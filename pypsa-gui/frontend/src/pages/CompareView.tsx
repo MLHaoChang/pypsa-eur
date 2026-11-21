@@ -2978,10 +2978,15 @@ function StudyTable({ a, b }: { a: CompareState; b: CompareState }) {
     )
   }
   const comparable = sa.state === 'current' && sb.state === 'current'
-  const npv = sa.period_basis === 'npv_multi_period' || sb.period_basis === 'npv_multi_period'
-  const rows: { label: string; v: (s: CompareStudy) => number | null; fmt: (n: number) => string }[] = [
-    { label: npv ? 'Cost at target (€, NPV)' : 'Cost at target (€ per year)',
-      v: s => s.cost_at_target_eur, fmt: n => fmtCurrency(n) },
+  const npv = (s: CompareStudy) => s.period_basis === 'npv_multi_period'
+  // A per-year cost and a multi-period NPV are not one quantity: no delta.
+  const sameBasis = npv(sa) === npv(sb)
+  const costLabel = !sameBasis ? 'Cost at target (€, per year vs NPV)'
+    : npv(sa) ? 'Cost at target (€, NPV)' : 'Cost at target (€ per year)'
+  const rows: {
+    label: string; v: (s: CompareStudy) => number | null; fmt: (n: number) => string; delta?: boolean
+  }[] = [
+    { label: costLabel, v: s => s.cost_at_target_eur, fmt: n => fmtCurrency(n), delta: sameBasis },
     { label: 'Unserved energy', v: s => s.achieved_ens_permyriad, fmt: fmtPermyriad },
     { label: 'Expected loss of load', v: s => s.mc_lole_h, fmt: fmtHours },
   ]
@@ -3013,7 +3018,7 @@ function StudyTable({ a, b }: { a: CompareState; b: CompareState }) {
                 {cell(sa, va, r.fmt)}
                 {cell(sb, vb, r.fmt)}
                 <td className="py-1 text-right font-mono">
-                  {comparable && va != null && vb != null
+                  {comparable && r.delta !== false && va != null && vb != null
                     ? <Delta v={vb - va} fmt={r.fmt} invert />
                     : <span className="text-muted">—</span>}
                 </td>

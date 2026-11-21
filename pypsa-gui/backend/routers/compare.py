@@ -322,11 +322,31 @@ def _saved_results_state(project_dir: pathlib.Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _inherited_marker_changed(project_dir: pathlib.Path, rec: dict) -> bool:
+    """Whether the template marker the project reads from its base (a
+    scenario child's parent, a case's base) changed after the study
+    finished: such an edit is a study input the project's own revision does
+    not count. True when that cannot be told."""
+    from services import template_marker as tm
+
+    found = tm.resolve(project_dir)
+    if found.state != tm.BASE:
+        return found.state == tm.UNREADABLE
+    finished = rec.get("finished_at")
+    if not isinstance(finished, (int, float)) or isinstance(finished, bool):
+        return True
+    try:
+        return found.path.stat().st_mtime > finished
+    except OSError:
+        return True
+
+
 def _saved_study(project_dir: pathlib.Path, meta: dict) -> CompareStudy | None:
     """The headline of the project's saved Guided study (issue 23), or None
     when it has no finished (``done``) one. A study the network was edited
     after, or whose revision is unknown, reads ``out_of_date``
-    (``study_state.edited_since``)."""
+    (``study_state.edited_since``); so does one whose inherited template
+    marker changed after it finished."""
     from services.study_state import edited_since
 
     rec = _saved_results_state(project_dir).get("eh_study_record")
@@ -334,6 +354,8 @@ def _saved_study(project_dir: pathlib.Path, meta: dict) -> CompareStudy | None:
         return None
     report = rec.get("report") if isinstance(rec.get("report"), dict) else {}
     edited = edited_since(rec, revision=int(meta.get("network_revision") or 0))
+    if edited is False and _inherited_marker_changed(project_dir, rec):
+        edited = True
     certified = report.get("certified")
     period = report.get("period_basis")
     return CompareStudy(

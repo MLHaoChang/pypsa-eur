@@ -88,6 +88,13 @@ describe('Compare: Guided study headline', () => {
     expect(screen.queryByText(/stale/i)).toBeNull()
   })
 
+  it('gives no cost delta between a per-year cost and an NPV', async () => {
+    renderWith(study(), study({ period_basis: 'npv_multi_period', cost_at_target_eur: 9_000_000 }))
+    expect(await screen.findByText('Cost at target (€, per year vs NPV)')).toBeTruthy()
+    expect(screen.getByText('€9.00M')).toBeTruthy()
+    expect(screen.queryByText(/^\+€/)).toBeNull()
+  })
+
   it('names the one side that has results', async () => {
     renderWith(null, study())
     expect(await screen.findByText('Study: only What if has results')).toBeTruthy()

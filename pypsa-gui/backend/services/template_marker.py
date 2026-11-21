@@ -73,6 +73,14 @@ def is_case(project_dir) -> bool:
     return (pathlib.Path(project_dir) / CASE_FILE).is_file()
 
 
+def inherits(project_dir) -> bool:
+    """Whether the folder reads another project's marker while it has none
+    of its own: a sensitivity case, or a scenario child (issue 23). What an
+    undo of the edit that made its own copy puts back (``resolve_base``)."""
+    here = pathlib.Path(project_dir)
+    return is_case(here) or _scenario_parent_dir(here) is not None
+
+
 def own_path(project_dir) -> pathlib.Path:
     """Where the project's own marker is, and where a write to it goes."""
     return pathlib.Path(project_dir) / MARKER_FILE
@@ -93,9 +101,9 @@ def _same_dir(a: pathlib.Path, b: pathlib.Path) -> bool:
 
 
 def _base_dir(here: pathlib.Path) -> pathlib.Path | None:
-    """The folder of the base ``here``'s case record names; None when
-    ``here`` is not a case or its base cannot be reached (see the module
-    docstring). Raises _Unreadable for a record that cannot be read."""
+    """The folder of the base ``here``'s case record names, or a scenario
+    child's parent (``_scenario_parent_dir``); None when ``here`` is neither
+    or its base cannot be reached (see the module docstring). Raises _Unreadable for a record that cannot be read."""
     if not is_case(here):
         return _scenario_parent_dir(here)
     record_path = here / CASE_FILE
@@ -236,10 +244,10 @@ def write_lock(project_dir, *, timeout=5):
 
 
 def resolve_base(project_dir) -> Marker:
-    """The marker a sensitivity case would read without a copy of its own:
-    its base's (UM10-UNDO-1: what an undo of the edit that made the copy
-    puts back). OWN or BASE with the path; NONE when the folder is not a case
-    or its base has none; UNREADABLE when the case record or the base cannot
+    """The marker a sensitivity case or a scenario child would read without
+    a copy of its own: its base's (UM10-UNDO-1: what an undo of the edit
+    that made the copy puts back). OWN or BASE with the path; NONE when the
+    folder is neither or its base has none; UNREADABLE when the case record or the base cannot
     be read, or the base's marker is not a JSON object (#1390 F2)."""
     here = pathlib.Path(project_dir)
     try:

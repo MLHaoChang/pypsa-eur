@@ -9,6 +9,8 @@ issue 23 slice a)."""
 from __future__ import annotations
 
 import json
+import os
+import time
 
 import pytest
 
@@ -32,6 +34,7 @@ def studied(client, eh_base):
         "status": "done",
         "report": dict(REPORT),
         "network_revision": int(ctx.network_revision or 0),
+        "finished_at": time.time(),
     }
     response = client.post("/api/projects/Tool Baseline")
     assert response.status_code == 200, response.text
@@ -122,3 +125,12 @@ def test_a_record_without_a_revision_reads_out_of_date(client, eh_base):
     eh_base.ctx.solver_state["eh_study"] = {"status": "done", "report": dict(REPORT)}
     assert client.post("/api/projects/Tool Baseline").status_code == 200
     assert _study(client, "Tool Baseline")["state"] == "out_of_date"
+
+
+def test_a_child_reads_out_of_date_when_its_parents_template_changed(client, studied):
+    _child(client)
+    marker = studied.dir / "eh_template.json"
+    later = time.time() + 60
+    os.utime(marker, (later, later))
+    assert _study(client, "Tool What If")["state"] == "out_of_date"
+    assert _study(client, "Tool Baseline")["state"] == "current"  # its own marker

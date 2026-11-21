@@ -149,9 +149,59 @@ def test_a_root_project_costs_no_lookup(eh_base, monkeypatch):
     from db import session as _db
 
     (eh_base.dir / tm.MARKER_FILE).unlink()
+    calls = []
 
-    def forbidden():
-        raise AssertionError("a root project needs no query")
+    def counted():
+        calls.append(1)
+        raise RuntimeError("a root project needs no query")
 
-    monkeypatch.setattr(_db, "SessionLocal", forbidden)
+    monkeypatch.setattr(_db, "SessionLocal", counted)
     assert tm.resolve(eh_base.dir) == tm.Marker(tm.NONE)
+    assert calls == []
+
+
+def test_a_child_of_a_child_follows_the_chain(client, eh_base, child):
+    response = client.post(
+        "/api/projects/Tool What If/scenarios", json={"name": "Tool What If 2"}
+    )
+    assert response.status_code == 201, response.text
+    with chat_tools._acting() as (db, user):
+        row = project_registry.resolve_project(db, user, "Tool What If 2")
+        d = project_registry.project_dir(row)
+    assert tm.resolve(d) == tm.Marker(tm.BASE, eh_base.dir / tm.MARKER_FILE)
+
+
+def test_a_parent_loop_ends_as_a_plain_network(eh_base, child):
+    child_id, d = child
+    (eh_base.dir / tm.MARKER_FILE).unlink()
+    _write_meta(eh_base.dir, parent_project="Tool What If")
+    edit_row(eh_base.id, parent_project_id=uuid.UUID(child_id))
+    assert tm.resolve(d) == tm.Marker(tm.NONE)
+    assert tm.resolve(eh_base.dir) == tm.Marker(tm.NONE)
+
+
+@pytest.fixture
+def active_child(child, monkeypatch):
+    from services import network_lengths
+
+    monkeypatch.setattr(network_lengths, "active_project_dir", lambda: child[1])
+    return child[1]
+
+
+def test_undoing_the_edit_that_made_a_child_copy_removes_it(eh_base, active_child):
+    from services import growth_placeholders as gp
+
+    assert tm.inherits(active_child)
+    snapshot = gp.snapshot_meta()
+    assert snapshot is None  # the child has no marker of its own
+    gp._write(gp._own_meta_path(), {**eh_base.meta, "growth_inputs": []})
+    assert tm.resolve(active_child).state == tm.OWN
+    assert gp.restore_meta(snapshot) is None
+    assert not (active_child / tm.MARKER_FILE).exists()
+    assert tm.read_marker(active_child) == eh_base.meta
+
+
+def test_a_study_fork_does_not_inherit(eh_base, child):
+    _, d = child
+    _write_meta(d, owner_study_id=str(uuid.uuid4()), owner_base_project=eh_base.id)
+    assert not tm.inherits(d)
