@@ -162,6 +162,8 @@ def view(task_id, provider_ready):
     reason = _unattended(task, provider_ready, email)
     card = runner.live_card(task_id)
     waiting = task["run"].get("waiting")
+    from harness import run_ppa
+    ppa = run_ppa.monitor(task)  # study harness 14 S-C: the PPA price, in words
     out["monitor"] = {
         "budgets": _budgets(task, envelope),
         "unattended": {"available": reason is None, **({"reason": reason} if reason else {})},
@@ -170,6 +172,7 @@ def view(task_id, provider_ready):
         **({"card": card} if card else {}),
         **({"waiting": {k: waiting[k] for k in ("kind", "ref")}} if waiting else {}),
         **({"research": _research(task["run"]["research"])} if task["run"].get("research") else {}),
+        **({"ppa": ppa} if ppa else {}),
         **({"revision_drafts": run_revise.view(task)} if run_revise.rows(task) else {}),
         **({"revision_report": {**offer, "may_act": not _views_only(task)}}
            if (offer := run_revise.offer(task)) else {}),

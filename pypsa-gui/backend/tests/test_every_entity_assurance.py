@@ -305,6 +305,28 @@ def test_an_every_entity_answer_carries_the_solve_and_its_gap_line(
     assert disclosure in public_text(frames)
 
 
+def test_an_every_entity_answer_records_its_definition_hash(grid, checked, monkeypatch):
+    """GK B 69: the real turn stores the hash for a "*" scope, and a later
+    definition change reads as changed."""
+    from services import assurance_records as records
+
+    ctx = fleet(grid, 3)
+    scope = every(ctx)
+    _, receipt = ask(checked, scope)
+    stored = records.load(records.actor_id(), receipt["answer_id"], "answer")
+    expected = calculations.scope_definition_hash(scope)
+    assert expected is not None
+    assert stored["definition_hash"] == expected
+    assert records.definition_changed(stored) is False
+    metric = calculations.requested_metrics(scope)[0]
+    monkeypatch.setitem(
+        calculations.DEFINITIONS,
+        metric,
+        {**calculations.DEFINITIONS[metric], "label": "Renamed"},
+    )
+    assert records.definition_changed(stored) is True
+
+
 # --- Sections in the real turn. ---
 
 

@@ -545,8 +545,6 @@ def create_report(body: CreateReportBody,
     Build and store the evidence-only report (v1) from the session's current
     result state. Returns the `ReportMeta` fields plus `document`.
     """
-    from services.reports.assemble import DEFAULT_TITLE, evidence_only_document
-
     if body.mode != "evidence_only":
         raise HTTPException(400, {
             "error_kind": "report_mode_not_supported",
@@ -557,7 +555,17 @@ def create_report(body: CreateReportBody,
 
     evidence, eh_report = _current_evidence(project)
     figure_pngs = _render_figures(eh_report, project.directory, charts=not assistant_strict_active())
-    title = (body.title or "").strip() or f"{DEFAULT_TITLE} — {project.name}"
+    return store_evidence_only_report(project, evidence, figure_pngs, body.title)
+
+
+def store_evidence_only_report(project: AuthorizedProject, evidence: Evidence,
+                               figure_pngs: dict, title: str | None) -> dict:
+    """Build the evidence-only document from `evidence`, store it as v1 with
+    its figures and return the `ReportMeta` fields plus `document`. The one
+    builder behind `POST /{name}/reports` and the no-LLM `Generate report`."""
+    from services.reports.assemble import DEFAULT_TITLE, evidence_only_document
+
+    title = (title or "").strip() or f"{DEFAULT_TITLE} — {project.name}"
     doc = evidence_only_document(evidence, title=title,
                                  report_id=store.new_report_id(),
                                  figure_pngs=figure_pngs)

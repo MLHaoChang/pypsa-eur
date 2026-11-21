@@ -961,6 +961,9 @@ class ProjectInfo(BaseModel):
     # a handle to delete the row) or purged (a project on an unmounted share
     # would be destroyed).
     missing: bool = False
+    # The caller's access: "edit" or "view" (project-viewer-role 01), from
+    # `project_acl.project_role`. None where the route does not report it.
+    my_access: str | None = None
     # Name of the parent project (None = root scenario, not a child).
     # A non-null value means this project is a scenario branched off another.
     # The frontend reconstructs the scenario tree by walking these pointers.
