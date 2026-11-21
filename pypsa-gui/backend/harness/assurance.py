@@ -406,7 +406,7 @@ class Turn:
                 )
             except (ValueError, KeyError, TypeError, HTTPException) as exc:
                 from harness import (
-                    answer_sections, branch_calculations, carrier_calculations, curtailment_calculations,
+                    ac_branch_calculations, answer_sections, branch_calculations, carrier_calculations, curtailment_calculations,
                     capacity_calculations, emissions_calculations, energy_balance_calculations,
                     lost_load_calculations, site_import_calculations, investment_calculations, copt_calculations,
                     grid_readiness_calculations, time_to_power_calculations,
@@ -420,7 +420,8 @@ class Turn:
                             | energy_balance_calculations.REFUSALS | site_import_calculations.REFUSALS
                             | investment_calculations.REFUSALS | copt_calculations.REFUSALS
                             | grid_readiness_calculations.REFUSALS | time_to_power_calculations.REFUSALS
-                            | answer_sections.REFUSALS)
+                            | answer_sections.REFUSALS | ac_branch_calculations.REFUSALS
+                            | {"too_many_metrics_for_warnings"})
                 named = isinstance(exc, ValueError) and exc.args and exc.args[0] in refusals
                 self.request_scope["reason"] = (
                     exc.args[0] if named else "unsupported_or_unavailable_source"
@@ -620,6 +621,7 @@ class Turn:
         scoped = record["source_kind"] == "scoped_result"
         carrier = self.request_scope["profile"] == assurance_metrics.carrier.PROFILE
         loading = self.request_scope["profile"] in assurance_metrics.branch.PROFILES
+        ac_loading = self.request_scope["profile"] in assurance_metrics.ac_branch.PROFILES
         shed = self.request_scope["profile"] == assurance_metrics.lost_load.PROFILE
         profile = self.request_scope["profile"]
         result_kind = {
@@ -643,7 +645,7 @@ class Turn:
             else "Carrier" if carrier
             else ("Network" if self.request_scope["entity_id"] == "network" else "Load") if shed
             else "Network" if self.request_scope["profile"] == assurance_metrics.branch.NETWORK_PROFILE
-            else "Branch" if loading
+            else "Branch" if loading or ac_loading
             else "StorageUnit" if self.request_scope["profile"] in assurance_metrics.STORAGE_PROFILES
             else "Network" if self.request_scope["profile"] == "network-linear-cost/1" else "Generator"
         )
@@ -656,6 +658,8 @@ class Turn:
             lines.extend(assurance_metrics.carrier.notes(record["raw"], self.request_scope))
         if loading:
             lines.extend(assurance_metrics.branch.notes(record["raw"]))
+        if ac_loading:
+            lines.extend(assurance_metrics.ac_branch.notes(record["raw"], self.request_scope))
         if shed:
             lines.extend(assurance_metrics.lost_load.notes(record["raw"], self.request_scope, _label))
         if profile in assurance_metrics.emissions.PROFILES:
@@ -1459,11 +1463,20 @@ class Turn:
         if self.effect_pending:
             raise HTTPException(409, {"error_kind": "assurance_context_changed"})
         draft_failed = False
+        # AA-13 (A2.8): the evidence's required warning slots, kept even when the
+        # draft fails, so an excluded interval never leaves the receipt.
+        warned = list(
+            (self.request_evidence or {}).get("required_warnings") or []
+            if self.request_scope is not None else []
+        )
         try:
             if truncated:
                 # A cut-off draft can still parse; it is never certified.
                 raise ValueError("draft_truncated")
             text, public_blocks, evidence_ids = self.validate(blocks)
+            if warned and (self.derived or self.predicates or self.sections is not None):
+                # Policy "5" carries warnings and nothing else (GK B4 AA-13 (1)): fail closed.
+                raise ValueError("warned_receipt_conflict")
             if self.request_scope is not None:
                 if self.request_evidence is None:
                     limitations = [
@@ -1479,7 +1492,7 @@ class Turn:
                 else:
                     from harness.calculations import slot_warnings
 
-                    limitations = slot_warnings(self.request_evidence["slots"])
+                    limitations = slot_warnings(warned + self.request_evidence["slots"])
             if _redact_for_persist(text) != text:
                 raise ValueError("sensitive content")
             if self.reviewer_status == "passed":
@@ -1587,6 +1600,11 @@ class Turn:
                 ]
             else:
                 receipt["result_slots"] = self.request_evidence["slots"]
+            if warned:
+                # AA-13 (A2.8): required warnings first, whatever was requested; the
+                # cap was checked at capture (`calculations.required_warnings`).
+                receipt["policy_version"] = records.WARNED_POLICY_VERSION
+                receipt["result_slots"] = warned + receipt["result_slots"]
             receipt["request_complete"] = all(
                 s["disposition"] == "answered"
                 for s in receipt.get("result_slots")

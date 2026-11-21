@@ -97,3 +97,20 @@ describe('the Load flow line (S3b)', () => {
       [{ ...base, shows: 'shown' }]]) expect(parseApproval(frame(forged))).toBeNull()
   })
 })
+
+it('shows a required warning slot and reads the request incomplete (AA-13)', () => {
+  const warned: AnswerReceipt = {
+    ...receipt, policy_version: '5', reviewer_status: 'not_required', limitations: [],
+    request_scope: { profile: 'ac-branch-loading/1', entity_id: 'L12' },
+    result_slots: [
+      { metric: 'ac_pf_convergence', disposition: 'warning', reason: 'ac_pf_not_converged (1 of 2 snapshots in the window converged)',
+        valid_snapshots: 1, requested_snapshots: 2, excluded_indices: ['2026-01-01T01:00:00'] },
+      { metric: 'branch_rating', disposition: 'answered', valid_snapshots: 1, requested_snapshots: 2 },
+    ],
+  }
+  render(<CheckedEvidenceCard answerId="answer-1" receipt={warned} />)
+  expect(screen.getByText('Request incomplete: warning')).toBeTruthy()
+  expect(screen.getByTestId('checked-warning-slot').textContent).toMatch(
+    /Warning: ac pf convergence — ac pf not converged \(1 of 2 snapshots in the window converged\); values cover 1\/2 snapshots/)
+  expect(screen.queryByText('Requested results checked')).toBeNull()
+})

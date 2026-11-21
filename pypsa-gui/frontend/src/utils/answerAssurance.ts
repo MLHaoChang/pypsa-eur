@@ -9,7 +9,9 @@ export interface AnswerReceipt {
   request_complete?: boolean
   request_scope?: { profile: string; entity_id?: string; project_id?: string; start?: string; end?: string; retain?: boolean;
     cost_basis?: { currency: 'EUR'; price_year: number; annual_fixed_cost_fraction: number } }
-  result_slots?: { metric: string; disposition: 'answered' | 'unavailable' | 'needs_clarification'; reason?: string; valid_snapshots?: number; requested_snapshots?: number }[]
+  /** A `warning` slot (policy "5" only, AA-13) names an interval the values leave out; it never answers. */
+  result_slots?: { metric: string; disposition: 'answered' | 'unavailable' | 'needs_clarification' | 'warning'; reason?: string;
+    valid_snapshots?: number; requested_snapshots?: number; excluded_indices?: string[] }[]
   chart?: CheckedChart
   navigation?: NavigationEntry[]
   /** Policy "2" only (AA-03 S2): software-recomputed derived claims. */
@@ -194,6 +196,17 @@ function validSections(sections: unknown): boolean {
   })
 }
 
+/** Policy "5" (AA-13): the warning slots come first, each names what it excludes, and the request is incomplete. */
+function validWarned(receipt: Partial<AnswerReceipt>): boolean {
+  const slots = receipt.result_slots
+  if (!Array.isArray(slots) || receipt.request_complete !== false) return false
+  const warned = slots.map(s => s?.disposition === 'warning')
+  const count = warned.filter(Boolean).length
+  return count > 0 && warned.slice(0, count).every(Boolean)
+    && slots.slice(0, count).every(s => typeof s.reason === 'string' && s.reason.length > 0
+      && Array.isArray(s.excluded_indices) && s.excluded_indices.length > 0)
+}
+
 export function parseApproval(value: Record<string, unknown>): ApprovedAnswerFrame | null {
   const receipt = value.receipt as Partial<AnswerReceipt> | null
   const scope = receipt?.request_scope
@@ -207,6 +220,8 @@ export function parseApproval(value: Record<string, unknown>): ApprovedAnswerFra
       : receipt.policy_version === '2' ? receipt.predicates === undefined && validDerived(receipt.derived)
       : receipt.policy_version === '3' ? validPredicates(receipt.predicates)
         && (receipt.derived === undefined || validDerived(receipt.derived))
+      : receipt.policy_version === '5' ? receipt.derived === undefined && receipt.predicates === undefined
+        && validWarned(receipt)
       : receipt.policy_version === '4' && receipt.derived === undefined && receipt.predicates === undefined
         && receipt.result_slots === undefined && validSections(receipt.sections))
     || (receipt.policy_version !== '4' && receipt.sections !== undefined)
@@ -227,7 +242,10 @@ export function parseApproval(value: Record<string, unknown>): ApprovedAnswerFra
         || Object.keys(scope.cost_basis).some(k => !['currency', 'price_year', 'annual_fixed_cost_fraction'].includes(k))))))
     || (receipt.result_slots !== undefined && (!Array.isArray(receipt.result_slots) || receipt.result_slots.length > 20
       || receipt.result_slots.some(s => !s || typeof s.metric !== 'string' || s.metric.length > 64
-        || (typeof s.disposition !== 'string' || !['answered', 'unavailable', 'needs_clarification'].includes(s.disposition))
+        || (typeof s.disposition !== 'string' || !['answered', 'unavailable', 'needs_clarification', 'warning'].includes(s.disposition))
+        || (s.disposition === 'warning' && receipt.policy_version !== '5')
+        || (s.excluded_indices !== undefined && (!Array.isArray(s.excluded_indices) || s.excluded_indices.length > 512
+          || s.excluded_indices.some(v => typeof v !== 'string' || v.length > 64)))
         || (s.reason !== undefined && (typeof s.reason !== 'string' || s.reason.length > 4096))
         || [s.valid_snapshots, s.requested_snapshots].some(v => v !== undefined
           && (!Number.isInteger(v) || v < 0 || v > 512)))))

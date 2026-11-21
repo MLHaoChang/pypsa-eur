@@ -175,8 +175,9 @@ def _same_on_every_surface(checked, profile, scope, record):
             assert block[key] == fact[key], (metric, key)
         assert repr(block["value"]) == repr(fact["value"]), metric  # K3: no rounding
         assert block["source"] == {"evidence_id": evidence_id, "path": fact["path"]}
-    # The receipt's slots are the evidence's; its window is the record's.
-    assert receipt["result_slots"] == stored["slots"]
+    # The receipt's slots are the evidence's, after the record's required
+    # warning slots (AA-13; hidden from the public evidence); its window is the record's.
+    assert receipt["result_slots"] == record.get("required_warnings", []) + stored["slots"]
     assert stored["window"]["weight_basis"] == record["window"]["weight_basis"]
     assert (stored["scope"]["start"], stored["scope"]["end"]) == (
         stored["window"]["start"],

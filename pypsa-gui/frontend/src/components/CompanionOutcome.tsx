@@ -29,6 +29,7 @@ function afterLastUser(messages: readonly ChatMessage[]): readonly ChatMessage[]
 function checkedLabel(answer: OwnedCheckedAnswer): string {
   const receipt = answer.receipt
   if (receipt.result_slots?.some(s => s.disposition === 'needs_clarification')) return 'Clarification needed'
+  if (receipt.result_slots?.some(s => s.disposition === 'warning')) return 'Request incomplete: warning'
   if (receipt.request_complete === true) return 'Requested results checked'
   if (receipt.checked_block_ids.length === 0) return 'Requested results unavailable'
   return 'Checked evidence and limitations'

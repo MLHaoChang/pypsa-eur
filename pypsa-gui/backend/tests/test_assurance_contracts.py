@@ -270,6 +270,7 @@ def test_every_adapter_receipt_and_checked_tool_has_a_returned_shape(live):
         POLICY_VERSION,
         PREDICATE_POLICY_VERSION,
         SECTIONED_POLICY_VERSION,
+        WARNED_POLICY_VERSION,
     )
 
     assert set(INPUT_ADAPTERS.values()) <= set(live["evidence_identity"])
@@ -279,6 +280,7 @@ def test_every_adapter_receipt_and_checked_tool_has_a_returned_shape(live):
         DERIVED_POLICY_VERSION,
         PREDICATE_POLICY_VERSION,
         SECTIONED_POLICY_VERSION,
+        WARNED_POLICY_VERSION,
     }
     assert set(live["checked_tool_results"]) == CHECKED_TOOLS
     for key in ("evidence_identity", "answer_receipt", "checked_tool_results"):
