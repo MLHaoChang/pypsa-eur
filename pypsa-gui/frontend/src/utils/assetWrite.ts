@@ -211,7 +211,11 @@ export async function updateAsset<T extends { name: string } = AssetRow>(
   patch: Partial<NoInfer<T>> | ((current: NoInfer<T>) => Partial<NoInfer<T>>),
   // The basis the typed costs were scaled under (`costBasisOf(schema)`): the server refuses the write when the
   // asset's bus, as it will be stored, says otherwise, so a stale unit can never store a cost x1000 off (05d).
-  opts?: { costBasis?: CostBasis },
+  // `initial`: what the SAME builder returns for the form's initial values (taken when the editor opened). The user's
+  // change is then the keys where the patch differs from it, compared exactly: both sides went through the same
+  // scaling, so an untouched field is bit-equal however the form holds it. Without it (a plain patch) the base is
+  // the cached row.
+  opts?: { costBasis?: CostBasis; initial?: Partial<NoInfer<T>> },
 ): Promise<unknown> {
   const e = ENDPOINTS[cls]
   const key = nk(project, cls)
@@ -234,8 +238,10 @@ export async function updateAsset<T extends { name: string } = AssetRow>(
   if (!current) {
     throw new Error(`${cls}/${name} not found in the current network`)
   }
+  // An explicit `undefined` is the builder's way to keep a derived column out of the PUT (omitDerived): it stays.
+  const against = (opts?.initial ?? base) as Record<string, unknown>
   const changed = warm
-    ? Object.fromEntries(Object.entries(resolved).filter(([k, v]) => !(k in base) || !Object.is(base[k], v)))
+    ? Object.fromEntries(Object.entries(resolved).filter(([k, v]) => v === undefined || !(k in against) || !Object.is(against[k], v)))
     : resolved
   // Return the PUT's response body: some endpoints answer with more than an
   // ack (updateBus carries a `rescale` preview the Bus card must ingest),

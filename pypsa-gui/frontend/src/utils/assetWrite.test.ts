@@ -461,4 +461,55 @@ describe('updateAsset rebases on the fresh row (05g)', () => {
     await expect(updateAsset(qc, 'p1', 'generators', 'g1', { p_nom: 5 })).rejects.toThrow()
     expect(api().updateGenerator).not.toHaveBeenCalled()
   })
+
+  it('an untouched scaled cost stays fresh when the builder round trip is not bit-equal (initial patch)', async () => {
+    const { updateAsset } = await import('./assetWrite')
+    const qc = new QueryClient()
+    const drift = 0.1 * 3 * 1000 / 1000        // 0.30000000000000004: not equal to the stored 0.3
+    expect(drift).not.toBe(0.3)
+    qc.setQueryData(nk('p1', 'generators'), [{ ...stale, capital_cost: 0.3 }])
+    api().getGenerators.mockResolvedValue([{ ...fresh, capital_cost: 0.9 }])
+    api().updateGenerator.mockResolvedValue({})
+    // the form's builder gives `drift` both at open and at save; only p_nom was typed
+    await updateAsset(qc, 'p1', 'generators', 'g1',
+      { capital_cost: drift, p_nom: 120 }, { initial: { capital_cost: drift, p_nom: 100 } })
+    expect(api().updateGenerator.mock.calls[0][1]).toEqual({ ...fresh, capital_cost: 0.9, p_nom: 120 })
+  })
+
+  it('an untouched field the form holds as a string stays fresh (initial patch)', async () => {
+    const { updateAsset } = await import('./assetWrite')
+    const qc = new QueryClient()
+    qc.setQueryData(nk('p1', 'generators'), [stale])
+    api().getGenerators.mockResolvedValue([fresh])
+    api().updateGenerator.mockResolvedValue({})
+    await updateAsset(qc, 'p1', 'generators', 'g1',
+      { efficiency: '0.4', p_nom: 120 }, { initial: { efficiency: '0.4', p_nom: 100 } })
+    expect(api().updateGenerator.mock.calls[0][1]).toEqual({ ...fresh, p_nom: 120 })
+  })
+
+  it('the cost basis is the one the typed values were scaled under, passed through as given', async () => {
+    const { updateAsset } = await import('./assetWrite')
+    const qc = new QueryClient()
+    qc.setQueryData(nk('p1', 'generators'), [stale])
+    api().getGenerators.mockResolvedValue([fresh])
+    api().updateGenerator.mockResolvedValue({})
+    await updateAsset(qc, 'p1', 'generators', 'g1', { capital_cost: 75 }, { costBasis: 'energy' })
+    expect(api().updateGenerator.mock.calls[0][2]).toBe('energy')
+  })
+
+  it('a rename is a user change and the fresh row is found by the old name', async () => {
+    const { updateAsset } = await import('./assetWrite')
+    const qc = new QueryClient()
+    qc.setQueryData(nk('p1', 'generators'), [stale])
+    api().getGenerators.mockResolvedValue([fresh])
+    api().updateGenerator.mockResolvedValue({ name: 'g2' })
+    await updateAsset(qc, 'p1', 'generators', 'g1', { name: 'g2' }, { initial: { name: 'g1' } })
+    expect(api().updateGenerator).toHaveBeenCalledWith('g1', { ...fresh, name: 'g2' })
+  })
+
+  it('a column the builder explicitly omits (undefined, a derived total) stays out of the PUT', async () => {
+    const body = await save({ p_nom: 120, capital_cost: undefined })
+    expect(body.p_nom).toBe(120)
+    expect(body.capital_cost).toBeUndefined()
+  })
 })
