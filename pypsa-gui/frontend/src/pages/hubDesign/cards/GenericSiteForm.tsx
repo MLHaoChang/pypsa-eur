@@ -24,7 +24,7 @@ import {
 const mwFigure = (x: number) => kpiFigure(String(x), 'MW').value.replace(/\.0+$|(\.\d*?)0+$/, '$1')
 
 interface CreateMutation {
-  mutate: (arg: TemplateCreate, opts?: { onError?: (e: unknown) => void}) => void
+  mutate: (arg: TemplateCreate, opts?: { onError?: (e: unknown) => void }) => void
   isPending: boolean
 }
 

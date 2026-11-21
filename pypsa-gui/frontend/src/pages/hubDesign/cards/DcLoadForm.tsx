@@ -15,7 +15,7 @@ import { emptyLocation, validateLocation, writeCreatedLocation, type LocationDra
 import { SiteLocationFields, showLocationSaveFailure } from './SiteLocationFields'
 
 interface CreateMutation {
-  mutate: (arg: TemplateCreate, opts?: { onError?: (e: unknown) => void}) => void
+  mutate: (arg: TemplateCreate, opts?: { onError?: (e: unknown) => void }) => void
   isPending: boolean
 }
 

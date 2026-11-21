@@ -3,6 +3,7 @@
 // writes it as the site anchor, the record the Guided "Open here" drawer edits.
 // Blank skips it; a half-filled pair or an out-of-range value is checked here.
 import { networkApi } from '../../api/network'
+import { useUIStore } from '../../store/uiStore'
 import { siteSceneApi } from '../../api/siteScene'
 import { anchorInputErrors } from '../../site3d/SiteAnchorField'
 
@@ -42,6 +43,10 @@ export async function writeCreatedLocation(project: string, d: LocationDraft): P
   try {
     const doc = await siteSceneApi.getAnchor(project)
     await siteSceneApi.putAnchor(project, { ...loc, source: 'manual', confirmed: true }, doc.revision)
+    // The bus calls name no project: they act on the live network. Write only
+    // while this tab's project is the new one and the backend agrees.
+    const ui = useUIStore.getState()
+    if (ui.currentProject !== project || ui.projectMismatch) throw new Error('another project is open')
     const buses = await networkApi.getBuses()
     if (buses.length) {
       await networkApi.bulkUpdate({ component_class: 'Bus', names: buses.map(b => b.name),

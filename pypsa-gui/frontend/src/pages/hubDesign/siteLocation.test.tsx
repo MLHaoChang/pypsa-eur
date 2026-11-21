@@ -11,10 +11,12 @@ vi.mock('../../api/siteScene', () => ({
 }))
 import { siteSceneApi } from '../../api/siteScene'
 import { networkApi } from '../../api/network'
+import { useUIStore } from '../../store/uiStore'
 import { validateLocation, writeCreatedLocation } from './siteLocation'
 import { DcLoadForm } from './cards/DcLoadForm'
 
 beforeEach(() => {
+  useUIStore.setState({ currentProject: 'p1', projectMismatch: null })
   vi.mocked(siteSceneApi.getAnchor).mockResolvedValue({ revision: 3, anchor: null } as never)
   vi.mocked(siteSceneApi.putAnchor).mockResolvedValue({} as never)
   vi.mocked(networkApi.getBuses).mockResolvedValue([{ name: 'b1' }, { name: 'b2' }] as never)
@@ -39,6 +41,12 @@ describe('writeCreatedLocation', () => {
       { lat: 47.4, lng: 8.5, source: 'manual', confirmed: true }, 3)
     expect(networkApi.bulkUpdate).toHaveBeenCalledWith({ component_class: 'Bus', names: ['b1', 'b2'],
       updates: { x: 8.5, y: 47.4 } })
+  })
+  it('does not touch the live network when another project is open', async () => {
+    useUIStore.setState({ currentProject: 'other' })
+    expect(await writeCreatedLocation('p1', { lat: '47.4', lng: '8.5' })).toMatch(/not saved/)
+    expect(networkApi.getBuses).not.toHaveBeenCalled()
+    expect(networkApi.bulkUpdate).not.toHaveBeenCalled()
   })
   it('writes nothing for a skipped pair', async () => {
     expect(await writeCreatedLocation('p1', { lat: '', lng: '' })).toBeNull()
