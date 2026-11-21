@@ -200,7 +200,12 @@ def test_off_grid_with_an_open_tie_excludes_the_ramp_oscillation_and_peak_rows(
     )
     # The other rows leave by their own rules, unchanged.
     reasons = {e["reason"] for e in out["excluded"]}
-    assert reasons == {G.SK_OFF_GRID, G.VS_OFF_GRID, G.CONN_OFF_GRID, G.SUBSYNC_OFF_GRID}
+    assert reasons == {
+        G.SK_OFF_GRID,
+        G.VS_OFF_GRID,
+        G.CONN_OFF_GRID,
+        G.SUBSYNC_OFF_GRID,
+    }
 
 
 def test_off_grid_excludes_every_energization_period_it_emitted(tmp_path, monkeypatch):

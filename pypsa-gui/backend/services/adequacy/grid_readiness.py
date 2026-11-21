@@ -1414,6 +1414,13 @@ def _finite_number(v) -> float | None:
     return float(v)
 
 
+def _ssti_shown(v) -> str:
+    """A value the run wrote, as a note shows it: plainly, with an empty cell named."""
+    if v is None or (isinstance(v, float) and math.isnan(v)):
+        return "an empty value"
+    return str(v)
+
+
 def _ssti_say(text: str) -> str:
     """A screening row's note: ``text`` as a sentence, then the screening caveat."""
     text = text.strip().rstrip(".") or "no reason given"
@@ -1460,7 +1467,7 @@ def _uif_row(inp: _Inputs, screen: dict, table, common: dict) -> dict:
     unknown = dict(common, limit=limit, source=source, unit="UIF", project_value=None, verdict="unknown")
     verdict = screen.get("verdict")
     if verdict not in SSTI_VERDICTS[SSTI_UIF]:
-        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], note=_ssti_say(f"The screen returned {verdict!r}"),
+        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], note=_ssti_say(f"The screen returned {_ssti_shown(verdict)}"),
                     **unknown)
     if verdict == "not evaluated":
         why = "; ".join(str(x) for x in screen.get("notes") or []) or "the screen was not evaluated"
@@ -1471,7 +1478,7 @@ def _uif_row(inp: _Inputs, screen: dict, table, common: dict) -> dict:
         bad = "threshold" if limit is None else "worst UIF"
         raw = screen.get("threshold" if limit is None else "worst_uif")
         return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF],
-                    note=_ssti_say(f"The run's {bad} is not a finite number ({raw!r})"), **unknown)
+                    note=_ssti_say(f"The run's {bad} is not a finite number ({_ssti_shown(raw)})"), **unknown)
     if moved := _profile_moved(inp, PROFILE_KEY, DEFAULT_THRESHOLD, limit, UIF_CHANGED):
         return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], note=_ssti_say(moved), **unknown)
     judged = table[table["role"].astype(str) == "converter bus"] if table is not None and "role" in table else None
@@ -1488,7 +1495,7 @@ def _uif_row(inp: _Inputs, screen: dict, table, common: dict) -> dict:
     if any(u is None for u in uifs):
         bad = next(v for v, u in zip(judged["uif"], uifs) if u is None)
         return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF],
-                    note=_ssti_say(f"The run's UIF table has a UIF that is not a finite number ({bad!r})"),
+                    note=_ssti_say(f"The run's UIF table has a UIF that is not a finite number ({_ssti_shown(bad)})"),
                     **unknown)
     top = judged.iloc[max(range(len(uifs)), key=uifs.__getitem__)]
     if max(uifs) != worst:
@@ -1497,7 +1504,7 @@ def _uif_row(inp: _Inputs, screen: dict, table, common: dict) -> dict:
                                    f"{worst:.6g} its record gives"), **unknown)
     if (worst > limit) != (verdict == "flag"):
         return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], note=_ssti_say(
-            f"The run's worst UIF {worst:.6g} contradicts its verdict {verdict!r} against the threshold "
+            f"The run's worst UIF {worst:.6g} contradicts its verdict {_ssti_shown(verdict)} against the threshold "
             f"{limit:g}"), **unknown)
     blank = [c for c in UIF_ROW_COLUMNS[1:] if pd.isna(top[c]) or not str(top[c]).strip()]
     if blank:
@@ -1525,7 +1532,7 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
     unknown = dict(common, limit=limit, source=source, unit="Hz", project_value=None, verdict="unknown")
     verdict = screen.get("verdict")
     if verdict not in SSTI_VERDICTS[SUBSYNC_SR]:
-        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(f"The screen returned {verdict!r}"),
+        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(f"The screen returned {_ssti_shown(verdict)}"),
                     **unknown)
     if verdict in ("check", "not evaluated"):
         why = NO_MODES if verdict == "check" else NO_SERIES_CAP
@@ -1533,7 +1540,7 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
                     **dict(unknown, verdict=SSTI_VERDICTS[SUBSYNC_SR][verdict]))
     if limit is None:
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(
-            f"The run's torsional clearance is not a finite number ({screen.get('clearance_hz')!r})"), **unknown)
+            f"The run's torsional clearance is not a finite number ({_ssti_shown(screen.get('clearance_hz'))})"), **unknown)
     if moved := _profile_moved(inp, PROFILE_KEY, DEFAULT_CLEARANCE_HZ, limit, CLEARANCE_CHANGED):
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(moved), **unknown)
     series = (resonance[resonance["kind"].astype(str) == SERIES] if resonance is not None and "kind" in resonance
@@ -1546,12 +1553,12 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
     margins = [(_num(r["margin_hz"]), r) for _, r in series.iterrows()]
     if bad := [r["margin_hz"] for m, r in margins if m is None]:
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(
-            f"The run's resonance table has a torsional margin that is not a finite number ({bad[0]!r})"),
+            f"The run's resonance table has a torsional margin that is not a finite number ({_ssti_shown(bad[0])})"),
             **unknown)
     margin, r = min(margins, key=lambda mr: mr[0])
     if (margin < limit) != (verdict == "flag"):
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(
-            f"The run's least margin {margin:.6g} Hz contradicts its verdict {verdict!r} against the clearance "
+            f"The run's least margin {margin:.6g} Hz contradicts its verdict {_ssti_shown(verdict)} against the clearance "
             f"{limit:g} Hz"), **unknown)
     if blank := [c for c in SUBSYNC_ROW_COLUMNS if c not in r or pd.isna(r[c]) or not str(r[c]).strip()]:
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(

@@ -262,10 +262,10 @@ def test_the_row_follows_the_engine_at_the_threshold_edge(tmp_path):
 @pytest.mark.parametrize(
     "worst, shown",
     [
-        (None, "None"),
-        ("0.3", "'0.3'"),
+        (None, "an empty value"),
+        ("0.3", "0.3"),
         (True, "True"),
-        ("NaN", "nan"),
+        ("NaN", "an empty value"),
         ("inf", "inf"),
     ],
     ids=["blank", "string", "bool", "nan", "inf"],
@@ -290,10 +290,10 @@ def test_an_unknown_engine_verdict_reads_unknown_with_the_raw_string(tmp_path):
         == rows["subsync_series_resonance"]["verdict"]
         == "unknown"
     )
-    assert rows["ssti_uif"]["note"] == f"The screen returned 'maybe'. {SCREENING}"
+    assert rows["ssti_uif"]["note"] == f"The screen returned maybe. {SCREENING}"
     assert (
         rows["subsync_series_resonance"]["note"]
-        == f"The screen returned 'clear-ish'. {SCREENING}"
+        == f"The screen returned clear-ish. {SCREENING}"
     )
 
 
@@ -302,7 +302,7 @@ def test_check_is_not_a_uif_verdict(tmp_path):
     _write(tmp_path, uif=_uif_meta("check"))
     assert (
         _card(tmp_path)[0]["ssti_uif"]["note"]
-        == f"The screen returned 'check'. {SCREENING}"
+        == f"The screen returned check. {SCREENING}"
     )
 
 
@@ -332,7 +332,10 @@ def test_a_screen_not_evaluated_gives_the_engines_reason(tmp_path, note):
         tmp_path, uif=_uif_meta("not evaluated", worst=None, notes=[note]), uif_rows=[]
     )
     row = _card(tmp_path)[0]["ssti_uif"]
-    assert row["verdict"] == "unknown" and row["note"] == f"{note[0].upper()}{note[1:]}. {SCREENING}"
+    assert (
+        row["verdict"] == "unknown"
+        and row["note"] == f"{note[0].upper()}{note[1:]}. {SCREENING}"
+    )
 
 
 # ── the series-resonance row and SSCI (TRGC 20) ───────────────────────────────
@@ -636,7 +639,10 @@ def test_an_open_tie_keeps_the_engines_own_reason_when_it_could_not_evaluate(tmp
         tmp_path, uif=_uif_meta("not evaluated", worst=None, notes=[note]), uif_rows=[]
     )
     row = _card(tmp_path, n=_open_tie(_site()))[0]["ssti_uif"]
-    assert row["verdict"] == "unknown" and row["note"] == f"{note[0].upper()}{note[1:]}. {SCREENING}"
+    assert (
+        row["verdict"] == "unknown"
+        and row["note"] == f"{note[0].upper()}{note[1:]}. {SCREENING}"
+    )
 
 
 def test_a_not_evaluated_uif_without_notes_says_so(tmp_path):
@@ -650,7 +656,8 @@ def test_a_threshold_that_is_not_a_number_reads_unknown(tmp_path):
     row = _card(tmp_path)[0]["ssti_uif"]
     assert row["verdict"] == "unknown" and row["limit"] is None
     assert (
-        row["note"] == f"The run's threshold is not a finite number (None). {SCREENING}"
+        row["note"]
+        == f"The run's threshold is not a finite number (an empty value). {SCREENING}"
     )
 
 
@@ -660,7 +667,7 @@ def test_a_clearance_that_is_not_a_number_reads_unknown(tmp_path):
     assert row["verdict"] == "unknown"
     assert (
         row["note"]
-        == f"The run's torsional clearance is not a finite number ('1'). {SCREENING}"
+        == f"The run's torsional clearance is not a finite number (1). {SCREENING}"
     )
 
 
@@ -763,9 +770,14 @@ def test_a_not_evaluated_uif_with_null_notes_says_so(tmp_path):
 def test_the_source_never_carries_todays_profile_title(tmp_path):
     # R1: the run's clause only; today's profile title may not be the one the run judged on
     t = {"value": 0.1, "clause": "TRGC 19 c", "source": "code"}
-    _write(tmp_path, uif=_uif_meta("clear", worst=0.05, source="code", clause="TRGC 19 c"),
-           uif_rows=_uif_table(0.05))
-    row = _card(tmp_path, "gc08_card", _profile_dir(tmp_path, ssti_uif_threshold=t))[0]["ssti_uif"]
+    _write(
+        tmp_path,
+        uif=_uif_meta("clear", worst=0.05, source="code", clause="TRGC 19 c"),
+        uif_rows=_uif_table(0.05),
+    )
+    row = _card(tmp_path, "gc08_card", _profile_dir(tmp_path, ssti_uif_threshold=t))[0][
+        "ssti_uif"
+    ]
     assert row["source"] == "TRGC 19 c"
 
 
@@ -774,19 +786,29 @@ def test_the_source_never_carries_todays_profile_title(tmp_path):
 
 @pytest.mark.parametrize(
     "key",
-    [0.1, "0.1", [0.1], {"clause": "c", "source": "code"}, {"value": "0.1", "clause": "c", "source": "code"}],
+    [
+        0.1,
+        "0.1",
+        [0.1],
+        {"clause": "c", "source": "code"},
+        {"value": "0.1", "clause": "c", "source": "code"},
+    ],
     ids=["bare_number", "string", "list", "no_value", "string_value"],
 )
 def test_a_malformed_profile_threshold_reads_unknown(tmp_path, key):
     # the loader refuses the profile, so today's limit is unknown: never the run's verdict beside it
     _write(tmp_path, uif=_uif_meta("flag", threshold=0.1))
-    row = _card(tmp_path, "gc08_card", _profile_dir(tmp_path, ssti_uif_threshold=key))[0]["ssti_uif"]
+    row = _card(tmp_path, "gc08_card", _profile_dir(tmp_path, ssti_uif_threshold=key))[
+        0
+    ]["ssti_uif"]
     assert row["verdict"] == "unknown" and row["project_value"] is None
     assert row["note"].startswith("Today's grid-code profile is unreadable (")
     assert row["note"].endswith(f"): its limit is unknown. {SCREENING}")
 
 
-@pytest.mark.parametrize("key", [0.1, {"value": None}, {"value": "0.1"}], ids=["bare", "null", "string"])
+@pytest.mark.parametrize(
+    "key", [0.1, {"value": None}, {"value": "0.1"}], ids=["bare", "null", "string"]
+)
 def test_a_malformed_key_the_loader_let_through_reads_as_moved(key):
     # belt and braces (GK #1390 F2): _profile_moved never reads a malformed key as the default
     inp = SimpleNamespace(profile={"ssti_uif_threshold": key}, profile_error=None)
@@ -803,7 +825,9 @@ def test_a_threshold_equal_only_after_rounding_has_moved(tmp_path):
     # exact compare: 0.1 + 1e-15 is not the 0.1 the run judged on
     t = {"value": 0.1 + 1e-15, "clause": "c", "source": "code"}
     _write(tmp_path, uif=_uif_meta("flag", threshold=0.1, source="code", clause="c"))
-    row = _card(tmp_path, "gc08_card", _profile_dir(tmp_path, ssti_uif_threshold=t))[0]["ssti_uif"]
+    row = _card(tmp_path, "gc08_card", _profile_dir(tmp_path, ssti_uif_threshold=t))[0][
+        "ssti_uif"
+    ]
     assert row["verdict"] == "unknown"
 
 
@@ -811,7 +835,9 @@ def test_a_clearance_equal_only_after_rounding_has_moved(tmp_path):
     from gridspine.static.subsync_scan import PROFILE_KEY
 
     t = {"value": 1.0 + 1e-13, "clause": "c", "source": "code"}
-    _write(tmp_path, subsync=_sub_meta("flag", clearance=1.0, source="code", clause="c"))
+    _write(
+        tmp_path, subsync=_sub_meta("flag", clearance=1.0, source="code", clause="c")
+    )
     row = _card(tmp_path, "gc08_card", _profile_dir(tmp_path, **{PROFILE_KEY: t}))[0][
         "subsync_series_resonance"
     ]
@@ -823,7 +849,9 @@ def test_a_clearance_equal_only_after_rounding_has_moved(tmp_path):
 def test_an_unchanged_code_threshold_stays_judged(tmp_path):
     t = {"value": 0.1, "clause": "c", "source": "code"}
     _write(tmp_path, uif=_uif_meta("flag", threshold=0.1, source="code", clause="c"))
-    row = _card(tmp_path, "gc08_card", _profile_dir(tmp_path, ssti_uif_threshold=t))[0]["ssti_uif"]
+    row = _card(tmp_path, "gc08_card", _profile_dir(tmp_path, ssti_uif_threshold=t))[0][
+        "ssti_uif"
+    ]
     assert row["verdict"] == "warn"
 
 
@@ -842,17 +870,33 @@ _ALL_TRUE = [{**r, "uif": True} for r in _uif_table()]
 @pytest.mark.parametrize(
     "rows, worst, why",
     [
-        (_damaged(uif="high"), 0.25, " has a UIF that is not a finite number ('high')"),
-        (_damaged(uif=None), 0.25, " has a UIF that is not a finite number (nan)"),
-        (_damaged(uif=True), 0.25, " has a UIF that is not a finite number ('True')"),
+        (_damaged(uif="high"), 0.25, " has a UIF that is not a finite number (high)"),
+        (
+            _damaged(uif=None),
+            0.25,
+            " has a UIF that is not a finite number (an empty value)",
+        ),
+        (_damaged(uif=True), 0.25, " has a UIF that is not a finite number (True)"),
         (_ALL_TRUE, 1.0, " has a UIF that is not a finite number (True)"),
         (_damaged(bus=None), 0.25, "'s worst row has no bus"),
         (_damaged(case=" "), 0.25, "'s worst row has no case"),
         (_damaged(machine=None), 0.25, "'s worst row has no machine"),
-        (_damaged(uif=0.3), 0.25, "'s worst UIF 0.3 is not the worst UIF 0.25 its record gives"),
+        (
+            _damaged(uif=0.3),
+            0.25,
+            "'s worst UIF 0.3 is not the worst UIF 0.25 its record gives",
+        ),
     ],
-    ids=["text_uif", "missing_uif", "text_bool_uif", "bool_column", "no_bus", "blank_case", "no_machine",
-         "max_disagrees"],
+    ids=[
+        "text_uif",
+        "missing_uif",
+        "text_bool_uif",
+        "bool_column",
+        "no_bus",
+        "blank_case",
+        "no_machine",
+        "max_disagrees",
+    ],
 )
 def test_a_damaged_worst_uif_row_reads_unknown(tmp_path, rows, worst, why):
     _write(tmp_path, uif=_uif_meta("flag", worst=worst), uif_rows=rows)
@@ -939,10 +983,19 @@ def _bad_resonance(**changes):
 @pytest.mark.parametrize(
     "rows, why",
     [
-        (_bad_resonance(margin_hz="x"), " has a torsional margin that is not a finite number ('x')"),
-        (_bad_resonance(margin_hz=None), " has a torsional margin that is not a finite number (nan)"),
+        (
+            _bad_resonance(margin_hz="x"),
+            " has a torsional margin that is not a finite number (x)",
+        ),
+        (
+            _bad_resonance(margin_hz=None),
+            " has a torsional margin that is not a finite number (an empty value)",
+        ),
         (_bad_resonance(machine=None), "'s least-margin row has no machine"),
-        (_bad_resonance(f_comp_hz=None, mode_hz=None), "'s least-margin row has no f_comp_hz, mode_hz"),
+        (
+            _bad_resonance(f_comp_hz=None, mode_hz=None),
+            "'s least-margin row has no f_comp_hz, mode_hz",
+        ),
     ],
     ids=["text_margin", "missing_margin", "no_machine", "no_frequencies"],
 )
@@ -955,11 +1008,15 @@ def test_a_damaged_least_margin_row_reads_unknown(tmp_path, rows, why):
 
 @pytest.mark.parametrize(
     "verdict, margins, words",
-    [("clear", (0.4, 3.0), "0.4 Hz contradicts its verdict 'clear'"),
-     ("flag", (1.0, 3.0), "1 Hz contradicts its verdict 'flag'")],
+    [
+        ("clear", (0.4, 3.0), "0.4 Hz contradicts its verdict clear"),
+        ("flag", (1.0, 3.0), "1 Hz contradicts its verdict flag"),
+    ],
     ids=["clear_below", "flag_at_edge"],
 )
-def test_a_least_margin_that_contradicts_the_verdict_reads_unknown(tmp_path, verdict, margins, words):
+def test_a_least_margin_that_contradicts_the_verdict_reads_unknown(
+    tmp_path, verdict, margins, words
+):
     _write(tmp_path, subsync=_sub_meta(verdict), resonance=_resonance(margins, verdict))
     row = _card(tmp_path)[0]["subsync_series_resonance"]
     assert row["verdict"] == "unknown"
@@ -978,19 +1035,31 @@ def test_a_margin_just_below_the_clearance_flags(tmp_path):
 
 @pytest.mark.parametrize(
     "verdict, worst, words",
-    [("clear", 0.25, "0.25 contradicts its verdict 'clear'"),
-     ("flag", 0.1, "0.1 contradicts its verdict 'flag'")],
+    [
+        ("clear", 0.25, "0.25 contradicts its verdict clear"),
+        ("flag", 0.1, "0.1 contradicts its verdict flag"),
+    ],
     ids=["clear_above", "flag_at_edge"],
 )
-def test_a_worst_uif_that_contradicts_the_verdict_reads_unknown(tmp_path, verdict, worst, words):
+def test_a_worst_uif_that_contradicts_the_verdict_reads_unknown(
+    tmp_path, verdict, worst, words
+):
     _write(tmp_path, uif=_uif_meta(verdict, worst=worst), uif_rows=_uif_table(worst))
     row = _card(tmp_path)[0]["ssti_uif"]
     assert row["verdict"] == "unknown"
-    assert row["note"] == f"The run's worst UIF {words} against the threshold 0.1. {SCREENING}"
+    assert (
+        row["note"]
+        == f"The run's worst UIF {words} against the threshold 0.1. {SCREENING}"
+    )
 
 
 @pytest.mark.parametrize(
-    "text, want", [("", "No reason given"), ("ends with a period.", "Ends with a period"), ("  ", "No reason given")]
+    "text, want",
+    [
+        ("", "No reason given"),
+        ("ends with a period.", "Ends with a period"),
+        ("  ", "No reason given"),
+    ],
 )
 def test_a_note_is_one_sentence_whatever_the_engine_wrote(text, want):
     assert G._ssti_say(text) == f"{want}. {SCREENING}"
