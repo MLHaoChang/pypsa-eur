@@ -1474,7 +1474,13 @@ def checked_answer(answer_id: str, actor: User | None = Depends(optional_user)):
     from services import assurance_records
     if actor is None:
         raise HTTPException(401, "Authentication required")
-    return assurance_records.public(assurance_records.answer(str(actor.id), answer_id))
+    record = assurance_records.answer(str(actor.id), answer_id)
+    shown = assurance_records.public(record)
+    # AA-10 S7: compared, never recomputed; absent when the answer recorded no hash.
+    changed = assurance_records.definition_changed(record)
+    if changed is not None:
+        shown["definition_changed"] = changed
+    return shown
 
 
 @router.get("/evidence/{evidence_id}")

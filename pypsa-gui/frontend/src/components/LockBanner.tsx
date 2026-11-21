@@ -21,6 +21,9 @@ export default function LockBanner() {
   const holder = useUIStore(s => s.lockHolderEmail)
 
   if (!authEnabled || !readOnly) return null
+  // A project being solved says so in the run strip (`runStatus/RunStrip`),
+  // on the same line as the run's progress: one line, not two.
+  if (reason === 'solving') return null
 
   return (
     <div

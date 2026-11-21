@@ -8,6 +8,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type {
@@ -190,6 +191,10 @@ const TEMPLATE_UPLOAD: UploadMeta = {
   schema_version: 1, file_id: 'f1', filename: 'corporate.docx', mime: 'application/x', size: 1, sha256: 'a',
   kind: 'report_template', uploaded_at: 1_790_000_000, blob_ready: true, version: 1,
 }
+
+/** A toast argument as text: a string, or the JSX of a refusal with its link. */
+const toastText = (arg: unknown): string =>
+  typeof arg === 'string' ? arg : renderToStaticMarkup(arg as React.ReactElement).replace(/<[^>]*>/g, '')
 
 beforeEach(() => {
   api.getReport.mockReset().mockResolvedValue(FIXTURE)
@@ -401,7 +406,7 @@ describe('ReportViewer — regenerate and evidence status (WP7b)', () => {
     await user.click(within(sections[0]).getByTestId('section-regenerate'))
     await user.click(within(sections[0]).getByTestId('regenerate-submit'))
     await waitFor(() => expect(toast.error).toHaveBeenCalled())
-    expect(String(toast.error.mock.calls[0][0])).toMatch(/configure an LLM profile in Settings/i)
+    expect(toastText(toast.error.mock.calls[0][0])).toMatch(/needs an LLM profile with a key.*Add an LLM profile/i)
   })
 
   it('shows "evidence changed since v{N}" when the document hash differs from the current evidence hash', async () => {
@@ -499,7 +504,7 @@ describe('ReportViewer — templates and the export preview (WP11)', () => {
     await screen.findAllByTestId('report-section')
     await user.click(screen.getByTestId('report-export'))
     await waitFor(() => expect(toast.error).toHaveBeenCalled())
-    expect(String(toast.error.mock.calls[0][0])).toMatch(/tags could not be rendered.*fields\.nope/)
+    expect(toastText(toast.error.mock.calls[0][0])).toMatch(/tags could not be rendered.*fields\.nope/)
     expect(screen.queryByTestId('export-preview-panel')).toBeNull()
   })
 
@@ -589,7 +594,7 @@ describe('ReportViewer — round trip, diff and PDF (WP14)', () => {
     const pdf = await screen.findByTestId('report-export-pdf')
     await user.click(pdf)
     await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
-    expect(String(toast.error.mock.calls[0][0])).toMatch(/LibreOffice.*soffice is not on PATH/)
+    expect(toastText(toast.error.mock.calls[0][0])).toMatch(/LibreOffice.*soffice is not on PATH/)
     await user.click(pdf)
     await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(2))
     expect(String(toast.error.mock.calls[1][0])).toMatch(/PDF conversion failed.*soffice exited 1: boom/)

@@ -34,6 +34,10 @@ LOGIN = "index.html"
 _ASSET_PREFIXES = ("/assets/", "/img/", "/api/", "/favicon")
 _ASSET_FILES = ("/brand.css",)
 
+# Pages an anonymous user must reach to finish onboarding. Exact match only;
+# the token is checked (and consumed once) by the API, not by this gate.
+ANON_SPA_PATHS = frozenset({"/set-password", "/reset-password"})
+
 Decision = tuple[str, str]
 
 
@@ -67,4 +71,6 @@ def decide_route(path: str, *, local_mode: bool, authed: bool) -> Decision:
 
     if path == f"/{SPA}":
         return ("redirect", "/")
+    if path in ANON_SPA_PATHS:
+        return ("serve", SPA)
     return ("serve", LOGIN)

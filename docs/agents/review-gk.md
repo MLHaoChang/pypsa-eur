@@ -345,3 +345,9 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A builder that cannot see the plan conditions it was given gets them from the GK, verbatim. The GK recovers the text from the setter's transcript (`list_events`) and sends it; a restatement is not accepted, even the builder's own (#1773 dropped clauses and changed W5).
 - A new top-level route prefix (e.g. `/api/workbook/`) skips every `/api/io/` middleware gate (undo, foreign-lock, harness-run, solver, live-study), and no middleware caps uploads (`read_capped` is per route). The plan justifies each skipped gate, with a test, and the route calls `read_capped` itself (S2 excel plan G2/G3).
 - A hand-resolved merge that combines two features (e.g. #1712's sectioned wrapper plus the every-entity branch) gets a test pinning the combined behaviour, and the mutant run covers the resolved hunk. Moving the branch found that the sectioned path missed the gap line (#1712).
+
+## Standing rulings (GK A (33), recorded 2026-11-21)
+
+- A sizing or loop runner that skips the commercial layer admits a `commercial` block only on an allowlist of keys with no LP effect, never a deny-list. A test refuses an unknown key (#1711: a tariff adds €/MWh to the import Links' `marginal_cost` at solve time, which the loop does not apply).
+- A tolerance boundary test pins the literal tolerance, never the code's own constant (#1786 M6a).
+- A test of "an order change is refused" uses an exact permutation (`a[::-1]`), never a re-generated series (#1773 E4).
