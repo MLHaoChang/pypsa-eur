@@ -1,0 +1,20 @@
+{
+ "profiles": {
+  "generator-emissions/1": [
+   {
+    "metric": "generator_emissions",
+    "formula": "sum over t of w_generators[t] x p[t] / efficiency[t] x co2_emissions(carrier), of the one generator",
+    "validity": "verified solve (else unverified_solve); per snapshot p, efficiency and weight finite, efficiency > 0, weight >= 0, else invalid_or_missing_emissions_data; a fuel-curve generator with CO2 gives fuel_curve_generator. Refusals: emissions_outside_scope, misaligned_source, network_scope_required, unknown_generator, unsupported_generator_population, unsupported_snapshot_scope",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_generator_emissions_use_dispatch_over_efficiency",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_generator_emissions_use_dispatch_over_efficiency"
+     }
+    }
+   }
+  ]
+ }
+}

@@ -4,7 +4,7 @@ import {
   assetLabel, projectFlagWords,
   baselineCaveats, basisStatement, cashflowPivot, cashTotals, counterfactualStatement, errorKey, errorsFor, established, financeErrors, fmtCell,
   fmtHeadline, headlines, numOrNull, parseRateOrList, perYearLists, progressFraction, progressText,
-  rateOrListText, studyFailure, studyProgress, studyStale, toTable, waccGate, withKey,
+  rateOrListText, studyProgress, studyStale, toTable, waccGate, withKey,
 } from './financeModel'
 import type { CashflowLine, InvestmentCaseReportPayload } from '../../../api/types'
 
@@ -224,14 +224,6 @@ describe('the study record', () => {
     expect(studyStale({ status: 'done', report: { stale: true } }).stale).toBe(true)
     expect(studyStale(null).stale).toBe(false)
   })
-
-  it('names the failure of an error, failed or refused run', () => {
-    expect(studyFailure({ status: 'done' })).toBeNull()
-    expect(studyFailure({ status: 'error', code: 'x', message: 'boom' })).toBe('The run failed: boom (x)')
-    expect(studyFailure({ status: 'failed', error: 'kaput' })).toBe('The run failed: kaput')
-    expect(studyFailure({ status: 'refused', error_code: 'cod_mismatch' }))
-      .toBe('The case was refused: cod_mismatch')
-  })
 })
 
 describe('WP4.7 review B3/B4', () => {
@@ -351,5 +343,18 @@ describe('project finance flags in plain words', () => {
     expect(projectFlagWords([...caveats, 'new_flag:keep:this', 'part_not_replaced:bess:power']))
       .toEqual(['new_flag:keep:this', "bess, power: its life ends inside the case's horizon and no replacement is planned."])
     expect(baselineCaveats({ sections: { project: { payload: { flags: caveats } } } } as never)).toHaveLength(5)
+  })
+})
+
+describe('the two break-even prices say which question they answer (WALK-IMPROVE-1 a)', () => {
+  it('labels LCOE and the solved PPA price apart', () => {
+    const rows = headlines({ lcoe_finance_consistent_eur_per_mwh: 84.48,
+      ppa_price_for_target_irr_eur_per_mwh: 36.35, sections: {} } as never)
+    const lcoe = rows.find(h => h.id === 'lcoe')!
+    const ppa = rows.find(h => h.id === 'ppa_price')!
+    expect([lcoe.value, ppa.value]).toEqual([84.48, 36.35])
+    expect(lcoe.asks).toMatch(/^Break-even for all output: .*every MWh generated.*no other revenue\.$/)
+    expect(ppa.asks).toMatch(/^Break-even for the PPA alone: .*target equity IRR.*other revenue kept as they are\.$/)
+    expect(rows.filter(h => h.asks).map(h => h.id)).toEqual(['lcoe', 'ppa_price'])
   })
 })

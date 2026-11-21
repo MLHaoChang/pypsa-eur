@@ -278,11 +278,36 @@ export interface ActivitySummary {
   note: string | null
 }
 
+/** The MC run judged against the project's goal (`lole_verdict`, the one
+ *  LOLE-vs-goal rule); `null` when no goal applies. */
+export interface McGoalVerdict {
+  /** The goal in h/yr. */
+  target_lole_h: number
+  /** `default`: nobody set it; it is the site type's assumed goal. */
+  target_source: 'stored' | 'template' | 'default' | 'override'
+  verdict: 'pass' | 'miss' | 'not_confident'
+  confident: boolean
+  settle_draws: number | null
+  settle_reason: string | null
+}
+
+/** One vre asset's installed capacity beside its ELCC row (walkthrough 07). */
+export interface ElccInstalled { mw: number | null; basis: 'p_nom' | 'p_nom_opt' | 'not_built' }
+
 export interface McResult {
   engine: string
   fidelity: string
   metrics: McMetrics
+  /** Walkthrough asset-investment 01. Absent on older payloads. */
+  goal?: McGoalVerdict | null
+  /** Walkthrough 08: the first batch, the cap and the stopping CoV. */
+  draws?: { first_batch: number; max: number; cov_target: number }
   elcc: ElccRow[]
+  /** Walkthrough 07: installed MW of each priced vre asset, as the MC
+   *  samples it (`copt.solved_capacity`); `basis` names the figure:
+   *  `not_built` is a sizable unit no solve built (0 MW). `mw` is null when
+   *  the unit has no finite size. A vre row's `nameplate_mw` is its peak. */
+  elcc_installed?: Record<string, ElccInstalled | null>
   /** MC_WARNING_V1, shipped with every payload — render it, never inline it. */
   warning: string
   /** Phase 12c-pre: units whose outages were sampled ON their availability
@@ -699,6 +724,24 @@ export interface EhSectionState {
   note?: string | null
 }
 
+/** One asset the study sized: `sections.sizing.payload.assets` (walkthrough
+ *  asset-investment 03). A Store is sized in MWh (`*_mwh`); the others in MW.
+ *  An infinite bound reads null. */
+export interface EhSizedAsset {
+  component: 'Generator' | 'StorageUnit' | 'Link' | 'Store'
+  name: string
+  carrier: string
+  built_mw?: number | null
+  min_mw?: number | null
+  max_mw?: number | null
+  built_mwh?: number | null
+  min_mwh?: number | null
+  max_mwh?: number | null
+  max_hours?: number | null
+  /** A Link's MW is on its bus0 side. */
+  basis?: 'bus0'
+}
+
 /** TEA wrap (spec decision 9). LCOH is null + a flag when it cannot be
  *  established (ADR-0001) — `lcoh_status` says `skipped` (no electrolyser
  *  Links) or `not_established` (Links that produced no H₂). */
@@ -1049,6 +1092,22 @@ export type EhReview =
       how_to_apply?: string
     }
 
+/** One default a study assumed (#1645 `run_assumptions`): what it is, its value in words, where it comes from,
+ *  and the flow section, component, unit(s) and field it names ("d1, d2" when it joins several units). */
+export interface EhStudyAssumption {
+  key: string
+  label: string
+  value: unknown
+  shown: string
+  source: string
+  reason: string | null
+  section: string
+  card: string
+  component: string
+  entity: string
+  field: string
+}
+
 /** Study lifecycle record from GET /results/eh_study. */
 export interface EhStudyPayload {
   status: string
@@ -1065,6 +1124,8 @@ export interface EhStudyPayload {
   /** P33b: true when the network was edited since the study started; null
    *  while running or for a record that cannot say (Unavailable). */
   edited_since_study?: boolean | null
+  /** The defaults the study assumed; absent on an older record (not recorded), `[]` when none. */
+  assumptions?: EhStudyAssumption[]
 }
 
 export interface EhRedundancyOption {
@@ -1287,6 +1348,7 @@ export interface CurtailmentByCausePlant {
 export type CurtailmentNotEstablishedReason =
   | 'export_link_missing' | 'export_price_missing'
   | 'no_commercial_solve_record' | 'export_price_changed_since_solve'
+  | 'export_flow_missing'
 
 /** GET /results/curtailment/by_cause (204 → null before a solve). */
 export type CurtailmentByCausePayload =
@@ -1339,10 +1401,13 @@ export interface HeadlineKpis {
   comparison: HeadlineComparison | null
 }
 
+export interface ReserveHolder { name: string; kind: 'generator' | 'storage_unit'; held_mw: number }
+
 export interface OperatingReserveResult {
   shares: { load: number; pv: number; wind: number } | null
   not_counted: string[]
-  per_snapshot: { snapshot: string; required_mw: number; held_mw: number; binding: boolean }[]
+  // `holders` (01d) is on binding hours only: the units holding the reserve, largest first.
+  per_snapshot: { snapshot: string; required_mw: number; held_mw: number; binding: boolean; holders?: ReserveHolder[] }[]
   binding: string[]
   reason: string | null
 }
@@ -1813,6 +1878,8 @@ export const resultsApi = {
     available: boolean
     slack_bus_used?: string | null
     stripped_voll_slacks?: string[]
+    // Shifting transformers that made lpf() seed the flow (DGS-SEED-1); empty = flat start.
+    seeded_by?: string[]
     // Legacy `{iso: bool}` dict — ambiguous on multi-period (same iso under
     // different periods collapses). Kept for backward compatibility.
     // `null` = PyPSA did not report convergence for that snapshot (AA-12).

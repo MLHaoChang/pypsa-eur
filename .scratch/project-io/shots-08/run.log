@@ -1,0 +1,20 @@
+07:33:28 projects {"other":"made","study":"made 3296fc33-fdb0-4f22-8881-0484608879d0"}
+07:33:34 non-study expert: Run LOPF buttons 1
+07:33:34 shot 01-nonstudy-expert.png
+07:33:40 non-study guided: Run LOPF buttons 0
+07:33:40 shot 01-nonstudy-guided.png
+07:33:46 shot 02-study-guided.png
+07:33:53 shot 03-study-expert-before.png
+07:33:59 dispatch: RUNNING Unit commitment window 1 of 3, 0 solved 0:03
+07:34:02 shot 04-dispatch-window-1-of-3.png
+07:34:23 dispatch: RUNNING Unit commitment window 2 of 3, 1 solved 0:27
+07:34:26 shot 04-dispatch-window-2-of-3.png
+07:39:41 status completed 349 s
+07:39:46 shot 05-completed.png
+07:39:46 bundle download buttons 8
+07:39:46 downloaded pio08-study-93520_bundle_h90.zip 46501 bytes
+07:39:49 after completion: Abort 1 Solving… 1
+07:39:49 shot 06-completed-downloaded.png
+PROBLEMS:
+non-study guided: no Run LOPF
+# The one problem above is the script's old check (Guided never shows Run LOPF); shots.mjs now checks Expert only.

@@ -26,6 +26,8 @@ ERROR_STATUS: dict[str, int] = {
     "proposal_expired": 410,
     "proposal_cancelled": 409,
     "integrity_error": 500,
+    # Issue 06: the project already has an active queue job (one per project).
+    "job_active": 409,
 }
 
 
@@ -63,12 +65,16 @@ ROUTES: tuple[dict[str, Any], ...] = (
     {"method": "PUT", "path": "/api/projects/{name}/site-anchor", "role": "editor", "lock": True, "chat": "none"},
     {"method": "GET", "path": "/api/projects/{name}/sites/{site_id}/scene", "role": "viewer", "lock": False, "chat": "none"},
     {"method": "POST", "path": "/api/projects/{name}/sites/{site_id}/scene/adopt", "role": "editor", "lock": True, "chat": "none"},
-    {"method": "POST", "path": "/api/projects/{name}/sites/{site_id}/scene/proposals", "role": "editor", "lock": False, "chat": "none"},
+    {"method": "POST", "path": "/api/projects/{name}/sites/{site_id}/scene/proposals", "role": "editor", "lock": True, "chat": "none"},
     {"method": "GET", "path": "/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}", "role": "editor", "lock": False, "chat": "none"},
     {"method": "POST", "path": "/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/apply", "role": "editor", "lock": True, "chat": "none"},
-    {"method": "POST", "path": "/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/cancel", "role": "editor", "lock": False, "chat": "none"},
+    {"method": "POST", "path": "/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/cancel", "role": "editor", "lock": True, "chat": "none"},
     # SC-04: a read that answers with a download; it writes nothing, so a viewer may call it and no lock applies.
     {"method": "POST", "path": "/api/projects/{name}/sites/{site_id}/scene/exports", "role": "viewer", "lock": False, "chat": "none"},
+    # Issue 06 slice (a): queue a pinned-Blender run; it stores an artifact under the project, so it locks.
+    {"method": "POST", "path": "/api/projects/{name}/sites/{site_id}/scene/blender-jobs", "role": "editor", "lock": True, "chat": "none"},
+    # A stored worker artifact, downloaded; it writes nothing.
+    {"method": "GET", "path": "/api/projects/{name}/sites/{site_id}/scene/artifacts/{artifact_id}", "role": "viewer", "lock": False, "chat": "none"},
 )
 
 # contracts.md §5 rows that SC-00 N does NOT freeze: they need D05 runtime proof
@@ -78,7 +84,6 @@ DEFERRED_ROUTES: tuple[tuple[str, str], ...] = (
     ("POST .../scene/sources", "SC-06: upload stays disabled until D05 runtime proof"),
     ("GET/DELETE .../scene/sources/{id}", "SC-06"),
     ("GET .../scene/sources/{id}/original", "SC-06"),
-    ("GET .../scene/artifacts/{id}", "SC-05/issue 06: a stored worker artifact; SC-04's export is returned, not stored"),
 )
 
 

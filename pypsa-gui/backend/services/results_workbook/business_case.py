@@ -19,6 +19,10 @@ SHEET = "Business case"
 RUN_THE_BUSINESS_CASE = "run the business case (Results, Investment tab)"
 
 
+#: The lease-up row of "P&L by year" (BC 15); written only when a year is below 100 %.
+LEASE_UP_ROW = "Volume factor (lease-up), %"
+
+
 def business_case_text(report: dict | None, state: dict | None) -> str:
     """The About row and the sheet's status line."""
     if not report:
@@ -84,6 +88,17 @@ def write_business_case_sheet(wb, report: dict | None, state: dict | None) -> st
         ("Business case hash", report.get("business_case_hash")),
         ("Investment case key", report.get("ic_assumptions_hash")),
     ]
+    pnl = report.get("pnl") or {}
+    if pnl.get("volume_factor_note"):
+        rows.append(("Volume factor (lease-up)", pnl["volume_factor_note"]))
+    if pnl.get("volume_factor_ignored"):
+        rows.append(
+            (
+                "Volume factor years ignored",
+                "outside the operating years: "
+                + ", ".join(str(y) for y in pnl["volume_factor_ignored"]),
+            )
+        )
     r = 3
     for k, v in rows:
         put(ws, r, 1, k)
@@ -112,7 +127,6 @@ def write_business_case_sheet(wb, report: dict | None, state: dict | None) -> st
         put(ws, r, 2, be.get(key) if (ok or key == "line") else None)
         put(ws, r, 3, "ok" if ok else (be.get("status") or NOT_ESTABLISHED))
     r = _assumed_rows(ws, r + 2, report.get("assumed"))
-    pnl = report.get("pnl") or {}
     years = pnl.get("years") or []
     for title, table in (
         ("P&L by year", pnl.get("rows") or {}),
@@ -120,6 +134,13 @@ def write_business_case_sheet(wb, report: dict | None, state: dict | None) -> st
     ):
         r += 2
         heading(ws, r, [title, *years])
+        lease = pnl.get("volume_factor")
+        if title == "P&L by year" and lease:
+            # BC 15: the lease-up the run applied, a percent per year (100 = full volume).
+            r += 1
+            put(ws, r, 1, LEASE_UP_ROW)
+            for j, y in enumerate(years):
+                put(ws, r, 2 + j, 100.0 * lease.get(str(y), 1.0))
         for name, series in table.items():
             r += 1
             put(ws, r, 1, name)

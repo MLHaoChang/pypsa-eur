@@ -470,7 +470,11 @@ class Runner:
     def scan(self):
         """Every run the runner may drive: reads task files only, never a
         network, at most SCAN_LIMIT of them."""
-        return [path for path, task in self._runs() if task["run"].get("status") in _DRIVEN]
+        from harness import run_revise
+        # 07d (GK B (64) D1): a completed run with a draft to make is scanned too,
+        # so a lost wake or a lease held elsewhere never strands the request.
+        return [path for path, task in self._runs()
+                if task["run"].get("status") in _DRIVEN or run_revise.due(task)]
 
     def _runs(self):
         """Every run file with its record, at most SCAN_LIMIT task files read."""
@@ -519,6 +523,9 @@ class Runner:
             swept += run_eh.recover(path, None, instance=self.instance, now=self.clock(), lapsed_ok=True)
             from harness import run_ic
             swept += run_ic.recover(path, None, instance=self.instance, now=self.clock(), lapsed_ok=True)
+            from harness import run_revise
+            if any(r.get("status") == "drafting" for r in run_revise.rows(task)):
+                swept += run_revise.recover(path, boot=self.instance, now=self.clock())  # 07d: a draft lost with a boot
         return swept
 
     # one tick
@@ -540,6 +547,9 @@ class Runner:
             self._sync_hold(task)
             _notify(path)
             return "needs_user"  # a failed gate or a stop: only the user's resume goes on
+        from harness import run_revise
+        if run_revise.due(task):
+            return self._revise(path, task)  # 07d: before the idle return, never through _act (D2)
         if run["status"] not in _DRIVEN:
             self._let_go(task)
             _notify(path)
@@ -854,24 +864,62 @@ class Runner:
         session while the user is there, as a chat step's card is. On the
         user's approval it runs with that card's digest, which dispatch
         compares with the frozen record's; anything else leaves it to do."""
+        from services import run_actions
+        edit_card = run_actions.approval_card(step)
+        if edit_card is None and run_actions.pick_card(step) is not None:
+            return self._pick_card(path, session, task, step)  # S-B2c (Q1 = A): pick first
+        if edit_card is None:
+            return run_actions.start(path, ctx, step, instance=self.instance)  # stops on the unfrozen reason
+
+        def approved(_ticked):
+            run_actions.start(path, ctx, step, instance=self.instance, approved=edit_card["digest"])
+
+        # GK B (37) W1: a deny stops the step for the user; no new card while they are there.
+        return self._card(path, session, task, step, args={"digest": edit_card["digest"]},
+                          shown={"edit_card": edit_card}, call=f"native-{step['id']}", on_approve=approved,
+                          denied="the user denied the campus study's card")
+
+    def _pick_card(self, path, session, task, step):
+        """S-B2c (GK B (60) Q1 = A): the shipped cases' pick card, a change-set
+        shaped card whose ticks are the LP cases to solve. On approval the pick
+        is checked and written under the run's lease (`run_shipped_engine.pick`),
+        which freezes the step anew; the next tick shows its approval card. A
+        refused pick stops the step with its own kind; nothing runs."""
+        from harness import run_shipped, run_shipped_engine
+        from services import run_actions
+        card = run_actions.pick_card(step)
+
+        def approved(ticked):
+            try:
+                run_shipped_engine.pick(path, step["id"], ticked, card["digest"], self.instance)
+            except run_shipped.ShippedError as exc:
+                if exc.kind != "shipped_pick_closed":  # a step that moved on is left as it is
+                    run_actions._stop(path, step["id"], exc.kind, str(exc))
+
+        args = {"digest": card["digest"], "tool_use_ids": [i["tool_use_id"] for i in card["items"]],
+                "pick_max": card["pick_max"]}
+        return self._card(path, session, task, step, args=args, shown={"change_set": card},
+                          call=f"native-pick-{step['id']}", on_approve=approved,
+                          denied="the user denied the shipped cases' pick card")
+
+    def _card(self, path, session, task, step, *, args, shown, call, on_approve, denied):
+        """A native step's card on the run's session: issued and audited, then
+        answered on a helper thread. An approval calls `on_approve(ticked)`
+        (the card's ticks, None when it has none); a deny stops the step."""
         from harness import approvals
         from harness import session as harness_session
         from services import run_actions
         task_id = task["task_id"]
-        edit_card = run_actions.approval_card(step)
-        if edit_card is None:
-            return run_actions.start(path, ctx, step, instance=self.instance)  # stops on the unfrozen reason
-        call_id = f"native-{step['id']}-{uuid.uuid4().hex[:8]}"
+        call_id = f"{call}-{uuid.uuid4().hex[:8]}"
         tier = "write"
-        pc = session.issue_confirmation(tool_name=step["tool"], args={"digest": edit_card["digest"]},
-                                        safety_tier=tier)
+        pc = session.issue_confirmation(tool_name=step["tool"], args=args, safety_tier=tier)
         if not approvals.asked(session, call_id=call_id, tool=step["tool"], tier=tier, token=pc.token):
             session.withdraw_confirmation(pc.token)  # a card nobody can audit is never shown
             raise _Stop("needs_user", "approval_unavailable")
         self._cards[task_id] = {
-            "tool_use_id": call_id, "tool_name": step["tool"], "args": {"digest": edit_card["digest"]},
+            "tool_use_id": call_id, "tool_name": step["tool"], "args": args,
             "safety_tier": tier, "confirmation_token": pc.token,
-            "ttl_seconds": harness_session.CONFIRMATION_TTL_SECONDS, "edit_card": edit_card,
+            "ttl_seconds": harness_session.CONFIRMATION_TTL_SECONDS, **shown,
             "session_id": session.session_id,
             "expires_at_epoch_ms": time.time() * 1000 + harness_session.CONFIRMATION_TTL_SECONDS * 1000}
         self._wait_for_user(path, "card", step["id"])
@@ -879,6 +927,7 @@ class Runner:
         def wait():
             try:
                 decision = session.wait_for_decision(pc.token)
+                ticked = (getattr(session, "confirmation_ticks", None) or {}).pop(pc.token, None)
                 outcome, by = {"approve": ("approved", "user"), "deny": ("rejected", "user"),
                                "expired": ("expired", "ttl"), "aborted": ("aborted", "session"),
                                "revoked": ("revoked", "system")}.get(decision, ("unavailable", "system"))
@@ -888,11 +937,9 @@ class Runner:
                     self._cards.pop(task_id, None)
                 if decision == "approve" and recorded:
                     self._go_on(path)
-                    run_actions.start(path, ctx, step, instance=self.instance, approved=edit_card["digest"])
+                    on_approve(ticked)
                 elif decision == "deny":
-                    # GK B (37) W1: a deny stops the step for the user; no new card while they are there.
-                    run_actions._stop(path, step["id"], "confirmation_denied",
-                                      "the user denied the campus study's card")
+                    run_actions._stop(path, step["id"], "confirmation_denied", denied)
             except Exception:  # noqa: BLE001 — a card that errors leaves the step to do, never run
                 logger.exception("harness runner: the card of %s on %s errored", step["id"], task_id)
             finally:
@@ -1010,6 +1057,63 @@ class Runner:
         self._inflight[task_id] = (path, thread)
         thread.start()
         return "explore"
+
+    def _revise(self, path, task):
+        """07d: draft one requested report revision of a completed run, on a
+        helper thread under the run's lease. It never changes `run.status`,
+        never goes through `_act`'s recovery (which may pause a run) and takes
+        no project hold (GK B (64) D2, D3); every fault ends the row, not the
+        run."""
+        from harness import run_revise
+        task_id = task["task_id"]
+        if self._lease(path) is None:
+            return "leased_elsewhere"
+        try:
+            run_revise.recover(path, boot=self.instance, now=self.clock())
+            from harness import send_reservation
+            send_reservation.reconcile(path, boot=self.instance, now=self.clock())
+            row = run_revise.claim(path, boot=self.instance, clock=self.clock)
+        except Exception:  # noqa: BLE001 — a ledger fault leaves the request for the next tick
+            logger.exception("harness runner: claiming a revision draft of %s failed", task_id)
+            return "error"
+        if row is None:
+            return "idle"
+        project_dir = Path(path).parent.parent
+
+        def turn():
+            from harness import send_reservation
+            try:
+                ctx, slot = self._context(task)
+                with self._bound(task, ctx, slot) as session:
+                    run_revise.run_turn(path, project_dir, row, provider=self._revision_provider(path, session),
+                                        model=getattr(session, "model", None), boot=self.instance)
+            except BaseException:  # noqa: BLE001 — a lost owner or any fault refuses the draft, never the run
+                logger.exception("harness runner: the revision draft of %s errored", task_id)
+                run_revise.failed(path, project_dir, row, self.instance)
+            finally:
+                try:
+                    send_reservation.close_open(path, boot=self.instance)
+                except Exception:  # noqa: BLE001 — a ledger fault never keeps the runner from waking
+                    logger.exception("harness runner: closing the draft send of %s failed", task_id)
+                self.wake(path)
+        context = contextvars.copy_context()
+        thread = threading.Thread(target=context.run, args=(turn,), name=f"harness-rv-{task_id[:8]}", daemon=True)
+        self._inflight[task_id] = (path, thread)
+        thread.start()
+        return "revise"
+
+    def _revision_provider(self, path, session):
+        """The run's own provider behind a `revision` reservation (07d): held
+        in EUR whatever the durable budget mode."""
+        from harness import run_revise, send_reservation
+        inner = self._agent_provider
+        if inner is None:
+            from harness.providers import wiring
+            inner, _ = wiring._provider_for_profile(wiring._resolve_turn_profile(session))
+            if inner is None:
+                return None
+        return send_reservation.ReservingProvider(inner, path, boot=self.instance, scope=run_revise.SCOPE,
+                                                  clock=self.clock)
 
     def _hold_if_effectful(self, task, step):
         from services import harness_locks

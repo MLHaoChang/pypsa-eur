@@ -1,0 +1,1 @@
+* CI: each GUI backend shard job has a `timeout-minutes` cap of 180 and lists every test by name (`-vv`), so a hung shard names the test it stalled on and frees its runner instead of holding it for six hours.

@@ -136,6 +136,8 @@ EXPECTED = (
     # Not-via-chat entries and their fragment folder (RETRO-FRAG-1): read beside
     # `services/not_via_chat.py` at import; without the folder every fragment entry is lost.
     "not_via_chat.json", "not_via_chat.d",
+    # The Parameter guide folder, read beside `services/asset_schema/catalogue.py`.
+    "group.general.md",
 )
 
 # Info.plist usage-description keys macOS TCC requires before the app may

@@ -61,7 +61,10 @@ logger = logging.getLogger(__name__)
 MODE_ENV = "PYPSA_GUI_CHAT_DURABLE_BUDGET_MODE"
 MODES = ("off", "output_tokens", "total_tokens", "money_eur")
 UNITS = {"output_tokens": "output_tokens", "total_tokens": "total_tokens", "money_eur": "eur"}
-KINDS = {"run": "model_send", "research": "research_send"}
+KINDS = {"run": "model_send", "research": "research_send", "revision": "revision_send"}
+# Sends that `runner.charge` never meters: their EUR counts toward the run's
+# `budget.cost_eur` from the ledger alone (07d, GK B (64) D4).
+UNMETERED_KINDS = frozenset({KINDS["research"], KINDS["revision"]})
 # Tokens a provider adds around the serialised request (role and turn
 # markers, its tool-use preamble). The byte count already over-counts JSON
 # punctuation; this covers what the bytes cannot see.
@@ -318,6 +321,18 @@ def _research_spent(run: dict) -> float:
     return _sum([r for r in _rows(run) if r.get("kind") == KINDS["research"]], "eur")
 
 
+def _unmetered_eur(run: dict) -> float:
+    return _sum([r for r in _rows(run) if r.get("kind") in UNMETERED_KINDS], "eur")
+
+
+def cost_eur(task: dict) -> float:
+    """The run's EUR spend against `budget.cost_eur`: what `runner.charge`
+    metered plus the ledger's research and revision sends, each counted once
+    (a settled send at its EUR, an open hold at its bound)."""
+    from harness import runner
+    return round(float(runner._budget(task)["used"]["cost_eur"]) + _unmetered_eur(task["run"]), 6)
+
+
 def cap(task: dict, unit: str) -> float | None:
     """The run's cap in `unit`; None when the run sets none."""
     from harness import budget, runner
@@ -415,9 +430,11 @@ def _admit(path, request, *, boot, scope, key, clock):
     current = mode()
     if current == "invalid":
         raise SendRefused("invalid_mode", f"{MODE_ENV} is not one of {', '.join(MODES)}; sends are refused.")
-    if current == "off" and scope != "research":
+    if current == "off" and scope == "run":
         raise ValueError("no run-scope reservation while the mode is off")
-    unit = UNITS["money_eur" if current == "off" else current]
+    # A revision draft (07d) is held in EUR whatever the mode: it runs on a
+    # completed run, outside any envelope, so its bound is always money.
+    unit = "eur" if scope == "revision" else UNITS["money_eur" if current == "off" else current]
     s = shape(request)
     hold = amount(s, unit, request.model)
     eur = hold if unit == "eur" else (amount(s, "eur", request.model) if scope == "research" else None)
@@ -435,13 +452,10 @@ def _admit(path, request, *, boot, scope, key, clock):
             out["key"] = key
             return False  # a retry before any response byte reserves once
         try:
-            limit = cap(task, unit)
-            if limit is None:
-                raise SendRefused("no_cap", f"The run sets no {unit} cap; the send is refused.")
-            if _spent(run, unit) + hold > limit:
-                raise SendRefused("budget", "The run's model budget is spent; the send is refused.")
-            if research_limit is not None and _research_spent(run) + eur > research_limit:
-                raise SendRefused("research_budget", "The research budget is spent; research stops.")
+            if scope == "revision":
+                _check_revision(task, hold)
+            else:
+                _check_run(task, run, unit, hold, eur, research_limit)
         except SendRefused as refused:
             out["refused"] = refused
             return False
@@ -450,7 +464,7 @@ def _admit(path, request, *, boot, scope, key, clock):
         durable_conversation.reserve_in(run, key=out["key"], kind=KINDS[scope], amount=hold, unit=unit)
         row = next(r for r in _ledger(run)["reservations"] if r["key"] == out["key"])
         row["dispatch"] = {"boot": boot, "model": request.model, "at": time.time()}
-        if scope == "research":
+        if scope in ("research", "revision"):
             row["eur"] = eur
         return None
 
@@ -459,6 +473,36 @@ def _admit(path, request, *, boot, scope, key, clock):
     if out.get("refused"):
         raise out["refused"]
     return out["key"]
+
+
+def _check_run(task, run, unit, hold, eur, research_limit) -> None:
+    limit = cap(task, unit)
+    if limit is None:
+        raise SendRefused("no_cap", f"The run sets no {unit} cap; the send is refused.")
+    if _spent(run, unit) + hold > limit:
+        raise SendRefused("budget", "The run's model budget is spent; the send is refused.")
+    if research_limit is not None and _research_spent(run) + eur > research_limit:
+        raise SendRefused("research_budget", "The research budget is spent; research stops.")
+
+
+def _check_revision(task, hold) -> None:
+    """07d: a revision hold counts once against `budget.cost_eur`, with the
+    metered spend and the other unmetered sends (GK B (64) D4). It fails
+    closed (GK B (65) R1): unless the metered spend, the total spend and the
+    hold are finite numbers >= 0 and the cap a finite number > 0, the send is
+    refused, so a NaN, an infinity, a negative or a non-number never admits."""
+    from harness import runner
+    refused = SendRefused("budget", "The run's model budget is spent; the send is refused.")
+    try:
+        metered = runner._budget(task)["used"]["cost_eur"]
+        limit = runner._budget(task)["limit"]["cost_eur"]
+        used = cost_eur(task)
+    except (KeyError, TypeError, ValueError):
+        raise refused from None
+    if not (_number(metered) and _number(used) and _number(hold) and _number(limit) and limit > 0):
+        raise refused
+    if runner.budget_spent(task) or used + hold > limit:
+        raise refused
 
 
 def _settle_row(run: dict, hold: dict, amount_, flags: list[str] | None, eur=None) -> None:

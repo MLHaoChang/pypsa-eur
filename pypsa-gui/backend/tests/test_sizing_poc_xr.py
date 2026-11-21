@@ -20,13 +20,14 @@ from services.compare import intent_jobs
 from services.adequacy import grid_readiness as G
 from services.solver import sizing_cuts as sc
 from tests.test_grid_readiness import PROFILE, _project, _rows
-from tests.test_intent_comparison_endpoint import INPUTS, URL, _wait
+from tests.test_intent_comparison_endpoint import INPUTS, URL, _wait, stub_project_inputs
 from tests.test_intent_table import _result
 
 
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
     monkeypatch.setattr("services.adequacy.sizing_loop_runner._check_inputs", lambda n, inp: None)
+    stub_project_inputs(monkeypatch)
     intent_jobs.clear()
     yield
     intent_jobs.clear()
