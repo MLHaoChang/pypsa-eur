@@ -234,6 +234,10 @@ def curtailment_by_cause(n, commercial):
     from services.adequacy.energization import capped_mw
 
     limit = capped_mw(n, link, cap * pu)
+    if link not in n.links_t.p0.columns:
+        # A project saved before its link flows were kept reloads with them emptied
+        # (study harness 50, PF-SAVE-1): no LP flow to compare with the limit.
+        return not_established("export_flow_missing")
     flow = n.links_t.p0[link].reindex(frame.index).fillna(0.0).to_numpy(dtype=float)
     at_limit = flow >= limit * (1.0 - _AT_LIMIT_REL) - 1e-9
     negative = price < 0.0

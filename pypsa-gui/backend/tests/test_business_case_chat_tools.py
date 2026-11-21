@@ -1062,3 +1062,155 @@ def test_citations_that_are_not_a_list_are_invalid_citations(bc):
     assert d["error_kind"] == "price_not_from_user" and d["status"] == 422
     assert d["reason"] == "invalid_citations"
     assert chat_tools.get_business_case(detail="inputs")["business_case"] is None
+
+
+def test_options_read_offers_units_and_refuses_nothing_without_lines(bc):
+    out = chat_tools.get_business_case(detail="options")
+    assert set(out["units_by_source"]) == {"typed", "share_of", "linked"}
+    assert out["units_by_source"]["typed"]["revenue"]
+    assert out["refusals"] == [] or out["refusals"] is None
+    assert out["hint"] and "truncated" not in out
+
+
+def test_options_read_names_a_refusal_of_a_stored_line(bc, monkeypatch):
+    import routers.results as R
+
+    monkeypatch.setattr(R, "_bc_ic_horizon", lambda: ((2030, 2040), 2025))
+    monkeypatch.setattr(R, "_bc_ic_current", lambda: None)
+    monkeypatch.setattr(R, "_bc_raw", lambda: _bc(_line(start_year=1990)))
+    out = chat_tools.get_business_case(detail="options")
+    assert out["refusals"], out["refusals_reason"]
+    assert any("start_year" in str(r) for r in out["refusals"])
+
+
+def test_options_read_busy_keeps_the_refusal_kind(bc):
+    import routers.results as R
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(R, "_solver_in_flight", lambda: True)
+        assert (
+            _refused(chat_tools.get_business_case, detail="options")["error_kind"]
+            == "solver_in_flight"
+        )
+    lock = R.PyPSAService.get_lock()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(R, "_IC_LOCK_WAIT_S", 0.01)
+        held, free = threading.Event(), threading.Event()
+
+        def hold():
+            with lock:
+                held.set()
+                free.wait(5)
+
+        t = threading.Thread(target=hold)
+        t.start()
+        held.wait(5)
+        try:
+            assert (
+                _refused(chat_tools.get_business_case, detail="options")["error_kind"]
+                == "business_case_busy"
+            )
+        finally:
+            free.set()
+            t.join()
+
+
+def test_an_oversize_options_read_drops_whole_entries_refusals_last(bc, monkeypatch):
+    import routers.results as R
+
+    real = R.get_business_case_options()
+    outs = [
+        {"id": f"o{i}", "label": "x" * 100, "units": ["MWh", "t"], "derived": False}
+        for i in range(80)
+    ]
+    rows = [{"name": "r" * 150} for _ in range(40)]
+    fake = {
+        **real,
+        "offered_rows": rows,
+        "outputs": outs,
+        "units_by_source": {
+            **real["units_by_source"],
+            "linked": {o["id"]: {"revenue": ["MWh"]} for o in outs},
+        },
+        "refusals": [{"code": "unit_not_allowed", "field": "lines[0].unit"}],
+    }
+    monkeypatch.setattr(R, "get_business_case_options", lambda: fake)
+    out = chat_tools.get_business_case(detail="options")
+    cut = out["truncated"]
+    assert "offered_rows" in cut and "refusals" not in cut
+    kept = {o["id"] for o in out["outputs"]}
+    assert kept and kept < {o["id"] for o in outs}
+    # a cut output is absent everywhere, never present with fewer units
+    assert set(out["units_by_source"]["linked"]) == kept
+    assert all(o["units"] == ["MWh", "t"] for o in out["outputs"])
+    assert set(cut["outputs"]) == {o["id"] for o in outs} - kept
+    assert out["refusals"] == fake["refusals"]
+    assert len(fake["outputs"]) == 80  # the route's own object is not mutated
+
+
+def test_options_parity_with_the_route(bc):
+    import routers.results as R
+
+    assert {
+        k: v
+        for k, v in chat_tools.get_business_case(detail="options").items()
+        if k not in ("hint",)
+    } == R.get_business_case_options()
+
+
+def test_options_none_stays_none_with_its_reasons(bc, monkeypatch):
+    import routers.results as R
+
+    ctx = R.PyPSAService.get_active_context()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(ctx, "network", None)
+        out = chat_tools.get_business_case(detail="options")
+    assert out["outputs"] is None and out["outputs_reason"] == "no_network"
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(R, "_bc_raw", lambda: _bc(_line()))
+        mp.setattr(R, "_bc_ic_horizon", lambda: None)
+        out = chat_tools.get_business_case(detail="options")
+    assert (
+        out["refusals"] is None and out["refusals_reason"] == "investment_case_missing"
+    )
+
+
+def test_the_set_tool_tells_the_model_to_read_the_options_first():
+    desc = next(t for t in TOOLS if t["name"] == "set_business_case_lines")[
+        "description"
+    ]
+    assert "get_business_case(detail='options')" in desc
+
+
+def test_the_options_route_is_bound_to_the_read_tool():
+    assert ("GET", "/api/results/business_case/options") in TOOL_ROUTES[
+        "get_business_case"
+    ]
+
+
+def test_bc15_the_summary_carries_the_lease_up_only_when_one_applied(bc, monkeypatch):
+    """HOLISTIC-1: an answer about the result knows the volumes were ramped."""
+    import routers.results as R
+    from services.finance.business_case import VOLUME_FACTOR_NOTE
+
+    monkeypatch.setattr(
+        R,
+        "_bc_staleness_now",
+        lambda stored, ic_key=None: {"present": True, "stale": False, "changed": []},
+    )
+    R._state["business_case_report"] = _report()
+    out = chat_tools.get_business_case()
+    assert not {"volume_factor", "volume_factor_note", "volume_factor_ignored"} & set(
+        out
+    )
+    rep = _report()
+    rep["pnl"].update(
+        volume_factor={"2027": 0.5},
+        volume_factor_note=VOLUME_FACTOR_NOTE,
+        volume_factor_ignored=[2040],
+    )
+    R._state["business_case_report"] = rep
+    out = chat_tools.get_business_case()
+    assert out["volume_factor"] == {"2027": 0.5}
+    assert out["volume_factor_note"] == VOLUME_FACTOR_NOTE
+    assert out["volume_factor_ignored"] == [2040]

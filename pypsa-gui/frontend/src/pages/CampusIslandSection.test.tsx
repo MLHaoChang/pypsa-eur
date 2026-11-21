@@ -131,7 +131,7 @@ describe('island section: the report', () => {
     const heads = (id: string) => [...screen.getByTestId(`island-table-${id}`).querySelectorAll('th')].map(h => h.textContent)
     await screen.findByTestId('island-table-requirements')
     expect(heads('requirements')).toEqual(['Setting', 'Value', 'Source', ''])
-    expect(heads('costs')).toContain('Cost of island capability')
+    expect(heads('costs')).toContain('Cost of island capability (per year)')
     expect(heads('static_flow')).toEqual(['Period', 'Hour', 'Viable', 'Assumed inputs', ''])
     const first = screen.getByTestId('island-table-requirements').querySelector('tbody tr td')
     expect(first?.textContent).toBe('UPS bridge (s)')
@@ -146,6 +146,27 @@ describe('island section: the report', () => {
     expect(screen.getByTestId('island-empty').textContent).toBe('Nothing to report for this run: UPS ride-through; planned islanding.')
   })
 
+  it('puts € per year on the money columns and the limit in words', async () => {
+    const binding = { ...REPORT.tables[1], id: 'binding', title: 'Island limits that were reached, and what each costs',
+      columns: ['scenario', 'row', 'hours binding', 'sum of duals'], rows: [['seamless', 'Island-n1-down-bess_new', 7, 83338]],
+      assumed_rows: [] }
+    renderReport({ ...REPORT, tables: [...REPORT.tables, binding] })
+    const costs = await screen.findByTestId('island-table-costs')
+    expect(costs.textContent).toContain('Cost of island capability (per year)')
+    expect(costs.textContent).toMatch(/€\u00a0\d/)
+    const table = await screen.findByTestId('island-table-binding')
+    expect(table.textContent).toContain('Island N-1: loss of bess new, downward reserve')
+    expect(table.textContent).toContain('Cost of the limit (per year)')
+    expect(within(table).getByTestId('island-binding-note').textContent).toContain('do not add up')
+  })
+
+  it('says what ran, what has not, and links to Grid connection', async () => {
+    renderReport()
+    const note = await screen.findByTestId('island-missing')
+    expect(note.textContent).toMatch(/Ran: .*Not run yet: .*campus run with island tables/)
+    expect(within(note).getByTestId('island-missing-link').textContent).toContain('Open Grid connection')
+  })
+
   it('says what is missing', async () => {
     renderReport()
     expect((await screen.findByTestId('island-missing')).textContent).toContain('campus run with island tables')
@@ -157,7 +178,7 @@ describe('island section: the form', () => {
     renderSection()
     const user = userEvent.setup()
     await screen.findByTestId('island-form')
-    await user.click(screen.getByLabelText('seamless'))
+    await user.click(screen.getByLabelText('Seamless'))
     const sustained = screen.getByLabelText('Sustained ride-through (h)')
     await user.clear(sustained)
     await user.type(sustained, '12')
@@ -182,7 +203,7 @@ describe('island section: the form', () => {
     renderSection()
     const user = userEvent.setup()
     await screen.findByTestId('island-form')
-    await user.click(screen.getByLabelText('seamless'))
+    await user.click(screen.getByLabelText('Seamless'))
     await user.click(screen.getByRole('button', { name: /Save island config/ }))
     expect((await screen.findByTestId('island-refusal')).textContent).toContain('pickup_blocks')
   })
@@ -210,7 +231,7 @@ describe('island section: the form', () => {
     renderSection()
     const user = userEvent.setup()
     await screen.findByTestId('island-form')
-    await user.click(screen.getByLabelText('seamless'))
+    await user.click(screen.getByLabelText('Seamless'))
     expect((screen.getByRole('button', { name: /Run cost-of-islanding study/ }) as HTMLButtonElement).disabled).toBe(true)
   })
 

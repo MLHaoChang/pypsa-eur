@@ -84,6 +84,40 @@ def test_the_view_carries_stages_envelope_and_the_monitor(client, session, site)
     assert monitor["email"] == {"available": email_service.get_status()["configured"]} and "card" not in monitor
 
 
+def test_the_view_offers_a_revision_draft_only_on_a_completed_run_with_its_report(client, session, site, monkeypatch):
+    """SH-07d PR B: `monitor.revision_report` names the run's own report and
+    the server's limits, and only where `request()` would accept it."""
+    from harness import run_revise
+
+    _, root = site
+    task = start()
+    path = task_path(root, task)
+    url = f"/api/chat/runs/{task['task_id']}/view"
+    assert "revision_report" not in client.get(url).json()["monitor"]
+
+    def finish(record):
+        record["status"] = "completed"
+        record["run"]["status"] = "completed"
+        record["steps"].append({"id": "report.1", "native": "report", "tool": "generate_report",
+                                "status": "completed", "args": {},
+                                "job": {"report_id": "r-own", "outcome": "done", "version": 1}})
+
+    harness_runner._update(path, finish)
+    monitor = client.get(url).json()["monitor"]
+    assert monitor["revision_report"] == {"report_id": "r-own", "max_requests": run_revise.MAX_REQUESTS,
+                                          "in_flight": list(run_revise.IN_FLIGHT), "may_act": True}
+    # A viewer of the run's project sees the offer but may not act on it.
+    from services import project_write_gate
+    asked = []
+    monkeypatch.setattr(project_write_gate, "is_viewer",
+                        lambda db, user, project: asked.append(project) or True)
+    assert client.get(url).json()["monitor"]["revision_report"]["may_act"] is False
+    assert asked == [task["project_id"]]
+    monkeypatch.undo()
+    harness_runner._update(path, lambda r: r["steps"][-1]["job"].update(outcome="failed"))
+    assert "revision_report" not in client.get(url).json()["monitor"]
+
+
 def test_unattended_is_available_only_with_the_runner_a_provider_and_the_edit_right(client, session, site, monkeypatch):
     from services import run_monitor
     task = start()
@@ -328,13 +362,22 @@ def words_keys(name):
     start = text.index(f"export const {name}")
     body = text[text.index("= {", start) + 3:text.index("\n}", start)]
     body = re.sub(r"\{[^{}]*\}", "{}", body)
-    return {a or b for a, b in re.findall(r"(?:'([^']+)'|([A-Za-z_]\w*))\s*:\s*['{]", body)}
+    return {a or b for a, b in re.findall(r"(?:'([^']+)'|([A-Za-z_]\w*))\s*:\s*['\"{]", body)}
 
 
 def test_the_plan_card_names_every_stage_and_gate_fact_in_words():
     from services import run_gates, run_profiles
     assert words_keys("STAGE_WORDS") == set(run_profiles.STAGES)
     assert set(run_gates.FACTS) <= words_keys("FACT_WORDS")
+
+
+def test_the_run_card_names_every_draft_status_and_reason_in_words():
+    """SH-07d PR B (UX (26) condition 3): no engine status or reason code on a row."""
+    from harness import run_revise
+    from services.reports import revisions
+    assert words_keys("DRAFT_STATUS_WORDS") == set(run_revise.STATUSES)
+    assert set(revisions.REASON_TEXT) | {run_revise.DRAFT_UNREADABLE, run_revise.DRAFT_TRUNCATED} \
+        == words_keys("DRAFT_REASON_WORDS")
 
 
 def test_the_envelope_section_names_every_profile_edit_and_run_in_words():

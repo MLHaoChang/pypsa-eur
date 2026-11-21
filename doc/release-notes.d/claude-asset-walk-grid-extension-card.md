@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): An island site gets a "Grid extension vs island" card in Guided Results and in Expert Results › Investment case: it compares the supply architectures and finds the distance from the grid within which extending it costs less than supplying the site off-grid.

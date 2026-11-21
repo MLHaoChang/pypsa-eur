@@ -106,14 +106,21 @@ def test_evaluate_network_uses_min_scr_across_poc_buses():
 def test_evaluate_network_ibr_override_on_bus():
     from services.adequacy import scr_gate as G
 
-    # wind_mw=100 but override ibr=50 → SCR = 200/50 = 4 → pass
-    n = _poc_network(sk_mva=200.0, ibr_mva=50.0, wind_mw=100.0)
+    # wind_mw=40 but override ibr=50 → SCR = 200/50 = 4 → pass
+    n = _poc_network(sk_mva=200.0, ibr_mva=50.0, wind_mw=40.0)
     gate, status, payload, _note = G.evaluate_network_scr_gate(n)
     assert status == "ok"
     assert gate.scr == "pass"
     assert gate.emt_recommended is False
     assert payload["buses"][0]["ibr_mva"] == pytest.approx(50.0)
     assert payload["buses"][0]["scr"] == pytest.approx(4.0)
+    # A stated 50 below 100 MW of wind on the bus still sets the figure, but
+    # never certifies the Pass (DC walk 05, GK A 31).
+    n = _poc_network(sk_mva=200.0, ibr_mva=50.0, wind_mw=100.0)
+    gate, status, payload, _note = G.evaluate_network_scr_gate(n)
+    assert gate is None and status == "not_established"
+    assert payload["buses"][0]["scr"] == pytest.approx(4.0)
+    assert payload["capped_pocs"] == ["poc"]
 
 
 def test_evaluate_network_not_established_without_sk():

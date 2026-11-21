@@ -22,6 +22,8 @@ import ResultState, { StatePill } from '../../components/ResultState'
 import { nk } from '../../utils/queryKeys'
 import { acPfConvergenceText } from '../../utils/acPfConvergence'
 import { openPanel } from './openPanel'
+import { resultsEvidenceApi } from '../../api/resultsEvidence'
+import { useHubTemplate } from '../hubDesign/useHubData'
 
 // Branch loading is the native, source-attested server projection used by
 // get_loadflow_summary. Bus/reactive/voltage/loss diagnostics retain their
@@ -36,18 +38,40 @@ import { openPanel } from './openPanel'
 const SHOW_RETIRED_SECTIONS = false as boolean
 
 /** The one Run entry, here: the header's Run through the gate (pre-save, enqueue, log).
- *  It runs the whole solve again; AC power flow follows only when it is switched on. */
-function RunAgain({ acPfAvailable }: { acPfAvailable: boolean }) {
+ *  It runs the whole solve again; AC power flow follows only when it is switched on.
+ *  A network with no lines or transformers has no load flow to switch on: the
+ *  "Not applicable" statement below is then the only reason given, and an Energy
+ *  Hub points to Grid study. */
+function RunAgain({ acPfAvailable, from, to, enabled }: { acPfAvailable: boolean, from: number, to: number, enabled: boolean }) {
   const requestRunSolve = useUIStore(s => s.requestRunSolve)
+  const project = useUIStore(s => s.currentProject)
+  const source = useUIStore(s => s.resultSource)
+  const isHub = !!useHubTemplate().template
+  // Same key as BranchLoading's read, so this shares its request.
+  const { data: evidence } = useQuery({
+    queryKey: nk(project, 'results', 'loadflow-view', source, from, to),
+    queryFn: () => resultsEvidenceApi.loadflow(source, from, to),
+    enabled: enabled && !!project,
+  })
+  const noBranches = evidence?.status === 'unavailable' && evidence.unavailable_kind === 'no_ac_branches'
+  const title = noBranches
+    ? 'Runs the whole solve again'
+    : 'Runs the whole solve again: the optimisation, then AC power flow when it is switched on'
   return (
     <div data-testid="loadflow-run-again" className="flex flex-1 flex-wrap items-center gap-2 px-3 text-[11px]">
       <button type="button" data-testid="loadflow-run-again-btn" onClick={requestRunSolve}
-        title="Runs the whole solve again: the optimisation, then AC power flow when it is switched on"
+        title={title}
         className="rounded-[6px] border border-border-2 bg-bg px-2 py-1 text-[11px] font-semibold text-text hover:border-border-3">
         Run again
       </button>
-      <span className="text-muted">Runs the whole solve again{acPfAvailable ? '' : '; AC power flow follows when switched on'}.</span>
-      {!acPfAvailable && (
+      <span className="text-muted">Runs the whole solve again{acPfAvailable || noBranches ? '' : '; AC power flow follows when switched on'}.</span>
+      {noBranches && isHub && (
+        <button type="button" data-testid="loadflow-open-grid-study" className="text-accent hover:underline"
+          onClick={() => openPanel('scenarios', 'campusStudy')}>
+          Grid checks are in Grid study ›
+        </button>
+      )}
+      {!acPfAvailable && !noBranches && (
         <>
           <StatePill state="not_modelled" />
           <span className="text-muted">AC power flow was not part of this run.</span>
@@ -431,7 +455,7 @@ export default function LoadFlow() {
       <section>
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Network</h3>
-          <RunAgain acPfAvailable={acPfAvailable} />
+          <RunAgain acPfAvailable={acPfAvailable} from={win.from} to={win.to} enabled={winValid} />
           {/* Result-source toggle. Hidden when Stage 2 hasn't run yet — the
               backend would just return the same LOPF data either way, so
               giving the user a no-op pill would be misleading. Same store
@@ -941,11 +965,12 @@ export default function LoadFlow() {
       {acPfStatus?.available && (
         <section>
           <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2">AC Power Flow status</h3>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             <KPI label="Snapshots converged" value={acPfText.kpi} />
             <KPI label="Slack bus" value={acPfStatus.slack_bus_used ?? '—'} />
             <KPI label="VOLL slacks stripped"
               value={`${(acPfStatus.stripped_voll_slacks ?? []).length}`} />
+            <SeededByKPI seededBy={acPfStatus.seeded_by ?? []} />
           </div>
           {acPfText.note && (
             <p className="text-[11px] text-muted mt-2">{acPfText.note}</p>
@@ -1379,5 +1404,15 @@ export default function LoadFlow() {
         </section>
       )}
     </div>
+  )
+}
+
+/** Seed tile: a count (names in the tooltip) so the value never outgrows its quarter-width tile. */
+function SeededByKPI({ seededBy }: { seededBy: string[] }) {
+  const n = seededBy.length
+  if (n === 0) return <KPI label="Seeded by" value="Flat start" hint="No active phase-shifting transformer: the flow started flat." />
+  return (
+    <KPI label="Seeded by" value="Linear estimate" sub={`${n} phase-shifting ${n === 1 ? 'transformer' : 'transformers'}`}
+      hint={`A linear power flow gave the starting point, because these transformers shift phase: ${seededBy.join(', ')}`} />
   )
 }

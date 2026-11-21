@@ -56,15 +56,17 @@ from services.atomic_io import (
     atomic_write_text as _atomic_write_text,
     atomic_write_with as _atomic_write_with,
 )
+from services import project_contents as PC
 from routers.projects import (
     _reports_copy_guard,
-    _BUNDLE_DIRS,
+    _SNAPSHOT_DIRS,
     _BUNDLE_FILES,
     _enforce_project_lock,
     _force_rmtree,
     _read_meta,
     _remove_closed_dir,
     _remove_retired,
+    _replace_dir_keeping,
     _retire_closed_dir,
     _restore_results_state,
     _safe_project_dir,
@@ -302,7 +304,7 @@ def _capture_presence(project_dir: pathlib.Path) -> dict:
     folder whose copy failed was present, so a restore must not delete the live
     one on its account.
     """
-    tracked = {"tracked_files": list(_BUNDLE_FILES), "tracked_dirs": list(_BUNDLE_DIRS)}
+    tracked = {"tracked_files": list(_BUNDLE_FILES), "tracked_dirs": list(_SNAPSHOT_DIRS)}
     return {
         "version": _CAPTURE_MANIFEST_VERSION,
         # Which bundle lists the manifest was judged against, so a reader can
@@ -311,7 +313,7 @@ def _capture_presence(project_dir: pathlib.Path) -> dict:
             json.dumps(tracked, sort_keys=True).encode()).hexdigest()[:16],
         **tracked,
         "present_files": [f for f in _BUNDLE_FILES if (project_dir / f).exists()],
-        "present_dirs": [d for d in _BUNDLE_DIRS if (project_dir / d).exists()],
+        "present_dirs": [d for d in _SNAPSHOT_DIRS if (project_dir / d).exists()],
     }
 
 
@@ -340,7 +342,7 @@ def _absent_at_capture(snap_dir: pathlib.Path) -> tuple[set[str], set[str]] | No
         dirs = set(m["tracked_dirs"]) - set(m["present_dirs"])
     except (KeyError, TypeError):
         return None
-    return files & set(_BUNDLE_FILES), dirs & set(_BUNDLE_DIRS)
+    return files & set(_BUNDLE_FILES), dirs & set(_SNAPSHOT_DIRS)
 
 
 def _list_snapshot_dirs(project_dir: pathlib.Path) -> list[pathlib.Path]:
@@ -550,7 +552,7 @@ def _capture_snapshot(
         # copy failure must not abort the snapshot create.
         try:
             from routers.projects import _copy_bundle_dirs
-            _copy_bundle_dirs(project_dir, snap_dir)
+            _copy_bundle_dirs(project_dir, snap_dir, op=PC.SNAPSHOT)
         except report_store.ReportBusy:
             raise  # never a silent skip (07e); the caller holds the locks
         except Exception:  # noqa: BLE001 — best-effort
@@ -878,7 +880,7 @@ def restore_snapshot(
         # removal failure here must not abort restore.
         try:
             from routers.projects import _copy_bundle_dirs
-            _copy_bundle_dirs(snap_dir, project_dir)
+            _copy_bundle_dirs(snap_dir, project_dir, op=PC.SNAPSHOT)
         except report_store.ReportBusy:
             raise  # never a silent skip (07e); this block holds the locks
         except Exception:  # noqa: BLE001 — best-effort
@@ -890,6 +892,10 @@ def restore_snapshot(
                     if dname == report_store.REPORTS_DIRNAME:
                         # Report by report, and never the held lock files.
                         report_store.clear_reports(project_dir)
+                        continue
+                    if keep := PC.skipped(dname, PC.SNAPSHOT):
+                        # `gridspine/run/` is never the snapshot's to remove.
+                        _replace_dir_keeping(None, live, keep)
                         continue
                     _force_rmtree(live)
                 except OSError as exc:

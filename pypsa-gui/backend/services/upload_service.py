@@ -52,6 +52,7 @@ import shutil
 import threading
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from fastapi import HTTPException
 
@@ -313,6 +314,18 @@ def _upload_not_found(name: str, file_id: str) -> HTTPException:
 DELIVERY_TTL_SECONDS = 7 * 24 * 3600
 
 
+def delivery_expires_at(meta: UploadMeta) -> str | None:
+    """The last instant an `agent_export` download is served (ISO, UTC), else None.
+
+    Matches `refuse_expired_delivery`: served while age <= TTL. Other kinds
+    never expire, so they carry no date.
+    """
+    if meta.kind != "agent_export" or not math.isfinite(meta.uploaded_at):
+        return None
+    instant = meta.uploaded_at + DELIVERY_TTL_SECONDS
+    return datetime.fromtimestamp(instant, UTC).isoformat()
+
+
 def refuse_expired_delivery(meta: UploadMeta, *, now: float | None = None) -> None:
     """Raise 410 `delivery_expired` for an `agent_export` older than the TTL.
 
@@ -451,6 +464,10 @@ def unwatch_uploads(token: contextvars.Token) -> None:
         _UPLOAD_WATCH.set(None)
 
 
+UPLOAD_LOCK_FILE = ".uploads.lock"
+UPLOAD_LOCK_TIMEOUT_S = 10
+
+
 def add_upload(
     name: str,
     file_bytes: bytes,
@@ -469,6 +486,8 @@ def add_upload(
 
     Raises:
         HTTPException(507, error_kind="upload_quota_exceeded") on quota.
+        HTTPException(409, error_kind="upload_busy") when another process
+            holds the project's upload lock past the timeout.
         HTTPException(500, error_kind="file_integrity_error") on a
             hash-collision-style dedup mismatch (effectively impossible
             in practice but caught to fail loudly).
@@ -476,101 +495,135 @@ def add_upload(
     paths = _resolve_paths(name, project_dir)
     paths.uploads_dir.mkdir(parents=True, exist_ok=True)
     file_id, sha256_full = _file_id_for(file_bytes)
+    safe_name = safe_upload_filename(filename, ext=pathlib.Path(filename).suffix.lstrip("."))
+
+    # The RLock serialises threads of this process; the file lock serialises
+    # API processes, so two of them storing the same bytes cannot both miss the
+    # sha256 dedup (GK B ruling #1070). The lock file sits beside `uploads/`,
+    # not in it, so the upload listing and quota walk never see it.
+    from harness.durable import file_lock
+
+    with _project_upload_lock(name):
+        try:
+            with file_lock(
+                paths.project_dir / UPLOAD_LOCK_FILE,
+                timeout=UPLOAD_LOCK_TIMEOUT_S,
+                busy="upload lock busy",
+            ):
+                return _add_upload_locked(
+                    name, file_bytes, safe_name, sniffed_mime, kind, quota_bytes,
+                    paths, file_id, sha256_full, assurance_sha256,
+                )
+        except TimeoutError:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_kind": "upload_busy",
+                    "message": (
+                        f"another process is storing an upload for project '{name}'; "
+                        "nothing was stored"
+                    ),
+                    "hint": "retry in a few seconds",
+                },
+            ) from None
+
+
+def _add_upload_locked(
+    name, file_bytes, safe_name, sniffed_mime, kind, quota_bytes,
+    paths, file_id, sha256_full, assurance_sha256,
+) -> UploadMeta:
+    """The body of `add_upload`, run with both locks held."""
     file_dir = paths.uploads_dir / file_id
     meta_path = file_dir / "meta.json"
     blob_path = file_dir / "blob"
-
-    safe_name = safe_upload_filename(filename, ext=pathlib.Path(filename).suffix.lstrip("."))
-
-    with _project_upload_lock(name):
-        # Dedup hit: existing meta + ready blob → return as-is — except that a
-        # user upload re-sent AS A TEMPLATE (or as a round-trip copy) is
-        # promoted to that kind, so the report viewer's picker (which lists
-        # one kind only) shows it. Never the other direction: a template
-        # stays a template, a round-trip copy stays one.
-        existing = _read_meta(meta_path)
-        if existing is not None and existing.blob_ready:
-            if existing.sha256 != sha256_full:
-                raise HTTPException(
-                    status_code=500,
-                    detail={
-                        "error_kind": "file_integrity_error",
-                        "message": (
-                            f"existing meta.json for {file_id} has sha256 "
-                            f"{existing.sha256[:16]}... but new bytes hash to "
-                            f"{sha256_full[:16]}... — possible disk corruption"
-                        ),
-                    },
-                )
-            if kind in PROMOTABLE_KINDS and existing.kind == "user_upload":
-                existing = existing.model_copy(update={"kind": kind})
-                _atomic_write_meta(meta_path, existing)
-            if assurance_sha256 is not None and existing.assurance_sha256 != assurance_sha256:
-                existing = existing.model_copy(update={"assurance_sha256": assurance_sha256})
-                _atomic_write_meta(meta_path, existing)
-            if kind == "agent_export" and existing.kind == "agent_export":
-                # Exporting the same content again is a fresh delivery: its
-                # 7-day clock restarts (LC48A-TTL-1).
-                existing = existing.model_copy(update={"uploaded_at": time.time()})
-                _atomic_write_meta(meta_path, existing)
-            _note_upload(existing)
-            return existing
-
-        # Quota check — only on a fresh upload (dedup hit doesn't grow disk).
-        usage = _current_usage_bytes(paths.uploads_dir)
-        if usage + len(file_bytes) > quota_bytes:
+    # Dedup hit: existing meta + ready blob → return as-is — except that a
+    # user upload re-sent AS A TEMPLATE (or as a round-trip copy) is
+    # promoted to that kind, so the report viewer's picker (which lists
+    # one kind only) shows it. Never the other direction: a template
+    # stays a template, a round-trip copy stays one.
+    existing = _read_meta(meta_path)
+    if existing is not None and existing.blob_ready:
+        if existing.sha256 != sha256_full:
             raise HTTPException(
-                status_code=507,
+                status_code=500,
                 detail={
-                    "error_kind": "upload_quota_exceeded",
+                    "error_kind": "file_integrity_error",
                     "message": (
-                        f"project '{name}' would exceed the {quota_bytes // (1024*1024)} MB "
-                        f"upload quota ({usage // (1024*1024)} MB used + "
-                        f"{len(file_bytes) // (1024*1024)} MB new)"
+                        f"existing meta.json for {file_id} has sha256 "
+                        f"{existing.sha256[:16]}... but new bytes hash to "
+                        f"{sha256_full[:16]}... — possible disk corruption"
                     ),
-                    "hint": "delete unused uploads via the chat panel chip strip",
                 },
             )
+        if kind in PROMOTABLE_KINDS and existing.kind == "user_upload":
+            existing = existing.model_copy(update={"kind": kind})
+            _atomic_write_meta(meta_path, existing)
+        if assurance_sha256 is not None and existing.assurance_sha256 != assurance_sha256:
+            existing = existing.model_copy(update={"assurance_sha256": assurance_sha256})
+            _atomic_write_meta(meta_path, existing)
+        if kind == "agent_export" and existing.kind == "agent_export":
+            # Exporting the same content again is a fresh delivery: its
+            # 7-day clock restarts (LC48A-TTL-1).
+            existing = existing.model_copy(update={"uploaded_at": time.time()})
+            _atomic_write_meta(meta_path, existing)
+        _note_upload(existing)
+        return existing
 
-        # Fresh upload path.
-        file_dir.mkdir(parents=True, exist_ok=True)
-
-        uploaded_at = time.time()
-        # Phase C — PDF page-count metadata. Recorded on upload so the
-        # multimodal block builder can refuse / truncate without re-parsing.
-        # Schema bumps to v2 only when these optional fields are set; v1
-        # readers ignore them via `extra="ignore"`.
-        page_count = None
-        truncated_flag: bool | None = None
-        schema_v = 1
-        if sniffed_mime == "application/pdf":
-            page_count, was_truncated = _probe_pdf_page_count(file_bytes)
-            if page_count is not None:
-                schema_v = 2
-                truncated_flag = was_truncated
-        meta = UploadMeta(
-            schema_version=schema_v,
-            file_id=file_id,
-            filename=safe_name,
-            mime=sniffed_mime,
-            size=len(file_bytes),
-            sha256=sha256_full,
-            kind=kind,
-            uploaded_at=uploaded_at,
-            blob_ready=False,
-            version=1,
-            page_count=page_count,
-            truncated_to_100_pages=truncated_flag,
-            assurance_sha256=assurance_sha256,
+    # Quota check — only on a fresh upload (dedup hit doesn't grow disk).
+    usage = _current_usage_bytes(paths.uploads_dir)
+    if usage + len(file_bytes) > quota_bytes:
+        raise HTTPException(
+            status_code=507,
+            detail={
+                "error_kind": "upload_quota_exceeded",
+                "message": (
+                    f"project '{name}' would exceed the {quota_bytes // (1024*1024)} MB "
+                    f"upload quota ({usage // (1024*1024)} MB used + "
+                    f"{len(file_bytes) // (1024*1024)} MB new)"
+                ),
+                "hint": "delete unused uploads via the chat panel chip strip",
+            },
         )
-        # Write meta (blob_ready=false) → write blob → flip meta.blob_ready=true.
-        # An orphan blob without a meta is invisible to list_uploads.
-        _atomic_write_meta(meta_path, meta)
-        _atomic_write_bytes(blob_path, file_bytes)
-        meta = meta.model_copy(update={"blob_ready": True})
-        _atomic_write_meta(meta_path, meta)
-        _note_upload(meta)
-        return meta
+
+    # Fresh upload path.
+    file_dir.mkdir(parents=True, exist_ok=True)
+
+    uploaded_at = time.time()
+    # Phase C — PDF page-count metadata. Recorded on upload so the
+    # multimodal block builder can refuse / truncate without re-parsing.
+    # Schema bumps to v2 only when these optional fields are set; v1
+    # readers ignore them via `extra="ignore"`.
+    page_count = None
+    truncated_flag: bool | None = None
+    schema_v = 1
+    if sniffed_mime == "application/pdf":
+        page_count, was_truncated = _probe_pdf_page_count(file_bytes)
+        if page_count is not None:
+            schema_v = 2
+            truncated_flag = was_truncated
+    meta = UploadMeta(
+        schema_version=schema_v,
+        file_id=file_id,
+        filename=safe_name,
+        mime=sniffed_mime,
+        size=len(file_bytes),
+        sha256=sha256_full,
+        kind=kind,
+        uploaded_at=uploaded_at,
+        blob_ready=False,
+        version=1,
+        page_count=page_count,
+        truncated_to_100_pages=truncated_flag,
+        assurance_sha256=assurance_sha256,
+    )
+    # Write meta (blob_ready=false) → write blob → flip meta.blob_ready=true.
+    # An orphan blob without a meta is invisible to list_uploads.
+    _atomic_write_meta(meta_path, meta)
+    _atomic_write_bytes(blob_path, file_bytes)
+    meta = meta.model_copy(update={"blob_ready": True})
+    _atomic_write_meta(meta_path, meta)
+    _note_upload(meta)
+    return meta
 
 
 def list_uploads(name: str, *, project_dir: pathlib.Path | None = None,

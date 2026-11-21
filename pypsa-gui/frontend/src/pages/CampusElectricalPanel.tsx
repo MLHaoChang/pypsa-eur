@@ -52,7 +52,7 @@ import CampusDipsRestartSection from './CampusDipsRestartSection'
 import CampusHarmonicScanSection from './CampusHarmonicScanSection'
 import CampusUnitQCurveSection from './CampusUnitQCurveSection'
 import { GRID_CODE_CHANGED } from '../components/gridReadiness/GridReadinessScorecard'
-import CampusIslandSection, { ISLAND_REPORT_KEY } from './CampusIslandSection'
+import CampusIslandSection, { ISLAND_REPORT_KEY, openCampusFile } from './CampusIslandSection'
 import DcArchitectureSection from './DcArchitectureSection'
 import DcBackupSection from './DcBackupSection'
 import CampusLibrarySection from './CampusLibrarySection'
@@ -271,7 +271,12 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
         ) : (
           <PageSection title="Study settings">
             <p className="text-[12px] text-muted">
-              Draft the campus file in the grid connection first; the study runs on it.
+              The study runs on the campus file, a description of your site's electrical network. It is
+              drafted from the project in Grid connection.{' '}
+              <button type="button" className="text-accent underline" data-testid="campus-draft-link"
+                onClick={openCampusFile}>
+                Draft the campus file ›
+              </button>
             </p>
           </PageSection>
         )}

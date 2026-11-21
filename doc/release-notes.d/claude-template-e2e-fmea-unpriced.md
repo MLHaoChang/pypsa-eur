@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The FMEA worksheet no longer shows €0 for a failure mode it could not price (no Value of Lost Load). Those cells read "Not set", the modes are listed after the priced ones and left out of the ranking, and a visible line links to the VOLL field in Solver settings.

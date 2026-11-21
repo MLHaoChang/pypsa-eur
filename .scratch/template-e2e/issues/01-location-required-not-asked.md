@@ -26,3 +26,13 @@ Design §2.3 marks location **R** for every template. In the app (verified 2026-
 - If it blocks: section 1 reads `incomplete` until a location is set, and the readiness line links to the same Latitude/Longitude drawer.
 - A test covers each template's section 1 state with and without a location.
 - (UX) If Q1 says block: New project asks for the location (DC form, Generic Site form, template cards), and the Readiness line links to the same Latitude/Longitude drawer.
+
+## Comments
+
+- Seen again 2026-11-20 (template walk, master 1f6905e3): DC, H2 and microgrid still open with 'The site has no location: no bus is placed' in Guided step 1 and as a note on Readiness and run.
+
+- Seen again 2026-11-21 (template walk, master 6b421b06): IPP, concentrator and ammonia all open with "The site has no location: no bus is placed" in Guided section 1 (and "1 note" in the Expert header).
+
+- Extended 2026-11-21 (gap review, `.scratch/gap-review-2026-11-21/README.md`, walk W1, master 76707f13): **the existing fix path does not clear the item.** On the DC staged template, section 1's "site has no location" item → "Open here ›" / "› Site coordinates" opens the lat/lon drawer. Confirming 52.52, 13.4 reads back "confirmed" and writes `site_anchor.json` (`services/site_scene/anchor.py`). The item and "1 to check" stay, because `site_location_missing` in `flow_service._presence` (~l.1002) reads Bus x/y, never the site anchor. Design.md §2.4 J12 says buses inherit the site location. Added acceptance for this issue:
+  - [ ] Confirming the site coordinates in the section-1 drawer clears `site_location_missing`: either the flow fact reads the anchor, or confirming writes the anchor to the buses that have no position (J12). One rule, tested both ways.
+  - [ ] End to end in the real app: DC staged › section 1 › Open here › confirm coordinates → the item disappears, section 1 turns complete, and Run's note list no longer names the location.

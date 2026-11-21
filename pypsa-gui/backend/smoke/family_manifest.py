@@ -94,7 +94,8 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         get_project_flow_scope update_project_flow_scope get_project_network_meta get_meta update_meta
         project_readiness get_site_template_form fetch_site_context geocode_place get_osm_suggestions
         list_project_network_component set_site_connection get_site_anchor set_site_anchor
-        site_scene_read site_scene_prepare site_scene_apply site_scene_cancel""",
+        site_scene_read site_scene_prepare site_scene_apply site_scene_cancel
+        site_scene_results""",
     'network-topology': """
         batch_create_components batch_delete_components bulk_update_components cascade_delete_bus
         create_carrier create_component delete_component get_component get_component_schema list_carriers
@@ -146,6 +147,7 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         set_finance_inputs solve_ppa_price start_decision_study update_decision_study set_study_parameter
         get_study_findings get_poc_state get_value_flow_designer
         get_supply_architectures compare_supply_architectures
+        get_system_type_map compare_system_types
         get_grid_extension_break_even
         run_business_case get_business_case set_business_case_lines abort_business_case
         apply_business_case_preset""",

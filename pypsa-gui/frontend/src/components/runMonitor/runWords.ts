@@ -73,6 +73,20 @@ export const FACT_WORDS: Record<string, string> = {
   'ipp.export.over_limit_mw': 'The power exported never passes the export connection\'s rating',
   'ic.min_dscr': 'The investment case\'s lowest debt cover is at or above the assumed floor (not the lender\'s covenant)',
   'ic.project_pre_tax_irr': 'The investment case reports the project\'s pre-tax IRR',
+  // Study harness 16: the staged mining concentrator's process and comparison facts.
+  'process.mass_balance': 'The ore and concentrate tonnes balance at every tonne bus in every period',
+  'process.motor_start': 'The large process motors start without breaking the site\'s voltage dip limit',
+  'process.restart': 'Every process unit restarts in time after a grid trip',
+  'process.n_1.site_transformer': 'Losing one site transformer cuts off no process unit',
+  'ic.counterfactual.basis': 'The comparison case is the site as it runs today',
+  'process.lost_production': 'The concentrate lost to grid events is reported (lost production, not shipped)',
+  'process.shed_level': 'The highest process load shed is reported',
+  // Study harness 15: the grid-only profile.
+  'grid.template.source': 'The grid template\'s source data is in place',
+  'grid.pf.converged': 'The load flow converged in every hour',
+  'grid.pf.loading_pct': 'Every line and transformer stays within its rating in the load flow',
+  'grid.pf.voltage_violations': 'Every bus voltage stays within its own band in the load flow',
+  'grid.n1.secured': 'The grid survives the loss of any one line or transformer',
 }
 
 /** The unit a counted gate fact is read in, when the rule sends none,
@@ -112,6 +126,8 @@ export const NAME_WORDS: Record<string, string> = {
   bess: 'The battery',
   // Study harness 13: the ammonia hub's levers.
   'wind_new_*': 'New wind', 'solar_new_*': 'New solar', nh3_tank: 'The ammonia tank',
+  // Study harness 16: the concentrator's buffer lever.
+  'coarse_ore_stockpile_new_*': 'New coarse-ore stockpiles',
 }
 
 /** An envelope edit's field: the panels' own word (`FIELD_LABELS`) and its unit. */
@@ -129,6 +145,7 @@ export const FIELD_WORDS: Record<string, { words: string; unit: string }> = {
 export const RUN_WORDS: Record<string, string> = {
   solve_queue_enqueue: 'Queued solves', run_simulation: 'Solves', run_ac_pf_stage: 'Load-flow checks',
   generate_report: 'Study reports', run_investment_case: 'Investment case',
+  update_solver_config: 'Switching Load flow on',
 }
 
 const number = (x: number) => (Number.isInteger(x) ? String(x) : x.toFixed(2).replace(/\.?0+$/, ''))
@@ -217,3 +234,77 @@ export function stopWords(reason: string | undefined, stage: string): { words: s
 
 /** A research gap's name, one per gap key in a profile's `research.gaps` (parity: runWords.test.ts). */
 export const GAP_WORDS: Record<string, string> = { import_tariff: 'Import tariff' }
+
+// ── SH-07d: report revision drafts on the run card ──────────────────────────
+
+/** A draft row's status in words (`run_revise.STATUSES`, every one). */
+export const DRAFT_STATUS_WORDS: Record<string, string> = {
+  requested: 'Waiting to draft',
+  drafting: 'Drafting',
+  drafted: 'Ready for you to confirm',
+  rejected: 'Could not be used',
+  refused: 'Not made',
+  lost: 'Interrupted',
+  applying: 'Applying',
+  applied: 'Applied to the report',
+  discarded: 'Discarded',
+}
+
+/** A drafted row for a user who may not confirm it: no "for you". */
+export const DRAFT_DRAFTED_VIEW_ONLY = 'Drafted, not yet confirmed'
+/** A status this card does not know yet: never read as a refusal. */
+export const DRAFT_STATUS_UNKNOWN = 'Status not known'
+
+/** A refused row whose confirm 07c refused: the draft was made, not applied. */
+export const DRAFT_NOT_APPLIED = 'Not applied'
+
+/** Why a draft could not be used or applied: 07c's `REASON_TEXT`, and the
+ *  two reasons a reply is rejected (`run_revise.DRAFT_*`). */
+export const DRAFT_REASON_WORDS: Record<string, string> = {
+  no_edit_target: 'The comment names a whole section, not one paragraph, bullet list or table, so no edit can address it.',
+  outside_edit_set: 'The comment names a part a revision may not edit: a disclosure, gap or not-established box, a figure or a field.',
+  edit_kind_mismatch: "The edit's kind does not fit the commented block.",
+  changes_number: 'The edit changes a number. A revision may re-spell a number to an equal value, never round, convert, move or change it.',
+  drops_number: 'The edit drops a number the report states.',
+  changes_structure: 'The edit adds, removes or reorders blocks or sections.',
+  changes_disclosure: 'The edit changes a disclosure, gap or not-established box.',
+  changes_audit: "The number check of the new text differs from the report's.",
+  changes_evidence_ref: 'The edit changes an evidence reference (a table or figure reference, or a source path).',
+  changes_chart: 'The edit changes a figure.',
+  changes_evidence_hash: 'The edit changes the evidence the report was made from.',
+  changes_table_shape: "The edit changes a table's shape.",
+  edit_outside_anchor: 'The edit changes something outside the commented block.',
+  draft_budget: "The run's model budget cannot cover a draft for this comment.",
+  draft_unavailable: 'No draft could be made for this comment last time.',
+  draft_unreadable: "The model's reply could not be read as an edit.",
+  draft_truncated: "The model's reply was cut off before the edit ended.",
+}
+
+/** Why a row was refused, by its `error`; any other error has the fallback. */
+export const DRAFT_ERROR_WORDS: Record<string, string> = {
+  budget: "The run's model budget cannot cover a draft.",
+  revision_stale_base: 'The report changed after this draft was made, so it cannot be applied.',
+  report_revision_unsupported: "The draft does not pass the report's checks.",
+}
+export const DRAFT_ERROR_FALLBACK = 'No draft could be made.'
+export const draftErrorWords = (error: string | undefined): string =>
+  (error && DRAFT_ERROR_WORDS[error]) || DRAFT_ERROR_FALLBACK
+
+/** A refused Draft a fix, Confirm or Discard click, by its error kind. A kind
+ *  with no entry shows the server's own message (GK B (68) R6). */
+export const DRAFT_REFUSAL_WORDS: Record<string, string> = {
+  revision_draft_run_state: 'Only a finished run can draft a fix.',
+  revision_draft_not_run_report: 'This run did not make this report, so it cannot draft for it.',
+  revision_draft_limit: 'This run is already drafting, or has made all its drafts.',
+  revision_draft_not_found: 'This draft is no longer there.',
+  revision_draft_not_drafted: 'This draft was already decided.',
+  revision_stale_base: 'The report changed after this draft was made, so it cannot be applied.',
+  report_comment_closed: 'This comment is no longer open.',
+  report_job_in_flight: 'A report job is running: try again when it ends.',
+  project_locked: 'Another user is editing this project: try again when they finish.',
+  project_view_only: 'View only: ask the project owner for edit access.',
+  task_not_found: 'This run is no longer available to you.',
+}
+export function draftRefusalWords(kind: string | null | undefined, message: string | null | undefined): string {
+  return (kind && DRAFT_REFUSAL_WORDS[kind]) || message || 'That did not go through: try again.'
+}

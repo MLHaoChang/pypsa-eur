@@ -3,7 +3,7 @@
 
 # GC-05 PowerFactory DGS export with harmonic sources; background-harmonic import
 
-Status: ready-for-agent
+Status: done (#1580; app entry points go to GC-09)
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: none
