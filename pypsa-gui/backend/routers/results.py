@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from db.models import User
-from deps import require_user
+from deps import optional_user, require_user
 
 from services.dispatch_status import dispatch_status as _dispatch_status
 from services.pypsa_service import PyPSAService
@@ -2330,8 +2330,22 @@ def post_investment_case_abort():
     )
 
 
+def _run_requester(user) -> tuple:
+    """(user id, project id) of who starts an in-process run on the active
+    project: the HTTP caller, else the chat's acting user (a chat tool calls
+    the handler directly). The runner reads their role again before it stores
+    its report (project-viewer-role 02)."""
+    uid = user.id if isinstance(user, User) else None
+    if uid is None:
+        from services.chat_tools import acting_user_id
+
+        uid = acting_user_id()
+    return uid, PyPSAService.get_active_context().project_uuid
+
+
 @results_router.post("/investment_case")
-def post_investment_case(body: InvestmentCaseRequest | None = None):
+def post_investment_case(body: InvestmentCaseRequest | None = None,
+                         user: User | None = Depends(optional_user)):
     """
     Start the single-owner investment-case run in a worker thread (IC P4
     WP4.6b): build the `FinanceCase` from the solved network and the stored
@@ -2365,6 +2379,7 @@ def post_investment_case(body: InvestmentCaseRequest | None = None):
         assumptions=lambda: _ic_assumptions(cfg, n, lock=lock, extra_assets=campus.digest),
         case_hash=_ic_case_hash,
         state_lock=PyPSAService.get_solver_state_lock(),
+        requester=_run_requester(user),
     )
 
 
@@ -2794,7 +2809,7 @@ def post_business_case_abort():
 
 
 @results_router.post("/business_case")
-def post_business_case():
+def post_business_case(user: User | None = Depends(optional_user)):
     """Start the business-case run on the stored investment case (spec §7). 422 without
     (valid) inputs; 409 `investment_case_missing` without a current investment-case
     report ("run the investment case first", C3); 409 while a solve or another study
@@ -2823,6 +2838,7 @@ def post_business_case():
         publish_study=_publish_study,
         load_pack=_bc_load_pack,
         state_lock=PyPSAService.get_solver_state_lock(),
+        requester=_run_requester(user),
     )
 
 

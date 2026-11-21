@@ -3,7 +3,8 @@
 
 # 02 — Parameter guide drawer, ⌘K parameter search, `openParameter`, raw-name guard over `src/`
 
-Status: ready-for-agent
+Status: done (#1804)
+Landed in #1804, #1807, #1812.
 Type: task
 Gated: yes (UX (23); GK B for the client and navigate kind)
 Spec: [spec.md](../spec.md) §4.3, §6, §7.1 (navigate kind), §7.2

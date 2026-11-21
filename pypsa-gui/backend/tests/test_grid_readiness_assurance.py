@@ -220,8 +220,8 @@ def test_a_limits_edit_during_the_read_is_refused_by_name(hub, checked, monkeypa
     read = G.grid_readiness_for
     edits = iter(range(1000))
 
-    def edited_mid_read(project):
-        card = read(project)
+    def edited_mid_read(project, **kw):
+        card = read(project, **kw)
         grid_limits.set_limit(path, "fault_level", source="code", note=f"edit {next(edits)}")
         return card
 
@@ -264,3 +264,30 @@ def test_report_chapter_names_excluded_rows_and_why():
     plain = C.grid_readiness_payload({**src, "excluded": []})
     assert "excluded" not in plain
     assert "left out" not in "\n".join(C.grid_readiness_disclosures(plain))
+
+
+def test_a_live_tool_answer_with_unsaved_edits_is_no_checker_mismatch(hub, checked):
+    """GK A 31 C1 (DC walkthrough 04): campus_grid_readiness reads the loaded
+    network, unsaved edits included; the checked answer recomputes from the
+    saved file. The live answer never reaches that checker (a checked turn
+    refuses the tool), so an unsaved edit that changes a row is no mismatch."""
+    from harness import assurance, calculations
+    from services import chat_tools, dirty_state, project_registry
+
+    ctx, _ = hub
+    assert "campus_grid_readiness" not in assurance.CHECKED_TOOLS
+    dirty_state.mark_dirty(ctx)  # the loaded network is not the saved DC template
+    with chat_tools._acting() as (db, user):
+        project = project_registry.resolve_project(db, user, ctx.project_uuid)
+    saved = {r["id"]: r for r in G.grid_readiness_for(project, source="saved")["rows"]}
+    live = chat_tools.campus_grid_readiness(ctx.project_uuid)
+    assert live["network"] == "live"
+    assert any((r.get("project_value"), r["verdict"])
+               != (saved.get(r["id"], {}).get("project_value"), saved.get(r["id"], {}).get("verdict"))
+               for r in live["rows"])
+    scope = {"version": 1, "profile": R.PROFILE, "entity_id": "network"}
+    raw = calculations.scoped_source(ctx, scope)
+    facts, _ = calculations.scoped_calculate(raw, scope)
+    frames = ask(checked, ctx, {f["metric"]: f["value"] for f in facts})
+    assert approval(frames)["verdict"] != "limited"
+    assert "couldn't verify" not in public_text(frames)

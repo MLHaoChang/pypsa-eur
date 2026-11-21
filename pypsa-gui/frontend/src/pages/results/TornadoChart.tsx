@@ -125,7 +125,7 @@ const GAP = 12
 const FALLBACK_WIDTH = 720   // jsdom, and the first paint before the width is measured
 const TEXT = { fontSize: 11, fill: 'var(--color-text)' }
 // --color-axis is the chart text colour held to 4.5 : 1 on every chart surface.
-const SMALL = { fontSize: 10.5, fill: 'var(--color-axis)', fontFamily: 'var(--font-family-mono)' }
+const SMALL = { fontSize: 10.5, fill: 'var(--color-axis)', fontFamily: 'var(--font-mono)' }
 
 export default function TornadoChart({
   title, measure, rows, base, currency = 'EUR', baseWord = 'Base case', formatInput, domain, note, children, filename, testId,
@@ -247,7 +247,7 @@ export default function TornadoChart({
             <g data-testid="tornado-base">
               {across(x(base), 14, { stroke: 'var(--color-text)', strokeWidth: 1.2 })}
               <text x={clampX(x(base), baseLabel.length * 3.3)} y={10} textAnchor="middle" fontSize={10.5}
-                fontWeight={600} fill="var(--color-text)" fontFamily="var(--font-family-mono)">{baseLabel}</text>
+                fontWeight={600} fill="var(--color-text)" fontFamily="var(--font-mono)">{baseLabel}</text>
             </g>
           )}
           {laid.map(({ r, lines, at, barY, endsY }) => {

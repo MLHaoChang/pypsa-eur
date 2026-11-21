@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The assistant route-parity build no longer sets `PYPSAGUI_PROJECTS_ROOT` to a temp dir when the app is already imported, which leaked into later tests in the same process (`test_a_fresh_install_uses_the_new_name` reading `route-parity-…`).

@@ -281,7 +281,7 @@ export default function Prices() {
                 <tr className="border-b border-border">
                   <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Name</th>
                   <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Carrier</th>
-                  <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">v_nom</th>
+                  <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Nominal voltage</th>
                   <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Mean €/MWh</th>
                   <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Peak</th>
                   <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Trough</th>
@@ -316,7 +316,7 @@ export default function Prices() {
               <Seg
                 value={priceSource}
                 onChange={setPriceSource}
-                title="LP dual = raw shadow price of the power-balance constraint. Merit order = LP dual + curtailment_cost added back at hours where a renewable was the marginal dispatch unit."
+                title="LP dual = raw shadow price of the power-balance constraint. Merit order = LP dual + the curtailment cost added back at hours where a renewable was the marginal dispatch unit."
                 options={[
                   { value: 'lp', label: 'LP dual' },
                   { value: 'merit', label: 'Merit order', disabled: !priceChart.hasAdjusted },
@@ -389,7 +389,7 @@ export default function Prices() {
           {priceSource === 'lp' && priceChart.negativeHours > 0 && (
             <div className="mb-2 text-[10px] text-muted italic">
               {priceChart.negativeHours} snapshot{priceChart.negativeHours === 1 ? '' : 's'} contain at least one
-              negative-price bus. This is the LP shadow price; setting <code>curtailment_cost</code> on renewables
+              negative-price bus. This is the LP shadow price; setting a curtailment cost on renewables
               subsidises their dispatch by that amount, which the LP dual reflects as a negative price when the
               renewable is marginal. Switch to <span className="font-medium">Merit order</span> to see prices
               without that subsidy.
@@ -513,7 +513,7 @@ export default function Prices() {
                     <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Price (€/MWh)</th>
                     <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Marginal gen</th>
                     <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Carrier</th>
-                    <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Gen MC</th>
+                    <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Marginal cost</th>
                     <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Dispatch</th>
                     <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Diagnosis</th>
                   </tr>

@@ -1,0 +1,37 @@
+{
+ "entries": [
+  {
+   "id": "excel_input_workbook",
+   "title": "Excel input workbook",
+   "disposition": "unbuilt",
+   "reason": "Chat cannot give or import the Excel input workbook yet: an import needs a preview to confirm. Hand-off > Exports will offer both.",
+   "page": "Hand-off > Exports",
+   "panel": null,
+   "keywords": [
+    "spreadsheet",
+    "xlsx"
+   ],
+   "routes": [
+    [
+     "GET",
+     "/api/workbook/template"
+    ],
+    [
+     "GET",
+     "/api/projects/{name}/workbook"
+    ],
+    [
+     "POST",
+     "/api/workbook/preview"
+    ],
+    [
+     "POST",
+     "/api/workbook/import"
+    ]
+   ]
+  }
+ ],
+ "goals": {
+  "Give me the input workbook as an xlsx spreadsheet to fill in": "excel_input_workbook"
+ }
+}

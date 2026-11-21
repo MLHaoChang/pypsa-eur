@@ -1549,9 +1549,13 @@ async def import_bundle(
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
     session: SessionRow | None = Depends(current_session),
+    dry_run: bool = False,
 ):
     """
     Restore a project from a .pypsaproj.zip bundle.
+
+    ``dry_run=true`` runs every check a real import runs and answers what it
+    would create, writing nothing (project-io 02, GK B I8).
 
     Writes the bundle to ``projects/{name}/`` (defaulting to the bundle's
     metadata name or the uploaded filename) and loads it into the live network.
@@ -1565,7 +1569,17 @@ async def import_bundle(
     # route has already committed the project row and written its files. Worse, the retry the
     # refusal advises then fails FOREVER, because the committed row makes
     # every attempt 409 with "already exists" instead.
-    PyPSAService.refuse_if_study_running("import a project bundle")
+    from services import project_registry
+
+    project_registry.require_user(user)
+    # A dry run reports a running study as a warning: it swaps nothing.
+    study_warnings: list[str] = []
+    try:
+        PyPSAService.refuse_if_study_running("import a project bundle")
+    except HTTPException as exc:
+        if not dry_run:
+            raise
+        study_warnings.append(str(exc.detail))
     from services.upload_guard import read_capped
     data = await read_capped(file)
 
@@ -1589,8 +1603,13 @@ async def import_bundle(
     except zipfile.BadZipFile as exc:
         raise HTTPException(400, f"Not a valid zip bundle: {exc}") from exc
 
+    from services import bundle_manifest
+
     try:
         allowed, ignored = PC.screen_members(zf)
+        # The manifest (project-io 02, GK B I7): a damaged or newer bundle is
+        # refused here, before anything is unpacked; no manifest is a warning.
+        warnings = bundle_manifest.check(zf) + study_warnings
     except PC.BundleRefused as exc:
         raise HTTPException(400, exc.detail) from exc
     members = set(allowed)
@@ -1627,9 +1646,6 @@ async def import_bundle(
 
     # `target_name` may come from a zip's metadata.json — never trust it.
     # `_safe_project_dir` rejects path traversal and shell-metachar names.
-    from services import project_registry
-
-    project_registry.require_user(user)
     # Every refusal comes BEFORE the project row exists (project-io 01, GK B
     # I3): the bundle is unpacked into a private staging folder and checked
     # there, so a refused import leaves no row and no folder behind.
@@ -1658,6 +1674,15 @@ async def import_bundle(
         from services.component_names import invalid_names_in_netcdf, refuse_invalid_names
 
         refuse_invalid_names(invalid_names_in_netcdf(staged_nc))
+        # The pinned Library copies (project-io 03, GK B3 L1/L5), checked before
+        # the row exists so a bad copy leaves nothing behind.
+        _refuse_bad_library_copies(staging, members)
+
+        if dry_run:
+            return _import_dry_run(
+                db, user, staging, target_name, project_kind, members,
+                ignored=ignored, stripped=stripped_fields, rederived=rederived,
+                rate_source=rate_source, warnings=warnings)
 
         # Carry the bundle's scenario labels onto the ROW, not just onto the
         # files: `_project_info_db` serves the DB row. The parent link is
@@ -1679,7 +1704,7 @@ async def import_bundle(
             return _open_imported_bundle(
                 db, session, _imported_project, dest, file.filename,
                 candidate=candidate, rederived=rederived, rate_source=rate_source,
-                stripped_fields=stripped_fields, ignored=ignored)
+                stripped_fields=stripped_fields, ignored=ignored, warnings=warnings)
         except BaseException:
             _discard_import(db, _imported_project, dest,
                             session=session, prev_pointer=prev_pointer)
@@ -1688,10 +1713,94 @@ async def import_bundle(
         _force_rmtree(staging)
 
 
+def _carries_user_code(cfg_data: dict) -> bool:
+    """True when a bundle's solver settings carry `extra_functionality_code`,
+    which every import strips (see `_open_imported_bundle`)."""
+    return bool(str(cfg_data.get("extra_functionality_code") or "").strip())
+
+
+def _refuse_bad_library_copies(staging: pathlib.Path, members: set[str]) -> None:
+    """400 `bundle_corrupt` when the staged `library/` folder holds a copy that
+    does not hash to its pin, a file that is no pin's copy, or a pin whose id
+    is not a Library name (`project_copies.staged_problems`)."""
+    from services.library import bundle_pins
+    from services.library import project_copies
+
+    pins, _issues = bundle_pins.read_pins(staging)
+    # The config's own refs pin their copies too: a bundle whose sidecar was
+    # dropped or is unreadable still carries the copies its config names.
+    cfg_path = staging / "solver_config.json"
+    if cfg_path.is_file():
+        # Already read as a JSON object by `_bundle_network_owning_its_costs`.
+        pins += bundle_pins.collect_pins(json.loads(cfg_path.read_text()))
+    problems = project_copies.staged_problems(staging, members, pins)
+    if problems:
+        raise HTTPException(
+            400,
+            {
+                "error_kind": "bundle_corrupt",
+                "message": f"{problems[0]} The bundle is damaged or was changed after "
+                "export. Nothing was imported; export it again.",
+            },
+        )
+
+
+def _import_dry_run(
+    db: DBSession,
+    user,
+    staging: pathlib.Path,
+    target_name: str,
+    project_kind: str | None,
+    members: set[str],
+    *,
+    ignored: list[str],
+    stripped: list[str],
+    rederived: list[str],
+    rate_source: str,
+    warnings: list[str],
+) -> dict:
+    """What `import_bundle` would create from the checked, staged bundle.
+
+    Reads only: no row, no project folder; the caller removes `staging`.
+    The fields are the ones the real import reports (`stripped`, `ignored`,
+    `rederived`, `rederived_at_default_rate`, `warnings`, `dropped_goal`);
+    `would_conflict` is the 409 the real import would answer for a name
+    already taken. Checks that run only after the move (library pins,
+    hydration) are not part of the answer.
+    """
+    from services import project_registry
+
+    stripped = list(stripped)
+    dropped_goal: list[dict] = []
+    cfg_path = staging / "solver_config.json"
+    if cfg_path.is_file():
+        # `_bundle_network_owning_its_costs` has already refused (422) a
+        # solver_config.json that is not a readable JSON object.
+        cfg_data = json.loads(cfg_path.read_text())
+        if _carries_user_code(cfg_data):
+            stripped.append("extra_functionality_code")
+        dropped_goal = _dropped_goal(cfg_data)
+    clash = project_registry.find_project(db, user, target_name, name_only=True)
+    return {
+        "dry_run": True,
+        "name": target_name,
+        "project_kind": project_kind,
+        "members": sorted(members),
+        "would_conflict": clash is not None,
+        "stripped": stripped,
+        "ignored": list(ignored),
+        "rederived": list(rederived),
+        "rederived_at_default_rate": bool(rederived) and rate_source == "default",
+        "warnings": list(warnings),
+        **({"dropped_goal": dropped_goal} if dropped_goal else {}),
+    }
+
+
 def _open_imported_bundle(db: DBSession, session: SessionRow | None, _imported_project,
                           dest: pathlib.Path, filename: str | None, *,
                           candidate, rederived: list[str], rate_source: str,
-                          stripped_fields: list[str], ignored: list[str]) -> dict:
+                          stripped_fields: list[str], ignored: list[str],
+                          warnings: list[str]) -> dict:
     """The import's swap and hydration, once its files are in `dest`. Any
     failure here is undone by the caller (`_discard_import`)."""
     from services import project_registry
@@ -1756,7 +1865,7 @@ def _open_imported_bundle(db: DBSession, session: SessionRow | None, _imported_p
         # is already extracted by this point, and refusing here would leave a
         # half-imported project. The response names the field so this is never
         # a silent difference between what was uploaded and what was imported.
-        if str(cfg_data.get("extra_functionality_code") or "").strip():
+        if _carries_user_code(cfg_data):
             cfg_data.pop("extra_functionality_code", None)
             stripped_fields.append("extra_functionality_code")
             cfg_path.write_text(json.dumps(cfg_data, indent=2))
@@ -1861,6 +1970,8 @@ def _open_imported_bundle(db: DBSession, session: SessionRow | None, _imported_p
             "stripped_note": _stripped_note(stripped_fields)} if stripped_fields else {}),
         # Archive members no table entry names: reported, never written (GK B I2).
         **({"ignored": ignored} if ignored else {}),
+        # An old bundle with no manifest, so nothing was checked for damage (project-io 02).
+        **({"warnings": warnings} if warnings else {}),
         # Likewise each reliability-goal value the bundle carried that PUT
         # would refuse: imported as "not set" (W3b-R), named here.
         **({"dropped_goal": dropped_goal} if dropped_goal else {}),
@@ -2299,6 +2410,7 @@ def _materialise_from_template(template_id: str, name: str | None, params: dict 
         # Pin what the config now names, as a save does (WP1.1c): an unpinned ref
         # reads `library_ref_stale` on the first open.
         bundle_pins.write_pins(dest, bundle_pins.collect_pins(cfg))
+        _write_library_copies(db, _created_project.org_id, dest)
     if dc is not None and dc[1] is not None:
         # The opt-in's spec, dynamic envelope and ledger, per project
         # (`services.dc_load_profile.read_envelope`; get_eh_template serves it).
@@ -3202,6 +3314,14 @@ def _write_context(
         # Pin the Library versions the config references (WP1.1c).
         from services.library import bundle_pins
         bundle_pins.write_pins(dest, bundle_pins.collect_pins(asdict(cfg)))
+        # ...and keep a copy of each pinned payload in `library/` (project-io 03).
+        _write_library_copies(
+            db,
+            project_row.org_id
+            if project_row is not None
+            else getattr(ctx, "org_id", None),
+            dest,
+        )
 
     # Persist solve-time _state fields that n.export_to_netcdf doesn't
     # capture. Without these, after reload:
@@ -3495,6 +3615,40 @@ def _tariff_ref_load_issues(cfg, project_name: str | None) -> list[dict]:
     change_log_service.log("warn", "Project", project_name or "(unsaved)",
                            f"{issue['code']} ({issue['reason']}): {issue['message']}")
     return [issue]
+
+
+def _write_library_copies(db, org_id, project_dir: pathlib.Path) -> list[str]:
+    """`bundle_pins.write_copies`, which never fails the caller: a copy that
+    cannot be written now is written by a later save or load, and until then
+    the org's Library serves the pin (project-io 03)."""
+    if db is None or org_id is None:
+        return []
+    from uuid import UUID
+
+    from services.library import bundle_pins
+
+    try:
+        return bundle_pins.write_copies(db, UUID(str(org_id)), project_dir)
+    except Exception:  # noqa: BLE001 - logged; the copies are filled on the next save or load
+        logger.exception(
+            "project-io 03: Library copies for %s not written", project_dir
+        )
+        return []
+
+
+def _migrate_library_copies(db, project, src: pathlib.Path, user) -> list[str]:
+    """Fill a project's missing Library copies on load (project-io 03
+    migration), only for a caller who may write it now: local mode, or the
+    holder of its edit lock (GK B3 L3). A viewer's, or anyone else's, load
+    only reads; the org's Library serves the pins as before, and the next
+    save fills the copies. Writes nothing but `library/`."""
+    if db is None or project is None:
+        return []
+    if not local_mode.is_local_mode():
+        lock = _serialize_project_lock(db, project.id, user)
+        if not (lock and lock.get("yours")):
+            return []
+    return _write_library_copies(db, project.org_id, src)
 
 
 def _library_pin_issues(db, project, src: pathlib.Path, cfg) -> list[dict]:
@@ -3800,6 +3954,7 @@ def activate_project(
                 _hydrate_context_from_disk(ctx, src, project.name)
             project_registry.bind_context(ctx, project)
             evicted = PyPSAService.activate_context(ctx, register=True)
+            _migrate_library_copies(db, project, src, user)
             library_issues = _library_pin_issues(
                 db, project, src, ctx.solver_state.get("solver_config"))
 
@@ -3822,7 +3977,12 @@ def activate_project(
         from services.library import bundle_pins
         cfg = PyPSAService.get_active_context().solver_state.get("solver_config")
         library_issues = bundle_pins.check_pins(
-            db, project.org_id, None, config=asdict(cfg) if cfg is not None else {})
+            db,
+            project.org_id,
+            None,
+            config=asdict(cfg) if cfg is not None else {},
+            copies_dir=src,
+        )
         for issue in library_issues:
             change_log_service.log(
                 "warn", "Project", project.name,
@@ -4165,10 +4325,18 @@ def load_project(
         snapshots=len(n.snapshots),
     )
     from routers.simulation import _state as _sim_state
-    library_issues = _library_pin_issues(db, project, src, _sim_state.get("solver_config"))
-    return {**summary.model_dump(), "lock": lock_info, "library_issues": library_issues,
-            "my_access": project_acl.project_role(db, user, project),
-            **({"dropped_goal": dropped_goal} if dropped_goal else {})}
+
+    _migrate_library_copies(db, project, src, user)
+    library_issues = _library_pin_issues(
+        db, project, src, _sim_state.get("solver_config")
+    )
+    return {
+        **summary.model_dump(),
+        "lock": lock_info,
+        "library_issues": library_issues,
+        "my_access": project_acl.project_role(db, user, project),
+        **({"dropped_goal": dropped_goal} if dropped_goal else {}),
+    }
 
 
 def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> ProjectInfo:
@@ -5519,7 +5687,9 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None, *,
     change_log_service.log(
         "export", "Project", name, f"Downloaded project bundle '{name}.pypsaproj.zip'",
     )
-    return buf.getvalue()
+    from services import bundle_manifest
+
+    return bundle_manifest.add_to(buf.getvalue(), project_kind=project_kind)
 
 
 @router.get("/{name}/bundle")
@@ -5539,6 +5709,30 @@ def download_bundle(
         io.BytesIO(_project_bundle_bytes(name, src, project_kind=project.project_kind)),
         media_type="application/zip",
         headers={"Content-Disposition": content_disposition(f"{name}.pypsaproj.zip")},
+    )
+
+
+@router.get("/{name}/workbook")
+def download_workbook(
+    name: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """The project as last saved, as the Excel input workbook (IMPORTS-1); unsaved edits are not in it."""
+    from services import excel_workbook, project_registry
+
+    project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, name)
+    data = excel_workbook.export_bytes(project_registry.project_dir(project), project.name)
+    change_log_service.log(
+        "export", "Project", project.name,
+        f"Downloaded the Excel input workbook of '{project.name}' (as last saved)",
+        org_id=str(project.org_id),
+    )
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=excel_workbook.MIME,
+        headers={"Content-Disposition": content_disposition(f"{project.name}.xlsx")},
     )
 
 

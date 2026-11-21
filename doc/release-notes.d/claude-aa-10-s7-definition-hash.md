@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Checked answers, scoped evidence and checked charts record a hash of the metric definitions they were checked under (labels, units, formula ids and the answer renderer's version). The answer record and its export report `definition_changed` when the server's definitions differ now, and the companion card says the definition changed since the answer was checked.

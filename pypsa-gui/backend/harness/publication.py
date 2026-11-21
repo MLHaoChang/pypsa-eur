@@ -32,6 +32,11 @@ def export(owner, answer_id, format):
             "evidence": evidence,
             "limitations": answer["receipt"]["limitations"],
         }
+        # AA-10 S7: beside the sealed answer, never inside it; absent when the
+        # answer recorded no definition hash.
+        changed = records.definition_changed(answer)
+        if changed is not None:
+            envelope["definition_changed"] = changed
         if answer["receipt"].get("operation_ids"):
             from harness.effects import operation
 

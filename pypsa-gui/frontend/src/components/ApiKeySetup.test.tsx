@@ -71,8 +71,11 @@ function forbidden() {
   return Object.assign(new Error('Forbidden'), { response: { status: 403 } })
 }
 
+const asSuperAdmin = vi.hoisted(() => ({ value: true }))
+
 afterEach(() => cleanup())
 beforeEach(() => {
+  asSuperAdmin.value = true
   vi.clearAllMocks()
   vi.mocked(getChatHealth).mockResolvedValue(health())
 })
@@ -179,6 +182,15 @@ describe('ApiKeySetup', () => {
     expect(screen.queryByTestId('chat-api-key-input')).toBeNull()
   })
 
+  it('asks a non-super-admin nothing: no 403 call, just who to ask (issue 49)', async () => {
+    asSuperAdmin.value = false
+    renderSetup()
+
+    expect(await screen.findByTestId('chat-api-key-forbidden')).toBeTruthy()
+    expect(getApiKeySettings).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('chat-api-key-input')).toBeNull()
+  })
+
   // Task 15 — ApiKeySetup generalisation: the built-in Anthropic profile
   // keeps the verbatim inline form (every test above this point exercises
   // that path via the default `health()` mock); any OTHER active profile —
@@ -275,3 +287,9 @@ describe('C-12 — the form follows the profile the TURN used', () => {
     expect(await screen.findByTestId('chat-api-key-open-settings')).toBeTruthy()
   })
 })
+
+// Issue 49: the shared key and model settings are only asked for by a super-admin.
+vi.mock('../auth/AuthProvider', async (orig) => ({
+  ...(await orig<typeof import('../auth/AuthProvider')>()),
+  useIsSuperAdmin: () => asSuperAdmin.value,
+}))
