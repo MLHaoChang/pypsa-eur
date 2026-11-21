@@ -850,3 +850,15 @@ def test_the_fetch_date_and_the_last_complete_year_follow_the_given_now():
         "DE-LU", 2024, transport=Replay(body=_fixture()).transport, now=then
     )
     assert fetched == "2025-03-04"
+
+
+def test_a_cache_path_that_would_leave_the_cache_directory_is_refused(monkeypatch):
+    """Defence in depth behind check_request: even a zone code from the table
+    that pointed outside the cache directory is refused, never opened."""
+    import dataclasses
+
+    bad = dataclasses.replace(M.BIDDING_ZONES["DE-LU"], code="../../outside")
+    monkeypatch.setitem(M.BIDDING_ZONES, "DE-LU", bad)
+    with pytest.raises(M.MarketPriceError) as e:
+        M._cache_file("DE-LU", 2024)
+    assert e.value.kind == "invalid_zone"
