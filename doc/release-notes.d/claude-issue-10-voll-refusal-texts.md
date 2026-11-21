@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The contingency sweep, the reliability-targeted planning loop and the cost vs availability study now refuse a zero value of lost load in plain words that name the Solver settings field, like the reliability study.
