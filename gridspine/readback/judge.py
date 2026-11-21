@@ -29,8 +29,12 @@ end_window_s?, channels: {role: channel name}}``. Kinds and their checks:
     the curve passes; it fails at the first sample outside.
     ``stays_connected`` (obligation): the ``connected`` status channel is 1 at
     every sample from ``t_event`` while the voltage is within the curve. A
-    trip after the voltage first leaves the curve is allowed. No status
-    channel: unknown.
+    trip after the voltage first leaves the curve is allowed. The first 0 is
+    the trip, even if a later sample reads 1; with no 0, a sample not read
+    (``channels.STATUS_NOT_READ``) makes it unknown. No status channel:
+    unknown. A case of any other kind with ``connected_required: true`` gets
+    the same row over every sample from ``t_event`` to the end (GC-12: a trip
+    in any test case is a failure).
     ``reactive_current_rise`` (obligation): the reactive current change
     reaches ``target_pct`` of ``k_gain`` times the voltage deviation beyond
     the deadband (the deadband is subtracted) within ``rise_time_s`` of
@@ -77,7 +81,7 @@ import math
 
 import numpy as np
 
-from gridspine.readback.channels import ChannelFrame
+from gridspine.readback.channels import STATUS_NOT_READ, ChannelFrame
 from gridspine.schema.contracts import ContractError
 
 PASS, FAIL, UNKNOWN = "pass", "fail", "unknown"
@@ -405,43 +409,61 @@ def _ride_through(case, profile):
         if t_exit is not None
         else ""
     )
+    held = after & (t < t_exit) if t_exit is not None else after
+    crow = _stays_connected(
+        case,
+        env,
+        quantity,
+        held,
+        ended,
+        " with the voltage within the curve",
+        "the voltage is outside the curve from fault inception; no sample to judge",
+    )
+    return [vrow, crow]
+
+
+def _stays_connected(case, env, quantity, window, ended="", within="", empty=""):
+    """
+    The ``stays_connected`` obligation over the samples in ``window``.
+
+    The first 0 is the trip (fail at its time), even if a later sample reads
+    1 or another is not read. With no 0, a sample not read
+    (``STATUS_NOT_READ``) makes it unknown; pass only when every sample in the
+    window is 1. Any other value is refused, naming its time.
+    """
     why = case.missing("connected")
     if why:
-        return [
-            vrow,
-            _row(
-                case,
-                "stays_connected",
-                OBLIGATION,
-                env,
-                UNKNOWN,
-                quantity=quantity,
-                detail=why + ended,
-            ),
-        ]
-    held = after & (t < t_exit) if t_exit is not None else after
-    status = case.values("connected")
-    if not np.isin(status, (0.0, 1.0)).all():
-        raise ContractError(
-            f"{case.where}: the connected channel {case.channels['connected']!r} must be 0 or 1"
+        return _row(
+            case,
+            "stays_connected",
+            OBLIGATION,
+            env,
+            UNKNOWN,
+            quantity=quantity,
+            detail=why + ended,
         )
-    if not held.any():
-        return [
-            vrow,
-            _row(
-                case,
-                "stays_connected",
-                OBLIGATION,
-                env,
-                UNKNOWN,
-                quantity=quantity,
-                detail="the voltage is outside the curve from fault inception; no sample to judge",
-            ),
-        ]
-    tripped = np.flatnonzero(status[held] == 0)
+    t = case.frame.time
+    status = case.values("connected")
+    bad = ~np.isin(status, (0.0, 1.0, STATUS_NOT_READ))
+    if bad.any():
+        raise ContractError(
+            f"{case.where}: the connected channel {case.channels['connected']!r} must be 0 or 1, "
+            f"got {float(status[bad][0])!r} at {float(t[bad][0]):g} s"
+        )
+    if not window.any():
+        return _row(
+            case,
+            "stays_connected",
+            OBLIGATION,
+            env,
+            UNKNOWN,
+            quantity=quantity,
+            detail=empty or "no sample after the event to judge",
+        )
+    tripped = np.flatnonzero(status[window] == 0)
     if tripped.size:
-        at = float(t[held][tripped[0]])
-        crow = _row(
+        at = float(t[window][tripped[0]])
+        return _row(
             case,
             "stays_connected",
             OBLIGATION,
@@ -453,24 +475,39 @@ def _ride_through(case, profile):
             at,
             "status",
             quantity,
-            f"disconnected at {at:g} s with the voltage within the curve",
+            f"disconnected at {at:g} s{within}",
         )
-    else:
-        crow = _row(
+    unread = np.flatnonzero(status[window] == STATUS_NOT_READ)
+    if unread.size:
+        at = float(t[window][unread[0]])
+        return _row(
             case,
             "stays_connected",
             OBLIGATION,
             env,
-            PASS,
-            1.0,
+            UNKNOWN,
+            None,
             1.0,
             None,
-            None,
+            at,
             "status",
             quantity,
-            "connected throughout" + ended,
+            f"status poll failed at t={at:g} s" + ended,
         )
-    return [vrow, crow]
+    return _row(
+        case,
+        "stays_connected",
+        OBLIGATION,
+        env,
+        PASS,
+        1.0,
+        1.0,
+        None,
+        None,
+        "status",
+        quantity,
+        "connected throughout" + ended,
+    )
 
 
 def _reactive_current(case, profile):
@@ -904,4 +941,8 @@ def judge(frame: ChannelFrame, case: dict, profile: dict) -> dict:
         rows = _step(c, profile)
     else:
         rows = _droop(c, profile)
+    if c.kind not in ("lvrt", "hvrt") and case.get("connected_required") is True:
+        rows.append(
+            _stays_connected(c, None, "PoC breaker status", c.frame.time >= c.t_event)
+        )
     return {"case_id": c.id, "kind": c.kind, "status": case_status(rows), "rows": rows}

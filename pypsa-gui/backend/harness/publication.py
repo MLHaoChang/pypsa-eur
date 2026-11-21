@@ -69,6 +69,11 @@ def export(owner, answer_id, format):
         "answer_id": answer_id,
         "request_scope": answer["receipt"].get("request_scope"),
         "result_slots": answer["receipt"].get("result_slots", []),
+        **(
+            {"sections": answer["receipt"]["sections"]}
+            if "sections" in answer["receipt"]
+            else {}
+        ),
         "verdict": answer["verdict"],
         "files": {
             name: {"sha256": hashlib.sha256(value).hexdigest(), "bytes": len(value)}

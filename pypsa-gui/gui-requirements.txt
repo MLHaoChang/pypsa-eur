@@ -104,6 +104,9 @@ defusedxml==0.7.1    # openpyxl hardens its XML parsing (entity expansion,
                      # it parses every uploaded workbook. Nothing imports it
                      # by name, so the scan cannot see the need; without it
                      # the app parses hostile XML and nothing fails.
+lxml==6.1.1          # PLEXOS import (`gridspine/ingest/plexos_xml.py`) parses
+                     # the model XML with it, reached only through the import
+                     # registry's string lookup. Version from pixi.lock.
 Jinja2==3.1.6        # matpower export (`io.py:125`), unguarded. Was reaching
                      # the bundle only as an undeclared transitive — it worked
                      # by luck, and a resolver change would have made it the

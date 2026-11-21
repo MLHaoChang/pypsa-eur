@@ -294,6 +294,35 @@ def test_a_scope_without_metrics_hashes_the_profile_defaults():
     assert calculations.scope_definition_hash(scope) == GOLDEN
 
 
+@pytest.mark.parametrize(
+    "profile, component_class",
+    [("generator-dispatch/1", "Generator"), ("branch-loading/1", "Line")],
+)
+def test_an_every_entity_scope_hashes_like_its_one_entity_scope(
+    monkeypatch, profile, component_class
+):
+    """S6a "*" (issue 10): the hash covers profile and metrics only, never the entity."""
+    one = {"profile": profile, "entity_id": "G1"}
+    every = {
+        **one,
+        "entity_id": "*",
+        "component_class": component_class,
+    }
+    hashed = calculations.scope_definition_hash(every)
+    assert hashed is not None and hashed == calculations.scope_definition_hash(one)
+    metric = calculations.requested_metrics(every)[0]
+    monkeypatch.setitem(
+        calculations.DEFINITIONS,
+        metric,
+        {**calculations.DEFINITIONS[metric], "label": "Renamed"},
+    )
+    assert calculations.scope_definition_hash(every) != hashed
+    record = {"definition_hash": hashed, "request_scope": every}
+    assert assurance_records.definition_changed(record) is True
+    monkeypatch.undo()
+    assert assurance_records.definition_changed(record) is False
+
+
 def test_an_unknown_requested_metric_is_not_hashed_and_reads_changed():
     scope = {"profile": PROFILE, "metrics": ["no_such_metric"]}
     assert calculations.scope_definition_hash(scope) is None

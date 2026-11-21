@@ -56,6 +56,8 @@ POLICY_VERSION = "1"
 DERIVED_POLICY_VERSION = "2"
 # Policy "1" plus complete-population predicates, with any derived entries (AA-03 S4).
 PREDICATE_POLICY_VERSION = "3"
+# Policy "1" with its result slots in bounded sections (issue 10, S6a); no derived entries or predicates.
+SECTIONED_POLICY_VERSION = "4"
 INPUT_ADAPTERS = {
     "static": "static-input/1",
     "static_page": "static-input-page/1",
@@ -1865,8 +1867,12 @@ def capture_scoped(owner, scope):
     raw = _scoped_read(ctx, scope, owner)
     with network_guard():
         facts, slots = calculations.scoped_calculate(raw, scope)
+        from harness.assurance_scope import every_entity
+
         first = (
-            raw["storage_unit"]
+            raw
+            if every_entity(scope)
+            else raw["storage_unit"]
             if scope["profile"] in calculations.STORAGE_PROFILES
             else raw
             if scope["profile"]
@@ -2037,6 +2043,14 @@ def receipt_policy_ok(receipt):
         return _entries_ok(receipt.get("predicates"), predicates) and (
             "derived" not in receipt or _entries_ok(receipt["derived"], derived)
         )
+    if version == SECTIONED_POLICY_VERSION:
+        from harness.assurance_shapes import SectionedReceipt
+
+        try:
+            SectionedReceipt.model_validate(receipt)  # closed: no derived entries or predicates
+        except ValueError:
+            return False
+        return "result_slots" not in receipt
     return False
 
 

@@ -26,3 +26,9 @@ Design §2.3 marks location **R** for every template. In the app (verified 2026-
 - If it blocks: section 1 reads `incomplete` until a location is set, and the readiness line links to the same Latitude/Longitude drawer.
 - A test covers each template's section 1 state with and without a location.
 - (UX) If Q1 says block: New project asks for the location (DC form, Generic Site form, template cards), and the Readiness line links to the same Latitude/Longitude drawer.
+
+## Comments
+
+- Seen again 2026-11-20 (template walk, master 1f6905e3): DC, H2 and microgrid still open with 'The site has no location: no bus is placed' in Guided step 1 and as a note on Readiness and run.
+
+- Seen again 2026-11-21 (template walk, master 6b421b06): IPP, concentrator and ammonia all open with "The site has no location: no bus is placed" in Guided section 1 (and "1 note" in the Expert header).
