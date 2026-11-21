@@ -3,7 +3,8 @@
 
 # 19 — Raw internal names across Expert results, readiness and queue (RAW-NAMES-1; adds to 05)
 
-Status: needs-triage
+Status: done (#1820)
+Landed in #1820, #1821, #1827.
 Impact: medium
 Templates: all templates
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
@@ -19,3 +20,7 @@ Violates RAW-NAMES-1 on the screens that carry the decision.
 ## Suggested fix
 
 Plain display names for every listed item; hide the queue log behind "details".
+
+## Triage (2026-11-20, master 8a039460)
+
+Checked by code reading only; the app was not re-run. Acceptance: no raw id (`ups_battery`, `bess_new`, `gfl_pq`, `gfm_droop`, `weak_flexible`, `budget_solves exhausted`, `ReferenceDesignReport`) on the Readiness, Grid study and study-card screens; plain display names for each; the queue log sits behind 'details'. RAW-NAMES-1 applies. Slice by screen (PR-SIZE-1). Gated: UX. Blocked by: none.

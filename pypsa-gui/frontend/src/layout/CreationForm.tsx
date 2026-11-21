@@ -142,8 +142,8 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
       defaultValue: 'Custom',
       options: ['380/220 kV','380/110 kV','380/132 kV','220/110 kV','220/132 kV',
         '132/33 kV','132/20 kV','110/33 kV','110/20 kV','33/11 kV','20/0.4 kV','Custom'] },
-    { key: 'v_nom_0',      label: 'v_nom₀ (HV)',    type: 'number', defaultValue: '0', unit: 'kV',  half: true },
-    { key: 'v_nom_1',      label: 'v_nom₁ (LV)',    type: 'number', defaultValue: '0', unit: 'kV',  half: true },
+    { key: 'v_nom_0',      label: 'Declared HV voltage', type: 'number', defaultValue: '0', unit: 'kV',  half: true },
+    { key: 'v_nom_1',      label: 'Declared LV voltage', type: 'number', defaultValue: '0', unit: 'kV',  half: true },
     { key: 's_nom',        label: 'S nom',          type: 'number', defaultValue: '100',  unit: 'MVA', half: true },
     { key: 'r',            label: 'Resistance r',   type: 'number', defaultValue: '0.0', unit: 'pu', half: true },
     { key: 'x',            label: 'Reactance x',    type: 'number', defaultValue: '0.1', unit: 'pu', half: true },
@@ -922,7 +922,7 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
                 </select>
               ) : (
                 <button type="button" onClick={() => setPicking(true)}
-                        className="text-[10px] text-accent hover:underline">+ Add parameter</button>
+                        className="text-[10px] text-link hover:underline">+ Add parameter</button>
               )}
             </div>
           )}

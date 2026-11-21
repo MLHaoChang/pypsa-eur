@@ -24,6 +24,7 @@ import { projectsApi } from '../api/projects'
 import { formatApiDetail } from '../api/client'
 import { useUIStore } from '../store/uiStore'
 import { usePanelSectionScroll } from './usePanelSectionScroll'
+import { formatElapsed } from '../hooks/useElapsed'
 import { useSolveQueue, activeJobForProject, QUEUE_KEY } from '../hooks/useSolveQueue'
 import { PageBody, PageSection, Btn, Tag, Field } from '../components/PageKit'
 
@@ -147,7 +148,14 @@ function StudyView({ name }: { name: string }) {
     )
   }
 
-  const canRun = !activeJob && status.isSuccess && status.data.status !== 'running'
+  // Why Run study is off, said next to it, not only in a tooltip (pio/08): a
+  // disabled button with no reason reads as a broken one.
+  const runBlocked = status.isPending ? 'Loading the study…'
+    : activeJob ? (activeJob.status === 'queued' ? 'Already queued' : 'Already running')
+      : status.isError ? 'Could not read the study'
+        : status.data.status === 'running' ? 'The study is running'
+          : null
+  const canRun = runBlocked == null
 
   return (
     <PageBody>
@@ -159,11 +167,14 @@ function StudyView({ name }: { name: string }) {
             <Btn onClick={() => status.refetch()} title="Refresh" aria-label="Refresh status">
               <RefreshCw size={12} />
             </Btn>
+            {runBlocked && (
+              <span className="text-[11px] text-muted" data-testid="run-blocked">{runBlocked}</span>
+            )}
             <Btn
               variant="primary"
               onClick={() => run.mutate()}
               disabled={!canRun || run.isPending}
-              title={activeJob ? 'A job for this project is already queued or running' : 'Queue the study'}
+              title={runBlocked ?? 'Queue the study'}
             >
               <Play size={12} /> {status.data?.resumable && status.data.status !== 'completed' ? 'Resume' : 'Run study'}
             </Btn>
@@ -173,7 +184,13 @@ function StudyView({ name }: { name: string }) {
         {status.isError && !notAStudy && (
           <p className="text-[12px] text-danger">{errorText(status.error)}</p>
         )}
-        {status.data && <Stages status={status.data} />}
+        <p className="mb-2 text-[11px] text-muted" data-testid="study-panel-note">
+          A Study project has no network to build: set the study up below, then run it here with Run study.
+        </p>
+        {status.isPending && (
+          <p role="status" className="text-[12px] text-muted" data-testid="study-loading">Loading the study…</p>
+        )}
+        {status.data && <Stages status={status.data} live={activeJob != null} />}
         {status.data?.error && (
           <p className="mt-2 text-[11px] text-danger" data-testid="study-error">
             {status.data.error.stage}: {status.data.error.cause}
@@ -709,18 +726,43 @@ function ReadbackRow({ name, hour, short }: { name: string; hour: number; short:
   )
 }
 
-function Stages({ status }: { status: StageStatus }) {
+// `live`: the queue holds a job for this project. The clock shows only then:
+// a record copied with the project, or left by a run that died, would
+// otherwise count up for ever.
+function Stages({ status, live }: { status: StageStatus; live: boolean }) {
   return (
     <ol className="flex flex-col gap-1" aria-label="Study stages">
       {STAGES.map(stage => {
         const s = status.stages[stage]
         const perHour = stage === 'loadflow' || stage === 'screening' || stage === 'handoff'
+        const running = s.state === 'running'
+        // Dispatch counts rolling-horizon windows, and a window is one solve
+        // that cannot report halfway, so the count moves per window; the
+        // elapsed time is what shows a long window is alive (pio/08).
+        const perWindow = stage === 'dispatch' && running && s.total > 1
         return (
           <li key={stage} className="flex items-center gap-2 text-[12px]" data-testid={`stage-${stage}`}>
             <Tag tone={STATE_TONE[s.state]}>{s.state}</Tag>
             <span className="text-text">{STAGE_LABEL[stage]}</span>
             {perHour && s.total > 0 && (
               <span className="text-[10.5px] font-mono text-muted">{s.done}/{s.total} hours</span>
+            )}
+            {perWindow && (
+              <span className="text-[10.5px] font-mono text-muted">
+                window {Math.min(s.done + 1, s.total)} of {s.total}, {s.done} solved
+              </span>
+            )}
+            {running && s.total > 1 && (
+              <span role="progressbar" aria-label={`${STAGE_LABEL[stage]} progress`}
+                aria-valuemin={0} aria-valuemax={s.total} aria-valuenow={s.done}
+                className="inline-block h-1 w-16 rounded bg-border overflow-hidden">
+                <span className="block h-full bg-accent" style={{ width: `${(100 * s.done) / s.total}%` }} />
+              </span>
+            )}
+            {running && live && s.elapsed_s != null && (
+              <span className="text-[10.5px] font-mono text-muted" data-testid={`stage-${stage}-elapsed`}>
+                {formatElapsed(Math.floor(s.elapsed_s))}
+              </span>
             )}
           </li>
         )

@@ -3,6 +3,9 @@
 // run leaves. A native view shows freshness, never "checked" (integration-
 // sensitivities §5.4); "Out of date" is the same pill the strip uses.
 import type { ReactNode } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { financeApi } from '../../api/finance'
+import { nk } from '../../utils/queryKeys'
 import { StatePill, type NonValueState } from '../../components/ResultState'
 import type { SimulationStatus } from '../../api/types'
 import { useUIStore } from '../../store/uiStore'
@@ -38,6 +41,18 @@ export default function GroupHeader({ group, status, outsideScope, pastRun, chil
 }) {
   const fresh = freshnessOf(status)
   const uiMode = useUIStore(st => st.uiMode)
+  // Commercial & finance holds one result, the investment case: its pill says
+  // whether that ran, not the solve's freshness (issue 22, GK B3 F5). The key
+  // is the Investment case view's, so both read one cache.
+  const project = useUIStore(st => st.currentProject)
+  const icGroup = group.id === 'commercial'
+  const icStudy = useQuery({ queryKey: nk(project, 'results', 'investment_case'),
+                             queryFn: () => financeApi.getInvestmentCase(), enabled: icGroup && !!project })
+  const icReport = useQuery({ queryKey: nk(project, 'results', 'investment_case', 'report'),
+                              queryFn: () => financeApi.getReport(), enabled: icGroup && !!project })
+  // A first run under way is not "not run": the panel says it is running.
+  const icNotRun = icReport.isSuccess && icReport.data == null && icStudy.isSuccess
+    && icStudy.data?.status !== 'running'
   // The latest solve's failure says nothing about a past run on screen.
   const failed = !pastRun && !!status && !status.running && !!status.failure
   const pastWhen = pastRun ? runWhen(pastRun.startedAt) : null
@@ -50,7 +65,11 @@ export default function GroupHeader({ group, status, outsideScope, pastRun, chil
           title={`Run ${pastRun.runId}`} className="text-[11px] text-muted">
           {pastWhen ? `From the run of ${pastWhen}` : `From past ${runShort(pastRun.runId)}`}
         </span>
-      ) : !outsideScope && group.tabs.length > 0 && !group.fromStudy && (
+      ) : icGroup ? (!outsideScope && icNotRun && (
+        <span data-testid="results-ghead-freshness" data-freshness="ic_not_run" className="flex items-center gap-2">
+          <StatePill state="not_run" label="Investment case not run yet" />
+        </span>
+      )) : !outsideScope && group.tabs.length > 0 && !group.fromStudy && (
         <span data-testid="results-ghead-freshness" data-freshness={fresh}
           className="flex items-center gap-2 text-[11px] text-muted">
           {fresh === 'fresh' ? 'From the latest run' : <StatePill state={fresh} />}
@@ -62,7 +81,7 @@ export default function GroupHeader({ group, status, outsideScope, pastRun, chil
           {' '}
           <button type="button" data-testid="results-ghead-failed-open"
             onClick={() => (uiMode === 'guided' ? openSectionInGuided : openSectionInExpert)('readiness')}
-            className="text-accent hover:underline">Open Issues ›</button>
+            className="text-link hover:underline">Open Issues ›</button>
         </span>
       )}
       <span className="flex-1" />

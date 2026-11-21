@@ -70,8 +70,24 @@ export default function UsersPage() {
   const orgAdminCount = sortedUsers.filter(row => row.role === 'admin').length
   const representedOrgCount = new Set(sortedUsers.map(row => row.org_id).filter(Boolean)).size
 
+  const [manualInvite, setManualInvite] = useState<{ email: string; link: string } | null>(null)
+
+  const [copied, setCopied] = useState(false)
+
+  async function copyInviteLink(link: string) {
+    try {
+      await navigator.clipboard.writeText(link)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
+    } catch {
+      toast.error('Could not copy. Select the link and copy it by hand.')
+    }
+  }
+
   const createUser = useMutation({
     mutationFn: async () => {
+      setManualInvite(null)
+      setCopied(false)
       const payload: CreateAdminUserPayload = {
         email: email.trim(),
         role,
@@ -82,7 +98,16 @@ export default function UsersPage() {
       return adminApi.createUser(payload)
     },
     onSuccess: async (createdUser) => {
-      toast.success(`Invitation sent to ${createdUser.email}.`)
+      if (createdUser.email_sent) {
+        setManualInvite(null)
+        toast.success(`Invitation sent to ${createdUser.email}.`)
+      } else {
+        // No email went out: say so in a notice that stays until dismissed,
+        // and hand the admin the link instead of claiming an invitation went.
+        setManualInvite(createdUser.set_password_link
+          ? { email: createdUser.email, link: createdUser.set_password_link }
+          : null)
+      }
       setEmail('')
       setRole('member')
       await queryClient.invalidateQueries({ queryKey: USERS_QUERY_KEY })
@@ -164,6 +189,41 @@ export default function UsersPage() {
               </Btn>
             </div>
           </form>
+          {manualInvite && (
+            <div
+              className="mt-4 rounded-xl border border-[var(--brand-warn)] bg-[var(--brand-surface-2)] p-3"
+              role="status"
+            >
+              <p className="text-sm font-medium text-[var(--brand-warn)]">
+                No email was sent to {manualInvite.email}: email is not set up on this server.
+              </p>
+              <p className="mt-1 text-sm text-[var(--brand-ink)]">
+                Copy this link and give it to {manualInvite.email}:
+              </p>
+              <div className="mt-2 flex gap-2">
+                <input
+                  aria-label="Set-password link"
+                  className={INPUT_CLASS_NAME}
+                  onFocus={event => event.currentTarget.select()}
+                  readOnly
+                  value={manualInvite.link}
+                />
+                <Btn
+                  aria-label="Copy set-password link"
+                  onClick={() => void copyInviteLink(manualInvite.link)}
+                  type="button"
+                >
+                  {copied ? 'Copied' : 'Copy link'}
+                </Btn>
+                <Btn onClick={() => setManualInvite(null)} type="button">
+                  Dismiss
+                </Btn>
+              </div>
+              <p className="mt-2 text-xs text-[var(--brand-ink-dim)]">
+                Anyone with this link can set {manualInvite.email}&apos;s password. It works once.
+              </p>
+            </div>
+          )}
           {user?.is_super_admin && organizations.length === 0 && (
             <p className="mt-3 text-sm text-[var(--brand-ink-dim)]">
               Create an organization first before inviting users.

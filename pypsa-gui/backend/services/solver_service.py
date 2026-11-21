@@ -297,6 +297,14 @@ class SolverConfig:
     # which mirrors the frontend's `loadCarrierKey` so the same alias set
     # collapses '', 'AC', 'electricity', … into 'electrical'.
     load_scalers_by_carrier: dict = field(default_factory=dict)
+    # Load growth, % per year per carrier, from `load_growth_base_year`
+    # (homer-parity 04a). The route derives `load_scalers_by_carrier` from it
+    # at write time and names the derived entries in `load_scalers_derived`;
+    # the LP reads only the derived multipliers, so none of the three enters
+    # a fingerprint (`reliability_goal.NOT_LP_FIELDS`).
+    load_growth_pct_per_year: dict = field(default_factory=dict)
+    load_growth_base_year: int | None = None
+    load_scalers_derived: dict = field(default_factory=dict)
     # ── Period discounting (PV via ipw.objective) ──────────────────────────
     # When True, _apply_modelling_assumptions overwrites
     # `n.investment_period_weightings.objective[P]` with the present-value
@@ -477,6 +485,11 @@ class SolverConfig:
     # the solver-config PUT keeps it. Nothing at solve time reads it, and it is
     # in no solve fingerprint (a finance edit never makes a dispatch stale).
     finance: dict | None = None
+    # The finance inputs a template ships as assumptions, with their source
+    # (`models.finance.parse_finance_assumed`; WALK-IMPROVE-1 b). A label for
+    # the screens and the chat only: `goal_free_config` drops it, so it is in
+    # no fingerprint, digest or investment-case key.
+    finance_assumed: dict | None = None
     # Business case 08: the business-case inputs (`services.business_case.runner.
     # BusinessCaseConfig` JSON), set ONLY by `PUT /api/results/business_case/inputs`
     # (If-Match). Never an LP input: `goal_free_config` drops it, so it is in no

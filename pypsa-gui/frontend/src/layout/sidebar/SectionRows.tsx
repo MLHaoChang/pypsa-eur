@@ -5,7 +5,8 @@ import {
   GitBranch, Layers, ListChecks, Plus, Scale, Settings2, Table2, TrendingUp,
 } from 'lucide-react'
 import type { FlowSectionId } from '../../api/flow'
-import { projectsApi } from '../../api/projects'
+import { useOpenProjectKind } from '../../hooks/useOpenProjectKind'
+import { STUDY_KIND } from '../../utils/projectActions'
 import { simulationApi } from '../../api/simulation'
 import { isActive } from '../../api/solveQueue'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
@@ -113,7 +114,7 @@ function ScenarioRows({ onCloseModal }: Props) {
   const { activeSlidePanel, toggle } = usePanelToggle(onCloseModal)
   return (
     <>
-      <SItem icon={<Settings2 size={15} />} label="Solver Settings"
+      <SItem icon={<Settings2 size={15} />} label="Solver settings"
         title="Choose the solver, foresight mode (overnight / myopic / perfect), CO₂ price, discount rate and value-of-lost-load."
         active={activeSlidePanel === 'simparams'} onClick={() => toggle('simparams')} />
       <SItem icon={<GitBranch size={15} />} label="Scenarios"
@@ -180,15 +181,32 @@ function ResultRows({ onCloseModal }: Props) {
   const { activeSlidePanel, toggle } = usePanelToggle(onCloseModal)
   // Planning → dynamics only works in a study project. Hidden only when the
   // project list says so: unknown is not "not a study".
-  const { data: projects } = useQuery({ queryKey: ['projects'], queryFn: projectsApi.list, staleTime: 10_000 })
-  const openProject = projects?.find(p => p.id === currentProject || p.name === currentProject)
-  const knownNotAStudy = !!openProject && openProject.project_kind !== 'planning_dynamics'
+  const kind = useOpenProjectKind()
+  const knownNotAStudy = kind !== undefined && kind !== STUDY_KIND
+  // A study has no network: its one result is the study panel (pio/08).
+  const knownStudy = kind === STUDY_KIND
   // A decision study is its own project kind, started and reopened from the
   // projects home (workspace-reconciliation §6.2): the row shows only in the
   // study's own project, or while its panel is open (UX-flow #21).
   const studyRef = useDecisionStore(s => s.active) ?? storedStudyRef()
   const showDecision = activeSlidePanel === 'decision'
     || (!!studyRef && !!currentProject && studyRef.project === currentProject)
+  const studyRow = (
+    <SItem icon={<FlaskConical size={15} />} label="Planning → dynamics"
+      title="Rank a year's extreme hours, screen N-1/N-2 and fault levels, and export PowerFactory handoff bundles (gridspine)."
+      active={activeSlidePanel === 'gridspine'} onClick={() => toggle('gridspine')} />
+  )
+  if (knownStudy) {
+    // The hidden sections are not missing: a study is set up and run here.
+    return (
+      <>
+        <p className="px-4 pt-1 pb-1 text-[10.5px] leading-snug text-muted" data-testid="study-sidebar-note">
+          A Study project has no network to build: its settings and its run are in this panel.
+        </p>
+        {studyRow}
+      </>
+    )
+  }
   return (
     <>
       <SItem icon={<TrendingUp size={15} />} label="Results"
@@ -201,11 +219,7 @@ function ResultRows({ onCloseModal }: Props) {
           title="Answer an investment question (do I need a battery?) with a verdict, a size, a value and a report."
           active={activeSlidePanel === 'decision'} onClick={() => toggle('decision')} />
       )}
-      {!knownNotAStudy && (
-        <SItem icon={<FlaskConical size={15} />} label="Planning → dynamics"
-          title="Rank a year's extreme hours, screen N-1/N-2 and fault levels, and export PowerFactory handoff bundles (gridspine)."
-          active={activeSlidePanel === 'gridspine'} onClick={() => toggle('gridspine')} />
-      )}
+      {!knownNotAStudy && studyRow}
       <SItem icon={<FileText size={15} />} label="Reports"
         title="Study reports written from the Energy Hub reference design and the adequacy study; read them here and export to Word."
         active={activeSlidePanel === 'reports'} onClick={() => toggle('reports')} />

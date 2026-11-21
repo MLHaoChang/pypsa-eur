@@ -150,6 +150,12 @@
       "source": "assumed",
       "unit": "h/yr",
       "value": 3.0
+    },
+    {
+      "item": "tax",
+      "note": "a stand-in: the template is priced in EUR on German data; pick your country's tax rule. Depreciation straight line by the BMF AfA-Tabelle AV (2000): 3.1.2 Stromerzeugung 19 years, 3.1.3 Akkumulatoren 10, 3.1.5 Windkraftanlagen 16, 3.1.6 Photovoltaikanlagen 20; assets it does not list assumed, network lifetime, else 20 years. Hebesatz: Destatis 2023 average 407 %, rounded to 400 %",
+      "source": "assumed",
+      "value": "German corporate tax (pack eu_de), Hebesatz 400 %"
     }
   ],
   "name": "Data Center Energy Hub (staged growth)",

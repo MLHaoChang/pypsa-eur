@@ -291,6 +291,16 @@ class ImporterSpec:
     extensions: tuple[str, ...]
     help: str
     package: str = DEFAULT_PACKAGE
+    #: "module:function" taking a path and returning whether the file's
+    #: content is this format; how ``for_file`` tells apart importers that
+    #: share an extension (``.xlsx``). The module must not import the engine.
+    #: Empty: the importer is never chosen by content.
+    sniff: str = ""
+    #: The importer ``for_file`` picks for a shared extension when no sniff
+    #: claims the file, so the extension's own format refuses it in its own
+    #: words (``.xlsx``: the Excel input workbook, whose older layouts its
+    #: sniff does not list).
+    fallback: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.format_id, str) or not _FORMAT_ID.match(self.format_id):
@@ -337,6 +347,17 @@ class ImporterSpec:
             )
         return reader
 
+    def claims(self, path: Path) -> bool:
+        """Whether this importer's sniff says ``path`` is its format."""
+        if not self.sniff:
+            return False
+        module, _, func = self.sniff.partition(":")
+        try:
+            check = getattr(importlib.import_module(module), func)
+        except (ImportError, AttributeError):
+            return False
+        return bool(check(path))
+
 
 def _normalise_ext(ext: str) -> str:
     _require_text(ext, "file extension")
@@ -350,6 +371,8 @@ DECLARED: tuple[ImporterSpec, ...] = (
         display_name="Excel input workbook",
         extensions=(".xlsx",),
         help="A workbook with one sheet per asset type, as the app's own template exports it.",
+        sniff="gridspine.ingest.xlsx_safe:is_excel_input_workbook",
+        fallback=True,
     ),
     ImporterSpec(
         format_id="psse",
@@ -363,8 +386,10 @@ DECLARED: tuple[ImporterSpec, ...] = (
     ImporterSpec(
         format_id="dgs",
         display_name="PowerFactory export (DGS)",
-        extensions=(".dgs",),
-        help="A DIgSILENT PowerFactory network exported as a DGS file.",
+        extensions=(".dgs", ".xlsx"),
+        help="A DIgSILENT PowerFactory network exported as a DGS file, or as "
+        "its Excel form (one sheet per class).",
+        sniff="gridspine.ingest.dgs_xlsx:is_dgs_workbook",
     ),
     ImporterSpec(
         format_id="plexos",
@@ -410,6 +435,44 @@ def for_extension(
     """
     wanted = _normalise_ext(ext)
     return [s for s in importers(declared) if wanted in s.extensions]
+
+
+def for_file(path: Path, declared: Sequence[ImporterSpec] = DECLARED) -> ImporterSpec:
+    """
+    The one importer for the file at ``path``. Its extension decides when one
+    importer takes it. When several do (``.xlsx``), the sniffs read the
+    content and the one importer that claims it wins; when none does, the
+    extension's one ``fallback`` importer takes it and refuses it in its own
+    words. A file two importers claim, or one with no claim and no single
+    fallback, is refused naming the candidates: the app never picks between
+    formats silently.
+    """
+    path = Path(path)
+    candidates = for_extension(path.suffix or ".", declared)
+    if not candidates:
+        known = sorted({e for s in importers(declared) for e in s.extensions})
+        raise ImportFormatError(
+            f"{path.name}: no importer reads {path.suffix or 'files without an extension'}"
+            f"; this build reads {', '.join(known) or 'nothing'}"
+        )
+    if len(candidates) == 1:
+        return candidates[0]
+    claimed = [s for s in candidates if s.claims(path)]
+    if len(claimed) == 1:
+        return claimed[0]
+    if claimed:
+        names = ", ".join(s.display_name for s in claimed)
+        raise ImportFormatError(
+            f"{path.name} reads as more than one format ({names}); "
+            "it cannot be imported until it is only one"
+        )
+    fallback = [s for s in candidates if s.fallback]
+    if len(fallback) == 1:
+        return fallback[0]
+    names = ", ".join(s.display_name for s in candidates)
+    raise ImportFormatError(
+        f"{path.name} is not a file any of these importers recognise: {names}"
+    )
 
 
 def read(

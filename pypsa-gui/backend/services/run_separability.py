@@ -99,8 +99,9 @@ MATRIX: dict[str, Row] = {r.kind: r for r in (
     Row("loadflow", "AC power flow", "bundled", True,
         entry="POST /api/simulation/run_ac_pf → ac_pf_service.run_ac_pf_stage; or Stage 2 of /run",
         inputs="a solved network with fresh dispatch (the LP's operating points)",
-        outputs="lines_t.p0/p1/q0/q1 and buses_t.v_mag_pu/v_ang overwritten in place; "
-                "_state lopf_results / ac_pf_results",
+        outputs="_state ac_pf_results (the flow's lines_t.p0/p1/q0/q1, buses_t.v_mag_pu/v_ang); "
+                "the live network keeps the LP's tables, PF-only ones empty (PF-SAVE-1); "
+                "_state lopf_results",
         locks_and_state="the network lock for the whole PF; not abortable",
         implicit_steps="none; it needs a dispatch, so it is bundled with the optimisation",
         freshness="dispatch_status must be 'fresh' to start (the topology shape: a parameter "
@@ -112,7 +113,7 @@ MATRIX: dict[str, Row] = {r.kind: r for r in (
                   "tests/test_project_flow.py::test_load_flow_freshness_follows_its_inputs",
                   _T + "test_the_bundled_load_flow_answers_for_stage_two_on",
                   _T + "test_verdicts_defer_instead_of_waiting_on_a_held_lock",
-                  _T + "test_the_load_flow_overwrites_the_lp_flows")),
+                  _T + "test_the_load_flow_keeps_the_lp_flows_live_and_its_own_aside")),
     Row("sclopf", "N-1 security (SCLOPF)", "supported", True,
         entry="an option of optimisation (SolverConfig.sclopf → optimize_security_constrained)",
         inputs="lines/transformers in the contingency set; LOPF mode",

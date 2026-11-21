@@ -9,13 +9,18 @@ export interface AnswerReceipt {
   request_complete?: boolean
   request_scope?: { profile: string; entity_id?: string; project_id?: string; start?: string; end?: string; retain?: boolean;
     cost_basis?: { currency: 'EUR'; price_year: number; annual_fixed_cost_fraction: number } }
-  result_slots?: { metric: string; disposition: 'answered' | 'unavailable' | 'needs_clarification'; reason?: string; valid_snapshots?: number; requested_snapshots?: number }[]
+  /** A `warning` slot (policy "5" only, AA-13) names an interval the values leave out; it never answers. */
+  result_slots?: { metric: string; disposition: 'answered' | 'unavailable' | 'needs_clarification' | 'warning'; reason?: string;
+    valid_snapshots?: number; requested_snapshots?: number; excluded_indices?: string[] }[]
   chart?: CheckedChart
   navigation?: NavigationEntry[]
   /** Policy "2" only (AA-03 S2): software-recomputed derived claims. */
   derived?: DerivedEntry[]
   /** Policy "3" only (AA-03 S4): software-decided complete-population predicates. */
   predicates?: PredicateEntry[]
+  /** Policy "4" only (issue 10 S6a): an every-entity answer's slots, in server-written sections. */
+  sections?: { heading: string | null; result_slots: (NonNullable<AnswerReceipt['result_slots']>[number]
+    & { entity_id: string; component_class: string })[] }[]
 }
 
 interface PredicateCommon {
@@ -168,6 +173,66 @@ export interface ApprovedAnswerFrame {
   receipt: AnswerReceipt
 }
 
+const SECTION_SLOT_KEYS = new Set(['metric', 'disposition', 'reason', 'valid_snapshots', 'requested_snapshots',
+  'excluded_indices', 'partial_value', 'entity_id', 'component_class'])
+
+/** Policy "4" (issue 10 S6a) carries one to five sections of one to twenty entity slots each. */
+function validSections(sections: unknown): boolean {
+  return Array.isArray(sections) && sections.length >= 1 && sections.length <= 5 && sections.every(e => {
+    if (!e || typeof e !== 'object' || Array.isArray(e)) return false
+    const section = e as Record<string, unknown>
+    const slots = section.result_slots
+    return Object.keys(section).length === 2 && 'heading' in section
+      && (section.heading === null || text(section.heading, 64))
+      && Array.isArray(slots) && slots.length >= 1 && slots.length <= 20 && slots.every(v => {
+        if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+        const slot = v as Record<string, unknown>
+        return Object.keys(slot).every(k => SECTION_SLOT_KEYS.has(k))
+          && text(slot.entity_id, 128) && text(slot.component_class, 64) && text(slot.metric, 64)
+          && typeof slot.disposition === 'string' && ['answered', 'unavailable'].includes(slot.disposition)
+          && (slot.reason == null || (typeof slot.reason === 'string' && slot.reason.length <= 4096))
+          && [slot.valid_snapshots, slot.requested_snapshots].every(n => n == null || count(n, 0, 512))
+      })
+  })
+}
+
+/** The summary of a receipt with a required warning slot; the evidence card and the outcome card share it. */
+export const WARNED_LABEL = 'Request incomplete: warning'
+
+/** Whether a receipt carries a required warning slot (policy "5", AA-13). */
+export function hasWarning(receipt: Pick<AnswerReceipt, 'result_slots'>): boolean {
+  return receipt.result_slots?.some(s => s.disposition === 'warning') === true
+}
+
+type ResultSlot = NonNullable<AnswerReceipt['result_slots']>[number]
+
+/** Plain text per warning reason code (the code before " (k of n …)", `ac_branch_calculations`). */
+const WARNING_TEXT: Record<string, (excluded: number, total: number) => string> = {
+  ac_pf_not_converged: (x, n) => `AC power flow did not converge for ${x} of ${n} snapshots in the window.`,
+  ac_pf_convergence_unknown: (x, n) => `AC power flow convergence is unknown for ${x} of ${n} snapshots in the window.`,
+}
+export const WARNING_REASON_CODES = Object.keys(WARNING_TEXT)
+
+/** "Warning: <what is excluded>. The values cover k of n snapshots." for one warning slot. */
+export function warningText(slot: ResultSlot): string {
+  const total = slot.requested_snapshots ?? 0
+  const kept = slot.valid_snapshots ?? 0
+  const text = WARNING_TEXT[(slot.reason ?? '').split(' ')[0]]
+  const what = text ? text(total - kept, total) : `${total - kept} of ${total} snapshots in the window are excluded.`
+  return `Warning: ${what} The values cover ${kept} of ${total} snapshots.`
+}
+
+/** Policy "5" (AA-13): the warning slots come first, each names what it excludes, and the request is incomplete. */
+function validWarned(receipt: Partial<AnswerReceipt>): boolean {
+  const slots = receipt.result_slots
+  if (!Array.isArray(slots) || receipt.request_complete !== false) return false
+  const warned = slots.map(s => s?.disposition === 'warning')
+  const count = warned.filter(Boolean).length
+  return count > 0 && warned.slice(0, count).every(Boolean)
+    && slots.slice(0, count).every(s => typeof s.reason === 'string' && s.reason.length > 0
+      && Array.isArray(s.excluded_indices) && s.excluded_indices.length > 0)
+}
+
 export function parseApproval(value: Record<string, unknown>): ApprovedAnswerFrame | null {
   const receipt = value.receipt as Partial<AnswerReceipt> | null
   const scope = receipt?.request_scope
@@ -179,8 +244,13 @@ export function parseApproval(value: Record<string, unknown>): ApprovedAnswerFra
     || typeof receipt.content_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(receipt.content_sha256)
     || !(receipt.policy_version === '1' ? receipt.derived === undefined && receipt.predicates === undefined
       : receipt.policy_version === '2' ? receipt.predicates === undefined && validDerived(receipt.derived)
-      : receipt.policy_version === '3' && validPredicates(receipt.predicates)
-        && (receipt.derived === undefined || validDerived(receipt.derived)))
+      : receipt.policy_version === '3' ? validPredicates(receipt.predicates)
+        && (receipt.derived === undefined || validDerived(receipt.derived))
+      : receipt.policy_version === '5' ? receipt.derived === undefined && receipt.predicates === undefined
+        && validWarned(receipt)
+      : receipt.policy_version === '4' && receipt.derived === undefined && receipt.predicates === undefined
+        && receipt.result_slots === undefined && validSections(receipt.sections))
+    || (receipt.policy_version !== '4' && receipt.sections !== undefined)
     || typeof receipt.reviewer_status !== 'string' || !REVIEW_STATUSES.has(receipt.reviewer_status)
     || (receipt.request_complete !== undefined && typeof receipt.request_complete !== 'boolean')
     || (scope !== undefined && (!scope || typeof scope !== 'object' || Array.isArray(scope)
@@ -198,7 +268,10 @@ export function parseApproval(value: Record<string, unknown>): ApprovedAnswerFra
         || Object.keys(scope.cost_basis).some(k => !['currency', 'price_year', 'annual_fixed_cost_fraction'].includes(k))))))
     || (receipt.result_slots !== undefined && (!Array.isArray(receipt.result_slots) || receipt.result_slots.length > 20
       || receipt.result_slots.some(s => !s || typeof s.metric !== 'string' || s.metric.length > 64
-        || (typeof s.disposition !== 'string' || !['answered', 'unavailable', 'needs_clarification'].includes(s.disposition))
+        || (typeof s.disposition !== 'string' || !['answered', 'unavailable', 'needs_clarification', 'warning'].includes(s.disposition))
+        || (s.disposition === 'warning' && receipt.policy_version !== '5')
+        || (s.excluded_indices !== undefined && (!Array.isArray(s.excluded_indices) || s.excluded_indices.length > 512
+          || s.excluded_indices.some(v => typeof v !== 'string' || v.length > 64)))
         || (s.reason !== undefined && (typeof s.reason !== 'string' || s.reason.length > 4096))
         || [s.valid_snapshots, s.requested_snapshots].some(v => v !== undefined
           && (!Number.isInteger(v) || v < 0 || v > 512)))))
@@ -206,7 +279,9 @@ export function parseApproval(value: Record<string, unknown>): ApprovedAnswerFra
     || (receipt.navigation !== undefined && !validNavigation(receipt.navigation))
     || !['evidence_ids', 'checked_block_ids', 'limitations'].every(key => {
       const values = receipt[key as keyof AnswerReceipt]
-      return Array.isArray(values) && values.length <= 20
+      // A sectioned answer checks up to five sections of twenty blocks.
+      const max = key === 'checked_block_ids' && receipt.policy_version === '4' ? 100 : 20
+      return Array.isArray(values) && values.length <= max
         && values.every(v => typeof v === 'string' && v.length <= 4096)
     })) return null
   const clarifying = receipt.result_slots?.some(s => s.disposition === 'needs_clarification')

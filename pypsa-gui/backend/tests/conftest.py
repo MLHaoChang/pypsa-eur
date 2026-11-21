@@ -15,6 +15,7 @@ fixture resets both before AND after every test so state can't bleed between tes
 """
 from __future__ import annotations
 
+import inspect
 import os
 import pathlib
 import shutil
@@ -54,6 +55,7 @@ os.environ["CORS_ALLOWED_ORIGINS"] = (
 # `import main`, because `get_settings()` is `lru_cache`d and main reads it at
 # import time.
 import tempfile as _tempfile
+import types
 
 _TEST_PROJECTS_ROOT = _tempfile.mkdtemp(prefix="pypsa-gui-test-projects-")
 os.environ["PROJECTS_ROOT"] = _TEST_PROJECTS_ROOT
@@ -107,7 +109,10 @@ def _dump_stall_diagnostics(unfinished: int) -> pathlib.Path:
     import traceback
 
     _RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    out = _RESULTS_DIR / "solve-queue-stall.txt"
+    # Under pytest-xdist several workers can stall at once; one file per worker
+    # keeps a later dump from overwriting (or interleaving with) an earlier one.
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    out = _RESULTS_DIR / (f"solve-queue-stall-{worker}.txt" if worker else "solve-queue-stall.txt")
     names = {t.ident: t.name for t in threading.enumerate()}
     with out.open("w") as f:
         f.write(f"unfinished_tasks={unfinished}\n")
@@ -124,12 +129,84 @@ def _dump_stall_diagnostics(unfinished: int) -> pathlib.Path:
     return out
 
 
+def _kill_child_processes() -> None:
+    """SIGKILL every direct child of this process (Linux `ps`; a no-op elsewhere).
+
+    A job stuck in `subprocess.Popen` leaves a forked child that never reaches
+    `exec`. It inherited the pipe CI tees pytest's output through, so after
+    pytest exits `tee` waits on that pipe until the step is cancelled.
+    """
+    import signal
+    import subprocess
+
+    try:
+        ps = subprocess.Popen(
+            ["ps", "-o", "pid=", "--ppid", str(os.getpid())],
+            stdout=subprocess.PIPE, text=True,
+        )
+        out, _ = ps.communicate(timeout=10)
+    except Exception:  # noqa: BLE001 — best effort, the watchdog still follows
+        return
+    for tok in out.split():
+        try:
+            pid = int(tok)
+        except ValueError:
+            continue
+        # `ps` lists itself as our child; it is already reaped, so its pid may
+        # have been reused by an unrelated process.
+        if pid == ps.pid:
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+_EXIT_GRACE_S = 60.0
+
+
+def _arm_exit_watchdog() -> None:
+    """Hard-exit the process if it is still alive `_EXIT_GRACE_S` after `pytest.exit`.
+
+    `pytest.exit` ends the session, but the interpreter then joins every
+    non-daemon thread, and the very thread that stalled the drain (a job stuck
+    in `subprocess.Popen`) can block that join forever. The watchdog is a daemon
+    timer: a clean exit (junit.xml written) never reaches it.
+    """
+    import threading
+
+    timer = threading.Timer(_EXIT_GRACE_S, os._exit, args=(3,))
+    timer.daemon = True
+    timer.start()
+
+
+def _drop_method_shadows(obj) -> None:
+    """Remove instance attributes that shadow a method of `obj`'s class.
+
+    pytest < 9.2 undoes `monkeypatch.setattr(instance, "method", stub)` by
+    writing the old *bound* method back into the instance `__dict__`. The
+    singleton then keeps that copy for the rest of the worker, so a later
+    test's `monkeypatch.setattr(SolveQueue, "method", ...)` never reaches the
+    dispatcher (CI shard 1/8 on #1832: test_viewer_role_gate patched
+    `solve_queue._run_solve_job`, and two blender_job tests later ran the real
+    solve runner). Dropping the copy restores the class lookup.
+    """
+    cls = type(obj)
+    for name in list(vars(obj)):
+        if isinstance(
+            inspect.getattr_static(cls, name, None),
+            (types.FunctionType, staticmethod, classmethod),
+        ):
+            delattr(obj, name)
+
+
 def _reset_solve_queue_or_exit() -> None:
     """Reset the solve queue; if jobs outlive its bounded join, dump and abort the shard.
 
     A stalled drain otherwise costs ~60 s per remaining test and runs the shard
     to the CI timeout with no clue which call blocks.
     """
+    _drop_method_shadows(solve_queue)
     solve_queue.reset_for_tests()
     q = getattr(solve_queue, "_q", None)
     # Mirror reset_for_tests: a stand-in `_q` without `all_tasks_done` is never
@@ -137,6 +214,8 @@ def _reset_solve_queue_or_exit() -> None:
     unfinished = getattr(q, "unfinished_tasks", 0) if hasattr(q, "all_tasks_done") else 0
     if isinstance(unfinished, int) and unfinished > 0:
         out = _dump_stall_diagnostics(unfinished)
+        _kill_child_processes()
+        _arm_exit_watchdog()
         pytest.exit(
             f"solve_queue.reset_for_tests could not drain ({unfinished} job(s) "
             f"still unwinding after its join); thread stacks and ps in {out}",

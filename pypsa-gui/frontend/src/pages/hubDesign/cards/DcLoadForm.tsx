@@ -11,6 +11,8 @@ import {
   dcFieldOf, dcLoadBody, dcRefusalText, initialDcDraft, validateDc,
   type DcDraft, type DcField,
 } from '../dcLoadForm'
+import { emptyLocation, validateLocation, writeCreatedLocation, type LocationDraft } from '../siteLocation'
+import { SiteLocationFields, showLocationSaveFailure } from './SiteLocationFields'
 
 interface CreateMutation {
   mutate: (arg: TemplateCreate, opts?: { onError?: (e: unknown) => void }) => void
@@ -28,16 +30,19 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
 }) {
   const [draft, setDraft] = useState<DcDraft>(initialDcDraft)
   const [server, setServer] = useState<{ field: DcField | null; text: string } | null>(null)
+  const [loc, setLoc] = useState<LocationDraft>(emptyLocation)
+  const locErrors = validateLocation(loc)
   const staged = templateId === 'eh_datacenter_staged'
   const local = validateDc(draft, templateId)
   const errors: Partial<Record<DcField, string>> = { ...local }
   if (server?.field && !errors[server.field]) errors[server.field] = server.text
-  const nErrors = Object.keys(errors).length
+  const nErrors = Object.keys(errors).length + Object.keys(locErrors).length
   const set = <K extends keyof DcDraft>(k: K, v: DcDraft[K]) => { setDraft({ ...draft, [k]: v }); setServer(null) }
 
+  const saveLocation = (project: string) => writeCreatedLocation(project, loc).then(m => { if (m) showLocationSaveFailure(m) })
   const submit = () => {
     if (nErrors || disabledReason) return
-    create.mutate({ templateId, params: dcLoadBody(draft, templateId) }, {
+    create.mutate({ templateId, params: dcLoadBody(draft, templateId), afterCreate: saveLocation }, {
       onError: (e: unknown) => {
         const r = dcLoadRefusal(e)
         if (!r) return
@@ -122,6 +127,8 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
         </ul>
         {err('architecture')}
       </div>
+
+      <SiteLocationFields value={loc} errors={locErrors} onChange={setLoc} />
 
       {server && !server.field && (
         <p role="alert" data-testid="dc-form-error-other" className="text-[11px] text-danger">{server.text}</p>

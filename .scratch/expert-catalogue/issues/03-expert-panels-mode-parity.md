@@ -33,3 +33,7 @@ Depends on: 01, 02. Starts after #1565 (PropertiesPanel, AssetFields, assetSchem
 ## Keeping both modes in step
 
 This slice is where both modes switch to the one component, in one PR; the parity test guards it from then on.
+
+## Comments
+
+- 2026-11-21, slice 02c (raw-name guard): `pypsa-gui/frontend/src/uiCopyGuard.allow.json` has rows naming this slice as the fix. Files: `layout/PropertiesPanel.tsx` (field labels, profile note; held by #1787 #1786 #1778 #1773 #1772 #1626), `pages/SolverSettings.tsx` (#1757), `pages/modelHorizon/StepPeriodEconomics.tsx` (#1795), `pages/results/LoadFlow.tsx` (#1801, includes the "Gen MC" header), the Results formula tips in `AggregatedOverview.tsx`, `CapacityExpansion.tsx`, `Curtailment.tsx`, `Economics.tsx`, `StorageCycling.tsx`, and the technical subtitles in `utils/decisionVocabulary.ts`. Remove each row (and its key in `PINNED_ALLOW_KEYS`) as its words change; a stale row fails the guard.

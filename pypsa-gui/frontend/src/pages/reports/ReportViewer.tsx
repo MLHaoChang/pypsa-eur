@@ -74,6 +74,7 @@ import { getUploadBlobUrl, type UploadMeta } from '../../api/uploads'
 import { Btn, PageSection, Tag } from '../../components/PageKit'
 import { DocxPreview } from './DocxPreview'
 import { MappingPlanEditor } from './MappingPlanEditor'
+import { toastReportRefusal } from './llmProfileLink'
 import { ReportJobStrip } from './ReportJobStrip'
 import { RoundTripPanel } from './RoundTripPanel'
 import { SectionCard } from './SectionCard'
@@ -192,7 +193,7 @@ export function ReportViewer({
       const text = instruction.trim()
       await job.regenerate(meta.report_id, sectionId, text ? { instruction: text } : {})
     } catch (e) {
-      toast.error(`Could not regenerate the section: ${reportJobErrorMessage(e)}`)
+      toastReportRefusal('Could not regenerate the section', reportJobErrorMessage(e), e)
     }
   }
 

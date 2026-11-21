@@ -176,7 +176,7 @@ export default function AvailabilityEditor({ project, component, componentType, 
           </p>
           <div className="flex flex-col items-start gap-1 mt-1">
             <Btn onClick={editOutageInputs}><Pencil size={12} /> Edit the outage rate and repair time</Btn>
-            <button type="button" className="text-[11px] text-accent hover:underline text-left" onClick={openReliability}>
+            <button type="button" className="text-[11px] text-link hover:underline text-left" onClick={openReliability}>
               Forced outages are sampled in the reliability study ›
             </button>
           </div>

@@ -42,6 +42,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from models.finance import FinanceInputs
+from services import project_write_gate
 from services.finance.case import FinanceCase, FinanceRefused
 from services.reliability_goal import goal_free_config
 
@@ -207,6 +208,7 @@ def start_investment_case(
     case_hash: Callable[[FinanceCase], str | None] | None = None,
     layers: Callable[[FinanceCase], tuple] | tuple | None = None,
     state_lock=None,
+    requester: tuple[Any, Any] | None = None,
 ) -> dict:
     """Start the investment-case run in a worker thread (see the module
     docstring). The mesh refusal (409 while a solve or another study runs) is
@@ -215,7 +217,12 @@ def start_investment_case(
     `assumptions` → (hash, parts) of the inputs the case is built from (the
     router closes over the same config snapshot as `build_case`); `case_hash`
     → the built `FinanceCase`'s hash, recorded as provenance; `layers` — tests
-    only — the tax layers `run_case` uses instead of the pack's."""
+    only — the tax layers `run_case` uses instead of the pack's.
+
+    `requester` is (user id, project id) of the person who started it: their
+    role is read again before each report is stored, and a person made a
+    viewer, or removed, mid-run gets a `project_view_only` failure and no
+    report (project-viewer-role 02)."""
     from services.finance.engine import run_case
     from services.finance.packs.base import PackNotFound, load_pack
     from services.finance.report import (
@@ -287,6 +294,15 @@ def start_investment_case(
             return True
         return False
 
+    def store(report) -> bool:
+        """Store `report` unless the requester may no longer write the project."""
+        if project_write_gate.requester_may_not_write(*(requester or (None, None))):
+            finish("failed", error=project_write_gate.MESSAGE,
+                   error_code=project_write_gate.KIND)
+            return False
+        state_update(**{"investment_case_report": report.model_dump(mode="json")})
+        return True
+
     def worker():
         try:
             a_hash, a_parts = (assumptions() if assumptions is not None
@@ -305,7 +321,8 @@ def start_investment_case(
                                                 owner=body.owner)
                 if aborted():           # an aborted run stores nothing (review B5)
                     return
-                state_update(**{"investment_case_report": report.model_dump(mode="json")})
+                if not store(report):
+                    return
                 finish("refused", error=str(exc), error_code=exc.code)
                 return
             if aborted():
@@ -326,7 +343,8 @@ def start_investment_case(
                                                 owner=case.owner)
                 if aborted():           # an aborted run stores nothing (review B5)
                     return
-                state_update(**{"investment_case_report": report.model_dump(mode="json")})
+                if not store(report):
+                    return
                 finish("refused", error=str(exc), error_code=exc.code)
                 return
             if aborted():
@@ -344,7 +362,8 @@ def start_investment_case(
             if aborted():
                 return
             progress("store")
-            state_update(**{"investment_case_report": report.model_dump(mode="json")})
+            if not store(report):
+                return
             finish("done", error=None, flags=list(result.flags),
                    completeness=dict(report.completeness))
         except Exception as exc:  # noqa: BLE001

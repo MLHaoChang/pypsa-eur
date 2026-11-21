@@ -273,7 +273,7 @@ def test_the_project_capex_budget_binds_inside_the_loop():
 
 @pytest.mark.parametrize("setting, value, named", [
     ("island_constraints", True, "island constraints are on"),
-    ("commercial", {"tariff": {}}, "commercial bindings are set on this project and are not applied to the loop"),
+    ("commercial", {"import_tariff": {"items": [{"id": "network_energy"}]}}, "commercial bindings are set on this project and are not applied to the loop"),
     ("fixed_sizes", "nameplate", "Capacity > sizing is off"),
 ])
 def test_a_pre_solve_setting_the_loop_cannot_reproduce_is_refused_by_name(setting, value, named):

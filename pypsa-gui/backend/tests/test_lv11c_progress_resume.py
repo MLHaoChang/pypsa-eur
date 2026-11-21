@@ -549,3 +549,59 @@ def test_an_adapter_fault_serves_no_view(baseline, monkeypatch):
 
     monkeypatch.setattr(ja, "job_status", broken)
     assert chat_router._progress_job_view("ad:x", chat_tools.acting_user_id()) is None
+
+
+def test_a_follow_resume_advances_its_cursor_and_ends_caught_up(
+    client, owned, monkeypatch
+):
+    """GK B 60 N1: the follow cursor moves past every frame it sent. A stuck
+    cursor would replay the same frames forever; the spy fails it instead."""
+    monkeypatch.setattr("routers.chat.PROGRESS_POLL_SECONDS", 0.01, raising=False)
+    _lines(owned, "a", "b")
+    real, asked = owned.progress_since, []
+
+    def spy(epoch, seq):
+        asked.append(seq)
+        if len(asked) > 8:
+            raise AssertionError(f"the follow cursor is stuck: {asked}")
+        return real(epoch, seq)
+
+    calls = []
+
+    def active(_tid=None):
+        calls.append(1)
+        if len(calls) == 1:
+            _lines(owned, "c")
+            return True
+        return False
+
+    monkeypatch.setattr(owned, "progress_since", spy)
+    monkeypatch.setattr(owned, "detached_monitor_active", active)
+    frames = _frames(_get(client, owned, f"{owned.progress_epoch()}:0").text)
+    assert [f[2]["line"] for f in frames] == ["a", "b", "c"]
+    assert [f[0] for f in frames] == [
+        f"{owned.progress_epoch()}:{n}" for n in (1, 2, 3)
+    ]
+    # The resume asks from 0, then follows from 2 (after a, b), then from 3 until it closes.
+    assert asked[:3] == [0, 2, 3] and set(asked[2:]) == {3}
+
+
+def test_a_terminal_frame_for_another_actors_job_is_served_without_the_job(
+    client, owned, baseline, seeded_identity
+):
+    """GK B 60 N2: at the route, the job view is read for the session's actor.
+    A job in the same project owned by someone else is served as null."""
+    ctx, *_ = baseline
+    job = ja.register_study_job(
+        study_key="fmea_sweep",
+        tool_name="run_fmea_sweep",
+        tool_use_id="tu-x",
+        owner_user_id=str(uuid.uuid4()),
+        project_uuid=_project(ctx),
+    )
+    owned.append_detached_progress(
+        {"frame": "job_terminal", "job_id": job, "tool_use_id": "tu-x"}
+    )
+    frames = _frames(_get(client, owned).text)
+    assert [f[1] for f in frames] == ["job_terminal"]
+    assert frames[0][2]["job"] is None and frames[0][2]["job_id"] == job

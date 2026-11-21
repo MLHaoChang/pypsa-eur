@@ -1,0 +1,44 @@
+{
+ "profiles": {
+  "network-emissions/1": [
+   {
+    "metric": "total_emissions",
+    "formula": "sum over t of w_generators[t] x p[t] / efficiency[t] x co2_emissions(carrier), summed over all generators",
+    "validity": "verified solve (else unverified_solve); per snapshot p, efficiency and weight finite, efficiency > 0, weight >= 0, else invalid_or_missing_emissions_data; a fuel-curve generator with CO2 gives fuel_curve_generator. Refusals: emissions_outside_scope, misaligned_source, network_scope_required, unknown_generator, unsupported_generator_population, unsupported_snapshot_scope",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_network_without_a_cap_has_no_shadow_price",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_network_without_a_cap_has_no_shadow_price"
+     },
+     "route": {
+      "status": "pending",
+      "test": null,
+      "ticket": ".scratch/assistant-assurance/issues/23-emissions-route-static-efficiency.md"
+     },
+     "workbook": {
+      "status": "pending",
+      "test": null,
+      "ticket": ".scratch/assistant-assurance/issues/23-emissions-route-static-efficiency.md"
+     }
+    }
+   },
+   {
+    "metric": "co2_cap_shadow_price",
+    "formula": "-mu of the one CO2 GlobalConstraint",
+    "validity": "verified solve and exactly one CO2 cap with a dual (else no_co2_cap, several_co2_caps or unverified_solve / invalid_or_missing_emissions_data)",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_a_binding_cap_reports_the_dual_as_a_positive_price",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_a_binding_cap_reports_the_dual_as_a_positive_price"
+     }
+    }
+   }
+  ]
+ }
+}
