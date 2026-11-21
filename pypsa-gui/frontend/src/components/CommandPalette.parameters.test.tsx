@@ -103,6 +103,10 @@ describe('CommandPalette — Parameters', () => {
     expect(battery.className).toContain('bg-accent/10')
     expect(none.className).not.toContain('bg-accent/10')
     expect(screen.getByText('⏎ select')).toBeTruthy()
+    // A pointer resting on the disabled row does not take the selection either.
+    fireEvent.mouseEnter(none)
+    expect(battery.className).toContain('bg-accent/10')
+    expect(none.className).not.toMatch(/bg-accent\/10|hover:bg-panel/)
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(useUIStore.getState().propertiesEditRequest).not.toBeNull()
   })

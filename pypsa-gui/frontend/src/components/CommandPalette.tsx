@@ -231,10 +231,10 @@ function PaletteShell({ mode, onClose, onRequestConfirm }: {
                   <button
                     key={cmd.id}
                     onClick={() => runCommand(cmd)}
-                    onMouseEnter={() => setSelectedIdx(idx)}
+                    onMouseEnter={() => { if (!cmd.disabled) setSelectedIdx(idx) }}
                     aria-disabled={cmd.disabled || undefined}
                     className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left transition-colors ${
-                      active ? 'bg-accent/10' : 'hover:bg-panel'
+                      active ? 'bg-accent/10' : cmd.disabled ? '' : 'hover:bg-panel'
                     }${cmd.disabled ? ' opacity-60 cursor-default' : ''}`}
                   >
                     <span className={`shrink-0 ${active ? 'text-accent' : 'text-muted'}`}>
