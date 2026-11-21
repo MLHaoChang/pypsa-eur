@@ -433,8 +433,12 @@ def test_every_retained_pending_reason_survives_the_durable_checkpoint():
 # ── A2.8 (AA-13): a non-converged interval is a required warning slot ────
 
 AC = "ac-branch-loading/1"
-AC_METRICS = ["ac_peak_branch_utilisation", "ac_hours_above_rating",
-              "ac_peak_apparent_flow", "branch_rating"]
+AC_METRICS = [
+    "ac_peak_branch_utilisation",
+    "ac_hours_above_rating",
+    "ac_peak_apparent_flow",
+    "branch_rating",
+]
 
 
 def install_ac(ctx, converged, p0, q0, line="L12"):
@@ -449,11 +453,16 @@ def install_ac(ctx, converged, p0, q0, line="L12"):
         condition="lopf+ac_pf_ok",
         lopf_results={},
         ac_pf_network_revision=int(getattr(ctx, "network_revision", 0) or 0),
-        ac_pf_results={"lines_t.p0": frame(p0), "lines_t.p1": frame([-v for v in p0]),
-                       "lines_t.q0": frame(q0), "lines_t.q1": frame([-v for v in q0])},
+        ac_pf_results={
+            "lines_t.p0": frame(p0),
+            "lines_t.p1": frame([-v for v in p0]),
+            "lines_t.q0": frame(q0),
+            "lines_t.q1": frame([-v for v in q0]),
+        },
         ac_pf_convergence={str(s): ok for s, ok in zip(n.snapshots, converged)},
-        ac_pf_convergence_list=[{"snapshot": str(s), "ok": ok}
-                                for s, ok in zip(n.snapshots, converged)],
+        ac_pf_convergence_list=[
+            {"snapshot": str(s), "ok": ok} for s, ok in zip(n.snapshots, converged)
+        ],
         ac_pf_converged_count=None if None in converged else sum(converged),
         ac_pf_unknown_count=sum(ok is None for ok in converged),
         ac_pf_total_snapshots=len(n.snapshots),
@@ -474,8 +483,12 @@ def ac_grid(grid, monkeypatch):
     return lambda converged: install_ac(ctx, converged, [6, 4], [8, 3])
 
 
-FIRST_ONLY = {"ac_peak_branch_utilisation": 125.0, "ac_hours_above_rating": 1.0,
-              "ac_peak_apparent_flow": 10.0, "branch_rating": 8.0}
+FIRST_ONLY = {
+    "ac_peak_branch_utilisation": 125.0,
+    "ac_hours_above_rating": 1.0,
+    "ac_peak_apparent_flow": 10.0,
+    "branch_rating": 8.0,
+}
 
 
 def ac_ask(checked, ctx, values, **options):
@@ -487,7 +500,9 @@ def receipt_of(frames):
 
 
 @pytest.mark.parametrize("extra", [0, 1, 5, 15])
-def test_a_non_converged_interval_keeps_its_warning_slot_whatever_is_asked(ac_grid, checked, extra):
+def test_a_non_converged_interval_keeps_its_warning_slot_whatever_is_asked(
+    ac_grid, checked, extra
+):
     ctx = ac_grid((True, False))
     metrics = AC_METRICS + [f"extra_metric_{i}" for i in range(extra)]
     frames = ac_ask(checked, ctx, FIRST_ONLY, metrics=metrics)
@@ -497,9 +512,12 @@ def test_a_non_converged_interval_keeps_its_warning_slot_whatever_is_asked(ac_gr
     second = str(pd.Timestamp(ctx.network.snapshots[1]).isoformat())
     warning = receipt["result_slots"][0]
     assert warning == {
-        "metric": "ac_pf_convergence", "disposition": "warning",
+        "metric": "ac_pf_convergence",
+        "disposition": "warning",
         "reason": "ac_pf_not_converged (1 of 2 snapshots in the window converged)",
-        "valid_snapshots": 1, "requested_snapshots": 2, "excluded_indices": [second],
+        "valid_snapshots": 1,
+        "requested_snapshots": 2,
+        "excluded_indices": [second],
     }
     assert len(receipt["result_slots"]) == 1 + len(metrics)
     for slot in receipt["result_slots"][1:]:
@@ -507,8 +525,10 @@ def test_a_non_converged_interval_keeps_its_warning_slot_whatever_is_asked(ac_gr
         assert (slot["valid_snapshots"], slot["requested_snapshots"]) == (1, 2)
         assert slot["excluded_indices"] == [second]
     assert answered(checked, frames) == pytest.approx(FIRST_ONLY)
-    assert "ac_pf_convergence: ac_pf_not_converged (1 of 2 snapshots in the window converged)" in (
-        receipt["limitations"])
+    assert (
+        "ac_pf_convergence: ac_pf_not_converged (1 of 2 snapshots in the window converged)"
+        in (receipt["limitations"])
+    )
     assert "Line values cover 1 of 2 snapshots" in public_text(frames)
 
 
@@ -516,12 +536,25 @@ def test_unknown_convergence_takes_precedence_over_not_converged(ac_grid, checke
     ctx = ac_grid((True, None))
     frames = ac_ask(checked, ctx, FIRST_ONLY)
     warning = receipt_of(frames)["result_slots"][0]
-    assert warning["reason"] == "ac_pf_convergence_unknown (1 of 2 snapshots in the window converged)"
+    assert (
+        warning["reason"]
+        == "ac_pf_convergence_unknown (1 of 2 snapshots in the window converged)"
+    )
     ctx = ac_grid((False, True))
     # Only the second snapshot is used: 62.5 %, never above the rating.
-    frames = ac_ask(checked, ctx, {"ac_peak_branch_utilisation": 62.5, "ac_hours_above_rating": 0.0,
-                                   "ac_peak_apparent_flow": 5.0, "branch_rating": 8.0})
-    assert receipt_of(frames)["result_slots"][0]["reason"].startswith("ac_pf_not_converged (1 of 2")
+    frames = ac_ask(
+        checked,
+        ctx,
+        {
+            "ac_peak_branch_utilisation": 62.5,
+            "ac_hours_above_rating": 0.0,
+            "ac_peak_apparent_flow": 5.0,
+            "branch_rating": 8.0,
+        },
+    )
+    assert receipt_of(frames)["result_slots"][0]["reason"].startswith(
+        "ac_pf_not_converged (1 of 2"
+    )
 
 
 def test_a_fully_converged_flow_has_no_warning_and_completes(ac_grid, checked):
@@ -535,7 +568,9 @@ def test_a_fully_converged_flow_has_no_warning_and_completes(ac_grid, checked):
 
 
 @pytest.mark.parametrize(("count", "refused"), [(18, False), (19, False), (20, True)])
-def test_warnings_count_toward_the_slot_cap_and_are_never_dropped(ac_grid, checked, count, refused):
+def test_warnings_count_toward_the_slot_cap_and_are_never_dropped(
+    ac_grid, checked, count, refused
+):
     # One warning: 18, 19 and 20 metrics need 19, 20 (the cap) and 21 slots.
     ctx = ac_grid((True, False))
     metrics = AC_METRICS + [f"extra_metric_{i}" for i in range(count - len(AC_METRICS))]
@@ -543,18 +578,25 @@ def test_warnings_count_toward_the_slot_cap_and_are_never_dropped(ac_grid, check
     assert receipt["request_complete"] is False
     if refused:
         assert receipt["policy_version"] == "1"
-        assert {s["reason"] for s in receipt["result_slots"]} == {"too_many_metrics_for_warnings"}
+        assert {s["reason"] for s in receipt["result_slots"]} == {
+            "too_many_metrics_for_warnings"
+        }
     else:
         assert receipt["policy_version"] == "5"
         assert len(receipt["result_slots"]) == count + 1 <= 20
         assert receipt["result_slots"][0]["disposition"] == "warning"
 
 
-@pytest.mark.parametrize(("converged", "reason"), [
-    ((False, False), "ac_pf_not_converged"),
-    ((False, None), "ac_pf_convergence_unknown"),
-])
-def test_a_window_with_nothing_converged_is_refused(ac_grid, checked, converged, reason):
+@pytest.mark.parametrize(
+    ("converged", "reason"),
+    [
+        ((False, False), "ac_pf_not_converged"),
+        ((False, None), "ac_pf_convergence_unknown"),
+    ],
+)
+def test_a_window_with_nothing_converged_is_refused(
+    ac_grid, checked, converged, reason
+):
     receipt = receipt_of(ac_ask(checked, ac_grid(converged), {}))
     assert receipt["request_complete"] is False and receipt["evidence_ids"] == []
     assert {s["reason"] for s in receipt["result_slots"]} == {reason}
@@ -562,9 +604,13 @@ def test_a_window_with_nothing_converged_is_refused(ac_grid, checked, converged,
 
 def test_an_unaligned_convergence_list_is_refused(ac_grid, checked):
     ctx = ac_grid((True, False))
-    ctx.solver_state["ac_pf_convergence_list"] = ctx.solver_state["ac_pf_convergence_list"][:1]
+    ctx.solver_state["ac_pf_convergence_list"] = ctx.solver_state[
+        "ac_pf_convergence_list"
+    ][:1]
     receipt = receipt_of(ac_ask(checked, ctx, {}))
-    assert {s["reason"] for s in receipt["result_slots"]} == {"ac_pf_convergence_unavailable"}
+    assert {s["reason"] for s in receipt["result_slots"]} == {
+        "ac_pf_convergence_unavailable"
+    }
 
 
 def test_a_failed_draft_keeps_the_warning(ac_grid, checked):
@@ -572,4 +618,6 @@ def test_a_failed_draft_keeps_the_warning(ac_grid, checked):
     receipt = receipt_of(ac_ask(checked, ctx, {**FIRST_ONLY, "branch_rating": 9.0}))
     assert receipt["policy_version"] == "5" and receipt["request_complete"] is False
     assert receipt["result_slots"][0]["metric"] == "ac_pf_convergence"
-    assert {s["reason"] for s in receipt["result_slots"][1:]} == {"draft_validation_failed"}
+    assert {s["reason"] for s in receipt["result_slots"][1:]} == {
+        "draft_validation_failed"
+    }

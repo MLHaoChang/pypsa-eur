@@ -28,10 +28,14 @@ from harness import branch_calculations as branch
 PROFILE = "ac-branch-loading/1"
 PROFILES = (PROFILE,)
 WARNING_METRIC = "ac_pf_convergence"
-REFUSALS = frozenset({
-    "ac_pf_not_available", "ac_pf_convergence_unavailable",
-    "ac_pf_not_converged", "ac_pf_convergence_unknown",
-})
+REFUSALS = frozenset(
+    {
+        "ac_pf_not_available",
+        "ac_pf_convergence_unavailable",
+        "ac_pf_not_converged",
+        "ac_pf_convergence_unknown",
+    }
+)
 METRICS = {
     "ac_peak_branch_utilisation": {
         "formula_id": "ac-branch-peak-utilisation/1",
@@ -131,7 +135,9 @@ def source(ctx, entity, component_class=None):
             "rating": rating,
             "rating_field": rating_field,
             "s_max_pu": [_number(v) for v in smax],
-            **{attr: _series(frame, name, len(index)) for attr, frame in frames.items()},
+            **{
+                attr: _series(frame, name, len(index)) for attr, frame in frames.items()
+            },
         },
         "valid_solve": state.get("status") == "completed"
         and state.get("condition") == "lopf+ac_pf_ok"
@@ -141,12 +147,14 @@ def source(ctx, entity, component_class=None):
 
 def _convergence(raw, a, b):
     """(converged positions, excluded snapshot labels, state) over window a..b."""
-    window = raw["converged"][a:b + 1]
+    window = raw["converged"][a : b + 1]
     kept = [a + k for k, ok in enumerate(window) if ok is True]
     excluded = [raw["index"][a + k] for k, ok in enumerate(window) if ok is not True]
     state = (
-        "converged" if not excluded
-        else "ac_pf_convergence_unknown" if any(ok is None for ok in window)
+        "converged"
+        if not excluded
+        else "ac_pf_convergence_unknown"
+        if any(ok is None for ok in window)
         else "ac_pf_not_converged"
     )
     return kept, excluded, state
@@ -161,14 +169,16 @@ def required_warnings(raw, scope):
     if not excluded:
         return []
     count = b - a + 1
-    return [{
-        "metric": WARNING_METRIC,
-        "disposition": "warning",
-        "reason": f"{state} ({len(kept)} of {count} snapshots in the window converged)",
-        "valid_snapshots": len(kept),
-        "requested_snapshots": count,
-        "excluded_indices": excluded,
-    }]
+    return [
+        {
+            "metric": WARNING_METRIC,
+            "disposition": "warning",
+            "reason": f"{state} ({len(kept)} of {count} snapshots in the window converged)",
+            "valid_snapshots": len(kept),
+            "requested_snapshots": count,
+            "excluded_indices": excluded,
+        }
+    ]
 
 
 def _loading(raw, kept):
@@ -186,8 +196,11 @@ def _loading(raw, kept):
         if apparent:
             if data["q0"][i] is None:
                 return None
-            s1 = (math.hypot(p1, data["q1"][i])
-                  if p1 is not None and data["q1"][i] is not None else None)
+            s1 = (
+                math.hypot(p1, data["q1"][i])
+                if p1 is not None and data["q1"][i] is not None
+                else None
+            )
             flow = max(math.hypot(p0, data["q0"][i]), s1 if s1 is not None else 0.0)
         else:
             flow = max(abs(p0), abs(p1) if p1 is not None else 0.0)
@@ -200,7 +213,9 @@ def _loading(raw, kept):
         return {
             "ac_peak_branch_utilisation": 100 * max(utilisation),
             "ac_hours_above_rating": math.fsum(
-                weights[i] for i, u in zip(kept, utilisation) if u > 1 + branch.OVER_LIMIT_TOLERANCE
+                weights[i]
+                for i, u in zip(kept, utilisation)
+                if u > 1 + branch.OVER_LIMIT_TOLERANCE
             ),
             "ac_peak_apparent_flow": max(flows) if apparent else None,
             "branch_rating": rating,
@@ -240,18 +255,22 @@ def calculate(raw, scope):
             slot["excluded_indices"] = excluded
         if answered:
             definition = METRICS[metric]
-            facts.append({
-                "path": "/" + metric,
-                "entity_id": scope["entity_id"],
-                "metric": metric,
-                "value": value,
-                "unit": definition["unit"],
-                "formula_id": definition["formula_id"],
-            })
+            facts.append(
+                {
+                    "path": "/" + metric,
+                    "entity_id": scope["entity_id"],
+                    "metric": metric,
+                    "value": value,
+                    "unit": definition["unit"],
+                    "formula_id": definition["formula_id"],
+                }
+            )
         else:
             slot["reason"] = (
-                "unverified_solve" if not raw["valid_solve"]
-                else "unsupported_metric" if metric not in METRICS
+                "unverified_solve"
+                if not raw["valid_solve"]
+                else "unsupported_metric"
+                if metric not in METRICS
                 else "apparent_power_unavailable"
                 if metric == "ac_peak_apparent_flow" and available and not apparent
                 else "invalid_or_missing_branch_data"
@@ -264,8 +283,14 @@ def notes(raw, scope):
     """Always-shown lines: the converged share the values cover, and the P fallback."""
     a, b = branch._window(raw, scope)
     kept, excluded, _ = _convergence(raw, a, b)
-    lines = [f"{raw['branch']['class']} values cover {len(kept)} of {b - a + 1} snapshots"
-             + ("; the others did not converge or are unknown." if excluded else ", all converged.")]
+    lines = [
+        f"{raw['branch']['class']} values cover {len(kept)} of {b - a + 1} snapshots"
+        + (
+            "; the others did not converge or are unknown."
+            if excluded
+            else ", all converged."
+        )
+    ]
     if not any(raw["branch"]["q0"][i] is not None for i in kept):
         lines.append(P_FALLBACK_NOTE)
     return lines

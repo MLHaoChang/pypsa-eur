@@ -60,7 +60,8 @@ def test_the_chart_identity_is_the_records_and_the_answers(request, checked, pro
     warnings = stored.get("required_warnings", [])
     assert receipt["result_slots"][: len(warnings)] == warnings
     assert [(m["metric"], m["disposition"]) for m in metrics] == [
-        (s["metric"], s["disposition"]) for s in receipt["result_slots"][len(warnings):]
+        (s["metric"], s["disposition"])
+        for s in receipt["result_slots"][len(warnings) :]
     ]
     for entry in metrics:
         if entry["disposition"] == "answered":
@@ -87,7 +88,9 @@ def test_the_chart_identity_is_the_records_and_the_answers(request, checked, pro
             }
             assert entry["metric"] not in blocks and entry["reason"].strip()
     # B3: the chart's warnings are the receipt's limitations, line for line.
-    assert calculations.slot_warnings(warnings + stored["slots"]) == receipt["limitations"]
+    assert (
+        calculations.slot_warnings(warnings + stored["slots"]) == receipt["limitations"]
+    )
 
 
 def test_a_drawn_chart_carries_the_identity_of_its_evidence(solved, checked):

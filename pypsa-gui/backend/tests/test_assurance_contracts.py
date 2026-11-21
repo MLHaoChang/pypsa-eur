@@ -317,7 +317,7 @@ def test_a_new_returned_field_breaks_and_a_new_version_is_additive(frozen):
         "$.evidence_identity.static-input/1 changed",
     ]
     added = copy.deepcopy(frozen)
-    added["answer_receipt"]["5"] = {"type": "object"}
+    added["answer_receipt"]["6"] = {"type": "object"}
     added["evidence_identity"]["static-input/2"] = {"type": "object"}
     added["checked_tool_results"]["new_tool"] = {"type": "object"}
     assert breaking_changes(frozen, added) == []

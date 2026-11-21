@@ -418,7 +418,9 @@ class WarnedReceipt(Receipt):
     """
 
     policy_version: Literal["5"]
-    result_slots: Annotated[list[WarningSlot | Slot], Field(min_length=1, max_length=20)]
+    result_slots: Annotated[
+        list[WarningSlot | Slot], Field(min_length=1, max_length=20)
+    ]
 
     @model_validator(mode="after")
     def _warned_first(self):

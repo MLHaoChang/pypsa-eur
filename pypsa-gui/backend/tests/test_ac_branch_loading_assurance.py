@@ -18,7 +18,12 @@ from services import loadflow_summary as lf
 from services import period_utils, workflow_tools
 from tests.assurance_acceptance.support import approval, public_text
 from tests.assurance_acceptance.test_p2_request_slots import (  # noqa: F401
-    AC, FIRST_ONLY, ac_ask, ac_grid, grid, private_store,
+    AC,
+    FIRST_ONLY,
+    ac_ask,
+    ac_grid,
+    grid,
+    private_store,
 )
 from tests.test_answer_assurance import checked  # noqa: F401
 from tests.test_workflow_tools import baseline  # noqa: F401
@@ -29,8 +34,15 @@ def _raw(ctx, entity="L12", component_class="Line"):
 
 
 def _scope(ctx, **extra):
-    return {"version": 1, "profile": AC, "project_id": ctx.project_uuid, "entity_id": "L12",
-            "component_class": "Line", "retain": False, **extra}
+    return {
+        "version": 1,
+        "profile": AC,
+        "project_id": ctx.project_uuid,
+        "entity_id": "L12",
+        "component_class": "Line",
+        "retain": False,
+        **extra,
+    }
 
 
 def test_ac_loading_matches_the_load_flow_tab_with_a_time_varying_limit(ac_grid):
@@ -45,8 +57,19 @@ def test_ac_loading_matches_the_load_flow_tab_with_a_time_varying_limit(ac_grid)
     index = n.snapshots
     mask, _ = lf._ac_convergence(n, index, 0, len(index) - 1, ctx.solver_state)
     weights = period_utils.snapshot_weights(n, "generators")
-    rows, skipped = lf._summarise_class(n, "Line", "lines", "lines_t", "ac_pf", index, weights,
-                                        mask, [], series_names={"L12"}, state=ctx.solver_state)
+    rows, skipped = lf._summarise_class(
+        n,
+        "Line",
+        "lines",
+        "lines_t",
+        "ac_pf",
+        index,
+        weights,
+        mask,
+        [],
+        series_names={"L12"},
+        state=ctx.solver_state,
+    )
     assert not skipped
     (row,) = rows
     assert row["basis"] == "ac_apparent_power"
@@ -58,13 +81,19 @@ def test_ac_loading_matches_the_load_flow_tab_with_a_time_varying_limit(ac_grid)
     assert values["branch_rating"] == row["rating"]["value"]
 
 
-def test_a_transformer_without_reactive_flow_falls_back_to_p_and_says_so(ac_grid, checked):
+def test_a_transformer_without_reactive_flow_falls_back_to_p_and_says_so(
+    ac_grid, checked
+):
     ctx = ac_grid((True, True))
     n = ctx.network
-    ctx.solver_state["ac_pf_results"].update({
-        "transformers_t.p0": pd.DataFrame({"T12": [30.0, 50.0]}, index=n.snapshots),
-        "transformers_t.p1": pd.DataFrame({"T12": [-30.0, -50.0]}, index=n.snapshots),
-    })
+    ctx.solver_state["ac_pf_results"].update(
+        {
+            "transformers_t.p0": pd.DataFrame({"T12": [30.0, 50.0]}, index=n.snapshots),
+            "transformers_t.p1": pd.DataFrame(
+                {"T12": [-30.0, -50.0]}, index=n.snapshots
+            ),
+        }
+    )
     raw = _raw(ctx, "T12", "Transformer")
     scope = _scope(ctx, entity_id="T12", component_class="Transformer")
     facts, slots = calculations.scoped_calculate(raw, scope)
@@ -75,8 +104,17 @@ def test_a_transformer_without_reactive_flow_falls_back_to_p_and_says_so(ac_grid
     reasons = {s["metric"]: s.get("reason") for s in slots}
     assert reasons["ac_peak_apparent_flow"] == "apparent_power_unavailable"
     assert ac.P_FALLBACK_NOTE in ac.notes(raw, scope)
-    frames = ac_ask_class(checked, ctx, "T12", "Transformer", {
-        "ac_peak_branch_utilisation": 125.0, "ac_hours_above_rating": 1.0, "branch_rating": 40.0})
+    frames = ac_ask_class(
+        checked,
+        ctx,
+        "T12",
+        "Transformer",
+        {
+            "ac_peak_branch_utilisation": 125.0,
+            "ac_hours_above_rating": 1.0,
+            "branch_rating": 40.0,
+        },
+    )
     assert ac.P_FALLBACK_NOTE in public_text(frames)
 
 
@@ -97,24 +135,35 @@ def test_no_ac_results_refuses(grid):
         _raw(grid)
 
 
-@pytest.mark.parametrize("message", [
-    "Show loading for network", "Show the loading for line L12",
-    "Show the loading for line L12; chart loading, p0", "Show the loading for transformer T1",
-    "show the loading for all lines; from 2026-01-01T00:00 to 2026-01-01T02:00",
-])
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Show loading for network",
+        "Show the loading for line L12",
+        "Show the loading for line L12; chart loading, p0",
+        "Show the loading for transformer T1",
+        "show the loading for all lines; from 2026-01-01T00:00 to 2026-01-01T02:00",
+    ],
+)
 def test_existing_loading_prompts_keep_their_profile(message):
     scope = from_message(message, "p", None)
     assert scope["profile"] in ("branch-loading/1", "network-loading/1")
 
 
-@pytest.mark.parametrize(("message", "entity", "component_class"), [
-    ("Show AC branch loading for line L12", "L12", "Line"),
-    ("show the ac loading for transformer T1.", "T1", "Transformer"),
-])
+@pytest.mark.parametrize(
+    ("message", "entity", "component_class"),
+    [
+        ("Show AC branch loading for line L12", "L12", "Line"),
+        ("show the ac loading for transformer T1.", "T1", "Transformer"),
+    ],
+)
 def test_the_ac_form_picks_the_ac_profile(message, entity, component_class):
     scope = from_message(message, "p", None)
     assert (scope["profile"], scope["entity_id"], scope["component_class"]) == (
-        AC, entity, component_class)
+        AC,
+        entity,
+        component_class,
+    )
 
 
 def test_the_ac_form_has_no_network_or_population_scope():
@@ -122,29 +171,58 @@ def test_the_ac_form_has_no_network_or_population_scope():
     with pytest.raises(ValueError, match="unsupported_population_scope"):
         from harness.assurance_scope import validate
 
-        validate({"version": 1, "profile": AC, "project_id": "p", "entity_id": "network",
-                  "retain": False})
+        validate(
+            {
+                "version": 1,
+                "profile": AC,
+                "project_id": "p",
+                "entity_id": "network",
+                "retain": False,
+            }
+        )
 
 
 # ── policy "5" ───────────────────────────────────────────────────────────
 
-WARNING = {"metric": "ac_pf_convergence", "disposition": "warning", "reason": "ac_pf_not_converged (1 of 2)",
-           "valid_snapshots": 1, "requested_snapshots": 2, "excluded_indices": ["2026-01-01T01:00:00"]}
-ANSWERED = {"metric": "branch_rating", "disposition": "answered", "valid_snapshots": 1,
-            "requested_snapshots": 2, "excluded_indices": ["2026-01-01T01:00:00"]}
+WARNING = {
+    "metric": "ac_pf_convergence",
+    "disposition": "warning",
+    "reason": "ac_pf_not_converged (1 of 2)",
+    "valid_snapshots": 1,
+    "requested_snapshots": 2,
+    "excluded_indices": ["2026-01-01T01:00:00"],
+}
+ANSWERED = {
+    "metric": "branch_rating",
+    "disposition": "answered",
+    "valid_snapshots": 1,
+    "requested_snapshots": 2,
+    "excluded_indices": ["2026-01-01T01:00:00"],
+}
 
 
 def _receipt(version, slots, **extra):
-    return {"policy_version": version, "content_sha256": "0" * 64, "evidence_ids": [],
-            "checked_block_ids": [], "limitations": [], "reviewer_status": "not_required",
-            "reviewed_claim_ids": [], "request_complete": False, "result_slots": slots, **extra}
+    return {
+        "policy_version": version,
+        "content_sha256": "0" * 64,
+        "evidence_ids": [],
+        "checked_block_ids": [],
+        "limitations": [],
+        "reviewer_status": "not_required",
+        "reviewed_claim_ids": [],
+        "request_complete": False,
+        "result_slots": slots,
+        **extra,
+    }
 
 
 def test_policy_5_needs_a_warning_first_and_an_incomplete_request():
     assert records.receipt_policy_ok(_receipt("5", [WARNING, ANSWERED]))
     assert not records.receipt_policy_ok(_receipt("5", [ANSWERED]))
     assert not records.receipt_policy_ok(_receipt("5", [ANSWERED, WARNING]))
-    assert not records.receipt_policy_ok(_receipt("5", [WARNING], request_complete=True))
+    assert not records.receipt_policy_ok(
+        _receipt("5", [WARNING], request_complete=True)
+    )
     assert not records.receipt_policy_ok(_receipt("5", [WARNING], derived=[]))
 
 
@@ -154,13 +232,17 @@ def test_only_policy_5_admits_a_warning_slot():
             RECEIPTS[version].model_validate(_receipt(version, [WARNING]))
 
 
-@pytest.mark.parametrize(("attribute", "value"), [
-    ("derived", [{"id": "d1"}]),        # would be policy "2"
-    ("predicates", [{"id": "p1"}]),     # would be policy "3"
-    ("sections", []),                   # would be policy "4"
-])
+@pytest.mark.parametrize(
+    ("attribute", "value"),
+    [
+        ("derived", [{"id": "d1"}]),  # would be policy "2"
+        ("predicates", [{"id": "p1"}]),  # would be policy "3"
+        ("sections", []),  # would be policy "4"
+    ],
+)
 def test_a_warned_answer_that_would_carry_another_policy_fails_closed(
-        ac_grid, checked, monkeypatch, attribute, value):
+    ac_grid, checked, monkeypatch, attribute, value
+):
     from harness import assurance
 
     ctx = ac_grid((True, False))
@@ -185,12 +267,23 @@ def test_a_warning_covers_only_a_window_with_an_excluded_snapshot(ac_grid):
     warnings = calculations.required_warnings(raw, _scope(ctx))
     assert [w["metric"] for w in warnings] == ["ac_pf_convergence"]
     assert "required_warnings" in records.IDENTITY_KEYS
-    assert calculations.required_warnings(raw, _scope(ctx, start=raw["index"][0], end=raw["index"][0])) == []
+    assert (
+        calculations.required_warnings(
+            raw, _scope(ctx, start=raw["index"][0], end=raw["index"][0])
+        )
+        == []
+    )
 
 
 def test_every_other_profile_has_no_required_warnings(grid):
-    scope = {"version": 1, "profile": "branch-loading/1", "project_id": "p", "entity_id": "L12",
-             "component_class": "Line", "retain": False}
+    scope = {
+        "version": 1,
+        "profile": "branch-loading/1",
+        "project_id": "p",
+        "entity_id": "L12",
+        "component_class": "Line",
+        "retain": False,
+    }
     assert calculations.required_warnings({}, scope) == []
     assert calculations.MAX_RESULT_SLOTS == 20
 
@@ -199,8 +292,14 @@ def test_the_browser_words_every_warning_state():
     """UX 26 (AA-13): each warning reason code has the card's plain wording."""
     from pathlib import Path
 
-    source = (Path(__file__).resolve().parents[2] / "frontend/src/utils/answerAssurance.ts").read_text()
-    table = source[source.index("const WARNING_TEXT"):source.index("export const WARNING_REASON_CODES")]
+    source = (
+        Path(__file__).resolve().parents[2] / "frontend/src/utils/answerAssurance.ts"
+    ).read_text()
+    table = source[
+        source.index("const WARNING_TEXT") : source.index(
+            "export const WARNING_REASON_CODES"
+        )
+    ]
     states = {"ac_pf_not_converged", "ac_pf_convergence_unknown"}
     assert states <= ac.REFUSALS
     import re
