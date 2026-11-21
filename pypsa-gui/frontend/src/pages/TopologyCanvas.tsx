@@ -243,6 +243,11 @@ const BUS_NODE_MIN_W = 72
 
 // Exported so a test can render one node in isolation inside a
 // <ReactFlowProvider>. nodeTypes (:1786) still references it locally.
+/** A selected node reads the same on every carrier (ruling #1597/#1598): a 2 px ink ring plus a soft
+ *  accent halo. The carrier colour stays on the border and fill; selection never borrows it. */
+export const SELECTED_NODE_SHADOW =
+  '0 0 0 2px var(--color-text), 0 0 0 5px color-mix(in srgb, var(--color-accent) 30%, transparent)'
+
 export function BusNode({ id, data, selected }: NodeProps) {
   const { bus } = data as unknown as { bus: Bus }
   const color = getLineColor(bus.v_nom ?? 1)
@@ -285,7 +290,7 @@ export function BusNode({ id, data, selected }: NodeProps) {
           : isHighlighted
           ? `0 0 0 3px ${color}, 0 0 0 8px ${color}70, 0 0 22px 8px ${color}45, 0 2px 8px rgba(0,0,0,0.14)`
           : selected
-          ? `0 0 0 3px ${color}28, 0 2px 8px rgba(0,0,0,0.14)`
+          ? `${SELECTED_NODE_SHADOW}, 0 2px 8px rgba(0,0,0,0.14)`
           : '0 1px 4px rgba(0,0,0,0.10)',
         whiteSpace: 'nowrap',
       }}
@@ -684,15 +689,14 @@ function AssetGroupNode({ id, data, selected }: NodeProps) {
       style={{
         width: 68,
         backgroundColor: 'var(--color-bg)',
-        border: `${selected ? 2 : 1.2}px solid ${color}`,
+        border: `1.2px solid ${color}`,
         borderRadius: 7,
         boxShadow: isOverlapping
           ? `0 0 0 2px rgba(239,68,68,0.4), 0 2px 8px rgba(0,0,0,0.12)`
           : selected
-          ? `0 0 0 2px ${color}22, 0 2px 8px rgba(0,0,0,0.12)`
+          ? `${SELECTED_NODE_SHADOW}, 0 2px 8px rgba(0,0,0,0.12)`
           : hovered ? '0 2px 7px rgba(0,0,0,0.12)' : '0 1px 4px rgba(0,0,0,0.08)',
-        filter: selected ? `drop-shadow(0 0 3px ${color}88)` : undefined,
-        transform: hovered && !selected ? 'translate(-1px, -2px)' : undefined,
+                transform: hovered && !selected ? 'translate(-1px, -2px)' : undefined,
         transition: 'transform 120ms, box-shadow 120ms',
         padding: '5px 4px 4px',
       }}
@@ -879,17 +883,16 @@ export function AssetNode({ id, data, selected }: NodeProps) {
       style={{
         width: ASSET_NODE_W,
         backgroundColor: 'var(--color-bg)',
-        border: `${selected ? 2 : 1.2}px solid ${color}`,
+        border: `1.2px solid ${color}`,
         borderRadius: 7,
         boxShadow: isOverlapping
           ? '0 0 0 2px rgba(239,68,68,0.4), 0 2px 8px rgba(0,0,0,0.12)'
           : isHighlighted
           ? '0 0 0 3px #2f81f7, 0 2px 8px rgba(0,0,0,0.12)'
           : selected
-          ? `0 0 0 2px ${color}22, 0 2px 8px rgba(0,0,0,0.12)`
+          ? `${SELECTED_NODE_SHADOW}, 0 2px 8px rgba(0,0,0,0.12)`
           : hovered ? '0 2px 7px rgba(0,0,0,0.12)' : '0 1px 4px rgba(0,0,0,0.08)',
-        filter: selected ? `drop-shadow(0 0 3px ${color}88)` : undefined,
-        transform: hovered && !selected ? 'translate(-1px, -2px)' : undefined,
+                transform: hovered && !selected ? 'translate(-1px, -2px)' : undefined,
         transition: 'transform 120ms, box-shadow 120ms',
         padding: '5px 4px 4px',
       }}

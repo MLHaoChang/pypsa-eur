@@ -200,7 +200,7 @@ export default function LostLoadTab() {
     return (
       <div className="flex flex-col h-full overflow-auto p-4 gap-4">
         <header>
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Lost load</h3>
+          <h3 className="text-h3 font-semibold text-text">Lost load</h3>
         </header>
         <p className="text-[11px] text-muted" data-testid="lostload-adequacy-crosslink">
           {ADEQUACY_CROSSLINK}
@@ -251,7 +251,7 @@ export default function LostLoadTab() {
           still hit the server's MAX_RESPONSE_VALUES cap. */}
       <WindowCapBanner payloads={[lostLoad as TSPayload | null]} />
       <header>
-        <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
+        <h3 className="text-h3 font-semibold text-text">
           Lost load
           <span className="ml-2 text-[10px] font-normal text-muted">{periodLabel}</span>
         </h3>

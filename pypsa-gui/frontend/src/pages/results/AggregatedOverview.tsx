@@ -516,7 +516,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
           period. Lets the user read off annualised totals before drilling
           into the bar charts below. */}
       <section>
-        <h3 className="text-[12.5px] font-semibold text-text mb-2.5 flex items-center gap-2 tracking-[-0.005em]">
+        <h3 className="text-h3 font-semibold text-text mb-2.5 flex items-center gap-2">
           System dispatch
           {scaled && (
             <span className="text-[10px] font-normal text-accent bg-accent/10 px-1.5 py-0.5 rounded font-mono"
@@ -566,7 +566,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
       {cost && (
         <section>
           <div className="flex items-center justify-between mb-2.5">
-            <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Operational expenditure (OPEX)</h3>
+            <h3 className="text-h3 font-semibold text-text">Operational expenditure (OPEX)</h3>
             <button
               onClick={() => {
                 const rows = cost.by_component

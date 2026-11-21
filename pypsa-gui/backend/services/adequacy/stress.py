@@ -355,7 +355,7 @@ def save_scenarios(project_dir: pathlib.Path, scenarios: list[dict]) -> list[dic
     atomic_write_text(
         project_dir / SIDECAR_NAME,
         json.dumps({"__schema__": SCHEMA, "scenarios": scenarios},
-                   indent=2, sort_keys=True))
+                   indent=2, sort_keys=True) + "\n")
     return scenarios
 
 

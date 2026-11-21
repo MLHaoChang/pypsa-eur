@@ -36,7 +36,7 @@ type Checked = { id: string; result: 'applied' | 'not_applied'; readAt: number }
 function ActButton({ label, testid, onClick, busy }: { label: string; testid: string; onClick: () => void; busy?: boolean }) {
   return (
     <button type="button" data-testid={testid} onClick={onClick} disabled={busy}
-      className={`whitespace-nowrap ${busy ? 'text-muted' : 'text-accent hover:underline'}`}>{label}</button>
+      className={`whitespace-nowrap ${busy ? 'text-muted' : 'text-link hover:underline'}`}>{label}</button>
   )
 }
 
@@ -91,7 +91,7 @@ export default function SiteResume({ siteName, rows, readAt, recheck }: {
     } else {
       line = `Found: a ${what} you prepared, not applied yet${more(n)}.`
       // The one "›" here (U-a): it moves to the chat dock, prefilled, and sends nothing.
-      action = <button type="button" data-testid="site-resume-review" className="whitespace-nowrap text-accent hover:underline"
+      action = <button type="button" data-testid="site-resume-review" className="whitespace-nowrap text-link hover:underline"
         onClick={() => ask(`Show me the ${what} I prepared for ${site}, so I can review it.`)}>Review it in chat ›</button>
     }
   }
