@@ -305,3 +305,149 @@ def test_the_browser_words_every_warning_state():
     import re
 
     assert set(re.findall(r"^\s+(\w+): \(", table, re.M)) == states
+
+
+# ── source and loading guards (mutant survivors, AA-13) ──────────────────
+
+
+def _slots(raw, ctx, **extra):
+    facts, slots = ac.calculate(raw, _scope(ctx, **extra))
+    return facts, {s["metric"]: s.get("reason") for s in slots}
+
+
+@pytest.mark.parametrize("ok", [0, 1, "", "false", "true"])
+def test_a_non_bool_convergence_flag_reads_as_unknown(ac_grid, ok):
+    ctx = ac_grid((True, False))
+    ctx.solver_state["ac_pf_convergence_list"][1]["ok"] = ok
+    assert _raw(ctx)["converged"] == [True, None]
+
+
+def test_the_evidence_names_the_ac_disclosure(ac_grid):
+    ctx = ac_grid((True, False))
+    assert calculations.disclosure(_scope(ctx)) == ac.DISCLOSURE
+
+
+def test_an_unknown_branch_is_refused(ac_grid):
+    ctx = ac_grid((True, False))
+    with pytest.raises(ValueError, match="^unknown_branch$"):
+        ac.source(ctx, "nope", "Line")
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"version": 2}, {"profile": "branch-loading/1"}, {"entity_id": "L13"}],
+)
+def test_calculate_refuses_a_source_of_another_request(ac_grid, change):
+    ctx = ac_grid((True, False))
+    with pytest.raises(ValueError, match="^ac_branch_source_identity$"):
+        ac.calculate({**_raw(ctx), **change}, _scope(ctx))
+
+
+def test_an_unverified_solve_answers_nothing(ac_grid):
+    ctx = ac_grid((True, False))
+    facts, reasons = _slots({**_raw(ctx), "valid_solve": False}, ctx)
+    assert facts == []
+    assert set(reasons.values()) == {"unverified_solve"}
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("p0", None),
+        ("s_max_pu", None),
+        ("s_max_pu", 0.0),
+        ("weight", None),
+        ("weight", -1.0),
+        ("rating", None),
+        ("rating", 0.0),
+    ],
+)
+def test_missing_branch_data_at_a_converged_snapshot_is_unavailable(
+    ac_grid, field, value
+):
+    ctx = ac_grid((True, False))
+    raw = _raw(ctx)
+    if field == "weight":
+        raw["energy_weight"][0] = value
+    elif field == "rating":
+        raw["branch"]["rating"] = value
+    else:
+        raw["branch"][field][0] = value
+    facts, reasons = _slots(raw, ctx)
+    assert facts == []
+    assert set(reasons.values()) == {"invalid_or_missing_branch_data"}
+
+
+def test_missing_data_at_an_excluded_snapshot_is_ignored(ac_grid):
+    ctx = ac_grid((True, False))
+    raw = _raw(ctx)
+    raw["branch"]["p0"][1] = None
+    facts, _ = _slots(raw, ctx)
+    assert {f["metric"] for f in facts} == set(ac.METRICS)
+
+
+def test_a_flow_exactly_at_the_limit_is_not_above_it(ac_grid):
+    ctx = ac_grid((True, False))
+    raw = _raw(ctx)
+    data = raw["branch"]
+    limit = data["rating"] * data["s_max_pu"][0]
+    data["p0"][0], data["p1"][0] = limit, -limit
+    data["q0"] = [None] * len(data["q0"])
+    data["q1"] = [None] * len(data["q1"])
+    facts, _ = _slots(raw, ctx)
+    values = {f["metric"]: f["value"] for f in facts}
+    assert values["ac_peak_branch_utilisation"] == pytest.approx(100.0)
+    assert values["ac_hours_above_rating"] == 0
+
+
+def test_a_p_only_branch_names_why_apparent_flow_is_missing(ac_grid):
+    ctx = ac_grid((True, False))
+    raw = _raw(ctx)
+    raw["branch"]["q0"] = [None] * len(raw["branch"]["q0"])
+    raw["branch"]["q1"] = [None] * len(raw["branch"]["q1"])
+    facts, reasons = _slots(raw, ctx)
+    assert reasons["ac_peak_apparent_flow"] == "apparent_power_unavailable"
+    assert {f["metric"] for f in facts} == set(ac.METRICS) - {"ac_peak_apparent_flow"}
+
+
+# ── a warned request tells the model what fails closed ────────────────────
+
+
+class _Seen(ac_ask.__globals__["NumericalProvider"]):
+    def __init__(self, values, seen):
+        super().__init__(values)
+        self.seen = seen
+
+    def stream(self, request):
+        content = request.messages[-1]["content"]
+        self.seen.append(
+            content
+            if isinstance(content, str)
+            else "".join(b.get("text", "") for b in content)
+        )
+        yield from super().stream(request)
+
+
+@pytest.mark.parametrize(
+    "converged, warned", [((True, False), True), ((True, True), False)]
+)
+def test_only_a_warned_request_forbids_derived_and_predicate_entries(
+    ac_grid, checked, converged, warned
+):
+    from harness.assurance import WARNED_LEDGER_NOTE
+
+    ctx = ac_grid(converged)
+    seen = []
+    scope = _scope(ctx)
+    frames = checked.run(
+        _Seen(FIRST_ONLY, seen), message="Check results.", checked_scope=scope
+    )
+    assert len(seen) == 1
+    assert (WARNED_LEDGER_NOTE in seen[0]) is warned
+    if warned:
+        # The note costs a well-behaved draft nothing: every metric is answered.
+        receipt = approval(frames)["receipt"]
+        assert receipt["policy_version"] == "5"
+        assert [s["disposition"] for s in receipt["result_slots"]] == ["warning"] + [
+            "answered"
+        ] * len(ac.METRICS)
