@@ -1092,6 +1092,22 @@ export type EhReview =
       how_to_apply?: string
     }
 
+/** One default a study assumed (#1645 `run_assumptions`): what it is, its value in words, where it comes from,
+ *  and the flow section, component, unit(s) and field it names ("d1, d2" when it joins several units). */
+export interface EhStudyAssumption {
+  key: string
+  label: string
+  value: unknown
+  shown: string
+  source: string
+  reason: string | null
+  section: string
+  card: string
+  component: string
+  entity: string
+  field: string
+}
+
 /** Study lifecycle record from GET /results/eh_study. */
 export interface EhStudyPayload {
   status: string
@@ -1108,6 +1124,8 @@ export interface EhStudyPayload {
   /** P33b: true when the network was edited since the study started; null
    *  while running or for a record that cannot say (Unavailable). */
   edited_since_study?: boolean | null
+  /** The defaults the study assumed; absent on an older record (not recorded), `[]` when none. */
+  assumptions?: EhStudyAssumption[]
 }
 
 export interface EhRedundancyOption {
@@ -1330,6 +1348,7 @@ export interface CurtailmentByCausePlant {
 export type CurtailmentNotEstablishedReason =
   | 'export_link_missing' | 'export_price_missing'
   | 'no_commercial_solve_record' | 'export_price_changed_since_solve'
+  | 'export_flow_missing'
 
 /** GET /results/curtailment/by_cause (204 → null before a solve). */
 export type CurtailmentByCausePayload =
@@ -1859,6 +1878,8 @@ export const resultsApi = {
     available: boolean
     slack_bus_used?: string | null
     stripped_voll_slacks?: string[]
+    // Shifting transformers that made lpf() seed the flow (DGS-SEED-1); empty = flat start.
+    seeded_by?: string[]
     // Legacy `{iso: bool}` dict — ambiguous on multi-period (same iso under
     // different periods collapses). Kept for backward compatibility.
     // `null` = PyPSA did not report convergence for that snapshot (AA-12).

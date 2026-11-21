@@ -414,6 +414,7 @@ POST    /api/results/business_case                                              
 POST    /api/results/business_case/abort                                           -> post_business_case_abort_api_results_business_case_abort_post
 GET     /api/results/business_case/inputs                                          -> get_business_case_inputs_api_results_business_case_inputs_get
 PUT     /api/results/business_case/inputs                                          -> put_business_case_inputs_api_results_business_case_inputs_put
+GET     /api/results/business_case/options                                         -> get_business_case_options_api_results_business_case_options_get
 GET     /api/results/business_case/preset                                          -> get_business_case_preset_api_results_business_case_preset_get
 GET     /api/results/carrier_kpis                                                  -> get_carrier_kpis_api_results_carrier_kpis_get
 GET     /api/results/cfe_score                                                     -> get_cfe_score_api_results_cfe_score_get

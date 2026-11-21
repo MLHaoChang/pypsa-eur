@@ -10,9 +10,13 @@ import type {
 export { SolverInFlightError, StaleEditError }
 
 /** A 409 on the finance PUT or the study start that is not a solve: another
- *  study runs (the detail names it). */
+ *  study runs (the detail names it), or the start's coded refusal (`code`,
+ *  e.g. `not_solved`). */
 export class StudyBusyError extends Error {
-  constructor(message: string) { super(message); this.name = 'StudyBusyError' }
+  readonly code?: string
+  constructor(message: string, code?: string) {
+    super(message); this.name = 'StudyBusyError'; this.code = code
+  }
 }
 
 const QUIET = { skipErrorToast: true } as const
@@ -33,7 +37,7 @@ function typed(e: unknown): never {
   if (status === 412) throw new StaleEditError(message ?? 'the finance inputs changed since they were read')
   if (status === 409) {
     if (code === 'solver_in_flight') throw new SolverInFlightError(message ?? 'a solve is running')
-    throw new StudyBusyError(message ?? 'a solve or another study is running')
+    throw new StudyBusyError(message ?? 'a solve or another study is running', code)
   }
   throw e
 }

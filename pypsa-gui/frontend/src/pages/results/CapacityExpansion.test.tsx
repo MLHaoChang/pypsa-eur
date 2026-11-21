@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi, simulationApi } from '../../api/simulation'
@@ -14,7 +14,7 @@ vi.mock('../../api/simulation', async (importOriginal) => {
   return {
     ...actual,
     resultsApi: { ...actual.resultsApi, getCostBreakdown: vi.fn(), getEconomicsByCarrier: vi.fn() },
-    simulationApi: { ...actual.simulationApi, getAssetCosts: vi.fn() },
+    simulationApi: { ...actual.simulationApi, getAssetCosts: vi.fn(), getStatus: vi.fn() },
   }
 })
 
@@ -64,6 +64,7 @@ beforeEach(() => {
   // an empty object (rather than `[]`) is the accurate empty fixture.
   vi.mocked(resultsApi.getEconomicsByCarrier).mockReset().mockResolvedValue({})
   vi.mocked(simulationApi.getAssetCosts).mockReset().mockResolvedValue({})
+  vi.mocked(simulationApi.getStatus).mockReset().mockResolvedValue(SOLVED)
   vi.mocked(networkApi.getGenerators).mockReset().mockResolvedValue([])
   vi.mocked(networkApi.getStorageUnits).mockReset().mockResolvedValue([])
   vi.mocked(networkApi.getStores).mockReset().mockResolvedValue([])
@@ -148,6 +149,9 @@ it('renders a distinctive optimal line sizing value sourced from the mocked netw
 
 /** The KPI card carrying `label` — `KPI` renders label and value as sibling
  *  divs, so the label's PARENT is the card root. */
+/** A solve the page can read (`GET /simulation/status`). */
+const SOLVED = { running: false, status: 'completed', condition: 'optimal', objective: 1, solve_time: 1, dispatch: 'fresh' as const }
+
 function kpiCard(label: string): HTMLElement {
   const el = screen.getAllByText(label).find(e => e.tagName === 'DIV')
   if (!el?.parentElement) throw new Error(`no KPI card labelled "${label}"`)
@@ -378,6 +382,53 @@ it('heads the per-unit CAPEX without /yr in total-investment (PV) mode', async (
   await switchToLifetimeMode()
   expect(screen.getAllByText('CAPEX €/MW')).toHaveLength(2)
   expect(screen.queryByText('CAPEX €/MW/yr')).toBeNull()
+})
+
+// ── Template-e2e 14: an IPP's owned plants are never "retired" ──────────────
+// eh_ipp_hybrid's wind farm is extendable between equal bounds (60 MW); before a solve the
+// network serves p_nom_opt = 0. GK B2 (3) d, UX 2 (4) 1.
+const ipp = (over: Record<string, unknown> = {}) => [
+  { name: 'wind_farm', bus: 'B1', carrier: 'wind', p_nom: 60, p_nom_opt: 0, p_nom_min: 60, p_nom_max: 60,
+    p_nom_extendable: true, capital_cost: 0, ...over },
+] as never
+
+it('shows no retired header for a plant pinned at its size', async () => {
+  vi.mocked(networkApi.getGenerators).mockReset().mockResolvedValue(ipp())
+  renderPage()
+  await screen.findAllByText('Total system cost')
+  await waitFor(() => expect(vi.mocked(simulationApi.getStatus)).toHaveBeenCalled())
+  expect(screen.queryByText('Retired assets')).toBeNull()
+  expect(screen.queryByText(/assets? retired/)).toBeNull()
+})
+
+it('shows no retired header before a solve, even for an asset free to shrink', async () => {
+  vi.mocked(simulationApi.getStatus).mockReset().mockResolvedValue({ ...SOLVED, condition: null, objective: null, status: 'idle' })
+  vi.mocked(networkApi.getGenerators).mockReset().mockResolvedValue(ipp({ p_nom_min: 0 }))
+  renderPage()
+  await screen.findAllByText('Total system cost')
+  await waitFor(() => expect(vi.mocked(simulationApi.getStatus)).toHaveBeenCalled())
+  expect(screen.queryByText('Retired assets')).toBeNull()
+})
+
+it('lists a solved retirement of an asset free to shrink', async () => {
+  vi.mocked(networkApi.getGenerators).mockReset().mockResolvedValue(ipp({ p_nom_min: 0, p_nom_opt: 20 }))
+  renderPage()
+  expect(await screen.findByText('Retired assets')).toBeTruthy()
+  expect(screen.getByText(/1 asset retired/)).toBeTruthy()
+})
+
+it('says a negative total system cost is revenue over cost, never a profit', async () => {
+  const base = await resultsApi.getCostBreakdown()
+  vi.mocked(resultsApi.getCostBreakdown).mockResolvedValue({ ...base, capex: 0, opex: -4_550_000, total: -4_550_000 } as never)
+  renderPage()
+  const card = await waitFor(() => kpiCard('Total system cost'))
+  await waitFor(() => expect(within(card).getByText('(revenue exceeds cost)')).toBeTruthy())
+  // The sign before the €, never "€-4.55 M" (the shared tile writes its own minus).
+  expect(card.textContent).toMatch(/[-\u2212]€4\.55\s?M/)
+  expect(card.textContent).not.toMatch(/profit/i)
+  // One sign position and one minus for the total in the view (UX 2 (5)): the build-up chart's
+  // header reads as the tile does, never "€-4.55 M".
+  expect(screen.getByText('-€4.55 M per year')).toBeTruthy()
 })
 
 // ── Result states (UX overhaul S2) ──────────────────────────────────────────
