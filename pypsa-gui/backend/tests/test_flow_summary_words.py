@@ -4,7 +4,7 @@ counts time steps, not "snapshots" (CONTEXT.md, Snapshot)."""
 
 from types import SimpleNamespace
 
-from services.flow_service import _summary
+from services.flow_service import ImportCapacity, _summary
 
 
 def facts(**kw):
@@ -12,7 +12,7 @@ def facts(**kw):
         snapshots=168,
         carriers=[],
         connection_links=[],
-        import_p_nom_mw=None,
+        import_cap=ImportCapacity(links=(), mw=None),
         loads=0,
         asset_count=0,
     )
@@ -22,7 +22,10 @@ def facts(**kw):
 def test_connection_names_its_links_in_plain_words():
     assert (
         _summary(
-            "connection", facts(connection_links=["grid_import"], import_p_nom_mw=40.0)
+            "connection", facts(
+                connection_links=["grid_import"],
+                import_cap=ImportCapacity(links=("grid_import",), mw=40.0),
+            )
         )
         == "Grid import, 40 MW"
     )
