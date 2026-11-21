@@ -3,7 +3,8 @@
 
 # add_upload serialises only within one process
 
-Status: ready-for-agent
+Status: done (#1755)
+Landed in #1755.
 Type: task
 Source: GK B (63) on #1622 (export under a foreign lock); predates the viewer role
 

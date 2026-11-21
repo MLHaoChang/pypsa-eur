@@ -11,7 +11,9 @@
 // Nothing here blocks Run (project workflow R1). A row's verdict is a word and
 // an icon, never a colour alone; an unknown row says first what is missing.
 import { FIELD_LABELS } from '../../utils/fieldLabels'
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { networkApi } from '../../api/network'
+import { nk } from '../../utils/queryKeys'
 import { AlertCircle, AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, HelpCircle,
   MessageCircleQuestion } from 'lucide-react'
 import { create } from 'zustand'
@@ -60,16 +62,34 @@ export const useScorecardOpen = create<OpenState>(set => ({
   toggle: (key, fallback) => set(s => ({ open: { ...s.open, [key]: !(s.open[key] ?? fallback) } })),
 }))
 
+/** While a run holds the network the answer is the saved file's ("out_of_date"). A solve does not move
+ *  the edit counter, so the scorecard asks again on this beat until the run lets go (GK A review). */
+export const OUT_OF_DATE_REFETCH_MS = 3000
+
 export function useGridReadiness(enabled = true) {
   const project = useUIStore(s => s.currentProject)
-  // Under the campus root, so a campus run's invalidation refreshes it too;
-  // read again on each mount, since a network or island edit changes it.
-  return useQuery({
-    queryKey: ['campusElectrical', 'grid_readiness', project],
-    queryFn: () => campusApi.gridReadiness(project ?? ''),
+  // The project's edit counter, the sample the always-mounted readers poll
+  // (useNetworkRevisionInvalidation): any network edit, saved or not, moves it,
+  // and the scorecard reads the loaded network (DC grid-readiness walkthrough 04).
+  const { data: undo, isPending: undoPending } = useQuery({
+    queryKey: nk(project, 'undoInfo'),
+    queryFn: () => networkApi.undoInfo(),
+    refetchInterval: 3000,
     enabled: !!project && enabled,
+  })
+  const revision = typeof undo?.network_revision === 'number' ? undo.network_revision : null
+  // Under the campus root, so a campus run's invalidation refreshes it too;
+  // read again on each mount and each edit. The last verdicts stay shown while the next loads.
+  // It waits for the first sample (or its failure), so a load is not read twice.
+  return useQuery({
+    queryKey: ['campusElectrical', 'grid_readiness', project, revision],
+    queryFn: () => campusApi.gridReadiness(project ?? ''),
+    enabled: !!project && enabled && !undoPending,
     staleTime: 0,
     refetchOnMount: 'always',
+    // The last verdicts stay shown while the same project's next read loads; never another project's (GK B3).
+    placeholderData: (prev, prevQuery) => (prevQuery?.queryKey[2] === project ? keepPreviousData(prev) : undefined),
+    refetchInterval: q => (q.state.data?.network === 'out_of_date' ? OUT_OF_DATE_REFETCH_MS : false),
   })
 }
 
@@ -144,7 +164,7 @@ function LatencyLine({ row, mode, onJump }: {
   const name = (u: GridReadinessAfterUnit) => (
     <button type="button" data-testid={`gr-latency-unit-${u.unit}`} onClick={() => open(u)}
       title={`Open ${u.unit}, where its control is set`}
-      className="text-accent hover:underline">'{u.unit}'</button>
+      className="text-link hover:underline">'{u.unit}'</button>
   )
   return (
     <div data-testid={`gr-latency-${row.id}`}>
@@ -213,8 +233,8 @@ function ScoreRow({ row, mode, onJump, fieldLabels, noAssistant }: {
             )}
             {row.xr_assumed && (
               <button type="button" data-testid={`gr-set-xr-${row.id}`} onClick={openPocXr}
-                title="Open the PoC X/R field in Project info, Settings"
-                className="ml-1.5 text-[11px] text-accent hover:underline">Set PoC X/R ›</button>
+                title="Open the point-of-connection X/R field in Project info, Settings"
+                className="ml-1.5 text-[11px] text-link hover:underline">Set point-of-connection X/R ›</button>
             )}
             <span className="mx-1.5">·</span>
             Project:{'\u00A0'}<span className="text-text">
@@ -346,6 +366,11 @@ export function GridReadinessScorecard({ data, mode, onJump = () => {}, fieldLab
         <div className="text-[11px] text-muted">Advisory: nothing here blocks Run.</div>
         {sinceRunText(data.profile.since_run) && (
           <div data-testid="gr-since-run" className="text-[11px] text-warn">{sinceRunText(data.profile.since_run)}</div>
+        )}
+        {data.network === 'out_of_date' && (
+          <div data-testid="gr-out-of-date" role="status" className="text-[11px] text-warn">
+            A run is using the project, so this reads the last saved project. It updates when the run finishes.
+          </div>
         )}
         {data.profile.error && (
           <div data-testid="gr-profile-error" className="text-[11px] text-warn">{data.profile.error}</div>

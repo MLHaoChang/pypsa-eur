@@ -235,7 +235,7 @@ export default function Prices() {
 
       {/* ── KPI strip ──────────────────────────────────────────── */}
       <section>
-        <h3 className="text-[12.5px] font-semibold text-text mb-2.5 tracking-[-0.005em]">System prices</h3>
+        <h3 className="text-h3 font-semibold text-text mb-2.5">System prices</h3>
         <div className="grid grid-cols-4 gap-3">
           <KPI accent label="System mean"
                value={kpis ? `${kpis.systemMean.toFixed(2)} €/MWh` : '—'}
@@ -265,7 +265,7 @@ export default function Prices() {
       {/* ── Per-bus table ──────────────────────────────────────── */}
       <section>
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Buses · marginal prices ({busStats?.length ?? 0})</h3>
+          <h3 className="text-h3 font-semibold text-text">Buses · marginal prices ({busStats?.length ?? 0})</h3>
           <button onClick={exportBusStatsCSV} disabled={!busStats}
             className="flex items-center gap-1 text-[11px] text-muted hover:text-accent disabled:opacity-40"
           ><Download size={11} /> CSV</button>
@@ -281,7 +281,7 @@ export default function Prices() {
                 <tr className="border-b border-border">
                   <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Name</th>
                   <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Carrier</th>
-                  <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">v_nom</th>
+                  <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Nominal voltage</th>
                   <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Mean €/MWh</th>
                   <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Peak</th>
                   <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Trough</th>
@@ -316,7 +316,7 @@ export default function Prices() {
               <Seg
                 value={priceSource}
                 onChange={setPriceSource}
-                title="LP dual = raw shadow price of the power-balance constraint. Merit order = LP dual + curtailment_cost added back at hours where a renewable was the marginal dispatch unit."
+                title="LP dual = raw shadow price of the power-balance constraint. Merit order = LP dual + the curtailment cost added back at hours where a renewable was the marginal dispatch unit."
                 options={[
                   { value: 'lp', label: 'LP dual' },
                   { value: 'merit', label: 'Merit order', disabled: !priceChart.hasAdjusted },
@@ -389,7 +389,7 @@ export default function Prices() {
           {priceSource === 'lp' && priceChart.negativeHours > 0 && (
             <div className="mb-2 text-[10px] text-muted italic">
               {priceChart.negativeHours} snapshot{priceChart.negativeHours === 1 ? '' : 's'} contain at least one
-              negative-price bus. This is the LP shadow price; setting <code>curtailment_cost</code> on renewables
+              negative-price bus. This is the LP shadow price; setting a curtailment cost on renewables
               subsidises their dispatch by that amount, which the LP dual reflects as a negative price when the
               renewable is marginal. Switch to <span className="font-medium">Merit order</span> to see prices
               without that subsidy.
@@ -477,7 +477,7 @@ export default function Prices() {
       {priceTS && (
         <section>
           <div className="flex items-center gap-2 mb-2">
-            <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Price drivers</h3>
+            <h3 className="text-h3 font-semibold text-text">Price drivers</h3>
             <label className="text-[10px] text-muted ml-2">|price| ≥</label>
             <input type="number" step="100" min={0}
               value={driverThreshold}
@@ -513,7 +513,7 @@ export default function Prices() {
                     <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Price (€/MWh)</th>
                     <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Marginal gen</th>
                     <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Carrier</th>
-                    <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Gen MC</th>
+                    <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Marginal cost</th>
                     <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Dispatch</th>
                     <th className="text-left  px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Diagnosis</th>
                   </tr>

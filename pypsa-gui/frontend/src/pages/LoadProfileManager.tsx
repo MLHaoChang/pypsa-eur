@@ -317,7 +317,7 @@ export default function LoadProfileManager() {
           <p>• Formats accepted: <span className="font-mono">.xlsx</span>, <span className="font-mono">.xls</span>, <span className="font-mono">.csv</span></p>
           <p className="pt-1 text-[10px]">
             The template provides a 1-week hourly sinusoidal profile (Mon 00:00 → Sun 23:00)
-            scaled between 0 and each load's current static <span className="font-mono">p_set</span>.
+            scaled between 0 and each load's current static demand.
           </p>
         </div>
 

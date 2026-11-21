@@ -71,7 +71,7 @@ const ORDER = ['setup', 'model', 'run', 'results', 'reports']
 const ROWS: Record<string, string[]> = {
   setup: ['Model Horizon', 'Carriers'],
   model: ['Grid connection', 'Loads', 'Add demand', 'Assets', 'Capacity Bounds', 'Time Series', 'Economics'],
-  run: ['Solver Settings', 'Scenarios', 'Grid study', 'Issues', 'Solve Queue'],
+  run: ['Solver settings', 'Scenarios', 'Grid study', 'Issues', 'Solve Queue'],
   results: ['Results', 'Grid study results', 'Planning → dynamics', 'Reports'],
   reports: ['Snapshots', 'Commercial library'],
 }
@@ -136,9 +136,9 @@ describe('M2 — Expert sidebar, expanded', () => {
   it('a step collapses and opens again', async () => {
     await renderSidebar()
     fireEvent.click(screen.getByTestId('sidebar-section-run'))
-    expect(screen.queryByText('Solver Settings')).toBeNull()
+    expect(screen.queryByText('Solver settings')).toBeNull()
     fireEvent.click(screen.getByTestId('sidebar-section-run'))
-    expect(screen.getByText('Solver Settings')).toBeTruthy()
+    expect(screen.getByText('Solver settings')).toBeTruthy()
   })
 
   it('the project is a card in the footer, below the steps', async () => {

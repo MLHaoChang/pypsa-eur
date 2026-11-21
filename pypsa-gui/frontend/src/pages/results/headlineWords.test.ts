@@ -19,6 +19,6 @@ describe('totalCostWords', () => {
     const card = { id: 'system_cost', unit: 'currency', value: -4_550_000 } as HeadlineCard
     expect(headlineFigure(card)).toEqual({ value: '-€4.55 M', basis: `in this solve ${REVENUE_EXCEEDS_COST}` })
     expect(headlineFigure({ ...card, value: 10 })).toEqual({ value: '€10.00', basis: 'in this solve' })
-    expect(headlineFigure({ ...card, id: 'other' })).toEqual({ value: '€-4.55 M', basis: 'in this solve' })
+    expect(headlineFigure({ ...card, id: 'other' })).toEqual({ value: '-€4.55 M', basis: 'in this solve' })
   })
 })

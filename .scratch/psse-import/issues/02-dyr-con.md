@@ -3,7 +3,8 @@
 
 # PSS/E import 02: dynamic data (.dyr) and contingencies (.con)
 
-Status: ready-for-agent
+Status: done (#1714)
+Landed in #1714.
 Type: task
 Owner decision: IMPORTS-1, IMPORT-FLOW-1, HOLISTIC-1, RAW-NAMES-1, PR-SIZE-1
 Gated: yes (GK A, gridspine)

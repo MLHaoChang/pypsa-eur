@@ -66,7 +66,7 @@ export default function AssetTable(
       <p className="p-4 text-[11px] text-muted">
         No time series selected.{' '}
         {onShowAll && (
-          <button onClick={onShowAll} className="text-accent hover:underline">
+          <button onClick={onShowAll} className="text-link hover:underline">
             Show all
           </button>
         )}

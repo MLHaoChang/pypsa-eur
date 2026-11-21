@@ -135,6 +135,11 @@ def test_the_study_verdict_is_the_start_refusal(client, tmp_projects_dir, bound_
     meta = json.loads(path.read_text())
     meta["pack_overrides"] = {**meta["pack_overrides"], "import_energy_mwh_per_year": 1000.0}
     path.write_text(json.dumps(meta))
+    # The template's PoC binding refuses a two-way import (WALK-IMPROVE-1 b ships a
+    # commercial block); without it the study's own refusal is the blocker.
+    _cfg = client.get("/api/simulation/solver_config").json()
+    assert client.put("/api/simulation/solver_config",
+                      json={**_cfg, "commercial": None}).status_code == 200
     grid = next(r for r in client.get("/api/network/links").json() if r["name"] == "grid_import")
     assert client.put("/api/network/links/grid_import",
                       json={**grid, "p_min_pu": -1.0}).status_code == 200

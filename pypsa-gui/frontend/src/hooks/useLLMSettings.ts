@@ -33,12 +33,18 @@
  * Sidebar row AND the ⌘K entry for the rest of the session.
  */
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useIsSuperAdmin } from '../auth/AuthProvider'
 import { fetchLLMSettingsOrNull, type LLMSettingsPayload } from '../api/llmSettings'
 
 export const LLM_SETTINGS_KEY = ['llmSettings'] as const
 
 export function useLLMSettings() {
+  // Issue 49: the route is super-admin only (`_require_super_admin`), so anyone
+  // else is not asked. The query stays idle: `data` is `undefined`, which the
+  // callers already treat as "not for you" (no 403 call, no console error).
+  const isSuperAdmin = useIsSuperAdmin()
   return useQuery<LLMSettingsPayload | null>({
+    enabled: isSuperAdmin,
     queryKey: LLM_SETTINGS_KEY,
     queryFn: fetchLLMSettingsOrNull,
     staleTime: Infinity,
