@@ -9,7 +9,7 @@
 const ACRONYMS: Record<string, string> = {
   ac: 'AC', dc: 'DC', it: 'IT', pv: 'PV', h2: 'H2', ups: 'UPS', ev: 'EV',
   hv: 'HV', mv: 'MV', lv: 'LV', bess: 'BESS', chp: 'CHP', ccgt: 'CCGT', ocgt: 'OCGT',
-  poc: 'PoC', co2: 'CO₂', lng: 'LNG',
+  poc: 'PoC', co2: 'CO₂', lng: 'LNG', nh3: 'NH3',
 }
 
 export function displayName(id: string): string {

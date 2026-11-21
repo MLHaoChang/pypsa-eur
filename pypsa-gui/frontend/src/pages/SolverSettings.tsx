@@ -273,6 +273,8 @@ export default function SolverSettings() {
       ? ['network', 'solver-sclopf-panel'] as const
       : blockRequest === 'offgrid'
       ? ['network', 'solver-offgrid-constraints'] as const
+      : blockRequest === 'island'
+      ? ['network', 'solver-island-constraints'] as const
       : blockRequest === 'goal'
         ? ['network', 'solver-reliability-goal'] as const
       : blockRequest === 'voll'
@@ -281,7 +283,9 @@ export default function SolverSettings() {
           ? ['general', 'solver-solve-strategy'] as const
           : ['dispatch', 'solver-economic-assumptions'] as const
     if (tab !== want) { setTab(want); return }
-    document.getElementById(target)?.scrollIntoView({ block: 'start' })
+    const el = document.getElementById(target)
+    el?.scrollIntoView({ block: 'center' })
+    if (blockRequest === 'island') el?.focus()
     clearBlockRequest()
   }, [blockRequest, draft, tab, clearBlockRequest])
   // "Switch it under What the Run computes › N-1 security" (or › Load flow): the

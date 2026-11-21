@@ -1,0 +1,6 @@
+{"kinds": {
+  "bundle_unsafe_path": {"surface": "inline", "why": "import_project_bundle: the archive holds a member outside the project (absolute path, '..', a drive letter or backslash) or a link. Nothing was imported; the assistant says the bundle is unsafe and asks for a fresh export."},
+  "bundle_name_clash": {"surface": "inline", "why": "import_project_bundle: two archive members are one file on Windows or macOS (case, trailing dot or space). Nothing was imported; the assistant names both members and asks for a fresh export."},
+  "bundle_too_large": {"surface": "inline", "why": "import_project_bundle: the archive unpacks to more than the cap (PYPSA_GUI_MAX_BUNDLE_UNPACKED_BYTES). Nothing was imported; the assistant says so and suggests exporting without large uploads."},
+  "bundle_unknown_kind": {"surface": "inline", "why": "import_project_bundle: metadata.json names a project kind this app does not know. Nothing was imported; the assistant names the kind and suggests importing in the app version that exported it."}
+}}

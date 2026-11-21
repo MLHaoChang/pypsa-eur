@@ -1145,8 +1145,14 @@ def run_eh_study(
     mc_draws: int | None = None,
     mc_seed: int | None = None,
     mc_cov_target: float | None = None,
+    on_private_copy=None,
 ) -> ReferenceDesignReport:
     """Synchronous EH study driver (HTTP worker: ``eh_study_runner``).
+
+    ``on_private_copy(network)``, when given, reads the study's private copy
+    right after it is made, outside the shared network lock (the runner
+    records the run's assumed inputs from it, template-e2e 08); it must not
+    change it.
 
     Stages execute in spec decision-18 order (``EH_PIPELINE_STAGES``) from
     the stage table ``_STAGE_HANDLERS``.
@@ -1201,6 +1207,9 @@ def run_eh_study(
     with lock:
         _detach_solver_model(network)
         network = network.copy()
+    # The copy is this study's alone now, so it is read outside the shared lock.
+    if on_private_copy is not None:
+        on_private_copy(network)
     # Private cfg: the pack target wins for every stage, the session config
     # is left exactly as the user set it.
     cfg = copy.copy(cfg) if cfg is not None else SolverConfig()

@@ -416,7 +416,7 @@ def test_data_file_rows_not_read_never_use_the_placeholder():
         "Generator 'G' (Max Capacity)",
         "time series for 'Max Capacity' is not imported yet",
     ) in got
-    assert ("Node 'A' (Load)", "scaled by Variable 'V': later slice") in got
+    assert ("Node 'A' (Load)", "data file: no column 'A'") in got
     assert ("Node 'A' (Voltage)", "2 data files on one row; none used") in got
 
 
@@ -640,7 +640,18 @@ def test_world_fixture_with_its_csvs_in_a_zip(tmp_path):
     assert not conv.report.warnings
 
 
+def _no_scenarios(m):
+    """The Europe Model with its scenarios off: the 2b base rows and files."""
+    m.memberships = [
+        x
+        for x in m.memberships
+        if not (x.parent[0] == "Model" and x.child[0] == "Scenario")
+    ]
+    return m
+
+
 def run_files(m, files):
+    m = _no_scenarios(m)
     conv = convert(m, {"model": "PLEXOS World 2015 Europe"}, None, files)
     check_ledger(m, conv)
     return conv

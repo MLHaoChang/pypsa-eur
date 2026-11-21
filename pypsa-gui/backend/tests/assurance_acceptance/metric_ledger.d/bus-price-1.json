@@ -1,0 +1,67 @@
+{
+ "profiles": {
+  "bus-price/1": [
+   {
+    "metric": "mean_price",
+    "formula": "sum over t of w_generators[t] x marginal_price[t] / sum over t of w_generators[t]",
+    "validity": "verified solve (else unverified_solve); prices and weights finite, weights >= 0 and sum > 0, else invalid_or_missing_price_data. Refusals: unknown_bus, misaligned_source, unsupported_snapshot_scope",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_bus_price_is_time_weighted_and_observed",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_bus_price_is_time_weighted_and_observed"
+     },
+     "workbook": {
+      "status": "pending",
+      "test": null,
+      "ticket": ".scratch/assistant-assurance/issues/22-workbook-mean-price-unweighted.md"
+     }
+    }
+   },
+   {
+    "metric": "min_price",
+    "formula": "min over t of marginal_price[t]",
+    "validity": "verified solve (else unverified_solve); prices and weights finite, weights >= 0 and sum > 0, else invalid_or_missing_price_data. Refusals: unknown_bus, misaligned_source, unsupported_snapshot_scope",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_bus_price_is_time_weighted_and_observed",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_bus_price_is_time_weighted_and_observed"
+     }
+    }
+   },
+   {
+    "metric": "max_price",
+    "formula": "max over t of marginal_price[t]",
+    "validity": "verified solve (else unverified_solve); prices and weights finite, weights >= 0 and sum > 0, else invalid_or_missing_price_data. Refusals: unknown_bus, misaligned_source, unsupported_snapshot_scope",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_bus_price_is_time_weighted_and_observed",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_bus_price_is_time_weighted_and_observed"
+     }
+    }
+   },
+   {
+    "metric": "hours_at_voll",
+    "formula": "sum over t of w_generators[t] where marginal_price[t] >= VoLL x (1 - tolerance)",
+    "validity": "verified solve (else unverified_solve); prices and weights finite, weights >= 0 and sum > 0, else invalid_or_missing_price_data. Refusals: unknown_bus, misaligned_source, unsupported_snapshot_scope; VoLL of the solve > 0, else voll_missing_or_zero",
+    "tolerance": "harness.price_calculations:VOLL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_hours_at_voll_use_the_solves_voll_and_need_one",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_hours_at_voll_use_the_solves_voll_and_need_one"
+     }
+    }
+   }
+  ]
+ }
+}

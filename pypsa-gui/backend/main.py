@@ -68,6 +68,7 @@ from db import session as db_session_module
 from deps import bind_active_project, resolve_request_session, resolve_request_user
 from services import project_write_gate
 from services import active_project
+from services.app_version import APP_VERSION
 from services import fs_permission
 from services import shutdown as shutdown_service
 from routers import (
@@ -75,6 +76,7 @@ from routers import (
     asset_results,
     assistant_activity,
     auth,
+    catalogue,
     changelog,
     chat,
     dictation,
@@ -113,6 +115,7 @@ from routers import (
     studies,
     uploads,
     vintage,
+    workbook,
 )
 from services.commercial import stamp_currency
 from services.pypsa_service import PyPSAService
@@ -724,7 +727,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="PyPSA Studio API",
-    version="1.0.0",
+    version=APP_VERSION,
     lifespan=lifespan,
     # Runs before every endpoint on every router: binds the caller's session to
     # its active project so the ~110 routes that name no project resolve
@@ -1388,6 +1391,8 @@ app.include_router(
 app.include_router(library.router, prefix="/api/library", tags=["library"])
 # The shipped (common) cost references: read-only, the same for every org.
 app.include_router(library_references.router, prefix="/api/library/references", tags=["library"])
+# The Parameter catalogue (expert-catalogue 01a): project-free, the same for every org and caller.
+app.include_router(catalogue.router, prefix="/api/catalogue", tags=["catalogue"])
 app.include_router(network.router, prefix="/api/network", tags=["network"])
 # Mount /api/network/cluster from the dedicated clustering router. Sharing the
 # /api/network prefix keeps the endpoint adjacent to other network mutations.
@@ -1415,6 +1420,8 @@ app.include_router(asset_results.router, prefix="/api/results/asset", tags=["ass
 # so it's adjacent to the foreground solve lifecycle it shares (_state, log_stream).
 app.include_router(solve_queue.router, prefix="/api/simulation/queue", tags=["solve-queue"])
 app.include_router(io.router, prefix="/api/io", tags=["io"])
+# The Excel input workbook (IMPORTS-1): outside /api/io, since it never touches the open network.
+app.include_router(workbook.router, prefix="/api/workbook", tags=["io"])
 # The manual-mapping form's preview of an equipment table: a read, mounted outside
 # /api/network so it takes no undo snapshot and clears no results.
 from routers.network_equipment_table import preview_router as _equipment_table_preview  # noqa: E402

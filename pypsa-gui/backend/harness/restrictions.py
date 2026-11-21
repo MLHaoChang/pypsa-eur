@@ -80,7 +80,15 @@ def capture(session):
     with chat_tools._acting() as (db, user):
         if session.owner_user_id is not None and session.owner_user_id != str(user.id):
             raise HTTPException(403, 'Chat ownership changed.')
-        project = current_project(db, user, project_id)
+        try:
+            project = current_project(db, user, project_id)
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+            # No access is not an unreadable store (issue 17); still 404, so a
+            # project's existence never leaks across the access boundary.
+            raise HTTPException(404, {'error_kind': 'project_access_denied',
+                                      'message': 'You do not have access to this project. No tool was admitted.'}) from exc
         # The caller's project role, read fresh at every admission and again at
         # execution (require_current), so an editor demoted to viewer mid-turn
         # is refused at the next write (project-viewer-role 01, GK B R3).
@@ -89,10 +97,25 @@ def capture(session):
                 'project_role': role}
 
 
+def role_admits(snapshot, tier):
+    """Whether the snapshot's project role admits a tool of `tier`.
+
+    The one rule for a viewer: the chat offers a tool exactly when dispatch
+    would admit it (project-viewer-role 01, GK B3 V5). No snapshot (an
+    unsaved draft) has no role to judge.
+    """
+    return snapshot is None or snapshot.get('project_role') == project_acl.EDIT or tier == 'read'
+
+
+def view_only(snapshot):
+    """True when the snapshot's caller may view the project but not change it."""
+    return not role_admits(snapshot, 'write')
+
+
 def _require_role(snapshot, tier):
     # A viewer's write is refused whatever personal rule is saved: a saved
     # 'standard' rule never loosens the role (project-viewer-role 01).
-    if snapshot is not None and snapshot.get('project_role') != project_acl.EDIT and tier != 'read':
+    if not role_admits(snapshot, tier):
         raise project_write_gate.refusal()
 
 

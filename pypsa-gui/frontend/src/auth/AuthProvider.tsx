@@ -108,6 +108,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
+/**
+ * Whether the signed-in user may do what the backend's `_require_super_admin`
+ * guards (the shared API key and model settings). Unlike `isAdmin` it excludes
+ * org admins. False while nobody is signed in or no provider is mounted.
+ */
+export function useIsSuperAdmin(): boolean {
+  return useContext(AuthContext)?.user?.is_super_admin === true
+}
+
+/** 'unknown' while the session's user is still being read, so a caller can show nothing instead of the wrong variant. */
+export function useSuperAdminState(): 'unknown' | 'yes' | 'no' {
+  const ctx = useContext(AuthContext)
+  if (ctx?.status === 'loading') return 'unknown'
+  return ctx?.user?.is_super_admin === true ? 'yes' : 'no'
+}
+
 export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext)
   if (!context) {

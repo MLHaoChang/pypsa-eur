@@ -65,6 +65,13 @@ SERVICE_WORDS = {"grid_forming": "grid forming", "synthetic_inertia": "synthetic
                  "fast_frequency_response": "fast frequency response", "voltage_control": "voltage control"}
 
 
+def _asset_names(names) -> str:
+    """Asset ids as the app reads them (utils/displayName.ts), each in curly quotes."""
+    from services.run_actions import _display_name
+
+    return ", ".join(f"\u201c{_display_name(n)}\u201d" for n in names)
+
+
 def _services_text(services) -> str:
     return ", ".join(SERVICE_WORDS.get(x, x) for x in services)
 
@@ -281,20 +288,82 @@ def _scr_rows(inp: _Inputs) -> list[dict]:
         return [_row("scr", "Short-circuit ratio at the PoC", project_value=None,
                      verdict="unknown", assumed=True, note="The project has no saved network",
                      **base)]
-    gates, status, payload, note = evaluate_network_scr_gate(inp.n)
-    if status != "ok" or gates is None:
+    arch = _arch_offer(inp)
+    from services.dc_architecture import LABEL, behind_architecture
+    behind = behind_architecture(inp.n, inp.island, arch[0] if arch else None)
+    gates, status, payload, note = evaluate_network_scr_gate(inp.n, behind=behind)
+    # A capped gate (not_established with a computed payload) still shows its figure.
+    if payload is None or payload.get("min_scr") is None:
+        from services.adequacy.scr_gate import unattributed_converters
+        off = unattributed_converters(inp.n, behind)
         return [_row("scr", "Short-circuit ratio at the PoC", project_value=None,
                      verdict="unknown", assumed=True,
                      note=("No short-circuit level and inverter capacity at every point of connection, "
-                           "so the SCR is not known"), **base)]
-    verdict = _judge(float(payload["min_scr"]), PASS_SCR, RULE_SCR)
-    extra = "; below it an EMT study is recommended" if gates.emt_recommended else ""
+                           "so the SCR is not known: enter the fault level and, where the network has no "
+                           "inverter-based generator or battery to derive it from (or has several points of "
+                           "connection), the IBR capacity field of each point of connection's bus"
+                           + (f". Converters on no point of connection's bus, so their point of connection is "
+                              f"unknown: {', '.join(map(_display, off))}" if off else "")),
+                     **base)]
+    # GK A (walkthrough 05, GK A 31): the gate itself withholds a Pass when any
+    # PoC's capacity is capped (stated below its converters, or a converter not
+    # sized yet), for every caller. It reads unknown, not warn, so the verdict
+    # stays the declared rule's wherever it is given (checked results S9: a
+    # checker withholds unknown). A real SCR below 3.0 still warns.
+    verdict = "unknown" if gates is None else _judge(float(payload["min_scr"]), PASS_SCR, RULE_SCR)
+    extra = "; below it an EMT study is recommended" if gates is not None and gates.emt_recommended else ""
+    low = next(r for r in payload["buses"] if r["bus"] == payload["min_bus"])
+    label = LABEL[arch[0]] if arch else None
+    capped = [r for r in payload["buses"] if r["bus"] in payload.get("capped_pocs", ())]
+    others = "".join(f". At {r['bus']} (SCR {r['scr']:.4g}): {_capacity_words(r, label)}"
+                     for r in capped if r is not low)
     return [_row("scr", "Short-circuit ratio at the PoC", project_value=round(payload["min_scr"], 3),
                  verdict=verdict, assumed=True,
                  note=(f"Lowest SCR, at {payload['min_bus']}: fault level over inverter-based capacity "
                        f"(MVA){extra}; " + ("fault level assumed" if fault_assumed
-                                            else "fault level as entered")),
+                                            else "fault level as entered")
+                       + f". {_capacity_words(low, label)}{others}"),
                  **base)]
+
+
+def _display(name: str) -> str:
+    from services.run_actions import _display_name
+    return _display_name(name)
+
+
+def _stated_below(row: dict) -> bool:
+    from services.adequacy.scr_gate import stated_below
+    return stated_below(row)
+
+
+def _unsized(row: dict) -> bool:
+    from services.adequacy.scr_gate import unsized
+    return unsized(row)
+
+
+def _capacity_words(row: dict, architecture: str | None) -> str:
+    """Where the SCR's inverter capacity comes from (DC grid-readiness walkthrough 05)."""
+    mva, assets, derived = row["ibr_mva"], row.get("ibr_assets") or {}, row.get("ibr_derived_mva")
+    solved = set(row.get("ibr_solved") or ())
+    listed = ", ".join(f"{_display(k)} {v:.4g}" + (" (from the last solve)" if k in solved else "")
+                       for k, v in assets.items() if v > 0) or "none sized"
+    if row.get("ibr_source") == "stated":
+        text = (f"Inverter capacity {mva:.4g} MVA, stated in the PoC bus's IBR capacity field; "
+                "assumed unless you sourced it")
+        if _stated_below(row):
+            text += (f". It is below the converter-coupled assets the network now holds ({derived:.4g} MVA: "
+                     f"{listed}): it predates them, so a Pass is not established; clear it to derive "
+                     "the capacity from them")
+    else:
+        text = (f"Inverter capacity {mva:.4g} MVA, derived from the converter-coupled assets ({listed}), "
+                "installed MW read as MVA (assumed)")
+    if _unsized(row):
+        text += (f"; not sized yet, counted 0: {', '.join(map(_display, row['ibr_unsized']))}, so a "
+                 "Pass is not established before sizing")
+    if row.get("ibr_excluded") and architecture:
+        text += (f"; not counted: behind the {architecture} ({', '.join(map(_display, row['ibr_excluded']))}). "
+                 "The architecture's own grid-facing converter is not in this figure")
+    return text
 
 
 def _in_hour_uplift_mw(inp: _Inputs, period: str) -> float | None:
@@ -1342,8 +1411,31 @@ def _governing_poc(n) -> tuple[str | None, int]:
 def _services(inp: _Inputs):
     if inp.island is None:
         return None
-    from services.adequacy.island_config import offered_services
-    return offered_services(inp.island)
+    arch = _arch_offer(inp)
+    return grid_facing_offer(inp.n, inp.island, arch[0] if arch else None)
+
+
+def grid_facing_offer(n, island: dict, architecture: str | None) -> dict:
+    """The island's ``offered_services`` as the PoC sees them (DC grid-readiness
+    walkthrough 03). Under a set power ``architecture`` a unit behind it
+    (``dc_architecture.behind_architecture``) reaches the grid only through
+    the architecture's converters, so its services are not credited here: the
+    architecture's own (assumed) services stand in for them. ``behind`` names
+    those units; ``sources`` maps each credited service to the units offering
+    it. An unset architecture keeps every unit, as before."""
+    from services.adequacy.island_config import SERVICES, offered_services
+    from services.dc_architecture import behind_architecture
+
+    got = offered_services(island)
+    behind = behind_architecture(n, island, architecture)
+    units = {k: v for k, v in got["units"].items() if k not in behind}
+    sources: dict[str, list[str]] = {}
+    for name, u in units.items():
+        for x in u["services"]:
+            sources.setdefault(x, []).append(name)
+    order = list(SERVICES) or list(sources)
+    services = got["services"] if not behind else [x for x in order if x in sources]
+    return {**got, "units": units, "services": services, "behind": behind, "sources": sources}
 
 
 def _no_island_note(inp: _Inputs) -> str:
@@ -1412,10 +1504,10 @@ def _reactive_row(inp: _Inputs) -> dict:
         derivation += f"; {', '.join(unrated)} counted zero: no rated power factor or no rating"
     source = f"{source}. {derivation}"
     if unsized and verdict == "unknown":
-        note = (f"Not sized yet: {', '.join(unsized)} — run the plan to see the reactive range "
+        note = (f"Not sized yet: {_asset_names(unsized)}: run the plan to see the reactive range "
                 f"{'it adds' if len(unsized) == 1 else 'they add'}.")
     elif unsized:
-        note = f"Enough without {', '.join(unsized)}, which are not sized yet"
+        note = f"Enough without {_asset_names(unsized)}, which are not sized yet"
     elif verdict == "warn":
         note = f"Short by {need - have:.4g} Mvar"
     else:
@@ -1426,28 +1518,47 @@ def _reactive_row(inp: _Inputs) -> dict:
 
 
 def service_verdict(offered, arch_counted=(), *, wanted=None, conditional=(),
-                    architecture: str | None = None) -> dict:
+                    architecture: str | None = None,
+                    offered_sources: dict[str, list[str]] | None = None) -> dict:
     """The support rule (DC 05, shared with the architecture compare): a
     service the island's units offer passes; one only the power architecture
     can offer is assumed and reads warn, never pass on that alone (GK A C6);
     a service waiting for DC-bus storage is listed as conditional and never
-    counts. ``wanted`` defaults to the frequency services. ``offered`` None
-    (no island) with nothing from the architecture is unknown."""
+    counts. ``wanted`` defaults to the frequency services; an explicit
+    ``wanted`` also limits the value to those services, so the voltage-control
+    cell does not repeat the frequency ones (DC walk 05 shots). ``offered`` None
+    (no island) with nothing from the architecture is unknown.
+    ``offered_sources`` (``grid_facing_offer``'s ``sources``) names the units
+    offering each service, in the value and in ``sources``
+    ([{service, label, units}], each service's credited units in full)."""
+    shown = (lambda xs: [x for x in xs if x in wanted]) if wanted else list
     wanted = tuple(wanted or _FREQUENCY_SERVICES)
     arch = [x for x in (arch_counted or ()) if x not in (offered or [])]
     have = [x for x in (offered or []) if x in wanted]
     arch_have = [x for x in arch if x in wanted]
     cond = [x for x in (conditional or ()) if x in wanted]
     if offered is None and not arch and not cond:
-        return {"verdict": "unknown", "project_value": None, "assumed_from_architecture": []}
-    parts = [_services_text(offered)] if offered else []
+        return {"verdict": "unknown", "project_value": None, "assumed_from_architecture": [],
+                "sources": [], "value_rest": None}
+    own, arch, cond_shown = shown(offered or []), shown(arch), shown(conditional or ())
+    sources = ([{"service": x, "label": SERVICE_WORDS.get(x, x),
+                 "units": [_display(u) for u in offered_sources.get(x, [])]}
+                for x in own] if offered_sources is not None else [])
+    parts = []
+    if own:
+        parts.append(" · ".join(f"{r['label']} ({', '.join(r['units'])})" for r in sources)
+                     if sources else _services_text(own))
     if arch:
-        parts.append(f"{_services_text(arch)} (assumed, {architecture or 'architecture'})")
-    if cond:
-        parts.append(f"{_services_text(cond)} (conditional on DC-bus storage)")
+        # never counted toward a Pass (GK A C6), said in the value, not only the note (UX 2)
+        parts.append(f"{_services_text(arch)} (assumed, {architecture or 'architecture'}: not counted)")
+    if cond_shown:
+        parts.append(f"{_services_text(cond_shown)} (conditional on DC-bus storage)")
     value = "; ".join(parts) if parts else "none"
+    # ``value_rest``: the value after the unit-named services, for a UI that
+    # renders ``sources`` itself (folded) and this text after it.
     return {"verdict": "pass" if have else "warn", "project_value": value,
-            "assumed_from_architecture": arch_have, "conditional": cond}
+            "assumed_from_architecture": arch_have, "conditional": cond, "sources": sources,
+            "value_rest": "; ".join(parts[1:] if sources else parts) or None}
 
 
 def _arch_offer(inp: _Inputs):
@@ -1481,15 +1592,21 @@ def _support_rows(inp: _Inputs) -> list[dict]:
     else:
         from services import dc_architecture as A
         got = service_verdict(offered, arch[1]["counted"], conditional=arch[1]["conditional"],
-                              architecture=A.LABEL[arch[0]])
+                              architecture=A.LABEL[arch[0]],
+                              offered_sources=services["sources"] if services else None)
         verdict, value = got["verdict"], got["project_value"]
+        note += f". Power architecture {A.LABEL[arch[0]]}: {A.SERVICE_WHY[arch[0]]}"
+        if services and services["behind"]:
+            note += (f"; behind it, not credited at the PoC: {', '.join(map(_display, services['behind']))}")
         if got["assumed_from_architecture"] or got.get("conditional"):
-            note += f". Power architecture {A.LABEL[arch[0]]}: {A.RMS_CAVEAT}"
+            note += f". {A.RMS_CAVEAT}"
     rows = [_row("frequency_support", "Frequency support offered by the site's converters",
                  limit="at least one of " + _services_text(_FREQUENCY_SERVICES), unit=None,
                  source="Assumed: the scorecard's own expectation for a large connection; the grid "
                         "code sets no limit", project_value=value,
                  verdict=verdict, assumed=True, note=note, section="assets", target=target)]
+    if arch is not None:  # each credited service's units, for the UI to fold (unset: as before)
+        rows[0]["sources"], rows[0]["value_rest"] = got["sources"], got["value_rest"]
     for r in (inp.profile or {}).get("dynamic_requirements") or []:
         rows.append(_row(f"dynamic:{r['id']}", r["requirement"], limit=r["value"], unit=None,
                          source=f"{_profile_title(inp)}: {r['clause']}",
@@ -1543,7 +1660,7 @@ def _island_rows(inp: _Inputs) -> list[dict]:
         if inp.island_study is not None:
             note += "; the study is the stored one, re-run it after a network edit"
         rows.append(_row(f"ride_through:{sc}", f"Island ride-through ({SCENARIO_WORDS.get(sc, sc)})",
-                         limit=(f"bridge {bridge:g} s on {', '.join(storage) or 'the site storage'}"
+                         limit=(f"bridge {bridge:g} s on {_asset_names(storage) or 'the site storage'}"
                                 if bridge is not None else "the island requirements"),
                          unit=None, source="The island requirements (each value tagged with its source)",
                          project_value=value, verdict=verdict,
@@ -1824,11 +1941,15 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
                       "input is missing, never a pass")}
 
 
-def grid_readiness_for(project, profile: str | None = None) -> dict:
-    """The scorecard of a registered project: its saved network, its
-    published grid codes, and the active session's reliability study when
-    this project is the active one. ``profile`` defaults to the campus
-    study's last-run profile, else its default."""
+def grid_readiness_for(project, profile: str | None = None, *, source: str = "live") -> dict:
+    """The scorecard of a registered project: its network, its published
+    grid codes, and the active session's reliability study when this project
+    is the active one. ``profile`` defaults to the campus study's last-run
+    profile, else its default. ``source="live"`` (the screen) reads the loaded
+    network when the project is loaded, unsaved edits included (DC
+    grid-readiness walkthrough 04); ``"saved"`` (the report, whose other
+    chapters read the saved project) reads the saved file only. The answer's
+    ``network`` names which: ``live``, ``saved`` or ``out_of_date``."""
     import pypsa
     from fastapi import HTTPException
 
@@ -1845,16 +1966,50 @@ def grid_readiness_for(project, profile: str | None = None) -> dict:
         raise HTTPException(status_code=422, detail={
             "error_kind": "unknown_grid_code_profile",
             "message": f"unknown grid-code profile {profile!r}; known {sorted(known)}"})
-    nc = d / ce.NETWORK_FILE
-    n = None
-    if nc.is_file():
-        with ce._netcdf_lock():
-            n = pypsa.Network(str(nc))
+    # DC grid-readiness walkthrough 04: unsaved edits are read, not the saved file.
+    n, unsaved = _live_network(project) if source == "live" else (None, "saved")
+    if n is None:
+        nc = d / ce.NETWORK_FILE
+        if nc.is_file():
+            with ce._netcdf_lock():
+                n = pypsa.Network(str(nc))
     record, edited = _active_study(d)
     out = grid_readiness(d, n, profile, profile_dirs=(codes,), eh_study=record, study_edited=edited)
+    # "live": the rows read the loaded network, unsaved edits included;
+    # "out_of_date": it was busy, so the saved file was read and may lag them.
+    out["network"] = unsaved
     # SCORECARD-STALE-1: whether this profile is still the code the last campus run was held to.
     out["profile"]["since_run"] = ce.grid_code_since_run(project, profile)
     return out
+
+
+#: How long the scorecard waits for a busy network before it reads the saved file.
+LIVE_LOCK_TIMEOUT_S = 2.0
+
+
+def _live_network(project) -> tuple[Any, str]:
+    """A copy of the project's in-memory network when it is loaded, with
+    ``"live"`` (it holds every edit, saved or not); ``(None, "saved")`` when
+    it is not loaded; ``(None, "out_of_date")`` when its mutation lock stays
+    held (a solve), so the saved file is read and may lag unsaved edits."""
+    try:
+        from services import project_registry
+        from services.pypsa_service import PyPSAService
+
+        # The registry key is the project's org and uuid: only the context of the
+        # project the route authorised is read (GK A L2).
+        ctx = PyPSAService.get_context(project_registry.registry_key(project))
+    except Exception:  # noqa: BLE001 — not loaded reads the saved file
+        return None, "saved"
+    if ctx is None:
+        return None, "saved"
+    lock = ctx.mutation_lock
+    if not lock.acquire(timeout=LIVE_LOCK_TIMEOUT_S):
+        return None, "out_of_date"
+    try:
+        return ctx.network.copy(), "live"
+    finally:
+        lock.release()
 
 
 def _known_profiles(codes: pathlib.Path) -> set | None:

@@ -3,7 +3,7 @@
 
 # Readers outside checked answers still show a MIP's 0.0 bus prices
 
-Status: needs-triage
+Status: ready-for-agent
 Type: bug
 Found by: GK B (65) on #1680 (issue 10, S2).
 
@@ -24,3 +24,7 @@ views, Compare, reports, headline KPIs, LCOH and `prices_digest`.
 - A committable-unit test per reader shows that no 0.0 is presented as a price.
 
 ## Comments
+
+## Triage (2026-11-20, master 87cf52a7)
+
+Checked by code reading only. Still true: only `checked_charts.py` and `harness/solve_validity.py` handle `mip_duals_not_marginal`. Slice by reader (Results price views, Compare, reports, headline KPIs and LCOH, `prices_digest`), PR-SIZE-1. Acceptance is the section above. Gated: GK B. Blocked by: none.

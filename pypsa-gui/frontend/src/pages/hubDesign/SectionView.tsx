@@ -80,11 +80,13 @@ export function SectionView({ id, onNext, children }: {
       </div>
       {items.length > 0 && (
         <ul data-testid="section-items"
-          className="flex flex-col gap-1.5 rounded border border-border bg-panel px-3 py-2">
+          className="flex flex-col gap-1.5 rounded-card border border-border bg-panel px-3 py-2">
           {items.map((it, i) => <ItemRow key={`${it.code}-${it.target.entity ?? ''}-${i}`} item={it} />)}
         </ul>
       )}
-      <AssumptionsCard key={id} items={assumed} />
+      {/* Waiting: the section is "to check" only because of these defaults. */}
+      <AssumptionsCard key={id} items={assumed}
+        waiting={s?.state === 'warning' && items.length === 0 && assumed.length > 0} />
       {!stateless && <SectionNotInScope section={id} />}
       {infos.length > 0 && (
         <ul data-testid="section-infos" className="flex flex-col gap-0.5 text-[11px] text-muted">

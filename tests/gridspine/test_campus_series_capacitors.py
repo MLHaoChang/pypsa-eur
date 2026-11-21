@@ -1,0 +1,777 @@
+# SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
+#
+# SPDX-License-Identifier: MIT
+"""
+GC-01b: series capacitors in the campus description.
+
+A ``series_capacitors`` entry is ``{from_bus, to_bus, xc_ohm}`` or the
+compensation degree ``k`` with the ``line`` (a cable in series with it) it
+compensates, Xc = k * X_line. It enters the net as a pandapower
+``impedance`` of -Xc, is listed in ``Campus.series_capacitors``, and is
+handed to GC-08's sub-synchronous scan as ``Campus.series_caps``.
+
+The oracles are arithmetic: the per-unit impedance is -Xc / (Vn^2 / Sbase);
+a series capacitor cancels part of the feeder's reactance, so the far bus's
+voltage rises.
+"""
+
+import copy
+
+import pandapower as pp
+import pytest
+
+from gridspine.ingest.campus import build_campus
+from gridspine.schema.contracts import ContractError
+from gridspine.schema.model_set import data_hash
+from tests.gridspine.test_campus import campus_spec, t
+
+# X of CB1: 0.11 ohm/km * 2 km.
+X_CB1 = 0.22
+
+
+def cap_spec(**cap):
+    """
+    ``campus_spec`` with MV1 -> SC1 -> MV1C -> CB1 -> MV2: the cable now
+    starts at a dedicated bus, the capacitor in series with it.
+    """
+    spec = campus_spec()
+    c = spec["campus"]
+    c["buses"]["MV1C"] = {"vn_kv": 20.0}
+    c["cables"]["CB1"]["from_bus"] = "MV1C"
+    entry = {"from_bus": "MV1", "to_bus": "MV1C", "xc_ohm": t(0.1, "datasheet")}
+    entry.update(cap)
+    entry = {k: v for k, v in entry.items() if v is not None}
+    c["series_capacitors"] = {"SC1": entry}
+    return spec
+
+
+def _refused(spec, match):
+    with pytest.raises(ContractError, match=match):
+        build_campus(spec)
+
+
+# --- the build ---------------------------------------------------------------
+
+
+def test_a_series_capacitor_is_a_negative_reactance_impedance_in_the_net():
+    campus = build_campus(cap_spec())
+    imp = campus.net.impedance
+    assert list(imp["name"]) == ["SC1"]
+    row = imp.iloc[0]
+    # Zbase = 20 kV^2 / 1 MVA = 400 ohm; -0.1 / 400 = -0.00025 pu.
+    assert row.xft_pu == pytest.approx(-0.00025, abs=1e-12)
+    assert row.xtf_pu == pytest.approx(-0.00025, abs=1e-12)
+    assert (row.rft_pu, row.rtf_pu, row.sn_mva) == (0.0, 0.0, 1.0)
+    assert campus.net.bus.at[row.from_bus, "name"] == "MV1"
+    assert campus.net.bus.at[row.to_bus, "name"] == "MV1C"
+
+
+def test_the_table_lists_the_capacitor_with_its_tag_and_the_scan_form_uses_pandapower_buses():
+    campus = build_campus(cap_spec())
+    tab = campus.series_capacitors
+    assert list(tab.index) == ["SC1"]
+    assert tab.loc["SC1"].to_dict() == {
+        "from_bus": "MV1",
+        "to_bus": "MV1C",
+        "xc_ohm": 0.1,
+        "source": "datasheet",
+        "protection": "bypassed",
+        "pypsa_name": None,
+    }
+    bus = {n: i for i, n in campus.net.bus["name"].items()}
+    assert campus.series_caps == [(bus["MV1"], bus["MV1C"], 0.1)]
+    p = campus.params
+    assert p[(p["element"] == "SC1") & (p["param"] == "xc_ohm")][
+        ["value", "source"]
+    ].values.tolist() == [[0.1, "datasheet"]]
+
+
+def test_k_with_its_cable_gives_xc_as_k_times_the_cables_reactance_with_ks_tag():
+    campus = build_campus(cap_spec(xc_ohm=None, k=t(0.4, "measured"), line="CB1"))
+    row = campus.series_capacitors.loc["SC1"]
+    assert row.xc_ohm == pytest.approx(0.4 * X_CB1, rel=1e-12)
+    assert row.source == "measured"
+    assert campus.net.impedance.iloc[0].xft_pu == pytest.approx(-0.088 / 400, rel=1e-12)
+
+
+def test_k_reads_a_parallel_cables_combined_reactance():
+    spec = cap_spec(xc_ohm=None, k=t(0.5), line="CB1")
+    spec["campus"]["cables"]["CB1"]["parallel"] = 2
+    assert build_campus(spec).series_capacitors.loc["SC1"].xc_ohm == pytest.approx(
+        0.5 * X_CB1 / 2, rel=1e-12
+    )
+
+
+def test_the_capacitor_cancels_part_of_the_feeders_reactance_so_the_far_bus_sits_higher():
+    def v_mv2(spec):
+        campus = build_campus(spec)
+        pp.runpp(campus.net)
+        return float(
+            campus.net.res_bus.loc[campus.net.bus["name"] == "MV2", "vm_pu"].iloc[0]
+        )
+
+    plain = v_mv2(campus_spec())
+    with_cap = v_mv2(cap_spec(xc_ohm=t(0.1)))
+    stronger = v_mv2(cap_spec(xc_ohm=t(0.2)))
+    assert plain < with_cap < stronger
+
+
+def test_a_campus_without_the_key_builds_unchanged():
+    campus = build_campus(campus_spec())
+    assert campus.series_capacitors.empty
+    assert list(campus.series_capacitors.columns) == [
+        "from_bus",
+        "to_bus",
+        "xc_ohm",
+        "source",
+        "protection",
+        "pypsa_name",
+    ]
+    assert campus.series_caps == []
+    assert campus.net.impedance.empty
+
+
+def test_a_series_capacitors_pypsa_name_is_kept_in_its_table():
+    caps = build_campus(cap_spec(pypsa_name="SC-north")).series_capacitors
+    assert caps.loc["SC1", "pypsa_name"] == "SC-north"
+    assert build_campus(cap_spec()).series_capacitors.loc["SC1", "pypsa_name"] is None
+
+
+def test_protection_none_is_kept_and_the_default_is_bypassed():
+    assert (
+        build_campus(cap_spec(protection="none"))
+        .series_capacitors.loc["SC1"]
+        .protection
+        == "none"
+    )
+    assert (
+        build_campus(cap_spec(protection="bypassed"))
+        .series_capacitors.loc["SC1"]
+        .protection
+        == "bypassed"
+    )
+
+
+# --- the freeze's data hash (S4) ---------------------------------------------
+
+#: data_hash(campus_spec(), {}) on master before GC-01b (b34f80c3): the key's code
+#: must not change the hash of a campus that does not use it.
+PINNED_HASH = "ab1046752ec5787004fa70665a76b4782797ffbc42acc7a3092df2c3fc9457fb"
+
+
+def test_the_freeze_hash_of_a_campus_without_capacitors_is_unchanged_and_one_with_them_differs():
+    assert data_hash(campus_spec(), {}) == PINNED_HASH
+    with_cap = data_hash(cap_spec(), {})
+    assert with_cap != PINNED_HASH
+    other = data_hash(cap_spec(xc_ohm=t(0.2, "datasheet")), {})
+    assert other not in (with_cap, PINNED_HASH)
+
+
+# --- refusals, each with its own reason --------------------------------------
+
+
+def test_an_unknown_bus_is_refused_naming_the_field():
+    _refused(
+        cap_spec(to_bus="NOWHERE"),
+        r"series_capacitors\.SC1\.to_bus: unknown bus 'NOWHERE'",
+    )
+    _refused(
+        cap_spec(from_bus="NOWHERE"),
+        r"series_capacitors\.SC1\.from_bus: unknown bus 'NOWHERE'",
+    )
+
+
+def test_buses_at_different_nominal_voltages_are_refused():
+    _refused(
+        cap_spec(from_bus="PCC"),
+        r"series_capacitors\.SC1: connects buses of different nominal voltages",
+    )
+
+
+def test_the_same_bus_at_both_ends_is_refused():
+    _refused(
+        cap_spec(to_bus="MV1"),
+        r"series_capacitors\.SC1: from_bus and to_bus are the same bus 'MV1'",
+    )
+
+
+def test_both_xc_and_k_are_refused():
+    _refused(
+        cap_spec(k=t(0.5), line="CB1"),
+        r"series_capacitors\.SC1: give exactly one of xc_ohm and k",
+    )
+
+
+def test_neither_xc_nor_k_is_refused():
+    _refused(
+        cap_spec(xc_ohm=None),
+        r"series_capacitors\.SC1: give exactly one of xc_ohm and k",
+    )
+
+
+@pytest.mark.parametrize(
+    "k, match",
+    [
+        (1.0, r"series_capacitors\.SC1\.k must be in \(0, 1\), got 1\.0"),
+        (1.5, r"series_capacitors\.SC1\.k must be in \(0, 1\), got 1\.5"),
+        (0.0, r"series_capacitors\.SC1\.k must be positive, got 0"),
+        (-0.2, r"series_capacitors\.SC1\.k must be positive, got -0\.2"),
+    ],
+)
+def test_k_outside_zero_one_is_refused(k, match):
+    _refused(cap_spec(xc_ohm=None, k=t(k), line="CB1"), match)
+
+
+def test_k_without_a_line_is_refused():
+    _refused(
+        cap_spec(xc_ohm=None, k=t(0.5)),
+        r"series_capacitors\.SC1\.line: a k entry needs the name of the cable",
+    )
+
+
+def test_a_line_that_is_not_a_cable_is_refused():
+    _refused(
+        cap_spec(xc_ohm=None, k=t(0.5), line="TR1"),
+        r"series_capacitors\.SC1\.line: 'TR1' is not a cable of the campus",
+    )
+
+
+def test_a_cable_between_the_same_buses_would_sit_in_parallel_and_is_refused():
+    spec = cap_spec(xc_ohm=None, k=t(0.5), line="CB2")
+    spec["campus"]["cables"]["CB2"] = dict(
+        spec["campus"]["cables"]["CB1"], from_bus="MV1", to_bus="MV1C"
+    )
+    _refused(
+        spec,
+        r"series_capacitors\.SC1\.line: cable 'CB2' \(\['MV1', 'MV1C'\]\) is not in series",
+    )
+
+
+def test_a_cable_sharing_no_bus_with_the_capacitor_is_refused():
+    spec = cap_spec(xc_ohm=None, k=t(0.5), line="CB2")
+    c = spec["campus"]
+    c["buses"]["MV3"] = {"vn_kv": 20.0}
+    c["cables"]["CB2"] = dict(c["cables"]["CB1"], from_bus="MV2", to_bus="MV3")
+    _refused(
+        spec,
+        r"series_capacitors\.SC1\.line: cable 'CB2' \(\['MV2', 'MV3'\]\) is not in series",
+    )
+
+
+def test_a_line_with_an_xc_entry_is_refused():
+    _refused(
+        cap_spec(line="CB1"),
+        r"series_capacitors\.SC1\.line: only a k entry names a line",
+    )
+
+
+@pytest.mark.parametrize("field", ["length_km", "x_ohm_per_km"])
+def test_k_from_a_cable_missing_its_length_or_reactance_is_refused(field):
+    spec = cap_spec(xc_ohm=None, k=t(0.5), line="CB1")
+    del spec["campus"]["cables"]["CB1"][field]
+    _refused(spec, rf"cables\.CB1: missing {field}")
+
+
+@pytest.mark.parametrize(
+    "value, match",
+    [
+        (0.0, r"series_capacitors\.SC1\.xc_ohm must be positive, got 0"),
+        (-0.1, r"series_capacitors\.SC1\.xc_ohm must be positive, got -0\.1"),
+        (float("nan"), r"series_capacitors\.SC1\.xc_ohm value must be a finite number"),
+        (float("inf"), r"series_capacitors\.SC1\.xc_ohm value must be a finite number"),
+    ],
+)
+def test_a_non_positive_or_non_finite_xc_is_refused(value, match):
+    _refused(cap_spec(xc_ohm=t(value)), match)
+
+
+@pytest.mark.parametrize(
+    "cap, match",
+    [
+        (
+            {"xc_ohm": 0.1},
+            r"series_capacitors\.SC1\.xc_ohm must be a mapping with 'value' and 'source'",
+        ),
+        (
+            {"xc_ohm": None, "k": 0.5, "line": "CB1"},
+            r"series_capacitors\.SC1\.k must be a mapping with 'value' and 'source'",
+        ),
+    ],
+)
+def test_an_untagged_value_is_refused(cap, match):
+    _refused(cap_spec(**cap), match)
+
+
+def test_a_duplicate_name_is_refused():
+    spec = cap_spec()
+    spec["campus"]["series_capacitors"]["CB1"] = spec["campus"][
+        "series_capacitors"
+    ].pop("SC1")
+    _refused(spec, r"campus: duplicate element name\(s\) \['CB1'\]")
+
+
+def test_an_unknown_protection_or_field_is_refused():
+    _refused(
+        cap_spec(protection="mov"),
+        r"series_capacitors\.SC1\.protection must be one of \['bypassed', 'none'\]",
+    )
+    _refused(cap_spec(r_ohm=t(0.01)), r"series_capacitors\.SC1: unknown field")
+
+
+def test_a_block_that_is_not_a_mapping_is_refused():
+    spec = cap_spec()
+    spec["campus"]["series_capacitors"] = [spec["campus"]["series_capacitors"]["SC1"]]
+    _refused(spec, r"campus\.series_capacitors must be a mapping, got list")
+
+
+def test_a_bus_reachable_only_through_the_capacitor_is_connected():
+    # MV1C and MV2 hang off the PCC only through SC1: without its edge the build refuses them as stranded.
+    campus = build_campus(cap_spec())
+    pp.runpp(campus.net)
+    assert campus.net.converged
+
+
+def test_the_input_spec_is_not_mutated():
+    spec = cap_spec(xc_ohm=None, k=t(0.5), line="CB1")
+    before = copy.deepcopy(spec)
+    build_campus(spec)
+    assert spec == before
+
+
+# --- fault levels: a bypassed capacitor is neglected (S1, IEC 60909-0) -------
+
+ALL_UNITS = ("BESS1", "PV1", "GEN1")
+
+
+def _ik(campus, bus):
+    from gridspine.static.campus_sc import campus_fault_levels
+
+    fl = campus_fault_levels(campus, ALL_UNITS).set_index("bus")
+    return float(fl.at[bus, "ikss_max_ka"]), float(fl.at[bus, "ikss_min_ka"])
+
+
+def test_a_bypassed_capacitor_leaves_the_fault_levels_of_the_uncompensated_feeder():
+    plain = build_campus(campus_spec())
+    capped = build_campus(cap_spec(xc_ohm=t(0.2)))
+    for bus in ("PCC", "MV1", "MV2"):
+        assert _ik(capped, bus) == pytest.approx(_ik(plain, bus), abs=1e-6)
+    # MV1C sits on MV1 once the capacitor is shorted.
+    assert _ik(capped, "MV1C") == pytest.approx(_ik(plain, "MV1"), abs=1e-6)
+
+
+def test_each_fault_level_row_says_a_bypassed_capacitor_assumes_its_bypass_conducts():
+    from gridspine.static.campus_sc import campus_fault_levels
+
+    note = (
+        "series capacitor(s) ['SC1'] neglected: assumes the MOV or bypass conducts "
+        "for every fault"
+    )
+    capped = campus_fault_levels(build_campus(cap_spec()), ALL_UNITS)
+    assert capped["detail"].str.endswith(note).all()
+    for spec in (campus_spec(), cap_spec(protection="none")):
+        fl = campus_fault_levels(build_campus(spec), ALL_UNITS)
+        assert not fl["detail"].str.contains("series capacitor").any()
+
+
+def test_protection_none_keeps_the_capacitor_in_and_raises_the_far_fault_level():
+    plain = build_campus(campus_spec())
+    kept = build_campus(cap_spec(xc_ohm=t(0.2), protection="none"))
+    ik_plain, ik_kept = _ik(plain, "MV2")[0], _ik(kept, "MV2")[0]
+    # -jXc cancels part of the feeder's reactance: the fault current behind it rises.
+    assert ik_kept > ik_plain + 1e-3
+
+
+def test_bypass_for_faults_shorts_only_the_bypassed_capacitors_and_leaves_the_campus_net_alone():
+    from gridspine.static import series_caps as SC
+
+    spec = cap_spec()
+    c = spec["campus"]
+    c["buses"]["MV2C"] = {"vn_kv": 20.0}
+    c["cables"]["CB2"] = dict(c["cables"]["CB1"], from_bus="MV2C", to_bus="MV2")
+    c["series_capacitors"]["SC2"] = {
+        "from_bus": "MV1",
+        "to_bus": "MV2C",
+        "xc_ohm": t(0.1),
+        "protection": "none",
+    }
+    campus = build_campus(spec)
+    work = SC.bypass_for_faults(copy.deepcopy(campus.net))
+    imp = work.impedance.set_index("name")
+    assert (bool(imp.at["SC1", "in_service"]), bool(imp.at["SC2", "in_service"])) == (
+        False,
+        True,
+    )
+    sw = work.switch
+    assert list(sw["name"]) == ["SC1~bypass"]
+    row = sw.iloc[0]
+    bus = {n: i for i, n in work.bus["name"].items()}
+    assert (row.bus, row.element, row.et, bool(row.closed)) == (
+        bus["MV1"],
+        bus["MV1C"],
+        "b",
+        True,
+    )
+    assert campus.net.impedance["in_service"].all() and campus.net.switch.empty
+
+
+# --- walkers over lines and transformers refuse; the tap graph follows it (S3) -
+
+
+def _refuses(call, what):
+    with pytest.raises(
+        ContractError,
+        match=rf"{what}: series capacitor\(s\) \['SC1'\] not modelled here",
+    ):
+        call()
+
+
+def test_every_line_and_transformer_walker_refuses_a_campus_with_a_series_capacitor(
+    tmp_path,
+):
+    from gridspine.handoff.dgs_writer import write_dgs
+    from gridspine.handoff.emt_pack import write_emt_pack
+    from gridspine.handoff.raw_writer import write_raw
+    from gridspine.handoff.seq_writer import write_seq
+    from gridspine.producers.pypsa_nodal import to_pypsa
+    from gridspine.static import island_sc as ISC
+    from gridspine.static import island_sc_seq as SEQ
+    from gridspine.static.loadflow import branch_keys
+
+    campus = build_campus(cap_spec())
+    _refuses(
+        lambda: branch_keys(campus.net),
+        r"branch keys \(contingency, sensitivity and planning screens\)",
+    )
+    _refuses(lambda: ISC._branches(campus.net, 1.0), "island fault levels")
+    # a bypassed capacitor is a bus-bus switch, which these walkers do not read either
+    _refuses(
+        lambda: ISC._branches(ISC.machine_net(campus, ALL_UNITS), 1.0),
+        "island fault levels",
+    )
+    _refuses(
+        lambda: SEQ.sequence_net(campus, {}),
+        r"sequence networks \(unbalanced faults, earthing\)",
+    )
+    _refuses(lambda: write_raw(campus.net, tmp_path / "unused.raw"), "PSS/E RAW writer")
+    _refuses(lambda: to_pypsa(campus.net), "PyPSA nodal export")
+    _refuses(
+        lambda: write_dgs(campus.net, tmp_path / "unused.dgs"),
+        "PowerFactory DGS writer",
+    )
+    _refuses(
+        lambda: write_seq(campus, tmp_path / "unused.seq"), "PSS/E sequence writer"
+    )
+    _refuses(lambda: write_emt_pack(tmp_path / "emt", campus), "EMT pack")
+    assert list(tmp_path.iterdir()) == []  # every walker refused before writing
+
+
+def test_island_hours_lists_an_assumed_series_capacitor_input():
+    from gridspine.static.island_hours import assumed_inputs
+
+    for cap, param in (
+        (dict(xc_ohm=t(0.1, "assumed")), "xc_ohm"),
+        (dict(xc_ohm=None, k=t(0.5, "assumed"), line="CB1"), "k"),
+    ):
+        campus = build_campus(cap_spec(**cap))
+        for model in ("flow", "sc"):
+            assert f"SC1.{param}" in assumed_inputs(campus, [], model)
+    datasheet = build_campus(cap_spec())
+    assert not any(a.startswith("SC1.") for a in assumed_inputs(datasheet, [], "flow"))
+
+
+def test_the_walkers_still_take_a_campus_without_capacitors():
+    from gridspine.static import island_sc as ISC
+    from gridspine.static.loadflow import branch_keys
+
+    campus = build_campus(campus_spec())
+    assert len(branch_keys(campus.net)) == 3
+    assert len(ISC._branches(campus.net, 1.0)) == 3
+
+
+def test_the_tap_graph_reaches_the_buses_behind_the_capacitor():
+    from gridspine.static import campus_taps as CT
+
+    campus = build_campus(cap_spec())
+    adj = CT._graph(campus.net)
+    bus = {n: i for i, n in campus.net.bus["name"].items()}
+    assert CT._reach(adj, bus["PCC"], set()) == set(bus.values())
+    assert (bus["MV1C"], "impedance", 0) in adj[bus["MV1"]]
+
+
+# --- GC-01's aggregation: refused inside a collector tree, kept elsewhere ------
+
+
+def _plant_with_cap_in_collector():
+    from tests.gridspine.test_aggregate import plant
+
+    spec = plant()
+    c = spec["campus"]
+    # COL -> SC1 -> JC -> TRUNK -> J: every converter sits behind the capacitor.
+    c["buses"]["JC"] = {"vn_kv": 33.0}
+    c["cables"]["TRUNK"]["from_bus"] = "JC"
+    c["series_capacitors"] = {
+        "SC1": {"from_bus": "COL", "to_bus": "JC", "xc_ohm": t(0.5)}
+    }
+    return spec
+
+
+def _plant_with_aux_feeder(cap_name):
+    """
+    ``plant()`` plus a second main transformer feeding AUX -> cap -> AUXC
+    with a load: a tree without converters, which aggregation leaves alone.
+    """
+    from tests.gridspine.test_aggregate import plant
+
+    spec = plant()
+    c = spec["campus"]
+    c["transformers"]["TRA"] = dict(c["transformers"]["TRM"], lv_bus="AUX")
+    c["buses"]["AUX"] = {"vn_kv": 33.0}
+    c["buses"]["AUXC"] = {"vn_kv": 33.0}
+    c["units"]["AUXLD"] = {"kind": "load", "bus": "AUXC", "p_mw": t(1.0), "pf": t(0.95)}
+    c["series_capacitors"] = {
+        cap_name: {"from_bus": "AUX", "to_bus": "AUXC", "xc_ohm": t(0.5)}
+    }
+    return spec
+
+
+def test_a_series_capacitor_inside_a_collector_tree_is_refused_by_name_before_the_walk_loses_its_far_side():
+    from gridspine.ingest.aggregate import AggregationError, aggregate
+
+    spec = _plant_with_cap_in_collector()
+    build_campus(spec)  # a valid campus: only aggregation refuses it
+    # Without following the capacitor the walk would find no converter and say so instead.
+    with pytest.raises(
+        AggregationError,
+        match=r"series capacitor SC1 sits inside the collector behind COL \(COL-JC\)",
+    ):
+        aggregate(spec)
+
+
+def test_a_series_capacitor_outside_every_collector_stays_in_the_aggregated_model():
+    from gridspine.ingest.aggregate import aggregate
+
+    agg = aggregate(_plant_with_aux_feeder("SCAUX"))
+    assert (
+        agg.spec["campus"]["series_capacitors"]
+        == _plant_with_aux_feeder("SCAUX")["campus"]["series_capacitors"]
+    )
+    assert build_campus(agg.spec).series_capacitors.index.tolist() == ["SCAUX"]
+
+
+def test_a_kept_series_capacitor_name_blocks_an_equivalent_of_the_same_name():
+    from gridspine.ingest.aggregate import AggregationError, aggregate
+
+    with pytest.raises(
+        AggregationError,
+        match=r"the equivalent name\(s\) \['EQ_MV'\] are already taken",
+    ):
+        aggregate(_plant_with_aux_feeder("EQ_MV"))
+
+
+# --- GC-08's campus step scans from behind each capacitor (S7) ---------------
+#
+# Hand calculation on the test campus, everything in ohm at 20 kV (Zbase = 400 ohm on 1 MVA):
+# * two 40 MVA 110/21 kV transformers, vk 12 %, vkr 0.4 %, at the nominal ratio:
+#   zk = 0.12 / 40 = 0.003 pu, rk = 0.004 / 40 = 0.0001 pu, xk = sqrt(zk^2 - rk^2) = 0.0029983 pu;
+#   two in parallel: 0.00149917 pu = 0.599667 ohm;
+# * the grid (IEC 60909 c: 1.1 for max, 1.0 for min, at 110 kV):
+#   max: 1.1 / 3000 / sqrt(1 + 0.1^2) = 3.64837e-4 pu = 0.145935 ohm;
+#   min: 1.0 / 2000 / sqrt(1 + 0.12^2) = 4.96442e-4 pu = 0.198577 ohm.
+# X_total(max) = 0.745602 ohm, X_total(min) = 0.798244 ohm; f_er = 50 * sqrt(Xc / X_total).
+X_TOTAL = {"max": 0.745602, "min": 0.798244}
+
+
+def _screens(tmp_path, monkeypatch, spec):
+    from gridspine.drivers import campus_study as cs
+
+    campus = build_campus(spec)
+    monkeypatch.setattr(cs, "load_run_campus", lambda run_dir: campus)
+    return cs.ssti_screens_campus(tmp_path)
+
+
+def test_the_campus_step_finds_the_capacitors_resonance_from_its_far_side_bus(
+    tmp_path, monkeypatch
+):
+    import math
+
+    import pandas as pd
+
+    from gridspine.drivers import campus_study as cs
+    from gridspine.static import subsync_scan as ss
+
+    out = _screens(tmp_path, monkeypatch, cap_spec(xc_ohm=t(0.5)))
+    res = pd.read_csv(tmp_path / cs.SUBSYNC_RESONANCE_CSV)
+    series = res[res["kind"] == ss.SERIES].set_index("case")
+    assert set(series["bus"]) == {"MV1C"}
+    for case, x_total in X_TOTAL.items():
+        f_er = 50.0 * math.sqrt(0.5 / x_total)  # max 40.945 Hz, min 39.572 Hz
+        assert series.at[case, "f_er_hz"] == pytest.approx(f_er, abs=ss.DF_HZ)
+    assert out.subsync_verdict == "check"  # no torsional mode given
+    scan = pd.read_csv(tmp_path / cs.SUBSYNC_SCAN_CSV)
+    assert set(scan["bus"]) == {"PCC", "MV1C"}
+    assert set(res[res["kind"] == ss.SSCI]["bus"]) == {"PCC", "MV1C"}
+
+
+def test_a_capacitor_resonating_below_the_band_reads_clear_in_the_band_and_names_it(
+    tmp_path, monkeypatch
+):
+    import pandas as pd
+
+    from gridspine.drivers import campus_study as cs
+    from gridspine.static import subsync_scan as ss
+
+    # Xc = 0.005 ohm: f_er = 50 * sqrt(0.005 / 0.7456) = 4.1 Hz, below the 5 Hz edge.
+    out = _screens(tmp_path, monkeypatch, cap_spec(xc_ohm=t(0.005)))
+    res = pd.read_csv(tmp_path / cs.SUBSYNC_RESONANCE_CSV)
+    series = res[res["kind"] == ss.SERIES]
+    assert set(series["verdict"]) == {"clear"} and set(series["case"]) == {"max", "min"}
+    assert set(series["note"]) == {
+        "clear in the 5-45 Hz scan band: series capacitor(s) ['SC1'] scanned, "
+        "no series resonance"
+    }
+    assert out.subsync_verdict == "clear"
+    # scanned from behind the capacitor only, with the scan's own clearance and label
+    assert set(series["bus"]) == {"MV1C"}
+    ssci = res[res["kind"] == ss.SSCI].iloc[0]
+    for col in ("clearance_hz", "assumed", "label"):
+        assert set(series[col]) == {ssci[col]}
+
+
+def test_without_a_capacitor_the_campus_step_still_reads_not_evaluated(
+    tmp_path, monkeypatch
+):
+    import pandas as pd
+
+    from gridspine.drivers import campus_study as cs
+
+    out = _screens(tmp_path, monkeypatch, campus_spec())
+    assert out.subsync_verdict == "not evaluated"
+    assert set(pd.read_csv(tmp_path / cs.SUBSYNC_SCAN_CSV)["bus"]) == {"PCC"}
+
+
+def test_with_two_capacitors_the_worst_row_decides(tmp_path, monkeypatch):
+    from gridspine.static import subsync_scan as ss
+
+    # SC1 resonates below the band (clear on its own); SC2, on a second feeder, inside it.
+    spec = cap_spec(xc_ohm=t(0.005))
+    c = spec["campus"]
+    c["buses"]["MV3C"] = {"vn_kv": 20.0}
+    c["buses"]["MV3"] = {"vn_kv": 20.0}
+    c["cables"]["CB3"] = dict(c["cables"]["CB1"], from_bus="MV3C", to_bus="MV3")
+    c["series_capacitors"]["SC2"] = {
+        "from_bus": "MV1",
+        "to_bus": "MV3C",
+        "xc_ohm": t(0.5),
+    }
+    out = _screens(tmp_path, monkeypatch, spec)
+    res = out.subsync.resonance
+    series = res[res["kind"] == ss.SERIES]
+    crossing = series[series["verdict"] != "clear"]
+    assert set(crossing["bus"]) == {"MV3C"}  # only SC2 crosses inside the band
+    # SC1's far side has no crossing: it reads clear, naming SC1 alone
+    clear = series[series["verdict"] == "clear"]
+    assert set(clear["bus"]) == {"MV1C"}
+    assert clear["note"].str.contains(r"series capacitor\(s\) \['SC1'\] scanned").all()
+    assert out.subsync_verdict == "check"
+
+
+def test_a_capacitor_in_a_ring_has_no_far_side_and_is_refused(tmp_path, monkeypatch):
+    # SC1 ties MV1 to MVB, each fed by its own transformer from the PCC: both ends sit one
+    # branch from the PCC, so neither is behind the capacitor.
+    spec = cap_spec(to_bus="MVB")
+    c = spec["campus"]
+    c["cables"]["CB1"]["from_bus"] = "MV1"
+    del c["buses"]["MV1C"]
+    c["buses"]["MVB"] = {"vn_kv": 20.0}
+    c["transformers"]["TR3"] = dict(c["transformers"]["TR1"], lv_bus="MVB")
+    with pytest.raises(
+        ContractError,
+        match=r"series capacitor SC1: both ends stay connected to the PCC without it "
+        r"\(a ring through it\)",
+    ):
+        _screens(tmp_path, monkeypatch, spec)
+
+
+def test_a_capacitor_in_a_ring_with_unequal_distances_is_refused_too(
+    tmp_path, monkeypatch
+):
+    # MV1 -> SC1 -> MV1C as before, and MV1C also fed from the PCC by TR3 -> MVB -> CB3:
+    # MV1 is one branch from the PCC and MV1C two, yet MV1C is not behind the capacitor.
+    spec = cap_spec()
+    c = spec["campus"]
+    c["buses"]["MVB"] = {"vn_kv": 20.0}
+    c["transformers"]["TR3"] = dict(c["transformers"]["TR1"], lv_bus="MVB")
+    c["cables"]["CB3"] = dict(c["cables"]["CB1"], from_bus="MVB", to_bus="MV1C")
+    with pytest.raises(
+        ContractError, match=r"series capacitor SC1: both ends stay connected"
+    ):
+        _screens(tmp_path, monkeypatch, spec)
+
+
+def test_the_harmonic_scan_refuses_a_campus_with_a_series_capacitor_naming_it():
+    from gridspine.static import harmonic_scan as hs
+
+    campus = build_campus(cap_spec())
+    bus, cases, _ = hs.campus_cases(campus)
+    _refuses(
+        lambda: hs.impedance_scan(campus.net, bus, cases), "harmonic impedance scan"
+    )
+    plain = build_campus(campus_spec())
+    bus, cases, _ = hs.campus_cases(plain)
+    assert not hs.impedance_scan(plain.net, bus, cases).envelope.empty
+
+
+def test_a_line_that_is_not_a_name_is_refused():
+    _refused(
+        cap_spec(xc_ohm=None, k=t(0.5), line=5),
+        r"series_capacitors\.SC1\.line: a k entry needs the name of the cable",
+    )
+
+
+def test_a_plain_impedance_without_the_marker_is_no_series_capacitor():
+    from gridspine.static import series_caps as SC
+
+    campus = build_campus(campus_spec())
+    bus = {n: i for i, n in campus.net.bus["name"].items()}
+    # island_flow's droop reactance is such an impedance
+    pp.create_impedance(
+        campus.net, bus["MV1"], bus["MV2"], rft_pu=0.0, xft_pu=0.1, sn_mva=1.0
+    )
+    assert SC.series_caps(campus.net).empty
+    SC.refuse(campus.net, "anything")
+
+
+def test_an_empty_series_capacitors_key_builds_and_aggregates_like_none():
+    from gridspine.ingest.aggregate import aggregate
+    from tests.gridspine.test_aggregate import plant
+
+    spec = plant()
+    spec["campus"]["series_capacitors"] = None
+    assert build_campus(spec).series_capacitors.empty
+    assert aggregate(spec).spec["campus"]["series_capacitors"] is None
+
+
+def test_a_bad_hourly_status_is_printed_as_a_plain_number():
+    import pandas as pd
+
+    from gridspine.schema.campus import HOURLY_COLUMNS, validate_hourly
+
+    row = {"unit_id": "PV1", "period": 0, "hour": 0, "status": 2, "p_mw": 0.0}
+    df = pd.DataFrame([{c: row.get(c, 0.0) for c in HOURLY_COLUMNS}])
+    with pytest.raises(ContractError, match=r"status must be 0 or 1, got \[2\]$"):
+        validate_hourly(df)
+
+
+def test_far_side_walks_a_closed_bus_bus_switch():
+    from gridspine.static import harmonic_scan as hs
+    from gridspine.static import series_caps as SC
+
+    campus = build_campus(cap_spec())
+    net = campus.net
+    bus = {n: i for i, n in net.bus["name"].items()}
+    pcc, _, _ = hs.campus_cases(campus)
+    # TR1 now feeds MVX, and only a closed coupler joins MVX to MV1 (the capacitor's near end)
+    mvx = pp.create_bus(net, vn_kv=20.0, name="MVX")
+    net.trafo.loc[net.trafo["lv_bus"] == bus["MV1"], "lv_bus"] = mvx
+    pp.create_switch(net, mvx, bus["MV1"], et="b", closed=True)
+    assert SC.far_side(net, pcc) == [("SC1", bus["MV1C"])]
