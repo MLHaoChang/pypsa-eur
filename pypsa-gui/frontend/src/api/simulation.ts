@@ -1330,6 +1330,7 @@ export interface CurtailmentByCausePlant {
 export type CurtailmentNotEstablishedReason =
   | 'export_link_missing' | 'export_price_missing'
   | 'no_commercial_solve_record' | 'export_price_changed_since_solve'
+  | 'export_flow_missing'
 
 /** GET /results/curtailment/by_cause (204 → null before a solve). */
 export type CurtailmentByCausePayload =

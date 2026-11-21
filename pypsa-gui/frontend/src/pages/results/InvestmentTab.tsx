@@ -178,7 +178,7 @@ export default function InvestmentTab() {
           Island: no grid in operation; compared with the island as it stands today. The tie
           {' '}{poc.data?.poc_link} is open, so there is no connection, tariff or export to set.
         </p>
-      ) : rootMissing ? <SiteConnectionNeeded /> : commercial.isSuccess && <SiteConnectionSummary />}
+      ) : rootMissing ? (section !== 'case' && <SiteConnectionNeeded />) : commercial.isSuccess && <SiteConnectionSummary />}
       <CompletenessChips rows={completeness(billing.data, flows.data,
                                             billing.isError ? billing.error : undefined)}
                          testId="ic-completeness"
@@ -215,7 +215,7 @@ export default function InvestmentTab() {
             </p>
           </div>
         )}
-        {section === 'case' && <InvestmentCaseView />}
+        {section === 'case' && <InvestmentCaseView connectionMissing={!island && rootMissing} />}
         {section === 'business_case' && <BusinessCaseLines />}
         {section === 'grid_extension' && <GridExtensionCard />}
       </div>

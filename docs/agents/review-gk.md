@@ -332,3 +332,16 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A merge whose hand resolutions are only in another reviewer's scope: re-OK your own scope, and name the hand-resolved files for the other reviewer (#1673).
 - `_save_context` rebuilds `metadata.json` from an explicit dict, so a key it does not list is dropped on save. A PR that writes a new `metadata.json` key carries it through `_save_context` from `_carry_source_meta`, like `_carried_settings`, under the same `_saves_its_own_directory` rule. Tests fail without the carry: apply → save, Save-As and Save-a-Copy into another directory, and save → export → import → save (#1709, GK B3 (2)).
 - A cleanup keeps everything the import accepts, judged on the same set. Library copies are pruned only against the sidecar pins (`library_refs.json`) ∪ `collect_pins(solver_config.json)`, and nothing is pruned when either file is unreadable. A test keeps a copy that only the config names, with no sidecar (#1689, GK B3 (2)).
+
+## Standing rulings (GK A (32), recorded 2026-11-20)
+
+- A gate that admits on a frozen input binds the exact input's digest, never a summary of it (e.g. min/max per period). A test shows a reversed ramp with the same min/max is refused (#1773 E4).
+- A value read under a start lock and acted on by a worker after that lock is released is re-read under the lock the worker captures its revision under, and the worker fails on a mismatch (#1772 D1).
+- An input of unknown reliability (e.g. a no-data feeder) is taken as failing (q=1) wherever it lies on any supply→critical path. Those paths are found exactly (node-disjoint paths), never by sampling a few cut sets. A far side fed only back through the pocket counts as not supplied (#1729 R2′/R2″).
+- A byte-identity pin compares against a literal value or master's function, never against the same code run with an input monkeypatched to None (#1773 W1).
+
+## Standing rulings (GK B 68, recorded 2026-11-20)
+
+- A builder that cannot see the plan conditions it was given gets them from the GK, verbatim. The GK recovers the text from the setter's transcript (`list_events`) and sends it; a restatement is not accepted, even the builder's own (#1773 dropped clauses and changed W5).
+- A new top-level route prefix (e.g. `/api/workbook/`) skips every `/api/io/` middleware gate (undo, foreign-lock, harness-run, solver, live-study), and no middleware caps uploads (`read_capped` is per route). The plan justifies each skipped gate, with a test, and the route calls `read_capped` itself (S2 excel plan G2/G3).
+- A hand-resolved merge that combines two features (e.g. #1712's sectioned wrapper plus the every-entity branch) gets a test pinning the combined behaviour, and the mutant run covers the resolved hunk. Moving the branch found that the sectioned path missed the gap line (#1712).

@@ -16,7 +16,9 @@ waits for that lock: a held lock reads every comparison as `BUSY`, uncompared, n
 
 `run:study` -derived_from-> its inputs, each a `pins.Pin` of what the record holds against what a study started now
 would read, compared exactly by `pins.compare_pin` (W3): the goal's value, basis and unit; the site type; the Monte
-Carlo draws, horizon years, seed (only when recorded) and convergence target; the network revision; the run
+Carlo draws, horizon years, seed and convergence target (02b: a null or missing seed reads not recorded; draws, seed
+and target read as the runner resolves them, the request's `mc` with the goal's draws in it, else the pack's, and
+uncompared when the runner would refuse that `mc`); the network revision; the run
 choices no edit seam moves the revision for (pack overrides beyond the goal, stages, solve budget, demand-response
 buses, DtC config and attribution), against the request Guided would send now; and each row of the record's
 `assumptions` list against the network field the row names, one pin per unit of a row that joins several; a
@@ -66,6 +68,9 @@ CHOICES = {
 }
 FINANCE_UNCOMPARED = "the study did not record the finance and currency settings, and PUT /finance does not move the revision"
 PACK_UNCOMPARED = "the study did not record the pack's prices"
+#: The request's `mc` the runner refuses (`check_eh_study_start`): no study could start to compare with (02b W2).
+MC_NOT_OBJECT = "the run settings' mc is not an object, which the study refuses"
+MC_REFUSED = "the run settings' mc is one the study refuses"
 RESULTS = runs.results_id("study")
 RUN = runs.run_id("study")
 LOLE_CI = "derived:eh_study/lole_ci"
@@ -218,7 +223,6 @@ class Record:
     figures: dict[str, Any] = field(default_factory=dict)
     lole_ci: Any = None
     period_basis: Any = None
-    has_seed: bool = False
     assumptions: Any = ()
 
 
@@ -262,9 +266,12 @@ def normalise(raw: Any) -> Record:
     fields["mc/cov_target"] = _choice(
         payload, "cov_target", "MC convergence target", (int, float), nullable=False
     )
-    has_seed = payload.get("seed") is not None
-    if has_seed:
-        fields["mc/seed"] = _int(payload, "seed")
+    # A null or missing seed is not recorded: the seed keeps its node and reads uncompared, never current (02b W3).
+    fields["mc/seed"] = (
+        _int(payload, "seed")
+        if payload.get("seed") is not None
+        else Unrecorded("seed: not recorded")
+    )
     ci = payload.get("lole_ci")
     lole_ci = (
         list(ci)
@@ -291,7 +298,6 @@ def normalise(raw: Any) -> Record:
         },
         lole_ci=lole_ci,
         period_basis=report.get("period_basis"),
-        has_seed=has_seed,
         assumptions=tuple(assumptions)
         if isinstance(assumptions, (list, tuple))
         else Unrecorded(ASSUMPTIONS_NOT_RECORDED)
@@ -313,6 +319,13 @@ class StudyRead:
     revision: int
     current: dict[str, Any] = field(default_factory=dict)
     rows: tuple = ()
+
+
+def _first_error(exc) -> str:
+    err = exc.errors()[0]
+    # A dict's errors always name a field: the non-object mc is refused before validation.
+    where = ".".join(str(x) for x in err.get("loc", ()))
+    return f"{where}: {err.get('msg')}"
 
 
 def _try(fn) -> Any:
@@ -342,21 +355,25 @@ def _current(ctx, state: dict, record: Record) -> tuple[dict[str, Any], tuple]:
     """The inputs a study started now would read, as `eh_request_with_goal` and the runner resolve them: the
     project's goal, falling back to the site type's pack; the network's horizon and revision."""
     from services import reliability_goal as rg
-    from services.adequacy.eh_study import DEFAULT_MC_SEED
+    from services.adequacy.eh_study import (
+        DEFAULT_MC_COV_TARGET,
+        DEFAULT_MC_DRAWS,
+        DEFAULT_MC_SEED,
+    )
     from services.adequacy.eh_study_runner import _PACK_FACTORY
     from services.adequacy.metrics import horizon_years
 
     goal = _try(lambda: rg.active_goal(state))
     pack = _try(lambda: _PACK_FACTORY[goal["site_archetype"]["value"]]())
 
-    def goal_or_pack(key: str, from_pack):
-        if goal[key]["source"] != rg.DEFAULT:
-            return goal[key]["value"]
-        return from_pack(pack)
-
     def target():
-        value = goal_or_pack("target_lole_h", lambda p: p.availability.target_lole_h)
+        if goal["target_lole_h"]["source"] != rg.DEFAULT:
+            value = goal["target_lole_h"]["value"]
+        else:
+            value = pack.availability.target_lole_h
         return NO_GOAL if value is None else value
+
+    refused: list[str] = []
 
     def request():
         from services import network_lengths
@@ -365,14 +382,53 @@ def _current(ctx, state: dict, record: Record) -> tuple[dict[str, Any], tuple]:
 
         d = network_lengths.active_project_dir()
         template = read_template(d) if d is not None else None
-        body = EhStudyRequest(**_request_for(template, state.get("solver_config")))
-        return rg.eh_request_with_goal(body, goal)[0]
+        raw = dict(_request_for(template, state.get("solver_config")))
+        if raw.get("mc") is not None and not isinstance(raw["mc"], dict):
+            # The study refuses it; the run choices still read without it (02b W2).
+            refused.append(MC_NOT_OBJECT)
+            raw["mc"] = None
+        return rg.eh_request_with_goal(EhStudyRequest(**raw), goal)[0]
 
     req = _try(request)
 
+    def mc_options() -> Any:
+        """The request's `mc` as the runner validates it (`check_eh_study_start`), the goal's draws already in it
+        (`eh_request_with_goal`); `Unrecorded` when the runner would refuse it: no study could start to compare
+        the MC settings with (02b W2)."""
+        from pydantic import ValidationError
+
+        from services.adequacy import mc as _mc
+        from services.adequacy.eh_study_runner import McOptions
+
+        if isinstance(req, Exception):
+            raise req  # the request cannot be built: stale, naming why
+        if refused:
+            return Unrecorded(refused[0])
+        try:
+            opts = McOptions.model_validate(req.mc or {})
+        except ValidationError as exc:
+            return Unrecorded(f"{MC_REFUSED}: {_first_error(exc)}")
+        if opts.draws is not None and opts.draws > _mc.MAX_DRAWS:
+            return Unrecorded(
+                f"{MC_REFUSED}: draws must be at most {_mc.MAX_DRAWS}, got {opts.draws}"
+            )
+        return opts
+
+    mc = _try(mc_options)
+
+    def mc_setting(name: str, from_pack):
+        """The request's own value wins, else the pack's (`run_eh_study`): never the goal directly, whose draws
+        are in the request already (02b W1)."""
+        if isinstance(mc, Exception):
+            raise mc
+        if isinstance(mc, Unrecorded):
+            return mc
+        value = getattr(mc, name)
+        return value if value is not None else from_pack(pack)
+
     def choices() -> dict[str, Any]:
         from models.energy_hub import DEFAULT_EH_BUDGET_SOLVES
-        from services.adequacy.eh_study import DEFAULT_MC_COV_TARGET, validate_stages
+        from services.adequacy.eh_study import validate_stages
         from services.adequacy.eh_study_runner import (
             normalised_overrides,
             resolve_dtc_attribution,
@@ -385,7 +441,6 @@ def _current(ctx, state: dict, record: Record) -> tuple[dict[str, Any], tuple]:
             req.dtc_config, req.dtc_attribution
         )
         stages = validate_stages(req.stages)
-        cov = (req.mc or {}).get("cov_target")
         return {
             "run/pack_overrides": beyond_goal(
                 tok(normalised_overrides(req.pack_overrides))
@@ -403,28 +458,32 @@ def _current(ctx, state: dict, record: Record) -> tuple[dict[str, Any], tuple]:
             ),
             "run/dtc_config": tok(dict(raw_dtc) if raw_dtc else None),
             "run/dtc_attribution": tok(attribution),
-            "mc/cov_target": cov
-            if cov is not None
-            else getattr(pack, "mc_cov_target", DEFAULT_MC_COV_TARGET),
         }
 
     chosen = _try(choices)
     current = {
         **{
-            k: (chosen if isinstance(chosen, Exception) else chosen[k])
-            for k in (*CHOICES, "mc/cov_target")
+            k: (chosen if isinstance(chosen, Exception) else chosen[k]) for k in CHOICES
         },
         "goal/value": _try(target),
         "goal/basis": GOAL_BASIS,
         "goal/unit": GOAL_UNIT,
         "site_archetype": _try(lambda: goal["site_archetype"]["value"]),
         "mc/draws": _try(
-            lambda: goal_or_pack(
-                "mc_draws", lambda p: getattr(p, "mc_draws", rg.DEFAULT_MC_DRAWS)
+            lambda: mc_setting(
+                "draws", lambda p: getattr(p, "mc_draws", DEFAULT_MC_DRAWS)
             )
         ),
         "mc/horizon_years": _try(lambda: float(horizon_years(ctx.network))),
-        "mc/seed": _try(lambda: getattr(pack, "mc_seed", DEFAULT_MC_SEED)),
+        "mc/seed": _try(
+            lambda: mc_setting("seed", lambda p: getattr(p, "mc_seed", DEFAULT_MC_SEED))
+        ),
+        "mc/cov_target": _try(
+            lambda: mc_setting(
+                "cov_target",
+                lambda p: getattr(p, "mc_cov_target", DEFAULT_MC_COV_TARGET),
+            )
+        ),
         "network_revision": runs._revision(ctx),
     }
     rows = record.assumptions if isinstance(record.assumptions, tuple) else ()
@@ -521,6 +580,8 @@ def study_graph(r: StudyRead) -> StudyGraph:
             via: Any = Unrecorded(blocked)
         elif isinstance(recorded, Unrecorded):
             via = recorded
+        elif isinstance(current, Unrecorded):
+            via = current  # nothing a study started now would read (02b W2)
         else:
             via = pins.Pin(label, recorded, _reader(current))
         b.edge(Edge("derived_from", src, dst, via))
@@ -584,8 +645,6 @@ def study_graph(r: StudyRead) -> StudyGraph:
     info[RUN] = {"label": "study run", "value": rec.status, "unit": None, "stamp": None}
 
     for key, label in _LABELS.items():
-        if key == "mc/seed" and not rec.has_seed:
-            continue  # a seed is pinned only when the record holds one
         unit = {"goal/value": GOAL_UNIT, "mc/horizon_years": "years"}.get(key)
         link(
             RUN,
