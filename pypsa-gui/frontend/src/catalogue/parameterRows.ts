@@ -2,8 +2,10 @@
  * The ⌘K palette's "Parameters" rows (spec expert-catalogue §4.3): an asset's value
  * (`PV roof: Capacity · 2.4 MW`) for each asset of the entry's class, or the entry
  * itself (`Capacity · Generator · Size and limits · None in this project`) when the
- * project has none. Rows carry plain names only: a hit by model-file name says so in
- * words (RAW-NAMES-1). Words of the query that name assets narrow the asset rows.
+ * project has none. An entry with no Properties field (a setting, a constraint) is
+ * one row that opens it in the Parameter guide. Rows carry plain names only: a hit by
+ * model-file name says so in words (RAW-NAMES-1). Words of the query that name assets
+ * narrow the asset rows.
  */
 import { componentLabel } from '../utils/componentLabels'
 import { CARRIER_CATALOG } from '../utils/carrierCatalog'
@@ -15,12 +17,16 @@ export type PaletteAsset = Record<string, unknown> & { name: string }
 
 export interface ParameterRow {
   id: string
+  /** The catalogue entry the row is about (Shift+Enter opens it in the guide). */
+  entryId: string
   title: string
   subtitle: string
   /** The value on that asset, with that asset's unit. */
   hint?: string
   /** Where Enter goes; none for an entry with no asset in the project (the row is disabled). */
   target?: ParameterTarget
+  /** No field to open: Enter opens the entry in the guide. */
+  guideOnly?: boolean
 }
 
 /** Asset rows shown per entry; the rest are counted on the last row. */
@@ -29,6 +35,7 @@ export const ASSETS_PER_ENTRY = 5
 export const ENTRY_LIMIT = 8
 export const MODEL_NAME_NOTE = 'matches the model-file name'
 export const NONE_NOTE = 'None in this project'
+export const GUIDE_NOTE = 'Opens in the guide'
 export const moreNote = (n: number) => `and ${n} more: type the asset name to narrow`
 /** Characters of help or guide text shown around a text hit. */
 const SNIPPET = 60
@@ -126,15 +133,19 @@ export function parameterRows(query: string, index: ParameterIndex, catalogue: P
   const { parameterQuery, assetWords } = splitAssetWords(query, allNames, isParameterWord)
   const hits: ParameterHit[] = parameterQuery ? index.search(parameterQuery) : []
   const rows: ParameterRow[] = []
-  for (const { entry, via } of hits.filter(h => canOpenParameter(h.entry)).slice(0, ENTRY_LIMIT)) {
+  for (const { entry, via } of hits.slice(0, ENTRY_LIMIT)) {
     const parts = [componentLabel(entry.scope), groupName.get(entry.group) ?? '']
     if (via === 'model') parts.push(MODEL_NAME_NOTE)
     if (via === 'help' || via === 'guide') parts.push(snippet(via === 'help' ? entry.short_help : entry.guide ?? '', parameterQuery))
     const where = parts.filter(Boolean).join(' · ')
+    if (!canOpenParameter(entry)) {
+      if (!assetWords.length) rows.push({ id: `param-${entry.id}`, entryId: entry.id, title: entry.plain_name, subtitle: `${where} · ${GUIDE_NOTE}`, guideOnly: true })
+      continue
+    }
     const assets = (assetsByClass[entry.scope] ?? []).filter(a => namedBy(a.name, assetWords))
     if (!assets.length) {
       if (assetWords.length) continue
-      rows.push({ id: `param-${entry.id}`, title: entry.plain_name, subtitle: `${where} · ${NONE_NOTE}` })
+      rows.push({ id: `param-${entry.id}`, entryId: entry.id, title: entry.plain_name, subtitle: `${where} · ${NONE_NOTE}` })
       continue
     }
     const shown = assets.slice(0, ASSETS_PER_ENTRY)
@@ -143,6 +154,7 @@ export function parameterRows(query: string, index: ParameterIndex, catalogue: P
       const last = i === shown.length - 1 && more > 0
       rows.push({
         id: `param-${entry.id}-${a.name}`,
+        entryId: entry.id,
         title: `${a.name}: ${entry.plain_name}`,
         subtitle: last ? `${where} · ${moreNote(more)}` : where,
         hint: formatValue(unitOn(entry, a, busByName), a[entry.model_name]),

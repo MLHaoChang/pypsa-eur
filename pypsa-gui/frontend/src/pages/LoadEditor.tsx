@@ -12,8 +12,8 @@ const columns = [
   col.accessor('name', { header: 'Name', size: 160 }),
   col.accessor('bus', { header: 'Bus', size: 120 }),
   col.accessor('carrier', { header: 'Carrier', size: 100 }),
-  col.accessor('p_set', { header: 'p_set (MW)', size: 110 }),
-  col.accessor('q_set', { header: 'q_set (MVAr)', size: 110 }),
+  col.accessor('p_set', { header: 'Demand (MW)', size: 110 }),
+  col.accessor('q_set', { header: 'Reactive demand (MVAr)', size: 110 }),
   col.accessor('sign', { header: 'Sign', size: 60 }),
 ]
 
