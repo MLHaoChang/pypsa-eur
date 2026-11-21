@@ -12,7 +12,7 @@ export interface EmptyStateAction {
   onClick: () => void
 }
 
-export default function EmptyState({ title, children, action, testId }: {
+export default function EmptyState({ title, children, action, testId, actionTestId }: {
   /** The state, in a few words: "Not run yet", "Not yet available". */
   title: string
   /** The reason or the next step, one sentence. */
@@ -20,6 +20,7 @@ export default function EmptyState({ title, children, action, testId }: {
   /** At most one action. */
   action?: EmptyStateAction
   testId?: string
+  actionTestId?: string
 }) {
   return (
     <div role="status" data-testid={testId} data-empty-state
@@ -27,7 +28,7 @@ export default function EmptyState({ title, children, action, testId }: {
       <div className="text-h3 font-semibold text-text">{title}</div>
       {children && <p className="text-lead leading-snug text-muted">{children}</p>}
       {action && (
-        <button type="button" onClick={action.onClick}
+        <button type="button" onClick={action.onClick} data-testid={actionTestId}
           className="mt-0.5 rounded-control border border-border-2 bg-bg px-2 py-1 text-body font-semibold text-text hover:border-border-3">
           {action.label}
         </button>

@@ -76,13 +76,14 @@ function RailButton({ id, testId, ...props }: RailProps & { id: FlowSectionId; t
       <button type="button" data-testid={testId} data-state={bs}
         aria-current={bs === 'current' ? 'step' : undefined}
         disabled={bs === 'blocked'}
-        title={why ?? label} aria-label={why ? undefined : label}
+        title={why ?? label} aria-label={why ? `${label}. ${why}` : label}
         onClick={() => props.onPick(id)}
         className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] ${tone}`}>
         <span className="font-mono text-[10px]">{meta.number}</span>
-        {/* Narrow windows keep the number and dot; the label stays on the
-            current pill and in every pill's title. */}
-        <span className={bs === 'current' ? '' : 'hidden min-[900px]:inline'}>{meta.label}</span>
+        {/* Below 1600 px (the ten steps do not fit a 1280 px row with their labels)
+            an inactive pill keeps the number and dot; the label stays on the
+            current pill and in every pill's title and accessible name. */}
+        <span className={bs === 'current' ? '' : 'hidden min-[1600px]:inline'}>{meta.label}</span>
         {bs === 'current' && <ScopeChips section={id} testId="hub-rail-scope-chips" />}
         {!stateless && bs !== 'blocked' && <FlowStateDot state={isError ? null : state} />}
         {id === 'scenarios' && props.flow === 'running' && (

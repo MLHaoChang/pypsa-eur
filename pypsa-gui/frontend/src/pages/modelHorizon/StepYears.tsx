@@ -39,7 +39,7 @@ export function StepYears({
 
   return (
     <section>
-      <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Investment years</h3>
+      <h3 className="text-h3 font-semibold text-text mb-2.5">Investment years</h3>
       <div className="border border-border rounded mb-3">
         <div className="p-2.5">
           <p className="text-[11px] text-muted mb-2 leading-relaxed">

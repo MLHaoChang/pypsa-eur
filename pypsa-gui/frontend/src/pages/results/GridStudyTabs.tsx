@@ -23,7 +23,7 @@ function GridNext() {
   return (
     <p data-testid="grid-next" className="text-[11px] text-muted">
       Next: {control ? 'Control' : 'hand off'}{' '}
-      <button type="button" data-testid="grid-next-open" onClick={go} className="text-accent hover:underline">
+      <button type="button" data-testid="grid-next-open" onClick={go} className="text-link hover:underline">
         {control ? 'Run the island study in Grid study' : 'Open Reports'} ›
       </button>
     </p>
@@ -79,7 +79,7 @@ export function GridCodeTab() {
       <PageSection title="Grid code & connection" hint="What the grid-readiness scorecard does not show">
         <p className="text-[11px] text-muted">
           Grid-code verdicts, with the before / after-battery values, are in the scorecard.{' '}
-          <button type="button" data-testid="grid-code-scorecard-link" className="text-accent hover:underline"
+          <button type="button" data-testid="grid-code-scorecard-link" className="text-link hover:underline"
             onClick={showGridReadiness}>Readiness › Grid readiness ›</button>
         </p>
       </PageSection>

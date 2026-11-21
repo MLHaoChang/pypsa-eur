@@ -1011,7 +1011,7 @@ export default function AppHeader() {
       </div>
 
       {/* Search — multi-type, debounced, keyboard navigable */}
-      <div className="relative mx-2" style={{ width: 220 }}>
+      <div className="relative mx-2" style={{ flex: '0 1 220px', minWidth: 150 }}>
         <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
         <input
           ref={searchRef}
@@ -1182,10 +1182,12 @@ export default function AppHeader() {
                     {mode === 'lopf' ? <Zap size={11} /> : <Play size={11} />}
                     {runLabel}
                     {(staleKinds.length > 0 || uncheckedKinds.length > 0) && (
+                      // Below 1400 px the words fold to the counts, so the search field keeps its
+                      // width; the full text stays in the title and the accessible name.
                       <span data-testid="run-stale" title={staleText} className="font-normal opacity-90">
-                        ({staleKinds.length > 0 && `${staleKinds.length} out of date`}
+                        ({staleKinds.length > 0 && <>{staleKinds.length}<span className="max-[1399px]:sr-only"> out of date</span></>}
                         {staleKinds.length > 0 && uncheckedKinds.length > 0 && ' · '}
-                        {uncheckedKinds.length > 0 && <span data-testid="run-unchecked" className="opacity-75">{uncheckedKinds.length} unchecked</span>})
+                        {uncheckedKinds.length > 0 && <span data-testid="run-unchecked" className="opacity-75">{uncheckedKinds.length}<span className="max-[1399px]:sr-only"> unchecked</span></span>})
                       </span>
                     )}
                   </>}
