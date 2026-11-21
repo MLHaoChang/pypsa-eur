@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant's durable conversation records the view each turn was asked from (panel, results tab, run, window and selected asset) separately from the run under discussion, and a file delivery reports when its download link expires (live-voice 03a).

@@ -107,6 +107,9 @@ def write_ledger_readme(entries, templates: UnitTemplates, measurements: dict, p
         "Every number in this bundle is tagged `measured`, `datasheet` or "
         "`assumed`. This file is the appendix that lets a reader tell them apart.",
         "",
+        "The `.dyr` is the PSS/E v33 REGCA1/REECA1 set. The full v35 WECC set (REECC1, "
+        "REPCA1, type 3 wind) can be written by the PSS/E pack (`gridspine.handoff.psse_pack`).",
+        "",
     ]
 
     lines += ["## Provenance", ""]

@@ -895,3 +895,84 @@ export function reportChartErrorMessage(e: unknown, limit = 12): string {
   if (isReportError(e, 'chart_limit_reached')) return REPORT_CHART_LIMIT_TEXT(limit)
   return reportErrorMessage(e, 'Could not update the report')
 }
+
+// ── 07c comments and 07d run drafts (SH-07d PR B) ───────────────────────────
+
+/** A 07c comment's anchor: a section, and in it one block or table. */
+export interface CommentAnchor {
+  section_id: string
+  block_index?: number | null
+  table_id?: string | null
+}
+
+/** One 07c comment as `GET …/comments` returns it. */
+export interface ReportComment {
+  comment_id: string
+  text: string
+  anchor: CommentAnchor
+  status: 'open' | 'addressed' | 'withdrawn'
+  reason?: string | null
+  reasons?: string[]
+  created_at: string
+}
+
+export interface ReportComments {
+  report_id: string
+  latest_version: number
+  digest: string
+  comments: ReportComment[]
+}
+
+/** 07c's closed edit set, as a run's draft carries it. */
+export type RevisionEdit =
+  | { kind: 'paragraph_text'; md: string }
+  | { kind: 'bullet_text'; items: string[] }
+  | { kind: 'table_text'; caption?: string | null; columns: string[] }
+  | { kind: 'table_cells'; rows: string[][] }
+
+/** One draft row of a run (`run_revise.view`). */
+export interface RevisionDraft {
+  id: string
+  comment_id: string
+  report_id: string
+  status: string
+  at?: string
+  ended_at?: string
+  edit?: RevisionEdit
+  base_digest?: string
+  reasons?: string[]
+  error?: string
+  revision?: { version: number; digest: string }
+}
+
+const drafts = (projectName: string, reportId: string) =>
+  `${base(projectName)}/${encodeURIComponent(reportId)}`
+
+/** `GET …/{id}/comments`: the report's comments, oldest first. */
+export async function listReportComments(projectName: string, reportId: string): Promise<ReportComments> {
+  return _json<ReportComments>(await fetch(`${drafts(projectName, reportId)}/comments`))
+}
+
+/** `POST …/comments/{comment_id}/drafts`: ask the named run to draft a fix. */
+export async function requestRevisionDraft(
+  projectName: string, reportId: string, commentId: string, taskId: string,
+): Promise<{ draft: RevisionDraft }> {
+  return _json(await _postJson(
+    `${drafts(projectName, reportId)}/comments/${encodeURIComponent(commentId)}/drafts`, { task_id: taskId }))
+}
+
+/** `POST …/drafts/{draft_id}/confirm`: apply the draft through 07c's address. */
+export async function confirmRevisionDraft(
+  projectName: string, reportId: string, draftId: string, taskId: string,
+): Promise<unknown> {
+  return _json(await _postJson(
+    `${drafts(projectName, reportId)}/drafts/${encodeURIComponent(draftId)}/confirm`, { task_id: taskId }))
+}
+
+/** `POST …/drafts/{draft_id}/discard`. */
+export async function discardRevisionDraft(
+  projectName: string, reportId: string, draftId: string, taskId: string,
+): Promise<{ draft: RevisionDraft }> {
+  return _json(await _postJson(
+    `${drafts(projectName, reportId)}/drafts/${encodeURIComponent(draftId)}/discard`, { task_id: taskId }))
+}

@@ -1,0 +1,1 @@
+{"kinds": {"project_access_denied": {"surface": "inline", "why": "Tool admission found the acting user has no access to the open project (404, so existence is not leaked). No tool ran; the assistant tells the user they cannot act on this project and does not retry. Distinct from restriction_unavailable, which means the saved-rule store could not be read."}}}

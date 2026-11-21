@@ -48,6 +48,8 @@ neither the 422 nor the scorecard reads the placeholder as a number.
 """
 from __future__ import annotations
 
+import datetime
+
 import numpy as np
 import pandas as pd
 
@@ -460,7 +462,8 @@ def peak_check(n, island: dict | None, *, unset: dict[str, list[str]] | None = N
         missing = list((unset or {}).get(label, []))
         firm = [{"source": "gensets", "mw": firm_mw, "rule": rule},
                 {"source": "ride-through batteries", "mw": float(shave[j]), "rule": bess_rule}]
-        out.append({"period": label, "binding_snapshot": str(snaps[t]), "load_mw": float(load[t]),
+        out.append({"period": label, "binding_snapshot": snapshot_words(snaps[t]),
+                    "load_mw": float(load[t]),
                     "energized_mw": e_t,
                     "efficiency": float(delivered[t]) / e_t if e_t > 0 else min(eff.values()),
                     "delivered_mw": float(delivered[t]), "cap_mw": float(cap[j]),
@@ -473,12 +476,26 @@ def peak_check(n, island: dict | None, *, unset: dict[str, list[str]] | None = N
     return out
 
 
+def snapshot_words(snap) -> str:
+    """A snapshot as ISO date and minute ("2030-07-07 13:00"); a multi-period
+    ``(period, timestamp)`` snapshot gives its timestamp (DC walkthrough 02:
+    never the tuple's Python text)."""
+    ts = snap[-1] if isinstance(snap, tuple) else snap
+    if not isinstance(ts, (pd.Timestamp, np.datetime64, datetime.datetime)):
+        return str(ts)   # an integer or text snapshot index (GK A D3)
+    return pd.Timestamp(ts).strftime("%Y-%m-%d %H:%M")
+
+
 def describe(row: dict) -> str:
     """The cap in words, as the 422 and the scorecard both say it."""
     eff = row["efficiency"]
     shown = f" (× {eff:.4g} efficiency)" if abs(eff - 1.0) > 1e-12 else ""
-    # A source that adds nothing beyond the first is left out of the words.
-    sources = [f for i, f in enumerate(row["firm"]) if i == 0 or f["mw"] > 0]
-    firm = " plus ".join(f"{f['mw']:g} MW of firm {f['source']} ({f['rule']})" for f in sources)
-    return (f"the {row['energized_mw']:g} MW energized import{shown} plus {firm} "
+    # A source that adds nothing is left out of the words (no gensets on a
+    # Battery-backup site: DC walkthrough 02).
+    # An unknown (NaN) size is said, not dropped (GK A D4).
+    sources = [f for f in row["firm"] if not f["mw"] <= 0]
+    firm = "".join(
+        f" plus {'an unknown amount' if f['mw'] != f['mw'] else format(f['mw'], 'g') + ' MW'} "
+        f"of firm {f['source']} ({f['rule']})" for f in sources)
+    return (f"the {row['energized_mw']:g} MW energized import{shown}{firm} "
             f"= {row['cap_mw']:.4g} MW")

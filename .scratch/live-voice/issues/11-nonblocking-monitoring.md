@@ -3,7 +3,7 @@
 
 # Nonblocking domain jobs, recoverable monitoring and results refresh
 
-Status: done (#1556)
+Status: ready-for-agent; audit 2026-11-19: 11a, 11b, 11c-1, 11c-2 merged (#1543, #1548, #1550, #1556); left besides: adapters for all families, wait_for_job, D-I2, D-C1
 Type: task
 Blocked by: 02, 08, 09
 

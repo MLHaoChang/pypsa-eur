@@ -582,14 +582,14 @@ def _materialised_cross_interval(n, cfg, adders, price):
     if not gain > _GAIN_EPS:
         return None
     return ("warning", "commercial.arbitrage_loop_via_storage", "Link", member,
-            f"No single snapshot pays, but with storage {name!r} behind the meter, energy "
-            f"imported through {member!r} ({imp[member][cheap]:,.2f} per MWh at "
-            f"{n.snapshots[cheap]}) and exported through {cfg.export_link!r} at the highest "
-            f"credit ({credit[best]:,.2f} per MWh, first at {n.snapshots[best]}), after the "
-            f"import Link's efficiency and the storage's round trip "
-            f"({float(eff[member][cheap]) * eta:.2f}), earns up to {gain:,.2f} per MWh, and "
-            "the LP will do it. Check the export price against the tariff's energy rates; "
-            "if the tariff really pays this, the result is real.")
+            f"With the storage {name}, the site can buy electricity from the grid at "
+            f"{imp[member][cheap]:,.2f} per MWh (through {member}, {n.snapshots[cheap]}) "
+            f"and sell it back at {credit[best]:,.2f} per MWh (through {cfg.export_link}, "
+            f"first at {n.snapshots[best]}). After the storage's and the import's losses "
+            f"({float(eff[member][cheap]) * eta:.2f} of each MWh comes back) that earns up to "
+            f"{gain:,.2f} per MWh, so the run will trade through the grid, not only store the "
+            "site's own output. Check the export price against the tariff; if the tariff "
+            "really pays this, the result is real.")
 
 
 # ── without a commercial config: the Links' own marginal cost ─────────────

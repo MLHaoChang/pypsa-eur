@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, Square, Trash2 } from 'lucide-react'
 import { campusApi, errorText, type AppliedCut, type ProposedCut, type RefreshedRating } from '../api/campusElectrical'
+import { islandScenarioLabel } from '../plainNames'
 import { Btn, Tag } from '../components/PageKit'
 import { ISLAND_REPORT_KEY } from './CampusIslandSection'
 
@@ -35,9 +36,7 @@ const refreshedText = (r: RefreshedRating) =>
   'field' in r ? `${r.unit} ${r.field} ${num(r.from)} → ${num(r.to)}`
     : r.added ? `${r.unit} added` : `${r.unit} not added: ${r.reason}`
 /** Scenario ids in the user's words, as the island Scenarios checkboxes name them. */
-const SCENARIO_WORDS: Record<string, string> = { ups_bridged: 'UPS-bridged', seamless: 'Seamless', planned: 'Planned' }
-export const scenarioWords = (id: string) =>
-  SCENARIO_WORDS[id] ?? id.replace(/_/g, ' ').replace(/^./, ch => ch.toUpperCase())
+export const scenarioWords = islandScenarioLabel
 
 const hourWords = (period: number, hour: number) => `${period}, hour ${hour}`
 const EVENT_WORDS: Record<string, string> = {

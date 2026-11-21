@@ -1,0 +1,1 @@
+* Test(pypsa-gui): Browser journeys for every workflow template (template, set-up, readiness, run, results, report), short in pull-request CI and full on the scheduled run, with the open template gaps as expected failures.
