@@ -266,7 +266,11 @@ def test_a_malformed_import_is_refused_and_keeps_the_open_network(
             "import_unreadable",
         )
     logged = [r for r in caplog.records if r.name == "routers.io" and r.exc_info]
-    assert len(logged) == (0 if name in ("bad.m", "empty.zip", "empty.xlsx") else 1)
+    # The Excel reader refuses a non-workbook by its own zip check (ImportFormatError), so
+    # nothing raised; its unexpected failures are logged by `services.excel_workbook`.
+    assert len(logged) == (
+        0 if name in ("bad.m", "empty.zip", "empty.xlsx", "bad.xlsx") else 1
+    )
     assert state(project_dir) == before
     assert PyPSAService.get_network().generators.at["G1", "p_nom"] == 33.0
 

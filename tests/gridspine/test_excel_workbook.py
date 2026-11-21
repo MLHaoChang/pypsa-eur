@@ -296,6 +296,24 @@ def test_a_money_per_kw_value_reads_back_as_the_same_float(tmp_path):
     assert _read(path).network.generators.at["wind 1", "capital_cost"] == 123456.789
 
 
+def test_a_custom_column_shown_per_kw_reads_back_per_mw(tmp_path):
+    """An investment part (a custom column) the catalogue shows in EUR/kW is stored per MW again (S2)."""
+    n = _network(False)
+    n.generators["capex_part_eur_per_kw"] = 250_000.0
+    shown = C("capex_part_eur_per_kw", "Capex part", "EUR/kW", 1e-3)
+    cat = {**CATALOGUE, "Generator": [*CATALOGUE["Generator"], shown]}
+    data = write_workbook(n, columns=cat, custom_columns=CUSTOM)
+    path = tmp_path / "w.xlsx"
+    path.write_bytes(data)
+    ws = openpyxl.load_workbook(path)["Generators"]
+    col = [c.value for c in ws[L.ROW_KEY]].index("capex_part_eur_per_kw") + 1
+    assert ws.cell(L.FIRST_DATA_ROW, col).value == 250.0
+    res = read_excel(path, {"custom_columns": CUSTOM, "columns": cat})
+    assert res.network.generators["capex_part_eur_per_kw"].tolist() == [
+        250_000.0
+    ] * len(n.generators)
+
+
 def test_a_size_on_a_tonne_node_is_shown_and_read_in_tonnes_per_hour(tmp_path):
     """E4: the size unit is the asset's node unit, not the catalogue's MW; the value is unchanged."""
     n = _network(True)
