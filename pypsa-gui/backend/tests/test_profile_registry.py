@@ -8,7 +8,7 @@ from harness import (
     ac_branch_calculations, branch_calculations, calculations, copt_calculations, grid_readiness_calculations, capacity_calculations, carrier_calculations, energy_balance_calculations,
     curtailment_calculations, emissions_calculations, lost_load_calculations,
     investment_calculations, price_calculations, site_import_calculations, storage_calculations, storage_costs, storage_cycles_calculations,
-    time_to_power_calculations, ac_branch_calculations,
+    time_to_power_calculations,
 )
 
 TABLES = (
@@ -21,7 +21,6 @@ TABLES = (
     site_import_calculations.METRICS, investment_calculations.METRICS,
     investment_calculations.LCOE_METRICS, copt_calculations.METRICS,
     grid_readiness_calculations.METRICS, time_to_power_calculations.METRICS,
-    ac_branch_calculations.METRICS,
 )
 
 
