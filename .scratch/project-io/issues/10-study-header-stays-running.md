@@ -4,6 +4,7 @@
 # 10 After a Study run completes, the header still shows Abort and "Running · Solving…"
 
 Status: needs-triage
+Impact: medium
 Blocked by: none
 Source: follow-up from 08 (shot set 2, `.scratch/project-io/shots-08/06-completed-downloaded.png`).
 

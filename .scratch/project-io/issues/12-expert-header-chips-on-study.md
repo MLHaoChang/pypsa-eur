@@ -4,6 +4,7 @@
 # 12 The Expert header shows bus/line/asset chips and component search on a Study project
 
 Status: needs-triage
+Impact: medium
 Blocked by: none
 Source: follow-up from 08 (shot `.scratch/project-io/shots-08/04-dispatch-window-1-of-3.png`).
 
@@ -11,9 +12,12 @@ Source: follow-up from 08 (shot `.scratch/project-io/shots-08/04-dispatch-window
 
 On a planning → dynamics Study, Expert's header still shows "0 buses · 0 lines · 0 assets" and the "Search components…" box. A Study has no network canvas, so they always read zero and the search finds nothing. Guided's header has neither.
 
+Ctrl K (`components/CommandPalette.tsx`) has no run command, so a Study can't be run from it. It does offer network-only entries on a Study: Open solve queue, Open solver settings, Open model horizon and Open issues panel ("Validate the current network").
+
 ## Acceptance criteria
 
 - [ ] On a Study project, Expert hides the component chips and search, and does not flash them while the project kind loads.
+- [ ] Ctrl K leaves out the network-only entries on a Study.
 - [ ] A non-Study project keeps them; a vitest covers both.
 
 ## Likely files
