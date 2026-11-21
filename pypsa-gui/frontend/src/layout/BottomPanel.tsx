@@ -11,7 +11,8 @@ import { coerceForColumn } from '../utils/coerce'
 import { useSimulationStore } from '../store/simulationStore'
 import { useCatalog } from '../hooks/useCatalog'
 import { useAssetSchema } from '../hooks/useAssetSchema'
-import { SCHEMA_CLASSES } from '../api/assetSchema'
+import { SCHEMA_CLASSES, assetSchemaApi } from '../api/assetSchema'
+import { unitLabel } from '../utils/assetForm'
 import {
   CLOSED_SETS, buildSeriesIndex, columnHeaderLabel, columnHeaderTooltip,
   isBooleanDtype, readOnlyReason, resolveEditability, resolveEditor,
@@ -68,6 +69,8 @@ const TAB_COLUMNS: Record<Tab, string[]> = {
 // unit, everything else its name and the catalog's unit (`columnHeaderLabel`,
 // S1d). M5 described the Bus and Carrier tables too, so the short-name list
 // (COL_LABELS) that covered them is gone.
+/** The classes whose size is measured on a bus, so a row can sit on a tonne bus (the backend's `_SIZE_BUS`). */
+const SIZED_ON_A_BUS: ReadonlySet<string> = new Set(['Generator', 'StorageUnit', 'Store', 'Load', 'Link'])
 const NO_SHORT_NAMES: Record<string, string> = {}
 
 const TAB_TYPES: Record<Tab, string | null> = {
@@ -390,7 +393,43 @@ function AssetTable({
   // S1d: a described class's headers come from its asset schema (label +
   // stored unit), the words its Expert card uses.
   const { data: schema } = useAssetSchema(SCHEMA_CLASSES.has(componentClass) ? componentClass : null)
-  const headerOf = (col: string) => columnHeaderLabel(col, catalog, NO_SHORT_NAMES, schema)
+  // 05f: one table spans many assets, so a cost header cannot name one bus. It keeps the stored unit and adds the
+  // per-tonne unit when a tonne-bus asset is among the filtered rows, or says the unit is unknown when a bus is
+  // unreadable; those rows' cost cells say it too. Keyed on the network revision like `useAssetSchema`'s units, so any
+  // write, undo or restore re-reads it.
+  const revision = useQuery({
+    queryKey: nk(currentProject, 'undoInfo'),
+    queryFn: () => networkApi.undoInfo(),
+    enabled: SIZED_ON_A_BUS.has(componentClass) && !!currentProject,
+    staleTime: 2000,
+  }).data?.network_revision
+  const { data: tableUnits } = useQuery({
+    queryKey: nk(currentProject, 'assetUnits', componentClass, 'tableUnits', revision ?? ''),
+    queryFn: () => assetSchemaApi.tableUnits(componentClass),
+    enabled: SIZED_ON_A_BUS.has(componentClass) && !!currentProject,
+    staleTime: 30_000,
+    retry: false,
+  })
+  const headerOf = (col: string) => {
+    const base = columnHeaderLabel(col, catalog, NO_SHORT_NAMES, schema)
+    if (!tableUnits?.cost_fields.includes(col)) return base
+    const tonneUnits = new Set<string>()
+    let unknown = false
+    for (const r of filtered) {
+      const u = tableUnits.rows[String(r.name)]?.[col]?.unit
+      if (u) tonneUnits.add(u)
+      else if (tableUnits.unreadable.includes(String(r.name))) unknown = true
+    }
+    const notes = [...tonneUnits].map(u => `${unitLabel(u)} on tonne buses`)
+    if (unknown) notes.push('unit unknown where the bus is unreadable')
+    return notes.length ? `${base} · ${notes.join(' · ')}` : base
+  }
+  const costCellNote = (name: string, col: string): string | undefined => {
+    const u = tableUnits?.rows[name]?.[col]?.unit
+    if (u) return `On a tonne bus: ${unitLabel(u)}`
+    return tableUnits?.cost_fields.includes(col) && tableUnits.unreadable.includes(name)
+      ? 'Unit unknown: the bus cannot be read' : undefined
+  }
   const { data: tsList = [] } = useQuery({
     queryKey: nk(currentProject, 'timeseries'),
     queryFn: networkApi.listTimeseries,
@@ -1205,7 +1244,7 @@ function AssetTable({
                         if (!draggingRef.current) return
                         setDrag(prev => (prev ? { ...prev, focus: { name, col } } : prev))
                       }}
-                      title={readOnlyReason(editabilityOf(name, col))}
+                      title={readOnlyReason(editabilityOf(name, col)) || costCellNote(name, col)}
                       // Double-click edits; a single click only selects. Both
                       // halves are load-bearing: onCopy/onPaste bail while an
                       // editor is open, so if a single click opened one the
