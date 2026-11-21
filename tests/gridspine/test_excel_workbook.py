@@ -453,13 +453,34 @@ def test_a_hidden_model_name_not_on_the_allow_list_is_reported_and_never_set(
     _tamper(path, "Generators", L.ROW_KEY, "marginal_cost", raw)
     res = _read(path)
     assert (
-        "Generators › Variable cost",
-        f"'{raw}' is not a parameter of Generators",
+        "Generators · Variable cost",
+        f"its hidden model name “{raw}” is not one Generators reads; the column was not read",
     ) in _um(res)
     assert raw not in res.network.generators.columns or raw == "p_nom_opt"
     assert res.network.generators.at["wind 1", "marginal_cost"] == 0.0
     if raw == "p_nom_opt":
         assert (res.network.generators["p_nom_opt"] == 0.0).all()
+
+
+def test_a_broken_workbook_s_report_uses_no_straight_quotes_or_link_marks(tmp_path):
+    """Issue 07 (UX 27 on S3): the report quotes in “…” and separates with "·"; "›" is for links only."""
+    import re
+
+    path = _write(_network(False), tmp_path)
+    _tamper(path, "Generators", L.ROW_KEY, "marginal_cost", "p_nom_opt")
+    _tamper(path, "Generators", L.ROW_SCALE, "capital_cost", 2.0)
+    _tamper(path, "Generators", L.FIRST_DATA_ROW, "p_nom", "lots")
+    res = _read(path)
+    rows = _um(res)
+    assert len(rows) >= 3
+    for item, reason in rows:
+        for text in (item, reason):
+            assert "›" not in text, text
+            assert not re.search(r"(^|\s)'\S", text), text
+    assert (
+        "Generators · Variable cost",
+        "its hidden model name “p_nom_opt” is not one Generators reads; the column was not read",
+    ) in rows
 
 
 @pytest.mark.parametrize(
@@ -470,8 +491,8 @@ def test_a_hidden_factor_that_does_not_match_its_unit_is_reported(tmp_path, scal
     _tamper(path, "Generators", L.ROW_SCALE, "capital_cost", scale)
     res = _read(path)
     assert (
-        "Generators › Annualised investment",
-        "the hidden unit factor (row 4) does not match the unit 'EUR/kW/yr'",
+        "Generators · Annualised investment",
+        "the hidden unit factor (row 4) does not match the unit “EUR/kW/yr”",
     ) in _um(res)
     assert res.network.generators.at["wind 1", "capital_cost"] == 0.0
 
@@ -480,7 +501,7 @@ def test_a_unit_changed_without_its_factor_is_reported(tmp_path):
     path = _write(_network(False), tmp_path)
     _tamper(path, "Generators", L.ROW_UNIT, "capital_cost", "EUR/MW/yr")
     assert any(
-        item == "Generators › Annualised investment" for item, _ in _um(_read(path))
+        item == "Generators · Annualised investment" for item, _ in _um(_read(path))
     )
 
 
@@ -498,17 +519,17 @@ def test_tampered_time_series_rows_are_reported(tmp_path):
     res = _read(path)
     reasons = dict(_um(res))
     assert (
-        reasons["Time series › d Demand"]
-        == "'p_nom' is not a parameter that can change over time"
+        reasons["Time series · d Demand"]
+        == "“p_nom” is not a parameter that can change over time"
     )
-    assert reasons["Time series › wind 1 P max pu"] == "'Network' is not an asset type"
+    assert reasons["Time series · wind 1 P max pu"] == "“Network” is not an asset type"
     assert res.network.loads_t.p_set.empty
 
 
 def test_a_series_for_an_asset_that_does_not_exist_is_reported(tmp_path):
     path = _write(_network(False), tmp_path)
     _tamper(path, L.TIME_SERIES, L.TS_ROW_ASSET, "d", "ghost")
-    assert ("Time series › ghost › p_set", "no Loads row is named 'ghost'") in _um(
+    assert ("Time series · ghost · p_set", "no Loads row is named “ghost”") in _um(
         _read(path)
     )
 
@@ -536,9 +557,9 @@ def test_an_unreadable_upload_mark_keeps_the_series_and_warns(tmp_path):
         ("p_nom", "nan", "not a number (NaN)"),
         ("p_nom", "inf", "infinity is not allowed here"),
         ("p_nom", True, "a TRUE/FALSE value in a number column"),
-        ("p_nom", "lots", "'lots' is not a number"),
-        ("p_nom_extendable", "maybe", "'maybe' is not TRUE or FALSE"),
-        ("p_nom_extendable", 1, "'1' is not TRUE or FALSE"),
+        ("p_nom", "lots", "“lots” is not a number"),
+        ("p_nom_extendable", "maybe", "“maybe” is not TRUE or FALSE"),
+        ("p_nom_extendable", 1, "“1” is not TRUE or FALSE"),
         ("build_year", 2030.5, "2030.5 is not a whole number"),
         ("bus", False, "a TRUE/FALSE value in a text column"),
     ],
@@ -555,7 +576,7 @@ def test_a_bad_value_is_a_report_row_and_the_default_is_kept(
     wb.save(path)
     res = _read(path)
     assert (
-        f"Generators › wind 1 › {label}",
+        f"Generators · wind 1 · {label}",
         f"{reason}; the model default is kept",
     ) in _um(res)
     assert "wind 1" in res.network.generators.index
@@ -576,7 +597,7 @@ def test_a_formula_without_a_saved_value_is_never_evaluated(tmp_path):
     wb.save(path)
     res = _read(path)
     assert any(
-        item == "Generators › wind 1 › Capacity" and "formula" in why
+        item == "Generators · wind 1 · Capacity" and "formula" in why
         for item, why in _um(res)
     )
     assert res.network.generators.at["wind 1", "p_nom"] == 0.0
@@ -767,7 +788,7 @@ def test_a_pypsa_export_column_off_the_allow_list_is_reported_not_set(tmp_path):
     res = read_excel(_native(n, tmp_path))
     assert "cmd" not in res.network.buses.columns
     assert (
-        "buses › column cmd",
+        "buses · column cmd",
         "not an input of this kind of asset; the column was not read",
     ) in _um(res)
 
@@ -814,7 +835,7 @@ def test_a_legacy_column_off_the_allow_list_is_reported_not_set(tmp_path):
     assert bool(res.network.buses.at["B1", "eh_flag"]) is True
     assert _um(res) == [
         (
-            "buses › column __class__",
+            "buses · column __class__",
             "not an input of this kind of asset; the column was not read",
         )
     ]
@@ -828,7 +849,7 @@ def test_a_legacy_column_off_the_allow_list_is_reported_not_set(tmp_path):
             "p_nom: infinity is not allowed here",
         ),  # an .xlsx cannot hold a float inf
         (True, "p_nom: a TRUE/FALSE value in a number column"),
-        ("lots", "p_nom: 'lots' is not a number"),
+        ("lots", "p_nom: “lots” is not a number"),
     ],
 )
 def test_a_legacy_cell_the_model_cannot_take_is_reported(tmp_path, value, reason):
@@ -842,7 +863,7 @@ def test_a_legacy_cell_the_model_cannot_take_is_reported(tmp_path, value, reason
     )
     res = read_excel(path)
     assert res.network.generators.empty
-    assert _um(res) == [("generators › G1", reason)]
+    assert _um(res) == [("generators · G1", reason)]
 
 
 def test_a_legacy_formula_with_no_saved_value_is_reported(tmp_path):
@@ -856,7 +877,7 @@ def test_a_legacy_formula_with_no_saved_value_is_reported(tmp_path):
     res = read_excel(path)
     assert "B1" in res.network.buses.index
     assert (
-        "buses › cell B2",
+        "buses · cell B2",
         "a formula with no saved value; open and save the file in Excel, "
         "or type the value",
     ) in _um(res)
@@ -876,7 +897,7 @@ def test_a_legacy_output_column_is_reported_not_set(tmp_path):
         },
     )
     res = read_excel(path)
-    assert ("generators › column p_nom_opt", _OFF_LIST) in _um(res)
+    assert ("generators · column p_nom_opt", _OFF_LIST) in _um(res)
     assert res.network.generators.at["G1", "p_nom_opt"] == 0.0
 
 
@@ -903,7 +924,7 @@ def test_a_formula_with_no_saved_value_in_a_pypsa_export_is_reported(tmp_path):
     wb.save(path)
     res = read_excel(path)
     assert any(
-        src == f"buses › cell {cell.coordinate}"
+        src == f"buses · cell {cell.coordinate}"
         and "formula with no saved value" in why
         for src, why in _um(res)
     )
@@ -972,7 +993,7 @@ def test_a_legacy_row_names_its_first_bad_cell(tmp_path):
         },
     )
     res = read_excel(path)
-    assert _um(res) == [("generators › G1", "p_nom: 'lots' is not a number")]
+    assert _um(res) == [("generators · G1", "p_nom: “lots” is not a number")]
 
 
 def _native_edit(tmp_path, n, sheet, header, row_name, value):
@@ -1023,7 +1044,7 @@ def test_a_cell_pypsa_s_export_cannot_take_is_reported_and_its_asset_not_read(
 ):
     """E3 on PyPSA's own layout: checked on the cell as written, before PyPSA coerces it."""
     res = read_excel(_native_edit(tmp_path, _two_gens(), sheet, header, row, value))
-    assert _um(res) == [(f"{sheet} › {row}", reason)]
+    assert _um(res) == [(f"{sheet} · {row}", reason)]
     assert row not in getattr(res.network, sheet).index
     assert len(getattr(res.network, sheet)) == 1
 
@@ -1039,7 +1060,7 @@ def test_a_model_output_column_in_pypsa_s_export_is_reported_and_reset(tmp_path)
     """E1: an attribute PyPSA knows but that is not an input is not read."""
     path = _native_edit(tmp_path, _two_gens(), "generators", "p_nom_opt", "G1", 99.0)
     res = read_excel(path)
-    assert _um(res) == [("generators › column p_nom_opt", _OFF_LIST)]
+    assert _um(res) == [("generators · column p_nom_opt", _OFF_LIST)]
     assert res.network.generators.at["G1", "p_nom_opt"] == 0.0
 
 
@@ -1069,7 +1090,7 @@ def test_a_bad_cell_in_a_pypsa_export_time_series_drops_that_series(tmp_path):
     ws.cell(row=3, column=col, value="nan")
     wb.save(path)
     res = read_excel(path)
-    assert _um(res) == [("generators-p_max_pu › G2", "p_max_pu: not a number (NaN)")]
+    assert _um(res) == [("generators-p_max_pu · G2", "p_max_pu: not a number (NaN)")]
     assert list(res.network.generators_t.p_max_pu.columns) == ["G1"]
 
 
@@ -1093,7 +1114,7 @@ def test_a_header_less_column_in_pypsa_s_export_is_reported_and_dropped(tmp_path
         ws["B3"] = 7
 
     res = _native_wb(tmp_path, edit)
-    assert ("buses › column 2", _NO_HEADER) in _um(res)
+    assert ("buses · column 2", _NO_HEADER) in _um(res)
     assert not any(c.startswith("Unnamed") for c in res.network.buses.columns)
     assert not any("None" in src for src, _ in _um(res))
 
@@ -1138,7 +1159,7 @@ def test_a_row_with_two_bad_cells_in_pypsa_s_export_is_reported_once(tmp_path):
             ws.cell(row=3, column=heads.index(h) + 1, value=True)
 
     res = _native_wb(tmp_path, edit)
-    assert [src for src, _ in _um(res)] == ["generators › G2"]
+    assert [src for src, _ in _um(res)] == ["generators · G2"]
 
 
 @pytest.mark.parametrize("attr", ["foo", "p_nom"])
@@ -1171,7 +1192,7 @@ def test_a_series_with_two_bad_cells_is_reported_once(tmp_path):
         ws.cell(row=3, column=col, value="x")
 
     res = _native_wb(tmp_path, edit)
-    assert [src for src, _ in _um(res)] == ["generators-p_max_pu › G1"]
+    assert [src for src, _ in _um(res)] == ["generators-p_max_pu · G1"]
 
 
 def test_a_nameless_row_in_pypsa_s_export_is_reported_not_read_as_nan(tmp_path):
@@ -1277,8 +1298,8 @@ def test_a_date_in_a_number_column_is_reported(tmp_path):
 
     res = _edit(_write(_network(False), tmp_path), fn)
     assert (
-        "Generators › wind 1 › Capacity",
-        "'2030-01-02 00:00:00' is not a number; the model default is kept",
+        "Generators · wind 1 · Capacity",
+        "“2030-01-02 00:00:00” is not a number; the model default is kept",
     ) in _um(res)
 
 
@@ -1317,8 +1338,8 @@ def test_a_number_in_the_hidden_model_name_row_is_reported(tmp_path):
 
     res = _edit(_write(_network(False), tmp_path), fn)
     assert (
-        "Generators › Variable cost",
-        "'5' is not a parameter of Generators",
+        "Generators · Variable cost",
+        "its hidden model name “5” is not one Generators reads; the column was not read",
     ) in _um(res)
 
 
@@ -1354,7 +1375,7 @@ def test_a_size_unit_column_on_a_sheet_without_a_size_is_reported(tmp_path):
             ws.cell(r, c).value = v
 
     res = _edit(_write(_network(False), tmp_path), fn)
-    assert ("Lines › Size unit", "'~size_unit' is not a parameter of Lines") in _um(res)
+    assert ("Lines · Size unit", "its hidden model name “~size_unit” is not one Lines reads; the column was not read") in _um(res)
 
 
 def test_a_missing_weighting_column_keeps_the_default(tmp_path):
@@ -1428,7 +1449,7 @@ def test_an_uploaded_profile_with_an_unreadable_time_step_is_reported(tmp_path, 
         wb[L.UPLOADED].cell(L.UP_FIRST_DATA_ROW, 1).value = index
 
     res = _edit(_write(n, tmp_path, sidecars={"user_ts.json": _user_ts(n)}), fn)
-    assert any(item == "Uploaded profiles › other › p_max_pu" for item, _ in _um(res))
+    assert any(item == "Uploaded profiles · other · p_max_pu" for item, _ in _um(res))
     assert "generators" not in res.sidecars["user_ts.json"]
 
 
@@ -1445,7 +1466,7 @@ def test_a_date_typed_as_an_excel_date_reads_and_a_number_is_refused(tmp_path):
     res = _edit(_write(_network(False), tmp_path), fn)
     assert (
         f"{L.TIME_SERIES} row {L.TS_FIRST_DATA_ROW + 2}",
-        "time step: '5' is not a date as YYYY-MM-DD or YYYY-MM-DD hh:mm[:ss], "
+        "time step: “5” is not a date as YYYY-MM-DD or YYYY-MM-DD hh:mm[:ss], "
         "without a time zone",
     ) in _um(res)
     assert list(res.network.snapshots) == [
@@ -1459,7 +1480,7 @@ def test_read_excel_takes_a_plain_string_path_and_no_options(tmp_path):
     res = read_excel(str(path))
     assert res.report.source_files == ["w.xlsx"]
     # Without the allow-list, the custom columns are reported, never set.
-    assert any("is not a parameter of Generators" in why for _, why in _um(res))
+    assert any("is not one Generators reads; the column was not read" in why for _, why in _um(res))
     assert "eh_flag" not in res.network.generators.columns
 
 
@@ -1477,8 +1498,8 @@ def test_a_unit_and_its_factor_changed_together_cannot_rescale_a_value(tmp_path)
 
     res = _edit(_write(_network(False), tmp_path), fn)
     assert (
-        "Generators › Annualised investment",
-        "the unit 'EUR/MW/yr' is not this parameter's unit 'EUR/kW/yr'",
+        "Generators · Annualised investment",
+        "the unit “EUR/MW/yr” is not this parameter's unit “EUR/kW/yr”",
     ) in _um(res)
     assert res.network.generators.at["wind 1", "capital_cost"] == 0.0
 
@@ -1498,7 +1519,7 @@ def test_only_the_engine_s_own_infinity_is_accepted(tmp_path):
 
     res = _edit(_write(_network(False), tmp_path), fn)
     assert (
-        "Generators › electrolyser out › Maximum capacity",
+        "Generators · electrolyser out · Maximum capacity",
         "only inf is allowed here; the model default is kept",
     ) in _um(res)
 
@@ -1511,7 +1532,7 @@ def test_a_formula_without_a_saved_value_anywhere_is_reported(tmp_path):
         _write(_network(False), tmp_path, sidecars={"solver_config.json": SOLVER}), fn
     )
     assert (
-        f"{L.HORIZON} › cell B2",
+        f"{L.HORIZON} · cell B2",
         "a formula with no saved value; open and save the file in Excel, or type the value",
     ) in _um(res)
     assert "discount_rate" not in res.sidecars["solver_config.json"]
@@ -1544,7 +1565,7 @@ def test_a_custom_column_off_the_allow_list_is_exported_and_reported_on_import(
     n = _network(False)
     n.loads["site_note"] = ["north yard"]
     res = _read(_write(n, tmp_path))
-    assert ("Loads › Site note", "'site_note' is not a parameter of Loads") in _um(res)
+    assert ("Loads · Site note", "its hidden model name “site_note” is not one Loads reads; the column was not read") in _um(res)
     assert "site_note" not in res.network.loads.columns
 
 
@@ -1570,7 +1591,7 @@ def test_a_formula_without_a_saved_value_in_a_time_series_names_its_column(tmp_p
 
     res = _edit(_write(_network(False), tmp_path), fn)
     assert any(
-        item.startswith(f"{L.TIME_SERIES} › d")
+        item.startswith(f"{L.TIME_SERIES} · d")
         and why.startswith(
             f"row {L.TS_FIRST_DATA_ROW} is a formula with no saved value"
         )
@@ -1619,8 +1640,8 @@ def test_an_uploaded_time_step_that_is_not_json_ready_is_reported(tmp_path):
 
     res = _edit(_write(n, tmp_path, sidecars={"user_ts.json": _user_ts(n)}), fn)
     assert (
-        f"{L.UPLOADED} › other › p_max_pu",
-        "uploaded profile: '[NaN, 1]' is not a time step",
+        f"{L.UPLOADED} · other · p_max_pu",
+        "uploaded profile: “[NaN, 1]” is not a time step",
     ) in _um(res)
     assert "generators" not in res.sidecars["user_ts.json"]
 
@@ -1632,7 +1653,7 @@ def test_an_unknown_snapshot_kind_is_reported(tmp_path):
         ws.cell(r, 2).value = "bogus"
 
     res = _edit(_write(_network(False), tmp_path), fn)
-    assert any(why.startswith("'bogus' is not one of") for _, why in _um(res))
+    assert any(why.startswith("“bogus” is not one of") for _, why in _um(res))
 
 
 def test_an_infinite_value_is_written_as_text_and_refused_where_the_engine_does(
@@ -1644,7 +1665,7 @@ def test_an_infinite_value_is_written_as_text_and_refused_where_the_engine_does(
     ws = openpyxl.load_workbook(path)["Generators"]
     assert ws.cell(L.FIRST_DATA_ROW, _col(ws, "p_nom")).value == "inf"
     assert any(
-        item == "Generators › wind 1 › Capacity"
+        item == "Generators · wind 1 · Capacity"
         and why.startswith("infinity is not allowed here")
         for item, why in _um(_read(path))
     )
@@ -1716,7 +1737,7 @@ def test_a_factor_only_close_to_the_unit_s_is_reported(tmp_path):
     _tamper(path, "Generators", L.ROW_SCALE, "capital_cost", 0.001 * (1 + 5e-13))
     res = _read(path)
     assert any(
-        item == "Generators › Annualised investment" and "hidden unit factor" in why
+        item == "Generators · Annualised investment" and "hidden unit factor" in why
         for item, why in _um(res)
     )
     assert res.network.generators.at["wind 1", "capital_cost"] == 0.0
@@ -1765,7 +1786,7 @@ def test_an_unknown_setting_row_is_reported(tmp_path):
         _write(_network(False), tmp_path, sidecars={"solver_config.json": SOLVER}), fn
     )
     assert any(
-        why == "'discount_rte' is not a setting this workbook uses"
+        why == "“discount_rte” is not a setting this workbook uses"
         for _, why in _um(res)
     )
     assert "discount_rate" not in res.sidecars["solver_config.json"]
@@ -1783,7 +1804,7 @@ def test_a_second_row_for_a_setting_is_reported_and_the_first_kept(tmp_path):
         _write(_network(False), tmp_path, sidecars={"solver_config.json": SOLVER}), fn
     )
     assert any(
-        why == "a second row for the setting 'Discount rate'" for _, why in _um(res)
+        why == "a second row for the setting “Discount rate”" for _, why in _um(res)
     )
     assert (
         res.sidecars["solver_config.json"]["discount_rate"] == SOLVER["discount_rate"]
@@ -1852,13 +1873,13 @@ def test_a_time_step_that_is_not_a_plain_iso_date_is_refused(tmp_path, text):
         ).value = text
 
     res = _edit(_write(_network(False), tmp_path), fn)
-    assert any(f"'{text}' is not a date as YYYY-MM-DD" in why for _, why in _um(res))
+    assert any(f"“{text}” is not a date as YYYY-MM-DD" in why for _, why in _um(res))
 
 
 def test_a_number_with_underscores_is_refused(tmp_path):
     path = _write(_network(False), tmp_path)
     _tamper(path, "Generators", L.FIRST_DATA_ROW, "p_nom", "1_000")
-    assert ("'1_000' is not a number") in " ".join(why for _, why in _um(_read(path)))
+    assert ("“1_000” is not a number") in " ".join(why for _, why in _um(_read(path)))
 
 
 def test_a_negative_weighting_is_refused_and_1_used(tmp_path):
@@ -2345,10 +2366,10 @@ def test_the_network_sheet_sets_only_the_settings_an_export_writes(tmp_path):
     res = _native_wb(tmp_path, edit)
     n, um = res.network, _um(res)
     for header in ("evil_attr", "objective", "objective_constant", "model", "optimize"):
-        assert (f"network › column {header}", _NOT_SETTING) in um
-    assert ("network › column name", _NOT_SETTING) in um
-    assert any(src == "network › srid" for src, _ in um)
-    assert any(src.startswith("network › column ") and r == _NO_HEADER for src, r in um)
+        assert (f"network · column {header}", _NOT_SETTING) in um
+    assert ("network · column name", _NOT_SETTING) in um
+    assert any(src == "network · srid" for src, _ in um)
+    assert any(src.startswith("network · column ") and r == _NO_HEADER for src, r in um)
     assert not hasattr(n, "evil_attr")
     assert n._objective is None and n._objective_constant is None and n._model is None
     assert not isinstance(n.optimize, int)
@@ -2370,7 +2391,7 @@ def test_a_network_setting_the_model_cannot_take_is_reported_and_not_read(
     tmp_path, header, value
 ):
     res = _native_wb(tmp_path, lambda wb: _set_header(wb["network"], header, value))
-    assert any(src == f"network › {header}" for src, _ in _um(res))
+    assert any(src == f"network · {header}" for src, _ in _um(res))
     assert getattr(res.network, header, None) != value
 
 
@@ -2448,7 +2469,7 @@ def test_a_crs_sheet_pypsa_does_not_write_is_removed_and_reported(tmp_path, edit
     [
         ("objective", "inf", "infinity is not allowed here"),
         ("generators", "nan", "not a number (NaN)"),
-        ("stores", "NA", "'NA' is not a number"),
+        ("stores", "NA", "“NA” is not a number"),
         ("objective", -1, "a weighting cannot be negative"),
     ],
 )
@@ -2530,7 +2551,7 @@ def test_an_investment_period_weighting_is_checked_as_written(tmp_path):
     um = _um(res)
     rows = [r for src, r in um if src == "investment_periods row 3"]
     assert len(rows) == 2 and all(r.endswith("the weighting 1 is used") for r in rows)
-    assert ("investment_periods › column evil", _NOT_INPUT) in um
+    assert ("investment_periods · column evil", _NOT_INPUT) in um
     w = res.network.investment_period_weightings
     assert w.loc[2040].tolist() == [1.0, 1.0] and "evil" not in w.columns
 
@@ -2564,7 +2585,7 @@ def test_a_series_sheet_off_the_snapshots_is_not_read(tmp_path):
         "the sheet was not read",
     ) in _um(res)
     assert res.network.generators_t.p_max_pu.empty
-    assert not any(src.startswith("generators-p_max_pu ›") for src, _ in _um(res))
+    assert not any(src.startswith("generators-p_max_pu ·") for src, _ in _um(res))
 
 
 def test_an_empty_column_without_a_header_is_dropped_without_a_report(tmp_path):
@@ -2575,7 +2596,7 @@ def test_an_empty_column_without_a_header_is_dropped_without_a_report(tmp_path):
         ws.cell(row=2, column=col, value=1)
 
     res = _native_wb(tmp_path, edit)
-    assert _um(res) == [("network › column evil", _NOT_SETTING)]
+    assert _um(res) == [("network · column evil", _NOT_SETTING)]
 
 
 def test_a_column_that_is_not_read_is_not_checked(tmp_path):
@@ -2585,7 +2606,7 @@ def test_a_column_that_is_not_read_is_not_checked(tmp_path):
         ws.cell(row=2, column=ws.max_column, value="NA")
 
     res = _native_wb(tmp_path, edit)
-    assert _um(res) == [("generators › column evil", _NOT_INPUT)]
+    assert _um(res) == [("generators · column evil", _NOT_INPUT)]
     assert list(res.network.generators.index) == ["G1", "G2"]
 
 
@@ -2600,8 +2621,8 @@ def test_text_pandas_reads_as_empty_is_reported_not_turned_into_the_default(tmp_
 
     res = _native_wb(tmp_path, edit)
     assert (
-        "buses › B1",
-        "carrier: the text 'N/A' reads as empty; leave the cell empty instead",
+        "buses · B1",
+        "carrier: the text “N/A” reads as empty; leave the cell empty instead",
     ) in _um(res)
     assert "B1" not in res.network.buses.index
 
@@ -2626,13 +2647,13 @@ def test_assets_on_a_removed_bus_are_reported_and_removed(tmp_path):
     res = read_excel(_native_edit(tmp_path, n, "buses", "v_nom", "B1", "nan"))
     um, net = _um(res), res.network
     for item, col in [
-        ("generators › G1", "bus"),
-        ("generators › G2", "bus"),
-        ("lines › l1", "bus1"),
+        ("generators · G1", "bus"),
+        ("generators · G2", "bus"),
+        ("lines · l1", "bus1"),
     ]:
         assert (
             item,
-            f"{col}: 'B1' was not read, so this asset was not read either",
+            f"{col}: “B1” was not read, so this asset was not read either",
         ) in um
     assert net.generators.empty and net.lines.empty
     assert list(net.loads.index) == ["D2"] and list(net.buses.index) == ["B2"]
@@ -2648,9 +2669,9 @@ def test_an_asset_on_two_removed_buses_is_reported_for_the_first(tmp_path):
     for r in (2, 3):
         wb["buses"].cell(row=r, column=2, value="nan")  # B1's and B2's v_nom
     wb.save(path)
-    um = [item for item in _um(read_excel(path)) if item[0] == "lines › l1"]
+    um = [item for item in _um(read_excel(path)) if item[0] == "lines · l1"]
     assert um == [
-        ("lines › l1", "bus0: 'B1' was not read, so this asset was not read either")
+        ("lines · l1", "bus0: “B1” was not read, so this asset was not read either")
     ]
 
 
@@ -2663,12 +2684,12 @@ def test_a_removed_carrier_takes_its_buses_and_their_assets(tmp_path):
     )
     um = _um(res)
     assert (
-        "buses › B1",
-        "carrier: 'DC' was not read, so this asset was not read either",
+        "buses · B1",
+        "carrier: “DC” was not read, so this asset was not read either",
     ) in um
     assert (
-        "generators › G1",
-        "bus: 'B1' was not read, so this asset was not read either",
+        "generators · G1",
+        "bus: “B1” was not read, so this asset was not read either",
     ) in um
     assert list(res.network.buses.index) == ["B2"] and res.network.generators.empty
 
@@ -2679,7 +2700,7 @@ def test_a_removed_carrier_is_matched_on_the_carrier_column_only(tmp_path):
     res = read_excel(
         _native_edit(tmp_path, n, "carriers", "co2_emissions", "PQ", "nan")
     )
-    assert _um(res) == [("carriers › PQ", "co2_emissions: not a number (NaN)")]
+    assert _um(res) == [("carriers · PQ", "co2_emissions: not a number (NaN)")]
     assert list(res.network.generators.index) == ["G1", "G2"]
 
 
@@ -2699,12 +2720,12 @@ def test_the_raw_sheets_layout_drops_what_refers_to_a_skipped_row(tmp_path):
     res = read_excel(path)
     um = _um(res)
     assert (
-        "generators › G1",
-        "bus: 'B1' was not read, so this asset was not read either",
+        "generators · G1",
+        "bus: “B1” was not read, so this asset was not read either",
     ) in um
     assert (
-        "lines › l1",
-        "bus1: 'B1' was not read, so this asset was not read either",
+        "lines · l1",
+        "bus1: “B1” was not read, so this asset was not read either",
     ) in um
     assert list(res.network.generators.index) == ["G2"] and res.network.lines.empty
     assert res.report.counts["Generators"] == 1 and res.report.counts["Lines"] == 0
@@ -2787,12 +2808,12 @@ def test_a_line_or_transformer_of_an_unknown_type_is_reported_and_not_read(tmp_p
     res = read_excel(path)
     um = _um(res)
     assert (
-        "lines › l1",
-        "type: 'no such type' is not a standard line type; the asset was not read",
+        "lines · l1",
+        "type: “no such type” is not a standard line type; the asset was not read",
     ) in um
     assert (
-        "transformers › t1",
-        "type: 'mine' is not a standard transformer type; the asset was not read",
+        "transformers · t1",
+        "type: “mine” is not a standard transformer type; the asset was not read",
     ) in um
     assert ("transformer_types", _NOT_READ_SHEET) in um
     assert list(res.network.lines.index) == ["l2"] and res.network.transformers.empty
@@ -2813,8 +2834,8 @@ def test_the_raw_sheets_layout_reports_an_unknown_line_type(tmp_path):
     wb.save(path)
     res = read_excel(path)
     assert (
-        "lines › l1",
-        "type: 'nope' is not a standard line type; the asset was not read",
+        "lines · l1",
+        "type: “nope” is not a standard line type; the asset was not read",
     ) in _um(res)
     assert res.network.lines.empty and res.report.counts["Lines"] == 0
 

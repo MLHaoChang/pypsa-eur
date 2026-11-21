@@ -74,20 +74,109 @@ def catalogue() -> dict:
     return out
 
 
+# Asset-form inputs that never join a workbook as plain values (issue 07): a Link's extra ports follow the
+# port rule (`network_crud._link_port_extras`), and a bus or carrier field names another asset.
+_NOT_PLAIN = {"Link": frozenset({"bus2", "bus3", "bus4", "efficiency2", "efficiency3", "efficiency4"})}
+
+
+def form_columns() -> dict[str, list[str]]:
+    """Per model class, the asset form's inputs beyond PyPSA's attributes that a workbook carries (issue 07).
+
+    A field joins when it is not derived (`catalogue` leaves those out), not a PyPSA attribute, declared by
+    the class's Create model (so the single-edit validators exist for it, `refuse_bad_form_values`), not a
+    bus or carrier reference, not a Link port column (`_NOT_PLAIN`) and not already one of the custom columns
+    with their own reading (investment parts, eh_* tags and the outage flag).
+    """
+    import pypsa
+
+    from services.adequacy.eh_columns import eh_columns_for
+    from services.adequacy.occurrence import FLAG_COL
+    from services.asset_schema.schema import part_columns
+    from services.network_crud import _declared_attributes
+
+    blank = pypsa.Network()
+    out: dict[str, list[str]] = {}
+    for cls, cols in catalogue().items():
+        skip = set(blank.components[cls].defaults.index)
+        skip |= {*part_columns(cls), *eh_columns_for(cls), FLAG_COL}
+        keys = [
+            c.key
+            for c in cols
+            if c.key not in skip
+            and c.key in _declared_attributes(cls)
+            and c.kind not in ("bus", "carrier")
+            and c.key not in _NOT_PLAIN.get(cls, ())
+        ]
+        if keys:
+            out[cls] = keys
+    return out
+
+
 def custom_columns() -> dict[str, list[str]]:
-    """Per model class, the non-PyPSA columns a project may hold: investment parts, eh_* tags and the outage flag."""
+    """Per model class, the non-PyPSA columns a project may hold: investment parts, eh_* tags, the outage
+    flag and the asset form's other inputs (`form_columns`), so the reader accepts what the writer emits."""
     from services.adequacy.eh_columns import eh_columns_for
     from services.adequacy.occurrence import FLAG_COL
     from services.asset_schema.schema import part_columns
 
     L = _gs()[0]
+    forms = form_columns()
     out: dict[str, list[str]] = {}
     for cls, _, _ in L.SHEETS:
         flag = [FLAG_COL] if cls == "Generator" else []
-        cols = list(dict.fromkeys([*part_columns(cls), *eh_columns_for(cls), *flag]))
+        cols = list(
+            dict.fromkeys(
+                [*part_columns(cls), *eh_columns_for(cls), *flag, *forms.get(cls, [])]
+            )
+        )
         if cols:
             out[cls] = cols
     return out
+
+
+def _form_validator(cls: str, key: str):
+    """The single-edit path's validator for one Create-model field (#738: the same checks on every write)."""
+    from typing import Annotated
+
+    import models.schemas as schemas
+    from pydantic import TypeAdapter
+
+    from services.network_crud import _CREATE_MODEL_NAMES
+
+    field = getattr(schemas, _CREATE_MODEL_NAMES[cls]).model_fields[key]
+    return TypeAdapter(Annotated[field.annotation, *field.metadata] if field.metadata else field.annotation)
+
+
+def _is_unset(v) -> bool:
+    return v is None or (isinstance(v, float) and v != v) or (isinstance(v, str) and not v.strip())
+
+
+def refuse_bad_form_values(n, unchanged: str = "") -> None:
+    """A form column's value the single edit would refuse refuses the whole import, before anything is written."""
+    from pydantic import ValidationError
+
+    L = _gs()[0]
+    labels = {cls: {c.key: c.label for c in cols} for cls, cols in catalogue().items()}
+    for cls, keys in form_columns().items():
+        frame = n.static(cls)
+        for key in keys:
+            if key not in frame.columns:
+                continue
+            check = _form_validator(cls, key)
+            for name, v in frame[key].items():
+                if _is_unset(v):
+                    continue
+                try:
+                    check.validate_python(v.item() if hasattr(v, "item") else v)
+                except ValidationError:
+                    raise HTTPException(
+                        422,
+                        {
+                            "error_kind": "invalid_edit_value",
+                            "message": f"{L.SHEET_OF[cls]} · {labels[cls][key]}: the value for “{name}” "
+                            f"is not one the asset form accepts. Nothing was imported.{unchanged}",
+                        },
+                    ) from None
 
 
 def _write(n, sidecars: dict | None, *, template: bool) -> bytes:
@@ -278,6 +367,7 @@ def prepare(data: bytes, filename: str | None, *, new_project: bool) -> Prepared
         )
     _refuse_reserved_buses(n)
     _refuse_invalid_names(n)
+    refuse_bad_form_values(n, unchanged)
     # A new project's sidecars are checked here, before any row exists (all or nothing).
     checked = _new_project_sidecars(res.sidecars) if new_project else (None, "", 0)
     rate = workbook_rate(res.sidecars) if new_project else None
