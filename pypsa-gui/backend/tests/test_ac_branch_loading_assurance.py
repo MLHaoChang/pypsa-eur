@@ -591,3 +591,96 @@ def test_only_a_warned_request_forbids_derived_and_predicate_entries(
         assert [s["disposition"] for s in receipt["result_slots"]] == ["warning"] + [
             "answered"
         ] * len(ac.METRICS)
+
+
+# ── guards from the mutants.py re-run at 7135343f (GK B4 (3)) ─────────────
+
+
+def test_a_missing_convergence_mask_is_refused(ac_grid, monkeypatch):
+    ctx = ac_grid((True, False))
+    monkeypatch.setattr(lf, "_ac_convergence", lambda *a, **k: (None, None))
+    with pytest.raises(ValueError, match="^ac_pf_convergence_unavailable$"):
+        _raw(ctx)
+
+
+def test_a_false_convergence_flag_stays_not_converged(ac_grid):
+    ctx = ac_grid((True, False))
+    assert _raw(ctx)["converged"] == [True, False]
+
+
+@pytest.mark.parametrize(
+    "converged, state",
+    [
+        ([True, False], "ac_pf_not_converged"),
+        ([True, None], "ac_pf_convergence_unknown"),
+        ([None, False], "ac_pf_convergence_unknown"),
+        ([True, True], "converged"),
+    ],
+)
+def test_the_window_state_names_unknown_only_when_a_flag_is_unknown(
+    converged, state
+):
+    raw = {"converged": converged, "index": ["t0", "t1"]}
+    assert ac._convergence(raw, 0, 1)[2] == state
+
+
+@pytest.mark.parametrize(
+    "converged, state",
+    [((False, False), "ac_pf_not_converged"), ((None, False), "ac_pf_convergence_unknown")],
+)
+def test_calculate_refuses_a_window_with_nothing_converged(ac_grid, converged, state):
+    ctx = ac_grid((True, True))
+    raw = {**_raw(ctx), "converged": list(converged)}
+    with pytest.raises(ValueError, match=f"^{state}$"):
+        ac.calculate(raw, _scope(ctx))
+
+
+def test_only_a_window_with_an_excluded_snapshot_names_it_on_each_slot(ac_grid):
+    ctx = ac_grid((True, False))
+    raw = _raw(ctx)
+    _, slots = ac.calculate(raw, _scope(ctx))
+    assert slots and all(s["excluded_indices"] == [raw["index"][1]] for s in slots)
+    ctx = ac_grid((True, True))
+    _, slots = ac.calculate(_raw(ctx), _scope(ctx))
+    assert slots and not any("excluded_indices" in s for s in slots)
+
+
+@pytest.mark.parametrize("rating", [0.0, float("nan"), float("inf")])
+def test_a_branch_without_reactive_flow_and_an_invalid_rating_answers_nothing(
+    ac_grid, rating
+):
+    ctx = ac_grid((True, False))
+    raw = _raw(ctx)
+    raw["branch"]["q0"] = [None] * len(raw["index"])
+    raw["branch"]["q1"] = [None] * len(raw["index"])
+    raw["branch"]["rating"] = rating
+    facts, reasons = _slots(raw, ctx)
+    assert facts == []
+    assert set(reasons.values()) == {"invalid_or_missing_branch_data"}
+
+
+@pytest.mark.parametrize(
+    "rating, s_max_pu",
+    [(8.0, float("inf")), (8.0, float("nan")), (1.0, 1e-9)],
+)
+def test_a_non_finite_or_vanishing_limit_is_unavailable(ac_grid, rating, s_max_pu):
+    ctx = ac_grid((True, False))
+    raw = _raw(ctx)
+    raw["branch"]["rating"] = rating
+    raw["branch"]["s_max_pu"][0] = s_max_pu
+    facts, reasons = _slots(raw, ctx)
+    assert facts == []
+    assert set(reasons.values()) == {"invalid_or_missing_branch_data"}
+
+
+def test_a_flow_exactly_at_the_tolerance_is_not_above_the_rating(ac_grid):
+    ctx = ac_grid((True, False))
+    raw = _raw(ctx)
+    data = raw["branch"]
+    edge = 1 + ac.branch.OVER_LIMIT_TOLERANCE
+    data["rating"], data["s_max_pu"][0] = 1.0, 1.0
+    data["p0"][0], data["p1"][0] = edge, -edge
+    data["q0"][0], data["q1"][0] = 0.0, 0.0
+    facts, _ = _slots(raw, ctx)
+    values = {f["metric"]: f["value"] for f in facts}
+    assert values["ac_hours_above_rating"] == 0
