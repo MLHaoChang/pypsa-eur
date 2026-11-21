@@ -3,7 +3,8 @@
 
 # 55 — A multi-port Link's extra ports are left out of the mainland-feed check
 
-Status: ready-for-agent
+Status: done (#1643)
+Landed in #1643.
 Gated: GK A
 Type: bug
 Parent: SH 48 (#1567) review follow-up

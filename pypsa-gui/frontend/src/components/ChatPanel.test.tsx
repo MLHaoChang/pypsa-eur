@@ -551,3 +551,9 @@ it('renders structured task checkpoints and downloads from real tool_result fram
   expect(screen.getByText('Next: build_delivery (pending)')).toBeTruthy()
   expect(screen.getByTestId('assistant-file-download').getAttribute('href')).toBe('/api/projects/Demo/uploads/0123456789abcdef/blob')
 })
+
+// Issue 49: the shared key and model settings are only asked for by a super-admin.
+vi.mock('../auth/AuthProvider', async (orig) => ({
+  ...(await orig<typeof import('../auth/AuthProvider')>()),
+  useIsSuperAdmin: () => true,
+}))

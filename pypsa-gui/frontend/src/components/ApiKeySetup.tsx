@@ -44,6 +44,8 @@ import {
 import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
+import { ASSISTANT_OFF_FOR_MEMBER } from './assistantOffMessage'
+import { useIsSuperAdmin } from '../auth/AuthProvider'
 
 // Exported so ChatLaunchGreeting reads the SAME cache entry rather than a
 // parallel one: the greeting only needs to know whether a key exists, and
@@ -101,9 +103,13 @@ export default function ApiKeySetup({
     retry: false,
   })
 
+  // Issue 49: the route is super-admin only, so anyone else is not asked
+  // (no 403 call); they get the "ask an administrator" text below.
+  const isSuperAdmin = useIsSuperAdmin()
   const settings = useQuery<ApiKeySettings>({
     queryKey: API_KEY_SETTINGS_KEY,
     queryFn: getApiKeySettings,
+    enabled: isSuperAdmin,
     // A 403 is the answer, not a transient failure — retrying it three times
     // just delays the message telling the user to ask an administrator.
     retry: false,
@@ -185,11 +191,10 @@ export default function ApiKeySetup({
 
   if (settings.isLoading) return null
 
-  if (isForbidden(settings.error)) {
+  if (!isSuperAdmin || isForbidden(settings.error)) {
     return (
       <p className="mt-2 text-[11px] text-muted" data-testid="chat-api-key-forbidden">
-        Ask an administrator to add an Anthropic API key for this instance — the
-        key is shared, so only a super-admin can set it.
+        {ASSISTANT_OFF_FOR_MEMBER}
       </p>
     )
   }

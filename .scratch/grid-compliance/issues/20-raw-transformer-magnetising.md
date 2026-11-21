@@ -3,7 +3,7 @@
 
 # GC-20: transformer magnetising branch (MAG1/MAG2) in the PSS/E RAW
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Parent: `.scratch/grid-compliance/issues/04-psse-pack.md`
 Gated: yes (GK A2, gridspine)
@@ -27,3 +27,7 @@ for both tap sides.
 - The RAW read as PSS/E reads it matches `net._ppc['branch']` b and g (shunt) for a transformer
   with nonzero pfe_kw and i0_percent, for an HV and an LV tap.
 - case39 output stays byte-identical.
+
+## Triage (2026-11-20, master 87cf52a7)
+
+Checked by code reading only. Acceptance is the 'Done when' section above. Still true: `gridspine/handoff/raw_writer.py:354` still writes zero magnetising and says it is exact only for case39. Gated: GK A2. Blocked by: none.

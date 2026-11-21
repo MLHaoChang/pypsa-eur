@@ -31,6 +31,23 @@ export interface CatalogueEntry {
   former_ids: string[]
   /** Guide markdown (rendered with raw HTML off), or null. */
   guide: string | null
+  /** The value used when none is set: shown, never written. `none`: there is none. */
+  default?: CatalogueDefault | null
+  /** Allowed and typical values; null until the catalogue carries them. */
+  range?: CatalogueRange | null
+}
+
+export interface CatalogueDefault {
+  value: number | string | boolean | null
+  /** `engine`: the model's built-in default; `library`: a Generic default from a Library pack. */
+  source: 'none' | 'engine' | 'library' | string
+}
+
+export interface CatalogueRange {
+  min?: number | null
+  max?: number | null
+  /** The usual span, low to high. */
+  typical?: [number, number] | null
 }
 
 export interface CatalogueGroup { id: string; plain_name: string; short_help: string; order: number; guide: string | null }

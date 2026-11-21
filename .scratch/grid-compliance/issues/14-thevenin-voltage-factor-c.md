@@ -3,7 +3,7 @@
 
 # GC-14: IEC 60909 voltage factor c in the test battery's Thevenin source
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Parent: `.scratch/grid-compliance/issues/04-psse-pack.md`
 Gated: yes (GK A2, gridspine)
@@ -31,3 +31,7 @@ and disclose the c used per case in the battery output and the pack manifest.
   is named in each case's output, and the tests pin both ends of the bracket.
 - Fault impedances and the psspy scripts use the corrected source; packs written before
   the change are not silently re-labelled.
+
+## Triage (2026-11-20, master 87cf52a7)
+
+Checked by code reading only. Acceptance is the 'Done when' section above. Still true: `gridspine/handoff/test_battery.py` `thevenin_impedances_ohm` uses `vn_kv**2 / sk_mva` with no voltage factor c. Follow GK A2's standing ruling GC-02 V1 (c_max on S_k''min, c_min on S_k''max; disclose c per case). Gated: GK A2. Blocked by: none.

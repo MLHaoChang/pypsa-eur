@@ -87,6 +87,7 @@ from gridspine.handoff.test_battery import (
     validate_battery,
 )
 from gridspine.schema.contracts import ContractError
+from gridspine.static import series_caps as SC
 
 PACK_VERSION = "1"
 #: The battery contract this pack's schedule records: version 2, with
@@ -590,6 +591,9 @@ def write_emt_pack(
     stage label to its installed unit ids (reference fault levels).
     ``model_set_id`` is cited in the manifest only when given.
     """
+    SC.refuse(
+        campus.net, "EMT pack"
+    )  # GC-01b: the workbook has no series-capacitor sheet yet (GC-01f)
     out = Path(outdir)
     bus, vn_kv, pcc = pcc_data(campus)
     sources, gaps = study_sources(pcc)

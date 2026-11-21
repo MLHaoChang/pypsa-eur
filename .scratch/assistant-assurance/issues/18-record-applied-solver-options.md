@@ -3,7 +3,7 @@
 
 # Record the solver options actually applied at the solve call
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Found by: GK B (65) on #1680 (issue 10, S2), point (c).
 
@@ -29,3 +29,7 @@ that the solver never used. A gap that cannot be read today reads
   DGS-SEED-1).
 
 ## Comments
+
+## Triage (2026-11-20, master 87cf52a7)
+
+Checked by code reading only. Still true: `applied_gap` in `harness/solve_validity.py` still reconstructs the gap from the persisted config. Acceptance is the section above: the solve records the options it applied and the validity check reads that record, so no mirror can drift. Gated: GK B. Blocked by: none.

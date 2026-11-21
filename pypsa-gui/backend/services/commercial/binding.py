@@ -405,9 +405,25 @@ def context_resolvers(ctx, user=None) -> tuple[Callable[[object], pd.Series],
     from services.library import items as library_items
     from services.library import series_store
 
+    # The project's own copies first (project-io 03), then the org's Library.
+    copies = (
+        pathlib.Path(ctx.storage_dir) if getattr(ctx, "storage_dir", None) else None
+    )
     # Looked up at call time, so a patched store is the one used.
-    return (_in_org(ctx, user, lambda db, org, ref: series_store.resolve(db, org, ref)),
-            _in_org(ctx, user, lambda db, org, ref: library_items.resolve(db, org, ref)))
+    return (
+        _in_org(
+            ctx,
+            user,
+            lambda db, org, ref: series_store.resolve(db, org, ref, project_dir=copies),
+        ),
+        _in_org(
+            ctx,
+            user,
+            lambda db, org, ref: library_items.resolve(
+                db, org, ref, project_dir=copies
+            ),
+        ),
+    )
 
 
 def context_series_meta(ctx, user=None) -> Callable[[object], dict]:

@@ -20,6 +20,7 @@ import { resolveRange, useResultsFilter } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
 import { NOT_RECORDED_KPI, NotRecordedDash, NotRecordedNote } from './NotRecorded'
+import { signFirstEuro } from '../../utils/format'
 
 // ── Lost-load result tab ────────────────────────────────────────────────────
 // Unserved demand via the LP's VOLL slack generators. The backend already
@@ -276,7 +277,7 @@ export default function LostLoadTab() {
       </div>
       <NotRecordedNote show={totals.voll == null} />
 
-      <section className="rounded-[10px] border border-border bg-bg overflow-hidden">
+      <section className="rounded-card border border-border bg-bg overflow-hidden">
         <header className="px-4 py-2.5 border-b border-border bg-bg-2">
           <span className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">By carrier</span>
         </header>
@@ -354,7 +355,7 @@ function PerBusLostLoadSection({
     getValue: (r, k) => (k === 'bus' || k === 'carrier') ? r[k] : r[k],
   })
   return (
-    <section className="rounded-[10px] border border-border bg-bg overflow-hidden">
+    <section className="rounded-card border border-border bg-bg overflow-hidden">
       <header className="px-4 py-2.5 border-b border-border bg-bg-2 flex items-center gap-2 flex-wrap">
         <span className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
           Per-bus lost load
@@ -402,8 +403,8 @@ function fmtEnergy(mwh: number): string {
 function fmtCurrency(eur: number | null): string {
   if (eur == null || !Number.isFinite(eur)) return '—'
   const a = Math.abs(eur)
-  if (a >= 1e9) return `€${(eur / 1e9).toFixed(2)} B`
-  if (a >= 1e6) return `€${(eur / 1e6).toFixed(2)} M`
-  if (a >= 1e3) return `€${(eur / 1e3).toFixed(1)} k`
-  return `€${eur.toFixed(0)}`
+  if (a >= 1e9) return signFirstEuro(eur, `${(a / 1e9).toFixed(2)} B`)
+  if (a >= 1e6) return signFirstEuro(eur, `${(a / 1e6).toFixed(2)} M`)
+  if (a >= 1e3) return signFirstEuro(eur, `${(a / 1e3).toFixed(1)} k`)
+  return signFirstEuro(eur, a.toFixed(0))
 }

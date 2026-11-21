@@ -51,7 +51,7 @@ const clearMutate = vi.fn()
 const enqueueMutateAsync = vi.fn()
 let authState: { user: { is_super_admin: boolean } | null } = { user: null }
 
-vi.mock('../auth/AuthProvider', () => ({ useAuth: () => authState }))
+vi.mock('../auth/AuthProvider', () => ({ useAuth: () => authState, useIsSuperAdmin: () => true }))
 vi.mock('../store/uiStore', () => ({
   useUIStore: () => ({ currentProject, openTabs: [], markProjectSaved: vi.fn() }),
 }))

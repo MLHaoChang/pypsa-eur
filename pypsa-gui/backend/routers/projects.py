@@ -1674,6 +1674,9 @@ async def import_bundle(
         from services.component_names import invalid_names_in_netcdf, refuse_invalid_names
 
         refuse_invalid_names(invalid_names_in_netcdf(staged_nc))
+        # The pinned Library copies (project-io 03, GK B3 L1/L5), checked before
+        # the row exists so a bad copy leaves nothing behind.
+        _refuse_bad_library_copies(staging, members)
 
         if dry_run:
             return _import_dry_run(
@@ -1716,10 +1719,46 @@ def _carries_user_code(cfg_data: dict) -> bool:
     return bool(str(cfg_data.get("extra_functionality_code") or "").strip())
 
 
-def _import_dry_run(db: DBSession, user, staging: pathlib.Path, target_name: str,
-                    project_kind: str | None, members: set[str], *, ignored: list[str],
-                    stripped: list[str], rederived: list[str], rate_source: str,
-                    warnings: list[str]) -> dict:
+def _refuse_bad_library_copies(staging: pathlib.Path, members: set[str]) -> None:
+    """400 `bundle_corrupt` when the staged `library/` folder holds a copy that
+    does not hash to its pin, a file that is no pin's copy, or a pin whose id
+    is not a Library name (`project_copies.staged_problems`)."""
+    from services.library import bundle_pins
+    from services.library import project_copies
+
+    pins, _issues = bundle_pins.read_pins(staging)
+    # The config's own refs pin their copies too: a bundle whose sidecar was
+    # dropped or is unreadable still carries the copies its config names.
+    cfg_path = staging / "solver_config.json"
+    if cfg_path.is_file():
+        # Already read as a JSON object by `_bundle_network_owning_its_costs`.
+        pins += bundle_pins.collect_pins(json.loads(cfg_path.read_text()))
+    problems = project_copies.staged_problems(staging, members, pins)
+    if problems:
+        raise HTTPException(
+            400,
+            {
+                "error_kind": "bundle_corrupt",
+                "message": f"{problems[0]} The bundle is damaged or was changed after "
+                "export. Nothing was imported; export it again.",
+            },
+        )
+
+
+def _import_dry_run(
+    db: DBSession,
+    user,
+    staging: pathlib.Path,
+    target_name: str,
+    project_kind: str | None,
+    members: set[str],
+    *,
+    ignored: list[str],
+    stripped: list[str],
+    rederived: list[str],
+    rate_source: str,
+    warnings: list[str],
+) -> dict:
     """What `import_bundle` would create from the checked, staged bundle.
 
     Reads only: no row, no project folder; the caller removes `staging`.
@@ -2371,6 +2410,7 @@ def _materialise_from_template(template_id: str, name: str | None, params: dict 
         # Pin what the config now names, as a save does (WP1.1c): an unpinned ref
         # reads `library_ref_stale` on the first open.
         bundle_pins.write_pins(dest, bundle_pins.collect_pins(cfg))
+        _write_library_copies(db, _created_project.org_id, dest)
     if dc is not None and dc[1] is not None:
         # The opt-in's spec, dynamic envelope and ledger, per project
         # (`services.dc_load_profile.read_envelope`; get_eh_template serves it).
@@ -3285,6 +3325,14 @@ def _write_context(
         # Pin the Library versions the config references (WP1.1c).
         from services.library import bundle_pins
         bundle_pins.write_pins(dest, bundle_pins.collect_pins(asdict(cfg)))
+        # ...and keep a copy of each pinned payload in `library/` (project-io 03).
+        _write_library_copies(
+            db,
+            project_row.org_id
+            if project_row is not None
+            else getattr(ctx, "org_id", None),
+            dest,
+        )
 
     # Persist solve-time _state fields that n.export_to_netcdf doesn't
     # capture. Without these, after reload:
@@ -3578,6 +3626,40 @@ def _tariff_ref_load_issues(cfg, project_name: str | None) -> list[dict]:
     change_log_service.log("warn", "Project", project_name or "(unsaved)",
                            f"{issue['code']} ({issue['reason']}): {issue['message']}")
     return [issue]
+
+
+def _write_library_copies(db, org_id, project_dir: pathlib.Path) -> list[str]:
+    """`bundle_pins.write_copies`, which never fails the caller: a copy that
+    cannot be written now is written by a later save or load, and until then
+    the org's Library serves the pin (project-io 03)."""
+    if db is None or org_id is None:
+        return []
+    from uuid import UUID
+
+    from services.library import bundle_pins
+
+    try:
+        return bundle_pins.write_copies(db, UUID(str(org_id)), project_dir)
+    except Exception:  # noqa: BLE001 - logged; the copies are filled on the next save or load
+        logger.exception(
+            "project-io 03: Library copies for %s not written", project_dir
+        )
+        return []
+
+
+def _migrate_library_copies(db, project, src: pathlib.Path, user) -> list[str]:
+    """Fill a project's missing Library copies on load (project-io 03
+    migration), only for a caller who may write it now: local mode, or the
+    holder of its edit lock (GK B3 L3). A viewer's, or anyone else's, load
+    only reads; the org's Library serves the pins as before, and the next
+    save fills the copies. Writes nothing but `library/`."""
+    if db is None or project is None:
+        return []
+    if not local_mode.is_local_mode():
+        lock = _serialize_project_lock(db, project.id, user)
+        if not (lock and lock.get("yours")):
+            return []
+    return _write_library_copies(db, project.org_id, src)
 
 
 def _library_pin_issues(db, project, src: pathlib.Path, cfg) -> list[dict]:
@@ -3883,6 +3965,7 @@ def activate_project(
                 _hydrate_context_from_disk(ctx, src, project.name)
             project_registry.bind_context(ctx, project)
             evicted = PyPSAService.activate_context(ctx, register=True)
+            _migrate_library_copies(db, project, src, user)
             library_issues = _library_pin_issues(
                 db, project, src, ctx.solver_state.get("solver_config"))
 
@@ -3905,7 +3988,12 @@ def activate_project(
         from services.library import bundle_pins
         cfg = PyPSAService.get_active_context().solver_state.get("solver_config")
         library_issues = bundle_pins.check_pins(
-            db, project.org_id, None, config=asdict(cfg) if cfg is not None else {})
+            db,
+            project.org_id,
+            None,
+            config=asdict(cfg) if cfg is not None else {},
+            copies_dir=src,
+        )
         for issue in library_issues:
             change_log_service.log(
                 "warn", "Project", project.name,
@@ -4248,10 +4336,18 @@ def load_project(
         snapshots=len(n.snapshots),
     )
     from routers.simulation import _state as _sim_state
-    library_issues = _library_pin_issues(db, project, src, _sim_state.get("solver_config"))
-    return {**summary.model_dump(), "lock": lock_info, "library_issues": library_issues,
-            "my_access": project_acl.project_role(db, user, project),
-            **({"dropped_goal": dropped_goal} if dropped_goal else {})}
+
+    _migrate_library_copies(db, project, src, user)
+    library_issues = _library_pin_issues(
+        db, project, src, _sim_state.get("solver_config")
+    )
+    return {
+        **summary.model_dump(),
+        "lock": lock_info,
+        "library_issues": library_issues,
+        "my_access": project_acl.project_role(db, user, project),
+        **({"dropped_goal": dropped_goal} if dropped_goal else {}),
+    }
 
 
 def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> ProjectInfo:
@@ -5624,6 +5720,30 @@ def download_bundle(
         io.BytesIO(_project_bundle_bytes(name, src, project_kind=project.project_kind)),
         media_type="application/zip",
         headers={"Content-Disposition": content_disposition(f"{name}.pypsaproj.zip")},
+    )
+
+
+@router.get("/{name}/workbook")
+def download_workbook(
+    name: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """The project as last saved, as the Excel input workbook (IMPORTS-1); unsaved edits are not in it."""
+    from services import excel_workbook, project_registry
+
+    project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, name)
+    data = excel_workbook.export_bytes(project_registry.project_dir(project), project.name)
+    change_log_service.log(
+        "export", "Project", project.name,
+        f"Downloaded the Excel input workbook of '{project.name}' (as last saved)",
+        org_id=str(project.org_id),
+    )
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=excel_workbook.MIME,
+        headers={"Content-Disposition": content_disposition(f"{project.name}.xlsx")},
     )
 
 

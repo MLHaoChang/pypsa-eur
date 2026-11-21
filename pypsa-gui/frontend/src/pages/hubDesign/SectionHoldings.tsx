@@ -105,7 +105,7 @@ export function SectionHoldings({ id, holds, total, pending, failed, deferred = 
   const groups = heldGroups(holds)
   const rest = heldRest(holds.length, total)
   return (
-    <div data-testid="section-held-list" className="flex flex-col gap-3">
+    <div data-testid="section-held-list" className="flex flex-col gap-3 rounded-card border border-border bg-panel p-3">
       <SectionSummary id={id} holds={holds} total={total} />
       {groups.map(g => (
         <Group key={g.component} section={id} rows={g.rows} counted={rest === null} sized={sized}
