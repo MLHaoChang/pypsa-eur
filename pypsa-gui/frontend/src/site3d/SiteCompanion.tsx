@@ -7,6 +7,9 @@
 //   (UX #1226, the fix on the refusal's line as in #1193); only with a blocker.
 // - Words only: the Site by its name, the part by its tab label, a building
 //   by its visible label; never an id or a field key (U4).
+// - SC-07 S6c: in the Results part the Explain reads "Explain these results";
+//   its prefill adds the snapshot in the words the results panel shows
+//   (`snapshotWords`), never an index.
 import type { SitePart } from '../api/flow'
 import { ask, ASK_TITLE } from '../pages/hubDesign/delegate'
 import type { SceneBuilding } from '../api/siteScene'
@@ -46,15 +49,25 @@ export function BlockerAsk({ where, reason }: { where: string; reason: string })
   return <AskButton testid="site-companion-blocker" label="Ask for help" prefill={`Help me with what blocks ${where}: ${sentence(reason)}`} />
 }
 
-export default function SiteCompanion({ siteName, part, selected, resume }: {
+/** "Explain these results: <where>, <building> selected, at <snapshot words>." */
+export const resultsPrefill = (where: string, building: string | null, snapshot: string | null) =>
+  `Explain these results: ${where}${building ? `, ${building} selected` : ''}${snapshot ? `, at ${snapshot}` : ''}.`
+
+export default function SiteCompanion({ siteName, part, selected, resume, snapshot = null, resultsName = null }: {
   siteName: string; part: SitePart; selected: SceneBuilding | null
   /** SC-07 S5b R5: the Resume line, on its own line in this row (UX (13)). */
   resume?: React.ReactNode
+  /** SC-07 S6c: the served snapshot in the results panel's words (`snapshotWords`), when results were read. */
+  snapshot?: string | null
+  /** SC-07 S6c: the selected building as the results panel names it (`featureName`), so both say the same. */
+  resultsName?: string | null
 }) {
   const where = whereWords(siteName, part)
   return (
     <div className="flex flex-wrap items-center gap-1.5" data-testid="site-companion" role="group" aria-label="Ask the assistant">
-      {selected
+      {part === 'results'
+        ? <AskButton testid="site-companion-explain" label="Explain these results" prefill={resultsPrefill(where, selected ? resultsName ?? buildingLabel(selected) : null, snapshot)} />
+        : selected
         ? <AskButton testid="site-companion-explain" label={`Explain ${buildingLabel(selected)}`}
             prefill={`Explain ${buildingLabel(selected)}, selected in ${where}.`} />
         : <AskButton testid="site-companion-explain" label={`Explain ${PART_LABEL[part]}`}

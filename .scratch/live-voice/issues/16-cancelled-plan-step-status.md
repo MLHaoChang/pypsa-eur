@@ -3,7 +3,12 @@
 
 # A cancelled plan step reads cancelled, not failed
 
-Status: needs-triage
+Status: ready-for-agent
+Blocked by: none (live-voice 11b merged, #1548)
+Model tier: opus
+Size: M
+Gated: GK B; UX (plan step status in the UI)
+Likely files: `pypsa-gui/backend/services/assistant_tasks.py` (`_settle`), `pypsa-gui/backend/tests/test_oj07_edit_relaunch_walk_journey.py`, `tests/test_lv11b_cancel_stop.py`, `pypsa-gui/frontend/src/components/AssistantResultCard.tsx`
 Type: task
 Found by: live-voice 11b (`11-nonblocking-monitoring.md`), GK B (59) on the 11b plan.
 
@@ -29,6 +34,8 @@ distinct facts instead: the tool result is `cancel: cancelled`,
 - The plan UI that shows step status. This goes to UX review.
 
 ## Comments
+
+**2026-11-17 triage (SCALE-1).** Still needed: master `_settle` still maps `aborted` to `failed`. The scope list above is the plan outline; the plan goes to GK B first.
 
 - GK B (64) plan GO 2026-11-17 at master 0ab07339, conditions:
   C1 one mapping in `_settle`: native `aborted` + caller `failed` → `cancelled`, nothing

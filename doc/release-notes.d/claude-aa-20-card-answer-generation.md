@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Answers to the assistant's checked-answer clarification cards (cost quantity, cost basis, capacity meaning) and "show those results again" follow-ups are no longer refused as a changed scope in the browser.

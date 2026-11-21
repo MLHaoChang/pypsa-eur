@@ -1,0 +1,16 @@
+{
+ "entries": [{
+  "id": "report_revision_drafts",
+  "title": "Model-drafted report revisions",
+  "disposition": "out of chat",
+  "reason": "A run's drafted edit to its report is asked for, applied or set aside only by your own click on the run's card; chat never applies one.",
+  "page": "Run card (chat panel)",
+  "panel": null,
+  "keywords": ["draft", "drafts", "redraft"],
+  "routes": [
+   ["POST", "/api/projects/{name}/reports/{report_id}/comments/{comment_id}/drafts"],
+   ["POST", "/api/projects/{name}/reports/{report_id}/drafts/{draft_id}/confirm"],
+   ["POST", "/api/projects/{name}/reports/{report_id}/drafts/{draft_id}/discard"]
+  ]
+ }]
+}

@@ -22,6 +22,12 @@ export const ENVELOPE: Envelope = {
 const ORDER = ['intake', 'setup', 'inputs', 'input_gate', 'solve', 'result_gate', 'explore', 'report', 'handoff']
 const SKIPPED: Record<string, string> = { explore: 'Exploring cases is not part of a run yet.', report: 'The run report is not part of a run yet.' }
 
+// The grid_only@1 profile's own skip reasons (`services/run_profiles.py`).
+const GRID_SKIPPED: Record<string, string> = {
+  explore: 'Grid-only runs explore no cases by default.',
+  report: 'No report from grid-only runs yet: the report would read results the load flow has overwritten.',
+}
+
 function stages(at: string, current: Partial<RunStage> = {}, done = false): RunStage[] {
   const index = ORDER.indexOf(at)
   return ORDER.map((stage, i) => SKIPPED[stage] ? { stage, status: 'skipped', reason: SKIPPED[stage] }
@@ -105,6 +111,16 @@ export const STATES: Record<string, RunMonitorView> = {
   finished_report: view({ status: 'completed', run: run('handoff', { status: 'completed',
     stages: stages('handoff', {}, true).map(s => (s.stage === 'report' ? { stage: 'report', status: 'passed' } : s)) }),
     envelope: GRANTED, monitor: { ...MONITOR, budgets: GRANTED_BUDGETS } }),
+  // Study harness 15: a grid-only run, finished, with explore and the report skipped by the profile.
+  finished_grid_only: view({ status: 'completed', run: run('handoff', { profile: 'grid_only@1', status: 'completed',
+    stages: stages('handoff', {}, true).map(s => s.stage in GRID_SKIPPED
+      ? { stage: s.stage, status: 'skipped', reason: GRID_SKIPPED[s.stage] } : s) }),
+    envelope: GRANTED, monitor: { ...MONITOR, budgets: GRANTED_BUDGETS } }),
+  // GK B (62): a reason on a stage that was not skipped (passed, failed) is never shown as a skip reason.
+  finished_with_stage_reasons: view({ status: 'completed', run: run('handoff', { status: 'completed',
+    stages: stages('handoff', {}, true).map(s => s.stage === 'solve' ? { ...s, reason: 'A solve note' }
+      : s.stage === 'input_gate' ? { ...s, status: 'failed', reason: 'A gate note' } : s) }),
+    envelope: GRANTED, monitor: { ...MONITOR, budgets: GRANTED_BUDGETS } }),
   over_budget: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'budget', stages: stages('solve') }),
     monitor: { ...MONITOR, budgets: { cost_eur: { used: 5.01, limit: 5, unmetered: false } } } }),
   lost_send: view({ status: 'needs_review', run: run('input_gate', { status: 'needs_user', reason: 'uncertain', stages: stages('input_gate') }),
@@ -166,4 +182,39 @@ export const STATES: Record<string, RunMonitorView> = {
 export const STATE_STEPS: Partial<Record<keyof typeof STATES, { untickEdits?: number[]; solves?: number; click?: string }>> = {
   envelope_narrowed: { untickEdits: [1], solves: 4 },
   stop_confirm: { click: 'run-stop' },
+}
+
+// ── SH-07d PR B: report revision drafts on a finished run (shots) ───────────
+
+export const DRAFT_REPORT_ID = 'r-shots'
+const DRAFT_OFFER = { report_id: DRAFT_REPORT_ID, max_requests: 10, in_flight: ['requested', 'drafting'], may_act: true }
+const DRAFT_EDIT = { kind: 'paragraph_text' as const, md: 'The site connects at 20 kV through one 4 MVA transformer.' }
+const draftRow = (id: string, status: string, over: Record<string, unknown> = {}) => ({
+  id, comment_id: 'c1', report_id: DRAFT_REPORT_ID, status, at: '2026-11-19T08:00:00Z', ...over })
+const withDrafts = (rows: ReturnType<typeof draftRow>[], offer: Partial<typeof DRAFT_OFFER> = {}): RunMonitorView => {
+  const base = STATES.finished_report
+  return { ...base, monitor: { ...base.monitor, revision_report: { ...DRAFT_OFFER, ...offer }, revision_drafts: rows } }
+}
+/** The report's comments and document the drafts block reads. */
+export const DRAFT_COMMENTS = { report_id: DRAFT_REPORT_ID, latest_version: 1, digest: 'd', comments: [
+  { comment_id: 'c1', text: 'Say the connection voltage and the transformer size in one sentence.',
+    anchor: { section_id: 'grid', block_index: 1 }, status: 'open', created_at: '2026-11-19T07:50:00Z' },
+  { comment_id: 'c2', text: 'The tariff table needs its source year.', anchor: { section_id: 'grid', table_id: 't1' },
+    status: 'open', created_at: '2026-11-19T07:55:00Z' },
+] }
+export const DRAFT_DOC = { report_id: DRAFT_REPORT_ID, version: 1, title: 'Own site study', sections: [
+  { section_id: 'grid', heading: 'Grid connection', blocks: [
+    { type: 'bullets', items: ['20 kV'] }, { type: 'paragraph', md: 'Text' },
+    { type: 'table_ref', table_id: 't1', caption: 'Import tariffs' }] }] }
+export const DRAFT_STATES: Record<string, RunMonitorView> = {
+  drafts_none: withDrafts([]),
+  drafts_drafted: withDrafts([draftRow('d1', 'drafted', { edit: DRAFT_EDIT })]),
+  drafts_in_flight: withDrafts([draftRow('d1', 'drafting')]),
+  drafts_confirmed: withDrafts([draftRow('d1', 'applied', { edit: DRAFT_EDIT, revision: { version: 2, digest: 'e' } })]),
+  drafts_discarded: withDrafts([draftRow('d1', 'discarded', { edit: DRAFT_EDIT })]),
+  drafts_rejected: withDrafts([draftRow('d1', 'rejected', { reasons: ['changes_number'] })]),
+  drafts_refused: withDrafts([draftRow('d1', 'refused', { error: 'budget' }),
+    draftRow('d2', 'refused', { error: 'revision_stale_base', edit: DRAFT_EDIT })]),
+  drafts_at_limit: withDrafts(Array.from({ length: 10 }, (_, i) => draftRow(`d${i}`, 'discarded', { edit: DRAFT_EDIT }))),
+  drafts_viewer: withDrafts([draftRow('d1', 'drafted', { edit: DRAFT_EDIT })], { may_act: false }),
 }

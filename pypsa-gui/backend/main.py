@@ -66,6 +66,7 @@ import security
 import static_gate
 from db import session as db_session_module
 from deps import bind_active_project, resolve_request_session, resolve_request_user
+from services import project_write_gate
 from services import active_project
 from services import fs_permission
 from services import shutdown as shutdown_service
@@ -74,6 +75,7 @@ from routers import (
     asset_results,
     assistant_activity,
     auth,
+    catalogue,
     changelog,
     chat,
     dictation,
@@ -727,8 +729,9 @@ app = FastAPI(
     lifespan=lifespan,
     # Runs before every endpoint on every router: binds the caller's session to
     # its active project so the ~110 routes that name no project resolve
-    # per-user instead of through a process global (Step 0b).
-    dependencies=[Depends(bind_active_project)],
+    # per-user instead of through a process global (Step 0b). Then refuses a
+    # project viewer's write, after the binding it reads (project-viewer-role 01).
+    dependencies=[Depends(bind_active_project), Depends(project_write_gate.require_project_write)],
 )
 
 # The Tariff model's defaults-pack stamp lookup (gridspine-library-eu 05, GK A G5-1):
@@ -1386,6 +1389,8 @@ app.include_router(
 app.include_router(library.router, prefix="/api/library", tags=["library"])
 # The shipped (common) cost references: read-only, the same for every org.
 app.include_router(library_references.router, prefix="/api/library/references", tags=["library"])
+# The Parameter catalogue (expert-catalogue 01a): project-free, the same for every org and caller.
+app.include_router(catalogue.router, prefix="/api/catalogue", tags=["catalogue"])
 app.include_router(network.router, prefix="/api/network", tags=["network"])
 # Mount /api/network/cluster from the dedicated clustering router. Sharing the
 # /api/network prefix keeps the endpoint adjacent to other network mutations.

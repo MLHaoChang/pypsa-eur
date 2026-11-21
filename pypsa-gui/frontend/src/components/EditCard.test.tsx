@@ -469,3 +469,18 @@ it('RP-20 (GK B #1396): a 250-series card caps only its scope line; the table sh
   expect(shown).toHaveLength(250)
   expect(shown.map(r => within(r).getByTestId('chat-edit-code').textContent)).toEqual(rows.map((_, i) => code(i)))
 })
+
+it.each([true, false])('a growth input the change leaves says "unchanged", with no arrow in the headline (guided %s)', guided => {
+  const rows = [
+    { component_class: 'Settings', name: 'Solver settings', field: 'load_growth_pct_per_year.electrical',
+      label: 'Load growth electrical', old: 2, new: 3, unit: '% per year', role: 'typed' as const },
+    { component_class: 'Settings', name: 'Solver settings', field: 'load_growth_base_year',
+      label: 'Growth from year', old: 2030, new: 2030, unit: '', role: 'typed' as const, unchanged: true },
+  ]
+  const card = { rows, sets: [] } as unknown as EditCard
+  render(<EditCardTable card={card} guided={guided} />)
+  const cells = screen.getAllByRole('cell').map(c => c.textContent)
+  expect(cells).toContain('unchanged')
+  expect(editCardWords(card)).not.toMatch(/2030 → 2030/)
+  expect(editCardWords(card)).not.toMatch(/Growth from year/)
+})
