@@ -648,6 +648,8 @@ def _with_member(data: bytes, member: str, body: bytes | None) -> bytes:
     """The bundle with `member` replaced (None: removed)."""
     import zipfile
 
+    from tests.bundle_util import refresh_manifest
+
     src = zipfile.ZipFile(io.BytesIO(data))
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as out:
@@ -656,7 +658,9 @@ def _with_member(data: bytes, member: str, body: bytes | None) -> bytes:
                 out.writestr(item, src.read(item))
         if body is not None:
             out.writestr(member, body)
-    return buf.getvalue()
+    return refresh_manifest(
+        buf.getvalue()
+    )  # the edit changes members, so the manifest is rebuilt (project-io 02)
 
 
 def test_a_bundle_without_solver_settings_derives_at_the_default_rate_and_says_so(

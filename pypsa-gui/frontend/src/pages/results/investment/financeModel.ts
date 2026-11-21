@@ -115,7 +115,7 @@ export function errorsFor(errors: Record<string, string[]>, path: string,
 // ── the report ───────────────────────────────────────────────────────────
 
 type Obj = Record<string, unknown>
-const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
+export const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
 
 /** A value as a number, or null when it is not established (null, absent,
  *  the string "not_established", a `{value: null}` record). */
@@ -663,16 +663,6 @@ export function uncheckableReason(reason: string | null): string | null {
       return "can't check whether this report is current: the current inputs are not established"
     default: return null
   }
-}
-
-/** The failure a finished run ended in (error / failed / refused), or null. */
-export function studyFailure(s: InvestmentCaseStudy | null | undefined): string | null {
-  if (!s || !['error', 'failed', 'refused'].includes(s.status)) return null
-  const why = s.message ?? s.error ?? null
-  const code = s.code ?? s.error_code ?? null
-  const text = why ?? code ?? 'no reason given'
-  return `${s.status === 'refused' ? 'The case was refused' : 'The run failed'}: ${text}`
-    + (why && code && !why.includes(code) ? ` (${code})` : '')
 }
 
 // ── the campus equipment the case took (campus-IC issues 02 and 05) ─────

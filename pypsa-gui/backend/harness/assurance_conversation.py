@@ -356,6 +356,11 @@ def remember(turn):
             (turn.conversation_state or {}).get("expires_at", record["expires_at"]),
             record["expires_at"],
         )
+    elif assurance_scope.every_entity(turn.request_scope or {}):
+        # A population answer is not a follow-up scope: it is cleared, like any
+        # answer that cannot be retained (the final `else` does the same).
+        turn.session.assurance_context = None
+        return
     elif (
         record["receipt"].get("request_complete")
         and turn.request_evidence
@@ -402,6 +407,10 @@ def remember(turn):
             "raw": raw,
             "source_sha256": records.digest(raw),
         }
+        # Recalculated now, so the current definitions, not the source's.
+        frozen.pop("definition_hash", None)
+        if (definition := calculations.scope_definition_hash(scope)) is not None:
+            frozen["definition_hash"] = definition
         records.save(frozen, frozen["evidence_id"])
         entry = {
             "scope": deepcopy(scope),

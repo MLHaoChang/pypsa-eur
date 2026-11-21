@@ -229,6 +229,9 @@ def _empty_workbook() -> bytes:
             "matpower",
         ),
     ],
+    # Stable ids: a zip's bytes carry a timestamp, so byte-valued ids differ
+    # between xdist workers that collect in different seconds.
+    ids=lambda value: value if isinstance(value, str) else "bytes",
 )
 def test_a_malformed_import_is_refused_and_keeps_the_open_network(
     baseline, session, caplog, name, data, fmt

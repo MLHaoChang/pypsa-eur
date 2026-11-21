@@ -441,8 +441,10 @@ def test_island_words_mirror_the_island_form():
     # "Genset redundancy (N+k)" keeps its parenthesis: it is a name, not a unit.
     words["genset_redundancy_n"] = ("Genset redundancy (N+k)", "")
     assert ec._ISLAND_WORDS == words
-    cuts = (pages / "CampusIslandCutsSection.tsx").read_text(encoding="utf-8")
-    scen = cuts[cuts.index("const SCENARIO_WORDS"):cuts.index("\n", cuts.index("const SCENARIO_WORDS"))]
+    # The Cuts section's scenarioWords is plainNames.islandScenarioLabel (RAW-NAMES-1).
+    names = (pages.parent / "plainNames.ts").read_text(encoding="utf-8")
+    scen = names[names.index("const ISLAND_SCENARIO_LABELS"):]
+    scen = scen[:scen.index("\n}\n")]
     assert ec._SCENARIO_WORDS == dict(re.findall(r"(\w+): '([^']*)'", scen))
 
 

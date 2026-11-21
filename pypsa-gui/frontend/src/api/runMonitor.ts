@@ -114,12 +114,22 @@ export interface RunMonitorView {
     card?: RunCard
     waiting?: { kind: string; ref: string }
     research?: { rows: ResearchRow[]; steps: ResearchStep[] }
+    /** Study harness 14 S-C: the PPA price step's card lines and the price or its state, in words. */
+    ppa?: RunPpaPrice
     /** SH-07d: the run's draft rows, oldest first. */
     revision_drafts?: RevisionDraft[]
     /** SH-07d: the report a draft may be asked for now, with the server's limits;
      *  `may_act` is false for a viewer of the project. */
     revision_report?: { report_id: string; max_requests: number; in_flight: string[]; may_act: boolean }
   }
+}
+
+/** `harness.run_ppa.monitor`: every string is the backend's own words. */
+export interface RunPpaPrice {
+  title: string
+  lines: string[]
+  state: 'priced' | 'not_evaluated' | 'out_of_date' | 'pending'
+  text: string
 }
 
 const base = (taskId: string) => `/chat/runs/${encodeURIComponent(taskId)}`
