@@ -5,6 +5,7 @@
 and shows its headline in Compare, base against a what-if child (template-e2e
 issue 23 slice a)."""
 
+# ruff: noqa: F811 -- imported shared fixtures.
 from __future__ import annotations
 
 import json
@@ -90,7 +91,8 @@ def test_a_child_edited_after_the_study_reads_out_of_date(client, studied):
     _child(client)
     with chat_tools._acting() as (db, user):
         d = project_registry.project_dir(
-            project_registry.resolve_project(db, user, "Tool What If"))
+            project_registry.resolve_project(db, user, "Tool What If")
+        )
     meta = json.loads((d / "metadata.json").read_text())
     meta["network_revision"] = int(meta.get("network_revision") or 0) + 1
     (d / "metadata.json").write_text(json.dumps(meta))
@@ -100,8 +102,11 @@ def test_a_child_edited_after_the_study_reads_out_of_date(client, studied):
 
 @pytest.mark.parametrize("status", ["failed", "aborted"])
 def test_an_unfinished_study_is_no_result(client, eh_base, status):
-    eh_base.ctx.solver_state["eh_study"] = {"status": status, "report": None,
-                                            "network_revision": 0}
+    eh_base.ctx.solver_state["eh_study"] = {
+        "status": status,
+        "report": None,
+        "network_revision": 0,
+    }
     assert client.post("/api/projects/Tool Baseline").status_code == 200
     assert _study(client, "Tool Baseline") is None
     assert _listed(client)["Tool Baseline"]["study_finished"] is False

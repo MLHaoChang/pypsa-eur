@@ -5,6 +5,7 @@
 (template-e2e issue 23 slice a), so its Guided study runs as the parent's does.
 A study fork of the parent does not."""
 
+# ruff: noqa: F811 -- imported shared fixtures.
 from __future__ import annotations
 
 import json
@@ -91,7 +92,9 @@ def test_study_keys_naming_another_base_do_not_make_a_fork(eh_base, child):
     # A scenario made from a fork copies the fork's keys; they name the
     # fork's base, not this row's parent (`study.forks.is_study_owned`).
     _, d = child
-    _write_meta(d, owner_study_id=str(uuid.uuid4()), owner_base_project=str(uuid.uuid4()))
+    _write_meta(
+        d, owner_study_id=str(uuid.uuid4()), owner_base_project=str(uuid.uuid4())
+    )
     assert tm.resolve(d).state == tm.BASE
 
 
@@ -122,7 +125,9 @@ def test_a_child_whose_parent_folder_lost_its_marker_reads_none(eh_base, child):
 
 
 def test_a_folder_naming_a_parent_but_holding_no_row_reads_none(tmp_path):
-    (tmp_path / "metadata.json").write_text(json.dumps({"parent_project": "Tool Baseline"}))
+    (tmp_path / "metadata.json").write_text(
+        json.dumps({"parent_project": "Tool Baseline"})
+    )
     assert tm.resolve(tmp_path) == tm.Marker(tm.NONE)
 
 
