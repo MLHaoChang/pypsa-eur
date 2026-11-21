@@ -856,7 +856,7 @@ def test_a_run_never_runs_python_in_the_forked_child(make):
     _FORK_TRAP.update(armed=True, pids=w)
     try:
         runner.start()
-        runner.join(20)
+        runner.join(10)
     finally:
         _FORK_TRAP["armed"] = False
         try:
@@ -896,6 +896,12 @@ def test_a_spawn_that_never_returns_is_typed_and_its_late_process_is_stopped(
     env, _ = make("hang")
     ready = _ready(env)
     release, late = _stuck_cli_spawn(monkeypatch)
+    stopped = []
+    for name in ("_kill_container", "_killpg"):
+        real = getattr(bw, name)
+        monkeypatch.setattr(
+            bw, name, lambda *a, _r=real, _n=name: (stopped.append(_n), _r(*a))[1]
+        )
     stop = threading.Event()
     if cancel:
         threading.Timer(0.3, stop.set).start()
@@ -912,3 +918,27 @@ def test_a_spawn_that_never_returns_is_typed_and_its_late_process_is_stopped(
     while not (late and late[0].returncode is not None) and time.monotonic() < deadline:
         time.sleep(0.05)
     assert late and late[0].returncode is not None, "the late CLI is stopped"
+    assert stopped == ["_kill_container", "_killpg"], "by container name, then group"
+
+
+def test_the_cli_runs_with_no_core_dump(make, monkeypatch):
+    import resource
+
+    env, _ = make()
+    ready = _ready(env)
+    soft, hard = resource.getrlimit(resource.RLIMIT_CORE)
+    resource.setrlimit(resource.RLIMIT_CORE, (hard, hard))  # the parent allows cores
+    try:
+        monkeypatch.setattr(
+            bw,
+            "_container_argv",
+            lambda *a: ["/bin/sh", "-c", "echo core=$(ulimit -c)"],
+        )
+        work = bw._workdir()
+        try:
+            tail = bw._run(ready, work, [], env, FAST, wall_s=10, stop_event=None)
+        finally:
+            os.rmdir(work)
+    finally:
+        resource.setrlimit(resource.RLIMIT_CORE, (soft, hard))
+    assert b"core=0" in tail, tail
