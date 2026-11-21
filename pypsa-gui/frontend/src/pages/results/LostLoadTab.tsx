@@ -402,8 +402,9 @@ function fmtEnergy(mwh: number): string {
 function fmtCurrency(eur: number | null): string {
   if (eur == null || !Number.isFinite(eur)) return '—'
   const a = Math.abs(eur)
-  if (a >= 1e9) return `€${(eur / 1e9).toFixed(2)} B`
-  if (a >= 1e6) return `€${(eur / 1e6).toFixed(2)} M`
-  if (a >= 1e3) return `€${(eur / 1e3).toFixed(1)} k`
-  return `€${eur.toFixed(0)}`
+  const sign = eur < 0 ? '-' : ''
+  if (a >= 1e9) return `${sign}€${(a / 1e9).toFixed(2)} B`
+  if (a >= 1e6) return `${sign}€${(a / 1e6).toFixed(2)} M`
+  if (a >= 1e3) return `${sign}€${(a / 1e3).toFixed(1)} k`
+  return `${sign}€${a.toFixed(0)}`
 }
