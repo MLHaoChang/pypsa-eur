@@ -879,3 +879,118 @@ def test_a_worst_uif_that_only_round_trips_exactly_stays_judged(tmp_path):
     _write(tmp_path, uif=_uif_meta("flag", worst=worst), uif_rows=_uif_table(worst))
     row = _card(tmp_path)[0]["ssti_uif"]
     assert row["verdict"] == "warn" and row["project_value"] == worst
+
+
+# ── a grid project with an open tie: the grid's infeed is on the counted path (GK A2 R4a) ──
+
+
+def _grid_run_with_open_tie(d, sk_mva):
+    """The two-genset hub on a grid template with its import Link held at 0 MW (an open tie in the
+    saved network), prepared and screened by the real stage."""
+    from gridspine.drivers.campus_study import draft_from_project, prepare_campus
+    from tests.test_campus_electrical_service import hub_network
+
+    _template(d, "strong_grid")
+    n = hub_network()
+    n.buses.at["grid", "eh_sk_mva"] = sk_mva
+    for name, p_nom in (("gas_a", 6.0), ("gas_b", 15.0)):
+        n.add("Generator", name, bus="mv", carrier="gas", p_nom=p_nom)
+        n.generators_t.p[name] = 0.0
+    _open_tie(n)
+    n.links_t.p0["grid_import"] = 0.0
+    n.links_t.p1["grid_import"] = 0.0
+    path = d / "network.nc"
+    n.export_to_netcdf(str(path))
+    run = d / "campus_electrical" / "run"
+    prepare_campus(run, draft_from_project(path).spec, path)
+    ce._ssti_screens(run, PROFILE, ())
+    return run, n
+
+
+def test_a_grid_project_with_an_open_tie_screens_with_the_grids_infeed(tmp_path):
+    # The archetype says the PoC is closed: a Link at 0 MW limits the energy bought, not the fault
+    # current. The campus run seats the grid at the PoC from its entered S_k'' (the ext_grid), so the
+    # UIF's SC_tot counts a real infeed and the row stays judged.
+    from gridspine.drivers.campus_study import SSTI_UIF_CSV, load_run_campus
+
+    run, n = _grid_run_with_open_tie(tmp_path, 2000.0)
+    inp = SimpleNamespace(n=n, links=list(n.links.index))
+    assert G._tie_open(inp)  # the open-tie case, not a closed one
+    grid = load_run_campus(run).net.ext_grid
+    assert len(grid) == 1 and float(grid.iloc[0]["s_sc_max_mva"]) == 2000.0
+    table = pd.read_csv(run / SSTI_UIF_CSV)
+    pcc = table[table["role"] != "converter bus"]
+    # at the PoC the grid's 2000 MVA dominates: the machines alone could not reach it
+    assert (pcc["sc_tot_mva"] > 1000.0).all()
+    row = _card(tmp_path, n=n)[0]["ssti_uif"]
+    assert row["verdict"] in ("pass", "warn") and row["project_value"] is not None
+    assert "(grid-connected state only)" in row["note"]
+
+
+# ── the resonance table's least-margin row, and verdicts the tables contradict (GK A2 R2) ──
+
+
+def _bad_resonance(**changes):
+    rows = _resonance((0.4, 3.0), "flag")
+    rows[0] = {**rows[0], **changes}  # the least-margin series row
+    return rows
+
+
+@pytest.mark.parametrize(
+    "rows, why",
+    [
+        (_bad_resonance(margin_hz="x"), " has a torsional margin that is not a finite number ('x')"),
+        (_bad_resonance(margin_hz=None), " has a torsional margin that is not a finite number (nan)"),
+        (_bad_resonance(machine=None), "'s least-margin row has no machine"),
+        (_bad_resonance(f_comp_hz=None, mode_hz=None), "'s least-margin row has no f_comp_hz, mode_hz"),
+    ],
+    ids=["text_margin", "missing_margin", "no_machine", "no_frequencies"],
+)
+def test_a_damaged_least_margin_row_reads_unknown(tmp_path, rows, why):
+    _write(tmp_path, subsync=_sub_meta("flag"), resonance=rows)
+    row = _card(tmp_path)[0]["subsync_series_resonance"]
+    assert row["verdict"] == "unknown" and row["project_value"] is None
+    assert row["note"] == f"The run's resonance table{why}. {SCREENING}"
+
+
+@pytest.mark.parametrize(
+    "verdict, margins, words",
+    [("clear", (0.4, 3.0), "0.4 Hz contradicts its verdict 'clear'"),
+     ("flag", (1.0, 3.0), "1 Hz contradicts its verdict 'flag'")],
+    ids=["clear_below", "flag_at_edge"],
+)
+def test_a_least_margin_that_contradicts_the_verdict_reads_unknown(tmp_path, verdict, margins, words):
+    _write(tmp_path, subsync=_sub_meta(verdict), resonance=_resonance(margins, verdict))
+    row = _card(tmp_path)[0]["subsync_series_resonance"]
+    assert row["verdict"] == "unknown"
+    assert row["note"] == (
+        f"The run's least margin {words} against the clearance 1 Hz. {SCREENING}"
+    )
+
+
+def test_a_margin_just_below_the_clearance_flags(tmp_path):
+    m = math.nextafter(1.0, 0.0)
+    _write(tmp_path, subsync=_sub_meta("flag"), resonance=_resonance((m, 3.0), "flag"))
+    row = _card(tmp_path)[0]["subsync_series_resonance"]
+    assert row["verdict"] == "warn" and row["project_value"] == m
+    assert G._judge(row["project_value"], row["limit"], row["rule"]) == "warn"
+
+
+@pytest.mark.parametrize(
+    "verdict, worst, words",
+    [("clear", 0.25, "0.25 contradicts its verdict 'clear'"),
+     ("flag", 0.1, "0.1 contradicts its verdict 'flag'")],
+    ids=["clear_above", "flag_at_edge"],
+)
+def test_a_worst_uif_that_contradicts_the_verdict_reads_unknown(tmp_path, verdict, worst, words):
+    _write(tmp_path, uif=_uif_meta(verdict, worst=worst), uif_rows=_uif_table(worst))
+    row = _card(tmp_path)[0]["ssti_uif"]
+    assert row["verdict"] == "unknown"
+    assert row["note"] == f"The run's worst UIF {words} against the threshold 0.1. {SCREENING}"
+
+
+@pytest.mark.parametrize(
+    "text, want", [("", "No reason given"), ("ends with a period.", "Ends with a period"), ("  ", "No reason given")]
+)
+def test_a_note_is_one_sentence_whatever_the_engine_wrote(text, want):
+    assert G._ssti_say(text) == f"{want}. {SCREENING}"

@@ -1403,6 +1403,8 @@ UIF_CHANGED = "the UIF threshold changed since the run: rerun the grid study"
 CLEARANCE_CHANGED = "the torsional clearance changed since the run: rerun the grid study"
 #: The UIF table's columns the worst row is read from (the UIF, then where it sits).
 UIF_ROW_COLUMNS = ("uif", "bus", "case", "machine")
+#: The resonance table's columns the least-margin row's note names.
+SUBSYNC_ROW_COLUMNS = ("f_comp_hz", "mode_hz", "machine", "case")
 
 
 def _finite_number(v) -> float | None:
@@ -1414,6 +1416,7 @@ def _finite_number(v) -> float | None:
 
 def _ssti_say(text: str) -> str:
     """A screening row's note: ``text`` as a sentence, then the screening caveat."""
+    text = text.strip().rstrip(".") or "no reason given"
     return f"{text[0].upper()}{text[1:]}. {SSTI_SCREENING}"
 
 
@@ -1442,7 +1445,8 @@ def _profile_moved(inp: _Inputs, key: str, default: float, judged_on, changed: s
         now = _finite_number(lim.get("value"))
     else:
         now = None
-    return changed if now is None or judged_on is None or now != judged_on else None
+    # a None ``now`` never equals the run's limit, which the callers checked is a finite number
+    return changed if now != judged_on else None
 
 
 def _uif_row(inp: _Inputs, screen: dict, table, common: dict) -> dict:
@@ -1491,6 +1495,10 @@ def _uif_row(inp: _Inputs, screen: dict, table, common: dict) -> dict:
         return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF],
                     note=_ssti_say(f"The run's UIF table's worst UIF {max(uifs):.6g} is not the worst UIF "
                                    f"{worst:.6g} its record gives"), **unknown)
+    if (worst > limit) != (verdict == "flag"):
+        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], note=_ssti_say(
+            f"The run's worst UIF {worst:.6g} contradicts its verdict {verdict!r} against the threshold "
+            f"{limit:g}"), **unknown)
     blank = [c for c in UIF_ROW_COLUMNS[1:] if pd.isna(top[c]) or not str(top[c]).strip()]
     if blank:
         return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF],
@@ -1508,6 +1516,8 @@ def _uif_row(inp: _Inputs, screen: dict, table, common: dict) -> dict:
 
 def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
     """The series-resonance row from the run's meta ``screen`` and resonance table (GK A2 R1-R3)."""
+    import pandas as pd
+
     from gridspine.static.subsync_scan import DEFAULT_CLEARANCE_HZ, PROFILE_KEY, SERIES
 
     limit = _finite_number(screen.get("clearance_hz"))
@@ -1528,12 +1538,24 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(moved), **unknown)
     series = (resonance[resonance["kind"].astype(str) == SERIES] if resonance is not None and "kind" in resonance
               else None)
-    margins = ([(m, r) for _, r in series.iterrows() if (m := _num(r.get("margin_hz"))) is not None]
-               if series is not None else [])
-    if not margins:
+    if series is None or series.empty or "margin_hz" not in series:
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR],
                     note=_ssti_say("The run wrote no torsional margin for a series resonance"), **unknown)
+    # Fail closed like the UIF row (GK A2 R2): a margin that is not a number, a least margin that
+    # contradicts the run's verdict, or a least-margin row that cannot say where it sits reads unknown.
+    margins = [(_num(r["margin_hz"]), r) for _, r in series.iterrows()]
+    if bad := [r["margin_hz"] for m, r in margins if m is None]:
+        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(
+            f"The run's resonance table has a torsional margin that is not a finite number ({bad[0]!r})"),
+            **unknown)
     margin, r = min(margins, key=lambda mr: mr[0])
+    if (margin < limit) != (verdict == "flag"):
+        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(
+            f"The run's least margin {margin:.6g} Hz contradicts its verdict {verdict!r} against the clearance "
+            f"{limit:g} Hz"), **unknown)
+    if blank := [c for c in SUBSYNC_ROW_COLUMNS if c not in r or pd.isna(r[c]) or not str(r[c]).strip()]:
+        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(
+            f"The run's resonance table's least-margin row has no {', '.join(blank)}"), **unknown)
     words = "below" if verdict == "flag" else "at or above"
     note = (f"Least margin {margin:.4g} Hz: the electrical resonance's complement {r.get('f_comp_hz')} Hz "
             f"against the torsional mode {r.get('mode_hz')} Hz of {r.get('machine')} ({r.get('case')}), {words} "
