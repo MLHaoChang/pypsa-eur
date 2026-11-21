@@ -81,10 +81,11 @@ def _project_id(session_local_, name) -> str:
 
 
 def _assert_requester(demotion, session_local_, name) -> None:
-    """Every check named the signed-in requester and the run's base project."""
+    """The runner's checks named the signed-in requester and the run's base
+    project (the queue's own check of each fork's solve job names the fork)."""
     pid = _project_id(session_local_, name)
-    assert demotion.calls and all(p == pid for _u, p in demotion.calls)
-    assert all(_a_user(session_local_, u) for u, _p in demotion.calls)
+    users = {u for u, p in demotion.calls if p == pid}
+    assert len(users) == 1 and _a_user(session_local_, users.pop())
 
 
 # ── the gate: fresh from the database, a lost membership fails closed ────────
@@ -284,7 +285,7 @@ def test_the_investment_case_route_records_its_requester(
     assert client.post(IC_URL, json={}).status_code == 200
     rec = _poll(client)
     assert rec["status"] == "failed" and rec["error_code"] == KIND, rec
-    assert rec.get("report") is None
+    assert rec["report"]["present"] is False
     uid, pid = demotion.calls[-1]
     assert _a_user(_auth_db[1], uid)
     assert pid == str(PyPSAService.get_active_context().project_uuid)
