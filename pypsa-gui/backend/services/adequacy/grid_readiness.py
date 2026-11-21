@@ -1398,7 +1398,6 @@ SSTI_ISLAND = "the screen counts the grid's infeed; the islanded case is not eva
 SSTI_GRID_ONLY = "grid-connected state only"
 SSCI_REASON = "not evaluated: converter damping not modelled"
 NO_MODES = "no torsional modes given"
-NO_SERIES_CAP = "not evaluated: grid-side series compensation needs the TSP's data"
 UIF_CHANGED = "the UIF threshold changed since the run: rerun the grid study"
 CLEARANCE_CHANGED = "the torsional clearance changed since the run: rerun the grid study"
 #: The UIF table's columns the worst row is read from (the UIF, then where it sits).
@@ -1447,6 +1446,22 @@ def _ssti_notes(notes) -> str:
     if not isinstance(notes, list):
         return "the screen's notes are unreadable"
     return "; ".join(x if isinstance(x, str) else "an unreadable note" for x in notes)
+
+
+def _subsync_reasons(resonance, series: str, verdict: str) -> str:
+    """The engine's own reasons for an undecided series-resonance verdict (GK A2 B7, GC-TEXT-1): the
+    distinct notes on the series rows that carry that verdict, as plain text, in the run's order."""
+    import pandas as pd
+
+    if resonance is None or not {"kind", "verdict", "note"} <= set(resonance.columns):
+        return ""
+    rows = resonance[(resonance["kind"].astype(str) == series) & (resonance["verdict"].astype(str) == verdict)]
+    seen: list[str] = []
+    for v in rows["note"]:
+        text = "" if pd.isna(v) else v.strip() if isinstance(v, str) else "an unreadable note"
+        if text and text not in seen:
+            seen.append(text)
+    return "; ".join(seen)
 
 
 def _ssti_hz(v) -> float | None:
@@ -1570,7 +1585,8 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
     if why:
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(why), **unknown)
     if verdict in ("check", "not evaluated"):
-        why = NO_MODES if verdict == "check" else NO_SERIES_CAP
+        why = (_subsync_reasons(resonance, SERIES, verdict) or _ssti_notes(screen.get("notes"))
+               or (NO_MODES if verdict == "check" else "the scan was not evaluated"))
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(why),
                     **dict(unknown, verdict=SSTI_VERDICTS[SUBSYNC_SR][verdict]))
     if limit is None:

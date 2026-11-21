@@ -375,24 +375,78 @@ def test_a_series_resonance_clear_passes(tmp_path):
     assert G._judge(row["project_value"], row["limit"], row["rule"]) == "pass"
 
 
+_TSP = "not evaluated: grid-side series compensation needs the TSP's data"
+_NO_NORMAL = "no normal case given (pcc.sk_normal_mva), so it is not scanned"
+
+
+def _undecided(verdict, notes):
+    """Series rows as the scan writes them when it cannot judge: one per case, each with its note."""
+    return [
+        {
+            "case": c,
+            "kind": SERIES,
+            "verdict": verdict,
+            "note": n,
+            "margin_hz": float("nan"),
+        }
+        for c, n in zip(("max", "min"), notes)
+    ]
+
+
 @pytest.mark.parametrize(
-    "verdict, reason",
+    "verdict, rows, meta_notes, reason",
     [
-        ("check", "No torsional modes given"),
+        ("check", ["no torsional modes given"] * 2, [], "No torsional modes given"),
+        ("check", [], [], "No torsional modes given"),
+        ("not evaluated", [_TSP, _TSP], [], _TSP[0].upper() + _TSP[1:]),
+        ("not evaluated", [], [_NO_NORMAL], _NO_NORMAL[0].upper() + _NO_NORMAL[1:]),
         (
             "not evaluated",
-            "Not evaluated: grid-side series compensation needs the TSP's data",
+            ["a reason the reader has never seen"] * 2,
+            [],
+            "A reason the reader has never seen",
         ),
+        ("not evaluated", ["first", None], [], "First"),
+        ("not evaluated", [], [], "The scan was not evaluated"),
+    ],
+    ids=[
+        "check_note",
+        "check_bare",
+        "tsp",
+        "no_normal_case",
+        "unknown_reason",
+        "blank_note",
+        "nothing",
     ],
 )
-def test_a_series_resonance_the_scan_could_not_judge_gives_its_reason(
-    tmp_path, verdict, reason
+def test_a_series_resonance_the_scan_could_not_judge_gives_the_engines_reason(
+    tmp_path, verdict, rows, meta_notes, reason
 ):
-    # R3
-    _write(tmp_path, subsync=_sub_meta(verdict))
+    # R3, GK A2 B7 (GC-TEXT-1): the note follows the engine's own reason, never a stock sentence
+    meta = dict(_sub_meta(verdict), notes=meta_notes)
+    _write(
+        tmp_path,
+        subsync=meta,
+        resonance=_undecided(verdict, rows) or [{"kind": "SSCI"}],
+    )
     row = _card(tmp_path)[0]["subsync_series_resonance"]
     assert row["verdict"] == "unknown" and row["project_value"] is None
     assert row["note"] == f"{reason}. {SCREENING}"
+
+
+def test_a_real_run_says_why_its_scan_was_not_evaluated(tmp_path):
+    # the stage's own notes on a campus with no series capacitor and no normal case
+    from gridspine.drivers.campus_study import SUBSYNC_RESONANCE_CSV
+
+    run = _two_genset_run(tmp_path)
+    res = pd.read_csv(run / SUBSYNC_RESONANCE_CSV)
+    notes = res[(res["kind"] == SERIES) & (res["verdict"] == "not evaluated")]["note"]
+    engine = notes.iloc[0]
+    assert set(notes) == {engine} and "TSP's data" in engine
+    row = _card(tmp_path)[0]["subsync_series_resonance"]
+    assert row["note"] == f"{engine[0].upper()}{engine[1:]}. {SCREENING}"
+    assert "(pcc.sk_normal_mva)" in row["note"]
+    assert "synchronous machine impedance is not in the scan" in row["note"]
 
 
 def test_a_series_resonance_without_a_margin_reads_unknown(tmp_path):
@@ -1122,7 +1176,10 @@ def test_a_uif_verdict_that_is_not_a_word_reads_unknown(tmp_path, verdict, why):
     rows, out = _card(tmp_path)
     assert rows["ssti_uif"]["verdict"] == "unknown"
     assert rows["ssti_uif"]["note"] == f"{why}. {SCREENING}"
-    assert rows["subsync_series_resonance"]["note"].startswith("Not evaluated")
+    assert (
+        rows["subsync_series_resonance"]["note"]
+        == f"The scan was not evaluated. {SCREENING}"
+    )
 
 
 @pytest.mark.parametrize("verdict, why", _VERDICT_CASES, ids=_VERDICT_IDS)
