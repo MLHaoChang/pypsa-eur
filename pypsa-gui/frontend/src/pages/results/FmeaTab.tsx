@@ -199,7 +199,7 @@ export default function FmeaTab() {
     <div className="flex flex-col h-full overflow-auto p-4 gap-3">
       <header>
         <div className="flex items-center gap-2">
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
+          <h3 className="text-h3 font-semibold text-text">
             {guided ? 'What could fail, and what it would cost' : 'FMEA worksheet'}
           </h3>
           <GuideButton tourId="fmea" testId="fmea-guide-button" />
@@ -226,7 +226,7 @@ export default function FmeaTab() {
           {unpricedNote(unpricedCount)}{' '}
           <button type="button" data-testid="fmea-unpriced-set-voll"
             onClick={() => openVollField(FMEA_RETURN_LABEL)}
-            className="text-accent hover:underline">
+            className="text-link hover:underline">
             {setVollText(guided)} ›
           </button>
         </p>

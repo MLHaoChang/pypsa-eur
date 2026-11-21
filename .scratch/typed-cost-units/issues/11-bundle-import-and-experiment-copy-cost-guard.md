@@ -1,6 +1,7 @@
 # Owned-cost guard: project-bundle import and the experiment preflight copy
 
-Status: ready-for-agent
+Status: done (#1628)
+Landed in #1628.
 Type: bug
 Found in: TCU 10 (#1555), follow-up candidates in `10-owned-cost-guard-gaps.md`.
 Owner area: app backend (GK B reviews).

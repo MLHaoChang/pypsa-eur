@@ -15,7 +15,7 @@ const authState = { user: localAdminUser(), logout: vi.fn() }
 const authMode = { authEnabled: false }
 const rows = vi.hoisted(() => ({ list: [] as unknown[] }))
 
-vi.mock('../auth/AuthProvider', () => ({ useAuth: () => authState }))
+vi.mock('../auth/AuthProvider', () => ({ useAuth: () => authState, useIsSuperAdmin: () => true }))
 vi.mock('../auth/AuthModeProvider', () => ({ useAuthMode: () => authMode }))
 vi.mock('../api/projects', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/projects')>()

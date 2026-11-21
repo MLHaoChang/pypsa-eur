@@ -86,7 +86,7 @@ export default function MemorySettledLine({ settled, toolUseId }: {
       {settled.state === 'remembered' && (
         <>
           {' · '}
-          <button type="button" className="text-accent hover:underline"
+          <button type="button" className="text-link hover:underline"
             onClick={() => openMemory({ editId: settled.id })}
             data-testid="memory-settled-edit">
             {settled.id ? 'Edit in Memory ›' : 'Open Memory ›'}

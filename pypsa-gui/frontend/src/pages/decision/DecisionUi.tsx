@@ -31,7 +31,7 @@ export function Card({ title, right, children }: { title: ReactNode; right?: Rea
   return (
     <section className="rounded-[10px] border border-border bg-bg overflow-hidden">
       <header className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-2">
-        <h3 className="text-[12.5px] font-semibold text-text">{title}</h3>
+        <h3 className="text-h3 font-semibold text-text">{title}</h3>
         {right}
       </header>
       <div className="p-4 flex flex-col gap-2.5 text-[12px] text-text">{children}</div>

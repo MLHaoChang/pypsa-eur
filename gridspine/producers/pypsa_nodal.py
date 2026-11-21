@@ -8,6 +8,7 @@ import pandas as pd
 import pypsa
 
 from gridspine.schema.contracts import ContractError
+from gridspine.static import series_caps as SC
 
 # Normalised daily load shape (24 h), peak = 1.0 at hour 19. Ledgered
 # assumption: synthetic shape for the vertical slice; real studies supply
@@ -105,6 +106,7 @@ def to_pypsa(net, snapshots=24, load_shape=None, res_cf=None) -> pypsa.Network:
     to the capacity factor, so they are curtailable but never dispatchable
     above the resource.
     """
+    SC.refuse(net, "PyPSA nodal export")  # GC-01b: not written yet (follow-up)
     n = pypsa.Network()
     if isinstance(snapshots, (int, np.integer)) and not isinstance(snapshots, bool):
         n.set_snapshots(range(int(snapshots)))

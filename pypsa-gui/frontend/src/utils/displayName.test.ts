@@ -24,3 +24,5 @@ describe('displayName — raw ids in plain words (UX S6, finding G1)', () => {
     expect(displayName('')).toBe('')
   })
 })
+
+it('spells NH3 as an acronym', () => { expect(displayName('nh3_tank')).toBe('NH3 tank') })

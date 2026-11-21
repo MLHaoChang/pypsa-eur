@@ -156,7 +156,7 @@ export default function OverviewPanel() {
                   const rest = entries.length - 2
                   return rest > 0 ? `${head} · +${rest} more` : head
                 })()}
-            title={`Total link capacity: ${caps.linkPower.toFixed(0)} MW (p_nom). Carriers: ${
+            title={`Total link capacity: ${caps.linkPower.toFixed(0)} MW. Carriers: ${
               Array.from(linkSummary.carriers.entries())
                 .map(([c, n]) => `${c} (${n})`).join(', ') || 'none'
             }`}

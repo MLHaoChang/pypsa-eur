@@ -29,3 +29,7 @@ Depends on: 01. Opens after #1575, #1590 and #1586 merge (GK B ruling on #1597).
 ## Keeping both modes in step
 
 `open_parameter` lands in the Expert panel or the Guided field drawer by the current mode; it never switches mode.
+
+## Comments
+
+- 2026-11-21, slice 02c (raw-name guard): `pages/hubDesign/delegate.ts` (Site card fix requests sent to the assistant: `grid_import`, `outage_rate_value`, `mttr_hours`) has allow rows in `pypsa-gui/frontend/src/uiCopyGuard.allow.json` naming this slice. Remove them when the requests use plain names.

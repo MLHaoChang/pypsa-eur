@@ -3,7 +3,8 @@
 
 # 06 No market data: historical prices, PPA defaults per contract form and market bundles are unbuilt (S1, S2, K8)
 
-Status: needs-triage
+Status: ready-for-agent
+Owner: SCU06-PLAN-1.
 Blocked by: none for S1/S2; K8 needs its own gated plan (with DC-06, one reserve model)
 Design: `.scratch/project-workflow/integration-sensitivities.md` §1, §2 and §6; commercial-finance.md §7 row K8 (Q8 = A).
 Source: gap review 2026-11-21, design map.

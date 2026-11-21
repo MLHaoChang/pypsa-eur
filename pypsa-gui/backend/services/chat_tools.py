@@ -2958,7 +2958,9 @@ def run_investment_case(owner: str | None = None) -> dict:
 
     def start():
         with _ic_errors():
-            return _h(body)
+            # No HTTP caller here: `user=None` makes the handler take the
+            # requester from the chat's acting user (project-viewer-role 02).
+            return _h(body, user=None)
 
     out = _campaign_gated("investment_case", start)
     out = {k: (_cut(v) if k in ("owner", "case_id") else v) for k, v in out.items()}
@@ -3883,7 +3885,8 @@ def run_business_case() -> dict:
 
     def start():
         with _bc_errors():
-            return _h()
+            # As run_investment_case: the requester is the chat's acting user.
+            return _h(user=None)
 
     out = dict(_campaign_gated("business_case", start))
     out["hint"] = ("poll get_business_case() until status is done / refused / failed; a "

@@ -148,7 +148,7 @@ function ResearchCard({ row, others, busy, onDecide }: {
       {row.range ? `${row.range.low}–${row.range.high}` : row.value} {row.unit} <span className="text-muted">({row.basis}{row.jurisdiction ? `, ${row.jurisdiction}` : ''})</span>
     </div>
     {sourced ? <>
-      <a href={row.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline break-all"
+      <a href={row.url} target="_blank" rel="noopener noreferrer" className="text-link hover:underline break-all"
         data-testid="run-research-source">{row.title || row.url}</a>
       <blockquote data-testid="run-research-quote" className="my-1 border-l-2 border-border pl-2 italic">“{row.quote}”</blockquote>
     </> : <div data-testid="run-research-unverified" className="text-warn">Unverified source: not used</div>}
@@ -156,7 +156,7 @@ function ResearchCard({ row, others, busy, onDecide }: {
       {others} other {others === 1 ? 'source' : 'sources'} for this {thing}: using this one rejects {others === 1 ? 'it' : 'them'}.</div>}
     <div className="mt-1 flex gap-3">
       {usable && <button type="button" disabled={busy} data-testid="run-research-use"
-        className="text-accent hover:underline disabled:opacity-40" onClick={() => onDecide('confirmed')}>Use this {thing}</button>}
+        className="text-link hover:underline disabled:opacity-40" onClick={() => onDecide('confirmed')}>Use this {thing}</button>}
       <button type="button" disabled={busy} data-testid="run-research-reject"
         className="text-muted hover:text-text disabled:opacity-40" onClick={() => onDecide('rejected')}>Reject</button>
     </div>
@@ -172,13 +172,13 @@ function Link({ children, onClick, disabled, testId }: {
   children: string; onClick: () => void; disabled?: boolean; testId?: string
 }) {
   return <button type="button" disabled={disabled} onClick={onClick} data-testid={testId} data-run-link=""
-    className="text-accent hover:underline disabled:opacity-40">{children} ›</button>
+    className="text-link hover:underline disabled:opacity-40">{children} ›</button>
 }
 
 /** An action in place (resume, retry): no "›". */
 function Action({ children, onClick, disabled }: { children: string; onClick: () => void; disabled?: boolean }) {
   return <button type="button" disabled={disabled} onClick={onClick}
-    className="text-accent hover:underline disabled:opacity-40">{children}</button>
+    className="text-link hover:underline disabled:opacity-40">{children}</button>
 }
 
 export default function RunMonitor({ task, disabled, disabledReason, onRequest }: {

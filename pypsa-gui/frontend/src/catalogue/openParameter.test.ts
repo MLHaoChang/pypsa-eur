@@ -87,3 +87,34 @@ describe('pickAssetFor', () => {
     expect(takePaletteSeed()).toBe('')
   })
 })
+
+describe('focus poll teardown', () => {
+  it('stops polling once cancelled: no further tick, no error', async () => {
+    vi.useFakeTimers()
+    const af = await import('../layout/properties/AssetFields')
+    const spy = vi.spyOn(af, 'focusFieldControl').mockReturnValue(false)
+    try {
+      useUIStore.setState({ uiMode: 'expert' })
+      openParameter({ entry: P_NOM, asset: 'PV roof' })
+      vi.advanceTimersByTime(250)
+      const calls = spy.mock.calls.length
+      expect(calls).toBeGreaterThan(0)
+      const { cancelParameterFocus } = await import('./openParameter')
+      cancelParameterFocus()
+      vi.advanceTimersByTime(5000)
+      expect(spy.mock.calls.length).toBe(calls)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally { spy.mockRestore(); vi.useRealTimers() }
+  })
+
+  it('stops when the document is gone', () => {
+    vi.useFakeTimers()
+    try {
+      useUIStore.setState({ uiMode: 'expert' })
+      openParameter({ entry: P_NOM, asset: 'PV roof' })
+      vi.stubGlobal('document', undefined)
+      vi.advanceTimersByTime(5000)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally { vi.unstubAllGlobals(); vi.useRealTimers() }
+  })
+})
