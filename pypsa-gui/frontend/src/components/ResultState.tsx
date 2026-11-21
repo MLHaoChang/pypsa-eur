@@ -19,6 +19,7 @@
 // no lines), render one <ResultState> for the group instead of repeating the
 // pill, reason and action on each tile. Kpi's own `state` is for a tile whose
 // neighbours have values.
+import { plainReason } from '../pages/hubDesign/plainWords'
 import type { ReactNode } from 'react'
 
 export type ResultStateKind =
@@ -77,7 +78,7 @@ export default function ResultState({
   return (
     <div data-state={state} className="flex flex-col gap-1.5 rounded-[8px] border border-border bg-bg-2 px-3 py-2.5">
       <StatePill state={state} />
-      <p className="text-[12px] leading-snug text-muted">{reason}</p>
+      <p className="text-[12px] leading-snug text-muted">{plainReason(reason)}</p>
       {children}
       {action && <StateAction action={action} />}
     </div>

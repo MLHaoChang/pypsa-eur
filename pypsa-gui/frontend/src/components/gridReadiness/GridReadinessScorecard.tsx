@@ -213,8 +213,8 @@ function ScoreRow({ row, mode, onJump, fieldLabels, noAssistant }: {
             )}
             {row.xr_assumed && (
               <button type="button" data-testid={`gr-set-xr-${row.id}`} onClick={openPocXr}
-                title="Open the PoC X/R field in Project info, Settings"
-                className="ml-1.5 text-[11px] text-accent hover:underline">Set PoC X/R ›</button>
+                title="Open the point-of-connection X/R field in Project info, Settings"
+                className="ml-1.5 text-[11px] text-accent hover:underline">Set point-of-connection X/R ›</button>
             )}
             <span className="mx-1.5">·</span>
             Project:{'\u00A0'}<span className="text-text">
