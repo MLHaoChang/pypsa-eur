@@ -1042,7 +1042,11 @@ def test_a_new_project_import_s_refusal_says_nothing_was_imported():
         return exc.value.detail["message"]
 
     head = "Storage 'bess2': its investment parts cannot be annuitised at rate 10 over 300 years. "
-    assert message() == message(new_project=False) == head + "The open network is unchanged."
+    assert (
+        message()
+        == message(new_project=False)
+        == head + "The open network is unchanged."
+    )
     assert message(new_project=True) == head + "Nothing was imported."
 
 
