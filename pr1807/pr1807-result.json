@@ -27,10 +27,14 @@
    "back": "Back to Capacity",
    "backFirst": true,
    "oneDrawer": true,
-   "openOn": "Open on mainland_supply ›",
+   "openOnHosted": 0,
    "formShownAfterBack": true,
+   "otherVia": "guide store \"Running cost\" (no Related Generator entry)",
+   "otherField": "marginal_cost",
+   "openOn": "Open on mainland_supply ›",
+   "chooseAsset": null,
    "landed": {
-    "field": "p_nom",
+    "field": "marginal_cost",
     "value": "",
     "mode": "guided"
    },
@@ -63,10 +67,14 @@
    "back": "Back to Capacity",
    "backFirst": true,
    "oneDrawer": true,
-   "openOn": "Open on mainland_supply ›",
+   "openOnHosted": 0,
    "formShownAfterBack": true,
+   "otherVia": "guide store \"Running cost\" (no Related Generator entry)",
+   "otherField": "marginal_cost",
+   "openOn": "Open on mainland_supply ›",
+   "chooseAsset": null,
    "landed": {
-    "field": "p_nom",
+    "field": "marginal_cost",
     "value": "",
     "mode": "guided"
    },
@@ -98,11 +106,16 @@
    "dockOpenAfterEsc": true,
    "back": "Back to mainland_supply",
    "backFirst": true,
-   "openOn": "Open on mainland_supply ›",
+   "openOnHosted": 0,
    "formShownAfterBack": true,
+   "otherVia": "Properties panel hidden, ⌘K Shift+Enter",
+   "otherField": "p_nom",
+   "backUnhosted": 0,
+   "openOn": "Open on mainland_supply ›",
+   "chooseAsset": null,
    "landed": {
     "field": "p_nom",
-    "value": "",
+    "value": "100",
     "mode": "expert"
    },
    "ok": true
@@ -133,11 +146,16 @@
    "dockOpenAfterEsc": true,
    "back": "Back to mainland_supply",
    "backFirst": true,
-   "openOn": "Open on mainland_supply ›",
+   "openOnHosted": 0,
    "formShownAfterBack": true,
+   "otherVia": "Properties panel hidden, ⌘K Shift+Enter",
+   "otherField": "p_nom",
+   "backUnhosted": 0,
+   "openOn": "Open on mainland_supply ›",
+   "chooseAsset": null,
    "landed": {
     "field": "p_nom",
-    "value": "",
+    "value": "100",
     "mode": "expert"
    },
    "ok": true
