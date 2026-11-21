@@ -1,0 +1,833 @@
+"""The project contents table and the safe bundle import (project-io issue 01).
+
+GK B (63) plan conditions: I1 project kind, I2 safe staging, I3 cleanup, I4 the
+guard both ways, I5 old snapshots and bundles, I10 the cost guard (#1628) refuses before the row.
+"""
+
+from __future__ import annotations
+
+import ast
+import io
+import json
+import pathlib
+import stat
+import zipfile
+
+import pytest
+
+from routers import projects
+from services import project_contents as PC
+
+BACKEND = pathlib.Path(__file__).resolve().parents[1]
+
+
+# ── I4: the guard, both ways ─────────────────────────────────────────────────
+
+
+def _declared_names() -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for root in ("services", "routers", "harness"):
+        for path in sorted((BACKEND / root).rglob("*.py")):
+            tree = ast.parse(path.read_text())
+            for node in tree.body:
+                # `X_FILE = "..."` and the annotated `X_FILE: Final = "..."`.
+                if isinstance(node, ast.AnnAssign) and node.value is not None:
+                    target = node.target
+                elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+                    target = node.targets[0]
+                else:
+                    continue
+                if not isinstance(target, ast.Name):
+                    continue
+                var = target.id
+                if not (var == "SIDECAR_NAME" or var.endswith("_FILE")):
+                    continue
+                if isinstance(node.value, ast.Constant) and isinstance(
+                    node.value.value, str
+                ):
+                    out.setdefault(node.value.value, []).append(
+                        f"{path.relative_to(BACKEND)}:{var}"
+                    )
+    return out
+
+
+def test_every_declared_project_file_is_in_the_table_or_excluded():
+    table = {e.path.rsplit("/", 1)[-1] for e in PC.TABLE}
+    missing = {
+        name: where
+        for name, where in _declared_names().items()
+        if name not in table and name not in PC.NOT_CARRIED and " " not in name
+    }
+    assert not missing, (
+        f"declared project file(s) neither in project_contents.TABLE nor NOT_CARRIED: {missing}"
+    )
+
+
+def test_every_table_entry_has_a_writer():
+    sources = "\n".join(
+        p.read_text()
+        for root in ("services", "routers", "harness")
+        for p in (BACKEND / root).rglob("*.py")
+        if p.name != "project_contents.py"
+    )
+    # Templates write some names; the gridspine drivers write the campus run files.
+    for extra in (BACKEND / "project_templates", BACKEND.parents[1] / "gridspine"):
+        sources += "\n".join(p.read_text() for p in extra.rglob("*.py"))
+    orphans = [
+        e.path
+        for e in PC.TABLE
+        if not e.pending_writer
+        and f'"{e.path.rsplit("/", 1)[-1]}"' not in sources
+        and f'"{e.path}"' not in sources
+    ]
+    assert not orphans, f"table entries no module writes: {orphans}"
+
+
+def test_experiments_stays_out_and_the_derived_lists_follow_the_table():
+    assert PC.entry("experiments") is None
+    assert "experiments" not in PC.names(PC.BUNDLE)
+    for name in ("eh_template.json", "cases.json", "import_report.json"):
+        assert name in projects._BUNDLE_FILES
+    assert {
+        "eh_template.json",
+        "cases.json",
+        "sensitivity_case.json",
+    } == projects._FORK_SKIPPED_FILES
+    assert "gridspine" in PC.names(PC.BUNDLE) and "gridspine" in PC.names(PC.SAVE_AS)
+    assert (
+        "gridspine" in projects._SNAPSHOT_DIRS
+        and "gridspine" not in projects._BUNDLE_DIRS
+    )
+    assert PC.skipped("gridspine", PC.SNAPSHOT) == ("run",)
+    assert PC.NOT_CARRIED.keys().isdisjoint(e.path for e in PC.TABLE)
+
+
+# ── I2: safe staging ─────────────────────────────────────────────────────────
+
+
+def _zip(members: dict[str, bytes], *, link: str | None = None) -> zipfile.ZipFile:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+        if link:
+            info = zipfile.ZipInfo(link)
+            info.external_attr = (stat.S_IFLNK | 0o777) << 16
+            zf.writestr(info, "/etc/passwd")
+    return zipfile.ZipFile(io.BytesIO(buf.getvalue()))
+
+
+@pytest.mark.parametrize(
+    "bad, kind",
+    [
+        ("/etc/x", "bundle_unsafe_path"),
+        ("../x.json", "bundle_unsafe_path"),
+        ("uploads/../../x", "bundle_unsafe_path"),
+        ("C:/x.json", "bundle_unsafe_path"),
+        ("uploads\\x", "bundle_unsafe_path"),
+    ],
+)
+def test_unsafe_member_paths_are_refused(bad, kind):
+    with pytest.raises(PC.BundleRefused) as exc:
+        PC.screen_members(_zip({"network.nc": b"x", bad: b"y"}))
+    assert exc.value.kind == kind
+
+
+def test_a_symlink_member_is_refused():
+    with pytest.raises(PC.BundleRefused) as exc:
+        PC.screen_members(_zip({"network.nc": b"x"}, link="uploads/a"))
+    assert exc.value.kind == "bundle_unsafe_path"
+
+
+@pytest.mark.parametrize(
+    "a, b",
+    [
+        ("layout.json", "LAYOUT.json"),
+        ("uploads/a", "uploads/a."),
+        ("uploads/a", "uploads/a "),
+    ],
+)
+def test_members_that_fold_to_one_file_are_refused(a, b):
+    with pytest.raises(PC.BundleRefused) as exc:
+        PC.screen_members(_zip({a: b"1", b: b"2"}))
+    assert exc.value.kind == "bundle_name_clash"
+
+
+@pytest.mark.parametrize(
+    "a, b",
+    [
+        ("uploads/a", "uploads/a/b"),
+        ("uploads/a/b/c", "uploads/A"),
+        ("uploads/a", "uploads/a./x"),
+    ],
+)
+def test_a_member_that_is_also_a_folder_is_refused(a, b):
+    with pytest.raises(PC.BundleRefused) as exc:
+        PC.screen_members(_zip({a: b"1", b: b"2"}))
+    assert exc.value.kind == "bundle_unsafe_path"
+
+
+def test_nfc_and_nfd_spellings_are_one_file():
+    with pytest.raises(PC.BundleRefused) as exc:
+        PC.screen_members(
+            _zip({"uploads/caf\u00e9.csv": b"1", "uploads/cafe\u0301.csv": b"2"})
+        )
+    assert exc.value.kind == "bundle_name_clash"
+
+
+def test_a_folder_beside_a_file_with_a_longer_name_is_fine():
+    allowed, _ = PC.screen_members(_zip({"uploads/a": b"1", "uploads/ab/c": b"2"}))
+    assert sorted(allowed) == ["uploads/a", "uploads/ab/c"]
+
+
+def test_a_bundle_over_the_unpacked_cap_is_refused():
+    zf = _zip({"network.nc": b"x" * 600, "layout.json": b"y" * 600})
+    assert PC.screen_members(zf, max_unpacked=1200)
+    with pytest.raises(PC.BundleRefused) as exc:
+        PC.screen_members(zf, max_unpacked=1199)
+    assert exc.value.kind == "bundle_too_large"
+
+
+def test_members_the_table_does_not_name_are_reported_not_allowed():
+    allowed, ignored = PC.screen_members(
+        _zip(
+            {
+                "network.nc": b"x",
+                "uploads/f/a.txt": b"a",
+                "evil.py": b"x",
+                "experiments/p.json": b"{}",
+                "campus_electrical/campus_input.yaml": b"",
+                "campus_electrical/draft_notes.json": b"{}",
+            }
+        )
+    )
+    assert sorted(allowed) == [
+        "campus_electrical/campus_input.yaml",
+        "network.nc",
+        "uploads/f/a.txt",
+    ]
+    assert sorted(ignored) == [
+        "campus_electrical/draft_notes.json",
+        "evil.py",
+        "experiments/p.json",
+    ]
+
+
+# ── the route: what is carried, kind, refusals, cleanup ─────────────────────
+
+
+def _bundle_from(
+    project_dir: pathlib.Path,
+    extra: dict[str, bytes] | None = None,
+    meta: dict | None = None,
+) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.write(project_dir / "network.nc", "network.nc")
+        zf.writestr("metadata.json", json.dumps({"name": "x", **(meta or {})}))
+        for name, data in (extra or {}).items():
+            zf.writestr(name, data)
+    return buf.getvalue()
+
+
+def _post(client, data: bytes, name: str):
+    return client.post(
+        f"/api/projects/import_bundle?name={name}",
+        files={"file": ("p.pypsaproj.zip", data, "application/zip")},
+    )
+
+
+def _left_behind(project_row, projects_root: pathlib.Path, name: str) -> list[str]:
+    left = []
+    if project_row(name) is not None:
+        left.append("row")
+    staging = projects_root / ".bundle-staging"
+    if staging.exists() and any(staging.iterdir()):
+        left.append("staging")
+    left += [str(p) for p in projects_root.rglob(name) if p.is_dir()]
+    return left
+
+
+@pytest.fixture
+def projects_root():
+    from settings import get_settings
+
+    return pathlib.Path(get_settings().projects_root)
+
+
+def test_a_round_trip_carries_the_marker_cases_importer_sidecars_and_kind(
+    client, api_project, project_storage_dir, project_row
+):
+    name = api_project("pc-src")
+    d = project_storage_dir(name)
+    for f in ("eh_template.json", "cases.json", "psse_case.json", "import_report.json"):
+        (d / f).write_text(json.dumps({"f": f}))
+    r = client.get(f"/api/projects/{name}/bundle")
+    assert r.status_code == 200, r.text
+    members = set(zipfile.ZipFile(io.BytesIO(r.content)).namelist())
+    assert {
+        "eh_template.json",
+        "cases.json",
+        "psse_case.json",
+        "import_report.json",
+    } <= members
+
+    r = _post(client, r.content, "pc_dst")
+    assert r.status_code in (200, 201), r.text
+    dst = project_storage_dir("pc_dst")
+    for f in ("eh_template.json", "cases.json", "psse_case.json", "import_report.json"):
+        assert json.loads((dst / f).read_text()) == {"f": f}
+    assert project_row("pc_dst").project_kind is None
+
+
+def test_a_planning_bundle_keeps_its_kind_and_gridspine_but_not_its_source_paths(
+    client, api_project, project_storage_dir, project_row, _auth_db, monkeypatch
+):
+    from services import gridspine_service as gs
+
+    if not gs.GRIDSPINE_AVAILABLE:
+        pytest.skip("gridspine is not in this build")
+    name = api_project("pc-plan")
+    from db.models import Project
+
+    with _auth_db[1]() as db:
+        db.get(Project, project_row(name).id).project_kind = gs.PLANNING_DYNAMICS
+        db.commit()
+    d = project_storage_dir(name)
+    (d / "gridspine" / "run").mkdir(parents=True)
+    (d / "gridspine" / "config.json").write_text(
+        json.dumps(
+            {"hours": 3, "from_dispatch": "/elsewhere/run", "from_network": "/etc/x.nc"}
+        )
+    )
+    (d / "gridspine" / "run" / "manifest.json").write_text("{}")
+    (d / "gridspine" / "run" / "dispatch.csv").write_bytes(b"h,p\r\n0,\x001.5\n")
+    r = client.get(f"/api/projects/{name}/bundle")
+    meta = json.loads(zipfile.ZipFile(io.BytesIO(r.content)).read("metadata.json"))
+    assert meta["project_kind"] == gs.PLANNING_DYNAMICS
+
+    logged = []
+    real_log = projects.change_log_service.log
+    monkeypatch.setattr(
+        projects.change_log_service,
+        "log",
+        lambda *a, **k: (logged.append(a), real_log(*a, **k))[1],
+    )
+    r = _post(client, r.content, "pc_plan_dst")
+    assert r.status_code in (200, 201), r.text
+    imported = [a[3] for a in logged if a[:2] == ("import", "Project")]
+    assert len(imported) == 1 and imported[0].endswith(". " + r.json()["stripped_note"])
+    assert set(r.json()["stripped"]) == {
+        "gridspine.from_dispatch",
+        "gridspine.from_network",
+    }
+    assert "from_dispatch" in r.json()["stripped_note"]
+    assert "Choose the study's sources again" in r.json()["stripped_note"]
+    dst = project_storage_dir("pc_plan_dst")
+    cfg = json.loads((dst / "gridspine" / "config.json").read_text())
+    assert (
+        cfg["hours"] == 3
+        and cfg["from_dispatch"] is None
+        and cfg["from_network"] is None
+    )
+    # A copy claims nothing new (GK B, replacing Q-A): run/ arrives byte-equal
+    # and nothing in it is added or marked current by the import.
+    src_run, dst_run = d / "gridspine" / "run", dst / "gridspine" / "run"
+    assert sorted(p.name for p in dst_run.iterdir()) == sorted(
+        p.name for p in src_run.iterdir()
+    )
+    for f in src_run.iterdir():
+        assert (dst_run / f.name).read_bytes() == f.read_bytes(), f.name
+    assert project_row("pc_plan_dst").project_kind == gs.PLANNING_DYNAMICS
+
+
+def test_a_capacity_expansion_bundle_never_writes_gridspine(
+    client, api_project, project_storage_dir, project_row
+):
+    d = project_storage_dir(api_project("pc-ce"))
+    r = _post(client, _bundle_from(d, {"gridspine/config.json": b"{}"}), "pc_ce_dst")
+    assert r.status_code in (200, 201), r.text
+    assert "gridspine/config.json" in r.json()["ignored"]
+    assert not (project_storage_dir("pc_ce_dst") / "gridspine").exists()
+
+
+@pytest.mark.parametrize("kind", ["nonsense", 7, ["planning_dynamics"]])
+def test_an_unknown_kind_is_a_plain_refusal_that_leaves_nothing(
+    client, api_project, project_storage_dir, project_row, projects_root, kind
+):
+    d = project_storage_dir(api_project("pc-kind"))
+    r = _post(client, _bundle_from(d, meta={"project_kind": kind}), "pc_kind_dst")
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "bundle_unknown_kind"
+    assert _left_behind(project_row, projects_root, "pc_kind_dst") == []
+
+
+def test_an_unsafe_bundle_is_refused_before_the_row(
+    client, api_project, project_storage_dir, project_row, projects_root
+):
+    d = project_storage_dir(api_project("pc-unsafe"))
+    r = _post(
+        client, _bundle_from(d, {"uploads/../../escape.txt": b"x"}), "pc_unsafe_dst"
+    )
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"]["error_kind"] == "bundle_unsafe_path"
+    assert _left_behind(project_row, projects_root, "pc_unsafe_dst") == []
+    assert not any(projects_root.rglob("escape.txt"))
+
+
+def test_an_ignored_member_is_never_written(client, api_project, project_storage_dir):
+    d = project_storage_dir(api_project("pc-ign"))
+    r = _post(client, _bundle_from(d, {"run.sh": b"rm -rf /"}), "pc_ign_dst")
+    assert r.status_code in (200, 201), r.text
+    assert r.json()["ignored"] == ["run.sh"]
+    assert not (project_storage_dir("pc_ign_dst") / "run.sh").exists()
+
+
+# ── I3: a failure at each step after the row leaves nothing; a retry works ──
+
+_STEPS = [
+    ("routers.projects._move_staged", None),
+    ("routers.projects._reports_copy_guard", None),
+    ("services.pypsa_service.PyPSAService.reset_network", "classattr"),
+    ("services.project_registry.bind_context", None),
+    ("services.active_project.set_active_project", None),
+    ("routers.projects._restore_results_state", None),
+    ("routers.projects._library_pin_issues", None),
+]
+
+
+@pytest.mark.parametrize(
+    "target, how", _STEPS, ids=[s[0].rsplit(".", 1)[-1] for s in _STEPS]
+)
+def test_a_late_failure_removes_row_and_folder_and_a_retry_succeeds(
+    client,
+    api_project,
+    project_storage_dir,
+    project_row,
+    projects_root,
+    monkeypatch,
+    target,
+    how,
+):
+    d = project_storage_dir(api_project("pc-fail"))
+    data = _bundle_from(d)
+    dst = f"pc_fail_{target.rsplit('.', 1)[-1].lower()}"
+
+    def boom(*a, **k):
+        raise RuntimeError("injected")
+
+    mod_path, attr = target.rsplit(".", 1)
+    if how == "classattr":
+        from services.pypsa_service import PyPSAService
+
+        monkeypatch.setattr(PyPSAService, attr, boom)
+    else:
+        import importlib
+
+        monkeypatch.setattr(importlib.import_module(mod_path), attr, boom)
+    with pytest.raises(RuntimeError):
+        _post(client, data, dst)
+    assert _left_behind(project_row, projects_root, dst) == []
+    monkeypatch.undo()
+    r = _post(client, data, dst)
+    assert r.status_code in (200, 201), r.text
+    assert (project_storage_dir(dst) / "network.nc").exists()
+
+
+@pytest.mark.parametrize("step", ["_restore_results_state", "_library_pin_issues"])
+def test_a_failure_after_the_swap_leaves_no_context_and_restores_the_pointer(
+    client,
+    api_project,
+    project_storage_dir,
+    project_row,
+    projects_root,
+    _auth_db,
+    monkeypatch,
+    step,
+):
+    """GK B 64, ask 2: no ghost context bound to the deleted project, the
+    session's pointer back where it was, and an eviction flush writes nothing."""
+    from db.models import Session as SessionRow
+    from sqlalchemy import select
+    from services.pypsa_service import PyPSAService
+
+    d = project_storage_dir(api_project("pc-ghost"))
+    data = _bundle_from(d)
+    dst = f"pc_ghost{step.lower()}"
+    _engine, session_local = _auth_db
+
+    def pointers():
+        with session_local() as db:
+            return sorted(
+                str(x) for x in db.scalars(select(SessionRow.active_project_id))
+            )
+
+    before = pointers()
+
+    def boom(*a, **k):
+        raise RuntimeError("injected")
+
+    monkeypatch.setattr(projects, step, boom)
+    with pytest.raises(RuntimeError):
+        _post(client, data, dst)
+    assert _left_behind(project_row, projects_root, dst) == []
+    assert pointers() == before
+    resident = dict(PyPSAService._contexts)
+    assert [k for k, c in resident.items() if c.loaded_project == dst] == []
+    for key, ctx in resident.items():
+        PyPSAService._save_evicted_ctx(key, ctx)
+    active = PyPSAService._active
+    if active is not None and active.registry_key:
+        PyPSAService._save_evicted_ctx(active.registry_key, active)
+    assert _left_behind(project_row, projects_root, dst) == []
+
+
+def test_an_import_that_loses_the_name_race_gets_a_clean_409(
+    client,
+    api_project,
+    project_storage_dir,
+    project_row,
+    projects_root,
+    monkeypatch,
+    _auth_db,
+    seeded_identity,
+):
+    """Two imports of one name: the other wins between this one's checks and
+    its row (the app serializes requests, so the race is staged here)."""
+    from db.models import User
+    from services import project_registry
+
+    d = project_storage_dir(api_project("pc-race"))
+    data = _bundle_from(d)
+    real = projects._bundle_network_owning_its_costs
+
+    def other_import_wins(*a, **k):
+        out = real(*a, **k)
+        with _auth_db[1]() as db:
+            winner = project_registry.create_root(
+                db, db.get(User, seeded_identity["user_id"]), "pc_race_dst"
+            )
+            project_registry.ensure_project_dir(winner)
+            (project_registry.project_dir(winner) / "winner.txt").write_text("w")
+        return out
+
+    monkeypatch.setattr(projects, "_bundle_network_owning_its_costs", other_import_wins)
+    r = _post(client, data, "pc_race_dst")
+    assert r.status_code == 409, r.text
+    winner = project_storage_dir("pc_race_dst")
+    assert (winner / "winner.txt").exists(), "the loser removed the winner's folder"
+    assert not (winner / "network.nc").exists(), (
+        "the loser wrote into the winner's folder"
+    )
+    staging = projects_root / ".bundle-staging"
+    assert not staging.exists() or not any(staging.iterdir())
+
+
+# ── I10: the cost guard (#1628) refuses before the row ──────────────────────
+
+
+def _priced_bundle(tmp_path, mutate) -> bytes:
+    from services.pypsa_service import PyPSAService
+    from tests.test_bulk_part_rederive import _network
+
+    n = _network()
+    mutate(n)
+    nc = tmp_path / "network.nc"
+    PyPSAService.export_network_to_netcdf(n, nc)
+    return _bundle_from(tmp_path)
+
+
+def test_a_non_finite_part_is_a_422_with_no_row_and_no_folder(
+    client, project_row, projects_root, tmp_path
+):
+    def inf_part(n):
+        n.storage_units.at["bess", "inv_energy_overnight"] = float("inf")
+
+    r = _post(client, _priced_bundle(tmp_path, inf_part), "pc_inf_dst")
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "invalid_edit_value"
+    assert _left_behind(project_row, projects_root, "pc_inf_dst") == []
+
+
+# ── I5: old snapshots and Q-A: gridspine/run/ in snapshots ──────────────────
+
+
+def test_an_old_snapshot_without_the_new_entries_leaves_the_live_copies(
+    client, api_project, project_storage_dir
+):
+    name = api_project("pc-oldsnap")
+    d = project_storage_dir(name)
+    r = client.post(f"/api/projects/{name}/snapshots", json={"label": "v1"})
+    assert r.status_code == 200, r.text
+    snap = d / "snapshots" / r.json()["id"]
+    # Rewrite the capture as an older release made it: no marker, no gridspine/.
+    m = json.loads((snap / "capture_manifest.json").read_text())
+    m["tracked_files"] = [
+        f for f in m["tracked_files"] if f not in ("eh_template.json", "cases.json")
+    ]
+    m["tracked_dirs"] = [x for x in m["tracked_dirs"] if x != "gridspine"]
+    (snap / "capture_manifest.json").write_text(json.dumps(m))
+    (d / "eh_template.json").write_text('{"later": true}')
+    (d / "gridspine").mkdir()
+    (d / "gridspine" / "config.json").write_text("{}")
+    r = client.post(f"/api/projects/{name}/snapshots/{snap.name}/restore")
+    assert r.status_code == 200, r.text
+    assert (d / "eh_template.json").read_text() == '{"later": true}'
+    assert (d / "gridspine" / "config.json").exists()
+
+
+def test_a_snapshot_carries_gridspine_without_run_and_its_restore_keeps_the_live_run(
+    client, api_project, project_storage_dir
+):
+    name = api_project("pc-gsnap")
+    d = project_storage_dir(name)
+    (d / "gridspine" / "run").mkdir(parents=True)
+    (d / "gridspine" / "config.json").write_text('{"hours": 1}')
+    (d / "gridspine" / "run" / "manifest.json").write_text('{"v": 1}')
+    r = client.post(f"/api/projects/{name}/snapshots", json={"label": "v1"})
+    assert r.status_code == 200, r.text
+    snap = d / "snapshots" / r.json()["id"]
+    assert (snap / "gridspine" / "config.json").exists()
+    assert not (snap / "gridspine" / "run").exists()
+
+    (d / "gridspine" / "config.json").write_text('{"hours": 2}')
+    (d / "gridspine" / "run" / "manifest.json").write_text('{"v": 2}')
+    r = client.post(f"/api/projects/{name}/snapshots/{snap.name}/restore")
+    assert r.status_code == 200, r.text
+    assert (d / "gridspine" / "config.json").read_text() == '{"hours": 1}'
+    assert (d / "gridspine" / "run" / "manifest.json").read_text() == '{"v": 2}'
+
+
+def test_replace_dir_keeping_empties_all_but_the_kept(tmp_path):
+    live = tmp_path / "gridspine"
+    (live / "run").mkdir(parents=True)
+    (live / "run" / "x").write_text("x")
+    (live / "config.json").write_text("{}")
+    (live / "sub").mkdir()
+    projects._replace_dir_keeping(None, live, ("run",))
+    assert sorted(p.name for p in live.iterdir()) == ["run"]
+
+
+# ── mutant survivors (scripts/coord/mutants.py) ─────────────────────────────
+
+
+def test_an_unknown_operation_is_a_programming_error():
+    with pytest.raises(ValueError):
+        PC.entries("copy")
+
+
+def test_a_kind_filter_keeps_folders_out_of_the_file_lists():
+    assert "uploads" not in PC.names(PC.BUNDLE, kind=PC.FILE)
+    assert "network.nc" not in PC.names(PC.BUNDLE, kind=PC.DIR)
+
+
+def test_a_bare_folder_name_is_not_a_member_of_that_folder():
+    assert not PC.allows_member("uploads")
+    assert PC.allows_member("uploads/a.txt")
+
+
+def test_directory_entries_and_one_letter_names_are_neither_allowed_nor_refused():
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("network.nc", b"x")
+        zf.writestr(zipfile.ZipInfo("uploads/"), b"")
+        zf.writestr("x", b"one letter, not a drive")
+    allowed, ignored = PC.screen_members(zipfile.ZipFile(io.BytesIO(buf.getvalue())))
+    assert allowed == ["network.nc"] and ignored == ["x"]
+
+
+def test_the_unpacked_cap_defaults_to_four_gib(monkeypatch):
+    import importlib.util
+    import sys
+
+    # A fresh copy under its own name, not `importlib.reload(PC)`: a reload
+    # makes new classes, so `BundleRefused` raised by a module that imported
+    # the old one (`bundle_manifest`) no longer matches `PC.BundleRefused` in
+    # every test that runs after this one.
+    monkeypatch.delenv("PYPSA_GUI_MAX_BUNDLE_UNPACKED_BYTES", raising=False)
+    spec = importlib.util.spec_from_file_location(
+        "_project_contents_fresh", PC.__file__
+    )
+    fresh = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, fresh)
+    spec.loader.exec_module(fresh)
+    assert fresh.MAX_UNPACKED_BYTES == 4 * 1024**3
+
+
+def test_restoring_a_snapshot_taken_without_gridspine_keeps_only_the_live_run(
+    client, api_project, project_storage_dir
+):
+    name = api_project("pc-gabsent")
+    d = project_storage_dir(name)
+    r = client.post(f"/api/projects/{name}/snapshots", json={"label": "v0"})
+    assert r.status_code == 200, r.text
+    sid = r.json()["id"]
+    (d / "gridspine" / "run").mkdir(parents=True)
+    (d / "gridspine" / "config.json").write_text("{}")
+    (d / "gridspine" / "run" / "manifest.json").write_text("{}")
+    r = client.post(f"/api/projects/{name}/snapshots/{sid}/restore")
+    assert r.status_code == 200, r.text
+    assert not (d / "gridspine" / "config.json").exists()
+    assert (d / "gridspine" / "run" / "manifest.json").exists()
+
+
+def test_a_capacity_expansion_kind_is_the_default(
+    client, api_project, project_storage_dir, project_row
+):
+    d = project_storage_dir(api_project("pc-cekind"))
+    data = _bundle_from(
+        d, {"gridspine/config.json": b"{}"}, meta={"project_kind": "capacity_expansion"}
+    )
+    r = _post(client, data, "pc_cekind_dst")
+    assert r.status_code in (200, 201), r.text
+    assert project_row("pc_cekind_dst").project_kind is None
+    assert "gridspine/config.json" in r.json()["ignored"]
+
+
+def test_an_unreadable_gridspine_config_imports_unchanged(tmp_path):
+    for body in (b"[1]", b"not json"):
+        (tmp_path / "gridspine").mkdir(exist_ok=True)
+        (tmp_path / "gridspine" / "config.json").write_bytes(body)
+        assert projects._clear_gridspine_sources(tmp_path) == []
+        assert (tmp_path / "gridspine" / "config.json").read_bytes() == body
+
+
+def test_a_failure_before_the_folder_exists_raises_the_original_error(
+    client, api_project, project_storage_dir, project_row, projects_root, monkeypatch
+):
+    from services import project_registry
+
+    d = project_storage_dir(api_project("pc-nodir"))
+
+    def boom(*a, **k):
+        raise RuntimeError("injected")
+
+    monkeypatch.setattr(project_registry, "ensure_project_dir", boom)
+    with pytest.raises(RuntimeError, match="injected"):
+        _post(client, _bundle_from(d), "pc_nodir_dst")
+    assert project_row("pc_nodir_dst") is None
+
+
+def test_a_capacity_expansion_export_names_no_kind_and_keeps_its_metadata(
+    client, api_project
+):
+    name = api_project("pc-cemeta")
+    r = client.get(f"/api/projects/{name}/bundle")
+    meta = json.loads(zipfile.ZipFile(io.BytesIO(r.content)).read("metadata.json"))
+    assert "project_kind" not in meta
+
+
+def test_the_export_keeps_the_metadata_beside_the_kind(tmp_path, monkeypatch):
+    (tmp_path / "network.nc").write_bytes(b"x")
+    (tmp_path / "metadata.json").write_text(json.dumps({"name": "keep me"}))
+    monkeypatch.setattr(projects.change_log_service, "log", lambda *a, **k: None)
+    blob = projects._project_bundle_bytes(
+        "p", src=tmp_path, project_kind="planning_dynamics"
+    )
+    meta = json.loads(zipfile.ZipFile(io.BytesIO(blob)).read("metadata.json"))
+    assert meta == {"name": "keep me", "project_kind": "planning_dynamics"}
+
+
+def test_replace_dir_keeping_unlinks_a_linked_folder_and_copies_deeper_runs(tmp_path):
+    target = tmp_path / "elsewhere"
+    target.mkdir()
+    (target / "keep.txt").write_text("k")
+    live = tmp_path / "gridspine"
+    live.mkdir()
+    (live / "linked").symlink_to(target, target_is_directory=True)
+    src = tmp_path / "snap"
+    (src / "sub" / "run").mkdir(parents=True)
+    (src / "sub" / "run" / "x").write_text("x")
+    (src / "run").mkdir()
+    (src / "run" / "y").write_text("y")
+    projects._replace_dir_keeping(src, live, ("run",))
+    assert (target / "keep.txt").exists(), "followed a link into another folder"
+    assert not (live / "linked").exists()
+    assert (live / "sub" / "run" / "x").exists(), "only the top-level run/ is kept out"
+    assert not (live / "run").exists()
+
+
+# ── GK B 64, ask 3: the cleared gridspine fields follow StudyConfig ─────────
+
+
+def _study_config():
+    from services import gridspine_service as gs
+
+    if not gs.GRIDSPINE_AVAILABLE:
+        pytest.skip("gridspine is not in this build")
+    from gridspine.drivers.study import StudyConfig
+
+    return StudyConfig
+
+
+def test_the_cleared_gridspine_fields_are_every_path_field_of_study_config():
+    import dataclasses
+    from pathlib import Path
+
+    StudyConfig = _study_config()
+    path_fields = {
+        f.name for f in dataclasses.fields(StudyConfig) if f.type in (Path, "Path")
+    }
+    assert projects._gridspine_path_fields() == (
+        "from_dispatch",
+        "from_network",
+        "from_external",
+        "from_external_loads",
+        "from_project",
+    )
+    assert set(projects._gridspine_path_fields()) == (
+        path_fields - projects._GRIDSPINE_REDERIVED
+    ) | {"from_project"}
+    assert projects._GRIDSPINE_REDERIVED <= path_fields
+
+
+def test_every_path_field_is_cleared_and_the_rest_kept(tmp_path):
+    _study_config()
+    fields = projects._gridspine_path_fields()
+    (tmp_path / "gridspine").mkdir()
+    cfg = tmp_path / "gridspine" / "config.json"
+    cfg.write_text(json.dumps({"hours": 3, **{f: f"/x/{f}" for f in fields}}))
+    assert projects._clear_gridspine_sources(tmp_path) == [
+        f"gridspine.{f}" for f in fields
+    ]
+    data = json.loads(cfg.read_text())
+    assert data == {"hours": 3, **dict.fromkeys(fields)}
+
+
+@pytest.mark.parametrize(
+    "fields, says",
+    [
+        (
+            ["gridspine.from_external"],
+            ["(from_external)", "Choose the study's sources again"],
+        ),
+        (["extra_functionality_code"], ["custom solver code"]),
+        (
+            ["gridspine.from_network", "extra_functionality_code"],
+            ["(from_network)", "custom solver code"],
+        ),
+    ],
+)
+def test_the_stripped_note_names_what_was_cleared(fields, says):
+    note = projects._stripped_note(fields)
+    for s in says:
+        assert s in note
+    if "extra_functionality_code" not in fields:
+        assert "solver code" not in note
+    if not any(f.startswith("gridspine.") for f in fields):
+        assert "study" not in note
+
+
+def test_the_declared_names_guard_reads_annotated_assignments(tmp_path, monkeypatch):
+    import sys
+
+    mod = sys.modules[__name__]
+    (tmp_path / "services").mkdir()
+    (tmp_path / "services" / "x.py").write_text(
+        'from typing import Final\nSCOPE_FILE: Final = "scope.json"\nOTHER_FILE = "o.json"\nBARE_FILE: str\n'
+    )
+    monkeypatch.setattr(mod, "BACKEND", tmp_path)
+    assert _declared_names() == {
+        "scope.json": ["services/x.py:SCOPE_FILE"],
+        "o.json": ["services/x.py:OTHER_FILE"],
+    }

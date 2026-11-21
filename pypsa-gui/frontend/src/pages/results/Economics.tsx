@@ -1280,7 +1280,7 @@ function LcohSection() {
               <tr className="text-muted">
                 <th className="text-left  py-1 px-3 font-medium">Link</th>
                 <th className="text-right py-1 px-3 font-medium">Carrier</th>
-                <th className="text-right py-1 px-3 font-medium">p_nom (MW)</th>
+                <th className="text-right py-1 px-3 font-medium">Capacity (MW)</th>
                 <th className="text-right py-1 px-3 font-medium">η</th>
                 <th className="text-right py-1 px-3 font-medium">H₂ produced</th>
                 <th className="text-right py-1 px-3 font-medium" title="Annuitised CAPEX + fixed O&M">Fixed cost</th>

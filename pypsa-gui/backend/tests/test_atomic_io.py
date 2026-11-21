@@ -148,8 +148,8 @@ def test_routers_still_expose_the_historical_names():
 def _sites():
     """The production call sites, as (file, needle) pairs."""
     return [
-        ("routers/projects.py", "atomic_write_bytes(dest / fname, zf.read(fname))"),
-        ("routers/projects.py", "atomic_write_bytes(target_path, zf.read(member))"),
+        # The bundle extract writes every member through one call (project-io 01).
+        ("routers/projects.py", "atomic_write_bytes(target, zf.read(member))"),
         ("routers/projects.py", 'atomic_copy(src_nc, dest / "network.nc")'),
         ("routers/projects.py", "atomic_write_bytes(child_dir / fname, src_file.read_bytes())"),
     ]

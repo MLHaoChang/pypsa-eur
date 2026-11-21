@@ -53,6 +53,7 @@ list_projects,ProjectInfo,snapshot_count,snapshot_count,True
 list_projects,ProjectInfo,objective,objective,True
 list_projects,ProjectInfo,has_orphan_tmp,has_orphan_tmp,True
 list_projects,ProjectInfo,missing,missing,True
+list_projects,ProjectInfo,my_access,my_access,True
 list_projects,ProjectInfo,parent_project,parent_project,True
 list_projects,ProjectInfo,scenario_description,scenario_description,True
 list_projects,ProjectInfo,scenario_type,scenario_type,True
@@ -70,6 +71,7 @@ list_scenarios,ProjectInfo,snapshot_count,snapshot_count,True
 list_scenarios,ProjectInfo,objective,objective,True
 list_scenarios,ProjectInfo,has_orphan_tmp,has_orphan_tmp,True
 list_scenarios,ProjectInfo,missing,missing,True
+list_scenarios,ProjectInfo,my_access,my_access,True
 list_scenarios,ProjectInfo,parent_project,parent_project,True
 list_scenarios,ProjectInfo,scenario_description,scenario_description,True
 list_scenarios,ProjectInfo,scenario_type,scenario_type,True

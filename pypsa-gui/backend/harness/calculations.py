@@ -1,7 +1,15 @@
-"""Bounded, raw-source generator calculations; never a total-system-cost alias."""
+"""Bounded, raw-source generator calculations; never a total-system-cost alias.
+
+A profile's definition hash (`definition_hash`) covers each metric's label, unit
+and formula_id and the checked-answer renderer's version, not the formula code.
+A change to a formula's arithmetic must bump its formula_id (``x/1`` -> ``x/2``),
+or a record checked under the old formula reads as if nothing changed.
+"""
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from numbers import Real
 
@@ -148,17 +156,38 @@ def _series(component, attribute, entity, index):
     return [_number(component.static.at[entity, attribute])] * len(index)
 
 
-def solve_matches_inputs(ctx):
+def solve_matches_inputs(ctx, after_pf=False):
     """Both recorded solve fingerprints match the current inputs: the lossy one
     and the exact one the Load flow tab requires. After an AC power flow the
-    live outputs are PF values (ac_pf_service overwrites them and keeps the LP
-    aside), so the live network no longer holds the LP solve."""
+    live network keeps the LP's tables (owner decision PF-SAVE-1: the flow's
+    live only in `ac_pf_results`), so the LP solve stays current through a
+    flow chained to it (`lopf+ac_pf_ok`) and through a failed one; a flow
+    record needs the LP's record beside it. A standalone flow (condition
+    `ac_pf_ok`) reads not current to an LP-only reader: it fails closed.
+    `after_pf` (study harness 15) also asks that a flow there ran on the
+    current edit counter and succeeded (a PF result, never an LP one)."""
     n, state = ctx.network, ctx.solver_state
+    flowed = state.get("ac_pf_results") is not None
+    condition = state.get("condition")
+    if after_pf and flowed and (
+        state.get("ac_pf_network_revision") != int(getattr(ctx, "network_revision", 0) or 0)
+        or condition != "lopf+ac_pf_ok"
+    ):
+        return False
+    from services.run_grid_pf import AC_PF_FAILED
+
+    # A flow that failed restores the LP's tables too (`ac_pf_service.run_ac_pf_stage`): the
+    # failure is judged by the PF rules alone (GK B SH-15 (1)); no other suffix is accepted.
+    lp_kept = (
+        condition == "optimal"
+        or (flowed and condition == "lopf+ac_pf_ok")
+        or (isinstance(condition, str) and condition.startswith(AC_PF_FAILED))
+    )
     return (
-        state.get("ac_pf_results") is None
-        and state.get("lopf_results") is None
+        # A flow keeps the LP's record beside its own; an LP record alone is no solve's.
+        flowed == (state.get("lopf_results") is not None)
         and state.get("status") == "completed"
-        and state.get("condition") == "optimal"
+        and lp_kept
         and n.meta.get("assistant_solve_input_fingerprint")
         == workflow_tools._network_input_fingerprint(ctx)
         and n.meta.get("assistant_solve_exact_input_fingerprint")
@@ -310,6 +339,47 @@ def calculate(raw, entity):
     return facts, slots
 
 
+# The version of the checked-answer text renderer (`assurance.Turn.validate_profile`).
+# Bump it when that renderer changes how a checked value is worded; every
+# profile's definition hash then changes with it.
+RENDERER_VERSION = 1
+
+
+def _no_floats(value):
+    """Refuse a float anywhere in the hash input: its JSON spelling is not canonical."""
+    if isinstance(value, float):
+        raise TypeError("definition_hash_float")
+    if isinstance(value, dict):
+        for item in value.values():
+            _no_floats(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _no_floats(item)
+
+
+def definition_hash(profile, metrics=None):
+    """``"sha256:<hex>"`` over the profile's metrics in order (or `metrics`,
+    the ones a scope requested, in their requested order), each metric's
+    label, unit and formula_id (as `definition` gives them for this profile) and
+    `RENDERER_VERSION`; canonical JSON (sorted keys, no spaces, UTF-8).
+
+    The hash covers formula ids, not formula code: a formula change must bump
+    its formula_id. A metric without a definition (the "unsupported" fallback)
+    and an unknown profile are refused, never hashed; so is a float input.
+    """
+    rows = []
+    for metric in PROFILES[profile] if metrics is None else metrics:
+        d = definition(metric, profile)
+        if d["formula_id"] == "unsupported":
+            raise ValueError("unsupported_metric_definition")
+        rows.append({"metric": metric, "label": d["label"], "unit": d["unit"],
+                     "formula_id": d["formula_id"]})
+    payload = {"metrics": rows, "renderer_version": RENDERER_VERSION}
+    _no_floats(payload)
+    text = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def definition(metric, profile=None):
     if profile == storage_costs.PROFILE and metric == "total_cost":
         return storage_costs.TOTAL_DEFINITION
@@ -326,6 +396,16 @@ def slot_warnings(slots):
 
 def requested_metrics(scope):
     return scope.get("metrics", PROFILES[scope["profile"]])
+
+
+def scope_definition_hash(scope):
+    """`definition_hash` over the metrics `scope` requests (comparison and
+    optional metrics included), or None when one has no definition: such a
+    record is captured with its hash not recorded, never refused here."""
+    try:
+        return definition_hash(scope["profile"], requested_metrics(scope))
+    except ValueError:
+        return None
 
 
 def _window(raw, scope):
@@ -346,6 +426,46 @@ def _window(raw, scope):
     }
 
 
+def _every_source(ctx, scope):
+    """Every entity of the scope's class, sorted, counted against the answer bound
+    before any entity is read or calculated (issue 10 K1, K4)."""
+    from harness import answer_sections
+
+    names = sorted(str(name) for name in ctx.network.components[scope["component_class"]].static.index)
+    if not names:
+        raise ValueError("empty_population")
+    # A receipt slot names its entity in at most 128 characters (UTF-16 units in the
+    # browser); refuse before any calculation rather than publish an answer that fails read-back.
+    if any(len(name.encode("utf-16-le")) // 2 > 128 for name in names):
+        raise ValueError("population_name_too_long")
+    answer_sections.admit(len(names), len(requested_metrics(scope)))
+    if scope["profile"] == PROFILE:
+        members = {name: {"generators": {name: source(ctx, name)}, "passive_costs": [],
+                          "unsupported_cost_components": []} for name in names}
+        index = members[names[0]]["generators"][names[0]]["index"]
+    else:
+        members = {name: branch.source(ctx, name, False, scope["component_class"]) for name in names}
+        index = members[names[0]]["index"]
+    population = {"version": 1, "component_class": scope["component_class"], "entities": names,
+                  "index": index, "members": members}
+    if scope["profile"] != PROFILE:
+        # branch-loading/1 "*" covers Lines; Transformers are named as excluded.
+        population["transformers_excluded"] = len(ctx.network.components["Transformer"].static)
+    return population
+
+
+def _every_calculate(raw, scope):
+    """Each member through its own one-entity profile; a fact's path names its member."""
+    if raw.get("version") != 1 or raw.get("component_class") != scope["component_class"]:
+        raise ValueError("population_source_identity")
+    facts, slots = [], []
+    for i, name in enumerate(raw["entities"]):
+        member_facts, member_slots = scoped_calculate(raw["members"][name], {**scope, "entity_id": name})
+        facts += [{**f, "path": f"/{i}{f['path']}"} for f in member_facts]
+        slots += member_slots
+    return facts, slots
+
+
 def scoped_source(ctx, scope, owner=None, investment_state=None):
     """Capture complete raw populations under the existing project lock, with
     the solve's LP/MIP classification and gap (assistant-assurance 10, S2)."""
@@ -356,6 +476,10 @@ def scoped_source(ctx, scope, owner=None, investment_state=None):
 
 
 def _scoped_source(ctx, scope, owner=None, investment_state=None):
+    from harness.assurance_scope import every_entity
+
+    if every_entity(scope):
+        return _every_source(ctx, scope)
     if scope["profile"] == carrier.PROFILE:
         return carrier.source(ctx, scope["entity_id"])
     if scope["profile"] == lost_load.PROFILE:
@@ -556,6 +680,10 @@ def _comparison(raw, scope, owner):
 
 def scoped_calculate(raw, scope):
     """A bounded calculation DAG; missing dependencies never become zero."""
+    from harness.assurance_scope import every_entity
+
+    if every_entity(scope):
+        return _every_calculate(raw, scope)
     if scope["profile"] == carrier.PROFILE:
         return carrier.calculate(raw, scope)
     if scope["profile"] in branch.PROFILES:

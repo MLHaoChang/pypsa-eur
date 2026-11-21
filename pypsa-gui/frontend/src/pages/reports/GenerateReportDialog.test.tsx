@@ -7,6 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import userEvent from '@testing-library/user-event'
 import { ReportsError, type ChartSnapshot } from '../../api/reports'
 import { resetReportCharts } from '../results/reportCharts'
@@ -46,6 +47,10 @@ function renderDialog(over: Partial<React.ComponentProps<typeof GenerateReportDi
   )
   return { onGenerate, onClose }
 }
+
+/** A toast argument as text: a string, or the JSX of a refusal with its link. */
+const toastText = (arg: unknown): string =>
+  typeof arg === 'string' ? arg : renderToStaticMarkup(arg as React.ReactElement).replace(/<[^>]*>/g, '')
 
 beforeEach(() => {
   toast.success.mockReset()
@@ -91,6 +96,16 @@ describe('GenerateReportDialog', () => {
     expect(toast.success).toHaveBeenCalled()
   })
 
+  it('says a plain report was created, not that generation started, when no LLM profile is set', async () => {
+    const user = userEvent.setup()
+    const onGenerate = vi.fn().mockResolvedValue({ status: 'done', report_id: 'a1b2c3d4e5f60718', mode: 'plain' })
+    const { onClose } = renderDialog({ onGenerate })
+    await user.click(screen.getByTestId('generate-submit'))
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(String(toast.success.mock.calls[0][0])).toMatch(/stored results/i)
+    expect(String(toast.success.mock.calls[0][0])).not.toMatch(/started/i)
+  })
+
   it('submits title, a free-form language, the picked sections and the instruction', async () => {
     const user = userEvent.setup()
     const { onGenerate } = renderDialog()
@@ -119,8 +134,8 @@ describe('GenerateReportDialog', () => {
   it.each([
     ['report_job_in_flight', 409, /already being written/i],
     ['no_evidence', 400, /run a study first/i],
-    ['missing_api_key', 400, /configure an LLM profile in Settings/i],
-    ['sdk_not_installed', 400, /configure an LLM profile in Settings/i],
+    ['missing_api_key', 400, /needs an LLM profile with a key/i],
+    ['sdk_not_installed', 400, /needs an LLM profile with a key/i],
     ['project_locked', 409, /being edited by another user/i],
   ])('toasts the copy for %s and stays open', async (kind, status, copy) => {
     const user = userEvent.setup()
@@ -130,7 +145,7 @@ describe('GenerateReportDialog', () => {
     ))
     await user.click(screen.getByTestId('generate-submit'))
     await waitFor(() => expect(toast.error).toHaveBeenCalled())
-    expect(String(toast.error.mock.calls[0][0])).toMatch(copy)
+    expect(toastText(toast.error.mock.calls[0][0])).toMatch(copy)
     expect(onClose).not.toHaveBeenCalled()
     expect(screen.getByRole('dialog')).toBeTruthy()
   })

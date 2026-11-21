@@ -170,7 +170,7 @@ export default function Emissions() {
             CO₂ caps ({allCaps.length})
             <span className="ml-2 text-[10px] font-normal text-muted">
               {hasPerPeriodCaps
-                ? 'Per-period caps set via primary_energy global constraints with investment_period.'
+                ? 'Per-period caps, one primary-energy constraint for each investment period.'
                 : 'Horizon-wide caps.'}
             </span>
           </h3>
@@ -273,7 +273,7 @@ export default function Emissions() {
         <p className="text-[11px] text-muted">
           {view.scope === 'period'
             ? `No CO₂ emitted in period ${view.period}.`
-            : <>All dispatched carriers have <code>co2_emissions = 0</code>. Set per-carrier emission intensities (tCO₂/MWh of primary energy) in the Carriers tab to activate this report.</>}
+            : <>All dispatched carriers have zero CO₂ emissions. Set per-carrier emission intensities (tCO₂/MWh of primary energy) in the Carriers tab to activate this report.</>}
         </p>
       ) : view.by_carrier.length > 0 && (
         <section>
