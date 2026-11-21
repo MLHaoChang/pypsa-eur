@@ -235,6 +235,40 @@ def to_ask(case: dict) -> list[dict]:
     return out
 
 
+#: The finance panel's words for each terminal-value method (FinanceInputsEditor.tsx).
+_TV_WORDS = {
+    "none": "none",
+    "book_value": "book value",
+    "multiple_of_ebitda": "a multiple of EBITDA",
+    "fixed": "a fixed amount",
+    "remaining_life_annuity": "the parts' remaining life (LP annuity)",
+}
+
+
+def _terminal_row(cfg, new: dict) -> dict | None:
+    """The project's own saved terminal-value method, shown when the applied lines
+    include a capex line and the method cannot price it (`none`, or unset: the finance
+    default). A method the user chose that prices it shows nothing (#21, GK B2 (3))."""
+    if not any(ln.get("kind") == "capex" for ln in new["inputs"]["lines"]):
+        return None
+    raw = getattr(cfg, "finance", None) or {}
+    tv = (raw.get("terminal_value") if isinstance(raw, dict) else None) or {}
+    method = tv.get("method") if isinstance(tv, dict) else None
+    if method not in (None, "none"):
+        return None
+    r = _row(
+        ["finance", "terminal_value", "method"],
+        "Terminal value",
+        _TV_WORDS["none"],
+        _TV_WORDS["none"],
+        "kept",
+        None,
+    )
+    r["warn"] = True
+    r["reason"] = "Plant capex has no end-of-life value: choose a terminal-value method that can price it."
+    return r
+
+
 def _row(path: list[str], label: str, old, new, change: str, line: str | None) -> dict:
     from harness.edit_card import _setting
 
@@ -374,6 +408,9 @@ def plan(args: dict) -> dict:
     else:
         picked = f"{template_id}: offered rows " + ", ".join(rows)
     out = _rows(old, new, picked, stamp)
+    tv_row = _terminal_row(cfg, new)
+    if tv_row is not None:
+        out.append(tv_row)
     if len(out) > CARD_ROW_CAP or len(json.dumps(out, default=str)) > CARD_CHARS:
         _refuse(
             "business_case_card_too_large",
@@ -390,7 +427,8 @@ def read_cell(row: dict, stored: dict | None):
     from harness.edit_card import _setting
 
     path = list(row.get("path") or [])
-    if path in (["preset"], ["defaults_pack"]):
+    # The finance row states the project's own method; the apply never writes it.
+    if path in (["preset"], ["defaults_pack"]) or path[:1] == ["finance"]:
         return row.get("new")
     if path[:2] == ["inputs", "lines"] and len(path) >= 3:
         line = _lines(stored).get(path[2])

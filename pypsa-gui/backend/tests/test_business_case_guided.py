@@ -1312,3 +1312,39 @@ def test_bc15_a_whole_object_write_shows_a_lease_up_change_on_the_card():
     )
     assert _label(None, ("inputs", "receivable_days")) == "Receivable days"
     assert _label("x", ("price_by_year", "2031")) == "x · Price 2031"
+
+
+# ── #21: the plan card names a terminal value that cannot price the plant ───
+
+def _with_terminal(method):
+    import routers.results as R
+
+    cfg = R._state["solver_config"]
+    fin = dict(cfg.finance)
+    if method is None:  # the finance default: the key is absent
+        fin.pop("terminal_value", None)
+    else:
+        fin["terminal_value"] = {"method": method, "value": None}
+    cfg.finance = fin
+
+
+@pytest.mark.parametrize("method", ["none", None])
+def test_21_a_capex_preset_with_no_terminal_value_warns_on_the_card(
+    bc, template, method
+):
+    template["id"] = "eh_ipp_hybrid"
+    _with_terminal(method)
+    row = _rows(preset_apply.plan(_args(variant="ipp_hybrid")))["Terminal value"]
+    assert row["warn"] is True and row["path"] == ["finance", "terminal_value", "method"]
+    assert "terminal-value method" in row["reason"] and row["new"] == "none"
+
+
+@pytest.mark.parametrize(
+    "method", ["book_value", "fixed", "multiple_of_ebitda", "remaining_life_annuity"]
+)
+def test_21_a_method_the_project_already_has_shows_no_terminal_row(
+    bc, template, method
+):
+    template["id"] = "eh_ipp_hybrid"
+    _with_terminal(method)
+    assert "Terminal value" not in _rows(preset_apply.plan(_args(variant="ipp_hybrid")))
