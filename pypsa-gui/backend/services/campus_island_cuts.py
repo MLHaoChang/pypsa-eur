@@ -29,7 +29,7 @@ import math
 import pandas as pd
 from fastapi import HTTPException
 
-from services import project_registry
+from services import project_registry, project_write_gate
 from services.solver.island import CUTS_FILE, IslandRefusal, campus_f_hz, cut_estimates, load_applied_cuts
 
 #: gridspine's frozen contract (``frequency.CUT_COLUMNS``,
@@ -217,12 +217,41 @@ def refresh_ratings(project) -> list[dict]:
     return changed
 
 
-def apply_loop(project, *, solve, rerun, stop_event) -> dict:
+def _trial_files(project) -> list:
+    """The files a trial changes that a refused trial puts back: the cuts
+    file and the campus YAML (project-viewer-role 02)."""
+    from services import campus_electrical_service as ce
+
+    return [_cuts_path(project), ce.campus_dir(project) / ce.CAMPUS_FILE]
+
+
+def _snapshot(paths) -> dict:
+    return {p: (p.read_bytes() if p.is_file() else None) for p in paths}
+
+
+def _restore(snapshot: dict) -> None:
+    from services.atomic_io import atomic_write_bytes
+
+    for path, data in snapshot.items():
+        if data is None:
+            path.unlink(missing_ok=True)
+        elif not path.is_file() or path.read_bytes() != data:
+            atomic_write_bytes(path, data)
+
+
+def apply_loop(project, *, solve, rerun, stop_event, may_write=lambda: None) -> dict:
     """Apply, re-solve, rerun, until nothing fails, nothing more can be cut,
     ``MAX_TRIALS``, or ``stop_event`` (owner QA). ``solve(project)`` re-solves
     and saves the hub and returns its objective; ``rerun(project)`` brings
     the campus file's ratings up to it and reruns the campus study, which
-    proposes the next cuts, and returns what it refreshed."""
+    proposes the next cuts, and returns what it refreshed.
+
+    ``may_write()`` raises ``RequesterViewOnly`` once the requester may no
+    longer write the project; it is asked before each write and each solve
+    (project-viewer-role 02). A refusal in trial N stops the loop with
+    ``stopped == "project_view_only"``: trials 1..N-1 stay, and the cuts file
+    and the campus YAML are put back to their bytes after trial N-1. A hub
+    solve or campus rerun trial N already finished is not undone."""
     state = _state(project)
     new = _new_cuts(_proposed_rows(project), state["cuts"])
     if not new:
@@ -230,13 +259,23 @@ def apply_loop(project, *, solve, rerun, stop_event) -> dict:
                                                     "no cut the hub can take")
     trials, stopped = [], "N reached"
     for i in range(MAX_TRIALS):
-        state["cuts"] = _merge(state["cuts"], new)
-        _write(project, state)
-        objective = solve(project)
-        refreshed = rerun(project) or []
-        proposed = _proposed_rows(project)
-        trial = {"trial": len(state["trials"]) + 1, "added": new, "objective": objective,
-                 "refreshed": refreshed, "verdict": _verdict(proposed)}
+        before = _snapshot(_trial_files(project))
+        try:
+            may_write()
+            state["cuts"] = _merge(state["cuts"], new)
+            _write(project, state)
+            may_write()
+            objective = solve(project)
+            may_write()
+            refreshed = rerun(project) or []
+            proposed = _proposed_rows(project)
+            trial = {"trial": len(state["trials"]) + 1, "added": new, "objective": objective,
+                     "refreshed": refreshed, "verdict": _verdict(proposed)}
+            may_write()
+        except project_write_gate.RequesterViewOnly:
+            _restore(before)
+            stopped = project_write_gate.KIND
+            break
         state["trials"].append(trial)
         trials.append(trial)
         _write(project, state)
@@ -325,6 +364,9 @@ def _queue_solve(project, user_id, stop_event) -> float | None:
         raise RuntimeError(f"the project already has a {job.kind} job {job.status}; the hub solve "
                            "was not queued")
     _wait(job, stop_event)
+    if job.status != "completed" and str(job.error or "").startswith(project_write_gate.KIND):
+        # the queue's worker read the requester's role and refused the solve
+        raise project_write_gate.RequesterViewOnly()
     if job.status != "completed":
         raise RuntimeError(f"the hub solve ended {job.status}" + (f": {job.error}" if job.error else ""))
     return job.objective
@@ -341,15 +383,23 @@ def _rerun(project, settings) -> list[dict]:
     return refreshed
 
 
-def _run_job(project, user_id, settings, record) -> None:
+def _run_job(project, user_id, settings, record, project_id=None) -> None:
     stop = record["stop_event"]
     try:
         out = apply_loop(project, solve=lambda p: _queue_solve(p, user_id, stop),
-                         rerun=lambda p: _rerun(p, settings), stop_event=stop)
+                         rerun=lambda p: _rerun(p, settings), stop_event=stop,
+                         may_write=lambda: project_write_gate.check_requester(user_id, project_id))
+        refused = out["stopped"] == project_write_gate.KIND
         with _LOCK:
-            record.update(state="cancelled" if out["stopped"] == "stopped by the user" else "done",
-                          finished_at=time.time(), stopped=out["stopped"], trials=len(out["trials"]),
-                          message=out["stopped"])
+            if refused:
+                # project-viewer-role 02: the requester lost edit access mid-run
+                record.update(state="failed", finished_at=time.time(), stopped=out["stopped"],
+                              trials=len(out["trials"]), error=project_write_gate.REFUSAL,
+                              error_code=project_write_gate.KIND, message="failed")
+            else:
+                record.update(state="cancelled" if out["stopped"] == "stopped by the user" else "done",
+                              finished_at=time.time(), stopped=out["stopped"],
+                              trials=len(out["trials"]), message=out["stopped"])
     except Exception as exc:                                    # noqa: BLE001 - recorded on the job
         logger.exception("campus island cuts job failed")
         detail = getattr(exc, "detail", None) or str(exc) or type(exc).__name__
@@ -392,7 +442,9 @@ def start_apply_job(project, user_id) -> dict:
             raise busy
         _JOBS[key] = record
     ctx = contextvars.copy_context()
-    thread = threading.Thread(target=lambda: ctx.run(_run_job, project, user_id, settings, record),
+    project_id = project.id  # captured now; the role is read against it (project-viewer-role 02)
+    thread = threading.Thread(target=lambda: ctx.run(_run_job, project, user_id, settings, record,
+                                                     project_id),
                               daemon=True, name=THREAD_NAME)
     record["thread"] = thread
     thread.start()
