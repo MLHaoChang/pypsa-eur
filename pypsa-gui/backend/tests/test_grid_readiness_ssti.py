@@ -13,6 +13,7 @@ runs the real stage on a two-genset campus and checks the row against a UIF comp
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 import math
 
 import pandas as pd
@@ -211,10 +212,7 @@ def test_a_code_threshold_cites_the_clause_the_run_judged_on(tmp_path):
     )
     row = _card(tmp_path, "gc08_card", dirs)[0]["ssti_uif"]
     assert row["verdict"] == "pass" and row["limit"] == 0.2
-    assert (
-        row["source"].endswith(": TRGC 19 test clause")
-        and "assumed" not in row["source"].lower()
-    )
+    assert row["source"] == "TRGC 19 test clause"  # the run's clause alone (R1)
     assert (
         "at or below the threshold 0.2" in row["note"] and "assumed" not in row["note"]
     )
@@ -334,7 +332,7 @@ def test_a_screen_not_evaluated_gives_the_engines_reason(tmp_path, note):
         tmp_path, uif=_uif_meta("not evaluated", worst=None, notes=[note]), uif_rows=[]
     )
     row = _card(tmp_path)[0]["ssti_uif"]
-    assert row["verdict"] == "unknown" and row["note"] == f"{note}. {SCREENING}"
+    assert row["verdict"] == "unknown" and row["note"] == f"{note[0].upper()}{note[1:]}. {SCREENING}"
 
 
 # ── the series-resonance row and SSCI (TRGC 20) ───────────────────────────────
@@ -638,13 +636,13 @@ def test_an_open_tie_keeps_the_engines_own_reason_when_it_could_not_evaluate(tmp
         tmp_path, uif=_uif_meta("not evaluated", worst=None, notes=[note]), uif_rows=[]
     )
     row = _card(tmp_path, n=_open_tie(_site()))[0]["ssti_uif"]
-    assert row["verdict"] == "unknown" and row["note"] == f"{note}. {SCREENING}"
+    assert row["verdict"] == "unknown" and row["note"] == f"{note[0].upper()}{note[1:]}. {SCREENING}"
 
 
 def test_a_not_evaluated_uif_without_notes_says_so(tmp_path):
     _write(tmp_path, uif=_uif_meta("not evaluated", worst=None, notes=[]), uif_rows=[])
     row = _card(tmp_path)[0]["ssti_uif"]
-    assert row["note"] == f"the screen was not evaluated. {SCREENING}"
+    assert row["note"] == f"The screen was not evaluated. {SCREENING}"
 
 
 def test_a_threshold_that_is_not_a_number_reads_unknown(tmp_path):
@@ -692,8 +690,8 @@ def test_a_missing_or_malformed_table_reads_unknown(tmp_path, damage):
     [
         ("{not json", "its error file is unreadable"),
         ("[1]", "its error file is unreadable"),
-        (json.dumps({"error": None}), ""),
-        (json.dumps({}), ""),
+        (json.dumps({"error": None}), "no reason given"),
+        (json.dumps({}), "no reason given"),
     ],
     ids=["not_json", "not_a_dict", "null_error", "no_error_key"],
 )
@@ -727,18 +725,20 @@ def test_a_record_without_the_subsync_screen_is_unreadable(tmp_path):
 @pytest.mark.parametrize(
     "source, clause, want, assumed_note",
     [
-        ("code", "TRGC 19 c", ": TRGC 19 c", False),
-        ("assumed", "TRGC 19 c", ": TRGC 19 c (assumed)", True),
-        (None, "TRGC 19 c", ": TRGC 19 c (assumed)", True),
+        ("code", "TRGC 19 c", "TRGC 19 c", False),
+        ("assumed", "TRGC 19 c", "TRGC 19 c (assumed)", True),
+        (None, "TRGC 19 c", "TRGC 19 c (assumed)", True),
+        ("extracted", "TRGC 19 c", "TRGC 19 c (extracted)", True),
         ("code", None, "Assumed screening threshold (the grid code sets none)", True),
     ],
-    ids=["code", "assumed_clause", "no_source", "code_without_clause"],
+    ids=["code", "assumed_clause", "no_source", "extracted", "code_without_clause"],
 )
 def test_the_limit_source_follows_the_runs_citation(
     tmp_path, source, clause, want, assumed_note
 ):
+    # today's profile holds the same value under its own citation: the row shows the run's (R1)
     keys = (
-        {"ssti_uif_threshold": {"value": 0.1, "clause": clause, "source": source}}
+        {"ssti_uif_threshold": {"value": 0.1, "clause": "today", "source": "code"}}
         if clause
         else {}
     )
@@ -749,5 +749,133 @@ def test_the_limit_source_follows_the_runs_citation(
         uif_rows=_uif_table(0.05),
     )
     row = _card(tmp_path, "gc08_card", dirs)[0]["ssti_uif"]
-    assert row["verdict"] == "pass" and row["source"].endswith(want)
+    assert row["verdict"] == "pass" and row["source"] == want
     assert ("the assumed screening threshold" in row["note"]) is assumed_note
+
+
+def test_a_not_evaluated_uif_with_null_notes_says_so(tmp_path):
+    uif = dict(_uif_meta("not evaluated", worst=None), notes=None)
+    _write(tmp_path, uif=uif, uif_rows=[])
+    row = _card(tmp_path)[0]["ssti_uif"]
+    assert row["note"] == f"The screen was not evaluated. {SCREENING}"
+
+
+def test_the_source_never_carries_todays_profile_title(tmp_path):
+    # R1: the run's clause only; today's profile title may not be the one the run judged on
+    t = {"value": 0.1, "clause": "TRGC 19 c", "source": "code"}
+    _write(tmp_path, uif=_uif_meta("clear", worst=0.05, source="code", clause="TRGC 19 c"),
+           uif_rows=_uif_table(0.05))
+    row = _card(tmp_path, "gc08_card", _profile_dir(tmp_path, ssti_uif_threshold=t))[0]["ssti_uif"]
+    assert row["source"] == "TRGC 19 c"
+
+
+# ── the profile moved since the run (GK #1386 A3, #1390 F2) ───────────────────
+
+
+@pytest.mark.parametrize(
+    "key",
+    [0.1, "0.1", [0.1], {"clause": "c", "source": "code"}, {"value": "0.1", "clause": "c", "source": "code"}],
+    ids=["bare_number", "string", "list", "no_value", "string_value"],
+)
+def test_a_malformed_profile_threshold_reads_unknown(tmp_path, key):
+    # the loader refuses the profile, so today's limit is unknown: never the run's verdict beside it
+    _write(tmp_path, uif=_uif_meta("flag", threshold=0.1))
+    row = _card(tmp_path, "gc08_card", _profile_dir(tmp_path, ssti_uif_threshold=key))[0]["ssti_uif"]
+    assert row["verdict"] == "unknown" and row["project_value"] is None
+    assert row["note"].startswith("Today's grid-code profile is unreadable (")
+    assert row["note"].endswith(f"): its limit is unknown. {SCREENING}")
+
+
+@pytest.mark.parametrize("key", [0.1, {"value": None}, {"value": "0.1"}], ids=["bare", "null", "string"])
+def test_a_malformed_key_the_loader_let_through_reads_as_moved(key):
+    # belt and braces (GK #1390 F2): _profile_moved never reads a malformed key as the default
+    inp = SimpleNamespace(profile={"ssti_uif_threshold": key}, profile_error=None)
+    assert G._profile_moved(inp, "ssti_uif_threshold", 0.1, 0.1, "moved") == "moved"
+
+
+def test_an_absent_key_judges_against_the_default():
+    inp = SimpleNamespace(profile={}, profile_error=None)
+    assert G._profile_moved(inp, "ssti_uif_threshold", 0.1, 0.1, "moved") is None
+    assert G._profile_moved(inp, "ssti_uif_threshold", 0.1, None, "moved") == "moved"
+
+
+def test_a_threshold_equal_only_after_rounding_has_moved(tmp_path):
+    # exact compare: 0.1 + 1e-15 is not the 0.1 the run judged on
+    t = {"value": 0.1 + 1e-15, "clause": "c", "source": "code"}
+    _write(tmp_path, uif=_uif_meta("flag", threshold=0.1, source="code", clause="c"))
+    row = _card(tmp_path, "gc08_card", _profile_dir(tmp_path, ssti_uif_threshold=t))[0]["ssti_uif"]
+    assert row["verdict"] == "unknown"
+
+
+def test_a_clearance_equal_only_after_rounding_has_moved(tmp_path):
+    from gridspine.static.subsync_scan import PROFILE_KEY
+
+    t = {"value": 1.0 + 1e-13, "clause": "c", "source": "code"}
+    _write(tmp_path, subsync=_sub_meta("flag", clearance=1.0, source="code", clause="c"))
+    row = _card(tmp_path, "gc08_card", _profile_dir(tmp_path, **{PROFILE_KEY: t}))[0][
+        "subsync_series_resonance"
+    ]
+    assert row["note"] == (
+        f"The torsional clearance changed since the run: rerun the grid study. {SCREENING}"
+    )
+
+
+def test_an_unchanged_code_threshold_stays_judged(tmp_path):
+    t = {"value": 0.1, "clause": "c", "source": "code"}
+    _write(tmp_path, uif=_uif_meta("flag", threshold=0.1, source="code", clause="c"))
+    row = _card(tmp_path, "gc08_card", _profile_dir(tmp_path, ssti_uif_threshold=t))[0]["ssti_uif"]
+    assert row["verdict"] == "warn"
+
+
+# ── the UIF table's worst row (GK A2 R2) ──────────────────────────────────────
+
+
+def _damaged(**changes):
+    rows = _uif_table()
+    rows[0] = {**rows[0], **changes}  # the worst converter-bus row
+    return rows
+
+
+_ALL_TRUE = [{**r, "uif": True} for r in _uif_table()]
+
+
+@pytest.mark.parametrize(
+    "rows, worst, why",
+    [
+        (_damaged(uif="high"), 0.25, " has a UIF that is not a finite number ('high')"),
+        (_damaged(uif=None), 0.25, " has a UIF that is not a finite number (nan)"),
+        (_damaged(uif=True), 0.25, " has a UIF that is not a finite number ('True')"),
+        (_ALL_TRUE, 1.0, " has a UIF that is not a finite number (True)"),
+        (_damaged(bus=None), 0.25, "'s worst row has no bus"),
+        (_damaged(case=" "), 0.25, "'s worst row has no case"),
+        (_damaged(machine=None), 0.25, "'s worst row has no machine"),
+        (_damaged(uif=0.3), 0.25, "'s worst UIF 0.3 is not the worst UIF 0.25 its record gives"),
+    ],
+    ids=["text_uif", "missing_uif", "text_bool_uif", "bool_column", "no_bus", "blank_case", "no_machine",
+         "max_disagrees"],
+)
+def test_a_damaged_worst_uif_row_reads_unknown(tmp_path, rows, worst, why):
+    _write(tmp_path, uif=_uif_meta("flag", worst=worst), uif_rows=rows)
+    row = _card(tmp_path)[0]["ssti_uif"]
+    assert row["verdict"] == "unknown" and row["project_value"] is None
+    assert row["note"] == f"The run's UIF table{why}. {SCREENING}"
+
+
+@pytest.mark.parametrize("column", ["uif", "bus", "case", "machine"])
+def test_a_uif_table_without_a_column_reads_unknown(tmp_path, column):
+    from gridspine.drivers.campus_study import SSTI_UIF_CSV
+
+    _write(tmp_path)
+    path = _run_dir(tmp_path) / SSTI_UIF_CSV
+    pd.read_csv(path).drop(columns=[column]).to_csv(path, index=False)
+    row = _card(tmp_path)[0]["ssti_uif"]
+    assert row["verdict"] == "unknown"
+    assert row["note"] == f"The run's UIF table has no {column} column. {SCREENING}"
+
+
+def test_a_worst_uif_that_only_round_trips_exactly_stays_judged(tmp_path):
+    # the CSV is read round-trip exact, so the table's max equals the meta's worst UIF bit for bit
+    worst = 0.1 + 0.2  # 0.30000000000000004
+    _write(tmp_path, uif=_uif_meta("flag", worst=worst), uif_rows=_uif_table(worst))
+    row = _card(tmp_path)[0]["ssti_uif"]
+    assert row["verdict"] == "warn" and row["project_value"] == worst

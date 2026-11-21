@@ -1401,6 +1401,8 @@ NO_MODES = "no torsional modes given"
 NO_SERIES_CAP = "not evaluated: grid-side series compensation needs the TSP's data"
 UIF_CHANGED = "the UIF threshold changed since the run: rerun the grid study"
 CLEARANCE_CHANGED = "the torsional clearance changed since the run: rerun the grid study"
+#: The UIF table's columns the worst row is read from (the UIF, then where it sits).
+UIF_ROW_COLUMNS = ("uif", "bus", "case", "machine")
 
 
 def _finite_number(v) -> float | None:
@@ -1410,54 +1412,89 @@ def _finite_number(v) -> float | None:
     return float(v)
 
 
-def _ssti_limit_source(inp: _Inputs, screen: dict, what: str) -> tuple[str, bool]:
+def _ssti_say(text: str) -> str:
+    """A screening row's note: ``text`` as a sentence, then the screening caveat."""
+    return f"{text[0].upper()}{text[1:]}. {SSTI_SCREENING}"
+
+
+def _ssti_limit_source(screen: dict, what: str) -> tuple[str, bool]:
     """(the source of the limit the run judged on, assumed): the profile clause the run cited, else the
-    assumed screening default. Read from the run's meta, never from today's profile (GK A2 R1)."""
+    assumed screening default. Read from the run's meta only, never from today's profile, whose title
+    may have changed since the run (GK A2 R1; the profile id in the meta is GC-08b)."""
     clause, source = screen.get("clause"), screen.get("source")
     if source == "code" and clause:
-        return f"{_profile_title(inp)}: {clause}", False
+        return str(clause), False
     if clause:
-        return f"{_profile_title(inp)}: {clause} ({source or 'assumed'})", True
+        return f"{clause} ({source or 'assumed'})", True
     return f"Assumed screening {what} (the grid code sets none)", True
 
 
-def _profile_moved(inp: _Inputs, key: str, default: float, judged_on) -> bool:
-    """True when today's profile sets ``key`` (or its absence the ``default``) to other than what the run
-    judged on."""
-    lim = (inp.profile or {}).get(key)
-    now = _finite_number(lim.get("value")) if isinstance(lim, dict) else default
-    return now is None or judged_on is None or abs(now - judged_on) > 1e-12
+def _profile_moved(inp: _Inputs, key: str, default: float, judged_on, changed: str) -> str | None:
+    """Why the run's limit no longer stands, or None: today's profile sets ``key`` (or its absence the
+    ``default``) to other than what the run judged on, compared exactly (GK #1386 A3: the engine judged on
+    the profile's value as written), or today's profile or its key is unreadable (GK #1390 F2)."""
+    if inp.profile is None:
+        return f"today's grid-code profile is unreadable ({inp.profile_error}): its limit is unknown"
+    lim = inp.profile.get(key)
+    if lim is None:
+        now = default
+    elif isinstance(lim, dict):
+        now = _finite_number(lim.get("value"))
+    else:
+        now = None
+    return changed if now is None or judged_on is None or now != judged_on else None
 
 
 def _uif_row(inp: _Inputs, screen: dict, table, common: dict) -> dict:
     """The UIF row from the run's meta ``screen`` and UIF table (GK A2 R1, R2, R9)."""
+    import pandas as pd
+
     from gridspine.static.ssti_uif import DEFAULT_THRESHOLD, PROFILE_KEY
 
     limit = _finite_number(screen.get("threshold"))
-    source, assumed_limit = _ssti_limit_source(inp, screen, "threshold")
+    source, assumed_limit = _ssti_limit_source(screen, "threshold")
     unknown = dict(common, limit=limit, source=source, unit="UIF", project_value=None, verdict="unknown")
     verdict = screen.get("verdict")
     if verdict not in SSTI_VERDICTS[SSTI_UIF]:
-        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], note=f"The screen returned {verdict!r}. {SSTI_SCREENING}",
+        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], note=_ssti_say(f"The screen returned {verdict!r}"),
                     **unknown)
     if verdict == "not evaluated":
         why = "; ".join(str(x) for x in screen.get("notes") or []) or "the screen was not evaluated"
-        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], note=f"{why}. {SSTI_SCREENING}",
+        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], note=_ssti_say(why),
                     **dict(unknown, verdict=SSTI_VERDICTS[SSTI_UIF][verdict]))
     worst = _finite_number(screen.get("worst_uif"))
     if limit is None or worst is None:
         bad = "threshold" if limit is None else "worst UIF"
         raw = screen.get("threshold" if limit is None else "worst_uif")
         return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF],
-                    note=f"The run's {bad} is not a finite number ({raw!r}). {SSTI_SCREENING}", **unknown)
-    if _profile_moved(inp, PROFILE_KEY, DEFAULT_THRESHOLD, limit):
-        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], note=f"{UIF_CHANGED[0].upper()}{UIF_CHANGED[1:]}. "
-                    f"{SSTI_SCREENING}", **unknown)
+                    note=_ssti_say(f"The run's {bad} is not a finite number ({raw!r})"), **unknown)
+    if moved := _profile_moved(inp, PROFILE_KEY, DEFAULT_THRESHOLD, limit, UIF_CHANGED):
+        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], note=_ssti_say(moved), **unknown)
     judged = table[table["role"].astype(str) == "converter bus"] if table is not None and "role" in table else None
     if judged is None or judged.empty:
         return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF],
-                    note=f"The run wrote no UIF rows at a converter bus. {SSTI_SCREENING}", **unknown)
-    top = judged.loc[judged["uif"].astype(float).idxmax()]
+                    note=_ssti_say("The run wrote no UIF rows at a converter bus"), **unknown)
+    # The worst row names where the worst UIF sits; a table that cannot say so, or that disagrees with the
+    # meta's worst UIF, reads unknown rather than naming the wrong bus (GK A2 R2).
+    missing = [c for c in UIF_ROW_COLUMNS if c not in judged]
+    if missing:
+        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF],
+                    note=_ssti_say(f"The run's UIF table has no {', '.join(missing)} column"), **unknown)
+    uifs = [None if pd.api.types.is_bool(v) else _num(v) for v in judged["uif"]]
+    if any(u is None for u in uifs):
+        bad = next(v for v, u in zip(judged["uif"], uifs) if u is None)
+        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF],
+                    note=_ssti_say(f"The run's UIF table has a UIF that is not a finite number ({bad!r})"),
+                    **unknown)
+    top = judged.iloc[max(range(len(uifs)), key=uifs.__getitem__)]
+    if max(uifs) != worst:
+        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF],
+                    note=_ssti_say(f"The run's UIF table's worst UIF {max(uifs):.6g} is not the worst UIF "
+                                   f"{worst:.6g} its record gives"), **unknown)
+    blank = [c for c in UIF_ROW_COLUMNS[1:] if pd.isna(top[c]) or not str(top[c]).strip()]
+    if blank:
+        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF],
+                    note=_ssti_say(f"The run's UIF table's worst row has no {', '.join(blank)}"), **unknown)
     against = "the assumed screening threshold" if assumed_limit else "the threshold"
     words = "above" if verdict == "flag" else "at or below"
     note = (f"Worst UIF {worst:.4g} at bus {top['bus']} ({top['case']} fault level, machine {top['machine']}), "
@@ -1474,29 +1511,28 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
     from gridspine.static.subsync_scan import DEFAULT_CLEARANCE_HZ, PROFILE_KEY, SERIES
 
     limit = _finite_number(screen.get("clearance_hz"))
-    source, _ = _ssti_limit_source(inp, screen, "torsional clearance")
+    source, _ = _ssti_limit_source(screen, "torsional clearance")
     unknown = dict(common, limit=limit, source=source, unit="Hz", project_value=None, verdict="unknown")
     verdict = screen.get("verdict")
     if verdict not in SSTI_VERDICTS[SUBSYNC_SR]:
-        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=f"The screen returned {verdict!r}. {SSTI_SCREENING}",
+        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(f"The screen returned {verdict!r}"),
                     **unknown)
     if verdict in ("check", "not evaluated"):
         why = NO_MODES if verdict == "check" else NO_SERIES_CAP
-        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=f"{why[0].upper()}{why[1:]}. {SSTI_SCREENING}",
+        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(why),
                     **dict(unknown, verdict=SSTI_VERDICTS[SUBSYNC_SR][verdict]))
     if limit is None:
-        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=f"The run's torsional clearance is not a finite "
-                    f"number ({screen.get('clearance_hz')!r}). {SSTI_SCREENING}", **unknown)
-    if _profile_moved(inp, PROFILE_KEY, DEFAULT_CLEARANCE_HZ, limit):
-        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=f"{CLEARANCE_CHANGED[0].upper()}"
-                    f"{CLEARANCE_CHANGED[1:]}. {SSTI_SCREENING}", **unknown)
+        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(
+            f"The run's torsional clearance is not a finite number ({screen.get('clearance_hz')!r})"), **unknown)
+    if moved := _profile_moved(inp, PROFILE_KEY, DEFAULT_CLEARANCE_HZ, limit, CLEARANCE_CHANGED):
+        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(moved), **unknown)
     series = (resonance[resonance["kind"].astype(str) == SERIES] if resonance is not None and "kind" in resonance
               else None)
     margins = ([(m, r) for _, r in series.iterrows() if (m := _num(r.get("margin_hz"))) is not None]
                if series is not None else [])
     if not margins:
-        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=f"The run wrote no torsional margin for a series "
-                    f"resonance. {SSTI_SCREENING}", **unknown)
+        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR],
+                    note=_ssti_say("The run wrote no torsional margin for a series resonance"), **unknown)
     margin, r = min(margins, key=lambda mr: mr[0])
     words = "below" if verdict == "flag" else "at or above"
     note = (f"Least margin {margin:.4g} Hz: the electrical resonance's complement {r.get('f_comp_hz')} Hz "
@@ -1521,7 +1557,7 @@ def _ssti_rows(inp: _Inputs) -> list[dict]:
                   section="connection", target=target)
 
     def all_unknown(reason: str) -> list[dict]:
-        return [_row(rid, req, project_value=None, verdict="unknown", note=f"{reason}. {SSTI_SCREENING}",
+        return [_row(rid, req, project_value=None, verdict="unknown", note=_ssti_say(reason),
                      **common) for rid, req in _SSTI_REQ.items()]
 
     try:
@@ -1533,7 +1569,8 @@ def _ssti_rows(inp: _Inputs) -> list[dict]:
     run = inp.dir / ce.SUBDIR / "run"
     error = _read_json(run / ce.SSTI_SCREENS_ERROR)
     if isinstance(error, dict) or (run / ce.SSTI_SCREENS_ERROR).is_file():
-        text = str(error.get("error") or "") if isinstance(error, dict) else "its error file is unreadable"
+        text = (str(error.get("error") or "") or "no reason given" if isinstance(error, dict)
+                else "its error file is unreadable")
         return all_unknown(f"The SSTI screens could not run: {text}")
     meta = _read_json(run / ce.SSTI_SCREENS_META)
     if not (run / ce.SSTI_SCREENS_META).is_file():
@@ -1545,17 +1582,17 @@ def _ssti_rows(inp: _Inputs) -> list[dict]:
 
     def table(name):
         try:
-            return pd.read_csv(run / name)
+            return pd.read_csv(run / name, float_precision="round_trip")
         except (OSError, ValueError):
             return None
 
     uif = _uif_row(inp, meta["uif"], table(SSTI_UIF_CSV), common)
     if (uif["verdict"] in ("pass", "warn") and _archetype(inp) == "off_grid" and _tie_open(inp)):
         uif.update(verdict="unknown", project_value=None,
-                   note=f"{SSTI_ISLAND[0].upper()}{SSTI_ISLAND[1:]}. {SSTI_SCREENING}")
+                   note=_ssti_say(SSTI_ISLAND))
     sub = _subsync_row(inp, meta["subsync"], table(SUBSYNC_RESONANCE_CSV), common)
     ssci = _row(SSCI, _SSTI_REQ[SSCI], project_value=None, verdict="unknown",
-                note=f"{SSCI_REASON[0].upper()}{SSCI_REASON[1:]}. {SSTI_SCREENING}", **common)
+                note=_ssti_say(SSCI_REASON), **common)
     return [uif, sub, ssci]
 
 
