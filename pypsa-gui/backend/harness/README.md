@@ -10,7 +10,7 @@ harness/
   protocol.py     the provider seam: LLMProvider, LLMRequest, LLMEvent, ERROR_KINDS
   catalogue.py    the tool declarations, their Safety tiers, TOOL_ROUTES
   toolsets.py     ordered provider-neutral catalogue views and always-available controls
-  events.py       the closed vocabulary of frames the turn loop yields to the UI
+  events.py       the closed vocabulary of frames the turn loop yields to the UI; (live-voice 11c) `PROGRESS_FRAMES`, the separate vocabulary of the /progress stream (`tool_progress`, `job_snapshot`, `job_terminal`)
   assurance.py    opt-in checked input/result drafts and publication gate
   assurance_scope.py  typed requested metrics, windows, cost basis and retained/comparison IDs
   assurance_conversation.py  bounded checked-scope carryover, cost clarification and previous-run selection
@@ -37,6 +37,7 @@ harness/
   loop.py         the turn loop: the stream seam and tool dispatch (the former services/chat_service.py); `dispatch_tool_call` is the one per-call path (allowlist → guard → validators → card → handler) every caller drives
   run_lifecycle.py  LC-19: a re-solve of current results is asked about before its card (`results_current`), and a failed solve names its triage reads; nothing re-runs by itself
   solver_bridge.py  the solver log → tool_progress bridge for a running run_simulation / run_ac_pf_stage call; (live-voice 11b) each bridge ends when its session's `monitor_generation` moves (Stop monitoring, `POST /api/chat/{id}/progress/stop`, `ChatSession.stop_monitoring`), which ends this session's observation only, never the job (cancelling is the `cancel_job` tool). The generation is per session and is not the 11c event-ring epoch
+  progress_ids.py (live-voice 11c) /progress event ids `<epoch>:<seq>`: an epoch is a nonce signed with the server key and the session id, so a past epoch still verifies for its session after a restart (resumed with a `job_snapshot`) and another session's does not (409 `progress_cursor_foreign`)
   job_adapters.py the fg:/ad:/rpt: job handles for wait_for_job without holding the turn, and (live-voice 11a) `job_status` / `cancel_job`: one neutral view of every job family, solve queue and GridSpine included, with a cursor, start revision, outcome and a cancel that reports only what it verified. Cancel verdicts: `cancelled` (outcome cancelled and the worker exited), `cancel_requested` (sent, not yet confirmed within the settle bound, capped at `CANCEL_SETTLE_MAX_SECONDS`), `already_finished`, `finished_first`, `origin_lost` (a newer run took the record, the worker exited without a status, or the project was reopened as a new context: nothing is stopped; a switch to another project is 409 `job_project_mismatch`), `refused` (with `refusal.error_kind`: the queue refused the abort, or `not_stoppable`); a native handle with no owner is 409 `job_owner_unknown` on cancel. The stop is set on the handle's own record in the same solver-state-lock hold that checked its origin
   activity_history.py bounded owned job-origin/status observations across worker loss; no execution, numerical or approval authority
   completion_observer.py bounded weak native-worker status observation while Activity is closed; no advancement or retry
@@ -62,7 +63,7 @@ harness/
   mcp_client.py   external tools from admin-listed MCP servers (issue 19): the server list, the stdio and HTTP JSON-RPC client, the per-session tool list and tiers, the dispatcher
   goals.py        a goal with a round budget: set/pause/complete, what stops it after a turn, the per-turn goal block (rounds run in loop.run_turn)
   ratelimit.py    the /stream token bucket
-  sse.py          the SSE framing of a yielded (event, payload)
+  sse.py          the SSE framing of a yielded (event, payload); an optional `id:` line, written only on the /progress stream (live-voice 11c)
   fence.py        the untrusted-content delimiters and the neutraliser
   results.py      tool-result shaping: coercion, truncation, the per-turn result budget, error content
   spill.py        oversized results kept whole per owner and session; the model gets a preview and a locator for `read_result`
@@ -592,8 +593,9 @@ the EH study's per-year LOLE) stays withheld: no per-sample series is retained.
 (opt-in, `price_calculations.py`, `emissions_calculations.py`,
 `curtailment_calculations.py`, sharing `profile_common.py`) check one bus's
 time-weighted price, generator CO2 over the time-varying efficiency with the cap's
-dual as −mu, and curtailment of generators with a time-varying availability. Every
-profile refuses once an AC power flow has overwritten the LP outputs.
+dual as −mu, and curtailment of generators with a time-varying availability. An AC
+power flow leaves the LP outputs in place (owner decision PF-SAVE-1: the flow's
+values live only in `ac_pf_results`), so every profile still reads the LP after one.
 `capacity/1` (opt-in) reports one named-class component's `*_nom_opt` and its
 change, and says when it was built to its bound; `storage-cycles/1` divides window
 discharge (store weights) by energy capacity, sharing the StorageUnit profile's
@@ -821,10 +823,18 @@ merge in either order. The inventory, route parity
 (`smoke/assistant_route_parity.py`) and control matrix
 (`smoke/assistant_control_matrix.py`) are built in memory by their `--check`s and
 are not committed; `--write` saves a copy under `.scratch/live-voice/` (git
-ignores it) for reading. New entries in the shared hand-written JSON go in a new
-fragment file per PR: error kinds in `pypsa-gui/tool-error-kinds.d/`, route-parity
-declarations in `smoke/assistant_route_parity_declarations.d/`
-(`smoke/json_fragments.py` merges them and fails on a duplicate). A declaration or
+ignores it) for reading. New entries in a shared list go in a new fragment file
+per PR, never a new row in the shared file (RETRO-COST-1, RETRO-FRAG-1): error
+kinds in `pypsa-gui/tool-error-kinds.d/`, route-parity declarations in
+`smoke/assistant_route_parity_declarations.d/`, a write route's or tool's lock
+decision in `tests/write_surface_lock_policy.d/`, a route's chat disposition in
+`tests/route_chat_disposition.d/`, a feature chat cannot do (and its refusal
+goals) in `services/not_via_chat.d/`, a tool's LC-06 family, variant or evidence
+in `smoke/family_manifest.d/`, and a results route's golden surfaces in
+`tests/golden_route_surfaces.d/`. Each folder's README has the format.
+`smoke/json_fragments.py` merges them after the Python rows and fails on a key
+defined twice, so a fragment adds rows and never overrides one; every check
+(stale or unknown route, unknown tool, ceilings) runs on the merged table. A declaration or
 `KNOWN_GAPS` row whose route a tool now serves stays in place and passes as stale;
 the coordinator's sweep deletes it (`smoke/prune_stale_declarations.py`). New tool
 blocks go at the end of TOOLS (and of the matching chat_tools section). Existing tools then keep their selection tie-breaks, which `wiring._bounded_tools` resolves toward the earlier index. Two PRs that append at the same anchor conflict as text: resolve it by keeping both blocks, the earlier-merged PR's first, then run `assistant_inventory.py --check` and the tool-selection tests at the merge.
@@ -1795,6 +1805,37 @@ the preset turns off (grid, control, reliability), with its reason, read from
 - **Explore.** Skipped, with its reason, until the shipped `cases.json` run as
   explore cases (the next slice).
 
+### The grid-only profile (study harness 15)
+
+`grid_only@1` serves the `3bus`, `ieee14`, `belgium` and `ieee39` templates,
+with no params, sidecars or levers (owner decisions SH-PILOT-1, SH15-PF-1).
+
+- **Setup.** One action: `update_solver_config` with exactly
+  `{"partial": {"run_ac_pf_after_lopf": true}}`, switching Load flow on. It is
+  a `BOUND_CONTEXT_TOOLS` member, carded in stepwise mode; a grant admits it
+  only through `run_envelope.SETTING_TOOLS`, as the runner's own step
+  (`session.run_step_call`, else `own_step_only`) with those args alone (else
+  `outside_entry`). Setup also refuses a template whose source is missing.
+- **Result gate.** The core rules and the PF rules, read only from the stored
+  AC PF result (`services/run_grid_pf.py`), never from LOPF flows; a stale,
+  unknown or absent PF is no evidence. `grid.pf.converged` and
+  `grid.pf.loading` (at most 100 %, apparent power) block and go to the user
+  when not evaluated; `grid.pf.voltage` (each bus's own band, none set: not
+  evaluated) and `grid.n1.secured` (the solver's N-1 option over every line,
+  and every transformer when there is one) warn. A solve with Load flow on is
+  fresh for a profile that sets `pf_results` only while `ac_pf_network_revision`
+  is the network's and the condition is exactly `lopf+ac_pf_ok`
+  (`run_gates.lp_condition`, `calculations.solve_matches_inputs(after_pf=True)`).
+  An LP-only reader stays current through the flow (issue 50).
+- **Report and hand-off (issue 50, PF-SAVE-1).** The flow restores the LP's
+  tables into the live network, so the report and the hand-off's total-cost and
+  CO2 KPIs read the LP dispatch. The chapters are `headline_results`,
+  `dispatch` and `load_flow`; the load-flow chapter reads the flow's own result.
+  The grant lists the report.
+- **Scope (issue 51).** The four grid templates have their own preset in
+  `flow_scope.TEMPLATE_PRESETS`: the grid card with Load flow, and no EH
+  reliability study or investment case.
+
 ### The approval envelope (study harness issue 03)
 
 `services/run_envelope.py` (design §7; SH-ENVELOPE-1). "Approve once, run
@@ -2204,6 +2245,52 @@ step never nests a second `ReservingProvider`.
 
 Tests: `tests/test_harness_budget_reservation.py`.
 
+### Report revision drafts (study harness issue 07d)
+
+`harness/run_revise.py` (the module docstring holds the rules). A completed
+run drafts the edit for an open comment on its own report (07c), as a turn the
+runner launches itself (SH07C-DRAFT-1; GK B (64) D1–D10).
+
+- **Request.** `POST /api/projects/{name}/reports/{report_id}/comments/{comment_id}/drafts
+  {task_id}` names the run: the caller's own, in this project, `completed`
+  (`run_revise.REQUESTABLE`), and the report must be its stage-7 job's. It
+  writes one `requested` row on `run.revisions.requests` and charges nothing.
+  One request in flight (`requested` or `drafting`) per run, at most
+  `MAX_REQUESTS` = 10 rows in all (`revision_draft_limit`).
+- **Turn.** `Runner.tick` drafts before its idle return (`_revise`), never
+  through `_act` or `_recover`, so a draft never changes `run.status`, and it
+  takes no project hold. `scan()` also returns a completed run with a request
+  due. The row is claimed under the live lease. The send has no tools,
+  `max_tokens` 4096 and the run's own model; the comment and the anchored
+  block are fenced as untrusted data. It goes through `ReservingProvider` with
+  scope `revision`: held in EUR whatever the mode, against `budget.cost_eur`
+  with the metered spend and the research and revision rows
+  (`send_reservation.cost_eur`), and never metered by `runner.charge`. A
+  refusal makes no call: the row is `refused` and the comment keeps
+  `draft_budget` or `draft_unavailable`. A reply that does not parse, is
+  truncated or fails 07c's invariants (`revisions.preview`) is `rejected` and
+  cannot be confirmed.
+- **Confirm.** `POST …/drafts/{draft_id}/confirm {task_id}` (and `/discard`),
+  with 07c's address checks (project lock, report job slot). The row moves to
+  `applying` under the lock before `revisions.address` runs against the
+  draft's base digest, so one of two clicks wins; it ends `applied` or
+  `refused` with 07c's kind, or goes back to `drafted` on any other fault.
+  Chat never reaches these routes (`not_via_chat.d`, "out of chat").
+- **Restart.** A `drafting` row of another boot is `lost`, only where that
+  boot's lease lapsed or this instance holds it (the boot sweep, and `_revise`
+  after a takeover); its comment gets `draft_unavailable`, and its hold
+  settles `uncertain` through issue 24's reconcile. Nothing is re-sent.
+- **The run card (PR B).** The run view carries `monitor.revision_drafts`
+  (`run_revise.view`) and, where a request can be made, `monitor.revision_report`
+  (`run_revise.offer`: the report id, `max_requests`, `in_flight`, and `may_act`,
+  false for a viewer). The offer and `request()` read one predicate,
+  `requestable_report`, so the card never offers what the route refuses.
+  `RunMonitor`'s `RevisionDrafts` lists the report's open comments with Draft a
+  fix, and the drafts with Confirm and Discard, as plain text.
+
+Tests: `tests/test_harness_revision_drafts.py`; the card in
+`frontend/src/components/runMonitor/RevisionDrafts.test.tsx`.
+
 
 ## Recorded runs, load flow, and experiment plans
 
@@ -2318,6 +2405,36 @@ the error is `discussed_run_required`. Download the chip with
 `discuss_project_run` and `export_run_evidence` are write-tier. Expert mode
 leaves write-tier tools uncarded. Guided mode cards every write, and
 `AUTO_APPROVE_TIERS` never includes `write`.
+
+### Current view (live-voice 03a)
+
+Each admitted turn records the view it was asked from in the durable thread's
+`refs.current`, through `durable_conversation.record_current_view`, called once
+in `loop.py` after the turn has passed every refusal and its user message is
+kept. The loop reads the bound thread's generation before `session_init`
+(`current_view_generation`) and passes it on; the write re-checks it under
+`_LOCK`, so a rebind during the turn, an obsolete utterance or an unreadable
+start generation records nothing. `refs.discussed` is never
+touched by it: what the user is looking at and the run under discussion stay
+distinct, and a resumed episode keeps both.
+
+The record is built from the request's `ui_context`, which is client input.
+Every value is checked on its own: `panel` and `results_tab` against
+`SAFETY_PANEL_ENUM` and `RESULTS_TAB_ENUM` (a tab only under Results), run ids
+against the run id pattern, `section` against a bounded id pattern, `source`,
+`scope` and `mode` against closed sets, the window as two whole numbers in
+order, and the asset as a known component class plus a bounded name. A value
+that fails is dropped. `at` is server time.
+
+The write never refuses or delays a turn: no context, no bound thread, another
+episode, a stale `generation`, another replica, or a disk or JSON error writes
+nothing and returns False. It does not bump the generation. The loop holds no
+session or provider lock at the call; the function takes only `_LOCK`.
+
+`get_file_delivery` also returns `expires_at`: for an `agent_export`, the last
+instant the download is served (`uploaded_at` + 7 days, as
+`upload_service.refuse_expired_delivery` measures it); `null` for every other
+kind, which never expires.
 
 ### Current load flow
 

@@ -734,6 +734,7 @@ def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None
     _restore_network_revision(PyPSAService.get_active_context(), project_dir)
     results_path = project_dir / "results_state.pkl"
     if not results_path.exists():
+        _keep_lp_dispatch({}, project_name, project_dir)
         return
     try:
         restored = _safe_unpickle_results(results_path.read_bytes())
@@ -750,10 +751,12 @@ def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None
                     f"{_RESULTS_STATE_SCHEMA}); skipped. Re-run the solve to "
                     f"repopulate side results (cost / dispatch unaffected).",
                 )
+            _keep_lp_dispatch({}, project_name, project_dir)
             return
         applied = {k: v for k, v in data.items() if k in _RESULTS_STATE_KEYS}
         if applied:
             _sim_state_update(**applied)
+        _keep_lp_dispatch(applied, project_name, project_dir)
         with PyPSAService.get_solver_state_lock():
             _map_eh_study_mirror(PyPSAService.get_solver_state())
     except Exception as exc:
@@ -762,6 +765,53 @@ def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None
             f"Couldn't restore results_state.pkl ({type(exc).__name__}: {exc}). "
             f"Re-run the solve to repopulate side results (cost / dispatch "
             f"unaffected — they come from the netcdf).",
+        )
+        _keep_lp_dispatch({}, project_name, project_dir)
+
+
+# metadata.json key of a save whose network.nc holds the LP's tables after an
+# AC power flow (PF-SAVE-1). A save without it predates the restore (GK A 3).
+LP_DISPATCH_SAVED = "lp_dispatch_saved"
+
+# (project dir, network.nc mtime) pairs whose load-flow dispatch was already
+# disclosed: one warning per saved file, not one per background probe.
+_FLOW_DISPATCH_DISCLOSED: set[tuple[str, int]] = set()
+
+
+def _keep_lp_dispatch(data: dict, project_name: str, project_dir: pathlib.Path, ctx=None) -> None:
+    """PF-SAVE-1 (GK A F5): a project saved before it carries the AC power
+    flow's tables in network.nc. When its record keeps the LP's tables, the
+    LP's win; when it keeps only the flow's, say the dispatch came from the
+    load flow instead of showing it as the LP's. A save that carries
+    `LP_DISPATCH_SAVED` holds the LP's tables whatever its record says, so it
+    is never disclosed (GK A 3). `ctx` defaults to the active context."""
+    ctx = ctx or PyPSAService.get_active_context()
+    lp = data.get("lopf_results")
+    with ctx.mutation_lock:
+        if isinstance(lp, dict) and lp and data.get("ac_pf_results"):
+            from services.ac_pf_service import keep_lp_tables
+            keep_lp_tables(ctx.network, lp)
+            return
+        if _read_meta(project_dir).get(LP_DISPATCH_SAVED) is True:
+            return
+        # The LP never writes |V| and a PF-SAVE-1 save holds it empty, so a
+        # saved |V| means the saved tables are a flow's (standalone or chained).
+        from_flow = "ac_pf" in str(ctx.solver_state.get("condition") or "") or (
+            not ctx.network.buses_t.v_mag_pu.columns.empty
+        )
+    if from_flow:
+        try:
+            saved = (str(project_dir.resolve()), (project_dir / "network.nc").stat().st_mtime_ns)
+        except OSError:
+            saved = (str(project_dir), 0)
+        if saved in _FLOW_DISPATCH_DISCLOSED:
+            return
+        _FLOW_DISPATCH_DISCLOSED.add(saved)
+        change_log_service.log(
+            "warn", "Project", project_name,
+            "Dispatch saved from load flow: this project's results come from "
+            "the AC power flow, not the LP, and its LP dispatch was not kept. "
+            "Re-run the solve to see the LP dispatch.",
         )
 
 
@@ -1368,6 +1418,68 @@ def _extract_bundle(zf: zipfile.ZipFile, members: set[str], dest: pathlib.Path,
             atomic_write_bytes(target_path, zf.read(member))
 
 
+
+def _bundle_network_owning_its_costs(zf: zipfile.ZipFile):
+    """A bundle's `network.nc` parsed into a network that is not open yet, with its priced rows checked and
+    re-derived (`network_crud.rederive_imported_parts`, 422 on a bad row) at the bundle's own discount rate:
+    the project it restores brings its solver settings, read as every load reads them
+    (`_solver_config_from_dict`). A `solver_config.json` that is present but cannot be read refuses the
+    import (422); only an absent one uses the defaults. Returns the network, the rows whose owned cost the
+    re-derive moved, and the rate's source ("bundle" or "default")."""
+    import tempfile
+
+    import pypsa
+
+    from services.network_crud import rederive_imported_parts
+    from services.solver.periodized_costs import discount_rate_problem
+    from services.solver_service import SolverConfig
+
+    if "solver_config.json" in zf.namelist():
+        try:
+            loaded = json.loads(zf.read("solver_config.json").decode("utf-8"))
+            if not isinstance(loaded, dict):
+                raise ValueError("not an object")
+            # The raw value, before the dataclass coerces it: a bool or a string is not a rate (GK B 63).
+            if "discount_rate" in loaded and (problem := discount_rate_problem(loaded["discount_rate"])):
+                raise ValueError(problem)
+            rate = float(_solver_config_from_dict(loaded).discount_rate)
+        except Exception as exc:  # noqa: BLE001 - any unreadable settings file refuses, by name
+            raise HTTPException(422, {
+                "error_kind": "import_unreadable",
+                "message": f"The bundle's solver settings (solver_config.json) cannot be read "
+                           f"({type(exc).__name__}); nothing was imported.",
+            }) from exc
+        source = "bundle"
+    else:
+        rate, source = float(SolverConfig().discount_rate), "default"
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "network.nc"
+        path.write_bytes(zf.read("network.nc"))
+        candidate = pypsa.Network()
+        with PyPSAService.get_netcdf_io_lock():
+            PyPSAService.import_network_from_netcdf(candidate, path)
+    before = _owned_costs(candidate)
+    rederive_imported_parts(candidate, global_rate=rate)
+    after = _owned_costs(candidate)
+    # Only the rows whose owned cost moved: a bundle saved with its costs current re-derives to the same values,
+    # so it reads as saved and lists nothing.
+    moved = [label for label, value in after.items() if not before[label].equals(value)]
+    return candidate, moved, source
+
+
+def _owned_costs(n) -> dict:
+    """{"Storage 'name'": the row's part-owned cost columns} for every row of a class with investment parts."""
+    from services.asset_schema.derive import class_label, owned_columns
+    from services.asset_schema.schema import CLASS_ATTR, COMPOSITE
+
+    out = {}
+    for component_class in COMPOSITE:
+        df = getattr(n, CLASS_ATTR[component_class])
+        cols = [c for c in owned_columns(component_class) if c in df.columns]
+        for name in df.index:
+            out[f"{class_label(component_class)} '{name}'"] = df.loc[name, cols].copy()
+    return out
+
 @router.post("/import_bundle")
 async def import_bundle(
     file: UploadFile = File(...),
@@ -1442,6 +1554,11 @@ async def import_bundle(
                 break
         target_name = base or "imported_project"
 
+    # TCU 11: the bundle's network is an upload like the network imports, so its investment parts own their
+    # rows' costs. A priced part that cannot be derived refuses the import here, before the project row or
+    # any file exists; the priced rows are re-derived at the bundle's own rate.
+    candidate, rederived, rate_source = _bundle_network_owning_its_costs(zf)
+
     # `target_name` may come from a zip's metadata.json — never trust it.
     # `_safe_project_dir` rejects path traversal and shell-metachar names.
     from services import project_registry
@@ -1485,12 +1602,13 @@ async def import_bundle(
         # A different project: a fresh context (own undo, counter 0, no result
         # state of the project being left — P33b gate B-1). The clears apply
         # to the new context, never to the resident one being left.
-        PyPSAService.reset_network()
+        # The network checked and re-derived above, parsed from this same network.nc.
+        PyPSAService.reset_network(network=candidate)
         undo_service.clear()
         dirty_state.clear()  # memory and disk now agree
+        if rederived:
+            dirty_state.mark_dirty()  # unless costs were re-derived: then the file still holds the stale ones
         n = PyPSAService.get_network()
-        with PyPSAService.get_netcdf_io_lock():
-            PyPSAService.import_network_from_netcdf(n, nc_path)
         # Bind identity atomically with the swap (see load_project for the
         # rationale on why this must be inside the lock, not after).
         project_registry.bind_context(
@@ -1622,10 +1740,12 @@ async def import_bundle(
     # stale pointer on the next request and silently reverts the switch.
     if session is not None:
         active_project.set_active_project(db, session, _imported_project)
+    from routers.io import _rederived_note
+
     change_log_service.log(
         "import", "Project", target_name,
         f"Imported project bundle '{file.filename}' as '{target_name}' "
-        f"({len(n.buses)} buses, {len(n.snapshots)} snapshots)",
+        f"({len(n.buses)} buses, {len(n.snapshots)} snapshots)" + _rederived_note(rederived),
     )
     from routers.simulation import _state as _sim_state
     library_issues = _library_pin_issues(
@@ -1641,6 +1761,10 @@ async def import_bundle(
         # Likewise each reliability-goal value the bundle carried that PUT
         # would refuse: imported as "not set" (W3b-R), named here.
         **({"dropped_goal": dropped_goal} if dropped_goal else {}),
+        # The priced rows whose costs were re-derived from their parts (TCU 11).
+        **({"rederived": rederived} if rederived else {}),
+        # The bundle had no solver settings, so the costs were re-derived at the default discount rate.
+        **({"rederived_at_default_rate": True} if rederived and rate_source == "default" else {}),
         "summary": ImportSummary(
             buses=len(n.buses),
             generators=len(n.generators),
@@ -1994,6 +2118,10 @@ def _materialise_from_template(template_id: str, name: str | None, params: dict 
                                           "message": str(exc)}) from exc
         if planning is None:
             built_net = tpl_mod.BUILDERS[template_key](load_spec=dc_spec)
+            if dc_spec is not None and dc_spec.backup.mode != "genset":
+                # The strings are in the network: write the sidecar built with
+                # them, not the example's (DC walkthrough 01). Gensets keep the copy.
+                planned = (tpl_mod, None, dc_spec)
         else:
             built_net = _planned_network(tpl_mod, template_key, planning, dc_spec)
             planned = (tpl_mod, planning, dc_spec)
@@ -2014,8 +2142,9 @@ def _materialise_from_template(template_id: str, name: str | None, params: dict 
     if not src_nc.exists() and eh_builder is None:
         raise HTTPException(
             404,
-            f"Template '{template_id}' is registered but its network.nc is "
-            f"missing — run project_templates/_build.py to regenerate it.",
+            "This template's example network has not been built on this "
+            "installation, so it cannot be created here. Choose another "
+            "template, or reinstall the app.",
         )
 
     # `name` is optional — default to the template's friendly name, then
@@ -2051,6 +2180,16 @@ def _materialise_from_template(template_id: str, name: str | None, params: dict 
             src = _PROJECT_TEMPLATES_DIR / template_key / sidecar
             if src.is_file():
                 atomic_copy(src, dest / sidecar)
+    from services import flow_scope
+
+    if "load_flow" in flow_scope.preset_for({"id": template_key})[1].get("grid", ()):
+        # Issue 51: the grid preset's Load flow is on exactly when the solver
+        # flag it owns is (`flow_scope.OWNED`), and a grid template ships no
+        # config, so the project starts with the flag on.
+        cfg_path = dest / "solver_config.json"
+        cfg = json.loads(cfg_path.read_text()) if cfg_path.is_file() else {}
+        atomic_write_text(cfg_path, json.dumps({**cfg, "run_ac_pf_after_lopf": True},
+                                               indent=2, sort_keys=True) + "\n")
     if site is None and template_series:
         from services.library import bundle_pins
         from services.library import template_series as TS
@@ -2123,6 +2262,9 @@ def _finish_created_project(made: _Materialised, db: DBSession, user: User | Non
         "network_revision": int(PyPSAService.get_active_context().network_revision or 0),
         "parent_project": None,
         "scenario_description": None,
+        # The template the project was made from: a grid template ships no
+        # marker, and its scope preset reads this (`flow_scope.preset_template`).
+        "template_id": template_id,
     })
     # A template's commercial config and finance inputs (slice D4) are bound
     # and validated as their PUT routes do; one that does not is dropped and
@@ -2575,7 +2717,8 @@ def _saves_its_own_directory(bound_dir, loaded: str | None, name: str,
 def _carried_settings(existing_meta: dict, bound_dir, loaded: str | None, name: str,
                       dest: pathlib.Path) -> dict:
     """
-    The `settings` entry a save writes into ``dest``'s metadata.json.
+    The `settings` and `template_id` entries a save writes into ``dest``'s
+    metadata.json.
 
     A save of a directory's own network keeps that directory's table. A save
     of another bound project's network (Save-As, Save-a-Copy, a forced Save-As
@@ -2593,7 +2736,10 @@ def _carried_settings(existing_meta: dict, bound_dir, loaded: str | None, name: 
     else:
         source_meta = {}
     table = source_meta.get("settings")
-    return {"settings": table} if isinstance(table, dict) else {}
+    out = {"settings": table} if isinstance(table, dict) else {}
+    if isinstance(source_meta.get("template_id"), str):
+        out["template_id"] = source_meta["template_id"]
+    return out
 
 
 def _check_save_allowed(
@@ -3099,6 +3245,10 @@ def _write_context(
             "user_ts_count": len(user_ts_data),
             # P33b: the edit counter the saved EH study record is compared to.
             "network_revision": int(ctx.network_revision or 0),
+            # PF-SAVE-1: network.nc holds the LP's tables after a load flow.
+            # A live |V| is a flow's left by a save from before it (loaded
+            # with no LP record): that file is still disclosed on reload.
+            LP_DISPATCH_SAVED: bool(n.buses_t.v_mag_pu.columns.empty),
             "parent_project": new_parent,
             "scenario_description": new_desc,
             "scenario_type": new_type,
@@ -3441,6 +3591,10 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str, *, allow_netwo
         ctx.solver_state["condition"] = None
         ctx.solver_state["objective"] = None
         ctx.solver_state["solve_time"] = None
+    _keep_lp_dispatch(
+        {k: ctx.solver_state.get(k) for k in ("lopf_results", "ac_pf_results")},
+        name, src, ctx,
+    )
 
 
 @router.post("/{project_id}/activate")

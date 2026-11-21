@@ -1,0 +1,1 @@
+* Feat(gridspine): PSCAD / EMT pack (`gridspine/handoff/emt_pack.py`): a Thevenin set (Sk and X/R per study case and per battery corner at the PoC, with IEC 60909 reference levels per stage), the test battery as a PSCAD case schedule with contract channel names, a generated `mhi.pscad` automation stub, and a manifest with per-file hashes (TRGC 05, 07, 17, 19–23 EMT inputs).

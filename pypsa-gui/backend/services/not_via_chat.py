@@ -6,6 +6,9 @@ provider names are not keywords: switching an existing profile is supported.
 from __future__ import annotations
 
 import re
+from pathlib import Path
+
+from smoke.json_fragments import extend, extend_items
 
 DISPOSITIONS = ("out of chat", "manual", "unbuilt", "unbuilt; owner to decide later")
 
@@ -221,23 +224,6 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
-        'id': 'business_case_table_options',
-        'title': 'Business case line options',
-        'disposition': 'unbuilt',
-        'reason': 'The units each business-case line may take and every check on its cells are not available from chat yet. Use the line table in the Business case view on the Results page.',
-        'page': 'Results (Investment tab)',
-        'panel': None,
-        'keywords': frozenset({
-            'unit',
-            'units',
-            'options',
-            'checks',
-        }),
-        'routes': frozenset({
-            ('GET', '/api/results/business_case/options'),
-        }),
-    },
-    {
         'id': 'intent_comparison',
         'title': 'Design intent comparison',
         'disposition': 'unbuilt',
@@ -252,6 +238,7 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
             ('GET', '/api/projects/{name}/intent-comparison'),
             ('POST', '/api/projects/{name}/intent-comparison'),
             ('POST', '/api/projects/{name}/intent-comparison/abort'),
+            ('GET', '/api/projects/{name}/intent-comparison/defaults'),
         }),
     },
     {
@@ -355,6 +342,21 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
+        'id': 'site_scene_blender_worker',
+        'title': 'Blender scene output (.blend)',
+        'disposition': 'unbuilt',
+        'reason': 'A .blend made by Blender runs only where an administrator set up the Blender container; not from chat. To open the site in Blender yourself, use "Export for Blender" on the Site canvas.',
+        'page': 'Site 3D',
+        'panel': 'map',
+        'keywords': frozenset({
+            'blend',
+        }),
+        'routes': frozenset({
+            ('POST', '/api/projects/{name}/sites/{site_id}/scene/blender-jobs'),
+            ('GET', '/api/projects/{name}/sites/{site_id}/scene/artifacts/{artifact_id}'),
+        }),
+    },
+    {
         'id': 'library_uploads_and_tariff_edit',
         'title': 'Library series sent as JSON values',
         'disposition': 'manual',
@@ -402,19 +404,6 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
             ('POST', '/api/spectrum/trace'),
         }),
     },    {
-        'id': 'operating_reserve_result',
-        'title': 'Operating reserve per hour',
-        'disposition': 'unbuilt',
-        'reason': ('The operating reserve held and required per hour, and the hours where it binds, '
-                   'cannot be read from chat yet. A Results view follows.'),
-        'page': 'Results',
-        'panel': None,
-        'keywords': frozenset({'reserve', 'headroom', 'spinning'}),
-        'routes': frozenset({
-            ('GET', '/api/results/operating_reserve'),
-        }),
-    },
-    {
         'id': 'report_comment_revisions',
         'title': 'Report comments and comment revisions',
         'disposition': 'unbuilt',
@@ -490,6 +479,50 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
 NOTE = ("not_via_chat lists features you cannot do from chat. Tell the user the reason and the page; "
         "if panel is set you may open it with ui_open_panel. Do not look for another tool or an API for them.")
 
+# A new entry or refusal goal arrives as a fragment instead of a row above
+# (RETRO-FRAG-1): `not_via_chat.d/<branch>.json`, format in that folder's
+# README. Entries keep their order: the rows above, then `not_via_chat.json`,
+# then each fragment in file-name order; `matches` breaks ties by that order. A
+# malformed fragment, or one naming an id already declared, fails the import.
+ENTRIES_FILE = Path(__file__).with_name('not_via_chat.json')
+PYTHON_ENTRIES = NOT_VIA_CHAT
+_ENTRY_KEYS = {'id', 'title', 'disposition', 'reason', 'page', 'panel', 'keywords', 'routes'}
+
+
+def _entry(raw) -> dict:
+    if not (isinstance(raw, dict) and set(raw) == _ENTRY_KEYS):
+        raise ValueError(f'an entry has exactly the keys {sorted(_ENTRY_KEYS)}')
+    texts = ('id', 'title', 'reason', 'page')
+    if not all(isinstance(raw[k], str) and raw[k] for k in texts) or raw['disposition'] not in DISPOSITIONS:
+        raise ValueError(f'{texts} are text and disposition is one of {DISPOSITIONS}')
+    if raw['panel'] is not None and not isinstance(raw['panel'], str):
+        raise ValueError('panel is null or a panel id')
+    if not (isinstance(raw['keywords'], list) and raw['keywords'] and all(isinstance(k, str) for k in raw['keywords'])):
+        raise ValueError('keywords is a non-empty list of words')
+    if not (isinstance(raw['routes'], list) and raw['routes']
+            and all(isinstance(r, list) and len(r) == 2 and all(isinstance(x, str) for x in r) for r in raw['routes'])):
+        raise ValueError('routes is a non-empty list of ["METHOD", "/api/path"] pairs')
+    return {**raw, 'keywords': frozenset(raw['keywords']), 'routes': frozenset(map(tuple, raw['routes']))}
+
+
+def load_entries(base: Path = ENTRIES_FILE) -> tuple[dict, ...]:
+    """NOT_VIA_CHAT: the rows above, then the JSON base's and the fragments' entries."""
+    return tuple(extend_items(PYTHON_ENTRIES, base, 'entries', convert=_entry))
+
+
+def load_goals(base: Path = ENTRIES_FILE) -> dict[str, str]:
+    """Refusal goals the fragments pin to their entry (`tests/test_registry_fragments.py` asks each)."""
+    ids = {e['id'] for e in load_entries(base)}
+
+    def goal(text, entry_id):
+        if entry_id not in ids:
+            raise ValueError(f'names no entry: {entry_id!r}')  # repr-ok: names a JSON key in a CI/import error
+        return text, entry_id
+    return extend({}, base, 'goals', goal)
+
+
+NOT_VIA_CHAT = load_entries()
+
 
 # A saved field value. Three asks reach it:
 # - a chip, or a value made "reusable";
@@ -559,11 +592,6 @@ def _asks_about_the_strip(words: set[str]) -> bool:
     return bool(words & _STRIP_NAMES and words & _STRIP_ASKS and not words & _STRIP_ELSEWHERE)
 
 
-# The business-case line table's options: "business case" plus a units word, never
-# "business as usual" (BAU), which is a scenario (GK B (54) D3).
-_BUSINESS_CASE_NOUN = frozenset({'case', 'cases'})
-_BUSINESS_AS_USUAL = frozenset({'usual', 'bau'})
-
 
 def matches(words: set[str], limit: int = 2, goal: str = '') -> list[dict]:
     """Keyword hits, ranked by count then declaration order; return public copies.
@@ -582,10 +610,6 @@ def matches(words: set[str], limit: int = 2, goal: str = '') -> list[dict]:
             continue
         if entry['id'] == 'results_headline_strip' and not _asks_about_the_strip(words):
             continue
-        if (entry['id'] == 'business_case_table_options'
-                and not ('business' in words and words & _BUSINESS_CASE_NOUN
-                         and not words & _BUSINESS_AS_USUAL)):
-            continue  # "units" alone is any unit question; this is the line table's only
         hits = len(words & entry['keywords'])
         if hits:
             ranked.append((-hits, index, entry))

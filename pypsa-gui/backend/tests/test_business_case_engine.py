@@ -35,6 +35,8 @@ from models.business_case import (
     PresetRule,
     PriceNotEstablished,
     ShareCycle,
+    VolumeFactorUnclassified,
+    VolumeFactorTypedLine,
 )
 from models.finance import DebtTranche, FinanceInputs, Incentive
 from services.business_case.linked_outputs import NotEvaluated, Series
@@ -1834,3 +1836,342 @@ def test_c7_a_rerun_without_its_npv_or_its_line_is_not_established(monkeypatch):
     assert be["status"] == "break_even_not_established" and be["price"] is None
     be = _rerun_stub(monkeypatch, series=None, at=7.0, v=0.0)
     assert be["status"] == "break_even_not_established" and be["price"] is None
+
+
+# ── BC 15: the lease-up volume factor (ruling 6) ─────────────────────────────
+
+_NH3 = dict(name="nh3", quantity=None, quantity_source="linked:served_product.nh3@1")
+_NH3_OUT = {"nh3": Series("served_product.nh3", "t", {None: 100.0}, {})}
+_OPS = range(2031, 2036)
+
+
+def _no_export_ic():
+    return _ic(
+        lines=(
+            TemplateLine("bill", "energy_import", -300.0, "tariff"),
+            TemplateLine("vom", "vom", -40.0, "opex"),
+            TemplateLine("fom", "fom", -20.0, "opex"),
+            TemplateLine("export", "energy_export", 0.0, "export"),
+        )
+    )
+
+
+def _lease_case(factor=None, *lines, nh3=None):
+    kw = {} if factor is None else {"volume_factor_by_year": factor}
+    return _inputs(_line(**_NH3, price=400.0, **(nh3 or {})), *lines, **kw)
+
+
+def _amount(bc, key, year):
+    (t,) = [t for t in bc.case.templates if t.first_year == year]
+    (ln,) = [x for x in t.lines if x.key == key]
+    return ln.amount
+
+
+@pytest.mark.parametrize(
+    "factor", [None, {}, {y: 1.0 for y in _OPS}, {2020: 0.3, 2099: 0.0}]
+)
+def test_bc15_full_volume_leaves_the_case_its_hash_and_results_unchanged(factor):
+    """Default 100 % (absent, empty, every year 1.0, or only years outside the horizon)
+    builds the same templates, hash, P&L and KPIs as a case without the field."""
+    ic = _ic()
+    ref_bc, ref = _run(_lease_case(None), ic=ic, outputs=_NH3_OUT)
+    bc, r = _run(_lease_case(factor), ic=ic, outputs=_NH3_OUT)
+    assert bc.hash == ref_bc.hash
+    assert bc.case.templates == ref_bc.case.templates
+    assert list(pnl(r).rows) == list(pnl(ref).rows)
+    for k, v in pnl(ref).rows.items():
+        np.testing.assert_array_equal(pnl(r).rows[k], v)
+    assert kpis(r, pnl(r)) == kpis(ref, pnl(ref))
+
+
+def test_bc15_a_year_below_full_volume_scales_revenue_and_dispatched_costs_together():
+    ic = _no_export_ic()
+    share = _line(
+        name="royalty",
+        kind="opex",
+        category="other",
+        unit="share",
+        quantity=0.1,
+        price=None,
+        quantity_source="share_of:revenue",
+        escalation="opex",
+    )
+    cap = _line(
+        name="capacity",
+        category="capacity_payment",
+        unit="kW_year",
+        quantity=None,
+        quantity_source="linked:capacity.pv@1",
+        price=5.0,
+    )
+    outs = {**_NH3_OUT, "capacity": Series("capacity.pv", "kW_year", {None: 50.0}, {})}
+    _, full = _run(_lease_case(None, cap, share), ic=ic, outputs=outs)
+    _, half = _run(_lease_case({2032: 0.5}, cap, share), ic=ic, outputs=outs)
+    i, j = _at(full, 2032), _at(full, 2033)
+    lines, ref = half.op.lines, full.op.lines
+    # Scaled in 2032 only: linked served volume and the dispatched IC rows.
+    for key in ("nh3", "bill", "vom"):
+        assert lines[key][i] == pytest.approx(0.5 * ref[key][i], rel=1e-12)
+        assert lines[key][j] == ref[key][j]
+    # Never scaled: fixed IC rows and installed capacity.
+    for key in ("fom", "capacity"):
+        np.testing.assert_array_equal(lines[key], ref[key])
+    # C4: the share follows its scaled base once: f, never f² (0.5 vs 0.25).
+    rev_full = ref["nh3"][i] + ref["capacity"][i]
+    rev_half = 0.5 * ref["nh3"][i] + ref["capacity"][i]
+    assert lines["royalty"][i] == pytest.approx(
+        ref["royalty"][i] * rev_half / rev_full, rel=1e-12
+    )
+    np.testing.assert_allclose(
+        lines["royalty"], -0.1 * (lines["nh3"] + lines["capacity"]), rtol=1e-12
+    )
+
+
+def test_bc15_c4_a_linked_line_books_quantity_times_sold_share_times_factor():
+    s, f = 0.6, 0.35
+    bc, _ = _run(
+        _lease_case({2032: f}, nh3={"linked_share": s}),
+        ic=_no_export_ic(),
+        outputs=_NH3_OUT,
+    )
+    assert _amount(bc, "nh3", 2032) == 100.0 * s * f * 400.0
+    assert _amount(bc, "nh3", 2033) == 100.0 * s * 400.0
+    assert _amount(bc, "bill", 2032) == -300.0 * f
+    assert _amount(bc, "vom", 2032) == -40.0 * f
+    assert _amount(bc, "fom", 2032) == -20.0
+
+
+def test_bc15_c6_uneven_factors_scale_each_year_by_its_own():
+    fs = {2031: 0.3, 2032: 0.7, 2033: 1.0}
+    bc, _ = _run(_lease_case(fs), ic=_no_export_ic(), outputs=_NH3_OUT)
+    for y in _OPS:
+        f = fs.get(y, 1.0)
+        want = 100.0 * 400.0 if f == 1.0 else 100.0 * f * 400.0
+        assert _amount(bc, "nh3", y) == want, y
+        assert _amount(bc, "bill", y) == (-300.0 if f == 1.0 else -300.0 * f), y
+
+
+def test_bc15_zero_volume_books_no_served_volume_and_no_dispatched_cost():
+    _, r = _run(_lease_case({2031: 0.0}), ic=_no_export_ic(), outputs=_NH3_OUT)
+    i = _at(r, 2031)
+    for key in ("nh3", "bill", "vom"):
+        assert r.op.lines[key][i] == 0.0
+    assert r.op.lines["fom"][i] != 0.0
+
+
+def test_bc15_c2_the_hash_moves_only_for_an_operating_year_below_full_volume():
+    ic = _no_export_ic()
+
+    def h(f):
+        return _run(_lease_case(f), ic=ic, outputs=_NH3_OUT)[0].hash
+
+    base = h(None)
+    # Both parts hold: each in-horizon year and value below 1 is its own digest.
+    assert len({base, h({2031: 0.5}), h({2031: 0.6}), h({2032: 0.5})}) == 4
+    # Only "below 1" holds (a year outside the horizon): no move.
+    assert h({2030: 0.5}) == h({2036: 0.5}) == base
+    # Only "in the horizon" holds (f = 1 there): no move.
+    assert h({2031: 1.0, 2035: 1.0}) == base
+
+
+def test_bc15_q1_a_typed_operating_line_refuses_under_a_factor_below_full():
+    typed = _line(name="service", category="service_fee", quantity=1.0)
+    with pytest.raises(VolumeFactorTypedLine) as e:
+        _run(_lease_case({2032: 0.5}, typed), ic=_no_export_ic(), outputs=_NH3_OUT)
+    assert e.value.field == "lines[1].quantity_source"
+    inputs = _lease_case(
+        {2032: 0.5}, typed, _line(name="o2", kind="opex", category="staff")
+    )
+    found = inputs.refusals(horizon=(2031, 2035), base_year=2031)
+    assert [x.field for x in found if x.kind == "volume_factor_typed_line"] == [
+        "lines[1].quantity_source",
+        "lines[2].quantity_source",
+    ]
+    # Not when the factor is 1 in its span, nor outside it, nor for capex, nor for a
+    # year outside the operating years (ignored, never both ignored and refused: C3).
+    # The first and last operating years count (the horizon bounds are inclusive).
+    for edge in (2031, 2035):
+        found = _lease_case({edge: 0.5}, typed).refusals(
+            horizon=(2031, 2035), base_year=2031
+        )
+        assert [x.kind for x in found] == ["volume_factor_typed_line"], edge
+    later = typed.model_copy(update={"start_year": 2033})
+    for case in (
+        _lease_case({2032: 1.0}, typed),
+        _lease_case({2032: 0.5}, later),
+        _lease_case({2032: 0.5}, _capex()),
+        _lease_case({2030: 0.5, 2036: 0.5}, typed),
+    ):
+        assert not [
+            x
+            for x in case.refusals(horizon=(2031, 2035), base_year=2031)
+            if x.kind == "volume_factor_typed_line"
+        ]
+
+
+def test_bc15_n1_a_pre_cod_year_on_a_typed_line_is_ignored_never_refused():
+    """GK B2 N1: a typed line that starts before COD, with its only factor below 1 in
+    that pre-COD year, does not refuse for lease-up; the report names the year as
+    ignored."""
+    early = _line(name="service", category="service_fee", quantity=1.0, start_year=2029)
+    case = _lease_case({2029: 0.5}, early)
+    kinds = [x.kind for x in case.refusals(horizon=(2031, 2035), base_year=2031)]
+    assert "volume_factor_typed_line" not in kinds
+    shown = bcm.volume_factor_display(case, _OPS)
+    assert shown == {"volume_factor_ignored": [2029]}
+
+
+def test_bc15_n2_a_demand_charge_row_scales_with_the_factor():
+    ic = _ic(
+        lines=(
+            TemplateLine("peak", "demand_charge", -80.0, "tariff"),
+            TemplateLine("fom", "fom", -20.0, "opex"),
+        )
+    )
+    bc, _ = _run(_lease_case({2032: 0.5}), ic=ic, outputs=_NH3_OUT)
+    assert _amount(bc, "peak", 2032) == -40.0
+    assert _amount(bc, "peak", 2033) == -80.0
+    assert _amount(bc, "fom", 2032) == -20.0
+
+
+def test_bc15_c5_an_undetermined_ic_row_refuses_only_where_nonzero_and_below_full():
+    """A generation-side row whose response to the served volume is unknown refuses
+    under a factor below 100 % (fail closed) in a year it is non-zero."""
+    with pytest.raises(VolumeFactorUnclassified) as e:
+        _run(_lease_case({2032: 0.5}), outputs=_NH3_OUT)  # export 120 every year
+    assert e.value.field == "energy_export"
+    assert e.value.kind == "volume_factor_unclassified"
+    rows = lambda x: (  # noqa: E731
+        TemplateLine("bill", "energy_import", -300.0, "tariff"),
+        TemplateLine("export", "energy_export", x, "export"),
+    )
+    ic = dataclasses.replace(
+        _ic(),
+        templates=(
+            Template(2031, rows(120.0), energy_mwh={"pv": 10.0}),
+            Template(2033, rows(0.0), energy_mwh={"pv": 10.0}),
+        ),
+    )
+    # Below 1 where the row is zero: builds.
+    _run(_lease_case({2034: 0.5}), ic=ic, outputs=_NH3_OUT)
+    # Non-zero where the factor is 1: builds.
+    _run(_lease_case({2031: 1.0, 2034: 0.5}), ic=ic, outputs=_NH3_OUT)
+    # Both: refuses.
+    with pytest.raises(VolumeFactorUnclassified):
+        _run(_lease_case({2032: 0.5}), ic=ic, outputs=_NH3_OUT)
+
+
+def test_bc15_a_value_the_solve_lacks_stays_not_established_under_a_factor():
+    """A linked line with no value and an IC row with no amount stay None (LO-7)
+    under a factor, never 0 and never an error; `_templates` without a factor is the
+    IC as it was."""
+    _, r = _run(
+        _lease_case({2032: 0.5}),
+        ic=_no_export_ic(),
+        outputs={"nh3": NotEvaluated("served_product.nh3", "stale")},
+    )
+    assert "line_not_established:nh3" in r.op.reasons["operating"]
+    gone = TemplateLine("bill", "energy_import", None, "tariff")
+    assert bcm._ic_scaled(gone, 0.5).amount is None
+    ic = _no_export_ic()
+    tl = bcm.build_timeline(ic)
+    assert bcm._templates(ic, tl, {}) == bcm._templates(ic, tl, {}, lease_up={})
+
+
+def test_bc15_an_unknown_ic_stream_or_linked_kind_refuses():
+    ic = _ic(lines=(TemplateLine("x", "new_stream", -1.0, "opex"),))
+    with pytest.raises(VolumeFactorUnclassified):
+        bcm._templates(ic, bcm.build_timeline(ic), {}, lease_up={2031: 0.5})
+    odd = _line(**{**_NH3, "quantity_source": "linked:new_kind.x@1"})
+    with pytest.raises(VolumeFactorUnclassified):
+        bcm._volume_line(odd)
+
+
+def test_bc15_v3_every_stream_and_linked_kind_has_exactly_one_volume_class():
+    from services.business_case.linked_outputs import READERS
+    from services.finance.cashflow import BC_STREAM_CLASS
+
+    ledger = set(STREAM_CLASS) - set(BC_STREAM_CLASS)
+    assert set(bcm.STREAM_VOLUME_CLASS) == ledger
+    # Each class pinned (GK B2 N2): a move between classes is a reviewed change.
+    assert bcm.STREAM_VOLUME_CLASS == {
+        "energy_import": "scale",
+        "network_energy": "scale",
+        "certificates": "scale",
+        "tax": "scale",
+        "demand_charge": "scale",
+        "vom": "scale",
+        "fuel": "scale",
+        "lost_production": "scale",
+        "energy_wholesale": "scale",
+        "network_capacity": "fixed",
+        "retail_fixed": "fixed",
+        "fom": "fixed",
+        "other": "fixed",
+        "capex": "fixed",
+        "lease": "fixed",
+        "eaas_fee": "fixed",
+        "dr_availability": "fixed",
+        "energy_export": "undetermined",
+        "ppa_settlement": "undetermined",
+        "cfd_settlement": "undetermined",
+        "ancillary": "undetermined",
+        "dr_activation": "undetermined",
+    }
+    assert bcm.VOLUME_KINDS == {
+        "served_product",
+        "served_h2",
+        "shipped",
+        "derived_o2",
+        "served_load",
+        "it_energy",
+        "contracted_it_kw",
+    }
+    assert bcm.FIXED_KINDS == {"capacity"}
+    assert bcm.UNDETERMINED_KINDS == {"export"}
+    kinds = {k for r in READERS.values() for k in r}
+    sets = (bcm.VOLUME_KINDS, bcm.FIXED_KINDS, bcm.UNDETERMINED_KINDS)
+    assert set().union(*sets) == kinds
+    assert sum(len(x) for x in sets) == len(kinds)  # disjoint
+
+
+def test_bc15_a_typed_line_is_not_volume_and_a_linked_export_refuses():
+    assert bcm._volume_line(_line()) is False
+    assert bcm._volume_line(_line(**_NH3)) is True
+    cap = _line(**{**_NH3, "quantity_source": "linked:capacity.pv@1"})
+    assert bcm._volume_line(cap) is False
+    exp = _line(**{**_NH3, "quantity_source": "linked:export.grid@1"})
+    with pytest.raises(VolumeFactorUnclassified) as e:
+        bcm._volume_line(exp)
+    assert e.value.field == "linked:export"
+
+
+def test_bc15_a_difference_line_moves_both_legs_or_refuses():
+    """A difference line ((price - ref) x q) nets to zero only in its money year: an
+    undetermined one with a quantity refuses even at amount 0, and a scaled one scales
+    its quantity with its amount."""
+    cfd = TemplateLine(
+        "cfd", "cfd_settlement", 0.0, "ppa", price=50.0, price_qty_mwh=100.0
+    )
+    with pytest.raises(VolumeFactorUnclassified):
+        bcm._ic_scaled(cfd, 0.5)
+    assert bcm._ic_scaled(dataclasses.replace(cfd, price_qty_mwh=0.0), 0.5) is not None
+    bill = TemplateLine(
+        "bill", "energy_import", -300.0, "tariff", price=3.0, price_qty_mwh=100.0
+    )
+    got = bcm._ic_scaled(bill, 0.25)
+    assert (got.amount, got.price_qty_mwh, got.price) == (-75.0, 25.0, 3.0)
+    assert bcm._ic_scaled(TemplateLine("f", "fom", -20.0, "opex"), 0.25).amount == -20.0
+
+
+def test_bc15_v1_c3_the_display_keys_state_the_basis_and_the_ignored_years():
+    disp = bcm.volume_factor_display
+    assert disp(_lease_case(None), _OPS) == {}
+    assert disp(_lease_case({y: 1.0 for y in _OPS}), _OPS) == {}
+    got = disp(_lease_case({2031: 0.5, 2032: 1.0, 2040: 0.2, 2020: 1.0}), _OPS)
+    assert got == {
+        "volume_factor": {"2031": 0.5},
+        "volume_factor_note": bcm.VOLUME_FACTOR_NOTE,
+        "volume_factor_ignored": [2020, 2040],
+    }
+    assert "not re-solved" in bcm.VOLUME_FACTOR_NOTE
