@@ -902,7 +902,7 @@ def test_a_spawn_that_never_returns_is_typed_and_its_late_process_is_stopped(
         monkeypatch.setattr(
             bw, name, lambda *a, _r=real, _n=name: (stopped.append(_n), _r(*a))[1]
         )
-    stop = threading.Event()
+    stop = threading.Event() if cancel else None  # a run may have no stop event
     if cancel:
         threading.Timer(0.3, stop.set).start()
     t0 = time.monotonic()
@@ -942,3 +942,18 @@ def test_the_cli_runs_with_no_core_dump(make, monkeypatch):
     finally:
         resource.setrlimit(resource.RLIMIT_CORE, (soft, hard))
     assert b"core=0" in tail, tail
+
+
+def test_a_cli_that_cannot_be_spawned_raises_as_before(make, monkeypatch):
+    env, _ = make()
+    ready = _ready(env)
+    real = subprocess.Popen
+
+    def popen(argv, *a, **k):
+        if "run" in argv and "--version" not in argv:
+            raise OSError("no such runtime")
+        return real(argv, *a, **k)
+
+    monkeypatch.setattr(bw.subprocess, "Popen", popen)
+    with pytest.raises(OSError, match="no such runtime"):
+        bw.run(ready, b"g", None, FAST, env)
