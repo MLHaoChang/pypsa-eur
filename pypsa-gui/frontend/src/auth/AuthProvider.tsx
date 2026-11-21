@@ -7,6 +7,7 @@ import { useAuthMode } from './AuthModeProvider'
 import { localAdminUser } from './localMode'
 import { loginWithPassword } from './requests'
 import { USER_SCOPED_ROOTS } from '../utils/queryKeys'
+import { clearImprovePrefill } from '../pages/hubDesign/improvePrefill'
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated'
 
@@ -29,6 +30,8 @@ function isUnauthorized(error: unknown): boolean {
 /** Drops the cached data of the user who was signed in, so the next user never sees it (SC-07 J5). */
 export function dropUserScopedQueries(qc: QueryClient): void {
   USER_SCOPED_ROOTS.forEach(root => qc.removeQueries({ queryKey: [root] }))
+  // An Improve card's hand-over to Expert belongs to the user who made it.
+  clearImprovePrefill()
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
