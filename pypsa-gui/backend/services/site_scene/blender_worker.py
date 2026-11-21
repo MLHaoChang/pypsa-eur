@@ -46,7 +46,6 @@ import shutil
 import signal
 import stat
 import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -381,21 +380,20 @@ def child_env(env) -> dict[str, str]:
     return out
 
 
-# The CLI gets no core dump. A fresh, single-threaded interpreter sets the limit
-# and execs the CLI with its argv and environment unchanged (a shell would add
-# PWD or SHLVL to that environment). A `preexec_fn` would instead run Python
-# between fork and exec: in the API process (many threads, the forked child
-# inheriting their held locks with none of their owners) that child can block
-# forever before `exec`, wedging the solve-queue dispatcher inside `Popen` (the
-# CI shard hangs of #1577, #1578 and #1627).
+# The CLI gets no core dump. POSIX `sh` sets the limit, then `env` drops what a
+# shell exports by itself (dash adds PWD; bash adds SHLVL, OLDPWD and `_`), so
+# the CLI's environment stays exactly `child_env(env)`. The runtime path and its
+# arguments arrive as positional parameters, never as shell text. (Not a
+# re-exec of `sys.executable`: in the frozen desktop app that is the app.) A
+# `preexec_fn` would instead run Python between fork and exec: in the API
+# process (many threads, the forked child inheriting their held locks with none
+# of their owners) that child can block forever before `exec`, wedging the
+# solve-queue dispatcher inside `Popen` (the CI shard hangs of #1577, #1578 and
+# #1627).
 _CORE_OFF = [
-    sys.executable,
-    "-I",
-    "-S",
+    "/bin/sh",
     "-c",
-    "import os, resource, sys\n"
-    "resource.setrlimit(resource.RLIMIT_CORE, (0, 0))\n"
-    "os.execv(sys.argv[1], sys.argv[1:])\n",
+    'ulimit -c 0 && exec /usr/bin/env -u PWD -u OLDPWD -u SHLVL -u _ "$0" "$@"',
 ]
 
 
