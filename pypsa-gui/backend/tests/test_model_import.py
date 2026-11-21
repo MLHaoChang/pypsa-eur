@@ -50,7 +50,11 @@ def store(_auth_db):
     def state():
         with session_local() as db:
             rows = sorted(str(p.id) for p in db.query(Project).all())
-        dirs = sorted(str(p) for p in root.rglob("*") if p.is_dir() and staging not in p.parents)
+        # Non-empty folders: the first project in a workspace also makes its (empty) parent.
+        dirs = sorted(
+            str(p) for p in root.rglob("*")
+            if p.is_dir() and p != staging and staging not in p.parents and any(p.iterdir())
+        )
         return rows, dirs, sorted(p.name for p in staging.iterdir())
 
     return state
@@ -380,14 +384,17 @@ def test_two_imports_racing_for_one_name_one_wins_the_other_is_a_clean_409(
     results = []
 
     def go():
-        results.append(_import(client, named, sha=sha, name="Raced"))
+        try:
+            results.append(_import(client, named, sha=sha, name="Raced"))
+        except BaseException as exc:  # surfaced by the assert below
+            results.append(exc)
 
     threads = [threading.Thread(target=go) for _ in range(2)]
     for t in threads:
         t.start()
     for t in threads:
         t.join(120)
-    assert sorted(r.status_code for r in results) == [201, 409], [r.text for r in results]
+    assert sorted(getattr(r, "status_code", 0) for r in results) == [201, 409], [getattr(r, "text", r) for r in results]
     rows, dirs, staged = store()
     assert len(rows) == len(before_rows) + 1
     made = [d for d in dirs if d not in before_dirs and (Path(d) / "network.nc").is_file()]
