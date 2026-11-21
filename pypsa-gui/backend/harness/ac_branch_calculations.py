@@ -5,8 +5,9 @@ One Line or Transformer, from the AC power flow's own result snapshot
 (`services/loadflow_summary`: `_frame`, `_smax_matrix`, `_rating`,
 `_ac_convergence`) so the figures match its `ac_pf` source. Flow is the larger
 terminal apparent power, max(hypot(p0, q0), hypot(p1, q1)); a branch with no
-reactive flow recorded (a Transformer, today) falls back to the larger active
-power and says so. The limit is rating·s_max_pu(t); overload is u > 1 + 1e-6.
+reactive flow recorded (a Transformer, today) answers its rating only, and its
+flow metrics read `reactive_flow_unavailable`. The limit is rating·s_max_pu(t);
+overload is u > 1 + 1e-6.
 
 Values are computed over the converged snapshots of the window only. Every
 snapshot whose convergence is not `True` is excluded, and the evidence then
@@ -63,11 +64,8 @@ DISCLOSURE = (
     "no N-1 and no voltage limits. The limit is the rating times s_max_pu per snapshot. "
     "Hours use generator snapshot weights. Values cover converged snapshots only; a "
     "non-converged or unknown snapshot is excluded and named in the receipt's warning. "
-    "A branch with any missing flow or zero limit at a converged snapshot is unavailable."
-)
-P_FALLBACK_NOTE = (
-    "No reactive flow is recorded for this branch: loading uses active power only "
-    "(P proxy), and the apparent-power flow is unavailable."
+    "A branch with any missing flow or zero limit at a converged snapshot is unavailable; "
+    "one with no reactive flow recorded answers its rating only."
 )
 
 
@@ -186,28 +184,21 @@ def required_warnings(raw, scope):
 
 
 def _loading(raw, kept):
-    """Per-branch values over the converged snapshots; None when any input there is missing."""
+    """Per-branch values over the converged snapshots; None when any input there
+    is missing. A branch with no reactive flow at any of them has its rating only."""
     data, weights = raw["branch"], raw["energy_weight"]
     rating = data["rating"]
     if rating is None or not math.isfinite(rating) or rating <= 1e-9:
         return None
-    apparent = any(data["q0"][i] is not None for i in kept)
+    if all(data["q0"][i] is None for i in kept):
+        return {"ac_branch_rating": rating}
     flows, utilisation = [], []
     for i in kept:
-        p0, p1, smax, w = data["p0"][i], data["p1"][i], data["s_max_pu"][i], weights[i]
-        if p0 is None or smax is None or w is None or w < 0:
+        p0, p1, q0, q1 = (data[attr][i] for attr in ("p0", "p1", "q0", "q1"))
+        smax, w = data["s_max_pu"][i], weights[i]
+        if any(v is None for v in (p0, p1, q0, q1, smax, w)) or w < 0:
             return None
-        if apparent:
-            if data["q0"][i] is None:
-                return None
-            s1 = (
-                math.hypot(p1, data["q1"][i])
-                if p1 is not None and data["q1"][i] is not None
-                else None
-            )
-            flow = max(math.hypot(p0, data["q0"][i]), s1 if s1 is not None else 0.0)
-        else:
-            flow = max(abs(p0), abs(p1) if p1 is not None else 0.0)
+        flow = max(math.hypot(p0, q0), math.hypot(p1, q1))
         limit = rating * smax
         if not math.isfinite(limit) or limit <= 1e-9:
             return None
@@ -221,7 +212,7 @@ def _loading(raw, kept):
                 for i, u in zip(kept, utilisation)
                 if u > 1 + branch.OVER_LIMIT_TOLERANCE
             ),
-            "ac_peak_apparent_flow": max(flows) if apparent else None,
+            "ac_peak_apparent_flow": max(flows),
             "ac_branch_rating": rating,
         }
     except (OverflowError, ValueError):
@@ -275,8 +266,8 @@ def calculate(raw, scope):
                 if not raw["valid_solve"]
                 else "unsupported_metric"
                 if metric not in METRICS
-                else "apparent_power_unavailable"
-                if metric == "ac_peak_apparent_flow" and available and not apparent
+                else "reactive_flow_unavailable"
+                if metric != "ac_branch_rating" and available and not apparent
                 else "invalid_or_missing_branch_data"
             )
         slots.append(slot)
@@ -284,10 +275,10 @@ def calculate(raw, scope):
 
 
 def notes(raw, scope):
-    """Always-shown lines: the converged share the values cover, and the P fallback."""
+    """Always-shown line: the converged share the values cover."""
     a, b = branch._window(raw, scope)
     kept, excluded, _ = _convergence(raw, a, b)
-    lines = [
+    return [
         f"{raw['branch']['class']} values cover {len(kept)} of {b - a + 1} snapshots"
         + (
             "; the others did not converge or are unknown."
@@ -295,6 +286,3 @@ def notes(raw, scope):
             else ", all converged."
         )
     ]
-    if not any(raw["branch"]["q0"][i] is not None for i in kept):
-        lines.append(P_FALLBACK_NOTE)
-    return lines

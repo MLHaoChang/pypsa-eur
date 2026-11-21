@@ -81,9 +81,7 @@ def test_ac_loading_matches_the_load_flow_tab_with_a_time_varying_limit(ac_grid)
     assert values["ac_branch_rating"] == row["rating"]["value"]
 
 
-def test_a_transformer_without_reactive_flow_falls_back_to_p_and_says_so(
-    ac_grid, checked
-):
+def test_a_transformer_without_reactive_flow_answers_its_rating_only(ac_grid, checked):
     ctx = ac_grid((True, True))
     n = ctx.network
     ctx.solver_state["ac_pf_results"].update(
@@ -97,25 +95,23 @@ def test_a_transformer_without_reactive_flow_falls_back_to_p_and_says_so(
     raw = _raw(ctx, "T12", "Transformer")
     scope = _scope(ctx, entity_id="T12", component_class="Transformer")
     facts, slots = calculations.scoped_calculate(raw, scope)
-    values = {f["metric"]: f["value"] for f in facts}
-    # P proxy: 50 MW against s_nom 40.
-    assert values["ac_peak_branch_utilisation"] == pytest.approx(125.0)
-    assert "ac_peak_apparent_flow" not in values
+    # No active-power proxy: 50 MW against s_nom 40 is not read as loading.
+    assert {f["metric"]: f["value"] for f in facts} == {"ac_branch_rating": 40.0}
     reasons = {s["metric"]: s.get("reason") for s in slots}
-    assert reasons["ac_peak_apparent_flow"] == "apparent_power_unavailable"
-    assert ac.P_FALLBACK_NOTE in ac.notes(raw, scope)
+    assert reasons == {
+        "ac_peak_branch_utilisation": "reactive_flow_unavailable",
+        "ac_hours_above_rating": "reactive_flow_unavailable",
+        "ac_peak_apparent_flow": "reactive_flow_unavailable",
+        "ac_branch_rating": None,
+    }
+    assert ac.notes(raw, scope) == [
+        "Transformer values cover 2 of 2 snapshots, all converged."
+    ]
     frames = ac_ask_class(
-        checked,
-        ctx,
-        "T12",
-        "Transformer",
-        {
-            "ac_peak_branch_utilisation": 125.0,
-            "ac_hours_above_rating": 1.0,
-            "ac_branch_rating": 40.0,
-        },
+        checked, ctx, "T12", "Transformer", {"ac_branch_rating": 40.0}
     )
-    assert ac.P_FALLBACK_NOTE in public_text(frames)
+    text = public_text(frames)
+    assert "P proxy" not in text and "active power only" not in text
 
 
 def ac_ask_class(checked, ctx, entity, component_class, values):
@@ -392,22 +388,166 @@ def test_a_flow_exactly_at_the_limit_is_not_above_it(ac_grid):
     data = raw["branch"]
     limit = data["rating"] * data["s_max_pu"][0]
     data["p0"][0], data["p1"][0] = limit, -limit
-    data["q0"] = [None] * len(data["q0"])
-    data["q1"] = [None] * len(data["q1"])
+    data["q0"][0], data["q1"][0] = 0.0, 0.0
     facts, _ = _slots(raw, ctx)
     values = {f["metric"]: f["value"] for f in facts}
     assert values["ac_peak_branch_utilisation"] == pytest.approx(100.0)
     assert values["ac_hours_above_rating"] == 0
 
 
-def test_a_p_only_branch_names_why_apparent_flow_is_missing(ac_grid):
+def test_a_branch_without_reactive_flow_names_why_its_flow_is_missing(ac_grid):
+    ctx = ac_grid((True, False))
+    raw = _raw(ctx)
+    # Only the converged snapshot counts: a q0 at the excluded one changes nothing.
+    raw["branch"]["q0"][0] = None
+    raw["branch"]["q1"] = [None] * len(raw["branch"]["q1"])
+    facts, reasons = _slots(raw, ctx)
+    assert {f["metric"]: f["value"] for f in facts} == {"ac_branch_rating": 8.0}
+    assert reasons == {
+        **{m: "reactive_flow_unavailable" for m in ac.METRICS},
+        "ac_branch_rating": None,
+    }
+
+
+def test_an_unverified_solve_without_reactive_flow_stays_unverified(ac_grid):
     ctx = ac_grid((True, False))
     raw = _raw(ctx)
     raw["branch"]["q0"] = [None] * len(raw["branch"]["q0"])
-    raw["branch"]["q1"] = [None] * len(raw["branch"]["q1"])
+    facts, reasons = _slots({**raw, "valid_solve": False}, ctx)
+    assert facts == []
+    assert set(reasons.values()) == {"unverified_solve"}
+
+
+@pytest.mark.parametrize("field", ["p1", "q1"])
+def test_a_missing_terminal_1_flow_at_a_converged_snapshot_is_unavailable(
+    ac_grid, field
+):
+    # Terminal 0 alone never stands in for the branch (GK B4 (1)).
+    ctx = ac_grid((True, False))
+    raw = _raw(ctx)
+    raw["branch"][field][0] = None
     facts, reasons = _slots(raw, ctx)
-    assert reasons["ac_peak_apparent_flow"] == "apparent_power_unavailable"
-    assert {f["metric"] for f in facts} == set(ac.METRICS) - {"ac_peak_apparent_flow"}
+    assert facts == []
+    assert set(reasons.values()) == {"invalid_or_missing_branch_data"}
+
+
+def test_terminal_1_carrying_the_larger_flow_sets_the_values(ac_grid):
+    ctx = ac_grid((True, True))
+    raw = _raw(ctx)
+    data = raw["branch"]
+    # Terminal 0: hypot(1, 1) and hypot(2, 1); terminal 1: hypot(6, 8) = 10 and
+    # hypot(9, 0) = 9 MVA, both above the 8 MVA limit.
+    data["p0"], data["q0"] = [1.0, 2.0], [1.0, 1.0]
+    data["p1"], data["q1"] = [-6.0, -9.0], [-8.0, 0.0]
+    data["s_max_pu"] = [1.0, 1.0]
+    raw["energy_weight"] = [2.0, 0.5]
+    facts, _ = _slots(raw, ctx)
+    values = {f["metric"]: f["value"] for f in facts}
+    assert values["ac_peak_branch_utilisation"] == pytest.approx(100 * 10 / 8)
+    assert values["ac_peak_apparent_flow"] == pytest.approx(10.0)
+    assert values["ac_hours_above_rating"] == pytest.approx(2.5)
+
+
+def test_reactive_flow_at_only_some_converged_snapshots_is_unavailable(ac_grid):
+    ctx = ac_grid((True, True))
+    for k in (0, 1):
+        raw = _raw(ctx)
+        raw["branch"]["q0"][k] = None
+        facts, reasons = _slots(raw, ctx)
+        assert facts == []
+        assert set(reasons.values()) == {"invalid_or_missing_branch_data"}
+
+
+def test_a_zero_weight_snapshot_is_answered_and_counts_no_hours(ac_grid):
+    ctx = ac_grid((True, True))
+    raw = _raw(ctx)
+    # 125 % at the first snapshot, weighted 0; 62.5 % at the second.
+    raw["energy_weight"] = [0.0, 1.0]
+    facts, _ = _slots(raw, ctx)
+    values = {f["metric"]: f["value"] for f in facts}
+    assert values["ac_peak_branch_utilisation"] == pytest.approx(125.0)
+    assert values["ac_hours_above_rating"] == 0.0
+
+
+class _Snapshots:
+    """The network with another snapshot index (and investment periods)."""
+
+    def __init__(self, n, snapshots, periods=()):
+        self._n = n
+        self.snapshots = snapshots
+        self.investment_periods = pd.Index(periods)
+
+    def __getattr__(self, attr):
+        return getattr(self._n, attr)
+
+
+@pytest.mark.parametrize(
+    "scope", ["duplicate", "descending", "too_many", "multiindex", "periods", "range"]
+)
+def test_an_unsupported_snapshot_scope_is_refused(ac_grid, monkeypatch, scope):
+    ctx = ac_grid((True, True))
+    n = ctx.network
+    t0, t1 = n.snapshots
+    index, periods = {
+        "duplicate": (pd.DatetimeIndex([t0, t0]), ()),
+        "descending": (pd.DatetimeIndex([t1, t0]), ()),
+        "too_many": (
+            pd.date_range(t0, periods=calculations.MAX_SNAPSHOTS + 1, freq="h"),
+            (),
+        ),
+        "multiindex": (pd.MultiIndex.from_product([[2030], [t0, t1]]), ()),
+        "periods": (n.snapshots, (2030,)),
+        "range": (pd.RangeIndex(2), ()),
+    }[scope]
+    monkeypatch.setattr(ctx, "network", _Snapshots(n, index, periods))
+    with pytest.raises(ValueError, match="^unsupported_snapshot_scope$"):
+        _raw(ctx)
+
+
+def test_a_name_shared_by_a_line_and_a_transformer_is_ambiguous(ac_grid):
+    ctx = ac_grid((True, True))
+    ctx.network.add("Transformer", "L12", bus0="B1", bus1="B2", s_nom=40, x=0.1)
+    with pytest.raises(ValueError, match="^ambiguous_branch$"):
+        ac.source(ctx, "L12", None)
+    assert ac.source(ctx, "L12", "Line")["branch"]["class"] == "Line"
+
+
+def test_weights_not_aligned_with_the_snapshots_are_refused(ac_grid, monkeypatch):
+    ctx = ac_grid((True, True))
+    monkeypatch.setattr(
+        period_utils,
+        "snapshot_weights",
+        lambda n, column="objective", sns=None: pd.Series(1.0, n.snapshots[::-1]),
+    )
+    with pytest.raises(ValueError, match="^misaligned_source$"):
+        _raw(ctx)
+
+
+@pytest.mark.parametrize(
+    "change, matches",
+    [
+        ({"status": "failed"}, True),
+        ({"condition": "lopf+ac_pf_failed"}, True),
+        ({}, False),
+    ],
+)
+def test_each_part_of_a_valid_solve_is_required(ac_grid, monkeypatch, change, matches):
+    ctx = ac_grid((True, True))
+    ctx.solver_state.update(change)
+    monkeypatch.setattr(
+        calculations, "solve_matches_inputs", lambda ctx, after_pf=False: matches
+    )
+    assert _raw(ctx)["valid_solve"] is False
+
+
+def test_a_valid_solve_checks_the_inputs_after_the_power_flow(ac_grid, monkeypatch):
+    ctx = ac_grid((True, True))
+    monkeypatch.setattr(
+        calculations,
+        "solve_matches_inputs",
+        lambda ctx, after_pf=False: after_pf is True,
+    )
+    assert _raw(ctx)["valid_solve"] is True
 
 
 # ── a warned request tells the model what fails closed ────────────────────

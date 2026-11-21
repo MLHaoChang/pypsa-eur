@@ -595,8 +595,9 @@ Transformer, or the whole network, against `loadflow_summary`'s LOPF definition:
 P-only flow max(|p0|, |p1|) over rating·s_max_pu(t), overload above 1 + 1e-6. They
 refuse whenever AC power-flow results exist. `ac-branch-loading/1`
 (`ac_branch_calculations.py`, opt-in, AA-13) reads one Line or Transformer from the AC
-flow's own results with the tab's `ac_pf` readers (apparent power, a P proxy with a note
-when no q is recorded) over the window's converged snapshots only. Any snapshot not
+flow's own results with the tab's `ac_pf` readers (apparent power; a branch with no q
+recorded answers its rating only, its flow metrics `reactive_flow_unavailable`) over the
+window's converged snapshots only. Any snapshot not
 converged or unknown adds a **required warning slot** (`ac_pf_convergence`, disposition
 `warning`), stored as the evidence's hidden `required_warnings` and put first in the
 receipt's `result_slots` under policy "5" (policy "1" plus warnings, nothing else), so

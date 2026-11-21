@@ -3,8 +3,8 @@
   "ac-branch-loading/1": [
    {
     "metric": "ac_peak_branch_utilisation",
-    "formula": "100 x max over converged t of max(hypot(p0[t], q0[t]), hypot(p1[t], q1[t])) / (rating x s_max_pu[t]); P proxy max(|p0[t]|, |p1[t]|) when no q0 is recorded",
-    "validity": "verified solve with condition lopf+ac_pf_ok and current PF revision (else unverified_solve); over converged snapshots of the window only, every one needs p0, s_max_pu, weight >= 0 and q0 when any is recorded, with rating x s_max_pu > 1e-9, else invalid_or_missing_branch_data; any excluded snapshot adds the required warning slot ac_pf_convergence. Refusals: ac_pf_not_available, ac_pf_convergence_unavailable, ac_pf_not_converged, ac_pf_convergence_unknown, ambiguous_branch, unknown_branch, misaligned_source, unsupported_snapshot_scope, too_many_metrics_for_warnings",
+    "formula": "100 x max over converged t of max(hypot(p0[t], q0[t]), hypot(p1[t], q1[t])) / (rating x s_max_pu[t]); unavailable (reactive_flow_unavailable) when no q0 is recorded",
+    "validity": "verified solve with condition lopf+ac_pf_ok and current PF revision (else unverified_solve); over converged snapshots of the window only, every one needs p0, p1, q0, q1, s_max_pu and weight >= 0, with rating x s_max_pu > 1e-9, else invalid_or_missing_branch_data (no q0 at any of them: the flow metrics read reactive_flow_unavailable, the rating is answered); any excluded snapshot adds the required warning slot ac_pf_convergence. Refusals: ac_pf_not_available, ac_pf_convergence_unavailable, ac_pf_not_converged, ac_pf_convergence_unknown, ambiguous_branch, unknown_branch, misaligned_source, unsupported_snapshot_scope, too_many_metrics_for_warnings",
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/assurance_acceptance/test_p2_request_slots.py::test_a_non_converged_interval_keeps_its_warning_slot_whatever_is_asked",
     "status": "verified",
@@ -18,7 +18,7 @@
    {
     "metric": "ac_hours_above_rating",
     "formula": "sum over converged t of w_generators[t] where utilisation[t] > 1 + tolerance",
-    "validity": "verified solve with condition lopf+ac_pf_ok and current PF revision (else unverified_solve); over converged snapshots of the window only, every one needs p0, s_max_pu, weight >= 0 and q0 when any is recorded, with rating x s_max_pu > 1e-9, else invalid_or_missing_branch_data; any excluded snapshot adds the required warning slot ac_pf_convergence. Refusals: ac_pf_not_available, ac_pf_convergence_unavailable, ac_pf_not_converged, ac_pf_convergence_unknown, ambiguous_branch, unknown_branch, misaligned_source, unsupported_snapshot_scope, too_many_metrics_for_warnings",
+    "validity": "verified solve with condition lopf+ac_pf_ok and current PF revision (else unverified_solve); over converged snapshots of the window only, every one needs p0, p1, q0, q1, s_max_pu and weight >= 0, with rating x s_max_pu > 1e-9, else invalid_or_missing_branch_data (no q0 at any of them: the flow metrics read reactive_flow_unavailable, the rating is answered); any excluded snapshot adds the required warning slot ac_pf_convergence. Refusals: ac_pf_not_available, ac_pf_convergence_unavailable, ac_pf_not_converged, ac_pf_convergence_unknown, ambiguous_branch, unknown_branch, misaligned_source, unsupported_snapshot_scope, too_many_metrics_for_warnings",
     "tolerance": "harness.branch_calculations:OVER_LIMIT_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/assurance_acceptance/test_p2_request_slots.py::test_a_non_converged_interval_keeps_its_warning_slot_whatever_is_asked",
     "status": "verified",
@@ -31,8 +31,8 @@
    },
    {
     "metric": "ac_peak_apparent_flow",
-    "formula": "max over converged t of max(hypot(p0[t], q0[t]), hypot(p1[t], q1[t])); unavailable (apparent_power_unavailable) when no q0 is recorded",
-    "validity": "verified solve with condition lopf+ac_pf_ok and current PF revision (else unverified_solve); over converged snapshots of the window only, every one needs p0, s_max_pu, weight >= 0 and q0 when any is recorded, with rating x s_max_pu > 1e-9, else invalid_or_missing_branch_data; any excluded snapshot adds the required warning slot ac_pf_convergence. Refusals: ac_pf_not_available, ac_pf_convergence_unavailable, ac_pf_not_converged, ac_pf_convergence_unknown, ambiguous_branch, unknown_branch, misaligned_source, unsupported_snapshot_scope, too_many_metrics_for_warnings",
+    "formula": "max over converged t of max(hypot(p0[t], q0[t]), hypot(p1[t], q1[t])); unavailable (reactive_flow_unavailable) when no q0 is recorded",
+    "validity": "verified solve with condition lopf+ac_pf_ok and current PF revision (else unverified_solve); over converged snapshots of the window only, every one needs p0, p1, q0, q1, s_max_pu and weight >= 0, with rating x s_max_pu > 1e-9, else invalid_or_missing_branch_data (no q0 at any of them: the flow metrics read reactive_flow_unavailable, the rating is answered); any excluded snapshot adds the required warning slot ac_pf_convergence. Refusals: ac_pf_not_available, ac_pf_convergence_unavailable, ac_pf_not_converged, ac_pf_convergence_unknown, ambiguous_branch, unknown_branch, misaligned_source, unsupported_snapshot_scope, too_many_metrics_for_warnings",
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/assurance_acceptance/test_p2_request_slots.py::test_a_non_converged_interval_keeps_its_warning_slot_whatever_is_asked",
     "status": "verified",
@@ -46,7 +46,7 @@
    {
     "metric": "ac_branch_rating",
     "formula": "s_nom_opt if s_nom_extendable else s_nom",
-    "validity": "verified solve with condition lopf+ac_pf_ok and current PF revision (else unverified_solve); over converged snapshots of the window only, every one needs p0, s_max_pu, weight >= 0 and q0 when any is recorded, with rating x s_max_pu > 1e-9, else invalid_or_missing_branch_data; any excluded snapshot adds the required warning slot ac_pf_convergence. Refusals: ac_pf_not_available, ac_pf_convergence_unavailable, ac_pf_not_converged, ac_pf_convergence_unknown, ambiguous_branch, unknown_branch, misaligned_source, unsupported_snapshot_scope, too_many_metrics_for_warnings",
+    "validity": "verified solve with condition lopf+ac_pf_ok and current PF revision (else unverified_solve); over converged snapshots of the window only, every one needs p0, p1, q0, q1, s_max_pu and weight >= 0, with rating x s_max_pu > 1e-9, else invalid_or_missing_branch_data (no q0 at any of them: the flow metrics read reactive_flow_unavailable, the rating is answered); any excluded snapshot adds the required warning slot ac_pf_convergence. Refusals: ac_pf_not_available, ac_pf_convergence_unavailable, ac_pf_not_converged, ac_pf_convergence_unknown, ambiguous_branch, unknown_branch, misaligned_source, unsupported_snapshot_scope, too_many_metrics_for_warnings",
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/assurance_acceptance/test_p2_request_slots.py::test_a_non_converged_interval_keeps_its_warning_slot_whatever_is_asked",
     "status": "verified",
