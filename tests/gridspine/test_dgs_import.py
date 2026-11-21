@@ -19,6 +19,7 @@ import math
 import re
 
 import pandapower as pp
+import pandapower.networks as pn
 import pytest
 
 from gridspine.handoff.dgs_writer import write_dgs
@@ -1269,8 +1270,6 @@ def test_an_unbounded_grid_without_snss_takes_the_load_bound(tmp_path):
 
 
 def _issue_example(tmp_path):
-    import pandapower.networks as pn
-
     net = pn.example_simple()
     net.ext_grid[["s_sc_max_mva", "s_sc_min_mva", "rx_max", "rx_min"]] = [
         1000,

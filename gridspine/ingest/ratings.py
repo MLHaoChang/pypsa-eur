@@ -47,3 +47,12 @@ def total_load_mva(loads) -> float:
     """Σ |S| of the in-service loads of a ``n.loads`` frame, in MVA."""
     on = loads[loads["active"].astype(bool)]
     return float(((on["p_set"] ** 2 + on["q_set"] ** 2) ** 0.5).sum())
+
+
+def source_column(index, assumed) -> list[str]:
+    """
+    The marker column for ``index``: "assumed" for names in ``assumed``, else
+    "file". Only "assumed" means assumed; a row added later reads "" or NaN.
+    """
+    assumed = set(assumed)
+    return ["assumed" if name in assumed else "file" for name in index]

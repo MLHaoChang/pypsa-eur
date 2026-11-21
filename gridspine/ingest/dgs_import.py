@@ -72,7 +72,11 @@ from gridspine.ingest.import_result import (
     ImportResult,
     Unmapped,
 )
-from gridspine.ingest.ratings import assumed_rating_mva, total_load_mva
+from gridspine.ingest.ratings import (
+    assumed_rating_mva,
+    source_column,
+    total_load_mva,
+)
 from gridspine.schema.contracts import ContractError
 
 FORMAT_ID = "dgs"
@@ -936,9 +940,7 @@ class _Mapper:
             self.record("ElmXnet", oid, row, "Generator", name)
         if bounded:  # marks a limit results must not read as real
             gens = self.n.generators
-            gens["p_nom_source"] = [
-                "assumed" if g in bounded else "file" for g in gens.index
-            ]
+            gens["p_nom_source"] = source_column(gens.index, bounded)
 
     def _grid_limit(self, item, bus, row):
         """``(p_nom, why)`` for an external grid, which the file leaves unbounded."""

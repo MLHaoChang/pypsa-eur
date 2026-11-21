@@ -53,7 +53,8 @@ means unrated. A line with RATEA/RATE1 = 0 takes the first positive later rating
 higher-voltage end)) MVA, where L is Σ |S| of the in-service loads floored at
 SBASE. Such a line is listed in ``assumed`` and marked ``s_nom_source`` =
 "assumed"; the column exists only when a line is, and the other lines read "file".
-Only "assumed" means assumed: a row added later (empty or NaN) is not. A transformer without a rating takes its
+Only "assumed" means assumed: a row added later (empty or NaN) is not. A
+transformer without a rating takes its
 impedance base SBASE1-2 as ``s_nom``, listed in ``assumed``.
 """
 
@@ -98,7 +99,11 @@ from gridspine.ingest.psse_raw_parse import (
     shunt_siemens,
     transformer_windings,
 )
-from gridspine.ingest.ratings import assumed_rating_mva, total_load_mva
+from gridspine.ingest.ratings import (
+    assumed_rating_mva,
+    source_column,
+    total_load_mva,
+)
 from gridspine.schema.contracts import ContractError
 
 FORMAT_ID = "psse"
@@ -448,7 +453,6 @@ def build_network(case: RawCase):
     # the bound an unrated line takes (gridspine.ingest.ratings): total load
     # floored at SBASE, so a load-free case still scales with its base
     load_mva = total_load_mva(n.loads)
-    bound_load = max(load_mva, sb)
     assumed_lines: list[str] = []
     n_lines = n_branch_tr = 0
     if len(br):
@@ -511,8 +515,7 @@ def build_network(case: RawCase):
                 phys = branch_physical(case, r)
                 s_nom = rate
                 if rate <= 0:
-                    s_nom, why = _line_rating(r, rate_cols, bound_load, kv[i], kv[j])
-                    why = why.format(load=load_mva, sb=sb)
+                    s_nom, why = _line_rating(r, rate_cols, load_mva, sb, kv[i], kv[j])
                     assumed_lines.append(nm)
                     assumed.append(Assumed(nm, "thermal rating (MVA)", s_nom, why))
                 n.add(
@@ -665,9 +668,7 @@ def build_network(case: RawCase):
         ]
 
     if assumed_lines:  # marks a rating results must not read as real
-        n.lines["s_nom_source"] = [
-            "assumed" if nm in assumed_lines else "file" for nm in n.lines.index
-        ]
+        n.lines["s_nom_source"] = source_column(n.lines.index, assumed_lines)
 
     lone = _lone_buses(n)
     if lone:
@@ -695,10 +696,10 @@ def build_network(case: RawCase):
     return n, counts, assumed, warnings
 
 
-def _line_rating(r, rate_cols, bound_load, kv_from, kv_to):
+def _line_rating(r, rate_cols, load_mva, sb, kv_from, kv_to):
     """
     ``(s_nom, why)`` for a line whose first rating is 0: the first positive
-    later rating, else the never-binding bound. ``why`` has ``{load}``/``{sb}``.
+    later rating, else the never-binding bound (SBASE ``sb`` floors the load).
     """
     first = rate_cols[0]
     for col in rate_cols[1:]:
@@ -707,11 +708,11 @@ def _line_rating(r, rate_cols, bound_load, kv_from, kv_to):
                 f"{first} is 0; {col} = {r[col]:g} MVA is used, the first rating "
                 "the file gives. Set the normal rating before you read loading"
             )
-    bound = assumed_rating_mva(bound_load, kv_from, kv_to)
+    bound = assumed_rating_mva(max(load_mva, sb), kv_from, kv_to)
     return bound, (
         f"the case gives no rating ({first} = 0 means unrated), so a bound that "
-        f"never binds is used: 10 × the total load {{load:.1f}} MVA (at least SBASE "
-        f"{{sb:g}} MVA), or the {max(kv_from, kv_to):g} kV class floor if higher. "
+        f"never binds is used: 10 × the total load {load_mva:.1f} MVA (at least SBASE "
+        f"{sb:g} MVA), or the {max(kv_from, kv_to):g} kV class floor if higher. "
         "Set a real rating before you read loading"
     )
 

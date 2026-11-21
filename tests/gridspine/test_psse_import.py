@@ -20,6 +20,7 @@ from gridspine.handoff.raw_writer import SECTIONS, write_raw
 from gridspine.ingest.import_result import ImportFormatError, ImportResult
 from gridspine.ingest.psse_import import THRSHZ, read_psse
 from gridspine.ingest.psse_raw_parse import read_raw
+from gridspine.ingest.ratings import assumed_rating_mva
 
 FIX = Path(__file__).parent / "fixtures" / "psse"
 logging.getLogger("pypsa").setLevel(logging.ERROR)
@@ -1090,14 +1091,10 @@ def test_features_rated_line_keeps_its_ratea(features):
     ],
 )
 def test_assumed_bound_rule(load_mva, kv, want):
-    from gridspine.ingest.ratings import assumed_rating_mva
-
     assert assumed_rating_mva(load_mva, kv) == want
 
 
 def test_assumed_bound_takes_the_higher_end_voltage():
-    from gridspine.ingest.ratings import assumed_rating_mva
-
     assert assumed_rating_mva(1.0, 20.0, 380.0) == 3000.0
     assert assumed_rating_mva(1.0, 0.0, 220.0) == 1000.0
 
