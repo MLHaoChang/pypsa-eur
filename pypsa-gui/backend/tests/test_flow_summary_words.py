@@ -22,10 +22,11 @@ def facts(**kw):
 def test_connection_names_its_links_in_plain_words():
     assert (
         _summary(
-            "connection", facts(
+            "connection",
+            facts(
                 connection_links=["grid_import"],
                 import_cap=ImportCapacity(links=("grid_import",), mw=40.0),
-            )
+            ),
         )
         == "Grid import, 40 MW"
     )
