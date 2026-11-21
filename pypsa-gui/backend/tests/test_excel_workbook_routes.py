@@ -172,6 +172,22 @@ def test_not_carried_is_the_about_sheet_s_list(client):
     )  # G8: unsaved edits are not in it
 
 
+def test_the_template_shows_the_form_s_input_fields_and_no_derived_one(client):
+    import openpyxl
+
+    from services.asset_schema.fields import fields_for
+
+    ws = openpyxl.load_workbook(
+        io.BytesIO(client.get("/api/workbook/template").content)
+    )["Generators"]
+    keys = [c.value for c in ws[3]]
+    labels = dict(zip(keys, [c.value for c in ws[1]], strict=True))
+    form = {f.key: f for f in fields_for("Generator")}
+    assert keys[0] == "name" and keys.count("name") == 1
+    assert labels["p_nom"] == form["p_nom"].label
+    assert form["capital_cost"].derived and "capital_cost" not in keys
+
+
 # ── preview ──────────────────────────────────────────────────────────────────
 
 
@@ -226,6 +242,55 @@ def test_a_workbook_rate_the_rate_rule_refuses_creates_nothing(client, store):
     assert r.status_code == 422 and _kind(r) == "import_unreadable", r.text
     assert "discount rate" in r.json()["detail"]["message"]
     assert store() == before
+
+
+def test_an_older_layout_imports_as_a_new_project_named_after_its_file(
+    client, _auth_db
+):
+    r = client.post(
+        "/api/workbook/import",
+        files={"file": ("C:/Users/me/Grid A.xlsx", _older_layout(), MIME)},
+        data={"expected_sha256": _sha(_older_layout())},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "Grid A"
+    assert r.json()["report"]["source_files"] == ["Grid A.xlsx"]
+    folder = _saved(_auth_db[1], r.json()["project_id"])
+    cfg = json.loads((folder / "solver_config.json").read_text())
+    from services.solver_service import SolverConfig
+
+    assert cfg["discount_rate"] == SolverConfig().discount_rate
+    assert not (folder / "user_ts.json").exists()
+
+
+def test_a_file_name_with_no_stem_suggests_a_plain_name(client):
+    r = _preview(client, _workbook(), " .xlsx")
+    assert r.status_code == 200 and r.json()["suggested_name"] == "Imported workbook"
+
+
+def test_an_unreadable_file_s_message_names_the_uploaded_file(client):
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    wb.active.title = "notes"
+    buf = io.BytesIO()
+    wb.save(buf)
+    r = _preview(client, buf.getvalue(), "Notes 2030.xlsx")
+    assert r.status_code == 422 and _kind(r) == "import_unreadable", r.text
+    assert r.json()["detail"]["message"].startswith(
+        "Notes 2030.xlsx has none of the sheets"
+    )
+
+
+def test_a_build_without_gridspine_answers_503(client, monkeypatch):
+    import sys
+
+    import gridspine.ingest
+
+    monkeypatch.setitem(sys.modules, "gridspine.ingest.excel_export", None)
+    monkeypatch.delattr(gridspine.ingest, "excel_export")
+    r = client.get("/api/workbook/template")
+    assert r.status_code == 503 and "not available in this build" in r.text
 
 
 # ── G2: the open network's gates do not apply, because it is never touched ──
@@ -350,6 +415,21 @@ def test_a_failed_sidecar_write_removes_the_row_and_the_folder(
     before = store()
     r = _import(client, _workbook(), name="Half written")
     assert r.status_code == 500 and _kind(r) == "import_write_failed", r.text
+    assert store() == before
+
+
+def test_a_refusal_after_the_row_exists_keeps_its_status_and_leaves_nothing(
+    client, store, monkeypatch
+):
+    from fastapi import HTTPException
+
+    def refuse(*a, **k):
+        raise HTTPException(422, {"error_kind": "invalid_edit_value", "message": "no"})
+
+    monkeypatch.setattr(excel_workbook, "_write_files", refuse)
+    before = store()
+    r = _import(client, _workbook(), name="Refused late")
+    assert r.status_code == 422 and _kind(r) == "invalid_edit_value", r.text
     assert store() == before
 
 
@@ -524,6 +604,30 @@ def test_a_project_s_workbook_round_trips_as_saved(
         ("loads", "p_set", "L1")
     }
     assert inputs(copied) == want
+
+
+@pytest.mark.parametrize("broken", ["solver_config.json", "user_ts.json", None])
+def test_a_project_s_saved_sidecars_are_read_or_refused_by_name(
+    client,
+    baseline,  # noqa: F811
+    broken,
+):
+    _, project_id, path = baseline
+    (path / "user_ts.json").unlink(missing_ok=True)
+    if broken is None:
+        (path / "solver_config.json").unlink()  # never saved: the defaults
+    else:
+        (path / broken).write_text("{not json")
+    r = client.get(f"/api/projects/{project_id}/workbook")
+    if broken is None:
+        assert r.status_code == 200, r.text
+        assert _preview(client, r.content).status_code == 200
+    else:
+        words = {
+            "solver_config.json": "saved solver settings cannot be read",
+            "user_ts.json": "saved time series (user_ts.json) cannot be read",
+        }[broken]
+        assert r.status_code == 422 and words in r.json()["detail"], r.text
 
 
 def test_a_cross_org_workbook_is_the_same_404_as_no_project(

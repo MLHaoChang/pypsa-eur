@@ -60,12 +60,12 @@ def catalogue() -> dict:
             specs = fields_for(cls)
         except KeyError:
             continue
-        out[cls] = [L.Column("name", "Name", kind="text")] + [
+        out[cls] = [
             L.Column(
                 f.key, f.label, f.unit_display, float(f.scale), f.kind, tuple(f.options)
             )
             for f in specs
-            if not f.derived and f.key != "name"
+            if not f.derived
         ]
     return out
 
@@ -157,9 +157,7 @@ class Prepared:
 
     @property
     def suggested_name(self) -> str:
-        name = str(self.network.name or "").strip()
-        if name and name != "Unnamed Network":
-            return name
+        """The upload's file name: an exported workbook is named after its project."""
         return pathlib.PurePath(self.filename).stem.strip() or "Imported workbook"
 
 
@@ -209,7 +207,9 @@ def prepare(data: bytes, filename: str | None, *, new_project: bool) -> Prepared
                 413, {"error_kind": "import_expansion_too_large", "message": str(exc)}
             ) from exc
         except L.ImportFormatError as exc:
-            raise _unreadable(f"{exc} The open network is unchanged.") from exc
+            # The reader names the file it opened: the user's name, not the temporary one.
+            message = str(exc).replace(path.name, filename)
+            raise _unreadable(f"{message} The open network is unchanged.") from exc
         except Exception as exc:  # noqa: BLE001 - any reader failure is one refusal
             logger.warning("Excel workbook refused as unreadable", exc_info=True)
             raise _unreadable(
