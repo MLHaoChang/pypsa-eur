@@ -119,6 +119,29 @@ it('shows a required warning slot and reads the request incomplete (AA-13)', () 
   expect(screen.queryByText('Requested results checked')).toBeNull()
 })
 
+it('shows a warning once, as its worded row, with no raw slot key or reason code (AA-13)', () => {
+  const warned: AnswerReceipt = {
+    ...receipt, policy_version: '5', reviewer_status: 'not_required',
+    // The backend's receipt lists the warning slot again as a limitation.
+    limitations: [
+      'ac_pf_convergence: ac_pf_not_converged (2 of 3 snapshots in the window converged)',
+      'Interpretation withheld: unavailable',
+    ],
+    request_scope: { profile: 'ac-branch-loading/1', entity_id: 'Line_BC' },
+    result_slots: [
+      { metric: 'ac_pf_convergence', disposition: 'warning', reason: 'ac_pf_not_converged (2 of 3 snapshots in the window converged)',
+        valid_snapshots: 2, requested_snapshots: 3, excluded_indices: ['2030-01-01T02:00:00'] },
+      { metric: 'ac_branch_rating', disposition: 'answered', valid_snapshots: 2, requested_snapshots: 3 },
+    ],
+  }
+  render(<CheckedEvidenceCard answerId="answer-1" receipt={warned} />)
+  const card = screen.getByTestId('checked-evidence-card')
+  expect(card.textContent).not.toContain('ac_pf_')
+  expect(screen.getAllByTestId('checked-warning-slot')).toHaveLength(1)
+  // Any other limitation is still shown.
+  expect(screen.getByText('Limitation: Interpretation withheld: unavailable')).toBeTruthy()
+})
+
 it('words each warning reason in plain text, with no slot key or dash (AA-13)', () => {
   // Parity with the backend's warning states (tests/test_ac_branch_loading_assurance.py reads this list).
   expect(WARNING_REASON_CODES).toEqual(['ac_pf_not_converged', 'ac_pf_convergence_unknown'])
