@@ -27,5 +27,12 @@ export function nk(projectId: string | null, root: string, ...rest: unknown[]): 
 /** The scene's query root. Its GET carries the caller's own `my_previews`, so it is per user (SC-07 J5). */
 export const SITE_SCENE_ROOT = 'site-scene'
 
+/**
+ * The solve queue's query root (`QUEUE_KEY` in hooks/useSolveQueue). Its rows
+ * carry the caller's own `started_by_me` and `can_dismiss`, so it is per user
+ * (run progress slice 3, GK B3 (3) #1716).
+ */
+export const SOLVE_QUEUE_ROOT = 'solveQueue'
+
 /** Query roots whose data belongs to the signed-in user: dropped when that user changes (SC-07 J5). */
-export const USER_SCOPED_ROOTS: readonly string[] = [SITE_SCENE_ROOT]
+export const USER_SCOPED_ROOTS: readonly string[] = [SITE_SCENE_ROOT, SOLVE_QUEUE_ROOT]
