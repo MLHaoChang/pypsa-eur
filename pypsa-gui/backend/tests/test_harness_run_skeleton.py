@@ -471,7 +471,7 @@ def _case_tools_read_the_run_project(run_ctx, monkeypatch):
     from services.study.runner import _on_ctx
     seen = {}
 
-    def start(body=None):
+    def start(body=None, user=None):  # the handler's signature (viewer-role 02 added `user`)
         seen["start"] = str(PyPSAService.get_active_context().project_uuid)
         return {"status": "running"}
 
