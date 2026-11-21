@@ -1,6 +1,7 @@
 import { manualNavigation, navigationEpoch, withAssistantNavigation } from '../utils/navigationEpoch'
 import { useUIStore, type CanvasView, type PropertiesEditRequest } from '../store/uiStore'
 import { withReturnFrom } from '../layout/flowNavigation'
+import { openParameter, resolveEntry } from '../catalogue/openParameter'
 import { HUB_STEPS, useHubDesignStore, type HubStep } from '../pages/hubDesign/hubDesignStore'
 
 /**
@@ -66,8 +67,16 @@ function _normalizePanelId(raw: string): string {
 /** The panels whose sections chat can name (backend `_PANEL_SECTIONS`). */
 const SECTION_PANELS: ReadonlySet<string> = new Set(['campusElectrical', 'campusStudy', 'campusResults', 'gridspine'])
 
+/** Every `ui_event` kind this file handles; any other kind is read as `navigate`. */
+export const NAVIGATE_KINDS = [
+  'navigate', 'open_panel', 'select_component', 'open_properties', 'open_asset_detail',
+  'open_run_result', 'set_snapshot', 'parameter',
+] as const
+
 type NavigationRequest = {
   kind?: string
+  /** Kind `parameter` (expert-catalogue §7.1): the catalogue entry to open on asset `name`. */
+  entry_id?: string
   panel_id?: string
   results_tab?: string
   bottom_tab?: string
@@ -143,6 +152,18 @@ function apply(d: NavigationRequest, modelTurn: number | null = null) {
     ui.setSelectedComponent({ type: d.component_class, name: d.name })
     ui.openRightPanel()
     ui.requestPropertiesEdit({ type: d.component_class as PropertiesEditRequest['type'], name: d.name })
+    return
+  }
+  if (d.kind === 'parameter') {
+    // The entry may need the catalogue fetched first; a later navigation wins over it.
+    const name = d.name
+    if (!d.entry_id || !name) return
+    const epoch = navigationEpoch()
+    void resolveEntry(d.entry_id).then(entry => {
+      if (!entry || navigationEpoch() !== epoch) return
+      if (d.component_class && d.component_class !== entry.scope) return
+      withAssistantNavigation(() => openParameter({ entry, asset: name }))
+    }).catch(() => undefined)
     return
   }
   if (d.kind === 'open_asset_detail' && d.component_class && d.name) {

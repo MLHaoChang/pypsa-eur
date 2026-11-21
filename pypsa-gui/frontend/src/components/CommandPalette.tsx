@@ -5,7 +5,7 @@ import {
   Search, X, FolderOpen, Camera, Save as SaveIcon, Settings2,
   TrendingUp, Clock, Zap, RotateCcw, LayoutDashboard,
   Sun, Moon, Rows2, Rows3, GitBranch, Layers, ListChecks, LayoutGrid, Users,
-  SlidersHorizontal, MessageSquare, Compass,
+  SlidersHorizontal, MessageSquare, Compass, Gauge,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Dialog } from './Dialog'
@@ -19,13 +19,17 @@ import { invalidateNetworkQueries, saveProjectQuietly, formatRelativeTime, switc
 import { nk } from '../utils/queryKeys'
 import { useLocalSettingsAvailable } from '../hooks/useLocalSettings'
 import { useLLMSettingsAvailable } from '../hooks/useLLMSettings'
+import { useCatalogue } from '../catalogue/useCatalogue'
+import { buildParameterIndex } from '../catalogue/searchIndex'
+import { parameterRows, type PaletteAsset } from '../catalogue/parameterRows'
+import { openParameter } from '../catalogue/openParameter'
 import type { Bus, Generator, Load, Line, Link, StorageUnit, Store, Transformer } from '../api/types'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 // Command "kinds" determine the row icon + group heading. They also drive
 // the ⌘P pre-filter (only kind='project' commands shown).
-type CommandKind = 'action' | 'project' | 'snapshot' | 'asset'
+type CommandKind = 'action' | 'project' | 'snapshot' | 'asset' | 'parameter'
 
 interface Command {
   id: string                    // stable key for the row
@@ -117,7 +121,8 @@ function PaletteShell({ mode, onClose, onRequestConfirm }: {
   // Build commands. useCommands hook pulls from the various caches and
   // returns a flat, already-grouped list. We then fuzzy-filter on the query.
   const all = useCommands(mode)
-  const filtered = useMemo(() => fuzzyFilter(all, query), [all, query])
+  const parameters = useParameterCommands(mode, query)
+  const filtered = useMemo(() => [...fuzzyFilter(all, query), ...parameters], [all, query, parameters])
 
   // Single dispatch chokepoint for BOTH the Enter path and the click path.
   // A destructive command is refused here or nowhere.
@@ -147,7 +152,7 @@ function PaletteShell({ mode, onClose, onRequestConfirm }: {
   const groups = useMemo(() => {
     const order: CommandKind[] = mode === 'projects'
       ? ['project']
-      : ['action', 'project', 'snapshot', 'asset']
+      : ['action', 'project', 'snapshot', 'asset', 'parameter']
     const out: Array<{ kind: CommandKind; rows: Command[] }> = []
     for (const k of order) {
       const rows = filtered.filter(c => c.kind === k)
@@ -255,6 +260,50 @@ const GROUP_LABELS: Record<CommandKind, string> = {
   project: 'Projects',
   snapshot: 'Snapshots',
   asset: 'Assets',
+  parameter: 'Parameters',
+}
+
+// Asset queries — only fetched when user opens palette in 'all' mode so
+// first-load isn't paying for them. Each component class is a separate
+// query so they hit the React Query cache shared with the asset tables.
+// The asset rows and the Parameters rows read the same lists.
+function usePaletteAssets(mode: PaletteMode, currentProject: string | null) {
+  const enableAssets = mode === 'all'
+  const { data: buses = [] }        = useQuery({ queryKey: nk(currentProject, 'buses'),         queryFn: networkApi.getBuses,         enabled: enableAssets, staleTime: 30_000 })
+  const { data: generators = [] }   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators,    enabled: enableAssets, staleTime: 30_000 })
+  const { data: loads = [] }        = useQuery({ queryKey: nk(currentProject, 'loads'),         queryFn: networkApi.getLoads,         enabled: enableAssets, staleTime: 30_000 })
+  const { data: lines = [] }        = useQuery({ queryKey: nk(currentProject, 'lines'),         queryFn: networkApi.getLines,         enabled: enableAssets, staleTime: 30_000 })
+  const { data: links = [] }        = useQuery({ queryKey: nk(currentProject, 'links'),         queryFn: networkApi.getLinks,         enabled: enableAssets, staleTime: 30_000 })
+  const { data: storageUnits = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits,  enabled: enableAssets, staleTime: 30_000 })
+  const { data: stores = [] }       = useQuery({ queryKey: nk(currentProject, 'stores'),        queryFn: networkApi.getStores,        enabled: enableAssets, staleTime: 30_000 })
+  const { data: transformers = [] } = useQuery({ queryKey: nk(currentProject, 'transformers'),  queryFn: networkApi.getTransformers,  enabled: enableAssets, staleTime: 30_000 })
+  return { buses, generators, loads, lines, links, storageUnits, stores, transformers }
+}
+
+// The "Parameters" source (expert-catalogue §4.3): catalogue entries ranked by
+// `searchIndex`, not the fuzzy scorer, each shown on the project's assets of its
+// class. Only for a typed query; Enter opens the field in either mode.
+function useParameterCommands(mode: PaletteMode, query: string): Command[] {
+  const currentProject = useUIStore(s => s.currentProject)
+  const { buses, generators, loads, lines, links, storageUnits, stores, transformers } = usePaletteAssets(mode, currentProject)
+  const catalogue = useCatalogue(mode === 'all')
+  const index = useMemo(() => (catalogue ? buildParameterIndex(catalogue.entries) : null), [catalogue])
+  return useMemo(() => {
+    if (mode !== 'all' || !catalogue || !index || !query.trim()) return []
+    const byClass: Record<string, readonly PaletteAsset[]> = {
+      Bus: buses, Generator: generators, Load: loads, Line: lines, Link: links,
+      StorageUnit: storageUnits, Store: stores, Transformer: transformers,
+    } as unknown as Record<string, readonly PaletteAsset[]>
+    return parameterRows(index.search(query), catalogue, byClass).map(r => ({
+      id: r.id,
+      kind: 'parameter' as const,
+      title: r.title,
+      subtitle: r.subtitle,
+      hint: r.hint,
+      icon: <Gauge size={12} />,
+      run: () => { if (r.target) openParameter(r.target) },
+    }))
+  }, [mode, catalogue, index, query, buses, generators, loads, lines, links, storageUnits, stores, transformers])
 }
 
 // ── Command sources ──────────────────────────────────────────────────────────
@@ -310,18 +359,7 @@ function useCommands(mode: PaletteMode): Command[] {
     staleTime: 5_000,
   })
 
-  // Asset queries — only fetched when user opens palette in 'all' mode so
-  // first-load isn't paying for them. Each component class is a separate
-  // query so they hit the React Query cache shared with the asset tables.
-  const enableAssets = mode === 'all'
-  const { data: buses = [] }        = useQuery({ queryKey: nk(currentProject, 'buses'),         queryFn: networkApi.getBuses,         enabled: enableAssets, staleTime: 30_000 })
-  const { data: generators = [] }   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators,    enabled: enableAssets, staleTime: 30_000 })
-  const { data: loads = [] }        = useQuery({ queryKey: nk(currentProject, 'loads'),         queryFn: networkApi.getLoads,         enabled: enableAssets, staleTime: 30_000 })
-  const { data: lines = [] }        = useQuery({ queryKey: nk(currentProject, 'lines'),         queryFn: networkApi.getLines,         enabled: enableAssets, staleTime: 30_000 })
-  const { data: links = [] }        = useQuery({ queryKey: nk(currentProject, 'links'),         queryFn: networkApi.getLinks,         enabled: enableAssets, staleTime: 30_000 })
-  const { data: storageUnits = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits,  enabled: enableAssets, staleTime: 30_000 })
-  const { data: stores = [] }       = useQuery({ queryKey: nk(currentProject, 'stores'),        queryFn: networkApi.getStores,        enabled: enableAssets, staleTime: 30_000 })
-  const { data: transformers = [] } = useQuery({ queryKey: nk(currentProject, 'transformers'),  queryFn: networkApi.getTransformers,  enabled: enableAssets, staleTime: 30_000 })
+  const { buses, generators, loads, lines, links, storageUnits, stores, transformers } = usePaletteAssets(mode, currentProject)
 
   return useMemo(() => {
     const cmds: Command[] = []
