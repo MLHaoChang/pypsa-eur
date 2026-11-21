@@ -42,11 +42,13 @@ export const STATE_PILL: Record<NonValueState, { label: string; tone: string }> 
   study_only: { label: 'From the study', tone: 'text-info bg-info/12' },
 }
 
-export function StatePill({ state }: { state: NonValueState }) {
+/** `label` names what is missing when the generic words would be wrong
+ *  ("Investment case not run yet" on a solved project). */
+export function StatePill({ state, label }: { state: NonValueState; label?: string }) {
   const pill = STATE_PILL[state]
   return (
     <span className={`self-start whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${pill.tone}`}>
-      {pill.label}
+      {label ?? pill.label}
     </span>
   )
 }
