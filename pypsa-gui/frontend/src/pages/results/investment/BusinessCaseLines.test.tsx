@@ -10,6 +10,7 @@ import {
   type BusinessCaseConfig, type BusinessCaseOptions, type LineItem,
 } from '../../../api/businessCase'
 import BusinessCaseLines from './BusinessCaseLines'
+import { financeApi } from '../../../api/finance'
 import { expectAllButtonsNamed } from '../../../test-utils/accessibleName'
 
 vi.mock('../../../api/businessCase', async (importOriginal) => {
@@ -383,5 +384,36 @@ describe('the volume factor strip', () => {
     fireEvent.click(within(line).getByRole('button', { name: /Remove/ }))
     expect(screen.getByTestId('bc-unsaved')).toBeTruthy()
     expect((await saved()).volume_factor_by_year).toEqual({ 2031: 0.6 })
+  })
+})
+
+describe('a capex line with no terminal-value method (#21)', () => {
+  const finance = (terminal_value?: { method: string }) =>
+    vi.mocked(financeApi.getFinance).mockResolvedValue(
+      { finance: { currency: 'EUR', ...(terminal_value ? { terminal_value } : {}) }, digest: 'f1', status: 'ok' } as never)
+  afterEach(() => { finance() })
+
+  it('says the plant has no end-of-life value and links to the setting', async () => {
+    finance({ method: 'none' })
+    mount(config(CAPEX))
+    const note = await screen.findByTestId('bc-terminal-missing')
+    expect(note.textContent).toContain('Plant capex has no end-of-life value: choose a terminal-value method that can price it.')
+    expect(within(note).getByTestId('bc-open-terminal').textContent).toContain('Terminal value')
+  })
+  it('says it too when the finance inputs leave the method unset', async () => {
+    finance()
+    mount(config(CAPEX))
+    expect(await screen.findByTestId('bc-terminal-missing')).toBeTruthy()
+  })
+  it('says nothing once the project has a method, or when there is no capex line', async () => {
+    finance({ method: 'remaining_life_annuity' })
+    mount(config(CAPEX))
+    await screen.findByLabelText('Unit, Plant')
+    expect(screen.queryByTestId('bc-terminal-missing')).toBeNull()
+    cleanup()
+    finance({ method: 'none' })
+    mount(config(H2))
+    await screen.findByLabelText('Unit, H2 sales')
+    expect(screen.queryByTestId('bc-terminal-missing')).toBeNull()
   })
 })

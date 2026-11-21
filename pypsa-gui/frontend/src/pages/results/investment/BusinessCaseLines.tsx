@@ -318,6 +318,10 @@ export default function BusinessCaseLines() {
   // The report's currency, else the finance inputs' (blank reads EUR, as their form says).
   const currency = (study.data?.report?.currency as string | undefined)
     ?? (finance.data?.finance ? (finance.data.finance.currency || 'EUR') : null)
+  // A capex line with no terminal-value method has no end-of-life value: say so, beside the
+  // lines (#21). Read from the project's own saved finance inputs.
+  const noTerminal = lines.some(l => l.kind === 'capex') && !!finance.data?.finance
+    && ((finance.data.finance as { terminal_value?: { method?: string } }).terminal_value?.method ?? 'none') === 'none'
   const setLines = (next: LineItem[]) => {
     // A break-even line must name a revenue line (the validator's rule): one renamed,
     // retyped or removed leaves the choice empty rather than a refused save.
@@ -642,6 +646,12 @@ export default function BusinessCaseLines() {
       {message && <p role="status" className={message.tone === 'ok' ? 'text-success' : 'text-danger'}>{message.text}
         {message.finance && <>{' '}<button type="button" className="underline" data-testid="bc-open-finance"
           onClick={() => openPanel('commercial', 'economics')}>Finance inputs ›</button></>}</p>}
+      {noTerminal && (
+        <p className="text-warn" data-testid="bc-terminal-missing">
+          Plant capex has no end-of-life value: choose a terminal-value method that can price it.{' '}
+          <button type="button" className="underline" data-testid="bc-open-terminal"
+            onClick={() => openPanel('commercial', 'economics')}>Terminal value ›</button></p>
+      )}
       <div className="flex flex-wrap gap-2 items-center">
         <button type="button" className="px-2 py-1 rounded bg-accent text-on-accent disabled:opacity-50"
                 disabled={!dirty || saving || draft === null || vfOff}
