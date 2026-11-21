@@ -6,6 +6,9 @@
 // beside each field, in the backend's words and on its field keys, so a
 // server refusal lands on the same field. Nothing asked here is asked again
 // later in Guided: the Site card shows it read-only.
+import toast from 'react-hot-toast'
+import { emptyLocation, validateLocation, writeCreatedLocation, type LocationDraft } from '../siteLocation'
+import { SiteLocationFields } from './SiteLocationFields'
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { projectsApi } from '../../../api/projects'
@@ -22,7 +25,7 @@ import {
 const mwFigure = (x: number) => kpiFigure(String(x), 'MW').value.replace(/\.0+$|(\.\d*?)0+$/, '$1')
 
 interface CreateMutation {
-  mutate: (arg: TemplateCreate, opts?: { onError?: (e: unknown) => void }) => void
+  mutate: (arg: TemplateCreate, opts?: { onError?: (e: unknown) => void}) => void
   isPending: boolean
 }
 
@@ -58,12 +61,14 @@ function SiteFormBody({ form, create, disabledReason, onCancel, seed }: {
   const [draft, setDraft] = useState<SiteDraft>(
     () => (seed ? draftFromSite(seed.params, seed.entered) : initialDraft(form)))
   const [server, setServer] = useState<{ field: string; message: string } | null>(null)
+  const [loc, setLoc] = useState<LocationDraft>(emptyLocation)
+  const locErrors = validateLocation(loc)
   const rootRef = useRef<HTMLDivElement>(null)
   const errors = useMemo(() => {
     const e = validate(draft, form.bounds)
     return server && !e[server.field] ? { ...e, [server.field]: server.message } : e
   }, [draft, form.bounds, server])
-  const nErrors = Object.keys(errors).length
+  const nErrors = Object.keys(errors).length + Object.keys(locErrors).length
   const update = (d: SiteDraft) => { setDraft(d); setServer(null) }
   const v = draft.values
   const bounds = form.bounds
@@ -77,9 +82,10 @@ function SiteFormBody({ form, create, disabledReason, onCancel, seed }: {
     el?.scrollIntoView?.({ block: 'center' })
     el?.focus()
   }
+  const saveLocation = (project: string) => writeCreatedLocation(project, loc).then(m => { if (m) toast.error(m) })
   const submit = () => {
     if (nErrors) { focusFirst(); return }
-    create.mutate({ templateId: 'eh_site', params: requestBody(draft) }, {
+    create.mutate({ templateId: 'eh_site', params: requestBody(draft), afterCreate: saveLocation }, {
       onError: (e: unknown) => { const r = siteParamsRefusal(e); if (r) setServer(r) },
     })
   }
@@ -250,6 +256,8 @@ function SiteFormBody({ form, create, disabledReason, onCancel, seed }: {
         </label>
         <FieldError id={errId('ride_through')} error={errors.ride_through} />
       </Group>
+
+      <SiteLocationFields value={loc} errors={locErrors} onChange={setLoc} />
 
       <div className="flex flex-wrap items-center gap-3">
         <button type="button" data-testid="site-create" onClick={submit}
