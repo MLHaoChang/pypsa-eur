@@ -640,6 +640,26 @@ def test_r4_study_with_voll_zero(client, tmp_projects_dir, monkeypatch):
     assert {x["section"] for x in body["notes"]} == {"project"}
 
 
+def test_a_two_way_grid_import_is_refused_by_the_commercial_binding_first(
+        client, tmp_projects_dir, monkeypatch):
+    """GK B2 sweep item 9: the data centre ships a commercial block, so a two-way
+    grid import is refused at section 7 before any study refusal, in plain words
+    that say what to change."""
+    name = _create(client, "eh_datacenter", "two_way")
+    link = client.get("/api/network/links").json()
+    grid = next(r for r in link if r["name"] == "grid_import")
+    assert client.put("/api/network/links/grid_import",
+                      json={**grid, "p_min_pu": -1.0}).status_code == 200
+    body = _flow(client, name)
+    assert body["run_ready"] is False
+    blocker = body["run_blocker"]
+    assert blocker["section"] == "commercial" and blocker["code"] == "commercial.binding_invalid"
+    msg = blocker["detail"]  # the plain words; `message` is the issue's title
+    assert "grid connection link grid_import allows reverse flow" in msg
+    assert "Make it one-way (set its minimum power, p_min_pu, to 0)" in msg
+    assert "commercial.poc_link" not in msg
+
+
 def test_r4_a_study_start_refusal_blocks_run(client, tmp_projects_dir, monkeypatch,
                                              project_storage_dir):
     """The study's own refusal (here: an energy-import cap on a two-way import
@@ -649,6 +669,11 @@ def test_r4_a_study_start_refusal_blocks_run(client, tmp_projects_dir, monkeypat
     meta = json.loads(path.read_text())
     meta["pack_overrides"] = {**meta["pack_overrides"], "import_energy_mwh_per_year": 1000.0}
     path.write_text(json.dumps(meta))
+    # The template's PoC binding refuses a two-way import (WALK-IMPROVE-1 b ships a
+    # commercial block); without it the study's own refusal is the blocker.
+    _cfg = client.get("/api/simulation/solver_config").json()
+    assert client.put("/api/simulation/solver_config",
+                      json={**_cfg, "commercial": None}).status_code == 200
     link = client.get("/api/network/links").json()
     grid = next(r for r in link if r["name"] == "grid_import")
     assert client.put("/api/network/links/grid_import",
@@ -688,11 +713,13 @@ def test_r4_in_flight(client, site, monkeypatch):
 TEMPLATE_STATES = {
     # R location → warning (site_location_missing). R connection limits and
     # ramp, R LOLE goal: DC 02's assumed ledger rows → connection and
-    # scenarios warning ("to check").
+    # scenarios warning ("to check"). Its shipped finance inputs and tax rule
+    # (WALK-IMPROVE-1 b) are assumed ledger rows → commercial warning; the
+    # existing campus typed sunk (overnight cost 0) is one → assets warning.
     "eh_datacenter": {"project": "warning", "carriers": "complete",
                       "connection": "warning", "loads": "complete",
                       "assets": "warning", "profiles": "complete",
-                      "commercial": "complete", "scenarios": "warning"},
+                      "commercial": "warning", "scenarios": "warning"},
     # Islanded: connection `not_needed`. Assumed island data → assets warning.
     # DC 02's assumed LOLE goal → scenarios warning.
     "eh_microgrid": {"project": "warning", "carriers": "complete",

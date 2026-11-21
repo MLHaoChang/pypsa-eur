@@ -2628,8 +2628,19 @@ def _bind_template_solver_config(user, cfg_path: pathlib.Path) -> list[dict]:
             logger.exception("template finance block failed to validate")
             issues.append({"field": "finance", "code": "finance_bind_failed",
                            "message": "the template's finance inputs could not be applied"})
+    if cfg.finance_assumed is not None:
+        from models.finance import parse_finance_assumed
+
+        try:
+            parse_finance_assumed(cfg.finance_assumed)
+        except (ValidationError, ValueError) as exc:
+            issues.append({"field": "finance_assumed", "code": "finance_assumed_invalid",
+                           "message": str(exc)})
     for issue in issues:
         merged[issue["field"]] = None
+    if merged.get("finance") is None:
+        # A label for inputs the project does not hold labels nothing.
+        merged["finance_assumed"] = None
     _state["solver_config"] = SolverConfig(**merged)
     if issues and cfg_path.is_file():
         try:
@@ -5668,6 +5679,7 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None, *,
             d = src / dname
             if not d.is_dir():
                 continue
+            left_out = PC.skipped(dname, PC.BUNDLE)
             for root, _dirs, files in os.walk(d):
                 root_p = pathlib.Path(root)
                 for fname in files:
@@ -5675,6 +5687,10 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None, *,
                     if scene_store.is_scene_path(full.relative_to(src)):
                         continue
                     rel = full.relative_to(src)
+                    if len(rel.parts) > 1 and rel.parts[1] in left_out:
+                        # A sub-path the table leaves out of the bundle
+                        # (grid_compliance/tracker.lock).
+                        continue
                     if (dname == report_store.REPORTS_DIRNAME
                             and rel.parts[1] not in reports_held["src"]):
                         # A lock file, a report created meanwhile, or a stray

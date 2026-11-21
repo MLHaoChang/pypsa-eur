@@ -66,7 +66,7 @@ export function WeatherBar({ project }: { project: string }) {
       <p className="text-muted" data-testid="weather-time-basis">
         Snapshots are read as {w.time_basis.value}
         {w.time_basis.assumed ? ': no site time is set' : ''}.{' '}
-        <button type="button" className="text-accent hover:underline" onClick={openSiteConnection}>
+        <button type="button" className="text-link hover:underline" onClick={openSiteConnection}>
           Edit in Connection &amp; grid ›
         </button>
       </p>
