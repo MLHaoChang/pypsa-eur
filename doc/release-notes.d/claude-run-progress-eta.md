@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A queued run can now be asked how long it will likely take (`GET /api/simulation/queue/{job_id}/estimate`): the median of the project's last five completed runs of the same kind and settings, unknown until two such runs exist, with the runs it is based on.

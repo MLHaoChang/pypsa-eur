@@ -20,3 +20,7 @@ A first-time user taking the 'Next' buttons in order never sees the loads, asset
 ## Suggested fix
 
 Label the button with the stepper's name ('Next: Scenarios & optimisation (Goal)') and either go to section 4 or say that 4–7 are skipped because they are complete.
+
+## Comments
+
+- Seen again 2026-11-21 (template walk, master 6b421b06): IPP: the Connection & grid step ends in "Next: Goal" again.

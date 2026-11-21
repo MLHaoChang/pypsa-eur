@@ -367,6 +367,46 @@ def _window(raw, scope):
     }
 
 
+def _every_source(ctx, scope):
+    """Every entity of the scope's class, sorted, counted against the answer bound
+    before any entity is read or calculated (issue 10 K1, K4)."""
+    from harness import answer_sections
+
+    names = sorted(str(name) for name in ctx.network.components[scope["component_class"]].static.index)
+    if not names:
+        raise ValueError("empty_population")
+    # A receipt slot names its entity in at most 128 characters (UTF-16 units in the
+    # browser); refuse before any calculation rather than publish an answer that fails read-back.
+    if any(len(name.encode("utf-16-le")) // 2 > 128 for name in names):
+        raise ValueError("population_name_too_long")
+    answer_sections.admit(len(names), len(requested_metrics(scope)))
+    if scope["profile"] == PROFILE:
+        members = {name: {"generators": {name: source(ctx, name)}, "passive_costs": [],
+                          "unsupported_cost_components": []} for name in names}
+        index = members[names[0]]["generators"][names[0]]["index"]
+    else:
+        members = {name: branch.source(ctx, name, False, scope["component_class"]) for name in names}
+        index = members[names[0]]["index"]
+    population = {"version": 1, "component_class": scope["component_class"], "entities": names,
+                  "index": index, "members": members}
+    if scope["profile"] != PROFILE:
+        # branch-loading/1 "*" covers Lines; Transformers are named as excluded.
+        population["transformers_excluded"] = len(ctx.network.components["Transformer"].static)
+    return population
+
+
+def _every_calculate(raw, scope):
+    """Each member through its own one-entity profile; a fact's path names its member."""
+    if raw.get("version") != 1 or raw.get("component_class") != scope["component_class"]:
+        raise ValueError("population_source_identity")
+    facts, slots = [], []
+    for i, name in enumerate(raw["entities"]):
+        member_facts, member_slots = scoped_calculate(raw["members"][name], {**scope, "entity_id": name})
+        facts += [{**f, "path": f"/{i}{f['path']}"} for f in member_facts]
+        slots += member_slots
+    return facts, slots
+
+
 def scoped_source(ctx, scope, owner=None, investment_state=None):
     """Capture complete raw populations under the existing project lock, with
     the solve's LP/MIP classification and gap (assistant-assurance 10, S2)."""
@@ -377,6 +417,10 @@ def scoped_source(ctx, scope, owner=None, investment_state=None):
 
 
 def _scoped_source(ctx, scope, owner=None, investment_state=None):
+    from harness.assurance_scope import every_entity
+
+    if every_entity(scope):
+        return _every_source(ctx, scope)
     if scope["profile"] == carrier.PROFILE:
         return carrier.source(ctx, scope["entity_id"])
     if scope["profile"] == lost_load.PROFILE:
@@ -577,6 +621,10 @@ def _comparison(raw, scope, owner):
 
 def scoped_calculate(raw, scope):
     """A bounded calculation DAG; missing dependencies never become zero."""
+    from harness.assurance_scope import every_entity
+
+    if every_entity(scope):
+        return _every_calculate(raw, scope)
     if scope["profile"] == carrier.PROFILE:
         return carrier.calculate(raw, scope)
     if scope["profile"] in branch.PROFILES:
