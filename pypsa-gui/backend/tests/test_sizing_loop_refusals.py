@@ -82,3 +82,11 @@ def test_the_staged_dc_template_keeps_its_tariff_and_is_refused():
     )
     assert cfg["commercial"]["import_tariff"]
     assert len(_lines(cfg["commercial"])) == 1
+
+
+@pytest.mark.parametrize(
+    "commercial", [[{"import_tariff": 1}], ("poc_link",), object()]
+)
+def test_a_truthy_commercial_that_is_not_a_dict_refuses(commercial):
+    lines = _lines(commercial)
+    assert len(lines) == 1 and "commercial bindings" in lines[0]
