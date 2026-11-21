@@ -1618,7 +1618,8 @@ def test_a_stored_row_with_another_status_fails_the_gate_though_value_and_reason
     _readers(monkeypatch, *_established())
     rows = run_handoff.read_kpis(KPIS)
     assert {r["status"] for r in rows} == {"read"}
-    stored = [{**r, "status": "not_established"} for r in rows]  # same value and reasons
+    # same value and reasons, another status
+    stored = [{**r, "status": "not_established"} for r in rows]
     assert run_handoff.kpis_read({"run": {"handoff": {"kpis": stored}}}, KPIS) is False
 
 
