@@ -1248,7 +1248,11 @@ def _grid_rows(rep):
 def test_the_unbounded_grid_takes_its_short_circuit_level(hand):
     g = hand.network.generators
     assert g.at["Grid", "p_nom"] == 1000.0
-    assert g["p_nom_assumed"].to_dict() == {"PV": False, "Gen": False, "Grid": True}
+    assert g["p_nom_source"].to_dict() == {
+        "PV": "file",
+        "Gen": "file",
+        "Grid": "assumed",
+    }
     (row,) = _grid_rows(hand.report)
     assert (row.asset, row.value) == ("Grid", 1000.0)
     assert "unbounded in the file (ElmXnet)" in row.why
@@ -1283,9 +1287,9 @@ def test_the_issue_example_grid_is_finite_and_assumed(tmp_path):
     res = _issue_example(tmp_path)
     g = res.network.generators
     assert g.at["ext_grid_0", "p_nom"] == 1000.0
-    assert bool(g.at["ext_grid_0", "p_nom_assumed"]) is True
+    assert g.at["ext_grid_0", "p_nom_source"] == "assumed"
     assert [(a.asset, a.value) for a in _grid_rows(res.report)] == [
         ("ext_grid_0", 1000.0)
     ]
     # DGS lines carry √3·U·I ratings and are never defaulted
-    assert "s_nom_assumed" not in res.network.lines.columns
+    assert "s_nom_source" not in res.network.lines.columns

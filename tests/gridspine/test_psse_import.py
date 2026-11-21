@@ -843,7 +843,7 @@ def test_unrated_line_assumed(tmp_path):
     # no load, so the total load floors at SBASE 100 MVA: 10 × 100 = 1000 MVA,
     # above the 110 kV class floor (250 MVA)
     assert res.network.lines.at["Line A - B 1", "s_nom"] == 1000.0
-    assert bool(res.network.lines.at["Line A - B 1", "s_nom_assumed"]) is True
+    assert res.network.lines.at["Line A - B 1", "s_nom_source"] == "assumed"
     assert _assumed(res.report, "thermal rating (MVA)") == ["Line A - B 1"]
     (row,) = [a for a in res.report.assumed if a.parameter == "thermal rating (MVA)"]
     assert row.value == 1000.0 and "SBASE" in row.why
@@ -1006,7 +1006,7 @@ def test_case14_unrated_lines_get_a_stated_bound():
     n = res.network
     assert len(n.lines) == 17
     assert n.lines["s_nom"].tolist() == [CASE14_ASSUMED_LINE_MVA] * 17
-    assert n.lines["s_nom_assumed"].tolist() == [True] * 17
+    assert n.lines["s_nom_source"].tolist() == ["assumed"] * 17
     rows = _rating_rows(res.report)
     assert sorted(rows) == sorted(n.lines.index)
     for a in rows.values():
@@ -1015,7 +1015,7 @@ def test_case14_unrated_lines_get_a_stated_bound():
         assert "275.7 MVA" in a.why  # the total load the bound is 10 times
     # the transformers keep their SBASE1-2 base, as before
     assert n.transformers["s_nom"].tolist() == [100.0, 100.0, 100.0]
-    assert "s_nom_assumed" not in n.transformers.columns
+    assert "s_nom_source" not in n.transformers.columns
 
 
 def test_a_zero_ratea_line_falls_back_to_a_positive_rateb(tmp_path):
@@ -1033,7 +1033,8 @@ def test_a_zero_ratea_line_falls_back_to_a_positive_rateb(tmp_path):
     n = res.network
     line = "Line Bus 1     HV - Bus 2     HV 1"
     assert n.lines.at[line, "s_nom"] == 45.0
-    assert bool(n.lines.at[line, "s_nom_assumed"]) is True
+    assert n.lines.at[line, "s_nom_source"] == "assumed"
+    assert set(n.lines.drop(line)["s_nom_source"]) == {"assumed"}
     row = _rating_rows(res.report)[line]
     assert row.value == 45.0
     assert "RATEA is 0; RATEB = 45 MVA is used" in row.why
@@ -1065,7 +1066,7 @@ def test_a_fully_rated_case_is_unchanged():
 def test_features_rated_line_keeps_its_ratea(features):
     ln = features.network.lines
     assert ln["s_nom"].tolist() == [100.0]
-    assert "s_nom_assumed" not in ln.columns
+    assert "s_nom_source" not in ln.columns
     assert _rating_rows(features.report) == {}
 
 

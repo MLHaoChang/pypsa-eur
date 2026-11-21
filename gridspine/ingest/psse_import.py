@@ -51,8 +51,9 @@ means unrated. A line with RATEA/RATE1 = 0 takes the first positive later rating
 (RATEB, RATEC; RATE2..RATE12), else the never-binding bound of
 ``gridspine.ingest.ratings``: ceil(max(10 × L, the voltage-class floor of its
 higher-voltage end)) MVA, where L is Σ |S| of the in-service loads floored at
-SBASE. Such a line is listed in ``assumed`` and marked ``s_nom_assumed`` = True
-(the column exists only when a line is). A transformer without a rating takes its
+SBASE. Such a line is listed in ``assumed`` and marked ``s_nom_source`` =
+"assumed"; the column exists only when a line is, and the other lines read "file".
+Only "assumed" means assumed: a row added later (empty or NaN) is not. A transformer without a rating takes its
 impedance base SBASE1-2 as ``s_nom``, listed in ``assumed``.
 """
 
@@ -664,7 +665,9 @@ def build_network(case: RawCase):
         ]
 
     if assumed_lines:  # marks a rating results must not read as real
-        n.lines["s_nom_assumed"] = n.lines.index.isin(assumed_lines)
+        n.lines["s_nom_source"] = [
+            "assumed" if nm in assumed_lines else "file" for nm in n.lines.index
+        ]
 
     lone = _lone_buses(n)
     if lone:

@@ -32,7 +32,9 @@ or 7.x) or its Excel form (``dgs_xlsx``) and returns the shared
   larger of its short-circuit level ``snss`` (when given) and the never-binding
   bound of ``gridspine.ingest.ratings`` (ceil(max(10 × Σ |S| of the in-service
   loads, the voltage-class floor of its bus)) MVA, used as MW), listed in
-  ``assumed`` and marked ``p_nom_assumed`` = True. A machine's p_nom is ``sgn`` · ``cosn``, or ``sgn``
+  ``assumed`` and marked ``p_nom_source`` = "assumed" (other generators read
+  "file"; only "assumed" means assumed, so a row added later, empty or NaN, is
+  not). A machine's p_nom is ``sgn`` · ``cosn``, or ``sgn``
   (MVA used as MW, assumed) without ``cosn``.
 - ``ElmShnt`` (``shtype`` 1 R-L or 2 C) → ShuntImpedance, b = ±``qtotn`` ·
   ``ncapa``/``ncapx``/``ushnm``² (capacitive positive); g 0, assumed (the file
@@ -934,7 +936,9 @@ class _Mapper:
             self.record("ElmXnet", oid, row, "Generator", name)
         if bounded:  # marks a limit results must not read as real
             gens = self.n.generators
-            gens["p_nom_assumed"] = gens.index.isin(bounded)
+            gens["p_nom_source"] = [
+                "assumed" if g in bounded else "file" for g in gens.index
+            ]
 
     def _grid_limit(self, item, bus, row):
         """``(p_nom, why)`` for an external grid, which the file leaves unbounded."""
