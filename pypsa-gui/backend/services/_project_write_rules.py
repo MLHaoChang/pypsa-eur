@@ -96,6 +96,12 @@ POST   /api/durable-conversations/{thread_id}/speech/segment  allow the caller's
 POST   /api/durable-conversations/{thread_id}/speech/start  allow the caller's own conversation thread and speech records; writes no project
 POST   /api/durable-conversations/{thread_id}/speech/usage  allow the caller's own conversation thread and speech records; writes no project
 POST   /api/equipment_table/preview  allow declared non-mutating (assistant_route_parity non_mutating_routes): computes and returns, writes nothing
+PATCH  /api/grid-compliance/{name}/deliverables/{code}/comments/{comment_id}  write path:name
+POST   /api/grid-compliance/{name}/deliverables/{code}/comments  write path:name
+PUT    /api/grid-compliance/{name}/deliverables/{code}/data  write path:name
+POST   /api/grid-compliance/{name}/deliverables/{code}/freeze  write path:name
+POST   /api/grid-compliance/{name}/deliverables/{code}/pack  write path:name
+PUT    /api/grid-compliance/{name}/deliverables/{code}/status  write path:name
 POST   /api/gridspine/projects  none creates a new project the caller owns
 POST   /api/gridspine/{name}/capacity  write path:name
 PUT    /api/gridspine/{name}/config  write path:name
@@ -106,7 +112,7 @@ POST   /api/gridspine/{name}/readback/{hour}  write path:name
 POST   /api/gridspine/{name}/run  write path:name
 PUT    /api/gridspine/{name}/templates/{unit_id}/{param}  write path:name
 POST   /api/io/import/csv  none replaces the open network with an unsaved scratch copy; writes no project
-POST   /api/io/import/excel  none replaces the open network with an unsaved scratch copy; writes no project
+POST   /api/io/import/excel  write active
 POST   /api/io/import/matpower  none replaces the open network with an unsaved scratch copy; writes no project
 POST   /api/io/import/netcdf  none replaces the open network with an unsaved scratch copy; writes no project
 POST   /api/library/items/tariff/import_urdb  none the org library, not a project
@@ -117,6 +123,8 @@ POST   /api/library/series/upload  none the org library, not a project
 POST   /api/library_reference/preview  allow declared non-mutating (assistant_route_parity non_mutating_routes): computes and returns, writes nothing
 PUT    /api/local-settings/anthropic-key  none desktop settings
 POST   /api/local-settings/reveal-log  none desktop settings
+DELETE /api/market-prices/token  none instance administration
+PUT    /api/market-prices/token  none instance administration
 DELETE /api/mcp  none personal MCP connections
 POST   /api/mcp  none personal MCP connections
 POST   /api/memory/dismissals  none personal assistant memory
@@ -208,6 +216,7 @@ POST   /api/projects/{name}/intent-comparison/abort  write path:name
 PUT    /api/projects/{name}/layout  write path:name
 PUT    /api/projects/{name}/map_layout  write path:name
 POST   /api/projects/{name}/map_layout/import  write path:name
+POST   /api/projects/{name}/market-prices/day-ahead  write path:name
 PUT    /api/projects/{name}/members  write path:name
 POST   /api/projects/{name}/profiles/apply  write path:name
 POST   /api/projects/{name}/profiles/apply-batch  write path:name
@@ -234,6 +243,9 @@ POST   /api/projects/{name}/reports/generate/abort  write path:name
 DELETE /api/projects/{name}/reports/{report_id}  write path:name
 POST   /api/projects/{name}/reports/{report_id}/comments  allow a viewer may comment on a report (owner decision VIEWER-ROLE-1, Q3); the report itself is unchanged
 POST   /api/projects/{name}/reports/{report_id}/comments/{comment_id}/address  write path:name
+POST   /api/projects/{name}/reports/{report_id}/comments/{comment_id}/drafts  write path:name
+POST   /api/projects/{name}/reports/{report_id}/drafts/{draft_id}/confirm  write path:name
+POST   /api/projects/{name}/reports/{report_id}/drafts/{draft_id}/discard  write path:name
 POST   /api/projects/{name}/reports/{report_id}/comments/{comment_id}/withdraw  write handler
 POST   /api/projects/{name}/reports/{report_id}/export  allow a viewer may export a report file (owner decision VIEWER-ROLE-1, Q4); the stored report is unchanged
 POST   /api/projects/{name}/reports/{report_id}/roundtrip  write path:name
@@ -317,4 +329,6 @@ POST   /api/simulation/run_ac_pf  write active
 PUT    /api/simulation/solver_config  write active
 POST   /api/simulation/value_flows/template  write active
 POST   /api/spectrum/trace  none analyses an uploaded trace in memory; stores nothing
+POST   /api/workbook/import  none creates a new project the caller owns
+POST   /api/workbook/preview  none parses an upload, writes nothing
 """

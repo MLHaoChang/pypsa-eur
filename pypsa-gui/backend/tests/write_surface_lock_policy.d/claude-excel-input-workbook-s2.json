@@ -1,0 +1,6 @@
+{
+ "routes": {
+  "POST /api/workbook/preview": {"category": "not-project-data", "reason": "parses an uploaded workbook and returns what an import would create; it writes nothing and resolves no project"},
+  "POST /api/workbook/import": {"category": "creates-project", "reason": "makes a NEW project from the workbook and leaves it closed; no lock row can exist for it yet, and the open project is not touched"}
+ }
+}

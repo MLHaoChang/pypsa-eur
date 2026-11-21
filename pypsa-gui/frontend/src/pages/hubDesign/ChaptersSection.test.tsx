@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { financeApi } from '../../api/finance'
 import { campusApi } from '../../api/campusElectrical'
+import { getFlowScope } from '../../api/flow'
 import { simulationApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from './hubDesignStore'
@@ -15,6 +16,9 @@ vi.mock('../../api/finance', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/finance')>()
   return { ...actual, financeApi: { ...actual.financeApi, getInvestmentCase: vi.fn(), getReport: vi.fn() } }
 })
+vi.mock('../../api/flow', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../api/flow')>()), getFlowScope: vi.fn(),
+}))
 vi.mock('../../api/campusElectrical', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/campusElectrical')>()
   return { ...actual, campusApi: { ...actual.campusApi, state: vi.fn(), gfmSettings: vi.fn() } }
@@ -40,6 +44,8 @@ beforeEach(() => {
   vi.mocked(financeApi.getInvestmentCase).mockResolvedValue({ status: 'done' } as never)
   vi.mocked(financeApi.getReport).mockResolvedValue({ npv_at_wacc: null,
     sections: { project: { status: 'ok', payload: { project_pre_tax_npv: -11_010_262 } } } } as never)
+  // Unread scope: every card counts as in scope (useInScope), as before this mock.
+  vi.mocked(getFlowScope).mockRejectedValue(new Error('no scope'))
   vi.mocked(campusApi.state).mockRejectedValue(Object.assign(new Error('409'), { response: { status: 409 } }))
   vi.mocked(simulationApi.getStatus).mockResolvedValue(
     { running: false, status: 'idle', condition: null, objective: null, solve_time: null, dispatch: 'none' })
@@ -87,6 +93,19 @@ describe('ChaptersSection', () => {
     expect(line.textContent).toMatch(/Re-solve the hub: these settings change its island rows/)
     await user.click(screen.getByTestId('hub-chapter-operation-solve'))
     expect(requestRunSolve).toHaveBeenCalled()
+  })
+
+  it('no grid-forming line when Control is out of scope (control-strategy 06)', async () => {
+    const value = { version: 1, groups: ['capacity'], options: { capacity: ['x'] } }
+    vi.mocked(getFlowScope).mockResolvedValue({ scope: { ...value, source: 'project', preset_id: 'p' }, cards: [],
+      preset_id: 'p', preset_label: 'P', preset: value } as never)
+    vi.mocked(campusApi.state).mockResolvedValue({ results: null, stale: false } as never)
+    vi.mocked(campusApi.gfmSettings).mockResolvedValue({ state: 'not_run', reason: 'x', recommendation: null } as never)
+    mount()
+    await waitFor(() => expect(campusApi.gfmSettings).toHaveBeenCalled())
+    await waitFor(() => expect(getFlowScope).toHaveBeenCalled())
+    await new Promise(r => setTimeout(r, 0))
+    expect(screen.queryByTestId('hub-chapter-operation-control')).toBeNull()
   })
 
   it('no control line when the project has no campus', async () => {

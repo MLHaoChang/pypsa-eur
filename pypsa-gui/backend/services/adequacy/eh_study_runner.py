@@ -292,6 +292,42 @@ class EhStudyLockBusy(Exception):
     (a solve or an edit has it): the verdict is deferred, not a refusal."""
 
 
+def _assumptions_recorder(record: dict, cfg, body, goal_sources: dict):
+    """``on_private_copy`` for `run_eh_study`: puts on ``record`` every input
+    the run falls back on (template-e2e 08), read from the private copy the
+    study solves, with the project's template. A failure leaves the key
+    absent ("not recorded"), never an empty list ("none assumed")."""
+    from services import network_lengths
+    from services.adequacy.run_assumptions import run_assumptions, study_assumptions
+    from services.flow_service import read_template
+
+    project_dir = network_lengths.active_project_dir()
+    template = read_template(project_dir) if project_dir is not None else None
+    requested = {"site_archetype": body.archetype,
+                 "mc_draws": (body.mc or {}).get("draws") if isinstance(body.mc, dict) else None}
+
+    def record_from(network) -> None:
+        try:
+            rows = study_assumptions(
+                run_assumptions(network, cfg, template), goal_sources, requested)
+        except Exception:
+            logger.exception("eh_study: the run's assumed inputs could not be read")
+            return
+        # Every write to the record holds this lock (see the worker's updates).
+        with PyPSAService.get_solver_state_lock():
+            record["assumptions"] = rows
+
+    return record_from
+
+
+# The Solver settings panel's own label for the field (SolverSettings.tsx;
+# test_run_assumptions pins the two together), so the refusal names what the
+# user sees there.
+VOLL_FIELD_LABEL = "Value of Lost Load (VOLL)"
+VOLL_REFUSAL = (f"{VOLL_FIELD_LABEL}: must be above 0 to run the reliability study. "
+                "Set it in Solver settings.")
+
+
 def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
                          lock_blocking: bool = True) -> dict:
     """Every refusal `POST /results/eh_study` makes before its worker exists
@@ -397,6 +433,17 @@ def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
                                    ("mc_seed", mc_opts.seed),
                                    ("mc_cov_target", mc_opts.cov_target))
                  if v is not None}
+    # Template-e2e 06: the frontier and stress stages price unserved energy,
+    # so a missing VOLL is refused — the API and assistant path — as the Run
+    # button refuses it, never run as 0.0. Last, after the request's own
+    # checks, so a malformed request is told what is wrong with it first.
+    from services.adequacy.run_assumptions import voll_is_set
+    if not voll_is_set(cfg):
+        from services.adequacy.campaign import unsupported_scope
+        refusal = unsupported_scope(VOLL_REFUSAL)
+        # Typed, so readiness points the refusal at its field without reading the text.
+        refusal.detail["field"] = "voll"
+        raise refusal
     return {"body": body, "archetype": archetype, "budget": budget, "stages": stages,
             "goal_sources": goal_sources,
             "cfg": cfg, "n": n, "lock": lock, "pack": pack, "raw_dtc": raw_dtc,
@@ -461,6 +508,10 @@ def start_eh_study(
     from services import dirty_state
     study_ctx = PyPSAService.get_active_context()
 
+    # The project's template is read here, on the request thread, for the
+    # project this request started on.
+    record_assumptions = _assumptions_recorder(record, cfg, body, plan["goal_sources"])
+
     def worker():
         try:
             # ★ Here, not on the request thread nor in `run_eh_study`: see `dirty_state.capture`.
@@ -494,6 +545,7 @@ def start_eh_study(
                 dtc_config=dtc_config,
                 dtc_attribution=dtc_attribution,
                 dsr_buses=dsr_buses,
+                on_private_copy=record_assumptions,
                 **mc_kwargs,
             )
             pipeline = getattr(report, "pipeline", None)

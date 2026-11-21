@@ -3,7 +3,7 @@
 
 # 08: The data-centre load generator builds a profile, then refuses it in engine words with no link
 
-Status: ready-for-agent
+Status: done
 Impact: medium
 Templates: Data Center Energy Hub (any template whose load comes from a site spec)
 Found by: control-strategy walkthrough, 2026-11-17 (master 9491878d). Shot: `../shots/08-generator-refuses.png`

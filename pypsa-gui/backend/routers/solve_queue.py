@@ -457,6 +457,39 @@ def job_log_history(
     return {"lines": lines, "status": job["status"]}
 
 
+@router.get("/{job_id}/estimate")
+def job_estimate(
+    job_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    How long this job is likely to run, from its project's past runs of the
+    same kind and settings (`services.run_estimate`; run progress spec §2).
+
+    `seconds` is None when fewer than two such runs exist: the estimate is
+    unknown, never 0. `samples` and `run_ids` are its basis. A read: anyone who
+    may see the job may ask, whoever holds the project's edit lock. Same
+    visibility and the same byte-for-byte 404 as `/log_history`.
+    """
+    from services import project_registry, run_estimate, solve_job_store
+    from services.solve_queue import KIND_SOLVE, KINDS
+
+    project_registry.require_user(user)
+    job = _visible_job_or_404(db, user, job_id)
+    kind = job.get("kind") or KIND_SOLVE
+    project_key = job.get("project_key")
+    if kind not in KINDS or not project_key:
+        return {"kind": kind, **run_estimate.unknown()}
+    row = solve_job_store.load_job(_parse_job_id(job_id))
+    if row is None:
+        # No stored row means no settings snapshot to compare on. Reading that
+        # as "no snapshot" would match the project's snapshot-less runs, which
+        # is a different mode, so the estimate is unknown (GK B 63, R1).
+        return {"kind": kind, **run_estimate.unknown()}
+    return run_estimate.for_job(job_id, project_key, kind, row.get("solver_config"))
+
+
 @router.get("/{job_id}/log_stream")
 async def job_log_stream(
     job_id: str,
@@ -610,6 +643,17 @@ def _can_dismiss(job: dict, owner, user: User) -> bool:
     """
     if job.get("status") not in _TERMINAL:
         return False
+    return _started_by(owner, user)
+
+
+def _started_by(owner, user: User) -> bool:
+    """
+    Whether this caller queued the job: the one ownership test behind both
+    `can_dismiss` and `started_by_me` (run progress slice 3, GK B3 N1).
+
+    `owner` comes from the `owners` map `list_queue` pops, never from the job
+    dict. A NULL owner (a legacy row) is false for everybody.
+    """
     return owner is not None and str(owner) == str(user.id)
 
 
@@ -812,6 +856,11 @@ def list_queue(
                 # never have been queued by this caller, so it is already
                 # false for every redacted row.
                 "can_dismiss": _can_dismiss(job, owners.get(job["id"]), user),
+                # The finish/fail notification fires only for runs this caller
+                # started (run progress slice 3). A capability, like
+                # `can_dismiss`: true in every status, and false for every
+                # redacted row for the same reason.
+                "started_by_me": _started_by(owners.get(job["id"]), user),
             }
             for job, ok in zip(jobs, seen)
         ],

@@ -38,6 +38,7 @@ import {
 } from '../api/localSettings'
 import AssistantModelSettings from '../components/AssistantModelSettings'
 import McpServerSettings from '../components/McpServerSettings'
+import { BlockTitle } from '../components/PageKit'
 
 // Tokens defined in src/index.css:71-73 (--color-success / --color-warn /
 // --color-danger). There is no `text-ok`.
@@ -132,7 +133,7 @@ function LocalSettingsBody({
   return (
     <>
       <section className="space-y-2">
-        <h3 className="text-sm font-semibold">Anthropic API key</h3>
+        <BlockTitle>Anthropic API key</BlockTitle>
         <p className="text-xs text-muted">
           Needed for the built-in Claude Sonnet / Claude Opus profiles. Stored
           on this machine only, in your application data folder — never in a
@@ -182,7 +183,7 @@ function LocalSettingsBody({
       </section>
 
       <section className="space-y-2">
-        <h3 className="text-sm font-semibold">Diagnostics</h3>
+        <BlockTitle>Diagnostics</BlockTitle>
         <p className="text-xs text-muted">
           Errors the app cannot show you land here. Include this file when
           reporting a problem.

@@ -8,6 +8,7 @@ import pandas as pd
 import pypsa
 
 from gridspine.schema.contracts import ContractError
+from gridspine.static import series_caps as SC
 
 # Normalised daily load shape (24 h), peak = 1.0 at hour 19. Ledgered
 # assumption: synthetic shape for the vertical slice; real studies supply
@@ -105,6 +106,7 @@ def to_pypsa(net, snapshots=24, load_shape=None, res_cf=None) -> pypsa.Network:
     to the capacity factor, so they are curtailable but never dispatchable
     above the resource.
     """
+    SC.refuse(net, "PyPSA nodal export")  # GC-01b: not written yet (follow-up)
     n = pypsa.Network()
     if isinstance(snapshots, (int, np.integer)) and not isinstance(snapshots, bool):
         n.set_snapshots(range(int(snapshots)))
@@ -304,6 +306,7 @@ def run_uc_rolling(
     overlap: int = 24,
     mip_rel_gap: float = DEFAULT_MIP_REL_GAP,
     on_window=None,
+    on_start=None,
 ) -> pypsa.Network:
     """Solve committable UC over `n.snapshots` in overlapping windows.
 
@@ -328,6 +331,10 @@ def run_uc_rolling(
     MILP. A caller that wants to stop raises from it (the driver's `Progress`
     does exactly that): the next window is never started and nothing partial
     is written, because the dispatch table is assembled only at the end.
+
+    `on_start(n_windows)` is called once, before the first window is solved, so
+    a caller knows the total while that first MILP runs; it is not progress,
+    and `on_window` is still called exactly `n_windows` times.
     """
     if window <= 0 or window % 24 != 0:
         raise ContractError(
@@ -348,6 +355,8 @@ def run_uc_rolling(
     frozen_status, dispatch = [], []
     t0 = 0
     solved = 0
+    if on_start is not None:
+        on_start(n_windows)
     while True:
         w_sns = sns[t0:t0 + window]
         status, condition = n.optimize(

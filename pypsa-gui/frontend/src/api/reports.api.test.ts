@@ -303,8 +303,8 @@ describe('reports api — generation job (WP7b)', () => {
     const cases: Array<[string, number, RegExp]> = [
       ['report_job_in_flight', 409, /already being written/i],
       ['no_evidence', 400, /run a study first/i],
-      ['missing_api_key', 400, /configure an LLM profile in Settings/i],
-      ['sdk_not_installed', 400, /configure an LLM profile in Settings/i],
+      ['missing_api_key', 400, /needs an LLM profile with a key/i],
+      ['sdk_not_installed', 400, /needs an LLM profile with a key/i],
       ['project_locked', 409, /being edited by another user/i],
       ['report_section_not_found', 404, /no section/i],
     ]

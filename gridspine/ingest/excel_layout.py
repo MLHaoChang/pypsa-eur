@@ -69,6 +69,9 @@ NOT_CARRIED = (
     "Results, reports and studies",
     "The assumptions ledger and change history",
     "Custom line and transformer types (standard types are kept by name)",
+    "Other solver, tariff and finance settings (only the discount rate and investment periods are kept)",
+    "Library references and uploaded files",
+    "Edits not yet saved: a project's workbook holds the project as last saved",
 )
 
 # Time series sheet: the header rows above each series column.
@@ -106,6 +109,9 @@ LIMITS = {
     "rows": 1_048_576,
     "columns": 16_384,
     "cells": 60_000_000,
+    # Ticket 04: all sheets together, declared and read (8760 h x ~2,000 series).
+    # Memory is bounded by uncompressed_bytes as well.
+    "workbook_cells": 20_000_000,
 }
 
 
@@ -225,8 +231,8 @@ A float shown per kW or in % cannot always come back as the same stored float: t
 stored values can show as the same float. For each such cell the writer records the
 key, the float it wrote and the stored float; the reader uses the stored float only
 while the visible cell still equals what was written and the stored float still
-shows as it, so a tampered entry moves a value by at most the gap between two floats
-that show alike.
+shows as it and lies within 2 ulp of the visible value read back, so a tampered entry
+moves a value by at most 2 ulp (`excel_import.EXACT_ULPS`).
 """
 EXACT_COLUMNS = ("sheet", "name", "parameter", "time step", "shown", "stored")
 

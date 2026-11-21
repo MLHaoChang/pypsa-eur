@@ -317,26 +317,30 @@ def ref_for(db: DBSession, org_id: UUID, kind: str, name: str,
     return None if row is None else _ref(row)
 
 
-def resolve(db: DBSession, org_id: UUID, ref: M.LibraryItemRef, *,
-            root: Path | None = None) -> dict:
-    """Exactly the payload `ref` names (a JSON object); refuse any mismatch."""
-    from services.library import common
-
-    if common.is_common(ref.kind, ref.id):
-        shipped = common.ref(ref.kind, ref.id)
-        label = f"{ref.kind} {ref.id!r} v{ref.version}"
-        if ref.version != shipped.version:
-            raise LibraryRefNotFound(f"no {label}: the shipped common item is v{shipped.version}")
-        if ref.hash != shipped.hash:
-            raise LibraryRefStale(f"ref hash for {label} does not match the shipped common item")
-        return common.payload(ref.kind, ref.id)
-    row = db.scalars(select(LibraryItem).where(
-        LibraryItem.org_id == org_id, LibraryItem.kind == ref.kind,
-        LibraryItem.name == ref.id, LibraryItem.version == ref.version)).first()
-    label = f"{ref.kind} {ref.id!r} v{ref.version}"
+def payload_bytes(
+    db: DBSession,
+    org_id: UUID,
+    kind: str,
+    name: str,
+    version: int,
+    digest: str,
+    *,
+    root: Path | None = None,
+) -> bytes:
+    """The stored bytes of `kind` `name` v`version` in `org_id`'s Library,
+    checked against `digest`; refuse any mismatch. Not for a common item."""
+    row = db.scalars(
+        select(LibraryItem).where(
+            LibraryItem.org_id == org_id,
+            LibraryItem.kind == kind,
+            LibraryItem.name == name,
+            LibraryItem.version == version,
+        )
+    ).first()
+    label = f"{kind} '{name}' v{version}"
     if row is None:
         raise LibraryRefNotFound(f"no {label} in this org")
-    if ref.hash != row.hash:
+    if digest != row.hash:
         raise LibraryRefStale(f"ref hash for {label} does not match the Library")
     try:
         path = library_file(root or _default_root(), org_id, row.path)
@@ -351,6 +355,54 @@ def resolve(db: DBSession, org_id: UUID, ref: M.LibraryItemRef, *,
                               f"({type(exc).__name__})") from exc
     if hashlib.sha256(data).hexdigest() != row.hash:
         raise LibraryRefStale(f"Library file for {label} was modified")
+    return data
+
+
+def resolve(
+    db: DBSession,
+    org_id: UUID,
+    ref: M.LibraryItemRef,
+    *,
+    root: Path | None = None,
+    project_dir: Path | None = None,
+) -> dict:
+    """Exactly the payload `ref` names (a JSON object); refuse any mismatch.
+
+    With `project_dir`, the project's own copy is read after the shipped
+    common items and before the org's Library (project-io 03); a copy that
+    does not hash to the ref is never read."""
+    from services.library import common
+    from services.library import project_copies as PC
+
+    if common.is_common(ref.kind, ref.id):
+        shipped = common.ref(ref.kind, ref.id)
+        label = f"{ref.kind} '{ref.id}' v{ref.version}"
+        if ref.version != shipped.version:
+            raise LibraryRefNotFound(
+                f"no {label}: the shipped common item is v{shipped.version}"
+            )
+        if ref.hash != shipped.hash:
+            raise LibraryRefStale(
+                f"ref hash for {label} does not match the shipped common item"
+            )
+        return common.payload(ref.kind, ref.id)
+    modified = False
+    if project_dir is not None:
+        pin = {"kind": ref.kind, "id": ref.id, "version": ref.version, "hash": ref.hash}
+        data, modified = PC.read(project_dir, pin)
+        if data is not None:
+            return json.loads(data)
+    try:
+        data = payload_bytes(
+            db, org_id, ref.kind, ref.id, ref.version, ref.hash, root=root
+        )
+    except (LibraryRefNotFound, LibraryRefStale) as exc:
+        if modified:
+            raise LibraryRefStale(
+                f"the project's copy of {ref.kind} '{ref.id}' v{ref.version} "
+                f"was modified, and the Library cannot give it ({exc})"
+            ) from exc
+        raise
     return json.loads(data)
 
 

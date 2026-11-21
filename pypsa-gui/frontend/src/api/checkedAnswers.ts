@@ -4,13 +4,15 @@ import type { ChatMessage } from '../store/chatStore'
 
 const PROFILES = new Set(['generator-dispatch/1', 'generator-cost/1', 'network-linear-cost/1',
   'storage-unit-dispatch/1', 'storage-unit-cost/1', 'carrier-energy/1',
-  'branch-loading/1', 'network-loading/1', 'lost-load/1',
+  'branch-loading/1', 'network-loading/1', 'ac-branch-loading/1', 'lost-load/1',
   'bus-price/1', 'generator-emissions/1', 'network-emissions/1', 'curtailment/1',
   'capacity/1', 'storage-cycles/1', 'energy-balance/1', 'site-import/1', 'investment-case/1', 'investment-lcoe/1', 'copt-screening/1', 'grid-readiness/1'])
 
 export interface OwnedCheckedAnswer extends ApprovedAnswerFrame {
   text: string
   project_id: string
+  /** The server's metric definitions changed since this answer was checked (AA-10 S7). */
+  definition_changed: boolean
 }
 
 function canonical(value: unknown, depth = 0): unknown {
@@ -59,5 +61,6 @@ export async function getOwnedCheckedAnswer(message: ChatMessage, signal: AbortS
     || !(await verifyApprovedText(message.content, approved.receipt.content_sha256)) || signal.aborted) {
     throw new Error('Checked answer contract unavailable')
   }
-  return { ...approved, text: message.content, project_id: data.project_id }
+  return { ...approved, text: message.content, project_id: data.project_id,
+    definition_changed: data.definition_changed === true }
 }

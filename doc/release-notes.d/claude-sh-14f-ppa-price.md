@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The IPP hybrid study run (profile `eh_ipp_hybrid@3`) reads the PPA price for the template's target return from the run's own investment case, shows the target, year, contract and source on the step's card, and reads it back at hand-off as a KPI that is stale after any later edit. The step runs no solve.

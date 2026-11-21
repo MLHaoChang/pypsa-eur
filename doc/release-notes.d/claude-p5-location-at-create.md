@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The data-centre and generic-site create forms now ask for the site location (optional) and save it as the project's site anchor, so Guided step 1 no longer opens with "The site has no location".

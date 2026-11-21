@@ -52,6 +52,7 @@ vi.mock('../api/simulation', async (importOriginal) => {
     simulationApi: {
       ...actual.simulationApi,
       getSolverConfig: vi.fn(),
+      updateSolverConfig: vi.fn(),
     },
   }
 })
@@ -386,6 +387,107 @@ it('shows the PV column but hides the CAPEX budget column until Advanced is open
   // The PV column is still there too — opening Advanced adds columns, it
   // doesn't replace the default ones.
   expect(screen.getAllByTitle(/Auto-discount/).length).toBeGreaterThan(0)
+})
+
+it('shows the load growth rate beside the multipliers it derives, and sends a typed rate', async () => {
+  // homer-parity 04a: 2 % per year from 2030 → 2035 × 1.104 (the server's
+  // derivation, marked as derived); a typed rate goes to the solver config.
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(multiPeriodSnapshots())
+  vi.mocked(networkApi.getInvestmentPeriods).mockResolvedValue({
+    periods: [2030, 2035],
+    weightings: [
+      { period: 2030, years: 5, objective: 1 },
+      { period: 2035, years: 5, objective: 1 },
+    ],
+  })
+  vi.mocked(simulationApi.getSolverConfig).mockResolvedValue(baseSolverConfig({
+    multi_investment_periods: true,
+    load_growth_pct_per_year: { electrical: 2 },
+    load_growth_base_year: 2030,
+    load_scalers_by_carrier: { electrical: { '2035': 1.104081 } },
+    load_scalers_derived: { electrical: ['2035'] },
+  }))
+  const put = vi.mocked(simulationApi.updateSolverConfig).mockResolvedValue({} as never)
+
+  renderPage()
+  await openStep(/Economics/)
+  await screen.findByText('Period weightings')
+  await userEvent.click(screen.getByText('Advanced'))
+
+  const rate = await screen.findByLabelText('Load growth (% per year), Electrical')
+  expect((rate as HTMLInputElement).value).toBe('2')
+  const cell = screen.getByLabelText('Load multiplier, Electrical, 2035') as HTMLInputElement
+  expect(cell.value).toBe('1.104')
+  expect(cell.title).toMatch(/From the load growth rate: 2 % per year from 2030/)
+
+  const heat = screen.getByLabelText('Load growth (% per year), Heat')
+  await userEvent.type(heat, '3')
+  await userEvent.tab()
+  expect(put).toHaveBeenCalledWith({ load_growth_pct_per_year: { electrical: 2, heat: 3 } })
+  expect(screen.getByText(/muted = calculated from the growth rate/)).not.toBeNull()
+  expect(screen.getAllByText('from rate').length).toBe(2)  // 2030 (1.000) and 2035
+
+  // A refusal only the server can make shows beside the field, in its words.
+  put.mockRejectedValueOnce({ response: { data: { detail: {
+    error_kind: 'load_growth_factor_invalid',
+    message: 'Load growth (heat): 900 % per year gives a load multiplier of inf in 2035' } } } })
+  const hydrogen = screen.getByLabelText('Load growth (% per year), Hydrogen')
+  await userEvent.type(hydrogen, '900')
+  await userEvent.tab()
+  expect((await screen.findByRole('alert')).textContent).toMatch(/^Load growth \(heat\): 900 %/)
+  // the refused entry stays in its field, marked and pointing at the alert
+  expect((hydrogen as HTMLInputElement).value).toBe('900')
+  expect(hydrogen.getAttribute('aria-invalid')).toBe('true')
+  expect(hydrogen.getAttribute('aria-describedby')).toBe('load-growth-alert')
+
+  // a client-side refusal keeps the entry too; clearing the field clears the mark
+  const heatRate = screen.getByLabelText('Load growth (% per year), Heat') as HTMLInputElement
+  await userEvent.clear(heatRate)
+  await userEvent.type(heatRate, '-150')
+  await userEvent.tab()
+  expect(heatRate.value).toBe('-150')
+  expect(heatRate.getAttribute('aria-invalid')).toBe('true')
+  expect(screen.getByRole('alert').textContent).toBe('Load growth (Heat): must be above -100 %')
+  await userEvent.clear(heatRate)
+  await userEvent.tab()
+  expect(heatRate.getAttribute('aria-invalid')).toBeNull()
+})
+
+it('shows a period the all-carrier multiplier holds as typed, not from the rate', async () => {
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(multiPeriodSnapshots())
+  vi.mocked(networkApi.getInvestmentPeriods).mockResolvedValue({
+    periods: [2030, 2035],
+    weightings: [{ period: 2030, years: 5, objective: 1 }, { period: 2035, years: 5, objective: 1 }],
+  })
+  // The server keeps a legacy all-carrier value and never derives over it.
+  vi.mocked(simulationApi.getSolverConfig).mockResolvedValue(baseSolverConfig({
+    multi_investment_periods: true,
+    load_scalers: { '2035': 1.3 },
+    load_growth_pct_per_year: { electrical: 2 },
+    load_growth_base_year: 2030,
+  }))
+  renderPage()
+  await openStep(/Economics/)
+  await screen.findByText('Period weightings')
+  await userEvent.click(screen.getByText('Advanced'))
+  await screen.findByLabelText('Load growth (% per year), Electrical')
+  expect(screen.getAllByText('from rate').length).toBe(1)  // 2030 only
+})
+
+it('says why the growth year is disabled while no carrier has a rate', async () => {
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue(multiPeriodSnapshots())
+  vi.mocked(networkApi.getInvestmentPeriods).mockResolvedValue({
+    periods: [2030, 2035],
+    weightings: [{ period: 2030, years: 5, objective: 1 }, { period: 2035, years: 5, objective: 1 }],
+  })
+  vi.mocked(simulationApi.getSolverConfig).mockResolvedValue(
+    baseSolverConfig({ multi_investment_periods: true }))
+  renderPage()
+  await openStep(/Economics/)
+  await screen.findByText('Period weightings')
+  await userEvent.click(screen.getByText('Advanced'))
+  expect((await screen.findByLabelText('Growth from year') as HTMLInputElement).disabled).toBe(true)
+  expect(screen.getByText('· Enter a growth rate first')).not.toBeNull()
 })
 
 // ── 4. Guided-step shell: routing between summary and steps (Task 3) ──────

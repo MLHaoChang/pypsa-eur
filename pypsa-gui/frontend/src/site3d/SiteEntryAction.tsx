@@ -71,14 +71,14 @@ export default function SiteEntryAction() {
       {saveFirst && (
         <span data-testid="site-entry-reason" className="text-[11px] text-muted">
           {entry.reason}{' '}
-          <button type="button" onClick={pointAtHeaderSave} className="text-accent hover:underline">› Save in the header</button>
+          <button type="button" onClick={pointAtHeaderSave} className="text-link hover:underline">› Save in the header</button>
         </span>
       )}
       {!entry.enabled && entry.blocker && (
         <span data-testid="site-entry-reason" className="text-[11px] text-muted">
           {entry.blocker.reason}{' '}
           {'guided' in entry.blocker.home && (
-            <button type="button" onClick={() => openSiteAnchor()} className="text-accent hover:underline">
+            <button type="button" onClick={() => openSiteAnchor()} className="text-link hover:underline">
               {entry.blocker.link} Site coordinates
             </button>
           )}

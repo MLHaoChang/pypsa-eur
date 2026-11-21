@@ -1,0 +1,27 @@
+{
+  "_comment": "Every code family (the part before the first ':') a run of the investment case can refuse with, and the input it needs. 'generic' codes have no plain fix and show 'could not finish'. backend/tests/test_investment_case_needs_parity.py checks this against the backend (GK B3 F1).",
+  "solve": ["not_solved"],
+  "connection": [
+    "value_flows_not_configured", "value_flows_invalid", "counterfactual_not_established",
+    "owner_has_no_assets", "owner_ambiguous", "stream_unmapped"
+  ],
+  "cod": [
+    "cod_missing", "cod_mismatch", "staged_cod_not_active_period", "staged_cod_outside_axis"
+  ],
+  "finance": [
+    "finance_inputs_missing", "finance_inputs_invalid", "tax_pack_not_found", "analysis_years_missing",
+    "contract_tenor_below_one", "capex_phasing_mismatch", "capex_phasing_negative",
+    "financial_close_after_cod", "staged_capex_before_close"
+  ],
+  "generic": [
+    "request_invalid", "internal_error", "owner_asset_missing", "template_missing", "template_not_annual",
+    "co2_price_year_uncovered", "asset_retires_in_horizon", "asset_lifetime_short",
+    "staged_build_vintage_bounds_not_supported", "staged_incentive_not_supported",
+    "staged_tax_schedule_not_supported", "extra_asset_derived_upfront", "extra_asset_duplicate",
+    "extra_asset_duplicates_network_asset", "replacement_before_cod", "replacement_unknown_asset",
+    "replacement_rule_conflict", "part_lifetime_too_short", "campus_renewal_before_cod",
+    "scale_capex_part_fixed_replacement", "scale_capex_part_without_asset", "scale_capex_unknown_asset",
+    "scale_capex_unknown_part", "campus_assets_invalid", "campus_assets_money_year_mismatch",
+    "baseline_solve", "baseline_not_established"
+  ]
+}
