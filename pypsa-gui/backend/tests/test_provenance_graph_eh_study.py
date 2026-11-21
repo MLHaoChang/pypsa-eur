@@ -285,7 +285,10 @@ def test_no_goal_on_both_sides_compares_equal(study):
     assert explain_study_figure("expected_shortfall")["outcome"]["state"] == "fresh"
 
 
-def test_a_goal_left_to_the_pack_reads_the_pack_s_value(study):
+def test_a_goal_left_to_the_pack_reads_the_pack_s_value(study, monkeypatch):
+    # A weak-grid request takes its cap from the network (template-e2e 02); this
+    # toy network has no import link, so the request under test is given directly.
+    _request_now(monkeypatch, archetype="weak_flexible")
     _goal(study, target_lole_h=None, site_archetype="weak_flexible")
     study.solver_state["eh_study"]["archetype"] = "weak_flexible"
     _payload(study)["target_lole_h"] = 3.0  # weak_flexible's pack target
@@ -351,7 +354,7 @@ def _request_now(monkeypatch, **request):
     monkeypatch.setattr(
         flow_service,
         "_request_for",
-        lambda t, c=None: {"archetype": "strong_grid", **request},
+        lambda t, c=None, n=None: {"archetype": "strong_grid", **request},
     )
 
 
@@ -604,7 +607,7 @@ def test_a_changed_request_guided_would_send_now_reads_stale(
     monkeypatch.setattr(
         flow_service,
         "_request_for",
-        lambda t, c=None: {"archetype": "strong_grid", **request_now},
+        lambda t, c=None, n=None: {"archetype": "strong_grid", **request_now},
     )
     out = explain_study_figure("expected_shortfall")
     assert out["outcome"]["state"] == "stale"

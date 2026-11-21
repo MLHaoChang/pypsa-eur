@@ -382,7 +382,7 @@ def _current(ctx, state: dict, record: Record) -> tuple[dict[str, Any], tuple]:
 
         d = network_lengths.active_project_dir()
         template = read_template(d) if d is not None else None
-        raw = dict(_request_for(template, state.get("solver_config")))
+        raw = dict(_request_for(template, state.get("solver_config"), ctx.network))
         if raw.get("mc") is not None and not isinstance(raw["mc"], dict):
             # The study refuses it; the run choices still read without it (02b W2).
             refused.append(MC_NOT_OBJECT)
