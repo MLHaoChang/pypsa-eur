@@ -332,7 +332,7 @@ export default function AssetDetail() {
                       <span className="whitespace-nowrap text-[10.5px] text-muted" data-testid="asset-default-line">
                         {onDefault ? 'Your default' : 'Already your default'}
                         {' · '}
-                        <button type="button" className="hover:text-accent hover:underline"
+                        <button type="button" className="hover:text-link hover:underline"
                           onClick={() => useMemoryStore.getState().openMemory({ editId: savedDefault!.item.id })}
                           data-testid="asset-default-edit">
                           Edit ›

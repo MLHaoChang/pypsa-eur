@@ -16,8 +16,10 @@ import { canMutate, type ReadOnlyReason } from './lockState'
 export const READ_ONLY_MUTATION_MESSAGE =
   'Read-only: another user is editing this project.'
 
+// Run progress (UX plan GO 4): a blocked control refers to the run strip's
+// line at the top of the tab, in the same words.
 export const SOLVING_MUTATION_MESSAGE =
-  'Read-only: this project is solving in the queue. It becomes editable when the solve finishes.'
+  'Being solved: edits open again when the run ends. The line at the top of the tab shows its progress.'
 
 const MESSAGE_BY_REASON: Record<ReadOnlyReason, string | null> = {
   writable: null,
@@ -77,6 +79,10 @@ export function readOnlyMessage(reason: ReadOnlyReason): string | null {
 // Still ONE place per surface-kind that maps a reason to English: the banners
 // call this, everything that speaks about a refused mutation calls the table
 // above. `holderEmail` is ignored for every reason but 'locked-by-user'.
+/** The run strip's read-only line while this project is being solved (owner
+ * decision RUN-READONLY-1; UX plan GO 3 and 4: one line, a colon, no dash). */
+export const RUN_READ_ONLY_LINE = 'Being solved: edits open again when the run ends.'
+
 export function readOnlyBannerMessage(
   reason: ReadOnlyReason,
   holderEmail: string | null = null,

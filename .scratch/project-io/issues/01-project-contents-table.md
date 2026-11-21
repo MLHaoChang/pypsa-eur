@@ -1,6 +1,7 @@
 # 01 Project contents table, missing files, safe bundle import
 
-Status: ready-for-agent
+Status: done (#1648)
+Landed in #1648.
 
 One table (`services/project_contents.py`) says which files and folders make up a project and which operations carry each one: bundle export/import, Save-As, scenario fork, snapshot. The existing lists in `routers/projects.py`, `routers/snapshots.py` and `services/study/forks.py` are derived from it.
 

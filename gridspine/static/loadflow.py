@@ -6,6 +6,7 @@ import pandapower as pp
 import pandas as pd
 
 from gridspine.schema.contracts import ContractError
+from gridspine.static import series_caps as SC
 
 #: Column contract of ``LFResult.branch_flow``. The first three are the join
 #: key the PowerFactory read-back compares on; see ``_branch_flow`` for why
@@ -266,7 +267,12 @@ def branch_keys(net) -> pd.DataFrame:
     the lines'. Bus names (not numbers) are carried because that is what the
     .raw NAME field and every other gridspine frame use; the numbers only
     ever appear inside the counter key.
+
+    A series capacitor (GC-01b) is not a line or a transformer, so a net that
+    carries one is refused: every contingency, sensitivity and planning
+    screen keys its branches here.
     """
+    SC.refuse(net, "branch keys (contingency, sensitivity and planning screens)")
     nums = _bus_numbers(net)
     name_of = net.bus["name"]
 

@@ -112,7 +112,7 @@ export default function Emissions() {
       {/* ── KPI strip ──────────────────────────────────────────── */}
       <section>
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
+          <h3 className="text-h3 font-semibold text-text">
             CO₂ emissions
             <span className="text-[10px] font-normal text-muted ml-2">
               ({scopeLabel})
@@ -166,11 +166,11 @@ export default function Emissions() {
       {/* ── All CO₂ caps table (when multiple exist OR per-period caps) ── */}
       {(allCaps.length > 1 || hasPerPeriodCaps) && (
         <section>
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2">
+          <h3 className="text-h3 font-semibold text-text mb-2">
             CO₂ caps ({allCaps.length})
             <span className="ml-2 text-[10px] font-normal text-muted">
               {hasPerPeriodCaps
-                ? 'Per-period caps set via primary_energy global constraints with investment_period.'
+                ? 'Per-period caps, one primary-energy constraint for each investment period.'
                 : 'Horizon-wide caps.'}
             </span>
           </h3>
@@ -228,7 +228,7 @@ export default function Emissions() {
       {/* ── Per-period totals (multi-period only, when not period-scoped) ── */}
       {emissions.is_multi_period && view.scope === 'horizon' && emissions.by_period.length > 0 && (
         <section>
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2">
+          <h3 className="text-h3 font-semibold text-text mb-2">
             By investment period
             <span className="ml-2 text-[10px] font-normal text-muted">
               Use the Period strip above to drill into per-year carrier / generator splits.
@@ -273,11 +273,11 @@ export default function Emissions() {
         <p className="text-[11px] text-muted">
           {view.scope === 'period'
             ? `No CO₂ emitted in period ${view.period}.`
-            : <>All dispatched carriers have <code>co2_emissions = 0</code>. Set per-carrier emission intensities (tCO₂/MWh of primary energy) in the Carriers tab to activate this report.</>}
+            : <>All dispatched carriers have zero CO₂ emissions. Set per-carrier emission intensities (tCO₂/MWh of primary energy) in the Carriers tab to activate this report.</>}
         </p>
       ) : view.by_carrier.length > 0 && (
         <section>
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2">
+          <h3 className="text-h3 font-semibold text-text mb-2">
             By carrier
             <span className="ml-2 text-[10px] font-normal text-muted">({scopeLabel})</span>
           </h3>
@@ -309,7 +309,7 @@ export default function Emissions() {
       {/* ── Per-generator breakdown ───────────────────────────── */}
       {view.by_generator.filter(r => r.tCO2 > 0).length > 0 && (
         <section>
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2">
+          <h3 className="text-h3 font-semibold text-text mb-2">
             By generator
             <span className="ml-2 text-[10px] font-normal text-muted">({scopeLabel})</span>
           </h3>

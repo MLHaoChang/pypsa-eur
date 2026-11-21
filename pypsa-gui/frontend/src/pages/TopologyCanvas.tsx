@@ -62,6 +62,7 @@ import {
 } from '../utils/flowMotion'
 import { useReducedMotion } from '../site3d/motion'
 import LoadingKey, { VoltageKeyTitle } from '../components/LoadingKey'
+import { signFirstEuro } from '../utils/format'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type AssetCategory = 'Thermal' | 'Renewables' | 'Storage' | 'Load'
@@ -218,7 +219,7 @@ function CarrierBadge({ carrier, color }: { carrier: string; color: string }) {
       display: 'flex', alignItems: 'center', gap: 3,
       backgroundColor: color, color: '#fff',
       padding: '2px 7px', borderRadius: 10,
-      fontSize: 9, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace",
+      fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-mono)',
       border: '2px solid #fff',
       boxShadow: '0 1px 5px rgba(0,0,0,0.25)',
       whiteSpace: 'nowrap', lineHeight: 1.2, userSelect: 'none',
@@ -242,6 +243,11 @@ const BUS_NODE_MIN_W = 72
 
 // Exported so a test can render one node in isolation inside a
 // <ReactFlowProvider>. nodeTypes (:1786) still references it locally.
+/** A selected node reads the same on every carrier (ruling #1597/#1598): a 2 px ink ring plus a soft
+ *  accent halo. The carrier colour stays on the border and fill; selection never borrows it. */
+export const SELECTED_NODE_SHADOW =
+  '0 0 0 2px var(--color-text), 0 0 0 5px color-mix(in srgb, var(--color-accent) 30%, transparent)'
+
 export function BusNode({ id, data, selected }: NodeProps) {
   const { bus } = data as unknown as { bus: Bus }
   const color = getLineColor(bus.v_nom ?? 1)
@@ -284,7 +290,7 @@ export function BusNode({ id, data, selected }: NodeProps) {
           : isHighlighted
           ? `0 0 0 3px ${color}, 0 0 0 8px ${color}70, 0 0 22px 8px ${color}45, 0 2px 8px rgba(0,0,0,0.14)`
           : selected
-          ? `0 0 0 3px ${color}28, 0 2px 8px rgba(0,0,0,0.14)`
+          ? `${SELECTED_NODE_SHADOW}, 0 2px 8px rgba(0,0,0,0.14)`
           : '0 1px 4px rgba(0,0,0,0.10)',
         whiteSpace: 'nowrap',
       }}
@@ -683,15 +689,14 @@ function AssetGroupNode({ id, data, selected }: NodeProps) {
       style={{
         width: 68,
         backgroundColor: 'var(--color-bg)',
-        border: `${selected ? 2 : 1.2}px solid ${color}`,
+        border: `1.2px solid ${color}`,
         borderRadius: 7,
         boxShadow: isOverlapping
           ? `0 0 0 2px rgba(239,68,68,0.4), 0 2px 8px rgba(0,0,0,0.12)`
           : selected
-          ? `0 0 0 2px ${color}22, 0 2px 8px rgba(0,0,0,0.12)`
+          ? `${SELECTED_NODE_SHADOW}, 0 2px 8px rgba(0,0,0,0.12)`
           : hovered ? '0 2px 7px rgba(0,0,0,0.12)' : '0 1px 4px rgba(0,0,0,0.08)',
-        filter: selected ? `drop-shadow(0 0 3px ${color}88)` : undefined,
-        transform: hovered && !selected ? 'translate(-1px, -2px)' : undefined,
+                transform: hovered && !selected ? 'translate(-1px, -2px)' : undefined,
         transition: 'transform 120ms, box-shadow 120ms',
         padding: '5px 4px 4px',
       }}
@@ -712,7 +717,7 @@ function AssetGroupNode({ id, data, selected }: NodeProps) {
       </div>
 
       {/* Type label */}
-      <div style={{ fontSize: 8.5, fontWeight: 600, color: 'var(--color-text)', textAlign: 'center', lineHeight: 1.15 }}>
+      <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--color-text)', textAlign: 'center', lineHeight: 1.15 }}>
         {(isH2 && H2_CAT_LABELS[d.category]) ?? CAT_DISPLAY_LABELS[d.category] ?? d.category}
       </div>
 
@@ -729,7 +734,7 @@ function AssetGroupNode({ id, data, selected }: NodeProps) {
           : undefined
         const mw = (effective != null && Number.isFinite(effective)) ? effective : d.totalMW
         return (
-          <div style={{ fontSize: 8, color: 'var(--color-muted)', marginTop: 1, textAlign: 'center' }}>
+          <div style={{ fontSize: 9, color: 'var(--color-muted)', marginTop: 1, textAlign: 'center' }}>
             {d.assetCount} · {mw >= 1000 ? `${(mw / 1000).toFixed(1)} GW` : `${mw.toFixed(0)} MW`}
           </div>
         )
@@ -740,7 +745,7 @@ function AssetGroupNode({ id, data, selected }: NodeProps) {
       {dispatchMW != null && Number.isFinite(dispatchMW) && (
         <div
           style={{
-            fontSize: 8.5,
+            fontSize: 9,
             fontWeight: 600,
             color: dispatchColor,
             marginTop: 2,
@@ -765,7 +770,7 @@ function AssetGroupNode({ id, data, selected }: NodeProps) {
       {socPct != null && Number.isFinite(socPct) && (
         <div
           style={{
-            fontSize: 8,
+            fontSize: 9,
             fontWeight: 500,
             color: socTint,
             marginTop: 1,
@@ -878,17 +883,16 @@ export function AssetNode({ id, data, selected }: NodeProps) {
       style={{
         width: ASSET_NODE_W,
         backgroundColor: 'var(--color-bg)',
-        border: `${selected ? 2 : 1.2}px solid ${color}`,
+        border: `1.2px solid ${color}`,
         borderRadius: 7,
         boxShadow: isOverlapping
           ? '0 0 0 2px rgba(239,68,68,0.4), 0 2px 8px rgba(0,0,0,0.12)'
           : isHighlighted
           ? '0 0 0 3px #2f81f7, 0 2px 8px rgba(0,0,0,0.12)'
           : selected
-          ? `0 0 0 2px ${color}22, 0 2px 8px rgba(0,0,0,0.12)`
+          ? `${SELECTED_NODE_SHADOW}, 0 2px 8px rgba(0,0,0,0.12)`
           : hovered ? '0 2px 7px rgba(0,0,0,0.12)' : '0 1px 4px rgba(0,0,0,0.08)',
-        filter: selected ? `drop-shadow(0 0 3px ${color}88)` : undefined,
-        transform: hovered && !selected ? 'translate(-1px, -2px)' : undefined,
+                transform: hovered && !selected ? 'translate(-1px, -2px)' : undefined,
         transition: 'transform 120ms, box-shadow 120ms',
         padding: '5px 4px 4px',
       }}
@@ -906,22 +910,22 @@ export function AssetNode({ id, data, selected }: NodeProps) {
       </div>
 
       {/* Name — the thing the user designs; the type is the tooltip and the legend. */}
-      <div style={{ fontSize: 8.5, fontWeight: 600, color: 'var(--color-text)', textAlign: 'center', lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <div style={{ fontSize: 9, fontWeight: 600, color: 'var(--color-text)', textAlign: 'center', lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {d.name}
       </div>
       {figure && (
-        <div data-testid="asset-figure" style={{ fontSize: 8, color: 'var(--color-muted)', marginTop: 1, textAlign: 'center' }}>{figure}</div>
+        <div data-testid="asset-figure" style={{ fontSize: 9, color: 'var(--color-muted)', marginTop: 1, textAlign: 'center' }}>{figure}</div>
       )}
 
       {dispatchMW != null && Number.isFinite(dispatchMW) && (
-        <div style={{ fontSize: 8.5, fontWeight: 600, color: dispatchColor, marginTop: 2, textAlign: 'center', lineHeight: 1.15 }} title={dispatchTitle}>
+        <div style={{ fontSize: 9, fontWeight: 600, color: dispatchColor, marginTop: 2, textAlign: 'center', lineHeight: 1.15 }} title={dispatchTitle}>
           {arrow} {fmtMW(Math.abs(dispatchMW))}
         </div>
       )}
 
       {socPct != null && Number.isFinite(socPct) && (
         <div
-          style={{ fontSize: 8, fontWeight: 500, color: socTint, marginTop: 1, textAlign: 'center', lineHeight: 1.15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}
+          style={{ fontSize: 9, fontWeight: 500, color: socTint, marginTop: 1, textAlign: 'center', lineHeight: 1.15, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3 }}
           title={`State of charge at this snapshot: ${socPct.toFixed(1)} %`}
         >
           <span aria-hidden style={{ display: 'inline-block', width: 22, height: 4, background: '#e5e7eb', borderRadius: 2, overflow: 'hidden' }}>
@@ -1761,7 +1765,7 @@ function NewConnectionDialog({
               </select>
             </label>
             <label className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-muted">s_nom (MVA)</span>
+              <span className="text-[10px] text-muted">Capacity (MVA)</span>
               <input className={inp} type="number" step="any" value={sNom} onChange={e => setSNom(e.target.value)} />
             </label>
             <label className="flex flex-col gap-0.5">
@@ -1786,15 +1790,15 @@ function NewConnectionDialog({
             </label>
             <div className="grid grid-cols-2 gap-2">
               <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-muted">v_nom₀ (kV)</span>
+                <span className="text-[10px] text-muted">Declared HV voltage (kV)</span>
                 <input className={inp} type="number" step="any" value={trVNom0} onChange={e => { setTrVNom0(e.target.value); setTrType('Custom') }} />
               </label>
               <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-muted">v_nom₁ (kV)</span>
+                <span className="text-[10px] text-muted">Declared LV voltage (kV)</span>
                 <input className={inp} type="number" step="any" value={trVNom1} onChange={e => { setTrVNom1(e.target.value); setTrType('Custom') }} />
               </label>
               <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] text-muted">s_nom (MVA)</span>
+                <span className="text-[10px] text-muted">Capacity (MVA)</span>
                 <input className={inp} type="number" step="any" value={trSNom} onChange={e => setTrSNom(e.target.value)} />
               </label>
               <label className="flex flex-col gap-0.5">
@@ -1847,18 +1851,21 @@ const edgeTypes = { network: EditableEdge }
 // objective value (mono); failed / aborted → muted error line. Reads
 // simulationStore directly so it tracks the header Run button with no
 // prop-drilling through the (large) main canvas component.
+/** The canvas Results pill's objective: "-€96.0 k", sign before the € (UX 2 (6)). */
+export function fmtResultsObjective(v: number): string {
+  const a = Math.abs(v)
+  if (a >= 1e9) return signFirstEuro(v, `${(a / 1e9).toFixed(2)} B`)
+  if (a >= 1e6) return signFirstEuro(v, `${(a / 1e6).toFixed(2)} M`)
+  if (a >= 1e3) return signFirstEuro(v, `${(a / 1e3).toFixed(1)} k`)
+  return signFirstEuro(v, a.toFixed(0))
+}
+
 function ResultsPill() {
   const status = useSimulationStore(s => s.status)
   const objective = useSimulationStore(s => s.objective)
   const solveTime = useSimulationStore(s => s.solveTime)
 
-  const fmtObj = (v: number) => {
-    const a = Math.abs(v)
-    if (a >= 1e9) return `€${(v / 1e9).toFixed(2)} B`
-    if (a >= 1e6) return `€${(v / 1e6).toFixed(2)} M`
-    if (a >= 1e3) return `€${(v / 1e3).toFixed(1)} k`
-    return `€${v.toFixed(0)}`
-  }
+  const fmtObj = fmtResultsObjective
 
   return (
     <div
@@ -3249,7 +3256,7 @@ export default function TopologyCanvas() {
                     aria-label="Width by flow"
                     aria-pressed={widthByFlow}
                     onClick={() => setWidthByFlow(v => !v)}
-                    title="Width by flow — edge width follows |flow| / rating (off: static s_nom width)"
+                    title="Width by flow. Edge width follows |flow| / rating; off, it follows each line’s capacity."
                     className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors
                       ${widthByFlow ? 'bg-accent-50 text-accent' : 'text-ink-600 hover:bg-panel hover:text-accent'}`}
                   >
@@ -3379,7 +3386,7 @@ export default function TopologyCanvas() {
                           display: 'flex', alignItems: 'center', gap: 2,
                           backgroundColor: color, color: '#fff',
                           padding: '1px 5px', borderRadius: 6,
-                          fontSize: 8, fontWeight: 700, fontFamily: 'var(--font-family-mono)',
+                          fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-mono)',
                           border: '1px solid #fff',
                           flexShrink: 0,
                         }}>

@@ -12,7 +12,7 @@ import { CREATE_LABEL } from '../layout/newProjectVocabulary'
 const authState = { user: localAdminUser(), logout: vi.fn() }
 const authMode = { authEnabled: false }
 
-vi.mock('../auth/AuthProvider', () => ({ useAuth: () => authState }))
+vi.mock('../auth/AuthProvider', () => ({ useAuth: () => authState, useIsSuperAdmin: () => true }))
 vi.mock('../auth/AuthModeProvider', () => ({ useAuthMode: () => authMode }))
 vi.mock('../components/AssistantDock', () => ({ default: () => <div /> }))
 vi.mock('../api/projects', async (importOriginal) => {

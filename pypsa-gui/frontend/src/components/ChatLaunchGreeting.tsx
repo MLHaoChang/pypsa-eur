@@ -45,6 +45,7 @@ import { useChatReadiness } from '../hooks/useChatProfiles'
 import { nk } from '../utils/queryKeys'
 import { ehStudyRefetchInterval } from '../pages/results/ehStudyPoll'
 import { useNetworkRevisionInvalidation } from '../hooks/useNetworkRevisionInvalidation'
+import { useIsSuperAdmin } from '../auth/AuthProvider'
 import ApiKeySetup, { API_KEY_SETTINGS_KEY } from './ApiKeySetup'
 import type { SimulationStatus } from '../api/types'
 
@@ -130,9 +131,12 @@ export default function ChatLaunchGreeting() {
   // failure. On that path `data` stays undefined and the offer never renders —
   // which is correct, because the route is instance-wide and super-admin only,
   // so there is no field they could usefully be shown.
+  const isSuperAdmin = useIsSuperAdmin()
   const { data: keySettings } = useQuery<ApiKeySettings>({
     queryKey: API_KEY_SETTINGS_KEY,
     queryFn: getApiKeySettings,
+    // Issue 49: anyone else is not asked at all (no 403 call, no console error).
+    enabled: isSuperAdmin,
     retry: false,
   })
 

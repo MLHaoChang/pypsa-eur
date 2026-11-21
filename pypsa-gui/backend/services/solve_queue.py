@@ -284,25 +284,9 @@ def _enqueuer_may_not_write(job: "SolveJob") -> bool:
     key, requester = job.project_key, job.enqueued_by_user_id
     if not key or requester is None or ":" not in key:
         return False
-    try:
-        project_id = uuid.UUID(key.split(":", 1)[1])
-        user_id = uuid.UUID(str(requester))
-    except ValueError:
-        return False
-    from db import session as db_session
-    from db.models import Project, User
-    from services import project_acl
+    from services import project_write_gate
 
-    db = db_session.SessionLocal()
-    try:
-        user, project = db.get(User, user_id), db.get(Project, project_id)
-        if project is None:
-            return False
-        if user is None:
-            return True
-        return project_acl.project_role(db, user, project) != project_acl.EDIT
-    finally:
-        db.close()
+    return project_write_gate.requester_may_not_write(requester, key.split(":", 1)[1])
 
 
 class SolveQueue:

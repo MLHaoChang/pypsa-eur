@@ -160,7 +160,7 @@ function ReserveLine({ name }: { name: string }) {
         ? <span className="text-muted">not set</span>
         : `${num(data.headroom_h_per_string)}${NBSP}h per string`}
       {' · '}
-      <button type="button" className="text-accent hover:underline" data-testid="dc-backup-reserves-open"
+      <button type="button" className="text-link hover:underline" data-testid="dc-backup-reserves-open"
         onClick={() => showResultsTab('storage', { section: RESERVE_SECTION, from: 'Grid study' })}>Storage view ›</button>
     </p>
   )
