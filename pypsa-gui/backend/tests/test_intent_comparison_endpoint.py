@@ -14,10 +14,19 @@ INPUTS = {"link": "poc", "envelope": {"phases": [], "max": {}}, "ramp_mw_per_min
 URL = "/api/projects/{}/intent-comparison"
 
 
+def stub_project_inputs(monkeypatch):
+    """The stub network has no point-of-connection values or backup battery either: those have their own tests
+    on the DC template (test_intent_comparison_dc_template.py). Here the request's inputs pass through as given."""
+    monkeypatch.setattr("routers.compare._intent_inputs", lambda row, project, n, cfg, req=None: (dict(req), {}))
+    monkeypatch.setattr("services.compare.intent_inputs.apply_pq", lambda n, inp: inp)
+    monkeypatch.setattr("routers.compare._has_backup_reserve", lambda n: True)
+
+
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
     # The stub network has no campus link: the input check has its own tests below.
     monkeypatch.setattr("services.adequacy.sizing_loop_runner._check_inputs", lambda n, inp: None)
+    stub_project_inputs(monkeypatch)
     intent_jobs.clear()
     yield
     intent_jobs.clear()

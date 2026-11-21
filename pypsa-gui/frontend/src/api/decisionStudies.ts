@@ -503,6 +503,86 @@ export interface IntakePreview {
   bill: PreviewPart<{ bill: Bill; tariff: Tariff; notes: string[] }>
 }
 
+// ── supply architectures (homer-parity 03a) and the grid-extension break-even (03d) ──
+
+/** The bare record the "Grid extension vs island" card keeps on the open project (not a
+ *  question template, so it runs no pack). Study lists leave it out: the card owns it. */
+export const GRID_EXTENSION_QUESTION_ID = 'grid_extension'
+export const GRID_EXTENSION_STUDY_NAME = 'Grid extension vs island'
+
+export type SupplyArchitectureRowStatus = 'ok' | 'infeasible' | 'failed' | 'not_reached'
+
+export interface SupplyArchitectureSize {
+  asset: string
+  component: string
+  extendable: boolean
+  size: number | null
+  unit: string
+}
+
+/** One row of the 03a table (`services/study/supply_architectures.py`); figures are null unless `ok`. */
+export interface SupplyArchitectureRow {
+  architecture_id: string
+  label: string
+  groups: string[]
+  status: SupplyArchitectureRowStatus
+  total_cost_eur_per_year: number | null
+  capex_eur: number | null
+  renewable_fraction: number | null
+  sizes: SupplyArchitectureSize[]
+}
+
+/** `GET …/supply-architectures`: the running comparison's progress, else the last table. */
+export interface SupplyArchitecturesRecord {
+  /** `running` while it runs; the finished run's status (`done`, `aborted`, `failed`), or
+   *  `not_evaluated` when the stored record cannot be read. */
+  status: string
+  architectures?: string[]
+  current?: string | null
+  solves_estimated?: number
+  solves_charged?: number
+  rows?: SupplyArchitectureRow[]
+  best_architecture_id?: string | null
+  stale?: boolean
+  error?: string | null
+}
+
+/** The basis the grid side is declared in; it must equal the study's on every field. */
+export interface GridBasis {
+  currency: string
+  currency_year: number
+  discount_rate: number
+  horizon_years: number
+}
+
+export interface GridExtensionRequest {
+  architecture_id: string
+  eur_per_km: number
+  grid_supply_npc: number
+  grid_basis: GridBasis
+  fixed_eur?: number
+  max_km?: number
+}
+
+export type GridExtensionStatus =
+  | 'break_even' | 'offgrid_cheaper_everywhere' | 'grid_cheaper_everywhere'
+  | 'beyond_max_km' | 'break_even_not_established'
+
+/** `POST …/grid-extension-break-even` (`routers/grid_extension.py`): `km` is null unless
+ *  `break_even` or `beyond_max_km` (ADR-0001: never read as 0). */
+export interface GridExtensionResult {
+  status: GridExtensionStatus
+  km: number | null
+  message?: string
+  reason?: string
+  invalid?: string[]
+  architecture_id: string
+  total_cost_eur_per_year: number
+  offgrid_npc: number
+  basis: GridBasis
+  approximation: string
+}
+
 // ── errors ────────────────────────────────────────────────────────────────
 
 /** A refusal the UI renders in words: HTTP status, the typed code, the backend's message. */
@@ -615,4 +695,21 @@ export const decisionStudiesApi = {
     client.post<DecisionReport>(`${item(project, studyId)}/report`, {}, Q).then(r => r.data),
   report: (project: string, studyId: string) =>
     client.get<DecisionReport>(`${item(project, studyId)}/report`, Q).then(r => r.data),
+
+  /** The study's own settings (here: its currency year); the intake goes through `patchStep`. */
+  patchSettings: (project: string, studyId: string, settings: { currency_year?: number }) =>
+    client.patch<DecisionStudy>(item(project, studyId), { settings }, Q).then(r => r.data),
+
+  startSupplyArchitectures: (project: string, studyId: string,
+                             body: { architectures?: string[]; budget_solves?: number } = {}) =>
+    client.post<SupplyArchitecturesRecord>(`${item(project, studyId)}/supply-architectures`, body, Q)
+      .then(r => r.data),
+  supplyArchitectures: (project: string, studyId: string) =>
+    client.get<SupplyArchitecturesRecord>(`${item(project, studyId)}/supply-architectures`, Q).then(r => r.data),
+  abortSupplyArchitectures: (project: string, studyId: string) =>
+    client.post<{ status: string; aborting: boolean }>(`${item(project, studyId)}/supply-architectures/abort`, {}, Q)
+      .then(r => r.data),
+  gridExtensionBreakEven: (project: string, studyId: string, body: GridExtensionRequest) =>
+    client.post<GridExtensionResult>(`${item(project, studyId)}/grid-extension-break-even`, body, Q)
+      .then(r => r.data),
 }

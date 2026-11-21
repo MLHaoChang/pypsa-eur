@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session as DBSession
 from models.schemas import (
     BUS_LAZY_COLUMNS,
@@ -390,15 +392,20 @@ def get_links():
     return _get_component("Link", "links")
 
 
+
+# 05d: the basis a client scaled its typed costs under (tonne | energy). Annotated, so a direct call of the route
+# function (tests, in-process callers) gets None rather than a FieldInfo default.
+CostBasisHeader = Annotated[str | None, Header(alias="X-Cost-Basis")]
+
 @router.post("/links", status_code=201)
-def create_link(link: LinkCreate):
+def create_link(link: LinkCreate, cost_basis: CostBasisHeader = None):
     unset_lazy = LINK_LAZY_COLUMNS - link.model_fields_set
-    return _create_component("Link", "links", link.name, link.model_dump(exclude={"name"} | unset_lazy))
+    return _create_component("Link", "links", link.name, link.model_dump(exclude={"name"} | unset_lazy), cost_basis)
 
 
 @router.put("/links/{name}")
-def update_link(name: str, link: LinkCreate):
-    return _update_component("Link", "links", name, link.model_dump(exclude_unset=True))
+def update_link(name: str, link: LinkCreate, cost_basis: CostBasisHeader = None):
+    return _update_component("Link", "links", name, link.model_dump(exclude_unset=True), cost_basis)
 
 
 @router.delete("/links/{name}", status_code=204)
@@ -414,14 +421,14 @@ def get_generators():
 
 
 @router.post("/generators", status_code=201)
-def create_generator(gen: GeneratorCreate):
+def create_generator(gen: GeneratorCreate, cost_basis: CostBasisHeader = None):
     unset_lazy = GENERATOR_LAZY_COLUMNS - gen.model_fields_set
-    return _create_component("Generator", "generators", gen.name, gen.model_dump(exclude={"name"} | unset_lazy))
+    return _create_component("Generator", "generators", gen.name, gen.model_dump(exclude={"name"} | unset_lazy), cost_basis)
 
 
 @router.put("/generators/{name}")
-def update_generator(name: str, gen: GeneratorCreate):
-    return _update_component("Generator", "generators", name, gen.model_dump(exclude_unset=True))
+def update_generator(name: str, gen: GeneratorCreate, cost_basis: CostBasisHeader = None):
+    return _update_component("Generator", "generators", name, gen.model_dump(exclude_unset=True), cost_basis)
 
 
 @router.delete("/generators/{name}", status_code=204)
@@ -437,13 +444,13 @@ def get_storage_units():
 
 
 @router.post("/storage_units", status_code=201)
-def create_storage_unit(su: StorageUnitCreate):
-    return _create_component("StorageUnit", "storage_units", su.name, su.model_dump(exclude={"name"}))
+def create_storage_unit(su: StorageUnitCreate, cost_basis: CostBasisHeader = None):
+    return _create_component("StorageUnit", "storage_units", su.name, su.model_dump(exclude={"name"}), cost_basis)
 
 
 @router.put("/storage_units/{name}")
-def update_storage_unit(name: str, su: StorageUnitCreate):
-    return _update_component("StorageUnit", "storage_units", name, su.model_dump(exclude_unset=True))
+def update_storage_unit(name: str, su: StorageUnitCreate, cost_basis: CostBasisHeader = None):
+    return _update_component("StorageUnit", "storage_units", name, su.model_dump(exclude_unset=True), cost_basis)
 
 
 @router.delete("/storage_units/{name}", status_code=204)
@@ -459,13 +466,13 @@ def get_stores():
 
 
 @router.post("/stores", status_code=201)
-def create_store(store: StoreCreate):
-    return _create_component("Store", "stores", store.name, store.model_dump(exclude={"name"}))
+def create_store(store: StoreCreate, cost_basis: CostBasisHeader = None):
+    return _create_component("Store", "stores", store.name, store.model_dump(exclude={"name"}), cost_basis)
 
 
 @router.put("/stores/{name}")
-def update_store(name: str, store: StoreCreate):
-    return _update_component("Store", "stores", name, store.model_dump(exclude_unset=True))
+def update_store(name: str, store: StoreCreate, cost_basis: CostBasisHeader = None):
+    return _update_component("Store", "stores", name, store.model_dump(exclude_unset=True), cost_basis)
 
 
 @router.delete("/stores/{name}", status_code=204)
@@ -792,15 +799,22 @@ def get_asset_schema(component: str) -> dict:
 
 
 @router.get("/asset_schema/{component}/units/{name}")
-def get_asset_units(component: str, name: str) -> dict:
-    """The size fields whose unit follows this asset's bus (t/h, t on a tonne bus); the rest keep the
-    class-level unit from `asset_schema/{component}`."""
+def get_asset_units(component: str, name: str, bus: str | None = None) -> dict:
+    """The fields whose unit follows this asset's bus (t/h, t and per-tonne costs on a tonne bus); the rest keep
+    the class-level unit from `asset_schema/{component}`. With `bus` the asset need not exist: the creation form
+    asks what a new asset attached to that bus would read (`name` is then only a label)."""
     if component not in CLASS_ATTR:
         raise HTTPException(400, f"No asset schema for '{component}'.")
     n = PyPSAService.get_network()
-    if name not in getattr(n, CLASS_ATTR[component]).index:
+    if bus is None and name not in getattr(n, CLASS_ATTR[component]).index:
         raise HTTPException(404, f"{component} '{name}' not found")
-    return {"component": component, "name": name, "units": asset_fields.size_units(n, component, name)}
+    if bus is not None:
+        if not bus.strip():
+            raise HTTPException(400, "bus must not be empty.")
+        if bus not in n.buses.index:
+            raise HTTPException(404, f"Bus '{bus}' not found")
+    return {"component": component, "name": name, "units": asset_fields.size_units(n, component, name, bus),
+            "costs": asset_fields.cost_units(n, component, name, bus)}
 
 
 @router.get("/asset_costs")
