@@ -268,6 +268,13 @@ def test_a_file_name_with_no_stem_suggests_a_plain_name(client):
     assert r.status_code == 200 and r.json()["suggested_name"] == "Imported workbook"
 
 
+@pytest.mark.parametrize("filename", [None, "", "/"])
+def test_an_upload_with_no_usable_file_name_is_called_workbook_xlsx(client, filename):
+    prep = excel_workbook.prepare(_workbook(), filename, new_project=True)
+    assert prep.filename == "workbook.xlsx"
+    assert prep.report.source_files == ["workbook.xlsx"]
+
+
 def test_an_unreadable_file_s_message_names_the_uploaded_file(client):
     import openpyxl
 
@@ -538,6 +545,60 @@ def test_a_malformed_sidecar_is_refused_before_the_row_exists(
     ):
         assert r.status_code == 422 and _kind(r) == "import_unreadable", r.text
         assert r.json()["detail"]["message"].endswith("nothing was imported.")
+    assert store() == before
+
+
+def test_an_interrupt_while_writing_leaves_nothing_and_is_not_turned_into_a_500(
+    client, store, monkeypatch, _auth_db, seeded_identity
+):
+    """A BaseException that is not an Exception (Ctrl-C, a cancelled task) cleans up and propagates as itself."""
+    from db.models import User
+
+    def interrupt(*a, **k):
+        raise KeyboardInterrupt
+
+    prep = excel_workbook.prepare(_workbook(), "wb.xlsx", new_project=True)
+    # The org's folder exists, as it does once the org has any project.
+    assert (
+        _import(client, _workbook(), name=f"Other {uuid.uuid4().hex}").status_code
+        == 200
+    )
+    before = store()
+    monkeypatch.setattr(excel_workbook, "_write_files", interrupt)
+    with _auth_db[1]() as db:
+        user = db.get(User, seeded_identity["user_id"])
+        with pytest.raises(KeyboardInterrupt):
+            excel_workbook.create_project(db, user, "Interrupted", prep)
+    assert store() == before
+
+
+def test_a_session_left_failed_by_the_write_is_rolled_back_before_the_row_goes(
+    client, store, monkeypatch, _auth_db, seeded_identity
+):
+    """N2: the cleanup rolls the session back first, so a failed flush cannot strand the row."""
+    from fastapi import HTTPException
+
+    from db.models import User
+
+    prep = excel_workbook.prepare(_workbook(), "wb.xlsx", new_project=True)
+    # The org's folder exists, as it does once the org has any project.
+    assert (
+        _import(client, _workbook(), name=f"Other {uuid.uuid4().hex}").status_code
+        == 200
+    )
+    before = store()
+    with _auth_db[1]() as db:
+
+        def broken_flush(*a, **k):
+            db.add(User(id=uuid.uuid4(), email=None))  # NOT NULL: the flush fails
+            db.flush()
+
+        monkeypatch.setattr(excel_workbook, "_write_files", broken_flush)
+        user = db.get(User, seeded_identity["user_id"])
+        with pytest.raises(HTTPException) as exc:
+            excel_workbook.create_project(db, user, "Failed flush", prep)
+    assert exc.value.status_code == 500
+    assert exc.value.detail["error_kind"] == "import_write_failed"
     assert store() == before
 
 
