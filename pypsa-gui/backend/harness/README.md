@@ -593,7 +593,15 @@ Stores and always discloses how many it excluded. `branch-loading/1` and
 `network-loading/1` (`branch_calculations.py`, also opt-in) check one Line or
 Transformer, or the whole network, against `loadflow_summary`'s LOPF definition:
 P-only flow max(|p0|, |p1|) over rating·s_max_pu(t), overload above 1 + 1e-6. They
-refuse whenever AC power-flow results exist. `lost-load/1` (`lost_load_calculations.py`,
+refuse whenever AC power-flow results exist. `ac-branch-loading/1`
+(`ac_branch_calculations.py`, opt-in, AA-13) reads one Line or Transformer from the AC
+flow's own results with the tab's `ac_pf` readers (apparent power, a P proxy with a note
+when no q is recorded) over the window's converged snapshots only. Any snapshot not
+converged or unknown adds a **required warning slot** (`ac_pf_convergence`, disposition
+`warning`), stored as the evidence's hidden `required_warnings` and put first in the
+receipt's `result_slots` under policy "5" (policy "1" plus warnings, nothing else), so
+`request_complete` stays false; warnings count toward the twenty slots and a request
+that would overflow them is refused (`calculations.required_warnings`). `lost-load/1` (`lost_load_calculations.py`,
 opt-in) rebuilds one Load's or the network's unserved energy, peak, weighted shed
 hours and VoLL cost from the solve's own VoLL-slack capture, which every solve
 claim wipes and rewrites beside the input fingerprints. Monte Carlo LOLE (and

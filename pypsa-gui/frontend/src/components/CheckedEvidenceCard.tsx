@@ -1,4 +1,4 @@
-import type { AnswerReceipt } from '../utils/answerAssurance'
+import { hasWarning, WARNED_LABEL, warningText, type AnswerReceipt } from '../utils/answerAssurance'
 import { readableProfile, readableWindow } from '../utils/readableTime'
 import type { NavigationEntry } from '../utils/answerAssurance'
 
@@ -29,8 +29,10 @@ export function loadflowLine(entry: NavigationEntry): string | null {
 export function CheckedEvidenceCard({ answerId, receipt, sourceLabel }: { answerId: string; receipt: AnswerReceipt; sourceLabel?: string }) {
   const scope = receipt.request_scope
   const clarifying = receipt.result_slots?.some(s => s.disposition === 'needs_clarification') === true
+  // AA-13: a warning slot (policy "5") marks an interval the values leave out.
+  const warned = hasWarning(receipt)
   return <details className="mt-2 text-[11px] border border-border rounded p-2" data-testid="checked-evidence-card">
-    <summary className="cursor-pointer">{clarifying ? 'Clarification needed' : receipt.request_complete === true ? 'Requested results checked' : 'Checked evidence and limitations'}</summary>
+    <summary className="cursor-pointer">{clarifying ? 'Clarification needed' : warned ? WARNED_LABEL : receipt.request_complete === true ? 'Requested results checked' : 'Checked evidence and limitations'}</summary>
     <div className="mt-2 space-y-1">
       {scope && <p>{sourceLabel ?? (scope.retain ? 'Retained run' : 'Current run')} · {scope.entity_id} · {readableProfile(scope.profile)}</p>}
       {scope?.start && <p>{readableWindow(scope.start, scope.end)}</p>}
@@ -38,7 +40,9 @@ export function CheckedEvidenceCard({ answerId, receipt, sourceLabel }: { answer
         <p key={i} data-testid="checked-loadflow-view">{line}</p>)}
       {scope?.cost_basis && <p>Cost basis: {scope.cost_basis.currency}, price year {scope.cost_basis.price_year};
         {' '}annual fixed cost fraction {scope.cost_basis.annual_fixed_cost_fraction}</p>}
-      {receipt.result_slots && <ul>{receipt.result_slots.map(s => <li key={s.metric}>
+      {receipt.result_slots && <ul>{receipt.result_slots.map(s => s.disposition === 'warning'
+        ? <li key={s.metric} className="text-warn" data-testid="checked-warning-slot">{warningText(s)}</li>
+        : <li key={s.metric}>
         {s.metric.replace(/_/g, ' ')}: {s.disposition.replace(/_/g, ' ')}
         {s.valid_snapshots !== undefined && ` (${s.valid_snapshots}/${s.requested_snapshots} snapshots)`}
         {s.reason && ` — ${s.reason.replace(/_/g, ' ')}`}

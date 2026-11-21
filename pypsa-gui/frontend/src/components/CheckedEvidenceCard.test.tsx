@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { CheckedEvidenceCard, loadflowLine } from './CheckedEvidenceCard'
-import { parseApproval, type AnswerReceipt } from '../utils/answerAssurance'
+import { parseApproval, WARNED_LABEL, warningText, WARNING_REASON_CODES, type AnswerReceipt } from '../utils/answerAssurance'
 
 afterEach(cleanup)
 const receipt: AnswerReceipt = {
@@ -96,4 +96,39 @@ describe('the Load flow line (S3b)', () => {
     for (const forged of [[{ ...base, shows: 'checked_evidence' }], [{ ...base, shows: 'different_view', reason: 'made_up' }],
       [{ ...base, shows: 'shown' }]]) expect(parseApproval(frame(forged))).toBeNull()
   })
+})
+
+it('shows a required warning slot and reads the request incomplete (AA-13)', () => {
+  const warned: AnswerReceipt = {
+    ...receipt, policy_version: '5', reviewer_status: 'not_required', limitations: [],
+    request_scope: { profile: 'ac-branch-loading/1', entity_id: 'L12' },
+    result_slots: [
+      { metric: 'ac_pf_convergence', disposition: 'warning', reason: 'ac_pf_not_converged (1 of 2 snapshots in the window converged)',
+        valid_snapshots: 1, requested_snapshots: 2, excluded_indices: ['2026-01-01T01:00:00'] },
+      { metric: 'branch_rating', disposition: 'answered', valid_snapshots: 1, requested_snapshots: 2 },
+    ],
+  }
+  render(<CheckedEvidenceCard answerId="answer-1" receipt={warned} />)
+  expect(screen.getByText(WARNED_LABEL)).toBeTruthy()
+  const row = screen.getByTestId('checked-warning-slot')
+  expect(row.textContent).toBe(
+    'Warning: AC power flow did not converge for 1 of 2 snapshots in the window. The values cover 1 of 2 snapshots.')
+  expect(row.className).toContain('text-warn')
+  // Listed first, above the metric slots.
+  expect(row.parentElement!.firstElementChild).toBe(row)
+  expect(screen.queryByText('Requested results checked')).toBeNull()
+})
+
+it('words each warning reason in plain text, with no slot key or dash (AA-13)', () => {
+  // Parity with the backend's warning states (tests/test_ac_branch_loading_assurance.py reads this list).
+  expect(WARNING_REASON_CODES).toEqual(['ac_pf_not_converged', 'ac_pf_convergence_unknown'])
+  const slot = { metric: 'ac_pf_convergence', disposition: 'warning' as const, valid_snapshots: 2, requested_snapshots: 3 }
+  expect(warningText({ ...slot, reason: 'ac_pf_convergence_unknown (2 of 3 snapshots in the window converged)' })).toBe(
+    'Warning: AC power flow convergence is unknown for 1 of 3 snapshots in the window. The values cover 2 of 3 snapshots.')
+  expect(warningText({ ...slot, reason: 'other_reason' })).toBe(
+    'Warning: 1 of 3 snapshots in the window are excluded. The values cover 2 of 3 snapshots.')
+  for (const code of WARNING_REASON_CODES) {
+    const text = warningText({ ...slot, reason: `${code} (2 of 3)` })
+    expect(text).not.toMatch(/[—_]|ac pf/)
+  }
 })
