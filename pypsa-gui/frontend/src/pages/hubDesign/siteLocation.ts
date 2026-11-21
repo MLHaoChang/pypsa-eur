@@ -34,6 +34,19 @@ export function locationOf(d: LocationDraft): { lat: number; lng: number } | nul
   return c.lat || c.lng ? null : { lat, lng }
 }
 
+/** Resolves once this tab's project is `project` and no mismatch is set; false
+ *  on timeout. The new project becomes current as the create finishes, which
+ *  can lag a slow open. */
+function projectOpen(project: string, timeoutMs = 20000): Promise<boolean> {
+  const ready = () => { const u = useUIStore.getState(); return u.currentProject === project && !u.projectMismatch }
+  if (ready()) return Promise.resolve(true)
+  return new Promise(resolve => {
+    const done = (v: boolean) => { clearTimeout(timer); unsub(); resolve(v) }
+    const unsub = useUIStore.subscribe(() => { if (ready()) done(true) })
+    const timer = setTimeout(() => done(false), timeoutMs)
+  })
+}
+
 /** Write the entered location as the new project's confirmed site anchor and
  *  put its buses there (the readiness note "The site has no location" reads
  *  the buses' x/y, not the anchor). Does nothing for a skipped pair. Returns an error text, or null when written. */
@@ -45,8 +58,7 @@ export async function writeCreatedLocation(project: string, d: LocationDraft): P
     await siteSceneApi.putAnchor(project, { ...loc, source: 'manual', confirmed: true }, doc.revision)
     // The bus calls name no project: they act on the live network. Write only
     // while this tab's project is the new one and the backend agrees.
-    const ui = useUIStore.getState()
-    if (ui.currentProject !== project || ui.projectMismatch) throw new Error('another project is open')
+    if (!(await projectOpen(project))) throw new Error('another project is open')
     const buses = await networkApi.getBuses()
     if (buses.length) {
       await networkApi.bulkUpdate({ component_class: 'Bus', names: buses.map(b => b.name),

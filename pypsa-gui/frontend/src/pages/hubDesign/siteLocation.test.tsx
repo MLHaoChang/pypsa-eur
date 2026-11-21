@@ -42,9 +42,22 @@ describe('writeCreatedLocation', () => {
     expect(networkApi.bulkUpdate).toHaveBeenCalledWith({ component_class: 'Bus', names: ['b1', 'b2'],
       updates: { x: 8.5, y: 47.4 } })
   })
-  it('does not touch the live network when another project is open', async () => {
+  it('waits for a slow project open instead of failing', async () => {
     useUIStore.setState({ currentProject: 'other' })
-    expect(await writeCreatedLocation('p1', { lat: '47.4', lng: '8.5' })).toMatch(/not saved/)
+    const w = writeCreatedLocation('p1', { lat: '47.4', lng: '8.5' })
+    await new Promise(r => setTimeout(r, 30))
+    expect(networkApi.bulkUpdate).not.toHaveBeenCalled()
+    useUIStore.setState({ currentProject: 'p1' })
+    expect(await w).toBeNull()
+    expect(networkApi.bulkUpdate).toHaveBeenCalled()
+  })
+  it('does not touch the live network when another project stays open', async () => {
+    vi.useFakeTimers()
+    useUIStore.setState({ currentProject: 'other' })
+    const w = writeCreatedLocation('p1', { lat: '47.4', lng: '8.5' })
+    await vi.advanceTimersByTimeAsync(20001)
+    vi.useRealTimers()
+    expect(await w).toMatch(/not saved/)
     expect(networkApi.getBuses).not.toHaveBeenCalled()
     expect(networkApi.bulkUpdate).not.toHaveBeenCalled()
   })
