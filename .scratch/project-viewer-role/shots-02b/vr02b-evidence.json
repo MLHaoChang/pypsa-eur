@@ -1,278 +1,404 @@
 {
- "regenerate_before": {
-  "reports_listing": [
-   "reports/.94e0a7f10321c61c.lock",
-   "reports/94e0a7f10321c61c",
-   "reports/94e0a7f10321c61c/meta.json",
-   "reports/94e0a7f10321c61c/v1.json",
-   "reports/94e0a7f10321c61c/v2.json"
+  "regenerate_before": {
+    "reports_listing": [
+      "reports/.94e0a7f10321c61c.lock",
+      "reports/94e0a7f10321c61c",
+      "reports/94e0a7f10321c61c/meta.json",
+      "reports/94e0a7f10321c61c/v1.json",
+      "reports/94e0a7f10321c61c/v2.json"
+    ],
+    "meta_sha256": {
+      "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c"
+    },
+    "all_files_sha256": {
+      "reports/.94e0a7f10321c61c.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c",
+      "reports/94e0a7f10321c61c/v1.json": "fdc42986b04ae38e9c9982fd67bd149818cfade69ad7c28cced7522836c8d8d5",
+      "reports/94e0a7f10321c61c/v2.json": "fcbebf24f6d772b4be449df8e0f12edb265e8ba9a733271ab4cb6427b7539273"
+    },
+    "island_cuts_sha256": null,
+    "campus_input_yaml_sha256": null
+  },
+  "_tmp_running": {
+    "http": 200,
+    "body": {
+      "status": "running",
+      "report_id": "5dfc78ede6ed6970",
+      "version": null,
+      "mode": "generate",
+      "section": null,
+      "progress": {
+        "done": 0,
+        "total": 2,
+        "current": "executive_summary"
+      },
+      "repairs": 0,
+      "prose_failures": [],
+      "error": null,
+      "started_at": 1795268548.3015437,
+      "finished_at": null,
+      "profile_id": "fake",
+      "model": "fake-model"
+    }
+  },
+  "regenerate_status_record": {
+    "http": 200,
+    "body": {
+      "status": "failed",
+      "report_id": "94e0a7f10321c61c",
+      "version": null,
+      "mode": "regenerate",
+      "section": "cost",
+      "progress": {
+        "done": 1,
+        "total": 1,
+        "current": null
+      },
+      "repairs": 0,
+      "prose_failures": [],
+      "error": "project_view_only: You can view this project but not change it. Ask its owner for edit access.",
+      "started_at": 1795268513.1792362,
+      "finished_at": 1795268515.1410294,
+      "profile_id": "fake",
+      "model": "fake-model",
+      "error_kind": "project_view_only"
+    }
+  },
+  "regenerate_after": {
+    "reports_listing": [
+      "reports/.94e0a7f10321c61c.lock",
+      "reports/94e0a7f10321c61c",
+      "reports/94e0a7f10321c61c/meta.json",
+      "reports/94e0a7f10321c61c/v1.json",
+      "reports/94e0a7f10321c61c/v2.json"
+    ],
+    "meta_sha256": {
+      "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c"
+    },
+    "all_files_sha256": {
+      "reports/.94e0a7f10321c61c.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c",
+      "reports/94e0a7f10321c61c/v1.json": "fdc42986b04ae38e9c9982fd67bd149818cfade69ad7c28cced7522836c8d8d5",
+      "reports/94e0a7f10321c61c/v2.json": "fcbebf24f6d772b4be449df8e0f12edb265e8ba9a733271ab4cb6427b7539273"
+    },
+    "island_cuts_sha256": null,
+    "campus_input_yaml_sha256": null
+  },
+  "generate_before": {
+    "reports_listing": [
+      "reports/.94e0a7f10321c61c.lock",
+      "reports/94e0a7f10321c61c",
+      "reports/94e0a7f10321c61c/meta.json",
+      "reports/94e0a7f10321c61c/v1.json",
+      "reports/94e0a7f10321c61c/v2.json"
+    ],
+    "meta_sha256": {
+      "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c"
+    },
+    "all_files_sha256": {
+      "reports/.94e0a7f10321c61c.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c",
+      "reports/94e0a7f10321c61c/v1.json": "fdc42986b04ae38e9c9982fd67bd149818cfade69ad7c28cced7522836c8d8d5",
+      "reports/94e0a7f10321c61c/v2.json": "fcbebf24f6d772b4be449df8e0f12edb265e8ba9a733271ab4cb6427b7539273"
+    },
+    "island_cuts_sha256": null,
+    "campus_input_yaml_sha256": null
+  },
+  "generate_status_record": {
+    "http": 200,
+    "body": {
+      "status": "failed",
+      "report_id": "5dfc78ede6ed6970",
+      "version": null,
+      "mode": "generate",
+      "section": null,
+      "progress": {
+        "done": 2,
+        "total": 2,
+        "current": null
+      },
+      "repairs": 0,
+      "prose_failures": [],
+      "error": "project_view_only: You can view this project but not change it. Ask its owner for edit access.",
+      "started_at": 1795268548.3015437,
+      "finished_at": 1795268551.296572,
+      "profile_id": "fake",
+      "model": "fake-model",
+      "error_kind": "project_view_only"
+    }
+  },
+  "generate_after": {
+    "reports_listing": [
+      "reports/.94e0a7f10321c61c.lock",
+      "reports/94e0a7f10321c61c",
+      "reports/94e0a7f10321c61c/meta.json",
+      "reports/94e0a7f10321c61c/v1.json",
+      "reports/94e0a7f10321c61c/v2.json"
+    ],
+    "meta_sha256": {
+      "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c"
+    },
+    "all_files_sha256": {
+      "reports/.94e0a7f10321c61c.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c",
+      "reports/94e0a7f10321c61c/v1.json": "fdc42986b04ae38e9c9982fd67bd149818cfade69ad7c28cced7522836c8d8d5",
+      "reports/94e0a7f10321c61c/v2.json": "fcbebf24f6d772b4be449df8e0f12edb265e8ba9a733271ab4cb6427b7539273"
+    },
+    "island_cuts_sha256": null,
+    "campus_input_yaml_sha256": null
+  },
+  "viewer_before": {
+    "reports_listing": [
+      "reports/.94e0a7f10321c61c.lock",
+      "reports/94e0a7f10321c61c",
+      "reports/94e0a7f10321c61c/meta.json",
+      "reports/94e0a7f10321c61c/v1.json",
+      "reports/94e0a7f10321c61c/v2.json"
+    ],
+    "meta_sha256": {
+      "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c"
+    },
+    "all_files_sha256": {
+      "reports/.94e0a7f10321c61c.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c",
+      "reports/94e0a7f10321c61c/v1.json": "fdc42986b04ae38e9c9982fd67bd149818cfade69ad7c28cced7522836c8d8d5",
+      "reports/94e0a7f10321c61c/v2.json": "fcbebf24f6d772b4be449df8e0f12edb265e8ba9a733271ab4cb6427b7539273"
+    },
+    "island_cuts_sha256": null,
+    "campus_input_yaml_sha256": null
+  },
+  "viewer_ui_status_after_click": {
+    "http": 200,
+    "body": {
+      "status": "failed",
+      "report_id": "5dfc78ede6ed6970",
+      "version": null,
+      "mode": "generate",
+      "section": null,
+      "progress": {
+        "done": 2,
+        "total": 2,
+        "current": null
+      },
+      "repairs": 0,
+      "prose_failures": [],
+      "error": "project_view_only: You can view this project but not change it. Ask its owner for edit access.",
+      "started_at": 1795268548.3015437,
+      "finished_at": 1795268551.296572,
+      "profile_id": "fake",
+      "model": "fake-model",
+      "error_kind": "project_view_only"
+    }
+  },
+  "viewer_after": {
+    "reports_listing": [
+      "reports/.94e0a7f10321c61c.lock",
+      "reports/94e0a7f10321c61c",
+      "reports/94e0a7f10321c61c/meta.json",
+      "reports/94e0a7f10321c61c/v1.json",
+      "reports/94e0a7f10321c61c/v2.json"
+    ],
+    "meta_sha256": {
+      "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c"
+    },
+    "all_files_sha256": {
+      "reports/.94e0a7f10321c61c.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c",
+      "reports/94e0a7f10321c61c/v1.json": "fdc42986b04ae38e9c9982fd67bd149818cfade69ad7c28cced7522836c8d8d5",
+      "reports/94e0a7f10321c61c/v2.json": "fcbebf24f6d772b4be449df8e0f12edb265e8ba9a733271ab4cb6427b7539273"
+    },
+    "island_cuts_sha256": null,
+    "campus_input_yaml_sha256": null
+  },
+  "campus_plain_viewer_apply": {
+    "status": 403,
+    "body": {
+      "detail": {
+        "error_kind": "project_view_only",
+        "message": "You can view this project but not change it. Ask its owner for edit access."
+      }
+    }
+  },
+  "campus_before": {
+    "island_cuts_json_sha256": null,
+    "campus_input_yaml_sha256": "a5fd74d2f5316073abadfb0ae45871b587aa4bdc48b0f78b1fd885fc48a3192e",
+    "island_cuts_json_exists": false
+  },
+  "campus_cuts_proposed_seed": "campus_freq_cuts.csv seeded by hand with one seamless inertia row (real campus run proposed none)",
+  "campus_start_record": {
+    "state": "running",
+    "project": "E2E Campus",
+    "started_at": 1795268767.6949415,
+    "finished_at": null,
+    "trials": 0,
+    "max_trials": 3,
+    "stopped": null,
+    "error": null,
+    "message": "applying the cuts"
+  },
+  "campus_mid_run_when_demoted": {
+    "island_cuts_json_sha256": "173f435b4118417021b20dccaa54a84e5a0a263c2e6494f3de41a97943cd0be2",
+    "campus_input_yaml_sha256": "e738f36b7f73932e66d80aba77da858dc5dc60f9b7e39803318b258c70b15d18",
+    "island_cuts_json_exists": true,
+    "status": {
+      "state": "running",
+      "project": "E2E Campus",
+      "started_at": 1795268767.6949415,
+      "finished_at": null,
+      "trials": 0,
+      "max_trials": 3,
+      "stopped": null,
+      "error": null,
+      "message": "applying the cuts"
+    }
+  },
+  "campus_status_record": {
+    "state": "failed",
+    "project": "E2E Campus",
+    "started_at": 1795268767.6949415,
+    "finished_at": 1795268800.6556373,
+    "trials": 0,
+    "max_trials": 3,
+    "stopped": "project_view_only",
+    "error": "project_view_only: You can view this project but not change it. Ask its owner for edit access.",
+    "message": "failed",
+    "error_code": "project_view_only"
+  },
+  "campus_after": {
+    "island_cuts_json_sha256": null,
+    "campus_input_yaml_sha256": "a5fd74d2f5316073abadfb0ae45871b587aa4bdc48b0f78b1fd885fc48a3192e",
+    "island_cuts_json_exists": false
+  },
+  "campus_cuts_api_after": [],
+  "notes": {
+    "llm": "report jobs ran against a local OpenAI-compatible fake model server on 127.0.0.1:9911 (custom profile 'fake'); demotion done by a direct sqlite UPDATE of project_memberships.role while the job was held inside its LLM call",
+    "extra_v2": "reports/<id>/v2.json existed before the regenerate run: an earlier attempt of mine had no demotion (admin PUT refused while the editor held the edit lock), so that regenerate completed normally. before/after of the refused regenerate both include v2.",
+    "campus_seed": "island_cuts proposals CSV was seeded by hand (one seamless inertia row) because the template hub cannot solve with the seamless scenario (infeasible); apply job, hub solve via the queue, campus rerun and the role checks were real. The rerun's campus run results (run/) were replaced by the real rerun, as documented (a finished rerun is not undone)."
+  },
+  "campus2_A_before_sha256": {
+    "island_cuts_json": null,
+    "campus_input_yaml": "a5fd74d2f5316073abadfb0ae45871b587aa4bdc48b0f78b1fd885fc48a3192e"
+  },
+  "campus2_A_after_sha256": {
+    "island_cuts_json": null,
+    "campus_input_yaml": "a5fd74d2f5316073abadfb0ae45871b587aa4bdc48b0f78b1fd885fc48a3192e"
+  },
+  "campus2_A_record": {
+    "state": "failed",
+    "project": "E2E Campus",
+    "started_at": 1795272113.5536473,
+    "finished_at": 1795272113.6287398,
+    "trials": 0,
+    "max_trials": 3,
+    "stopped": "project_view_only",
+    "error": "project_view_only: You can view this project but not change it. Ask its owner for edit access.",
+    "message": "failed",
+    "error_code": "project_view_only",
+    "refused_trial": 1,
+    "refused_before": "solve"
+  },
+  "campus2_A_demote_log": [
+    [
+      "demoted",
+      0.02,
+      [
+        [
+          "c8c9df25c3134ad987af9c7c14b9ab1b",
+          "queued",
+          "solve"
+        ]
+      ]
+    ]
   ],
-  "meta_sha256": {
-   "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c"
-  },
-  "all_files_sha256": {
-   "reports/.94e0a7f10321c61c.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-   "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c",
-   "reports/94e0a7f10321c61c/v1.json": "fdc42986b04ae38e9c9982fd67bd149818cfade69ad7c28cced7522836c8d8d5",
-   "reports/94e0a7f10321c61c/v2.json": "fcbebf24f6d772b4be449df8e0f12edb265e8ba9a733271ab4cb6427b7539273"
-  },
-  "island_cuts_sha256": null,
-  "campus_input_yaml_sha256": null
- },
- "_tmp_running": {
-  "http": 200,
-  "body": {
-   "status": "running",
-   "report_id": "5dfc78ede6ed6970",
-   "version": null,
-   "mode": "generate",
-   "section": null,
-   "progress": {
-    "done": 0,
-    "total": 2,
-    "current": "executive_summary"
-   },
-   "repairs": 0,
-   "prose_failures": [],
-   "error": null,
-   "started_at": 1795268548.3015437,
-   "finished_at": null,
-   "profile_id": "fake",
-   "model": "fake-model"
-  }
- },
- "regenerate_status_record": {
-  "http": 200,
-  "body": {
-   "status": "failed",
-   "report_id": "94e0a7f10321c61c",
-   "version": null,
-   "mode": "regenerate",
-   "section": "cost",
-   "progress": {
-    "done": 1,
-    "total": 1,
-    "current": null
-   },
-   "repairs": 0,
-   "prose_failures": [],
-   "error": "project_view_only: You can view this project but not change it. Ask its owner for edit access.",
-   "started_at": 1795268513.1792362,
-   "finished_at": 1795268515.1410294,
-   "profile_id": "fake",
-   "model": "fake-model",
-   "error_kind": "project_view_only"
-  }
- },
- "regenerate_after": {
-  "reports_listing": [
-   "reports/.94e0a7f10321c61c.lock",
-   "reports/94e0a7f10321c61c",
-   "reports/94e0a7f10321c61c/meta.json",
-   "reports/94e0a7f10321c61c/v1.json",
-   "reports/94e0a7f10321c61c/v2.json"
+  "campus2_A_island_cuts_after": null,
+  "campus2_A_last_solve_job": [
+    [
+      "c8c9df25c3134ad987af9c7c14b9ab1b",
+      "failed",
+      "solve"
+    ]
   ],
-  "meta_sha256": {
-   "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c"
+  "campus2_B_before_sha256": {
+    "island_cuts_json": null,
+    "campus_input_yaml": "a5fd74d2f5316073abadfb0ae45871b587aa4bdc48b0f78b1fd885fc48a3192e"
   },
-  "all_files_sha256": {
-   "reports/.94e0a7f10321c61c.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-   "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c",
-   "reports/94e0a7f10321c61c/v1.json": "fdc42986b04ae38e9c9982fd67bd149818cfade69ad7c28cced7522836c8d8d5",
-   "reports/94e0a7f10321c61c/v2.json": "fcbebf24f6d772b4be449df8e0f12edb265e8ba9a733271ab4cb6427b7539273"
+  "campus2_B_after_sha256": {
+    "island_cuts_json": "92f411ea9fe0c1de4a0f06fbc2ac1378f5d2f34b5f5592279878cf009e5b2207",
+    "campus_input_yaml": "a5fd74d2f5316073abadfb0ae45871b587aa4bdc48b0f78b1fd885fc48a3192e"
   },
-  "island_cuts_sha256": null,
-  "campus_input_yaml_sha256": null
- },
- "generate_before": {
-  "reports_listing": [
-   "reports/.94e0a7f10321c61c.lock",
-   "reports/94e0a7f10321c61c",
-   "reports/94e0a7f10321c61c/meta.json",
-   "reports/94e0a7f10321c61c/v1.json",
-   "reports/94e0a7f10321c61c/v2.json"
+  "campus2_B_record": {
+    "state": "failed",
+    "project": "E2E Campus",
+    "started_at": 1795272318.0718973,
+    "finished_at": 1795272323.1615274,
+    "trials": 0,
+    "max_trials": 3,
+    "stopped": "project_view_only",
+    "error": "project_view_only: You can view this project but not change it. Ask its owner for edit access.",
+    "message": "failed",
+    "error_code": "project_view_only",
+    "refused_trial": 1,
+    "refused_before": "rerun"
+  },
+  "campus2_B_demote_log": [
+    [
+      "demoted",
+      5.06,
+      [
+        [
+          "43bc2f65419442358a2769179f3f2064",
+          "completed",
+          "solve"
+        ]
+      ],
+      {
+        "state": "running",
+        "project": "E2E Campus",
+        "started_at": 1795272318.0718973,
+        "finished_at": null,
+        "trials": 0,
+        "max_trials": 3,
+        "stopped": null,
+        "error": null,
+        "message": "applying the cuts"
+      }
+    ]
   ],
-  "meta_sha256": {
-   "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c"
+  "campus2_B_island_cuts_after": {
+    "cuts": [
+      {
+        "period": 2030,
+        "hour": 12,
+        "scenario": "seamless",
+        "kind": "inertia",
+        "required": 100.0
+      }
+    ],
+    "trials": [
+      {
+        "trial": 1,
+        "added": [
+          {
+            "period": 2030,
+            "hour": 12,
+            "scenario": "seamless",
+            "kind": "inertia",
+            "required": 100.0
+          }
+        ],
+        "objective": null,
+        "refreshed": [],
+        "verdict": "not finished"
+      }
+    ]
   },
-  "all_files_sha256": {
-   "reports/.94e0a7f10321c61c.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-   "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c",
-   "reports/94e0a7f10321c61c/v1.json": "fdc42986b04ae38e9c9982fd67bd149818cfade69ad7c28cced7522836c8d8d5",
-   "reports/94e0a7f10321c61c/v2.json": "fcbebf24f6d772b4be449df8e0f12edb265e8ba9a733271ab4cb6427b7539273"
-  },
-  "island_cuts_sha256": null,
-  "campus_input_yaml_sha256": null
- },
- "generate_status_record": {
-  "http": 200,
-  "body": {
-   "status": "failed",
-   "report_id": "5dfc78ede6ed6970",
-   "version": null,
-   "mode": "generate",
-   "section": null,
-   "progress": {
-    "done": 2,
-    "total": 2,
-    "current": null
-   },
-   "repairs": 0,
-   "prose_failures": [],
-   "error": "project_view_only: You can view this project but not change it. Ask its owner for edit access.",
-   "started_at": 1795268548.3015437,
-   "finished_at": 1795268551.296572,
-   "profile_id": "fake",
-   "model": "fake-model",
-   "error_kind": "project_view_only"
-  }
- },
- "generate_after": {
-  "reports_listing": [
-   "reports/.94e0a7f10321c61c.lock",
-   "reports/94e0a7f10321c61c",
-   "reports/94e0a7f10321c61c/meta.json",
-   "reports/94e0a7f10321c61c/v1.json",
-   "reports/94e0a7f10321c61c/v2.json"
+  "campus2_B_last_solve_job": [
+    [
+      "43bc2f65419442358a2769179f3f2064",
+      "completed",
+      "solve"
+    ]
   ],
-  "meta_sha256": {
-   "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c"
-  },
-  "all_files_sha256": {
-   "reports/.94e0a7f10321c61c.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-   "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c",
-   "reports/94e0a7f10321c61c/v1.json": "fdc42986b04ae38e9c9982fd67bd149818cfade69ad7c28cced7522836c8d8d5",
-   "reports/94e0a7f10321c61c/v2.json": "fcbebf24f6d772b4be449df8e0f12edb265e8ba9a733271ab4cb6427b7539273"
-  },
-  "island_cuts_sha256": null,
-  "campus_input_yaml_sha256": null
- },
- "viewer_before": {
-  "reports_listing": [
-   "reports/.94e0a7f10321c61c.lock",
-   "reports/94e0a7f10321c61c",
-   "reports/94e0a7f10321c61c/meta.json",
-   "reports/94e0a7f10321c61c/v1.json",
-   "reports/94e0a7f10321c61c/v2.json"
-  ],
-  "meta_sha256": {
-   "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c"
-  },
-  "all_files_sha256": {
-   "reports/.94e0a7f10321c61c.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-   "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c",
-   "reports/94e0a7f10321c61c/v1.json": "fdc42986b04ae38e9c9982fd67bd149818cfade69ad7c28cced7522836c8d8d5",
-   "reports/94e0a7f10321c61c/v2.json": "fcbebf24f6d772b4be449df8e0f12edb265e8ba9a733271ab4cb6427b7539273"
-  },
-  "island_cuts_sha256": null,
-  "campus_input_yaml_sha256": null
- },
- "viewer_ui_status_after_click": {
-  "http": 200,
-  "body": {
-   "status": "failed",
-   "report_id": "5dfc78ede6ed6970",
-   "version": null,
-   "mode": "generate",
-   "section": null,
-   "progress": {
-    "done": 2,
-    "total": 2,
-    "current": null
-   },
-   "repairs": 0,
-   "prose_failures": [],
-   "error": "project_view_only: You can view this project but not change it. Ask its owner for edit access.",
-   "started_at": 1795268548.3015437,
-   "finished_at": 1795268551.296572,
-   "profile_id": "fake",
-   "model": "fake-model",
-   "error_kind": "project_view_only"
-  }
- },
- "viewer_after": {
-  "reports_listing": [
-   "reports/.94e0a7f10321c61c.lock",
-   "reports/94e0a7f10321c61c",
-   "reports/94e0a7f10321c61c/meta.json",
-   "reports/94e0a7f10321c61c/v1.json",
-   "reports/94e0a7f10321c61c/v2.json"
-  ],
-  "meta_sha256": {
-   "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c"
-  },
-  "all_files_sha256": {
-   "reports/.94e0a7f10321c61c.lock": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-   "reports/94e0a7f10321c61c/meta.json": "5844e86e550eace8d1ec40bd94e65af6617b1f23a3106e1d75b761008007373c",
-   "reports/94e0a7f10321c61c/v1.json": "fdc42986b04ae38e9c9982fd67bd149818cfade69ad7c28cced7522836c8d8d5",
-   "reports/94e0a7f10321c61c/v2.json": "fcbebf24f6d772b4be449df8e0f12edb265e8ba9a733271ab4cb6427b7539273"
-  },
-  "island_cuts_sha256": null,
-  "campus_input_yaml_sha256": null
- },
- "campus_plain_viewer_apply": {
-  "status": 403,
-  "body": {
-   "detail": {
-    "error_kind": "project_view_only",
-    "message": "You can view this project but not change it. Ask its owner for edit access."
-   }
-  }
- },
- "campus_before": {
-  "island_cuts_json_sha256": null,
-  "campus_input_yaml_sha256": "a5fd74d2f5316073abadfb0ae45871b587aa4bdc48b0f78b1fd885fc48a3192e",
-  "island_cuts_json_exists": false
- },
- "campus_cuts_proposed_seed": "campus_freq_cuts.csv seeded by hand with one seamless inertia row (real campus run proposed none)",
- "campus_start_record": {
-  "state": "running",
-  "project": "E2E Campus",
-  "started_at": 1795268767.6949415,
-  "finished_at": null,
-  "trials": 0,
-  "max_trials": 3,
-  "stopped": null,
-  "error": null,
-  "message": "applying the cuts"
- },
- "campus_mid_run_when_demoted": {
-  "island_cuts_json_sha256": "173f435b4118417021b20dccaa54a84e5a0a263c2e6494f3de41a97943cd0be2",
-  "campus_input_yaml_sha256": "e738f36b7f73932e66d80aba77da858dc5dc60f9b7e39803318b258c70b15d18",
-  "island_cuts_json_exists": true,
-  "status": {
-   "state": "running",
-   "project": "E2E Campus",
-   "started_at": 1795268767.6949415,
-   "finished_at": null,
-   "trials": 0,
-   "max_trials": 3,
-   "stopped": null,
-   "error": null,
-   "message": "applying the cuts"
-  }
- },
- "campus_status_record": {
-  "state": "failed",
-  "project": "E2E Campus",
-  "started_at": 1795268767.6949415,
-  "finished_at": 1795268800.6556373,
-  "trials": 0,
-  "max_trials": 3,
-  "stopped": "project_view_only",
-  "error": "project_view_only: You can view this project but not change it. Ask its owner for edit access.",
-  "message": "failed",
-  "error_code": "project_view_only"
- },
- "campus_after": {
-  "island_cuts_json_sha256": null,
-  "campus_input_yaml_sha256": "a5fd74d2f5316073abadfb0ae45871b587aa4bdc48b0f78b1fd885fc48a3192e",
-  "island_cuts_json_exists": false
- },
- "campus_cuts_api_after": [],
- "notes": {
-  "llm": "report jobs ran against a local OpenAI-compatible fake model server on 127.0.0.1:9911 (custom profile 'fake'); demotion done by a direct sqlite UPDATE of project_memberships.role while the job was held inside its LLM call",
-  "extra_v2": "reports/<id>/v2.json existed before the regenerate run: an earlier attempt of mine had no demotion (admin PUT refused while the editor held the edit lock), so that regenerate completed normally. before/after of the refused regenerate both include v2.",
-  "campus_seed": "island_cuts proposals CSV was seeded by hand (one seamless inertia row) because the template hub cannot solve with the seamless scenario (infeasible); apply job, hub solve via the queue, campus rerun and the role checks were real. The rerun's campus run results (run/) were replaced by the real rerun, as documented (a finished rerun is not undone)."
- }
+  "campus2_A_note": "demoted 0.02 s after apply start: the solve job was queued, the queue worker refused it (job failed, refused_before=solve); no trial left",
+  "campus2_B_note": "demoted 5.06 s after start, right after the solve job completed; network.nc/results_state.pkl mtime 1795272321 > apply start 1795272318; island_cuts.json written 1795272318 (before the solve, unchanged since); campus_input.yaml untouched (refresh_ratings not reached)"
 }
