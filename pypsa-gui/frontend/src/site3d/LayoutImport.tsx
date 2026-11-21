@@ -219,7 +219,7 @@ function TraceDialog({ raster, disabled, onClose, onPropose }: {
             {ring.length > 0 && (
               <div className="flex items-center gap-2 text-[11px]">
                 <span className="text-warn">Outline: {ring.length} corners</span>
-                <button type="button" className="text-accent hover:underline disabled:text-muted" disabled={ring.length < 3} onClick={finish} data-testid="layout-trace-finish">Finish outline</button>
+                <button type="button" className="text-link hover:underline disabled:text-muted" disabled={ring.length < 3} onClick={finish} data-testid="layout-trace-finish">Finish outline</button>
                 <button type="button" className="text-muted hover:text-text" onClick={() => setRing(corners => corners.slice(0, -1))}>Undo corner</button>
               </div>
             )}

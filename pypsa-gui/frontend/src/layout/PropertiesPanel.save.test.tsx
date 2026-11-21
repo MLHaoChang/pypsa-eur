@@ -10,6 +10,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
+import { seedRows } from '../test/seedRows'
 
 vi.mock('../api/network', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/network')>()
@@ -51,7 +52,7 @@ function renderCard() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  client.setQueryData(nk('Demo', 'generators'), [GEN])
+  seedRows(client, 'Demo', 'generators', [GEN])
   return render(
     <QueryClientProvider client={client}>
       <GeneratorCard gen={GEN} onRename={() => {}} />

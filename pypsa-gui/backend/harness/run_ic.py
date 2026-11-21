@@ -13,6 +13,7 @@ The case solves no LP, so the step reserves and spends no solve."""
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 
@@ -29,6 +30,55 @@ _FOLLOWERS: dict[tuple, threading.Thread] = {}
 TIMED_OUT = (
     "The investment case passed its follow deadline; its outcome cannot be verified."
 )
+# Study harness 36 (GK B (60) B1, follow-up (a)): a profile action may carry
+# `on_end: chapter_gap` (eh_site@4). Its case that ends refused, failed or
+# aborted, or that is still running at the run's wall time (the envelope's
+# `expires_at`), keeps the step `failed` with its typed error and is judged by
+# the report (`judged_by`), so the run goes on to a report that lists the
+# investment chapter as a gap with that error. An unverifiable step stays
+# `uncertain` and stops the run, as before. A step without it is unchanged.
+from services.run_envelope import IC_BUDGET_KIND  # noqa: E402 (A5 (a): one literal)
+from services.run_profiles import CHAPTER_GAP, ON_END  # noqa: E402 (the profile owns them)
+
+JUDGED = "report"
+# O4: a gap step's error is its typed kind and fixed user words, plus the
+# case's own error code when it is one (never its raw error text or a path).
+GAP_KINDS = {
+    "refused": ("ic_case_refused", "the investment case was refused for its inputs"),
+    "failed": ("ic_case_failed", "the investment case failed"),
+    "aborted": (
+        "ic_case_aborted",
+        "the investment case was stopped before it finished",
+    ),
+}
+WALL_TIME_KIND = "ic_wall_time"
+WALL_TIME = (
+    f"{WALL_TIME_KIND}: the investment case did not finish within the run's wall time."
+)
+BUDGET_KIND = IC_BUDGET_KIND  # the envelope refuses with it (A2, A5)
+BUDGET = (
+    f"{BUDGET_KIND}: the run's solves left do not cover the investment case's baseline "
+    "solves, so it did not run."
+)
+# A5 (b): a gap step whose error carries no kind of the set (an uncertain step,
+# a lost record) is stated as a failed case it could not verify.
+UNVERIFIED = (
+    "ic_case_failed (unverified): the investment case's outcome could not be verified."
+)
+# GK B (61) A5: the one set of kinds a chapter-gap step's error carries (run_ic
+# owns it). They are never a `tool_error` frame's kind: a gap is the report's.
+CHAPTER_GAP_KINDS = frozenset(
+    {BUDGET_KIND, WALL_TIME_KIND, *(kind for kind, _ in GAP_KINDS.values())}
+)
+_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}")
+
+
+def gap_error(native, record) -> str:
+    """The typed error of a gap step whose case ended `native`."""
+    kind, words = GAP_KINDS[native]
+    code = (record or {}).get("error_code")
+    code = f" ({code})" if isinstance(code, str) and _CODE.fullmatch(code) else ""
+    return f"{kind}{code}: {words}, so this chapter is not established."
 
 
 def is_ic_step(step) -> bool:
@@ -45,7 +95,14 @@ def _record(ctx):
             return None
         return {
             k: record.get(k)
-            for k in ("status", "started_at", "error", "error_code", "thread")
+            for k in (
+                "status",
+                "started_at",
+                "finished_at",
+                "error",
+                "error_code",
+                "thread",
+            )
         }
 
 
@@ -85,6 +142,43 @@ def _alive(record) -> bool:
     )
 
 
+def _gap_step(task, step_id) -> bool:
+    step = next((s for s in task.get("steps", []) if s["id"] == step_id), None)
+    return step is not None and step.get(ON_END) == CHAPTER_GAP
+
+
+def _wall_deadline(path):
+    """The run's wall-time end (the granted envelope's `expires_at`, epoch
+    seconds), or None with no granted envelope."""
+    from services import run_envelope
+
+    envelope = run_envelope.read(path) or {}
+    if envelope.get("state") != "granted" or not envelope.get("expires_at"):
+        return None
+    return run_envelope._epoch(envelope["expires_at"])
+
+
+def chapter_gaps(task) -> dict[str, str]:
+    """The report chapters this run's own `chapter_gap` case steps leave as
+    gaps: {section id: the step's typed error}, for a live (not superseded)
+    step that settled anything but completed."""
+    from services.reports.chapters import INVESTMENT
+
+    out = {}
+    for step in task.get("steps") or []:
+        if (
+            is_ic_step(step)
+            and step.get(ON_END) == CHAPTER_GAP
+            and not step.get("superseded")
+            and step.get("status") in ("failed", "uncertain")
+        ):
+            error = str(step.get("error") or "")
+            if error.split(":", 1)[0].split(" ", 1)[0] not in CHAPTER_GAP_KINDS:
+                error = UNVERIFIED  # A5 (b): a gap row always carries a kind of the set
+            out[INVESTMENT] = error
+    return out
+
+
 def wait(ticket, job_id, session_id, ctx, begun) -> bool:
     """The run's case step waits on its job and a follower settles it from
     its own record. True when the step now waits; a chat plan's step keeps
@@ -102,6 +196,10 @@ def wait(ticket, job_id, session_id, ctx, begun) -> bool:
     if path is None:
         return False
 
+    deadline = time.time() + MAX_FOLLOW_SECONDS
+    wall = _wall_deadline(path) if _gap_step(task, ticket[1]) else None
+    walled = wall is not None and wall < deadline  # B1: the run's wall time ends first
+
     def mark(task):
         step = next((s for s in task["steps"] if s["id"] == ticket[1]), None)
         if (
@@ -114,7 +212,8 @@ def wait(ticket, job_id, session_id, ctx, begun) -> bool:
             kind=STUDY,
             started_at=begun,
             call_id=ticket[2],
-            deadline_at=time.time() + MAX_FOLLOW_SECONDS,
+            deadline_at=wall if walled else deadline,
+            **({"deadline_kind": WALL_TIME_KIND} if walled else {}),
         )
 
     runner._update(path, mark)
@@ -145,6 +244,7 @@ def following(ticket) -> bool:
 def _follow(path, ticket, job_id, ctx, begun):
     try:
         deadline = time.monotonic() + MAX_FOLLOW_SECONDS
+        wall = _wall_of(path, ticket)
         record = _record(ctx)
         while (
             record is not None
@@ -152,32 +252,156 @@ def _follow(path, ticket, job_id, ctx, begun):
             and record.get("status") == "running"
             and _alive(record)
             and time.monotonic() < deadline
+            and (wall is None or time.time() < wall)
         ):
             _WAKE.wait(POLL_SECONDS)
             record = _record(ctx)
+        if (
+            wall is not None
+            and time.time() >= wall
+            and _own(record, begun)
+            and not _ended_by(record, begun, wall)
+        ):  # B1, O6: past the wall time only a case that ended in time settles;
+            # a lost or replaced record stays unverifiable (O5)
+            settle_walled(path, ticket, job_id)
+            return
         settle(path, ticket, job_id, record, begun)
     except Exception:  # noqa: BLE001 — a lost settlement leaves the step waiting, never re-runs
         logger.exception("run investment case %s could not be settled", job_id)
 
 
+def _wall_of(path, ticket):
+    """B1: the step's deadline (epoch seconds) when it is the run's wall
+    time, else None."""
+    from harness import runner
+
+    task = runner._read(path) or {}
+    step = next((s for s in task.get("steps", []) if s["id"] == ticket[1]), None)
+    job = (step or {}).get("job") or {}
+    deadline = job.get("deadline_at")
+    if job.get("deadline_kind") != WALL_TIME_KIND or not isinstance(
+        deadline, (int, float)
+    ):
+        return None
+    return deadline
+
+
+def _own(record, begun) -> bool:
+    """The step's own case record (not lost, not replaced by a later run)."""
+    return isinstance(record, dict) and record.get("started_at") == begun
+
+
+def _ended_by(record, begun, wall) -> bool:
+    """B1, O6: the step's own case ended (not running) no later than the
+    run's wall time, so its record settles the step, never a late finish."""
+    finished = record.get("finished_at") if isinstance(record, dict) else None
+    return (
+        isinstance(record, dict)
+        and record.get("started_at") == begun
+        and record.get("status") != "running"
+        and isinstance(finished, (int, float))
+        and not isinstance(finished, bool)
+        and finished <= wall
+    )
+
+
+def _running(record, begun) -> bool:
+    return (
+        isinstance(record, dict)
+        and record.get("started_at") == begun
+        and record.get("status") == "running"
+    )
+
+
+def _judge(path, step_id, error, gap=None):
+    """The step's error; a failed `chapter_gap` step takes its typed `gap`
+    error and is judged by the report (the run goes on)."""
+    from harness import runner
+
+    def mark(task):
+        step = next(s for s in task["steps"] if s["id"] == step_id)
+        step["error"] = error
+        if step.get(ON_END) == CHAPTER_GAP and step["status"] == "failed":
+            step["error"] = gap or error
+            step["judged_by"] = JUDGED
+
+    runner._update(path, mark)
+
+
+def budget_gap(path, step_id) -> bool:
+    """A2: admission refused the gap step `ic_budget` (no LP ran): the step
+    fails with that kind and is judged by the report. False for any other
+    step, which keeps its card."""
+    from harness import runner
+
+    done = []
+
+    def mark(task):
+        step = next((s for s in task["steps"] if s["id"] == step_id), None)
+        if (
+            step is None
+            or not is_ic_step(step)
+            or step.get(ON_END) != CHAPTER_GAP
+            or step["status"] in ("completed", "failed", "uncertain")
+        ):
+            return False
+        step.update(status="failed", error=BUDGET, judged_by=JUDGED)
+        done.append(step_id)
+
+    runner._update(path, mark)
+    return bool(done)
+
+
+def settle_walled(path, ticket, job_id):
+    """B1: a case still running at the run's wall time ends the step failed
+    with its typed kind, never completed and never left waiting."""
+    from services import assistant_tasks
+
+    view = assistant_tasks.settle_job(path, ticket, job_id, "timed_out", "failed")
+    if view is not None:
+        _judge(path, ticket[1], WALL_TIME)
+    return view
+
+
+def reserved(path) -> int:
+    """The solves the run's grant reserved for its latest admitted case (the
+    baseline, study harness 36 A2; one case runs at a time), else `SOLVES`:
+    the case itself solves no LP."""
+    from services import run_envelope
+
+    try:
+        audit = (run_envelope._load(path) or {}).get("audit") or []
+    except Exception:  # noqa: BLE001 -- no envelope to read: nothing was reserved
+        return SOLVES
+    last = next(
+        (
+            a
+            for a in reversed(audit)
+            if a.get("event") == "used" and a.get("tool") == TOOL
+        ),
+        None,
+    )
+    solves = (last or {}).get("solves")
+    return solves if type(solves) is int else SOLVES
+
+
 def settle(path, ticket, job_id, record, begun):
     """Settle the step from `record`; the case is never started again."""
-    from harness import runner
     from services import assistant_tasks
 
     native, status, error = outcome(record, begun)
     result = (
-        {"study": STUDY, "started_at": begun, "solves": SOLVES}
+        {"study": STUDY, "started_at": begun, "solves": reserved(path)}
         if status == "completed"
         else None
     )
     view = assistant_tasks.settle_job(path, ticket, job_id, native, status, result)
     if view is not None and error:
-        runner._update(
+        _judge(
             path,
-            lambda t: next(s for s in t["steps"] if s["id"] == ticket[1]).update(
-                error=error
-            ),
+            ticket[1],
+            error,
+            gap_error(native, record) if native in GAP_KINDS else None,
         )
     return view
 
@@ -214,6 +438,7 @@ def recover(path, ctx, *, instance, now=None, lapsed_ok=False):
                 continue
             deadline = job.get("deadline_at")
             late = isinstance(deadline, (int, float)) and now >= deadline
+            walled = late and job.get("deadline_kind") == WALL_TIME_KIND
             if not late:
                 record = _record(ctx) if mine else None
                 if (
@@ -225,6 +450,16 @@ def recover(path, ctx, *, instance, now=None, lapsed_ok=False):
                 ):
                     _start_follower(path, ticket, job_id, ctx, begun)
                     continue
+        if walled:  # B1: the run's wall time ended with the case still out
+            record = _record(ctx) if mine else None
+            # O5: a lost or replaced record is unverifiable; B1: one that ended
+            # in time settles from its record (a restart lost the follower)
+            if (mine and not _own(record, begun)) or _ended_by(record, begun, deadline):
+                if settle(path, ticket, job_id, record, begun) is not None:
+                    swept += 1
+            elif settle_walled(path, ticket, job_id) is not None:
+                swept += 1
+            continue
         if late:
             if (
                 assistant_tasks.settle_job(

@@ -49,7 +49,7 @@ export default function SourceRunLine({ source, at, outOfDate = false, missing, 
           {missing.action && (
             <>
               <span aria-hidden="true">·</span>
-              <button type="button" onClick={missing.action.onClick} className="text-accent hover:underline"
+              <button type="button" onClick={missing.action.onClick} className="text-link hover:underline"
                 data-testid={`${testId}-action`}>{missing.action.label} ›</button>
             </>
           )}

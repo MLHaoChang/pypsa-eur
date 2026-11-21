@@ -89,7 +89,7 @@ export function ControlChapter() {
       </div>
       {inScope ? (
         <button type="button" data-testid="hub-chapter-control-open" onClick={openIsland}
-          className="self-start text-[11.5px] text-accent hover:underline">Open in Expert ›</button>
+          className="self-start text-[11.5px] text-link hover:underline">Open in Expert ›</button>
       ) : (
         <AddToScope card="control" option="island_checks" testId="hub-chapter-control-out-of-scope" />
       )}

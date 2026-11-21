@@ -9,6 +9,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
+import { seedRows } from '../test/seedRows'
 
 vi.mock('../api/network', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/network')>()
@@ -70,7 +71,7 @@ const LEGACY = {
 
 function renderCard(su: never, mode: 'card' | 'detail' = 'card') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  client.setQueryData(nk('Demo', 'storage_units'), [su])
+  seedRows(client, 'Demo', 'storage_units', [su])
   render(<QueryClientProvider client={client}><StorageUnitCard su={su} mode={mode} onRename={() => {}} /></QueryClientProvider>)
 }
 

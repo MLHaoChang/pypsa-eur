@@ -850,7 +850,7 @@ export default function Results() {
           <button
             type="button"
             data-testid="discussed-run-export"
-            className="ml-auto inline-flex items-center gap-1 text-accent hover:underline"
+            className="ml-auto inline-flex items-center gap-1 text-link hover:underline"
             onClick={() => requestIoModal('export', 'workbook')}
           >
             Export…
@@ -1076,7 +1076,7 @@ export default function Results() {
                             if (useUIStore.getState().uiMode === 'guided') openSectionInGuided(n.section)
                             else openFlowTarget(flowTarget(n.section, n.panel))
                           }}
-                          className="text-accent hover:underline">
+                          className="text-link hover:underline">
                           {EMPTY_GROUP_NEXT[g]?.label} ›
                         </button>
                       </p>

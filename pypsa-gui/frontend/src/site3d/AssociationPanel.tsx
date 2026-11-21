@@ -80,7 +80,7 @@ function openCreationForm(item: PaletteItemData): void {
   else open()
 }
 
-const link = `whitespace-nowrap text-accent hover:underline disabled:no-underline ${FIELD_DISABLED}`
+const link = `whitespace-nowrap text-link hover:underline disabled:no-underline ${FIELD_DISABLED}`
 const primary = PRIMARY_BUTTON
 const secondary = SECONDARY_BUTTON
 
