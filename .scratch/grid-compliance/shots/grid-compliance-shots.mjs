@@ -22,10 +22,12 @@ try {
   await p.getByRole('button', { name: 'Sign in' }).click()
   await p.getByRole('link', { name: new RegExp(PROJECT) }).first().click()
   await p.getByRole('button', { name: 'Expert', exact: true }).click()
-  // THEME=light|dark: the status-bar toggle names the current theme; flip it when it differs.
+  // THEME=light|dark: the sidebar toggle is labelled "Switch to <other> theme"; click it when
+  // it offers the theme we want.
   if (process.env.THEME) {
-    const toggle = p.getByRole('button', { name: /^(light|dark)$/ }).first()
-    if ((await toggle.innerText()).trim() !== process.env.THEME) await toggle.click()
+    const toggle = p.getByRole('button', { name: /^Switch to (light|dark) theme$/ }).first()
+    const label = await toggle.getAttribute('aria-label')
+    if (label === `Switch to ${process.env.THEME} theme`) await toggle.click()
   }
   await p.getByRole('button', { name: 'Grid study', exact: true }).click()
   const title = p.getByText('Grid compliance (TRGC)', { exact: true })
