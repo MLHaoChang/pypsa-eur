@@ -591,6 +591,9 @@ interface UIStore {
   // The export format to preselect with that request (the discussed-run
   // row's Export… picks the results workbook); consumed with it.
   ioModalFormat: 'workbook' | null
+  // The Excel input workbook import dialog (one per page): open, with the file
+  // to preview when the caller already has it. Cleared when the dialog closes.
+  workbookImportRequest: { file: File | null; id: number } | null
   // Multi-user edit lock (Task 14). `readOnly` is true when another user holds
   // the active project's lock (or acquisition failed) — every destructive /
   // mutating affordance is gated on it. `lockHolderEmail` names the current
@@ -759,6 +762,8 @@ interface UIStore {
   clearCompareNavRequest: () => void
   requestIoModal: (tab: 'import' | 'export', format?: 'workbook') => void
   clearIoModalRequest: () => void
+  requestWorkbookImport: (file?: File) => void
+  clearWorkbookImportRequest: () => void
   // Apply a derived lock state (from utils/lockState.lockStateFromAcquire).
   setLockState: (s: LockState) => void
   // A queue job is (or is no longer) solving the project the user is viewing.
@@ -844,6 +849,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   compareNavRequest: null,
   ioModalRequest: null,
   ioModalFormat: null,
+  workbookImportRequest: null,
   readOnly: false,
   lockHolderEmail: null,
   readOnlyReason: 'writable',
@@ -1150,6 +1156,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
   clearCompareNavRequest: () => set({ compareNavRequest: null }),
   requestIoModal: (tab, format) => set({ ioModalRequest: tab, ioModalFormat: format ?? null }),
   clearIoModalRequest: () => set({ ioModalRequest: null, ioModalFormat: null }),
+  requestWorkbookImport: (file) => set(s => ({ workbookImportRequest: { file: file ?? null, id: (s.workbookImportRequest?.id ?? 0) + 1 } })),
+  clearWorkbookImportRequest: () => set({ workbookImportRequest: null }),
   setLockState: (s) => set((state) => {
     const { readOnly, reason } = effectiveLockState(s.readOnly, state.solvingReadOnly)
     return {

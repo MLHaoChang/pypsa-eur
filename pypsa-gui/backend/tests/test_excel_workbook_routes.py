@@ -506,6 +506,10 @@ def test_a_failed_sidecar_write_removes_the_row_and_the_folder(
     before = store()
     r = _import(client, _workbook(), name="Half written")
     assert r.status_code == 500 and _kind(r) == "import_write_failed", r.text
+    # Plain words: no engine class name ("OSError") in the user's text (#1466).
+    assert r.json()["detail"]["message"] == (
+        "The project could not be written; nothing was created."
+    )
     assert store() == before
 
 
