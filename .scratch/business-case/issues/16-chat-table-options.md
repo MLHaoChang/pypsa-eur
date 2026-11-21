@@ -3,8 +3,7 @@
 
 # 16 — Chat reads of the line table's options and the preset
 
-Status: done (#1651)
-Landed in #1651.
+Status: ready-for-agent
 Blocked by: none (business-case 09 merged)
 Model tier: sonnet
 Size: S
