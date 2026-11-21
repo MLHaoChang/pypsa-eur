@@ -1,0 +1,147 @@
+{
+ "results": [
+  {
+   "key": "guided-light",
+   "footer": "↑↓ navigate\n⏎ select\nShift+⏎ guide\nesc close\n19 results",
+   "fullRows": [
+    "What it means",
+    "Needed for",
+    "Also used by",
+    "Default",
+    "Example",
+    "In model files"
+   ],
+   "escFocusTrigger": true,
+   "sparseRows": [
+    "What it means",
+    "Also used by",
+    "Example",
+    "In model files"
+   ],
+   "functionTabSelected": "true",
+   "searchHits": 30,
+   "noFieldFooter": "↑↓ navigate\n⏎ open guide\nesc close\n17 results",
+   "unknownSearchFocused": true,
+   "dockUncovered": true,
+   "dockOpenAfterEsc": true,
+   "back": "Back to Capacity",
+   "backFirst": true,
+   "oneDrawer": true,
+   "openOn": "Open on mainland_supply ›",
+   "formShownAfterBack": true,
+   "landed": {
+    "field": "p_nom",
+    "value": "",
+    "mode": "guided"
+   },
+   "ok": true
+  },
+  {
+   "key": "guided-dark",
+   "footer": "↑↓ navigate\n⏎ select\nShift+⏎ guide\nesc close\n19 results",
+   "fullRows": [
+    "What it means",
+    "Needed for",
+    "Also used by",
+    "Default",
+    "Example",
+    "In model files"
+   ],
+   "escFocusTrigger": true,
+   "sparseRows": [
+    "What it means",
+    "Also used by",
+    "Example",
+    "In model files"
+   ],
+   "functionTabSelected": "true",
+   "searchHits": 30,
+   "noFieldFooter": "↑↓ navigate\n⏎ open guide\nesc close\n17 results",
+   "unknownSearchFocused": true,
+   "dockUncovered": true,
+   "dockOpenAfterEsc": true,
+   "back": "Back to Capacity",
+   "backFirst": true,
+   "oneDrawer": true,
+   "openOn": "Open on mainland_supply ›",
+   "formShownAfterBack": true,
+   "landed": {
+    "field": "p_nom",
+    "value": "",
+    "mode": "guided"
+   },
+   "ok": true
+  },
+  {
+   "key": "expert-light",
+   "footer": "↑↓ navigate\n⏎ select\nShift+⏎ guide\nesc close\n19 results",
+   "fullRows": [
+    "What it means",
+    "Needed for",
+    "Also used by",
+    "Default",
+    "Example",
+    "In model files"
+   ],
+   "escFocusTrigger": true,
+   "sparseRows": [
+    "What it means",
+    "Also used by",
+    "Example",
+    "In model files"
+   ],
+   "functionTabSelected": "true",
+   "searchHits": 30,
+   "noFieldFooter": "↑↓ navigate\n⏎ open guide\nesc close\n17 results",
+   "unknownSearchFocused": true,
+   "dockUncovered": true,
+   "dockOpenAfterEsc": true,
+   "back": "Back to mainland_supply",
+   "backFirst": true,
+   "openOn": "Open on mainland_supply ›",
+   "formShownAfterBack": true,
+   "landed": {
+    "field": "p_nom",
+    "value": "",
+    "mode": "expert"
+   },
+   "ok": true
+  },
+  {
+   "key": "expert-dark",
+   "footer": "↑↓ navigate\n⏎ select\nShift+⏎ guide\nesc close\n19 results",
+   "fullRows": [
+    "What it means",
+    "Needed for",
+    "Also used by",
+    "Default",
+    "Example",
+    "In model files"
+   ],
+   "escFocusTrigger": true,
+   "sparseRows": [
+    "What it means",
+    "Also used by",
+    "Example",
+    "In model files"
+   ],
+   "functionTabSelected": "true",
+   "searchHits": 30,
+   "noFieldFooter": "↑↓ navigate\n⏎ open guide\nesc close\n17 results",
+   "unknownSearchFocused": true,
+   "dockUncovered": true,
+   "dockOpenAfterEsc": true,
+   "back": "Back to mainland_supply",
+   "backFirst": true,
+   "openOn": "Open on mainland_supply ›",
+   "formShownAfterBack": true,
+   "landed": {
+    "field": "p_nom",
+    "value": "",
+    "mode": "expert"
+   },
+   "ok": true
+  }
+ ],
+ "failures": []
+}
