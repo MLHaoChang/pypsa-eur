@@ -40,16 +40,20 @@ export interface ParameterIndex {
 }
 
 export const norm = (s: string): string => s.toLowerCase().replace(/\s+/g, ' ').trim()
-const words = (s: string): string[] => norm(s).split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+/** The letter-and-digit words of a text, lower case. */
+export const words = (s: string): string[] => norm(s).split(/[^\p{L}\p{N}]+/u).filter(Boolean)
 
-/** Guide markdown as searchable words: headings, emphasis and link targets dropped. */
-function guideText(md: string | null): string {
+/** Markdown as plain text: code blocks, headings, emphasis and link targets dropped. */
+export function plainText(md: string | null): string {
   if (!md) return ''
-  return norm(md
+  return md
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[#*_`>|]/g, ' '))
+    .replace(/[#*_`>|]/g, ' ')
+    .replace(/\s+/g, ' ').trim()
 }
+
+const guideText = (md: string | null): string => norm(plainText(md))
 
 /** Every query word starts some word of the text, in any order. */
 function prefixMatch(q: string[], ws: string[]): boolean {

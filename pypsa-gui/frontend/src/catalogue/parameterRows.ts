@@ -9,7 +9,7 @@ import { componentLabel } from '../utils/componentLabels'
 import { CARRIER_CATALOG } from '../utils/carrierCatalog'
 import type { Catalogue, CatalogueEntry } from './api'
 import { canOpenParameter, type ParameterTarget } from './openParameter'
-import { norm, type ParameterHit, type ParameterIndex } from './searchIndex'
+import { norm, plainText, words, type ParameterHit, type ParameterIndex } from './searchIndex'
 
 export type PaletteAsset = Record<string, unknown> & { name: string }
 
@@ -79,18 +79,17 @@ export function unitOn(entry: CatalogueEntry, asset: PaletteAsset, busByName: Re
 
 /** A short plain excerpt of `text` around the first query word it holds, or ''. */
 function snippet(text: string, query: string): string {
-  const plain = text.replace(/```[\s\S]*?```/g, ' ').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/[#*_`>|]/g, ' ').replace(/\s+/g, ' ').trim()
-  const words = norm(query).split(' ').filter(Boolean)
+  const plain = plainText(text)
+  const queryWords = norm(query).split(' ').filter(Boolean)
   const lower = plain.toLowerCase()
-  const at = words.map(w => lower.indexOf(w)).filter(i => i >= 0).sort((a, b) => a - b)[0]
+  const at = queryWords.map(w => lower.indexOf(w)).filter(i => i >= 0).sort((a, b) => a - b)[0]
   if (at === undefined) return ''
   const from = Math.max(0, at - SNIPPET / 3)
   const cut = plain.slice(from, from + SNIPPET).trim()
   return `${from > 0 ? '…' : ''}${cut}${from + SNIPPET < plain.length ? '…' : ''}`
 }
 
-const nameWords = (s: string) => norm(s).split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+const nameWords = words
 
 /**
  * Split a query into the words that name assets and the rest. A word that also
@@ -99,10 +98,10 @@ const nameWords = (s: string) => norm(s).split(/[^\p{L}\p{N}]+/u).filter(Boolean
 export function splitAssetWords(query: string, assetNames: readonly string[],
   isParameterWord: (w: string) => boolean): { parameterQuery: string; assetWords: string[] } {
   // Whitespace only: a model-file name (`p_nom`) stays one word.
-  const words = norm(query).split(' ').filter(Boolean)
+  const queryWords = norm(query).split(' ').filter(Boolean)
   const names = assetNames.map(nameWords)
-  const assetWords = words.filter(w => !isParameterWord(w) && names.some(n => n.some(x => x.startsWith(w))))
-  return { parameterQuery: words.filter(w => !assetWords.includes(w)).join(' '), assetWords }
+  const assetWords = queryWords.filter(w => !isParameterWord(w) && names.some(n => n.some(x => x.startsWith(w))))
+  return { parameterQuery: queryWords.filter(w => !assetWords.includes(w)).join(' '), assetWords }
 }
 
 const namedBy = (asset: string, words: readonly string[]) => {

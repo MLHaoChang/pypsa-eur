@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import toast from 'react-hot-toast'
-import { NAVIGATE_KINDS, UNKNOWN_PARAMETER_NOTICE, applyUiNavigate } from './uiNavigate'
+import {
+  CATALOGUE_UNAVAILABLE_NOTICE, NAVIGATE_KINDS, NOT_OPENABLE_NOTICE, UNKNOWN_PARAMETER_NOTICE, applyUiNavigate,
+} from './uiNavigate'
 import { takePaletteSeed } from '../catalogue/openParameter'
 import * as catalogueApi from '../catalogue/api'
 
@@ -111,6 +113,21 @@ describe('navigate kind parameter', () => {
     await vi.waitFor(() => expect(notice).toHaveBeenCalledWith(UNKNOWN_PARAMETER_NOTICE))
     expect(useUIStore.getState().propertiesEditRequest).toBeNull()
     expect(useUIStore.getState().selectedComponent).toBeNull()
+  })
+
+  it('a setting with no field on an asset says so and moves nothing', async () => {
+    vi.spyOn(catalogueApi, 'fetchCatalogue').mockResolvedValue({ ...CAT,
+      entries: [entry({ id: 'globalconstraint.constant', plain_name: 'Limit', scope: 'GlobalConstraint' })] })
+    applyUiNavigate({ kind: 'parameter', entry_id: 'globalconstraint.constant', name: 'co2' })
+    await vi.waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith(NOT_OPENABLE_NOTICE))
+    expect(useUIStore.getState().selectedComponent).toBeNull()
+  })
+
+  it('a catalogue that cannot be loaded says so, not that the setting is unknown', async () => {
+    vi.spyOn(catalogueApi, 'fetchCatalogue').mockRejectedValue(new Error('500'))
+    applyUiNavigate({ kind: 'parameter', entry_id: 'generator.p_nom', name: 'PV roof' })
+    await vi.waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith(CATALOGUE_UNAVAILABLE_NOTICE))
+    expect(vi.mocked(toast)).not.toHaveBeenCalledWith(UNKNOWN_PARAMETER_NOTICE)
   })
 
   it('a navigation after it wins: the late catalogue moves nothing', async () => {

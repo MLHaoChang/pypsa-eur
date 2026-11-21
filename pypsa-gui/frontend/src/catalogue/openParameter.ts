@@ -53,33 +53,32 @@ export function openParameter({ entry, asset }: ParameterTarget): boolean {
   const type = entry.scope as PropertiesEditRequest['type']
   const field = entry.model_name
   const ui = useUIStore.getState()
+  // Both modes land the same way: the asset selected and its edit form asked for at the field.
+  const land = () => {
+    const s = useUIStore.getState()
+    s.setSelectedComponent({ type, name: asset })
+    s.setHighlightedComponent({ type, name: asset })
+    s.openRightPanel()
+    s.requestPropertiesEdit({ type, name: asset, field })
+    focusWhenShown(field)
+  }
   if (ui.uiMode === 'guided') {
     // Guided's home for a field: the drawer over its section's card (EXPERT-GUIDED-1).
     // Already on that card, the drawer is the way back; from anywhere else, Back returns.
     const section = sectionForComponent(type) ?? 'assets'
     const onCard = ui.activeSlidePanel === 'hubDesign' && ui.activeSection === section
     const jump = () => {
-      const s = useUIStore.getState()
       if (!onCard) openSectionInGuided(section)
-      s.setSelectedComponent({ type, name: asset })
-      s.setHighlightedComponent({ type, name: asset })
-      s.openRightPanel()
-      s.setFieldDrawer({ section, panel: null, component: type, entity: asset, field })
-      s.requestPropertiesEdit({ type, name: asset, field })
-      focusWhenShown(field)
+      useUIStore.getState().setFieldDrawer({ section, panel: null, component: type, entity: asset, field })
+      land()
     }
     if (onCard) jump()
     else withReturnFrom(jump)
     return true
   }
   withReturnFrom(() => {
-    const s = useUIStore.getState()
-    s.setSlidePanel(null)
-    s.setSelectedComponent({ type, name: asset })
-    s.setHighlightedComponent({ type, name: asset })
-    s.openRightPanel()
-    s.requestPropertiesEdit({ type, name: asset, field })
-    focusWhenShown(field)
+    useUIStore.getState().setSlidePanel(null)
+    land()
   })
   return true
 }
