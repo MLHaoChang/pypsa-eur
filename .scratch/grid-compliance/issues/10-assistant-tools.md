@@ -20,6 +20,17 @@ GC-09 ships `/api/grid-compliance` with no chat tool. Its seven routes sit in th
 `grid_compliance_workflow` group of `UI_INTERNAL` (`tests/test_route_chat_disposition.py`), whose
 cap went from 11 to 12 for it.
 
+The seven routes, held for this issue in route parity
+(`smoke/assistant_route_parity_declarations.d/claude-gc09-compliance-workflow-ui.json`):
+
+- `GET /api/grid-compliance/{name}`
+- `PUT /api/grid-compliance/{name}/deliverables/{code}/status`
+- `PUT /api/grid-compliance/{name}/deliverables/{code}/data`
+- `POST /api/grid-compliance/{name}/deliverables/{code}/freeze`
+- `POST /api/grid-compliance/{name}/deliverables/{code}/comments`
+- `PATCH /api/grid-compliance/{name}/deliverables/{code}/comments/{comment_id}`
+- `POST /api/grid-compliance/{name}/deliverables/{code}/pack`
+
 ## What to build
 
 Chat tools that serve every `/api/grid-compliance` route (read the tracker; set a status; edit
