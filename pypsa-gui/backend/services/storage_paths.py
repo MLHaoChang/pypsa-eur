@@ -117,12 +117,19 @@ def allocate_storage_path(
     project's current directory, or a no-op rename suffixes itself).
     """
     root = Path(get_settings().projects_root)
+    resolved_root = root.resolve()
     mine = {fold(entry) for entry in exclude}
     taken = {entry for entry in taken_names(db, org_id, org_segment) if fold(entry) not in mine}
     for _ in range(8):
         relative = storage_path_for(
             org_id, project_id, name, taken, org_segment=org_segment
         )
+        # A barrier behind `safe_dir_name`: whatever reaches here (a name, a
+        # symlink already in the root) must resolve inside `projects_root`.
+        if not (resolved_root / relative).resolve().is_relative_to(resolved_root):
+            raise HTTPException(
+                status_code=400, detail=f"'{name}' does not make a project folder name"
+            )
         # `exclude` names are the CALLER'S OWN directory, so of course it
         # exists — a rename to a name that sanitises back to the current
         # directory must land on it, not allocate ` (2)` and move the data for
