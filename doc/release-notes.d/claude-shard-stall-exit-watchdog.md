@@ -1,0 +1,1 @@
+* Test(pypsa-gui): When a backend test shard aborts on a stalled solve queue, it now kills the forked child still holding CI's output pipe and hard-exits 60 s later, so the stalled step ends at once instead of waiting for the CI timeout.
