@@ -51,6 +51,7 @@ list_projects,ProjectInfo,has_solver_config,has_solver_config,True
 list_projects,ProjectInfo,bus_count,bus_count,True
 list_projects,ProjectInfo,snapshot_count,snapshot_count,True
 list_projects,ProjectInfo,objective,objective,True
+list_projects,ProjectInfo,study_finished,study_finished,True
 list_projects,ProjectInfo,has_orphan_tmp,has_orphan_tmp,True
 list_projects,ProjectInfo,missing,missing,True
 list_projects,ProjectInfo,my_access,my_access,True
@@ -69,6 +70,7 @@ list_scenarios,ProjectInfo,has_solver_config,has_solver_config,True
 list_scenarios,ProjectInfo,bus_count,bus_count,True
 list_scenarios,ProjectInfo,snapshot_count,snapshot_count,True
 list_scenarios,ProjectInfo,objective,objective,True
+list_scenarios,ProjectInfo,study_finished,study_finished,True
 list_scenarios,ProjectInfo,has_orphan_tmp,has_orphan_tmp,True
 list_scenarios,ProjectInfo,missing,missing,True
 list_scenarios,ProjectInfo,my_access,my_access,True

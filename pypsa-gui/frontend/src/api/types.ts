@@ -701,6 +701,8 @@ export interface ProjectInfo {
   id?: string | null
   name: string; created_at: string; has_solver_config: boolean
   bus_count: number; snapshot_count: number; objective: number | null
+  // A finished Guided (Energy Hub) study was saved with the project (issue 23).
+  study_finished?: boolean
   // True when an interrupted save left a `*.tmp` sibling next to the
   // main bundle file. The main file is still the previous good version
   // (atomic rename only commits at the end), but the partial write hasn't
@@ -791,6 +793,24 @@ export interface CompareState {
   scenario_description: string | null
   created_at: string | null
   last_saved: string | null
+  // The saved Guided study's headline; null without a finished one (issue 23).
+  eh_study?: CompareStudy | null
+}
+
+// The headline of a saved Guided (Energy Hub) study (backend `CompareStudy`).
+export interface CompareStudy {
+  // `out_of_date`: the network was edited after the study ran.
+  state: 'current' | 'out_of_date'
+  // EUR, excluding shed load; per year when period_basis is single_period.
+  cost_at_target_eur: number | null
+  period_basis: string | null
+  // Unserved energy reached and allowed, ‱ of demand.
+  achieved_ens_permyriad: number | null
+  ens_cap_permyriad: number | null
+  // Expected loss of load, h per year.
+  mc_lole_h: number | null
+  // True on a pass, false on a fail, null when no goal was set.
+  certified: boolean | null
 }
 
 // ── Results-Summary types (Compare Scenarios v2) ─────────────────────────────

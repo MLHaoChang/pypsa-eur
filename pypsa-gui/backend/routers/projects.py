@@ -904,6 +904,7 @@ def _project_info(project_dir: pathlib.Path) -> ProjectInfo:
         bus_count=meta.get("bus_count", 0),
         snapshot_count=meta.get("snapshot_count", 0),
         objective=meta.get("objective"),
+        study_finished=meta.get("eh_study_done") is True,
         has_orphan_tmp=has_orphan,
         parent_project=meta.get("parent_project"),
         settings=_settings_from_meta(meta),
@@ -3463,6 +3464,8 @@ def _write_context(
             "user_ts_count": len(user_ts_data),
             # P33b: the edit counter the saved EH study record is compared to.
             "network_revision": int(ctx.network_revision or 0),
+            # Issue 23: the project list reads this, not the pickle.
+            "eh_study_done": (results_state["eh_study_record"] or {}).get("status") == "done",
             # PF-SAVE-1: network.nc holds the LP's tables after a load flow.
             # A live |V| is a flow's left by a save from before it (loaded
             # with no LP record): that file is still disclosed on reload.
