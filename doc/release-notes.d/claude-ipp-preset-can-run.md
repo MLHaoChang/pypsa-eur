@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The IPP business-case preset can now run once prices are typed: the IPP template values terminal value on book value, and Apply preset fills the plant capex life (assumed, from the pinned pack) and a flat contract indexation.

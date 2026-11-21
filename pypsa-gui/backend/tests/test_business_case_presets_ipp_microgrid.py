@@ -13,6 +13,7 @@ from models.business_case import LineItem
 from services.business_case import linked_outputs as L
 from services.business_case import presets as P
 from services.finance.business_case import DoubleCount, build_business_case, pnl
+from models.finance import TerminalValueRule
 from services.finance.case import TemplateLine
 from services.finance.engine import run_case
 from tests.test_business_case_engine import PACK, _ic, _inputs, _line
@@ -75,7 +76,11 @@ def test_the_ipp_rows_are_spec_6_6():
     assert not [
         ln for ln in case.lines if ln.quantity_source.startswith("linked:export")
     ]
-    assert not [ln for ln in case.lines if ln.assumed]
+    # Only the plant capex life is a pack default, recorded `assumed` with its source (#21).
+    assert [(ln.name, sorted(ln.assumed)) for ln in case.lines if ln.assumed] == [
+        ("Plant capex", ["life_years"])
+    ]
+    assert not any(ln.price is not None for ln in case.lines if ln.kind == "revenue")
 
 
 @pytest.mark.parametrize("template", MG)
@@ -140,7 +145,7 @@ def _ipp_filled() -> list[LineItem]:
             if ln.quantity_source == "typed":
                 d.update(quantity=100.0)
         elif ln.kind == "capex":
-            d.update(quantity=1.0, price=1000.0, life_years=10.0)
+            d.update(quantity=1.0, price=1000.0, life_years=ln.life_years or 10.0)
         elif ln.category == "insurance":
             d.update(quantity=0.01)
         else:
@@ -244,7 +249,7 @@ def _filled(template: str) -> list[LineItem]:
         if ln.kind == "revenue":
             d.update(price=100.0, indexation=0.0)
         elif ln.kind == "capex":
-            d.update(quantity=1.0, price=1000.0, life_years=10.0)
+            d.update(quantity=1.0, price=1000.0, life_years=ln.life_years or 10.0)
         elif ln.category in ("insurance", "maintenance"):
             d.update(quantity=0.01)
         elif ln.category == "staff":
@@ -281,3 +286,44 @@ def test_g2_each_capex_line_is_in_at_most_one_maintenance_share_base(template):
             if kind == "capex" and (not cat or cap.category == cat):
                 bases.append(sh.name)
         assert len(bases) <= 1, (cap.name, bases)
+
+
+def test_21_the_ipp_preset_runs_once_only_prices_are_typed():
+    """Prices (and the plant capex quantity) are all a user types: no indexation, life or
+    terminal-value refusal remains, and NPV, IRR and payback are established."""
+    ppa = TemplateLine("asset:ppa_wind", "ppa_settlement", 5000.0, "ppa")
+    ic = _ic(
+        lines=(ppa, TemplateLine("fom", "fom", -20.0, "opex")),
+        analysis_years=8,
+        terminal_value=TerminalValueRule(method="book_value"),
+    )
+    rows = []
+    for ln in P.preset(IPP, "ipp_hybrid", currency="USD").lines:
+        d = ln.model_dump()
+        if ln.kind == "revenue":
+            d.update(price=10.0)
+            if ln.quantity_source == "typed":
+                d.update(quantity=100.0)
+        elif ln.kind == "capex":
+            d.update(quantity=1.0, price=600000.0)
+        elif ln.category == "insurance":
+            d.update(quantity=0.01)
+        else:
+            d.update(price=5.0)
+        rows.append(LineItem.model_validate(d))
+    inputs = _inputs(*rows)
+    assert not inputs.refusals(horizon=(2030, 2037), base_year=2030)
+    series = {
+        "Capacity payment (BESS, firm capacity)": L.Series(
+            "capacity.StorageUnit.bess", "kW_year", {None: 10000.0}, {}
+        ),
+        "Land lease, wind farm": L.Series(
+            "capacity.Generator.wind_farm", "MW_year", {None: 40.0}, {}
+        ),
+        "Land lease, PV plant": L.Series(
+            "capacity.Generator.pv_plant", "MW_year", {None: 60.0}, {}
+        ),
+    }
+    r = run_case(build_business_case(ic, inputs, series).case, PACK)
+    for k in ("project_post_tax_npv", "project_post_tax_irr", "payback_years"):
+        assert r.metrics.get(k) is not None, (k, r.reasons)
