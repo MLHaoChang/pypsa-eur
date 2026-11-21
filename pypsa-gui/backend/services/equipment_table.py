@@ -383,11 +383,11 @@ def plan(n, table: dict, component_class: str, name_column: str, columns: dict, 
             continue
         if counts[nm] > 1:
             unmapped.append({"row": row["row"], "cell": ref["cell"], "name": nm, "kind": "duplicate_entity",
-                             "message": f"{nm!r} appears on {counts[nm]} rows; none of them is mapped."})
+                             "message": f"\u201c{nm}\u201d appears on {counts[nm]} rows; none of them is mapped."})
             continue
         if nm not in frame.index:
             unmapped.append({"row": row["row"], "cell": ref["cell"], "name": nm, "kind": "component_not_found",
-                             "message": f"No {component_class} named {nm!r}."})
+                             "message": f"No {component_class.lower()} named \u201c{nm}\u201d."})
             continue
         for header, p in plans.items():
             cell = row["cells"][header]

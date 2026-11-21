@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react'
 import StressScenarioEditor from '../../results/StressScenarioEditor'
 import { useHubDesignStore } from '../hubDesignStore'
 import { useUIStore } from '../../../store/uiStore'
-import { goalPatchFromEdits, useReliabilityGoal, type GoalEdits } from '../../../hooks/useReliabilityGoal'
+import { assumedLole, goalPatchFromEdits, useReliabilityGoal, type GoalEdits } from '../../../hooks/useReliabilityGoal'
 import { ReliabilityGoalEditor } from '../../../components/reliabilityGoal/ReliabilityGoalEditor'
 import { VOLL_TEXT } from '../delegate'
 import { GOAL_VOLL_LABEL } from './goalCardWords'
@@ -47,8 +47,10 @@ export function GoalCard() {
   // hides and the study is not run. VOLL stays: the optimisation prices lost
   // load with it (modular-cards §2).
   const reliabilityOn = useInScope('reliability', 'goal_study')
+  // "No goal yet" only when there is none at all: no typed, saved or template
+  // value and no site-type assumed goal (template-e2e 06).
   const loleText = edits.target_lole_h ?? (goal?.target_lole_h.source !== 'default'
-    ? String(goal?.target_lole_h.value ?? '') : '')
+    ? String(goal?.target_lole_h.value ?? '') : String(assumedLole(goal) ?? ''))
 
   return (
     <CardShell step="goal" testId="hub-card-goal" title="Goal">
@@ -60,8 +62,8 @@ export function GoalCard() {
       <ReliabilityGoalEditor mode="guided" goal={goal} edits={edits}
         onChange={setEdits} disabled={running || !goal}
         fields={advanced ? ['target_lole_h', 'ens_cap_permyriad', 'mc_draws'] : ['target_lole_h']} />
-      {/* The field shows the goal as stored ("not set"), as Expert does; a
-          typical value is only suggested here, never shown as a default. */}
+      {/* With no goal and no assumed one the field reads "not set", as Expert
+          does; a typical value is only suggested here, never shown as a default. */}
       {loleText.trim() === '' && (
         <span className="text-[12px] text-muted" data-testid="hub-goal-empty-hint">
           No goal yet. Type how many hours per year without power you can accept (for example 3)

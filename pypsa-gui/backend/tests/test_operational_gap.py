@@ -440,6 +440,7 @@ def test_the_reference_leaves_the_operation_unchanged_with_curtailment_on(
         if k in (
             "assistant_solve_input_fingerprint",
             "assistant_solve_exact_input_fingerprint",
+            "assistant_solve_at",  # wall-clock time of each solve (#1700)
         ):
             continue
         assert repr(meta_a.get(k)) == repr(meta_b.get(k)), k

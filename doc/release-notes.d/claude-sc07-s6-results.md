@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant can read the Site 3D results with the new `site_scene_results` tool. It shows the same numbers as the Site 3D results panel, names buildings and groups as the panel does, and gives each value with its unit and run. When the results are out of date or not solved yet, it says so and shows no numbers.

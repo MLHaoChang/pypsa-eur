@@ -606,6 +606,10 @@ interface UIStore {
   // solving project editable, and vice versa.
   lockReadOnly: boolean
   solvingReadOnly: boolean
+  // Name/id of the project a switch is in flight for (null = none). Drives the
+  // "Opening …" progress bar; a cold open can take a minute on a big template.
+  openingProject: string | null
+  setOpeningProject: (target: string | null) => void
   currentProject: string | null
   // Resume target for auth / projects-home flows. Prefer a stable UUID when a
   // caller knows it, but keep the project name as a compatible fallback so
@@ -845,6 +849,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
   readOnlyReason: 'writable',
   lockReadOnly: false,
   solvingReadOnly: false,
+  openingProject: null,
+  setOpeningProject: (target) => set({ openingProject: target }),
   currentProject: storedCurrentProject(),
   lastProjectId: storedLastProjectId(),
   autosaveEnabled: storedAutosave(INITIAL_UI_MODE.mode),

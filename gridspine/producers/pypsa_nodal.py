@@ -304,6 +304,7 @@ def run_uc_rolling(
     overlap: int = 24,
     mip_rel_gap: float = DEFAULT_MIP_REL_GAP,
     on_window=None,
+    on_start=None,
 ) -> pypsa.Network:
     """Solve committable UC over `n.snapshots` in overlapping windows.
 
@@ -328,6 +329,10 @@ def run_uc_rolling(
     MILP. A caller that wants to stop raises from it (the driver's `Progress`
     does exactly that): the next window is never started and nothing partial
     is written, because the dispatch table is assembled only at the end.
+
+    `on_start(n_windows)` is called once, before the first window is solved, so
+    a caller knows the total while that first MILP runs; it is not progress,
+    and `on_window` is still called exactly `n_windows` times.
     """
     if window <= 0 or window % 24 != 0:
         raise ContractError(
@@ -348,6 +353,8 @@ def run_uc_rolling(
     frozen_status, dispatch = [], []
     t0 = 0
     solved = 0
+    if on_start is not None:
+        on_start(n_windows)
     while True:
         w_sns = sns[t0:t0 + window]
         status, condition = n.optimize(

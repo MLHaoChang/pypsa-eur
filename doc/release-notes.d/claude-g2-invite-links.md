@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The invite toast no longer says "Invitation sent" when no email went out; it shows a copyable set-password link instead, and the /set-password and /reset-password links now open their pages for signed-out users.

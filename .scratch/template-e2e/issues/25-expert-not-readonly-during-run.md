@@ -20,3 +20,7 @@ Guided is read-only and hands off into results. In Expert during a Guided study 
 ## Triage (2026-11-20, master b7e5dee3)
 
 Checked by code reading only; the app was not re-run. Acceptance as above (RUN-READONLY-1). Shares the run-state display with issue 17 (TE2E-17-RUN-1): reuse its stage x of N line, do not build a second one. Gated: UX and GK B. Blocked by: 17 for the progress line only; the disable-and-Abort part is not blocked.
+
+## Comments
+
+- Seen again 2026-11-21 (template walk, master 6b421b06): Concentrator: Expert header "Idle" for 30 minutes during a Guided study run (see 12). Separately, a read-only "Another user is editing" banner appeared on the user's own project after a solve: `walkthroughs/templates-2026-11-21` issue 05.

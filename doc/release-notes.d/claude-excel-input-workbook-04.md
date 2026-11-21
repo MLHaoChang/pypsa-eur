@@ -1,0 +1,1 @@
+* Feat(gridspine): the Excel workbook reader holds a hidden exact value to within 2 ulp of its visible cell, and refuses a workbook whose sheets together declare or hold more than 20 million cells, before reading it.
