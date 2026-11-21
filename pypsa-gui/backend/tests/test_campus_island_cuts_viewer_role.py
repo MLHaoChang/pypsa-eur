@@ -124,6 +124,23 @@ def test_a_refused_queue_solve_is_a_view_only_refusal(saved, monkeypatch):
     monkeypatch.setattr(runner, "_wait", lambda j, stop: None)
     with pytest.raises(project_write_gate.RequesterViewOnly):
         cic._queue_solve(saved, 7, threading.Event())
+    job.error = "infeasible"  # any other failure stays a plain failure
+    with pytest.raises(RuntimeError, match="infeasible") as other:
+        cic._queue_solve(saved, 7, threading.Event())
+    assert not isinstance(other.value, project_write_gate.RequesterViewOnly)
+
+
+def test_a_file_removed_during_the_refused_trial_is_put_back(saved, tmp_path):
+    kept, gone = tmp_path / "kept.yaml", tmp_path / "gone.yaml"
+    kept.write_text("a: 1\n")
+    gone.write_text("b: 2\n")
+    snap = cic._snapshot([kept, gone, tmp_path / "new.yaml"])
+    kept.write_text("a: 2\n")
+    gone.unlink()
+    (tmp_path / "new.yaml").write_text("c: 3\n")
+    cic._restore(snap)
+    assert kept.read_text() == "a: 1\n" and gone.read_text() == "b: 2\n"
+    assert not (tmp_path / "new.yaml").exists()
 
 
 # ── the job, with a real member's role ──────────────────────────────────────
