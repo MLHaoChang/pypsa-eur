@@ -3,7 +3,8 @@
 
 # 07d — Model-drafted report revisions as a runner stage (HH-08A, part 2)
 
-Status: ready-for-agent (Opus; GK B plan first); audit 2026-11-19: open in #1649
+Status: done (#1746)
+Landed in #1746.
 Type: task
 Blocked by: 07c
 Gated: yes (GK B)

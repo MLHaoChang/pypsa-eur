@@ -3,7 +3,8 @@
 
 # 03 A signed-in user cannot change their password or see their account
 
-Status: needs-triage
+Status: ready-for-agent
+Owner: AO03-PAGE-1.
 Blocked by: none
 Source: gap review 2026-11-21, walk W4.
 Model: sonnet. Review: GK B + UX.

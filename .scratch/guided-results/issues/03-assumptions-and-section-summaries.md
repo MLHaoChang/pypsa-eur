@@ -1,6 +1,7 @@
 # Collapsed, grouped Assumptions card; summaries in sections 2, 4, 5, 6
 
-Status: ready-for-agent; audit 2026-11-19: Assumptions card merged (#1313); section summaries and charts open in #1688, #1697
+Status: done (#1688)
+Landed in #1688.
 Type: task
 Spec: `.scratch/guided-results/spec.md` §2, §3
 

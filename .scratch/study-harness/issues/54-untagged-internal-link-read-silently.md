@@ -3,7 +3,8 @@
 
 # 54 — An untagged internal Link is read as the island's own feeder without a word
 
-Status: ready-for-agent
+Status: done (#1643)
+Landed in #1643.
 Gated: GK A
 Type: bug
 Parent: SH 48 (#1567) review follow-up
