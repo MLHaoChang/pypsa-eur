@@ -840,8 +840,26 @@ def test_unrated_line_assumed(tmp_path):
     res = _case(
         tmp_path, BUS=_BUSES, GENERATOR=[_SWING], BRANCH=["1,2,'1',0.01,0.1,0.0,0.0"]
     )
-    assert res.network.lines.at["Line A - B 1", "s_nom"] == 0.0
+    # no load, so the total load floors at SBASE 100 MVA: 10 × 100 = 1000 MVA,
+    # above the 110 kV class floor (250 MVA)
+    assert res.network.lines.at["Line A - B 1", "s_nom"] == 1000.0
+    assert bool(res.network.lines.at["Line A - B 1", "s_nom_assumed"]) is True
     assert _assumed(res.report, "thermal rating (MVA)") == ["Line A - B 1"]
+    (row,) = [a for a in res.report.assumed if a.parameter == "thermal rating (MVA)"]
+    assert row.value == 1000.0 and "SBASE" in row.why
+
+
+def test_v35_zero_rate1_line_uses_the_first_positive_rate(tmp_path):
+    res = _case(
+        tmp_path,
+        rev=35,
+        BUS=_BUSES,
+        GENERATOR=[_SWING],
+        BRANCH=["1,2,'1',0.01,0.1,0.0,'',0.0,0.0,30.0"],
+    )
+    assert res.network.lines.at["Line A - B 1", "s_nom"] == 30.0
+    (row,) = [a for a in res.report.assumed if a.parameter == "thermal rating (MVA)"]
+    assert row.value == 30.0 and "RATE1 is 0; RATE3 = 30 MVA is used" in row.why
 
 
 def test_line_end_shunts_rebased_to_each_end(tmp_path):
@@ -971,3 +989,107 @@ def test_parallel_circuits_with_distinct_ckt_are_both_kept(tmp_path):
     n = res.network
     assert len(n.lines) == res.report.counts["Lines"] == 3
     assert n.lines["r"].nunique() == 3
+
+
+# ---------------------------------------------------------------- unrated lines (issue psse-import 04)
+#: case14: Σ|S| of its 11 loads is 275.65 MVA; 10 × that, rounded up to a whole
+#: MVA, is above the 138 kV class floor (250 MVA).
+CASE14_ASSUMED_LINE_MVA = 2757.0
+
+
+def _rating_rows(rep):
+    return {a.asset: a for a in rep.assumed if a.parameter == "thermal rating (MVA)"}
+
+
+def test_case14_unrated_lines_get_a_stated_bound():
+    res = _read("case14")
+    n = res.network
+    assert len(n.lines) == 17
+    assert n.lines["s_nom"].tolist() == [CASE14_ASSUMED_LINE_MVA] * 17
+    assert n.lines["s_nom_assumed"].tolist() == [True] * 17
+    rows = _rating_rows(res.report)
+    assert sorted(rows) == sorted(n.lines.index)
+    for a in rows.values():
+        assert a.value == 2757.0
+        assert "RATEA = 0 means unrated" in a.why
+        assert "275.7 MVA" in a.why  # the total load the bound is 10 times
+    # the transformers keep their SBASE1-2 base, as before
+    assert n.transformers["s_nom"].tolist() == [100.0, 100.0, 100.0]
+    assert "s_nom_assumed" not in n.transformers.columns
+
+
+def test_a_zero_ratea_line_falls_back_to_a_positive_rateb(tmp_path):
+    text = (FIX / "case14.raw").read_text().splitlines()
+    first = "     1,     2,'1 ',1.93800E-2,5.91700E-2,5.28000E-2,   0.00,   0.00,   0.00,"
+    assert text[37].startswith(first)
+    text[37] = text[37].replace(first, first[: -len("   0.00,   0.00,")] + "  45.00,   0.00,", 1)
+    p = tmp_path / "case14_rateb.raw"
+    p.write_text("\n".join(text) + "\n")
+    res = read_psse([p], {})
+    n = res.network
+    line = "Line Bus 1     HV - Bus 2     HV 1"
+    assert n.lines.at[line, "s_nom"] == 45.0
+    assert bool(n.lines.at[line, "s_nom_assumed"]) is True
+    row = _rating_rows(res.report)[line]
+    assert row.value == 45.0
+    assert "RATEA is 0; RATEB = 45 MVA is used" in row.why
+    others = n.lines.drop(line)
+    assert others["s_nom"].tolist() == [2757.0] * 16
+
+
+def test_a_fully_rated_case_is_unchanged():
+    """case30 rates every line: its frames equal master 3b9ea4f9's, column for column."""
+    golden = json.loads((FIX / "case30_frames_3b9ea4f9.json").read_text())
+    n = _read("case30").network
+    for comp in ("lines", "generators", "transformers"):
+        df = getattr(n, comp)
+        assert list(df.columns) == golden[comp]["columns"], comp
+        for name, row in golden[comp]["rows"].items():
+            for col, want in row.items():
+                got = df.at[name, col]
+                if hasattr(got, "item"):
+                    got = got.item()
+                if want == "NaN":
+                    assert isinstance(got, float) and math.isnan(got), (comp, name, col)
+                elif want in ("inf", "-inf"):
+                    assert got == float(want), (comp, name, col)
+                else:
+                    assert got == want, (comp, name, col, got, want)
+    assert n.lines.at[n.lines.index[0], "s_nom"] == 138.0  # RATEA 138 in the file
+
+
+def test_features_rated_line_keeps_its_ratea(features):
+    ln = features.network.lines
+    assert ln["s_nom"].tolist() == [100.0]
+    assert "s_nom_assumed" not in ln.columns
+    assert _rating_rows(features.report) == {}
+
+
+@pytest.mark.parametrize(
+    "load_mva, kv, want",
+    [
+        (275.65, 138.0, 2757.0),  # 10 × load wins over the 250 MVA floor
+        (10.0, 138.0, 250.0),  # 100 MVA < the ≤150 kV floor
+        (10.0, 0.4, 100.0),  # <1 kV floor is 1 MVA
+        (1.0, 20.0, 50.0),  # ≤36 kV floor
+        (1.0, 36.0, 50.0),
+        (1.0, 36.1, 250.0),
+        (1.0, 150.0, 250.0),
+        (1.0, 220.0, 1000.0),  # ≤300 kV floor
+        (1.0, 300.0, 1000.0),
+        (1.0, 380.0, 3000.0),  # >300 kV floor
+        (0.21, 0.0, 3.0),  # BASKV 0: lowest class, still 10 × load (2.1 → 3)
+        (0.21, math.nan, 3.0),  # BASKV missing: the same
+    ],
+)
+def test_assumed_bound_rule(load_mva, kv, want):
+    from gridspine.ingest.ratings import assumed_rating_mva
+
+    assert assumed_rating_mva(load_mva, kv) == want
+
+
+def test_assumed_bound_takes_the_higher_end_voltage():
+    from gridspine.ingest.ratings import assumed_rating_mva
+
+    assert assumed_rating_mva(1.0, 20.0, 380.0) == 3000.0
+    assert assumed_rating_mva(1.0, 0.0, 220.0) == 1000.0

@@ -28,7 +28,11 @@ or 7.x) or its Excel form (``dgs_xlsx``) and returns the shared
 - ``ElmLod`` → Load (``plini``/``qlini`` · ``scale0``); ``ElmGenstat`` → Generator
   PQ; ``ElmSym`` + ``TypSym`` → Generator PV (Slack with ``ip_ctrl`` 1), its
   ``usetp`` the bus voltage set-point; ``ElmXnet`` → Generator Slack (PV or PQ by
-  ``bustp``) with p_nom = inf. A machine's p_nom is ``sgn`` · ``cosn``, or ``sgn``
+  ``bustp``). The file leaves an external grid unbounded, so its p_nom is the
+  larger of its short-circuit level ``snss`` (when given) and the never-binding
+  bound of ``gridspine.ingest.ratings`` (ceil(max(10 × Σ |S| of the in-service
+  loads, the voltage-class floor of its bus)) MVA, used as MW), listed in
+  ``assumed`` and marked ``p_nom_assumed`` = True. A machine's p_nom is ``sgn`` · ``cosn``, or ``sgn``
   (MVA used as MW, assumed) without ``cosn``.
 - ``ElmShnt`` (``shtype`` 1 R-L or 2 C) → ShuntImpedance, b = ±``qtotn`` ·
   ``ncapa``/``ncapx``/``ushnm``² (capacitive positive); g 0, assumed (the file
@@ -59,6 +63,7 @@ from typing import Any
 import pypsa
 
 from gridspine.ingest.dgs_parse import LINE_COLUMN, DgsTables, parse_dgs
+from gridspine.ingest.ratings import assumed_rating_mva, total_load_mva
 from gridspine.ingest.import_result import (
     Assumed,
     ImportFormatError,
@@ -890,6 +895,7 @@ class _Mapper:
         self.n.buses.at[bus, "v_mag_pu_set"] = v
 
     def _xnets(self):
+        bounded = []
         for oid, row, item, name, bus in self._injection("ElmXnet", "Generator"):
             kind = str(self.get(row, "bustp", "SL")).strip().upper()
             control = {"SL": "Slack", "PV": "PV", "PQ": "PQ"}.get(kind)
@@ -909,20 +915,46 @@ class _Mapper:
                     "reactive power (Mvar)",
                     self.opt(name, row, "qgini", 0.0, "Reactive power (Mvar)"),
                 )
+            p_nom, why = self._grid_limit(item, bus, row)
             self.n.add(
                 "Generator",
                 name,
                 bus=bus,
                 control=control,
-                p_nom=math.inf,
+                p_nom=p_nom,
                 p_set=p,
                 q_set=q,
                 active=self.active(oid, row),
             )
+            self.assume(name, "active power limit (MW)", p_nom, why)
+            bounded.append(name)
             if control != "PQ" and self.active(oid, row):
                 self._setpoint(item, bus, row)
             self._grid_strength(item, name, row)
             self.record("ElmXnet", oid, row, "Generator", name)
+        if bounded:  # marks a limit results must not read as real
+            gens = self.n.generators
+            gens["p_nom_assumed"] = gens.index.isin(bounded)
+
+    def _grid_limit(self, item, bus, row):
+        """``(p_nom, why)`` for an external grid, which the file leaves unbounded."""
+        load = total_load_mva(self.n.loads)
+        kv = self.n.buses.at[bus, "v_nom"]
+        bound = assumed_rating_mva(load, kv)
+        why = (
+            "the external grid is unbounded in the file (ElmXnet), so a limit that "
+            f"never binds is used: 10 × the total load {load:.1f} MVA, or the "
+            f"{kv:g} kV class floor if higher"
+        )
+        sk = self.get(row, "snss")
+        if sk is not None:
+            sk = _finite(item, "sk max mva", sk, positive=True)
+            if sk > bound:
+                return sk, (
+                    f"{why}; its short-circuit level {sk:g} MVA is higher, so that "
+                    "is used"
+                )
+        return bound, why
 
     def _shunts(self):
         for oid, row, item, name, bus in self._injection("ElmShnt", "ShuntImpedance"):
