@@ -109,6 +109,8 @@ const THEME_KEY = 'network-diagram:theme'
 const THEME_SCHEMA_KEY = 'network-diagram:theme-schema'
 const THEME_SCHEMA = '2'
 const DENSITY_KEY = 'network-diagram:density'
+// Browser notifications when a run of mine ends (run progress slice 3).
+const BROWSER_NOTIFY_KEY = 'network-diagram:run-browser-notify'
 const COMPARE_RAIL_KEY = 'network-diagram:compare-rail'
 const COMPARE_RAIL_WIDTH_KEY = 'network-diagram:compare-rail-width'
 const ASSISTANT_DOCK_KEY = 'network-diagram:assistant-dock'
@@ -276,6 +278,10 @@ function storedTheme(): Theme {
     if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) return 'dark'
   } catch { /* noop */ }
   return 'light'
+}
+
+function storedBrowserNotify(): boolean {
+  try { return localStorage.getItem(BROWSER_NOTIFY_KEY) === 'true' } catch { return false }
 }
 
 function storedDensity(): Density {
@@ -634,6 +640,8 @@ interface UIStore {
   // attributes which the CSS-var overrides in index.css key off.
   theme: Theme
   density: Density
+  /** Browser notifications when a run of mine ends while the tab is hidden; off until chosen. */
+  browserNotify: boolean
   // Guided / Expert (spec §3.1). `uiModeExplicit` is true once the user chose
   // a mode themselves; the new-project rule never overrides that choice.
   uiMode: UiMode
@@ -651,6 +659,7 @@ interface UIStore {
   releaseGuidedTour: () => void
   setTheme: (t: Theme) => void
   setDensity: (d: Density) => void
+  setBrowserNotify: (on: boolean) => void
   toggleTheme: () => void
   toggleDensity: () => void
   toggleSidebar: () => void
@@ -873,6 +882,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   paletteMode: null,
   theme: storedTheme(),
   density: storedDensity(),
+  browserNotify: storedBrowserNotify(),
   uiMode: INITIAL_UI_MODE.mode,
   uiModeExplicit: INITIAL_UI_MODE.explicit,
   setUiMode: (mode, opts) => {
@@ -939,6 +949,10 @@ export const useUIStore = create<UIStore>((set, get) => ({
   setTheme: (t) => {
     try { localStorage.setItem(THEME_KEY, t) } catch { /* noop */ }
     set({ theme: t })
+  },
+  setBrowserNotify: (on) => {
+    try { localStorage.setItem(BROWSER_NOTIFY_KEY, String(on)) } catch { /* noop */ }
+    set({ browserNotify: on })
   },
   setDensity: (d) => {
     try { localStorage.setItem(DENSITY_KEY, d) } catch { /* noop */ }

@@ -184,7 +184,7 @@ export default function Curtailment() {
       </div>
 
       {/* Per-carrier table */}
-      <section className="rounded-[10px] border border-border bg-bg overflow-hidden">
+      <section className="rounded-card border border-border bg-bg overflow-hidden">
         <header className="px-4 py-2.5 border-b border-border bg-bg-2">
           <span className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">By carrier</span>
         </header>

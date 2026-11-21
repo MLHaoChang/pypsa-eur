@@ -16,6 +16,7 @@ import type {
 import { canonicaliseCarrier, carrierDisplayName, type ComponentClass } from './results/carrierAliases'
 import { useCarrierFilter, CarrierFilter, bindCarrierFilter } from './results/CarrierFilter'
 import { COST_UNAVAILABLE, UnavailableBlock, UnavailableCell } from './results/shared'
+import { signFirstEuro } from '../utils/format'
 
 // ── Compare view ─────────────────────────────────────────────────────────────
 // Tabbed A/B comparison across two saved projects. Each tab loads its own
@@ -1457,7 +1458,7 @@ export function EmissionsTab({ a, b }: { a: string; b: string }) {
   const emA = sa.emissions
   const emB = sb.emissions
   if (!emA || !emB) {
-    return <p className="text-[11px] text-muted py-2">No emissions data — neither project has carriers with co2_emissions set.</p>
+    return <p className="text-[11px] text-muted py-2">No emissions data. Neither project has a carrier with CO₂ emissions set.</p>
   }
   // Whether this side's emissions block resolved at all — see CapacityTab's
   // matching computation for the full ADR-0001 rationale.
@@ -1993,7 +1994,7 @@ export function CurtailmentTab({ a, b }: { a: string; b: string }) {
   const hasAnyA = cA && Object.keys(cA.by_carrier_gwh).length > 0
   const hasAnyB = cB && Object.keys(cB.by_carrier_gwh).length > 0
   if (!hasAnyA && !hasAnyB) {
-    return <p className="text-[11px] text-muted py-2">No curtailment data — neither project has renewable generators with a time-varying p_max_pu profile.</p>
+    return <p className="text-[11px] text-muted py-2">No curtailment data. Neither project has a renewable generator with an availability profile that varies over time.</p>
   }
   // A ONE-SIDED absence is not zero. `readPV` maps a null payload to 0, so a
   // project that never reported curtailment rendered identically to one that
@@ -2644,8 +2645,8 @@ function StorageUnitTable({
         <tr className="border-b border-border text-muted">
           <th className="text-left  py-1 font-medium">Unit</th>
           <th className="text-right py-1 font-medium">Carrier</th>
-          <th className="text-right py-1 font-medium">{aName} p_nom</th>
-          <th className="text-right py-1 font-medium">{bName} p_nom</th>
+          <th className="text-right py-1 font-medium">{aName} capacity</th>
+          <th className="text-right py-1 font-medium">{bName} capacity</th>
           <th className="text-right py-1 font-medium">{aName} energy</th>
           <th className="text-right py-1 font-medium">{bName} energy</th>
           <th className="text-right py-1 font-medium">{aName} cycles</th>
@@ -3320,7 +3321,7 @@ function OverviewCapacityTable({
     )
   }
   const title = `Generator capacity by carrier ${
-    useOpt ? '(total p_nom_opt = brownfield + built)' : '(installed p_nom — brownfield only)'
+    useOpt ? '(total p_nom_opt = brownfield + built)' : '(installed capacity, brownfield only)'
   }`
   const unavailable = <UnavailableCell />
   return (
@@ -3503,10 +3504,10 @@ function DispatchBadge({ status }: { status: 'none' | 'fresh' | 'stale' }) {
 function fmtCurrency(v: number | null): string {
   if (v == null || !Number.isFinite(v)) return '—'
   const abs = Math.abs(v)
-  if (abs >= 1e9) return `€${(v / 1e9).toFixed(2)}B`
-  if (abs >= 1e6) return `€${(v / 1e6).toFixed(2)}M`
-  if (abs >= 1e3) return `€${(v / 1e3).toFixed(2)}k`
-  return `€${v.toFixed(0)}`
+  if (abs >= 1e9) return signFirstEuro(v, `${(abs / 1e9).toFixed(2)}B`)
+  if (abs >= 1e6) return signFirstEuro(v, `${(abs / 1e6).toFixed(2)}M`)
+  if (abs >= 1e3) return signFirstEuro(v, `${(abs / 1e3).toFixed(2)}k`)
+  return signFirstEuro(v, abs.toFixed(0))
 }
 function fmtMW(v: number): string {
   if (!Number.isFinite(v)) return '—'

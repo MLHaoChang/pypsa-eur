@@ -378,3 +378,14 @@ def test_the_real_as19_decision_id_is_in_the_owner_decisions_table():
 def test_a_closed_issue_still_fails_held_by_spec_even_though_ui_pointer_exists(tmp_path, monkeypatch):
     _, problems = _held(tmp_path, monkeypatch, 'Status: wontfix\n- GET /api/things\n')
     assert any('is wontfix' in p for p in problems), problems
+
+
+def test_building_in_a_process_that_has_the_app_leaves_its_environment_alone(monkeypatch):
+    # The CI flake: `build()` with no app, run in-process, set PYPSAGUI_PROJECTS_ROOT
+    # to a temp dir, and a later test_app_paths test on the same worker read it.
+    monkeypatch.delenv('PYPSAGUI_PROJECTS_ROOT', raising=False)
+    before = dict(os.environ)
+    import main  # noqa: PLC0415 - conftest imported it already
+
+    assert parity._isolated_app() is main.app
+    assert dict(os.environ) == before

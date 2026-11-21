@@ -94,8 +94,9 @@ _CABLE_ZERO = ("r0_ohm_per_km", "x0_ohm_per_km", "c0_nf_per_km")
 #: Branch inputs by model: the flow reads them all; the fault levels the
 #: series impedance only (magnetising neglected); the sequence networks also
 #: the zero sequence and the cable capacitance (the unearthed zone's current).
+#: A series capacitor's xc_ohm or k is series impedance too (GC-01b).
 _BRANCH_SC = frozenset({"length_km", "r_ohm_per_km", "x_ohm_per_km", "sn_mva", "vk_percent", "vkr_percent",
-                        "vn_hv_kv", "vn_lv_kv"})
+                        "vn_hv_kv", "vn_lv_kv", "xc_ohm", "k"})
 _BRANCH_SEQ = _BRANCH_SC | {"c_nf_per_km", *_CABLE_ZERO}
 #: The grid's inputs to the grid-connected comparison of a relay.
 _PCC_SC = frozenset({"sk_max_mva", "rx_max"})
@@ -147,7 +148,8 @@ def assumed_inputs(campus, online, model) -> list:
     ``unbalanced``, ``earth_relays``) rests on in an island of ``online``
     units, as ``ELEMENT.param`` (sorted). A relay's own pickup is added per
     row by the caller."""
-    branches = set(campus.net.line["name"].astype(str)) | set(campus.net.trafo["name"].astype(str))
+    branches = (set(campus.net.line["name"].astype(str)) | set(campus.net.trafo["name"].astype(str))
+                | set(campus.series_capacitors.index.astype(str)))
     kinds = campus.units["kind"]
     units = set(online) & set(kinds.index[kinds != "load"])
     loads = set(online) & set(kinds.index[kinds == "load"])

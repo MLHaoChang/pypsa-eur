@@ -655,7 +655,7 @@ function FixCarrierZeroCo2Button({ carrierName, suggested, carriers }: {
     <button
       onClick={() => fixMut.mutate()}
       disabled={fixMut.isPending}
-      title={`Set '${carrierName}' co2_emissions to the catalog value`}
+      title={`Set the CO₂ emissions of “${carrierName}” to the catalog value`}
       className="shrink-0 flex items-center gap-1 self-center rounded-md border border-accent/30 bg-accent/5 px-2 py-1 text-[10.5px] font-medium text-accent hover:bg-accent/10 hover:border-accent/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
     >
       <Wrench size={11} />

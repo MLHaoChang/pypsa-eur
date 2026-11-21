@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): One empty state (title, reason or next step, at most one action) across the Results tabs, one 8 px card radius in the hub design and Results panels, and the Section holdings list on the card surface.

@@ -23,6 +23,7 @@ import { STUDY_FORK_LABELS } from '../utils/decisionVocabulary'
 import { PageBody, PageSection, RowGrid, StatCard, Btn, Tag } from '../components/PageKit'
 import { Dialog } from '../components/Dialog'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { signFirstEuro } from '../utils/format'
 
 // ── Tree-building helpers ────────────────────────────────────────────────────
 // The backend returns a flat list of projects with `parent_project` pointers.
@@ -1389,11 +1390,11 @@ function CreateScenarioDialog({ base, baseId, baseIsActive, onClose, onCreated }
 
 // ── Small formatters ────────────────────────────────────────────────────────
 
-function formatObjective(v: number): string {
+export function formatObjective(v: number): string {
   if (!Number.isFinite(v)) return '—'
   const abs = Math.abs(v)
-  if (abs >= 1e9) return `€${(v / 1e9).toFixed(2)}B`
-  if (abs >= 1e6) return `€${(v / 1e6).toFixed(2)}M`
-  if (abs >= 1e3) return `€${(v / 1e3).toFixed(2)}k`
-  return `€${v.toFixed(0)}`
+  if (abs >= 1e9) return signFirstEuro(v, `${(abs / 1e9).toFixed(2)}B`)
+  if (abs >= 1e6) return signFirstEuro(v, `${(abs / 1e6).toFixed(2)}M`)
+  if (abs >= 1e3) return signFirstEuro(v, `${(abs / 1e3).toFixed(2)}k`)
+  return signFirstEuro(v, abs.toFixed(0))
 }

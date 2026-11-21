@@ -3,7 +3,8 @@
 
 # A user without project access reads as restriction_unavailable
 
-Status: ready-for-agent
+Status: done (#1653)
+Landed in #1653.
 Blocked by: none (live-voice 11b merged, #1548)
 Model tier: sonnet
 Size: S

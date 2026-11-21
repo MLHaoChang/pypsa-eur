@@ -89,7 +89,7 @@ def validate_hourly(df: pd.DataFrame) -> pd.DataFrame:
         raise ContractError(f"{where}: hour must be non-negative")
     bad = ~out["status"].isin((0, 1))
     if bad.any():
-        raise ContractError(f"{where}: status must be 0 or 1, got {sorted(out.loc[bad, 'status'].unique())}")
+        raise ContractError(f"{where}: status must be 0 or 1, got {sorted(int(s) for s in out.loc[bad, 'status'].unique())}")
     off = (out["status"] == 0) & (out["p_mw"].abs() > P_TOL_MW)
     if off.any():
         raise ContractError(f"{where}: units with status 0 carry power: {sorted(out.loc[off, 'unit_id'].unique())}")

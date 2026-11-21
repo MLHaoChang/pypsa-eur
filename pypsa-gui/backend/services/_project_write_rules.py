@@ -96,6 +96,12 @@ POST   /api/durable-conversations/{thread_id}/speech/segment  allow the caller's
 POST   /api/durable-conversations/{thread_id}/speech/start  allow the caller's own conversation thread and speech records; writes no project
 POST   /api/durable-conversations/{thread_id}/speech/usage  allow the caller's own conversation thread and speech records; writes no project
 POST   /api/equipment_table/preview  allow declared non-mutating (assistant_route_parity non_mutating_routes): computes and returns, writes nothing
+PATCH  /api/grid-compliance/{name}/deliverables/{code}/comments/{comment_id}  write path:name
+POST   /api/grid-compliance/{name}/deliverables/{code}/comments  write path:name
+PUT    /api/grid-compliance/{name}/deliverables/{code}/data  write path:name
+POST   /api/grid-compliance/{name}/deliverables/{code}/freeze  write path:name
+POST   /api/grid-compliance/{name}/deliverables/{code}/pack  write path:name
+PUT    /api/grid-compliance/{name}/deliverables/{code}/status  write path:name
 POST   /api/gridspine/projects  none creates a new project the caller owns
 POST   /api/gridspine/{name}/capacity  write path:name
 PUT    /api/gridspine/{name}/config  write path:name
@@ -106,7 +112,7 @@ POST   /api/gridspine/{name}/readback/{hour}  write path:name
 POST   /api/gridspine/{name}/run  write path:name
 PUT    /api/gridspine/{name}/templates/{unit_id}/{param}  write path:name
 POST   /api/io/import/csv  none replaces the open network with an unsaved scratch copy; writes no project
-POST   /api/io/import/excel  none replaces the open network with an unsaved scratch copy; writes no project
+POST   /api/io/import/excel  write active
 POST   /api/io/import/matpower  none replaces the open network with an unsaved scratch copy; writes no project
 POST   /api/io/import/netcdf  none replaces the open network with an unsaved scratch copy; writes no project
 POST   /api/library/items/tariff/import_urdb  none the org library, not a project
@@ -320,4 +326,6 @@ POST   /api/simulation/run_ac_pf  write active
 PUT    /api/simulation/solver_config  write active
 POST   /api/simulation/value_flows/template  write active
 POST   /api/spectrum/trace  none analyses an uploaded trace in memory; stores nothing
+POST   /api/workbook/import  none creates a new project the caller owns
+POST   /api/workbook/preview  none parses an upload, writes nothing
 """

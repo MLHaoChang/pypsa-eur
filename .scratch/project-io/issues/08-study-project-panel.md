@@ -3,7 +3,8 @@
 
 # 08 A planning → dynamics Study project shows the hub sidebar and gives no progress inside dispatch
 
-Status: ready-for-agent
+Status: done (#1816)
+Landed in #1816.
 Blocked by: none (siblings: 06 fork kind, 07 run freshness)
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), walk W3 (shot `s2-panel`).
 Model: sonnet. Review: UX (+ GK A if `gridspine/drivers/progress.py` changes).

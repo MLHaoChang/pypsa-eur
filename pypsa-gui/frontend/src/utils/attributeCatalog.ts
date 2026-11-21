@@ -298,5 +298,5 @@ export function isRequired(column: string, ctx: RevealContext): boolean {
  */
 export function requiredPairMessage(ctx: RevealContext): string | null {
   if (ctx.mode !== 'lopf' || !ctx.extendable) return null
-  return 'An extendable asset needs capital_cost or overnight_cost above zero.'
+  return 'An extendable asset needs an overnight cost or a capital cost above zero.'
 }

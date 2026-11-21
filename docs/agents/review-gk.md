@@ -351,3 +351,16 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A sizing or loop runner that skips the commercial layer admits a `commercial` block only on an allowlist of keys with no LP effect, never a deny-list. A test refuses an unknown key (#1711: a tariff adds €/MWh to the import Links' `marginal_cost` at solve time, which the loop does not apply).
 - A tolerance boundary test pins the literal tolerance, never the code's own constant (#1786 M6a).
 - A test of "an order change is refused" uses an exact permutation (`a[::-1]`), never a re-generated series (#1773 E4).
+
+## Standing rulings (GK A2 (4) and GK A2 (5), recorded 2026-11-21)
+
+- A pack never declares a channel it does not record (GK A2 (4)).
+- Two modules that share a file format get a writer→reader contract test (GK A2 (4)).
+- A contract error in one case reads "unknown" for that case only. The other cases are still judged (GK A2 (4)).
+- An open-tie screen reads "not evaluated" (GK A2 (4)).
+- An importer lists its defaults as assumed. A text value in an int field is a format error that names the field (GK A2 (4)).
+- When formats share a file extension, each format sniffs the content. A file that two formats claim is refused, and the refusal names both. Any fallback is an explicit flag, never "this format has no sniff" (#1731 X6).
+- A sniff or a reader turns any parser failure into a format refusal, never a raw exception (#1731).
+- A written file that needs a sidecar marks itself, so a reader refuses it without the sidecar. Hand-written files are unaffected. An importer takes the sidecar from the files it is given, not only from disk, and never reports a sidecar it used as unread (GC-19 #1743).
+- A docstring "known edge" states today's behaviour, and the edge is filed as an issue (#1742).
+- A test of a mapping compares whole dicts against a hand-written mapping, never against the code's own constants, and includes a blank value (#1767, #1790).

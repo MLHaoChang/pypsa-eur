@@ -1,7 +1,8 @@
 """Checked grid-readiness scorecard rows (checked-results S9).
 
-The scorecard as the route and the copilot tool read it (`grid_readiness_for`:
-the project's saved network, sidecars and grid-code profile). A row is checked
+The scorecard of the project's saved network, sidecars and grid-code profile
+(`grid_readiness_for(source="saved")`; the route and the copilot tool read the
+loaded network, unsaved edits included, DC walkthrough 04). A row is checked
 when it declares the code's own rule for its id and its stored project value,
 judged against its stored limit by that rule, gives the engine's verdict. A
 disagreement (a rounding boundary) is withheld, never re-verdicted; rows whose
@@ -88,7 +89,7 @@ def source(ctx, entity):
     limits = root / grid_limits.SIDECAR_NAME
     before = _file_sha256(limits)
     try:
-        card = grid_readiness_for(project)  # the route's own load path, locks and profile resolution
+        card = grid_readiness_for(project, source="saved")  # the route's own load path, locks and profile resolution
     except HTTPException as exc:
         if isinstance(exc.detail, dict) and exc.detail.get("error_kind") == "unknown_grid_code_profile":
             raise ValueError("unknown_grid_code_profile") from exc

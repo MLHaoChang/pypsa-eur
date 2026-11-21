@@ -44,9 +44,8 @@ export function StepYears({
         <div className="p-2.5">
           <p className="text-[11px] text-muted mb-2 leading-relaxed">
             Each year becomes one optimisation period. Capacity decisions are
-            made independently per period; assets must have <code>build_year</code>
-            ≤ period to be available, and are retired at
-            <code> build_year + lifetime</code>.
+            made independently per period. An asset is available from its build
+            year and retires when its lifetime ends.
           </p>
           <div className="flex flex-wrap items-center gap-1">
             {periods.map(y => (

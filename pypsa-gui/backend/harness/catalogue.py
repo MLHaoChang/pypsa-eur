@@ -2340,9 +2340,13 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "import_excel",
-        "Import a network from an .xlsx workbook. Returns ImportSummary "
-        "{buses, generators, lines, links, storage_units, stores, loads, "
-        "transformers, snapshots} per schemas.py:455-464. Safety: destructive.",
+        "Import a network from an .xlsx workbook in an older layout (PyPSA's "
+        "own export or raw-named sheets). Returns ImportSummary {buses, "
+        "generators, lines, links, storage_units, stores, loads, transformers, "
+        "snapshots, report} per schemas.py:455-464; report lists what the file "
+        "held that was not read. The PyPSA Studio input workbook is refused "
+        "(import_as_new_project): the user imports it as a new project in the "
+        "app. Safety: destructive.",
         {
             "bytes_b64": {"type": "string"},
             "filename": {"type": "string"},
@@ -2380,7 +2384,8 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _empty(
         "export_excel",
-        "Export the active network to an .xlsx workbook and return the new "
+        "Export the active network to an .xlsx workbook in PyPSA's own layout "
+        "(not the input workbook) and return the new "
         "file's metadata {file_id, filename, size}. "
         "Writes the file into the project's uploads (shown in the chat file "
         "strip, counted toward the uploads quota, refused while another user "
