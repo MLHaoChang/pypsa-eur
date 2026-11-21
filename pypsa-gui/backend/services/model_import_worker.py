@@ -18,6 +18,7 @@ never pickles a network across the pipe:
 
 A child that dies (the memory limit, a crash) sends nothing; the parent reads that as EOF.
 """
+
 from __future__ import annotations
 
 import json
@@ -30,15 +31,21 @@ def _write_sidecar(path: Path, content) -> None:
     if isinstance(content, bytes):
         path.write_bytes(content)
     else:
-        path.write_text(json.dumps(content, indent=2, allow_nan=False), encoding="utf-8")
+        path.write_text(
+            json.dumps(content, indent=2, allow_nan=False), encoding="utf-8"
+        )
 
 
-def run(format_id: str, paths: list[str], options: dict, out_dir: str, declared) -> dict:
+def run(
+    format_id: str, paths: list[str], options: dict, out_dir: str, declared
+) -> dict:
     """Read the files and write the result into `out_dir`; the dict the child sends."""
     from gridspine.ingest import import_result as IR
 
     try:
-        result = IR.read(format_id, [Path(p) for p in paths], options, declared=declared)
+        result = IR.read(
+            format_id, [Path(p) for p in paths], options, declared=declared
+        )
     except IR.ImportFormatError as exc:
         return {"refused": str(exc)}
     from services.pypsa_service import PyPSAService
@@ -59,8 +66,15 @@ def run(format_id: str, paths: list[str], options: dict, out_dir: str, declared)
     }
 
 
-def read_to(conn, format_id: str, paths: list[str], options: dict, out_dir: str,
-            declared, memory: int) -> None:
+def read_to(
+    conn,
+    format_id: str,
+    paths: list[str],
+    options: dict,
+    out_dir: str,
+    declared,
+    memory: int,
+) -> None:
     """The child's entry: limit the address space, read, send the result, exit."""
     import os
 
@@ -72,7 +86,11 @@ def read_to(conn, format_id: str, paths: list[str], options: dict, out_dir: str,
         import resource
 
         resource.setrlimit(resource.RLIMIT_AS, (memory, memory))
-    except (ImportError, ValueError, OSError):  # no `resource` on Windows; the time budget still holds
+    except (
+        ImportError,
+        ValueError,
+        OSError,
+    ):  # no `resource` on Windows; the time budget still holds
         pass
     try:
         out = run(format_id, paths, options, out_dir, declared)

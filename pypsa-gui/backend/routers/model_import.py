@@ -81,7 +81,11 @@ async def import_model(
         body = svc.payload(st)
         # Off the event loop: the create writes the database and moves files.
         project = await run_in_threadpool(
-            svc.create_project, db, user, (name or "").strip() or body["suggested_name"], st
+            svc.create_project,
+            db,
+            user,
+            (name or "").strip() or body["suggested_name"],
+            st,
         )
     finally:
         svc.discard(st)

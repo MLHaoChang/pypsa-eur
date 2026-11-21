@@ -26,6 +26,7 @@ or nothing. It never overwrites one (IMPORT-FLOW-1).
 - **All or nothing.** `project_registry.create_root` refuses a taken name (409) before any
   folder exists; a failure after the row exists removes the row and the folder.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -153,24 +154,62 @@ def parse_options(raw: str | None) -> dict:
     try:
         opts = json.loads(raw, parse_constant=_no_constant)
     except ValueError:
-        _refuse(422, {"error_kind": "import_options_invalid", "message": "The import options are not valid JSON."})
+        _refuse(
+            422,
+            {
+                "error_kind": "import_options_invalid",
+                "message": "The import options are not valid JSON.",
+            },
+        )
     if not isinstance(opts, dict) or len(opts) > MAX_OPTIONS:
-        _refuse(422, {"error_kind": "import_options_invalid", "message": f"The import options must be an object with at most {MAX_OPTIONS} entries."})
+        _refuse(
+            422,
+            {
+                "error_kind": "import_options_invalid",
+                "message": f"The import options must be an object with at most {MAX_OPTIONS} entries.",
+            },
+        )
     for key, value in opts.items():
         if not key or len(key) > 32 or not set(key) <= _OPTION_KEY_CHARS:
-            _refuse(422, {"error_kind": "import_options_invalid", "message": f"The import option {key!r} is not a known kind of option."})
+            _refuse(
+                422,
+                {
+                    "error_kind": "import_options_invalid",
+                    "message": f'The import option "{key}" is not a known kind of option.',
+                },
+            )
         if value is not None and not isinstance(value, (str, int, float, bool)):
-            _refuse(422, {"error_kind": "import_options_invalid", "message": f"The import option {key!r} must be a single value."})
+            _refuse(
+                422,
+                {
+                    "error_kind": "import_options_invalid",
+                    "message": f'The import option "{key}" must be a single value.',
+                },
+            )
         if isinstance(value, float) and not math.isfinite(value):
-            _refuse(422, {"error_kind": "import_options_invalid", "message": f"The import option {key!r} must be a finite number."})
+            _refuse(
+                422,
+                {
+                    "error_kind": "import_options_invalid",
+                    "message": f'The import option "{key}" must be a finite number.',
+                },
+            )
         if isinstance(value, str) and len(value) > 256:
-            _refuse(422, {"error_kind": "import_options_invalid", "message": f"The import option {key!r} is too long."})
+            _refuse(
+                422,
+                {
+                    "error_kind": "import_options_invalid",
+                    "message": f'The import option "{key}" is too long.',
+                },
+            )
     return opts
 
 
 #: Names Windows reserves for devices, whatever the extension (the desktop build).
 _WINDOWS_DEVICES = frozenset(
-    {"con", "prn", "aux", "nul"} | {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)}
+    {"con", "prn", "aux", "nul"}
+    | {f"com{i}" for i in range(1, 10)}
+    | {f"lpt{i}" for i in range(1, 10)}
 )
 MAX_NAME_BYTES = 255
 
@@ -180,9 +219,21 @@ def check_names(names: list[str]) -> None:
     `..`, no `:` (an NTFS stream), no device name, at most 255 bytes. Two names that
     Windows and macOS read as one file (case, trailing dots and spaces) are refused."""
     if not names:
-        _refuse(422, {"error_kind": "import_files_invalid", "message": "Choose at least one file to import."})
+        _refuse(
+            422,
+            {
+                "error_kind": "import_files_invalid",
+                "message": "Choose at least one file to import.",
+            },
+        )
     if len(names) > MAX_FILES:
-        _refuse(422, {"error_kind": "import_files_invalid", "message": f"At most {MAX_FILES} files can be imported together."})
+        _refuse(
+            422,
+            {
+                "error_kind": "import_files_invalid",
+                "message": f"At most {MAX_FILES} files can be imported together.",
+            },
+        )
     seen: set[str] = set()
     for name in names:
         if (
@@ -197,10 +248,22 @@ def check_names(names: list[str]) -> None:
             or name.split(".")[0].rstrip(" ").casefold() in _WINDOWS_DEVICES
             or os.path.basename(name) != name
         ):
-            _refuse(422, {"error_kind": "import_files_invalid", "message": f"{name!r} is not a plain file name."})
+            _refuse(
+                422,
+                {
+                    "error_kind": "import_files_invalid",
+                    "message": f'"{name}" is not a plain file name.',
+                },
+            )
         folded = name.rstrip(". ").casefold()
         if folded in seen:
-            _refuse(422, {"error_kind": "import_files_invalid", "message": f"Two files are named {name!r}."})
+            _refuse(
+                422,
+                {
+                    "error_kind": "import_files_invalid",
+                    "message": f'Two files are named "{name}".',
+                },
+            )
         seen.add(folded)
 
 
@@ -227,10 +290,17 @@ async def stage(files: list[UploadFile], options_raw: str | None) -> Staged:
     return await run_in_threadpool(_stage_files, names, options, blobs)
 
 
-def _stage_files(names: list[str], options: dict, blobs: list[tuple[str, bytes]]) -> Staged:
+def _stage_files(
+    names: list[str], options: dict, blobs: list[tuple[str, bytes]]
+) -> Staged:
     sha = digest(options, blobs)
     clear_stale_staging()
-    st = Staged(pathlib.Path(tempfile.mkdtemp(dir=staging_root(), prefix="import-")), names, options, sha)
+    st = Staged(
+        pathlib.Path(tempfile.mkdtemp(dir=staging_root(), prefix="import-")),
+        names,
+        options,
+        sha,
+    )
     try:
         st.src.mkdir()
         st.out.mkdir()
@@ -258,14 +328,30 @@ def format_of(st: Staged) -> str:
         except IR.ImportFormatError as exc:
             _refuse(422, {"error_kind": "import_unreadable", "message": str(exc)})
         except Exception:  # a format sniff that breaks on a malformed file
-            logger.warning("Model import: telling the format of %s failed", name, exc_info=True)
-            _refuse(422, {"error_kind": "import_unreadable", "message": f"{name}: its format could not be told from its content."})
+            logger.warning(
+                "Model import: telling the format of %s failed", name, exc_info=True
+            )
+            _refuse(
+                422,
+                {
+                    "error_kind": "import_unreadable",
+                    "message": f"{name}: its format could not be told from its content.",
+                },
+            )
         ids.add(spec.format_id)
     if len(ids) > 1:
-        _refuse(422, {"error_kind": "import_files_invalid", "message": "These files are of different formats; import one model at a time."})
+        _refuse(
+            422,
+            {
+                "error_kind": "import_files_invalid",
+                "message": "These files are of different formats; import one model at a time.",
+            },
+        )
     (fid,) = ids
     if fid in EXCLUDED:
-        _refuse(422, {"error_kind": "import_format_elsewhere", "message": EXCLUDED[fid]})
+        _refuse(
+            422, {"error_kind": "import_format_elsewhere", "message": EXCLUDED[fid]}
+        )
     return fid
 
 
@@ -279,7 +365,15 @@ def _read_in_child(st: Staged) -> dict:
     paths = [str(st.src / n) for n in st.names]
     child = ctx.Process(
         target=W.read_to,
-        args=(send, st.format_id, paths, st.options, str(st.out), tuple(declared()), READ_MEMORY),
+        args=(
+            send,
+            st.format_id,
+            paths,
+            st.options,
+            str(st.out),
+            tuple(declared()),
+            READ_MEMORY,
+        ),
         daemon=True,
         name="model-import",
     )
@@ -287,11 +381,21 @@ def _read_in_child(st: Staged) -> dict:
     send.close()
     try:
         if not receive.poll(READ_SECONDS):
-            _refuse(422, {"error_kind": "import_timeout", "message": f"The files could not be read within {READ_SECONDS:g} s, so the import stopped. "
-                    "Split the model, or export a smaller case from its source.", "budget_seconds": READ_SECONDS})
+            _refuse(
+                422,
+                {
+                    "error_kind": "import_timeout",
+                    "message": f"The files could not be read within {READ_SECONDS:g} s, so the import stopped. "
+                    "Split the model, or export a smaller case from its source.",
+                    "budget_seconds": READ_SECONDS,
+                },
+            )
         try:
             out = receive.recv()
-        except (EOFError, OSError):  # the child died (the memory limit, a crash) before it answered
+        except (
+            EOFError,
+            OSError,
+        ):  # the child died (the memory limit, a crash) before it answered
             out = {}
     finally:
         receive.close()
@@ -305,7 +409,13 @@ def read(st: Staged) -> Staged:
     """Run the importer on the staged files; the result's sidecars are checked."""
     st.format_id = format_of(st)
     if not _READS.acquire(blocking=False):
-        _refuse(503, {"error_kind": "import_busy", "message": "Other model imports are being read right now. Try again in a minute."})
+        _refuse(
+            503,
+            {
+                "error_kind": "import_busy",
+                "message": "Other model imports are being read right now. Try again in a minute.",
+            },
+        )
     try:
         out = _read_in_child(st)
     finally:
@@ -313,8 +423,18 @@ def read(st: Staged) -> Staged:
     if "refused" in out:
         _refuse(422, {"error_kind": "import_unreadable", "message": out["refused"]})
     if "report" not in out:
-        why = f" ({out['error']})" if out.get("error") else " (it ran out of memory or stopped)"
-        _refuse(422, {"error_kind": "import_unreadable", "message": "The importer could not read these files" + why + "."})
+        why = (
+            f" ({out['error']})"
+            if out.get("error")
+            else " (it ran out of memory or stopped)"
+        )
+        _refuse(
+            422,
+            {
+                "error_kind": "import_unreadable",
+                "message": "The importer could not read these files" + why + ".",
+            },
+        )
     check_sidecars(st, out["sidecars"])
     st.result = out
     return st
@@ -331,12 +451,29 @@ def check_sidecars(st: Staged, names: list[str]) -> None:
                 meta = json.loads((st.out / name).read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 meta = None
-            clash = sorted(set(meta) - IMPORTER_META_KEYS) if isinstance(meta, dict) else None
+            clash = (
+                sorted(set(meta) - IMPORTER_META_KEYS)
+                if isinstance(meta, dict)
+                else None
+            )
             if clash is None or clash:
-                _refuse(422, {"error_kind": "import_sidecar_refused", "message": "The importer tried to set project fields it may not set"
-                        + (f" ({', '.join(clash)})" if clash else "") + "."})
+                _refuse(
+                    422,
+                    {
+                        "error_kind": "import_sidecar_refused",
+                        "message": "The importer tried to set project fields it may not set"
+                        + (f" ({', '.join(clash)})" if clash else "")
+                        + ".",
+                    },
+                )
         elif name not in PC.IMPORTER_SIDECARS:
-            _refuse(422, {"error_kind": "import_sidecar_refused", "message": f"The importer tried to store {name!r}, which a project does not keep."})
+            _refuse(
+                422,
+                {
+                    "error_kind": "import_sidecar_refused",
+                    "message": f'The importer tried to store "{name}", which a project does not keep.',
+                },
+            )
 
 
 def payload(st: Staged) -> dict:
@@ -430,6 +567,12 @@ def create_project(db, user, name: str, st: Staged):
         project_registry.delete_project_row(db, project)
         if isinstance(exc, Exception) and not isinstance(exc, HTTPException):
             logger.warning("Model import could not write the project", exc_info=True)
-            _refuse(500, {"error_kind": "import_write_failed", "message": "The project could not be written; nothing was kept. Try the import again."})
+            _refuse(
+                500,
+                {
+                    "error_kind": "import_write_failed",
+                    "message": "The project could not be written; nothing was kept. Try the import again.",
+                },
+            )
         raise
     return project

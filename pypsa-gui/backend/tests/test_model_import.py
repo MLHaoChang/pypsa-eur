@@ -52,8 +52,12 @@ def store(_auth_db):
             rows = sorted(str(p.id) for p in db.query(Project).all())
         # Non-empty folders: the first project in a workspace also makes its (empty) parent.
         dirs = sorted(
-            str(p) for p in root.rglob("*")
-            if p.is_dir() and p != staging and staging not in p.parents and any(p.iterdir())
+            str(p)
+            for p in root.rglob("*")
+            if p.is_dir()
+            and p != staging
+            and staging not in p.parents
+            and any(p.iterdir())
         )
         return rows, dirs, sorted(p.name for p in staging.iterdir())
 
@@ -96,7 +100,12 @@ def _dgs_bytes(tmp_path) -> bytes:
     from gridspine.handoff.dgs_writer import write_dgs
 
     net = pn.example_simple()
-    net.ext_grid[["s_sc_max_mva", "s_sc_min_mva", "rx_max", "rx_min"]] = [1000.0, 800.0, 0.1, 0.1]
+    net.ext_grid[["s_sc_max_mva", "s_sc_min_mva", "rx_max", "rx_min"]] = [
+        1000.0,
+        800.0,
+        0.1,
+        0.1,
+    ]
     path = tmp_path / "simple.dgs"
     write_dgs(net, path)
     return path.read_bytes()
@@ -110,9 +119,14 @@ def test_formats_come_from_the_registry_and_a_new_importer_appears(client, monke
     assert {"psse", "dgs", "plexos"} <= set(ids) and "fake" not in ids
     assert "excel" not in ids  # the Excel workbook has its own import (#1798)
     monkeypatch.setattr(svc, "declared", lambda: (*DECLARED, FAKE))
-    formats = {f["id"]: f for f in client.get("/api/model-import/formats").json()["formats"]}
+    formats = {
+        f["id"]: f for f in client.get("/api/model-import/formats").json()["formats"]
+    }
     assert formats["fake"] == {
-        "id": "fake", "label": "Fake model", "extensions": [".fake"], "help": "A test-only format."
+        "id": "fake",
+        "label": "Fake model",
+        "extensions": [".fake"],
+        "help": "A test-only format.",
     }
 
 
@@ -124,7 +138,9 @@ def test_formats_need_a_signed_in_caller(anon_client):
 
 
 @pytest.mark.parametrize("which", ["psse", "dgs", "plexos"])
-def test_a_preview_of_each_real_format_lists_everything_and_keeps_nothing(client, store, tmp_path, which):
+def test_a_preview_of_each_real_format_lists_everything_and_keeps_nothing(
+    client, store, tmp_path, which
+):
     named = {
         "psse": ("case14.raw", CASE14.read_bytes()),
         "dgs": ("simple.dgs", _dgs_bytes(tmp_path)),
@@ -142,7 +158,9 @@ def test_a_preview_of_each_real_format_lists_everything_and_keeps_nothing(client
     for row in body["assumed"]:
         assert set(row) >= {"asset", "parameter", "value", "why"} and row["why"]
     if which == "psse":
-        assert body["counts"]["Buses"] == 14 and body["stored_files"] == ["psse_case.json"]
+        assert body["counts"]["Buses"] == 14 and body["stored_files"] == [
+            "psse_case.json"
+        ]
     if which == "plexos":
         assert len(body["assumed"]) > 0 and len(body["unmapped"]) > 0
         assert any(a["parameter"] == "Model" for a in body["assumed"])
@@ -177,7 +195,10 @@ def test_files_of_two_formats_are_refused(client, fake, store):
 def test_a_reader_refusal_is_its_own_words(client, fake, store):
     before = store()
     r = _preview(client, ("m.fake", b"refuse"))
-    assert r.status_code == 422 and r.json()["detail"]["message"] == "m.fake is not a fake model"
+    assert (
+        r.status_code == 422
+        and r.json()["detail"]["message"] == "m.fake is not a fake model"
+    )
     assert store() == before
 
 
@@ -189,17 +210,23 @@ def test_a_reader_crash_is_a_plain_422_not_a_500(client, fake, store):
     assert store() == before
 
 
-def test_a_reader_past_the_time_budget_is_stopped_and_its_child_killed(client, fake, store, monkeypatch):
+def test_a_reader_past_the_time_budget_is_stopped_and_its_child_killed(
+    client, fake, store, monkeypatch
+):
     monkeypatch.setattr(svc, "READ_SECONDS", 15.0)
     before = store()
     r = _preview(client, ("m.fake", b"sleep"))
     assert r.status_code == 422 and _kind(r) == "import_timeout", r.text
     assert r.json()["detail"]["budget_seconds"] == 15.0
-    assert not [c for c in multiprocessing.active_children() if c.name == "model-import"]
+    assert not [
+        c for c in multiprocessing.active_children() if c.name == "model-import"
+    ]
     assert store() == before
 
 
-def test_a_child_that_dies_at_the_memory_limit_is_a_plain_422(client, fake, store, monkeypatch):
+def test_a_child_that_dies_at_the_memory_limit_is_a_plain_422(
+    client, fake, store, monkeypatch
+):
     monkeypatch.setattr(svc, "READ_MEMORY", 3 * 1024 * 1024 * 1024)
     before = store()
     r = _preview(client, ("m.fake", b"eat"))
@@ -211,12 +238,26 @@ def test_a_child_that_dies_at_the_memory_limit_is_a_plain_422(client, fake, stor
 
 
 @pytest.mark.parametrize(
-    "bad", ["..", "a/b.fake", "a\\b.fake", " a.fake", "a\x01.fake", "x:y.fake", "CON.fake", "nul", "a" * 252 + ".fake"]
+    "bad",
+    [
+        "..",
+        "a/b.fake",
+        "a\\b.fake",
+        " a.fake",
+        "a\x01.fake",
+        "x:y.fake",
+        "CON.fake",
+        "nul",
+        "a" * 252 + ".fake",
+    ],
 )
 def test_a_file_name_that_is_not_plain_is_refused(bad):
     with pytest.raises(Exception) as err:
         svc.check_names([bad])
-    assert err.value.status_code == 422 and err.value.detail["error_kind"] == "import_files_invalid"
+    assert (
+        err.value.status_code == 422
+        and err.value.detail["error_kind"] == "import_files_invalid"
+    )
 
 
 def test_an_empty_name_and_duplicate_names_are_refused():
@@ -243,10 +284,14 @@ def test_files_over_the_byte_cap_together_are_413(client, fake, store, monkeypat
     assert store() == before
 
 
-@pytest.mark.parametrize("raw", ["[1]", "{bad", '{"Model": "x"}', '{"model": {"a": 1}}'])
+@pytest.mark.parametrize(
+    "raw", ["[1]", "{bad", '{"Model": "x"}', '{"model": {"a": 1}}']
+)
 def test_options_that_are_not_short_scalar_values_are_refused(client, fake, raw):
     r = client.post(
-        "/api/model-import/preview", files=_files(("m.fake", b"ok")), data={"options": raw}
+        "/api/model-import/preview",
+        files=_files(("m.fake", b"ok")),
+        data={"options": raw},
     )
     assert r.status_code == 422 and _kind(r) == "import_options_invalid"
 
@@ -254,7 +299,9 @@ def test_options_that_are_not_short_scalar_values_are_refused(client, fake, raw)
 # ── import: a new project, all or nothing ────────────────────────────────────
 
 
-def test_an_import_creates_a_project_that_opens_with_its_report(client, _auth_db, store):
+def test_an_import_creates_a_project_that_opens_with_its_report(
+    client, _auth_db, store
+):
     _, session_local = _auth_db
     named = ("case14.raw", CASE14.read_bytes())
     sha = _preview(client, named).json()["sha256"]
@@ -267,7 +314,11 @@ def test_an_import_creates_a_project_that_opens_with_its_report(client, _auth_db
     n.import_from_netcdf(str(dest / "network.nc"))
     assert len(n.buses) == 14
     report = json.loads((dest / "import_report.json").read_text())
-    assert report["format"] == "psse" and report["sha256"] == sha and report["files"] == ["case14.raw"]
+    assert (
+        report["format"] == "psse"
+        and report["sha256"] == sha
+        and report["files"] == ["case14.raw"]
+    )
     assert report["report"]["counts"]["Buses"] == 14
     from gridspine.ingest.import_result import ImportReport
 
@@ -281,31 +332,41 @@ def test_an_import_creates_a_project_that_opens_with_its_report(client, _auth_db
     assert store()[2] == []
 
 
-def test_an_importer_s_metadata_is_merged_and_keeps_the_create_s_keys(client, fake, _auth_db, store):
+def test_an_importer_s_metadata_is_merged_and_keeps_the_create_s_keys(
+    client, fake, _auth_db, store
+):
     """The DGS reader stores its names as a metadata.json sidecar (project-io (6) hand-off)."""
     _, session_local = _auth_db
     named = ("m.fake", b"importmeta")
     sha = _preview(client, named).json()["sha256"]
     r = _import(client, named, sha=sha, name="Merged meta")
     assert r.status_code == 201, r.text
-    meta = json.loads((_dir(session_local, r.json()["project_id"]) / "metadata.json").read_text())
+    meta = json.loads(
+        (_dir(session_local, r.json()["project_id"]) / "metadata.json").read_text()
+    )
     assert meta["import"] == {"format": "fake", "names": {"North": "N1"}}
     assert set(svc._create_meta(0, 0)) <= set(meta) and meta["bus_count"] == 2
 
 
-def test_a_real_dgs_import_keeps_its_names_beside_the_create_s_keys(client, _auth_db, tmp_path):
+def test_a_real_dgs_import_keeps_its_names_beside_the_create_s_keys(
+    client, _auth_db, tmp_path
+):
     _, session_local = _auth_db
     named = ("simple.dgs", _dgs_bytes(tmp_path))
     sha = _preview(client, named).json()["sha256"]
     r = _import(client, named, sha=sha, name="DGS simple")
     assert r.status_code == 201, r.text
-    meta = json.loads((_dir(session_local, r.json()["project_id"]) / "metadata.json").read_text())
+    meta = json.loads(
+        (_dir(session_local, r.json()["project_id"]) / "metadata.json").read_text()
+    )
     assert meta["import"]["format"] == "dgs" and "dgs_names" in meta["import"]
     assert set(svc._create_meta(0, 0)) <= set(meta) and meta["bus_count"] == 7
 
 
 @pytest.mark.parametrize("word", ["meta", "ownmeta", "stray"])
-def test_a_sidecar_the_project_does_not_keep_refuses_the_import(client, fake, store, word):
+def test_a_sidecar_the_project_does_not_keep_refuses_the_import(
+    client, fake, store, word
+):
     """C5: a reader may not set the project's own metadata keys or store other files."""
     named = ("m.fake", word.encode())
     before = store()
@@ -337,7 +398,9 @@ def test_options_changed_since_the_preview_are_409(client, fake, store):
     assert r.status_code == 201, r.text
 
 
-def test_a_failure_after_the_row_exists_leaves_no_row_and_no_folder(client, fake, store, monkeypatch):
+def test_a_failure_after_the_row_exists_leaves_no_row_and_no_folder(
+    client, fake, store, monkeypatch
+):
     named = ("m.fake", b"ok")
     sha = _preview(client, named).json()["sha256"]
     before = store()
@@ -396,10 +459,14 @@ def test_two_imports_racing_for_one_name_one_wins_the_other_is_a_clean_409(
         t.start()
     for t in threads:
         t.join(120)
-    assert sorted(getattr(r, "status_code", 0) for r in results) == [201, 409], [getattr(r, "text", r) for r in results]
+    assert sorted(getattr(r, "status_code", 0) for r in results) == [201, 409], [
+        getattr(r, "text", r) for r in results
+    ]
     rows, dirs, staged = store()
     assert len(rows) == len(before_rows) + 1
-    made = [d for d in dirs if d not in before_dirs and (Path(d) / "network.nc").is_file()]
+    made = [
+        d for d in dirs if d not in before_dirs and (Path(d) / "network.nc").is_file()
+    ]
     assert len(made) == 1 and staged == []
 
 
@@ -413,7 +480,9 @@ def test_a_signed_out_caller_is_401_and_creates_nothing(anon_client, fake, store
     assert store() == before
 
 
-def test_a_caller_outside_every_workspace_is_403_and_creates_nothing(_auth_db, fake, store):
+def test_a_caller_outside_every_workspace_is_403_and_creates_nothing(
+    _auth_db, fake, store
+):
     from tests.test_changelog_scoping import _user
 
     orgless, raw = _user(_auth_db, org_id=None)
@@ -447,7 +516,9 @@ def test_every_importer_file_is_in_the_contents_table_with_its_writer():
 
 def test_a_non_finite_option_is_refused_before_reading(client, fake):
     r = client.post(
-        "/api/model-import/preview", files=_files(("m.fake", b"ok")), data={"options": '{"x": NaN}'}
+        "/api/model-import/preview",
+        files=_files(("m.fake", b"ok")),
+        data={"options": '{"x": NaN}'},
     )
     assert r.status_code == 422 and _kind(r) == "import_options_invalid"
 
@@ -465,7 +536,9 @@ def test_a_format_sniff_that_breaks_is_a_plain_422(client, fake, store, monkeypa
     assert store() == before
 
 
-def test_reads_past_the_concurrency_cap_are_503_and_read_nothing(client, fake, store, monkeypatch):
+def test_reads_past_the_concurrency_cap_are_503_and_read_nothing(
+    client, fake, store, monkeypatch
+):
     calls = []
     monkeypatch.setattr(svc, "_read_in_child", lambda st: calls.append(st) or {})
     for _ in range(svc.MAX_CONCURRENT_READS):
@@ -479,7 +552,9 @@ def test_reads_past_the_concurrency_cap_are_503_and_read_nothing(client, fake, s
     assert store()[2] == []
 
 
-def test_a_caller_outside_every_workspace_is_refused_before_anything_is_read(_auth_db, fake, monkeypatch):
+def test_a_caller_outside_every_workspace_is_refused_before_anything_is_read(
+    _auth_db, fake, monkeypatch
+):
     from tests.test_changelog_scoping import _user
 
     staged = []
@@ -493,7 +568,12 @@ def test_a_caller_outside_every_workspace_is_refused_before_anything_is_read(_au
     orgless, raw = _user(_auth_db, org_id=None)
     try:
         named = ("m.fake", b"ok")
-        assert _import(orgless, named, sha=svc.digest({}, [named]), name="No org").status_code == 403
+        assert (
+            _import(
+                orgless, named, sha=svc.digest({}, [named]), name="No org"
+            ).status_code
+            == 403
+        )
     finally:
         raw.__exit__(None, None, None)
     assert staged == []
@@ -518,8 +598,15 @@ def test_a_database_failure_after_the_row_exists_is_rolled_back_and_removed(
 
     def broken(dest, st):
         db, project = seen["db"], seen["project"]
-        db.add(Project(id=project.id, org_id=project.org_id, name=project.name, created_by=project.created_by,
-                       storage_path="dup"))
+        db.add(
+            Project(
+                id=project.id,
+                org_id=project.org_id,
+                name=project.name,
+                created_by=project.created_by,
+                storage_path="dup",
+            )
+        )
         db.flush()  # IntegrityError: the same id again
 
     monkeypatch.setattr(project_registry, "create_root", keep)

@@ -1,11 +1,18 @@
 """A fake model importer: the file's first word says what it does (tests only)."""
+
 from __future__ import annotations
 
 import time
 
 import pypsa
 
-from gridspine.ingest.import_result import Assumed, ImportFormatError, ImportReport, ImportResult, Unmapped
+from gridspine.ingest.import_result import (
+    Assumed,
+    ImportFormatError,
+    ImportReport,
+    ImportResult,
+    Unmapped,
+)
 
 
 def read_fake(paths, options):
@@ -27,13 +34,17 @@ def read_fake(paths, options):
         source_files=[p.name for p in paths],
         counts={"Buses": 2, "Lines": 1},
         unmapped=[Unmapped("Relay R1", "protection relays are not modelled")],
-        assumed=[Assumed("Line North-South", "Thermal rating", 100.0, "the file gives none")],
+        assumed=[
+            Assumed("Line North-South", "Thermal rating", 100.0, "the file gives none")
+        ],
     )
     sidecars = {"psse_case.json": {"buses": 2}}
     if word == "meta":
         sidecars["metadata.json"] = {"bus_count": 99}
     if word == "importmeta":
-        sidecars["metadata.json"] = {"import": {"format": "fake", "names": {"North": "N1"}}}
+        sidecars["metadata.json"] = {
+            "import": {"format": "fake", "names": {"North": "N1"}}
+        }
     if word == "ownmeta":
         sidecars["metadata.json"] = {"scenario_type": "planning"}
     if word == "stray":
