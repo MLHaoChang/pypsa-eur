@@ -835,3 +835,18 @@ def test_the_cache_keeps_the_notes():
     )
     _, notes, fetched = M._read_cache("DE-LU", 2024)
     assert notes == ["resolution:PT15M averaged to hourly"] and fetched == "2026-11-21"
+
+
+def test_the_fetch_date_and_the_last_complete_year_follow_the_given_now():
+    """`now` is honoured, not the wall clock (mutants on #1850)."""
+    then = datetime(2025, 3, 4, tzinfo=UTC)
+    assert M.last_complete_year(then) == 2024
+    assert M.last_complete_year(datetime(2021, 6, 1, tzinfo=UTC)) == 2020
+    with pytest.raises(M.MarketPriceError) as e:
+        M.check_request("DE-LU", 2024, datetime(2024, 6, 1, tzinfo=UTC))
+    assert e.value.kind == "invalid_year"
+    app_secrets.set_secret(M.TOKEN_NAME, TOKEN)
+    _, _, fetched = M.day_ahead(
+        "DE-LU", 2024, transport=Replay(body=_fixture()).transport, now=then
+    )
+    assert fetched == "2025-03-04"
