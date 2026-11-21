@@ -7,7 +7,7 @@
  * "Created ‘X’, not opened". Every file is real: a project's own workbook, a text file, a 41-sheet workbook.
  * Needs the API on :8000 and Vite on :5173 (dev admin, scripts/dev-credentials.mjs).
  * Usage: node scripts/excel-input-workbook-shots.mjs [outDir]
- *   env: THEME (light|dark), MODES (guided,expert), PASS (main|cap|study).
+ *   env: THEME (light|dark), MODES (guided,expert), PASS (main|cap|study|e2e).
  *   PASS=cap needs the API started with PYPSA_GUI_MAX_UPLOAD_BYTES=1048576 (the upload cap shot).
  */
 import fs from 'node:fs/promises'
@@ -124,6 +124,31 @@ try {
       await page.locator('[data-testid="workbook-not-opened"], [data-testid="workbook-refusal"]').first().waitFor({ timeout: 120000 })
       await shot(page, `dialog-created-not-opened-${mode}`)
       await page.evaluate(async () => { const { resultsApi } = await import('/src/api/simulation.ts'); await resultsApi.abortEhStudy().catch(() => {}) })
+      await ctx.close(); continue
+    }
+
+    if (PASS === 'e2e') {
+      // E2E-DONE-1: a project's own workbook → preview → import → the new project opens with the same assets.
+      const count = () => page.evaluate(async () => {
+        const { networkApi } = await import('/src/api/network.ts')
+        return { buses: (await networkApi.getBuses()).length, generators: (await networkApi.getGenerators()).length }
+      })
+      const source = await count()
+      const name = `Workbook S3 E2E ${mode}`
+      await openDialog(); await pick('Filled site.xlsx'); await page.getByTestId('workbook-counts').waitFor()
+      // UX 27 items 1–3: the report reads in plain words (no field keys in straight quotes, no "›" or "&gt;").
+      const words = await page.getByTestId('workbook-report').innerText()
+      for (const bad of ["'", '›', '&gt;', '>']) if (words.includes(bad)) throw new Error(`report has ${bad}: ${words}`)
+      await shot(page, `e2e-preview-${mode}`)
+      await page.getByTestId('workbook-name').fill(name)
+      await page.getByTestId('workbook-import-btn').click()
+      await dialog.waitFor({ state: 'detached', timeout: 120000 })
+      await page.waitForFunction(async n => (await import('/src/store/uiStore.ts')).useUIStore.getState().currentProject === n, name, { timeout: 60000 })
+      await page.waitForLoadState('networkidle'); await page.waitForTimeout(2500)
+      const made = await count()
+      console.log('e2e', mode, JSON.stringify({ source, made }))
+      if (JSON.stringify(made) !== JSON.stringify(source)) throw new Error(`imported ${JSON.stringify(made)} ≠ source ${JSON.stringify(source)}`)
+      await shot(page, `e2e-project-opened-${mode}`)
       await ctx.close(); continue
     }
 
