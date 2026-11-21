@@ -49,6 +49,6 @@ export async function writeCreatedLocation(project: string, d: LocationDraft): P
     }
     return null
   } catch {
-    return 'The project was created, but its location was not saved: set it in the Project & site step.'
+    return 'The project was created, but its location was not saved.'
   }
 }

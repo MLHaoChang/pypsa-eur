@@ -5,7 +5,6 @@
 // example's default, so Create works unedited. A refusal (422 dc_load_invalid)
 // sits beside its field and opens with the field label.
 import { useState } from 'react'
-import toast from 'react-hot-toast'
 import { dcLoadRefusal, type TemplateCreate } from '../../../hooks/useCreateFromTemplate'
 import {
   ARCH_HINT, BACKUP_HINT, DC_ARCH_OPTIONS, DC_BACKUP_OPTIONS, DC_DEFAULTS, DC_FIELD_LABEL, STAGED_BESS_LINE,
@@ -13,7 +12,7 @@ import {
   type DcDraft, type DcField,
 } from '../dcLoadForm'
 import { emptyLocation, validateLocation, writeCreatedLocation, type LocationDraft } from '../siteLocation'
-import { SiteLocationFields } from './SiteLocationFields'
+import { SiteLocationFields, showLocationSaveFailure } from './SiteLocationFields'
 
 interface CreateMutation {
   mutate: (arg: TemplateCreate, opts?: { onError?: (e: unknown) => void}) => void
@@ -40,7 +39,7 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
   const nErrors = Object.keys(errors).length + Object.keys(locErrors).length
   const set = <K extends keyof DcDraft>(k: K, v: DcDraft[K]) => { setDraft({ ...draft, [k]: v }); setServer(null) }
 
-  const saveLocation = (project: string) => writeCreatedLocation(project, loc).then(m => { if (m) toast.error(m) })
+  const saveLocation = (project: string) => writeCreatedLocation(project, loc).then(m => { if (m) showLocationSaveFailure(m) })
   const submit = () => {
     if (nErrors || disabledReason) return
     create.mutate({ templateId, params: dcLoadBody(draft, templateId), afterCreate: saveLocation }, {

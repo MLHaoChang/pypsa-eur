@@ -1,6 +1,20 @@
 // Optional site location on the create forms (P5): latitude and longitude, in
 // the Latitude (°) / Longitude (°) words of the Project & site drawer.
+import toast from 'react-hot-toast'
+import { openSiteAnchor } from '../../../layout/flowNavigation'
 import type { LocationDraft, LocationErrors } from '../siteLocation'
+
+/** The project exists but its location was not saved: a status notice that
+ *  keeps the project open and links to the Latitude/Longitude drawer. */
+export function showLocationSaveFailure(message: string): void {
+  toast(t => (
+    <span role="status" data-testid="site-loc-failed" className="flex items-center gap-2 text-[12px]">
+      {message}
+      <button type="button" className="font-semibold text-accent underline"
+        onClick={() => { toast.dismiss(t.id); openSiteAnchor() }}>Set location ›</button>
+    </span>
+  ), { duration: 15000 })
+}
 
 const INPUT = 'rounded border border-border bg-bg px-1.5 py-0.5 text-[12px] tabular-nums'
 
@@ -27,7 +41,7 @@ export function SiteLocationFields({ value, errors, onChange }: {
         {one('lng', 'Longitude (°)')}
       </div>
       <p id="site-loc-hint" className="text-muted">
-        Weather profiles and the map need it. Leave both blank to set it later in the Project &amp; site step.
+        Needed before the first run. You can also set it later in section 1.
       </p>
     </fieldset>
   )
