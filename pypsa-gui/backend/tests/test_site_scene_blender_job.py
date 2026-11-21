@@ -483,9 +483,10 @@ def test_a_timed_out_job_fails_typed_with_no_artifact_and_frees_the_dispatcher(
     monkeypatch.setattr(
         sq.SolveQueue,
         "_run_solve_job",
+        # Recorded once finished: the assert below reads the finished status.
         lambda self, job: (
-            started.append(time.monotonic()),
             self._finish(job, "completed"),
+            started.append(time.monotonic()),
         ),
     )
     scene = client.post(JOBS).json()
