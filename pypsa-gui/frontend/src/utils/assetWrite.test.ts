@@ -38,6 +38,17 @@ import {
 } from './assetWrite'
 import { nk } from './queryKeys'
 
+// A warm cache is rebased on a fresh read (05g), so a test that seeds the cache also says what the server holds:
+// the same rows, i.e. nothing changed since the cache was filled.
+const GETTER: Record<string, string> = {
+  buses: 'getBuses', lines: 'getLines', loads: 'getLoads', generators: 'getGenerators',
+}
+function seed(qc: QueryClient, root: string, rows: unknown[]) {
+  qc.setQueryData(nk('p1', root), rows)
+  ;(globalThis as never as { __awMock: Record<string, ReturnType<typeof vi.fn>> }).__awMock[GETTER[root]]
+    .mockResolvedValue(rows)
+}
+
 describe('COMPONENT_QUERY_ROOTS', () => {
   it('covers every component class the api client can update, plus meta', () => {
     // Derived from networkApi's update surface (api/network.ts): a class that
@@ -109,7 +120,7 @@ describe('updateAsset — the chokepoint (Task 3)', () => {
   it('spreads the cached row under the patch — a partial PUT is unrepresentable', async () => {
     const { updateAsset } = await import('./assetWrite')
     const qc = new QueryClient()
-    qc.setQueryData(nk('p1', 'generators'), [
+    seed(qc, 'generators', [
       { name: 'g1', p_nom: 100, marginal_cost: 50, carrier: 'gas' },
     ])
     api().updateGenerator.mockResolvedValue({})
@@ -152,7 +163,7 @@ describe('updateAsset — the chokepoint (Task 3)', () => {
     const { updateAsset } = await import('./assetWrite')
     const qc = new QueryClient()
     const spy = vi.spyOn(qc, 'invalidateQueries')
-    qc.setQueryData(nk('p1', 'buses'), [{ name: 'b1', v_nom: 380 }])
+    seed(qc, 'buses', [{ name: 'b1', v_nom: 380 }])
     api().updateBus.mockResolvedValue({})
 
     await updateAsset(qc, 'p1', 'buses', 'b1', { v_nom: 220 })
@@ -165,7 +176,7 @@ describe('updateAsset — the chokepoint (Task 3)', () => {
     const { updateAsset } = await import('./assetWrite')
     const qc = new QueryClient()
     const spy = vi.spyOn(qc, 'invalidateQueries')
-    qc.setQueryData(nk('p1', 'loads'), [{ name: 'l1', p_set: 10 }])
+    seed(qc, 'loads', [{ name: 'l1', p_set: 10 }])
     api().updateLoad.mockRejectedValue(new Error('422'))
 
     await expect(
@@ -182,7 +193,7 @@ describe('updateAsset carries the cost basis claim (05d)', () => {
   it('passes the basis as the third PUT argument, and leaves it off when none is claimed', async () => {
     const { updateAsset } = await import('./assetWrite')
     const qc = new QueryClient()
-    qc.setQueryData(nk('p1', 'generators'), [{ name: 'g1', p_nom: 100 }])
+    seed(qc, 'generators', [{ name: 'g1', p_nom: 100 }])
     api().updateGenerator.mockResolvedValue({})
 
     await updateAsset(qc, 'p1', 'generators', 'g1', { marginal_cost: 7 }, { costBasis: 'tonne' })
@@ -205,7 +216,7 @@ describe('updateAsset with a patch BUILDER', () => {
     // fetch, spread, PUT and invalidation.
     const { updateAsset } = await import('./assetWrite')
     const qc = new QueryClient()
-    qc.setQueryData(nk('p1', 'generators'), [
+    seed(qc, 'generators', [
       { name: 'g1', p_nom: 100, marginal_cost: 50, carrier: 'gas' },
     ])
     api().updateGenerator.mockResolvedValue({})
@@ -245,7 +256,7 @@ describe('updateAsset returns the PUT response', () => {
     // the 2026-08-09 architecture report told this module to prevent.
     const { updateAsset } = await import('./assetWrite')
     const qc = new QueryClient()
-    qc.setQueryData(nk('p1', 'buses'), [{ name: 'b1', v_nom: 380 }])
+    seed(qc, 'buses', [{ name: 'b1', v_nom: 380 }])
     api().updateBus.mockResolvedValue({ name: 'b1', rescale: [{ line: 'L1' }] })
 
     const resp = await updateAsset(qc, 'p1', 'buses', 'b1', { v_nom: 220 })
@@ -283,7 +294,7 @@ describe('updateAsset re-keys the map route and the site placement after a renam
     const { updateAsset } = await import('./assetWrite')
     const { useMapLayoutStore, useSitesStore } = await stores()
     const qc = new QueryClient()
-    qc.setQueryData(nk('p1', 'lines'), [{ name: 'L1', bus0: 'A', bus1: 'B', length: 1 }])
+    seed(qc, 'lines', [{ name: 'L1', bus0: 'A', bus1: 'B', length: 1 }])
     api().updateLine.mockResolvedValue({ name: 'L9' })
 
     await updateAsset(qc, 'p1', 'lines', 'L1', { name: 'L9' })
@@ -301,7 +312,7 @@ describe('updateAsset re-keys the map route and the site placement after a renam
     const { useMapLayoutStore, useSitesStore } = await stores()
     const before = useMapLayoutStore.getState().docFor('p1')
     const qc = new QueryClient()
-    qc.setQueryData(nk('p1', 'lines'), [{ name: 'L1', bus0: 'A', bus1: 'B', length: 1 }])
+    seed(qc, 'lines', [{ name: 'L1', bus0: 'A', bus1: 'B', length: 1 }])
     api().updateLine.mockResolvedValue({ name: 'L1' })
 
     await updateAsset(qc, 'p1', 'lines', 'L1', { length: 2 })
@@ -317,7 +328,7 @@ describe('updateAsset re-keys the map route and the site placement after a renam
     const { useMapLayoutStore, useSitesStore } = await stores()
     useSitesStore.getState().setPlacement('p1', 'site_a', 'Bus:A', { x: 0, y: 0, heading: 0 })
     const qc = new QueryClient()
-    qc.setQueryData(nk('p1', 'buses'), [{ name: 'A', v_nom: 20 }])
+    seed(qc, 'buses', [{ name: 'A', v_nom: 20 }])
     api().updateBus.mockResolvedValue({ name: 'A2', rescale: [] })
 
     await updateAsset(qc, 'p1', 'buses', 'A', { name: 'A2' })
@@ -393,5 +404,61 @@ describe('invalidation reaches legacy FLAT-keyed consumers too', () => {
       'the flat-keyed SolverSettings cache went stale after a chat edit',
     ).toBe(true)
     expect(qc.getQueryState(nk('Demo', 'generators'))?.isInvalidated).toBe(true)
+  })
+})
+
+// 05g: the card's form (and the cached row under it) can be older than the network. A restore, an undo or another tab
+// changed the asset after the cache was filled; the save must send only what the user changed, on top of the FRESH row.
+describe('updateAsset rebases on the fresh row (05g)', () => {
+  const api = () => (globalThis as never as { __awMock: Record<string, ReturnType<typeof vi.fn>> }).__awMock
+  beforeEach(() => vi.clearAllMocks())
+
+  const stale = { name: 'g1', bus: 'B_new', p_nom: 100, capital_cost: 70, efficiency: 0.4, carrier: 'gas' }
+  // What a restore wrote after the cache was filled: the old bus, other costs and efficiency.
+  const fresh = { name: 'g1', bus: 'B_old', p_nom: 100, capital_cost: 90, efficiency: 0.5, carrier: 'gas' }
+
+  async function save(patch: Record<string, unknown> | ((c: Record<string, unknown>) => Record<string, unknown>)) {
+    const { updateAsset } = await import('./assetWrite')
+    const qc = new QueryClient()
+    qc.setQueryData(nk('p1', 'generators'), [stale])
+    api().getGenerators.mockResolvedValue([fresh])
+    api().updateGenerator.mockResolvedValue({})
+    await updateAsset(qc, 'p1', 'generators', 'g1', patch)
+    return api().updateGenerator.mock.calls[0][1] as Record<string, unknown>
+  }
+
+  it('a restore after the card opened: Save leaves the restored columns as they were', async () => {
+    // The card's patch carries every field of its (stale) form; only p_nom was typed.
+    const body = await save({ ...stale, p_nom: 120 })
+    expect(body).toEqual({ ...fresh, p_nom: 120 })
+  })
+
+  it('a bus-only move after a restore keeps the costs the restore wrote (U1)', async () => {
+    const body = await save(c => ({ bus: 'B_other', capital_cost: c.capital_cost, efficiency: c.efficiency }))
+    expect(body).toEqual({ ...fresh, bus: 'B_other' })
+  })
+
+  it('a column the user edited wins over the fresh value', async () => {
+    const body = await save({ capital_cost: 75 })
+    expect(body.capital_cost).toBe(75)
+    expect(body.bus).toBe('B_old')
+  })
+
+  it('the asset deleted in the meantime: an error and no PUT', async () => {
+    const { updateAsset } = await import('./assetWrite')
+    const qc = new QueryClient()
+    qc.setQueryData(nk('p1', 'generators'), [stale])
+    api().getGenerators.mockResolvedValue([{ name: 'other' }])
+    await expect(updateAsset(qc, 'p1', 'generators', 'g1', { p_nom: 5 })).rejects.toThrow(/g1/)
+    expect(api().updateGenerator).not.toHaveBeenCalled()
+  })
+
+  it('an unreadable fresh list stops the save: nothing stale is written', async () => {
+    const { updateAsset } = await import('./assetWrite')
+    const qc = new QueryClient()
+    qc.setQueryData(nk('p1', 'generators'), [stale])
+    api().getGenerators.mockRejectedValue(new Error('network down'))
+    await expect(updateAsset(qc, 'p1', 'generators', 'g1', { p_nom: 5 })).rejects.toThrow()
+    expect(api().updateGenerator).not.toHaveBeenCalled()
   })
 })

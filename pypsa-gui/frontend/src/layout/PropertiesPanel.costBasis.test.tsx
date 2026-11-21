@@ -8,6 +8,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
+import { seedRows } from '../test/seedRows'
 
 import schemas from '../test/fixtures/assetSchema.json'
 
@@ -100,7 +101,7 @@ function tonneUnits(cls: string, name: string) {
 
 function mount(c: Case) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  client.setQueryData(nk('Demo', c.root), [c.row])
+  seedRows(client, 'Demo', c.root, [c.row])
   render(<QueryClientProvider client={client}>{c.el(c.row as never)}</QueryClientProvider>)
   return client
 }

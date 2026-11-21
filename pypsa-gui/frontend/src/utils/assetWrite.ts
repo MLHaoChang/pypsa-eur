@@ -214,21 +214,33 @@ export async function updateAsset<T extends { name: string } = AssetRow>(
   opts?: { costBasis?: CostBasis },
 ): Promise<unknown> {
   const e = ENDPOINTS[cls]
-  const rows = await qc.ensureQueryData({
-    queryKey: nk(project, cls),
-    queryFn: e.get,
-  })
-  const current = rows.find((r) => r.name === name)
-  if (!current) {
+  const key = nk(project, cls)
+  const warm = qc.getQueryData<AssetRow[]>(key) !== undefined
+  const rows = await qc.ensureQueryData({ queryKey: key, queryFn: e.get })
+  const base = rows.find((r) => r.name === name)
+  if (!base) {
     throw new Error(`${cls}/${name} not found in the current network`)
   }
   // The rows really are T (getGenerators returns Generator[]); the table
   // widened them to AssetRow at its seam, so narrow back at this one.
-  const resolved = typeof patch === 'function' ? patch(current as unknown as T) : patch
+  const resolved = (typeof patch === 'function' ? patch(base as unknown as T) : patch) as Record<string, unknown>
+  // 05g: the cached row (and the form built from it) can be older than the network: a restore, an undo or another
+  // tab changed the asset after the cache was filled. PUTting the cached row would write those columns back. So the
+  // user's change is only what differs from the base the form was built on, and it goes onto the FRESH row. A cold
+  // cache was just fetched: nothing to rebase. A failed fresh read stops the save rather than writing stale columns.
+  const current = warm
+    ? (await qc.fetchQuery({ queryKey: key, queryFn: e.get, staleTime: 0 })).find((r) => r.name === name)
+    : base
+  if (!current) {
+    throw new Error(`${cls}/${name} not found in the current network`)
+  }
+  const changed = warm
+    ? Object.fromEntries(Object.entries(resolved).filter(([k, v]) => !(k in base) || !Object.is(base[k], v)))
+    : resolved
   // Return the PUT's response body: some endpoints answer with more than an
   // ack (updateBus carries a `rescale` preview the Bus card must ingest),
   // and a chokepoint that swallowed it would silently drop that behaviour.
-  const body = { ...current, ...resolved }
+  const body = { ...current, ...changed }
   const resp = opts?.costBasis ? await e.put(name, body, opts.costBasis) : await e.put(name, body)
   invalidateAssetQueries(qc, project)
   // The backend answers `{name: <new name>}`; the patch's `name` is what was
