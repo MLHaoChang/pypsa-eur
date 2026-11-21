@@ -322,6 +322,8 @@ function useParameterCommands(mode: PaletteMode, query: string): Command[] {
     } as unknown as Record<string, readonly PaletteAsset[]>
     return parameterRows(query, index, catalogue, byClass)
   }, [mode, catalogue, index, query, buses, generators, loads, lines, links, storageUnits, stores, transformers])
+  // Shift+Enter records the row's field as where the guide came from (its "Open on" hides over it).
+  const fieldOf = useMemo(() => new Map((catalogue?.entries ?? []).map(e => [e.id, e.model_name])), [catalogue])
   return useMemo(() => rows.map(r => ({
       id: r.id,
       kind: 'parameter' as const,
@@ -331,9 +333,9 @@ function useParameterCommands(mode: PaletteMode, query: string): Command[] {
       icon: <Gauge size={12} />,
       disabled: !r.target && !r.guideOnly,
       guideOnly: r.guideOnly,
-      guide: () => openGuide(r.entryId),
+      guide: () => openGuide(r.entryId, null, fieldOf.get(r.entryId)),
       run: () => { if (r.target) openParameter(r.target); else if (r.guideOnly) openGuide(r.entryId) },
-    })), [rows])
+    })), [rows, fieldOf])
 }
 
 // ── Command sources ──────────────────────────────────────────────────────────

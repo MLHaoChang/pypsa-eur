@@ -53,7 +53,7 @@ function pct(v: number | null | undefined): string {
 export function scopeSentence(horizonWide: boolean): string {
   if (horizonWide) {
     return 'ONE horizon-wide standard at the maximum peak, not a per-period '
-      + 'one: `Generator-p_nom` is a single variable for the whole horizon, so '
+      + 'one: a generator’s capacity is a single variable for the whole horizon, so '
       + 'the periods below share it and their constraints collapse into that '
       + 'one. Each period is listed for inspection, but only the largest peak '
       + 'sets the requirement the plan was built to.'

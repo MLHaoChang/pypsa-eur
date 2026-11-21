@@ -209,21 +209,24 @@ function EntryView({ entry, catalogue, hosted }: { entry: CatalogueEntry; catalo
 
 /**
  * "Open on <asset> ›" for the asset in hand when its class has the field; else "Choose an asset ›".
- * Hidden when the guide is hosted over that same place ("Back to …" already goes there):
- * Guided's field drawer for this very field, or Expert's Properties of this asset.
+ * Hidden when the guide is hosted over that same field ("Back to …" already goes there):
+ * Guided's field drawer for this very field, or Expert's Properties of this asset when
+ * the guide was opened from this field. Another field of that asset keeps it (it scrolls
+ * and flashes the field); an unknown origin keeps it too.
  */
 function OpenOn({ entry, hosted }: { entry: CatalogueEntry; hosted: boolean }) {
   const uiMode = useUIStore(s => s.uiMode)
   const fieldDrawer = useUIStore(s => s.fieldDrawer)
   const selected = useUIStore(s => s.selectedComponent)
   const close = useGuideStore(s => s.closeGuide)
+  const originField = useGuideStore(s => s.originField)
   if (!canOpenParameter(entry)) return null
   const inHand = uiMode === 'guided' && fieldDrawer?.component && fieldDrawer.entity
     ? { type: fieldDrawer.component, name: fieldDrawer.entity }
     : selected
   const asset = inHand && inHand.type === entry.scope ? inHand.name : null
   const sameAsBack = hosted && asset !== null
-    && (uiMode === 'guided' ? fieldDrawer?.field === entry.model_name : true)
+    && (uiMode === 'guided' ? fieldDrawer?.field : originField) === entry.model_name
   if (sameAsBack) return null
   const cls = 'mt-3 rounded border border-border px-2 py-1 text-[11px] text-text underline underline-offset-2 hover:bg-panel'
   return asset

@@ -18,7 +18,7 @@ export const PROPERTY_DOCS: Record<string, string> = {
 
   // ── Line impedances, typed per km ────────────────────────────────────────
   'line.r':
-    'Series resistance per km (Ω/km). UI multiplies by length on save; PyPSA stores absolute Ω and then converts to per-unit via r_pu = r / v_nom². Rule of thumb: ~0.03 Ω/km on a 380 kV overhead line. Drives Ohmic losses when transmission_losses is enabled.',
+    'Series resistance per km (Ω/km). UI multiplies by length on save; PyPSA stores absolute Ω and then converts to per-unit by dividing by the square of the nominal voltage. Rule of thumb: ~0.03 Ω/km on a 380 kV overhead line. Drives Ohmic losses when transmission_losses is enabled.',
   'line.x':
     'Series reactance per km (Ω/km). UI multiplies by length on save; PyPSA stores absolute Ω. The dominant term in DC OPF — flows split between parallel paths inversely proportional to x. Typical 380 kV value: ~0.3 Ω/km.',
   'line.b':

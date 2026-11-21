@@ -27,8 +27,14 @@ interface GuideState {
   history: GuideView[]
   /** Where focus returns on close: what had focus when the guide opened. */
   opener: HTMLElement | null
+  /**
+   * The field (model name) the guide was opened from, or null when unknown: the
+   * palette row's entry, or the Properties field that had focus. Over that same
+   * field the entry's "Open on" is hidden ("Back to …" already goes there).
+   */
+  originField: string | null
   /** Open an entry (or an asset type, group or function guide id); no id opens the search. */
-  openGuide: (id?: string | null, opener?: HTMLElement | null) => void
+  openGuide: (id?: string | null, opener?: HTMLElement | null, field?: string | null) => void
   /** Show another view; the current one goes onto the Back history. */
   showView: (view: GuideView) => void
   /** Change the current view in place (typing a query, switching a tab). */
@@ -60,16 +66,22 @@ function restoreFocus(opener: HTMLElement | null): void {
   }, 0)
 }
 
+/** The Properties field (its `data-field` wrapper, layout/properties/AssetFields.tsx) an element sits in. */
+const fieldOf = (el: HTMLElement | null): string | null =>
+  el?.closest<HTMLElement>('[data-field]')?.dataset.field ?? null
+
 export const useGuideStore = create<GuideState>((set, get) => ({
   view: null,
   history: [],
   opener: null,
-  openGuide: (id, opener) => {
+  originField: null,
+  openGuide: (id, opener, field) => {
     const view: GuideView = id ? { kind: 'entry', id } : HOME
     const s = get()
     if (s.view) { set({ view, history: push(s.history, s.view) }); return }
     const active = typeof document !== 'undefined' ? document.activeElement : null
-    set({ view, history: [], opener: opener ?? (active instanceof HTMLElement && active !== document.body ? active : null) })
+    const from = opener ?? (active instanceof HTMLElement && active !== document.body ? active : null)
+    set({ view, history: [], opener: from, originField: field ?? fieldOf(from) })
   },
   showView: view => set(s => ({ view, history: push(s.history, s.view) })),
   replaceView: view => set({ view }),
@@ -79,14 +91,14 @@ export const useGuideStore = create<GuideState>((set, get) => ({
   closeGuide: ({ restoreFocus: restore = true } = {}) => {
     const { view, opener } = get()
     if (!view) return
-    set({ view: null, history: [], opener: null })
+    set({ view: null, history: [], opener: null, originField: null })
     if (restore) restoreFocus(opener)
   },
 }))
 
 /** Shorthand for callers outside React (palette rows, chat links). */
-export const openGuide = (id?: string | null, opener?: HTMLElement | null): void =>
-  useGuideStore.getState().openGuide(id, opener)
+export const openGuide = (id?: string | null, opener?: HTMLElement | null, field?: string | null): void =>
+  useGuideStore.getState().openGuide(id, opener, field)
 
 // A mode switch closes the guide: the drawer or panel it sat beside is replaced.
 // Subscribed on the first open, not at import: importing this module (ChatMarkdown

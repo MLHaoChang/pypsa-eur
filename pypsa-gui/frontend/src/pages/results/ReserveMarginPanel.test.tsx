@@ -217,7 +217,7 @@ describe('ReserveMarginPanel — ★ the horizon-wide label', () => {
     expect(s).toMatch(/not a per-period/i)
     // The mechanism, so the label is checkable rather than a slogan.
     expect(s).toMatch(/single|one/i)
-    expect(s).toMatch(/p_nom/)
+    expect(s).toMatch(/capacity is a single variable/)
     // It must NOT claim the per-period enforcement it does not have.
     expect(s).not.toMatch(/enforced per investment period/i)
   })
