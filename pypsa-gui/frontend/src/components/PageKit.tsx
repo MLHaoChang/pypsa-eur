@@ -53,13 +53,11 @@ export function PageHeader({
       >
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-2 min-w-0">
-            <span className="font-mono text-[9px] font-bold uppercase tracking-[0.14em] text-accent shrink-0">
+            <span className="font-mono text-micro font-bold uppercase tracking-[0.14em] text-eyebrow shrink-0">
               {eyebrow ?? chrome.eyebrow}
             </span>
             <span className="text-border-3 shrink-0">/</span>
-            <h1 className="text-[16px] font-semibold text-text tracking-[-0.01em] leading-tight m-0 truncate">
-              {title}
-            </h1>
+            <PanelTitle className="truncate">{title}</PanelTitle>
           </div>
           {subtitle && (
             <p className="text-[12px] text-muted leading-snug max-w-[720px] m-0 mt-0.5">{subtitle}</p>
@@ -115,6 +113,24 @@ export function PageHeader({
 // ── PageBody ─────────────────────────────────────────────────────────────────
 // The scrollable content area below a PageHeader — 32px horizontal padding,
 // 20px vertical rhythm between sections.
+// One recipe per heading level (UI-COHESION-1 F2). Sizes come from the --text-* tokens in index.css:
+// a panel title and a Guided section title are 15 px, an inner block title 13 px.
+export function PanelTitle({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return (
+    <h1 className={`text-h2 font-semibold text-text tracking-[-0.01em] leading-tight m-0 ${className}`}>{children}</h1>
+  )
+}
+
+export function SectionTitle({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return (
+    <h2 className={`text-h2 font-semibold text-text tracking-[-0.01em] leading-tight m-0 ${className}`}>{children}</h2>
+  )
+}
+
+export function BlockTitle({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <h3 className={`text-h3 font-semibold text-text leading-snug m-0 ${className}`}>{children}</h3>
+}
+
 export function PageBody({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div className={`flex-1 min-h-0 overflow-y-auto px-8 py-5 flex flex-col gap-5 ${className ?? ''}`}>

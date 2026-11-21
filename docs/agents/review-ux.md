@@ -92,6 +92,12 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - A lens or filter never hides Essentials or Guided blockers, and shows a "Showing for … Clear" chip.
 - Folds use ▸/▾, never ">".
 - "·" separates data fields; a comma separates names inside one field.
+- A re-OK after a master merge compares the PR's own frontend diff at both heads, non-test files and test files separately: `diff <(git diff $(git merge-base origin/master $OLD) $OLD -- pypsa-gui/frontend/src ':!*.test.*' | grep '^[+-][^+-]') <(git diff origin/master...$NEW -- pypsa-gui/frontend/src ':!*.test.*' | grep '^[+-][^+-]')`. Identical means the OK carries.
+- Evidence shots live on `claude/campus-ic-02-05-shots` under `pr<N>/`, downscaled, never in the PR diff.
+- A toast or notice left over from an earlier step in a shot is retaken or explained (#1803).
+- A persistent notice with a copy field (a credential link) is `role="status"`, not a toast, and never times out (#1803).
+- One word per concept across palette rows, notices and guide, e.g. "parameter" (#1804).
+- A hosted drawer hides a link whose destination its Back control already goes to (#1807).
 - Hand-resolved master merge: read the resolved files. A clean merge carries after comparing the PR's own non-test frontend diff against master at both heads (`git diff origin/master...<head> -- pypsa-gui/frontend/src ':!*.test.*'`); stat diffs against a sha are polluted by master drift.
 - Strings with nested brackets or a semicolon chain are split into short sentences, cause first (#1729 headline, #1757 goal line).
 - A banner describing a state the user can change (e.g. "Filled in from…") is muted, never red.

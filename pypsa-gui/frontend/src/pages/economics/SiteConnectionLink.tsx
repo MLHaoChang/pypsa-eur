@@ -5,6 +5,7 @@ import { commercialApi } from '../../api/commercial'
 import type { FlowTarget } from '../../api/flow'
 import { openFlowTarget, openFlowTargetInPlace } from '../../layout/flowNavigation'
 import { useUIStore } from '../../store/uiStore'
+import EmptyState from '../../components/EmptyState'
 import { nk } from '../../utils/queryKeys'
 import SiteConnectionSection from '../results/investment/SiteConnectionSection'
 
@@ -59,9 +60,9 @@ export function SiteConnectionSummary() {
 /** Results › Investment when the commercial root is missing. */
 export function SiteConnectionNeeded() {
   return (
-    <p className="text-[11px] text-muted" data-testid="ic-site-connection-needed">
-      The investment case needs the site connection. Set it in{' '}
-      <button type="button" className="underline" onClick={openSiteConnection}>Connection &amp; grid ›</button>
-    </p>
+    <EmptyState testId="ic-site-connection-needed" title="Not yet available"
+      action={{ label: 'Set it in Connection & grid ›', onClick: openSiteConnection }}>
+      The investment case needs the site connection.
+    </EmptyState>
   )
 }

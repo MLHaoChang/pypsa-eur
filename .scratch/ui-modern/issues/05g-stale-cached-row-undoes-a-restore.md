@@ -3,7 +3,7 @@
 
 # A stale cached row in updateAsset can undo a restore's change
 
-Status: needs-triage
+Status: ready-for-agent
 Gated: GK B.
 Type: bug
 Parent: 05d (#1565), GK B2 review of 93dfa2c1.
@@ -22,3 +22,7 @@ A second path, which 05d's U1 rule creates. A card save that only moves the bus 
 ## Comments
 
 > *Filed by AI from GK B2's review of #1565.*
+
+## Triage (2026-11-20, master 87cf52a7)
+
+Checked by code reading only. Still true: `assetWrite.ts` sends no `X-Cost-Basis` and PUTs the cached row. Blocked by 05d: merged (#1565), so unblocked. Refuse (409) or rebase is decided at plan time with GK B, as written. Gated: GK B.

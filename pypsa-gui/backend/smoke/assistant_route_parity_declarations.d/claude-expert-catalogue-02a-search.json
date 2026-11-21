@@ -1,0 +1,10 @@
+{
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/catalogue",
+   "reason": "held-by-spec",
+   "issue": ".scratch/expert-catalogue/issues/05-chat-parameter-tools.md"
+  }
+ ]
+}

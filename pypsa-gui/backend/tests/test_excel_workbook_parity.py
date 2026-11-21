@@ -1,11 +1,14 @@
-"""GK B E6: for a valid workbook in an older layout, `gridspine.ingest.excel_import.read_excel`
-gives the same network as today's /import/excel: the same frames and the same
-`_network_input_fingerprint`, after the route's own post-steps."""
+"""GK B E6: for a valid workbook in an older layout, /import/excel gives the network its
+parser gave before S2 rerouted it through `gridspine.ingest.excel_import.read_excel`
+(fingerprints recorded on the old route), and the route's network is the reader's with
+the app's catalogue: the same frames and `_network_input_fingerprint`, after the route's
+own post-steps."""
 
 from __future__ import annotations
 
 import copy
 import io
+import json
 import pathlib
 import tempfile
 
@@ -18,8 +21,6 @@ from gridspine.ingest import excel_layout as L
 from gridspine.ingest.excel_import import read_excel
 
 MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-#: What S2 passes: the app's own non-PyPSA columns (here one eh_* tag).
-CUSTOM = {"Generator": ["eh_flag"]}
 
 
 def _legacy_workbook() -> bytes:
@@ -93,6 +94,44 @@ def _native_multi_period_workbook() -> bytes:
         return path.read_bytes()
 
 
+#: The route's network, as `_network_input_fingerprint(ctx, exact=True)`, recorded with
+#: the parser /import/excel had BEFORE it was rerouted through the reader (S2), so
+#: this check is not the reader compared with itself.
+BEFORE = json.loads(
+    (
+        pathlib.Path(__file__).parent
+        / "fixtures"
+        / "excel_import_e6_before_reroute.json"
+    ).read_text()
+)
+
+
+@pytest.mark.parametrize(
+    "make, case",
+    [
+        (_legacy_workbook, "legacy-sheets"),
+        (_native_workbook, "pypsa-native"),
+        (_native_multi_period_workbook, "pypsa-native-multi-period"),
+    ],
+    ids=["legacy-sheets", "pypsa-native", "pypsa-native-multi-period"],
+)
+def test_an_older_layout_reads_as_before_the_reroute(client, session_ctx, make, case):
+    from services.workflow_tools import _network_input_fingerprint
+
+    r = client.post("/api/io/import/excel", files={"file": ("x.xlsx", make(), MIME)})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    report = body.pop("report")
+    assert body == BEFORE[case]["summary"]
+    # The old parser kept any column; the reader keeps only the app's own (E1) and says so.
+    unmapped = [u["source_item"] for u in report["unmapped"]]
+    assert unmapped == (
+        ["generators › column eh_flag"] if case == "legacy-sheets" else []
+    )
+    ctx = session_ctx(client)
+    assert _network_input_fingerprint(ctx, exact=True) == BEFORE[case]["fingerprint"]
+
+
 def _post_steps(n) -> None:
     """What /import/excel does after parsing, so both sides are compared as opened."""
     from services.adequacy.eh_columns import normalise_eh_columns
@@ -107,7 +146,10 @@ def _post_steps(n) -> None:
     [_legacy_workbook, _native_workbook, _native_multi_period_workbook],
     ids=["legacy-sheets", "pypsa-native", "pypsa-native-multi-period"],
 )
-def test_an_older_layout_reads_as_today_s_import(client, session_ctx, tmp_path, make):
+def test_an_older_layout_reads_as_the_reader_with_the_app_s_catalogue(
+    client, session_ctx, tmp_path, make
+):
+    from services import excel_workbook
     from services.workflow_tools import _network_input_fingerprint
 
     data = make()
@@ -118,8 +160,15 @@ def test_an_older_layout_reads_as_today_s_import(client, session_ctx, tmp_path, 
 
     path = tmp_path / "x.xlsx"
     path.write_bytes(data)
-    res = read_excel(path, {"custom_columns": CUSTOM})
-    assert res.report.unmapped == []
+    res = read_excel(
+        path,
+        {
+            "custom_columns": excel_workbook.custom_columns(),
+            "columns": excel_workbook.catalogue(),
+        },
+    )
+    res.report.source_files = ["x.xlsx"]
+    assert r.json()["report"] == res.report.to_dict()
     ours = res.network
     _post_steps(ours)
 

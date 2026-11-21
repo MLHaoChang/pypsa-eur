@@ -90,7 +90,7 @@ describe('Island & ride-through', () => {
     api.islandReport.mockResolvedValue({ caveat: '', tables: [], missing: ['island_config.json'] })
     mount(<IslandTab />)
     expect((await screen.findByTestId('island-gate-why')).textContent)
-      .toBe('Not yet available: The one Run does not request this yet.')
+      .toBe('Not yet availableThe one Run does not request this yet. The island study has not been run for this project. Run it in Grid study.')
     expect(screen.queryByTestId('island-report')).toBeNull()
     expect(screen.queryByTestId('island-table-requirements')).toBeNull()
     // The way to the study stays under the line.
