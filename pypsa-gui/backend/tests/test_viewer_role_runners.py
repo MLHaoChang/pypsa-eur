@@ -137,11 +137,13 @@ def _study_as_member(client, api_project, sl_, name):
     return r.json()["study_id"], Member(sl_, name)
 
 
-def _run_as(as_user, member, name, sid):
+def _run_as(client, as_user, member, name, sid):
+    """Start the run as the member; read it as the admin (a removed member
+    can no longer open the project)."""
     c = as_user(member.id)
     r = c.post(f"/api/projects/{name}/studies/{sid}/run", json={})
     assert r.status_code == 202, r.text
-    return c, wait_run(c, name, sid)
+    return c, wait_run(client, name, sid)
 
 
 @pytest.mark.parametrize("change", ["demote", "remove"])
@@ -156,7 +158,7 @@ def test_a_study_run_whose_requester_loses_edit_mid_run_writes_nothing(
     sid, member = _study_as_member(client, api_project, sl, name)
     monkeypatch.setattr(solver_service, "run_simulation",
                         FakeSolver(getattr(member, change)))
-    _c, rec = _run_as(as_user, member, name, sid)
+    _c, rec = _run_as(client, as_user, member, name, sid)
     assert rec["status"] == "failed" and rec["error_code"] == KIND, rec
     assert rec["error"].startswith(KIND) and rec["solved"] == []
     # Nothing of the run is in the project: no findings, run record or study
@@ -180,7 +182,7 @@ def test_a_study_run_of_an_editor_who_stays_one_is_saved(
 
     sid, member = _study_as_member(client, api_project, sl, "vr-run-ok")
     monkeypatch.setattr(solver_service, "run_simulation", FakeSolver())
-    _c, rec = _run_as(as_user, member, "vr-run-ok", sid)
+    _c, rec = _run_as(client, as_user, member, "vr-run-ok", sid)
     assert rec["status"] == "done", rec
     assert store.load_aux(project_storage_dir("vr-run-ok"), sid, "findings") is not None
 
@@ -202,7 +204,7 @@ def test_a_study_run_refused_before_its_first_fork_creates_none(
         return real_worker(**kw)
 
     monkeypatch.setattr(R, "_worker", demoted_first)
-    _c, rec = _run_as(as_user, member, "vr-pre", sid)
+    _c, rec = _run_as(client, as_user, member, "vr-pre", sid)
     assert rec["status"] == "failed" and rec["error_code"] == KIND, rec
     assert solver.calls == []
     assert all(project_row(f"vr-pre-opt-{o}") is None for o in OPTIONS)
@@ -306,16 +308,15 @@ def test_an_investment_case_of_an_editor_who_stays_one_is_stored(world):
 
 
 def test_a_business_case_whose_requester_is_demoted_stores_no_report(
-    client, install_network, monkeypatch, session_state, sl,
+    client, api_project, install_network, monkeypatch, session_state, sl,
 ):
     import routers.results as RR
     from tests.test_business_case_routes import BC_URL, _bc, _bc_poll, _put, _with_ic
 
+    api_project("vr-bc")  # the requester's project (a real membership row)
+    member = Member(sl, "vr-bc")
     _with_ic(client, install_network, monkeypatch)
     assert _put(client, _bc()).status_code == 200
-    with sl() as db:
-        project = db.query(Project).first()
-    member = Member(sl, project_id=project.id)
     monkeypatch.setattr(RR, "_run_requester", lambda _u: (member.id, member.project_id))
     real_read = RR._bc_read_solve
 
