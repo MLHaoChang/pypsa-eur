@@ -246,14 +246,37 @@ it('Run again is the header Run, through the gate; without AC power flow it says
   expect(useUIStore.getState().activeSlidePanel).toBe('simparams')
 })
 
-it('on an Energy Hub project the dead-end switch link becomes a Grid study link', async () => {
+const NO_BRANCHES = { status: 'unavailable', unavailable_kind: 'no_ac_branches', message: 'This network has no lines or transformers.' } as const
+
+it('on a hub with no lines or transformers, only the Not applicable reason shows, and a Grid study link', async () => {
   vi.mocked(resultsApi.getEhTemplate).mockResolvedValue({ id: 'dc', name: 'DC', recommended_archetype: 'dc' } as never)
-  const { findByTestId, queryByTestId, getByTestId } = renderPage()
+  vi.mocked(resultsEvidenceApi.loadflow).mockResolvedValue(NO_BRANCHES)
+  const { findByTestId, queryByTestId, getByTestId, findAllByText } = renderPage()
   const link = await findByTestId('loadflow-open-grid-study')
+  expect(link.textContent).toBe('Grid checks are in Grid study ›')
+  expect((await findAllByText('Not applicable')).length).toBe(1)
   expect(queryByTestId('loadflow-switch-on-acpf')).toBeNull()
+  expect(getByTestId('loadflow-run-again').textContent).not.toContain('Not modelled')
   expect(getByTestId('loadflow-run-again').textContent).not.toContain('switched on')
+  expect(getByTestId('loadflow-run-again-btn').getAttribute('title')).not.toContain('switched on')
   link.click()
   expect(useUIStore.getState().activeSlidePanel).toBe('campusStudy')
+})
+
+it('on a non-hub with no lines or transformers, the statement shows with no switch or Grid study link', async () => {
+  vi.mocked(resultsEvidenceApi.loadflow).mockResolvedValue(NO_BRANCHES)
+  const { findAllByText, queryByTestId, getByTestId } = renderPage()
+  expect((await findAllByText('Not applicable')).length).toBe(1)
+  expect(queryByTestId('loadflow-open-grid-study')).toBeNull()
+  expect(queryByTestId('loadflow-switch-on-acpf')).toBeNull()
+  expect(getByTestId('loadflow-run-again').textContent).not.toContain('Not modelled')
+})
+
+it('on a hub whose network has branches, today\'s switch link stays', async () => {
+  vi.mocked(resultsApi.getEhTemplate).mockResolvedValue({ id: 'dc', name: 'DC', recommended_archetype: 'dc' } as never)
+  const { findByTestId, queryByTestId } = renderPage()
+  await findByTestId('loadflow-switch-on-acpf')
+  expect(queryByTestId('loadflow-open-grid-study')).toBeNull()
 })
 
 it('Guided shows Branch loading with the assistant branch highlighted, as Expert does', async () => {
