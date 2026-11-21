@@ -114,7 +114,7 @@ function ScenarioRows({ onCloseModal }: Props) {
   const { activeSlidePanel, toggle } = usePanelToggle(onCloseModal)
   return (
     <>
-      <SItem icon={<Settings2 size={15} />} label="Solver Settings"
+      <SItem icon={<Settings2 size={15} />} label="Solver settings"
         title="Choose the solver, foresight mode (overnight / myopic / perfect), CO₂ price, discount rate and value-of-lost-load."
         active={activeSlidePanel === 'simparams'} onClick={() => toggle('simparams')} />
       <SItem icon={<GitBranch size={15} />} label="Scenarios"

@@ -107,7 +107,7 @@ describe('Settings button — gates on EITHER surface (Task 15)', () => {
     renderSidebar()
 
     // Confirms the sidebar actually rendered before asserting absence.
-    await screen.findByText('Solver Settings')
+    await screen.findByText('Solver settings')
     expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull()
   })
 
@@ -148,7 +148,7 @@ describe('Settings button — an OUTAGE must not hide the door (C-11)', () => {
     vi.mocked(fetchLLMSettingsOrNull).mockRejectedValue(new Error('500'))
     renderSidebar()
 
-    await screen.findByText('Solver Settings')
+    await screen.findByText('Solver settings')
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeNull()
     })
@@ -162,7 +162,7 @@ describe('Settings button — an OUTAGE must not hide the door (C-11)', () => {
     vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(null)
     renderSidebar()
 
-    await screen.findByText('Solver Settings')
+    await screen.findByText('Solver settings')
     expect(screen.queryByRole('button', { name: 'Settings' })).toBeNull()
   })
 })
@@ -177,7 +177,7 @@ describe('Q10 — Settings is a header control, not a SIMULATION row', () => {
         <MemoryRouter><Sidebar /></MemoryRouter>
       </QueryClientProvider>,
     )
-    await screen.findByText('Solver Settings')
+    await screen.findByText('Solver settings')
     expect(screen.queryByText(/^Settings$/)).toBeNull()
   })
 

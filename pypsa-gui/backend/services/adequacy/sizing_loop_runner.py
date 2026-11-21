@@ -76,13 +76,22 @@ BASIS_NOTE = ("the loop's LP matches the project solve's: the same extra_functio
               "(solver_service.build_lp_chain), energization and modelling assumptions, on a private copy")
 
 
+#: The only `commercial` keys with no effect on a solve's LP: the PoC link and timezone are read by the
+#: connection agreement and the price adders, the site party by contract checks, and the value flows
+#: only after the solve (participants, results, finance case). An allowlist: any other truthy key
+#: (a tariff, contract, connection, price ref, a key added later) refuses (GK A, #1711).
+COMMERCIAL_NO_LP_KEYS = frozenset({"poc_link", "site_party", "timezone", "value_flows"})
+
+
 def refusals(config) -> list[str]:
     """One line per project setting whose pre-solve step the loop does not reproduce on its copy."""
     out = []
     if getattr(config, "island_constraints", False):
         out.append("sizing loop: island constraints are on for this project; their island_config.json apply is "
                    "not reproduced in the loop")
-    if getattr(config, "commercial", None):
+    commercial = getattr(config, "commercial", None)
+    if commercial and (not isinstance(commercial, dict)
+                       or any(v for k, v in commercial.items() if k not in COMMERCIAL_NO_LP_KEYS)):
         out.append("sizing loop: commercial bindings are set on this project and are not applied to the loop "
                    "(the PoC price writer and connection agreement run only in a project solve)")
     if getattr(config, "fixed_sizes", "off") != "off":

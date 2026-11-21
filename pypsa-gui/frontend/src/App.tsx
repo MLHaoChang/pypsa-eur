@@ -53,6 +53,7 @@ import { GuidedTourHost } from './components/GuidedTour'
 import CrashRecoveryBanner from './components/CrashRecoveryBanner'
 import LockBanner from './components/LockBanner'
 import RunStrip from './components/runStatus/RunStrip'
+import RunNotices from './components/runStatus/RunNotices'
 import ProjectMismatchBanner from './components/ProjectMismatchBanner'
 import { ProjectMismatchWatcher } from './hooks/useProjectMismatchDetection'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -159,7 +160,8 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
 }
 
 /** The flow items whose Guided drawer shows a grid-readiness limit line: item field → row kind. */
-const LIMIT_FIELDS: Record<string, string[]> = { connection_ramp: ['ramp_rate'], oscillation: ['oscillation'], eh_sk_mva: ['scr'] }
+const LIMIT_FIELDS: Record<string, string[]> = { connection_ramp: ['ramp_rate'], oscillation: ['oscillation'], eh_sk_mva: ['scr'],
+  connection_limit: ['connection_limit'] }
 
 // Tabs that take the whole main area (canvas hidden) rather than opening as a
 // half-width panel beside the canvas — their charts, tables, and two-column
@@ -724,6 +726,8 @@ export default function App() {
         {/* While this project's run is queued or going on: what runs, how
             far, the estimate, and the read-only line while it is solved. */}
         <RunStrip />
+        {/* Finish/fail notices for my runs (slice 3); they render in the toaster. */}
+        <RunNotices />
 
         {/* ── Tab / backend project mismatch (A2) ───────────────────── */}
         {/* Renders only while this tab's project and the backend's binding
