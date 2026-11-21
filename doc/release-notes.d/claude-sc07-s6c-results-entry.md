@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): In Site 3D, the Results part offers "Explain these results", prefilled with the site, the selected building and the snapshot shown; "Ask for help" appears there only when the run is blocked.

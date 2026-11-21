@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { isAxiosError } from 'axios'
 import {
   decideResearch, getRun, pauseRun, presentRun, resumeRun, stopRun,
-  type GateRule, type ResearchRow, type RunMonitorView, type RunStage,
+  type GateRule, type ResearchRow, type RunMonitorView, type RunPpaPrice, type RunStage,
 } from '../../api/runMonitor'
 import { useChatStore } from '../../store/chatStore'
 import { useUIStore, type SlidePanel } from '../../store/uiStore'
@@ -22,6 +22,7 @@ import {
   GAP_WORDS,
 } from './runWords'
 import { runUnderReview } from './planReview'
+import RevisionDrafts from './RevisionDrafts'
 import { fmtCurrency } from '../../utils/format'
 
 const POLL_MS = 4000
@@ -94,6 +95,17 @@ function CurrentStage({ stage, view }: { stage: RunStage; view: RunMonitorView }
         {RESEARCH_STOP[s.status]}: {s.gaps.map(g => gapWords(g)).join(', ')} {s.gaps.length === 1
           ? 'stays as the template has it' : 'stay as the template has them'}.</div>)}
     <Budgets view={view} />
+  </div>
+}
+
+/** Study harness 14 S-C: the PPA price, as the backend words it. A price not
+ *  evaluated or out of date is amber with its reason, never a pass. */
+function PpaPrice({ ppa }: { ppa: RunPpaPrice }) {
+  const amber = ppa.state === 'not_evaluated' || ppa.state === 'out_of_date'
+  return <div data-testid="run-ppa" data-state={ppa.state} className="mt-1 rounded border border-border p-2">
+    <div className="font-medium">{ppa.title}</div>
+    <div data-testid="run-ppa-text" className={amber ? 'text-amber-400' : 'text-text'}>{ppa.text}</div>
+    <ul className="text-muted">{ppa.lines.map((line, i) => <li key={i} data-testid="run-ppa-line">{line}</li>)}</ul>
   </div>
 }
 
@@ -318,6 +330,8 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
           aria-current={now ? 'step' : undefined} className={now ? 'font-medium' : s.status === 'skipped' ? 'text-muted' : ''}>
           <span data-testid="run-stage-words">{stageWords(s.stage)} · {now && ['pending', 'active'].includes(s.status)
             ? currentWords : STAGE_STATUS_WORDS[s.status] ?? 'to do'}</span>
+          {/* Study harness 15 (GK B): a stage the profile skips says why, e.g. no report until issue 50. */}
+          {s.status === 'skipped' && s.reason && <div data-testid="run-stage-reason" className="text-muted">{s.reason}</div>}
           {now && !cancelled && <CurrentStage stage={s} view={view} />}
         </li>
       })}
@@ -325,6 +339,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
         <Link testId="run-report-link" onClick={() => open('reports')}>Open the report</Link>
       </li>}
     </ol>
+    {view.monitor.ppa && <PpaPrice ppa={view.monitor.ppa} />}
 
     {gateFailed && <div data-testid="run-failure">
       {stoppedAt} failed: {failedRules} {failedRules === 1 ? 'rule' : 'rules'} did not pass.{' '}
@@ -376,6 +391,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
       A stopped run cannot be restarted: start a new one from the composer.
     </p>}
     {finished && hasReport && <p data-testid="run-finished">The report is in Reports.</p>}
+    <RevisionDrafts taskId={taskId} view={view} onRefresh={refresh} />
 
     {failed && <p className="text-amber-400">{failed}</p>}
     {(can.has('pause') || can.has('stop')) && <div className="mt-1 flex flex-wrap items-baseline gap-2">

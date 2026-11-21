@@ -243,6 +243,8 @@ export interface SolverConfig {
   // cover; null = off. Schema bounds are ge=0, le=5.
   reserve_margin?: number | null
   /** homer-parity 01a: share of the electricity used on site (load plus converter draw) from renewables, 0–1; null = off. */
+  /** Island limits in the optimisation (the hub solve reads island_config.json); off when absent. */
+  island_constraints?: boolean
   min_renewable_fraction?: number | null
   /** homer-parity 01b operating reserve shares (0–1), null or 0 off. */
   reserve_share_load?: number | null
@@ -275,6 +277,12 @@ export interface SolverConfig {
   // period year (str), value = multiplier. Overrides `load_scalers` (which
   // remains as a legacy all-carriers fallback) for the same period.
   load_scalers_by_carrier?: Record<string, Record<string, number>>
+  // Load growth, % per year per carrier (homer-parity 04a), compounded from
+  // `load_growth_base_year`. The server derives the `load_scalers_by_carrier`
+  // entries the user did not type and names them in `load_scalers_derived`.
+  load_growth_pct_per_year?: Record<string, number>
+  load_growth_base_year?: number | null
+  load_scalers_derived?: Record<string, string[]>
   // When true, the LP overwrites ipw.objective per period with
   // (1 + discount_rate)^-(P - ref_year) × years[P] at solve time. Stops
   // the LP from front-loading every CAPEX dollar into the first period.

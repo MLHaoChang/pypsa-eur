@@ -34,6 +34,9 @@ BOUND_CONTEXT_TOOLS = frozenset({
     # SC-07 S3 (GK B G7, N7): a 3D site apply step works on the bound project. A
     # profile never lists it: its args come only from a prepare step (N2).
     "site_scene_apply",
+    # Study harness 15 (owner decision SH15-PF-1): grid_only's setup switches Load flow on,
+    # a carded write of the solver config's `run_ac_pf_after_lopf` alone (a merge, never a scope reset).
+    "update_solver_config",
 })
 
 # Issue 07 (design §3 stages 7-8): steps only the runner runs, never a chat
@@ -304,7 +307,18 @@ def load(profile: dict) -> dict:
         stages[name] = {"actions": actions, "rules": rules}
         if "agent" in stage:
             stages[name]["agent"] = _check_agent(name, stage["agent"])
-    if "skip" not in stages["explore"] or "explore" in profile:
+    explore_stage = stages["explore"]
+    shipped = "skip" not in explore_stage and any(
+        a["tool"] == run_actions.SHIPPED for a in explore_stage["actions"])
+    if shipped and "explore" not in profile and "agent" not in explore_stage:
+        # Study harness 14 S-B2c (GK B (60) Q2 = A, P6): the shipped cases explore
+        # with no proposal turn; the stage still settles every case.
+        if EXPLORE_RULES[0]["id"] not in {r["id"] for r in explore_stage["rules"]}:
+            raise ProfileError("Stage explore: the shipped cases' stage names ex.cases.settled.")
+        forks = (profile.get("shipped") or {}).get("forks")
+        if type(forks) is not int or not 1 <= forks <= EXPLORE_CASES:
+            raise ProfileError(f"Shipped: forks is a whole number from 1 to {EXPLORE_CASES}.")
+    elif "skip" not in stages["explore"] or "explore" in profile:
         # Issue 06: a run explores only with the profile's levers, its one
         # proposal turn and the settled-cases rule.
         from harness import run_explore
@@ -316,6 +330,15 @@ def load(profile: dict) -> dict:
         stage = stages["explore"]
         if "skip" in stage or "agent" not in stage or EXPLORE_RULES[0]["id"] not in {r["id"] for r in stage["rules"]}:
             raise ProfileError("Stage explore: an exploring profile names its proposal turn and ex.cases.settled.")
+    # Study harness 14 S-C: the PPA price reads the case the step before it ran,
+    # and a KPI kept in the run's record needs the step that writes it.
+    solve_tools = [a["tool"] for a in stages["solve"].get("actions", [])]
+    if run_actions.PPA_PRICE in solve_tools and "run_investment_case" not in solve_tools[
+            :solve_tools.index(run_actions.PPA_PRICE)]:
+        raise ProfileError("Stage solve: ppa_price runs after the run's own run_investment_case step.")
+    for kpi in profile.get("kpis") or []:
+        if "record" in kpi and RECORD_KPIS.get(kpi["record"]) not in solve_tools:
+            raise ProfileError(f"KPI {kpi.get('id')}: its record is written by no step of the profile.")
     loaded = {**copy.deepcopy(profile), "stages": stages}
     if "explore" in profile:
         loaded["explore"] = explore
@@ -886,6 +909,113 @@ def _eh_ammonia_staged() -> dict:
 
 EH_AMMONIA_STAGED = _eh_ammonia_staged()
 
+# Study harness 16 (design §9.3 "eh_concentrator_staged"; GK A (28) GO,
+# Q1-Q6): eh_concentrator_staged@1 on the shipped template (g2p 10-12, 18).
+# The result gate blocks on the mass balance; the investment case against
+# the site as it stands today (g2p 11: a baseline re-solve) is read from a
+# case the user ran on this network and warns only, since a run's case
+# refuses that re-solve (GK A (28) Q8 = A; study-harness issue 52); the
+# motor start, the restart
+# and N-1 on the site transformer warn (the start method and the transformer
+# are the user's, §6.0), each FAIL shown with its numbers. The KPIs are warn
+# rules that read as established: lost tonnes and EUR by period, the shed's
+# level and the project NPV. The process units, the mine, the shipments, the
+# services load, the grid import and the lost-production slack are never
+# levers: the envelope names the per-year candidates, each up to twice its
+# template cap (`eh_concentrator.py`: PV 40, BESS 20 MW, stockpile 60,000 t).
+CONC_MASS_BALANCE_TOL = 1e-6  # design §3.B
+CONC_SOLVES = 1  # the plan
+CONC_CASE_OUTSIDE = ("the investment case against the site as today: a run's case refuses its baseline re-solve "
+                     "(run_envelope `baseline_solve`, routers/results.py; the budget does not count it), so the "
+                     "run reads a case the user ran on this network (study-harness issue 52)")
+_CASE_WORDS = (" A run's case refuses the baseline re-solve this needs (study-harness issue 52): the rule reads "
+               "a case the user ran on this network, current for its solve and inputs; else not evaluated.")
+
+
+def _conc_levers():
+    return [_h2_edit("Generator", "pv_new_*", "p_nom_max", 80.0),
+            _h2_edit("StorageUnit", "bess_new_*", "p_nom_max", 40.0),
+            _h2_edit("Store", "coarse_ore_stockpile_new_*", "e_nom_max", 120_000.0)]
+
+
+def _eh_concentrator_staged() -> dict:
+    from services.run_gates_concentrator import MASS_BALANCE_BASIS
+    template = "eh_concentrator_staged"
+    unserved = next(r for r in EH_RESULT_RULES if r["id"] == "kpi.unserved_mwh")
+    edits = _conc_levers()
+    tunable = sorted({(e["target"]["component"], e["target"]["attr"]) for e in edits})
+    return {
+        "id": template, "version": 1,
+        "templates": [template],
+        "scope": "flow_scope.preset_for",
+        "params": {"required": [], "ask": []},
+        "inputs": {"required": []},
+        "stages": {
+            "setup": {"actions": [], "rules": [
+                *GENERIC["setup"]["rules"],
+                _rule("set.project.template", "project.template", "eq", template,
+                      basis=f"The profile serves the {template} template only."),
+            ]},
+            "inputs": {"actions": list(GENERIC["inputs"]["actions"]), "rules": [
+                _rule("conc.process.units", "process.units", "nonempty",
+                      basis="The process units are the user's inputs (the process-unit form): a committable unit "
+                            "with a capacity and an efficiency to a product counted in tonnes."),
+            ]},
+            "result_gate": {**GENERIC["result_gate"], "rules": [
+                *CORE_RESULT_RULES,
+                {**unserved, "basis": "No electrical load is shed in normal operation (the run's own solve). "
+                                      "Concentrate short of the shipments is lost production, counted in "
+                                      "tonnes by conc.kpi.lost_tonnes, never as served."},
+                _rule("conc.mass_balance", "process.mass_balance", "le", CONC_MASS_BALANCE_TOL,
+                      basis=MASS_BALANCE_BASIS),
+                _rule("conc.motor_start", "process.motor_start", "eq", "pass", severity="warn",
+                      basis="Each process unit's motor start keeps the voltage change at the PoC within the grid "
+                            "code's limit (a screen; a FAIL names the unit, its ΔU and the limit). The start "
+                            "method is the user's, never a lever."),
+                _rule("conc.restart", "process.restart", "eq", 0, severity="warn",
+                      basis="Every unit the dip classes trip restarts after a grid trip: none FAILs its motor "
+                            "start on the PoC or its pickup block (the count of units that fail)."),
+                _rule("conc.n_1.site_transformer", "process.n_1.site_transformer", "empty", severity="warn",
+                      basis="No single site transformer's outage stops a process unit (N-1, first order). "
+                            "A project with no site transformer is not evaluated."),
+                _rule("conc.ic.counterfactual", "ic.counterfactual", "eq", "established", severity="warn",
+                      basis="The investment case compares against an established counterfactual." + _CASE_WORDS),
+                _rule("conc.ic.basis", "ic.counterfactual.basis", "eq", "site_today", severity="warn",
+                      basis="The counterfactual is the site as it stands today (existing connection, no PV or "
+                            "BESS, the same process), re-solved by the case." + _CASE_WORDS),
+                _rule("conc.kpi.lost_tonnes", "process.lost_production", "ge", 0.0, severity="warn",
+                      basis="KPI: concentrate lost to the grid per year (t/yr), the worst period's; each "
+                            "period's tonnes and lost-production EUR are listed."),
+                _rule("conc.kpi.shed_level", "process.shed_level", "ge", 0.0, severity="warn",
+                      basis="KPI: the concentrate shed's peak level (t); each period's least, peak and last."),
+                _rule("conc.kpi.npv", "ic.returns", "nonempty", severity="warn",
+                      basis="KPI: the project NPV at the WACC and IRR against the site as today, from the "
+                            "case the user ran on this network; no number otherwise. NPV by stage is not "
+                            "established (missing tools)." + _CASE_WORDS),
+            ]},
+            "report": {"actions": [_native("report")], "rules": REPORT_RULES},
+            "handoff": {"actions": [_native("handoff")], "rules": HANDOFF_RULES},
+        },
+        "tunable": [{"component": c, "attr": a} for c, a in tunable],
+        "envelope": {
+            "edits": edits,
+            "runs": [{"tool": "solve_queue_enqueue"}, {"tool": "generate_report"}],
+            # The solve and each L2 round's re-solve (L2_ROUNDS = 2).
+            "budget": {"solves": CONC_SOLVES + 2, "rounds": 2, "wall_time_h": 8.0},
+        },
+        "kpis": copy.deepcopy(EH_SITE["kpis"]),
+        "chapters": ["sizing", "investment_case", "grid_risk"],
+        "missing_tools": [
+            "NPV by stage: the case reports the project NPV and each stage's capex lines, no NPV per stage",
+            "N-1 on the site transformer: the project (the shipped template) has no site transformer",
+            "a chat path to the process-unit form (G2P-07; the user fills it)",
+            CONC_CASE_OUTSIDE,
+        ],
+    }
+
+
+EH_CONCENTRATOR_STAGED = _eh_concentrator_staged()
+
 # Study harness 14 (design §9.3 "eh_ipp_hybrid"; GK B (52) GO, I1-I10):
 # eh_ipp_hybrid@1. Commercial-led: the solve, then the single-owner investment
 # case. The result gate blocks when the peak export passes the export link's
@@ -953,6 +1083,52 @@ def _eh_ipp_hybrid() -> dict:
 
 
 EH_IPP_HYBRID = _eh_ipp_hybrid()
+
+# Study harness 14 S-B2c (GK B (60) Q2 = A, P3-P6): eh_ipp_hybrid@2. The explore
+# stage runs the template's shipped cases (`run_shipped_engine`, no proposal
+# turn); the user picks which cases that need a solve run when more need one
+# than `shipped.forks`. The budget is the solve, two L2 rounds and the forks:
+# 1 + 2 + 2 = 5. eh_ipp_hybrid@1 stays byte-equal for the runs started on it (L8).
+IPP_SHIPPED_FORKS = 2
+
+
+def _eh_ipp_hybrid_v2() -> dict:
+    profile = copy.deepcopy(EH_IPP_HYBRID)
+    profile["version"] = 2
+    profile["stages"]["explore"] = {
+        "actions": [{"tool": run_actions.SHIPPED, "args": dict(run_actions.MARKERS[run_actions.SHIPPED_KIND]),
+                     "native": run_actions.KIND}],
+        "rules": copy.deepcopy(EXPLORE_RULES)}
+    profile["shipped"] = {"forks": IPP_SHIPPED_FORKS}
+    rounds = profile["envelope"]["budget"]["rounds"]
+    profile["envelope"]["budget"]["solves"] = 1 + rounds + IPP_SHIPPED_FORKS
+    return profile
+
+
+EH_IPP_HYBRID_V2 = _eh_ipp_hybrid_v2()
+
+# Study harness 14 S-C (GK B (61) Q-SC1 = A, S1-S8): eh_ipp_hybrid@3. After the
+# run's own investment case, the native `ppa_price` step reads the PPA price
+# that case solved for the template's target return (`harness/run_ppa.py`);
+# it solves nothing, so the budget stays @2's. The hand-off reads it back from
+# the run's record (`record`), never from retained results. @1 and @2 stay
+# byte-equal for the runs started on them (L8).
+PPA_KPI = {"id": "ppa_price", "label": "PPA price for the target return", "record": "ppa_price",
+           "unit": "currency/MWh"}
+RECORD_KPIS = {"ppa_price": run_actions.PPA_PRICE}  # a record KPI and the step that writes it
+
+
+def _eh_ipp_hybrid_v3() -> dict:
+    profile = copy.deepcopy(EH_IPP_HYBRID_V2)
+    profile["version"] = 3
+    profile["stages"]["solve"]["actions"].append(
+        {"tool": run_actions.PPA_PRICE, "args": dict(run_actions.MARKERS[run_actions.PPA_KIND]),
+         "native": run_actions.KIND})
+    profile["kpis"].append(copy.deepcopy(PPA_KPI))
+    return profile
+
+
+EH_IPP_HYBRID_V3 = _eh_ipp_hybrid_v3()
 
 # Study harness 12c (design §9.3 "eh_microgrid"; GK B (47) G1-G9): eh_microgrid@1
 # and eh_microgrid_staged@1. The solve, the EH study with the off-grid stress
@@ -1102,13 +1278,88 @@ def _eh_microgrid(staged: bool) -> dict:
 EH_MICROGRID = _eh_microgrid(staged=False)
 EH_MICROGRID_STAGED = _eh_microgrid(staged=True)
 
+
+# Study harness 15 (design §9.3 "Grid-only"; owner decision SH-PILOT-1; GK A,
+# ACPF-BUG): grid_only@1 serves the four grid templates. No params, no
+# sidecars and no tunables: a failed result rule is diagnosed and the run ends
+# `needs_user`. The PF rules read only the AC PF result the engine labels as
+# PF (`run_grid_pf`); without one they are `not_evaluated` and never pass on
+# LOPF flows. Convergence and line loading block (an absent PF asks the user to
+# switch Load flow on); the voltage band and N-1 warn, and read not evaluated
+# until the buses state a band and the solver's N-1 option is on.
+GRID_TEMPLATES = ("3bus", "ieee14", "belgium", "ieee39")
+GRID_LOADING_MAX_PCT = 100.0
+
+
+def _grid_only() -> dict:
+    return {
+        "id": "grid_only", "version": 1,
+        "templates": list(GRID_TEMPLATES),
+        "pf_results": True,  # the run reads its solve's AC power flow (`run_gates._fresh`, `run_handoff`)
+        "scope": "flow_scope.preset_for",
+        "params": {"required": [], "ask": []},
+        "inputs": {"required": []},
+        "stages": {
+            "setup": {"actions": [_call("update_solver_config", partial={"run_ac_pf_after_lopf": True})], "rules": [
+                *GENERIC["setup"]["rules"],
+                _rule("set.project.template", "project.template", "in", list(GRID_TEMPLATES),
+                      basis="The profile serves the four grid-only templates."),
+                _rule("set.template.source", "grid.template.source", "eq", "available",
+                      basis="The template's network is built here (belgium and ieee39 need a source a "
+                            "checkout may lack)."),
+            ]},
+            "result_gate": {**GENERIC["result_gate"], "rules": [
+                *CORE_RESULT_RULES,
+                {**_rule("grid.pf.converged", "grid.pf.converged", "eq", True,
+                         basis="Every snapshot of the run's AC power flow converged. Read only from the AC PF "
+                               "result; with none the rule is not evaluated and LOPF flows never satisfy it."),
+                 "unevaluated": run_gates.UNEVALUATED_TO_USER},
+                {**_rule("grid.pf.loading", "grid.pf.loading_pct", "le", GRID_LOADING_MAX_PCT,
+                         basis="No line or transformer carries more than its rating in the AC power flow: "
+                               "the apparent power at either end against the MVA rating x s_max_pu, per "
+                               "converged snapshot (a current-based rating at depressed voltage reads higher). "
+                               "Read only from the AC PF result."),
+                 "unit": "%", "unevaluated": run_gates.UNEVALUATED_TO_USER},
+                {**_rule("grid.pf.voltage", "grid.pf.voltage_violations", "le", 0, severity="warn",
+                         basis="No bus voltage leaves the bus's own v_mag_pu_min/max band in the AC power "
+                               "flow; not evaluated while no bus states a band."),
+                 "unit": "count"},
+                _rule("grid.n1.secured", "grid.n1.secured", "eq", True, severity="warn",
+                      basis="The solve enforced N-1 on every line (the solver's N-1 option on); not evaluated "
+                            "while the option is off or covers only listed lines."),
+            ]},
+            "explore": {"skip": "Grid-only runs explore no cases by default."},
+            # Issue 50 (owner decision PF-SAVE-1): the live network keeps the LP's tables after
+            # the flow, so the report and the headline KPIs read the LP dispatch; the load flow
+            # chapter reads the flow's own result (`retained_results`, source ac_pf).
+            "report": {"actions": [_native("report")], "rules": REPORT_RULES},
+            "handoff": {"actions": [_native("handoff")], "rules": HANDOFF_RULES},
+        },
+        "tunable": [],
+        # No lever to grant: the envelope covers the run's one solve and report, and the
+        # L2 round diagnoses (a round with no change ends the loop, §6.2).
+        "envelope": {"edits": [], "runs": [{"tool": "update_solver_config"}, {"tool": "solve_queue_enqueue"},
+                              {"tool": "generate_report"}],
+                     "budget": {"solves": 1, "rounds": 2, "wall_time_h": 8.0}},
+        "kpis": copy.deepcopy(EH_SITE["kpis"]),
+        # The network-study chapters (`reports.network_chapters`) a grid study rests on.
+        "chapters": ["headline_results", "dispatch", "load_flow"],
+        "missing_tools": [],
+    }
+
+
+GRID_ONLY = _grid_only()
+
 PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2, "eh_site@3": EH_SITE_V3,
                               "eh_datacenter@1": EH_DATACENTER,
                               "eh_datacenter_staged@1": EH_DATACENTER_STAGED,
                               "eh_h2_hub@1": EH_H2_HUB, "eh_h2_hub_staged@1": EH_H2_HUB_STAGED,
                               "eh_ammonia_staged@1": EH_AMMONIA_STAGED,
-                              "eh_ipp_hybrid@1": EH_IPP_HYBRID,
-                              "eh_microgrid@1": EH_MICROGRID, "eh_microgrid_staged@1": EH_MICROGRID_STAGED}
+                              "eh_concentrator_staged@1": EH_CONCENTRATOR_STAGED,
+                              "eh_ipp_hybrid@1": EH_IPP_HYBRID, "eh_ipp_hybrid@2": EH_IPP_HYBRID_V2,
+                              "eh_ipp_hybrid@3": EH_IPP_HYBRID_V3,
+                              "eh_microgrid@1": EH_MICROGRID, "eh_microgrid_staged@1": EH_MICROGRID_STAGED,
+                              "grid_only@1": GRID_ONLY}
 
 
 def needs_goal(profile: dict) -> bool:

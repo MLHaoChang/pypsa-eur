@@ -10,12 +10,26 @@ vi.mock('./sceneActions', async (orig) => ({
   ...(await orig<typeof import('./sceneActions')>()),
   propose: vi.fn(), applyProposal: vi.fn(), discardProposal: vi.fn(),
 }))
+vi.mock('../layout/flowNavigation', async (orig) => {
+  const real = await orig<typeof import('../layout/flowNavigation')>()
+  return { ...real, withReturnFromSite3D: vi.fn(real.withReturnFromSite3D), openSectionInGuided: vi.fn(real.openSectionInGuided),
+    openSectionInExpert: vi.fn(real.openSectionInExpert) }
+})
+const served: { data: unknown } = { data: null }
+vi.mock('./useSceneResults', () => ({
+  useSceneResults: () => ({ data: served.data, query: null, loading: false, error: null }),
+}))
 vi.mock('../api/siteScene', async (orig) => ({
   ...(await orig<typeof import('../api/siteScene')>()),
   siteSceneApi: { getScene: vi.fn() },
 }))
 
 import { siteSceneApi } from '../api/siteScene'
+import { openSectionInExpert, openSectionInGuided, withReturnFromSite3D } from '../layout/flowNavigation'
+import { useChatStore } from '../store/chatStore'
+import { snapshotWords } from './sceneResults'
+import { featureName } from './associations'
+import type { SceneResults } from '../api/siteSceneResults'
 import { applyProposal, discardProposal, propose } from './sceneActions'
 import { useUIStore } from '../store/uiStore'
 import { useSceneProposal } from './useSiteScene'
@@ -45,6 +59,7 @@ beforeEach(() => {
     blocker: { code: 'no_model_targets', reason: 'Buildings only: configure model elements to map them', link: '›',
       home: { guided: { section: 'loads', drawer: null, open: 'request_then_scroll' }, expert: { table: 'Loads' } } } }] } }
   vi.mocked(siteSceneApi.getScene).mockResolvedValue(enabled([]))
+  served.data = null
 })
 
 describe('Site 3D scene panel', () => {
@@ -176,7 +191,60 @@ describe('Site 3D scene panel', () => {
         home: { guided: { section: 'results', drawer: null, open: 'request_then_scroll' }, expert: { panel: 'results' } } } })
     view()
     expect(screen.getByTestId('scene-blocker-play_results').textContent)
-      .toBe('Not available yet: comes in a later version › ResultsAsk for help')
+      .toBe('Not available yet: comes in a later version › Results')
+  })
+
+  // SC-07 S6c (UX U2, U3): "Ask for help" on the results line keys on /flow `run_blocker` alone.
+  const readiness = { section: 'readiness', label: 'Readiness and run', state: null, required: true, items: [], summary: null }
+  const results = (freshness: string) => ({ section: 'results', label: 'Results', state: null, required: false, items: [],
+    summary: null, freshness })
+  const runBlocker = { section: 'readiness', message: 'Readiness and run: Bus voltage must be positive', target: {} }
+
+  it.each(['guided', 'expert'] as const)('a /flow run blocker sits on the results line with its › and Ask for help (%s)', mode => {
+    useUIStore.setState({ sitePart: 'results', uiMode: mode })
+    Object.assign(flowState.flow as object, { run_blocker: runBlocker, sections: [readiness, results('not_run')] })
+    view()
+    const line = screen.getByTestId('scene-results-run-blocker')
+    expect(line.textContent).toBe('Readiness and run: Bus voltage must be positive › Readiness and runAsk for help')
+    fireEvent.click(screen.getByText('› Readiness and run'))
+    expect(withReturnFromSite3D).toHaveBeenCalledTimes(1)
+    expect(mode === 'guided' ? openSectionInGuided : openSectionInExpert).toHaveBeenCalledWith('readiness')
+    fireEvent.click(screen.getByTestId('site-companion-blocker'))
+    expect(useChatStore.getState().composerSeed).toBe('Help me with what blocks the Results part of the site “Campus” '
+      + 'in Site 3D: Readiness and run: Bus voltage must be positive.')
+  })
+
+  it('out-of-date results alone show no Ask for help and never the word stale', () => {
+    useUIStore.setState({ sitePart: 'results' })
+    Object.assign(flowState.flow as object, { run_blocker: null, sections: [readiness, results('stale')] })
+    view()
+    expect(screen.queryByTestId('scene-results-run-blocker')).toBeNull()
+    expect(screen.queryByTestId('site-companion-blocker')).toBeNull()
+    expect(screen.getByTestId('site-scene-panel').textContent).not.toMatch(/stale/i)
+  })
+
+  it('Explain these results carries the snapshot in the results panel\'s words', () => {
+    useUIStore.setState({ sitePart: 'results' })
+    served.data = { snapshot: { index: 3, label: '2030-03-03T14:00:00', period: null,
+      weight_generators: { value: 1, available: true, reason: null, unit: 'h' } } }
+    view()
+    expect(screen.getByTestId('site-companion-explain').textContent).toBe('Explain these results')
+    fireEvent.click(screen.getByTestId('site-companion-explain'))
+    // The panel's own words, reused (UX change 2: no fork of snapshotWords).
+    expect(useChatStore.getState().composerSeed).toBe('Explain these results: the Results part of the site “Campus” '
+      + `in Site 3D, at ${snapshotWords(served.data as SceneResults)}.`)
+    expect(useChatStore.getState().composerSeed).toContain('at 2030-03-03 14:00')
+  })
+
+  it('a selected building is named as the results panel names it (featureName), never by id', async () => {
+    useUIStore.setState({ sitePart: 'results', sitePartSelection: { kind: 'building', id: gf.id } })
+    vi.mocked(siteSceneApi.getScene).mockResolvedValue(enabled([gf]))
+    view()
+    await waitFor(() => {
+      fireEvent.click(screen.getByTestId('site-companion-explain'))
+      expect(useChatStore.getState().composerSeed).toContain(`, ${featureName(gf.id, [gf])} selected`)
+    })
+    expect(useChatStore.getState().composerSeed).not.toContain(gf.id)
   })
 
   it('an expired preview is dropped with its error, and the error clears on a part change', async () => {

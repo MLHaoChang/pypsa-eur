@@ -340,6 +340,31 @@ def test_a_code_default_with_a_value_still_refuses_goal_missing(
     assert exc.value.detail["error_kind"] == "goal_missing"
 
 
+def test_an_assumed_site_type_goal_alone_still_refuses_goal_missing(
+    session, site, profile, monkeypatch
+):
+    """GK B 65 C1: with nothing stored or templated, the goal carries only the
+    site type's `assumed` target; that is not a goal the user set, so the
+    card reads no value and the grant refuses goal_missing."""
+    from services import reliability_goal
+
+    _plain_goal_profile(monkeypatch)
+    goal = reliability_goal.effective_goal({}, {"recommended_archetype": "off_grid"})
+    assert goal["target_lole_h"]["assumed"] == 3.0
+    assert goal["target_lole_h"]["value"] is None
+    monkeypatch.setattr(reliability_goal, "active_goal", lambda _state: goal)
+    task = start()
+    assert task["envelope"]["goal"] == {
+        "value": None,
+        "unit": "h/yr",
+        "source": "default",
+    }
+    assert "No reliability goal is set" in task["envelope"]["detail"]
+    with pytest.raises(HTTPException) as exc:
+        run_envelope.decide(session, task["task_id"], "unattended")
+    assert exc.value.detail["error_kind"] == "goal_missing"
+
+
 def test_a_template_goal_is_on_the_card_with_its_source_and_frozen_at_the_grant(
     session, site, profile, monkeypatch
 ):

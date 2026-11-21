@@ -306,7 +306,7 @@ def _unreadable() -> Any:
 
 def add_runs(b, r: RunsRead) -> None:
     """The run nodes and their `computed_in` edges for the read `r` (spec "Node kinds": `run`)."""
-    opt, lf, st = (results_id(k) for k in ("optimisation", "loadflow", "study"))
+    opt, lf = (results_id(k) for k in ("optimisation", "loadflow"))
     b.node(Node("run", run_id("optimisation"), r.solved))
     b.node(Node("derived", opt))
     b.node(Node("input", "input:dispatch_shape", r.dispatch))
@@ -357,15 +357,21 @@ def add_runs(b, r: RunsRead) -> None:
     )
     b.edge(Edge("derived_from", lf, opt))  # the dispatch the load flow read
 
-    b.node(Node("run", run_id("study"), r.study_done))
+    add_study(b, r.study_done, r.study_edited)
+
+
+def add_study(b, done: bool, edited: bool | None, unrecorded: Any = None) -> None:
+    """`results:study` -computed_in-> `run:study`, pinned on `study_state.edited_since` (`edited`). None compared
+    nothing: the edge records `unrecorded` (an `Unrecorded` reason, or None)."""
+    st = results_id("study")
+    b.node(Node("run", run_id("study"), done))
     b.node(Node("derived", st))
-    edited = r.study_edited
     b.edge(
         Edge(
             "computed_in",
             st,
             run_id("study"),
-            None
+            unrecorded
             if edited is None
             else pins.Pin("edited since the study ran", False, lambda: edited),
         )

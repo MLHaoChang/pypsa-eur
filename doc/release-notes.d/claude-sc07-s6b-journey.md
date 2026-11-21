@@ -1,0 +1,1 @@
+* Test(pypsa-gui): An integrated journey test drives the 3D site setup, its scene card, the run, the results read and an out-of-date answer through a scripted model over the real provider wire, in Guided and Expert.

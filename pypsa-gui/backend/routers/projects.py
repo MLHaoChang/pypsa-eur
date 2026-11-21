@@ -16,7 +16,7 @@ import time
 import zipfile
 from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
@@ -60,6 +60,9 @@ class MembersRequest(BaseModel):
     """Body for PUT /{id_or_name}/members — the desired member user-id set."""
 
     user_ids: list[str] = []
+    # Optional role per user id (project-viewer-role 01). A member with no
+    # entry keeps the stored role; a new member defaults to editor.
+    roles: dict[str, Literal["editor", "viewer"]] = {}
 
 
 # The FLAT legacy store: <root>/<display-name>/network.nc. Distinct from
@@ -671,6 +674,7 @@ def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None
     _restore_network_revision(PyPSAService.get_active_context(), project_dir)
     results_path = project_dir / "results_state.pkl"
     if not results_path.exists():
+        _keep_lp_dispatch({}, project_name, project_dir)
         return
     try:
         restored = _safe_unpickle_results(results_path.read_bytes())
@@ -687,10 +691,12 @@ def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None
                     f"{_RESULTS_STATE_SCHEMA}); skipped. Re-run the solve to "
                     f"repopulate side results (cost / dispatch unaffected).",
                 )
+            _keep_lp_dispatch({}, project_name, project_dir)
             return
         applied = {k: v for k, v in data.items() if k in _RESULTS_STATE_KEYS}
         if applied:
             _sim_state_update(**applied)
+        _keep_lp_dispatch(applied, project_name, project_dir)
         with PyPSAService.get_solver_state_lock():
             _map_eh_study_mirror(PyPSAService.get_solver_state())
     except Exception as exc:
@@ -699,6 +705,53 @@ def _restore_results_state(project_dir: pathlib.Path, project_name: str) -> None
             f"Couldn't restore results_state.pkl ({type(exc).__name__}: {exc}). "
             f"Re-run the solve to repopulate side results (cost / dispatch "
             f"unaffected — they come from the netcdf).",
+        )
+        _keep_lp_dispatch({}, project_name, project_dir)
+
+
+# metadata.json key of a save whose network.nc holds the LP's tables after an
+# AC power flow (PF-SAVE-1). A save without it predates the restore (GK A 3).
+LP_DISPATCH_SAVED = "lp_dispatch_saved"
+
+# (project dir, network.nc mtime) pairs whose load-flow dispatch was already
+# disclosed: one warning per saved file, not one per background probe.
+_FLOW_DISPATCH_DISCLOSED: set[tuple[str, int]] = set()
+
+
+def _keep_lp_dispatch(data: dict, project_name: str, project_dir: pathlib.Path, ctx=None) -> None:
+    """PF-SAVE-1 (GK A F5): a project saved before it carries the AC power
+    flow's tables in network.nc. When its record keeps the LP's tables, the
+    LP's win; when it keeps only the flow's, say the dispatch came from the
+    load flow instead of showing it as the LP's. A save that carries
+    `LP_DISPATCH_SAVED` holds the LP's tables whatever its record says, so it
+    is never disclosed (GK A 3). `ctx` defaults to the active context."""
+    ctx = ctx or PyPSAService.get_active_context()
+    lp = data.get("lopf_results")
+    with ctx.mutation_lock:
+        if isinstance(lp, dict) and lp and data.get("ac_pf_results"):
+            from services.ac_pf_service import keep_lp_tables
+            keep_lp_tables(ctx.network, lp)
+            return
+        if _read_meta(project_dir).get(LP_DISPATCH_SAVED) is True:
+            return
+        # The LP never writes |V| and a PF-SAVE-1 save holds it empty, so a
+        # saved |V| means the saved tables are a flow's (standalone or chained).
+        from_flow = "ac_pf" in str(ctx.solver_state.get("condition") or "") or (
+            not ctx.network.buses_t.v_mag_pu.columns.empty
+        )
+    if from_flow:
+        try:
+            saved = (str(project_dir.resolve()), (project_dir / "network.nc").stat().st_mtime_ns)
+        except OSError:
+            saved = (str(project_dir), 0)
+        if saved in _FLOW_DISPATCH_DISCLOSED:
+            return
+        _FLOW_DISPATCH_DISCLOSED.add(saved)
+        change_log_service.log(
+            "warn", "Project", project_name,
+            "Dispatch saved from load flow: this project's results come from "
+            "the AC power flow, not the LP, and its LP dispatch was not kept. "
+            "Re-run the solve to see the LP dispatch.",
         )
 
 
@@ -1071,7 +1124,15 @@ def list_projects(
     # (Step 1) is the channel that surfaces such drift.
     project_registry.require_user(user)
     projects = project_acl.list_accessible_projects(db, user)
-    return [_project_info_db(db, p) for p in projects]
+    # One `project_role` per row, the same function the write gate uses (GK B3
+    # V4). Its few indexed lookups are small next to the bundle read
+    # `_project_info_db` already does per row.
+    return [
+        _project_info_db(db, p).model_copy(
+            update={"my_access": project_acl.project_role(db, user, p)}
+        )
+        for p in projects
+    ]
 
 
 # NOTE: `/unclaimed` and `/unclaimed/{legacy_name}/import` MUST stay ahead of
@@ -2266,6 +2327,10 @@ def _materialise_from_template(template_id: str, name: str | None, params: dict 
                                           "message": str(exc)}) from exc
         if planning is None:
             built_net = tpl_mod.BUILDERS[template_key](load_spec=dc_spec)
+            if dc_spec is not None and dc_spec.backup.mode != "genset":
+                # The strings are in the network: write the sidecar built with
+                # them, not the example's (DC walkthrough 01). Gensets keep the copy.
+                planned = (tpl_mod, None, dc_spec)
         else:
             built_net = _planned_network(tpl_mod, template_key, planning, dc_spec)
             planned = (tpl_mod, planning, dc_spec)
@@ -2286,8 +2351,9 @@ def _materialise_from_template(template_id: str, name: str | None, params: dict 
     if not src_nc.exists() and eh_builder is None:
         raise HTTPException(
             404,
-            f"Template '{template_id}' is registered but its network.nc is "
-            f"missing — run project_templates/_build.py to regenerate it.",
+            "This template's example network has not been built on this "
+            "installation, so it cannot be created here. Choose another "
+            "template, or reinstall the app.",
         )
 
     # `name` is optional — default to the template's friendly name, then
@@ -2323,6 +2389,16 @@ def _materialise_from_template(template_id: str, name: str | None, params: dict 
             src = _PROJECT_TEMPLATES_DIR / template_key / sidecar
             if src.is_file():
                 atomic_copy(src, dest / sidecar)
+    from services import flow_scope
+
+    if "load_flow" in flow_scope.preset_for({"id": template_key})[1].get("grid", ()):
+        # Issue 51: the grid preset's Load flow is on exactly when the solver
+        # flag it owns is (`flow_scope.OWNED`), and a grid template ships no
+        # config, so the project starts with the flag on.
+        cfg_path = dest / "solver_config.json"
+        cfg = json.loads(cfg_path.read_text()) if cfg_path.is_file() else {}
+        atomic_write_text(cfg_path, json.dumps({**cfg, "run_ac_pf_after_lopf": True},
+                                               indent=2, sort_keys=True) + "\n")
     if site is None and template_series:
         from services.library import bundle_pins
         from services.library import template_series as TS
@@ -2396,6 +2472,9 @@ def _finish_created_project(made: _Materialised, db: DBSession, user: User | Non
         "network_revision": int(PyPSAService.get_active_context().network_revision or 0),
         "parent_project": None,
         "scenario_description": None,
+        # The template the project was made from: a grid template ships no
+        # marker, and its scope preset reads this (`flow_scope.preset_template`).
+        "template_id": template_id,
     })
     # A template's commercial config and finance inputs (slice D4) are bound
     # and validated as their PUT routes do; one that does not is dropped and
@@ -2848,7 +2927,8 @@ def _saves_its_own_directory(bound_dir, loaded: str | None, name: str,
 def _carried_settings(existing_meta: dict, bound_dir, loaded: str | None, name: str,
                       dest: pathlib.Path) -> dict:
     """
-    The `settings` entry a save writes into ``dest``'s metadata.json.
+    The `settings` and `template_id` entries a save writes into ``dest``'s
+    metadata.json.
 
     A save of a directory's own network keeps that directory's table. A save
     of another bound project's network (Save-As, Save-a-Copy, a forced Save-As
@@ -2866,7 +2946,10 @@ def _carried_settings(existing_meta: dict, bound_dir, loaded: str | None, name: 
     else:
         source_meta = {}
     table = source_meta.get("settings")
-    return {"settings": table} if isinstance(table, dict) else {}
+    out = {"settings": table} if isinstance(table, dict) else {}
+    if isinstance(source_meta.get("template_id"), str):
+        out["template_id"] = source_meta["template_id"]
+    return out
 
 
 def _check_save_allowed(
@@ -3380,6 +3463,10 @@ def _write_context(
             "user_ts_count": len(user_ts_data),
             # P33b: the edit counter the saved EH study record is compared to.
             "network_revision": int(ctx.network_revision or 0),
+            # PF-SAVE-1: network.nc holds the LP's tables after a load flow.
+            # A live |V| is a flow's left by a save from before it (loaded
+            # with no LP record): that file is still disclosed on reload.
+            LP_DISPATCH_SAVED: bool(n.buses_t.v_mag_pu.columns.empty),
             "parent_project": new_parent,
             "scenario_description": new_desc,
             "scenario_type": new_type,
@@ -3756,6 +3843,10 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str, *, allow_netwo
         ctx.solver_state["condition"] = None
         ctx.solver_state["objective"] = None
         ctx.solver_state["solve_time"] = None
+    _keep_lp_dispatch(
+        {k: ctx.solver_state.get(k) for k in ("lopf_results", "ac_pf_results")},
+        name, src, ctx,
+    )
 
 
 @router.post("/{project_id}/activate")
@@ -3786,7 +3877,7 @@ def activate_project(
     ``_solver_in_flight()`` (which keys on the active ctx), so switching away
     while the queue solves a DIFFERENT project is allowed — that is the payoff.
     """
-    from services import project_registry
+    from services import project_acl, project_registry
 
     project_registry.require_user(user)
     project = project_registry.resolve_project(db, user, project_id)
@@ -3898,7 +3989,8 @@ def activate_project(
                 f"Library pin {issue['code']} ({issue['reason']}): {issue['message']}")
         library_issues = _tariff_ref_load_issues(cfg, project.name) + library_issues
     return {"activated": project.name, "evicted": evicted, "lock": lock_info,
-            "library_issues": library_issues}
+            "library_issues": library_issues,
+            "my_access": project_acl.project_role(db, user, project)}
 
 
 @router.post("/{project_id}/lock")
@@ -3967,7 +4059,7 @@ def load_project(
     user: User | None = Depends(optional_user),
     session: SessionRow | None = Depends(current_session),
 ) -> ImportSummary | dict[str, object]:
-    from services import project_registry
+    from services import project_acl, project_registry
 
     project_registry.require_user(user)
     project = project_registry.resolve_project(db, user, name)
@@ -4242,6 +4334,7 @@ def load_project(
         **summary.model_dump(),
         "lock": lock_info,
         "library_issues": library_issues,
+        "my_access": project_acl.project_role(db, user, project),
         **({"dropped_goal": dropped_goal} if dropped_goal else {}),
     }
 
@@ -5666,8 +5759,14 @@ def put_project_members(
         user_ids = [_uuid.UUID(str(uid)) for uid in body.user_ids]
     except (ValueError, TypeError) as exc:
         raise HTTPException(400, "user_ids must be valid UUID strings") from exc
+    try:
+        roles = {_uuid.UUID(str(uid)): role for uid, role in body.roles.items()}
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, "roles keys must be valid UUID strings") from exc
+    if len(roles) != len(body.roles):
+        raise HTTPException(400, "roles names the same user more than once")
 
-    return project_registry.set_root_members(db, user, project, user_ids)
+    return project_registry.set_root_members(db, user, project, user_ids, roles)
 
 
 @router.get("/{name}/statistics")

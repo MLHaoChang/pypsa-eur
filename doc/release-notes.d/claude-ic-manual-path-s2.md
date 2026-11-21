@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The investment case says what it compares before and after a run, and a refused run lists, in plain words, the inputs it needs (a solved project, the site connection, start dates, finance inputs), each with a link to set it. Commercial & finance reads "Investment case not run yet" only while that result is absent.
