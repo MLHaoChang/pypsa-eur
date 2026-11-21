@@ -16,3 +16,7 @@ Guided is read-only and hands off into results. In Expert during a Guided study 
 
 - Expert shows the run state, disables Run LOPF and editing, and offers Abort for a Guided study run.
 - Progress names the step; section 5 says a run is in progress.
+
+## Comments
+
+- Seen again 2026-11-21 (template walk, master 6b421b06): Concentrator: Expert header "Idle" for 30 minutes during a Guided study run (see 12). Separately, a read-only "Another user is editing" banner appeared on the user's own project after a solve: `walkthroughs/templates-2026-11-21` issue 05.

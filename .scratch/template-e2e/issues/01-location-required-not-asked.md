@@ -30,3 +30,5 @@ Design §2.3 marks location **R** for every template. In the app (verified 2026-
 ## Comments
 
 - Seen again 2026-11-20 (template walk, master 1f6905e3): DC, H2 and microgrid still open with 'The site has no location: no bus is placed' in Guided step 1 and as a note on Readiness and run.
+
+- Seen again 2026-11-21 (template walk, master 6b421b06): IPP, concentrator and ammonia all open with "The site has no location: no bus is placed" in Guided section 1 (and "1 note" in the Expert header).

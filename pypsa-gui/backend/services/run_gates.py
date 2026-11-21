@@ -616,6 +616,13 @@ def _own_solve(env, read, typed=False):
     return _on(env.ctx, guarded)
 
 
+# GK A (28) Q9, GK B (61): the per-period unserved read's own bound, checked on
+# each investment period's snapshot count (a leap year of hourly snapshots; a
+# sub-hourly year is over it). The sum is O(snapshots × captured loads) in memory
+# and time; MAX_SNAPSHOTS bounds the chat tool's rows, not this sum.
+UNSERVED_MAX_SNAPSHOTS_PER_PERIOD = 8784
+
+
 def _unserved_by_period(ctx):
     """Issue 07 B3b (GK B (33) P4): unserved energy of a multi-period solve,
     under the network lock. Per investment period, the shed MW of every
@@ -627,11 +634,12 @@ def _unserved_by_period(ctx):
     import pandas as pd
 
     from harness import lost_load_calculations as lost_load
-    from harness.calculations import MAX_SNAPSHOTS, solve_matches_inputs
+    from harness.calculations import solve_matches_inputs
     from services.adequacy.metrics import electrical_columns
     n = ctx.network
     index = n.snapshots
-    if not isinstance(index, pd.MultiIndex) or index.nlevels != 2 or not 1 <= len(index) <= MAX_SNAPSHOTS:
+    if (not isinstance(index, pd.MultiIndex) or index.nlevels != 2 or not len(index)
+            or index.get_level_values(0).value_counts().max() > UNSERVED_MAX_SNAPSHOTS_PER_PERIOD):
         return NoEvidence("unsupported_snapshot_scope", "unsupported_snapshot_scope: unserved energy cannot be read")
     frame = (ctx.solver_state.get("last_lost_load") or {}).get("lost_load_t")
     if not isinstance(frame, pd.DataFrame) or frame.empty:
@@ -1304,6 +1312,14 @@ def _mg_frequency(env):
     return Detailed(len(out["hours"]), detail, run_actions.MG_FREQUENCY_BASIS)
 
 
+def _concentrator(name):
+    """Study harness 16: a reader of `services.run_gates_concentrator`, imported when read."""
+    def read(env):
+        from services import run_gates_concentrator
+        return getattr(run_gates_concentrator, name)(env)
+    return read
+
+
 # Study harness 15 (design §9.3 "Grid-only"; GK A, ACPF-BUG): the grid-only
 # profile's setup and AC power-flow facts. The PF readers sit in `run_grid_pf`
 # and read only the PF snapshot the engine stored.
@@ -1436,6 +1452,22 @@ FACTS: dict[str, Fact] = {
     "process.binary_check": Fact("services.solver.process_uc.binary_check", "status", None, _binary_check),
     "process.delivery.shortfall": Fact("services.run_gates._delivery_shortfall", "shortfall_share", "p.u.",
                                        _delivery_shortfall),
+    # Study harness 16: the concentrator run (GK A (28) Q1-Q6), read by
+    # `services.run_gates_concentrator` (imported when read: it imports this module).
+    "process.mass_balance": Fact("services.run_gates_concentrator.mass_balance_of", "share", "p.u.",
+                                 _concentrator("_mass_balance")),
+    "process.motor_start": Fact("services.adequacy.grid_readiness._motor_start_rows", "verdict", None,
+                                _concentrator("_motor_start")),
+    "process.restart": Fact("gridspine.static.restart_sequence.restart_sequence", "fail_count", "count",
+                            _concentrator("_restart")),
+    "process.n_1.site_transformer": Fact("services.adequacy.process_loss.units_cut_off", "transformers", None,
+                                         _concentrator("_n_1_site_transformer")),
+    "ic.counterfactual.basis": Fact("services.ic_counterfactual.read", "basis", None,
+                                    _concentrator("_ic_counterfactual_basis")),
+    "process.lost_production": Fact("services.results.grid_risk_production.grid_risk_production",
+                                    "lost_t_per_year", "t/yr", _concentrator("_lost_production")),
+    "process.shed_level": Fact("services.run_gates_concentrator.shed_level_of", "peak_t", "t",
+                               _concentrator("_shed_level")),
     # Study harness 10a: the data-centre run (GK B (36) D1, Q1, Q2).
     "dc.campus.contingency": Fact("services.run_actions.contingency", "failing", None, _dc_campus_contingency),
     "dc.gridcode.published": Fact("services.run_actions.choose", "id", None, _dc_gridcode_published),
