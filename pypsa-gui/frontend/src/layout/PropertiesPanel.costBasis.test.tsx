@@ -35,6 +35,8 @@ vi.mock('../api/network', async (importOriginal) => {
       updateStore: vi.fn(async () => ({})),
       updateLink: vi.fn(async () => ({})),
       updateLoad: vi.fn(async () => ({})),
+      updateLine: vi.fn(async () => ({})),
+      updateTransformer: vi.fn(async () => ({})),
     },
   }
 })
@@ -47,43 +49,68 @@ vi.mock('../api/simulation', async (importOriginal) => {
 })
 
 import { networkApi } from '../api/network'
-import { GeneratorCard, LinkCard, LoadCard, StorageUnitCard, StoreCard } from './PropertiesPanel'
+import { GeneratorCard, LinkCard, LinePanel, LoadCard, StorageUnitCard, StoreCard, TransformerPanel } from './PropertiesPanel'
 
-type Api = 'updateGenerator' | 'updateStorageUnit' | 'updateStore' | 'updateLink' | 'updateLoad'
-interface Case { cls: string; root: string; api: Api; row: Record<string, unknown>; el: (r: never) => ReactElement }
+type Api = 'updateGenerator' | 'updateStorageUnit' | 'updateStore' | 'updateLink' | 'updateLoad' | 'updateLine' | 'updateTransformer'
+// `cap`: the field a 05g test edits (its label, patch key and a new value); `stale`: an untouched numeric column a
+// restore changes after the card opened.
+interface Case {
+  cls: string; root: string; api: Api; row: Record<string, unknown>; el: (r: never) => ReactElement
+  cap: { label: string; key: string; typed: number }; stale: { key: string; now: number }
+}
 
 const CASES: Record<string, Case> = {
   Generator: {
+    cap: { label: 'Capacity', key: 'p_nom', typed: 130 }, stale: { key: 'efficiency', now: 0.5 },
     cls: 'Generator', root: 'generators', api: 'updateGenerator',
-    row: { name: 'crusher', bus: 'ore', carrier: 'ore', control: 'PQ', p_nom: 120, p_nom_extendable: false,
+    row: { name: 'crusher', discount_rate: 0.0712345678901234, bus: 'ore', carrier: 'ore', control: 'PQ', p_nom: 120, p_nom_extendable: false,
       p_nom_min: 0, p_nom_max: 80, p_min_pu: 0, p_max_pu: 1, efficiency: 1, marginal_cost: 0, overnight_cost: 50,
       curtailment_cost: 0, lifetime: 40, build_year: 2027, committable: false },
     el: r => <GeneratorCard gen={r} onRename={() => {}} />,
   },
   StorageUnit: {
+    cap: { label: 'Power', key: 'p_nom', typed: 12 }, stale: { key: 'efficiency_store', now: 0.5 },
     cls: 'StorageUnit', root: 'storage_units', api: 'updateStorageUnit',
-    row: { name: 'silo', bus: 'ore', carrier: 'ore', p_nom: 10, p_nom_extendable: false, max_hours: 2,
+    row: { name: 'silo', discount_rate: 0.0712345678901234, bus: 'ore', carrier: 'ore', p_nom: 10, p_nom_extendable: false, max_hours: 2,
       efficiency_store: 0.9, efficiency_dispatch: 0.9, marginal_cost: 0, capital_cost: 0, lifetime: 20,
       build_year: 2027, cyclic_state_of_charge: false },
     el: r => <StorageUnitCard su={r} onRename={() => {}} />,
   },
   Store: {
+    cap: { label: 'Energy capacity', key: 'e_nom', typed: 340 }, stale: { key: 'standing_loss', now: 0.25 },
     cls: 'Store', root: 'stores', api: 'updateStore',
-    row: { name: 'tank', bus: 'ore', carrier: 'ore', e_nom: 336, e_nom_extendable: false, e_nom_min: 0,
+    row: { name: 'tank', discount_rate: 0.0712345678901234, bus: 'ore', carrier: 'ore', e_nom: 336, e_nom_extendable: false, e_nom_min: 0,
       e_nom_max: 1000, e_cyclic: false, standing_loss: 0, marginal_cost: 0, lifetime: 30, build_year: 2027 },
     el: r => <StoreCard store={r} onRename={() => {}} />,
   },
   Link: {
+    cap: { label: 'Capacity', key: 'p_nom', typed: 60 }, stale: { key: 'efficiency', now: 0.5 },
     cls: 'Link', root: 'links', api: 'updateLink',
-    row: { name: 'kiln', bus0: 'ore', bus1: 'grid', carrier: 'ore', p_nom: 50, p_nom_extendable: false,
+    row: { name: 'kiln', discount_rate: 0.0712345678901234, bus0: 'ore', bus1: 'grid', carrier: 'ore', p_nom: 50, p_nom_extendable: false,
       efficiency: 1, marginal_cost: 0, overnight_cost: 50, lifetime: 30, build_year: 2027 },
     el: r => <LinkCard link={r} onRename={() => {}} />,
   },
   Load: {
+    cap: { label: 'Reactive demand', key: 'q_set', typed: 3 }, stale: { key: 'sign', now: 1 },
     cls: 'Load', root: 'loads', api: 'updateLoad',
-    row: { name: 'mill', bus: 'ore', carrier: '', p_set: 5 },
+    row: { name: 'mill', bus: 'ore', carrier: '', p_set: 5, q_set: 1, sign: -1 },
     el: r => <LoadCard load={r} onRename={() => {}} />,
   },
+}
+CASES.Line = {
+  cls: 'Line', root: 'lines', api: 'updateLine',
+  row: { name: 'belt', discount_rate: 0.0712345678901234, bus0: 'ore', bus1: 'grid', carrier: 'AC', s_nom: 500, s_nom_extendable: false, s_nom_min: 0,
+    s_nom_max: null, length: 100, r: 3, x: 30, b: 0.0001, lifetime: 40, build_year: 2030,
+    inv_per_km_overnight: 432, inv_per_km_fom_share: 0.02, overnight_cost: null },
+  el: r => <LinePanel name={(r as { name: string }).name} />,
+  cap: { label: 'Capacity', key: 's_nom', typed: 520 }, stale: { key: 'lifetime', now: 25 },
+}
+CASES.Transformer = {
+  cls: 'Transformer', root: 'transformers', api: 'updateTransformer',
+  row: { name: 'xf', discount_rate: 0.0712345678901234, bus0: 'ore', bus1: 'grid', s_nom: 400, s_nom_extendable: false, s_nom_min: 0, s_nom_max: null,
+    r: 0.002, x: 0.12, tap_ratio: 1, phase_shift: 0, v_nom_0: 380, v_nom_1: 110, overnight_cost: 15000, lifetime: 40 },
+  el: r => <TransformerPanel name={(r as { name: string }).name} />,
+  cap: { label: 'Capacity', key: 's_nom', typed: 420 }, stale: { key: 'lifetime', now: 25 },
 }
 const COST_CARDS = ['Generator', 'StorageUnit', 'Store', 'Link']
 
@@ -151,7 +178,7 @@ describe.each(COST_CARDS)('the %s card claims the basis it shows (T2)', (cls) =>
   })
 })
 
-describe.each(Object.keys(CASES))('the %s card holds Save until its fields load (F3, T2)', (cls) => {
+describe.each(['Generator', 'StorageUnit', 'Store', 'Link', 'Load'])('the %s card holds Save until its fields load (F3, T2)', (cls) => {
   it('is disabled while the schema is pending, and a click sends nothing', async () => {
     const c = CASES[cls]
     schemaGet.mockImplementation(() => new Promise(() => {}))
@@ -261,52 +288,63 @@ describe('a refused claim (409 cost_basis_mismatch)', () => {
   })
 })
 
-// 05g: the card's save is a rebase on the fresh row, and the basis is the one the form was opened with.
-describe('the Generator card rebases its save (05g)', () => {
-  const c = CASES.Generator
+// 05g: the card's save is a rebase on the fresh row, and the basis is the one the form was opened with. Every card
+// wired to useEditBase (GK B4).
+describe.each(Object.keys(CASES))('the %s card rebases its save (05g)', (cls) => {
+  const c = CASES[cls]
+  const idle = () => units.mockResolvedValue({ component: cls, name: c.row.name, units: {} })
+  const typeCap = async () => {
+    await userEvent.clear(inputStarting(c.cap.label))
+    await userEvent.type(inputStarting(c.cap.label), String(c.cap.typed))
+  }
 
   it('keeps the columns the user did not touch as the network now holds them', async () => {
-    units.mockResolvedValue({ component: 'Generator', name: c.row.name, units: {} })
+    idle()
     mount(c)
     await openEdit()
-    // a restore after the card opened: efficiency and marginal cost changed; the cache still holds the old ones
-    serveRows('generators', [{ ...c.row, efficiency: 0.5, marginal_cost: 9 }])
-    await userEvent.clear(inputStarting('Capacity'))
-    await userEvent.type(inputStarting('Capacity'), '130')
+    // a restore after the card opened: an untouched column changed; the cache still holds the old one
+    serveRows(c.root, [{ ...c.row, [c.stale.key]: c.stale.now }])
+    await typeCap()
     await saveWhenReady()
     await waitFor(() => expect(put(c)).toHaveBeenCalled())
     const body = put(c).mock.calls[0][1] as Record<string, unknown>
-    expect(body.p_nom).toBe(130)
-    expect(body.efficiency).toBe(0.5)
-    expect(body.marginal_cost).toBe(9)
+    expect(body[c.cap.key]).toBe(c.cap.typed)
+    expect(body[c.stale.key]).toBe(c.stale.now)
   })
 
-  it('an untouched cost whose display round trip is not bit-equal stays as the network now holds it', async () => {
-    units.mockResolvedValue({ component: 'Generator', name: c.row.name, units: {} })
-    const row = { ...c.row, overnight_cost: 55555.55555555 }   // shown as 55.5555555556 €/kW: 55555.5555556 back
-    mount({ ...c, row })
+  // 0.0712345678901234 shows as 7.12345678901 % (12 digits): the form's own round trip is not bit-equal, so only the same-builder base
+  // tells "untouched" from "typed". A Load has no scaled field: its round trip is exact, the base changes nothing.
+  it.skipIf(cls === 'Load')('an untouched scaled column whose display round trip is not bit-equal stays as the network now holds it', async () => {
+    idle()
+    mount(c)
     await openEdit()
-    serveRows('generators', [{ ...row, overnight_cost: 77777 }])
-    await userEvent.clear(inputStarting('Capacity'))
-    await userEvent.type(inputStarting('Capacity'), '130')
+    serveRows(c.root, [{ ...c.row, discount_rate: 0.08 }])
+    await typeCap()
     await saveWhenReady()
     await waitFor(() => expect(put(c)).toHaveBeenCalled())
     const body = put(c).mock.calls[0][1] as Record<string, unknown>
-    expect(body.p_nom).toBe(130)
-    expect(body.overnight_cost).toBe(77777)
+    expect(body[c.cap.key]).toBe(c.cap.typed)
+    expect(body.discount_rate).toBe(0.08)
   })
 
-  it('claims the basis the form opened with, not the one the schema reads at Save', async () => {
-    units.mockResolvedValue({ component: 'Generator', name: c.row.name, units: {} })
+  it('a typed value is scaled under the schema the form opened with, not the one the schema reads at Save', async () => {
+    idle()
     const client = mount(c)
     await openEdit()
     await screen.findByRole('button', { name: /^save$/i })
-    // another tab moved the bus to a tonne bus after the card opened
-    units.mockResolvedValue(tonneUnits('Generator', String(c.row.name)))
-    await act(async () => { await client.invalidateQueries({ queryKey: ['assetUnits'] }) })
-    await waitFor(() => expect(screen.getAllByText(/€\/(\(t\/h\)|t)\b/).length).toBeGreaterThan(0))
+    // the descriptors changed after the card opened (a units flip): the capacity now reads on a x1000 scale
+    const flipped = JSON.parse(JSON.stringify((schemas as unknown as Record<string, unknown>)[cls])) as
+      { groups: { fields: { key: string; scale: number; unit_display: string; unit_storage: string }[] }[] }
+    for (const f of flipped.groups.flatMap(g => g.fields).filter(f => f.key === c.cap.key)) {
+      f.scale = 1000; f.unit_display = 'kU'; f.unit_storage = 'kU'
+    }
+    schemaGet.mockImplementation(async () => flipped)
+    await act(async () => { await client.invalidateQueries({ queryKey: ['assetSchema'] }) })
+    await waitFor(() => expect(screen.getAllByText(/kU/).length).toBeGreaterThan(0))
+    await typeCap()
     await saveWhenReady()
     await waitFor(() => expect(put(c)).toHaveBeenCalled())
-    expect(put(c).mock.calls[0][2]).toBe('energy')
+    const body = put(c).mock.calls[0][1] as Record<string, unknown>
+    expect(body[c.cap.key]).toBe(c.cap.typed)
   })
 })
