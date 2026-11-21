@@ -823,3 +823,92 @@ def test_a_kill_that_hangs_or_fails_never_breaks_cleanup(monkeypatch, exc):
         bw._kill_container(bw.Readiness(True, None, "/b", "/rt", "img"), "n", {}, 0.1)
         is None
     )
+
+
+# The CI shard hang (#1577, #1578, #1627): the solve-queue dispatcher sat in
+# `subprocess.Popen` reading the exec-error pipe for hours, its forked child
+# stuck before `exec`. The API process runs many threads, and a fork copies
+# their held locks with none of their owners, so any Python code run in the
+# child (a `preexec_fn`, the at-fork hooks it brings along, a GC finaliser) can
+# block forever. This hook stands in for such a lock: while armed, Python code
+# in a forked child blocks until the test kills it.
+_FORK_TRAP = {"armed": False, "pids": None}
+
+
+def _trap_in_child() -> None:
+    if _FORK_TRAP["armed"]:
+        os.write(_FORK_TRAP["pids"], f"{os.getpid()}\n".encode())
+        threading.Event().wait()  # an inherited lock that no thread will ever release
+
+
+os.register_at_fork(after_in_child=_trap_in_child)
+
+
+def test_a_run_never_runs_python_in_the_forked_child(make):
+    env, _ = make()
+    ready = _ready(env)
+    r, w = os.pipe()
+    os.set_blocking(r, False)
+    done: list = []
+    runner = threading.Thread(
+        target=lambda: done.append(bw.run(ready, b"g", None, FAST, env)), daemon=True
+    )
+    _FORK_TRAP.update(armed=True, pids=w)
+    try:
+        runner.start()
+        runner.join(20)
+    finally:
+        _FORK_TRAP["armed"] = False
+        try:
+            trapped = [int(p) for p in os.read(r, 4096).split()]
+        except BlockingIOError:
+            trapped = []
+        for pid in trapped:  # free a stuck spawn so the thread can unwind
+            os.kill(pid, 9)
+        runner.join(20)
+        os.close(r)
+        os.close(w)
+    assert not trapped, "Python code ran in the forked child before exec"
+    assert done and done[0].glb == b"g"
+
+
+def _stuck_cli_spawn(monkeypatch):
+    """Hold the CLI's `Popen` until released; every other spawn runs at once."""
+    real, release, late = subprocess.Popen, threading.Event(), []
+
+    def popen(argv, *a, **k):
+        if "run" in argv and "--version" not in argv:
+            release.wait(30)
+            # The run removed its work dir when it gave up, so a late spawn in
+            # it fails by itself; start it elsewhere to reach the late stop.
+            late.append(real(argv, *a, **{**k, "cwd": "/"}))
+            return late[-1]
+        return real(argv, *a, **k)
+
+    monkeypatch.setattr(bw.subprocess, "Popen", popen)
+    return release, late
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+def test_a_spawn_that_never_returns_is_typed_and_its_late_process_is_stopped(
+    make, monkeypatch, cancel
+):
+    env, _ = make("hang")
+    ready = _ready(env)
+    release, late = _stuck_cli_spawn(monkeypatch)
+    stop = threading.Event()
+    if cancel:
+        threading.Timer(0.3, stop.set).start()
+    t0 = time.monotonic()
+    try:
+        with pytest.raises(bw.WorkerError) as err:
+            bw.run(ready, b"g", stop, _caps(spawn_s=1.0), env)
+        took = time.monotonic() - t0
+    finally:
+        release.set()
+    assert err.value.kind == (bw.CANCELLED if cancel else bw.FAILED), err.value.message
+    assert took < (1.0 if cancel else 2.0), took
+    deadline = time.monotonic() + 15
+    while not (late and late[0].returncode is not None) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert late and late[0].returncode is not None, "the late CLI is stopped"
