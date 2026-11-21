@@ -239,6 +239,10 @@ def _restore(snapshot: dict) -> None:
             atomic_write_bytes(path, data)
 
 
+#: A trial written with its cuts before its solve, until the trial ends.
+UNFINISHED = "not finished"
+
+
 def apply_loop(project, *, solve, rerun, stop_event, may_write=lambda: None) -> dict:
     """Apply, re-solve, rerun, until nothing fails, nothing more can be cut,
     ``MAX_TRIALS``, or ``stop_event`` (owner QA). ``solve(project)`` re-solves
@@ -246,37 +250,52 @@ def apply_loop(project, *, solve, rerun, stop_event, may_write=lambda: None) -> 
     the campus file's ratings up to it and reruns the campus study, which
     proposes the next cuts, and returns what it refreshed.
 
+    Each trial is written with its cuts (verdict ``UNFINISHED``) before its
+    solve and completed after its rerun, so cuts on disk always have their
+    trial in the history.
+
     ``may_write()`` raises ``RequesterViewOnly`` once the requester may no
     longer write the project; it is asked before each write and each solve
     (project-viewer-role 02). A refusal in trial N stops the loop with
-    ``stopped == "project_view_only"``: trials 1..N-1 stay, and the cuts file
-    and the campus YAML are put back to their bytes after trial N-1. A hub
-    solve or campus rerun trial N already finished is not undone."""
+    ``stopped == "project_view_only"`` and ``refused`` naming the trial and
+    the step it did not take. Every saved result keeps the files it was made
+    from: the files trial N changed are put back to their bytes after trial
+    N-1 only while no saved result has read them. Once the hub solve has
+    read the cuts and the campus YAML (both solve inputs), they stay, and so
+    does trial N, unfinished, in the history; a rerun's YAML stays with the
+    campus results made from it."""
     state = _state(project)
     new = _new_cuts(_proposed_rows(project), state["cuts"])
     if not new:
         raise HTTPException(status_code=422, detail="nothing to apply: the last campus run proposes "
                                                     "no cut the hub can take")
-    trials, stopped = [], "N reached"
+    trials, stopped, refused = [], "N reached", None
+    files = _trial_files(project)
     for i in range(MAX_TRIALS):
-        before = _snapshot(_trial_files(project))
+        before, read, step = _snapshot(files), set(), "cuts"
         try:
             may_write()
             state["cuts"] = _merge(state["cuts"], new)
+            trial = {"trial": len(state["trials"]) + 1, "added": new, "objective": None,
+                     "refreshed": [], "verdict": UNFINISHED}
+            state["trials"].append(trial)
             _write(project, state)
+            step = "solve"
             may_write()
             objective = solve(project)
+            read.update(files)  # the saved hub read the cuts and the campus YAML
+            step = "rerun"
             may_write()
             refreshed = rerun(project) or []
             proposed = _proposed_rows(project)
-            trial = {"trial": len(state["trials"]) + 1, "added": new, "objective": objective,
-                     "refreshed": refreshed, "verdict": _verdict(proposed)}
+            trial.update(objective=objective, refreshed=refreshed, verdict=_verdict(proposed))
+            step = "record"
             may_write()
         except project_write_gate.RequesterViewOnly:
-            _restore(before)
+            _restore({path: data for path, data in before.items() if path not in read})
             stopped = project_write_gate.KIND
+            refused = {"trial": len(state["trials"]) + (step == "cuts"), "before": step}
             break
-        state["trials"].append(trial)
         trials.append(trial)
         _write(project, state)
         new = _new_cuts(proposed, state["cuts"])
@@ -289,7 +308,7 @@ def apply_loop(project, *, solve, rerun, stop_event, may_write=lambda: None) -> 
         if stop_event.is_set():
             stopped = "stopped by the user"
             break
-    return {"trials": trials, "stopped": stopped, "applied": state["cuts"]}
+    return {"trials": trials, "stopped": stopped, "applied": state["cuts"], "refused": refused}
 
 
 def remove_cut(project, *, period, hour, kind, scenario="seamless") -> dict:
@@ -395,7 +414,9 @@ def _run_job(project, user_id, settings, record, project_id) -> None:
                 # project-viewer-role 02: the requester lost edit access mid-run
                 record.update(state="failed", finished_at=time.time(), stopped=out["stopped"],
                               trials=len(out["trials"]), error=project_write_gate.REFUSAL,
-                              error_code=project_write_gate.KIND, message="failed")
+                              error_code=project_write_gate.KIND, message="failed",
+                              refused_trial=out["refused"]["trial"],
+                              refused_before=out["refused"]["before"])
             else:
                 record.update(state="cancelled" if out["stopped"] == "stopped by the user" else "done",
                               finished_at=time.time(), stopped=out["stopped"],
