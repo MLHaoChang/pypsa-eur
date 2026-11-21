@@ -288,6 +288,16 @@ def test_a_record_without_its_run_file_is_ignored(tmp_path):
     assert stage_status(tmp_path)["stages"]["dispatch"]["total"] == 1
 
 
+def test_an_empty_run_nonce_matches_nothing(tmp_path):
+    # An empty progress.run names no run, even when the record's nonce is empty too.
+    (tmp_path / "loads.csv").write_text("snapshot\n")
+    (tmp_path / PROGRESS_RUN).write_text("\n")
+    (tmp_path / PROGRESS_RECORD).write_text(
+        json.dumps({"run": "", "stage": "dispatch", "done": 1, "total": 3})
+    )
+    assert stage_status(tmp_path)["stages"]["dispatch"]["total"] == 1
+
+
 @pytest.mark.parametrize("done, shown", [(7, 3), (-2, 0)])
 def test_the_count_is_clamped_to_the_total(tmp_path, done, shown):
     st = _dispatch_running(tmp_path, {"stage": "dispatch", "done": done, "total": 3})

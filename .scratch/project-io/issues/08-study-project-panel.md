@@ -21,10 +21,10 @@ The user does not know whether the study is stuck, and is offered sections and a
 
 ## Acceptance criteria
 
-- [ ] While the panel loads, it shows a loading state, and Run study shows why it is disabled.
-- [ ] Dispatch reports finer progress, for example per solved period or per hour block, with elapsed time, so the bar moves at least once a minute on the 336 h case.
-- [ ] On a Study project, the sidebar shows only the sections that apply to the kind (from `project_kind`), and Run LOPF is hidden.
-- [ ] End to end in the real app: New project › Study (336 h, k = 2) › Run study. The progress moves within dispatch. On completion the bundles list shows the selected hours, and a bundle downloads.
+- [x] While the panel loads, it shows a loading state, and Run study shows why it is disabled.
+- [x] Dispatch reports finer progress, for example per solved period or per hour block, with elapsed time, so the bar moves at least once a minute on the 336 h case.
+- [x] On a Study project, the sidebar shows only the sections that apply to the kind (from `project_kind`), and Run LOPF is hidden.
+- [x] End to end in the real app: New project › Study (336 h, k = 2) › Run study. The progress moves within dispatch. On completion the bundles list shows the selected hours, and a bundle downloads.
 
 ## Likely files
 
@@ -43,3 +43,4 @@ The user does not know whether the study is stuck, and is offered sections and a
   - P7: `Progress()` without a record writes nothing, and its callback events are unchanged.
   - P8: mutants on progress.py and status.py, with the survivors argued in the PR.
 - 2026-11-21, UX 3 plan GO with conditions: a visible reason line; no flash while the kind loads; the other Run LOPF entry points agree; Expert never shows less than Guided; shots in Guided and Expert.
+- 2026-11-21, builder (session_01G7qCunrb252pbjZ1eudsSA): E2E run 2 on 19a25bbf, real app, Study 336 h, k = 2 (`.scratch/project-io/shots-08/`, script `shots.mjs`, log `run.log`). Dispatch showed "window 1 of 3, 0 solved 0:03", then "window 2 of 3, 1 solved 0:27"; completed in 349 s; 8 bundle hours; h90 bundle downloaded (46,501 bytes). Expert on a non-Study project keeps Run LOPF; the Study hides it in Guided and Expert. Follow-ups filed: 10 (header stays Running/Abort after completion; reproduced), 11 (chat enqueue on a Study), 12 (Expert header chips on a Study).
