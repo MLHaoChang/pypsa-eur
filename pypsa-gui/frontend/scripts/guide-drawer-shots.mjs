@@ -49,11 +49,12 @@ try {
   await page.waitForURL(/\/app/, { timeout: 60000 })
   project = await page.evaluate(() => localStorage.getItem('network-diagram:current-project'))
   }
-  // Pick the entries from the live catalogue: one with rows to leave out (no default,
-  // no function reads it, no related entries) and one with no Properties field.
+  // Pick the entries from the live catalogue: one with rows to leave out (no default, no
+  // function needs it; every entry has some function use, so "Also used by" may stay) and
+  // one with no Properties field. Prefer one that also has no range and no related entries.
   const catalogue = await page.evaluate(async () => (await fetch('/api/catalogue', { credentials: 'include' })).json())
-  const sparse = catalogue.entries.find(e => (!e.default || e.default.source === 'none') && !Object.keys(e.functions).length
-    && !e.related.length && !e.range)
+  const omits = e => (!e.default || e.default.source === 'none') && !Object.values(e.functions).includes('needs')
+  const sparse = catalogue.entries.find(e => omits(e) && !e.related.length && !e.range) ?? catalogue.entries.find(omits)
   const noField = catalogue.entries.find(e => ['GlobalConstraint', 'Carrier', 'ShuntImpedance'].includes(e.scope))
   if (!sparse || !noField) failures.push(`catalogue: no sparse entry (${!!sparse}) or no-field entry (${!!noField})`)
   const state = await setup.storageState()
