@@ -64,7 +64,7 @@ export default function PasswordTokenPage({
       {linkRejected && (
         <AuthMessage tone="error">
           This link has expired or was already used. Ask your admin for a new invite link,
-          or go back to sign in and use "Forgot password".
+          or use “Forgot password” on the sign-in page.
           {' '}
           <Link className="underline" to="/login">Back to sign in</Link>
         </AuthMessage>
