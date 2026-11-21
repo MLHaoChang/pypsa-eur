@@ -1568,8 +1568,6 @@ def _drop_blank_series(n: pypsa.Network, report: ImportReport) -> None:
         series = getattr(n, f"{ln}_t")
         for attr in list(series):
             frame = series[attr]
-            if frame.empty:
-                continue
             empty = frame.isna().sum()
             for asset, k in empty[empty > 0].items():
                 report.unmapped.append(
