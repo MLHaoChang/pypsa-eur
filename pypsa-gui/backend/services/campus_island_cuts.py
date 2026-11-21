@@ -383,7 +383,7 @@ def _rerun(project, settings) -> list[dict]:
     return refreshed
 
 
-def _run_job(project, user_id, settings, record, project_id=None) -> None:
+def _run_job(project, user_id, settings, record, project_id) -> None:
     stop = record["stop_event"]
     try:
         out = apply_loop(project, solve=lambda p: _queue_solve(p, user_id, stop),

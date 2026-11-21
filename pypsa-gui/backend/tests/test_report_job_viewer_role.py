@@ -368,3 +368,65 @@ def test_the_harness_report_stage_names_the_runs_owner(monkeypatch, tmp_path):
     monkeypatch.setattr(report_jobs, "_start", start)
     run_report.start(path, ctx, {"id": "report"}, instance="i")
     assert seen["user_id"] == "u-7"
+
+
+def test_the_chat_tool_names_the_acting_user_through_the_route(world, monkeypatch):
+    """The chat tool reaches the route through `_route`, which injects the
+    acting user: the job is started with that user and the project row."""
+    from routers import report_jobs
+    from services import chat_tools
+
+    seen = {}
+    monkeypatch.setattr(report_jobs, "_check_lock", lambda *_a: None)
+    monkeypatch.setattr(report_jobs, "_resolve_profile", lambda: _PROFILE)
+    monkeypatch.setattr(report_jobs, "_plain_report_if_no_llm", lambda *_a: None)
+    monkeypatch.setattr(report_jobs, "_provider_or_400", lambda _p: None)
+    monkeypatch.setattr(report_jobs, "_evidence_for", lambda *_a, **_k: (None, {}))
+    monkeypatch.setattr(
+        report_jobs, "start_report_job", lambda **kw: seen.update(kw) or "r-1"
+    )
+    chat_tools.set_acting_user(str(world["editor"]))
+    try:
+        out = chat_tools.generate_report(title="T")
+    finally:
+        chat_tools.set_acting_user(None)
+    assert out["report_id"] == "r-1"
+    assert str(seen["user_id"]) == str(world["editor"])
+    assert str(seen["project_id"]) == str(world["project"])
+
+
+def test_a_template_plan_whose_role_cannot_be_read_refuses(
+    world, tmp_path, evidence, monkeypatch
+):
+    from db import session as db_session
+    from services.reports import templates
+
+    v1 = run_report_job(_job(tmp_path, evidence, FakeProvider(_script())))
+    meta_path = tmp_path / "reports" / v1.report_id / "meta.json"
+    meta = meta_path.read_bytes()
+
+    def broken():
+        raise RuntimeError("database gone")
+
+    def propose(provider, **_kw):
+        monkeypatch.setattr(db_session, "SessionLocal", broken)
+        return {}
+
+    monkeypatch.setattr(templates, "_propose_mapping", lambda: propose)
+    monkeypatch.setattr(
+        templates, "sanitise_plan", lambda raw, outline, doc: ({"p": 1}, [])
+    )
+    job = prepare_mapping_job(
+        project_name="demo",
+        project_dir=tmp_path,
+        document=v1,
+        outline=SimpleNamespace(),
+        profile=_PROFILE,
+        provider=None,
+        language="en",
+        **_requester(world),
+    )
+    with pytest.raises(project_write_gate.RequesterViewOnly):
+        run_mapping_job(job)
+    assert job.record["error_kind"] == KIND
+    assert meta_path.read_bytes() == meta
