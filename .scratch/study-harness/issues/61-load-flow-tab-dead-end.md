@@ -3,7 +3,7 @@
 
 # 61 Results › Load flow offers the AC power-flow switch on a network with no lines, beside "Not applicable"
 
-Status: ready-for-agent
+Status: done
 Blocked by: none (related: 51, which sets a scope preset for the four grid templates only)
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), walk W3 (shots `e10-loadflow-switch`, `e13-lf`).
 Model: sonnet. Review: UX.
