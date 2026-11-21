@@ -1,0 +1,40 @@
+url http://127.0.0.1:5173/app
+acpf after open 200 {"available":true,"slack_bus_used":"Bus_A","stripped_voll_slacks":[],"seeded_by":[],"converged_per_snapshot":{"2030-01-01T00:00:00":true,"2030-01-01T01:00:00":true,"2030-01-01T02:00:00":false},"converged_list":[{"snapshot":"2030-01-01T00:00:00","period":null,"ok":true},{"snapshot":"2030-01-01T01:00:
+sim {"running":false,"status":"completed","condition":"lopf+ac_pf_ok","objective":2100.0,"solve_time":4.12,"failure":null,"dispatch":"fresh","solved_at":"2026-11-21T15:28:52Z"}
+[warn] CARD TEXT:
+Request incomplete: warning
+
+Current run · Line_BC · ac branch loading
+
+Warning: AC power flow did not converge for 1 of 3 snapshots in the window. The values cover 2 of 3 snapshots.
+ac peak branch utilisation: answered (2/3 snapshots)
+ac hours above rating: answered (2/3 snapshots)
+ac peak apparent flow: answered (2/3 snapshots)
+ac branch rating: answered (2/3 snapshots)
+
+4 facts checked against evidence. This does not certify the engineering model.
+
+Download checked values and evidence
+Evidence 1
+[warn] WARN ROWS: ["Warning: AC power flow did not converge for 1 of 3 snapshots in the window. The values cover 2 of 3 snapshots."]
+[warn] COMPANION: "Request incomplete: warning\n\nShow answer\n\nBranch Line_BC; requested snapshots (2030-01-01T00:00:00 to 2030-01-01T02:00:00). Line values cover 2 of 3 snapshots; the others did not converge or are unknown. Peak AC loading against the rating, over converged snapshots: 0.06119313132646785 %. Weighted hours above the rating, over converged snapshots: 0 h. Peak apparent-power flow, over converged snapshots: 3.0596565663233926 MVA. Rating (s_nom_opt if extendable, else s_nom): 5000 MVA. AC power flow: apparent power from the flow's own results, max(hypot(p0, q0), hypot(p1, q1)); no N-1 and no voltage limits. The limit is the rating times s_max_pu per snapshot. Hours use generator snapshot weights. Values cover converged snapshots only; a non-converged or unknown snapshot is excluded and named in the receipt's warning. A branch with any missing flow or zero limit at a converged snapshot is unavailable."
+[clean] CARD TEXT:
+Requested results checked
+
+Current run · Line_BC · ac branch loading
+
+1 Jan 2030, 00:00–01:00
+
+ac peak branch utilisation: answered (2/2 snapshots)
+ac hours above rating: answered (2/2 snapshots)
+ac peak apparent flow: answered (2/2 snapshots)
+ac branch rating: answered (2/2 snapshots)
+
+4 facts checked against evidence. This does not certify the engineering model.
+
+Download checked values and evidence
+Evidence 1
+[clean] WARN ROWS: []
+[clean] COMPANION: "Requested results checked\n\nShow answer\n\nBranch Line_BC; requested snapshots (2030-01-01T00:00:00 to 2030-01-01T01:00:00). Line values cover 2 of 2 snapshots, all converged. Peak AC loading against the rating, over converged snapshots: 0.06119313132646785 %. Weighted hours above the rating, over converged snapshots: 0 h. Peak apparent-power flow, over converged snapshots: 3.0596565663233926 MVA. Rating (s_nom_opt if extendable, else s_nom): 5000 MVA. AC power flow: apparent power from the flow's own results, max(hypot(p0, q0), hypot(p1, q1)); no N-1 and no voltage limits. The limit is the rating times s_max_pu per snapshot. Hours use generator snapshot weights. Values cover converged snapshots only; a non-converged or unknown snapshot is excluded and named in the receipt's warning. A branch with any missing flow or zero limit at a converged snapshot is unavailable."
+no load flow tab found
+done
