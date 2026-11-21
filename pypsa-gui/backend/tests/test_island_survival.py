@@ -571,7 +571,14 @@ def test_the_island_side_is_the_sidecar_units_buses_not_the_poc_mark():
         "carrying": [],
     }
     n.remove("Link", "subsea_tie")
-    assert S.tie_state(n, island) == {"state": "no_tie", "ties": [], "carrying": []}
+    out = S.tie_state(n, island)
+    assert {k: out[k] for k in ("state", "ties", "carrying")} == {
+        "state": "no_tie",
+        "ties": [],
+        "carrying": [],
+    }
+    # SH 54: the untagged internal feeder is still read as the island's own, but named.
+    assert out["unmarked_links"] == ["hospital_feeder"]
     import pypsa
 
     assert S.tie_state(pypsa.Network(), island) == {

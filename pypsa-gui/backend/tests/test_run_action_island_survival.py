@@ -1595,3 +1595,29 @@ def _screen_failed(ok):
     from gridspine.static.frequency import failed
 
     return failed(ok)
+
+
+def test_no_tie_names_an_internal_link_read_as_the_islands_own_feeder(hub):
+    """SH 54: the untagged R4 network reads no_tie, and the row's detail says why, by name."""
+    _sidecar(hub)
+    n = T.BUILDERS[TID]()
+    n.remove("Generator", "mainland_supply")
+    n.generators.at["diesel_new", "bus"] = "mainland"
+    n.links.at["subsea_tie", "eh_role"] = ""
+    n.buses.at["mainland", "eh_poc"] = False
+    g = _gate(hub, "mg.tie.open", value="open", ctx=_ctx(hub, n))
+    assert g["facts"][0]["value"] == "no_tie"
+    (detail,) = g["facts"][0]["detail"]
+    for word in ("hospital_feeder, subsea_tie", "own feeder", "grid_import", "eh_poc"):
+        assert word in detail, word
+
+
+def test_the_tie_row_names_a_supply_left_out_as_never_available(hub):
+    """SH 56: the open answer stands, and the row's detail says which supply was left out."""
+    _sidecar(hub)
+    n = T.BUILDERS[TID]()
+    n.add("Generator", "parked", bus="island", p_nom=4.0, p_max_pu=0.0)
+    g = _gate(hub, "mg.tie.open", value="open", ctx=_ctx(hub, n))
+    assert g["facts"][0]["value"] == "open"
+    (detail,) = g["facts"][0]["detail"]
+    assert "parked" in detail and "not read as a mainland supply" in detail

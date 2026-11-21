@@ -29,3 +29,5 @@ Journey fit: set up the question (section 8) → run → results header ("the re
 ## Comments
 
 - Seen again 2026-11-20 (template walk, master 1f6905e3): H2 Guided Goal card still reads 'No goal yet' (no default goal); DC and microgrid show 'No goal yet' in the field while the Assumptions row says '3 h/yr (assumed)'. The verdict text now correctly names 'section 8, Scenarios & optimisation'.
+
+- Seen again 2026-11-21 (template walk, master 6b421b06): Ammonia: verdict "No reliability goal is set for this site, so the study did not certify it", with a Set a goal button; Guided cost shown. Concentrator and IPP: Reliability not offered or not reached.
