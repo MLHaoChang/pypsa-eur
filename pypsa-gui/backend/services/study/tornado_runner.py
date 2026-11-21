@@ -50,7 +50,7 @@ import time
 from dataclasses import asdict
 from typing import Any
 
-from services import dirty_state
+from services import dirty_state, project_write_gate
 from services.pypsa_service import PyPSAService
 from services.study import findings as F
 from services.study import forks as study_forks
@@ -144,6 +144,9 @@ class ForkSolver:
                 kept.extend(c for c in flags if c not in kept)
         self.count += 1
         slug = f"v{self.count:02d}"
+        # Project-viewer-role 02: the requester's role is read again before
+        # each fork is written into the project.
+        project_write_gate.check_requester(self.user_id, self.base_row.id)
         row = study_forks.create_variant_fork(
             self.db, self.user_id, base_row=self.base_row, study_id=self.study_id,
             variant_id=slug, network=net, solver_config=cfg)
@@ -368,6 +371,8 @@ def _worker(*, study_id, base_dir, base_row_id, user_id, inp, record, stop_event
                   or record.get("deadline_exceeded") else "done")
         if record.get("deadline_exceeded"):
             error = record["deadline_exceeded"]
+    except project_write_gate.RequesterViewOnly as exc:
+        error, status = str(exc), "failed"
     except Exception as exc:  # noqa: BLE001 — recorded
         logger.exception("decision study %s tornado failed", study_id)
         error = f"{type(exc).__name__}: {exc}"
@@ -381,8 +386,15 @@ def _worker(*, study_id, base_dir, base_row_id, user_id, inp, record, stop_event
                 R._set(ctx, record, campaign=campaign.end(f"decision study tornado {status}"))
             except campaign.CampaignError:
                 pass
+        # A requester made a viewer, or removed, mid-run gets none of the
+        # tornado's results saved, only the refusal (project-viewer-role 02).
+        refused = project_write_gate.requester_may_not_write(user_id, base_row_id)
+        if refused:
+            status, error = "failed", str(project_write_gate.RequesterViewOnly())
+            outcome = None
         try:
-            _save(base_dir, study_id, inp, record, outcome, status, error, left)
+            _save(base_dir, study_id, inp, record, outcome, status, error, left,
+                  error_code=project_write_gate.KIND if refused else None)
         except Exception:  # noqa: BLE001
             logger.exception("decision study %s: saving the tornado failed", study_id)
             error = error or "saving the tornado failed"
@@ -393,10 +405,12 @@ def _worker(*, study_id, base_dir, base_row_id, user_id, inp, record, stop_event
         if record.get("registered_base"):
             R._release_base(ctx.registry_key, True)
         R._set(ctx, record, status=status, error=error, finished_at=time.time(),
-               current=None, forks_left=left)
+               current=None, forks_left=left,
+               **({"error_code": project_write_gate.KIND} if refused else {}))
 
 
-def _save(base_dir, study_id, inp, record, outcome, status, error, left) -> None:
+def _save(base_dir, study_id, inp, record, outcome, status, error, left,
+          error_code: str | None = None) -> None:
     hashes = inp.findings.get("hashes") or {}
     data: dict[str, Any] = {
         "status": status, "kind": KIND, "error": error,
@@ -409,6 +423,8 @@ def _save(base_dir, study_id, inp, record, outcome, status, error, left) -> None
         "option_network_hashes": hashes.get("option_network_hashes") or {},
         "preflight_flags": list(record.get("preflight_flags") or []),
     }
+    if error_code is not None:
+        data["error_code"] = error_code
     if outcome is not None:
         rob = outcome.robustness
         if status == "aborted" and rob.status == "ok":

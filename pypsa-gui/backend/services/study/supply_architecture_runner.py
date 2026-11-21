@@ -34,7 +34,7 @@ import threading
 import time
 from typing import Any
 
-from services import dirty_state
+from services import dirty_state, project_write_gate
 from services.pypsa_service import PyPSAService
 from services.study import findings as F
 from services.study import runner as R
@@ -291,6 +291,8 @@ def _worker(
         )
         if record.get("deadline_exceeded"):
             error = record["deadline_exceeded"]
+    except project_write_gate.RequesterViewOnly as exc:
+        error, status = str(exc), "failed"
     except Exception as exc:  # noqa: BLE001 — recorded
         logger.exception("decision study %s supply architectures failed", study_id)
         error = type(exc).__name__  # the text is in the log above, not the record
@@ -308,8 +310,17 @@ def _worker(
                 )
             except campaign.CampaignError:
                 pass
+        # A requester made a viewer, or removed, mid-run gets none of the
+        # comparison saved, only the refusal (project-viewer-role 02).
+        refused = project_write_gate.requester_may_not_write(user_id, base_row_id)
+        if refused:
+            status, error = "failed", str(project_write_gate.RequesterViewOnly())
+            table = None
         try:
-            _save(base_dir, study_id, record, table, status, error, left)
+            _save(
+                base_dir, study_id, record, table, status, error, left,
+                error_code=project_write_gate.KIND if refused else None,
+            )
         except Exception:  # noqa: BLE001
             logger.exception(
                 "decision study %s: saving the supply architectures failed", study_id
@@ -327,10 +338,13 @@ def _worker(
             finished_at=time.time(),
             current=None,
             forks_left=left,
+            **({"error_code": project_write_gate.KIND} if refused else {}),
         )
 
 
-def _save(base_dir, study_id, record, table, status, error, left) -> None:
+def _save(
+    base_dir, study_id, record, table, status, error, left, error_code=None
+) -> None:
     data: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "status": status,
@@ -353,6 +367,8 @@ def _save(base_dir, study_id, record, table, status, error, left) -> None:
     }
     if table is not None:
         data.update(table)
+    if error_code is not None:
+        data["error_code"] = error_code
     with store.WRITE_LOCK:
         store.save_aux(base_dir, study_id, AUX, data)
 

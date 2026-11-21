@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A decision-study run, tornado, supply-architecture comparison, investment case or business case started by an editor who is made a viewer, or removed, while it runs now fails with `project_view_only` and saves nothing into the project.

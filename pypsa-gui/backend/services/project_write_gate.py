@@ -79,6 +79,53 @@ def is_viewer(db: DBSession, user: User | None, project_uuid: str | None) -> boo
     )
 
 
+class RequesterViewOnly(RuntimeError):
+    """A run's requester may no longer write its project (project-viewer-role 02)."""
+
+    code = KIND
+
+    def __init__(self) -> None:
+        super().__init__(f"{KIND}: {MESSAGE}")
+
+
+def requester_may_not_write(user_id, project_id) -> bool:
+    """True when the person who started a run may no longer write its project:
+    they now only view it, their membership is gone, or their account is.
+
+    Read fresh from the database each call, so a run asks again before each
+    write: an editor made a viewer, or removed, mid-run gets nothing saved
+    (project-viewer-role 02; GK B F3 on #1622: a lost membership fails closed
+    like a demotion). A run with no recorded requester or project (local mode)
+    is not judged here, nor is a deleted project.
+    """
+    import uuid
+
+    if user_id is None or project_id is None:
+        return False
+    try:
+        uid, pid = uuid.UUID(str(user_id)), uuid.UUID(str(project_id))
+    except ValueError:
+        return False
+    from db import session as db_session
+
+    db = db_session.SessionLocal()
+    try:
+        user, project = db.get(User, uid), db.get(Project, pid)
+        if project is None:
+            return False
+        if user is None:
+            return True
+        return project_acl.project_role(db, user, project) != project_acl.EDIT
+    finally:
+        db.close()
+
+
+def check_requester(user_id, project_id) -> None:
+    """Raise `RequesterViewOnly` when `requester_may_not_write` holds."""
+    if requester_may_not_write(user_id, project_id):
+        raise RequesterViewOnly()
+
+
 @dataclass(frozen=True)
 class Rule:
     kind: str  # "write" | "allow" | "none"

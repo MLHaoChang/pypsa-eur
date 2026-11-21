@@ -77,7 +77,7 @@ from models.study import (
     FindingsHashes,
     OptionResult,
 )
-from services import dirty_state
+from services import dirty_state, project_write_gate
 from services.pypsa_service import PyPSAService
 from services.study import forks as study_forks
 from services.study import library as study_library
@@ -660,6 +660,7 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
         from services.study import compile as study_compile
 
         idx = packs.snapshots_for(intake)
+        project_write_gate.check_requester(user_id, base_row_id)
         try:
             ref = study_compile.mint_export_series(
                 db, base_row.org_id, base_uuid=base_row_id, study_id=study_id,
@@ -707,6 +708,9 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
             flags = export_cycling_flags(issues)
             if flags:
                 preflight_flags[opt.option_id] = flags
+            # Project-viewer-role 02: the requester's role is read again
+            # before each fork is written into the project.
+            project_write_gate.check_requester(user_id, base_row_id)
             row = study_forks.create_option_fork(
                 db, user_id, base_row=base_row, study_id=study_id,
                 option_id=opt.option_id, network=net, solver_config=cfg)
@@ -779,6 +783,8 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
                 break
         status = ("aborted" if stop_event.is_set()
                   else "failed" if error is not None else "done")
+    except project_write_gate.RequesterViewOnly as exc:
+        error, status = str(exc), "failed"
     except Exception as exc:  # noqa: BLE001 — recorded on the run
         logger.exception("decision study %s run failed", study_id)
         error = f"{type(exc).__name__}: {exc}"
@@ -799,7 +805,7 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
         try:
             final = _finish(db, ctx, record, study_id=study_id, base_row_id=base_row_id,
                             base_dir=base_dir, created=created, outcomes=outcomes,
-                            fidelity=fidelity, status=status, error=error,
+                            fidelity=fidelity, status=status, error=error, user_id=user_id,
                             run_ledger=ledger, run_intake=intake,
                             preflight_flags=preflight_flags)
         except Exception as exc:  # noqa: BLE001
@@ -847,14 +853,24 @@ def _flag_codes(preflight_flags: dict[str, list[str]] | None) -> list[str]:
 
 def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcomes,
             fidelity, status, error, run_ledger, run_intake,
-            preflight_flags: dict[str, list[str]] | None = None) -> dict:
+            preflight_flags: dict[str, list[str]] | None = None, user_id=None) -> dict:
     """
     Remove unsolved forks, write the findings and the run record; return the
     live record's terminal fields, which the worker publishes after release.
+
+    A requester who may no longer write the base project (made a viewer, or
+    removed, mid-run: project-viewer-role 02) gets none of the run's results
+    written: every fork goes, and no findings or study change land. Only the
+    refusal itself is recorded (status, error, `error_code`), as a failed
+    finish is, so the run does not read as never run.
     """
-    solved_rows = {o.option_id: r for o, r, _c in created
-                   if outcomes.get(o.option_id, {}).get("result") is not None
-                   and outcomes[o.option_id]["result"].solve_status == "ok"}
+    refused = project_write_gate.requester_may_not_write(user_id, base_row_id)
+    if refused:
+        status, error = "failed", str(project_write_gate.RequesterViewOnly())
+    solved_rows = {} if refused else {
+        o.option_id: r for o, r, _c in created
+        if outcomes.get(o.option_id, {}).get("result") is not None
+        and outcomes[o.option_id]["result"].solve_status == "ok"}
     removal_errors = []
     for opt, row, _cfg in created:
         if opt.option_id in solved_rows:
@@ -872,6 +888,13 @@ def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcom
                              study_id, opt.option_id)
             removal_errors.append(f"fork_removal_failed:{type(exc).__name__}")
             db.rollback()
+    if refused:
+        final = {"status": status, "error": error,
+                 "error_code": project_write_gate.KIND, "finished_at": time.time(),
+                 "current": None, "pending": [o.option_id for o, _r, _c in created],
+                 "solved": [], "fork_removal_refused": removal_errors}
+        _record_unfinished(base_dir, study_id, record, final)
+        return final
 
     with store.WRITE_LOCK:
         study = store.load_study(base_dir, study_id)
