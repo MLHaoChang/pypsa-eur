@@ -1,7 +1,15 @@
-"""Bounded, raw-source generator calculations; never a total-system-cost alias."""
+"""Bounded, raw-source generator calculations; never a total-system-cost alias.
+
+A profile's definition hash (`definition_hash`) covers each metric's label, unit
+and formula_id and the checked-answer renderer's version, not the formula code.
+A change to a formula's arithmetic must bump its formula_id (``x/1`` -> ``x/2``),
+or a record checked under the old formula reads as if nothing changed.
+"""
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from numbers import Real
 
@@ -331,6 +339,47 @@ def calculate(raw, entity):
     return facts, slots
 
 
+# The version of the checked-answer text renderer (`assurance.Turn.validate_profile`).
+# Bump it when that renderer changes how a checked value is worded; every
+# profile's definition hash then changes with it.
+RENDERER_VERSION = 1
+
+
+def _no_floats(value):
+    """Refuse a float anywhere in the hash input: its JSON spelling is not canonical."""
+    if isinstance(value, float):
+        raise TypeError("definition_hash_float")
+    if isinstance(value, dict):
+        for item in value.values():
+            _no_floats(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _no_floats(item)
+
+
+def definition_hash(profile, metrics=None):
+    """``"sha256:<hex>"`` over the profile's metrics in order (or `metrics`,
+    the ones a scope requested, in their requested order), each metric's
+    label, unit and formula_id (as `definition` gives them for this profile) and
+    `RENDERER_VERSION`; canonical JSON (sorted keys, no spaces, UTF-8).
+
+    The hash covers formula ids, not formula code: a formula change must bump
+    its formula_id. A metric without a definition (the "unsupported" fallback)
+    and an unknown profile are refused, never hashed; so is a float input.
+    """
+    rows = []
+    for metric in PROFILES[profile] if metrics is None else metrics:
+        d = definition(metric, profile)
+        if d["formula_id"] == "unsupported":
+            raise ValueError("unsupported_metric_definition")
+        rows.append({"metric": metric, "label": d["label"], "unit": d["unit"],
+                     "formula_id": d["formula_id"]})
+    payload = {"metrics": rows, "renderer_version": RENDERER_VERSION}
+    _no_floats(payload)
+    text = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def definition(metric, profile=None):
     if profile == storage_costs.PROFILE and metric == "total_cost":
         return storage_costs.TOTAL_DEFINITION
@@ -347,6 +396,16 @@ def slot_warnings(slots):
 
 def requested_metrics(scope):
     return scope.get("metrics", PROFILES[scope["profile"]])
+
+
+def scope_definition_hash(scope):
+    """`definition_hash` over the metrics `scope` requests (comparison and
+    optional metrics included), or None when one has no definition: such a
+    record is captured with its hash not recorded, never refused here."""
+    try:
+        return definition_hash(scope["profile"], requested_metrics(scope))
+    except ValueError:
+        return None
 
 
 def _window(raw, scope):

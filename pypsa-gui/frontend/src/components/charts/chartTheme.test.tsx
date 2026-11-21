@@ -53,7 +53,7 @@ describe('sizes, ticks and series styles', () => {
   })
 
   it('sets ticks in mono with tabular figures, at the DENSITY-1 size', () => {
-    expect(CHART_TICK.fontFamily).toBe('var(--font-family-mono)')
+    expect(CHART_TICK.fontFamily).toBe('var(--font-mono)')
     expect(CHART_TICK.style.fontVariantNumeric).toBe('tabular-nums')
     expect(CHART_TICK.fontSize).toBe(10)
   })

@@ -1,0 +1,60 @@
+{
+ "status": "failed",
+ "study": "decision_study",
+ "study_id": "0244c972bc294b84899378fbf25bab30",
+ "fidelity": "quick_screen",
+ "options": [
+  "none",
+  "bess_1h",
+  "bess_2h",
+  "bess_4h",
+  "bess_pv_2h"
+ ],
+ "solved": [],
+ "current": null,
+ "pending": [
+  "none",
+  "bess_1h",
+  "bess_2h",
+  "bess_4h",
+  "bess_pv_2h"
+ ],
+ "solves_charged": 5,
+ "campaign": {
+  "active": false,
+  "objective": "decision study 'Site battery (viewer e2e)': 5 option(s)",
+  "budget_solves": 5,
+  "spent_solves": 5,
+  "remaining_solves": 0,
+  "started_at": "2026-11-21T04:49:25Z",
+  "entries": [
+   {
+    "study": "decision_study",
+    "solves_charged": 5,
+    "at": "2026-11-21T04:49:25Z",
+    "network_revision": 0,
+    "edited_since_study": null
+   }
+  ],
+  "edited_since_study": null,
+  "note": "decision study run done"
+ },
+ "own_campaign": true,
+ "ledger_hash": "2070b04d75d76804",
+ "registered_base": false,
+ "error": "project_view_only: You can view this project but not change it. Ask its owner for edit access.",
+ "started_at": 1795236565.3918872,
+ "finished_at": 1795236628.0652208,
+ "export_series": {
+  "id": "decision-study:f3ef9771-98db-4641-af6b-2e0cad7d976a:0244c972bc294b84899378fbf25bab30:export",
+  "version": 1,
+  "hash": "57186d15792bb8334a6df7e304fb55cd25dc2ffad401f573a1fb0823e4fe195c",
+  "source": "decision_study",
+  "vintage_year": null,
+  "provider": null
+ },
+ "commercial_digest": "ad1563e8f1820503ad4ba81d55b03c6d5b46749629908c0e89a2a86421b5563f",
+ "network_revision": 0,
+ "error_code": "project_view_only",
+ "fork_removal_refused": []
+}

@@ -192,3 +192,9 @@ describe('Q10 — Settings is a header control, not a SIMULATION row', () => {
     await waitFor(() => expect(useUIStore.getState().activeSlidePanel).toBeNull())
   })
 })
+
+// Issue 49: the shared key and model settings are only asked for by a super-admin.
+vi.mock('../auth/AuthProvider', async (orig) => ({
+  ...(await orig<typeof import('../auth/AuthProvider')>()),
+  useIsSuperAdmin: () => true,
+}))

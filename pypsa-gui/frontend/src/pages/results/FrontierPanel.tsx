@@ -11,6 +11,7 @@ import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvali
 import { nk } from '../../utils/queryKeys'
 import { EditedSinceStudyBanner } from './EditedSinceStudyBanner'
 import { CHART_GRID, downloadCSV, refLine } from './shared'
+import { signFirstEuro } from '../../utils/format'
 
 // The cost-vs-availability frontier (spec §5.6, Phase 5) — the trade-off the
 // feature is named for, as a CURVE. Phases 1–4 give one point on it.
@@ -73,10 +74,12 @@ export interface FrontierPayload {
 const CURVE = '#dc2626'   // matches the Lost load tab this panel lives on
 const KNEE = '#f59e0b'    // amber, so the economic point reads as distinct
 
-const eur = (v: number) =>
-  v >= 1e9 ? `€${(v / 1e9).toFixed(2)}bn`
-    : v >= 1e6 ? `€${(v / 1e6).toFixed(1)}m`
-      : `€${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+const eur = (v: number) => {
+  const a = Math.abs(v)
+  return a >= 1e9 ? signFirstEuro(v, `${(a / 1e9).toFixed(2)}bn`)
+    : a >= 1e6 ? signFirstEuro(v, `${(a / 1e6).toFixed(1)}m`)
+      : signFirstEuro(v, a.toLocaleString(undefined, { maximumFractionDigits: 0 }))
+}
 
 /**
  * The economic reading of the curve. `knee` is the index of the step where
