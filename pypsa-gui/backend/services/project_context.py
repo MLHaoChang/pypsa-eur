@@ -313,7 +313,7 @@ RESULT_STATE_KEYS = (
     "billing_frames",
     "last_commercial_terms",
     "ac_pf_convergence", "ac_pf_convergence_list",
-    "ac_pf_slack_bus_used", "ac_pf_stripped_voll_slacks",
+    "ac_pf_slack_bus_used", "ac_pf_stripped_voll_slacks", "ac_pf_seeded_by",
     "ac_pf_converged_count", "ac_pf_total_snapshots", "ac_pf_unknown_count",
     # W4b: the edit counter the load flow ran at (its freshness, like the EH
     # study's `network_revision`). Persisted beside the counter in metadata.json.
@@ -600,6 +600,7 @@ class ProjectSolverState:
     ac_pf_convergence_list: Any = None   # list[{snapshot, period?, ok}]
     ac_pf_slack_bus_used: Any = None
     ac_pf_stripped_voll_slacks: Any = None
+    ac_pf_seeded_by: Any = None          # list[str]: shifting transformers that seeded the PF (DGS-SEED-1)
     ac_pf_converged_count: Any = None
     ac_pf_total_snapshots: Any = None
     ac_pf_unknown_count: Any = None      # int: snapshots with unknown convergence (AA-12)

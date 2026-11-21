@@ -298,6 +298,11 @@ def _result_df(n, accessor_name: str, attr: str, source: str = "lopf", *, state=
     snap = (_state if state is None else state).get(f"{src}_results")
     if isinstance(snap, dict) and key in snap:
         return snap[key]
+    if src == "ac_pf" and isinstance(snap, dict):
+        # PF-SAVE-1: the live network holds the LP's tables, never the
+        # flow's, so a table the flow's record lacks (links in a project saved
+        # before them) is no data, not the LP's values under a PF label.
+        return None
     try:
         accessor = getattr(n, accessor_name, None)
         if accessor is None:
@@ -709,6 +714,9 @@ def get_ac_pf_status():
         "available": True,
         "slack_bus_used": s.get("ac_pf_slack_bus_used"),
         "stripped_voll_slacks": s.get("ac_pf_stripped_voll_slacks") or [],
+        # DGS-SEED-1: non-empty when the flow was seeded by lpf() because
+        # these transformers shift phase.
+        "seeded_by": s.get("ac_pf_seeded_by") or [],
         # `converged_per_snapshot` is the legacy `{iso: bool}` dict; on
         # multi-period the same ISO can map to multiple periods so the map
         # is ambiguous. New consumers should use `converged_list` —

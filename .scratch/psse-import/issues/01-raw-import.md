@@ -3,7 +3,7 @@
 
 # PSS/E import 01: RAW case to a PyPSA network
 
-Status: in-progress
+Status: done; import merged (#1652, #1608, #1609); R7 off-nominal round trip landed in #1727
 Type: task
 Owner decision: IMPORTS-1, IMPORT-FLOW-1, HOLISTIC-1, RAW-NAMES-1, PR-SIZE-1
 Gated: yes (GK A, gridspine)

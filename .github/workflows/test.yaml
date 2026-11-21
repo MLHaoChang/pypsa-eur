@@ -136,6 +136,10 @@ jobs:
     needs: gui-backend-changes
     if: needs.gui-backend-changes.outputs.run == 'true'
     runs-on: ubuntu-latest
+    # A healthy shard on the 4-shard layout takes up to ~150 min. Without a cap
+    # a hung shard held its runner for GitHub's 6 h limit. Once the shards run
+    # under xdist (~25 min each) this can drop to ~60.
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
@@ -170,7 +174,9 @@ jobs:
       run: npm ci --no-audit --no-fund
 
     # The full output goes to a log file and the artifact below, so a failure
-    # can be read whole instead of from under the job log's tail.
+    # can be read whole instead of from under the job log's tail. `-vv` (on top
+    # of pytest.ini's -q) prints every test's name, so a shard that stalls
+    # shows which test it stalled on.
     - name: Run backend tests
       run: |
         set -o pipefail
@@ -178,7 +184,7 @@ jobs:
         pixi run gui-tests \
           --num-shards=8 --shard-id=$(( ${{ matrix.shard }} - 1 )) \
           -n auto --dist loadfile \
-          --junitxml=test-results/junit.xml --durations=30 \
+          --junitxml=test-results/junit.xml --durations=30 -vv \
           2>&1 | tee pypsa-gui/backend/test-results/pytest.log
 
     - name: Upload test results
@@ -394,6 +400,93 @@ jobs:
       with:
         name: gui-owner-journeys
         path: oj-artifacts/
+        if-no-files-found: ignore
+
+  # Template end-to-end journeys (E2E-TEMPLATES-1): one browser journey per
+  # workflow template through the built app, no model. Pull requests that touch
+  # the GUI run the short journey (default study budget, a few minutes per
+  # template); the scheduled run and a manual dispatch run the full journey.
+  # Open gaps from .scratch/template-e2e are expected failures keyed to their
+  # issue and flip green when fixed. Not part of "GUI backend", like the owner
+  # journeys: a browser flake must not hold the backend gate.
+  gui-template-journeys:
+    name: GUI template journeys (browser)
+    runs-on: ubuntu-latest
+    # The full journey waits for the staged concentrator study (26,280 snapshots,
+    # up to 30 steps), which took over 15 minutes locally.
+    timeout-minutes: 150
+
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    env:
+      PLAYWRIGHT_VERSION: "1.63.0"
+      TEMPLATE_JOURNEYS_ARTIFACTS: ${{ github.workspace }}/template-journeys-artifacts
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - uses: dorny/paths-filter@v4
+      id: filter
+      with:
+        filters: |
+          gui:
+            - 'pypsa-gui/backend/**'
+            - 'pypsa-gui/frontend/**'
+            - 'pixi.toml'
+            - 'pixi.lock'
+            - '.github/workflows/test.yaml'
+
+    - name: Skip - no GUI changes
+      if: steps.filter.outputs.gui != 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+      run: echo "Skipping template journeys because no GUI changes detected"
+
+    - name: Setup Pixi
+      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      uses: prefix-dev/setup-pixi@v0.10.0
+      with:
+        pixi-version: v0.68.1
+        environments: test
+        cache: true
+        cache-write: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
+
+    - name: Setup Node
+      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: npm
+        cache-dependency-path: pypsa-gui/frontend/package-lock.json
+
+    - name: Build the frontend
+      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      working-directory: pypsa-gui/frontend
+      run: |
+        npm ci --no-audit --no-fund
+        npm run build
+
+    - name: Install Playwright and its Chromium
+      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      run: |
+        npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/pw" "playwright@$PLAYWRIGHT_VERSION"
+        "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
+
+    - name: Run the template journeys (short on pull requests, full on schedule)
+      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      working-directory: pypsa-gui/frontend
+      env:
+        PLAYWRIGHT_MODULE_PATH: ${{ runner.temp }}/pw/node_modules/playwright/package.json
+        PYPSA_COMPOSER_PYTHON: ${{ github.workspace }}/.pixi/envs/test/bin/python
+        JOURNEY_MODE: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'full' || 'short' }}
+      run: node scripts/template-journeys.mjs --mode "$JOURNEY_MODE"
+
+    - name: Upload journey screenshots and reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: gui-template-journeys
+        path: template-journeys-artifacts/
         if-no-files-found: ignore
 
   integration-tests:

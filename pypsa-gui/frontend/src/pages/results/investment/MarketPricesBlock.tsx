@@ -9,6 +9,7 @@ import { commercialApi, libraryApi } from '../../../api/commercial'
 import type { CommercialConfig, LibraryRef } from '../../../api/types'
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
+import { librarySeriesLabel } from '../../../plainNames'
 import { SeriesSelect } from './SeriesSelect'
 
 function Provenance({ value, testId }: { value: LibraryRef | null; testId: string }) {
@@ -16,7 +17,7 @@ function Provenance({ value, testId }: { value: LibraryRef | null; testId: strin
   const illustrative = /illustrative/i.test(value.source)
   return (
     <span className="text-[11px] text-muted" data-testid={testId}>
-      Library series {value.id} v{value.version} · {value.source}
+      Library series {librarySeriesLabel(value.id, value.version)} · {value.source}
       {illustrative && <span className="text-warn"> (illustrative, not market data)</span>}
     </span>
   )

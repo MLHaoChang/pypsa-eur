@@ -3,7 +3,7 @@
 
 # 12 — Mining concentrator run never finishes in a usable time and blocks the app
 
-Status: needs-triage
+Status: ready-for-agent
 Impact: high
 Templates: eh_concentrator_staged (26,280 snapshots)
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
@@ -19,3 +19,7 @@ One template cannot complete the journey; the single backend is unusable while i
 ## Suggested fix
 
 Default a representative horizon like the other templates, show stage and elapsed time, make Abort reliable, keep other requests responsive.
+
+## Triage (2026-11-19, master 9f850d36)
+
+Checked by code reading only; the app was not re-run. Three parts, slice them (PR-SIZE-1): (a) a shorter default horizon for the concentrator, which is issue 09 fix (b) and changes results (GK A); unblocked by the owner's call TE2E-09-SMALLER-1 (see issue 09 (b), which carries it: do it there once); (b) Abort answers within its timeout and other requests (project delete, API calls) stay responsive during the run (GK B); (c) the run shows stage and elapsed time instead of a raw log (UX). Acceptance: while the concentrator runs, project delete and API calls respond; Abort stops it with no timeout toast. No slice is blocked now.
