@@ -121,7 +121,9 @@ try {
       }
       // Opening the palette again revalidates the catalogue: the network shows a 304.
       await p.keyboard.press('Escape').catch(() => {})
+      const revalidated = p.waitForResponse(r => new URL(r.url()).pathname === '/api/catalogue', { timeout: 10000 }).catch(() => null)
       await p.keyboard.press('Control+k')
+      await revalidated
       await input.fill(QUERY)
       await palette.getByText('Parameters', { exact: true }).waitFor()
       const ok = landed.field === 'p_nom' && landed.mode === mode && !!back && returned
