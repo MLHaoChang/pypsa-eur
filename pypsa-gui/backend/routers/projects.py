@@ -5712,6 +5712,30 @@ def download_bundle(
     )
 
 
+@router.get("/{name}/workbook")
+def download_workbook(
+    name: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """The project as last saved, as the Excel input workbook (IMPORTS-1); unsaved edits are not in it."""
+    from services import excel_workbook, project_registry
+
+    project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, name)
+    data = excel_workbook.export_bytes(project_registry.project_dir(project), project.name)
+    change_log_service.log(
+        "export", "Project", project.name,
+        f"Downloaded the Excel input workbook of '{project.name}' (as last saved)",
+        org_id=str(project.org_id),
+    )
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=excel_workbook.MIME,
+        headers={"Content-Disposition": content_disposition(f"{project.name}.xlsx")},
+    )
+
+
 @router.get("/{name}/members")
 def get_project_members(
     name: str,
