@@ -1039,6 +1039,7 @@ export default function AppHeader() {
           shortcut via the kbd chip. */}
       <button
         onClick={() => setPaletteMode('all')}
+        data-palette-trigger
         title={`Command palette — switch projects, open panels, jump to assets (${cmdKey}+K)`}
         className="flex items-center gap-1.5 px-2 py-1.5 rounded text-[11px] font-medium border border-border text-muted hover:text-text hover:bg-border/30 transition-colors shrink-0"
       >

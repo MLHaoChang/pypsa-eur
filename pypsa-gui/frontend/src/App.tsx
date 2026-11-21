@@ -56,6 +56,7 @@ import ProjectMismatchBanner from './components/ProjectMismatchBanner'
 import { ProjectMismatchWatcher } from './hooks/useProjectMismatchDetection'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import AssistantDock from './components/AssistantDock'
+import GuideDrawer from './catalogue/GuideDrawer'
 import { useDockAutoCollapse } from './layout/dockAutoCollapse'
 import { useUIStore, type SlidePanel } from './store/uiStore'
 import { authEnabled } from './auth/config'
@@ -838,6 +839,7 @@ export default function App() {
               dock and collapsed companion use this body as their positioned
               container while the chat stays mounted. */}
           <AssistantDock />
+          <GuideDrawer />
           {uiMode === 'guided' && (
             <FieldDrawer>
               {t => t.field === SITE_ANCHOR_TARGET.field
