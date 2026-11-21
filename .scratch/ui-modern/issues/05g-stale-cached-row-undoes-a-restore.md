@@ -27,7 +27,7 @@ A second path, which 05d's U1 rule creates. A card save that only moves the bus 
 - Rebase decision: client-side, no backend change (a 409 would fire on every unrelated write; there is no per-asset revision). The PUT is `{...freshRow, ...userChange}`.
 - Initial-patch compare: the user's change is the keys where the patch differs from the same builder's result for the form's initial values (`useEditBase`), compared with `Object.is`, no tolerance. Tested on all seven cards.
 - Derived columns: the server does not re-derive a generator's capital cost on PUT; StorageUnit and Line omit derived totals; the others keep the fresh stored total.
-- At-open basis: the claim and the scaling use the schema the card opened with. This reverses GK B2's T3 ruling (see 05d Comments). Tested on all seven cards.
+- At-open basis: the claim and the scaling use the schema the card opened with. This reverses GK B2's T3 ruling (see 05d Comments). The scaling is tested on all seven cards, the claim on the four cost cards.
 - No cache fallback: a failed fresh read stops the save; nothing is PUT from the cached row.
 - Residual window: a write between the fresh GET and the PUT is still overwritten. After a units flip the labels follow the live schema while values are claimed at-open, and the save is refused.
 

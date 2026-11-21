@@ -312,19 +312,22 @@ describe.each(Object.keys(CASES))('the %s card rebases its save (05g)', (cls) =>
     expect(body[c.stale.key]).toBe(c.stale.now)
   })
 
-  // 0.0712345678901234 shows as 7.12345678901 % (12 digits): the form's own round trip is not bit-equal, so only the same-builder base
-  // tells "untouched" from "typed". A Load has no scaled field: its round trip is exact, the base changes nothing.
-  it.skipIf(cls === 'Load')('an untouched scaled column whose display round trip is not bit-equal stays as the network now holds it', async () => {
+  // The form seeds every number rounded to 12 digits (`tidy`, assetForm.ts), so a long stored value does not come back
+  // bit-equal from an untouched field (a scaled one, or a Load's p_set): only the same-builder base tells "untouched"
+  // from "typed".
+  it('an untouched column the form rounds stays as the network now holds it', async () => {
     idle()
-    mount(c)
+    const key = cls === 'Load' ? 'p_set' : 'discount_rate'
+    const fresh = cls === 'Load' ? 7 : 0.08
+    mount(cls === 'Load' ? { ...c, row: { ...c.row, p_set: 5.0123456789012345 } } : c)
     await openEdit()
-    serveRows(c.root, [{ ...c.row, discount_rate: 0.08 }])
+    serveRows(c.root, [{ ...(cls === 'Load' ? { ...c.row, p_set: 5.0123456789012345 } : c.row), [key]: fresh }])
     await typeCap()
     await saveWhenReady()
     await waitFor(() => expect(put(c)).toHaveBeenCalled())
     const body = put(c).mock.calls[0][1] as Record<string, unknown>
     expect(body[c.cap.key]).toBe(c.cap.typed)
-    expect(body.discount_rate).toBe(0.08)
+    expect(body[key]).toBe(fresh)
   })
 
   it('a typed value is scaled under the schema the form opened with, not the one the schema reads at Save', async () => {
@@ -335,8 +338,10 @@ describe.each(Object.keys(CASES))('the %s card rebases its save (05g)', (cls) =>
     // the descriptors changed after the card opened (a units flip): the capacity now reads on a x1000 scale
     const flipped = JSON.parse(JSON.stringify((schemas as unknown as Record<string, unknown>)[cls])) as
       { groups: { fields: { key: string; scale: number; unit_display: string; unit_storage: string }[] }[] }
-    for (const f of flipped.groups.flatMap(g => g.fields).filter(f => f.key === c.cap.key)) {
-      f.scale = 1000; f.unit_display = 'kU'; f.unit_storage = 'kU'
+    for (const f of flipped.groups.flatMap(g => g.fields)) {
+      if (f.key === c.cap.key) { f.scale = 1000; f.unit_display = 'kU'; f.unit_storage = 'kU' }
+      // the bus became a tonne bus: a claim read live would now say tonne
+      else if (TONNE_UNIT[f.unit_display]) { f.unit_display = TONNE_UNIT[f.unit_display]; f.unit_storage = f.unit_display }
     }
     schemaGet.mockImplementation(async () => flipped)
     await act(async () => { await client.invalidateQueries({ queryKey: ['assetSchema'] }) })
@@ -344,7 +349,9 @@ describe.each(Object.keys(CASES))('the %s card rebases its save (05g)', (cls) =>
     await typeCap()
     await saveWhenReady()
     await waitFor(() => expect(put(c)).toHaveBeenCalled())
-    const body = put(c).mock.calls[0][1] as Record<string, unknown>
+    const [, body, basis] = put(c).mock.calls[0] as [string, Record<string, unknown>, string | undefined]
     expect(body[c.cap.key]).toBe(c.cap.typed)
+    // the claim is the at-open one too: the cost cards say energy (the server then refuses a bus that is tonne now)
+    expect(basis).toBe(COST_CARDS.includes(cls) ? 'energy' : undefined)
   })
 })
