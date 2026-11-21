@@ -636,7 +636,7 @@ def test_a_two_way_grid_import_is_refused_by_the_commercial_binding_first(
     assert body["run_ready"] is False
     blocker = body["run_blocker"]
     assert blocker["section"] == "commercial" and blocker["code"] == "commercial.binding_invalid"
-    msg = blocker["message"]
+    msg = blocker["detail"]  # the plain words; `message` is the issue's title
     assert "grid connection link grid_import allows reverse flow" in msg
     assert "Make it one-way (set its minimum power, p_min_pu, to 0)" in msg
     assert "commercial.poc_link" not in msg
