@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Fetch historical ENTSO-E day-ahead prices with your own access token. The bidding zone comes from the site pin, or you pick it when the pin does not settle it. Each complete year is cached and lands in the Library as a price series that names its source, zone, year and fetch date.

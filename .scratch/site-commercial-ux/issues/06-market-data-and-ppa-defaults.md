@@ -3,7 +3,7 @@
 
 # 06 No market data: historical prices, PPA defaults per contract form and market bundles are unbuilt (S1, S2, K8)
 
-Status: needs-triage
+Status: ready-for-agent
 Blocked by: none for S1/S2; K8 needs its own gated plan (with DC-06, one reserve model)
 Design: `.scratch/project-workflow/integration-sensitivities.md` §1, §2 and §6; commercial-finance.md §7 row K8 (Q8 = A).
 Source: gap review 2026-11-21, design map.
@@ -39,3 +39,5 @@ An IPP or BESS business case runs on one seed price year. The user cannot pick t
 new `pypsa-gui/backend/services/market_prices.py`, the time-series routes, section 7 price card, app secrets.
 
 ## Comments
+
+- 2026-11-21: owner chose option 2, "S1 + S2 + a K8 plan as one stack" (SCU06-PLAN-1; recorded in the coordinator's brief to session_01G7qCukdK1MXJNKxWQwaHQG until the docs sweep lands it in owner-decisions.md). S1 in progress on `claude/scu06-s1-entsoe-prices`; the section-7 offer waits for SCU03 K1.

@@ -117,6 +117,8 @@ POST   /api/library/series/upload  none the org library, not a project
 POST   /api/library_reference/preview  allow declared non-mutating (assistant_route_parity non_mutating_routes): computes and returns, writes nothing
 PUT    /api/local-settings/anthropic-key  none desktop settings
 POST   /api/local-settings/reveal-log  none desktop settings
+DELETE /api/market-prices/token  none instance administration
+PUT    /api/market-prices/token  none instance administration
 DELETE /api/mcp  none personal MCP connections
 POST   /api/mcp  none personal MCP connections
 POST   /api/memory/dismissals  none personal assistant memory
@@ -208,6 +210,7 @@ POST   /api/projects/{name}/intent-comparison/abort  write path:name
 PUT    /api/projects/{name}/layout  write path:name
 PUT    /api/projects/{name}/map_layout  write path:name
 POST   /api/projects/{name}/map_layout/import  write path:name
+POST   /api/projects/{name}/market-prices/day-ahead  write path:name
 PUT    /api/projects/{name}/members  write path:name
 POST   /api/projects/{name}/profiles/apply  write path:name
 POST   /api/projects/{name}/profiles/apply-batch  write path:name
