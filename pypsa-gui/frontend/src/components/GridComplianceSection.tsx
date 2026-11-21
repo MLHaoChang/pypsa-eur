@@ -96,7 +96,6 @@ export default function GridComplianceSection({ name }: { name: string }) {
       title="Grid compliance (TRGC)"
       count={data ? `${accepted} of ${data.deliverables.length} accepted` : undefined}
       hint="The grid-connection study chain: data, freeze, external study, judgment, TSO submission."
-      panelSection="grid_compliance"
     >
       {q.isPending && <p className="text-[11px] text-muted px-4 py-3">Loading the deliverables…</p>}
       {q.isError && (

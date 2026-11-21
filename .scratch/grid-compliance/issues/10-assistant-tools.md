@@ -43,3 +43,6 @@ the data list; freeze; log and answer a TSO comment; build a pack), registered i
 - `grid_compliance_workflow` is gone from `UI_INTERNAL` and the cap in
   `test_ui_internal_stays_small` is back to 11.
 - Each write tool goes through the same guards and lock as its route (tests).
+- `ui_open_panel` can open the section: `grid_compliance` joins its `panel_section` enum and
+  `_SECTION_FILES` in `tests/test_navigation_reach.py`, and the section gets its
+  `panelSection="grid_compliance"` marker back (GC-09 ships without one, as no id names it yet).
