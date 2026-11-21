@@ -494,6 +494,15 @@ def test_every_template_and_redundancy_asset_keeps_its_price_but_the_electrolyse
         apply_redundancy_scenario(n, sid)
         now[f"redundancy:{sid}"] = _dump_priced(n)
     assert now.keys() == before.keys()
+    # The data centre's existing campus is typed sunk since WALK-IMPROVE-1 b
+    # (GK B2 condition 2 a): overnight cost 0 and nothing else, so it is
+    # priced now and was not before; capital_cost stays 0.
+    for key in [k for k in now if k == "eh_datacenter" or k.startswith("redundancy:")]:
+        sunk = {a: now[key].pop(a) for a in list(now[key]) if a.split(":", 1)[1] in T.DC_EXISTING
+                and a not in before[key]}
+        assert {a.split(":", 1)[1] for a in sunk} == set(T.DC_EXISTING), key
+        for a, row in sunk.items():
+            assert (row["overnight_cost"], row["capital_cost"], row["discount_rate"]) == (0.0, 0.0, 0.07), (key, a)
     changed = []
     for template, assets in before.items():
         assert now[template].keys() == assets.keys(), template

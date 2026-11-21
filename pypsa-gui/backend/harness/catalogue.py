@@ -4218,8 +4218,12 @@ TOOLS: list[dict[str, Any]] = [
         "get_finance_inputs",
         "Read the project's stored finance inputs (FinanceInputs JSON: owner, "
         "WACC, tax, debt, depreciation, ...) and their `digest`: {finance, "
-        "digest, status (not_set | ok | finance_inputs_invalid)}. Call it before "
-        "set_finance_inputs and pass `digest` as its if_match. Safety: read.",
+        "digest, status (not_set | ok | finance_inputs_invalid), assumed}. "
+        "`assumed` maps each input the template shipped as an assumption to "
+        "{value, source, source_year, note, current}; `current` false means the "
+        "user has changed it. Name the assumed values and their source when "
+        "presenting a case. Call it before set_finance_inputs and pass `digest` "
+        "as its if_match. Safety: read.",
         {},
         [],
     ),
