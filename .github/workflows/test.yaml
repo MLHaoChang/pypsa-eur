@@ -180,8 +180,8 @@ jobs:
     if: needs.changes.outputs.gui_backend == 'true'
     runs-on: ubuntu-latest
     # Without a cap a hung shard held its runner for GitHub's 6 h limit. The 8
-    # xdist shards finish in ~10-25 min (pytest itself ~10 min); 120 leaves
-    # wide headroom and frees a wedged runner an hour sooner than 180 did.
+    # xdist shards took 19-62 min each (run 44899424122); 120 leaves headroom
+    # and frees a wedged runner an hour sooner than 180 did.
     timeout-minutes: 120
     strategy:
       fail-fast: false
