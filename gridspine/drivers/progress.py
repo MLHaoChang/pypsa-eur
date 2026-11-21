@@ -118,10 +118,19 @@ class Progress:
     def _write_record(self, stage: str, done: int, total: int) -> None:
         if self._record is None:
             return
-        self._write(self._record, json.dumps({
-            "run": self._run_id, "stage": stage, "done": done, "total": total,
-            "stage_started_at": self._stage_started_at, "updated_at": time.time(),
-        }))
+        self._write(
+            self._record,
+            json.dumps(
+                {
+                    "run": self._run_id,
+                    "stage": stage,
+                    "done": done,
+                    "total": total,
+                    "stage_started_at": self._stage_started_at,
+                    "updated_at": time.time(),
+                }
+            ),
+        )
 
     def _write(self, path: Path, text: str) -> None:
         # A unique temporary file in the SAME directory, then os.replace:
@@ -129,7 +138,9 @@ class Progress:
         tmp = None
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+            fd, tmp = tempfile.mkstemp(
+                dir=path.parent, prefix=path.name + ".", suffix=".tmp"
+            )
             with os.fdopen(fd, "w") as f:
                 f.write(text)
             os.replace(tmp, path)
