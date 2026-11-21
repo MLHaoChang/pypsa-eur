@@ -146,6 +146,32 @@ class RunRefused(RuntimeError):
 
 # ── context plumbing ──────────────────────────────────────────────────────
 
+# Project-viewer-role 02: runs refused because their requester lost edit
+# access mid-run, by (base project id, study id, kind). Nothing of a refused
+# run is written into the project, and the base context is dropped once the
+# run releases it, so this is where its status reads find the refusal. A run
+# finished on disk after it wins (`refused_or_saved`); a restart forgets it.
+_REFUSED: dict[tuple[str, str, str], dict] = {}
+_REFUSED_LOCK = threading.Lock()
+
+
+def remember_refusal(base_uuid, study_id: str, kind: str, record: dict) -> None:
+    with _REFUSED_LOCK:
+        _REFUSED[(str(base_uuid), study_id, kind)] = dict(record)
+
+
+def refused_or_saved(base_uuid, study_id: str, kind: str, saved):
+    """The refused run's record when it is newer than `saved` (the last one on
+    disk), else `saved`."""
+    with _REFUSED_LOCK:
+        refused = _REFUSED.get((str(base_uuid), study_id, kind))
+    if refused is None:
+        return saved
+    if isinstance(saved, dict) and (saved.get("finished_at") or 0) > refused["finished_at"]:
+        return saved
+    return dict(refused)
+
+
 def _on_ctx(ctx, fn, *args, **kwargs):
     """Call ``fn`` with ``ctx`` as the active context, without leaking it."""
     def run():
@@ -859,10 +885,9 @@ def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcom
     live record's terminal fields, which the worker publishes after release.
 
     A requester who may no longer write the base project (made a viewer, or
-    removed, mid-run: project-viewer-role 02) gets none of the run's results
-    written: every fork goes, and no findings or study change land. Only the
-    refusal itself is recorded (status, error, `error_code`), as a failed
-    finish is, so the run does not read as never run.
+    removed, mid-run: project-viewer-role 02) gets nothing written: every fork
+    goes, and no findings, run record or study change land. The refusal is
+    kept in memory (`remember_refusal`) for `get_study_run`.
     """
     refused = project_write_gate.requester_may_not_write(user_id, base_row_id)
     if refused:
@@ -893,7 +918,7 @@ def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcom
                  "error_code": project_write_gate.KIND, "finished_at": time.time(),
                  "current": None, "pending": [o.option_id for o, _r, _c in created],
                  "solved": [], "fork_removal_refused": removal_errors}
-        _record_unfinished(base_dir, study_id, record, final)
+        remember_refusal(base_row_id, study_id, "run", {**_public(record), **final})
         return final
 
     with store.WRITE_LOCK:
@@ -999,7 +1024,8 @@ def get_study_run(study_id: str, *, base_row, base_dir) -> dict | None:
             if (rec and rec.get("study_id") == study_id and rec.get("status") == "running"
                     and rec.get("kind", "run") == "run"):
                 return _public(rec)
-    return store.load_aux(base_dir, study_id, "run")
+    return refused_or_saved(base_row.id, study_id, "run",
+                            store.load_aux(base_dir, study_id, "run"))
 
 
 def abort_study_run(study_id: str, *, base_row, base_dir) -> dict:

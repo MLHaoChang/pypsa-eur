@@ -310,23 +310,21 @@ def _worker(
                 )
             except campaign.CampaignError:
                 pass
-        # A requester made a viewer, or removed, mid-run gets none of the
-        # comparison saved, only the refusal (project-viewer-role 02).
+        # A requester made a viewer, or removed, mid-run gets nothing saved
+        # (project-viewer-role 02); `get` serves the refusal.
         refused = project_write_gate.requester_may_not_write(user_id, base_row_id)
         if refused:
             status, error = "failed", str(project_write_gate.RequesterViewOnly())
-            table = None
-        try:
-            _save(
-                base_dir, study_id, record, table, status, error, left,
-                error_code=project_write_gate.KIND if refused else None,
-            )
-        except Exception:  # noqa: BLE001
-            logger.exception(
-                "decision study %s: saving the supply architectures failed", study_id
-            )
-            error = error or "saving the supply architectures failed"
-            status = "failed"
+        else:
+            try:
+                _save(base_dir, study_id, record, table, status, error, left)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "decision study %s: saving the supply architectures failed",
+                    study_id,
+                )
+                error = error or "saving the supply architectures failed"
+                status = "failed"
         db.close()
         if record.get("registered_base"):
             R._release_base(ctx.registry_key, True)
@@ -340,11 +338,11 @@ def _worker(
             forks_left=left,
             **({"error_code": project_write_gate.KIND} if refused else {}),
         )
+        if refused:
+            R.remember_refusal(base_row_id, study_id, KIND, R._public(record))
 
 
-def _save(
-    base_dir, study_id, record, table, status, error, left, error_code=None
-) -> None:
+def _save(base_dir, study_id, record, table, status, error, left) -> None:
     data: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "status": status,
@@ -367,8 +365,6 @@ def _save(
     }
     if table is not None:
         data.update(table)
-    if error_code is not None:
-        data["error_code"] = error_code
     with store.WRITE_LOCK:
         store.save_aux(base_dir, study_id, AUX, data)
 
@@ -413,6 +409,9 @@ def get(study_id: str, *, base_row, base_dir) -> dict | None:
             ):
                 return R._public(rec)
     saved = _load_saved(base_dir, study_id)
+    refused = R.refused_or_saved(base_row.id, study_id, KIND, saved)
+    if refused is not saved:  # a run refused since (project-viewer-role 02)
+        return refused
     if saved is None:
         return None
     if not isinstance(saved, dict):

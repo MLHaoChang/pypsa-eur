@@ -386,19 +386,18 @@ def _worker(*, study_id, base_dir, base_row_id, user_id, inp, record, stop_event
                 R._set(ctx, record, campaign=campaign.end(f"decision study tornado {status}"))
             except campaign.CampaignError:
                 pass
-        # A requester made a viewer, or removed, mid-run gets none of the
-        # tornado's results saved, only the refusal (project-viewer-role 02).
+        # A requester made a viewer, or removed, mid-run gets nothing saved
+        # (project-viewer-role 02); `get_tornado` serves the refusal.
         refused = project_write_gate.requester_may_not_write(user_id, base_row_id)
         if refused:
             status, error = "failed", str(project_write_gate.RequesterViewOnly())
-            outcome = None
-        try:
-            _save(base_dir, study_id, inp, record, outcome, status, error, left,
-                  error_code=project_write_gate.KIND if refused else None)
-        except Exception:  # noqa: BLE001
-            logger.exception("decision study %s: saving the tornado failed", study_id)
-            error = error or "saving the tornado failed"
-            status = "failed"
+        else:
+            try:
+                _save(base_dir, study_id, inp, record, outcome, status, error, left)
+            except Exception:  # noqa: BLE001
+                logger.exception("decision study %s: saving the tornado failed", study_id)
+                error = error or "saving the tornado failed"
+                status = "failed"
         db.close()
         # Gate S6: release before the terminal status is published (the
         # runner's rule; a poll reading "done" finds nothing exempt).
@@ -407,10 +406,11 @@ def _worker(*, study_id, base_dir, base_row_id, user_id, inp, record, stop_event
         R._set(ctx, record, status=status, error=error, finished_at=time.time(),
                current=None, forks_left=left,
                **({"error_code": project_write_gate.KIND} if refused else {}))
+        if refused:
+            R.remember_refusal(base_row_id, study_id, KIND, R._public(record))
 
 
-def _save(base_dir, study_id, inp, record, outcome, status, error, left,
-          error_code: str | None = None) -> None:
+def _save(base_dir, study_id, inp, record, outcome, status, error, left) -> None:
     hashes = inp.findings.get("hashes") or {}
     data: dict[str, Any] = {
         "status": status, "kind": KIND, "error": error,
@@ -423,8 +423,6 @@ def _save(base_dir, study_id, inp, record, outcome, status, error, left,
         "option_network_hashes": hashes.get("option_network_hashes") or {},
         "preflight_flags": list(record.get("preflight_flags") or []),
     }
-    if error_code is not None:
-        data["error_code"] = error_code
     if outcome is not None:
         rob = outcome.robustness
         if status == "aborted" and rob.status == "ok":
@@ -454,7 +452,8 @@ def get_tornado(study_id: str, *, base_row, base_dir) -> dict | None:
             if (rec and rec.get("kind") == KIND and rec.get("study_id") == study_id
                     and rec.get("status") == "running"):
                 return R._public(rec)
-    return store.load_aux(base_dir, study_id, F.TORNADO_AUX)
+    return R.refused_or_saved(base_row.id, study_id, KIND,
+                              store.load_aux(base_dir, study_id, F.TORNADO_AUX))
 
 
 def abort_tornado(study_id: str, *, base_row, base_dir) -> dict:
