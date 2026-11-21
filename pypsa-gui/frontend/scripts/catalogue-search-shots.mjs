@@ -73,6 +73,9 @@ try {
       await p.goto(`${BASE}/app`)
       await p.getByRole('group', { name: 'Interface mode' }).waitFor()
       await p.waitForTimeout(1500)
+      // A fresh account gets the first-run tour; it would sit over the palette in the shots.
+      const skipTour = p.getByRole('button', { name: 'Skip tour' })
+      if (await skipTour.isVisible().catch(() => false)) await skipTour.click()
       const palette = p.getByRole('dialog', { name: 'Command palette' })
       const input = palette.getByRole('textbox')
       await p.keyboard.press('Control+k')
