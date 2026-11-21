@@ -29,5 +29,5 @@ Six open PRs touch `PropertiesPanel.tsx` (#1787 #1786 #1778 #1773 #1772 #1626); 
 
 - Opening the edit form by request and by canvas double-click, with the schema cached and uncached, shows the asset's current values.
 - A vitest pins both paths.
-- MC → plain words (marginal cost) at PropertiesPanel.tsx:269: the Generator card's meta line says “Marginal cost 40 €/MWh” (or the catalogue's plain name if slice 03 has landed), and the row `layout/PropertiesPanel.tsx | MC` leaves `pypsa-gui/frontend/src/uiCopyGuard.allow.json` and its pinned key set in `uiCopyGuard.test.ts` (expert-catalogue 02c).
+- MC → Running cost (at PropertiesPanel.tsx:269): the Generator card's meta line says “Running cost 40 €/MWh”, the word `utils/fieldLabels.ts` already uses for marginal cost, and the row `layout/PropertiesPanel.tsx | MC` leaves `pypsa-gui/frontend/src/uiCopyGuard.allow.json` and its pinned key set in `uiCopyGuard.test.ts` (expert-catalogue 02c).
 - `pypsa-gui/frontend/scripts/catalogue-search-shots.mjs` asserts the landed field's stored value (100 MW for mainland_supply on Island Microgrid) in all four mode × theme runs; the empty value is never pinned as expected.

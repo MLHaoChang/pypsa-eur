@@ -3,7 +3,7 @@
     "file": "layout/PropertiesPanel.tsx",
     "text": "MC",
     "surface": "Properties panel, Generator card meta line (Expert; Guided field drawer reuses the panel)",
-    "reason": "\"MC\" abbreviates marginal cost (“· MC 40 €/MWh”); held by open PRs #1787 #1786 #1778 #1773 #1772 #1626, and off limits to 02c. Plain words come with the properties-blank-form fix.",
+    "reason": "held file (PropertiesPanel.tsx is changed by open PRs #1787 #1786 #1778 #1773 #1772 #1626); MC = marginal cost",
     "fix": ".scratch/properties-blank-form/issues/01-edit-form-opens-blank.md"
   },
   {
