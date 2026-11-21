@@ -535,3 +535,243 @@ def test_land_stores_the_year_in_the_org_library(db, seeded_identity, tmp_path):
     (row,) = db.query(LibraryItem).filter_by(org_id=org, name=ref.id).all()
     assert TOKEN not in row.meta_json and "fetched:2026-11-21" in row.meta_json
     assert TOKEN not in json.dumps(ref.model_dump(mode="json"))
+
+
+# ── redaction on the real transport (GK B4 review) ─────────────────────────
+
+
+@pytest.fixture()
+def local_entsoe(monkeypatch):
+    """A plain-HTTP server on localhost standing in for the fixed host, so a
+    request runs through httpx's real transport and httpcore, with their DEBUG
+    logging. Only the module constant moves; the code path is the production one."""
+    import http.server
+    import threading
+
+    body = _fixture()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            code = 401 if "bad" in self.path else 200
+            self.send_response(code)
+            self.send_header("Content-Length", str(len(body) if code == 200 else 0))
+            self.end_headers()
+            if code == 200:
+                self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setattr(M, "BASE_URL", f"http://127.0.0.1:{server.server_port}/api")
+    yield server
+    server.shutdown()
+
+
+def test_no_logger_at_any_level_sees_the_token(local_entsoe, caplog):
+    caplog.set_level(logging.DEBUG)  # the root logger, every child propagating to it
+    for name in ("httpx", "httpcore", "httpcore.http11", "httpcore.connection"):
+        logging.getLogger(name).setLevel(logging.DEBUG)
+    series, _ = M.fetch_day_ahead("DE-LU", 2024, token=TOKEN)
+    assert len(series) == 8784
+    with pytest.raises(M.MarketPriceError) as e:
+        M.fetch_day_ahead("DE-LU", 2024, token=TOKEN + "bad")
+    assert e.value.kind == "bad_token"
+    assert any(
+        r.name.startswith("httpcore") for r in caplog.records
+    )  # DEBUG really ran
+    assert TOKEN not in caplog.text
+    assert "securityToken=<redacted>" in caplog.text
+
+
+def test_a_network_refusal_carries_no_request_in_its_traceback(caplog, monkeypatch):
+    import traceback
+
+    monkeypatch.setattr(M, "BASE_URL", "http://127.0.0.1:9/api")  # nothing listens
+    with pytest.raises(M.MarketPriceError) as e:
+        M.fetch_day_ahead("DE-LU", 2024, token=TOKEN)
+    assert e.value.kind == "unavailable"
+    assert e.value.__cause__ is None and e.value.__suppress_context__
+    assert TOKEN not in "".join(traceback.format_exception(e.value))
+    logging.getLogger("tests.market_prices").exception("refused", exc_info=e.value)
+    assert TOKEN not in caplog.text
+
+
+def test_an_unformattable_record_is_dropped_not_passed_on():
+    record = logging.LogRecord("httpx", logging.INFO, "f", 1, "%s %s", ("one",), None)
+    assert M._FILTER.filter(record) is False
+    plain = logging.LogRecord("httpx", logging.INFO, "f", 1, "GET /x", (), None)
+    assert M._FILTER.filter(plain) is True and plain.getMessage() == "GET /x"
+
+
+# ── the edges the mutant run found untested ────────────────────────────────
+
+
+def test_a_pin_that_is_not_a_number_has_no_zone():
+    assert M.zone_for_pin("52.5", 13.4) is None
+    assert M.zone_for_pin(52.5, "13.4") is None
+    assert M.zone_for_pin(52.5, None) is None
+
+
+def test_a_core_holds_its_west_and_south_edges_not_its_east_and_north(monkeypatch):
+    monkeypatch.setattr(M, "CORES", {"FR": ((0.0, 0.0, 1.0, 1.0),)})
+    assert M.zone_for_pin(0.0, 0.0) == "FR"
+    assert M.zone_for_pin(0.5, 0.999) == "FR"
+    assert M.zone_for_pin(1.0, 0.5) is None  # north edge
+    assert M.zone_for_pin(0.5, 1.0) is None  # east edge
+
+
+def test_pin_of_tolerates_a_document_without_sites_and_a_bad_lng():
+    assert M.pin_of({}) is None
+    assert M.pin_of({"sites": None}) is None
+    assert M.pin_of({"sites": [{"origin": {"lat": 1.0, "lng": "x"}}]}) is None
+
+
+def test_without_now_the_clock_decides():
+    assert M.last_complete_year() == datetime.now(UTC).year - 1
+    app_secrets.set_secret(M.TOKEN_NAME, TOKEN)
+    _, _, fetched = M.day_ahead(
+        "DE-LU", 2024, transport=Replay(body=_fixture()).transport
+    )
+    assert fetched == datetime.now(UTC).date().isoformat()
+
+
+def _swap(old: bytes, new: bytes) -> bytes:
+    body = _doc(_year_prices(2023))
+    assert old in body
+    return body.replace(old, new, 1)
+
+
+@pytest.mark.parametrize(
+    "body, words",
+    [
+        (b"<Publication_MarketDocument", "could not be read"),
+        (b"<?xml version='1.0'?><Other_MarketDocument/>", "not a price list"),
+    ],
+)
+def test_an_unreadable_or_foreign_document_is_refused(body, words):
+    with pytest.raises(M.MarketPriceError) as e:
+        M.parse_a44(body, "DE-LU", 2023)
+    assert e.value.kind == "bad_document" and words in e.value.message
+
+
+@pytest.mark.parametrize(
+    "old, new, words",
+    [
+        (
+            b"<start>2023-01-01T23:00Z</start>",
+            b"<start>2023-01-01T23:00</start>",
+            "unreadable time",
+        ),  # naive: no Z
+        (
+            b"<start>2022-12-31T23:00Z</start>\n        <end>",
+            b"<start>2022-12-31T23:00Z</start>\n        <end>x",
+            "unreadable time",
+        ),
+        (
+            b"<price_Measure_Unit.name>MWH</price_Measure_Unit.name>",
+            b"",
+            "unit other than MWh",
+        ),
+        (b"<position>2</position>", b"<position></position>", "not a number"),
+        (b"<price.amount>1</price.amount>", b"", "not a number"),
+        (
+            b"<price.amount>1</price.amount>",
+            b"<price.amount>NaN</price.amount>",
+            "outside its period",
+        ),
+        (
+            b"<position>1</position>",
+            b"<position>2</position>",
+            "without its first price",
+        ),
+    ],
+)
+def test_a_malformed_period_is_refused_in_words(old, new, words):
+    with pytest.raises(M.MarketPriceError) as e:
+        M.parse_a44(_swap(old, new), "DE-LU", 2023)
+    assert e.value.kind == "bad_document" and words in e.value.message
+
+
+def test_an_empty_period_is_refused():
+    raw = _doc(_year_prices(2023)).decode()
+    i = raw.index("<end>2023-01-01T23:00Z</end>")
+    body = (
+        raw[:i]
+        + "<end>2022-12-31T23:00Z</end>"
+        + raw[i + len("<end>2023-01-01T23:00Z</end>") :]
+    )
+    with pytest.raises(M.MarketPriceError) as e:
+        M.parse_a44(body.encode(), "DE-LU", 2023)
+    assert e.value.kind == "bad_document" and "empty price period" in e.value.message
+
+
+def test_a_missing_curve_type_reads_as_a01():
+    body = _doc(_year_prices(2023), curve="A01").replace(
+        b"<curveType>A01</curveType>", b""
+    )
+    series, _ = M.parse_a44(body, "DE-LU", 2023)
+    assert len(series) == 8760
+
+
+def test_a_document_without_time_series_is_no_data():
+    raw = _doc(_year_prices(2023)).decode()
+    body = raw[: raw.index("<TimeSeries>")] + "</Publication_MarketDocument>\n"
+    with pytest.raises(M.MarketPriceError) as e:
+        M.parse_a44(body.encode(), "DE-LU", 2023)
+    assert e.value.kind == "no_data"
+
+
+def test_the_size_cap_is_a_ceiling_the_document_may_reach(monkeypatch):
+    body = _fixture()
+    monkeypatch.setattr(M, "MAX_RESPONSE_BYTES", len(body))
+    assert len(M.parse_a44(body, "DE-LU", 2024)[0]) == 8784
+    series, _ = M.fetch_day_ahead(
+        "DE-LU", 2024, token=TOKEN, transport=Replay(body=body).transport
+    )
+    assert len(series) == 8784
+    monkeypatch.setattr(M, "MAX_RESPONSE_BYTES", len(body) - 1)
+    for call in (
+        lambda: M.parse_a44(body, "DE-LU", 2024),
+        lambda: M.fetch_day_ahead(
+            "DE-LU", 2024, token=TOKEN, transport=Replay(body=body).transport
+        ),
+    ):
+        with pytest.raises(M.MarketPriceError) as e:
+            call()
+        assert "more data than one year" in e.value.message
+
+
+def test_429_says_ENTSO_E_is_limiting():
+    with pytest.raises(M.MarketPriceError) as e:
+        M.fetch_day_ahead(
+            "DE-LU", 2024, token=TOKEN, transport=Replay(status=429).transport
+        )
+    assert "limiting requests" in e.value.message
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        lambda d: {**d, "year": 2023},
+        lambda d: {**d, "values": [float("nan")] + d["values"][1:]},
+    ],
+)
+def test_a_cache_for_another_year_or_with_a_gap_refetches(damage):
+    app_secrets.set_secret(M.TOKEN_NAME, TOKEN)
+    r = Replay(body=_fixture())
+    M.day_ahead("DE-LU", 2024, transport=r.transport, now=NOW)
+    path = M.cache_dir() / "DE-LU" / "2024.json"
+    path.write_text(json.dumps(damage(json.loads(path.read_text()))))
+    M.day_ahead("DE-LU", 2024, transport=r.transport, now=NOW)
+    assert len(r.requests) == 2
+
+
+def test_the_cache_keeps_the_notes():
+    series = pd.Series(1.0, index=_hours(2024))
+    M._write_cache(
+        "DE-LU", 2024, series, ["resolution:PT15M averaged to hourly"], "2026-11-21"
+    )
+    _, notes, fetched = M._read_cache("DE-LU", 2024)
+    assert notes == ["resolution:PT15M averaged to hourly"] and fetched == "2026-11-21"
