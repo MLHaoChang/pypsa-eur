@@ -84,9 +84,16 @@ function snippet(text: string, query: string): string {
   const lower = plain.toLowerCase()
   const at = queryWords.map(w => lower.indexOf(w)).filter(i => i >= 0).sort((a, b) => a - b)[0]
   if (at === undefined) return ''
-  const from = Math.max(0, at - SNIPPET / 3)
-  const cut = plain.slice(from, from + SNIPPET).trim()
-  return `${from > 0 ? '…' : ''}${cut}${from + SNIPPET < plain.length ? '…' : ''}`
+  // Cut at word boundaries: start after the last space before the window, end at the last space inside it.
+  let from = Math.max(0, Math.floor(at - SNIPPET / 3))
+  if (from > 0) from = plain.lastIndexOf(' ', from) + 1
+  let to = Math.min(plain.length, from + SNIPPET)
+  if (to < plain.length) {
+    const space = plain.lastIndexOf(' ', to)
+    if (space > at) to = space
+  }
+  const cut = plain.slice(from, to).trim()
+  return `${from > 0 ? '…' : ''}${cut}${to < plain.length ? '…' : ''}`
 }
 
 const nameWords = words

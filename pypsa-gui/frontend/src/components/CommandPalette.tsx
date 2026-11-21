@@ -118,38 +118,11 @@ function PaletteShell({ mode, onClose, onRequestConfirm }: {
     inputRef.current?.focus()
   }, [])
 
-  // Reset selection when the filtered set changes — otherwise the highlight
-  // can land on an invalid index after typing narrows the list.
-  useEffect(() => { setSelectedIdx(0) }, [query, mode])
-
   // Build commands. useCommands hook pulls from the various caches and
   // returns a flat, already-grouped list. We then fuzzy-filter on the query.
   const all = useCommands(mode)
   const parameters = useParameterCommands(mode, query)
   const filtered = useMemo(() => [...fuzzyFilter(all, query), ...parameters], [all, query, parameters])
-
-  // Single dispatch chokepoint for BOTH the Enter path and the click path.
-  // A destructive command is refused here or nowhere.
-  const runCommand = useCallback((cmd: Command) => {
-    if (cmd.disabled) return
-    if (cmd.confirm) { onRequestConfirm(cmd); return }
-    void cmd.run()
-    onClose()
-  }, [onRequestConfirm, onClose])
-
-  const onKey = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      setSelectedIdx(i => Math.min(filtered.length - 1, i + 1))
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      setSelectedIdx(i => Math.max(0, i - 1))
-    } else if (e.key === 'Enter') {
-      e.preventDefault()
-      const cmd = filtered[selectedIdx]
-      if (cmd) runCommand(cmd)
-    }
-  }, [filtered, selectedIdx, runCommand])
 
   // Group results by kind for visual separation. Order is fixed to match
   // user expectations: actions first, then projects, then snapshots, then
@@ -165,6 +138,42 @@ function PaletteShell({ mode, onClose, onRequestConfirm }: {
     }
     return out
   }, [filtered, mode])
+  // The rows in the order they render: the selection index and Enter both read this.
+  const ordered = useMemo(() => groups.flatMap(g => g.rows), [groups])
+
+  // Selection starts on the first row that can run: a disabled "None in this project"
+  // row never starts selected. Typing or a mode change resets it there; rows arriving
+  // later move it only off a row that is gone or disabled, so an arrow-key choice stays.
+  const firstEnabled = (rows: Command[]) => Math.max(0, rows.findIndex(c => !c.disabled))
+  const orderedRef = useRef(ordered)
+  orderedRef.current = ordered
+  useEffect(() => { setSelectedIdx(firstEnabled(orderedRef.current)) }, [query, mode])
+  useEffect(() => {
+    setSelectedIdx(i => (ordered[i] && !ordered[i].disabled ? i : firstEnabled(ordered)))
+  }, [ordered])
+
+  // Single dispatch chokepoint for BOTH the Enter path and the click path.
+  // A destructive command is refused here or nowhere.
+  const runCommand = useCallback((cmd: Command) => {
+    if (cmd.disabled) return
+    if (cmd.confirm) { onRequestConfirm(cmd); return }
+    void cmd.run()
+    onClose()
+  }, [onRequestConfirm, onClose])
+
+  const onKey = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setSelectedIdx(i => Math.min(ordered.length - 1, i + 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setSelectedIdx(i => Math.max(0, i - 1))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const cmd = ordered[selectedIdx]
+      if (cmd) runCommand(cmd)
+    }
+  }, [ordered, selectedIdx, runCommand])
 
   return (
     <Dialog
@@ -253,7 +262,7 @@ function PaletteShell({ mode, onClose, onRequestConfirm }: {
       {/* Footer hint */}
       <div className="flex items-center gap-3 px-3 py-1.5 border-t border-border text-[10px] text-muted/70 font-mono shrink-0">
         <span>↑↓ navigate</span>
-        {!filtered[selectedIdx]?.disabled && <span>⏎ select</span>}
+        {!ordered[selectedIdx]?.disabled && <span>⏎ select</span>}
         <span>esc close</span>
         <span className="ml-auto">{filtered.length} result{filtered.length === 1 ? '' : 's'}</span>
       </div>

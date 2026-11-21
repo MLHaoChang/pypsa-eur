@@ -87,6 +87,26 @@ describe('CommandPalette — Parameters', () => {
     expect(useUIStore.getState().propertiesEditRequest).toBeNull()
   })
 
+  it('starts on the first row that can run, not on a disabled "None in this project" row', async () => {
+    vi.mocked(networkApi.getGenerators).mockResolvedValue([])
+    vi.spyOn(networkApi, 'getStorageUnits').mockResolvedValue([{ name: 'Battery', p_nom: 1, bus: 'B1' }] as never)
+    vi.mocked(catalogueApi.fetchCatalogue).mockResolvedValue({ ...CATALOGUE, entries: [
+      ...CATALOGUE.entries,
+      entry({ id: 'storageunit.p_nom', plain_name: 'Peak capacity', scope: 'StorageUnit', unit_display: 'MW' }),
+    ] })
+    renderPalette()
+    const input = screen.getByPlaceholderText(/Type a command/)
+    fireEvent.change(input, { target: { value: 'capacity' } })
+    const none = (await screen.findByText(/None in this project/)).closest('button')!
+    const battery = (await screen.findByText('Battery: Peak capacity')).closest('button')!
+    expect(none.compareDocumentPosition(battery) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(battery.className).toContain('bg-accent/10')
+    expect(none.className).not.toContain('bg-accent/10')
+    expect(screen.getByText('⏎ select')).toBeTruthy()
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(useUIStore.getState().propertiesEditRequest).not.toBeNull()
+  })
+
   it('opens on a seeded query when a jump asks the user to pick the asset', async () => {
     pickAssetFor(CATALOGUE.entries[0])
     renderPalette()

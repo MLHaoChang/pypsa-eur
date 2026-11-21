@@ -63,6 +63,21 @@ describe('Parameters rows', () => {
     expect(r.subtitle).toMatch(/^Generator · Size and limits · …?.*before any financing\.$/)
   })
 
+  it('a long guide snippet is cut at word boundaries, never inside a word', () => {
+    const guide = 'Every unit of installed capacity carries an annualised overnight cost that the optimiser weighs against '
+      + 'the energy it delivers across the whole year, including financing and maintenance over its expected lifetime.'
+    const long = entry({ id: 'generator.capital_cost', plain_name: 'Overnight cost', guide })
+    const [r] = parameterRows('weighs', buildParameterIndex([long]), { groups: CAT_GROUPS, entries: [long] },
+      { Generator: [{ name: 'PV', capital_cost: 1 }] })
+    const snip = r.subtitle!.split(' · ').at(-1)!
+    expect(snip).toMatch(/^….*…$/)
+    const inner = snip.slice(1, -1)
+    expect(guide).toContain(inner)
+    const start = guide.indexOf(inner)
+    expect(guide[start - 1]).toBe(' ')
+    expect(guide[start + inner.length]).toBe(' ')
+  })
+
   it('an entry whose class has no Properties card is left out', () => {
     expect(rows('limit', {})).toEqual([])
   })

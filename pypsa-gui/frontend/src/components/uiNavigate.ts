@@ -69,11 +69,13 @@ function _normalizePanelId(raw: string): string {
 const SECTION_PANELS: ReadonlySet<string> = new Set(['campusElectrical', 'campusStudy', 'campusResults', 'gridspine'])
 
 /** Kind `parameter` with an id the catalogue does not hold (or for another class). */
-export const UNKNOWN_PARAMETER_NOTICE = 'That setting is not in the parameter list. Search for it in the command palette.'
-/** Kind `parameter` for a setting with no field on an asset's Properties (opens in the guide from slice 02b). */
-export const NOT_OPENABLE_NOTICE = 'That setting has no field on an asset to open yet.'
+export const UNKNOWN_PARAMETER_NOTICE = 'That parameter is not in the list. Search for it in the command palette.'
+/** Kind `parameter` for a parameter with no field on an asset's Properties (opens in the guide from slice 02b). */
+export const NOT_OPENABLE_NOTICE = 'No asset in this project has that parameter to open.'
 /** Kind `parameter` while the parameter list could not be loaded. */
 export const CATALOGUE_UNAVAILABLE_NOTICE = 'The parameter list could not be loaded. Try again in a moment.'
+/** The parameter notices are read out politely, never as alerts. */
+export const PARAMETER_NOTICE_OPTIONS = { ariaProps: { role: 'status', 'aria-live': 'polite' } } as const
 
 /** Every `ui_event` kind this file handles; any other kind is read as `navigate`. */
 export const NAVIGATE_KINDS = [
@@ -172,12 +174,12 @@ function apply(d: NavigationRequest, modelTurn: number | null = null) {
     void resolveEntry(d.entry_id).then(entry => {
       if (navigationEpoch() !== epoch) return
       if (!entry || (d.component_class && d.component_class !== entry.scope)) {
-        toast(UNKNOWN_PARAMETER_NOTICE)
+        toast(UNKNOWN_PARAMETER_NOTICE, PARAMETER_NOTICE_OPTIONS)
         return
       }
       if (!name) { withAssistantNavigation(() => pickAssetFor(entry)); return }
-      if (!withAssistantNavigation(() => openParameter({ entry, asset: name }))) toast(NOT_OPENABLE_NOTICE)
-    }, () => { if (navigationEpoch() === epoch) toast(CATALOGUE_UNAVAILABLE_NOTICE) })
+      if (!withAssistantNavigation(() => openParameter({ entry, asset: name }))) toast(NOT_OPENABLE_NOTICE, PARAMETER_NOTICE_OPTIONS)
+    }, () => { if (navigationEpoch() === epoch) toast(CATALOGUE_UNAVAILABLE_NOTICE, PARAMETER_NOTICE_OPTIONS) })
     return
   }
   if (kind === 'open_asset_detail' && d.component_class && d.name) {
