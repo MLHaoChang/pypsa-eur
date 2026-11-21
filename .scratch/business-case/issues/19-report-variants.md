@@ -3,7 +3,8 @@
 
 # 19 Report variants: top N by NPV, greatest IRR, one per participant (K9 / C4)
 
-Status: needs-triage
+Status: ready-for-agent
+Owner: BC19-NPV-1.
 Blocked by: `site-commercial-ux/04` (party board, for the per-participant variant)
 Design: `.scratch/project-workflow/commercial-finance.md` §7 row K9; design.md:317.
 Source: gap review 2026-11-21, design map.

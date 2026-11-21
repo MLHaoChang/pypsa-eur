@@ -277,7 +277,7 @@ export default function LostLoadTab() {
       </div>
       <NotRecordedNote show={totals.voll == null} />
 
-      <section className="rounded-[10px] border border-border bg-bg overflow-hidden">
+      <section className="rounded-card border border-border bg-bg overflow-hidden">
         <header className="px-4 py-2.5 border-b border-border bg-bg-2">
           <span className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">By carrier</span>
         </header>
@@ -355,7 +355,7 @@ function PerBusLostLoadSection({
     getValue: (r, k) => (k === 'bus' || k === 'carrier') ? r[k] : r[k],
   })
   return (
-    <section className="rounded-[10px] border border-border bg-bg overflow-hidden">
+    <section className="rounded-card border border-border bg-bg overflow-hidden">
       <header className="px-4 py-2.5 border-b border-border bg-bg-2 flex items-center gap-2 flex-wrap">
         <span className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
           Per-bus lost load

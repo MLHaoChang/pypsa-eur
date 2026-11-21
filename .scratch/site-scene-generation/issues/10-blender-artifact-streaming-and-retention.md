@@ -3,7 +3,7 @@
 
 # SC-05 follow-up: stream the artifact download, and bound stored artifacts
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Dependencies: issue 06 slices (a) and (b)
 
@@ -19,3 +19,7 @@ GK B (61) on #1561 named two follow-ups. Issue 06's slice (b) scope does not nam
 - The download's peak memory is bounded by a chunk size, not by the artifact size. A test reads a near-cap artifact under a memory probe, or asserts the response is a streamed body.
 - The per-project artifact count (or age) is capped, with a test. An artifact behind an open proposal is kept.
 - GK B review.
+
+## Triage (2026-11-20, master 87cf52a7)
+
+Checked by code reading only. Still true: `site_scene/blender_job.py:148` `read_artifact` still builds the zip in memory. Dependencies: issue 06 slices (a) and (b) are merged (#1557, #1561, #1619), so unblocked. Acceptance is the section above. Gated: GK B.

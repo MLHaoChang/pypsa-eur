@@ -1132,7 +1132,7 @@ export function ChartCard({
 }) {
   return (
     <section
-      className={`rounded-[10px] border border-border bg-bg overflow-hidden
+      className={`rounded-card border border-border bg-bg overflow-hidden
         shadow-[0_1px_0_rgba(10,14,20,0.04)] ${className ?? ''}`}
     >
       <header className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-2">
@@ -1656,7 +1656,7 @@ export function SeasonalLineCardGrid({
         const present = cols.filter(c => seasonRows.some(r => r[c] != null))
         return (
           <div key={season} data-report-panel={season}
-            className="rounded-[10px] border border-border bg-bg overflow-hidden shadow-[0_1px_0_rgba(10,14,20,0.04)]">
+            className="rounded-card border border-border bg-bg overflow-hidden shadow-[0_1px_0_rgba(10,14,20,0.04)]">
             <header className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-bg-2">
               <span className="w-2 h-2 rounded-full shrink-0"
                 style={{ background: SEASON_ACCENT[season] }} />
