@@ -72,13 +72,13 @@ function RailButton({ id, testId, ...props }: RailProps & { id: FlowSectionId; t
   const label = `${meta.label}${stateWord ? `: ${stateWord}` : ''}${chips.length ? ` · ${chips.join(', ')}` : ''}`
   return (
     <div className="flex items-center gap-1">
-      {id !== 'project' && <span aria-hidden className="h-px w-3 bg-border" />}
+      {id !== 'project' && <span aria-hidden className="h-px w-1.5 min-[1600px]:w-3 bg-border" />}
       <button type="button" data-testid={testId} data-state={bs}
         aria-current={bs === 'current' ? 'step' : undefined}
         disabled={bs === 'blocked'}
         title={why ?? label} aria-label={why ? `${label}. ${why}` : label}
         onClick={() => props.onPick(id)}
-        className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] ${tone}`}>
+        className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border py-1 text-[11px] ${bs === 'current' ? 'px-2.5' : 'px-1.5 min-[1600px]:px-2.5'} ${tone}`}>
         <span className="font-mono text-[10px]">{meta.number}</span>
         {/* Below 1600 px (the ten steps do not fit a 1280 px row with their labels)
             an inactive pill keeps the number and dot; the label stays on the
