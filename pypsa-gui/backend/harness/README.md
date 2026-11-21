@@ -265,6 +265,15 @@ key: an unknown, deleted or foreign one is the route's `not_found`.
   the `scene_apply_outcome_unknown` error kind, never a receipt.
 - **Cancel** reaches only the caller's own preview and carries no card
   (`GUIDED_UNCARDED`).
+- **Results** (`site_scene_results`, `chat_results.py`, S6a) runs the scene
+  results route's own `parse_query`, `gate` and `project` in the route's lock
+  order: the store lock for the scene read, released, then the network lock.
+  The gate alone decides whether a number is shown, so out-of-date results
+  carry only the gate's reason. Buildings and groups are named in
+  `feature_words`, never by scene id or model uid. `building` narrows to one,
+  matched exactly, and an ambiguous or unknown word is `invalid_input`. Whole
+  items are cut to `MAX_ITEMS` and the answer to `MAX_READ_BYTES`, with every
+  cut named in `truncated`.
 - **Per-turn block.** The browser's `ui_context.site_scene` hint only names the
   Site. The `[site 3d]` lines in the per-turn block (`compose._format_ui_context`,
   D11's frozen block) come from a server re-read.
@@ -593,8 +602,9 @@ the EH study's per-year LOLE) stays withheld: no per-sample series is retained.
 (opt-in, `price_calculations.py`, `emissions_calculations.py`,
 `curtailment_calculations.py`, sharing `profile_common.py`) check one bus's
 time-weighted price, generator CO2 over the time-varying efficiency with the cap's
-dual as −mu, and curtailment of generators with a time-varying availability. Every
-profile refuses once an AC power flow has overwritten the LP outputs.
+dual as −mu, and curtailment of generators with a time-varying availability. An AC
+power flow leaves the LP outputs in place (owner decision PF-SAVE-1: the flow's
+values live only in `ac_pf_results`), so every profile still reads the LP after one.
 `capacity/1` (opt-in) reports one named-class component's `*_nom_opt` and its
 change, and says when it was built to its bound; `storage-cycles/1` divides window
 discharge (store weights) by energy capacity, sharing the StorageUnit profile's
@@ -1759,6 +1769,51 @@ C1-C7). The scope is the template's; there is no EH study and no LOLE loop.
   report, g2p 13); a run whose `grid_risk` section is not established lists
   it as a gap.
 
+### The concentrator profile (study harness 16)
+
+`eh_concentrator_staged@1` (`run_profiles._eh_concentrator_staged`; GK A (28)
+GO, Q1-Q8). The readers are `services/run_gates_concentrator.py`, registered
+in `run_gates.FACTS` through `_concentrator(name)` (imported when read). No EH
+study and no LOLE loop; the solve stage is the queued solve only. The
+investment case stays out of the run (Q8): a run's case refuses its baseline
+re-solve (`baseline_solve`), so the case rules read a case the user ran on
+this network.
+
+- **Result gate.** The core rules, `kpi.unserved_mwh` (electrical load only:
+  concentrate short of the shipments is lost production, never served), and:
+  - `process.mass_balance` (block, ≤ 1e-6): per tonne bus and period,
+    Σ w·|Σ flows| over every component on the bus (one-ports by `sign`, Links
+    at every port by −p_i) over the period's tonnes fed in from outside the
+    site (supply Generators on tonne buses; a `shortfall` role and any LP
+    slack, `slack_generator_mask`, are not a supply). Nothing fed in is no evidence. The LP enforces nodal balance, so
+    this catches corrupt results, not a design flaw;
+  - `process.motor_start` (warn, `eq pass`): the scorecard's own rows
+    (`grid_readiness._motor_start_rows`) on the live network and the project's
+    campus grid code (settings or a grid code it cannot read are no evidence,
+    `grid_code_unreadable`, never the default); a FAIL names the unit, its ΔU and the limit; an unknown
+    row with no fail is no evidence;
+  - `process.restart` (warn, `eq 0`): the units that fail to restart after a
+    grid trip (`gridspine` restart sequence on the units the dip classes trip,
+    each start on the motor-start rows' PoC source);
+  - `process.n_1.site_transformer` (warn, `empty`): the site transformers
+    whose outage stops a process unit (`process_loss.units_cut_off`); the
+    shipped template has none, so it is not evaluated and listed missing;
+  - `ic.counterfactual` and `ic.counterfactual.basis` (warn): established,
+    and against `site_today`, from a stored case current for this run's solve
+    and inputs (`ic_counterfactual.read`); with none they are not evaluated
+    with their reason, never a pass;
+  - KPIs as warn rules that pass when read: `process.lost_production` (the
+    grid-risk `connection` line, t/yr and EUR/yr per period),
+    `process.shed_level` (least, peak, last per period) and `ic.returns` (not
+    evaluated, no number, without that case). NPV by stage is listed missing.
+- **Levers.** `pv_new_*`, `bess_new_*` and `coarse_ore_stockpile_new_*` caps,
+  each up to twice the template's. The process units, the mine, the
+  shipments, the services load, the grid import, the shed and the slack are
+  never levers.
+- **Solves.** The plan is the envelope's solve (`CONC_SOLVES = 1`). The case
+  in the run, with its baseline re-solve counted, is study-harness issue 52;
+  `missing_tools` names it (`CONC_CASE_OUTSIDE`).
+
 ### The IPP hybrid profile (study harness 14)
 
 `eh_ipp_hybrid@1` (`run_profiles._eh_ipp_hybrid`; GK B (52) GO, I1-I10). A
@@ -1803,6 +1858,37 @@ the preset turns off (grid, control, reliability), with its reason, read from
   reaches (`missing_tools`).
 - **Explore.** Skipped, with its reason, until the shipped `cases.json` run as
   explore cases (the next slice).
+
+### The grid-only profile (study harness 15)
+
+`grid_only@1` serves the `3bus`, `ieee14`, `belgium` and `ieee39` templates,
+with no params, sidecars or levers (owner decisions SH-PILOT-1, SH15-PF-1).
+
+- **Setup.** One action: `update_solver_config` with exactly
+  `{"partial": {"run_ac_pf_after_lopf": true}}`, switching Load flow on. It is
+  a `BOUND_CONTEXT_TOOLS` member, carded in stepwise mode; a grant admits it
+  only through `run_envelope.SETTING_TOOLS`, as the runner's own step
+  (`session.run_step_call`, else `own_step_only`) with those args alone (else
+  `outside_entry`). Setup also refuses a template whose source is missing.
+- **Result gate.** The core rules and the PF rules, read only from the stored
+  AC PF result (`services/run_grid_pf.py`), never from LOPF flows; a stale,
+  unknown or absent PF is no evidence. `grid.pf.converged` and
+  `grid.pf.loading` (at most 100 %, apparent power) block and go to the user
+  when not evaluated; `grid.pf.voltage` (each bus's own band, none set: not
+  evaluated) and `grid.n1.secured` (the solver's N-1 option over every line,
+  and every transformer when there is one) warn. A solve with Load flow on is
+  fresh for a profile that sets `pf_results` only while `ac_pf_network_revision`
+  is the network's and the condition is exactly `lopf+ac_pf_ok`
+  (`run_gates.lp_condition`, `calculations.solve_matches_inputs(after_pf=True)`).
+  An LP-only reader stays current through the flow (issue 50).
+- **Report and hand-off (issue 50, PF-SAVE-1).** The flow restores the LP's
+  tables into the live network, so the report and the hand-off's total-cost and
+  CO2 KPIs read the LP dispatch. The chapters are `headline_results`,
+  `dispatch` and `load_flow`; the load-flow chapter reads the flow's own result.
+  The grant lists the report.
+- **Scope (issue 51).** The four grid templates have their own preset in
+  `flow_scope.TEMPLATE_PRESETS`: the grid card with Load flow, and no EH
+  reliability study or investment case.
 
 ### The approval envelope (study harness issue 03)
 
@@ -2213,6 +2299,52 @@ step never nests a second `ReservingProvider`.
 
 Tests: `tests/test_harness_budget_reservation.py`.
 
+### Report revision drafts (study harness issue 07d)
+
+`harness/run_revise.py` (the module docstring holds the rules). A completed
+run drafts the edit for an open comment on its own report (07c), as a turn the
+runner launches itself (SH07C-DRAFT-1; GK B (64) D1–D10).
+
+- **Request.** `POST /api/projects/{name}/reports/{report_id}/comments/{comment_id}/drafts
+  {task_id}` names the run: the caller's own, in this project, `completed`
+  (`run_revise.REQUESTABLE`), and the report must be its stage-7 job's. It
+  writes one `requested` row on `run.revisions.requests` and charges nothing.
+  One request in flight (`requested` or `drafting`) per run, at most
+  `MAX_REQUESTS` = 10 rows in all (`revision_draft_limit`).
+- **Turn.** `Runner.tick` drafts before its idle return (`_revise`), never
+  through `_act` or `_recover`, so a draft never changes `run.status`, and it
+  takes no project hold. `scan()` also returns a completed run with a request
+  due. The row is claimed under the live lease. The send has no tools,
+  `max_tokens` 4096 and the run's own model; the comment and the anchored
+  block are fenced as untrusted data. It goes through `ReservingProvider` with
+  scope `revision`: held in EUR whatever the mode, against `budget.cost_eur`
+  with the metered spend and the research and revision rows
+  (`send_reservation.cost_eur`), and never metered by `runner.charge`. A
+  refusal makes no call: the row is `refused` and the comment keeps
+  `draft_budget` or `draft_unavailable`. A reply that does not parse, is
+  truncated or fails 07c's invariants (`revisions.preview`) is `rejected` and
+  cannot be confirmed.
+- **Confirm.** `POST …/drafts/{draft_id}/confirm {task_id}` (and `/discard`),
+  with 07c's address checks (project lock, report job slot). The row moves to
+  `applying` under the lock before `revisions.address` runs against the
+  draft's base digest, so one of two clicks wins; it ends `applied` or
+  `refused` with 07c's kind, or goes back to `drafted` on any other fault.
+  Chat never reaches these routes (`not_via_chat.d`, "out of chat").
+- **Restart.** A `drafting` row of another boot is `lost`, only where that
+  boot's lease lapsed or this instance holds it (the boot sweep, and `_revise`
+  after a takeover); its comment gets `draft_unavailable`, and its hold
+  settles `uncertain` through issue 24's reconcile. Nothing is re-sent.
+- **The run card (PR B).** The run view carries `monitor.revision_drafts`
+  (`run_revise.view`) and, where a request can be made, `monitor.revision_report`
+  (`run_revise.offer`: the report id, `max_requests`, `in_flight`, and `may_act`,
+  false for a viewer). The offer and `request()` read one predicate,
+  `requestable_report`, so the card never offers what the route refuses.
+  `RunMonitor`'s `RevisionDrafts` lists the report's open comments with Draft a
+  fix, and the drafts with Confirm and Discard, as plain text.
+
+Tests: `tests/test_harness_revision_drafts.py`; the card in
+`frontend/src/components/runMonitor/RevisionDrafts.test.tsx`.
+
 
 ## Recorded runs, load flow, and experiment plans
 
@@ -2327,6 +2459,36 @@ the error is `discussed_run_required`. Download the chip with
 `discuss_project_run` and `export_run_evidence` are write-tier. Expert mode
 leaves write-tier tools uncarded. Guided mode cards every write, and
 `AUTO_APPROVE_TIERS` never includes `write`.
+
+### Current view (live-voice 03a)
+
+Each admitted turn records the view it was asked from in the durable thread's
+`refs.current`, through `durable_conversation.record_current_view`, called once
+in `loop.py` after the turn has passed every refusal and its user message is
+kept. The loop reads the bound thread's generation before `session_init`
+(`current_view_generation`) and passes it on; the write re-checks it under
+`_LOCK`, so a rebind during the turn, an obsolete utterance or an unreadable
+start generation records nothing. `refs.discussed` is never
+touched by it: what the user is looking at and the run under discussion stay
+distinct, and a resumed episode keeps both.
+
+The record is built from the request's `ui_context`, which is client input.
+Every value is checked on its own: `panel` and `results_tab` against
+`SAFETY_PANEL_ENUM` and `RESULTS_TAB_ENUM` (a tab only under Results), run ids
+against the run id pattern, `section` against a bounded id pattern, `source`,
+`scope` and `mode` against closed sets, the window as two whole numbers in
+order, and the asset as a known component class plus a bounded name. A value
+that fails is dropped. `at` is server time.
+
+The write never refuses or delays a turn: no context, no bound thread, another
+episode, a stale `generation`, another replica, or a disk or JSON error writes
+nothing and returns False. It does not bump the generation. The loop holds no
+session or provider lock at the call; the function takes only `_LOCK`.
+
+`get_file_delivery` also returns `expires_at`: for an `agent_export`, the last
+instant the download is served (`uploaded_at` + 7 days, as
+`upload_service.refuse_expired_delivery` measures it); `null` for every other
+kind, which never expires.
 
 ### Current load flow
 

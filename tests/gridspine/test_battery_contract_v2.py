@@ -269,27 +269,24 @@ def test_emt_manifest_declares_exactly_what_its_schedule_records(tmp_path):
     from tests.gridspine.test_emt_pack import spec
 
     camp = build_campus(spec())
-    p = write_emt_pack(tmp_path / "emt", camp, battery=battery_from_campus(camp))
-    manifest = json.loads((p.path / "manifest.json").read_text())
-    schedule = json.loads((p.path / "case_schedule.json").read_text())
-    recorded = {ch for r in schedule for ch in r["channels"].split("|")}
-    assert manifest["contract_version"] == "1"
-    assert set(manifest["channels"]) == recorded
-    assert manifest["channels"] == list(V1)
+    for out, battery in (("default", None), ("given", battery_from_campus(camp))):
+        p = write_emt_pack(tmp_path / out, camp, battery=battery)
+        manifest = json.loads((p.path / "manifest.json").read_text())
+        schedule = json.loads((p.path / "case_schedule.json").read_text())
+        recorded = {ch for r in schedule for ch in r["channels"].split("|")}
+        assert manifest["contract_version"] == "2"
+        assert set(manifest["channels"]) == recorded
+        assert manifest["channels"] == [*V1, "connected"]
+        assert all("connected" in r["channels"].split("|") for r in schedule)
 
 
-def test_emt_pack_refuses_a_v2_battery_until_its_schedule_records_connected(tmp_path):
-    from dataclasses import replace
-
+def test_emt_pack_refuses_a_v1_battery(tmp_path):
     from gridspine.handoff import emt_pack
     from gridspine.ingest.campus import build_campus
     from tests.gridspine.test_emt_pack import spec
 
-    assert emt_pack.EMT_CONTRACT_VERSION == "1"
+    assert emt_pack.EMT_CONTRACT_VERSION == "2"
     camp = build_campus(spec())
-    v2 = tuple(
-        replace(c, channels=(*c.channels, "connected"))
-        for c in emt_pack.battery_from_campus(camp)
-    )
-    with pytest.raises(ContractError, match="not in contract version 1"):
-        emt_pack.write_emt_pack(tmp_path / "emt", camp, battery=v2)
+    v1 = build_battery(2000, 3000, 8, 10, z0_over_z1=3.0, x0_over_r0=10.0)
+    with pytest.raises(ContractError, match="needs the 'connected' channel"):
+        emt_pack.write_emt_pack(tmp_path / "emt", camp, battery=v1)

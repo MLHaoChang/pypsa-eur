@@ -7,7 +7,7 @@
 import { useState } from 'react'
 import { dcLoadRefusal, type TemplateCreate } from '../../../hooks/useCreateFromTemplate'
 import {
-  ARCH_HINT, BACKUP_HINT, DC_ARCH_OPTIONS, DC_BACKUP_OPTIONS, DC_DEFAULTS, DC_FIELD_LABEL,
+  ARCH_HINT, BACKUP_HINT, DC_ARCH_OPTIONS, DC_BACKUP_OPTIONS, DC_DEFAULTS, DC_FIELD_LABEL, STAGED_BESS_LINE,
   dcFieldOf, dcLoadBody, dcRefusalText, initialDcDraft, validateDc,
   type DcDraft, type DcField,
 } from '../dcLoadForm'
@@ -95,6 +95,9 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
         </select>
         <p id="dc-form-backup-hint" data-testid="dc-form-backup-hint" className="text-muted">
           {BACKUP_HINT[draft.backup]}
+          {staged && draft.backup === 'bess' && (
+            <span data-testid="dc-form-backup-staged"> {STAGED_BESS_LINE}</span>
+          )}
         </p>
         {err('backup')}
       </div>

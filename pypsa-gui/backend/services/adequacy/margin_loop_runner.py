@@ -132,7 +132,7 @@ def start_margin_loop(
     # ── the synchronous 422 set (§2.4) ────────────────────────────────────
     # W3b-R: an omitted target or draws is the project's one stored goal
     # (its h/yr target on this network's horizon basis).
-    from services.reliability_goal import active_loop_goal
+    from services.reliability_goal import active_loop_goal, no_target_hint
     target, draws, goal_sources = active_loop_goal(body, solver_state)
     try:
         target = float(target) if target is not None else None
@@ -146,7 +146,7 @@ def start_margin_loop(
             "STANDARD, and a target of zero (or none) is not a standard — it "
             "is the demand that no draw ever sheds an hour, which no finite "
             "plan can buy. Set the reliability goal's allowed shortfall in "
-            "Scenarios & optimisation")
+            "Scenarios & optimisation" + no_target_hint(solver_state))
 
     if draws < 1:
         raise HTTPException(422, "draws must be a positive number of samples")

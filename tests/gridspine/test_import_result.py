@@ -1,6 +1,7 @@
 """The shared import contract: report types and the importer registry."""
 
 import ast
+import dataclasses
 import json
 import re
 import subprocess
@@ -553,3 +554,97 @@ def test_an_import_error_without_a_module_name_names_the_importer(fake_package):
     )
     with pytest.raises(ImportFormatError, match="'fake_ingest.psse_import'"):
         ir.read("psse", ["case.raw"], declared=(_spec("psse"),))
+
+
+# --- for_file and sniffs (DGS S3, X6) ----------------------------------------
+
+
+def test_a_spec_without_a_sniff_never_claims(tmp_path):
+    assert not _spec("dgs", (".xlsx",)).claims(tmp_path / "a.xlsx")
+
+
+def test_a_sniff_whose_module_is_missing_never_claims(tmp_path):
+    spec = ir.ImporterSpec(
+        format_id="x",
+        display_name="X",
+        extensions=(".xlsx",),
+        help="h",
+        sniff="no_such_module_anywhere:check",
+    )
+    assert not spec.claims(tmp_path / "a.xlsx")
+    spec = ir.ImporterSpec(
+        format_id="x",
+        display_name="X",
+        extensions=(".xlsx",),
+        help="h",
+        sniff="gridspine.ingest.import_result:no_such_function",
+    )
+    assert not spec.claims(tmp_path / "a.xlsx")
+
+
+def test_for_file_names_what_this_build_reads(tmp_path, fake_package):
+    (fake_package / "psse_import.py").write_text("def read_psse(p, o): pass\n")
+    with pytest.raises(
+        ImportFormatError,
+        match=r"noext: no importer reads files without an extension; this build reads .dyr, .raw",
+    ):
+        ir.for_file(tmp_path / "noext", (_spec("psse"),))
+    with pytest.raises(
+        ImportFormatError,
+        match=r"a.raw: no importer reads .raw; this build reads nothing",
+    ):
+        ir.for_file(tmp_path / "a.raw", ())
+
+
+def test_for_file_falls_back_to_the_one_marked_fallback(tmp_path, fake_package):
+    for fid in ("aa", "bb", "cc"):
+        (fake_package / f"{fid}_import.py").write_text(
+            f"def read_{fid}(p, o): pass\ndef sniff(p): return {fid == 'bb'}\n"
+        )
+
+    def spec(fid, fallback=False):
+        return ir.ImporterSpec(
+            format_id=fid,
+            display_name=f"{fid.upper()} file",
+            extensions=(".xlsx",),
+            help="h",
+            package="fake_ingest",
+            sniff=f"fake_ingest.{fid}_import:sniff",
+            fallback=fallback,
+        )
+
+    w = tmp_path / "w.xlsx"
+    # a claim wins over the fallback
+    assert ir.for_file(w, [spec("aa", True), spec("bb")]).format_id == "bb"
+    # no claim: the one importer marked fallback, with or without a sniff
+    assert ir.for_file(w, [spec("aa"), spec("cc", True)]).format_id == "cc"
+    no_sniff = dataclasses.replace(spec("cc", True), sniff="")
+    assert ir.for_file(w, [spec("aa"), no_sniff]).format_id == "cc"
+    # no claim and no single fallback: refused naming every candidate
+    for specs in ([spec("aa"), spec("cc")], [spec("aa", True), spec("cc", True)]):
+        with pytest.raises(ImportFormatError) as e:
+            ir.for_file(w, specs)
+        assert "importers recognise: AA file, CC file" in str(e.value)
+
+
+def test_an_ambiguous_file_names_only_the_importers_that_claim_it(
+    tmp_path, fake_package
+):
+    for fid, claims in (("aa", True), ("bb", True), ("cc", False)):
+        (fake_package / f"{fid}_import.py").write_text(
+            f"def read_{fid}(p, o): pass\ndef sniff(p): return {claims}\n"
+        )
+    specs = [
+        ir.ImporterSpec(
+            format_id=fid,
+            display_name=f"{fid.upper()} file",
+            extensions=(".xlsx",),
+            help="h",
+            package="fake_ingest",
+            sniff=f"fake_ingest.{fid}_import:sniff",
+        )
+        for fid in ("aa", "bb", "cc")
+    ]
+    with pytest.raises(ImportFormatError) as e:
+        ir.for_file(tmp_path / "w.xlsx", specs)
+    assert "more than one format (AA file, BB file)" in str(e.value)
