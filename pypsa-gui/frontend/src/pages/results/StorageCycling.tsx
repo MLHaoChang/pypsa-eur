@@ -385,7 +385,7 @@ function PerUnitCyclingSection({ units }: { units: UnitRow[] }) {
             <tr className="border-b border-border text-muted">
               <SortHeader columnKey="name"       label="Unit"               sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('name')} />
               <SortHeader columnKey="carrier"    label="Carrier"            sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('carrier')}    align="right" />
-              <SortHeader columnKey="pNom"       label="p_nom (MW)"         sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('pNom')}       align="right" />
+              <SortHeader columnKey="pNom"       label="Power (MW)"         sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('pNom')}       align="right" />
               <SortHeader columnKey="energyCap"  label="Energy (MWh)"       sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('energyCap')}  align="right" />
               <SortHeader columnKey="throughput" label="Throughput (MWh)"   sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('throughput')} align="right" />
               <SortHeader columnKey="cycles"     label="Cycles"             sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('cycles')}     align="right" />

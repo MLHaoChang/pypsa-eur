@@ -23,6 +23,7 @@ import { useUIStore } from '../../store/uiStore'
 import { useChatReadiness } from '../../hooks/useChatProfiles'
 import { ask, ASK_TITLE } from '../../pages/hubDesign/delegate'
 import { NO_ASSISTANT } from '../../pages/hubDesign/shared/CardShell'
+import { displayName } from '../../utils/displayName'
 import { ServiceSources } from './ServiceSources'
 
 export type ScorecardMode = 'expert' | 'guided'
@@ -117,11 +118,11 @@ export function summaryText(s: GridReadiness['summary'], mode: ScorecardMode): s
   return `${s.red_flags} red ${s.red_flags === 1 ? 'flag' : 'flags'} · ${s.unknown} unknown · ${s.assumed} assumed${after}`
 }
 
-/** "After battery 'b'" or "After UPS 'u'" for one unit, "After batteries/UPS" for several. */
+/** "After battery “B”" or "After UPS “UPS battery”" for one unit (its name as displayName reads it), "After batteries/UPS" for several. */
 export function afterLabel(after: NonNullable<GridReadinessRow['after_battery']>): string {
   if (after.units.length !== 1) return 'After batteries/UPS'
   const kind = after.unit_detail?.find(u => u.unit === after.units[0])?.kind
-  return `After ${kind === 'ups' ? 'UPS' : 'battery'} '${after.units[0]}'`
+  return `After ${kind === 'ups' ? 'UPS' : 'battery'} “${displayName(after.units[0])}”`
 }
 
 /** Each unit's assumed response latency, its name a link to the asset (DC 03,
@@ -212,8 +213,8 @@ function ScoreRow({ row, mode, onJump, fieldLabels, noAssistant }: {
             )}
             {row.xr_assumed && (
               <button type="button" data-testid={`gr-set-xr-${row.id}`} onClick={openPocXr}
-                title="Open the PoC X/R field in Project info, Settings"
-                className="ml-1.5 text-[11px] text-accent hover:underline">Set PoC X/R ›</button>
+                title="Open the point-of-connection X/R field in Project info, Settings"
+                className="ml-1.5 text-[11px] text-accent hover:underline">Set point-of-connection X/R ›</button>
             )}
             <span className="mx-1.5">·</span>
             Project:{'\u00A0'}<span className="text-text">

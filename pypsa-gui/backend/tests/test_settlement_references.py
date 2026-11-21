@@ -242,9 +242,11 @@ def test_a_bundle_with_an_ic_bus_is_refused_before_the_swap(client, api_project,
     with zipfile.ZipFile(buf, "w") as zf:
         for m in src.namelist():
             zf.writestr(m, nc if m == "network.nc" else src.read(m))
+    from tests.bundle_util import refresh_manifest
+
     before = list(session_ctx(client).network.buses.index)
     r = client.post("/api/projects/import_bundle?name=bad_in",
-                    files={"file": ("b.zip", buf.getvalue(), "application/zip")})
+                    files={"file": ("b.zip", refresh_manifest(buf.getvalue()), "application/zip")})
     assert r.status_code == 422, r.text
     assert list(session_ctx(client).network.buses.index) == before
 

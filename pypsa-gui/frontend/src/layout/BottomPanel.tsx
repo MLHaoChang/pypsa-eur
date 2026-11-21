@@ -1679,8 +1679,8 @@ export default function BottomPanel() {
                 // of that component the shared grid has no place for (D16).
                 <p className="text-[10px] text-muted px-2 py-1.5 border-t border-border bg-bg-2/50">
                   CO₂ values are per MWh of <em>primary</em> energy — output-MWh
-                  intensity is computed in the Emissions tab as
-                  <code> co2_emissions / efficiency</code>.
+                  intensity is computed in the Emissions tab as the CO₂
+                  emissions divided by the efficiency.
                 </p>
               )}
             </>

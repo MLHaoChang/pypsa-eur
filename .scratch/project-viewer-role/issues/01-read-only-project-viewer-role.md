@@ -139,3 +139,10 @@ GK B (session_01G7qCunbvxN6JVyrzVTsisA) reviews this package (the brief names it
 - Q2 runs: a viewer runs no solve or study.
 - Q3 comments: a viewer may add a report comment and withdraw their own (`withdraw` checks the author for a viewer); addressing a comment stays an editor's write.
 - Q4 exports: a viewer downloads existing reports and deliveries and may export a report file (`POST …/reports/{id}/export`); building a delivery and generating or regenerating a report stay refused. In chat, the export and delivery tools are write-tier and stay refused: the chat is read-only for a viewer (brief), and the export button is the way.
+
+### 2026-11-17: PR 2 plan verdicts
+
+PR 2 splits per PR-SIZE-1: **2a** backend (members role, `my_access`, read-only chat offer, `LC-D22.viewer_role` fixture; GK B3 only) and **2b** UI (GK B3 + UX); the UI sweep may split again into 2b/2c.
+
+- GK B3 GO for 2a with V1–V8: write the role explicitly (new member → editor, absent entry keeps the stored role); validate roles (422 bad value, 400 key outside `user_ids` or not a UUID); a self role change is a plain 400; a demotion bites on the next request; `my_access` only from `project_role`; the chat offer uses the same predicate as `require_allowed`, with a catalogue-wide parity test on both wires; the prompt line is a `harness/prompts/` fragment; Journey fit and targeted mutants in the PR body.
+- UX 24 (now UX 25) GO for 2b with eight conditions: one read-only line, "View only: ask the project owner for edit access.", which wins over the run strip's line; a sweep list in the PR body, including the Guided assistant buttons; no "Autosave on · 5 min" for a viewer; the members picker as a radiogroup with a visible key and fixed rows; toast "This project is view only."; the chat declines in plain words; Journey fit; light and dark shots in Guided and Expert.

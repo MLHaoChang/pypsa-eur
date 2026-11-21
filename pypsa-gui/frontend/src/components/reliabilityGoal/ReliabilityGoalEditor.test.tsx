@@ -7,6 +7,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 import { goal } from '../../test/fixtures/reliabilityGoal'
 import { ENS_HINT, ReliabilityGoalEditor } from './ReliabilityGoalEditor'
+import { GOAL_KEY_SITE_TYPE } from '../../pages/hubDesign/cards/goalCardWords'
 
 afterEach(() => cleanup())
 
@@ -28,6 +29,17 @@ describe('ReliabilityGoalEditor', () => {
       // the template's value says where it came from; a stored one does not
       expect(screen.getByTestId(`${g}-ens-template`).textContent).toBe('From the project template')
       expect(screen.queryByTestId(`${g}-lole-template`)).toBeNull()
+    })
+
+  it.each([['guided', 'hub-goal'], ['expert', 'solver-goal']] as const)(
+    '%s shows the same assumed goal: the server\'s value in the field, its chip and key (template-e2e 06)', (mode, g) => {
+      const base = goal()
+      const assumed = { ...base, target_lole_h: { ...base.target_lole_h, assumed: 2.5 } }
+      render(<ReliabilityGoalEditor mode={mode} goal={assumed} edits={{}} onChange={vi.fn()} />)
+      expect(input(`${g}-lole`).value).toBe('2.5')
+      expect(screen.getByTestId(`${g}-lole-assumed`).dataset.state).toBe('assumed')
+      expect(screen.getByTestId(`${g}-lole-assumed-source`).textContent).toBe('Site type: 2.5 h/yr')
+      expect(screen.getByTestId(`${g}-lole-key`).textContent).toBe(GOAL_KEY_SITE_TYPE)
     })
 
   it('reports only the field typed into', () => {

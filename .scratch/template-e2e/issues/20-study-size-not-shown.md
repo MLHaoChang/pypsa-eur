@@ -3,7 +3,7 @@
 
 # 20 — The size of what the study chose to build is not shown in results
 
-Status: needs-triage
+Status: ready-for-agent
 Source: decide-report-journeys.md (walk 2026-11-17, master 0ab07339)
 Severity: blocks decision
 Journey fit: results → decide. A user cannot justify an investment without the MW/MWh to build.
@@ -17,3 +17,7 @@ Guided and Expert results say 'sized by the study' and never list the chosen cap
 - Guided results and the report list every built asset with MW (and MWh, t/h where non-electric), per stage for staged templates.
 - Placeholder grid capacity and shortfall are not counted as installed capacity; the total is checked against the connection limit.
 - Guided, Expert and report show the same figures (test per template).
+
+## Triage (2026-11-20, master 8a039460)
+
+Checked by code reading only; the app was not re-run. Partly done: #1734 (merged) added `SizedDesignTable.tsx`, shown in section 10, the reference-design panel and section 5, with sizes in each asset's own unit. Remaining, to re-check in the app first: the report lists every built asset per stage; a placeholder grid capacity and shortfall are not counted as installed capacity and the total is checked against the connection limit; Guided, Expert and report show the same figures (a test per template). Gated: GK A. Blocked by: none.

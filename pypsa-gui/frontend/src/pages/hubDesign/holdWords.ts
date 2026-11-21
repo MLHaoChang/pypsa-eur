@@ -39,6 +39,10 @@ export function heldFigure(section: FlowSectionId, h: FlowHeld, sized?: EhSizedA
     return word ? `${word} time series` : 'Time series'
   }
   const label = section === 'loads' ? PEAK_LOAD : (h.field && FIELD_LABELS[h.field]) || 'Size'
+  // Extendable only between equal bounds (an IPP's owned plant, template-e2e 14): its size.
+  if (h.extendable && h.fixed_size != null) {
+    return `${label}: fixed at ${number(h.fixed_size)}${h.unit ? ` ${h.unit}` : ''}`
+  }
   // After a study, the size it chose (walkthrough asset-investment 03).
   // The row's own unit (MW, or t/h on a tonne bus), never an assumed MW.
   if (h.extendable && sized && sizedBuilt(sized, h.unit) !== 'not reported') {

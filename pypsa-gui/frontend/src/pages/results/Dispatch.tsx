@@ -3776,7 +3776,7 @@ function PerAssetFlhTable({ rows, scopeLabel }: { rows: FlhRow[]; scopeLabel: st
               <SortHeader columnKey="kind"     label="Kind"         sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('kind')} />
               <SortHeader columnKey="category" label="Category"     sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('category')} />
               <SortHeader columnKey="carrier"  label="Carrier"      sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('carrier')} />
-              <SortHeader columnKey="pNom"     label="p_nom (MW)"     sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('pNom')}   align="right" />
+              <SortHeader columnKey="pNom"     label="Capacity (MW)"  sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('pNom')}   align="right" />
               <SortHeader columnKey="energy"   label="Energy (MWh/y)" sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('energy')} align="right" />
               <SortHeader columnKey="flh"      label="FLH (h/y)"      sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('flh')}    align="right" />
             </tr>

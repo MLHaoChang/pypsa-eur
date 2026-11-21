@@ -126,7 +126,18 @@ export function useReportJob(project: string | null, options: UseReportJobOption
 
   const startMutation = useMutation({
     mutationFn: (opts: GenerateReportOptions = {}) => generateReport(project as string, opts),
-    onSuccess: () => { setAborting(false); void refreshStatus() },
+    onSuccess: (out) => {
+      setAborting(false)
+      if (out.mode === 'plain') {
+        // No job: the plain report is already stored, so re-read the list.
+        if (project) {
+          void qc.invalidateQueries({ queryKey: REPORTS_LIST_KEY(project) })
+          void qc.invalidateQueries({ queryKey: REPORT_EVIDENCE_HASH_KEY(project) })
+        }
+        return
+      }
+      void refreshStatus()
+    },
   })
 
   const abortMutation = useMutation({

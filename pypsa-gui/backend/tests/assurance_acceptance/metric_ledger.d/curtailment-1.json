@@ -1,0 +1,48 @@
+{
+ "profiles": {
+  "curtailment/1": [
+   {
+    "metric": "available_energy",
+    "formula": "sum over t of w_generators[t] x p_max_pu[t] x capacity",
+    "validity": "verified solve (else unverified_solve); every variable generator non-committable with finite capacity >= 0, finite p_max_pu, p and weight >= 0, and p <= p_max_pu x capacity within tolerance x capacity, else invalid_variable_generator. Refusals: committable_unit, misaligned_source, no_variable_generators, not_variable, unknown_generator, unsupported_generator_population, unsupported_snapshot_scope",
+    "tolerance": "harness.curtailment_calculations:RESIDUAL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_curtailment_of_a_variable_generator[G1]",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_curtailment_of_a_variable_generator[G1]"
+     }
+    }
+   },
+   {
+    "metric": "curtailed_energy",
+    "formula": "sum over t of w_generators[t] x max(p_max_pu[t] x capacity - p[t], 0)",
+    "validity": "verified solve (else unverified_solve); every variable generator non-committable with finite capacity >= 0, finite p_max_pu, p and weight >= 0, and p <= p_max_pu x capacity within tolerance x capacity, else invalid_variable_generator. Refusals: committable_unit, misaligned_source, no_variable_generators, not_variable, unknown_generator, unsupported_generator_population, unsupported_snapshot_scope",
+    "tolerance": "harness.curtailment_calculations:RESIDUAL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_curtailment_of_a_variable_generator[G1]",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_curtailment_of_a_variable_generator[G1]"
+     }
+    }
+   },
+   {
+    "metric": "curtailment_share",
+    "formula": "100 x curtailed_energy / available_energy",
+    "validity": "verified solve (else unverified_solve); every variable generator non-committable with finite capacity >= 0, finite p_max_pu, p and weight >= 0, and p <= p_max_pu x capacity within tolerance x capacity, else invalid_variable_generator. Refusals: committable_unit, misaligned_source, no_variable_generators, not_variable, unknown_generator, unsupported_generator_population, unsupported_snapshot_scope; available_energy > 0, else no_available_energy",
+    "tolerance": "harness.curtailment_calculations:RESIDUAL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_curtailment_of_a_variable_generator[G1]",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_curtailment_of_a_variable_generator[G1]"
+     }
+    }
+   }
+  ]
+ }
+}

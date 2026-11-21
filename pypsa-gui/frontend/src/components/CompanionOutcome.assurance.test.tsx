@@ -62,6 +62,19 @@ describe('closed companion publication', () => {
   })
 
   it.each([
+    [true, true], [false, false], [undefined, false],
+  ])('says the definition changed only when the record reads definition_changed %s', async (flag, shown) => {
+    vi.mocked(client.get).mockImplementation(async url => ({ data:
+      String(url).endsWith('/reliability/context') ? { version: 1, project_id: 'project-1' }
+        : record(flag === undefined ? {} : { definition_changed: flag }),
+    }))
+    useChatStore.setState({ messages: checkedMessages() })
+    render(<CompanionOutcome />)
+    expect(await screen.findByText(text)).toBeTruthy()
+    expect(screen.queryByText(/The definition changed since this was checked\./) !== null).toBe(shown)
+  })
+
+  it.each([
     ['wrong answer', { answer_id: 'other-answer' }],
     ['wrong turn', { turn_id: 'other-turn' }],
     ['wrong active project', { project_id: 'other-project' }],

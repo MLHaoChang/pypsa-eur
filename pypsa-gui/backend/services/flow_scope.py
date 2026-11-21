@@ -200,6 +200,13 @@ _OWN_SITE: Preset = {
 _HOSPITAL: Preset = {**_OWN_SITE, "reliability": ("goal_study", "stress")}
 BLANK_PRESET: Final[Preset] = {
     "capacity": _CAPACITY, "commercial": ("tariffs",), "handoff": ("reports",)}
+# The grid templates (study harness 51): a grid study, so the grid card with
+# its load flow, which grid_only@1's setup switches on (SH15-PF-1); no EH
+# reliability study or investment case.
+_GRID: Preset = {**BLANK_PRESET, "grid": ("load_flow",)}
+#: The grid templates. They ship no marker, so a project made from one reads
+#: its preset from the template id its creation records (``preset_template``).
+GRID_TEMPLATES: Final = ("3bus", "ieee14", "belgium", "ieee39")
 
 TEMPLATE_PRESETS: Final[dict[str, Preset]] = {
     "eh_datacenter": _DATACENTER, "eh_datacenter_staged": _DATACENTER,
@@ -209,6 +216,7 @@ TEMPLATE_PRESETS: Final[dict[str, Preset]] = {
     # The concentrator (grid-to-process ticket 10): a process plant as the ammonia hub.
     "eh_concentrator_staged": _AMMONIA,
     "eh_ipp_hybrid": _IPP,
+    **dict.fromkeys(GRID_TEMPLATES, _GRID),
 }
 # `eh_site` by its `site_type` (`project_templates/eh_site.SITE_TYPES`).
 SITE_TYPE_PRESETS: Final[dict[str, Preset]] = {
@@ -236,6 +244,38 @@ def preset_for(template: dict | None) -> tuple[str, Preset]:
         st = str(template.get("site_type") or "industrial")
         return f"eh_site:{st}", SITE_TYPE_PRESETS.get(st, _OWN_SITE)
     return (tid, TEMPLATE_PRESETS[tid]) if tid in TEMPLATE_PRESETS else ("eh_generic", _OWN_SITE)
+
+
+def _recorded_grid_template(project_dir) -> dict | None:
+    """``{"id": <grid template>}`` from the template id the project's
+    ``metadata.json`` records (``routers.projects._finish_created_project``);
+    None for any other id, none recorded (a project made before it was), or a
+    file that cannot be read. Only the preset reads it: the project has no
+    marker, so ``has_template`` stays False (issue 51)."""
+    try:
+        meta = json.loads((pathlib.Path(project_dir) / "metadata.json").read_text("utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
+        return None
+    tid = meta.get("template_id") if isinstance(meta, dict) else None
+    if tid not in GRID_TEMPLATES:
+        return None
+    from routers.projects import _TEMPLATE_DEFAULT_NAMES  # its "Reset to <name>" label
+    return {"id": tid, "name": _TEMPLATE_DEFAULT_NAMES.get(tid, tid)}
+
+
+def _preset_source(project_dir, template: dict | None) -> dict | None:
+    if template is not None or project_dir is None:
+        return template
+    return _recorded_grid_template(project_dir)
+
+
+def preset_template(project_dir) -> dict | None:
+    """The template metadata a project's preset reads (``preset_for``): its
+    marker (``template_marker.read_marker``), else a grid template's
+    recorded id."""
+    from services.template_marker import read_marker
+
+    return _preset_source(project_dir, read_marker(project_dir))
 
 
 def _storable(card: str, option: str, *, has_template: bool, no_load: bool = False) -> bool:
@@ -423,7 +463,7 @@ def read_scope(project_dir: pathlib.Path, template: dict | None,
     ``source`` is ``project`` (the stored file) or ``preset`` (none stored).
     ``settings``: the solver config, for the settings-driven sub-options."""
     has_template = template is not None
-    preset_id, preset = preset_for(template)
+    preset_id, preset = preset_for(_preset_source(project_dir, template))
     raw = _read_raw(project_dir)
     if raw is None:
         scope = effective_preset(preset, has_template=has_template, no_load=no_load)
@@ -461,11 +501,13 @@ def selected(scope: dict, card: str, option: str | None = None) -> bool:
 
 
 def registry(template: dict | None, settings: dict | None = None, *,
-             no_load: bool = False) -> dict:
+             no_load: bool = False, project_dir: pathlib.Path | None = None) -> dict:
     """The cards as the scope component draws them, with this project's
-    availability, the effective preset and what the preset intends."""
+    availability, the effective preset and what the preset intends.
+    ``project_dir``: where a grid template's recorded id is read."""
     has_template = template is not None
-    preset_id, preset = preset_for(template)
+    source = _preset_source(project_dir, template)
+    preset_id, preset = preset_for(source)
     cards = []
     for card in CARDS:
         opts = []
@@ -477,7 +519,7 @@ def registry(template: dict | None, settings: dict | None = None, *,
                       "locked_reason": locked, "sections": list(card.sections),
                       "chip": card.chip,
                       "intended": list(preset.get(card.id, ()))})
-    return {"cards": cards, "preset_id": preset_id, "preset_label": preset_label(template),
+    return {"cards": cards, "preset_id": preset_id, "preset_label": preset_label(source),
             "preset": effective_preset(preset, has_template=has_template, no_load=no_load)}
 
 
