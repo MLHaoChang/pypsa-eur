@@ -4,6 +4,5 @@
   "import_format_elsewhere": {"surface": "inline", "why": "The file is a format with its own import (the Excel input workbook); the message names where to import it. Nothing is kept."},
   "import_timeout": {"surface": "inline", "why": "The importer's child process ran past its time budget and was stopped. Nothing is kept; the message suggests a smaller case."},
   "import_busy": {"surface": "inline", "why": "As many model imports as the app reads at once are already running. Nothing is read or kept; the user tries again shortly."},
-  "import_sidecar_refused": {"surface": "inline", "why": "The importer returned a file the project does not keep, or metadata keys the project owns. Nothing is kept: no project row and no folder."},
-  "import_write_failed": {"surface": "inline", "why": "The new project's files could not be written after its row was made; the row and the folder are removed, so nothing is kept. The user tries again."}
+  "import_sidecar_refused": {"surface": "inline", "why": "The importer returned a file the project does not keep, or metadata keys the project owns. Nothing is kept: no project row and no folder."}
 }}
