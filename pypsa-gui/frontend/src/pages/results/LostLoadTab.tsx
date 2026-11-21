@@ -20,6 +20,7 @@ import { resolveRange, useResultsFilter } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
 import { NOT_RECORDED_KPI, NotRecordedDash, NotRecordedNote } from './NotRecorded'
+import { signFirstEuro } from '../../utils/format'
 
 // ── Lost-load result tab ────────────────────────────────────────────────────
 // Unserved demand via the LP's VOLL slack generators. The backend already
@@ -402,9 +403,8 @@ function fmtEnergy(mwh: number): string {
 function fmtCurrency(eur: number | null): string {
   if (eur == null || !Number.isFinite(eur)) return '—'
   const a = Math.abs(eur)
-  const sign = eur < 0 ? '-' : ''
-  if (a >= 1e9) return `${sign}€${(a / 1e9).toFixed(2)} B`
-  if (a >= 1e6) return `${sign}€${(a / 1e6).toFixed(2)} M`
-  if (a >= 1e3) return `${sign}€${(a / 1e3).toFixed(1)} k`
-  return `${sign}€${a.toFixed(0)}`
+  if (a >= 1e9) return signFirstEuro(eur, `${(a / 1e9).toFixed(2)} B`)
+  if (a >= 1e6) return signFirstEuro(eur, `${(a / 1e6).toFixed(2)} M`)
+  if (a >= 1e3) return signFirstEuro(eur, `${(a / 1e3).toFixed(1)} k`)
+  return signFirstEuro(eur, a.toFixed(0))
 }

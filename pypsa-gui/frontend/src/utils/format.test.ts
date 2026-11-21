@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fmtCurrency } from './format'
+import { fmtCurrency, signFirstEuro } from './format'
 
 describe('fmtCurrency sign position (UX 2 (6))', () => {
   it('puts the minus before the €', () => {
@@ -14,5 +14,14 @@ describe('fmtCurrency sign position (UX 2 (6))', () => {
     expect(fmtCurrency(0)).toBe('€0.00')
     expect(fmtCurrency(-0.001)).toBe('€0.00')
     expect(fmtCurrency(null)).toBe('—')
+  })
+})
+
+describe('signFirstEuro', () => {
+  it('puts the minus before the €, none when the figure rounds to zero', () => {
+    expect(signFirstEuro(-16.31e6, '16.31 M')).toBe('-€16.31 M')
+    expect(signFirstEuro(16.31e6, '16.31 M')).toBe('€16.31 M')
+    expect(signFirstEuro(-0.4, '0')).toBe('€0')
+    expect(signFirstEuro(-0.004, '0.00 k')).toBe('€0.00 k')
   })
 })

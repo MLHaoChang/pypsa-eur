@@ -32,6 +32,13 @@ export function fmtMwhNumber(mwh: number | null | undefined): string {
   return mwh.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+/** "€" + body with the minus in front of it: "-€16.31 M", never "€-16.31 M"
+ *  (UX 2 (6)). A figure that rounds to zero keeps no sign. `body` is the
+ *  unsigned magnitude as shown ("16.31 M", "830 k", "12"). */
+export function signFirstEuro(eur: number, body: string): string {
+  return `${eur < 0 && parseFloat(body) !== 0 ? '-' : ''}€${body}`
+}
+
 /** Euros scaled to B / M / k. The minus goes before the € ("-€16.31 M", never
  *  "€-16.31 M"; UX 2 (6)). Every euro formatter agrees on this. */
 export function fmtCurrency(eur: number | null | undefined, digits = 2): string {
@@ -39,7 +46,7 @@ export function fmtCurrency(eur: number | null | undefined, digits = 2): string 
   const a = Math.abs(eur)
   const [scaled, unit] = a >= 1e9 ? [a / 1e9, ' B'] : a >= 1e6 ? [a / 1e6, ' M'] : a >= 1e3 ? [a / 1e3, ' k'] : [a, '']
   const body = scaled.toFixed(digits)
-  return `${eur < 0 && Number(body) !== 0 ? '-' : ''}€${body}${unit}`
+  return signFirstEuro(eur, `${body}${unit}`)
 }
 
 /** Tonnes of product, scaled like fmtEnergy: t, kt, Mt. */
