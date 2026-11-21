@@ -437,7 +437,7 @@ AC_METRICS = [
     "ac_peak_branch_utilisation",
     "ac_hours_above_rating",
     "ac_peak_apparent_flow",
-    "branch_rating",
+    "ac_branch_rating",
 ]
 
 
@@ -487,7 +487,7 @@ FIRST_ONLY = {
     "ac_peak_branch_utilisation": 125.0,
     "ac_hours_above_rating": 1.0,
     "ac_peak_apparent_flow": 10.0,
-    "branch_rating": 8.0,
+    "ac_branch_rating": 8.0,
 }
 
 
@@ -549,7 +549,7 @@ def test_unknown_convergence_takes_precedence_over_not_converged(ac_grid, checke
             "ac_peak_branch_utilisation": 62.5,
             "ac_hours_above_rating": 0.0,
             "ac_peak_apparent_flow": 5.0,
-            "branch_rating": 8.0,
+            "ac_branch_rating": 8.0,
         },
     )
     assert receipt_of(frames)["result_slots"][0]["reason"].startswith(
@@ -615,7 +615,7 @@ def test_an_unaligned_convergence_list_is_refused(ac_grid, checked):
 
 def test_a_failed_draft_keeps_the_warning(ac_grid, checked):
     ctx = ac_grid((True, False))
-    receipt = receipt_of(ac_ask(checked, ctx, {**FIRST_ONLY, "branch_rating": 9.0}))
+    receipt = receipt_of(ac_ask(checked, ctx, {**FIRST_ONLY, "ac_branch_rating": 9.0}))
     assert receipt["policy_version"] == "5" and receipt["request_complete"] is False
     assert receipt["result_slots"][0]["metric"] == "ac_pf_convergence"
     assert {s["reason"] for s in receipt["result_slots"][1:]} == {

@@ -6629,6 +6629,11 @@
  "profiles": {
   "ac-branch-loading/1": {
    "definitions": {
+    "ac_branch_rating": {
+     "formula_id": "ac-branch-rating/1",
+     "label": "Rating (s_nom_opt if extendable, else s_nom)",
+     "unit": "MVA"
+    },
     "ac_hours_above_rating": {
      "formula_id": "ac-branch-weighted-hours-above-rating/1",
      "label": "Weighted hours above the rating, over converged snapshots",
@@ -6643,18 +6648,13 @@
      "formula_id": "ac-branch-peak-utilisation/1",
      "label": "Peak AC loading against the rating, over converged snapshots",
      "unit": "%"
-    },
-    "branch_rating": {
-     "formula_id": "branch-rating/1",
-     "label": "Rating (s_nom_opt if extendable, else s_nom)",
-     "unit": "MVA"
     }
    },
    "metrics": [
     "ac_peak_branch_utilisation",
     "ac_hours_above_rating",
     "ac_peak_apparent_flow",
-    "branch_rating"
+    "ac_branch_rating"
    ]
   },
   "branch-loading/1": {
