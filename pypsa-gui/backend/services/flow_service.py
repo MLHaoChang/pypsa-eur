@@ -448,6 +448,24 @@ def _held(component: str, entity: str, *, carrier=None, field_name: str | None =
             "series": bool(series)}
 
 
+def _pin_sizes(n, rows: list[dict]) -> None:
+    """Set ``fixed_size`` on each section 5 asset row: the size an extendable asset's two
+    bounds pin when both are finite and equal (an IPP's owned plant, template-e2e 14), else
+    None. Display only, like the rest of the row: Guided reads "fixed at", not "sized by
+    the study"."""
+    tables = {klass: (table, fld) for klass, table, fld, _stock in _ASSET_TABLES}
+    for row in rows:
+        row["fixed_size"] = None
+        if not row["extendable"] or row["component"] not in tables:
+            continue
+        table, fld = tables[row["component"]]
+        df = getattr(n, table)
+        lo, hi = (_number(df.at[row["entity"], f"{fld}_{b}"]) if f"{fld}_{b}" in df else None
+                  for b in ("min", "max"))
+        if lo is not None and hi is not None and abs(hi - lo) <= 1e-6 * max(1.0, abs(hi)):
+            row["fixed_size"] = lo
+
+
 def _peak(column) -> float | None:
     """The value of a series furthest from zero, sign kept: the peak of
     [-5, -1, -2] is -5. Where +5 and -5 tie, the positive one. None for a
@@ -463,6 +481,8 @@ def _holds(n, carriers: list[str], site_assets: list[tuple[str, str]]
     total never does. Raw values only, the words are the frontend's. Display only: no state,
     count, blocker, verdict, acknowledgement or fingerprint reads it. An
     extendable asset carries the size as entered, never a solved one."""
+    from services.process_products import is_helper_generator
+
     tables = {klass: (table, fld, stock) for klass, table, fld, stock in _ASSET_TABLES}
     assets = []
     for klass, name in site_assets[:HOLDS_CAP]:
@@ -473,6 +493,9 @@ def _holds(n, carriers: list[str], site_assets: list[tuple[str, str]]
                             field_name=fld, value=df.at[name, fld],
                             unit=_size_unit(n, bus, stock=stock),
                             extendable=df.at[name, f"{fld}_extendable"]))
+        # Asset rows only: a Generator the model adds (slack, lost production, buy-in), not an asset of
+        # the site (`process_products.is_helper_generator`). Display only, like the rest of the row.
+        assets[-1]["helper"] = klass == "Generator" and is_helper_generator(n, name)
     series = n.loads_t.p_set
     loads = []
     for name in n.loads.index[:HOLDS_CAP]:
@@ -553,6 +576,7 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
     carriers = [str(c) for c in n.carriers.index] if len(n.carriers) else \
         sorted({str(b) for b in n.buses.get("carrier", []) if str(b)})
     holds, holds_total = _holds(n, carriers, site_assets)
+    _pin_sizes(n, holds.get("assets", []))
     return _Facts(
         revision=revision, snapshots=len(n.snapshots), loads=len(n.loads),
         carriers=carriers,
@@ -1173,14 +1197,18 @@ def _loadflow_requested(facts) -> bool:
 
 def _summary(section: str, facts: _Facts) -> str | None:
     if section == "project":
-        return f"{facts.snapshots} snapshots"
+        # A time step, never an unqualified "snapshot" (CONTEXT.md).
+        return _count(facts.snapshots, "time step")
     if section == "carriers":
         return ", ".join(facts.carriers[:6]) or None
     if section == "connection":
         if not facts.connection_links:
             return None
+        # Names as a person reads them, never the engine id (UX 2 on #1688), the same way Guided's Site card does.
+        from services.run_actions import _display_name
+
         mw = f", {facts.import_p_nom_mw:g} MW" if facts.import_p_nom_mw is not None else ""
-        return ", ".join(facts.connection_links[:3]) + mw
+        return ", ".join(_display_name(x) for x in facts.connection_links[:3]) + mw
     if section == "loads":
         return _count(facts.loads, "load")
     if section == "assets":

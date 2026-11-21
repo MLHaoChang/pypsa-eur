@@ -41,3 +41,7 @@ Adequacy spec: the verdict answers "is the must-stay-on load adequate". review-u
 ## Done when
 
 The Island Microgrid run either reports the hospital's LOLE with the feeder sampled, close to the 87.6 h/yr hand figure and so a miss, or shows no "Certified" and names the unsampled feeder. A test pins one of the two.
+
+## Comments
+
+- Seen again 2026-11-20 (template walk, master 1f6905e3): DC: verdict 'Certified: about 0.5 h/yr' next to 'Site transformer about EUR 7.04 M per year'; microgrid: 'Certified: no shortfall expected' next to 'Hospital feeder about EUR 657 k per year'. The EUR figure is not explained next to the verdict. Issue 03 (sized design never shown) looks fixed: all three now show a 'Sized design' table.

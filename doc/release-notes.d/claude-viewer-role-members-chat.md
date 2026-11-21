@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A project's owner can make a member an editor or a viewer, and the project list and project responses say whether you may edit. The assistant offers a viewer only look-up tools and says in plain words that the project is view only. Choosing the role in the members dialog follows in the app.
