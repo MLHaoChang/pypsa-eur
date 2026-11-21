@@ -29,3 +29,5 @@ Decision (owner, 2026-11-20, TE2E-16-PLAIN-1): yes, a plain template report buil
 ## Comments
 
 - Seen again 2026-11-20 (template walk, master 1f6905e3): DC, H2, microgrid: Expert Reports says 'No reports yet' after a certified Guided run, and Expert Results tabs read 'Not run yet' until Run LOPF is clicked; Create evidence report then builds in about 3 s and Export .docx/.pdf are offered.
+
+- Seen again 2026-11-21 (template walk, master 6b421b06): IPP, Expert › Reports: "No reports yet" after a run; Generate report ends in "No usable LLM profile: configure an LLM profile in Settings. (The active LLM profile (anthropic-sonnet) has no API key configured ...)", so on a machine without a key the evidence report cannot be built and I could not check that it follows a field edit. TE2E-16-PLAIN-1 (plain report, no key) is not on this master. Ammonia Guided Results does offer "Download report (.docx)"; I did not open it.
