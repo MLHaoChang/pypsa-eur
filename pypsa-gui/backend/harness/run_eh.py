@@ -199,8 +199,72 @@ def freeze(ctx, profile, solves_left) -> dict:
         "args": args,
         "goal": _goal_snapshot(goal),
         "digest": digest(args),
+        # template-e2e 02b (GK B E4, GK A 32): the energization schedule the card
+        # was drawn on, bound by its digest, which `admit` compares exactly. A
+        # network read without a schedule records nothing, so its card stays
+        # byte-equal to a pre-02b one (GK B E4) and admits as one.
+        **_energization_entry(getattr(ctx, "network", None)),
         **({"contingencies": held} if held is not None else {}),
     }
+
+
+def _energization_entry(network) -> dict:
+    """``{"energization": ...}`` for `freeze`; empty where the schedule reads
+    as absent (no digest: the test `_energization_change` admits a pre-02b
+    record by), so a non-staged card is unchanged."""
+    entry = _energization(network)
+    if entry is not None and entry["digest"] is None:
+        return {}
+    return {"energization": entry}
+
+
+def _energization(network):
+    """``{digest, by_period}`` of the network's energization schedule: the
+    digest of the exact schedule (`energization.schedule_digest`, None without
+    one), which `admit` binds, and ``{link: by_period}``
+    (`energization.all_by_period`), which only names the links that moved.
+    None when it can't be read."""
+    from services.adequacy.energization import all_by_period, schedule_digest
+
+    try:
+        return {"digest": schedule_digest(network), "by_period": all_by_period(network)}
+    except Exception:  # noqa: BLE001 — unreadable is never the frozen schedule
+        logger.exception("run_eh: energization schedule read failed")
+        return None
+
+
+#: A record frozen before 02b, on a network that now carries a schedule.
+ENERGIZATION_UNRECORDED = (
+    "The study's card was drawn before the connection's energization schedule was "
+    "recorded with it. Review the run again so the card is drawn with the schedule."
+)
+
+
+def _energization_change(ctx, frozen) -> str | None:
+    """template-e2e 02b (GK B E4, GK A 32): why the network's energization
+    schedule is no longer the one the study's card was drawn on, or None when
+    it still is. The digest of the exact schedule is compared, so a ramp
+    reversed inside a period (the same min and max) is seen. A record frozen
+    before 02b holds none: it refuses where the network carries a schedule."""
+    now = _energization(getattr(ctx, "network", None))
+    if "energization" not in frozen:
+        return (
+            None
+            if now is not None and now["digest"] is None
+            else ENERGIZATION_UNRECORDED
+        )
+    then = frozen["energization"]
+    if not isinstance(then, dict) or "digest" not in then or now is None:
+        return "The connection's energization schedule can't be compared now. Review the run again."
+    if now["digest"] == then.get("digest"):
+        return None
+    was, is_ = then.get("by_period") or {}, now["by_period"]
+    moved = sorted(link for link in {*was, *is_} if was.get(link) != is_.get(link))
+    where = f" ({', '.join(moved)})" if moved else " (inside a period)"
+    return (
+        f"The connection's energization schedule changed since the study's card was "
+        f"drawn{where}. Review the run again."
+    )
 
 
 def islanding(network, args):
@@ -407,6 +471,10 @@ def admit(path, task, step, args, ctx):
             "review the run again."
         )
     stale = _connection_limit_change(ctx, args)
+    if stale is not None:
+        _stop(task, ARGS_KIND)
+        return ARGS_KIND, stale
+    stale = _energization_change(ctx, frozen)
     if stale is not None:
         _stop(task, ARGS_KIND)
         return ARGS_KIND, stale
