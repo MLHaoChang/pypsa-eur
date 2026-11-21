@@ -6,14 +6,14 @@ network. The main fixture (`tests/fixtures/entsoe/de_lu_2024_a44.xml.gz`) is the
 A44 layout built from the shipped SMARD DE-LU 2024 seed (its `build.py` says
 how); the edge cases are built here with the same writer.
 """
+
 from __future__ import annotations
 
 import gzip
 import json
 import logging
 import os
-import uuid
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 import httpx
@@ -27,7 +27,7 @@ from tests.fixtures.entsoe import build as B
 
 FIXTURE = Path(__file__).parent / "fixtures" / "entsoe" / "de_lu_2024_a44.xml.gz"
 TOKEN = "entsoe-test-token-3f9c2a71-0b5d-4e8e-9d1a-7c6b5a4f3e2d"
-NOW = datetime(2026, 11, 21, tzinfo=timezone.utc)
+NOW = datetime(2026, 11, 21, tzinfo=UTC)
 
 
 @pytest.fixture(autouse=True)
@@ -52,10 +52,20 @@ class Replay:
     """A MockTransport that answers every request with one response and
     records the requests it saw."""
 
-    def __init__(self, status: int = 200, body: bytes = b"", headers: dict | None = None,
-                 exc: Exception | None = None):
+    def __init__(
+        self,
+        status: int = 200,
+        body: bytes = b"",
+        headers: dict | None = None,
+        exc: Exception | None = None,
+    ):
         self.requests: list[httpx.Request] = []
-        self.status, self.body, self.headers, self.exc = status, body, headers or {}, exc
+        self.status, self.body, self.headers, self.exc = (
+            status,
+            body,
+            headers or {},
+            exc,
+        )
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
@@ -69,36 +79,48 @@ class Replay:
 
 
 def _hours(year: int) -> pd.DatetimeIndex:
-    return pd.date_range(f"{year}-01-01", f"{year + 1}-01-01", freq="h", tz="UTC", inclusive="left")
+    return pd.date_range(
+        f"{year}-01-01", f"{year + 1}-01-01", freq="h", tz="UTC", inclusive="left"
+    )
 
 
 def _doc(prices: pd.Series, **kw) -> bytes:
     return B.a44(prices, **kw).encode()
 
 
-def _year_prices(year: int, *, start_offset_h: int = -1, end_extra_h: int = 23) -> pd.Series:
+def _year_prices(
+    year: int, *, start_offset_h: int = -1, end_extra_h: int = 23
+) -> pd.Series:
     """Prices for whole CET days covering the UTC year: value = hour index mod 50."""
-    idx = pd.date_range(pd.Timestamp(f"{year}-01-01", tz="UTC") + pd.Timedelta(hours=start_offset_h),
-                        pd.Timestamp(f"{year + 1}-01-01", tz="UTC") + pd.Timedelta(hours=end_extra_h),
-                        freq="h", inclusive="left")
+    idx = pd.date_range(
+        pd.Timestamp(f"{year}-01-01", tz="UTC") + pd.Timedelta(hours=start_offset_h),
+        pd.Timestamp(f"{year + 1}-01-01", tz="UTC") + pd.Timedelta(hours=end_extra_h),
+        freq="h",
+        inclusive="left",
+    )
     return pd.Series((np.arange(len(idx)) % 50).astype(float), index=idx)
 
 
 # ── parsing ────────────────────────────────────────────────────────────────
 
+
 def test_the_fixture_parses_to_the_seed_year_hour_by_hour():
     series, notes = M.parse_a44(_fixture(), "DE-LU", 2024)
     seed = B.seed()
-    assert len(series) == 8784                       # leap year
+    assert len(series) == 8784  # leap year
     assert series.index.equals(_hours(2024))
     assert np.allclose(series.to_numpy(), seed.to_numpy())
-    assert notes == []                               # hourly: nothing averaged
+    assert notes == []  # hourly: nothing averaged
 
 
 def test_the_dst_days_carry_23_and_25_points_and_still_fill_every_utc_hour():
     raw = _fixture().decode()
-    assert "<start>2024-03-30T23:00Z</start>\n        <end>2024-03-31T22:00Z</end>" in raw
-    assert "<start>2024-10-26T22:00Z</start>\n        <end>2024-10-27T23:00Z</end>" in raw
+    assert (
+        "<start>2024-03-30T23:00Z</start>\n        <end>2024-03-31T22:00Z</end>" in raw
+    )
+    assert (
+        "<start>2024-10-26T22:00Z</start>\n        <end>2024-10-27T23:00Z</end>" in raw
+    )
     series, _ = M.parse_a44(raw.encode(), "DE-LU", 2024)
     assert series.isna().sum() == 0
 
@@ -106,16 +128,23 @@ def test_the_dst_days_carry_23_and_25_points_and_still_fill_every_utc_hour():
 def test_a03_repeats_the_last_price_over_skipped_positions():
     p = _year_prices(2023)
     p[:] = 7.0
-    p.iloc[31:41] = -3.5                             # p starts one hour before the year
+    p.iloc[31:41] = -3.5  # p starts one hour before the year
     series, _ = M.parse_a44(_doc(p, curve="A03"), "DE-LU", 2023)
     assert len(series) == 8760
-    assert series.iloc[29] == 7.0 and (series.iloc[30:40] == -3.5).all() and series.iloc[40] == 7.0
+    assert (
+        series.iloc[29] == 7.0
+        and (series.iloc[30:40] == -3.5).all()
+        and series.iloc[40] == 7.0
+    )
 
 
 def test_an_a01_curve_with_a_missing_position_is_refused_not_zero_filled():
     raw = _doc(_year_prices(2023), curve="A01").decode()
     cut = raw.index("<position>5</position>")
-    start, end = raw.rindex("<Point>", 0, cut), raw.index("</Point>", cut) + len("</Point>")
+    start, end = (
+        raw.rindex("<Point>", 0, cut),
+        raw.index("</Point>", cut) + len("</Point>"),
+    )
     with pytest.raises(M.MarketPriceError) as e:
         M.parse_a44((raw[:start] + raw[end:]).encode(), "DE-LU", 2023)
     assert e.value.kind == "bad_document" and "left 1 prices out" in e.value.message
@@ -123,15 +152,22 @@ def test_an_a01_curve_with_a_missing_position_is_refused_not_zero_filled():
 
 def test_quarter_hours_are_averaged_to_hourly_and_noted():
     hourly = _year_prices(2025)
-    q = pd.Series(np.repeat(hourly.to_numpy(), 4) + np.tile([-1.5, -0.5, 0.5, 1.5], len(hourly)),
-                  index=pd.date_range(hourly.index[0], periods=4 * len(hourly), freq="15min"))
+    q = pd.Series(
+        np.repeat(hourly.to_numpy(), 4) + np.tile([-1.5, -0.5, 0.5, 1.5], len(hourly)),
+        index=pd.date_range(hourly.index[0], periods=4 * len(hourly), freq="15min"),
+    )
     # Hourly until October, quarter-hours after: the 2025 market change.
     split = pd.Timestamp("2025-09-30T22:00Z")
     doc_h = B.a44(hourly[hourly.index < split], curve="A01")
     doc_q = B.a44(q[q.index >= split], resolution="PT15M", curve="A01")
-    body = doc_h.split("</Publication_MarketDocument>")[0] + doc_q.split("</period.timeInterval>", 1)[1]
+    body = (
+        doc_h.split("</Publication_MarketDocument>")[0]
+        + doc_q.split("</period.timeInterval>", 1)[1]
+    )
     series, notes = M.parse_a44(body.encode(), "DE-LU", 2025)
-    expected = hourly[(hourly.index >= _hours(2025)[0]) & (hourly.index <= _hours(2025)[-1])]
+    expected = hourly[
+        (hourly.index >= _hours(2025)[0]) & (hourly.index <= _hours(2025)[-1])
+    ]
     assert np.allclose(series.to_numpy(), expected.to_numpy())
     assert notes == ["resolution:PT15M averaged to hourly"]
 
@@ -149,27 +185,41 @@ def test_a_missing_hour_refuses_the_year():
     assert len(p) == len(_year_prices(2023)) - 1
 
 
-@pytest.mark.parametrize("decl", [
-    b'<!DOCTYPE x [<!ENTITY a "b">]>',
-    b'<!ENTITY a SYSTEM "file:///etc/passwd">',
-    b"<!doctype html>",
-])
+@pytest.mark.parametrize(
+    "decl",
+    [
+        b'<!DOCTYPE x [<!ENTITY a "b">]>',
+        b'<!ENTITY a SYSTEM "file:///etc/passwd">',
+        b"<!doctype html>",
+    ],
+)
 def test_doctype_and_entity_declarations_are_refused_before_parsing(decl):
     raw = _doc(_year_prices(2023))
-    body = raw.replace(b"<Publication_MarketDocument", decl + b"<Publication_MarketDocument", 1)
+    body = raw.replace(
+        b"<Publication_MarketDocument", decl + b"<Publication_MarketDocument", 1
+    )
     with pytest.raises(M.MarketPriceError) as e:
         M.parse_a44(body, "DE-LU", 2023)
     assert e.value.kind == "bad_document"
 
 
-@pytest.mark.parametrize("swap, words", [
-    ((b"<currency_Unit.name>EUR<", b"<currency_Unit.name>USD<"), "currency other than EUR"),
-    ((b"<price_Measure_Unit.name>MWH<", b"<price_Measure_Unit.name>KWH<"), "unit other than MWh"),
-    ((b"<resolution>PT60M<", b"<resolution>P1D<"), "resolution"),
-    ((b"<curveType>A03<", b"<curveType>A02<"), "price curve"),
-    ((b"<price.amount>1<", b"<price.amount>abc<"), "not a number"),
-    ((b"<position>2<", b"<position>99<"), "outside its period"),
-])
+@pytest.mark.parametrize(
+    "swap, words",
+    [
+        (
+            (b"<currency_Unit.name>EUR<", b"<currency_Unit.name>USD<"),
+            "currency other than EUR",
+        ),
+        (
+            (b"<price_Measure_Unit.name>MWH<", b"<price_Measure_Unit.name>KWH<"),
+            "unit other than MWh",
+        ),
+        ((b"<resolution>PT60M<", b"<resolution>P1D<"), "resolution"),
+        ((b"<curveType>A03<", b"<curveType>A02<"), "price curve"),
+        ((b"<price.amount>1<", b"<price.amount>abc<"), "not a number"),
+        ((b"<position>2<", b"<position>99<"), "outside its period"),
+    ],
+)
 def test_a_document_off_the_rules_is_refused_in_words(swap, words):
     body = _doc(_year_prices(2023)).replace(*swap, 1)
     assert body != _doc(_year_prices(2023))
@@ -184,11 +234,13 @@ def test_an_oversized_document_is_refused():
     assert e.value.kind == "bad_document"
 
 
-ACK = (b'<?xml version="1.0" encoding="UTF-8"?><Acknowledgement_MarketDocument '
-       b'xmlns="urn:iec62325.351:tc57wg16:451-1:acknowledgementdocument:7:0"><mRID>x</mRID>'
-       b"<Reason><code>999</code><text>No matching data found for Data item Day-ahead Prices "
-       b"[12.1.D] (10Y1001A1001A82H, 10Y1001A1001A82H) and interval 2016-01-01T00:00:00.000Z/"
-       b"2017-01-01T00:00:00.000Z.</text></Reason></Acknowledgement_MarketDocument>")
+ACK = (
+    b'<?xml version="1.0" encoding="UTF-8"?><Acknowledgement_MarketDocument '
+    b'xmlns="urn:iec62325.351:tc57wg16:451-1:acknowledgementdocument:7:0"><mRID>x</mRID>'
+    b"<Reason><code>999</code><text>No matching data found for Data item Day-ahead Prices "
+    b"[12.1.D] (10Y1001A1001A82H, 10Y1001A1001A82H) and interval 2016-01-01T00:00:00.000Z/"
+    b"2017-01-01T00:00:00.000Z.</text></Reason></Acknowledgement_MarketDocument>"
+)
 
 
 def test_an_acknowledgement_is_no_data_in_our_words_not_entsoes():
@@ -200,6 +252,7 @@ def test_an_acknowledgement_is_no_data_in_our_words_not_entsoes():
 
 # ── the request ────────────────────────────────────────────────────────────
 
+
 def test_the_request_names_the_zone_eic_and_the_utc_year():
     r = Replay(body=_fixture())
     series, _ = M.fetch_day_ahead("DE-LU", 2024, token=TOKEN, transport=r.transport)
@@ -207,25 +260,40 @@ def test_the_request_names_the_zone_eic_and_the_utc_year():
     (req,) = r.requests
     assert req.url.scheme == "https" and req.url.host == "web-api.tp.entsoe.eu"
     q = dict(req.url.params)
-    assert q == {"securityToken": TOKEN, "documentType": "A44", "in_Domain": "10Y1001A1001A82H",
-                 "out_Domain": "10Y1001A1001A82H", "periodStart": "202401010000",
-                 "periodEnd": "202501010000"}
+    assert q == {
+        "securityToken": TOKEN,
+        "documentType": "A44",
+        "in_Domain": "10Y1001A1001A82H",
+        "out_Domain": "10Y1001A1001A82H",
+        "periodStart": "202401010000",
+        "periodEnd": "202501010000",
+    }
     assert req.headers["user-agent"] == M.USER_AGENT
 
 
-@pytest.mark.parametrize("status, kind", [
-    (401, "bad_token"), (403, "bad_token"), (429, "unavailable"), (500, "unavailable"),
-    (503, "unavailable"), (302, "unavailable"),
-])
+@pytest.mark.parametrize(
+    "status, kind",
+    [
+        (401, "bad_token"),
+        (403, "bad_token"),
+        (429, "unavailable"),
+        (500, "unavailable"),
+        (503, "unavailable"),
+        (302, "unavailable"),
+    ],
+)
 def test_http_refusals_are_plain_and_carry_no_token(status, kind):
-    r = Replay(status=status, body=b"<html>Unauthorized " + TOKEN.encode() + b"</html>",
-               headers={"location": "https://elsewhere.example/steal"})
+    r = Replay(
+        status=status,
+        body=b"<html>Unauthorized " + TOKEN.encode() + b"</html>",
+        headers={"location": "https://elsewhere.example/steal"},
+    )
     with pytest.raises(M.MarketPriceError) as e:
         M.fetch_day_ahead("DE-LU", 2024, token=TOKEN, transport=r.transport)
     assert e.value.kind == kind
     assert TOKEN not in str(e.value) and "http" not in e.value.message.lower()
-    assert str(status) not in e.value.message           # no raw status code in the words
-    assert len(r.requests) == 1                       # a redirect is never followed
+    assert str(status) not in e.value.message  # no raw status code in the words
+    assert len(r.requests) == 1  # a redirect is never followed
 
 
 def test_a_400_acknowledgement_is_no_data():
@@ -235,35 +303,53 @@ def test_a_400_acknowledgement_is_no_data():
     assert e.value.kind == "no_data"
 
 
-@pytest.mark.parametrize("exc, words", [
-    (httpx.ConnectTimeout("t"), "did not answer in time"),
-    (httpx.ConnectError("c"), "could not be reached"),
-])
+@pytest.mark.parametrize(
+    "exc, words",
+    [
+        (httpx.ConnectTimeout("t"), "did not answer in time"),
+        (httpx.ConnectError("c"), "could not be reached"),
+    ],
+)
 def test_network_failures_are_plain(exc, words):
     with pytest.raises(M.MarketPriceError) as e:
-        M.fetch_day_ahead("DE-LU", 2024, token=TOKEN, transport=Replay(exc=exc).transport)
+        M.fetch_day_ahead(
+            "DE-LU", 2024, token=TOKEN, transport=Replay(exc=exc).transport
+        )
     assert e.value.kind == "unavailable" and words in e.value.message
 
 
 def test_a_stream_past_the_cap_is_refused(monkeypatch):
     monkeypatch.setattr(M, "MAX_RESPONSE_BYTES", 1000)
     with pytest.raises(M.MarketPriceError) as e:
-        M.fetch_day_ahead("DE-LU", 2024, token=TOKEN, transport=Replay(body=b"x" * 5000).transport)
+        M.fetch_day_ahead(
+            "DE-LU", 2024, token=TOKEN, transport=Replay(body=b"x" * 5000).transport
+        )
     assert e.value.kind == "bad_document"
 
 
 # ── zone and year ──────────────────────────────────────────────────────────
 
+
 @pytest.mark.parametrize("zone", ["XX", "../../etc", "de-lu", "", None, 5])
 def test_an_unknown_zone_is_refused_before_any_path_or_request(zone):
     with pytest.raises(M.MarketPriceError) as e:
         M.check_request(zone, 2024, NOW)
-    assert e.value.kind == "invalid_zone" and e.value.message.startswith("Bidding zone:")
+    assert e.value.kind == "invalid_zone" and e.value.message.startswith(
+        "Bidding zone:"
+    )
 
 
-@pytest.mark.parametrize("zone, year", [
-    ("DE-LU", 2018), ("DE-LU", 2026), ("FR", 2014), ("FR", True), ("FR", "2024"), ("IT-CALA", 2020),
-])
+@pytest.mark.parametrize(
+    "zone, year",
+    [
+        ("DE-LU", 2018),
+        ("DE-LU", 2026),
+        ("FR", 2014),
+        ("FR", True),
+        ("FR", "2024"),
+        ("IT-CALA", 2020),
+    ],
+)
 def test_a_year_outside_the_zone_s_complete_years_is_refused(zone, year):
     with pytest.raises(M.MarketPriceError) as e:
         M.check_request(zone, year, NOW)
@@ -287,21 +373,24 @@ def test_every_eic_code_passes_its_check_character():
         assert len(zone.eic) == 16 and _eic_check(zone.eic) == zone.eic[15], zone.code
 
 
-@pytest.mark.parametrize("lat, lng, zone", [
-    (52.52, 13.40, "DE-LU"),     # Berlin
-    (48.14, 11.58, "DE-LU"),     # Munich
-    (48.86, 2.35, "FR"),         # Paris
-    (40.42, -3.70, "ES"),        # Madrid
-    (52.23, 21.01, "PL"),        # Warsaw
-    (48.21, 16.37, "AT"),        # Vienna
-    (47.56, 7.59, None),         # Basel: three borders
-    (50.78, 6.08, None),         # Aachen: near NL and BE
-    (59.91, 10.75, None),        # Oslo: Norway has five zones
-    (45.46, 9.19, None),         # Milan: Italy has seven
-    (55.68, 12.57, None),        # Copenhagen: two zones
-    (51.51, -0.13, None),        # London: not on the platform
-    (float("nan"), 13.4, None),
-])
+@pytest.mark.parametrize(
+    "lat, lng, zone",
+    [
+        (52.52, 13.40, "DE-LU"),  # Berlin
+        (48.14, 11.58, "DE-LU"),  # Munich
+        (48.86, 2.35, "FR"),  # Paris
+        (40.42, -3.70, "ES"),  # Madrid
+        (52.23, 21.01, "PL"),  # Warsaw
+        (48.21, 16.37, "AT"),  # Vienna
+        (47.56, 7.59, None),  # Basel: three borders
+        (50.78, 6.08, None),  # Aachen: near NL and BE
+        (59.91, 10.75, None),  # Oslo: Norway has five zones
+        (45.46, 9.19, None),  # Milan: Italy has seven
+        (55.68, 12.57, None),  # Copenhagen: two zones
+        (51.51, -0.13, None),  # London: not on the platform
+        (float("nan"), 13.4, None),
+    ],
+)
 def test_the_pin_lookup_names_a_zone_only_when_it_is_sure(lat, lng, zone):
     assert M.zone_for_pin(lat, lng) == zone
 
@@ -332,6 +421,7 @@ def test_the_chosen_zone_round_trips_and_a_stale_one_reads_as_none(tmp_path):
 
 # ── cache and token ────────────────────────────────────────────────────────
 
+
 def test_no_token_is_a_plain_refusal_and_no_request():
     r = Replay(body=_fixture())
     with pytest.raises(M.MarketPriceError) as e:
@@ -352,13 +442,20 @@ def test_a_fetched_year_is_cached_and_never_fetched_twice():
     assert TOKEN not in cache.read_text()
 
 
-@pytest.mark.parametrize("damage", [
-    lambda p: p.write_text("{not json"),
-    lambda p: p.write_text(json.dumps({**json.loads(p.read_text()), "values": [1.0] * 10})),
-    lambda p: p.write_text(json.dumps({**json.loads(p.read_text()), "version": 0})),
-    lambda p: p.write_text(json.dumps({**json.loads(p.read_text()), "fetched": "yesterday"})),
-    lambda p: p.write_text(json.dumps({**json.loads(p.read_text()), "zone": "FR"})),
-])
+@pytest.mark.parametrize(
+    "damage",
+    [
+        lambda p: p.write_text("{not json"),
+        lambda p: p.write_text(
+            json.dumps({**json.loads(p.read_text()), "values": [1.0] * 10})
+        ),
+        lambda p: p.write_text(json.dumps({**json.loads(p.read_text()), "version": 0})),
+        lambda p: p.write_text(
+            json.dumps({**json.loads(p.read_text()), "fetched": "yesterday"})
+        ),
+        lambda p: p.write_text(json.dumps({**json.loads(p.read_text()), "zone": "FR"})),
+    ],
+)
 def test_a_corrupt_or_partial_cache_refetches(damage):
     app_secrets.set_secret(M.TOKEN_NAME, TOKEN)
     r = Replay(body=_fixture())
@@ -373,9 +470,11 @@ def test_the_token_never_reaches_a_log_line(caplog):
     caplog.set_level(logging.DEBUG)
     M.day_ahead("DE-LU", 2024, transport=Replay(body=_fixture()).transport, now=NOW)
     with pytest.raises(M.MarketPriceError):
-        M.fetch_day_ahead("FR", 2024, token=TOKEN, transport=Replay(status=401).transport)
+        M.fetch_day_ahead(
+            "FR", 2024, token=TOKEN, transport=Replay(status=401).transport
+        )
     assert TOKEN not in caplog.text
-    assert "securityToken=<redacted>" in caplog.text      # the request line is still logged
+    assert "securityToken=<redacted>" in caplog.text  # the request line is still logged
 
 
 def test_the_token_is_a_managed_secret_and_redacted():
@@ -387,15 +486,24 @@ def test_the_token_is_a_managed_secret_and_redacted():
 
 
 def test_the_landing_meta_names_source_date_zone_and_year_and_no_token():
-    meta = M.series_meta("DE-LU", 2024, ["resolution:PT15M averaged to hourly"], "2026-11-21")
+    meta = M.series_meta(
+        "DE-LU", 2024, ["resolution:PT15M averaged to hourly"], "2026-11-21"
+    )
     assert meta["source"] == "ENTSO-E day-ahead" and meta["vintage_year"] == 2024
     assert meta["label"] == "DE-LU day-ahead 2024" and meta["unit"] == "EUR/MWh"
-    assert {"currency:EUR", "price_basis:nominal", "currency_year:2024", "region:DE-LU",
-            "fetched:2026-11-21", "resolution:PT15M averaged to hourly"} <= set(meta["notes"])
+    assert {
+        "currency:EUR",
+        "price_basis:nominal",
+        "currency_year:2024",
+        "region:DE-LU",
+        "fetched:2026-11-21",
+        "resolution:PT15M averaged to hourly",
+    } <= set(meta["notes"])
     assert TOKEN not in json.dumps(meta)
 
 
-# ── landing and routes ─────────────────────────────────────────────────────
+# ── landing ──────────────────────────────────────────────────────────────
+
 
 @pytest.fixture()
 def db(_auth_db):
@@ -404,152 +512,26 @@ def db(_auth_db):
         yield s
 
 
-def _project(tmp_path, org_id):
-    from routers.deps import AuthorizedProject
-    return AuthorizedProject(name="Demo", directory=tmp_path, uuid="not-a-uuid",
-                             org_id=str(org_id), registry_key="k")
-
-
-def _user(db, seeded_identity):
-    from db.models import User
-    return db.get(User, seeded_identity["user_id"])
-
-
 def test_land_stores_the_year_in_the_org_library(db, seeded_identity, tmp_path):
     from services.library import series_store as S
+
     app_secrets.set_secret(M.TOKEN_NAME, TOKEN)
     org = seeded_identity["org_id"]
-    ref, fetched = M.land(db, org, "DE-LU", 2024, transport=Replay(body=_fixture()).transport,
-                 now=NOW, root=tmp_path)
+    ref, fetched = M.land(
+        db,
+        org,
+        "DE-LU",
+        2024,
+        transport=Replay(body=_fixture()).transport,
+        now=NOW,
+        root=tmp_path,
+    )
     assert fetched == "2026-11-21"
     assert ref.id == "entsoe_da_DE-LU_2024" and ref.source == "ENTSO-E day-ahead"
     series = S.resolve(db, org, ref, root=tmp_path)
     assert len(series) == 8784
     from db.models import LibraryItem
+
     (row,) = db.query(LibraryItem).filter_by(org_id=org, name=ref.id).all()
     assert TOKEN not in row.meta_json and "fetched:2026-11-21" in row.meta_json
     assert TOKEN not in json.dumps(ref.model_dump(mode="json"))
-
-
-def test_the_project_route_offers_zones_the_pin_zone_and_the_pick(db, seeded_identity, tmp_path):
-    import routers.market_prices as R
-    (tmp_path / "sites.json").write_text(json.dumps(
-        {"version": 1, "sites": [{"id": "s", "origin": {"lat": 52.52, "lng": 13.40}}]}))
-    out = R.get_project_market_prices(project=_project(tmp_path, seeded_identity["org_id"]),
-                                      db=db, user=_user(db, seeded_identity))
-    assert out["pin_zone"] == "DE-LU" and out["zone"] == "DE-LU" and out["chosen_zone"] is None
-    assert out["can_fetch"] is True
-    assert out["token_set"] is False and out["can_set_token"] is False
-    assert {"code": "NO-2", "label": "Southern Norway", "first_year": 2015} in out["zones"]
-    M.store_zone(tmp_path, "NL")
-    out = R.get_project_market_prices(project=_project(tmp_path, seeded_identity["org_id"]),
-                                      db=db, user=_user(db, seeded_identity))
-    assert out["zone"] == "NL" and out["pin_zone"] == "DE-LU"
-
-
-def test_the_fetch_route_lands_the_series_and_remembers_the_zone(db, seeded_identity, tmp_path,
-                                                               monkeypatch):
-    import routers.market_prices as R
-    app_secrets.set_secret(M.TOKEN_NAME, TOKEN)
-    real = M.fetch_day_ahead
-    monkeypatch.setattr(M, "fetch_day_ahead", lambda zone, year, *, token, transport=None:
-                        real(zone, year, token=token, transport=Replay(body=_fixture()).transport))
-    out = R.post_day_ahead(body=R.DayAheadIn(zone="DE-LU", year=2024),
-                           project=_project(tmp_path, seeded_identity["org_id"]), db=db,
-                           user=_user(db, seeded_identity))
-    assert out.ref.id == "entsoe_da_DE-LU_2024" and out.source == "ENTSO-E day-ahead"
-    assert (out.zone, out.year) == ("DE-LU", 2024) and len(out.fetched) == 10
-    assert M.chosen_zone(tmp_path) == "DE-LU"
-
-
-@pytest.mark.parametrize("body, status, kind", [
-    ({"zone": "XX", "year": 2024}, 422, "invalid_zone"),
-    ({"zone": "DE-LU", "year": 2010}, 422, "invalid_year"),
-    ({"zone": "DE-LU", "year": 2024}, 409, "no_token"),
-])
-def test_the_fetch_route_refuses_in_words(db, seeded_identity, tmp_path, body, status, kind):
-    import routers.market_prices as R
-    from fastapi import HTTPException
-    with pytest.raises(HTTPException) as e:
-        R.post_day_ahead(body=R.DayAheadIn(**body), project=_project(tmp_path, seeded_identity["org_id"]),
-                         db=db, user=_user(db, seeded_identity))
-    assert e.value.status_code == status and e.value.detail["kind"] == kind
-    assert M.chosen_zone(tmp_path) is None
-
-
-def test_the_fetch_route_refuses_another_org_s_library(db, seeded_identity, second_identity, tmp_path):
-    import routers.market_prices as R
-    from fastapi import HTTPException
-    with pytest.raises(HTTPException) as e:
-        R.post_day_ahead(body=R.DayAheadIn(zone="DE-LU", year=2024),
-                         project=_project(tmp_path, second_identity["org_id"]), db=db,
-                         user=_user(db, seeded_identity))
-    assert e.value.status_code == 403
-
-
-def test_another_org_s_member_may_not_fetch(db, seeded_identity, second_identity, tmp_path):
-    import routers.market_prices as R
-    out = R.get_project_market_prices(project=_project(tmp_path, second_identity["org_id"]),
-                                      db=db, user=_user(db, seeded_identity))
-    assert out["can_fetch"] is False
-
-
-def test_a_project_viewer_may_not_fetch(db, seeded_identity, tmp_path, monkeypatch):
-    import routers.market_prices as R
-    from services import project_write_gate
-    monkeypatch.setattr(project_write_gate, "is_viewer", lambda db, user, uuid: True)
-    out = R.get_project_market_prices(project=_project(tmp_path, seeded_identity["org_id"]),
-                                      db=db, user=_user(db, seeded_identity))
-    assert out["can_fetch"] is False
-
-
-# ── token routes over HTTP ─────────────────────────────────────────────────
-
-@pytest.fixture
-def super_admin_client(_auth_db, seeded_identity):
-    from fastapi.testclient import TestClient
-
-    import main
-    from db.models import OrgMembership, User
-    from tests.conftest import attach_session
-    _engine, session_local = _auth_db
-    with session_local() as s:
-        user = User(id=uuid.uuid4(), email=f"entsoe-super-{uuid.uuid4().hex[:8]}@example.com",
-                    password_hash=None, status="active", is_super_admin=True,
-                    created_at=datetime.now(tz=timezone.utc))
-        s.add(user)
-        s.flush()
-        s.add(OrgMembership(id=uuid.uuid4(), user_id=user.id, org_id=seeded_identity["org_id"],
-                            role="admin"))
-        s.commit()
-        user_id = user.id
-    try:
-        with TestClient(main.app) as c:
-            yield attach_session(c, session_local, user_id)
-    finally:
-        with session_local() as s:
-            row = s.get(User, user_id)
-            if row is not None:
-                s.delete(row)
-                s.commit()
-
-
-@pytest.mark.parametrize("method, kwargs", [("put", {"json": {"value": TOKEN}}), ("delete", {})])
-def test_an_org_admin_cannot_set_or_clear_the_token(client, method, kwargs):
-    response = getattr(client, method)("/api/market-prices/token", **kwargs)
-    assert response.status_code == 403 and "super-admins" in response.json()["detail"]
-    assert M.token() is None
-
-
-def test_a_super_admin_sets_and_clears_the_token_and_status_says_only_set(super_admin_client, client):
-    r = super_admin_client.put("/api/market-prices/token", json={"value": TOKEN})
-    assert r.status_code == 200 and r.json() == {"token_set": True, "can_set_token": True}
-    assert TOKEN not in r.text
-    s = client.get("/api/market-prices/status")
-    assert s.json() == {"token_set": True, "can_set_token": False} and TOKEN[-4:] not in s.text
-    r = super_admin_client.delete("/api/market-prices/token")
-    assert r.json()["token_set"] is False and M.token() is None
-
-
-def test_an_anonymous_caller_gets_no_status(anon_client):
-    assert anon_client.get("/api/market-prices/status").status_code == 401

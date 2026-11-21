@@ -10,6 +10,7 @@ zone the user picked) and `…/day-ahead` fetches one complete year into the
 organisation's Library (`services/market_prices.py`). Not via chat: it spends a
 stored credential on an outbound call.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -31,27 +32,40 @@ router = APIRouter()
 project_router = APIRouter()
 
 _STATUS = {
-    "no_token": 409, "bad_token": 422, "invalid_zone": 422, "invalid_year": 422,
-    "no_data": 404, "incomplete": 422, "bad_document": 502, "unavailable": 503,
+    "no_token": 409,
+    "bad_token": 422,
+    "invalid_zone": 422,
+    "invalid_year": 422,
+    "no_data": 404,
+    "incomplete": 422,
+    "bad_document": 502,
+    "unavailable": 503,
 }
 
 
 def _refusal(exc: market_prices.MarketPriceError) -> HTTPException:
-    return HTTPException(_STATUS.get(exc.kind, 502), {"kind": exc.kind, "message": exc.message})
+    return HTTPException(
+        _STATUS.get(exc.kind, 502), {"kind": exc.kind, "message": exc.message}
+    )
 
 
 def _require_super_admin(user: User | None) -> User:
     if user is None:
         raise HTTPException(401, "Authentication required")
     if not user.is_super_admin:
-        raise HTTPException(403, "The ENTSO-E access token is shared by every organization on "
-                                 "this instance, so only super-admins can change it.")
+        raise HTTPException(
+            403,
+            "The ENTSO-E access token is shared by every organization on "
+            "this instance, so only super-admins can change it.",
+        )
     return user
 
 
 def _token_status(user: User | None) -> dict:
-    return {"token_set": market_prices.token() is not None,
-            "can_set_token": bool(user is not None and user.is_super_admin)}
+    return {
+        "token_set": market_prices.token() is not None,
+        "can_set_token": bool(user is not None and user.is_super_admin),
+    }
 
 
 class TokenIn(BaseModel):
@@ -111,9 +125,11 @@ def _can_fetch(db: DBSession, user: User | None, project: AuthorizedProject) -> 
 
 
 @project_router.get("/{name}/market-prices")
-def get_project_market_prices(project: AuthorizedProject = ProjectAccessDep,
-                              db: DBSession = Depends(get_db),
-                              user: User | None = Depends(optional_user)) -> dict:
+def get_project_market_prices(
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
     """What the fetch offers this project: the zones, the zone from the pin,
     the zone the user picked, the last complete year, and whether this user
     may fetch at all."""
@@ -121,8 +137,10 @@ def get_project_market_prices(project: AuthorizedProject = ProjectAccessDep,
     chosen = market_prices.chosen_zone(project.directory)
     return {
         **_token_status(user),
-        "zones": [{"code": z.code, "label": z.label, "first_year": z.first_year}
-                  for z in market_prices.BIDDING_ZONES.values()],
+        "zones": [
+            {"code": z.code, "label": z.label, "first_year": z.first_year}
+            for z in market_prices.BIDDING_ZONES.values()
+        ],
         "pin_zone": pin_zone,
         "chosen_zone": chosen,
         "zone": chosen or pin_zone,
@@ -161,14 +179,19 @@ def _library_org(db: DBSession, user: User | None, project: AuthorizedProject) -
     except (TypeError, ValueError):
         org = library_acl.org_of(db, user)
     if org is None or not library_acl.can_write(db, user, org):
-        raise HTTPException(403, "Not allowed to add series to this organization's Library.")
+        raise HTTPException(
+            403, "Not allowed to add series to this organization's Library."
+        )
     return org
 
 
 @project_router.post("/{name}/market-prices/day-ahead", response_model=DayAheadOut)
-def post_day_ahead(body: DayAheadIn, project: AuthorizedProject = ProjectAccessDep,
-                         db: DBSession = Depends(get_db),
-                         user: User | None = Depends(optional_user)) -> DayAheadOut:
+def post_day_ahead(
+    body: DayAheadIn,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> DayAheadOut:
     """Fetch one complete year of `zone`'s day-ahead prices into the Library,
     and remember the zone for this project. Check-only lock, like the sidecars."""
     from routers.projects import _check_project_lock
@@ -180,7 +203,9 @@ def post_day_ahead(body: DayAheadIn, project: AuthorizedProject = ProjectAccessD
     try:
         market_prices.check_request(body.zone, body.year)
         # A sync route: FastAPI runs it in the threadpool, so the fetch blocks no loop.
-        ref, fetched = market_prices.land(db, org, body.zone, body.year, created_by=user.id)
+        ref, fetched = market_prices.land(
+            db, org, body.zone, body.year, created_by=user.id
+        )
         market_prices.store_zone(project.directory, body.zone)
     except market_prices.MarketPriceError as exc:
         raise _refusal(exc) from exc

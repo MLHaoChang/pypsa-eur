@@ -14,6 +14,7 @@ pyogrio ships as a test fixture. For each single-zone country it keeps the
 rectangles. A pin outside every core (near a border, a coast, or in a
 multi-zone country) resolves to no zone, so the lookup never guesses.
 """
+
 from __future__ import annotations
 
 import sys
@@ -29,19 +30,37 @@ INWARD = 0.2
 # are deliberately absent: a country border cannot place a pin in DK1 or NO2.
 ZONES: dict[str, tuple[str, ...]] = {
     "DE-LU": ("Germany", "Luxembourg"),
-    "NL": ("Netherlands",), "BE": ("Belgium",), "FR": ("France",), "AT": ("Austria",),
-    "PL": ("Poland",), "CZ": ("Czechia",), "SK": ("Slovakia",), "HU": ("Hungary",),
-    "SI": ("Slovenia",), "HR": ("Croatia",), "RO": ("Romania",), "BG": ("Bulgaria",),
-    "GR": ("Greece",), "ES": ("Spain",), "PT": ("Portugal",), "FI": ("Finland",),
-    "EE": ("Estonia",), "LV": ("Latvia",), "LT": ("Lithuania",), "CH": ("Switzerland",),
-    "RS": ("Serbia",), "IE-SEM": ("Ireland",),
+    "NL": ("Netherlands",),
+    "BE": ("Belgium",),
+    "FR": ("France",),
+    "AT": ("Austria",),
+    "PL": ("Poland",),
+    "CZ": ("Czechia",),
+    "SK": ("Slovakia",),
+    "HU": ("Hungary",),
+    "SI": ("Slovenia",),
+    "HR": ("Croatia",),
+    "RO": ("Romania",),
+    "BG": ("Bulgaria",),
+    "GR": ("Greece",),
+    "ES": ("Spain",),
+    "PT": ("Portugal",),
+    "FI": ("Finland",),
+    "EE": ("Estonia",),
+    "LV": ("Latvia",),
+    "LT": ("Lithuania",),
+    "CH": ("Switzerland",),
+    "RS": ("Serbia",),
+    "IE-SEM": ("Ireland",),
 }
 # Mainland only: overseas France and the Canaries are not in these zones, and
 # Corsica is outside the French day-ahead zone.
 CLIP = {"FR": box(-5.5, 42.0, 8.3, 51.5), "ES": box(-10.0, 35.5, 4.0, 44.5)}
 
 
-def cores(shapes: gpd.GeoDataFrame) -> dict[str, list[tuple[float, float, float, float]]]:
+def cores(
+    shapes: gpd.GeoDataFrame,
+) -> dict[str, list[tuple[float, float, float, float]]]:
     out: dict[str, list[tuple[float, float, float, float]]] = {}
     for zone, names in ZONES.items():
         geom = shapes[shapes["name"].isin(names)].union_all()
@@ -56,14 +75,33 @@ def cores(shapes: gpd.GeoDataFrame) -> dict[str, list[tuple[float, float, float,
                 if inner.contains(box(x, y, x + CELL, y + CELL)):
                     run = [run[0], x + CELL] if run else [x, x + CELL]
                 elif run:
-                    rows.append((round(run[0], 2), round(y, 2), round(run[1], 2), round(y + CELL, 2)))
+                    rows.append(
+                        (
+                            round(run[0], 2),
+                            round(y, 2),
+                            round(run[1], 2),
+                            round(y + CELL, 2),
+                        )
+                    )
                     run = None
             if run:
-                rows.append((round(run[0], 2), round(y, 2), round(run[1], 2), round(y + CELL, 2)))
+                rows.append(
+                    (
+                        round(run[0], 2),
+                        round(y, 2),
+                        round(run[1], 2),
+                        round(y + CELL, 2),
+                    )
+                )
         rows.sort(key=lambda r: (r[0], r[2], r[1]))
         merged: list[tuple[float, float, float, float]] = []
         for r in rows:  # stack runs with the same x-span into one rectangle
-            if merged and merged[-1][0] == r[0] and merged[-1][2] == r[2] and merged[-1][3] == r[1]:
+            if (
+                merged
+                and merged[-1][0] == r[0]
+                and merged[-1][2] == r[2]
+                and merged[-1][3] == r[1]
+            ):
                 merged[-1] = (r[0], merged[-1][1], r[2], r[3])
             else:
                 merged.append(r)
@@ -93,6 +131,8 @@ def render(table: dict[str, list[tuple[float, float, float, float]]]) -> str:
 
 
 if __name__ == "__main__":
-    target = Path(__file__).resolve().parent.parent / "services" / "market_zone_cores.py"
+    target = (
+        Path(__file__).resolve().parent.parent / "services" / "market_zone_cores.py"
+    )
     target.write_text(render(cores(gpd.read_file(sys.argv[1]))), encoding="utf-8")
     print(f"wrote {target}")
