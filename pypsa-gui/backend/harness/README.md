@@ -1769,6 +1769,51 @@ C1-C7). The scope is the template's; there is no EH study and no LOLE loop.
   report, g2p 13); a run whose `grid_risk` section is not established lists
   it as a gap.
 
+### The concentrator profile (study harness 16)
+
+`eh_concentrator_staged@1` (`run_profiles._eh_concentrator_staged`; GK A (28)
+GO, Q1-Q8). The readers are `services/run_gates_concentrator.py`, registered
+in `run_gates.FACTS` through `_concentrator(name)` (imported when read). No EH
+study and no LOLE loop; the solve stage is the queued solve only. The
+investment case stays out of the run (Q8): a run's case refuses its baseline
+re-solve (`baseline_solve`), so the case rules read a case the user ran on
+this network.
+
+- **Result gate.** The core rules, `kpi.unserved_mwh` (electrical load only:
+  concentrate short of the shipments is lost production, never served), and:
+  - `process.mass_balance` (block, ≤ 1e-6): per tonne bus and period,
+    Σ w·|Σ flows| over every component on the bus (one-ports by `sign`, Links
+    at every port by −p_i) over the period's tonnes fed in from outside the
+    site (supply Generators on tonne buses; a `shortfall` role and any LP
+    slack, `slack_generator_mask`, are not a supply). Nothing fed in is no evidence. The LP enforces nodal balance, so
+    this catches corrupt results, not a design flaw;
+  - `process.motor_start` (warn, `eq pass`): the scorecard's own rows
+    (`grid_readiness._motor_start_rows`) on the live network and the project's
+    campus grid code (settings or a grid code it cannot read are no evidence,
+    `grid_code_unreadable`, never the default); a FAIL names the unit, its ΔU and the limit; an unknown
+    row with no fail is no evidence;
+  - `process.restart` (warn, `eq 0`): the units that fail to restart after a
+    grid trip (`gridspine` restart sequence on the units the dip classes trip,
+    each start on the motor-start rows' PoC source);
+  - `process.n_1.site_transformer` (warn, `empty`): the site transformers
+    whose outage stops a process unit (`process_loss.units_cut_off`); the
+    shipped template has none, so it is not evaluated and listed missing;
+  - `ic.counterfactual` and `ic.counterfactual.basis` (warn): established,
+    and against `site_today`, from a stored case current for this run's solve
+    and inputs (`ic_counterfactual.read`); with none they are not evaluated
+    with their reason, never a pass;
+  - KPIs as warn rules that pass when read: `process.lost_production` (the
+    grid-risk `connection` line, t/yr and EUR/yr per period),
+    `process.shed_level` (least, peak, last per period) and `ic.returns` (not
+    evaluated, no number, without that case). NPV by stage is listed missing.
+- **Levers.** `pv_new_*`, `bess_new_*` and `coarse_ore_stockpile_new_*` caps,
+  each up to twice the template's. The process units, the mine, the
+  shipments, the services load, the grid import, the shed and the slack are
+  never levers.
+- **Solves.** The plan is the envelope's solve (`CONC_SOLVES = 1`). The case
+  in the run, with its baseline re-solve counted, is study-harness issue 52;
+  `missing_tools` names it (`CONC_CASE_OUTSIDE`).
+
 ### The IPP hybrid profile (study harness 14)
 
 `eh_ipp_hybrid@1` (`run_profiles._eh_ipp_hybrid`; GK B (52) GO, I1-I10). A
