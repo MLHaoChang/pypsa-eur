@@ -4,7 +4,7 @@
 # 02 — Economics › Discount rate is saved but changes nothing in the model or Results
 
 Status: needs-triage
-Impact: medium
+Impact: high
 Templates: IPP (Economics › Rates); Ammonia and Concentrator: not tried
 Found by: template walk, 2026-11-21 (master 6b421b06)
 Shot: ../shots/ipp-e-econ2.png

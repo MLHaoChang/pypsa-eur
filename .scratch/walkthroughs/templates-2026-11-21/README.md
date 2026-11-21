@@ -52,12 +52,16 @@ New (files in `issues/`):
 
 | # | Finding | Impact |
 |---|---|---|
-| 01 | After a re-run, Results tables and cards show the previous run's capacities beside updated cost cards (IPP battery 32 MW vs the 20 MW cap; ammonia Key capacities empty then stale) | medium |
-| 02 | Economics › Discount rate 7 → 10 % saves and does nothing to the model or Results; the investment case then flags the mismatch | medium |
+| 01 | After a re-run, Results tables and cards show the previous run's capacities beside updated cost cards (IPP battery 32 MW vs the 20 MW cap; ammonia Key capacities empty then stale) | high |
+| 02 | Economics › Discount rate 7 → 10 % saves and does nothing to the model or Results; the investment case then flags the mismatch | high |
 | 03 | Guided Connection step on the IPP gives four connection sizes (70, 50, 20, 500 MW) and flags "must stay on" on a no-load site | medium |
+| 04 | Grid study offers data-center intents (UPS, diesel) on a wind/solar plant and a mine | low |
 | 05 | The user's own project goes read-only ("Another user is editing") after a solve; two reproductions | medium |
 | 06 | Economics › Asset costs shows "0 €/kW/yr" annualised capex for priced candidates (ammonia) | medium |
-| 04 | Grid study offers data-center intents (UPS, diesel) on a wind/solar plant and a mine | low |
+| 07 | IPP "Total system cost -€4.52 M" has no stated basis beside the developer Net (+4.14 M) | medium |
+| 08 | "Checked figures are off on this installation" replaces LCOE and Curtailment cards with no way forward | low |
+
+(Numbered in file order, not by severity.)
 
 Seen again, added to the existing issue (no duplicate; these were not filed again):
 
@@ -73,9 +77,7 @@ Open PRs #1676, #1700 and #1729 own other walkthrough folders; I appended to non
 
 ## Observed, not filed
 
-- Expert Results on all three: "LCOE (real)" and "Curtailment rate" say "Not available for this run — Checked figures are off on this installation". That is an install setting, so I left it.
 - A sidebar "Saved 1mo ago" appeared once on the IPP a minute after a save; I did not see it again.
-- On the IPP, Commercial & finance lists the IPP developer's Net as EUR 4,141,318.07 beside Results "Total system cost EUR -4.52 M"; the bases differ (cash view vs system cost) and I did not reconcile them.
 - Closing the browser page mid-run marks the queue entry "Aborted by user" (my first IPP run, closed by my script). That is probably intended.
 
 ## Not walked, and what to trust
