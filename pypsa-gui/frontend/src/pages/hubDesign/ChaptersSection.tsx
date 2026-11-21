@@ -16,6 +16,7 @@ import { useHubDesignStore } from './hubDesignStore'
 import RunGridChecks from './RunGridChecks'
 import ProductionTiles from '../results/ProductionTiles'
 import { useInScope } from '../../components/flowScope/useFlowScope'
+import { ControlChapter } from './ControlChapter'
 import { AddToScope } from '../../components/flowScope/ScopeCards'
 
 const OPEN_LABEL = (o: ChapterOpen) =>
@@ -81,6 +82,8 @@ export function ChaptersSection({ reliability, headlined = [] }: {
 
   // The grid checks are Grid › Grid code & electrical design's (W4a).
   const gridInScope = useInScope('grid', 'grid_code')
+  // The grid-forming line is Control's: none when Control is out of scope (control-strategy 06).
+  const controlInScope = useInScope('control')
 
   const open = (o: ChapterOpen) => {
     if ('step' in o) { setStep(o.step, { user: true }); return }
@@ -94,7 +97,7 @@ export function ChaptersSection({ reliability, headlined = [] }: {
       <h3 className="text-[12px] font-semibold text-text">The whole picture</h3>
       <div className="grid grid-cols-2 gap-2">
         {tiles.map(t => (
-          <div key={t.id} className="flex flex-col gap-1.5 rounded-[10px] border border-border/70 p-2" data-testid={`hub-chapter-${t.id}`}>
+          <div key={t.id} className="flex flex-col gap-1.5 rounded-card border border-border/70 p-2" data-testid={`hub-chapter-${t.id}`}>
             <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{t.group}</span>
             {headlined.includes(t.id) ? (
               <p className="text-[11.5px] text-muted" data-testid={`hub-chapter-${t.id}-headlined`}>
@@ -105,7 +108,7 @@ export function ChaptersSection({ reliability, headlined = [] }: {
                 state={t.state} reason={t.reason} fromStudy={t.fromStudy}
                 hint={t.fromStudy ? FROM_STUDY_HINT : undefined} testId={`hub-chapter-${t.id}-kpi`} />
             )}
-            {t.control && (
+            {t.control && controlInScope && (
               <p className="text-[11.5px] text-muted" data-testid={`hub-chapter-${t.id}-control`}>
                 {t.control.text}{' '}
                 {t.control.resolve && (
@@ -129,6 +132,7 @@ export function ChaptersSection({ reliability, headlined = [] }: {
             )}
           </div>
         ))}
+        <ControlChapter />
       </div>
       <ProductionTiles view={processView} />
     </section>

@@ -15,9 +15,9 @@ Token rules (GK B4, SCU06-S1 plan):
   log line: errors are our own plain words (no status code, no ENTSO-E text), and
   the request line httpx logs has the token blotted out (`_NoSecurityToken`).
 
-Parsing rules: the response is capped at `MAX_RESPONSE_BYTES`; a document with a
-DOCTYPE or ENTITY declaration is refused before parsing; every TimeSeries must be
-in EUR per MWH; an A01 curve must list every position, while an A03 curve repeats
+Parsing rules: the response is capped at `MAX_RESPONSE_BYTES`; a body that is not
+UTF-8, or has a DOCTYPE or ENTITY declaration, is refused before parsing; every
+TimeSeries must be in EUR per MWH; an A01 curve must list every position, while an A03 curve repeats
 the last price over skipped positions (its definition). Sub-hourly points (PT15M,
 PT30M: the 15-minute day-ahead market since October 2025) are averaged to hourly,
 and the series notes say so. A year with any hour missing is refused, never filled.
@@ -137,10 +137,27 @@ class _NoSecurityToken(logging.Filter):
         return True
 
 
-# The filter sits on the loggers that print request URLs (the deepgram_stt
-# precedent), so no log level or handler reaches the token.
-for _name in ("httpx", "httpcore"):
-    logging.getLogger(_name).addFilter(_NoSecurityToken())
+_FILTER = _NoSecurityToken()
+
+
+def _install_log_filter() -> None:
+    """Put the filter on httpx, httpcore and every child logger they have made
+    (the deepgram_stt precedent). A logger's filter sees only the records logged
+    on that logger, not its children's (`httpcore.http11`, `httpcore.connection`),
+    so each one gets it. Idempotent; run at import and before each request, so a
+    child created later is covered too, at any level and through any handler."""
+    names = ["httpx", "httpcore"] + [
+        n
+        for n in list(logging.Logger.manager.loggerDict)
+        if n.startswith(("httpx.", "httpcore."))
+    ]
+    for name in names:
+        lg = logging.getLogger(name)
+        if _FILTER not in lg.filters:
+            lg.addFilter(_FILTER)
+
+
+_install_log_filter()
 
 
 class MarketPriceError(Exception):
@@ -254,7 +271,10 @@ def _text(el: ET.Element | None, name: str) -> str | None:
 
 
 _RESOLUTION = {"PT15M": 15, "PT30M": 30, "PT60M": 60, "PT1H": 60}
-_FORBIDDEN = re.compile(rb"<!\s*(DOCTYPE|ENTITY)", re.IGNORECASE)
+_FORBIDDEN = re.compile(r"<!\s*(DOCTYPE|ENTITY)", re.IGNORECASE)
+# The encoding an XML declaration names; anything but UTF-8 is refused, so the
+# DOCTYPE/ENTITY check above reads the same characters expat will.
+_DECLARED_ENCODING = re.compile(r"""\A\s*<\?xml[^>]*?encoding\s*=\s*["']([^"']*)["']""")
 
 
 def _bad(message: str) -> MarketPriceError:
@@ -276,10 +296,21 @@ def parse_a44(xml: bytes, zone: str, year: int) -> tuple[pd.Series, list[str]]:
     extra notes). Raises `MarketPriceError` with a plain message."""
     if len(xml) > MAX_RESPONSE_BYTES:
         raise _bad("ENTSO-E sent more data than one year of prices can be.")
-    if _FORBIDDEN.search(xml):
+    # UTF-8 only: a UTF-16 or UTF-32 body (with or without a BOM) would hide a
+    # DOCTYPE from a byte search while expat still decodes and expands it.
+    try:
+        text = xml.decode("utf-8").removeprefix("\ufeff")
+    except UnicodeDecodeError:
+        raise _bad("ENTSO-E sent a document this app does not read.") from None
+    declared = _DECLARED_ENCODING.match(text)
+    if (
+        "\x00" in text
+        or (declared and declared.group(1).strip().lower() not in ("utf-8", "utf8"))
+        or _FORBIDDEN.search(text)
+    ):
         raise _bad("ENTSO-E sent a document this app does not read.")
     try:
-        root = ET.fromstring(xml)
+        root = ET.fromstring(text.encode("utf-8"))
     except ET.ParseError as exc:
         raise _bad("ENTSO-E sent a document that could not be read.") from exc
     name = _local(root.tag)
@@ -371,6 +402,7 @@ def fetch_day_ahead(
 ) -> tuple[pd.Series, list[str]]:
     """One request to ENTSO-E for `zone`'s day-ahead prices in `year` (UTC)."""
     z = check_request(zone, year)
+    _install_log_filter()
     params = {
         "securityToken": token,
         "documentType": "A44",
@@ -394,15 +426,15 @@ def fetch_day_ahead(
                         raise _bad(
                             "ENTSO-E sent more data than one year of prices can be."
                         )
-    except httpx.TimeoutException as exc:
+    except httpx.TimeoutException:
         raise MarketPriceError(
             "unavailable", "ENTSO-E did not answer in time. Try again later."
-        ) from exc
-    except httpx.HTTPError as exc:
+        ) from None  # httpx errors carry the request, URL and token included
+    except httpx.HTTPError:
         raise MarketPriceError(
             "unavailable",
             "ENTSO-E could not be reached. Check the connection and try again.",
-        ) from exc
+        ) from None  # no chained cause: a traceback would print its URL
     if status == 401 or status == 403:
         raise MarketPriceError(
             "bad_token",
@@ -431,9 +463,17 @@ def cache_dir() -> Path:
 
 
 def _cache_file(zone: str, year: int) -> Path:
-    # Only ever called after `check_request`: zone is a key of BIDDING_ZONES
-    # and year an int, so the path cannot leave the cache directory.
-    return cache_dir() / zone / f"{year}.json"
+    """The cache path of a year. Callers run `check_request` first; the path is
+    still built from the zone table's own code and an int, and must stay inside
+    the cache directory, so a request string never reaches the file system."""
+    code = BIDDING_ZONES[zone].code
+    root = os.path.realpath(cache_dir())
+    path = os.path.realpath(os.path.join(root, code, f"{int(year)}.json"))
+    if not path.startswith(root + os.sep):
+        raise MarketPriceError(
+            "invalid_zone", "Bidding zone: choose a zone from the list."
+        )
+    return Path(path)
 
 
 def _read_cache(zone: str, year: int) -> tuple[pd.Series, list[str], str] | None:

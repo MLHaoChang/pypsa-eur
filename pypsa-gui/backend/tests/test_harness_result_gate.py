@@ -42,7 +42,7 @@ def _row(id_, verdict, assumed=False):
 def _gate(monkeypatch, rows, fact, severity="block", excluded=()):
     calls = []
 
-    def card(project, profile=None):
+    def card(project, profile=None, **kw):
         calls.append(project)
         return {"rows": rows, "excluded": list(excluded)}
 
@@ -141,7 +141,7 @@ def test_a_family_with_zero_rows_is_not_evaluated(monkeypatch):
 def test_the_scorecard_is_read_once_per_gate(monkeypatch):
     calls = []
 
-    def card(project, profile=None):
+    def card(project, profile=None, **kw):
         calls.append(project)
         return {"rows": [_row("scr", "pass"), _row("tdd", "pass")], "excluded": []}
 

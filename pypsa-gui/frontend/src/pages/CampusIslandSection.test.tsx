@@ -155,7 +155,7 @@ describe('island section: the report', () => {
     expect(costs.textContent).toContain('Cost of island capability (per year)')
     expect(costs.textContent).toMatch(/€\u00a0\d/)
     const table = await screen.findByTestId('island-table-binding')
-    expect(table.textContent).toContain('Island N-1: loss of bess new, downward reserve')
+    expect(table.textContent).toContain('Island N-1: loss of BESS new, downward reserve')
     expect(table.textContent).toContain('Cost of the limit (per year)')
     expect(within(table).getByTestId('island-binding-note').textContent).toContain('do not add up')
   })
@@ -184,7 +184,7 @@ describe('island section: the form', () => {
     await user.type(sustained, '12')
     await user.selectOptions(screen.getByLabelText('Sustained ride-through (h) source'), 'datasheet')
     await user.click(screen.getByLabelText(/Linearised unit commitment/))
-    await user.selectOptions(screen.getByLabelText('Control mode of bess'), 'gfm_vsm')
+    await user.selectOptions(screen.getByLabelText('Control mode of BESS'), 'gfm_vsm')
     await user.click(screen.getByRole('button', { name: /Save island config/ }))
     await waitFor(() => expect(api.saveIsland).toHaveBeenCalledTimes(1))
     const [project, sent] = api.saveIsland.mock.calls[0] as [string, IslandConfig]

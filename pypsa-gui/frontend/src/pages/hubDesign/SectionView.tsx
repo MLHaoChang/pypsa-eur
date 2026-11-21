@@ -80,7 +80,7 @@ export function SectionView({ id, onNext, children }: {
       </div>
       {items.length > 0 && (
         <ul data-testid="section-items"
-          className="flex flex-col gap-1.5 rounded border border-border bg-panel px-3 py-2">
+          className="flex flex-col gap-1.5 rounded-card border border-border bg-panel px-3 py-2">
           {items.map((it, i) => <ItemRow key={`${it.code}-${it.target.entity ?? ''}-${i}`} item={it} />)}
         </ul>
       )}

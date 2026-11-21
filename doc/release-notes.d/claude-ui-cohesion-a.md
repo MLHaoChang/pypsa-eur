@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Inter and JetBrains Mono ship with the app (self-hosted, work offline), with one type scale, radius tokens and link/eyebrow colour tokens; canvas asset labels are 9 px at least, and panel titles are 15 px.

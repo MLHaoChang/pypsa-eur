@@ -393,7 +393,7 @@ export default function LibraryBrowser({ onOpenInputs }: { onOpenInputs?: () => 
       <LibraryReferences />
       <Dialog open={confirm !== null} onClose={() => setConfirm(null)}
               title="Replace the project's import tariff?"
-              panelClassName="bg-bg rounded-xl shadow-2xl w-[440px] max-w-[95vw] p-4 space-y-3">
+              panelClassName="bg-bg rounded-card shadow-2xl w-[440px] max-w-[95vw] p-4 space-y-3">
         <p className="text-[11px]">
           The project has its own import tariff, which is not this Library item. Attaching{' '}
           {confirm?.id} v{confirm?.version} replaces it; the project's copy is not kept.</p>

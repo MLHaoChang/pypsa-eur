@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The UI copy guard now checks every frontend source file for raw model names, template component ids and Library ids; about thirty labels and help lines across Expert panels and Results switch to the words the Properties panel uses, and the capacity-bounds empty state names the Extendable setting instead of `p_nom_extendable=True`.
