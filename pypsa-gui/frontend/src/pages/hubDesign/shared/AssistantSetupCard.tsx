@@ -4,7 +4,8 @@
 // nothing while readiness is unknown or the assistant is ready, and nothing
 // once dismissed for the project (kept in the browser: UM08-CHROME-1).
 import { Sparkles, X } from 'lucide-react'
-import { useIsSuperAdmin } from '../../../auth/AuthProvider'
+import { ASSISTANT_OFF_FOR_MEMBER } from '../../../components/assistantOffMessage'
+import { useSuperAdminState } from '../../../auth/AuthProvider'
 import { useChatReadiness } from '../../../hooks/useChatProfiles'
 import { useUIStore } from '../../../store/uiStore'
 import { readSetupCardDismissed, useHubDesignStore } from '../hubDesignStore'
@@ -12,17 +13,20 @@ import { readSetupCardDismissed, useHubDesignStore } from '../hubDesignStore'
 export function AssistantSetupCard() {
   const { ready } = useChatReadiness()
   // Same rule as the backend's `_require_super_admin`: only a super-admin can set the key.
-  const canSetKey = useIsSuperAdmin()
+  const role = useSuperAdminState()
+  const canSetKey = role === 'yes'
   const project = useUIStore(s => s.currentProject)
   const dismissed = useHubDesignStore(s => s.setupCardDismissedFor.includes(project ?? '')) || readSetupCardDismissed(project)
-  if (ready !== false || dismissed) return null
+  if (ready !== false || dismissed || role === 'unknown') return null
   return (
     <div data-testid="assistant-setup-card"
-      className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-bg-2 px-4 py-3 text-[12px]">
-      <span className="flex-1 min-w-[16rem] text-text">
+      className={canSetKey
+        ? 'flex flex-wrap items-center gap-3 rounded-lg border border-border bg-bg-2 px-4 py-3 text-[12px]'
+        : 'flex items-center gap-2 px-1 py-1 text-[11px] text-muted'}>
+      <span className={canSetKey ? 'flex-1 min-w-[16rem] text-text' : 'flex-1'}>
         {canSetKey
           ? 'Every step below works by hand. To let the assistant do steps for you, set it up once with an API key.'
-          : 'Every step below works by hand. An administrator can turn the assistant on.'}
+          : `Every step below works by hand. ${ASSISTANT_OFF_FOR_MEMBER}`}
       </span>
       {canSetKey && <button type="button" data-testid="assistant-setup-open"
         onClick={() => useUIStore.getState().setAssistantDockOpen(true)}

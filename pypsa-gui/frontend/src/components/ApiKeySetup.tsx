@@ -44,6 +44,7 @@ import {
 import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
+import { ASSISTANT_OFF_FOR_MEMBER } from './assistantOffMessage'
 import { useIsSuperAdmin } from '../auth/AuthProvider'
 
 // Exported so ChatLaunchGreeting reads the SAME cache entry rather than a
@@ -193,8 +194,7 @@ export default function ApiKeySetup({
   if (!isSuperAdmin || isForbidden(settings.error)) {
     return (
       <p className="mt-2 text-[11px] text-muted" data-testid="chat-api-key-forbidden">
-        Ask an administrator to add an Anthropic API key for this instance — the
-        key is shared, so only a super-admin can set it.
+        {ASSISTANT_OFF_FOR_MEMBER}
       </p>
     )
   }

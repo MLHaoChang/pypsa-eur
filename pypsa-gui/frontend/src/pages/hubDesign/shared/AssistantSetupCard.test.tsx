@@ -16,16 +16,16 @@ vi.mock('../../../hooks/useChatProfiles', async (orig) => ({
   useChatReadiness: () => ({ effectiveProfileId: null, ready: readiness.ready }),
 }))
 
-const authUser = vi.hoisted(() => ({ superAdmin: true }))
+const authUser = vi.hoisted(() => ({ state: 'yes' as 'yes' | 'no' | 'unknown' }))
 vi.mock('../../../auth/AuthProvider', () => ({
-  useIsSuperAdmin: () => authUser.superAdmin,
+  useSuperAdminState: () => authUser.state,
 }))
 
 const mount = (ui: ReactElement) => render(
   <QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>)
 
 beforeEach(() => {
-  authUser.superAdmin = true
+  authUser.state = 'yes'
   useUIStore.setState({ uiMode: 'guided', assistantDockOpen: false })
   useHubDesignStore.setState({ setupCardDismissedFor: [] })
   localStorage.clear()
@@ -33,9 +33,16 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('Guided without an assistant', () => {
+  it('shows nothing while the user is still being read (issue 49)', () => {
+    readiness.ready = false
+    authUser.state = 'unknown'
+    mount(<AssistantSetupCard />)
+    expect(screen.queryByTestId('assistant-setup-card')).toBeNull()
+  })
+
   it('offers a member no setup, only that an administrator can turn it on (issue 49)', () => {
     readiness.ready = false
-    authUser.superAdmin = false // an org admin is not enough: the key route is super-admin only
+    authUser.state = 'no' // an org admin is not enough: the key route is super-admin only
     mount(<AssistantSetupCard />)
     expect(screen.queryByTestId('assistant-setup-open')).toBeNull()
     expect(screen.getByTestId('assistant-setup-card').textContent).toContain('An administrator can turn the assistant on')
