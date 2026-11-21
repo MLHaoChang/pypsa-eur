@@ -5,15 +5,17 @@ import { fetchCatalogue, type Catalogue } from './api'
 export const CATALOGUE_KEY = ['catalogue'] as const
 
 /**
- * The Parameter catalogue, fetched once per session; `version` (its content hash)
- * tells readers when it changed. `enabled: false` leaves it unfetched until needed.
+ * The Parameter catalogue. Project-free, so the key carries no project. Each new
+ * reader (the palette opening) revalidates it with its ETag: unchanged, that costs a
+ * 304 and the held body. `enabled: false` leaves it unfetched until needed.
  */
 export function useCatalogue(enabled = true): Catalogue | undefined {
   const { data } = useQuery({
     queryKey: CATALOGUE_KEY,
     queryFn: fetchCatalogue,
     enabled,
-    staleTime: Infinity,
+    staleTime: 0,
+    refetchOnWindowFocus: false,
   })
   return data
 }

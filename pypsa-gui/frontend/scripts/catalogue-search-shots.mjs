@@ -7,7 +7,7 @@
 // dark: an empty query (no Parameters group), a class the project has none of
 // (a disabled row), "capacity" (the hits), Enter and where it landed (Expert: the
 // asset's Properties with the field focused; Guided: the field drawer, still in
-// Guided), Back, and a reload whose catalogue request is a 304. Exit 1 when a check fails.
+// Guided), Back, and a second palette opening whose catalogue request is a 304. Exit 1 when a check fails.
 //
 //   BASE=http://127.0.0.1:5173 OUT=<dir> [PROJECT=<name>, to reuse one] node scripts/catalogue-search-shots.mjs
 import fs from 'node:fs/promises'
@@ -119,9 +119,8 @@ try {
           && (await p.evaluate(() => localStorage.getItem('network-diagram:ui-mode'))) === mode
         await p.screenshot({ path: path.join(OUT, `${key}-3-back.png`) })
       }
-      // A second load of the catalogue revalidates: the network shows a 304.
-      await p.reload()
-      await p.getByRole('group', { name: 'Interface mode' }).waitFor()
+      // Opening the palette again revalidates the catalogue: the network shows a 304.
+      await p.keyboard.press('Escape').catch(() => {})
       await p.keyboard.press('Control+k')
       await input.fill(QUERY)
       await palette.getByText('Parameters', { exact: true }).waitFor()

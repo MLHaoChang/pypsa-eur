@@ -13,6 +13,7 @@ import { ConfirmDialog } from './ConfirmDialog'
 import { useUIStore } from '../store/uiStore'
 import { uiModeToast } from '../utils/uiMode'
 import { networkApi } from '../api/network'
+import { assetSchemaApi } from '../api/assetSchema'
 import { projectsApi } from '../api/projects'
 import { appLog } from '../store/simulationStore'
 import { invalidateNetworkQueries, saveProjectQuietly, formatRelativeTime, switchToProject } from '../utils/projectActions'
@@ -294,13 +295,23 @@ function useParameterCommands(mode: PaletteMode, query: string): Command[] {
   const { buses, generators, loads, lines, links, storageUnits, stores, transformers } = usePaletteAssets(mode, currentProject)
   const catalogue = useCatalogue(mode === 'all')
   const index = useMemo(() => (catalogue ? buildParameterIndex(catalogue.entries) : null), [catalogue])
-  return useMemo(() => {
+  const rows = useMemo(() => {
     if (mode !== 'all' || !catalogue || !index || !query.trim()) return []
     const byClass: Record<string, readonly PaletteAsset[]> = {
       Bus: buses, Generator: generators, Load: loads, Line: lines, Link: links,
       StorageUnit: storageUnits, Store: stores, Transformer: transformers,
     } as unknown as Record<string, readonly PaletteAsset[]>
-    return parameterRows(query, index, catalogue, byClass).map(r => ({
+    return parameterRows(query, index, catalogue, byClass)
+  }, [mode, catalogue, index, query, buses, generators, loads, lines, links, storageUnits, stores, transformers])
+  // The card seeds its edit form from the class's asset schema when the jump lands:
+  // fetch it while the row is on screen, so the form never seeds before it is there.
+  const qc = useQueryClient()
+  useEffect(() => {
+    for (const cls of new Set(rows.flatMap(r => (r.target ? [r.target.entry.scope] : [])))) {
+      void qc.prefetchQuery({ queryKey: ['assetSchema', cls], queryFn: () => assetSchemaApi.get(cls), staleTime: Infinity })
+    }
+  }, [rows, qc])
+  return useMemo(() => rows.map(r => ({
       id: r.id,
       kind: 'parameter' as const,
       title: r.title,
@@ -309,8 +320,7 @@ function useParameterCommands(mode: PaletteMode, query: string): Command[] {
       icon: <Gauge size={12} />,
       disabled: !r.target,
       run: () => { if (r.target) openParameter(r.target) },
-    }))
-  }, [mode, catalogue, index, query, buses, generators, loads, lines, links, storageUnits, stores, transformers])
+    })), [rows])
 }
 
 // ── Command sources ──────────────────────────────────────────────────────────
