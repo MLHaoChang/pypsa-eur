@@ -44,7 +44,7 @@ describe('CapacityBoundsEditor empty state', () => {
     render(<QueryClientProvider client={client}><CapacityBoundsEditor /></QueryClientProvider>)
     const empty = await screen.findByTestId('capacity-bounds-empty')
     expect(empty.textContent!.replace(/\s+/g, ' ').trim()).toBe(
-      `No asset in this network is sized by the optimiser. Tick “${EXTENDABLE_LABEL}” on an asset in the Properties panel to list it here.`)
+      `No asset in this network is sized by the optimiser. Tick “${EXTENDABLE_LABEL}” on an asset to list it here.`)
     expect(empty.textContent).not.toMatch(/_nom|=True|›/)
     expect(empty.querySelector('a, button, code')).toBeNull()
   })

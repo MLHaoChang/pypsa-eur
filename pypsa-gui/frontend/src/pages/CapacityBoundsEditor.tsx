@@ -172,8 +172,8 @@ export default function CapacityBoundsEditor() {
   if (totalCount === 0) {
     return (
       <div className="p-6 text-center text-xs text-muted" data-testid="capacity-bounds-empty">
-        No asset in this network is sized by the optimiser. Tick “{EXTENDABLE_LABEL}” on an asset in the
-        Properties panel to list it here.
+        No asset in this network is sized by the optimiser. Tick “{EXTENDABLE_LABEL}” on an asset to list it
+        here.
       </div>
     )
   }
