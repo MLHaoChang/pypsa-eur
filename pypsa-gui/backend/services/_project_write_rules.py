@@ -122,13 +122,13 @@ POST   /api/mcp  none personal MCP connections
 POST   /api/memory/dismissals  none personal assistant memory
 POST   /api/memory/dream  none personal assistant memory
 PUT    /api/memory/dream/settings  none personal assistant memory
-POST   /api/model-import/import  none creates a new project the caller owns
-POST   /api/model-import/preview  none parses uploads, writes nothing
 POST   /api/memory/items  none personal assistant memory
 PATCH  /api/memory/items/{item_id}  none personal assistant memory
 POST   /api/memory/items/{item_id}/{action}  none personal assistant memory
 POST   /api/memory/parameters  none personal assistant memory
 POST   /api/memory/suggestions/{item_id}/preview  none personal assistant memory
+POST   /api/model-import/import  none creates a new project the caller owns
+POST   /api/model-import/preview  none parses uploads, writes nothing
 PATCH  /api/network/_bulk  write active
 POST   /api/network/buses  write active
 DELETE /api/network/buses/{name}  write active

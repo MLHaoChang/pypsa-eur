@@ -34,6 +34,8 @@ def read_fake(paths, options):
         sidecars["metadata.json"] = {"bus_count": 99}
     if word == "importmeta":
         sidecars["metadata.json"] = {"import": {"format": "fake", "names": {"North": "N1"}}}
+    if word == "ownmeta":
+        sidecars["metadata.json"] = {"scenario_type": "planning"}
     if word == "stray":
         sidecars["notes.json"] = {"x": 1}
     return ImportResult(network=n, report=report, sidecars=sidecars)

@@ -210,7 +210,9 @@ def test_a_child_that_dies_at_the_memory_limit_is_a_plain_422(client, fake, stor
 # ── C4: uploads ──────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("bad", ["..", "a/b.fake", "a\\b.fake", " a.fake", "a\x01.fake"])
+@pytest.mark.parametrize(
+    "bad", ["..", "a/b.fake", "a\\b.fake", " a.fake", "a\x01.fake", "x:y.fake", "CON.fake", "nul", "a" * 252 + ".fake"]
+)
 def test_a_file_name_that_is_not_plain_is_refused(bad):
     with pytest.raises(Exception) as err:
         svc.check_names([bad])
@@ -218,7 +220,7 @@ def test_a_file_name_that_is_not_plain_is_refused(bad):
 
 
 def test_an_empty_name_and_duplicate_names_are_refused():
-    for names in ([""], ["a.fake", "A.fake"], []):
+    for names in ([""], ["a.fake", "A.fake"], ["a.fake", "a.fake."], []):
         with pytest.raises(Exception) as err:
             svc.check_names(names)
         assert err.value.status_code == 422, names
@@ -302,7 +304,7 @@ def test_a_real_dgs_import_keeps_its_names_beside_the_create_s_keys(client, _aut
     assert set(svc._create_meta(0, 0)) <= set(meta) and meta["bus_count"] == 7
 
 
-@pytest.mark.parametrize("word", ["meta", "stray"])
+@pytest.mark.parametrize("word", ["meta", "ownmeta", "stray"])
 def test_a_sidecar_the_project_does_not_keep_refuses_the_import(client, fake, store, word):
     """C5: a reader may not set the project's own metadata keys or store other files."""
     named = ("m.fake", word.encode())
@@ -438,3 +440,117 @@ def test_every_importer_file_is_in_the_contents_table_with_its_writer():
         ), name
         assert not entry.pending_writer, name
     assert not [e.path for e in PC.TABLE if e.pending_writer]
+
+
+# ── review and mutant follow-ups ─────────────────────────────────────────────
+
+
+def test_a_non_finite_option_is_refused_before_reading(client, fake):
+    r = client.post(
+        "/api/model-import/preview", files=_files(("m.fake", b"ok")), data={"options": '{"x": NaN}'}
+    )
+    assert r.status_code == 422 and _kind(r) == "import_options_invalid"
+
+
+def test_a_format_sniff_that_breaks_is_a_plain_422(client, fake, store, monkeypatch):
+    from gridspine.ingest import import_result as IR
+
+    def broken(*_a, **_k):
+        raise RuntimeError("sniff broke")
+
+    monkeypatch.setattr(IR, "for_file", broken)
+    before = store()
+    r = _preview(client, ("m.fake", b"ok"))
+    assert r.status_code == 422 and _kind(r) == "import_unreadable"
+    assert store() == before
+
+
+def test_reads_past_the_concurrency_cap_are_503_and_read_nothing(client, fake, store, monkeypatch):
+    calls = []
+    monkeypatch.setattr(svc, "_read_in_child", lambda st: calls.append(st) or {})
+    for _ in range(svc.MAX_CONCURRENT_READS):
+        assert svc._READS.acquire(blocking=False)
+    try:
+        r = _preview(client, ("m.fake", b"ok"))
+    finally:
+        for _ in range(svc.MAX_CONCURRENT_READS):
+            svc._READS.release()
+    assert r.status_code == 503 and _kind(r) == "import_busy" and calls == []
+    assert store()[2] == []
+
+
+def test_a_caller_outside_every_workspace_is_refused_before_anything_is_read(_auth_db, fake, monkeypatch):
+    from tests.test_changelog_scoping import _user
+
+    staged = []
+    real = svc.stage
+
+    async def counting(*a, **k):
+        staged.append(1)
+        return await real(*a, **k)
+
+    monkeypatch.setattr(svc, "stage", counting)
+    orgless, raw = _user(_auth_db, org_id=None)
+    try:
+        named = ("m.fake", b"ok")
+        assert _import(orgless, named, sha=svc.digest({}, [named]), name="No org").status_code == 403
+    finally:
+        raw.__exit__(None, None, None)
+    assert staged == []
+
+
+def test_a_database_failure_after_the_row_exists_is_rolled_back_and_removed(
+    client, fake, _auth_db, store, monkeypatch
+):
+    """M2: a failed flush leaves the session needing a rollback before the row can go."""
+    from services import project_registry
+
+    named = ("m.fake", b"ok")
+    sha = _preview(client, named).json()["sha256"]
+    before = store()
+    seen = {}
+    real = project_registry.create_root
+
+    def keep(db, *a, **k):
+        project = real(db, *a, **k)
+        seen["db"], seen["project"] = db, project
+        return project
+
+    def broken(dest, st):
+        db, project = seen["db"], seen["project"]
+        db.add(Project(id=project.id, org_id=project.org_id, name=project.name, created_by=project.created_by,
+                       storage_path="dup"))
+        db.flush()  # IntegrityError: the same id again
+
+    monkeypatch.setattr(project_registry, "create_root", keep)
+    monkeypatch.setattr(svc, "_write_files", broken)
+    r = _import(client, named, sha=sha, name="Bad flush")
+    assert r.status_code == 500 and _kind(r) == "import_write_failed", r.text
+    assert store() == before
+
+
+def test_a_staging_write_that_fails_leaves_no_staging_folder(fake, monkeypatch):
+    """M11: the staging folder is removed when writing an upload into it fails."""
+    import pathlib
+
+    def full(self, data):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(pathlib.Path, "write_bytes", full)
+    with pytest.raises(OSError):
+        svc._stage_files(["m.fake"], {}, [("m.fake", b"ok")])
+    assert [p.name for p in svc.staging_root().iterdir()] == []
+
+
+def test_staging_folders_a_killed_process_left_are_cleared(fake):
+    import os
+    import time
+
+    old = svc.staging_root() / "import-left-behind"
+    old.mkdir()
+    fresh = svc.staging_root() / "import-in-use"
+    fresh.mkdir()
+    os.utime(old, (time.time() - 2 * svc.STALE_STAGING_SECONDS,) * 2)
+    svc.clear_stale_staging()
+    assert not old.exists() and fresh.exists()
+    fresh.rmdir()

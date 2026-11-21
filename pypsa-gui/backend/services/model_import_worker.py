@@ -62,6 +62,12 @@ def run(format_id: str, paths: list[str], options: dict, out_dir: str, declared)
 def read_to(conn, format_id: str, paths: list[str], options: dict, out_dir: str,
             declared, memory: int) -> None:
     """The child's entry: limit the address space, read, send the result, exit."""
+    import os
+
+    # One BLAS/OpenMP thread: per-thread buffers on a many-core host would otherwise
+    # take much of the address-space limit before the read starts.
+    for var in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+        os.environ[var] = "1"
     try:
         import resource
 
