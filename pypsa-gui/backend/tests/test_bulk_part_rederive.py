@@ -402,7 +402,10 @@ def _ctx(n):
 
 
 def test_a_network_without_a_priced_part_fingerprints_byte_identical_to_before():
-    """Values from master e73996c71 (AS-02 pin): no part column, or one that holds no value, appends nothing."""
+    """Values from master e73996c71 (AS-02 pin): no part column, or one that holds no value, appends nothing.
+
+    The line has no carrier: SH-15 hashes a branch's `''` carrier as `'AC'` (GK B ruling C-b),
+    so these are master 0ab07339's values for the same network with `carrier="AC"` on the line."""
     from services.workflow_tools import _network_input_fingerprint as fp
 
     n = build_network()
@@ -423,11 +426,11 @@ def test_a_network_without_a_priced_part_fingerprints_byte_identical_to_before()
     for _ in range(2):
         assert (
             fp(_ctx(n))
-            == "35fd1ebb6193b1f925890baec8fec756bd2da965a2fa30f8878f8def2082eae6"
+            == "84f8a279fd51ea824c623023fc501e2d0917f39091f7553402498a121e7a9de6"
         )
         assert (
             fp(_ctx(n), exact=True)
-            == "1a30168d2df520d9ddd9965cd27115e4ff361199a49d36e2115ca886a24be633"
+            == "bf32632d457c650584c79ad2cd6c27666d19c6524d2f8802403569b639eedecc"
         )
         n.storage_units["inv_power_overnight"] = float(
             "nan"

@@ -33,6 +33,8 @@ const redactedJob: SolveJob = {
   can_dismiss: false,
 }
 
+const redactedRunning: SolveJob = { ...redactedJob, status: 'running' }
+
 const runningJob: SolveJob = {
   ...redactedJob, id: '88888888-8888-4888-8888-888888888888', project_id: 'mine', status: 'running',
 }
@@ -74,15 +76,22 @@ function renderPanel() {
 }
 
 describe('SolveQueuePanel redaction', () => {
-  it('renders a fixed label instead of an empty name for a redacted row', () => {
+  it('hides a finished redacted row (a deleted project) from the queue', () => {
     jobs = [redactedJob]
+    renderPanel()
+    expect(screen.queryByText(REDACTED_PROJECT_LABEL)).toBeNull()
+    expect(screen.getByText('The solve queue is empty.')).toBeTruthy()
+  })
+
+  it('renders a fixed label instead of an empty name for an active redacted row', () => {
+    jobs = [redactedRunning]
     renderPanel()
     expect(screen.getByText(REDACTED_PROJECT_LABEL)).toBeTruthy()
     expect(REDACTED_PROJECT_LABEL.length).toBeGreaterThan(0)
   })
 
   it('disables the expand control on a redacted row', () => {
-    jobs = [redactedJob]
+    jobs = [redactedRunning]
     renderPanel()
     const expand = screen.getByTitle('Not available for this job')
     expect((expand as HTMLButtonElement).disabled).toBe(true)

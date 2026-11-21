@@ -452,7 +452,7 @@ def _exact_frame_json(frame):
         sort_keys=True, allow_nan=False)
 
 
-def solve_freshness(ctx=None):
+def solve_freshness(ctx=None, after_pf=False):
     """LC-12: whether results describe the current inputs, for result reads.
 
     `inputs_changed_since_solve` is the optimisation's verdict on the
@@ -461,7 +461,8 @@ def solve_freshness(ctx=None):
     cannot be read: fail closed), False when fresh, None when no solve recorded
     its inputs: no claim either way. `results_current` is Check answers' own
     guard (`calculations.solve_matches_inputs`), so every read agrees on it; a
-    stale verdict is never current."""
+    stale verdict is never current. `after_pf` (study harness 15) also accepts
+    the solve's own AC power flow as current."""
     from harness.calculations import solve_matches_inputs
     from services.provenance_graph import runs
     from services.pypsa_service import PyPSAService
@@ -471,7 +472,7 @@ def solve_freshness(ctx=None):
         return {"inputs_changed_since_solve": None, "results_current": False}
     changed = runs.results_verdicts(read)["optimisation"].state != "fresh"
     return {"inputs_changed_since_solve": changed,
-            "results_current": not changed and solve_matches_inputs(ctx)}
+            "results_current": not changed and solve_matches_inputs(ctx, after_pf=after_pf)}
 
 
 _EXTRA_PORT = re.compile(r"(bus|efficiency)(\d+)")
@@ -498,6 +499,17 @@ def _unused_extra_ports(component):
     return skip
 
 
+def _canonical_branch_carriers(n):
+    """PyPSA also gives a Line or Transformer without a carrier its sub-network's
+    ("AC") while solving. That assignment is no edit: without this a solve on a
+    project of Lines moves its own input identity (study harness 15). Only an
+    empty Line/Transformer carrier is read as "AC", on the fingerprint's private
+    copy `n`; every other carrier and component hashes as before."""
+    for branches in (n.lines, n.transformers):
+        if "carrier" in branches.columns:
+            branches.loc[branches["carrier"] == "", "carrier"] = "AC"
+
+
 def _network_input_fingerprint(ctx, *, exact=False):
     """Hash model inputs, excluding solver outputs so a solve can be reused."""
     # PyPSA assigns a slack control while solving. Canonicalise controls on a
@@ -510,6 +522,7 @@ def _network_input_fingerprint(ctx, *, exact=False):
     n.determine_network_topology()
     for subnet in n.sub_networks.obj:
         subnet.find_bus_controls()
+    _canonical_branch_carriers(n)
     def encode(frame):
         return _exact_frame_json(frame) if exact else frame.to_json(date_format="iso")
 

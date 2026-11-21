@@ -1,0 +1,1 @@
+* Docs(pypsa-gui): End-to-end walkthrough of the data-centre grid-readiness workflow, with a journey map, eight bug issues and recommended improvements (`.scratch/walkthroughs/dc-grid-readiness-2026-11-17/`).

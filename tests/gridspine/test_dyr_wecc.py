@@ -677,6 +677,55 @@ def test_htfrac_zero_is_refused(tmp_path):
         _load(tmp_path, WIND3 | {"wtdt_htfrac": 0.0})
 
 
+def test_synchronous_records_keep_a_separator_before_a_ten_column_con():
+    # GK A2 (PR3 note): the synchronous and DYR_CONTROLS records use the same
+    # _con as the converters, so -998.00000 cannot run into the previous value.
+    from gridspine.handoff.dyr_writer import DYR_CONTROLS, format_record
+
+    model = next(iter(DYR_CONTROLS))
+    icons, cons = DYR_CONTROLS[model]
+    values = {n: 1 for n in icons} | {n: -998.0 for n in cons}
+    line = format_record(1, "1", model, values)
+    assert line.count(" -998.00000") == len(cons)
+
+
+def test_write_dyr_synchronous_records_keep_a_separator_before_a_ten_column_con(
+    tmp_path,
+):
+    # write_dyr's own GENROU/GENSAL CONs go through _con too, not format_record
+    params, templates = _toy_templates(tmp_path, ibr=_IBR)
+    params = params.copy()
+    params.loc["G_BUS_02", "d"] = -998.0
+    path = tmp_path / "t.dyr"
+    write_dyr(_net(), params, path, ibr=wecc_params(templates))
+    text = path.read_text()
+    sync = [ln for ln in text.splitlines() if re.search(r"'GEN(ROU|SAL)'", ln)]
+    assert [ln.count(" -998.00000") for ln in sync].count(1) == 1
+    assert re.search(r"\S-998\.00000", text) is None
+
+
+def _converter_inputs(tmp_path):
+    _params, templates = _toy_templates(tmp_path, ibr=_IBR)
+    return _net(), wecc_params(templates)
+
+
+def test_converter_records_refuses_a_version_outside_33_35(tmp_path):
+    net, ibr = _converter_inputs(tmp_path)
+    with pytest.raises(
+        ContractError, match=r"\.dyr version 34 not supported; supported \(33, 35\)"
+    ):
+        dyr_writer.converter_records(net, ibr, version=34)
+
+
+def test_converter_records_skips_a_synchronous_machine_with_an_ibr_row(tmp_path):
+    net, ibr = _converter_inputs(tmp_path)
+    own = dyr_writer.converter_records(net, ibr, version=35)
+    # the gen G_BUS_02 is synchronous: a converter row under its name is not written
+    both = pd.concat([ibr, ibr.rename(index={"W_BUS_02": "G_BUS_02"})])
+    assert dyr_writer.converter_records(net, both, version=35) == own
+    assert list(own[1]) == ["W_BUS_02"]
+
+
 def test_a_ten_column_con_line_keeps_its_separators(tmp_path):
     """
     A REPCA1 line holding femax 999 and femin -998 (both fill ten columns)
@@ -743,3 +792,20 @@ def test_each_ordered_pair_is_refused_at_its_boundary(tmp_path, lo, hi, op):
     with pytest.raises(ContractError, match=f"unit .*: {lo} must be {op} {hi}: "):
         _load(tmp_path, _FULL | {lo: bad})
     _load(tmp_path, _FULL | {lo: _FULL[hi] - 0.001 if op == "<" else _FULL[hi]})
+
+
+def test_converter_records_skips_a_converter_with_no_ibr_row(tmp_path):
+    net, ibr = _converter_inputs(tmp_path)
+    assert dyr_writer.converter_records(
+        net, ibr.drop(index="W_BUS_02"), version=35
+    ) == (
+        [],
+        {},
+        {},
+    )
+
+
+def test_converter_records_refuses_a_poc_branch_for_a_unit_without_repca1(tmp_path):
+    net, ibr = _converter_inputs(tmp_path)
+    with pytest.raises(ContractError, match="write no REPCA1 record"):
+        dyr_writer.converter_records(net, ibr, version=35, poc=POC)

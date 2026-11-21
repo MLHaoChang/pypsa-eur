@@ -331,10 +331,11 @@ def test_the_oscillation_row(tmp_path, amp, period, verdict):
     assert _rows(G.grid_readiness(d, n, PROFILE))["oscillation"]["verdict"] == verdict
 
 
-@pytest.mark.parametrize("sk, verdict", [(90.0, "pass"), (87.0, "warn")])
+@pytest.mark.parametrize("sk, verdict", [(150.0, "pass"), (145.0, "warn")])
 def test_the_scr_row_at_three(tmp_path, sk, verdict):
     d, n = _project(tmp_path, "eh_datacenter")
-    n.buses.at["grid", "eh_sk_mva"] = sk                         # IBR 30 MVA: SCR 3.0 / 2.9
+    n.buses.at["grid", "eh_ibr_mva"] = 50.0                      # stated, above the 44 MVA of converters
+    n.buses.at["grid", "eh_sk_mva"] = sk                         # SCR 3.0 / 2.9
     row = _rows(G.grid_readiness(d, n, PROFILE))["scr"]
     assert row["verdict"] == verdict and row["assumed"]
 
@@ -643,7 +644,7 @@ def test_the_reactive_range_counts_gfm_and_gfl_qu_units_at_rated_p(tmp_path):
     # bess_new (gfm_droop) is extendable and unsized: only the 4 MW PV counts so far
     assert row["project_value"] == pytest.approx(4.0 * math.tan(math.acos(0.95)), rel=1e-4)
     assert row["limit"] == pytest.approx(0.48 * 40.0)
-    assert row["verdict"] == "unknown" and "bess_new" in row["note"]
+    assert row["verdict"] == "unknown" and "\u201cBESS new\u201d" in row["note"]
     n.storage_units.at["bess_new", "p_nom_extendable"] = False
     n.storage_units.at["bess_new", "p_nom"] = 60.0
     row = _rows(G.grid_readiness(d, n, PROFILE))["reactive_range"]
@@ -701,6 +702,7 @@ def test_ride_through_reads_the_stored_island_study(tmp_path, status, verdict):
     row = _rows(G.grid_readiness(d, n, PROFILE))["ride_through:ups_bridged"]
     assert row["verdict"] == verdict and row["assumed"]
     assert "600" in row["limit"]
+    assert "'" not in row["limit"] and "\u201c" in row["limit"] and "ups_battery" not in row["limit"]
 
 
 # ── LOLE ────────────────────────────────────────────────────────────────────
