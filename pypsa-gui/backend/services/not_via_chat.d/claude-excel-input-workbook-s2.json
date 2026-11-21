@@ -4,8 +4,8 @@
    "id": "excel_input_workbook",
    "title": "Excel input workbook",
    "disposition": "unbuilt",
-   "reason": "Chat cannot give or import the Excel input workbook yet: an import needs a preview to confirm. Hand-off > Exports will offer both.",
-   "page": "Hand-off > Exports",
+   "reason": "Chat cannot give or import the Excel input workbook yet: an import needs a preview to confirm. Download it from Export…, and import it from Start or New project › From file.",
+   "page": "Export… · New project › From file",
    "panel": null,
    "keywords": [
     "spreadsheet",

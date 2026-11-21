@@ -309,6 +309,23 @@ async function journey(t) {
       const sheets = [...(await zip.file('xl/workbook.xml').async('string')).matchAll(/<sheet [^>]*name="([^"]+)"/g)].map(m => m[1])
       assert.deepEqual(sheets.slice(0, 2), ['About', 'Overview'], `first sheets are ${sheets.slice(0, 2)}`)
     })
+    // Excel input workbook (S3): the same chooser gives the project as last saved, with its About sheet.
+    const inputStarted = Date.now()
+    await L.step(ctx, 'export: Input workbook (Excel) delivers the saved project as an .xlsx with an About sheet', async () => {
+      await page.getByText('Input workbook (Excel)', { exact: true }).click()
+      await page.getByTestId('input-workbook-note').waitFor()
+      const [download] = await Promise.all([
+        page.waitForEvent('download', { timeout: 60000 }),
+        page.getByRole('button', { name: 'Download File', exact: true }).click(),
+      ])
+      assert.match(download.suggestedFilename(), /\.xlsx$/)
+      const file = path.join(out, `${t.id}-${mode}-input-workbook.xlsx`)
+      await download.saveAs(file)
+      const zip = await JSZip.loadAsync(await fs.readFile(file))
+      const sheets = [...(await zip.file('xl/workbook.xml').async('string')).matchAll(/<sheet [^>]*name="([^"]+)"/g)].map(m => m[1])
+      assert.ok(sheets.includes('About') && sheets.includes('Nodes'), `input workbook sheets are ${sheets}`)
+    })
+    ctx.added.inputWorkbookS = Math.round((Date.now() - inputStarted) / 100) / 10  // CI-PACE: seconds this slice adds
     // The chooser's own Cancel: the one beside its Download button.
     await page.locator('div:has(> button:has-text("Download File"))').getByRole('button', { name: 'Cancel', exact: true }).click()
     await L.chooseMode(ctx, 'Guided')
