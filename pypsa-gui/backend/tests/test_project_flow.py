@@ -117,7 +117,7 @@ def test_a_filled_site_is_complete_and_ready(client, site):
     rows = {s["section"]: s for s in body["sections"]}
     assert rows["readiness"]["state"] is None and rows["readiness"]["summary"] == "0 to do, 0 to check"
     assert rows["results"]["state"] is None and rows["results"]["freshness"] == "not_run"
-    assert rows["connection"]["summary"] == "1 grid connection, 50 MW"
+    assert rows["connection"]["summary"] == "Grid import, 50 MW"
     # The limit as the study takes it, with the links it is read from (template-e2e 02).
     assert rows["connection"]["connection_limit"] == {
         "mw": 50.0, "refusal": None, "links": ["grid_import"]}

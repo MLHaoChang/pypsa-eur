@@ -101,7 +101,9 @@ jobs:
   #
   # Four jobs, because one serial run of the ~14,000 tests took ~2 h:
   #   gui-backend-changes  the paths filter, once; the others read its output
-  #   gui-backend-tests    the pytest suite, split by file into 4 shards
+  #   gui-backend-tests    the pytest suite, split by file into 8 shards, each run with
+  #                        pytest-xdist across the runner's cores (`-n auto --dist
+  #                        loadfile`: a file stays in one worker process)
   #                        (`--num-shards`/`--shard-id`, tests/_shard.py)
   #   gui-backend-qa       the pilot evaluation gate and the qa_*.py drivers,
   #                        once, beside the shards
@@ -130,15 +132,19 @@ jobs:
             - '.github/workflows/test.yaml'
 
   gui-backend-tests:
-    name: GUI backend shard ${{ matrix.shard }}/4
+    name: GUI backend shard ${{ matrix.shard }}/8
     needs: gui-backend-changes
     if: needs.gui-backend-changes.outputs.run == 'true'
     runs-on: ubuntu-latest
+    # A healthy shard on the 4-shard layout takes up to ~150 min. Without a cap
+    # a hung shard held its runner for GitHub's 6 h limit. Once the shards run
+    # under xdist (~25 min each) this can drop to ~60.
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
         # 1-based here for the job name; pytest's --shard-id is 0-based.
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
 
     defaults:
       run:
@@ -168,21 +174,24 @@ jobs:
       run: npm ci --no-audit --no-fund
 
     # The full output goes to a log file and the artifact below, so a failure
-    # can be read whole instead of from under the job log's tail.
+    # can be read whole instead of from under the job log's tail. `-vv` (on top
+    # of pytest.ini's -q) prints every test's name, so a shard that stalls
+    # shows which test it stalled on.
     - name: Run backend tests
       run: |
         set -o pipefail
         mkdir -p pypsa-gui/backend/test-results
         pixi run gui-tests \
-          --num-shards=4 --shard-id=$(( ${{ matrix.shard }} - 1 )) \
-          --junitxml=test-results/junit.xml --durations=30 \
+          --num-shards=8 --shard-id=$(( ${{ matrix.shard }} - 1 )) \
+          -n auto --dist loadfile \
+          --junitxml=test-results/junit.xml --durations=30 -vv \
           2>&1 | tee pypsa-gui/backend/test-results/pytest.log
 
     - name: Upload test results
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: gui-backend-shard-${{ matrix.shard }}-of-4
+        name: gui-backend-shard-${{ matrix.shard }}-of-8
         path: pypsa-gui/backend/test-results/
         if-no-files-found: warn
 

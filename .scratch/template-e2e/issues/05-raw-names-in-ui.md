@@ -46,3 +46,5 @@ Waiting on other PRs / later slices:
 ## Comments
 
 - Seen again 2026-11-20 (template walk, master 1f6905e3): DC Guided step 3 prints 'grid_import, 40 MW', 'BESS new is not sized yet'; H2 step 1 says 'Fmea top ranks them'.
+
+- Seen again 2026-11-21 (template walk, master 6b421b06): IPP, Guided Connection & grid: "Grid strength: data missing — eh_sk_mva (and IBR capacity) required on ALL eh_poc buses for SCR gate; missing/invalid at: grid". Ammonia: Guided Sized design lists `wind_new_2027`, `electrolyser_new_2030`, `h2_storage`, `nh3_tank`; the Expert investment case says "not established (no_discharge:bess_new_2027; overnight_cost_missing:bess_new_2030; overnight_cost_missing:bess_new_2035)". Expert Key capacities lists "concentrate shortfall 486 MW" and "NH3 shortfall 32 MW" as capacities.

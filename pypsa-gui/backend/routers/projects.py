@@ -16,7 +16,7 @@ import time
 import zipfile
 from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 from fastapi import APIRouter, Body, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
@@ -36,6 +36,7 @@ from models.schemas import (
     UpdateScenarioRequest,
 )
 from services import active_project, change_log_service
+from services import project_contents as PC
 from services.atomic_io import (
     atomic_copy,
     atomic_write_bytes,
@@ -59,6 +60,9 @@ class MembersRequest(BaseModel):
     """Body for PUT /{id_or_name}/members — the desired member user-id set."""
 
     user_ids: list[str] = []
+    # Optional role per user id (project-viewer-role 01). A member with no
+    # entry keeps the stored role; a new member defaults to editor.
+    roles: dict[str, Literal["editor", "viewer"]] = {}
 
 
 # The FLAT legacy store: <root>/<display-name>/network.nc. Distinct from
@@ -74,137 +78,45 @@ class MembersRequest(BaseModel):
 # which lands inside a read-only app bundle once the backend is frozen.
 PROJECTS_DIR = pathlib.Path(get_settings().flat_projects_root)
 
-# Files that make up a project bundle (.pypsaproj.zip).
-# `layout.json` holds the blank-canvas schematic layout — the "latent
-# coordinates" (node positions + edge waypoints). It is deliberately part of
-# the bundle so the schematic travels with the project across machines, but
-# it is NEVER part of the network model / network API: it is pure
-# presentation state, decoupled from the geographic bus.x/y the map view and
-# clustering consume.
-# `adequacy_worksheet.json` (the user-authored FMEA worksheet: expert rows +
-# overlays) and `adequacy_stress_scenarios.json` (the stress-scenario
-# registry) are per-project sidecars the adequacy routes write beside the
-# network. Whole-branch review, finding S7: they were NOT in this tuple, so a
-# bundle export/import, a project snapshot and a scenario fork all silently
-# dropped them — the shared bundle arrived with an empty worksheet and no
-# stress scenarios, and a snapshot restore could not bring them back. Every
-# loop over this tuple tolerates an absent file, so an older bundle or
-# snapshot without them still imports. Literals rather than the services'
-# `SIDECAR_NAME` constants (a router-level import of the adequacy services
-# is a cycle waiting to happen); `test_bundle_sidecars` pins them equal.
-_BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.json", "layout.json", "results_state.pkl",
-                 "adequacy_worksheet.json", "adequacy_stress_scenarios.json",
-                 # Review finding S7, third recurrence: the outage-rate
-                 # provenance ledger. Dropping it on a bundle/snapshot/fork is
-                 # not cosmetic — `study_report._evidence_gaps` reads it, so a
-                 # restored project reports every asset-level rate as
-                 # `unsourced` and a clean study grows a provenance gap it does
-                 # not have. test_bundle_sidecars now enumerates every
-                 # SIDECAR_NAME under services/adequacy/ so a fourth sidecar
-                 # cannot repeat this.
-                 "asset_health.json",
-                 # The 3D site view's sidecar (sites, boundaries, placements).
-                 # services/site_service.py owns it; its cached context lives
-                 # under the `sites/` dir below.
-                 "sites.json",
-                 # The confirmed site anchor (SC-01a, D01): one revisioned
-                 # project coordinate. Not private, so it travels everywhere
-                 # sites.json does. Pinned equal to site_scene.anchor.ANCHOR_FILE.
-                 "site_anchor.json",
-                 # The map view's user geometry: routed branches and dragged
-                 # asset bubbles (visual layers plan 2, M1).
-                 # services/map_layout_service.py owns it; `test_map_layout_routes`
-                 # pins it equal to MAP_LAYOUT_FILE.
-                 "map_layout.json",
-                 # The island sidecar (plan 2026-10-07 campus island, I1):
-                 # control modes, unit dynamics and island requirements.
-                 "island_config.json",
-                 # The frequency cuts the user applied (campus island plan, I7):
-                 # the solve reads them with the sidecar. `test_island_cuts`
-                 # pins it equal to solver.island.CUTS_FILE.
-                 "island_cuts.json",
-                 # Edge Investment Case WP1.1c: the (id, version, hash) of every
-                 # Library series the project references, re-checked on open.
-                 # `test_library_bundle_pins` pins it equal to SIDECAR_NAME.
-                 "library_refs.json",
-                 # The project flow's acknowledged warnings (B1).
-                 # `test_project_flow` pins it equal to flow_service.ACKS_FILE.
-                 "flow_acks.json",
-                 # The project's scope: the work cards the Run computes (W4a).
-                 # `test_flow_scope` pins it equal to flow_scope.SCOPE_FILE.
-                 "flow_scope.json",
-                 # The user's own grid-readiness limits (DC 03 slice 6):
-                 # services/adequacy/grid_limits.py owns it; the walk in
-                 # `test_bundle_sidecars` pins it to its SIDECAR_NAME.
-                 "grid_readiness_limits.json",
-                 # A sensitivity case's record of its baseline and changes
-                 # (SR-1, F10). Carried by bundles, copies and snapshots so a
-                 # case keeps its provenance, but NOT by scenario forks
-                 # (`_FORK_SKIPPED_FILES`): a fork of a case is not that case.
-                 # `test_bundle_provenance` pins it to SENSITIVITY_CASE_FILE.
-                 "sensitivity_case.json")
+# What a project is, and which operation carries each part: the one table in
+# `services/project_contents.py` (project-io issue 01). The lists below are
+# derived from it, so a new sidecar is added there once; the reasons each
+# entry travels (or not) are recorded beside it.
+#
+# `_BUNDLE_FILES`: the top-level files bundles, Save-As and snapshots carry.
+# Every loop over it tolerates an absent file, so an older bundle or snapshot
+# without a newer name still imports. Every consumer reads bytes: a folder
+# belongs in the folder lists, never here (review v2 BC-4).
+_BUNDLE_FILES = PC.names(PC.BUNDLE, group=PC.SIDECAR)
 
 # Bundle files a scenario fork (`create_scenario`, the study option forks)
 # must not inherit, though bundles, copies and snapshots carry them.
-_FORK_SKIPPED_FILES = frozenset({"sensitivity_case.json"})
+_FORK_SKIPPED_FILES = frozenset(f for f in _BUNDLE_FILES if PC.FORK not in PC.entry(f).carried_by)
 
-# The campus electrical study's inputs and investment results (plan C9), under
-# `campus_electrical/`: the campus description, the asset library (the
-# project's copy, and the one the last run used) and what the run bought, its
-# cost, its re-checked compliance and who owns the PCC switchgear. Literals,
-# for the reason above; `test_bundle_campus` pins them to the service's
-# constants. Exported and imported with the bundle, each only when it exists.
-# The grid-code documents and drafts are NOT carried: a licensed text stays with
-# its licensee. Not copied by Save-As, snapshots or forks.
-_BUNDLE_CAMPUS_FILES = (
-    "campus_electrical/campus_input.yaml",
-    "campus_electrical/campus_assets.yaml",
-    "campus_electrical/run/campus_assets_used.yaml",
-    "campus_electrical/run/campus_investment.csv",
-    "campus_electrical/run/campus_cost.csv",
-    "campus_electrical/run/campus_compliance_invested.csv",
-    "campus_electrical/run/campus_invest_scope.json",
-    # The last island study (campus island plan I9a): a result like the cost,
-    # made from the sidecar the project bundle already carries.
-    "campus_electrical/island_study.json",
-)
+# The campus electrical study's files under `campus_electrical/` (plan C9):
+# exported and imported with the bundle, each only when it exists; not copied
+# by Save-As, snapshots or forks.
+_BUNDLE_CAMPUS_FILES = PC.names(PC.BUNDLE, group=PC.CAMPUS)
 
-# Per-project subdirectories that travel alongside the bundle FILES on every
-# project-to-project transition. Chatbot uploads (Phase A) live here under
-# `uploads/<file_id>/`. The transition table (Save-As, Save-a-Copy, scenario
-# copy, snapshot create + restore) is invoked via `_copy_bundle_dirs(src, dst)`
-# from each respective call site; routine re-save (loaded == target) skips it
-# because the source and destination ARE the same dir. The legacy bundle-file
-# loop already handles the small files; bundling dirs separately keeps it
-# robust to growth (e.g. agent_export PNGs accumulating in uploads/).
-#
-# `studies/` holds the decision-study sidecars, `studies/<study_id>.json`
-# (`services/study/store.py`). A DIRECTORY, so it belongs here and never in
-# `_BUNDLE_FILES`, whose every consumer reads bytes (review v2 BC-4). Bundles,
-# Save-As and snapshots carry it; the study option forks of S4 do not — see the
-# note in `_create_scenario_db`.
-#
-# Study reports (`reports/<report_id>/{meta.json, v<N>.json, figures/}`,
-# services/reports/store.py) joined the tuple with the same semantics: always a
-# COPY on save-as, replaced wholesale on snapshot restore, walked recursively
-# into the bundle zip and extracted from it. `sites/` is the 3D site view's
-# cached site context (services/site_context.py), one directory per site id.
-_BUNDLE_DIRS = ("uploads", "reports", "studies", "sites")
+# Per-project folders every project-to-project transition carries (Save-As,
+# scenario fork, snapshot create + restore, bundle), through
+# `_copy_bundle_dirs(src, dst, op=...)`. `studies/` is not taken by the study
+# option forks (`services/study/forks.py` skips it). `reports/` is copied
+# report by report under the report locks (07e); `sites/` as scene closures.
+_BUNDLE_DIRS = PC.names(PC.FORK, group=PC.FOLDER)
 
-# Per-project HISTORY: append-only records of what happened, not working state
-# (SR-1, F10). Carried by bundle export/import and Save-As/Save-a-Copy, so a
-# copy keeps its provenance; NOT by snapshots (a restore must never erase runs
-# recorded after the capture) or scenario forks (a fork did not run them).
-# `run_evidence/` (services/run_evidence.py) is bounded there: 16 KB per
-# section, artifacts for the newest 20 runs, 200 manifests. Its records name
-# the project they were recorded in, so a copy carries them without claiming
-# them. `experiments/` is deliberately absent: its plans name other case
-# projects' ids, so a copy would hold duplicate or dangling plans.
-_HISTORY_DIRS = ("run_evidence",)
+# The folders a snapshot tracks: `_BUNDLE_DIRS` plus `gridspine/` (less its
+# `run/`, which a restore leaves as it is).
+_SNAPSHOT_DIRS = PC.names(PC.SNAPSHOT, group=PC.FOLDER)
+
+# Per-project HISTORY: append-only records (SR-1, F10). Bundles and Save-As
+# carry them; snapshots (a restore must never erase later runs) and forks do
+# not. `experiments/` is deliberately absent: its plans name other projects.
+_HISTORY_DIRS = PC.names(PC.SAVE_AS, group=PC.HISTORY)
 
 # The metadata keys a decision-study option fork carries (S4), and a tornado's
-# throw-away fork (S6: `owner_variant_id`, `throwaway`). Literals, like
-# `_BUNDLE_FILES`, to keep the router free of a services.study import;
+# throw-away fork (S6: `owner_variant_id`, `throwaway`). Literals, to keep
+# the router free of a services.study import;
 # `tests/test_study_forks.py` pins them equal to `forks.OWNER_KEYS`.
 _STUDY_FORK_META_KEYS = ("owner_study_id", "owner_base_project", "owner_option_id",
                          "owner_variant_id", "throwaway")
@@ -370,9 +282,10 @@ def _reports_copy_guard(src: pathlib.Path | None = None, dst: pathlib.Path | Non
         }) from exc
 
 
-def _copy_bundle_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:
+def _copy_bundle_dirs(src: pathlib.Path, dst: pathlib.Path, *, op: str = PC.FORK) -> None:
     """
-    Recursively copy each `_BUNDLE_DIRS` subdir from `src` to `dst`,
+    Recursively copy each project folder `op` carries (`project_contents`)
+    from `src` to `dst`,
     replacing any existing destination dir of the same name. No-op for
     sources that don't exist (legacy projects predate uploads/).
 
@@ -401,9 +314,15 @@ def _copy_bundle_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:
     # are never copied.
     scene_blobs = scene_store.closure_blobs(src)
     with report_store.reports_copy_lock(src, dst):
-        for dname in _BUNDLE_DIRS:
+        for dname in PC.names(op, group=PC.FOLDER):
             src_d, dst_d = src / dname, dst / dname
             if not src_d.exists():
+                continue
+            if keep := PC.skipped(dname, op):
+                try:
+                    _replace_dir_keeping(src_d, dst_d, keep)
+                except OSError as exc:
+                    logger.warning("bundle: copy_bundle_dir %s → %s failed: %s", src_d, dst_d, exc)
                 continue
             if dname == "sites":
                 _swap_in_sites(src_d, dst_d, scene_blobs)
@@ -420,6 +339,27 @@ def _copy_bundle_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:
                     "bundle: copy_bundle_dir %s → %s failed: %s",
                     src_d, dst_d, exc,
                 )
+
+
+def _replace_dir_keeping(src_d: pathlib.Path | None, dst_d: pathlib.Path, keep: tuple[str, ...]) -> None:
+    """
+    Make `dst_d` a copy of `src_d` except the sub-paths `keep`: those are never
+    copied from `src_d`, and `dst_d`'s own are left where they are (a snapshot
+    of `gridspine/` leaves out `run/`, and its restore keeps the live `run/`).
+    `src_d` None empties `dst_d` the same way.
+    """
+    if dst_d.exists():
+        for child in list(dst_d.iterdir()):
+            if child.name in keep:
+                continue
+            if child.is_dir() and not child.is_symlink():
+                _force_rmtree(child)
+            else:
+                child.unlink()
+    if src_d is None:
+        return
+    shutil.copytree(str(src_d), str(dst_d), dirs_exist_ok=True,
+                    ignore=lambda d, names: [n for n in names if pathlib.Path(d) == src_d and n in keep])
 
 
 def _swap_in_sites(src_d: pathlib.Path, dst_d: pathlib.Path, scene_blobs: list) -> None:
@@ -1184,7 +1124,15 @@ def list_projects(
     # (Step 1) is the channel that surfaces such drift.
     project_registry.require_user(user)
     projects = project_acl.list_accessible_projects(db, user)
-    return [_project_info_db(db, p) for p in projects]
+    # One `project_role` per row, the same function the write gate uses (GK B3
+    # V4). Its few indexed lookups are small next to the bundle read
+    # `_project_info_db` already does per row.
+    return [
+        _project_info_db(db, p).model_copy(
+            update={"my_access": project_acl.project_role(db, user, p)}
+        )
+        for p in projects
+    ]
 
 
 # NOTE: `/unclaimed` and `/unclaimed/{legacy_name}/import` MUST stay ahead of
@@ -1379,43 +1327,157 @@ def _bundle_report_ids(members: set[str]) -> frozenset[str]:
 
 def _extract_bundle(zf: zipfile.ZipFile, members: set[str], dest: pathlib.Path,
                     incoming_reports: frozenset[str]) -> None:
-    """Write a bundle's files and folders into `dest`. The caller holds the
-    report locks for `incoming_reports` (`_reports_copy_guard`)."""
-    for fname in _BUNDLE_FILES:
-        if fname in members:
-            # Atomic because the process can be KILLED mid-write, leaving a
-            # live project's `network.nc` truncated.
-            #
-            # NOT because `write_bytes` truncates before reading the member:
-            # `zf.read(fname)` is fully evaluated first, so that hazard never
-            # existed at this call. It DOES exist at the `copy2` site below,
-            # which opens the destination before reading the source.
-            atomic_write_bytes(dest / fname, zf.read(fname))
-    for fname in _BUNDLE_CAMPUS_FILES:
-        if fname in members:
-            (dest / fname).parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_bytes(dest / fname, zf.read(fname))
-    # Chatbot uploads (Phase A) — extract any `uploads/...` entries the
-    # exporting GUI included. Each archive member's path is verified to
-    # stay inside `dest` before writing (zip-slip defence) and the parent
-    # subdirs are created on demand.
-    for member in members:
-        for dname in _BUNDLE_DIRS + _HISTORY_DIRS:
-            if not member.startswith(f"{dname}/"):
-                continue
-            # Sanity: refuse any member that resolves outside dest.
-            target_path = (dest / member).resolve()
-            try:
-                target_path.relative_to(dest.resolve())
-            except ValueError:
-                continue  # zip-slip attempt — silently drop the member
-            parts = pathlib.PurePosixPath(member).parts
-            if dname == report_store.REPORTS_DIRNAME and (
-                len(parts) < 2 or parts[1] not in incoming_reports
-            ):
-                continue  # an exported lock file is not part of the bundle
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_bytes(target_path, zf.read(member))
+    """Write a bundle's members into `dest`, the import's private staging
+    folder. `members` are the ones `project_contents.screen_members` allowed:
+    no path among them leaves `dest`."""
+    root = dest.resolve()
+    for member in sorted(members):
+        parts = pathlib.PurePosixPath(member).parts
+        if parts[0] == report_store.REPORTS_DIRNAME and (
+            len(parts) < 2 or parts[1] not in incoming_reports
+        ):
+            continue  # an exported lock file is not part of the bundle
+        target = dest / member
+        target.resolve().relative_to(root)  # screened already; never write outside
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Atomic because the process can be KILLED mid-write.
+        atomic_write_bytes(target, zf.read(member))
+
+
+def _bundle_staging_dir() -> pathlib.Path:
+    """A fresh private folder beside the projects, for one import to unpack
+    into before its project row exists. A dot folder: `storage_reconcile`
+    never reads it as a project."""
+    import tempfile
+
+    root = pathlib.Path(get_settings().projects_root) / ".bundle-staging"
+    root.mkdir(parents=True, exist_ok=True)
+    return pathlib.Path(tempfile.mkdtemp(dir=root, prefix="import-"))
+
+
+def _move_staged(staging: pathlib.Path, dest: pathlib.Path) -> None:
+    """Move every staged file into `dest`, which may already hold the report
+    lock files the caller holds."""
+    for src in sorted(p for p in staging.rglob("*") if p.is_file()):
+        target = dest / src.relative_to(staging)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        os.replace(src, target)
+
+
+def _bundle_project_kind(meta: dict) -> str | None:
+    """The project kind a bundle's metadata.json names (GK B I1). Absent or
+    null: the column default (a capacity-expansion project, as every bundle
+    exported before the kind travelled). Anything else that is not a kind
+    this app knows refuses the import, 422; a kind this build cannot run
+    refuses as creating one would (503). The kind never grants more than
+    creating that project here would."""
+    raw = meta.get("project_kind")
+    if raw is None:
+        return None
+    from services import gridspine_service as gs
+
+    if not isinstance(raw, str) or raw not in gs.PROJECT_KINDS:
+        shown = raw if isinstance(raw, str) else type(raw).__name__
+        raise HTTPException(422, {
+            "error_kind": "bundle_unknown_kind",
+            "message": f"The bundle says it is a '{str(shown)[:40]}' project, which this app "
+                       "does not know. Nothing was imported.",
+        })
+    if raw == gs.CAPACITY_EXPANSION:
+        return None
+    gs.require_gridspine()
+    return raw
+
+
+#: `StudyConfig` path fields every read derives from the project folder
+#: (`gridspine_service.config_for_dir`), so a bundle's value is never used.
+_GRIDSPINE_REDERIVED = frozenset({"outdir", "templates_overlay"})
+#: Not a `StudyConfig` field: the GUI's name of the project a dispatch source
+#: came from, which names a project on the exporting machine.
+_GRIDSPINE_GUI_SOURCES = ("from_project",)
+
+
+def _gridspine_path_fields() -> tuple[str, ...]:
+    """The gridspine study fields that name a server path: every `StudyConfig`
+    field typed `Path` (less the re-derived ones), plus `from_project`. A
+    bundle's values name folders on the machine it came from (or, crafted, any
+    folder here), so an import clears them; the user picks the source again.
+    Derived, so a new `Path` field is cleared without a change here (GK B 64)."""
+    import dataclasses
+    from pathlib import Path
+
+    from services import gridspine_service as gs
+
+    if gs.StudyConfig is None:
+        # No gridspine in this build: no planning kind imports, and a
+        # capacity-expansion import never writes gridspine/.
+        return _GRIDSPINE_GUI_SOURCES
+    return tuple(
+        f.name for f in dataclasses.fields(gs.StudyConfig)
+        if f.type in (Path, "Path") and f.name not in _GRIDSPINE_REDERIVED
+    ) + _GRIDSPINE_GUI_SOURCES
+
+
+def _clear_gridspine_sources(staging: pathlib.Path) -> list[str]:
+    """Clear the path fields of a staged `gridspine/config.json`; their names."""
+    cfg = staging / "gridspine" / "config.json"
+    if not cfg.is_file():
+        return []
+    try:
+        data = json.loads(cfg.read_text())
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    cleared = [f for f in _gridspine_path_fields() if data.get(f) is not None]
+    if cleared:
+        data.update(dict.fromkeys(cleared))
+        atomic_write_text(cfg, json.dumps(data, indent=2))
+    return [f"gridspine.{f}" for f in cleared]
+
+
+def _stripped_note(fields: list[str]) -> str:
+    """The import result's plain words for what it cleared (GK B 64, ask 3)."""
+    paths = [f.removeprefix("gridspine.") for f in fields if f.startswith("gridspine.")]
+    parts = []
+    if paths:
+        parts.append(
+            "Cleared the planning study's source settings ("
+            + ", ".join(paths)
+            + "): they named folders on the machine the bundle came from. "
+            "Choose the study's sources again before running it."
+        )
+    if "extra_functionality_code" in fields:
+        parts.append(
+            "Removed the custom solver code (extra_functionality_code): a bundle's "
+            "code is never run. Set it again in the solver settings if you wrote it."
+        )
+    return " ".join(parts)
+
+
+def _discard_import(db: DBSession, project, dest: pathlib.Path | None, *,
+                    session: SessionRow | None = None, prev_pointer=None) -> None:
+    """Undo a bundle import that failed after its row was created (GK B I3).
+
+    A failure after the swap also leaves the project's context resident and
+    the session pointing at it; both go, or an eviction flush would write the
+    deleted project's folder back (GK B 64, ask 2)."""
+    from services import project_registry
+    from services.auth_service import set_session_active_project
+
+    try:
+        PyPSAService.drop(project_registry.registry_key(project))
+    except Exception:  # noqa: BLE001 — the original failure is the one to raise
+        logger.exception("import_bundle: could not drop the context of %s", project.name)
+    try:
+        db.rollback()
+        if session is not None and session.active_project_id == project.id:
+            set_session_active_project(db, session, prev_pointer)
+        project_registry.delete_project_row(db, project)
+    except Exception:  # noqa: BLE001 — the original failure is the one to raise
+        logger.exception("import_bundle: could not remove the row of %s", project.name)
+    if dest is not None and dest.exists():
+        _force_rmtree(dest)
 
 
 
@@ -1527,7 +1589,11 @@ async def import_bundle(
     except zipfile.BadZipFile as exc:
         raise HTTPException(400, f"Not a valid zip bundle: {exc}") from exc
 
-    members = set(zf.namelist())
+    try:
+        allowed, ignored = PC.screen_members(zf)
+    except PC.BundleRefused as exc:
+        raise HTTPException(400, exc.detail) from exc
+    members = set(allowed)
     if "network.nc" not in members:
         raise HTTPException(400, "Bundle is missing network.nc")
 
@@ -1564,39 +1630,73 @@ async def import_bundle(
     from services import project_registry
 
     project_registry.require_user(user)
-    # Before the project row exists: a bad report id refuses the import.
+    # Every refusal comes BEFORE the project row exists (project-io 01, GK B
+    # I3): the bundle is unpacked into a private staging folder and checked
+    # there, so a refused import leaves no row and no folder behind.
+    # A bad report id refuses the import.
     incoming_reports = _bundle_report_ids(members)
-    # Carry the bundle's scenario labels onto the ROW, not just onto the files.
-    # `_project_info_db` serves the DB row and overrides whatever the storage
-    # dir says, so a row created without these makes the restored
-    # metadata.json's correct values unreachable — the export round-tripped
-    # them and the import threw them away. `_scenario_fields_from_meta` also
-    # splits a pre-0004 bundle's inline `[type]` prefix on the way in.
-    #
-    # The parent link is deliberately NOT restored: a bundle is a single
-    # project, and its `parent_project` names a project that may not exist
-    # here. Imports land as roots, which is the pre-existing behaviour.
-    _imported_project = project_registry.create_root(
-        db, user, target_name, **_scenario_fields_from_meta(bundle_meta),
-    )
+    project_kind = _bundle_project_kind(bundle_meta)
+    if project_kind is None:
+        # A capacity-expansion project holds no gridspine/ (require_planning).
+        gs_members = {m for m in members if m.startswith("gridspine/")}
+        members -= gs_members
+        ignored = sorted({*ignored, *gs_members})
+    staging = _bundle_staging_dir()
+    try:
+        _extract_bundle(zf, members, staging, incoming_reports)
+        stripped_fields = _clear_gridspine_sources(staging)
+        staged_nc = staging / "network.nc"
+        from services.commercial.settlement_inputs import reserved_buses_in_netcdf
+
+        reserved = reserved_buses_in_netcdf(staged_nc)
+        if reserved:
+            # `ic:` names the commercial reference frames' columns (P2 WP2.2-0):
+            # refused before anything is swapped (review 0b #2).
+            raise HTTPException(422, f"bus names starting 'ic:' are reserved: {reserved[:5]}")
+        # OPEN-ITEMS item 8, also before the swap: a new import may not bring in a
+        # name the create routes would refuse.
+        from services.component_names import invalid_names_in_netcdf, refuse_invalid_names
+
+        refuse_invalid_names(invalid_names_in_netcdf(staged_nc))
+
+        # Carry the bundle's scenario labels onto the ROW, not just onto the
+        # files: `_project_info_db` serves the DB row. The parent link is
+        # deliberately NOT restored: a bundle is a single project, and its
+        # `parent_project` names a project that may not exist here. Imports
+        # land as roots. A second import of the same name gets the 409.
+        prev_pointer = session.active_project_id if session is not None else None
+        _imported_project = project_registry.create_root(
+            db, user, target_name, **_scenario_fields_from_meta(bundle_meta),
+        )
+        dest = None
+        try:
+            if project_kind is not None:
+                _imported_project.project_kind = project_kind
+                db.commit()
+            dest = project_registry.ensure_project_dir(_imported_project)
+            with _reports_copy_guard(None, dest, incoming=incoming_reports):
+                _move_staged(staging, dest)
+            return _open_imported_bundle(
+                db, session, _imported_project, dest, file.filename,
+                candidate=candidate, rederived=rederived, rate_source=rate_source,
+                stripped_fields=stripped_fields, ignored=ignored)
+        except BaseException:
+            _discard_import(db, _imported_project, dest,
+                            session=session, prev_pointer=prev_pointer)
+            raise
+    finally:
+        _force_rmtree(staging)
+
+
+def _open_imported_bundle(db: DBSession, session: SessionRow | None, _imported_project,
+                          dest: pathlib.Path, filename: str | None, *,
+                          candidate, rederived: list[str], rate_source: str,
+                          stripped_fields: list[str], ignored: list[str]) -> dict:
+    """The import's swap and hydration, once its files are in `dest`. Any
+    failure here is undone by the caller (`_discard_import`)."""
+    from services import project_registry
+
     target_name = _imported_project.name
-    dest = project_registry.ensure_project_dir(_imported_project)
-    with _reports_copy_guard(None, dest, incoming=incoming_reports):
-        _extract_bundle(zf, members, dest, incoming_reports)
-
-    nc_path = dest / "network.nc"
-    from services.commercial.settlement_inputs import reserved_buses_in_netcdf
-
-    reserved = reserved_buses_in_netcdf(nc_path)
-    if reserved:
-        # `ic:` names the commercial reference frames' columns (P2 WP2.2-0):
-        # refused before anything is swapped (review 0b #2).
-        raise HTTPException(422, f"bus names starting 'ic:' are reserved: {reserved[:5]}")
-    # OPEN-ITEMS item 8, also before the swap: a new import may not bring in a
-    # name the create routes would refuse.
-    from services.component_names import invalid_names_in_netcdf, refuse_invalid_names
-
-    refuse_invalid_names(invalid_names_in_netcdf(nc_path))
     from services import dirty_state, undo_service
     with PyPSAService.get_lock():
         # A different project: a fresh context (own undo, counter 0, no result
@@ -1625,7 +1725,6 @@ async def import_bundle(
 
     cfg_path = dest / "solver_config.json"
     from routers.simulation import _state
-    stripped_fields: list[str] = []
     dropped_goal: list[dict] = []
     if cfg_path.exists():
         cfg_data = json.loads(cfg_path.read_text())
@@ -1744,8 +1843,9 @@ async def import_bundle(
 
     change_log_service.log(
         "import", "Project", target_name,
-        f"Imported project bundle '{file.filename}' as '{target_name}' "
-        f"({len(n.buses)} buses, {len(n.snapshots)} snapshots)" + _rederived_note(rederived),
+        f"Imported project bundle '{filename}' as '{target_name}' "
+        f"({len(n.buses)} buses, {len(n.snapshots)} snapshots)" + _rederived_note(rederived)
+        + (f". {_stripped_note(stripped_fields)}" if stripped_fields else ""),
     )
     from routers.simulation import _state as _sim_state
     library_issues = _library_pin_issues(
@@ -1757,7 +1857,10 @@ async def import_bundle(
         # Present only when the import dropped something the caller was not
         # authorized to set, so a stripped field is never a silent difference
         # between the uploaded bundle and the imported project.
-        **({"stripped": stripped_fields} if stripped_fields else {}),
+        **({"stripped": stripped_fields,
+            "stripped_note": _stripped_note(stripped_fields)} if stripped_fields else {}),
+        # Archive members no table entry names: reported, never written (GK B I2).
+        **({"ignored": ignored} if ignored else {}),
         # Likewise each reliability-goal value the bundle carried that PUT
         # would refuse: imported as "not set" (W3b-R), named here.
         **({"dropped_goal": dropped_goal} if dropped_goal else {}),
@@ -1814,12 +1917,7 @@ _TEMPLATE_DEFAULT_NAMES = {
 # Sidecars a template directory may carry beside network.nc (P19): the EH
 # template metadata, its Class-C stress registry and its solver settings.
 # An allow-list, never a directory copy.
-_TEMPLATE_SIDECARS = ("eh_template.json", "adequacy_stress_scenarios.json",
-                      "solver_config.json",
-                      # The island sidecar (plan 2026-10-07 campus island, I1).
-                      "island_config.json",
-                      # Pre-built sensitivity cases, data only until S5 (IPP ticket 04).
-                      "cases.json")
+_TEMPLATE_SIDECARS = PC.names(PC.TEMPLATE)
 
 
 def _eh_templates_module():
@@ -2673,7 +2771,7 @@ def _carry_sidecars_on_move(
             # mode); `src_dir` was resolved the same way above, and is shared
             # with the chat half so the two sidecars cannot disagree about
             # where the source project is.
-            _copy_bundle_dirs(src_dir, dest)
+            _copy_bundle_dirs(src_dir, dest, op=PC.SAVE_AS)
             _copy_history_dirs(src_dir, dest)
         except report_store.ReportBusy:
             raise  # never a silent skip (07e); `_save_context` holds the locks
@@ -3625,7 +3723,7 @@ def activate_project(
     ``_solver_in_flight()`` (which keys on the active ctx), so switching away
     while the queue solves a DIFFERENT project is allowed — that is the payoff.
     """
-    from services import project_registry
+    from services import project_acl, project_registry
 
     project_registry.require_user(user)
     project = project_registry.resolve_project(db, user, project_id)
@@ -3731,7 +3829,8 @@ def activate_project(
                 f"Library pin {issue['code']} ({issue['reason']}): {issue['message']}")
         library_issues = _tariff_ref_load_issues(cfg, project.name) + library_issues
     return {"activated": project.name, "evicted": evicted, "lock": lock_info,
-            "library_issues": library_issues}
+            "library_issues": library_issues,
+            "my_access": project_acl.project_role(db, user, project)}
 
 
 @router.post("/{project_id}/lock")
@@ -3800,7 +3899,7 @@ def load_project(
     user: User | None = Depends(optional_user),
     session: SessionRow | None = Depends(current_session),
 ) -> ImportSummary | dict[str, object]:
-    from services import project_registry
+    from services import project_acl, project_registry
 
     project_registry.require_user(user)
     project = project_registry.resolve_project(db, user, name)
@@ -4068,6 +4167,7 @@ def load_project(
     from routers.simulation import _state as _sim_state
     library_issues = _library_pin_issues(db, project, src, _sim_state.get("solver_config"))
     return {**summary.model_dump(), "lock": lock_info, "library_issues": library_issues,
+            "my_access": project_acl.project_role(db, user, project),
             **({"dropped_goal": dropped_goal} if dropped_goal else {})}
 
 
@@ -5351,7 +5451,8 @@ def osm_suggestions(
         raise HTTPException(exc.status, str(exc)) from exc
 
 
-def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:
+def _project_bundle_bytes(name: str, src: pathlib.Path | None = None, *,
+                          project_kind: str | None = None) -> bytes:
     """
     Materialise a zipped project bundle (.pypsaproj.zip) as bytes.
 
@@ -5378,7 +5479,11 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:
             zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for fname in _BUNDLE_FILES:
             p = src / fname
-            if p.exists():
+            if fname == "metadata.json" and project_kind:
+                # The kind lives on the DB row; the bundle carries it in its
+                # metadata so an import can restore it (project-io 01, I1).
+                zf.writestr(fname, json.dumps({**_read_meta(src), "project_kind": project_kind}, indent=2))
+            elif p.exists():
                 zf.write(p, arcname=fname)
         for fname in _BUNDLE_CAMPUS_FILES:
             p = src / fname
@@ -5391,7 +5496,7 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:
         # read under the scene mutex; nothing else under sites/<id>/scene.
         from services.site_scene import store as scene_store
         scene_blobs = scene_store.closure_blobs(src)
-        for dname in _BUNDLE_DIRS + _HISTORY_DIRS:
+        for dname in PC.names(PC.BUNDLE, kind=PC.DIR):
             d = src / dname
             if not d.is_dir():
                 continue
@@ -5431,7 +5536,7 @@ def download_bundle(
     src = project_registry.project_dir(project)
     name = project.name
     return StreamingResponse(
-        io.BytesIO(_project_bundle_bytes(name, src)),
+        io.BytesIO(_project_bundle_bytes(name, src, project_kind=project.project_kind)),
         media_type="application/zip",
         headers={"Content-Disposition": content_disposition(f"{name}.pypsaproj.zip")},
     )
@@ -5484,8 +5589,14 @@ def put_project_members(
         user_ids = [_uuid.UUID(str(uid)) for uid in body.user_ids]
     except (ValueError, TypeError) as exc:
         raise HTTPException(400, "user_ids must be valid UUID strings") from exc
+    try:
+        roles = {_uuid.UUID(str(uid)): role for uid, role in body.roles.items()}
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(400, "roles keys must be valid UUID strings") from exc
+    if len(roles) != len(body.roles):
+        raise HTTPException(400, "roles names the same user more than once")
 
-    return project_registry.set_root_members(db, user, project, user_ids)
+    return project_registry.set_root_members(db, user, project, user_ids, roles)
 
 
 @router.get("/{name}/statistics")

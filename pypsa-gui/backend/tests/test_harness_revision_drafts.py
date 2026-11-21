@@ -1337,3 +1337,50 @@ def test_confirm_and_discard_on_a_task_with_no_run_are_404(
             r.status_code == 404
             and r.json()["detail"]["error_kind"] == "task_not_found"
         ), act
+
+
+# ── PR B: the run view offers exactly what request() accepts (GK B (68) R1) ──
+
+
+def _no_report_step(t):
+    t["steps"].pop()
+
+
+@pytest.mark.parametrize(
+    "case, change",
+    [
+        ("completed_with_report", None),
+        ("cancelled_with_report", lambda t: t["run"].update(status="cancelled")),
+        ("failed_with_report", lambda t: t["run"].update(status="failed")),
+        ("paused_with_report", lambda t: t["run"].update(status="paused")),
+        ("job_not_done", lambda t: t["steps"][-1]["job"].update(outcome="failed")),
+        ("step_not_completed", lambda t: t["steps"][-1].update(status="running")),
+        ("no_report_step", _no_report_step),
+    ],
+)
+def test_the_views_offer_and_request_agree(made, case, change):
+    path, root, comment = made
+    if change is not None:
+        update(path, change)
+    offer = run_revise.offer(record(path))
+    try:
+        ask(path, root, comment)
+        accepted = True
+    except run_revise.DraftError as exc:
+        assert exc.kind in ("revision_draft_run_state", "revision_draft_not_run_report")
+        accepted = False
+    assert accepted == (case == "completed_with_report")
+    if accepted:
+        assert offer == {
+            "report_id": RID,
+            "max_requests": run_revise.MAX_REQUESTS,
+            "in_flight": list(run_revise.IN_FLIGHT),
+        }
+    else:
+        assert offer is None
+
+
+def test_the_offer_names_the_runs_own_report_not_a_constant(made):
+    path, _, _ = made
+    update(path, lambda t: t["steps"][-1]["job"].update(report_id="other"))
+    assert run_revise.offer(record(path))["report_id"] == "other"

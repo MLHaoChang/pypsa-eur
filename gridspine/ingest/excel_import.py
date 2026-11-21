@@ -38,6 +38,9 @@ from gridspine.ingest.import_result import Assumed, ImportReport, ImportResult, 
 
 logger = logging.getLogger(__name__)
 
+#: How far a hidden exact value may sit from its visible cell, in ulps of that value.
+EXACT_ULPS = 2
+
 FORMAT_ID = "excel"
 
 
@@ -82,8 +85,11 @@ class _Sheets:
             self.rows: dict[str, list[tuple]] = {}
             self.formula_cells: dict[str, set[tuple[int, int]]] = {}
             self.reported: set[tuple[str, int, int]] = set()
+            declared = 0
             for name in self.names:
-                _declared_within_limits(values[name])
+                declared += _declared_within_limits(values[name])
+                if declared > L.LIMITS["workbook_cells"]:
+                    raise L.ImportLimitError("workbook_cells", declared)
                 values[name].reset_dimensions()
                 formulas[name].reset_dimensions()
             cells = scanned = 0
@@ -93,6 +99,10 @@ class _Sheets:
                     scanned += len(row)
                     if scanned > L.LIMITS["cells"]:
                         raise L.ImportLimitError("cells", scanned)
+                    # The formula pass reads each sheet before the value pass, so its
+                    # running count across sheets is the one to hold (ticket 04).
+                    if scanned > L.LIMITS["workbook_cells"]:
+                        raise L.ImportLimitError("workbook_cells", scanned)
                     for c, cell in enumerate(row, start=1):
                         if getattr(cell, "data_type", None) == "f":
                             f_cells.add((r, c))
@@ -316,6 +326,17 @@ class _Reader:
             self.unmapped(
                 f"{L.EXACT} row {r}",
                 "the exact value does not show as its cell; ignored",
+            )
+            return None
+        # Ticket 04: within 2 ulp of the visible value read back, so a tampered
+        # entry moves a value by at most that. A zero or subnormal cell is kept
+        # (the writer emits one for a stored subnormal shown as 0.0); the bound
+        # limits it to the subnormal range.
+        visible = L.rescale(shown, 1.0 / scale)
+        if abs(stored - visible) > EXACT_ULPS * math.ulp(visible):
+            self.unmapped(
+                f"{L.EXACT} row {r}",
+                "the exact value is too far from its cell; ignored",
             )
             return None
         return stored

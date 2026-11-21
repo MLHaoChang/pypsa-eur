@@ -63,6 +63,14 @@ ENGINE_TOOLS = frozenset({"run_margin_loop", "run_coupling_loop"})
 # single-owner investment case values the solved dispatch. It is admitted like
 # a run but never counts as a solve, so it never spends the solves budget.
 CASE_TOOLS = frozenset({"run_investment_case"})
+# Study harness 14 S-C (GK B (56) C8): the PPA price is the runner's native read
+# of the run's own case (`harness/run_ppa.py`); no call is ever its step, so a
+# model turn never solves one under the grant (#1123). The tool is read tier, so
+# its calls never reach `admit`: a run turn is refused by the offered-tools
+# allowlist (`session.stage_tools`, `loop.dispatch_tool_call`). This branch is
+# defence in depth: unreachable for a read-tier tool through dispatch, it holds
+# if the tool's tier or a stage's offer ever changes.
+PPA_TOOLS = frozenset({"solve_ppa_price"})
 # Study harness 15 (owner decision SH15-PF-1): grid_only's setup switches Load flow on. The
 # one setting a grant covers, and only as the harness's own step with exactly these args: a
 # model turn never writes the solver config under a grant (`own_step_only`, `outside_entry`).
@@ -1471,6 +1479,8 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
         # the owner the case will be built for (`InvestmentCaseRequest.owner`), as the route reads it
         if _case_solves_baseline(ctx, args.get("owner") if isinstance(args, dict) else None):
             return "baseline_solve"
+    if tool in PPA_TOOLS:
+        return "own_step_only"
     if tool in SETTING_TOOLS:
         # The harness's own setup step, with exactly its frozen args (SH15-PF-1).
         if not note.get("call_id") or note["call_id"] != getattr(session, "run_step_call", None):
