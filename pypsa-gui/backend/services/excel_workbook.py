@@ -215,7 +215,9 @@ def prepare(data: bytes, filename: str | None, *, new_project: bool) -> Prepared
             raise _unreadable(f"{message}{unchanged}") from exc
         except Exception as exc:  # noqa: BLE001 - any reader failure is one refusal
             logger.warning("Excel workbook refused as unreadable", exc_info=True)
-            raise _unreadable(f"The file is not a readable Excel workbook.{unchanged}") from exc
+            raise _unreadable(
+                f"The file is not a readable Excel workbook.{unchanged}"
+            ) from exc
     res.report.source_files = [filename]
     input_workbook = L.SIDECAR_SOLVER in res.sidecars
     if input_workbook and not new_project:
@@ -229,7 +231,9 @@ def prepare(data: bytes, filename: str | None, *, new_project: bool) -> Prepared
         )
     n = res.network
     if n.buses.empty:
-        raise _unreadable(f"The workbook has no nodes, so there is nothing to import.{unchanged}")
+        raise _unreadable(
+            f"The workbook has no nodes, so there is nothing to import.{unchanged}"
+        )
     _refuse_reserved_buses(n)
     _refuse_invalid_names(n)
     rate = workbook_rate(res.sidecars) if new_project else None
