@@ -1,6 +1,6 @@
 # Guided Results headline card
 
-Status: in-progress
+Status: in-progress; audit 2026-11-19: headline card merged (#1611); left: mismatched-revision vitest (G1), chapter-tile one-number rule
 Type: task
 Spec: `.scratch/guided-results/spec.md` §1
 

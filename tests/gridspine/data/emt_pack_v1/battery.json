@@ -1,0 +1,1577 @@
+{
+ "cases": [
+  {
+   "case_id": "flat_skmin_xrmin",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar"
+   ],
+   "grid": {
+    "label": "skmin_xrmin",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "flat",
+   "params": {},
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "flat_skmin_xrmax",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar"
+   ],
+   "grid": {
+    "label": "skmin_xrmax",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "flat",
+   "params": {},
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "flat_skmax_xrmin",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar"
+   ],
+   "grid": {
+    "label": "skmax_xrmin",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "flat",
+   "params": {},
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "flat_skmax_xrmax",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar"
+   ],
+   "grid": {
+    "label": "skmax_xrmax",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "flat",
+   "params": {},
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_3ph_skmin_xrmin_v000",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmin",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_3ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.0
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_3ph_skmin_xrmin_v020",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmin",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_3ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_3ph_skmin_xrmin_v050",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmin",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_3ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.5
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_3ph_skmin_xrmax_v000",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmax",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_3ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.0
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_3ph_skmin_xrmax_v020",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmax",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_3ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_3ph_skmin_xrmax_v050",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmax",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_3ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.5
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_3ph_skmax_xrmin_v000",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmin",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_3ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.0
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_3ph_skmax_xrmin_v020",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmin",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_3ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_3ph_skmax_xrmin_v050",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmin",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_3ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.5
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_3ph_skmax_xrmax_v000",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmax",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_3ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.0
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_3ph_skmax_xrmax_v020",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmax",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_3ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_3ph_skmax_xrmax_v050",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmax",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_3ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.5
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_1ph_skmin_xrmin_v000",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmin",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_1ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.0
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_1ph_skmin_xrmin_v020",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmin",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_1ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_1ph_skmin_xrmin_v050",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmin",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_1ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.5
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_1ph_skmin_xrmax_v000",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmax",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_1ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.0
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_1ph_skmin_xrmax_v020",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmax",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_1ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_1ph_skmin_xrmax_v050",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmax",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_1ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.5
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_1ph_skmax_xrmin_v000",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmin",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_1ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.0
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_1ph_skmax_xrmin_v020",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmin",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_1ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_1ph_skmax_xrmin_v050",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmin",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_1ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.5
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_1ph_skmax_xrmax_v000",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmax",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_1ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.0
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_1ph_skmax_xrmax_v020",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmax",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_1ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "fault_1ph_skmax_xrmax_v050",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmax",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "fault_1ph",
+   "params": {
+    "duration_s": 0.15,
+    "v_retained_pu": 0.5
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "v_step_skmin_xrmin_up",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "iq_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmin",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "v_step",
+   "params": {
+    "step_pu": 0.05
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "v_step_skmin_xrmin_down",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "iq_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmin",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "v_step",
+   "params": {
+    "step_pu": -0.05
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "v_step_skmin_xrmax_up",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "iq_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmax",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "v_step",
+   "params": {
+    "step_pu": 0.05
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "v_step_skmin_xrmax_down",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "iq_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmax",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "v_step",
+   "params": {
+    "step_pu": -0.05
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "v_step_skmax_xrmin_up",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "iq_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmin",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "v_step",
+   "params": {
+    "step_pu": 0.05
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "v_step_skmax_xrmin_down",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "iq_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmin",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "v_step",
+   "params": {
+    "step_pu": -0.05
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "v_step_skmax_xrmax_up",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "iq_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmax",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "v_step",
+   "params": {
+    "step_pu": 0.05
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "v_step_skmax_xrmax_down",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "iq_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmax",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "v_step",
+   "params": {
+    "step_pu": -0.05
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "q_step_skmin_xrmin_up",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "iq_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmin",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "q_step",
+   "params": {
+    "step_pu": 0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "q_step_skmin_xrmin_down",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "iq_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmin",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "q_step",
+   "params": {
+    "step_pu": -0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "q_step_skmin_xrmax_up",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "iq_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmax",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "q_step",
+   "params": {
+    "step_pu": 0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "q_step_skmin_xrmax_down",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "iq_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmax",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "q_step",
+   "params": {
+    "step_pu": -0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "q_step_skmax_xrmin_up",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "iq_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmin",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "q_step",
+   "params": {
+    "step_pu": 0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "q_step_skmax_xrmin_down",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "iq_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmin",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "q_step",
+   "params": {
+    "step_pu": -0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "q_step_skmax_xrmax_up",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "iq_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmax",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "q_step",
+   "params": {
+    "step_pu": 0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "q_step_skmax_xrmax_down",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "iq_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmax",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "q_step",
+   "params": {
+    "step_pu": -0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "p_step_skmin_xrmin_up",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmin",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "p_step",
+   "params": {
+    "step_pu": 0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "p_step_skmin_xrmin_down",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmin",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "p_step",
+   "params": {
+    "step_pu": -0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "p_step_skmin_xrmax_up",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmax",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "p_step",
+   "params": {
+    "step_pu": 0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "p_step_skmin_xrmax_down",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmax",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "p_step",
+   "params": {
+    "step_pu": -0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "p_step_skmax_xrmin_up",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmin",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "p_step",
+   "params": {
+    "step_pu": 0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "p_step_skmax_xrmin_down",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmin",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "p_step",
+   "params": {
+    "step_pu": -0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "p_step_skmax_xrmax_up",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmax",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "p_step",
+   "params": {
+    "step_pu": 0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "p_step_skmax_xrmax_down",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu"
+   ],
+   "grid": {
+    "label": "skmax_xrmax",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "p_step",
+   "params": {
+    "step_pu": -0.2
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "f_step_skmax_xrmax_up",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar"
+   ],
+   "grid": {
+    "label": "skmax_xrmax",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "f_step",
+   "params": {
+    "step_hz": 0.5
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "f_ramp_skmax_xrmax_up",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar"
+   ],
+   "grid": {
+    "label": "skmax_xrmax",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "f_ramp",
+   "params": {
+    "duration_s": 2.0,
+    "ramp_hz_per_s": 0.5
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "phase_jump_skmin_xrmin_up",
+   "channels": [
+    "v_poc_pu",
+    "theta_poc_deg",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmin",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "phase_jump",
+   "params": {
+    "angle_deg": 20.0
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "f_step_skmax_xrmax_down",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar"
+   ],
+   "grid": {
+    "label": "skmax_xrmax",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "f_step",
+   "params": {
+    "step_hz": -0.5
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "f_ramp_skmax_xrmax_down",
+   "channels": [
+    "v_poc_pu",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar"
+   ],
+   "grid": {
+    "label": "skmax_xrmax",
+    "sk_mva": 3000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 10.0,
+    "z0_over_z1": 3.0
+   },
+   "kind": "f_ramp",
+   "params": {
+    "duration_s": 2.0,
+    "ramp_hz_per_s": -0.5
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  },
+  {
+   "case_id": "phase_jump_skmin_xrmin_down",
+   "channels": [
+    "v_poc_pu",
+    "theta_poc_deg",
+    "f_hz",
+    "p_poc_mw",
+    "q_poc_mvar",
+    "id_pu",
+    "iq_pu",
+    "i_poc_pu"
+   ],
+   "grid": {
+    "label": "skmin_xrmin",
+    "sk_mva": 2000.0,
+    "x0_over_r0": 10.0,
+    "x_over_r": 8.333333333333334,
+    "z0_over_z1": 3.0
+   },
+   "kind": "phase_jump",
+   "params": {
+    "angle_deg": -20.0
+   },
+   "source": "assumed",
+   "t_end_s": 10.0,
+   "t_event_s": 1.0,
+   "trgc": "04/05"
+  }
+ ],
+ "channels": {
+  "f_hz": {
+   "base": "absolute frequency",
+   "meaning": "frequency of the PoC voltage",
+   "point": "point of connection (PoC), grid side of the plant's main transformer",
+   "sign": "absolute value",
+   "unit": "Hz"
+  },
+  "i_poc_pu": {
+   "base": "plant rated current at the PoC",
+   "meaning": "positive-sequence current magnitude",
+   "point": "point of connection (PoC), grid side of the plant's main transformer",
+   "sign": "magnitude, >= 0",
+   "unit": "pu"
+  },
+  "id_pu": {
+   "base": "plant rated current at the PoC",
+   "meaning": "positive-sequence active current",
+   "point": "point of connection (PoC), grid side of the plant's main transformer",
+   "sign": "positive = active power injection",
+   "unit": "pu"
+  },
+  "iq_pu": {
+   "base": "plant rated current at the PoC",
+   "meaning": "positive-sequence reactive current",
+   "point": "point of connection (PoC), grid side of the plant's main transformer",
+   "sign": "positive = reactive injection (capacitive, voltage-raising)",
+   "unit": "pu"
+  },
+  "p_poc_mw": {
+   "base": "absolute",
+   "meaning": "active power",
+   "point": "point of connection (PoC), grid side of the plant's main transformer",
+   "sign": "positive = injection into the grid (generator convention)",
+   "unit": "MW"
+  },
+  "q_poc_mvar": {
+   "base": "absolute",
+   "meaning": "reactive power",
+   "point": "point of connection (PoC), grid side of the plant's main transformer",
+   "sign": "positive = injection into the grid (generator convention, over-excited)",
+   "unit": "Mvar"
+  },
+  "theta_poc_deg": {
+   "base": "angle of the Thevenin source voltage",
+   "meaning": "positive-sequence voltage angle",
+   "point": "point of connection (PoC), grid side of the plant's main transformer",
+   "sign": "positive = PoC voltage leads the source",
+   "unit": "deg"
+  },
+  "v_poc_pu": {
+   "base": "nominal PoC voltage (line-line, kV)",
+   "meaning": "positive-sequence voltage magnitude",
+   "point": "point of connection (PoC), grid side of the plant's main transformer",
+   "sign": "magnitude, >= 0",
+   "unit": "pu"
+  }
+ },
+ "contract_version": "1"
+}

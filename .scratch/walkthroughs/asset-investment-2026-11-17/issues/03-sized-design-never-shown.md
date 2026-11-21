@@ -3,7 +3,7 @@
 
 # The study sizes the new units but no screen shows the sizes
 
-Status: ready-for-agent
+Status: done (#1677, #1734)
 Type: bug (asset-investment walkthrough, WALK-E2E-1)
 Journey steps: J1 Site set-up → sized design (Guided and Expert)
 Severity: high

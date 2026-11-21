@@ -172,6 +172,14 @@ class _NetIndex:
         return name, None
 
 
+def _index(net) -> _NetIndex:
+    """
+    ``net`` itself when a caller passes a prebuilt index (the PSS/E importer's,
+    over a PyPSA network), else the pandapower net's index.
+    """
+    return net if isinstance(net, _NetIndex) else _NetIndex(net)
+
+
 def _contingency_id(label: str) -> str:
     """The label in the contingency-set charset: other characters become ``_``."""
     return _ID_UNSAFE.sub("_", label.strip())
@@ -492,7 +500,7 @@ def _finish(rows, unmatched) -> ImportedContingencies:
 
 def _from_con(text: str, net) -> ImportedContingencies:
     blocks, top = _parse_con(text)
-    idx = _NetIndex(net)
+    idx = _index(net)
     seen, rows, unmatched = {}, [], []
     for lineno, line in top:
         unmatched.append(
@@ -563,7 +571,7 @@ def _from_csv(text: str, net) -> ImportedContingencies:
         raise ContractError(
             f"line 1: contingency CSV is missing column(s) {sorted(missing)}"
         )
-    idx = _NetIndex(net)
+    idx = _index(net)
     seen, seen_id, rows, unmatched = {}, {}, [], []
     known_branch = {f"{r.from_bus}-{r.to_bus}-{r.ckt}" for r in idx.branch.values()}
     for i, rec in enumerate(df.to_dict("records")):
@@ -578,11 +586,17 @@ def _from_csv(text: str, net) -> ImportedContingencies:
             )
         seen[label] = lineno
         try:
-            order = _num(rec.get("order")) or 1
+            order = _num(rec.get("order"))
         except (TypeError, ValueError):
             raise ContractError(
                 f"line {lineno}: order {rec.get('order')!r} is not an integer"
             ) from None
+        if order is None:
+            order = 1
+        elif order not in (1, 2):
+            raise ContractError(
+                f"line {lineno}: order {rec.get('order')!r} is not 1 or 2"
+            )
         cid = _contingency_id(label) if kind not in COMPOUND_SEPARATORS else label
         if cid in seen_id:
             raise ContractError(
@@ -621,6 +635,17 @@ def _from_csv(text: str, net) -> ImportedContingencies:
                 raise ContractError(
                     f"line {lineno}: a {kind} row of order 2 needs two element_ids, got {ids}"
                 )
+            if ids[0] == ids[1]:
+                # one branch named twice is not an N-2: listed, never screened as N-1
+                unmatched.append(
+                    {
+                        "contingency_id": cid,
+                        "line": lineno,
+                        "element": ids[0],
+                        "reason": "not_representable",
+                    }
+                )
+                continue
             bad = [e for e in ids if e not in known_branch]
             if bad:
                 for e in bad:
@@ -665,7 +690,9 @@ def read_contingency_list(
     Read a TSO contingency list (``.con`` or CSV) onto ``net``.
 
     ``source`` is a path, or the file's text with ``fmt`` given (``"con"`` or
-    ``"csv"``). For a path, ``fmt`` defaults to its suffix.
+    ``"csv"``). For a path, ``fmt`` defaults to its suffix. ``net`` is a
+    pandapower net, or a ``_NetIndex`` subclass that maps another network onto
+    the RAW's identity (``psse_import`` does this for an imported PyPSA network).
     """
     if isinstance(source, Path) or (isinstance(source, str) and fmt is None):
         path = Path(source)

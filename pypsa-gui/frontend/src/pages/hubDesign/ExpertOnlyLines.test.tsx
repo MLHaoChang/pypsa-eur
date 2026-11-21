@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { FlowSectionId } from '../../api/flow'
 import { useUIStore } from '../../store/uiStore'
-import { ExpertOnlyLines, hasGaps } from './ExpertOnlyLines'
+import { ExpertOnlyLines, hasGaps, weeksPerPeriod } from './ExpertOnlyLines'
 
 const api = vi.hoisted(() => ({
   snapshots: vi.fn(), periods: vi.fn(), gens: vi.fn(), links: vi.fn(), solver: vi.fn(), commercial: vi.fn(),
@@ -216,11 +216,29 @@ describe('ExpertOnlyLines', () => {
 
   it('a chronological year reads as such', async () => {
     setValues()
-    api.snapshots.mockResolvedValue({ count: 3, weightings: [], snapshots: [
+    api.snapshots.mockResolvedValue({ count: 3, weightings: [{ objective: 1 }, { objective: 1 }, { objective: 1 }], snapshots: [
       '2030-01-01T00:00:00', '2030-01-01T01:00:00', '2030-01-01T02:00:00'] })
     mount('project')
     await settled('project')
     expect(lineText('representative_weeks')).toBe('Representative weeks: no, a chronological year')
+  })
+
+  it('unreadable weights say "not known yet", not a bare no', async () => {
+    setValues()
+    api.snapshots.mockResolvedValue({ count: 3, weightings: [], snapshots: [
+      '2030-01-01T00:00:00', '2030-01-01T01:00:00', '2030-01-01T02:00:00'] })
+    mount('project')
+    await settled('project')
+    expect(lineText('representative_weeks')).toBe("Representative weeks: not known yet: the horizon's weights could not be read")
+  })
+
+  it('one representative week reads "yes", not a chronological year', async () => {
+    setValues()
+    const snaps = Array.from({ length: 168 }, (_, i) => `2030-07-${String(1 + Math.floor(i / 24)).padStart(2, '0')}T${String(i % 24).padStart(2, '0')}:00:00`)
+    api.snapshots.mockResolvedValue({ count: 168, weightings: snaps.map(() => ({ objective: 52 })), snapshots: snaps })
+    mount('project')
+    await settled('project')
+    expect(lineText('representative_weeks')).toBe('Representative weeks: yes, 1 week per period, weighted to a year')
   })
 
   it('"Open in Expert ›" opens the place in Expert and leaves a way back to the section', async () => {
@@ -281,5 +299,21 @@ describe('hasGaps', () => {
     expect(hasGaps(['2030-01-01T00:00', '2030-01-01T01:00', '2030-01-08T00:00'])).toBe(true)
     expect(hasGaps(['2030-01-01T00:00', '2030-01-01T01:00', '2040-01-01T00:00', '2040-01-01T01:00'],
                    [2030, 2030, 2040, 2040])).toBe(false)
+  })
+})
+
+describe('weeksPerPeriod', () => {
+  const hours = (n: number, day = 1) =>
+    Array.from({ length: n }, (_, i) => `2030-07-${String(day + Math.floor(i / 24)).padStart(2, '0')}T${String(i % 24).padStart(2, '0')}:00:00`)
+  const w = (n: number, v: number) => Array.from({ length: n }, () => ({ objective: v }))
+  it('a chronological year is not representative weeks', () => {
+    expect(weeksPerPeriod(hours(48), w(48, 1))).toBe(0)
+  })
+  it('one contiguous week weighted to a year is 1 week', () => {
+    expect(weeksPerPeriod(hours(168), w(168, 52))).toBe(1)
+  })
+  it('several weeks weighted to a year', () => {
+    const s = [...hours(168, 1), ...hours(168, 15)]
+    expect(weeksPerPeriod(s, w(336, 26))).toBe(2)
   })
 })

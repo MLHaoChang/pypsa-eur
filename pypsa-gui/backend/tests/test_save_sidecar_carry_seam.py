@@ -68,7 +68,7 @@ def spy(monkeypatch):
     )
     monkeypatch.setattr(
         projects_router, "_copy_bundle_dirs",
-        lambda src, dst: calls["copy"].append((str(src), str(dst))),
+        lambda src, dst, **_kw: calls["copy"].append((str(src), str(dst))),
     )
     return calls
 
@@ -165,7 +165,7 @@ def test_a_copy_failure_does_not_abort_the_save_and_IS_logged(monkeypatch, caplo
 
     monkeypatch.setattr(chat_service, "handle_save_lineage", lambda ctx, **kw: None)
 
-    def _boom(src, dst):
+    def _boom(src, dst, **_kw):
         raise OSError("disk full")
 
     monkeypatch.setattr(projects_router, "_copy_bundle_dirs", _boom)

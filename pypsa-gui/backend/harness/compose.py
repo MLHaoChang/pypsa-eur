@@ -77,6 +77,10 @@ _UNTRUSTED_DATA_CLAUSE = _prompts.load("untrusted_data_clause")["text"].format(
     open=_UNTRUSTED_OPEN, close=_UNTRUSTED_CLOSE,
 )
 
+# project-viewer-role 01: appended per turn, after the cached prefix, only
+# when the caller may view but not change the active project.
+_VIEW_ONLY = _prompts.load("view_only")["text"]
+
 # Deixis, prompt half: stable policy, so it rides the cached system block;
 # the per-turn context does NOT (see _format_ui_context).
 _p = _prompts.load("assistant_stance")

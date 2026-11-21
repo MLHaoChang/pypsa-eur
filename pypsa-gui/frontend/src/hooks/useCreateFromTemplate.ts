@@ -69,8 +69,11 @@ export interface CreateFromTemplateOptions {
 /** A template created with parameters: the generic site (G2). */
 export interface TemplateCreate {
   templateId: string
-  params: Record<string, unknown>
+  params?: Record<string, unknown>
   name?: string
+  /** Runs once the project exists, even after the form that asked is gone
+   *  (a per-call `mutate` callback is dropped when its component unmounts). */
+  afterCreate?: (project: string) => void | Promise<unknown>
 }
 
 /** A refusal the generic site form shows beside its field (422
@@ -103,11 +106,11 @@ export function useCreateFromTemplate(options?: CreateFromTemplateOptions) {
   // Available templates import via the backend's /projects/from_template/<id>
   // endpoint, which copies the bundled network.nc into a fresh project dir and
   // loads it — same success path as FromFileTab's bundle import.
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: (arg: string | TemplateCreate) => typeof arg === 'string'
       ? projectsApi.createFromTemplate(arg)
       : projectsApi.createFromTemplate(arg.templateId, arg.name, arg.params),
-    onSuccess: (res) => {
+    onSuccess: (res, arg) => {
       // G4 (guided-mode spec §3.4): a new project starts Guided unless the
       // user chose a mode explicitly. First, before any navigation.
       useUIStore.getState().noteNewProjectCreated('template')
@@ -121,6 +124,10 @@ export function useCreateFromTemplate(options?: CreateFromTemplateOptions) {
         const msg = issueMessage(issue)
         appLog('WARN', msg)
         toast(msg, { icon: '⚠️', duration: 10000 })
+      }
+      if (typeof arg !== 'string' && arg.afterCreate) {
+        // The network may have changed: read it again once the step is done.
+        void Promise.resolve(arg.afterCreate(res.imported)).finally(() => invalidateNetworkQueries(qc, res.imported))
       }
       onCreated?.(res.imported)
       openInWorkbench(res.imported)
@@ -141,7 +148,7 @@ export function useCreateFromTemplate(options?: CreateFromTemplateOptions) {
         .catch(() => { /* no template meta: Results opens as it would */ })
     },
     // A refused site parameter is shown beside its field by the form.
-    onError: (e: unknown) => {
+    onError: (e: unknown, arg: string | TemplateCreate) => {
       if (siteParamsRefusal(e) || dcLoadRefusal(e)) return
       // N17: a taken name stays on screen with a way to open that project.
       const taken = nameClashFrom(blockerMessage(e))
@@ -151,10 +158,13 @@ export function useCreateFromTemplate(options?: CreateFromTemplateOptions) {
           setProjectName(taken)
           onCreated?.(taken)
           openInWorkbench(taken)
-        })
+        }, copyName => mutation.mutate(typeof arg === 'string'
+          ? { templateId: arg, name: copyName }
+          : { ...arg, name: copyName }))
         return
       }
       toast.error(createErrorMessage(e))
     },
   })
+  return mutation
 }

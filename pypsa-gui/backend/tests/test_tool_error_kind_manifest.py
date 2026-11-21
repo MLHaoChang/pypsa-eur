@@ -49,6 +49,7 @@ _FORWARDER_FALLBACKS = frozenset({"tool_error", "validation_error"})
 _SKIP_DIRS = frozenset({"tests", "__pycache__", "smoke", ".pixi", "alembic"})
 
 _REFUSE_HELPER_MODULES: tuple[str, ...] = (
+    "harness/system_map_card.py",
     "harness/edit_card.py",
     "harness/job_adapters.py",
     "harness/sensitivity_comparison.py",

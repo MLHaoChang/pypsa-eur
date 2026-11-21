@@ -134,6 +134,6 @@ def test_ci_keeps_one_check_named_gui_backend():
     assert len(job) == 2, "the aggregate `gui-backend` job is gone from test.yaml"
     body = job[1].split("\n\n  ", 1)[0]
     assert "    name: GUI backend\n" in body
-    assert "needs: [gui-backend-changes, gui-backend-tests, gui-backend-qa]" in body
+    assert "needs: [changes, gui-backend-tests, gui-backend-qa]" in body
     assert text.count("name: GUI backend\n") == 1
-    assert "--num-shards=4" in text
+    assert "--num-shards=8" in text

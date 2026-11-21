@@ -294,9 +294,10 @@ def test_loadflow_switched_on_reports_the_first_blocker_in_flow_order(
     assert v["loadflow"]["blocker"] == flow["run_blocker"]
 
 
-def test_the_load_flow_overwrites_the_lp_flows(client, site, bound_ctx):
-    """Shared state: Stage 2 rewrites the LP's flows and voltages in place; the
-    LP's are kept aside in `lopf_results`."""
+def test_the_load_flow_keeps_the_lp_flows_live_and_its_own_aside(client, site, bound_ctx):
+    """Shared state (owner decision PF-SAVE-1): Stage 2's flows and voltages are
+    kept in `ac_pf_results`; the live network keeps the LP's flows, with the
+    PF-only tables (q0, |V|) empty, and the LP's are also in `lopf_results`."""
     site(_line_network(), name="lf3")
     assert client.post("/api/simulation/run").status_code == 200
     _wait_idle(client)
@@ -309,11 +310,15 @@ def test_the_load_flow_overwrites_the_lp_flows(client, site, bound_ctx):
     assert st["status"] == "completed", st
     with bound_ctx(client):
         n = PyPSAService.get_network()
-        assert (n.lines_t.q0["ab"].abs() > 1e-6).all()            # the LP has no reactive flow
-        assert not n.lines_t.p0["ab"].equals(lp_p0)               # losses: p0 moved
-        assert (n.buses_t.v_mag_pu["b"] < 1.0 - 1e-6).all()       # a voltage drop to the load
-        assert lp_v.empty or not n.buses_t.v_mag_pu.equals(lp_v)
-        assert PyPSAService.get_solver_state()["lopf_results"] is not None
+        state = PyPSAService.get_solver_state()
+        flow = state["ac_pf_results"]
+        assert (flow["lines_t.q0"]["ab"].abs() > 1e-6).all()      # the LP has no reactive flow
+        assert not flow["lines_t.p0"]["ab"].equals(lp_p0)         # losses: p0 moved
+        assert (flow["buses_t.v_mag_pu"]["b"] < 1.0 - 1e-6).all() # a voltage drop to the load
+        assert lp_v.empty or not flow["buses_t.v_mag_pu"].equals(lp_v)
+        pd.testing.assert_series_equal(n.lines_t.p0["ab"], lp_p0, check_exact=True)
+        assert n.lines_t.q0.columns.empty and n.buses_t.v_mag_pu.columns.empty
+        assert state["lopf_results"] is not None
 
 
 # ── the optimisation's implicit sub-step ────────────────────────────────────

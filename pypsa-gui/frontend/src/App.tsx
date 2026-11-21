@@ -6,6 +6,8 @@ import AppHeader from './layout/AppHeader'
 import ProjectTabs from './layout/ProjectTabs'
 import Sidebar from './layout/Sidebar'
 import PropertiesPanel from './layout/PropertiesPanel'
+import RecipeCard from './layout/properties/RecipeCard'
+import { RECIPE_FIELD } from './pages/hubDesign/holdWords'
 import BottomPanel from './layout/BottomPanel'
 import StatusBar from './components/StatusBar'
 import MapModeSwitcher from './components/MapModeSwitcher'
@@ -61,6 +63,7 @@ import { authEnabled } from './auth/config'
 import AuthMismatchGate from './auth/AuthMismatchGate'
 import { networkApi } from './api/network'
 import { projectsApi } from './api/projects'
+import ProjectOpeningBanner from './components/ProjectOpeningBanner'
 import { simulationApi, createLogStream } from './api/simulation'
 import { acquireProjectLock, invalidateNetworkQueries, stopLockHeartbeat, switchToProject } from './utils/projectActions'
 import { nk } from './utils/queryKeys'
@@ -412,7 +415,19 @@ export default function App() {
       return
     }
 
-    void switchToProject(resumeProject, qc).finally(stripProjectParam)
+    // The link may carry a project NAME (what a person types or shares) or an
+    // id (what the list uses): resolve either against the project list, then
+    // switch by the id so both reach the same project. An unknown ref falls
+    // through unchanged and the backend answers with its own not-found.
+    void (async () => {
+      let target = resumeProject
+      try {
+        const all = await projectsApi.list()
+        const hit = all.find(p => p.id === resumeProject) ?? all.find(p => p.name === resumeProject)
+        if (hit) target = hit.id ?? hit.name
+      } catch { /* list unavailable — let activate resolve the raw ref */ }
+      await switchToProject(target, qc)
+    })().finally(stripProjectParam)
   }, [currentProject, qc])
 
   // Edit-lock acquisition on mount (auth mode). Covers the plain-reload path
@@ -714,6 +729,9 @@ export default function App() {
             disagree; the tab's writes are paused until Reload or Switch. */}
         <ProjectMismatchBanner />
 
+        {/* ── Project opening progress ───────────────────────────────── */}
+        <ProjectOpeningBanner />
+
         {/* ── App header ─────────────────────────────────────────────── */}
         <AppHeader />
 
@@ -838,6 +856,9 @@ export default function App() {
                 // The grid-readiness limits' one editor (DC 03 slice 6): a to-check ramp or oscillation
                 // limit opens its line; the fault level's value and source are one line too.
                 ? <div className="px-3"><ConnectionLimits only={LIMIT_FIELDS[t.field ?? '']} /></div>
+                : t.field === RECIPE_FIELD && t.entity
+                // Gap 03: a section 2 recipe row's Guided home, the recipe card alone over the card.
+                ? <div className="px-3 py-2"><RecipeCard name={t.entity} /></div>
                 : t.component && t.entity
                 ? <PropertiesPanel />
                 : <FullPageTab panel={t.panel as SlidePanel} onClose={() => useUIStore.getState().setFieldDrawer(null)} />}
