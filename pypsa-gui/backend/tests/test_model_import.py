@@ -536,6 +536,48 @@ def test_a_format_sniff_that_breaks_is_a_plain_422(client, fake, store, monkeypa
     assert store() == before
 
 
+def _without_gridspine(monkeypatch):
+    """A build whose gridspine does not import (OPTIONAL_AT_RUNTIME in the packaging test)."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "gridspine.ingest", None)
+    monkeypatch.setitem(sys.modules, "gridspine.ingest.import_result", None)
+
+
+def test_a_build_without_gridspine_refuses_every_route_plainly_and_writes_nothing(
+    client, fake, store, monkeypatch
+):
+    named = ("m.fake", b"ok")
+    sha = _preview(client, named).json()["sha256"]
+    _without_gridspine(monkeypatch)
+    before = store()
+    for r in (
+        client.get("/api/model-import/formats"),
+        _preview(client, named),
+        _import(client, named, sha=sha, name="No gridspine"),
+    ):
+        assert r.status_code == 503 and _kind(r) == "import_unavailable", r.text
+    assert store() == before
+
+
+def test_a_child_without_gridspine_answers_plainly_and_writes_nothing(
+    monkeypatch, tmp_path
+):
+    from services import model_import_worker as W
+
+    _without_gridspine(monkeypatch)
+    out = W.run("fake", [], {}, str(tmp_path), ())
+    assert set(out) == {"unavailable"} and list(tmp_path.iterdir()) == []
+
+
+def test_a_child_that_answers_unavailable_is_a_plain_503(client, fake, store, monkeypatch):
+    monkeypatch.setattr(svc, "_read_in_child", lambda st: {"unavailable": "No module named 'gridspine'"})
+    before = store()
+    r = _preview(client, ("m.fake", b"ok"))
+    assert r.status_code == 503 and _kind(r) == "import_unavailable", r.text
+    assert store() == before
+
+
 def test_reads_past_the_concurrency_cap_are_503_and_read_nothing(
     client, fake, store, monkeypatch
 ):

@@ -40,7 +40,10 @@ def run(
     format_id: str, paths: list[str], options: dict, out_dir: str, declared
 ) -> dict:
     """Read the files and write the result into `out_dir`; the dict the child sends."""
-    from gridspine.ingest import import_result as IR
+    try:
+        from gridspine.ingest import import_result as IR
+    except ImportError as exc:  # a build without gridspine: the parent answers 503
+        return {"unavailable": str(exc)}
 
     try:
         result = IR.read(

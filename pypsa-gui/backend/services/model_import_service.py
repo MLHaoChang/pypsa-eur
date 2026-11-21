@@ -77,16 +77,31 @@ def _refuse(status: int, detail: dict) -> None:
     raise HTTPException(status, detail)
 
 
+_UNAVAILABLE = (
+    "Model import is not available in this build: its importers (gridspine) are not installed."
+)
+
+
+def _contract():
+    """gridspine's import contract, or a plain 503 when this build does not carry it
+    (gridspine is optional at runtime, as in `gridspine_service`)."""
+    try:
+        from gridspine.ingest import import_result as IR
+    except ImportError:
+        _refuse(503, {"error_kind": "import_unavailable", "message": _UNAVAILABLE})
+    return IR
+
+
 def declared():
     """The importer registry this service reads (a test passes its own)."""
-    from gridspine.ingest import import_result as IR
+    IR = _contract()
 
     return IR.DECLARED
 
 
 def formats() -> list[dict]:
     """Every importer this build can run, in plain names."""
-    from gridspine.ingest import import_result as IR
+    IR = _contract()
 
     return [
         {
@@ -319,7 +334,7 @@ def discard(st: Staged | None) -> None:
 
 def format_of(st: Staged) -> str:
     """The one importer for every staged file; 422 when they disagree or none reads them."""
-    from gridspine.ingest import import_result as IR
+    IR = _contract()
 
     ids = set()
     for name in st.names:
@@ -422,6 +437,8 @@ def read(st: Staged) -> Staged:
         _READS.release()
     if "refused" in out:
         _refuse(422, {"error_kind": "import_unreadable", "message": out["refused"]})
+    if "unavailable" in out:
+        _refuse(503, {"error_kind": "import_unavailable", "message": _UNAVAILABLE})
     if "report" not in out:
         why = (
             f" ({out['error']})"
@@ -478,7 +495,7 @@ def check_sidecars(st: Staged, names: list[str]) -> None:
 
 def payload(st: Staged) -> dict:
     """What the preview shows: counts, then every unmapped and assumed row, in plain names."""
-    from gridspine.ingest import import_result as IR
+    IR = _contract()
 
     r = st.result
     report = r["report"]
