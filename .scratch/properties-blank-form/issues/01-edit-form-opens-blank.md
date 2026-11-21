@@ -23,3 +23,4 @@ Six open PRs touch `PropertiesPanel.tsx` (#1787 #1786 #1778 #1773 #1772 #1626); 
 
 - Opening the edit form by request and by canvas double-click, with the schema cached and uncached, shows the asset's current values.
 - A vitest pins both paths.
+- `pypsa-gui/frontend/scripts/catalogue-search-shots.mjs` asserts the landed field's stored value (100 MW for mainland_supply on Island Microgrid) in all four mode × theme runs; the empty value is never pinned as expected.
