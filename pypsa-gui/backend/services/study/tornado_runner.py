@@ -361,6 +361,7 @@ def _worker(*, study_id, base_dir, base_row_id, user_id, inp, record, stop_event
     solver = None
     outcome = None
     status, error = "failed", None
+    view_only = False  # the run met a `RequesterViewOnly` (project-viewer-role 02)
     try:
         base_row = db.get(Project, R._uuid(base_row_id))
         solver = ForkSolver(db, user_id, base_row, study_id, stop_event, record, ctx)
@@ -372,7 +373,7 @@ def _worker(*, study_id, base_dir, base_row_id, user_id, inp, record, stop_event
         if record.get("deadline_exceeded"):
             error = record["deadline_exceeded"]
     except project_write_gate.RequesterViewOnly as exc:
-        error, status = str(exc), "failed"
+        error, status, view_only = str(exc), "failed", True
     except Exception as exc:  # noqa: BLE001 — recorded
         logger.exception("decision study %s tornado failed", study_id)
         error = f"{type(exc).__name__}: {exc}"
@@ -388,9 +389,10 @@ def _worker(*, study_id, base_dir, base_row_id, user_id, inp, record, stop_event
                 pass
         # A requester made a viewer, or removed, mid-run gets nothing saved
         # (project-viewer-role 02); `get_tornado` serves the refusal.
-        refused = project_write_gate.requester_may_not_write(user_id, base_row_id)
+        refused = view_only or project_write_gate.requester_may_not_write(
+            user_id, base_row_id)
         if refused:
-            status, error = "failed", str(project_write_gate.RequesterViewOnly())
+            status, error = "failed", project_write_gate.REFUSAL
         else:
             try:
                 _save(base_dir, study_id, inp, record, outcome, status, error, left)

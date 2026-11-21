@@ -238,7 +238,9 @@ def test_a_study_run_refused_before_its_first_fork_creates_none(
 # ── tornado ──────────────────────────────────────────────────────────────────
 
 
-def test_a_tornado_whose_requester_is_demoted_mid_run_saves_nothing(
+@pytest.mark.parametrize("change", ["demote", "remove"])
+def test_a_tornado_whose_requester_loses_edit_mid_run_saves_nothing(
+    change,
     client,
     api_project,
     studies_on,
@@ -251,27 +253,30 @@ def test_a_tornado_whose_requester_is_demoted_mid_run_saves_nothing(
     from services.study import findings as F
     from services.study import store
 
+    name = f"vr-tor-{change}"
     solver = FakeSolver()
     monkeypatch.setattr(solver_service, "run_simulation", solver)
-    sid = _study_done(client, api_project, "vr-tor")
-    _released(client, sl, "vr-tor")
-    member = Member(sl, "vr-tor")
-    solver.on_call = member.demote  # the tornado's first solve demotes
+    sid = _study_done(client, api_project, name)
+    _released(client, sl, name)
+    member = Member(sl, name)
+    solver.on_call = getattr(member, change)  # the tornado's first solve demotes
     c = as_user(member.id)
-    r = c.post(f"/api/projects/vr-tor/studies/{sid}/findings/tornado", json={})
+    r = c.post(f"/api/projects/{name}/studies/{sid}/findings/tornado", json={})
     assert r.status_code == 202, r.text
-    rec = wait_tornado(client, "vr-tor", sid)
+    rec = wait_tornado(client, name, sid)
     assert rec["status"] == "failed" and rec["error_code"] == KIND, rec
-    assert store.load_aux(project_storage_dir("vr-tor"), sid, F.TORNADO_AUX) is None
+    assert store.load_aux(project_storage_dir(name), sid, F.TORNADO_AUX) is None
     # The first variant's fork was deleted; no second one was made.
-    assert _variant_rows(sl, "vr-tor") == []
+    assert _variant_rows(sl, name) == []
     assert rec["solves_charged"] == 1
 
 
 # ── supply architectures ─────────────────────────────────────────────────────
 
 
-def test_supply_architectures_whose_requester_is_demoted_mid_run_save_nothing(
+@pytest.mark.parametrize("change", ["demote", "remove"])
+def test_supply_architectures_whose_requester_loses_edit_mid_run_save_nothing(
+    change,
     client,
     studies_on,
     install_network,
@@ -283,31 +288,32 @@ def test_supply_architectures_whose_requester_is_demoted_mid_run_save_nothing(
     from services import project_registry, solver_service
     from services.study import supply_architecture_runner as SAR
 
-    sid = _sa_project(client, install_network, "vr-sa")
-    _released(client, sl, "vr-sa")
-    member = Member(sl, "vr-sa")
+    name = f"vr-sa-{change}"
+    sid = _sa_project(client, install_network, name)
+    _released(client, sl, name)
+    member = Member(sl, name)
 
     def demote_then_solve(*a, **kw):
-        member.demote()
+        getattr(member, change)()
         return arch_solver(*a, **kw)
 
     monkeypatch.setattr(solver_service, "run_simulation", demote_then_solve)
-    assert as_user(member.id).post(_sa_url("vr-sa", sid), json={}).status_code == 202
-    rec = _sa_wait(client, "vr-sa", sid)
+    assert as_user(member.id).post(_sa_url(name, sid), json={}).status_code == 202
+    rec = _sa_wait(client, name, sid)
     assert rec["status"] == "failed" and rec["error_code"] == KIND, rec
     with sl() as db:
         base_dir = project_registry.project_dir(
-            db.query(Project).filter_by(name="vr-sa").one()
+            db.query(Project).filter_by(name=name).one()
         )
     assert SAR._load_saved(base_dir, sid) is None
-    assert _var_rows(sl, "vr-sa") == []
+    assert _var_rows(sl, name) == []
     assert len(arch_solver.calls) == 1  # stopped before the second fork
 
 
 # ── investment case and business case ────────────────────────────────────────
 
 
-def _ic_run(world, change: str | None):
+def _ic_run(world, change: str | None, before_store=None):
     from services.finance.investment_case_runner import start_investment_case
     from tests.fixtures.investment_case.sam import sam_case as S
     from tests.test_investment_case_runner import _Cfg
@@ -320,6 +326,8 @@ def _ic_run(world, change: str | None):
     def build():
         if change:
             getattr(member, change)()
+        if before_store is not None:
+            before_store()
         return S.to_finance_case("s2")
 
     def publish(key, record, thread):
@@ -352,7 +360,9 @@ def test_an_investment_case_of_an_editor_who_stays_one_is_stored(world):
     assert state["investment_case_report"] is not None
 
 
-def test_a_business_case_whose_requester_is_demoted_stores_no_report(
+@pytest.mark.parametrize("change", ["demote", "remove"])
+def test_a_business_case_whose_requester_loses_edit_stores_no_report(
+    change,
     client,
     api_project,
     install_network,
@@ -363,8 +373,8 @@ def test_a_business_case_whose_requester_is_demoted_stores_no_report(
     import routers.results as RR
     from tests.test_business_case_routes import BC_URL, _bc, _bc_poll, _put, _with_ic
 
-    api_project("vr-bc")  # the requester's project (a real membership row)
-    member = Member(sl, "vr-bc")
+    api_project(f"vr-bc-{change}")  # the requester's project (a real membership row)
+    member = Member(sl, f"vr-bc-{change}")
     _with_ic(client, install_network, monkeypatch)
     assert _put(client, _bc()).status_code == 200
     monkeypatch.setattr(RR, "_run_requester", lambda _u: (member.id, member.project_id))
@@ -374,7 +384,7 @@ def test_a_business_case_whose_requester_is_demoted_stores_no_report(
         read = real_read(ic_hash)
 
         def wrapped(*a, **kw):
-            member.demote()
+            getattr(member, change)()
             return read(*a, **kw)
 
         return wrapped
@@ -427,3 +437,38 @@ def test_a_chat_run_names_the_acting_user():
     finally:
         chat_tools.set_acting_user(None)
     assert str(uid) == who
+
+
+def test_a_run_whose_role_check_fails_refuses_and_logs(world, monkeypatch, caplog):
+    """A database error inside the check fails closed: the run ends refused,
+    nothing is stored, the error is logged, and the status is not left running."""
+    from db import session as db_session
+
+    def broken():
+        raise RuntimeError("database gone")
+
+    def break_db():
+        monkeypatch.setattr(db_session, "SessionLocal", broken)
+
+    import logging
+
+    caplog.set_level(logging.ERROR, logger="services.project_write_gate")
+    state = _ic_run(world, None, before_store=break_db)
+    rec = state["investment_case"]
+    assert rec["status"] == "failed" and rec["error_code"] == KIND, rec
+    assert "investment_case_report" not in state
+    assert any("refusing" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize("finished_at", ["yesterday", None, float("nan"), True])
+def test_a_malformed_saved_timestamp_reads_as_older_than_a_refusal(finished_at):
+    from services.study import runner as R
+
+    base, sid = str(uuid.uuid4()), "s-malformed"
+    R.remember_refusal(base, sid, "run", {"status": "failed", "finished_at": 5.0})
+    got = R.refused_or_saved(
+        base, sid, "run", {"status": "done", "finished_at": finished_at}
+    )
+    assert got["status"] == "failed"
+    newer = R.refused_or_saved(base, sid, "run", {"status": "done", "finished_at": 9.0})
+    assert newer["status"] == "done"

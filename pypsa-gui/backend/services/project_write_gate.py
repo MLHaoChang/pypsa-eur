@@ -50,6 +50,7 @@ logger = logging.getLogger(__name__)
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 KIND = "project_view_only"
 MESSAGE = "You can view this project but not change it. Ask its owner for edit access."
+REFUSAL = f"{KIND}: {MESSAGE}"  # a run's `error` when its requester lost edit access
 
 
 def refusal() -> HTTPException:
@@ -88,7 +89,7 @@ class RequesterViewOnly(RuntimeError):
     code = KIND
 
     def __init__(self) -> None:
-        super().__init__(f"{KIND}: {MESSAGE}")
+        super().__init__(REFUSAL)
 
 
 def requester_may_not_write(user_id, project_id) -> bool:

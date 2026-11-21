@@ -59,6 +59,7 @@ from __future__ import annotations
 import contextvars
 import hashlib
 import json
+import math
 import logging
 import pathlib
 import threading
@@ -167,7 +168,10 @@ def refused_or_saved(base_uuid, study_id: str, kind: str, saved):
         refused = _REFUSED.get((str(base_uuid), study_id, kind))
     if refused is None:
         return saved
-    if isinstance(saved, dict) and (saved.get("finished_at") or 0) > refused["finished_at"]:
+    finished = saved.get("finished_at") if isinstance(saved, dict) else None
+    # A malformed saved timestamp reads as older (review-gk: never a 500).
+    if (isinstance(finished, (int, float)) and not isinstance(finished, bool)
+            and math.isfinite(finished) and finished > refused["finished_at"]):
         return saved
     return dict(refused)
 
@@ -663,6 +667,7 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
     finance_digests: dict[str, str | None] = {}
     finance_refused: dict[str, tuple[str, str]] = {}
     status, error = "failed", None
+    view_only = False  # the run met a `RequesterViewOnly` (project-viewer-role 02)
     study = None
     try:
         base_row = db.get(Project, _uuid(base_row_id))
@@ -741,6 +746,7 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
                 db, user_id, base_row=base_row, study_id=study_id,
                 option_id=opt.option_id, network=net, solver_config=cfg)
             created.append((opt, row, cfg))
+        project_write_gate.check_requester(user_id, base_row_id)
         with store.WRITE_LOCK:
             study = store.load_study(base_dir, study_id)
             study = study.model_copy(update={
@@ -810,7 +816,7 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
         status = ("aborted" if stop_event.is_set()
                   else "failed" if error is not None else "done")
     except project_write_gate.RequesterViewOnly as exc:
-        error, status = str(exc), "failed"
+        error, status, view_only = str(exc), "failed", True
     except Exception as exc:  # noqa: BLE001 — recorded on the run
         logger.exception("decision study %s run failed", study_id)
         error = f"{type(exc).__name__}: {exc}"
@@ -832,6 +838,7 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
             final = _finish(db, ctx, record, study_id=study_id, base_row_id=base_row_id,
                             base_dir=base_dir, created=created, outcomes=outcomes,
                             fidelity=fidelity, status=status, error=error, user_id=user_id,
+                            view_only=view_only,
                             run_ledger=ledger, run_intake=intake,
                             preflight_flags=preflight_flags)
         except Exception as exc:  # noqa: BLE001
@@ -879,7 +886,8 @@ def _flag_codes(preflight_flags: dict[str, list[str]] | None) -> list[str]:
 
 def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcomes,
             fidelity, status, error, run_ledger, run_intake,
-            preflight_flags: dict[str, list[str]] | None = None, user_id=None) -> dict:
+            preflight_flags: dict[str, list[str]] | None = None, user_id,
+            view_only: bool = False) -> dict:
     """
     Remove unsolved forks, write the findings and the run record; return the
     live record's terminal fields, which the worker publishes after release.
@@ -889,9 +897,10 @@ def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcom
     goes, and no findings, run record or study change land. The refusal is
     kept in memory (`remember_refusal`) for `get_study_run`.
     """
-    refused = project_write_gate.requester_may_not_write(user_id, base_row_id)
+    # A refusal the run already met stays final, whatever a second read says.
+    refused = view_only or project_write_gate.requester_may_not_write(user_id, base_row_id)
     if refused:
-        status, error = "failed", str(project_write_gate.RequesterViewOnly())
+        status, error = "failed", project_write_gate.REFUSAL
     solved_rows = {} if refused else {
         o.option_id: r for o, r, _c in created
         if outcomes.get(o.option_id, {}).get("result") is not None

@@ -273,6 +273,7 @@ def _worker(
     solver = None
     table = None
     status, error = "failed", None
+    view_only = False  # the run met a `RequesterViewOnly` (project-viewer-role 02)
     try:
         base_row = db.get(Project, R._uuid(base_row_id))
         solver = ForkSolver(db, user_id, base_row, study_id, stop_event, record, ctx)
@@ -292,7 +293,7 @@ def _worker(
         if record.get("deadline_exceeded"):
             error = record["deadline_exceeded"]
     except project_write_gate.RequesterViewOnly as exc:
-        error, status = str(exc), "failed"
+        error, status, view_only = str(exc), "failed", True
     except Exception as exc:  # noqa: BLE001 — recorded
         logger.exception("decision study %s supply architectures failed", study_id)
         error = type(exc).__name__  # the text is in the log above, not the record
@@ -312,9 +313,11 @@ def _worker(
                 pass
         # A requester made a viewer, or removed, mid-run gets nothing saved
         # (project-viewer-role 02); `get` serves the refusal.
-        refused = project_write_gate.requester_may_not_write(user_id, base_row_id)
+        refused = view_only or project_write_gate.requester_may_not_write(
+            user_id, base_row_id
+        )
         if refused:
-            status, error = "failed", str(project_write_gate.RequesterViewOnly())
+            status, error = "failed", project_write_gate.REFUSAL
         else:
             try:
                 _save(base_dir, study_id, record, table, status, error, left)
