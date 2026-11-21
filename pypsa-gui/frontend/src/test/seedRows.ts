@@ -23,3 +23,9 @@ export function seedRows(qc: QueryClient, project: string | null, root: string, 
 
 /** The rows seeded for a class, for a test whose `networkApi` mock answers the class list itself. */
 export const servedRows = (root: string): unknown[] => served[`/network/${root}`] ?? []
+
+/** What the network answers from now on, while the query cache keeps the older rows (a restore after the card opened). */
+export function serveRows(root: string, rows: unknown[]) { served[`/network/${root}`] = rows }
+
+/** Forget what a finished test served. */
+export const resetServedRows = () => { for (const k of Object.keys(served)) delete served[k] }

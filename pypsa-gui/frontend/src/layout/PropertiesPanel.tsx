@@ -169,10 +169,10 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
     onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
-  const edit = useEditBase<Generator>(open, gen as Generator)
+  const edit = useEditBase<Generator, { schema: typeof schema; specs: typeof specs }>(open, gen as Generator, { schema, specs }, !!schema)
   const build = edit.remember((current: Generator) => {
-      const claim = cardCostClaim(schema, specs, form, asset, 'bus')
-      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Generator>
+      const claim = cardCostClaim(edit.atOpen().schema, edit.atOpen().specs, form, asset, 'bus')
+      const payload = buildPatch(edit.atOpen().specs, form, current as unknown as Record<string, unknown>) as Partial<Generator>
       payload.name = form.name?.trim() || gen.name
       payload.bus = (form.bus as string | undefined)?.trim() || gen.bus
       payload.carrier = form.carrier || current.carrier
@@ -190,7 +190,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
     // (ruling 3), so the old `?? gen` stale-prop fallback is gone.
     mutationFn: () => updateAsset<Generator>(
       qc, useUIStore.getState().currentProject, 'generators', gen.name, build,
-      { costBasis: cardCostClaim(schema, specs, form, asset, 'bus').costBasis, initial: edit.initial() }),
+      { costBasis: cardCostClaim(edit.atOpen().schema, edit.atOpen().specs, form, asset, 'bus').costBasis, initial: edit.initial() }),
     onSuccess: () => {
       // Invalidation is the chokepoint's job now.
       setOpen(false)
@@ -361,12 +361,12 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
     onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
-  const edit = useEditBase<StorageUnit>(open, su as StorageUnit)
+  const edit = useEditBase<StorageUnit, { schema: typeof schema; specs: typeof specs }>(open, su as StorageUnit, { schema, specs }, !!schema)
   const build = edit.remember((current: StorageUnit) => {
-      const claim = cardCostClaim(schema, specs, form, asset, 'bus')
-      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<StorageUnit>
+      const claim = cardCostClaim(edit.atOpen().schema, edit.atOpen().specs, form, asset, 'bus')
+      const payload = buildPatch(edit.atOpen().specs, form, current as unknown as Record<string, unknown>) as Partial<StorageUnit>
       // TCU 09: the derived costs stay out of the PUT; the parts own them.
-      omitDerived(specs, payload)
+      omitDerived(edit.atOpen().specs, payload)
       payload.name = form.name?.trim() || su.name
       payload.bus = (form.bus as string | undefined)?.trim() || su.bus
       payload.carrier = form.carrier || current.carrier
@@ -382,7 +382,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
     // the schema's descriptors own the form→patch mapping.
     mutationFn: () => updateAsset<StorageUnit>(
       qc, useUIStore.getState().currentProject, 'storage_units', su.name, build,
-      { costBasis: cardCostClaim(schema, specs, form, asset, 'bus').costBasis, initial: edit.initial() }),
+      { costBasis: cardCostClaim(edit.atOpen().schema, edit.atOpen().specs, form, asset, 'bus').costBasis, initial: edit.initial() }),
     onSuccess: () => {
       setOpen(false)
       toast.success('Storage unit saved')
@@ -535,10 +535,10 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
     onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
-  const edit = useEditBase<Store>(open, store as Store)
+  const edit = useEditBase<Store, { schema: typeof schema; specs: typeof specs }>(open, store as Store, { schema, specs }, !!schema)
   const build = edit.remember((current: Store) => {
-      const claim = cardCostClaim(schema, specs, form, asset, 'bus')
-      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Store>
+      const claim = cardCostClaim(edit.atOpen().schema, edit.atOpen().specs, form, asset, 'bus')
+      const payload = buildPatch(edit.atOpen().specs, form, current as unknown as Record<string, unknown>) as Partial<Store>
       payload.name = form.name?.trim() || store.name
       payload.bus = (form.bus as string | undefined)?.trim() || store.bus
       payload.carrier = form.carrier || current.carrier
@@ -554,7 +554,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
     // the schema's descriptors own the form→patch mapping.
     mutationFn: () => updateAsset<Store>(
       qc, useUIStore.getState().currentProject, 'stores', store.name, build,
-      { costBasis: cardCostClaim(schema, specs, form, asset, 'bus').costBasis, initial: edit.initial() }),
+      { costBasis: cardCostClaim(edit.atOpen().schema, edit.atOpen().specs, form, asset, 'bus').costBasis, initial: edit.initial() }),
     onSuccess: () => {
       setOpen(false)
       toast.success('Store saved')
@@ -727,9 +727,9 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
   // Save for reuse in the read-out rows (slice 03b; Expert only).
   const saveAction = useSaveAction('Load', load.name, asset)
 
-  const edit = useEditBase<Load>(open, load as Load)
+  const edit = useEditBase<Load, { schema: typeof schema; specs: typeof specs }>(open, load as Load, { schema, specs }, !!schema)
   const build = edit.remember((current: Load) => {
-        const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Load>
+        const payload = buildPatch(edit.atOpen().specs, form, current as unknown as Record<string, unknown>) as Partial<Load>
         payload.name = form.name?.trim() || load.name
         payload.bus = (form.bus as string | undefined)?.trim() || load.bus
         payload.carrier = form.carrier || current.carrier
@@ -941,10 +941,10 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
     onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
-  const edit = useEditBase<Link>(open, link as Link)
+  const edit = useEditBase<Link, { schema: typeof schema; specs: typeof specs }>(open, link as Link, { schema, specs }, !!schema)
   const build = edit.remember((current: Link) => {
-      const claim = cardCostClaim(schema, specs, form, asset, 'bus0')
-      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Link>
+      const claim = cardCostClaim(edit.atOpen().schema, edit.atOpen().specs, form, asset, 'bus0')
+      const payload = buildPatch(edit.atOpen().specs, form, current as unknown as Record<string, unknown>) as Partial<Link>
       payload.name = form.name?.trim() || link.name
       payload.bus0 = form.bus0 || current.bus0
       payload.bus1 = form.bus1 || current.bus1
@@ -964,7 +964,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
     // backend's remove+add cycle. This builder is only the form→patch map.
     mutationFn: () => updateAsset<Link>(
       qc, useUIStore.getState().currentProject, 'links', link.name, build,
-      { costBasis: cardCostClaim(schema, specs, form, asset, 'bus0').costBasis, initial: edit.initial() }),
+      { costBasis: cardCostClaim(edit.atOpen().schema, edit.atOpen().specs, form, asset, 'bus0').costBasis, initial: edit.initial() }),
     onSuccess: () => {
       setOpen(false)
       toast.success('Link saved')
@@ -1599,12 +1599,12 @@ export function LinePanel({ name }: { name: string }) {
     const v = parseFloat(form[key]); return isNaN(v) ? (fallback ?? 0) : v
   }
 
-  const edit = useEditBase<Line>(editing, line as Line)
+  const edit = useEditBase<Line, { schema: typeof schema; specs: typeof specs }>(editing, line as Line, { schema, specs }, !!schema)
   const build = edit.remember((current: Line) => {
       if (!line) throw new Error('Line not found')
-      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Line>
+      const payload = buildPatch(edit.atOpen().specs, form, current as unknown as Record<string, unknown>) as Partial<Line>
       // TCU 09: the derived costs stay out of the PUT; the parts own them.
-      omitDerived(specs, payload)
+      omitDerived(edit.atOpen().specs, payload)
       payload.name = form.name?.trim() || name
       // r/x/b are entered per km; PyPSA stores absolute Ohm / Siemens.
       // Multiply by the length being saved. Per-km 0 (or empty) ⇒ absolute 0.
@@ -1806,10 +1806,10 @@ export function TransformerPanel({ name }: { name: string }) {
   // Save for reuse in the read-out rows (slice 03b; Expert only).
   const saveAction = useSaveAction('Transformer', tr?.name ?? null, asset)
 
-  const edit = useEditBase<Transformer>(editing, tr as Transformer)
+  const edit = useEditBase<Transformer, { schema: typeof schema; specs: typeof specs }>(editing, tr as Transformer, { schema, specs }, !!schema)
   const build = edit.remember((current: Transformer) => {
       if (!tr) throw new Error('Transformer not found')
-      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Transformer>
+      const payload = buildPatch(edit.atOpen().specs, form, current as unknown as Record<string, unknown>) as Partial<Transformer>
       payload.name = form.name?.trim() || name
       // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Transformer'))))

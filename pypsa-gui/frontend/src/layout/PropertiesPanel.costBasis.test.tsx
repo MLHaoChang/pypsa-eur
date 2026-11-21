@@ -3,12 +3,12 @@
 // and a server refusal of the claim reads as the backend's sentence, once.
 import type { ReactElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
-import { seedRows } from '../test/seedRows'
+import { seedRows, serveRows, resetServedRows } from '../test/seedRows'
 
 import schemas from '../test/fixtures/assetSchema.json'
 
@@ -128,7 +128,7 @@ beforeEach(() => {
   schemaGet.mockImplementation(async (c: string) => (schemas as unknown as Record<string, unknown>)[c])
   for (const c of Object.values(CASES)) put(c).mockClear()
 })
-afterEach(() => { useUIStore.setState({ currentProject: null }) })
+afterEach(() => { useUIStore.setState({ currentProject: null }); resetServedRows() })
 
 describe.each(COST_CARDS)('the %s card claims the basis it shows (T2)', (cls) => {
   const c = CASES[cls]
@@ -192,7 +192,7 @@ describe.each(['Generator', 'Link'])('the %s claim and patch come from one schem
 })
 
 describe('the units flip between opening the card and Save (T3)', () => {
-  it('the claim follows the schema the patch is scaled with, not the one the card opened with', async () => {
+  it('the claim and the scaling follow the schema the card opened with (05g, GK B4): the server then refuses a flipped bus', async () => {
     const c = CASES.Generator
     units.mockResolvedValueOnce({ component: 'Generator', name: 'crusher', units: {} })
     units.mockResolvedValue(tonneUnits('Generator', 'crusher'))
@@ -205,7 +205,9 @@ describe('the units flip between opening the card and Save (T3)', () => {
     await saveWhenReady()
     await waitFor(() => expect(put(c)).toHaveBeenCalled())
     const [, body, basis] = put(c).mock.calls[0] as [string, Record<string, unknown>, string]
-    expect([body.overnight_cost, basis]).toEqual([123.4, 'tonne'])
+    // Scaled and claimed under the at-open (energy) schema: if the bus really is a tonne bus now, the server refuses
+    // the save, instead of the number being silently re-read under a unit the user may not have typed it in.
+    expect([body.overnight_cost, basis]).toEqual([123400, 'energy'])
   })
 })
 
@@ -256,5 +258,55 @@ describe('a refused claim (409 cost_basis_mismatch)', () => {
     expect(shown.mock.calls.map(c => String(c[0])).filter(t => t.startsWith('Save failed')))
       .toEqual([`Save failed: ${message}`])
     shown.mockRestore()
+  })
+})
+
+// 05g: the card's save is a rebase on the fresh row, and the basis is the one the form was opened with.
+describe('the Generator card rebases its save (05g)', () => {
+  const c = CASES.Generator
+
+  it('keeps the columns the user did not touch as the network now holds them', async () => {
+    units.mockResolvedValue({ component: 'Generator', name: c.row.name, units: {} })
+    mount(c)
+    await openEdit()
+    // a restore after the card opened: efficiency and marginal cost changed; the cache still holds the old ones
+    serveRows('generators', [{ ...c.row, efficiency: 0.5, marginal_cost: 9 }])
+    await userEvent.clear(inputStarting('Capacity'))
+    await userEvent.type(inputStarting('Capacity'), '130')
+    await saveWhenReady()
+    await waitFor(() => expect(put(c)).toHaveBeenCalled())
+    const body = put(c).mock.calls[0][1] as Record<string, unknown>
+    expect(body.p_nom).toBe(130)
+    expect(body.efficiency).toBe(0.5)
+    expect(body.marginal_cost).toBe(9)
+  })
+
+  it('an untouched cost whose display round trip is not bit-equal stays as the network now holds it', async () => {
+    units.mockResolvedValue({ component: 'Generator', name: c.row.name, units: {} })
+    const row = { ...c.row, overnight_cost: 55555.55555555 }   // shown as 55.5555555556 €/kW: 55555.5555556 back
+    mount({ ...c, row })
+    await openEdit()
+    serveRows('generators', [{ ...row, overnight_cost: 77777 }])
+    await userEvent.clear(inputStarting('Capacity'))
+    await userEvent.type(inputStarting('Capacity'), '130')
+    await saveWhenReady()
+    await waitFor(() => expect(put(c)).toHaveBeenCalled())
+    const body = put(c).mock.calls[0][1] as Record<string, unknown>
+    expect(body.p_nom).toBe(130)
+    expect(body.overnight_cost).toBe(77777)
+  })
+
+  it('claims the basis the form opened with, not the one the schema reads at Save', async () => {
+    units.mockResolvedValue({ component: 'Generator', name: c.row.name, units: {} })
+    const client = mount(c)
+    await openEdit()
+    await screen.findByRole('button', { name: /^save$/i })
+    // another tab moved the bus to a tonne bus after the card opened
+    units.mockResolvedValue(tonneUnits('Generator', String(c.row.name)))
+    await act(async () => { await client.invalidateQueries({ queryKey: ['assetUnits'] }) })
+    await waitFor(() => expect(screen.getAllByText(/€\/(\(t\/h\)|t)\b/).length).toBeGreaterThan(0))
+    await saveWhenReady()
+    await waitFor(() => expect(put(c)).toHaveBeenCalled())
+    expect(put(c).mock.calls[0][2]).toBe('energy')
   })
 })

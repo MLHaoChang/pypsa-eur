@@ -512,4 +512,16 @@ describe('updateAsset rebases on the fresh row (05g)', () => {
     expect(body.p_nom).toBe(120)
     expect(body.capital_cost).toBeUndefined()
   })
+
+  it('compares exactly: 0.1 → 0.1000001, "" → 0 and "1" → 1 are all user changes', async () => {
+    const { updateAsset } = await import('./assetWrite')
+    const qc = new QueryClient()
+    qc.setQueryData(nk('p1', 'generators'), [stale])
+    api().getGenerators.mockResolvedValue([fresh])
+    api().updateGenerator.mockResolvedValue({})
+    await updateAsset(qc, 'p1', 'generators', 'g1',
+      { capital_cost: 0.1000001, efficiency: 0, p_nom: 1 },
+      { initial: { capital_cost: 0.1, efficiency: '', p_nom: '1' } as never })
+    expect(api().updateGenerator.mock.calls[0][1]).toEqual({ ...fresh, capital_cost: 0.1000001, efficiency: 0, p_nom: 1 })
+  })
 })
