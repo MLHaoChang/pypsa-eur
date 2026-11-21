@@ -25,6 +25,7 @@ import pandas as pd
 from services.adequacy.stress import StressValidationError
 from services.commercial import connection as conn
 from services.commercial import lp_bindings
+from services.commercial import placeholders
 
 
 class BindingRefusal(Exception):
@@ -237,6 +238,10 @@ def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
         return None
 
     commercial = resolve_tariff_ref(commercial, resolve_item)
+    unfilled = placeholders.first_problem(commercial.contracts)
+    if unfilled:
+        # A Library contract template still naming no party or asset (SCU06 S2a).
+        raise BindingRefusal(422, placeholders.CODE, unfilled)
     if commercial.import_tariff_ref is not None:
         clash = tariff_currency_mismatch(commercial.import_tariff, currency)
         if clash:
