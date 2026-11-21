@@ -1,5 +1,6 @@
 import { type FormEvent, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import axios from 'axios'
 import { submitPasswordToken, type PasswordTokenMode } from '../../auth/requests'
 import {
   AuthButton,
@@ -26,10 +27,12 @@ export default function PasswordTokenPage({
   const [confirmPassword, setConfirmPassword] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [linkRejected, setLinkRejected] = useState(false)
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setMessage(null)
+    setLinkRejected(false)
     setIsSubmitting(true)
     try {
       const result = await submitPasswordToken({
@@ -43,6 +46,13 @@ export default function PasswordTokenPage({
         return
       }
       navigate('/login', { replace: true, state: { message: successMessage } })
+    } catch (error) {
+      // The API answers 400 for a token that is wrong, expired or already used.
+      if (axios.isAxiosError(error) && error.response?.status === 400) {
+        setLinkRejected(true)
+      } else {
+        setMessage('Could not save the password. Check your connection and try again.')
+      }
     } finally {
       setIsSubmitting(false)
     }
@@ -51,6 +61,14 @@ export default function PasswordTokenPage({
   return (
     <AuthSplitLayout subtitle={subtitle} title={title}>
       {message && <AuthMessage>{message}</AuthMessage>}
+      {linkRejected && (
+        <AuthMessage tone="error">
+          This link has expired or was already used. Ask your admin for a new invite link,
+          or go back to sign in and use "Forgot password".
+          {' '}
+          <Link className="underline" to="/login">Back to sign in</Link>
+        </AuthMessage>
+      )}
       <form className="space-y-4" onSubmit={handleSubmit}>
         <AuthInput
           autoComplete="new-password"

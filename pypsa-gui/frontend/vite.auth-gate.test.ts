@@ -50,9 +50,12 @@ describe('auth HTML gate', () => {
       expect(decide(route, 'auth-on')).toEqual({ kind: 'serve-spa' })
     }
     // Exact match only: nothing nested or look-alike opens up.
-    for (const route of ['/set-password/x', '/reset-password.html', '/set-passwordx', '/admin/users']) {
+    for (const route of ['/set-password/', '/set-password/x', '/set-passwordX', '/set-password.html', '/SET-PASSWORD', '/reset-password/../projects', '/reset-password/', '/admin/users']) {
       expect(decide(route, 'auth-on')).toEqual({ kind: 'serve-login' })
     }
+    // Authed users still get the SPA (no redirect); auth-off is unchanged.
+    expect(decide('/set-password', 'auth-on', true)).toEqual({ kind: 'serve-spa' })
+    expect(decide('/set-password', 'auth-off')).toEqual({ kind: 'serve-spa' })
     // Fail closed when the backend cannot confirm auth state.
     expect(decide('/set-password', 'unreachable')).toEqual({ kind: 'serve-login' })
   })

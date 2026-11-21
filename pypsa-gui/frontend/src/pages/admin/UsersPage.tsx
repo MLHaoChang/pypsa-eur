@@ -72,10 +72,13 @@ export default function UsersPage() {
 
   const [manualInvite, setManualInvite] = useState<{ email: string; link: string } | null>(null)
 
+  const [copied, setCopied] = useState(false)
+
   async function copyInviteLink(link: string) {
     try {
       await navigator.clipboard.writeText(link)
-      toast.success('Link copied.')
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 2000)
     } catch {
       toast.error('Could not copy. Select the link and copy it by hand.')
     }
@@ -83,6 +86,8 @@ export default function UsersPage() {
 
   const createUser = useMutation({
     mutationFn: async () => {
+      setManualInvite(null)
+      setCopied(false)
       const payload: CreateAdminUserPayload = {
         email: email.trim(),
         role,
@@ -97,12 +102,11 @@ export default function UsersPage() {
         setManualInvite(null)
         toast.success(`Invitation sent to ${createdUser.email}.`)
       } else {
-        // No email went out (e.g. SMTP not configured): say so, and hand the
-        // admin the link instead of claiming an invitation was sent.
+        // No email went out: say so in a notice that stays until dismissed,
+        // and hand the admin the link instead of claiming an invitation went.
         setManualInvite(createdUser.set_password_link
           ? { email: createdUser.email, link: createdUser.set_password_link }
           : null)
-        toast.error(`No email was sent to ${createdUser.email}.`)
       }
       setEmail('')
       setRole('member')
@@ -186,10 +190,15 @@ export default function UsersPage() {
             </div>
           </form>
           {manualInvite && (
-            <div className="mt-4 rounded-xl border border-[var(--brand-line)] bg-[var(--brand-surface-2)] p-3" role="status">
-              <p className="text-sm text-[var(--brand-ink)]">
-                {manualInvite.email} was created, but no email was sent (email is not configured).
-                Give them this link to set their password. It works once.
+            <div
+              className="mt-4 rounded-xl border border-[var(--brand-warn)] bg-[var(--brand-surface-2)] p-3"
+              role="status"
+            >
+              <p className="text-sm font-medium text-[var(--brand-warn)]">
+                No email was sent to {manualInvite.email}: email is not set up on this server.
+              </p>
+              <p className="mt-1 text-sm text-[var(--brand-ink)]">
+                Copy this link and give it to {manualInvite.email}:
               </p>
               <div className="mt-2 flex gap-2">
                 <input
@@ -199,10 +208,20 @@ export default function UsersPage() {
                   readOnly
                   value={manualInvite.link}
                 />
-                <Btn onClick={() => void copyInviteLink(manualInvite.link)} type="button" variant="primary">
-                  Copy link
+                <Btn
+                  aria-label="Copy set-password link"
+                  onClick={() => void copyInviteLink(manualInvite.link)}
+                  type="button"
+                >
+                  {copied ? 'Copied' : 'Copy link'}
+                </Btn>
+                <Btn onClick={() => setManualInvite(null)} type="button">
+                  Dismiss
                 </Btn>
               </div>
+              <p className="mt-2 text-xs text-[var(--brand-ink-dim)]">
+                Anyone with this link can set {manualInvite.email}&apos;s password. It works once.
+              </p>
             </div>
           )}
           {user?.is_super_admin && organizations.length === 0 && (

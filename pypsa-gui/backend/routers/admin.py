@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
 
@@ -180,6 +180,7 @@ def list_organizations_endpoint(
 @router.post("/users", status_code=201)
 def create_user_endpoint(
     payload: CreateUserRequest,
+    response_obj: Response,
     actor: User = Depends(require_user),
     db: DBSession = Depends(get_db),
 ) -> dict[str, str | bool | None]:
@@ -201,6 +202,7 @@ def create_user_endpoint(
         # Only the admin who just created the invite sees this, and only when
         # no email went out; the token stays single-use and expiring.
         response["set_password_link"] = _set_password_link(raw_token)
+        response_obj.headers["Cache-Control"] = "no-store"
         response["warning"] = (
             f"User created, but the set-password email was not sent: {exc}. "
             "Use the resend set-password action once email is configured."

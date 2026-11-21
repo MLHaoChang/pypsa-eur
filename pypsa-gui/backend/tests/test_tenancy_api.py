@@ -206,6 +206,8 @@ def test_admin_create_user_survives_email_failure(
     assert "warning" in body and body["warning"]
     assert body["set_password_link"].startswith(("http://", "https://"))
     assert "/set-password?token=" in body["set_password_link"]
+    assert response.headers["cache-control"] == "no-store"
+    assert body["set_password_link"] not in body["warning"]
 
     # The user + set-password token must still be persisted so resend works.
     with auth_session_local() as db:
