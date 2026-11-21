@@ -44,7 +44,7 @@
     }
    },
    {
-    "metric": "branch_rating",
+    "metric": "ac_branch_rating",
     "formula": "s_nom_opt if s_nom_extendable else s_nom",
     "validity": "verified solve with condition lopf+ac_pf_ok and current PF revision (else unverified_solve); over converged snapshots of the window only, every one needs p0, s_max_pu, weight >= 0 and q0 when any is recorded, with rating x s_max_pu > 1e-9, else invalid_or_missing_branch_data; any excluded snapshot adds the required warning slot ac_pf_convergence. Refusals: ac_pf_not_available, ac_pf_convergence_unavailable, ac_pf_not_converged, ac_pf_convergence_unknown, ambiguous_branch, unknown_branch, misaligned_source, unsupported_snapshot_scope, too_many_metrics_for_warnings",
     "tolerance": "exact",

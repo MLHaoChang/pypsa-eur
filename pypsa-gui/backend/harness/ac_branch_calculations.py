@@ -52,7 +52,11 @@ METRICS = {
         "unit": "MVA",
         "label": "Peak apparent-power flow, over converged snapshots",
     },
-    "branch_rating": branch.METRICS["branch_rating"],
+    "ac_branch_rating": {
+        "formula_id": "ac-branch-rating/1",
+        "unit": "MVA",
+        "label": "Rating (s_nom_opt if extendable, else s_nom)",
+    },
 }
 DISCLOSURE = (
     "AC power flow: apparent power from the flow's own results, max(hypot(p0, q0), hypot(p1, q1)); "
@@ -218,7 +222,7 @@ def _loading(raw, kept):
                 if u > 1 + branch.OVER_LIMIT_TOLERANCE
             ),
             "ac_peak_apparent_flow": max(flows) if apparent else None,
-            "branch_rating": rating,
+            "ac_branch_rating": rating,
         }
     except (OverflowError, ValueError):
         return None

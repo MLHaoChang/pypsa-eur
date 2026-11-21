@@ -56,6 +56,7 @@ WEIGHT_BASIS: dict[str, str] = {
     "ac_peak_branch_utilisation": "none",
     "ac_hours_above_rating": "generators",
     "ac_peak_apparent_flow": "none",
+    "ac_branch_rating": "none",
     # lost_load_calculations.py
     "lost_load_energy": "generators",
     "peak_shed": "none",

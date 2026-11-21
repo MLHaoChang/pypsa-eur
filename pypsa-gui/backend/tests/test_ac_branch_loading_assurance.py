@@ -78,7 +78,7 @@ def test_ac_loading_matches_the_load_flow_tab_with_a_time_varying_limit(ac_grid)
     assert round(values["ac_peak_branch_utilisation"], 2) == row["util_pct"]
     assert round(values["ac_peak_apparent_flow"], 2) == row["peak_flow"]
     assert round(values["ac_hours_above_rating"], 2) == row["h_over_limit"]
-    assert values["branch_rating"] == row["rating"]["value"]
+    assert values["ac_branch_rating"] == row["rating"]["value"]
 
 
 def test_a_transformer_without_reactive_flow_falls_back_to_p_and_says_so(
@@ -112,7 +112,7 @@ def test_a_transformer_without_reactive_flow_falls_back_to_p_and_says_so(
         {
             "ac_peak_branch_utilisation": 125.0,
             "ac_hours_above_rating": 1.0,
-            "branch_rating": 40.0,
+            "ac_branch_rating": 40.0,
         },
     )
     assert ac.P_FALLBACK_NOTE in public_text(frames)
@@ -193,7 +193,7 @@ WARNING = {
     "excluded_indices": ["2026-01-01T01:00:00"],
 }
 ANSWERED = {
-    "metric": "branch_rating",
+    "metric": "ac_branch_rating",
     "disposition": "answered",
     "valid_snapshots": 1,
     "requested_snapshots": 2,
