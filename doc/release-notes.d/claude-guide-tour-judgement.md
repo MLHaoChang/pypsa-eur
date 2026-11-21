@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Guided hub-design tour opens once per project on first open, visits the stepper's ten numbered sections in order (each step opens its section), and mentions the assistant only when it is set up.

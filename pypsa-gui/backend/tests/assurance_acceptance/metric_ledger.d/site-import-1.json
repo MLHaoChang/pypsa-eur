@@ -1,0 +1,62 @@
+{
+ "profiles": {
+  "site-import/1": [
+   {
+    "metric": "grid_import_energy",
+    "formula": "sum over t of w_generators[t] x sum over grid generators of max(p[t], 0)",
+    "validity": "verified solve (else unverified_solve); every generator and port dispatch readable and weights >= 0, else invalid_or_missing_dispatch. Refusals: load_shape_not_established, network_scope_required, unsupported_snapshot_scope; a grid generator, else no_grid_connection",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_site_import_assurance.py::test_export_is_what_the_meter_delivers_into_the_grid_bus",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_site_import_assurance.py::test_export_is_what_the_meter_delivers_into_the_grid_bus"
+     }
+    }
+   },
+   {
+    "metric": "peak_grid_import",
+    "formula": "max over t of sum over grid generators of max(p[t], 0)",
+    "validity": "verified solve (else unverified_solve); every generator and port dispatch readable and weights >= 0, else invalid_or_missing_dispatch. Refusals: load_shape_not_established, network_scope_required, unsupported_snapshot_scope; a grid generator, else no_grid_connection",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_site_import_assurance.py::test_export_is_what_the_meter_delivers_into_the_grid_bus",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_site_import_assurance.py::test_export_is_what_the_meter_delivers_into_the_grid_bus"
+     }
+    }
+   },
+   {
+    "metric": "export_energy",
+    "formula": "sum over t of w_generators[t] x energy leaving the site into external buses",
+    "validity": "verified solve (else unverified_solve); every generator and port dispatch readable and weights >= 0, else invalid_or_missing_dispatch. Refusals: load_shape_not_established, network_scope_required, unsupported_snapshot_scope; a grid connection, else no_grid_connection",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_site_import_assurance.py::test_export_is_what_the_meter_delivers_into_the_grid_bus",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_site_import_assurance.py::test_export_is_what_the_meter_delivers_into_the_grid_bus"
+     }
+    }
+   },
+   {
+    "metric": "hours_at_import_limit",
+    "formula": "sum over t of w_generators[t] where import[t] >= AT_LIMIT x limit[t] and limit > 0",
+    "validity": "verified solve (else unverified_solve); every generator and port dispatch readable and weights >= 0, else invalid_or_missing_dispatch. Refusals: load_shape_not_established, network_scope_required, unsupported_snapshot_scope; a grid generator and an import connection, else no_grid_connection / no_import_connection",
+    "tolerance": "harness.site_import_calculations:AT_LIMIT",
+    "oracle": "pypsa-gui/backend/tests/test_site_import_assurance.py::test_export_is_what_the_meter_delivers_into_the_grid_bus",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_site_import_assurance.py::test_export_is_what_the_meter_delivers_into_the_grid_bus"
+     }
+    }
+   }
+  ]
+ }
+}

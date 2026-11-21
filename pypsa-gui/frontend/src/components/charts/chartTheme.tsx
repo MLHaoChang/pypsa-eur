@@ -100,7 +100,7 @@ export type ChartSize = keyof typeof CHART_HEIGHT
 export const CHART_TICK = {
   fontSize: 10,
   fill: 'var(--color-axis)',
-  fontFamily: 'var(--font-family-mono)',
+  fontFamily: 'var(--font-mono)',
   style: { fontVariantNumeric: 'tabular-nums' } as CSSProperties,
 }
 

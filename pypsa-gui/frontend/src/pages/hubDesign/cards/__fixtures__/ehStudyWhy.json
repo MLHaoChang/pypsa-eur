@@ -1,0 +1,2184 @@
+{
+  "current": {
+    "design_cost": {
+      "body": {
+        "node": "derived:eh_study/design_cost",
+        "outcome": {
+          "complete": true,
+          "state": "uncompared",
+          "steps_total": 21,
+          "truncated": false,
+          "uncompared": [
+            "input:eh_study/finance",
+            "input:eh_study/pack_prices"
+          ]
+        },
+        "steps": [
+          {
+            "broken": null,
+            "kind": "derived",
+            "label": "design_cost",
+            "node": "derived:eh_study/design_cost",
+            "stamp": {
+              "period_basis": "single_period"
+            },
+            "stamp_missing": [],
+            "state": "uncompared",
+            "unit": "EUR",
+            "value": 1234.5,
+            "via": null
+          },
+          {
+            "broken": null,
+            "kind": "derived",
+            "label": "study results",
+            "node": "results:study",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": null,
+            "via": {
+              "edge": "derived_from",
+              "from": "derived:eh_study/design_cost",
+              "recorded": null
+            }
+          },
+          {
+            "broken": null,
+            "kind": "run",
+            "label": "study run",
+            "node": "run:study",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "done",
+            "via": {
+              "edge": "computed_in",
+              "from": "results:study",
+              "recorded": {
+                "label": "edited since the study ran",
+                "recorded": false
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "goal value",
+            "node": "input:eh_study/goal/value",
+            "stamp": null,
+            "stamp_missing": [],
+            "state": "fresh",
+            "unit": "h",
+            "value": 1.0,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "goal value",
+                "recorded": 1.0
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "goal basis",
+            "node": "input:eh_study/goal/basis",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "h_per_year",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "goal basis",
+                "recorded": "h_per_year"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "goal unit",
+            "node": "input:eh_study/goal/unit",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "h",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "goal unit",
+                "recorded": "h"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "site type",
+            "node": "input:eh_study/site_archetype",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "strong_grid",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "site type",
+                "recorded": "strong_grid"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "MC draws",
+            "node": "input:eh_study/mc/draws",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 500,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "MC draws",
+                "recorded": 500
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "horizon years",
+            "node": "input:eh_study/mc/horizon_years",
+            "stamp": null,
+            "stamp_missing": [],
+            "state": "fresh",
+            "unit": "years",
+            "value": 0.00034246575342465754,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "horizon years",
+                "recorded": 0.00034246575342465754
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "MC seed",
+            "node": "input:eh_study/mc/seed",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 0,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "MC seed",
+                "recorded": 0
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "MC convergence target",
+            "node": "input:eh_study/mc/cov_target",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 0.05,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "MC convergence target",
+                "recorded": 0.05
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "network revision",
+            "node": "input:eh_study/network_revision",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 1,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "network revision",
+                "recorded": 1
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "pack overrides beyond the goal",
+            "node": "input:eh_study/run/pack_overrides",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "pack overrides beyond the goal",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "stages",
+            "node": "input:eh_study/run/stages",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "stages",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "solve budget",
+            "node": "input:eh_study/run/budget_solves",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 30,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "solve budget",
+                "recorded": 30
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "demand-response buses",
+            "node": "input:eh_study/run/dsr_buses",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "demand-response buses",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "DtC config",
+            "node": "input:eh_study/run/dtc_config",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "DtC config",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "DtC attribution",
+            "node": "input:eh_study/run/dtc_attribution",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "DtC attribution",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "Generator size",
+            "node": "input:eh_study/assumption/g_size",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 10.0,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "Generator size",
+                "recorded": 10.0
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "finance and currency settings",
+            "node": "input:eh_study/finance",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "uncompared",
+            "unit": null,
+            "value": null,
+            "via": {
+              "edge": "derived_from",
+              "from": "derived:eh_study/design_cost",
+              "recorded": {
+                "unrecorded": "the study did not record the finance and currency settings, and PUT /finance does not move the revision"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "pack prices",
+            "node": "input:eh_study/pack_prices",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "uncompared",
+            "unit": null,
+            "value": null,
+            "via": {
+              "edge": "derived_from",
+              "from": "derived:eh_study/design_cost",
+              "recorded": {
+                "unrecorded": "the study did not record the pack's prices"
+              }
+            }
+          }
+        ],
+        "target": {
+          "figure": "design_cost",
+          "study": "eh_study"
+        }
+      },
+      "status": 200
+    },
+    "expected_shortfall": {
+      "body": {
+        "node": "derived:eh_study/expected_shortfall",
+        "outcome": {
+          "complete": true,
+          "state": "fresh",
+          "steps_total": 20,
+          "truncated": false,
+          "uncompared": []
+        },
+        "steps": [
+          {
+            "broken": null,
+            "kind": "derived",
+            "label": "expected_shortfall",
+            "node": "derived:eh_study/expected_shortfall",
+            "stamp": null,
+            "stamp_missing": [],
+            "state": "fresh",
+            "unit": "h/yr",
+            "value": 0.05,
+            "via": null
+          },
+          {
+            "broken": null,
+            "kind": "derived",
+            "label": "study results",
+            "node": "results:study",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": null,
+            "via": {
+              "edge": "derived_from",
+              "from": "derived:eh_study/expected_shortfall",
+              "recorded": null
+            }
+          },
+          {
+            "broken": null,
+            "kind": "run",
+            "label": "study run",
+            "node": "run:study",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "done",
+            "via": {
+              "edge": "computed_in",
+              "from": "results:study",
+              "recorded": {
+                "label": "edited since the study ran",
+                "recorded": false
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "goal value",
+            "node": "input:eh_study/goal/value",
+            "stamp": null,
+            "stamp_missing": [],
+            "state": "fresh",
+            "unit": "h",
+            "value": 1.0,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "goal value",
+                "recorded": 1.0
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "goal basis",
+            "node": "input:eh_study/goal/basis",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "h_per_year",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "goal basis",
+                "recorded": "h_per_year"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "goal unit",
+            "node": "input:eh_study/goal/unit",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "h",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "goal unit",
+                "recorded": "h"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "site type",
+            "node": "input:eh_study/site_archetype",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "strong_grid",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "site type",
+                "recorded": "strong_grid"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "MC draws",
+            "node": "input:eh_study/mc/draws",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 500,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "MC draws",
+                "recorded": 500
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "horizon years",
+            "node": "input:eh_study/mc/horizon_years",
+            "stamp": null,
+            "stamp_missing": [],
+            "state": "fresh",
+            "unit": "years",
+            "value": 0.00034246575342465754,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "horizon years",
+                "recorded": 0.00034246575342465754
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "MC seed",
+            "node": "input:eh_study/mc/seed",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 0,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "MC seed",
+                "recorded": 0
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "MC convergence target",
+            "node": "input:eh_study/mc/cov_target",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 0.05,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "MC convergence target",
+                "recorded": 0.05
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "network revision",
+            "node": "input:eh_study/network_revision",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 1,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "network revision",
+                "recorded": 1
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "pack overrides beyond the goal",
+            "node": "input:eh_study/run/pack_overrides",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "pack overrides beyond the goal",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "stages",
+            "node": "input:eh_study/run/stages",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "stages",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "solve budget",
+            "node": "input:eh_study/run/budget_solves",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 30,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "solve budget",
+                "recorded": 30
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "demand-response buses",
+            "node": "input:eh_study/run/dsr_buses",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "demand-response buses",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "DtC config",
+            "node": "input:eh_study/run/dtc_config",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "DtC config",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "DtC attribution",
+            "node": "input:eh_study/run/dtc_attribution",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "DtC attribution",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "Generator size",
+            "node": "input:eh_study/assumption/g_size",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 10.0,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "Generator size",
+                "recorded": 10.0
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "derived",
+            "label": "lole_ci",
+            "node": "derived:eh_study/lole_ci",
+            "stamp": null,
+            "stamp_missing": [],
+            "state": "fresh",
+            "unit": "h per horizon",
+            "value": [
+              0.0001,
+              0.0002
+            ],
+            "via": {
+              "edge": "derived_from",
+              "from": "derived:eh_study/expected_shortfall",
+              "recorded": null
+            }
+          }
+        ],
+        "target": {
+          "figure": "expected_shortfall",
+          "study": "eh_study"
+        }
+      },
+      "status": 200
+    },
+    "verdict": {
+      "body": {
+        "node": "derived:eh_study/verdict",
+        "outcome": {
+          "complete": true,
+          "state": "fresh",
+          "steps_total": 20,
+          "truncated": false,
+          "uncompared": []
+        },
+        "steps": [
+          {
+            "broken": null,
+            "kind": "derived",
+            "label": "verdict",
+            "node": "derived:eh_study/verdict",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "pass",
+            "via": null
+          },
+          {
+            "broken": null,
+            "kind": "derived",
+            "label": "study results",
+            "node": "results:study",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": null,
+            "via": {
+              "edge": "derived_from",
+              "from": "derived:eh_study/verdict",
+              "recorded": null
+            }
+          },
+          {
+            "broken": null,
+            "kind": "run",
+            "label": "study run",
+            "node": "run:study",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "done",
+            "via": {
+              "edge": "computed_in",
+              "from": "results:study",
+              "recorded": {
+                "label": "edited since the study ran",
+                "recorded": false
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "goal value",
+            "node": "input:eh_study/goal/value",
+            "stamp": null,
+            "stamp_missing": [],
+            "state": "fresh",
+            "unit": "h",
+            "value": 1.0,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "goal value",
+                "recorded": 1.0
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "goal basis",
+            "node": "input:eh_study/goal/basis",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "h_per_year",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "goal basis",
+                "recorded": "h_per_year"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "goal unit",
+            "node": "input:eh_study/goal/unit",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "h",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "goal unit",
+                "recorded": "h"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "site type",
+            "node": "input:eh_study/site_archetype",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "strong_grid",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "site type",
+                "recorded": "strong_grid"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "MC draws",
+            "node": "input:eh_study/mc/draws",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 500,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "MC draws",
+                "recorded": 500
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "horizon years",
+            "node": "input:eh_study/mc/horizon_years",
+            "stamp": null,
+            "stamp_missing": [],
+            "state": "fresh",
+            "unit": "years",
+            "value": 0.00034246575342465754,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "horizon years",
+                "recorded": 0.00034246575342465754
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "MC seed",
+            "node": "input:eh_study/mc/seed",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 0,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "MC seed",
+                "recorded": 0
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "MC convergence target",
+            "node": "input:eh_study/mc/cov_target",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 0.05,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "MC convergence target",
+                "recorded": 0.05
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "network revision",
+            "node": "input:eh_study/network_revision",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 1,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "network revision",
+                "recorded": 1
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "pack overrides beyond the goal",
+            "node": "input:eh_study/run/pack_overrides",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "pack overrides beyond the goal",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "stages",
+            "node": "input:eh_study/run/stages",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "stages",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "solve budget",
+            "node": "input:eh_study/run/budget_solves",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 30,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "solve budget",
+                "recorded": 30
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "demand-response buses",
+            "node": "input:eh_study/run/dsr_buses",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "demand-response buses",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "DtC config",
+            "node": "input:eh_study/run/dtc_config",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "DtC config",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "DtC attribution",
+            "node": "input:eh_study/run/dtc_attribution",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "DtC attribution",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "Generator size",
+            "node": "input:eh_study/assumption/g_size",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 10.0,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "Generator size",
+                "recorded": 10.0
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "derived",
+            "label": "lole_ci",
+            "node": "derived:eh_study/lole_ci",
+            "stamp": null,
+            "stamp_missing": [],
+            "state": "fresh",
+            "unit": "h per horizon",
+            "value": [
+              0.0001,
+              0.0002
+            ],
+            "via": {
+              "edge": "derived_from",
+              "from": "derived:eh_study/verdict",
+              "recorded": null
+            }
+          }
+        ],
+        "target": {
+          "figure": "verdict",
+          "study": "eh_study"
+        }
+      },
+      "status": 200
+    }
+  },
+  "not_compared": {
+    "expected_shortfall": {
+      "body": {
+        "node": "derived:eh_study/expected_shortfall",
+        "outcome": {
+          "complete": true,
+          "state": "uncompared",
+          "steps_total": 20,
+          "truncated": false,
+          "uncompared": [
+            "input:eh_study/assumptions"
+          ]
+        },
+        "steps": [
+          {
+            "broken": null,
+            "kind": "derived",
+            "label": "expected_shortfall",
+            "node": "derived:eh_study/expected_shortfall",
+            "stamp": null,
+            "stamp_missing": [],
+            "state": "fresh",
+            "unit": "h/yr",
+            "value": 0.05,
+            "via": null
+          },
+          {
+            "broken": null,
+            "kind": "derived",
+            "label": "study results",
+            "node": "results:study",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": null,
+            "via": {
+              "edge": "derived_from",
+              "from": "derived:eh_study/expected_shortfall",
+              "recorded": null
+            }
+          },
+          {
+            "broken": null,
+            "kind": "run",
+            "label": "study run",
+            "node": "run:study",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "done",
+            "via": {
+              "edge": "computed_in",
+              "from": "results:study",
+              "recorded": {
+                "label": "edited since the study ran",
+                "recorded": false
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "goal value",
+            "node": "input:eh_study/goal/value",
+            "stamp": null,
+            "stamp_missing": [],
+            "state": "fresh",
+            "unit": "h",
+            "value": 1.0,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "goal value",
+                "recorded": 1.0
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "goal basis",
+            "node": "input:eh_study/goal/basis",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "h_per_year",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "goal basis",
+                "recorded": "h_per_year"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "goal unit",
+            "node": "input:eh_study/goal/unit",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "h",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "goal unit",
+                "recorded": "h"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "site type",
+            "node": "input:eh_study/site_archetype",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "strong_grid",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "site type",
+                "recorded": "strong_grid"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "MC draws",
+            "node": "input:eh_study/mc/draws",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 500,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "MC draws",
+                "recorded": 500
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "horizon years",
+            "node": "input:eh_study/mc/horizon_years",
+            "stamp": null,
+            "stamp_missing": [],
+            "state": "fresh",
+            "unit": "years",
+            "value": 0.00034246575342465754,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "horizon years",
+                "recorded": 0.00034246575342465754
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "MC seed",
+            "node": "input:eh_study/mc/seed",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 0,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "MC seed",
+                "recorded": 0
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "MC convergence target",
+            "node": "input:eh_study/mc/cov_target",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 0.05,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "MC convergence target",
+                "recorded": 0.05
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "network revision",
+            "node": "input:eh_study/network_revision",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 1,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "network revision",
+                "recorded": 1
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "pack overrides beyond the goal",
+            "node": "input:eh_study/run/pack_overrides",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "pack overrides beyond the goal",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "stages",
+            "node": "input:eh_study/run/stages",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "stages",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "solve budget",
+            "node": "input:eh_study/run/budget_solves",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 30,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "solve budget",
+                "recorded": 30
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "demand-response buses",
+            "node": "input:eh_study/run/dsr_buses",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "demand-response buses",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "DtC config",
+            "node": "input:eh_study/run/dtc_config",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "DtC config",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "DtC attribution",
+            "node": "input:eh_study/run/dtc_attribution",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "DtC attribution",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "assumptions",
+            "node": "input:eh_study/assumptions",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "uncompared",
+            "unit": null,
+            "value": null,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "unrecorded": "the study did not record its assumed inputs"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "derived",
+            "label": "lole_ci",
+            "node": "derived:eh_study/lole_ci",
+            "stamp": null,
+            "stamp_missing": [],
+            "state": "fresh",
+            "unit": "h per horizon",
+            "value": [
+              0.0001,
+              0.0002
+            ],
+            "via": {
+              "edge": "derived_from",
+              "from": "derived:eh_study/expected_shortfall",
+              "recorded": null
+            }
+          }
+        ],
+        "target": {
+          "figure": "expected_shortfall",
+          "study": "eh_study"
+        }
+      },
+      "status": 200
+    }
+  },
+  "not_run": {
+    "verdict": {
+      "body": {
+        "detail": {
+          "error_kind": "study_not_run",
+          "message": "no Energy Hub study has been run in this session"
+        }
+      },
+      "status": 404
+    }
+  },
+  "other_project": {
+    "verdict": {
+      "body": {
+        "detail": {
+          "error_kind": "project_not_open",
+          "message": "The study's figures are read from the open project; open that project first."
+        }
+      },
+      "status": 409
+    }
+  },
+  "out_of_date": {
+    "expected_shortfall": {
+      "body": {
+        "node": "derived:eh_study/expected_shortfall",
+        "outcome": {
+          "complete": true,
+          "state": "stale",
+          "steps_total": 20,
+          "truncated": false,
+          "uncompared": []
+        },
+        "steps": [
+          {
+            "broken": null,
+            "kind": "derived",
+            "label": "expected_shortfall",
+            "node": "derived:eh_study/expected_shortfall",
+            "stamp": null,
+            "stamp_missing": [],
+            "state": "fresh",
+            "unit": "h/yr",
+            "value": 0.05,
+            "via": null
+          },
+          {
+            "broken": null,
+            "kind": "derived",
+            "label": "study results",
+            "node": "results:study",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": null,
+            "via": {
+              "edge": "derived_from",
+              "from": "derived:eh_study/expected_shortfall",
+              "recorded": null
+            }
+          },
+          {
+            "broken": null,
+            "kind": "run",
+            "label": "study run",
+            "node": "run:study",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "done",
+            "via": {
+              "edge": "computed_in",
+              "from": "results:study",
+              "recorded": {
+                "label": "edited since the study ran",
+                "recorded": false
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "goal value",
+            "node": "input:eh_study/goal/value",
+            "stamp": null,
+            "stamp_missing": [],
+            "state": "fresh",
+            "unit": "h",
+            "value": 1.0,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "goal value",
+                "recorded": 1.0
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "goal basis",
+            "node": "input:eh_study/goal/basis",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "h_per_year",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "goal basis",
+                "recorded": "h_per_year"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "goal unit",
+            "node": "input:eh_study/goal/unit",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "h",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "goal unit",
+                "recorded": "h"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "site type",
+            "node": "input:eh_study/site_archetype",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "strong_grid",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "site type",
+                "recorded": "strong_grid"
+              }
+            }
+          },
+          {
+            "broken": {
+              "compared": {
+                "current": 1000,
+                "current_field": "MC draws",
+                "field": "MC draws",
+                "recorded": 500
+              },
+              "reason": "changed",
+              "uncompared": []
+            },
+            "kind": "input",
+            "label": "MC draws",
+            "node": "input:eh_study/mc/draws",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "stale",
+            "unit": null,
+            "value": 500,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "MC draws",
+                "recorded": 500
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "horizon years",
+            "node": "input:eh_study/mc/horizon_years",
+            "stamp": null,
+            "stamp_missing": [],
+            "state": "fresh",
+            "unit": "years",
+            "value": 0.00034246575342465754,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "horizon years",
+                "recorded": 0.00034246575342465754
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "MC seed",
+            "node": "input:eh_study/mc/seed",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 0,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "MC seed",
+                "recorded": 0
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "MC convergence target",
+            "node": "input:eh_study/mc/cov_target",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 0.05,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "MC convergence target",
+                "recorded": 0.05
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "network revision",
+            "node": "input:eh_study/network_revision",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 1,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "network revision",
+                "recorded": 1
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "pack overrides beyond the goal",
+            "node": "input:eh_study/run/pack_overrides",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "pack overrides beyond the goal",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "stages",
+            "node": "input:eh_study/run/stages",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "stages",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "solve budget",
+            "node": "input:eh_study/run/budget_solves",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 30,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "solve budget",
+                "recorded": 30
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "demand-response buses",
+            "node": "input:eh_study/run/dsr_buses",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "demand-response buses",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "DtC config",
+            "node": "input:eh_study/run/dtc_config",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "DtC config",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "DtC attribution",
+            "node": "input:eh_study/run/dtc_attribution",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": "none (the study's default)",
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "DtC attribution",
+                "recorded": "none (the study's default)"
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "input",
+            "label": "Generator size",
+            "node": "input:eh_study/assumption/g_size",
+            "stamp": null,
+            "stamp_missing": [
+              "unit"
+            ],
+            "state": "fresh",
+            "unit": null,
+            "value": 10.0,
+            "via": {
+              "edge": "derived_from",
+              "from": "run:study",
+              "recorded": {
+                "label": "Generator size",
+                "recorded": 10.0
+              }
+            }
+          },
+          {
+            "broken": null,
+            "kind": "derived",
+            "label": "lole_ci",
+            "node": "derived:eh_study/lole_ci",
+            "stamp": null,
+            "stamp_missing": [],
+            "state": "fresh",
+            "unit": "h per horizon",
+            "value": [
+              0.0001,
+              0.0002
+            ],
+            "via": {
+              "edge": "derived_from",
+              "from": "derived:eh_study/expected_shortfall",
+              "recorded": null
+            }
+          }
+        ],
+        "target": {
+          "figure": "expected_shortfall",
+          "study": "eh_study"
+        }
+      },
+      "status": 200
+    }
+  },
+  "running": {
+    "verdict": {
+      "body": {
+        "detail": {
+          "error_kind": "study_not_run",
+          "message": "the Energy Hub study is still running"
+        }
+      },
+      "status": 409
+    }
+  }
+}

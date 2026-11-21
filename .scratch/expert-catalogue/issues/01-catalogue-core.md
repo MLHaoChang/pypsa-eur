@@ -3,7 +3,7 @@
 
 # 01 — Parameter catalogue core (01a): entries, asset types, guide files, `GET /api/catalogue`, range validation
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: 01a-1 open in #1634
 Type: task
 Gated: yes (GK B; UX (23) OKs the rename diff table and guide drafts)
 Spec: [spec.md](../spec.md) §3, §6.2, §7.2, §10.1
@@ -50,3 +50,19 @@ The catalogue is mode-free: `depth: essentials` is the Guided set, everything el
   - T3: `options_plain` is display only; the stored value stays the raw option (round-trip test). An unknown stored option reads as itself and is flagged, never blank or coerced.
 - UX (23), OK on #1597 @887ab0d6: existing projects show the plain display name where one exists (a label beside the unchanged id); `internal: true` assets stay reachable in Results and reports as what they mean ("Concentrate shortfall").
 - Agreed with homer-parity 04a and GK B (62): "Load growth starts from year" has default source `none`, required when a rate is set; the UI pre-fills the first period and saves it explicitly; the server's 422 stays.
+- GK B (63), plan GO for 01a as three PRs, landed in order 01a-1 (core + route) → 01a-2 (settings, coverage, display names) → 01a-3 (range validation; last because it touches every write path). GK B (64) keeps the GO.
+  - Ids: derived `<scope>.<slug(plain name)>`, pinned by `catalogue.ids.txt`; the pin test fails on any change to a derived id and tells the author to set an explicit `id` equal to the old one. Unique case-insensitively; a slug collision is refused, never suffixed or truncated (#1127).
+  - T1 location: a dict keyed on (template id, component class, component id), served on the network meta payload; a user-added component with the same id under another class gets no name; delete and re-add of the same class and id keeps it (state in the PR); fallback test.
+  - C1: ETag = hash of the exact response bytes per query; `?depth` and `?function` each change it; a stale If-None-Match gets 200 with the new body.
+  - C2: `asset_schema/{component}` as a view is byte-equal to a full payload recorded before the move.
+  - C3: guide ids are dict lookups only; unknown id, `../`, `%2e%2e` and empty all return the same 404 body.
+  - C4: route parity, ACL policy, write-surface lock, golden coverage, route_chat_disposition and test_packaging_requirements run at the trial merge.
+  - C5: `EH_CUSTOM_COLUMNS` derived from entries keeps its exact order; fingerprint and IC digest pinned before the move.
+  - C6: load growth rate finite and > -100; the base year has no default and is required with a rate (422); same words as homer 04a/#1604.
+  - C7: the coverage test asserts `KNOWN_GAPS` only shrinks, against a committed list.
+  - C8: validate only the fields a write changes; an edit to another field of an asset already out of range is never refused (test).
+  - C9: imports (legacy, PSS/E, Library apply of a stored project) load out-of-range values and flag them, never refuse or clamp; interactive edits, bulk, preview/apply and chat writes refuse. One test per path.
+  - C10: ranges are in the stored model unit; a bus-unit-dependent field is checked in the stored unit, with a test on a non-MW bus (#1347).
+  - C11: inf accepted only on fields whose engine default is inf (listed, tested); NaN refused everywhere.
+  - C12: one mutant per write path that skips the validator, each killed by that path's own test; a redundant layer is mutated together with its sibling (#1127 M10).
+- UX (24), OK on #1634 @701e2dea (01a-1): Generator `p_max_pu` keeps "Availability" and `p_min_pu` "Minimum output". For slice 03: a parity test for "Rating" (Line/Transformer `s_nom`) against today's "Capacity"; the `committable` plain name keeps "unit commitment".

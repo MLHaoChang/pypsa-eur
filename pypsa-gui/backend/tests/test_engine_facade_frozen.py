@@ -111,7 +111,7 @@ SIGNATURES: dict[str, str] = {
         "(jurisdiction: 'str', *, as_of: 'date') -> 'JurisdictionPack'",
     "services.library.items.resolve":
         "(db: 'DBSession', org_id: 'UUID', ref: 'M.LibraryItemRef', *, "
-        "root: 'Path | None' = None) -> 'dict'",
+        "root: 'Path | None' = None, project_dir: 'Path | None' = None) -> 'dict'",
     "services.library.items.put_item":
         "(db: 'DBSession', org_id: 'UUID', kind: 'str', name: 'str', payload: 'dict', "
         "meta: 'dict | None' = None, *, created_by: 'UUID | None' = None, "
@@ -139,8 +139,8 @@ SIGNATURES: dict[str, str] = {
         "currency: 'str | None' = None, "
         "series_meta: 'Callable[[object], dict] | None' = None) -> 'dict | None'",
     "services.library.series_store.resolve":
-        "(db: 'DBSession', org_id: 'UUID', ref: 'PriceSeriesRef', *, root: 'Path | None' = None)"
-        " -> 'pd.Series'",
+        "(db: 'DBSession', org_id: 'UUID', ref: 'PriceSeriesRef', *, root: 'Path | None' = None, "
+        "project_dir: 'Path | None' = None) -> 'pd.Series'",
     "services.asset_schema.derive.apply_parts":
         "(n, component_class: 'str', name: 'str', parts: 'Mapping[str, Any]', *, "
         "discount_rate: 'float') -> 'None'",

@@ -3,7 +3,7 @@
 
 # 16 — Harness profile: eh_concentrator_staged (planned template)
 
-Status: ready-for-agent
+Status: done
 Model: Opus
 Type: task
 Blocked by: 07; g2p 10 (template), g2p 11 (counterfactual), g2p 12 and 18 (motor start)
@@ -18,8 +18,8 @@ Profile `eh_concentrator_staged@1` once the template exists: mass balance to 1e-
 
 ## Acceptance criteria
 
-- [ ] Re-triaged against the shipped template; rules and facts confirmed with GK A.
-- [ ] A run reaches hand-off on the demo data.
+- [x] Re-triaged against the shipped template; rules and facts confirmed with GK A (28), Q1-Q9.
+- [x] A run reaches hand-off on the demo data (`tests/test_run_profile_concentrator_runs.py`).
 
 ## Likely files
 

@@ -3,7 +3,7 @@
 
 # Generation-only template (Renewables IPP) cannot run from Guided
 
-Status: needs-triage
+Status: done (#1620 pending; duplicate, GENONLY-RUN-1)
 Type: finding (keyed walkthrough audit, UX-NEXT-1)
 Journey steps: J3 Readiness, J4 Run, J6 Results
 Severity: high
@@ -22,3 +22,7 @@ A generation-only site has a runnable Guided path (or Guided says plainly that i
 ## Journey fit
 
 J3 to J6. The Next button on section 9 must lead to a run that ends on a result the site can have.
+
+## Comments
+
+**2026-11-17 triage (SCALE-1).** Duplicate of #1620 (Guided section 9 offers "Run the solve" on a generation-only site). Check section 10 shows its result there when #1620 lands; reopen if not.

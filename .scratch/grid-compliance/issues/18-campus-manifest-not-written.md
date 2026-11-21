@@ -3,7 +3,11 @@
 
 # GC-18 Campus study: carry the DGS export's `not_written` list into the campus manifest
 
-Status: needs-triage
+Status: ready-for-agent
+Model tier: sonnet
+Size: S
+Blocked by: #1578, #1584, #1589 merged (they change `gridspine/drivers/campus_study.py`)
+Likely files: `gridspine/drivers/campus_study.py`, `tests/gridspine/`
 Type: task
 Parent: `16-dgs-shunt-p-and-line-g.md`
 Gated: **yes** (GK A2, gridspine)
@@ -24,3 +28,7 @@ Write `not_written` into the campus study's export manifest, with the same colum
 
 Open PRs #1578, #1584 and #1589 change `gridspine/drivers/campus_study.py`. Start after they merge. The
 DGS-import session (IMPORTS-1) has the manifest's layout and names.
+
+## Comments
+
+**2026-11-17 triage (SCALE-1).** Still needed: GC-16 (#1602) lists `not_written` only in the writer's return value. Ready once the three PRs merge; the DGS-import session (IMPORTS-1) has the manifest layout, so check it before the plan.

@@ -115,7 +115,7 @@ export function errorsFor(errors: Record<string, string[]>, path: string,
 // ── the report ───────────────────────────────────────────────────────────
 
 type Obj = Record<string, unknown>
-const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
+export const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
 
 /** A value as a number, or null when it is not established (null, absent,
  *  the string "not_established", a `{value: null}` record). */
@@ -147,6 +147,8 @@ export interface Headline {
   value: number | null
   /** Why it is not established, when the report says. */
   note: string | null
+  /** The question the figure answers, when two figures could be confused. */
+  asks?: string
 }
 
 interface HeadlineSpec {
@@ -156,6 +158,7 @@ interface HeadlineSpec {
   optional?: boolean
   /** Shown only when the report has storage (an LCOS block with assets). */
   storage?: boolean
+  asks?: string
 }
 
 /** The storage LCOS block of the project payload (owner decision 6), or null. */
@@ -190,7 +193,9 @@ export const HEADLINES: HeadlineSpec[] = [
   { id: 'llcr', label: 'LLCR', kind: 'ratio', top: 'llcr', section: 'debt', keys: ['llcr'] },
   { id: 'plcr', label: 'PLCR', kind: 'ratio', top: 'plcr', section: 'debt', keys: ['plcr'] },
   { id: 'lcoe', label: 'LCOE (finance-consistent, nominal)', kind: 'price',
-    top: 'lcoe_finance_consistent_eur_per_mwh', section: 'project', keys: ['lcoe_nominal_per_mwh'] },
+    top: 'lcoe_finance_consistent_eur_per_mwh', section: 'project', keys: ['lcoe_nominal_per_mwh'],
+    // WALK-IMPROVE-1 (a): the two break-even prices answer different questions.
+    asks: 'Break-even for all output: one price for every MWh generated that repays every cost at the case’s finance terms, with no other revenue.' },
   { id: 'lcoe_real', label: 'LCOE (real)', kind: 'price', section: 'project',
     keys: ['lcoe_real_per_mwh'], optional: true },
   { id: 'lcos', label: 'Storage LCOS (charging included, nominal)', kind: 'price', section: 'project',
@@ -198,7 +203,8 @@ export const HEADLINES: HeadlineSpec[] = [
   { id: 'lcos_real', label: 'Storage LCOS (real)', kind: 'price', section: 'project',
     keys: ['lcos_real_per_mwh'], storage: true },
   { id: 'ppa_price', label: 'Solved PPA price for the target IRR', kind: 'price',
-    top: 'ppa_price_for_target_irr_eur_per_mwh', section: 'project', keys: ['solved_ppa_price'] },
+    top: 'ppa_price_for_target_irr_eur_per_mwh', section: 'project', keys: ['solved_ppa_price'],
+    asks: 'Break-even for the PPA alone: the PPA’s price that reaches the target equity IRR, with the market sales and other revenue kept as they are.' },
 ]
 
 export function headlines(report: InvestmentCaseReportPayload): Headline[] {
@@ -223,7 +229,7 @@ export function headlines(report: InvestmentCaseReportPayload): Headline[] {
         ?? (h.storage ? lcosReason(payload, h.id === 'lcos_real') : null)
         ?? (sec && sec.status !== 'ok' ? sec.note ?? `the ${h.section} section is ${sec.status.replace(/_/g, ' ')}` : null)
     }
-    out.push({ id: h.id, label: h.label, kind: h.kind, value, note })
+    out.push({ id: h.id, label: h.label, kind: h.kind, value, note, ...(h.asks ? { asks: h.asks } : {}) })
   }
   // H2e: "of which avoided CO2 cost" beside the NPV, when the case prices CO2
   // (gatekeeper Q1: lenders ask). Undiscounted over the horizon; a priced but
@@ -657,16 +663,6 @@ export function uncheckableReason(reason: string | null): string | null {
       return "can't check whether this report is current: the current inputs are not established"
     default: return null
   }
-}
-
-/** The failure a finished run ended in (error / failed / refused), or null. */
-export function studyFailure(s: InvestmentCaseStudy | null | undefined): string | null {
-  if (!s || !['error', 'failed', 'refused'].includes(s.status)) return null
-  const why = s.message ?? s.error ?? null
-  const code = s.code ?? s.error_code ?? null
-  const text = why ?? code ?? 'no reason given'
-  return `${s.status === 'refused' ? 'The case was refused' : 'The run failed'}: ${text}`
-    + (why && code && !why.includes(code) ? ` (${code})` : '')
 }
 
 // ── the campus equipment the case took (campus-IC issues 02 and 05) ─────

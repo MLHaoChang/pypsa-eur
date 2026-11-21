@@ -1,6 +1,7 @@
 # Collapsed, grouped Assumptions card; summaries in sections 2, 4, 5, 6
 
-Status: ready-for-agent
+Status: done (#1688)
+Landed in #1688.
 Type: task
 Spec: `.scratch/guided-results/spec.md` §2, §3
 

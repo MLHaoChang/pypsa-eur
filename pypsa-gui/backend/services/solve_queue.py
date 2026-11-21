@@ -272,6 +272,23 @@ class SolveConfigConflict(Exception):
         self.existing = existing
 
 
+def _enqueuer_may_not_write(job: "SolveJob") -> bool:
+    """True when the person who queued `job` may no longer write its project:
+    they now only view it, their membership is gone, or their account is.
+
+    Read fresh from the database at the moment the job runs; a lost membership
+    fails closed like a demotion (GK B F3 on #1622). A job with no recorded
+    requester or project (local mode, unkeyed jobs) is not judged here, nor is
+    a deleted project.
+    """
+    key, requester = job.project_key, job.enqueued_by_user_id
+    if not key or requester is None or ":" not in key:
+        return False
+    from services import project_write_gate
+
+    return project_write_gate.requester_may_not_write(requester, key.split(":", 1)[1])
+
+
 class SolveQueue:
     """FIFO dispatcher: enqueue saved projects, solve them one at a time."""
 
@@ -1037,6 +1054,14 @@ class SolveQueue:
         """Dispatch on the job's kind. Everything else about a job — claiming
         it, the log queue, the stop event, the persisted status — is the same
         whichever runner takes it."""
+        if _enqueuer_may_not_write(job):
+            # The role is read again here, at execution: a person made a
+            # viewer, or removed, after queueing does not get the solve saved
+            # (project-viewer-role 01, GK B R3).
+            from services import project_write_gate
+
+            self._finish(job, "failed", error=f"{project_write_gate.KIND}: {project_write_gate.MESSAGE}")
+            return
         if job.kind == KIND_GRIDSPINE:
             self._run_gridspine_job(job)
         elif job.kind == KIND_CAMPUS:

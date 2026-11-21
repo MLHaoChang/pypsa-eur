@@ -448,6 +448,24 @@ def _held(component: str, entity: str, *, carrier=None, field_name: str | None =
             "series": bool(series)}
 
 
+def _pin_sizes(n, rows: list[dict]) -> None:
+    """Set ``fixed_size`` on each section 5 asset row: the size an extendable asset's two
+    bounds pin when both are finite and equal (an IPP's owned plant, template-e2e 14), else
+    None. Display only, like the rest of the row: Guided reads "fixed at", not "sized by
+    the study"."""
+    tables = {klass: (table, fld) for klass, table, fld, _stock in _ASSET_TABLES}
+    for row in rows:
+        row["fixed_size"] = None
+        if not row["extendable"] or row["component"] not in tables:
+            continue
+        table, fld = tables[row["component"]]
+        df = getattr(n, table)
+        lo, hi = (_number(df.at[row["entity"], f"{fld}_{b}"]) if f"{fld}_{b}" in df else None
+                  for b in ("min", "max"))
+        if lo is not None and hi is not None and abs(hi - lo) <= 1e-6 * max(1.0, abs(hi)):
+            row["fixed_size"] = lo
+
+
 def _peak(column) -> float | None:
     """The value of a series furthest from zero, sign kept: the peak of
     [-5, -1, -2] is -5. Where +5 and -5 tie, the positive one. None for a
@@ -463,6 +481,8 @@ def _holds(n, carriers: list[str], site_assets: list[tuple[str, str]]
     total never does. Raw values only, the words are the frontend's. Display only: no state,
     count, blocker, verdict, acknowledgement or fingerprint reads it. An
     extendable asset carries the size as entered, never a solved one."""
+    from services.process_products import is_helper_generator
+
     tables = {klass: (table, fld, stock) for klass, table, fld, stock in _ASSET_TABLES}
     assets = []
     for klass, name in site_assets[:HOLDS_CAP]:
@@ -473,6 +493,9 @@ def _holds(n, carriers: list[str], site_assets: list[tuple[str, str]]
                             field_name=fld, value=df.at[name, fld],
                             unit=_size_unit(n, bus, stock=stock),
                             extendable=df.at[name, f"{fld}_extendable"]))
+        # Asset rows only: a Generator the model adds (slack, lost production, buy-in), not an asset of
+        # the site (`process_products.is_helper_generator`). Display only, like the rest of the row.
+        assets[-1]["helper"] = klass == "Generator" and is_helper_generator(n, name)
     series = n.loads_t.p_set
     loads = []
     for name in n.loads.index[:HOLDS_CAP]:
@@ -494,9 +517,19 @@ def _holds(n, carriers: list[str], site_assets: list[tuple[str, str]]
             # The attribute's name only, never the series' values.
             profiles += [_held(klass, str(name), field_name=fld)
                          for name in frame.columns[:max(0, HOLDS_CAP - len(profiles))]]
-    rows = {"carriers": [_held("Carrier", c) for c in carriers[:HOLDS_CAP]], "loads": loads,
+    from services.recipes import link_recipe
+
+    # Section 2 holds the carriers, then each process's recipe (gap 03): the
+    # recipe row owns the recipe, section 5's row of the same Link its size.
+    recipes = []
+    for klass, name in site_assets:
+        r = link_recipe(n, name) if klass == "Link" else None
+        if r is not None:
+            recipes.append({**_held("Link", name, carrier=n.links.at[name, "carrier"]), "recipe": r})
+    held_carriers = [_held("Carrier", c) for c in carriers[:HOLDS_CAP]]
+    rows = {"carriers": held_carriers + recipes[:max(0, HOLDS_CAP - len(held_carriers))], "loads": loads,
             "assets": assets, "profiles": profiles}
-    totals = {"carriers": len(carriers), "loads": len(n.loads.index),
+    totals = {"carriers": len(carriers) + len(recipes), "loads": len(n.loads.index),
               "assets": len(site_assets), "profiles": profile_total}
     return rows, totals
 
@@ -543,6 +576,7 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
     carriers = [str(c) for c in n.carriers.index] if len(n.carriers) else \
         sorted({str(b) for b in n.buses.get("carrier", []) if str(b)})
     holds, holds_total = _holds(n, carriers, site_assets)
+    _pin_sizes(n, holds.get("assets", []))
     return _Facts(
         revision=revision, snapshots=len(n.snapshots), loads=len(n.loads),
         carriers=carriers,
@@ -777,13 +811,37 @@ def _bind_items(facts: _Facts, db, org_id, project_dir: pathlib.Path, n) -> list
 
             from services.library import bundle_pins
 
-            for issue in bundle_pins.check_pins(db, _uuid.UUID(str(org_id)), project_dir,
-                                                config=facts.cfg_dict):
-                add(issue.get("code", "library_pin_invalid"), issue.get("message", ""),
-                    issue.get("field") or "library", source="library")
-        except Exception:                                # noqa: BLE001
+            for issue in bundle_pins.check_pins(
+                db, _uuid.UUID(str(org_id)), project_dir, config=facts.cfg_dict
+            ):
+                # A newer Library version, or a series served by its copy alone, is a
+                # notice, not a fault (project-io 03).
+                add(
+                    issue.get("code", "library_pin_invalid"),
+                    issue.get("message", ""),
+                    issue.get("field") or "library",
+                    source="library",
+                    severity="warning"
+                    if issue.get("code") in bundle_pins.NOTICE_CODES
+                    else "error",
+                )
+        except Exception:  # noqa: BLE001
             logger.exception("flow: library pin re-check failed")
     return out
+
+
+# Island rows have no editor of their own in section 5 yet (the Controls block
+# is a later package); until then they open the island panel, Grid study ›
+# Island, in place. Never the Expert Capacity bounds the section fallback gives.
+_ISLAND_WORDS = ("island", "rocof", "ride-through")
+_ISLAND_PANEL = "campusStudy"
+
+
+def _ledger_panel(item: str, section: str | None) -> str | None:
+    low = item.lower()
+    if section == "assets" and any(w in low for w in _ISLAND_WORDS):
+        return _ISLAND_PANEL
+    return None
 
 
 def ledger_section(item: str) -> str | None:
@@ -883,8 +941,9 @@ def _assumed_items(template: dict, cfg: dict | None = None) -> list[dict]:
                              panel=row.get("panel"), value=str(value or "")))
             out[-1]["card"] = card
             continue
+        filed = ledger_section(item) or "project"
         out.append(_item("assumed_default", "warning", message, "template",
-                         ledger_section(item) or "project", entity=item,
+                         filed, entity=item, panel=_ledger_panel(item, filed),
                          value=str(value or "")))
         out[-1]["card"] = card
     energ = [e for e in template.get("energization") or []
@@ -1148,14 +1207,18 @@ def _loadflow_requested(facts) -> bool:
 
 def _summary(section: str, facts: _Facts) -> str | None:
     if section == "project":
-        return f"{facts.snapshots} snapshots"
+        # A time step, never an unqualified "snapshot" (CONTEXT.md).
+        return _count(facts.snapshots, "time step")
     if section == "carriers":
         return ", ".join(facts.carriers[:6]) or None
     if section == "connection":
         if not facts.connection_links:
             return None
+        # Names as a person reads them, never the engine id (UX 2 on #1688), the same way Guided's Site card does.
+        from services.run_actions import _display_name
+
         mw = f", {facts.import_p_nom_mw:g} MW" if facts.import_p_nom_mw is not None else ""
-        return ", ".join(facts.connection_links[:3]) + mw
+        return ", ".join(_display_name(x) for x in facts.connection_links[:3]) + mw
     if section == "loads":
         return _count(facts.loads, "load")
     if section == "assets":
