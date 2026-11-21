@@ -77,6 +77,10 @@ export function hasGaps(snapshots: string[], periods?: Array<number | string>): 
   return false
 }
 
+function weightsReadable(snapshots: string[], weightings?: Array<Record<string, number | string>>): boolean {
+  return !!weightings && weightings.length === snapshots.length && weightings.every(r => Number.isFinite(Number(r?.objective)))
+}
+
 /** Weeks per period when the horizon is representative weeks weighted up to a year, else 0.
  *  Reads the weights, not gaps: one contiguous week with weights near 52 is still a sample. */
 export function weeksPerPeriod(
@@ -118,7 +122,11 @@ function useProjectLines(): ExpertOnlyLine[] {
         if (!d || d.snapshots.length === 0) return null
         const weeks = weeksPerPeriod(d.snapshots, d.weightings ?? [], d.periods)
         if (weeks > 0) return `yes, ${weeks} ${weeks === 1 ? 'week' : 'weeks'} per period, weighted to a year`
-        return hasGaps(d.snapshots, d.periods) ? 'sampled' : 'no, a chronological year'
+        if (hasGaps(d.snapshots, d.periods)) return 'sampled'
+        // Weights missing or short: say so rather than guess "no".
+        return weightsReadable(d.snapshots, d.weightings) ? 'no, a chronological year'
+          : "not known yet: the horizon's weights could not be read"
+
       }) },
   ]
 }

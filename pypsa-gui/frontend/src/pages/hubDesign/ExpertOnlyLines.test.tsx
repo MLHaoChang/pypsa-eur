@@ -216,11 +216,20 @@ describe('ExpertOnlyLines', () => {
 
   it('a chronological year reads as such', async () => {
     setValues()
-    api.snapshots.mockResolvedValue({ count: 3, weightings: [], snapshots: [
+    api.snapshots.mockResolvedValue({ count: 3, weightings: [{ objective: 1 }, { objective: 1 }, { objective: 1 }], snapshots: [
       '2030-01-01T00:00:00', '2030-01-01T01:00:00', '2030-01-01T02:00:00'] })
     mount('project')
     await settled('project')
     expect(lineText('representative_weeks')).toBe('Representative weeks: no, a chronological year')
+  })
+
+  it('unreadable weights say "not known yet", not a bare no', async () => {
+    setValues()
+    api.snapshots.mockResolvedValue({ count: 3, weightings: [], snapshots: [
+      '2030-01-01T00:00:00', '2030-01-01T01:00:00', '2030-01-01T02:00:00'] })
+    mount('project')
+    await settled('project')
+    expect(lineText('representative_weeks')).toBe("Representative weeks: not known yet: the horizon's weights could not be read")
   })
 
   it('one representative week reads "yes", not a chronological year', async () => {
