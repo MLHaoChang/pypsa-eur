@@ -757,7 +757,9 @@ def test_F1k_the_worksheet_ranking_is_deterministic_when_every_row_ties():
         _state.pop("fmea_sweep", None)
 
     assert set(ids) <= set(got), got
-    assert all(float(r.get("criticality_eur_per_year", 0.0)) == 0.0
+    # Without a VoLL the € figures are not priced (None, template-e2e 08):
+    # they tie all the same.
+    assert all((r.get("criticality_eur_per_year") or 0.0) == 0.0
                for r in out["per_mode"]), \
         "fixture must tie every row, or the tie-break is not what is tested"
     assert got == sorted(got), got

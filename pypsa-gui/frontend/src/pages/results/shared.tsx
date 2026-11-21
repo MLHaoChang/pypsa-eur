@@ -1137,7 +1137,7 @@ export function ChartCard({
     >
       <header className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-2">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0">
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] [overflow-wrap:anywhere]">{title}</h3>
+          <h3 className="text-h3 font-semibold text-text [overflow-wrap:anywhere]">{title}</h3>
           {count != null && <span className="font-mono text-[11px] text-muted shrink-0">{count}</span>}
           {hint && <span className="text-[11px] text-muted [overflow-wrap:anywhere]">{hint}</span>}
         </div>

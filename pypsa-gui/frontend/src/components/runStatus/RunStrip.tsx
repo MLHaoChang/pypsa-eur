@@ -6,6 +6,7 @@ import { RUN_READ_ONLY_LINE } from '../../utils/mutationGuard'
 import { outcomeText } from '../../utils/runStatus'
 import { RunStatusLine } from './RunStatusLine'
 import { RunOutcomeLine } from './RunOutcomeLine'
+import { NotifyOptIn } from './NotifyOptIn'
 
 /**
  * The run strip at the top of the tab, above the header (run progress spec §1
@@ -37,6 +38,7 @@ export default function RunStrip() {
     <div data-testid="run-strip"
       className="flex items-center gap-3 px-3 h-8 shrink-0 overflow-hidden border-b border-warn/30 bg-warn/10 text-[11.5px] text-warn">
       {run && <RunStatusLine run={run} />}
+      {run && <NotifyOptIn />}
       {solving && (
         <span data-testid="run-strip-readonly" className="ml-auto flex shrink-0 items-center gap-1.5 text-warn/80">
           <Lock size={12} className="shrink-0" aria-hidden />

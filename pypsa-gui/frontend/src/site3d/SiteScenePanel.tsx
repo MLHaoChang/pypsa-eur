@@ -58,7 +58,7 @@ function goHome(home: unknown): void {
 /** "› Snapshots" beside an unreadable scene (UX SC-01b plan, condition 3). */
 function SnapshotsLink() {
   return (
-    <button type="button" data-testid="scene-snapshots-link" className="whitespace-nowrap text-accent hover:underline"
+    <button type="button" data-testid="scene-snapshots-link" className="whitespace-nowrap text-link hover:underline"
       onClick={() => withReturnFromSite3D(() => useUIStore.getState().setSlidePanel('snapshots'))}>
       › Snapshots
     </button>
@@ -75,7 +75,7 @@ function Blocker({ action, where, ask = true }: { action: SceneAction | undefine
     <span className="text-[11px] text-muted" data-testid={`scene-blocker-${action.action}`}>
       {action.blocker.reason}
       {leaves && section && (
-        <> <button type="button" onClick={() => goHome(action.blocker!.home)} className="text-accent hover:underline">
+        <> <button type="button" onClick={() => goHome(action.blocker!.home)} className="text-link hover:underline">
           {action.blocker.link} {SECTION_WORDS[section] ?? section}
         </button></>
       )}
@@ -302,13 +302,13 @@ export default function SiteScenePanel({ site, contextBuildings, current = false
       {moved && (
         <div data-testid="site-anchor-moved" className="text-[11px] text-warn">
           Site coordinates moved over 1 km from this site: the site stays where it was created{' '}
-          <button type="button" onClick={() => openSiteAnchor({ fromSite3D: true })} className="text-accent hover:underline">› Site coordinates</button>
+          <button type="button" onClick={() => openSiteAnchor({ fromSite3D: true })} className="text-link hover:underline">› Site coordinates</button>
         </div>
       )}
       {refusal && (
         <div role="alert" className="text-[11px] text-danger">
           {refusal}{' '}
-          <button type="button" data-testid="scene-refusal-generate" className="whitespace-nowrap text-accent hover:underline"
+          <button type="button" data-testid="scene-refusal-generate" className="whitespace-nowrap text-link hover:underline"
             onClick={() => { clearRefusal(project); setPart('generate') }}>› Generate</button>{' '}
           <button type="button" onClick={() => clearRefusal(project)} className="whitespace-nowrap text-muted hover:text-text">Dismiss</button>
         </div>
@@ -324,7 +324,7 @@ export default function SiteScenePanel({ site, contextBuildings, current = false
               {enabled.unbound_keys.map(key => (
                 <li key={key}>
                   {placedName(key)}{' '}
-                  <button type="button" data-testid={`site-unbound-attach-${key}`} className="whitespace-nowrap text-accent hover:underline"
+                  <button type="button" data-testid={`site-unbound-attach-${key}`} className="whitespace-nowrap text-link hover:underline"
                     onClick={() => { setPlacementRebind({ siteId: site.id, key }); setPart('model') }}>› Attach again</button>
                 </li>
               ))}

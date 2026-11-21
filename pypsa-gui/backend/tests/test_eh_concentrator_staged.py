@@ -224,7 +224,7 @@ def test_the_sidecars_are_current():
     """The shipped sidecars match what the builders write (regenerate with `_build.py`)."""
     out = TPL_DIR / TID
     meta = json.loads((out / T.META_FILE).read_text())
-    assert meta == json.loads(json.dumps(T.TEMPLATE_META[TID]))
+    assert meta == json.loads(json.dumps(T.template_meta(TID)))
     assert json.loads((out / T.SOLVER_FILE).read_text()) == json.loads(json.dumps(T.solver_config(TID)))
 
 

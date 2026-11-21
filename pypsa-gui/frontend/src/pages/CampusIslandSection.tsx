@@ -322,7 +322,7 @@ export default function CampusIslandSection({ name }: { name: string }) {
             live in Results › Control (W10 R3). The cuts' loop is started here. */}
         <p className="text-[12px] text-muted mt-3" data-testid="island-results-link">
           The island report, the frequency cuts and the grid-forming settings are in Results › Control.{' '}
-          <button type="button" className="text-accent hover:underline" data-testid="island-results-open"
+          <button type="button" className="text-link hover:underline" data-testid="island-results-open"
             onClick={() => showResultsTab('island')}>Open Island & ride-through ›</button>
         </p>
         {saved && <CampusIslandCutsSection name={name} mode="actions" />}

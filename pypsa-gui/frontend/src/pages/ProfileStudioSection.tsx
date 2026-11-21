@@ -110,7 +110,7 @@ function PendingCard({ name, record }: { name: string; record: PendingProfile })
       {message && appliedTo && (
         <button type="button" data-testid="apply-view-time-series"
           onClick={() => openTimeSeriesFor('Generator', appliedTo, { field: 'p_max_pu' })}
-          className="mt-1 text-[11px] text-accent hover:underline">
+          className="mt-1 text-[11px] text-link hover:underline">
           View in Time Series ›
         </button>
       )}

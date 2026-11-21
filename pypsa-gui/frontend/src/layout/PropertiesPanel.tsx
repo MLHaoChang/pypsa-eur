@@ -18,6 +18,7 @@ import { useUIStore } from '../store/uiStore'
 import { editScope, loadExtras } from '../utils/extrasStore'
 import { nk } from '../utils/queryKeys'
 import { updateAsset } from '../utils/assetWrite'
+import { useEditBase } from '../hooks/useEditBase'
 // A1-FE: a refused edit (`study_in_flight`, quiet in the interceptor) toasts
 // the backend's sentence, not axios' "Request failed with status code 409".
 import { blockerMessage } from '../utils/blockerMessage'
@@ -168,17 +169,10 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
     onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
-  const saveMut = useMutation({
-    // The Asset-write chokepoint (utils/assetWrite.ts) owns fetch, spread,
-    // PUT and invalidation; this builder owns only the form→patch mapping.
-    // `current` arrives from the chokepoint — fresh-fetched on a cold cache
-    // (ruling 3), so the old `?? gen` stale-prop fallback is gone.
-    mutationFn: () => {
-      const claim = cardCostClaim(schema, specs, form, asset, 'bus')
-      return updateAsset<Generator>(
-      qc, useUIStore.getState().currentProject, 'generators', gen.name,
-      (current) => {
-      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Generator>
+  const edit = useEditBase<Generator, { schema: typeof schema; specs: typeof specs }>(open, gen as Generator, { schema, specs }, !!schema)
+  const build = edit.remember((current: Generator) => {
+      const claim = cardCostClaim(edit.atOpen().schema, edit.atOpen().specs, form, asset, 'bus')
+      const payload = buildPatch(edit.atOpen().specs, form, current as unknown as Record<string, unknown>) as Partial<Generator>
       payload.name = form.name?.trim() || gen.name
       payload.bus = (form.bus as string | undefined)?.trim() || gen.bus
       payload.carrier = form.carrier || current.carrier
@@ -187,7 +181,16 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
       // 05d U1: a bus move that leaves the costs as seeded keeps them as stored and sends no claim.
       for (const key of claim.dropCosts) delete (payload as Record<string, unknown>)[key]
       return payload
-    }, { costBasis: claim.costBasis }) },
+  })
+
+  const saveMut = useMutation({
+    // The Asset-write chokepoint (utils/assetWrite.ts) owns fetch, spread,
+    // PUT and invalidation; this builder owns only the form→patch mapping.
+    // `current` arrives from the chokepoint — fresh-fetched on a cold cache
+    // (ruling 3), so the old `?? gen` stale-prop fallback is gone.
+    mutationFn: () => updateAsset<Generator>(
+      qc, useUIStore.getState().currentProject, 'generators', gen.name, build,
+      { costBasis: cardCostClaim(edit.atOpen().schema, edit.atOpen().specs, form, asset, 'bus').costBasis, initial: edit.initial() }),
     onSuccess: () => {
       // Invalidation is the chokepoint's job now.
       setOpen(false)
@@ -358,17 +361,12 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
     onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
-  const saveMut = useMutation({
-    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
-    // the schema's descriptors own the form→patch mapping.
-    mutationFn: () => {
-      const claim = cardCostClaim(schema, specs, form, asset, 'bus')
-      return updateAsset<StorageUnit>(
-      qc, useUIStore.getState().currentProject, 'storage_units', su.name,
-      (current) => {
-      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<StorageUnit>
+  const edit = useEditBase<StorageUnit, { schema: typeof schema; specs: typeof specs }>(open, su as StorageUnit, { schema, specs }, !!schema)
+  const build = edit.remember((current: StorageUnit) => {
+      const claim = cardCostClaim(edit.atOpen().schema, edit.atOpen().specs, form, asset, 'bus')
+      const payload = buildPatch(edit.atOpen().specs, form, current as unknown as Record<string, unknown>) as Partial<StorageUnit>
       // TCU 09: the derived costs stay out of the PUT; the parts own them.
-      omitDerived(specs, payload)
+      omitDerived(edit.atOpen().specs, payload)
       payload.name = form.name?.trim() || su.name
       payload.bus = (form.bus as string | undefined)?.trim() || su.bus
       payload.carrier = form.carrier || current.carrier
@@ -377,7 +375,14 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       // 05d U1: a bus move that leaves the costs as seeded keeps them as stored and sends no claim.
       for (const key of claim.dropCosts) delete (payload as Record<string, unknown>)[key]
       return payload
-    }, { costBasis: claim.costBasis }) },
+  })
+
+  const saveMut = useMutation({
+    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
+    // the schema's descriptors own the form→patch mapping.
+    mutationFn: () => updateAsset<StorageUnit>(
+      qc, useUIStore.getState().currentProject, 'storage_units', su.name, build,
+      { costBasis: cardCostClaim(edit.atOpen().schema, edit.atOpen().specs, form, asset, 'bus').costBasis, initial: edit.initial() }),
     onSuccess: () => {
       setOpen(false)
       toast.success('Storage unit saved')
@@ -530,15 +535,10 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
     onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
-  const saveMut = useMutation({
-    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
-    // the schema's descriptors own the form→patch mapping.
-    mutationFn: () => {
-      const claim = cardCostClaim(schema, specs, form, asset, 'bus')
-      return updateAsset<Store>(
-      qc, useUIStore.getState().currentProject, 'stores', store.name,
-      (current) => {
-      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Store>
+  const edit = useEditBase<Store, { schema: typeof schema; specs: typeof specs }>(open, store as Store, { schema, specs }, !!schema)
+  const build = edit.remember((current: Store) => {
+      const claim = cardCostClaim(edit.atOpen().schema, edit.atOpen().specs, form, asset, 'bus')
+      const payload = buildPatch(edit.atOpen().specs, form, current as unknown as Record<string, unknown>) as Partial<Store>
       payload.name = form.name?.trim() || store.name
       payload.bus = (form.bus as string | undefined)?.trim() || store.bus
       payload.carrier = form.carrier || current.carrier
@@ -547,7 +547,14 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
       // 05d U1: a bus move that leaves the costs as seeded keeps them as stored and sends no claim.
       for (const key of claim.dropCosts) delete (payload as Record<string, unknown>)[key]
       return payload
-    }, { costBasis: claim.costBasis }) },
+  })
+
+  const saveMut = useMutation({
+    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
+    // the schema's descriptors own the form→patch mapping.
+    mutationFn: () => updateAsset<Store>(
+      qc, useUIStore.getState().currentProject, 'stores', store.name, build,
+      { costBasis: cardCostClaim(edit.atOpen().schema, edit.atOpen().specs, form, asset, 'bus').costBasis, initial: edit.initial() }),
     onSuccess: () => {
       setOpen(false)
       toast.success('Store saved')
@@ -720,19 +727,22 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
   // Save for reuse in the read-out rows (slice 03b; Expert only).
   const saveAction = useSaveAction('Load', load.name, asset)
 
-  const saveMut = useMutation({
-    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
-    // the schema's descriptors own the form→patch mapping.
-    mutationFn: () => updateAsset<Load>(
-      qc, useUIStore.getState().currentProject, 'loads', load.name,
-      (current) => {
-        const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Load>
+  const edit = useEditBase<Load, { schema: typeof schema; specs: typeof specs }>(open, load as Load, { schema, specs }, !!schema)
+  const build = edit.remember((current: Load) => {
+        const payload = buildPatch(edit.atOpen().specs, form, current as unknown as Record<string, unknown>) as Partial<Load>
         payload.name = form.name?.trim() || load.name
         payload.bus = (form.bus as string | undefined)?.trim() || load.bus
         payload.carrier = form.carrier || current.carrier
         Object.assign(payload, extrasPatch(form, loadExtras(editScope('Load'))))
         return payload
-      }),
+  })
+
+  const saveMut = useMutation({
+    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
+    // the schema's descriptors own the form→patch mapping.
+    mutationFn: () => updateAsset<Load>(
+      qc, useUIStore.getState().currentProject, 'loads', load.name, build,
+      { initial: edit.initial() }),
     onSuccess: () => {
       setOpen(false)
       toast.success('Load saved')
@@ -931,17 +941,10 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
     onError: (e: Error) => toast.error(blockerMessage(e)),
   })
 
-  const saveMut = useMutation({
-    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate —
-    // the spread is what keeps un-surfaced Link fields (`efficiency2`,
-    // `bus2..bus4`, `committable`, `terrain_factor`, …) alive through the
-    // backend's remove+add cycle. This builder is only the form→patch map.
-    mutationFn: () => {
-      const claim = cardCostClaim(schema, specs, form, asset, 'bus0')
-      return updateAsset<Link>(
-      qc, useUIStore.getState().currentProject, 'links', link.name,
-      (current) => {
-      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Link>
+  const edit = useEditBase<Link, { schema: typeof schema; specs: typeof specs }>(open, link as Link, { schema, specs }, !!schema)
+  const build = edit.remember((current: Link) => {
+      const claim = cardCostClaim(edit.atOpen().schema, edit.atOpen().specs, form, asset, 'bus0')
+      const payload = buildPatch(edit.atOpen().specs, form, current as unknown as Record<string, unknown>) as Partial<Link>
       payload.name = form.name?.trim() || link.name
       payload.bus0 = form.bus0 || current.bus0
       payload.bus1 = form.bus1 || current.bus1
@@ -952,7 +955,16 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
       // 05d U1: a bus move that leaves the costs as seeded keeps them as stored and sends no claim.
       for (const key of claim.dropCosts) delete (payload as Record<string, unknown>)[key]
       return payload
-    }, { costBasis: claim.costBasis }) },
+  })
+
+  const saveMut = useMutation({
+    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate —
+    // the spread is what keeps un-surfaced Link fields (`efficiency2`,
+    // `bus2..bus4`, `committable`, `terrain_factor`, …) alive through the
+    // backend's remove+add cycle. This builder is only the form→patch map.
+    mutationFn: () => updateAsset<Link>(
+      qc, useUIStore.getState().currentProject, 'links', link.name, build,
+      { costBasis: cardCostClaim(edit.atOpen().schema, edit.atOpen().specs, form, asset, 'bus0').costBasis, initial: edit.initial() }),
     onSuccess: () => {
       setOpen(false)
       toast.success('Link saved')
@@ -1587,18 +1599,12 @@ export function LinePanel({ name }: { name: string }) {
     const v = parseFloat(form[key]); return isNaN(v) ? (fallback ?? 0) : v
   }
 
-  const updateMut = useMutation({
-    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate —
-    // the spread keeps un-surfaced fields (`terrain_factor`, `num_parallel`,
-    // `v_ang_min/max`, `committable`, …) alive through remove+add; the
-    // schema's descriptors own the form→patch mapping.
-    mutationFn: () => updateAsset<Line>(
-      qc, useUIStore.getState().currentProject, 'lines', name,
-      (current) => {
+  const edit = useEditBase<Line, { schema: typeof schema; specs: typeof specs }>(editing, line as Line, { schema, specs }, !!schema)
+  const build = edit.remember((current: Line) => {
       if (!line) throw new Error('Line not found')
-      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Line>
+      const payload = buildPatch(edit.atOpen().specs, form, current as unknown as Record<string, unknown>) as Partial<Line>
       // TCU 09: the derived costs stay out of the PUT; the parts own them.
-      omitDerived(specs, payload)
+      omitDerived(edit.atOpen().specs, payload)
       payload.name = form.name?.trim() || name
       // r/x/b are entered per km; PyPSA stores absolute Ohm / Siemens.
       // Multiply by the length being saved. Per-km 0 (or empty) ⇒ absolute 0.
@@ -1609,7 +1615,16 @@ export function LinePanel({ name }: { name: string }) {
       // Extras last: a value the user just typed in the extras picker wins.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Line'))))
       return payload
-    }),
+  })
+
+  const updateMut = useMutation({
+    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate —
+    // the spread keeps un-surfaced fields (`terrain_factor`, `num_parallel`,
+    // `v_ang_min/max`, `committable`, …) alive through remove+add; the
+    // schema's descriptors own the form→patch mapping.
+    mutationFn: () => updateAsset<Line>(
+      qc, useUIStore.getState().currentProject, 'lines', name, build,
+      { initial: edit.initial() }),
     onSuccess: () => {
       setEditing(false)
       toast.success('Line updated')
@@ -1791,6 +1806,16 @@ export function TransformerPanel({ name }: { name: string }) {
   // Save for reuse in the read-out rows (slice 03b; Expert only).
   const saveAction = useSaveAction('Transformer', tr?.name ?? null, asset)
 
+  const edit = useEditBase<Transformer, { schema: typeof schema; specs: typeof specs }>(editing, tr as Transformer, { schema, specs }, !!schema)
+  const build = edit.remember((current: Transformer) => {
+      if (!tr) throw new Error('Transformer not found')
+      const payload = buildPatch(edit.atOpen().specs, form, current as unknown as Record<string, unknown>) as Partial<Transformer>
+      payload.name = form.name?.trim() || name
+      // Extras last: a value the user just typed in the extras picker wins.
+      Object.assign(payload, extrasPatch(form, loadExtras(editScope('Transformer'))))
+      return payload
+  })
+
   const updateMut = useMutation({
     // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate —
     // the spread keeps un-surfaced Transformer fields (`tap_position`,
@@ -1799,15 +1824,8 @@ export function TransformerPanel({ name }: { name: string }) {
     // own the form→patch mapping. v_nom_0 / v_nom_1 always go back, so the
     // backend re-validates them against the connected buses on every save.
     mutationFn: () => updateAsset<Transformer>(
-      qc, useUIStore.getState().currentProject, 'transformers', name,
-      (current) => {
-      if (!tr) throw new Error('Transformer not found')
-      const payload = buildPatch(specs, form, current as unknown as Record<string, unknown>) as Partial<Transformer>
-      payload.name = form.name?.trim() || name
-      // Extras last: a value the user just typed in the extras picker wins.
-      Object.assign(payload, extrasPatch(form, loadExtras(editScope('Transformer'))))
-      return payload
-    }),
+      qc, useUIStore.getState().currentProject, 'transformers', name, build,
+      { initial: edit.initial() }),
     onSuccess: () => {
       setEditing(false)
       toast.success('Transformer updated')
