@@ -63,7 +63,6 @@ from typing import Any
 import pypsa
 
 from gridspine.ingest.dgs_parse import LINE_COLUMN, DgsTables, parse_dgs
-from gridspine.ingest.ratings import assumed_rating_mva, total_load_mva
 from gridspine.ingest.import_result import (
     Assumed,
     ImportFormatError,
@@ -71,6 +70,7 @@ from gridspine.ingest.import_result import (
     ImportResult,
     Unmapped,
 )
+from gridspine.ingest.ratings import assumed_rating_mva, total_load_mva
 from gridspine.schema.contracts import ContractError
 
 FORMAT_ID = "dgs"

@@ -1020,9 +1020,13 @@ def test_case14_unrated_lines_get_a_stated_bound():
 
 def test_a_zero_ratea_line_falls_back_to_a_positive_rateb(tmp_path):
     text = (FIX / "case14.raw").read_text().splitlines()
-    first = "     1,     2,'1 ',1.93800E-2,5.91700E-2,5.28000E-2,   0.00,   0.00,   0.00,"
+    first = (
+        "     1,     2,'1 ',1.93800E-2,5.91700E-2,5.28000E-2,   0.00,   0.00,   0.00,"
+    )
     assert text[37].startswith(first)
-    text[37] = text[37].replace(first, first[: -len("   0.00,   0.00,")] + "  45.00,   0.00,", 1)
+    text[37] = text[37].replace(
+        first, first[: -len("   0.00,   0.00,")] + "  45.00,   0.00,", 1
+    )
     p = tmp_path / "case14_rateb.raw"
     p.write_text("\n".join(text) + "\n")
     res = read_psse([p], {})

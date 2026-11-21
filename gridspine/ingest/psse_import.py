@@ -71,7 +71,6 @@ import pandas as pd
 import pypsa
 
 from gridspine.handoff.contingencies import conmap_path
-from gridspine.ingest.ratings import assumed_rating_mva, total_load_mva
 from gridspine.ingest.contingency_list import (
     _marked,
     _NetIndex,
@@ -98,6 +97,7 @@ from gridspine.ingest.psse_raw_parse import (
     shunt_siemens,
     transformer_windings,
 )
+from gridspine.ingest.ratings import assumed_rating_mva, total_load_mva
 from gridspine.schema.contracts import ContractError
 
 FORMAT_ID = "psse"
@@ -693,8 +693,10 @@ def build_network(case: RawCase):
 
 
 def _line_rating(r, rate_cols, bound_load, kv_from, kv_to):
-    """``(s_nom, why)`` for a line whose first rating is 0: the first positive
-    later rating, else the never-binding bound. ``why`` has ``{load}``/``{sb}``."""
+    """
+    ``(s_nom, why)`` for a line whose first rating is 0: the first positive
+    later rating, else the never-binding bound. ``why`` has ``{load}``/``{sb}``.
+    """
     first = rate_cols[0]
     for col in rate_cols[1:]:
         if r[col] > 0:

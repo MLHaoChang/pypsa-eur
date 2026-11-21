@@ -38,7 +38,9 @@ def _class_floor(kv: float) -> float:
 
 def assumed_rating_mva(total_load_mva: float, *kv: float) -> float:
     """The never-binding bound for a total load and the element's voltage(s)."""
-    known = [float(v) for v in kv if v is not None and math.isfinite(float(v)) and v > 0]
+    known = [
+        float(v) for v in kv if v is not None and math.isfinite(float(v)) and v > 0
+    ]
     floor = _class_floor(max(known)) if known else _class_floor(0.0)
     return float(math.ceil(max(LOAD_MULTIPLE * float(total_load_mva), floor)))
 

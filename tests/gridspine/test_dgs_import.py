@@ -1257,9 +1257,7 @@ def test_the_unbounded_grid_takes_its_short_circuit_level(hand):
 
 def test_an_unbounded_grid_without_snss_takes_the_load_bound(tmp_path):
     # load 6 + j2 MVA: 10 × 6.32 = 64 MVA is under the 132 kV class floor 250 MVA
-    res = read_text(
-        tmp_path, dgs_text(_with(ElmXnet=["44;Grid;2;1.0;;;;;SL;0"]))
-    )
+    res = read_text(tmp_path, dgs_text(_with(ElmXnet=["44;Grid;2;1.0;;;;;SL;0"])))
     assert res.network.generators.at["Grid", "p_nom"] == 250.0
     (row,) = _grid_rows(res.report)
     assert (row.asset, row.value) == ("Grid", 250.0)
