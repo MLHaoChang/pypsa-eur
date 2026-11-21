@@ -1,0 +1,1 @@
+* Fix(gridspine): The PSS/E import refuses a case that repeats a branch circuit (same buses and circuit ID, in either direction), a load ID or a machine ID on one bus, naming both lines; before, one of two parallel circuits with the same ID was silently dropped.

@@ -3,7 +3,7 @@
 
 # LC-48g — An idle task in another project blocks a new plan after a switch
 
-Status: needs-triage
+Status: ready-for-agent
 Model tier: opus
 Size: S
 Blocked by: none
@@ -22,3 +22,9 @@ Since #1558 (owner decision LC48F-REFUSE-1), `_refuse_switch` fails closed when 
   - read the task in its own project (by its `project_id`, with the owner check) and refuse only when it really runs;
   - or detach an idle task at the switch.
 - The guard follows that decision, with a test that switches projects while the chat's task is `ready` (and `needs_review`) and then starts another plan.
+
+## Comments
+
+**2026-11-17 triage (SCALE-1).** Not ready: the issue itself needs an owner decision (keep refusing, read the task in its own project, or detach the idle task at the switch). Sent to the coordinator as options; set ready-for-agent with the chosen option.
+
+**2026-11-17 owner decision LC48G-READ-1 (via the coordinator).** Option 2: the switch guard reads an idle task in its own project (by its `project_id`, with the owner check) and refuses only when the task really runs; it still fails closed when the task cannot be read. Status is now ready-for-agent (opus, S, GK B).

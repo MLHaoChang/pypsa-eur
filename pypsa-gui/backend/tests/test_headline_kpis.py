@@ -379,7 +379,7 @@ def test_checked_cards_follow_the_answer_assurance_switch(
         assert (card["value"], card["state"], card["reason"], card["formula_id"]) == (
             None,
             "unavailable",
-            "Checked figures are switched off for this installation.",
+            "Checked figures are off on this installation; an administrator can turn them on.",
             None,
         )
     assert by_id["system_cost"]["state"] == "ready"
@@ -440,9 +440,11 @@ def test_an_lcoe_profile_that_is_not_listed_switches_its_card_off(
     assert order[0] == "lcoe"
     assert (lcoe["value"], lcoe["state"], lcoe["reason"], lcoe["formula_id"]) == (
         None,
-        *hk.SWITCHED_OFF,
+        *hk.SWITCHED_OFF_LCOE,
         None,
     )
+    # Walk 2026-11-17 issue 06: the off card says where the figure is found.
+    assert "Investment case" in lcoe["reason"]
 
 
 def test_the_strip_gate_is_one_switch(windy, client, monkeypatch):
@@ -575,6 +577,7 @@ def test_card_sets_are_short_and_reasons_carry_no_engine_identifier():
     split = [
         hk._UNAVAILABLE,
         hk.SWITCHED_OFF,
+        hk.SWITCHED_OFF_LCOE,
         hk.BUSY,
         hk.INPUTS_CHANGED,
         hk.LOAD_FLOW_REPLACED,

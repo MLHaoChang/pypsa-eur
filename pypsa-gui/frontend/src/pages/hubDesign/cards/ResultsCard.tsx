@@ -7,7 +7,7 @@ import { FileText } from 'lucide-react'
 import Kpi from '../../../components/Kpi'
 import ResultState from '../../../components/ResultState'
 import { useUIStore } from '../../../store/uiStore'
-import { fmeaTopRows, notEstablishedNotes } from '../../results/EhReferenceDesignPanel'
+import { fmeaTopRows, LEVERS_SECTION, notEstablishedNotes } from '../../results/EhReferenceDesignPanel'
 import { zeroReasonText } from '../../results/fmea'
 import { fmtCurrency } from '../../results/shared'
 import { studyHasResults } from '../flow'
@@ -15,25 +15,40 @@ import { headline, riskName } from '../headline'
 import { useHubDesignStore } from '../hubDesignStore'
 import { CardShell } from '../shared/CardShell'
 import { Term, TERM_FALLBACK } from '../shared/Term'
-import { useDispatchSolved, useHubReport, useHubReview, useHubStudy } from '../useHubData'
+import { useDispatchSolved, useHubLevers, useHubReport, useHubReview, useHubStudy } from '../useHubData'
+import { cheaperDuration, leversFinding } from '../cheaperDuration'
+import { showResultsTab } from '../../../layout/flowNavigation'
 import { FROM_STUDY_HINT } from '../chapters'
 import { SECTION_LABEL } from '../sectionLabels'
 import { costTileLabel, kpiMoney } from '../plainWords'
+import { SizedDesignTable } from '../../results/SizedDesignTable'
 import { useQuery } from '@tanstack/react-query'
 import { uncheckedKindsSentence, useUncheckedRunKinds } from '../../../hooks/useStaleRunKinds'
 import { networkApi } from '../../../api/network'
 import { nk } from '../../../utils/queryKeys'
 import { ChaptersSection } from '../ChaptersSection'
 import DownloadReport from '../DownloadReport'
+import SourceRunLine from '../../../components/SourceRunLine'
+import { useDispatchRun } from '../../../hooks/useDispatchRun'
+import { money } from '../../../utils/money'
+import GridExtensionCard from '../../results/GridExtensionCard'
+import { HEADLINED, ResultsHeadline } from './ResultsHeadline'
+import { WhyThisNumber } from './WhyThisNumber'
 
 
+// It names the figures it covers: the investment case's NPV and LCOE above carry their own state (UX 23).
 export const STALE_TEXT =
-  'These results are from an earlier study; the network was solved since. Run again to refresh.'
+  'The verdict, expected shortfall, design cost and risks are from an earlier study; the network was solved since. Run again to refresh.'
 
 /** P33b (D-2): an edit seam was crossed since the study started. Says
  *  "edited", never "changed" — that is all the counter carries. */
 export const EDITED_TEXT =
-  'The network has been edited since this study, so these results describe the design as it was. Run again to refresh.'
+  'The network has been edited since this study, so its verdict, expected shortfall, design cost and risks describe the design as it was. Run again to refresh.'
+
+/** GK B F1 (rulings #1170, #1390 F2): the server says `edited_since_study` is null when it could not
+ *  compare, such as a study saved before revisions were captured. Unknown never reads as current. */
+export const FRESHNESS_UNKNOWN_TEXT =
+  "Can't tell whether the network changed since this study, so its verdict, expected shortfall, design cost and risks may not describe the current design. Run again to check."
 
 export function openFullReport(): void {
   const ui = useUIStore.getState()
@@ -43,10 +58,31 @@ export function openFullReport(): void {
   ui.requestEhReport()
 }
 
+/** "Design options ›": Results › Adequacy, the Energy Hub panel opened and
+ *  scrolled to its levers block (request-then-scroll). Guided stays in Guided,
+ *  as "Show the engineering detail" does, with the Results panel's own "Back
+ *  to Results"; Expert goes through showResultsTab, whose Back pill returns. */
+export function openDesignOptions(): void {
+  const ui = useUIStore.getState()
+  if (ui.uiMode === 'guided') {
+    ui.setSlidePanel('results')
+    ui.requestResultsTab('adequacy', LEVERS_SECTION)
+    return
+  }
+  showResultsTab('adequacy', { section: LEVERS_SECTION })
+}
+
 /** Years the Monte Carlo modelled, from the certification section (UX review N10). */
 function horizonYearsOf(report: ReturnType<typeof useHubReport>): number | null {
   const h = report?.sections?.certification?.payload?.horizon_years
   return typeof h === 'number' ? h : null
+}
+
+/** The study's likely range for the shortfall (`certification.lole_ci`), when it gave one. */
+export function loleCi(report: ReturnType<typeof useHubReport>): [number, number] | null {
+  const ci = (report?.sections?.certification?.payload as { lole_ci?: unknown } | undefined)?.lole_ci
+  return Array.isArray(ci) && ci.length === 2 && ci.every(v => typeof v === 'number' && Number.isFinite(v))
+    ? [ci[0] as number, ci[1] as number] : null
 }
 
 export function ResultsCard() {
@@ -54,6 +90,9 @@ export function ResultsCard() {
   const { review } = useHubReview(studyHasResults(study))
   const report = useHubReport(study, running)
   const solved = useDispatchSolved()
+  // The dispatch solve, for the source-run line (control-strategy 06, improvement 2).
+  const run = useDispatchRun()
+  const requestRunSolve = useUIStore(s => s.requestRunSolve)
   // A unit whose loss causes no shortfall is not a risk (UX S6, G3): it is
   // named once under the list, never ranked in it.
   const rows = report ? fmeaTopRows(report) : []
@@ -62,6 +101,9 @@ export function ResultsCard() {
   const risks = rows.filter(r => !isNoShortfall(r)).slice(0, 3)
   const coped = rows.filter(isNoShortfall).map(r => riskName(r.name || r.mode_id))
   const gaps = report ? notEstablishedNotes(report) : []
+  // A cheaper battery duration the study's levers already found (WALK-IMPROVE-1).
+  const levers = useHubLevers(!running && leversFinding(review?.findings) != null)
+  const cheaper = cheaperDuration(review?.findings, levers, report)
   const cost = report?.cost_at_target_eur
   const project = useUIStore(s => s.currentProject)
   const multiPeriod = report?.period_basis === 'npv_multi_period'
@@ -77,16 +119,16 @@ export function ResultsCard() {
   const verdict = summary.verdict
   // Out-of-date figures are marked on the tiles too, not only above them (UX review N4, L5).
   const stale = review?.stale === true && study?.edited_since_study !== true
-  const chapters = (
-    <ChaptersSection reliability={{
-      hasResults: studyHasResults(study), running,
-      lole: summary.mc_lole_h_per_year ?? report?.mc_lole_h ?? null,
-      target: summary.target_lole_h ?? null,
-      horizonYears: horizonYearsOf(report),
-      stale,
-      verdict: verdict === 'pass' || verdict === 'fail' || verdict === 'inconclusive' ? verdict : null,
-    }} />
-  )
+  // Null or missing means the server could not compare (GK B F1): only a strict `false` reads as current.
+  const freshnessUnknown = study?.edited_since_study !== true && study?.edited_since_study !== false && !stale
+  const reliability = {
+    hasResults: studyHasResults(study), running,
+    lole: summary.mc_lole_h_per_year ?? report?.mc_lole_h ?? null,
+    target: summary.target_lole_h ?? null,
+    horizonYears: horizonYearsOf(report),
+    stale,
+    verdict: verdict === 'pass' || verdict === 'fail' || verdict === 'inconclusive' ? verdict : null,
+  } as const
 
   if (!studyHasResults(study)) {
     // Never an empty or greyed card (UX S6, G2): say why, and how to get there.
@@ -94,11 +136,23 @@ export function ResultsCard() {
       <CardShell step="results" next="improve" testId="hub-card-results" title="Results">
         {running ? (
           <ResultState state="running" reason="The study is running; its verdict, cost and risks appear here when it finishes." />
+        ) : run?.solved && run.objective != null ? (
+          // An Expert solve with no study is never "Not run yet" (control-strategy 06): its cost, from the
+          // dispatch solve, out of date when the backend says so, and the study offered by name.
+          <div className="flex flex-col gap-1.5" data-testid="hub-results-dispatch">
+            <Kpi testId="hub-results-dispatch-cost" headline label="Total system cost"
+              value={`${run.objective < 0 ? '−' : ''}${money(run.objective, 'EUR')}`}
+              state={run.current ? 'ready' : 'stale'} basis="the dispatch solve's objective" />
+            <SourceRunLine testId="hub-results-source" source="dispatch" at={run.at} outOfDate={!run.current}
+              missing={{ run: 'study', action: { label: 'Go to Goal and run the study', onClick: () => setStep('goal', { user: true }) } }} />
+          </div>
         ) : (
           <ResultState state="not_run" reason="The study writes its verdict, cost and risks here."
             action={{ label: 'Go to Goal and run the study', onClick: () => setStep('goal', { user: true }) }} />
         )}
-        {chapters}
+        <GridExtensionCard />
+        {/* No headline yet, so every tile keeps its figure. */}
+        <ChaptersSection reliability={reliability} />
       </CardShell>
     )
   }
@@ -110,6 +164,12 @@ export function ResultsCard() {
         <p data-testid="hub-results-edited"
           className="rounded border border-warn/50 bg-warn/10 px-3 py-2 text-[12px] text-warn">
           {EDITED_TEXT}
+        </p>
+      )}
+      {freshnessUnknown && (
+        <p data-testid="hub-results-freshness-unknown"
+          className="rounded border border-warn/50 bg-warn/10 px-3 py-2 text-[12px] text-warn">
+          {FRESHNESS_UNKNOWN_TEXT}
         </p>
       )}
       {uncheckedKinds.length > 0 && (
@@ -133,6 +193,16 @@ export function ResultsCard() {
           <p data-testid="hub-results-verdict" className="text-[14px] font-semibold text-text">
             {headline(review, report)}
           </p>
+          <WhyThisNumber figure="verdict" />
+          {cheaper && (
+            <p data-testid="hub-results-cheaper-duration" className="text-[12px] text-text">
+              {cheaper}{' '}
+              <button type="button" data-testid="hub-results-design-options" onClick={openDesignOptions}
+                className="text-accent hover:underline">
+                {SECTION_LABEL.levers} ›
+              </button>
+            </p>
+          )}
           {/* P26 gate: with no goal the headline asks for one — take the user there. */}
           {review.status === 'ok' && review.summary?.target_lole_h == null && (
             <button type="button" data-testid="hub-results-set-goal"
@@ -148,19 +218,28 @@ export function ResultsCard() {
         </p>
       )}
 
-      {cost != null && (
+      {/* Which run the verdict and figures come from; the dispatch solve offered when it has not run. */}
+      <SourceRunLine testId="hub-results-source" source="study" at={study?.finished_at ?? null}
+        outOfDate={stale || study?.edited_since_study === true}
+        missing={run && !run.solved ? { run: 'dispatch', action: { label: 'Run the solve', onClick: requestRunSolve } } : undefined} />
+
+      {/* An edit since the study makes the study's figures out of date too: the edited banner is their
+          mark, and the headline's mixed-source line and chart then say so (review P1, GK B G1). */}
+      <ResultsHeadline reliability={{ ...reliability, stale: stale || study?.edited_since_study === true }}
+        freshnessUnknown={freshnessUnknown} ci={loleCi(report)} costEur={cost ?? null} cost={cost != null && (
         // The cost of the planned design at the pack's energy target, without
         // shortfall costs — never "the cost of your goal" (P24-FE gate B1).
         // The shared KPI tile (UX S6, G-item 2), the glossary text on hover.
-        <div className="max-w-[260px]">
-          <Kpi testId="hub-results-cost" headline
-            label={costTileLabel(report?.period_basis, periods.data?.periods)}
-            value={fmtCurrency(cost)} fromStudy={solved === false && !stale}
-            hint={solved === false && !stale ? `${TERM_FALLBACK.cost_at_target} ${FROM_STUDY_HINT}` : TERM_FALLBACK.cost_at_target}
-            // The banner above says "Out of date" once for the card; the tile only dims.
-            state="ready" dimmed={stale} />
-        </div>
-      )}
+        <Kpi testId="hub-results-cost" headline
+          label={costTileLabel(report?.period_basis, periods.data?.periods)}
+          value={fmtCurrency(cost)} fromStudy={solved === false && !stale && !freshnessUnknown}
+          hint={solved === false && !stale && !freshnessUnknown ? `${TERM_FALLBACK.cost_at_target} ${FROM_STUDY_HINT}` : TERM_FALLBACK.cost_at_target}
+          // The banner above says "Out of date" once for the card; the tile only dims.
+          state="ready" dimmed={stale || freshnessUnknown} />
+      )} />
+
+      {/* What the study chose to build (walkthrough asset-investment 03). */}
+      <SizedDesignTable report={report} mode="guided" testId="hub-results-sized" />
 
       {(risks.length > 0 || coped.length > 0) && (
         <div className="flex flex-col gap-1 text-[12px]">
@@ -211,7 +290,8 @@ export function ResultsCard() {
           <FileText size={13} /> Show the engineering detail
         </button>
       </div>
-      {chapters}
+      <GridExtensionCard />
+      <ChaptersSection reliability={reliability} headlined={[...HEADLINED]} />
     </CardShell>
   )
 }

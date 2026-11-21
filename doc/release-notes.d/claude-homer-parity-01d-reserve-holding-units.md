@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Results › Capacity expansion names the generators and storage units holding the operating reserve in each binding hour, and the assistant can read the reserve through `get_results` (homer-parity 01d).

@@ -244,6 +244,7 @@ def test_target_is_compared_per_horizon():
     report = _run(_cert_network(units=4), _pack(target=3.0))
     p = _cert(report).payload
     assert p["target_basis"] == "h_per_year"
+    assert p["target_unit"] == "h"
     assert p["target_lole_h_per_horizon"] == pytest.approx(
         3.0 * p["horizon_years"])
     assert p["horizon_years"] == pytest.approx(168 / 8760)

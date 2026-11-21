@@ -46,6 +46,15 @@
       })()
     </script>
     <script>
+      // Exact paths only. The ?token= in these URLs is a credential, so those
+      // pages send no Referer (nothing on the page loads a third-party origin).
+      var tokenPage = location.pathname === '/set-password' || location.pathname === '/reset-password'
+      if (tokenPage) {
+        var refMeta = document.createElement('meta')
+        refMeta.name = 'referrer'
+        refMeta.content = 'no-referrer'
+        document.head.appendChild(refMeta)
+      }
       window.__PYPSA_AUTH_BOOT__ = (async function pypsaAuthBoot() {
         try {
           var healthRes = await fetch('/api/health', { credentials: 'include' })
@@ -53,6 +62,7 @@
           var health = await healthRes.json()
           if (!health.auth_enabled) return 'single-user'
           var meRes = await fetch('/api/auth/me', { credentials: 'include' })
+          if (meRes.status === 401 && tokenPage) return 'token-page'
           if (meRes.status === 401 || meRes.status === 403) {
             location.replace('/?needLogin=' + Date.now())
             return 'redirect-login'

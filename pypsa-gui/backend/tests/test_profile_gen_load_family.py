@@ -295,7 +295,7 @@ def test_a_data_centre_profile_is_refused_on_a_dc_load_project(tmp_path):
     _net()
     ctx = _dc_project(tmp_path)
     res = _gen("data_centre")
-    with pytest.raises(DcLoadOwnedError, match="dc_load"):
+    with pytest.raises(DcLoadOwnedError, match="data-centre set-up"):
         assign_profile(ctx, "L1", res.series["L1"], res.meta,
                        component_type="loads", attribute="p_set", now=NOW)
 

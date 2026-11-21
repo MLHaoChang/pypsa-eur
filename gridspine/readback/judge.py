@@ -19,8 +19,8 @@ the obligation rows only: ``fail`` if one fails, else ``unknown`` if one is
 unknown or there is none, else ``pass`` (``case_status``). So a case never
 passes on a validity row alone.
 
-The case: ``{id, kind, t_event, t_clear?, pre_window_s?,
-channels: {role: channel name}}``. Kinds and their checks:
+The case: ``{id, kind, t_event, t_clear?, target?, pre_window_s?,
+end_window_s?, channels: {role: channel name}}``. Kinds and their checks:
 
 ``lvrt`` / ``hvrt`` (fault ride-through; ``t_event`` the fault inception,
 ``t_clear`` its clearing)
@@ -29,8 +29,12 @@ channels: {role: channel name}}``. Kinds and their checks:
     the curve passes; it fails at the first sample outside.
     ``stays_connected`` (obligation): the ``connected`` status channel is 1 at
     every sample from ``t_event`` while the voltage is within the curve. A
-    trip after the voltage first leaves the curve is allowed. No status
-    channel: unknown.
+    trip after the voltage first leaves the curve is allowed. The first 0 is
+    the trip, even if a later sample reads 1; with no 0, a sample not read
+    (``channels.STATUS_NOT_READ``) makes it unknown. No status channel:
+    unknown. A case of any other kind with ``connected_required: true`` gets
+    the same row over every sample from ``t_event`` to the end (GC-12: a trip
+    in any test case is a failure).
     ``reactive_current_rise`` (obligation): the reactive current change
     reaches ``target_pct`` of ``k_gain`` times the voltage deviation beyond
     the deadband (the deadband is subtracted) within ``rise_time_s`` of
@@ -45,11 +49,27 @@ channels: {role: channel name}}``. Kinds and their checks:
     recovery time to after the dip. ``active_power_ramp`` (obligation, when
     ``ramp_min_pu_per_s`` is set): the average rate from clearing to that
     recovery.
+``setpoint_step`` (``t_event`` the step; ``target`` the commanded value)
+    ``rise_time``: from the step to ``rise_level_pct`` of the change.
+    ``settling_time``: from the step to the sample from which the response
+    stays within ``settling_band_pct`` of the change around the target (a
+    sample on the band edge is inside). ``overshoot``: the largest excursion
+    past the target, in % of the change, in the step's direction. Without a
+    ``target`` the final value is the mean over the last ``end_window_s`` of
+    the record, and the rows say so, since that hides a steady-state error.
+``frequency_step`` (``t_event`` the frequency step)
+    ``droop``: the measured droop, ``-(df beyond the deadband / nominal_hz) /
+    dP * 100``, from pre-step and end-of-record means, within
+    ``tolerance_pct`` percentage points of ``droop_pct``. A frequency change
+    inside the deadband is unknown; no power change, or one in the wrong
+    direction, fails; neither yields an infinite or NaN droop. ``dP`` is in pu
+    of the rated active power.
 
 Channel roles: the voltage is ``v1`` (positive-sequence voltage at the PoC)
 or ``v_ll_min`` (minimum phase-to-phase voltage at the PoC), one of them, in
-pu; ``iq`` reactive current and ``p`` active power in pu; ``connected`` a 0/1
-status. Pre-fault values are means over ``pre_window_s`` (default
+pu; ``iq`` reactive current and ``p`` active power in pu; ``y`` the stepped
+quantity; ``f`` frequency in Hz; ``connected`` a 0/1 status. Pre-fault and
+pre-step values are means over ``pre_window_s`` (default
 ``PRE_WINDOW_S``) before ``t_event``.
 
 numpy only.
@@ -61,25 +81,27 @@ import math
 
 import numpy as np
 
-from gridspine.readback.channels import ChannelFrame
+from gridspine.readback.channels import STATUS_NOT_READ, ChannelFrame
 from gridspine.schema.contracts import ContractError
 
 PASS, FAIL, UNKNOWN = "pass", "fail", "unknown"
 OBLIGATION, VALIDITY = "obligation", "validity"
-#: Default length of the pre-event averaging window, in s.
+#: Default length of the pre-event and end-of-record averaging windows, in s.
 PRE_WINDOW_S = 0.1
+END_WINDOW_S = 0.1
 VOLTAGE_ROLES = {
     "v1": "positive-sequence voltage at the PoC",
     "v_ll_min": "minimum phase-to-phase voltage at the PoC",
 }
-ROLES = frozenset({*VOLTAGE_ROLES, "iq", "p", "connected"})
-KINDS = ("lvrt", "hvrt")
-#: The unit each role must carry in the frame.
+ROLES = frozenset({*VOLTAGE_ROLES, "iq", "p", "y", "f", "connected"})
+KINDS = ("lvrt", "hvrt", "setpoint_step", "frequency_step")
+#: The unit each role must carry in the frame ("y" carries any).
 _ROLE_UNITS = {
     "v1": "pu",
     "v_ll_min": "pu",
     "iq": "pu",
     "p": "pu",
+    "f": "Hz",
     "connected": "status",
 }
 
@@ -154,6 +176,24 @@ class _Case:
                 f"{where}: t_clear {self.t_clear!r} s must be after t_event and inside the record"
             )
         self.pre_window = self._window(case, "pre_window_s", PRE_WINDOW_S)
+        self.end_window = self._window(case, "end_window_s", END_WINDOW_S)
+        if (
+            self.kind in ("setpoint_step", "frequency_step")
+            and frame.time[-1] - self.end_window <= self.t_event
+        ):
+            raise ContractError(
+                f"{where}: end_window_s {self.end_window!r} s reaches back to t_event; "
+                "the end-of-record mean must lie after the event"
+            )
+        self.target = case.get("target")
+        if self.target is not None and (
+            isinstance(self.target, bool)
+            or not isinstance(self.target, (int, float))
+            or not math.isfinite(self.target)
+        ):
+            raise ContractError(
+                f"{where}: target must be a finite number, got {self.target!r}"
+            )
         channels = case.get("channels", {})
         if not isinstance(channels, dict):
             raise ContractError(
@@ -228,6 +268,10 @@ class _Case:
                 f"{self.where}: no sample in the {self.pre_window!r} s before t_event"
             )
         return float(np.mean(self.values(role)[sel]))
+
+    def end_mean(self, role):
+        t = self.frame.time
+        return float(np.mean(self.values(role)[t >= t[-1] - self.end_window]))
 
 
 def _row(
@@ -365,43 +409,61 @@ def _ride_through(case, profile):
         if t_exit is not None
         else ""
     )
+    held = after & (t < t_exit) if t_exit is not None else after
+    crow = _stays_connected(
+        case,
+        env,
+        quantity,
+        held,
+        ended,
+        " with the voltage within the curve",
+        "the voltage is outside the curve from fault inception; no sample to judge",
+    )
+    return [vrow, crow]
+
+
+def _stays_connected(case, env, quantity, window, ended="", within="", empty=""):
+    """
+    The ``stays_connected`` obligation over the samples in ``window``.
+
+    The first 0 is the trip (fail at its time), even if a later sample reads
+    1 or another is not read. With no 0, a sample not read
+    (``STATUS_NOT_READ``) makes it unknown; pass only when every sample in the
+    window is 1. Any other value is refused, naming its time.
+    """
     why = case.missing("connected")
     if why:
-        return [
-            vrow,
-            _row(
-                case,
-                "stays_connected",
-                OBLIGATION,
-                env,
-                UNKNOWN,
-                quantity=quantity,
-                detail=why + ended,
-            ),
-        ]
-    held = after & (t < t_exit) if t_exit is not None else after
-    status = case.values("connected")
-    if not np.isin(status, (0.0, 1.0)).all():
-        raise ContractError(
-            f"{case.where}: the connected channel {case.channels['connected']!r} must be 0 or 1"
+        return _row(
+            case,
+            "stays_connected",
+            OBLIGATION,
+            env,
+            UNKNOWN,
+            quantity=quantity,
+            detail=why + ended,
         )
-    if not held.any():
-        return [
-            vrow,
-            _row(
-                case,
-                "stays_connected",
-                OBLIGATION,
-                env,
-                UNKNOWN,
-                quantity=quantity,
-                detail="the voltage is outside the curve from fault inception; no sample to judge",
-            ),
-        ]
-    tripped = np.flatnonzero(status[held] == 0)
+    t = case.frame.time
+    status = case.values("connected")
+    bad = ~np.isin(status, (0.0, 1.0, STATUS_NOT_READ))
+    if bad.any():
+        raise ContractError(
+            f"{case.where}: the connected channel {case.channels['connected']!r} must be 0 or 1, "
+            f"got {float(status[bad][0])!r} at {float(t[bad][0]):g} s"
+        )
+    if not window.any():
+        return _row(
+            case,
+            "stays_connected",
+            OBLIGATION,
+            env,
+            UNKNOWN,
+            quantity=quantity,
+            detail=empty or "no sample after the event to judge",
+        )
+    tripped = np.flatnonzero(status[window] == 0)
     if tripped.size:
-        at = float(t[held][tripped[0]])
-        crow = _row(
+        at = float(t[window][tripped[0]])
+        return _row(
             case,
             "stays_connected",
             OBLIGATION,
@@ -413,24 +475,39 @@ def _ride_through(case, profile):
             at,
             "status",
             quantity,
-            f"disconnected at {at:g} s with the voltage within the curve",
+            f"disconnected at {at:g} s{within}",
         )
-    else:
-        crow = _row(
+    unread = np.flatnonzero(status[window] == STATUS_NOT_READ)
+    if unread.size:
+        at = float(t[window][unread[0]])
+        return _row(
             case,
             "stays_connected",
             OBLIGATION,
             env,
-            PASS,
-            1.0,
+            UNKNOWN,
+            None,
             1.0,
             None,
-            None,
+            at,
             "status",
             quantity,
-            "connected throughout" + ended,
+            f"status poll failed at t={at:g} s" + ended,
         )
-    return [vrow, crow]
+    return _row(
+        case,
+        "stays_connected",
+        OBLIGATION,
+        env,
+        PASS,
+        1.0,
+        1.0,
+        None,
+        None,
+        "status",
+        quantity,
+        "connected throughout" + ended,
+    )
 
 
 def _reactive_current(case, profile):
@@ -647,6 +724,208 @@ def _p_recovery(case, profile):
     return rows
 
 
+def _step(case, profile):
+    key = "setpoint_step_response"
+    env = profile.get(key)
+    checks = ("rise_time", "settling_time", "overshoot")
+    why = case.missing("y")
+    if env is None or why:
+        return [_unknown(case, c, OBLIGATION, env, why, key) for c in checks]
+    t = case.frame.time
+    y = case.values("y")
+    y0 = case.pre_mean("y")
+    if case.target is not None:
+        yf, basis = float(case.target), "commanded target"
+    else:
+        yf, basis = (
+            case.end_mean("y"),
+            f"no target given: final value {case.end_mean('y'):g} is the mean of the last "
+            f"{case.end_window:g} s",
+        )
+    change = yf - y0
+    if change == 0:
+        return [
+            _row(
+                case,
+                c,
+                OBLIGATION,
+                env,
+                UNKNOWN,
+                detail=f"no change to judge ({basis})",
+            )
+            for c in checks
+        ]
+    after = np.flatnonzero(t >= case.t_event)
+    frac = (
+        y[after] - y0
+    ) / change  # 0 before the step, 1 at the final value, in the step's direction
+    rows = []
+    limit = env["rise_time_s"]
+    hit = np.flatnonzero(frac >= env["rise_level_pct"] / 100)
+    if hit.size:
+        at = float(t[after[hit[0]]])
+        rise = at - case.t_event
+        rows.append(
+            _at_most(
+                case,
+                "rise_time",
+                env,
+                rise,
+                limit,
+                at,
+                "s",
+                detail=f"0 to {env['rise_level_pct']:g} % of the change; {basis}",
+            )
+        )
+    else:
+        rows.append(
+            _row(
+                case,
+                "rise_time",
+                OBLIGATION,
+                env,
+                FAIL,
+                None,
+                limit,
+                unit="s",
+                detail=f"never reached {env['rise_level_pct']:g} % of the change; {basis}",
+            )
+        )
+    limit = env["settling_time_s"]
+    band = env["settling_band_pct"] / 100 * abs(change)
+    out = np.flatnonzero(np.abs(y[after] - yf) > band)
+    if out.size and out[-1] == after.size - 1:
+        rows.append(
+            _row(
+                case,
+                "settling_time",
+                OBLIGATION,
+                env,
+                FAIL,
+                None,
+                limit,
+                unit="s",
+                detail=f"outside the ±{env['settling_band_pct']:g} % band at the end of the record; {basis}",
+            )
+        )
+    else:
+        k = after[out[-1] + 1] if out.size else after[0]
+        at = float(t[k])
+        settle = at - case.t_event
+        rows.append(
+            _at_most(
+                case,
+                "settling_time",
+                env,
+                settle,
+                limit,
+                at,
+                "s",
+                detail=f"within ±{env['settling_band_pct']:g} % of the change "
+                f"from here on; {basis}",
+            )
+        )
+    limit = env["overshoot_max_pct"]
+    k = int(np.argmax(frac))
+    over = max(0.0, (float(frac[k]) - 1.0) * 100)
+    if not math.isfinite(over):
+        rows.append(
+            _row(
+                case,
+                "overshoot",
+                OBLIGATION,
+                env,
+                FAIL,
+                None,
+                limit,
+                unit="%",
+                detail=f"change {change:g} is too small to give a finite overshoot; {basis}",
+            )
+        )
+        return rows
+    rows.append(
+        _at_most(
+            case,
+            "overshoot",
+            env,
+            over,
+            limit,
+            float(t[after[k]]),
+            "%",
+            detail=f"peak past the final value; {basis}",
+        )
+    )
+    return rows
+
+
+def _droop(case, profile):
+    key = "frequency_droop"
+    env = profile.get(key)
+    why = case.missing("f", "p")
+    if env is None or why:
+        return [_unknown(case, "droop", OBLIGATION, env, why, key, unit="%")]
+    df = case.end_mean("f") - case.pre_mean("f")
+    dp = case.end_mean("p") - case.pre_mean("p")
+    beyond = abs(df) - env["deadband_hz"]
+    limit = env["droop_pct"]
+    if beyond <= 0:
+        return [
+            _row(
+                case,
+                "droop",
+                OBLIGATION,
+                env,
+                UNKNOWN,
+                unit="%",
+                detail=f"frequency change {df:g} Hz is inside the {env['deadband_hz']:g} Hz deadband",
+            )
+        ]
+    df_eff = math.copysign(beyond, df)
+    if dp == 0 or (dp > 0) == (df_eff > 0):
+        return [
+            _row(
+                case,
+                "droop",
+                OBLIGATION,
+                env,
+                FAIL,
+                None,
+                limit,
+                unit="%",
+                detail=f"active power change {dp:g} pu does not oppose the {df:g} Hz frequency change",
+            )
+        ]
+    droop = -(df_eff / env["nominal_hz"]) / dp * 100
+    if not math.isfinite(droop):
+        return [
+            _row(
+                case,
+                "droop",
+                OBLIGATION,
+                env,
+                FAIL,
+                None,
+                limit,
+                unit="%",
+                detail=f"active power change {dp:g} pu is too small to give a finite droop",
+            )
+        ]
+    margin = env["tolerance_pct"] - abs(droop - limit)
+    return [
+        _judged(
+            case,
+            "droop",
+            env,
+            droop,
+            limit,
+            margin,
+            None,
+            "%",
+            detail=f"within ±{env['tolerance_pct']:g} percentage points of the set droop",
+        )
+    ]
+
+
 def judge(frame: ChannelFrame, case: dict, profile: dict) -> dict:
     """``{case_id, kind, status, rows}`` for one case (see the module docstring)."""
     c = _Case(frame, case)
@@ -658,4 +937,12 @@ def judge(frame: ChannelFrame, case: dict, profile: dict) -> dict:
         rows = _ride_through(c, profile) + _reactive_current(c, profile)
         if c.kind == "lvrt":
             rows += _p_recovery(c, profile)
+    elif c.kind == "setpoint_step":
+        rows = _step(c, profile)
+    else:
+        rows = _droop(c, profile)
+    if c.kind not in ("lvrt", "hvrt") and case.get("connected_required") is True:
+        rows.append(
+            _stays_connected(c, None, "PoC breaker status", c.frame.time >= c.t_event)
+        )
     return {"case_id": c.id, "kind": c.kind, "status": case_status(rows), "rows": rows}

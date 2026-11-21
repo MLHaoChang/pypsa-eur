@@ -1,0 +1,48 @@
+{
+ "profiles": {
+  "generator-dispatch/1": [
+   {
+    "metric": "dispatch_energy",
+    "formula": "sum over t of p[t] x w_generators[t], of the one generator",
+    "validity": "each snapshot needs a verified LP solve (else unverified_solve), capacity >= 0, p within capacity x [p_min_pu, p_max_pu] +/- 1e-8 and its inputs present with weight > 0; one excluded snapshot makes it unavailable (invalid_or_missing_raw_data, partial value labelled). Refusals: unsupported_snapshot_scope, unknown_generator, misaligned_source, missing_dispatch, unsupported_generator_sign",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_assurance_metrics.py::test_independent_lp_results_and_cost_basis",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_assurance_metrics.py::test_independent_lp_results_and_cost_basis"
+     }
+    }
+   },
+   {
+    "metric": "marginal_expenditure",
+    "formula": "sum over t of p[t] x marginal_cost[t] x w_objective[t], of the one generator",
+    "validity": "each snapshot needs a verified LP solve (else unverified_solve), capacity >= 0, p within capacity x [p_min_pu, p_max_pu] +/- 1e-8 and its inputs present with weight > 0; one excluded snapshot makes it unavailable (invalid_or_missing_raw_data, partial value labelled). Refusals: unsupported_snapshot_scope, unknown_generator, misaligned_source, missing_dispatch, unsupported_generator_sign",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_assurance_metrics.py::test_independent_lp_results_and_cost_basis",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_assurance_metrics.py::test_independent_lp_results_and_cost_basis"
+     }
+    }
+   },
+   {
+    "metric": "peak_dispatch",
+    "formula": "max over t of p[t]",
+    "validity": "each snapshot needs a verified LP solve (else unverified_solve), capacity >= 0, p within capacity x [p_min_pu, p_max_pu] +/- 1e-8 and its inputs present with weight > 0; one excluded snapshot makes it unavailable (invalid_or_missing_raw_data, partial value labelled). Refusals: unsupported_snapshot_scope, unknown_generator, misaligned_source, missing_dispatch, unsupported_generator_sign",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_assurance_metrics.py::test_independent_lp_results_and_cost_basis",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_assurance_metrics.py::test_independent_lp_results_and_cost_basis"
+     }
+    }
+   }
+  ]
+ }
+}

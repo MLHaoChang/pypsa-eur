@@ -31,6 +31,10 @@ export interface EditCardRow {
    *  while the strategy was full): the old cell shows "—". */
   old_applies?: boolean
   readback?: Scalar
+  /** A setting the change leaves as it is, shown beside the one it changes because
+   *  both derive what follows (load growth's rate and start year): the new cell says
+   *  "unchanged" and the headline leaves it out. */
+  unchanged?: boolean
   /** Where the field lives in the project flow (api/flow.ts FlowTarget). */
   target?: FlowTarget
   /** Where the value came from: a table cell (apply_equipment_mapping), or a PDF page
@@ -238,7 +242,8 @@ function rowValues(r: EditCardRow, guided: boolean, value = cellValue): [string,
   const old = r.old_applies === false ? '\u2014'
     : words ? (words.old == null ? show(r.old) : String(words.old))
     : r.display && known && typeof r.old === 'number' ? showDisplay(r.display.old) : value(r.old, known)
-  const now = words ? (words.new == null ? show(r.new) : String(words.new))
+  const now = r.unchanged ? 'unchanged'
+    : words ? (words.new == null ? show(r.new) : String(words.new))
     : r.display ? showDisplay(r.display.new) : value(r.new)
   return [old, now]
 }
@@ -251,7 +256,7 @@ export const HEADLINE_CAP = 4
 export function editCardLines(card: EditCard): string[] {
   const members = setMembers(card)
   return [...(card.sets ?? []).map(g => cardSetLine(card, g, true)),
-    ...card.rows.filter(r => r.role === 'typed' && !inSet(members, r)).map(r => {
+    ...card.rows.filter(r => r.role === 'typed' && !r.unchanged && !inSet(members, r)).map(r => {
     const asset = assetWords(r.component_class, r.name)
     if (r.field === 'exists') return `${r.new ? 'Adds' : 'Removes'} ${asset}`
     const [old, now] = rowValues(r, true)

@@ -1,0 +1,1 @@
+* Feat(gridspine): the Excel workbook reader also reads the older layouts today's /import/excel accepts: PyPSA's own Excel export and raw-named component sheets. A column that is not a model input, a second row with the same name, a cell the model cannot take and a formula with no saved value are each reported with the reason, never dropped silently.

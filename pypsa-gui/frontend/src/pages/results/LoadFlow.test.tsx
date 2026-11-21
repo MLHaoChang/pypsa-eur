@@ -21,7 +21,7 @@ vi.mock('../../api/simulation', async (importOriginal) => {
       getPrices: vi.fn(), getEmissions: vi.fn(), getCarrierKpis: vi.fn(),
       getLineDuals: vi.fn(), getUnitCommitment: vi.fn(), getLosses: vi.fn(),
       getVoltages: vi.fn(), getLineReactive: vi.fn(), getTransformerReactive: vi.fn(),
-      getPriceDrivers: vi.fn(),
+      getPriceDrivers: vi.fn(), getEhTemplate: vi.fn(),
     },
   }
 })
@@ -55,6 +55,7 @@ beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo', resultSource: 'lopf' })
   vi.mocked(resultsEvidenceApi.loadflow).mockResolvedValue({ status: 'ok', binding: { version: 1, project_id: 'project-1', project_name: 'Demo', scope: 'current', source: 'lopf', window_from: 0, window_to: 0, input_sha256: 'b'.repeat(64), data_sha256: 'a'.repeat(64) }, rows: [{ name: 'Line 1', class: 'Line', basis: 'active_power_proxy', util_pct: 42.424, rating_pct: 42.424, mean_util_pct: 42.424, peak_flow: 424.24, mean_flow: 424.24, peak_at: '2026-01-01', h_at_limit: 0, h_over_limit: 0, rating: { value: 1000, basis: 'configured' }, s_max_pu: { min: 1, max: 1 } }] })
   const emptyTs = { index: [], columns: [], data: [] }
+  vi.mocked(resultsApi.getEhTemplate).mockReset().mockResolvedValue(null)
   vi.mocked(resultsApi.getAcPfStatus).mockReset().mockResolvedValue({ available: false })
   // Single line, single snapshot: max(|p0|) over one point equals that
   // point regardless of the exact peak-flow aggregation implementation.
@@ -245,6 +246,39 @@ it('Run again is the header Run, through the gate; without AC power flow it says
   expect(useUIStore.getState().activeSlidePanel).toBe('simparams')
 })
 
+const NO_BRANCHES = { status: 'unavailable', unavailable_kind: 'no_ac_branches', message: 'This network has no lines or transformers.' } as const
+
+it('on a hub with no lines or transformers, only the Not applicable reason shows, and a Grid study link', async () => {
+  vi.mocked(resultsApi.getEhTemplate).mockResolvedValue({ id: 'dc', name: 'DC', recommended_archetype: 'dc' } as never)
+  vi.mocked(resultsEvidenceApi.loadflow).mockResolvedValue(NO_BRANCHES)
+  const { findByTestId, queryByTestId, getByTestId, findAllByText } = renderPage()
+  const link = await findByTestId('loadflow-open-grid-study')
+  expect(link.textContent).toBe('Grid checks are in Grid study ›')
+  expect((await findAllByText('Not applicable')).length).toBe(1)
+  expect(queryByTestId('loadflow-switch-on-acpf')).toBeNull()
+  expect(getByTestId('loadflow-run-again').textContent).not.toContain('Not modelled')
+  expect(getByTestId('loadflow-run-again').textContent).not.toContain('switched on')
+  expect(getByTestId('loadflow-run-again-btn').getAttribute('title')).not.toContain('switched on')
+  link.click()
+  expect(useUIStore.getState().activeSlidePanel).toBe('campusStudy')
+})
+
+it('on a non-hub with no lines or transformers, the statement shows with no switch or Grid study link', async () => {
+  vi.mocked(resultsEvidenceApi.loadflow).mockResolvedValue(NO_BRANCHES)
+  const { findAllByText, queryByTestId, getByTestId } = renderPage()
+  expect((await findAllByText('Not applicable')).length).toBe(1)
+  expect(queryByTestId('loadflow-open-grid-study')).toBeNull()
+  expect(queryByTestId('loadflow-switch-on-acpf')).toBeNull()
+  expect(getByTestId('loadflow-run-again').textContent).not.toContain('Not modelled')
+})
+
+it('on a hub whose network has branches, today\'s switch link stays', async () => {
+  vi.mocked(resultsApi.getEhTemplate).mockResolvedValue({ id: 'dc', name: 'DC', recommended_archetype: 'dc' } as never)
+  const { findByTestId, queryByTestId } = renderPage()
+  await findByTestId('loadflow-switch-on-acpf')
+  expect(queryByTestId('loadflow-open-grid-study')).toBeNull()
+})
+
 it('Guided shows Branch loading with the assistant branch highlighted, as Expert does', async () => {
   useUIStore.setState({ uiMode: 'guided', resultsHighlight: { component: 'Line', name: 'Line 1' } })
   renderPage()
@@ -277,6 +311,20 @@ it.each([
   expect(queryByText('All snapshots converged.')).toBeNull()
   if (counts.unknown_count === 4) expect(queryByText(/non-converged snapshot/)).toBeNull()
   else expect(await findByText('1 non-converged snapshot')).toBeTruthy()
+})
+
+it.each([
+  [[], 'Flat start'],
+  [['T1'], '1 phase-shifting transformer'],
+  [['T1', 'T2', 'T3', 'T4', 'T5', 'T6'], '6 phase-shifting transformers'],
+])('AC PF status shows the seed (%j) as %s', async (seededBy, shown) => {
+  vi.mocked(resultsApi.getAcPfStatus).mockResolvedValue({
+    available: true, slack_bus_used: 'B1', stripped_voll_slacks: [], seeded_by: seededBy,
+    converged_list: [], converged_per_snapshot: {}, converged_count: 4,
+    total_snapshots: 4, known_converged_count: 4, unknown_count: 0,
+  } as never)
+  renderPage()
+  expect(await screen.findByText(shown)).toBeTruthy()
 })
 
 // ── "Add to report" on the bus-voltage chart ────────────────────────────────
