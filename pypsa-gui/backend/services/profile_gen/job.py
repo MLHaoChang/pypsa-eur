@@ -173,6 +173,18 @@ def _resolve_params(spec: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _cutout_record(path: str) -> dict | None:
+    """The cutout's record for the project, or None when it cannot be read: a
+    job never fails on its provenance (GK B3 W3)."""
+    from services.profile_gen.cutout_digest import cutout_record
+
+    try:
+        return cutout_record(path)
+    except (OSError, ValueError):
+        logger.warning("profile_gen: cutout %s not recorded", path, exc_info=True)
+        return None
+
+
 def run_queued(job: Any, progress: Any, stop_event: Any) -> tuple[Path, Path]:
     """Run one profile_gen job to its pending artifact. Returns the
     (nc, json) pair. Raises ProfileGenAborted when the stop_event fired,
@@ -223,7 +235,10 @@ def run_queued(job: Any, progress: Any, stop_event: Any) -> tuple[Path, Path]:
             bbox, weather_year,
             stop_event=stop_event,
         ))
+        cutout = _cutout_record(params["cutout_path"])
         _check_stop()
+    else:
+        cutout = None
 
     if progress:
         progress("generate", 0, 1)
@@ -238,6 +253,10 @@ def run_queued(job: Any, progress: Any, stop_event: Any) -> tuple[Path, Path]:
     record["project_id"] = job.project_id
     record["points"] = list(result.series.columns)
     record["year_source"] = str(spec.get("year_source") or "default")
+    # The cutout the series came from: its own extent, year and sha256
+    # (project-io 03). None for synthetic, or when it cannot be recorded.
+    if cutout is not None:
+        record["cutout"] = cutout
     # Per-point coordinates, so a later apply can warn when an asset's bus
     # has moved since its profile was generated.
     record["point_coords"] = {

@@ -512,6 +512,7 @@ DISPLAY_ACRONYMS = {
     "poc": "PoC",
     "co2": "CO₂",
     "lng": "LNG",
+    "nh3": "NH3",
 }
 # Why a case is not run, in plain words, by the reason `run_shipped.load` gave
 # (its text is the server's; each marker below is a phrase of it).
