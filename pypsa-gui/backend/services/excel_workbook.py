@@ -74,9 +74,23 @@ def catalogue() -> dict:
     return out
 
 
-# Asset-form inputs that never join a workbook as plain values (issue 07): a Link's extra ports follow the
-# port rule (`network_crud._link_port_extras`), and a bus or carrier field names another asset.
-_NOT_PLAIN = {"Link": frozenset({"bus2", "bus3", "bus4", "efficiency2", "efficiency3", "efficiency4"})}
+# Asset-form inputs the single edit never writes as plain values, so a workbook does not either (issue 07):
+# a Link's extra ports follow the port rule (`network_crud._link_port_extras`), and a transformer's
+# winding voltages are read from its buses (`update_transformer` excludes them from the write).
+_NOT_WRITTEN = {
+    "Link": frozenset({"bus2", "bus3", "bus4", "efficiency2", "efficiency3", "efficiency4"}),
+    "Transformer": frozenset({"v_nom_0", "v_nom_1"}),
+}
+
+
+def _own_custom_columns(cls: str) -> list[str]:
+    """The custom columns with their own reading: investment parts, eh_* tags and the outage flag."""
+    from services.adequacy.eh_columns import eh_columns_for
+    from services.adequacy.occurrence import FLAG_COL
+    from services.asset_schema.schema import part_columns
+
+    flag = [FLAG_COL] if cls == "Generator" else []
+    return list(dict.fromkeys([*part_columns(cls), *eh_columns_for(cls), *flag]))
 
 
 def form_columns() -> dict[str, list[str]]:
@@ -84,28 +98,24 @@ def form_columns() -> dict[str, list[str]]:
 
     A field joins when it is not derived (`catalogue` leaves those out), not a PyPSA attribute, declared by
     the class's Create model (so the single-edit validators exist for it, `refuse_bad_form_values`), not a
-    bus or carrier reference, not a Link port column (`_NOT_PLAIN`) and not already one of the custom columns
-    with their own reading (investment parts, eh_* tags and the outage flag).
+    bus or carrier reference, not one the single edit never writes (`_NOT_WRITTEN`) and not already one of
+    the custom columns with their own reading (`_own_custom_columns`).
     """
     import pypsa
 
-    from services.adequacy.eh_columns import eh_columns_for
-    from services.adequacy.occurrence import FLAG_COL
-    from services.asset_schema.schema import part_columns
     from services.network_crud import _declared_attributes
 
     blank = pypsa.Network()
     out: dict[str, list[str]] = {}
     for cls, cols in catalogue().items():
-        skip = set(blank.components[cls].defaults.index)
-        skip |= {*part_columns(cls), *eh_columns_for(cls), FLAG_COL}
+        skip = {*blank.components[cls].defaults.index, *_own_custom_columns(cls)}
+        skip |= _NOT_WRITTEN.get(cls, frozenset())
         keys = [
             c.key
             for c in cols
             if c.key not in skip
             and c.key in _declared_attributes(cls)
             and c.kind not in ("bus", "carrier")
-            and c.key not in _NOT_PLAIN.get(cls, ())
         ]
         if keys:
             out[cls] = keys
@@ -113,22 +123,13 @@ def form_columns() -> dict[str, list[str]]:
 
 
 def custom_columns() -> dict[str, list[str]]:
-    """Per model class, the non-PyPSA columns a project may hold: investment parts, eh_* tags, the outage
-    flag and the asset form's other inputs (`form_columns`), so the reader accepts what the writer emits."""
-    from services.adequacy.eh_columns import eh_columns_for
-    from services.adequacy.occurrence import FLAG_COL
-    from services.asset_schema.schema import part_columns
-
+    """Per model class, the non-PyPSA columns a project may hold: the ones with their own reading and the
+    asset form's other inputs (`form_columns`), so the reader accepts what the writer emits."""
     L = _gs()[0]
     forms = form_columns()
     out: dict[str, list[str]] = {}
     for cls, _, _ in L.SHEETS:
-        flag = [FLAG_COL] if cls == "Generator" else []
-        cols = list(
-            dict.fromkeys(
-                [*part_columns(cls), *eh_columns_for(cls), *flag, *forms.get(cls, [])]
-            )
-        )
+        cols = [*_own_custom_columns(cls), *forms.get(cls, [])]
         if cols:
             out[cls] = cols
     return out
@@ -147,12 +148,11 @@ def _form_validator(cls: str, key: str):
     return TypeAdapter(Annotated[field.annotation, *field.metadata] if field.metadata else field.annotation)
 
 
-def _is_unset(v) -> bool:
-    return v is None or (isinstance(v, float) and v != v) or (isinstance(v, str) and not v.strip())
-
-
 def refuse_bad_form_values(n, unchanged: str = "") -> None:
-    """A form column's value the single edit would refuse refuses the whole import, before anything is written."""
+    """A form column's value the single edit would refuse refuses the whole import, before anything is written.
+
+    `unchanged`: the open-network import's ending; a new-project import says nothing was imported."""
+    import pandas as pd
     from pydantic import ValidationError
 
     L = _gs()[0]
@@ -164,7 +164,7 @@ def refuse_bad_form_values(n, unchanged: str = "") -> None:
                 continue
             check = _form_validator(cls, key)
             for name, v in frame[key].items():
-                if _is_unset(v):
+                if pd.isna(v) or (isinstance(v, str) and not v.strip()):
                     continue
                 try:
                     check.validate_python(v.item() if hasattr(v, "item") else v)
@@ -174,7 +174,7 @@ def refuse_bad_form_values(n, unchanged: str = "") -> None:
                         {
                             "error_kind": "invalid_edit_value",
                             "message": f"{L.SHEET_OF[cls]} · {labels[cls][key]}: the value for “{name}” "
-                            f"is not one the asset form accepts. Nothing was imported.{unchanged}",
+                            f"is not one the asset form accepts.{unchanged or ' Nothing was imported.'}",
                         },
                     ) from None
 

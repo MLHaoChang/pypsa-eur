@@ -834,7 +834,6 @@ FORM_COLUMNS = {
     "Carrier": ["unit"],
     "Bus": ["country"],
     "Line": ["outage_rate_value", "outage_rate_basis", "mttr_hours"],
-    "Transformer": ["v_nom_0", "v_nom_1"],
     "Generator": [
         "lifetime_run_hours",
         "fuel_price",
@@ -865,6 +864,7 @@ def test_the_form_columns_a_workbook_carries_are_pinned():
         ("Generator", "p_max_pu_includes_outages", "the outage flag, read as a custom column"),
         ("Link", "bus2", "a bus reference"),
         ("Link", "efficiency2", "a Link port column"),
+        ("Transformer", "v_nom_0", "shown by the form, never written by the single edit"),
         ("GlobalConstraint", "carrier", "not declared by a Create model"),
     ],
 )
@@ -903,6 +903,21 @@ def test_a_form_value_the_asset_form_refuses_refuses_the_import(
     assert store() == before
 
 
+def test_a_form_value_refused_on_the_open_network_import_says_it_is_unchanged():
+    """H5's split: the open-network import keeps its own ending, not both."""
+    from fastapi import HTTPException
+
+    n = _network(stale=False)
+    n.generators.loc["G1", "outage_rate_value"] = 1.5
+    with pytest.raises(HTTPException) as exc:
+        excel_workbook.refuse_bad_form_values(n, " The open network is unchanged.")
+    assert exc.value.detail == {
+        "error_kind": "invalid_edit_value",
+        "message": "Generators · Forced-outage rate: the value for “G1” is not one the asset form "
+        "accepts. The open network is unchanged.",
+    }
+
+
 def test_a_project_without_form_values_imports_none(
     client, install_network, session_ctx, _auth_db
 ):
@@ -916,6 +931,7 @@ def test_a_project_without_form_values_imports_none(
     with _auth_db[1]() as db:
         src_id = str(db.query(Project).filter_by(name="WB Plain").one().id)
     data = client.get(f"/api/projects/{src_id}/workbook").content
+    assert _preview(client, data).json()["report"]["unmapped"] == []
     made = _import(client, data, name="WB Plain Copy")
     assert made.status_code == 200, made.text
     got = _saved_network(_saved(_auth_db[1], made.json()["project_id"]))
