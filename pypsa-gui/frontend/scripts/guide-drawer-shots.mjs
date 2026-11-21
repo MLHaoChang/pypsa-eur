@@ -7,7 +7,8 @@
 // a full entry, an entry with rows left out, browse by function, search results, the
 // palette footer on a row with no field, an unknown guide id, the guide beside the
 // open assistant dock (never over it), then Guided "Back to <field>" or Expert
-// "Back to <asset>" with "Open on <asset> ›". Checks Esc order (guide first, then the
+// "Back to <asset>" with no "Open on" (that is where Back goes), then "Open on <asset> ›"
+// where it is offered (Guided: another field via Related; Expert: Properties hidden). Checks Esc order (guide first, then the
 // dock stays) and focus return. Shots at 1x (downscaled for the evidence branch).
 // Exit 1 when a check fails.
 //
@@ -75,7 +76,7 @@ try {
     const p = await ctx.newPage()
     p.setDefaultTimeout(20000)
     p.on('pageerror', e => failures.push(`${key}: page error: ${e.message}`))
-    const shot = name => p.screenshot({ path: path.join(OUT, `${key}-${name}.png`) })
+    const shot = (name, el) => (el ?? p).screenshot({ path: path.join(OUT, `${key}-${name}.png`) })
     const r = { key }
     try {
       await p.goto(`${BASE}/app`)
@@ -185,8 +186,10 @@ try {
       if (mode === 'guided') r.oneDrawer = await p.getByTestId('field-drawer').count() === 1
         && await p.getByRole('dialog', { name: 'Parameter guide' }).count() === 0
       await shot(mode === 'guided' ? '8-guided-back-to-field' : '8-expert-back-to-asset')
-      const openOn = guide.getByTestId('guide-open-on')
-      r.openOn = await openOn.innerText().catch(() => null)
+      // Hosted over the place "Back to …" goes (Guided: this field's drawer; Expert: this
+      // asset's Properties), so "Open on" is not offered there.
+      r.openOnHosted = await guide.getByTestId('guide-open-on').count()
+      await shot(mode === 'guided' ? '8b-guided-hosted-eyebrow' : '8b-expert-hosted-eyebrow', guide)
       if (r.back) {
         await back.click()
         await guide.waitFor({ state: 'detached' })
@@ -194,12 +197,46 @@ try {
           ? await p.getByTestId('field-drawer').locator('[data-field]').first().isVisible().catch(() => false)
           : true
       }
+
+      // 9. "Open on" where it is offered: Guided, another Generator field of the same asset,
+      // reached through Related inside the field drawer; Expert, with the Properties panel hidden.
+      if (mode === 'guided') {
+        await openPalette(QUERY)
+        await input.press('Shift+Enter')
+        await guide.getByTestId('guide-entry').waitFor()
+        const here = await guide.getByTestId('guide-model-name').innerText()
+        const cur = catalogue.entries.find(e => e.scope === 'Generator' && e.model_name === here)
+        const other = cur && cur.related.map(id => catalogue.entries.find(e => e.id === id))
+          .find(e => e && e.scope === 'Generator' && e.model_name !== here)
+        if (other) {
+          await guide.getByRole('button', { name: `${other.plain_name} ›`, exact: true }).first().click()
+          r.otherVia = `Related "${other.plain_name}"`
+        } else {
+          const any = catalogue.entries.find(e => e.scope === 'Generator' && e.model_name !== here && e.model_name === 'marginal_cost')
+            ?? catalogue.entries.find(e => e.scope === 'Generator' && e.model_name !== here)
+          await openGuideById(any.id)
+          r.otherVia = `guide store "${any.plain_name}" (no Related Generator entry)`
+        }
+        await guide.getByTestId('guide-model-name').filter({ hasNotText: new RegExp(`^${here}$`) }).waitFor()
+        r.otherField = await guide.getByTestId('guide-model-name').innerText()
+      } else {
+        await p.getByRole('button', { name: 'Hide properties panel' }).click()
+        await p.waitForTimeout(300)
+        await openPalette(QUERY)
+        await input.press('Shift+Enter')
+        await guide.getByTestId('guide-entry').waitFor()
+        r.otherVia = 'Properties panel hidden, ⌘K Shift+Enter'
+        r.otherField = await guide.getByTestId('guide-model-name').innerText()
+        r.backUnhosted = await guide.getByTestId('guide-back').count()
+      }
+      const openOn = guide.getByTestId('guide-open-on')
+      r.openOn = await openOn.innerText().catch(() => null)
+      r.chooseAsset = await guide.getByTestId('guide-choose-asset').innerText().catch(() => null)
+      await shot(mode === 'guided' ? '9-guided-other-field-open-on' : '9-expert-unhosted-open-on')
       // "Open on" lands on the field. The value it shows is recorded, not pinned: the
       // edit form can open blank today (.scratch/properties-blank-form/issues/01-edit-form-opens-blank.md).
       if (r.openOn) {
-        await openPalette(QUERY)
-        await input.press('Shift+Enter')
-        await guide.getByTestId('guide-open-on').click()
+        await openOn.click()
         await p.waitForFunction(() => document.activeElement?.closest('[data-field]'), null, { timeout: 5000 }).catch(() => {})
         r.landed = await p.evaluate(() => {
           const a = document.activeElement
@@ -209,7 +246,7 @@ try {
             mode: localStorage.getItem('network-diagram:ui-mode'),
           }
         })
-        await shot('9-open-on-landed')
+        await shot('10-open-on-landed')
       }
 
       r.ok = r.fullRows.includes('In model files') && r.escFocusTrigger
@@ -218,7 +255,9 @@ try {
         && (!noField || /⏎ open guide/.test(r.noFieldFooter)) && /⏎ select/.test(r.footer) && /⏎ guide/.test(r.footer)
         && r.unknownSearchFocused && r.dockUncovered && r.dockOpenAfterEsc
         && !!r.back && r.backFirst && r.formShownAfterBack && (mode === 'expert' || r.oneDrawer)
-        && (!r.landed || (r.landed.field === 'p_nom' && r.landed.mode === mode))
+        && r.openOnHosted === 0 && (mode === 'guided' || r.backUnhosted === 0)
+        && /^Open on mainland_supply/.test(r.openOn ?? '') && !!r.landed
+        && r.landed.field === r.otherField && r.landed.mode === mode
       if (!r.ok) failures.push(`${key}: ${JSON.stringify(r)}`)
       results.push(r)
     } catch (e) {
@@ -231,6 +270,6 @@ try {
   await browser.close()
 }
 await fs.writeFile(path.join(OUT, 'result.json'), JSON.stringify({ results, failures }, null, 1))
-for (const r of results) console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${r.key}: "${r.back}", open on "${r.openOn}" → ${JSON.stringify(r.landed ?? null)}, dock uncovered ${r.dockUncovered}`)
+for (const r of results) console.log(`${r.ok ? 'ok  ' : 'FAIL'} ${r.key}: "${r.back}", hosted open-on ${r.openOnHosted}, ${r.otherVia}: "${r.openOn}" → ${JSON.stringify(r.landed ?? null)}, dock uncovered ${r.dockUncovered}`)
 for (const f of failures) console.log(`FAIL ${f}`)
 process.exit(failures.length ? 1 : 0)
