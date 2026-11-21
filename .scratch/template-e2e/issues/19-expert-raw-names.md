@@ -3,7 +3,8 @@
 
 # 19 — Raw internal names across Expert results, readiness and queue (RAW-NAMES-1; adds to 05)
 
-Status: ready-for-agent
+Status: done (#1820)
+Landed in #1820, #1821, #1827.
 Impact: medium
 Templates: all templates
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
