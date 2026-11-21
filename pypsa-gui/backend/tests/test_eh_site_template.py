@@ -23,6 +23,7 @@ BACKEND = pathlib.Path(__file__).resolve().parents[1]
 TPL_DIR = BACKEND / "project_templates"
 sys.path.insert(0, str(TPL_DIR))
 import eh_site as S  # noqa: E402
+from services.asset_schema import provenance  # noqa: E402
 
 TID = "eh_site"
 
@@ -88,6 +89,10 @@ def test_the_existing_site_is_sunk_and_the_poc_chain_is_loss_free(site):
             df = getattr(n, frame)
             if a in df.index:
                 assert df.at[a, "overnight_cost"] == 0.0, a
+                cls = {"generators": "Generator", "storage_units": "StorageUnit", "links": "Link"}
+                stamp = provenance.get(n, cls[frame], a)["overnight_cost"]
+                # the template's assumption, a code default: never the pack price, never user-set
+                assert (stamp["status"], stamp["source"]) == ("default", S.SUNK_COST_SOURCE), a
     assert n.links.at["grid_import", "efficiency"] == 1.0
     assert n.links.at["critical_feeder", "efficiency"] == 1.0
     # the PoC meter link stays untyped (not an investment)
@@ -209,11 +214,33 @@ def test_the_ledger_states_the_assumptions():
     items = {r["item"]: r for r in meta["ledger"]}
     assert "industrial_two_shift" in items["load shape"]["note"]
     assert "PF 0.98" in items["power factor and load damping"]["value"]
+    assert "gridspine" not in str(items["power factor and load damping"])
+    assert "solar-rooftop.investment.overnight" in items["PV candidate"]["note"]
     assert "not modelled" in items["PoC and feeder losses"]["note"]
     assert items["import tariff"]["source"] == "synthetic"
     assert meta["site_type"] == "industrial" and meta["recommended_archetype"] == "weak_flexible"
     assert meta["site_type_label"] == "Industrial plant"
     assert [r["peak_mw"] for r in meta["projected_load"]] == [8.0, 12.0, 15.0]
+
+
+def test_the_pv_ledger_row_is_the_pack_row_the_candidate_is_priced_at(site):
+    """The ledger's figure and the candidate's cost both come from the pack's values.csv
+    row, read here from the file, not copied from the template (#1379)."""
+    import csv
+
+    p, n = site
+    if not p["candidates"]["pv"]["enabled"]:
+        pytest.skip("no PV candidate")
+    path = (BACKEND / "services/library/defaults_pack/versions" / S.PACK_VERSION / "values.csv")
+    with path.open(newline="") as f:
+        row = next(r for r in csv.DictReader(f) if r["key"] == "solar-rooftop.investment.overnight")
+    items = {r["item"]: r for r in S.template_meta(p)["ledger"]}
+    assert f"{float(row['original_value']):.2f} {row['original_unit']}" in items["PV candidate"]["value"]
+    assert row["money_year"] in items["PV candidate"]["value"]
+    assert (row["original_unit"], row["unit"]) == ("EUR/kW_e", "EUR/MW")
+    eur_per_mw = float(row["original_value"]) * 1000.0
+    pv = [g for g in n.generators.index if g.startswith("pv_new")]
+    assert pv and all(abs(n.generators.at[g, "overnight_cost"] - eur_per_mw) < 1e-3 for g in pv)
 
 
 # ── 4. the route ────────────────────────────────────────────────────────────

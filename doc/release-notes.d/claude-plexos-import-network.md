@@ -1,0 +1,1 @@
+* Feat(gridspine): PLEXOS import, slice 2a. `read_plexos` turns a PLEXOS model (an XML file, or a .zip of the XML and its CSV data files) into a network: grid nodes, lines and links, generators with fuel cost and CO2 rate, batteries, static loads and the chosen Model's horizon. Every row the importer does not convert is listed in the import report with the reason.

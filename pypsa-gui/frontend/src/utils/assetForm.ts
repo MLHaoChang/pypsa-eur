@@ -145,3 +145,40 @@ export function isRevealed(spec: AssetFieldSpec, fs: FS): boolean {
     return raw === String(want)
   })
 }
+
+
+/** The cost fields a bus unit changes the scale of (05d): the typed costs of an investment, O&M and operation. */
+const COST_KEYS = ['overnight_cost', 'capital_cost', 'fom_cost', 'marginal_cost', 'inv_power_overnight', 'inv_energy_overnight']
+
+/**
+ * What the costs on screen are per: `tonne` when the schema's cost units say so (EUR/t, EUR/(t/h)), `energy`
+ * otherwise, undefined without a cost field. Sent with a write as `X-Cost-Basis`; the server refuses it when the
+ * asset's bus, as it will be stored, is the other kind (a stale unit must never store a cost x1000 off).
+ */
+export function costBasisOf(schema: AssetSchema | undefined): 'tonne' | 'energy' | undefined {
+  const f = schema?.groups.flatMap(g => g.fields).find(x => COST_KEYS.includes(x.key) && x.unit_display)
+  if (!f) return undefined
+  return /^EUR\/(\(t\/h\)|t)(\/|$)/.test(f.unit_display.replace('€', 'EUR')) ? 'tonne' : 'energy'
+}
+
+/** A cost whose unit follows the bus (EUR/kW, EUR/kWh, EUR/MWh on an energy bus; EUR/(t/h), EUR/t on a tonne bus). */
+const BUS_SCALED_COST = /^(EUR|€)\/(\(t\/h\)|t|kW|kWh|MWh)(\/|$)/
+
+/**
+ * The claim an edit card sends with its save (05d, GK B2 U1). A save that moves the asset to another bus and leaves
+ * every bus-scaled cost as seeded sends those costs as stored and no claim, so a bus move alone always saves; the
+ * costs are then entered in the new bus's unit. A save that moves the bus and changes a cost keeps the claim, and
+ * the server refuses it, saying to save the bus change first. `busKey` is the bus the size is measured on.
+ */
+export function cardCostClaim(
+  schema: AssetSchema | undefined, specs: AssetFieldSpec[], form: FS, asset: Record<string, unknown>,
+  busKey: 'bus' | 'bus0',
+): { costBasis?: 'tonne' | 'energy'; dropCosts: string[] } {
+  const formBus = String(form[busKey] ?? '').trim()
+  const moved = formBus !== '' && formBus !== String(asset[busKey] ?? '')
+  const seed = seedForm(specs, asset)
+  const costs = specs.filter(s => !s.derived && BUS_SCALED_COST.test(s.unit_display)).map(s => s.key)
+  const touched = costs.some(k => (form[k] ?? '') !== (seed[k] ?? ''))
+  if (moved && !touched) return { costBasis: undefined, dropCosts: costs }
+  return { costBasis: costBasisOf(schema), dropCosts: [] }
+}

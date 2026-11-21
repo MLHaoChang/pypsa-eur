@@ -57,9 +57,11 @@ SOLVES = 1  # an LP case's one queued solve
 DESCRIPTION = "Harness shipped case"
 FINANCE_WHY = "Investment case per case not run: this case moves only the settlement on the solved dispatch."
 NOT_PICKED = "Not picked to run on the card."
+NO_SOLVE = "The run has no solve left for this case."
 ERROR_KINDS = (
     {"error_kind": "shipped_fork_exists"},
     {"error_kind": "shipped_base_unsaved"},
+    {"error_kind": "shipped_pick_closed"},  # S-B2c: the step no longer awaits this pick
 )
 _TEMPLATES = Path(__file__).resolve().parents[1] / "project_templates"
 _JOB_DONE = ("completed", "failed", "aborted", "cancelled", "interrupted")
@@ -124,8 +126,47 @@ def valid(frozen) -> bool:
     )
 
 
-def freeze(task) -> dict:
-    """The record at stage entry, or `{"unfrozen": {state, message}}`."""
+def forks(profile) -> int:
+    """The profile's fork-solve allowance for the shipped cases (GK B (60) P3/P4):
+    `shipped.forks`, else the explore case cap as before."""
+    from harness import run_explore
+
+    allowance = (profile.get("shipped") or {}).get("forks")
+    return (
+        int(allowance) if isinstance(allowance, int) else run_explore.caps(profile)[0]
+    )
+
+
+def cap(profile, path, task) -> int:
+    """The fork solves the run can spend on the shipped cases (P3): the profile's
+    allowance, held to the solves its granted envelope has left."""
+    from harness import run_loops
+    from services import run_envelope
+
+    allowance = forks(profile)
+    if path is None or run_envelope._load(path) is None:
+        return allowance  # no grant: each fork's reservation still decides
+    return max(0, min(allowance, run_loops._solves_left(path, task)))
+
+
+def pick_payload(shipped, cap_now) -> dict:
+    """What the pick card shows and binds: the cases file's digest, the cap and
+    every case with its status, so the user sees all of them."""
+    return {
+        "cases_digest": shipped["digest"],
+        "cap": cap_now,
+        "total": shipped["total"],
+        "cases": [
+            {k: c[k] for k in ("id", "label", "kind", "status", "why")}
+            for c in shipped["cases"]
+        ],
+    }
+
+
+def freeze(task, path=None) -> dict:
+    """The record at stage entry, or `{"unfrozen": {state, message}}`. S-B2c:
+    more LP cases than the fork solves left needs the user's pick first; that
+    unfrozen state carries `pick`, what the pick card shows."""
     from fastapi import HTTPException
 
     from harness import run_explore
@@ -142,7 +183,19 @@ def freeze(task) -> dict:
                 project_registry.project_dir(project), tid, **sources
             )
         picked = (run.get("explore") or {}).get("shipped_pick")
-        ids = run_shipped.choose(shipped, run_explore.caps(profile)[0], picked)
+        cap_now = cap(profile, path, task)
+        try:
+            ids = run_shipped.choose(shipped, cap_now, picked)
+        except run_shipped.ShippedError as exc:
+            if exc.kind != "shipped_cases_over_budget" or picked is not None:
+                raise
+            return {
+                "unfrozen": {
+                    "state": exc.kind,
+                    "message": str(exc),
+                    "pick": pick_payload(shipped, cap_now),
+                }
+            }
     except run_shipped.ShippedError as exc:
         return {"unfrozen": {"state": exc.kind, "message": str(exc)}}
     except (HTTPException, OSError):
@@ -160,6 +213,9 @@ def freeze(task) -> dict:
         "cases_digest": shipped["digest"],
         "total": shipped["total"],
         "cases": shipped["cases"],
+        "series": shipped["series"],
+        "refs": shipped["refs"],
+        "cap": cap_now,
         "run": ids,
         "solves": sum(1 for i in ids if kinds[i] == run_shipped.LP),
     }
@@ -167,14 +223,115 @@ def freeze(task) -> dict:
     return frozen
 
 
+def pick(path, step_id, ticked, digest, instance) -> str:
+    """S-B2c (GK B (60) Q1 = A, P1): the user's pick from the pick card whose
+    digest is `digest`. Checked against the cases as they are now, then written
+    to `run.explore.shipped_pick` and the step frozen anew, in one update under
+    the run's lease; the approval card then binds that record. Returns the new
+    record's digest; raises ShippedError (each refusal its own kind)."""
+    import copy
+    import json
+
+    from harness import run_explore, runner
+    from services import run_actions
+
+    path = Path(path)
+    task = json.loads(path.read_text())
+
+    def awaiting(t):
+        step = next((s for s in t["steps"] if s["id"] == step_id), None)
+        unfrozen = (step or {}).get("unfrozen") or {}
+        return (
+            step is not None
+            and step["status"] == "pending"
+            and run_actions.kind_of(step) == KIND
+            and isinstance(unfrozen.get("pick"), dict)
+            and run_actions.digest(unfrozen["pick"]) == digest
+            and "shipped_pick" not in (t["run"].get("explore") or {})
+            and (t["run"].get("runner") or {}).get("lease_owner") == instance
+        )
+
+    if not awaiting(task):
+        raise run_shipped.ShippedError(
+            "shipped_pick_closed", "This step no longer waits on that pick."
+        )
+    shown = next(s for s in task["steps"] if s["id"] == step_id)["unfrozen"]["pick"]
+    pickable = [
+        c["id"]
+        for c in shown["cases"]
+        if c["status"] == "admissible" and c["kind"] == run_shipped.LP
+    ]
+    if isinstance(ticked, list) and any(
+        t not in pickable for t in ticked if isinstance(t, str)
+    ):
+        # GK B (61) 3: only the card's own rows; the kind says which way it is not one.
+        run_shipped.choose(
+            {
+                **shown,
+                "admissible": [
+                    c["id"] for c in shown["cases"] if c["status"] == "admissible"
+                ],
+            },
+            shown["cap"],
+            ticked,
+        )
+        raise run_shipped.ShippedError(
+            "shipped_pick_unknown", "Pick only the cases on the card."
+        )
+    trial = copy.deepcopy(task)
+    trial["run"].setdefault("explore", {})["shipped_pick"] = ticked
+    frozen = freeze(trial, path)
+    if "unfrozen" in frozen:
+        raise run_shipped.ShippedError(
+            frozen["unfrozen"]["state"], frozen["unfrozen"]["message"]
+        )
+    if frozen["cases_digest"] != shown["cases_digest"] or frozen["cap"] != shown["cap"]:
+        raise run_shipped.ShippedError(
+            "shipped_cases_changed",
+            f"{run_shipped.CASES_FILE}, a series it names or the solves left changed "
+            "after the pick card was shown.",
+        )
+    done, out = {}, {}
+
+    profile = run_explore._profile(task)
+    solving = sum(1 for i in frozen["run"] if i in pickable)
+
+    def change(t):
+        if not awaiting(t):
+            return False
+        # GK B (61) 1: the solves left re-read under the lease; a drop since
+        # the card refuses the pick.
+        if solving > cap(profile, path, t):
+            out["refused"] = True
+            return False
+        step = next(s for s in t["steps"] if s["id"] == step_id)
+        t["run"].setdefault("explore", {})["shipped_pick"] = list(ticked)
+        step.pop("unfrozen", None)
+        step["frozen"] = copy.deepcopy(frozen)
+        step["card"] = run_actions._card_for(KIND, frozen)
+        done["ok"] = True
+
+    runner._update(path, change)
+    if out.get("refused"):
+        raise run_shipped.ShippedError(
+            "shipped_cases_over_budget",
+            "The run has fewer solves left than when the pick card was shown.",
+        )
+    if not done:
+        raise run_shipped.ShippedError(
+            "shipped_pick_closed", "This step no longer waits on that pick."
+        )
+    return frozen["digest"]
+
+
 # ── admission and the step (the runner's native dispatch) ───────────────────
 
 
-def _status(case, ids) -> tuple[str, str | None]:
+def _status(case, ids, cap_now=1) -> tuple[str, str | None]:
     if case["status"] != "admissible":
         return "not_run", case["why"]
     if case["id"] not in ids:
-        return "not_run", NOT_PICKED
+        return "not_run", NOT_PICKED if cap_now else NO_SOLVE
     if case["kind"] == run_shipped.FINANCE:
         return "not_evaluated", FINANCE_WHY
     return "admitted", None
@@ -190,7 +347,7 @@ def _admit(path, step_id, frozen, held) -> list[str] | None:
 
     rows = []
     for case in frozen["cases"]:
-        status, why = _status(case, frozen["run"])
+        status, why = _status(case, frozen["run"], frozen.get("cap", 1))
         row = {
             "name": case["id"],
             "engine": SHIPPED,
@@ -245,6 +402,31 @@ def _release_all(path, rows):
             run_actions.release(path, row["solves"]["call_id"], 0, EVENT)
 
 
+def _save_base(path) -> bool | None:
+    """S-B2c (GK B (60) P5): the base saved before an LP case forks it, as the
+    explore stage's own save step does (`run_explore.steps_for`): True when it
+    had unsaved edits and was saved, False when it had none, None when the save
+    failed. `run_case` still refuses an unsaved base (`shipped_base_unsaved`)."""
+    import logging
+
+    from harness import run_explore
+    from services import chat_tools, dirty_state, project_registry
+    from services.pypsa_service import PyPSAService
+
+    task = json.loads(Path(path).read_text())
+    try:
+        with chat_tools._acting() as (db, user):
+            base = project_registry.resolve_project(db, user, task["project_id"])
+            resident = PyPSAService.get_context(project_registry.registry_key(base))
+        if resident is None or not dirty_state.is_dirty(resident):
+            return False
+        chat_tools.save_project(run_explore.project_name(task))
+        return True
+    except Exception:  # noqa: BLE001 — the backstop refuses each case instead
+        logging.getLogger(__name__).exception("shipped cases: the base save failed")
+        return None
+
+
 def dispatch(path, step, frozen, attempt, instance) -> str:
     """The step: admit, then fork and queue each admitted case in turn."""
     from harness import runner
@@ -254,6 +436,7 @@ def dispatch(path, step, frozen, attempt, instance) -> str:
     ids = _admit(path, step["id"], frozen, held)
     if ids is None:
         return "taken_over"
+    saved = _save_base(path) if ids else None  # P5: only when an LP case forks
     for case_id in ids:
         try:
             run_case(path, case_id, frozen["cases_digest"])
@@ -267,7 +450,10 @@ def dispatch(path, step, frozen, attempt, instance) -> str:
         shipped = [c for c in task["run"]["cases"] if c.get("engine") == SHIPPED]
         s.update(
             status="completed",
-            result={"cases": {c["name"]: c["status"] for c in shipped}},
+            result={
+                "cases": {c["name"]: c["status"] for c in shipped},
+                "saved": saved,
+            },
         )
 
     runner._update(path, done)
