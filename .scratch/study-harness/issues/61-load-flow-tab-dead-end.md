@@ -1,28 +1,30 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-# 61 Results › Load flow sends Energy Hub users to a switch they cannot turn on
+# 61 Results › Load flow offers the AC power-flow switch on a network with no lines, beside "Not applicable"
 
 Status: ready-for-agent
 Blocked by: none (related: 51, which sets a scope preset for the four grid templates only)
-Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), walk W3 (shots `e10-loadflow-switch`, `e11-checked`, `e13-lf`).
+Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), walk W3 (shots `e10-loadflow-switch`, `e13-lf`).
 Model: sonnet. Review: UX.
 
 ## Problem
 
-On an Energy Hub project (data-centre template, after a run), Results › AC power flow & grid › Load flow shows two things at once: "Not modelled … Switch it on under What the Run computes › Load flow ›" (`frontend/src/pages/results/LoadFlow.tsx:56`, `RunAgain`) and "Not applicable: the network has no lines or transformers". The link opens Solver & mode (`openPanel('scenarios', 'simparams')`), where Load flow is greyed out. `services/flow_scope.py:115` marks `("grid", "load_flow")` `NOT_YET` with `_NOT_HERE`, so clicking does nothing. The real load flow for these templates is the campus Grid study, and the tab never mentions it.
+After a run on an Energy Hub project, the walk saw Results › AC power flow & grid › Load flow show two things at once. One is "Not modelled … Switch it on under What the Run computes › Load flow ›" (`frontend/src/pages/results/LoadFlow.tsx:56`, `RunAgain`, shown whenever AC power flow was not part of the run). The other is "Not applicable: the network has no lines or transformers". The tab never mentions the campus Grid study, which is where the load flow of these templates runs.
+
+**Correction (2026-11-21, after the G3 builder's check on #1801).** The first version of this issue said the Solver & mode switch was greyed out. That does not hold: `GET /api/projects/{name}/flow/scope` reports `grid.load_flow` as `available` on every project the walks made. `flow_scope.option_status` lifts the `NOT_YET` row through `run_separability.runnable("loadflow")`. What stands is the contradictory pair of states, and the missing pointer to the Grid study. Only one walk observed the pair, on the walk's "GR-W3 DC grid" project, which had also had a raw `.xlsx` re-import. So reproduce it first on a fresh data-centre project. If the "Not applicable" state does not appear there, close this as not reproduced.
 
 ## User-visible impact
 
-The user follows the app's own instruction and reaches a control that cannot be used. This is the "jump away and back" that design.md §1.4 removes.
+The user is told to switch on a computation that cannot apply to this network (it has no lines), and is not told where the site's load flow is.
 
 ## Acceptance criteria
 
-- [ ] When `flow_scope` reports `("grid","load_flow")` as not available for the project, the tab does not offer the switch. It shows one state, the reason from the availability table, and, when the project has a campus/Grid study, "Run the Grid study ›", which opens that section.
-- [ ] When the network has no lines or transformers, the tab shows only "Not applicable" with its reason, never "Not modelled" as well.
-- [ ] The availability comes from `flow_scope` (the `/flow` scope payload), not a frontend copy of the table. A vitest covers the three cases: available, not available with a Grid study, and no branches.
-- [ ] Grid templates (IEEE 14 etc.) keep today's switch and link.
-- [ ] End to end in the real app: create from the data-centre template, Run LOPF, open Results › Load flow, follow "Run the Grid study ›", run it, and reach the Grid code & connection table. On an IEEE 14 project the tab still offers the AC power flow switch, and it works.
+- [ ] First, a reproduction on a fresh data-centre project (or a vitest with a branchless network), seen showing both states.
+- [ ] When the network has no lines or transformers, the tab shows only "Not applicable" with its reason, never "Not modelled" and the switch as well.
+- [ ] In that case, when the project has a campus/Grid study, the tab offers "Run the Grid study ›", which opens that section.
+- [ ] Networks with branches (IEEE 14 etc.) keep today's switch and link.
+- [ ] End to end in the real app: data-centre template › Run LOPF › Results › Load flow shows one state and the Grid study link; follow it and reach the Grid code & connection table. On IEEE 14 the AC power flow switch still works.
 
 ## Likely files
 
