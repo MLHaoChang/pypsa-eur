@@ -30,6 +30,7 @@ import { ChaptersSection } from '../ChaptersSection'
 import DownloadReport from '../DownloadReport'
 import GridExtensionCard from '../../results/GridExtensionCard'
 import { HEADLINED, ResultsHeadline } from './ResultsHeadline'
+import { WhyThisNumber } from './WhyThisNumber'
 
 
 // It names the figures it covers: the investment case's NPV and LCOE above carry their own state (UX 23).
@@ -176,6 +177,7 @@ export function ResultsCard() {
           <p data-testid="hub-results-verdict" className="text-[14px] font-semibold text-text">
             {headline(review, report)}
           </p>
+          <WhyThisNumber figure="verdict" />
           {cheaper && (
             <p data-testid="hub-results-cheaper-duration" className="text-[12px] text-text">
               {cheaper}{' '}
@@ -203,7 +205,7 @@ export function ResultsCard() {
       {/* An edit since the study makes the study's figures out of date too: the edited banner is their
           mark, and the headline's mixed-source line and chart then say so (review P1, GK B G1). */}
       <ResultsHeadline reliability={{ ...reliability, stale: stale || study?.edited_since_study === true }}
-        freshnessUnknown={freshnessUnknown} ci={loleCi(report)} cost={cost != null && (
+        freshnessUnknown={freshnessUnknown} ci={loleCi(report)} costEur={cost ?? null} cost={cost != null && (
         // The cost of the planned design at the pack's energy target, without
         // shortfall costs — never "the cost of your goal" (P24-FE gate B1).
         // The shared KPI tile (UX S6, G-item 2), the glossary text on hover.

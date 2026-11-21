@@ -184,17 +184,22 @@ def test_line_flows_at_bus0_equal_the_independent_solve(pf, oracle):
 
 
 def test_both_terminals_close_kcl_at_the_100_mva_load_bus(pf, oracle):
-    """bus1 terminals are read from the solved network (no tool serves p1/q1):
+    """bus1 terminals are read from the flow's stored record (no tool serves
+    p1/q1; the live network holds the LP's tables after the flow, PF-SAVE-1):
     they equal the oracle, and the terminals at C (bus1 of BC, bus0 of AC) sum
     to the 100 MVA load."""
     from services.pypsa_service import PyPSAService
-    n = PyPSAService.get_network()
+    flow = PyPSAService.get_solver_state()['ac_pf_results']
+
+    def line(attr):
+        return flow[f'lines_t.{attr}']
+
     for t, sol in enumerate(oracle):
         for name, (_s0, s1) in sol['flows'].items():
-            assert n.lines_t.p1[name].iloc[t] == pytest.approx(s1.real, abs=FLOW_TOL)
-            assert n.lines_t.q1[name].iloc[t] == pytest.approx(s1.imag, abs=FLOW_TOL)
-    p_c = -sum(getattr(n.lines_t, f'p{_end_at("C", name)}')[name].iloc[0] for name in ('BC', 'AC'))
-    q_c = -sum(getattr(n.lines_t, f'q{_end_at("C", name)}')[name].iloc[0] for name in ('BC', 'AC'))
+            assert line('p1')[name].iloc[t] == pytest.approx(s1.real, abs=FLOW_TOL)
+            assert line('q1')[name].iloc[t] == pytest.approx(s1.imag, abs=FLOW_TOL)
+    p_c = -sum(line(f'p{_end_at("C", name)}')[name].iloc[0] for name in ('BC', 'AC'))
+    q_c = -sum(line(f'q{_end_at("C", name)}')[name].iloc[0] for name in ('BC', 'AC'))
     assert (p_c, q_c) == pytest.approx((60.0, 80.0), abs=FLOW_TOL)
     assert math.hypot(p_c, q_c) == pytest.approx(100.0, abs=FLOW_TOL)
 

@@ -1,8 +1,9 @@
 """
 PowerFactory DGS import, step 2: the parsed tables as a pypsa network.
 
-``read_dgs(paths, options)`` reads one ASCII ``.dgs`` (``dgs_parse``) and
-returns the shared ``ImportResult``. What becomes what:
+``read_dgs(paths, options)`` reads one ASCII ``.dgs`` (``dgs_parse``, DGS 5.x
+or 7.x) or its Excel form (``dgs_xlsx``) and returns the shared
+``ImportResult``. What becomes what:
 
 - ``ElmTerm`` → Bus (``uknom`` kV). Terminals joined by a closed coupler
   (``ElmCoup`` ``on_off`` 1) of the same voltage become one bus, named after
@@ -50,6 +51,7 @@ parser it reads with may not.
 from __future__ import annotations
 
 import math
+import numbers
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -103,23 +105,45 @@ METADATA_KEY = "import"
 
 
 def read_dgs(paths: Sequence[Path], options: Mapping[str, Any] | None = None):
-    """Read one ASCII ``.dgs`` export into an ``ImportResult``."""
+    """
+    Read one PowerFactory export into an ``ImportResult``: an ASCII ``.dgs``
+    file (DGS 5.x or 7.x) or its Excel form (``.xlsx``, see ``dgs_xlsx``).
+    """
     paths = [Path(p) for p in paths]
     if len(paths) != 1:
         raise ImportFormatError(
-            f"A PowerFactory DGS import reads one .dgs file, got {len(paths)}"
+            f"A PowerFactory DGS import reads one .dgs or .xlsx file, got {len(paths)}"
         )
     path = paths[0]
-    if path.suffix.lower() != ".dgs":
-        raise ImportFormatError(f"{path.name} is not a .dgs file")
+    suffix = path.suffix.lower()
+    if suffix not in (".dgs", ".xlsx"):
+        raise ImportFormatError(f"{path.name} is not a .dgs or .xlsx file")
     try:
-        tables = parse_dgs(path)
+        if suffix == ".xlsx":
+            from gridspine.ingest.dgs_xlsx import parse_dgs_xlsx
+
+            tables = parse_dgs_xlsx(path)
+        else:
+            tables = parse_dgs(path)
+    except ImportFormatError as exc:  # a workbook limit or an unreadable file
+        raise ImportFormatError(f"{path.name}: {exc}") from exc
     except ContractError as exc:
         raise ImportFormatError(str(exc)) from exc
     try:
         return _Mapper(tables, path.name).run()
     except ContractError as exc:
         raise ImportFormatError(f"{path.name}: {exc}") from exc
+
+
+def _int(item: str, what: str, v) -> int:
+    """``v`` as an integer; text or a fraction is refused naming ``what``."""
+    if (
+        isinstance(v, bool)
+        or not isinstance(v, numbers.Real)
+        or not float(v).is_integer()  # a fraction, inf or nan
+    ):
+        raise ContractError(f"{item}: {what} {v!r} is not an integer")
+    return int(v)
 
 
 def _finite(item: str, what: str, v, *, positive=False, at_least=None) -> float:
@@ -139,11 +163,18 @@ def _finite(item: str, what: str, v, *, positive=False, at_least=None) -> float:
 class _Mapper:
     def __init__(self, tables: DgsTables, source: str):
         self.t = tables.tables
+        self.dropped = tables.dropped
+        self.where = tables.where
         self.source = source
         self.n = pypsa.Network()
         self.unmapped: list[Unmapped] = []
         self.assumed: list[Assumed] = []
         self.warnings: list[str] = []
+        if tables.decimal_comma:
+            self.warnings.append(
+                "Decimal comma read as decimal mark: the file writes its numbers "
+                "with a comma (158,77 is read as 158.77)."
+            )
         self.counts: dict[str, int] = {}
         self.names: list[dict] = []  # DGS → network, every object
         self.switches: list[dict] = []
@@ -165,7 +196,7 @@ class _Mapper:
     def label(self, cls, oid, row) -> str:
         name = row.get("loc_name") if hasattr(row, "get") else None
         name = name if isinstance(name, str) and name else f"ID {oid}"
-        return f"{cls} {name!r} (line {int(row[LINE_COLUMN])})"
+        return f"{cls} {name!r} ({self.where(row[LINE_COLUMN])})"
 
     def skip(self, cls, oid, row, reason):
         self.unmapped.append(Unmapped(self.label(cls, oid, row), reason))
@@ -220,7 +251,10 @@ class _Mapper:
                     "StaCubic", cid, c, "a cubicle without its element or terminal"
                 )
                 continue
-            out.setdefault(obj, {})[int(self.get(c, "obj_bus", 0))] = (term, cid)
+            side = _int(
+                self.label("StaCubic", cid, c), "obj_bus", self.get(c, "obj_bus", 0)
+            )
+            out.setdefault(obj, {})[side] = (term, cid)
         return out
 
     def ends(self, cls, oid, row, sides) -> list | None:
@@ -234,8 +268,17 @@ class _Mapper:
             buses.append(self.bus_of[got[s][0]])
         return buses
 
+    def cls_of(self, oid) -> str:
+        """The class holding ``oid`` (IDs are unique across the file)."""
+        return next(c for c, df in self.t.items() if oid in df.index)
+
     def active(self, oid, row) -> bool:
-        return int(self.get(row, "outserv", 0)) == 0 and oid not in self.open_ends
+        out = _int(
+            self.label(self.cls_of(oid), oid, row),
+            "outserv",
+            self.get(row, "outserv", 0),
+        )
+        return out == 0 and oid not in self.open_ends
 
     def record(self, cls, oid, row, component, name):
         self.names.append(
@@ -316,7 +359,14 @@ class _Mapper:
             return x
 
         for oid, row in self.rows("ElmCoup"):
-            closed = int(self.get(row, "on_off", 1)) == 1
+            closed = (
+                _int(
+                    self.label("ElmCoup", oid, row),
+                    "on_off",
+                    self.get(row, "on_off", 1),
+                )
+                == 1
+            )
             ends = self.cub.get(oid, {})
             t0, t1 = (ends.get(s, (None,))[0] for s in (0, 1))
             if t0 not in parent or t1 not in parent:
@@ -351,7 +401,14 @@ class _Mapper:
             cid: obj for obj, sides in self.cub.items() for _, cid in sides.values()
         }
         for sid, row in self.rows("StaSwitch"):
-            closed = int(self.get(row, "on_off", 1)) == 1
+            closed = (
+                _int(
+                    self.label("StaSwitch", sid, row),
+                    "on_off",
+                    self.get(row, "on_off", 1),
+                )
+                == 1
+            )
             obj = cub_owner.get(self.get(row, "fold_id"))
             self.switches.append(
                 {
@@ -495,12 +552,16 @@ class _Mapper:
             step = _finite(
                 item, "tap step (%)", self.opt(name, typ, "dutap", 0.0, "Tap step (%)")
             )
-            n0 = int(self.opt(name, typ, "nntap0", 0, "Neutral tap position"))
-            pos = int(self.opt(name, row, "nntap", n0, "Tap position"))
+            n0 = _int(
+                item, "nntap0", self.opt(name, typ, "nntap0", 0, "Neutral tap position")
+            )
+            pos = _int(item, "nntap", self.opt(name, row, "nntap", n0, "Tap position"))
             tap = 1.0 + step / 100.0 * (pos - n0)
             if tap <= 0:
                 raise ContractError(f"{item}: tap position {pos} gives ratio {tap:g}")
-            side = int(self.opt(name, typ, "tap_side", 0, "Tap side"))
+            side = _int(
+                item, "tap_side", self.opt(name, typ, "tap_side", 0, "Tap side")
+            )
             if side not in (0, 1):
                 raise ContractError(f"{item}: tap side {side} is not 0 (HV) or 1 (LV)")
             lv_side = side == 1
@@ -733,10 +794,16 @@ class _Mapper:
                 "Load",
                 name,
                 bus=bus,
-                p_set=_finite(item, "active power (MW)", self.get(row, "plini", 0.0))
+                p_set=_finite(
+                    item,
+                    "active power (MW)",
+                    self.opt(name, row, "plini", 0.0, "Active power (MW)"),
+                )
                 * sc,
                 q_set=_finite(
-                    item, "reactive power (Mvar)", self.get(row, "qlini", 0.0)
+                    item,
+                    "reactive power (Mvar)",
+                    self.opt(name, row, "qlini", 0.0, "Reactive power (Mvar)"),
                 )
                 * sc,
                 active=self.active(oid, row),
@@ -769,10 +836,16 @@ class _Mapper:
                 bus=bus,
                 control="PQ",
                 p_nom=self._p_nom(item, name, row),
-                p_set=_finite(item, "active power (MW)", self.get(row, "pgini", 0.0))
+                p_set=_finite(
+                    item,
+                    "active power (MW)",
+                    self.opt(name, row, "pgini", 0.0, "Active power (MW)"),
+                )
                 * sc,
                 q_set=_finite(
-                    item, "reactive power (Mvar)", self.get(row, "qgini", 0.0)
+                    item,
+                    "reactive power (Mvar)",
+                    self.opt(name, row, "qgini", 0.0, "Reactive power (Mvar)"),
                 )
                 * sc,
                 active=self.active(oid, row),
@@ -791,14 +864,18 @@ class _Mapper:
             if typ is None:
                 continue
             sc = _finite(item, "scaling", self.get(row, "scale0", 1.0))
-            slack = int(self.get(row, "ip_ctrl", 0)) == 1
+            slack = _int(item, "ip_ctrl", self.get(row, "ip_ctrl", 0)) == 1
             self.n.add(
                 "Generator",
                 name,
                 bus=bus,
                 control="Slack" if slack else "PV",
                 p_nom=self._p_nom(item, name, typ),
-                p_set=_finite(item, "active power (MW)", self.get(row, "pgini", 0.0))
+                p_set=_finite(
+                    item,
+                    "active power (MW)",
+                    self.opt(name, row, "pgini", 0.0, "Active power (MW)"),
+                )
                 * sc,
                 active=self.active(oid, row),
             )
@@ -849,7 +926,7 @@ class _Mapper:
 
     def _shunts(self):
         for oid, row, item, name, bus in self._injection("ElmShnt", "ShuntImpedance"):
-            kind = int(self.get(row, "shtype", -1))
+            kind = _int(item, "shtype", self.get(row, "shtype", -1))
             if kind not in (SHTYPE_L, SHTYPE_C):
                 self.skip(
                     "ElmShnt", oid, row, f"shunt type {kind} (a filter) is not imported"
@@ -928,6 +1005,14 @@ class _Mapper:
                 self.filled["short_circuit"].append(name)
 
     def _leftovers(self):
+        for cls, cols in self.dropped.items():
+            for col in cols:  # every class, its rows imported or not
+                self.unmapped.append(
+                    Unmapped(
+                        f"{cls} column {col!r}",
+                        "a DGS 7.x matrix attribute is not imported",
+                    )
+                )
         for cls, df in self.t.items():
             if cls in STRUCTURE or cls in ELEMENTS:
                 continue

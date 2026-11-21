@@ -599,6 +599,14 @@ def _check_modelling_assumptions(n, solver_config) -> list[Issue]:
                 f"voll={cfg.voll} €/MWh set, but the network has no loads. "
                 "Slack generators will be added but never dispatched."))
 
+    # Load growth (homer-parity 04a): the stored multipliers must be what the
+    # rate gives for the periods this solve uses. Every period writer
+    # re-derives them; this refuses a solve on any that did not.
+    from services.solver.load_growth import stale_problem
+    stale = stale_problem(cfg, n)
+    if stale:
+        out.append(_err("load_growth_stale", "", "", stale))
+
     # investment_periods configured but no extendable asset → multi-period LP
     # has no decision variables differentiating across periods.
     if getattr(cfg, "multi_investment_periods", False) and getattr(cfg, "investment_periods", None):

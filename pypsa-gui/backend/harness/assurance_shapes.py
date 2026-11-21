@@ -20,7 +20,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
-from harness import predicates
+from harness import answer_sections, predicates
 from harness.assurance_scope import RequestScope
 
 
@@ -361,7 +361,41 @@ class PredicateReceipt(Receipt):
     ]
 
 
-RECEIPTS = {"1": Receipt, "2": DerivedReceipt, "3": PredicateReceipt}
+class SectionSlot(Slot):
+    """A result slot of a sectioned answer: the slot plus the entity it is for."""
+
+    entity_id: Annotated[str, Field(min_length=1, max_length=128)]
+    component_class: Annotated[str, Field(min_length=1, max_length=64)]
+
+
+class Section(_Closed):
+    """One server-written section; the heading is absent only for a lone section."""
+
+    heading: Annotated[str, Field(min_length=1, max_length=64)] | None
+    result_slots: Annotated[
+        list[SectionSlot], Field(min_length=1, max_length=answer_sections.SECTION_SLOTS)
+    ]
+
+
+class SectionedReceipt(Receipt):
+    """Policy "4" (issue 10, S6a): every entity of one component type, in at most
+    five sections of at most twenty slots (so at most a hundred); `result_slots`
+    stays absent and each slot lives in exactly one section.
+    """
+
+    policy_version: Literal["4"]
+    checked_block_ids: Annotated[list[str], Field(max_length=answer_sections.MAX_SLOTS)]
+    sections: Annotated[
+        list[Section], Field(min_length=1, max_length=answer_sections.MAX_SECTIONS)
+    ]
+
+
+RECEIPTS = {
+    "1": Receipt,
+    "2": DerivedReceipt,
+    "3": PredicateReceipt,
+    "4": SectionedReceipt,
+}
 
 
 # --- Checked tool results, keyed by tool name. ---
