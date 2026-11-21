@@ -70,6 +70,17 @@ export default function UsersPage() {
   const orgAdminCount = sortedUsers.filter(row => row.role === 'admin').length
   const representedOrgCount = new Set(sortedUsers.map(row => row.org_id).filter(Boolean)).size
 
+  const [manualInvite, setManualInvite] = useState<{ email: string; link: string } | null>(null)
+
+  async function copyInviteLink(link: string) {
+    try {
+      await navigator.clipboard.writeText(link)
+      toast.success('Link copied.')
+    } catch {
+      toast.error('Could not copy. Select the link and copy it by hand.')
+    }
+  }
+
   const createUser = useMutation({
     mutationFn: async () => {
       const payload: CreateAdminUserPayload = {
@@ -82,7 +93,17 @@ export default function UsersPage() {
       return adminApi.createUser(payload)
     },
     onSuccess: async (createdUser) => {
-      toast.success(`Invitation sent to ${createdUser.email}.`)
+      if (createdUser.email_sent) {
+        setManualInvite(null)
+        toast.success(`Invitation sent to ${createdUser.email}.`)
+      } else {
+        // No email went out (e.g. SMTP not configured): say so, and hand the
+        // admin the link instead of claiming an invitation was sent.
+        setManualInvite(createdUser.set_password_link
+          ? { email: createdUser.email, link: createdUser.set_password_link }
+          : null)
+        toast.error(`No email was sent to ${createdUser.email}.`)
+      }
       setEmail('')
       setRole('member')
       await queryClient.invalidateQueries({ queryKey: USERS_QUERY_KEY })
@@ -164,6 +185,26 @@ export default function UsersPage() {
               </Btn>
             </div>
           </form>
+          {manualInvite && (
+            <div className="mt-4 rounded-xl border border-[var(--brand-line)] bg-[var(--brand-surface-2)] p-3" role="status">
+              <p className="text-sm text-[var(--brand-ink)]">
+                {manualInvite.email} was created, but no email was sent (email is not configured).
+                Give them this link to set their password. It works once.
+              </p>
+              <div className="mt-2 flex gap-2">
+                <input
+                  aria-label="Set-password link"
+                  className={INPUT_CLASS_NAME}
+                  onFocus={event => event.currentTarget.select()}
+                  readOnly
+                  value={manualInvite.link}
+                />
+                <Btn onClick={() => void copyInviteLink(manualInvite.link)} type="button" variant="primary">
+                  Copy link
+                </Btn>
+              </div>
+            </div>
+          )}
           {user?.is_super_admin && organizations.length === 0 && (
             <p className="mt-3 text-sm text-[var(--brand-ink-dim)]">
               Create an organization first before inviting users.

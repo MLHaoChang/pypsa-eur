@@ -45,6 +45,18 @@ describe('auth HTML gate', () => {
     }
   })
 
+  it('lets anonymous users reach only the set/reset-password pages besides login', () => {
+    for (const route of ['/set-password', '/reset-password']) {
+      expect(decide(route, 'auth-on')).toEqual({ kind: 'serve-spa' })
+    }
+    // Exact match only: nothing nested or look-alike opens up.
+    for (const route of ['/set-password/x', '/reset-password.html', '/set-passwordx', '/admin/users']) {
+      expect(decide(route, 'auth-on')).toEqual({ kind: 'serve-login' })
+    }
+    // Fail closed when the backend cannot confirm auth state.
+    expect(decide('/set-password', 'unreachable')).toEqual({ kind: 'serve-login' })
+  })
+
   it('fails closed to the login page when the backend is unreachable', () => {
     // Regression: a stopped uvicorn used to fall through to the workbench.
     for (const route of DOCUMENT_ROUTES) {

@@ -61,3 +61,15 @@ def test_spa_html_is_never_served_directly_in_web_mode():
 def test_login_html_serves_login_html_not_index():
     """vite.auth-gate.ts:49 passes /login.html through to dist/login.html."""
     assert decide_route("/login.html", local_mode=False, authed=False) == ("serve", "login.html")
+
+
+@pytest.mark.parametrize("path", ["/set-password", "/reset-password"])
+def test_anonymous_reaches_the_password_pages(path):
+    assert decide_route(path, local_mode=False, authed=False) == ("serve", "spa.html")
+
+
+@pytest.mark.parametrize(
+    "path", ["/set-password/x", "/reset-password.html", "/set-passwordx", "/admin/users"]
+)
+def test_anonymous_gate_stays_closed_elsewhere(path):
+    assert decide_route(path, local_mode=False, authed=False) == ("serve", "index.html")

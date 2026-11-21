@@ -198,6 +198,9 @@ def create_user_endpoint(
         response["email_sent"] = True
     except email_service.EmailServiceError as exc:
         response["email_sent"] = False
+        # Only the admin who just created the invite sees this, and only when
+        # no email went out; the token stays single-use and expiring.
+        response["set_password_link"] = _set_password_link(raw_token)
         response["warning"] = (
             f"User created, but the set-password email was not sent: {exc}. "
             "Use the resend set-password action once email is configured."

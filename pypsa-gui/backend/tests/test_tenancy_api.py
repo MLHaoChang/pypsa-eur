@@ -155,6 +155,7 @@ def test_admin_creates_user_and_issues_token(admin_client, auth_session_local, m
     assert response.json()["role"] == "member"
     assert response.json()["status"] == "invited"
     assert response.json()["email_sent"] is True
+    assert "set_password_link" not in response.json()
     assert len(mail_outbox) == 1
     assert mail_outbox[0]["to"] == "new@example.com"
     assert mail_outbox[0]["metadata"]["purpose"] == "set_password"
@@ -203,6 +204,8 @@ def test_admin_create_user_survives_email_failure(
     assert body["status"] == "invited"
     assert body["email_sent"] is False
     assert "warning" in body and body["warning"]
+    assert body["set_password_link"].startswith(("http://", "https://"))
+    assert "/set-password?token=" in body["set_password_link"]
 
     # The user + set-password token must still be persisted so resend works.
     with auth_session_local() as db:
