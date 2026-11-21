@@ -1,6 +1,6 @@
 # The design battery duration counts every StorageUnit
 
-Status: ready-for-agent
+Status: done
 
 Raised by GK B3 (3) on #1752 (GK NOT OK @93ccc20b, nit b, accepted as a follow-up).
 
@@ -16,3 +16,7 @@ plus a non-battery StorageUnit of another duration.
 ## Triage (2026-11-20, master 87cf52a7)
 
 Checked by code reading only. Still true: `cheaperDuration.ts` filters on StorageUnit only. Acceptance as in the Ask, with the test it names. Gated: GK B3. Blocked by: none.
+
+## Done
+
+Status: done (PR pending merge). `designDurationHours` filters `carrier === 'battery'`; test with a battery plus a non-battery StorageUnit of another duration added.

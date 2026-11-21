@@ -3,7 +3,7 @@
 
 # 11 — FMEA worksheet shows €0 for a failure mode it could not price
 
-Status: ready-for-agent
+Status: done (remainder; see end of file)
 Owner: template-e2e 08 slice-2 builder (assigned by coordinator session_01G7qCuj8rD9ab9ReE2VaxLB; #1645 introduced the null). Lands in slice 2.
 Size: S
 Gated: UX (UX 2 session_01G7qCukikR93QrY7d2YFJ1c)
@@ -20,3 +20,9 @@ Since #1645, `/fmea_modes` with no VOLL returns `severity_eur` and `criticality_
 2. Unpriced modes sort after the priced ones, and the column header or that line says so. They are never mixed in as "least critical". Any total or chart over the modes leaves them out and says so.
 3. A vitest covers null severity and null criticality, plus one shot of the table in the unpriced state, dark and light.
 4. It lands with or before slice 2 of template-e2e 08, not after. If it hasn't started when slice 2's plan is ready, tell UX 2.
+
+## Remainder (checked on master a68541e6b)
+
+Verified: `mergeWorksheet` keeps null for computed rows, FmeaTab shows "Not set" and sorts unpriced last. Fixed here: manual rows no longer turn a missing € into 0 (`fmea.ts`, vitest added).
+
+Follow-up, not done (open #1729 and #1757 edit it): `pages/results/EhReferenceDesignPanel.tsx` still has `severity_eur` cells (l.575 CSV `?? ''`, the table cells near l.1896) — check they read "Not set" and not €0 once those PRs merge.
