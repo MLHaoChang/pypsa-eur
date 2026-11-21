@@ -33,9 +33,13 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 import { Btn, PageBody, PageSection, Tag } from '../components/PageKit'
 import { useUIStore } from '../store/uiStore'
 import { GenerateReportDialog } from './reports/GenerateReportDialog'
+import { AddLlmProfileLink } from './reports/llmProfileLink'
 import { ReportJobStrip } from './reports/ReportJobStrip'
 import { REPORT_DOC_KEY, ReportViewer } from './reports/ReportViewer'
 import { REPORT_EVIDENCE_HASH_KEY, useReportJob } from './reports/useReportJob'
+
+/** How long the plain-report note stays (ms). */
+const PLAIN_NOTE_MS = 45_000
 
 export const REPORTS_KEY = (project: string) => ['reports', 'list', project] as const
 
@@ -95,6 +99,15 @@ function ReportsList({ project }: { project: string }) {
   const [selected, setSelected] = useState<ReportMeta | null>(null)
   const [pendingDelete, setPendingDelete] = useState<ReportMeta | null>(null)
   const [genOpen, setGenOpen] = useState(false)
+  // TE2E-16-PLAIN-1: set when the last Generate built a plain report (no LLM
+  // profile). It clears on its own after PLAIN_NOTE_MS, when an LLM-written
+  // report finishes, and with the panel (coming back from Settings remounts it).
+  const [plainNote, setPlainNote] = useState(false)
+  useEffect(() => {
+    if (!plainNote) return
+    const t = window.setTimeout(() => setPlainNote(false), PLAIN_NOTE_MS)
+    return () => window.clearTimeout(t)
+  }, [plainNote])
   const reportGenerateRequest = useUIStore(s => s.reportGenerateRequest)
   const clearReportGenerateRequest = useUIStore(s => s.clearReportGenerateRequest)
 
@@ -115,6 +128,7 @@ function ReportsList({ project }: { project: string }) {
   const job = useReportJob(project, {
     onFinished: (record) => {
       if (record.mode !== 'generate') return
+      setPlainNote(false)
       if (record.status === 'done') {
         toast.success(`Report written — v${record.version ?? 1}`)
         // Open the new report when nothing else is open; the refreshed list
@@ -232,7 +246,7 @@ function ReportsList({ project }: { project: string }) {
               variant="primary"
               onClick={() => setGenOpen(true)}
               disabled={generateBlocked != null}
-              title={generateBlocked ?? 'Write a report with the active LLM profile from the studies this session has run'}
+              title={generateBlocked ?? 'Report from the studies this session has run: written by the active LLM profile when one is set, otherwise built plainly from the stored results'}
               data-testid="reports-generate"
             >
               <Sparkles size={12} /> Generate report…
@@ -240,6 +254,14 @@ function ReportsList({ project }: { project: string }) {
           </div>
         }
       >
+        <div role="status" data-testid="reports-plain-note">
+          {plainNote && (
+            <p className="mb-3 text-[12px] text-muted">
+              Plain report built from the stored results: no LLM key needed.{' '}
+              For a written report: <AddLlmProfileLink testId="reports-plain-note-link" />
+            </p>
+          )}
+        </div>
         {job.record && (
           <div className="mb-3">
             <ReportJobStrip
@@ -312,7 +334,11 @@ function ReportsList({ project }: { project: string }) {
       <GenerateReportDialog
         open={genOpen}
         onClose={() => setGenOpen(false)}
-        onGenerate={(opts) => job.start(opts)}
+        onGenerate={async (opts) => {
+          const out = await job.start(opts)
+          setPlainNote(out.mode === 'plain')
+          return out
+        }}
         sectionChoices={sectionChoices}
         project={project}
       />
