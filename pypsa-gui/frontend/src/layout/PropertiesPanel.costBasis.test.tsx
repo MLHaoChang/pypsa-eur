@@ -3,11 +3,12 @@
 // and a server refusal of the claim reads as the backend's sentence, once.
 import type { ReactElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
+import { seedRows, serveRows, resetServedRows } from '../test/seedRows'
 
 import schemas from '../test/fixtures/assetSchema.json'
 
@@ -34,6 +35,8 @@ vi.mock('../api/network', async (importOriginal) => {
       updateStore: vi.fn(async () => ({})),
       updateLink: vi.fn(async () => ({})),
       updateLoad: vi.fn(async () => ({})),
+      updateLine: vi.fn(async () => ({})),
+      updateTransformer: vi.fn(async () => ({})),
     },
   }
 })
@@ -46,43 +49,68 @@ vi.mock('../api/simulation', async (importOriginal) => {
 })
 
 import { networkApi } from '../api/network'
-import { GeneratorCard, LinkCard, LoadCard, StorageUnitCard, StoreCard } from './PropertiesPanel'
+import { GeneratorCard, LinkCard, LinePanel, LoadCard, StorageUnitCard, StoreCard, TransformerPanel } from './PropertiesPanel'
 
-type Api = 'updateGenerator' | 'updateStorageUnit' | 'updateStore' | 'updateLink' | 'updateLoad'
-interface Case { cls: string; root: string; api: Api; row: Record<string, unknown>; el: (r: never) => ReactElement }
+type Api = 'updateGenerator' | 'updateStorageUnit' | 'updateStore' | 'updateLink' | 'updateLoad' | 'updateLine' | 'updateTransformer'
+// `cap`: the field a 05g test edits (its label, patch key and a new value); `stale`: an untouched numeric column a
+// restore changes after the card opened.
+interface Case {
+  cls: string; root: string; api: Api; row: Record<string, unknown>; el: (r: never) => ReactElement
+  cap: { label: string; key: string; typed: number }; stale: { key: string; now: number }
+}
 
 const CASES: Record<string, Case> = {
   Generator: {
+    cap: { label: 'Capacity', key: 'p_nom', typed: 130 }, stale: { key: 'efficiency', now: 0.5 },
     cls: 'Generator', root: 'generators', api: 'updateGenerator',
-    row: { name: 'crusher', bus: 'ore', carrier: 'ore', control: 'PQ', p_nom: 120, p_nom_extendable: false,
+    row: { name: 'crusher', discount_rate: 0.0712345678901234, bus: 'ore', carrier: 'ore', control: 'PQ', p_nom: 120, p_nom_extendable: false,
       p_nom_min: 0, p_nom_max: 80, p_min_pu: 0, p_max_pu: 1, efficiency: 1, marginal_cost: 0, overnight_cost: 50,
       curtailment_cost: 0, lifetime: 40, build_year: 2027, committable: false },
     el: r => <GeneratorCard gen={r} onRename={() => {}} />,
   },
   StorageUnit: {
+    cap: { label: 'Power', key: 'p_nom', typed: 12 }, stale: { key: 'efficiency_store', now: 0.5 },
     cls: 'StorageUnit', root: 'storage_units', api: 'updateStorageUnit',
-    row: { name: 'silo', bus: 'ore', carrier: 'ore', p_nom: 10, p_nom_extendable: false, max_hours: 2,
+    row: { name: 'silo', discount_rate: 0.0712345678901234, bus: 'ore', carrier: 'ore', p_nom: 10, p_nom_extendable: false, max_hours: 2,
       efficiency_store: 0.9, efficiency_dispatch: 0.9, marginal_cost: 0, capital_cost: 0, lifetime: 20,
       build_year: 2027, cyclic_state_of_charge: false },
     el: r => <StorageUnitCard su={r} onRename={() => {}} />,
   },
   Store: {
+    cap: { label: 'Energy capacity', key: 'e_nom', typed: 340 }, stale: { key: 'standing_loss', now: 0.25 },
     cls: 'Store', root: 'stores', api: 'updateStore',
-    row: { name: 'tank', bus: 'ore', carrier: 'ore', e_nom: 336, e_nom_extendable: false, e_nom_min: 0,
+    row: { name: 'tank', discount_rate: 0.0712345678901234, bus: 'ore', carrier: 'ore', e_nom: 336, e_nom_extendable: false, e_nom_min: 0,
       e_nom_max: 1000, e_cyclic: false, standing_loss: 0, marginal_cost: 0, lifetime: 30, build_year: 2027 },
     el: r => <StoreCard store={r} onRename={() => {}} />,
   },
   Link: {
+    cap: { label: 'Capacity', key: 'p_nom', typed: 60 }, stale: { key: 'efficiency', now: 0.5 },
     cls: 'Link', root: 'links', api: 'updateLink',
-    row: { name: 'kiln', bus0: 'ore', bus1: 'grid', carrier: 'ore', p_nom: 50, p_nom_extendable: false,
+    row: { name: 'kiln', discount_rate: 0.0712345678901234, bus0: 'ore', bus1: 'grid', carrier: 'ore', p_nom: 50, p_nom_extendable: false,
       efficiency: 1, marginal_cost: 0, overnight_cost: 50, lifetime: 30, build_year: 2027 },
     el: r => <LinkCard link={r} onRename={() => {}} />,
   },
   Load: {
+    cap: { label: 'Reactive demand', key: 'q_set', typed: 3 }, stale: { key: 'sign', now: 1 },
     cls: 'Load', root: 'loads', api: 'updateLoad',
-    row: { name: 'mill', bus: 'ore', carrier: '', p_set: 5 },
+    row: { name: 'mill', bus: 'ore', carrier: '', p_set: 5, q_set: 1, sign: -1 },
     el: r => <LoadCard load={r} onRename={() => {}} />,
   },
+}
+CASES.Line = {
+  cls: 'Line', root: 'lines', api: 'updateLine',
+  row: { name: 'belt', discount_rate: 0.0712345678901234, bus0: 'ore', bus1: 'grid', carrier: 'AC', s_nom: 500, s_nom_extendable: false, s_nom_min: 0,
+    s_nom_max: null, length: 100, r: 3, x: 30, b: 0.0001, lifetime: 40, build_year: 2030,
+    inv_per_km_overnight: 432, inv_per_km_fom_share: 0.02, overnight_cost: null },
+  el: r => <LinePanel name={(r as { name: string }).name} />,
+  cap: { label: 'Capacity', key: 's_nom', typed: 520 }, stale: { key: 'lifetime', now: 25 },
+}
+CASES.Transformer = {
+  cls: 'Transformer', root: 'transformers', api: 'updateTransformer',
+  row: { name: 'xf', discount_rate: 0.0712345678901234, bus0: 'ore', bus1: 'grid', s_nom: 400, s_nom_extendable: false, s_nom_min: 0, s_nom_max: null,
+    r: 0.002, x: 0.12, tap_ratio: 1, phase_shift: 0, v_nom_0: 380, v_nom_1: 110, overnight_cost: 15000, lifetime: 40 },
+  el: r => <TransformerPanel name={(r as { name: string }).name} />,
+  cap: { label: 'Capacity', key: 's_nom', typed: 420 }, stale: { key: 'lifetime', now: 25 },
 }
 const COST_CARDS = ['Generator', 'StorageUnit', 'Store', 'Link']
 
@@ -100,7 +128,7 @@ function tonneUnits(cls: string, name: string) {
 
 function mount(c: Case) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  client.setQueryData(nk('Demo', c.root), [c.row])
+  seedRows(client, 'Demo', c.root, [c.row])
   render(<QueryClientProvider client={client}>{c.el(c.row as never)}</QueryClientProvider>)
   return client
 }
@@ -127,7 +155,7 @@ beforeEach(() => {
   schemaGet.mockImplementation(async (c: string) => (schemas as unknown as Record<string, unknown>)[c])
   for (const c of Object.values(CASES)) put(c).mockClear()
 })
-afterEach(() => { useUIStore.setState({ currentProject: null }) })
+afterEach(() => { useUIStore.setState({ currentProject: null }); resetServedRows() })
 
 describe.each(COST_CARDS)('the %s card claims the basis it shows (T2)', (cls) => {
   const c = CASES[cls]
@@ -150,7 +178,7 @@ describe.each(COST_CARDS)('the %s card claims the basis it shows (T2)', (cls) =>
   })
 })
 
-describe.each(Object.keys(CASES))('the %s card holds Save until its fields load (F3, T2)', (cls) => {
+describe.each(['Generator', 'StorageUnit', 'Store', 'Link', 'Load'])('the %s card holds Save until its fields load (F3, T2)', (cls) => {
   it('is disabled while the schema is pending, and a click sends nothing', async () => {
     const c = CASES[cls]
     schemaGet.mockImplementation(() => new Promise(() => {}))
@@ -191,7 +219,7 @@ describe.each(['Generator', 'Link'])('the %s claim and patch come from one schem
 })
 
 describe('the units flip between opening the card and Save (T3)', () => {
-  it('the claim follows the schema the patch is scaled with, not the one the card opened with', async () => {
+  it('the claim and the scaling follow the schema the card opened with (05g, GK B4): the server then refuses a flipped bus', async () => {
     const c = CASES.Generator
     units.mockResolvedValueOnce({ component: 'Generator', name: 'crusher', units: {} })
     units.mockResolvedValue(tonneUnits('Generator', 'crusher'))
@@ -204,7 +232,9 @@ describe('the units flip between opening the card and Save (T3)', () => {
     await saveWhenReady()
     await waitFor(() => expect(put(c)).toHaveBeenCalled())
     const [, body, basis] = put(c).mock.calls[0] as [string, Record<string, unknown>, string]
-    expect([body.overnight_cost, basis]).toEqual([123.4, 'tonne'])
+    // Scaled and claimed under the at-open (energy) schema: if the bus really is a tonne bus now, the server refuses
+    // the save, instead of the number being silently re-read under a unit the user may not have typed it in.
+    expect([body.overnight_cost, basis]).toEqual([123400, 'energy'])
   })
 })
 
@@ -255,5 +285,73 @@ describe('a refused claim (409 cost_basis_mismatch)', () => {
     expect(shown.mock.calls.map(c => String(c[0])).filter(t => t.startsWith('Save failed')))
       .toEqual([`Save failed: ${message}`])
     shown.mockRestore()
+  })
+})
+
+// 05g: the card's save is a rebase on the fresh row, and the basis is the one the form was opened with. Every card
+// wired to useEditBase (GK B4).
+describe.each(Object.keys(CASES))('the %s card rebases its save (05g)', (cls) => {
+  const c = CASES[cls]
+  const idle = () => units.mockResolvedValue({ component: cls, name: c.row.name, units: {} })
+  const typeCap = async () => {
+    await userEvent.clear(inputStarting(c.cap.label))
+    await userEvent.type(inputStarting(c.cap.label), String(c.cap.typed))
+  }
+
+  it('keeps the columns the user did not touch as the network now holds them', async () => {
+    idle()
+    mount(c)
+    await openEdit()
+    // a restore after the card opened: an untouched column changed; the cache still holds the old one
+    serveRows(c.root, [{ ...c.row, [c.stale.key]: c.stale.now }])
+    await typeCap()
+    await saveWhenReady()
+    await waitFor(() => expect(put(c)).toHaveBeenCalled())
+    const body = put(c).mock.calls[0][1] as Record<string, unknown>
+    expect(body[c.cap.key]).toBe(c.cap.typed)
+    expect(body[c.stale.key]).toBe(c.stale.now)
+  })
+
+  // The form seeds every number rounded to 12 digits (`tidy`, assetForm.ts), so a long stored value does not come back
+  // bit-equal from an untouched field (a scaled one, or a Load's p_set): only the same-builder base tells "untouched"
+  // from "typed".
+  it('an untouched column the form rounds stays as the network now holds it', async () => {
+    idle()
+    const key = cls === 'Load' ? 'p_set' : 'discount_rate'
+    const fresh = cls === 'Load' ? 7 : 0.08
+    mount(cls === 'Load' ? { ...c, row: { ...c.row, p_set: 5.0123456789012345 } } : c)
+    await openEdit()
+    serveRows(c.root, [{ ...(cls === 'Load' ? { ...c.row, p_set: 5.0123456789012345 } : c.row), [key]: fresh }])
+    await typeCap()
+    await saveWhenReady()
+    await waitFor(() => expect(put(c)).toHaveBeenCalled())
+    const body = put(c).mock.calls[0][1] as Record<string, unknown>
+    expect(body[c.cap.key]).toBe(c.cap.typed)
+    expect(body[key]).toBe(fresh)
+  })
+
+  it('a typed value is scaled under the schema the form opened with, not the one the schema reads at Save', async () => {
+    idle()
+    const client = mount(c)
+    await openEdit()
+    await screen.findByRole('button', { name: /^save$/i })
+    // the descriptors changed after the card opened (a units flip): the capacity now reads on a x1000 scale
+    const flipped = JSON.parse(JSON.stringify((schemas as unknown as Record<string, unknown>)[cls])) as
+      { groups: { fields: { key: string; scale: number; unit_display: string; unit_storage: string }[] }[] }
+    for (const f of flipped.groups.flatMap(g => g.fields)) {
+      if (f.key === c.cap.key) { f.scale = 1000; f.unit_display = 'kU'; f.unit_storage = 'kU' }
+      // the bus became a tonne bus: a claim read live would now say tonne
+      else if (TONNE_UNIT[f.unit_display]) { f.unit_display = TONNE_UNIT[f.unit_display]; f.unit_storage = f.unit_display }
+    }
+    schemaGet.mockImplementation(async () => flipped)
+    await act(async () => { await client.invalidateQueries({ queryKey: ['assetSchema'] }) })
+    await waitFor(() => expect(screen.getAllByText(/kU/).length).toBeGreaterThan(0))
+    await typeCap()
+    await saveWhenReady()
+    await waitFor(() => expect(put(c)).toHaveBeenCalled())
+    const [, body, basis] = put(c).mock.calls[0] as [string, Record<string, unknown>, string | undefined]
+    expect(body[c.cap.key]).toBe(c.cap.typed)
+    // the claim is the at-open one too: the cost cards say energy (the server then refuses a bus that is tonne now)
+    expect(basis).toBe(COST_CARDS.includes(cls) ? 'energy' : undefined)
   })
 })
