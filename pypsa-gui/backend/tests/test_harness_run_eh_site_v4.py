@@ -1598,6 +1598,30 @@ def test_a_case_that_names_no_currency_is_read_in_the_kpis_unit(monkeypatch):
     )
 
 
+def test_a_stored_row_with_another_status_fails_the_gate_though_value_and_reasons_match(
+    monkeypatch,
+):
+    """GK B 69: the read-back compares the status itself. A stored row equal to the
+    fresh one in value and reasons but not in status (read vs not_established, either
+    way) is not read back."""
+    fact = {"state": "not_established", "reasons": ["no_case"]}
+    _readers(monkeypatch, {**fact, "returns": None}, {**fact, "irr": None})
+    rows = run_handoff.read_kpis(KPIS)
+    assert {r["status"] for r in rows} == {"not_established"}
+    stored = [{**r, "status": "read"} for r in rows]  # same value (None) and reasons
+    assert all(
+        s["value"] == r["value"] and s.get("reasons") == r.get("reasons")
+        for s, r in zip(stored, rows)
+    )
+    assert run_handoff.kpis_read({"run": {"handoff": {"kpis": stored}}}, KPIS) is False
+
+    _readers(monkeypatch, *_established())
+    rows = run_handoff.read_kpis(KPIS)
+    assert {r["status"] for r in rows} == {"read"}
+    stored = [{**r, "status": "not_established"} for r in rows]  # same value and reasons
+    assert run_handoff.kpis_read({"run": {"handoff": {"kpis": stored}}}, KPIS) is False
+
+
 def test_a_reader_that_raises_is_unreadable_and_fails_the_gate(monkeypatch):
     def boom(ctx, on):
         raise RuntimeError("x")
