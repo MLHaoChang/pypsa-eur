@@ -25,9 +25,14 @@ from services import campus_electrical_service as ce
 from services import campus_island_cuts as cic
 from services import project_registry, project_write_gate
 from services.project_write_gate import KIND
-from tests.test_campus_island_cuts import _propose, _ready, _row, _wait_done, saved  # noqa: F401
-from tests.test_campus_island_service import project, user_and_db  # noqa: F401
+from tests import test_campus_island_cuts as cut_fixtures
+from tests import test_campus_island_service as service_fixtures
+from tests.test_campus_island_cuts import _propose, _ready, _row, _wait_done
 from tests.test_viewer_role_runners import Member
+
+saved = cut_fixtures.saved
+project = service_fixtures.project
+user_and_db = service_fixtures.user_and_db
 
 CALLS_PER_TRIAL = 4  # before the cuts write, the solve, the rerun, the trial's write
 
@@ -55,8 +60,10 @@ class Script:
 
 
 def _files(project):
-    paths = [project_registry.project_dir(project) / cic.CUTS_FILE,
-             ce.campus_dir(project) / ce.CAMPUS_FILE]
+    paths = [
+        project_registry.project_dir(project) / cic.CUTS_FILE,
+        ce.campus_dir(project) / ce.CAMPUS_FILE,
+    ]
     return {p.name: (p.read_bytes() if p.is_file() else None) for p in paths}
 
 
@@ -69,26 +76,36 @@ def test_a_refusal_in_trial_n_leaves_the_files_as_trial_n_minus_1_left_them(save
 
     def may_write():
         calls["n"] += 1
-        if calls["n"] % CALLS_PER_TRIAL == 1:                  # a trial begins
+        if calls["n"] % CALLS_PER_TRIAL == 1:  # a trial begins
             after[calls["n"] // CALLS_PER_TRIAL] = _files(saved)
         if calls["n"] == at:
             raise project_write_gate.RequesterViewOnly()
 
-    out = cic.apply_loop(saved, solve=script.solve, rerun=script.rerun,
-                         stop_event=threading.Event(), may_write=may_write)
-    n = (at - 1) // CALLS_PER_TRIAL                            # the refused trial, 0-based
+    out = cic.apply_loop(
+        saved,
+        solve=script.solve,
+        rerun=script.rerun,
+        stop_event=threading.Event(),
+        may_write=may_write,
+    )
+    n = (at - 1) // CALLS_PER_TRIAL  # the refused trial, 0-based
     assert out["stopped"] == KIND
     assert [t["trial"] for t in out["trials"]] == list(range(1, n + 1))
     assert _files(saved) == after[n]
     assert len(cic.get_cuts(saved)["trials"]) == n
-    assert calls["n"] == at                                    # nothing ran past the refusal
+    assert calls["n"] == at  # nothing ran past the refusal
 
 
 def test_without_a_refusal_the_loop_asks_before_every_write_and_solve(saved):
     _propose(saved, [_row(hour=0)])
     script, calls = Script(saved), []
-    out = cic.apply_loop(saved, solve=script.solve, rerun=script.rerun,
-                         stop_event=threading.Event(), may_write=lambda: calls.append(1))
+    out = cic.apply_loop(
+        saved,
+        solve=script.solve,
+        rerun=script.rerun,
+        stop_event=threading.Event(),
+        may_write=lambda: calls.append(1),
+    )
     assert out["stopped"] == "N reached" and len(out["trials"]) == cic.MAX_TRIALS
     assert len(calls) == CALLS_PER_TRIAL * cic.MAX_TRIALS
 
@@ -98,8 +115,12 @@ def test_a_refused_queue_solve_is_a_view_only_refusal(saved, monkeypatch):
     from services.study import runner
 
     _ready(saved)
-    job = SimpleNamespace(status="failed", objective=None, error=project_write_gate.REFUSAL)
-    monkeypatch.setattr(sq.solve_queue, "enqueue_unique", lambda name, **kw: (job, True))
+    job = SimpleNamespace(
+        status="failed", objective=None, error=project_write_gate.REFUSAL
+    )
+    monkeypatch.setattr(
+        sq.solve_queue, "enqueue_unique", lambda name, **kw: (job, True)
+    )
     monkeypatch.setattr(runner, "_wait", lambda j, stop: None)
     with pytest.raises(project_write_gate.RequesterViewOnly):
         cic._queue_solve(saved, 7, threading.Event())
@@ -125,13 +146,16 @@ def member(saved, _auth_db):
 
 @pytest.mark.parametrize("change", ["demote", "remove"])
 def test_an_apply_job_whose_requester_loses_edit_in_trial_2_keeps_trial_1(
-        saved, member, monkeypatch, change):
+    saved, member, monkeypatch, change
+):
     after_1 = {}
 
     def on_solve(n):
         if n == 1:
             return
-        after_1.update(_files(saved))  # trial 2's cuts are written; the check after the solve refuses
+        after_1.update(
+            _files(saved)
+        )  # trial 2's cuts are written; the check after the solve refuses
         getattr(member, change)()
 
     rec = _job(saved, monkeypatch, on_solve, member.id)
@@ -139,12 +163,14 @@ def test_an_apply_job_whose_requester_loses_edit_in_trial_2_keeps_trial_1(
     assert rec["error_code"] == KIND and rec["error"] == project_write_gate.REFUSAL
     assert rec["trials"] == 1 and len(cic.get_cuts(saved)["trials"]) == 1
     cuts = project_registry.project_dir(saved) / cic.CUTS_FILE
-    assert [c["hour"] for c in cic.get_cuts(saved)["applied"]] == [0]   # trial 1's only
-    assert cuts.read_bytes() != after_1[cic.CUTS_FILE]                    # trial 2's put back
+    assert [c["hour"] for c in cic.get_cuts(saved)["applied"]] == [0]  # trial 1's only
+    assert cuts.read_bytes() != after_1[cic.CUTS_FILE]  # trial 2's put back
     assert (ce.campus_dir(saved) / ce.CAMPUS_FILE).read_text() == _yaml(1)
 
 
-def test_an_apply_job_of_an_editor_who_stays_one_runs_to_its_end(saved, member, monkeypatch):
+def test_an_apply_job_of_an_editor_who_stays_one_runs_to_its_end(
+    saved, member, monkeypatch
+):
     rec = _job(saved, monkeypatch, None, member.id)
     assert rec["state"] == "done" and rec["trials"] == cic.MAX_TRIALS, rec
     assert "error_code" not in rec
@@ -166,16 +192,23 @@ def test_an_apply_job_whose_role_cannot_be_read_refuses(saved, member, monkeypat
 
 
 def test_an_apply_job_with_no_requester_is_not_judged(saved, monkeypatch):
-    monkeypatch.setattr(project_write_gate, "requester_may_not_write",
-                        lambda u, p: pytest.fail("a local-mode job is not judged")
-                        if u is not None else False)
+    monkeypatch.setattr(
+        project_write_gate,
+        "requester_may_not_write",
+        lambda u, p: (
+            pytest.fail("a local-mode job is not judged") if u is not None else False
+        ),
+    )
     rec = _job(saved, monkeypatch, None, None)
     assert rec["state"] == "done" and rec["trials"] == cic.MAX_TRIALS, rec
 
 
 def test_the_job_reads_the_role_against_the_project_row(saved, monkeypatch):
     asked = []
-    monkeypatch.setattr(project_write_gate, "requester_may_not_write",
-                        lambda u, p: asked.append((u, p)) or False)
+    monkeypatch.setattr(
+        project_write_gate,
+        "requester_may_not_write",
+        lambda u, p: asked.append((u, p)) or False,
+    )
     _job(saved, monkeypatch, None, "u-1")
     assert asked and set(asked) == {("u-1", saved.id)}

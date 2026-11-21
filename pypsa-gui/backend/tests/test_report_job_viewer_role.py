@@ -34,12 +34,14 @@ from services.reports.report_job import (
     start_report_job,
 )
 from tests import test_viewer_role_gate as gate_fixtures
-from tests.test_report_job import _PNG, _PROFILE, _draft, _job, evidence  # noqa: F401
+from tests import test_report_job as report_fixtures
+from tests.test_report_job import _PNG, _PROFILE, _draft, _job
 from tests.test_viewer_role_gate import _set_role
 
 baseline = gate_fixtures.baseline
 helpers_state = gate_fixtures.helpers_state
 world = gate_fixtures.world
+evidence = report_fixtures.evidence
 
 
 def _script():
@@ -65,7 +67,9 @@ class _CueOnFirstSend(FakeProvider):
 
 
 def _demote(world):
-    return lambda: _set_role(world["session_local"], world["project"], world["editor"], "viewer")
+    return lambda: _set_role(
+        world["session_local"], world["project"], world["editor"], "viewer"
+    )
 
 
 def _remove(world):
@@ -89,9 +93,18 @@ def _run_threaded(tmp_path, provider, **kw) -> dict:
     """Through `start_report_job`, so the on-disk marker is written and must end."""
     state: dict = {}
     start_report_job(
-        project_name="demo", project_dir=tmp_path, evidence=kw.pop("evidence"),
-        figure_pngs={"fmea_pareto": _PNG}, profile=_PROFILE, provider=provider,
-        language="en", title="T", lock=threading.Lock(), state=state, **kw)
+        project_name="demo",
+        project_dir=tmp_path,
+        evidence=kw.pop("evidence"),
+        figure_pngs={"fmea_pareto": _PNG},
+        profile=_PROFILE,
+        provider=provider,
+        language="en",
+        title="T",
+        lock=threading.Lock(),
+        state=state,
+        **kw,
+    )
     record = state["report_job"]
     record["thread"].join(timeout=20)
     assert not record["thread"].is_alive()
@@ -100,27 +113,43 @@ def _run_threaded(tmp_path, provider, **kw) -> dict:
 
 @pytest.mark.parametrize("change", [_demote, _remove], ids=["demoted", "removed"])
 def test_a_generate_whose_requester_loses_edit_mid_run_writes_no_report(
-        world, tmp_path, evidence, change):
-    record = _run_threaded(tmp_path, _CueOnFirstSend(_script(), change(world)),
-                           evidence=evidence, **_requester(world))
+    world, tmp_path, evidence, change
+):
+    record = _run_threaded(
+        tmp_path,
+        _CueOnFirstSend(_script(), change(world)),
+        evidence=evidence,
+        **_requester(world),
+    )
     assert record["status"] == "failed" and record["error_kind"] == KIND, record
     assert record["error"] == project_write_gate.REFUSAL and record["version"] is None
-    assert not (tmp_path / "reports").exists() or not any((tmp_path / "reports").iterdir())
+    assert not (tmp_path / "reports").exists() or not any(
+        (tmp_path / "reports").iterdir()
+    )
     assert store.list_reports(tmp_path) == []
-    assert _read_job_marker(tmp_path) is None              # the marker still ends
+    assert _read_job_marker(tmp_path) is None  # the marker still ends
 
 
 def test_a_regenerate_whose_requester_loses_edit_mid_run_writes_no_version(
-        world, tmp_path, evidence):
+    world, tmp_path, evidence
+):
     v1 = run_report_job(_job(tmp_path, evidence, FakeProvider(_script())))
     report_dir = tmp_path / "reports" / v1.report_id
     meta = (report_dir / "meta.json").read_bytes()
     files = sorted(p.relative_to(report_dir) for p in report_dir.rglob("*"))
 
-    provider = _CueOnFirstSend([_draft("fmea_top", "Modes, rewritten.")], _demote(world))
-    record = _run_threaded(tmp_path, provider, evidence=evidence, base_document=v1,
-                           regenerate_section="fmea_top", instruction="shorter",
-                           **_requester(world))
+    provider = _CueOnFirstSend(
+        [_draft("fmea_top", "Modes, rewritten.")], _demote(world)
+    )
+    record = _run_threaded(
+        tmp_path,
+        provider,
+        evidence=evidence,
+        base_document=v1,
+        regenerate_section="fmea_top",
+        instruction="shorter",
+        **_requester(world),
+    )
     assert record["status"] == "failed" and record["error_kind"] == KIND, record
     assert (report_dir / "meta.json").read_bytes() == meta
     assert sorted(p.relative_to(report_dir) for p in report_dir.rglob("*")) == files
@@ -129,13 +158,16 @@ def test_a_regenerate_whose_requester_loses_edit_mid_run_writes_no_version(
 
 
 def test_a_generate_of_an_editor_who_stays_one_is_saved(world, tmp_path, evidence):
-    record = _run_threaded(tmp_path, FakeProvider(_script()), evidence=evidence,
-                           **_requester(world))
+    record = _run_threaded(
+        tmp_path, FakeProvider(_script()), evidence=evidence, **_requester(world)
+    )
     assert record["status"] == "done" and record["version"] == 1, record
     assert len(store.list_reports(tmp_path)) == 1
 
 
-def test_a_report_job_whose_role_cannot_be_read_refuses(world, tmp_path, evidence, monkeypatch):
+def test_a_report_job_whose_role_cannot_be_read_refuses(
+    world, tmp_path, evidence, monkeypatch
+):
     from db import session as db_session
 
     def broken():
@@ -144,7 +176,9 @@ def test_a_report_job_whose_role_cannot_be_read_refuses(world, tmp_path, evidenc
     def break_db():
         monkeypatch.setattr(db_session, "SessionLocal", broken)
 
-    job = _job(tmp_path, evidence, _CueOnFirstSend(_script(), break_db), **_requester(world))
+    job = _job(
+        tmp_path, evidence, _CueOnFirstSend(_script(), break_db), **_requester(world)
+    )
     with pytest.raises(project_write_gate.RequesterViewOnly):
         run_report_job(job)
     assert job.record["status"] == "failed" and job.record["error_kind"] == KIND
@@ -152,17 +186,24 @@ def test_a_report_job_whose_role_cannot_be_read_refuses(world, tmp_path, evidenc
 
 
 def test_a_report_job_with_no_requester_is_not_judged(tmp_path, evidence, monkeypatch):
-    monkeypatch.setattr(project_write_gate, "requester_may_not_write",
-                        lambda *_a: pytest.fail("a local-mode job is not judged") or True)
-    monkeypatch.setattr(report_job.project_write_gate, "check_requester",
-                        lambda u, p: None if (u, p) == (None, None) else pytest.fail((u, p)))
+    monkeypatch.setattr(
+        project_write_gate,
+        "requester_may_not_write",
+        lambda *_a: pytest.fail("a local-mode job is not judged") or True,
+    )
+    monkeypatch.setattr(
+        report_job.project_write_gate,
+        "check_requester",
+        lambda u, p: None if (u, p) == (None, None) else pytest.fail((u, p)),
+    )
     job = _job(tmp_path, evidence, FakeProvider(_script()))
     run_report_job(job)
     assert job.record["status"] == "done"
 
 
 def test_a_template_plan_whose_requester_loses_edit_stores_no_plan(
-        world, tmp_path, evidence, monkeypatch):
+    world, tmp_path, evidence, monkeypatch
+):
     from services.reports import templates
 
     v1 = run_report_job(_job(tmp_path, evidence, FakeProvider(_script())))
@@ -174,10 +215,19 @@ def test_a_template_plan_whose_requester_loses_edit_stores_no_plan(
         return {"headings": []}
 
     monkeypatch.setattr(templates, "_propose_mapping", lambda: propose)
-    monkeypatch.setattr(templates, "sanitise_plan", lambda raw, outline, doc: ({"p": 1}, []))
-    job = prepare_mapping_job(project_name="demo", project_dir=tmp_path, document=v1,
-                              outline=SimpleNamespace(), profile=_PROFILE, provider=None,
-                              language="en", **_requester(world))
+    monkeypatch.setattr(
+        templates, "sanitise_plan", lambda raw, outline, doc: ({"p": 1}, [])
+    )
+    job = prepare_mapping_job(
+        project_name="demo",
+        project_dir=tmp_path,
+        document=v1,
+        outline=SimpleNamespace(),
+        profile=_PROFILE,
+        provider=None,
+        language="en",
+        **_requester(world),
+    )
     with pytest.raises(project_write_gate.RequesterViewOnly):
         run_mapping_job(job)
     assert job.record["status"] == "failed" and job.record["error_kind"] == KIND
@@ -188,11 +238,22 @@ def test_a_template_plan_of_an_editor_is_stored(world, tmp_path, evidence, monke
     from services.reports import templates
 
     v1 = run_report_job(_job(tmp_path, evidence, FakeProvider(_script())))
-    monkeypatch.setattr(templates, "_propose_mapping", lambda: lambda provider, **_kw: {})
-    monkeypatch.setattr(templates, "sanitise_plan", lambda raw, outline, doc: ({"p": 1}, []))
-    job = prepare_mapping_job(project_name="demo", project_dir=tmp_path, document=v1,
-                              outline=SimpleNamespace(), profile=_PROFILE, provider=None,
-                              language="en", **_requester(world))
+    monkeypatch.setattr(
+        templates, "_propose_mapping", lambda: lambda provider, **_kw: {}
+    )
+    monkeypatch.setattr(
+        templates, "sanitise_plan", lambda raw, outline, doc: ({"p": 1}, [])
+    )
+    job = prepare_mapping_job(
+        project_name="demo",
+        project_dir=tmp_path,
+        document=v1,
+        outline=SimpleNamespace(),
+        profile=_PROFILE,
+        provider=None,
+        language="en",
+        **_requester(world),
+    )
     assert run_mapping_job(job) == {"p": 1}
     assert job.record["status"] == "done"
 
@@ -211,7 +272,8 @@ def _poll(client, name, timeout=10.0):
 
 
 def test_generate_and_regenerate_name_the_caller_and_the_project_row(
-        client, api_project, session_state, seeded_identity, _auth_db, monkeypatch):
+    client, api_project, session_state, seeded_identity, _auth_db, monkeypatch
+):
     from db.models import Project
     from tests.test_report_job_http import _install_provider, _store_eh_report
 
@@ -227,13 +289,21 @@ def test_generate_and_regenerate_name_the_caller_and_the_project_row(
         return real(user_id, project_id)
 
     monkeypatch.setattr(project_write_gate, "requester_may_not_write", spy)
-    _install_provider(monkeypatch, FakeProvider([
-        _draft(EXECUTIVE_SUMMARY_ID, "Summary."), _draft("fmea_top", "Modes.")]))
-    rid = client.post(f"/api/projects/{name}/reports/generate",
-                      json={"sections": [EXECUTIVE_SUMMARY_ID, "fmea_top"]}).json()["report_id"]
+    _install_provider(
+        monkeypatch,
+        FakeProvider(
+            [_draft(EXECUTIVE_SUMMARY_ID, "Summary."), _draft("fmea_top", "Modes.")]
+        ),
+    )
+    rid = client.post(
+        f"/api/projects/{name}/reports/generate",
+        json={"sections": [EXECUTIVE_SUMMARY_ID, "fmea_top"]},
+    ).json()["report_id"]
     assert _poll(client, name)["status"] == "done"
     _install_provider(monkeypatch, FakeProvider([_draft("fmea_top", "Shorter.")]))
-    r = client.post(f"/api/projects/{name}/reports/{rid}/sections/fmea_top/regenerate", json={})
+    r = client.post(
+        f"/api/projects/{name}/reports/{rid}/sections/fmea_top/regenerate", json={}
+    )
     assert r.status_code == 200, r.text[:300]
     assert _poll(client, name)["status"] == "done"
     me = str(seeded_identity["user_id"])
@@ -241,16 +311,23 @@ def test_generate_and_regenerate_name_the_caller_and_the_project_row(
 
 
 def test_a_refused_generate_over_http_reports_the_kind_and_writes_nothing(
-        client, api_project, session_state, monkeypatch):
+    client, api_project, session_state, monkeypatch
+):
     from tests.test_report_job_http import _install_provider, _store_eh_report
 
     name = api_project("gen-viewer-refused")
     _store_eh_report(session_state(client))
     monkeypatch.setattr(project_write_gate, "requester_may_not_write", lambda *_a: True)
-    _install_provider(monkeypatch, FakeProvider([
-        _draft(EXECUTIVE_SUMMARY_ID, "Summary."), _draft("fmea_top", "Modes.")]))
-    r = client.post(f"/api/projects/{name}/reports/generate",
-                    json={"sections": [EXECUTIVE_SUMMARY_ID, "fmea_top"]})
+    _install_provider(
+        monkeypatch,
+        FakeProvider(
+            [_draft(EXECUTIVE_SUMMARY_ID, "Summary."), _draft("fmea_top", "Modes.")]
+        ),
+    )
+    r = client.post(
+        f"/api/projects/{name}/reports/generate",
+        json={"sections": [EXECUTIVE_SUMMARY_ID, "fmea_top"]},
+    )
     assert r.status_code == 200, r.text[:300]
     body = _poll(client, name)
     assert body["status"] == "failed" and body["error_kind"] == KIND, body
@@ -267,9 +344,13 @@ def test_the_harness_report_stage_names_the_runs_owner(monkeypatch, tmp_path):
 
     project = SimpleNamespace(uuid="p-1", name="demo", directory=tmp_path)
     ctx = SimpleNamespace(project_uuid="p-1")
-    task = {"project_id": "p-1", "owner_id": "u-7", "status": "running",
-            "run": {"profile": "x", "status": "running"},
-            "steps": [{"id": "report", "status": "pending"}]}
+    task = {
+        "project_id": "p-1",
+        "owner_id": "u-7",
+        "status": "running",
+        "run": {"profile": "x", "status": "running"},
+        "steps": [{"id": "report", "status": "pending"}],
+    }
     path = tmp_path / "task.json"
     path.write_text(json.dumps(task))
     seen = {}

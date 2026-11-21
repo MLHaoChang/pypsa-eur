@@ -241,8 +241,9 @@ def test_a_refused_rerun_puts_back_the_option_projects_of_the_last_run(
     study = store.load_study(base_dir, sid)
     with sl() as db:
         still = [pid for pid in prior if db.get(Project, uuid.UUID(pid)) is not None]
-        assert all(db.get(Project, uuid.UUID(pid)) is not None
-                   for pid in study.option_projects)
+        assert all(
+            db.get(Project, uuid.UUID(pid)) is not None for pid in study.option_projects
+        )
     assert list(study.option_projects) == still
 
 
