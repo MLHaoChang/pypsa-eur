@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime
 import json
 import math
+import pathlib
 import random
 import warnings
 
@@ -2007,7 +2008,7 @@ def test_an_exact_value_keyed_to_another_asset_is_not_applied(tmp_path, name, re
 def test_a_tampered_exact_value_is_reported_and_moves_nothing(
     tmp_path, col, value, reason
 ):
-    """X3: a bad entry falls back to the visible value, so it moves a value by at most 1 ulp."""
+    """X3: a bad entry falls back to the visible value, so it moves a value by at most 2 ulp."""
     path = _collision(tmp_path)
     wb = openpyxl.load_workbook(path)
     wb[L.EXACT].cell(2, col).value = value
@@ -2113,6 +2114,162 @@ def test_the_formula_pass_stops_at_the_cell_limit(tmp_path, monkeypatch):
     with pytest.raises(L.ImportLimitError) as e:
         _read(path)
     assert e.value.limit == "cells"
+
+
+# ── ticket 04: the exact-value bound and the workbook-wide cap ────────────────
+
+
+def _nudge(x: float, k: int) -> float:
+    for _ in range(abs(k)):
+        x = math.nextafter(x, math.inf if k > 0 else -math.inf)
+    return x
+
+
+def _exact_entry(tmp_path, key, shown, stored, name="e.xlsx"):
+    """A collision workbook whose `key` cell for wind 1 shows `shown`, with one exact entry."""
+    path = _collision(tmp_path, name=name)
+    _tamper(path, "Generators", L.FIRST_DATA_ROW, key, shown)
+    wb = openpyxl.load_workbook(path)
+    ws = wb[L.EXACT]
+    ws.cell(2, 3).value = key
+    ws.cell(2, 5).value = repr(shown)
+    ws.cell(2, 6).value = repr(stored)
+    wb.save(path)
+    return _read(path)
+
+
+@pytest.mark.parametrize("shown", [5e-324, 0.0, -0.0], ids=repr)
+@pytest.mark.parametrize("k", [2, -2, 3, -3])
+def test_an_exact_value_is_kept_only_within_two_ulps_of_its_cell(tmp_path, shown, k):
+    """T1 at a non-unit scale (capital cost, x 1e-3): every float here shows alike."""
+    visible = L.rescale(shown, 1e3)
+    stored = _nudge(visible, k)
+    assert L.rescale(stored, 1e-3) == shown  # only the bound can tell them apart
+    res = _exact_entry(tmp_path, "capital_cost", shown, stored)
+    v = res.network.generators.at["wind 1", "capital_cost"]
+    if abs(k) <= 2:
+        assert v == stored and not [u for u in _um(res) if u[0].startswith(L.EXACT)]
+    else:
+        assert v == visible
+        assert (
+            "Exact values row 2",
+            "the exact value is too far from its cell; ignored",
+        ) in _um(res)
+
+
+def test_an_exact_value_for_an_unscaled_cell_is_reported(tmp_path):
+    """T1 at scale 1: an unscaled cell never needs an entry, so one is ignored."""
+    stored = _nudge(5.0, 2)
+    res = _exact_entry(tmp_path, "marginal_cost", 5.0, stored)
+    assert res.network.generators.at["wind 1", "marginal_cost"] == 5.0
+    assert (
+        "Exact values row 2",
+        "the exact value does not show as its cell; ignored",
+    ) in _um(res)
+
+
+def test_a_tampered_exact_value_on_a_zero_cell_is_reported(tmp_path):
+    res = _exact_entry(tmp_path, "capital_cost", 0.0, 1.0)
+    assert res.network.generators.at["wind 1", "capital_cost"] == 0.0
+    assert (
+        "Exact values row 2",
+        "the exact value does not show as its cell; ignored",
+    ) in _um(res)
+
+
+def test_a_stored_subnormal_shown_as_zero_round_trips_through_its_exact_value(
+    tmp_path,
+):
+    """T2: the writer does emit an entry whose shown value is 0.0, so the reader keeps it."""
+    n = _network(False)
+    n.generators.loc["wind 1", "capital_cost"] = 5e-324
+    path = _write(n, tmp_path)
+    _, rows = _exact_rows(path)
+    assert rows == [["Generators", "wind 1", "capital_cost", None, "0.0", "5e-324"]]
+    res = _read(path)
+    assert res.network.generators.at["wind 1", "capital_cost"] == 5e-324
+    assert _um(res) == []
+
+
+def _declared(path) -> int:
+    wb = openpyxl.load_workbook(path, read_only=True)
+    return sum((ws.max_row or 0) * (ws.max_column or 0) for ws in wb.worksheets)
+
+
+def test_the_workbook_cell_cap_counts_every_sheet_s_declared_size(
+    tmp_path, monkeypatch
+):
+    """T4: the boundary value passes, one less is refused before any cell is read."""
+    path = _write(_network(False), tmp_path)
+    total = _declared(path)
+    monkeypatch.setitem(L.LIMITS, "workbook_cells", total)
+    _read(path)
+    monkeypatch.setitem(L.LIMITS, "workbook_cells", total - 1)
+    with pytest.raises(L.ImportLimitError) as e:
+        _read(path)
+    assert e.value.limit == "workbook_cells"
+
+
+def test_the_workbook_cell_cap_holds_when_the_declared_sizes_lie_low(
+    tmp_path, monkeypatch
+):
+    import re
+
+    path = _write(_network(False), tmp_path)
+    for i in range(len(openpyxl.load_workbook(path).sheetnames)):
+        path = _patch_xml(
+            path,
+            f"xl/worksheets/sheet{i + 1}.xml",
+            lambda d: re.sub(
+                rb'<dimension ref="[^"]+"/>', b'<dimension ref="A1:A1"/>', d
+            ),
+        )
+    sheets = len(openpyxl.load_workbook(path).sheetnames)
+    assert _declared(path) == sheets
+    monkeypatch.setitem(L.LIMITS, "workbook_cells", 50)  # above the declared sum
+    with pytest.raises(L.ImportLimitError) as e:
+        _read(path)
+    assert e.value.limit == "workbook_cells"
+
+
+def test_many_sparse_sheets_are_refused_at_once(tmp_path):
+    """T4: the file from the #1646 review (25 sparse sheets: 12 s and 459 MB before)."""
+    import time
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    for i in range(25):
+        ws = wb.create_sheet(f"s{i}")
+        ws["A1"] = "x"
+        ws["XFD800"] = "x"  # 13.1M cells declared: under the per-sheet cap
+    path = tmp_path / "sparse.xlsx"
+    wb.save(path)
+    t = time.monotonic()
+    with pytest.raises(L.ImportLimitError) as e:
+        _read(path)
+    assert e.value.limit == "workbook_cells"
+    assert time.monotonic() - t < 10
+
+
+def _golden_cases():
+    golden = pathlib.Path(__file__).with_name("excel_golden.json")
+    return sorted(json.loads(golden.read_text()))
+
+
+@pytest.mark.parametrize("case", _golden_cases())
+def test_a_valid_workbook_reads_byte_for_byte_as_the_golden(tmp_path, case):
+    """T5: every frame, dtype, index and sidecar as the reader on the golden's commit read it."""
+    from tests.gridspine import excel_golden
+
+    golden = json.loads(excel_golden.GOLDEN.read_text())[case]
+    n, sidecars = excel_golden.cases()[case]
+    got = excel_golden.snapshot(excel_golden.read_back(n, sidecars, tmp_path))
+    assert got["snapshots"] == golden["snapshots"]
+    assert got["sidecars"] == golden["sidecars"]
+    assert got["sidecar_floats"] == golden["sidecar_floats"]
+    assert got["frames"].keys() == golden["frames"].keys()
+    for name, frame in golden["frames"].items():
+        assert got["frames"][name] == frame, name
 
 
 # ── GK B 67 on #1732: what PyPSA's own layout reads outside the component sheets ──
