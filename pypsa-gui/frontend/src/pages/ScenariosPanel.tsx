@@ -686,8 +686,9 @@ export default function ScenariosPanel() {
   })
 
   const projectList = projects as ProjectInfo[]
+  // An optimisation solve (an objective) or a finished Guided study (issue 23).
   const solvedCount = projectList.filter(
-    p => p.objective != null && Number.isFinite(p.objective),
+    p => (p.objective != null && Number.isFinite(p.objective)) || p.study_finished,
   ).length
 
   return (
@@ -696,7 +697,12 @@ export default function ScenariosPanel() {
       <PageBody>
         <RowGrid cols={2}>
           <StatCard accent eyebrow="Scenarios" value={projectList.length} sub="project variants" />
-          <StatCard eyebrow="Solved" value={solvedCount} sub="have an objective" />
+          <StatCard
+            eyebrow="Solved"
+            value={solvedCount}
+            sub="have results"
+            title="Counts projects with an optimisation solve or a finished Guided study"
+          />
         </RowGrid>
 
         {/* Lineage breadcrumb — visible only when the active project has at

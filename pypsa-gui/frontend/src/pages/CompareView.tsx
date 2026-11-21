@@ -9,7 +9,7 @@ import { projectsApi } from '../api/projects'
 import { useUIStore } from '../store/uiStore'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 import type {
-  CompareState, ProjectInfo, ResultsSummary, CarrierPeriodValue,
+  CompareState, CompareStudy, ProjectInfo, ResultsSummary, CarrierPeriodValue,
   LineLoadingEntry, CarrierEconomics, StorageUnitCycles, LostLoadBus,
   AssetLCOHEntry, CarrierPriceStats, LostLoadByCarrier,
 } from '../api/types'
@@ -338,6 +338,7 @@ export function OverviewTab({ a, b }: { a: string; b: string }) {
     <div className="space-y-4">
       <CountsTable a={sa} b={sb} />
       <SolverTable a={sa} b={sb} />
+      <StudyTable a={sa} b={sb} />
       <OverviewCapacityTable
         a={sa} b={sb}
         newCapA={summaryA.capacity?.new_capacity_mw_by_carrier}
@@ -2945,6 +2946,83 @@ function CountsTable({ a, b }: { a: CompareState; b: CompareState }) {
               </tr>
             )
           })}
+        </tbody>
+      </table>
+    </Section>
+  )
+}
+
+// ── Guided study headline (issue 23) ─────────────────────────────────────────
+
+function fmtPermyriad(v: number): string { return `${v.toFixed(2)} ‱` }
+function fmtHours(v: number): string { return `${v.toFixed(1)} h per year` }
+
+function reliabilityWord(s: CompareStudy): string {
+  if (s.certified === true) return 'Pass'
+  if (s.certified === false) return 'Fail'
+  return 'No goal set'
+}
+
+// The saved Guided study of each side. Both sides: their headline side by
+// side; deltas only while both studies are current. One side: a muted line
+// naming it. Neither: nothing, as for a pair of plain networks.
+function StudyTable({ a, b }: { a: CompareState; b: CompareState }) {
+  const sa = a.eh_study ?? null
+  const sb = b.eh_study ?? null
+  if (!sa && !sb) return null
+  if (!sa || !sb) {
+    return (
+      <p className="text-xs text-muted">
+        Study: only {(sa ? a : b).name} has results
+      </p>
+    )
+  }
+  const comparable = sa.state === 'current' && sb.state === 'current'
+  const npv = sa.period_basis === 'npv_multi_period' || sb.period_basis === 'npv_multi_period'
+  const rows: { label: string; v: (s: CompareStudy) => number | null; fmt: (n: number) => string }[] = [
+    { label: npv ? 'Cost at target (€, NPV)' : 'Cost at target (€ per year)',
+      v: s => s.cost_at_target_eur, fmt: n => fmtCurrency(n) },
+    { label: 'Unserved energy', v: s => s.achieved_ens_permyriad, fmt: fmtPermyriad },
+    { label: 'Expected loss of load', v: s => s.mc_lole_h, fmt: fmtHours },
+  ]
+  const cell = (s: CompareStudy, v: number | null, fmt: (n: number) => string) => (
+    <td className={`py-1 text-right font-mono ${s.state === 'current' ? 'text-text' : 'text-muted'}`}>
+      {v != null ? fmt(v) : '—'}
+    </td>
+  )
+  const stateWord = (s: CompareStudy) => (s.state === 'current' ? 'Current' : 'Out of date')
+  return (
+    <Section title="Guided study">
+      <table className="w-full text-xs">
+        <tbody>
+          <tr className="border-b border-border/40">
+            <td className="py-1 text-text">Study</td>
+            <td className="py-1 text-right text-muted">{stateWord(sa)}</td>
+            <td className="py-1 text-right text-muted">{stateWord(sb)}</td>
+            <td className="py-1" />
+          </tr>
+          {rows.map(r => {
+            const va = r.v(sa)
+            const vb = r.v(sb)
+            return (
+              <tr key={r.label} className="border-b border-border/40">
+                <td className="py-1 text-text">{r.label}</td>
+                {cell(sa, va, r.fmt)}
+                {cell(sb, vb, r.fmt)}
+                <td className="py-1 text-right font-mono">
+                  {comparable && va != null && vb != null
+                    ? <Delta v={vb - va} fmt={r.fmt} invert />
+                    : <span className="text-muted">—</span>}
+                </td>
+              </tr>
+            )
+          })}
+          <tr className="border-b border-border/40">
+            <td className="py-1 text-text">Reliability goal</td>
+            <td className="py-1 text-right text-text">{reliabilityWord(sa)}</td>
+            <td className="py-1 text-right text-text">{reliabilityWord(sb)}</td>
+            <td className="py-1" />
+          </tr>
         </tbody>
       </table>
     </Section>

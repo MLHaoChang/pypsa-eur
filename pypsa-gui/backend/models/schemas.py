@@ -942,6 +942,10 @@ class ProjectInfo(BaseModel):
     bus_count: int
     snapshot_count: int
     objective: float | None = None
+    #: A finished Guided (Energy Hub) study was saved with the project
+    #: (``metadata.json`` ``eh_study_done``; issue 23). False for a project
+    #: saved before it was recorded, until its next save.
+    study_finished: bool = False
     # True when the project dir contains an orphaned `*.tmp` sibling — left
     # behind by `_atomic_write_with` if the process was killed mid-save.
     # The main `network.nc` is still the previous good version (atomic rename
@@ -1057,6 +1061,27 @@ class RenameProjectRequest(BaseModel):
     new_name: str = Field(..., min_length=1, max_length=64)
 
 
+class CompareStudy(BaseModel):
+    """The headline of a project's saved, finished Guided (Energy Hub) study,
+    as Compare shows it side by side (issue 23). Read from the study's report
+    (``ReferenceDesignReport``)."""
+
+    #: ``current`` when the study ran on the network as saved; ``out_of_date``
+    #: when the network was edited after it ran, or that cannot be told.
+    state: Literal["current", "out_of_date"]
+    #: EUR, excluding the cost of shed load; ``period_basis`` says per year
+    #: (``single_period``) or a multi-period NPV.
+    cost_at_target_eur: float | None = None
+    period_basis: str | None = None
+    #: Unserved energy reached and allowed, ‱ of demand.
+    achieved_ens_permyriad: float | None = None
+    ens_cap_permyriad: float | None = None
+    #: Expected loss of load, h per year (Monte Carlo).
+    mc_lole_h: float | None = None
+    #: True on a pass verdict, False on a fail, None when no goal was set.
+    certified: bool | None = None
+
+
 class CompareState(BaseModel):
     """
     Compact snapshot of a non-active project's state, suitable for
@@ -1115,6 +1140,9 @@ class CompareState(BaseModel):
     scenario_type: str | None = None
     created_at: str | None = None
     last_saved: str | None = None
+    # The saved Guided (Energy Hub) study's headline, or None when the
+    # project has no finished study (issue 23).
+    eh_study: CompareStudy | None = None
 
 
 # ── Results-Summary types (Compare Scenarios v2) ─────────────────────────────
