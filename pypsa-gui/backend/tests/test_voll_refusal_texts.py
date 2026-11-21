@@ -21,33 +21,45 @@ from services.adequacy.frontier_loop_runner import FrontierRequest, start_fronti
 
 def _refuse(start, body):
     with pytest.raises(HTTPException) as exc:
-        start(body, solver_state={"solver_config": SolverConfig(voll=0.0)},
-              state_update=None, publish_study=None)
+        start(
+            body,
+            solver_state={"solver_config": SolverConfig(voll=0.0)},
+            state_update=None,
+            publish_study=None,
+        )
     assert exc.value.status_code == 422
     return exc.value.detail
 
 
 def test_the_contingency_sweep_refusal_names_the_field_and_the_sweep():
     detail = _refuse(start_fmea_sweep, FmeaSweepRequest())
-    assert detail == (f"{VOLL_FIELD_LABEL}: must be above 0 to run the "
-                      "contingency sweep. Set it in Solver settings.")
+    assert detail == (
+        f"{VOLL_FIELD_LABEL}: must be above 0 to run the "
+        "contingency sweep. Set it in Solver settings."
+    )
 
 
 def test_the_planning_loop_refusal_names_the_field_and_the_loop():
     detail = _refuse(start_coupling_loop, CouplingLoopRequest(target_lole_h=1.0))
-    assert detail == (f"{VOLL_FIELD_LABEL}: must be above 0 to run the "
-                      "reliability-targeted planning loop. Set it in Solver settings.")
+    assert detail == (
+        f"{VOLL_FIELD_LABEL}: must be above 0 to run the "
+        "reliability-targeted planning loop. Set it in Solver settings."
+    )
 
 
 def test_the_frontier_refusal_names_the_field_and_keeps_its_unsupported_scope_kind():
     detail = _refuse(start_frontier, FrontierRequest())
     assert detail == {
         "error_kind": "unsupported_scope",
-        "message": (f"{VOLL_FIELD_LABEL}: must be above 0 to run the cost vs "
-                    "availability study. Set it in Solver settings."),
+        "message": (
+            f"{VOLL_FIELD_LABEL}: must be above 0 to run the cost vs "
+            "availability study. Set it in Solver settings."
+        ),
     }
 
 
 def test_the_reliability_study_refusal_keeps_its_words():
-    assert VOLL_REFUSAL == (f"{VOLL_FIELD_LABEL}: must be above 0 to run the "
-                            "reliability study. Set it in Solver settings.")
+    assert VOLL_REFUSAL == (
+        f"{VOLL_FIELD_LABEL}: must be above 0 to run the "
+        "reliability study. Set it in Solver settings."
+    )
