@@ -76,7 +76,7 @@ function RailButton({ id, testId, ...props }: RailProps & { id: FlowSectionId; t
       <button type="button" data-testid={testId} data-state={bs}
         aria-current={bs === 'current' ? 'step' : undefined}
         disabled={bs === 'blocked'}
-        title={why ?? label} aria-label={why ? `${label}. ${why}` : label}
+        title={why ? `${label}. ${why}` : label} aria-label={why ? `${label}. ${why}` : label}
         onClick={() => props.onPick(id)}
         className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border py-1 text-[11px] ${bs === 'current' ? 'px-2.5' : 'px-1.5 min-[1600px]:px-2.5'} ${tone}`}>
         <span className="font-mono text-[10px]">{meta.number}</span>
@@ -84,7 +84,7 @@ function RailButton({ id, testId, ...props }: RailProps & { id: FlowSectionId; t
             an inactive pill keeps the number and dot; the label stays on the
             current pill and in every pill's title and accessible name. */}
         <span className={bs === 'current' ? '' : 'hidden min-[1600px]:inline'}>{meta.label}</span>
-        {bs === 'current' && <ScopeChips section={id} testId="hub-rail-scope-chips" />}
+        {bs === 'current' && <span className="hidden min-[1600px]:contents"><ScopeChips section={id} testId="hub-rail-scope-chips" /></span>}
         {!stateless && bs !== 'blocked' && <FlowStateDot state={isError ? null : state} />}
         {id === 'scenarios' && props.flow === 'running' && (
           <Loader2 size={11} className="animate-spin" data-testid="hub-rail-spinner" />
@@ -102,13 +102,14 @@ function ImproveButton(props: RailProps) {
   return (
     <button type="button" data-testid="hub-rail-step-improve" data-state={state}
       aria-current={state === 'current' ? 'step' : undefined}
-      disabled={state === 'blocked'} title={why ?? 'Improve: what to try next'}
+      disabled={state === 'blocked'} title={why ? `Improve. ${why}` : 'Improve: what to try next'}
+      aria-label={why ? `Improve. ${why}` : 'Improve: what to try next'}
       onClick={props.onPickImprove}
       className={`ml-1 inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] ${
         state === 'current' ? 'border-accent bg-accent/10 text-accent font-semibold'
           : state === 'blocked' ? 'border-border/60 text-muted/50 cursor-not-allowed'
             : 'border-border text-muted hover:border-accent hover:text-accent'}`}>
-      ↳ Improve
+      ↳<span className="hidden min-[1600px]:inline"> Improve</span>
     </button>
   )
 }
