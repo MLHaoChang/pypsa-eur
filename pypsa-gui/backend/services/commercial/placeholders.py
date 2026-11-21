@@ -45,7 +45,7 @@ def problem(contract) -> str | None:
     if not fields:
         return None
     return (
-        f"Contract {contract.id!r} still has template placeholders in "
+        f"Contract {contract.id} still has template placeholders in "
         f"{', '.join(fields)}. Replace each with your own party or asset name, "
         "then save again."
     )
