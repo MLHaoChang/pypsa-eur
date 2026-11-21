@@ -30,7 +30,7 @@ export default function FuelRunHours({ cost }: { cost: Pick<CostBreakdown, 'fuel
         The fuel curve and run-hour inputs are in the generator&apos;s form under Assets.{' '}
         <button type="button" data-testid="fuel-run-hours-inputs"
           onClick={() => withReturnFrom(() => openSectionInExpert('assets'))}
-          className="text-accent hover:underline">Generator inputs ›</button>
+          className="text-link hover:underline">Generator inputs ›</button>
       </p>
       <div className="overflow-auto border border-border rounded">
         <table className="w-full text-xs border-collapse" style={{ minWidth: 640 }}>

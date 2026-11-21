@@ -86,7 +86,9 @@ def _record_kpi(kpi: dict, task: dict | None) -> dict:
 def read_kpis(profile: dict, task: dict | None = None) -> list[dict]:
     """Each profile KPI from its retained results section on the bound
     context: `{id, label, value, unit, source, status}`, `status` "read" or
-    why it is not (`not_current`, `unreadable`). A KPI the profile keeps in
+    why it is not (`not_current`, `unreadable`). When `task`'s own case step
+    is the investment chapter's gap, its case KPIs read `not_established` with
+    that gap's kind, never a case the project stored before (follow-up (a)). A KPI the profile keeps in
     the run's record (`record`) is read from `task` only."""
     from services import retained_results
     from services.workflow_tools import solve_freshness
@@ -97,7 +99,12 @@ def read_kpis(profile: dict, task: dict | None = None) -> list[dict]:
         current = False
     sections: dict = {}
     rows = []
+    case: dict = {}
+    gap = _ic_gap(task)
     for kpi in profile.get("kpis") or []:
+        if kpi.get("source") == IC_SOURCE:
+            rows.append(_ic_kpi(kpi, case, gap))
+            continue
         if "record" in kpi:
             rows.append(_record_kpi(kpi, task))
             continue
@@ -133,6 +140,87 @@ def read_kpis(profile: dict, task: dict | None = None) -> list[dict]:
     return rows
 
 
+# Study harness 36 (GK B (60) 36-K1, K2): a KPI the stored investment case
+# holds, read only through `ic_counterfactual`'s readers of the stored report
+# (no new computation). A case that is stale for this network, not run,
+# refused or failed reads `not_current` (stale for this network) or
+# `not_established` (the case holds no such figure: not run, refused, failed,
+# no sign change) with the reader's reasons, never its old number. The gate
+# takes a `not_established` row as read when it equals the stored row: the
+# report lists the chapter's gap, the hand-off states why (follow-up (a)).
+IC_SOURCE = "investment_case"
+IC_KPIS = {  # key -> (reader, the figure in its fact, the source path)
+    "npv_at_wacc": (
+        "read_returns",
+        ("returns", "npv_at_wacc"),
+        "project_post_tax_npv_at_wacc",
+    ),
+    "post_tax_irr": ("read_returns", ("returns", "irr"), "project_post_tax_irr"),
+    "pre_tax_irr": ("read_pre_tax_irr", ("irr",), "project_pre_tax_irr"),
+}
+_IC_STALE = frozenset({"case_stale", "results_not_current"})
+NOT_ESTABLISHED = "not_established"  # an investment-case row only
+
+
+def _ic_gap(task: dict | None) -> str | None:
+    """The kind of the run's own investment-chapter gap, if its case step is
+    one (`run_ic.chapter_gaps`), else None."""
+    from harness import run_ic
+    from services.reports.chapters import INVESTMENT
+
+    error = run_ic.chapter_gaps(task or {}).get(INVESTMENT)
+    return None if error is None else error.split(":", 1)[0].split(" ", 1)[0]
+
+
+def _ic_kpi(kpi: dict, facts: dict, gap: str | None = None) -> dict:
+    """One investment-case KPI row; `facts` caches each reader's fact for
+    this read-back, so every row of one hand-off reads one case. A run whose
+    own case is the chapter's gap reads none (`gap`: its kind)."""
+    from services import ic_counterfactual as ic
+    from services.pypsa_service import PyPSAService
+
+    reader, path, field = IC_KPIS.get(kpi.get("key"), (None, (), "?"))
+    row = {
+        "id": kpi["id"],
+        "label": kpi["label"],
+        "unit": kpi["unit"],
+        "value": None,
+        "source": f"services.ic_counterfactual.{reader}:{field}",
+    }
+    if reader is None:
+        return {**row, "status": "unreadable", "reasons": ["unknown_kpi"]}
+    if gap is not None:
+        return {**row, "status": NOT_ESTABLISHED, "reasons": [f"chapter_gap:{gap}"]}
+    try:
+        if reader not in facts:
+            facts[reader] = getattr(ic, reader)(
+                PyPSAService.get_active_context(), lambda fn: fn()
+            )
+        fact = facts[reader]
+        reasons = list(fact.get("reasons") or [])
+        if fact.get("state") != ic.ESTABLISHED:
+            stale = bool(_IC_STALE & set(reasons))
+            return {
+                **row,
+                "status": "not_current" if stale else NOT_ESTABLISHED,
+                "reasons": reasons,
+            }
+        value = fact
+        for key in path:
+            value = value[key]
+    except Exception:  # noqa: BLE001 -- an unreadable case is stated, never guessed
+        logger.info(
+            "investment-case KPI %s could not be read", kpi["id"], exc_info=True
+        )
+        return {**row, "status": "unreadable", "reasons": ["unreadable"]}
+    if _number(value) is None:
+        return {**row, "status": "unreadable", "reasons": ["not_a_number"]}
+    currency = (fact.get("returns") or {}).get("currency")
+    if kpi["unit"] != "fraction" and currency is not None and currency != kpi["unit"]:
+        return {**row, "status": "unreadable", "reasons": ["currency_mismatch"]}
+    return {**row, "value": _number(value), "status": "read"}
+
+
 def kpis_read(task: dict, profile: dict) -> bool | None:
     """`handoff.kpis_read`: None with no hand-off record or no KPI to read;
     True only when every profile KPI reads natively now and equals its row."""
@@ -145,11 +233,15 @@ def kpis_read(task: dict, profile: dict) -> bool | None:
 
 
 def _read_back(fresh: dict, stored: dict) -> bool:
-    """One KPI read back: read now and equal to its row; or (study harness
-    14 S-C) a record KPI the run's own step judged not evaluated, with the
-    same status and reason as its row. Stale or anything else fails."""
-    if fresh["status"] == "read":
-        return stored.get("status") == "read" and stored.get("value") == fresh["value"]
+    """One KPI read back: read now (or not established, with its reasons) and equal to its
+    row; or (study harness 14 S-C) a record KPI the run's own step judged not evaluated,
+    with the same status and reason as its row. Stale or anything else fails."""
+    if fresh["status"] in ("read", NOT_ESTABLISHED):
+        return (
+            stored.get("status") == fresh["status"]
+            and stored.get("value") == fresh["value"]
+            and stored.get("reasons") == fresh.get("reasons")
+        )
     return (
         fresh.get("settled") is True
         and fresh["status"] == NOT_EVALUATED

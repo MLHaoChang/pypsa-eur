@@ -41,7 +41,7 @@ export function ReliabilityGoalSummary({ items, testId, requireTarget = false, m
   requireTarget?: boolean
 }) {
   const { goal, target, isPending, isError } = useReliabilityGoal()
-  const link = 'text-accent hover:underline'
+  const link = 'text-link hover:underline'
   if (requireTarget && goal && !hasTarget(target)) {
     return (
       <div data-testid={testId} className="flex flex-wrap items-center gap-x-2 text-[10px]">

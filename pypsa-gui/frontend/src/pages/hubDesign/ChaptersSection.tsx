@@ -114,7 +114,7 @@ export function ChaptersSection({ reliability, headlined = [] }: {
                 {t.control.resolve && (
                   <button type="button" data-testid={`hub-chapter-${t.id}-solve`}
                     onClick={() => useUIStore.getState().requestRunSolve()}
-                    className="text-accent hover:underline">Solve</button>
+                    className="text-link hover:underline">Solve</button>
                 )}
               </p>
             )}
@@ -126,7 +126,7 @@ export function ChaptersSection({ reliability, headlined = [] }: {
             {/* A headlined figure's way in is its link in the headline: one entry point per destination. */}
             {!headlined.includes(t.id) && (
               <button type="button" data-testid={`hub-chapter-${t.id}-open`} onClick={() => open(t.open)}
-                className="self-start text-[11.5px] text-accent hover:underline">
+                className="self-start text-[11.5px] text-link hover:underline">
                 {OPEN_LABEL(t.open)}
               </button>
             )}

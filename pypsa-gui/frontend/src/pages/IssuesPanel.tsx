@@ -210,7 +210,7 @@ export default function IssuesPanel() {
                     <span className="font-semibold text-text">{h.constraint}</span>: {h.text}
                     {h.setting === 'offgrid' && (
                       <button type="button" onClick={openOffGridConstraints}
-                        className="ml-1.5 inline-flex items-center gap-0.5 text-accent hover:underline">
+                        className="ml-1.5 inline-flex items-center gap-0.5 text-link hover:underline">
                         Open Off-grid constraints <ArrowRight size={11} />
                       </button>
                     )}
@@ -512,7 +512,7 @@ function FlowItemRow({ item }: { item: FlowItem }) {
       </span>
       <button type="button" data-testid="issues-flow-item-open" onClick={() => openFlowTarget(item.target)}
         title={`Open ${field ?? 'this field'}`}
-        className="shrink-0 text-[11px] text-accent hover:underline">
+        className="shrink-0 text-[11px] text-link hover:underline">
         Open ›
       </button>
     </div>

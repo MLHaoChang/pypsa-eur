@@ -158,7 +158,7 @@ export default function Curtailment() {
           still hit the server's MAX_RESPONSE_VALUES cap. */}
       <WindowCapBanner payloads={[curtailTS as TSPayload | null, gensTS as TSPayload | null]} />
       <header>
-        <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
+        <h3 className="text-h3 font-semibold text-text">
           Renewable curtailment
           <span className="ml-2 text-[10px] font-normal text-muted">{periodLabel}</span>
         </h3>

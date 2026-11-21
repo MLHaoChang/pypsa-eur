@@ -131,3 +131,12 @@ export function useAuth(): AuthContextValue {
   }
   return context
 }
+
+/**
+ * The signed-in user's id, or null when signed out or outside an
+ * AuthProvider (local mode, isolated tests). For per-user browser state that
+ * must not throw where `useAuth` would.
+ */
+export function useAuthUserId(): string | null {
+  return useContext(AuthContext)?.user?.id ?? null
+}

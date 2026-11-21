@@ -28,7 +28,7 @@ export function StepSampling({
 }: StepSamplingProps) {
   return (
     <section>
-      <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Representative weeks</h3>
+      <h3 className="text-h3 font-semibold text-text mb-2.5">Representative weeks</h3>
       <p className="text-[11px] text-muted mb-2 leading-relaxed">
         Sample <code>N</code> random ISO calendar weeks (Mon–Sun) per month
         from an uploaded full-year hourly profile — e.g. 1 week/month →
