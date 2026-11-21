@@ -184,6 +184,8 @@ describe('refusals: once, inline, the action on the same line, no toast', () => 
     const line = await screen.findByTestId('workbook-refusal')
     expect(line.textContent).toBe(`${message}Choose another file`)
     expect(screen.getAllByRole('alert')).toHaveLength(1)
+    // The refusal's own action is the one way to choose again (UX 27 @06eb610b).
+    expect(screen.getAllByRole('button', { name: 'Choose another file' })).toHaveLength(1)
   })
 
   it('a write failure offers Try again, which imports again', async () => {

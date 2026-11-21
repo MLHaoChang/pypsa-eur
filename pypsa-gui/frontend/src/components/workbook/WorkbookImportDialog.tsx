@@ -64,6 +64,9 @@ export function WorkbookImportDialog({ initialFile, onClose }: { initialFile: Fi
   // otherwise the name's own problem, checked against the project list.
   const clashNow = !!refusal?.clash && name.trim() === refusal.clash
   const problem = shown && !clashNow ? nameProblem(name, taken) : null
+  const refusalShown = !!refusal && (!refusal.clash || clashNow)
+  // A refusal that offers "Choose another file" is the one link to it (UX 27 @06eb610b).
+  const refusalChoosesFile = refusalShown && !refusal?.clash && refusal?.action === 'choose-file'
   const useFree = (base: string) => setName(freeName(base, taken, numberedCopyName))
   const refusalAction = () => {
     if (!refusal) return
@@ -91,7 +94,7 @@ export function WorkbookImportDialog({ initialFile, onClose }: { initialFile: Fi
           <p className="flex items-center gap-2 text-text" data-testid="workbook-file">
             <FileSpreadsheet size={13} className="text-accent shrink-0" />
             <span className="truncate">{file.name}</span>
-            {!busy && phase.step !== 'not-opened' && (
+            {!busy && phase.step !== 'not-opened' && !refusalChoosesFile && (
               <button type="button" className={`${LINK} ml-auto`} onClick={chooseFile}>Choose another file</button>
             )}
           </p>
@@ -107,7 +110,7 @@ export function WorkbookImportDialog({ initialFile, onClose }: { initialFile: Fi
           </button>
         )}
 
-        {refusal && (!refusal.clash || clashNow) && (
+        {refusal && refusalShown && (
           <p className="flex items-baseline gap-2 text-danger" role="alert" data-testid="workbook-refusal">
             <span>{refusal.message}</span>
             <button type="button" className={LINK} data-testid="workbook-refusal-action" onClick={refusalAction} disabled={busy}>
