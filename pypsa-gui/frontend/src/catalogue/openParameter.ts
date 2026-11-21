@@ -9,7 +9,7 @@
  * pill returns to where the user was.
  */
 import { useUIStore, type PropertiesEditRequest } from '../store/uiStore'
-import { openFlowTargetInPlace, withReturnFrom } from '../layout/flowNavigation'
+import { openSectionInGuided, withReturnFrom } from '../layout/flowNavigation'
 import { sectionForComponent } from '../layout/flowSections'
 import { focusFieldControl } from '../layout/properties/AssetFields'
 import { navigationEpoch } from '../utils/navigationEpoch'
@@ -52,25 +52,53 @@ export function openParameter({ entry, asset }: ParameterTarget): boolean {
   if (!canOpenParameter(entry) || !asset) return false
   const type = entry.scope as PropertiesEditRequest['type']
   const field = entry.model_name
-  const request = () => {
-    useUIStore.getState().requestPropertiesEdit({ type, name: asset, field })
-    focusWhenShown(field)
-  }
-  if (useUIStore.getState().uiMode === 'guided') {
+  const ui = useUIStore.getState()
+  if (ui.uiMode === 'guided') {
+    // Guided's home for a field: the drawer over its section's card (EXPERT-GUIDED-1).
+    // Already on that card, the drawer is the way back; from anywhere else, Back returns.
     const section = sectionForComponent(type) ?? 'assets'
-    openFlowTargetInPlace({ section, panel: null, component: type, entity: asset, field })
-    request()
+    const onCard = ui.activeSlidePanel === 'hubDesign' && ui.activeSection === section
+    const jump = () => {
+      const s = useUIStore.getState()
+      if (!onCard) openSectionInGuided(section)
+      s.setSelectedComponent({ type, name: asset })
+      s.setHighlightedComponent({ type, name: asset })
+      s.openRightPanel()
+      s.setFieldDrawer({ section, panel: null, component: type, entity: asset, field })
+      s.requestPropertiesEdit({ type, name: asset, field })
+      focusWhenShown(field)
+    }
+    if (onCard) jump()
+    else withReturnFrom(jump)
     return true
   }
   withReturnFrom(() => {
-    const ui = useUIStore.getState()
-    ui.setSlidePanel(null)
-    ui.setSelectedComponent({ type, name: asset })
-    ui.setHighlightedComponent({ type, name: asset })
-    ui.openRightPanel()
-    request()
+    const s = useUIStore.getState()
+    s.setSlidePanel(null)
+    s.setSelectedComponent({ type, name: asset })
+    s.setHighlightedComponent({ type, name: asset })
+    s.openRightPanel()
+    s.requestPropertiesEdit({ type, name: asset, field })
+    focusWhenShown(field)
   })
   return true
+}
+
+// ── Picking the asset ────────────────────────────────────────────────────────
+
+let paletteSeed = ''
+
+/** The query the palette opens on, once (then ''). */
+export function takePaletteSeed(): string {
+  const q = paletteSeed
+  paletteSeed = ''
+  return q
+}
+
+/** A parameter named without its asset: the palette opens on its plain name, so the user picks the asset. */
+export function pickAssetFor(entry: Pick<CatalogueEntry, 'plain_name'>): void {
+  paletteSeed = entry.plain_name
+  useUIStore.getState().setPaletteMode('all')
 }
 
 /** The entry with this id, or the one that lists it among its `former_ids`; null when neither. */

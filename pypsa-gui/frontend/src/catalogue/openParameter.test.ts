@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useUIStore } from '../store/uiStore'
-import { findEntry, openParameter } from './openParameter'
+import { findEntry, openParameter, pickAssetFor, takePaletteSeed } from './openParameter'
+import { returnToOrigin } from '../layout/flowNavigation'
 import { entry } from './testEntries'
 
 // Spec expert-catalogue §4.3 / §10.1 "Search": the jump in both modes.
@@ -27,14 +28,34 @@ describe('openParameter', () => {
     expect(s.fieldDrawer).toBeNull()
   })
 
-  it('Guided: opens the field drawer on that asset and field, and never switches mode', () => {
-    useUIStore.setState({ uiMode: 'guided', activeSlidePanel: 'hubDesign' })
+  it('Guided, from another view: opens the asset section card, then the drawer; Back returns; mode unchanged', () => {
+    useUIStore.setState({ uiMode: 'guided', activeSlidePanel: 'results', activeSection: 'results' })
     expect(openParameter({ entry: P_NOM, asset: 'PV roof' })).toBe(true)
     const s = useUIStore.getState()
     expect(s.uiMode).toBe('guided')
+    expect(s.activeSlidePanel).toBe('hubDesign')
+    expect(s.activeSection).toBe('assets')
     expect(s.fieldDrawer).toMatchObject({ section: 'assets', component: 'Generator', entity: 'PV roof', field: 'p_nom' })
     expect(s.propertiesEditRequest).toEqual({ type: 'Generator', name: 'PV roof', field: 'p_nom' })
-    expect(s.flowReturn).toMatchObject({ mode: 'guided' })
+    expect(s.flowReturn).toMatchObject({ mode: 'guided', panel: 'results' })
+    returnToOrigin()
+    expect(useUIStore.getState()).toMatchObject({ uiMode: 'guided', activeSlidePanel: 'results', fieldDrawer: null })
+  })
+
+  it('Guided, already on that card: the drawer opens over it with no Back pill', () => {
+    useUIStore.setState({ uiMode: 'guided', activeSlidePanel: 'hubDesign', activeSection: 'assets' })
+    openParameter({ entry: P_NOM, asset: 'PV roof' })
+    const s = useUIStore.getState()
+    expect(s.fieldDrawer).toMatchObject({ entity: 'PV roof', field: 'p_nom' })
+    expect(s.flowReturn).toBeNull()
+    expect(s.uiMode).toBe('guided')
+  })
+
+  it('Expert: Back returns to the panel the jump left', () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    openParameter({ entry: P_NOM, asset: 'PV roof' })
+    returnToOrigin()
+    expect(useUIStore.getState()).toMatchObject({ uiMode: 'expert', activeSlidePanel: 'scenarios' })
   })
 
   it('moves nothing for a class with no Properties card, or no asset', () => {
@@ -54,5 +75,15 @@ describe('findEntry', () => {
     expect(findEntry(cat, 'generator.p_nom')?.id).toBe('generator.p_nom')
     expect(findEntry(cat, 'generator.eta')?.id).toBe('generator.efficiency')
     expect(findEntry(cat, 'generator.nope')).toBeNull()
+  })
+})
+
+describe('pickAssetFor', () => {
+  it('opens the palette on the plain name once, so the user picks the asset', () => {
+    useUIStore.setState({ paletteMode: null })
+    pickAssetFor(P_NOM)
+    expect(useUIStore.getState().paletteMode).toBe('all')
+    expect(takePaletteSeed()).toBe('Capacity')
+    expect(takePaletteSeed()).toBe('')
   })
 })

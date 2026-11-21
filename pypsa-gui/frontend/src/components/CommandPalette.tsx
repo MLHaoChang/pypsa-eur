@@ -22,7 +22,7 @@ import { useLLMSettingsAvailable } from '../hooks/useLLMSettings'
 import { useCatalogue } from '../catalogue/useCatalogue'
 import { buildParameterIndex } from '../catalogue/searchIndex'
 import { parameterRows, type PaletteAsset } from '../catalogue/parameterRows'
-import { openParameter } from '../catalogue/openParameter'
+import { openParameter, takePaletteSeed } from '../catalogue/openParameter'
 import type { Bus, Generator, Load, Line, Link, StorageUnit, Store, Transformer } from '../api/types'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -47,6 +47,9 @@ interface Command {
   // the single chokepoint, and makes the next destructive command opt IN by
   // description instead of by remembering.
   confirm?: { title: string; message: string; confirmLabel: string }
+  // A row that only informs (a parameter with no asset in the project): muted,
+  // aria-disabled, and Enter or a click does nothing.
+  disabled?: boolean
 }
 
 // Open mode — drives the placeholder + result filter. The 'projects' mode is
@@ -101,7 +104,8 @@ function PaletteShell({ mode, onClose, onRequestConfirm }: {
   onClose: () => void
   onRequestConfirm: (cmd: Command) => void
 }) {
-  const [query, setQuery] = useState('')
+  // A jump that needs the user to pick an asset opens the palette on its query.
+  const [query, setQuery] = useState(() => takePaletteSeed())
   const [selectedIdx, setSelectedIdx] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -127,6 +131,7 @@ function PaletteShell({ mode, onClose, onRequestConfirm }: {
   // Single dispatch chokepoint for BOTH the Enter path and the click path.
   // A destructive command is refused here or nowhere.
   const runCommand = useCallback((cmd: Command) => {
+    if (cmd.disabled) return
     if (cmd.confirm) { onRequestConfirm(cmd); return }
     void cmd.run()
     onClose()
@@ -218,9 +223,10 @@ function PaletteShell({ mode, onClose, onRequestConfirm }: {
                     key={cmd.id}
                     onClick={() => runCommand(cmd)}
                     onMouseEnter={() => setSelectedIdx(idx)}
+                    aria-disabled={cmd.disabled || undefined}
                     className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-left transition-colors ${
                       active ? 'bg-accent/10' : 'hover:bg-panel'
-                    }`}
+                    }${cmd.disabled ? ' opacity-60 cursor-default' : ''}`}
                   >
                     <span className={`shrink-0 ${active ? 'text-accent' : 'text-muted'}`}>
                       {cmd.icon}
@@ -247,7 +253,7 @@ function PaletteShell({ mode, onClose, onRequestConfirm }: {
       {/* Footer hint */}
       <div className="flex items-center gap-3 px-3 py-1.5 border-t border-border text-[10px] text-muted/70 font-mono shrink-0">
         <span>↑↓ navigate</span>
-        <span>⏎ select</span>
+        {!filtered[selectedIdx]?.disabled && <span>⏎ select</span>}
         <span>esc close</span>
         <span className="ml-auto">{filtered.length} result{filtered.length === 1 ? '' : 's'}</span>
       </div>
@@ -294,13 +300,14 @@ function useParameterCommands(mode: PaletteMode, query: string): Command[] {
       Bus: buses, Generator: generators, Load: loads, Line: lines, Link: links,
       StorageUnit: storageUnits, Store: stores, Transformer: transformers,
     } as unknown as Record<string, readonly PaletteAsset[]>
-    return parameterRows(index.search(query), catalogue, byClass).map(r => ({
+    return parameterRows(query, index, catalogue, byClass).map(r => ({
       id: r.id,
       kind: 'parameter' as const,
       title: r.title,
       subtitle: r.subtitle,
       hint: r.hint,
       icon: <Gauge size={12} />,
+      disabled: !r.target,
       run: () => { if (r.target) openParameter(r.target) },
     }))
   }, [mode, catalogue, index, query, buses, generators, loads, lines, links, storageUnits, stores, transformers])

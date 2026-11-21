@@ -58,17 +58,28 @@ export interface Catalogue {
 // The last full body and its tag: a 304 answers with no body, so it reuses this one.
 let cached: { etag: string; body: Catalogue } | null = null
 
-/** The whole catalogue. Sends `If-None-Match` once a body is held; a 304 returns that body. */
+/**
+ * The whole catalogue. Sends `If-None-Match` only while a body is held; a 304 returns
+ * that body. A 304 with no body held (after a reset) refetches without the header.
+ */
 export async function fetchCatalogue(): Promise<Catalogue> {
-  const headers: Record<string, string> = cached ? { 'If-None-Match': cached.etag } : {}
+  const held = cached
   const res = await client.get<Catalogue>('/catalogue', {
-    headers,
-    validateStatus: s => (s >= 200 && s < 300) || (s === 304 && cached !== null),
+    headers: held ? { 'If-None-Match': held.etag } : {},
+    validateStatus: s => (s >= 200 && s < 300) || s === 304,
   })
-  if (res.status === 304 && cached) return cached.body
-  const etag = res.headers?.etag as string | undefined
-  cached = etag ? { etag, body: res.data } : null
-  return res.data
+  if (res.status === 304) {
+    if (held && cached === held) return held.body
+    cached = null
+    const fresh = await client.get<Catalogue>('/catalogue', { headers: {} })
+    return keep(fresh.data, fresh.headers?.etag)
+  }
+  return keep(res.data, res.headers?.etag)
+}
+
+function keep(body: Catalogue, etag: unknown): Catalogue {
+  cached = typeof etag === 'string' && etag ? { etag, body } : null
+  return body
 }
 
 /** Tests only: forget the held body. */

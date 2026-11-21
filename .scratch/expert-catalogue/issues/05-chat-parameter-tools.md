@@ -11,7 +11,7 @@ Depends on: 01. Opens after #1575, #1590 and #1586 merge (GK B ruling on #1597).
 
 ## What
 
-1. `find_parameter(query, asset_type?, function?)`: up to 8 entries with `assets` capped at 10 per entry plus `assets_total` and `assets_truncated`; reads only the active project under its ACL (viewers may read, VIEWER-ROLE-1). Read-only.
+1. `find_parameter(query, asset_type?, function?)`, the chat counterpart of the GUI's GET /api/catalogue (slice 02a holds that route's parity declaration on this issue): up to 8 entries with `assets` capped at 10 per entry plus `assets_total` and `assets_truncated`; reads only the active project under its ACL (viewers may read, VIEWER-ROLE-1). Read-only.
 2. `open_parameter(entry_id, asset?)`: navigate event kind `parameter`; a `former_ids` id resolves to the current id (named in the result); an unknown id gets the typed refusal `unknown_parameter` (fragment in `pypsa-gui/tool-error-kinds.d/`). Safety tier: navigation.
 3. Write-tool results gain `plain_name` beside each model name; refusals open with the plain name.
 4. System prompt line: use plain names; the pilot-eval scorer counts raw names in replies.

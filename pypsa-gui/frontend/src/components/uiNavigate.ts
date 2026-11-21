@@ -1,7 +1,8 @@
 import { manualNavigation, navigationEpoch, withAssistantNavigation } from '../utils/navigationEpoch'
 import { useUIStore, type CanvasView, type PropertiesEditRequest } from '../store/uiStore'
 import { withReturnFrom } from '../layout/flowNavigation'
-import { openParameter, resolveEntry } from '../catalogue/openParameter'
+import toast from 'react-hot-toast'
+import { openParameter, pickAssetFor, resolveEntry } from '../catalogue/openParameter'
 import { HUB_STEPS, useHubDesignStore, type HubStep } from '../pages/hubDesign/hubDesignStore'
 
 /**
@@ -66,6 +67,9 @@ function _normalizePanelId(raw: string): string {
 
 /** The panels whose sections chat can name (backend `_PANEL_SECTIONS`). */
 const SECTION_PANELS: ReadonlySet<string> = new Set(['campusElectrical', 'campusStudy', 'campusResults', 'gridspine'])
+
+/** Kind `parameter` with an id the catalogue does not hold (or for another class). */
+export const UNKNOWN_PARAMETER_NOTICE = 'That setting is not in the parameter list. Search for it in the command palette.'
 
 /** Every `ui_event` kind this file handles; any other kind is read as `navigate`. */
 export const NAVIGATE_KINDS = [
@@ -156,14 +160,17 @@ function apply(d: NavigationRequest, modelTurn: number | null = null) {
   }
   if (d.kind === 'parameter') {
     // The entry may need the catalogue fetched first; a later navigation wins over it.
+    if (!d.entry_id) return
     const name = d.name
-    if (!d.entry_id || !name) return
     const epoch = navigationEpoch()
     void resolveEntry(d.entry_id).then(entry => {
-      if (!entry || navigationEpoch() !== epoch) return
-      if (d.component_class && d.component_class !== entry.scope) return
-      withAssistantNavigation(() => openParameter({ entry, asset: name }))
-    }).catch(() => undefined)
+      if (navigationEpoch() !== epoch) return
+      if (!entry || (d.component_class && d.component_class !== entry.scope)) {
+        toast(UNKNOWN_PARAMETER_NOTICE)
+        return
+      }
+      withAssistantNavigation(() => (name ? openParameter({ entry, asset: name }) : pickAssetFor(entry)))
+    }).catch(() => toast(UNKNOWN_PARAMETER_NOTICE))
     return
   }
   if (d.kind === 'open_asset_detail' && d.component_class && d.name) {

@@ -9,6 +9,7 @@ import { useUIStore } from '../store/uiStore'
 import { networkApi } from '../api/network'
 import * as catalogueApi from '../catalogue/api'
 import { entry } from '../catalogue/testEntries'
+import { pickAssetFor } from '../catalogue/openParameter'
 import { fetchLocalSettings } from '../api/localSettings'
 import { fetchLLMSettingsOrNull } from '../api/llmSettings'
 
@@ -51,12 +52,46 @@ describe('CommandPalette — Parameters', () => {
     renderPalette()
     const input = screen.getByPlaceholderText(/Type a command/)
     fireEvent.change(input, { target: { value: 'capacity' } })
-    expect(await screen.findByText('PV roof › Capacity')).toBeTruthy()
+    expect(await screen.findByText('PV roof: Capacity')).toBeTruthy()
     expect(screen.getByText('Parameters')).toBeTruthy()
     expect(screen.getByText('2.4 MW')).toBeTruthy()
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(useUIStore.getState().propertiesEditRequest).toEqual({ type: 'Generator', name: 'PV roof', field: 'p_nom' })
     expect(useUIStore.getState().paletteMode).toBeNull()
+  })
+
+  it('a model-file-name hit never shows the raw name in the rendered rows or their labels (RAW-NAMES-1)', async () => {
+    const { container } = renderPalette()
+    fireEvent.change(screen.getByPlaceholderText(/Type a command/), { target: { value: 'p_nom' } })
+    expect(await screen.findByText(/matches the model-file name/)).toBeTruthy()
+    const body = container.ownerDocument.body
+    const rows = Array.from(body.querySelectorAll('button')).filter(b => b.textContent?.includes('Capacity'))
+    expect(rows.length).toBeGreaterThan(0)
+    for (const r of rows) {
+      expect(r.textContent).not.toMatch(/p_nom/)
+      for (const a of Array.from(r.attributes)) expect(a.value).not.toMatch(/p_nom/)
+    }
+  })
+
+  it('an entry with no asset in the project is a disabled row: Enter does nothing and the footer hides select', async () => {
+    vi.mocked(networkApi.getGenerators).mockResolvedValue([])
+    renderPalette()
+    const input = screen.getByPlaceholderText(/Type a command/)
+    fireEvent.change(input, { target: { value: 'capacity' } })
+    const row = (await screen.findByText(/None in this project/)).closest('button')!
+    expect(row.getAttribute('aria-disabled')).toBe('true')
+    expect(screen.queryByText('⏎ select')).toBeNull()
+    fireEvent.keyDown(input, { key: 'Enter' })
+    fireEvent.click(row)
+    expect(useUIStore.getState().paletteMode).toBe('all')
+    expect(useUIStore.getState().propertiesEditRequest).toBeNull()
+  })
+
+  it('opens on a seeded query when a jump asks the user to pick the asset', async () => {
+    pickAssetFor(CATALOGUE.entries[0])
+    renderPalette()
+    expect((screen.getByPlaceholderText(/Type a command/) as HTMLInputElement).value).toBe('Capacity')
+    expect(await screen.findByText('PV roof: Capacity')).toBeTruthy()
   })
 
   it('shows no Parameters group without a query', async () => {

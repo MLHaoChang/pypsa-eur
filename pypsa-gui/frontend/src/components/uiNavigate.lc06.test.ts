@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { NAVIGATE_KINDS, applyUiNavigate } from './uiNavigate'
+import toast from 'react-hot-toast'
+import { NAVIGATE_KINDS, UNKNOWN_PARAMETER_NOTICE, applyUiNavigate } from './uiNavigate'
+import { takePaletteSeed } from '../catalogue/openParameter'
 import * as catalogueApi from '../catalogue/api'
+
+vi.mock('react-hot-toast', () => ({ default: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }))
 import { entry } from '../catalogue/testEntries'
 import { manualNavigation, navigationEpoch } from '../utils/navigationEpoch'
 import { useUIStore } from '../store/uiStore'
@@ -65,35 +69,58 @@ it('a frame older than the user\'s own navigation is dropped', () => {
 
 // expert-catalogue §7.1: `open_parameter` emits kind `parameter`; it is on the navigate list.
 describe('navigate kind parameter', () => {
-  it('is one of the handled navigate kinds', () => {
-    expect(NAVIGATE_KINDS).toContain('parameter')
+  const CAT = {
+    version: 'v', groups: [], functions: [], asset_types: [],
+    entries: [entry({ id: 'generator.p_nom', plain_name: 'Capacity', former_ids: ['generator.size'] })],
+  }
+  beforeEach(() => {
+    useUIStore.setState({ uiMode: 'expert', propertiesEditRequest: null, paletteMode: null })
+    vi.mocked(toast).mockClear()
+  })
+
+  it('the handled kinds, exactly', () => {
+    expect([...NAVIGATE_KINDS]).toEqual([
+      'navigate', 'open_panel', 'select_component', 'open_properties', 'open_asset_detail',
+      'open_run_result', 'set_snapshot', 'parameter',
+    ])
   })
 
   it('opens the entry (by current or former id) on that asset', async () => {
-    useUIStore.setState({ uiMode: 'expert', propertiesEditRequest: null })
-    vi.spyOn(catalogueApi, 'fetchCatalogue').mockResolvedValue({
-      version: 'v', groups: [], functions: [], asset_types: [],
-      entries: [entry({ id: 'generator.p_nom', plain_name: 'Capacity', former_ids: ['generator.size'] })],
-    })
+    vi.spyOn(catalogueApi, 'fetchCatalogue').mockResolvedValue(CAT)
     applyUiNavigate({ kind: 'parameter', entry_id: 'generator.size', component_class: 'Generator', name: 'PV roof' })
     await vi.waitFor(() => expect(useUIStore.getState().propertiesEditRequest)
       .toEqual({ type: 'Generator', name: 'PV roof', field: 'p_nom' }))
     expect(useUIStore.getState().selectedComponent).toEqual({ type: 'Generator', name: 'PV roof' })
   })
 
-  it('an unknown entry, a class that disagrees, or a later navigation moves nothing', async () => {
-    useUIStore.setState({ uiMode: 'expert', propertiesEditRequest: null })
-    const fetch = vi.spyOn(catalogueApi, 'fetchCatalogue').mockResolvedValue({
-      version: 'v', groups: [], functions: [], asset_types: [],
-      entries: [entry({ id: 'generator.p_nom', plain_name: 'Capacity' })],
-    })
-    applyUiNavigate({ kind: 'parameter', entry_id: 'generator.nope', name: 'PV roof' })
-    applyUiNavigate({ kind: 'parameter', entry_id: 'generator.p_nom', component_class: 'Line', name: 'PV roof' })
-    applyUiNavigate({ kind: 'parameter', entry_id: 'generator.p_nom', name: 'PV roof' })
-    manualNavigation()
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(3))
-    await new Promise(r => setTimeout(r, 0))
+  it('without an asset, opens the palette on the plain name to pick one', async () => {
+    vi.spyOn(catalogueApi, 'fetchCatalogue').mockResolvedValue(CAT)
+    applyUiNavigate({ kind: 'parameter', entry_id: 'generator.p_nom' })
+    await vi.waitFor(() => expect(useUIStore.getState().paletteMode).toBe('all'))
+    expect(takePaletteSeed()).toBe('Capacity')
+    expect(useUIStore.getState().selectedComponent).toBeNull()
+  })
+
+  it.each([
+    ['an unknown entry', { entry_id: 'generator.nope', name: 'PV roof' }],
+    ['a class that disagrees', { entry_id: 'generator.p_nom', component_class: 'Line', name: 'PV roof' }],
+  ])('%s shows a plain notice and moves nothing', async (_, d) => {
+    const notice = vi.mocked(toast)
+    vi.spyOn(catalogueApi, 'fetchCatalogue').mockResolvedValue(CAT)
+    applyUiNavigate({ kind: 'parameter', ...d })
+    await vi.waitFor(() => expect(notice).toHaveBeenCalledWith(UNKNOWN_PARAMETER_NOTICE))
     expect(useUIStore.getState().propertiesEditRequest).toBeNull()
     expect(useUIStore.getState().selectedComponent).toBeNull()
+  })
+
+  it('a navigation after it wins: the late catalogue moves nothing', async () => {
+    let resolve: (c: typeof CAT) => void = () => {}
+    vi.spyOn(catalogueApi, 'fetchCatalogue').mockReturnValue(new Promise(r => { resolve = r }))
+    applyUiNavigate({ kind: 'parameter', entry_id: 'generator.p_nom', name: 'PV roof' })
+    manualNavigation()
+    resolve(CAT)
+    await new Promise(r => setTimeout(r, 0))
+    expect(useUIStore.getState().propertiesEditRequest).toBeNull()
+    expect(vi.mocked(toast)).not.toHaveBeenCalled()
   })
 })

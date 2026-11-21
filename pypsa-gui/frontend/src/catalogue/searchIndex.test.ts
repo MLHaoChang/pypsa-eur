@@ -51,6 +51,29 @@ describe('parameter search ranking', () => {
     expect(ids('mw')).toEqual([])
   })
 
+  it('one query across all four tiers: exact plain name, alias, word prefix, guide text (GK B3 C3)', () => {
+    const tiers = buildParameterIndex([
+      entry({ id: 'd.guide', plain_name: 'Stack', guide: 'Wear grows with the hours run.' }),
+      entry({ id: 'c.prefix', plain_name: 'Hours run per year' }),
+      entry({ id: 'b.alias', plain_name: 'Lifetime in running hours', aliases: ['Hours run'] }),
+      entry({ id: 'a.plain', plain_name: 'Hours run' }),
+    ])
+    expect(tiers.search('hours run').map(h => [h.entry.id, h.via])).toEqual([
+      ['a.plain', 'plain'], ['b.alias', 'alias'], ['c.prefix', 'prefix'], ['d.guide', 'guide'],
+    ])
+  })
+
+  it('ties break by depth, then plain name, then id, whatever the input order', () => {
+    const tied = [
+      entry({ id: 'z.cap', plain_name: 'Capacity', depth: 'advanced' }),
+      entry({ id: 'y.cap', plain_name: 'Capacity' }),
+      entry({ id: 'x.cap', plain_name: 'Capacity' }),
+    ]
+    const order = ['x.cap', 'y.cap', 'z.cap']
+    expect(buildParameterIndex(tied).search('capacity').map(h => h.entry.id)).toEqual(order)
+    expect(buildParameterIndex([...tied].reverse()).search('capacity').map(h => h.entry.id)).toEqual(order)
+  })
+
   it('with a lens, the entries that function needs come first', () => {
     expect(ids('capacity', 'load_flow')[0]).toBe('line.s_nom')
   })
