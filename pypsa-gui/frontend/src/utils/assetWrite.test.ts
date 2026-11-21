@@ -449,7 +449,7 @@ describe('updateAsset rebases on the fresh row (05g)', () => {
     const qc = new QueryClient()
     qc.setQueryData(nk('p1', 'generators'), [stale])
     api().getGenerators.mockResolvedValue([{ name: 'other' }])
-    await expect(updateAsset(qc, 'p1', 'generators', 'g1', { p_nom: 5 })).rejects.toThrow(/g1/)
+    await expect(updateAsset(qc, 'p1', 'generators', 'g1', { p_nom: 5 })).rejects.toThrow('Generator “g1” is no longer in the network: reopen the card to see its current state.')
     expect(api().updateGenerator).not.toHaveBeenCalled()
   })
 

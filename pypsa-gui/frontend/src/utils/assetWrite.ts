@@ -21,6 +21,7 @@ import { networkApi, type CostBasis } from '../api/network'
 import { useMapLayoutStore } from '../pages/mapLayoutStore'
 import { useSitesStore } from '../site3d/sitesStore'
 import { nk } from './queryKeys'
+import { componentLabel } from './componentLabels'
 
 /**
  * Every query-key root whose rows a mutating chat tool (or any asset write)
@@ -178,6 +179,10 @@ export function rekeySidecarsAfterRename(
   useSitesStore.getState().renamePlacement(project, klass, oldName, newName)
 }
 
+/** The words a card's error toast shows when the asset is gone (deleted in another tab, an undo, a restore). */
+const gone = (cls: WritableRoot, name: string) =>
+  `${componentLabel(ROOT_CLASS[cls])} “${name}” is no longer in the network: reopen the card to see its current state.`
+
 /**
  * The Asset-write chokepoint: fetch → spread → PUT → invalidate.
  *
@@ -223,7 +228,7 @@ export async function updateAsset<T extends { name: string } = AssetRow>(
   const rows = await qc.ensureQueryData({ queryKey: key, queryFn: e.get })
   const base = rows.find((r) => r.name === name)
   if (!base) {
-    throw new Error(`${cls}/${name} not found in the current network`)
+    throw new Error(gone(cls, name))
   }
   // The rows really are T (getGenerators returns Generator[]); the table
   // widened them to AssetRow at its seam, so narrow back at this one.
@@ -236,7 +241,7 @@ export async function updateAsset<T extends { name: string } = AssetRow>(
     ? (await qc.fetchQuery({ queryKey: key, queryFn: e.get, staleTime: 0 })).find((r) => r.name === name)
     : base
   if (!current) {
-    throw new Error(`${cls}/${name} not found in the current network`)
+    throw new Error(gone(cls, name))
   }
   // An explicit `undefined` is the builder's way to keep a derived column out of the PUT (omitDerived): it stays.
   const against = (opts?.initial ?? base) as Record<string, unknown>
