@@ -951,7 +951,14 @@ def test_a_fuel_curve_the_single_edit_refuses_refuses_the_import(client, store):
 def test_a_fuel_curve_s_costs_are_derived_on_import(client, _auth_db):
     """N1: the curve sets the costs, as the single edit's `_apply_fuel_curve` does."""
     n = _network(stale=False)
-    n.generators.loc["G1", ["fuel_curve_slope", "fuel_curve_no_load", "fuel_price"]] = [2.0, 0.5, 30.0]
+    n.generators.loc["G1", ["fuel_curve_slope", "fuel_curve_no_load", "fuel_price"]] = [
+        2.0,
+        0.5,
+        30.0,
+    ]
+    n.generators.loc["G1", "committable"] = (
+        True  # no-load fuel burns only while the unit is on
+    )
     made = _import(client, _workbook(n), name="Curve")
     assert made.status_code == 200, made.text
     got = _saved_network(_saved(_auth_db[1], made.json()["project_id"]))
