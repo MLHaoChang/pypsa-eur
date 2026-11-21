@@ -3,7 +3,7 @@
 
 # GC-09 Compliance workflow: deliverable tracker, data list, TSO revision log, report pack
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-19: backend open in #1577; UI and item 6 wiring not started
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: none (tracker, data list and revision log start at once; pack rows light up as 01–08 land)
@@ -12,7 +12,7 @@ Model tier: opus
 Size: L (backend PR, then UI PR)
 Owner decision: GC-SCOPE-1, GC-TEXT-1 (2026-11-17)
 TRGC: all 01–25 (tracking); generates 09, 10, 11
-Likely files: new `pypsa-gui/backend/services/grid_compliance/` (tracker, data list, revision log, pack assembly), new `pypsa-gui/backend/routers/grid_compliance.py`, `pypsa-gui/backend/services/campus_electrical_service.py` (shared; read-only use of outputs), `pypsa-gui/backend/services/reports/` (reuse docx/pdf writers and `revisions.py`), new `pypsa-gui/frontend/src/components/GridCompliance*.tsx` + tests, backend tests under `pypsa-gui/backend/tests/`
+Likely files: new `pypsa-gui/backend/services/grid_compliance/` (tracker, data list, revision log, pack assembly), new `pypsa-gui/backend/routers/grid_compliance.py`, `pypsa-gui/backend/services/campus_electrical_service.py` (shared; read-only use of outputs, plus the GC-05 entry points in item 6), `pypsa-gui/backend/services/reports/` (reuse docx/pdf writers and `revisions.py`), new `pypsa-gui/frontend/src/components/GridCompliance*.tsx` + tests, backend tests under `pypsa-gui/backend/tests/`
 
 **Confidentiality (GC-TEXT-1).** Cite only the public grid code (SAGC / TRGC by SE / NGSA) and generic engineering. TRGC numbers and titles may be named. Never name a project, customer, consultant, EPC or OEM, here, in code, tests, fixtures, UI text or PR bodies.
 
@@ -36,6 +36,10 @@ needs, where its inputs come from, which tool runs it, what came back, and what 
 5. **UI**: one Grid compliance section in the campus electrical panel; phase columns, status
    chips, next step visible; follows `pypsa-gui/frontend/src/index.css`, `docs/agents/review-ux.md`
    and DENSITY-1.
+6. **PowerFactory pack (GC-05 output)**: GC-09 wires the DGS export download
+   (`campus_study.powerfactory_campus`) and the background-harmonics upload
+   (`campus_study.import_background_campus`) into `campus_electrical_service.py`; GC-05 (#1580)
+   left no app entry point.
 
 ## Done when
 

@@ -22,6 +22,7 @@ import {
   GAP_WORDS,
 } from './runWords'
 import { runUnderReview } from './planReview'
+import RevisionDrafts from './RevisionDrafts'
 import { fmtCurrency } from '../../utils/format'
 
 const POLL_MS = 4000
@@ -318,6 +319,8 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
           aria-current={now ? 'step' : undefined} className={now ? 'font-medium' : s.status === 'skipped' ? 'text-muted' : ''}>
           <span data-testid="run-stage-words">{stageWords(s.stage)} · {now && ['pending', 'active'].includes(s.status)
             ? currentWords : STAGE_STATUS_WORDS[s.status] ?? 'to do'}</span>
+          {/* Study harness 15 (GK B): a stage the profile skips says why, e.g. no report until issue 50. */}
+          {s.status === 'skipped' && s.reason && <div data-testid="run-stage-reason" className="text-muted">{s.reason}</div>}
           {now && !cancelled && <CurrentStage stage={s} view={view} />}
         </li>
       })}
@@ -376,6 +379,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
       A stopped run cannot be restarted: start a new one from the composer.
     </p>}
     {finished && hasReport && <p data-testid="run-finished">The report is in Reports.</p>}
+    <RevisionDrafts taskId={taskId} view={view} onRefresh={refresh} />
 
     {failed && <p className="text-amber-400">{failed}</p>}
     {(can.has('pause') || can.has('stop')) && <div className="mt-1 flex flex-wrap items-baseline gap-2">

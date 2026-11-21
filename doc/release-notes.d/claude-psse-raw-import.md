@@ -1,0 +1,1 @@
+* Feat(gridspine): Import a PSS/E case file (`.raw`, versions 33, 35 and 36) as a PyPSA network: buses, loads, fixed and switched shunts, generators, lines and two- and three-winding transformers, with areas, zones and owners; records that have no counterpart (DC links, FACTS, switching devices, ...) and every value the importer had to assume are listed in the import report.

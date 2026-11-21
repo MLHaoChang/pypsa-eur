@@ -1,0 +1,62 @@
+{
+ "profiles": {
+  "branch-loading/1": [
+   {
+    "metric": "peak_branch_utilisation",
+    "formula": "100 x max over t of max(|p0[t]|, |p1[t]|) / (rating x s_max_pu[t])",
+    "validity": "verified solve (else unverified_solve); every snapshot needs p0, p1, s_max_pu and weight >= 0 with rating x s_max_pu > 1e-9, else invalid_or_missing_branch_data. Refusals: ac_pf_present, ambiguous_branch, network_scope_required, unknown_branch, unsupported_branch_population, misaligned_source, unsupported_snapshot_scope",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_branch_loading_assurance.py::test_line_loading_matches_the_hand_values_and_the_load_flow_tab",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_branch_loading_assurance.py::test_line_loading_matches_the_hand_values_and_the_load_flow_tab"
+     }
+    }
+   },
+   {
+    "metric": "hours_above_rating",
+    "formula": "sum over t of w_generators[t] where utilisation[t] > 1 + tolerance",
+    "validity": "verified solve (else unverified_solve); every snapshot needs p0, p1, s_max_pu and weight >= 0 with rating x s_max_pu > 1e-9, else invalid_or_missing_branch_data. Refusals: ac_pf_present, ambiguous_branch, network_scope_required, unknown_branch, unsupported_branch_population, misaligned_source, unsupported_snapshot_scope",
+    "tolerance": "harness.branch_calculations:OVER_LIMIT_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_branch_loading_assurance.py::test_an_observed_overload_counts_weighted_hours_like_the_tab",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_branch_loading_assurance.py::test_an_observed_overload_counts_weighted_hours_like_the_tab"
+     }
+    }
+   },
+   {
+    "metric": "peak_branch_flow",
+    "formula": "max over t of max(|p0[t]|, |p1[t]|)",
+    "validity": "verified solve (else unverified_solve); every snapshot needs p0, p1, s_max_pu and weight >= 0 with rating x s_max_pu > 1e-9, else invalid_or_missing_branch_data. Refusals: ac_pf_present, ambiguous_branch, network_scope_required, unknown_branch, unsupported_branch_population, misaligned_source, unsupported_snapshot_scope",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_branch_loading_assurance.py::test_line_loading_matches_the_hand_values_and_the_load_flow_tab",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_branch_loading_assurance.py::test_line_loading_matches_the_hand_values_and_the_load_flow_tab"
+     }
+    }
+   },
+   {
+    "metric": "branch_rating",
+    "formula": "s_nom_opt if extendable else s_nom",
+    "validity": "verified solve (else unverified_solve); every snapshot needs p0, p1, s_max_pu and weight >= 0 with rating x s_max_pu > 1e-9, else invalid_or_missing_branch_data. Refusals: ac_pf_present, ambiguous_branch, network_scope_required, unknown_branch, unsupported_branch_population, misaligned_source, unsupported_snapshot_scope",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_branch_loading_assurance.py::test_line_loading_matches_the_hand_values_and_the_load_flow_tab",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_branch_loading_assurance.py::test_line_loading_matches_the_hand_values_and_the_load_flow_tab"
+     }
+    }
+   }
+  ]
+ }
+}

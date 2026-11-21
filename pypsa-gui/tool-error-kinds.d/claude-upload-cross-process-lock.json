@@ -1,0 +1,1 @@
+{"kinds": {"upload_busy": {"surface": "inline", "why": "Another API process held the project's upload lock for the whole wait, so add_upload stored nothing (HTTP 409). The assistant retries the upload once after a few seconds, else tells the user."}}}

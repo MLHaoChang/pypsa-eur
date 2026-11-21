@@ -18,6 +18,7 @@ import { useUIStore } from '../store/uiStore'
 import { appLog } from '../store/simulationStore'
 import { formatRelativeTime, invalidateNetworkQueries } from '../utils/projectActions'
 import { resolveScenType } from '../utils/scenarioType'
+import { DeleteProjectDialog, InlineRename, ProjectCardMenu } from './projectsHome/ProjectCardMenu'
 import { hasAdminConsoleAccess } from './admin/helpers'
 import {
   countScenarios,
@@ -210,6 +211,9 @@ export default function ProjectsHomePage() {
   const [importing, setImporting] = useState<readonly string[]>([])
   const [feedback, setFeedback] = useState<Record<string, RowFeedback>>({})
   const [wizardTab, setWizardTab] = useState<NewProjectTab | null>(null)
+  const [duplicateOf, setDuplicateOf] = useState<string | undefined>(undefined)
+  const [renamingKey, setRenamingKey] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<ProjectInfo | null>(null)
   const launchTimer = useRef<number | null>(null)
 
   const { data: projects = [], isLoading } = useQuery({
@@ -346,6 +350,7 @@ export default function ProjectsHomePage() {
   // than leaving the user staring at a stale page.
   const closeWizard = useCallback(() => {
     setWizardTab(null)
+    setDuplicateOf(undefined)
     queryClient.invalidateQueries({ queryKey: PROJECTS_KEY })
   }, [queryClient])
 
@@ -559,14 +564,25 @@ export default function ProjectsHomePage() {
                       >
                         <div className="space-y-3">
                           <div className="flex items-start justify-between gap-2">
-                            <h3 className="min-w-0 break-words text-lg font-semibold tracking-[-0.02em]">
-                              {project.name}
-                            </h3>
+                            {renamingKey === key ? (
+                              <InlineRename project={project} onDone={() => setRenamingKey(null)} />
+                            ) : (
+                              <h3 className="min-w-0 break-words text-lg font-semibold tracking-[-0.02em]">
+                                {project.name}
+                              </h3>
+                            )}
                             <span className="flex shrink-0 items-center gap-1.5">
                               {project.project_kind === 'planning_dynamics' && (
                                 <Badge tone="mint" title="Planning → dynamics study">Study</Badge>
                               )}
                               <Badge>Root</Badge>
+                              <ProjectCardMenu
+                                project={project}
+                                onOpen={() => navigate(projectHref(project))}
+                                onRename={() => setRenamingKey(key)}
+                                onDuplicate={() => { setDuplicateOf(project.name); setWizardTab('clone') }}
+                                onDelete={() => setDeleting(project)}
+                              />
                             </span>
                           </div>
                           <StatChips
@@ -773,10 +789,13 @@ export default function ProjectsHomePage() {
         </div>
       )}
 
+      <DeleteProjectDialog project={deleting} onClose={() => setDeleting(null)} />
+
       {wizardTab && (
         <NewProjectWizard
           existingProjects={projects}
           initialTab={wizardTab}
+          initialCloneSource={wizardTab === 'clone' ? duplicateOf : undefined}
           isPending={createBlank.isPending}
           onClose={closeWizard}
           onConfirm={name => createBlank.mutate(name)}
