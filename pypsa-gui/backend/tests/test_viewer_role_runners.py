@@ -210,6 +210,43 @@ def test_a_study_run_of_an_editor_who_stays_one_is_saved(
     assert store.load_aux(project_storage_dir("vr-run-ok"), sid, "findings") is not None
 
 
+def test_a_refused_rerun_puts_back_the_option_projects_of_the_last_run(
+    client,
+    api_project,
+    studies_on,
+    monkeypatch,
+    project_storage_dir,
+    sl,
+    as_user,
+):
+    """GK B4 condition 5: the run starts from a non-empty `option_projects`
+    (an earlier run's solved forks). The second run replaces those forks as
+    it makes its own, so a refusal puts back only the prior forks that still
+    exist: the list never names a project that is gone."""
+    from services import solver_service
+    from services.study import store
+
+    name = "vr-rerun"
+    sid, member = _study_as_member(client, api_project, sl, name)
+    monkeypatch.setattr(solver_service, "run_simulation", FakeSolver())
+    _c, rec = _run_as(client, as_user, member, name, sid)
+    assert rec["status"] == "done", rec
+    base_dir = project_storage_dir(name)
+    prior = list(store.load_study(base_dir, sid).option_projects)
+    assert prior, "the first run saved its solved forks"
+
+    monkeypatch.setattr(solver_service, "run_simulation", FakeSolver(member.demote))
+    _c, rec = _run_as(client, as_user, member, name, sid)
+    assert rec["status"] == "failed" and rec["error_code"] == KIND, rec
+    study = store.load_study(base_dir, sid)
+    with sl() as db:
+        still = [pid for pid in prior if db.get(Project, uuid.UUID(pid)) is not None]
+        assert all(
+            db.get(Project, uuid.UUID(pid)) is not None for pid in study.option_projects
+        )
+    assert list(study.option_projects) == still
+
+
 def test_a_study_run_refused_before_its_first_fork_creates_none(
     client,
     api_project,
