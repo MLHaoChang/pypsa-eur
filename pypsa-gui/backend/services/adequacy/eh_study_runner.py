@@ -324,8 +324,16 @@ def _assumptions_recorder(record: dict, cfg, body, goal_sources: dict):
 # test_run_assumptions pins the two together), so the refusal names what the
 # user sees there.
 VOLL_FIELD_LABEL = "Value of Lost Load (VOLL)"
-VOLL_REFUSAL = (f"{VOLL_FIELD_LABEL}: must be above 0 to run the reliability study. "
-                "Set it in Solver settings.")
+
+
+def voll_refusal(study: str) -> str:
+    """The refusal every study that needs VOLL > 0 gives at VOLL 0, in one form:
+    the panel's label, what it would run, where to set it (RAW-NAMES-1)."""
+    return (f"{VOLL_FIELD_LABEL}: must be above 0 to run {study}. "
+            "Set it in Solver settings.")
+
+
+VOLL_REFUSAL = voll_refusal("the reliability study")
 
 
 def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,

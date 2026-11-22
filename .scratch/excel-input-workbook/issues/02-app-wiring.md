@@ -1,6 +1,6 @@
 # S2 app wiring (catalogue adapter, template and export routes, /import/excel)
 
-Status: in-progress
+Status: done (#1798)
 Blocked by: 01
 
 See `../spec.md`.

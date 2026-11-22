@@ -210,6 +210,7 @@ POST   /api/projects/{name}  write path:name
 PUT    /api/projects/{name}/asset_health  write path:name
 POST   /api/projects/{name}/flow/ack  write path:name
 POST   /api/projects/{name}/flow/ack-many  write path:name
+PUT    /api/projects/{name}/flow/energization  write path:name
 PUT    /api/projects/{name}/flow/scope  write path:name
 POST   /api/projects/{name}/intent-comparison  write path:name
 POST   /api/projects/{name}/intent-comparison/abort  write path:name

@@ -475,12 +475,12 @@ def rederive_imported_parts(n, *, global_rate: float | None = None, new_project:
             if problem := _imported_parts_problem(component_class, row, global_rate):
                 raise HTTPException(422, {
                     "error_kind": "invalid_edit_value",
-                    "message": f"{class_label(component_class)} '{name}': {problem}. "
+                    "message": f"{class_label(component_class)} “{name}”: {problem}. "
                                + ("Nothing was imported." if new_project else "The open network is unchanged.")})
             priced.append((component_class, name))
     for component_class, name in priced:
         rederive_scaled_parts(n, component_class, name, global_rate=global_rate)
-    return [f"{class_label(component_class)} '{name}'" for component_class, name in priced]
+    return [f"{class_label(component_class)} “{name}”" for component_class, name in priced]
 
 
 def _refuse_edit_during_live_study() -> None:
