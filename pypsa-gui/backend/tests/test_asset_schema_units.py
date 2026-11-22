@@ -404,18 +404,24 @@ def test_the_table_units_route_gives_each_tonne_asset_the_cards_cost_units_and_l
     install_network(n)
     body = client.get("/api/network/asset_schema/Store/table_units").json()
     assert body["component"] == "Store" and body["unreadable"] == []
-    assert body["rows"][tonne] == cost_units(n, "Store", tonne)  # the card's unit and scale, not the class scale
+    assert body["rows"][tonne] == cost_units(
+        n, "Store", tonne
+    )  # the card's unit and scale, not the class scale
     assert body["rows"][tonne]["capital_cost"] == {"unit": "EUR/t/yr", "scale": 1.0}
     assert "capital_cost" in body["cost_fields"]
     links = client.get("/api/network/asset_schema/Link/table_units").json()
     assert energy not in links["rows"] and energy not in links["unreadable"]
 
 
-def test_a_table_mixing_tonne_and_energy_assets_marks_only_the_tonne_ones(client, install_network, n):
+def test_a_table_mixing_tonne_and_energy_assets_marks_only_the_tonne_ones(
+    client, install_network, n
+):
     m = n.copy()
     tonne_link = _first(m, "links", "bus1", True)
     energy_link = _first(m, "links", "bus0", False)
-    m.links.at[tonne_link, "bus0"] = m.stores.at[_first(m, "stores", "bus", True), "bus"]
+    m.links.at[tonne_link, "bus0"] = m.stores.at[
+        _first(m, "stores", "bus", True), "bus"
+    ]
     install_network(m)
     body = client.get("/api/network/asset_schema/Link/table_units").json()
     assert tonne_link in body["rows"] and energy_link not in body["rows"]
@@ -437,5 +443,9 @@ def test_the_table_units_route_is_empty_for_a_class_with_no_bus_size_and_refuses
 ):
     install_network(n)
     assert client.get("/api/network/asset_schema/Bus/table_units").json() == {
-        "component": "Bus", "rows": {}, "unreadable": [], "cost_fields": []}
+        "component": "Bus",
+        "rows": {},
+        "unreadable": [],
+        "cost_fields": [],
+    }
     assert client.get("/api/network/asset_schema/Nope/table_units").status_code == 400
