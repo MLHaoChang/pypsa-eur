@@ -1428,3 +1428,10 @@ def test_b2_a_preset_keeps_the_stored_receivable_days(bc, template):
     _store(bc, {"inputs": {"lines": [_bc_line(price=None)], "receivable_days": 30.0}})
     new = preset_apply.plan(_args(variant="gpu_cloud"))["new"]
     assert new["inputs"]["receivable_days"] == 30.0
+
+
+def test_21_lines_without_capex_show_no_terminal_row(bc, template):
+    template["id"] = "eh_site"  # the generic rows: revenue and opex only
+    _with_terminal("none")
+    card = preset_apply.plan(_args(rows=["Product sales", "Staff"]))
+    assert "Terminal value" not in _rows(card)
