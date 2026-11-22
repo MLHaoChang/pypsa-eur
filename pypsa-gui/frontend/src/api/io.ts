@@ -10,10 +10,31 @@ export interface ResultsWorkbookView {
 export interface ResultsWorkbookRun { run_id: string; started_at: string | null }
 export interface ResultsWorkbookListing { views: ResultsWorkbookView[]; run: ResultsWorkbookRun | null }
 
+export const EXPORT_TIMEOUT_MS = 600000
+
+/** A blob-typed request returns its JSON error as a Blob: read the server's `detail` sentence. */
+export async function blobErrorReason(e: unknown): Promise<string | null> {
+  const body = (e as { response?: { data?: unknown } }).response?.data
+  if (!(body instanceof Blob)) return null
+  try {
+    const d = JSON.parse(await body.text())?.detail
+    return typeof d === 'string' ? d : d?.message ?? null
+  } catch { return null }
+}
+
+async function rethrowWithServerReason(e: unknown): Promise<never> {
+  const msg = await blobErrorReason(e)
+  if (msg) throw new Error(msg)
+  throw e
+}
+
 export const ioApi = {
   exportNetcdf: () => client.get('/io/export/netcdf', { responseType: 'blob' }).then(r => r.data as Blob),
   exportCsv: () => client.get('/io/export/csv', { responseType: 'blob' }).then(r => r.data as Blob),
-  exportExcel: () => client.get('/io/export/excel', { responseType: 'blob' }).then(r => r.data as Blob),
+  /** An hourly year takes ~45 s to write, past the 30 s default: size the timeout to the export.
+   *  A refusal's reason is read out of the Blob body (see `blobErrorReason`). */
+  exportExcel: () => client.get('/io/export/excel', { responseType: 'blob', timeout: EXPORT_TIMEOUT_MS, skipErrorToast: true })
+    .then(r => r.data as Blob).catch(rethrowWithServerReason),
   exportMatpower: () => client.get('/io/export/matpower', { responseType: 'blob' }).then(r => r.data as Blob),
 
   /** The result views a workbook can hold; `selected` = included by the project's cards. */
@@ -50,9 +71,11 @@ export const ioApi = {
     const fd = new FormData(); fd.append('file', file)
     return client.post<ImportSummary>('/io/import/csv', fd).then(r => r.data)
   },
+  /** No error toast: an input workbook's 422 `import_as_new_project` opens the
+   *  workbook dialog instead, and the Import zone shows any other refusal once. */
   importExcel: (file: File) => {
     const fd = new FormData(); fd.append('file', file)
-    return client.post<ImportSummary>('/io/import/excel', fd).then(r => r.data)
+    return client.post<ImportSummary>('/io/import/excel', fd, { skipErrorToast: true }).then(r => r.data)
   },
   importMatpower: (file: File) => {
     const fd = new FormData(); fd.append('file', file)

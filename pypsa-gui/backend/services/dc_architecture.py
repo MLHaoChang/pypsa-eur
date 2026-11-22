@@ -235,6 +235,35 @@ def services(architecture: str, storage: bool) -> dict[str, list[str]]:
     return {"counted": counted, "conditional": conditional}
 
 
+def behind_architecture(n, island: dict | None, architecture: str | None) -> list[str]:
+    """The units behind a set power ``architecture`` (DC grid-readiness
+    walkthrough 03, 05): the island's ``ups`` units and every
+    Generator or StorageUnit on an ``eh_critical`` bus (Link-modelled units
+    are never behind). They reach the grid only
+    through the architecture's own converters, so neither their island-study
+    services nor their converters count at the PoC (the architecture's own
+    services stand in; its grid-facing front end is not in the IBR figure).
+    Loads never count. Empty when no architecture is set: ``eh_critical`` is a
+    reliability tag, not a topology fact, so alone it moves nothing."""
+    if architecture is None:
+        return []
+    from services.solver.process_uc import flag_column
+
+    critical: set[str] = set()
+    if n is not None and "eh_critical" in n.buses.columns:
+        critical = set(n.buses.index[flag_column(n.buses, "eh_critical")].astype(str))
+    units = (island or {}).get("units") or {}
+    out = [str(k) for k, u in units.items() if u.get("kind") == "ups"]
+    for frame in ("generators", "storage_units"):
+        df = getattr(n, frame, None) if n is not None else None
+        if df is None or df.empty:
+            continue
+        for x in df.index[df["bus"].astype(str).isin(critical)].astype(str):
+            if x not in out and (units.get(x) or {}).get("kind") != "load":
+                out.append(x)
+    return out
+
+
 def ledger_rows(spec: DataCentreLoadSpec) -> list[tuple[str, str, str]]:
     """The ledger lines an explicitly set architecture carries in place of the
     "UPS and distribution losses" line (GK A C1, C2)."""
@@ -537,9 +566,13 @@ def compare(
     rate_kwargs: dict | None = None,
     island_offered: list[str] | None = None,
     finance_currency: str | None = None,
+    tariff_shipped: bool = False,
+    island_offered_sources: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     """Every architecture against the project's own on the saved network ``n``
-    (read, never changed). See the module docstring for the algebra."""
+    (read, never changed). See the module docstring for the algebra.
+    ``tariff_shipped``: the project's tariff is still the template's default,
+    so a price read from it is assumed (WALK-IMPROVE-1 b)."""
     from services.adequacy.dc_backup import (
         DcBackupError,
         _check_years,
@@ -622,8 +655,9 @@ def compare(
             )
         rate_t = tr["rate"]
         price = {
-            "source": tr["source"],
-            "assumed": False,
+            "source": tr["source"]
+            + (" (the template's default tariff, assumed)" if tariff_shipped else ""),
+            "assumed": tariff_shipped,
             "currency": tr["currency"],
             "currency_note": tr["currency_note"],
         }
@@ -647,6 +681,8 @@ def compare(
             f"finance case nominal wacc {rk['rate']:g} made real with its inflation "
             f"{rk.get('inflation') or 0.0:g}"
         )
+    if rk.get("rate") is not None and rk.get("rate_assumed"):
+        rate_source += " (the template's shipped wacc, assumed)"
     if not math.isfinite(r) or r <= -1.0:
         raise _err(
             f"Discount rate: the real rate {r:g} is not usable",
@@ -736,6 +772,7 @@ def compare(
                 wanted=wanted,
                 conditional=svc["conditional"],
                 architecture=LABEL[a],
+                offered_sources=island_offered_sources,
             )
         variants.append(variant)
     own_v = next(v for v in variants if v["own"])
@@ -829,6 +866,23 @@ def _peak(n, island, facility, spec, unset, peak_check) -> dict[str, Any]:
 # ── the project ───────────────────────────────────────────────────────────
 
 
+def _tariff_is_shipped(tpl, tid: str, plan, commercial: dict | None) -> bool:
+    """The project's import tariff still equals the one its template ships."""
+    from models.commercial import CommercialConfig
+
+    tariff = (commercial or {}).get("import_tariff")
+    shipped = tpl.solver_config(tid, plan).get("commercial") or {}
+    if not tariff or not shipped.get("import_tariff"):
+        return False
+    try:
+        want = CommercialConfig.model_validate(shipped).model_dump(mode="json")[
+            "import_tariff"
+        ]
+    except ValueError:
+        return False
+    return tariff == want
+
+
 def compare_project(
     project_dir, tpl, *, energy_price_per_mwh: float | None = None
 ) -> dict:
@@ -873,7 +927,9 @@ def compare_project(
         ) from None
     finance = getattr(cfg, "finance", None)
     try:
-        rate_kwargs = dc_backup.finance_rate(finance)
+        rate_kwargs = dc_backup.finance_rate(
+            finance, getattr(cfg, "finance_assumed", None)
+        )
     except dc_backup.DcBackupError as exc:
         raise _err(str(exc), "invalid", exc.field) from None
     from models.finance import FinanceInputs
@@ -883,23 +939,29 @@ def compare_project(
         FinanceInputs.model_validate(finance).currency if finance else None
     )
     plan = planning or tpl.NATIVE_PLANNING[tid]
-    offered = None
+    offered = offered_sources = None
     if isinstance(island, dict):
-        from services.adequacy.island_config import (
-            ContractError,
-            offered_services,
-            validate,
-        )
+        from services.adequacy.grid_readiness import grid_facing_offer
+        from services.adequacy.island_config import ContractError, validate
 
+        # A set architecture's units behind it (the UPS, the critical bus) are
+        # never credited at the PoC: its own services stand in (DC grid-readiness
+        # walkthrough 03). Unset, nothing is behind, as on the scorecard: the
+        # spec's "ac" is only a default then (GK A 30).
         try:
-            got = offered_services(validate(island))
-            offered = got["services"] if got else None
+            got = grid_facing_offer(
+                n, validate(island), spec.architecture if is_set(raw) else None
+            )
+            offered = got["services"]
+            # Units are named only under a set architecture, as on the scorecard.
+            offered_sources = got["sources"] if is_set(raw) else None
         except (ContractError, ValueError):
             offered = None
     commercial = getattr(cfg, "commercial", None)
     if commercial is not None and hasattr(commercial, "model_dump"):
         commercial = commercial.model_dump(mode="json")
     it_mw = max(float(p.it_mw) for p in spec.phases)
+    tariff_shipped = _tariff_is_shipped(tpl, tid, plan, commercial)
     out = compare(
         n,
         spec,
@@ -913,6 +975,8 @@ def compare_project(
         energy_price_per_mwh=energy_price_per_mwh,
         rate_kwargs=rate_kwargs,
         island_offered=offered,
+        tariff_shipped=tariff_shipped,
+        island_offered_sources=offered_sources,
         finance_currency=finance_currency,
     )
     return {**out, "basis": dc_backup._basis(nc)}

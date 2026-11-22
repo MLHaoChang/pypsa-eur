@@ -1,16 +1,18 @@
 import { useState, useMemo } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { X, AlertTriangle } from 'lucide-react'
-import { networkApi } from '../api/network'
+import { networkApi, type CostBasis } from '../api/network'
 import { useUIStore, type CreationRequest } from '../store/uiStore'
 import { isRevealed } from '../utils/attributeCatalog'
 import { extrasPatch, useSolveMode } from './properties/cardKit'
 import { useCatalog } from '../hooks/useCatalog'
 import { useAssetSchema } from '../hooks/useAssetSchema'
+import FieldsPending from './properties/FieldsPending'
 import { SCHEMA_CLASSES, type AssetSchema } from '../api/assetSchema'
-import { tidy, unitLabel } from '../utils/assetForm'
+import { costBasisOf, tidy, unitLabel } from '../utils/assetForm'
 import { creationScope, loadExtras, saveExtras } from '../utils/extrasStore'
 import { nk } from '../utils/queryKeys'
+import { blockerMessage } from '../utils/blockerMessage'
 import BusAutocomplete from '../components/BusAutocomplete'
 import { useSitesStore } from '../site3d/sitesStore'
 import { primaryBus } from '../site3d/siteModel'
@@ -140,8 +142,8 @@ export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
       defaultValue: 'Custom',
       options: ['380/220 kV','380/110 kV','380/132 kV','220/110 kV','220/132 kV',
         '132/33 kV','132/20 kV','110/33 kV','110/20 kV','33/11 kV','20/0.4 kV','Custom'] },
-    { key: 'v_nom_0',      label: 'v_nom₀ (HV)',    type: 'number', defaultValue: '0', unit: 'kV',  half: true },
-    { key: 'v_nom_1',      label: 'v_nom₁ (LV)',    type: 'number', defaultValue: '0', unit: 'kV',  half: true },
+    { key: 'v_nom_0',      label: 'Declared HV voltage', type: 'number', defaultValue: '0', unit: 'kV',  half: true },
+    { key: 'v_nom_1',      label: 'Declared LV voltage', type: 'number', defaultValue: '0', unit: 'kV',  half: true },
     { key: 's_nom',        label: 'S nom',          type: 'number', defaultValue: '100',  unit: 'MVA', half: true },
     { key: 'r',            label: 'Resistance r',   type: 'number', defaultValue: '0.0', unit: 'pu', half: true },
     { key: 'x',            label: 'Reactance x',    type: 'number', defaultValue: '0.1', unit: 'pu', half: true },
@@ -359,25 +361,25 @@ const QUERY_KEY: Record<string, string> = {
 // The class each palette item creates lives with the rest of the palette data.
 const COMPONENT_TYPE: Record<string, string> = PALETTE_COMPONENT_TYPE
 
-type CreateFn = (p: Record<string, unknown>) => Promise<unknown>
+type CreateFn = (p: Record<string, unknown>, basis?: CostBasis) => Promise<unknown>
 
 const CREATE_FN: Record<string, CreateFn> = {
   bus:           p => networkApi.createBus(p as Partial<Bus>),
   line:          p => networkApi.createLine(p as Partial<Line>),
   transformer:   p => networkApi.createTransformer(p as Partial<Transformer>),
-  electrolyzer:  p => networkApi.createLink(p as Partial<Link>),
-  fuel_cell:     p => networkApi.createLink(p as Partial<Link>),
-  process_unit:  p => networkApi.createLink(p as Partial<Link>),
-  power_to_heat: p => networkApi.createLink(p as Partial<Link>),
-  chp:           p => networkApi.createLink(p as Partial<Link>),
-  thermal:       p => networkApi.createGenerator(p as Partial<Generator>),
-  renewable:     p => networkApi.createGenerator(p as Partial<Generator>),
-  battery:       p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
-  psh:           p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
-  hydrogen:      p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
-  caes:          p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
-  flywheel:      p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
-  thermal_storage: p => networkApi.createStore(p as Partial<Store>),
+  electrolyzer:  (p, b) => networkApi.createLink(p as Partial<Link>, b),
+  fuel_cell:     (p, b) => networkApi.createLink(p as Partial<Link>, b),
+  process_unit:  (p, b) => networkApi.createLink(p as Partial<Link>, b),
+  power_to_heat: (p, b) => networkApi.createLink(p as Partial<Link>, b),
+  chp:           (p, b) => networkApi.createLink(p as Partial<Link>, b),
+  thermal:       (p, b) => networkApi.createGenerator(p as Partial<Generator>, b),
+  renewable:     (p, b) => networkApi.createGenerator(p as Partial<Generator>, b),
+  battery:       (p, b) => networkApi.createStorageUnit(p as Partial<StorageUnit>, b),
+  psh:           (p, b) => networkApi.createStorageUnit(p as Partial<StorageUnit>, b),
+  hydrogen:      (p, b) => networkApi.createStorageUnit(p as Partial<StorageUnit>, b),
+  caes:          (p, b) => networkApi.createStorageUnit(p as Partial<StorageUnit>, b),
+  flywheel:      (p, b) => networkApi.createStorageUnit(p as Partial<StorageUnit>, b),
+  thermal_storage: (p, b) => networkApi.createStore(p as Partial<Store>, b),
   load_elec:     p => networkApi.createLoad(p as Partial<Load>),
   load_h2:       p => networkApi.createLoad(p as Partial<Load>),
   load_heat:     p => networkApi.createLoad(p as Partial<Load>),
@@ -500,7 +502,7 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
   const [picking, setPicking] = useState(false)
   const { data: catalog } = useCatalog(COMPONENT_TYPE[item.id] ?? null)
 
-  const fields = useMemo(() => (FIELD_MAP[item.id] ?? []).map(f => withDescriptor(f, schema)), [item.id, schema])
+  const baseFields = useMemo(() => (FIELD_MAP[item.id] ?? []).map(f => withDescriptor(f, schema)), [item.id, schema])
   const qKey = QUERY_KEY[item.id] ?? ''
   const prefix = AUTO_PREFIX[item.id] ?? 'Asset'
 
@@ -527,7 +529,7 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
   const [form, setForm] = useState<Record<string, string>>(() => {
     const existingCount = (qc.getQueryData<unknown[]>(nk(useUIStore.getState().currentProject, qKey)) ?? []).length
     const init: Record<string, string> = {}
-    fields.forEach(f => { init[f.key] = f.defaultValue ?? '' })
+    baseFields.forEach(f => { init[f.key] = f.defaultValue ?? '' })
     init.name = `${prefix} ${existingCount + 1}`
     // Terminal prefill from a drop-on-a-bus (spec D27). Applied only when the
     // target bus passes the field's own carrier filter — otherwise the form
@@ -540,7 +542,7 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
     // comment on FIELD_MAP.bus's x/y fields.
     const terminal = TERMINAL_FIELD[item.id]
     if (item.dropBusName && terminal) {
-      const spec = fields.find(f => f.key === terminal) as BusFieldSpec | undefined
+      const spec = baseFields.find(f => f.key === terminal) as BusFieldSpec | undefined
       if (spec && filteredBusNames(spec.busCarrierFilter).includes(item.dropBusName)) {
         init[terminal] = item.dropBusName
       }
@@ -554,7 +556,7 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
         init.x = String(Math.round(item.dropLatLng.lng * 1e6) / 1e6)
         init.y = String(Math.round(item.dropLatLng.lat * 1e6) / 1e6)
       } else if (terminal && !init[terminal]) {
-        const spec = fields.find(f => f.key === terminal) as BusFieldSpec | undefined
+        const spec = baseFields.find(f => f.key === terminal) as BusFieldSpec | undefined
         const allowed = new Set(filteredBusNames(spec?.busCarrierFilter))
         const nearest = nearestPlacedBus(item.dropLatLng, allBuses.filter(b => allowed.has(b.name)))
         if (nearest) init[terminal] = nearest
@@ -565,7 +567,7 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
       // the field's carrier filter; nothing if none does (the mismatch line
       // explains, as for a bus drop).
       if (terminal) {
-        const spec = fields.find(f => f.key === terminal) as BusFieldSpec | undefined
+        const spec = baseFields.find(f => f.key === terminal) as BusFieldSpec | undefined
         const allowed = spec ? filteredBusNames(spec.busCarrierFilter) : []
         const candidates = [primaryBus(dropSite), ...dropSite.buses].filter((b): b is string => !!b)
         const pick = candidates.find(b => allowed.includes(b))
@@ -582,6 +584,11 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
     }
     return init
   })
+  // A cost field's unit and scale follow the bus the new asset attaches to (a tonne bus: per tonne, scale 1;
+  // 05d), so a value typed per tonne is not stored x1000. The initial values above stay in the class's units.
+  const sizeBus = (form.bus ?? form.bus0 ?? '') || null
+  const { data: liveSchema, unitsReady, unitsFailed, retryUnits } = useAssetSchema(SCHEMA_CLASSES.has(COMPONENT_TYPE[item.id] ?? '') ? COMPONENT_TYPE[item.id] : null, null, sizeBus)
+  const fields = useMemo(() => (FIELD_MAP[item.id] ?? []).map(f => withDescriptor(f, liveSchema ?? schema)), [item.id, liveSchema, schema])
   const [errors, setErrors] = useState<Record<string, string>>({})
 
   const set = (k: string, v: string) => {
@@ -665,7 +672,7 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
       const fn = CREATE_FN[item.id]
       if (!fn) throw new Error(`Unknown asset type: ${item.id}`)
       const transform = SUBMIT_TRANSFORM[item.id]
-      return fn(transform ? transform(payload) : payload)
+      return fn(transform ? transform(payload) : payload, costBasisOf(liveSchema ?? schema))
     },
     onSuccess: () => {
       const proj = useUIStore.getState().currentProject
@@ -713,7 +720,8 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
       }
     },
     onError: (e: Error) => {
-      if (e.message !== 'validation') toast.error(e.message)
+      // blockerMessage: a refused write (e.g. 409 cost_basis_mismatch, quiet in the interceptor) shows the backend's sentence.
+      if (e.message !== 'validation') toast.error(blockerMessage(e))
     },
   })
 
@@ -914,7 +922,7 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
                 </select>
               ) : (
                 <button type="button" onClick={() => setPicking(true)}
-                        className="text-[10px] text-accent hover:underline">+ Add parameter</button>
+                        className="text-[10px] text-link hover:underline">+ Add parameter</button>
               )}
             </div>
           )}
@@ -922,6 +930,11 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
       </div>
 
       {/* Footer */}
+      {!unitsReady && (
+        <div className="px-3 pt-2 shrink-0">
+          <FieldsPending variant="line" failed={unitsFailed} onRetry={retryUnits} />
+        </div>
+      )}
       <div className="flex gap-2 px-3 py-2 border-t border-border shrink-0">
         <button
           onClick={() => setCreationItem(null)}
@@ -931,7 +944,7 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
         </button>
         <button
           onClick={() => createMut.mutate()}
-          disabled={createMut.isPending}
+          disabled={createMut.isPending || !unitsReady}
           className="flex-1 py-1.5 bg-accent text-white rounded text-xs font-semibold hover:bg-accent/90 transition-colors disabled:opacity-50"
         >
           {createMut.isPending ? 'Adding…' : 'Add to Network'}

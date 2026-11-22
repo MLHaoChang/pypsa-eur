@@ -10,10 +10,13 @@ import {
 import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
 import { useUIStore } from '../../../store/uiStore'
 import { ACTION } from './actionStyle'
+import { openPanel } from '../openPanel'
+import { streamWords } from './businessCaseWords'
 import {
-  breakEvenReason, fmtYear, hidden, KPI_ORDER, kpiText, NET_INCOME_NOTE, PNL_SECTIONS,
-  rowReason, series, staleText, stageText, streamGroups, yearReason,
+  breakEvenReason, firstFix, fmtYear, hidden, KPI_ORDER, kpiText, NET_INCOME_NOTE, PNL_SECTIONS,
+  refusedRunText, rowReason, series, staleText, stageText, streamGroups, yearReason,
 } from './businessCaseReport'
+import { pctText, VOLUME_LABEL } from './businessCaseModel'
 import { fmtAmount } from './valueFlows'
 
 const words = (id: string) => id.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase())
@@ -25,8 +28,14 @@ export interface BusinessCaseRunProps {
   /** Why Run is off now (unsaved lines, no lines, refused lines…), or null. */
   disabledReason: string | null
   revenueLines: string[]
+  /** Every saved line's name, in order: a refused run names its line (walk 05). */
+  lineNames?: string[]
   breakEvenLine: string | null
   onBreakEvenLine: (name: string | null) => void
+  /** The years the draft states a volume factor for (BC 15). */
+  volumeFactorYears?: string[]
+  /** Removes years from the draft's volume factor (marks it unsaved; Save writes it). */
+  onRemoveVolumeFactorYears?: (years: number[]) => void
 }
 
 export default function BusinessCaseRun(p: BusinessCaseRunProps) {
@@ -66,7 +75,8 @@ export default function BusinessCaseRun(p: BusinessCaseRunProps) {
   const report = running ? null : (s?.report ?? null)
   const stale = running ? null : staleText(s)
   const failure = s?.status === 'failed' || s?.status === 'refused'
-    ? `${s.status === 'refused' ? 'Refused' : 'Failed'}: ${s.error || words(s.error_code ?? 'unknown')}`
+    ? `${s.status === 'refused' ? 'Refused.' : 'Failed.'} ${
+      s.error ? refusedRunText(s.error, p.lineNames ?? []) : words(s.error_code ?? 'unknown')}`
     : null
 
   return (
@@ -108,7 +118,8 @@ export default function BusinessCaseRun(p: BusinessCaseRunProps) {
         )}
       </div>
       {stale && <p role="alert" className="text-warn" data-testid="bc-out-of-date">{stale}</p>}
-      {report && <ReportView report={report} breakEvenLine={p.breakEvenLine} />}
+      {report && <ReportView report={report} breakEvenLine={p.breakEvenLine}
+                             draftYears={p.volumeFactorYears ?? []} onRemoveYears={p.onRemoveVolumeFactorYears} />}
       {/* One reason at a time (UX): "not run yet" only when nothing else is said. */}
       {!report && !running && s === null && off === null && !blocked && !run.isPending && (
         <p className="text-muted" data-testid="bc-not-run">Not run yet: save the lines, then run the business case.</p>
@@ -117,13 +128,31 @@ export default function BusinessCaseRun(p: BusinessCaseRunProps) {
   )
 }
 
-function ReportView({ report, breakEvenLine }: { report: BusinessCaseReport; breakEvenLine: string | null }) {
+function ReportView({ report, breakEvenLine, draftYears, onRemoveYears }: {
+  report: BusinessCaseReport; breakEvenLine: string | null
+  draftYears: string[]; onRemoveYears?: (years: number[]) => void
+}) {
   const ccy = report.currency ?? ''
+  const ignored = report.pnl?.volume_factor_ignored ?? []
+  const stillStated = ignored.filter(y => draftYears.includes(String(y)))
   return (
     <div className="space-y-3" data-testid="bc-report">
       {report.basis && <p className="text-muted" data-testid="bc-basis">Basis: {report.basis.label}{ccy && ` · ${ccy}`}</p>}
+      {report.pnl?.volume_factor && (
+        <p data-testid="bc-kpi-volume-factor">
+          <span className="rounded px-1 bg-warn/15 text-warn">With volume factor (lease-up)</span>{' '}
+          These figures differ from the Investment case because of the volume factor.</p>
+      )}
       <KpiRow report={report} />
       <BreakEven report={report} line={breakEvenLine} />
+      {ignored.length > 0 && (
+        <p className="text-warn" data-testid="bc-volume-factor-ignored">
+          Ignored, outside the operating years: {ignored.join(', ')}{' '}
+          {stillStated.length > 0 && onRemoveYears
+            ? <button type="button" className={ACTION} onClick={() => onRemoveYears(stillStated)}
+                      aria-label={`Remove the volume factor of ${stillStated.join(', ')}`}>Remove</button>
+            : <span className="text-muted">(removed from the unsaved lines: save, then run again)</span>}</p>
+      )}
       {report.pnl
         ? <PnlTable pnl={report.pnl} />
         : <p className="text-muted" data-testid="bc-no-pnl">Not established: this report has no P&amp;L.</p>}
@@ -133,7 +162,9 @@ function ReportView({ report, breakEvenLine }: { report: BusinessCaseReport; bre
 
 function KpiRow({ report }: { report: BusinessCaseReport }) {
   const k = report.kpis ?? {}
+  const fix = firstFix(k, report.pnl)
   return (
+    <>
     <dl className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-2" data-testid="bc-kpis">
       {KPI_ORDER.map(spec => {
         const kpi = k[spec.key]
@@ -141,11 +172,19 @@ function KpiRow({ report }: { report: BusinessCaseReport }) {
           <div key={spec.key} className="border border-border rounded px-2 py-1"
                data-testid={`bc-kpi-${spec.key}`} data-status={kpi?.status ?? 'missing'}>
             <dt className="text-muted">{spec.label}</dt>
-            <dd className={kpi?.status === 'ok' ? 'font-semibold tabular-nums' : 'text-muted'}>{kpiText(kpi, spec.fmt)}</dd>
+            <dd className={kpi?.status === 'ok' ? 'font-semibold tabular-nums' : 'text-muted'}>{kpiText(kpi, spec.fmt, report.pnl, spec.key)}</dd>
           </div>
         )
       })}
     </dl>
+    {fix && (
+      <p className="text-warn" data-testid="bc-first-fix">First:{' '}
+        {fix.place === 'finance'
+          ? <button type="button" className="underline" data-testid="bc-first-fix-open"
+              onClick={() => openPanel('commercial', 'economics')}>{fix.action} ›</button>
+          : <>{fix.action} in the lines above.</>}</p>
+    )}
+    </>
   )
 }
 
@@ -164,6 +203,9 @@ function BreakEven({ report, line }: { report: BusinessCaseReport; line: string 
       {text}</p>
   )
 }
+
+/** The report's lowercase note as a sentence. */
+const sentence = (t: string) => t.replace(/^./, c => c.toUpperCase()).replace(/([^.])$/, '$1.')
 
 /** Pinned to the scroll box's left edge, so a heading stays readable while the years scroll. */
 const PIN = 'sticky left-0 inline-block'
@@ -214,7 +256,7 @@ function PnlTable({ pnl }: { pnl: BusinessCasePnl }) {
                 const v = pnl.streams[n]
                 return (
                   <tr key={n} data-testid={`bc-stream-${n}`}>
-                    <th scope="row" className={head + ' pl-3'}>{words(n.replace(/^bc_/, ''))}
+                    <th scope="row" className={head + ' pl-3'}>{streamWords(n)}
                       {!v && <Reason text={rowReason(`stream:${n}`, pnl)} />}</th>
                     {v ? cells(n, v) : <Gap span={years.length} />}
                   </tr>
@@ -222,11 +264,24 @@ function PnlTable({ pnl }: { pnl: BusinessCasePnl }) {
               })}
             </Fragment>
           ))}
-          {PNL_SECTIONS.map(sec => (
+          {PNL_SECTIONS.map((sec, si) => (
             <Fragment key={sec.title}>
               <tr><th scope="rowgroup" colSpan={years.length + 1} className="text-left pt-2 font-semibold">
                 <span className={PIN}>{sec.title}
                   {sec.note && <span className="font-normal text-muted"> · {sec.note}</span>}</span></th></tr>
+              {si === 0 && pnl.volume_factor && (
+                <tr data-testid="bc-row-volume_factor">
+                  <th scope="row" className={head + ' pl-3 align-top'}>{VOLUME_LABEL}
+                    {pnl.volume_factor_note && (
+                      <span className="block font-normal text-muted whitespace-normal max-w-[18rem]"
+                            data-testid="bc-volume-factor-note">{sentence(pnl.volume_factor_note)}</span>
+                    )}</th>
+                  {years.map(y => (
+                    <td key={y} className="text-right tabular-nums px-1 whitespace-nowrap align-top">
+                      {pctText(pnl.volume_factor![String(y)] ?? 1)}</td>
+                  ))}
+                </tr>
+              )}
               {sec.rows.map(spec => {
                 const v = series(pnl, spec.key)
                 if (hidden(spec, v)) return null

@@ -16,6 +16,13 @@ export interface AdminUser {
   role: OrgRole | null
 }
 
+export interface CreatedAdminUser extends AdminUser {
+  email_sent: boolean
+  /** Present only when no email went out; give it to the invitee yourself. */
+  set_password_link?: string
+  warning?: string
+}
+
 export interface CreateAdminUserPayload {
   email: string
   role: OrgRole
@@ -79,7 +86,7 @@ export const adminApi = {
   listUsers: () =>
     client.get<AdminUser[]>('/admin/users').then(r => r.data),
   createUser: (payload: CreateAdminUserPayload) =>
-    client.post<AdminUser>('/admin/users', payload).then(r => r.data),
+    client.post<CreatedAdminUser>('/admin/users', payload).then(r => r.data),
   resendSetPassword: (userId: string) =>
     client.post<{ ok: true }>(`/admin/users/${encodeURIComponent(userId)}/resend-set-password`).then(r => r.data),
   listLegacyProjects: () =>

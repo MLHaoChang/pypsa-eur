@@ -216,10 +216,10 @@ def section_1_weak_flexible() -> None:
           and payload.get("import_firmness") != "planning_limit_only",
           f"import_model={payload.get('import_model')} "
           f"firmness={payload.get('import_firmness')}")
-    _step("the PoC Link is a sampled unit at the pack's 50 MW cap",
+    _step("the PoC Link is a sampled unit at the network's 100 MW connection limit",
           [m.get("model") for m in scope.get("import_link_models") or []]
           == ["sampled_unit"]
-          and scope.get("import_cap_mw_max") == 50.0
+          and scope.get("import_cap_mw_max") == 100.0
           and scope.get("import_firm_mw_max") is None,
           str(scope.get("import_link_models"))[:200])
     _step("the grid behind the Link is sampled as a second area",

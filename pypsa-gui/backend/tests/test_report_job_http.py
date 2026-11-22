@@ -286,15 +286,90 @@ def test_generate_without_any_evidence_is_400_no_evidence(client, api_project, m
     assert client.get(f"/api/projects/{name}/reports/generate/status").status_code == 204
 
 
-def test_a_provider_that_cannot_be_built_is_400_with_the_seam_kind(
-        client, api_project, session_state, monkeypatch):
+@pytest.mark.parametrize("kind", ["missing_api_key", "sdk_not_installed"])
+def test_no_usable_llm_profile_builds_a_plain_report_from_stored_results(
+        client, api_project, session_state, monkeypatch, kind):
+    """TE2E-16-PLAIN-1: no key, Generate report still produces a report."""
     name = api_project("gen-nokey")
     _store_eh_report(session_state(client))
     import routers.report_jobs as jobs
-    monkeypatch.setattr(jobs, "_provider_for_profile", lambda profile: (None, "missing_api_key"))
+    monkeypatch.setattr(jobs, "_provider_for_profile", lambda profile: (None, kind))
     r = client.post(f"/api/projects/{name}/reports/generate", json={})
+    assert r.status_code == 200, r.text[:300]
+    body = r.json()
+    assert body["status"] == "done" and body["mode"] == "plain"
+    listed = client.get(f"/api/projects/{name}/reports").json()
+    assert [m["report_id"] for m in listed] == [body["report_id"]]
+    assert listed[0]["mode"] == "evidence_only"
+    # No job was started.
+    assert client.get(f"/api/projects/{name}/reports/generate/status").status_code == 204
+
+
+def test_the_plain_report_is_what_post_reports_builds(
+        client, api_project, session_state, monkeypatch):
+    name = api_project("gen-nokey-same")
+    _store_eh_report(session_state(client))
+    import routers.report_jobs as jobs
+    monkeypatch.setattr(jobs, "_provider_for_profile", lambda profile: (None, "missing_api_key"))
+    monkeypatch.setattr(jobs, "start_report_job",
+                        lambda **kw: pytest.fail("no job may start without a key"))
+    plain = client.post(f"/api/projects/{name}/reports/generate", json={"title": "T"}).json()
+    built = client.post(f"/api/projects/{name}/reports", json={"mode": "evidence_only", "title": "T"}).json()
+    a = client.get(f"/api/projects/{name}/reports/{plain['report_id']}").json()
+    b = client.get(f"/api/projects/{name}/reports/{built['report_id']}").json()
+    for d in (a, b):
+        for k in ("report_id", "created_at", "updated_at"):
+            d.pop(k, None)
+    assert a == b
+
+
+@pytest.mark.parametrize("body", [
+    {"instruction": "be brief"}, {"sections": ["executive_summary"]},
+    {"language": "de"}, {"summaries": [{"section_id": "executive_summary", "sections": []}]},
+])
+def test_an_llm_only_input_without_a_key_keeps_the_400(
+        client, api_project, session_state, monkeypatch, body):
+    name = api_project("gen-nokey-llm-only")
+    _store_eh_report(session_state(client))
+    import routers.report_jobs as jobs
+    monkeypatch.setattr(jobs, "_provider_for_profile", lambda profile: (None, "missing_api_key"))
+    r = client.post(f"/api/projects/{name}/reports/generate", json=body)
     assert r.status_code == 400, r.text[:300]
     assert r.json()["detail"]["error_kind"] == "missing_api_key"
+    assert client.get(f"/api/projects/{name}/reports").json() == []
+
+
+def test_the_assistants_strict_call_never_gets_a_plain_report(
+        client, api_project, session_state, monkeypatch):
+    name = api_project("gen-nokey-strict")
+    _store_eh_report(session_state(client))
+    import routers.report_jobs as jobs
+    monkeypatch.setattr(jobs, "_provider_for_profile", lambda profile: (None, "missing_api_key"))
+    monkeypatch.setattr(jobs, "assistant_strict_active", lambda: True)
+    r = client.post(f"/api/projects/{name}/reports/generate", json={})
+    assert r.status_code == 400 and r.json()["detail"]["error_kind"] == "missing_api_key"
+
+
+def test_no_usable_llm_profile_and_no_evidence_still_says_no_evidence(
+        client, api_project, monkeypatch):
+    name = api_project("gen-nokey-empty")
+    import routers.report_jobs as jobs
+    monkeypatch.setattr(jobs, "_current_study_report", lambda: None)
+    monkeypatch.setattr(jobs, "_provider_for_profile", lambda profile: (None, "missing_api_key"))
+    r = client.post(f"/api/projects/{name}/reports/generate", json={})
+    assert r.status_code == 400
+    assert r.json()["detail"]["error_kind"] == "no_evidence"
+
+
+def test_any_other_provider_failure_stays_a_400(
+        client, api_project, session_state, monkeypatch):
+    name = api_project("gen-badprov")
+    _store_eh_report(session_state(client))
+    import routers.report_jobs as jobs
+    monkeypatch.setattr(jobs, "_provider_for_profile", lambda profile: (None, "internal_error"))
+    r = client.post(f"/api/projects/{name}/reports/generate", json={})
+    assert r.status_code == 400, r.text[:300]
+    assert r.json()["detail"]["error_kind"] == "internal_error"
 
 
 @pytest.mark.parametrize("body", [{"sections": ["nope"]}, {"sections": []}])
@@ -309,8 +384,9 @@ def test_an_unknown_or_empty_section_list_is_refused(client, api_project, sessio
         assert r.json()["detail"]["error_kind"] == "report_section_not_found"
 
 
+@pytest.mark.parametrize("no_key", [False, True])
 def test_generate_is_refused_under_a_foreign_lock(client, api_project, session_state,
-                                                  monkeypatch, _auth_db, seeded_identity):
+                                                  monkeypatch, _auth_db, seeded_identity, no_key):
     import uuid as _uuid
     from datetime import datetime, UTC
 
@@ -323,7 +399,12 @@ def test_generate_is_refused_under_a_foreign_lock(client, api_project, session_s
 
     name = api_project("gen-lock")
     _store_eh_report(session_state(client))
-    _install_provider(monkeypatch, FakeProvider([]))
+    if no_key:
+        # No usable profile: the plain fallback must still sit behind the lock.
+        import routers.report_jobs as jobs
+        monkeypatch.setattr(jobs, "_provider_for_profile", lambda profile: (None, "missing_api_key"))
+    else:
+        _install_provider(monkeypatch, FakeProvider([]))
     assert client.post(f"/api/projects/{name}/lock").status_code == 200
 
     _engine, session_local = _auth_db
@@ -342,3 +423,5 @@ def test_generate_is_refused_under_a_foreign_lock(client, api_project, session_s
         r = other.post(f"/api/projects/{name}/reports/generate", json={})
         assert r.status_code == 409, r.text[:300]
         assert r.json()["detail"]["error_kind"] == "project_locked"
+    # Nothing was stored by the refused call.
+    assert client.get(f"/api/projects/{name}/reports").json() == []

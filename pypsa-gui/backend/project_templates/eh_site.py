@@ -411,6 +411,48 @@ def year_snapshots(snapshots: pd.Index) -> pd.DatetimeIndex:
     return idx
 
 
+#: The pack row that prices `pv_new` (see `_price` in `candidates`).
+PV_TECHNOLOGY = "solar-rooftop"
+
+
+def _pv_ledger_row() -> dict:
+    """The ledger row for the PV candidate, read from its pack row: a behind-the-meter
+    site builds on its roofs, so it is dearer per kW than the hubs' solar-utility."""
+    from services.library.defaults_pack.loader import load_defaults_pack
+    from services.library.defaults_pack.pricing import _row
+
+    key = f"{PV_TECHNOLOGY}.investment.overnight"
+    row = _row(load_defaults_pack(PACK_VERSION), key)
+    return {"item": "PV candidate",
+            "value": f"rooftop PV, {row.original_value:.2f} {row.original_unit} overnight "
+                     f"({row.money_year} {row.currency})",
+            "source": "pack",
+            "note": f"defaults pack {PACK_VERSION} row {key} ({row.label}), from {row.source_url}; "
+                    "a behind-the-meter site builds on its roofs, so it is dearer per kW than "
+                    "the ground-mounted solar-utility row the hub templates use"}
+
+
+_FRAME_CLASS = {"generators": "Generator", "storage_units": "StorageUnit", "links": "Link",
+                "stores": "Store"}
+
+
+#: The source a sunk unit's overnight cost is stamped with: the template's own
+#: assumption (the ledger's existing-unit row), not a pack row.
+SUNK_COST_SOURCE = "template assumption: existing unit, in service and sunk (overnight cost 0)"
+
+
+def _stamp_sunk_cost(n, frame: str, rows) -> None:
+    """A sunk existing asset's overnight cost is 0 by the template's assumption, not
+    the pack price `_price` stamped on it: re-stamp it as that assumption (a code
+    default, never a user's value), so the chip, the money graph, Parameter Memory
+    and the chat read where the 0 comes from. The other pack stamps stay."""
+    from services.asset_schema import provenance
+
+    for name in rows:
+        provenance.record(n, _FRAME_CLASS[frame], name, "overnight_cost", status="default",
+                          source=SUNK_COST_SOURCE)
+
+
 def stage_network(n: pypsa.Network, years: list[int], *, load_scale: dict[int, dict[str, float]],
                   energization: dict[str, list[float]], weights: dict[int, int],
                   existing: tuple[str, ...], candidates,
@@ -454,6 +496,7 @@ def stage_network(n: pypsa.Network, years: list[int], *, load_scale: dict[int, d
         df = getattr(n, frame)
         rows = [a for a in existing if a in df.index]
         df.loc[rows, ["overnight_cost", "discount_rate"]] = [0.0, DISCOUNT_RATE]
+        _stamp_sunk_cost(n, frame, rows)
     for y in years:
         candidates(n, y)
     cyclic_per_period(n)
@@ -595,7 +638,7 @@ def build_eh_site(params: dict | None = None) -> pypsa.Network:
             net.add("Generator", v, bus="site_mv", carrier="solar", p_nom=0.0,
                     p_nom_extendable=True, p_nom_max=cand["pv"]["max_mw"], marginal_cost=0.0,
                     build_year=y)
-            _T._price(net, "generators", v, "solar-rooftop")
+            _T._price(net, "generators", v, PV_TECHNOLOGY)
             net.generators_t.p_max_pu[v] = np.tile(sun, len(years))
 
     scale = {s["year"]: {"critical_load": s["peak_mw"] / last_peak,
@@ -644,6 +687,9 @@ def finance_inputs(p: dict) -> dict:
         "replacement_rule": "part_lifetimes",
         "terminal_value": {"method": "remaining_life_annuity"},
         "wacc_nominal": DISCOUNT_RATE, "cost_of_equity": DISCOUNT_RATE, "inflation": 0.02,
+        # The templates' tax default (eh_templates.TAX_DEFAULT): German
+        # corporate tax at the average Hebesatz.
+        **_T.TAX_DEFAULT,
     }
 
 
@@ -656,10 +702,21 @@ def commercial_and_finance(p: dict, n: pypsa.Network | None = None) -> dict:
 
     base = CommercialConfig.model_validate(
         {"poc_link": "grid_import", "import_tariff": SITE_TARIFF, "timezone": "UTC"})
-    vf = VFT.build("single_owner", n if n is not None else build_eh_site(p), base).config
+    net = n if n is not None else build_eh_site(p)
+    vf = VFT.build("single_owner", net, base).config
     commercial = base.model_copy(update={"value_flows": vf.model_dump(mode="json")})
-    return {"commercial": commercial.model_dump(mode="json"),
-            "finance": FinanceInputs.model_validate(finance_inputs(p)).model_dump(mode="json")}
+    fin = finance_inputs(p)
+    # As the templates ship them: bought at the first COD (else the first
+    # stage's day one), and each owned asset's AfA class; without one a
+    # battery leaves the tax section not established.
+    fin["acquisition_date"] = min(fin["cod_by_asset"].values(),
+                                  default=f"{p['stages'][0]['year']}-01-01")
+    fin["depreciation_class_by_asset"] = {
+        o.asset_id: _T._afa_class(net, o.component, o.asset_id) for o in vf.asset_owners}
+    fin = FinanceInputs.model_validate(fin).model_dump(mode="json")
+    # Every shipped value is marked assumed with its source (GK B2 F1).
+    return {"commercial": commercial.model_dump(mode="json"), "finance": fin,
+            "finance_assumed": _T.finance_assumed(fin)}
 
 
 def solver_config(p: dict, n: pypsa.Network | None = None) -> dict:
@@ -881,12 +938,13 @@ def template_meta(p: dict, entered: list[str] | None = None) -> dict:
                          "checks it does not cost less); the extra is the difference from "
                          "the same site with ride-through off"}]
                if p["ride_through"] else []),
+            *([_pv_ledger_row()] if p["candidates"]["pv"]["enabled"] else []),
             {"item": "fault level at the PoC", "value": f"{p['fault_level_mva']:g} MVA",
              "source": "assumed", "note": "20 × the connection unless set"},
             {"item": "power factor and load damping",
-             "value": "PF 0.98, load damping D = 0 (gridspine defaults)",
+             "value": "PF 0.98, load damping D = 0 (the studies' built-in values)",
              "source": "assumed",
-             "note": "the electrical and frequency studies use the data center's defaults; "
+             "note": "the electrical and frequency studies use their built-in values; "
                      "PF 0.98 is optimistic for a motor-heavy site, D = 0 is conservative "
                      "(per-site values are a later slice)"},
         ],

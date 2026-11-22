@@ -3,5 +3,6 @@
 export const COMPONENT_LABEL: Record<string, string> = {
   Bus: 'Bus', Line: 'Line', Generator: 'Generator', StorageUnit: 'Storage', Store: 'Store',
   Load: 'Load', Link: 'Link', Transformer: 'Transformer', ShuntImpedance: 'Shunt', Carrier: 'Carrier',
+  GlobalConstraint: 'Global constraint',
 }
 export const componentLabel = (cls: string): string => COMPONENT_LABEL[cls] ?? cls

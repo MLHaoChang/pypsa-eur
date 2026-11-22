@@ -26,6 +26,7 @@ Nothing here imports ``services``: the pack is passed in.
 
 from __future__ import annotations
 
+import re
 from typing import Annotated, Any, Literal, NamedTuple, Protocol, get_args
 
 from pydantic import (
@@ -140,6 +141,9 @@ QUANTITY_SOURCE_PATTERN = (
 PRESET_PATTERN = rf"^{_ID}@{_ID}$"
 MONEY_YEAR_MIN = 1990
 MONEY_YEAR_AFTER_BASE = 5
+#: The most years a volume factor may list (BC 15, GK B2 C3).
+VOLUME_FACTOR_YEARS_MAX = 100
+_YEAR_KEY = re.compile(r"[12][0-9]{3}")
 
 # A typo is refused, never dropped; inf and NaN are refused in every float (#1320 F1).
 _FORBID = ConfigDict(extra="forbid", allow_inf_nan=False)
@@ -214,6 +218,14 @@ class Cell(NamedTuple):
     escalates: bool
 
 
+def takes_derating(category: Any, quantity_source: Any) -> bool:
+    """A capacity payment linked to an asset's capacity in service: the one line a
+    de-rating multiplies (spec §6.6)."""
+    return category == "capacity_payment" and str(quantity_source).startswith(
+        "linked:capacity."
+    )
+
+
 class LineItem(BaseModel):
     """One row of the business-case table (spec §4). No tax column (G-C2)."""
 
@@ -259,6 +271,14 @@ class LineItem(BaseModel):
     linked_share_by_year: dict[int, Annotated[Finite, Field(ge=0.0, le=1.0)]] = Field(
         default_factory=dict,
         description="sold share by year; a year's cell wins over `linked_share`",
+    )
+    # A capacity payment on an asset's capacity in service is paid on a typed de-rated
+    # share of it (spec §6.6; walk 04, GK B2 Q1/Q2): 0..1, never defaulted.
+    derating: Finite | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="de-rating: the share of the capacity in service the market pays for",
     )
     hint: Hint | None = None
 
@@ -331,6 +351,17 @@ class LineItem(BaseModel):
             raise ValueError(f"{info.field_name} applies to revenue lines only")
         return v
 
+    @field_validator("derating")
+    @classmethod
+    def _capacity_payment_only(cls, v: Any, info: ValidationInfo) -> Any:
+        if v is not None and not takes_derating(
+            info.data.get("category"), info.data.get("quantity_source")
+        ):
+            raise ValueError(
+                "derating applies to a capacity payment linked to capacity in service only"
+            )
+        return v
+
     @field_validator("linked_share", "linked_share_by_year")
     @classmethod
     def _linked_only(cls, v: Any, info: ValidationInfo) -> Any:
@@ -390,7 +421,43 @@ class BusinessCaseInputs(BaseModel):
     )  # preset_id@version
     # Days of revenue outstanding (cash bridge only, never EBITDA: GK B BC3). None = not stated.
     receivable_days: Finite | None = Field(default=None, ge=0.0, le=365.0)
+    # Lease-up (BC 15, BC15-BUILD-1): the share of the solved volume served in a year, a
+    # fraction 0..1 shown as a percent. A year not listed reads 1.0 (full volume from COD).
+    # It is a volume factor, never the sold share (`linked_share`, #1430 F2): it scales
+    # the dispatched-volume cost rows with the revenue (ruling 6).
+    volume_factor_by_year: dict[int, Annotated[Finite, Field(ge=0.0, le=1.0)]] = Field(
+        default_factory=dict,
+        description="lease-up: the share of the solved volume served in a year",
+    )
     lines: list[LineItem] = Field(default_factory=list)
+
+    @field_validator("volume_factor_by_year", mode="before")
+    @classmethod
+    def _strict_volume_factor(cls, v: Any) -> Any:
+        """GK B2 C3: a year is a four-digit int or its exact JSON string, never a bool,
+        a float or padded text; a value is a number, never a bool or a string; at most
+        `VOLUME_FACTOR_YEARS_MAX` years. Finiteness and 0..1 are the field's own."""
+        if not isinstance(v, dict):
+            return v
+        if len(v) > VOLUME_FACTOR_YEARS_MAX:
+            raise ValueError(f"at most {VOLUME_FACTOR_YEARS_MAX} years")
+        for k, f in v.items():
+            ok = (
+                isinstance(k, int)
+                and not isinstance(k, bool)
+                and _YEAR_KEY.fullmatch(str(k))
+            ) or (isinstance(k, str) and _YEAR_KEY.fullmatch(k))
+            if not ok:
+                raise ValueError(f"year {k} is not a four-digit year")
+            if isinstance(f, bool) or not isinstance(f, (int, float)):
+                raise ValueError(f"the factor of {k} is not a number")
+        if len({int(k) for k in v}) != len(v):
+            raise ValueError("a year is listed twice")
+        return v
+
+    def volume_factor_at(self, year: int) -> float:
+        """`year`'s volume factor: its cell, else 1.0."""
+        return self.volume_factor_by_year.get(year, 1.0)
 
     def refusals(
         self, *, horizon: tuple[int, int], base_year: int
@@ -478,6 +545,8 @@ class BusinessCaseInputs(BaseModel):
             out.append(YearOutOfRange(f"{at}.money_year"))
         if ln.escalation == "contract" and ln.indexation is None:
             out.append(IndexationMissing(f"{at}.indexation"))
+        if ln.derating is None and takes_derating(ln.category, ln.quantity_source):
+            out.append(DeratingMissing(f"{at}.derating"))
         if ln.start_year is not None and not horizon[0] <= ln.start_year <= horizon[1]:
             out.append(OutsideHorizon(f"{at}.start_year"))
         if ln.end_year is not None and not horizon[0] <= ln.end_year <= horizon[1]:
@@ -496,6 +565,18 @@ class BusinessCaseInputs(BaseModel):
                             f"{at}.preset_rule.requires[{c}]"
                         )
                     )
+        if (
+            ln.source == "typed"
+            and ln.kind != "capex"
+            and any(
+                self.volume_factor_at(y) != 1.0
+                for y in years
+                if horizon[0] <= y <= horizon[1]
+            )
+        ):
+            # Ruling 6 (GK B2 BC 15 Q1): a typed line states an amount, not its volume
+            # class, so a lease-up below 100 % in its span refuses rather than guess.
+            out.append(VolumeFactorTypedLine(f"{at}.quantity_source"))
         if not share and ln.price is None and not _covers(ln.price_by_year, years):
             cls = PriceNotEstablished if ln.kind == "revenue" else CostNotEstablished
             out.append(cls(f"{at}.price"))
@@ -638,6 +719,10 @@ class IndexationMissing(BusinessCaseRefused):
     kind = "indexation_missing"
 
 
+class DeratingMissing(BusinessCaseRefused):
+    kind = "derating_missing"
+
+
 class LifeMissing(BusinessCaseRefused):
     kind = "life_missing"
 
@@ -692,6 +777,21 @@ class DoubleCount(BusinessCaseRefused):
     kind = "double_count"
 
 
+class VolumeFactorTypedLine(BusinessCaseRefused):
+    """A typed revenue or opex line in a year whose volume factor is below 100 %: its
+    volume class is not stated, so ruling 6 refuses (GK B2 BC 15 Q1)."""
+
+    kind = "volume_factor_typed_line"
+
+
+class VolumeFactorUnclassified(BusinessCaseRefused):
+    """A volume factor below full volume in a year an IC row whose volume class is not
+    determined (a generation-side stream) is non-zero: ruling 6 refuses rather than
+    guess (BC 15). `field` is the ledger stream."""
+
+    kind = "volume_factor_unclassified"
+
+
 # The DC spec names these two; every other required category is `capex_missing` (GK B Q2).
 _CAPEX_MISSING: dict[str, type[BusinessCaseRefused]] = {
     "it_hardware": ItCapexMissing,
@@ -711,6 +811,7 @@ REFUSAL_KINDS: tuple[str, ...] = (
     "outside_horizon",
     "year_out_of_range",
     "indexation_missing",
+    "derating_missing",
     "life_missing",
     "rate_missing",
     "price_not_established",
@@ -723,6 +824,8 @@ REFUSAL_KINDS: tuple[str, ...] = (
     "linked_output_missing",
     "double_count",
     "default_unit_mismatch",
+    "volume_factor_unclassified",
+    "volume_factor_typed_line",
 )
 
 # ------------------------------------------------------------------ helpers

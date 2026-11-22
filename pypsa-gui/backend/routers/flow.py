@@ -310,7 +310,8 @@ def get_flow_scope(project: AuthorizedProject = ProjectAccessDep) -> dict:
                                            no_load=no_load),
             # The size source Asset sizing off dispatches on (read-only here).
             "fixed_sizes": (settings or {}).get("fixed_sizes", "off"),
-            **flow_scope.registry(template, settings, no_load=no_load)}
+            **flow_scope.registry(template, settings, no_load=no_load,
+                                  project_dir=project.directory)}
 
 
 @router.get("/{name}/flow/reliability_goal")
@@ -359,3 +360,90 @@ def put_flow_scope(body: dict,
                                   **({"blocker_code": exc.blocker_code}
                                      if exc.blocker_code else {})}) from exc
     return {"scope": scope}
+
+
+def _check_lock(project: AuthorizedProject, db: DBSession, user: User | None) -> None:
+    """Another user's edit lock refuses the write (409), as on the siblings above."""
+    from routers.projects import _check_project_lock
+
+    try:
+        lock_target = SimpleNamespace(id=uuid.UUID(project.uuid), name=project.name)
+    except (TypeError, ValueError):
+        return                      # no registry row, no lock
+    _check_project_lock(db, lock_target, user)
+
+
+_ENERGIZATION_KEYS = frozenset({"link", "period", "mw"})
+
+
+def _energization_refused(kind: str, message: str) -> HTTPException:
+    return HTTPException(422, {"error_kind": kind, "message": message})
+
+
+@router.put("/{name}/flow/energization")
+def put_flow_energization(body: dict,
+                          project: AuthorizedProject = ProjectAccessDep,
+                          db: DBSession = Depends(get_db),
+                          user: User | None = Depends(optional_user)) -> dict:
+    """Set one period of a Link's energization schedule to one MW value, flat
+    across that period's snapshots (template-e2e 02b): ``{link, period, mw}``,
+    ``period`` a year of a multi-period network, or ``"all"`` (or null) on a
+    single-period one. The connection row's ``energization`` reads it back.
+
+    The writer is `energization.set_period_mw`; this route adds what the
+    `/api/network` middleware gives an asset edit there (this prefix has
+    none): the edit lock, one undo step, the edit counter, the unsaved mark,
+    solved dispatch cleared, the change log and the growth placeholder the
+    period sets. 422 with a typed kind, nothing written:
+    ``energization_invalid_request`` (shape), ``energization_invalid_mw``
+    (a bool, not a number, not finite, or not above 0),
+    ``energization_no_schedule`` (the Link has none; one is never created),
+    ``energization_unknown_period``, ``energization_period_not_flat`` (a shaped
+    period, its range named; never scaled). 409: another user's edit lock, the
+    project not open, a live study. An MW above the Link's ``p_nom`` is
+    accepted and the answer's sentence says it does not raise the capacity."""
+    from services import change_log_service, dirty_state, growth_placeholders
+    from services.adequacy import energization as E
+    from services.dispatch_status import clear_dispatch
+    from services.network_undo import push_undo_snapshot
+    from services.pypsa_service import PyPSAService
+    from services.study_state import refuse_edit_during_live_study
+
+    _check_lock(project, db, user)
+    _require_open(project)
+    refuse_edit_during_live_study()
+    if set(body) - _ENERGIZATION_KEYS or "mw" not in body \
+            or not isinstance(body.get("link"), str) or not body["link"]:
+        raise _energization_refused(
+            "energization_invalid_request",
+            "Send {link, period, mw}: the link's name, the period and the MW.")
+    link, period, mw = body["link"], body.get("period"), body["mw"]
+    with PyPSAService.get_lock():
+        n = PyPSAService.get_network()  # read under the lock the edit holds (GK A G2)
+        try:
+            E.plan_period_mw(n, link, period, mw)       # refused before the undo step
+        except E.EnergizationEditError as exc:
+            raise _energization_refused(exc.error_kind, exc.message) from exc
+        push_undo_snapshot()
+        prior = growth_placeholders.before(n, "links", E.ATTR, [link], project_dir=project.directory)
+        try:
+            dirty_state.bump_revision()
+            out = E.set_period_mw(n, link, period, mw)
+            dirty_state.mark_dirty()
+            # An edit sets the growth placeholder of its own period (E1 follow-up).
+            growth_placeholders.mark_set(n, "links", E.ATTR, {link: out.pop("series")}, prior,
+                                         project_dir=project.directory)
+            cleared = clear_dispatch(n)
+        finally:
+            dirty_state.bump_inputs()
+    if cleared:
+        from routers.simulation import _state_update
+
+        _state_update(status="idle", condition=None, objective=None, solve_time=None)
+    when = "" if out["period"] == E.ALL else f" for {out['period']}"
+    was = "" if out["previous_mw"] is None else f" (was {out['previous_mw']:g} MW)"
+    message = f"The energized capacity of {link}{when} is now {out['mw']:g} MW{was}."
+    if out["note"]:
+        message += " " + out["note"]
+    change_log_service.log("update", "Link", link, message)
+    return {**out, "dispatch_cleared": bool(cleared), "message": message}

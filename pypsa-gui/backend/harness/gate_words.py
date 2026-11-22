@@ -18,6 +18,16 @@ log = logging.getLogger(__name__)
 UNNAMED = "Unnamed check"
 
 RULE_WORDS: dict[str, str] = {
+    "conc.ic.basis": "Comparison basis",
+    "conc.ic.counterfactual": "Comparison case",
+    "conc.kpi.lost_tonnes": "Lost concentrate",
+    "conc.kpi.npv": "Investment returns",
+    "conc.kpi.shed_level": "Load shed level",
+    "conc.mass_balance": "Ore mass balance",
+    "conc.motor_start": "Motor start",
+    "conc.n_1.site_transformer": "Site transformer failure",
+    "conc.process.units": "Process unit count",
+    "conc.restart": "Restart time",
     "dc.campus.contingency": "Campus survives a failure",
     "dc.campus.study": "Campus grid study",
     "dc.current_distortion": "Current distortion",
@@ -49,11 +59,15 @@ RULE_WORDS: dict[str, str] = {
     "eh.review.blockers": "Review blockers",
     "eh.site.context": "Site map context",
     "eh.study.status": "Study finished",
+    "grid.n1.secured": "Survives losing one line",
+    "grid.pf.converged": "Load flow converged",
+    "grid.pf.loading": "Lines within rating",
+    "grid.pf.voltage": "Bus voltages in band",
     "ex.cases.settled": "What-if cases settled",
     "h2.electrolyser.utilisation": "Electrolyser use",
     "h2.ic.counterfactual": "Comparison case",
     "h2.offtake.met": "Hydrogen demand met",
-    "ho.kpis_read": "Headline results read back",
+    "ho.kpis_read": "Headline results read back, or shown as not evaluated with the reason",
     "in.diagnose.unserved_islands": "Every load connected",
     "in.readiness.ready": "Model ready to solve",
     "in.validate.errors": "Model errors",
@@ -79,6 +93,7 @@ RULE_WORDS: dict[str, str] = {
     "rp.report.unsupported_listed": "Unsupported chapters named",
     "set.project.exists": "Project exists",
     "set.project.template": "Project type",
+    "set.template.source": "Template data available",
     "sv.solve.state": "Solve finished",
 }
 

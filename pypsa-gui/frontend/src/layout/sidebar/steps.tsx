@@ -3,6 +3,7 @@ import { Boxes, FlaskConical, FolderOpen, Play, SlidersHorizontal } from 'lucide
 import { BAND_SECTIONS, type BandId } from '../flowSections'
 import { FlowSectionBlock } from './FlowSectionBlock'
 import { ProjectUtilityRows, SectionRows } from './SectionRows'
+import { STUDY_KIND } from '../../utils/projectActions'
 
 // The Expert sidebar, regrouped into the ten flow sections (workspace-
 // reconciliation §6.1, design §3.4): Set-up (1–2), Model (3–7), Question & run
@@ -40,3 +41,13 @@ export const STEPS: Step[] = [
   { id: 'results', title: 'RESULTS & HAND-OFF', label: 'Results', icon: <FlaskConical size={18} />, Content: bandContent('results') },
   { id: 'reports', title: 'PROJECT', label: 'Project', icon: <FolderOpen size={18} />, Content: bandContent('reports') },
 ]
+
+/**
+ * The steps that apply to the open project's kind (pio/08). A planning →
+ * dynamics study has no network to set up, model or run: only its results
+ * band, whose rows show the study panel. Any other kind, or one not known
+ * yet, keeps every step.
+ */
+export function stepsForKind(kind: string | null | undefined): Step[] {
+  return kind === STUDY_KIND ? STEPS.filter(s => s.id === 'results') : STEPS
+}

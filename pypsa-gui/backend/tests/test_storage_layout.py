@@ -824,3 +824,38 @@ def test_rename_is_allowed_in_web_mode_when_no_job_holds_the_project(
     monkeypatch.setattr(_sq.solve_queue, "list_jobs", lambda: [])
     project_registry.rename_project(db_session, project, "New Name")
     assert project.name == "New Name"
+
+
+# ── the path barrier: every allocation stays under projects_root ─────────────
+
+
+@pytest.mark.parametrize("hostile", ["..", "../Elsewhere", "../Projects-sibling", "/etc", "link", ".", "link/.."])
+def test_an_allocation_outside_the_projects_root_is_refused(
+    db_session, projects_root, monkeypatch, hostile
+):
+    """`safe_dir_name` already defuses these; the barrier holds if it ever did not, and the root itself is refused too."""
+    from services import storage_paths
+
+    outside = projects_root.parent / "Elsewhere"
+    outside.mkdir()
+    (projects_root / "link").symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(storage_paths, "unique_dir_name", lambda name, taken: name)
+    with pytest.raises(HTTPException) as exc:
+        storage_paths.allocate_storage_path(
+            db_session, _ORG, uuid.uuid4(), hostile, org_segment=False
+        )
+    assert exc.value.status_code == 400
+    assert exc.value.detail == {
+        "error_kind": "invalid_project_folder",
+        "message": f"'{hostile}' does not make a project folder name.",
+    }
+    assert sorted(p.name for p in projects_root.parent.iterdir()) == ["Elsewhere", "Projects"]
+
+
+def test_an_ordinary_name_still_allocates_under_the_root(db_session, projects_root):
+    from services import storage_paths
+
+    rel = storage_paths.allocate_storage_path(
+        db_session, _ORG, uuid.uuid4(), "../Belgium Grid", org_segment=False
+    )
+    assert rel == Path("_Belgium Grid")

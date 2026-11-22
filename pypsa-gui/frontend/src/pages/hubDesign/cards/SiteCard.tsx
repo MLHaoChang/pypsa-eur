@@ -20,8 +20,13 @@ import { siteFixText, type SiteFix } from '../delegate'
 import { CardShell, DelegateButton } from '../shared/CardShell'
 import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStudyRunning'
 import { Term, type TermKey } from '../shared/Term'
-import { useHubReadiness, useHubStudy, useHubTemplate } from '../useHubData'
+import { useConnectionLimit, useEnergization, useHubReadiness, useHubStudy, useHubTemplate } from '../useHubData'
 import { displayName } from '../../../utils/displayName'
+import { openConnectionLimitEditor } from '../../../layout/flowNavigation'
+import { useCapacityUnit, useImportLinks, useStagedConnection } from '../../../components/gridReadiness/ConnectionLimits'
+import type { Link } from '../../../api/types'
+import type { FlowEnergization } from '../../../api/flow'
+import { energizationSummary } from '../../../components/gridReadiness/EnergizationRows'
 import { GridReadinessScorecard, summaryText, useGridReadiness, useScorecardOpen }
   from '../../../components/gridReadiness/GridReadinessScorecard'
 
@@ -34,7 +39,10 @@ const mw = (v: number) => `${Number(v.toPrecision(6))} MW`
 interface Row { value: string; gap: boolean; fix?: string }
 
 /** The four rows in words. Exported for the smoke's expectations. */
-export function siteRows(r: EhReadiness, archetype: EhArchetype): Record<SiteFix, Row> {
+/** `limitMw`: the connection limit the server reads from the network (`useConnectionLimit`), never
+ *  readiness's own sum of the links' capacity (GK B (64) 4). */
+export function siteRows(r: EhReadiness, archetype: EhArchetype,
+  limitMw: number | null = null): Record<SiteFix, Row> {
   const island = archetype === 'off_grid'
   const links = r.import?.links ?? []
   // Plain names in Guided, never the raw ids (UX S6, G1).
@@ -44,14 +52,14 @@ export function siteRows(r: EhReadiness, archetype: EhArchetype): Record<SiteFix
       ? `${names(links)} — normally open; the study runs the site as an island`
       : 'none — the study runs the site as an island', gap: false }
     : links.length
-      ? { value: `${names(links)}${r.import_p_nom_mw != null ? ` (${mw(r.import_p_nom_mw)}${
-          r.import_firm_mw != null && r.import_firm_mw < r.import_p_nom_mw
+      ? { value: `${names(links)}${limitMw != null ? ` (${mw(limitMw)}${
+          r.import_firm_mw != null && r.import_firm_mw < limitMw
             ? `; ${mw(r.import_firm_mw)} until fully energized` : ''})` : ''}`, gap: false }
       : { value: 'none tagged', gap: true, fix: siteFixText('grid') }
 
   const crit = r.critical_buses ?? []
   const critical: Row = crit.length
-    ? { value: `${names(crit)} — everything on ${crit.length > 1 ? 'these buses' : 'this bus'} keeps power`, gap: false }
+    ? { value: `${names(crit)}: everything on ${crit.length > 1 ? 'these buses' : 'this bus'} keeps power`, gap: false }
     : { value: 'none tagged', gap: true, fix: siteFixText('critical') }
 
   const scr = r.scr?.status
@@ -91,6 +99,74 @@ function SiteRow({ k, term, label, row, liveStudy }: {
       {row.gap && row.fix && (
         <DelegateButton testId={`hub-site-fix-${k}`} text={row.fix} label="Fix with the assistant"
           disabled={liveStudy} disabledTitle={LIVE_STUDY_EDIT} />
+      )}
+    </li>
+  )
+}
+
+/** The connection limit (template-e2e 02): read here, edited on the Connection limits line in the field
+ *  drawer, the same editor Expert's Connection & grid shows. One row per import link. A staged site's
+ *  link with an energization schedule reads its limit per period, edited as rows in that drawer
+ *  (template-e2e 02b); a staged one without a schedule is shown with that reason and no Edit. */
+function ConnectionLimitRows({ liveStudy }: { liveStudy: boolean }) {
+  // The import links themselves, the record the editor writes, so a save shows here at once.
+  const links = useImportLinks()
+  const staged = useStagedConnection()
+  const schedules = useEnergization()
+  return <>{links.map(l => (
+    <ConnectionLimitRow key={l.name} link={l} named={links.length > 1} staged={staged} liveStudy={liveStudy}
+      schedule={schedules.find(e => e.link === l.name)} />
+  ))}</>
+}
+
+function ConnectionLimitRow({ link, named, staged, liveStudy, schedule }: {
+  link: Link; named: boolean; staged: boolean; liveStudy: boolean; schedule?: FlowEnergization
+}) {
+  const unit = useCapacityUnit(link.name)
+  // No Edit while the project is read-only (another user's edit lock, or a solve).
+  const readOnly = useUIStore(s => s.readOnly)
+  if (schedule) {
+    return (
+      <li className="flex flex-wrap items-center gap-2 text-[12px]">
+        <span data-testid="hub-site-connection-limit" className="flex-1 min-w-[16rem]">
+          <span className="mr-1 text-success">✓</span>
+          {`Connection limit (${unit})${named ? ` · ${displayName(link.name)}` : ''}`}:{' '}
+          <span className="text-text tabular-nums">{energizationSummary(schedule)}</span>
+        </span>
+        {!readOnly && (
+          <button type="button" data-testid="hub-site-connection-limit-edit" disabled={liveStudy}
+            onClick={openConnectionLimitEditor}
+            className="shrink-0 text-[11px] text-text underline disabled:opacity-50">
+            Edit ›
+          </button>
+        )}
+        {!readOnly && liveStudy && (
+          <span data-testid="hub-site-connection-limit-paused" className="basis-full text-[11px] text-muted">
+            {LIVE_STUDY_EDIT}
+          </span>
+        )}
+      </li>
+    )
+  }
+  return (
+    <li className="flex flex-wrap items-center gap-2 text-[12px]">
+      <span data-testid="hub-site-connection-limit" className="flex-1 min-w-[16rem]">
+        <span className="mr-1 text-success">✓</span>
+        Connection limit{named ? ` · ${displayName(link.name)}` : ''}:{' '}
+        <span className="text-text">{`${Number(link.p_nom.toPrecision(6))} ${unit}`}</span>
+        {staged && <span className="text-muted"> (set per period by the energization schedule)</span>}
+      </span>
+      {!staged && (
+        <button type="button" data-testid="hub-site-connection-limit-edit" disabled={liveStudy}
+          onClick={openConnectionLimitEditor}
+          className="shrink-0 text-[11px] text-text underline disabled:opacity-50">
+          Edit ›
+        </button>
+      )}
+      {!staged && liveStudy && (
+        <span data-testid="hub-site-connection-limit-paused" className="basis-full text-[11px] text-muted">
+          {LIVE_STUDY_EDIT}
+        </span>
       )}
     </li>
   )
@@ -169,7 +245,8 @@ export function SiteCard() {
   const { archetype } = useReliabilityGoal()
   const { readiness, isError } = useHubReadiness(template, running,
     !studyPending && !templatePending)
-  const rows = readiness ? siteRows(readiness, archetype) : null
+  const limitMw = useConnectionLimit()?.mw ?? null
+  const rows = readiness ? siteRows(readiness, archetype, limitMw) : null
   // A generic site says what was entered, not a bus name (UX G2 note 7).
   const critical = template ? genericCritical(template) : null
   if (rows && critical) rows.critical = { value: critical, gap: false }
@@ -190,6 +267,7 @@ export function SiteCard() {
         ) : rows ? (
           <ul className="flex flex-col gap-2">
             {ROW_META.map(m => <SiteRow key={m.k} {...m} row={rows[m.k]} liveStudy={liveStudy} />)}
+            {archetype !== 'off_grid' && <ConnectionLimitRows liveStudy={liveStudy} />}
           </ul>
         ) : (
           isError ? (

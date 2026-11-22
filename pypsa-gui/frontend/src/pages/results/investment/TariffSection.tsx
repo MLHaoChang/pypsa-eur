@@ -32,7 +32,7 @@ export default function TariffSection() {
     <div className="space-y-2">
       {current.data && <MarketPricesBlock cfg={current.data} />}
       <p className="text-[11px] text-muted">
-        {tariff ? `Editing the project's import tariff ${tariff.id}.`
+        {tariff ? `Editing the project's import tariff ${tariff.name || tariff.id}.`
           : 'No import tariff is set. It is optional: to bill imports under one, fill this in and choose Save as the project tariff.'}</p>
       {ref && (
         <p className="text-[11px] text-warn" data-testid="ic-tariff-library-ref">

@@ -104,6 +104,9 @@ defusedxml==0.7.1    # openpyxl hardens its XML parsing (entity expansion,
                      # it parses every uploaded workbook. Nothing imports it
                      # by name, so the scan cannot see the need; without it
                      # the app parses hostile XML and nothing fails.
+lxml==6.1.1          # PLEXOS import (`gridspine/ingest/plexos_xml.py`) parses
+                     # the model XML with it, reached only through the import
+                     # registry's string lookup. Version from pixi.lock.
 Jinja2==3.1.6        # matpower export (`io.py:125`), unguarded. Was reaching
                      # the bundle only as an undeclared transitive — it worked
                      # by luck, and a resolver change would have made it the
@@ -161,3 +164,9 @@ python-docx==1.2.0   # decision-study report DOCX (`services/study/
 # ones installed in the desktop environment on 2026-09-29.
 shapely==2.1.2       # boundary bbox / padding for the Overpass query
 pillow==12.3.0       # Terrarium PNG decode for the terrain grid
+# ── must-stay-on feeder scoping (services/adequacy/critical_feeders.py) ─────
+# Already ships transitively (pypsa depends on it); pinned because
+# `_on_supply_paths` imports it UNGUARDED (node connectivity for unread
+# feeders, GK A R2'), and test_packaging_requirements refuses to trust a
+# transitive presence. Version from pixi.lock (the desktop environment).
+networkx==3.6.1

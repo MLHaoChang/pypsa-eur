@@ -172,6 +172,15 @@ def _full() -> B.BusinessCaseInputs:
             linked_share=0.8,
             linked_share_by_year={2027: 0.5},
         ),
+        _rev(
+            "capacity",
+            category="capacity_payment",
+            quantity_source="linked:capacity.StorageUnit.bess@1",
+            quantity=None,
+            unit="kW_year",
+            price=40.0,
+            derating=0.5,
+        ),
         preset="eh_datacenter@1",
         receivable_days=45,
     )
@@ -317,6 +326,15 @@ FLOAT_COLUMNS = [
         lambda: _rev(quantity_source="linked:x@1", quantity=None),
         "linked_share_by_year[]",
     ),
+    (
+        lambda: _rev(
+            category="capacity_payment",
+            quantity_source="linked:capacity.StorageUnit.bess@1",
+            quantity=None,
+            unit="kW_year",
+        ),
+        "derating",
+    ),
 ]
 
 
@@ -330,7 +348,10 @@ def _float_fields(model) -> set[str]:
 
 def test_float_column_list_is_complete():
     assert {c.removesuffix("[]") for _, c in FLOAT_COLUMNS} == _float_fields(B.LineItem)
-    assert _float_fields(B.BusinessCaseInputs) == {"receivable_days"}
+    assert _float_fields(B.BusinessCaseInputs) == {
+        "receivable_days",
+        "volume_factor_by_year",
+    }
     assert _float_fields(B.CostDefault) == {"value", "range_low", "range_high"}
     assert _float_fields(B.Hint) == {"low", "high"}
 
@@ -1089,3 +1110,91 @@ def test_facility_capex_default_is_the_converted_jll_figure():
     assert row.unit == "EUR/MW" and row.value == pytest.approx(10.7e6 / 1.13, rel=1e-4)
     assert row.range.low == pytest.approx(8.9e6 / 1.13, rel=1e-4)
     assert row.range.high == pytest.approx(23.3e6 / 1.13, rel=1e-4)
+
+
+# ── BC 15: the lease-up volume factor ───────────────────────────────────────
+
+
+def test_bc15_the_volume_factor_defaults_to_full_volume_every_year():
+    inputs = B.BusinessCaseInputs()
+    assert inputs.volume_factor_by_year == {}
+    assert inputs.volume_factor_at(2031) == 1.0
+    stated = B.BusinessCaseInputs(volume_factor_by_year={2031: 0.4})
+    assert stated.volume_factor_at(2031) == 0.4
+    assert stated.volume_factor_at(2032) == 1.0
+
+
+@pytest.mark.parametrize("ok", [0.0, 0.5, 1.0])
+def test_bc15_the_volume_factor_takes_zero_to_one_inclusive(ok):
+    assert (
+        B.BusinessCaseInputs(volume_factor_by_year={2031: ok}).volume_factor_at(2031)
+        == ok
+    )
+
+
+@pytest.mark.parametrize("bad", [-0.01, 1.01, 50.0, math.inf, -math.inf, math.nan])
+def test_bc15_the_volume_factor_refuses_outside_zero_to_one_or_non_finite(bad):
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs(volume_factor_by_year={2031: bad})
+
+
+@pytest.mark.parametrize("bad", ["NaN", "Infinity", "-Infinity", "1e999"])
+def test_bc15_the_volume_factor_refuses_non_finite_json(bad):
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs.model_validate_json(
+            '{"volume_factor_by_year": {"2031": ' + bad + "}}"
+        )
+
+
+@pytest.mark.parametrize(
+    "key", ["2030.5", "x", "true", " 2030", "+2030", "02030", "203", "", "3030"]
+)
+def test_bc15_c3_a_json_year_key_must_be_a_plain_four_digit_year(key):
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs.model_validate_json(
+            json.dumps({"volume_factor_by_year": {key: 0.5}})
+        )
+
+
+@pytest.mark.parametrize("key", [True, False, 2030.0, None, 5, -1, 203, 3030, 99999])
+def test_bc15_c3_a_python_year_key_must_be_an_int_never_bool_or_float(key):
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs(volume_factor_by_year={key: 0.5})
+
+
+@pytest.mark.parametrize("value", ["true", '"0.5"', "null", "[0.5]"])
+def test_bc15_c3_a_factor_must_be_a_number_never_bool_or_text(value):
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs.model_validate_json(
+            '{"volume_factor_by_year": {"2031": ' + value + "}}"
+        )
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs(volume_factor_by_year={2031: json.loads(value)})
+
+
+def test_bc15_c3_the_year_count_is_capped():
+    cap = B.VOLUME_FACTOR_YEARS_MAX
+    ok = {2000 + i: 0.5 for i in range(cap)}
+    assert (
+        len(B.BusinessCaseInputs(volume_factor_by_year=ok).volume_factor_by_year) == cap
+    )
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs(volume_factor_by_year={**ok, 2000 + cap: 0.5})
+
+
+def test_bc15_the_volume_factor_round_trips_through_json():
+    inputs = B.BusinessCaseInputs(volume_factor_by_year={2031: 0.25, 2032: 1})
+    again = B.BusinessCaseInputs.model_validate_json(inputs.model_dump_json())
+    assert again.volume_factor_by_year == {2031: 0.25, 2032: 1.0}
+    assert again == inputs
+
+
+@pytest.mark.parametrize("bad", [[0.5], "2031", 0.5])
+def test_bc15_c3_the_volume_factor_is_a_mapping(bad):
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs(volume_factor_by_year=bad)
+
+
+def test_bc15_c3_a_year_listed_twice_is_refused():
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs(volume_factor_by_year={2030: 0.5, "2030": 0.6})

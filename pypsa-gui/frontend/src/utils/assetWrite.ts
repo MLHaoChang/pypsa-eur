@@ -17,10 +17,11 @@
  */
 import type { QueryClient } from '@tanstack/react-query'
 
-import { networkApi } from '../api/network'
+import { networkApi, type CostBasis } from '../api/network'
 import { useMapLayoutStore } from '../pages/mapLayoutStore'
 import { useSitesStore } from '../site3d/sitesStore'
 import { nk } from './queryKeys'
+import { componentLabel } from './componentLabels'
 
 /**
  * Every query-key root whose rows a mutating chat tool (or any asset write)
@@ -41,6 +42,8 @@ export const COMPONENT_QUERY_ROOTS = [
   'loads',
   'transformers',
   'shunt_impedances',
+  // An asset's per-bus cost units (hooks/useAssetSchema): a write to the asset or its bus can change them.
+  'assetUnits',
   // Writable by the generic `update_component` / `delete_component` chat
   // tools (chat_tools_schema `_COMP_UPDATE_ROUTES` / `_COMP_DELETE_ROUTES`
   // both list it) and cached by SolverSettings, so a chat edit to a CO2 cap
@@ -104,7 +107,7 @@ type AssetRow = { name: string } & Record<string, unknown>
 /** One row of the per-class dispatch table: how to list and how to PUT. */
 type Endpoints = {
   get: () => Promise<AssetRow[]>
-  put: (name: string, body: AssetRow) => Promise<unknown>
+  put: (name: string, body: AssetRow, basis?: CostBasis) => Promise<unknown>
 }
 
 /**
@@ -116,7 +119,7 @@ type Endpoints = {
  */
 function ep<G extends { name: string }, P>(
   get: () => Promise<G[]>,
-  put: (name: string, body: P) => Promise<unknown>,
+  put: (name: string, body: P, basis?: CostBasis) => Promise<unknown>,
 ): Endpoints {
   return {
     get: get as unknown as Endpoints['get'],
@@ -176,6 +179,10 @@ export function rekeySidecarsAfterRename(
   useSitesStore.getState().renamePlacement(project, klass, oldName, newName)
 }
 
+/** The words a card's error toast shows when the asset is gone (deleted in another tab, an undo, a restore). */
+const gone = (cls: WritableRoot, name: string) =>
+  `${componentLabel(ROOT_CLASS[cls])} “${name}” is no longer in the network: reopen the card to see its current state.`
+
 /**
  * The Asset-write chokepoint: fetch → spread → PUT → invalidate.
  *
@@ -207,23 +214,45 @@ export async function updateAsset<T extends { name: string } = AssetRow>(
   // updateAsset<Generator>(...) for field-checked call sites — and defaults
   // to the open AssetRow for untyped ones.
   patch: Partial<NoInfer<T>> | ((current: NoInfer<T>) => Partial<NoInfer<T>>),
+  // The basis the typed costs were scaled under (`costBasisOf(schema)`): the server refuses the write when the
+  // asset's bus, as it will be stored, says otherwise, so a stale unit can never store a cost x1000 off (05d).
+  // `initial`: what the SAME builder returns for the form's initial values (taken when the editor opened). The user's
+  // change is then the keys where the patch differs from it, compared exactly: both sides went through the same
+  // scaling, so an untouched field is bit-equal however the form holds it. Without it (a plain patch) the base is
+  // the cached row.
+  opts?: { costBasis?: CostBasis; initial?: Partial<NoInfer<T>> },
 ): Promise<unknown> {
   const e = ENDPOINTS[cls]
-  const rows = await qc.ensureQueryData({
-    queryKey: nk(project, cls),
-    queryFn: e.get,
-  })
-  const current = rows.find((r) => r.name === name)
-  if (!current) {
-    throw new Error(`${cls}/${name} not found in the current network`)
+  const key = nk(project, cls)
+  const warm = qc.getQueryData<AssetRow[]>(key) !== undefined
+  const rows = await qc.ensureQueryData({ queryKey: key, queryFn: e.get })
+  const base = rows.find((r) => r.name === name)
+  if (!base) {
+    throw new Error(gone(cls, name))
   }
   // The rows really are T (getGenerators returns Generator[]); the table
   // widened them to AssetRow at its seam, so narrow back at this one.
-  const resolved = typeof patch === 'function' ? patch(current as unknown as T) : patch
+  const resolved = (typeof patch === 'function' ? patch(base as unknown as T) : patch) as Record<string, unknown>
+  // 05g: the cached row (and the form built from it) can be older than the network: a restore, an undo or another
+  // tab changed the asset after the cache was filled. PUTting the cached row would write those columns back. So the
+  // user's change is only what differs from the base the form was built on, and it goes onto the FRESH row. A cold
+  // cache was just fetched: nothing to rebase. A failed fresh read stops the save rather than writing stale columns.
+  const current = warm
+    ? (await qc.fetchQuery({ queryKey: key, queryFn: e.get, staleTime: 0 })).find((r) => r.name === name)
+    : base
+  if (!current) {
+    throw new Error(gone(cls, name))
+  }
+  // An explicit `undefined` is the builder's way to keep a derived column out of the PUT (omitDerived): it stays.
+  const against = (opts?.initial ?? base) as Record<string, unknown>
+  const changed = warm
+    ? Object.fromEntries(Object.entries(resolved).filter(([k, v]) => v === undefined || !(k in against) || !Object.is(against[k], v)))
+    : resolved
   // Return the PUT's response body: some endpoints answer with more than an
   // ack (updateBus carries a `rescale` preview the Bus card must ingest),
   // and a chokepoint that swallowed it would silently drop that behaviour.
-  const resp = await e.put(name, { ...current, ...resolved })
+  const body = { ...current, ...changed }
+  const resp = opts?.costBasis ? await e.put(name, body, opts.costBasis) : await e.put(name, body)
   invalidateAssetQueries(qc, project)
   // The backend answers `{name: <new name>}`; the patch's `name` is what was
   // asked. Either says a rename happened, and the sidecar caches follow.

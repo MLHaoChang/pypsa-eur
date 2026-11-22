@@ -1,0 +1,3 @@
+{"kinds": {
+  "project_view_only": {"surface": "inline", "why": "The caller is a viewer of this project (project-viewer-role 01, owner decision VIEWER-ROLE-1): every write, undo, snapshot restore and non-read tool is refused, over HTTP (services/project_write_gate.py) and in chat (harness/restrictions.require_allowed), whatever personal rule is saved. Nothing is written; the model says the project is view-only and that the project owner can grant edit access, and offers read-only help instead."}
+}}

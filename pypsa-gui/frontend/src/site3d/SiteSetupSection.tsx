@@ -36,7 +36,7 @@ export default function SiteSetupSection({ variant }: { variant: 'guided' | 'exp
           <span className="text-muted">Site coordinates:</span>
           <span className="text-text">{project ? anchorSummary(anchor.data) : 'Not set'}</span>
           {project && !reasonLinks && (
-            <button type="button" data-testid="site-anchor-edit" onClick={() => openSiteAnchor()} className="text-[11px] text-accent hover:underline">
+            <button type="button" data-testid="site-anchor-edit" onClick={() => openSiteAnchor()} className="text-[11px] text-link hover:underline">
               › Edit
             </button>
           )}

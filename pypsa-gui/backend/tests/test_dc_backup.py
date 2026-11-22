@@ -293,6 +293,35 @@ def test_a_finance_rate_with_inflation_is_made_real():
     )
 
 
+def test_the_shipped_wacc_label_marks_a_finance_rate_only():
+    # WALK-IMPROVE-1 b: the label rides on the finance case's wacc, never the pack's.
+    out = _delta(rate=0.09, inflation=0.02, rate_assumed=True)
+    assert out["discount_rate_source"].endswith(
+        "(the template's shipped wacc, assumed)"
+    )
+    assert "assumed" not in _delta(rate=0.09, inflation=0.02)["discount_rate_source"]
+    pack = _delta(rate_assumed=True)
+    assert "shipped wacc" not in pack["discount_rate_source"]
+
+
+def test_finance_rate_flags_the_wacc_only_while_it_equals_the_shipped_record():
+    fin = {"wacc_nominal": 0.07, "inflation": 0.02, "financial_close": "2026-01-01"}
+    shipped = {"wacc_nominal": {"value": 0.07, "source": "assumed"}}
+    assert dc_backup.finance_rate(fin, shipped)["rate_assumed"] is True
+    assert "rate_assumed" not in dc_backup.finance_rate(
+        {**fin, "wacc_nominal": 0.08}, shipped
+    )
+    # A record for other fields, a null record or none at all labels nothing.
+    for assumed in (
+        {"inflation": {"value": 0.02, "source": "x"}},
+        {"wacc_nominal": None},
+        {},
+        None,
+        [],
+    ):
+        assert "rate_assumed" not in dc_backup.finance_rate(fin, assumed)
+
+
 def test_augmentation_policies_on_one_fade_curve():
     fade = {"calendar_fade_per_year": 0.02, "cycle_fade_per_full_cycle": 0.001}
     restore = _delta(
@@ -1223,6 +1252,16 @@ def test_assess_reads_the_finance_case_rate_on_its_basis(
     _served(monkeypatch)
     pack = dc_backup.pack_prices(t.TEMPLATE_PACK_VERSION)["discount_rate"]
     d = _dc_project(client, tmp_path, monkeypatch, project_row, "dc_rate", finance)
+    if finance is None:
+        # The template ships finance inputs (WALK-IMPROVE-1 b): unset means removed.
+        import json
+
+        cfg = d / "solver_config.json"
+        cfg.write_text(
+            json.dumps(
+                {k: v for k, v in json.loads(cfg.read_text()).items() if k != "finance"}
+            )
+        )
     c = dc_backup.assess_project(d, t, "hybrid")["cost"]
     want = pack if assumed else rate
     assert c["discount_rate"] == pytest.approx(want)
@@ -1230,34 +1269,283 @@ def test_assess_reads_the_finance_case_rate_on_its_basis(
     assert row["assumed"] is assumed and words in row["source"]
 
 
-def test_a_project_created_with_strings_is_refused_with_the_way_out(
-    client, tmp_path, monkeypatch, tmp_projects_dir, project_row
+def _dc_built(client, project_row, name, mode, it=30.0):
+    """A project created through the route with ``mode`` backup at IT ``it``."""
+    from services import project_registry
+
+    r = client.post(
+        "/api/projects/from_template/eh_datacenter",
+        params={"name": name},
+        json={
+            "dc_load": {
+                "backup": {"mode": mode},
+                "phases": [{"cod": "2030-01-01", "it_mw": it}],
+            }
+        },
+    )
+    assert r.status_code < 300, r.text
+    name = r.json().get("name", name)
+    return name, pathlib.Path(project_registry.project_dir(project_row(name)))
+
+
+def _sidecar_bytes(d):
+    return {p.name: p.read_bytes() for p in sorted(d.iterdir()) if p.is_file()}
+
+
+def _assessed(out):
+    """The assessment without what names the project's own file and build."""
+    return {k: v for k, v in out.items() if k not in ("basis", "built")}
+
+
+@pytest.mark.parametrize(
+    "built,mode",
+    [("bess", None), ("bess", "genset"), ("hybrid", "genset"), ("hybrid", "hybrid")],
+)
+def test_a_project_created_with_strings_assesses_as_a_genset_one_would(
+    client,
+    tmp_path,
+    monkeypatch,
+    tmp_projects_dir,
+    project_row,
+    session_ctx,
+    built,
+    mode,
 ):
-    """GK A Q1: the saved network already has the strings; assess is a typed
-    422 that says to switch with PUT /dc-backup on a genset-form project,
-    and the meta marks it for the card."""
+    """DC walkthrough 01 (GK A G1-G8): a Batteries or Hybrid project is
+    assessed in genset form, and its answer equals a genset-built project's
+    in the same mode; the saved network and sidecars are left byte for byte,
+    and so is the loaded project (G1); the result names the built mode with
+    its notes."""
     import json
 
-    from services import project_registry
+    from services.workflow_tools import _network_input_fingerprint
 
     _served(monkeypatch)
     _stage_dc(tmp_path, monkeypatch, "eh_datacenter")
-    r = client.post(
-        "/api/projects/from_template/eh_datacenter",
-        params={"name": "dc_hy"},
-        json={"dc_load": {"backup": {"mode": "hybrid"}}},
-    )
-    assert r.status_code < 300, r.text
-    d = pathlib.Path(
-        project_registry.project_dir(project_row(r.json().get("name", "dc_hy")))
-    )
+    g_name, g_dir = _dc_built(client, project_row, f"dc_g_{built}", "genset")
+    # Created last, so it is the session's loaded project.
+    name, d = _dc_built(client, project_row, f"dc_{built}", built)
     meta = json.loads((d / "eh_template.json").read_text())
-    assert meta["dc_load"]["network_backup_mode"] == "hybrid"
-    r = client.post(f"/api/campus-electrical/{d.name}/dc-backup/assess", json={})
+    assert meta["dc_load"]["network_backup_mode"] == built
+    before = _sidecar_bytes(d)
+    assert {"network.nc", "island_config.json", "eh_template.json"} <= set(before)
+    ctx = session_ctx(client)
+    assert any(
+        s.startswith(dc_backup.STRING_PREFIX) for s in ctx.network.storage_units.index
+    )
+    live = (
+        _network_input_fingerprint(ctx),
+        sorted(ctx.network.storage_units.index),
+        sorted(ctx.network.generators.index),
+    )
+    body = {} if mode is None else {"mode": mode}
+    r = client.post(f"/api/campus-electrical/{name}/dc-backup/assess", json=body)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["built"]["mode"] == built
+    assert any("not assessed as built" in x for x in out["built"]["notes"])
+    assert _sidecar_bytes(d) == before
+    ctx = session_ctx(client)
+    assert (
+        _network_input_fingerprint(ctx),
+        sorted(ctx.network.storage_units.index),
+        sorted(ctx.network.generators.index),
+    ) == live
+    r = client.post(
+        f"/api/campus-electrical/{g_name}/dc-backup/assess",
+        json={"mode": mode or built},
+    )
+    assert r.status_code == 200, r.text
+    ref = r.json()
+    assert ref["built"] == {"mode": "genset", "notes": []}
+    assert _assessed(out) == _assessed(ref)
+    # GK A: the saved files themselves, not only the answers. The strings
+    # project's saved network and sidecar, in genset form, are the genset
+    # project's saved ones (the create writes the same campus but the strings).
+    import pypsa
+
+    from tests.test_dc_backup_built import _same_network
+
+    def saved(p):
+        return (
+            pypsa.Network(str(p / "network.nc")),
+            json.loads((p / "island_config.json").read_text()),
+        )
+
+    (n_s, i_s), (n_g, i_g) = saved(d), saved(g_dir)
+    m, island, _notes, _strings = dc_backup.genset_form(n_s, i_s, built, n_g, i_g)
+    _same_network(m, n_g)
+    assert island == i_g
+
+
+def test_a_staged_project_assesses_with_its_own_build_plan(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row
+):
+    """The staged example: the genset form is built with the project's own
+    build plan (here not the example's), so a Batteries-created staged project
+    assesses as a genset-created one with the same plan, and its files are
+    left as they are."""
+    from services import project_registry
+
+    _served(monkeypatch)
+    _stage_dc(tmp_path, monkeypatch, "eh_datacenter_staged")
+    phases = [
+        {"cod": f"{y}-01-01", "it_mw": it}
+        for y, it in ((2028, 12.0), (2031, 24.0), (2036, 36.0))
+    ]
+    made = {}
+    for mode in ("genset", "bess"):
+        r = client.post(
+            "/api/projects/from_template/eh_datacenter_staged",
+            params={"name": f"dc_staged_{mode}"},
+            json={
+                "planning": {"start_year": 2028, "end_year": 2040},
+                "dc_load": {"backup": {"mode": mode}, "phases": phases},
+            },
+        )
+        assert r.status_code < 300, r.text
+        name = r.json().get("name", f"dc_staged_{mode}")
+        made[mode] = (
+            name,
+            pathlib.Path(project_registry.project_dir(project_row(name))),
+        )
+    name, d = made["bess"]
+    before = _sidecar_bytes(d)
+    r = client.post(f"/api/campus-electrical/{name}/dc-backup/assess", json={})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["built"]["mode"] == "bess"
+    assert _sidecar_bytes(d) == before
+    r = client.post(
+        f"/api/campus-electrical/{made['genset'][0]}/dc-backup/assess",
+        json={"mode": "bess"},
+    )
+    assert r.status_code == 200, r.text
+    assert _assessed(out) == _assessed(r.json())
+
+
+@pytest.mark.parametrize("built,word", [("bess", "Batteries"), ("hybrid", "Hybrid")])
+def test_a_project_created_before_its_sidecar_listed_the_strings_is_refused(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row, built, word
+):
+    """A single-year Batteries or Hybrid project created before this PR holds
+    the example's genset sidecar: the assessment refuses it in the form's
+    words, with the way out, and leaves its files as they are."""
+    import shutil
+
+    _served(monkeypatch)
+    _stage_dc(tmp_path, monkeypatch, "eh_datacenter")
+    name, d = _dc_built(client, project_row, f"dc_old_{built}", built)
+    shutil.copyfile(
+        tmp_path / "eh_datacenter" / "island_config.json", d / "island_config.json"
+    )
+    before = _sidecar_bytes(d)
+    # The byte check covers the saved network as well as the sidecars (GK A).
+    assert {"network.nc", "island_config.json", "eh_template.json"} <= set(before)
+    r = client.post(f"/api/campus-electrical/{name}/dc-backup/assess", json={})
     assert r.status_code == 422, r.text
     detail = r.json()["detail"]
     assert detail["error_kind"] == "dc_backup_invalid"
-    assert "PUT /dc-backup" in str(detail) and "created with hybrid" in str(detail)
+    msg = detail["message"]
+    assert f"created with {word} backup" in msg and built not in msg.split()
+    assert "does not list the battery strings" in msg
+    assert "Create the project again" in msg
+    assert _sidecar_bytes(d) == before
+
+
+def test_a_built_mode_the_assessment_cannot_undo_is_refused(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row
+):
+    """Only Batteries and Hybrid builds are put back in genset form; any other
+    stored build mode is a typed 422 that names it."""
+    import json
+
+    _served(monkeypatch)
+    _stage_dc(tmp_path, monkeypatch, "eh_datacenter")
+    name, d = _dc_built(client, project_row, "dc_odd", "genset", it=36.0)
+    meta_path = d / "eh_template.json"
+    meta = json.loads(meta_path.read_text())
+    meta["dc_load"]["network_backup_mode"] = "flywheel"
+    meta_path.write_text(json.dumps(meta))
+    r = client.post(f"/api/campus-electrical/{name}/dc-backup/assess", json={})
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert detail["error_kind"] == "dc_backup_invalid"
+    assert "created with flywheel backup" in detail["message"]
+
+
+def test_a_genset_create_copies_the_example_sidecars_byte_for_byte(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row
+):
+    """GK A G6: the single-year sidecar fix leaves a genset create as it was:
+    the example's sidecars byte for byte, the network the builder makes for the
+    spec, and only the spec's ``dc_load`` block added to the metadata (no
+    built backup mode)."""
+    import json
+
+    _stage_dc(tmp_path, monkeypatch, "eh_datacenter")
+    _name, d = _dc_built(client, project_row, "dc_g6", "genset", it=36.0)
+    src = tmp_path / "eh_datacenter"
+    import pypsa
+
+    from tests.test_dc_backup_built import _same_network
+
+    from project_templates import eh_templates as T
+
+    # The create builds the network for the spec and exports it, as before this
+    # PR (its HDF5 header differs per export): every component and series equals
+    # the builder's for the same spec.
+    spec = T.dc_load_spec(
+        "eh_datacenter",
+        {
+            "backup": {"mode": "genset"},
+            "phases": [{"cod": "2030-01-01", "it_mw": 36.0}],
+        },
+    )
+    T.BUILDERS["eh_datacenter"](load_spec=spec).export_to_netcdf(
+        str(tmp_path / "g6.nc")
+    )
+    _same_network(
+        pypsa.Network(str(d / "network.nc")), pypsa.Network(str(tmp_path / "g6.nc"))
+    )
+    for f in (
+        "island_config.json",
+        "adequacy_stress_scenarios.json",
+        "solver_config.json",
+    ):
+        assert (d / f).read_bytes() == (src / f).read_bytes(), f
+    meta, example = (json.loads((p / "eh_template.json").read_text()) for p in (d, src))
+    block = meta.pop("dc_load")
+    assert "network_backup_mode" not in block
+    assert meta == example
+
+
+@pytest.mark.parametrize("built", ["bess", "hybrid"])
+def test_a_create_with_strings_writes_a_sidecar_that_lists_them(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row, built
+):
+    """DW-A's finding: a single-year Batteries or Hybrid create wrote the
+    example's genset sidecar; it now lists each string in the network as
+    ride-through storage of kind ``bess``. Batteries keeps no genset; Hybrid
+    keeps them."""
+    import json
+
+    import pypsa
+
+    _stage_dc(tmp_path, monkeypatch, "eh_datacenter")
+    _name, d = _dc_built(client, project_row, f"dc_s_{built}", built)
+    island = json.loads((d / "island_config.json").read_text())
+    n = pypsa.Network(str(d / "network.nc"))
+    in_network = sorted(
+        s for s in n.storage_units.index if s.startswith(dc_backup.STRING_PREFIX)
+    )
+    assert in_network
+    listed = island["requirements"]["ride_through_storage"]
+    assert set(in_network) <= set(listed)
+    assert all(island["units"][s]["kind"] == "bess" for s in in_network)
+    assert sorted(dc_backup.built_strings(n, island)) == in_network
+    gensets = [u for u, v in island["units"].items() if v.get("kind") == "genset"]
+    assert bool(gensets) is (built == "hybrid")
 
 
 def test_a_nominal_finance_rate_without_inflation_is_refused(
@@ -1315,3 +1603,35 @@ def test_assess_route_returns_json_and_writes_nothing(
         dc_backup.NOT_REPRODUCED
     )
     assert {f: (d / f).read_bytes() for f in before} == before
+
+
+def test_a_new_data_centre_reads_the_template_wacc_as_assumed(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row
+):
+    """WALK-IMPROVE-1 b (GK B2 sweep item 7): the template ships finance inputs,
+    so a new DC's backup case reads its 7 % nominal made real with its 2 %
+    inflation (4.90 %, was the pack's 7 % real on master), labelled assumed
+    while the stored wacc is the shipped one; a typed wacc is not assumed."""
+    import json
+
+    from project_templates import eh_templates as t
+
+    _served(monkeypatch)
+    d = _dc_project(client, tmp_path, monkeypatch, project_row, "dc_shipped")
+    c = dc_backup.assess_project(d, t, "hybrid")["cost"]
+    assert c["discount_rate"] == pytest.approx(1.07 / 1.02 - 1)
+    row = {r["key"]: r for r in c["inputs"]}["discount_rate"]
+    assert (
+        row["assumed"] is True
+        and "the template's shipped wacc, assumed" in row["source"]
+    )
+
+    cfg = d / "solver_config.json"
+    raw = json.loads(cfg.read_text())
+    cfg.write_text(
+        json.dumps({**raw, "finance": {**raw["finance"], "wacc_nominal": 0.08}})
+    )
+    c = dc_backup.assess_project(d, t, "hybrid")["cost"]
+    assert c["discount_rate"] == pytest.approx(1.08 / 1.02 - 1)
+    row = {r["key"]: r for r in c["inputs"]}["discount_rate"]
+    assert row["assumed"] is False and "assumed" not in row["source"]

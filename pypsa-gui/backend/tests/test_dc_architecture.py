@@ -281,7 +281,9 @@ def test_an_architecture_service_alone_never_passes():
     assert service_verdict([])["verdict"] == "warn"
     assert service_verdict(["grid_forming"])["verdict"] == "pass"
     got = service_verdict([], ["fast_frequency_response"], architecture="MV UPS")
-    assert got["verdict"] == "warn" and "assumed, MV UPS" in got["project_value"]
+    assert got["verdict"] == "warn" and got["project_value"] == (
+        "fast frequency response (assumed, MV UPS: not counted)"
+    )
     got = service_verdict(None, [], conditional=["grid_forming"])
     assert got["verdict"] == "warn" and got["conditional"] == ["grid_forming"]
     assert (
@@ -529,6 +531,62 @@ def test_the_price_follows_the_projects_finance_currency():
         _compare(_net()[0], _spec(), finance_currency="EUR")["price"]["currency"]
         == "EUR"
     )
+
+
+def test_the_rate_source_names_the_shipped_wacc_on_a_finance_rate_only():
+    # WALK-IMPROVE-1 b: the label rides on the finance case's wacc, never the pack's.
+    n, spec, tag = _net()[0], _spec(), " (the template's shipped wacc, assumed)"
+    nominal = {"rate": 0.07, "inflation": 0.02, "rate_assumed": True}
+    assert _compare(n, spec, rate_kwargs=nominal)["discount_rate_source"] == (
+        "finance case nominal wacc 0.07 made real with its inflation 0.02" + tag
+    )
+    real = _compare(
+        n, spec, rate_kwargs={"rate": 0.05, "rate_is_real": True, "rate_assumed": True}
+    )
+    assert (
+        real["discount_rate_source"]
+        == "finance case wacc 0.05 (real price basis)" + tag
+    )
+    typed = _compare(n, spec, rate_kwargs={"rate": 0.07, "inflation": 0.02})
+    assert "assumed" not in typed["discount_rate_source"]
+    pack = _compare(n, spec, rate_kwargs={"rate": None, "rate_assumed": True})
+    assert pack["discount_rate_source"] == "pack discount rate (real, assumed)"
+
+
+def test_the_tariff_is_shipped_only_while_it_equals_the_templates():
+    from project_templates import eh_templates as T
+
+    # The staged campus ships a tariff; the single-year one ships none (#1711), so
+    # nothing of its own is ever "shipped".
+    tid = "eh_datacenter_staged"
+    cfg = T.solver_config(tid)
+    tpl = SimpleNamespace(solver_config=lambda tid, plan: cfg)
+    own = json.loads(json.dumps(cfg["commercial"]))
+    assert A._tariff_is_shipped(tpl, tid, None, own) is True
+    own["import_tariff"]["items"][0]["periods"][0]["rate"] += 0.001
+    assert A._tariff_is_shipped(tpl, tid, None, own) is False
+    for commercial in (None, {}, {"import_tariff": None}):
+        assert A._tariff_is_shipped(tpl, tid, None, commercial) is False
+    single = T.solver_config("eh_datacenter")
+    assert single["commercial"]["import_tariff"] is None
+    assert (
+        A._tariff_is_shipped(
+            SimpleNamespace(solver_config=lambda t, plan: single),
+            "eh_datacenter",
+            None,
+            own,
+        )
+        is False
+    )
+    # A template that ships no tariff, or one its model refuses, marks nothing shipped.
+    bare = SimpleNamespace(solver_config=lambda tid, plan: {})
+    assert A._tariff_is_shipped(bare, tid, None, cfg["commercial"]) is False
+    none = {**cfg["commercial"], "import_tariff": None}
+    untariffed = SimpleNamespace(solver_config=lambda tid, plan: {"commercial": none})
+    assert A._tariff_is_shipped(untariffed, tid, None, none) is False
+    bad = {**cfg["commercial"], "poc_link": 7}
+    broken = SimpleNamespace(solver_config=lambda tid, plan: {"commercial": bad})
+    assert A._tariff_is_shipped(broken, tid, None, bad) is False
 
 
 def test_an_unset_architecture_leaves_the_scorecard_as_before(tmp_path, monkeypatch):
@@ -813,6 +871,38 @@ def test_compare_route_writes_nothing_and_answers_every_architecture(
         for v in body["variants"]
     )
     assert _snapshot(d) == before and _network_input_fingerprint(ctx) == fp
+    # The single-year template ships no tariff (the sizing loop and intent comparison
+    # would size on a cheaper import than the solve, #1711): no price entered, no
+    # assumed default, the route asks for one and writes nothing.
+    r = client.post(f"/api/campus-electrical/{name}/dc-architecture/compare", json={})
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "dc_architecture_no_energy_price"
+    assert _snapshot(d) == before
+    # Once the user's own tariff stands, the price read from it is not assumed.
+    import copy
+    import json
+
+    cfg = d / "solver_config.json"
+    raw = json.loads(cfg.read_text())
+    from project_templates import eh_templates as T
+
+    own = copy.deepcopy(raw)
+    own["commercial"]["import_tariff"] = copy.deepcopy(
+        T.solver_config("eh_datacenter_staged")["commercial"]["import_tariff"]
+    )
+    cfg.write_text(json.dumps(own))
+    price = client.post(
+        f"/api/campus-electrical/{name}/dc-architecture/compare", json={}
+    ).json()["price"]
+    assert price["assumed"] is False and "assumed" not in price["source"]
+    cfg.write_text(json.dumps(raw))
+    # With no tariff and no price entered, it refuses and writes nothing.
+    cfg.write_text(
+        json.dumps(
+            {k: v for k, v in json.loads(cfg.read_text()).items() if k != "commercial"}
+        )
+    )
+    before = _snapshot(d)
     r = client.post(f"/api/campus-electrical/{name}/dc-architecture/compare", json={})
     assert r.status_code == 422
     assert r.json()["detail"]["error_kind"] == "dc_architecture_no_energy_price"
@@ -854,3 +944,21 @@ def test_every_refusal_kind_is_declared():
         and isinstance(c.args[1], ast.Constant)
     }
     assert len(used) == 6 and used == set(frag)
+
+
+def test_service_verdict_words_an_unnamed_architecture_and_an_empty_rest():
+    # Mutants on the GK A 30 / UX 2 lines: the fallback architecture word, an
+    # absent island with an explicit `wanted`, and value_rest's None.
+    from services.adequacy.grid_readiness import service_verdict
+
+    got = service_verdict(None, ["voltage_control"], wanted=("voltage_control",))
+    assert (
+        got["project_value"] == "voltage control (assumed, architecture: not counted)"
+    )
+    assert got["value_rest"] == got["project_value"] and got["sources"] == []
+    got = service_verdict([])
+    assert got["project_value"] == "none" and got["value_rest"] is None
+    got = service_verdict(
+        ["grid_forming"], offered_sources={"grid_forming": ["bess_new"]}
+    )
+    assert got["value_rest"] is None and got["sources"][0]["units"] == ["BESS new"]

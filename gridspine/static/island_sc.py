@@ -37,6 +37,8 @@ import math
 import numpy as np
 import pandas as pd
 
+from gridspine.static import series_caps as SC
+
 #: The phase assumption behind adding converter currents.
 PHASE_RULE = ("converter fault currents are added in phase: every converter is "
               "assumed to inject reactive current during the fault (assumed)")
@@ -91,6 +93,7 @@ class SourceFault:
 def _branches(net, sbase):
     """``(name, kind, i, j, y_pu, vn_i)`` for every in-service line and
     transformer, the series admittance on ``sbase`` at the nominal ratio."""
+    SC.refuse(net, "island fault levels")
     out = []
     for k in net.line.index[net.line["in_service"].astype(bool)]:
         i, j = int(net.line.at[k, "from_bus"]), int(net.line.at[k, "to_bus"])
@@ -193,7 +196,8 @@ def machine_net(campus, installed, island=False, case="max", gfm_override=None):
     k, the rest out of service. ``island`` takes the grid out."""
     import pandapower as pp
 
-    net = __import__("copy").deepcopy(campus.net)
+    # IEC 60909-0: a bypassed series capacitor is neglected
+    net = SC.bypass_for_faults(__import__("copy").deepcopy(campus.net))
     installed = set(installed)
     if island:
         net.ext_grid["in_service"] = False
