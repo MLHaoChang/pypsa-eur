@@ -121,7 +121,10 @@ def _uif_table(row: dict, frame, case: str, path: str) -> Table:
 
 
 def _resonance_table(row: dict, frame, path: str) -> Table:
-    from gridspine.static.subsync_scan import SERIES
+    try:
+        from gridspine.static.subsync_scan import SERIES
+    except ImportError as exc:  # pragma: no cover - build-shape branch
+        raise SstiSourceUnavailable(f"The SSTI screens need gridspine ({exc})") from exc
 
     rows = []
     series = (
