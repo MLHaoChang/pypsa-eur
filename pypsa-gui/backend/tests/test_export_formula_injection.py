@@ -247,7 +247,7 @@ def test_excel_export_real_child_round_trips_escaping_and_leaves_no_temp(monkeyp
 
 def test_excel_child_failure_paths(monkeypatch, tmp_path, caplog):
     """A child that raises, a child that exits silently, and a timeout kill."""
-    import multiprocessing  # noqa: F401
+    import multiprocessing
     import tempfile
 
     rio, client = _client(monkeypatch)
@@ -268,8 +268,6 @@ def test_excel_child_failure_paths(monkeypatch, tmp_path, caplog):
     r = client.get("/export/excel")
     d = r.json()["detail"]
     assert r.status_code == 500 and d["error_kind"] == "excel_export_timeout" and "1 s" in d["message"]
-    import multiprocessing
-
     assert [c for c in multiprocessing.active_children() if c.name == "excel-export"] == []
     assert list(tmp_path.iterdir()) == []
 
