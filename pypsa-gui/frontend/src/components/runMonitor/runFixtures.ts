@@ -146,6 +146,7 @@ export const STATES: Record<string, RunMonitorView> = {
     envelope: { ...GRANTED, state: 'expired' } }),
   solver_error: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'step_failed', stages: stages('solve') }) }),
   uncertain: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'step_uncertain', stages: stages('solve') }) }),
+  solve_stopped: view({ status: 'needs_review', run: run('solve', { status: 'needs_user', reason: 'step_cancelled', stages: stages('solve') }) }),
   // LC-48e: the data request is answered, but the chat's other task runs, so the resume was refused.
   held_by_switch: view({ run: run('inputs', { status: 'needs_user', stages: stages('inputs'),
     held: { kind: 'switch_in_progress', active: { kind: 'task', id: 'task-2', title: 'Wait for result', status: 'running' },
