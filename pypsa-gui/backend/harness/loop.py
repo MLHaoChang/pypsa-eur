@@ -1051,6 +1051,10 @@ def _build_user_content(
                     "text/csv",
                 ):
                     hint = "read_excel_sheet / apply_demand_from_excel"
+                    if m["mime"] != "text/csv":
+                        # Excel input workbook 06: a filled input workbook
+                        # imports as a new project after its preview card.
+                        hint += " / preview_input_workbook (a PyPSA Studio input workbook)"
                 elif m["mime"] == (
                     "application/vnd.openxmlformats-officedocument."
                     "wordprocessingml.document"
@@ -3677,6 +3681,39 @@ def _dispatch_real_tool_call(
                 }
             )
             return
+    workbook_card = None
+    if tool_name == "import_input_workbook" and session.assurance_turn is None:
+        # Excel input workbook issue 06 (IMPORT-FLOW-1): the preview of the
+        # exact bytes the import reads; a refusal here means no card.
+        from harness import workbook_card as workbook_cards
+
+        try:
+            workbook_card = workbook_cards.preview(args or {})
+        except Exception as exc:
+            detail = getattr(exc, "detail", None)
+            kind = (
+                detail.get("error_kind", "workbook_preview_unavailable")
+                if isinstance(detail, dict)
+                else "workbook_preview_unavailable"
+            )
+            yield (
+                "tool_error",
+                {
+                    "tool_use_id": tool_use_id,
+                    "tool_name": tool_name,
+                    "error_kind": kind,
+                    "message": _redact_for_log(detail or exc),
+                },
+            )
+            tool_results_collector.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "is_error": True,
+                    "content": _error_result_content(detail, exc, kind),
+                }
+            )
+            return
     if tool_name == "propose_memory":
         # Assistant memory §2.2–§2.4: a proposal is validated, capped and
         # checked against recent dismissals BEFORE its card, so a refused one
@@ -3746,6 +3783,7 @@ def _dispatch_real_tool_call(
         edit_card=edit_card,
         sweep_card=sweep_card,
         **({"map_card": map_card} if map_card is not None else {}),
+        **({"workbook_card": workbook_card} if workbook_card is not None else {}),
         **({"repeat_card": repeat_card} if repeat_card is not None else {}),
     )
     if not approved:

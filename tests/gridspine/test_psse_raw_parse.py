@@ -182,7 +182,7 @@ def test_defaults_file_every_section_accounted():
         "case",
         "system base (MVA)",
         100.0,
-        "SBASE empty; PSS/E default",
+        "the file leaves the system base power empty; PSS/E's default",
     ) in case.assumed
     assert any(
         a[1] == "base voltage (kV)" for a in case.assumed
@@ -335,8 +335,18 @@ def test_non_positive_sbase_refused(sbase):
         read_raw_text(text)
 
 
-_SBASE_ASSUMED = ("case", "system base (MVA)", 100.0, "SBASE empty; PSS/E default")
-_BASFRQ_ASSUMED = ("case", "base frequency (Hz)", 60.0, "BASFRQ empty; PSS/E default")
+_SBASE_ASSUMED = (
+    "case",
+    "system base (MVA)",
+    100.0,
+    "the file leaves the system base power empty; PSS/E's default",
+)
+_BASFRQ_ASSUMED = (
+    "case",
+    "base frequency (Hz)",
+    60.0,
+    "the file leaves the base frequency empty; PSS/E's default",
+)
 
 
 @pytest.mark.parametrize(
