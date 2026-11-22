@@ -202,7 +202,7 @@ class AssetFinance:
             life = self.parts[0].lifetime_years if self.parts else self.lifetime_years
             if life is None or not math.isinf(life):
                 raise ValueError(f"{self.name}: terminal_lifetime_years needs an infinite "
-                                 f"lifetime, not {life!r}")
+                                 f"lifetime, not {life}")
         if not self.parts:
             return
         costs = [p.overnight_cost for p in self.parts]
