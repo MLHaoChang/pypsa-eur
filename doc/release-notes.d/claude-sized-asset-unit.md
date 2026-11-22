@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A held asset's "by the last study" size reads the sized row's own unit (t/h, t, MW, MWh) first, as the sized-design table already does, and falls back to the flow row's unit only for a report stored before rows carried one.
