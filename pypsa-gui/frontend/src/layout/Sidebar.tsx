@@ -11,7 +11,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { networkApi } from '../api/network'
 import { ConfirmDialog } from '../components/ConfirmDialog'
-import { ioApi, blobErrorReason } from '../api/io'
+import { ioApi } from '../api/io'
 import { workbookApi } from '../api/workbook'
 import {
   AS_LAST_SAVED, INPUT_WORKBOOK_DESC, INPUT_WORKBOOK_LABEL, SAVE_FIRST_REASON, TEMPLATE_DESC, TEMPLATE_LABEL,
@@ -153,7 +153,7 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
       URL.revokeObjectURL(url)
       toast.success(`Downloaded ${fname}`)
     } catch (e) {
-      toast.error(e instanceof Error && !('isAxiosError' in e) ? e.message : (await blobErrorReason(e)) ?? 'Export failed')
+      toast.error(['workbook', 'input', 'template', 'excel'].includes(exportFmt) && e instanceof Error && !('isAxiosError' in e) ? e.message : 'Export failed')
     } finally { setExporting(false) }
   }
 

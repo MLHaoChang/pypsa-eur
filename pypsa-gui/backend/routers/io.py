@@ -219,7 +219,11 @@ def export_excel():
         raise
     except Exception as exc:
         logging.getLogger(__name__).exception("Excel export failed")
-        raise HTTPException(500, f"Excel export failed: {exc}") from exc
+        raise HTTPException(
+            500,
+            "The network could not be written to Excel. Try the CSV or NetCDF export, "
+            "or check the server log for the cause.",
+        ) from exc
     return StreamingResponse(
         io.BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

@@ -247,4 +247,5 @@ def test_slow_excel_export_does_not_block_csv_and_failure_has_reason(monkeypatch
     gate.set()
     t.join(10)
     assert out["r"].status_code == 500
-    assert "disk full" in out["r"].json()["detail"]
+    detail = out["r"].json()["detail"]
+    assert "could not be written to Excel" in detail and "RuntimeError" not in detail
