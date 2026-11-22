@@ -3,7 +3,8 @@
 
 # 10 — The reliability study silently changes the user's grid connection
 
-Status: ready-for-agent
+Status: done (#1781)
+Landed in #1781.
 Impact: high
 Templates: Concentrator, ammonia, every weak-grid template
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)

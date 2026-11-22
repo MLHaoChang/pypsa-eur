@@ -33,3 +33,9 @@ Depends on: 01, 02. Starts after #1565 (PropertiesPanel, AssetFields, assetSchem
 ## Keeping both modes in step
 
 This slice is where both modes switch to the one component, in one PR; the parity test guards it from then on.
+
+## Comments
+
+- GK B (65), 2026-11-17 16:41Z, at the #1634 OK: T3 carries here as a named condition. `options_plain` is display only. A test shows the stored value stays the raw option through a card edit and save (round trip), and an unknown stored option reads as itself and is flagged, never blank or coerced.
+- UX (25), 2026-11-17 16:18Z, DGS-EXTRAS-1: a field hidden by `reveal_when` gets a one-line reason (for example "Shown when AC control is Slack"), not a silent disappearance. This is one frontend change for every reveal_when field, and it lands here.
+- 2026-11-21, slice 02c (raw-name guard): `pypsa-gui/frontend/src/uiCopyGuard.allow.json` has rows naming this slice as the fix. Files: `layout/PropertiesPanel.tsx` (field labels, profile note; held by #1787 #1786 #1778 #1773 #1772 #1626), `pages/SolverSettings.tsx` (#1757), `pages/modelHorizon/StepPeriodEconomics.tsx` (#1795), `pages/results/LoadFlow.tsx` (#1801, includes the "Gen MC" header), the Results formula tips in `AggregatedOverview.tsx`, `CapacityExpansion.tsx`, `Curtailment.tsx`, `Economics.tsx`, `StorageCycling.tsx`, and the technical subtitles in `utils/decisionVocabulary.ts`. Remove each row (and its key in `PINNED_ALLOW_KEYS`) as its words change; a stale row fails the guard.

@@ -1124,7 +1124,7 @@ def _dc_campus_study(env):
     """The run's own campus job: `done` only once its step settled completed."""
     from services import run_actions
     step = run_actions.latest(env.task, run_actions.CAMPUS)
-    if step is None or step["status"] not in ("completed", "failed"):
+    if step is None or step["status"] not in ("completed", "failed", "cancelled"):
         return None
     return "done" if step["status"] == "completed" else ((step.get("job") or {}).get("outcome") or "failed")
 
@@ -1216,7 +1216,10 @@ def _mg_tie(env):
         return NoEvidence("unit_on_mainland", str(out.get("reason") or "a sidecar unit sits on the mainland"))
     if state not in ("open", "closed", "no_tie"):
         return NoEvidence("unreadable", "the island's tie cannot be read")
-    return Detailed(state, [str(t) for t in out.get("carrying") or []])
+    detail = [str(t) for t in out.get("carrying") or []]
+    # SH 54: an internal Link read as the island's own feeder; SH 56: a supply left out as never available.
+    detail += [str(out[k]) for k in ("warning", "idle_warning") if out.get(k)]
+    return Detailed(state, detail)
 
 
 def _mg_critical(env):
@@ -1539,7 +1542,9 @@ def _frozen_scorecard(env):
     if not code.get("id") or (step.get("result") or {}).get("digest") != code.get("digest") \
             or not run_actions.unchanged(env.project, code):
         return NoEvidence("grid_code_changed", "the run's grid-code profile changed since its scorecard was read")
-    card = grid_readiness.grid_readiness_for(env.project, code["id"])
+    # The saved project, as the step read it: a live read can fall back to it
+    # under a run's lock and change the digest (DC walkthrough 04).
+    card = grid_readiness.grid_readiness_for(env.project, code["id"], source="saved")
     if run_actions.rows_digest(card) != step["result"].get("rows_digest"):
         # A campus run again, or an edited sidecar, between the read and the gate: never a fresh pass.
         return NoEvidence("scorecard_changed", "the scorecard changed since the run's own readiness step read it")

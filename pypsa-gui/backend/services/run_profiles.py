@@ -103,6 +103,9 @@ def _rule(id, fact, op, value=None, severity="block", basis=""):
     return rule
 
 
+ON_END, CHAPTER_GAP = "on_end", "chapter_gap"  # `harness/run_ic.py` (study harness 36)
+
+
 def _call(tool, **args):
     return {"tool": tool, "args": args}
 
@@ -262,8 +265,13 @@ def load(profile: dict) -> dict:
         if len(actions) > STAGE_STEPS or len(json.dumps(actions)) > STAGE_CHARS:
             raise ProfileError(f"Stage {name}: at most {STAGE_STEPS} steps and {STAGE_CHARS} characters.")
         for action in actions:
-            if set(action) - {"native"} != {"tool", "args"} or not isinstance(action["args"], dict):
+            if set(action) - {"native", ON_END} != {"tool", "args"} or not isinstance(action["args"], dict):
                 raise ProfileError(f"Stage {name}: each action has tool and args.")
+            if ON_END in action and (name != "report" or action["tool"] != "run_investment_case"
+                                     or action[ON_END] != CHAPTER_GAP):
+                # Study harness 36 (GK B (60) follow-up (a), O1): only the report stage's case.
+                raise ProfileError(f"Stage {name}: on_end is chapter_gap, on the report stage's "
+                                   "run_investment_case only.")
             if action.get("native") == run_actions.KIND or action["tool"] in run_actions.REGISTRY:
                 # Study harness 10a (GK B (36) D7): the runner's closed native-action registry.
                 try:
@@ -330,6 +338,15 @@ def load(profile: dict) -> dict:
         stage = stages["explore"]
         if "skip" in stage or "agent" not in stage or EXPLORE_RULES[0]["id"] not in {r["id"] for r in stage["rules"]}:
             raise ProfileError("Stage explore: an exploring profile names its proposal turn and ex.cases.settled.")
+    # Study harness 14 S-C: the PPA price reads the case the step before it ran,
+    # and a KPI kept in the run's record needs the step that writes it.
+    solve_tools = [a["tool"] for a in stages["solve"].get("actions", [])]
+    if run_actions.PPA_PRICE in solve_tools and "run_investment_case" not in solve_tools[
+            :solve_tools.index(run_actions.PPA_PRICE)]:
+        raise ProfileError("Stage solve: ppa_price runs after the run's own run_investment_case step.")
+    for kpi in profile.get("kpis") or []:
+        if "record" in kpi and RECORD_KPIS.get(kpi["record"]) not in solve_tools:
+            raise ProfileError(f"KPI {kpi.get('id')}: its record is written by no step of the profile.")
     loaded = {**copy.deepcopy(profile), "stages": stages}
     if "explore" in profile:
         loaded["explore"] = explore
@@ -583,6 +600,46 @@ def _eh_site_v3() -> dict:
 
 EH_SITE_V3 = _eh_site_v3()
 
+# Study harness 36 (GK B (60) plan GO, Q1, Q2 (a), B1, 36-K1, K2): eh_site@4. The
+# investment case runs after the solve, the result gate and its loop, at the head
+# of the report stage (`harness/run_ic.py`), so it values the final dispatch. Its
+# baseline re-solve (the site keeps existing assets) is reserved at admission
+# (`run_envelope.CASE_BASELINE_SOLVES`); its sends and wall time are the run's. The hand-off reads
+# the stored case's figures (`run_handoff.IC_KPIS`), so the investment chapter
+# is established when the case ran and stays a listed gap when it did not.
+# eh_site@1-@3 stay byte-equal (L8).
+EH_SITE_IC_KPIS = [
+    {"id": "ic_npv_at_wacc", "label": "Project NPV at WACC (post-tax)", "source": "investment_case",
+     "key": "npv_at_wacc", "unit": "EUR"},
+    {"id": "ic_post_tax_irr", "label": "Project IRR (post-tax)", "source": "investment_case",
+     "key": "post_tax_irr", "unit": "fraction"},
+    {"id": "ic_pre_tax_irr", "label": "Project IRR (pre-tax)", "source": "investment_case",
+     "key": "pre_tax_irr", "unit": "fraction"},
+]
+
+
+def _eh_site_v4() -> dict:
+    from services import run_envelope
+
+    profile = copy.deepcopy(EH_SITE_V3)
+    profile["version"] = 4
+    # The case values the final dispatch: it runs in the report stage, before the
+    # report, so the result gate's loop (which re-solves) never leaves it stale.
+    report = profile["stages"]["report"]
+    report["actions"] = [{**_call("run_investment_case"), ON_END: CHAPTER_GAP}, *report["actions"]]
+    runs = profile["envelope"]["runs"]
+    # Q2 (a), A4: the case's baseline (the site keeps existing gensets, PV and
+    # UPS) is reserved at the bound; the budget grows by exactly that, so the
+    # queued solve, the coupling loop's worst case and the case still fit.
+    runs.insert(runs.index({"tool": "generate_report"}),
+                {"tool": "run_investment_case", "baseline_solves": run_envelope.CASE_BASELINE_SOLVES})
+    profile["envelope"]["budget"]["solves"] += run_envelope.CASE_BASELINE_SOLVES
+    profile["kpis"] = [*profile["kpis"], *copy.deepcopy(EH_SITE_IC_KPIS)]
+    return profile
+
+
+EH_SITE_V4 = _eh_site_v4()
+
 # Study harness 10a (GK B (36) D1-D8, Q1-Q5): eh_datacenter@1. The solve stage
 # runs the solve, the EH study (LOLE as eh_site@2, Q5), the campus run held to
 # the run's frozen grid-code profile and the scorecard read with it
@@ -620,6 +677,10 @@ DC_SCORECARD = (
     # Acceptance (issue 18): a P-V/Q-V margin is screening, so it warns.
     ("voltage_stability_pv", "warn", "P-V margin at the PoC (screening).", _CAMPUS_RUN),
     ("voltage_stability_qv", "warn", "Q-V margin at the PoC (screening).", _CAMPUS_RUN),
+    # GC-08: SSTI / SSR / SSCI are screening; the binding answer is the EMT study, so they warn.
+    ("ssti_uif", "warn", "SSTI unit interaction factor within the threshold (screening).", _CAMPUS_RUN),
+    ("subsync_series_resonance", "warn", "Series resonance clear of torsional modes (screening).", _CAMPUS_RUN),
+    ("ssci", "warn", "SSCI needs an EMT study; it never passes here.", _CAMPUS_RUN),
     ("frequency_support", "warn", "The campus offers the frequency support the code asks.", _ISLAND),
     ("grid_former", "warn", "A unit forms the island's voltage.", _ISLAND),
     ("ride_through:", "warn", "Ride-through needs the operator's study; it never passes here.", _ISLAND),
@@ -1098,6 +1159,29 @@ def _eh_ipp_hybrid_v2() -> dict:
 
 EH_IPP_HYBRID_V2 = _eh_ipp_hybrid_v2()
 
+# Study harness 14 S-C (GK B (61) Q-SC1 = A, S1-S8): eh_ipp_hybrid@3. After the
+# run's own investment case, the native `ppa_price` step reads the PPA price
+# that case solved for the template's target return (`harness/run_ppa.py`);
+# it solves nothing, so the budget stays @2's. The hand-off reads it back from
+# the run's record (`record`), never from retained results. @1 and @2 stay
+# byte-equal for the runs started on them (L8).
+PPA_KPI = {"id": "ppa_price", "label": "PPA price for the target return", "record": "ppa_price",
+           "unit": "currency/MWh"}
+RECORD_KPIS = {"ppa_price": run_actions.PPA_PRICE}  # a record KPI and the step that writes it
+
+
+def _eh_ipp_hybrid_v3() -> dict:
+    profile = copy.deepcopy(EH_IPP_HYBRID_V2)
+    profile["version"] = 3
+    profile["stages"]["solve"]["actions"].append(
+        {"tool": run_actions.PPA_PRICE, "args": dict(run_actions.MARKERS[run_actions.PPA_KIND]),
+         "native": run_actions.KIND})
+    profile["kpis"].append(copy.deepcopy(PPA_KPI))
+    return profile
+
+
+EH_IPP_HYBRID_V3 = _eh_ipp_hybrid_v3()
+
 # Study harness 12c (design §9.3 "eh_microgrid"; GK B (47) G1-G9): eh_microgrid@1
 # and eh_microgrid_staged@1. The solve, the EH study with the off-grid stress
 # (`dtc_stress`, one solve per islanding contingency) and the island check of
@@ -1319,12 +1403,14 @@ def _grid_only() -> dict:
 GRID_ONLY = _grid_only()
 
 PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2, "eh_site@3": EH_SITE_V3,
+                              "eh_site@4": EH_SITE_V4,
                               "eh_datacenter@1": EH_DATACENTER,
                               "eh_datacenter_staged@1": EH_DATACENTER_STAGED,
                               "eh_h2_hub@1": EH_H2_HUB, "eh_h2_hub_staged@1": EH_H2_HUB_STAGED,
                               "eh_ammonia_staged@1": EH_AMMONIA_STAGED,
                               "eh_concentrator_staged@1": EH_CONCENTRATOR_STAGED,
                               "eh_ipp_hybrid@1": EH_IPP_HYBRID, "eh_ipp_hybrid@2": EH_IPP_HYBRID_V2,
+                              "eh_ipp_hybrid@3": EH_IPP_HYBRID_V3,
                               "eh_microgrid@1": EH_MICROGRID, "eh_microgrid_staged@1": EH_MICROGRID_STAGED,
                               "grid_only@1": GRID_ONLY}
 
@@ -1355,5 +1441,6 @@ def materialise(profile: dict, stage: str, project_id: str, start: int = 1) -> l
             return [fill(v) for v in value]
         return value
     return [{"id": f"{stage}.{n}", "tool": a["tool"], "args": fill(a["args"]), "status": "pending",
-             **({"native": a["native"]} if "native" in a else {})}
+             **({"native": a["native"]} if "native" in a else {}),
+             **({ON_END: a[ON_END]} if ON_END in a else {})}
             for n, a in enumerate(profile["stages"][stage].get("actions", []), start=start)]

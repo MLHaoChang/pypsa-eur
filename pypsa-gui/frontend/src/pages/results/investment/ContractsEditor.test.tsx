@@ -3,7 +3,7 @@
 // is shown at the contract it names, the Library pin is shown, and the
 // connection agreement's capacity fee uses the tariff item editor.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../../store/uiStore'
 import { commercialApi, libraryApi } from '../../../api/commercial'
@@ -15,7 +15,7 @@ vi.mock('../../../api/commercial', async (importOriginal) => {
   return { ...actual,
     commercialApi: { ...actual.commercialApi, getCommercial: vi.fn(), getValueFlows: vi.fn(),
                      saveCommercial: vi.fn() },
-    libraryApi: { ...actual.libraryApi, listSeries: vi.fn() } }
+    libraryApi: { ...actual.libraryApi, listSeries: vi.fn(), getItem: vi.fn() } }
 })
 const api = vi.mocked(commercialApi)
 const lib = vi.mocked(libraryApi)
@@ -51,14 +51,27 @@ beforeEach(() => {
   api.getValueFlows.mockResolvedValue({ value_flows: null, digest: 'd', status: 'not_set' })
   lib.listSeries.mockResolvedValue([SERIES])
   api.saveCommercial.mockResolvedValue({} as never)
+  lib.getItem.mockRejectedValue(new Error('not in this test'))
+  useUIStore.setState({ contractStart: null })
 })
+
+// SCU06 S2b: a common Library contract as the start of a project contract.
+const M = '\u2060fill-in:'
+const CFD_REF = { kind: 'contract' as const, id: 'eu-cfd', version: 1, hash: 'c' }
+const CFD_ITEM = { type: 'cfd', id: 'eu-cfd', strike: 85, tenor_years: 18, reference: 'interval',
+  generator_owner: `${M}generator_owner`, counterparty: `${M}counterparty`, asset_ids: [`${M}asset`] }
+function startFromLibrary() {
+  lib.getItem.mockResolvedValue({ ref: CFD_REF, payload: structuredClone(CFD_ITEM) as never,
+                                  meta: { source: 'illustrative' } })
+  useUIStore.getState().startContractFrom({ ref: CFD_REF, payload: structuredClone(CFD_ITEM) })
+}
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
 describe('ContractsEditor', () => {
   it('round-trips every P2 contract type unchanged and shows the Library pin', async () => {
     const { container } = renderEditor()
     await screen.findByTestId('ce-contract-5')
-    expect(screen.getByTestId('ce-contract-0').textContent).toContain('Copied from Library item ppa_lib v3')
+    expect(screen.getByTestId('ce-contract-0').textContent).toContain('Copied from Library item “ppa_lib” v3')
     // Type-specific fields: the premium only under market_plus_premium.
     expect(screen.getByLabelText('Contract ppa1 premium (per MWh)')).toBeTruthy()
     expect(screen.queryByLabelText('Contract ppa1 sleeving party')).toBeNull()
@@ -290,5 +303,116 @@ describe('ContractsEditor', () => {
     const box = await screen.findByTestId('ce-contract-0')
     fireEvent.change(within(box).getByLabelText('Contract old fee (per MWh)'), { target: { value: '' } })
     expect(screen.getByTestId('ce-contract-0').querySelector('legend')!.textContent).toBe('EAAS old')
+  })
+
+  it('adds a Library contract as an unsaved copy: new id, library_ref kept, the fill-ins blank', async () => {
+    startFromLibrary()
+    renderEditor()
+    const added = await screen.findByTestId('ce-contract-6')
+    expect(useUIStore.getState().contractStart).toBeNull()
+    expect(screen.getByRole('status').textContent).toBe('Added cfd_7, a copy of Library item “eu-cfd” v1. '
+      + 'Generator owner, Counterparty and Assets (generators) need your own values, then save the contracts.')
+    expect(added.textContent).toContain('Copied from Library item “eu-cfd” v1')
+    for (const f of ['generator owner', 'counterparty', 'assets (generators)']) {
+      const box = within(added).getByLabelText(`Contract cfd_7 ${f}`) as HTMLInputElement
+      expect([box.value, box.placeholder]).toEqual(['', ''])
+      // The prompt is visible text on the field's own line, once.
+      expect(within(box.closest('label')!).getAllByText('Fill in your own')).toHaveLength(1)
+    }
+    expect(within(added).getByTestId('ce-unsaved').textContent).toBe('Not saved yet')
+    expect(within(screen.getByTestId('ce-contract-0')).queryByTestId('ce-unsaved')).toBeNull()
+    expect(api.saveCommercial).not.toHaveBeenCalled()
+    expectAllButtonsNamed(added)
+  })
+
+  it('refuses the save while a fill-in is left, untouched ids included; saves once each is replaced', async () => {
+    startFromLibrary()
+    renderEditor()
+    const added = await screen.findByTestId('ce-contract-6')
+    const ids = within(added).getByLabelText('Contract cfd_7 assets (generators)')
+    fireEvent.focus(ids); fireEvent.blur(ids)                 // untouched: the marker stays
+    fireEvent.change(within(added).getByLabelText('Contract cfd_7 generator owner'), { target: { value: 'Wind BV' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save the contracts' }))
+    // One line beside the save button, in the server's words; nothing else.
+    expect((await screen.findByTestId('ce-fill-refusal')).textContent).toBe(
+      'The contracts were not saved: in cfd_7, Counterparty and Assets (generators) need your own values.')
+    expect(within(added).queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
+    expect(api.saveCommercial).not.toHaveBeenCalled()
+    // The next edit clears the refusal: it named the list as it was.
+    fireEvent.change(within(added).getByLabelText('Contract cfd_7 generator owner'), { target: { value: 'Wind BV ' } })
+    expect(screen.queryByTestId('ce-fill-refusal')).toBeNull()
+    fireEvent.change(within(added).getByLabelText('Contract cfd_7 generator owner'), { target: { value: 'Wind BV' } })
+    // The stored list after the save holds the copy: its "Not saved yet" goes.
+    api.saveCommercial.mockImplementation(async (patch) => {
+      api.getCommercial.mockResolvedValue({ poc_link: 'import', site_party: 'site',
+        contracts: structuredClone((patch as { contracts: unknown }).contracts),
+        connection: structuredClone(CONNECTION) } as never)
+      return {} as never
+    })
+    fireEvent.change(within(added).getByLabelText('Contract cfd_7 counterparty'), { target: { value: 'gov' } })
+    fireEvent.focus(ids); fireEvent.change(ids, { target: { value: 'wind' } }); fireEvent.blur(ids)
+    fireEvent.click(screen.getByRole('button', { name: 'Save the contracts' }))
+    await waitFor(() => expect(api.saveCommercial).toHaveBeenCalledTimes(1))
+    const sent = (api.saveCommercial.mock.calls[0][0] as unknown as { contracts: Array<Record<string, unknown>> }).contracts[6]
+    expect(sent).toEqual({ ...CFD_ITEM, id: 'cfd_7', generator_owner: 'Wind BV', counterparty: 'gov',
+                           asset_ids: ['wind'], library_ref: CFD_REF })
+    expect(screen.queryByTestId('ce-fill-refusal')).toBeNull()
+    await waitFor(() => expect(within(added).queryByTestId('ce-unsaved')).toBeNull())
+  })
+
+  it('a second "starting point" for the same item version points to the unsaved copy, adds none', async () => {
+    startFromLibrary()
+    renderEditor()
+    await screen.findByTestId('ce-contract-6')
+    act(() => { startFromLibrary() })
+    expect((await screen.findByRole('status')).textContent)
+      .toBe('An unsaved copy of Library item “eu-cfd” v1 is already in the list: cfd_7.')
+    expect(screen.queryByTestId('ce-contract-7')).toBeNull()
+    expect(useUIStore.getState().contractStart).toBeNull()
+  })
+
+  it('"›" on the copied-from line opens that item in the Commercial library, with a way back', async () => {
+    startFromLibrary()
+    useUIStore.setState({ activeSlidePanel: 'economics', flowReturn: null, libraryFocus: null })
+    renderEditor()
+    const added = await screen.findByTestId('ce-contract-6')
+    fireEvent.click(within(added).getByRole('button', { name: 'Open “eu-cfd” v1 in the Commercial library' }))
+    const ui = useUIStore.getState()
+    expect(ui.activeSlidePanel).toBe('library')
+    expect(ui.libraryFocus).toEqual({ kind: 'contract', id: 'eu-cfd', version: 1 })
+    expect(ui.flowReturn?.panel).toBe('economics')
+  })
+
+  it('labels a price copied from an illustrative item until the user changes it', async () => {
+    startFromLibrary()
+    renderEditor()
+    const added = await screen.findByTestId('ce-contract-6')
+    const strike = within(added).getByLabelText('Contract cfd_7 strike (per MWh)')
+    await waitFor(() => expect(strike.closest('label')!.textContent).toContain('Illustrative EU default'))
+    expect(within(added).getByTestId('ce-illustrative-key').textContent).toBe(
+      "Illustrative EU default: a value inside a published range, not your contract's. Replace it with your own.")
+    // The tenor is not a price: no label.
+    expect(within(added).getByLabelText('Contract cfd_7 tenor (years)').closest('label')!.textContent)
+      .not.toContain('Illustrative')
+    fireEvent.change(strike, { target: { value: '90' } })
+    expect(strike.closest('label')!.textContent).not.toContain('Illustrative')
+    expect(within(added).queryByTestId('ce-illustrative-key')).toBeNull()
+    // Set back to the default: the label is back (the value rule).
+    fireEvent.change(strike, { target: { value: '85' } })
+    expect(strike.closest('label')!.textContent).toContain('Illustrative EU default')
+    // ppa1's pin is not illustrative (its item cannot be read): never labelled.
+    expect(within(screen.getByTestId('ce-contract-0')).queryByTestId('ce-illustrative')).toBeNull()
+  })
+
+  it('a non-illustrative Library source is never labelled', async () => {
+    startFromLibrary()
+    lib.getItem.mockResolvedValue({ ref: CFD_REF, payload: structuredClone(CFD_ITEM) as never,
+                                    meta: { source: 'upload' } })
+    renderEditor()
+    await screen.findByTestId('ce-contract-6')
+    await waitFor(() => expect(lib.getItem).toHaveBeenCalledWith('contract', 'eu-cfd', 1))
+    await new Promise(r => setTimeout(r, 0))
+    expect(screen.queryByTestId('ce-illustrative')).toBeNull()
   })
 })

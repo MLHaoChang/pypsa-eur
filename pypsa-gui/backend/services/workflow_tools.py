@@ -420,8 +420,14 @@ class SensitivityCase(BaseModel):
 
 
 def _exact_frame_json(frame):
-    """Encode typed input values without pandas' JSON float rounding."""
+    """Encode typed input values without pandas' JSON float rounding.
+
+    The text is exactly `json.dumps` of the per-value `scalar` encoding below
+    (sort_keys, default separators). Issue 225: a column or index of a plain
+    numpy dtype is written straight to that text (no per-value lists, no float
+    maths), and everything else falls back to `scalar`, column by column."""
     from datetime import date, datetime
+    import numpy as np
     import pandas as pd
 
     def scalar(value):
@@ -443,13 +449,43 @@ def _exact_frame_json(frame):
             return ['str', value]
         _refuse('input_capture_unavailable', 'An input has an unsupported scalar type; exact preflight is unavailable.', 409)
 
-    return json.dumps({'columns': [scalar(v) for v in frame.columns.tolist()],
-        'index': [scalar(v) for v in frame.index.tolist()],
-        'index_names': [scalar(v) for v in frame.index.names],
-        'dtypes': [str(v) for v in frame.dtypes],
-        'values_by_column': [[scalar(v) for v in frame.iloc[:, position].tolist()]
-                             for position in range(len(frame.columns))]},
-        sort_keys=True, allow_nan=False)
+    def items(values):
+        """Each value's `json.dumps(scalar(value))` text, for an Index or a Series."""
+        if isinstance(values, pd.MultiIndex):
+            if not any((codes == -1).any() for codes in values.codes):
+                # Each used level value once, then taken by code: the tuples master iterates.
+                # Unused level values (left by a slice) are never encoded, as in master.
+                values = values.remove_unused_levels()
+                levels = [items(level) for level in values.levels]
+                taken = [[text[code] for code in codes.tolist()] for text, codes in zip(levels, values.codes)]
+                return ['["tuple", [' + ', '.join(row) + ']]' for row in zip(*taken)]
+        elif isinstance(values.dtype, np.dtype):
+            kind = values.dtype.kind
+            if kind == 'f' and values.dtype.itemsize <= 8:  # .tolist() gives Python floats, widened exactly
+                return ['["float", "' + v.hex() + '"]' for v in values.tolist()]
+            if kind in 'iu':
+                return ['["int", "' + str(v) + '"]' for v in values.tolist()]
+            if kind == 'b':
+                return ['["bool", true]' if v else '["bool", false]' for v in values.tolist()]
+            if kind == 'M' and not values.isna().any():
+                stamps = values.to_numpy()
+                seconds = stamps.astype('datetime64[s]')
+                # Whole seconds in years 1-9999 only: there numpy's text is Timestamp.isoformat()'s.
+                if ((seconds == stamps).all() and (seconds >= np.datetime64('0001-01-01T00:00:00', 's')).all()
+                        and (seconds <= np.datetime64('9999-12-31T23:59:59', 's')).all()):
+                    return ['["datetime", "' + v + '"]' for v in np.datetime_as_string(seconds, unit='s').tolist()]
+        return [json.dumps(scalar(v)) for v in values.tolist()]
+
+    def array(texts):
+        return '[' + ', '.join(texts) + ']'
+
+    # The keys in sort_keys order, as json.dumps(..., sort_keys=True, allow_nan=False) wrote them.
+    return ('{"columns": ' + json.dumps([scalar(v) for v in frame.columns.tolist()], allow_nan=False)
+            + ', "dtypes": ' + json.dumps([str(v) for v in frame.dtypes])
+            + ', "index": ' + array(items(frame.index))
+            + ', "index_names": ' + json.dumps([scalar(v) for v in frame.index.names], allow_nan=False)
+            + ', "values_by_column": ' + array(array(items(frame.iloc[:, position]))
+                                               for position in range(len(frame.columns))) + '}')
 
 
 def solve_freshness(ctx=None, after_pf=False):
@@ -564,6 +600,14 @@ def _network_input_fingerprint(ctx, *, exact=False):
         if present:
             parts.append("envelope-floors/1")
             parts.append(_exact_frame_json(frame[present]) if exact else frame[present].to_json())
+    # AS-02, template-e2e 02b: the energization schedule in MW, which a solve turns into p_max_pu
+    # (`energization.apply_energization`). Not a PyPSA input, so the loop above skips it: a schedule edited or
+    # uploaded left the fingerprint as it was. Appended only when the column holds a value.
+    from services.adequacy.energization import energization_frame
+    schedule = energization_frame(n)
+    if schedule is not None and schedule.notna().any().any():
+        parts.append("energization/1")
+        parts.append(encode(schedule))
     # AS-02, homer-parity 02a: a generator fuel curve's inputs, which the solve staging turns into marginal_cost
     # and stand_by_cost (both already hashed as PyPSA columns). Appended only when present.
     # homer-parity 02b: the O&M per running hour rides in the same block (a lifetime in running hours is the
@@ -902,6 +946,10 @@ def hold_solve_inputs(network, lock):
 
 def _record_solve_inputs(network, config):
     """Called under the existing solve lock, after modelling inputs restore."""
+    # When this solve ran (UTC), saved with the project: the Results source-run line names it
+    # (control-strategy walkthrough 06). Stamped first, so a fingerprint failure after it (the caller then
+    # drops both fingerprints) never leaves the previous solve's time on this new dispatch.
+    network.meta["assistant_solve_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     # A queued solve of another project runs in `solving_context(ctx)`: its
     # own uploaded series (user_ts) belong in the fingerprint, as every later
     # read hydrates them from disk (LC-18).

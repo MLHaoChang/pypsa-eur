@@ -237,7 +237,10 @@ def test_off_grid_excludes_both_rows_with_the_reason(tmp_path, setup):
     assert [e["id"] for e in vs] == list(IDS)
     assert all(e["reason"] == G.VS_OFF_GRID for e in vs)
     # Study harness 12: the other off-grid exclusions are the fault-level rows, with their own reason.
-    assert all(e["reason"] == G.SK_OFF_GRID for e in out["excluded"] if e["id"] not in IDS)
+    # GC-08: the sub-synchronous rows are scanned from the PCC and leave with theirs.
+    assert all(e["reason"] == (G.SUBSYNC_OFF_GRID if e["id"] in G.SUBSYNC_PCC_ROWS else G.SK_OFF_GRID)
+               for e in out["excluded"] if e["id"] not in IDS)
+    assert set(G.SUBSYNC_PCC_ROWS) <= {e["id"] for e in out["excluded"]}
     assert sum(out["summary"][v] for v in G.VERDICTS) == len(out["rows"])
 
 

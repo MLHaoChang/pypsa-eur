@@ -46,7 +46,7 @@ export const FACT_WORDS: Record<string, string> = {
   'explore.study.status': 'The decision study finished',
   'report.status': 'The report is saved',
   'report.unsupported_listed': 'The report names every chapter it cannot back up',
-  'handoff.kpis_read': 'Every headline result was read back from the model',
+  'handoff.kpis_read': 'Every headline result was read back, or is shown as not evaluated with its reason',
   // Study harness 10a: the data-centre run.
   'dc.gridcode.published': 'A grid-code profile is published for the run',
   'dc.gridcode.frequency_match': 'The campus runs at the grid frequency you gave',
@@ -216,6 +216,10 @@ export function stopWords(reason: string | undefined, stage: string): { words: s
       return stage === 'solve'
         ? { words: 'Solve did not finish', fix: 'solve_log', fixWords: 'Open the solve log' }
         : { words: `A step in ${at} did not finish`, fix: 'review', fixWords: 'Review the step' }
+    case 'step_cancelled':  // live-voice 16: the step's job was stopped on purpose; same fix as step_failed
+      return stage === 'solve'
+        ? { words: 'The solve was stopped: the run waits for you', fix: 'solve_log', fixWords: 'Open the solve log' }
+        : { words: `A step in ${at} was stopped: the run waits for you`, fix: 'review', fixWords: 'Review the step' }
     case 'uncertain':
     case 'step_uncertain':
       return { words: 'A step may or may not have run', fix: 'review', fixWords: 'Review the step' }

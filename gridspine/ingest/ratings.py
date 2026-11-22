@@ -1,0 +1,90 @@
+"""
+The rating an importer states when the source file leaves one unset or unbounded.
+
+A solver needs a finite rating on every branch and source, but an unrated PSS/E
+line (RATEA = 0) or a PowerFactory external grid (``ElmXnet``) gives none. The
+readers then use a bound that never binds and stays in scale with the case:
+
+    bound = ceil(max(10 × L, floor(kV)))  MVA
+
+``L`` is the case's total load, Σ |S| of the in-service loads in MVA. ``floor`` is
+a per-voltage-class floor taken at the highest of the given voltages:
+
+    < 1 kV: 1 · ≤ 36 kV: 50 · ≤ 150 kV: 250 · ≤ 300 kV: 1000 · above: 3000 MVA
+
+A voltage of 0 or a missing one falls to the lowest class. Never ``inf`` or a bare
+big-M: preflight refuses ``inf``, and a 1e6-style value hurts LP conditioning.
+Each reader lists every such value under ``report.assumed`` and marks the element.
+
+A generator the file gives no cost for takes a marginal cost of 1 €/MWh, so LOPF
+has an objective (owner decision, psse-import 04): with every generator at that
+cost the dispatch between them is arbitrary, which its assumed row says. A cost
+the file does give, 0 included, is kept and marked "file".
+"""
+
+from __future__ import annotations
+
+import math
+
+LOAD_MULTIPLE = 10.0
+
+
+def _class_floor(kv: float) -> float:
+    if kv < 1.0:
+        return 1.0
+    if kv <= 36.0:
+        return 50.0
+    if kv <= 150.0:
+        return 250.0
+    if kv <= 300.0:
+        return 1000.0
+    return 3000.0
+
+
+def assumed_rating_mva(total_load_mva: float, *kv: float) -> float:
+    """The never-binding bound for a total load and the element's voltage(s)."""
+    # NaN > 0 is False, so a missing voltage drops out like a zero one
+    floor = _class_floor(max([float(v) for v in kv if float(v) > 0], default=0.0))
+    return float(math.ceil(max(LOAD_MULTIPLE * float(total_load_mva), floor)))
+
+
+def total_load_mva(loads) -> float:
+    """Σ |S| of the in-service loads of a ``n.loads`` frame, in MVA."""
+    on = loads[loads["active"].astype(bool)]
+    return float(((on["p_set"] ** 2 + on["q_set"] ** 2) ** 0.5).sum())
+
+
+def source_column(index, assumed) -> list[str]:
+    """
+    The marker column for ``index``: "assumed" for names in ``assumed``, else
+    "file". Only "assumed" means assumed; a row added later reads "" or NaN.
+    """
+    assumed = set(assumed)
+    return ["assumed" if name in assumed else "file" for name in index]
+
+
+#: €/MWh for a generator the file gives no cost for.
+DEFAULT_MARGINAL_COST = 1.0
+
+COST_WHY = (
+    "the file gives no cost, so 1 €/MWh is used so that LOPF has an objective. "
+    "With every generator at the same cost, the dispatch between them is "
+    "arbitrary: set real costs before you read dispatch"
+)
+
+
+def default_marginal_costs(gens, given=()) -> list[tuple[str, str, float, str]]:
+    """
+    Give each generator of ``gens`` not in ``given`` (the names whose cost the file
+    gives) the default marginal cost, add the ``marginal_cost_source`` column and
+    return one ``(asset, parameter, value, why)`` assumed row per defaulted one.
+    """
+    given = set(given)
+    names = [g for g in gens.index if g not in given]
+    if not names:
+        return []
+    gens.loc[names, "marginal_cost"] = DEFAULT_MARGINAL_COST
+    gens["marginal_cost_source"] = source_column(gens.index, names)
+    return [
+        (g, "marginal cost (€/MWh)", DEFAULT_MARGINAL_COST, COST_WHY) for g in names
+    ]

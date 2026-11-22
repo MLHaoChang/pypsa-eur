@@ -38,7 +38,7 @@ class RequestScope(BaseModel):
         "branch-loading/1", "network-loading/1", "lost-load/1", "bus-price/1",
         "generator-emissions/1", "network-emissions/1", "curtailment/1", "capacity/1",
         "storage-cycles/1", "energy-balance/1", "site-import/1", "investment-case/1", "investment-lcoe/1",
-        "copt-screening/1", "grid-readiness/1", "time-to-power/1",
+        "copt-screening/1", "grid-readiness/1", "time-to-power/1", "ac-branch-loading/1",
     ]
     project_id: str = Field(min_length=1, max_length=128)
     entity_id: str = Field(min_length=1, max_length=128)
@@ -82,10 +82,12 @@ def validate(value):
         scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("unsupported_carrier_cost_scope")
-    if scope["profile"] in ("branch-loading/1", "network-loading/1") and (
+    if scope["profile"] in ("branch-loading/1", "network-loading/1", "ac-branch-loading/1") and (
         scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("unsupported_loading_cost_scope")
+    if scope["profile"] == "ac-branch-loading/1" and scope["entity_id"] in ("network", EVERY):
+        raise ValueError("unsupported_population_scope")
     if scope["profile"] in ("bus-price/1", "generator-emissions/1", "network-emissions/1",
                             "curtailment/1") and (
         scope.get("cost_basis") or scope.get("comparison_evidence_id")
@@ -105,6 +107,7 @@ def validate(value):
             raise ValueError("unsupported_population_scope")
         return scope
     classed = {"branch-loading/1": ("Line", "Transformer"),
+               "ac-branch-loading/1": ("Line", "Transformer"),
                "capacity/1": ("Generator", "Link", "StorageUnit", "Store", "Line", "Transformer"),
                "storage-cycles/1": ("StorageUnit", "Store")}
     if scope.get("component_class") and scope["component_class"] not in classed.get(scope["profile"], ()):
@@ -186,6 +189,21 @@ def _from_message(message, project_id, ui_context):
         r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
         message.strip(), re.I,
     )
+    # AA-13: "AC" names the AC power-flow profile; the plain form above keeps
+    # routing to branch-loading/1, which never reads AC results.
+    ac_loading = re.fullmatch(
+        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?ac\s+(?:branch\s+)?loading\s+for\s+"
+        r"(line|transformer)\s+([^;]{1,128}?)"
+        r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
+        message.strip(), re.I,
+    )
+    if ac_loading:
+        value = {"version": 1, "profile": "ac-branch-loading/1", "project_id": project_id,
+                 "entity_id": ac_loading[2], "component_class": ac_loading[1].capitalize(),
+                 "retain": False}
+        if ac_loading[3]:
+            value.update(start=ac_loading[3], end=ac_loading[4])
+        return validate(value)
     every = re.fullmatch(
         r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?(key results|(?:branch\s+)?loading)\s+for\s+"
         r"(?:every|all)\s+(generators?|lines?)"

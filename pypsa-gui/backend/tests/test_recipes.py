@@ -96,8 +96,8 @@ def test_no_recipe_where_the_card_cannot_show_one(over):
 
 
 def test_section_2_lists_the_carriers_then_the_recipes(ammonia):
-    imports, connection = flow_service._connection(ammonia, {}, None)
-    site = flow_service._site_assets(ammonia, imports, connection)
+    cap, connection = flow_service._connection(ammonia, {}, None)
+    site = flow_service._site_assets(ammonia, list(cap.links), connection)
     carriers = [str(c) for c in ammonia.carriers.index]
     rows, totals = flow_service._holds(ammonia, carriers, site)
     held = rows["carriers"]

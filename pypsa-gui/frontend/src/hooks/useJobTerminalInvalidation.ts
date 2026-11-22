@@ -35,15 +35,17 @@ export function terminalTransitions(
   prev: Map<string, string>,
   jobs: SolveJob[],
 ): string[] {
-  const names: string[] = []
-  for (const job of jobs) {
-    const before = prev.get(String(job.id))
-    if (before === job.status) continue
-    if (!isTerminal(job)) continue
-    if (!job.project_id) continue
-    names.push(job.project_id)
-  }
-  return Array.from(new Set(names))
+  return Array.from(new Set(terminalJobs(prev, jobs).map(j => j.project_id!)))
+}
+
+/**
+ * The jobs behind `terminalTransitions`, one per job rather than one per
+ * project: the finish/fail notification (run progress slice 3) needs each
+ * job's outcome, not only which caches to refresh. Same rules.
+ */
+export function terminalJobs(prev: Map<string, string>, jobs: SolveJob[]): SolveJob[] {
+  return jobs.filter(job =>
+    prev.get(String(job.id)) !== job.status && isTerminal(job) && !!job.project_id)
 }
 
 /**

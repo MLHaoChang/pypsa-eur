@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Reports > Generate report now builds a plain report from the stored results when no LLM profile or key is set, instead of failing with "No usable LLM profile"; with a profile the written report is unchanged.

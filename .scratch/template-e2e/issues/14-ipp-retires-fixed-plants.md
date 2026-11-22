@@ -3,7 +3,8 @@
 
 # 14 — IPP run retires both existing plants and reports a negative cost
 
-Status: ready-for-agent
+Status: done (#1783)
+Landed in #1783.
 Impact: high
 Templates: eh_ipp_hybrid
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)

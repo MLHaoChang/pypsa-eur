@@ -58,6 +58,8 @@ DERIVED_POLICY_VERSION = "2"
 PREDICATE_POLICY_VERSION = "3"
 # Policy "1" with its result slots in bounded sections (issue 10, S6a); no derived entries or predicates.
 SECTIONED_POLICY_VERSION = "4"
+# Policy "1" plus at least one required warning slot (AA-13, A2.8); nothing else.
+WARNED_POLICY_VERSION = "5"
 INPUT_ADAPTERS = {
     "static": "static-input/1",
     "static_page": "static-input-page/1",
@@ -1831,6 +1833,7 @@ def capture_dispatch(owner, entity):
             "slots": slots,
             "raw": raw,
             "source_sha256": digest(raw),
+            "definition_hash": assurance_metrics.definition_hash(assurance_metrics.PROFILE),
             "validity": {
                 "outcome": "completed"
                 if all(s["disposition"] == "answered" for s in slots)
@@ -1866,6 +1869,7 @@ def capture_scoped(owner, scope):
     raw = _scoped_read(ctx, scope, owner)
     with network_guard():
         facts, slots = calculations.scoped_calculate(raw, scope)
+        warnings = calculations.required_warnings(raw, scope)
         from harness.assurance_scope import every_entity
 
         first = (
@@ -1878,6 +1882,7 @@ def capture_scoped(owner, scope):
             in (
                 calculations.carrier.PROFILE,
                 *calculations.branch.PROFILES,
+                *calculations.ac_branch.PROFILES,
                 calculations.lost_load.PROFILE,
                 calculations.price.PROFILE,
                 *calculations.emissions.PROFILES,
@@ -1918,10 +1923,22 @@ def capture_scoped(owner, scope):
             # `public` strips both, so existing readers see byte-equal output.
             "window": fact_identity.window(first["index"], scope),
             "solve_stamp": solve_stamp(ctx.network),
+            # AA-10 S7: the profile's definition hash as checked (hidden like
+            # the keys above, so the public evidence shape is unchanged).
+            **(
+                {"definition_hash": definition}
+                if (definition := calculations.scope_definition_hash(scope))
+                is not None
+                else {}
+            ),
+            # AA-13 (A2.8): the required warning slots, hidden like the keys
+            # above and stored only when present; the receipt carries them.
+            **({"required_warnings": warnings} if warnings else {}),
             "validity": {
                 "coverage": "requested_population",
                 "as_of": time.time(),
-                "warnings": [calculations.disclosure(scope)],
+                "warnings": [calculations.disclosure(scope)]
+                + calculations.slot_warnings(warnings),
             },
             "expires_at": time.time() + RETENTION_SECONDS,
         }
@@ -1955,7 +1972,30 @@ scoped_read = _scoped_read
 
 # AA-05 S5a (A4.6): identity keys an evidence record stores for the
 # cross-surface checks. No existing reader's output carries them (GK B (34) Q2).
-IDENTITY_KEYS = frozenset({"window", "solve_stamp"})
+# AA-10 S7 adds the definition hash on the same terms.
+# AA-13 adds the required warning slots, which only the receipt shows.
+IDENTITY_KEYS = frozenset({"window", "solve_stamp", "definition_hash", "required_warnings"})
+
+
+def definition_changed(record):
+    """Whether the definition hash of the profile a checked answer record
+    names now differs from the hash it recorded: True or False, or None when
+    it recorded none. A read only: the record is never recomputed or
+    rewritten. A profile this server no longer defines counts as changed.
+    Answer records only: evidence records carry no request scope here, so
+    they would read as changed."""
+    recorded = record.get("definition_hash")
+    if recorded is None:
+        return None
+    from harness import calculations
+
+    try:
+        scope = record.get("request_scope") or record["receipt"]["request_scope"]
+        current = calculations.scope_definition_hash(scope)
+    except (KeyError, ValueError, TypeError):
+        return True
+    # A requested metric with no definition hashes to None: None != recorded.
+    return current != recorded
 
 
 def public(record):
@@ -2012,6 +2052,14 @@ def receipt_policy_ok(receipt):
         return _entries_ok(receipt.get("predicates"), predicates) and (
             "derived" not in receipt or _entries_ok(receipt["derived"], derived)
         )
+    if version == WARNED_POLICY_VERSION:
+        from harness.assurance_shapes import WarnedReceipt
+
+        try:
+            WarnedReceipt.model_validate(receipt)  # closed: no derived entries, predicates or sections
+        except ValueError:
+            return False
+        return True
     if version == SECTIONED_POLICY_VERSION:
         from harness.assurance_shapes import SectionedReceipt
 

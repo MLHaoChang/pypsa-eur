@@ -3,7 +3,8 @@
 
 # 34 Projects home cards offer only Open: delete is reachable only as Expert › Scenarios › "Delete this scenario"
 
-Status: ready-for-agent
+Status: done (#1809)
+Landed in #1809.
 Blocked by: none
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), walk W1 (shot `p01-projects`).
 Severity: friction

@@ -5,6 +5,7 @@
 import type { EhReferenceDesignReport, EhReview } from '../../api/simulation'
 import { certificationHeadline, fmeaTopRows } from '../results/EhReferenceDesignPanel'
 import { displayName } from '../../utils/displayName'
+import { verdictWord } from './verdictWords'
 import { sectionMeta } from '../../layout/flowSections'
 
 type OkReview = Extract<EhReview, { status: 'ok' }>
@@ -51,18 +52,39 @@ export function headline(review: OkReview, report: EhReferenceDesignReport | nul
   const target = num(s.target_lole_h)
 
   if (verdict === 'fail' && lole != null && target != null) {
-    return `Not certified: about ${lole.toFixed(1)} h/yr of shortfall vs a ${g(target)} h/yr goal, driven by ${topRisk(report)}`
+    return `${verdictWord('fail')}: about ${lole.toFixed(1)} h/yr of shortfall vs a ${g(target)} h/yr goal, driven by ${topRisk(report)}`
+  }
+  // GK A F6': a pass held back by a must-stay-on bus behind one feeder is
+  // not a sampling question; more runs would not settle it.
+  const fb = s.feeder_bound
+  if (verdict === 'inconclusive' && fb && target != null) {
+    const names = (xs: string[]) => xs.map(displayName).join(' and ')
+    const pk = fb.pockets ?? []
+    if (pk.length) {
+      const buses = names(pk.flatMap((p) => p.buses))
+      const feeders = pk.flatMap((p) => p.feeders)
+      const bound = pk.reduce((a, p) => a + (num(p.bound_h_per_year) ?? 0), 0)
+      const cut = `${verdictWord('inconclusive')}: ${buses} could be cut off up to ${bound.toFixed(1)} h/yr while ${names(feeders)} ${feeders.length > 1 ? 'are' : 'is'} out`
+      // GK R2: a feeder without outage data is taken as always out; its data
+      // is the first thing that would settle it.
+      const unread = [...new Set(pk.flatMap((p) => p.no_data ?? []))]
+      if (unread.length) {
+        return `${cut}, against the ${g(target)} h/yr goal. ${names(unread)}'s outage rate${unread.length > 1 ? 's are' : ' is'} not known, so ${unread.length > 1 ? 'they are' : 'it is'} taken as always out. Outage data for ${names(unread)}, a second feeder or a more reliable one would settle it.`
+      }
+      return `${cut} (${pk.length > 1 ? 'their' : 'its'} own backup not counted), over the ${g(target)} h/yr goal: a second feeder or a more reliable one would settle it.`
+    }
+    return `${verdictWord('inconclusive')}: ${names(fb.chained ?? [])} reaches a must-stay-on bus only through a bus with no supply of its own, which this check cannot bound: a feeder straight from a supplied bus would settle it.`
   }
   if (verdict === 'inconclusive' && target != null) {
     const ci = interval(review, report)
     if (ci) {
-      return `Not decided: the shortfall estimate (${ci[0].toFixed(1)}–${ci[1].toFixed(1)} h/yr) straddles the ${g(target)} h/yr goal: more simulation runs would settle it.`
+      return `${verdictWord('inconclusive')}: the shortfall estimate (${ci[0].toFixed(1)}–${ci[1].toFixed(1)} h/yr) straddles the ${g(target)} h/yr goal: more simulation runs would settle it.`
     }
   }
   if (verdict === 'pass' && lole != null && target != null) {
     // A computed zero (below the one-decimal rounding) says so (UX audit M7).
-    return lole < 0.05 ? `Certified: no shortfall expected, under the ${g(target)} h/yr goal.`
-      : `Certified: about ${lole.toFixed(1)} h/yr of shortfall, under the ${g(target)} h/yr goal.`
+    return lole < 0.05 ? `${verdictWord('pass')}: no shortfall expected, under the ${g(target)} h/yr goal.`
+      : `${verdictWord('pass')}: about ${lole.toFixed(1)} h/yr of shortfall, under the ${g(target)} h/yr goal.`
   }
   if (lole != null && target == null) {
     return lole < 0.05 ? 'No reliability goal was set: the study expects no shortfall. Set a goal to certify.'

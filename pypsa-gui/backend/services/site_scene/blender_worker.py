@@ -54,10 +54,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-try:  # POSIX only; the worker is Linux-only, but the module loads everywhere
-    import resource
-except ImportError:  # pragma: no cover - Windows
-    resource = None
 
 PIN_VERSION = "5.2.4"
 # blender.org's blender-5.2.4.sha256 for the release tarball.
@@ -125,6 +121,7 @@ class Caps:
     pids: int = 256
     grace_s: float = 5.0
     version_timeout_s: float = 30.0
+    spawn_s: float = 30.0
     poll_s: float = 0.1
     ready_ttl_s: float = 60.0
 
@@ -383,9 +380,75 @@ def child_env(env) -> dict[str, str]:
     return out
 
 
-def _cli_limits() -> None:
-    # Runs between fork and exec: no import here (`resource` is imported at the top).
-    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+# The CLI gets no core dump. POSIX `sh` sets the limit, then `env` drops what a
+# shell exports by itself (dash adds PWD; bash adds SHLVL, OLDPWD and `_`), so
+# the CLI's environment stays exactly `child_env(env)`. The runtime path and its
+# arguments arrive as positional parameters, never as shell text. (Not a
+# re-exec of `sys.executable`: in the frozen desktop app that is the app.) A
+# `preexec_fn` would instead run Python between fork and exec: in the API
+# process (many threads, the forked child inheriting their held locks with none
+# of their owners) that child can block forever before `exec`, wedging the
+# solve-queue dispatcher inside `Popen` (the CI shard hangs of #1577, #1578 and
+# #1627).
+_CORE_OFF = [
+    "/bin/sh",
+    "-c",
+    'ulimit -c 0 && exec /usr/bin/env -u PWD -u OLDPWD -u SHLVL -u _ "$0" "$@"',
+]
+
+
+def _spawn(
+    argv: list[str], caps: Caps, stop_event, deadline: float, cleanup, stdout: int, **kw
+):
+    """`subprocess.Popen(argv, stdout=..., **kw)`, waited for under `caps.spawn_s`,
+    the run's wall `deadline` and `stop_event`.
+
+    The spawn runs on its own thread, so a fork that never reaches `exec` costs
+    the run a typed error, not the dispatcher. A process that starts after the
+    run gave up on it is handed to `cleanup`, which stops it. The thread spawns
+    with its own copy of `stdout`, so the caller may close its descriptor even
+    while an abandoned spawn is still in flight.
+    """
+    out = os.dup(stdout)
+    lock = threading.Lock()
+    box: dict[str, Any] = {}
+    started = threading.Event()
+
+    def target() -> None:
+        try:
+            proc = subprocess.Popen(argv, stdout=out, **kw)
+        except BaseException as exc:  # noqa: BLE001 - re-raised on the run's thread
+            box["error"] = exc
+            started.set()
+            return
+        finally:
+            os.close(out)
+        with lock:
+            box["proc"] = proc
+            late = box.get("abandoned", False)
+        started.set()
+        if late:
+            cleanup(proc)
+
+    threading.Thread(target=target, name="blender-spawn", daemon=True).start()
+    spawn_deadline = min(deadline, time.monotonic() + caps.spawn_s)
+    failure: WorkerError | None = None
+    while not started.wait(caps.poll_s):
+        if stop_event is not None and stop_event.is_set():
+            failure = WorkerError(CANCELLED, "the run was cancelled")
+        elif time.monotonic() > spawn_deadline:
+            failure = WorkerError(
+                FAILED, f"the container CLI did not start within {caps.spawn_s:g} s"
+            )
+        if failure is not None:
+            with lock:
+                if "proc" not in box and "error" not in box:
+                    box["abandoned"] = True
+                    raise failure
+            break
+    if "error" in box:
+        raise box["error"]
+    return box["proc"]
 
 
 def _killpg(pgid: int, grace_s: float) -> None:
@@ -444,8 +507,19 @@ def _run(
     name = f"pypsa-blender-{uuid.uuid4().hex}"
     log_fd, log_path = tempfile.mkstemp(prefix="blender-log-")
     try:
-        proc = subprocess.Popen(
-            _container_argv(ready, name, work, tail, caps),
+        deadline = time.monotonic() + wall_s
+
+        def stop_late(late: subprocess.Popen) -> None:
+            _kill_container(ready, name, env, caps.grace_s)
+            _killpg(late.pid, caps.grace_s)
+            late.wait()
+
+        proc = _spawn(
+            _CORE_OFF + _container_argv(ready, name, work, tail, caps),
+            caps,
+            stop_event,
+            deadline,
+            stop_late,
             cwd=work,
             env=child_env(env),
             stdin=subprocess.DEVNULL,
@@ -453,10 +527,8 @@ def _run(
             stderr=subprocess.STDOUT,
             close_fds=True,
             start_new_session=True,
-            preexec_fn=_cli_limits,
         )
         failure: WorkerError | None = None
-        deadline = time.monotonic() + wall_s
         try:
             while proc.poll() is None:
                 if stop_event is not None and stop_event.is_set():

@@ -218,6 +218,14 @@ class Cell(NamedTuple):
     escalates: bool
 
 
+def takes_derating(category: Any, quantity_source: Any) -> bool:
+    """A capacity payment linked to an asset's capacity in service: the one line a
+    de-rating multiplies (spec §6.6)."""
+    return category == "capacity_payment" and str(quantity_source).startswith(
+        "linked:capacity."
+    )
+
+
 class LineItem(BaseModel):
     """One row of the business-case table (spec §4). No tax column (G-C2)."""
 
@@ -263,6 +271,14 @@ class LineItem(BaseModel):
     linked_share_by_year: dict[int, Annotated[Finite, Field(ge=0.0, le=1.0)]] = Field(
         default_factory=dict,
         description="sold share by year; a year's cell wins over `linked_share`",
+    )
+    # A capacity payment on an asset's capacity in service is paid on a typed de-rated
+    # share of it (spec §6.6; walk 04, GK B2 Q1/Q2): 0..1, never defaulted.
+    derating: Finite | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="de-rating: the share of the capacity in service the market pays for",
     )
     hint: Hint | None = None
 
@@ -333,6 +349,17 @@ class LineItem(BaseModel):
     def _revenue_only(cls, v: Any, info: ValidationInfo) -> Any:
         if v is not None and info.data.get("kind") != "revenue":
             raise ValueError(f"{info.field_name} applies to revenue lines only")
+        return v
+
+    @field_validator("derating")
+    @classmethod
+    def _capacity_payment_only(cls, v: Any, info: ValidationInfo) -> Any:
+        if v is not None and not takes_derating(
+            info.data.get("category"), info.data.get("quantity_source")
+        ):
+            raise ValueError(
+                "derating applies to a capacity payment linked to capacity in service only"
+            )
         return v
 
     @field_validator("linked_share", "linked_share_by_year")
@@ -518,6 +545,8 @@ class BusinessCaseInputs(BaseModel):
             out.append(YearOutOfRange(f"{at}.money_year"))
         if ln.escalation == "contract" and ln.indexation is None:
             out.append(IndexationMissing(f"{at}.indexation"))
+        if ln.derating is None and takes_derating(ln.category, ln.quantity_source):
+            out.append(DeratingMissing(f"{at}.derating"))
         if ln.start_year is not None and not horizon[0] <= ln.start_year <= horizon[1]:
             out.append(OutsideHorizon(f"{at}.start_year"))
         if ln.end_year is not None and not horizon[0] <= ln.end_year <= horizon[1]:
@@ -690,6 +719,10 @@ class IndexationMissing(BusinessCaseRefused):
     kind = "indexation_missing"
 
 
+class DeratingMissing(BusinessCaseRefused):
+    kind = "derating_missing"
+
+
 class LifeMissing(BusinessCaseRefused):
     kind = "life_missing"
 
@@ -778,6 +811,7 @@ REFUSAL_KINDS: tuple[str, ...] = (
     "outside_horizon",
     "year_out_of_range",
     "indexation_missing",
+    "derating_missing",
     "life_missing",
     "rate_missing",
     "price_not_established",

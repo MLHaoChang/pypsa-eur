@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The Production tiles show the product bought in (tonnes and its cost at the buy-in price), so Made + Bought in + Lost = Delivered on screen; Key capacities name the buy-in and shortfall generators in the same words ("NH₃ bought in", "NH₃ lost (shortfall)").

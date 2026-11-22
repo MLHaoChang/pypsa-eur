@@ -64,13 +64,19 @@ def _f(path, ops, why, group=SIDECAR, **kw):
     return Entry(path, FILE, group, frozenset(ops), why, **kw)
 
 
-def _importer(path, writer):
-    return _f(
-        path,
-        _ALL,
-        "an importer's record of the source model it read",
-        pending_writer=writer,
-    )
+#: The files a model importer may store beside network.nc; `services.model_import_service`
+#: refuses any other name a reader returns (project-io 04).
+IMPORTER_SIDECARS = (
+    "psse_case.json",
+    "psse_dynamics.json",
+    "psse_contingencies.json",
+    "plexos_areas.json",
+    "plexos_fuel_prices.json",
+)
+
+
+def _importer(path):
+    return _f(path, _ALL, "an importer's record of the source model it read")
 
 
 def _marker_entry() -> Entry:
@@ -121,11 +127,8 @@ TABLE: tuple[Entry, ...] = (
         _ALL - {FORK} | {TEMPLATE},
         "a template's pre-built sensitivity cases",
     ),
-    _importer("psse_case.json", "PSS/E importer"),
-    _importer("psse_dynamics.json", "PSS/E importer"),
-    _importer("plexos_areas.json", "PLEXOS importer"),
-    _importer("plexos_fuel_prices.json", "PLEXOS importer"),
-    _importer("import_report.json", "shared import contract (#1600)"),
+    *(_importer(p) for p in IMPORTER_SIDECARS),
+    _f("import_report.json", _ALL, "what a model import read, mapped and assumed"),
     # The campus electrical study (plan C9): bundle only. The grid-code
     # documents and drafts stay with their licensee.
     *(
@@ -145,6 +148,24 @@ TABLE: tuple[Entry, ...] = (
     Entry("reports", DIR, FOLDER, _ALL, "study reports"),
     Entry("studies", DIR, FOLDER, _ALL, "decision-study sidecars"),
     Entry("sites", DIR, FOLDER, _ALL, "3D site context"),
+    # The grid-compliance tracker (GC-09): deliverable statuses, TSO comment log,
+    # pack history. Project data, so it travels with the project; the lock file
+    # beside it is a runtime lock and stays behind.
+    Entry(
+        "grid_compliance",
+        DIR,
+        FOLDER,
+        _ALL,
+        "the grid-compliance tracker",
+        skip={op: ("tracker.lock",) for op in sorted(_ALL)},
+    ),
+    Entry(
+        "library",
+        DIR,
+        FOLDER,
+        _ALL,
+        "copies of the pinned Library payloads (project-io 03)",
+    ),
     Entry(
         "run_evidence",
         DIR,
@@ -170,6 +191,7 @@ TABLE: tuple[Entry, ...] = (
 NOT_CARRIED: dict[str, str] = {
     ".eh_template.lock": "a lock file",
     ".lock": "a lock file",
+    ".uploads.lock": "a lock file",
     "install.json": "the app install record, not a project file",
     "chat.jsonl": "a per-conversation thread; forks copy it themselves",
     # Inside a folder the table carries whole.
@@ -177,6 +199,9 @@ NOT_CARRIED: dict[str, str] = {
     "context.json": "inside sites/",
     "generation.json": "inside sites/",
     "thumb.png": "inside sites/",
+    # Inside grid_compliance/, which the table carries whole (the lock is skipped).
+    "tracker.json": "inside grid_compliance/",
+    "tracker.lock": "inside grid_compliance/; a lock file",
     # Campus electrical files the bundle does not carry (plan C9).
     "campus_cost_basis.json": "campus: derived on every run",
     "campus_milp_basis.json": "campus: derived on every run",
@@ -185,6 +210,7 @@ NOT_CARRIED: dict[str, str] = {
     "draft_notes.json": "campus: a grid-code draft stays with its licensee",
     "settings.json": "campus: per-install settings",
     "gfm_applied.json": "campus island tuning: derived from island_config.json",
+    "market_prices.json": "the ENTSO-E zone pick: a copy decides again from the site pin",
 }
 
 
@@ -227,6 +253,11 @@ def allows_member(member: str) -> bool:
     return member != top and top in names(BUNDLE, kind=DIR)
 
 
+#: A bundle's own record of its members (issue 02). Only `bundle_manifest`
+#: writes and reads it; it is never unpacked into a project.
+MANIFEST = "manifest.json"
+
+
 # ── Safe bundle staging (issue 01, GK B I2) ──────────────────────────────────
 
 #: The most a bundle may unpack to. The upload itself is capped by
@@ -264,7 +295,7 @@ def screen_members(
     symlink, two members that are one file on a case-folding file system
     (case, trailing dot or space), and members that unpack to more than
     `MAX_UNPACKED_BYTES`. Ignored (reported, never written): a member the
-    table does not list. Directory entries are neither.
+    table does not list. Directory entries and `MANIFEST` are neither.
     """
     cap = MAX_UNPACKED_BYTES if max_unpacked is None else max_unpacked
     allowed, ignored, seen, total = [], [], {}, 0
@@ -311,7 +342,8 @@ def screen_members(
                     "message": f"The bundle unpacks to more than {cap // 1024**2} MB. Nothing was imported.",
                 }
             )
-        (allowed if allows_member(name) else ignored).append(name)
+        if name != MANIFEST:
+            (allowed if allows_member(name) else ignored).append(name)
     for folded, name in seen.items():
         parts = folded.split("/")
         for i in range(1, len(parts)):

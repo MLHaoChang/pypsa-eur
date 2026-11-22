@@ -61,6 +61,7 @@ def test_the_report_adds_the_display_keys_and_changes_nothing_else(
         "stream_class",
         "stream_source",
         "row_reason",
+        "kpi_row",  # walk 03: the P&L row each KPI is computed from
     }
     assert set(pnl["stream_class"]) == set(pnl["streams"]) == set(pnl["stream_source"])
     assert pnl["stream_source"]["product_revenue"] == "line:revenue"
@@ -77,6 +78,7 @@ def test_the_report_adds_the_display_keys_and_changes_nothing_else(
         b["pnl"].pop("stream_class")
         b["pnl"].pop("stream_source")
         b["pnl"].pop("row_reason")
+        b["pnl"].pop("kpi_row")
         b.pop("created_at", None)  # the build time
     assert body == again
     assert set(body["pnl"]) == {"years", "streams", "rows", "not_finite"}

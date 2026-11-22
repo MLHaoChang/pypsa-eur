@@ -21,7 +21,7 @@ import {
 import type { AdequacyReportPayload } from './adequacy'
 import { CARD_GROUPS, type CardGroupId } from './groups'
 import { freshnessOf } from './GroupHeader'
-import ProductionTiles from './ProductionTiles'
+import ProductionTiles, { processCarrierLabels } from './ProductionTiles'
 import OperationalGap from './OperationalGap'
 import { solveWords } from './solveWords'
 import HeadlineStrip, { useHeadlineKpis } from './HeadlineStrip'
@@ -33,6 +33,13 @@ import { useGridReadiness } from '../../components/gridReadiness/GridReadinessSc
 import { useFlowScope } from '../../components/flowScope/useFlowScope'
 import { inScope, type ScopeCardId } from '../../api/flow'
 import type { SimulationStatus } from '../../api/types'
+import SourceRunLine from '../../components/SourceRunLine'
+import { useDispatchRun } from '../../hooks/useDispatchRun'
+import { useProjectFlow } from '../../hooks/useProjectFlow'
+import { openReliabilityGoal } from '../../layout/flowNavigation'
+import { studyHasResults } from '../hubDesign/flow'
+import { headline as studyHeadline } from '../hubDesign/headline'
+import { useHubReport, useHubReview, useHubStudy } from '../hubDesign/useHubData'
 
 /** The Results tabs a card links to. */
 export type SummaryLink = 'capex' | 'emissions' | 'lostload' | 'adequacy' | 'economics' | 'loadflow' | 'investment'
@@ -140,12 +147,32 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
 
   const c = costView(cost, selectedPeriod)
   const e = emissionsView(emissions as EmissionsPayload | null | undefined, selectedPeriod)
+  const carrierLabels = processCarrierLabels(processView)
+  const run = useDispatchRun()
+  const { study } = useHubStudy()
+  const { review } = useHubReview(studyHasResults(study))
+  const report = useHubReport(study, false)
+  const { flow } = useProjectFlow()
+  const studyKind = flow?.sections.find(sec => sec.section === 'results')?.freshness_by_kind?.study
+  const requestRunSolve = useUIStore(st => st.requestRunSolve)
   const caps = capacityRows(stats as Record<string, unknown>[] | null | undefined, selectedPeriod)
   const ll = (lostLoad ?? null) as LostLoadPayload | null
   const rm = reserveMarginVerdict(margin as ReserveMarginSummary | null | undefined)
   const target = (adequacy ?? null) as AdequacyReportPayload | null
 
   if (!c && !e && !caps.length) {
+    // A Guided study with no solve (control-strategy 06 / #1618-01): Guided's verdict, from the study, and
+    // that the dispatch solve has not run, with one link to run it, never a bare "No results yet".
+    if (studyHasResults(study) && review?.status === 'ok') {
+      return (
+        <div className="p-4 flex flex-col gap-2" data-testid="summary-study-only">
+          <p className="text-[13px] font-semibold text-text" data-testid="summary-study-verdict">{studyHeadline(review, report)}</p>
+          <SourceRunLine testId="summary-source" source="study" at={study?.finished_at ?? null}
+            outOfDate={review.stale === true || study?.edited_since_study === true}
+            missing={{ run: 'dispatch', action: { label: 'Run the solve', onClick: requestRunSolve } }} />
+        </div>
+      )
+    }
     return (
       <div className="p-6 text-[12px] text-muted" data-testid="summary-empty">
         No results yet: run the model, and its cost, emissions, reliability and capacities are summarised here.
@@ -163,6 +190,13 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
   return (
     <div className="p-4 flex flex-col gap-3" data-testid="results-summary">
       <HeadlineStrip />
+      {run?.solved && (
+        // Which run the figures come from (control-strategy improvement 2); the study offered by name when the
+        // project has one that has not run.
+        <SourceRunLine testId="summary-source" source="dispatch" at={run.at} outOfDate={!run.current}
+          missing={studyKind === 'not_run'
+            ? { run: 'study', action: { label: 'Reliability goal', onClick: openReliabilityGoal } } : undefined} />
+      )}
       {status && (
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[11px] text-muted" data-testid="summary-status">
           <span>Solve: <span className="text-text font-medium">{status.condition ? solveWords(status.condition) : status.status ?? 'not run yet'}</span></span>
@@ -278,7 +312,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
               <tbody>
                 {caps.slice(0, MAX_CAPACITY_ROWS).map(r => (
                   <tr key={`${r.component}-${r.carrier}`} data-testid={`summary-cap-${r.component}-${r.carrier}`}>
-                    <td className="truncate" title={r.component}>{r.carrier || r.component}</td>
+                    <td className="truncate" title={r.component}>{carrierLabels.get(r.carrier) ?? (r.carrier || r.component)}</td>
                     <td className="text-right font-mono tabular-nums">{fmtCapacity(r.capacity, r.unit)}</td>
                     <td className="text-right font-mono tabular-nums">{r.newBuild > 0 ? fmtCapacity(r.newBuild, r.unit) : '—'}</td>
                   </tr>

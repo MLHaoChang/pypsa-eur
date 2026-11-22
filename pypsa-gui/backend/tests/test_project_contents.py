@@ -637,13 +637,21 @@ def test_directory_entries_and_one_letter_names_are_neither_allowed_nor_refused(
 
 
 def test_the_unpacked_cap_defaults_to_four_gib(monkeypatch):
-    import importlib
+    import importlib.util
+    import sys
 
+    # A fresh copy under its own name, not `importlib.reload(PC)`: a reload
+    # makes new classes, so `BundleRefused` raised by a module that imported
+    # the old one (`bundle_manifest`) no longer matches `PC.BundleRefused` in
+    # every test that runs after this one.
     monkeypatch.delenv("PYPSA_GUI_MAX_BUNDLE_UNPACKED_BYTES", raising=False)
-    try:
-        assert importlib.reload(PC).MAX_UNPACKED_BYTES == 4 * 1024**3
-    finally:
-        importlib.reload(PC)
+    spec = importlib.util.spec_from_file_location(
+        "_project_contents_fresh", PC.__file__
+    )
+    fresh = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, fresh)
+    spec.loader.exec_module(fresh)
+    assert fresh.MAX_UNPACKED_BYTES == 4 * 1024**3
 
 
 def test_restoring_a_snapshot_taken_without_gridspine_keeps_only_the_live_run(
@@ -823,3 +831,34 @@ def test_the_declared_names_guard_reads_annotated_assignments(tmp_path, monkeypa
         "scope.json": ["services/x.py:SCOPE_FILE"],
         "o.json": ["services/x.py:OTHER_FILE"],
     }
+
+
+def test_the_grid_compliance_tracker_travels_but_its_lock_stays_behind(
+    client, api_project, project_storage_dir
+):
+    """Bundle, import, Save-As and fork all carry tracker.json and leave tracker.lock."""
+    name = api_project("pc-tracker")
+    src = project_storage_dir(name)
+    (src / "grid_compliance").mkdir()
+    (src / "grid_compliance" / "tracker.json").write_text(json.dumps({"t": 1}))
+    (src / "grid_compliance" / "tracker.lock").write_text("")
+
+    r = client.get(f"/api/projects/{name}/bundle")
+    assert r.status_code == 200, r.text
+    members = set(zipfile.ZipFile(io.BytesIO(r.content)).namelist())
+    assert "grid_compliance/tracker.json" in members
+    assert "grid_compliance/tracker.lock" not in members
+
+    r = _post(client, r.content, "pc_tracker_dst")
+    assert r.status_code in (200, 201), r.text
+    back = project_storage_dir("pc_tracker_dst") / "grid_compliance"
+    assert json.loads((back / "tracker.json").read_text()) == {"t": 1}
+
+    for op in (PC.SAVE_AS, PC.FORK):
+        dst = src.parent / f"pc-tracker-{op}"
+        dst.mkdir()
+        projects._copy_bundle_dirs(src, dst, op=op)
+        assert json.loads((dst / "grid_compliance" / "tracker.json").read_text()) == {
+            "t": 1
+        }
+        assert not (dst / "grid_compliance" / "tracker.lock").exists()

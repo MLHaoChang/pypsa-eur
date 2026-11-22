@@ -1,6 +1,6 @@
 # eh_report's slack-carrier set disagrees with slack.py
 
-Status: needs-triage
+Status: ready-for-agent
 
 Raised by GK A 30 on #1677 (GK OK @bb7fb4fe); older than that PR, not blocking it.
 
@@ -21,3 +21,7 @@ Fix sketch: read `slack.SLACK_CARRIERS` (plus the `demand_response` /
 or use slack.py's own slack predicate if it has one. Test: a generator on
 each `slack.SLACK_CARRIERS` carrier is neither in `by_carrier` nor a row.
 The EH report fixtures and fingerprint tests must stay unchanged.
+
+## Triage (2026-11-20, master 87cf52a7)
+
+Checked by code reading only. Still true: `eh_report.py:50` keeps its own `_SLACK_CARRIERS` without `voll_slack` and `dc_curtailment`. Acceptance: it uses the canonical `SLACK_CARRIERS` from `adequacy/slack.py`, with a test that a generator under `voll_slack` and one under `dc_curtailment` are excluded from the sized assets and totals. Gated: GK A. Blocked by: none.

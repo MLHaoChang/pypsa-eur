@@ -51,3 +51,16 @@ Release note: one new file under `doc/release-notes.d/` (see its README).
 - The scanned network is passive, so R at a crossing is information only; SSCI rows read "not evaluated: converter damping not modelled". Verdict states: flag, clear, check (no torsional modes), not evaluated (no series capacitor in the model: "grid-side series compensation needs the TSP's data"). The torsional margin uses the complement f0 − f_er.
 - The campus has no series-capacitor entry (that is `ingest/`, GC-01): the follow-up goes to the coordinator.
 - PR2 adds the two frontend lines a new run stage needs (CampusRunStage, STAGE_LABEL) and no UI section.
+
+**2026-11-17, GK A2 plan GO for PR3 slice A** (scorecard rows `ssti_uif`, `subsync_series_resonance`, `ssci` in `services/adequacy/grid_readiness.py`). Slice B, the `SOURCES["GC-08"]` provider in `grid_compliance/sources.py`, is a separate PR after #1577 merges. Conditions:
+
+- R1: the limit and its source come from the run's meta, not today's profile. A profile threshold that changed since the run reads unknown: "the UIF threshold changed since the run: rerun the grid study".
+- R2: fail closed. An unknown engine verdict, or a blank, non-finite or non-numeric worst UIF, or an empty UIF table with no error json, each reads unknown with the reason. One test per case.
+- R3: each mapped verdict pins its reason text (no genset, no converter, no torsional modes, TSP data, error text, no run, pre-stage run with the VS meta but no SSTI meta).
+- R4: off-grid keeps `ssti_uif`; confirm what the stage does on an islanded campus and test it.
+- R5: the end-to-end oracle is hand-computed UIF from two gensets of different ratings and SC shares, with no import of the ssti code.
+- R6: add the ids to every registry keyed by scorecard id, or say why not; ids unique (test).
+- R7: mutants.py in a subagent, plus hand-mutating each verdict-map entry and the off-grid exclusion set.
+- R8: Journey-fit paragraph in the PR body, and a release-note fragment.
+- R9: an assumed threshold's "clear" reads pass, with the note "against the assumed screening threshold"; every row is assumed=True.
+- Torsional-mode input becomes a separate GC-01c, not part of GC-01b (sent to the coordinator).

@@ -25,6 +25,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from models.business_case import takes_derating
 from services.business_case.chat_edit import CARD_CHARS, CARD_ROW_CAP, NAME, _refuse
 
 # Tool-side refusals, as literals for the error-kind manifest guard.
@@ -41,6 +42,10 @@ _KEPT = ("kw_per_gpu", "lhv_kwh_per_kg", "capacity", "capacity_unit")
 
 
 def _currency(cfg) -> str:
+    return _finance(cfg).currency
+
+
+def _finance(cfg):
     from pydantic import ValidationError
 
     from models.finance import FinanceInputs
@@ -53,7 +58,7 @@ def _currency(cfg) -> str:
             "case's currency",
         )
     try:
-        return FinanceInputs.model_validate(raw_fin).currency
+        return FinanceInputs.model_validate(raw_fin)
     except ValidationError as exc:
         _refuse("finance_inputs_invalid", str(exc.errors()[0]["msg"])[:300])
 
@@ -91,8 +96,18 @@ def _pick(template_id: str, variant, rows) -> tuple[str | None, list[str]]:
     return None, list(rows)
 
 
-def _inputs(template_id: str, variant, rows, currency: str):
-    """The preset's `BusinessCaseInputs` and the stamp of the pack that filled it."""
+def _indexation_filled(before, after) -> set[str]:
+    """The lines whose indexation the finance inputs filled (no preset states one)."""
+    return {
+        b.name
+        for b, a in zip(before.lines, after.lines)
+        if b.indexation is None and a.indexation is not None
+    }
+
+
+def _inputs(template_id: str, variant, rows, currency: str, escalation: dict):
+    """The preset's `BusinessCaseInputs`, the stamp of the pack that filled it, and the
+    lines whose indexation the finance inputs filled (walk 05)."""
     from models.business_case import DefaultUnitMismatch
     from services.business_case import presets as P
     from services.business_case.runner import refusal_detail
@@ -101,8 +116,11 @@ def _inputs(template_id: str, variant, rows, currency: str):
         variant, labels = _pick(template_id, variant, rows)
         stamp = P.pinned_pack(template_id)
         if variant is not None:
-            return P.preset(template_id, variant, currency=currency), stamp
-        return P.offered_case(template_id, labels, currency=currency), stamp
+            case = P.preset(template_id, variant, currency=currency)
+        else:
+            case = P.offered_case(template_id, labels, currency=currency)
+        filled = P.with_finance_indexation(case, escalation)
+        return filled, stamp, _indexation_filled(case, filled)
     except DefaultUnitMismatch as exc:
         raise HTTPException(
             422, {**refusal_detail(exc), "error_kind": "default_unit_mismatch"}
@@ -125,6 +143,10 @@ def _break_even_line(old: str | None, lines: list[dict]) -> str | None:
         if ln.get("kind") == "revenue" and _source(ln) != "share_of"
     ]
     return old if old in revenue else (revenue[0] if revenue else None)
+
+
+#: The unit text of an indexation the finance inputs filled (walk 05, GK B2 B2).
+FROM_FINANCE = "per year, from the finance inputs (PPA escalation)"
 
 
 def cells(line: dict) -> list[tuple[str, str, Any, str]]:
@@ -165,6 +187,16 @@ def cells(line: dict) -> list[tuple[str, str, Any, str]]:
                     "",
                 )
             )
+    # Contract indexation and a capacity payment's de-rating: shown set or EMPTY, so the
+    # card never hides a value the run needs (walk 04, 05).
+    if line.get("escalation") == "contract":
+        v = line.get("indexation")
+        out.append(("indexation", "indexation", EMPTY if v is None else v, "per year"))
+    if takes_derating(line.get("category"), line.get("quantity_source")):
+        v = line.get("derating")
+        out.append(
+            ("derating", "de-rating", EMPTY if v is None else v, "share of capacity")
+        )
     return out
 
 
@@ -229,6 +261,24 @@ def to_ask(case: dict) -> list[dict]:
                     ),
                 }
             )
+        for col, per, needed in (
+            ("indexation", "per year", ln.get("escalation") == "contract"),
+            (
+                "derating",
+                "share of capacity, 0 to 1",
+                takes_derating(ln.get("category"), ln.get("quantity_source")),
+            ),
+        ):
+            if needed and ln.get(col) is None:
+                out.append(
+                    {
+                        "line": ln["name"],
+                        "column": col,
+                        "kind": ln.get("kind"),
+                        "per": per,
+                        "hint": None,
+                    }
+                )
     gpu = any(ln.get("unit") == "GPU_h" and _source(ln) == "linked" for ln in lines)
     if gpu and case.get("kw_per_gpu") is None:
         out.append({"setting": "kw_per_gpu", "per": "kW per GPU", "hint": None})
@@ -377,13 +427,21 @@ def plan(args: dict) -> dict:
             412,
         )
     variant, rows = args.get("variant"), args.get("rows")
-    inputs, stamp = _inputs(template_id, variant, rows, _currency(cfg))
+    inputs, stamp, from_finance = _inputs(
+        template_id, variant, rows, _currency(cfg), _finance(cfg).escalation
+    )
     merged: dict[str, Any] = {k: v for k, v in (old or {}).items() if k != "inputs"}
     merged["inputs"] = inputs.model_dump(mode="json")
     # The stored lease-up is case-level, not the preset's: it stays (BC 15, GK B2 C7).
-    stored_factor = ((old or {}).get("inputs") or {}).get("volume_factor_by_year")
-    if stored_factor:
-        merged["inputs"]["volume_factor_by_year"] = stored_factor
+    stored = (old or {}).get("inputs") or {}
+    if stored.get("volume_factor_by_year"):
+        merged["inputs"]["volume_factor_by_year"] = stored["volume_factor_by_year"]
+    # So is the receivable days, when the preset gives none (GK B2 B2).
+    if (
+        stored.get("receivable_days") is not None
+        and merged["inputs"].get("receivable_days") is None
+    ):
+        merged["inputs"]["receivable_days"] = stored["receivable_days"]
     merged["break_even_line"] = _break_even_line(
         merged.get("break_even_line"), merged["inputs"]["lines"]
     )
@@ -411,6 +469,9 @@ def plan(args: dict) -> dict:
     tv_row = _terminal_row(cfg, new)
     if tv_row is not None:
         out.append(tv_row)
+    for r in out:  # the rate is the finance inputs', never the preset's (walk 05)
+        if r["path"][-1:] == ["indexation"] and r.get("line") in from_finance:
+            r["unit"] = FROM_FINANCE
     if len(out) > CARD_ROW_CAP or len(json.dumps(out, default=str)) > CARD_CHARS:
         _refuse(
             "business_case_card_too_large",

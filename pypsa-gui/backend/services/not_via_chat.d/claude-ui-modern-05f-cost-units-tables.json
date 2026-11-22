@@ -1,0 +1,22 @@
+{
+ "entries": [
+  {
+   "id": "table_tonne_unit_marks",
+   "title": "Per-tonne marks in the asset tables",
+   "disposition": "manual",
+   "reason": "The asset tables mark which rows sit on a tonne bus so their cost cells read per tonne. Chat reads each asset's units instead.",
+   "page": "Bottom panel tables",
+   "panel": null,
+   "keywords": [
+    "tonne",
+    "pertonne"
+   ],
+   "routes": [
+    [
+     "GET",
+     "/api/network/asset_schema/{component}/table_units"
+    ]
+   ]
+  }
+ ]
+}

@@ -31,6 +31,7 @@ import pandapower.shortcircuit as sc
 import pandas as pd
 
 from gridspine.static.island_sc import machine_net
+from gridspine.static.series_caps import PROTECTION, series_caps
 
 #: Rated peak withstand current over rated short-time current (IEC 62271-1).
 PEAK_FACTOR = {50: 2.5, 60: 2.6}
@@ -62,6 +63,11 @@ def campus_fault_levels(campus, installed) -> pd.DataFrame:
     p = campus.params
     ratings = p[p["param"] == "ik_rated_ka"].set_index("element")
     f_hz = int(round(float(net.f_hz)))
+    caps = series_caps(campus.net)
+    bypassed = sorted(map(str, caps.loc[caps[PROTECTION] != "none", "name"])) if not caps.empty else []
+    # GC-01b: machine_net shorts each bypassed series capacitor (IEC 60909-0)
+    cap_note = (f"; series capacitor(s) {bypassed} neglected: assumes the MOV or bypass conducts for every fault"
+                if bypassed else "")
     rows = []
     for i in net.bus.index:
         name = str(net.bus.at[i, "name"])
@@ -73,5 +79,6 @@ def campus_fault_levels(campus, installed) -> pd.DataFrame:
             rated = float(ratings.at[name, "value"])
             adequate, detail = judge(row["ikss_max_ka"], row["ip_max_ka"], rated, f_hz)
             row.update(rated_ka=rated, rating_source=ratings.at[name, "source"], adequate=adequate, detail=detail)
+        row["detail"] += cap_note
         rows.append(row)
     return pd.DataFrame(rows)

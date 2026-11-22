@@ -179,6 +179,25 @@ def preset(
     return case.with_cost_defaults(_pack(f), currency=currency)
 
 
+def with_finance_indexation(
+    case: BusinessCaseInputs, escalation: dict[str, float]
+) -> BusinessCaseInputs:
+    """Each `contract` line the preset leaves without an indexation reads the finance
+    inputs' rate for contracts, the `ppa` class the investment case indexes its own
+    contract lines by (walk 05, GK B2 B2). A stated indexation is never overwritten; with
+    no such rate the line stays empty and the run names it."""
+    rate = escalation.get("ppa")
+    if rate is None:
+        return case
+    lines = [
+        ln.model_copy(update={"indexation": rate})
+        if ln.escalation == "contract" and ln.indexation is None
+        else ln
+        for ln in case.lines
+    ]
+    return case.model_copy(update={"lines": lines})
+
+
 def offered_rows(
     template_id: str, *, directory: pathlib.Path = PRESETS_DIR
 ) -> list[OfferedRow]:

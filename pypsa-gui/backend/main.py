@@ -68,6 +68,7 @@ from db import session as db_session_module
 from deps import bind_active_project, resolve_request_session, resolve_request_user
 from services import project_write_gate
 from services import active_project
+from services.app_version import APP_VERSION
 from services import fs_permission
 from services import shutdown as shutdown_service
 from routers import (
@@ -88,14 +89,17 @@ from routers import (
     compare,
     gridspine,
     campus_electrical,
+    grid_compliance,
     geocode,
     guides,
     io,
     library,
     library_references,
     local_settings,
+    market_prices,
     memory,
     memory_dream,
+    model_import,
     network,
     operational_gap,
     profiles,
@@ -114,6 +118,7 @@ from routers import (
     studies,
     uploads,
     vintage,
+    workbook,
 )
 from services.commercial import stamp_currency
 from services.pypsa_service import PyPSAService
@@ -725,7 +730,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="PyPSA Studio API",
-    version="1.0.0",
+    version=APP_VERSION,
     lifespan=lifespan,
     # Runs before every endpoint on every router: binds the caller's session to
     # its active project so the ~110 routes that name no project resolve
@@ -1387,6 +1392,8 @@ app.include_router(
 )
 # Edge Investment Case (P1 WP1.1b): the org-scoped Library.
 app.include_router(library.router, prefix="/api/library", tags=["library"])
+# SCU06 S1: the ENTSO-E token (super-admin) and the project's day-ahead fetch.
+app.include_router(market_prices.router, prefix="/api/market-prices", tags=["market-prices"])
 # The shipped (common) cost references: read-only, the same for every org.
 app.include_router(library_references.router, prefix="/api/library/references", tags=["library"])
 # The Parameter catalogue (expert-catalogue 01a): project-free, the same for every org and caller.
@@ -1418,6 +1425,8 @@ app.include_router(asset_results.router, prefix="/api/results/asset", tags=["ass
 # so it's adjacent to the foreground solve lifecycle it shares (_state, log_stream).
 app.include_router(solve_queue.router, prefix="/api/simulation/queue", tags=["solve-queue"])
 app.include_router(io.router, prefix="/api/io", tags=["io"])
+# The Excel input workbook (IMPORTS-1): outside /api/io, since it never touches the open network.
+app.include_router(workbook.router, prefix="/api/workbook", tags=["io"])
 # The manual-mapping form's preview of an equipment table: a read, mounted outside
 # /api/network so it takes no undo snapshot and clears no results.
 from routers.network_equipment_table import preview_router as _equipment_table_preview  # noqa: E402
@@ -1461,6 +1470,10 @@ app.include_router(compare.router, prefix="/api/projects", tags=["compare"])
 _projects_router_guard = [Depends(fs_permission.require_file_access)]
 app.include_router(
     adequacy_worksheet.router, prefix="/api/projects", tags=["adequacy"],
+    dependencies=_projects_router_guard,
+)
+app.include_router(
+    market_prices.project_router, prefix="/api/projects", tags=["market-prices"],
     dependencies=_projects_router_guard,
 )
 # Study reports (WP1): `/{name}/reports…` — same posture as the worksheet
@@ -1536,12 +1549,18 @@ app.include_router(gridspine.router, prefix="/api/gridspine", tags=["gridspine"]
 # The campus electrical study of a hub project (gridspine campus engine, plan
 # C6): its own prefix, like gridspine's, for the same reason.
 app.include_router(campus_electrical.router, prefix="/api/campus-electrical", tags=["campus-electrical"])
+# The grid-compliance workflow (GC-09): TRGC deliverable tracker, data list,
+# TSO revision log and report pack.
+app.include_router(grid_compliance.router, prefix="/api/grid-compliance", tags=["grid-compliance"])
 # Chatbot file uploads (Phase A) — per-project file storage at
 # `projects/<name>/uploads/`. Mounted under the same /api/projects prefix
 # so its routes (`/{name}/uploads`, `/{name}/uploads/{file_id}/...`) follow
 # the existing project-scoped URL pattern. Phase B adds chat tools that
 # consume these uploads; Phase C wires them into the Anthropic multimodal API.
 app.include_router(uploads.router, prefix="/api/projects", tags=["uploads"])
+# Model files (PSS/E, DGS, PLEXOS) into a new project (project-io 04): outside /api/io,
+# since it never touches the open network.
+app.include_router(model_import.router, prefix="/api/model-import", tags=["io"])
 # Chatbot integration v6 (Phase 2 stub — no Anthropic SDK yet). SSE stream +
 # confirmation card lifecycle + abort endpoint. The router is mounted under
 # /api/chat; Phase 3 wires the real LLM call without changing route shapes.
