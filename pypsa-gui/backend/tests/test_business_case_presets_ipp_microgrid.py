@@ -7,13 +7,16 @@ VoLL appears (B4); GK B ruling C3 puts the EaaS-fee help in the preset."""
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from models.business_case import LineItem
 from services.business_case import linked_outputs as L
 from services.business_case import presets as P
 from services.finance.business_case import DoubleCount, build_business_case, pnl
-from services.finance.case import TemplateLine
+from models.finance import TerminalValueRule
+from services.finance.case import LpBasis, TemplateLine
 from services.finance.engine import run_case
 from tests.test_business_case_engine import PACK, _ic, _inputs, _line
 from tests.test_business_case_guards import OPS, _by_year
@@ -293,9 +296,17 @@ def test_21_the_ipp_preset_runs_once_only_prices_are_typed():
     """Prices (and the plant capex quantity) are all a user types: no indexation, life or
     terminal-value refusal remains, and NPV, IRR and payback are established."""
     ppa = TemplateLine("asset:ppa_wind", "ppa_settlement", 5000.0, "ppa")
-    ic = _ic(
-        lines=(ppa, TemplateLine("fom", "fom", -20.0, "opex")),
-        analysis_years=8,
+    ppa = TemplateLine("asset:ppa_wind", "ppa_settlement", 5000.0, "ppa")
+    # The IPP template's own method: the remaining life (its replacement rule is
+    # `part_lifetimes`); `_rla_ic` is IB-B PR C's fixture for it, with an LP rate.
+    ic = dataclasses.replace(
+        _ic(
+            lines=(ppa, TemplateLine("fom", "fom", -20.0, "opex")),
+            analysis_years=8,
+            terminal_value=TerminalValueRule(method="remaining_life_annuity"),
+            replacement_rule="part_lifetimes",
+        ),
+        lp_basis=LpBasis(discount_rate=0.06),
     )
     rows = []
     for ln in P.preset(IPP, "ipp_hybrid", currency="USD").lines:
@@ -330,4 +341,12 @@ def test_21_the_ipp_preset_runs_once_only_prices_are_typed():
     }
     r = run_case(build_business_case(ic, inputs, series).case, PACK)
     for k in ("project_post_tax_npv", "project_post_tax_irr", "payback_years"):
-        assert r.metrics.get(k) is not None, (k, r.reasons)
+        assert r.metrics.get(k) is not None, (k, r.op.reasons)
+    # Hand computation: the plant capex (600 000, life 30 y from the pack) is valued at the
+    # horizon on the annuity of its purchase over the years still to run.
+    (term,) = [x for x in r.op.terminal_terms if x.asset == "Plant capex"]
+    rate, life, left = 0.06, 30.0, term.remaining_years
+    crf = rate / (1.0 - (1.0 + rate) ** -life)
+    apf = (1.0 - (1.0 + rate) ** -left) / rate
+    assert term.lifetime_years == 30.0 and 0.0 < left < life
+    assert term.value == pytest.approx(600000.0 * crf * apf)
