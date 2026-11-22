@@ -41,6 +41,16 @@ describe('InvestmentTab, Investment case section', () => {
     expect(screen.queryByTestId('ic-site-connection-needed')).toBeNull()
   })
 
+  it('an island site with no connection: nothing is handed over (GK B3 4)', async () => {
+    vi.mocked(commercialApi.getCommercial).mockResolvedValue(null)
+    vi.mocked(commercialApi.getPocState).mockResolvedValue({ poc_link: null, open: true } as never)
+    renderTab()
+    await screen.findByTestId('ic-island')
+    fireEvent.click(screen.getByRole('tab', { name: 'Investment case' }))
+    expect((await screen.findByTestId('case-view')).getAttribute('data-connection-missing')).toBe('false')
+    expect(screen.queryByTestId('ic-site-connection-needed')).toBeNull()
+  })
+
   it('a site connection set: nothing is handed over', async () => {
     vi.mocked(commercialApi.getCommercial).mockResolvedValue({ poc_link: 'import' } as never)
     renderTab()

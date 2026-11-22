@@ -9,18 +9,6 @@
    "method": "GET",
    "path": "/api/projects/{name}/workbook",
    "reason": "binary-transfer"
-  },
-  {
-   "method": "POST",
-   "path": "/api/workbook/preview",
-   "reason": "held-by-spec",
-   "issue": ".scratch/excel-input-workbook/issues/06-chat-workbook.md"
-  },
-  {
-   "method": "POST",
-   "path": "/api/workbook/import",
-   "reason": "held-by-spec",
-   "issue": ".scratch/excel-input-workbook/issues/06-chat-workbook.md"
   }
  ]
 }

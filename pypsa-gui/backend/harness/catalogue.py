@@ -2348,8 +2348,8 @@ TOOLS: list[dict[str, Any]] = [
         "generators, lines, links, storage_units, stores, loads, transformers, "
         "snapshots, report} per schemas.py:455-464; report lists what the file "
         "held that was not read. The PyPSA Studio input workbook is refused "
-        "(import_as_new_project): the user imports it as a new project in the "
-        "app. Safety: destructive.",
+        "(import_as_new_project): preview_input_workbook then import_input_workbook "
+        "import it as a new project. Safety: destructive.",
         {
             "bytes_b64": {"type": "string"},
             "filename": {"type": "string"},
@@ -5279,6 +5279,36 @@ TOOLS: list[dict[str, Any]] = [
                              "required": ["component", "digest"]}}},
         ["project_id", "items"],
     ),
+    # Excel input workbook issue 06 (IMPORT-FLOW-1): download, preview, import as NEW.
+    _t(
+        "get_input_workbook",
+        "Offer the PyPSA Studio Excel input workbook as a download the user's browser fetches: "
+        "with no project, the blank template (plain-named sheets with units and validation lists, "
+        "filled in Excel); with project, that project's workbook as last saved (unsaved edits are "
+        "not in it). Returns filename and download_url; no bytes, nothing written. Safety: read.",
+        {"project": {"type": "string", "description": "Exact project name; omit for the blank template."}},
+        [],
+    ),
+    _t(
+        "preview_input_workbook",
+        "Preview importing a filled-in Excel input workbook the user attached (file_id) as a NEW "
+        "project: what it creates (counts per sheet, summary) and what it could not read "
+        "(unmapped, assumed, warnings). Writes nothing. Returns sha256 and suggested_name for "
+        "import_input_workbook. Safety: read.",
+        {"file_id": {"type": "string"}},
+        ["file_id"],
+    ),
+    _t(
+        "import_input_workbook",
+        "Import the previewed Excel input workbook (file_id, expected_sha256 from "
+        "preview_input_workbook) as a NEW project named name (default suggested_name). Never "
+        "overwrites: a taken name refuses. The user confirms a card showing the preview first. "
+        "The new project stays closed and the open one unchanged; activate_project opens it. "
+        "Safety: destructive.",
+        {"file_id": {"type": "string"}, "expected_sha256": {"type": "string"},
+         "name": {"type": "string"}},
+        ["file_id", "expected_sha256"],
+    ),
 ]
 
 
@@ -6123,6 +6153,9 @@ TOOL_ROUTES: dict[str, list] = {
     "campus_publish_grid_code": [("POST", "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/publish")],
     "campus_get_published_grid_code": [("GET", "/api/campus-electrical/{name}/grid-codes/published/{profile_id}")],
     "campus_delete_published_grid_code": [("DELETE", "/api/campus-electrical/{name}/grid-codes/published/{profile_id}")],
+    "get_input_workbook": [("GET", "/api/workbook/template"), ("GET", "/api/projects/{name}/workbook")],
+    "preview_input_workbook": [("POST", "/api/workbook/preview")],
+    "import_input_workbook": [("POST", "/api/workbook/import")],
 }
 
 

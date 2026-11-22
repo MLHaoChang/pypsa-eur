@@ -160,7 +160,7 @@ export function improveFillText(f: { title: string; voll: boolean; goal: boolean
     : f.voll ? 'the value of lost load' : 'the reliability goal'
   const head = `Not saved yet: ${what} filled in from the Improve card (${f.title}).`
   return f.goal
-    ? `${head} Saving changes the project's goal for every study, not only the next run; then run the study again in Results › Adequacy. Or Revert.`
+    ? `${head} Saving changes the project's goal for every study, not only the next run. Then run the study again in Results › Adequacy. Or Revert.`
     : `${head} Save settings to keep it, or Revert.`
 }
 

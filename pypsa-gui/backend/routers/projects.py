@@ -1788,6 +1788,8 @@ def _import_dry_run(
         "members": sorted(members),
         "would_conflict": clash is not None,
         "stripped": stripped,
+        # The same plain words the real import answers with, for the preview.
+        **({"stripped_note": _stripped_note(stripped)} if stripped else {}),
         "ignored": list(ignored),
         "rederived": list(rederived),
         "rederived_at_default_rate": bool(rederived) and rate_source == "default",

@@ -21,6 +21,7 @@ import { resolveScenType } from '../utils/scenarioType'
 import { DeleteProjectDialog, InlineRename, ProjectCardMenu } from './projectsHome/ProjectCardMenu'
 import { hasAdminConsoleAccess } from './admin/helpers'
 import { WorkbookImportHost } from '../components/workbook/WorkbookImportDialog'
+import { ModelImportHost } from '../components/workbook/ModelImportDialog'
 import {
   countScenarios,
   findProjectByIdentifier,
@@ -81,7 +82,7 @@ const START_ACTIONS: ReadonlyArray<{
 }> = [
   { tab: 'blank', label: CREATE_LABEL.blank, hint: 'Start from an empty network', Icon: FilePlus },
   { tab: 'template', label: CREATE_LABEL.template, hint: 'Bundled starter networks', Icon: BookOpen },
-  { tab: 'file', label: CREATE_LABEL.file, hint: '.pypsaproj.zip or .nc', Icon: Upload },
+  { tab: 'file', label: CREATE_LABEL.file, hint: 'Project file, PSS/E, PowerFactory, PLEXOS', Icon: Upload },
   { tab: 'clone', label: CREATE_LABEL.clone, hint: 'Fork one you can access', Icon: CopyIcon },
   // S8: a question-first decision study (its own project; the intake opens in
   // the workbench's decision panel).
@@ -792,6 +793,7 @@ export default function ProjectsHomePage() {
 
       <DeleteProjectDialog project={deleting} onClose={() => setDeleting(null)} />
       <WorkbookImportHost />
+      <ModelImportHost />
 
       {wizardTab && (
         <NewProjectWizard

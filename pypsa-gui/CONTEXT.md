@@ -350,6 +350,31 @@ A value the user has not supplied, filled from a Generic default. Marked in
 every view and listed in the Assumptions ledger. A catalogue default is shown,
 never written into a network.
 
+**Import preview**:
+What a file import shows before it creates anything (IMPORT-FLOW-1): what the files
+hold, then every item the import does not carry and every value it had to choose, in
+plain names (RAW-NAMES-1), then the warnings. "Create project" makes a **new** project
+and never overwrites one. Its words:
+- **Not carried**: a source item the importer could not map into a project, with the reason.
+- **Assumed**: a value the file did not give and the importer chose, with why (the
+  assumed-rating markers `s_nom_source`, `p_nom_source`, `marginal_cost_source` read
+  "assumed" or "file"). In the preview this is the importer's choice; the Generic-default
+  **Assumed** above is the same word for a value the user has not supplied.
+- **Applied (suggested)**: a suggestion the user accepted in the preview. It moves its row
+  out of Not carried or Assumed in the stored import report (project-io 05). A suggestion
+  not accepted stays listed as "Suggested (not applied)".
+
+**Bundle manifest**:
+The checksum list inside a project file (`.pypsaproj.zip`) that lets an import detect a
+damaged file. A bundle without one still imports, and the import preview says
+"no manifest, so nothing was checked for damage" with the other warnings. The preview
+also says in plain words what the import clears (the `stripped_note`).
+
+**Network not saved yet**:
+The state after a raw `.nc`, `.m` or `.xlsx` import into the Project Data modal: the
+loaded network belongs to no project. The sidebar says so and offers "Save as project";
+exports are named after the file until then.
+
 ## Project flow language
 
 **Project flow**:

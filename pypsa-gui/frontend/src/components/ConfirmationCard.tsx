@@ -10,6 +10,7 @@ import { mismatchSentence } from '../utils/projectMismatch'
 import { CHANGE_SET_NONE_TICKED, ChangeSetRows, changeSetApplyLabel, changeSetOf, pickMaxOf, settledChangeSet } from './ChangeSetCard'
 import { SAYS_HEADLINE, EditCardTable, editCardOf, editCardWords } from './EditCard'
 import { SweepCardTable, sweepCardOf } from './SweepCard'
+import { WorkbookImportCardBody, workbookCardOf } from './workbook/WorkbookChatCard'
 
 // Tools that require an EXTRA typed-confirmation step (Phase 4 polish).
 // v4-MAJOR-1 / v6-F1: save_project force-overwrite needs the user to type
@@ -284,6 +285,7 @@ export function ConfirmationCard() {
   const edit = editCardOf(pending?.edit_card)
   const sweep = sweepCardOf(pending?.sweep_card)
   const repeat = repeatCardOf(pending?.repeat_card)
+  const workbook = workbookCardOf(pending?.workbook_card)
   // LC-47: a change set's rows, the ones ticked, and a refused decision's line.
   const changeSet = changeSetOf(pending?.change_set)
   // A change-set card without well-formed rows is never approvable: an approval with no ticks means every row.
@@ -297,6 +299,7 @@ export function ConfirmationCard() {
     || (pending?.edit_card !== undefined && !edit)
     || (pending?.sweep_card !== undefined && !sweep)
     || (pending?.repeat_card !== undefined && !repeat)
+    || ((pending?.workbook_card !== undefined || pending?.tool_name === 'import_input_workbook') && !workbook)
     || (isChangeSet && !changeSet)
 
   // Reset the typed-confirmation field whenever the pending card changes.
@@ -544,6 +547,10 @@ export function ConfirmationCard() {
         These ticks no longer match the card, so nothing was applied. Cancel all and ask again.
       </p>}
       {sweep && <SweepCardTable card={sweep} guided={Boolean(guidedWording)} />}
+      {workbook && <WorkbookImportCardBody card={workbook} />}
+      {pending.tool_name === 'import_input_workbook' && !workbook && <p role="alert" className="mb-2 text-xs text-warn">
+        The preview of this workbook is unavailable. Deny it and ask again.
+      </p>}
       {pending.sweep_card !== undefined && !sweep && <p role="alert" className="mb-2 text-xs text-warn">
         The cases of this sweep are unavailable. Deny it and ask again.
       </p>}

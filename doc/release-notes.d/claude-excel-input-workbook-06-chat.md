@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant can give you the blank Excel input workbook or a project's workbook as a download, and import a filled workbook you attach as a new project. It shows what the import creates and what it could not read on the confirmation card first; nothing is written until you approve, and nothing is ever overwritten.
