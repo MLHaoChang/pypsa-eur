@@ -1,0 +1,297 @@
+# SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
+#
+# SPDX-License-Identifier: MIT
+"""GC-08's tables in the grid-compliance report pack (``SOURCES["GC-08"]``, GK A2 S1-S5).
+
+The provider reads the run through the scorecard's own read, so each test sets the run's files as
+``test_grid_readiness_ssti`` does and compares the pack against the scorecard row and against tables
+written out by hand here (S3), never built from the module's constants.
+"""
+
+from __future__ import annotations
+
+import re
+
+import pytest
+
+from services.adequacy import grid_readiness as G
+from services.grid_compliance import sources
+from services.grid_compliance import ssti_source as S
+from tests.test_grid_compliance import hub  # noqa: F401 - the registered-project fixture
+from tests.test_grid_readiness import PROFILE
+from tests.test_grid_readiness_motor_start import _site
+from tests.test_grid_readiness_off_grid import _open_tie
+from tests.test_grid_readiness_ssti import (
+    _card,
+    _profile_dir,
+    _resonance,
+    _sub_meta,
+    _two_genset_run,
+    _uif_meta,
+    _uif_table,
+    _write,
+)
+from tests.test_grid_readiness_voltage_stability import _template
+
+UIF_CSV = "campus_electrical/run/campus_ssti_uif.csv"
+RES_CSV = "campus_electrical/run/campus_subsync_resonance.csv"
+UIF_HEAD = ["Bus", "Case", "Machine", "UIF", "Threshold", "Verdict", "Note"]
+RES_HEAD = [
+    "Case",
+    "Machine",
+    "Resonance (Hz)",
+    "Complement (Hz)",
+    "Mode (Hz)",
+    "Margin (Hz)",
+    "Verdict",
+    "Note",
+]
+
+
+def _project(monkeypatch, d, n=None, profile=PROFILE, dirs=()):
+    """A stand-in project whose directory is ``d``: only the registry lookup is replaced."""
+    codes = dirs[0] if dirs else d / "codes"
+    net = _site() if n is None else n
+    monkeypatch.setattr(
+        G,
+        "_project_inputs",
+        lambda project, p, source: (d, net, profile, codes, "saved"),
+    )
+    return object()
+
+
+def _pack(project):
+    state, tables = sources.read(project, "GC-08")
+    return state, {t.table_id: t for t in tables or ()}
+
+
+def _no_repr(tables):
+    # S4: plain values only
+    for t in tables.values():
+        for text in [t.caption, *(c for r in t.rows for c in r)]:
+            assert not re.search(
+                r"np\.|\bnan\b|\bNone\b|Timestamp\(|array\(|\{'", text
+            ), text
+
+
+# ── present: whole tables against hand-written ones (S3, S4) ──────────────────
+
+
+def test_a_judged_run_gives_both_tables_cell_for_cell(tmp_path, monkeypatch):
+    uif = _uif_table()
+    uif[1] = {
+        **uif[1],
+        "machine": None,
+        "threshold": float("inf"),
+    }  # a blank and a non-finite cell
+    res = _resonance((0.4, 3.0), "flag")
+    res[1] = {**res[1], "note": 5}  # a note that is not text
+    _write(tmp_path, subsync=_sub_meta("flag"), uif_rows=uif, resonance=res)
+    rows, _ = _card(tmp_path)
+    state, t = _pack(_project(monkeypatch, tmp_path))
+
+    assert state == "present" and list(t) == ["ssti_uif", "subsync_series_resonance"]
+    assert t["ssti_uif"].columns == UIF_HEAD
+    assert t["ssti_uif"].rows == [
+        ["MV", "max", "GAS", "0.25", "0.1", "warn", ""],
+        ["MV", "min", "", "0.125", "—", "warn", ""],
+    ]
+    assert t["ssti_uif"].caption == rows["ssti_uif"]["note"]
+    assert t["ssti_uif"].source_path == UIF_CSV
+    assert t["subsync_series_resonance"].columns == RES_HEAD
+    assert t["subsync_series_resonance"].rows == [
+        ["max", "GAS", "30", "20.4", "20", "0.4", "warn", ""],
+        ["max", "GAS", "30", "23", "20", "3", "pass", "an unreadable note"],
+    ]
+    assert (
+        t["subsync_series_resonance"].caption
+        == rows["subsync_series_resonance"]["note"]
+    )
+    assert t["subsync_series_resonance"].source_path == RES_CSV
+    _no_repr(t)
+
+
+def test_a_clear_uif_at_the_threshold_passes_each_bus(tmp_path, monkeypatch):
+    # the scorecard's rule: equal to the threshold clears
+    _write(tmp_path, uif=_uif_meta("clear", worst=0.1), uif_rows=_uif_table(0.1))
+    _, t = _pack(_project(monkeypatch, tmp_path))
+    assert [r[5] for r in t["ssti_uif"].rows] == ["pass", "pass"]
+
+
+# ── S1: what the scorecard refused, the pack does not judge ───────────────────
+
+
+def test_a_damaged_uif_table_states_the_scorecards_reason_and_judges_nothing(
+    tmp_path, monkeypatch
+):
+    uif = _uif_table()
+    uif[0] = {**uif[0], "uif": "x"}
+    _write(tmp_path, uif_rows=uif)
+    rows, _ = _card(tmp_path)
+    assert rows["ssti_uif"]["verdict"] == "unknown"
+    _, t = _pack(_project(monkeypatch, tmp_path))
+    assert t["ssti_uif"].caption == rows["ssti_uif"]["note"]
+    assert "not a finite number (x)" in t["ssti_uif"].caption
+    assert t["ssti_uif"].rows == [
+        ["MV", "max", "GAS", "—", "0.1", "not judged", ""],
+        ["MV", "min", "GAS", "0.125", "0.1", "not judged", ""],
+    ]
+
+
+def test_a_profile_moved_since_the_run_states_the_reason_and_judges_nothing(
+    tmp_path, monkeypatch
+):
+    dirs = _profile_dir(
+        tmp_path, ssti_uif_threshold={"value": 0.2, "clause": "c", "source": "code"}
+    )
+    _write(tmp_path, uif=_uif_meta("flag", threshold=0.1, source="code", clause="c"))
+    rows, _ = _card(tmp_path, "gc08_card", dirs)
+    assert rows["ssti_uif"]["verdict"] == "unknown"
+    _, t = _pack(_project(monkeypatch, tmp_path, profile="gc08_card", dirs=dirs))
+    assert t["ssti_uif"].caption == rows["ssti_uif"]["note"]
+    assert "changed since the run" in t["ssti_uif"].caption
+    assert {r[5] for r in t["ssti_uif"].rows} == {"not judged"}
+
+
+def test_an_undecided_scan_lists_its_rows_unjudged_with_the_engines_reason(
+    tmp_path, monkeypatch
+):
+    _write(tmp_path)  # the scan's verdict: not evaluated
+    rows, _ = _card(tmp_path)
+    _, t = _pack(_project(monkeypatch, tmp_path))
+    table = t["subsync_series_resonance"]
+    assert table.caption == rows["subsync_series_resonance"]["note"]
+    assert {r[6] for r in table.rows} == {"not judged"}
+
+
+# ── S2: one off-grid rule ─────────────────────────────────────────────────────
+
+
+def test_off_grid_with_an_open_tie_marks_each_bus_islanded_and_drops_the_scan(
+    tmp_path, monkeypatch
+):
+    _template(tmp_path, "off_grid")
+    _write(tmp_path, uif=_uif_meta("clear", worst=0.05), uif_rows=_uif_table(0.05))
+    n = _open_tie(_site())
+    rows, _ = _card(tmp_path, n=n)
+    _, t = _pack(_project(monkeypatch, tmp_path, n=n))
+    assert list(t) == ["ssti_uif"]
+    assert t["ssti_uif"].caption == (
+        "The screen counts the grid's infeed; the islanded case is not evaluated. "
+        "Screening; the binding answer is the EMT study."
+    )
+    assert t["ssti_uif"].caption == rows["ssti_uif"]["note"]
+    assert [r[5] for r in t["ssti_uif"].rows] == [
+        "not evaluated (islanded)",
+        "not evaluated (islanded)",
+    ]
+
+
+def test_a_grid_project_with_an_open_tie_stays_judged_and_unmarked(
+    tmp_path, monkeypatch
+):
+    _template(tmp_path, "strong_grid")
+    _write(tmp_path)
+    _, t = _pack(_project(monkeypatch, tmp_path, n=_open_tie(_site())))
+    assert list(t) == ["ssti_uif", "subsync_series_resonance"]
+    assert [r[5] for r in t["ssti_uif"].rows] == ["warn", "warn"]
+    assert "islanded" not in t["ssti_uif"].caption
+
+
+def test_off_grid_by_label_only_stays_judged_and_drops_the_scan(tmp_path, monkeypatch):
+    _template(tmp_path, "off_grid")
+    _write(tmp_path)
+    _, t = _pack(_project(monkeypatch, tmp_path))
+    assert list(t) == ["ssti_uif"]
+    assert [r[5] for r in t["ssti_uif"].rows] == ["warn", "warn"]
+    assert "(grid-connected state only)" in t["ssti_uif"].caption
+
+
+@pytest.mark.parametrize(
+    "case, tables, verdicts, scorecard_uif",
+    [
+        ("islanded", ["ssti_uif"], ["not evaluated (islanded)"] * 2, "unknown"),
+        ("off_grid", ["ssti_uif"], ["warn", "warn"], "warn"),
+    ],
+)
+def test_the_scorecard_and_the_pack_follow_the_one_rule(
+    tmp_path, monkeypatch, case, tables, verdicts, scorecard_uif
+):
+    # S2: a grid project the rule calls off-grid; both readers follow the helper, not their own test
+    _template(tmp_path, "strong_grid")
+    _write(tmp_path)
+    monkeypatch.setattr(G, "grid_case", lambda inp: case)
+    rows, out = _card(tmp_path)
+    assert rows["ssti_uif"]["verdict"] == scorecard_uif
+    assert {e["id"] for e in out["excluded"]} >= set(G.SUBSYNC_PCC_ROWS)
+    _, t = _pack(_project(monkeypatch, tmp_path))
+    assert list(t) == tables
+    assert [r[5] for r in t["ssti_uif"].rows] == verdicts
+
+
+@pytest.mark.parametrize(
+    "template, n, case",
+    [
+        ("strong_grid", _site, "grid"),
+        ("strong_grid", lambda: _open_tie(_site()), "grid"),
+        ("off_grid", _site, "off_grid"),
+        ("off_grid", lambda: _open_tie(_site()), "islanded"),
+    ],
+    ids=["grid", "grid_open_tie", "off_grid_label_only", "off_grid_open_tie"],
+)
+def test_the_grid_case_reads_the_site_type_and_the_tie(tmp_path, template, n, case):
+    _template(tmp_path, template)
+    inp = G._Inputs(tmp_path, n(), None, None, None, None)
+    assert G.grid_case(inp) == case
+
+
+# ── pending and unavailable (S5, GK A2 (a)) ───────────────────────────────────
+
+
+def test_a_real_two_genset_stage_is_present_with_the_scorecards_worst_uif(
+    tmp_path, monkeypatch
+):
+    _two_genset_run(tmp_path)
+    rows, _ = _card(tmp_path)
+    state, t = _pack(_project(monkeypatch, tmp_path))
+    assert state == "present"
+    worst = rows["ssti_uif"]["project_value"]
+    assert worst is not None
+    assert max(float(r[3]) for r in t["ssti_uif"].rows) == pytest.approx(
+        worst, rel=5e-4
+    )
+    assert t["ssti_uif"].caption == rows["ssti_uif"]["note"]
+    _no_repr(t)
+
+
+def test_a_registered_project_before_the_stage_is_pending(hub):  # noqa: F811
+    assert sources.read(hub, "GC-08") == ("pending", None)
+
+
+def test_a_project_with_no_run_is_pending(tmp_path, monkeypatch):
+    assert _pack(_project(monkeypatch, tmp_path)) == ("pending", {})
+
+
+@pytest.mark.parametrize(
+    "files, reason",
+    [
+        (
+            {"error": "the PCC has no fault level"},
+            "The SSTI screens could not run: the PCC has no fault level",
+        ),
+        (
+            {"raw_meta": "["},
+            "The SSTI screens' record is unreadable: rerun the grid study",
+        ),
+    ],
+    ids=["failed_stage", "unreadable_meta"],
+)
+def test_a_failed_stage_or_unreadable_record_is_unavailable(
+    tmp_path, monkeypatch, files, reason
+):
+    _write(tmp_path, **files)
+    project = _project(monkeypatch, tmp_path)
+    assert sources.read(project, "GC-08") == ("unavailable", None)
+    with pytest.raises(S.SstiSourceUnavailable) as caught:
+        S.gc08_tables(project)
+    assert str(caught.value) == reason

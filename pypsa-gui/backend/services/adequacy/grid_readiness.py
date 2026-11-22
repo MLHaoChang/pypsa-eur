@@ -1628,13 +1628,57 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
                 **{k: v for k, v in common.items() if k not in ("limit", "source", "unit", "rule")})
 
 
+def _ssti_read(inp: _Inputs) -> dict:
+    """The campus run's SSTI files, read once for the scorecard rows and the report pack (GC-08 slice B, GK A2
+    S1). ``state`` is ``read`` (with ``meta``, a dict, and the ``uif`` and ``resonance`` tables, each a frame or
+    None when unreadable), ``pending`` (no run with the screens yet), ``error`` (the stage failed or gridspine
+    is missing) or ``unreadable`` (the meta is not a record); every state but ``read`` carries the
+    ``reason`` the rows state."""
+    import pandas as pd
+
+    try:
+        from gridspine.drivers.campus_study import SSTI_UIF_CSV, SUBSYNC_RESONANCE_CSV
+    except ImportError as exc:  # pragma: no cover - build-shape branch
+        return {"state": "error", "reason": f"The SSTI screens need gridspine ({exc})"}
+    from services import campus_electrical_service as ce
+
+    run = inp.dir / ce.SUBDIR / "run"
+    error = _read_json(run / ce.SSTI_SCREENS_ERROR)
+    if isinstance(error, dict) or (run / ce.SSTI_SCREENS_ERROR).exists():
+        reason = error.get("error") if isinstance(error, dict) else None
+        text = ("its error file is unreadable" if not isinstance(error, dict)
+                else (reason.strip() or "no reason given") if isinstance(reason, str)
+                else "no reason given" if reason is None else "its error is unreadable")
+        return {"state": "error", "reason": f"The SSTI screens could not run: {text}"}
+    meta = _read_json(run / ce.SSTI_SCREENS_META)
+    if not (run / ce.SSTI_SCREENS_META).is_file():
+        ran = run.is_dir() and any(run.iterdir())
+        return {"state": "pending",
+                "reason": "The grid study ran before the SSTI screens were added: rerun the grid study" if ran
+                else "No grid study with the SSTI screens yet: run the grid study"}
+    if not isinstance(meta, dict):
+        return {"state": "unreadable", "reason": SSTI_RECORD_UNREADABLE}
+
+    def table(name):
+        try:
+            return pd.read_csv(run / name, float_precision="round_trip")
+        except (OSError, ValueError):
+            return None
+
+    return {"state": "read", "meta": meta, "uif": table(SSTI_UIF_CSV), "resonance": table(SUBSYNC_RESONANCE_CSV),
+            "files": {"uif": f"{ce.SUBDIR}/run/{SSTI_UIF_CSV}", "resonance": f"{ce.SUBDIR}/run/{SUBSYNC_RESONANCE_CSV}"}}
+
+
 def _ssti_rows(inp: _Inputs) -> list[dict]:
+    """The three SSTI screening rows of the campus run (see ``_ssti_judged``)."""
+    return _ssti_judged(inp, _ssti_read(inp))
+
+
+def _ssti_judged(inp: _Inputs, read: dict) -> list[dict]:
     """The SSTI unit-interaction-factor screen and the sub-synchronous scan of the campus run (grid-compliance
     GC-08, ``campus_study.ssti_screens_campus``): three screening rows, judged as the run judged them (the
     threshold and clearance from the run's meta), so a flag warns and anything the screens could not decide
     reads unknown with its reason. SSCI is never evaluated here (converter damping is not modelled)."""
-    import pandas as pd
-
     # The screens read the campus run, not the PoC's entered fault level: the target is the section, where
     # the grid study runs.
     target = _target("connection")
@@ -1645,45 +1689,21 @@ def _ssti_rows(inp: _Inputs) -> list[dict]:
         return [_row(rid, req, project_value=None, verdict="unknown", note=_ssti_say(reason),
                      **common) for rid, req in _SSTI_REQ.items()]
 
-    try:
-        from gridspine.drivers.campus_study import SSTI_UIF_CSV, SUBSYNC_RESONANCE_CSV
-    except ImportError as exc:  # pragma: no cover - build-shape branch
-        return all_unknown(f"The SSTI screens need gridspine ({exc})")
-    from services import campus_electrical_service as ce
-
-    run = inp.dir / ce.SUBDIR / "run"
-    error = _read_json(run / ce.SSTI_SCREENS_ERROR)
-    if isinstance(error, dict) or (run / ce.SSTI_SCREENS_ERROR).exists():
-        reason = error.get("error") if isinstance(error, dict) else None
-        text = ("its error file is unreadable" if not isinstance(error, dict)
-                else (reason.strip() or "no reason given") if isinstance(reason, str)
-                else "no reason given" if reason is None else "its error is unreadable")
-        return all_unknown(f"The SSTI screens could not run: {text}")
-    meta = _read_json(run / ce.SSTI_SCREENS_META)
-    if not (run / ce.SSTI_SCREENS_META).is_file():
-        ran = run.is_dir() and any(run.iterdir())
-        return all_unknown("The grid study ran before the SSTI screens were added: rerun the grid study" if ran
-                           else "No grid study with the SSTI screens yet: run the grid study")
-    if not isinstance(meta, dict):
-        return all_unknown(SSTI_RECORD_UNREADABLE)
-
-    def table(name):
-        try:
-            return pd.read_csv(run / name, float_precision="round_trip")
-        except (OSError, ValueError):
-            return None
+    if read["state"] != "read":
+        return all_unknown(read["reason"])
+    meta = read["meta"]
 
     # A defect in one screen's record blanks that screen's row only (GK A2 N1).
     def unreadable(rid):
         return _row(rid, _SSTI_REQ[rid], project_value=None, verdict="unknown",
                     note=_ssti_say(SSTI_RECORD_UNREADABLE), **common)
 
-    uif = (_uif_row(inp, meta["uif"], table(SSTI_UIF_CSV), common) if isinstance(meta.get("uif"), dict)
+    uif = (_uif_row(inp, meta["uif"], read["uif"], common) if isinstance(meta.get("uif"), dict)
            else unreadable(SSTI_UIF))
-    if (uif["verdict"] in ("pass", "warn") and _archetype(inp) == "off_grid" and _tie_open(inp)):
+    if uif["verdict"] in ("pass", "warn") and grid_case(inp) == "islanded":
         uif.update(verdict="unknown", project_value=None,
                    note=_ssti_say(SSTI_ISLAND))
-    sub = (_subsync_row(inp, meta["subsync"], table(SUBSYNC_RESONANCE_CSV), common)
+    sub = (_subsync_row(inp, meta["subsync"], read["resonance"], common)
            if isinstance(meta.get("subsync"), dict) else unreadable(SUBSYNC_SR))
     ssci = _row(SSCI, _SSTI_REQ[SSCI], project_value=None, verdict="unknown",
                 note=_ssti_say(SSCI_REASON), **common)
@@ -2187,6 +2207,15 @@ CONN_LABEL_ONLY = "labelled off-grid, but the connection can import"
 CONN_BUILDERS = frozenset({_peak_rows, _ramp_row, _oscillation_row})
 
 
+def grid_case(inp: _Inputs) -> str:
+    """The scorecard's one off-grid rule (GK A2 S2), read by its off-grid exclusions, the SSTI UIF row and the
+    report pack: ``"grid"``, ``"off_grid"`` (off-grid with the tie closed or labelled only, so the rows stay
+    judged) or ``"islanded"`` (off-grid with the tie open)."""
+    if _archetype(inp) != "off_grid":
+        return "grid"
+    return "islanded" if _tie_open(inp) else "off_grid"
+
+
 def _tie_open(inp: _Inputs) -> bool:
     """True when the saved network shows the connection open: at least one bus
     is marked as the PoC, each is joined to the campus by Links alone, with at
@@ -2227,10 +2256,10 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
             conn_built.update(r["id"] for r in out)
         rows += out
     excluded = []
-    if _archetype(inp) == "off_grid":
+    if (case := grid_case(inp)) != "grid":
         why = {**dict.fromkeys(sk_built, SK_OFF_GRID), **dict.fromkeys(_VS, VS_OFF_GRID),
                **dict.fromkeys(SUBSYNC_PCC_ROWS, SUBSYNC_OFF_GRID)}
-        if _tie_open(inp):
+        if case == "islanded":
             why.update(dict.fromkeys(conn_built, CONN_OFF_GRID))
         elif inp.links:
             for r in rows:
@@ -2269,6 +2298,33 @@ def grid_readiness_for(project, profile: str | None = None, *, source: str = "li
     grid-readiness walkthrough 04); ``"saved"`` (the report, whose other
     chapters read the saved project) reads the saved file only. The answer's
     ``network`` names which: ``live``, ``saved`` or ``out_of_date``."""
+    from services import campus_electrical_service as ce
+
+    d, n, profile, codes, unsaved = _project_inputs(project, profile, source)
+    record, edited = _active_study(d)
+    out = grid_readiness(d, n, profile, profile_dirs=(codes,), eh_study=record, study_edited=edited)
+    # "live": the rows read the loaded network, unsaved edits included;
+    # "out_of_date": it was busy, so the saved file was read and may lag them.
+    out["network"] = unsaved
+    # SCORECARD-STALE-1: whether this profile is still the code the last campus run was held to.
+    out["profile"]["since_run"] = ce.grid_code_since_run(project, profile)
+    return out
+
+
+def ssti_screens_for(project) -> dict:
+    """The SSTI screens of a registered project as its saved scorecard reads them, for the report pack
+    (GC-08 slice B, GK A2 S1, S2): ``read`` (the run's files, ``_ssti_read``), ``rows`` (the scorecard's three
+    SSTI rows, before the off-grid exclusions) and ``case`` (``grid_case``)."""
+    d, n, profile, codes, _ = _project_inputs(project, None, "saved")
+    loaded, error = _load_profile(profile, (codes,))
+    inp = _Inputs(d, n, loaded, error, None, None)
+    read = _ssti_read(inp)
+    return {"read": read, "rows": _ssti_judged(inp, read), "case": grid_case(inp)}
+
+
+def _project_inputs(project, profile: str | None, source: str):
+    """A registered project's directory, network, profile id, grid-code folder and network source, as
+    ``grid_readiness_for`` documents them."""
     import pypsa
     from fastapi import HTTPException
 
@@ -2292,14 +2348,7 @@ def grid_readiness_for(project, profile: str | None = None, *, source: str = "li
         if nc.is_file():
             with ce._netcdf_lock():
                 n = pypsa.Network(str(nc))
-    record, edited = _active_study(d)
-    out = grid_readiness(d, n, profile, profile_dirs=(codes,), eh_study=record, study_edited=edited)
-    # "live": the rows read the loaded network, unsaved edits included;
-    # "out_of_date": it was busy, so the saved file was read and may lag them.
-    out["network"] = unsaved
-    # SCORECARD-STALE-1: whether this profile is still the code the last campus run was held to.
-    out["profile"]["since_run"] = ce.grid_code_since_run(project, profile)
-    return out
+    return d, n, profile, codes, unsaved
 
 
 #: How long the scorecard waits for a busy network before it reads the saved file.
