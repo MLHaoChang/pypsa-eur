@@ -11,6 +11,7 @@ import {
 import type { LibraryItemRef, Tariff } from '../../../api/types'
 import { Dialog } from '../../../components/Dialog'
 import { useUIStore } from '../../../store/uiStore'
+import { withReturnFrom } from '../../../layout/flowNavigation'
 import { nk } from '../../../utils/queryKeys'
 import { formatApiDetail } from '../../../api/client'
 import { pinnedVersions, replacesInline, urdbRate, type RateChoice } from './libraryModel'
@@ -354,10 +355,14 @@ export default function LibraryBrowser({ onOpenInputs }: { onOpenInputs?: () => 
     }
   }
   // The copy is added in Tariffs & contracts, unsaved; that editor says what to fill in.
+  // "Back to Commercial library" returns to this item at this version (UX 27 on S2b).
   const startFrom = (ref: LibraryItemRef, payload: Record<string, unknown>) => {
     setMessage(null)
-    useUIStore.getState().startContractFrom({ ref, payload })
-    onOpenInputs?.()
+    withReturnFrom(() => {
+      useUIStore.getState().startContractFrom({ ref, payload })
+      onOpenInputs?.()
+    }, 'Commercial library')
+    useUIStore.getState().focusLibraryItem({ kind: ref.kind, id: ref.id, version: ref.version })
   }
   const requestAttach = async (ref: LibraryItemRef) => {
     setMessage(null)

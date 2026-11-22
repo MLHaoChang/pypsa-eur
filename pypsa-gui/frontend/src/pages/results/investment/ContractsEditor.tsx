@@ -4,12 +4,13 @@
 // envelope series, curtailment, the capacity-fee item through the tariff
 // builder's item editor, available_from, group). Library pins are shown. The
 // server judges every combination: its 422 is shown at the contract it names.
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { NumInput } from './NumInput'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { commercialApi, libraryApi } from '../../../api/commercial'
 import type { CommercialConfig, CommercialContract, ConnectionAgreement, LibraryRef } from '../../../api/types'
 import { useUIStore } from '../../../store/uiStore'
+import { withReturnFrom } from '../../../layout/flowNavigation'
 import { nk } from '../../../utils/queryKeys'
 import { ItemEditor } from './TariffBuilder'
 import { blankItem } from './tariffModel'
@@ -31,6 +32,8 @@ function Errors({ list }: { list: string[] }) {
 
 /** Shown on a field that still holds a Library template's fill-in marker. */
 const FILL_IN = 'fill in your own'
+/** A neutral chip: a state the user can read, not a problem (UX 27 on S2b). */
+const CHIP = 'border border-border rounded px-1 text-muted text-[10px]'
 
 function IdsInput({ label, value, onChange }: {
   label: string; value: string[]; onChange: (v: string[]) => void
@@ -101,7 +104,9 @@ function Field({ spec, contract, label, parties, series, set, illustrative = fal
   return (
     <label className="flex items-center gap-2">
       <span className="w-48">{spec.label}{spec.required ? '' : ' (optional)'}</span>{control}
-      {illustrative && <span className="text-warn" data-testid="ce-illustrative">Illustrative EU default</span>}
+      {(isPlaceholder(v) || (Array.isArray(v) && v.some(isPlaceholder))) && (
+        <span className="text-muted" data-testid="ce-fill-in">Fill in your own</span>)}
+      {illustrative && <span className={CHIP} data-testid="ce-illustrative">Illustrative EU default</span>}
     </label>
   )
 }
@@ -191,6 +196,20 @@ function ConnectionEditor({ current, series, errors, onSave }: {
 const tagged = (list: CommercialContract[]) => structuredClone(list).map(c => (
   (c as { type?: unknown }).type == null ? { ...c, type: contractType(c) } as CommercialContract : c))
 
+/** Where a contract was copied from, with a way back to that item (UX 27 on S2b). */
+function LibrarySource({ ref_ }: { ref_: NonNullable<CommercialContract['library_ref']> }) {
+  const open = () => withReturnFrom(() => {
+    const ui = useUIStore.getState()
+    ui.focusLibraryItem({ kind: ref_.kind, id: ref_.id, version: ref_.version })
+    ui.setSlidePanel('library')
+  })
+  return (
+    <p className="text-muted">Copied from Library item “{ref_.id}” v{ref_.version}{' '}
+      <button type="button" className={ACTION} aria-label={`Open “${ref_.id}” v${ref_.version} in the Commercial library`}
+              onClick={open}>›</button></p>
+  )
+}
+
 export default function ContractsEditor() {
   const project = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
@@ -208,6 +227,14 @@ export default function ContractsEditor() {
   const [errors, setErrors] = useState<Map<number, string[]>>(new Map())
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
   const [newType, setNewType] = useState<ContractType>('ppa')
+  // The Library fill-ins left at the last save: one line beside the save button (UX 27 on S2b).
+  const [fillRefusal, setFillRefusal] = useState<string | null>(null)
+  const [scrollTo, setScrollTo] = useState<string | null>(null)
+  // The ids the stored list holds: any other contract in the form is not saved yet.
+  const savedIds = useMemo(() => {
+    try { return new Set((JSON.parse(baseline ?? '[]') as Array<{ id?: string }>).map(c => c.id)) }
+    catch { return new Set<string | undefined>() }
+  }, [baseline])
 
   useEffect(() => {
     if (commercial.data !== undefined && contracts === null && !commercial.isFetching) {
@@ -223,12 +250,27 @@ export default function ContractsEditor() {
     // One editor takes it, where two are mounted (section 7 and Economics).
     if (useUIStore.getState().contractStart !== start) return
     useUIStore.getState().clearContractStart()
+    const item = `Library item “${start.ref.id}” v${start.ref.version}`
+    // One unsaved copy per item version: a second click points to the first.
+    const unsaved = contracts.find(c => c.library_ref?.id === start.ref.id
+      && c.library_ref?.version === start.ref.version && !savedIds.has(c.id))
+    if (unsaved) {
+      setScrollTo(unsaved.id)
+      setMessage({ tone: 'ok', text: `An unsaved copy of ${item} is already in the list: ${unsaved.id}.` })
+      return
+    }
     const added = startingPoint(start.payload, start.ref, contracts)
-    setContracts([...contracts, added]); setErrors(new Map())
+    setContracts([...contracts, added]); setErrors(new Map()); setScrollTo(added.id)
     const fill = unfilledPlaceholders(added)
-    setMessage({ tone: 'ok', text: `Added ${added.id}, a copy of Library item ${start.ref.id} v${start.ref.version}. `
+    setMessage({ tone: 'ok', text: `Added ${added.id}, a copy of ${item}. `
       + (fill.length ? `Fill in ${fill.join(', ')}, then save the contracts.` : 'Save the contracts to keep it.') })
-  }, [start, contracts, commercial.data])
+  }, [start, contracts, commercial.data, savedIds])
+  useEffect(() => {
+    if (!scrollTo) return
+    setScrollTo(null)
+    Array.from(document.querySelectorAll<HTMLElement>('[data-contract-id]'))
+      .find(el => el.dataset.contractId === scrollTo)?.scrollIntoView?.({ block: 'center' })
+  }, [scrollTo])
   // The Library items the contracts were copied from: a price still equal to
   // an illustrative item's is labelled as one (SCU06 S2b, GK condition 4).
   const sourceRefs = (contracts ?? []).map(c => c.library_ref)
@@ -279,10 +321,13 @@ export default function ContractsEditor() {
   const saveContracts = async () => {
     // A blank required party or id is refused here (the model takes '').
     const blank = new Map(contracts.map((c, i) => [i, missingRequired(c)] as const).filter(([, m]) => m.length))
-    // A Library template's fill-in marker left in place: refused here, as the server would.
-    for (const [i, c] of contracts.entries()) {
-      const fill = unfilledPlaceholders(c)
-      if (fill.length) blank.set(i, [...(blank.get(i) ?? []), ...fill.map(f => `${f}: fill in your own (the Library template's placeholder)`)])
+    // A Library template's fill-in left in place: refused here in the server's words.
+    setFillRefusal(null)
+    const left = contracts.map(c => [c.id, unfilledPlaceholders(c)] as const).filter(([, f]) => f.length)
+    if (left.length) {
+      setMessage(null); setErrors(new Map())
+      setFillRefusal(`Not saved: ${left.map(([id, f]) => `contract ${id} still holds the Library template's fill-in in ${f.join(', ')}.`).join(' ')} Fill in your own, then save again.`)
+      return
     }
     if (blank.size) {
       setErrors(blank)
@@ -337,9 +382,12 @@ export default function ContractsEditor() {
         const type = contractType(c)
         const illustrative = illustrativePrices(c)
         return (
-          <fieldset key={i} className="border border-border rounded p-2 space-y-1" data-testid={`ce-contract-${i}`}>
-            <legend className="font-semibold">{type ? type.toUpperCase() : String(rec.type ?? 'contract')} {c.id}</legend>
-            {c.library_ref && <p className="text-muted">Copied from Library item {c.library_ref.id} v{c.library_ref.version}.</p>}
+          <fieldset key={i} className="border border-border rounded p-2 space-y-1" data-testid={`ce-contract-${i}`}
+                    data-contract-id={c.id}>
+            <legend className="font-semibold">{type ? type.toUpperCase() : String(rec.type ?? 'contract')} {c.id}
+              {baseline !== null && !savedIds.has(c.id) && (
+                <span className={`${CHIP} ml-2 font-normal`} data-testid="ce-unsaved">Not saved yet</span>)}</legend>
+            {c.library_ref && <LibrarySource ref_={c.library_ref} />}
             {type ? CONTRACT_FIELDS[type].filter(f => !f.when || f.when(rec)).map(f => (
               <Field key={f.key} spec={f} contract={rec} label={label} parties={datalist} series={refs}
                      illustrative={illustrative.has(f.key)}
@@ -347,13 +395,16 @@ export default function ContractsEditor() {
             )) : (
               <p className="text-muted">A contract type this editor does not know: kept as stored.</p>
             )}
+            {illustrative.size > 0 && (
+              <p className="text-muted" data-testid="ce-illustrative-key">
+                Illustrative EU default: a value inside a published range, not your contract's. Replace it with your own.</p>)}
             <Errors list={errors.get(i) ?? []} />
             <button type="button" className={ACTION} aria-label={`Remove ${label}`}
                     onClick={() => edit(contracts.filter((_, j) => j !== i), true)}>Remove</button>
           </fieldset>
         )
       })}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2 [&>button]:shrink-0">
         <label>Add a{' '}
           <select aria-label="New contract type" className={input} value={newType}
                   onChange={e => setNewType(e.target.value as ContractType)}>
@@ -362,6 +413,7 @@ export default function ContractsEditor() {
           blankContract(newType, nextContractId(contracts, newType), site)], true)}>Add contract</button>
         <button type="button" className="px-2 py-1 rounded bg-accent text-on-accent"
                 onClick={() => { void saveContracts() }}>Save the contracts</button>
+        {fillRefusal && <span role="alert" className="text-danger min-w-[16rem] flex-1" data-testid="ce-fill-refusal">{fillRefusal}</span>}
         <button type="button" className={ACTION} onClick={() => { void reload() }}>
           Reload the contracts</button>
       </div>

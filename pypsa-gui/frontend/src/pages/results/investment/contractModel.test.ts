@@ -56,7 +56,7 @@ describe('contract model', () => {
     // Keys sorted, as the server returns them: the names follow the form.
     const c = { asset_ids: ['pv', '\u2060fill-in:asset'], buyer: 'site', id: 'p', kind: 'pay_as_produced',
                 price: 55, seller: '\u2060fill-in:seller', tenor_years: 12, type: 'ppa', x: '\u2060fill-in:x' }
-    expect(unfilledPlaceholders(c as never)).toEqual(['seller', 'assets (generators)', 'x'])
+    expect(unfilledPlaceholders(c as never)).toEqual(['Seller', 'Assets (generators)', 'X'])
     expect(unfilledPlaceholders({ ...c, seller: 'Solar BV', asset_ids: ['pv'], x: 'y' } as never)).toEqual([])
   })
 

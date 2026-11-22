@@ -211,7 +211,7 @@ export const isPlaceholder = (v: unknown): boolean =>
   typeof v === 'string'
   && v.split(PLACEHOLDER_MARK[0]).join('').trim().toLowerCase().startsWith(PLACEHOLDER_MARK.slice(1))
 
-/** The labels of the fields that still hold a fill-in marker (a party, or an
+/** The panel's words ("Seller", "Assets (generators)") for the fields that still hold a fill-in marker (a party, or an
  *  asset in a list): the save is refused while any is left (SCU06 S2b). */
 export function unfilledPlaceholders(c: CommercialContract): string[] {
   const type = contractType(c)
@@ -223,6 +223,7 @@ export function unfilledPlaceholders(c: CommercialContract): string[] {
     .filter(k => isPlaceholder(r[k]) || (Array.isArray(r[k]) && (r[k] as unknown[]).some(isPlaceholder)))
     .sort((a, b) => at(a) - at(b))
     .map(k => specs.find(f => f.key === k)?.label ?? k)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))     // the panel's word, as a name
 }
 
 /** A Library contract as the start of a new project contract (SCU06 S2b): a

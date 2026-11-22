@@ -39,15 +39,29 @@ def unfilled(contract) -> list[str]:
     return out
 
 
+# The Contracts panel's own words for the fields a template leaves to fill in
+# (frontend `contractModel.CONTRACT_FIELDS`), so the server's refusal and the
+# panel's say the same thing, in the form's order (SCU06 S2b, UX 27 condition 4).
+FIELD_WORDS = {
+    "seller": "Seller",
+    "buyer": "Buyer",
+    "generator_owner": "Generator owner",
+    "counterparty": "Counterparty",
+    "asset_ids": "Assets (generators)",
+}
+_ORDER = list(FIELD_WORDS)
+
+
 def problem(contract) -> str | None:
     """A plain refusal for a contract that is still a template, or None."""
     fields = unfilled(contract)
     if not fields:
         return None
+    fields.sort(key=lambda f: _ORDER.index(f) if f in _ORDER else len(_ORDER))
+    words = ", ".join(FIELD_WORDS.get(f, f) for f in fields)
     return (
-        f"Contract {contract.id} still has template placeholders in "
-        f"{', '.join(fields)}. Replace each with your own party or asset name, "
-        "then save again."
+        f"Contract {contract.id} still holds the Library template's fill-in in "
+        f"{words}. Fill in your own, then save again."
     )
 
 

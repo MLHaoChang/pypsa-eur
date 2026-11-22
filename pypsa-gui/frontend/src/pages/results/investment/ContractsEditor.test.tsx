@@ -3,7 +3,7 @@
 // is shown at the contract it names, the Library pin is shown, and the
 // connection agreement's capacity fee uses the tariff item editor.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../../store/uiStore'
 import { commercialApi, libraryApi } from '../../../api/commercial'
@@ -71,7 +71,7 @@ describe('ContractsEditor', () => {
   it('round-trips every P2 contract type unchanged and shows the Library pin', async () => {
     const { container } = renderEditor()
     await screen.findByTestId('ce-contract-5')
-    expect(screen.getByTestId('ce-contract-0').textContent).toContain('Copied from Library item ppa_lib v3')
+    expect(screen.getByTestId('ce-contract-0').textContent).toContain('Copied from Library item “ppa_lib” v3')
     // Type-specific fields: the premium only under market_plus_premium.
     expect(screen.getByLabelText('Contract ppa1 premium (per MWh)')).toBeTruthy()
     expect(screen.queryByLabelText('Contract ppa1 sleeving party')).toBeNull()
@@ -310,13 +310,17 @@ describe('ContractsEditor', () => {
     renderEditor()
     const added = await screen.findByTestId('ce-contract-6')
     expect(useUIStore.getState().contractStart).toBeNull()
-    expect(screen.getByRole('status').textContent).toBe('Added cfd_7, a copy of Library item eu-cfd v1. '
-      + 'Fill in generator owner, counterparty, assets (generators), then save the contracts.')
-    expect(within(added).getByText('Copied from Library item eu-cfd v1.')).toBeTruthy()
+    expect(screen.getByRole('status').textContent).toBe('Added cfd_7, a copy of Library item “eu-cfd” v1. '
+      + 'Fill in Generator owner, Counterparty, Assets (generators), then save the contracts.')
+    expect(added.textContent).toContain('Copied from Library item “eu-cfd” v1')
     for (const f of ['generator owner', 'counterparty', 'assets (generators)']) {
       const box = within(added).getByLabelText(`Contract cfd_7 ${f}`) as HTMLInputElement
       expect([box.value, box.placeholder]).toEqual(['', 'fill in your own'])
+      // The prompt is visible text on the field's own line, not only a placeholder.
+      expect(box.closest('label')!.textContent).toContain('Fill in your own')
     }
+    expect(within(added).getByTestId('ce-unsaved').textContent).toBe('Not saved yet')
+    expect(within(screen.getByTestId('ce-contract-0')).queryByTestId('ce-unsaved')).toBeNull()
     expect(api.saveCommercial).not.toHaveBeenCalled()
     expectAllButtonsNamed(added)
   })
@@ -329,11 +333,20 @@ describe('ContractsEditor', () => {
     fireEvent.focus(ids); fireEvent.blur(ids)                 // untouched: the marker stays
     fireEvent.change(within(added).getByLabelText('Contract cfd_7 generator owner'), { target: { value: 'Wind BV' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save the contracts' }))
-    const alert = await within(added).findByRole('alert')
-    expect(alert.textContent).toContain("counterparty: fill in your own (the Library template's placeholder)")
-    expect(alert.textContent).toContain('assets (generators): fill in your own')
-    expect(alert.textContent).not.toContain('generator owner')
+    // One line beside the save button, in the server's words; nothing else.
+    expect((await screen.findByTestId('ce-fill-refusal')).textContent).toBe(
+      "Not saved: contract cfd_7 still holds the Library template's fill-in in Counterparty, Assets (generators). "
+      + 'Fill in your own, then save again.')
+    expect(within(added).queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('status')).toBeNull()
     expect(api.saveCommercial).not.toHaveBeenCalled()
+    // The stored list after the save holds the copy: its "Not saved yet" goes.
+    api.saveCommercial.mockImplementation(async (patch) => {
+      api.getCommercial.mockResolvedValue({ poc_link: 'import', site_party: 'site',
+        contracts: structuredClone((patch as { contracts: unknown }).contracts),
+        connection: structuredClone(CONNECTION) } as never)
+      return {} as never
+    })
     fireEvent.change(within(added).getByLabelText('Contract cfd_7 counterparty'), { target: { value: 'gov' } })
     fireEvent.focus(ids); fireEvent.change(ids, { target: { value: 'wind' } }); fireEvent.blur(ids)
     fireEvent.click(screen.getByRole('button', { name: 'Save the contracts' }))
@@ -341,6 +354,31 @@ describe('ContractsEditor', () => {
     const sent = (api.saveCommercial.mock.calls[0][0] as unknown as { contracts: Array<Record<string, unknown>> }).contracts[6]
     expect(sent).toEqual({ ...CFD_ITEM, id: 'cfd_7', generator_owner: 'Wind BV', counterparty: 'gov',
                            asset_ids: ['wind'], library_ref: CFD_REF })
+    expect(screen.queryByTestId('ce-fill-refusal')).toBeNull()
+    await waitFor(() => expect(within(added).queryByTestId('ce-unsaved')).toBeNull())
+  })
+
+  it('a second "starting point" for the same item version points to the unsaved copy, adds none', async () => {
+    startFromLibrary()
+    renderEditor()
+    await screen.findByTestId('ce-contract-6')
+    act(() => { startFromLibrary() })
+    expect((await screen.findByRole('status')).textContent)
+      .toBe('An unsaved copy of Library item “eu-cfd” v1 is already in the list: cfd_7.')
+    expect(screen.queryByTestId('ce-contract-7')).toBeNull()
+    expect(useUIStore.getState().contractStart).toBeNull()
+  })
+
+  it('"›" on the copied-from line opens that item in the Commercial library, with a way back', async () => {
+    startFromLibrary()
+    useUIStore.setState({ activeSlidePanel: 'economics', flowReturn: null, libraryFocus: null })
+    renderEditor()
+    const added = await screen.findByTestId('ce-contract-6')
+    fireEvent.click(within(added).getByRole('button', { name: 'Open “eu-cfd” v1 in the Commercial library' }))
+    const ui = useUIStore.getState()
+    expect(ui.activeSlidePanel).toBe('library')
+    expect(ui.libraryFocus).toEqual({ kind: 'contract', id: 'eu-cfd', version: 1 })
+    expect(ui.flowReturn?.panel).toBe('economics')
   })
 
   it('labels a price copied from an illustrative item until the user changes it', async () => {
@@ -349,11 +387,17 @@ describe('ContractsEditor', () => {
     const added = await screen.findByTestId('ce-contract-6')
     const strike = within(added).getByLabelText('Contract cfd_7 strike (per MWh)')
     await waitFor(() => expect(strike.closest('label')!.textContent).toContain('Illustrative EU default'))
+    expect(within(added).getByTestId('ce-illustrative-key').textContent).toBe(
+      "Illustrative EU default: a value inside a published range, not your contract's. Replace it with your own.")
     // The tenor is not a price: no label.
     expect(within(added).getByLabelText('Contract cfd_7 tenor (years)').closest('label')!.textContent)
       .not.toContain('Illustrative')
     fireEvent.change(strike, { target: { value: '90' } })
     expect(strike.closest('label')!.textContent).not.toContain('Illustrative')
+    expect(within(added).queryByTestId('ce-illustrative-key')).toBeNull()
+    // Set back to the default: the label is back (the value rule).
+    fireEvent.change(strike, { target: { value: '85' } })
+    expect(strike.closest('label')!.textContent).toContain('Illustrative EU default')
     // ppa1's pin is not illustrative (its item cannot be read): never labelled.
     expect(within(screen.getByTestId('ce-contract-0')).queryByTestId('ce-illustrative')).toBeNull()
   })

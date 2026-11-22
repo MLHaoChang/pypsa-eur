@@ -27,6 +27,11 @@ function renderBrowser(onOpenInputs?: () => void) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(<QueryClientProvider client={qc}><LibraryBrowser onOpenInputs={onOpenInputs} /></QueryClientProvider>)
 }
+/** The browser as the Library slide panel holds it: gone once another panel opens. */
+function AsPanel({ onOpenInputs }: { onOpenInputs: () => void }) {
+  const panel = useUIStore(st => st.activeSlidePanel)
+  return panel === 'library' ? <LibraryBrowser onOpenInputs={onOpenInputs} /> : null
+}
 function file(name: string, body: string, type = 'application/json') {
   const f = new File([body], name, { type })
   Object.defineProperty(f, 'text', { value: () => Promise.resolve(body) })
@@ -34,7 +39,7 @@ function file(name: string, body: string, type = 'application/json') {
 }
 
 beforeEach(() => {
-  useUIStore.setState({ currentProject: 'Demo' })
+  useUIStore.setState({ currentProject: 'Demo', libraryFocus: null })
   lib.listItems.mockResolvedValue([REF])
   lib.getItem.mockImplementation(async (_k, name, version) => ({
     ref: { ...REF, id: name, version: version ?? 2 }, payload: TARIFF as never, meta: { source: 'urdb' } }))
@@ -229,9 +234,10 @@ describe('LibraryBrowser', () => {
                       seller: '\u2060fill-in:seller', buyer: '\u2060fill-in:buyer', asset_ids: [] }
     lib.listItems.mockResolvedValue([ref])
     lib.getItem.mockResolvedValue({ ref, payload: payload as never, meta: { source: 'illustrative' } })
-    useUIStore.setState({ contractStart: null })
-    const open = vi.fn()
-    renderBrowser(open)
+    useUIStore.setState({ contractStart: null, flowReturn: null, activeSlidePanel: 'library' })
+    const open = vi.fn(() => useUIStore.setState({ activeSlidePanel: 'economics' }))
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={qc}><AsPanel onOpenInputs={open} /></QueryClientProvider>)
     fireEvent.click(screen.getByRole('radio', { name: 'Contracts' }))
     fireEvent.click(await screen.findByRole('button', { name: 'eu-ppa-baseload' }))
     expect((await screen.findByTestId('lib-illustrative')).textContent)
@@ -241,6 +247,9 @@ describe('LibraryBrowser', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use v1 as a starting point' }))
     expect(useUIStore.getState().contractStart).toEqual({ ref, payload })
     expect(open).toHaveBeenCalledTimes(1)
+    // "Back to Commercial library" reopens this item at this version.
+    expect(useUIStore.getState().flowReturn?.label).toBe('Commercial library')
+    expect(useUIStore.getState().libraryFocus).toEqual({ kind: 'contract', id: 'eu-ppa-baseload', version: 1 })
     expect(api.saveCommercial).not.toHaveBeenCalled()
   })
 
