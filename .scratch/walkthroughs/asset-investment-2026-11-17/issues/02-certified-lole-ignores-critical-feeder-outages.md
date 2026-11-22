@@ -3,7 +3,7 @@
 
 # Certified 0.0 h/yr leaves out the outages of the hospital's only feeder
 
-Status: ready-for-agent
+Status: done (#1729)
 Type: bug (asset-investment walkthrough, WALK-E2E-1)
 Journey steps: J2 Reliability goal → verdict
 Severity: high
@@ -44,4 +44,8 @@ The Island Microgrid run either reports the hospital's LOLE with the feeder samp
 
 ## Comments
 
+- **F6' (GK A (31), 2026-11-19), a must-stay-on bus with units of its own** (the data-centre `it_bus` behind `site_transformer`). Its loss of supply while its feeders are out is bounded from above by the same closed-form figure as a bus without units, because its own units can only lower that loss.
+  - If the bound, together with the rest of the hub, stays within the target, the bus does not block "pass". Its row shows the bound, labelled as an upper bound with the bus's own units not counted.
+  - Otherwise the certification reads "inconclusive", never "fail". It names the bus and the bound, and says what clears it: a second feeder, a lower outage rate on the feeder, or the two-area treatment in issue 09.
+  - A cap never certifies a pass on a risk that was not evaluated.
 - Seen again 2026-11-20 (template walk, master 1f6905e3): DC: verdict 'Certified: about 0.5 h/yr' next to 'Site transformer about EUR 7.04 M per year'; microgrid: 'Certified: no shortfall expected' next to 'Hospital feeder about EUR 657 k per year'. The EUR figure is not explained next to the verdict. Issue 03 (sized design never shown) looks fixed: all three now show a 'Sized design' table.
