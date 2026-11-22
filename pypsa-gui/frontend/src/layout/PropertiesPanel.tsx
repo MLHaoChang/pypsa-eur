@@ -7,6 +7,7 @@ import {
   HelpCircle, ExternalLink,
 } from 'lucide-react'
 import { H2Icon } from '../components/AssetIcons'
+import { SkeletonLines } from '../components/Skeleton'
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
 import LoadSeriesEditor from '../components/series/LoadSeriesEditor'
 import AvailabilityEditor from '../components/series/AvailabilityEditor'
@@ -48,6 +49,7 @@ import RecipeCard from './properties/RecipeCard'
 import CarrierPanel from './properties/CarrierPanel'
 import ShuntPanel from './properties/ShuntPanel'
 import AssetFootprintEditor from '../components/AssetFootprintEditor'
+import { useConnectionLimit } from '../pages/hubDesign/useHubData'
 
 import {
   TOOLTIP_VIEWPORT_MARGIN,
@@ -920,6 +922,8 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
 
   const { data: carriers = [] } = useQuery({ queryKey: nk(currentProject, 'carriers'), queryFn: networkApi.getCarriers, staleTime: 60_000 })
   const { data: buses = [] }    = useQuery({ queryKey: nk(currentProject, 'buses'),    queryFn: networkApi.getBuses,    staleTime: 30_000 })
+  // template-e2e 02: the import links as the server selects them for the connection limit (any rule).
+  const importLinkNames = new Set(useConnectionLimit()?.links ?? [])
   // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost per kW of input; the annualised
   // capital cost is derived and shown read-only.
@@ -987,11 +991,14 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   const editRequest = useUIStore(s => s.propertiesEditRequest)
   useEffect(() => {
     if (editRequest?.type !== 'Link' || editRequest.name !== link.name || mode !== 'detail') return
+    // A drawer opened from a flow item mounts this card cold: seeding before the schema
+    // arrives leaves every field blank (template-e2e 02), so wait for it.
+    if (!schema) return
     if (!open) startEdit()
     if (editRequest.field) setFocusField(editRequest.field)
     useUIStore.getState().clearPropertiesEditRequest()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editRequest, mode, link.name])
+  }, [editRequest, mode, link.name, schema])
 
   const bus0Obj = (buses as Bus[]).find(b => b.name === link.bus0)
   const bus1Obj = (buses as Bus[]).find(b => b.name === link.bus1)
@@ -1008,6 +1015,11 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
     ...assetReadoutItems(schema, asset, undefined, provenance, series),
   ]
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
+
+  // An edit asked for before the schema arrived (a drawer opened from a flow item): busy, never blank fields.
+  if (!open && mode === 'detail' && !schema && editRequest?.type === 'Link' && editRequest.name === link.name) {
+    return <div className="p-3"><SkeletonLines what="the link's fields" rows={4} testId="link-edit-loading" /></div>
+  }
 
   if (!open && mode === 'detail') {
     return (
@@ -1107,6 +1119,11 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
             (buses as Bus[]).find(b => b.name === form[k])?.carrier ?? ''), form, 'max_supply_temp_c', 'max_pressure_bar')}
           onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
           after={{
+            // template-e2e 02: one value, two views.
+            ...(importLinkNames.has(link.name) ? { p_nom: (
+              <p className="col-span-2 -mt-0.5 text-[10px] text-muted" data-testid="link-capacity-connection-limit">
+                Same value as Connection limit under Connection &amp; grid.
+              </p>) } : {}),
             p_nom_max: (
               <div className="col-span-2 -mt-0.5">
                 <button type="button" onClick={() => setVintageOpen(true)}

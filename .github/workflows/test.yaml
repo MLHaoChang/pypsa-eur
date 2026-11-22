@@ -358,6 +358,7 @@ jobs:
       OJ05_ARTIFACTS: ${{ github.workspace }}/oj-artifacts/oj05
       OJ21_ARTIFACTS: ${{ github.workspace }}/oj-artifacts/oj21
       LC03H_ARTIFACTS: ${{ github.workspace }}/oj-artifacts/lc03h
+      TJ_ARTIFACTS: ${{ github.workspace }}/oj-artifacts/template-journey
 
     steps:
     - uses: actions/checkout@v7
@@ -394,13 +395,15 @@ jobs:
         PLAYWRIGHT_MODULE_PATH: ${{ runner.temp }}/pw/node_modules/playwright/package.json
         PYPSA_COMPOSER_PYTHON: ${{ github.workspace }}/.pixi/envs/test/bin/python
       run: |
-        mkdir -p "$OJ01_ARTIFACTS" "$OJ05_ARTIFACTS" "$OJ21_ARTIFACTS" "$LC03H_ARTIFACTS"
+        mkdir -p "$OJ01_ARTIFACTS" "$OJ05_ARTIFACTS" "$OJ21_ARTIFACTS" "$LC03H_ARTIFACTS" "$TJ_ARTIFACTS"
         status=0
         node scripts/smoke-copilot-oj01.mjs || status=1
         node scripts/smoke-copilot-oj05.mjs || status=1
         node scripts/smoke-copilot-oj21.mjs || status=1
         node scripts/smoke-copilot-lc03-historical.mjs || status=1
         node scripts/smoke-copilot-lc06-d24.mjs || status=1
+        # E2E-TEMPLATES-1: the template journey, section 3 (template-e2e 02).
+        node scripts/smoke-template-journey-connection.mjs || status=1
         exit $status
 
     - name: Upload journey screenshots
