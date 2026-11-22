@@ -252,7 +252,7 @@ function ClassSection({
 }) {
   return (
     <section>
-      <h3 className="text-[12.5px] font-semibold text-text mb-2.5 flex items-center gap-2 tracking-[-0.005em]">
+      <h3 className="text-h3 font-semibold text-text mb-2.5 flex items-center gap-2">
         <Settings2 size={13} className="text-muted" />
         {section.label}
         <span className="text-[10px] font-normal text-muted">({rows.length} extendable)</span>
@@ -407,7 +407,7 @@ function AssetRowEditor({
           <>
             <button
               onClick={onOpenModal}
-              className="text-[10.5px] text-accent hover:underline mr-2"
+              className="text-[10.5px] text-link hover:underline mr-2"
             >Edit</button>
             <button
               onClick={() => clearVintageMut.mutate()}
@@ -420,7 +420,7 @@ function AssetRowEditor({
           <button
             onClick={onOpenModal}
             disabled={!hasPeriods}
-            className="text-[10.5px] text-accent hover:underline disabled:opacity-40 disabled:no-underline"
+            className="text-[10.5px] text-link hover:underline disabled:opacity-40 disabled:no-underline"
             title={hasPeriods
               ? 'Configure per-period bounds for this asset'
               : 'Enable multi-period planning first (Model Horizon → Mode → Multi-period)'}

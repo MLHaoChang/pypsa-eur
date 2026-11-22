@@ -1,4 +1,4 @@
-import type { AnswerReceipt } from '../utils/answerAssurance'
+import { hasWarning, WARNED_LABEL, warningText, type AnswerReceipt } from '../utils/answerAssurance'
 import { readableProfile, readableWindow } from '../utils/readableTime'
 import type { NavigationEntry } from '../utils/answerAssurance'
 
@@ -29,8 +29,14 @@ export function loadflowLine(entry: NavigationEntry): string | null {
 export function CheckedEvidenceCard({ answerId, receipt, sourceLabel }: { answerId: string; receipt: AnswerReceipt; sourceLabel?: string }) {
   const scope = receipt.request_scope
   const clarifying = receipt.result_slots?.some(s => s.disposition === 'needs_clarification') === true
+  // AA-13: a warning slot (policy "5") marks an interval the values leave out.
+  const warned = hasWarning(receipt)
+  // The backend lists each warning slot again as a "<metric>: <reason>" limitation;
+  // the warning row already words it, so that raw line is not shown (UX 3, #1831).
+  const warningPrefixes = (receipt.result_slots ?? []).filter(s => s.disposition === 'warning').map(s => `${s.metric}: `)
+  const limitations = receipt.limitations.filter(text => !warningPrefixes.some(prefix => text.startsWith(prefix)))
   return <details className="mt-2 text-[11px] border border-border rounded p-2" data-testid="checked-evidence-card">
-    <summary className="cursor-pointer">{clarifying ? 'Clarification needed' : receipt.request_complete === true ? 'Requested results checked' : 'Checked evidence and limitations'}</summary>
+    <summary className="cursor-pointer">{clarifying ? 'Clarification needed' : warned ? WARNED_LABEL : receipt.request_complete === true ? 'Requested results checked' : 'Checked evidence and limitations'}</summary>
     <div className="mt-2 space-y-1">
       {scope && <p>{sourceLabel ?? (scope.retain ? 'Retained run' : 'Current run')} · {scope.entity_id} · {readableProfile(scope.profile)}</p>}
       {scope?.start && <p>{readableWindow(scope.start, scope.end)}</p>}
@@ -38,12 +44,14 @@ export function CheckedEvidenceCard({ answerId, receipt, sourceLabel }: { answer
         <p key={i} data-testid="checked-loadflow-view">{line}</p>)}
       {scope?.cost_basis && <p>Cost basis: {scope.cost_basis.currency}, price year {scope.cost_basis.price_year};
         {' '}annual fixed cost fraction {scope.cost_basis.annual_fixed_cost_fraction}</p>}
-      {receipt.result_slots && <ul>{receipt.result_slots.map(s => <li key={s.metric}>
+      {receipt.result_slots && <ul>{receipt.result_slots.map(s => s.disposition === 'warning'
+        ? <li key={s.metric} className="text-warn" data-testid="checked-warning-slot">{warningText(s)}</li>
+        : <li key={s.metric}>
         {s.metric.replace(/_/g, ' ')}: {s.disposition.replace(/_/g, ' ')}
         {s.valid_snapshots !== undefined && ` (${s.valid_snapshots}/${s.requested_snapshots} snapshots)`}
         {s.reason && ` — ${s.reason.replace(/_/g, ' ')}`}
       </li>)}</ul>}
-      {receipt.limitations.length > 0 && <ul aria-label="Answer limitations">{receipt.limitations.map((text, i) => <li key={i}>{`Limitation: ${text}`}</li>)}</ul>}
+      {limitations.length > 0 && <ul aria-label="Answer limitations">{limitations.map((text, i) => <li key={i}>{`Limitation: ${text}`}</li>)}</ul>}
       {clarifying ? <p>No result has been checked. Answer the clarification to continue.</p>
         : <p>{receipt.checked_block_ids.length} facts checked against evidence. This does not certify the engineering model.</p>}
       {receipt.reviewer_status !== 'not_required' && <p>Interpretation review: {receipt.reviewer_status.replace(/_/g, ' ')}</p>}

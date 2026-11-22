@@ -104,7 +104,7 @@ function GoLink({ target, label, testId, mode }: {
         // Expert: the campus results are a Results tab. `openFlowTarget` would route through the campusResults alias,
         // whose own panel switch drops the Back; `showResultsTab` keeps it (the Control tabs' links).
         : t.panel === 'campusResults' ? showResultsTab('grid_code') : openFlowTarget(t))}
-      className="self-start text-[11px] text-accent hover:underline whitespace-nowrap">
+      className="self-start text-[11px] text-link hover:underline whitespace-nowrap">
       {label} ›
     </button>
   )

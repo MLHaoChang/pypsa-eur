@@ -2189,10 +2189,15 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
     (``_ic_growth_flags``). On a run's own step (`assistant_tasks.RUN_CONTEXT` set,
     study harness 14) the case never re-solves the baseline: the envelope counts
     no solve for it, and a kept asset added after its admission is refused here,
-    under the lock that plans it (`baseline_solve`)."""
+    under the lock that plans it (`baseline_solve`), unless the run's grant
+    reserved the baseline's solves at the case's admission (study harness 36,
+    GK B (60) A2: `run_envelope.case_baseline_reserved`)."""
     from services import assistant_tasks
 
     in_run = assistant_tasks.RUN_CONTEXT.get() is not None
+    if in_run:
+        from services import harness_locks, run_envelope
+        in_run = not run_envelope.case_baseline_reserved(harness_locks.in_run())
 
     def build():
         from models.finance import FinanceInputs
@@ -2266,12 +2271,16 @@ def _ic_assumptions(cfg, n, *, lock, extra_assets: str | None = None,
         fin = None
     solver = dataclasses.asdict(cfg) if dataclasses.is_dataclass(cfg) else None
     commercial = getattr(cfg, "commercial", None)
+    from services.adequacy.energization import schedule_digest
+
     with lock:
         owner_assets = owner_assets_digest(n, commercial)
+        # template-e2e 02b (W2): the case reads the energization schedule at build time.
+        energization = schedule_digest(n)
     return assumptions_digest(finance=raw, commercial=commercial,
                               dispatch=dispatch_digest(n, result_df or _result_df), packs=pack_versions(fin),
                               solver=solver, owner_assets=owner_assets,
-                              extra_assets=extra_assets)
+                              extra_assets=extra_assets, energization=energization)
 
 
 def _ic_current_assumptions() -> tuple[tuple[str, dict] | None, str | None]:

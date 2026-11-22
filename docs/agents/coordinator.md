@@ -1,6 +1,6 @@
 # Coordinator
 
-Current coordinator session: `session_01G7qCujym3C138y9CjTXJpb`
+Current coordinator session: `session_01G7qCuo1iCT8Q5FSfijmCJa`
 
 Engine gatekeeper A (34; gridspine, DC, grid-to-process and IC/adequacy engine reviews; owner decision GK-SPLIT-1): `session_01G7qCuit2j5CJeVWXjvctmH`
 
@@ -16,7 +16,7 @@ UX reviewer (27; UI coherence gate, owner decision 2026-10-20): `session_01G7qCu
 
 UX reviewer 2 (6; new template-e2e, ux-next and ui-cohesion UI reviews from 2026-11-17 13:00Z; owner decision SCALE-1): `session_01G7qCunnbAYRFp93JbLcx2R`
 
-Engine gatekeeper B4 (2; app and harness reviews from 2026-11-20 11:30Z; owner decision SCALE-4): `session_01G7qCuncJ2hrXsFvC8HgoUW`
+Engine gatekeeper B4 (3; app and harness reviews from 2026-11-20 11:30Z; owner decision SCALE-4): `session_01G7qCunRE31sCeGnJDVugXE`
 
 UX reviewer 3 (2; UI reviews from 2026-11-20 11:30Z, and template walkthroughs; owner decisions SCALE-4, WALK-CADENCE-1): `session_01G7qCuinYaPoD4s6WyHsnBn`
 

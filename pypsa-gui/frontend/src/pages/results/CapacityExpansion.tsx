@@ -966,7 +966,7 @@ export default function CapacityExpansion() {
       {/* ── Cost KPIs ──────────────────────────────────────────── */}
       <section>
         <div className="flex items-center justify-between mb-2.5">
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
+          <h3 className="text-h3 font-semibold text-text">
             Total system cost
             <span className="ml-2 text-[10px] font-normal text-muted">
               {scopeLabel}
@@ -1300,7 +1300,7 @@ export default function CapacityExpansion() {
       <section className="flex flex-col gap-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-baseline gap-2">
-            <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Investments by asset</h3>
+            <h3 className="text-h3 font-semibold text-text">Investments by asset</h3>
             <span className="text-[11px] text-muted">
               {totalSized} asset{totalSized === 1 ? '' : 's'} expanded
               {carrierFilter.isFiltered && ` · filtered to ${carrierFilter.selectedCarrier}`}
@@ -1352,7 +1352,7 @@ export default function CapacityExpansion() {
       {totalRetired > 0 && (
         <section className="flex flex-col gap-4">
           <div className="flex items-center justify-between">
-            <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Retired assets</h3>
+            <h3 className="text-h3 font-semibold text-text">Retired assets</h3>
             <span className="text-[11px] text-muted">
               {totalRetired} asset{totalRetired === 1 ? '' : 's'} retired
               {' · saves '}{fmtCapexCell(totalRetirementSavings, 2)}

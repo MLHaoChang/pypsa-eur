@@ -435,7 +435,7 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
         return { imported: name, summary }
       }
       throw new Error(
-        'Unsupported file. Use a .pypsaproj.zip project bundle (network + results), or a .nc network file.',
+        'Unsupported file. Use a .pypsaproj.zip project bundle (network + results), a .nc network file or an .xlsx input workbook.',
       )
     },
     onSuccess: (res) => {
@@ -457,6 +457,13 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
 
   const onFile = (file: File) => {
     if (!file) return
+    // An Excel input workbook is previewed before anything is created (IMPORT-FLOW-1):
+    // the workbook dialog takes the file from here.
+    if (file.name.toLowerCase().endsWith('.xlsx')) {
+      onClose()
+      useUIStore.getState().requestWorkbookImport(file)
+      return
+    }
     importMut.mutate(file)
   }
 
@@ -476,10 +483,10 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
       >
         <Upload size={28} className="text-muted" />
         <span className="text-sm font-medium text-text">Drop a .pypsaproj.zip project file here</span>
-        <span className="text-[11px] text-muted">or click to browse · .nc also accepted (network only)</span>
+        <span className="text-[11px] text-muted">or click to browse · .nc (network only) and .xlsx (input workbook) also accepted</span>
         <input
           type="file"
-          accept=".pypsaproj.zip,.zip,.nc"
+          accept=".pypsaproj.zip,.zip,.nc,.xlsx"
           className="hidden"
           onChange={e => {
             const f = e.target.files?.[0]
@@ -497,6 +504,8 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
         Restores Results tabs when the file was saved after a solve.
         <br />
         <strong>.nc</strong> — PyPSA network only; wrapped as a new project (no GUI side-results).
+        <br />
+        <strong>.xlsx</strong>: an Excel input workbook you filled in. It shows what it reads before the project is created.
       </p>
     </div>
   )

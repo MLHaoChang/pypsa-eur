@@ -91,7 +91,7 @@ export default function RenewableTuner({ project, row, onApplied }: {
       value={preset} onChange={e => { setChoice(e.target.value); setEdits({}); setAdvanced('') }}>
       {available.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
     </select></label>
-    <button type="button" data-testid="tune-reset" disabled={blocked || apply.isPending || (!changed.length && !advanced)} className="text-accent hover:underline disabled:opacity-50"
+    <button type="button" data-testid="tune-reset" disabled={blocked || apply.isPending || (!changed.length && !advanced)} className="text-link hover:underline disabled:opacity-50"
       onClick={() => { setEdits({}); setAdvanced(''); setFormError('') }}>Reset to preset</button>
     {!available.length && <p>No preset is available for this weather source.</p>}
     {fields.map(f => <div key={f.key} className="border-b border-border/40 pb-1">
@@ -111,7 +111,7 @@ export default function RenewableTuner({ project, row, onApplied }: {
       <textarea aria-label="Advanced settings" value={advanced} disabled={blocked || apply.isPending} onChange={e => setAdvanced(e.target.value)} className="w-full bg-bg border border-border rounded font-mono" />
     </label><p>Changed fields override Advanced settings{changed.length ? `: ${changed.map(f => f.label).join(', ')}` : ''}.</p></details>
     {formError && <p role="alert" className="text-warn">{formError}</p>}
-    <button type="button" disabled={blocked || !preset || !schema.data || generation.isPending || apply.isPending} className="text-accent hover:underline disabled:opacity-50" onClick={generate}>Generate</button>
+    <button type="button" disabled={blocked || !preset || !schema.data || generation.isPending || apply.isPending} className="text-link hover:underline disabled:opacity-50" onClick={generate}>Generate</button>
     {generation.isPending && <p role="status">Generating this profile: wait before generating again.</p>}
     {generation.isError && <Refusal label="Couldn't generate" error={generation.error} retry={generate} disabled={blocked || generation.isPending || apply.isPending} />}
     {outdated && <p role="status">This preview is out of date: generate again</p>}
@@ -119,7 +119,7 @@ export default function RenewableTuner({ project, row, onApplied }: {
     {job && !outdated && compare.isError && <Refusal label="Couldn't compare" error={compare.error} retry={() => { void compare.refetch() }} disabled={blocked || compare.isFetching || apply.isPending} />}
     {job && !outdated && compare.data && !compare.isError && !compare.isFetching && <ProfileCompare data={compare.data} />}
     <div><button type="button" disabled={blocked || !job || outdated || !compare.isSuccess || compare.isFetching || apply.isPending || generation.isPending}
-      className="text-accent hover:underline disabled:opacity-50" onClick={() => apply.mutate()}>{apply.isPending ? 'Applying…' : 'Apply'}</button>
+      className="text-link hover:underline disabled:opacity-50" onClick={() => apply.mutate()}>{apply.isPending ? 'Applying…' : 'Apply'}</button>
       {!job || compare.isFetching ? <p>Compare first</p> : compare.isError ? <p>Comparison failed: retry or close</p> : null}
     </div>
     {apply.isError && <Refusal label="Couldn't apply" error={apply.error} retry={() => apply.mutate()} disabled={blocked || generation.isPending || apply.isPending || outdated || !compare.isSuccess || compare.isFetching} />}

@@ -170,7 +170,7 @@ export function OperationalGapCard({ payload }: { payload: OperationalGapPayload
           {failedWindowWords(w)}, so the run stopped there and there is no gap to show.{' '}
           <button type="button" data-testid="operational-gap-open-strategy"
             onClick={() => openSolveStrategy(BACK_LABEL)}
-            className="inline-flex items-center gap-1 text-[11px] text-accent hover:underline">
+            className="inline-flex items-center gap-1 text-[11px] text-link hover:underline">
             Solver settings ›
           </button>
         </div>

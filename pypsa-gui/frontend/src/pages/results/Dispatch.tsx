@@ -1339,7 +1339,7 @@ export default function Dispatch() {
           system total see /api/results/cost_breakdown. The Top-profit chart
           and per-asset table further down handle cross-carrier asset views. */}
       <section style={{display: 'none'}}>
-        <h3 className="text-[12.5px] font-semibold text-text mb-2.5 flex items-center gap-2 tracking-[-0.005em]">
+        <h3 className="text-h3 font-semibold text-text mb-2.5 flex items-center gap-2">
           System dispatch
           {scaled && (
             <span className="text-[10px] font-normal text-accent bg-accent/10 px-1.5 py-0.5 rounded font-mono"
@@ -1428,7 +1428,7 @@ export default function Dispatch() {
         return (
         <section style={{display: 'none'}}>
           <div className="flex items-center justify-between mb-2.5">
-            <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
+            <h3 className="text-h3 font-semibold text-text">
               Operational expenditure (OPEX)
               <span className="ml-2 text-[10px] font-normal text-muted">{scopeLabel}</span>
             </h3>
@@ -3671,7 +3671,7 @@ function FullLoadHoursSection(props: {
   return (
     <div className="flex flex-col gap-4">
       <header>
-        <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] flex items-center gap-2">
+        <h3 className="text-h3 font-semibold text-text flex items-center gap-2">
           Full load hours
           <span className="text-[10px] font-normal text-muted">{scopeLabel}</span>
           {scaled && (

@@ -33,7 +33,7 @@ describe('LifetimeInherit', () => {
   it('names the project default for a blank lifetime and links to the Economic assumptions block', async () => {
     mount('')
     await waitFor(() => expect(screen.getByTestId('asset-lifetime-inherit').textContent).toContain('25 years, project default'))
-    expect(screen.getByTestId('asset-lifetime-change').getAttribute('title')).toBe('Opens Solver Settings in Expert')
+    expect(screen.getByTestId('asset-lifetime-change').getAttribute('title')).toBe('Opens Solver settings in Expert')
     fireEvent.click(screen.getByTestId('asset-lifetime-change'))
     expect(useUIStore.getState().solverBlockRequest).toBe('economic')
     expect(useUIStore.getState().activeSlidePanel).toBe('simparams')

@@ -2629,8 +2629,19 @@ def _bind_template_solver_config(user, cfg_path: pathlib.Path) -> list[dict]:
             logger.exception("template finance block failed to validate")
             issues.append({"field": "finance", "code": "finance_bind_failed",
                            "message": "the template's finance inputs could not be applied"})
+    if cfg.finance_assumed is not None:
+        from models.finance import parse_finance_assumed
+
+        try:
+            parse_finance_assumed(cfg.finance_assumed)
+        except (ValidationError, ValueError) as exc:
+            issues.append({"field": "finance_assumed", "code": "finance_assumed_invalid",
+                           "message": str(exc)})
     for issue in issues:
         merged[issue["field"]] = None
+    if merged.get("finance") is None:
+        # A label for inputs the project does not hold labels nothing.
+        merged["finance_assumed"] = None
     _state["solver_config"] = SolverConfig(**merged)
     if issues and cfg_path.is_file():
         try:
@@ -2940,17 +2951,34 @@ def _carried_settings(existing_meta: dict, bound_dir, loaded: str | None, name: 
     saved) has no table, so it writes none (the defaults) and never inherits
     the destination's leftovers. Returns ``{}`` when there is no table to write.
     """
-    if _saves_its_own_directory(bound_dir, loaded, name, dest):
-        source_meta = existing_meta
-    elif bound_dir:
-        source_meta = _read_meta(pathlib.Path(bound_dir))
-    else:
-        source_meta = {}
+    source_meta = _carry_source_meta(existing_meta, bound_dir, loaded, name, dest)
     table = source_meta.get("settings")
     out = {"settings": table} if isinstance(table, dict) else {}
     if isinstance(source_meta.get("template_id"), str):
         out["template_id"] = source_meta["template_id"]
     return out
+
+
+def _carry_source_meta(existing_meta: dict, bound_dir, loaded: str | None, name: str,
+                       dest: pathlib.Path) -> dict:
+    """The metadata a save carries per-project keys from (`_carried_settings`)."""
+    if _saves_its_own_directory(bound_dir, loaded, name, dest):
+        return existing_meta
+    if bound_dir:
+        return _read_meta(pathlib.Path(bound_dir))
+    return {}
+
+
+def _carried_weather(existing_meta: dict, bound_dir, loaded: str | None, name: str,
+                     dest: pathlib.Path) -> dict:
+    """The weather choice and the cutout record a save writes into ``dest``'s
+    metadata.json, from the same source as `_carried_settings` (project-io 03,
+    GK B3): they belong to the network's series, so they travel with it."""
+    from services.profile_gen import weather_prefs
+
+    source_meta = _carry_source_meta(existing_meta, bound_dir, loaded, name, dest)
+    keys = (weather_prefs.META_KEY, weather_prefs.CUTOUTS_KEY)
+    return {k: source_meta[k] for k in keys if k in source_meta}
 
 
 def _check_save_allowed(
@@ -3489,6 +3517,7 @@ def _write_context(
             # `PATCH /{name}/settings` is their only writer, and a save that
             # dropped the key would silently reset the user's choice.
             **_carried_settings(existing_meta, bound_dir, loaded, name, dest),
+            **_carried_weather(existing_meta, bound_dir, loaded, name, dest),
         })
     ts_columns_saved = len(user_ts_data) if isinstance(user_ts_data, dict) else 0
     # Flat-count the leaves of the nested {comp: {attr: {col: ...}}} structure.

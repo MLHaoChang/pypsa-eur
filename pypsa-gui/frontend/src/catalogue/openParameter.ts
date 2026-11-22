@@ -32,19 +32,31 @@ export const canOpenParameter = (entry: Pick<CatalogueEntry, 'scope'>): boolean 
 export const FOCUS_WAIT_MS = 3000
 const FOCUS_POLL_MS = 100
 
+let pendingFocus: ReturnType<typeof setTimeout> | null = null
+
+/** Stop the pending focus poll, if any (a newer jump, or a teardown, calls this). */
+export function cancelParameterFocus(): void {
+  if (pendingFocus !== null) clearTimeout(pendingFocus)
+  pendingFocus = null
+}
+
 /**
  * Request-then-scroll: the card opens its edit form on the request; once the field's
  * control is in the page, scroll to it, focus and flash it. Gives up after
- * FOCUS_WAIT_MS, or as soon as the user navigates elsewhere.
+ * FOCUS_WAIT_MS, as soon as the user navigates elsewhere, when the document is gone,
+ * or when cancelled. Only one poll runs at a time.
  */
 function focusWhenShown(field: string): void {
+  cancelParameterFocus()
   const epoch = navigationEpoch()
   const started = Date.now()
   const tick = () => {
+    pendingFocus = null
+    if (typeof document === 'undefined' || typeof window === 'undefined') return
     if (navigationEpoch() !== epoch || Date.now() - started > FOCUS_WAIT_MS) return
-    if (!focusFieldControl(field)) window.setTimeout(tick, FOCUS_POLL_MS)
+    if (!focusFieldControl(field)) pendingFocus = setTimeout(tick, FOCUS_POLL_MS)
   }
-  window.setTimeout(tick, 0)
+  pendingFocus = setTimeout(tick, 0)
 }
 
 /** Open one asset's field. Returns false, moving nothing, for a class with no Properties card. */
