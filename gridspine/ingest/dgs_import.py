@@ -169,6 +169,11 @@ _TYPE_NAMES = {
 }
 
 
+def _type_name(tcls: str) -> str:
+    """The plain name of a DGS type class; an unlisted one reads "matching"."""
+    return _TYPE_NAMES.get(tcls, "matching")
+
+
 def _no_value(parameter: str) -> str:
     """The assumed why for a value the file omits; "no no-load losses" never reads."""
     plain = _plain(parameter)
@@ -267,7 +272,7 @@ class _Mapper:
         tid = self.get(row, "typ_id")
         if not self.holds(tcls, tid):
             self.skip(
-                cls, oid, row, f"the file gives no {_TYPE_NAMES[tcls]} type for it"
+                cls, oid, row, f"the file gives no {_type_name(tcls)} type for it"
             )
             return None
         self.used_types.add(tid)

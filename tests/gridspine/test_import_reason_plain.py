@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from gridspine.handoff.raw_writer import write_raw
-from gridspine.ingest.dgs_import import _plain
+from gridspine.ingest.dgs_import import _TYPE_NAMES, _plain, _type_name
 from gridspine.ingest.psse_import import read_psse
 
 FIX = Path(__file__).parent / "fixtures" / "psse"
@@ -311,6 +311,21 @@ def test_dgs_absent_type_and_no_load_word_for_word(tmp_path):
         0.0,
         "the file gives no value for no-load losses (kW)",
     )
+
+
+def test_dgs_type_names_whole():
+    assert _TYPE_NAMES == {
+        "TypLne": "line",
+        "TypTr2": "two-winding transformer",
+        "TypTr3": "three-winding transformer",
+        "TypSym": "synchronous machine",
+    }
+
+
+def test_dgs_unlisted_type_class_reads_plain():
+    # a typ() class not in _TYPE_NAMES: a plain word, never a KeyError or the class
+    assert _type_name("TypAsmo") == "matching"
+    assert [_type_name(c) for c in _TYPE_NAMES] == list(_TYPE_NAMES.values())
 
 
 # ---------------------------------------------------------------- no value or key change
