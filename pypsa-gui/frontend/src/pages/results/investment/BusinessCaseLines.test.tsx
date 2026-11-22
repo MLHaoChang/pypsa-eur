@@ -417,3 +417,31 @@ describe('a capex line with no terminal-value method (#21)', () => {
     expect(screen.queryByTestId('bc-terminal-missing')).toBeNull()
   })
 })
+
+describe('the de-rating of a capacity payment (#21)', () => {
+  const CAP: LineItem = {
+    name: 'Capacity payment', kind: 'revenue', category: 'capacity_payment', unit: 'kW_year',
+    quantity_source: 'linked:capacity.StorageUnit.bess@1', escalation: 'opex',
+  }
+  it('shows its refusal on the field, which opens from the row and takes a value in 0 to 1', async () => {
+    mount(config(CAP), { refusals: [
+      { code: 'business_case_refused', refusal: 'derating_missing', field: 'lines[0].derating', message: 'x' },
+    ] })
+    const row = await screen.findByTestId('bc-row-refusals')
+    expect(row.textContent).toMatch(/^De-rating: set the share of the capacity the market pays for/)
+    fireEvent.click(within(row).getByRole('button', { name: 'Show details' }))
+    const field = screen.getByLabelText('De-rating, Capacity payment') as HTMLInputElement
+    expect(field.getAttribute('aria-invalid')).toBe('true')
+    expect(field.value).toBe('')  // no default
+    fireEvent.change(field, { target: { value: '0.9' } })
+    await waitFor(() => expect((screen.getByLabelText('De-rating, Capacity payment') as HTMLInputElement).value).toBe('0.9'))
+  })
+  it('is offered on a capacity payment linked to capacity only', async () => {
+    mount(config(H2, { ...CAP, name: 'Typed fee', quantity_source: 'typed', unit: 'MWh' }))
+    fireEvent.click(await screen.findByLabelText('Show details of Typed fee'))
+    await screen.findByLabelText('Money year, Typed fee')  // its details are open
+    expect(screen.queryByLabelText(/^De-rating/)).toBeNull()
+    fireEvent.click(screen.getByLabelText('Show details of H2 sales'))
+    expect(screen.queryByLabelText(/^De-rating/)).toBeNull()
+  })
+})

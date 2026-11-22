@@ -63,6 +63,8 @@ export interface LineItem {
   default_units?: Partial<Record<DefaultColumn, string>>
   preset_rule?: PresetRule | null
   linked_share?: number | null
+  /** A capacity payment linked to capacity in service: the share the market pays for (0 to 1). */
+  derating?: number | null
   linked_share_by_year?: Record<string, number>
   hint?: PriceHint | null
 }

@@ -28,7 +28,7 @@ import {
   blankLine, edited, hintUnitWords, priceUnitWords, unitWords, linkedSource, OUTPUTS_REASON_WORDS,
   parsePaste, placeRefusals, placeValidation, provenanceDetail, provenanceOf,
   operatingYears, REFUSALS_REASON_WORDS, sourceKind, uniqueName, unitNotAllowed, unitsFor, VOLUME_FIELD,
-  withKind, yearsOf, type Placed,
+  takesDerating, withKind, yearsOf, type Placed,
 } from './businessCaseModel'
 
 const KINDS: LineKind[] = ['revenue', 'opex', 'capex']
@@ -167,6 +167,8 @@ function Details({ line, set, placed, years }: {
         {num('money_year', 'Money year')}
         {line.escalation === 'contract' && num('indexation', 'Indexation', 'per year, as a fraction (0.02 = 2 %)')}
         {sourceKind(line.quantity_source) === 'linked' && num('linked_share', 'Sold share', '0 to 1; empty reads 1')}
+        {takesDerating(line.category, line.quantity_source)
+          && num('derating', 'De-rating', '0 to 1: the share of the capacity the market pays for; no default')}
         {line.kind === 'capex' && (
           <>
             <label className="flex items-center gap-1">
@@ -528,7 +530,9 @@ export default function BusinessCaseLines() {
                         <td className="px-1">
                           <select aria-label={`Category, ${ln.name}`} className={CELL + ' max-w-[8rem]' + (bad('category') ? BAD : '')}
                                   aria-invalid={bad('category') ? true : undefined}
-                                  value={ln.category} onChange={e => setLine(i, { category: e.target.value })}>
+                                  value={ln.category}
+                                  onChange={e => setLine(i, { category: e.target.value,
+                                    ...(takesDerating(e.target.value, ln.quantity_source) ? {} : { derating: null }) })}>
                             {(opts?.categories[ln.kind] ?? [ln.category]).map(c => <option key={c} value={c}>{categoryWords(c)}</option>)}
                           </select>
                         </td>
@@ -540,7 +544,8 @@ export default function BusinessCaseLines() {
                                           const units = unitsFor({ ...next, unit: '' }, opts)
                                           setLine(i, { quantity_source: qs,
                                                        unit: units.includes(ln.unit) ? ln.unit : (units[0] ?? ln.unit),
-                                                       ...(sourceKind(qs) === 'linked' ? { quantity: null } : {}) })
+                                                       ...(sourceKind(qs) === 'linked' ? { quantity: null } : {}),
+                                                       ...(takesDerating(ln.category, qs) ? {} : { derating: null }) })
                                         }} />
                         </td>
                         <td className="px-1">
@@ -595,7 +600,7 @@ export default function BusinessCaseLines() {
                                 <li key={k} data-column={p.column}>
                                   {p.message}{' '}
                                   {!open.has(i) && ['money_year', 'indexation', 'life_years', 'rate', 'refresh_years',
-                                    'quantity_by_year', 'price_by_year', 'linked_share'].includes(p.column) && (
+                                    'quantity_by_year', 'price_by_year', 'linked_share', 'derating'].includes(p.column) && (
                                     <button type="button" className="underline" onClick={() => toggle(i)}>Show details</button>
                                   )}
                                 </li>

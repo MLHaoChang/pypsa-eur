@@ -133,6 +133,7 @@ export const COLUMN_LABEL: Record<string, string> = {
   rate: 'Rate',
   refresh_years: 'Refresh every (years)',
   note: 'Source note',
+  derating: 'De-rating',
   linked_share: 'Sold share',
   linked_share_by_year: 'Sold share by year',
 }
@@ -321,3 +322,8 @@ export const REFUSALS_REASON_WORDS: Record<string, string> = {
   solve_in_flight: 'A solve is running, so the lines were not checked: read the options again after it.',
   current_assumptions_not_established: 'The current inputs cannot be read now, so the lines were not checked.',
 }
+
+/** The one line a de-rating multiplies: a capacity payment linked to capacity in service
+ *  (backend `takes_derating`). */
+export const takesDerating = (category: string, quantitySource: string): boolean =>
+  category === 'capacity_payment' && quantitySource.startsWith('linked:capacity.')
