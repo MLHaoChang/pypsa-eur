@@ -225,8 +225,7 @@ def _export_excel_bytes() -> bytes:
             logging.getLogger(__name__).error("Excel export failed: %s", err)
             raise HTTPException(500, {
                 "error_kind": "excel_export_failed",
-                "message": "The network could not be written to Excel. Try the CSV or NetCDF export, "
-                           "or check the server log for the cause.",
+                "message": "The network could not be written to Excel. Try the CSV or NetCDF export instead.",
             })
         data = pathlib.Path(tmp).read_bytes()
     change_log_service.log("export", "Network", "network.xlsx", "Exported network as Excel (.xlsx)")
