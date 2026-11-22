@@ -446,6 +446,18 @@ def test_an_undecided_scan_with_no_resonance_table_gives_the_meta_reason(tmp_pat
     assert row["note"] == f"{_NO_NORMAL[0].upper()}{_NO_NORMAL[1:]}. {SCREENING}"
 
 
+def test_a_resonance_table_with_only_the_reason_columns_gives_its_reason(tmp_path):
+    # mutants.py survivor grid_readiness.py:1456 (<= -> <): exactly kind, verdict and note is enough
+    rows = [{"kind": SERIES, "verdict": "not evaluated", "note": _TSP}]
+    _write(
+        tmp_path,
+        subsync=dict(_sub_meta("not evaluated"), notes=[_NO_NORMAL]),
+        resonance=rows,
+    )
+    row = _card(tmp_path)[0]["subsync_series_resonance"]
+    assert row["note"] == f"{_TSP[0].upper()}{_TSP[1:]}. {SCREENING}"
+
+
 def test_a_real_run_says_why_its_scan_was_not_evaluated(tmp_path):
     # the stage's own notes on a campus with no series capacitor and no normal case
     from gridspine.drivers.campus_study import SUBSYNC_RESONANCE_CSV
@@ -1080,18 +1092,40 @@ def _bad_resonance(**changes):
             " has a torsional margin that is not a finite number (an empty value)",
         ),
         (_bad_resonance(machine=None), "'s least-margin row has no machine"),
+        (_bad_resonance(case=" "), "'s least-margin row has no case"),
+        (
+            [{k: v for k, v in r.items() if k != "machine"} for r in _resonance()],
+            "'s least-margin row has no machine",
+        ),
         (
             _bad_resonance(f_comp_hz=None, mode_hz=None),
             "'s least-margin row has no f_comp_hz, mode_hz",
         ),
     ],
-    ids=["text_margin", "missing_margin", "no_machine", "no_frequencies"],
+    ids=[
+        "text_margin",
+        "missing_margin",
+        "no_machine",
+        "blank_case",
+        "no_machine_column",
+        "no_frequencies",
+    ],
 )
 def test_a_damaged_least_margin_row_reads_unknown(tmp_path, rows, why):
     _write(tmp_path, subsync=_sub_meta("flag"), resonance=rows)
     row = _card(tmp_path)[0]["subsync_series_resonance"]
     assert row["verdict"] == "unknown" and row["project_value"] is None
     assert row["note"] == f"The run's resonance table{why}. {SCREENING}"
+
+
+def test_a_resonance_table_with_no_margin_column_reads_unknown(tmp_path):
+    rows = [{k: v for k, v in r.items() if k != "margin_hz"} for r in _resonance()]
+    _write(tmp_path, subsync=_sub_meta("flag"), resonance=rows)
+    row = _card(tmp_path)[0]["subsync_series_resonance"]
+    assert row["verdict"] == "unknown" and row["project_value"] is None
+    assert row["note"] == (
+        f"The run wrote no torsional margin for a series resonance. {SCREENING}"
+    )
 
 
 @pytest.mark.parametrize(
