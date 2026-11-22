@@ -3,7 +3,7 @@
 
 # 10 — The other VOLL refusals still read "requires a VOLL > 0"
 
-Status: ready-for-agent
+Status: done
 Owner: template-e2e slice-2 builder (successor of session_01G7qCukBqpE7RUE97mdvTio)
 Size: S
 Gated: UX (wording); GK B (typed refusal kinds)
@@ -18,3 +18,7 @@ Journey fit: run (Expert and assistant) → the refusal the user reads.
 
 - Each refusal opens with `VOLL_FIELD_LABEL` and names what it would run, in the same form.
 - Each refusal keeps its typed kind (e.g. the frontier's `unsupported_scope`), and the tests pinning those kinds pass.
+
+## Done
+
+`voll_refusal(study)` (eh_study_runner.py) words every VOLL-0 refusal in one form; the contingency sweep, the reliability-targeted planning loop and the cost vs availability study use it, each keeping its kind (tests/test_voll_refusal_texts.py). E2E shots in `.scratch/template-e2e/shots/10/` (shots.mjs).

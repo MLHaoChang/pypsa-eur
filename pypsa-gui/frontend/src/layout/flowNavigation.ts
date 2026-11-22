@@ -101,8 +101,10 @@ function withReturn(target: FlowTarget | null, jump: () => void, fromSite3D = fa
   if (origin) useUIStore.setState({ flowReturn: origin })
 }
 
-/** Run a programmatic jump (the assistant's) and remember the view it left. */
-export function withReturnFrom(jump: () => void): void { withReturn(null, jump) }
+/** Run a programmatic jump (the assistant's) and remember the view it left;
+ *  `label` names it on the Back pill when the section's name would not
+ *  (an Improve card: "Back to Improve"). */
+export function withReturnFrom(jump: () => void, label?: string): void { withReturn(null, jump, false, label) }
 
 /** A jump that leaves Site 3D: "Back to Site 3D" lands on the same Site, part and selection. */
 export function withReturnFromSite3D(jump: () => void): void { withReturn(null, jump, true) }
@@ -326,6 +328,16 @@ export const FAULT_LEVEL_TARGET: FlowTarget = {
 export function openFaultLevelEditor(): void {
   if (useUIStore.getState().uiMode === 'expert') openFlowTarget(FAULT_LEVEL_TARGET)
   else openFlowTargetInPlace(FAULT_LEVEL_TARGET)
+}
+
+/** The connection limit (template-e2e 02): the import link's capacity, edited on the Connection limits
+ *  line like the fault level. Expert opens the section's panel; Guided the field drawer over the card. */
+export const CONNECTION_LIMIT_TARGET: FlowTarget = {
+  section: 'connection', panel: 'campusElectrical', component: null, entity: null, field: 'connection_limit',
+}
+export function openConnectionLimitEditor(): void {
+  if (useUIStore.getState().uiMode === 'expert') openFlowTarget(CONNECTION_LIMIT_TARGET)
+  else openFlowTargetInPlace(CONNECTION_LIMIT_TARGET)
 }
 
 /** The site coordinate field (D01; UI contract rule 4): Guided, a drawer over

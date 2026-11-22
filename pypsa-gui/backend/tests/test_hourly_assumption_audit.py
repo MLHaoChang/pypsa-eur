@@ -135,6 +135,15 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "profile_gen/compare.py": (1, "FLH = generator-weighted mean CF times the calendar year's "
                                   "8760 or 8784 hours — an annual unit conversion, not a "
                                   "snapshot-step assumption"),
+    # SCU06 S1a: the ENTSO-E day-ahead series is published per hour of the
+    # UTC calendar year (PT15M/PT30M are averaged to hourly), so its axis is
+    # the market's own, checked before it is stored.
+    "market_prices.py": (3, "the fetched day-ahead series' own axis: every hour of one "
+                            "complete UTC calendar year (8760 or 8784), built to refuse "
+                            "a year with a missing hour, to trim to that year and to "
+                            "check a cached file's length — a "
+                            "declared hourly product, not an assumption about a "
+                            "network's resolution"),
 }
 
 
@@ -172,6 +181,7 @@ def test_the_inventory_is_pinned():
     # AS-03: solver/envelope_floors.py (4) prorates the annual run-hour cap.
     # AS-06: adequacy/sizing_loop_runner.py (1) reads a RangeIndex as hourly for tsam.
     # G2P-15: process_heat.py (1), the two-level heat demo's own hourly snapshots.
-    assert sum(c for c, _ in ALLOWED.values()) == 94
-    assert len(ALLOWED) == 50
+    # SCU06 S1a: market_prices.py (3), the ENTSO-E series' own UTC-year axis.
+    assert sum(c for c, _ in ALLOWED.values()) == 97
+    assert len(ALLOWED) == 51
     assert all(reason for _, reason in ALLOWED.values())

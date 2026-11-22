@@ -50,6 +50,10 @@ export interface SolveJob {
   // to Clear finished, and getting it wrong here means a guaranteed 403 on
   // every row a colleague queued.
   can_dismiss: boolean
+  // Whether THIS caller queued the job, in any status (run progress slice 3):
+  // the finish/fail notification fires only for your own runs. The same
+  // capability-not-identity shape as `can_dismiss`; false for redacted rows.
+  started_by_me: boolean
 }
 
 export interface QueueList {

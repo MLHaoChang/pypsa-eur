@@ -70,7 +70,7 @@ export default function AdequacyTab() {
     <div className="flex flex-col h-full overflow-auto p-4 gap-4">
       <header>
         <div className="flex items-center gap-2">
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
+          <h3 className="text-h3 font-semibold text-text">
             Adequacy
           </h3>
           {/* WP7b: the studies on this tab are the report's evidence. Same
@@ -104,7 +104,7 @@ export default function AdequacyTab() {
           No reliability target was applied to the last solve, so there is no
           achieved-vs-target readout yet. Set the ENS target in the{' '}
           <button type="button" data-testid="adequacy-no-target-goal"
-            className="font-medium text-accent hover:underline"
+            className="font-medium text-link hover:underline"
             onClick={openReliabilityGoal}>reliability goal ›</button>{' '}
           and re-solve to get one — or run the screening or the frontier below,
           neither of which needs a target to say something useful about this
