@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): New project › Import file previews a PSS/E, PowerFactory or PLEXOS model (and a project file) before creating it, listing what is not carried and what is assumed; a raw network import now reads "Network not saved yet" with "Save as project" in the sidebar.

@@ -109,6 +109,21 @@ from gridspine.schema.contracts import ContractError
 
 FORMAT_ID = "psse"
 THRSHZ = 1e-4  # PSS/E's zero-impedance threshold, pu
+#: Plain names of the transformer control modes COD (1..5), for ``assumed`` text.
+_CONTROL = {
+    1: "voltage",
+    2: "reactive power flow",
+    3: "active power flow (phase shift)",
+    4: "DC line",
+    5: "asymmetric active power flow",
+}
+
+
+def _rating_label(col: str) -> str:
+    """The plain label of a rating column: RATEB -> "B", RATE3 -> "3"."""
+    return col.removeprefix("RATE")
+
+
 _NO_LIMIT = 9999.0
 _BUS_TYPE = {1: "load bus", 2: "generator bus", 3: "swing bus", 4: "isolated"}
 
@@ -366,7 +381,7 @@ def build_network(case: RawCase):
                 nm,
                 "susceptance setting",
                 float(r["BINIT"]),
-                "held at its initial setting BINIT (Mvar at 1.0 pu); "
+                "held at its initial switched-shunt setting (Mvar at 1.0 pu); "
                 "voltage-controlled switching is not modelled" + remote,
             )
         )
@@ -396,8 +411,8 @@ def build_network(case: RawCase):
                         nm,
                         "rated power (MW)",
                         float(pn),
-                        f"maximum output PT is {r['PT']:g} in the file; the machine "
-                        "base MBASE is used",
+                        f"the file gives a maximum output of {r['PT']:g} MW, which is "
+                        "no usable limit, so the machine base power is used",
                     )
                 )
             p_nom.append(pn)
@@ -410,7 +425,7 @@ def build_network(case: RawCase):
                         "regulated bus",
                         bname[r["I"]],
                         f"the file regulates remote bus {reg}; the machine holds "
-                        "its own terminal at VS",
+                        "its own terminal at its voltage setpoint",
                     )
                 )
         n.add(
@@ -470,7 +485,7 @@ def build_network(case: RawCase):
                         "reactance (pu)",
                         THRSHZ,
                         "R = X = 0 in the file (a zero-impedance jumper); PSS/E's "
-                        "threshold THRSHZ is used",
+                        f"zero-impedance threshold ({THRSHZ:g} pu) is used",
                     )
                 )
                 r = {**r, "X": x}
@@ -497,8 +512,9 @@ def build_network(case: RawCase):
                             nm,
                             "thermal rating (MVA)",
                             sb,
-                            "no rating in the file; the system base SBASE is used as the "
-                            "transformer base, so set a real rating",
+                            f"the file gives no thermal rating; the system base power "
+                            f"({sb:g} MVA) is used as the transformer base, so set a real "
+                            "rating",
                         )
                     )
                 assumed.append(
@@ -584,7 +600,8 @@ def build_network(case: RawCase):
                         label,
                         f"winding {k} {'phase angle (deg)' if angle else 'tap ratio'}",
                         float(r[f"ANG{k}"] if angle else r[f"WINDV{k}"]),
-                        f"automatic control (COD{k} = {cod}) is not modelled; held at "
+                        f"automatic {_CONTROL.get(abs(cod), 'tap or phase')} control "
+                        f"(control mode {cod}) of winding {k} is not modelled; held at "
                         "the file's setting",
                     )
                 )
@@ -609,7 +626,8 @@ def build_network(case: RawCase):
                         nm,
                         "rating (MVA)",
                         float(s_nom),
-                        f"no rating in the file; its impedance base {base_key} is used",
+                        "the file gives no thermal rating; its winding impedance base "
+                        f"power ({s_nom:g} MVA) is used",
                     )
                 )
             n.add(
@@ -704,18 +722,19 @@ def _line_rating(r, rate_cols, load_mva, sb, kv_from, kv_to):
     ``(s_nom, why)`` for a line whose first rating is 0: the first positive
     later rating, else the never-binding bound (SBASE ``sb`` floors the load).
     """
-    first = rate_cols[0]
     for col in rate_cols[1:]:
         if r[col] > 0:
             return float(r[col]), (
-                f"{first} is 0; {col} = {r[col]:g} MVA is used, the first rating "
-                "the file gives. Set the normal rating before you read loading"
+                f"the normal rating is 0; rating {_rating_label(col)} = {r[col]:g} MVA "
+                "is used, the first rating the file gives. Set the normal rating "
+                "before you read loading"
             )
     bound = assumed_rating_mva(max(load_mva, sb), kv_from, kv_to)
     return bound, (
-        f"the case gives no rating ({first} = 0 means unrated), so a bound that "
-        f"never binds is used: 10 × the total load {load_mva:.1f} MVA (at least SBASE "
-        f"{sb:g} MVA), or the {max(kv_from, kv_to):g} kV class floor if higher. "
+        "the file gives no thermal rating (a normal rating of 0 means unrated), so a "
+        f"bound that never binds is used: 10 × the total load {load_mva:.1f} MVA (at "
+        f"least the system base power, {sb:g} MVA), or the {max(kv_from, kv_to):g} kV "
+        "class floor if higher. "
         "Set a real rating before you read loading"
     )
 

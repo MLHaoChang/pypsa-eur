@@ -610,6 +610,10 @@ interface UIStore {
   // The Excel input workbook import dialog (one per page): open, with the file
   // to preview when the caller already has it. Cleared when the dialog closes.
   workbookImportRequest: { file: File | null; id: number } | null
+  /** A model file (or files) waiting in the model-import preview dialog. */
+  modelImportRequest: { files: File[]; id: number } | null
+  /** A raw .nc/.xlsx/.m import replaced the loaded network and it belongs to no saved project yet: its file name. */
+  unsavedNetwork: string | null
   // Multi-user edit lock (Task 14). `readOnly` is true when another user holds
   // the active project's lock (or acquisition failed) — every destructive /
   // mutating affordance is gated on it. `lockHolderEmail` names the current
@@ -787,6 +791,9 @@ interface UIStore {
   requestIoModal: (tab: 'import' | 'export', format?: 'workbook') => void
   clearIoModalRequest: () => void
   requestWorkbookImport: (file?: File) => void
+  requestModelImport: (files: File[]) => void
+  setUnsavedNetwork: (name: string | null) => void
+  clearModelImportRequest: () => void
   clearWorkbookImportRequest: () => void
   // Apply a derived lock state (from utils/lockState.lockStateFromAcquire).
   setLockState: (s: LockState) => void
@@ -875,6 +882,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
   ioModalRequest: null,
   ioModalFormat: null,
   workbookImportRequest: null,
+  modelImportRequest: null,
+  unsavedNetwork: null,
   readOnly: false,
   lockHolderEmail: null,
   readOnlyReason: 'writable',
@@ -1192,6 +1201,9 @@ export const useUIStore = create<UIStore>((set, get) => ({
   clearIoModalRequest: () => set({ ioModalRequest: null, ioModalFormat: null }),
   requestWorkbookImport: (file) => set(s => ({ workbookImportRequest: { file: file ?? null, id: (s.workbookImportRequest?.id ?? 0) + 1 } })),
   clearWorkbookImportRequest: () => set({ workbookImportRequest: null }),
+  requestModelImport: (files) => set(s => ({ modelImportRequest: { files, id: (s.modelImportRequest?.id ?? 0) + 1 } })),
+  clearModelImportRequest: () => set({ modelImportRequest: null }),
+  setUnsavedNetwork: (name) => set({ unsavedNetwork: name }),
   setLockState: (s) => set((state) => {
     const { readOnly, reason } = effectiveLockState(s.readOnly, state.solvingReadOnly)
     return {
@@ -1230,6 +1242,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
       // same-named asset in project B.
       const patch: Partial<UIStore> = {
         currentProject: name,
+        // A project is open: the imported network was saved into one, or replaced by it.
+        ...(name ? { unsavedNetwork: null } : {}),
         // The section this project was left in (design §7), else none.
         activeSection: readActiveSection(name),
         fieldDrawer: null,

@@ -35,12 +35,20 @@ function Section({ title, testId, children }: { title: string; testId: string; c
   )
 }
 
-export function WorkbookReport({ contents }: { contents: WorkbookContents }) {
-  const { report, rederived, not_carried: notCarried } = contents
+/** A model-file preview has no workbook-only parts: no re-derived costs, no "not carried" list. */
+type Shown = Pick<WorkbookContents, 'report'> & Partial<Pick<WorkbookContents, 'rederived' | 'not_carried'>>
+
+export function WorkbookReport({ contents, headings = HEADINGS, testId = 'workbook-report' }: {
+  contents: Shown
+  headings?: Record<keyof typeof HEADINGS, string>
+  testId?: string
+}) {
+  const { report, rederived = [], not_carried: notCarried = [] } = contents
+  const H = headings
   const counts = Object.entries(report.counts).filter(([, n]) => n > 0)
   return (
-    <div className="flex flex-col gap-3 text-[11px]" data-testid="workbook-report">
-      <Section title={HEADINGS.holds} testId="workbook-counts">
+    <div className="flex flex-col gap-3 text-[11px]" data-testid={testId}>
+      <Section title={H.holds} testId="workbook-counts">
         <p className="text-text">
           {counts.map(([sheet, n], i) => (
             <span key={sheet}>{i > 0 && ' · '}{sheet} {n.toLocaleString('en')}</span>
@@ -48,13 +56,13 @@ export function WorkbookReport({ contents }: { contents: WorkbookContents }) {
         </p>
       </Section>
       {report.unmapped.length > 0 && (
-        <Section title={`${HEADINGS.unmapped} (${report.unmapped.length})`} testId="workbook-unmapped">
+        <Section title={`${H.unmapped} (${report.unmapped.length})`} testId="workbook-unmapped">
           <Fold items={report.unmapped} testId="workbook-unmapped-list"
             row={u => <><span className="text-text">{u.source_item}</span><span className="text-muted">: {u.reason}</span></>} />
         </Section>
       )}
       {report.assumed.length > 0 && (
-        <Section title={`${HEADINGS.assumed} (${report.assumed.length})`} testId="workbook-assumed">
+        <Section title={`${H.assumed} (${report.assumed.length})`} testId="workbook-assumed">
           <Fold items={report.assumed} testId="workbook-assumed-list"
             row={a => (
               <span className="text-muted">
@@ -64,25 +72,27 @@ export function WorkbookReport({ contents }: { contents: WorkbookContents }) {
         </Section>
       )}
       {report.warnings.length > 0 && (
-        <Section title={HEADINGS.warnings} testId="workbook-warnings">
+        <Section title={H.warnings} testId="workbook-warnings">
           <Fold items={report.warnings} testId="workbook-warnings-list" row={w => <span className="text-warn">{w}</span>} />
         </Section>
       )}
       {report.suggestions.length > 0 && (
-        <Section title={HEADINGS.suggestions} testId="workbook-suggestions">
+        <Section title={H.suggestions} testId="workbook-suggestions">
           <Fold items={report.suggestions} testId="workbook-suggestions-list"
             row={s => <span className="text-muted"><span className="text-text">{s.target}</span> · {s.parameter}: {s.why}</span>} />
         </Section>
       )}
       {rederived.length > 0 && (
-        <Section title={HEADINGS.rederived} testId="workbook-rederived">
+        <Section title={H.rederived} testId="workbook-rederived">
           <span className="text-muted">Worked out from their cost parts.</span>
           <Fold items={rederived} testId="workbook-rederived-list" row={r => <span className="text-text">{r}</span>} />
         </Section>
       )}
-      <Section title={HEADINGS.notCarried} testId="workbook-not-carried">
-        <Fold items={notCarried} testId="workbook-not-carried-list" row={t => <span className="text-muted">{t}</span>} />
-      </Section>
+      {notCarried.length > 0 && (
+        <Section title={H.notCarried} testId="workbook-not-carried">
+          <Fold items={notCarried} testId="workbook-not-carried-list" row={t => <span className="text-muted">{t}</span>} />
+        </Section>
+      )}
     </div>
   )
 }
