@@ -18,6 +18,8 @@ import ProductionTiles from '../results/ProductionTiles'
 import { useInScope } from '../../components/flowScope/useFlowScope'
 import { ControlChapter } from './ControlChapter'
 import { AddToScope } from '../../components/flowScope/ScopeCards'
+import InvestmentCaseRunPanel from '../results/investment/InvestmentCaseRunPanel'
+import { useInvestmentCaseRun } from '../results/investment/useInvestmentCaseRun'
 
 const OPEN_LABEL = (o: ChapterOpen) =>
   'step' in o ? 'Go to Goal' : o.panel === 'campusResults' || o.panel === 'campusStudy' ? 'Open the grid checks' : 'Open the detail'
@@ -81,7 +83,10 @@ export function ChaptersSection({ reliability, headlined = [] }: {
 }) {
   const project = useUIStore(s => s.currentProject)
   const setStep = useHubDesignStore(s => s.setStep)
-  const { tiles, processView } = useChapterTiles(reliability)
+  const { tiles, processView, icReport } = useChapterTiles(reliability)
+  // Before the study has results the Investment tile is not headlined: it runs
+  // the investment case itself (issue 22, S2b), as the headline's NPV does after.
+  const icRun = useInvestmentCaseRun()
 
   // The grid checks are Grid › Grid code & electrical design's (W4a).
   const gridInScope = useInScope('grid', 'grid_code')
@@ -108,7 +113,9 @@ export function ChaptersSection({ reliability, headlined = [] }: {
               </p>
             ) : (
               <Kpi label={t.label} value={t.value} unit={t.unit} basis={t.basis}
-                state={t.state} reason={t.reason} fromStudy={t.fromStudy}
+                state={t.state} fromStudy={t.fromStudy}
+                // The run panel states "not run yet" and a refusal's needs itself.
+                reason={t.id === 'investment' && (t.state === 'not_run' || icRun.blocker) ? undefined : t.reason}
                 hint={t.fromStudy ? FROM_STUDY_HINT : undefined} testId={`hub-chapter-${t.id}-kpi`} />
             )}
             {t.control && controlInScope && (
@@ -120,6 +127,9 @@ export function ChaptersSection({ reliability, headlined = [] }: {
                     className="text-link hover:underline">Solve</button>
                 )}
               </p>
+            )}
+            {t.id === 'investment' && !headlined.includes(t.id) && (
+              <InvestmentCaseRunPanel run={icRun} mode="guided" report={icReport} />
             )}
             {t.id === 'grid_plan' && project && ['not_run', 'stale', 'unavailable'].includes(t.state) && (
               gridInScope
