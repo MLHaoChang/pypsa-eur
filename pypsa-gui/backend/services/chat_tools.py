@@ -10649,6 +10649,19 @@ DISPATCHERS: dict[str, Any] = {
 }
 
 
+# Excel input workbook issue 06 (3): the template / a project's workbook as a
+# browser download, and a chat upload previewed then imported as a NEW project.
+from services.workbook_chat import (  # noqa: E402
+    get_input_workbook, import_input_workbook, preview_input_workbook,
+)
+
+DISPATCHERS.update({
+    "get_input_workbook": get_input_workbook,
+    "preview_input_workbook": preview_input_workbook,
+    "import_input_workbook": import_input_workbook,
+})
+
+
 # LV08 B2a (12) — live-voice 08 slice B2: registered before the lock and
 # study gates below wrap DISPATCHERS, so they apply to these as to the rest.
 DISPATCHERS.update({

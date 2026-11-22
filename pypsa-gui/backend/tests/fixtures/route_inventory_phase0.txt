@@ -395,6 +395,7 @@ DELETE  /api/projects/{name}/uploads/{file_id}                                  
 GET     /api/projects/{name}/uploads/{file_id}/blob                                -> get_upload_blob_api_projects__name__uploads__file_id__blob_get
 GET     /api/projects/{name}/uploads/{file_id}/meta                                -> get_upload_meta_route_api_projects__name__uploads__file_id__meta_get
 GET     /api/projects/{name}/uploads/{file_id}/signature                           -> get_upload_signature_api_projects__name__uploads__file_id__signature_get
+GET     /api/projects/{name}/workbook                                              -> download_workbook_api_projects__name__workbook_get
 GET     /api/projects/{name}/worksheet                                             -> get_worksheet_api_projects__name__worksheet_get
 PUT     /api/projects/{name}/worksheet                                             -> put_worksheet_api_projects__name__worksheet_put
 POST    /api/projects/{project_id}/activate                                        -> activate_project_api_projects__project_id__activate_post
@@ -526,3 +527,6 @@ PUT     /api/simulation/solver_config                                           
 GET     /api/simulation/status                                                     -> get_status_api_simulation_status_get
 GET     /api/simulation/value_flows/designer                                       -> get_value_flow_designer_api_simulation_value_flows_designer_get
 POST    /api/simulation/value_flows/template                                       -> build_value_flow_template_api_simulation_value_flows_template_post
+POST    /api/workbook/import                                                       -> import_workbook_api_workbook_import_post
+POST    /api/workbook/preview                                                      -> preview_workbook_api_workbook_preview_post
+GET     /api/workbook/template                                                     -> download_template_api_workbook_template_get
