@@ -21,7 +21,7 @@ logging.getLogger("pypsa").setLevel(logging.ERROR)
 #: Raw PSS/E record field codes a reason may not show.
 RAW_CODE = re.compile(
     r"\b(RATE[A-C]|RATE\d+(-\d+)?|SBASE(\d-\d)?|BINIT|THRSHZ|MBASE|BASKV|BASFRQ"
-    r"|PT|PB|QT|QB|VS|IREG|SWREG|SWREM|COD\d|WINDV\d|NOMV\d|CW|CZ|CM|STAT|ElmXnet)\b"
+    r"|PT|PB|QT|QB|VS|IREG|SWREG|SWREM|COD\d|WINDV\d|NOMV\d|CW|CZ|CM|STAT|ElmXnet|Typ[A-Z]\w*)\b"
 )
 
 #: Bundled .raw cases the reader takes; case5 is refused (CW = 0) and
@@ -275,11 +275,42 @@ def test_dgs_reasons_word_for_word(tmp_path):
         ("Tap position", "tap position"),
         ("HV vector group number", "HV vector group number"),
         ("Magnetising current (%)", "magnetising current (%)"),
+        ("MVA rating", "MVA rating"),
         ("", "value"),  # no label: a plain word, never the raw attribute
     ],
 )
 def test_dgs_label_reads_mid_sentence(label, plain):
     assert _plain(label) == plain
+
+
+def test_three_winding_bases_word_for_word(tmp_path):
+    """Each winding without a rating names its own base: 1-2, 2-3, 3-1."""
+    text = (FIX / "parser_test_defaults.raw").read_text().splitlines()
+    assert text[16] == ",0.1,,,0.1,,,0.1,,,,,,,"
+    text[16] = ",0.1,100.0,,0.1,50.0,,0.1,30.0,,,,,,"  # SBASE1-2, 2-3, 3-1
+    path = tmp_path / "bases.raw"
+    path.write_text("\n".join(text) + "\n")
+    got = _why(read_psse([path], {"version": 33}).report)
+    for k, mva in ((1, 100.0), (2, 50.0), (3, 30.0)):
+        assert got[(f"Transformer 1-2-3 1 winding {k}", "rating (MVA)")] == (
+            mva,
+            "the file gives no thermal rating; its winding impedance base power "
+            f"({mva:g} MVA) is used",
+        )
+
+
+def test_dgs_absent_type_and_no_load_word_for_word(tmp_path):
+    from tests.gridspine.test_dgs_import import _unmapped, _with, dgs_text, read_text
+
+    rows = _with(ElmLne=["31;L1;2;32;10.0;2;0"])  # a transformer type, no line type
+    res = read_text(tmp_path, dgs_text(rows))
+    assert ("ElmLne 'L1'", "the file gives no line type for it") in _unmapped(res)
+    assert _raw_codes(res.report) == []
+    got = _why(read_text(tmp_path, dgs_text(), name="hand.dgs").report)
+    assert got[("T3W", "No-load losses (kW)")] == (
+        0.0,
+        "the file gives no value for no-load losses (kW)",
+    )
 
 
 # ---------------------------------------------------------------- no value or key change

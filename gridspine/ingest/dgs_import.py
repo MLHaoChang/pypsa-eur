@@ -160,6 +160,23 @@ def _plain(parameter: str) -> str:
     return parameter[:1].lower() + parameter[1:]
 
 
+#: Plain names of the DGS type classes an element refers to, for unmapped text.
+_TYPE_NAMES = {
+    "TypLne": "line",
+    "TypTr2": "two-winding transformer",
+    "TypTr3": "three-winding transformer",
+    "TypSym": "synchronous machine",
+}
+
+
+def _no_value(parameter: str) -> str:
+    """The assumed why for a value the file omits; "no no-load losses" never reads."""
+    plain = _plain(parameter)
+    if plain.lower().startswith(("no-", "no ")):
+        return f"the file gives no value for {plain}"
+    return f"the file gives no {plain}"
+
+
 def _int(item: str, what: str, v) -> int:
     """``v`` as an integer; text or a fraction is refused naming ``what``."""
     if (
@@ -239,9 +256,7 @@ class _Mapper:
         """``row[attr]``, or ``default`` listed as assumed when the file omits it."""
         v = self.get(row, attr)
         if v is None:
-            self.assume(
-                asset, parameter, default, f"the file gives no {_plain(parameter)}"
-            )
+            self.assume(asset, parameter, default, _no_value(parameter))
             return default
         return v
 
@@ -251,7 +266,9 @@ class _Mapper:
     def typ(self, cls, oid, row, tcls):
         tid = self.get(row, "typ_id")
         if not self.holds(tcls, tid):
-            self.skip(cls, oid, row, f"no {tcls} type")
+            self.skip(
+                cls, oid, row, f"the file gives no {_TYPE_NAMES[tcls]} type for it"
+            )
             return None
         self.used_types.add(tid)
         return self.t[tcls].loc[tid]
