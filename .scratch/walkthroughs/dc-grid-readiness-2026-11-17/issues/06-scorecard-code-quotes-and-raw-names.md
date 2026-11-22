@@ -3,7 +3,7 @@
 
 # 06: Scorecard rows show Python quotes, raw asset names and an em dash
 
-Status: ready-for-agent
+Status: done
 Type: task
 Impact: low (wording; every DC project shows it in both modes)
 Templates: eh_datacenter, eh_datacenter_staged (Guided and Expert scorecard)

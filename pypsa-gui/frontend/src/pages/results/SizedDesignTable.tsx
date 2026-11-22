@@ -2,6 +2,7 @@
 // build, from the stored report's `sizing` section. One table for Guided
 // section 10, the engineering detail and Expert's Energy Hub panel, so the
 // two modes show the same numbers (EXPERT-GUIDED-1, HOLISTIC-1).
+import AssetName from '../../components/AssetName'
 import type { EhReferenceDesignReport, EhSizedAsset } from '../../api/simulation'
 import { componentLabel } from '../../utils/componentLabels'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
@@ -106,7 +107,7 @@ export function SizedDesignTable({ report, mode, testId }: {
             {rows.map(a => (
               <tr key={`${a.component}:${a.name}`} data-testid={`${testId}-row-${a.name}`}
                 className="border-t border-border/50">
-                <td className={`${cell} font-mono`}>{a.name}</td>
+                <td className={cell}><AssetName id={a.name} /></td>
                 <td className={cell}>{componentLabel(a.component)}{a.carrier ? `, ${a.carrier}` : ''}</td>
                 <td className={`${cell} text-right font-mono`}>{sizedBuilt(a, units.get(`${a.component}:${a.name}`))}</td>
                 <td className={`${cell} text-right font-mono text-muted`}>{sizedRange(a, units.get(`${a.component}:${a.name}`))}</td>

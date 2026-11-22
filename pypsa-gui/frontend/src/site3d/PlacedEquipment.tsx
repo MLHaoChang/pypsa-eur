@@ -57,7 +57,7 @@ export default function PlacedEquipment({ siteId, placements, itemName, writable
         {n > 0 && (
           <>
             <span className="text-[11px] text-muted" data-testid="placed-count">{n} selected</span>
-            <button type="button" data-testid="placed-clear" className="text-[11px] text-accent hover:underline"
+            <button type="button" data-testid="placed-clear" className="text-[11px] text-link hover:underline"
               onClick={clearPicked}>Clear</button>
           </>
         )}

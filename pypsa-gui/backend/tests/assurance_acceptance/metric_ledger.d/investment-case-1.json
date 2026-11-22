@@ -1,0 +1,62 @@
+{
+ "profiles": {
+  "investment-case/1": [
+   {
+    "metric": "equity_npv",
+    "formula": "sum over years k of equity_post_tax[k] / (1 + cost_of_equity)^k",
+    "validity": "a current investment-case report (else investment_case_not_current); finite cash (else cash_not_established); the figure must reproduce the report's headline (headline_not_established, headline_mismatch). Refusals: network_scope_required, unsupported_snapshot_scope; a recorded rate > -1, else npv_rate_not_recorded",
+    "tolerance": "harness.investment_calculations:REL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_investment_assurance.py::test_hand_cash_with_a_nonzero_first_year",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     }
+    }
+   },
+   {
+    "metric": "project_npv",
+    "formula": "sum over years k of project_post_tax[k] / (1 + wacc_nominal)^k",
+    "validity": "a current investment-case report (else investment_case_not_current); finite cash (else cash_not_established); the figure must reproduce the report's headline (headline_not_established, headline_mismatch). Refusals: network_scope_required, unsupported_snapshot_scope; a recorded rate > -1, else npv_rate_not_recorded",
+    "tolerance": "harness.investment_calculations:REL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_investment_assurance.py::test_hand_cash_with_a_nonzero_first_year",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     }
+    }
+   },
+   {
+    "metric": "equity_irr",
+    "formula": "the unique r with sum over k of equity_post_tax[k] / (1 + r)^k = 0",
+    "validity": "a current investment-case report (else investment_case_not_current); finite cash (else cash_not_established); the figure must reproduce the report's headline (headline_not_established, headline_mismatch). Refusals: network_scope_required, unsupported_snapshot_scope; a unique bracketed root, else irr_not_unique / irr_not_bracketed",
+    "tolerance": "harness.investment_calculations:IRR_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_investment_assurance.py::test_hand_cash_with_a_nonzero_first_year",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     }
+    }
+   },
+   {
+    "metric": "project_irr",
+    "formula": "the unique r with sum over k of project_post_tax[k] / (1 + r)^k = 0",
+    "validity": "a current investment-case report (else investment_case_not_current); finite cash (else cash_not_established); the figure must reproduce the report's headline (headline_not_established, headline_mismatch). Refusals: network_scope_required, unsupported_snapshot_scope; a unique bracketed root, else irr_not_unique / irr_not_bracketed",
+    "tolerance": "harness.investment_calculations:IRR_TOLERANCE",
+    "oracle": null,
+    "status": "pending",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     }
+    }
+   }
+  ]
+ }
+}

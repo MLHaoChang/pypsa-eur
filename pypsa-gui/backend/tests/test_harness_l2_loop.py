@@ -645,7 +645,7 @@ def test_a_scorecard_block_rule_with_no_rows_ends_the_run_needs_user(
     monkeypatch.setattr(
         grid_readiness,
         "grid_readiness_for",
-        lambda project, profile=None: {"rows": [], "excluded": []},
+        lambda project, profile=None, **kw: {"rows": [], "excluded": []},
     )
     scorecard = {
         "id": "res.dc.ride_through",

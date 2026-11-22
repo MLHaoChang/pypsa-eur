@@ -80,6 +80,8 @@ try {
     localStorage.setItem('network-diagram:current-project', project)
     localStorage.setItem('network-diagram:ui-mode', 'guided')
     localStorage.setItem('network-diagram:ui-mode-explicit', '1')
+    // The hub-design tour offers itself once per project (TOUR-AUTO-1); this journey is not about it.
+    localStorage.setItem(`pypsa-guide-offered:hub_design:${project}`, '1')
   }, PROJECT)
   await page.goto(base + '/app')
   await page.getByTestId('hub-rail').waitFor()
@@ -103,7 +105,8 @@ try {
   await row.getByText('45 MW').waitFor()
   // The readiness and the run take the same value (owner decision (a)): the connection point reads it too.
   await page.getByTestId('hub-site-grid').getByText(/\(45 MW/).waitFor()
-  await page.getByText(/1 grid connection, 45 MW/).first().waitFor()
+  // The rail reads the connection by its display name, then the limit (UX 2 on #1688).
+  await page.getByText(/^[^(]+, 45 MW$/).first().waitFor()
 
   // Expert reads back the same value under the same label (EXPERT-GUIDED-1): the switch keeps the
   // section, so Connection & grid's panel opens with its Connection limits.
@@ -118,6 +121,9 @@ try {
   // the limit set above as its capacity, and 99.5 % efficiency.
   await page.getByRole('button', { name: 'Guided', exact: true }).click()
   await page.getByTestId('hub-rail-step-site').click()
+  // The Assumptions card opens collapsed (guided-results 03): open it to reach its rows.
+  const assumptions = page.locator('[data-testid="assumptions-toggle"][aria-expanded="false"]')
+  if (await assumptions.count()) await assumptions.click()
   await page.getByTestId('assumption-row').filter({ hasText: 'Import efficiency' })
     .getByTestId('assumption-edit').click()
   await page.getByTestId('field-drawer').waitFor()

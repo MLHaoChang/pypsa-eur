@@ -159,7 +159,9 @@ def readiness_rows(ctx):
 
     with chat_tools._acting() as (db, user):
         project = project_registry.resolve_project(db, user, ctx.project_uuid)
-    return grid_readiness_for(project)["rows"]
+    return grid_readiness_for(project, source="saved")[
+        "rows"
+    ]  # the profile's saved network
 
 
 # (profile, metric, oracle over the solved context, exact?)

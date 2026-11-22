@@ -312,6 +312,39 @@ describe('ReportsPanel — generation (WP7b)', () => {
     expect(await screen.findByTestId('report-job-strip')).toBeTruthy()
   })
 
+  it('says in a status region that a plain report was built when no LLM profile is set, with a way to add one', async () => {
+    api.listReports.mockResolvedValue([META_A])
+    api.generateReport.mockResolvedValue({ status: 'done', report_id: ID_B, mode: 'plain' })
+    const user = userEvent.setup()
+    renderPanel()
+    await screen.findAllByTestId('report-row')
+    expect(screen.getByTestId('reports-plain-note').getAttribute('role')).toBe('status')
+    expect(screen.getByTestId('reports-plain-note').textContent).toBe('')
+    await user.click(screen.getByTestId('reports-generate'))
+    await user.click(within(await screen.findByRole('dialog')).getByTestId('generate-submit'))
+    const note = await screen.findByTestId('reports-plain-note-link')
+    expect(screen.getByTestId('reports-plain-note').textContent).toMatch(/Plain report built from the stored results: no LLM key needed\./)
+    expect(note.textContent).toMatch(/Add an LLM profile/)
+    // No job ran: the status strip never appears.
+    expect(screen.queryByTestId('report-job-strip')).toBeNull()
+  })
+
+  it('offers "Add an LLM profile" beside the refusal when an LLM-only input needs a key', async () => {
+    api.listReports.mockResolvedValue([META_A])
+    const { ReportsError } = await vi.importActual<typeof import('../api/reports')>('../api/reports')
+    api.generateReport.mockRejectedValue(new ReportsError({ error_kind: 'missing_api_key', message: 'raw backend text' }, 400))
+    const user = userEvent.setup()
+    renderPanel()
+    await screen.findAllByTestId('report-row')
+    await user.click(screen.getByTestId('reports-generate'))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByTestId('generate-submit'))
+    const err = await within(dialog).findByTestId('generate-error')
+    expect(err.textContent).toMatch(/needs an LLM profile with a key/)
+    expect(err.textContent).not.toMatch(/raw backend text/)
+    expect(within(err).getByTestId('report-add-llm-profile')).toBeTruthy()
+  })
+
   it('offers the sections of the newest evidence-only report in the dialog', async () => {
     api.listReports.mockResolvedValue([META_B, META_A])
     const user = userEvent.setup()

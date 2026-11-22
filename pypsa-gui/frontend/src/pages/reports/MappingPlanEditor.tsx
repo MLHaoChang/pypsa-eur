@@ -34,6 +34,7 @@ import {
 } from '../../api/reports'
 import { Btn, PageSection, Tag } from '../../components/PageKit'
 import type { SectionChoice } from './GenerateReportDialog'
+import { toastReportRefusal } from './llmProfileLink'
 import { ReportJobStrip } from './ReportJobStrip'
 import { REPORT_TEMPLATE_KEY, type ReportJobApi } from './useReportJob'
 
@@ -171,7 +172,7 @@ export function MappingPlanEditor({
       setOutcomeVisible(false)
       await job.proposeMapping(reportId, language ? { language } : {})
     } catch (e) {
-      toast.error(`Could not ask for a mapping plan: ${templateErrorMessage(e)}`)
+      toastReportRefusal('Could not ask for a mapping plan', templateErrorMessage(e), e)
     }
   }
 

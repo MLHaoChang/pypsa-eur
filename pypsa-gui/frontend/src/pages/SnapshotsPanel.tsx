@@ -11,6 +11,7 @@ import { appLog } from '../store/simulationStore'
 import { confirmToast } from '../utils/toasts'
 import { PageBody, PageSection, Btn, Tag } from '../components/PageKit'
 import { Dialog } from '../components/Dialog'
+import { signFirstEuro } from '../utils/format'
 
 // SnapshotsPanel — vertical timeline of project snapshots with restore +
 // delete, rendered as a full-page tab from the sidebar's REPORTS step.
@@ -200,7 +201,7 @@ function SnapshotRow({
   deleteDisabled: boolean
 }) {
   const relative = formatRelativeTime(snap.created_at) ?? '—'
-  const objStr = snap.objective != null ? `obj €${(snap.objective / 1e9).toFixed(3)}B` : null
+  const objStr = snap.objective != null ? `obj ${signFirstEuro(snap.objective, `${(Math.abs(snap.objective) / 1e9).toFixed(3)}B`)}` : null
   // Dispatch-status badge. fresh = solver dispatch matches the snapshot's
   // topology; stale = dispatch is for a different topology (charts would
   // mislead until re-solve); none = no dispatch. Older snapshots without

@@ -127,3 +127,157 @@ def apply_energization(n):
         done["v"] = True
 
     return undo
+
+
+# ── One period's MW (template-e2e 02b) ─────────────────────────────────────
+#
+# Guided section 3 edits the schedule as one MW value per investment period.
+# A period is written flat across its snapshots, and only a period that is
+# already flat: a shaped one (an uploaded ramp, say) is refused with its range
+# named, never scaled. The frame is edited in place: no column is created, no
+# row is added, and its index and dtype stay as they are.
+
+#: The key of the one period of a single-period axis (`energized_mw_by_period`).
+ALL = "all"
+#: The refusals of an MW value (the UX review's plain sentences, label "Connection limit (MW)").
+NOT_A_NUMBER = "Connection limit: enter a number."
+NOT_ABOVE_ZERO = "Connection limit: must be above 0 MW."
+
+
+class EnergizationEditError(ValueError):
+    """A per-period edit refused before anything was written: ``error_kind``
+    is the typed kind, the message says why in plain words."""
+
+    def __init__(self, error_kind: str, message: str):
+        super().__init__(message)
+        self.error_kind = error_kind
+        self.message = message
+
+
+def _period_masks(index) -> list[tuple[str, np.ndarray]]:
+    """``[(period key, row mask)]`` over the frame's own index: each level-0
+    period of a MultiIndex, or the one ``"all"`` of a single axis."""
+    if isinstance(index, pd.MultiIndex):
+        level = index.get_level_values(0)
+        return [(str(p), np.asarray(level == p)) for p in pd.unique(level)]
+    return [(ALL, np.ones(len(index), dtype=bool))]
+
+
+def by_period(n, link: str) -> dict | None:
+    """The schedule per period of the frame's own index, as stored:
+    ``{"by_period": {period: MW | {"min", "max"} | None}}``. A flat period
+    reads its one value; one that varies inside it (or has hours without a
+    value) reads its ``{"min", "max"}`` (the frontend's read-only "varies"
+    row); a period with no value at all reads None. None when the link has no
+    schedule. The one reading the flow row, the run's freeze and its
+    admission take."""
+    store = energization_frame(n)
+    if store is None or link not in store.columns:
+        return None
+    values = pd.to_numeric(store[link], errors="coerce").to_numpy(dtype=float)
+    out: dict[str, float | dict | None] = {}
+    for key, mask in _period_masks(store.index):
+        v = values[mask]
+        finite = v[np.isfinite(v)]
+        if not finite.size:
+            out[key] = None
+        elif finite.size == v.size and finite.min() == finite.max():
+            out[key] = float(finite[0])
+        else:
+            out[key] = {"min": float(finite.min()), "max": float(finite.max())}
+    return {"by_period": out}
+
+
+def schedule_digest(n) -> str | None:
+    """A digest of the whole schedule frame (its links, index and every MW
+    value), or None when no link carries a value: the investment case's key
+    part (template-e2e 02b W2), so a case is never keyed without it."""
+    import hashlib
+
+    store = energization_frame(n)
+    if store is None or not store.notna().any().any():
+        return None
+    h = hashlib.sha256(repr([str(c) for c in store.columns]).encode())
+    h.update(pd.util.hash_pandas_object(store, index=True).to_numpy().tobytes())
+    return h.hexdigest()[:32]
+
+
+def all_by_period(n) -> dict[str, dict]:
+    """``{link: by_period}`` for every scheduled Link ({} without one)."""
+    return {link: by_period(n, link) for link in energized_links(n)}
+
+
+def _period_mask(store: pd.DataFrame, period) -> tuple[np.ndarray, str]:
+    """The rows of ``period`` in the frame's own index, and its key. A
+    multi-period axis takes a level-0 value (an int, numpy's included, or its digits); a single
+    axis takes only ``"all"`` or None."""
+    index = store.index
+    if isinstance(index, pd.MultiIndex):
+        masks = dict(_period_masks(index))
+        # An int period may come from the index itself (np.int64); a float, bool or Decimal never.
+        if isinstance(period, bool) or not isinstance(period, (int, np.integer, str)) or str(period) not in masks:
+            raise EnergizationEditError(
+                "energization_unknown_period",
+                f"Choose one of the schedule's periods: {', '.join(masks)}.")
+        return masks[str(period)], str(period)
+    if period is not None and period != ALL:
+        raise EnergizationEditError(
+            "energization_unknown_period",
+            "This network has one period: set the schedule for all of it (period \"all\").")
+    return np.ones(len(index), dtype=bool), ALL
+
+
+def plan_period_mw(n, link: str, period, mw) -> dict:
+    """Check one period's edit without writing: EnergizationEditError, or what
+    `set_period_mw` writes (``mask``, ``period``, ``mw``, ``previous_mw``,
+    ``p_nom_mw``, ``note``)."""
+    # bool first: True is an int, and would read as 1 MW.
+    if isinstance(mw, bool) or not isinstance(mw, (int, float, np.integer, np.floating)):
+        raise EnergizationEditError("energization_invalid_mw", NOT_A_NUMBER)
+    value = float(mw)
+    if not np.isfinite(value):
+        raise EnergizationEditError("energization_invalid_mw", NOT_A_NUMBER)
+    if value <= 0:
+        raise EnergizationEditError("energization_invalid_mw", NOT_ABOVE_ZERO)
+    store = energization_frame(n)
+    if store is None or link not in store.columns or link not in n.links.index:
+        # Never created here: a schedule is the template's, or an upload's.
+        raise EnergizationEditError(
+            "energization_no_schedule", f"The link {link} has no energization schedule to edit.")
+    if store[link].dtype.kind != "f":
+        raise EnergizationEditError(
+            "energization_no_schedule",
+            f"The energization schedule of {link} is not stored as MW numbers.")
+    mask, key = _period_mask(store, period)
+    current = store[link].to_numpy(dtype=float)[mask]
+    finite = current[np.isfinite(current)]
+    if finite.size and (finite.size != current.size or finite.min() != finite.max()):
+        # Never scaled: the range is named and the network is where it is set.
+        # A period flat apart from hours without a value says so, not "varies 15–15".
+        label = "The period" if key == ALL else key
+        shape = (f"varies {finite.min():g}–{finite.max():g} MW" if finite.min() != finite.max()
+                 else f"has hours without a value ({finite.min():g} MW in the others)")
+        raise EnergizationEditError("energization_period_not_flat", f"{label} {shape}: set it on the network.")
+    p_nom = float(n.links.at[link, "p_nom"])
+    note = None
+    if value > p_nom:
+        # The per-period value is the energized (study) limit; p_nom is the link's rating.
+        note = f"This is above the link's rating ({p_nom:g} MW): it doesn't raise the link's capacity."
+    return {"mask": mask, "period": key, "mw": value,
+            "previous_mw": float(finite[0]) if finite.size else None,
+            "p_nom_mw": p_nom, "note": note}
+
+
+def set_period_mw(n, link: str, period, mw) -> dict:
+    """Set ``link``'s schedule to ``mw`` MW in one period, flat across that
+    period's snapshots (``period`` a level-0 value of a multi-period axis;
+    ``"all"`` or None on a single one). Refused with EnergizationEditError
+    and the frame untouched. The caller holds the network lock. Returns
+    ``{link, period, mw, previous_mw, p_nom_mw, note, series}``; ``note``
+    says when ``mw`` is above the link's ``p_nom``, which the schedule does
+    not raise; ``series`` is the period's rows as written."""
+    plan = plan_period_mw(n, link, period, mw)
+    store = energization_frame(n)
+    store.loc[plan["mask"], link] = plan["mw"]
+    return {"link": link, **{k: plan[k] for k in ("period", "mw", "previous_mw", "p_nom_mw", "note")},
+            "series": store.loc[plan["mask"], link].copy()}

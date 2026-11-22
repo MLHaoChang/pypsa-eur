@@ -149,7 +149,7 @@ def test_the_sidecars_are_current():
     """The shipped sidecars match what the builders write (regenerate with `_build.py`)."""
     out = TPL_DIR / TID
     meta = json.loads((out / T.META_FILE).read_text())
-    assert meta == json.loads(json.dumps(T.TEMPLATE_META[TID]))
+    assert meta == json.loads(json.dumps(T.template_meta(TID)))
     assert json.loads((out / T.SOLVER_FILE).read_text()) == json.loads(json.dumps(T.solver_config(TID)))
 
 
@@ -180,6 +180,24 @@ def test_mass_balance_per_period_and_the_h2_ratio(reset_backend):
     assert _by_period(made + buy + lost - delivered).abs().max() < 1e-6 * scale
     assert n.links_t.p2["haber_bosch"].to_numpy() == pytest.approx(
         (A.H2_MWH_PER_T / A.MWH_PER_T) * made.to_numpy(), abs=1e-6)
+
+
+@pytest.mark.live_solve
+def test_the_production_tiles_add_up_with_the_buy_in(reset_backend):
+    """Control-strategy walkthrough issue 10: the tiles' own figures (process_view) show
+    Made + Bought in + Lost = Delivered over the horizon, the buy-in priced at its marginal cost."""
+    from services.results.process_view import compute_process_view
+    n, _, _ = _plan("base")
+    nh3 = next(p for p in compute_process_view(n)["products"] if p["bus"] == "nh3")
+    made, bought, lost = nh3["production"]["t"], nh3["buy_in"]["t"], nh3["lost"]["t"]
+    assert bought > 0
+    assert made + bought + lost == pytest.approx(nh3["delivery"]["t"], rel=1e-6)
+    # The objective basis × each period's years, undiscounted (as lost.eur and the tonnes are).
+    years = n.investment_period_weightings["years"]
+    w = n.snapshot_weightings.objective * years.reindex(n.snapshots.get_level_values(0)).to_numpy()
+    mc = n.get_switchable_as_dense("Generator", "marginal_cost")["__buy_nh3"]
+    assert nh3["buy_in"]["eur"] == pytest.approx(float((n.generators_t.p["__buy_nh3"].clip(lower=0) * mc * w).sum()))
+    assert nh3["buy_in"]["carriers"] == [str(n.generators.at["__buy_nh3", "carrier"])]
 
 
 @pytest.mark.live_solve

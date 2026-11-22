@@ -68,6 +68,9 @@ def hub_network(*, peak_hour_mw: float = 120.0, import_price: float = 5.0):
     n = certifiable_weak_network()
     n.loads_t.p_set.iloc[3, 0] = peak_hour_mw
     n.generators.at['grid_supply', 'marginal_cost'] = import_price
+    # the study's import cap is the network's connection limit (template-e2e 02c):
+    # the hand values assume the pack's 50 MW, so the link is rated 50
+    n.links.loc['import_poc', ['p_nom', 'p_nom_max']] = PACK_IMPORT_MW
     return n
 
 
