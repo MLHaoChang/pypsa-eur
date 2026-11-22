@@ -10,6 +10,7 @@ import zipfile
 
 import pytest
 
+from routers.projects import _stripped_note
 from services import bundle_manifest as BM
 from services import project_contents as PC
 from tests.test_project_contents import _bundle_from, _left_behind, _post
@@ -313,6 +314,7 @@ def test_a_dry_run_writes_nothing_and_answers_what_the_import_does(
         "members": ["layout.json", "metadata.json", "network.nc", "solver_config.json"],
         "would_conflict": False,
         "stripped": ["extra_functionality_code"],
+        "stripped_note": _stripped_note(["extra_functionality_code"]),
         "ignored": ["stray.txt"],
         "rederived": [],
         "rederived_at_default_rate": False,
@@ -323,6 +325,7 @@ def test_a_dry_run_writes_nothing_and_answers_what_the_import_does(
     assert real.status_code == 200, real.text
     got = real.json()
     assert got["stripped"] == dry["stripped"]
+    assert got["stripped_note"] == dry["stripped_note"]
     assert got["ignored"] == dry["ignored"]
     assert got["warnings"] == dry["warnings"]
     assert (
