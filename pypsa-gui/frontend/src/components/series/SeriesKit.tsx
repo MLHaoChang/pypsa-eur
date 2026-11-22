@@ -91,7 +91,7 @@ export function MeasuredFileTab({
       </p>
       <input aria-label="Measured file" type="file" accept=".csv,.xlsx,.xls" className="block max-w-full"
         onChange={e => { setFile(e.target.files?.[0] ?? null); read.reset() }} />
-      <button type="button" className="block text-[11px] text-accent hover:underline" onClick={() => void template()}>
+      <button type="button" className="block text-[11px] text-link hover:underline" onClick={() => void template()}>
         <Download size={11} className="inline" /> Download the template
       </button>
       <div className="flex items-center gap-2">
@@ -129,7 +129,7 @@ export function SeriesStateLink({
     <div className="flex items-center gap-2 text-[11px]" data-testid="series-state">
       <span className="text-muted">Profile:</span>
       <span>{state}{data?.exists ? `, ${data.rows} h` : ''}</span>
-      <button type="button" className="text-accent hover:underline"
+      <button type="button" className="text-link hover:underline"
         onClick={() => openTimeSeriesFor(componentType === 'links' ? 'Link' : 'Generator', component,
           { field: attribute })}>
         Upload in Time Series ›

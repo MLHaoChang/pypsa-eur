@@ -89,12 +89,14 @@ from routers import (
     compare,
     gridspine,
     campus_electrical,
+    grid_compliance,
     geocode,
     guides,
     io,
     library,
     library_references,
     local_settings,
+    market_prices,
     memory,
     memory_dream,
     network,
@@ -1389,6 +1391,8 @@ app.include_router(
 )
 # Edge Investment Case (P1 WP1.1b): the org-scoped Library.
 app.include_router(library.router, prefix="/api/library", tags=["library"])
+# SCU06 S1: the ENTSO-E token (super-admin) and the project's day-ahead fetch.
+app.include_router(market_prices.router, prefix="/api/market-prices", tags=["market-prices"])
 # The shipped (common) cost references: read-only, the same for every org.
 app.include_router(library_references.router, prefix="/api/library/references", tags=["library"])
 # The Parameter catalogue (expert-catalogue 01a): project-free, the same for every org and caller.
@@ -1467,6 +1471,10 @@ app.include_router(
     adequacy_worksheet.router, prefix="/api/projects", tags=["adequacy"],
     dependencies=_projects_router_guard,
 )
+app.include_router(
+    market_prices.project_router, prefix="/api/projects", tags=["market-prices"],
+    dependencies=_projects_router_guard,
+)
 # Study reports (WP1): `/{name}/reports…` — same posture as the worksheet
 # (ProjectAccessDep on every route, lock-checked delete, paths joined only from
 # `AuthorizedProject.directory` + a regex-validated id). Registered BEFORE
@@ -1540,6 +1548,9 @@ app.include_router(gridspine.router, prefix="/api/gridspine", tags=["gridspine"]
 # The campus electrical study of a hub project (gridspine campus engine, plan
 # C6): its own prefix, like gridspine's, for the same reason.
 app.include_router(campus_electrical.router, prefix="/api/campus-electrical", tags=["campus-electrical"])
+# The grid-compliance workflow (GC-09): TRGC deliverable tracker, data list,
+# TSO revision log and report pack.
+app.include_router(grid_compliance.router, prefix="/api/grid-compliance", tags=["grid-compliance"])
 # Chatbot file uploads (Phase A) — per-project file storage at
 # `projects/<name>/uploads/`. Mounted under the same /api/projects prefix
 # so its routes (`/{name}/uploads`, `/{name}/uploads/{file_id}/...`) follow

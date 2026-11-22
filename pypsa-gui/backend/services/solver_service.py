@@ -485,6 +485,11 @@ class SolverConfig:
     # the solver-config PUT keeps it. Nothing at solve time reads it, and it is
     # in no solve fingerprint (a finance edit never makes a dispatch stale).
     finance: dict | None = None
+    # The finance inputs a template ships as assumptions, with their source
+    # (`models.finance.parse_finance_assumed`; WALK-IMPROVE-1 b). A label for
+    # the screens and the chat only: `goal_free_config` drops it, so it is in
+    # no fingerprint, digest or investment-case key.
+    finance_assumed: dict | None = None
     # Business case 08: the business-case inputs (`services.business_case.runner.
     # BusinessCaseConfig` JSON), set ONLY by `PUT /api/results/business_case/inputs`
     # (If-Match). Never an LP input: `goal_free_config` drops it, so it is in no

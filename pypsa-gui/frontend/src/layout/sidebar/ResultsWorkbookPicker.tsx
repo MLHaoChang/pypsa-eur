@@ -72,7 +72,7 @@ export function WorkbookRunNote({ run }: { run: ResultsWorkbookRun | null | unde
           <button type="button" data-testid="workbook-past-run-download" disabled={busy}
             data-run-id={past.runId} data-section={past.section ?? ''}
             onClick={() => { void download() }}
-            className="text-accent hover:underline disabled:opacity-50">
+            className="text-link hover:underline disabled:opacity-50">
             Download the kept results of {pastName} (JSON)
           </button>
           {refused && <p role="status" className="mt-1 text-warn" data-testid="workbook-past-run-refused">{refused}</p>}

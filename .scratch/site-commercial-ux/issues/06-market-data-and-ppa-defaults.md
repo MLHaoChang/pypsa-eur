@@ -41,11 +41,13 @@ new `pypsa-gui/backend/services/market_prices.py`, the time-series routes, secti
 
 ## Comments
 
+- 2026-11-21: owner chose option 2, "S1 + S2 + a K8 plan as one stack" (SCU06-PLAN-1, in `docs/agents/owner-decisions.md`). S1 in progress on `claude/scu06-s1-entsoe-prices`; the section-7 offer waits for SCU03 K1.
+
 ### 2026-11-21: S2a gatekeeper conditions (GK B4 (2))
 
 S2a ships the PPA/CfD defaults as five `common` Library contract items (`eu-ppa-pay-as-produced`, `eu-ppa-baseload`, `eu-ppa-as-consumed-btm`, `eu-ppa-sleeved`, `eu-cfd`). No swap or shaped off-site item: there is no model type for them yet (K7 gated plan).
 
-1. Home of the defaults: owner question SCU06-S2-HOME-1 (common Library items vs a defaults-pack section) is pending. S2a builds on common items meanwhile.
+1. Home of the defaults: the owner answered SCU06-S2-HOME-1 = (a), shared read-only common Library items (relayed 2026-11-22), which is what S2a builds.
 2. Versioning: a shipped item is never edited in place; a later change ships as a new ref version with the v1 bytes still pinned. `PINNED` covers all five, and a one-byte change fails the hash check.
 3. Placeholders fail closed on the server: seller, buyer and asset_ids (a CfD's generator_owner, counterparty and asset_ids) hold a fill-in marker that can never be a valid component name. Saving refuses a contract that still holds one, with a plain message, and settlement (what billing and finance read) refuses it too. Tests: save refused with each of the three left, accepted once all three are replaced; dropping the check turns them red.
 4. Every numeric value has a cited range (source, URL, year) and lies inside it; a test parses the notes. A copied contract keeps `library_ref`, so `source="illustrative"` stays traceable.

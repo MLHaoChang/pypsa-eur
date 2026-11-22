@@ -319,7 +319,7 @@ export default function StorageCycling() {
           still hit the server's MAX_RESPONSE_VALUES cap. */}
       <WindowCapBanner payloads={[storPowerTS as TSPayload | null]} />
       <header>
-        <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
+        <h3 className="text-h3 font-semibold text-text">
           Storage cycling
           <span className="ml-2 text-[10px] font-normal text-muted">{periodLabel}</span>
         </h3>

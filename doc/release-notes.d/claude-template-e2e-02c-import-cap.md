@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A weak-grid Energy Hub study started from chat or `POST /api/results/eh_study` without an import cap now runs on the network's connection limit instead of the pack's 50 MW constant; it is refused in plain words where the network fixes no limit, and an import cap that differs from the network's is refused naming both values.

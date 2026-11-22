@@ -285,11 +285,35 @@ def test_no_goal_on_both_sides_compares_equal(study):
     assert explain_study_figure("expected_shortfall")["outcome"]["state"] == "fresh"
 
 
-def test_a_goal_left_to_the_pack_reads_the_pack_s_value(study):
+def test_a_goal_left_to_the_pack_reads_the_pack_s_value(study, monkeypatch):
+    # A weak-grid request takes its cap from the network (template-e2e 02); this
+    # toy network has no import link, so the request under test is given directly.
+    _request_now(monkeypatch, archetype="weak_flexible")
     _goal(study, target_lole_h=None, site_archetype="weak_flexible")
     study.solver_state["eh_study"]["archetype"] = "weak_flexible"
     _payload(study)["target_lole_h"] = 3.0  # weak_flexible's pack target
     assert explain_study_figure("expected_shortfall")["outcome"]["state"] == "fresh"
+
+
+def test_a_weak_grid_study_on_a_network_with_an_import_link_reads_current(
+    install_network,
+):
+    """The request a study started now would send takes the weak-grid cap from
+    the network (template-e2e 02), through the real `flow_service._request_for`:
+    handing `_current` no network makes the request unbuildable, so a current
+    study would read stale."""
+    from project_templates.eh_templates import build_eh_datacenter
+
+    install_network(build_eh_datacenter())
+    ctx = PyPSAService.get_active_context()
+    _goal(ctx, site_archetype="weak_flexible")
+    ctx.solver_state["eh_study"] = _record(ctx)
+    record = ctx.solver_state["eh_study"]
+    record["archetype"] = "weak_flexible"
+    # A weak-grid run records the network's cap among its pack overrides.
+    record["pack_overrides"]["import_p_nom_mw"] = 40.0
+    out = explain_study_figure("expected_shortfall")
+    assert out["outcome"]["state"] == "fresh", _broken_labels(out)
 
 
 @pytest.mark.parametrize(
@@ -351,7 +375,7 @@ def _request_now(monkeypatch, **request):
     monkeypatch.setattr(
         flow_service,
         "_request_for",
-        lambda t, c=None: {"archetype": "strong_grid", **request},
+        lambda t, c=None, n=None: {"archetype": "strong_grid", **request},
     )
 
 
@@ -604,7 +628,7 @@ def test_a_changed_request_guided_would_send_now_reads_stale(
     monkeypatch.setattr(
         flow_service,
         "_request_for",
-        lambda t, c=None: {"archetype": "strong_grid", **request_now},
+        lambda t, c=None, n=None: {"archetype": "strong_grid", **request_now},
     )
     out = explain_study_figure("expected_shortfall")
     assert out["outcome"]["state"] == "stale"
