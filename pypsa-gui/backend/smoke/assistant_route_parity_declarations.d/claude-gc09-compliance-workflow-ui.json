@@ -1,0 +1,46 @@
+{
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/grid-compliance/{name}",
+   "reason": "held-by-spec",
+   "issue": ".scratch/grid-compliance/issues/10-assistant-tools.md"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/grid-compliance/{name}/deliverables/{code}/status",
+   "reason": "held-by-spec",
+   "issue": ".scratch/grid-compliance/issues/10-assistant-tools.md"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/grid-compliance/{name}/deliverables/{code}/data",
+   "reason": "held-by-spec",
+   "issue": ".scratch/grid-compliance/issues/10-assistant-tools.md"
+  },
+  {
+   "method": "POST",
+   "path": "/api/grid-compliance/{name}/deliverables/{code}/freeze",
+   "reason": "held-by-spec",
+   "issue": ".scratch/grid-compliance/issues/10-assistant-tools.md"
+  },
+  {
+   "method": "POST",
+   "path": "/api/grid-compliance/{name}/deliverables/{code}/comments",
+   "reason": "held-by-spec",
+   "issue": ".scratch/grid-compliance/issues/10-assistant-tools.md"
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/grid-compliance/{name}/deliverables/{code}/comments/{comment_id}",
+   "reason": "held-by-spec",
+   "issue": ".scratch/grid-compliance/issues/10-assistant-tools.md"
+  },
+  {
+   "method": "POST",
+   "path": "/api/grid-compliance/{name}/deliverables/{code}/pack",
+   "reason": "held-by-spec",
+   "issue": ".scratch/grid-compliance/issues/10-assistant-tools.md"
+  }
+ ]
+}
