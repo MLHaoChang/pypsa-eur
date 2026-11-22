@@ -57,6 +57,7 @@ import pandas as pd
 
 from gridspine.handoff.raw_writer import sgen_mbase
 from gridspine.schema.contracts import ContractError
+from gridspine.static import series_caps as SC
 from gridspine.static.harmonics import alpha, parse_spectrum
 
 DGS_VERSION = "5.0"
@@ -229,7 +230,7 @@ ATTRIBUTE_SOURCES = {
     "StaCubic": f"{_DGS_DOC}: cubicle (connection of an element to a terminal)",
     "TypHmccur": f"{_DGS_DOC}: harmonic current source type (vector attributes)",
 }
-#: ``TypHmccur`` is written separately: its vectors' length varies per row.
+#: ``TypHmccur`` is written separately: one block over the union of every source's orders (GC-15).
 HARMONIC_CLASS = "TypHmccur"
 #: ``ElmShnt.shtype``: 2 = C (capacitive), 1 = R-L (inductive).
 SHTYPE_C, SHTYPE_L = 2, 1
@@ -319,6 +320,7 @@ def write_dgs(
     spectrum``. A name in ``harmonics`` that matches no load or static
     generator is refused, as is a spectrum with an invalid order.
     """
+    SC.refuse(net, "PowerFactory DGS writer")  # GC-01b: not written yet (follow-up)
     f_hz = float(net.f_hz if f_hz is None else f_hz)
     harmonics = {str(k): v for k, v in (harmonics or {}).items()}
     converters = {str(c) for c in converters}

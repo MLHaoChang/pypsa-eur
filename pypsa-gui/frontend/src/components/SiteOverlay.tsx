@@ -84,7 +84,7 @@ export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, 
               type="button"
               aria-pressed={siteSizing === m}
               onClick={() => setSiteSizing(m)}
-              title={m === 'installed' ? 'Draw every asset at its installed size (p_nom, e_nom, s_nom)' : "Draw extendable assets at the last solve's optimum (*_nom_opt)"}
+              title={m === 'installed' ? 'Draw every asset at its installed size' : "Draw extendable assets at the last solve's optimum (*_nom_opt)"}
               className={`px-1.5 py-0.5 rounded border border-border ${siteSizing === m ? 'bg-accent/10 text-text font-semibold' : 'text-muted hover:bg-accent/5'}`}
             >
               {m === 'installed' ? 'as built' : 'optimised'}

@@ -3,7 +3,7 @@
 
 # 21 — Guided verdict says 'straddles the goal' when the run cannot resolve it
 
-Status: needs-triage
+Status: ready-for-agent
 Source: decide-report-journeys.md (walk 2026-11-17, master 0ab07339)
 Severity: misleads
 Journey fit: results. The verdict drives the go/no-go decision.
@@ -17,3 +17,7 @@ With 'Simulation runs per check' = 1 (allowed, minimum) the verdict reads 'Not d
 - The verdict states the resolution floor and the minimum runs needed.
 - Runs below the floor are refused or flagged before the run.
 - Goal reads the same value in rail, panel, verdict and reference design.
+
+## Triage (2026-11-20, master 8a039460)
+
+Checked by code reading only; the app was not re-run. Still true: the 'straddles the' text is still in `eh_study.py` and `headline.ts`. Goal display was partly fixed by #1734 (assumed-goal note). Acceptance as written above; re-check the goal-parity item after #1734. Gated: GK A. Blocked by: none.

@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from db.models import User
-from deps import require_user
+from deps import optional_user, require_user
 
 from services.dispatch_status import dispatch_status as _dispatch_status
 from services.pypsa_service import PyPSAService
@@ -298,6 +298,11 @@ def _result_df(n, accessor_name: str, attr: str, source: str = "lopf", *, state=
     snap = (_state if state is None else state).get(f"{src}_results")
     if isinstance(snap, dict) and key in snap:
         return snap[key]
+    if src == "ac_pf" and isinstance(snap, dict):
+        # PF-SAVE-1: the live network holds the LP's tables, never the
+        # flow's, so a table the flow's record lacks (links in a project saved
+        # before them) is no data, not the LP's values under a PF label.
+        return None
     try:
         accessor = getattr(n, accessor_name, None)
         if accessor is None:
@@ -488,6 +493,16 @@ def grid_risk_production_payload(project_id: str | None = None) -> dict:
     `project_id` must be the open project (it is the one whose network and campus run are read), resolved through
     the project ACL before any file is read. `available` false before a solve; `omitted` when the network has no
     process unit. See `services.results.grid_risk_production`."""
+    project_id, project = _open_project_read(
+        project_id, "Grid risk to production reads the open project's network and campus run; open that "
+                    "project first.")
+    return grid_risk_production_of(project, project_id)
+
+
+def _open_project_read(project_id: str | None, not_open: str) -> tuple[str, Any]:
+    """`(project_id, project)` for a read of the open project, for the acting user: `project_id` (default: the open
+    one) must be the open project (409 `no_active_project` / `project_not_open`, `not_open` its message), resolved
+    through the project ACL before anything is read (404 `not_authorized`)."""
     from services import chat_tools, project_registry
 
     active = PyPSAService.get_active_context().project_uuid
@@ -496,16 +511,14 @@ def grid_risk_production_payload(project_id: str | None = None) -> dict:
         raise HTTPException(409, {"error_kind": "no_active_project",
                                   "message": "No project is open; open the project and ask again."})
     if project_id != str(active or ""):
-        raise HTTPException(409, {"error_kind": "project_not_open",
-                                  "message": "Grid risk to production reads the open project's network and "
-                                             "campus run; open that project first."})
+        raise HTTPException(409, {"error_kind": "project_not_open", "message": not_open})
     with chat_tools._acting() as (db, user):
         try:
             project = project_registry.resolve_project(db, user, project_id)
         except HTTPException:
             raise HTTPException(404, {"error_kind": "not_authorized",
                                       "message": "The open project is not one you may read."}) from None
-    return grid_risk_production_of(project, project_id)
+    return project_id, project
 
 
 def grid_risk_production_of(project, project_id: str) -> dict:
@@ -701,6 +714,9 @@ def get_ac_pf_status():
         "available": True,
         "slack_bus_used": s.get("ac_pf_slack_bus_used"),
         "stripped_voll_slacks": s.get("ac_pf_stripped_voll_slacks") or [],
+        # DGS-SEED-1: non-empty when the flow was seeded by lpf() because
+        # these transformers shift phase.
+        "seeded_by": s.get("ac_pf_seeded_by") or [],
         # `converged_per_snapshot` is the legacy `{iso: bool}` dict; on
         # multi-period the same ISO can map to multiple periods so the map
         # is ambiguous. New consumers should use `converged_list` —
@@ -1690,6 +1706,32 @@ def get_eh_study():
     return out
 
 
+@results_router.get("/eh_study/why/{figure}")
+def get_eh_study_why(figure: str, project_id: str | None = Query(default=None),
+                     actor: User = Depends(require_user)):
+    """
+    Why a Guided Energy Hub study figure (`expected_shortfall`, `design_cost`,
+    `verdict`) has its value (guided-results 02a): the provenance graph's walk
+    to the study run and its inputs, each recorded vs current, outcome first
+    (`explain_study_figure`). Reads only (COPILOT-1). `project_id` must be the
+    open project (409 / 404 as the other open-project reads); an unknown figure
+    is `why_target_unknown` (404), no finished study `study_not_run` (404, 409
+    while it runs).
+    """
+    from services.provenance_graph.eh_study import StudyNotRun
+    from services.provenance_graph.explain import TargetUnknown, explain_study_figure
+
+    with _result_actor(actor):
+        _open_project_read(project_id, "The study's figures are read from the open project; open that "
+                                       "project first.")
+        try:
+            return explain_study_figure(figure)
+        except StudyNotRun as exc:
+            raise HTTPException(exc.status, {"error_kind": "study_not_run", "message": str(exc)}) from exc
+        except TargetUnknown as exc:
+            raise HTTPException(exc.status, {"error_kind": "why_target_unknown", "message": str(exc)}) from exc
+
+
 @results_router.post("/eh_study/abort")
 def post_eh_study_abort():
     """
@@ -2147,10 +2189,15 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
     (``_ic_growth_flags``). On a run's own step (`assistant_tasks.RUN_CONTEXT` set,
     study harness 14) the case never re-solves the baseline: the envelope counts
     no solve for it, and a kept asset added after its admission is refused here,
-    under the lock that plans it (`baseline_solve`)."""
+    under the lock that plans it (`baseline_solve`), unless the run's grant
+    reserved the baseline's solves at the case's admission (study harness 36,
+    GK B (60) A2: `run_envelope.case_baseline_reserved`)."""
     from services import assistant_tasks
 
     in_run = assistant_tasks.RUN_CONTEXT.get() is not None
+    if in_run:
+        from services import harness_locks, run_envelope
+        in_run = not run_envelope.case_baseline_reserved(harness_locks.in_run())
 
     def build():
         from models.finance import FinanceInputs
@@ -2224,12 +2271,16 @@ def _ic_assumptions(cfg, n, *, lock, extra_assets: str | None = None,
         fin = None
     solver = dataclasses.asdict(cfg) if dataclasses.is_dataclass(cfg) else None
     commercial = getattr(cfg, "commercial", None)
+    from services.adequacy.energization import schedule_digest
+
     with lock:
         owner_assets = owner_assets_digest(n, commercial)
+        # template-e2e 02b (W2): the case reads the energization schedule at build time.
+        energization = schedule_digest(n)
     return assumptions_digest(finance=raw, commercial=commercial,
                               dispatch=dispatch_digest(n, result_df or _result_df), packs=pack_versions(fin),
                               solver=solver, owner_assets=owner_assets,
-                              extra_assets=extra_assets)
+                              extra_assets=extra_assets, energization=energization)
 
 
 def _ic_current_assumptions() -> tuple[tuple[str, dict] | None, str | None]:
@@ -2288,8 +2339,22 @@ def post_investment_case_abort():
     )
 
 
+def _run_requester(user) -> tuple:
+    """(user id, project id) of who starts an in-process run on the active
+    project: the HTTP caller, else the chat's acting user (a chat tool calls
+    the handler directly). The runner reads their role again before it stores
+    its report (project-viewer-role 02)."""
+    uid = user.id if isinstance(user, User) else None
+    if uid is None:
+        from services.chat_tools import acting_user_id
+
+        uid = acting_user_id()
+    return uid, PyPSAService.get_active_context().project_uuid
+
+
 @results_router.post("/investment_case")
-def post_investment_case(body: InvestmentCaseRequest | None = None):
+def post_investment_case(body: InvestmentCaseRequest | None = None,
+                         user: User | None = Depends(optional_user)):
     """
     Start the single-owner investment-case run in a worker thread (IC P4
     WP4.6b): build the `FinanceCase` from the solved network and the stored
@@ -2323,6 +2388,7 @@ def post_investment_case(body: InvestmentCaseRequest | None = None):
         assumptions=lambda: _ic_assumptions(cfg, n, lock=lock, extra_assets=campus.digest),
         case_hash=_ic_case_hash,
         state_lock=PyPSAService.get_solver_state_lock(),
+        requester=_run_requester(user),
     )
 
 
@@ -2754,7 +2820,7 @@ def post_business_case_abort():
 
 
 @results_router.post("/business_case")
-def post_business_case():
+def post_business_case(user: User | None = Depends(optional_user)):
     """Start the business-case run on the stored investment case (spec §7). 422 without
     (valid) inputs; 409 `investment_case_missing` without a current investment-case
     report ("run the investment case first", C3); 409 while a solve or another study
@@ -2783,6 +2849,7 @@ def post_business_case():
         publish_study=_publish_study,
         load_pack=_bc_load_pack,
         state_lock=PyPSAService.get_solver_state_lock(),
+        requester=_run_requester(user),
     )
 
 

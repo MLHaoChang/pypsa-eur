@@ -419,6 +419,7 @@ from harness.compose import (  # noqa: E402, F401 — moved (issue 08); re-expor
     _STYLE_GUIDANCE,
     _UI_CONTEXT_MAX_VALUE_CHARS,
     _UNTRUSTED_DATA_CLAUSE,
+    _VIEW_ONLY,
     _WORKFLOW_STATE_TOOLS,
     _build_system_prompt,
     _format_live_network_meta,
@@ -2376,7 +2377,13 @@ def _run_turn_body(
     tool_call_count = 0
     # Task 8 — `[]` when the profile's `tools` capability is off; see
     # _tools_payload_for_profile.
-    tools = selected_tools
+    # project-viewer-role 01: a viewer is offered only the tools dispatch
+    # admits for them (`restrictions.role_admits`, the rule `require_allowed`
+    # applies), and the prompt says the project is view only.
+    from harness import restrictions
+
+    viewer_snapshot = _role_snapshot(session)
+    tools = _offer_for_role(session, selected_tools, viewer_snapshot)
     # C-1 — the ALLOWLIST the dispatch loop below enforces.
     #
     # Derived from `tools` (what this turn actually SENT), never from the
@@ -2398,6 +2405,8 @@ def _run_turn_body(
     )
     if session.assurance_turn is not None:
         system_prompt += "\n" + session.assurance_turn.prompt()
+    if restrictions.view_only(viewer_snapshot):
+        system_prompt += "\n" + _VIEW_ONLY
 
     # A8 — at most one fallback-model downgrade after rate_limited retries
     # are exhausted, PER TURN (public cost/availability escape hatch).
@@ -2950,7 +2959,13 @@ def _run_turn_body(
             for t in tool_uses
         ):
             _chat_tools.set_chat_session(session)
-            tools = _tools_payload_for_profile(profile, message, history=messages)
+            # The rebuilt offer passes the same role filter as the first one
+            # (project-viewer-role 01, GK B3), with the role read again.
+            tools = _offer_for_role(
+                session,
+                _tools_payload_for_profile(profile, message, history=messages),
+                _role_snapshot(session),
+            )
             offered_tool_names = {t["name"] for t in tools}
 
 
@@ -3100,6 +3115,31 @@ def dispatch_tool_call(
         guided=guided,
     )
     return True
+
+
+def _role_snapshot(session: ChatSession):
+    """The turn's restriction snapshot, for choosing what to offer.
+
+    None when it cannot be read here (no acting user, a changed owner): the
+    tools stay as selected and dispatch, which captures again, decides.
+    """
+    from harness import restrictions
+
+    try:
+        return restrictions.capture(session)
+    except HTTPException:
+        return None
+
+
+def _offer_for_role(session: ChatSession, tools: list, snapshot) -> list:
+    """The tools of `tools` that dispatch admits for the snapshot's role.
+
+    One filter for every place a turn builds its offer: a viewer is offered
+    only what `restrictions.require_allowed` would let them run.
+    """
+    from harness import restrictions
+
+    return [t for t in tools if restrictions.role_admits(snapshot, _tool_tier(session, t["name"]))]
 
 
 def _tool_tier(session: ChatSession, tool_name: str) -> str:
@@ -3600,6 +3640,43 @@ def _dispatch_real_tool_call(
                 }
             )
             return
+    map_card = None
+    if (
+        tool_name == "compare_system_types"
+        and (args or {}).get("action", "start") == "start"
+        and session.assurance_turn is None
+    ):
+        # homer-parity 03b-1: the saved base, both variables and the solve
+        # count; a refusal here means no card.
+        from harness import system_map_card as map_cards
+
+        try:
+            map_card = map_cards.preview(args or {})
+        except Exception as exc:
+            detail = getattr(exc, "detail", None)
+            kind = (
+                detail.get("error_kind", "system_map_preview_unavailable")
+                if isinstance(detail, dict)
+                else "system_map_preview_unavailable"
+            )
+            yield (
+                "tool_error",
+                {
+                    "tool_use_id": tool_use_id,
+                    "tool_name": tool_name,
+                    "error_kind": kind,
+                    "message": _redact_for_log(detail or exc),
+                },
+            )
+            tool_results_collector.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "is_error": True,
+                    "content": _error_result_content(detail, exc, kind),
+                }
+            )
+            return
     if tool_name == "propose_memory":
         # Assistant memory §2.2–§2.4: a proposal is validated, capped and
         # checked against recent dismissals BEFORE its card, so a refused one
@@ -3668,6 +3745,7 @@ def _dispatch_real_tool_call(
         restriction_snapshot=restriction,
         edit_card=edit_card,
         sweep_card=sweep_card,
+        **({"map_card": map_card} if map_card is not None else {}),
         **({"repeat_card": repeat_card} if repeat_card is not None else {}),
     )
     if not approved:
@@ -3929,6 +4007,8 @@ def _dispatch_real_tool_call(
                         return out
                     if sweep_card is not None:
                         sweep_cards.require_current(args or {}, sweep_card)
+                    if map_card is not None:
+                        map_cards.require_current(args or {}, map_card)
                     return invoke(session, tool_name, args or {}, handler)
 
             # PER_TOOL_TIMEOUT_SECONDS is a budget for RUNNING the handler.

@@ -50,9 +50,11 @@ export const ioApi = {
     const fd = new FormData(); fd.append('file', file)
     return client.post<ImportSummary>('/io/import/csv', fd).then(r => r.data)
   },
+  /** No error toast: an input workbook's 422 `import_as_new_project` opens the
+   *  workbook dialog instead, and the Import zone shows any other refusal once. */
   importExcel: (file: File) => {
     const fd = new FormData(); fd.append('file', file)
-    return client.post<ImportSummary>('/io/import/excel', fd).then(r => r.data)
+    return client.post<ImportSummary>('/io/import/excel', fd, { skipErrorToast: true }).then(r => r.data)
   },
   importMatpower: (file: File) => {
     const fd = new FormData(); fd.append('file', file)

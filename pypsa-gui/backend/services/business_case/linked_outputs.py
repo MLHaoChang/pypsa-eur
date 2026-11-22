@@ -22,6 +22,7 @@ preset row's kW per GPU. The one new constant is `O2_KG_PER_KG_H2`.
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 from collections.abc import Callable
@@ -84,13 +85,47 @@ class LinkedSolve:
     dc: tuple | None = None
 
 
-def bind(ctx, *, dc: tuple | None = None) -> LinkedSolve:
+#: `bind`'s default: read the data-centre spec off the context's project.
+_FROM_PROJECT: Any = object()
+
+
+def _project_dc(ctx) -> tuple | None:
+    """`(DataCentreLoadSpec, timezone)` of the context's project: the `dc_load` spec its
+    create body stored (`dc_backup.project_spec`) and the template's timezone. None
+    without a project directory, on another template or without the spec (never a
+    default spec: the IT outputs read the spec the network was built from)."""
+    storage = getattr(ctx, "storage_dir", None)
+    if not storage:
+        return None
+    from project_templates import eh_templates
+    from services.adequacy.dc_backup import DcBackupError, project_spec
+
+    try:
+        tid, spec, _planning = project_spec(storage, eh_templates)
+    except DcBackupError:
+        return None  # not a data-centre project made with the form's body
+    except (KeyError, TypeError, ValueError) as exc:
+        # A stored spec or planning block that no longer reads (pydantic's
+        # ValidationError is a ValueError): the IT outputs only are not offered.
+        logging.getLogger(__name__).warning(
+            "business case: the data-centre load spec does not read, no IT output: %s",
+            exc,
+        )
+        return None
+    return spec, eh_templates._dc_timezone(tid)
+
+
+def bind(ctx, *, dc: tuple | None = _FROM_PROJECT) -> LinkedSolve:
     """The live solve of a project context. Call under the network lock.
 
     `fresh` is `harness.calculations.solve_matches_inputs`: the solve completed optimal, the live frames are
     the LP's (no AC power flow or LOPF overlay) and both recorded fingerprints equal the current inputs,
-    re-hashed now."""
+    re-hashed now. `dc` defaults to the project's own data-centre spec (`_project_dc`); an explicit
+    None binds none (walk 2026-11-17, issue 01)."""
     from harness.calculations import solve_matches_inputs
+
+    if dc is _FROM_PROJECT:
+        dc = _project_dc(ctx)
 
     state = ctx.solver_state
     cfg = state.get("solver_config")

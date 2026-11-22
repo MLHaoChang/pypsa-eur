@@ -149,7 +149,9 @@ def _env(steps):
 
 
 def _result_gate(monkeypatch, card, steps=None, live=CODE["digest"]):
-    monkeypatch.setattr(G, "grid_readiness_for", lambda project, profile=None: card)
+    monkeypatch.setattr(
+        G, "grid_readiness_for", lambda project, profile=None, **kw: card
+    )
     for step in [_read_step()] if steps is None else steps:
         step.setdefault("result", {}).setdefault(
             "rows_digest", run_actions.rows_digest(card)
@@ -173,10 +175,15 @@ def _result_gate(monkeypatch, card, steps=None, live=CODE["digest"]):
     }
 
 
-def _shipped_card(tmp_path):
+def _shipped_card(tmp_path, bess_sized=False):
     d = tmp_path / "shipped"
     d.mkdir()
     n = T.BUILDERS["eh_datacenter"]()
+    if bess_sized:
+        # 10 MW stands for the size a solve leaves on the extendable BESS. The
+        # scr_gate._rating reader counts a positive p_nom_opt as sized (solve
+        # coverage decides only a 0). Unsized, the SCR Pass is withheld (DC walk 05).
+        n.storage_units.at["bess_new", "p_nom_opt"] = 10.0
     T.write_sidecars(d, "eh_datacenter")
     return G.grid_readiness(d, n, "generic_assumed")
 
@@ -184,7 +191,7 @@ def _shipped_card(tmp_path):
 def test_on_the_shipped_template_warn_rows_do_not_end_the_run_and_never_count_as_passes(
     tmp_path, monkeypatch
 ):
-    card = _shipped_card(tmp_path)
+    card = _shipped_card(tmp_path, bess_sized=True)
     results = _result_gate(monkeypatch, card)
     warn = [r for r in results.values() if r["severity"] == "warn"]
     unknown = {r["id"] for r in card["rows"] if r["verdict"] == "unknown"}
@@ -208,6 +215,8 @@ def test_on_the_shipped_template_warn_rows_do_not_end_the_run_and_never_count_as
     assert (
         card_row(card, "scr")["verdict"] == "pass" and card_row(card, "scr")["assumed"]
     )
+    # 250 MVA over PV 4 + UPS battery 40 + BESS 10 = 54 MVA, as the row rounds it.
+    assert card_row(card, "scr")["project_value"] == round(250.0 / 54.0, 3) == 4.63
     assert (
         block["dc.scr"]["verdict"] == "not_evaluated"
         and "assumed" in block["dc.scr"]["reason"]
@@ -239,6 +248,33 @@ def test_an_assumed_pass_on_a_block_row_is_not_evaluated_and_on_a_warn_row_is_wi
         {"rows": [{"id": "scr", "verdict": "pass", "assumed": False}], "excluded": []},
     )
     assert verified["dc.scr"]["verdict"] == "pass"
+
+
+def test_the_result_gate_reads_the_saved_scorecard(monkeypatch):
+    """DC walkthrough 04: the screen reads the loaded network, but the gate
+    re-reads the saved project, as its readiness step did: a live read can fall
+    back to the saved file under a run's lock and change the rows digest."""
+    card = {
+        "rows": [{"id": "scr", "verdict": "pass", "assumed": False}],
+        "excluded": [],
+    }
+    sources = []
+    monkeypatch.setattr(
+        G,
+        "grid_readiness_for",
+        lambda project, profile=None, source="live": sources.append(source) or card,
+    )
+    monkeypatch.setattr(run_actions, "unchanged", lambda project, code: True)
+    step = _read_step()
+    step["result"]["rows_digest"] = run_actions.rows_digest(card)
+    rules = [
+        r
+        for r in _profile()["stages"]["result_gate"]["rules"]
+        if r["fact"].startswith(run_gates.SCORECARD)
+    ]
+    results = {r["rule"]: r for r in run_gates.evaluate(rules, _env([step]))}
+    assert results["dc.scr"]["verdict"] == "pass"
+    assert sources and set(sources) == {"saved"}
 
 
 def test_a_block_row_reading_unknown_fails_closed(monkeypatch):
@@ -317,7 +353,7 @@ def test_the_scorecard_reads_with_the_frozen_profile_id(monkeypatch):
     monkeypatch.setattr(
         G,
         "grid_readiness_for",
-        lambda project, profile=None: (
+        lambda project, profile=None, **kw: (
             asked.append(profile) or {"rows": [], "excluded": []}
         ),
     )
@@ -1400,3 +1436,31 @@ def test_every_campus_setting_has_its_words():
         "invest",
         "profile",
     }
+
+
+def test_the_readiness_step_reads_the_saved_scorecard(monkeypatch):
+    """DC walkthrough 04: the step reads the saved project, as the campus run
+    does and as the result gate re-reads it, never the loaded network."""
+    from harness import runner
+    from services import campus_electrical_service as ce
+
+    card = {
+        "rows": [{"id": "scr", "verdict": "pass", "assumed": False}],
+        "excluded": [],
+    }
+    sources, written = [], []
+    monkeypatch.setattr(
+        G,
+        "grid_readiness_for",
+        lambda project, profile=None, source="live": sources.append(source) or card,
+    )
+    monkeypatch.setattr(
+        ce, "grid_code_since_run", lambda project, code: {"status": "same"}
+    )
+    monkeypatch.setattr(ce, "profile_fingerprint", lambda project, code: CODE["digest"])
+    monkeypatch.setattr(runner, "_update", lambda path, fn: written.append(fn))
+    assert (
+        run_actions._readiness(None, {"id": "s1"}, object(), CODE)
+        == run_actions.READINESS
+    )
+    assert sources == ["saved"] and written

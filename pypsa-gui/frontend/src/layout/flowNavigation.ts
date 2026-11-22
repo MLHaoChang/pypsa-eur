@@ -2,6 +2,7 @@ import type { FlowTarget, FlowSectionId, SitePart } from '../api/flow'
 import { useUIStore, type CanvasView, type SitePartSelection, type SlidePanel } from '../store/uiStore'
 import { onManualNavigation } from '../utils/navigationEpoch'
 import { fieldWords } from '../utils/flowItems'
+import { RECIPE_FIELD } from '../pages/hubDesign/holdWords'
 import { PANEL_SECTION, SECTION_OPEN, sectionMeta } from './flowSections'
 import { useScorecardOpen } from '../components/gridReadiness/GridReadinessScorecard'
 
@@ -111,6 +112,9 @@ export function returnToOrigin(): void {
   const o = useUIStore.getState().flowReturn
   if (!o) return
   const ui = useUIStore.getState()
+  // Back from Expert to Guided abandons an Add form the jump opened (Guided's "Add a process unit
+  // in Expert"); left set, it would take over the next Guided drawer.
+  if (ui.uiMode === 'expert' && o.mode === 'guided') ui.setCreationItem(null)
   ui.setUiMode(o.mode)
   ui.setActiveSection(o.section)
   if (o.mode === 'guided') {
@@ -258,6 +262,19 @@ export function openOffGridConstraints(): void {
   withReturn(null, () => openSectionInExpert('scenarios'))
 }
 
+/** Show the Island limits setting (Solver settings › Off-grid constraints), scrolled to and focused: the
+ *  section's panel in Expert, in place in Guided (never flips the mode). Back returns to where it was clicked. */
+export function openIslandLimits(): void {
+  const ui = useUIStore.getState()
+  ui.requestSolverBlock('island')
+  if (ui.uiMode === 'guided') {
+    openFlowTargetInPlace({ section: 'scenarios', panel: 'simparams', component: null,
+      entity: null, field: null })
+    return
+  }
+  withReturn(null, () => openSectionInExpert('scenarios'))
+}
+
 /** Show the N-1 security branch selector (Solver settings › Network): the
  *  section's panel in Expert, in place in Guided (never flips the mode). */
 export function openN1BranchSelector(): void {
@@ -309,6 +326,16 @@ export const FAULT_LEVEL_TARGET: FlowTarget = {
 export function openFaultLevelEditor(): void {
   if (useUIStore.getState().uiMode === 'expert') openFlowTarget(FAULT_LEVEL_TARGET)
   else openFlowTargetInPlace(FAULT_LEVEL_TARGET)
+}
+
+/** The connection limit (template-e2e 02): the import link's capacity, edited on the Connection limits
+ *  line like the fault level. Expert opens the section's panel; Guided the field drawer over the card. */
+export const CONNECTION_LIMIT_TARGET: FlowTarget = {
+  section: 'connection', panel: 'campusElectrical', component: null, entity: null, field: 'connection_limit',
+}
+export function openConnectionLimitEditor(): void {
+  if (useUIStore.getState().uiMode === 'expert') openFlowTarget(CONNECTION_LIMIT_TARGET)
+  else openFlowTargetInPlace(CONNECTION_LIMIT_TARGET)
 }
 
 /** The site coordinate field (D01; UI contract rule 4): Guided, a drawer over
@@ -370,7 +397,8 @@ export function openSiteBoundaryDraw(at: { lat: number; lng: number } | null): v
  *  (focused, highlighted), not the read-only card at its top. The card takes the
  *  request once it is the selected Link's detail view. */
 function requestLinkFieldEdit(target: FlowTarget): void {
-  if (target.component !== 'Link' || !target.entity || !target.field) return
+  // The recipe card (gap 03) sits above the Link's fields; it names no field to edit.
+  if (target.component !== 'Link' || !target.entity || !target.field || target.field === RECIPE_FIELD) return
   useUIStore.getState().requestPropertiesEdit({ type: 'Link', name: target.entity, field: target.field })
 }
 

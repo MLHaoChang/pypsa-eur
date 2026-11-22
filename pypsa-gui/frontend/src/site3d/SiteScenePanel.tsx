@@ -18,14 +18,16 @@ import SiteCompanion, { BlockerAsk, whereWords, buildingLabel, SECTION_WORDS } f
 import { openSectionInExpert, openSectionInGuided, openSiteAnchor, withReturnFromSite3D } from '../layout/flowNavigation'
 import { sceneErrorCopy, sceneErrorDetail, sceneErrorWantsReload, type GreenfieldInput, type LayoutInputs, type LayoutSummary, type SceneBuilding, type SourceInput } from '../api/siteScene'
 import LayoutImport from './LayoutImport'
-import type { SceneAction, SitePart } from '../api/flow'
+import type { FlowRunBlocker, SceneAction, SitePart } from '../api/flow'
 import { evaluateMutation } from '../utils/mutationGuard'
 import NumberField from './NumberField'
 import AssociationPanel from './AssociationPanel'
 import { useSitesStore } from './sitesStore'
 import { applyProposal, discardProposal, propose, SitesNotSaved } from './sceneActions'
 import { useModelProposal, useSceneProposal, useSiteScene } from './useSiteScene'
-import { KIND_WORDS } from './associations'
+import { featureName, KIND_WORDS } from './associations'
+import { useSceneResults } from './useSceneResults'
+import { snapshotWords } from './sceneResults'
 import type { TargetClass } from '../api/siteScene'
 import { heightEvidenceWords, HEIGHT_MAX_M, greenfieldFromBuilding, osmSourcesInside } from './nativeSite'
 import { fromLocal } from './geo'
@@ -56,7 +58,7 @@ function goHome(home: unknown): void {
 /** "› Snapshots" beside an unreadable scene (UX SC-01b plan, condition 3). */
 function SnapshotsLink() {
   return (
-    <button type="button" data-testid="scene-snapshots-link" className="whitespace-nowrap text-accent hover:underline"
+    <button type="button" data-testid="scene-snapshots-link" className="whitespace-nowrap text-link hover:underline"
       onClick={() => withReturnFromSite3D(() => useUIStore.getState().setSlidePanel('snapshots'))}>
       › Snapshots
     </button>
@@ -65,7 +67,7 @@ function SnapshotsLink() {
 
 const unreadable = (err: unknown) => sceneErrorDetail(err)?.error_kind === 'integrity_error'
 
-function Blocker({ action, where }: { action: SceneAction | undefined; where: string }) {
+function Blocker({ action, where, ask = true }: { action: SceneAction | undefined; where: string; ask?: boolean }) {
   if (!action || action.available || !action.blocker) return null
   const leaves = !('site_part' in (action.blocker.home as object))
   const section = (action.blocker.home as { guided?: { section: string } }).guided?.section
@@ -73,12 +75,25 @@ function Blocker({ action, where }: { action: SceneAction | undefined; where: st
     <span className="text-[11px] text-muted" data-testid={`scene-blocker-${action.action}`}>
       {action.blocker.reason}
       {leaves && section && (
-        <> <button type="button" onClick={() => goHome(action.blocker!.home)} className="text-accent hover:underline">
+        <> <button type="button" onClick={() => goHome(action.blocker!.home)} className="text-link hover:underline">
           {action.blocker.link} {SECTION_WORDS[section] ?? section}
         </button></>
       )}
       {/* Its own line under the reason (UX #1226): the button never fits beside it at the panel's width. */}
-      <span className="block mt-1"><BlockerAsk where={where} reason={action.blocker.reason} /></span>
+      {ask && <span className="block mt-1"><BlockerAsk where={where} reason={action.blocker.reason} /></span>}
+    </span>
+  )
+}
+
+/** SC-07 S6c (UX U2, U3): the Run's own `/flow` refusal on the results line, its "›" to the section
+ *  through withReturn, and "Ask for help" on its own line. Out-of-date results alone show nothing here. */
+function RunBlockerLine({ blocker, label, where }: { blocker: FlowRunBlocker; label: string; where: string }) {
+  return (
+    <span className="text-[11px] text-muted" data-testid="scene-results-run-blocker">
+      {blocker.message}
+      {' '}<button type="button" onClick={() => goHome({ guided: { section: blocker.section } })}
+        className="whitespace-nowrap underline text-text hover:text-accent">› {label}</button>
+      <span className="block mt-1"><BlockerAsk where={where} reason={blocker.message} /></span>
     </span>
   )
 }
@@ -149,7 +164,11 @@ function CornerTable({ ring, disabled, onChange }: { ring: [number, number][]; d
 export const greenfieldValid = (g: GreenfieldInput) =>
   g.width > 0 && g.depth > 0 && g.height > 0 && g.height <= HEIGHT_MAX_M && [g.heading, ...g.center].every(Number.isFinite)
 
-export default function SiteScenePanel({ site, contextBuildings }: { site: Site; contextBuildings: ContextBuilding[] | null }) {
+export default function SiteScenePanel({ site, contextBuildings, current = false, freshSince = 0 }: {
+  site: Site; contextBuildings: ContextBuilding[] | null
+  /** SC-07 S6c: the solve's settled state, as SceneResultsPanel gets it, so both read the same results. */
+  current?: boolean; freshSince?: number
+}) {
   const project = useUIStore(s => s.currentProject)
   const part = useUIStore(s => s.sitePart)
   const setPart = useUIStore(s => s.setSitePart)
@@ -181,6 +200,12 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
   const guard = evaluateMutation(readOnly, readOnlyReason)
   const blocked = guard.allowed ? null : guard.blockedMessage
   const enabled = scene.data?.state === 'enabled' ? scene.data : null
+  const resultsIdx = useUIStore(s => s.resultsSnapshotIdx)
+  const results = useSceneResults({
+    project, siteId: site.id, enabled: part === 'results' && !!enabled, current, freshSince,
+    sceneRevision: enabled?.revision ?? null, idx: resultsIdx,
+  })
+  const runBlocker = flow?.run_blocker ?? null
   const accepted: SceneBuilding[] = enabled?.buildings ?? []
   const sources: SourceInput[] = contextBuildings ? osmSourcesInside(site, contextBuildings) : []
   const mine = proposal && proposal.site_id === site.id ? proposal : null
@@ -260,6 +285,8 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
         ))}
       </div>
       <SiteCompanion siteName={site.name} part={part} selected={selected}
+        snapshot={part === 'results' && results.data ? snapshotWords(results.data) : null}
+        resultsName={selected ? featureName(selected.id, accepted, enabled?.groups ?? []) : null}
         resume={enabled ? <SiteResume siteName={site.name} rows={enabled.my_previews} readAt={scene.dataUpdatedAt}
           recheck={async () => {
             const read = await scene.refetch()
@@ -275,13 +302,13 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
       {moved && (
         <div data-testid="site-anchor-moved" className="text-[11px] text-warn">
           Site coordinates moved over 1 km from this site: the site stays where it was created{' '}
-          <button type="button" onClick={() => openSiteAnchor({ fromSite3D: true })} className="text-accent hover:underline">› Site coordinates</button>
+          <button type="button" onClick={() => openSiteAnchor({ fromSite3D: true })} className="text-link hover:underline">› Site coordinates</button>
         </div>
       )}
       {refusal && (
         <div role="alert" className="text-[11px] text-danger">
           {refusal}{' '}
-          <button type="button" data-testid="scene-refusal-generate" className="whitespace-nowrap text-accent hover:underline"
+          <button type="button" data-testid="scene-refusal-generate" className="whitespace-nowrap text-link hover:underline"
             onClick={() => { clearRefusal(project); setPart('generate') }}>› Generate</button>{' '}
           <button type="button" onClick={() => clearRefusal(project)} className="whitespace-nowrap text-muted hover:text-text">Dismiss</button>
         </div>
@@ -297,7 +324,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
               {enabled.unbound_keys.map(key => (
                 <li key={key}>
                   {placedName(key)}{' '}
-                  <button type="button" data-testid={`site-unbound-attach-${key}`} className="whitespace-nowrap text-accent hover:underline"
+                  <button type="button" data-testid={`site-unbound-attach-${key}`} className="whitespace-nowrap text-link hover:underline"
                     onClick={() => { setPlacementRebind({ siteId: site.id, key }); setPart('model') }}>› Attach again</button>
                 </li>
               ))}
@@ -415,7 +442,10 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
       )}
       {part === 'results' && (
         <div className="flex flex-col gap-1" data-testid="site-part-results-body">
-          <Blocker action={action('play_results')} where={whereWords(site.name, part)} />
+          {runBlocker && <RunBlockerLine blocker={runBlocker} where={whereWords(site.name, part)}
+            label={flow?.sections.find(sec => sec.section === runBlocker.section)?.label ?? runBlocker.section} />}
+          {/* Playback is not built yet: its line keeps the "›", and asking for help with it helps nobody (S6c). */}
+          <Blocker action={action('play_results')} where={whereWords(site.name, part)} ask={false} />
         </div>
       )}
 

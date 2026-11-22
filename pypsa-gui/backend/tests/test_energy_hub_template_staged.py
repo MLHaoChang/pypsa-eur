@@ -81,8 +81,23 @@ def solved(staged):
 
 
 def test_the_single_year_template_is_unchanged():
-    # the digest of master's build_eh_datacenter() before staging was added
-    assert _digest(T.build_eh_datacenter()) == "84c80723f0e72176"
+    # the digest of master's build_eh_datacenter() before staging was added;
+    # re-pinned for DC walk 05, which drops the template's stated 30/25 MVA IBR
+    # capacity so the SCR derives it from the converters.
+    # The existing campus is typed sunk since WALK-IMPROVE-1 b (GK B2 condition
+    # 2 a): with those 14 cells back at master's NaN the build is master's.
+    import numpy as np
+
+    n = T.build_eh_datacenter()
+    typed = 0
+    for frame in ("generators", "storage_units", "links"):
+        df = getattr(n, frame)
+        rows = [a for a in T.DC_EXISTING if a in df.index]
+        assert (df.loc[rows, ["overnight_cost", "discount_rate"]] == [0.0, 0.07]).all().all()
+        df.loc[rows, ["overnight_cost", "discount_rate"]] = np.nan
+        typed += len(rows)
+    assert typed == 7
+    assert _digest(n) == "32b282c3eb61543e"
 
 
 def test_three_periods_each_a_year_of_hours_with_their_own_length(staged):

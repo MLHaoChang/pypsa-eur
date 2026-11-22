@@ -72,7 +72,7 @@ function InlineCoordinates({ bus, onSave, onDone }: {
         data-testid={`coord-x-${bus}`} className={field} /></label>
       <label>Latitude (°N) <input type="number" step="any" value={y} onChange={e => setY(e.target.value)}
         data-testid={`coord-y-${bus}`} className={field} /></label>
-      <button type="button" className="text-accent hover:underline disabled:opacity-40"
+      <button type="button" className="text-link hover:underline disabled:opacity-40"
         disabled={!valid || saving} data-testid={`coord-save-${bus}`} onClick={() => { void save() }}>
         {saving ? 'Saving…' : 'Save'}
       </button>
@@ -133,7 +133,7 @@ export function UnrecordedSourceBanner({ rows, onConfirm }: {
         ))}
       </ul>
       {shown.length > SHOWN_AT_FIRST && (
-        <button type="button" className="mt-0.5 text-accent hover:underline" data-testid="unrecorded-toggle"
+        <button type="button" className="mt-0.5 text-link hover:underline" data-testid="unrecorded-toggle"
           onClick={() => setOpen(o => !o)}>
           {open ? 'Show fewer' : `(${shown.length - SHOWN_AT_FIRST} more) Show all`}
         </button>
@@ -143,7 +143,7 @@ export function UnrecordedSourceBanner({ rows, onConfirm }: {
         This changes only the record. Undo reverts it.
       </p>
       <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
-        <button type="button" className="text-accent hover:underline disabled:opacity-40"
+        <button type="button" className="text-link hover:underline disabled:opacity-40"
           disabled={!!why || busy} data-testid="confirm-unrecorded" onClick={() => { void go() }}>
           {busy ? 'Saving…' : shown.length === 1 ? 'Mark this one as the network’s own' : `Mark these ${shown.length} as the network’s own`}
         </button>
@@ -175,7 +175,7 @@ export function MissingCoordinatesBanner({ rows, onUploadInstead, onSetCoordinat
             {onSetCoordinates && editing === r.generator
               ? <InlineCoordinates bus={r.bus} onSave={onSetCoordinates} onDone={() => setEditing(null)} />
               : (
-                <button type="button" className="text-accent hover:underline"
+                <button type="button" className="text-link hover:underline"
                   data-testid={`set-coordinates-${r.generator}`}
                   onClick={() => onSetCoordinates ? setEditing(r.generator) : openBusCoordinates(r.bus)}>
                   {onSetCoordinates ? 'Set coordinates' : 'Set the bus coordinates ›'}
@@ -185,7 +185,7 @@ export function MissingCoordinatesBanner({ rows, onUploadInstead, onSetCoordinat
         ))}
       </ul>
       {onUploadInstead && (
-        <button type="button" className="mt-1 text-accent hover:underline"
+        <button type="button" className="mt-1 text-link hover:underline"
           data-testid="upload-instead" onClick={onUploadInstead}>
           Upload a measured file instead ›
         </button>

@@ -63,7 +63,7 @@ describe('GridReadinessScorecard', () => {
     ] }
     it('shows only on the row that assumes the X/R', () => {
       render(<GridReadinessScorecard data={xrData} mode="expert" />)
-      expect(screen.getByTestId('gr-set-xr-rapid_voltage_change').textContent).toBe('Set PoC X/R ›')
+      expect(screen.getByTestId('gr-set-xr-rapid_voltage_change').textContent).toBe('Set point-of-connection X/R ›')
       expect(screen.queryByTestId('gr-set-xr-scr')).toBeNull()
     })
     it('Expert: opens Project info with the field requested, and Back returns to the readiness view', async () => {
@@ -227,7 +227,7 @@ describe('GridReadinessScorecard', () => {
     const user = userEvent.setup()
     render(<GridReadinessScorecard data={AFTER} mode="expert" />)
     const line = screen.getByTestId('gr-after-ramp_rate')
-    expect(line.textContent).toContain("After battery 'ups_battery': 4\u00A0MW/min")
+    expect(line.textContent).toContain("After battery “UPS battery”: 4\u00A0MW/min")
     expect(line.querySelector('[data-testid="gr-after-verdict"]')?.getAttribute('data-verdict')).toBe('pass')
     expect(line.textContent).toContain('Pass')
     expect(screen.getByTestId('gr-row-ramp_rate').querySelector('[data-testid="gr-verdict"]')
@@ -251,7 +251,7 @@ describe('GridReadinessScorecard', () => {
     render(<GridReadinessScorecard data={AFTER} mode="guided" />)
     await user.click(screen.getByTestId('gr-ask-ramp_rate'))
     expect(useChatStore.getState().composerSeed)
-      .toContain("After battery 'ups_battery' it reads 4\u00A0MW/min (pass): explain that number too.")
+      .toContain("After battery “UPS battery” it reads 4\u00A0MW/min (pass): explain that number too.")
     expect(summaryText(AFTER.summary, 'expert')).toBe('2 red flags · 2 unknown · 3 assumed · 1 pass after battery/UPS')
     expect(summaryText(AFTER.summary, 'guided'))
       .toBe('2 things to look at, 2 not yet known · 1 pass after battery/UPS')
@@ -268,7 +268,7 @@ describe('GridReadinessScorecard', () => {
     const user = userEvent.setup()
     const onJump = vi.fn()
     render(<GridReadinessScorecard data={LAT} mode="expert" onJump={onJump} />)
-    expect(screen.getByTestId('gr-after-ramp_rate').textContent).toContain("After UPS 'ups_battery': 4\u00A0MW/min")
+    expect(screen.getByTestId('gr-after-ramp_rate').textContent).toContain("After UPS “UPS battery”: 4\u00A0MW/min")
     await user.click(screen.getByTestId('gr-more-ramp_rate'))
     expect(screen.getByTestId('gr-latency-ramp_rate').textContent)
       .toBe("'ups_battery' walks in over 15 s (UPS, assumed)")
