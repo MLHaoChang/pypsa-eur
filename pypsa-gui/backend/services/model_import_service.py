@@ -64,7 +64,7 @@ _OPTION_KEY_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_")
 REPORT_FILE = "import_report.json"
 #: The metadata.json keys an importer may add (the DGS reader's names live under "import").
 IMPORTER_META_KEYS = frozenset({"import"})
-META_FILE = "metadata.json"
+METADATA_FILE = "metadata.json"
 NETWORK_FILE = "network.nc"
 
 
@@ -461,7 +461,7 @@ def check_sidecars(st: Staged, names: list[str]) -> None:
     from services import project_contents as PC
 
     for name in names:
-        if name == META_FILE:
+        if name == METADATA_FILE:
             try:
                 meta = json.loads((st.out / name).read_text(encoding="utf-8"))
             except (OSError, ValueError):
@@ -511,7 +511,7 @@ def payload(st: Staged) -> dict:
         "assumed": report.get("assumed", []),
         "warnings": report.get("warnings", []),
         "suggestions": report.get("suggestions", []),
-        "stored_files": [n for n in r["sidecars"] if n != META_FILE],
+        "stored_files": [n for n in r["sidecars"] if n != METADATA_FILE],
     }
 
 
@@ -539,7 +539,7 @@ def _write_files(dest: pathlib.Path, st: Staged) -> None:
 
     r = st.result
     for name in [NETWORK_FILE, *r["sidecars"]]:
-        if name != META_FILE:
+        if name != METADATA_FILE:
             os.replace(st.out / name, dest / name)
     report = {
         "format": st.format_id,
@@ -551,8 +551,8 @@ def _write_files(dest: pathlib.Path, st: Staged) -> None:
     }
     atomic_write_text(dest / REPORT_FILE, json.dumps(report, indent=2, allow_nan=False))
     meta = _create_meta(r["bus_count"], r["snapshot_count"])
-    if META_FILE in r["sidecars"]:
-        meta.update(json.loads((st.out / META_FILE).read_text(encoding="utf-8")))
+    if METADATA_FILE in r["sidecars"]:
+        meta.update(json.loads((st.out / METADATA_FILE).read_text(encoding="utf-8")))
     _write_meta(dest, meta)
 
 
