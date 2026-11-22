@@ -3,7 +3,7 @@
 
 # Improve says the feeder is "100% of the outage risk" and offers a remedy that cannot fix it
 
-Status: ready-for-agent
+Status: done (#1729)
 Type: bug (asset-investment walkthrough, WALK-E2E-1)
 Journey steps: J2 verdict → Improve (Guided)
 Severity: medium

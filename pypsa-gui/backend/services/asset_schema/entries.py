@@ -87,6 +87,10 @@ _ELECTRICAL = frozenset(
         "spectrum_post_filter",
         "start_method",
         "motor_kw",
+        "sk_max_mva",
+        "sk_min_mva",
+        "rx_max",
+        "rx_min",
     }
 )
 _RELIABILITY = frozenset(
@@ -244,6 +248,8 @@ def options_plain_of(spec: FieldSpec) -> tuple[str, ...]:
 UNITLESS = frozenset(
     {
         ("Generator", "dc_ac_ratio"),
+        ("Generator", "rx_max"),
+        ("Generator", "rx_min"),
         ("GlobalConstraint", "constant"),
         ("GlobalConstraint", "investment_period"),
         ("Link", "efficiency2"),

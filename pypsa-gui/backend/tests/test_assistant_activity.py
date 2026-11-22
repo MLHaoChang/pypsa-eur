@@ -369,3 +369,22 @@ def test_confirmation_origin_stays_with_its_project_after_navigation(client, pro
         assert pc.token in session.pending_confirmations
     finally:
         sessions.drop_session(session.session_id)
+
+
+def test_a_plan_with_a_stopped_step_stays_listed(client, project):
+    """Live-voice 16: a step whose job was stopped is stored `cancelled`; the
+    checkpoint validator accepts it, so the plan is not dropped as unreadable."""
+    import json
+    from pathlib import Path
+    import uuid
+    ctx, owner = project
+    directory = Path(ctx.storage_dir) / 'assistant_tasks'
+    directory.mkdir(exist_ok=True)
+    task_id = str(uuid.uuid4())
+    task = dict(task_id=task_id, project_id=ctx.project_uuid, owner_id=owner, title='Re-solve after the cap',
+                status='ready', steps=[dict(id='run', tool='run_simulation', status='cancelled', args={})])
+    (directory / f'{task_id}.json').write_text(json.dumps(task))
+    response = client.get('/api/chat/activity')
+    assert response.status_code == 200, response.text
+    assert task_id in [item['source_id'] for item in response.json()['items']]
+    assert 'task_checkpoint_unavailable' not in response.json().get('warnings', [])

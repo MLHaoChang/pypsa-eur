@@ -39,16 +39,35 @@ def unfilled(contract) -> list[str]:
     return out
 
 
+# The Contracts panel's own words for the fields a template leaves to fill in
+# (frontend `contractModel.CONTRACT_FIELDS`), so the server's refusal and the
+# panel's say the same thing, in the form's order (SCU06 S2b, UX 27 condition 4).
+FIELD_WORDS = {
+    "seller": "Seller",
+    "buyer": "Buyer",
+    "generator_owner": "Generator owner",
+    "counterparty": "Counterparty",
+    "asset_ids": "Assets (generators)",
+}
+_ORDER = list(FIELD_WORDS)
+
+
 def problem(contract) -> str | None:
     """A plain refusal for a contract that is still a template, or None."""
     fields = unfilled(contract)
     if not fields:
         return None
-    return (
-        f"Contract {contract.id} still has template placeholders in "
-        f"{', '.join(fields)}. Replace each with your own party or asset name, "
-        "then save again."
-    )
+    fields.sort(key=lambda f: _ORDER.index(f) if f in _ORDER else len(_ORDER))
+    return f"Contract {contract.id}: {need_own_values(fields)}."
+
+
+def need_own_values(fields: list[str]) -> str:
+    """The words the Contracts panel uses too (frontend `contractModel.needOwnValues`):
+    "Seller, Buyer and Assets (generators) need your own values"."""
+    words = [FIELD_WORDS.get(f, f) for f in fields]
+    if len(words) == 1:
+        return f"{words[0]} needs your own value"
+    return f"{', '.join(words[:-1])} and {words[-1]} need your own values"
 
 
 def first_problem(contracts) -> str | None:
