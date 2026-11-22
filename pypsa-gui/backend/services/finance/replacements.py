@@ -387,9 +387,10 @@ def remaining_life_terms(case: FinanceCase, tl: Timeline
         own = lp.asset_discount_rates.get(a.name)
         r_a = r if own is None else float(own)
         e = campus.get(a.name)
-        # A terminal-only life (walk 03 case B: a business-case capex line), for one
-        # part outside a campus lineage; its refresh entries replace it under both rules.
-        own_life = a.terminal_lifetime_years if e is None and len(parts) == 1 else None
+        # A terminal-only life (walk 03 case B: a business-case capex line; one part,
+        # `AssetFinance` refuses it on more), outside a campus lineage; its refresh
+        # entries replace it under both rules.
+        own_life = a.terminal_lifetime_years if e is None else None
         for p in parts:
             life = p.lifetime_years if own_life is None else own_life
             if p.overnight_cost == 0.0 and not (fin.replacement_rule == FIXED and a.name in entries):

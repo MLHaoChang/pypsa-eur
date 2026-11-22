@@ -2282,6 +2282,12 @@ def test_a_terminal_life_on_a_composite_asset_is_refused():
         AssetFinance(
             "bess", "StorageUnit", 2.0, 15.0, parts=parts, terminal_lifetime_years=10.0
         )
+    # One explicit part takes it; a composite without one is as before.
+    one = AssetFinance(
+        "pv", "Generator", 1.0, 25.0, parts=parts[:1], terminal_lifetime_years=10.0
+    )
+    assert one.terminal_lifetime_years == 10.0
+    assert AssetFinance("bess", "StorageUnit", 2.0, 15.0, parts=parts).parts == parts
 
 
 @pytest.mark.parametrize("rule", RULES)
