@@ -148,7 +148,15 @@ def read_dgs(paths: Sequence[Path], options: Mapping[str, Any] | None = None):
 
 
 def _plain(parameter: str) -> str:
-    """A parameter label as it reads mid-sentence: "Tap position" -> "tap position"."""
+    """
+    A parameter label as it reads mid-sentence ("Tap position" -> "tap position",
+    an acronym kept: "HV vector group number"); a blank label reads "value",
+    never the raw DGS attribute.
+    """
+    if not parameter:
+        return "value"
+    if parameter[1:2].isupper():
+        return parameter
     return parameter[:1].lower() + parameter[1:]
 
 
