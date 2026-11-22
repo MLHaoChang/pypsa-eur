@@ -391,7 +391,7 @@ function SaveNameModal({
 // carries the button that opens the project's actions (the Expert footer).
 function ProjectHeaderCard({
   currentProject, lastSavedIso, dirty, autosaveEnabled, onToggleAutosave,
-  menu,
+  menu, unsavedNetwork, onSaveUnsaved,
 }: {
   currentProject: string | null
   lastSavedIso: string | null
@@ -399,6 +399,9 @@ function ProjectHeaderCard({
   autosaveEnabled: boolean
   onToggleAutosave: () => void
   menu?: { open: boolean; onToggle: () => void; controls: string }
+  /** A file import replaced the network and it is in no project yet: the file's name. */
+  unsavedNetwork?: string | null
+  onSaveUnsaved?: () => void
 }) {
   // Tick once per minute so "Saved Xm ago" updates without polling the
   // backend. 60 s granularity is fine — the label only changes minute-to-minute.
@@ -407,6 +410,24 @@ function ProjectHeaderCard({
     const id = setInterval(() => setTick(t => t + 1), 60_000)
     return () => clearInterval(id)
   }, [])
+
+  if (!currentProject && unsavedNetwork) {
+    return (
+      <div className="mx-3 mt-2 mb-2 p-3 rounded border border-[var(--color-border)] bg-panel" data-testid="sidebar-network-unsaved">
+        <div className="flex items-start gap-1.5">
+          <div className="text-[12px] font-semibold text-ink-600 mb-0.5 flex-1 min-w-0">Network not saved yet</div>
+          {menu && <ProjectMenuButton {...menu} />}
+        </div>
+        <div className="text-[10px] text-ink-400 leading-relaxed">
+          ‘{unsavedNetwork}’ was loaded from a file and is not in a project.
+        </div>
+        <button type="button" data-testid="sidebar-save-as-project" onClick={onSaveUnsaved}
+          className="mt-2 px-2.5 py-1 text-[11px] rounded bg-accent text-white hover:opacity-90">
+          Save as project
+        </button>
+      </div>
+    )
+  }
 
   if (!currentProject) {
     return (
@@ -535,8 +556,10 @@ function ProjectSectionContent({
     autosaveEnabled, setAutosaveEnabled, markProjectSaved,
     lastSavedByProject, recents,
     activeSlidePanel, setSlidePanel, setProjectSwitchInProgress,
-    readOnly, readOnlyReason, projectMismatch,
+    readOnly, readOnlyReason, projectMismatch, unsavedNetwork,
   } = useUIStore()
+  // "Save as project" for a network a file import loaded that belongs to no project yet.
+  const [showSaveUnsaved, setShowSaveUnsaved] = useState(false)
   // Separate flag for the "Save a Copy" flow so its modal can pre-fill a
   // distinct default name and the confirm handler doesn't switch the active
   // project to the copy.
@@ -1041,8 +1064,36 @@ function ProjectSectionContent({
     </>
   )
 
+  const handleSaveUnsaved = async (name: string) => {
+    setShowSaveUnsaved(false)
+    try {
+      // rebind: the loaded network becomes this project's, as the wizard's .nc import does.
+      await projectsApi.save(name, false, true, undefined, true)
+    } catch (e) {
+      // Plain words, never the status line: a taken name is the common refusal.
+      const status = (e as { response?: { status?: number } })?.response?.status
+      toast.error(status === 409
+        ? `A project named ‘${name}’ already exists, so nothing was saved. Choose another name.`
+        : `Could not save as ‘${name}’: the project was not created.`)
+      return
+    }
+    useUIStore.getState().noteNewProjectCreated('file')
+    setCurrentProject(name)
+    setProjectName(name)
+    qc.invalidateQueries({ queryKey: ['projects'] })
+    invalidateNetworkQueries(qc, name)
+    toast.success(`Saved as project '${name}'`)
+  }
+
   const modals = (
     <>
+      {showSaveUnsaved && unsavedNetwork && (
+        <SaveNameModal
+          initial={slugify(unsavedNetwork)}
+          onSave={handleSaveUnsaved}
+          onClose={() => setShowSaveUnsaved(false)}
+        />
+      )}
       {showCopyModal && (
         <SaveNameModal
           initial={slugify(`${currentProject || pn}_copy`)}
@@ -1086,6 +1137,8 @@ function ProjectSectionContent({
       dirty={dirty}
       autosaveEnabled={autosaveEnabled}
       onToggleAutosave={() => setAutosaveEnabled(!autosaveEnabled)}
+      unsavedNetwork={unsavedNetwork}
+      onSaveUnsaved={() => setShowSaveUnsaved(true)}
       menu={variant === 'footer'
         ? { open: menuOpen, onToggle: () => setMenuOpen(o => !o), controls: menuId }
         : undefined}
