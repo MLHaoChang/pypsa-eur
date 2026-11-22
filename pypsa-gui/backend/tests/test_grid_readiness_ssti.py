@@ -434,6 +434,18 @@ def test_a_series_resonance_the_scan_could_not_judge_gives_the_engines_reason(
     assert row["note"] == f"{reason}. {SCREENING}"
 
 
+def test_an_undecided_scan_with_no_resonance_table_gives_the_meta_reason(tmp_path):
+    # mutants.py survivor grid_readiness.py:1456: with the resonance CSV gone the reader must not
+    # look into a missing table; the meta's own note is the reason
+    from gridspine.drivers.campus_study import SUBSYNC_RESONANCE_CSV
+
+    _write(tmp_path, subsync=dict(_sub_meta("not evaluated"), notes=[_NO_NORMAL]))
+    (_run_dir(tmp_path) / SUBSYNC_RESONANCE_CSV).unlink()
+    row = _card(tmp_path)[0]["subsync_series_resonance"]
+    assert row["verdict"] == "unknown" and row["project_value"] is None
+    assert row["note"] == f"{_NO_NORMAL[0].upper()}{_NO_NORMAL[1:]}. {SCREENING}"
+
+
 def test_a_real_run_says_why_its_scan_was_not_evaluated(tmp_path):
     # the stage's own notes on a campus with no series capacitor and no normal case
     from gridspine.drivers.campus_study import SUBSYNC_RESONANCE_CSV
