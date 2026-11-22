@@ -819,6 +819,16 @@ def get_asset_units(component: str, name: str, bus: str | None = None) -> dict:
             "costs": asset_fields.cost_units(n, component, name, bus)}
 
 
+@router.get("/asset_schema/{component}/table_units")
+def get_table_units(component: str) -> dict:
+    """For a table of one class: each asset on a tonne bus with its cost units (the card's unit and scale), and the
+    assets whose bus is unreadable (no per-unit claim). Read-only; an energy-bus asset is in neither list."""
+    if component not in CLASS_ATTR:
+        raise HTTPException(400, f"No asset schema for '{component}'.")
+    return {"component": component,
+            **asset_fields.table_cost_units(PyPSAService.get_network(), component, keep=filter_transient_names)}
+
+
 @router.get("/asset_costs")
 def get_asset_costs() -> dict:
     """Every investable asset's upfront parts and annual costs, for the Economics panel's Asset costs tab

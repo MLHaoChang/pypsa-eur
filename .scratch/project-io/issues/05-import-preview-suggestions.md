@@ -5,7 +5,7 @@
 
 Status: needs-triage
 Blocked by: 04
-Owner decisions: AI-IMPORT-1, IMPORT-FLOW-1, RAW-NAMES-1
+Owner decisions: AI-IMPORT-1, IMPORT-FLOW-1, RAW-NAMES-1, IMPORT-05-SCOPE-1
 Source: gap review 2026-11-21; `project-io/spec.md` item 5, never filed.
 Model: opus. Review: GK B + UX.
 
@@ -35,3 +35,5 @@ How far should 05 go?
 `pypsa-gui/backend/services/model_import_service.py`, `pypsa-gui/backend/routers/model_import.py` (both from 04), the preview component from 04 B.
 
 ## Comments
+
+- 2026-11-21, owner decision IMPORT-05-SCOPE-1 (relayed by the coordinator): 05 covers the importer Suggestions with Accept/Skip (option 1's criteria), plus "Ask the assistant" on the preview when an API key is set (option 2). The assistant's proposals need an evidence contract (assistant-assurance). The plan goes to GK B and UX before building. Status moves to ready-for-agent once 04 has landed.
