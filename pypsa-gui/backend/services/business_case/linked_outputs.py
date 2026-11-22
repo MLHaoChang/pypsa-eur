@@ -32,6 +32,7 @@ from typing import Any
 import pandas as pd
 
 from models.business_case import LinkedOutputMissing, UnitNotAllowed
+from services.run_actions import _display_name
 
 CATALOGUE_VERSION = "1"
 #: Every catalogue version a stored line may carry; each has a reader for every kind (#1132 F1).
@@ -586,7 +587,8 @@ def catalogue(n, solve: LinkedSolve | None = None) -> list[OutputSpec]:
             out.append(
                 OutputSpec(
                     f"capacity.{comp}.{asset}",
-                    f"Capacity in service: {asset}",
+                    # The asset as a person reads it, never its id (walk 06, RAW-NAMES-1).
+                    f"Capacity in service: {_display_name(asset)}",
                     ("MW_year", "kW_year", "kW_month"),
                 )
             )
