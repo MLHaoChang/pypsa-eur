@@ -111,7 +111,7 @@ describe('FinanceInputsEditor', () => {
     const state = screen.getByLabelText('State / provincial rate') as HTMLInputElement
     expect(state.value).toBe('')
     expect(state.placeholder).toBe('not stated')
-    expect((screen.getByLabelText('Small business (§163(j) exempt)') as HTMLSelectElement).value).toBe('')
+    expect((screen.getByLabelText('Small business (section 163(j) exempt)') as HTMLSelectElement).value).toBe('')
     expect((screen.getByLabelText('Financing fee tax') as HTMLSelectElement)
       .selectedOptions[0].textContent).toBe('not stated')
     expect((screen.getByLabelText('Tranche 1 commitment fee') as HTMLInputElement).value).toBe('')

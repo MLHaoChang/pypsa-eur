@@ -51,10 +51,10 @@ def test_the_ipp_rows_are_spec_6_6():
         "kW_year",
     )
     assert cap.quantity_source == "linked:capacity.StorageUnit.bess@1"
-    # linked_share is the contracted share only; the de-rating lives in the typed price (#1430 F2).
-    assert (
-        cap.linked_share is None and "de-rating" in cap.note and "nameplate" in cap.note
-    )
+    # linked_share is the contracted share only (#1430 F2); the de-rating is its own
+    # typed field, empty until the user sets it (walk 04, GK B2 Q1/Q2).
+    assert cap.linked_share is None and cap.derating is None
+    assert "de-rating" in cap.note and "Per de-rated kW" in cap.hint.note
     goo = by["Guarantees of origin"]
     assert goo.quantity_source == "typed" and goo.unit == "MWh"
     assert "never above the renewable generation" in goo.note
@@ -137,6 +137,8 @@ def _ipp_filled() -> list[LineItem]:
         d = ln.model_dump()
         if ln.kind == "revenue":
             d.update(price=10.0, indexation=0.0)
+            if ln.category == "capacity_payment":
+                d.update(derating=1.0)  # the whole capacity: the hand check below
             if ln.quantity_source == "typed":
                 d.update(quantity=100.0)
         elif ln.kind == "capex":

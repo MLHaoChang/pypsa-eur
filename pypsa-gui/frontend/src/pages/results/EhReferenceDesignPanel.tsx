@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { plainReason } from '../hubDesign/plainWords'
 import { SizedDesignTable } from './SizedDesignTable'
 import { CompletenessChips, statusTone as sharedStatusTone } from '../../components/CompletenessChips'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -40,6 +41,9 @@ import { prepareTaggingTour } from './prepareTaggingTour'
 import { InfoTip } from '../../layout/properties/cardKit'
 import type { ZeroReason } from './fmea'
 import { CRITICALITY_PER_YEAR_LABEL } from './fmea'
+import { verdictWord } from '../hubDesign/verdictWords'
+import { plainIds } from '../hubDesign/plainWords'
+import { takeImprovePrefill, useImprovePrefillStore } from '../hubDesign/improvePrefill'
 import { leverKindWords } from './leverKindWords'
 
 const ARCHETYPES: { id: EhArchetype; label: string; blurb: string }[] = [
@@ -282,7 +286,19 @@ export const CERTIFICATION_NEXT = {
   // links there ("Change in Scenarios & optimisation ›").
   inconclusive: 'Next: raise the MC draws in the reliability goal or tighten the plan; an inconclusive verdict is not a failure.',
   noTarget: 'Next: set an allowed shortfall in the reliability goal to certify.',
+  // GK A F6': a must-stay-on bus behind one feeder holds the pass back; the
+  // interval may sit under the goal, so more draws would not settle it.
+  feederBound: 'Next: add a second feeder to the must-stay-on bus or make its feeder more reliable; more simulation draws would not settle this verdict.',
+  // GK R2: a feeder without outage data is taken as always out; its data
+  // comes first.
+  feederNoData: "Next: add outage data for the must-stay-on bus's feeder, or add a second feeder; more simulation draws would not settle this verdict.",
 } as const
+
+function feederNext(fb: unknown): string {
+  const pockets = (fb as { pockets?: { no_data?: string[] }[] } | null)?.pockets ?? []
+  return pockets.some((p) => (p.no_data ?? []).length > 0)
+    ? CERTIFICATION_NEXT.feederNoData : CERTIFICATION_NEXT.feederBound
+}
 
 /** MC certification headline from the `certification` section, if it ran. */
 export function certificationHeadline(report: EhReferenceDesignReport): {
@@ -311,7 +327,8 @@ export function certificationHeadline(report: EhReferenceDesignReport): {
   // No target (the study reports LOLE but certifies nothing) and the 'none'
   // metric both leave the verdict empty: the next step is to set a target.
   const next = verdict === 'fail' ? CERTIFICATION_NEXT.fail
-    : verdict === 'inconclusive' ? CERTIFICATION_NEXT.inconclusive
+    : verdict === 'inconclusive'
+      ? (payload.feeder_bound ? feederNext(payload.feeder_bound) : CERTIFICATION_NEXT.inconclusive)
       : verdict === 'pass' ? null
         : (verdict == null || verdict === 'none' || payload.metric === 'none')
           ? CERTIFICATION_NEXT.noTarget : null
@@ -911,7 +928,7 @@ export function ReadinessSummary({ r }: { r: EhReadiness }) {
         </ul>
       )}
       {r.warnings.map((w, i) => (
-        <span key={i} className="text-warn">{w}</span>
+        <span key={i} className="text-warn">{plainReason(w)}</span>
       ))}
     </div>
   )
@@ -992,6 +1009,31 @@ export function EhReferenceDesignPanel() {
   }, [template, currentProject])
   const setField = (k: keyof PackForm) =>
     (e: { target: { value: string } }) => setForm(f => ({ ...f, [k]: e.target.value }))
+  // Template-e2e 22 (IMPROVE-MANUAL-1): an Improve card's "Open in Expert"
+  // hands over a filled-in form, once, for this project. It opens the panel
+  // and its settings; nothing runs until the user presses Run. The note
+  // stands only while the form is still the one handed over.
+  const prefillPending = useImprovePrefillStore(s => !!s.prefill?.pack)
+  const [filledFrom, setFilledFrom] = useState<{ title: string; form: PackForm } | null>(null)
+  useEffect(() => {
+    if (!prefillPending) return
+    const got = takeImprovePrefill(currentProject, 'pack')
+    if (!got) return
+    preselectedFor.current = currentProject
+    setForm(got.pack)
+    setFilledFrom({ title: got.title, form: got.pack })
+    setOpen(true)
+    setSettingsOpen(true)
+  }, [prefillPending, currentProject])
+  const filledNote = filledFrom && JSON.stringify(filledFrom.form) === JSON.stringify(form)
+    ? filledFrom.title : null
+  useEffect(() => { if (filledFrom && !filledNote) setFilledFrom(null) }, [filledFrom, filledNote])
+  const filledProject = useRef(currentProject)
+  useEffect(() => {
+    if (filledProject.current === currentProject) return
+    filledProject.current = currentProject
+    setFilledFrom(null)
+  }, [currentProject])
 
   const studyKey = nk(currentProject, 'results', 'eh_study')
   const reportKey = nk(currentProject, 'results', 'eh_reference_design')
@@ -1267,7 +1309,7 @@ export function EhReferenceDesignPanel() {
                 <span className="font-mono">{template.recommended_archetype}</span>
               </span>
               {(template.study_notes ?? []).map((note, i) => (
-                <span key={i} className="text-muted">• {note}</span>
+                <span key={i} className="text-muted">• {plainReason(note)}</span>
               ))}
               {template.provenance && (
                 <span className="text-muted italic">{template.provenance}</span>
@@ -1424,6 +1466,11 @@ export function EhReferenceDesignPanel() {
             )}
           </div>
 
+          {filledNote && (
+            <p role="status" data-testid="eh-filled-from-improve" className="text-[11px] text-muted">
+              Filled in from the Improve card: {filledNote}. Review and run.
+            </p>
+          )}
           <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
@@ -1528,7 +1575,7 @@ export function EhReferenceDesignPanel() {
                     className={verdictTone(cert.verdict)}
                     title="MC LOLE certification (decision 2): certified only when the 95% CI upper bound is within the target"
                   >
-                    {cert.verdict === 'pass' ? 'Certified' : 'Not certified'}
+                    {verdictWord(cert.verdict)}
                     {' '}({cert.verdict}
                     {cert.target != null ? ` vs ${cert.target} h/yr` : ''})
                   </span>
@@ -1623,7 +1670,7 @@ export function EhReferenceDesignPanel() {
                   className="flex flex-col gap-0.5 text-[10px] text-warn"
                   data-testid="eh-report-notes"
                 >
-                  {report.notes!.map((note, i) => <li key={i}>{note}</li>)}
+                  {report.notes!.map((note, i) => <li key={i}>{plainReason(note)}</li>)}
                 </ul>
               )}
 
@@ -1690,6 +1737,11 @@ export function EhReferenceDesignPanel() {
                           <span className="text-text">{certification.ens_met ? 'met' : 'missed'}</span>
                         </span>
                       )}
+                      {certification.critical_feeder_note && (
+                        <span data-testid="eh-certification-feeders" className="text-muted">
+                          {plainIds(certification.critical_feeder_note)}
+                        </span>
+                      )}
                       {importModelLabel(certification) && (
                         <span
                           data-testid="eh-certification-import"
@@ -1721,7 +1773,7 @@ export function EhReferenceDesignPanel() {
                   )}
                   {report.sections?.certification?.note && (
                     <p className="text-[10px] text-muted" data-testid="eh-certification-note">
-                      {report.sections.certification.note}
+                      {plainIds(report.sections.certification.note)}
                     </p>
                   )}
                   {certification?.warning && (

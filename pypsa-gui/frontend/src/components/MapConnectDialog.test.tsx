@@ -37,7 +37,7 @@ describe('MapConnectDialog', () => {
     expect(submit.disabled).toBe(false)
     await userEvent.click(submit)
     expect(onConfirm).toHaveBeenCalledWith({ kind: 'transformer', name: 'A–B', type: '', v_nom_0: 110, v_nom_1: 33, s_nom: 100, x: 0.1, tap_ratio: 1 })
-    const v1 = screen.getByText('v_nom₁ (kV)').parentElement!.querySelector('input') as HTMLInputElement
+    const v1 = screen.getByText('Declared LV voltage (kV)').parentElement!.querySelector('input') as HTMLInputElement
     await userEvent.clear(v1)
     await userEvent.type(v1, '20')
     expect((screen.getByRole('button', { name: 'Add transformer' }) as HTMLButtonElement).disabled).toBe(true)

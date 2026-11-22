@@ -1,6 +1,8 @@
-// homer-parity 01a/01b: the "Off-grid constraints" block of Solver Settings
-// (workflow section 8): the minimum renewable fraction (01a) and the
-// operating reserve shares (01b-2).
+// homer-parity 01a: the "Off-grid constraints" block of Solver Settings
+// (workflow section 8, Network tab): the minimum renewable fraction. The
+// operating reserve shares (01b-2) sit under the Dispatch tab
+// (OperatingReserveBlock.tsx, control-strategy walkthrough 03); both blocks
+// share the percent field below.
 //
 // Each field is in percent; the wire value is a fraction (0.8 == 80 %), null
 // when 0 or empty (off), matching the backend's `float | None` (ge=0, le=1)
@@ -14,6 +16,9 @@ import type { SolverConfig } from '../../api/types'
 /** The field label, shared with the chat edit card's word map. */
 export const MIN_RENEWABLE_FRACTION_LABEL = 'Minimum renewable fraction (%)'
 
+/** The island-limits checkbox label. */
+export const ISLAND_LIMITS_LABEL = 'Island limits in the optimisation'
+
 /** The operating reserve fields (homer-parity 01b), each label shared with the chat edit card's word map. */
 export const RESERVE_LABELS = {
   reserve_share_load: 'Reserve for load (%)',
@@ -21,7 +26,7 @@ export const RESERVE_LABELS = {
   reserve_share_wind: 'Reserve for wind output (%)',
 } as const
 
-type ShareKey = 'min_renewable_fraction' | keyof typeof RESERVE_LABELS
+export type ShareKey = 'min_renewable_fraction' | keyof typeof RESERVE_LABELS
 
 /** Percent text → the wire value, or an error sentence opening with ``name`` (the label without its unit). */
 export function shareFromText(name: string, text: string): { value: number | null } | { error: string } {
@@ -45,7 +50,7 @@ function toText(v: number | null | undefined): string {
 const nameOf = (label: string) => label.replace(/ \(%\)$/, '')
 
 /** One percent field: its own text and refusal; the block collects the refusals. */
-function ShareField({ field, label, value, patch, onError, errorTestId }: {
+export function ShareField({ field, label, value, patch, onError, errorTestId }: {
   field: ShareKey
   label: string
   value: number | null | undefined
@@ -117,6 +122,15 @@ export function OffGridConstraints({ draft, patch, onError }: {
         <p className="text-[10px] text-muted mb-2">
           For an off-grid or island design: limits on how the system is run, applied to every solve.
         </p>
+        <label className="flex items-center gap-2 text-[11px] mb-3" data-testid="island-constraints">
+          <input id="solver-island-constraints" type="checkbox" checked={!!draft.island_constraints}
+            onChange={e => patch({ island_constraints: e.target.checked })} />
+          {ISLAND_LIMITS_LABEL}
+        </label>
+        <p className="text-[10px] text-muted -mt-2 mb-3">
+          Adds the island study's limits to the hub solve, from the project's island data. The intent comparison
+          cannot include them yet.
+        </p>
         <ShareField
           field="min_renewable_fraction"
           label={MIN_RENEWABLE_FRACTION_LABEL}
@@ -133,31 +147,6 @@ export function OffGridConstraints({ draft, patch, onError }: {
           reach the minimum fails, and its log names this constraint as the cause; with a
           lost-load price (VOLL) set, it sheds load at that price instead.
         </p>
-        <div className="mt-3 pt-2 border-t border-border" data-testid="operating-reserve">
-          <div className="text-[10px] font-semibold text-muted mb-1">Operating reserve</div>
-          <p className="text-[10px] text-muted mb-2">
-            Dispatchable generators and storage keep this much spare power every hour, as a share
-            of the load and of the solar and wind output, to cover a sudden drop. 0 means no reserve.
-          </p>
-          <div className="flex flex-col gap-2">
-            {(Object.keys(RESERVE_LABELS) as (keyof typeof RESERVE_LABELS)[]).map(k => (
-              <div key={k}>
-                <ShareField
-                  field={k}
-                  label={RESERVE_LABELS[k]}
-                  value={draft[k]}
-                  patch={patch}
-                  onError={report}
-                  errorTestId={`${k.replace(/_/g, '-')}-error`}
-                />
-              </div>
-            ))}
-          </div>
-          <p className="text-[10px] text-muted mt-1">
-            A solve that cannot hold the reserve fails, and its log names the operating reserve,
-            with the hours where the units cannot cover it.
-          </p>
-        </div>
       </div>
     </section>
   )

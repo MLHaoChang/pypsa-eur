@@ -1,0 +1,76 @@
+{
+ "profiles": {
+  "energy-balance/1": [
+   {
+    "metric": "generation_energy",
+    "formula": "sum over t of w_generators[t] x sum of max(p[t], 0) over generators other than VoLL slacks and process shortfall",
+    "validity": "verified solve (else unverified_solve); every bus balances and served demand is not negative, else balance_not_established. Refusals: legacy_lost_load_capture, misaligned_source, network_scope_required, non_energy_bus, shortfall_without_load, unsupported_snapshot_scope, unsupported_storage_inflow",
+    "tolerance": "harness.energy_balance_calculations:BUS_TOL_MW",
+    "oracle": "pypsa-gui/backend/tests/test_energy_balance_assurance.py::test_a_shortfall_comes_off_served_as_it_comes_off_generation",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_energy_balance_assurance.py::test_a_shortfall_comes_off_served_as_it_comes_off_generation"
+     }
+    }
+   },
+   {
+    "metric": "served_energy",
+    "formula": "sum over t of w_generators[t] x max(load[t] - shed[t] - shortfall[t], 0)",
+    "validity": "verified solve (else unverified_solve); every bus balances and served demand is not negative, else balance_not_established. Refusals: legacy_lost_load_capture, misaligned_source, network_scope_required, non_energy_bus, shortfall_without_load, unsupported_snapshot_scope, unsupported_storage_inflow",
+    "tolerance": "harness.energy_balance_calculations:BUS_TOL_MW",
+    "oracle": "pypsa-gui/backend/tests/test_energy_balance_assurance.py::test_a_shortfall_comes_off_served_as_it_comes_off_generation",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_energy_balance_assurance.py::test_a_shortfall_comes_off_served_as_it_comes_off_generation"
+     }
+    }
+   },
+   {
+    "metric": "unserved_energy",
+    "formula": "sum over t of w_generators[t] x (shed[t] + shortfall[t])",
+    "validity": "verified solve (else unverified_solve); every bus balances and served demand is not negative, else balance_not_established. Refusals: legacy_lost_load_capture, misaligned_source, network_scope_required, non_energy_bus, shortfall_without_load, unsupported_snapshot_scope, unsupported_storage_inflow",
+    "tolerance": "harness.energy_balance_calculations:BUS_TOL_MW",
+    "oracle": "pypsa-gui/backend/tests/test_energy_balance_assurance.py::test_a_shortfall_comes_off_served_as_it_comes_off_generation",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_energy_balance_assurance.py::test_a_shortfall_comes_off_served_as_it_comes_off_generation"
+     }
+    }
+   },
+   {
+    "metric": "storage_change",
+    "formula": "sum over t of w_generators[t] x (soc[t] - soc[t-1]) / w_stores[t]",
+    "validity": "verified solve (else unverified_solve); every bus balances and served demand is not negative, else balance_not_established. Refusals: legacy_lost_load_capture, misaligned_source, network_scope_required, non_energy_bus, shortfall_without_load, unsupported_snapshot_scope, unsupported_storage_inflow",
+    "tolerance": "harness.energy_balance_calculations:BUS_TOL_MW",
+    "oracle": null,
+    "status": "pending",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     }
+    }
+   },
+   {
+    "metric": "export_losses_and_conversion",
+    "formula": "generation_energy - served_energy - storage_change",
+    "validity": "verified solve (else unverified_solve); every bus balances and served demand is not negative, else balance_not_established. Refusals: legacy_lost_load_capture, misaligned_source, network_scope_required, non_energy_bus, shortfall_without_load, unsupported_snapshot_scope, unsupported_storage_inflow",
+    "tolerance": "harness.energy_balance_calculations:BUS_TOL_MW",
+    "oracle": null,
+    "status": "pending",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     }
+    }
+   }
+  ]
+ }
+}

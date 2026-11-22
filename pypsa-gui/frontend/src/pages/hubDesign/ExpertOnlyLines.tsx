@@ -77,6 +77,37 @@ export function hasGaps(snapshots: string[], periods?: Array<number | string>): 
   return false
 }
 
+function weightsReadable(snapshots: string[], weightings?: Array<Record<string, number | string>>): boolean {
+  return !!weightings && weightings.length === snapshots.length && weightings.every(r => Number.isFinite(Number(r?.objective)))
+}
+
+/** Weeks per period when the horizon is representative weeks weighted up to a year, else 0.
+ *  Reads the weights, not gaps: one contiguous week with weights near 52 is still a sample. */
+export function weeksPerPeriod(
+  snapshots: string[], weightings: Array<Record<string, number | string>>, periods?: Array<number | string>,
+): number {
+  if (snapshots.length < 2 || weightings.length !== snapshots.length) return 0
+  const WEEK = 7 * 24 * 3600e3
+  const by = new Map<string, { ts: number[]; w: number }>()
+  snapshots.forEach((s, i) => {
+    const t = Date.parse(s)
+    const w = Number(weightings[i]?.objective)
+    if (Number.isNaN(t) || !Number.isFinite(w)) return
+    const k = String(periods?.[i] ?? '')
+    const g = by.get(k) ?? { ts: [], w: 0 }
+    g.ts.push(t); g.w += w; by.set(k, g)
+  })
+  let weeks = 0
+  for (const { ts, w } of by.values()) {
+    const steps = ts.slice(1).map((t, i) => t - ts[i]).filter(d => d > 0)
+    if (steps.length === 0) continue
+    const span = (Math.max(...ts) - Math.min(...ts) + Math.min(...steps)) / 3600e3
+    if (w <= span * 1.5) return 0  // weights add no time beyond the span: chronological
+    weeks = Math.max(weeks, Math.max(1, Math.round(ts.length * Math.min(...steps) / WEEK)))
+  }
+  return weeks
+}
+
 // ── 1 Project: the model horizon (Expert: Model horizon panel) ───────────────
 function useProjectLines(): ExpertOnlyLine[] {
   const project = useProject()
@@ -87,8 +118,16 @@ function useProjectLines(): ExpertOnlyLine[] {
     { key: 'investment_years', label: STEP_LABELS.years, home,
       value: read(ip, d => names((d?.periods ?? []).map(String))) },
     { key: 'representative_weeks', label: STEP_LABELS.sampling, home,
-      value: read(snap, d => (!d || d.snapshots.length === 0 ? null
-        : hasGaps(d.snapshots, d.periods) ? 'sampled' : 'no, a chronological year')) },
+      value: read(snap, d => {
+        if (!d || d.snapshots.length === 0) return null
+        const weeks = weeksPerPeriod(d.snapshots, d.weightings ?? [], d.periods)
+        if (weeks > 0) return `yes, ${weeks} ${weeks === 1 ? 'week' : 'weeks'} per period, weighted to a year`
+        if (hasGaps(d.snapshots, d.periods)) return 'sampled'
+        // Weights missing or short: say so rather than guess "no".
+        return weightsReadable(d.snapshots, d.weightings) ? 'no, a chronological year'
+          : "not known yet: the horizon's weights could not be read"
+
+      }) },
   ]
 }
 

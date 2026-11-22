@@ -23,7 +23,7 @@ import { dispatchSolved } from './chapters'
 import { goalText, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import { networkApi } from '../../api/network'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
-import type { FlowConnectionLimit } from '../../api/flow'
+import type { FlowConnectionLimit, FlowEnergization } from '../../api/flow'
 import type { Link } from '../../api/types'
 
 /** The study record (`nk(project,'results','eh_study')`, 2 s poll while running). */
@@ -115,6 +115,13 @@ export function templateForm(template: EhTemplateMeta | null): PackForm {
 export function useConnectionLimit(): FlowConnectionLimit | undefined {
   const { section } = useProjectFlow()
   return section('connection')?.connection_limit
+}
+
+/** A staged site's energized limit per period, per scheduled link (the flow's connection row,
+ *  template-e2e 02b). Empty where the network has no schedule, or until the flow is read. */
+export function useEnergization(): FlowEnergization[] {
+  const { section } = useProjectFlow()
+  return section('connection')?.energization ?? []
 }
 
 /** The grid import links, as the server selects them for the connection limit (any rule: eh_role,

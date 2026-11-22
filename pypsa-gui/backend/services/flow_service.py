@@ -84,6 +84,7 @@ from services import flow_scope as S
 from services import flow_sections as F
 from services.issue_titles import ISSUE_TITLES
 from services.validation_service import STAGE2_CODES
+from services.adequacy.run_assumptions import run_assumptions
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +211,11 @@ class _Facts:
     # how many cost fields a person typed (no money year recorded) (B9).
     money_years: dict = field(default_factory=dict)
     hand_typed_costs: int = 0
+    # The energization schedule per period (`energization.all_by_period`):
+    # the connection row's `energization`, which Guided section 3 edits.
+    energization: dict = field(default_factory=dict)
+    # The run inputs the study would fall back on (template-e2e 08).
+    run_defaults: list = field(default_factory=list)
 
 
 # eh_readiness copies and walks the network; cached per readiness key.
@@ -562,6 +568,24 @@ def _held(component: str, entity: str, *, carrier=None, field_name: str | None =
             "series": bool(series)}
 
 
+def _pin_sizes(n, rows: list[dict]) -> None:
+    """Set ``fixed_size`` on each section 5 asset row: the size an extendable asset's two
+    bounds pin when both are finite and equal (an IPP's owned plant, template-e2e 14), else
+    None. Display only, like the rest of the row: Guided reads "fixed at", not "sized by
+    the study"."""
+    tables = {klass: (table, fld) for klass, table, fld, _stock in _ASSET_TABLES}
+    for row in rows:
+        row["fixed_size"] = None
+        if not row["extendable"] or row["component"] not in tables:
+            continue
+        table, fld = tables[row["component"]]
+        df = getattr(n, table)
+        lo, hi = (_number(df.at[row["entity"], f"{fld}_{b}"]) if f"{fld}_{b}" in df else None
+                  for b in ("min", "max"))
+        if lo is not None and hi is not None and abs(hi - lo) <= 1e-6 * max(1.0, abs(hi)):
+            row["fixed_size"] = lo
+
+
 def _peak(column) -> float | None:
     """The value of a series furthest from zero, sign kept: the peak of
     [-5, -1, -2] is -5. Where +5 and -5 tie, the positive one. None for a
@@ -577,6 +601,8 @@ def _holds(n, carriers: list[str], site_assets: list[tuple[str, str]]
     total never does. Raw values only, the words are the frontend's. Display only: no state,
     count, blocker, verdict, acknowledgement or fingerprint reads it. An
     extendable asset carries the size as entered, never a solved one."""
+    from services.process_products import is_helper_generator
+
     tables = {klass: (table, fld, stock) for klass, table, fld, stock in _ASSET_TABLES}
     assets = []
     for klass, name in site_assets[:HOLDS_CAP]:
@@ -587,6 +613,9 @@ def _holds(n, carriers: list[str], site_assets: list[tuple[str, str]]
                             field_name=fld, value=df.at[name, fld],
                             unit=_size_unit(n, bus, stock=stock),
                             extendable=df.at[name, f"{fld}_extendable"]))
+        # Asset rows only: a Generator the model adds (slack, lost production, buy-in), not an asset of
+        # the site (`process_products.is_helper_generator`). Display only, like the rest of the row.
+        assets[-1]["helper"] = klass == "Generator" and is_helper_generator(n, name)
     series = n.loads_t.p_set
     loads = []
     for name in n.loads.index[:HOLDS_CAP]:
@@ -662,6 +691,7 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
     carriers = [str(c) for c in n.carriers.index] if len(n.carriers) else \
         sorted({str(b) for b in n.buses.get("carrier", []) if str(b)})
     holds, holds_total = _holds(n, carriers, site_assets)
+    _pin_sizes(n, holds.get("assets", []))
     return _Facts(
         revision=revision, snapshots=len(n.snapshots), loads=len(n.loads),
         carriers=carriers,
@@ -672,7 +702,21 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
         ens_cap=getattr(config, "ens_cap_permyriad", None),
         commercial=commercial, finance=getattr(config, "finance", None),
         cfg_dict=cfg_dict, cfg_hash=cfg_hash, copy=copy,
+        energization=_energization(n),
+        run_defaults=run_assumptions(n, config, template),
         **_money_years(n))
+
+
+def _energization(n) -> dict:
+    """``{link: {by_period, not_flat}}`` of each scheduled Link
+    (`energization.all_by_period`); {} where none is, or it can't be read."""
+    from services.adequacy.energization import all_by_period
+
+    try:
+        return all_by_period(n)
+    except Exception:                                    # noqa: BLE001 — display only
+        logger.exception("flow: energization schedule read failed")
+        return {}
 
 
 def _money_years(n) -> dict:
@@ -733,7 +777,10 @@ def _study_start_items(body: dict, *, requested: bool = True) -> list[dict]:
     answers as `deferred`."""
     from fastapi import HTTPException
 
-    from services.adequacy.eh_study_runner import EhStudyRequest, check_eh_study_start
+    from services.adequacy.eh_study_runner import (
+        EhStudyRequest,
+        check_eh_study_start,
+    )
     from services.pypsa_service import PyPSAService
 
     try:
@@ -741,10 +788,16 @@ def _study_start_items(body: dict, *, requested: bool = True) -> list[dict]:
                              solver_state=PyPSAService.get_solver_state(),
                              lock_blocking=False)
     except HTTPException as exc:
-        detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail)
+        detail = exc.detail if isinstance(exc.detail, str) else (
+            exc.detail.get("message") if isinstance(exc.detail, dict)
+            and isinstance(exc.detail.get("message"), str) else json.dumps(exc.detail))
+        # The VOLL refusal points at its field (template-e2e 06).
+        fld = exc.detail.get("field", "") if isinstance(exc.detail, dict) else ""
+        # A field refusal opens with the field's own label, so it is shown as is.
+        text = detail if fld else f"The reliability study would not start: {detail}"
         return [_item("eh_study_refused", "error",
-                      f"The reliability study would not start: {detail}", "eh_study",
-                      "scenarios", blocking=requested)]
+                      text, "eh_study",
+                      "scenarios", fld=fld, blocking=requested)]
     return []
 
 
@@ -905,11 +958,21 @@ def _bind_items(facts: _Facts, db, org_id, project_dir: pathlib.Path, n) -> list
 
             from services.library import bundle_pins
 
-            for issue in bundle_pins.check_pins(db, _uuid.UUID(str(org_id)), project_dir,
-                                                config=facts.cfg_dict):
-                add(issue.get("code", "library_pin_invalid"), issue.get("message", ""),
-                    issue.get("field") or "library", source="library")
-        except Exception:                                # noqa: BLE001
+            for issue in bundle_pins.check_pins(
+                db, _uuid.UUID(str(org_id)), project_dir, config=facts.cfg_dict
+            ):
+                # A newer Library version, or a series served by its copy alone, is a
+                # notice, not a fault (project-io 03).
+                add(
+                    issue.get("code", "library_pin_invalid"),
+                    issue.get("message", ""),
+                    issue.get("field") or "library",
+                    source="library",
+                    severity="warning"
+                    if issue.get("code") in bundle_pins.NOTICE_CODES
+                    else "error",
+                )
+        except Exception:  # noqa: BLE001
             logger.exception("flow: library pin re-check failed")
     return out
 
@@ -1044,6 +1107,26 @@ def _assumed_items(template: dict, cfg: dict | None = None) -> list[dict]:
     return out
 
 
+def _run_default_items(rows: list[dict], template: dict | None) -> list[dict]:
+    """The run's fallbacks (``run_assumptions``) as warnings, filed where the
+    value is set: nothing the run assumes is silent (DECISION-GAPS-1). A
+    field the template's ledger already raises is left to that row."""
+    ledger = {(str(r.get("entity") or ""), str(r.get("field") or ""))
+              for r in (template or {}).get("ledger") or []
+              if isinstance(r, dict) and r.get("source") == "assumed" and r.get("field")}
+    out: list[dict] = []
+    for r in rows:
+        if (r["entity"], r["field"]) in ledger:
+            continue
+        out.append(_item(f"assumed_run_{r['key']}", "warning",
+                         f"{r['label']}: {r['shown']} (assumed: {r['reason']}): "
+                         "confirm it or set your own.", "run_defaults", r["section"],
+                         component=r["component"], entity=r["entity"], fld=r["field"],
+                         value=json.dumps(r["value"])))
+        out[-1]["card"] = r["card"]
+    return out
+
+
 def _is_assumed(it: dict) -> bool:
     """An unconfirmed template default (the Assumptions card's rows)."""
     return it["severity"] == "warning" and it["code"].startswith("assumed_")
@@ -1130,7 +1213,7 @@ def _apply_scope(items: list[dict], scope: dict, *, study_requested: bool) -> No
     (`_study_start_items(requested=…)`); `test_flow_scope` pins that no item
     with ``in_scope: false`` blocks."""
     for it in items:
-        if it["source"] in ("eh_study", "eh_readiness"):
+        if it["source"] in ("eh_study", "eh_readiness", "run_defaults"):
             it["card"] = "reliability"
             it["in_scope"] = study_requested
         elif it["code"] in _BIND_CARD:
@@ -1291,16 +1374,18 @@ def _loadflow_requested(facts) -> bool:
 
 def _summary(section: str, facts: _Facts) -> str | None:
     if section == "project":
-        return f"{facts.snapshots} snapshots"
+        # A time step, never an unqualified "snapshot" (CONTEXT.md).
+        return _count(facts.snapshots, "time step")
     if section == "carriers":
         return ", ".join(facts.carriers[:6]) or None
     if section == "connection":
         if not facts.connection_links:
             return None
+        # Names as a person reads them, never the engine id (UX 2 on #1688), the same way Guided's Site card does.
+        from services.run_actions import _display_name
+
         mw = f", {facts.import_cap.mw:g} MW" if facts.import_cap.mw is not None else ""
-        # No link ids (RAW-NAMES-1; template-e2e 02): a count in plain words until the
-        # template display names exist (gap 05).
-        return _count(len(facts.connection_links), "grid connection") + mw
+        return ", ".join(_display_name(x) for x in facts.connection_links[:3]) + mw
     if section == "loads":
         return _count(facts.loads, "load")
     if section == "assets":
@@ -1433,6 +1518,10 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
     items: list[dict] = []
     presence = _presence(facts, islanded=islanded, study_requested=study_requested,
                          loads_not_needed=loads_not_needed)
+    # The study's own VOLL refusal (blocking, same field) says it once.
+    voll_refused = any(i["target"]["field"] == "voll" for i in study_items)
+    if voll_refused:
+        presence = [i for i in presence if i["code"] != "presence_voll"]
     items += presence
     items += _validation_items(issues, frozenset(facts.connection_links))
     items += _money_year_items(facts)
@@ -1440,9 +1529,11 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
         items += study_items
         if not loads_not_needed:
             r = _readiness(facts, template, cache_key)
-            items += _readiness_items(r, voll_noted=any(
+            items += _readiness_items(r, voll_noted=voll_refused or any(
                 i["code"] == "presence_voll" for i in presence))
         items += _assumed_items(template, facts.cfg_dict)
+        if not loads_not_needed:
+            items += _run_default_items(facts.run_defaults, template)
     items += _bind_items(facts, db, org_id, project_dir, n)
     # Load flow and N-1 security are on exactly when their solver settings are.
     scope = S.apply_settings(scope, facts.cfg_dict)
@@ -1466,6 +1557,13 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
             row["connection_limit"] = {"mw": facts.import_cap.mw,
                                        "refusal": facts.import_cap.refusal,
                                        "links": list(facts.import_cap.links)}
+            if facts.energization:
+                # template-e2e 02b: a staged template's energization schedule,
+                # one MW per period ({min, max} for a period that varies), as
+                # `PUT /flow/energization` writes it. A network without one
+                # keeps #1626's single limit: no key.
+                row["energization"] = [{"link": link, **v}
+                                       for link, v in sorted(facts.energization.items())]
         if s in facts.holds:
             row["holds"] = facts.holds[s]
             row["holds_total"] = facts.holds_total[s]

@@ -5,7 +5,7 @@
 
 Status: ready-for-agent
 Type: task
-Blocked by: no warning disposition exists in the result-slot contract
+Blocked by: none (the missing warning disposition in the result-slot contract is this issue's own work)
 
 ## Problem
 

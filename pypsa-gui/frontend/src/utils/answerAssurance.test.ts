@@ -131,9 +131,87 @@ describe('receipt policy "3" (AA-03 S4 complete-population predicates)', () => {
     ['top_k with a threshold', receipt({ policy_version: '3', predicates: [{ ...top, threshold: 5 }] })],
     ['k out of range', receipt({ policy_version: '3', predicates: [{ ...top, k: 21 }] })],
     ['an unknown quantifier', receipt({ policy_version: '3', predicates: [{ ...all, quantifier: 'some' }] })],
-    ['policy "4"', receipt({ policy_version: '4', predicates: [all] })],
+    ['policy "4" carrying predicates', receipt({ policy_version: '4', predicates: [all] })],
   ])('rejects %s', (_label, value) => {
     expect(parseApproval(frame({ receipt: value }))).toBeNull()
+  })
+})
+
+describe('receipt policy "4" (issue 10 S6a sectioned answers)', () => {
+  const slot = (n: number) => ({ metric: 'dispatch_energy', disposition: 'answered', valid_snapshots: 3, requested_snapshots: 3,
+    entity_id: `G${n}`, component_class: 'Generator' })
+  const full = Array.from({ length: 20 }, (_, i) => slot(i + 1))
+  const sections = [{ heading: 'Generators 1–20 of 21', result_slots: full }, { heading: 'Generators 21 of 21', result_slots: [slot(21)] }]
+  const sectioned = (over: Record<string, unknown> = {}) => receipt({ policy_version: '4', sections,
+    checked_block_ids: Array.from({ length: 21 }, (_, i) => `b${i}`), ...over })
+
+  it('accepts sections of up to twenty slots and up to a hundred checked blocks', () => {
+    expect(parseApproval(frame({ receipt: sectioned() }))?.receipt.sections).toEqual(sections)
+    const five = Array.from({ length: 5 }, (_, i) => ({ heading: `Generators ${i}`, result_slots: full }))
+    const hundred = Array.from({ length: 100 }, (_, i) => `b${i}`)
+    expect(parseApproval(frame({ receipt: sectioned({ sections: five, checked_block_ids: hundred }) }))).not.toBeNull()
+    const lone = [{ heading: null, result_slots: [{ ...slot(1), disposition: 'unavailable', reason: 'invalid_or_missing_raw_data' }] }]
+    expect(parseApproval(frame({ verdict: 'limited', receipt: sectioned({ sections: lone, checked_block_ids: [] }) }))).not.toBeNull()
+  })
+
+  it('bounds a folded limitation at 4096 UTF-16 units and twenty entries', () => {
+    const folded = (last: string) => frame({ verdict: 'limited', receipt: sectioned({
+      limitations: [...Array.from({ length: 19 }, (_, i) => `G${i} dispatch_energy: x`), last] }) })
+    expect(parseApproval(folded('L'.repeat(4084) + '; and 9 more'))).not.toBeNull()
+    expect(parseApproval(folded('\u{1F600}'.repeat(2048)))).not.toBeNull()
+    expect(parseApproval(folded('L'.repeat(4085) + '; and 9 more'))).toBeNull()
+    expect(parseApproval(folded('\u{1F600}'.repeat(2048) + 'L'))).toBeNull()
+    expect(parseApproval(frame({ verdict: 'limited', receipt: sectioned({
+      limitations: Array.from({ length: 21 }, (_, i) => `l${i}`) }) }))).toBeNull()
+  })
+
+  it.each([
+    ['policy "4" without sections', sectioned({ sections: undefined })],
+    ['sections that are not a list', sectioned({ sections: { heading: null, result_slots: full } })],
+    ['empty sections', sectioned({ sections: [] })],
+    ['six sections', sectioned({ sections: Array.from({ length: 6 }, () => sections[1]) })],
+    ['a section with no slots', sectioned({ sections: [{ heading: null, result_slots: [] }] })],
+    ['a section over twenty slots', sectioned({ sections: [{ heading: null, result_slots: [...full, slot(21)] }] })],
+    ['a section with an extra key', sectioned({ sections: [{ ...sections[1], note: 'x' }] })],
+    ['a section with no heading key', sectioned({ sections: [{ result_slots: [slot(1)] }] })],
+    ['a numeric heading', sectioned({ sections: [{ heading: 7, result_slots: [slot(1)] }] })],
+    ['a slot with an extra key', sectioned({ sections: [{ heading: null, result_slots: [{ ...slot(1), fact: 1 }] }] })],
+    ['a slot without its entity', sectioned({ sections: [{ heading: null, result_slots: [{ ...slot(1), entity_id: '' }] }] })],
+    ['a clarification slot', sectioned({ sections: [{ heading: null, result_slots: [{ ...slot(1), disposition: 'needs_clarification' }] }] })],
+    ['policy "4" with result_slots', sectioned({ result_slots: [slot(1)] })],
+    ['policy "4" with derived entries', sectioned({ derived: [{ id: 'd1', formula_id: 'difference/1', operands: ['a'], value: 1, unit: 'MW' }] })],
+    ['over a hundred checked blocks', sectioned({ checked_block_ids: Array.from({ length: 101 }, (_, i) => `b${i}`) })],
+    ['policy "1" carrying sections', receipt({ sections })],
+    ['policy "1" with twenty-one checked blocks', receipt({ checked_block_ids: Array.from({ length: 21 }, (_, i) => `b${i}`) })],
+  ])('rejects %s', (_label, value) => {
+    expect(parseApproval(frame({ receipt: value }))).toBeNull()
+  })
+})
+
+describe('receipt policy "5" (AA-13 required warning slots)', () => {
+  const warning = { metric: 'ac_pf_convergence', disposition: 'warning', reason: 'ac_pf_not_converged (1 of 2)',
+    valid_snapshots: 1, requested_snapshots: 2, excluded_indices: ['2026-01-01T01:00:00'] }
+  const answered = { metric: 'branch_rating', disposition: 'answered', valid_snapshots: 1, requested_snapshots: 2,
+    excluded_indices: ['2026-01-01T01:00:00'] }
+  const warned = (over: Record<string, unknown> = {}) =>
+    receipt({ policy_version: '5', request_complete: false, result_slots: [warning, answered], ...over })
+
+  it('accepts warning slots first with an incomplete request', () => {
+    expect(parseApproval(frame({ verdict: 'limited', receipt: warned() }))).not.toBeNull()
+  })
+
+  it.each([
+    ['no warning slot', warned({ result_slots: [answered] })],
+    ['a warning after a metric', warned({ result_slots: [answered, warning] })],
+    ['a complete request', warned({ request_complete: true })],
+    ['a missing request_complete', warned({ request_complete: undefined })],
+    ['a warning without excluded snapshots', warned({ result_slots: [{ ...warning, excluded_indices: [] }] })],
+    ['a warning without a reason', warned({ result_slots: [{ ...warning, reason: '' }] })],
+    ['derived entries', warned({ derived: [] })],
+    ['a warning slot under policy "1"', receipt({ request_complete: false, result_slots: [warning] })],
+    ['a non-string excluded index', warned({ result_slots: [{ ...warning, excluded_indices: [3] }] })],
+  ])('rejects %s', (_label, value) => {
+    expect(parseApproval(frame({ verdict: 'limited', receipt: value }))).toBeNull()
   })
 })
 

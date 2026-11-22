@@ -13,11 +13,14 @@ vi.mock('../../api/network', () => ({ networkApi: { getBuses: vi.fn().mockResolv
   getLinks: vi.fn().mockResolvedValue([]), updateLink: vi.fn() } }))
 const hub = vi.hoisted(() => ({ template: null as null | { energization: unknown[] },
   // The import links as the server selects them for the connection limit (`connection_limit.links`).
-  links: ['grid_import', 'h2_import'] as string[], refusal: null as string | null }))
+  links: ['grid_import', 'h2_import'] as string[], refusal: null as string | null,
+  // A staged site's schedule per link (template-e2e 02b), as the flow's connection row reads it.
+  energization: undefined as undefined | { link: string, by_period: Record<string, unknown> }[] }))
 vi.mock('../../api/flow', async (orig) => ({
   ...await orig<typeof import('../../api/flow')>(),
   getProjectFlow: async () => ({ run_ready: true, notes: [],
-    sections: [{ section: 'connection', connection_limit: { mw: null, refusal: hub.refusal, links: hub.links } }] }) }))
+    sections: [{ section: 'connection', connection_limit: { mw: null, refusal: hub.refusal, links: hub.links },
+      energization: hub.energization }] }) }))
 vi.mock('../../pages/hubDesign/useHubData', async (orig) => ({
   ...await orig<typeof import('../../pages/hubDesign/useHubData')>(),
   useHubTemplate: () => ({ template: hub.template, isPending: false }) }))
@@ -42,7 +45,7 @@ function mount() {
   return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <ConnectionLimits /></QueryClientProvider>)
 }
-afterEach(() => { cleanup(); hub.template = null; useUIStore.setState({ uiMode: 'expert' }) })
+afterEach(() => { cleanup(); hub.template = null; hub.energization = undefined; useUIStore.setState({ uiMode: 'expert' }) })
 
 const setting = (item: string, over: Record<string, unknown> = {}) => ({
   item, user: null, default: { value: 5, source: 'assumed', origin: 'placeholder' }, ...over })
@@ -314,15 +317,36 @@ describe('ConnectionLimits', () => {
     expect(screen.getByLabelText('Connection limit (t/h), H2 import')).toBeTruthy()
   })
 
-  it('on a staged site shows the limit with its reason and no editor', async () => {
+  it('on a staged site without a schedule on its link shows the limit with its reason and no editor', async () => {
     vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [
       row('energization_peak:2027', { unit: 'MW', limit: 25 }), row('energization_peak:2030', { unit: 'MW', limit: 35 })] } as never)
     vi.mocked(networkApi.getLinks).mockResolvedValue([{ name: 'grid_import', eh_role: 'grid_import', p_nom: 35 }] as never)
     hub.template = { energization: [{ year: 2027, available_import_mw: 25 }, { year: 2030, available_import_mw: 35 }] }
     mount()
-    expect((await screen.findByTestId('connection-limit-staged')).textContent).toMatch(/Set per period: see Energization/)
+    expect((await screen.findByTestId('connection-limit-staged')).textContent).toMatch(/Set per period by the energization schedule/)
     expect(screen.queryByTestId('limit-editor-connection_limit')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Save connection limit' })).toBeNull()
+  })
+
+  it('on a staged site edits the limit per period, with the check beside it and the sentence once', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [
+      row('energization_peak:2027', { unit: 'MW', limit: 25, project_value: 20, verdict: 'pass' }),
+      row('energization_peak:2035', { unit: 'MW', limit: 35, project_value: 30, verdict: 'pass' })] } as never)
+    vi.mocked(networkApi.getLinks).mockResolvedValue([{ name: 'grid_import', eh_role: 'grid_import', p_nom: 35 }] as never)
+    hub.links = ['grid_import']
+    hub.template = { energization: [{ year: 2027, available_import_mw: 25 }, { year: 2035, available_import_mw: 35 }] }
+    hub.energization = [{ link: 'grid_import', by_period: { '2027': 25, '2035': { min: 30, max: 35 } } }]
+    try {
+      mount()
+      expect((await screen.findByLabelText('Connection limit (MW), 2027')) as HTMLInputElement).toBeTruthy()
+      expect(screen.getByTestId('energization-period-2035').textContent).toMatch(/2035 · varies 30–35 MW/)
+      expect(screen.getAllByTestId('energization-sentence')).toHaveLength(1)
+      await waitFor(() => expect(screen.getAllByTestId(/^energization-check-/)).toHaveLength(2))
+      // The Energization line would repeat the check: it gives way to the rows.
+      expect(screen.queryByTestId('connection-limit-energization_peak')).toBeNull()
+      expect(screen.queryByTestId('connection-limit-staged')).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Save connection limit' })).toBeNull()
+    } finally { hub.links = ['grid_import', 'h2_import'] }
   })
 
   it('keeps the rejected entry and opens the refusal with the label', async () => {

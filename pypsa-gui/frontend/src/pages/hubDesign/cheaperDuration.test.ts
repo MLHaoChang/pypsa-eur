@@ -130,6 +130,12 @@ describe('designDurationHours', () => {
   it('the one max_hours the built StorageUnits share', () => {
     expect(designDurationHours(report([battery(), battery({ name: 'b2' })]))).toBe(4)
   })
+  it('counts only the battery, not another StorageUnit of a different duration', () => {
+    expect(designDurationHours(report([battery(),
+      { component: 'StorageUnit', name: 'h2', carrier: 'H2', built_mw: 1, built_mwh: 100, max_hours: 100 }]))).toBe(4)
+    expect(designDurationHours(report([
+      { component: 'StorageUnit', name: 'h2', carrier: 'H2', built_mw: 1, built_mwh: 100, max_hours: 100 }]))).toBeNull()
+  })
   it('null when the durations differ, none is built, or there is no sizing', () => {
     expect(designDurationHours(report([battery(), battery({ name: 'b2', max_hours: 6 })]))).toBeNull()
     expect(designDurationHours(report([battery({ built_mw: 0 })]))).toBeNull()

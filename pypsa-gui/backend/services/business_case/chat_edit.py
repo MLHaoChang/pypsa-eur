@@ -80,6 +80,8 @@ _WORDS = {
     # A commercial share only, never a volume factor such as lease-up (#1430 F2).
     "linked_share": "Sold share",
     "linked_share_by_year": "Sold share",
+    # A capacity payment's paid share of the capacity in service (walk 04).
+    "derating": "De-rating",
     "hint": "Hint",
     "kw_per_gpu": "kW per GPU",
     "lhv_kwh_per_kg": "LHV (kWh/kg)",

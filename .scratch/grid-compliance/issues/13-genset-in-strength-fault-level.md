@@ -3,7 +3,7 @@
 
 # GC-13 A running genset in the strength fault level (S_k''min)
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: GC-03 PR2 (`claude/gc03-campus-steps`)
@@ -29,3 +29,7 @@ study says it runs. Decide (with GK A) whether the minimum case assumes the gens
 - A hand-calculated S_k at a PoC with one running genset matches the step within 0.5 %.
 - `GENSET_SK_NOTE` is replaced by a note naming the genset's contribution.
 - A genset not built in the stage still adds nothing.
+
+## Triage (2026-11-20, master 87cf52a7)
+
+Checked by code reading only. Acceptance is the 'Done when' section above. Still true: `GENSET_SK_NOTE` still states the grid-only SCR. Blocked by GC-03 PR2: merged (#1589), so unblocked. Gated: GK A. Blocked by: none.

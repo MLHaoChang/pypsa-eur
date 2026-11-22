@@ -339,7 +339,10 @@ def test_several_import_links_are_summed_then_split_evenly_by_the_pack():
         27.5,
         27.5,
     ]
-    assert any("split over 2 Links" in w for w in result.warnings)
+    assert any(
+        "55 MW grid connection limit evenly over its 2 connections" in w
+        for w in result.warnings
+    )
 
 
 def test_a_line_only_grid_connection_has_no_import_link():

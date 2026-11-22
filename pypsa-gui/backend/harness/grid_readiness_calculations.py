@@ -1,7 +1,8 @@
 """Checked grid-readiness scorecard rows (checked-results S9).
 
-The scorecard as the route and the copilot tool read it (`grid_readiness_for`:
-the project's saved network, sidecars and grid-code profile). A row is checked
+The scorecard of the project's saved network, sidecars and grid-code profile
+(`grid_readiness_for(source="saved")`; the route and the copilot tool read the
+loaded network, unsaved edits included, DC walkthrough 04). A row is checked
 when it declares the code's own rule for its id and its stored project value,
 judged against its stored limit by that rule, gives the engine's verdict. A
 disagreement (a rounding boundary) is withheld, never re-verdicted; rows whose
@@ -23,7 +24,9 @@ NOT_SCALAR = ("energization_peak:", "lole", "oscillation", "harmonic_distortion"
 CATEGORICAL = ("frequency_support", "dynamic:", "grid_former", "ride_through:")
 # Caveats the scorecard states, carried with a checked line so a pass never reads as final.
 CAVEATS = {"ramp_rate": "before mitigation", "rapid_voltage_change": "before mitigation; a screening upper bound",
-           "rapid_voltage_change_infrequent": "a screening upper bound", "motor_start:": "a screening estimate"}
+           "rapid_voltage_change_infrequent": "a screening upper bound", "motor_start:": "a screening estimate",
+           "ssti_uif": "screening; the binding answer is the EMT study",
+           "subsync_series_resonance": "screening; the binding answer is the EMT study"}
 METRICS = {
     "checked_pass": {"formula_id": "grid-readiness-checked-pass/1", "unit": "rows",
                      "label": "Scorecard rows checked as pass"},
@@ -54,7 +57,8 @@ def _registered():
 
     return {"scr": G.RULE_SCR, "ramp_rate": G.RULE_RAMP, "rapid_voltage_change": G.RULE_RVC,
             "rapid_voltage_change_infrequent": G.RULE_RVC, "reactive_range": G.RULE_REACTIVE,
-            "voltage_unbalance": G.RULE_UNBALANCE, "motor_start:": G.RULE_MOTOR_START}
+            "voltage_unbalance": G.RULE_UNBALANCE, "motor_start:": G.RULE_MOTOR_START,
+            G.SSTI_UIF: G.RULE_UIF, G.SUBSYNC_SR: G.RULE_SUBSYNC}
 
 
 def _named(row_id, prefixes):
@@ -88,7 +92,7 @@ def source(ctx, entity):
     limits = root / grid_limits.SIDECAR_NAME
     before = _file_sha256(limits)
     try:
-        card = grid_readiness_for(project)  # the route's own load path, locks and profile resolution
+        card = grid_readiness_for(project, source="saved")  # the route's own load path, locks and profile resolution
     except HTTPException as exc:
         if isinstance(exc.detail, dict) and exc.detail.get("error_kind") == "unknown_grid_code_profile":
             raise ValueError("unknown_grid_code_profile") from exc

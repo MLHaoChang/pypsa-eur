@@ -222,6 +222,8 @@ def test_run_gates_fresh_treats_no_recorded_inputs_as_not_fresh(solved):
     n, ctx = solved
     env = run_gates.Env.__new__(run_gates.Env)
     object.__setattr__(env, "ctx", ctx)
+    # An LP-only profile: `_fresh` reads the run's profile (study harness 15).
+    object.__setattr__(env, "task", {"run": {"profile": "eh_microgrid@1"}})
     assert run_gates._fresh(env) is True
     _unrecorded(n, ctx)
     assert workflow_tools.solve_freshness()["inputs_changed_since_solve"] is None
@@ -1023,7 +1025,11 @@ def test_a_bundle_import_moves_the_stamp_after_the_user_ts(
                 data = json.dumps(meta).encode()
             z.writestr(item, data)
     assert any(i.filename.endswith("metadata.json") for i in raw.infolist())
-    bundle = out.getvalue()
+    from tests.bundle_util import refresh_manifest
+
+    bundle = refresh_manifest(
+        out.getvalue()
+    )  # the edit changes members, so the manifest is rebuilt (project-io 02)
     seen = _poll_in_the_reapply_window(monkeypatch)
     r = client.post(
         "/api/projects/import_bundle",

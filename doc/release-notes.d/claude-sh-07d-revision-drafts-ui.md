@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A finished harness run's card lists the open comments on its report, drafts a fix for one on request, and shows each draft with Confirm and Discard; nothing changes the report until Confirm (study harness 07d, PR B).

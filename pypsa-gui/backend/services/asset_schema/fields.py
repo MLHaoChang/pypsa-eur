@@ -15,7 +15,7 @@ columns), then Line (one part priced per MVA and km, scaled by its length) and T
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from models.process_unit import HARMONIC_SOURCES, START_METHODS
@@ -40,7 +40,7 @@ _PCT = 100.0    # fraction -> %
 
 @dataclass(frozen=True)
 class FieldSpec:
-    key: str                      # the column it reads and writes
+    key: str                      # the column it reads and writes (the catalogue's model name)
     group: str
     label: str
     help: str
@@ -50,23 +50,45 @@ class FieldSpec:
     kind: str = "number"          # number | int | bool | enum | text | bus | carrier
     options: tuple[str, ...] = ()
     required: bool = False
-    key_param: bool = False       # the guided face lists it; the rest fold into "Defaults in use"
     derived: bool = False         # written by derive / the solver; read-only
     reveal_when: dict[str, Any] | None = field(default=None, hash=False)
     part: str | None = None       # the investment part it belongs to (composite classes)
     blank: str = "keep"           # what an emptied input saves: clear (null) | zero | empty ("") | keep (current)
+    # Parameter catalogue (spec expert-catalogue §3.2). Empty means "the catalogue's
+    # overlay or rule decides" (services/asset_schema/entries.py); a value set here wins.
+    depth: str = ""               # essentials | basic | advanced | detail; essentials is the Guided set
+    id: str = ""                  # explicit entry id; default <scope>.<slug(plain_name)>, pinned by catalogue.ids.txt
+    plain_name: str = ""
+    short_help: str = ""
+    aliases: tuple[str, ...] = ()
+    options_plain: tuple[str, ...] = ()   # display names, parallel to `options`; the stored value stays the raw option
+    related: tuple[str, ...] = ()
+    former_ids: tuple[str, ...] = ()
+
+    @property
+    def key_param(self) -> bool:
+        """The guided face lists it (S1); kept until slice 03 moves every reader to `depth`."""
+        return self.depth == "essentials"
 
     @property
     def technical_name(self) -> str:
         return self.key
 
     def as_dict(self) -> dict[str, Any]:
-        d = asdict(self)
-        d["technical_name"] = self.key
-        d["options"] = list(self.options)
+        """The `asset_schema/{component}` row, unchanged by the catalogue (pinned byte for byte)."""
+        d: dict[str, Any] = {
+            "key": self.key, "group": self.group, "label": self.label, "help": self.help,
+            "unit_display": self.unit_display, "unit_storage": self.unit_storage, "scale": self.scale,
+            "kind": self.kind, "options": list(self.options), "required": self.required,
+            "key_param": self.key_param, "derived": self.derived, "reveal_when": None,
+            "part": self.part, "blank": self.blank,
+        }
         if self.reveal_when:
             # A rule naming several values is a tuple here and a list on the wire.
             d["reveal_when"] = {k: list(v) if isinstance(v, tuple) else v for k, v in self.reveal_when.items()}
+        else:
+            d["reveal_when"] = self.reveal_when      # None or {} exactly as stored (byte pin)
+        d["technical_name"] = self.key
         return d
 
 
@@ -100,11 +122,11 @@ def _size_bounds() -> tuple[FieldSpec, ...]:
     return (
         FieldSpec("p_nom_extendable", "size", "Extendable", "When ticked, the optimiser chooses the capacity "
                   "between the minimum and maximum and pays the annualised cost for every MW it adds.",
-                  kind="bool", key_param=True),
+                  kind="bool", depth="essentials"),
         FieldSpec("p_nom_min", "size", "Minimum capacity", "Lower bound on the optimised capacity. Set it to the "
                   "existing capacity to forbid retirement.", "MW", "MW", reveal_when=_EXT),
         FieldSpec("p_nom_max", "size", "Maximum capacity", "Upper bound on the optimised capacity. Leave empty "
-                  "for no limit.", "MW", "MW", reveal_when=_EXT, key_param=True),
+                  "for no limit.", "MW", "MW", reveal_when=_EXT, depth="essentials"),
     )
 
 
@@ -177,6 +199,24 @@ def _uc_rows() -> tuple[FieldSpec, ...]:
     )
 
 
+def _harmonic_rows(what: str) -> tuple[FieldSpec, ...]:
+    """The harmonic screen's inputs on a Load or Generator (DGS-EXTRAS-1), as the DGS import writes them."""
+    return (
+        FieldSpec("rated_mva", "performance", "Rated apparent power", f"Rated apparent power of the {what}, for "
+                  "the harmonic screen. Leave empty when unknown: the check then reads unknown. It is never taken "
+                  "from the capacity.", "MVA", "MVA"),
+        FieldSpec("harmonic_source", "performance", "Harmonic source", "The drive topology or converter that sets "
+                  f"the {what}'s harmonic currents. linear declares no harmonic emission. Leave empty when unknown: "
+                  "the check then reads unknown.", kind="enum", options=HARMONIC_SOURCES),
+        FieldSpec("harmonic_spectrum", "performance", "Harmonic spectrum", "Harmonic current per order, as "
+                  "order:% of rated current, e.g. 5:20, 7:14. Leave empty to use the default for the harmonic "
+                  "source.", kind="text"),
+    )
+
+
+_SLACK = {"control": "Slack"}
+
+
 # ── Generator (single part) ──────────────────────────────────────────────────
 
 GENERATOR: tuple[FieldSpec, ...] = (
@@ -190,15 +230,15 @@ GENERATOR: tuple[FieldSpec, ...] = (
               kind="enum", options=("buy_in", "shortfall")),
     FieldSpec("p_nom", "size", "Capacity", "Installed active-power capacity: the AC rating, what the generator can "
               "inject at its bus. With extendable ticked, the existing capacity the optimiser starts from.", "MW", "MW",
-              key_param=True),
+              depth="essentials"),
     FieldSpec("dc_ac_ratio", "size", "DC/AC ratio", "PV only: the DC module rating as a multiple of the AC capacity "
               "(1.25 for 125 MWp on 100 MW). A cost priced per MW of DC is scaled by it; empty means not declared, "
               "and such a cost is refused rather than assumed 1."),
     *_size_bounds(),
     _money_per_mw("overnight_cost", "investment", "Overnight cost", "Upfront cost per unit of capacity, as if built "
-                  "at once without financing. Annualised over the lifetime at the discount rate.", key_param=True),
+                  "at once without financing. Annualised over the lifetime at the discount rate.", depth="essentials"),
     FieldSpec("lifetime", "investment", "Lifetime", "Technical and economic lifetime. The asset retires after its "
-              "build year plus lifetime.", "years", "years", key_param=True),
+              "build year plus lifetime.", "years", "years", depth="essentials"),
     FieldSpec("lifetime_run_hours", "investment", "Lifetime in running hours", "Engine-driven generators only. "
               "Running hours before the unit is replaced (HOMER's generator lifetime). The investment case replaces "
               "it at this many hours at the solved hours per year, or at Lifetime if sooner. The capital cost keeps "
@@ -242,7 +282,19 @@ GENERATOR: tuple[FieldSpec, ...] = (
     FieldSpec("e_sum_max", "performance", "Maximum energy", "Most energy the generator may produce over the "
               "modelled horizon, e.g. a fuel or water budget. Empty for no upper bound.", "MWh", "MWh"),
     FieldSpec("control", "performance", "AC control", "Control type in the AC power flow only: PQ fixes P and Q, "
-              "PV holds the voltage, Slack absorbs the imbalance.", kind="enum", options=("PQ", "PV", "Slack")),
+              "PV holds the voltage, Slack absorbs the imbalance. Slack also shows the external grid's short-circuit "
+              "power and resistance-to-reactance ratio.", kind="enum", options=("PQ", "PV", "Slack")),
+    FieldSpec("sk_max_mva", "performance", "Maximum short-circuit power", "Short-circuit power of the external "
+              "grid at its strongest, for fault and harmonic studies. Leave empty when unknown.", "MVA", "MVA",
+              reveal_when=_SLACK),
+    FieldSpec("sk_min_mva", "performance", "Minimum short-circuit power", "Short-circuit power of the external "
+              "grid at its weakest, for fault and harmonic studies. Leave empty when unknown.", "MVA", "MVA",
+              reveal_when=_SLACK),
+    FieldSpec("rx_max", "performance", "R/X ratio at maximum short circuit", "Resistance-to-reactance ratio (R/X) "
+              "of the external grid at its strongest, e.g. 0.1. Leave empty when unknown.", "", "", reveal_when=_SLACK),
+    FieldSpec("rx_min", "performance", "R/X ratio at minimum short circuit", "Resistance-to-reactance ratio (R/X) "
+              "of the external grid at its weakest, e.g. 0.15. Leave empty when unknown.", "", "", reveal_when=_SLACK),
+    *_harmonic_rows("generator"),
     *_outages(with_cf_flag=True),
 )
 
@@ -256,17 +308,17 @@ STORAGE_UNIT: tuple[FieldSpec, ...] = (
         "Bus the storage charges from and discharges to.",
         "Storage technology (battery, PHS, …). Used for grouping; does not change the energy balance.",
     ),
-    FieldSpec("p_nom", "size", "Power", "Charge and discharge rating on the AC side.", "MW", "MW", key_param=True),
+    FieldSpec("p_nom", "size", "Power", "Charge and discharge rating on the AC side.", "MW", "MW", depth="essentials"),
     FieldSpec("max_hours", "size", "Duration", "Hours of storage at rated power: energy = power × duration.", "h",
-              "h", key_param=True),
+              "h", depth="essentials"),
     *_size_bounds(),
     FieldSpec("inv_power_overnight", "investment", "Power part: overnight cost", "Upfront cost of the power "
-              "conversion (inverter, grid connection) per kW of power.", "EUR/kW", "EUR/MW", _KW, key_param=True,
+              "conversion (inverter, grid connection) per kW of power.", "EUR/kW", "EUR/MW", _KW, depth="essentials",
               part="power"),
     FieldSpec("inv_power_lifetime", "investment", "Power part: lifetime", "Lifetime of the power part. When "
               "shorter than the energy part's, finance books a replacement.", "years", "years", part="power"),
     FieldSpec("inv_energy_overnight", "investment", "Energy part: overnight cost", "Upfront cost of the storage "
-              "block per kWh of energy.", "EUR/kWh", "EUR/MWh", _KW, key_param=True, part="energy"),
+              "block per kWh of energy.", "EUR/kWh", "EUR/MWh", _KW, depth="essentials", part="energy"),
     FieldSpec("inv_energy_lifetime", "investment", "Energy part: lifetime", "Lifetime of the storage block.",
               "years", "years", part="energy"),
     *_investment_common(),
@@ -311,19 +363,19 @@ STORE: tuple[FieldSpec, ...] = (
         "Energy carrier held (H2, heat, battery, …). Used for grouping; does not change the energy balance.",
     ),
     FieldSpec("e_nom", "size", "Energy capacity", "Energy the store can hold. With extendable ticked, the existing "
-              "capacity the optimiser starts from.", "MWh", "MWh", key_param=True),
+              "capacity the optimiser starts from.", "MWh", "MWh", depth="essentials"),
     FieldSpec("e_nom_extendable", "size", "Extendable", "When ticked, the optimiser chooses the energy capacity "
               "between the minimum and maximum and pays the annualised cost for every MWh it adds.",
-              kind="bool", key_param=True),
+              kind="bool", depth="essentials"),
     FieldSpec("e_nom_min", "size", "Minimum capacity", "Lower bound on the optimised energy capacity.", "MWh", "MWh",
               reveal_when=_E_EXT),
     FieldSpec("e_nom_max", "size", "Maximum capacity", "Upper bound on the optimised energy capacity. Leave empty "
-              "for no limit.", "MWh", "MWh", reveal_when=_E_EXT, key_param=True),
+              "for no limit.", "MWh", "MWh", reveal_when=_E_EXT, depth="essentials"),
     FieldSpec("overnight_cost", "investment", "Overnight cost", "Upfront cost per kWh of storage capacity, as if "
               "built at once without financing. Annualised over the lifetime at the discount rate.", "EUR/kWh",
-              "EUR/MWh", _KW, key_param=True),
+              "EUR/MWh", _KW, depth="essentials"),
     FieldSpec("lifetime", "investment", "Lifetime", "Technical and economic lifetime. The store retires after its "
-              "build year plus lifetime.", "years", "years", key_param=True),
+              "build year plus lifetime.", "years", "years", depth="essentials"),
     *_investment_common(),
     FieldSpec("capital_cost", "investment", "Capital cost (annualised)", "Derived: overnight cost × annuity("
               "discount rate, lifetime); fixed O&M is charged on top. Per kWh of capacity.", "EUR/kWh/yr",
@@ -353,11 +405,12 @@ LOAD: tuple[FieldSpec, ...] = (
         "Energy carrier of the demand (AC, heat, H2, …). Used for grouping.",
     ),
     FieldSpec("p_set", "size", "Demand", "Active-power demand. A profile uploaded on the Time Series page replaces "
-              "this static value hour by hour.", "MW", "MW", key_param=True),
+              "this static value hour by hour.", "MW", "MW", depth="essentials"),
     FieldSpec("q_set", "size", "Reactive demand", "Reactive-power demand, used by the AC power flow only.", "MVAr",
               "MVAr"),
     FieldSpec("sign", "performance", "Sign", "Power sign convention: −1 for a consumer (the default), +1 to make the "
               "load inject power.", "", ""),
+    *_harmonic_rows("load"),
 )
 
 # ── Link (single part, priced per MW of its input, bus0) ─────────────────────
@@ -383,13 +436,13 @@ LINK: tuple[FieldSpec, ...] = (
               "day).", kind="enum", options=("safety", "process_critical", "process_flexible", "deferrable"),
               reveal_when={"eh_process": True}),
     FieldSpec("p_nom", "size", "Capacity", "Rating on the input side (bus0). With extendable ticked, the existing "
-              "capacity the optimiser starts from.", "MW", "MW", key_param=True),
+              "capacity the optimiser starts from.", "MW", "MW", depth="essentials"),
     *_size_bounds(),
     _money_per_mw("overnight_cost", "investment", "Overnight cost", "Upfront cost per kW of input capacity, as if "
                   "built at once without financing. Annualised over the lifetime at the discount rate.",
-                  key_param=True),
+                  depth="essentials"),
     FieldSpec("lifetime", "investment", "Lifetime", "Technical and economic lifetime. The link retires after its "
-              "build year plus lifetime.", "years", "years", key_param=True),
+              "build year plus lifetime.", "years", "years", depth="essentials"),
     *_investment_common(),
     _money_per_mw_yr("capital_cost", "investment", "Capital cost (annualised)", "Derived: overnight cost × annuity("
                      "discount rate, lifetime); fixed O&M is charged on top. Per kW of input.", derived=True),
@@ -485,20 +538,20 @@ def _branch_identity(what: str, carrier_help: str | None, from_label: str, to_la
 def _s_nom_bounds(what: str) -> tuple[FieldSpec, ...]:
     return (
         FieldSpec("s_nom", "size", "Capacity", f"Apparent-power rating of the {what}. With extendable ticked, the "
-                  "existing capacity the optimiser starts from.", "MVA", "MVA", key_param=True),
+                  "existing capacity the optimiser starts from.", "MVA", "MVA", depth="essentials"),
         FieldSpec("s_nom_extendable", "size", "Extendable", "When ticked, the optimiser chooses the capacity "
                   "between the minimum and maximum and pays the annualised cost for every MVA it adds.",
-                  kind="bool", key_param=True),
+                  kind="bool", depth="essentials"),
         FieldSpec("s_nom_min", "size", "Minimum capacity", "Lower bound on the optimised capacity.", "MVA", "MVA",
                   reveal_when=_S_EXT),
         FieldSpec("s_nom_max", "size", "Maximum capacity", "Upper bound on the optimised capacity. Leave empty "
-                  "for no limit.", "MVA", "MVA", reveal_when=_S_EXT, key_param=True),
+                  "for no limit.", "MVA", "MVA", reveal_when=_S_EXT, depth="essentials"),
     )
 
 
 def _lifetime(what: str) -> FieldSpec:
     return FieldSpec("lifetime", "investment", "Lifetime", f"Technical and economic lifetime. The {what} retires "
-                     "after its build year plus lifetime; leave empty for never.", "years", "years", key_param=True)
+                     "after its build year plus lifetime; leave empty for never.", "years", "years", depth="essentials")
 
 
 LINE: tuple[FieldSpec, ...] = (
@@ -506,10 +559,10 @@ LINE: tuple[FieldSpec, ...] = (
                       "one carrier; join buses of different carriers with a Link.", "From bus", "To bus"),
     *_s_nom_bounds("line"),
     FieldSpec("length", "size", "Length", "Route length. The impedances and the investment are entered per km "
-              "and scale with it.", "km", "km", key_param=True),
+              "and scale with it.", "km", "km", depth="essentials"),
     FieldSpec("inv_per_km_overnight", "investment", "Overnight cost per km", "Upfront cost per MVA of capacity "
               "and km of route, as catalogues publish it (e.g. HVAC overhead). Times the length, annualised over "
-              "the lifetime at the discount rate.", "EUR/MVA/km", "EUR/MVA/km", key_param=True),
+              "the lifetime at the discount rate.", "EUR/MVA/km", "EUR/MVA/km", depth="essentials"),
     _lifetime("line"),
     *_investment_common(),
     FieldSpec("capital_cost", "investment", "Capital cost (annualised)", "Derived: overnight cost per km × length "
@@ -529,7 +582,7 @@ TRANSFORMER: tuple[FieldSpec, ...] = (
     *_s_nom_bounds("transformer"),
     FieldSpec("overnight_cost", "investment", "Overnight cost", "Upfront cost per MVA of rating, as if built at "
               "once without financing. Annualised over the lifetime at the discount rate.", "EUR/MVA", "EUR/MVA",
-              key_param=True),
+              depth="essentials"),
     _lifetime("transformer"),
     *_investment_common(),
     FieldSpec("capital_cost", "investment", "Capital cost (annualised)", "Derived: overnight cost × annuity("
@@ -589,7 +642,7 @@ BUS: tuple[FieldSpec, ...] = (
     FieldSpec("y", "identity", "Latitude", "Geographic latitude, north positive. Places the bus on the map and sets "
               "the length of a line recalculated from coordinates; the optimisation does not read it.", "°N", "°N"),
     FieldSpec("v_nom", "performance", "Nominal voltage", "The bus's nominal voltage. Lines are coloured by voltage "
-              "class; a transformer's declared voltages are checked against it.", "kV", "kV", key_param=True),
+              "class; a transformer's declared voltages are checked against it.", "kV", "kV", depth="essentials"),
 )
 
 CARRIER: tuple[FieldSpec, ...] = (
@@ -602,7 +655,7 @@ CARRIER: tuple[FieldSpec, ...] = (
     FieldSpec("unit", "identity", "Unit", "Unit of the energy it carries, for display. Empty: MWh.", kind="text"),
     FieldSpec("co2_emissions", "performance", "CO₂ emissions", "Emissions per MWh of primary energy burnt. A "
               "generator's emissions are this divided by its efficiency; a CO₂ cap sums them.", "t/MWh", "t/MWh",
-              key_param=True),
+              depth="essentials"),
 )
 
 GLOBAL_CONSTRAINT_TYPES = ("primary_energy", "tech_capacity_expansion_limit", "operational_limit",
@@ -612,11 +665,11 @@ GLOBAL_CONSTRAINT: tuple[FieldSpec, ...] = (
     FieldSpec("name", "identity", "Name", "Unique constraint name.", kind="text", required=True),
     FieldSpec("type", "identity", "Type", "What the constraint caps: primary energy (a CO₂ cap), new capacity of a "
               "carrier, a carrier's dispatch, or the volume or cost of new transmission.", kind="enum",
-              options=GLOBAL_CONSTRAINT_TYPES, key_param=True),
+              options=GLOBAL_CONSTRAINT_TYPES, depth="essentials"),
     FieldSpec("sense", "identity", "Sense", "How the sum compares with the constant.", kind="enum",
-              options=("<=", "==", ">="), key_param=True),
+              options=("<=", "==", ">="), depth="essentials"),
     FieldSpec("constant", "identity", "Constant", "The bound, in the type's unit: t for a CO₂ cap, MW for capacity, "
-              "MWh for dispatch, MW·km or € for transmission.", required=True, key_param=True),
+              "MWh for dispatch, MW·km or € for transmission.", required=True, depth="essentials"),
     FieldSpec("carrier_attribute", "identity", "Carrier attribute", "For primary energy: the carrier column summed, "
               "e.g. co2_emissions.", kind="text", reveal_when={"type": "primary_energy"}),
     FieldSpec("carrier", "identity", "Carrier", "For a capacity or operational limit: the carrier it applies to.",
@@ -646,12 +699,15 @@ _CLEAR = {"p_nom_max", "e_nom_max", "s_nom_max", "v_nom_0", "v_nom_1", "lifetime
 # M5: per class. `empty` sends "" (a text column the write model types `str = ""`: an emptied country or display
 # name is a decision, and null would be refused); GlobalConstraint's optional columns clear to null.
 _EMPTY_BY_CLASS = {"Bus": {"country", "sub_network", "unit"}, "Carrier": {"nice_name", "color", "unit"},
-                   "Generator": {"process_role"},
+                   "Generator": {"process_role", "harmonic_source", "harmonic_spectrum"},
+                   "Load": {"harmonic_source", "harmonic_spectrum"},
                    "Link": {"bus2", "bus3", "bus4", "criticality_tier", "harmonic_source", "harmonic_spectrum",
                             "start_method", "ride_through_curve"}}
 _CLEAR_BY_CLASS = {"GlobalConstraint": {"carrier_attribute", "carrier", "investment_period"},
                    "Generator": {"dc_ac_ratio", "fuel_curve_slope", "fuel_curve_no_load", "fuel_price",
-                                 "om_cost_per_run_hour", "lifetime_run_hours"},
+                                 "om_cost_per_run_hour", "lifetime_run_hours", "rated_mva", "sk_max_mva",
+                                 "sk_min_mva", "rx_max", "rx_min"},
+                   "Load": {"rated_mva"},
                    "Bus": {"mwh_per_t", "product_value", "lost_production_value", "temperature_c", "pressure_bar"},
                    "Link": {"rated_mva", "flicker_step_mva", "flicker_changes_per_min",
                             "single_phase_share", "motor_kw", "i_start_pu", "restart_time_h", "max_supply_temp_c", "max_pressure_bar"}}
@@ -767,6 +823,34 @@ def on_tonne_bus(n, component: str, name: str) -> bool:
 
     size_bus = _size_bus_of(n, component, name, None)
     return size_bus is not None and _size_unit(n, size_bus, stock=False) in ("t", "t/h")
+
+
+def table_cost_units(n, component: str, *, keep=None) -> dict:
+    """What a table of one class needs to read each row's costs: ``rows`` maps every asset on a tonne bus to its
+    `cost_units` (unit and scale, as the card and the drawer show them); ``unreadable`` lists the assets whose
+    size bus is missing or has no known unit, which are neither tonne nor energy and so make no per-unit claim.
+    An asset on an energy bus is in neither. ``cost_fields`` are the class's cost columns that follow the bus. ``keep(component, names)`` drops transient names."""
+    from services.flow_service import _size_unit
+
+    col = _SIZE_BUS.get(component)
+    table = getattr(n, CLASS_ATTR.get(component, ""), None)
+    if col is None or table is None or col not in table.columns:
+        return {"rows": {}, "unreadable": [], "cost_fields": []}
+    names = list(table.index) if keep is None else keep(component, list(table.index))
+    seen: dict = {}
+    rows: dict[str, dict] = {}
+    unreadable: list[str] = []
+    for name in names:
+        bus = table.at[name, col]
+        if bus not in seen:
+            unit = _size_unit(n, bus, stock=False) if bus in n.buses.index else None
+            seen[bus] = "tonne" if unit in ("t", "t/h") else ("energy" if unit else None)
+        if seen[bus] == "tonne":
+            rows[str(name)] = cost_units(n, component, str(name))
+        elif seen[bus] is None:
+            unreadable.append(str(name))
+    return {"rows": rows, "unreadable": unreadable,
+            "cost_fields": [f.key for f in fields_for(component) if f.unit_display in _TONNE_COST_UNIT]}
 
 
 def cost_basis_of_row(n, component: str, row) -> str | None:

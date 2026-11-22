@@ -20,7 +20,7 @@ from models.energy_hub import EH_CUSTOM_COLUMNS, EH_INTERNAL_ROLES, EH_LINK_ROLE
 from models.process_unit import (CRITICALITY_TIERS, DC_AC_RATIO_MAX, HARMONIC_SOURCES, PROCESS_CUSTOM_COLUMNS,
                                  PROCESS_GENERATOR_ROLES, START_METHODS)
 
-_ATTR_OF = {"Bus": "buses", "Link": "links", "Generator": "generators", "Store": "stores"}
+_ATTR_OF = {"Bus": "buses", "Link": "links", "Generator": "generators", "Store": "stores", "Load": "loads"}
 _TRUE = ("true", "1", "yes", "y", "t")
 _FALSE = ("false", "0", "no", "n", "f", "")
 
@@ -64,6 +64,8 @@ def coerce_eh_value(component_class: str, col: str, value):
     if kind == "float_nonneg":
         if value is None or value == "":
             return float("nan")
+        if isinstance(value, bool):  # float(True) is 1.0: a tick is never a size (GK B X2)
+            raise ValueError(f"{col}: expected a number, got {value}")
         try:
             v = float(value)
         except (TypeError, ValueError):
@@ -165,9 +167,15 @@ def declared_dc_ac_ratio(frame, name: str) -> float:
     return ratio
 
 
+#: Orders 2–50 once each at "50:100.25, " fit well inside this; a longer value is a paste slip (GK B X6).
+SPECTRUM_MAX_CHARS = 600
+
+
 def _checked_text(kind: str, value) -> str:
     """A text column gridspine parses (a harmonic spectrum, a ride-through curve), refused when malformed."""
     v = "" if value is None else str(value).strip()
+    if kind == "harmonic_spectrum" and len(v) > SPECTRUM_MAX_CHARS:
+        raise ValueError(f"Harmonic spectrum: it is {len(v)} characters long; the most is {SPECTRUM_MAX_CHARS}.")
     try:
         from gridspine.schema.contracts import ContractError
         if kind == "harmonic_spectrum":

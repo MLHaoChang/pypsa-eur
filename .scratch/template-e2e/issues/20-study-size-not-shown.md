@@ -3,7 +3,7 @@
 
 # 20 — The size of what the study chose to build is not shown in results
 
-Status: needs-triage
+Status: ready-for-agent
 Source: decide-report-journeys.md (walk 2026-11-17, master 0ab07339)
 Severity: blocks decision
 Journey fit: results → decide. A user cannot justify an investment without the MW/MWh to build.
@@ -40,3 +40,7 @@ Follow-up (open): `eh_study.py` should pass the study's own request to `sizing_s
 Follow-up (open, GK A 33 on #1786): `flow_service._site_assets` (section 5) drops every generator on an import Link's grid-side bus, without S2's "the bus holds nothing else of the site's" check. No template differs today. On a network with site equipment on the grid bus, section 5 and the report's sizing could disagree; align `_site_assets` with `eh_report._connection`.
 
 GK A 33 NOT OK @06ba9e54, both fixed in #1786: the peak import is clipped at 0 (an export-only horizon or period reads 0, never negative), and the tolerance tests pin the literal 1e-6.
+
+## Triage (2026-11-20, master 8a039460)
+
+Checked by code reading only; the app was not re-run. Partly done: #1734 (merged) added `SizedDesignTable.tsx`, shown in section 10, the reference-design panel and section 5, with sizes in each asset's own unit. Remaining, to re-check in the app first: the report lists every built asset per stage; a placeholder grid capacity and shortfall are not counted as installed capacity and the total is checked against the connection limit; Guided, Expert and report show the same figures (a test per template). Gated: GK A. Blocked by: none.

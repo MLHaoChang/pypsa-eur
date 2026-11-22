@@ -269,6 +269,8 @@ def test_every_adapter_receipt_and_checked_tool_has_a_returned_shape(live):
         INPUT_ADAPTERS,
         POLICY_VERSION,
         PREDICATE_POLICY_VERSION,
+        SECTIONED_POLICY_VERSION,
+        WARNED_POLICY_VERSION,
     )
 
     assert set(INPUT_ADAPTERS.values()) <= set(live["evidence_identity"])
@@ -277,6 +279,8 @@ def test_every_adapter_receipt_and_checked_tool_has_a_returned_shape(live):
         POLICY_VERSION,
         DERIVED_POLICY_VERSION,
         PREDICATE_POLICY_VERSION,
+        SECTIONED_POLICY_VERSION,
+        WARNED_POLICY_VERSION,
     }
     assert set(live["checked_tool_results"]) == CHECKED_TOOLS
     for key in ("evidence_identity", "answer_receipt", "checked_tool_results"):
@@ -313,7 +317,7 @@ def test_a_new_returned_field_breaks_and_a_new_version_is_additive(frozen):
         "$.evidence_identity.static-input/1 changed",
     ]
     added = copy.deepcopy(frozen)
-    added["answer_receipt"]["4"] = {"type": "object"}
+    added["answer_receipt"]["6"] = {"type": "object"}
     added["evidence_identity"]["static-input/2"] = {"type": "object"}
     added["checked_tool_results"]["new_tool"] = {"type": "object"}
     assert breaking_changes(frozen, added) == []

@@ -44,6 +44,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from services.commercial import placeholders
 from services.commercial.tariff_engine import _HOURS_PER_YEAR
 
 
@@ -489,7 +490,11 @@ def retail_parties(contract, tariff) -> tuple[str, str]:
 
 def settle(contract, inputs: SettlementInputs) -> list[Line]:
     """The contract's settlement lines for one period (see module docstring).
-    A retail contract has none of its own (`retail_parties`)."""
+    A retail contract has none of its own (`retail_parties`). A contract still holding a
+    Library template's placeholder is refused (`placeholders`, SCU06 S2a)."""
+    unfilled = placeholders.problem(contract)
+    if unfilled:
+        raise ContractError(unfilled)
     kind = getattr(contract, "type", None)
     if kind == "ppa":
         return _ppa(contract, inputs)

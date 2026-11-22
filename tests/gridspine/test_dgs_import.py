@@ -19,6 +19,7 @@ import math
 import re
 
 import pandapower as pp
+import pandapower.networks as pn
 import pytest
 
 from gridspine.handoff.dgs_writer import write_dgs
@@ -248,7 +249,8 @@ def test_hand_injections_shunts_and_grid(hand):
     )  # open switch
     assert g.at["Gen", "p_nom"] == pytest.approx(8.0) and g.at["Gen", "control"] == "PV"
     assert n.buses.at["Spare", "v_mag_pu_set"] == pytest.approx(1.02)
-    assert g.at["Grid", "control"] == "Slack" and math.isinf(g.at["Grid", "p_nom"])
+    # the file leaves the grid unbounded: its short-circuit level 1000 MVA is used
+    assert g.at["Grid", "control"] == "Slack" and g.at["Grid", "p_nom"] == 1000.0
     assert [
         g.at["Grid", c] for c in ("sk_max_mva", "sk_min_mva", "rx_max", "rx_min")
     ] == [
@@ -358,11 +360,11 @@ def test_each_guard_refuses_naming_the_item(tmp_path, cls, row, words):
 def test_file_level_refusals(tmp_path):
     good = tmp_path / "a.dgs"
     good.write_text(dgs_text())
-    with pytest.raises(ImportFormatError, match="one .dgs file, got 2"):
+    with pytest.raises(ImportFormatError, match="one .dgs or .xlsx file, got 2"):
         read_dgs([good, good], {})
     other = tmp_path / "a.txt"
     other.write_text(dgs_text())
-    with pytest.raises(ImportFormatError, match="a.txt is not a .dgs file"):
+    with pytest.raises(ImportFormatError, match="a.txt is not a .dgs or .xlsx file"):
         read_dgs([other], {})
     with pytest.raises(ImportFormatError, match="version '6.0' found"):
         read_text(tmp_path, dgs_text().replace("1;Version;5.0", "1;Version;6.0"))
@@ -481,7 +483,7 @@ def test_round_trip_counts_and_spectra(tmp_path):
 # --- pypsa behaviour the mapping relies on (D5, D6) ---------------------------
 
 
-def test_an_infinite_slack_rating_does_not_change_the_load_flow(hand):
+def test_the_slack_rating_does_not_change_the_load_flow(hand):
     n = hand.network
     n.lpf()
     n.pf(use_seed=True)
@@ -1130,3 +1132,189 @@ def test_an_out_of_service_external_grid_leaves_the_bus_set_point(tmp_path):
     rows = _with(ElmXnet=["44;Grid;2;1.05;1000.0;500.0;0.1;0.2;SL;1"])
     n = read_text(tmp_path, dgs_text(rows)).network
     assert n.buses.at["EHV", "v_mag_pu_set"] == 1.0
+
+
+def _drop(cls, attr, head=HEAD, rows=ROWS):
+    """The fixture without ``cls.attr`` (its header column and every value)."""
+    cols = head[cls].split(";")
+    i = [c.split("(")[0] for c in cols].index(attr)
+    new_head = dict(head, **{cls: ";".join(cols[:i] + cols[i + 1 :])})
+    lines = [r.split(";") for r in rows[cls]]
+    new_rows = dict(rows, **{cls: [";".join(f[: i + 1] + f[i + 2 :]) for f in lines]})
+    return new_rows, new_head
+
+
+@pytest.mark.parametrize(
+    "cls, attr, asset, component, column, parameter",
+    [
+        ("ElmLod", "plini", "Load", "loads", "p_set", "Active power (MW)"),
+        ("ElmLod", "qlini", "Load", "loads", "q_set", "Reactive power (Mvar)"),
+        ("ElmGenstat", "pgini", "PV", "generators", "p_set", "Active power (MW)"),
+        ("ElmGenstat", "qgini", "PV", "generators", "q_set", "Reactive power (Mvar)"),
+        ("ElmSym", "pgini", "Gen", "generators", "p_set", "Active power (MW)"),
+    ],
+)
+def test_a_missing_set_point_is_listed_as_assumed(
+    tmp_path, cls, attr, asset, component, column, parameter
+):
+    """GK A2 X10: a set-point the file omits is assumed 0 and says so."""
+    rows, head = _drop(cls, attr)
+    res = read_text(tmp_path, dgs_text(rows, head))
+    got = {(a.asset, a.parameter): a.value for a in res.report.assumed}
+    assert got[(asset, parameter)] == 0.0
+    assert getattr(res.network, component).at[asset, column] == 0.0
+    full = read_text(tmp_path, dgs_text(), name="full.dgs")
+    assert (asset, parameter) not in {
+        (a.asset, a.parameter) for a in full.report.assumed
+    }
+
+
+@pytest.mark.parametrize(
+    "cls, attr, row, where",
+    [
+        (
+            "TypTr2",
+            "tap_side",
+            "32;T type;10.0;33.0;11.0;10.0;50.0;10.0;0.5;11.0;2.5;0;HV",
+            "T2W",
+        ),
+        (
+            "TypTr2",
+            "nntap0",
+            "32;T type;10.0;33.0;11.0;10.0;50.0;10.0;0.5;11.0;2.5;mid;0",
+            "T2W",
+        ),
+        ("ElmTr2", "nntap", "33;T2W;2;32;up;1;0", "T2W"),
+    ],
+)
+def test_text_in_an_integer_field_is_refused_by_name(tmp_path, cls, attr, row, where):
+    """GK A2 X11: a text tap field is an import format error naming the field."""
+    head = dict(HEAD, **{cls: HEAD[cls].replace(f"{attr}(i)", f"{attr}(a:8)")})
+    rows = dict(ROWS, **{cls: [row]})
+    with pytest.raises(
+        ImportFormatError, match=rf"{where}.*: {attr} '\w+' is not an integer"
+    ):
+        read_text(tmp_path, dgs_text(rows, head))
+
+
+def test_a_fractional_tap_position_is_refused(tmp_path):
+    head = dict(HEAD, ElmTr2=HEAD["ElmTr2"].replace("nntap(i)", "nntap(r)"))
+    rows = dict(ROWS, ElmTr2=["33;T2W;2;32;-2.5;1;0"])
+    with pytest.raises(ImportFormatError, match=r"nntap -2.5 is not an integer"):
+        read_text(tmp_path, dgs_text(rows, head))
+
+
+def test_text_in_an_out_of_service_flag_is_refused_by_name(tmp_path):
+    head = dict(HEAD, ElmLod=HEAD["ElmLod"].replace("outserv(i)", "outserv(a:4)"))
+    rows = dict(ROWS, ElmLod=["40;Load;2;3.0;1.0;2.0;50;no"])
+    with pytest.raises(
+        ImportFormatError, match=r"ElmLod 'Load' \(line \d+\): outserv 'no'"
+    ):
+        read_text(tmp_path, dgs_text(rows, head))
+
+
+def test_a_true_false_tap_position_is_refused(tmp_path):
+    """A bool is an int in Python; the mapper still refuses it as a tap position."""
+    from gridspine.ingest.dgs_import import _int
+    from gridspine.schema.contracts import ContractError
+
+    with pytest.raises(ContractError, match="nntap True is not an integer"):
+        _int("T2W", "nntap", True)
+    assert _int("T2W", "nntap", 3.0) == 3
+
+
+@pytest.mark.parametrize(
+    "cls, attr, row",
+    [
+        ("StaCubic", "obj_bus", "100;c;11;20;x"),
+        ("ElmCoup", "on_off", "20;C1;2;x"),
+        ("StaSwitch", "on_off", "90;S-PV;112;x"),
+        ("ElmSym", "ip_ctrl", "43;Gen;2;42;4.0;1.02;x;0"),
+        ("ElmShnt", "shtype", "45;Cap;2;x;11.0;6.0;3;2;0"),
+    ],
+)
+def test_text_in_each_integer_flag_is_refused_by_name(tmp_path, cls, attr, row):
+    """GK A2 X11: each integer guard, one field at a time."""
+    head = dict(HEAD, **{cls: HEAD[cls].replace(f"{attr}(i)", f"{attr}(a:8)")})
+    rows = dict(ROWS, **{cls: [row, *ROWS[cls][1:]]})
+    with pytest.raises(ImportFormatError, match=rf"{attr} 'x' is not an integer"):
+        read_text(tmp_path, dgs_text(rows, head))
+
+
+# ---------------------------------------------------------------- unbounded external grid (issue psse-import 04)
+def _grid_rows(rep):
+    return [a for a in rep.assumed if a.parameter == "active power limit (MW)"]
+
+
+def test_the_unbounded_grid_takes_its_short_circuit_level(hand):
+    g = hand.network.generators
+    assert g.at["Grid", "p_nom"] == 1000.0
+    assert g["p_nom_source"].to_dict() == {
+        "PV": "file",
+        "Gen": "file",
+        "Grid": "assumed",
+    }
+    (row,) = _grid_rows(hand.report)
+    assert (row.asset, row.value) == ("Grid", 1000.0)
+    assert "unbounded in the file (ElmXnet)" in row.why
+    assert "short-circuit level 1000 MVA" in row.why
+
+
+def test_an_unbounded_grid_without_snss_takes_the_load_bound(tmp_path):
+    # load 6 + j2 MVA: 10 × 6.32 = 64 MVA is under the 132 kV class floor 250 MVA
+    res = read_text(tmp_path, dgs_text(_with(ElmXnet=["44;Grid;2;1.0;;;;;SL;0"])))
+    assert res.network.generators.at["Grid", "p_nom"] == 250.0
+    (row,) = _grid_rows(res.report)
+    assert (row.asset, row.value) == ("Grid", 250.0)
+    assert "short-circuit" not in row.why
+
+
+def _issue_example(tmp_path):
+    net = pn.example_simple()
+    net.ext_grid[["s_sc_max_mva", "s_sc_min_mva", "rx_max", "rx_min"]] = [
+        1000,
+        800,
+        0.1,
+        0.1,
+    ]
+    path = tmp_path / "simple.dgs"
+    write_dgs(net, path)
+    return read_dgs([path], {})
+
+
+def test_the_issue_example_grid_is_finite_and_assumed(tmp_path):
+    res = _issue_example(tmp_path)
+    g = res.network.generators
+    assert g.at["ext_grid_0", "p_nom"] == 1000.0
+    assert g.at["ext_grid_0", "p_nom_source"] == "assumed"
+    assert [(a.asset, a.value) for a in _grid_rows(res.report)] == [
+        ("ext_grid_0", 1000.0)
+    ]
+    # DGS lines carry √3·U·I ratings and are never defaulted
+    assert "s_nom_source" not in res.network.lines.columns
+
+
+def test_a_short_circuit_level_equal_to_the_bound_is_not_named(tmp_path):
+    # snss 250 MVA equals the load bound (the 132 kV floor), so the bound is used
+    res = read_text(tmp_path, dgs_text(_with(ElmXnet=["44;Grid;2;1.0;250.0;;;;SL;0"])))
+    assert res.network.generators.at["Grid", "p_nom"] == 250.0
+    (row,) = _grid_rows(res.report)
+    assert "short-circuit" not in row.why
+
+
+def test_dgs_generators_take_the_stated_cost_default(hand):
+    g = hand.network.generators
+    assert g["marginal_cost"].to_dict() == {"PV": 1.0, "Gen": 1.0, "Grid": 1.0}
+    assert set(g["marginal_cost_source"]) == {"assumed"}
+    rows = [a for a in hand.report.assumed if a.parameter == "marginal cost (€/MWh)"]
+    assert sorted((a.asset, a.value) for a in rows) == [
+        ("Gen", 1.0),
+        ("Grid", 1.0),
+        ("PV", 1.0),
+    ]
+
+
+def test_the_issue_example_lopf_solves(tmp_path):
+    n = _issue_example(tmp_path).network
+    status, condition = n.optimize(solver_name="highs")
+    assert (status, condition) == ("ok", "optimal")
