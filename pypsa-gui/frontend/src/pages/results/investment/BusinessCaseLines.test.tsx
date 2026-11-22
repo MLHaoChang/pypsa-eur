@@ -450,3 +450,66 @@ describe('the de-rating of a capacity payment (#21)', () => {
     expect(screen.queryByLabelText(/^De-rating/)).toBeNull()
   })
 })
+
+describe('Indexation: % per year, stored as a fraction (bc-23)', () => {
+  const CONTRACT: LineItem = {
+    name: 'GoO', kind: 'revenue', category: 'by_product', unit: 'MWh', quantity_source: 'typed',
+    quantity: 1, price: 1, escalation: 'contract', indexation: 0.07,
+  }
+  const field = () => screen.getByLabelText('Indexation, GoO') as HTMLInputElement
+  const open = async () => {
+    mount(config(CONTRACT))
+    fireEvent.click(await screen.findByRole('button', { name: 'Show details of GoO' }))
+  }
+  beforeEach(() => {
+    api.putInputs.mockImplementation(async (cfg) => ({ business_case: cfg, digest: 'd2', status: 'ok' }))
+  })
+
+  it('shows the stored fraction as % per year, without float noise, with its unit', async () => {
+    await open()
+    expect(field().value).toBe('7')
+    expect(screen.getByTestId('bc-line-details').textContent).toContain('%/yr')
+    expect(screen.getByTestId('bc-line-details').textContent).not.toMatch(/fraction/)
+  })
+  it('an untouched field sends no write', async () => {
+    await open()
+    expect(api.putInputs).not.toHaveBeenCalled()
+    expect((screen.getByRole('button', { name: 'Save the lines' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+  it('typing 2 stores exactly 0.02; typing 7 stores 0.07', async () => {
+    await open()
+    fireEvent.change(field(), { target: { value: '2' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save the lines' }))
+    await waitFor(() => expect(api.putInputs).toHaveBeenCalledTimes(1))
+    expect(api.putInputs.mock.calls[0][0]!.inputs.lines[0].indexation).toBe(0.02)
+  })
+  it('clearing stores nothing, never 0; a typed 0 stays 0', async () => {
+    await open()
+    fireEvent.change(field(), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save the lines' }))
+    await waitFor(() => expect(api.putInputs).toHaveBeenCalledTimes(1))
+    expect(api.putInputs.mock.calls[0][0]!.inputs.lines[0].indexation ?? null).toBeNull()
+    cleanup(); vi.clearAllMocks(); api.putInputs.mockImplementation(async (cfg) => ({ business_case: cfg, digest: 'd2', status: 'ok' }))
+    await open()
+    fireEvent.change(field(), { target: { value: '0' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save the lines' }))
+    await waitFor(() => expect(api.putInputs).toHaveBeenCalledTimes(1))
+    expect(api.putInputs.mock.calls[0][0]!.inputs.lines[0].indexation).toBe(0)
+  })
+  it('200 is not saved silently: it asks for a confirmation first', async () => {
+    await open()
+    fireEvent.change(field(), { target: { value: '200' } })
+    expect(screen.getByTestId('bc-indexation-confirm').textContent).toContain('200 %/yr')
+    const save = screen.getByRole('button', { name: 'Save the lines' }) as HTMLButtonElement
+    expect(save.disabled).toBe(true)
+    expect(screen.getByTestId('bc-save-off').textContent).toContain('GoO')
+    fireEvent.click(within(screen.getByTestId('bc-indexation-confirm')).getByRole('checkbox'))
+    expect(save.disabled).toBe(false)
+  })
+  it('a served refusal for the rate reads in words on its cell', async () => {
+    mount(config(CONTRACT), { refusals: [
+      { code: 'business_case_refused', refusal: 'indexation_out_of_range', field: 'lines[0].indexation', message: 'x' },
+    ] })
+    expect((await screen.findByTestId('bc-row-refusals')).textContent).toMatch(/^Indexation: between −20 and \+30 %\/yr/)
+  })
+})

@@ -26,7 +26,14 @@ from typing import Any
 from fastapi import HTTPException
 
 from models.business_case import takes_derating
-from services.business_case.chat_edit import CARD_CHARS, CARD_ROW_CAP, NAME, _refuse
+from services.business_case.chat_edit import (
+    CARD_CHARS,
+    CARD_ROW_CAP,
+    INDEXATION_UNIT,
+    NAME,
+    _refuse,
+    indexation_warning,
+)
 
 # Tool-side refusals, as literals for the error-kind manifest guard.
 ERROR_KINDS = (
@@ -191,7 +198,9 @@ def cells(line: dict) -> list[tuple[str, str, Any, str]]:
     # card never hides a value the run needs (walk 04, 05).
     if line.get("escalation") == "contract":
         v = line.get("indexation")
-        out.append(("indexation", "indexation", EMPTY if v is None else v, "per year"))
+        out.append(
+            ("indexation", "indexation", EMPTY if v is None else v, INDEXATION_UNIT)
+        )
     if takes_derating(line.get("category"), line.get("quantity_source")):
         v = line.get("derating")
         out.append(
@@ -262,7 +271,7 @@ def to_ask(case: dict) -> list[dict]:
                 }
             )
         for col, per, needed in (
-            ("indexation", "per year", ln.get("escalation") == "contract"),
+            ("indexation", INDEXATION_UNIT, ln.get("escalation") == "contract"),
             (
                 "derating",
                 "share of capacity, 0 to 1",
@@ -476,6 +485,7 @@ def plan(args: dict) -> dict:
     for r in out:  # the rate is the finance inputs', never the preset's (walk 05)
         if r["path"][-1:] == ["indexation"] and r.get("line") in from_finance:
             r["unit"] = FROM_FINANCE
+        indexation_warning(r)
     if len(out) > CARD_ROW_CAP or len(json.dumps(out, default=str)) > CARD_CHARS:
         _refuse(
             "business_case_card_too_large",

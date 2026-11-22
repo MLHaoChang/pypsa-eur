@@ -200,6 +200,32 @@ def _price_unit(line: dict, currency: str | None) -> str:
     return cur if unit == "lump" else f"{cur}/{unit}"
 
 
+# The stored rate is a fraction per year; the line table shows %/yr. The card says which.
+INDEXATION_UNIT = "fraction per year"
+
+
+def indexation_warning(row: dict) -> None:
+    """A card row that sets an indexation beyond +-10 %/yr carries `warn` and the reason, so
+    a chat write is never silently unconfirmed (the user approves the card; GK B2 bc-23)."""
+    from models.business_case import indexation_unusual
+
+    if row.get("path", [])[-1:] == ["indexation"] and indexation_unusual(
+        _number(row.get("new"))
+    ):
+        row["warn"] = True
+        row["reason"] = (
+            f"an indexation of {row['new']} per year is unusually high "
+            "(the rate is a fraction: 0.02 is 2 %/yr); confirm it is meant"
+        )
+
+
+def _number(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
 def _unit(line: dict | None, path: tuple, currency: str | None) -> str:
     if line is None:
         return ""
@@ -207,6 +233,8 @@ def _unit(line: dict | None, path: tuple, currency: str | None) -> str:
         return _price_unit(line, currency)
     if path[0] in ("quantity", "quantity_by_year"):
         return str(line.get("unit") or "")
+    if path[0] == "indexation":
+        return INDEXATION_UNIT
     return ""
 
 
@@ -431,6 +459,7 @@ def _line_rows(
             else:
                 year = int(path[1]) if path[0] == _PRICE_BY_YEAR else None
                 row.update(_cited(name, line, year, n, citations, host, money_reader()))
+        indexation_warning(row)
         rows.append(row)
     return rows
 

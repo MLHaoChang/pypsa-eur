@@ -152,6 +152,7 @@ export const REFUSAL_WORDS: Record<string, string> = {
   outside_horizon: 'Years: outside the investment case years',
   year_out_of_range: 'By year: a year outside the line’s start to end',
   indexation_missing: 'Indexation: needed with contract escalation',
+  indexation_out_of_range: 'Indexation: between −20 and +30 %/yr',
   derating_missing: 'De-rating: set the share of the capacity the market pays for (0 to 1)',
   life_missing: 'Life (years): needed for capex',
   rate_missing: 'Rate: needed for declining balance',
@@ -327,3 +328,17 @@ export const REFUSALS_REASON_WORDS: Record<string, string> = {
  *  (backend `takes_derating`). */
 export const takesDerating = (category: string, quantitySource: string): boolean =>
   category === 'capacity_payment' && quantitySource.startsWith('linked:capacity.')
+
+/** Indexation is stored as a fraction per year (0.02) and shown in %/yr (2), like the
+ *  volume factor beside it. The conversion happens only at the edit boundary: the shown
+ *  value is rounded to 12 significant digits (0.07 shows 7, not 7.000000000000001) and a
+ *  typed n stores n / 100, never n * 0.01. */
+export const INDEXATION_MIN_PCT = -20
+export const INDEXATION_MAX_PCT = 30
+export const INDEXATION_SOFT_PCT = 10
+export const fractionToPct = (f: number | null | undefined): number | null =>
+  typeof f === 'number' && Number.isFinite(f) ? Number((f * 100).toPrecision(12)) : null
+export const pctToFraction = (pct: number | null): number | null => (pct === null ? null : pct / 100)
+/** A stated indexation beyond the soft band (10 %/yr): the UI asks for a confirmation. */
+export const indexationUnusual = (f: number | null | undefined): boolean =>
+  typeof f === 'number' && Math.abs(f) > INDEXATION_SOFT_PCT / 100
