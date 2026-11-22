@@ -10,6 +10,7 @@ import type { SizingMode } from '../site3d/sizing'
 // Results.tsx enforcing the same number independently is how they can drift.
 import type { FlowSectionId, FlowTarget, SitePart } from '../api/flow'
 import type { FlowReturn } from '../layout/flowNavigation'
+import type { LibraryItemRef } from '../api/types'
 import { PANEL_SECTION, SECTION_OPEN, sectionForComponent } from '../layout/flowSections'
 import { RAIL_MIN_W } from '../pages/results/railWidth'
 import { appLog } from './simulationStore'
@@ -423,6 +424,13 @@ export interface TimeSeriesFocus {
   openEditor?: boolean
 }
 
+/** One-shot: a Library contract the Contracts editor adds as an unsaved copy
+ *  ("Use as a starting point", SCU06 S2b). */
+export interface ContractStart {
+  ref: LibraryItemRef
+  payload: Record<string, unknown>
+}
+
 /** The Commercial library item to open once: its kind, id and the version a gap names. */
 export interface LibraryFocus {
   kind: string
@@ -544,7 +552,7 @@ interface UIStore {
   // Economics opens on this tab once (the commercial library's "Open Tariffs & contracts").
   economicsTabRequest: 'basis' | 'assets' | 'tariffs' | null
   // Solver Settings opens on this block once (the lifetime and CO₂ links in Assets and Economics).
-  solverBlockRequest: 'economic' | 'sclopf' | 'goal' | 'voll' | 'strategy' | 'offgrid' | 'island' | null
+  solverBlockRequest: 'economic' | 'sclopf' | 'goal' | 'voll' | 'strategy' | 'offgrid' | 'island' | 'reserve' | null
   /** Request-then-scroll to the Grid codes section of the Grid connection part (AS-10). */
   gridCodeScrollRequest: boolean
   requestGridCodeScroll: () => void
@@ -556,6 +564,8 @@ interface UIStore {
   timeSeriesFocus: TimeSeriesFocus | null
   /** One-shot: the Commercial library opens this item at this version ("Update it there ›"). */
   libraryFocus: LibraryFocus | null
+  /** One-shot: the Contracts editor appends a copy of this Library contract. */
+  contractStart: ContractStart | null
   /** One-shot: bumped by a "Run the solve" outside the header (a result tab's
    *  empty state, UX template audit H2). The header runs its own run path when
    *  it changes, so there is one way to queue a solve. */
@@ -619,6 +629,9 @@ interface UIStore {
   // "Opening …" progress bar; a cold open can take a minute on a big template.
   openingProject: string | null
   setOpeningProject: (target: string | null) => void
+  // A deep-link open that failed: the target and why, shown with a Retry.
+  openFailure: { target: string; message: string } | null
+  setOpenFailure: (f: { target: string; message: string } | null) => void
   currentProject: string | null
   // Resume target for auth / projects-home flows. Prefer a stable UUID when a
   // caller knows it, but keep the project name as a compatible fallback so
@@ -743,7 +756,7 @@ interface UIStore {
   clearResultsWindowRequest: () => void
   requestEconomicsTab: (tab: 'basis' | 'assets' | 'tariffs') => void
   clearEconomicsTabRequest: () => void
-  requestSolverBlock: (block: 'economic' | 'sclopf' | 'goal' | 'voll' | 'strategy' | 'offgrid' | 'island') => void
+  requestSolverBlock: (block: 'economic' | 'sclopf' | 'goal' | 'voll' | 'strategy' | 'offgrid' | 'island' | 'reserve') => void
   clearSolverBlockRequest: () => void
   requestGridReadiness: () => void
   clearGridReadinessRequest: () => void
@@ -751,6 +764,8 @@ interface UIStore {
   clearTimeSeriesFocus: () => void
   focusLibraryItem: (focus: LibraryFocus) => void
   clearLibraryFocus: () => void
+  startContractFrom: (start: ContractStart) => void
+  clearContractStart: () => void
   requestSettingsSection: (section: string) => void
   clearSettingsSectionRequest: () => void
   requestReportGenerate: () => void
@@ -847,6 +862,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   gridReadinessRequest: false,
   timeSeriesFocus: null,
   libraryFocus: null,
+  contractStart: null,
   runSolveRequest: 0,
   settingsSectionRequest: null,
   panelSectionRequest: null,
@@ -866,6 +882,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
   solvingReadOnly: false,
   openingProject: null,
   setOpeningProject: (target) => set({ openingProject: target }),
+  openFailure: null,
+  setOpenFailure: (f) => set({ openFailure: f }),
   currentProject: storedCurrentProject(),
   lastProjectId: storedLastProjectId(),
   autosaveEnabled: storedAutosave(INITIAL_UI_MODE.mode),
@@ -1140,6 +1158,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
   clearTimeSeriesFocus: () => set({ timeSeriesFocus: null }),
   focusLibraryItem: (focus) => set({ libraryFocus: focus }),
   clearLibraryFocus: () => set({ libraryFocus: null }),
+  startContractFrom: (start) => set({ contractStart: start }),
+  clearContractStart: () => set({ contractStart: null }),
   requestRunSolve: () => set(s => ({ runSolveRequest: s.runSolveRequest + 1 })),
   requestSettingsSection: (section) => set({ settingsSectionRequest: section }),
   clearSettingsSectionRequest: () => set({ settingsSectionRequest: null }),

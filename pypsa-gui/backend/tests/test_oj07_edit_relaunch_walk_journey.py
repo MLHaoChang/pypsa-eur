@@ -290,13 +290,16 @@ def test_oj08_progress_then_cancel_gives_no_walk(oj_grid):
     _settle_solver()
     assert PyPSAService.get_solver_state().get('status') == 'aborted'
 
-    # The walk does not start: no continuation, the run step failed, no new run.
+    # The walk does not start: no continuation, the run step cancelled (issue 16), no new run.
     time.sleep(0.5)
     assert continuation.due(session) == []
     refused = list(chat_service.run_turn(session, '', continuation_job_id=job))
     assert refused[0][1]['error_kind'] == 'continuation_unavailable'
     task = chat_tools.get_task(task_id)
-    assert task['next_step']['id'] == 'run' and task['next_step']['status'] == 'failed'
+    assert task['next_step']['id'] == 'run' and task['next_step']['status'] == 'cancelled'
+    from services import assistant_tasks
+
+    assert task['next_step']['error'] == assistant_tasks.STOPPED_ERROR
     assert chat_tools.list_project_runs(status='completed')['total_count'] == runs_before
     assert len(oj_grid.starts) == 1
 

@@ -18,7 +18,7 @@ import { useReliabilityGoal } from '../../../hooks/useReliabilityGoal'
 import {
   ARCHETYPE_SHORT, actionLabel, actionTexts, askText, stressScenarioText,
 } from '../delegate'
-import { evidenceValue, plainWords } from '../plainWords'
+import { evidenceValue, feederAdvice, plainWords } from '../plainWords'
 import { AskButton, CardShell, DelegateButton } from '../shared/CardShell'
 import { Term } from '../shared/Term'
 import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
@@ -55,6 +55,9 @@ function Finding({ f, liveStudy }: { f: EhReviewFinding; liveStudy: boolean }) {
   const doLabels = doTexts.map((_, i) => i === 0 ? actionLabel(f)
     : `${actionLabel(f)} (step ${i + 1} of ${doTexts.length})`)
   const effect = f.actions?.[0]?.effect
+  // The only feeder to a must-stay-on bus: no re-run fixes it, so the card
+  // says what does (asset-investment walkthrough 2026-11-17, issue 04).
+  const advice = feederAdvice(f)
   // The card shows the title and the action in plain words; the review's own
   // prose (recommendation, effect) and its numbers go in "Why" (§5.8, gate B3).
   const technical: [string, string][] = [
@@ -80,6 +83,9 @@ function Finding({ f, liveStudy }: { f: EhReviewFinding; liveStudy: boolean }) {
             : <>This change: {plainWords(effect)}</>}
           {more > 0 ? `, then ${more} more step${more === 1 ? '' : 's'}, one at a time` : ''}.
         </p>
+      )}
+      {advice && (
+        <p data-testid={`hub-improve-advice-${f.id}`} className="text-muted">{advice}</p>
       )}
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" data-testid={`hub-improve-why-${f.id}`} aria-expanded={why}

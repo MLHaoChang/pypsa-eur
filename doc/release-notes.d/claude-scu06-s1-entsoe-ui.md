@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Library › Series can fetch a bidding zone's ENTSO-E day-ahead prices for a complete year. The zone comes from the site pin, with a picker when the pin does not settle it. A super-admin enters the access token there.
