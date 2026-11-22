@@ -11,6 +11,7 @@ import {
 } from '../../../api/businessCase'
 import BusinessCaseLines from './BusinessCaseLines'
 import { financeApi } from '../../../api/finance'
+import { useUIStore } from '../../../store/uiStore'
 import { expectAllButtonsNamed } from '../../../test-utils/accessibleName'
 
 vi.mock('../../../api/businessCase', async (importOriginal) => {
@@ -399,6 +400,10 @@ describe('a capex line with no terminal-value method (#21)', () => {
     const note = await screen.findByTestId('bc-terminal-missing')
     expect(note.textContent).toContain('Plant capex has no end-of-life value: choose a terminal-value method that can price it.')
     expect(within(note).getByTestId('bc-open-terminal').textContent).toContain('Terminal value')
+    // The link opens the finance panel and asks it to scroll to the terminal-value field.
+    useUIStore.setState({ terminalValueScrollRequest: false })
+    fireEvent.click(within(note).getByTestId('bc-open-terminal'))
+    expect(useUIStore.getState().terminalValueScrollRequest).toBe(true)
   })
   it('says it too when the finance inputs leave the method unset', async () => {
     finance()

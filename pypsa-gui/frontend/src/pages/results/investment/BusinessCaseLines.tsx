@@ -655,7 +655,7 @@ export default function BusinessCaseLines() {
         <p className="text-warn" data-testid="bc-terminal-missing">
           Plant capex has no end-of-life value: choose a terminal-value method that can price it.{' '}
           <button type="button" className="underline" data-testid="bc-open-terminal"
-            onClick={() => openPanel('commercial', 'economics')}>Terminal value ›</button></p>
+            onClick={() => { openPanel('commercial', 'economics'); useUIStore.getState().requestTerminalValueScroll() }}>Terminal value ›</button></p>
       )}
       <div className="flex flex-wrap gap-2 items-center">
         <button type="button" className="px-2 py-1 rounded bg-accent text-on-accent disabled:opacity-50"

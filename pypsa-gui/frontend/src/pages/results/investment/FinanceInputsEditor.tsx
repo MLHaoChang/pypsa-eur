@@ -367,6 +367,14 @@ function Form({ d, set, errors, report, assets }: {
   const debt = (d.debt ?? []) as DebtTranche[]
   const incentives = (d.incentives ?? []) as Incentive[]
   const tv = (d.terminal_value ?? {}) as TerminalValueRule
+  // "Terminal value ›" in the business case asks for this field: scroll to it once it is on screen.
+  const tvRequest = useUIStore(s => s.terminalValueScrollRequest)
+  const clearTvRequest = useUIStore(s => s.clearTerminalValueScrollRequest)
+  useEffect(() => {
+    if (!tvRequest) return
+    document.querySelector('[data-testid="finance-terminal-value"]')?.scrollIntoView?.({ block: 'center' })
+    clearTvRequest()
+  }, [tvRequest, clearTvRequest])
   const sp = d.solve_ppa as SolvePpa | null | undefined
   const io = (d.island_outage ?? null) as IslandOutage | null
   // Both blank: not stated (no default); otherwise the pair, the server judges it.
@@ -496,7 +504,7 @@ function Form({ d, set, errors, report, assets }: {
         <NumField label="Reserves interest rate" value={d.reserves_rate} errors={e('reserves_rate')}
                   onChange={v => set('reserves_rate', v)} />
       </fieldset>
-      <fieldset className="border border-border rounded p-2 space-y-1">
+      <fieldset className="border border-border rounded p-2 space-y-1" data-testid="finance-terminal-value">
         <legend className="font-semibold">Terminal value</legend>
         <SelectField label="Terminal value method" value={tv.method} errors={e('terminal_value.method')}
                      empty="(default: none)"
