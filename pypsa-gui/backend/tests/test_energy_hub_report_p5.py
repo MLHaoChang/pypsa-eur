@@ -26,6 +26,7 @@ from models.energy_hub import (
 )
 from services.adequacy import eh_report as R
 from services.adequacy import eh_study as S
+from services.adequacy import slack
 from services.solver_service import SolverConfig
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "eh_archetypes"
@@ -260,6 +261,43 @@ def test_slack_generators_are_not_in_the_carrier_totals():
     assert "dsr" not in sizing["by_carrier"]
     assert sizing["by_carrier"]["gas"] == pytest.approx(100.0)
     assert sizing["total_p_nom_mw"] == pytest.approx(125.0)
+
+
+# asset-walk-followups 01 (GK A F1-F3): eh_report reads slack.py's own sets, so
+# every current slack carrier and name prefix is dropped, plus the two aliases
+# eh_report always had and the solve-time lost-production slack (`__lost_`).
+_CARRIERS = ["load_shedding", "voll_slack", "demand_response", "dc_curtailment"]
+_REAL = {"gas": 100.0, "solar": 0.0, "wind": 25.0}
+
+
+def test_the_carrier_list_is_slack_pys_whole_set():
+    assert set(_CARRIERS) == slack.SLACK_CARRIERS
+
+
+def _with_slack(name: str, carrier: str) -> pypsa.Network:
+    n = _ens_network()
+    n.add("Generator", name, bus="b", carrier=carrier, p_nom=999.0,
+          p_nom_extendable=True, marginal_cost=1e4)
+    n.add("Generator", "pv_new", bus="b", carrier="solar", p_nom_extendable=True)
+    n._objective = 1.0
+    return n
+
+
+@pytest.mark.parametrize("carrier", [*_CARRIERS, "voll", "dsr"])
+def test_a_generator_on_a_slack_carrier_is_neither_a_total_nor_a_row(carrier):
+    sizing = R.sizing_summary_from_network(_with_slack("unit_b", carrier))
+    assert sizing["by_carrier"] == _REAL
+    assert sizing["total_p_nom_mw"] == pytest.approx(125.0)
+    assert [a["name"] for a in sizing["assets"]] == ["pv_new"]
+
+
+@pytest.mark.parametrize(
+    "name", ["__voll_l", "__vollb", "voll_slack_b", "__dsr_l", "__dccurt_cooling", "__lost_b"])
+def test_a_slack_named_generator_on_a_real_carrier_is_neither_a_total_nor_a_row(name):
+    sizing = R.sizing_summary_from_network(_with_slack(name, "gas"))
+    assert sizing["by_carrier"] == _REAL
+    assert sizing["total_p_nom_mw"] == pytest.approx(125.0)
+    assert [a["name"] for a in sizing["assets"]] == ["pv_new"]
 
 
 def test_a_sized_storage_with_no_duration_has_no_energy():
