@@ -30,8 +30,6 @@ function Errors({ list }: { list: string[] }) {
     {list.map(e => <li key={e}>{e}</li>)}</ul>
 }
 
-/** Shown on a field that still holds a Library template's fill-in marker. */
-const FILL_IN = 'fill in your own'
 /** A neutral chip: a state the user can read, not a problem (UX 27 on S2b). */
 const CHIP = 'border border-border rounded px-1 text-muted text-[10px]'
 
@@ -47,7 +45,6 @@ function IdsInput({ label, value, onChange }: {
   useEffect(() => { if (!focused) setText(shown) }, [shown]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <input aria-label={label} className={`${input} w-56`} value={text}
-           placeholder={marked ? FILL_IN : undefined}
            onFocus={() => setFocused(true)} onChange={e => setText(e.target.value)}
            onBlur={() => { setFocused(false)
                            if (marked && text === shown) return
@@ -97,7 +94,6 @@ function Field({ spec, contract, label, parties, series, set, illustrative = fal
     default:
       control = <input aria-label={name} className={`${input} w-40`}
                        value={isPlaceholder(v) ? '' : String(v ?? '')}
-                       placeholder={isPlaceholder(v) ? FILL_IN : undefined}
                        list={spec.kind === 'party' ? parties : undefined}
                        onChange={e => set(e.target.value)} />
   }
@@ -364,6 +360,7 @@ export default function ContractsEditor() {
   }
   const edit = (next: CommercialContract[], clearErrors = false) => {
     setContracts(next)
+    setFillRefusal(null)                               // the refusal named the list as it was
     // Errors are by position: an added or removed contract moves them (review #7).
     if (clearErrors) setErrors(new Map())
   }

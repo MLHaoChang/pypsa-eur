@@ -315,9 +315,9 @@ describe('ContractsEditor', () => {
     expect(added.textContent).toContain('Copied from Library item “eu-cfd” v1')
     for (const f of ['generator owner', 'counterparty', 'assets (generators)']) {
       const box = within(added).getByLabelText(`Contract cfd_7 ${f}`) as HTMLInputElement
-      expect([box.value, box.placeholder]).toEqual(['', 'fill in your own'])
-      // The prompt is visible text on the field's own line, not only a placeholder.
-      expect(box.closest('label')!.textContent).toContain('Fill in your own')
+      expect([box.value, box.placeholder]).toEqual(['', ''])
+      // The prompt is visible text on the field's own line, once.
+      expect(within(box.closest('label')!).getAllByText('Fill in your own')).toHaveLength(1)
     }
     expect(within(added).getByTestId('ce-unsaved').textContent).toBe('Not saved yet')
     expect(within(screen.getByTestId('ce-contract-0')).queryByTestId('ce-unsaved')).toBeNull()
@@ -339,6 +339,10 @@ describe('ContractsEditor', () => {
     expect(within(added).queryByRole('alert')).toBeNull()
     expect(screen.queryByRole('status')).toBeNull()
     expect(api.saveCommercial).not.toHaveBeenCalled()
+    // The next edit clears the refusal: it named the list as it was.
+    fireEvent.change(within(added).getByLabelText('Contract cfd_7 generator owner'), { target: { value: 'Wind BV ' } })
+    expect(screen.queryByTestId('ce-fill-refusal')).toBeNull()
+    fireEvent.change(within(added).getByLabelText('Contract cfd_7 generator owner'), { target: { value: 'Wind BV' } })
     // The stored list after the save holds the copy: its "Not saved yet" goes.
     api.saveCommercial.mockImplementation(async (patch) => {
       api.getCommercial.mockResolvedValue({ poc_link: 'import', site_party: 'site',
