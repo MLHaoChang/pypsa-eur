@@ -2282,6 +2282,17 @@ def test_a_terminal_life_on_a_composite_asset_is_refused():
         AssetFinance(
             "bess", "StorageUnit", 2.0, 15.0, parts=parts, terminal_lifetime_years=10.0
         )
+    # Refused for the parts' count, even where no part lifetime replaces them.
+    never = (AssetPart("a", 1.0, math.inf), AssetPart("b", 1.0, math.inf))
+    with pytest.raises(ValueError, match="is for one part, not 2"):
+        AssetFinance(
+            "kit",
+            "business_case",
+            2.0,
+            math.inf,
+            parts=never,
+            terminal_lifetime_years=9.0,
+        )
     # One explicit part takes it only where no part lifetime replaces the asset.
     inf = AssetPart("investment", 1.0, math.inf)
     one = AssetFinance(
