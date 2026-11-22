@@ -46,4 +46,14 @@ describe('Guided section heading', () => {
     expect(screen.getByTestId('assumptions-toggle').textContent).toBe('▸ Assumed · 2 not yet confirmed')
     expect(screen.getByTestId('assumptions-waiting').textContent).toContain('waits on these 2 defaults')
   })
+  it('the card state reads the rail\'s open-item count first, as the step rail does', () => {
+    const open = (code: string, severity: 'error' | 'warning') => ({ code, severity, source: 'validation' as const,
+      blocking: false, acknowledged: false, card: null, in_scope: true, message: code,
+      target: { section: 'commercial' as const, panel: null, component: null, entity: code, field: null } })
+    rows.commercial = { state: 'incomplete', summary: '3 contracts', items: [open('a', 'error'), open('b', 'warning'), open('c', 'warning')] }
+    expect(heading('commercial')).toBe('1 to do · 2 to check · 3 contracts')
+    cleanup()
+    rows.commercial = { state: 'complete', summary: null, items: [] }
+    expect(heading('commercial')).toBe('complete')
+  })
 })

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The operating reserve shares moved from Solver settings › Network › Off-grid constraints to their own Operating reserve block under Solver settings › Dispatch. The Results link ("Edit the reserve shares ›") and the infeasible-run card ("Open Operating reserve") land on it; the minimum renewable fraction stays under Network.

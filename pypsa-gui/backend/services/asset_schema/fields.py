@@ -825,6 +825,34 @@ def on_tonne_bus(n, component: str, name: str) -> bool:
     return size_bus is not None and _size_unit(n, size_bus, stock=False) in ("t", "t/h")
 
 
+def table_cost_units(n, component: str, *, keep=None) -> dict:
+    """What a table of one class needs to read each row's costs: ``rows`` maps every asset on a tonne bus to its
+    `cost_units` (unit and scale, as the card and the drawer show them); ``unreadable`` lists the assets whose
+    size bus is missing or has no known unit, which are neither tonne nor energy and so make no per-unit claim.
+    An asset on an energy bus is in neither. ``cost_fields`` are the class's cost columns that follow the bus. ``keep(component, names)`` drops transient names."""
+    from services.flow_service import _size_unit
+
+    col = _SIZE_BUS.get(component)
+    table = getattr(n, CLASS_ATTR.get(component, ""), None)
+    if col is None or table is None or col not in table.columns:
+        return {"rows": {}, "unreadable": [], "cost_fields": []}
+    names = list(table.index) if keep is None else keep(component, list(table.index))
+    seen: dict = {}
+    rows: dict[str, dict] = {}
+    unreadable: list[str] = []
+    for name in names:
+        bus = table.at[name, col]
+        if bus not in seen:
+            unit = _size_unit(n, bus, stock=False) if bus in n.buses.index else None
+            seen[bus] = "tonne" if unit in ("t", "t/h") else ("energy" if unit else None)
+        if seen[bus] == "tonne":
+            rows[str(name)] = cost_units(n, component, str(name))
+        elif seen[bus] is None:
+            unreadable.append(str(name))
+    return {"rows": rows, "unreadable": unreadable,
+            "cost_fields": [f.key for f in fields_for(component) if f.unit_display in _TONNE_COST_UNIT]}
+
+
 def cost_basis_of_row(n, component: str, row) -> str | None:
     """What the costs of a row (as it will be stored) are measured per: ``tonne`` or ``energy``, from the bus its
     size is measured on; None where the class has no bus size or the bus is unreadable. The server's check of the

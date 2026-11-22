@@ -50,7 +50,12 @@ def test_a_section_lists_exactly_what_its_heading_counts(client, tmp_projects_di
     for h in _section(flow, "assets")["holds"]:
         assert h["field"] in ("p_nom", "e_nom")
         assert (
-            h["unit"] in ({"p_nom": ("MW", "t/h"), "e_nom": ("MWh", "t")}[h["field"]])
+            h["unit"]
+            in (
+                {"p_nom": ("MW", "MW_NH3", "t/h"), "e_nom": ("MWh", "MWh_NH3", "t")}[
+                    h["field"]
+                ]
+            )
         )
         assert h["value"] is None or math.isfinite(h["value"])
     for h in _section(flow, "profiles")["holds"]:
@@ -297,7 +302,7 @@ def test_a_size_on_a_tonne_bus_is_in_tonnes(client, tmp_projects_dir, session_ct
             seen += 1
             assert h["unit"] == ("t" if h["component"] == "Store" else "t/h"), h
         else:
-            assert h["unit"] in ("MW", "MWh"), h
+            assert h["unit"] in ("MW", "MWh", "MW_NH3", "MWh_NH3"), h
     assert seen
     by = {h["entity"]: h["unit"] for h in _section(flow, "assets")["holds"]}
     assert by["mine"] == "t/h" and by["coarse_ore_stockpile"] == "t"

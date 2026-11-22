@@ -242,6 +242,20 @@ describe('IssuesPanel — infeasible card names the constraint (homer-parity 05)
     expect(useUIStore.getState().solverBlockRequest).toBe('offgrid')
   })
 
+  it('links an operating reserve hint to Solver settings › Dispatch › Operating reserve', async () => {
+    vi.mocked(simulationApi.preflight).mockResolvedValue({ ok: true, errors: 0, warnings: 0, issues: [] })
+    vi.mocked(networkApi.getCarriers).mockResolvedValue([])
+    useSimulationStore.getState().setLastFailure({
+      category: 'infeasible', title: 'No feasible solution', hint: 'Generic hint.', detail: 'infeasible',
+      constraint_hints: [{ constraint: 'Operating reserve', setting: 'reserve', text: 'needs 12 MW at 03:00; at most 9 MW.' }],
+    })
+    renderPanel()
+    await screen.findByTestId('failure-constraint-hint')
+    expect(screen.queryByRole('button', { name: /Open Off-grid constraints/ })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: /Open Operating reserve/ }))
+    expect(useUIStore.getState().solverBlockRequest).toBe('reserve')
+  })
+
   it('lists every hint, and adds nothing when the list is empty', async () => {
     vi.mocked(simulationApi.preflight).mockResolvedValue({ ok: true, errors: 0, warnings: 0, issues: [] })
     vi.mocked(networkApi.getCarriers).mockResolvedValue([])
