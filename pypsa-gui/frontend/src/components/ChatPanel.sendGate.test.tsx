@@ -387,3 +387,9 @@ describe('the start menu and readiness', () => {
     expect(await screen.findByTestId('chat-starter-chips')).toBeTruthy()
   })
 })
+
+// Issue 49: the shared key and model settings are only asked for by a super-admin.
+vi.mock('../auth/AuthProvider', async (orig) => ({
+  ...(await orig<typeof import('../auth/AuthProvider')>()),
+  useIsSuperAdmin: () => true,
+}))

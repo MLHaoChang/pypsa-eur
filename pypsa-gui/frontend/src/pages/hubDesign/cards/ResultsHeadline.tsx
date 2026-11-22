@@ -8,6 +8,7 @@
 // Each figure keeps its own source and state; when some are current and others
 // out of date, one line says which (GK B G1).
 import Kpi from '../../../components/Kpi'
+import { WhyThisNumber } from './WhyThisNumber'
 import { Skeleton } from '../../../components/Skeleton'
 import type { ResultStateKind } from '../../../components/ResultState'
 import { ChartFrame, chartFigure, ChartSourceProvider, CHART_TICK } from '../../../components/charts/chartTheme'
@@ -203,12 +204,14 @@ export function ReliabilityBullet({ lole, target, ci: range, stale, freshnessUnk
   )
 }
 
-export function ResultsHeadline({ reliability, cost, ci, freshnessUnknown = false }: {
+export function ResultsHeadline({ reliability, cost, costEur = null, ci, freshnessUnknown = false }: {
   reliability: ChapterInputs['reliability']
   /** The study ran, but the server could not tell whether the network changed since (GK B F1). */
   freshnessUnknown?: boolean
   /** The study's cost tile, unchanged (P24-FE gate B1), placed with the figures. */
   cost: React.ReactNode
+  /** The study's design cost, for its "Why this number". */
+  costEur?: number | null
   ci: [number, number] | null
 }) {
   const { tiles } = useChapterTiles(reliability)
@@ -226,9 +229,9 @@ export function ResultsHeadline({ reliability, cost, ci, freshnessUnknown = fals
   return (
     <section aria-label="Headline figures" data-testid="hub-results-headline" className="flex flex-col gap-2">
       <div className="grid grid-cols-2 gap-2">
-        {rel && <TileFigure tile={rel} testId="hub-results-reliability" studyBanner={reliability.stale === true}
-          dimmed={freshnessUnknown} />}
-        {cost}
+        {rel && <div className="flex flex-col gap-1 self-start"><TileFigure tile={rel} testId="hub-results-reliability" studyBanner={reliability.stale === true}
+          dimmed={freshnessUnknown} /><WhyThisNumber figure="expected_shortfall" /></div>}
+        {cost && <div className="flex flex-col gap-1 self-start">{cost}<WhyThisNumber figure="design_cost" value={costEur} /></div>}
         {npv && <TileFigure tile={npv} testId="hub-results-npv" />}
         {/* The tile's place is kept while the figures load, so the grid does not move (as Expert's strip). */}
         {headline.isLoading ? <Skeleton className="min-h-[96px]" /> : (

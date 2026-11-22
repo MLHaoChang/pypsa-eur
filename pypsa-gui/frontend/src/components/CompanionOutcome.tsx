@@ -5,6 +5,7 @@ import { getOwnedCheckedAnswer, type OwnedCheckedAnswer } from '../api/checkedAn
 import { CheckedEvidenceCard } from './CheckedEvidenceCard'
 import { CheckedChart } from './CheckedChart'
 import ChatMarkdown from './ChatMarkdown'
+import { hasWarning, WARNED_LABEL } from '../utils/answerAssurance'
 
 /** The one word for an answer the gate did not check; the chat panel's turn mark uses it too. */
 export const ANSWER_NOT_CHECKED = 'Answer not checked'
@@ -29,6 +30,7 @@ function afterLastUser(messages: readonly ChatMessage[]): readonly ChatMessage[]
 function checkedLabel(answer: OwnedCheckedAnswer): string {
   const receipt = answer.receipt
   if (receipt.result_slots?.some(s => s.disposition === 'needs_clarification')) return 'Clarification needed'
+  if (hasWarning(receipt)) return WARNED_LABEL
   if (receipt.request_complete === true) return 'Requested results checked'
   if (receipt.checked_block_ids.length === 0) return 'Requested results unavailable'
   return 'Checked evidence and limitations'
@@ -95,6 +97,8 @@ function OutcomeCard({ message, checked, failed, download, docked }: {
     className={`w-80 max-w-[calc(100vw-3rem)] rounded-xl border border-border bg-bg-2 p-3 shadow-lg text-xs text-text ${
       docked ? 'max-h-[60vh] overflow-y-auto' : ''}`}>
     <p className="font-medium" role="status">{label}</p>
+    {answer?.definition_changed && <p className="mt-1 break-words text-[10px] text-muted"
+      data-testid="companion-definition-changed">The definition changed since this was checked.</p>}
     {answer ? <p className="mt-1 break-words text-[10px] text-muted">
       Project: {answer.project_id} · {answer.receipt.request_scope?.retain ? 'Retained evidence' : 'Recorded answer'}
     </p> : !checked && <p className="mt-1 break-words text-[10px] text-muted">

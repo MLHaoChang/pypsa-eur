@@ -36,8 +36,13 @@ def test_one_profile_serves_the_four_grid_templates_with_no_params_or_levers():
     assert p["params"]["required"] == [] and p["params"]["ask"] == []
     assert p["tunable"] == [] and p["envelope"]["edits"] == [] and "eh_study" not in p
     assert "skip" in p["stages"]["explore"]
-    # GK B SH-15 A1: no KPI and no hand-off rule reads the PF-overwritten frames (issue 50).
-    assert p["kpis"] == [] and p["stages"]["handoff"]["rules"] == []
+    # Issue 50 (PF-SAVE-1): the live frames keep the LP dispatch, so the headline KPIs,
+    # the hand-off read-back and the report are back; nothing is listed as missing.
+    assert [k["id"] for k in p["kpis"]] == ["total_cost", "emissions"]
+    assert [r["id"] for r in p["stages"]["handoff"]["rules"]] == ["ho.kpis_read"]
+    assert "skip" not in p["stages"]["report"] and p["missing_tools"] == []
+    assert p["chapters"] == ["headline_results", "dispatch", "load_flow"]
+    assert {"tool": "generate_report"} in p["envelope"]["runs"]
 
 
 def test_setup_switches_load_flow_on_with_the_one_setting_the_grant_admits():
@@ -344,6 +349,12 @@ def test_a_pf_older_than_the_inputs_is_not_evaluated(direct):
     assert out["verdict"] == "not_evaluated" and "re-run" in out["reason"]
 
 
+def test_a_pf_with_no_recorded_edit_counter_is_not_evaluated(direct):
+    """GK B 65: a None counter never matches edit counter 0."""
+    out = direct("grid.pf.loading", _ctx(_net(), ac_pf_network_revision=None))
+    assert out["verdict"] == "not_evaluated" and "re-run" in out["reason"]
+
+
 def test_an_unrated_branch_is_named_never_assumed(direct):
     out = direct("grid.pf.loading", _ctx(_net(rating=0.0)))
     assert out["verdict"] == "not_evaluated" and "l1" in out["reason"]
@@ -513,9 +524,11 @@ def test_the_lp_condition_is_optimal_only_for_the_known_pf_suffixes(
 
 
 def _fresh_ctx(**over):
+    """A flow keeps the LP's record beside its own (`run_ac_pf_stage`)."""
     n = _net()
     ctx = _ctx(n, **over)
-    ctx.solver_state.setdefault("lopf_results", None)
+    flowed = ctx.solver_state.get("ac_pf_results") is not None
+    ctx.solver_state.setdefault("lopf_results", {} if flowed else None)
     return ctx
 
 
@@ -540,13 +553,14 @@ def fingerprints(monkeypatch):
 from harness import calculations as _calc  # noqa: E402
 
 
-def test_a_pf_state_is_current_only_after_pf_and_only_for_the_solves_own_flow(
+def test_a_pf_state_is_current_after_pf_and_to_an_lp_only_reader(
     fingerprints,
 ):
     ctx = _fresh_ctx(condition="lopf+ac_pf_ok")
     fingerprints(ctx)
     assert _calc.solve_matches_inputs(ctx, after_pf=True) is True
-    assert _calc.solve_matches_inputs(ctx) is False  # the LP-only guard is unchanged
+    # Issue 50 (PF-SAVE-1): the live network keeps the LP's tables after the flow.
+    assert _calc.solve_matches_inputs(ctx) is True
 
 
 @pytest.mark.parametrize(
@@ -561,6 +575,10 @@ def test_a_pf_state_is_current_only_after_pf_and_only_for_the_solves_own_flow(
             "condition": "lopf+ac_pf_ok",
             "ac_pf_network_revision": 4,
         },  # the flow ran on another edit counter
+        {
+            "condition": "lopf+ac_pf_ok",
+            "ac_pf_network_revision": None,
+        },  # no recorded edit counter: not current at counter 0 (GK B 65)
         {"condition": "lopf+ac_pf_ok", "status": "running"},
     ],
 )
@@ -570,15 +588,15 @@ def test_each_part_of_the_pf_freshness_guard_refuses_on_its_own(fingerprints, ov
     assert _calc.solve_matches_inputs(ctx, after_pf=True) is False
 
 
-def test_a_failed_flow_leaves_the_lp_current_only_for_a_profile_that_reads_the_pf(
+def test_a_failed_flow_leaves_the_lp_current(
     fingerprints,
 ):
     """GK B SH-15 (1): the flow's failure feeds only grid.pf.converged (the stage restores the
-    LP's frames), so with `after_pf` the LP is still current; the LP-only guard is unchanged."""
+    LP's frames), so the LP is still current, with `after_pf` and (issue 50) without."""
     ctx = _fresh_ctx(condition="optimal; ac_pf_failed: singular", pf=False)
     fingerprints(ctx)
     assert _calc.solve_matches_inputs(ctx, after_pf=True) is True
-    assert _calc.solve_matches_inputs(ctx) is False
+    assert _calc.solve_matches_inputs(ctx) is True
 
 
 @pytest.mark.parametrize(
@@ -591,6 +609,36 @@ def test_without_a_flow_only_the_lp_or_a_failed_flow_is_current(
     ctx = _fresh_ctx(condition=condition, pf=False)
     fingerprints(ctx)
     assert _calc.solve_matches_inputs(ctx, after_pf=True) is False
+
+
+@pytest.mark.parametrize("after_pf", [False, True])
+def test_a_flowed_record_without_the_lps_is_not_current(fingerprints, after_pf):
+    """GK B M2: a record that kept only the flow's tables (a legacy save) has no
+    LP to read: the live tables may be the flow's."""
+    ctx = _fresh_ctx(condition="lopf+ac_pf_ok", lopf_results=None)
+    fingerprints(ctx)
+    assert _calc.solve_matches_inputs(ctx, after_pf=after_pf) is False
+
+
+def test_an_lp_record_without_a_flow_is_not_current(fingerprints):
+    ctx = _fresh_ctx(condition="optimal", pf=False, lopf_results={})
+    fingerprints(ctx)
+    assert _calc.solve_matches_inputs(ctx) is False
+
+
+@pytest.mark.parametrize(
+    "stale",
+    ["assistant_solve_input_fingerprint", "assistant_solve_exact_input_fingerprint"],
+)
+@pytest.mark.parametrize("condition, pf", [("optimal", False), ("lopf+ac_pf_ok", True)])
+def test_each_fingerprint_alone_makes_the_solve_not_current(
+    fingerprints, stale, condition, pf
+):
+    ctx = _fresh_ctx(condition=condition, pf=pf)
+    fingerprints(ctx)
+    assert _calc.solve_matches_inputs(ctx) is True, "fixture: current"
+    ctx.network.meta[stale] = "old"
+    assert _calc.solve_matches_inputs(ctx) is False
 
 
 def test_a_changed_input_is_never_current_after_a_pf(fingerprints):
@@ -863,19 +911,19 @@ def test_cd_the_investment_case_fact_reads_a_pre_change_solve_not_current(pf_pro
 # ── GK B (61) item 2: an LP-only reader never takes the flow's frames as current ───
 
 
-def test_a_flow_rewritten_network_is_not_current_to_an_lp_only_reader(pf_project):
-    """`solve_freshness` without `after_pf` (retained results, the KPI read-back, the
-    network chapters, the investment-case fact) reads the flow's state not current."""
+def test_a_flowed_network_is_current_to_an_lp_only_reader(pf_project):
+    """Issue 50 (PF-SAVE-1): the flow leaves the LP's tables live, so `solve_freshness`
+    without `after_pf` (retained results, the KPI read-back, the network chapters, the
+    investment-case fact) reads the solve current after its flow."""
     from services import ic_counterfactual, workflow_tools
 
     ctx, record = pf_project
     record(False, flowed=True)
     assert workflow_tools.solve_freshness(ctx, after_pf=True)["results_current"] is True
-    assert workflow_tools.solve_freshness(ctx)["results_current"] is False
+    assert workflow_tools.solve_freshness(ctx)["results_current"] is True
     body = {"status": "done", "report": {"present": True, "stale": False}, "flags": []}
     fact = ic_counterfactual.read(ctx, lambda fn: body)
-    assert fact["state"] == ic_counterfactual.NOT_RUN
-    assert "results_not_current" in fact["reasons"]
+    assert "results_not_current" not in fact.get("reasons", []), fact
 
 
 # ── each fail-closed guard of the PF reader has its own red case ───
@@ -977,4 +1025,30 @@ def test_n1_needs_a_completed_optimal_solve(direct, status, condition):
     out = direct("grid.n1.secured", ctx)
     assert (
         out["verdict"] == "not_evaluated" and out["facts"][0]["value"] == "n1_no_solve"
+    )
+
+
+@pytest.mark.parametrize("template", ["3bus", "ieee14", "belgium", "ieee39"])
+def test_each_grid_template_has_the_grid_scope_preset(template):
+    """Study harness 51: a grid template's run and scope cards show the grid study with its
+    load flow, not the EH generic preset's reliability study and investment case."""
+    from services import flow_scope, run_profiles
+
+    scope = run_profiles.scope_for({"id": template})
+    assert scope["preset"] == template
+    assert scope["cards"] == {
+        "capacity": ["sizing", "dispatch"],
+        "commercial": ["tariffs"],
+        "handoff": ["reports"],
+        "grid": ["load_flow"],
+    }
+    assert "grid" not in scope["skipped"] and "reliability" in scope["skipped"]
+    assert (
+        flow_scope.option_status("grid", "load_flow", has_template=True)[0]
+        == flow_scope.AVAILABLE
+    )
+    assert run_profiles.GRID_TEMPLATES == tuple(
+        t
+        for t, p in flow_scope.TEMPLATE_PRESETS.items()
+        if p.get("grid") == ("load_flow",)
     )

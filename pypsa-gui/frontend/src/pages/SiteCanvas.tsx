@@ -1281,7 +1281,7 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
         {contextFailure !== null && (
           <span data-testid="context-status">
             {CONTEXT_UNREACHABLE_COPY}{' '}
-            <button type="button" data-testid="context-retry" className="text-accent hover:underline disabled:opacity-50 disabled:no-underline"
+            <button type="button" data-testid="context-retry" className="text-link hover:underline disabled:opacity-50 disabled:no-underline"
               disabled={readOnly || contextBusy}
               onClick={() => { forceContextRef.current = true; setContextNonce(n => n + 1) }}>
               › Retry

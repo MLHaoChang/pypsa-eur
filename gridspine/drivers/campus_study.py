@@ -220,6 +220,13 @@ IBR_CAPABILITY_CSV = "campus_ibr_capability.csv"
 IBR_Q_CURVE_CSV = "campus_ibr_q_curve.csv"
 #: What the profile requires that a steady-state study cannot show.
 REPORTED_REQUIREMENTS_JSON = "campus_reported_requirements.json"
+#: The voltage-control step (plan GC-02): the PoC P-Q chart across voltage, the Q(V) droop in the load flow
+#: and their scorecard rows.
+POC_PQ_CSV = "campus_poc_pq.csv"
+VOLTAGE_CONTROL_LF_CSV = "campus_voltage_control_lf.csv"
+VOLTAGE_CONTROL_CSV = "campus_voltage_control.csv"
+#: How the voltage-control step pairs IEC 60909's c with S_k'' (GK A2, GC-02 V1), stated in its droop row.
+C_BRACKET_NOTE = "c_max on S_k''min / c_min on S_k''max (conservative bracket, not the IEC 60909 pairing)"
 INVESTMENT_CSV = "campus_investment.csv"
 COST_CSV = "campus_cost.csv"
 INVESTED_YAML = "campus_invested.yaml"
@@ -1239,6 +1246,86 @@ def harmonic_scan_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(
     return study
 
 
+# --- the SSTI and sub-synchronous screens (grid-compliance GC-08, TRGC 19, 20) ---
+
+SSTI_UIF_CSV = "campus_ssti_uif.csv"
+SUBSYNC_SCAN_CSV = "campus_subsync_scan.csv"
+SUBSYNC_RESONANCE_CSV = "campus_subsync_resonance.csv"
+#: The worst verdict first: a flag outranks a missing input, which outranks a clear.
+SUBSYNC_VERDICT_ORDER = ("flag", "check", "not evaluated", "clear")
+
+
+@dataclasses.dataclass
+class SstiScreens:
+    uif: object                 # ssti_uif.UifStudy
+    subsync: object             # subsync_scan.SubsyncStudy
+    subsync_verdict: str        # the worst of the series-resonance rows (``SUBSYNC_VERDICT_ORDER``)
+    threshold: float            # the UIF threshold judged on (the profile's, or the assumed default)
+    uif_threshold: list         # the profile's citation of ``ssti_uif_threshold`` ([] without one)
+    clearance_hz: float         # the torsional clearance judged on (the profile's, or the assumed default)
+    subsync_clearance: list     # the same for ``subsync_torsional_clearance_hz``
+
+
+def ssti_screens_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> SstiScreens:
+    """The SSTI unit-interaction-factor screen (``static/ssti_uif.py``) and the
+    sub-synchronous impedance scan from the PCC (``static/subsync_scan.py``) of
+    a prepared run, written to ``campus_ssti_uif.csv``,
+    ``campus_subsync_scan.csv`` and ``campus_subsync_resonance.csv``.
+
+    The campus's series capacitors (``Campus.series_caps``, GC-01b) enter the
+    scan. Seen from the PCC a campus capacitor only adds impedance to an open
+    branch, so each one is also scanned from its far-side bus
+    (``series_caps.far_side``), where the units behind it see grid,
+    transformer and capacitor in series. Every row carries the ``bus`` it was
+    scanned from, and the verdict is the worst over all rows. A capacitor
+    scanned with no crossing reads ``clear`` within the scan band. Without
+    any capacitor the series verdict reads ``not evaluated`` (grid-side series
+    compensation needs the TSP's data). No torsional mode is entered.
+    Screening only: the binding answer is the EMT study."""
+    from gridspine.static import harmonic_scan as hs
+    from gridspine.static import series_caps as SC
+    from gridspine.static import ssti_uif as su
+    from gridspine.static import subsync_scan as ss
+
+    run_dir = Path(run_dir)
+    campus = load_run_campus(run_dir)
+    code = load_grid_code(profile, extra_dirs=profile_dirs)
+    threshold, t_cited = su.threshold_from_profile(code)
+    uif = su.campus_uif(campus, threshold, assumed=bool(t_cited) and t_cited[0]["source"] != "code")
+    bus, cases, notes = hs.campus_cases(campus)
+    clearance, c_cited = ss.clearance_from_profile(code)
+    assumed = bool(c_cited) and c_cited[0]["source"] != "code"
+    net, caps = campus.net, campus.series_caps
+    far = [(c, b) for c, b in SC.far_side(net, bus) if b != bus]
+    points = [bus] + [b for _, b in far]
+    studies = [(b, ss.subsync_scan(net, b, cases, series_caps=caps, clearance_hz=clearance,
+                                   clearance_assumed=assumed, notes=notes))
+               for b in dict.fromkeys(points)]
+    name = net.bus["name"].astype(str)
+    scan = pd.concat([s.scan.assign(bus=name[b]) for b, s in studies], ignore_index=True)
+    resonance = pd.concat([s.resonance.assign(bus=name[b]) for b, s in studies], ignore_index=True)
+    # each far-side bus with no series crossing reads clear, naming the capacitors scanned from it
+    crossed = set(resonance.loc[resonance["kind"] == ss.SERIES, "bus"])
+    band = f"{ss.F_MIN_HZ:g}-{float(net.f_hz) - ss.F_MIN_HZ:g} Hz"
+    # the same clearance, assumed flag and label as the scan's own rows
+    base = resonance.iloc[0][["clearance_hz", "assumed", "label"]].to_dict() if len(resonance) else {}
+    clear = [{"case": case, "kind": ss.SERIES, "verdict": "clear", "bus": name[b], **base,
+              "note": f"clear in the {band} scan band: series capacitor(s) "
+                      f"{sorted(c for c, fb in far if fb == b)} scanned, no series resonance"}
+             for b, _ in studies[1:] if name[b] not in crossed for case in cases]
+    if clear:
+        resonance = pd.concat([resonance, pd.DataFrame(clear)], ignore_index=True)
+    sub = ss.SubsyncStudy(scan=scan, resonance=resonance, notes=studies[0][1].notes)
+    series = sub.resonance[sub.resonance["kind"] == ss.SERIES]["verdict"]
+    verdict = next(v for v in SUBSYNC_VERDICT_ORDER if v in set(series)) if len(series) else "not evaluated"
+    for fname, df in ((SSTI_UIF_CSV, uif.rows), (SUBSYNC_SCAN_CSV, sub.scan), (SUBSYNC_RESONANCE_CSV, sub.resonance)):
+        _write_text_atomic(run_dir / fname, df.to_csv(index=False))
+    return SstiScreens(uif=uif, subsync=sub, subsync_verdict=verdict,
+                       threshold=su.DEFAULT_THRESHOLD if threshold is None else threshold, uif_threshold=t_cited,
+                       clearance_hz=ss.DEFAULT_CLEARANCE_HZ if clearance is None else clearance,
+                       subsync_clearance=c_cited)
+
+
 # --- the P–V/Q–V margin at the PCC (study harness issue 18) ---------------
 
 VOLTAGE_STABILITY_CSV = "campus_voltage_stability.csv"
@@ -1386,6 +1473,67 @@ def voltage_stability_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_di
               "source EMF: 1.0 pu, or the period's lowest converged PCC voltage when lower"]
     return {"ledger": ledger, "notes": notes, "basis": SCREENING_BASIS, "sk_min_mva": sk, "rx_min": rx,
             "c": c, "vn_kv": vn}
+
+
+def voltage_control_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> dict:
+    """The plant's voltage-control strategy on a prepared run (plan GC-02,
+    ``static/voltage_control.py``): the PoC P-Q chart across voltage
+    (``campus_poc_pq.csv``), the profile's Q(V) droop in the load flow at
+    every selected hour, intact and N-1, on the S_k''min and S_k''max grid
+    equivalents (``campus_voltage_control_lf.csv``), and the scorecard rows
+    (``campus_voltage_control.csv``). A setting the profile does not state
+    makes its row "unknown"; a normally open tie or a PCC without S_k''
+    leaves the droop unrun, with the reason in its row."""
+    import copy
+
+    from gridspine.static.voltage_control import (
+        OUTCOME_COLUMNS,
+        droop_from,
+        grid_equivalent,
+        outcome_rows,
+        poc_pq_chart,
+        scorecard_rows,
+    )
+
+    run_dir = Path(run_dir)
+    code = load_grid_code(profile, extra_dirs=profile_dirs)
+    hourly, pcc = campus_tables(run_dir)
+    campus = load_run_campus(run_dir)
+    p_ref = _p_ref(campus, pcc)[0]
+    chart = poc_pq_chart(campus, code, p_ref)
+    control, why = droop_from(code, campus)
+    if control is not None and campus.tie_normally_open:
+        control, why = None, "the tie to the grid is normally open: no grid voltage to droop against"
+    if control is not None and _sk_source(yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text()),
+                                          _unchanged_project(run_dir))[1]:
+        control, why = None, NO_SK_MIN + ": the droop needs the grid's strength, not the typical fallback"
+    if control is not None:
+        try:                                    # the grid's strength, both equivalents, before any hour runs
+            for grid in ("min", "max"):
+                grid_equivalent(copy.deepcopy(campus.net), grid)
+        except ContractError as e:
+            control, why = None, str(e)
+    lf_rows = []
+    if control is not None:
+        selection = selected_hours(run_dir)
+        for period, hour in selection[["period", "hour"]].itertuples(index=False):
+            period, hour = int(period), int(hour)
+            rows = hourly[(hourly["period"] == period) & (hourly["hour"] == hour)]
+            for grid in ("min", "max"):
+                flows = solve_cases(campus, rows, control=dataclasses.replace(control, grid=grid))
+                lf_rows += outcome_rows({"period": period, "hour": hour}, grid, flows)
+    outcomes = pd.DataFrame(lf_rows, columns=list(OUTCOME_COLUMNS))
+    eg = campus.net.ext_grid.iloc[0]
+    grid_note = (f"S_k''min {float(eg['s_sc_min_mva']):g} MVA (R/X {float(eg['rx_min']):g}), "
+                 f"S_k''max {float(eg['s_sc_max_mva']):g} MVA (R/X {float(eg['rx_max']):g}); "
+                 f"{C_BRACKET_NOTE}")
+    if float(eg["s_sc_max_mva"]) == float(eg["s_sc_min_mva"]):
+        grid_note += ": no separate S_k''max entered, so the strong grid differs from the weak one only by c"
+    card = scorecard_rows(code, chart, outcomes, why, grid_note=grid_note)
+    _write_text_atomic(run_dir / POC_PQ_CSV, chart.to_csv(index=False))
+    _write_text_atomic(run_dir / VOLTAGE_CONTROL_LF_CSV, outcomes.to_csv(index=False))
+    _write_text_atomic(run_dir / VOLTAGE_CONTROL_CSV, card.to_csv(index=False))
+    return {"chart": chart, "outcomes": outcomes, "scorecard": card, "p_ref_mw": p_ref}
 
 
 # --- GC-03: planning criteria and grid strength in the campus run (TRGC 15) ---

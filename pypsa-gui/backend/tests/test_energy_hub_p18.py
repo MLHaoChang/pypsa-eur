@@ -117,6 +117,9 @@ def test_the_post_hands_dtc_attribution_to_the_driver(
 
     monkeypatch.setattr("services.adequacy.eh_study.run_eh_study", fake_run)
     install_network(_feeder_hub())
+    # The study start refuses a missing VOLL (template-e2e 06).
+    from services.pypsa_service import PyPSAService
+    PyPSAService.get_solver_state()["solver_config"].voll = 5000.0
     r = client.post("/api/results/eh_study", json={
         "archetype": "weak_flexible", "dtc_attribution": "per_load"})
     assert r.status_code in (200, 202), r.text

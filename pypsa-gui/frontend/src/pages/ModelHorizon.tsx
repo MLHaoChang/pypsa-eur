@@ -8,11 +8,11 @@ import { simulationApi } from '../api/simulation'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { PageHeader, RowGrid, StatCard } from '../components/PageKit'
-import type { Load } from '../api/types'
+import type { Load, SolverConfig } from '../api/types'
 import {
   resolutionLabel, horizonRangeLabel,
   visibleSteps, isHorizonUnset, stepSummary,
-  type WeightingRow, type HorizonStepId, type HorizonSummaryContext, stepHoursForFreq} from './modelHorizonModel'
+  type WeightingRow, type HorizonStepId, type HorizonSummaryContext, stepHoursForFreq, loadScalerEdit, loadGrowthEdit} from './modelHorizonModel'
 import { NextSectionButton } from '../components/NextSectionButton'
 import { openSectionInExpert } from '../layout/flowNavigation'
 import { StepShell, STEP_LABELS } from './modelHorizon/StepShell'
@@ -349,11 +349,26 @@ export default function ModelHorizon() {
   // ('electrical' / 'hydrogen' / 'heat' / passthrough), inner key = period
   // year (str). Wholesale PUT — caller sends the full nested map.
   const updateLoadScalersByCarrier = useMutation({
-    mutationFn: (next: Record<string, Record<string, number>>) =>
-      simulationApi.updateSolverConfig({ load_scalers_by_carrier: next }),
+    mutationFn: (next: ReturnType<typeof loadScalerEdit>) => simulationApi.updateSolverConfig(next),
     onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'solverConfig') }),
-    onError: (e: { response?: { data?: { detail?: string } } }) =>
-      toast.error(e.response?.data?.detail ?? 'Failed to update per-carrier load scaler'),
+    // With a rate stored the PUT re-derives, so a 422 detail is the growth
+    // refusal's {code, error_kind, message}, not a string.
+    onError: (e: unknown) =>
+      toast.error(growthErrorMessage(e) ?? 'Failed to update per-carrier load scaler'),
+  })
+
+  const growthErrorMessage = (e: unknown): string | null => {
+    const d = (e as { response?: { data?: { detail?: { message?: string } | string } } } | null)
+      ?.response?.data?.detail
+    return d == null ? null : typeof d === 'string' ? d : d.message ?? null
+  }
+  // Load growth, % per year (homer-parity 04a): the server derives the
+  // multipliers from it and answers 422 with a plain-words message.
+  const updateLoadGrowth = useMutation({
+    mutationFn: (body: Partial<SolverConfig>) => simulationApi.updateSolverConfig(body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'solverConfig') }),
+    // The refusal shows beside the field (StepPeriodEconomics' growth row).
+    onError: () => {},
   })
 
   // Pull loads to detect which carriers exist in the network. The per-carrier
@@ -810,7 +825,7 @@ export default function ModelHorizon() {
           <button
             type="button"
             onClick={() => setView('summary')}
-            className="self-start text-[11px] text-accent hover:underline"
+            className="self-start text-[11px] text-link hover:underline"
           >← Back to summary</button>
           <StepShell
             steps={steps}
@@ -900,22 +915,19 @@ export default function ModelHorizon() {
           loadScalersByCarrier={cfg?.load_scalers_by_carrier ?? {}}
           legacyLoadScalers={cfg?.load_scalers ?? {}}
           onLoadScalerChange={(carrier, period, value) => {
-            // Wholesale PUT: clone the nested map, ensure the per-carrier
-            // slot exists, write the new value. 1.0 entries are dropped so
-            // the server-side map stays compact (anything missing falls
-            // back to legacy load_scalers or 1.0 anyway).
-            const next: Record<string, Record<string, number>> = {}
-            for (const [c, m] of Object.entries(cfg?.load_scalers_by_carrier ?? {})) {
-              next[c] = { ...m }
-            }
-            const slot = next[carrier] ?? {}
-            if (value === 1) delete slot[String(period)]
-            else slot[String(period)] = value
-            if (Object.keys(slot).length === 0) delete next[carrier]
-            else next[carrier] = slot
-            updateLoadScalersByCarrier.mutate(next)
+            // Wholesale PUT of the nested map (`loadScalerEdit`): a typed
+            // cell leaves the derived list, `null` returns it to the rate.
+            updateLoadScalersByCarrier.mutate(loadScalerEdit(cfg ?? {}, carrier, period, value))
           }}
           loadScalerPending={updateLoadScalersByCarrier.isPending}
+          loadGrowthPctPerYear={cfg?.load_growth_pct_per_year ?? {}}
+          loadGrowthBaseYear={cfg?.load_growth_base_year ?? null}
+          loadScalersDerived={cfg?.load_scalers_derived ?? {}}
+          onLoadGrowthChange={(carrier, ratePct) =>
+            updateLoadGrowth.mutate(loadGrowthEdit(cfg ?? {}, carrier, ratePct, periods))}
+          onLoadGrowthBaseYearChange={year => updateLoadGrowth.mutate({ load_growth_base_year: year })}
+          loadGrowthPending={updateLoadGrowth.isPending || updateLoadScalersByCarrier.isPending}
+          loadGrowthError={growthErrorMessage(updateLoadGrowth.error)}
           capexBudgetPerPeriod={cfg?.capex_budget_per_period ?? {}}
           onCapexBudgetChange={(period, valueEur) => {
             const next: Record<string, number> = { ...(cfg?.capex_budget_per_period ?? {}) }

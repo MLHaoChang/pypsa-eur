@@ -26,6 +26,7 @@
 // shows as the new run's: it re-reads the state, warns while the backend says a
 // run is going on, and says once it ends whether the results it saved are the
 // run asked for.
+import GridComplianceSection from '../components/GridComplianceSection'
 import { assetLabel } from './results/investment/financeModel'
 import { SiteTypeSelect } from '../components/reliabilityGoal/SiteTypeSelect'
 import { useEffect, useRef, useState } from 'react'
@@ -43,6 +44,7 @@ import { openPanel } from './results/openPanel'
 import { settingsFromDraft, useCampusDraft, useCampusRunNotice, type LostRun } from '../store/campusSettingsDraft'
 import { isNotSolvedRefusal, NotSolvedRefusal } from './results/NotSolved'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
+import EmptyState from '../components/EmptyState'
 import { ConnectionLimits } from '../components/gridReadiness/ConnectionLimits'
 import { SiteConnectionEditor } from './economics/SiteConnectionLink'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
@@ -284,6 +286,7 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
         <DcBackupSection name={name} />
         <DcArchitectureSection name={name} />
         <IntentComparisonSection name={name} gridCode={state.data.settings?.profile ?? null} />
+        <GridComplianceSection name={name} />
       </>)}
       {part === 'results' && (state.data.results
         ? <ResultsSection state={state.data} pending={pending} />
@@ -854,19 +857,19 @@ export function CampusResultsTab({ name, part }: { name: string; part: Exclude<C
       ? CAMPUS_RUN_POLL_MS : false),
   })
   if (state.isError) {
-    return <p className="text-[12px] text-muted" data-testid="campus-tab-state">
-      {isOtherKind(state.error)
-        ? 'The campus electrical study is for capacity-expansion (hub) projects.'
-        : errorText(state.error)}
-    </p>
+    return isOtherKind(state.error)
+      ? <EmptyState testId="campus-tab-state" title="Not available for this project">
+          The campus electrical study is for capacity-expansion (hub) projects.
+        </EmptyState>
+      : <p className="text-[12px] text-muted" data-testid="campus-tab-state">{errorText(state.error)}</p>
   }
   if (!state.data) return <p className="text-[12px] text-muted" data-testid="campus-tab-state">Loading…</p>
   if (!state.data.results) {
     return (
-      <div data-testid="campus-tab-state" className="text-[12px] text-muted space-y-2">
-        <p>Not run yet: the grid study has not produced results for this project.</p>
-        <Btn onClick={() => openPanel('scenarios', 'campusStudy')}>Run the grid checks in Grid study ›</Btn>
-      </div>
+      <EmptyState testId="campus-tab-state" title="Not run yet"
+        action={{ label: 'Run the grid checks in Grid study ›', onClick: () => openPanel('scenarios', 'campusStudy') }}>
+        The grid study has not produced results for this project.
+      </EmptyState>
     )
   }
   const pending = state.data.run_in_progress === true || isActiveRun(state.data.run_job)

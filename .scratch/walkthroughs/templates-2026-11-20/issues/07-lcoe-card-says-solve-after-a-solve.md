@@ -20,3 +20,7 @@ The card sends the user back to the step they just finished, and the two modes g
 ## Suggested fix
 
 Say what is actually missing (the investment case, and the input it needs) and link to it; use the same sentence in Guided and Expert.
+
+## Comments
+
+- Seen again 2026-11-21 (template walk, master 6b421b06): Ammonia Guided Results, right after the study: "LCOE (real) — Not run yet. To get it, solve the project in Readiness and run, then run its investment case." On the Expert side LCOE (real) says "Not available for this run — Checked figures are off on this installation"; both are install-state wording for a user who just ran.

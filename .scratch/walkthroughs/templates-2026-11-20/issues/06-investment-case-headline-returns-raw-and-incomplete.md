@@ -20,3 +20,7 @@ A user who follows the template to the business case gets one return figure and 
 ## Suggested fix
 
 Format money with unit and thousands grouping; beside each 'not established' say which input is missing and link to it.
+
+## Comments
+
+- Seen again 2026-11-21 (template walk, master 6b421b06): Ammonia (Expert › Commercial & finance › Run the investment case, about 24 s upper bound): only the pre-tax IRR (22.18 %) is established; post-tax IRR, NPV at WACC, equity NPV, payback, DSCR, LCOE and LCOS are "not established", with "Tax: not established" and the "WACC gate: differs from the LP discount rate (… inflation differs)". IPP (about 3 s): IRR, NPV, payback and LCOE established (DSCR, LLCR, PLCR not), but "Unlevered NPV at WACC 28,841,527.66", "Equity NPV 3,055,564.64" and the Bill table (11,602,886.83) are still raw numbers without a unit.

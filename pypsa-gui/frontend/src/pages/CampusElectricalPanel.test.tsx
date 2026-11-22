@@ -18,11 +18,12 @@ const store = vi.hoisted(() => ({ currentProject: 'Hub A' as string | null, requ
   activeSlidePanel: null as string | null,
   panelSectionRequest: null as { panel: string; section: string } | null }))
 vi.mock('../store/uiStore', () => ({
-  useUIStore: (sel: (s: Record<string, unknown>) => unknown) =>
+  // improvePrefill subscribes to the store at import (#1757).
+  useUIStore: Object.assign((sel: (s: Record<string, unknown>) => unknown) =>
     sel({ currentProject: store.currentProject, requestRunSolve: () => store.requestRunSolve(),
           setSlidePanel: (p: string | null) => { store.activeSlidePanel = p },
           panelSectionRequest: store.panelSectionRequest,
-          clearPanelSectionRequest: () => { store.panelSectionRequest = null } }),
+          clearPanelSectionRequest: () => { store.panelSectionRequest = null } }), { subscribe: () => () => {} }),
 }))
 
 const api = vi.hoisted(() => ({

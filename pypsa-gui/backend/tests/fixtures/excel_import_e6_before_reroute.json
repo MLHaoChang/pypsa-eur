@@ -1,0 +1,44 @@
+{
+ "legacy-sheets": {
+  "fingerprint": "f8320cc7b09237b86b106890018d17025b7f283992105359bc17db3aee08257c",
+  "summary": {
+   "buses": 2,
+   "generators": 2,
+   "lines": 1,
+   "links": 0,
+   "loads": 1,
+   "snapshots": 1,
+   "storage_units": 0,
+   "stores": 0,
+   "transformers": 0
+  }
+ },
+ "pypsa-native": {
+  "fingerprint": "7dd31a17df2b13198be12c2a8af7d69993330272ef9bb80fceb66ec911736037",
+  "summary": {
+   "buses": 2,
+   "generators": 1,
+   "lines": 1,
+   "links": 0,
+   "loads": 1,
+   "snapshots": 3,
+   "storage_units": 0,
+   "stores": 0,
+   "transformers": 0
+  }
+ },
+ "pypsa-native-multi-period": {
+  "fingerprint": "555530b82c4bd02785b3e01c252b8114f980d6a7f4f7bd6a20e62ada71474f6a",
+  "summary": {
+   "buses": 2,
+   "generators": 1,
+   "lines": 1,
+   "links": 0,
+   "loads": 1,
+   "snapshots": 4,
+   "storage_units": 0,
+   "stores": 0,
+   "transformers": 0
+  }
+ }
+}

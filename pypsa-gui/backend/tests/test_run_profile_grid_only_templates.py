@@ -14,20 +14,14 @@ import pytest
 from tests.test_run_profile_grid_only import _both, _branch_carriers, _calc, _templates
 
 
-# ── no solve moves a Lines network's own input identity ───
-
-
-@pytest.mark.parametrize("template", ["3bus", "ieee14", "belgium", "ieee39"])
-@pytest.mark.parametrize("with_pf", [False, True])
-def test_a_solve_leaves_the_input_fingerprint_where_it_was(template, with_pf):
-    import logging
+def _template_network(template: str) -> pypsa.Network:
+    """The shipped template's network, or built as `project_templates/_build.py`
+    builds it: its network.nc is gitignored and CI builds no template (GK A 2).
+    Only a template whose own source is missing here (belgium's workflow
+    output) is skipped."""
     import pathlib
-    import queue
 
-    from services import workflow_tools
-    from services.ac_pf_service import run_ac_pf_stage
-    from services.pypsa_service import PyPSAService
-    from services.solver_service import SolverConfig
+    import project_templates._build as classic
 
     path = (
         pathlib.Path(__file__).resolve().parents[1]
@@ -35,11 +29,36 @@ def test_a_solve_leaves_the_input_fingerprint_where_it_was(template, with_pf):
         / template
         / "network.nc"
     )
-    if not path.exists():
-        pytest.skip(f"{template} is not built here")
+    if path.exists():
+        return pypsa.Network(str(path))
+    n = getattr(classic, f"build_{template}")()
+    if n is None:
+        pytest.skip(f"{template}'s source is not built here")
+    # Through a netCDF file, as the shipped template is read.
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        n.export_to_netcdf(str(pathlib.Path(d) / "network.nc"))
+        return pypsa.Network(str(pathlib.Path(d) / "network.nc"))
+
+
+# ── no solve moves a Lines network's own input identity ───
+
+
+@pytest.mark.parametrize("template", ["3bus", "ieee14", "belgium", "ieee39"])
+@pytest.mark.parametrize("with_pf", [False, True])
+def test_a_solve_leaves_the_input_fingerprint_where_it_was(template, with_pf):
+    import logging
+    import queue
+
+    from services import workflow_tools
+    from services.ac_pf_service import run_ac_pf_stage
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig
+
     logging.disable(logging.CRITICAL)
     try:
-        n = pypsa.Network(str(path))
+        n = _template_network(template)
         ctx = PyPSAService.build_context()
         ctx.network = n
         before = [
@@ -64,23 +83,14 @@ def test_the_in_place_flow_adds_no_edit_and_leaves_the_branch_carriers(template)
     """GK B SH-15 (2) A3: the AC power flow runs in place on the solved network; it pushes
     no undo entry, moves no edit counter and leaves the saved branch carriers as the LP left them."""
     import logging
-    import pathlib
     import queue
 
     from services.ac_pf_service import run_ac_pf_stage
     from services.pypsa_service import PyPSAService
     from services.solver_service import SolverConfig
 
-    path = (
-        pathlib.Path(__file__).resolve().parents[1]
-        / "project_templates"
-        / template
-        / "network.nc"
-    )
-    if not path.exists():
-        pytest.skip(f"{template} is not built here")
     logging.disable(logging.CRITICAL)
-    n = pypsa.Network(str(path))
+    n = _template_network(template)
     ctx = PyPSAService.build_context()
     ctx.network = n
     token = PyPSAService.bind_request_context(ctx)
@@ -143,14 +153,15 @@ def test_cb_b_a_shipped_grid_template_hashes_as_masters_same_network_with_ac(
     """The four grid templates ship Lines with carrier '' (ieee39's Transformers have no
     carrier column): each hashes as master hashes it with those carriers set to 'AC'."""
     import logging
-    from pathlib import Path
 
-    root = Path(__file__).resolve().parents[1] / "project_templates"
     logging.disable(logging.CRITICAL)
     try:
         checked = []
-        for name in _templates():
-            n = pypsa.Network(str(root / name / "network.nc"))
+        for name in ("3bus", "ieee14", "belgium", "ieee39"):
+            try:
+                n = _template_network(name)
+            except pytest.skip.Exception:
+                continue  # its source is not built here
             if not any("" in s for s in _branch_carriers(n).values()):
                 continue
             now, _ = _both(n, monkeypatch, exact=exact)
@@ -174,21 +185,12 @@ def solved_3bus(install_network):
     """The real 3bus template, solved and recorded as a PF-on run records it (the LP's
     fingerprints from `_record_solve_inputs`, then the state the run leaves)."""
     import logging
-    import pathlib
 
     from services import workflow_tools
     from services.pypsa_service import PyPSAService
 
-    path = (
-        pathlib.Path(__file__).resolve().parents[1]
-        / "project_templates"
-        / "3bus"
-        / "network.nc"
-    )
-    if not path.exists():
-        pytest.skip("3bus is not built here")
     logging.disable(logging.CRITICAL)
-    n = install_network(pypsa.Network(str(path)))
+    n = install_network(_template_network("3bus"))
     ctx = PyPSAService.get_active_context()
     config = ctx.solver_state["solver_config"]
     config.run_ac_pf_after_lopf = True
@@ -272,23 +274,14 @@ def test_the_flow_moves_no_saved_field_but_the_results(template):
     """GK B SH-15 (2) A3, option A: after the LP, the in-place flow changes no saved
     input, series input or meta; only result fields move."""
     import logging
-    import pathlib
     import queue
 
     from services.ac_pf_service import run_ac_pf_stage
     from services.solver_service import SolverConfig
 
-    path = (
-        pathlib.Path(__file__).resolve().parents[1]
-        / "project_templates"
-        / template
-        / "network.nc"
-    )
-    if not path.exists():
-        pytest.skip(f"{template} is not built here")
     logging.disable(logging.CRITICAL)
     try:
-        n = pypsa.Network(str(path))
+        n = _template_network(template)
         assert n.optimize(solver_name="highs")[0] == "ok"
         before = _saved_inputs(n)
         run_ac_pf_stage(n, SolverConfig(), queue.Queue())

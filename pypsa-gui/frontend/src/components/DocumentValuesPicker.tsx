@@ -89,7 +89,7 @@ const LIBRARY: FlowTarget = { section: 'commercial', panel: 'library', component
 export function LibraryLink({ onClose, item }: { onClose: () => void; item?: DocumentGap['library'] }) {
   const guided = useUIStore(s => s.uiMode) === 'guided'
   return (
-    <button type="button" data-testid="document-values-library-link" className="ml-1 text-accent hover:underline"
+    <button type="button" data-testid="document-values-library-link" className="ml-1 text-link hover:underline"
       onClick={() => {
         onClose()
         ;(guided ? openFlowTargetInPlace : openFlowTarget)(LIBRARY)
@@ -261,7 +261,7 @@ export default function DocumentValuesPicker({ uploadId, mode, fileSection, onCl
         ))}
         {found.more > 0 && <div className="text-[10px] text-muted">{found.more} more lines are not listed.</div>}
         {picks[r.key] !== null && picks[r.key] !== undefined && (
-          <button type="button" className="text-[10px] text-accent hover:underline" disabled={busy}
+          <button type="button" className="text-[10px] text-link hover:underline" disabled={busy}
             onClick={() => { invalidate(); setPicks(prev => ({ ...prev, [r.key]: null })) }}>
             Leave this one out
           </button>

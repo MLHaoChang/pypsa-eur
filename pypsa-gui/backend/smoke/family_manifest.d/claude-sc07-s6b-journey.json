@@ -1,0 +1,4 @@
+{
+ "variants": [{"id": "LC-D01.site_scene_results_after_route_edit", "status": "pending",
+               "reason": "After a solve, a PUT /api/network edit resets the solver to idle, so site_scene_results reads run_not_solved ('Not solved yet') instead of results_not_current ('Out of date'); ticket .scratch/site-scene-generation/issues/10-put-edit-resets-solve-to-idle.md. Pinned without the reason by tests/test_sc07_integrated_journey.py::test_an_edit_through_the_network_route_leaves_no_number."}]
+}

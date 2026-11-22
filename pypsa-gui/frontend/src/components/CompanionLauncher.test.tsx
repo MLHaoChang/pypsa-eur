@@ -49,6 +49,15 @@ describe('CompanionLauncher', () => {
     expect(screen.getByTestId('companion-profile').textContent).toBe('Claude')
   })
 
+  it('offers no setup chip to a user who cannot set the key (issue 49)', () => {
+    mockMotion(false)
+    render(
+      <CompanionLauncher profileLabel="Claude" modelKeyMissing canSetUp={false}
+        onCompose={vi.fn()} onSpeak={vi.fn()} onLive={vi.fn()} onProfiles={vi.fn()} />,
+    )
+    expect(screen.queryByTestId('companion-setup')).toBeNull()
+  })
+
   it('closes the live composer on Escape and returns focus to Chat here; offers setup without a key (UM08)', async () => {
     mockMotion(false)
     const onLive = vi.fn()

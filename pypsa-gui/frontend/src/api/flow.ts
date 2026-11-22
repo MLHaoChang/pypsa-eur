@@ -31,7 +31,7 @@ export type FlowFreshness = 'not_run' | 'running' | 'fresh' | 'stale' | 'uncompa
 
 export type FlowItemSource =
   | 'validation' | 'eh_study' | 'eh_readiness' | 'commercial' | 'library' | 'template' | 'flow'
-  | 'loadflow'
+  | 'loadflow' | 'run_defaults'
 
 /** Where an item's fix lives. `panel` is a `SlidePanel` id, or null for the
  *  component's own Properties (`component` + `entity`); unknowns are null. */
@@ -74,12 +74,18 @@ export interface FlowItem {
 export interface FlowHeld {
   component: string
   entity: string
+  /** Section 5 asset rows: the size an extendable asset's two equal, finite bounds pin
+   *  (`flow_service._pin_sizes`); null or absent when the study sizes it. */
+  fixed_size?: number | null
   carrier: string | null
   field: string | null
   value: number | null
   unit: string | null
   extendable: boolean
   series: boolean
+  /** Asset rows only: a Generator the model adds (slack, buy-in, shortfall).
+   *  Display only; a missing or non-boolean value reads as not a helper. */
+  helper?: boolean
   /** Section 2's recipe rows only (gap 03): the inputs per unit of product. */
   recipe?: FlowRecipe
 }
@@ -97,6 +103,21 @@ export interface FlowRecipe {
   inputs: { port: number; carrier: string; label: string; value: number; unit: string }[]
 }
 
+export interface FlowConnectionLimit {
+  mw: number | null
+  refusal: string | null
+  /** The grid import links the limit is read from, as the study selects them. */
+  links: string[]
+}
+
+/** One scheduled link's energized limit per period (template-e2e 02b): a number is flat in that period
+ *  (editable), `{min, max}` varies inside it (read-only), null has no value. Keys are the periods in
+ *  the schedule's order, or `"all"` on a single-period network. */
+export interface FlowEnergization {
+  link: string
+  by_period: Record<string, number | { min: number; max: number } | null>
+}
+
 export interface FlowSection {
   section: FlowSectionId
   label: string
@@ -104,8 +125,14 @@ export interface FlowSection {
   state: FlowSectionState | null
   required: boolean
   items: FlowItem[]
-  /** One line for the rail ("grid_import, 40 MW"); `readiness`: "n to do, m to check". */
+  /** One line for the rail ("Grid import, 40 MW"); `readiness`: "n to do, m to check". */
   summary: string | null
+  /** `connection` only: the connection limit as the study takes it
+   *  (`flow_service.import_capacity`), the import links' summed capacity in MW,
+   *  or why the network fixes none (`refusal`, `mw` null). */
+  connection_limit?: FlowConnectionLimit
+  /** `connection` only, on a staged site: each scheduled link's energized limit per period. */
+  energization?: FlowEnergization[]
   /** Sections 2, 4, 5 and 6: what the section holds, for display only. */
   holds?: FlowHeld[]
   /** How many the section holds in all; `holds` stops at the server's cap. */
@@ -222,6 +249,14 @@ export function ackFlowItem(project: string, code: string, entity: string | null
 export function ackFlowItems(project: string, items: { code: string, entity: string | null }[]): Promise<FlowAck[]> {
   return client.post<{ acks: FlowAck[] }>(`${flowPath(project)}/ack-many`, { items })
     .then(r => r.data.acks)
+}
+
+/** Set one period of a link's energized limit, flat across the period (template-e2e 02b). 422 with
+ *  `energization_invalid_request` / `energization_invalid_mw` / `energization_no_schedule` /
+ *  `energization_unknown_period` / `energization_period_not_flat`; the row shows it, so no toast. */
+export function putFlowEnergization(project: string, body: { link: string; period: string; mw: number }):
+  Promise<{ link: string; period: string; mw: number; note: string | null; message: string }> {
+  return client.put(`${flowPath(project)}/energization`, body, { skipErrorToast: true }).then(r => r.data)
 }
 
 // ── The scope (W4a): six work cards, each with at most three sub-options ──────

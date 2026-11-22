@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { plainReason } from '../hubDesign/plainWords'
 import { SizedDesignTable } from './SizedDesignTable'
 import { CompletenessChips, statusTone as sharedStatusTone } from '../../components/CompletenessChips'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -42,6 +43,7 @@ import type { ZeroReason } from './fmea'
 import { CRITICALITY_PER_YEAR_LABEL } from './fmea'
 import { verdictWord } from '../hubDesign/verdictWords'
 import { plainIds } from '../hubDesign/plainWords'
+import { takeImprovePrefill, useImprovePrefillStore } from '../hubDesign/improvePrefill'
 import { leverKindWords } from './leverKindWords'
 
 const ARCHETYPES: { id: EhArchetype; label: string; blurb: string }[] = [
@@ -926,7 +928,7 @@ export function ReadinessSummary({ r }: { r: EhReadiness }) {
         </ul>
       )}
       {r.warnings.map((w, i) => (
-        <span key={i} className="text-warn">{w}</span>
+        <span key={i} className="text-warn">{plainReason(w)}</span>
       ))}
     </div>
   )
@@ -1007,6 +1009,31 @@ export function EhReferenceDesignPanel() {
   }, [template, currentProject])
   const setField = (k: keyof PackForm) =>
     (e: { target: { value: string } }) => setForm(f => ({ ...f, [k]: e.target.value }))
+  // Template-e2e 22 (IMPROVE-MANUAL-1): an Improve card's "Open in Expert"
+  // hands over a filled-in form, once, for this project. It opens the panel
+  // and its settings; nothing runs until the user presses Run. The note
+  // stands only while the form is still the one handed over.
+  const prefillPending = useImprovePrefillStore(s => !!s.prefill?.pack)
+  const [filledFrom, setFilledFrom] = useState<{ title: string; form: PackForm } | null>(null)
+  useEffect(() => {
+    if (!prefillPending) return
+    const got = takeImprovePrefill(currentProject, 'pack')
+    if (!got) return
+    preselectedFor.current = currentProject
+    setForm(got.pack)
+    setFilledFrom({ title: got.title, form: got.pack })
+    setOpen(true)
+    setSettingsOpen(true)
+  }, [prefillPending, currentProject])
+  const filledNote = filledFrom && JSON.stringify(filledFrom.form) === JSON.stringify(form)
+    ? filledFrom.title : null
+  useEffect(() => { if (filledFrom && !filledNote) setFilledFrom(null) }, [filledFrom, filledNote])
+  const filledProject = useRef(currentProject)
+  useEffect(() => {
+    if (filledProject.current === currentProject) return
+    filledProject.current = currentProject
+    setFilledFrom(null)
+  }, [currentProject])
 
   const studyKey = nk(currentProject, 'results', 'eh_study')
   const reportKey = nk(currentProject, 'results', 'eh_reference_design')
@@ -1282,7 +1309,7 @@ export function EhReferenceDesignPanel() {
                 <span className="font-mono">{template.recommended_archetype}</span>
               </span>
               {(template.study_notes ?? []).map((note, i) => (
-                <span key={i} className="text-muted">• {note}</span>
+                <span key={i} className="text-muted">• {plainReason(note)}</span>
               ))}
               {template.provenance && (
                 <span className="text-muted italic">{template.provenance}</span>
@@ -1439,6 +1466,11 @@ export function EhReferenceDesignPanel() {
             )}
           </div>
 
+          {filledNote && (
+            <p role="status" data-testid="eh-filled-from-improve" className="text-[11px] text-muted">
+              Filled in from the Improve card: {filledNote}. Review and run.
+            </p>
+          )}
           <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
@@ -1638,7 +1670,7 @@ export function EhReferenceDesignPanel() {
                   className="flex flex-col gap-0.5 text-[10px] text-warn"
                   data-testid="eh-report-notes"
                 >
-                  {report.notes!.map((note, i) => <li key={i}>{note}</li>)}
+                  {report.notes!.map((note, i) => <li key={i}>{plainReason(note)}</li>)}
                 </ul>
               )}
 
