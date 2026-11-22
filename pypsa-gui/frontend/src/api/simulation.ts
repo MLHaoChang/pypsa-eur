@@ -740,6 +740,11 @@ export interface EhSizedAsset {
   max_hours?: number | null
   /** A Link's MW is on its bus0 side. */
   basis?: 'bus0'
+  /** The size's unit from its bus (MW or t/h; a Store's MWh or t); absent
+   *  on a report stored before it was written, null where not known. */
+  unit?: string | null
+  /** A staged build's period (its build_year); only on a staged plan. */
+  stage?: number | null
 }
 
 /** TEA wrap (spec decision 9). LCOH is null + a flag when it cannot be
