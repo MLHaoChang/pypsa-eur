@@ -113,7 +113,7 @@ def build_3bus() -> pypsa.Network:
             "Load 1": 100.0 * LOAD_SHAPE,
             "Load 2": 80.0 * LOAD_SHAPE,
         },
-        index=SNAPSHOTS.copy(),
+        index=n.snapshots,
     )
 
     # Triangle of identical lines. x > 0 is required for the LOPF's linearised
@@ -181,7 +181,7 @@ def build_ieee14() -> pypsa.Network:
         lname = f"Load {b}"
         n.add("Load", lname, bus=f"Bus {b}", carrier="AC")
         load_cols[lname] = mw * LOAD_SHAPE
-    n.loads_t.p_set = pd.DataFrame(load_cols, index=SNAPSHOTS.copy())
+    n.loads_t.p_set = pd.DataFrame(load_cols, index=n.snapshots)
 
     # Standard case14 branch impedances (r, x in p.u. on 100 MVA base). The
     # three original tap-changing transformers (4-7, 4-9, 5-6) are modelled as
