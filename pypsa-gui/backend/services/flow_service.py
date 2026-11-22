@@ -528,16 +528,20 @@ def _number(value) -> float | None:
 
 
 def _size_unit(n, bus, *, stock: bool) -> str | None:
-    """The unit of a size on ``bus``: MW (MWh for a stock) on an energy bus,
-    t/h (t) on a tonne bus, None where the bus's unit is not known."""
-    from services.process_products import bus_unit
+    """The unit of a size on ``bus``: MW (MWh for a stock) on an energy bus, MW_NH3 (MWh_NH3)
+    on the NH3 product bus, t/h (t) on a tonne bus, None where the bus's unit is not known."""
+    from services.process_products import bus_unit, is_product_bus
 
     try:
         unit = bus_unit(n, str(bus))
     except Exception:  # noqa: BLE001 — an unreadable bus has no known unit
         return None
     if unit in ("", "MWh"):
-        return "MWh" if stock else "MW"
+        # A catalogued product bus counted in MWh (NH3) names its product: MW_NH3, not an
+        # electric MW. Only the unit word changes; the figure is MWh_NH3 per hour already.
+        carrier = str(n.buses.at[str(bus), "carrier"]) if "carrier" in n.buses else ""
+        suffix = f"_{carrier}" if unit == "MWh" and is_product_bus(n, str(bus)) else ""
+        return f"MWh{suffix}" if stock else f"MW{suffix}"
     if unit == "t":
         return "t" if stock else "t/h"
     return None
@@ -844,7 +848,8 @@ def readiness_warning_filing(text: str) -> tuple[str, str] | None:
                  if text.startswith(prefix)), None)
 
 
-def _readiness_items(r: dict | Exception, *, voll_noted: bool) -> list[dict]:
+def _readiness_items(r: dict | Exception, *, voll_noted: bool,
+                     connection_links: frozenset[str] = frozenset()) -> list[dict]:
     if isinstance(r, Exception):
         # A typed refusal (or an internal failure) of the readiness preview:
         # one connection item, display-only; the study's own start refusal is
@@ -872,13 +877,17 @@ def _readiness_items(r: dict | Exception, *, voll_noted: bool) -> list[dict]:
                          "(eh_critical).", "eh_readiness", "loads", component="Bus",
                          fld="eh_critical"))
     missing = (r.get("outage_units") or {}).get("missing") or []
-    if missing:
-        names = ", ".join(m.get("name", "") for m in missing[:5])
-        more = f" and {len(missing) - 5} more" if len(missing) > 5 else ""
-        out.append(_item("eh_outage_data_missing", "warning",
-                         f"{_count(len(missing), 'unit')} {'has' if len(missing) == 1 else 'have'} "
-                         f"no outage data ({names}{more}).",
-                         "eh_readiness", "assets", fld="outage_rate_value"))
+    # A connection Link (the grid import, a tie) is the connection's, not an asset of the site
+    # (`_site_assets`): its missing outage data is a section 3 note, the units' stay in section 5.
+    for section, pick in (("connection", True), ("assets", False)):
+        rows = [m for m in missing if (str(m.get("name", "")) in connection_links) is pick]
+        if rows:
+            names = ", ".join(m.get("name", "") for m in rows[:5])
+            more = f" and {len(rows) - 5} more" if len(rows) > 5 else ""
+            out.append(_item("eh_outage_data_missing", "warning",
+                             f"{_count(len(rows), 'unit')} {'has' if len(rows) == 1 else 'have'} "
+                             f"no outage data ({names}{more}).",
+                             "eh_readiness", section, fld="outage_rate_value"))
     for w in r.get("warnings") or []:
         text = str(w)
         filed = readiness_warning_filing(text)
@@ -1530,7 +1539,8 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
         if not loads_not_needed:
             r = _readiness(facts, template, cache_key)
             items += _readiness_items(r, voll_noted=voll_refused or any(
-                i["code"] == "presence_voll" for i in presence))
+                i["code"] == "presence_voll" for i in presence),
+                connection_links=frozenset(facts.connection_links))
         items += _assumed_items(template, facts.cfg_dict)
         if not loads_not_needed:
             items += _run_default_items(facts.run_defaults, template)

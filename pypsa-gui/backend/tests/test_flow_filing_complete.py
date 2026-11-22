@@ -440,3 +440,18 @@ def test_the_outage_sentence_agrees_with_its_count(names, words):
     report = {"outage_units": {"missing": [{"name": n} for n in names]}}
     items = S._readiness_items(report, voll_noted=True)
     assert [i["message"] for i in items if i["code"] == "eh_outage_data_missing"] == [words]
+
+
+def test_the_outage_note_files_a_connection_link_under_connection():
+    """A grid import or tie link is the connection's, not an asset of the site (the same rule
+    as `_site_assets`): its missing outage data is a section 3 note, the units' stay in 5."""
+    report = {"outage_units": {"missing": [{"name": "grid_import"}, {"name": "genset_1"},
+                                           {"name": "subsea_tie"}]}}
+    items = S._readiness_items(report, voll_noted=True,
+                               connection_links=frozenset({"grid_import", "subsea_tie"}))
+    by_section = {i["target"]["section"]: i["message"] for i in items
+                  if i["code"] == "eh_outage_data_missing"}
+    assert by_section == {
+        "connection": "2 units have no outage data (grid_import, subsea_tie).",
+        "assets": "1 unit has no outage data (genset_1).",
+    }

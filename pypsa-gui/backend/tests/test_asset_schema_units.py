@@ -394,3 +394,12 @@ def test_a_create_under_the_wrong_basis_is_refused_and_nothing_is_added(
         headers={"X-Cost-Basis": "tonne"},
     )
     assert ok.status_code == 201, ok.text
+
+
+def test_an_nh3_load_and_store_carry_the_product_unit_not_mw():
+    """The NH3 delivery is MWh_NH3 per hour on a non-electric MWh bus: Guided's row says so."""
+    n = T.BUILDERS["eh_ammonia_staged"]()
+    assert _size_unit(n, n.loads.at["nh3_delivery", "bus"], stock=False) == "MW_NH3"
+    assert _size_unit(n, n.loads.at["nh3_delivery", "bus"], stock=True) == "MWh_NH3"
+    # An electric bus keeps MW.
+    assert _size_unit(n, n.loads.at["process_load", "bus"], stock=False) == "MW"
