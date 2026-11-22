@@ -372,14 +372,15 @@ describe('AssetTable cost units on tonne-bus assets — 05f', () => {
     expect(titleOf('tank_t')).toBe('Unit unknown: the units could not be read')
   })
 
-  it('a per-tonne cost whose scale is not 1 makes no per-tonne claim: the unit is unknown (GK B4)', async () => {
+  it('a per-tonne cost whose scale is not 1 makes no per-tonne claim and says why, not that the bus is unreadable (GK B4, UX)', async () => {
     vi.mocked(networkApi.getStores).mockResolvedValue([store('tank_t', 'NH3')] as never)
     vi.spyOn(assetSchemaApi, 'tableUnits').mockResolvedValue(units({
       rows: { tank_t: { capital_cost: { unit: 'EUR/t/yr', scale: 1000 } } } }))
     await open()
-    expect(await screen.findByText(/unit unknown where the bus is unreadable/)).toBeTruthy()
+    expect(await screen.findByText(/unit not shown on rows that need rescaling/)).toBeTruthy()
     expect(screen.queryByText(/€\/t\/yr on tonne buses/)).toBeNull()
-    await waitFor(() => expect(titleOf('tank_t')).toBe('Unit unknown: the bus cannot be read'))
+    expect(screen.queryByText(/bus is unreadable/)).toBeNull()   // the bus is readable here
+    await waitFor(() => expect(titleOf('tank_t')).toBe('Unit not shown: it needs rescaling'))
   })
 
   it('a change of the network revision re-reads the marks and the header follows', async () => {

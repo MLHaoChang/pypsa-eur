@@ -427,21 +427,25 @@ function AssetTable({
     if (!tableUnits?.cost_fields.includes(col)) return base
     const tonneUnits = new Set<string>()
     let unknown = false
+    let rescaled = false
     for (const r of filtered) {
       const c = tableUnits.rows[String(r.name)]?.[col]
       // A scale other than 1 would need the cell rescaled as the card does; the table makes no claim then.
       if (c && c.scale === 1) tonneUnits.add(c.unit)
-      else if (c || tableUnits.unreadable.includes(String(r.name))) unknown = true
+      else if (c) rescaled = true
+      else if (tableUnits.unreadable.includes(String(r.name))) unknown = true
     }
     const notes = [...tonneUnits].map(u => `${unitLabel(u)} on tonne buses`)
     if (unknown) notes.push('unit unknown where the bus is unreadable')
+    if (rescaled) notes.push('unit not shown on rows that need rescaling')
     return notes.length ? `${base} · ${notes.join(' · ')}` : base
   }
   const costCellNote = (name: string, col: string): string | undefined => {
     if (unitsUnread) return costColumns.has(col) ? `Unit ${unreadNote.replace(/^unit /, '')}` : undefined
     const c = tableUnits?.rows[name]?.[col]
     if (c && c.scale === 1) return `On a tonne bus: ${unitLabel(c.unit)}`
-    return tableUnits?.cost_fields.includes(col) && (c || tableUnits.unreadable.includes(name))
+    if (c) return 'Unit not shown: it needs rescaling'
+    return tableUnits?.cost_fields.includes(col) && tableUnits.unreadable.includes(name)
       ? 'Unit unknown: the bus cannot be read' : undefined
   }
   const { data: tsList = [] } = useQuery({
