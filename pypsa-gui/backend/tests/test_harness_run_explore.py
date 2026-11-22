@@ -1452,3 +1452,67 @@ def test_a_sweep_refused_at_preflight_leaves_the_step_uncertain_and_the_run_need
     assert len(solve_queue.solve_queue.list_jobs()) - len(jobs_before) == 1
     assert not any(c["status"] in ("running", "done", "judged") for c in run["cases"])
     assert not any(s["tool"] == "judge" or "judged_by" in s for s in record["steps"])
+
+
+@pytest.mark.parametrize("read_as", ["aborted", "failed"])
+def test_a_stopped_sweep_is_judged_as_a_failed_one_and_the_run_goes_on(
+    granted, explore_run, rated, monkeypatch, read_as
+):
+    """Live-voice issue 16 (GK B B1): every case job of the sweep is stopped
+    on purpose, so the sweep step settles `cancelled`. Its cases are judged
+    exactly as a failed sweep's (the `failed` row reads the same stopped jobs
+    as failed): they leave `running`, the explore stage settles and the run
+    goes on, never `needs_user` with `step_cancelled` (which Resume only
+    re-raised)."""
+    import uuid
+
+    from harness import continuation
+    from services import chat_tools
+
+    real_enqueue = chat_tools.solve_queue_enqueue
+    stopped_jobs = []
+
+    def stop_case_jobs(project_id, *a, **k):
+        if project_id == task["project_id"]:
+            return real_enqueue(project_id, *a, **k)  # the base solve runs as usual
+        solve_queue.solve_queue.pause()
+        try:
+            job = real_enqueue(project_id, *a, **k)
+            solve_queue.solve_queue.abort(uuid.UUID(job["id"]))
+        finally:
+            solve_queue.solve_queue.resume()
+        stopped_jobs.append(job["id"])
+        return job
+
+    real_status = continuation._queue_job_status
+
+    def status(job):
+        native = real_status(job)
+        return "failed" if read_as == "failed" and native == "aborted" else native
+
+    monkeypatch.setattr(chat_tools, "solve_queue_enqueue", stop_case_jobs)
+    monkeypatch.setattr(continuation, "_queue_job_status", status)
+    task, path, _ = granted()
+    script = Script(
+        propose([case("genset", genset()), case("bess", *bess())]), say("Two cases.")
+    )
+    record = go(
+        harness_runner.Runner("a", agent_provider=script, decisions=Clicks()),
+        path,
+        task,
+    )
+    run = record["run"]
+    [sweep] = [s for s in record["steps"] if s["tool"] == "run_sensitivity_sweep"]
+    assert len(stopped_jobs) == 2
+    assert sweep["status"] == ("cancelled" if read_as == "aborted" else "failed")
+    assert sweep["job"]["outcome"] == read_as
+    assert sweep["judged_by"] == run_explore.JUDGED
+    cases = {c["name"]: c for c in run["cases"]}
+    assert {n: c["status"] for n, c in cases.items()} == {
+        "genset": "failed",
+        "bess": "failed",
+    }
+    assert all(c["reason"] for c in cases.values())
+    assert run["stages"]["explore"]["status"] == "passed"
+    assert run.get("reason") != "step_cancelled"
+    assert run["stage"] != "explore" and run["status"] in ("running", "completed")

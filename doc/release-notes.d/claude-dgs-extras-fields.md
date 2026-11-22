@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Loads and generators now carry the harmonic screen's inputs (rated apparent power, harmonic source, harmonic spectrum), and the slack generator carries the external grid's short-circuit power and R/X ratio at its strongest and weakest. A PowerFactory DGS import fills these in, and the Expert forms can edit them (DGS-EXTRAS-1).

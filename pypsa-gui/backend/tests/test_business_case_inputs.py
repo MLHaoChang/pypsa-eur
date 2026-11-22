@@ -172,6 +172,15 @@ def _full() -> B.BusinessCaseInputs:
             linked_share=0.8,
             linked_share_by_year={2027: 0.5},
         ),
+        _rev(
+            "capacity",
+            category="capacity_payment",
+            quantity_source="linked:capacity.StorageUnit.bess@1",
+            quantity=None,
+            unit="kW_year",
+            price=40.0,
+            derating=0.5,
+        ),
         preset="eh_datacenter@1",
         receivable_days=45,
     )
@@ -316,6 +325,15 @@ FLOAT_COLUMNS = [
     (
         lambda: _rev(quantity_source="linked:x@1", quantity=None),
         "linked_share_by_year[]",
+    ),
+    (
+        lambda: _rev(
+            category="capacity_payment",
+            quantity_source="linked:capacity.StorageUnit.bess@1",
+            quantity=None,
+            unit="kW_year",
+        ),
+        "derating",
     ),
 ]
 

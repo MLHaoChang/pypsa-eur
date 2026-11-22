@@ -50,7 +50,10 @@ export interface ChapterInputs {
                  /** The review says the study is out of date (N4). */
                  stale?: boolean
                  /** Years the Monte Carlo modelled (`certification.horizon_years`); names the basis line (N10). */
-                 horizonYears?: number | null }
+                 horizonYears?: number | null
+                 /** A must-stay-on bus behind one feeder holds the verdict back
+                  *  (review `summary.feeder_bound`, GK A F6'). */
+                 feederBound?: boolean }
   /** `gfm`: the campus GFM settings (null when the project has no campus or no island). */
   operation: { status: SimulationStatus | null; gfm?: GfmSettingsState | null }
 }

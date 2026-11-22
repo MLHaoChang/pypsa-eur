@@ -27,6 +27,11 @@ function renderBrowser(onOpenInputs?: () => void) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(<QueryClientProvider client={qc}><LibraryBrowser onOpenInputs={onOpenInputs} /></QueryClientProvider>)
 }
+/** The browser as the Library slide panel holds it: gone once another panel opens. */
+function AsPanel({ onOpenInputs }: { onOpenInputs: () => void }) {
+  const panel = useUIStore(st => st.activeSlidePanel)
+  return panel === 'library' ? <LibraryBrowser onOpenInputs={onOpenInputs} /> : null
+}
 function file(name: string, body: string, type = 'application/json') {
   const f = new File([body], name, { type })
   Object.defineProperty(f, 'text', { value: () => Promise.resolve(body) })
@@ -34,7 +39,7 @@ function file(name: string, body: string, type = 'application/json') {
 }
 
 beforeEach(() => {
-  useUIStore.setState({ currentProject: 'Demo' })
+  useUIStore.setState({ currentProject: 'Demo', libraryFocus: null })
   lib.listItems.mockResolvedValue([REF])
   lib.getItem.mockImplementation(async (_k, name, version) => ({
     ref: { ...REF, id: name, version: version ?? 2 }, payload: TARIFF as never, meta: { source: 'urdb' } }))
@@ -221,5 +226,38 @@ describe('LibraryBrowser', () => {
     expect((await screen.findByRole('status')).textContent).toContain('already stored under that name')
     expect(lib.uploadMeterData).toHaveBeenCalledWith(expect.any(File), expect.objectContaining({
       name: 'm', unit: 'kW', settlement: '15min', label: 'start' }))
+  })
+
+  it('a contract offers "Use as a starting point": the copy goes to Tariffs & contracts, nothing saved', async () => {
+    const ref = { kind: 'contract' as const, id: 'eu-ppa-baseload', version: 1, hash: 'b' }
+    const payload = { type: 'ppa', id: 'eu-ppa-baseload', kind: 'baseload', price: 60, tenor_years: 10,
+                      seller: '\u2060fill-in:seller', buyer: '\u2060fill-in:buyer', asset_ids: [] }
+    lib.listItems.mockResolvedValue([ref])
+    lib.getItem.mockResolvedValue({ ref, payload: payload as never, meta: { source: 'illustrative' } })
+    useUIStore.setState({ contractStart: null, flowReturn: null, activeSlidePanel: 'library' })
+    const open = vi.fn(() => useUIStore.setState({ activeSlidePanel: 'economics' }))
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={qc}><AsPanel onOpenInputs={open} /></QueryClientProvider>)
+    fireEvent.click(screen.getByRole('radio', { name: 'Contracts' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'eu-ppa-baseload' }))
+    expect((await screen.findByTestId('lib-illustrative')).textContent)
+      .toBe('Illustrative EU default: its prices are a starting point, not market data.')
+    expect(screen.getByTestId('lib-item-summary').textContent)
+      .toBe('PPA (baseload): seller (to fill in), buyer (to fill in), price 60; 10 years')
+    fireEvent.click(screen.getByRole('button', { name: 'Use v1 as a starting point' }))
+    expect(useUIStore.getState().contractStart).toEqual({ ref, payload })
+    expect(open).toHaveBeenCalledTimes(1)
+    // "Back to Commercial library" reopens this item at this version.
+    expect(useUIStore.getState().flowReturn?.label).toBe('Commercial library')
+    expect(useUIStore.getState().libraryFocus).toEqual({ kind: 'contract', id: 'eu-ppa-baseload', version: 1 })
+    expect(api.saveCommercial).not.toHaveBeenCalled()
+  })
+
+  it('a tariff gets no starting-point action, and a non-illustrative item no label', async () => {
+    renderBrowser(() => {})
+    fireEvent.click(await screen.findByRole('button', { name: 'nl' }))
+    await screen.findByTestId('lib-item-summary')
+    expect(screen.queryByRole('button', { name: /as a starting point/ })).toBeNull()
+    expect(screen.queryByTestId('lib-illustrative')).toBeNull()
   })
 })
