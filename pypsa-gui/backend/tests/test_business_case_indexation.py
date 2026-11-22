@@ -16,7 +16,11 @@ from tests.test_business_case_inputs import _case, _refusals, _rev
 
 
 def _kinds_for(rate):
-    return [k for k in _refusals(_case(_rev(indexation=rate))) if k[0] == "indexation_out_of_range"]
+    return [
+        k
+        for k in _refusals(_case(_rev(indexation=rate)))
+        if k[0] == "indexation_out_of_range"
+    ]
 
 
 @pytest.mark.parametrize("rate", [-0.2, -0.05, 0.0, 0.02, 0.1, 0.3])
@@ -41,7 +45,9 @@ def test_a_stated_zero_stays_zero_and_empty_stays_empty():
 
 
 def test_a_saved_line_outside_the_band_loads_and_refuses_on_run_only():
-    case = _case(_rev(indexation=2.0))  # stored before the band existed: loads, no crash
+    case = _case(
+        _rev(indexation=2.0)
+    )  # stored before the band existed: loads, no crash
     assert case.lines[0].indexation == 2.0
     assert ("indexation_out_of_range", "lines[0].indexation") in _refusals(case)
     with pytest.raises(B.IndexationOutOfRange):
@@ -54,7 +60,17 @@ def test_a_stored_fraction_is_unchanged():
     assert dumped["lines"][0]["indexation"] == 0.02
 
 
-@pytest.mark.parametrize("v, unusual", [(0.1, False), (-0.1, False), (0.1001, True), (-0.1001, True), (0.02, False), (None, False)])
+@pytest.mark.parametrize(
+    "v, unusual",
+    [
+        (0.1, False),
+        (-0.1, False),
+        (0.1001, True),
+        (-0.1001, True),
+        (0.02, False),
+        (None, False),
+    ],
+)
 def test_the_soft_band_is_beyond_ten_percent(v, unusual):
     assert B.indexation_unusual(v) is unusual
 
@@ -62,7 +78,11 @@ def test_the_soft_band_is_beyond_ten_percent(v, unusual):
 def _card_rows(old_rate, new_rate):
     old = {"inputs": {"lines": [_rev(indexation=old_rate)]}}
     new = {"inputs": {"lines": [_rev(indexation=new_rate)]}}
-    return [r for r in chat_edit.rows(old, new, [], None) if r["path"][-1:] == ["indexation"]]
+    return [
+        r
+        for r in chat_edit.rows(old, new, [], None)
+        if r["path"][-1:] == ["indexation"]
+    ]
 
 
 def test_a_chat_card_row_beyond_the_soft_band_warns_and_names_its_unit():
@@ -74,3 +94,13 @@ def test_a_chat_card_row_beyond_the_soft_band_warns_and_names_its_unit():
 def test_a_chat_card_row_inside_the_soft_band_does_not_warn():
     (row,) = _card_rows(0.02, 0.05)
     assert "warn" not in row and row["unit"] == "fraction per year"
+
+
+def test_an_empty_indexation_is_not_range_checked():
+    assert _kinds_for(None) == []
+
+
+def test_only_an_indexation_row_gets_the_soft_band_warning():
+    row = {"path": ["lines", 0, "capex"], "old": 1.0, "new": 5.0}
+    chat_edit.indexation_warning(row)
+    assert "warn" not in row
