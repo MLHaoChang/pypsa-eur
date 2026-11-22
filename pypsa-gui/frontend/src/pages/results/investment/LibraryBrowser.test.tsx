@@ -222,4 +222,31 @@ describe('LibraryBrowser', () => {
     expect(lib.uploadMeterData).toHaveBeenCalledWith(expect.any(File), expect.objectContaining({
       name: 'm', unit: 'kW', settlement: '15min', label: 'start' }))
   })
+
+  it('a contract offers "Use as a starting point": the copy goes to Tariffs & contracts, nothing saved', async () => {
+    const ref = { kind: 'contract' as const, id: 'eu-ppa-baseload', version: 1, hash: 'b' }
+    const payload = { type: 'ppa', id: 'eu-ppa-baseload', kind: 'baseload', price: 60, tenor_years: 10,
+                      seller: '\u2060fill-in:seller', buyer: '\u2060fill-in:buyer', asset_ids: [] }
+    lib.listItems.mockResolvedValue([ref])
+    lib.getItem.mockResolvedValue({ ref, payload: payload as never, meta: { source: 'illustrative' } })
+    useUIStore.setState({ contractStart: null })
+    const open = vi.fn()
+    renderBrowser(open)
+    fireEvent.click(screen.getByRole('radio', { name: 'Contracts' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'eu-ppa-baseload' }))
+    expect((await screen.findByTestId('lib-illustrative')).textContent)
+      .toBe('Illustrative EU default: its prices are a starting point, not market data.')
+    fireEvent.click(screen.getByRole('button', { name: 'Use v1 as a starting point' }))
+    expect(useUIStore.getState().contractStart).toEqual({ ref, payload })
+    expect(open).toHaveBeenCalledTimes(1)
+    expect(api.saveCommercial).not.toHaveBeenCalled()
+  })
+
+  it('a tariff gets no starting-point action, and a non-illustrative item no label', async () => {
+    renderBrowser(() => {})
+    fireEvent.click(await screen.findByRole('button', { name: 'nl' }))
+    await screen.findByTestId('lib-item-summary')
+    expect(screen.queryByRole('button', { name: /as a starting point/ })).toBeNull()
+    expect(screen.queryByTestId('lib-illustrative')).toBeNull()
+  })
 })

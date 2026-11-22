@@ -2,7 +2,7 @@
 // type, so the form is generated and every type round-trips to its model
 // unchanged. Allowed combinations are the SERVER's to judge (its 422s are
 // mapped to the contract they name); the specs only say which fields exist.
-import type { CommercialContract } from '../../../api/types'
+import type { CommercialContract, LibraryItemRef } from '../../../api/types'
 
 export type ContractType = CommercialContract['type']
 export type FieldKind = 'text' | 'number' | 'int' | 'party' | 'ids' | 'select' | 'bool' | 'series'
@@ -197,4 +197,53 @@ export function contractErrors(detail: unknown, contracts: CommercialContract[] 
     add(idx >= 0 ? idx : /connection/i.test(text) && !/contract/i.test(text) ? CONNECTION : -1, text)
   }
   return out
+}
+
+/** The server's fill-in marker (`services/commercial/placeholders.MARK`): a
+ *  common Library contract holds it where the user must name a party or an
+ *  asset. It can never be a valid component name; the server refuses to save
+ *  or settle a contract that still holds one (SCU06 S2a condition 3). */
+export const PLACEHOLDER_MARK = '⁠fill-in:'
+
+/** As the server judges one (`_is_placeholder`): the marker with or without
+ *  its invisible first character, in any case, after leading space. */
+export const isPlaceholder = (v: unknown): boolean =>
+  typeof v === 'string'
+  && v.split(PLACEHOLDER_MARK[0]).join('').trim().toLowerCase().startsWith(PLACEHOLDER_MARK.slice(1))
+
+/** The labels of the fields that still hold a fill-in marker (a party, or an
+ *  asset in a list): the save is refused while any is left (SCU06 S2b). */
+export function unfilledPlaceholders(c: CommercialContract): string[] {
+  const type = contractType(c)
+  const r = c as unknown as Record<string, unknown>
+  const label = (k: string) => (type && CONTRACT_FIELDS[type].find(f => f.key === k)?.label) || k
+  return Object.keys(r)
+    .filter(k => isPlaceholder(r[k]) || (Array.isArray(r[k]) && (r[k] as unknown[]).some(isPlaceholder)))
+    .map(label)
+}
+
+/** A Library contract as the start of a new project contract (SCU06 S2b): a
+ *  copy of the item's payload with an id free in `contracts`, its `library_ref`
+ *  kept (so an illustrative source stays traceable, S2a condition 4) and the
+ *  fill-in markers left in place for the user to replace. */
+export function startingPoint(payload: Record<string, unknown>, ref: LibraryItemRef,
+                              contracts: CommercialContract[]): CommercialContract {
+  const copy = structuredClone(payload) as unknown as CommercialContract
+  const type = contractType(copy) ?? 'ppa'
+  return { ...copy, id: nextContractId(contracts, type), library_ref: ref } as CommercialContract
+}
+
+/** The price fields: where a value copied from an illustrative item is labelled
+ *  "Illustrative EU default" while it is unchanged (SCU06 S2b, GK condition 4). */
+export const PRICE_KEYS = new Set([
+  'price', 'strike', 'premium_eur_per_mwh', 'floor', 'cap', 'sleeving_fee_eur_per_mwh',
+  'indexation_pct_per_year', 'availability_eur_per_mw_year', 'activation_eur_per_mwh',
+  'annual_payment', 'fee_eur_per_mwh', 'fee_eur_per_year',
+])
+
+/** The price fields of `c` that still hold `source`'s value (the Library
+ *  item's payload it was copied from). */
+export function unchangedPrices(c: CommercialContract, source: Record<string, unknown>): string[] {
+  const r = c as unknown as Record<string, unknown>
+  return [...PRICE_KEYS].filter(k => k in source && r[k] === source[k])
 }

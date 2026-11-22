@@ -54,8 +54,10 @@ function itemSummary(kind: LibraryItemKind, p: Record<string, unknown>): string 
     [...parties, ...money].join(', ')}${p.tenor_years ? `; ${String(p.tenor_years)} years` : ''}`
 }
 
-function ItemView({ kind, refItem, onAttach, startVersion }: {
+function ItemView({ kind, refItem, onAttach, onStart, startVersion }: {
   kind: LibraryItemKind; refItem: LibraryItemRef; onAttach: (ref: LibraryItemRef) => void
+  /** "Use as a starting point": a contract copied into the project's contracts. */
+  onStart?: (ref: LibraryItemRef, payload: Record<string, unknown>) => void
   /** The version to show first (a linked pin); the latest when it is not one of this item's. */
   startVersion?: number
 }) {
@@ -88,10 +90,19 @@ function ItemView({ kind, refItem, onAttach, startVersion }: {
           <button type="button" className="underline" onClick={() => onAttach(item.data.ref)}>
             Attach v{item.data.ref.version} as the import tariff</button>
         )}
+        {kind === 'contract' && item.data && onStart && (
+          <button type="button" className="underline"
+                  onClick={() => onStart(item.data.ref, item.data.payload as Record<string, unknown>)}>
+            Use v{item.data.ref.version} as a starting point</button>
+        )}
       </div>
       {item.isError && <p role="alert" className="text-danger">{detailText(item.error)}</p>}
       {item.data && (
         <>
+          {item.data.meta?.source === 'illustrative' && (
+            <p className="text-warn" data-testid="lib-illustrative">
+              Illustrative EU default: its prices are a starting point, not market data.</p>
+          )}
           <p data-testid="lib-item-summary">{itemSummary(kind, item.data.payload as Record<string, unknown>)}</p>
           <details>
             <summary>JSON</summary>
@@ -340,6 +351,12 @@ export default function LibraryBrowser({ onOpenInputs }: { onOpenInputs?: () => 
       setMessage({ tone: 'error', text: `The tariff could not be attached: ${detailText(e)}` })
     }
   }
+  // The copy is added in Tariffs & contracts, unsaved; that editor says what to fill in.
+  const startFrom = (ref: LibraryItemRef, payload: Record<string, unknown>) => {
+    setMessage(null)
+    useUIStore.getState().startContractFrom({ ref, payload })
+    onOpenInputs?.()
+  }
   const requestAttach = async (ref: LibraryItemRef) => {
     setMessage(null)
     try {
@@ -383,7 +400,8 @@ export default function LibraryBrowser({ onOpenInputs }: { onOpenInputs?: () => 
         <div ref={itemView}>
           <ItemView key={`${kind}:${open.id}:${open.version}`} kind={kind} refItem={open}
                     startVersion={openId === open.id ? startVersion : undefined}
-                    onAttach={r => { void requestAttach(r) }} />
+                    onAttach={r => { void requestAttach(r) }}
+                    onStart={onOpenInputs ? startFrom : undefined} />
         </div>
       )}
       {kind === 'tariff' && (

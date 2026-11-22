@@ -110,4 +110,21 @@ describe('DayAheadPrices', () => {
     await waitFor(() => expect((screen.getByTestId('da-fetch') as HTMLButtonElement).disabled).toBe(true))
     expect(screen.getByTestId('da-prices').textContent).toMatch(/Read-only/)
   })
+
+  it('names the pin\'s zone in full when another zone is chosen', async () => {
+    show({ zone: 'NO-2', chosen_zone: 'NO-2' })
+    expect(await screen.findByText('The site pin is in DE-LU · Germany and Luxembourg.')).toBeTruthy()
+  })
+
+  it('removing the token asks first, inline: Keep leaves it, Remove clears it', async () => {
+    api.clearToken.mockResolvedValue({ token_set: false, can_set_token: true } as never)
+    show({ can_set_token: true })
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove the access token' }))
+    expect(screen.getByTestId('da-token-confirm').textContent).toContain('Remove for everyone?')
+    fireEvent.click(screen.getByRole('button', { name: 'Keep' }))
+    expect(api.clearToken).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the access token' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(api.clearToken).toHaveBeenCalledTimes(1))
+  })
 })

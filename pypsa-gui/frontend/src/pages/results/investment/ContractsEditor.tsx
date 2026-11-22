@@ -6,7 +6,7 @@
 // server judges every combination: its 422 is shown at the contract it names.
 import { useEffect, useId, useState } from 'react'
 import { NumInput } from './NumInput'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { commercialApi, libraryApi } from '../../../api/commercial'
 import type { CommercialConfig, CommercialContract, ConnectionAgreement, LibraryRef } from '../../../api/types'
 import { useUIStore } from '../../../store/uiStore'
@@ -16,7 +16,8 @@ import { blankItem } from './tariffModel'
 import { SeriesSelect } from './SeriesSelect'
 import {
   blankContract, CONNECTION, CONTRACT_FIELDS, CONTRACT_TYPES, contractErrors, contractType,
-  missingRequired, nextContractId, setField, type ContractType, type FieldSpec,
+  isPlaceholder, missingRequired, nextContractId, setField, startingPoint, unchangedPrices,
+  unfilledPlaceholders, type ContractType, type FieldSpec,
 } from './contractModel'
 import { ACTION } from './actionStyle'
 
@@ -28,25 +29,35 @@ function Errors({ list }: { list: string[] }) {
     {list.map(e => <li key={e}>{e}</li>)}</ul>
 }
 
+/** Shown on a field that still holds a Library template's fill-in marker. */
+const FILL_IN = 'fill in your own'
+
 function IdsInput({ label, value, onChange }: {
   label: string; value: string[]; onChange: (v: string[]) => void
 }) {
-  const shown = value.join(', ')
+  // A fill-in marker shows as a blank to type over; leaving the field
+  // untouched keeps it, so the save still names it (SCU06 S2b).
+  const marked = value.some(isPlaceholder)
+  const shown = value.filter(x => !isPlaceholder(x)).join(', ')
   const [text, setText] = useState(shown)
   const [focused, setFocused] = useState(false)
   useEffect(() => { if (!focused) setText(shown) }, [shown]) // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <input aria-label={label} className={`${input} w-56`} value={text}
+           placeholder={marked ? FILL_IN : undefined}
            onFocus={() => setFocused(true)} onChange={e => setText(e.target.value)}
            onBlur={() => { setFocused(false)
+                           if (marked && text === shown) return
                            onChange(text.split(',').map(x => x.trim()).filter(Boolean)) }} />
   )
 }
 
 
-function Field({ spec, contract, label, parties, series, set }: {
+function Field({ spec, contract, label, parties, series, set, illustrative = false }: {
   spec: FieldSpec; contract: Record<string, unknown>; label: string; parties: string
   series: LibraryRef[]; set: (value: unknown) => void
+  /** The value is still an illustrative Library default (SCU06 S2b, GK condition 4). */
+  illustrative?: boolean
 }) {
   const v = contract[spec.key]
   const name = `${label} ${spec.label}`
@@ -81,13 +92,16 @@ function Field({ spec, contract, label, parties, series, set }: {
                               series={series} onChange={set} />
       break
     default:
-      control = <input aria-label={name} className={`${input} w-40`} value={String(v ?? '')}
+      control = <input aria-label={name} className={`${input} w-40`}
+                       value={isPlaceholder(v) ? '' : String(v ?? '')}
+                       placeholder={isPlaceholder(v) ? FILL_IN : undefined}
                        list={spec.kind === 'party' ? parties : undefined}
                        onChange={e => set(e.target.value)} />
   }
   return (
     <label className="flex items-center gap-2">
       <span className="w-48">{spec.label}{spec.required ? '' : ' (optional)'}</span>{control}
+      {illustrative && <span className="text-warn" data-testid="ce-illustrative">Illustrative EU default</span>}
     </label>
   )
 }
@@ -201,6 +215,33 @@ export default function ContractsEditor() {
       setBaseline(JSON.stringify(commercial.data?.contracts ?? []))
     }
   }, [commercial.data, commercial.isFetching, contracts])
+  // "Use as a starting point" in the Library: an unsaved copy at the end of
+  // the list, saved only by "Save the contracts" (SCU06 S2b).
+  const start = useUIStore(s => s.contractStart)
+  useEffect(() => {
+    if (!start || !contracts || !commercial.data) return
+    // One editor takes it, where two are mounted (section 7 and Economics).
+    if (useUIStore.getState().contractStart !== start) return
+    useUIStore.getState().clearContractStart()
+    const added = startingPoint(start.payload, start.ref, contracts)
+    setContracts([...contracts, added]); setErrors(new Map())
+    const fill = unfilledPlaceholders(added)
+    setMessage({ tone: 'ok', text: `Added ${added.id}, a copy of Library item ${start.ref.id} v${start.ref.version}. `
+      + (fill.length ? `Fill in ${fill.join(', ')}, then save the contracts.` : 'Save the contracts to keep it.') })
+  }, [start, contracts, commercial.data])
+  // The Library items the contracts were copied from: a price still equal to
+  // an illustrative item's is labelled as one (SCU06 S2b, GK condition 4).
+  const sourceRefs = (contracts ?? []).map(c => c.library_ref)
+    .filter((r): r is NonNullable<typeof r> => !!r && r.kind === 'contract')
+  const sources = useQueries({ queries: sourceRefs.map(r => ({
+    queryKey: nk(project, 'library', 'item', 'contract', r.id, r.version),
+    queryFn: () => libraryApi.getItem('contract', r.id, r.version), retry: false })) })
+  const illustrativePrices = (c: CommercialContract): Set<string> => {
+    const r = c.library_ref
+    const item = r && sources[sourceRefs.findIndex(x => x.id === r.id && x.version === r.version)]?.data
+    if (!item || item.meta?.source !== 'illustrative') return new Set()
+    return new Set(unchangedPrices(c, item.payload as Record<string, unknown>))
+  }
 
   if (commercial.isError) {
     return <p className="text-[11px] text-warn py-2">The project's contracts could not be read; reload before editing them.</p>
@@ -238,6 +279,11 @@ export default function ContractsEditor() {
   const saveContracts = async () => {
     // A blank required party or id is refused here (the model takes '').
     const blank = new Map(contracts.map((c, i) => [i, missingRequired(c)] as const).filter(([, m]) => m.length))
+    // A Library template's fill-in marker left in place: refused here, as the server would.
+    for (const [i, c] of contracts.entries()) {
+      const fill = unfilledPlaceholders(c)
+      if (fill.length) blank.set(i, [...(blank.get(i) ?? []), ...fill.map(f => `${f}: fill in your own (the Library template's placeholder)`)])
+    }
     if (blank.size) {
       setErrors(blank)
       setMessage({ tone: 'error', text: 'The contracts not saved: fill in the required fields (see below).' })
@@ -289,12 +335,14 @@ export default function ContractsEditor() {
         // An untagged (P0-era) contract by its fields; an unknown tag is shown
         // read-only and kept unchanged (WP3.7c review #5).
         const type = contractType(c)
+        const illustrative = illustrativePrices(c)
         return (
           <fieldset key={i} className="border border-border rounded p-2 space-y-1" data-testid={`ce-contract-${i}`}>
             <legend className="font-semibold">{type ? type.toUpperCase() : String(rec.type ?? 'contract')} {c.id}</legend>
             {c.library_ref && <p className="text-muted">Copied from Library item {c.library_ref.id} v{c.library_ref.version}.</p>}
             {type ? CONTRACT_FIELDS[type].filter(f => !f.when || f.when(rec)).map(f => (
               <Field key={f.key} spec={f} contract={rec} label={label} parties={datalist} series={refs}
+                     illustrative={illustrative.has(f.key)}
                      set={v => edit(contracts.map((x, j) => (j === i ? setField(x, f, v, type) : x)))} />
             )) : (
               <p className="text-muted">A contract type this editor does not know: kept as stored.</p>

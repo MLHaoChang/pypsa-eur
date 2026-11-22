@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { CONNECTION, CONTRACT_FIELDS, contractErrors, contractType, missingRequired, setField } from './contractModel'
+import {
+  CONNECTION, CONTRACT_FIELDS, contractErrors, contractType, isPlaceholder, missingRequired, setField,
+  startingPoint, unchangedPrices, unfilledPlaceholders,
+} from './contractModel'
 
 const C = [{ type: 'ppa', id: 'ppa1' }, { type: 'cfd', id: 'cfd1' }] as never[]
 
@@ -40,5 +43,35 @@ describe('contract model', () => {
     expect(contractErrors({ code: 'x', message: 'the connection envelope is stale' }, C).get(CONNECTION))
       .toHaveLength(1)
     expect(contractErrors('solver busy', C).get(-1)).toEqual(['solver busy'])
+  })
+
+  it('reads a fill-in marker as the server does: with or without its invisible prefix, any case', () => {
+    for (const v of ['\u2060fill-in:seller', 'fill-in:seller', '  FILL-IN:x', '\u2060 Fill-In:asset'])
+      expect(isPlaceholder(v)).toBe(true)
+    for (const v of ['Solar BV', 'fill in', 'xfill-in:', '', null, 3, ['\u2060fill-in:a']])
+      expect(isPlaceholder(v)).toBe(false)
+  })
+
+  it('names each field still holding a marker, a list field when any entry is one', () => {
+    const c = { type: 'ppa', id: 'p', kind: 'pay_as_produced', price: 55, tenor_years: 12,
+                seller: '\u2060fill-in:seller', buyer: 'site', asset_ids: ['pv', '\u2060fill-in:asset'] }
+    expect(unfilledPlaceholders(c as never)).toEqual(['seller', 'assets (generators)'])
+    expect(unfilledPlaceholders({ ...c, seller: 'Solar BV', asset_ids: ['pv'] } as never)).toEqual([])
+  })
+
+  it('a starting point takes a free id, keeps the ref and the markers, and copies the payload', () => {
+    const ref = { kind: 'contract' as const, id: 'eu-cfd', version: 1, hash: 'c' }
+    const payload = { type: 'cfd', id: 'eu-cfd', strike: 85, tenor_years: 18, asset_ids: ['\u2060fill-in:asset'] }
+    const taken = [{ type: 'cfd', id: 'cfd_2', strike: 1, tenor_years: 1, asset_ids: ['a'] }]
+    const out = startingPoint(payload, ref, taken as never) as unknown as Record<string, unknown>
+    expect(out).toEqual({ ...payload, id: 'cfd_3', library_ref: ref })
+    ;(out.asset_ids as string[]).push('x')
+    expect(payload.asset_ids).toEqual(['\u2060fill-in:asset'])
+  })
+
+  it('lists the price fields still equal to the source, never a non-price one', () => {
+    const src = { type: 'ppa', price: 55, indexation_pct_per_year: 0, tenor_years: 12 }
+    expect(unchangedPrices({ ...src, price: 55 } as never, src).sort()).toEqual(['indexation_pct_per_year', 'price'])
+    expect(unchangedPrices({ ...src, price: 60, indexation_pct_per_year: 1 } as never, src)).toEqual([])
   })
 })

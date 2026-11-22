@@ -15,7 +15,7 @@ vi.mock('../../../api/commercial', async (importOriginal) => {
   return { ...actual,
     commercialApi: { ...actual.commercialApi, getCommercial: vi.fn(), getValueFlows: vi.fn(),
                      saveCommercial: vi.fn() },
-    libraryApi: { ...actual.libraryApi, listSeries: vi.fn() } }
+    libraryApi: { ...actual.libraryApi, listSeries: vi.fn(), getItem: vi.fn() } }
 })
 const api = vi.mocked(commercialApi)
 const lib = vi.mocked(libraryApi)
@@ -51,7 +51,20 @@ beforeEach(() => {
   api.getValueFlows.mockResolvedValue({ value_flows: null, digest: 'd', status: 'not_set' })
   lib.listSeries.mockResolvedValue([SERIES])
   api.saveCommercial.mockResolvedValue({} as never)
+  lib.getItem.mockRejectedValue(new Error('not in this test'))
+  useUIStore.setState({ contractStart: null })
 })
+
+// SCU06 S2b: a common Library contract as the start of a project contract.
+const M = '\u2060fill-in:'
+const CFD_REF = { kind: 'contract' as const, id: 'eu-cfd', version: 1, hash: 'c' }
+const CFD_ITEM = { type: 'cfd', id: 'eu-cfd', strike: 85, tenor_years: 18, reference: 'interval',
+  generator_owner: `${M}generator_owner`, counterparty: `${M}counterparty`, asset_ids: [`${M}asset`] }
+function startFromLibrary() {
+  lib.getItem.mockResolvedValue({ ref: CFD_REF, payload: structuredClone(CFD_ITEM) as never,
+                                  meta: { source: 'illustrative' } })
+  useUIStore.getState().startContractFrom({ ref: CFD_REF, payload: structuredClone(CFD_ITEM) })
+}
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
 describe('ContractsEditor', () => {
@@ -290,5 +303,69 @@ describe('ContractsEditor', () => {
     const box = await screen.findByTestId('ce-contract-0')
     fireEvent.change(within(box).getByLabelText('Contract old fee (per MWh)'), { target: { value: '' } })
     expect(screen.getByTestId('ce-contract-0').querySelector('legend')!.textContent).toBe('EAAS old')
+  })
+
+  it('adds a Library contract as an unsaved copy: new id, library_ref kept, the fill-ins blank', async () => {
+    startFromLibrary()
+    renderEditor()
+    const added = await screen.findByTestId('ce-contract-6')
+    expect(useUIStore.getState().contractStart).toBeNull()
+    expect(screen.getByRole('status').textContent).toBe('Added cfd_7, a copy of Library item eu-cfd v1. '
+      + 'Fill in generator owner, counterparty, assets (generators), then save the contracts.')
+    expect(within(added).getByText('Copied from Library item eu-cfd v1.')).toBeTruthy()
+    for (const f of ['generator owner', 'counterparty', 'assets (generators)']) {
+      const box = within(added).getByLabelText(`Contract cfd_7 ${f}`) as HTMLInputElement
+      expect([box.value, box.placeholder]).toEqual(['', 'fill in your own'])
+    }
+    expect(api.saveCommercial).not.toHaveBeenCalled()
+    expectAllButtonsNamed(added)
+  })
+
+  it('refuses the save while a fill-in is left, untouched ids included; saves once each is replaced', async () => {
+    startFromLibrary()
+    renderEditor()
+    const added = await screen.findByTestId('ce-contract-6')
+    const ids = within(added).getByLabelText('Contract cfd_7 assets (generators)')
+    fireEvent.focus(ids); fireEvent.blur(ids)                 // untouched: the marker stays
+    fireEvent.change(within(added).getByLabelText('Contract cfd_7 generator owner'), { target: { value: 'Wind BV' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save the contracts' }))
+    const alert = await within(added).findByRole('alert')
+    expect(alert.textContent).toContain("counterparty: fill in your own (the Library template's placeholder)")
+    expect(alert.textContent).toContain('assets (generators): fill in your own')
+    expect(alert.textContent).not.toContain('generator owner')
+    expect(api.saveCommercial).not.toHaveBeenCalled()
+    fireEvent.change(within(added).getByLabelText('Contract cfd_7 counterparty'), { target: { value: 'gov' } })
+    fireEvent.focus(ids); fireEvent.change(ids, { target: { value: 'wind' } }); fireEvent.blur(ids)
+    fireEvent.click(screen.getByRole('button', { name: 'Save the contracts' }))
+    await waitFor(() => expect(api.saveCommercial).toHaveBeenCalledTimes(1))
+    const sent = (api.saveCommercial.mock.calls[0][0] as unknown as { contracts: Array<Record<string, unknown>> }).contracts[6]
+    expect(sent).toEqual({ ...CFD_ITEM, id: 'cfd_7', generator_owner: 'Wind BV', counterparty: 'gov',
+                           asset_ids: ['wind'], library_ref: CFD_REF })
+  })
+
+  it('labels a price copied from an illustrative item until the user changes it', async () => {
+    startFromLibrary()
+    renderEditor()
+    const added = await screen.findByTestId('ce-contract-6')
+    const strike = within(added).getByLabelText('Contract cfd_7 strike (per MWh)')
+    await waitFor(() => expect(strike.closest('label')!.textContent).toContain('Illustrative EU default'))
+    // The tenor is not a price: no label.
+    expect(within(added).getByLabelText('Contract cfd_7 tenor (years)').closest('label')!.textContent)
+      .not.toContain('Illustrative')
+    fireEvent.change(strike, { target: { value: '90' } })
+    expect(strike.closest('label')!.textContent).not.toContain('Illustrative')
+    // ppa1's pin is not illustrative (its item cannot be read): never labelled.
+    expect(within(screen.getByTestId('ce-contract-0')).queryByTestId('ce-illustrative')).toBeNull()
+  })
+
+  it('a non-illustrative Library source is never labelled', async () => {
+    startFromLibrary()
+    lib.getItem.mockResolvedValue({ ref: CFD_REF, payload: structuredClone(CFD_ITEM) as never,
+                                    meta: { source: 'upload' } })
+    renderEditor()
+    await screen.findByTestId('ce-contract-6')
+    await waitFor(() => expect(lib.getItem).toHaveBeenCalledWith('contract', 'eu-cfd', 1))
+    await new Promise(r => setTimeout(r, 0))
+    expect(screen.queryByTestId('ce-illustrative')).toBeNull()
   })
 })
