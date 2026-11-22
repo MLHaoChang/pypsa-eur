@@ -216,10 +216,13 @@ export const isPlaceholder = (v: unknown): boolean =>
 export function unfilledPlaceholders(c: CommercialContract): string[] {
   const type = contractType(c)
   const r = c as unknown as Record<string, unknown>
-  const label = (k: string) => (type && CONTRACT_FIELDS[type].find(f => f.key === k)?.label) || k
+  const specs = type ? CONTRACT_FIELDS[type] : []
+  // In the form's order (the server stores keys sorted); a key the form lacks goes last.
+  const at = (k: string) => { const i = specs.findIndex(f => f.key === k); return i < 0 ? specs.length : i }
   return Object.keys(r)
     .filter(k => isPlaceholder(r[k]) || (Array.isArray(r[k]) && (r[k] as unknown[]).some(isPlaceholder)))
-    .map(label)
+    .sort((a, b) => at(a) - at(b))
+    .map(k => specs.find(f => f.key === k)?.label ?? k)
 }
 
 /** A Library contract as the start of a new project contract (SCU06 S2b): a

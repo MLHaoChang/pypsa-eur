@@ -16,6 +16,7 @@ import { formatApiDetail } from '../../../api/client'
 import { pinnedVersions, replacesInline, urdbRate, type RateChoice } from './libraryModel'
 import { LibraryReferences } from './LibraryReferences'
 import { DayAheadPrices } from './DayAheadPrices'
+import { isPlaceholder } from './contractModel'
 
 const input = 'border border-border rounded px-1 py-0.5 text-[11px] bg-bg'
 const KINDS: Array<{ id: LibraryItemKind; label: string }> = [
@@ -47,7 +48,8 @@ function itemSummary(kind: LibraryItemKind, p: Record<string, unknown>): string 
       p.capacity_fee ? ', with a capacity fee' : ''}`
   }
   const parties = ['seller', 'buyer', 'lessor', 'lessee', 'provider', 'customer', 'retailer',
-                   'counterparty', 'generator_owner'].filter(k => p[k]).map(k => `${k} ${String(p[k])}`)
+                   'counterparty', 'generator_owner'].filter(k => p[k])
+    .map(k => `${k.replace(/_/g, ' ')} ${isPlaceholder(p[k]) ? '(to fill in)' : String(p[k])}`)
   const money = ['price', 'strike', 'annual_payment', 'fee_eur_per_mwh', 'fee_eur_per_year',
                  'availability_eur_per_mw_year'].filter(k => p[k] != null).map(k => `${k.replace(/_/g, ' ')} ${String(p[k])}`)
   return `${String(p.type ?? 'contract').toUpperCase()}${p.kind ? ` (${String(p.kind)})` : ''}: ${

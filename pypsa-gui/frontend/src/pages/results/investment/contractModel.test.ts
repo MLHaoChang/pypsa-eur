@@ -53,10 +53,11 @@ describe('contract model', () => {
   })
 
   it('names each field still holding a marker, a list field when any entry is one', () => {
-    const c = { type: 'ppa', id: 'p', kind: 'pay_as_produced', price: 55, tenor_years: 12,
-                seller: '\u2060fill-in:seller', buyer: 'site', asset_ids: ['pv', '\u2060fill-in:asset'] }
-    expect(unfilledPlaceholders(c as never)).toEqual(['seller', 'assets (generators)'])
-    expect(unfilledPlaceholders({ ...c, seller: 'Solar BV', asset_ids: ['pv'] } as never)).toEqual([])
+    // Keys sorted, as the server returns them: the names follow the form.
+    const c = { asset_ids: ['pv', '\u2060fill-in:asset'], buyer: 'site', id: 'p', kind: 'pay_as_produced',
+                price: 55, seller: '\u2060fill-in:seller', tenor_years: 12, type: 'ppa', x: '\u2060fill-in:x' }
+    expect(unfilledPlaceholders(c as never)).toEqual(['seller', 'assets (generators)', 'x'])
+    expect(unfilledPlaceholders({ ...c, seller: 'Solar BV', asset_ids: ['pv'], x: 'y' } as never)).toEqual([])
   })
 
   it('a starting point takes a free id, keeps the ref and the markers, and copies the payload', () => {

@@ -236,6 +236,8 @@ describe('LibraryBrowser', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'eu-ppa-baseload' }))
     expect((await screen.findByTestId('lib-illustrative')).textContent)
       .toBe('Illustrative EU default: its prices are a starting point, not market data.')
+    expect(screen.getByTestId('lib-item-summary').textContent)
+      .toBe('PPA (baseload): seller (to fill in), buyer (to fill in), price 60; 10 years')
     fireEvent.click(screen.getByRole('button', { name: 'Use v1 as a starting point' }))
     expect(useUIStore.getState().contractStart).toEqual({ ref, payload })
     expect(open).toHaveBeenCalledTimes(1)
