@@ -3,7 +3,7 @@
 
 # 22 Business-case run: `network_busy` reads as "the investment case is out of date"
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), walk W2.
 Model: sonnet. Review: GK B.

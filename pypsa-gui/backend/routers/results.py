@@ -2720,6 +2720,10 @@ def _bc_ic_check() -> tuple[str, str | None]:
         raise HTTPException(409, {"code": "investment_case_missing", "reason": "no_report",
                                   "message": "run the investment case first"})
     current, why = _ic_current_assumptions()
+    if current is None and why == "network_busy":
+        from services.business_case.runner import NETWORK_BUSY_MESSAGE
+        raise HTTPException(409, {"code": "network_busy", "reason": "network_busy",
+                                  "message": NETWORK_BUSY_MESSAGE})
     st = staleness(stored, current, reason=why)
     if st["stale"] is not False:
         raise HTTPException(409, {"code": "investment_case_missing",
