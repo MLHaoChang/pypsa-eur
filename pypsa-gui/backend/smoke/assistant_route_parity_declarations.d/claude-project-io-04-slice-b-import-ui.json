@@ -4,19 +4,19 @@
    "method": "GET",
    "path": "/api/model-import/formats",
    "reason": "held-by-spec",
-   "issue": ".scratch/project-io/issues/04-model-import-pipeline.md"
+   "issue": ".scratch/project-io/issues/05-import-preview-suggestions.md"
   },
   {
    "method": "POST",
    "path": "/api/model-import/preview",
    "reason": "held-by-spec",
-   "issue": ".scratch/project-io/issues/04-model-import-pipeline.md"
+   "issue": ".scratch/project-io/issues/05-import-preview-suggestions.md"
   },
   {
    "method": "POST",
    "path": "/api/model-import/import",
    "reason": "held-by-spec",
-   "issue": ".scratch/project-io/issues/04-model-import-pipeline.md"
+   "issue": ".scratch/project-io/issues/05-import-preview-suggestions.md"
   }
  ]
 }
