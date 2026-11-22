@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The IPP business-case preset can run once prices and the de-rating are typed: Apply preset fills the plant capex life (assumed, from the pinned pack), the plan and the lines panel say when no terminal-value method can price the plant capex, and a capacity payment has a De-rating input.

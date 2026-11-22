@@ -66,7 +66,13 @@
           "category": "equipment",
           "unit": "lump",
           "escalation": "capex",
-          "note": "Plant capex not in the energy model's asset capex (grid connection, balance of plant, installation): the base of the insurance share. Capex is priced once: do not re-enter the generators or the battery. No sourced default: enter the price and life."
+          "note": "Plant capex not in the energy model's asset capex (grid connection, balance of plant, installation): the base of the insurance share. Capex is priced once: do not re-enter the generators or the battery. No sourced default for the price: enter it. Life: the onshore-wind lifetime of the pinned pack, assumed for the balance of plant; change it to your plant.",
+          "default_keys": {
+            "life_years": "onwind.investment.lifetime"
+          },
+          "default_units": {
+            "life_years": "years"
+          }
         },
         {
           "name": "Insurance",

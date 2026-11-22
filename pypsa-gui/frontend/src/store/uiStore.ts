@@ -555,6 +555,10 @@ interface UIStore {
   solverBlockRequest: 'economic' | 'sclopf' | 'goal' | 'voll' | 'strategy' | 'offgrid' | 'island' | 'reserve' | null
   /** Request-then-scroll to the Grid codes section of the Grid connection part (AS-10). */
   gridCodeScrollRequest: boolean
+  /** "Terminal value ›" asks the finance inputs to scroll to the terminal-value field. */
+  terminalValueScrollRequest: boolean
+  requestTerminalValueScroll: () => void
+  clearTerminalValueScrollRequest: () => void
   requestGridCodeScroll: () => void
   clearGridCodeScrollRequest: () => void
   /** Set by showGridReadiness: Issues scrolls to the Grid readiness group once it is mounted. */
@@ -866,6 +870,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   economicsTabRequest: null,
   solverBlockRequest: null,
   gridCodeScrollRequest: false,
+  terminalValueScrollRequest: false,
   gridReadinessRequest: false,
   timeSeriesFocus: null,
   libraryFocus: null,
@@ -1158,6 +1163,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
   requestSolverBlock: (block) => set({ solverBlockRequest: block }),
   clearSolverBlockRequest: () => set({ solverBlockRequest: null }),
   requestGridCodeScroll: () => set({ gridCodeScrollRequest: true }),
+  requestTerminalValueScroll: () => set({ terminalValueScrollRequest: true }),
+  clearTerminalValueScrollRequest: () => set({ terminalValueScrollRequest: false }),
   clearGridCodeScrollRequest: () => set({ gridCodeScrollRequest: false }),
   requestGridReadiness: () => set({ gridReadinessRequest: true }),
   clearGridReadinessRequest: () => set({ gridReadinessRequest: false }),

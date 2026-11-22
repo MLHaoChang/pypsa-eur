@@ -10,6 +10,8 @@ import {
   type BusinessCaseConfig, type BusinessCaseOptions, type LineItem,
 } from '../../../api/businessCase'
 import BusinessCaseLines from './BusinessCaseLines'
+import { financeApi } from '../../../api/finance'
+import { useUIStore } from '../../../store/uiStore'
 import { expectAllButtonsNamed } from '../../../test-utils/accessibleName'
 
 vi.mock('../../../api/businessCase', async (importOriginal) => {
@@ -383,5 +385,68 @@ describe('the volume factor strip', () => {
     fireEvent.click(within(line).getByRole('button', { name: /Remove/ }))
     expect(screen.getByTestId('bc-unsaved')).toBeTruthy()
     expect((await saved()).volume_factor_by_year).toEqual({ 2031: 0.6 })
+  })
+})
+
+describe('a capex line with no terminal-value method (#21)', () => {
+  const finance = (terminal_value?: { method: string }) =>
+    vi.mocked(financeApi.getFinance).mockResolvedValue(
+      { finance: { currency: 'EUR', ...(terminal_value ? { terminal_value } : {}) }, digest: 'f1', status: 'ok' } as never)
+  afterEach(() => { finance() })
+
+  it('says the plant has no end-of-life value and links to the setting', async () => {
+    finance({ method: 'none' })
+    mount(config(CAPEX))
+    const note = await screen.findByTestId('bc-terminal-missing')
+    expect(note.textContent).toContain('Plant has no end-of-life value: choose a terminal-value method that can price it.')
+    expect(within(note).getByTestId('bc-open-terminal').textContent).toContain('Terminal value')
+    // The link opens the finance panel and asks it to scroll to the terminal-value field.
+    useUIStore.setState({ terminalValueScrollRequest: false })
+    fireEvent.click(within(note).getByTestId('bc-open-terminal'))
+    expect(useUIStore.getState().terminalValueScrollRequest).toBe(true)
+  })
+  it('says it too when the finance inputs leave the method unset', async () => {
+    finance()
+    mount(config(CAPEX))
+    expect(await screen.findByTestId('bc-terminal-missing')).toBeTruthy()
+  })
+  it('says nothing once the project has a method, or when there is no capex line', async () => {
+    finance({ method: 'remaining_life_annuity' })
+    mount(config(CAPEX))
+    await screen.findByLabelText('Unit, Plant')
+    expect(screen.queryByTestId('bc-terminal-missing')).toBeNull()
+    cleanup()
+    finance({ method: 'none' })
+    mount(config(H2))
+    await screen.findByLabelText('Unit, H2 sales')
+    expect(screen.queryByTestId('bc-terminal-missing')).toBeNull()
+  })
+})
+
+describe('the de-rating of a capacity payment (#21)', () => {
+  const CAP: LineItem = {
+    name: 'Capacity payment', kind: 'revenue', category: 'capacity_payment', unit: 'kW_year',
+    quantity_source: 'linked:capacity.StorageUnit.bess@1', escalation: 'opex',
+  }
+  it('shows its refusal on the field, which opens from the row and takes a value in 0 to 1', async () => {
+    mount(config(CAP), { refusals: [
+      { code: 'business_case_refused', refusal: 'derating_missing', field: 'lines[0].derating', message: 'x' },
+    ] })
+    const row = await screen.findByTestId('bc-row-refusals')
+    expect(row.textContent).toMatch(/^De-rating: set the share of the capacity the market pays for/)
+    fireEvent.click(within(row).getByRole('button', { name: 'Show details' }))
+    const field = screen.getByLabelText('De-rating, Capacity payment') as HTMLInputElement
+    expect(field.getAttribute('aria-invalid')).toBe('true')
+    expect(field.value).toBe('')  // no default
+    fireEvent.change(field, { target: { value: '0.9' } })
+    await waitFor(() => expect((screen.getByLabelText('De-rating, Capacity payment') as HTMLInputElement).value).toBe('0.9'))
+  })
+  it('is offered on a capacity payment linked to capacity only', async () => {
+    mount(config(H2, { ...CAP, name: 'Typed fee', quantity_source: 'typed', unit: 'MWh' }))
+    fireEvent.click(await screen.findByLabelText('Show details of Typed fee'))
+    await screen.findByLabelText('Money year, Typed fee')  // its details are open
+    expect(screen.queryByLabelText(/^De-rating/)).toBeNull()
+    fireEvent.click(screen.getByLabelText('Show details of H2 sales'))
+    expect(screen.queryByLabelText(/^De-rating/)).toBeNull()
   })
 })
