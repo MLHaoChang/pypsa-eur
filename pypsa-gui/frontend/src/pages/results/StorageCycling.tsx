@@ -319,7 +319,7 @@ export default function StorageCycling() {
           still hit the server's MAX_RESPONSE_VALUES cap. */}
       <WindowCapBanner payloads={[storPowerTS as TSPayload | null]} />
       <header>
-        <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
+        <h3 className="text-h3 font-semibold text-text">
           Storage cycling
           <span className="ml-2 text-[10px] font-normal text-muted">{periodLabel}</span>
         </h3>
@@ -372,7 +372,7 @@ function PerUnitCyclingSection({ units }: { units: UnitRow[] }) {
     getValue: (r, k) => (k === 'name' || k === 'carrier') ? r[k] : r[k] as number,
   })
   return (
-    <section className="rounded-[10px] border border-border bg-bg overflow-hidden">
+    <section className="rounded-card border border-border bg-bg overflow-hidden">
       <header className="px-4 py-2.5 border-b border-border bg-bg-2 flex items-center gap-2 flex-wrap">
         <span className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Per-unit detail</span>
         <span className="text-[10px] text-muted">click headers to sort</span>

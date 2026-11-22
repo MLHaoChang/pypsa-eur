@@ -8,6 +8,7 @@ import { useUIStore } from '../../store/uiStore'
 import { openPanel } from './openPanel'
 import { showGridReadiness } from '../../layout/flowNavigation'
 import { Btn, PageSection } from '../../components/PageKit'
+import EmptyState from '../../components/EmptyState'
 import { useFlowScope } from '../../components/flowScope/useFlowScope'
 import { inScope } from '../../api/flow'
 import { CampusResultsTab } from '../CampusElectricalPanel'
@@ -22,7 +23,7 @@ function GridNext() {
   return (
     <p data-testid="grid-next" className="text-[11px] text-muted">
       Next: {control ? 'Control' : 'hand off'}{' '}
-      <button type="button" data-testid="grid-next-open" onClick={go} className="text-accent hover:underline">
+      <button type="button" data-testid="grid-next-open" onClick={go} className="text-link hover:underline">
         {control ? 'Run the island study in Grid study' : 'Open Reports'} ›
       </button>
     </p>
@@ -41,7 +42,7 @@ function Loading() {
 }
 
 function NoProject() {
-  return <p className="text-[12px] text-muted" data-testid="grid-tab-state">Open a solved project to see its grid study results.</p>
+  return <EmptyState testId="grid-tab-state" title="No project open">Open a solved project to see its grid study results.</EmptyState>
 }
 
 /** A planning → dynamics project's connection capacity and assessments, read-only. */
@@ -52,11 +53,10 @@ function StudyConnection({ name }: { name: string }) {
   if (status.data.status !== 'completed') {
     const running = status.data.status === 'running'
     return (
-      <div data-testid="grid-tab-state" className="text-[12px] text-muted space-y-2">
-        <p>{running ? 'Running: the planning → dynamics study is still going.'
-          : 'Not run yet: the planning → dynamics study has not finished.'}</p>
-        {!running && <Btn onClick={openStudy}>Open Planning → dynamics ›</Btn>}
-      </div>
+      <EmptyState testId="grid-tab-state" title={running ? 'Running' : 'Not run yet'}
+        action={running ? undefined : { label: 'Open Planning → dynamics ›', onClick: openStudy }}>
+        {running ? 'The planning → dynamics study is still going.' : 'The planning → dynamics study has not finished.'}
+      </EmptyState>
     )
   }
   return (
@@ -79,7 +79,7 @@ export function GridCodeTab() {
       <PageSection title="Grid code & connection" hint="What the grid-readiness scorecard does not show">
         <p className="text-[11px] text-muted">
           Grid-code verdicts, with the before / after-battery values, are in the scorecard.{' '}
-          <button type="button" data-testid="grid-code-scorecard-link" className="text-accent hover:underline"
+          <button type="button" data-testid="grid-code-scorecard-link" className="text-link hover:underline"
             onClick={showGridReadiness}>Readiness › Grid readiness ›</button>
         </p>
       </PageSection>
@@ -98,10 +98,12 @@ export function ElectricalDesignTab() {
   if (!name) return <NoProject />
   if (kind.isStudy) {
     return (
-      <p className="p-4 text-[12px] text-muted" data-testid="grid-tab-state">
-        The electrical design comes from the campus study of a capacity-expansion (hub) project, not from a
-        planning → dynamics study.
-      </p>
+      <div className="p-4">
+        <EmptyState testId="grid-tab-state" title="Not available for this project">
+          The electrical design comes from the campus study of a capacity-expansion (hub) project, not from a
+          planning → dynamics study.
+        </EmptyState>
+      </div>
     )
   }
   return (

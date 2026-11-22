@@ -895,6 +895,12 @@ class ImportSummary(BaseModel):
     snapshots: int
 
 
+class ExcelImportSummary(ImportSummary):
+    """/api/io/import/excel: the summary, and what the reader could not read or assumed (an ImportReport)."""
+
+    report: dict
+
+
 class ImportFolderRequest(BaseModel):
     """
     A folder the desktop user points at, to import pre-desktop projects from.

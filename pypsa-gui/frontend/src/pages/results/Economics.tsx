@@ -701,7 +701,7 @@ export default function Economics() {
       {/* ── KPI strip ──────────────────────────────────────────────────── */}
       <section>
         <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
+          <h3 className="text-h3 font-semibold text-text">
             Portfolio economics{periodLabel}
             {carrierFilter.isFiltered && (
               <span className="ml-2 text-[10.5px] font-normal text-muted">
@@ -1238,7 +1238,7 @@ function LcohSection() {
   return (
     <section>
       <div className="flex items-center justify-between mb-2">
-        <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
+        <h3 className="text-h3 font-semibold text-text">
           Levelised Cost of Hydrogen (LCOH)
           <span className="ml-2 text-[10px] font-normal text-muted">{scopeLabel}</span>
         </h3>
@@ -1273,7 +1273,7 @@ function LcohSection() {
                hint="Cost of electrons fed into the electrolysers, priced at merit-order (curtailment-subsidy-removed) bus duals — same correction the per-asset economics use" />
         </div>
       )}
-      <div className="rounded-[10px] border border-border bg-bg overflow-hidden">
+      <div className="rounded-card border border-border bg-bg overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-[11.5px] min-w-[900px]">
             <thead className="bg-bg-2 border-b border-border">

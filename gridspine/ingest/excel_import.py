@@ -188,9 +188,9 @@ def _number(v: Any, *, inf: float | None = None) -> float:
                 raise ValueError(v)
             f = float(v.strip())
         except ValueError:
-            raise _Bad(f"'{v[:40]}' is not a number") from None
+            raise _Bad(f"“{v[:40]}” is not a number") from None
     else:
-        raise _Bad(f"'{str(v)[:40]}' is not a number")
+        raise _Bad(f"“{str(v)[:40]}” is not a number")
     if math.isnan(f):
         raise _Bad("not a number (NaN)")
     if math.isinf(f) and f != inf:
@@ -218,7 +218,7 @@ def _convert(
             return v
         if isinstance(v, str) and v.strip().lower() in _BOOL_TEXT:
             return _BOOL_TEXT[v.strip().lower()]
-        raise _Bad(f"'{str(v)[:40]}' is not TRUE or FALSE")
+        raise _Bad(f"“{str(v)[:40]}” is not TRUE or FALSE")
     if typ is float:
         f = _number(v, inf=inf)
         return f if math.isinf(f) else L.rescale(f, 1.0 / scale)
@@ -235,8 +235,11 @@ def _convert(
         if hasattr(v, "isoformat"):
             return v.isoformat()
         return str(v)
-    # A custom column (no model type): kept as the cell holds it. An .xlsx cell
-    # cannot hold NaN, and a typed "nan" stays text.
+    # A custom column (no model type): kept as the cell holds it, but a number shown
+    # in another unit (a part's EUR/kW) goes back to its stored unit, as the writer
+    # scaled it. An .xlsx cell cannot hold NaN, and a typed "nan" stays text.
+    if scale != 1.0 and isinstance(v, int | float) and not isinstance(v, bool):
+        return L.rescale(float(v), 1.0 / scale)
     return v
 
 
@@ -271,7 +274,7 @@ class _Reader:
         if sheet not in self.s.hidden:
             self.unmapped(
                 sheet,
-                f"'{sheet}' is a reserved name for the workbook's hidden sheet; "
+                f"“{sheet}” is a reserved name for the workbook's hidden sheet; "
                 "this visible sheet was not read",
             )
             return
@@ -355,13 +358,13 @@ class _Reader:
         expected = self.units.get(cls, {}).get(key)
         if expected is not None and str(unit) != expected:
             self.unmapped(
-                shown, f"the unit '{unit}' is not this parameter's unit '{expected}'"
+                shown, f"the unit “{unit}” is not this parameter's unit “{expected}”"
             )
             return False
         if not L.scale_ok(str(unit), scale):
             self.unmapped(
                 shown,
-                f"the hidden unit factor (row {row}) does not match the unit '{unit}'",
+                f"the hidden unit factor (row {row}) does not match the unit “{unit}”",
             )
             return False
         return True
@@ -397,7 +400,7 @@ class _Reader:
             key = self.s.cell(sheet, L.ROW_KEY, c)
             unit = self.s.cell(sheet, L.ROW_UNIT, c) or ""
             scale = self.s.cell(sheet, L.ROW_SCALE, c)
-            shown = f"{sheet} › {label or key or f'column {c}'}"
+            shown = f"{sheet} · {label or key or f'column {c}'}"
             has_data = any(
                 len(r) >= c and r[c - 1] is not None
                 for r in rows[L.FIRST_DATA_ROW - 1 :]
@@ -413,7 +416,11 @@ class _Reader:
             if key not in allowed and not (
                 key == L.SIZE_UNIT_KEY and cls in L.SIZE_BUS
             ):
-                self.unmapped(shown, f"'{key[:60]}' is not a parameter of {sheet}")
+                self.unmapped(
+                    shown,
+                    f"its hidden model name “{key[:60]}” is not one {sheet} reads; "
+                    "the column was not read",
+                )
                 continue
             if not self._unit_ok(shown, cls, key, unit, scale, row=L.ROW_SCALE):
                 continue
@@ -460,7 +467,7 @@ class _Reader:
                     continue
                 if self.s.uncached_formula(sheet, r, c):
                     self.unmapped(
-                        f"{sheet} › {name} › {label}",
+                        f"{sheet} · {name} · {label}",
                         "a formula with no saved value; "
                         "open and save the file in Excel, or type the value",
                     )
@@ -485,7 +492,7 @@ class _Reader:
                     )
                 except _Bad as exc:
                     self.unmapped(
-                        f"{sheet} › {name} › {label}",
+                        f"{sheet} · {name} · {label}",
                         f"{exc}; the model default is kept",
                     )
             records[name] = values
@@ -515,7 +522,7 @@ class _Reader:
                     added.append(name)
                 except Exception as row_exc:  # noqa: BLE001
                     self.unmapped(
-                        f"{sheet} › {name}", f"the model refused the row: {row_exc}"
+                        f"{sheet} · {name}", f"the model refused the row: {row_exc}"
                     )
             logger.info("batch add of %s fell back to rows: %s", cls, exc)
             names = added
@@ -563,7 +570,7 @@ class _Reader:
             expected = L.size_unit(cls, bus_unit)
             if unit != expected:
                 self.report.warnings.append(
-                    f"{sheet} › {name}: size unit '{unit[:20]}' but its node counts in '{expected}'; "
+                    f"{sheet} · {name}: size unit “{unit[:20]}” but its node counts in “{expected}”; "
                     f"the size is read in {expected}."
                 )
 
@@ -588,10 +595,10 @@ class _Reader:
             if key in settings:
                 label, unit, scale = settings[key]
                 v = self.s.cell(sheet, r, 2)
-                shown = f"{sheet} › {label}"
+                shown = f"{sheet} · {label}"
                 if key in seen:
                     self.unmapped(
-                        f"{sheet} row {r}", f"a second row for the setting '{label}'"
+                        f"{sheet} row {r}", f"a second row for the setting “{label}”"
                     )
                     continue
                 seen.add(key)
@@ -602,7 +609,7 @@ class _Reader:
                 try:
                     if key == "discount_rate":
                         if (self.s.cell(sheet, r, 3) or "") != unit:
-                            raise _Bad(f"the unit must be '{unit}'")
+                            raise _Bad(f"the unit must be “{unit}”")
                         exact = self.exact_value((sheet, "", key, ""), v, scale)
                         solver[key] = (
                             exact
@@ -619,7 +626,7 @@ class _Reader:
                     elif key == "snapshot_kind":
                         if v not in L.SNAPSHOT_KINDS:
                             raise _Bad(
-                                f"'{str(v)[:20]}' is not one of {', '.join(L.SNAPSHOT_KINDS)}"
+                                f"“{str(v)[:20]}” is not one of {', '.join(L.SNAPSHOT_KINDS)}"
                             )
                         solver[key] = v
                 except _Bad as exc:
@@ -631,7 +638,7 @@ class _Reader:
             elif period_header is None and key not in (None, "key"):
                 self.unmapped(
                     f"{sheet} row {r}",
-                    f"'{str(key)[:40]}' is not a setting this workbook uses",
+                    f"“{str(key)[:40]}” is not a setting this workbook uses",
                 )
         if period_header is not None:
             periods: dict[int, tuple[float, float]] = {}
@@ -668,7 +675,7 @@ class _Reader:
             )
             label = self.s.cell(sheet, L.TS_ROW_LABEL, c)
             asset = self.s.cell(sheet, L.TS_ROW_ASSET, c)
-            shown = f"{sheet} › {asset or ''} {label or attr or f'column {c}'}".replace(
+            shown = f"{sheet} · {asset or ''} {label or attr or f'column {c}'}".replace(
                 "  ", " "
             )
             if cls == "snapshots" and attr in {k for k, _, _ in L.SNAPSHOT_COLUMNS}:
@@ -685,7 +692,7 @@ class _Reader:
                     )
                 continue
             if cls not in L.LIST_NAME:
-                self.unmapped(shown, f"'{str(cls)[:40]}' is not an asset type")
+                self.unmapped(shown, f"“{str(cls)[:40]}” is not an asset type")
                 continue
             defaults = self.n.components[L.LIST_NAME[cls]].defaults
             if (
@@ -695,7 +702,7 @@ class _Reader:
             ):
                 self.unmapped(
                     shown,
-                    f"'{str(attr)[:40]}' is not a parameter that can change over time",
+                    f"“{str(attr)[:40]}” is not a parameter that can change over time",
                 )
                 continue
             unit = self.s.cell(sheet, L.TS_ROW_UNIT, c) or ""
@@ -773,7 +780,7 @@ class _Reader:
                 try:
                     vals.append(_weighting(self.s.cell(sheet, r, time_cols[key])))
                 except _Bad as exc:
-                    self.unmapped(f"{sheet} row {r} › weighting", f"{exc}; 1 is used")
+                    self.unmapped(f"{sheet} row {r} · weighting", f"{exc}; 1 is used")
                     vals.append(1.0)
             self.n.snapshot_weightings[key] = vals
         self._keep_rows = keep_rows
@@ -783,10 +790,10 @@ class _Reader:
         sheet = L.TIME_SERIES
         for c, cls, attr, asset, scale, user in getattr(self, "_series_cols", ()):
             table = getattr(self.n, L.LIST_NAME[cls])
-            shown = f"{sheet} › {asset} › {attr}"
+            shown = f"{sheet} · {asset} · {attr}"
             if asset not in table.index:
                 self.unmapped(
-                    shown, f"no {L.SHEET_OF[cls]} row is named '{asset[:40]}'"
+                    shown, f"no {L.SHEET_OF[cls]} row is named “{asset[:40]}”"
                 )
                 continue
             if rows is None:
@@ -852,7 +859,7 @@ class _Reader:
             attr = self.s.cell(sheet, L.UP_ROW_ATTR, j)
             asset = self.s.cell(sheet, L.UP_ROW_ASSET, j)
             extra = _json_dict(self.s.cell(sheet, L.UP_ROW_META, j))
-            shown = f"{sheet} › {asset} › {attr}"
+            shown = f"{sheet} · {asset} · {attr}"
             if (
                 list_name not in {ln for _, _, ln in L.SHEETS}
                 or attr is None
@@ -903,7 +910,7 @@ class _Reader:
         for p, (obj, yrs) in periods.items():
             if p not in have:
                 self.unmapped(
-                    f"{L.HORIZON} › period {p}", "no time step belongs to this period"
+                    f"{L.HORIZON} · period {p}", "no time step belongs to this period"
                 )
                 continue
             self.n.investment_period_weightings.loc[p, "objective"] = obj
@@ -930,7 +937,7 @@ def _json_list(v: str) -> list:
     except ValueError:
         out = None
     if not isinstance(out, list):
-        raise _Bad(f"'{v[:40]}' is not a time step")
+        raise _Bad(f"“{v[:40]}” is not a time step")
     return out
 
 
@@ -943,11 +950,11 @@ def _snapshot(v: Any, kind: str) -> Any:
     if kind == "dates":
         if hasattr(v, "isoformat") and not isinstance(v, str):
             if getattr(v, "tzinfo", None) is not None:
-                raise _Bad(f"'{v}' carries a time zone; give local time without one")
+                raise _Bad(f"“{v}” carries a time zone; give local time without one")
             return pd.Timestamp(v)
         if not isinstance(v, str) or not _ISO_DATE.match(v.strip()):
             raise _Bad(
-                f"'{str(v)[:40]}' is not a date as YYYY-MM-DD or YYYY-MM-DD hh:mm[:ss], "
+                f"“{str(v)[:40]}” is not a date as YYYY-MM-DD or YYYY-MM-DD hh:mm[:ss], "
                 "without a time zone"
             )
         return pd.Timestamp(v.strip())
@@ -981,7 +988,7 @@ def _read_input_workbook(
     rd.unused_exact()
     for sheet, r, c in sheets.unread_formulas():
         rd.unmapped(
-            f"{sheet} › cell {get_column_letter(c)}{r}",
+            f"{sheet} · cell {get_column_letter(c)}{r}",
             "a formula with no saved value; open and save the file in Excel, or type the value",
         )
     report.counts[L.TIME_SERIES] = sum(
@@ -1042,7 +1049,7 @@ def _report_formulas(sheets: _Sheets, report: ImportReport) -> None:
     for sheet, r, c in sheets.unread_formulas():
         report.unmapped.append(
             Unmapped(
-                f"{sheet} › cell {get_column_letter(c)}{r}",
+                f"{sheet} · cell {get_column_letter(c)}{r}",
                 "a formula with no saved value; open and save the file in Excel, or type the value",
             )
         )
@@ -1081,7 +1088,7 @@ def _na_text(v: Any) -> bool:
 
 def _na_bad(v: Any) -> None:
     if _na_text(v):
-        raise _Bad(f"the text '{v}' reads as empty; leave the cell empty instead")
+        raise _Bad(f"the text “{v}” reads as empty; leave the cell empty instead")
 
 
 def _native_series_sheet(name: str) -> bool:
@@ -1127,12 +1134,12 @@ def _check_network_sheet(ws, report: ImportReport) -> None:
                 v is not None
                 for (v,) in ws.iter_rows(min_col=c, max_col=c, values_only=True)
             ):
-                report.unmapped.append(Unmapped(f"network › column {c}", _NO_HEADER))
+                report.unmapped.append(Unmapped(f"network · column {c}", _NO_HEADER))
             drop.append(c)
             continue
         if not isinstance(h, str) or h not in _NETWORK_SETTINGS or h in seen:
             report.unmapped.append(
-                Unmapped(f"network › column {str(h)[:40]}", _NOT_SETTING)
+                Unmapped(f"network · column {str(h)[:40]}", _NOT_SETTING)
             )
             drop.append(c)
             continue
@@ -1152,14 +1159,14 @@ def _check_network_sheet(ws, report: ImportReport) -> None:
                 try:
                     Version(got)
                 except InvalidVersion:
-                    raise _Bad(f"'{got[:40]}' is not a version number") from None
+                    raise _Bad(f"“{got[:40]}” is not a version number") from None
             elif h == "srid" and got <= 0:
                 raise _Bad(f"{got} is not a spatial reference id")
             elif h == "_multi_invest" and got not in (0, 1):
                 raise _Bad(f"{got} is not 0 or 1")
         except _Bad as exc:
             report.unmapped.append(
-                Unmapped(f"network › {h}", f"{exc}; the setting was not read")
+                Unmapped(f"network · {h}", f"{exc}; the setting was not read")
             )
             drop.append(c)
     for c in reversed(drop):
@@ -1239,7 +1246,7 @@ def _check_index(ws, cols: Sequence[int], *, whole: Sequence[int] = ()) -> None:
                     problem = f"is not a year: {exc}"
         if problem:
             raise L.ImportFormatError(
-                f"The '{ws.title}' sheet's row {r} {problem}; PyPSA's layout needs one "
+                f"The “{ws.title}” sheet's row {r} {problem}; PyPSA's layout needs one "
                 "named row per time step or period."
             )
         seen.add(key)
@@ -1290,7 +1297,7 @@ def _check_native_copy(wb, report: ImportReport) -> set[str]:
                 continue
             report.unmapped.append(
                 Unmapped(
-                    f"investment_periods › column {c if h is None else str(h)[:40]}",
+                    f"investment_periods · column {c if h is None else str(h)[:40]}",
                     _NOT_INPUT,
                 )
             )
@@ -1338,8 +1345,8 @@ def _drop_unknown_types(n: pypsa.Network, report: ImportReport) -> dict[str, int
         for name, v in bad.items():
             report.unmapped.append(
                 Unmapped(
-                    f"{L.LIST_NAME[cls]} › {name}",
-                    f"type: '{v[:40]}' is not a standard {cls.lower()} type; "
+                    f"{L.LIST_NAME[cls]} · {name}",
+                    f"type: “{v[:40]}” is not a standard {cls.lower()} type; "
                     "the asset was not read",
                 )
             )
@@ -1386,8 +1393,8 @@ def _drop_dangling(
             for name, (col, v) in hits.items():
                 report.unmapped.append(
                     Unmapped(
-                        f"{ln} › {name}",
-                        f"{col}: '{str(v)[:40]}' was not read, so this asset was not read either",
+                        f"{ln} · {name}",
+                        f"{col}: “{str(v)[:40]}” was not read, so this asset was not read either",
                     )
                 )
             n.remove(cls, list(hits))
@@ -1430,12 +1437,12 @@ def _check_native_cells(
                     # PyPSA keeps a header-less column as "Unnamed: <c>".
                     if f"Unnamed: {c}" in table.columns:
                         report.unmapped.append(
-                            Unmapped(f"{ln} › column {c + 1}", _NO_HEADER)
+                            Unmapped(f"{ln} · column {c + 1}", _NO_HEADER)
                         )
                         table.drop(columns=f"Unnamed: {c}", inplace=True)
                     continue
                 report.unmapped.append(
-                    Unmapped(f"{ln} › column {str(h)[:40]}", _NOT_INPUT)
+                    Unmapped(f"{ln} · column {str(h)[:40]}", _NOT_INPUT)
                 )
                 if isinstance(h, str) and h in defaults.index:
                     table[h] = defaults.at[h, "default"]
@@ -1489,7 +1496,7 @@ def _check_native_cells(
                         _na_bad(row[c])
                     except _Bad as exc:
                         report.unmapped.append(
-                            Unmapped(f"{ln} › {name}", f"{h}: {exc}")
+                            Unmapped(f"{ln} · {name}", f"{h}: {exc}")
                         )
                         refused.append(name)
                         break
@@ -1527,7 +1534,7 @@ def _check_native_cells(
                 if asset is None:
                     if f"Unnamed: {c}" in series[attr].columns:
                         report.unmapped.append(
-                            Unmapped(f"{sheet} › column {c + 1}", _NO_HEADER)
+                            Unmapped(f"{sheet} · column {c + 1}", _NO_HEADER)
                         )
                         series[attr] = series[attr].drop(columns=f"Unnamed: {c}")
                     continue
@@ -1539,12 +1546,37 @@ def _check_native_cells(
                         _number(row[c], inf=inf)
                     except _Bad as exc:
                         report.unmapped.append(
-                            Unmapped(f"{sheet} › {asset}", f"{attr}: {exc}")
+                            Unmapped(f"{sheet} · {asset}", f"{attr}: {exc}")
                         )
                         series[attr] = series[attr].drop(columns=asset, errors="ignore")
                         break
     _drop_unknown_types(n, report)
     _drop_dangling(n, removed, report)
+    _drop_blank_series(n, report)
+
+
+def _drop_blank_series(n: pypsa.Network, report: ImportReport) -> None:
+    """
+    Ticket 05: an asset's series in PyPSA's layout with an empty time step (a blank
+    cell, or a row cut short) is reported and dropped, so its static value applies;
+    PyPSA's reader would leave NaN there. Checked on what PyPSA read, after the
+    assets refused above are gone, so each asset gets one row; rows past the last
+    time step are not time steps. (The input workbook's own Time series sheet reads
+    a blank as the asset's fixed value, assumed.)
+    """
+    for _cls, _sheet, ln in L.SHEETS:
+        series = getattr(n, f"{ln}_t")
+        for attr in list(series):
+            frame = series[attr]
+            empty = frame.isna().sum()
+            for asset, k in empty[empty > 0].items():
+                report.unmapped.append(
+                    Unmapped(
+                        f"{ln}-{attr} · {asset}",
+                        f"{attr}: {k} empty time step(s); the series was not read",
+                    )
+                )
+            series[attr] = frame.drop(columns=empty[empty > 0].index)
 
 
 def _read_native(
@@ -1615,7 +1647,7 @@ def _read_legacy_sheets(
                 continue
             if not isinstance(h, str) or h not in allowed:
                 report.unmapped.append(
-                    Unmapped(f"{sheet} › column {str(h)[:40]}", _NOT_INPUT)
+                    Unmapped(f"{sheet} · column {str(h)[:40]}", _NOT_INPUT)
                 )
                 continue
             columns[c] = h
@@ -1658,7 +1690,7 @@ def _read_legacy_sheets(
                     bad = f"{key}: {exc}"
                     break
             if bad is not None:
-                report.unmapped.append(Unmapped(f"{sheet} › {name}", bad))
+                report.unmapped.append(Unmapped(f"{sheet} · {name}", bad))
                 removed.setdefault(cls, set()).add(name)
                 continue
             try:
@@ -1666,7 +1698,7 @@ def _read_legacy_sheets(
                 added += 1
             except Exception as exc:  # noqa: BLE001 - the model's refusal is the reason
                 report.unmapped.append(
-                    Unmapped(f"{sheet} › {name}", f"the model refused the row: {exc}")
+                    Unmapped(f"{sheet} · {name}", f"the model refused the row: {exc}")
                 )
                 removed.setdefault(cls, set()).add(name)
         report.counts[L.SHEET_OF[cls]] = report.counts.get(L.SHEET_OF[cls], 0) + added

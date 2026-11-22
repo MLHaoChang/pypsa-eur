@@ -114,3 +114,77 @@ export function runStatusText(run: RunView, elapsed: number | null, eta: EtaText
     .filter(Boolean)
     .join(' · ')
 }
+
+// ── How a run ended (slice 2b; audit #25) ──────────────────────────────────
+
+export type RunEnd = 'completed' | 'failed' | 'aborted' | 'interrupted'
+
+/** A run of the project on screen that ended while the app watched it. */
+export interface RunOutcome {
+  /** The queue job id, or `study:<started_at>` for the Guided goal study. */
+  key: string
+  name: string
+  end: RunEnd
+  /** Wall time, when both ends are known. */
+  seconds: number | null
+  /** The run's own reason, for a failed run; null when none was recorded. */
+  error: string | null
+  /** The queue job, when the run was one. */
+  jobId: string | null
+}
+
+const RUN_ENDS: ReadonlySet<string> = new Set(['completed', 'failed', 'aborted', 'interrupted'])
+
+function wallTime(started: number | null | undefined, finished: number | null | undefined): number | null {
+  return started != null && finished != null && finished > started ? finished - started : null
+}
+
+/** How a queue job ended; null while it is queued or running. */
+export function outcomeFromJob(job: SolveJob): RunOutcome | null {
+  if (!RUN_ENDS.has(job.status)) return null
+  return {
+    key: job.id,
+    name: RUN_NAME[(job.kind ?? 'solve') as SolveJobKind] ?? 'Run',
+    end: job.status as RunEnd,
+    seconds: wallTime(job.started_at, job.finished_at),
+    error: job.error ?? null,
+    jobId: job.id,
+  }
+}
+
+/** The key that names one Guided goal study (it has no id of its own). */
+export function studyKey(study: EhStudyPayload | null | undefined): string | null {
+  return study?.started_at != null ? `study:${study.started_at}` : null
+}
+
+/** How the Guided goal study ended; null while it runs or when it has not started. */
+export function outcomeFromStudy(study: EhStudyPayload | null | undefined): RunOutcome | null {
+  const key = studyKey(study)
+  // The study record says "done" where a queue job says "completed".
+  const end = study?.status === 'done' ? 'completed' : study?.status
+  if (!study || !key || !end || !RUN_ENDS.has(end)) return null
+  return {
+    key,
+    name: 'Reliability study',
+    end: end as RunEnd,
+    seconds: wallTime(study.started_at, study.finished_at),
+    error: study.error ?? null,
+    jobId: null,
+  }
+}
+
+/** "Campus study finished · 6 min", "Optimisation failed", "Optimisation stopped". */
+export function outcomeText(o: RunOutcome): string {
+  switch (o.end) {
+    case 'completed': return `${o.name} finished${o.seconds != null ? ` · ${aboutMinutes(o.seconds)}` : ''}`
+    case 'failed': return `${o.name} failed`
+    case 'interrupted': return `${o.name} was interrupted`
+    case 'aborted': return `${o.name} stopped`
+  }
+}
+
+/** The plain reason shown under "See why" (Guided, in place). */
+export function outcomeReason(o: RunOutcome): string {
+  if (o.end === 'interrupted') return 'The run stopped when the app restarted. Run it again to get results.'
+  return o.error?.trim() || 'No reason was recorded. Run it again, or open the log in Expert.'
+}

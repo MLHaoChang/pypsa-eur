@@ -9,6 +9,7 @@ import { projectsApi } from '../api/projects'
 import { downloadProjectBundle, saveProjectQuietly, type BundleSaveResult } from '../utils/projectActions'
 import { useSolveQueue, useEnqueueSolve, useAbortJob, activeJobForProject } from '../hooks/useSolveQueue'
 import { useProjectRun } from '../hooks/useProjectRun'
+import { RunsIndicator } from '../components/runStatus/RunsIndicator'
 import { nk } from '../utils/queryKeys'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useUIStore, type UiMode } from '../store/uiStore'
@@ -29,6 +30,7 @@ import { useRunGate } from '../hooks/useRunGate'
 import { staleKindsSentence, uncheckedKindsSentence, useStaleRunKinds, useUncheckedRunKinds } from '../hooks/useStaleRunKinds'
 import { openFlowTarget, openSectionInExpert } from './flowNavigation'
 import { componentLabel } from '../utils/componentLabels'
+import { signFirstEuro } from '../utils/format'
 
 // ── Status indicators ──────────────────────────────────────────────────────────
 const STATUS_DOT: Record<string, string> = {
@@ -43,10 +45,10 @@ const STATUS_LABEL: Record<string, string> = {
 export function formatObjective(v: number | null | undefined): string | null {
   if (v == null || !Number.isFinite(v)) return null
   const a = Math.abs(v)
-  if (a >= 1e9) return `€${(v / 1e9).toFixed(2)} bn`
-  if (a >= 1e6) return `€${(v / 1e6).toFixed(2)} M`
-  if (a >= 1e3) return `€${(v / 1e3).toFixed(0)} k`
-  return `€${v.toFixed(0)}`
+  if (a >= 1e9) return signFirstEuro(v, `${(a / 1e9).toFixed(2)} bn`)
+  if (a >= 1e6) return signFirstEuro(v, `${(a / 1e6).toFixed(2)} M`)
+  if (a >= 1e3) return signFirstEuro(v, `${(a / 1e3).toFixed(0)} k`)
+  return signFirstEuro(v, a.toFixed(0))
 }
 
 /** Open Results after a solve, on its Summary (the answer first; the Summary
@@ -1009,7 +1011,7 @@ export default function AppHeader() {
       </div>
 
       {/* Search — multi-type, debounced, keyboard navigable */}
-      <div className="relative mx-2" style={{ width: 220 }}>
+      <div className="relative mx-2" style={{ flex: '0 1 220px', minWidth: 150 }}>
         <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted pointer-events-none" />
         <input
           ref={searchRef}
@@ -1180,16 +1182,20 @@ export default function AppHeader() {
                     {mode === 'lopf' ? <Zap size={11} /> : <Play size={11} />}
                     {runLabel}
                     {(staleKinds.length > 0 || uncheckedKinds.length > 0) && (
+                      // Below 1400 px the words fold to the counts, so the search field keeps its
+                      // width; the full text stays in the title and the accessible name.
                       <span data-testid="run-stale" title={staleText} className="font-normal opacity-90">
-                        ({staleKinds.length > 0 && `${staleKinds.length} out of date`}
+                        ({staleKinds.length > 0 && <>{staleKinds.length}<span className="max-[1399px]:sr-only"> out of date</span></>}
                         {staleKinds.length > 0 && uncheckedKinds.length > 0 && ' · '}
-                        {uncheckedKinds.length > 0 && <span data-testid="run-unchecked" className="opacity-75">{uncheckedKinds.length} unchecked</span>})
+                        {uncheckedKinds.length > 0 && <span data-testid="run-unchecked" className="opacity-75">{uncheckedKinds.length}<span className="max-[1399px]:sr-only"> unchecked</span></span>})
                       </span>
                     )}
                   </>}
           </button>
         </>)
       })()}
+
+      <RunsIndicator />
 
       <UiModeSwitch />
 

@@ -15,7 +15,7 @@ export const STAGE_LABEL: Record<CampusRunStage, string> = {
   harmonic_scan: 'the harmonic impedance scan from the PCC',
   voltage_stability: 'the P–V/Q–V voltage-stability margin at the PCC',
   dips_restart: 'the dips, trips and restarts of the process units',
-  ssti_screens: 'the SSTI and sub-synchronous screens from the PCC',
+  ssti_screens: 'the SSTI and sub-synchronous screens from the PCC and behind each series capacitor',
   invest: 'buying the assets from the library, re-checked by AC load flow',
   gfm_settings: 'recommending grid-forming settings from the island hours',
   done: 'finishing',

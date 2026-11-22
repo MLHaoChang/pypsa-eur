@@ -512,6 +512,7 @@ DISPLAY_ACRONYMS = {
     "poc": "PoC",
     "co2": "CO₂",
     "lng": "LNG",
+    "nh3": "NH3",
 }
 # Why a case is not run, in plain words, by the reason `run_shipped.load` gave
 # (its text is the server's; each marker below is a phrase of it).
@@ -1213,7 +1214,8 @@ def _readiness(path, step, project, code):
             "campus_run_stale",
             "the published campus run is not held to the run's grid-code profile",
         )
-    card = grid_readiness.grid_readiness_for(project, code["id"])
+    # The saved project, as the campus run reads it (DC walkthrough 04).
+    card = grid_readiness.grid_readiness_for(project, code["id"], source="saved")
     result = {
         "profile": code["id"],
         "digest": ce.profile_fingerprint(

@@ -15,6 +15,7 @@ fixture resets both before AND after every test so state can't bleed between tes
 """
 from __future__ import annotations
 
+import inspect
 import os
 import pathlib
 import shutil
@@ -54,6 +55,7 @@ os.environ["CORS_ALLOWED_ORIGINS"] = (
 # `import main`, because `get_settings()` is `lru_cache`d and main reads it at
 # import time.
 import tempfile as _tempfile
+import types
 
 _TEST_PROJECTS_ROOT = _tempfile.mkdtemp(prefix="pypsa-gui-test-projects-")
 os.environ["PROJECTS_ROOT"] = _TEST_PROJECTS_ROOT
@@ -178,12 +180,33 @@ def _arm_exit_watchdog() -> None:
     timer.start()
 
 
+def _drop_method_shadows(obj) -> None:
+    """Remove instance attributes that shadow a method of `obj`'s class.
+
+    pytest < 9.2 undoes `monkeypatch.setattr(instance, "method", stub)` by
+    writing the old *bound* method back into the instance `__dict__`. The
+    singleton then keeps that copy for the rest of the worker, so a later
+    test's `monkeypatch.setattr(SolveQueue, "method", ...)` never reaches the
+    dispatcher (CI shard 1/8 on #1832: test_viewer_role_gate patched
+    `solve_queue._run_solve_job`, and two blender_job tests later ran the real
+    solve runner). Dropping the copy restores the class lookup.
+    """
+    cls = type(obj)
+    for name in list(vars(obj)):
+        if isinstance(
+            inspect.getattr_static(cls, name, None),
+            (types.FunctionType, staticmethod, classmethod),
+        ):
+            delattr(obj, name)
+
+
 def _reset_solve_queue_or_exit() -> None:
     """Reset the solve queue; if jobs outlive its bounded join, dump and abort the shard.
 
     A stalled drain otherwise costs ~60 s per remaining test and runs the shard
     to the CI timeout with no clue which call blocks.
     """
+    _drop_method_shadows(solve_queue)
     solve_queue.reset_for_tests()
     q = getattr(solve_queue, "_q", None)
     # Mirror reset_for_tests: a stand-in `_q` without `all_tasks_done` is never

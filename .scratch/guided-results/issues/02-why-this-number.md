@@ -1,6 +1,7 @@
 # "Why this number" and the Results assumptions group
 
-Status: ready-for-agent; audit 2026-11-19: 02a merged (#1675); 02b open in #1723, #1724; 02c is issue 05
+Status: done (#1724)
+Landed in #1724.
 Type: task
 Spec: `.scratch/guided-results/spec.md` §1.4, §2 (Results group)
 Blocked by: 01
