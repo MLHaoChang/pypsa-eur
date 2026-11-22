@@ -87,7 +87,7 @@ function investment({ study, report }: ChapterInputs['investment']): Omit<Chapte
   if (blocker) {
     const reason = blocker.kind === 'needs'
       ? `${NEEDS_LEAD} ${blocker.needs.map(n => NEED_TEXT[n].item.charAt(0).toLowerCase() + NEED_TEXT[n].item.slice(1)).join('; ')}.`
-      : couldNotFinish('guided', blocker.kind === 'unknown' ? blocker.detail : null)
+      : couldNotFinish('guided', blocker.kind === 'unknown' ? blocker.detail : null, blocker.kind === 'unknown' && !!blocker.internal)
     return { label, value: '', state: 'unavailable', reason, open }
   }
   if (!report) {

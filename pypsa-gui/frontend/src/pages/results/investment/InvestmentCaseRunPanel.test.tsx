@@ -91,7 +91,7 @@ describe('the needs (F1)', () => {
     expect(blockerOf(http(500, 'boom'), null)).toEqual({ kind: 'unknown', detail: null })
     expect(blockerOf(null, { status: 'refused' })).toEqual({ kind: 'unknown', detail: null })
     expect(blockerOf(null, { status: 'failed', error_code: 'internal_error', error: 'kaput' }))
-      .toEqual({ kind: 'unknown', detail: 'kaput' })
+      .toEqual({ kind: 'unknown', detail: 'kaput', internal: true })
     // A refusal is stored as "<code>: <detail>"; the code never reaches the words.
     expect(blockerOf(null, { status: 'refused', error_code: 'replacement_unknown_asset',
                              error: 'replacement_unknown_asset: bess' }))
@@ -185,6 +185,18 @@ describe('InvestmentCaseRunPanel', () => {
     cleanup()
     renderPanel('expert')
     expect((await screen.findByTestId('ic-error')).textContent).toBe('The investment case could not finish.')
+  })
+
+  it('an internal error never shows its raw exception text in Guided (GK B3)', async () => {
+    api.getInvestmentCase.mockResolvedValue({ status: 'failed', error_code: 'internal_error',
+                                              error: "KeyError: 'capex'" })
+    renderPanel('guided')
+    expect((await screen.findByTestId('ic-error')).textContent)
+      .toBe('The investment case could not finish. Open it in Expert for the details.')
+    cleanup()
+    renderPanel('expert')
+    expect((await screen.findByTestId('ic-error')).textContent)
+      .toBe("The investment case could not finish: KeyError: 'capex'.")
   })
 
   it('a busy 409 shows the server sentence once, and the button says it can be tried again', async () => {

@@ -42,8 +42,9 @@ export const OPEN_IN_EXPERT = 'Open it in Expert for the details.'
 /** The "could not finish" line: the run's own reason when it states one (a
  *  money-year refusal names both years and the way out, issue 03); without one,
  *  Guided points to Expert. */
-export function couldNotFinish(mode: 'guided' | 'expert', detail: string | null): string {
-  if (detail) return `The investment case could not finish: ${detail.replace(/\.$/, '')}.`
+export function couldNotFinish(mode: 'guided' | 'expert', detail: string | null, internal = false): string {
+  // An internal error's text is a raw exception, not a sentence: Guided never shows it.
+  if (detail && !(internal && mode === 'guided')) return `The investment case could not finish: ${detail.replace(/\.$/, '')}.`
   return mode === 'guided' ? `${COULD_NOT_FINISH} ${OPEN_IN_EXPERT}` : COULD_NOT_FINISH
 }
 
@@ -71,7 +72,7 @@ export type Blocker =
   | { kind: 'needs'; needs: Need[] }
   | { kind: 'wait'; text: string }
   /** No plain fix; `detail` is a stored run's own reason (Expert shows it). */
-  | { kind: 'unknown'; detail: string | null }
+  | { kind: 'unknown'; detail: string | null; internal?: boolean }
 
 const errorCode = (e: unknown): string | null => {
   if (e instanceof StudyBusyError) return e.code ?? null
@@ -102,7 +103,7 @@ export function blockerOf(err: unknown, study: InvestmentCaseStudy | null | unde
   if (study && ['refused', 'error', 'failed'].includes(String(study.status))) {
     const code = study.error_code ?? study.code ?? null
     const need = needOf(code)
-    return need ? { kind: 'needs', needs: [need] } : { kind: 'unknown', detail: reasonOf(study, code) }
+    return need ? { kind: 'needs', needs: [need] } : { kind: 'unknown', detail: reasonOf(study, code), ...(code === 'internal_error' ? { internal: true } : {}) }
   }
   return null
 }

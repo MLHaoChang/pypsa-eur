@@ -64,7 +64,7 @@ export default function InvestmentCaseRunPanel({ run, report, mode, known = [], 
       {blocker?.kind === 'wait' ? (
         <p className="text-warn" data-testid="ic-blocked">{sentence(blocker.text)}</p>
       ) : blocker?.kind === 'unknown' ? (
-        <p className="text-danger" data-testid="ic-error">{couldNotFinish(mode, blocker.detail)}</p>
+        <p className="text-danger" data-testid="ic-error">{couldNotFinish(mode, blocker.detail, blocker.internal)}</p>
       ) : needs.length > 0 || running ? null : report ? (
         <p data-testid="ic-compared">{comparedLine(report)}</p>
       ) : report === null && run.loaded ? (

@@ -19,6 +19,12 @@ describe("the Investment figure's refusal", () => {
       .toBe('The investment case could not finish. Open it in Expert for the details.')
   })
 
+  it('an internal error never shows its raw exception text', () => {
+    const r = tile({ status: 'failed', error_code: 'internal_error', error: "KeyError: 'capex'" }).reason
+    expect(r).toBe('The investment case could not finish. Open it in Expert for the details.')
+    expect(r).not.toMatch(/KeyError|capex/)
+  })
+
   it('a refusal with its own reason keeps the reason, without the code prefix', () => {
     expect(tile({ status: 'refused', error_code: 'owner_asset_missing',
                   error: 'owner_asset_missing: no owner assets' }).reason)
