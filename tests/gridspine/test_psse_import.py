@@ -835,7 +835,7 @@ def test_transformer_control_held_at_file_setting(tmp_path, cod, parameter, valu
     else:
         (row,) = rows
         assert (row.asset, row.parameter, row.value) == ("T", parameter, value)
-        assert f"COD1 = {cod}" in row.why
+        assert f"(control mode {cod}) of winding 1 is not modelled" in row.why
 
 
 def test_unrated_line_assumed(tmp_path):
@@ -848,7 +848,7 @@ def test_unrated_line_assumed(tmp_path):
     assert res.network.lines.at["Line A - B 1", "s_nom_source"] == "assumed"
     assert _assumed(res.report, "thermal rating (MVA)") == ["Line A - B 1"]
     (row,) = [a for a in res.report.assumed if a.parameter == "thermal rating (MVA)"]
-    assert row.value == 1000.0 and "SBASE" in row.why
+    assert row.value == 1000.0 and "at least the system base power, 100 MVA" in row.why
 
 
 def test_v35_zero_rate1_line_uses_the_first_positive_rate(tmp_path):
@@ -861,7 +861,10 @@ def test_v35_zero_rate1_line_uses_the_first_positive_rate(tmp_path):
     )
     assert res.network.lines.at["Line A - B 1", "s_nom"] == 30.0
     (row,) = [a for a in res.report.assumed if a.parameter == "thermal rating (MVA)"]
-    assert row.value == 30.0 and "RATE1 is 0; RATE3 = 30 MVA is used" in row.why
+    assert (
+        row.value == 30.0
+        and "the normal rating is 0; rating 3 = 30 MVA is used" in row.why
+    )
 
 
 def test_line_end_shunts_rebased_to_each_end(tmp_path):
@@ -1013,7 +1016,7 @@ def test_case14_unrated_lines_get_a_stated_bound():
     assert sorted(rows) == sorted(n.lines.index)
     for a in rows.values():
         assert a.value == 2757.0
-        assert "RATEA = 0 means unrated" in a.why
+        assert "a normal rating of 0 means unrated" in a.why
         assert "275.7 MVA" in a.why  # the total load the bound is 10 times
     # the transformers keep their SBASE1-2 base, as before
     assert n.transformers["s_nom"].tolist() == [100.0, 100.0, 100.0]
@@ -1039,7 +1042,7 @@ def test_a_zero_ratea_line_falls_back_to_a_positive_rateb(tmp_path):
     assert set(n.lines.drop(line)["s_nom_source"]) == {"assumed"}
     row = _rating_rows(res.report)[line]
     assert row.value == 45.0
-    assert "RATEA is 0; RATEB = 45 MVA is used" in row.why
+    assert "the normal rating is 0; rating B = 45 MVA is used" in row.why
     others = n.lines.drop(line)
     assert others["s_nom"].tolist() == [2757.0] * 16
 

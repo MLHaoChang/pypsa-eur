@@ -91,7 +91,7 @@ describe('the needs (F1)', () => {
     expect(blockerOf(http(500, 'boom'), null)).toEqual({ kind: 'unknown', detail: null })
     expect(blockerOf(null, { status: 'refused' })).toEqual({ kind: 'unknown', detail: null })
     expect(blockerOf(null, { status: 'failed', error_code: 'internal_error', error: 'kaput' }))
-      .toEqual({ kind: 'unknown', detail: 'kaput' })
+      .toEqual({ kind: 'unknown', detail: 'kaput', internal: true })
     // A refusal is stored as "<code>: <detail>"; the code never reaches the words.
     expect(blockerOf(null, { status: 'refused', error_code: 'replacement_unknown_asset',
                              error: 'replacement_unknown_asset: bess' }))
@@ -166,16 +166,37 @@ describe('InvestmentCaseRunPanel', () => {
     expect(screen.getByTestId('ic-needs').textContent).not.toMatch(/bess|cod_/)
   })
 
-  it('an unknown code: Guided points to Expert; Expert adds the reason, never the code', async () => {
+  it('an unknown code: both modes give the run its own reason, never the code (issue 03)', async () => {
     api.getInvestmentCase.mockResolvedValue({ status: 'refused', error_code: 'template_not_annual:8784',
                                               error: 'template_not_annual:8784: the template is not one year' })
+    for (const mode of ['guided', 'expert'] as const) {
+      renderPanel(mode)
+      expect((await screen.findByTestId('ic-error')).textContent)
+        .toBe('The investment case could not finish: the template is not one year.')
+      cleanup()
+    }
+  })
+
+  it('an unknown code with no reason: Guided points to Expert', async () => {
+    api.getInvestmentCase.mockResolvedValue({ status: 'error', error_code: 'internal_error' })
+    renderPanel('guided')
+    expect((await screen.findByTestId('ic-error')).textContent)
+      .toBe('The investment case could not finish. Open it in Expert for the details.')
+    cleanup()
+    renderPanel('expert')
+    expect((await screen.findByTestId('ic-error')).textContent).toBe('The investment case could not finish.')
+  })
+
+  it('an internal error never shows its raw exception text in Guided (GK B3)', async () => {
+    api.getInvestmentCase.mockResolvedValue({ status: 'failed', error_code: 'internal_error',
+                                              error: "KeyError: 'capex'" })
     renderPanel('guided')
     expect((await screen.findByTestId('ic-error')).textContent)
       .toBe('The investment case could not finish. Open it in Expert for the details.')
     cleanup()
     renderPanel('expert')
     expect((await screen.findByTestId('ic-error')).textContent)
-      .toBe('The investment case could not finish: the template is not one year.')
+      .toBe("The investment case could not finish: KeyError: 'capex'.")
   })
 
   it('a busy 409 shows the server sentence once, and the button says it can be tried again', async () => {
@@ -202,6 +223,26 @@ describe('InvestmentCaseRunPanel', () => {
     await screen.findByTestId('ic-need-solve')
     expect(screen.getAllByRole('listitem').map(li => li.getAttribute('data-testid')))
       .toEqual(['ic-need-solve', 'ic-need-connection'])
+  })
+
+  it('a stated need stays listed while the panel waits or could not finish (GK B3 4)', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    function Known() {
+      const run = useInvestmentCaseRun()
+      return <InvestmentCaseRunPanel run={run} mode="guided" report={null} known={['connection']} />
+    }
+    api.startInvestmentCase.mockRejectedValue(new StudyBusyError('a frontier study is running — wait for it to finish'))
+    render(<QueryClientProvider client={qc}><Known /></QueryClientProvider>)
+    fireEvent.click(await screen.findByRole('button', { name: 'Run the investment case' }))
+    await screen.findByTestId('ic-blocked')
+    expect(screen.getByTestId('ic-need-connection')).toBeTruthy()
+    cleanup()
+    api.startInvestmentCase.mockRejectedValue(http(500, 'boom'))
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <Known /></QueryClientProvider>)
+    fireEvent.click(await screen.findByRole('button', { name: 'Run the investment case' }))
+    await screen.findByTestId('ic-error')
+    expect(screen.getByTestId('ic-need-connection')).toBeTruthy()
   })
 
   it('after a run, the compared line replaces "Not run yet"', async () => {

@@ -158,6 +158,15 @@ export function ImportZone({ onSuccess }: { onSuccess: (summary: ImportSummary, 
         // intentionally, not silently.
         setCurrentProject(null)
       }
+      if (!name) {
+        // A raw network import: the network has no project yet. Name it after its file, so the
+        // sidebar offers "Save as project" and the exports carry that name, not "Unnamed Network".
+        const stem = pendingFileRef.current.replace(/\.[^.]+$/, '').trim()
+        if (stem) {
+          setProjectName(stem)
+          useUIStore.getState().setUnsavedNetwork(stem)
+        }
+      }
       onSuccess(s, pendingFileRef.current)
     },
     onError: (e: Error) => {

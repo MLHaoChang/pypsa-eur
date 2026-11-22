@@ -1,6 +1,6 @@
 # The levers scroll request is not cleared when the levers fetch fails
 
-Status: ready-for-agent
+Status: done
 
 Raised on #1752 (GK B3 (3) nit c, accepted as a follow-up).
 
