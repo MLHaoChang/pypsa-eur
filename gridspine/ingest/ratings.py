@@ -15,6 +15,11 @@ a per-voltage-class floor taken at the highest of the given voltages:
 A voltage of 0 or a missing one falls to the lowest class. Never ``inf`` or a bare
 big-M: preflight refuses ``inf``, and a 1e6-style value hurts LP conditioning.
 Each reader lists every such value under ``report.assumed`` and marks the element.
+
+A generator the file gives no cost for takes a marginal cost of 1 €/MWh, so LOPF
+has an objective (owner decision, psse-import 04): with every generator at that
+cost the dispatch between them is arbitrary, which its assumed row says. A cost
+the file does give, 0 included, is kept and marked "file".
 """
 
 from __future__ import annotations
@@ -56,3 +61,30 @@ def source_column(index, assumed) -> list[str]:
     """
     assumed = set(assumed)
     return ["assumed" if name in assumed else "file" for name in index]
+
+
+#: €/MWh for a generator the file gives no cost for.
+DEFAULT_MARGINAL_COST = 1.0
+
+COST_WHY = (
+    "the file gives no cost, so 1 €/MWh is used so that LOPF has an objective. "
+    "With every generator at the same cost, the dispatch between them is "
+    "arbitrary: set real costs before you read dispatch"
+)
+
+
+def default_marginal_costs(gens, given=()) -> list[tuple[str, str, float, str]]:
+    """
+    Give each generator of ``gens`` not in ``given`` (the names whose cost the file
+    gives) the default marginal cost, add the ``marginal_cost_source`` column and
+    return one ``(asset, parameter, value, why)`` assumed row per defaulted one.
+    """
+    given = set(given)
+    names = [g for g in gens.index if g not in given]
+    if not names:
+        return []
+    gens.loc[names, "marginal_cost"] = DEFAULT_MARGINAL_COST
+    gens["marginal_cost_source"] = source_column(gens.index, names)
+    return [
+        (g, "marginal cost (€/MWh)", DEFAULT_MARGINAL_COST, COST_WHY) for g in names
+    ]

@@ -1300,3 +1300,21 @@ def test_a_short_circuit_level_equal_to_the_bound_is_not_named(tmp_path):
     assert res.network.generators.at["Grid", "p_nom"] == 250.0
     (row,) = _grid_rows(res.report)
     assert "short-circuit" not in row.why
+
+
+def test_dgs_generators_take_the_stated_cost_default(hand):
+    g = hand.network.generators
+    assert g["marginal_cost"].to_dict() == {"PV": 1.0, "Gen": 1.0, "Grid": 1.0}
+    assert set(g["marginal_cost_source"]) == {"assumed"}
+    rows = [a for a in hand.report.assumed if a.parameter == "marginal cost (€/MWh)"]
+    assert sorted((a.asset, a.value) for a in rows) == [
+        ("Gen", 1.0),
+        ("Grid", 1.0),
+        ("PV", 1.0),
+    ]
+
+
+def test_the_issue_example_lopf_solves(tmp_path):
+    n = _issue_example(tmp_path).network
+    status, condition = n.optimize(solver_name="highs")
+    assert (status, condition) == ("ok", "optimal")

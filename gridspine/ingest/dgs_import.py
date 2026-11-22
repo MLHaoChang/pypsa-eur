@@ -74,6 +74,7 @@ from gridspine.ingest.import_result import (
 )
 from gridspine.ingest.ratings import (
     assumed_rating_mva,
+    default_marginal_costs,
     source_column,
     total_load_mva,
 )
@@ -316,6 +317,9 @@ class _Mapper:
         self._machines()
         self._xnets()
         self._shunts()
+        # no cost attribute is read from DGS, so every generator takes the default
+        for row in default_marginal_costs(self.n.generators):
+            self.assume(*row)
         for component in ("Load", "Generator"):
             df = self.n.components[component].static
             for col in ("harmonic_source", "harmonic_spectrum"):

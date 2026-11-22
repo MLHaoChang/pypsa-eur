@@ -101,6 +101,7 @@ from gridspine.ingest.psse_raw_parse import (
 )
 from gridspine.ingest.ratings import (
     assumed_rating_mva,
+    default_marginal_costs,
     source_column,
     total_load_mva,
 )
@@ -669,6 +670,8 @@ def build_network(case: RawCase):
 
     if assumed_lines:  # marks a rating results must not read as real
         n.lines["s_nom_source"] = source_column(n.lines.index, assumed_lines)
+    # RAW carries no cost data
+    assumed += [Assumed(*a) for a in default_marginal_costs(n.generators)]
 
     lone = _lone_buses(n)
     if lone:

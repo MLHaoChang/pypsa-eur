@@ -425,11 +425,12 @@ def test_no_other_assumptions_in_features(features):
     params = sorted({a.parameter for a in features.report.assumed})
     assert params == [
         "branch type",
+        "marginal cost (€/MWh)",  # RAW carries no cost: both generators
         "regulated bus",
         "susceptance setting",
         "voltage dependence",
     ]
-    assert len(features.report.assumed) == 1 + 1 + 2 + 1
+    assert len(features.report.assumed) == 1 + 2 + 1 + 2 + 1
 
 
 def test_row_accounting_features(features):
@@ -1044,7 +1045,11 @@ def test_a_zero_ratea_line_falls_back_to_a_positive_rateb(tmp_path):
 
 
 def test_a_fully_rated_case_is_unchanged():
-    """case30 rates every line: its frames equal master 3b9ea4f9's, column for column."""
+    """
+    case30 rates every line: its line and transformer frames equal master
+    3b9ea4f9's, column for column. Its generator frame is master's except for the
+    cost default (marginal_cost 0 → 1.0 on all 6, and marginal_cost_source).
+    """
     golden = json.loads((FIX / "case30_frames_3b9ea4f9.json").read_text())
     n = _read("case30").network
     for comp in ("lines", "generators", "transformers"):
@@ -1122,3 +1127,50 @@ def test_an_in_service_load_sets_the_bound(tmp_path):
     )
     # |S| = 500 MVA, 10 × 500 = 5000 MVA
     assert res.network.lines.at["Line A - B 1", "s_nom"] == 5000.0
+
+
+# ---------------------------------------------------------------- cost default (issue psse-import 04)
+def test_case14_generators_take_the_stated_cost_default():
+    res = _read("case14")
+    g = res.network.generators
+    assert g["marginal_cost"].tolist() == [1.0] * 5
+    assert g["marginal_cost_source"].tolist() == ["assumed"] * 5
+    rows = [a for a in res.report.assumed if a.parameter == "marginal cost (€/MWh)"]
+    assert sorted(a.asset for a in rows) == sorted(g.index)
+    for a in rows:
+        assert a.value == 1.0
+        assert "the file gives no cost, so 1 €/MWh is used" in a.why
+        assert "dispatch between them is arbitrary" in a.why
+
+
+def test_a_cost_the_file_gives_is_kept_even_when_zero():
+    import pandas as pd
+
+    from gridspine.ingest.ratings import default_marginal_costs
+
+    gens = pd.DataFrame(
+        {"marginal_cost": [0.0, 0.0, 7.5]}, index=["given 0", "none", "given"]
+    )
+    rows = default_marginal_costs(gens, given=["given 0", "given"])
+    assert gens["marginal_cost"].to_dict() == {
+        "given 0": 0.0,
+        "none": 1.0,
+        "given": 7.5,
+    }
+    assert gens["marginal_cost_source"].to_dict() == {
+        "given 0": "file",
+        "none": "assumed",
+        "given": "file",
+    }
+    assert [(a, v) for a, _, v, _ in rows] == [("none", 1.0)]
+    every = pd.DataFrame({"marginal_cost": [3.0]}, index=["g"])
+    assert default_marginal_costs(every, given=["g"]) == []
+    assert "marginal_cost_source" not in every.columns
+
+
+def test_case14_lopf_solves():
+    n = _read("case14").network
+    status, condition = n.optimize(solver_name="highs")
+    assert (status, condition) == ("ok", "optimal")
+    # load 259 MW at 1 €/MWh for one snapshot; lossless LOPF
+    assert n.objective == pytest.approx(259.0)
