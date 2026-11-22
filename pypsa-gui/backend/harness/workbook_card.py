@@ -12,9 +12,13 @@ project only: a taken name refuses, nothing is overwritten.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import HTTPException
 
 VERSION = 1
+
+logger = logging.getLogger("pypsa_gui.chat")
 
 
 def _refuse(kind: str, message: str, status: int = 409):
@@ -28,7 +32,17 @@ def preview(args: dict) -> dict:
     from services import workbook_chat
 
     expected = str(args.get("expected_sha256") or "").strip().lower()
-    out = workbook_chat.preview(str(args.get("file_id") or ""))
+    try:
+        out = workbook_chat.preview(str(args.get("file_id") or ""))
+    except HTTPException:
+        raise
+    except Exception:
+        logger.warning("workbook import card could not be built", exc_info=True)
+        _refuse(
+            "workbook_preview_unavailable",
+            "The workbook could not be previewed, so nothing was imported. Preview it again.",
+            500,
+        )
     if out["sha256"] != expected:
         _refuse(
             "import_file_changed",
