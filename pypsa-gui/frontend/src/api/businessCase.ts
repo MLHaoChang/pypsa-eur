@@ -236,6 +236,14 @@ export class InvestmentCaseMissing extends Error {
   }
 }
 
+/** A 409 `network_busy` from the run POST: the project lock was not free in time; retry. */
+export class NetworkBusy extends Error {
+  constructor(message?: string) {
+    super(message ?? 'The project is busy with another job; try again in a moment')
+    this.name = 'NetworkBusy'
+  }
+}
+
 export class BusinessCaseRejected extends Error {
   constructor(public detail: {
     code?: string; refusal?: string; field?: string; message?: string
@@ -263,6 +271,7 @@ function typed(e: unknown): never {
   if (status === 409 && detail.code === 'solver_in_flight') {
     throw new SolverInFlightError(message ?? 'a solve is running')
   }
+  if (status === 409 && detail.code === 'network_busy') throw new NetworkBusy()
   if (status === 409 && detail.code === 'investment_case_missing') {
     throw new InvestmentCaseMissing((detail.reason as string | undefined) ?? null)
   }

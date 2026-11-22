@@ -4,7 +4,7 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  businessCaseApi, InvestmentCaseMissing, SolverInFlightError,
+  businessCaseApi, InvestmentCaseMissing, NetworkBusy, SolverInFlightError,
   type BusinessCasePnl, type BusinessCaseReport, type BusinessCaseStudy,
 } from '../../../api/businessCase'
 import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
@@ -43,7 +43,7 @@ export default function BusinessCaseRun(p: BusinessCaseRunProps) {
   const s = p.study
   const running = s?.status === 'running'
   const elapsed = useElapsed(running)
-  const [blocked, setBlocked] = useState<{ text: string; ic?: boolean } | null>(null)
+  const [blocked, setBlocked] = useState<{ text: string; ic?: boolean; retry?: boolean } | null>(null)
   const beId = useId()
 
   // A run that ends while mounted brings its report in (the study GET carries it).
@@ -61,6 +61,8 @@ export default function BusinessCaseRun(p: BusinessCaseRunProps) {
     onError: (e: unknown) => setBlocked(
       e instanceof InvestmentCaseMissing
         ? { text: 'the business case needs a current investment case: run it first.', ic: true }
+        : e instanceof NetworkBusy
+          ? { text: 'the project is busy with another job; try again in a moment.', retry: true }
         : e instanceof SolverInFlightError
           ? { text: 'a solve is running; run the business case after it.' }
           : { text: (e as Error)?.message || 'the run could not start.' }),
@@ -112,6 +114,8 @@ export default function BusinessCaseRun(p: BusinessCaseRunProps) {
         {failure && <span className="text-danger" data-testid="bc-failure">{failure}</span>}
         {blocked && (
           <span className="text-warn" data-testid="bc-blocked">Blocked: {blocked.text}
+            {blocked.retry && <>{' '}<button type="button" className="underline" data-testid="bc-retry"
+              disabled={run.isPending} onClick={() => run.mutate()}>Retry</button></>}
             {blocked.ic && <>{' '}<button type="button" className="underline" data-testid="bc-open-ic"
               onClick={() => useUIStore.getState().requestResultsTab('investment', 'case')}>
               Investment case ›</button></>}</span>

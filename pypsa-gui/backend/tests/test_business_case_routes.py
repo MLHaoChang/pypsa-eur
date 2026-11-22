@@ -367,7 +367,9 @@ def test_c3_an_unreadable_ic_key_refuses(
     assert _put(client, _bc()).status_code == 200
     monkeypatch.setattr(R, "_ic_current_assumptions", lambda: (None, "network_busy"))
     r = client.post(BC_URL)
-    assert r.status_code == 409 and r.json()["detail"]["reason"] == "network_busy"
+    d = r.json()["detail"]
+    assert r.status_code == 409 and d["code"] == "network_busy"
+    assert "busy" in d["message"] and "out of date" not in d["message"]
 
 
 def test_c3_a_rebuilt_case_with_another_hash_refuses(
@@ -1231,8 +1233,11 @@ def test_c4_the_ic_key_is_rechecked_under_the_network_lock(
     assert client.post(BC_URL).status_code == 200
     body = _bc_poll(client)
     assert body["status"] == "refused", body
-    assert body["error_code"] == "investment_case_missing"
+    assert body["error_code"] == (
+        "network_busy" if reason == "network_busy" else "investment_case_missing"
+    )
     assert body["refusal"]["reason"] == reason
+    assert ("out of date" in body["error"]) == (reason != "network_busy")
     assert state["moved"] and read == []
     assert session_state(client).get("business_case_report") is None
 

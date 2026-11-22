@@ -529,10 +529,17 @@ def start_business_case(
     return {"status": "running", "study": STUDY_KEY, "ic_assumptions_hash": ic_hash}
 
 
+NETWORK_BUSY_MESSAGE = "the project is busy with another job; try again in a moment"
+
+
 class StaleInvestmentCase(RunRefused):
     """The IC key moved between the route's check and the solve read (C4)."""
 
     def __init__(self, reason: str):
+        if reason == "network_busy":
+            # The key could not be read in time: the case is not known to be out of date.
+            super().__init__("network_busy", NETWORK_BUSY_MESSAGE, reason=reason)
+            return
         super().__init__(
             "investment_case_missing",
             "the investment case is out of date (the project changed since it "

@@ -661,7 +661,7 @@ export default function BusinessCaseLines() {
       </div>
       <BusinessCaseRun
         study={study.data ?? null} studyKey={studyKey}
-        disabledReason={runOffReason(dirty, lines.length, (opts?.refusals ?? []).length)}
+        disabledReason={runOffReason(dirty, lines.length, placed.length)}
         revenueLines={lines.filter(l => l.kind === 'revenue').map(l => l.name)}
         lineNames={lines.map(l => l.name)}
         breakEvenLine={draft?.break_even_line ?? null}
