@@ -322,7 +322,8 @@ export default function BusinessCaseLines() {
     ?? (finance.data?.finance ? (finance.data.finance.currency || 'EUR') : null)
   // A capex line with no terminal-value method has no end-of-life value: say so, beside the
   // lines (#21). Read from the project's own saved finance inputs.
-  const noTerminal = lines.some(l => l.kind === 'capex') && !!finance.data?.finance
+  const capexNames = lines.filter(l => l.kind === 'capex').map(l => l.name)
+  const noTerminal = capexNames.length > 0 && !!finance.data?.finance
     && ((finance.data.finance as { terminal_value?: { method?: string } }).terminal_value?.method ?? 'none') === 'none'
   const setLines = (next: LineItem[]) => {
     // A break-even line must name a revenue line (the validator's rule): one renamed,
@@ -653,7 +654,7 @@ export default function BusinessCaseLines() {
           onClick={() => openPanel('commercial', 'economics')}>Finance inputs ›</button></>}</p>}
       {noTerminal && (
         <p className="text-warn" data-testid="bc-terminal-missing">
-          Plant capex has no end-of-life value: choose a terminal-value method that can price it.{' '}
+          {capexNames.join(', ')} has no end-of-life value: choose a terminal-value method that can price it.{' '}
           <button type="button" className="underline" data-testid="bc-open-terminal"
             onClick={() => { openPanel('commercial', 'economics'); useUIStore.getState().requestTerminalValueScroll() }}>Terminal value ›</button></p>
       )}

@@ -1341,6 +1341,9 @@ def test_21_a_capex_preset_with_no_terminal_value_warns_on_the_card(
         "terminal_value",
         "method",
     ]
+    assert row["reason"].startswith(
+        "Plant capex has no end-of-life value"
+    )  # the applied capex line
     assert "terminal-value method" in row["reason"] and row["new"] == "none"
 
 

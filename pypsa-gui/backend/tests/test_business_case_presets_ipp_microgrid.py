@@ -342,6 +342,31 @@ def test_21_the_ipp_preset_runs_once_only_prices_are_typed():
     r = run_case(build_business_case(ic, inputs, series).case, PACK)
     for k in ("project_post_tax_npv", "project_post_tax_irr", "payback_years"):
         assert r.metrics.get(k) is not None, (k, r.op.reasons)
+    # The three figures against arithmetic written here, on the case's own cash series
+    # (not the engine's npv/irr/payback functions): end-of-year discounting at the WACC,
+    # the rate that zeroes it by bisection, and the cumulative equity cash's first crossing.
+    cash_p = [float(x) for x in r.cash["project_post_tax"]]
+    cash_e = [float(x) for x in r.cash["equity_post_tax"]]
+
+    def pv(rate):
+        return sum(c / (1.0 + rate) ** t for t, c in enumerate(cash_p))
+
+    lo, hi = -0.5, 1.0
+    for _ in range(200):
+        mid = (lo + hi) / 2.0
+        lo, hi = (mid, hi) if pv(mid) > 0.0 else (lo, mid)
+    cum, back = 0.0, None
+    for t, c in enumerate(cash_e):
+        prev, cum = cum, cum + c
+        if t > 0 and prev < 0.0 <= cum:
+            back = (t - 1) + (-prev) / c
+            break
+    assert r.metrics["project_post_tax_npv"] == pytest.approx(
+        pv(ic.inputs.wacc_nominal), rel=1e-9
+    )
+    assert r.metrics["project_post_tax_irr"] == pytest.approx(lo, abs=1e-6)
+    assert back is not None
+    assert r.metrics["payback_years"] == pytest.approx(back, abs=1e-9)
     # Hand computation: the plant capex (600 000, life 30 y from the pack) is valued at the
     # horizon on the annuity of its purchase over the years still to run.
     (term,) = [x for x in r.op.terminal_terms if x.asset == "Plant capex"]
@@ -350,3 +375,44 @@ def test_21_the_ipp_preset_runs_once_only_prices_are_typed():
     apf = (1.0 - (1.0 + rate) ** -left) / rate
     assert term.lifetime_years == 30.0 and 0.0 < left < life
     assert term.value == pytest.approx(600000.0 * crf * apf)
+
+
+def test_21_a_stated_plant_capex_life_is_never_overwritten_by_the_default():
+    f = P._for_template(IPP, P.PRESETS_DIR)
+    lines = [ln.model_copy(deep=True) for ln in f.variants["ipp_hybrid"].lines]
+    plant = next(ln for ln in lines if ln.name == "Plant capex")
+    plant.life_years = 12.0
+    out = _inputs(*lines).with_cost_defaults(P._pack(f), currency="GBP")
+    got = next(ln for ln in out.lines if ln.name == "Plant capex")
+    assert got.life_years == 12.0 and "life_years" not in got.assumed
+    # Unstated, the same fill writes the pack's 30 years and records its source.
+    fresh = P.preset(IPP, "ipp_hybrid", currency="GBP")
+    p0 = next(ln for ln in fresh.lines if ln.name == "Plant capex")
+    assert p0.life_years == 30.0 and p0.assumed["life_years"].source
+
+
+def test_21_opex_prices_left_unset_refuse_the_run_so_no_margin_is_read_as_100_percent():
+    """The EBITDA margin cannot read 100 % from opex lines that are zero only because
+    they are unset: the lines are refused `cost_not_established` and the run is blocked,
+    so no report (and no margin) exists."""
+    rows = []
+    for ln in P.preset(IPP, "ipp_hybrid", currency="USD").lines:
+        d = ln.model_dump()
+        if ln.kind == "revenue":
+            d.update(price=10.0, indexation=0.0)
+            if ln.quantity_source == "typed":
+                d.update(quantity=100.0)
+            if ln.category == "capacity_payment":
+                d.update(derating=0.9)
+        elif ln.kind == "capex":
+            d.update(quantity=1.0, price=600000.0)
+        rows.append(LineItem.model_validate(d))  # land leases and insurance left unset
+    refused = _inputs(*rows).refusals(horizon=(2030, 2037), base_year=2030)
+    unset = {
+        r.args[0] if r.args else str(r)
+        for r in refused
+        if r.kind == "cost_not_established"
+    }
+    assert any("lines[2]" in x for x in unset) and any(
+        "lines[3]" in x for x in unset
+    ), refused

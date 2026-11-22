@@ -299,7 +299,8 @@ def _terminal_row(cfg, new: dict) -> dict | None:
     """The project's own saved terminal-value method, shown when the applied lines
     include a capex line and the method cannot price it (`none`, or unset: the finance
     default). A method the user chose that prices it shows nothing (#21, GK B2 (3))."""
-    if not any(ln.get("kind") == "capex" for ln in new["inputs"]["lines"]):
+    capex = [ln["name"] for ln in new["inputs"]["lines"] if ln.get("kind") == "capex"]
+    if not capex:
         return None
     raw = getattr(cfg, "finance", None) or {}
     tv = (raw.get("terminal_value") if isinstance(raw, dict) else None) or {}
@@ -316,7 +317,8 @@ def _terminal_row(cfg, new: dict) -> dict | None:
     )
     r["warn"] = True
     r["reason"] = (
-        "Plant capex has no end-of-life value: choose a terminal-value method that can price it."
+        f"{', '.join(capex)} has no end-of-life value: "
+        "choose a terminal-value method that can price it."
     )
     return r
 

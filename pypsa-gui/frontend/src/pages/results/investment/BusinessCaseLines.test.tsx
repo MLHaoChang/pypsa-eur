@@ -398,7 +398,7 @@ describe('a capex line with no terminal-value method (#21)', () => {
     finance({ method: 'none' })
     mount(config(CAPEX))
     const note = await screen.findByTestId('bc-terminal-missing')
-    expect(note.textContent).toContain('Plant capex has no end-of-life value: choose a terminal-value method that can price it.')
+    expect(note.textContent).toContain('Plant has no end-of-life value: choose a terminal-value method that can price it.')
     expect(within(note).getByTestId('bc-open-terminal').textContent).toContain('Terminal value')
     // The link opens the finance panel and asks it to scroll to the terminal-value field.
     useUIStore.setState({ terminalValueScrollRequest: false })
