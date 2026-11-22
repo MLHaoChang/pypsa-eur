@@ -18,13 +18,13 @@ const OPEN: Record<Need, () => void> = {
   finance: () => openPanel('commercial', 'economics'),
 }
 
-/** Where a need's link goes: the solve is an action; the others open a panel (›). */
 /** The server's busy sentence as a sentence ("a frontier study is running — wait for it to finish"). */
 const sentence = (t: string) => {
   const s = t.trim()
   return `${s.charAt(0).toUpperCase()}${s.slice(1)}${/[.!?]$/.test(s) ? '' : '.'}`
 }
 
+/** Where a need's link goes: the solve is an action; the others open a panel (›). */
 const linkLabel = (need: Need) => (need === 'solve' ? NEED_TEXT[need].link : `${NEED_TEXT[need].link} ›`)
 
 export default function InvestmentCaseRunPanel({ run, report, mode, known = [] }: {
@@ -38,11 +38,13 @@ export default function InvestmentCaseRunPanel({ run, report, mode, known = [] }
 }) {
   const { running, starting, start, blocker } = run
   const busy = running || starting
-  const needs = blocker?.kind === 'wait' || blocker?.kind === 'unknown' ? []
-    : NEED_ORDER.filter(n => known.includes(n) || (blocker?.kind === 'needs' && blocker.needs.includes(n)))
+  // A need another read states stays listed while a wait or "could not
+  // finish" line shows too (GK B3 4 on #1761): it is still missing.
+  const needs = NEED_ORDER.filter(n => known.includes(n)
+    || (blocker?.kind === 'needs' && blocker.needs.includes(n)))
   return (
     <div className="space-y-1 text-[11px]" data-testid="ic-run-panel">
-      {needs.length > 0 ? (
+      {needs.length > 0 && (
         <div data-testid="ic-needs">
           <p>{NEEDS_LEAD}</p>
           <ol className="list-decimal pl-5">
@@ -55,11 +57,12 @@ export default function InvestmentCaseRunPanel({ run, report, mode, known = [] }
             ))}
           </ol>
         </div>
-      ) : blocker?.kind === 'wait' ? (
+      )}
+      {blocker?.kind === 'wait' ? (
         <p className="text-warn" data-testid="ic-blocked">{sentence(blocker.text)}</p>
       ) : blocker?.kind === 'unknown' ? (
         <p className="text-danger" data-testid="ic-error">{couldNotFinish(mode, blocker.detail)}</p>
-      ) : running ? null : report ? (
+      ) : needs.length > 0 || running ? null : report ? (
         <p data-testid="ic-compared">{comparedLine(report)}</p>
       ) : report === null && run.loaded ? (
         <p className="text-muted" data-testid="ic-not-run">{BEFORE_RUN}</p>

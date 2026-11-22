@@ -4,7 +4,7 @@
 // codes, asset ids and the server's 422 messages are never shown here.
 import type { InvestmentCaseReportPayload, InvestmentCaseStudy } from '../../../api/types'
 import { SolverInFlightError, StudyBusyError } from '../../../api/finance'
-import { isObj } from './financeModel'
+import { hasNoCounterfactual, isObj } from './financeModel'
 import table from './investmentCaseNeeds.json'
 
 export type Need = 'solve' | 'connection' | 'cod' | 'finance'
@@ -57,7 +57,7 @@ export function comparedLine(report: InvestmentCaseReportPayload): string {
   const payload = report.sections?.project?.payload
   const p = isObj(payload) ? payload : {}
   const cf = isObj(p.counterfactual) ? p.counterfactual : null
-  if (p.has_counterfactual === false || cf?.present === false) return NOT_COMPARED
+  if (hasNoCounterfactual(report)) return NOT_COMPARED
   const basis = typeof cf?.counterfactual_basis === 'string' ? cf.counterfactual_basis : null
   return basis === 'analytic' ? `${COMPARED} ${NOT_RE_PLANNED}` : COMPARED
 }

@@ -204,6 +204,26 @@ describe('InvestmentCaseRunPanel', () => {
       .toEqual(['ic-need-solve', 'ic-need-connection'])
   })
 
+  it('a stated need stays listed while the panel waits or could not finish (GK B3 4)', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    function Known() {
+      const run = useInvestmentCaseRun()
+      return <InvestmentCaseRunPanel run={run} mode="guided" report={null} known={['connection']} />
+    }
+    api.startInvestmentCase.mockRejectedValue(new StudyBusyError('a frontier study is running — wait for it to finish'))
+    render(<QueryClientProvider client={qc}><Known /></QueryClientProvider>)
+    fireEvent.click(await screen.findByRole('button', { name: 'Run the investment case' }))
+    await screen.findByTestId('ic-blocked')
+    expect(screen.getByTestId('ic-need-connection')).toBeTruthy()
+    cleanup()
+    api.startInvestmentCase.mockRejectedValue(http(500, 'boom'))
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <Known /></QueryClientProvider>)
+    fireEvent.click(await screen.findByRole('button', { name: 'Run the investment case' }))
+    await screen.findByTestId('ic-error')
+    expect(screen.getByTestId('ic-need-connection')).toBeTruthy()
+  })
+
   it('after a run, the compared line replaces "Not run yet"', async () => {
     renderPanel('guided', reportWith({ counterfactual: { present: true, counterfactual_basis: 'analytic' } }))
     expect((await screen.findByTestId('ic-compared')).textContent).toMatch(/not re-planned\.$/)
