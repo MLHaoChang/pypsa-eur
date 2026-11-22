@@ -42,6 +42,29 @@ new `pypsa-gui/backend/services/market_prices.py`, the time-series routes, secti
 ## Comments
 
 - 2026-11-21: owner chose option 2, "S1 + S2 + a K8 plan as one stack" (SCU06-PLAN-1, in `docs/agents/owner-decisions.md`). S1 in progress on `claude/scu06-s1-entsoe-prices`; the section-7 offer waits for SCU03 K1.
+- 2026-11-21: K8 plan verdicts.
+  - **K8a (GK B4 (2)): GO with conditions.**
+    1. Build nothing SCU06-K8-1..4 decides until the answers are recorded; the PR cites each answer.
+    2. If AncillaryProduct is deleted, saved configs or packs holding it still load (stripped with a named flag, or a plain refusal, never a 500). Configs without it re-serialise byte-equal to master. A pin test uses a fixture with the old field.
+    3. Apply is an ordinary edit: the same validators as hand entry (#738, #1466 D1), plus the write gate, lock and undo. It moves `_network_input_fingerprint` and the IC digest exactly as hand entry would; the byte-equal test extends to both.
+    4. Empty refs fail closed: a template never clears or overwrites an existing export-price pick. A reserve product with no price is refused at solve and settlement with a named reason, never priced as 0; both tested.
+    5. "Update available" never overwrites user edits: compare per field against what the last apply wrote (per cell, LC-43a T1), show conflicts, and list every value it would change on a card (#1379 F2).
+    6. `region` is typed to S1's `BIDDING_ZONES` keys and validated at load; each part of the zone/currency mismatch refusal has its own test (#1257 F1a).
+    7. Mutants on the hash, the pin, the region type, the empty-ref guard and the per-field compare, each with its killing test.
+  - **K8b (GK A): GO, conditional on SCU06-K8-1 = (a).**
+    - B1: the stored "no backup obligation" attestation is a named second floor source in `derive_floors`; the docstring says a floor of 0 comes only from it. An unreadable floor or a missing attestation stays not eligible (R3), with a test for each.
+    - B2: the attestation is refused on any DC-03 string or spare and on any storage the island sidecar lists as ride-through; each refusal tested.
+    - B3: products with `storages=None` widen to newly eligible storage. With no attestation, floors, `inputs_digest`, the solve fingerprint and the IC digest equal master's (test); with one, `inputs_digest` changes (test). The user text states the widening.
+    - B4: the exact-value LP test (one BESS, p_nom 10, symmetric product) adds a case where the energy rows bind first (max_hours 1, sustain_h 2, so r ≤ 5), with the objective pinned to a hand-computed literal; the no-double-count test as planned.
+    - B5: the planned mutants (drop r from the up row; unreadable read as 0; settle from the objective), plus dropping the d_k term from row 3 and admitting storage with no attestation. DC-03 assess byte-equal and DC strings unchanged.
+- 2026-11-22: owner answers, relayed by the coordinator ("all recommended"):
+  - SCU06-S2-HOME-1 = (a): the PPA/CfD defaults are shared read-only common Library items (S2a as built).
+  - SCU06-CHAT-1 = (a): chat points to the screen; the project market-price routes are `ui-pointer` with decision SCU06-CHAT-1 (S1c).
+  - SCU06-K8-1 = (a): storage with an attested 0 backup floor may earn reserves (K8b, GK A conditions B1–B5 apply).
+  - SCU06-K8-2 = (a): AncillaryProduct is deleted (K8a condition 2 applies).
+  - SCU06-K8-3 = (a): reserve prices come from user upload only.
+  - SCU06-K8-4 = (a): flexible loads are deferred.
+  - The ENTSO-E token (`ENTSOE_API_TOKEN`) is still to be added by the owner; E2E-DONE-1 stays blocked on it.
 
 ### 2026-11-21: S2a gatekeeper conditions (GK B4 (2))
 
