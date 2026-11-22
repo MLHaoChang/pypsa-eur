@@ -86,7 +86,7 @@ def _tasks(root: Path, project: str, owner: str):
                 if path.stem != source_id or not isinstance(task.get('steps'), list):
                     raise ValueError('invalid checkpoint')
                 state = task['status']
-                valid_steps = {'pending', 'running', 'waiting', 'uncertain', 'failed', 'completed'}
+                valid_steps = {'pending', 'running', 'waiting', 'uncertain', 'failed', 'cancelled', 'completed'}
                 if (not isinstance(task.get('title'), str)
                         or not 1 <= len(task['steps']) <= (24 if task.get('brief') else 12)
                         or any(not isinstance(step, dict) or step.get('status') not in valid_steps

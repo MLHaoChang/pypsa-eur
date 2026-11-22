@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 
 from harness import continuation
-from services import chat_tools
+from services import assistant_tasks, chat_tools
 from tests.test_assistant_tasks_study_brief import (  # noqa: F401
     brief,
     dispatch,
@@ -236,10 +236,11 @@ def test_a_done_run_with_unsolved_options_is_partial_not_completed(
 
 
 @pytest.mark.parametrize(
-    "status, error", [("failed", "solver died"), ("aborted", None)]
+    "status, error, step_status",
+    [("failed", "solver died", "failed"), ("aborted", None, "cancelled")],
 )
 def test_a_failed_or_aborted_run_fails_the_step_with_the_record_reason(
-    session, baseline, monkeypatch, status, error
+    session, baseline, monkeypatch, status, error, step_status
 ):
     _, _, root = baseline
     task = _study(
@@ -249,11 +250,14 @@ def test_a_failed_or_aborted_run_fails_the_step_with_the_record_reason(
     )
     _run(session, monkeypatch, "options")
     step = _wait_done(root, task["task_id"], 0)
-    assert step["status"] == "failed" and (error or "aborted") in str(step)
+    assert step["status"] == step_status and (error or "aborted") in str(step)
+    if status == "aborted":  # live-voice 16: a stopped study is cancelled, not failed
+        assert step["error"] == assistant_tasks.STOPPED_ERROR
+        assert step["job"]["outcome"] == "aborted"
 
 
 @pytest.mark.parametrize(
-    "terminal, step_status", [("done", "completed"), ("aborted", "failed")]
+    "terminal, step_status", [("done", "completed"), ("aborted", "cancelled")]
 )
 def test_a_run_followed_while_running_settles_only_at_its_terminal_state(
     session, baseline, monkeypatch, terminal, step_status
@@ -290,6 +294,8 @@ def test_a_run_followed_while_running_settles_only_at_its_terminal_state(
     assert seen.count("running") >= 3 and seen[-1] == terminal
     if terminal == "aborted":
         assert "aborted" in str(step)
+        assert step["error"] == assistant_tasks.STOPPED_ERROR
+        assert step["job"]["outcome"] == "aborted"
 
 
 def _saved_tornado(monkeypatch, status, error=None, **record):

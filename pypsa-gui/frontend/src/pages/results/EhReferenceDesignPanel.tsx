@@ -41,6 +41,8 @@ import { prepareTaggingTour } from './prepareTaggingTour'
 import { InfoTip } from '../../layout/properties/cardKit'
 import type { ZeroReason } from './fmea'
 import { CRITICALITY_PER_YEAR_LABEL } from './fmea'
+import { verdictWord } from '../hubDesign/verdictWords'
+import { plainIds } from '../hubDesign/plainWords'
 import { takeImprovePrefill, useImprovePrefillStore } from '../hubDesign/improvePrefill'
 import { leverKindWords } from './leverKindWords'
 
@@ -284,7 +286,19 @@ export const CERTIFICATION_NEXT = {
   // links there ("Change in Scenarios & optimisation ›").
   inconclusive: 'Next: raise the MC draws in the reliability goal or tighten the plan; an inconclusive verdict is not a failure.',
   noTarget: 'Next: set an allowed shortfall in the reliability goal to certify.',
+  // GK A F6': a must-stay-on bus behind one feeder holds the pass back; the
+  // interval may sit under the goal, so more draws would not settle it.
+  feederBound: 'Next: add a second feeder to the must-stay-on bus or make its feeder more reliable; more simulation draws would not settle this verdict.',
+  // GK R2: a feeder without outage data is taken as always out; its data
+  // comes first.
+  feederNoData: "Next: add outage data for the must-stay-on bus's feeder, or add a second feeder; more simulation draws would not settle this verdict.",
 } as const
+
+function feederNext(fb: unknown): string {
+  const pockets = (fb as { pockets?: { no_data?: string[] }[] } | null)?.pockets ?? []
+  return pockets.some((p) => (p.no_data ?? []).length > 0)
+    ? CERTIFICATION_NEXT.feederNoData : CERTIFICATION_NEXT.feederBound
+}
 
 /** MC certification headline from the `certification` section, if it ran. */
 export function certificationHeadline(report: EhReferenceDesignReport): {
@@ -313,7 +327,8 @@ export function certificationHeadline(report: EhReferenceDesignReport): {
   // No target (the study reports LOLE but certifies nothing) and the 'none'
   // metric both leave the verdict empty: the next step is to set a target.
   const next = verdict === 'fail' ? CERTIFICATION_NEXT.fail
-    : verdict === 'inconclusive' ? CERTIFICATION_NEXT.inconclusive
+    : verdict === 'inconclusive'
+      ? (payload.feeder_bound ? feederNext(payload.feeder_bound) : CERTIFICATION_NEXT.inconclusive)
       : verdict === 'pass' ? null
         : (verdict == null || verdict === 'none' || payload.metric === 'none')
           ? CERTIFICATION_NEXT.noTarget : null
@@ -1560,7 +1575,7 @@ export function EhReferenceDesignPanel() {
                     className={verdictTone(cert.verdict)}
                     title="MC LOLE certification (decision 2): certified only when the 95% CI upper bound is within the target"
                   >
-                    {cert.verdict === 'pass' ? 'Certified' : 'Not certified'}
+                    {verdictWord(cert.verdict)}
                     {' '}({cert.verdict}
                     {cert.target != null ? ` vs ${cert.target} h/yr` : ''})
                   </span>
@@ -1722,6 +1737,11 @@ export function EhReferenceDesignPanel() {
                           <span className="text-text">{certification.ens_met ? 'met' : 'missed'}</span>
                         </span>
                       )}
+                      {certification.critical_feeder_note && (
+                        <span data-testid="eh-certification-feeders" className="text-muted">
+                          {plainIds(certification.critical_feeder_note)}
+                        </span>
+                      )}
                       {importModelLabel(certification) && (
                         <span
                           data-testid="eh-certification-import"
@@ -1753,7 +1773,7 @@ export function EhReferenceDesignPanel() {
                   )}
                   {report.sections?.certification?.note && (
                     <p className="text-[10px] text-muted" data-testid="eh-certification-note">
-                      {report.sections.certification.note}
+                      {plainIds(report.sections.certification.note)}
                     </p>
                   )}
                   {certification?.warning && (

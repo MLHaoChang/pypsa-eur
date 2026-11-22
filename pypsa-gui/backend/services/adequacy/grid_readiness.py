@@ -2063,12 +2063,34 @@ def _lole_row(inp: _Inputs) -> dict:
                        else "The study's network revision is not known")
     ci = payload.get("lole_ci") or []
     lo, hi = (_num(ci[0]), _num(ci[1])) if len(ci) == 2 else (None, None)
+    # GK R1 (shared gate): the certification's own feeder bound counts toward
+    # "within the goal", a chained feeder has none, and a verdict the
+    # certification withheld is never read as a pass here.
+    bound = _num(payload.get("critical_pocket_bound_h_per_year"))
+    chained = sorted(str(f.get("name")) for f in payload.get("critical_feeders") or []
+                     if isinstance(f, dict) and f.get("chained"))
+    held = payload.get("verdict") == "inconclusive" and isinstance(payload.get("feeder_bound"), dict)
     if lo is None or hi is None:
         verdict, why = "warn", "the study gives no confidence interval"
     else:
         lo, hi = lo / years, hi / years
-        verdict = "pass" if hi <= limit else ("fail" if lo > limit else "warn")
+        verdict = "pass" if hi + (bound or 0.0) <= limit else ("fail" if lo > limit else "warn")
         why = "pass needs the CI upper bound within the goal, fail the lower bound above it"
+        if bound is not None:
+            why += (f"; a must-stay-on bus behind its feeder adds up to {bound:.3g} h/yr to the upper bound "
+                    "(an upper bound, so it never makes a fail)")
+        if chained and verdict == "pass":
+            verdict = "warn"
+            why += f"; {', '.join(chained)} feeds a must-stay-on bus through a bus with no supply, which has no bound"
+        if payload.get("verdict") in ("inconclusive", "fail") and verdict == "pass":
+            verdict = "warn"
+            why += f"; the reliability study did not certify a pass ({payload.get('verdict')})"
+        if held:
+            fb = payload["feeder_bound"]
+            for p in fb.get("pockets") or []:
+                why += (f"; {', '.join(map(str, p.get('buses') or []))} could be cut off up to "
+                        f"{_num(p.get('bound_h_per_year')) or 0.0:.3g} h/yr while "
+                        f"{', '.join(map(str, p.get('feeders') or []))} is out")
     return _row("lole", req, limit=limit, unit="h/yr", source=source,
                 project_value={"lole_h_per_year": round(mean, 4),
                                "ci_h_per_year": None if hi is None else [round(lo, 4), round(hi, 4)],
