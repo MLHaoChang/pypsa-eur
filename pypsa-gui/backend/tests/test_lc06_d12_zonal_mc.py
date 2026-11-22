@@ -84,6 +84,8 @@ def zonal_oracle(n: pypsa.Network, import_cap: float = IMPORT_CAP) -> dict:
 
 
 def certify(seam, n, import_cap: float = IMPORT_CAP) -> dict:
+    # the cap is the network's connection limit (template-e2e 02c)
+    n.links.loc['import_poc', ['p_nom', 'p_nom_max']] = import_cap
     seam(n, voll=VOLL)
     frames = list(chat_service._dispatch_real_tool_call(
         chat_tools._CHAT_SESSION.get(),
