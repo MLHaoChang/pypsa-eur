@@ -491,6 +491,16 @@ def test_d2a_the_fingerprint_of_an_unscheduled_template_is_pre_02b():
     assert _fps(n) == MASTER_FP_EH_DATACENTER  # master's, byte for byte
 
 
+def test_d2a_a_build_shares_no_snapshot_index_with_an_earlier_one():
+    # A frame's index is named in place downstream (a live solve does); the next
+    # build must not inherit the name through a shared module-level index, or
+    # its exact fingerprint moves (CI shard order exposed it on #1874).
+    build_eh_datacenter().loads_t.p_set.index.name = "snapshot"
+    n = build_eh_datacenter()
+    assert n.loads_t.p_set.index.name is None
+    assert _fps(n) == MASTER_FP_EH_DATACENTER
+
+
 def test_d2b_a_scheduled_network_reads_inputs_changed_once_then_fresh(monkeypatch):
     from services.finance.investment_case_runner import staleness
 

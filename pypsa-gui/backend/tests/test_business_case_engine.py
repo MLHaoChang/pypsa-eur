@@ -54,7 +54,9 @@ from services.finance.case import (
     CONTRACT_CLASS,
     AssetFinance,
     FinanceCase,
+    AssetPart,
     FinanceRefused,
+    LpBasis,
     Template,
     TemplateLine,
 )
@@ -2177,3 +2179,173 @@ def test_bc15_v1_c3_the_display_keys_state_the_basis_and_the_ignored_years():
         "volume_factor_ignored": [2020, 2040],
     }
     assert "not re-solved" in bcm.VOLUME_FACTOR_NOTE
+
+
+# ── Walk 03 case B: a capex line's life feeds the remaining-life terminal rule ──
+
+RLA = {"method": "remaining_life_annuity"}
+RULES = ["fixed", "part_lifetimes"]
+
+
+def _rla_ic(rule="fixed", rate=0.06):
+    return dataclasses.replace(
+        _ic(terminal_value=RLA, replacement_rule=rule),
+        lp_basis=LpBasis(discount_rate=rate),
+    )
+
+
+def _crf(r, life):
+    return r / (1.0 - (1.0 + r) ** -life)
+
+
+def _apf(r, y):
+    return 0.0 if y <= 0 else (1.0 - (1.0 + r) ** -y) / r
+
+
+def _reasons(r):
+    return [x for v in r.op.reasons.values() for x in v]
+
+
+def _terms(r, name):
+    return [t for t in r.op.terminal_terms if t.asset == name]
+
+
+def _term(r, name):
+    (t,) = _terms(r, name)
+    return t
+
+
+@pytest.mark.parametrize("rule", RULES)
+def test_a_capex_line_is_valued_by_the_remaining_life_rule_over_its_life(rule):
+    # The IPP repro: a typed capex line is a terminal term, never
+    # `terminal_part_unknown:<line>:investment`, so NPV and IRR are established.
+    _bc, r = _run(_inputs(_capex()), ic=_rla_ic(rule))
+    assert not any("terminal_part_unknown" in x for x in _reasons(r))
+    assert r.sections["operating"] == "ok"
+    t = _term(r, "plant")
+    # Bought at COD 2031, serves 10 y, the horizon is 2036: 5 y remain.
+    assert (t.lifetime_years, t.start_year, t.remaining_years) == (10.0, 2031, 5.0)
+    assert t.base == 600.0
+    assert t.value == pytest.approx(600.0 * _crf(0.06, 10) * _apf(0.06, 5))
+    k = kpis(r, pnl(r))
+    assert k["project_npv"].value is not None and k["project_irr"].value is not None
+
+
+@pytest.mark.parametrize("rule", RULES)
+def test_a_staged_capex_line_is_valued_from_its_stage_purchase(rule):
+    _bc, r = _run(_inputs(_capex(start_year=2033)), ic=_rla_ic(rule))
+    t = _term(r, "plant")
+    ((_name, _cod, paid, amount),) = r.op.stage_items
+    assert t.base == pytest.approx(amount) and paid == 2032
+    assert (t.start_year, t.remaining_years) == (2033, 7.0)
+    assert t.value == pytest.approx(amount * _crf(0.06, 10) * _apf(0.06, 7))
+
+
+@pytest.mark.parametrize("rule", RULES)
+def test_a_refreshed_capex_line_is_valued_from_the_refresh_the_case_pays(rule):
+    # Both rules pay the refresh entries (the line is not governed), so the term
+    # follows the last one: paid in 2035, it serves from 2036 for 10 y.
+    _bc, r = _run(_inputs(_capex(refresh_years=2.0)), ic=_rla_ic(rule))
+    t = _term(r, "plant")
+    assert (t.start_year, t.remaining_years) == (2036, 10.0)
+    paid = r.op.replacement[_at(r, 2035)]
+    assert paid > 600.0 and t.base == pytest.approx(paid)
+    assert t.value == pytest.approx(paid * _crf(0.06, 10) * _apf(0.06, 10))
+
+
+def test_a_capex_line_whose_life_ends_inside_the_horizon_is_worth_nothing():
+    _bc, r = _run(_inputs(_capex(life_years=3.0)), ic=_rla_ic())
+    t = _term(r, "plant")
+    assert t.remaining_years == -2.0 and t.value == 0.0
+    assert not any("plant" in x for x in _reasons(r))
+
+
+def test_a_capex_line_typed_at_zero_has_no_term_and_no_reason():
+    _bc, r = _run(_inputs(_capex(price=0.0)), ic=_rla_ic())
+    assert _terms(r, "plant") == [] and not any("plant" in x for x in _reasons(r))
+
+
+@pytest.mark.parametrize("life", [0.5, math.inf])
+def test_a_terminal_life_below_a_year_or_infinite_is_terminal_part_unknown(life):
+    # The model refuses such a life (`LineItem.life_years`: Finite, ge=1.0); the
+    # engine still floors it, never a crash.
+    bc = build_business_case(_rla_ic(), _inputs(_capex()), {})
+    assets = tuple(
+        dataclasses.replace(a, terminal_lifetime_years=life) if a.name == "plant" else a
+        for a in bc.case.assets
+    )
+    r = run_case(dataclasses.replace(bc.case, assets=assets), PACK)
+    assert "terminal_part_unknown:plant:investment" in _reasons(r)
+
+
+def test_a_terminal_life_on_a_composite_asset_is_refused():
+    parts = (AssetPart("power", 1.0, 10.0), AssetPart("energy", 1.0, 15.0))
+    with pytest.raises(ValueError, match="terminal_lifetime_years"):
+        AssetFinance(
+            "bess", "StorageUnit", 2.0, 15.0, parts=parts, terminal_lifetime_years=10.0
+        )
+    # Refused for the parts' count, even where no part lifetime replaces them.
+    never = (AssetPart("a", 1.0, math.inf), AssetPart("b", 1.0, math.inf))
+    with pytest.raises(ValueError, match="is for one part, not 2"):
+        AssetFinance(
+            "kit",
+            "business_case",
+            2.0,
+            math.inf,
+            parts=never,
+            terminal_lifetime_years=9.0,
+        )
+    # One explicit part takes it only where no part lifetime replaces the asset.
+    inf = AssetPart("investment", 1.0, math.inf)
+    one = AssetFinance(
+        "kit",
+        "business_case",
+        1.0,
+        math.inf,
+        parts=(inf,),
+        terminal_lifetime_years=10.0,
+    )
+    assert one.terminal_lifetime_years == 10.0
+    for life in (25.0, None):
+        with pytest.raises(ValueError, match="needs an infinite lifetime"):
+            AssetFinance("pv", "Generator", 1.0, life, terminal_lifetime_years=10.0)
+    assert AssetFinance("bess", "StorageUnit", 2.0, 15.0, parts=parts).parts == parts
+
+
+@pytest.mark.parametrize("rule", RULES)
+def test_a_refreshed_capex_line_typed_at_zero_has_no_term_and_no_entry(rule):
+    bc, r = _run(_inputs(_capex(price=0.0, refresh_years=2.0)), ic=_rla_ic(rule))
+    assert not any(name == "plant" for _y, name, _x in bc.case.inputs.replacement_capex)
+    assert _terms(r, "plant") == [] and not any("plant" in x for x in _reasons(r))
+
+
+@pytest.mark.parametrize("rule", RULES)
+def test_the_life_never_schedules_a_replacement_of_the_line(rule):
+    # The life values the terminal only: a line is replaced by its refresh years,
+    # under either rule, never repurchased at its life (no replacement_rule_conflict).
+    bc, r = _run(_inputs(_capex(life_years=2.0, refresh_years=3.0)), ic=_rla_ic(rule))
+    plant = bc.case.assets[-1]
+    assert math.isinf(plant.lifetime_years) and plant.terminal_lifetime_years == 2.0
+    assert [x.year for x, _v in r.op.replacement_items if x.asset == "plant"] == [2034]
+
+
+def test_the_terminal_life_enters_the_digests_only_where_the_rule_reads_it():
+    from services.results.finance_case import _canon
+
+    # The IC case hash (`_canon`): an asset without a terminal-only life keeps its key out.
+    ic = _rla_ic()
+    bc = build_business_case(ic, _inputs(_capex()), {})
+    assert "terminal_lifetime_years" not in json.dumps(_canon(ic))
+    (plant,) = [a for a in _canon(bc.case)["assets"] if a["name"] == "plant"]
+    assert plant["terminal_lifetime_years"] == 10.0
+    # The BC digest, pinned to master before walk 03 case B: unchanged where the rule
+    # does not read a capex line's life, changed (a stored report reads stale) where it does.
+    assert (
+        bcm.business_case_hash(ic, _inputs(_line()), {})
+        == "806bb649435e0dc50bdbb0ebeba5341c"
+    )
+    assert (
+        bcm.business_case_hash(_ic(), _inputs(_capex()), {})
+        == "20735455cae9629c5d4532dcb3ede0b8"
+    )
+    assert bc.hash != "c1aad8d6e0ff781c03b54164a89de607"
