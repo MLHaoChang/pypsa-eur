@@ -268,6 +268,9 @@ def test_excel_child_failure_paths(monkeypatch, tmp_path, caplog):
     r = client.get("/export/excel")
     d = r.json()["detail"]
     assert r.status_code == 500 and d["error_kind"] == "excel_export_timeout" and "1 s" in d["message"]
+    import multiprocessing
+
+    assert [c for c in multiprocessing.active_children() if c.name == "excel-export"] == []
     assert list(tmp_path.iterdir()) == []
 
 
@@ -295,3 +298,21 @@ def test_slow_excel_export_does_not_block_csv(monkeypatch):
     gate.set()
     t.join(10)
     assert out["r"].status_code == 200
+
+
+def test_excel_child_reports_its_own_exception(monkeypatch, tmp_path):
+    """`_excel_child` sends the failure text to the parent instead of dying silently."""
+    import multiprocessing
+
+    import routers.io as rio
+
+    def boom(n, tmp):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(rio, "_write_excel", boom)
+    n = _network()
+    nc = tmp_path / "n.nc"
+    n.export_to_netcdf(str(nc))
+    recv, send = multiprocessing.Pipe(duplex=False)
+    rio._excel_child(str(nc), str(tmp_path / "o.xlsx"), send)
+    assert recv.recv() == "ValueError: boom"
