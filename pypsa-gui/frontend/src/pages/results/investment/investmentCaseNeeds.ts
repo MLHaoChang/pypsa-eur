@@ -30,8 +30,10 @@ export function needOf(code: string | null | undefined): Need | null {
   return NEED_OF.get(code.split(':')[0]) ?? null
 }
 
-export const BEFORE_RUN = 'Not run yet. The investment case compares the site with this design against '
+/** What the case compares, before a run. */
+export const COMPARES = 'The investment case compares the site with this design against '
   + "the same site without the owner's new equipment, paying for its energy as it does today."
+export const BEFORE_RUN = `Not run yet. ${COMPARES}`
 export const RUNNING = 'Running the investment case…'
 export const NEEDS_LEAD = 'The investment case needs:'
 export const COULD_NOT_FINISH = 'The investment case could not finish.'

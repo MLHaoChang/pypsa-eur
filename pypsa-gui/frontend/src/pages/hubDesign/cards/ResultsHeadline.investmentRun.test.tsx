@@ -13,7 +13,7 @@ import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { REPORT, review } from '../testFixtures'
 import captured from '../../../test/fixtures/headlineKpis.json'
 import { ResultsCard } from './ResultsCard'
-import { BEFORE_RUN } from '../../results/investment/investmentCaseNeeds'
+import { COMPARES } from '../../results/investment/investmentCaseNeeds'
 
 vi.mock('../../../hooks/useProjectFlow', () => ({ useProjectFlow: vi.fn() }))
 vi.mock('../../../api/finance', async (importOriginal) => {
@@ -65,7 +65,7 @@ describe('the Guided NPV figure runs the investment case', () => {
   it('before a run: says what it compares once, and runs from the headline', async () => {
     vi.mocked(financeApi.startInvestmentCase).mockResolvedValue({ status: 'running' } as never)
     mount()
-    expect((await screen.findByTestId('ic-not-run')).textContent).toBe(BEFORE_RUN)
+    expect((await screen.findByTestId('ic-not-run')).textContent).toBe(COMPARES)
     expect(npvBlock().textContent?.split('The investment case compares').length).toBe(2)
     fireEvent.click(screen.getByRole('button', { name: 'Run the investment case' }))
     await waitFor(() => expect(financeApi.startInvestmentCase).toHaveBeenCalledTimes(1))

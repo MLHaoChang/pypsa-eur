@@ -7,7 +7,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { openSiteConnection } from '../../economics/SiteConnectionLink'
 import { openPanel } from '../openPanel'
 import {
-  BEFORE_RUN, comparedLine, couldNotFinish, NEED_ORDER, NEED_TEXT, NEEDS_LEAD, RUNNING, type Need,
+  BEFORE_RUN, comparedLine, COMPARES, couldNotFinish, NEED_ORDER, NEED_TEXT, NEEDS_LEAD, RUNNING, type Need,
 } from './investmentCaseNeeds'
 import type { InvestmentCaseRun } from './useInvestmentCaseRun'
 
@@ -27,7 +27,7 @@ const sentence = (t: string) => {
 /** Where a need's link goes: the solve is an action; the others open a panel (›). */
 const linkLabel = (need: Need) => (need === 'solve' ? NEED_TEXT[need].link : `${NEED_TEXT[need].link} ›`)
 
-export default function InvestmentCaseRunPanel({ run, report, mode, known = [] }: {
+export default function InvestmentCaseRunPanel({ run, report, mode, known = [], stateShown = false }: {
   run: InvestmentCaseRun
   /** The stored report; null before a run, undefined while it is not read yet. */
   report: InvestmentCaseReportPayload | null | undefined
@@ -35,6 +35,9 @@ export default function InvestmentCaseRunPanel({ run, report, mode, known = [] }
   /** Needs another server read already states (the commercial config's
    *  "no site connection"), listed with the refusal's in one checklist. */
   known?: Need[]
+  /** The host already shows "Not run yet" (Guided's figure pill, UX 2 on #1886):
+   *  the line before a run says only what the case compares. */
+  stateShown?: boolean
 }) {
   const { running, starting, start, blocker } = run
   const busy = running || starting
@@ -65,7 +68,7 @@ export default function InvestmentCaseRunPanel({ run, report, mode, known = [] }
       ) : needs.length > 0 || running ? null : report ? (
         <p data-testid="ic-compared">{comparedLine(report)}</p>
       ) : report === null && run.loaded ? (
-        <p className="text-muted" data-testid="ic-not-run">{BEFORE_RUN}</p>
+        <p className="text-muted" data-testid="ic-not-run">{stateShown ? COMPARES : BEFORE_RUN}</p>
       ) : null}
       <button type="button" data-testid="ic-run" disabled={busy}
               className="px-2 py-1 rounded bg-accent text-on-accent disabled:opacity-50"

@@ -242,7 +242,7 @@ export function ResultsHeadline({ reliability, cost, costEur = null, ci, freshne
             {/* The panel states "not run yet" and a refusal's needs itself: the figure's reason steps aside. */}
             <TileFigure testId="hub-results-npv" tile={npv.state === 'not_run' || icRun.blocker
               ? { ...npv, reason: undefined } : npv} />
-            <InvestmentCaseRunPanel run={icRun} mode="guided" report={icReport} />
+            <InvestmentCaseRunPanel run={icRun} mode="guided" report={icReport} stateShown />
           </div>
         )}
         {/* The tile's place is kept while the figures load, so the grid does not move (as Expert's strip). */}

@@ -12,7 +12,7 @@ import { useUIStore } from '../../store/uiStore'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from './hubDesignStore'
 import { ChaptersSection } from './ChaptersSection'
 import type { ChapterId, ChapterInputs } from './chapters'
-import { BEFORE_RUN } from '../results/investment/investmentCaseNeeds'
+import { COMPARES } from '../results/investment/investmentCaseNeeds'
 
 vi.mock('../../api/finance', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/finance')>()
@@ -56,7 +56,9 @@ describe('the Investment tile before the study has results', () => {
   it('says what it compares once, and runs from the tile', async () => {
     vi.mocked(financeApi.startInvestmentCase).mockResolvedValue({ status: 'running' } as never)
     mount()
-    expect((await screen.findByTestId('ic-not-run')).textContent).toBe(BEFORE_RUN)
+    expect((await screen.findByTestId('ic-not-run')).textContent).toBe(COMPARES)
+    // The pill says "Not run yet"; the panel's line does not say it again (UX 2 on #1886).
+    expect(screen.getByTestId('hub-chapter-investment').textContent?.split('Not run yet').length).toBe(2)
     expect(screen.getByTestId('hub-chapter-investment').textContent?.split('investment case has not run').length).toBe(1)
     fireEvent.click(screen.getByRole('button', { name: 'Run the investment case' }))
     await waitFor(() => expect(financeApi.startInvestmentCase).toHaveBeenCalledTimes(1))

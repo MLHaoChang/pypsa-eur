@@ -4,7 +4,8 @@
 // stored study is mocked as an error with no reason). Expert: the IPP template's
 // Lifecycle-cost NPV row with its note (the report is mocked: no counterfactual,
 // lifecycle-cost NPV equal to the equity NPV, as GK A found on the IPP).
-// Run: node .scratch/template-e2e/shots/22-s2b/shots.mjs (app on :8000/:5173).
+// Run: OUT=<dir> node .scratch/template-e2e/shots/22-s2b/shots.mjs (app on :8000/:5173).
+// The PNGs live on claude/campus-ic-02-05-shots under pr1886/ (UX ruling v), not in the PR.
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
@@ -12,9 +13,11 @@ import { devCredentials } from '../../../../pypsa-gui/frontend/scripts/dev-crede
 const { chromium } = createRequire(import.meta.url)('playwright')
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const BASE = 'http://127.0.0.1:5173'
-const OUT = process.env.OUT || HERE
+const OUT = process.env.OUT || '/tmp/claude-0/-home-user-pypsa-eur/f77ac539-8b2d-5d27-8ebc-cd919ce3a922/scratchpad/shots-1886'
 const DC = { project: 'te22-investment', template: 'eh_datacenter' }
 const IPP = { project: 'te22-ipp', template: 'eh_ipp_hybrid' }
+// One predicate for the study route, so unroute() matches it (Playwright compares by identity).
+const IC = u => u.pathname === '/api/results/investment_case'
 const problems = []
 const written = []
 
@@ -97,11 +100,42 @@ try {
       await page.getByTestId('ic-run').click()
       await page.getByTestId('ic-need-solve').waitFor(); await page.waitForTimeout(800)
       await shot(page, 'guided-2-refused-needs', scheme, headline)
-      await page.route(u => u.pathname === '/api/results/investment_case', r => r.request().method() === 'GET'
+      await page.route(IC, r => r.request().method() === 'GET'
         ? r.fulfill({ status: 200, json: { status: 'error', error_code: 'internal_error' } }) : r.fallback())
       await land(page); await guidedResults(page)
       await page.getByTestId('ic-error').waitFor()
       await shot(page, 'guided-3-could-not-finish', scheme, page.getByTestId('hub-chapter-investment'))
+      // A refusal that states its own reason (issue 03's money-year sentence): shown whole.
+      await page.unroute(IC)
+      await page.route(IC, r => r.request().method() === 'GET'
+        ? r.fulfill({ status: 200, json: { status: 'refused', error_code: 'campus_assets_money_year_mismatch',
+            error: "campus_assets_money_year_mismatch: the campus assets are priced in 2026 money, the case's price data "
+              + 'are 2020; reprice the campus asset library in 2020, or state the finance inputs in 2026 money' } })
+        : r.fallback())
+      await land(page); await guidedResults(page)
+      await page.getByTestId('ic-error').waitFor()
+      await shot(page, 'guided-4-could-not-finish-reason', scheme, page.getByTestId('hub-chapter-investment'))
+      await page.unroute(IC)
+      // With the hub study's results (the repo's test fixtures), the panel sits under the headline NPV.
+      const fx = await page.evaluate(async () => {
+        const { REPORT, review } = await import('/src/pages/hubDesign/testFixtures.ts')
+        return { report: REPORT, review: review() }
+      })
+      const json = body => r => r.request().method() === 'GET' ? r.fulfill({ status: 200, json: body }) : r.fallback()
+      await page.route(u => u.pathname === '/api/results/eh_study',
+        json({ status: 'done', archetype: 'weak_flexible', report: fx.report, edited_since_study: false }))
+      await page.route(u => u.pathname === '/api/results/eh_review', json(fx.review))
+      await page.route(u => u.pathname === '/api/results/eh_reference_design', json(fx.report))
+      await land(page)
+      await page.evaluate(async () => {
+        const { useHubDesignStore } = await import('/src/pages/hubDesign/hubDesignStore.ts')
+        const { useUIStore } = await import('/src/store/uiStore.ts')
+        useUIStore.getState().setSlidePanel('hubDesign')
+        useHubDesignStore.getState().setStep('results', { user: true })
+      })
+      const head = page.getByTestId('hub-results-headline')
+      await head.waitFor(); await page.getByTestId('ic-run').waitFor(); await page.waitForTimeout(1200)
+      await shot(page, 'guided-5-headline-before-run', scheme, head)
     } catch (e) { problems.push(`${scheme} guided: ${e.message.split('\n')[0]}`); await page.screenshot({ path: path.join(OUT, `failed-guided-${scheme}.png`) }) }
     await ctx.close();
 
@@ -110,7 +144,7 @@ try {
     try {
       await page.route(u => u.pathname === '/api/results/investment_case/report',
         r => r.fulfill({ status: 200, json: IPP_REPORT }))
-      await page.route(u => u.pathname === '/api/results/investment_case', r => r.request().method() === 'GET'
+      await page.route(IC, r => r.request().method() === 'GET'
         ? r.fulfill({ status: 200, json: { status: 'done' } }) : r.fallback())
       await land(page)
       await page.evaluate(async () => {

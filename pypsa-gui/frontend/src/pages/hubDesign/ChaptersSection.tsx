@@ -129,7 +129,7 @@ export function ChaptersSection({ reliability, headlined = [] }: {
               </p>
             )}
             {t.id === 'investment' && !headlined.includes(t.id) && (
-              <InvestmentCaseRunPanel run={icRun} mode="guided" report={icReport} />
+              <InvestmentCaseRunPanel run={icRun} mode="guided" report={icReport} stateShown />
             )}
             {t.id === 'grid_plan' && project && ['not_run', 'stale', 'unavailable'].includes(t.state) && (
               gridInScope
