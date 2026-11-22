@@ -173,10 +173,6 @@ def _write_excel(n, tmp: pathlib.Path) -> None:
 EXCEL_EXPORT_SECONDS = 540.0  # under the client's 10 min per-call timeout
 
 
-def _excel_refusal(kind: str, message: str, **extra) -> HTTPException:
-    return HTTPException(500, {"error_kind": kind, "message": message, **extra})
-
-
 def _excel_child(nc_path: str, tmp: str, conn) -> None:
     """The `spawn` child: load the network the parent saved and write the workbook."""
     try:
@@ -210,11 +206,12 @@ def _export_excel_bytes() -> bytes:
         err = None
         try:
             if not recv.poll(EXCEL_EXPORT_SECONDS):
-                raise _excel_refusal(
-                    "excel_export_timeout",
-                    f"The Excel export did not finish within {EXCEL_EXPORT_SECONDS:g} s and was stopped. "
-                    "Try the CSV or NetCDF export, or shorten the snapshot range.",
-                    budget_seconds=EXCEL_EXPORT_SECONDS)
+                raise HTTPException(500, {
+                    "error_kind": "excel_export_timeout",
+                    "message": f"The Excel export did not finish within {EXCEL_EXPORT_SECONDS:g} s and was stopped. "
+                               "Try the CSV or NetCDF export, or shorten the snapshot range.",
+                    "budget_seconds": EXCEL_EXPORT_SECONDS,
+                })
             try:
                 err = recv.recv()
             except (EOFError, OSError):
@@ -226,10 +223,11 @@ def _export_excel_bytes() -> bytes:
             child.join(5)
         if err:
             logging.getLogger(__name__).error("Excel export failed: %s", err)
-            raise _excel_refusal(
-                "excel_export_failed",
-                "The network could not be written to Excel. Try the CSV or NetCDF export, "
-                "or check the server log for the cause.")
+            raise HTTPException(500, {
+                "error_kind": "excel_export_failed",
+                "message": "The network could not be written to Excel. Try the CSV or NetCDF export, "
+                           "or check the server log for the cause.",
+            })
         data = pathlib.Path(tmp).read_bytes()
     change_log_service.log("export", "Network", "network.xlsx", "Exported network as Excel (.xlsx)")
     return data
