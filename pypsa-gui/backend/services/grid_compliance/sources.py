@@ -20,8 +20,15 @@ log = logging.getLogger(__name__)
 
 Provider = Callable[[object], "list[Table] | None"]
 
-#: package id → provider. Empty until GC-01..GC-08 land.
-SOURCES: dict[str, Provider] = {}
+
+def _gc08(project) -> list[Table] | None:
+    from services.grid_compliance.ssti_source import gc08_tables
+
+    return gc08_tables(project)
+
+
+#: package id → provider, one line per package as it lands.
+SOURCES: dict[str, Provider] = {"GC-08": _gc08}
 
 
 def read(project, package: str) -> tuple[str, list[Table] | None]:

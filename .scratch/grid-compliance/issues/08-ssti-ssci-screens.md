@@ -64,3 +64,29 @@ Release note: one new file under `doc/release-notes.d/` (see its README).
 - R8: Journey-fit paragraph in the PR body, and a release-note fragment.
 - R9: an assumed threshold's "clear" reads pass, with the note "against the assumed screening threshold"; every row is assumed=True.
 - Torsional-mode input becomes a separate GC-01c, not part of GC-01b (sent to the coordinator).
+
+**2026-11-21, GK A2 (6) plan GO for slice B** (`SOURCES["GC-08"]` in `grid_compliance/sources.py`), recorded verbatim as GK A2 resent it on 2026-11-22:
+
+> GK A2 (6): GC-08 slice B plan is a GO, on conditions S1–S7. Record them verbatim in issue 08's ## Comments.
+>
+> Question: (a). The provider raises on an error json or an unreadable meta, so sources.read gives "unavailable". That is sources.py's documented contract, the scorecard row carries the reason, and a one-row "present" table would report a failed package as delivered. Raise one named exception class (not a bare Exception) whose message is plain text.
+>
+> S1. One reader. The pack tables come through the same validated read the scorecard rows use (the fail-closed guards from #1849), never a second parser of the run files. Where the scorecard row reads unknown (damaged table, contradicting verdict, profile moved since the run, unreadable verdict), the table's caption states that row's reason. The Verdict column must not show a judged verdict the scorecard refused. Test: a damaged UIF table and a moved profile give a caption that matches the scorecard note, and no judged verdict.
+>
+> S2. One off-grid rule. R4b uses the scorecard's own predicate through the small public helper. A test mutates the helper's result and shows both the scorecard and the pack follow it. Cover these cases:
+> - off-grid with an open tie: caption "islanded case not evaluated…", each converter-bus verdict "not evaluated (islanded)", never the grid-counted UIF given as the island answer;
+> - grid-connected with an open tie: judged, unmarked;
+> - off-grid by label only (tie closed): judged.
+> Off-grid leaves the subsync table out, as the scorecard leaves out its PCC rows.
+>
+> S3. Literal expectations. Column lists and rows are compared whole against hand-written lists, including one blank cell and one non-finite cell ("—"). Never build the expectation from the module's own constants or formatter (rulings 10 and #1786 M6a).
+>
+> S4. Plain values. No repr in any cell or caption. A non-string note cell reads as an unreadable note, as the scorecard does. source_path is relative to the project, never absolute.
+>
+> S5. One real stage. The two-genset hub runs through sources.read and gives "present", with the UIF worst row equal to the scorecard's project_value. Pre-stage gives pending.
+>
+> S6. End to end. Before review, generate the GC-08 pack entry in the real app on a grid project and on an off-grid project with an open tie. Send me the two captions and the rendered tables (screenshot via shots.sh, .small only). I will repeat it.
+>
+> S7. File .scratch/grid-compliance/issues/08c-subsync-reason-order.md as you listed, in this PR. Also add a release-note fragment, and the Journey-fit paragraph in the body as for slice A.
+>
+> Size ~400 lines is fine. Send the PR when it is ready.
