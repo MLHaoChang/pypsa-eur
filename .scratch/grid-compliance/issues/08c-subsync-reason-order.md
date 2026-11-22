@@ -29,6 +29,7 @@ Confirm each item against the code before fixing it, and give each a test.
 3. **Blank notes entries.** A meta `notes` list with an empty or blank string joins into the reason as an empty clause ("a; ; b"). Skip blank entries, as `_subsync_reasons` already does for table notes.
 4. **The "check" fallback.** When the scan's verdict is `check` and no note gives a reason, `_subsync_row` falls back to `NO_MODES`. Make sure the fallback is only used when the run gave no reason of its own, and pin it with a test.
 5. **The "( )" margin.** A note formatted from a missing margin shows empty parentheses. Leave the parenthesis out, or say the value is missing.
+6. **The repeated UIF note (GK A2 on #1879, Q1 (A)).** The run writes the same note on every converter-bus row of the UIF table, so the pack's `ssti_uif` Note column repeats it and 20 rows wrap across about 9 PDF pages. Show a note shared by every row once, as a line of the caption, and leave the Note column only for notes that differ between rows.
 
 ## Done when
 

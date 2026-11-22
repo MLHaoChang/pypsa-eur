@@ -214,9 +214,10 @@ def test_off_grid_with_an_open_tie_marks_each_bus_islanded_and_drops_the_scan(
         "Screening; the binding answer is the EMT study."
     )
     assert t["ssti_uif"].caption == rows["ssti_uif"]["note"]
-    assert [r[5] for r in t["ssti_uif"].rows] == [
-        "not evaluated (islanded)",
-        "not evaluated (islanded)",
+    # islanded, the grid-counted UIF is no answer: its cell reads "—" (GK A2 Q2)
+    assert t["ssti_uif"].rows == [
+        ["MV", "max", "GAS", "—", "0.1", "not evaluated (islanded)", ""],
+        ["MV", "min", "GAS", "—", "0.1", "not evaluated (islanded)", ""],
     ]
 
 
@@ -233,7 +234,9 @@ def test_an_islanded_project_with_a_damaged_table_gives_the_damage_and_judges_no
     _, t = _pack(_project(monkeypatch, tmp_path, n=n))
     assert t["ssti_uif"].caption == rows["ssti_uif"]["note"]
     assert "not a finite number (x)" in t["ssti_uif"].caption
-    assert [r[5] for r in t["ssti_uif"].rows] == ["not evaluated (islanded)"] * 2
+    assert [r[3:6] for r in t["ssti_uif"].rows] == [
+        ["—", "0.1", "not evaluated (islanded)"]
+    ] * 2
 
 
 def test_a_grid_project_with_an_open_tie_stays_judged_and_unmarked(

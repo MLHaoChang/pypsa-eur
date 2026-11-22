@@ -7,8 +7,8 @@ run files. Each caption is the scorecard row's note, so a row the scorecard
 refused (a damaged table, a contradicting verdict, a profile moved since the
 run) states its reason there, and its Verdict column judges nothing. The
 off-grid rule is the scorecard's ``grid_case`` (S2): islanded, the UIF rows
-read "not evaluated (islanded)"; off-grid, the scan from the PCC leaves the
-pack as its rows leave the scorecard.
+read "not evaluated (islanded)" and their UIF "—"; off-grid, the scan from the
+PCC leaves the pack as its rows leave the scorecard.
 
 No run with the screens yet gives None (pending). A failed stage or an
 unreadable record raises ``SstiSourceUnavailable`` (GK A2 (a)), so the pack
@@ -94,8 +94,10 @@ def _uif_table(row: dict, frame, case: str, path: str) -> Table:
         else None
     )
     for _, r in judged.iterrows() if judged is not None else ():
+        uif = _cell(r, "uif", _number)
         if case == "islanded":
-            verdict = ISLANDED
+            # the UIF counts the grid's infeed, which an island lacks: no number to show
+            verdict, uif = ISLANDED, NON_FINITE
         elif row["verdict"] in ("pass", "warn"):
             verdict = _judged(r["uif"], row)
         else:
@@ -105,7 +107,7 @@ def _uif_table(row: dict, frame, case: str, path: str) -> Table:
                 _cell(r, "bus", _text),
                 _cell(r, "case", _text),
                 _cell(r, "machine", _text),
-                _cell(r, "uif", _number),
+                uif,
                 _cell(r, "threshold", _number),
                 verdict,
                 _cell(r, "note", _note),
