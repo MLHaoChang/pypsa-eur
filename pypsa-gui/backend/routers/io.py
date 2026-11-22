@@ -145,17 +145,13 @@ def export_csv():
     )
 
 
-def _export_excel_bytes() -> bytes:
-    n = PyPSAService.get_network()
-    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
-        tmp = pathlib.Path(f.name)
+def _write_excel(n, tmp: pathlib.Path) -> None:
+    """Write the escaped workbook for `n` to `tmp` (CPU-bound; see `_export_excel_bytes`)."""
     try:
         # PyPSA appends when the path already exists. An empty mktemp file
         # is not a workbook; let its writer create the file instead.
-        tmp.unlink()
+        tmp.unlink(missing_ok=True)
         n.export_to_excel(str(tmp))
-        _map_xlsx_strings(tmp, _escape_formula)
-        data = tmp.read_bytes()
     except AttributeError:
         # Fallback: write each component DataFrame as a sheet
         import openpyxl
@@ -171,7 +167,41 @@ def _export_excel_bytes() -> bytes:
                 for row in rows:
                     ws.append(row)
         wb.save(str(tmp))
-        _map_xlsx_strings(tmp, _escape_formula)
+    _map_xlsx_strings(tmp, _escape_formula)
+
+
+def _excel_child(n, tmp: pathlib.Path, conn) -> None:
+    try:
+        _write_excel(n, tmp)
+        conn.send(None)
+    except BaseException as exc:  # reported to the parent, which raises it
+        conn.send(f"{type(exc).__name__}: {exc}")
+    finally:
+        conn.close()
+
+
+def _export_excel_bytes() -> bytes:
+    """The network as .xlsx. An hourly year is ~30 s of pure-Python work: it runs in a
+    forked child so it does not hold the GIL against other requests (a concurrent
+    CSV export took 21 s instead of 2 s when it ran in a thread)."""
+    import multiprocessing
+
+    n = PyPSAService.get_network()
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
+        tmp = pathlib.Path(f.name)
+    try:
+        ctx = multiprocessing.get_context("fork")
+        recv, send = ctx.Pipe(duplex=False)
+        proc = ctx.Process(target=_excel_child, args=(n, tmp, send), daemon=True)
+        proc.start()
+        send.close()
+        try:
+            err = recv.recv() if recv.poll(None) else None
+        except EOFError:
+            err = "the export process stopped without a result"
+        proc.join()
+        if err:
+            raise RuntimeError(err)
         data = tmp.read_bytes()
     finally:
         tmp.unlink(missing_ok=True)
