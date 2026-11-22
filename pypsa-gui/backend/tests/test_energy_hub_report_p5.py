@@ -276,8 +276,15 @@ def test_the_carrier_list_is_slack_pys_whole_set():
 
 def _with_slack(name: str, carrier: str) -> pypsa.Network:
     n = _ens_network()
-    n.add("Generator", name, bus="b", carrier=carrier, p_nom=999.0,
-          p_nom_extendable=True, marginal_cost=1e4)
+    n.add(
+        "Generator",
+        name,
+        bus="b",
+        carrier=carrier,
+        p_nom=999.0,
+        p_nom_extendable=True,
+        marginal_cost=1e4,
+    )
     n.add("Generator", "pv_new", bus="b", carrier="solar", p_nom_extendable=True)
     n._objective = 1.0
     return n
@@ -292,12 +299,27 @@ def test_a_generator_on_a_slack_carrier_is_neither_a_total_nor_a_row(carrier):
 
 
 @pytest.mark.parametrize(
-    "name", ["__voll_l", "__vollb", "voll_slack_b", "__dsr_l", "__dccurt_cooling", "__lost_b"])
+    "name",
+    ["__voll_l", "__vollb", "voll_slack_b", "__dsr_l", "__dccurt_cooling", "__lost_b"],
+)
 def test_a_slack_named_generator_on_a_real_carrier_is_neither_a_total_nor_a_row(name):
     sizing = R.sizing_summary_from_network(_with_slack(name, "gas"))
     assert sizing["by_carrier"] == _REAL
     assert sizing["total_p_nom_mw"] == pytest.approx(125.0)
     assert [a["name"] for a in sizing["assets"]] == ["pv_new"]
+
+
+def test_an_extendable_lost_production_slack_is_no_row_but_stays_a_product_slack():
+    """GK A F2: the `__lost_` slack is outside slack.py's sets; with a shortfall
+    role and even when extendable it is never a sized asset nor a carrier total,
+    and the product-slack list still reports it."""
+    n = _with_slack("__lost_b", "NH3 shortfall")
+    n.generators["process_role"] = ""
+    n.generators.loc["__lost_b", "process_role"] = "shortfall"
+    sizing = R.sizing_summary_from_network(n)
+    assert sizing["by_carrier"] == _REAL
+    assert [a["name"] for a in sizing["assets"]] == ["pv_new"]
+    assert [s["name"] for s in sizing["product_slacks"]] == ["__lost_b"]
 
 
 def test_a_sized_storage_with_no_duration_has_no_energy():
