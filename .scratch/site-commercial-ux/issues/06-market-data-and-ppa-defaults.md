@@ -57,3 +57,11 @@ new `pypsa-gui/backend/services/market_prices.py`, the time-series routes, secti
     - B3: products with `storages=None` widen to newly eligible storage. With no attestation, floors, `inputs_digest`, the solve fingerprint and the IC digest equal master's (test); with one, `inputs_digest` changes (test). The user text states the widening.
     - B4: the exact-value LP test (one BESS, p_nom 10, symmetric product) adds a case where the energy rows bind first (max_hours 1, sustain_h 2, so r ≤ 5), with the objective pinned to a hand-computed literal; the no-double-count test as planned.
     - B5: the planned mutants (drop r from the up row; unreadable read as 0; settle from the objective), plus dropping the d_k term from row 3 and admitting storage with no attestation. DC-03 assess byte-equal and DC strings unchanged.
+- 2026-11-22: owner answers, relayed by the coordinator ("all recommended"):
+  - SCU06-S2-HOME-1 = (a): the PPA/CfD defaults are shared read-only common Library items (S2a as built).
+  - SCU06-CHAT-1 = (a): chat points to the screen; the project market-price routes are `ui-pointer` with decision SCU06-CHAT-1 (S1c).
+  - SCU06-K8-1 = (a): storage with an attested 0 backup floor may earn reserves (K8b, GK A conditions B1–B5 apply).
+  - SCU06-K8-2 = (a): AncillaryProduct is deleted (K8a condition 2 applies).
+  - SCU06-K8-3 = (a): reserve prices come from user upload only.
+  - SCU06-K8-4 = (a): flexible loads are deferred.
+  - The ENTSO-E token (`ENTSOE_API_TOKEN`) is still to be added by the owner; E2E-DONE-1 stays blocked on it.
