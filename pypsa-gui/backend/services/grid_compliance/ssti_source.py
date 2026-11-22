@@ -74,6 +74,14 @@ def _note(v) -> str:
     return v.strip() if isinstance(v, str) else UNREADABLE_NOTE
 
 
+def _judged(value, row: dict) -> str:
+    """One run row's verdict under the scorecard row's own limit and rule (a judged row's values are all
+    finite: the scorecard refused the table otherwise)."""
+    from services.adequacy.grid_readiness import _judge
+
+    return _judge(float(value), row["limit"], row["rule"])
+
+
 def _cell(r, column: str, kind):
     return kind(r[column]) if column in r else ""
 
@@ -89,7 +97,7 @@ def _uif_table(row: dict, frame, case: str, path: str) -> Table:
         if case == "islanded":
             verdict = ISLANDED
         elif row["verdict"] in ("pass", "warn"):
-            verdict = "warn" if float(r["uif"]) > row["limit"] else "pass"
+            verdict = _judged(r["uif"], row)
         else:
             verdict = NOT_JUDGED
         rows.append(
@@ -123,7 +131,7 @@ def _resonance_table(row: dict, frame, path: str) -> Table:
     )
     for _, r in series.iterrows() if series is not None else ():
         verdict = (
-            ("pass" if float(r["margin_hz"]) >= row["limit"] else "warn")
+            _judged(r["margin_hz"], row)
             if row["verdict"] in ("pass", "warn")
             else NOT_JUDGED
         )

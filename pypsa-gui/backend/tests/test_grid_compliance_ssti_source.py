@@ -98,6 +98,10 @@ def test_a_judged_run_gives_both_tables_cell_for_cell(tmp_path, monkeypatch):
         ["MV", "min", "", "0.125", "—", "warn", ""],
     ]
     assert t["ssti_uif"].caption == rows["ssti_uif"]["note"]
+    assert t["ssti_uif"].caption.startswith(
+        "Worst UIF 0.25 at bus MV (max fault level, machine GAS), above the assumed "
+        "screening threshold 0.1: an EMT SSTI study is warranted (grid-connected state only)."
+    )
     assert t["ssti_uif"].source_path == UIF_CSV
     assert t["subsync_series_resonance"].columns == RES_HEAD
     assert t["subsync_series_resonance"].rows == [
@@ -216,6 +220,22 @@ def test_off_grid_with_an_open_tie_marks_each_bus_islanded_and_drops_the_scan(
     ]
 
 
+def test_an_islanded_project_with_a_damaged_table_gives_the_damage_and_judges_nothing(
+    tmp_path, monkeypatch
+):
+    # the scorecard refuses the table before the island rule: its caption is the damage, never a verdict
+    _template(tmp_path, "off_grid")
+    uif = _uif_table()
+    uif[0] = {**uif[0], "uif": "x"}
+    _write(tmp_path, uif_rows=uif)
+    n = _open_tie(_site())
+    rows, _ = _card(tmp_path, n=n)
+    _, t = _pack(_project(monkeypatch, tmp_path, n=n))
+    assert t["ssti_uif"].caption == rows["ssti_uif"]["note"]
+    assert "not a finite number (x)" in t["ssti_uif"].caption
+    assert [r[5] for r in t["ssti_uif"].rows] == ["not evaluated (islanded)"] * 2
+
+
 def test_a_grid_project_with_an_open_tie_stays_judged_and_unmarked(
     tmp_path, monkeypatch
 ):
@@ -286,8 +306,10 @@ def test_a_real_two_genset_stage_is_present_with_the_scorecards_worst_uif(
     assert state == "present"
     worst = rows["ssti_uif"]["project_value"]
     assert worst is not None
-    assert max(float(r[3]) for r in t["ssti_uif"].rows) == pytest.approx(
-        worst, rel=5e-4
+    # the worst bus's UIF cell is the scorecard's project_value, as the pack prints numbers
+    assert (
+        max((r for r in t["ssti_uif"].rows), key=lambda r: float(r[3]))[3]
+        == f"{worst:.4g}"
     )
     assert t["ssti_uif"].caption == rows["ssti_uif"]["note"]
     _no_repr(t)
