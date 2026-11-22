@@ -42,6 +42,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from models.finance import FinanceInputs
+from services import project_write_gate
 from services.finance.case import FinanceCase, FinanceRefused
 from services.reliability_goal import goal_free_config
 
@@ -109,8 +110,8 @@ def pack_versions(fin: FinanceInputs | None, *, load_pack=None) -> dict[str, str
 
 def assumptions_digest(*, finance: dict | None, commercial: dict | None, dispatch: str | None,
                        packs: dict[str, str], solver: dict | None = None,
-                       owner_assets: str | None = None, extra_assets: str | None = None
-                       ) -> tuple[str, dict[str, Any]]:
+                       owner_assets: str | None = None, extra_assets: str | None = None,
+                       energization: str | None = None) -> tuple[str, dict[str, Any]]:
     """(hash, parts): the report's staleness key and the per-input digests
     (so `GET /results/investment_case` can say WHICH input changed).
 
@@ -123,7 +124,13 @@ def assumptions_digest(*, finance: dict | None, commercial: dict | None, dispatc
     `owner_assets` (IC G3 F-2) is the digest of the owner assets' own
     investment columns (`finance_case.owner_assets_digest`); `extra_assets`
     (IC G3 R-4) the digest of the campus study the case takes its extra owner
-    assets from, None when no study applies. Both parts are always present."""
+    assets from, None when no study applies. Both parts are always present.
+
+    `energization` (template-e2e 02b W2) is the digest of the network's
+    energization schedule (`energization.schedule_digest`): the case reads it
+    at build time (`finance_case._import_capacity`), outside the dispatch.
+    A part only when the network carries one, so a key without it stays as
+    it was."""
     commercial = commercial if isinstance(commercial, dict) else None
     parts = {
         "solver_config": json_digest(None if solver is None else
@@ -139,6 +146,8 @@ def assumptions_digest(*, finance: dict | None, commercial: dict | None, dispatc
         "owner_assets": owner_assets,
         "extra_assets": extra_assets,
     }
+    if energization is not None:
+        parts["energization"] = energization
     return json_digest(parts), parts
 
 
@@ -199,6 +208,7 @@ def start_investment_case(
     case_hash: Callable[[FinanceCase], str | None] | None = None,
     layers: Callable[[FinanceCase], tuple] | tuple | None = None,
     state_lock=None,
+    requester: tuple[Any, Any] | None = None,
 ) -> dict:
     """Start the investment-case run in a worker thread (see the module
     docstring). The mesh refusal (409 while a solve or another study runs) is
@@ -207,7 +217,12 @@ def start_investment_case(
     `assumptions` → (hash, parts) of the inputs the case is built from (the
     router closes over the same config snapshot as `build_case`); `case_hash`
     → the built `FinanceCase`'s hash, recorded as provenance; `layers` — tests
-    only — the tax layers `run_case` uses instead of the pack's."""
+    only — the tax layers `run_case` uses instead of the pack's.
+
+    `requester` is (user id, project id) of the person who started it: their
+    role is read again before each report is stored, and a person made a
+    viewer, or removed, mid-run gets a `project_view_only` failure and no
+    report (project-viewer-role 02)."""
     from services.finance.engine import run_case
     from services.finance.packs.base import PackNotFound, load_pack
     from services.finance.report import (
@@ -279,6 +294,15 @@ def start_investment_case(
             return True
         return False
 
+    def store(report) -> bool:
+        """Store `report` unless the requester may no longer write the project."""
+        if project_write_gate.requester_may_not_write(*(requester or (None, None))):
+            finish("failed", error=project_write_gate.MESSAGE,
+                   error_code=project_write_gate.KIND)
+            return False
+        state_update(**{"investment_case_report": report.model_dump(mode="json")})
+        return True
+
     def worker():
         try:
             a_hash, a_parts = (assumptions() if assumptions is not None
@@ -297,7 +321,8 @@ def start_investment_case(
                                                 owner=body.owner)
                 if aborted():           # an aborted run stores nothing (review B5)
                     return
-                state_update(**{"investment_case_report": report.model_dump(mode="json")})
+                if not store(report):
+                    return
                 finish("refused", error=str(exc), error_code=exc.code)
                 return
             if aborted():
@@ -318,7 +343,8 @@ def start_investment_case(
                                                 owner=case.owner)
                 if aborted():           # an aborted run stores nothing (review B5)
                     return
-                state_update(**{"investment_case_report": report.model_dump(mode="json")})
+                if not store(report):
+                    return
                 finish("refused", error=str(exc), error_code=exc.code)
                 return
             if aborted():
@@ -336,7 +362,8 @@ def start_investment_case(
             if aborted():
                 return
             progress("store")
-            state_update(**{"investment_case_report": report.model_dump(mode="json")})
+            if not store(report):
+                return
             finish("done", error=None, flags=list(result.flags),
                    completeness=dict(report.completeness))
         except Exception as exc:  # noqa: BLE001

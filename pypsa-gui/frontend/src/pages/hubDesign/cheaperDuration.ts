@@ -25,10 +25,10 @@ export function leversFinding(findings: EhReviewFinding[] | null | undefined): E
 }
 
 /** The design battery's duration in hours: the one `max_hours` its built
- *  StorageUnits share. Null when none is built or their durations differ. */
+ *  battery StorageUnits (carrier `battery`) share; other StorageUnits are ignored. Null when none is built or their durations differ. */
 export function designDurationHours(report: EhReferenceDesignReport | null | undefined): number | null {
   const values = sizedAssets(report)
-    .filter(a => a.component === 'StorageUnit' && !notBuilt(a) && isNum(a.max_hours))
+    .filter(a => a.component === 'StorageUnit' && a.carrier === 'battery' && !notBuilt(a) && isNum(a.max_hours))
     .map(a => a.max_hours as number)
   if (values.length === 0) return null
   return values.every(v => same(v, values[0])) ? values[0] : null

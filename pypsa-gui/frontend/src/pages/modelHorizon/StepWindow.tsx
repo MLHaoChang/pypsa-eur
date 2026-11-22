@@ -83,7 +83,7 @@ export function StepWindow({
   if (isMultiPeriod) {
     return (
       <section>
-        <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Snapshot window</h3>
+        <h3 className="text-h3 font-semibold text-text mb-2.5">Snapshot window</h3>
         {periods.length === 0 ? noPeriodsFallback : (
           <div className="border border-border rounded">
             <div className="px-2.5 py-1.5 border-b border-border bg-bg-2 text-[9px] font-bold uppercase tracking-[0.14em] text-muted flex items-center justify-between">
@@ -190,7 +190,7 @@ export function StepWindow({
 
   return (
     <section>
-      <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Snapshot range</h3>
+      <h3 className="text-h3 font-semibold text-text mb-2.5">Snapshot range</h3>
       <p className="text-[11px] text-muted mb-2 leading-relaxed">
         Defines the single operational window the LP spans. The index is
         built as <code>pd.date_range(start, end, freq)</code>. Time-series
@@ -228,7 +228,7 @@ export function StepWindow({
       {resetRangeLabel && (
         <button
           onClick={onResetToUploadedRange}
-          className="mt-2 text-[10.5px] text-accent hover:underline"
+          className="mt-2 text-[10.5px] text-link hover:underline"
         >↻ Reset to uploaded data range ({resetRangeLabel})</button>
       )}
       <button

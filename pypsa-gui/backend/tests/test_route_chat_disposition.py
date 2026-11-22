@@ -181,9 +181,11 @@ UI_INTERNAL: dict[str, dict] = {
         }),
     },
     'log_feeds': {
-        "reason": 'Solver log feeds for the log panel; the assistant follows jobs with wait_for_job.',
+        "reason": ('Solver log feeds and the run estimate for the log panel and run status line; '
+                   'the assistant follows jobs with wait_for_job.'),
         "routes": frozenset({
             ('GET', '/api/simulation/log_stream'),
+            ('GET', '/api/simulation/queue/{job_id}/estimate'),
             ('GET', '/api/simulation/queue/{job_id}/log_stream'),
         }),
     },
@@ -205,6 +207,19 @@ UI_INTERNAL: dict[str, dict] = {
         "reason": 'JSON series write no screen calls now; chat writes series with upload_timeseries, which posts the file upload.',
         "routes": frozenset({
             ('PUT', '/api/network/timeseries/{component}/{attribute}'),
+        }),
+    },
+    'grid_compliance_workflow': {
+        "reason": ('Grid compliance section: TRGC tracker, data list, TSO log and report pack. No chat tool '
+                   'yet; GC-10 adds them.'),
+        "routes": frozenset({
+            ('GET', '/api/grid-compliance/{name}'),
+            ('PUT', '/api/grid-compliance/{name}/deliverables/{code}/status'),
+            ('PUT', '/api/grid-compliance/{name}/deliverables/{code}/data'),
+            ('POST', '/api/grid-compliance/{name}/deliverables/{code}/freeze'),
+            ('POST', '/api/grid-compliance/{name}/deliverables/{code}/comments'),
+            ('PATCH', '/api/grid-compliance/{name}/deliverables/{code}/comments/{comment_id}'),
+            ('POST', '/api/grid-compliance/{name}/deliverables/{code}/pack'),
         }),
     },
 }
@@ -352,7 +367,9 @@ def test_served_by_names_real_tools():
 
 
 def test_ui_internal_stays_small():
-    assert len(UI_INTERNAL) <= 11 and 'series_json_put' in UI_INTERNAL
+    # 12, owner decision GC09-CHAT-1: the one extra slot is grid_compliance_workflow, until
+    # .scratch/grid-compliance/issues/10-assistant-tools.md ships its chat tools (then 11).
+    assert len(UI_INTERNAL) <= 12 and 'series_json_put' in UI_INTERNAL
     assert all(20 <= len(entry['reason']) <= 160 for entry in UI_INTERNAL.values())
 
 

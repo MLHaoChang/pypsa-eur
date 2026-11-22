@@ -4,7 +4,7 @@ import {
   assetLabel, projectFlagWords,
   baselineCaveats, basisStatement, cashflowPivot, cashTotals, counterfactualStatement, errorKey, errorsFor, established, financeErrors, fmtCell,
   fmtHeadline, headlines, numOrNull, parseRateOrList, perYearLists, progressFraction, progressText,
-  rateOrListText, studyFailure, studyProgress, studyStale, toTable, waccGate, withKey,
+  rateOrListText, studyProgress, studyStale, toTable, waccGate, withKey,
 } from './financeModel'
 import type { CashflowLine, InvestmentCaseReportPayload } from '../../../api/types'
 
@@ -223,14 +223,6 @@ describe('the study record', () => {
     expect(studyStale({ status: 'done', report: { present: true, stale: false } }).stale).toBe(true)
     expect(studyStale({ status: 'done', report: { stale: true } }).stale).toBe(true)
     expect(studyStale(null).stale).toBe(false)
-  })
-
-  it('names the failure of an error, failed or refused run', () => {
-    expect(studyFailure({ status: 'done' })).toBeNull()
-    expect(studyFailure({ status: 'error', code: 'x', message: 'boom' })).toBe('The run failed: boom (x)')
-    expect(studyFailure({ status: 'failed', error: 'kaput' })).toBe('The run failed: kaput')
-    expect(studyFailure({ status: 'refused', error_code: 'cod_mismatch' }))
-      .toBe('The case was refused: cod_mismatch')
   })
 })
 

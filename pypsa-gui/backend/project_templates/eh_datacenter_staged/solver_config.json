@@ -168,7 +168,7 @@
   },
   "discount_rate": 0.07,
   "finance": {
-    "acquisition_date": null,
+    "acquisition_date": "2027-01-01",
     "analysis_years": 18,
     "annualise": false,
     "capex_phasing": [
@@ -204,7 +204,22 @@
       "rooftop_pv": 0.005,
       "ups_battery": 0.0
     },
-    "depreciation_class_by_asset": {},
+    "depreciation_class_by_asset": {
+      "bess_new_2027": "afa_10",
+      "bess_new_2030": "afa_10",
+      "bess_new_2035": "afa_10",
+      "genset_1": "afa_19",
+      "genset_2": "afa_19",
+      "genset_3": "afa_19",
+      "genset_4": "afa_19",
+      "genset_new_2027": "afa_19",
+      "genset_new_2030": "afa_19",
+      "genset_new_2035": "afa_19",
+      "grid_import": "afa_20",
+      "rooftop_pv": "afa_20",
+      "site_transformer": "afa_20",
+      "ups_battery": "afa_10"
+    },
     "escalation": {
       "capex": 0.02,
       "export": 0.02,
@@ -215,7 +230,7 @@
     },
     "financial_close": "2026-01-01",
     "financing_fee_tax": "not_deducted",
-    "hebesatz_pct": null,
+    "hebesatz_pct": 400.0,
     "incentives": [],
     "inflation": 0.02,
     "island_outage": null,
@@ -231,12 +246,135 @@
     "state_rate": null,
     "tax_equity": null,
     "tax_losses": "offset_other_income",
-    "tax_pack_id": null,
+    "tax_pack_id": "eu_de",
     "terminal_value": {
       "method": "remaining_life_annuity",
       "value": null
     },
     "wacc_nominal": 0.07
+  },
+  "finance_assumed": {
+    "acquisition_date": {
+      "note": "the first commercial operation date",
+      "source": "assumed",
+      "value": "2027-01-01"
+    },
+    "analysis_years": {
+      "note": "the template's planning horizon",
+      "source": "assumed",
+      "value": 18
+    },
+    "cod_by_asset": {
+      "note": "every asset in service in the first modelled year",
+      "source": "assumed",
+      "value": {
+        "genset_1": "2027-01-01",
+        "genset_2": "2027-01-01",
+        "genset_3": "2027-01-01",
+        "genset_4": "2027-01-01",
+        "rooftop_pv": "2027-01-01",
+        "site_transformer": "2027-01-01",
+        "ups_battery": "2027-01-01"
+      }
+    },
+    "cost_of_equity": {
+      "note": "Set your own",
+      "source": "assumed, no primary source",
+      "value": 0.07
+    },
+    "degradation_by_asset": {
+      "note": "PV 0.5 %/yr (median of field data); other assets none, assumed",
+      "source": "Jordan & Kurtz, Photovoltaic Degradation Rates: An Analytical Review, Prog. Photovolt. 21 (2013)",
+      "source_year": 2013,
+      "value": {
+        "bess_new_2027": 0.0,
+        "bess_new_2030": 0.0,
+        "bess_new_2035": 0.0,
+        "genset_1": 0.0,
+        "genset_2": 0.0,
+        "genset_3": 0.0,
+        "genset_4": 0.0,
+        "genset_new_2027": 0.0,
+        "genset_new_2030": 0.0,
+        "genset_new_2035": 0.0,
+        "rooftop_pv": 0.005,
+        "ups_battery": 0.0
+      }
+    },
+    "depreciation_class_by_asset": {
+      "note": "straight line: 3.1.2 Stromerzeugung (Gleichrichter, Ladeaggregate, Notstromaggregate, Stromgeneratoren, Stromumformer usw.) 19 years; 3.1.3 Akkumulatoren 10; 3.1.5 Windkraftanlagen 16; 3.1.6 Photovoltaikanlagen 20. Assets the table does not list (electrolysers, H2 storage, links): assumed, network lifetime, else 20 years",
+      "source": "BMF AfA-Tabelle AV (BMF-Schreiben vom 15.12.2000, BStBl. I 2000 S. 1532)",
+      "source_year": 2000,
+      "value": {
+        "bess_new_2027": "afa_10",
+        "bess_new_2030": "afa_10",
+        "bess_new_2035": "afa_10",
+        "genset_1": "afa_19",
+        "genset_2": "afa_19",
+        "genset_3": "afa_19",
+        "genset_4": "afa_19",
+        "genset_new_2027": "afa_19",
+        "genset_new_2030": "afa_19",
+        "genset_new_2035": "afa_19",
+        "grid_import": "afa_20",
+        "rooftop_pv": "afa_20",
+        "site_transformer": "afa_20",
+        "ups_battery": "afa_10"
+      }
+    },
+    "escalation": {
+      "note": "every cost and price class at 2 %/yr",
+      "source": "ECB monetary policy strategy (2 % inflation target)",
+      "source_year": 2021,
+      "value": {
+        "capex": 0.02,
+        "export": 0.02,
+        "fuel": 0.02,
+        "opex": 0.02,
+        "ppa": 0.02,
+        "tariff": 0.02
+      }
+    },
+    "financial_close": {
+      "note": "before the first operation date",
+      "source": "assumed",
+      "value": "2026-01-01"
+    },
+    "hebesatz_pct": {
+      "note": "rounded to 400 %; set your municipality's",
+      "source": "Destatis, Realsteuervergleich 2023: average trade-tax Hebesatz of all municipalities 407 %",
+      "source_year": 2023,
+      "value": 400.0
+    },
+    "inflation": {
+      "source": "ECB monetary policy strategy (2 % inflation target)",
+      "source_year": 2021,
+      "value": 0.02
+    },
+    "tax_losses": {
+      "note": "a sponsor with other taxable income",
+      "source": "assumed",
+      "value": "offset_other_income"
+    },
+    "tax_pack_id": {
+      "note": "a stand-in: every template is priced in EUR on German data. Pick your country's tax rule",
+      "source": "German corporate tax: KStG \u00a723 (15 %), SolZG (5.5 %), GewStG \u00a711 (3.5 % \u00d7 Hebesatz)",
+      "source_year": 2025,
+      "value": "eu_de"
+    },
+    "terminal_value": {
+      "note": "each asset's remaining life valued as an annuity of its last year",
+      "source": "assumed",
+      "value": {
+        "method": "remaining_life_annuity",
+        "value": null
+      }
+    },
+    "wacc_nominal": {
+      "note": "nominal, post-tax: a planning value. Set your own",
+      "source": "assumed, no primary source",
+      "value": 0.07
+    }
   },
   "island_constraints": true,
   "multi_investment_periods": true,

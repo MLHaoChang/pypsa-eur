@@ -155,3 +155,11 @@ path = [
 ]
 SPDX-FileCopyrightText = "2024 Next Level Builder"
 SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = [
+    "pypsa-gui/frontend/public/fonts/*.woff2",
+    "pypsa-gui/frontend/public/fonts/OFL-*.txt",
+]
+SPDX-FileCopyrightText = "The Inter Project Authors; The JetBrains Mono Project Authors"
+SPDX-License-Identifier = "OFL-1.1"

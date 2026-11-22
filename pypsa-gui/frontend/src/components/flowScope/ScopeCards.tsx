@@ -152,7 +152,7 @@ export function ScopeCards({ testId = 'scope-cards', collapsed = false }: {
         <span className="font-semibold text-text">The Run computes:</span> {summary}
         {' · '}
         <button type="button" data-testid={`${testId}-change`} aria-expanded={false}
-          onClick={() => setOpen(true)} className="text-accent hover:underline">Change</button>
+          onClick={() => setOpen(true)} className="text-link hover:underline">Change</button>
       </p>
     )
   }
@@ -175,7 +175,7 @@ export function ScopeCards({ testId = 'scope-cards', collapsed = false }: {
           )}
           {collapsed && (
             <button type="button" data-testid={`${testId}-done`} aria-expanded
-              onClick={() => setOpen(false)} className="text-[11px] text-accent hover:underline">
+              onClick={() => setOpen(false)} className="text-[11px] text-link hover:underline">
               Done
             </button>
           )}
@@ -264,7 +264,7 @@ export function ScopeCards({ testId = 'scope-cards', collapsed = false }: {
                               {' '}
                               <button type="button" data-testid={`${testId}-choose-branches`}
                                 onClick={openN1BranchSelector}
-                                className="text-accent hover:underline">Choose them ›</button>
+                                className="text-link hover:underline">Choose them ›</button>
                             </>
                           )}
                         </p>

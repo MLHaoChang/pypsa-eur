@@ -119,6 +119,7 @@ def start(
         )
         report_id = report_jobs._start(
             project,
+            user_id=task.get("owner_id"),  # project-viewer-role 02
             evidence=evidence,
             figure_pngs=figures,
             profile=llm,

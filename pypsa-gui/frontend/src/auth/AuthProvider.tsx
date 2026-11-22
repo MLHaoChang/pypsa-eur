@@ -7,6 +7,7 @@ import { useAuthMode } from './AuthModeProvider'
 import { localAdminUser } from './localMode'
 import { loginWithPassword } from './requests'
 import { USER_SCOPED_ROOTS } from '../utils/queryKeys'
+import { clearImprovePrefill } from '../pages/hubDesign/improvePrefill'
 
 type AuthStatus = 'loading' | 'authenticated' | 'unauthenticated'
 
@@ -29,6 +30,8 @@ function isUnauthorized(error: unknown): boolean {
 /** Drops the cached data of the user who was signed in, so the next user never sees it (SC-07 J5). */
 export function dropUserScopedQueries(qc: QueryClient): void {
   USER_SCOPED_ROOTS.forEach(root => qc.removeQueries({ queryKey: [root] }))
+  // An Improve card's hand-over to Expert belongs to the user who made it.
+  clearImprovePrefill()
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -108,10 +111,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
+/**
+ * Whether the signed-in user may do what the backend's `_require_super_admin`
+ * guards (the shared API key and model settings). Unlike `isAdmin` it excludes
+ * org admins. False while nobody is signed in or no provider is mounted.
+ */
+export function useIsSuperAdmin(): boolean {
+  return useContext(AuthContext)?.user?.is_super_admin === true
+}
+
+/** 'unknown' while the session's user is still being read, so a caller can show nothing instead of the wrong variant. */
+export function useSuperAdminState(): 'unknown' | 'yes' | 'no' {
+  const ctx = useContext(AuthContext)
+  if (ctx?.status === 'loading') return 'unknown'
+  return ctx?.user?.is_super_admin === true ? 'yes' : 'no'
+}
+
 export function useAuth(): AuthContextValue {
   const context = useContext(AuthContext)
   if (!context) {
     throw new Error('useAuth must be used within an AuthProvider')
   }
   return context
+}
+
+/**
+ * The signed-in user's id, or null when signed out or outside an
+ * AuthProvider (local mode, isolated tests). For per-user browser state that
+ * must not throw where `useAuth` would.
+ */
+export function useAuthUserId(): string | null {
+  return useContext(AuthContext)?.user?.id ?? null
 }

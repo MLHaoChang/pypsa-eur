@@ -1092,6 +1092,22 @@ export type EhReview =
       how_to_apply?: string
     }
 
+/** One default a study assumed (#1645 `run_assumptions`): what it is, its value in words, where it comes from,
+ *  and the flow section, component, unit(s) and field it names ("d1, d2" when it joins several units). */
+export interface EhStudyAssumption {
+  key: string
+  label: string
+  value: unknown
+  shown: string
+  source: string
+  reason: string | null
+  section: string
+  card: string
+  component: string
+  entity: string
+  field: string
+}
+
 /** Study lifecycle record from GET /results/eh_study. */
 export interface EhStudyPayload {
   status: string
@@ -1108,6 +1124,8 @@ export interface EhStudyPayload {
   /** P33b: true when the network was edited since the study started; null
    *  while running or for a record that cannot say (Unavailable). */
   edited_since_study?: boolean | null
+  /** The defaults the study assumed; absent on an older record (not recorded), `[]` when none. */
+  assumptions?: EhStudyAssumption[]
 }
 
 export interface EhRedundancyOption {

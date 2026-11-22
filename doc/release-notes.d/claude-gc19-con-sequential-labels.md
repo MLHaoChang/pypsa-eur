@@ -1,0 +1,1 @@
+* Feat(gridspine): The PSS/E `.con` writer labels blocks `C0001`, `C0002`, ... and writes a `<case>.conmap.csv` label-to-id map beside it, so contingency ids that are PyPSA-Eur bus names (spaces, more than 32 characters) can be written; the GC-03 reader reads the map back and refuses a label or map entry that does not pair up.

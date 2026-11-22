@@ -1,0 +1,34 @@
+{
+  "payload": {
+    "type": "ppa",
+    "id": "eu-ppa-as-consumed-btm",
+    "kind": "as_consumed_btm",
+    "price": 50.0,
+    "tenor_years": 12,
+    "seller": "\u2060fill-in:seller",
+    "buyer": "\u2060fill-in:buyer",
+    "asset_ids": [
+      "\u2060fill-in:asset"
+    ]
+  },
+  "meta": {
+    "source": "illustrative",
+    "provider": "PyPSA Studio (authored illustrative default)",
+    "description": "Illustrative EU default, not market data: a behind-the-meter PPA paid on the on-site generation the site consumes. Every value sits inside a cited public range (see notes); replace it with your own offer.",
+    "notes": [
+      "region:EU",
+      "currency:EUR",
+      "price_basis:nominal",
+      "illustrative:true",
+      "not market data: a starting point to replace with your own offer or an organisation pack",
+      "currency_year:2025",
+      "range:price=32.5..63.4 EUR/MWh|LevelTen European PPA Price Index Q4 2025, P25 solar, EU markets Spain 32.50 to France 63.40 (reported by pv magazine)|https://www.pv-magazine.com/2026/02/09/solar-wind-ppa-prices-continue-to-fall-in-europe/|2026",
+      "range:tenor_years=5..20 years|EIB Advisory, commercial PPA study: a cPPA is a long-term contract 'e.g. of 5-20 years'|https://advisory.eib.org/files/publications/attachments/developing-potential-financial-instruments-and-advisory-solutions-to-stimulate-more-investment-in-renewable-energy-generation-by-means-of-commercial-power-purchase-agreements.pdf|2023",
+      "placeholders:seller,buyer,asset_ids hold a fill-in marker; the server refuses to save or settle the contract until each is replaced",
+      "changes_dispatch:false (settled after the solve; never shapes the dispatch)"
+    ],
+    "scope": "common",
+    "licence": "Authored by the PyPSA Studio contributors for the common Library (owner Q11 = A). The ranges cite figures from the named public sources; no source content is reproduced.",
+    "attribution": "Ranges from the sources named in each range note."
+  }
+}

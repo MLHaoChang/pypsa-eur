@@ -117,7 +117,10 @@ def test_a_filled_site_is_complete_and_ready(client, site):
     rows = {s["section"]: s for s in body["sections"]}
     assert rows["readiness"]["state"] is None and rows["readiness"]["summary"] == "0 to do, 0 to check"
     assert rows["results"]["state"] is None and rows["results"]["freshness"] == "not_run"
-    assert rows["connection"]["summary"] == "grid_import, 50 MW"
+    assert rows["connection"]["summary"] == "Grid import, 50 MW"
+    # The limit as the study takes it, with the links it is read from (template-e2e 02).
+    assert rows["connection"]["connection_limit"] == {
+        "mw": 50.0, "refusal": None, "links": ["grid_import"]}
     assert rows["project"]["required"] and not rows["commercial"]["required"]
 
 
@@ -503,7 +506,7 @@ def test_a_deferred_preflight_is_unknown_everywhere(client, site, monkeypatch):
 # the reliability study, `POST /results/eh_study` with the Goal card's body (the
 # study's worker is faked, so an accepted start returns at once).
 
-def _server_verdict(client, monkeypatch, name) -> bool:
+def _server_verdict(client, monkeypatch, name, *, study: bool = True) -> bool:
     import time
 
     from services import flow_service as S
@@ -513,10 +516,21 @@ def _server_verdict(client, monkeypatch, name) -> bool:
         return False
     ok = bool(pre["ok"])
     meta = client.get(f"/api/projects/{name}/eh_template")
-    if meta.status_code == 200:
+    # Run starts the study only when it requests it (a generation-only plant's
+    # Run does not).
+    if study and meta.status_code == 200:
         monkeypatch.setattr("services.adequacy.eh_study.run_eh_study",
                             lambda *a, **k: {})
-        r = client.post("/api/results/eh_study", json=S._request_for(meta.json()))
+        # What the Goal card sends: the template's request with the connection limit
+        # the flow's connection row reads from the network (template-e2e 02).
+        flow = client.get(f"/api/projects/{name}/flow").json()
+        limit = next(s for s in flow["sections"] if s["section"] == "connection")["connection_limit"]
+        try:
+            body = S.with_network_import(S._template_request(meta.json()), cap=S.ImportCapacity(
+                (), limit["mw"], limit["refusal"]))
+        except S.ImportCapacityError:
+            return False                         # the card sends nothing: no study can start
+        r = client.post("/api/results/eh_study", json=body)
         assert r.status_code in (200, 202, 422), r.text
         ok = ok and r.status_code != 422
         for _ in range(100):                     # let the fake worker finish
@@ -529,7 +543,8 @@ def _server_verdict(client, monkeypatch, name) -> bool:
 
 def _assert_equivalent(client, monkeypatch, name) -> dict:
     body = _flow(client, name)
-    assert body["run_ready"] == _server_verdict(client, monkeypatch, name), body["run_blocker"]
+    assert body["run_ready"] == _server_verdict(
+        client, monkeypatch, name, study=body["run_request"]["study"]), body["run_blocker"]
     assert (body["run_blocker"] is None) == body["run_ready"]
     return body
 
@@ -608,18 +623,41 @@ def test_r4_snapshots_empty(client, site, monkeypatch):
 
 
 def test_r4_study_with_voll_zero(client, tmp_projects_dir, monkeypatch):
-    """The study starts with VOLL 0 (only its frontier and stress stages need
-    it), so Run is ready and the gap is a scenarios note."""
+    """The study start refuses VOLL 0 (template-e2e 06: never run as 0.0), so
+    the study blocks Run in section 8, on the VOLL field, said once."""
     name = _create(client, "eh_h2_hub", "voll0")
     cfg = client.get("/api/simulation/solver_config").json()
     assert client.put("/api/simulation/solver_config", json={**cfg, "voll": 0.0}).status_code == 200
     body = _assert_equivalent(client, monkeypatch, name)
-    assert body["run_ready"] is True
+    assert body["run_ready"] is False
     assert body["verdicts"]["optimisation"]["ready"] is True
-    assert body["verdicts"]["study"]["ready"] is True       # the study starts without VOLL
-    assert "presence_voll" in _codes(body, "scenarios")
-    # The template's buses are unplaced: the location is a note too.
-    assert {x["section"] for x in body["notes"]} == {"project", "scenarios"}
+    assert body["verdicts"]["study"]["ready"] is False
+    assert body["run_blocker"]["section"] == "scenarios"
+    assert body["run_blocker"]["target"]["field"] == "voll"
+    assert "presence_voll" not in _codes(body, "scenarios")
+    # The template's buses are unplaced: the location is a note; section 8
+    # is the blocker, not a note.
+    assert {x["section"] for x in body["notes"]} == {"project"}
+
+
+def test_a_two_way_grid_import_is_refused_by_the_commercial_binding_first(
+        client, tmp_projects_dir, monkeypatch):
+    """GK B2 sweep item 9: the data centre ships a commercial block, so a two-way
+    grid import is refused at section 7 before any study refusal, in plain words
+    that say what to change."""
+    name = _create(client, "eh_datacenter", "two_way")
+    link = client.get("/api/network/links").json()
+    grid = next(r for r in link if r["name"] == "grid_import")
+    assert client.put("/api/network/links/grid_import",
+                      json={**grid, "p_min_pu": -1.0}).status_code == 200
+    body = _flow(client, name)
+    assert body["run_ready"] is False
+    blocker = body["run_blocker"]
+    assert blocker["section"] == "commercial" and blocker["code"] == "commercial.binding_invalid"
+    msg = blocker["detail"]  # the plain words; `message` is the issue's title
+    assert "grid connection link grid_import allows reverse flow" in msg
+    assert "Make it one-way (set its minimum power, p_min_pu, to 0)" in msg
+    assert "commercial.poc_link" not in msg
 
 
 def test_r4_a_study_start_refusal_blocks_run(client, tmp_projects_dir, monkeypatch,
@@ -631,6 +669,11 @@ def test_r4_a_study_start_refusal_blocks_run(client, tmp_projects_dir, monkeypat
     meta = json.loads(path.read_text())
     meta["pack_overrides"] = {**meta["pack_overrides"], "import_energy_mwh_per_year": 1000.0}
     path.write_text(json.dumps(meta))
+    # The template's PoC binding refuses a two-way import (WALK-IMPROVE-1 b ships a
+    # commercial block); without it the study's own refusal is the blocker.
+    _cfg = client.get("/api/simulation/solver_config").json()
+    assert client.put("/api/simulation/solver_config",
+                      json={**_cfg, "commercial": None}).status_code == 200
     link = client.get("/api/network/links").json()
     grid = next(r for r in link if r["name"] == "grid_import")
     assert client.put("/api/network/links/grid_import",
@@ -670,11 +713,13 @@ def test_r4_in_flight(client, site, monkeypatch):
 TEMPLATE_STATES = {
     # R location → warning (site_location_missing). R connection limits and
     # ramp, R LOLE goal: DC 02's assumed ledger rows → connection and
-    # scenarios warning ("to check").
+    # scenarios warning ("to check"). Its shipped finance inputs and tax rule
+    # (WALK-IMPROVE-1 b) are assumed ledger rows → commercial warning; the
+    # existing campus typed sunk (overnight cost 0) is one → assets warning.
     "eh_datacenter": {"project": "warning", "carriers": "complete",
                       "connection": "warning", "loads": "complete",
-                      "assets": "complete", "profiles": "complete",
-                      "commercial": "complete", "scenarios": "warning"},
+                      "assets": "warning", "profiles": "complete",
+                      "commercial": "warning", "scenarios": "warning"},
     # Islanded: connection `not_needed`. Assumed island data → assets warning.
     # DC 02's assumed LOLE goal → scenarios warning.
     "eh_microgrid": {"project": "warning", "carriers": "complete",
@@ -682,18 +727,20 @@ TEMPLATE_STATES = {
                      "assets": "warning", "profiles": "complete",
                      "commercial": "warning", "scenarios": "warning"},
     # Ammonia (#418): electricity, H2 and NH3 pre-filled. Its assumed rows
-    # (energization; tanks, electrolyser, UC; finance and the NH3 value) read warning.
+    # (energization; tanks, electrolyser, UC; finance and the NH3 value) read warning,
+    # and so do the study's assumed site type and draws (template-e2e 08).
     "eh_ammonia_staged": {"project": "warning", "carriers": "complete",
                           "connection": "warning", "loads": "complete",
                           "assets": "warning", "profiles": "complete",
-                          "commercial": "warning", "scenarios": "complete"},
+                          "commercial": "warning", "scenarios": "warning"},
     # DC 02's assumed connection limits → connection warning; no LOLE goal
-    # (the strong-grid pack sets an ENS cap only) → scenarios complete. Study
+    # (the strong-grid pack sets an ENS cap only), but the study's assumed
+    # site type and draws (template-e2e 08) → scenarios warning. Study
     # harness 19's assumed investment case and finance inputs → commercial warning.
     "eh_h2_hub": {"project": "warning", "carriers": "complete",
                   "connection": "warning", "loads": "complete",
                   "assets": "warning", "profiles": "complete",
-                  "commercial": "warning", "scenarios": "complete"},
+                  "commercial": "warning", "scenarios": "warning"},
     # Generation-only (IPP ticket 03): no Load, so loads `not_needed` and no study.
     # Assumed limits (connection) and finance, tax and charges (commercial) read warning.
     "eh_ipp_hybrid": {"project": "warning", "carriers": "complete",
@@ -723,7 +770,8 @@ def test_generic_site_states_at_create(client, tmp_projects_dir):
     assert {s: states[s] for s in INPUTS} == {
         "project": "warning", "carriers": "complete", "connection": "warning",
         "loads": "warning", "assets": "warning", "profiles": "complete",
-        "commercial": "warning", "scenarios": "complete"}
+        # The study's assumed site type and draws (template-e2e 08).
+        "commercial": "warning", "scenarios": "warning"}
     assert "assumed_default" in _codes(body, "connection")
     assert body["run_ready"] is True
 
@@ -902,7 +950,12 @@ def test_a_generation_only_site_with_a_load_is_held_to_the_study(client, tmp_pro
     assert r.status_code == 200, r.text
     body = _flow(client, name)
     assert body["run_request"]["study"] is True
-    assert "presence_voll" in _codes(body, "scenarios")      # the template ships VoLL 0
+    # The template ships VoLL 0: the study start refuses it, and readiness
+    # shows that block before the run, on the VOLL field (template-e2e 06).
+    refused = [i for s in body["sections"] for i in s["items"] if i["code"] == "eh_study_refused"]
+    assert len(refused) == 1 and refused[0]["blocking"] and refused[0]["target"]["field"] == "voll"
+    assert "presence_voll" not in _codes(body, "scenarios")
+    assert body["run_ready"] is False
 
 
 
@@ -1116,6 +1169,23 @@ def test_load_flow_freshness_survives_a_save_and_reload(client, site, set_cfg, b
     assert _kinds(_flow(client, name))["loadflow"] == "fresh"
     _bump(client, bound_ctx)
     assert _kinds(_flow(client, name))["loadflow"] == "stale"
+
+
+def test_a_weak_grid_site_without_a_readable_limit_blocks_the_study(client, tmp_projects_dir):
+    """template-e2e 02 (GK B C2-C4): where the network fixes no connection limit,
+    the connection row says why and the study is blocked; the rail shows no MW."""
+    name = _create(client, "eh_datacenter", "nolimit")
+    assert _flow(client, name)["run_ready"] is True
+    _put(client, "links", "grid_import", p_nom_extendable=True)
+    body = _flow(client, name)
+    row = next(s for s in body["sections"] if s["section"] == "connection")
+    assert row["connection_limit"]["mw"] is None
+    assert "sized by the optimisation" in row["connection_limit"]["refusal"]
+    [item] = [i for i in row["items"] if i["code"] == "eh_connection_limit"]
+    assert item["blocking"] and item["severity"] == "error"
+    assert item["message"] == row["connection_limit"]["refusal"]
+    assert body["run_ready"] is False
+    assert all("connection_limit" not in s for s in body["sections"] if s["section"] != "connection")
 
 
 def test_island_assumption_rows_open_the_island_panel_not_expert_capacity_bounds():

@@ -466,7 +466,7 @@ function Form({ d, set, errors, report, assets }: {
                      onChange={v => set('financing_fee_tax', v)} />
         <TriField label="Prevailing wage and apprenticeship met" value={d.pwa_met} errors={e('pwa_met')}
                   onChange={v => set('pwa_met', v)} />
-        <TriField label="Small business (§163(j) exempt)" value={d.small_business_163j}
+        <TriField label="Small business (section 163(j) exempt)" value={d.small_business_163j}
                   errors={e('small_business_163j')} onChange={v => set('small_business_163j', v)} />
       </fieldset>
       <AssetMap title="Depreciation class" noun="a depreciation class" path="depreciation_class_by_asset"

@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The Guided rail's section summaries read as plain words: section 3 names its grid connections as people read them ("Grid import, 40 MW", not the model id "grid_import"), and section 1 counts time steps instead of "snapshots". The Site card's must-stay-on line uses a colon instead of an em dash ("IT bus: everything on this bus keeps power").

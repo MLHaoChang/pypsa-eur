@@ -29,6 +29,7 @@ const base: SolveJob = {
   // it from the status. `true` here because these cases are about the row's
   // LABEL, not its controls — the dismiss path has its own tests.
   can_dismiss: true,
+  started_by_me: false,
 }
 
 let jobs: SolveJob[] = []
