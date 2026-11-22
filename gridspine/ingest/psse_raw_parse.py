@@ -452,11 +452,21 @@ def read_raw_text(text: str, version: int | None = None) -> RawCase:
     case = RawCase(version=rev_v, sbase=sbase, basfrq=basfrq, title=lines[1].strip())
     if len(head) <= 1 or not head[1]:
         case.assumed.append(
-            ("case", "system base (MVA)", 100.0, "SBASE empty; PSS/E default")
+            (
+                "case",
+                "system base (MVA)",
+                100.0,
+                "the file leaves the system base power empty; PSS/E's default",
+            )
         )
     if len(head) <= 5 or not head[5]:
         case.assumed.append(
-            ("case", "base frequency (Hz)", 60.0, "BASFRQ empty; PSS/E default")
+            (
+                "case",
+                "base frequency (Hz)",
+                60.0,
+                "the file leaves the base frequency empty; PSS/E's default",
+            )
         )
 
     order = SECTIONS[rev_v]
@@ -554,7 +564,7 @@ def _build_tables(case: RawCase, raw: dict):
                     f"bus {b['I']}",
                     "base voltage (kV)",
                     1.0,
-                    "BASKV is 0 in the file; 1 kV keeps per-unit values unchanged",
+                    "the file gives a base voltage of 0; 1 kV keeps per-unit values unchanged",
                 )
             )
             b["BASKV"] = 1.0
