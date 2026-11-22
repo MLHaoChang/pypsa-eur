@@ -71,6 +71,8 @@ const TAB_COLUMNS: Record<Tab, string[]> = {
 // (COL_LABELS) that covered them is gone.
 /** The classes whose size is measured on a bus, so a row can sit on a tonne bus (the backend's `_SIZE_BUS`). */
 const SIZED_ON_A_BUS: ReadonlySet<string> = new Set(['Generator', 'StorageUnit', 'Store', 'Load', 'Link'])
+// The class schema's cost units that follow the asset's bus (EUR/kW, EUR/kWh, EUR/MWh on an energy bus).
+const BUS_FOLLOWING_COST_UNIT = /^EUR\/(kW|kWh|MWh)(\/|$)/
 const NO_SHORT_NAMES: Record<string, string> = {}
 
 const TAB_TYPES: Record<Tab, string | null> = {
@@ -403,31 +405,43 @@ function AssetTable({
     enabled: SIZED_ON_A_BUS.has(componentClass) && !!currentProject,
     staleTime: 2000,
   }).data?.network_revision
-  const { data: tableUnits } = useQuery({
+  const unitsWanted = SIZED_ON_A_BUS.has(componentClass) && !!currentProject
+  const { data: tableUnits, isError: unitsFailed } = useQuery({
     queryKey: nk(currentProject, 'assetUnits', componentClass, 'tableUnits', revision ?? ''),
     queryFn: () => assetSchemaApi.tableUnits(componentClass),
-    enabled: SIZED_ON_A_BUS.has(componentClass) && !!currentProject,
+    enabled: unitsWanted,
     staleTime: 30_000,
     retry: false,
   })
+  // Until the read has answered, or when it failed, nothing is known about which rows sit on a tonne bus: the cost
+  // columns (the class schema's bus-following ones) say so rather than silently reading as energy (GK B4).
+  const unitsUnread = unitsWanted && !tableUnits
+  const unreadNote = unitsFailed ? 'unit unknown: the units could not be read' : 'unit not read yet'
+  const costColumns = useMemo(() => new Set(
+    (schema?.groups ?? []).flatMap(g => g.fields)
+      .filter(f => BUS_FOLLOWING_COST_UNIT.test((f.unit_display ?? '').replace('€', 'EUR'))).map(f => f.key),
+  ), [schema])
   const headerOf = (col: string) => {
     const base = columnHeaderLabel(col, catalog, NO_SHORT_NAMES, schema)
+    if (unitsUnread) return costColumns.has(col) ? `${base} · ${unreadNote}` : base
     if (!tableUnits?.cost_fields.includes(col)) return base
     const tonneUnits = new Set<string>()
     let unknown = false
     for (const r of filtered) {
-      const u = tableUnits.rows[String(r.name)]?.[col]?.unit
-      if (u) tonneUnits.add(u)
-      else if (tableUnits.unreadable.includes(String(r.name))) unknown = true
+      const c = tableUnits.rows[String(r.name)]?.[col]
+      // A scale other than 1 would need the cell rescaled as the card does; the table makes no claim then.
+      if (c && c.scale === 1) tonneUnits.add(c.unit)
+      else if (c || tableUnits.unreadable.includes(String(r.name))) unknown = true
     }
     const notes = [...tonneUnits].map(u => `${unitLabel(u)} on tonne buses`)
     if (unknown) notes.push('unit unknown where the bus is unreadable')
     return notes.length ? `${base} · ${notes.join(' · ')}` : base
   }
   const costCellNote = (name: string, col: string): string | undefined => {
-    const u = tableUnits?.rows[name]?.[col]?.unit
-    if (u) return `On a tonne bus: ${unitLabel(u)}`
-    return tableUnits?.cost_fields.includes(col) && tableUnits.unreadable.includes(name)
+    if (unitsUnread) return costColumns.has(col) ? `Unit ${unreadNote.replace(/^unit /, '')}` : undefined
+    const c = tableUnits?.rows[name]?.[col]
+    if (c && c.scale === 1) return `On a tonne bus: ${unitLabel(c.unit)}`
+    return tableUnits?.cost_fields.includes(col) && (c || tableUnits.unreadable.includes(name))
       ? 'Unit unknown: the bus cannot be read' : undefined
   }
   const { data: tsList = [] } = useQuery({

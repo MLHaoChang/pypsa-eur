@@ -354,6 +354,34 @@ describe('AssetTable cost units on tonne-bus assets — 05f', () => {
     await waitFor(() => expect(titleOf('lost')).toBe('Unit unknown: the bus cannot be read'))
   })
 
+  it('while the units are still being read the cost header and cells say so, never energy (GK B4)', async () => {
+    vi.mocked(networkApi.getStores).mockResolvedValue([store('tank_t', 'NH3')] as never)
+    vi.spyOn(assetSchemaApi, 'tableUnits').mockImplementation(() => new Promise(() => {}))
+    await open()
+    expect(await screen.findByText(/Capital cost \(annualised\) \(€\/MWh\/yr\) · unit not read yet/)).toBeTruthy()
+    await waitFor(() => expect(titleOf('tank_t')).toBe('Unit not read yet'))
+    expect(screen.queryByText(/on tonne buses/)).toBeNull()
+  })
+
+  it('a failed read says the unit is unknown in the header and the cells, never energy (GK B4)', async () => {
+    vi.mocked(networkApi.getStores).mockResolvedValue([store('tank_t', 'NH3'), store('tank_e', 'H2')] as never)
+    vi.spyOn(assetSchemaApi, 'tableUnits').mockRejectedValue(new Error('boom'))
+    await open()
+    expect(await screen.findByText(/Capital cost \(annualised\) \(€\/MWh\/yr\) · unit unknown: the units could not be read/)).toBeTruthy()
+    await waitFor(() => expect(titleOf('tank_e')).toBe('Unit unknown: the units could not be read'))
+    expect(titleOf('tank_t')).toBe('Unit unknown: the units could not be read')
+  })
+
+  it('a per-tonne cost whose scale is not 1 makes no per-tonne claim: the unit is unknown (GK B4)', async () => {
+    vi.mocked(networkApi.getStores).mockResolvedValue([store('tank_t', 'NH3')] as never)
+    vi.spyOn(assetSchemaApi, 'tableUnits').mockResolvedValue(units({
+      rows: { tank_t: { capital_cost: { unit: 'EUR/t/yr', scale: 1000 } } } }))
+    await open()
+    expect(await screen.findByText(/unit unknown where the bus is unreadable/)).toBeTruthy()
+    expect(screen.queryByText(/€\/t\/yr on tonne buses/)).toBeNull()
+    await waitFor(() => expect(titleOf('tank_t')).toBe('Unit unknown: the bus cannot be read'))
+  })
+
   it('a change of the network revision re-reads the marks and the header follows', async () => {
     vi.mocked(networkApi.getStores).mockResolvedValue([store('tank_t', 'NH3')] as never)
     let onTonneBus = true
@@ -367,7 +395,7 @@ describe('AssetTable cost units on tonne-bus assets — 05f', () => {
     await act(async () => { await lastClient.invalidateQueries({ queryKey: ['undoInfo', 'Demo'] }) })
     await waitFor(() => expect(screen.queryByText(/on tonne buses/)).toBeNull())
     expect(spy.mock.calls.length).toBeGreaterThan(1)
-    expect(titleOf('tank_t')).toBeNull()
+    await waitFor(() => expect(titleOf('tank_t')).toBeNull())
   })
 })
 
