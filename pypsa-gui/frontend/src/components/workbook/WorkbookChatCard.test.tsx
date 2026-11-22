@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { ConfirmationCard } from '../ConfirmationCard'
 import { useChatStore } from '../../store/chatStore'
 import { useUIStore } from '../../store/uiStore'
-import { WorkbookDownloadCard, workbookCardOf, workbookDownloadOf } from './WorkbookChatCard'
+import { DOWNLOAD_FAILED, WorkbookDownloadCard, workbookCardOf, workbookDownloadOf } from './WorkbookChatCard'
 
 vi.mock('../../api/chat', () => ({ postChatConfirm: vi.fn().mockResolvedValue({ ok: true }) }))
 const template = vi.fn()
@@ -46,7 +46,7 @@ it.each(['expert', 'guided'] as const)('shows what the import creates before it 
   expect(screen.getByTestId('chat-workbook-card').textContent).toContain('nothing is overwritten')
   expect(screen.getByTestId('workbook-counts').textContent).toContain('Nodes 2')
   expect(screen.getByTestId('workbook-unmapped').textContent).toContain('Sheet9')
-  expect(screen.getByTestId('chat-workbook-card-more').textContent).toMatch(/^2 more lines not listed/)
+  expect(screen.getByTestId('chat-workbook-card-more').textContent).toBe('2 more lines are in the file but not listed here.')
   expect((screen.getByTestId('chat-confirm-approve') as HTMLButtonElement).disabled).toBe(false)
 })
 
@@ -84,3 +84,12 @@ it('shows a failed template download in the backend words', async () => {
   fireEvent.click(screen.getByTestId('chat-workbook-download-button'))
   await waitFor(() => expect(screen.getByTestId('chat-workbook-download-error').textContent).toBe('Authentication required'))
 })
+
+it.each(['Request failed with status code 500', 'Network Error', 'timeout of 180000ms exceeded'])(
+  'a transport failure (%s) reads as a plain sentence, not the axios message', async (message) => {
+    template.mockRejectedValue(new Error(message))
+    render(<WorkbookDownloadCard result={{ workbook_download: 'template', filename: 'PyPSA Studio input workbook.xlsx' }} />)
+    fireEvent.click(screen.getByTestId('chat-workbook-download-button'))
+    await waitFor(() => expect(screen.getByTestId('chat-workbook-download-error').textContent).toBe(DOWNLOAD_FAILED))
+    expect(screen.getByTestId('chat-workbook-download-button').textContent).toBe('Download')
+  })

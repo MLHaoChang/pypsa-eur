@@ -59,11 +59,20 @@ export function WorkbookImportCardBody({ card }: { card: WorkbookImportCard }) {
       <WorkbookReport contents={card} />
       {more > 0 && (
         <p className="mt-1 text-muted" data-testid="chat-workbook-card-more">
-          {more} more {more === 1 ? 'line' : 'lines'} not listed here; import it from New project › Import file to see them all.
+          {more} more {more === 1 ? 'line is' : 'lines are'} in the file but not listed here.
         </p>
       )}
     </div>
   )
+}
+
+/** The plain sentence for a failed download; the backend's own words when it sent some. */
+export const DOWNLOAD_FAILED = 'The workbook could not be downloaded. Try again.'
+const TRANSPORT = /^(Request failed with status code \d+|Network Error|timeout of \d+ms exceeded|canceled)$/
+
+function downloadError(e: unknown): string {
+  const message = e instanceof Error ? e.message.trim() : ''
+  return !message || TRANSPORT.test(message) ? DOWNLOAD_FAILED : message
 }
 
 interface DownloadResult {
@@ -97,7 +106,7 @@ export function WorkbookDownloadCard({ result }: { result: unknown }) {
       URL.revokeObjectURL(url)
       setState('done')
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'The download failed.')
+      setError(downloadError(e))
       setState('idle')
     }
   }
