@@ -11,7 +11,9 @@ export function openFailureMessage(r: SwitchResult): string {
     case 'busy-solve': return 'A simulation is running and could not be stopped.'
     case 'abort-failed': return 'The running simulation could not be stopped.'
     case 'not-found': return 'This project no longer exists.'
-    case 'error': return r.message
+    // `r.message` is the raw transport text ("Request failed with status code 500"):
+    // say it in words, the backend's own text reaches the user through the error toast.
+    case 'error': return 'The server could not open it. Try again in a moment.'
     default: return 'The project could not be opened.'
   }
 }

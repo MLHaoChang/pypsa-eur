@@ -17,6 +17,16 @@ beforeEach(() => {
 })
 
 describe('useProjectDeepLink', () => {
+  it('words a transport error as a plain sentence, never the raw axios text', async () => {
+    list.mockResolvedValue([{ id: 'p1', name: 'Grid' }])
+    sw.mockResolvedValue({ status: 'error', message: 'Request failed with status code 500' })
+    renderHook(() => useProjectDeepLink(null, qc))
+    await waitFor(() => expect(useUIStore.getState().openFailure).not.toBeNull())
+    const msg = useUIStore.getState().openFailure!.message
+    expect(msg).not.toMatch(/status code|Request failed/)
+    expect(msg).toMatch(/Try again/)
+  })
+
   it('reports a switch that does not land, instead of leaving an empty app', async () => {
     list.mockResolvedValue([{ id: 'p1', name: 'Grid' }])
     sw.mockResolvedValue({ status: 'abort-failed' })
