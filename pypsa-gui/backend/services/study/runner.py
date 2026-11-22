@@ -886,6 +886,15 @@ def _flag_codes(preflight_flags: dict[str, list[str]] | None) -> list[str]:
     return list(dict.fromkeys(c for codes in (preflight_flags or {}).values() for c in codes))
 
 
+def _fork_exists(db, project_id: str) -> bool:
+    from db.models import Project
+
+    try:
+        return db.get(Project, _uuid(project_id)) is not None
+    except ValueError:  # a malformed id names no project
+        return False
+
+
 def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcomes,
             fidelity, status, error, run_ledger, run_intake,
             preflight_flags: dict[str, list[str]] | None = None, user_id,
@@ -898,7 +907,7 @@ def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcom
     removed, mid-run: project-viewer-role 02) gets nothing written: every fork
     goes, no findings or run record land, and the study's `option_projects`,
     which the run saved while its requester could still write, is put back as
-    it was before the run (`prior_options`). The refusal is kept in memory
+    it was before the run (`prior_options`), less any fork the run replaced. The refusal is kept in memory
     (`remember_refusal`) for `get_study_run`.
     """
     # A refusal the run already met stays final, whatever a second read says.
@@ -932,11 +941,15 @@ def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcom
                  "current": None, "pending": [o.option_id for o, _r, _c in created],
                  "solved": [], "fork_removal_refused": removal_errors}
         if prior_options is not None:
+            # A re-run replaces the last run's forks as it makes its own, so
+            # only the prior forks that still exist are put back: the list
+            # never names a project that is gone (GK B4 condition 5).
+            kept = [pid for pid in prior_options if _fork_exists(db, pid)]
             with store.WRITE_LOCK:
                 study = store.load_study(base_dir, study_id)
-                if list(study.option_projects) != prior_options:
+                if list(study.option_projects) != kept:
                     store.save_study(base_dir, study.model_copy(update={
-                        "option_projects": prior_options}))
+                        "option_projects": kept}))
         remember_refusal(base_row_id, study_id, "run", {**_public(record), **final})
         return final
 

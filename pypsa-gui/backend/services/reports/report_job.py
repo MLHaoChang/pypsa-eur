@@ -41,6 +41,7 @@ from typing import Any
 
 from models.report import Block, Bullets, Callout, Paragraph, ReportDocument, Section
 from services.atomic_io import atomic_write_text
+from services import project_write_gate
 from services.reports import store
 from services.reports.assemble import (
     CHARTS_SECTION_ID,
@@ -137,6 +138,11 @@ class ReportJob:
     run_binding: tuple[pathlib.Path, str] | None = None
     # The token of this job's on-disk marker, set by `_launch` (LC48B-RESUME-1).
     marker_token: str | None = None
+    # Who started the job, and the project row's id, captured when it starts:
+    # the requester's role is read again before the save (project-viewer-role
+    # 02). None for both in local mode.
+    user_id: Any = None
+    project_id: Any = None
 
 
 # ── preparation ─────────────────────────────────────────────────────────────
@@ -172,7 +178,8 @@ def prepare_report_job(*, project_name: str, project_dir: pathlib.Path,
                        meta_updates: dict[str, Any] | None = None,
                        strict: bool = False,
                        summaries: dict[str, list[str]] | None = None,
-                       run_binding: tuple[pathlib.Path, str] | None = None) -> ReportJob:
+                       run_binding: tuple[pathlib.Path, str] | None = None,
+                       user_id: Any = None, project_id: Any = None) -> ReportJob:
     """
     Everything `run_report_job` needs, validated, with the record it will
     publish. Raises `KeyError` for a section id the document does not have.
@@ -230,7 +237,7 @@ def prepare_report_job(*, project_name: str, project_dir: pathlib.Path,
         regenerate_section=regenerate_section, report_id=report_id,
         record=record, new_report=new_report,
         meta_updates=dict(meta_updates or {}), strict=strict,
-        run_binding=run_binding,
+        run_binding=run_binding, user_id=user_id, project_id=project_id,
     )
     if run_binding is not None:
         job.provider = RunSends(provider, *run_binding)
@@ -692,6 +699,9 @@ def run_report_job(job: ReportJob) -> ReportDocument:
         # below; until then the meta marks them unrecorded and holds none,
         # never the last version's (07f-b, GK B E1/E4).
         pending = ("generation", *sorted(job.meta_updates))
+        # Project-viewer-role 02: a requester made a viewer, or removed,
+        # since the job started gets nothing saved.
+        project_write_gate.check_requester(job.user_id, job.project_id)
         if job.new_report:
             store.create_report(job.project_dir, doc, pending=pending)
             version = 1
@@ -715,6 +725,8 @@ def run_report_job(job: ReportJob) -> ReportDocument:
             fields["error_kind"] = exc.kind
         elif isinstance(exc, store.ReportBusy):
             fields["error_kind"] = "report_busy"
+        elif isinstance(exc, project_write_gate.RequesterViewOnly):
+            fields["error_kind"] = project_write_gate.KIND
         error = str(exc)
         if version is not None:
             fields["version"] = version
@@ -776,11 +788,14 @@ class MappingJob:
     stop_event: threading.Event = field(default_factory=threading.Event)
     lock: threading.Lock = field(default_factory=threading.Lock)
     marker_token: str | None = None
+    user_id: Any = None               # as `ReportJob` (project-viewer-role 02)
+    project_id: Any = None
 
 
 def prepare_mapping_job(*, project_name: str, project_dir: pathlib.Path,
                         document: ReportDocument, outline: Any, profile: Any,
-                        provider: Any, language: str) -> MappingJob:
+                        provider: Any, language: str,
+                        user_id: Any = None, project_id: Any = None) -> MappingJob:
     profile_id = str(getattr(profile, "id", "") or "")
     model = str(getattr(profile, "model", "") or "")
     max_tokens = int(getattr(profile, "max_output_tokens", None) or SECTION_MAX_TOKENS)
@@ -806,6 +821,7 @@ def prepare_mapping_job(*, project_name: str, project_dir: pathlib.Path,
         report_id=document.report_id, document=document, outline=outline,
         profile_id=profile_id, model=model, max_tokens=max_tokens,
         provider=provider, language=language, record=record,
+        user_id=user_id, project_id=project_id,
     )
     record["stop_event"] = job.stop_event
     return job
@@ -841,12 +857,15 @@ def run_mapping_job(job: MappingJob) -> dict[str, Any] | None:
             proposed = result
         raw = proposed.model_dump() if hasattr(proposed, "model_dump") else dict(proposed)
         plan, _notes = templates.sanitise_plan(raw, job.outline, job.document)
+        project_write_gate.check_requester(job.user_id, job.project_id)
         store.update_meta(job.project_dir, job.report_id, mapping_plan=plan)
         _finish(job, status="done", error=None, finished_at=time.time(),
                 progress={"done": 1, "total": 1, "current": None})
         return plan
     except Exception as exc:
-        _finish(job, status="failed", error=str(exc), finished_at=time.time())
+        kind = ({"error_kind": project_write_gate.KIND}
+                if isinstance(exc, project_write_gate.RequesterViewOnly) else {})
+        _finish(job, status="failed", error=str(exc), finished_at=time.time(), **kind)
         raise
 
 
@@ -1022,6 +1041,7 @@ def start_report_job(*, project_name: str, project_dir: pathlib.Path,
                      strict: bool = False,
                      summaries: dict[str, list[str]] | None = None,
                      run_binding: tuple[pathlib.Path, str] | None = None,
+                     user_id: Any = None, project_id: Any = None,
                      lock: threading.Lock, state: dict[str, Any]) -> str:
     """
     Publish the record under `state["report_job"]` and start the daemon
@@ -1036,19 +1056,22 @@ def start_report_job(*, project_name: str, project_dir: pathlib.Path,
             instruction=instruction, base_document=base_document,
             regenerate_section=regenerate_section, title=title,
             template_file_id=template_file_id, meta_updates=meta_updates, strict=strict,
-            summaries=summaries, run_binding=run_binding),
+            summaries=summaries, run_binding=run_binding,
+            user_id=user_id, project_id=project_id),
         run=run_report_job, lock=lock, state=state)
 
 
 def start_mapping_job(*, project_name: str, project_dir: pathlib.Path,
                       document: ReportDocument, outline: Any, profile: Any,
                       provider: Any, language: str,
+                      user_id: Any = None, project_id: Any = None,
                       lock: threading.Lock, state: dict[str, Any]) -> str:
     """The mapping kind on the same slot: `state["report_job"]["mode"] == "mapping"`."""
     return _launch(
         prepare=lambda: prepare_mapping_job(
             project_name=project_name, project_dir=project_dir, document=document,
-            outline=outline, profile=profile, provider=provider, language=language),
+            outline=outline, profile=profile, provider=provider, language=language,
+            user_id=user_id, project_id=project_id),
         run=run_mapping_job, lock=lock, state=state)
 
 
