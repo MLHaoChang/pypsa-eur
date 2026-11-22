@@ -1,0 +1,8 @@
+{
+  "limitations": [
+    {"method": "PUT", "path": "/api/market-prices/token", "reason": "admin"},
+    {"method": "DELETE", "path": "/api/market-prices/token", "reason": "admin"},
+    {"method": "GET", "path": "/api/projects/{name}/market-prices", "reason": "ui-pointer", "decision": "SCU06-CHAT-1"},
+    {"method": "POST", "path": "/api/projects/{name}/market-prices/day-ahead", "reason": "ui-pointer", "decision": "SCU06-CHAT-1"}
+  ]
+}

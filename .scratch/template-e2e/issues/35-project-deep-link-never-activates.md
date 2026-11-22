@@ -3,7 +3,7 @@
 
 # 35 Opening a project sometimes never activates it and leaves "Unnamed Network"
 
-Status: ready-for-agent
+Status: done
 Blocked by: none (21, now done, sped the open up; this race remains)
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), walk W4 (shot `member_app`).
 Model: sonnet (diagnose first: `diagnosing-bugs` skill). Review: UX.

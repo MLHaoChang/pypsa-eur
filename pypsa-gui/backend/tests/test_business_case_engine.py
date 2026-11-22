@@ -1493,6 +1493,7 @@ def test_the_hash_is_the_domain_the_ic_and_the_inputs_exactly():
                     "linked_share",
                     "linked_share_by_year",
                     "default_units",
+                    "derating",
                 },
             )
             for ln in inputs.lines
@@ -1903,6 +1904,7 @@ def test_bc15_a_year_below_full_volume_scales_revenue_and_dispatched_costs_toget
         quantity=None,
         quantity_source="linked:capacity.pv@1",
         price=5.0,
+        derating=1.0,
     )
     outs = {**_NH3_OUT, "capacity": Series("capacity.pv", "kW_year", {None: 50.0}, {})}
     _, full = _run(_lease_case(None, cap, share), ic=ic, outputs=outs)

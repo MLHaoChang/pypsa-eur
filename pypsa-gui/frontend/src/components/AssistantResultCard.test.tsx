@@ -163,3 +163,24 @@ it('SC-07 S5a (R4): a check that never started a turn does not leave Checking…
     vi.useRealTimers()
   }
 })
+it('live-voice 16: a step whose job was stopped reads stopped, not failed, and the plan stays resumable', () => {
+  const plan = { ...task, status: 'ready', completed_steps: 1, total_steps: 2,
+    steps: [{ id: 'cap', tool: 'set_component_attribute', status: 'completed' },
+      { id: 'run', tool: 'run_simulation', status: 'cancelled' }],
+    next_step: { id: 'run', tool: 'run_simulation', status: 'cancelled' } }
+  useUIStore.setState({ uiMode: 'guided' })
+  render(<AssistantResultCard result={{ _task: plan }} disabled={false} onRequest={vi.fn()}
+    toolWords={(t) => t === 'run_simulation' ? 'solve the model' : t} />)
+  const steps = screen.getAllByTestId('assistant-task-step')
+  expect(steps.map(s => [s.dataset.status, s.textContent])).toEqual([
+    ['completed', 'set_component_attribute · done'], ['cancelled', 'solve the model · stopped']])
+  expect(screen.getByText('Next: solve the model (stopped)')).toBeTruthy()
+  expect(screen.queryByText(/failed/)).toBeNull()
+  expect(screen.getByText('Resume task')).toBeTruthy()
+  cleanup()
+  useUIStore.setState({ uiMode: 'expert' })
+  render(<AssistantResultCard result={{ _task: plan }} disabled={false} onRequest={vi.fn()} />)
+  expect(screen.getByText('Next: run_simulation (stopped)')).toBeTruthy()
+  expect(screen.queryByText(/cancelled/)).toBeNull()
+  expect(screen.getAllByTestId('assistant-task-step')[1].textContent).toBe('run_simulation · stopped')
+})
