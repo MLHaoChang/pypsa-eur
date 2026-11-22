@@ -1132,12 +1132,12 @@ export function ChartCard({
 }) {
   return (
     <section
-      className={`rounded-[10px] border border-border bg-bg overflow-hidden
+      className={`rounded-card border border-border bg-bg overflow-hidden
         shadow-[0_1px_0_rgba(10,14,20,0.04)] ${className ?? ''}`}
     >
       <header className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-2">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0">
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] [overflow-wrap:anywhere]">{title}</h3>
+          <h3 className="text-h3 font-semibold text-text [overflow-wrap:anywhere]">{title}</h3>
           {count != null && <span className="font-mono text-[11px] text-muted shrink-0">{count}</span>}
           {hint && <span className="text-[11px] text-muted [overflow-wrap:anywhere]">{hint}</span>}
         </div>
@@ -1331,7 +1331,7 @@ export const CHART_TOOLTIP = {
     borderRadius: 8,
     fontSize: 11,
     boxShadow: '0 6px 16px rgba(10,14,20,0.10), 0 2px 5px rgba(10,14,20,0.06)',
-    fontFamily: 'var(--font-family-mono)',
+    fontFamily: 'var(--font-mono)',
     padding: '6px 9px',
   } as CSSProperties,
   separator: ': ',
@@ -1656,7 +1656,7 @@ export function SeasonalLineCardGrid({
         const present = cols.filter(c => seasonRows.some(r => r[c] != null))
         return (
           <div key={season} data-report-panel={season}
-            className="rounded-[10px] border border-border bg-bg overflow-hidden shadow-[0_1px_0_rgba(10,14,20,0.04)]">
+            className="rounded-card border border-border bg-bg overflow-hidden shadow-[0_1px_0_rgba(10,14,20,0.04)]">
             <header className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-bg-2">
               <span className="w-2 h-2 rounded-full shrink-0"
                 style={{ background: SEASON_ACCENT[season] }} />

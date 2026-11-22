@@ -12,6 +12,10 @@ import { useUIStore } from '../store/uiStore'
 import { networkApi } from '../api/network'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ioApi } from '../api/io'
+import { workbookApi } from '../api/workbook'
+import {
+  AS_LAST_SAVED, INPUT_WORKBOOK_DESC, INPUT_WORKBOOK_LABEL, SAVE_FIRST_REASON, TEMPLATE_DESC, TEMPLATE_LABEL,
+} from '../components/workbook/workbookWords'
 import { projectsApi } from '../api/projects'
 import type { ImportSummary, ProjectInfo } from '../api/types'
 import { ImportZone } from '../pages/ImportExport'
@@ -38,6 +42,7 @@ import { STEPS, stepsForKind, type Step, type StepId } from './sidebar/steps'
 import { useOpenProjectKind, useOpenProjectKindPending } from '../hooks/useOpenProjectKind'
 import { STUDY_KIND } from '../utils/projectActions'
 import { flushPendingMapLayoutToServer } from '../pages/mapLayoutStore'
+import { BrowserNotifyPref } from '../components/runStatus/NotifyOptIn'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const SIDEBAR_EXPANDED_W = 240
@@ -50,7 +55,7 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
   onClose: () => void; initialTab?: 'import' | 'export'; initialFormat?: 'workbook' | null; projectName: string
 }) {
   const [tab, setTab] = useState<'import' | 'export'>(initialTab)
-  const [exportFmt, setExportFmt] = useState<'bundle' | 'netcdf' | 'csv' | 'excel' | 'matpower' | 'workbook'>(initialFormat ?? 'bundle')
+  const [exportFmt, setExportFmt] = useState<'bundle' | 'netcdf' | 'csv' | 'excel' | 'matpower' | 'workbook' | 'input' | 'template'>(initialFormat ?? 'bundle')
   const [workbook, setWorkbook] = useState<WorkbookChoice>(WORKBOOK_DEFAULT)
   const workbookViews = useWorkbookViews(tab === 'export' && exportFmt === 'workbook')
   const workbookOff = exportFmt === 'workbook' && workbookBlock(workbookViews.data, workbook) !== null
@@ -58,6 +63,22 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
   const [exporting, setExporting] = useState(false)
   const qc = useQueryClient()
   const { setProjectName, currentProject } = useUIStore()
+  // The input workbook holds the project as last saved: offer "Save first" while edits are unsaved.
+  const { data: undoInfo } = useQuery({
+    queryKey: nk(currentProject, 'undoInfo'), queryFn: networkApi.undoInfo,
+    enabled: tab === 'export' && exportFmt === 'input' && !!currentProject, staleTime: 0,
+  })
+  const [savingFirst, setSavingFirst] = useState(false)
+  const saveFirst = async () => {
+    if (!currentProject) return
+    setSavingFirst(true)
+    const saved = await saveProjectQuietly(currentProject, true)
+    setSavingFirst(false)
+    qc.invalidateQueries({ queryKey: nk(currentProject, 'undoInfo') })
+    qc.invalidateQueries({ queryKey: ['projects'] })
+    if (!saved) toast.error(`Could not save ‘${currentProject}’.`)
+  }
+  const inputOff = exportFmt === 'input' && !currentProject
 
   const handleImportSuccess = (summary: ImportSummary, fileName?: string) => {
     // Scope to the active project's network + results (the import replaced the
@@ -89,6 +110,7 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
     try {
       let blob: Blob
       let ext: string
+      let templateName: string | null = null
       if (exportFmt === 'bundle') {
         if (!currentProject) {
           toast.error('Save the project first, then export as bundle.')
@@ -104,20 +126,27 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
         }
         blob = wb
         ext = '.xlsx'
+      } else if (exportFmt === 'input' || exportFmt === 'template') {
+        if (exportFmt === 'input' && !currentProject) return
+        const f = exportFmt === 'input' ? await workbookApi.project(currentProject!) : await workbookApi.template()
+        blob = f.blob
+        ext = '.xlsx'
+        // The blank template keeps its own name: it is no project's file.
+        if (exportFmt === 'template') templateName = f.filename
       } else {
         const fns = { netcdf: ioApi.exportNetcdf, csv: ioApi.exportCsv, excel: ioApi.exportExcel, matpower: ioApi.exportMatpower }
         const exts = { netcdf: '.nc', csv: '.zip', excel: '.xlsx', matpower: '.m' }
         blob = await fns[exportFmt]()
         ext = exts[exportFmt]
       }
-      const fname = (exportFilename.trim() || slugify(projectName)) + ext
+      const fname = templateName ?? (exportFilename.trim() || slugify(projectName)) + ext
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url; a.download = fname; a.click()
       URL.revokeObjectURL(url)
       toast.success(`Downloaded ${fname}`)
     } catch (e) {
-      toast.error(exportFmt === 'workbook' && e instanceof Error && !('isAxiosError' in e) ? e.message : 'Export failed')
+      toast.error(['workbook', 'input', 'template'].includes(exportFmt) && e instanceof Error && !('isAxiosError' in e) ? e.message : 'Export failed')
     } finally { setExporting(false) }
   }
 
@@ -162,7 +191,7 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
           )}
           {tab === 'export' && (
             <>
-              <label className="flex flex-col gap-1 mb-4">
+              {exportFmt !== 'template' && <label className="flex flex-col gap-1 mb-4">
                 <span className="text-xs font-medium text-text">File name</span>
                 <div className="flex items-center gap-1">
                   <input
@@ -173,10 +202,10 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
                     className="flex-1 px-2.5 py-1.5 text-xs border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20"
                   />
                   <span className="text-[10px] text-muted font-mono">
-                    {exportFmt === 'bundle' ? '.pypsaproj.zip' : exportFmt === 'netcdf' ? '.nc' : exportFmt === 'csv' ? '.zip' : exportFmt === 'excel' || exportFmt === 'workbook' ? '.xlsx' : '.m'}
+                    {exportFmt === 'bundle' ? '.pypsaproj.zip' : exportFmt === 'netcdf' ? '.nc' : exportFmt === 'csv' ? '.zip' : exportFmt === 'matpower' ? '.m' : '.xlsx'}
                   </span>
                 </div>
-              </label>
+              </label>}
               <p className="text-xs text-muted mb-3">Format:</p>
               <div className="space-y-2 mb-4">
                 {([
@@ -184,6 +213,8 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
                   { id: 'netcdf',   label: 'NetCDF (.nc)',   desc: 'Native PyPSA format — lossless' },
                   { id: 'excel',    label: 'Excel (.xlsx)',  desc: 'One sheet per component' },
                   { id: 'workbook', label: 'Results workbook (Excel)', desc: 'The solved results: overview, key charts and one sheet per result tab' },
+                  { id: 'input',    label: INPUT_WORKBOOK_LABEL, desc: INPUT_WORKBOOK_DESC },
+                  { id: 'template', label: TEMPLATE_LABEL, desc: TEMPLATE_DESC },
                   { id: 'csv',      label: 'CSV zip (.zip)', desc: 'Folder of CSVs' },
                   { id: 'matpower', label: 'MATPOWER (.m)',  desc: 'AC-only, for MATLAB/Octave' },
                 ] as const).map(f => (
@@ -194,6 +225,20 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
                       <div>
                         <div className="text-xs font-semibold text-text">{f.label}</div>
                         <div className="text-[10px] text-muted">{f.desc}</div>
+                        {f.id === 'input' && (currentProject ? (
+                          <div className="flex items-baseline gap-2 text-[10px] text-muted" data-testid="input-workbook-note">
+                            <span>{AS_LAST_SAVED}</span>
+                            {undoInfo?.unsaved && (
+                              <button type="button" data-testid="input-workbook-save-first" disabled={savingFirst}
+                                onClick={e => { e.preventDefault(); void saveFirst() }}
+                                className="shrink-0 text-text underline disabled:opacity-50">
+                                {savingFirst ? 'Saving…' : 'Save first'}
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-warn" data-testid="input-workbook-why">{SAVE_FIRST_REASON}</div>
+                        ))}
                       </div>
                     </label>
                     {f.id === 'workbook' && exportFmt === 'workbook' && (
@@ -208,7 +253,7 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
               </p>
               <div className="flex gap-2 justify-end">
                 <button onClick={onClose} className="px-3 py-1.5 border border-border rounded text-xs text-muted hover:text-text transition-colors">Cancel</button>
-                <button onClick={handleExport} disabled={exporting || workbookOff}
+                <button onClick={handleExport} disabled={exporting || workbookOff || inputOff}
                   className="flex items-center gap-1.5 px-4 py-1.5 bg-accent text-white rounded text-xs font-semibold hover:bg-accent/90 disabled:opacity-50 transition-colors">
                   <Download size={12} /> {exporting ? 'Downloading…' : 'Download File'}
                 </button>
@@ -1209,6 +1254,7 @@ function PreferencesFooter({ small = false }: { small?: boolean }) {
           <span className="capitalize">{density === 'comfortable' ? 'Comfy' : 'Compact'}</span>
         </button>
       </div>
+      <BrowserNotifyPref />
     </div>
   )
 }

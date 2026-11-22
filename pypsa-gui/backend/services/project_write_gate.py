@@ -33,6 +33,7 @@ stands (GK B R2).
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from functools import cache
@@ -44,9 +45,12 @@ from db.models import Project, User
 from db.session import get_db
 from services import project_acl
 
+logger = logging.getLogger(__name__)
+
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 KIND = "project_view_only"
 MESSAGE = "You can view this project but not change it. Ask its owner for edit access."
+REFUSAL = f"{KIND}: {MESSAGE}"  # a run's `error` when its requester lost edit access
 
 
 def refusal() -> HTTPException:
@@ -77,6 +81,57 @@ def is_viewer(db: DBSession, user: User | None, project_uuid: str | None) -> boo
         project is not None
         and project_acl.project_role(db, user, project) == project_acl.VIEW
     )
+
+
+class RequesterViewOnly(RuntimeError):
+    """A run's requester may no longer write its project (project-viewer-role 02)."""
+
+    code = KIND
+
+    def __init__(self) -> None:
+        super().__init__(REFUSAL)
+
+
+def requester_may_not_write(user_id, project_id) -> bool:
+    """True when the person who started a run may no longer write its project:
+    they now only view it, their membership is gone, or their account is.
+
+    Read fresh from the database each call, so a run asks again before each
+    write: an editor made a viewer, or removed, mid-run gets nothing saved
+    (project-viewer-role 02; GK B F3 on #1622: a lost membership fails closed
+    like a demotion). A run with no recorded requester or project (local mode)
+    is not judged here, nor is a deleted project.
+    """
+    import uuid
+
+    if user_id is None or project_id is None:
+        return False
+    try:
+        uid, pid = uuid.UUID(str(user_id)), uuid.UUID(str(project_id))
+    except ValueError:
+        return False
+    from db import session as db_session
+
+    try:
+        db = db_session.SessionLocal()
+        try:
+            user, project = db.get(User, uid), db.get(Project, pid)
+            if project is None:
+                return False
+            if user is None:
+                return True
+            return project_acl.project_role(db, user, project) != project_acl.EDIT
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001 — a role that cannot be read refuses
+        logger.exception("reading the role of %s on %s failed; refusing", uid, pid)
+        return True
+
+
+def check_requester(user_id, project_id) -> None:
+    """Raise `RequesterViewOnly` when `requester_may_not_write` holds."""
+    if requester_may_not_write(user_id, project_id):
+        raise RequesterViewOnly()
 
 
 @dataclass(frozen=True)

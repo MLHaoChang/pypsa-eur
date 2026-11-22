@@ -48,7 +48,7 @@ function Row({ m, checked, onToggle, onRemedy }: {
           {m.status === 'blocked' && m.remedy && (
             <button
               onClick={() => onRemedy(m.remedy!)}
-              className="text-accent hover:underline"
+              className="text-link hover:underline"
             >{m.remedy.label} →</button>
           )}
         </span>

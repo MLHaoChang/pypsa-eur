@@ -224,7 +224,7 @@ function Assumed({ why, rows, testId }: { why: EhStudyWhy; rows: EhStudyAssumpti
                 {state === 'not_compared' && <span className="text-muted">not compared</span>}
                 {edit && (
                   <button type="button" data-testid={`${testId}-edit`} onClick={edit.run}
-                    className="shrink-0 text-[11px] text-accent hover:underline">{edit.label}</button>
+                    className="shrink-0 text-[11px] text-link hover:underline">{edit.label}</button>
                 )}
               </span>
               <AssumedChip source={row?.reason ?? null} testId={`${testId}-chip`} />
@@ -260,7 +260,7 @@ export function WhyThisNumber({ figure, value, testId = `hub-why-${figure}` }: {
     <div data-testid={testId} className="flex flex-col gap-1 text-[11.5px]">
       <button type="button" aria-expanded={open} aria-controls={region} data-testid={`${testId}-toggle`}
         onClick={() => setOpen(o => !o)}
-        className="inline-flex items-center gap-1 self-start text-[11px] text-accent hover:underline">
+        className="inline-flex items-center gap-1 self-start text-[11px] text-link hover:underline">
         {open ? <ChevronDown size={12} aria-hidden /> : <ChevronRight size={12} aria-hidden />} Why this number
       </button>
       {open && (

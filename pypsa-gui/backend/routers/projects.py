@@ -1674,6 +1674,9 @@ async def import_bundle(
         from services.component_names import invalid_names_in_netcdf, refuse_invalid_names
 
         refuse_invalid_names(invalid_names_in_netcdf(staged_nc))
+        # The pinned Library copies (project-io 03, GK B3 L1/L5), checked before
+        # the row exists so a bad copy leaves nothing behind.
+        _refuse_bad_library_copies(staging, members)
 
         if dry_run:
             return _import_dry_run(
@@ -1716,10 +1719,46 @@ def _carries_user_code(cfg_data: dict) -> bool:
     return bool(str(cfg_data.get("extra_functionality_code") or "").strip())
 
 
-def _import_dry_run(db: DBSession, user, staging: pathlib.Path, target_name: str,
-                    project_kind: str | None, members: set[str], *, ignored: list[str],
-                    stripped: list[str], rederived: list[str], rate_source: str,
-                    warnings: list[str]) -> dict:
+def _refuse_bad_library_copies(staging: pathlib.Path, members: set[str]) -> None:
+    """400 `bundle_corrupt` when the staged `library/` folder holds a copy that
+    does not hash to its pin, a file that is no pin's copy, or a pin whose id
+    is not a Library name (`project_copies.staged_problems`)."""
+    from services.library import bundle_pins
+    from services.library import project_copies
+
+    pins, _issues = bundle_pins.read_pins(staging)
+    # The config's own refs pin their copies too: a bundle whose sidecar was
+    # dropped or is unreadable still carries the copies its config names.
+    cfg_path = staging / "solver_config.json"
+    if cfg_path.is_file():
+        # Already read as a JSON object by `_bundle_network_owning_its_costs`.
+        pins += bundle_pins.collect_pins(json.loads(cfg_path.read_text()))
+    problems = project_copies.staged_problems(staging, members, pins)
+    if problems:
+        raise HTTPException(
+            400,
+            {
+                "error_kind": "bundle_corrupt",
+                "message": f"{problems[0]} The bundle is damaged or was changed after "
+                "export. Nothing was imported; export it again.",
+            },
+        )
+
+
+def _import_dry_run(
+    db: DBSession,
+    user,
+    staging: pathlib.Path,
+    target_name: str,
+    project_kind: str | None,
+    members: set[str],
+    *,
+    ignored: list[str],
+    stripped: list[str],
+    rederived: list[str],
+    rate_source: str,
+    warnings: list[str],
+) -> dict:
     """What `import_bundle` would create from the checked, staged bundle.
 
     Reads only: no row, no project folder; the caller removes `staging`.
@@ -2371,6 +2410,7 @@ def _materialise_from_template(template_id: str, name: str | None, params: dict 
         # Pin what the config now names, as a save does (WP1.1c): an unpinned ref
         # reads `library_ref_stale` on the first open.
         bundle_pins.write_pins(dest, bundle_pins.collect_pins(cfg))
+        _write_library_copies(db, _created_project.org_id, dest)
     if dc is not None and dc[1] is not None:
         # The opt-in's spec, dynamic envelope and ledger, per project
         # (`services.dc_load_profile.read_envelope`; get_eh_template serves it).
@@ -2588,8 +2628,19 @@ def _bind_template_solver_config(user, cfg_path: pathlib.Path) -> list[dict]:
             logger.exception("template finance block failed to validate")
             issues.append({"field": "finance", "code": "finance_bind_failed",
                            "message": "the template's finance inputs could not be applied"})
+    if cfg.finance_assumed is not None:
+        from models.finance import parse_finance_assumed
+
+        try:
+            parse_finance_assumed(cfg.finance_assumed)
+        except (ValidationError, ValueError) as exc:
+            issues.append({"field": "finance_assumed", "code": "finance_assumed_invalid",
+                           "message": str(exc)})
     for issue in issues:
         merged[issue["field"]] = None
+    if merged.get("finance") is None:
+        # A label for inputs the project does not hold labels nothing.
+        merged["finance_assumed"] = None
     _state["solver_config"] = SolverConfig(**merged)
     if issues and cfg_path.is_file():
         try:
@@ -2899,17 +2950,34 @@ def _carried_settings(existing_meta: dict, bound_dir, loaded: str | None, name: 
     saved) has no table, so it writes none (the defaults) and never inherits
     the destination's leftovers. Returns ``{}`` when there is no table to write.
     """
-    if _saves_its_own_directory(bound_dir, loaded, name, dest):
-        source_meta = existing_meta
-    elif bound_dir:
-        source_meta = _read_meta(pathlib.Path(bound_dir))
-    else:
-        source_meta = {}
+    source_meta = _carry_source_meta(existing_meta, bound_dir, loaded, name, dest)
     table = source_meta.get("settings")
     out = {"settings": table} if isinstance(table, dict) else {}
     if isinstance(source_meta.get("template_id"), str):
         out["template_id"] = source_meta["template_id"]
     return out
+
+
+def _carry_source_meta(existing_meta: dict, bound_dir, loaded: str | None, name: str,
+                       dest: pathlib.Path) -> dict:
+    """The metadata a save carries per-project keys from (`_carried_settings`)."""
+    if _saves_its_own_directory(bound_dir, loaded, name, dest):
+        return existing_meta
+    if bound_dir:
+        return _read_meta(pathlib.Path(bound_dir))
+    return {}
+
+
+def _carried_weather(existing_meta: dict, bound_dir, loaded: str | None, name: str,
+                     dest: pathlib.Path) -> dict:
+    """The weather choice and the cutout record a save writes into ``dest``'s
+    metadata.json, from the same source as `_carried_settings` (project-io 03,
+    GK B3): they belong to the network's series, so they travel with it."""
+    from services.profile_gen import weather_prefs
+
+    source_meta = _carry_source_meta(existing_meta, bound_dir, loaded, name, dest)
+    keys = (weather_prefs.META_KEY, weather_prefs.CUTOUTS_KEY)
+    return {k: source_meta[k] for k in keys if k in source_meta}
 
 
 def _check_save_allowed(
@@ -3274,6 +3342,14 @@ def _write_context(
         # Pin the Library versions the config references (WP1.1c).
         from services.library import bundle_pins
         bundle_pins.write_pins(dest, bundle_pins.collect_pins(asdict(cfg)))
+        # ...and keep a copy of each pinned payload in `library/` (project-io 03).
+        _write_library_copies(
+            db,
+            project_row.org_id
+            if project_row is not None
+            else getattr(ctx, "org_id", None),
+            dest,
+        )
 
     # Persist solve-time _state fields that n.export_to_netcdf doesn't
     # capture. Without these, after reload:
@@ -3438,6 +3514,7 @@ def _write_context(
             # `PATCH /{name}/settings` is their only writer, and a save that
             # dropped the key would silently reset the user's choice.
             **_carried_settings(existing_meta, bound_dir, loaded, name, dest),
+            **_carried_weather(existing_meta, bound_dir, loaded, name, dest),
         })
     ts_columns_saved = len(user_ts_data) if isinstance(user_ts_data, dict) else 0
     # Flat-count the leaves of the nested {comp: {attr: {col: ...}}} structure.
@@ -3567,6 +3644,40 @@ def _tariff_ref_load_issues(cfg, project_name: str | None) -> list[dict]:
     change_log_service.log("warn", "Project", project_name or "(unsaved)",
                            f"{issue['code']} ({issue['reason']}): {issue['message']}")
     return [issue]
+
+
+def _write_library_copies(db, org_id, project_dir: pathlib.Path) -> list[str]:
+    """`bundle_pins.write_copies`, which never fails the caller: a copy that
+    cannot be written now is written by a later save or load, and until then
+    the org's Library serves the pin (project-io 03)."""
+    if db is None or org_id is None:
+        return []
+    from uuid import UUID
+
+    from services.library import bundle_pins
+
+    try:
+        return bundle_pins.write_copies(db, UUID(str(org_id)), project_dir)
+    except Exception:  # noqa: BLE001 - logged; the copies are filled on the next save or load
+        logger.exception(
+            "project-io 03: Library copies for %s not written", project_dir
+        )
+        return []
+
+
+def _migrate_library_copies(db, project, src: pathlib.Path, user) -> list[str]:
+    """Fill a project's missing Library copies on load (project-io 03
+    migration), only for a caller who may write it now: local mode, or the
+    holder of its edit lock (GK B3 L3). A viewer's, or anyone else's, load
+    only reads; the org's Library serves the pins as before, and the next
+    save fills the copies. Writes nothing but `library/`."""
+    if db is None or project is None:
+        return []
+    if not local_mode.is_local_mode():
+        lock = _serialize_project_lock(db, project.id, user)
+        if not (lock and lock.get("yours")):
+            return []
+    return _write_library_copies(db, project.org_id, src)
 
 
 def _library_pin_issues(db, project, src: pathlib.Path, cfg) -> list[dict]:
@@ -3872,6 +3983,7 @@ def activate_project(
                 _hydrate_context_from_disk(ctx, src, project.name)
             project_registry.bind_context(ctx, project)
             evicted = PyPSAService.activate_context(ctx, register=True)
+            _migrate_library_copies(db, project, src, user)
             library_issues = _library_pin_issues(
                 db, project, src, ctx.solver_state.get("solver_config"))
 
@@ -3894,7 +4006,12 @@ def activate_project(
         from services.library import bundle_pins
         cfg = PyPSAService.get_active_context().solver_state.get("solver_config")
         library_issues = bundle_pins.check_pins(
-            db, project.org_id, None, config=asdict(cfg) if cfg is not None else {})
+            db,
+            project.org_id,
+            None,
+            config=asdict(cfg) if cfg is not None else {},
+            copies_dir=src,
+        )
         for issue in library_issues:
             change_log_service.log(
                 "warn", "Project", project.name,
@@ -4237,10 +4354,18 @@ def load_project(
         snapshots=len(n.snapshots),
     )
     from routers.simulation import _state as _sim_state
-    library_issues = _library_pin_issues(db, project, src, _sim_state.get("solver_config"))
-    return {**summary.model_dump(), "lock": lock_info, "library_issues": library_issues,
-            "my_access": project_acl.project_role(db, user, project),
-            **({"dropped_goal": dropped_goal} if dropped_goal else {})}
+
+    _migrate_library_copies(db, project, src, user)
+    library_issues = _library_pin_issues(
+        db, project, src, _sim_state.get("solver_config")
+    )
+    return {
+        **summary.model_dump(),
+        "lock": lock_info,
+        "library_issues": library_issues,
+        "my_access": project_acl.project_role(db, user, project),
+        **({"dropped_goal": dropped_goal} if dropped_goal else {}),
+    }
 
 
 def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> ProjectInfo:
@@ -5572,6 +5697,7 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None, *,
             d = src / dname
             if not d.is_dir():
                 continue
+            left_out = PC.skipped(dname, PC.BUNDLE)
             for root, _dirs, files in os.walk(d):
                 root_p = pathlib.Path(root)
                 for fname in files:
@@ -5579,6 +5705,10 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None, *,
                     if scene_store.is_scene_path(full.relative_to(src)):
                         continue
                     rel = full.relative_to(src)
+                    if len(rel.parts) > 1 and rel.parts[1] in left_out:
+                        # A sub-path the table leaves out of the bundle
+                        # (grid_compliance/tracker.lock).
+                        continue
                     if (dname == report_store.REPORTS_DIRNAME
                             and rel.parts[1] not in reports_held["src"]):
                         # A lock file, a report created meanwhile, or a stray
@@ -5613,6 +5743,30 @@ def download_bundle(
         io.BytesIO(_project_bundle_bytes(name, src, project_kind=project.project_kind)),
         media_type="application/zip",
         headers={"Content-Disposition": content_disposition(f"{name}.pypsaproj.zip")},
+    )
+
+
+@router.get("/{name}/workbook")
+def download_workbook(
+    name: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """The project as last saved, as the Excel input workbook (IMPORTS-1); unsaved edits are not in it."""
+    from services import excel_workbook, project_registry
+
+    project_registry.require_user(user)
+    project = project_registry.resolve_project(db, user, name)
+    data = excel_workbook.export_bytes(project_registry.project_dir(project), project.name)
+    change_log_service.log(
+        "export", "Project", project.name,
+        f"Downloaded the Excel input workbook of '{project.name}' (as last saved)",
+        org_id=str(project.org_id),
+    )
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=excel_workbook.MIME,
+        headers={"Content-Disposition": content_disposition(f"{project.name}.xlsx")},
     )
 
 

@@ -939,6 +939,9 @@ export interface GridReadiness {
   rows: GridReadinessRow[]
   /** Rows that do not apply to this project, outside the summary counts. */
   excluded?: GridReadinessExcluded[]
+  /** Walkthrough 04: "live" reads the loaded network (unsaved edits included); "out_of_date" read the
+   *  saved file because a run held the network; "saved" when the project is not loaded. Absent from an older server. */
+  network?: 'live' | 'saved' | 'out_of_date'
   summary: Record<GridReadinessVerdict, number> & { assumed: number; red_flags: number
     /** Rows that fail or warn before mitigation and pass after the battery/UPS (DC 03). */
     pass_after_mitigation?: number }

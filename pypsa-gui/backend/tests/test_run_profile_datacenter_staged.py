@@ -191,7 +191,9 @@ def _confirmed(card):
 
 
 def _energization(monkeypatch, card, network):
-    monkeypatch.setattr(G, "grid_readiness_for", lambda project, profile=None: card)
+    monkeypatch.setattr(
+        G, "grid_readiness_for", lambda project, profile=None, **kw: card
+    )
     monkeypatch.setattr(run_actions, "unchanged", lambda project, code: True)
     rule = _rules(STAGED)["dc.energization_peak"]
     env = run_gates.Env(

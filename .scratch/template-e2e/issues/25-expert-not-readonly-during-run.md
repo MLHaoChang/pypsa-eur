@@ -3,7 +3,7 @@
 
 # 25 — Expert is not read-only during a study run and the run cannot be aborted
 
-Status: needs-triage
+Status: ready-for-agent
 Source: decide-report-journeys.md (walk 2026-11-17, master 0ab07339)
 Severity: misleads
 Journey fit: run → results (RUN-READONLY-1, UX-FLOW-NEXT-1).
@@ -16,6 +16,10 @@ Guided is read-only and hands off into results. In Expert during a Guided study 
 
 - Expert shows the run state, disables Run LOPF and editing, and offers Abort for a Guided study run.
 - Progress names the step; section 5 says a run is in progress.
+
+## Triage (2026-11-20, master b7e5dee3)
+
+Checked by code reading only; the app was not re-run. Acceptance as above (RUN-READONLY-1). Shares the run-state display with issue 17 (TE2E-17-RUN-1): reuse its stage x of N line, do not build a second one. Gated: UX and GK B. Blocked by: 17 for the progress line only; the disable-and-Abort part is not blocked.
 
 ## Comments
 

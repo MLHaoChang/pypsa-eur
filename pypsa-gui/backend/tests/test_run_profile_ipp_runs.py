@@ -529,6 +529,7 @@ def test_the_record_is_read_as_plain_values_or_not_at_all():
     assert run_ic._record(ctx) == {
         "status": "done",
         "started_at": 2.0,
+        "finished_at": None,  # SH-36 B1
         "error": "e",
         "error_code": "c",
         "thread": worker,
@@ -537,6 +538,7 @@ def test_the_record_is_read_as_plain_values_or_not_at_all():
     assert run_ic._record(ctx) == {
         "status": "done",
         "started_at": None,
+        "finished_at": None,
         "error": None,
         "error_code": None,
         "thread": None,

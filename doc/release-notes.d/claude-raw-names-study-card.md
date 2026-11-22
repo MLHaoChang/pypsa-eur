@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The study card shows plain words for the study's run limit, the sized-design unit names and the reserve-margin hint instead of raw ids (`budget_solves`, `genset_new`, `reserve_margin`).

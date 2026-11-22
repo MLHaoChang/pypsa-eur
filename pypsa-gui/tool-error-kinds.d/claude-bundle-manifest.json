@@ -1,4 +1,4 @@
 {"kinds": {
-  "bundle_corrupt": {"surface": "inline", "why": "import_project_bundle: the bundle's manifest.json cannot be read, or a member is missing, extra, or differs in size or checksum from it. Nothing was imported; the assistant names the file and asks for a fresh export."},
+  "bundle_corrupt": {"surface": "inline", "why": "import_project_bundle: the bundle's manifest.json cannot be read, or a member is missing, extra, or differs in size or checksum from it, or a `library/` copy does not match its pin (or no pin names it). Nothing was imported; the assistant names the file and asks for a fresh export."},
   "bundle_too_new": {"surface": "inline", "why": "import_project_bundle: the bundle's manifest names a newer bundle format than this app reads. Nothing was imported; the assistant says to update the app and import again."}
 }}

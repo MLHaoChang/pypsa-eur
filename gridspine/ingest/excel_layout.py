@@ -69,6 +69,9 @@ NOT_CARRIED = (
     "Results, reports and studies",
     "The assumptions ledger and change history",
     "Custom line and transformer types (standard types are kept by name)",
+    "Other solver, tariff and finance settings (only the discount rate and investment periods are kept)",
+    "Library references and uploaded files",
+    "Edits not yet saved: a project's workbook holds the project as last saved",
 )
 
 # Time series sheet: the header rows above each series column.

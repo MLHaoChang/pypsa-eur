@@ -97,7 +97,7 @@ export function ChaptersSection({ reliability, headlined = [] }: {
       <h3 className="text-[12px] font-semibold text-text">The whole picture</h3>
       <div className="grid grid-cols-2 gap-2">
         {tiles.map(t => (
-          <div key={t.id} className="flex flex-col gap-1.5 rounded-[10px] border border-border/70 p-2" data-testid={`hub-chapter-${t.id}`}>
+          <div key={t.id} className="flex flex-col gap-1.5 rounded-card border border-border/70 p-2" data-testid={`hub-chapter-${t.id}`}>
             <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{t.group}</span>
             {headlined.includes(t.id) ? (
               <p className="text-[11.5px] text-muted" data-testid={`hub-chapter-${t.id}-headlined`}>
@@ -114,7 +114,7 @@ export function ChaptersSection({ reliability, headlined = [] }: {
                 {t.control.resolve && (
                   <button type="button" data-testid={`hub-chapter-${t.id}-solve`}
                     onClick={() => useUIStore.getState().requestRunSolve()}
-                    className="text-accent hover:underline">Solve</button>
+                    className="text-link hover:underline">Solve</button>
                 )}
               </p>
             )}
@@ -126,7 +126,7 @@ export function ChaptersSection({ reliability, headlined = [] }: {
             {/* A headlined figure's way in is its link in the headline: one entry point per destination. */}
             {!headlined.includes(t.id) && (
               <button type="button" data-testid={`hub-chapter-${t.id}-open`} onClick={() => open(t.open)}
-                className="self-start text-[11.5px] text-accent hover:underline">
+                className="self-start text-[11.5px] text-link hover:underline">
                 {OPEN_LABEL(t.open)}
               </button>
             )}

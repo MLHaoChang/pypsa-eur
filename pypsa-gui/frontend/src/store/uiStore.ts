@@ -109,6 +109,8 @@ const THEME_KEY = 'network-diagram:theme'
 const THEME_SCHEMA_KEY = 'network-diagram:theme-schema'
 const THEME_SCHEMA = '2'
 const DENSITY_KEY = 'network-diagram:density'
+// Browser notifications when a run of mine ends (run progress slice 3).
+const BROWSER_NOTIFY_KEY = 'network-diagram:run-browser-notify'
 const COMPARE_RAIL_KEY = 'network-diagram:compare-rail'
 const COMPARE_RAIL_WIDTH_KEY = 'network-diagram:compare-rail-width'
 const ASSISTANT_DOCK_KEY = 'network-diagram:assistant-dock'
@@ -276,6 +278,10 @@ function storedTheme(): Theme {
     if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) return 'dark'
   } catch { /* noop */ }
   return 'light'
+}
+
+function storedBrowserNotify(): boolean {
+  try { return localStorage.getItem(BROWSER_NOTIFY_KEY) === 'true' } catch { return false }
 }
 
 function storedDensity(): Density {
@@ -591,6 +597,9 @@ interface UIStore {
   // The export format to preselect with that request (the discussed-run
   // row's Export… picks the results workbook); consumed with it.
   ioModalFormat: 'workbook' | null
+  // The Excel input workbook import dialog (one per page): open, with the file
+  // to preview when the caller already has it. Cleared when the dialog closes.
+  workbookImportRequest: { file: File | null; id: number } | null
   // Multi-user edit lock (Task 14). `readOnly` is true when another user holds
   // the active project's lock (or acquisition failed) — every destructive /
   // mutating affordance is gated on it. `lockHolderEmail` names the current
@@ -634,6 +643,8 @@ interface UIStore {
   // attributes which the CSS-var overrides in index.css key off.
   theme: Theme
   density: Density
+  /** Browser notifications when a run of mine ends while the tab is hidden; off until chosen. */
+  browserNotify: boolean
   // Guided / Expert (spec §3.1). `uiModeExplicit` is true once the user chose
   // a mode themselves; the new-project rule never overrides that choice.
   uiMode: UiMode
@@ -651,6 +662,7 @@ interface UIStore {
   releaseGuidedTour: () => void
   setTheme: (t: Theme) => void
   setDensity: (d: Density) => void
+  setBrowserNotify: (on: boolean) => void
   toggleTheme: () => void
   toggleDensity: () => void
   toggleSidebar: () => void
@@ -759,6 +771,8 @@ interface UIStore {
   clearCompareNavRequest: () => void
   requestIoModal: (tab: 'import' | 'export', format?: 'workbook') => void
   clearIoModalRequest: () => void
+  requestWorkbookImport: (file?: File) => void
+  clearWorkbookImportRequest: () => void
   // Apply a derived lock state (from utils/lockState.lockStateFromAcquire).
   setLockState: (s: LockState) => void
   // A queue job is (or is no longer) solving the project the user is viewing.
@@ -844,6 +858,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   compareNavRequest: null,
   ioModalRequest: null,
   ioModalFormat: null,
+  workbookImportRequest: null,
   readOnly: false,
   lockHolderEmail: null,
   readOnlyReason: 'writable',
@@ -873,6 +888,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   paletteMode: null,
   theme: storedTheme(),
   density: storedDensity(),
+  browserNotify: storedBrowserNotify(),
   uiMode: INITIAL_UI_MODE.mode,
   uiModeExplicit: INITIAL_UI_MODE.explicit,
   setUiMode: (mode, opts) => {
@@ -939,6 +955,10 @@ export const useUIStore = create<UIStore>((set, get) => ({
   setTheme: (t) => {
     try { localStorage.setItem(THEME_KEY, t) } catch { /* noop */ }
     set({ theme: t })
+  },
+  setBrowserNotify: (on) => {
+    try { localStorage.setItem(BROWSER_NOTIFY_KEY, String(on)) } catch { /* noop */ }
+    set({ browserNotify: on })
   },
   setDensity: (d) => {
     try { localStorage.setItem(DENSITY_KEY, d) } catch { /* noop */ }
@@ -1150,6 +1170,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
   clearCompareNavRequest: () => set({ compareNavRequest: null }),
   requestIoModal: (tab, format) => set({ ioModalRequest: tab, ioModalFormat: format ?? null }),
   clearIoModalRequest: () => set({ ioModalRequest: null, ioModalFormat: null }),
+  requestWorkbookImport: (file) => set(s => ({ workbookImportRequest: { file: file ?? null, id: (s.workbookImportRequest?.id ?? 0) + 1 } })),
+  clearWorkbookImportRequest: () => set({ workbookImportRequest: null }),
   setLockState: (s) => set((state) => {
     const { readOnly, reason } = effectiveLockState(s.readOnly, state.solvingReadOnly)
     return {
