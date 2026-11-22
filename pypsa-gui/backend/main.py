@@ -99,6 +99,7 @@ from routers import (
     market_prices,
     memory,
     memory_dream,
+    model_import,
     network,
     operational_gap,
     profiles,
@@ -1557,6 +1558,9 @@ app.include_router(grid_compliance.router, prefix="/api/grid-compliance", tags=[
 # the existing project-scoped URL pattern. Phase B adds chat tools that
 # consume these uploads; Phase C wires them into the Anthropic multimodal API.
 app.include_router(uploads.router, prefix="/api/projects", tags=["uploads"])
+# Model files (PSS/E, DGS, PLEXOS) into a new project (project-io 04): outside /api/io,
+# since it never touches the open network.
+app.include_router(model_import.router, prefix="/api/model-import", tags=["io"])
 # Chatbot integration v6 (Phase 2 stub — no Anthropic SDK yet). SSE stream +
 # confirmation card lifecycle + abort endpoint. The router is mounted under
 # /api/chat; Phase 3 wires the real LLM call without changing route shapes.
