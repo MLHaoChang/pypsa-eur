@@ -1379,6 +1379,37 @@ def test_b2_a_preset_contract_line_reads_the_finance_ppa_rate(bc, template):
     ]
 
 
+def test_bc23_a_preset_row_beyond_the_soft_band_warns_and_a_usual_one_does_not(
+    bc, template, monkeypatch
+):
+    """The finance rate fills the preset's contract lines: a rate beyond +-10 %/yr is shown
+    on the card with `warn` and the reason, so it is never silently confirmed (bc-23)."""
+    template["id"] = "eh_ipp_hybrid"
+    real = preset_apply._finance
+
+    def finance_at(rate):
+        def read(cfg):
+            fin = real(cfg)
+            return fin.model_copy(
+                update={"escalation": {**fin.escalation, "ppa": rate}}
+            )
+
+        return read
+
+    def indexation_rows():
+        card = preset_apply.plan(_args(variant="ipp_hybrid"))
+        return [r for r in card["rows"] if r["path"][-1:] == ["indexation"]]
+
+    monkeypatch.setattr(preset_apply, "_finance", finance_at(0.15))
+    high = indexation_rows()
+    assert high and all(
+        r["warn"] is True and "unusually high" in r["reason"] for r in high
+    )
+    monkeypatch.setattr(preset_apply, "_finance", finance_at(0.05))
+    usual = indexation_rows()
+    assert usual and all("warn" not in r for r in usual)
+
+
 def test_b2_the_card_marks_the_rate_from_the_finance_inputs(bc, template):
     """Guided: the card says where the indexation came from, and shows the empty
     de-rating, so the user sees both before applying (walk 04, 05)."""

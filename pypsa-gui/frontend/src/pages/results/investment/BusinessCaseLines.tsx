@@ -288,7 +288,6 @@ function LockedRows({ locked, ran }: { locked: LockedRow[] | null; ran: boolean 
 export default function BusinessCaseLines() {
   const project = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
-  const [editedRate, setEditedRate] = useState<Record<string, number>>({})
   const [confirmedRate, setConfirmedRate] = useState<Record<string, number>>({})
   const addId = useId()
   const inputsKey = nk(project, 'results', 'business_case', 'inputs')
@@ -362,12 +361,15 @@ export default function BusinessCaseLines() {
     setDraft(d => ({ ...(d ?? {}), inputs: { ...(d?.inputs ?? { lines: [] }), volume_factor_by_year: next } }))
     setVfBad(bad); setDirty(true); setRejected([]); setMessage(null)
   }
+  // A confirmation belongs to one line as it is now: a rename, a delete, a save, a discard
+  // and a reload each drop it, so it never carries to another line or a re-added one.
+  const dropConfirm = (name?: string) => setConfirmedRate(c => {
+    if (name === undefined) return {}
+    const { [name]: _drop, ...rest } = c
+    return rest
+  })
   const setLine = (i: number, patch: Partial<LineItem>) => {
-    if ('indexation' in patch && typeof patch.indexation === 'number') {
-      const name = lines[i].name
-      const rate = patch.indexation
-      setEditedRate(e => ({ ...e, [name]: rate }))
-    }
+    if (patch.name !== undefined && patch.name !== lines[i].name) dropConfirm(lines[i].name)
     setLines(lines.map((l, k) => (k === i ? edited(l, patch) : l)))
   }
 
@@ -377,7 +379,7 @@ export default function BusinessCaseLines() {
   const caseLevel = placed.filter(p => (p.line < 0 || p.line >= lines.length) && p.column !== VOLUME_FIELD)
 
   const reload = async () => {
-    setStale(false); setRejected([]); setMessage(null); setVfBad({})
+    setStale(false); setRejected([]); setMessage(null); setVfBad({}); dropConfirm()
     try {
       const fresh = await qc.fetchQuery({ queryKey: inputsKey, queryFn: () => businessCaseApi.getInputs(), staleTime: 0 })
       setDraft(fresh.business_case ? structuredClone(fresh.business_case) : null)
@@ -393,7 +395,7 @@ export default function BusinessCaseLines() {
       const out = await businessCaseApi.putInputs(draft, digest ?? '')
       setDigest(out.digest)
       if (out.business_case) setDraft(structuredClone(out.business_case))
-      setDirty(false)
+      setDirty(false); dropConfirm()
       setMessage({ tone: 'ok', text: 'Lines saved.' })
       await qc.invalidateQueries({ queryKey: inputsKey })
       await qc.invalidateQueries({ queryKey: optionsKey })
@@ -444,15 +446,18 @@ export default function BusinessCaseLines() {
     const next = new Set(prev); if (next.has(i)) next.delete(i); else next.add(i); return next
   })
   const remove = (i: number) => {
+    dropConfirm(lines[i].name)
     setLines(lines.filter((_, k) => k !== i))
     setOpen(new Set())
   }
   const horizon = opts?.horizon ?? null
   const vfOff = Object.keys(vfBad).length > 0
   // A rate typed beyond ±10 %/yr is saved only once confirmed (GAP W2: 2 typed for 2 % reads
-  // 200 %/yr). A stored rate that was not edited here is not asked about again.
+  // 200 %/yr). A line whose rate is the one already stored under its name is not asked again;
+  // a renamed or re-added line is a new line and asks.
+  const storedRate = new Map((inputs.data?.business_case?.inputs.lines ?? []).map(l => [l.name, l.indexation]))
   const unconfirmed = lines.filter(l => l.escalation === 'contract' && indexationUnusual(l.indexation)
-    && editedRate[l.name] === l.indexation && confirmedRate[l.name] !== l.indexation)
+    && storedRate.get(l.name) !== l.indexation && confirmedRate[l.name] !== l.indexation)
   const rateOff = unconfirmed.length > 0
   const ran = !!study.data?.report
 

@@ -471,17 +471,25 @@ describe('Indexation: % per year, stored as a fraction (bc-23)', () => {
     expect(screen.getByTestId('bc-line-details').textContent).toContain('%/yr')
     expect(screen.getByTestId('bc-line-details').textContent).not.toMatch(/fraction/)
   })
-  it('an untouched field sends no write', async () => {
+  it('shows 0.0215 as 2.15, not with float noise', async () => {
+    mount(config({ ...CONTRACT, indexation: 0.0215 }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Show details of GoO' }))
+    expect(field().value).toBe('2.15')
+  })
+  it('an untouched field sends no write, even after focus and blur', async () => {
     await open()
+    fireEvent.focus(field()); fireEvent.blur(field())
     expect(api.putInputs).not.toHaveBeenCalled()
     expect((screen.getByRole('button', { name: 'Save the lines' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.queryByTestId('bc-unsaved')).toBeNull()
   })
-  it('typing 2 stores exactly 0.02; typing 7 stores 0.07', async () => {
-    await open()
-    fireEvent.change(field(), { target: { value: '2' } })
+  it.each([['2', 0.02], ['7', 0.07], ['-5', -0.05], ['2.15', 0.0215]])('typing %s stores exactly %s', async (typed, stored) => {
+    mount(config({ ...CONTRACT, indexation: 0.03 })) // a start that none of the typed values equals
+    fireEvent.click(await screen.findByRole('button', { name: 'Show details of GoO' }))
+    fireEvent.change(field(), { target: { value: typed } })
     fireEvent.click(screen.getByRole('button', { name: 'Save the lines' }))
     await waitFor(() => expect(api.putInputs).toHaveBeenCalledTimes(1))
-    expect(api.putInputs.mock.calls[0][0]!.inputs.lines[0].indexation).toBe(0.02)
+    expect(api.putInputs.mock.calls[0][0]!.inputs.lines[0].indexation).toBe(stored)
   })
   it('clearing stores nothing, never 0; a typed 0 stays 0', async () => {
     await open()
@@ -505,6 +513,59 @@ describe('Indexation: % per year, stored as a fraction (bc-23)', () => {
     expect(screen.getByTestId('bc-save-off').textContent).toContain('GoO')
     fireEvent.click(within(screen.getByTestId('bc-indexation-confirm')).getByRole('checkbox'))
     expect(save.disabled).toBe(false)
+  })
+  const save = () => screen.getByRole('button', { name: 'Save the lines' }) as HTMLButtonElement
+  const confirmBox = () => within(screen.getByTestId('bc-indexation-confirm')).getByRole('checkbox') as HTMLInputElement
+  it('a rename drops the confirmation: the renamed line asks again', async () => {
+    await open()
+    fireEvent.change(field(), { target: { value: '15' } })
+    fireEvent.click(confirmBox())
+    expect(save().disabled).toBe(false)
+    fireEvent.change(screen.getByLabelText('Name, line 1'), { target: { value: 'GoO renamed' } })
+    expect(save().disabled).toBe(true)
+    expect(confirmBox().checked).toBe(false)
+  })
+  it('renaming a line that already stores an unusual rate asks, it is a new line', async () => {
+    mount(config({ ...CONTRACT, indexation: 0.15 }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Show details of GoO' }))
+    fireEvent.change(screen.getByLabelText('Quantity, GoO'), { target: { value: '2' } })
+    expect(save().disabled).toBe(false) // the stored 15 %/yr under its stored name is not asked again
+    fireEvent.change(screen.getByLabelText('Name, line 1'), { target: { value: 'GoO renamed' } })
+    expect(save().disabled).toBe(true)
+  })
+  it('a confirmation does not carry to a deleted then re-added line of the same name', async () => {
+    mount(config(CONTRACT, { ...CONTRACT, name: 'GoO2', indexation: 0.05 }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Show details of GoO' }))
+    fireEvent.change(field(), { target: { value: '15' } })
+    fireEvent.click(confirmBox())
+    fireEvent.click(screen.getByRole('button', { name: 'Remove GoO' }))
+    fireEvent.change(screen.getByLabelText('Name, line 1'), { target: { value: 'GoO' } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Show details of GoO' }))
+    fireEvent.change(field(), { target: { value: '15' } })
+    expect(confirmBox().checked).toBe(false)
+    expect(save().disabled).toBe(true)
+  })
+  it('a discard clears the confirmation', async () => {
+    await open()
+    fireEvent.change(field(), { target: { value: '15' } })
+    fireEvent.click(confirmBox())
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Discard' }))
+    await waitFor(() => expect(field().value).toBe('7'))
+    fireEvent.change(field(), { target: { value: '15' } })
+    expect(confirmBox().checked).toBe(false)
+    expect(save().disabled).toBe(true)
+  })
+  it('a save clears the confirmation', async () => {
+    await open()
+    fireEvent.change(field(), { target: { value: '15' } })
+    fireEvent.click(confirmBox())
+    fireEvent.click(save())
+    await waitFor(() => expect(api.putInputs).toHaveBeenCalledTimes(1))
+    api.getInputs.mockResolvedValue({ business_case: api.putInputs.mock.calls[0][0], digest: 'd2', status: 'ok' })
+    fireEvent.change(field(), { target: { value: '25' } })
+    expect(confirmBox().checked).toBe(false)
+    expect(save().disabled).toBe(true)
   })
   it('a served refusal for the rate reads in words on its cell', async () => {
     mount(config(CONTRACT), { refusals: [
