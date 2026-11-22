@@ -50,7 +50,12 @@ def test_a_section_lists_exactly_what_its_heading_counts(client, tmp_projects_di
     for h in _section(flow, "assets")["holds"]:
         assert h["field"] in ("p_nom", "e_nom")
         assert (
-            h["unit"] in ({"p_nom": ("MW", "MW_NH3", "t/h"), "e_nom": ("MWh", "MWh_NH3", "t")}[h["field"]])
+            h["unit"]
+            in (
+                {"p_nom": ("MW", "MW_NH3", "t/h"), "e_nom": ("MWh", "MWh_NH3", "t")}[
+                    h["field"]
+                ]
+            )
         )
         assert h["value"] is None or math.isfinite(h["value"])
     for h in _section(flow, "profiles")["holds"]:
