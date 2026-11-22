@@ -81,7 +81,7 @@ it('a goal change says before Save it is the goal for every study, then points t
   const { unmount } = mount()
   await screen.findByTestId('solver-goal-unsaved')
   expect(screen.getByTestId('solver-improve-unsaved').textContent).toBe(
-    "Not saved yet: the reliability goal filled in from the Improve card (More draws). Saving changes the project's goal for every study, not only the next run; then run the study again in Results › Adequacy. Or Revert.")
+    "Not saved yet: the reliability goal filled in from the Improve card (More draws). Saving changes the project's goal for every study, not only the next run. Then run the study again in Results › Adequacy. Or Revert.")
   expect((screen.getByTestId('solver-goal-draws') as HTMLInputElement).value).toBe('1000')
   fireEvent.click(screen.getByText('Save settings'))
   await waitFor(() => expect(simulationApi.updateSolverConfig).toHaveBeenCalledWith(expect.objectContaining({ mc_draws: 1000 })))
