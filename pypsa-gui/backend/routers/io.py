@@ -145,17 +145,13 @@ def export_csv():
     )
 
 
-def _export_excel_bytes() -> bytes:
-    n = PyPSAService.get_network()
-    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
-        tmp = pathlib.Path(f.name)
+def _write_excel(n, tmp: pathlib.Path) -> None:
+    """Write the escaped workbook for `n` to `tmp` (CPU-bound; see `_export_excel_bytes`)."""
     try:
         # PyPSA appends when the path already exists. An empty mktemp file
         # is not a workbook; let its writer create the file instead.
-        tmp.unlink()
+        tmp.unlink(missing_ok=True)
         n.export_to_excel(str(tmp))
-        _map_xlsx_strings(tmp, _escape_formula)
-        data = tmp.read_bytes()
     except AttributeError:
         # Fallback: write each component DataFrame as a sheet
         import openpyxl
@@ -171,18 +167,77 @@ def _export_excel_bytes() -> bytes:
                 for row in rows:
                     ws.append(row)
         wb.save(str(tmp))
-        _map_xlsx_strings(tmp, _escape_formula)
-        data = tmp.read_bytes()
+    _map_xlsx_strings(tmp, _escape_formula)
+
+
+EXCEL_EXPORT_SECONDS = 540.0  # under the client's 10 min per-call timeout
+
+
+def _excel_child(nc_path: str, tmp: str, conn) -> None:
+    """The `spawn` child: load the network the parent saved and write the workbook."""
+    try:
+        import pypsa
+
+        _write_excel(pypsa.Network(nc_path), pathlib.Path(tmp))
+        conn.send(None)
+    except BaseException as exc:  # logged by the parent; the client gets a plain sentence
+        conn.send(f"{type(exc).__name__}: {exc}")
     finally:
-        tmp.unlink(missing_ok=True)
+        conn.close()
+
+
+def _export_excel_bytes() -> bytes:
+    """The network as .xlsx. An hourly year is ~30 s of pure-Python work: it runs in a
+    `spawn` child so it does not hold the GIL against other requests (a concurrent
+    CSV export took 21 s instead of 2 s when it ran in a thread). The parent hands the
+    child a .nc file and waits at most `EXCEL_EXPORT_SECONDS`."""
+    import multiprocessing
+
+    n = PyPSAService.get_network()
+    with tempfile.TemporaryDirectory(prefix="excel-export-") as d:
+        nc, tmp = str(pathlib.Path(d) / "network.nc"), str(pathlib.Path(d) / "network.xlsx")
+        with PyPSAService.get_netcdf_io_lock():
+            PyPSAService.export_network_to_netcdf(n, nc)
+        ctx = multiprocessing.get_context("spawn")
+        recv, send = ctx.Pipe(duplex=False)
+        child = ctx.Process(target=_excel_child, args=(nc, tmp, send), daemon=True, name="excel-export")
+        child.start()
+        send.close()
+        err = None
+        try:
+            if not recv.poll(EXCEL_EXPORT_SECONDS):
+                raise HTTPException(500, {
+                    "error_kind": "excel_export_timeout",
+                    "message": f"The Excel export did not finish within {EXCEL_EXPORT_SECONDS:g} s and was stopped. "
+                               "Try the CSV or NetCDF export, or shorten the snapshot range.",
+                    "budget_seconds": EXCEL_EXPORT_SECONDS,
+                })
+            try:
+                err = recv.recv()
+            except (EOFError, OSError):
+                err = "the export process stopped without a result"
+        finally:
+            recv.close()
+            if child.is_alive():
+                child.kill()
+            child.join(5)
+        if err:
+            logging.getLogger(__name__).error("Excel export failed: %s", err)
+            raise HTTPException(500, {
+                "error_kind": "excel_export_failed",
+                "message": "The network could not be written to Excel. Try the CSV or NetCDF export instead.",
+            })
+        data = pathlib.Path(tmp).read_bytes()
     change_log_service.log("export", "Network", "network.xlsx", "Exported network as Excel (.xlsx)")
     return data
 
 
 @router.get("/export/excel")
 def export_excel():
+    # A plain `def` route runs on the threadpool; the write itself is in a child process.
+    data = _export_excel_bytes()
     return StreamingResponse(
-        io.BytesIO(_export_excel_bytes()),
+        io.BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=network.xlsx"},
     )

@@ -66,6 +66,7 @@ import { authEnabled } from './auth/config'
 import AuthMismatchGate from './auth/AuthMismatchGate'
 import { networkApi } from './api/network'
 import { projectsApi } from './api/projects'
+import { useProjectDeepLink } from './hooks/useProjectDeepLink'
 import ProjectOpeningBanner from './components/ProjectOpeningBanner'
 import { simulationApi, createLogStream } from './api/simulation'
 import { acquireProjectLock, invalidateNetworkQueries, stopLockHeartbeat, switchToProject } from './utils/projectActions'
@@ -321,7 +322,6 @@ export default function App() {
   const qc = useQueryClient()
   const [recoveryAttempted, setRecoveryAttempted] = useState(false)
   const [showShortcuts, setShowShortcuts] = useState(false)
-  const resumeProjectRef = useRef<string | null>(null)
 
   // Backend project list — used in two places: (1) prune recents of names that
   // no longer exist on disk (after a delete from another tab), (2) seed
@@ -395,44 +395,8 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Post-login resume: when auth routes bounce the user back to `/app` with a
-  // `?project=` query, activate that project once and strip the query param so
-  // refreshes don't keep replaying the handoff.
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const resumeProject = params.get('project')
-    if (!resumeProject) return
-    if (resumeProjectRef.current === resumeProject) return
-    resumeProjectRef.current = resumeProject
-
-    const stripProjectParam = () => {
-      const nextParams = new URLSearchParams(window.location.search)
-      if (nextParams.get('project') !== resumeProject) return
-      nextParams.delete('project')
-      const query = nextParams.toString()
-      const nextUrl = `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`
-      window.history.replaceState({}, '', nextUrl)
-    }
-
-    if (resumeProject === currentProject) {
-      stripProjectParam()
-      return
-    }
-
-    // The link may carry a project NAME (what a person types or shares) or an
-    // id (what the list uses): resolve either against the project list, then
-    // switch by the id so both reach the same project. An unknown ref falls
-    // through unchanged and the backend answers with its own not-found.
-    void (async () => {
-      let target = resumeProject
-      try {
-        const all = await projectsApi.list()
-        const hit = all.find(p => p.id === resumeProject) ?? all.find(p => p.name === resumeProject)
-        if (hit) target = hit.id ?? hit.name
-      } catch { /* list unavailable — let activate resolve the raw ref */ }
-      await switchToProject(target, qc)
-    })().finally(stripProjectParam)
-  }, [currentProject, qc])
+  // Post-login resume: activate the `?project=` link once (see the hook).
+  useProjectDeepLink(currentProject, qc)
 
   // Edit-lock acquisition on mount (auth mode). Covers the plain-reload path
   // where `currentProject` is restored from localStorage but NO switch/resume

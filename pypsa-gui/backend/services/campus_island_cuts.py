@@ -29,7 +29,7 @@ import math
 import pandas as pd
 from fastapi import HTTPException
 
-from services import project_registry
+from services import project_registry, project_write_gate
 from services.solver.island import CUTS_FILE, IslandRefusal, campus_f_hz, cut_estimates, load_applied_cuts
 
 #: gridspine's frozen contract (``frequency.CUT_COLUMNS``,
@@ -217,27 +217,85 @@ def refresh_ratings(project) -> list[dict]:
     return changed
 
 
-def apply_loop(project, *, solve, rerun, stop_event) -> dict:
+def _trial_files(project) -> list:
+    """The files a trial changes that a refused trial puts back: the cuts
+    file and the campus YAML (project-viewer-role 02)."""
+    from services import campus_electrical_service as ce
+
+    return [_cuts_path(project), ce.campus_dir(project) / ce.CAMPUS_FILE]
+
+
+def _snapshot(paths) -> dict:
+    return {p: (p.read_bytes() if p.is_file() else None) for p in paths}
+
+
+def _restore(snapshot: dict) -> None:
+    from services.atomic_io import atomic_write_bytes
+
+    for path, data in snapshot.items():
+        if data is None:
+            path.unlink(missing_ok=True)
+        elif not path.is_file() or path.read_bytes() != data:
+            atomic_write_bytes(path, data)
+
+
+#: A trial written with its cuts before its solve, until the trial ends.
+UNFINISHED = "not finished"
+
+
+def apply_loop(project, *, solve, rerun, stop_event, may_write=lambda: None) -> dict:
     """Apply, re-solve, rerun, until nothing fails, nothing more can be cut,
     ``MAX_TRIALS``, or ``stop_event`` (owner QA). ``solve(project)`` re-solves
     and saves the hub and returns its objective; ``rerun(project)`` brings
     the campus file's ratings up to it and reruns the campus study, which
-    proposes the next cuts, and returns what it refreshed."""
+    proposes the next cuts, and returns what it refreshed.
+
+    Each trial is written with its cuts (verdict ``UNFINISHED``) before its
+    solve and completed after its rerun, so cuts on disk always have their
+    trial in the history.
+
+    ``may_write()`` raises ``RequesterViewOnly`` once the requester may no
+    longer write the project; it is asked before each write and each solve
+    (project-viewer-role 02). A refusal in trial N stops the loop with
+    ``stopped == "project_view_only"`` and ``refused`` naming the trial and
+    the step it did not take. Every saved result keeps the files it was made
+    from: the files trial N changed are put back to their bytes after trial
+    N-1 only while no saved result has read them. Once the hub solve has
+    read the cuts and the campus YAML (both solve inputs), they stay, and so
+    does trial N, unfinished, in the history; a rerun's YAML stays with the
+    campus results made from it."""
     state = _state(project)
     new = _new_cuts(_proposed_rows(project), state["cuts"])
     if not new:
         raise HTTPException(status_code=422, detail="nothing to apply: the last campus run proposes "
                                                     "no cut the hub can take")
-    trials, stopped = [], "N reached"
+    trials, stopped, refused = [], "N reached", None
+    files = _trial_files(project)
     for i in range(MAX_TRIALS):
-        state["cuts"] = _merge(state["cuts"], new)
-        _write(project, state)
-        objective = solve(project)
-        refreshed = rerun(project) or []
-        proposed = _proposed_rows(project)
-        trial = {"trial": len(state["trials"]) + 1, "added": new, "objective": objective,
-                 "refreshed": refreshed, "verdict": _verdict(proposed)}
-        state["trials"].append(trial)
+        before, read, step = _snapshot(files), set(), "cuts"
+        try:
+            may_write()
+            state["cuts"] = _merge(state["cuts"], new)
+            trial = {"trial": len(state["trials"]) + 1, "added": new, "objective": None,
+                     "refreshed": [], "verdict": UNFINISHED}
+            state["trials"].append(trial)
+            _write(project, state)
+            step = "solve"
+            may_write()
+            objective = solve(project)
+            read.update(files)  # the saved hub read the cuts and the campus YAML
+            step = "rerun"
+            may_write()
+            refreshed = rerun(project) or []
+            proposed = _proposed_rows(project)
+            trial.update(objective=objective, refreshed=refreshed, verdict=_verdict(proposed))
+            step = "record"
+            may_write()
+        except project_write_gate.RequesterViewOnly:
+            _restore({path: data for path, data in before.items() if path not in read})
+            stopped = project_write_gate.KIND
+            refused = {"trial": len(state["trials"]) + (step == "cuts"), "before": step}
+            break
         trials.append(trial)
         _write(project, state)
         new = _new_cuts(proposed, state["cuts"])
@@ -250,7 +308,7 @@ def apply_loop(project, *, solve, rerun, stop_event) -> dict:
         if stop_event.is_set():
             stopped = "stopped by the user"
             break
-    return {"trials": trials, "stopped": stopped, "applied": state["cuts"]}
+    return {"trials": trials, "stopped": stopped, "applied": state["cuts"], "refused": refused}
 
 
 def remove_cut(project, *, period, hour, kind, scenario="seamless") -> dict:
@@ -325,6 +383,9 @@ def _queue_solve(project, user_id, stop_event) -> float | None:
         raise RuntimeError(f"the project already has a {job.kind} job {job.status}; the hub solve "
                            "was not queued")
     _wait(job, stop_event)
+    if job.status != "completed" and str(job.error or "").startswith(project_write_gate.KIND):
+        # the queue's worker read the requester's role and refused the solve
+        raise project_write_gate.RequesterViewOnly()
     if job.status != "completed":
         raise RuntimeError(f"the hub solve ended {job.status}" + (f": {job.error}" if job.error else ""))
     return job.objective
@@ -341,15 +402,25 @@ def _rerun(project, settings) -> list[dict]:
     return refreshed
 
 
-def _run_job(project, user_id, settings, record) -> None:
+def _run_job(project, user_id, settings, record, project_id) -> None:
     stop = record["stop_event"]
     try:
         out = apply_loop(project, solve=lambda p: _queue_solve(p, user_id, stop),
-                         rerun=lambda p: _rerun(p, settings), stop_event=stop)
+                         rerun=lambda p: _rerun(p, settings), stop_event=stop,
+                         may_write=lambda: project_write_gate.check_requester(user_id, project_id))
+        refused = out["stopped"] == project_write_gate.KIND
         with _LOCK:
-            record.update(state="cancelled" if out["stopped"] == "stopped by the user" else "done",
-                          finished_at=time.time(), stopped=out["stopped"], trials=len(out["trials"]),
-                          message=out["stopped"])
+            if refused:
+                # project-viewer-role 02: the requester lost edit access mid-run
+                record.update(state="failed", finished_at=time.time(), stopped=out["stopped"],
+                              trials=len(out["trials"]), error=project_write_gate.REFUSAL,
+                              error_code=project_write_gate.KIND, message="failed",
+                              refused_trial=out["refused"]["trial"],
+                              refused_before=out["refused"]["before"])
+            else:
+                record.update(state="cancelled" if out["stopped"] == "stopped by the user" else "done",
+                              finished_at=time.time(), stopped=out["stopped"],
+                              trials=len(out["trials"]), message=out["stopped"])
     except Exception as exc:                                    # noqa: BLE001 - recorded on the job
         logger.exception("campus island cuts job failed")
         detail = getattr(exc, "detail", None) or str(exc) or type(exc).__name__
@@ -392,7 +463,9 @@ def start_apply_job(project, user_id) -> dict:
             raise busy
         _JOBS[key] = record
     ctx = contextvars.copy_context()
-    thread = threading.Thread(target=lambda: ctx.run(_run_job, project, user_id, settings, record),
+    project_id = project.id  # captured now; the role is read against it (project-viewer-role 02)
+    thread = threading.Thread(target=lambda: ctx.run(_run_job, project, user_id, settings, record,
+                                                     project_id),
                               daemon=True, name=THREAD_NAME)
     record["thread"] = thread
     thread.start()

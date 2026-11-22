@@ -15,6 +15,7 @@ import { nk } from '../../../utils/queryKeys'
 import { formatApiDetail } from '../../../api/client'
 import { pinnedVersions, replacesInline, urdbRate, type RateChoice } from './libraryModel'
 import { LibraryReferences } from './LibraryReferences'
+import { DayAheadPrices } from './DayAheadPrices'
 
 const input = 'border border-border rounded px-1 py-0.5 text-[11px] bg-bg'
 const KINDS: Array<{ id: LibraryItemKind; label: string }> = [
@@ -243,6 +244,7 @@ function SeriesPanel() {
         ))}
         {series.data?.length === 0 && <li className="text-muted">No series yet.</li>}
       </ul>
+      <DayAheadPrices />
       <fieldset className="space-y-1 border border-border rounded p-1">
         <legend>Upload</legend>
         <div className="flex flex-wrap gap-2 items-center">

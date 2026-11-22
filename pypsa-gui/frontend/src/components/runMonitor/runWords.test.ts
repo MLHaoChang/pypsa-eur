@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest'
 import { COMPONENT_LABEL } from '../../utils/componentLabels'
 import { FIELD_LABELS } from '../../utils/fieldLabels'
 import { ENVELOPE } from './runFixtures'
-import { COMPONENT_WORDS, FACT_UNITS, factUnit, FACT_WORDS, FIELD_WORDS, GAP_WORDS, RUN_WORDS, STAGE_WORDS, UNATTENDED_BLOCK_WORDS, editSubject } from './runWords'
+import { COMPONENT_WORDS, FACT_UNITS, factUnit, FACT_WORDS, FIELD_WORDS, GAP_WORDS, RUN_WORDS, STAGE_WORDS, UNATTENDED_BLOCK_WORDS, editSubject, stopWords } from './runWords'
 
 describe('runWords', () => {
   it('names an envelope field by the panels’ FIELD_LABELS, with a unit', () => {
@@ -49,6 +49,17 @@ describe('runWords', () => {
   it('words only the runs an envelope may list (GK B 8: no sweep or site study)', () => {
     expect(Object.keys(RUN_WORDS)).not.toContain('run_sensitivity_sweep')
     expect(Object.keys(RUN_WORDS)).not.toContain('run_eh_study')
+  })
+
+  it('a stopped step keeps the failed step\u2019s fix and says it was stopped, not failed (live-voice 16)', () => {
+    for (const stage of ['solve', 'inputs']) {
+      const failed = stopWords('step_failed', stage)
+      const stopped = stopWords('step_cancelled', stage)
+      expect([stopped.fix, stopped.fixWords], stage).toEqual([failed.fix, failed.fixWords])
+      expect(stopped.words, stage).toMatch(/was stopped: the run waits for you$/)
+      expect(stopped.words, stage).not.toMatch(/fail|cancel|did not finish/i)
+    }
+    expect(stopWords('step_cancelled', 'inputs').words).toBe('A step in Inputs was stopped: the run waits for you')
   })
 
   it('words every reason unattended cannot work, including no notice surface', () => {
