@@ -186,8 +186,16 @@ class AssetFinance:
     lifetime_years: float | None = None
     carrier: str | None = None                  # incentive eligibility (WP4.4)
     parts: tuple[AssetPart, ...] = ()
+    #: The life the remaining-life terminal rule values the asset over when it is not
+    #: its replacement life (walk 03 case B): a business-case capex line's depreciation
+    #: life, while `lifetime_years` stays infinite so only its refresh years replace it.
+    #: None = the parts' own lifetimes. One effective part only (refused otherwise).
+    terminal_lifetime_years: float | None = None
 
     def __post_init__(self):
+        if self.terminal_lifetime_years is not None and len(self.parts) > 1:
+            raise ValueError(f"{self.name}: terminal_lifetime_years is for one part, "
+                             f"not {len(self.parts)}")
         if not self.parts:
             return
         costs = [p.overnight_cost for p in self.parts]

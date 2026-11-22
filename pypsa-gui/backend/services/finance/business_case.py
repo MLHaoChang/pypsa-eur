@@ -661,7 +661,13 @@ def build_business_case(
                 )
             )
         overnight[ln.name] = v
-        assets.append(AssetFinance(ln.name, SOURCE, v, math.inf))
+        # The life values the terminal only (walk 03 case B); the refresh years, never
+        # the life, replace the line, so `lifetime_years` stays infinite.
+        assets.append(
+            AssetFinance(
+                ln.name, SOURCE, v, math.inf, terminal_lifetime_years=ln.life_years
+            )
+        )
         dep[ln.name] = _depreciation_class(ln)
         if first > tl.cod_year:
             # A later stage (P5). With staged CODs every other asset states the case COD,
@@ -793,6 +799,12 @@ def business_case_hash(
         # Only the operating years it scales, so a full-volume case keeps its digest
         # (BC 15; a digest gate enters only when it changes an outcome, GK B (49)).
         blob["volume_factor"] = sorted([y, float(f)] for y, f in lease_up.items())
+    if ic_case.inputs.terminal_value.method == "remaining_life_annuity" and any(
+        ln.kind == "capex" for ln in inputs.lines
+    ):
+        # Walk 03 case B: a capex line's life now values its terminal, so a report
+        # stored before reads stale; a case the rule does not reach keeps its digest.
+        blob["capex_terminal_life"] = True
     lp = lost_production
     if (
         lp is not None

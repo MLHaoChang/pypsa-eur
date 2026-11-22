@@ -386,8 +386,12 @@ def remaining_life_terms(case: FinanceCase, tl: Timeline
             continue
         own = lp.asset_discount_rates.get(a.name)
         r_a = r if own is None else float(own)
+        e = campus.get(a.name)
+        # A terminal-only life (walk 03 case B: a business-case capex line), for one
+        # part outside a campus lineage; its refresh entries replace it under both rules.
+        own_life = a.terminal_lifetime_years if e is None and len(parts) == 1 else None
         for p in parts:
-            life = p.lifetime_years
+            life = p.lifetime_years if own_life is None else own_life
             if p.overnight_cost == 0.0 and not (fin.replacement_rule == FIXED and a.name in entries):
                 # A typed 0 (a sunk, existing asset, slice D4): nothing was bought,
                 # so nothing remains to credit, whatever the lifetime.
@@ -406,7 +410,6 @@ def remaining_life_terms(case: FinanceCase, tl: Timeline
                 # year, escalated like the stage capex (P5; no contingency, as
                 # a replacement's base).
                 bought = (cod - fin.stage_capex_lead_years, p.overnight_cost)
-            e = campus.get(a.name)
             if e is not None:
                 mine = [r for r in e.renewals if r.part == p.name]
                 if e.renewals and not mine:
@@ -421,7 +424,7 @@ def remaining_life_terms(case: FinanceCase, tl: Timeline
                 elif alive:
                     start = alive[-1].build_year
                     bought = (_paid(case, start), alive[-1].amount)
-            elif fin.replacement_rule == PART_LIFETIMES:
+            elif fin.replacement_rule == PART_LIFETIMES and own_life is None:
                 ks = _repurchases(life, years)
                 if ks:
                     k = ks[-1]
