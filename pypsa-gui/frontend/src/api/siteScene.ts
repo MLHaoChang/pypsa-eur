@@ -255,7 +255,7 @@ export const siteSceneApi = {
 export interface SceneExport { blob: Blob; filename: string; revision: number | null }
 
 /** A blob request's refusal carries its `{detail}` JSON as a Blob: parse it so `sceneErrorCopy` reads it. */
-async function withJsonDetail(err: unknown): Promise<unknown> {
+export async function withJsonDetail(err: unknown): Promise<unknown> {
   if (!axios.isAxiosError(err) || !(err.response?.data instanceof Blob)) return err
   try {
     err.response.data = JSON.parse(await err.response.data.text())

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): every Improve card in Guided has an "Open in Expert" button that opens the matching Expert place (Results › Adequacy, Solver settings › Reliability goal or Value of lost load, or Capacity bounds) with the recommended change filled in and unsaved, so the change can be made by hand without the assistant. Settings the Expert form cannot show are named on the card.

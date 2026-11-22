@@ -1,0 +1,36 @@
+{
+  "payload": {
+    "type": "ppa",
+    "id": "eu-ppa-pay-as-produced",
+    "kind": "pay_as_produced",
+    "price": 55.0,
+    "indexation_pct_per_year": 0.0,
+    "tenor_years": 12,
+    "seller": "\u2060fill-in:seller",
+    "buyer": "\u2060fill-in:buyer",
+    "asset_ids": [
+      "\u2060fill-in:asset"
+    ]
+  },
+  "meta": {
+    "source": "illustrative",
+    "provider": "PyPSA Studio (authored illustrative default)",
+    "description": "Illustrative EU default, not market data: a fixed-price pay-as-produced PPA, flat nominal price. Every value sits inside a cited public range (see notes); replace it with your own offer.",
+    "notes": [
+      "region:EU",
+      "currency:EUR",
+      "price_basis:nominal",
+      "illustrative:true",
+      "not market data: a starting point to replace with your own offer or an organisation pack",
+      "currency_year:2025",
+      "range:price=35..75 EUR/MWh|dena PPA-Marktanalyse 2025, p. 7: indicative 10-year as-produced PPA prices in Germany, solar 35-45 to offshore wind 65-75|https://www.dena.de/fileadmin/dena/Publikationen/PDFs/2026/PPA_Marktanalyse_2025.pdf|2026",
+      "range:tenor_years=5..20 years|EIB Advisory, commercial PPA study: a cPPA is a long-term contract 'e.g. of 5-20 years'|https://advisory.eib.org/files/publications/attachments/developing-potential-financial-instruments-and-advisory-solutions-to-stimulate-more-investment-in-renewable-energy-generation-by-means-of-commercial-power-purchase-agreements.pdf|2023",
+      "range:indexation_pct_per_year=0..2 %/year|0 = a flat nominal price; 2 = indexed at the ECB's 2% medium-term inflation target (ECB monetary policy strategy)|https://www.ecb.europa.eu/mopo/strategy/html/index.en.html|2021",
+      "placeholders:seller,buyer,asset_ids hold a fill-in marker; the server refuses to save or settle the contract until each is replaced",
+      "changes_dispatch:false (settled after the solve; never shapes the dispatch)"
+    ],
+    "scope": "common",
+    "licence": "Authored by the PyPSA Studio contributors for the common Library (owner Q11 = A). The ranges cite figures from the named public sources; no source content is reproduced.",
+    "attribution": "Ranges from the sources named in each range note."
+  }
+}
