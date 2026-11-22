@@ -14,6 +14,7 @@ import random
 import sys
 import types
 from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 
 import numpy as np
@@ -219,6 +220,18 @@ def test_multiindex_levels_encode_like_the_tuples_master_iterates():
             ]
         ),
         pd.MultiIndex.from_arrays([[], []]),
+        # Level values no row uses (left by a slice) are never read by master's tuples:
+        # an unsupported one must not refuse, a sub-second one must not leave the fast path.
+        pd.MultiIndex.from_arrays([[Decimal("1.5"), "x", "y"], [1, 2, 3]])[1:],
+        pd.MultiIndex.from_arrays(
+            [
+                pd.to_datetime(
+                    ["2027-01-01 00:00:00.5", "2027-01-02", "2027-01-03"],
+                    format="ISO8601",
+                ),
+                [1, 2, 3],
+            ]
+        )[1:],
     ]
     for index in frames:
         same(pd.DataFrame({"v": np.arange(len(index), dtype=float) / 7}, index=index))
@@ -247,6 +260,12 @@ def test_empty_zero_column_and_named_frames():
         pd.DataFrame({"x": [1.0, 2.0]}, index=pd.Index([1 + 2j, 3j])),
         pd.DataFrame({"x": [1.0]}, index=pd.MultiIndex.from_tuples([(1, 2j)])),
         pd.DataFrame({"x": [1.0]}, index=[pd.Timedelta(1)]),
+        pd.DataFrame(
+            {"c": np.array([1 + 2j, 3j], dtype=np.complex64)}
+        ),  # itemsize 8, kind 'c'
+        pd.DataFrame(
+            {"x": np.array([0.1, 1 / 3], dtype=np.longdouble)}
+        ),  # kind 'f', itemsize 16
     ],
     ids=[
         "complex-column",
@@ -254,6 +273,8 @@ def test_empty_zero_column_and_named_frames():
         "complex-index",
         "complex-level",
         "timedelta",
+        "complex64-column",
+        "longdouble-column",
     ],
 )
 def test_refusals_are_unchanged(frame):

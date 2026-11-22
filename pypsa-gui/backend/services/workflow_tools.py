@@ -453,7 +453,9 @@ def _exact_frame_json(frame):
         """Each value's `json.dumps(scalar(value))` text, for an Index or a Series."""
         if isinstance(values, pd.MultiIndex):
             if not any((codes == -1).any() for codes in values.codes):
-                # Each level once, then taken by code: the tuples master iterates.
+                # Each used level value once, then taken by code: the tuples master iterates.
+                # Unused level values (left by a slice) are never encoded, as in master.
+                values = values.remove_unused_levels()
                 levels = [items(level) for level in values.levels]
                 taken = [[text[code] for code in codes.tolist()] for text, codes in zip(levels, values.codes)]
                 return ['["tuple", [' + ', '.join(row) + ']]' for row in zip(*taken)]
