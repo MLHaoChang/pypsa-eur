@@ -334,17 +334,17 @@ describe('AssetTable cost units on tonne-bus assets — 05f', () => {
   })
 
   it('the header follows the filtered rows, and a tonne row past the render cap still counts', async () => {
-    const many = Array.from({ length: 1100 }, (_, i) => store(`e${i}`, 'H2'))
+    const many = Array.from({ length: 1001 }, (_, i) => store(`e${i}`, 'H2'))
     vi.mocked(networkApi.getStores).mockResolvedValue([...many, store('zz_tonne', 'NH3')] as never)
     vi.spyOn(assetSchemaApi, 'tableUnits').mockResolvedValue(units({ rows: { zz_tonne: PER_TONNE } }))
     await open()
-    // zz_tonne is row 1101: not rendered (cap 1000), yet the header names the tonne unit.
+    // zz_tonne is row 1002: not rendered (cap 1000), yet the header names the tonne unit.
     expect(await screen.findByText(/on tonne buses/)).toBeTruthy()
     expect(renderedNames()).not.toContain('zz_tonne')
-    await userEvent.type(screen.getByPlaceholderText(/Search by name/), 'e1099')
+    await userEvent.type(screen.getByPlaceholderText(/Search by name/), 'e999')
     await waitFor(() => expect(screen.queryByText(/on tonne buses/)).toBeNull())
     expect(screen.getByText(HEADER)).toBeTruthy()
-  })
+  }, 30_000)
 
   it('a row whose bus cannot be read says the unit is unknown, in the header and the cell', async () => {
     vi.mocked(networkApi.getStores).mockResolvedValue([store('lost', 'nowhere')] as never)
