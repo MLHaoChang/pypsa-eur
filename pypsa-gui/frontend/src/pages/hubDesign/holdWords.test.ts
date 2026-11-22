@@ -55,6 +55,14 @@ describe('a row in words', () => {
     expect(heldFigure('assets', held({ extendable: true, unit: 't/h' }),
       { component: 'StorageUnit', name: 'nh3_buffer', carrier: 'NH3', built_mw: 2, built_mwh: 48, max_hours: 24 }))
       .toBe('Capacity: 2 t/h · 48 t (24 h) (by the last study)')
+    // The sized row's own unit comes first (asset-walk-followups 02); a row
+    // without one (a report stored before) keeps the flow row's.
+    expect(heldFigure('assets', held({ component: 'Store', field: 'e_nom', extendable: true, unit: 'MWh' }),
+      { component: 'Store', name: 'ore_pile', carrier: 'ore', built_mwh: 500, unit: 't' }))
+      .toBe('Energy capacity: 500 t (by the last study)')
+    expect(heldFigure('assets', held({ extendable: true }),
+      { component: 'StorageUnit', name: 'bess_new', carrier: 'battery', built_mw: 2.5, built_mwh: 10, max_hours: 4, unit: 'MW' }))
+      .toBe('Capacity: 2.5 MW · 10 MWh (4 h) (by the last study)')
     // A study that left no size keeps the plain words.
     expect(heldFigure('assets', held({ extendable: true }),
       { component: 'Generator', name: 'g', carrier: '', built_mw: null })).toBe('Capacity: sized by the study')
