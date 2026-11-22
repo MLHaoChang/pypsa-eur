@@ -1512,7 +1512,11 @@ def _uif_row(inp: _Inputs, screen: dict, table, common: dict) -> dict:
     """The UIF row from the run's meta ``screen`` and UIF table (GK A2 R1, R2, R9)."""
     import pandas as pd
 
-    from gridspine.static.ssti_uif import DEFAULT_THRESHOLD, PROFILE_KEY
+    try:
+        from gridspine.static.ssti_uif import DEFAULT_THRESHOLD, PROFILE_KEY
+    except ImportError as exc:  # pragma: no cover - build-shape branch
+        return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], project_value=None, verdict="unknown",
+                    note=_ssti_say(f"The SSTI screens need gridspine ({exc})"), **common)
 
     limit = _finite_number(screen.get("threshold"))
     source, assumed_limit = _ssti_limit_source(screen, "threshold")
@@ -1576,7 +1580,11 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
     """The series-resonance row from the run's meta ``screen`` and resonance table (GK A2 R1-R3)."""
     import pandas as pd
 
-    from gridspine.static.subsync_scan import DEFAULT_CLEARANCE_HZ, PROFILE_KEY, SERIES
+    try:
+        from gridspine.static.subsync_scan import DEFAULT_CLEARANCE_HZ, PROFILE_KEY, SERIES
+    except ImportError as exc:  # pragma: no cover - build-shape branch
+        return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], project_value=None, verdict="unknown",
+                    note=_ssti_say(f"The SSTI screens need gridspine ({exc})"), **common)
 
     limit = _finite_number(screen.get("clearance_hz"))
     source, _ = _ssti_limit_source(screen, "torsional clearance")
