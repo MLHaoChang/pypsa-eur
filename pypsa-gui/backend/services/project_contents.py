@@ -210,6 +210,7 @@ NOT_CARRIED: dict[str, str] = {
     "draft_notes.json": "campus: a grid-code draft stays with its licensee",
     "settings.json": "campus: per-install settings",
     "gfm_applied.json": "campus island tuning: derived from island_config.json",
+    "market_prices.json": "the ENTSO-E zone pick: a copy decides again from the site pin",
 }
 
 
