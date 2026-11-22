@@ -1234,7 +1234,8 @@ def test_c4_the_ic_key_is_rechecked_under_the_network_lock(
     body = _bc_poll(client)
     assert body["status"] == "refused", body
     assert body["error_code"] == (
-        "network_busy" if reason == "network_busy" else "investment_case_missing")
+        "network_busy" if reason == "network_busy" else "investment_case_missing"
+    )
     assert body["refusal"]["reason"] == reason
     assert ("out of date" in body["error"]) == (reason != "network_busy")
     assert state["moved"] and read == []
