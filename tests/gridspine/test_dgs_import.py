@@ -1256,7 +1256,7 @@ def test_the_unbounded_grid_takes_its_short_circuit_level(hand):
     }
     (row,) = _grid_rows(hand.report)
     assert (row.asset, row.value) == ("Grid", 1000.0)
-    assert "unbounded in the file (ElmXnet)" in row.why
+    assert "unbounded in the file, so a limit" in row.why
     assert "short-circuit level 1000 MVA" in row.why
 
 

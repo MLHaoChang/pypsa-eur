@@ -147,6 +147,11 @@ def read_dgs(paths: Sequence[Path], options: Mapping[str, Any] | None = None):
         raise ImportFormatError(f"{path.name}: {exc}") from exc
 
 
+def _plain(parameter: str) -> str:
+    """A parameter label as it reads mid-sentence: "Tap position" -> "tap position"."""
+    return parameter[:1].lower() + parameter[1:]
+
+
 def _int(item: str, what: str, v) -> int:
     """``v`` as an integer; text or a fraction is refused naming ``what``."""
     if (
@@ -226,7 +231,9 @@ class _Mapper:
         """``row[attr]``, or ``default`` listed as assumed when the file omits it."""
         v = self.get(row, attr)
         if v is None:
-            self.assume(asset, parameter, default, f"the file gives no {attr}")
+            self.assume(
+                asset, parameter, default, f"the file gives no {_plain(parameter)}"
+            )
             return default
         return v
 
@@ -497,7 +504,9 @@ class _Mapper:
             g = self.get(typ, "gline")
             if g is None:
                 g = 0.0
-                self.assume(name, "Conductance", 0.0, "the line type gives no gline")
+                self.assume(
+                    name, "Conductance", 0.0, "the line type gives no conductance"
+                )
             g = _finite(item, "conductance per km", g)
             if r < 0 or x <= 0 or b < 0 or g < 0:
                 raise ContractError(
@@ -952,7 +961,7 @@ class _Mapper:
         kv = self.n.buses.at[bus, "v_nom"]
         bound = assumed_rating_mva(load, kv)
         why = (
-            "the external grid is unbounded in the file (ElmXnet), so a limit that "
+            "the external grid is unbounded in the file, so a limit that "
             f"never binds is used: 10 × the total load {load:.1f} MVA, or the "
             f"{kv:g} kV class floor if higher"
         )
