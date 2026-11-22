@@ -72,8 +72,8 @@ def test_on_scenario_row_replaces_the_base_row():
     ]
 
 
-def test_dated_or_banded_scenario_row_never_replaces_the_base_row():
-    """GK A C1: dated and band > 1 rows are slice 3b; the base row stays."""
+def test_dated_scenario_row_replaces_the_base_group_band_two_never():
+    """Slice 3b: an on scenario's dated row joins its group; band > 1 stays refused."""
     conv = run(
         scenarios(
             "On",
@@ -84,15 +84,18 @@ def test_dated_or_banded_scenario_row_never_replaces_the_base_row():
             ],
         )
     )
-    assert load(conv) == {"A": 5.0}
+    assert load(conv) == {"A": 9.0}
     assert sorted(unmapped_reason(conv, "Node 'A'")) == [
         "band 2: only band 1 is used",
-        "dated row: dates are applied in slice 3b",
+        "replaced by scenario 'On'",
     ]
 
 
-def test_timesliced_scenario_row_never_replaces_the_base_row():
-    """GK A C1 (#1728 ask 1): a Timeslice tag is slice 3b."""
+def test_timesliced_scenario_row_with_an_unreadable_timeslice_fails_closed():
+    """
+    Slice 3b: the scenario's group replaces the base row; its timeslice
+    'Peak' has no pattern and its name does not parse, so nothing is used.
+    """
     conv = run(
         scenarios(
             "On",
@@ -115,8 +118,11 @@ def test_timesliced_scenario_row_never_replaces_the_base_row():
             ],
         )
     )
-    assert load(conv) == {"A": 5.0}
-    assert unmapped_reason(conv, "Node 'A'") == ["scaled by Timeslice 'Peak': slice 3b"]
+    assert load(conv) == {}
+    assert sorted(unmapped_reason(conv, "Node 'A'")) == [
+        "replaced by scenario 'On'",
+        "timeslice 'Peak': pattern 'Peak': pattern item 'Peak' not read",
+    ]
 
 
 # ------------------------------------------------------------- S2: ties

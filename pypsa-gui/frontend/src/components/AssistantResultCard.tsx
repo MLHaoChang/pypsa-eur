@@ -22,7 +22,7 @@ function object(value: unknown): Record<string, unknown> | null {
 
 /** LC-02: a plan step's state in words; an unknown state shows as stored. */
 const STEP_WORDS: Record<string, string> = {
-  pending: 'to do', running: 'running', waiting: 'waiting for a job', completed: 'done', failed: 'failed', uncertain: 'needs review',
+  pending: 'to do', running: 'running', waiting: 'waiting for a job', completed: 'done', failed: 'failed', cancelled: 'stopped', uncertain: 'needs review',
 }
 
 /** LC-02: a plan's state in Guided's words; Expert shows the stored state. */
@@ -170,7 +170,8 @@ export default function AssistantResultCard({ result, disabled, disabledReason, 
       {next && (guided
         ? <div>Next: {toolWords ? toolWords(String(next.tool ?? '')) : String(next.tool ?? '')} ({
           next.status === 'waiting' ? 'waiting for a background job' : STEP_WORDS[String(next.status)] ?? String(next.status ?? '')})</div>
-        : <div>Next: {String(next.tool ?? '')} ({String(next.status ?? '')})</div>)}
+        // Expert keeps the stored id, except a stopped step: "cancelled" beside Cancel task would contradict its row (UX, live-voice 16).
+        : <div>Next: {String(next.tool ?? '')} ({next.status === 'cancelled' ? STEP_WORDS.cancelled : String(next.status ?? '')})</div>)}
       <PlanSteps task={task!} next={next} guided={guided} toolWords={toolWords} />
       <PartialMappingLine task={task!} taskId={taskId} disabled={disabled} onRequest={onRequest} />
       {status === 'waiting_job' && continuation && <WaitingLine line={continuation} />}

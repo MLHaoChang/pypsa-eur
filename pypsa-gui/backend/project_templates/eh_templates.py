@@ -49,11 +49,23 @@ PROVENANCE = ("synthetic illustrative data (P19 template) — representative "
               "before any decision")
 
 
+def _cpu_stable(x):
+    """Round a synthetic profile to 9 decimals, right after its np.exp/np.sin.
+
+    Array ``np.exp``/``np.sin`` use SIMD kernels whose last bit depends on the
+    CPU (AVX512 vs AVX2 runners). The exact input fingerprint hashes
+    ``float.hex``, so one ulp moved it between CI runners. 9 decimals is far
+    below any physical meaning here and far above an ulp, so every CPU rounds
+    to the same value.
+    """
+    return np.round(x, 9)
+
+
 def _solar(peak_hour: float = 13.0, width: float = 3.2,
            cloud: tuple[float, ...] = (1.0, 0.9, 0.55, 0.8, 1.0, 0.95, 0.7)
            ) -> np.ndarray:
     """Per-unit PV availability: a daylight bell times a daily cloud factor."""
-    bell = np.exp(-((_HOD - peak_hour) ** 2) / (2 * width ** 2))
+    bell = _cpu_stable(np.exp(-((_HOD - peak_hour) ** 2) / (2 * width ** 2)))
     bell[(_HOD < 6) | (_HOD > 20)] = 0.0
     return np.clip(bell * np.array(cloud)[_DAY], 0.0, 1.0)
 
@@ -61,14 +73,14 @@ def _solar(peak_hour: float = 13.0, width: float = 3.2,
 def _wind(mean: float = 0.38, seed: int = 7) -> np.ndarray:
     """Per-unit wind availability: a slow synoptic swing plus gusts."""
     rng = np.random.default_rng(seed)
-    synoptic = mean + 0.25 * np.sin(2 * np.pi * _H / 96.0 + 0.8)
+    synoptic = mean + 0.25 * _cpu_stable(np.sin(2 * np.pi * _H / 96.0 + 0.8))
     gust = rng.normal(0.0, 0.07, HOURS)
     return np.clip(synoptic + gust, 0.02, 0.98)
 
 
 def _day_shape(base: float, peak: float, peak_hour: float = 15.0,
                width: float = 4.5) -> np.ndarray:
-    return base + (peak - base) * np.exp(-((_HOD - peak_hour) ** 2) / (2 * width ** 2))
+    return base + (peak - base) * _cpu_stable(np.exp(-((_HOD - peak_hour) ** 2) / (2 * width ** 2)))
 
 
 def _base(name: str, snapshots=SNAPSHOTS) -> pypsa.Network:
@@ -141,7 +153,7 @@ def build_eh_datacenter(phases=None, load_spec=None, planning=None) -> pypsa.Net
     n.add("Bus", "it_bus", v_nom=11.0, carrier="AC", x=0.0, y=0.0)
 
     # Wholesale supply beyond the PoC (not firm capacity of the hub).
-    price = 70.0 + 40.0 * np.exp(-((_HOD - 19) ** 2) / 8.0)
+    price = 70.0 + 40.0 * _cpu_stable(np.exp(-((_HOD - 19) ** 2) / 8.0))
     n.add("Generator", "grid_supply", bus="grid", carrier="grid",
           p_nom=500.0, marginal_cost=0.0)
     n.generators_t.marginal_cost = pd.DataFrame(
@@ -889,7 +901,7 @@ def build_eh_h2_hub(load_spec=None, planning=None) -> pypsa.Network:
     n.add("Bus", "hub", v_nom=110.0, carrier="AC", x=0.0, y=0.0)
     n.add("Bus", "h2", carrier="H2", x=0.0, y=0.0)
 
-    price = 60.0 + 35.0 * np.exp(-((_HOD - 18) ** 2) / 10.0)
+    price = 60.0 + 35.0 * _cpu_stable(np.exp(-((_HOD - 18) ** 2) / 10.0))
     n.add("Generator", "grid_supply", bus="grid", carrier="grid",
           p_nom=1000.0, marginal_cost=0.0)
     n.generators_t.marginal_cost = pd.DataFrame(
@@ -1063,7 +1075,7 @@ def build_eh_microgrid(load_spec=None, planning=None) -> pypsa.Network:
     n.add("Load", "hospital_load", bus="hospital", carrier="AC")
     n.loads_t.p_set = pd.DataFrame({
         "residential": _day_shape(3.5, 7.5, peak_hour=19.0, width=3.5),
-        "hospital_load": 1.5 + 0.2 * np.sin(2 * np.pi * _HOD / 24.0),
+        "hospital_load": 1.5 + 0.2 * _cpu_stable(np.sin(2 * np.pi * _HOD / 24.0)),
     }, index=snaps)
 
     _tag_columns(n)

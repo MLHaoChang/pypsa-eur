@@ -25,6 +25,8 @@ from services.project_settings import POC_XR_MAX
 # The `int` fields of the same set (`build_year`, `min_up_time`, `tap_side`…)
 # already refuse non-finite values as `int` and stay `int`.
 Finite = Annotated[float, Field(allow_inf_nan=False)]
+# A finite number that refuses a tick (float(True) is 1.0) and a numeric string; JSON ints still pass (GK B X2).
+StrictFinite = Annotated[float, Field(strict=True, allow_inf_nan=False)]
 # An outage rate is a probability-like unavailability: finite and in [0, 1).
 # Whole-branch review, finding S1: the five create/update models accepted any
 # float here, the occurrence validator only WARNED, and `/copt` runs on demand
@@ -202,7 +204,11 @@ BUS_LAZY_COLUMNS = frozenset({"mwh_per_t", "product_value", "lost_production_val
 # The fuel curve (homer-parity 02a, `services.fuel_curve`) is written only when sent: a generator without one
 # keeps no column for it and its own marginal_cost.
 GENERATOR_LAZY_COLUMNS = frozenset({"process_role", "dc_ac_ratio", "fuel_curve_slope", "fuel_curve_no_load",
-                                    "fuel_price", "om_cost_per_run_hour", "lifetime_run_hours"})
+                                    "fuel_price", "om_cost_per_run_hour", "lifetime_run_hours",
+                                    # DGS-EXTRAS-1: the harmonic screen's inputs and the slack's grid strength.
+                                    "rated_mva", "harmonic_source", "harmonic_spectrum",
+                                    "sk_max_mva", "sk_min_mva", "rx_max", "rx_min"})
+LOAD_LAZY_COLUMNS = frozenset({"rated_mva", "harmonic_source", "harmonic_spectrum"})
 
 
 class LinkCreate(BaseModel):
@@ -343,6 +349,15 @@ class GeneratorCreate(BaseModel):
     p_max_pu_includes_outages: bool | None = None
     # `buy_in` | `shortfall` on a product bus's Generator (ticket 08); written only when sent.
     process_role: str | None = None
+    # DGS-EXTRAS-1: the harmonic screen's inputs, and on the slack the external grid's strength; written only
+    # when sent (`GENERATOR_LAZY_COLUMNS`), checked by `models/process_unit.py` PROCESS_CUSTOM_COLUMNS.
+    rated_mva: StrictFinite | None = None
+    harmonic_source: str | None = None
+    harmonic_spectrum: str | None = None
+    sk_max_mva: StrictFinite | None = None
+    sk_min_mva: StrictFinite | None = None
+    rx_max: StrictFinite | None = None
+    rx_min: StrictFinite | None = None
     # A PV generator's DC module rating / p_nom (p_nom is the AC rating); written only when sent, checked by
     # `eh_columns.dc_ac_ratio` (TC-02). None or blank = not declared.
     dc_ac_ratio: float | None = None
@@ -525,6 +540,10 @@ class LoadCreate(BaseModel):
     p_set: Finite = 0.0
     q_set: Finite = 0.0
     sign: Finite = -1.0
+    # DGS-EXTRAS-1: the harmonic screen's inputs, written only when sent (`LOAD_LAZY_COLUMNS`).
+    rated_mva: StrictFinite | None = None
+    harmonic_source: str | None = None
+    harmonic_spectrum: str | None = None
 
 
 class TransformerCreate(BaseModel):
