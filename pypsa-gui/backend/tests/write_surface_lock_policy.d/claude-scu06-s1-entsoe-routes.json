@@ -1,0 +1,6 @@
+{
+ "routes": {
+  "PUT /api/market-prices/token": {"category": "not-project-data", "reason": "the install-wide ENTSO-E access token in user.env (super-admin only), like the Anthropic key: no project is written"},
+  "DELETE /api/market-prices/token": {"category": "not-project-data", "reason": "clears the install-wide ENTSO-E access token in user.env (super-admin only): no project is written"}
+ }
+}

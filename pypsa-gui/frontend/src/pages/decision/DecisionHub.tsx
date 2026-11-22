@@ -33,7 +33,7 @@ export default function DecisionHub({ study, ledger, statuses, onOpen }: {
         {keyRows.length > 0 && (
           <p>These {keyRows.length} assumptions matter most for this question:{' '}
             {keyRows.map(r => r.label).join('; ')}.{' '}
-            <button type="button" className="text-accent hover:underline" onClick={() => onOpen('ledger')}>Check them</button>
+            <button type="button" className="text-link hover:underline" onClick={() => onOpen('ledger')}>Check them</button>
           </p>
         )}
       </Card>

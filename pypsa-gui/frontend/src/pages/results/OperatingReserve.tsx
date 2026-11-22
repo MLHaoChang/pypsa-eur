@@ -32,7 +32,7 @@ function HeldBy({ holders, heldMw }: { holders: ReserveHolder[]; heldMw: number 
       {shown.map(holderText).join(' · ')}
       {rest > 0 && (
         <> · <button type="button" data-testid="operating-reserve-show-all" onClick={() => setAll(true)}
-          className="text-accent hover:underline">({rest} more) Show all</button></>
+          className="text-link hover:underline">({rest} more) Show all</button></>
       )}
     </>
   )
@@ -70,7 +70,7 @@ export default function OperatingReserve() {
       <p className="text-[11px] text-muted mb-2">
         The hours where the reserve decided the dispatch: the headroom held equals the headroom required. The shares are set in Solver settings.{' '}
         <button type="button" data-testid="operating-reserve-inputs" onClick={() => openOffGridConstraints()}
-          className="text-accent hover:underline">Reserve inputs ›</button>
+          className="text-link hover:underline">Reserve inputs ›</button>
       </p>
       {data.reason ? (
         <p data-testid="operating-reserve-reason" className="text-[11px] text-muted">{plainReason(data.reason)}</p>

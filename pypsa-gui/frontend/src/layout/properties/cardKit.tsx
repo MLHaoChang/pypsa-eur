@@ -511,7 +511,7 @@ export function LifetimeInherit({ fs, set }: { fs: FS; set: SetFS }) {
         <>
           <span>{years ? `${years}, project default` : 'Project default'}</span>
           <button type="button" className="underline" data-testid="asset-lifetime-change" onClick={openEconomicAssumptions}
-            title="Opens Solver Settings in Expert">
+            title="Opens Solver settings in Expert">
             Change in Scenarios &amp; optimisation ›
           </button>
         </>
@@ -997,7 +997,7 @@ export function ExtrasSection({ componentClass, fs, set, curated }: {
         </select>
       ) : (
         <button type="button" onClick={() => setPicking(true)}
-                className="text-[9px] text-accent hover:underline">+ Add parameter</button>
+                className="text-[9px] text-link hover:underline">+ Add parameter</button>
       )}
     </div>
   )

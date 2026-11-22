@@ -128,6 +128,25 @@ describe('StartCard', () => {
       'A study is still running: wait for it to finish or abort it before switching project.')
   })
 
+  it('"From a filled workbook" opens the workbook import dialog, with no file yet', async () => {
+    useUIStore.setState({ workbookImportRequest: null })
+    const user = mount()
+    const tile = screen.getByTestId('hub-start-workbook')
+    expect(tile.textContent).toContain('From a filled workbook')
+    expect(screen.queryByTestId('hub-start-workbook-why')).toBeNull()
+    await user.click(tile)
+    expect(useUIStore.getState().workbookImportRequest).toMatchObject({ file: null })
+  })
+
+  it('while a study runs the workbook tile is disabled and says why in visible text', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'running' })
+    mount()
+    const tile = screen.getByTestId('hub-start-workbook') as HTMLButtonElement
+    await vi.waitFor(() => expect(tile.disabled).toBe(true))
+    expect(screen.getByTestId('hub-start-workbook-why').textContent).toBe(
+      'A study is still running: wait for it to finish or abort it before switching project.')
+  })
+
   it('"Use my network" moves the rail to Site', async () => {
     const user = mount()
     await user.click(screen.getByTestId('hub-start-own-network'))

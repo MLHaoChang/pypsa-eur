@@ -427,6 +427,23 @@ def _current_chapter_sources(project: AuthorizedProject) -> dict[str, Any]:
     template = read_template(d)
     if template is not None:
         out["template_ledger"] = template
+        # What the last study run assumed (template-e2e 08), from its record;
+        # a record from before the list existed, or a stored study report
+        # whose record is gone, says "not recorded".
+        # The study record is the open project's; another project's is not read.
+        from services.pypsa_service import PyPSAService
+
+        try:
+            is_open = str(PyPSAService.get_active_context().project_uuid or "") \
+                == str(getattr(project, "uuid", ""))
+        except Exception:                                   # noqa: BLE001 - no open project
+            is_open = False
+        record = results_router._state.get("eh_study") or {}
+        if is_open and record.get("report") is not None:
+            out["run_assumptions"] = {"recorded": "assumptions" in record,
+                                      "rows": record.get("assumptions") or []}
+        elif is_open and _current_eh_report() is not None:
+            out["run_assumptions"] = {"recorded": False, "rows": []}
     if (d / "island_config.json").is_file() \
             or (d / "campus_electrical" / "run" / "campus_freq_events.csv").is_file():
         import importlib
