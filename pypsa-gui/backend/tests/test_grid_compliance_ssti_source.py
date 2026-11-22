@@ -151,6 +151,38 @@ def test_a_missing_or_malformed_table_gives_empty_tables_with_the_reason(
         assert t[rid].rows == [] and t[rid].caption == rows[rid]["note"]
 
 
+def test_numeric_ids_print_whole_as_the_caption_prints_them(tmp_path, monkeypatch):
+    # GK A2 B2: the CSV reads a numeric id as a number (a float, with the PCC row's blank bus); it is a
+    # name, never "1.1e+05"
+    uif = _uif_table(bus=110012, machine=123456)
+    uif[2] = {**uif[2], "bus": None}
+    _write(tmp_path, uif_rows=uif)
+    rows, _ = _card(tmp_path)
+    _, t = _pack(_project(monkeypatch, tmp_path))
+    assert "bus 110012" in t["ssti_uif"].caption
+    assert t["ssti_uif"].caption == rows["ssti_uif"]["note"]
+    assert t["ssti_uif"].rows == [
+        ["110012", "max", "123456", "0.25", "0.1", "warn", ""],
+        ["110012", "min", "123456", "0.125", "0.1", "warn", ""],
+    ]
+
+
+def test_a_uif_just_over_its_threshold_never_prints_equal_to_it(tmp_path, monkeypatch):
+    # GK A2 B3: four figures would print 0.10004 against 0.1 as "0.1 | 0.1 | warn"
+    _write(
+        tmp_path,
+        uif=_uif_meta("flag", worst=0.10004),
+        uif_rows=_uif_table(0.10004),
+    )
+    rows, _ = _card(tmp_path)
+    assert rows["ssti_uif"]["verdict"] == "warn"
+    _, t = _pack(_project(monkeypatch, tmp_path))
+    assert t["ssti_uif"].rows == [
+        ["MV", "max", "GAS", "0.10004", "0.1", "warn", ""],
+        ["MV", "min", "GAS", "0.05002", "0.1", "pass", ""],
+    ]
+
+
 # ── S1: what the scorecard refused, the pack does not judge ───────────────────
 
 

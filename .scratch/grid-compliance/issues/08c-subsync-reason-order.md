@@ -31,6 +31,14 @@ Confirm each item against the code before fixing it, and give each a test.
 5. **The "( )" margin.** A note formatted from a missing margin shows empty parentheses. Leave the parenthesis out, or say the value is missing.
 6. **The repeated UIF note (GK A2 on #1879, Q1 (A)).** The run writes the same note on every converter-bus row of the UIF table, so the pack's `ssti_uif` Note column repeats it and 20 rows wrap across about 9 PDF pages. Show a note shared by every row once, as a line of the caption, and leave the Note column only for notes that differ between rows.
 
+The items below are GK A2's non-blocking findings on #1879 @1d4d9889 (N1–N5), filed here rather than fixed in slice B:
+
+7. **Raw exceptions before the stage (N1).** `grid_readiness._project_inputs` lets raw exceptions out: a settings file that is not a dict gives an AttributeError, an unknown profile gives HTTPException 422, and a corrupt `.nc` raises too. The pack then reads GC-08 as unavailable with a traceback, even before any stage has run, where it should read pending. Map these to pending or to a plain reason.
+8. **A meta path that is a directory (N2)** reads pending. It should read unavailable with a plain reason, as an error path that is a directory already does on the scorecard.
+9. **A non-dict `uif` record in a dict meta (N3)** gives `present` with every row "not judged". It should read unavailable.
+10. **The Threshold column (N4)** shows the CSV's per-row `threshold`, but the judgement uses the meta's limit. Show the meta's limit, or flag the row where the two differ.
+11. **Saved and live networks (N5).** The pack reads the saved network (`ssti_screens_for`), while the scorecard UI reads the live one. Decide which one both should use, or say in the pack which one it read.
+
 ## Done when
 
 - Each item has a test that fails before the fix.

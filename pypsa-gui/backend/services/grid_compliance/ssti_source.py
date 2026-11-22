@@ -62,9 +62,35 @@ def _number(v) -> str:
     return NON_FINITE if x is None else f"{x:.4g}"
 
 
+def _apart(v, ref) -> tuple[str, str]:
+    """``v`` and the limit ``ref`` it is judged against, as ``_number`` shows them, with more figures where
+    four would print two different values alike (GK A2 B3: 0.10004 against 0.1 never reads "0.1")."""
+    shown, limit = _number(v), _number(ref)
+    from services.adequacy.grid_readiness import _ssti_hz
+
+    x, y = (None if _missing(u) else _ssti_hz(u) for u in (v, ref))
+    if x is None or y is None or x == y:
+        return shown, limit
+    for figures in range(5, 18):
+        if shown != limit:
+            break
+        shown, limit = f"{x:.{figures}g}", f"{y:.{figures}g}"
+    return shown, limit
+
+
 def _text(v) -> str:
-    """A name the run wrote, as plain text (S4): blank when empty, a number as a number."""
-    return v.strip() if isinstance(v, str) else _number(v)
+    """A name the run wrote, as plain text (S4): blank when empty; an id the CSV read as a number prints
+    whole (GK A2 B2: bus 110012, never "1.1e+05"), as the scorecard's note prints it."""
+    if _missing(v):
+        return ""
+    if isinstance(v, str):
+        return v.strip()
+    if isinstance(v, float):
+        if not math.isfinite(v):
+            return NON_FINITE
+        if v.is_integer():
+            return str(int(v))
+    return str(v)
 
 
 def _note(v) -> str:
@@ -94,7 +120,11 @@ def _uif_table(row: dict, frame, case: str, path: str) -> Table:
         else None
     )
     for _, r in judged.iterrows() if judged is not None else ():
-        uif = _cell(r, "uif", _number)
+        uif, threshold = (
+            _apart(r["uif"], r["threshold"])
+            if "uif" in r and "threshold" in r
+            else (_cell(r, "uif", _number), _cell(r, "threshold", _number))
+        )
         if case == "islanded":
             # the UIF counts the grid's infeed, which an island lacks: no number to show
             verdict, uif = ISLANDED, NON_FINITE
@@ -108,7 +138,7 @@ def _uif_table(row: dict, frame, case: str, path: str) -> Table:
                 _cell(r, "case", _text),
                 _cell(r, "machine", _text),
                 uif,
-                _cell(r, "threshold", _number),
+                threshold,
                 verdict,
                 _cell(r, "note", _note),
             ]
@@ -147,7 +177,9 @@ def _resonance_table(row: dict, frame, path: str) -> Table:
                 _cell(r, "f_er_hz", _number),
                 _cell(r, "f_comp_hz", _number),
                 _cell(r, "mode_hz", _number),
-                _cell(r, "margin_hz", _number),
+                _apart(r["margin_hz"], row["limit"])[0]
+                if "margin_hz" in r
+                else "",
                 verdict,
                 _cell(r, "note", _note),
             ]
