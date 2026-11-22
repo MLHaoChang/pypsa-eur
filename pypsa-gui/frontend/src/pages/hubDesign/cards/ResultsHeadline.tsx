@@ -21,6 +21,8 @@ import { FROM_STUDY_HINT, type ChapterInputs, type ChapterOpen, type ChapterTile
 import { useChapterTiles } from '../ChaptersSection'
 import { TABS } from '../../Results'
 import { useHubDesignStore } from '../hubDesignStore'
+import InvestmentCaseRunPanel from '../../results/investment/InvestmentCaseRunPanel'
+import { useInvestmentCaseRun } from '../../results/investment/useInvestmentCaseRun'
 
 /** The chapter tiles whose figure the headline shows; the tiles below then leave the number out. */
 export const HEADLINED = ['reliability', 'investment'] as const
@@ -214,7 +216,10 @@ export function ResultsHeadline({ reliability, cost, costEur = null, ci, freshne
   costEur?: number | null
   ci: [number, number] | null
 }) {
-  const { tiles } = useChapterTiles(reliability)
+  const { tiles, icReport } = useChapterTiles(reliability)
+  // Guided runs the investment case from its figure (issue 22, S2b), with the
+  // same panel and words as Expert's Investment case.
+  const icRun = useInvestmentCaseRun()
   const headline = useHeadlineKpis()
   const lcoe = headline.data?.cards.find(c => c.id === 'lcoe') ?? null
   const rel = tiles.find(t => t.id === 'reliability')
@@ -232,7 +237,14 @@ export function ResultsHeadline({ reliability, cost, costEur = null, ci, freshne
         {rel && <div className="flex flex-col gap-1 self-start"><TileFigure tile={rel} testId="hub-results-reliability" studyBanner={reliability.stale === true}
           dimmed={freshnessUnknown} /><WhyThisNumber figure="expected_shortfall" /></div>}
         {cost && <div className="flex flex-col gap-1 self-start">{cost}<WhyThisNumber figure="design_cost" value={costEur} /></div>}
-        {npv && <TileFigure tile={npv} testId="hub-results-npv" />}
+        {npv && (
+          <div className="flex flex-col gap-1 self-start">
+            {/* The panel states "not run yet" and a refusal's needs itself: the figure's reason steps aside. */}
+            <TileFigure testId="hub-results-npv" tile={npv.state === 'not_run' || icRun.blocker
+              ? { ...npv, reason: undefined } : npv} />
+            <InvestmentCaseRunPanel run={icRun} mode="guided" report={icReport} />
+          </div>
+        )}
         {/* The tile's place is kept while the figures load, so the grid does not move (as Expert's strip). */}
         {headline.isLoading ? <Skeleton className="min-h-[96px]" /> : (
           <LcoeFigure read={headline.isError ? { kind: 'failed' } : headline.data ? { kind: 'card', card: lcoe } : { kind: 'none' }} />

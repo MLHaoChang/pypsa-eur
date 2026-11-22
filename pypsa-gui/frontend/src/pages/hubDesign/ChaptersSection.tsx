@@ -68,7 +68,10 @@ export function useChapterTiles(reliability: ChapterInputs['reliability']) {
     reliability: { ...reliability, solved: status.isSuccess ? dispatchSolved(status.data) : undefined },
     operation: { status: status.data ?? null, gfm: gfm.data ?? null },
   })
-  return { tiles, processView: processView.data }
+  // The stored report as the run panel reads it: null before a run (or while
+  // one runs), undefined while it is not read yet (issue 22, S2b).
+  const report = icRunning ? null : icReport.isSuccess ? (icReport.data ?? null) : undefined
+  return { tiles, processView: processView.data, icReport: report }
 }
 
 /** `headlined`: tiles whose figure, state and Expert link the Results headline shows; here
