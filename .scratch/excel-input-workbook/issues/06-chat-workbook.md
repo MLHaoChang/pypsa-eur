@@ -1,6 +1,6 @@
 # Chat export and import of the Excel input workbook
 
-Status: needs-triage
+Status: done
 Blocked by: 03
 
 See `../spec.md`. Filed by S2 (issue 02, F3): S2 gives chat no workbook tool.

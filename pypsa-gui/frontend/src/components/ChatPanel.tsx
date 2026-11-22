@@ -80,6 +80,7 @@ import { plainWords } from '../pages/hubDesign/plainWords'
 import { getWorkflowMenu, postChatGoal, postChatRewind, type ChoiceRequestFrame, type GoalState, type PlanContinuation, type WorkflowContext, type WorkflowMenu, type WorkflowState } from '../api/chat'
 import { CONTINUATION_MESSAGE, continuationMarker, usePlanContinuation } from '../hooks/usePlanContinuation'
 import type { ContinuationLine } from './AssistantResultCard'
+import { WorkbookDownloadCard } from './workbook/WorkbookChatCard'
 import * as speechOut from '../utils/speechOut'
 import { useUIStore, type UiMode } from '../store/uiStore'
 import { networkApi } from '../api/network'
@@ -186,6 +187,7 @@ interface ToolPendingFrame {
   edit_card?: unknown
   sweep_card?: unknown
   repeat_card?: unknown
+  workbook_card?: unknown
   change_set?: unknown
   external?: { server: string }
 }
@@ -2428,6 +2430,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           edit_card: d.edit_card,
           sweep_card: d.sweep_card,
           repeat_card: d.repeat_card,
+          workbook_card: d.workbook_card,
           change_set: d.change_set,
           external: d.external,
         })
@@ -3910,6 +3913,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
                   continuation={continuationLine(m.tool_result, m.origin_project)}
                   toolWords={uiMode === 'guided' ? guidedToolPhrase : undefined}
                   onRequest={(text, label) => useChatStore.getState().sendRequest(text, { source: 'assistant-task', ...(label ? { label } : {}) })} />
+                {m.tool_name === 'get_input_workbook' && <WorkbookDownloadCard result={m.tool_result} />}
                 <ToolProgressDetails toolUseId={m.tool_use_id} />
                 {monitorLine && index === monitorRowIndex && (
                   <DetachedMonitorLine line={monitorLine} onStop={stopMonitoring} />

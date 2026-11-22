@@ -1,0 +1,7 @@
+{
+ "kinds": {
+  "invalid_expected_sha256": {"surface": "inline", "why": "import_input_workbook was called without the preview's sha256; the assistant runs preview_input_workbook first and passes its sha256."},
+  "invalid_file_id": {"surface": "inline", "why": "preview_input_workbook / import_input_workbook got no upload id; the assistant asks the user to attach the workbook and uses its file_id."},
+  "invalid_project_name": {"surface": "inline", "why": "get_input_workbook got a project name longer than 256 characters; the assistant asks for the exact project name."}
+ }
+}

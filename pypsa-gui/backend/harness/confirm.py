@@ -182,6 +182,7 @@ def _confirm_destructive_tool(
     sweep_card: dict | None = None,
     map_card: dict | None = None,
     repeat_card: dict | None = None,
+    workbook_card: dict | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, bool]:
     """
     Gate a destructive tool on the user's confirmation. Returns whether to
@@ -308,6 +309,8 @@ def _confirm_destructive_tool(
         card["map_card"] = copy.deepcopy(map_card)  # homer-parity 03b, harness/system_map_card.py
     if repeat_card is not None:
         card["repeat_card"] = copy.deepcopy(repeat_card)  # issue 04 S5, harness/job_holds.py
+    if workbook_card is not None:
+        card["workbook_card"] = copy.deepcopy(workbook_card)  # excel-input-workbook 06, harness/workbook_card.py
     yield "tool_pending_confirmation", card
     decision = session.wait_for_decision(pc.token)
     if decision == 'approve' and confirmation_revision() != revision:
