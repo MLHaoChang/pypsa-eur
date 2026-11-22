@@ -82,4 +82,19 @@ describe('model import preview', () => {
     expect((await screen.findByTestId('model-refusal')).textContent).toContain('The file is not a PSS/E RAW file.')
     expect(modelImportApi.import).not.toHaveBeenCalled()
   })
+
+  it('an unreachable app or a bare network error shows a plain sentence, never the library’s text', async () => {
+    vi.mocked(modelImportApi.preview).mockRejectedValue(new Error('Network Error: AxiosError ECONNRESET'))
+    mount()
+    const said = (await screen.findByTestId('model-refusal')).textContent ?? ''
+    expect(said).toContain('The app did not answer: nothing was created.')
+    expect(said).not.toMatch(/axios|ECONNRESET|Network Error/i)
+  })
+
+  it('a server error with no plain message of its own shows a plain sentence, not its status text', async () => {
+    vi.mocked(modelImportApi.preview).mockRejectedValue({ response: { status: 500, data: { detail: 'Traceback (most recent call last): KeyError' } } })
+    mount()
+    const said = (await screen.findByTestId('model-refusal')).textContent ?? ''
+    expect(said).not.toMatch(/Traceback|KeyError/)
+  })
 })

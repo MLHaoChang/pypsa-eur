@@ -464,8 +464,9 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
     const file = list[0]
     if (!file) return
     // A project file or a model file is previewed before anything is created (IMPORT-FLOW-1):
-    // the model dialog takes the files from here (a model can be several files).
-    if (/\.pypsaproj\.zip$/i.test(file.name) || list.every(f => hasModelExtension(f.name, modelExts) && !/\.xlsx$/i.test(f.name))) {
+    // the model dialog takes the files from here. A model can be several files (a PSS/E
+    // case and its dynamics), so a choice of several files goes there as a set.
+    if (/\.pypsaproj\.zip$/i.test(file.name) || list.length > 1 || hasModelExtension(file.name, modelExts) && !/\.xlsx$/i.test(file.name)) {
       onClose()
       useUIStore.getState().requestModelImport(list)
       return

@@ -1070,7 +1070,11 @@ function ProjectSectionContent({
       // rebind: the loaded network becomes this project's, as the wizard's .nc import does.
       await projectsApi.save(name, false, true, undefined, true)
     } catch (e) {
-      toast.error(`Could not save as '${name}': ${formatApiDetail((e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail ?? (e as Error).message)}`)
+      // Plain words, never the status line: a taken name is the common refusal.
+      const status = (e as { response?: { status?: number } })?.response?.status
+      toast.error(status === 409
+        ? `A project named ‘${name}’ already exists, so nothing was saved. Choose another name.`
+        : `Could not save as ‘${name}’: the project was not created.`)
       return
     }
     useUIStore.getState().noteNewProjectCreated('file')

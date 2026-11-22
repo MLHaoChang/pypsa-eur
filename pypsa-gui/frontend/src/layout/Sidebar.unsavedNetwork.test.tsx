@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
+import toast from 'react-hot-toast'
 import { projectsApi } from '../api/projects'
 import Sidebar from './Sidebar'
 
@@ -15,6 +16,7 @@ vi.mock('../api/network', () => ({
     undoInfo: vi.fn().mockResolvedValue({ depth: 0 }),
   },
 }))
+vi.mock('react-hot-toast', () => ({ default: { error: vi.fn(), success: vi.fn() } }))
 vi.mock('../api/io', () => ({ ioApi: {} }))
 vi.mock('../api/projects', () => ({
   projectsApi: {
@@ -87,5 +89,17 @@ describe('a loaded network that belongs to no project', () => {
     useUIStore.setState({ unsavedNetwork: null })
     mount()
     expect(await screen.findByText('No project loaded')).toBeTruthy()
+  })
+})
+
+describe('Save as project refusals', () => {
+  it('a taken name says so in plain words and keeps the network unsaved', async () => {
+    vi.mocked(projectsApi.save).mockRejectedValueOnce({ response: { status: 409, data: { detail: "Project 'my_grid' already exists" } } })
+    mount()
+    fireEvent.click(await screen.findByTestId('sidebar-save-as-project'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining('already exists, so nothing was saved')))
+    expect(useUIStore.getState().currentProject).toBeNull()
+    expect(useUIStore.getState().unsavedNetwork).toBe('my_grid')
   })
 })

@@ -56,4 +56,11 @@ describe('Import file takes model files', () => {
     expect(useUIStore.getState().modelImportRequest?.files).toEqual([file])
     expect(projectsApi.importBundle).not.toHaveBeenCalled()
   })
+
+  it('a model in several files (a .raw and its .dyr) goes to the preview as one set', async () => {
+    const { input } = await mountFileTab()
+    const files = [new File(['x'], 'case.raw'), new File(['x'], 'case.dyr')]
+    await userEvent.upload(input, files)
+    expect(useUIStore.getState().modelImportRequest?.files).toEqual(files)
+  })
 })

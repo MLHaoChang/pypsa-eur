@@ -59,7 +59,9 @@ export function ModelImportDialog({ initialFiles, onClose }: { initialFiles: Fil
   useEffect(() => {
     if (!previewed || namedFor.current === previewed) return
     namedFor.current = previewed
-    setName(previewed.suggested_name)
+    // A model with no name of its own (PLEXOS: "Unnamed Network") is named after its file.
+    const stem = previewed.files[0]?.replace(/\.[^.]+$/, '')
+    setName(/^unnamed network$/i.test(previewed.suggested_name.trim()) && stem ? stem : previewed.suggested_name)
   }, [previewed])
 
   const shown = phase.step === 'preview' || phase.step === 'importing' ? phase.preview : null
