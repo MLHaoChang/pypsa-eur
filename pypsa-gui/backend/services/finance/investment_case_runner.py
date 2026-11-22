@@ -110,8 +110,8 @@ def pack_versions(fin: FinanceInputs | None, *, load_pack=None) -> dict[str, str
 
 def assumptions_digest(*, finance: dict | None, commercial: dict | None, dispatch: str | None,
                        packs: dict[str, str], solver: dict | None = None,
-                       owner_assets: str | None = None, extra_assets: str | None = None
-                       ) -> tuple[str, dict[str, Any]]:
+                       owner_assets: str | None = None, extra_assets: str | None = None,
+                       energization: str | None = None) -> tuple[str, dict[str, Any]]:
     """(hash, parts): the report's staleness key and the per-input digests
     (so `GET /results/investment_case` can say WHICH input changed).
 
@@ -124,7 +124,13 @@ def assumptions_digest(*, finance: dict | None, commercial: dict | None, dispatc
     `owner_assets` (IC G3 F-2) is the digest of the owner assets' own
     investment columns (`finance_case.owner_assets_digest`); `extra_assets`
     (IC G3 R-4) the digest of the campus study the case takes its extra owner
-    assets from, None when no study applies. Both parts are always present."""
+    assets from, None when no study applies. Both parts are always present.
+
+    `energization` (template-e2e 02b W2) is the digest of the network's
+    energization schedule (`energization.schedule_digest`): the case reads it
+    at build time (`finance_case._import_capacity`), outside the dispatch.
+    A part only when the network carries one, so a key without it stays as
+    it was."""
     commercial = commercial if isinstance(commercial, dict) else None
     parts = {
         "solver_config": json_digest(None if solver is None else
@@ -140,6 +146,8 @@ def assumptions_digest(*, finance: dict | None, commercial: dict | None, dispatc
         "owner_assets": owner_assets,
         "extra_assets": extra_assets,
     }
+    if energization is not None:
+        parts["energization"] = energization
     return json_digest(parts), parts
 
 

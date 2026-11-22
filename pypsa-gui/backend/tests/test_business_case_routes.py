@@ -247,10 +247,12 @@ def test_c1_goal_free_config_drops_only_the_named_field():
     from services.reliability_goal import NOT_LP_FIELDS, goal_free_config
 
     # The load-growth inputs reach the LP only through the multipliers they
-    # derive into the hashed `load_scalers_by_carrier` (homer-parity 04a).
+    # derive into the hashed `load_scalers_by_carrier` (homer-parity 04a), and
+    # the template's assumed-value record reaches no solve (WALK-IMPROVE-1 b).
     assert NOT_LP_FIELDS == frozenset(
         {
             "business_case",
+            "finance_assumed",
             "load_growth_pct_per_year",
             "load_growth_base_year",
             "load_scalers_derived",
@@ -260,6 +262,7 @@ def test_c1_goal_free_config_drops_only_the_named_field():
         "voll": 1.0,
         "business_case": {"x": 1},
         "finance": {"y": 2},
+        "finance_assumed": {"wacc_nominal": {"value": 0.07, "source": "s"}},
         "load_growth_pct_per_year": {"electrical": 2.0},
         "load_growth_base_year": 2030,
         "load_scalers_derived": {"electrical": ["2035"]},
@@ -647,7 +650,10 @@ def test_c6_a_break_even_without_a_root_is_not_established_in_api_and_workbook()
 
     import openpyxl
 
-    from services.results_workbook.business_case import write_business_case_sheet
+    from services.results_workbook.business_case import (
+        reason_words,
+        write_business_case_sheet,
+    )
 
     for status in (
         "break_even_not_bracketed",
@@ -682,11 +688,13 @@ def test_c6_a_break_even_without_a_root_is_not_established_in_api_and_workbook()
             for r in wb["Business case"].iter_rows()
             if r[0].value
         }
-        assert cells["Price at NPV 0"][:2] == ["not_established", status]
-        assert cells["Price scale at NPV 0"][0] == "not_established"
-        assert cells["project_npv"][:2] == ["not_established", "wacc_nominal_missing"]
-        assert cells["min_dscr"][:2] == ["n/a", "no_debt"]
-        assert cells["revenue"][0] == "not_established"
+        # In words, never a code (walk 06, GK B2 B3).
+        assert cells["Price at NPV 0"][:2] == ["not established", reason_words(status)]
+        assert "_" not in reason_words(status)
+        assert cells["Price scale at NPV 0"][0] == "not established"
+        assert cells["Project NPV"][:2] == ["not established", "WACC nominal missing"]
+        assert cells["Minimum DSCR"][:2] == ["n/a", "no debt"]
+        assert cells["revenue"][0] == "not established"
 
 
 def _save(wb) -> bytes:
@@ -729,11 +737,11 @@ def test_c7_the_sheet_reads_the_stored_report_only(
     # Nothing stored: not established, and the export never runs it.
     got = _sheet(client)
     assert (
-        got["about"].startswith("not_established")
+        got["about"].startswith("not established")
         and "run the business case" in got["about"]
     )
     assert got["rows"]["Business case"][0] == got["about"]
-    assert "ebitda_margin_gross" not in got["rows"]
+    assert "EBITDA margin (gross)" not in got["rows"]
     assert session_state(client).get("business_case") is None
     assert session_state(client).get("business_case_report") is None
     # A current report: its figures.
@@ -742,18 +750,21 @@ def test_c7_the_sheet_reads_the_stored_report_only(
     got = _sheet(client)
     assert got["about"].startswith("current")
     rep = session_state(client)["business_case_report"]
+    from services.finance.business_case import KPI_ROW
+
+    assert rep["pnl"]["kpi_row"] == KPI_ROW  # served, never mirrored (walk 03)
     k = rep["kpis"]["ebitda_margin_gross"]
-    assert got["rows"]["ebitda_margin_gross"][0] == (
+    assert got["rows"]["EBITDA margin (gross)"][0] == (
         k["value"]
         if k["status"] == "ok"
-        else ("n/a" if k["status"] == "n/a" else "not_established")
+        else ("n/a" if k["status"] == "n/a" else "not established")
     )
     assert got["rows"]["Revenue line"][0] == "product"
     # Stale: labelled with what changed, its figures not shown.
     assert _put(client, _bc(_line(price=70.0))).status_code == 200
     got = _sheet(client)
     assert got["about"].startswith("stale") and "business_case_inputs" in got["about"]
-    assert "ebitda_margin_gross" not in got["rows"]
+    assert "EBITDA margin (gross)" not in got["rows"]
 
 
 # ── the preset route: DefaultUnitMismatch's catching site (C6) ───────────────
@@ -789,6 +800,55 @@ def test_preset_lists_the_variants_and_returns_a_variant_read_only(
     assert _put(client, r.json()["business_case"]).status_code == 200
     r = client.get(PRESET_URL, params={"variant": "nope"})
     assert r.status_code == 422 and r.json()["detail"]["code"] == "preset_not_found"
+
+
+def test_b2_the_preset_get_fills_indexation_and_stores_nothing(
+    client, install_network, monkeypatch, session_state
+):
+    """GK B2 B2: the GET fills each contract line's empty indexation from the finance
+    inputs' PPA rate, and writes nothing: the stored inputs and their digest move only
+    on the client's PUT."""
+    import routers.results as R
+
+    install_network(build_network())
+    monkeypatch.setattr(R, "_active_template_meta", lambda: {"id": "eh_ipp_hybrid"})
+    assert _put_fin(client, _s2_inputs()).status_code == 200
+    assert _put(client, _bc()).status_code == 200
+    before = client.get(INPUTS_URL).json()
+    r = client.get(PRESET_URL, params={"variant": "ipp_hybrid"})
+    assert r.status_code == 200, r.text
+    lines = r.json()["business_case"]["inputs"]["lines"]
+    contract = [ln for ln in lines if ln["escalation"] == "contract"]
+    assert contract and all(ln["indexation"] == 0.01 for ln in contract)  # s2's ppa
+    after = client.get(INPUTS_URL).json()
+    assert after["digest"] == before["digest"]
+    assert after["business_case"] == before["business_case"]
+
+
+def test_q2_a_saved_case_without_its_derating_refuses_by_field(
+    client, install_network, monkeypatch, session_state
+):
+    """GK B2 Q2, fail-closed at the catching site: a saved case whose capacity payment
+    has no de-rating (every IPP case saved before the field) is a typed refusal naming
+    the line and column, never a run read at the whole capacity."""
+    _with_ic(client, install_network, monkeypatch)
+    cap = _line(
+        name="Capacity payment (BESS, firm capacity)",
+        category="capacity_payment",
+        unit="kW_year",
+        quantity=None,
+        quantity_source="linked:capacity.Generator.solar@1",
+        price=40.0,
+        escalation="contract",
+        indexation=0.0,
+    )
+    assert _put(client, _bc(_line(), cap)).status_code == 200  # saves, as before
+    assert client.post(BC_URL).status_code == 200
+    body = _bc_poll(client)
+    assert body["status"] == "refused" and body["error_code"] == "business_case_refused"
+    assert body["refusal"]["refusal"] == "derating_missing"
+    assert body["refusal"]["field"] == "lines[1].derating"
+    assert session_state(client).get("business_case_report") is None
 
 
 def test_preset_refusals(client, install_network, monkeypatch):
@@ -946,7 +1006,7 @@ def test_c6_a_break_even_without_a_root_is_not_established_end_to_end(
     assert be["status"] == "break_even_not_bracketed" and be["price"] is None
     assert be["line"] == "product"
     rows = _sheet(client)["rows"]
-    assert rows["Price at NPV 0"][:2] == ["not_established", "break_even_not_bracketed"]
+    assert rows["Price at NPV 0"][:2] == ["not established", "break even not bracketed"]
 
 
 def test_c6_kw_per_gpu_missing_reads_not_established_in_the_workbook(
@@ -967,8 +1027,8 @@ def test_c6_kw_per_gpu_missing_reads_not_established_in_the_workbook(
     assert client.post(BC_URL).status_code == 200
     assert _bc_poll(client)["status"] == "done"
     rows = _sheet(client)["rows"]
-    assert rows["ebitda_margin_gross"][0] == "not_established"
-    assert rows["revenue"][0] == "not_established"
+    assert rows["EBITDA margin (gross)"][0] == "not established"
+    assert rows["revenue"][0] == "not established"
 
 
 def test_a_report_without_a_current_ic_report_reads_stale(
@@ -1084,10 +1144,11 @@ def test_the_sheet_cells_name_each_reason_and_unit():
         for r in wb["Business case"].iter_rows()
         if r[0].value
     }
-    assert rows["a"][:3] == [1.5, "ok", "EUR/MW"]
-    assert rows["b"][:2] == ["not_established", "not_established"]
-    assert rows["b"][2] in (None, "")
-    assert rows["Price at NPV 0"][:2] == ["not_established", "not_established"]
+    # A key with no words of its own reads as its spelled-out name, never the id.
+    assert rows["A"][:3] == [1.5, "ok", "EUR/MW"]
+    assert rows["B"][:2] == ["not established", "not established"]
+    assert rows["B"][2] in (None, "")
+    assert rows["Price at NPV 0"][:2] == ["not established", "not established"]
 
 
 # ── GK B (54) D1, D2, M8: the under-lock re-checks, each pinned at lock entry ──

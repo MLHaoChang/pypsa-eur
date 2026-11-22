@@ -111,7 +111,7 @@ function FixLink({ unit, field, mode }: { unit: string; field: DipsRestartField;
     <button type="button" data-testid={`dips-fix-${unit}-${field}`}
       onClick={() => (mode === 'guided' ? openFlowTargetInPlace(target) : openFlowTarget(target))}
       title={`Open ${unit}, where its ${FIELD_LABELS[field].toLowerCase()} is set`}
-      className="text-[11px] text-accent hover:underline whitespace-nowrap">
+      className="text-[11px] text-link hover:underline whitespace-nowrap">
       {fieldLinkLabel(field)}
     </button>
   )

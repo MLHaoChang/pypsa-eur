@@ -1,0 +1,1 @@
+* Fix(gridspine): Importing a workbook in PyPSA's own Excel layout no longer passes an empty time-series cell to the model as a missing value. The asset's series is left out and reported under "Left out", and its fixed value applies.

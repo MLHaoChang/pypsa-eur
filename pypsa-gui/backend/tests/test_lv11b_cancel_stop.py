@@ -592,7 +592,7 @@ def test_b2_a_step_solve_that_fails_after_stop_monitoring_still_settles_failed(
     assert [(d["job_id"], d["status"]) for d in due] == [(job, "failed")]
 
 
-def test_b2_a_step_solve_cancelled_by_cancel_job_after_stop_monitoring_settles_failed(
+def test_b2_a_step_solve_cancelled_by_cancel_job_after_stop_monitoring_settles_cancelled(
     held_plan,
 ):
     from harness import continuation
@@ -616,16 +616,19 @@ def test_b2_a_step_solve_cancelled_by_cancel_job_after_stop_monitoring_settles_f
         and results[0]["job"]["outcome"] == "cancelled"
     )
     _settle_solver()
-    task = _settled_step(task_id, "failed")
+    task = _settled_step(task_id, "cancelled")
     assert task["completed_steps"] == 0
     from services import assistant_tasks
 
-    assert task["next_step"]["id"] == "run" and task["next_step"]["status"] == "failed"
-    # Status `failed` as for every native abort (GK B: option A; issue 16 for a
-    # cancelled status), with the cancel's own facts on the stored step.
+    assert (
+        task["next_step"]["id"] == "run" and task["next_step"]["status"] == "cancelled"
+    )
+    # Issue 16: a stopped job reads cancelled, not failed; the native outcome
+    # stays `aborted` on the stored step.
     _path, stored = assistant_tasks._read(task_id)
     step = next(s for s in stored["steps"] if s["id"] == "run")
-    assert step["job"]["outcome"] == "aborted" and "aborted" in step["error"]
+    assert step["job"]["outcome"] == "aborted"
+    assert step["error"] == assistant_tasks.STOPPED_ERROR
     time.sleep(0.3)
     assert continuation.due(session) == []
     assert len(held_plan.starts) == 1

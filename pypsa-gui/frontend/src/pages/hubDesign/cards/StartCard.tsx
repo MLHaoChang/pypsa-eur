@@ -9,7 +9,7 @@
 // (`useDecisionEntry`): the intake opens in the decision panel, and the study
 // builds its own project, so the open one is not changed.
 import { Fragment, useEffect, useState } from 'react'
-import { FolderOpen, Hexagon, Scale, SlidersHorizontal } from 'lucide-react'
+import { FileSpreadsheet, FolderOpen, Hexagon, Scale, SlidersHorizontal } from 'lucide-react'
 import { GUIDED_QUESTIONS, useDecisionEntry } from '../../decision/useDecisionEntry'
 import { TEMPLATES } from '../../../layout/NewProjectWizard'
 import { useCreateFromTemplate } from '../../../hooks/useCreateFromTemplate'
@@ -25,6 +25,7 @@ import { DcLoadForm } from './DcLoadForm'
 import { DC_TEMPLATES } from '../dcLoadForm'
 import { plainIds } from '../plainWords'
 import SiteSetupSection from '../../../site3d/SiteSetupSection'
+import { START_TILE_DESC, START_TILE_TITLE } from '../../../components/workbook/workbookWords'
 
 // The generic site (`eh_site`) is not in the table: it has its own tile and form.
 const HUB_TEMPLATES = TEMPLATES.filter(t => t.id.startsWith('eh_'))
@@ -58,6 +59,7 @@ export function plainProvenance(text: string): string {
 
 export function StartCard() {
   const project = useUIStore(s => s.currentProject)
+  const requestWorkbookImport = useUIStore(s => s.requestWorkbookImport)
   const setStep = useHubDesignStore(s => s.setStep)
   const create = useCreateFromTemplate()
   const { template } = useHubTemplate()
@@ -141,6 +143,16 @@ export function StartCard() {
               <span className="text-[11px] leading-relaxed text-muted">
                 A factory, hospital, office or campus: set its load and grid connection, and plan what to build.
               </span>
+            </button>
+            {/* Excel input workbook (S3): the dialog previews before it creates, and opens the new project. */}
+            <button type="button" data-testid="hub-start-workbook"
+              onClick={() => requestWorkbookImport()} disabled={running}
+              className="flex flex-col gap-1 rounded-lg border border-border p-3 text-left hover:border-accent/60 hover:bg-accent/5 disabled:opacity-50">
+              <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-text">
+                <FileSpreadsheet size={12} className="text-accent" /> {START_TILE_TITLE}
+              </span>
+              <span className="text-[11px] leading-relaxed text-muted">{START_TILE_DESC}</span>
+              {running && <span data-testid="hub-start-workbook-why" className="text-[11px] text-warn">{STUDY_RUNNING_SWITCH}</span>}
             </button>
           </div>
           {siteFormOpen && (

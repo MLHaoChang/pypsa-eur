@@ -1,11 +1,12 @@
 // Step 5 — Improve (guided-mode spec §5.3, §5.7): the review's high and
-// medium findings, each with Why (the evidence), "Let the assistant do this"
-// (its first action) and Ask; Check risks runs the FMEA sweep exactly as the
+// medium findings, each with Why (the evidence), "Open in Expert" (the same
+// change by hand, filled in; template-e2e 22, IMPROVE-MANUAL-1), "Let the
+// assistant do this" (its first action) and Ask; Check risks runs the FMEA sweep exactly as the
 // FMEA tab does (the lifted hook), and a stress scenario is added through
 // the assistant.
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ShieldAlert } from 'lucide-react'
+import { ExternalLink, ShieldAlert } from 'lucide-react'
 import { resultsApi, type EhReviewFinding } from '../../../api/simulation'
 import { fmeaModesRefetchInterval, useStartFmeaSweep } from '../../../hooks/useStartFmeaSweep'
 import { useStudyFinishedInvalidation } from '../../../hooks/useStudyFinishedInvalidation'
@@ -17,11 +18,12 @@ import { useReliabilityGoal } from '../../../hooks/useReliabilityGoal'
 import {
   ARCHETYPE_SHORT, actionLabel, actionTexts, askText, stressScenarioText,
 } from '../delegate'
-import { evidenceValue, plainWords } from '../plainWords'
+import { evidenceValue, feederAdvice, plainWords } from '../plainWords'
 import { AskButton, CardShell, DelegateButton } from '../shared/CardShell'
 import { Term } from '../shared/Term'
 import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
 import { useHubLevers, useHubReport, useHubReview, useHubStudy, useHubTemplate } from '../useHubData'
+import { DEST_WHERE, improvePlan, openImproveInExpert, openStressScenarios, type ImprovePlan } from '../improvePrefill'
 import { cheaperDuration, leversFinding } from '../cheaperDuration'
 
 export function openFmeaTab(): void {
@@ -30,14 +32,32 @@ export function openFmeaTab(): void {
   ui.requestResultsTab('fmea')
 }
 
+/** The secondary "Open in Expert" button: the same change by hand, with no
+ *  assistant (KEY-LATER-1), so it is never disabled. */
+function OpenInExpert({ f, plan }: { f: EhReviewFinding; plan: ImprovePlan }) {
+  const where = `Open in Expert: ${DEST_WHERE[plan.dest]}`
+  return (
+    <button type="button" data-testid={`hub-improve-open-${f.id}`} title={where} aria-label={where}
+      onClick={() => openImproveInExpert(plainWords(f.title), plan)}
+      className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[11px] text-text hover:border-accent hover:text-accent">
+      <ExternalLink size={12} /> Open in Expert
+    </button>
+  )
+}
+
 function Finding({ f, liveStudy }: { f: EhReviewFinding; liveStudy: boolean }) {
   const [why, setWhy] = useState(false)
+  const { archetype } = useReliabilityGoal()
+  const plan = improvePlan(f, archetype)
   // One message per action (§5.7); the queue sends them one after another.
   const doTexts = actionTexts(f)
   const more = doTexts.length - 1
   const doLabels = doTexts.map((_, i) => i === 0 ? actionLabel(f)
     : `${actionLabel(f)} (step ${i + 1} of ${doTexts.length})`)
   const effect = f.actions?.[0]?.effect
+  // The only feeder to a must-stay-on bus: no re-run fixes it, so the card
+  // says what does (asset-investment walkthrough 2026-11-17, issue 04).
+  const advice = feederAdvice(f)
   // The card shows the title and the action in plain words; the review's own
   // prose (recommendation, effect) and its numbers go in "Why" (§5.8, gate B3).
   const technical: [string, string][] = [
@@ -59,10 +79,13 @@ function Finding({ f, liveStudy }: { f: EhReviewFinding; liveStudy: boolean }) {
           {/* P26 gate: the button opens a "Run the reliability study" card,
               so a study re-run says so; the review's effect is its aim. */}
           {f.actions?.[0]?.tool === 'run_eh_study'
-            ? <>The assistant would run the reliability study again. Aim: {plainWords(effect)}</>
-            : <>The assistant would {plainWords(effect)}</>}
+            ? <>This change: run the reliability study again. Aim: {plainWords(effect)}</>
+            : <>This change: {plainWords(effect)}</>}
           {more > 0 ? `, then ${more} more step${more === 1 ? '' : 's'}, one at a time` : ''}.
         </p>
+      )}
+      {advice && (
+        <p data-testid={`hub-improve-advice-${f.id}`} className="text-muted">{advice}</p>
       )}
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" data-testid={`hub-improve-why-${f.id}`} aria-expanded={why}
@@ -70,12 +93,18 @@ function Finding({ f, liveStudy }: { f: EhReviewFinding; liveStudy: boolean }) {
           className="px-2 py-1 text-[11px] text-muted hover:text-accent">
           {why ? '▾' : '▸'} Why
         </button>
+        <OpenInExpert f={f} plan={plan} />
         {doTexts.length > 0 && (
           <DelegateButton testId={`hub-improve-do-${f.id}`} text={doTexts} display={doLabels}
             disabled={liveStudy} disabledTitle={LIVE_STUDY_EDIT} />
         )}
         <AskButton testId={`hub-improve-ask-${f.id}`} text={askText(f)} label="Ask" />
       </div>
+      {plan.unshown.length > 0 && (
+        <p data-testid={`hub-improve-unshown-${f.id}`} className="text-[11px] text-muted">
+          Expert does not fill in {plan.unshown.join(', ')}: set {plan.unshown.length === 1 ? 'it' : 'them'} there by hand, or let the assistant do this.
+        </p>
+      )}
       {why && (
         <div data-testid={`hub-improve-evidence-${f.id}`} className="rounded bg-bg p-2">
           <span className="text-[10px] uppercase tracking-wide text-muted">Technical evidence</span>
@@ -187,6 +216,11 @@ export function ImproveCard() {
         )}
         <div data-testid="hub-improve-stress-row" className="flex flex-wrap items-center gap-2">
           <span className="text-text"><Term k="stress_scenario">Hard conditions to test</Term>:</span>
+          <button type="button" data-testid="hub-improve-open-stress" onClick={openStressScenarios}
+            title="Open: Goal › More settings › Hard conditions" aria-label="Open the hard conditions: Goal › More settings"
+            className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[11px] text-text hover:border-accent hover:text-accent">
+            <ExternalLink size={12} /> Open the hard conditions
+          </button>
           <DelegateButton testId="hub-improve-add-stress" text={stressScenarioText(context)}
             label="Add a stress scenario" />
         </div>

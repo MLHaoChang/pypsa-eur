@@ -113,4 +113,6 @@ def test_the_docs_stay_compact():
     # fuel_curve_no_load) and its derived stand_by_cost (homer-parity 02a).
     # 4700 (owner HOMER-02B-DOCCAP): room for the Generator run-hour pair (om_cost_per_run_hour,
     # lifetime_run_hours; homer-parity 02b).
-    assert len(attrs_doc()) < 4700
+    # 5000 (owner DGS-EXTRAS-DOCCAP): room for the PowerFactory DGS Generator and Load extras
+    # (short-circuit power, R/X ratios, rated MVA, harmonic source and spectrum; DGS-EXTRAS-1).
+    assert len(attrs_doc()) < 5000

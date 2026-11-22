@@ -14,7 +14,8 @@ import CampusElectricalPanel from './campusTestParts'
 
 const store = vi.hoisted(() => ({ currentProject: 'Hub A' as string | null }))
 vi.mock('../store/uiStore', () => ({
-  useUIStore: (sel: (s: { currentProject: string | null }) => unknown) => sel({ currentProject: store.currentProject }),
+  // improvePrefill subscribes to the store at import (#1757).
+  useUIStore: Object.assign((sel: (s: { currentProject: string | null }) => unknown) => sel({ currentProject: store.currentProject }), { subscribe: () => () => {} }),
 }))
 
 const api = vi.hoisted(() => ({

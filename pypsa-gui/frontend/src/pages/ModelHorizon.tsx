@@ -825,7 +825,7 @@ export default function ModelHorizon() {
           <button
             type="button"
             onClick={() => setView('summary')}
-            className="self-start text-[11px] text-accent hover:underline"
+            className="self-start text-[11px] text-link hover:underline"
           >← Back to summary</button>
           <StepShell
             steps={steps}

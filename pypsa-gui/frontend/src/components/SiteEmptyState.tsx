@@ -7,6 +7,7 @@ import { useUIStore } from '../store/uiStore'
 import { openSiteEntry } from '../layout/flowNavigation'
 import { useSceneEntry } from '../site3d/SiteEntryAction'
 import { useSiteCreation } from '../site3d/siteCreation'
+import EmptyState from './EmptyState'
 import SiteCreationPanel from '../site3d/SiteCreationPanel'
 
 export default function SiteEmptyState({ loading = false }: { loading?: boolean }) {
@@ -18,22 +19,17 @@ export default function SiteEmptyState({ loading = false }: { loading?: boolean 
     : entry.enabled && !entry.reason ? `Next: ${entry.label}`
     : entry.blocker?.reason ?? entry.reason ?? entry.label
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 text-center px-8" data-testid="site-empty-state">
-      <div className="text-[13px] font-medium text-text">This project has no 3D site yet</div>
-      <div className="text-[12px] text-muted max-w-md">
-        A 3D site starts from the project’s site coordinates and a campus boundary. Model equipment is optional.
+    <div className="flex h-full items-center justify-center px-8">
+      <div className="w-full max-w-md" data-testid="site-empty-state">
+        <EmptyState title="This project has no 3D site yet"
+          action={{ label: '› Create 3D site in Project & site', onClick: () => openSiteEntry({ fromSite3D: true }) }}
+          actionTestId="site-empty-entry-link">
+          A 3D site starts from the project’s site coordinates and a campus boundary. Model equipment is optional.
+          {loading || entryLoading
+            ? <span className="mt-1 block">Checking the project…</span>
+            : state && <span data-testid="site-empty-entry-state" className="mt-1 block text-text">{state}</span>}
+        </EmptyState>
       </div>
-      {loading || entryLoading ? (
-        <div className="text-[12px] text-muted">Checking the project…</div>
-      ) : (
-        <div className="flex flex-col items-center gap-1 text-[12px]">
-          {state && <span data-testid="site-empty-entry-state" className="text-text">{state}</span>}
-          <button type="button" data-testid="site-empty-entry-link" onClick={() => openSiteEntry({ fromSite3D: true })}
-            className="text-accent hover:underline">
-            › Create 3D site in Project &amp; site
-          </button>
-        </div>
-      )}
     </div>
   )
 }

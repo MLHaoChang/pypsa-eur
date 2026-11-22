@@ -1,0 +1,35 @@
+{
+  "payload": {
+    "type": "cfd",
+    "id": "eu-cfd",
+    "strike": 85.0,
+    "tenor_years": 18,
+    "reference": "interval",
+    "generator_owner": "\u2060fill-in:generator_owner",
+    "counterparty": "\u2060fill-in:counterparty",
+    "asset_ids": [
+      "\u2060fill-in:asset"
+    ]
+  },
+  "meta": {
+    "source": "illustrative",
+    "provider": "PyPSA Studio (authored illustrative default)",
+    "description": "Illustrative EU default, not market data: a two-way contract for difference settled each interval against your reference price series. Every value sits inside a cited public range (see notes); replace it with your own offer.",
+    "notes": [
+      "region:EU",
+      "currency:EUR",
+      "price_basis:nominal",
+      "illustrative:true",
+      "not market data: a starting point to replace with your own offer or an organisation pack",
+      "currency_year:2023",
+      "range:strike=74.08..100.47 EUR/MWh|EirGrid RESS 1 (2020) and RESS 3 (2023) Final Auction Results, weighted average strike price of all successful projects|https://cms.eirgrid.ie/sites/default/files/publications/RESS-1-Final-Auction-Results-(R1FAR).pdf https://cms.eirgrid.ie/sites/default/files/publications/RESS-3-Final-Auction-Results-%28R3FAR%29.pdf|2023",
+      "range:tenor_years=15..20 years|GOV.UK, CfD Allocation Round 7 subsidy control estimates: CfDs have historically been 15-year contracts, AR7 awarded 20-year contracts|https://www.gov.uk/government/publications/contracts-for-difference-cfd-allocation-round-7-subsidy-control-transparency-database-estimates/contracts-for-difference-cfd-allocation-round-7-subsidy-control-transparency-database-estimates|2025",
+      "reference_price: set your own day-ahead price series before settling",
+      "placeholders:generator_owner,counterparty,asset_ids hold a fill-in marker; the server refuses to save or settle the contract until each is replaced",
+      "changes_dispatch:false (settled after the solve; never shapes the dispatch)"
+    ],
+    "scope": "common",
+    "licence": "Authored by the PyPSA Studio contributors for the common Library (owner Q11 = A). The ranges cite figures from the named public sources; no source content is reproduced.",
+    "attribution": "Ranges from the sources named in each range note."
+  }
+}

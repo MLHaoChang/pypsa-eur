@@ -16,7 +16,7 @@ import captured from '../../../test/fixtures/headlineKpis.json'
 import { ResultsCard } from './ResultsCard'
 import { chartFigure } from '../../../components/charts/chartTheme'
 import { HEADLINE_WORDS, headlineFigure } from '../../results/headlineWords'
-import { LCOE_NO_SOLVE, LCOE_NOT_APPLICABLE, LCOE_UNREAD, mixedSourceNote, ReliabilityBullet } from './ResultsHeadline'
+import { FEEDER_HELD_PILL, LCOE_NO_SOLVE, LCOE_NOT_APPLICABLE, LCOE_UNREAD, mixedSourceNote, ReliabilityBullet } from './ResultsHeadline'
 
 vi.mock('../../../hooks/useProjectFlow', () => ({ useProjectFlow: vi.fn() }))
 vi.mock('../../../api/finance', async (importOriginal) => {
@@ -299,6 +299,18 @@ describe('ReliabilityBullet', () => {
   it('within the goal says so in words', () => {
     render(<ReliabilityBullet lole={0.4} target={1} ci={null} stale={false} />)
     expect(screen.getByTestId('hub-results-reliability-against').textContent).toBe('Within goal')
+  })
+  it('under the goal but held back by a feeder bound: neutral, not the pass green (UX 2, #1729)', () => {
+    render(<ReliabilityBullet lole={0.6} target={3} ci={null} stale={false} feederBound />)
+    const pill = screen.getByTestId('hub-results-reliability-against')
+    expect(pill.textContent).toBe(FEEDER_HELD_PILL)
+    expect(FEEDER_HELD_PILL).toBe('Under goal · verdict not decided')
+    expect(pill.className).toContain('text-muted')
+    expect(pill.className).not.toContain('text-success')
+  })
+  it('over the goal a feeder bound does not soften the miss', () => {
+    render(<ReliabilityBullet lole={5} target={3} ci={null} stale={false} feederBound />)
+    expect(screen.getByTestId('hub-results-reliability-against').textContent).toBe('Above goal')
   })
   it('with no goal: the bar alone, no pass or fail colour', () => {
     render(<ReliabilityBullet lole={0.4} target={null} ci={null} stale={false} />)

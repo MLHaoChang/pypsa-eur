@@ -164,7 +164,7 @@ function LatencyLine({ row, mode, onJump }: {
   const name = (u: GridReadinessAfterUnit) => (
     <button type="button" data-testid={`gr-latency-unit-${u.unit}`} onClick={() => open(u)}
       title={`Open ${u.unit}, where its control is set`}
-      className="text-accent hover:underline">'{u.unit}'</button>
+      className="text-link hover:underline">'{u.unit}'</button>
   )
   return (
     <div data-testid={`gr-latency-${row.id}`}>
@@ -234,7 +234,7 @@ function ScoreRow({ row, mode, onJump, fieldLabels, noAssistant }: {
             {row.xr_assumed && (
               <button type="button" data-testid={`gr-set-xr-${row.id}`} onClick={openPocXr}
                 title="Open the point-of-connection X/R field in Project info, Settings"
-                className="ml-1.5 text-[11px] text-accent hover:underline">Set point-of-connection X/R ›</button>
+                className="ml-1.5 text-[11px] text-link hover:underline">Set point-of-connection X/R ›</button>
             )}
             <span className="mx-1.5">·</span>
             Project:{'\u00A0'}<span className="text-text">
