@@ -53,8 +53,8 @@ def _island_breakeven_item() -> str:
     """The ledger row's item: the one display name, lowercase like its neighbours."""
     from services.finance.breakeven import LABEL
 
-
     return LABEL.lower()
+
 
 def _cpu_stable(x):
     """Round a synthetic profile to 9 decimals, right after its np.exp/np.sin.
