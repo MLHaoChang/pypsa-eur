@@ -166,16 +166,25 @@ describe('InvestmentCaseRunPanel', () => {
     expect(screen.getByTestId('ic-needs').textContent).not.toMatch(/bess|cod_/)
   })
 
-  it('an unknown code: Guided points to Expert; Expert adds the reason, never the code', async () => {
+  it('an unknown code: both modes give the run its own reason, never the code (issue 03)', async () => {
     api.getInvestmentCase.mockResolvedValue({ status: 'refused', error_code: 'template_not_annual:8784',
                                               error: 'template_not_annual:8784: the template is not one year' })
+    for (const mode of ['guided', 'expert'] as const) {
+      renderPanel(mode)
+      expect((await screen.findByTestId('ic-error')).textContent)
+        .toBe('The investment case could not finish: the template is not one year.')
+      cleanup()
+    }
+  })
+
+  it('an unknown code with no reason: Guided points to Expert', async () => {
+    api.getInvestmentCase.mockResolvedValue({ status: 'error', error_code: 'internal_error' })
     renderPanel('guided')
     expect((await screen.findByTestId('ic-error')).textContent)
       .toBe('The investment case could not finish. Open it in Expert for the details.')
     cleanup()
     renderPanel('expert')
-    expect((await screen.findByTestId('ic-error')).textContent)
-      .toBe('The investment case could not finish: the template is not one year.')
+    expect((await screen.findByTestId('ic-error')).textContent).toBe('The investment case could not finish.')
   })
 
   it('a busy 409 shows the server sentence once, and the button says it can be tried again', async () => {

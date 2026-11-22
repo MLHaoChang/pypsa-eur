@@ -37,10 +37,12 @@ export const NEEDS_LEAD = 'The investment case needs:'
 export const COULD_NOT_FINISH = 'The investment case could not finish.'
 export const OPEN_IN_EXPERT = 'Open it in Expert for the details.'
 
-/** The "could not finish" line: Guided points to Expert; Expert adds the run's own reason. */
+/** The "could not finish" line: the run's own reason when it states one (a
+ *  money-year refusal names both years and the way out, issue 03); without one,
+ *  Guided points to Expert. */
 export function couldNotFinish(mode: 'guided' | 'expert', detail: string | null): string {
-  if (mode === 'guided') return `${COULD_NOT_FINISH} ${OPEN_IN_EXPERT}`
-  return detail ? `The investment case could not finish: ${detail.replace(/\.$/, '')}.` : COULD_NOT_FINISH
+  if (detail) return `The investment case could not finish: ${detail.replace(/\.$/, '')}.`
+  return mode === 'guided' ? `${COULD_NOT_FINISH} ${OPEN_IN_EXPERT}` : COULD_NOT_FINISH
 }
 
 const COMPARED = "Compared with: the same site's energy bill and connection costs without the owner's new equipment."
