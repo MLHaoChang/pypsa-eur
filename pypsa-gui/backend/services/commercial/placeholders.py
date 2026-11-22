@@ -58,11 +58,16 @@ def problem(contract) -> str | None:
     if not fields:
         return None
     fields.sort(key=lambda f: _ORDER.index(f) if f in _ORDER else len(_ORDER))
-    words = ", ".join(FIELD_WORDS.get(f, f) for f in fields)
-    return (
-        f"Contract {contract.id} still holds the Library template's fill-in in "
-        f"{words}. Fill in your own, then save again."
-    )
+    return f"Contract {contract.id}: {need_own_values(fields)}."
+
+
+def need_own_values(fields: list[str]) -> str:
+    """The words the Contracts panel uses too (frontend `contractModel.needOwnValues`):
+    "Seller, Buyer and Assets (generators) need your own values"."""
+    words = [FIELD_WORDS.get(f, f) for f in fields]
+    if len(words) == 1:
+        return f"{words[0]} needs your own value"
+    return f"{', '.join(words[:-1])} and {words[-1]} need your own values"
 
 
 def first_problem(contracts) -> str | None:

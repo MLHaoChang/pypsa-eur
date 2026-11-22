@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
-  CONNECTION, CONTRACT_FIELDS, contractErrors, contractType, isPlaceholder, missingRequired, setField,
+  CONNECTION, CONTRACT_FIELDS, contractErrors, contractType, isPlaceholder, missingRequired, needOwnValues, PLACEHOLDER_MARK, setField,
   startingPoint, unchangedPrices, unfilledPlaceholders,
 } from './contractModel'
 
@@ -74,5 +76,22 @@ describe('contract model', () => {
     const src = { type: 'ppa', price: 55, indexation_pct_per_year: 0, tenor_years: 12 }
     expect(unchangedPrices({ ...src, price: 55 } as never, src).sort()).toEqual(['indexation_pct_per_year', 'price'])
     expect(unchangedPrices({ ...src, price: 60, indexation_pct_per_year: 1 } as never, src)).toEqual([])
+  })
+
+  it('the marker is the server\'s, byte for byte (services/commercial/placeholders.MARK)', () => {
+    const py = readFileSync(resolve(__dirname, '../../../../../backend/services/commercial/placeholders.py'), 'utf8')
+    const m = /^MARK = "(.*)"$/m.exec(py)
+    expect(m).not.toBeNull()
+    expect(m![1]).toBe(PLACEHOLDER_MARK)
+  })
+
+  it('names the fields to fill as the server does: "A needs …", "A, B and C need …"', () => {
+    expect(needOwnValues(['Buyer'])).toBe('Buyer needs your own value')
+    expect(needOwnValues(['Seller', 'Buyer', 'Assets (generators)']))
+      .toBe('Seller, Buyer and Assets (generators) need your own values')
+  })
+
+  it('a price held as text is not the source\'s number: no label', () => {
+    expect(unchangedPrices({ price: '55' } as never, { price: 55 })).toEqual([])
   })
 })

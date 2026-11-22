@@ -273,8 +273,7 @@ def test_save_is_refused_with_any_placeholder_left(left, client, install_network
     assert detail["code"] == "contract_placeholder"
     word = P.FIELD_WORDS[left]
     assert detail["message"] == (
-        f"Contract {contract['id']} still holds the Library template's fill-in in "
-        f"{word}. Fill in your own, then save again."
+        f"Contract {contract['id']}: {word} needs your own value."
     )
 
 
@@ -301,7 +300,7 @@ def test_the_binder_refuses_before_any_network_check():
         )
     assert (exc.value.status, exc.value.code) == (422, "contract_placeholder")
     assert (
-        "in Generator owner, Counterparty, Assets (generators). Fill in your own"
+        ": Generator owner, Counterparty and Assets (generators) need your own values."
         in exc.value.message
     )
 
@@ -326,9 +325,7 @@ def _inputs(cid: str, gen, ref=None) -> K.SettlementInputs:
 
 def test_settle_refuses_a_placeholder():
     model = _model("eu-ppa-pay-as-produced", buyer=P.MARK + "buyer")
-    with pytest.raises(
-        K.ContractError, match="the Library template's fill-in in Buyer\\."
-    ):
+    with pytest.raises(K.ContractError, match=": Buyer needs your own value\\."):
         K.settle(model, _inputs(model.id, [1.0] * 4))
 
 

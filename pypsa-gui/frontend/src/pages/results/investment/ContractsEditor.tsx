@@ -17,7 +17,7 @@ import { blankItem } from './tariffModel'
 import { SeriesSelect } from './SeriesSelect'
 import {
   blankContract, CONNECTION, CONTRACT_FIELDS, CONTRACT_TYPES, contractErrors, contractType,
-  isPlaceholder, missingRequired, nextContractId, setField, startingPoint, unchangedPrices,
+  isPlaceholder, missingRequired, needOwnValues, nextContractId, setField, startingPoint, unchangedPrices,
   unfilledPlaceholders, type ContractType, type FieldSpec,
 } from './contractModel'
 import { ACTION } from './actionStyle'
@@ -263,7 +263,7 @@ export default function ContractsEditor() {
     setContracts([...contracts, added]); setErrors(new Map()); setScrollTo(added.id)
     const fill = unfilledPlaceholders(added)
     setMessage({ tone: 'ok', text: `Added ${added.id}, a copy of ${item}. `
-      + (fill.length ? `Fill in ${fill.join(', ')}, then save the contracts.` : 'Save the contracts to keep it.') })
+      + (fill.length ? `${needOwnValues(fill)}, then save the contracts.` : 'Save the contracts to keep it.') })
   }, [start, contracts, commercial.data, savedIds])
   useEffect(() => {
     if (!scrollTo) return
@@ -326,23 +326,23 @@ export default function ContractsEditor() {
     const left = contracts.map(c => [c.id, unfilledPlaceholders(c)] as const).filter(([, f]) => f.length)
     if (left.length) {
       setMessage(null); setErrors(new Map())
-      setFillRefusal(`Not saved: ${left.map(([id, f]) => `contract ${id} still holds the Library template's fill-in in ${f.join(', ')}.`).join(' ')} Fill in your own, then save again.`)
+      setFillRefusal(`The contracts were not saved: ${left.map(([id, f]) => `in ${id}, ${needOwnValues(f)}`).join('; ')}.`)
       return
     }
     if (blank.size) {
       setErrors(blank)
-      setMessage({ tone: 'error', text: 'The contracts not saved: fill in the required fields (see below).' })
+      setMessage({ tone: 'error', text: 'The contracts were not saved: fill in the required fields (see below).' })
       return
     }
     try {
       const stored = await commercialApi.getCommercial()
       if (JSON.stringify(stored?.contracts ?? []) !== baseline) {
         setErrors(new Map())
-        setMessage({ tone: 'error', text: 'The contracts not saved: the project\'s contracts changed since they were loaded (the assistant or a template may have added some). Reload them, then redo the edits.' })
+        setMessage({ tone: 'error', text: 'The contracts were not saved: the project\'s contracts changed since they were loaded (the assistant or a template may have added some). Reload them, then redo the edits.' })
         return
       }
     } catch (e) {
-      setMessage({ tone: 'error', text: `The contracts not saved: the project could not be read (${e instanceof Error ? e.message : 'error'}).` })
+      setMessage({ tone: 'error', text: `The contracts were not saved: the project could not be read (${e instanceof Error ? e.message : 'error'}).` })
       return
     }
     // After a save the stored form (the server may tag or normalise) is the

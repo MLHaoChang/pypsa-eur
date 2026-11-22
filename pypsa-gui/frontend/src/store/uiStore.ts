@@ -424,7 +424,6 @@ export interface TimeSeriesFocus {
   openEditor?: boolean
 }
 
-/** The Commercial library item to open once: its kind, id and the version a gap names. */
 /** One-shot: a Library contract the Contracts editor adds as an unsaved copy
  *  ("Use as a starting point", SCU06 S2b). */
 export interface ContractStart {
@@ -432,6 +431,7 @@ export interface ContractStart {
   payload: Record<string, unknown>
 }
 
+/** The Commercial library item to open once: its kind, id and the version a gap names. */
 export interface LibraryFocus {
   kind: string
   id: string

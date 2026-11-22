@@ -311,7 +311,7 @@ describe('ContractsEditor', () => {
     const added = await screen.findByTestId('ce-contract-6')
     expect(useUIStore.getState().contractStart).toBeNull()
     expect(screen.getByRole('status').textContent).toBe('Added cfd_7, a copy of Library item “eu-cfd” v1. '
-      + 'Fill in Generator owner, Counterparty, Assets (generators), then save the contracts.')
+      + 'Generator owner, Counterparty and Assets (generators) need your own values, then save the contracts.')
     expect(added.textContent).toContain('Copied from Library item “eu-cfd” v1')
     for (const f of ['generator owner', 'counterparty', 'assets (generators)']) {
       const box = within(added).getByLabelText(`Contract cfd_7 ${f}`) as HTMLInputElement
@@ -335,8 +335,7 @@ describe('ContractsEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save the contracts' }))
     // One line beside the save button, in the server's words; nothing else.
     expect((await screen.findByTestId('ce-fill-refusal')).textContent).toBe(
-      "Not saved: contract cfd_7 still holds the Library template's fill-in in Counterparty, Assets (generators). "
-      + 'Fill in your own, then save again.')
+      'The contracts were not saved: in cfd_7, Counterparty and Assets (generators) need your own values.')
     expect(within(added).queryByRole('alert')).toBeNull()
     expect(screen.queryByRole('status')).toBeNull()
     expect(api.saveCommercial).not.toHaveBeenCalled()

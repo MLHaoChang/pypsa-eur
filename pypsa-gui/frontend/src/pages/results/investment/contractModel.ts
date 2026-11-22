@@ -226,6 +226,13 @@ export function unfilledPlaceholders(c: CommercialContract): string[] {
     .map(w => w.charAt(0).toUpperCase() + w.slice(1))     // the panel's word, as a name
 }
 
+/** "Seller, Buyer and Assets (generators) need your own values": the words
+ *  the server's refusal uses too (`placeholders.need_own_values`). */
+export function needOwnValues(words: string[]): string {
+  if (words.length === 1) return `${words[0]} needs your own value`
+  return `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]} need your own values`
+}
+
 /** A Library contract as the start of a new project contract (SCU06 S2b): a
  *  copy of the item's payload with an id free in `contracts`, its `library_ref`
  *  kept (so an illustrative source stays traceable, S2a condition 4) and the
