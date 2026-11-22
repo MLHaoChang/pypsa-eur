@@ -3,7 +3,7 @@
 
 # GC-06d Test the generated mhi.pscad automation stub
 
-Status: ready-for-agent
+Status: done
 Model tier: sonnet
 Blocked by: none
 Type: task
