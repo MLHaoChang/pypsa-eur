@@ -315,7 +315,9 @@ def _terminal_row(cfg, new: dict) -> dict | None:
         None,
     )
     r["warn"] = True
-    r["reason"] = "Plant capex has no end-of-life value: choose a terminal-value method that can price it."
+    r["reason"] = (
+        "Plant capex has no end-of-life value: choose a terminal-value method that can price it."
+    )
     return r
 
 

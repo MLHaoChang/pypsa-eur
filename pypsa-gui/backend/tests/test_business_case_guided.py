@@ -1316,6 +1316,7 @@ def test_bc15_a_whole_object_write_shows_a_lease_up_change_on_the_card():
 
 # ── #21: the plan card names a terminal value that cannot price the plant ───
 
+
 def _with_terminal(method):
     import routers.results as R
 
@@ -1335,7 +1336,11 @@ def test_21_a_capex_preset_with_no_terminal_value_warns_on_the_card(
     template["id"] = "eh_ipp_hybrid"
     _with_terminal(method)
     row = _rows(preset_apply.plan(_args(variant="ipp_hybrid")))["Terminal value"]
-    assert row["warn"] is True and row["path"] == ["finance", "terminal_value", "method"]
+    assert row["warn"] is True and row["path"] == [
+        "finance",
+        "terminal_value",
+        "method",
+    ]
     assert "terminal-value method" in row["reason"] and row["new"] == "none"
 
 
