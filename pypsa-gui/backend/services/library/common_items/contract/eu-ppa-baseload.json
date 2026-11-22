@@ -1,0 +1,37 @@
+{
+  "payload": {
+    "type": "ppa",
+    "id": "eu-ppa-baseload",
+    "kind": "baseload",
+    "price": 78.0,
+    "baseload_mw": 20.0,
+    "tenor_years": 12,
+    "seller": "\u2060fill-in:seller",
+    "buyer": "\u2060fill-in:buyer",
+    "asset_ids": [
+      "\u2060fill-in:asset"
+    ]
+  },
+  "meta": {
+    "source": "illustrative",
+    "provider": "PyPSA Studio (authored illustrative default)",
+    "description": "Illustrative EU default, not market data: a baseload PPA settled financially against your reference price series. Every value sits inside a cited public range (see notes); replace it with your own offer.",
+    "notes": [
+      "region:EU",
+      "currency:EUR",
+      "price_basis:nominal",
+      "illustrative:true",
+      "not market data: a starting point to replace with your own offer or an organisation pack",
+      "currency_year:2025",
+      "range:price=71..85 EUR/MWh|European Commission DG ENER, Quarterly report on European electricity markets, vol. 18 (Q4 2025), p. 11: 2025 average baseload futures, three-year-ahead 71, year-ahead 85|https://webgate.ec.europa.eu/circabc-ewpp/d/d/workspace/SpacesStore/3fffc5f5-bdc8-45e2-bee3-1f872e9921d0/download|2026",
+      "range:baseload_mw=1..426 MW|1 MW = the delivery rate of one exchange baseload futures contract; 426 MW = the largest European PPA of February 2026 (Pexapark, reported by pv magazine); 20 MW is near the log-scale midpoint|https://www.pv-magazine.com/2026/03/17/pexapark-registers-30-european-ppas-for-2-2-gw-in-february/|2026",
+      "range:tenor_years=5..20 years|EIB Advisory, commercial PPA study: a cPPA is a long-term contract 'e.g. of 5-20 years'|https://advisory.eib.org/files/publications/attachments/developing-potential-financial-instruments-and-advisory-solutions-to-stimulate-more-investment-in-renewable-energy-generation-by-means-of-commercial-power-purchase-agreements.pdf|2023",
+      "reference_price: set your own day-ahead price series before settling",
+      "placeholders:seller,buyer,asset_ids hold a fill-in marker; the server refuses to save or settle the contract until each is replaced",
+      "changes_dispatch:false (settled after the solve; never shapes the dispatch)"
+    ],
+    "scope": "common",
+    "licence": "Authored by the PyPSA Studio contributors for the common Library (owner Q11 = A). The ranges cite figures from the named public sources; no source content is reproduced.",
+    "attribution": "Ranges from the sources named in each range note."
+  }
+}
