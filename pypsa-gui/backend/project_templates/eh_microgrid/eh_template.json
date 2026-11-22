@@ -70,7 +70,7 @@
       "value": "off (island_constraints false)"
     },
     {
-      "item": "island break-even",
+      "item": "island-capability break-even",
       "note": "the island rows are off, so the comparison is not relaxed for them and the case does not price an island capability",
       "source": "assumed",
       "value": "not applicable"

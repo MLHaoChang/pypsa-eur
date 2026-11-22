@@ -1181,7 +1181,7 @@ export interface SolvePpa {
   target_year: number
 }
 
-/** The island break-even's outage hours, as the user states them with their source. */
+/** The island-capability break-even's outage hours, as the user states them with their source. */
 export interface IslandOutage {
   hours_per_year: number | null
   source: string | null
