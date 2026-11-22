@@ -155,6 +155,7 @@ def test_numeric_ids_print_whole_as_the_caption_prints_them(tmp_path, monkeypatc
     # GK A2 B2: the CSV reads a numeric id as a number (a float, with the PCC row's blank bus); it is a
     # name, never "1.1e+05"
     uif = _uif_table(bus=110012, machine=123456)
+    uif[1] = {**uif[1], "machine": float("inf")}  # a non-finite name
     uif[2] = {**uif[2], "bus": None}
     _write(tmp_path, uif_rows=uif)
     rows, _ = _card(tmp_path)
@@ -163,7 +164,7 @@ def test_numeric_ids_print_whole_as_the_caption_prints_them(tmp_path, monkeypatc
     assert t["ssti_uif"].caption == rows["ssti_uif"]["note"]
     assert t["ssti_uif"].rows == [
         ["110012", "max", "123456", "0.25", "0.1", "warn", ""],
-        ["110012", "min", "123456", "0.125", "0.1", "warn", ""],
+        ["110012", "min", "—", "0.125", "0.1", "warn", ""],
     ]
 
 
@@ -172,7 +173,9 @@ def test_a_uif_just_over_its_threshold_never_prints_equal_to_it(tmp_path, monkey
     _write(
         tmp_path,
         uif=_uif_meta("flag", worst=0.10004),
-        uif_rows=_uif_table(0.10004),
+        uif_rows=_uif_table(0.10004, machine=" GAS "),  # a padded name
+        subsync=_sub_meta("flag"),
+        resonance=_resonance((0.99996, 3.0), "flag"),
     )
     rows, _ = _card(tmp_path)
     assert rows["ssti_uif"]["verdict"] == "warn"
@@ -181,6 +184,24 @@ def test_a_uif_just_over_its_threshold_never_prints_equal_to_it(tmp_path, monkey
         ["MV", "max", "GAS", "0.10004", "0.1", "warn", ""],
         ["MV", "min", "GAS", "0.05002", "0.1", "pass", ""],
     ]
+    # the least margin against the run's 1 Hz clearance, which the caption states
+    assert [r[5:7] for r in t["subsync_series_resonance"].rows] == [
+        ["0.99996", "warn"],
+        ["3", "pass"],
+    ]
+
+
+@pytest.mark.parametrize(
+    "value, limit, shown",
+    [
+        (0.1, 0.1, ("0.1", "0.1")),  # equal values print alike, never as 17 figures
+        (0.100039, 0.10004, ("0.100039", "0.10004")),  # the limit gains figures too
+        ("x", 0.1, ("—", "0.1")),
+        (None, " ", ("", "")),
+    ],
+)
+def test_a_value_and_its_limit_print_apart_only_when_they_differ(value, limit, shown):
+    assert S._apart(value, limit) == shown
 
 
 # ── S1: what the scorecard refused, the pack does not judge ───────────────────

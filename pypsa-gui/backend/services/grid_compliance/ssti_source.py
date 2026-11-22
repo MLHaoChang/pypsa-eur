@@ -68,12 +68,11 @@ def _apart(v, ref) -> tuple[str, str]:
     shown, limit = _number(v), _number(ref)
     from services.adequacy.grid_readiness import _ssti_hz
 
+    # a blank or unreadable side never prints like a number, so only two different numbers tie
     x, y = (None if _missing(u) else _ssti_hz(u) for u in (v, ref))
-    if x is None or y is None or x == y:
-        return shown, limit
-    for figures in range(5, 18):
-        if shown != limit:
-            break
+    figures = 4
+    while shown == limit and x != y and figures < 17:
+        figures += 1
         shown, limit = f"{x:.{figures}g}", f"{y:.{figures}g}"
     return shown, limit
 
@@ -120,11 +119,7 @@ def _uif_table(row: dict, frame, case: str, path: str) -> Table:
         else None
     )
     for _, r in judged.iterrows() if judged is not None else ():
-        uif, threshold = (
-            _apart(r["uif"], r["threshold"])
-            if "uif" in r and "threshold" in r
-            else (_cell(r, "uif", _number), _cell(r, "threshold", _number))
-        )
+        uif, threshold = _apart(r.get("uif"), r.get("threshold"))
         if case == "islanded":
             # the UIF counts the grid's infeed, which an island lacks: no number to show
             verdict, uif = ISLANDED, NON_FINITE
@@ -177,9 +172,7 @@ def _resonance_table(row: dict, frame, path: str) -> Table:
                 _cell(r, "f_er_hz", _number),
                 _cell(r, "f_comp_hz", _number),
                 _cell(r, "mode_hz", _number),
-                _apart(r["margin_hz"], row["limit"])[0]
-                if "margin_hz" in r
-                else "",
+                _apart(r.get("margin_hz"), row["limit"])[0],
                 verdict,
                 _cell(r, "note", _note),
             ]
