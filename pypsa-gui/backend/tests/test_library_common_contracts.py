@@ -300,7 +300,10 @@ def test_the_binder_refuses_before_any_network_check():
             build_edge_15min(), cfg, project_dir=None, resolve_ref=lambda ref: None
         )
     assert (exc.value.status, exc.value.code) == (422, "contract_placeholder")
-    assert "in Generator owner, Counterparty, Assets (generators). Fill in your own" in exc.value.message
+    assert (
+        "in Generator owner, Counterparty, Assets (generators). Fill in your own"
+        in exc.value.message
+    )
 
 
 # ── settlement with the items' values ──────────────────────────────────────
@@ -323,7 +326,9 @@ def _inputs(cid: str, gen, ref=None) -> K.SettlementInputs:
 
 def test_settle_refuses_a_placeholder():
     model = _model("eu-ppa-pay-as-produced", buyer=P.MARK + "buyer")
-    with pytest.raises(K.ContractError, match="the Library template's fill-in in Buyer\\."):
+    with pytest.raises(
+        K.ContractError, match="the Library template's fill-in in Buyer\\."
+    ):
         K.settle(model, _inputs(model.id, [1.0] * 4))
 
 
