@@ -24,7 +24,9 @@ NOT_SCALAR = ("energization_peak:", "lole", "oscillation", "harmonic_distortion"
 CATEGORICAL = ("frequency_support", "dynamic:", "grid_former", "ride_through:")
 # Caveats the scorecard states, carried with a checked line so a pass never reads as final.
 CAVEATS = {"ramp_rate": "before mitigation", "rapid_voltage_change": "before mitigation; a screening upper bound",
-           "rapid_voltage_change_infrequent": "a screening upper bound", "motor_start:": "a screening estimate"}
+           "rapid_voltage_change_infrequent": "a screening upper bound", "motor_start:": "a screening estimate",
+           "ssti_uif": "screening; the binding answer is the EMT study",
+           "subsync_series_resonance": "screening; the binding answer is the EMT study"}
 METRICS = {
     "checked_pass": {"formula_id": "grid-readiness-checked-pass/1", "unit": "rows",
                      "label": "Scorecard rows checked as pass"},
@@ -55,7 +57,8 @@ def _registered():
 
     return {"scr": G.RULE_SCR, "ramp_rate": G.RULE_RAMP, "rapid_voltage_change": G.RULE_RVC,
             "rapid_voltage_change_infrequent": G.RULE_RVC, "reactive_range": G.RULE_REACTIVE,
-            "voltage_unbalance": G.RULE_UNBALANCE, "motor_start:": G.RULE_MOTOR_START}
+            "voltage_unbalance": G.RULE_UNBALANCE, "motor_start:": G.RULE_MOTOR_START,
+            G.SSTI_UIF: G.RULE_UIF, G.SUBSYNC_SR: G.RULE_SUBSYNC}
 
 
 def _named(row_id, prefixes):

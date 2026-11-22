@@ -650,9 +650,12 @@ def test_the_off_grid_scorecard_excludes_the_sk_rows_with_their_reason(
         "voltage_unbalance",
     } <= set(excluded)
     assert all(
-        reason in (G.SK_OFF_GRID, G.VS_OFF_GRID, G.CONN_OFF_GRID)
+        reason in (G.SK_OFF_GRID, G.VS_OFF_GRID, G.CONN_OFF_GRID, G.SUBSYNC_OFF_GRID)
         for reason in excluded.values()
     )
+    # GC-08 R4: the two screens scanned from the PCC leave too; the UIF row stays.
+    assert all(excluded[rid] == G.SUBSYNC_OFF_GRID for rid in G.SUBSYNC_PCC_ROWS)
+    assert "ssti_uif" in ids
     # SH41-OFFGRID-1: the connection's ramp and oscillation limits leave too.
     assert excluded["ramp_rate"] == excluded["oscillation"] == G.CONN_OFF_GRID
     assert not ids & set(excluded)
