@@ -88,8 +88,8 @@ describe('SizedDesignTable', () => {
     render(<SizedDesignTable testId="t" mode="guided"
       report={report({ status: 'ok', payload: { assets: [ore, pv, DIESEL] } })} />)
     expect(screen.getByTestId('t-row-ore').textContent).toBe('OreStore, ore30,000 t0–60,000 t')
-    expect(screen.getByTestId('t-row-pv').textContent).toBe('pvGenerator, solar50–10')
-    expect(screen.getByTestId('t-row-diesel_new').textContent).toBe('diesel_newGenerator, diesel4.2 MW0–12 MW')
+    expect(screen.getByTestId('t-row-pv').textContent).toBe('PVGenerator, solar50–10')
+    expect(screen.getByTestId('t-row-diesel_new').textContent).toBe('Diesel newGenerator, diesel4.2 MW0–12 MW')
   })
 
   it('a staged plan leads with the period and lists by it', () => {
