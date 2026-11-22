@@ -193,9 +193,16 @@ class AssetFinance:
     terminal_lifetime_years: float | None = None
 
     def __post_init__(self):
-        if self.terminal_lifetime_years is not None and len(self.parts) > 1:
-            raise ValueError(f"{self.name}: terminal_lifetime_years is for one part, "
-                             f"not {len(self.parts)}")
+        if self.terminal_lifetime_years is not None:
+            if len(self.parts) > 1:
+                raise ValueError(f"{self.name}: terminal_lifetime_years is for one part, "
+                                 f"not {len(self.parts)}")
+            # Only on an asset no part lifetime replaces: else `part_lifetimes` would
+            # repurchase it at that lifetime while the term starts elsewhere.
+            life = self.parts[0].lifetime_years if self.parts else self.lifetime_years
+            if life is None or not math.isinf(life):
+                raise ValueError(f"{self.name}: terminal_lifetime_years needs an infinite "
+                                 f"lifetime, not {life!r}")
         if not self.parts:
             return
         costs = [p.overnight_cost for p in self.parts]

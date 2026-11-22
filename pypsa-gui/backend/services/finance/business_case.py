@@ -675,7 +675,8 @@ def build_business_case(
             for a in assets[:-1]:
                 cod.setdefault(a.name, ic_case.cod)
             cod[ln.name] = _cod_in(ic_case.cod, first)
-        if ln.refresh_years and v is not None:
+        # A typed 0 buys nothing, so nothing is refreshed (no zero entry; C3).
+        if ln.refresh_years and v:
             k = 1
             while (y := first + math.floor(k * ln.refresh_years + 1e-9)) <= last:
                 rep.append((y, ln.name, v))

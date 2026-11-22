@@ -2282,12 +2282,28 @@ def test_a_terminal_life_on_a_composite_asset_is_refused():
         AssetFinance(
             "bess", "StorageUnit", 2.0, 15.0, parts=parts, terminal_lifetime_years=10.0
         )
-    # One explicit part takes it; a composite without one is as before.
+    # One explicit part takes it only where no part lifetime replaces the asset.
+    inf = AssetPart("investment", 1.0, math.inf)
     one = AssetFinance(
-        "pv", "Generator", 1.0, 25.0, parts=parts[:1], terminal_lifetime_years=10.0
+        "kit",
+        "business_case",
+        1.0,
+        math.inf,
+        parts=(inf,),
+        terminal_lifetime_years=10.0,
     )
     assert one.terminal_lifetime_years == 10.0
+    for life in (25.0, None):
+        with pytest.raises(ValueError, match="needs an infinite lifetime"):
+            AssetFinance("pv", "Generator", 1.0, life, terminal_lifetime_years=10.0)
     assert AssetFinance("bess", "StorageUnit", 2.0, 15.0, parts=parts).parts == parts
+
+
+@pytest.mark.parametrize("rule", RULES)
+def test_a_refreshed_capex_line_typed_at_zero_has_no_term_and_no_entry(rule):
+    bc, r = _run(_inputs(_capex(price=0.0, refresh_years=2.0)), ic=_rla_ic(rule))
+    assert not any(name == "plant" for _y, name, _x in bc.case.inputs.replacement_capex)
+    assert _terms(r, "plant") == [] and not any("plant" in x for x in _reasons(r))
 
 
 @pytest.mark.parametrize("rule", RULES)
