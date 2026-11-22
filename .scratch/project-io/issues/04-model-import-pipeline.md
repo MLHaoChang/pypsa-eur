@@ -3,7 +3,7 @@
 
 # 04 Model import pipeline: one route, a preview in plain names, then a new project (PSS/E, DGS, PLEXOS)
 
-Status: in-review (Slice A merged #1860; Slice B UI in PR)
+Status: done (Slice A #1860, Slice B #1887)
 Blocked by: none (follows the pattern of #1798's `routers/workbook.py`; if #1798 has not merged, rebase on it before the UI slice)
 Owner decisions: IMPORTS-1, IMPORT-FLOW-1 (preview first, never an overwrite), HOLISTIC-1, RAW-NAMES-1, PR-SIZE-1, PLEXOS-SCOPE-1
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), walk W3; `project-io/spec.md` item 4, never filed until now.
