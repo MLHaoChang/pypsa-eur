@@ -89,7 +89,7 @@ def _export(n: pypsa.Network, template_id: str) -> None:
 def build_3bus() -> pypsa.Network:
     n = pypsa.Network()
     n.name = "3-Bus Tutorial"
-    n.set_snapshots(SNAPSHOTS)
+    n.set_snapshots(SNAPSHOTS.copy())
 
     n.add("Carrier", "AC")
     n.add("Carrier", "gas", co2_emissions=0.20)
@@ -113,7 +113,7 @@ def build_3bus() -> pypsa.Network:
             "Load 1": 100.0 * LOAD_SHAPE,
             "Load 2": 80.0 * LOAD_SHAPE,
         },
-        index=SNAPSHOTS,
+        index=SNAPSHOTS.copy(),
     )
 
     # Triangle of identical lines. x > 0 is required for the LOPF's linearised
@@ -138,7 +138,7 @@ def build_3bus() -> pypsa.Network:
 def build_ieee14() -> pypsa.Network:
     n = pypsa.Network()
     n.name = "IEEE 14-Bus"
-    n.set_snapshots(SNAPSHOTS)
+    n.set_snapshots(SNAPSHOTS.copy())
 
     n.add("Carrier", "AC")
     n.add("Carrier", "coal", co2_emissions=0.34)
@@ -181,7 +181,7 @@ def build_ieee14() -> pypsa.Network:
         lname = f"Load {b}"
         n.add("Load", lname, bus=f"Bus {b}", carrier="AC")
         load_cols[lname] = mw * LOAD_SHAPE
-    n.loads_t.p_set = pd.DataFrame(load_cols, index=SNAPSHOTS)
+    n.loads_t.p_set = pd.DataFrame(load_cols, index=SNAPSHOTS.copy())
 
     # Standard case14 branch impedances (r, x in p.u. on 100 MVA base). The
     # three original tap-changing transformers (4-7, 4-9, 5-6) are modelled as
@@ -258,7 +258,7 @@ def build_ieee39() -> pypsa.Network | None:
         return None
 
     net = load_case39_res()
-    n = to_pypsa(net, snapshots=SNAPSHOTS, res_cf=res_cf_for(net, len(SNAPSHOTS)))
+    n = to_pypsa(net, snapshots=SNAPSHOTS.copy(), res_cf=res_cf_for(net, len(SNAPSHOTS)))
     n.name = "IEEE 39-Bus (New England)"
     # Carriers are cosmetic for the study (the identity map is by unit id) but
     # the GUI's asset views and icons key off them.

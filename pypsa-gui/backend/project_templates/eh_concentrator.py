@@ -218,7 +218,7 @@ def build_eh_concentrator_staged(T, *, years=YEARS, time_base: str = "year") -> 
         cut, idx = slice(None), year_index()
     else:
         start = (pd.Timestamp(S.SNAPSHOTS[0]) - pd.Timestamp(YEAR_START)) // pd.Timedelta(hours=1)
-        cut, idx = slice(start, start + len(S.SNAPSHOTS)), S.SNAPSHOTS
+        cut, idx = slice(start, start + len(S.SNAPSHOTS)), S.SNAPSHOTS.copy()
     h = len(idx)
     prof = {k: v[cut] for k, v in _profiles().items()}
 

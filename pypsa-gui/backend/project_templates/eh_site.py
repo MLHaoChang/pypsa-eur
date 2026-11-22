@@ -470,7 +470,7 @@ def stage_network(n: pypsa.Network, years: list[int], *, load_scale: dict[int, d
     product across weeks (``year_snapshots`` says what it accepts)."""
     if time_base not in TIME_BASES:
         raise ValueError(f"time_base: {time_base!r} is not one of {TIME_BASES}")
-    timesteps = SNAPSHOTS if time_base == "week" else year_snapshots(n.snapshots)
+    timesteps = SNAPSHOTS.copy() if time_base == "week" else year_snapshots(n.snapshots)
     flat = {(frame, attr): getattr(n, frame)[attr].copy()
             for frame, attr in (("generators_t", "p_max_pu"), ("generators_t", "marginal_cost"),
                                 ("loads_t", "p_set"))}
@@ -568,7 +568,7 @@ def build_eh_site(params: dict | None = None) -> pypsa.Network:
     price = 70.0 + 40.0 * np.exp(-((_HOD - 19) ** 2) / 8.0)
     n.add("Generator", "grid_supply", bus="grid", carrier="grid",
           p_nom=10.0 * p["connection_mw"], marginal_cost=0.0)
-    n.generators_t.marginal_cost = pd.DataFrame({"grid_supply": price}, index=SNAPSHOTS)
+    n.generators_t.marginal_cost = pd.DataFrame({"grid_supply": price}, index=SNAPSHOTS.copy())
     # The PoC and the critical feeder are loss-free (the ledger says so).
     n.add("Link", "grid_import", bus0="grid", bus1="site_mv", p_nom=p["connection_mw"],
           efficiency=1.0, carrier="AC")
@@ -582,7 +582,7 @@ def build_eh_site(params: dict | None = None) -> pypsa.Network:
     n.add("Load", "general_load", bus="site_mv", carrier="AC")
     n.loads_t.p_set = pd.DataFrame({"critical_load": share * last_peak * shape,
                                     "general_load": (1.0 - share) * last_peak * shape},
-                                   index=SNAPSHOTS)
+                                   index=SNAPSHOTS.copy())
 
     for i in range(1, ex["gensets"]["count"] + 1):
         g = f"genset_{i}"
@@ -603,7 +603,7 @@ def build_eh_site(params: dict | None = None) -> pypsa.Network:
         n.add("StorageUnit", "ups_battery", bus="critical", carrier="battery",
               p_nom=ex["ups"]["mw"], max_hours=ex["ups"]["minutes"] / 60.0,
               efficiency_store=0.95, efficiency_dispatch=0.95, cyclic_state_of_charge=True)
-    n.generators_t.p_max_pu = pd.DataFrame(pmax, index=SNAPSHOTS)
+    n.generators_t.p_max_pu = pd.DataFrame(pmax, index=SNAPSHOTS.copy())
 
     _T._tag_columns(n)
     ibr = ex["pv_mw"] + ex["battery"]["mw"] + sum(

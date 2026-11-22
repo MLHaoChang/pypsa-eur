@@ -74,7 +74,7 @@ def _day_shape(base: float, peak: float, peak_hour: float = 15.0,
 def _base(name: str, snapshots=SNAPSHOTS) -> pypsa.Network:
     n = pypsa.Network()
     n.name = name
-    n.set_snapshots(snapshots)
+    n.set_snapshots(snapshots.copy())  # never the caller's index object (see `_week`)
     n.snapshot_weightings.loc[:, ["objective", "generators"]] = WEIGHT
     n.snapshot_weightings.loc[:, "stores"] = 1.0          # hours per snapshot (S0)
     return n
