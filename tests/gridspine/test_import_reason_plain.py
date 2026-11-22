@@ -77,8 +77,10 @@ def test_features_case_reasons_name_no_raw_code(tmp_path):
 
 @pytest.mark.parametrize("rev", [33, 35])
 def test_hand_case_reasons_name_no_raw_code(tmp_path, rev):
-    """Zero impedance, no rating, a later rating, an unrated 1:1 transformer,
-    no usable maximum output and a remote regulator, each in ``assumed``."""
+    """
+    Zero impedance, no rating, a later rating, an unrated 1:1 transformer,
+    no usable maximum output and a remote regulator, each in ``assumed``.
+    """
     from tests.gridspine.test_psse_import import _SWING, _case, _gen
 
     pad = ",''" if rev >= 35 else ""  # v35 branches carry a NAME before RATE1
