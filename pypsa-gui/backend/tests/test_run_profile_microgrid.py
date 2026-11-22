@@ -91,7 +91,7 @@ def test_each_profile_runs_the_eh_study_with_the_stress_then_the_island_check(
         k: list(v) for k, v in flow_scope.TEMPLATE_PRESETS[template].items()
     }
     assert flow_scope.TEMPLATE_PRESETS[template] is flow_scope._MICROGRID
-    assert flow_service._request_for(meta, None)["archetype"] == "off_grid"
+    assert flow_service._template_request(meta, None)["archetype"] == "off_grid"
     assert _rules(ref, "setup")["set.project.template"]["value"] == template
 
 

@@ -137,7 +137,7 @@ export function AdequacyChips({ report }: { report: AdequacyReportPayload | null
       {!t.zone_field_populated && t.zones.length > 0 && (
         <span
           className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-warn/10 text-warn text-[10px]"
-          title="Every electrical bus has a blank `country`, so the per-zone ceiling collapsed into a second system cap."
+          title="Every electrical bus has a blank country, so the per-zone ceiling collapsed into a second system cap."
         >
           <AlertTriangle size={11} /> zones unpopulated
         </span>
@@ -241,7 +241,7 @@ export function foldChipTitle(
   const lines: string[] = []
   const folded = fleet?.folded_units ?? []
   if (folded.length) {
-    lines.push('Static p_max_pu folded into capacity (no availability series): '
+    lines.push('Fixed availability folded into capacity (no availability series): '
       + folded.map((f) => `${f.name} × ${f.folded_constant}`).join(', '))
   }
   const det = fleet?.deterministic_units ?? []

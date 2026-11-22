@@ -3,7 +3,9 @@
 
 # Guided says Certified, Expert Results says not run yet
 
-Status: needs-triage
+Status: claimed
+Blocked by: none
+Owner: CS-C builder, session_01G7qCunJAP1nfa6Qmq6z2AH
 Type: finding (keyed walkthrough audit, UX-NEXT-1)
 Journey steps: J4 Run, J6 Read results (Guided and Expert)
 Severity: high
@@ -26,3 +28,7 @@ After a Guided study, Expert Results shows the same verdict and cost as its head
 ## Journey fit
 
 Touches J6. Hands off from J5 (the run ends on section 10) and to J7 (compare): the headline must be the same text in both modes.
+
+## Comments
+
+**2026-11-17 triage (SCALE-1).** Taken by the CS-C builder (coordinator, 16:14Z). Do not open a package for it. Related: Guided results legibility (#1611).

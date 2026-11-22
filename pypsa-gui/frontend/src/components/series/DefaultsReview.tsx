@@ -201,7 +201,7 @@ function EditorLink({ component, family, onOpenEditor }: {
 }) {
   if (!onOpenEditor?.families.has(family)) return null
   return (
-    <button type="button" className="ml-1 text-accent hover:underline"
+    <button type="button" className="ml-1 text-link hover:underline"
       onClick={() => onOpenEditor.open(component, family)}>
       Open its editor ›
     </button>

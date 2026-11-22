@@ -25,6 +25,7 @@ hourly dispatch move 52 hours of stored energy.
 """
 from __future__ import annotations
 
+import logging
 import math
 from datetime import date
 from typing import NamedTuple
@@ -32,6 +33,8 @@ from typing import NamedTuple
 import numpy as np
 import pandas as pd
 import pypsa
+
+_log = logging.getLogger(__name__)
 
 HOURS = 168
 SNAPSHOTS = pd.date_range("2030-07-01", periods=HOURS, freq="h")
@@ -52,12 +55,23 @@ def _island_breakeven_item() -> str:
 
     return LABEL.lower()
 
+def _cpu_stable(x):
+    """Round a synthetic profile to 9 decimals, right after its np.exp/np.sin.
+
+    Array ``np.exp``/``np.sin`` use SIMD kernels whose last bit depends on the
+    CPU (AVX512 vs AVX2 runners). The exact input fingerprint hashes
+    ``float.hex``, so one ulp moved it between CI runners. 9 decimals is far
+    below any physical meaning here and far above an ulp, so every CPU rounds
+    to the same value.
+    """
+    return np.round(x, 9)
+
 
 def _solar(peak_hour: float = 13.0, width: float = 3.2,
            cloud: tuple[float, ...] = (1.0, 0.9, 0.55, 0.8, 1.0, 0.95, 0.7)
            ) -> np.ndarray:
     """Per-unit PV availability: a daylight bell times a daily cloud factor."""
-    bell = np.exp(-((_HOD - peak_hour) ** 2) / (2 * width ** 2))
+    bell = _cpu_stable(np.exp(-((_HOD - peak_hour) ** 2) / (2 * width ** 2)))
     bell[(_HOD < 6) | (_HOD > 20)] = 0.0
     return np.clip(bell * np.array(cloud)[_DAY], 0.0, 1.0)
 
@@ -65,14 +79,14 @@ def _solar(peak_hour: float = 13.0, width: float = 3.2,
 def _wind(mean: float = 0.38, seed: int = 7) -> np.ndarray:
     """Per-unit wind availability: a slow synoptic swing plus gusts."""
     rng = np.random.default_rng(seed)
-    synoptic = mean + 0.25 * np.sin(2 * np.pi * _H / 96.0 + 0.8)
+    synoptic = mean + 0.25 * _cpu_stable(np.sin(2 * np.pi * _H / 96.0 + 0.8))
     gust = rng.normal(0.0, 0.07, HOURS)
     return np.clip(synoptic + gust, 0.02, 0.98)
 
 
 def _day_shape(base: float, peak: float, peak_hour: float = 15.0,
                width: float = 4.5) -> np.ndarray:
-    return base + (peak - base) * np.exp(-((_HOD - peak_hour) ** 2) / (2 * width ** 2))
+    return base + (peak - base) * _cpu_stable(np.exp(-((_HOD - peak_hour) ** 2) / (2 * width ** 2)))
 
 
 def _base(name: str, snapshots=SNAPSHOTS) -> pypsa.Network:
@@ -145,7 +159,7 @@ def build_eh_datacenter(phases=None, load_spec=None, planning=None) -> pypsa.Net
     n.add("Bus", "it_bus", v_nom=11.0, carrier="AC", x=0.0, y=0.0)
 
     # Wholesale supply beyond the PoC (not firm capacity of the hub).
-    price = 70.0 + 40.0 * np.exp(-((_HOD - 19) ** 2) / 8.0)
+    price = 70.0 + 40.0 * _cpu_stable(np.exp(-((_HOD - 19) ** 2) / 8.0))
     n.add("Generator", "grid_supply", bus="grid", carrier="grid",
           p_nom=500.0, marginal_cost=0.0)
     n.generators_t.marginal_cost = pd.DataFrame(
@@ -198,13 +212,14 @@ def build_eh_datacenter(phases=None, load_spec=None, planning=None) -> pypsa.Net
 
     _tag_columns(n)
     n.buses.at["grid", "eh_poc"] = True
-    # SCR gate inputs at the PoC: a 250 MVA fault level against ~30 MVA of
-    # inverter-based resources (PV + BESS inverters; the UPS feeds no fault
-    # upstream, its rectifier blocks it) → SCR ≈ 8, which passes. The connection is CAPACITY-weak (40 MW), not SCR-weak.
+    # SCR gate input at the PoC: a 250 MVA fault level. The inverter-based
+    # capacity is not stated: the SCR gate derives it from the converter-coupled
+    # assets (PV, the BESS and any backup strings), so added strings lower the
+    # SCR (DC grid-readiness walkthrough 05). Under a set power architecture the
+    # UPS and the critical bus sit behind it and are left out. The connection is
+    # CAPACITY-weak (40 MW), not SCR-weak.
     n.buses.at["grid", "eh_sk_mva"] = 250.0
-    n.buses.at["grid", "eh_ibr_mva"] = 30.0
     n.buses.at["dc_mv", "eh_sk_mva"] = 220.0
-    n.buses.at["dc_mv", "eh_ibr_mva"] = 25.0
     n.buses.at["it_bus", "eh_critical"] = True
     n.links.at["grid_import", "eh_role"] = "grid_import"
     # The import is firm only with its own outage data (decision 6 / Q7).
@@ -220,6 +235,14 @@ def build_eh_datacenter(phases=None, load_spec=None, planning=None) -> pypsa.Net
         _apply_dc_profile(n, load_spec, snaps, _single_year_phase(load_spec, planning).it_mw,
                           timezone=_dc_timezone("eh_datacenter"))
         _dc_backup(n, "eh_datacenter", load_spec, planning)
+    # The campus as it stands is in service and sunk, as the staged campus's
+    # first period and the single-year H2 hub (WALK-IMPROVE-1 b): a typed
+    # overnight cost of 0 is an established 0, so the investment case has its
+    # capex (the candidates). None is extendable; the PoC meter stays untyped.
+    for frame in ("generators", "storage_units", "links"):
+        df = getattr(n, frame)
+        rows = [a for a in DC_EXISTING if a in df.index]
+        df.loc[rows, ["overnight_cost", "discount_rate"]] = [0.0, 0.07]
     return n
 
 
@@ -303,7 +326,7 @@ NATIVE_PLANNING: dict[str, Planning] = {
 #: The single-year examples (E1d): one period, the start year, which dates the
 #: modelled week (or year); the end year is the horizon. True where the
 #: example ships an investment case, which needs a later end year.
-SINGLE_YEAR: dict[str, bool] = {"eh_datacenter": False, "eh_h2_hub": True,
+SINGLE_YEAR: dict[str, bool] = {"eh_datacenter": True, "eh_h2_hub": True,
                                 "eh_microgrid": True}
 
 
@@ -374,7 +397,8 @@ def _single_year_planning(template_id: str, raw: dict, start: int, end: int) -> 
     if SINGLE_YEAR[template_id] and end <= start:
         raise PlanningError(f"planning.end_year: the investment case runs from the start year "
                             f"to the end year, so it must be after the start year ({start}), "
-                            f"got {end}", "planning.end_year")
+                            f"got {end}. Enter an end year of {start + 1} or later",
+                            "planning.end_year")
     if end < start:
         raise PlanningError(f"planning.end_year: the start year ({start}) or later, got {end}",
                             "planning.end_year")
@@ -716,20 +740,134 @@ def _check_dc_peak(template_id: str, spec, planning: Planning | None = None) -> 
     the plan could only shed (gatekeeper review of DC grid readiness 01).
     The one check the grid-readiness scorecard also reports
     (``services.adequacy.site_peak.peak_check``)."""
-    from services.adequacy.site_peak import describe, peak_check, unset_periods
+    from services.adequacy.site_peak import describe
     from services.dc_load_profile import DcLoadError
+
+    n, over = _peak_over(template_id, spec, planning)
+    if not over:
+        return
+    row = over[0]
+    # The staged plan reuses one modelled week for every phase (walkthrough 02).
+    week = " of the modelled week" if isinstance(n.snapshots, pd.MultiIndex) else ""
+    words = (f"dc_load.phases: the {row['period']} peak is {row['load_mw']:.1f} MW (at "
+             f"{row['binding_snapshot']}{week}), above {describe(row)}.")
+    # One modelled year: its IT load is the form's one field (the staged plan's
+    # phases are read-only there, so no number is searched).
+    single = not week
+    bess = spec.backup.mode == "bess"
+    most = _search_fitting_it(template_id, spec, planning) if single and bess else None
+    # Name another backup mode only where it builds (GK A review).
+    alts = tuple(
+        m for m in (("hybrid",) if single else ("hybrid", "genset"))
+        if bess and _mode_builds(template_id, spec, m, planning)
+    )
+    raise DcLoadError(words + _peak_ways_out(spec, most, single=single, alts=alts),
+                      "dc_load.phases")
+
+
+def _search_fitting_it(template_id: str, spec, planning: Planning | None) -> float | None:
+    """``_largest_fitting_it``, or None when the search raises: the refusal
+    stands without its "at most N MW" way out, and the error is logged, never
+    shown as the user's (GK A review)."""
+    try:
+        return _largest_fitting_it(template_id, spec, planning)
+    except Exception:
+        _log.warning("DC peak IT load search failed; not naming a number", exc_info=True)
+        return None
+
+
+def _mode_builds(template_id: str, spec, mode: str, planning: Planning | None) -> bool:
+    """Whether ``spec`` with backup ``mode`` passes the same peak check. A probe
+    that raises counts as "doesn't build": the mode is not named, and the
+    error is logged, never shown as the user's (GK A review)."""
+    try:
+        return not _peak_over(template_id, _with_backup(spec, mode), planning)[1]
+    except Exception:
+        _log.warning("DC peak probe with %s backup failed; not naming it", mode,
+                     exc_info=True)
+        return False
+
+
+def _with_backup(spec, mode: str):
+    """``spec`` with another backup mode, the rest as entered."""
+    return spec.model_copy(update={"backup": spec.backup.model_copy(update={"mode": mode})})
+
+
+def _peak_over(template_id: str, spec, planning: Planning | None = None):
+    """The built network and the periods whose peak is above the cap
+    (``site_peak.peak_check``; an unset energization is unknown, never over)."""
+    from services.adequacy.site_peak import peak_check, unset_periods
 
     if planning is None:
         n = BUILDERS[template_id](load_spec=spec)
     else:
         n = BUILDERS[template_id](load_spec=spec, planning=planning)
-    # A period whose energization is a placeholder is unknown, never refused.
     unset = unset_periods(template_meta(template_id, planning, load_spec=spec))
-    for row in peak_check(n, island_config(template_id, planning, load_spec=spec), unset=unset):
-        if row["headroom_mw"] is not None and row["headroom_mw"] < -1e-9:
-            raise DcLoadError(
-                f"dc_load.phases: the {row['period']} peak is {row['load_mw']:.1f} MW (at "
-                f"{row['binding_snapshot']}), above {describe(row)}", "dc_load.phases")
+    rows = peak_check(n, island_config(template_id, planning, load_spec=spec), unset=unset)
+    return n, [r for r in rows if r["headroom_mw"] is not None and r["headroom_mw"] < -1e-9]
+
+
+#: The New project form's backup mode words (frontend ``MODE_LABEL``).
+_MODE_WORD = {"hybrid": "Hybrid", "genset": "Gensets"}
+
+#: The New project form takes the IT load in decimals; the way out names it to this step (MW).
+IT_STEP_MW = 0.1
+
+#: The bisection's step cap: far above log2 of any IT load the form takes.
+_BISECT_CAP = 64
+
+
+def _largest_fitting_it(template_id: str, spec, planning) -> float:
+    """The largest IT load, on the form's 0.1 MW step, whose peak fits: a bisection
+    on the same check (GK A D1: the load is not exactly proportional to the IT
+    load, so the linear IT × cap / load is no bound). 0 when none fits. The
+    bracket is proven: 0 MW fits, and the current IT load is refused (GK A
+    review), so ~9 builds of the network."""
+    import math
+
+    def fits(it_mw: float) -> bool:
+        phase = spec.phases[0].model_copy(update={"it_mw": it_mw})
+        return not _peak_over(template_id, spec.model_copy(update={"phases": [phase]}), planning)[1]
+
+    it = float(spec.phases[0].it_mw)
+    lo, hi = 0, int(math.ceil(it / IT_STEP_MW - 1e-9))  # lo fits (0 MW), hi refused
+    # A bisection ends in ceil(log2(hi)) steps; the cap makes a regression
+    # that stops shrinking the bracket fail fast instead of hanging (GK A review).
+    for _ in range(_BISECT_CAP):
+        if hi - lo <= 1:
+            return round(lo * IT_STEP_MW, 1)
+        mid = (lo + hi) // 2
+        if fits(mid * IT_STEP_MW):
+            lo = mid
+        else:
+            hi = mid
+    raise RuntimeError(f"IT load search did not converge in {_BISECT_CAP} steps")
+
+
+def _peak_ways_out(spec, most: float | None, *, single: bool,
+                   alts: tuple[str, ...] = ()) -> str:
+    """Why the peak is refused and each way out (DC grid-readiness walkthrough 01).
+    ``most`` is the largest IT load that fits (``_largest_fitting_it``), searched for
+    Battery backup only: with gensets the firm cap may move with the IT load, so no
+    number is given (GK A D1). 0 says no IT load fits. ``alts`` are the other
+    backup modes that build with the same spec: only those are named (GK A
+    review: Hybrid is refused too at a high IT load)."""
+    bess = spec.backup.mode == "bess"
+    out = (" Battery strings carry outages only, so the normal peak must fit the import."
+           if bess else "")
+    ways = []
+    if most is not None:
+        if most > 0:
+            ways.append(f"set IT load to at most {most:g} MW")
+        else:
+            out += " No IT load fits the energized import."
+    named = [_MODE_WORD[m] for m in ("hybrid", "genset") if m in alts]
+    if bess and named:
+        ways.append(f"pick {' or '.join(named)} backup")
+    ways.append("raise the connection after you create the project" if single
+                else "change the build plan after you create the project")
+    said = ways[0] if len(ways) == 1 else ", ".join(ways[:-1]) + ", or " + ways[-1]
+    return f"{out} {said[0].upper()}{said[1:]}."
 
 
 def dc_load_meta(template_id: str, spec) -> dict:
@@ -769,7 +907,7 @@ def build_eh_h2_hub(load_spec=None, planning=None) -> pypsa.Network:
     n.add("Bus", "hub", v_nom=110.0, carrier="AC", x=0.0, y=0.0)
     n.add("Bus", "h2", carrier="H2", x=0.0, y=0.0)
 
-    price = 60.0 + 35.0 * np.exp(-((_HOD - 18) ** 2) / 10.0)
+    price = 60.0 + 35.0 * _cpu_stable(np.exp(-((_HOD - 18) ** 2) / 10.0))
     n.add("Generator", "grid_supply", bus="grid", carrier="grid",
           p_nom=1000.0, marginal_cost=0.0)
     n.generators_t.marginal_cost = pd.DataFrame(
@@ -943,7 +1081,7 @@ def build_eh_microgrid(load_spec=None, planning=None) -> pypsa.Network:
     n.add("Load", "hospital_load", bus="hospital", carrier="AC")
     n.loads_t.p_set = pd.DataFrame({
         "residential": _day_shape(3.5, 7.5, peak_hour=19.0, width=3.5),
-        "hospital_load": 1.5 + 0.2 * np.sin(2 * np.pi * _HOD / 24.0),
+        "hospital_load": 1.5 + 0.2 * _cpu_stable(np.sin(2 * np.pi * _HOD / 24.0)),
     }, index=snaps)
 
     _tag_columns(n)
@@ -1520,17 +1658,26 @@ def _staged_commercial_and_finance(planning: Planning | None = None) -> dict:
     ``planning`` (None: the example's years), stored as the routes store them
     (validated, dumped): the value flows are the `single_owner` template
     built on the template's network."""
+    plan = _dc_plan(planning)
+    return _dc_blocks(build_eh_datacenter_staged(planning=planning), _dc_finance(plan), plan)
+
+
+def _dc_blocks(n, finance: dict, plan: _DcPlan, *, tariff: bool = True) -> dict:
+    """A campus's `commercial` and `finance` blocks on its network ``n``: the
+    grid import as the PoC, the campus tariff (unless ``tariff`` is off) and the
+    `single_owner` value flows, stored as the routes store them (validated,
+    dumped)."""
     from models.commercial import CommercialConfig
     from models.finance import FinanceInputs
     from services.commercial import value_flow_templates as VFT
 
-    plan = _dc_plan(planning)
     base = CommercialConfig.model_validate(
-        {"poc_link": "grid_import", "import_tariff": _dc_tariff(plan), "timezone": "UTC"})
-    vf = VFT.build("single_owner", build_eh_datacenter_staged(planning=planning), base).config
+        {"poc_link": "grid_import", "timezone": "UTC",
+         **({"import_tariff": _dc_tariff(plan)} if tariff else {})})
+    vf = VFT.build("single_owner", n, base).config
     commercial = base.model_copy(update={"value_flows": vf.model_dump(mode="json")})
     return {"commercial": commercial.model_dump(mode="json"),
-            "finance": FinanceInputs.model_validate(_dc_finance(plan)).model_dump(mode="json")}
+            "finance": FinanceInputs.model_validate(finance).model_dump(mode="json")}
 
 
 def _microgrid_commercial_and_finance(planning: Planning | None = None) -> dict:
@@ -1550,9 +1697,145 @@ def _microgrid_commercial_and_finance(planning: Planning | None = None) -> dict:
                                     .model_dump(mode="json")}
 
 
+def _dc_single_commercial_and_finance(planning: Planning | None = None) -> dict:
+    """The single-year campus's `commercial` and `finance` blocks
+    (WALK-IMPROVE-1 b): the staged campus's basis (`_dc_finance`, the
+    `single_owner` value flows) on one period, without its tariff: a project
+    solve applies a tariff at solve time and the sizing loop and intent
+    comparison do not, so a tariff here would make them size on a cheaper
+    import than the solve (GK A, #1711; the single-year island ships none
+    either). Every asset's COD is the start year, close a year before it, the
+    case to the end year, as the single-year H2 hub."""
+    p = planning or NATIVE_PLANNING["eh_datacenter"]
+    n = build_eh_datacenter(planning=planning)
+    first = f"{p.start_year}-01-01"
+    owned = [*n.generators.index.drop("grid_supply"), *n.storage_units.index, *n.links.index]
+    fin = {**_dc_finance(_dc_plan()),
+           "financial_close": f"{p.start_year - 1}-01-01",
+           "cod_by_asset": {a: first for a in owned if a != "grid_import"},
+           "degradation_by_asset": {a: (0.005 if a == "rooftop_pv" else 0.0)
+                                    for a in (*n.generators.index.drop("grid_supply"),
+                                              *n.storage_units.index)},
+           "analysis_years": p.analysis_years}
+    return _dc_blocks(n, fin, _dc_plan(), tariff=False)
+
+
+# ── Finance defaults every template ships (WALK-IMPROVE-1 b) ────────────────
+#
+# A template's case runs on its shipped inputs; each input it ships is an
+# assumption the screens mark, with its source (`finance_assumed`). Filled
+# only where the template states nothing: a template's own value wins.
+
+#: German corporate tax (the DE pack). The Hebesatz is the municipality's:
+#: Destatis's 2023 average over all municipalities is 407 %, rounded to the
+#: IPP's 400 %.
+TAX_DEFAULT: dict = {"tax_pack_id": "eu_de", "hebesatz_pct": 400.0}
+_AFA = "BMF AfA-Tabelle AV (BMF-Schreiben vom 15.12.2000, BStBl. I 2000 S. 1532)"
+#: Depreciation class by asset carrier: the AfA table's where it lists the
+#: asset, else stated (the pack never guesses one, so the case would stop).
+#: Straight line throughout: the degressive AfA is an election (§7 Abs. 2 EStG),
+#: and a staged build after the COD cannot take it (P5).
+_AFA_BY_CARRIER: dict[str, str] = {"solar": "afa_20", "wind": "afa_16", "onwind": "afa_16",
+                                   "gas": "afa_19", "diesel": "afa_19",
+                                   "battery": "afa_10"}   # 3.1.6, 3.1.5, 3.1.2, 3.1.3
+#: An asset the AfA table does not list and the network gives no finite life.
+_AFA_UNLISTED = "afa_20"
+
+#: Where each shipped finance input comes from (`models.finance.FinanceAssumedValue`
+#: without its value). Keys are `FinanceInputs` fields.
+FINANCE_SOURCES: dict[str, dict] = {
+    "wacc_nominal": {"source": "assumed, no primary source",
+                     "note": "nominal, post-tax: a planning value. Set your own"},
+    "cost_of_equity": {"source": "assumed, no primary source", "note": "Set your own"},
+    "escalation": {"source": "ECB monetary policy strategy (2 % inflation target)",
+                   "source_year": 2021, "note": "every cost and price class at 2 %/yr"},
+    "inflation": {"source": "ECB monetary policy strategy (2 % inflation target)",
+                  "source_year": 2021},
+    "tax_pack_id": {"source": "German corporate tax: KStG §23 (15 %), SolZG (5.5 %), GewStG "
+                    "§11 (3.5 % × Hebesatz)", "source_year": 2025,
+                    "note": "a stand-in: every template is priced in EUR on German data. "
+                            "Pick your country's tax rule"},
+    "hebesatz_pct": {"source": "Destatis, Realsteuervergleich 2023: average trade-tax "
+                     "Hebesatz of all municipalities 407 %", "source_year": 2023,
+                     "note": "rounded to 400 %; set your municipality's"},
+    "depreciation_class_by_asset": {"source": _AFA, "source_year": 2000,
+                                    "note": "straight line: 3.1.2 Stromerzeugung (Gleichrichter, "
+                                            "Ladeaggregate, Notstromaggregate, Stromgeneratoren, "
+                                            "Stromumformer usw.) 19 years; 3.1.3 Akkumulatoren 10; "
+                                            "3.1.5 Windkraftanlagen 16; 3.1.6 "
+                                            "Photovoltaikanlagen 20. Assets the table does not "
+                                            "list (electrolysers, H2 storage, links): assumed, "
+                                            "network lifetime, else 20 years"},
+    "acquisition_date": {"source": "assumed", "note": "the first commercial operation date"},
+    "degradation_by_asset": {"source": "Jordan & Kurtz, Photovoltaic Degradation Rates: An "
+                             "Analytical Review, Prog. Photovolt. 21 (2013)",
+                             "source_year": 2013,
+                             "note": "PV 0.5 %/yr (median of field data); other assets none, "
+                                     "assumed"},
+    "cod_by_asset": {"source": "assumed", "note": "every asset in service in the first "
+                     "modelled year"},
+    "financial_close": {"source": "assumed", "note": "before the first operation date"},
+    "analysis_years": {"source": "assumed", "note": "the template's planning horizon"},
+    "terminal_value": {"source": "assumed", "note": "each asset's remaining life valued as "
+                       "an annuity of its last year"},
+    "tax_losses": {"source": "assumed", "note": "a sponsor with other taxable income"},
+}
+
+
+def _afa_class(n, component: str, asset: str) -> str:
+    df = n.components[component].static
+    if asset not in df.index:
+        return _AFA_UNLISTED
+    cls = _AFA_BY_CARRIER.get(str(df.at[asset, "carrier"]))
+    if cls is not None:
+        return cls
+    life = float(df.at[asset, "lifetime"]) if "lifetime" in df else math.inf
+    return f"afa_{int(round(life))}" if math.isfinite(life) and life >= 1 else _AFA_UNLISTED
+
+
+def _with_finance_defaults(template_id: str, built: dict,
+                           planning: Planning | None = None) -> dict:
+    """``built`` with the tax inputs the template leaves unset filled in and
+    the `finance_assumed` record of what it ships (WALK-IMPROVE-1 b)."""
+    fin = built.get("finance")
+    if not fin:
+        return built
+    fin = dict(fin)
+    for k, v in TAX_DEFAULT.items():
+        if fin.get(k) is None:
+            fin[k] = v
+    if fin.get("acquisition_date") is None and fin.get("cod_by_asset"):
+        fin["acquisition_date"] = min(fin["cod_by_asset"].values())
+    owners = ((built.get("commercial") or {}).get("value_flows") or {}).get("asset_owners") or []
+    classes = dict(fin.get("depreciation_class_by_asset") or {})
+    if fin["tax_pack_id"] == "eu_de" and owners:
+        n = BUILDERS[template_id](planning=planning)
+        for o in owners:
+            a, comp = o["asset_id"], o["component"]
+            if a not in classes:
+                classes[a] = _afa_class(n, comp, a)
+    fin["depreciation_class_by_asset"] = classes
+    from models.finance import FinanceInputs
+
+    fin = FinanceInputs.model_validate(fin).model_dump(mode="json")
+    return {**built, "finance": fin, "finance_assumed": finance_assumed(fin)}
+
+
+def finance_assumed(fin: dict) -> dict:
+    """The `finance_assumed` record of the shipped finance inputs ``fin``
+    (validated, as dumped): each `FINANCE_SOURCES` key ``fin`` sets."""
+    from models.finance import parse_finance_assumed
+
+    assumed = {k: {"value": fin[k], **src} for k, src in FINANCE_SOURCES.items()
+               if fin.get(k) not in (None, {}, [])}
+    parse_finance_assumed(assumed)
+    return assumed
+
+
 #: Template blocks that need the backend's models (built on first use).
 _SOLVER_CONFIG_BUILT = {"eh_datacenter_staged": _staged_commercial_and_finance,
-                        "eh_microgrid": _microgrid_commercial_and_finance}
+                        "eh_microgrid": _microgrid_commercial_and_finance,
+                        "eh_datacenter": _dc_single_commercial_and_finance}
 #: Built blocks by template id, or by (id, Planning) for entered years.
 _BUILT_CACHE: dict[str | tuple, dict] = {}
 
@@ -1566,8 +1849,9 @@ def solver_config(template_id: str, planning: Planning | None = None) -> dict:
     key = template_id if _planned(template_id, planning) is None else (template_id, planning)
     if template_id in _SOLVER_CONFIG_BUILT:
         if key not in _BUILT_CACHE:
-            _BUILT_CACHE[key] = (_SOLVER_CONFIG_BUILT[template_id]() if key == template_id
-                                 else _SOLVER_CONFIG_BUILT[template_id](planning))
+            _BUILT_CACHE[key] = _with_finance_defaults(
+                template_id, _SOLVER_CONFIG_BUILT[template_id]() if key == template_id
+                else _SOLVER_CONFIG_BUILT[template_id](planning), _planned(template_id, planning))
         built = copy.deepcopy(_BUILT_CACHE[key])
     return {**SOLVER_CONFIG, **SOLVER_CONFIG_EXTRA.get(template_id, {}), **built}
 
@@ -1876,11 +2160,50 @@ def template_meta(template_id: str, planning: Planning | None = None, *, load_sp
 
     p = _planned(template_id, planning)
     if p is None:
-        return copy.deepcopy(TEMPLATE_META[template_id])
-    meta = _PLANNED_META[template_id](p, load_spec)
-    if template_id in _GRID_READINESS_SITE:
-        meta["ledger"] = [*meta["ledger"], *grid_readiness_ledger(template_id)]
+        meta = copy.deepcopy(TEMPLATE_META[template_id])
+    else:
+        meta = _PLANNED_META[template_id](p, load_spec)
+        if template_id in _GRID_READINESS_SITE:
+            meta["ledger"] = [*meta["ledger"], *grid_readiness_ledger(template_id)]
+    meta["ledger"] = [*meta.get("ledger", []), *_finance_ledger(template_id, p, meta)]
     return meta
+
+
+def _finance_ledger(template_id: str, planning: Planning | None, meta: dict) -> list[dict]:
+    """The ledger rows for the finance defaults a template ships
+    (WALK-IMPROVE-1 b) that its own ledger does not state already."""
+    fin = solver_config(template_id, planning).get("finance")
+    if not fin:
+        return []
+    have = {r.get("item") for r in meta.get("ledger", [])}
+    rows = []
+    if template_id == "eh_datacenter":
+        first = min(fin["cod_by_asset"].values())[:4]
+        rows += [
+            {"item": "finance inputs",
+             "value": f"the staged campus's: nominal EUR, escalation 2 %/yr, all equity at "
+                      f"{fin['wacc_nominal'] * 100:g} %, close {fin['financial_close']}, "
+                      f"{fin['analysis_years']} years",
+             "source": "assumed",
+             "note": f"every asset in service on {first}-01-01; the week weighs a year and "
+                     f"stands for each operating year, so nothing is annualised"},
+            {"item": "existing campus",
+             "value": ", ".join(a for a in DC_EXISTING) + ": overnight cost 0",
+             "source": "assumed",
+             "note": "in service and sunk: no capex in the case; the candidates the plan "
+                     "builds are the investments. The solve is unchanged"}]
+    if "tax" not in have and fin.get("tax_pack_id") == TAX_DEFAULT["tax_pack_id"]:
+        rows.append({
+            "item": "tax",
+            "value": f"German corporate tax (pack eu_de), Hebesatz {fin['hebesatz_pct']:g} %",
+            "source": "assumed",
+            "note": "a stand-in: the template is priced in EUR on German data; pick your "
+                    "country's tax rule. Depreciation straight line by the BMF AfA-Tabelle AV "
+                    "(2000): 3.1.2 Stromerzeugung 19 years, 3.1.3 Akkumulatoren 10, 3.1.5 "
+                    "Windkraftanlagen 16, 3.1.6 Photovoltaikanlagen 20; assets it does not list "
+                    "assumed, network lifetime, else 20 years. Hebesatz: Destatis 2023 average "
+                    "407 %, rounded to 400 %"})
+    return rows
 
 
 def _base_island(template_id: str, planning: Planning | None = None) -> dict | None:

@@ -100,7 +100,7 @@ export type ChartSize = keyof typeof CHART_HEIGHT
 export const CHART_TICK = {
   fontSize: 10,
   fill: 'var(--color-axis)',
-  fontFamily: 'var(--font-family-mono)',
+  fontFamily: 'var(--font-mono)',
   style: { fontVariantNumeric: 'tabular-nums' } as CSSProperties,
 }
 
@@ -270,7 +270,7 @@ export function ChartFrame({
     >
       <header className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-border bg-bg-2">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 min-w-0">
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] [overflow-wrap:anywhere]">{title}</h3>
+          <h3 className="text-h3 font-semibold text-text [overflow-wrap:anywhere]">{title}</h3>
           {figure != null && figure !== '' && (
             <span className="font-mono text-[12px] font-semibold text-text tabular-nums shrink-0" data-chart-figure="">
               {figure}

@@ -11,11 +11,14 @@ import { useUIStore } from '../../store/uiStore'
 import { AssumptionsCard, isAssumedItem } from './AssumptionsCard'
 import { CommercialCard } from './cards/CommercialCard'
 import { SectionHoldings } from './SectionHoldings'
+import { useSizedAssets } from './useHubData'
+import { ExpertOnlyLines } from './ExpertOnlyLines'
 import { GoalStudyRun } from './shared/GoalStudyRun'
 import { NextSectionButton } from '../../components/NextSectionButton'
 import { sectionMeta } from '../../layout/flowSections'
-import { openFlowTarget, openFlowTargetInPlace, openSectionInExpert } from '../../layout/flowNavigation'
+import { openFlowTarget, openFlowTargetInPlace, openSectionInExpert, withReturnFrom } from '../../layout/flowNavigation'
 import { PROCESS_UNIT_ITEM } from '../../layout/paletteData'
+import { SectionTitle } from '../../components/PageKit'
 
 // One flow section in Guided: its name and state, the items that are still to
 // do or to check (a Guided user never has a blocker hidden: the field is named
@@ -37,13 +40,13 @@ function ItemRow({ item }: { item: FlowItem }) {
       <button type="button" data-testid="section-item-open"
         onClick={() => openFlowTargetInPlace(item.target)}
         title={`Open ${field ?? 'this field'} here`}
-        className="shrink-0 inline-flex items-center gap-1 text-[11px] text-accent hover:underline">
+        className="shrink-0 inline-flex items-center gap-1 text-[11px] text-link hover:underline">
         Open here ›
       </button>
       <button type="button" data-testid="section-item-expert"
         onClick={() => openFlowTarget(item.target)}
         title="Open this section in Expert"
-        className="shrink-0 text-[11px] text-muted hover:text-accent hover:underline">
+        className="shrink-0 text-[11px] text-muted hover:text-link hover:underline">
         Open in Expert
       </button>
     </li>
@@ -67,10 +70,10 @@ export function SectionView({ id, onNext, children }: {
   return (
     <div data-testid={`section-view-${id}`} className="flex flex-col gap-4">
       <div className="flex items-center gap-2">
-        <span className="font-mono text-[11px] text-muted">{meta.number}</span>
-        <h2 className="text-[15px] font-semibold text-text">{meta.label}</h2>
+        <span className="font-mono text-body text-muted">{meta.number}</span>
+        <SectionTitle>{meta.label}</SectionTitle>
         {!stateless && <FlowStateDot state={s?.state ?? null} testId={`section-state-${id}`} />}
-        <span className="text-[12px] text-muted" data-testid="section-summary">
+        <span className="text-lead text-muted" data-testid="section-summary">
           {isError ? 'The flow could not be read from the server.'
             : stateless ? (s?.summary ?? '')
               : `${FLOW_STATE_WORDS[s?.state ?? 'unknown']}${s?.summary ? ` · ${s.summary}` : ''}`}
@@ -78,11 +81,13 @@ export function SectionView({ id, onNext, children }: {
       </div>
       {items.length > 0 && (
         <ul data-testid="section-items"
-          className="flex flex-col gap-1.5 rounded border border-border bg-panel px-3 py-2">
+          className="flex flex-col gap-1.5 rounded-card border border-border bg-panel px-3 py-2">
           {items.map((it, i) => <ItemRow key={`${it.code}-${it.target.entity ?? ''}-${i}`} item={it} />)}
         </ul>
       )}
-      <AssumptionsCard key={id} items={assumed} />
+      {/* Waiting: the section is "to check" only because of these defaults. */}
+      <AssumptionsCard key={id} items={assumed}
+        waiting={s?.state === 'warning' && items.length === 0 && assumed.length > 0} />
       {!stateless && <SectionNotInScope section={id} />}
       {infos.length > 0 && (
         <ul data-testid="section-infos" className="flex flex-col gap-0.5 text-[11px] text-muted">
@@ -90,6 +95,7 @@ export function SectionView({ id, onNext, children }: {
         </ul>
       )}
       {children}
+      <ExpertOnlyLines section={id} />
       {onNext && (
         <div>
           <NextSectionButton from={id} onNext={onNext} testId={`section-next-${id}`}
@@ -107,6 +113,8 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
   const { flow, section, isError, isPending } = useProjectFlow()
   const setActiveSection = useUIStore(s => s.setActiveSection)
   const gate = useRunGate('all')
+  // Section 5's sized assets read the last study's sizes (walkthrough asset-investment 03).
+  const sized = useSizedAssets(id === 'assets')
   if (id === 'readiness') {
     return (
       <div data-testid="hub-card-readiness" className="flex flex-col gap-2 rounded border border-border bg-panel p-4">
@@ -123,12 +131,12 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
             {gate.blocker && (<>
               <button type="button" data-testid="readiness-open"
                 onClick={() => openFlowTargetInPlace(gate.blocker!.target)}
-                className="inline-flex items-center gap-1 text-accent hover:underline">
+                className="inline-flex items-center gap-1 text-link hover:underline">
                 Open here ›
               </button>
               <button type="button" data-testid="readiness-open-expert"
                 onClick={() => openFlowTarget(gate.blocker!.target)}
-                className="text-muted hover:text-accent hover:underline">
+                className="text-muted hover:text-link hover:underline">
                 Open in Expert
               </button>
             </>)}
@@ -166,7 +174,7 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
   return (
     <div data-testid={`hub-card-${id}`} className="flex flex-col gap-3 rounded border border-border bg-panel p-4">
       <SectionHoldings id={id} holds={s?.holds} total={s?.holds_total} pending={isPending} failed={isError}
-        deferred={flow?.deferred === true} />
+        deferred={flow?.deferred === true} sized={sized} />
       <div>
         <button type="button" data-testid={`section-open-expert-${id}`} onClick={() => openSectionInExpert(id)}
           className="inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-[11px] text-muted hover:border-accent hover:text-accent">
@@ -175,10 +183,11 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
         {id === 'carriers' && (
           // A unit that turns inputs into a product, entered as rates per tonne. Its form is an Expert panel.
           <button type="button" data-testid="section-add-process-unit"
-            onClick={() => {
+            // Adding stays an Expert action (GAP03-ADD-1 a); "Back to Carriers & processes" returns.
+            onClick={() => withReturnFrom(() => {
               openSectionInExpert(id)
               useUIStore.getState().setCreationItem({ id: PROCESS_UNIT_ITEM.id, label: PROCESS_UNIT_ITEM.label })
-            }}
+            })}
             title="Add a unit that turns inputs into a product; you enter rates per tonne and the efficiencies are worked out"
             className="ml-2 inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-[11px] text-muted hover:border-accent hover:text-accent">
             Add a process unit in Expert ›

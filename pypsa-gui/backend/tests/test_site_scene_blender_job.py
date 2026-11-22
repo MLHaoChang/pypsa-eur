@@ -23,6 +23,7 @@ from db.models import SolveJobRow
 from services import solve_queue as sq
 from services.site_scene import blender_job
 from services.site_scene import blender_worker as bw
+from services.site_scene.contract import SceneError
 from tests.test_site_scene_blender_worker import make  # noqa: F401 - fixture
 from tests.test_site_scene_export import _scene_with_buildings
 from tests.test_site_scene_routes import _empty_network, _kind
@@ -236,8 +237,10 @@ def test_a_second_job_while_one_is_active_is_409(client, geo, worker):
     [
         "not-a-uuid",
         "x" * 36,
-        str(uuid.uuid4()).upper(),
-        str(uuid.uuid4()).replace("-", ""),
+        # Fresh values each run, fixed ids: pytest-xdist needs every worker to
+        # collect the same test ids, and a random value in an id breaks that.
+        pytest.param(str(uuid.uuid4()).upper(), id="upper-case-uuid"),
+        pytest.param(str(uuid.uuid4()).replace("-", ""), id="uuid-without-dashes"),
     ],
 )
 def test_an_artifact_id_that_is_not_a_canonical_uuid_is_404(client, geo, bad):
@@ -255,7 +258,7 @@ def test_an_artifact_id_that_is_not_a_canonical_uuid_is_404(client, geo, bad):
         "/etc/passwd",
         "",
         None,
-        "{" + str(uuid.uuid4()) + "}",
+        pytest.param("{" + str(uuid.uuid4()) + "}", id="braced-uuid"),
     ],
 )
 def test_artifact_dir_never_builds_a_path_from_a_non_uuid(tmp_path, bad):
@@ -480,9 +483,10 @@ def test_a_timed_out_job_fails_typed_with_no_artifact_and_frees_the_dispatcher(
     monkeypatch.setattr(
         sq.SolveQueue,
         "_run_solve_job",
+        # Recorded once finished: the assert below reads the finished status.
         lambda self, job: (
-            started.append(time.monotonic()),
             self._finish(job, "completed"),
+            started.append(time.monotonic()),
         ),
     )
     scene = client.post(JOBS).json()
@@ -512,3 +516,103 @@ def test_a_symlinked_artifact_dir_is_404(client, geo, tmp_path):
     store.mkdir(parents=True, exist_ok=True)
     (store / aid).symlink_to(elsewhere / blender_job.ARTIFACTS / aid)
     assert client.get(ART + aid).status_code == 404
+
+
+# ── slice (b): GK B's pins on the artifact read ─────────────────────────────
+
+
+def test_a_symlinked_artifact_store_is_404(client, geo, tmp_path):
+    _scene_with_buildings(client, geo)
+    aid = str(uuid.uuid4())
+    elsewhere = tmp_path / "elsewhere"
+    blender_job._store(
+        elsewhere,
+        aid,
+        bw.Result(b"g", b"b", ""),
+        {"artifact_id": aid, "site_id": "campus"},
+    )
+    (geo / blender_job.ARTIFACTS).symlink_to(elsewhere / blender_job.ARTIFACTS)
+    assert client.get(ART + aid).status_code == 404
+
+
+def test_meta_json_is_always_read_under_its_own_small_cap(geo, monkeypatch):
+    aid = str(uuid.uuid4())
+    blender_job._store(
+        geo, aid, bw.Result(b"g", b"b", ""), {"artifact_id": aid, "site_id": "campus"}
+    )
+    caps = []
+    real = bw._read_output
+
+    def spy(work, name, cap):
+        caps.append((name, cap))
+        return real(work, name, cap)
+
+    monkeypatch.setattr(bw, "_read_output", spy)
+    blender_job.read_artifact(geo, "campus", aid)
+    meta_caps = [c for n, c in caps if n == "meta.json"]
+    assert meta_caps and set(meta_caps) == {blender_job.META_CAP}
+    assert blender_job.META_CAP < bw.Caps().output_bytes
+
+
+def test_an_oversized_meta_json_is_404(geo):
+    aid = str(uuid.uuid4())
+    pad = "x" * blender_job.META_CAP
+    blender_job._store(
+        geo,
+        aid,
+        bw.Result(b"g", b"b", ""),
+        {"artifact_id": aid, "site_id": "campus", "pad": pad},
+    )
+    with pytest.raises(SceneError) as e:
+        blender_job.read_artifact(geo, "campus", aid)
+    assert e.value.kind == "not_found"
+
+
+# ── GK B G2: read_return's refusals ─────────────────────────────────────────
+
+
+def _stored(tmp_path, glb=b"0123456789"):
+    aid = str(uuid.uuid4())
+    meta = {"artifact_id": aid, "site_id": "campus"}
+    blender_job._store(tmp_path, aid, bw.Result(glb, b"b", ""), meta)
+    return aid
+
+
+def test_a_return_at_its_cap_is_read_and_one_byte_over_is_a_typed_limit(tmp_path):
+    aid = _stored(tmp_path)
+    assert blender_job.read_return(tmp_path, "campus", aid, 10)[0] == b"0123456789"
+    with pytest.raises(SceneError) as e:
+        blender_job.read_return(tmp_path, "campus", aid, 9)
+    assert e.value.kind == "resource_limit"
+    assert e.value.detail == {"limit": "return_bytes", "max": 9}
+
+
+def test_a_return_with_no_glb_is_not_found(tmp_path):
+    aid = _stored(tmp_path)
+    (blender_job.artifact_dir(tmp_path, aid) / "scene.glb").unlink()
+    with pytest.raises(SceneError) as e:
+        blender_job.read_return(tmp_path, "campus", aid, 10)
+    assert e.value.kind == "not_found"
+
+
+def test_an_io_error_reading_the_return_is_not_found(tmp_path, monkeypatch):
+    aid = _stored(tmp_path)
+
+    def broken(work, name, cap):
+        if name == "scene.glb":
+            raise OSError(5, "Input/output error")
+        return real(work, name, cap)
+
+    real = bw._read_output
+    monkeypatch.setattr(bw, "_read_output", broken)
+    with pytest.raises(SceneError) as e:
+        blender_job.read_return(tmp_path, "campus", aid, 10)
+    assert e.value.kind == "not_found"
+
+
+def test_a_meta_json_that_is_not_an_object_is_not_found(tmp_path):
+    aid = _stored(tmp_path)
+    (blender_job.artifact_dir(tmp_path, aid) / "meta.json").write_text("[]")
+    with pytest.raises(SceneError) as e:
+        blender_job.read_return(tmp_path, "campus", aid, 10)
+    assert e.value.kind == "not_found"

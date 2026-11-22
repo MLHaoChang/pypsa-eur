@@ -132,9 +132,13 @@ def _assert_library_pins(cfg_before: SolverConfig, first_load: dict) -> None:
         db.commit()
     _wipe_in_memory()
     second = _load(PROJECT_NAME)
-    reasons = [i.get("reason") for i in second.get("library_issues") or []]
-    _step("IC: a removed Library item reloads as a library_ref_stale 'missing' issue",
-          reasons == ["missing"], repr(second.get("library_issues")))
+    issues = second.get("library_issues") or []
+    # project-io 03: the save copied the series into the project, so a removed
+    # Library item still serves its values and reloads as the copy-only notice
+    # (its currency is read from the Library), not as 'missing'.
+    _step("IC: a removed Library item reloads as a library_copy_only notice",
+          [(i.get("code"), i.get("reason")) for i in issues]
+          == [("library_copy_only", "copy_only")], repr(issues))
     after = sim_router._state["solver_config"].commercial or {}
     _step("IC: the config still names the pinned version (no silent substitution)",
           after.get("export_price_ref") == ref, repr(after.get("export_price_ref")))

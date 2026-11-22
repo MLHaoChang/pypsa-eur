@@ -6,6 +6,7 @@
 // a zero (ADR-0001).
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import EmptyState from '../../components/EmptyState'
 import {
   commercialApi, NoCommercialConfigError, SolverInFlightError, type BillingPayload,
   type ValueFlowsPayload,
@@ -19,12 +20,16 @@ import ValueFlowsView from './investment/ValueFlowsView'
 import InvestmentCaseView from './investment/InvestmentCaseView'
 import BusinessCaseLines from './investment/BusinessCaseLines'
 import { SiteConnectionNeeded, SiteConnectionSummary } from '../economics/SiteConnectionLink'
+import { useReliabilityGoal } from '../../hooks/useReliabilityGoal'
+import GridExtensionCard, { GRID_EXTENSION_WORDS } from './GridExtensionCard'
 
 const SECTIONS = [
   { id: 'participants', label: 'Participants' },
   { id: 'bill', label: 'Bill' },
   { id: 'case', label: 'Investment case' },
   { id: 'business_case', label: 'Business case' },
+  // Island sites only (homer-parity 03d); the same card as Guided's Results.
+  { id: 'grid_extension', label: GRID_EXTENSION_WORDS.title },
 ] as const
 type SectionId = typeof SECTIONS[number]['id']
 const isSection = (v: string | null): v is SectionId => SECTIONS.some(s => s.id === v)
@@ -63,14 +68,19 @@ export function completeness(billing: BillingPayload | null | undefined,
   ]
 }
 
-function BillSection({ billing, error }: { billing: BillingPayload | null | undefined;
-                                           error: unknown }) {
+/** One next step when the site connection is what is missing: the line above holds its action. */
+const CONNECTION_FIRST = 'Needs the site connection first: use the action above.'
+
+function BillSection({ billing, error, connectionMissing }: { billing: BillingPayload | null | undefined;
+                                           error: unknown; connectionMissing?: boolean }) {
   if (error) {
     return <p className="text-[11px] text-warn py-2" data-testid="ic-bill-error">
       The bill: {loadFailure(error)}</p>
   }
   if (!billing) {
-    return <p className="text-[11px] text-muted py-2">No bill: solve with a commercial config first.</p>
+    return <EmptyState testId="ic-bill-state" title="Not yet available">
+      {connectionMissing ? CONNECTION_FIRST : 'Solve with a commercial config first to see the bill.'}
+    </EmptyState>
   }
   const periods = Object.entries(billing.summary ?? {})
   return (
@@ -122,13 +132,18 @@ export default function InvestmentTab() {
   // opens once, then the user's choice holds.
   const sectionRequest = useUIStore(s => s.resultsSectionRequest)
   const clearSectionRequest = useUIStore(s => s.clearResultsSectionRequest)
-  const [section, setSection] = useState<SectionId>(
+  const [chosen, setSection] = useState<SectionId>(
     () => (isSection(sectionRequest) ? sectionRequest : 'participants'))
   useEffect(() => {
     if (!sectionRequest) return
     if (isSection(sectionRequest)) setSection(sectionRequest)
     clearSectionRequest()
   }, [sectionRequest, clearSectionRequest])
+  // The grid-extension section exists for an island site only.
+  const goal = useReliabilityGoal()
+  const offGrid = !goal.isPending && goal.archetype === 'off_grid'
+  const shown = SECTIONS.filter(s => s.id !== 'grid_extension' || offGrid)
+  const section: SectionId = shown.some(s => s.id === chosen) ? chosen : 'participants'
   const expert = useUIStore(s => s.uiMode === 'expert')
   const openCommercial = () => {
     if (expert) openSectionInExpert('commercial')
@@ -137,13 +152,13 @@ export default function InvestmentTab() {
   const tabs = useRef<Array<HTMLButtonElement | null>>([])
 
   const onKey = (e: KeyboardEvent<HTMLButtonElement>, i: number) => {
-    const last = SECTIONS.length - 1
-    const next = e.key === 'ArrowRight' ? (i + 1) % SECTIONS.length
-      : e.key === 'ArrowLeft' ? (i + last) % SECTIONS.length
+    const last = shown.length - 1
+    const next = e.key === 'ArrowRight' ? (i + 1) % shown.length
+      : e.key === 'ArrowLeft' ? (i + last) % shown.length
         : e.key === 'Home' ? 0 : e.key === 'End' ? last : null
     if (next === null) return
     e.preventDefault()
-    setSection(SECTIONS[next].id)
+    setSection(shown[next].id)
     tabs.current[next]?.focus()
   }
 
@@ -169,13 +184,13 @@ export default function InvestmentTab() {
           Island: no grid in operation; compared with the island as it stands today. The tie
           {' '}{poc.data?.poc_link} is open, so there is no connection, tariff or export to set.
         </p>
-      ) : rootMissing ? <SiteConnectionNeeded /> : commercial.isSuccess && <SiteConnectionSummary />}
+      ) : rootMissing ? (section !== 'case' && <SiteConnectionNeeded />) : commercial.isSuccess && <SiteConnectionSummary />}
       <CompletenessChips rows={completeness(billing.data, flows.data,
                                             billing.isError ? billing.error : undefined)}
                          testId="ic-completeness"
                          itemTestIdPrefix="ic-section-" label="Investment case completeness" />
       <div role="tablist" aria-label="Investment case sections" className="flex gap-1 border-b border-border">
-        {SECTIONS.map((s, i) => (
+        {shown.map((s, i) => (
           <button key={s.id} ref={el => { tabs.current[i] = el }} type="button" role="tab"
                   id={`ic-tab-${s.id}`} aria-selected={section === s.id}
                   aria-controls={section === s.id ? `ic-panel-${s.id}` : undefined}
@@ -189,14 +204,15 @@ export default function InvestmentTab() {
       <div role="tabpanel" id={`ic-panel-${section}`} aria-labelledby={`ic-tab-${section}`}
            tabIndex={0}>
         {section === 'bill' && (
-          <BillSection billing={billing.data} error={billing.isError ? billing.error : null} />
+          <BillSection billing={billing.data} error={billing.isError ? billing.error : null}
+            connectionMissing={!island && rootMissing} />
         )}
         {section === 'participants' && (
           <div className="space-y-3">
             {flows.data?.status === 'ok' ? <ValueFlowsView payload={flows.data} /> : (
-              <p className="text-[11px] text-muted py-2" data-testid="ic-participants-state">
-                {participantsText}
-              </p>
+              <EmptyState testId="ic-participants-state"
+                title={flows.isError ? 'Not available' : flows.data == null ? 'Not yet available' : 'Not set'}>
+                {flows.data == null && !flows.isError && !island && rootMissing ? CONNECTION_FIRST : participantsText}</EmptyState>
             )}
             <p className="text-[11px] text-muted" data-testid="ic-edit-in-economics">
               The tariff, contracts, finance inputs and participants are set in Commercial &amp; parties.{' '}
@@ -206,8 +222,9 @@ export default function InvestmentTab() {
             </p>
           </div>
         )}
-        {section === 'case' && <InvestmentCaseView />}
+        {section === 'case' && <InvestmentCaseView connectionMissing={!island && rootMissing} />}
         {section === 'business_case' && <BusinessCaseLines />}
+        {section === 'grid_extension' && <GridExtensionCard />}
       </div>
     </div>
   )

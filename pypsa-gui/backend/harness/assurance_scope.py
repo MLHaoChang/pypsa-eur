@@ -5,6 +5,20 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt
 
+# The one multi-entity scope form (issue 10, S6a): entity_id EVERY with the named
+# component_class means every entity of that class, resolved server-side from the
+# network. Only these profiles and classes admit it; elsewhere "*" is a plain name.
+EVERY = "*"
+EVERY_ENTITY = {"generator-dispatch/1": "Generator", "branch-loading/1": "Line"}
+
+
+def every_entity(scope):
+    return (
+        scope.get("entity_id") == EVERY
+        and EVERY_ENTITY.get(scope.get("profile")) is not None
+        and scope.get("component_class") == EVERY_ENTITY[scope["profile"]]
+    )
+
 
 class CostBasis(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -24,7 +38,7 @@ class RequestScope(BaseModel):
         "branch-loading/1", "network-loading/1", "lost-load/1", "bus-price/1",
         "generator-emissions/1", "network-emissions/1", "curtailment/1", "capacity/1",
         "storage-cycles/1", "energy-balance/1", "site-import/1", "investment-case/1", "investment-lcoe/1",
-        "copt-screening/1", "grid-readiness/1", "time-to-power/1",
+        "copt-screening/1", "grid-readiness/1", "time-to-power/1", "ac-branch-loading/1",
     ]
     project_id: str = Field(min_length=1, max_length=128)
     entity_id: str = Field(min_length=1, max_length=128)
@@ -68,10 +82,12 @@ def validate(value):
         scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("unsupported_carrier_cost_scope")
-    if scope["profile"] in ("branch-loading/1", "network-loading/1") and (
+    if scope["profile"] in ("branch-loading/1", "network-loading/1", "ac-branch-loading/1") and (
         scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("unsupported_loading_cost_scope")
+    if scope["profile"] == "ac-branch-loading/1" and scope["entity_id"] in ("network", EVERY):
+        raise ValueError("unsupported_population_scope")
     if scope["profile"] in ("bus-price/1", "generator-emissions/1", "network-emissions/1",
                             "curtailment/1") and (
         scope.get("cost_basis") or scope.get("comparison_evidence_id")
@@ -85,7 +101,13 @@ def validate(value):
         scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("unsupported_lost_load_cost_scope")
+    if every_entity(scope):
+        if any(scope.get(k) for k in ("cost_basis", "comparison_evidence_id", "retain",
+                                      "evidence_id", "chart")):
+            raise ValueError("unsupported_population_scope")
+        return scope
     classed = {"branch-loading/1": ("Line", "Transformer"),
+               "ac-branch-loading/1": ("Line", "Transformer"),
                "capacity/1": ("Generator", "Link", "StorageUnit", "Store", "Line", "Transformer"),
                "storage-cycles/1": ("StorageUnit", "Store")}
     if scope.get("component_class") and scope["component_class"] not in classed.get(scope["profile"], ()):
@@ -167,6 +189,37 @@ def _from_message(message, project_id, ui_context):
         r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
         message.strip(), re.I,
     )
+    # AA-13: "AC" names the AC power-flow profile; the plain form above keeps
+    # routing to branch-loading/1, which never reads AC results.
+    ac_loading = re.fullmatch(
+        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?ac\s+(?:branch\s+)?loading\s+for\s+"
+        r"(line|transformer)\s+([^;]{1,128}?)"
+        r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
+        message.strip(), re.I,
+    )
+    if ac_loading:
+        value = {"version": 1, "profile": "ac-branch-loading/1", "project_id": project_id,
+                 "entity_id": ac_loading[2], "component_class": ac_loading[1].capitalize(),
+                 "retain": False}
+        if ac_loading[3]:
+            value.update(start=ac_loading[3], end=ac_loading[4])
+        return validate(value)
+    every = re.fullmatch(
+        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?(key results|(?:branch\s+)?loading)\s+for\s+"
+        r"(?:every|all)\s+(generators?|lines?)"
+        r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
+        message.strip(), re.I,
+    )
+    if every:
+        profile = {("key", "g"): "generator-dispatch/1", ("loading", "l"): "branch-loading/1"}.get(
+            ("key" if every[1].lower() == "key results" else "loading", every[2][0].lower()))
+        if profile is None:
+            return None  # e.g. "loading for every generator": no such profile
+        value = {"version": 1, "profile": profile, "project_id": project_id, "entity_id": EVERY,
+                 "component_class": EVERY_ENTITY[profile], "retain": False}
+        if every[3]:
+            value.update(start=every[3], end=every[4])
+        return validate(value)
     if loading:
         network = loading[3] is None
         value = {

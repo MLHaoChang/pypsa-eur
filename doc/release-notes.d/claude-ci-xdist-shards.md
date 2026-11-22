@@ -1,0 +1,1 @@
+* CI: the GUI backend tests run in 8 shards, each across the runner's cores with pytest-xdist (`-n auto --dist loadfile`), to cut the per-PR wall time. No test is skipped or changed; the aggregate "GUI backend" check keeps its name.

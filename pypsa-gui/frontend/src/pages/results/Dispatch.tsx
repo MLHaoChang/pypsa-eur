@@ -1339,7 +1339,7 @@ export default function Dispatch() {
           system total see /api/results/cost_breakdown. The Top-profit chart
           and per-asset table further down handle cross-carrier asset views. */}
       <section style={{display: 'none'}}>
-        <h3 className="text-[12.5px] font-semibold text-text mb-2.5 flex items-center gap-2 tracking-[-0.005em]">
+        <h3 className="text-h3 font-semibold text-text mb-2.5 flex items-center gap-2">
           System dispatch
           {scaled && (
             <span className="text-[10px] font-normal text-accent bg-accent/10 px-1.5 py-0.5 rounded font-mono"
@@ -1428,7 +1428,7 @@ export default function Dispatch() {
         return (
         <section style={{display: 'none'}}>
           <div className="flex items-center justify-between mb-2.5">
-            <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
+            <h3 className="text-h3 font-semibold text-text">
               Operational expenditure (OPEX)
               <span className="ml-2 text-[10px] font-normal text-muted">{scopeLabel}</span>
             </h3>
@@ -2095,7 +2095,7 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
     )
     return (
       <div key={sn}
-        className="rounded-[10px] border border-border bg-bg overflow-hidden shadow-[0_1px_0_rgba(10,14,20,0.04)]">
+        className="rounded-card border border-border bg-bg overflow-hidden shadow-[0_1px_0_rgba(10,14,20,0.04)]">
         <header className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-bg-2">
           <span className="w-2 h-2 rounded-full shrink-0"
             style={{ background: SEASON_ACCENT[sn] }} />
@@ -2564,7 +2564,7 @@ export function CarrierKpiPanel({
     : 'all periods (horizon total)'
 
   return (
-    <section className="rounded-[10px] border border-border bg-bg-2 p-3.5">
+    <section className="rounded-card border border-border bg-bg-2 p-3.5">
       <header className="flex items-center justify-between mb-2.5">
         <h3 className="text-[13px] font-semibold text-text tracking-[-0.005em] flex items-center gap-2">
           {carrierDisplayLabel(carrier)}
@@ -2788,7 +2788,7 @@ function CarrierTabbedSection<T extends { name: string; carrier?: string }>(prop
   const Icon = style.Icon
 
   return (
-    <section className="rounded-[10px] border border-border bg-bg overflow-hidden shadow-[0_1px_0_rgba(10,14,20,0.04)]">
+    <section className="rounded-card border border-border bg-bg overflow-hidden shadow-[0_1px_0_rgba(10,14,20,0.04)]">
       {/* Tab strip — slim chip row above the actual chart. Chips inherit the
           same colour-coded icon as the group so the visual identity carries
           across the per-carrier views. */}
@@ -3170,7 +3170,7 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
   }
 
   return (
-    <section className="rounded-[10px] border border-border bg-bg overflow-hidden shadow-[0_1px_0_rgba(10,14,20,0.04)]">
+    <section className="rounded-card border border-border bg-bg overflow-hidden shadow-[0_1px_0_rgba(10,14,20,0.04)]">
       <header className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-bg-2 cursor-pointer select-none"
         onClick={() => setOpen(o => !o)}>
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
@@ -3671,7 +3671,7 @@ function FullLoadHoursSection(props: {
   return (
     <div className="flex flex-col gap-4">
       <header>
-        <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] flex items-center gap-2">
+        <h3 className="text-h3 font-semibold text-text flex items-center gap-2">
           Full load hours
           <span className="text-[10px] font-normal text-muted">{scopeLabel}</span>
           {scaled && (
@@ -3751,7 +3751,7 @@ function PerAssetFlhTable({ rows, scopeLabel }: { rows: FlhRow[]; scopeLabel: st
         : r[k] as number,
   })
   return (
-    <section className="rounded-[10px] border border-border bg-bg overflow-hidden">
+    <section className="rounded-card border border-border bg-bg overflow-hidden">
       <header className="px-4 py-2.5 border-b border-border bg-bg-2 flex items-center gap-2 flex-wrap">
         <span className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Per-asset detail</span>
         <span className="text-[10px] text-muted">{scopeLabel} · click headers to sort</span>
@@ -3776,7 +3776,7 @@ function PerAssetFlhTable({ rows, scopeLabel }: { rows: FlhRow[]; scopeLabel: st
               <SortHeader columnKey="kind"     label="Kind"         sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('kind')} />
               <SortHeader columnKey="category" label="Category"     sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('category')} />
               <SortHeader columnKey="carrier"  label="Carrier"      sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('carrier')} />
-              <SortHeader columnKey="pNom"     label="p_nom (MW)"     sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('pNom')}   align="right" />
+              <SortHeader columnKey="pNom"     label="Capacity (MW)"  sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('pNom')}   align="right" />
               <SortHeader columnKey="energy"   label="Energy (MWh/y)" sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('energy')} align="right" />
               <SortHeader columnKey="flh"      label="FLH (h/y)"      sortKey={ft.sortKey} sortDir={ft.sortDir} onClick={ft.onSortClick('flh')}    align="right" />
             </tr>

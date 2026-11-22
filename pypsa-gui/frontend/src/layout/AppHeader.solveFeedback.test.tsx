@@ -88,6 +88,7 @@ describe('after a successful solve', () => {
 describe('formatObjective', () => {
   it.each([
     [1_234_567, '€1.23 M'], [830_400, '€830 k'], [12, '€12'], [2.5e9, '€2.50 bn'],
+    [-16_310_000, '-€16.31 M'], [-830_400, '-€830 k'], [-0.4, '€0'],
   ])('%s → %s', (v, out) => expect(formatObjective(v)).toBe(out))
 
   it('says nothing for a missing objective rather than €0', () => {

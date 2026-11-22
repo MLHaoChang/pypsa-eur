@@ -15,7 +15,11 @@ const FOREGROUND = /(?:^|[\s'"`])text-(on-status|bg)(?=[\s'"`]|$)/
 // text-bearing fill in the same file is still checked.
 const NO_TEXT = new Set([
   'components/FlowStateDot.tsx:"block h-2 w-2 rounded-full bg-warn"', // status dot
+  'components/runStatus/RunStatusLine.tsx:"w-1.5 h-1.5 rounded-full shrink-0 bg-warn motion-safe:animate-pulse"', // running dot, aria-hidden
+  'components/runStatus/RunsIndicator.tsx:"w-1.5 h-1.5 rounded-full bg-warn"', // Runs indicator dot, aria-hidden; the count is the text
   "components/PageKit.tsx:on ? 'bg-success' : 'bg-border-2'}`", // toggle track; its knob is a white disc, not text
+  // the reliability bar's fill; its words ("Within goal", the title) sit outside it, in theme text
+  "pages/hubDesign/cards/ResultsHeadline.tsx:target == null ? 'bg-accent' : pass ? 'bg-success' : 'bg-danger'}`",
 ])
 
 function sources(dir: string): string[] {

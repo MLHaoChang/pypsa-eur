@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 import { errorText, profilesApi, type ProfileSource, type WeatherChoice } from '../../api/profiles'
 import { nk } from '../../utils/queryKeys'
 import { Seg } from '../PageKit'
+import { DAY_MONTH, windowDates } from './SeriesKit'
 import { openSiteConnection } from '../../pages/economics/SiteConnectionLink'
 
 const YEAR_WORDS = {
@@ -17,15 +18,15 @@ const YEAR_WORDS = {
 
 export const weatherKey = (project: string | null) => nk(project, 'profile_weather')
 
-const isoDay = (s: string) => new Date(s).toISOString().slice(0, 10)
-
 /** One line when the snapshots are a sampled window rather than one calendar year. */
 function windowLine(w: WeatherChoice): string | null {
   const win = w.window
   if (!win || 'unsupported' in win) return null
   if (win.runs > 1) return `Your model has ${win.runs} sampled periods (${win.hours} h): a generated profile takes these dates from ${w.year}.`
-  const [a, b] = [isoDay(win.first), isoDay(win.last)]
-  return `Your model covers ${a === b ? a : `${a} to ${b}`} (${win.hours} h): a generated profile takes these dates from ${w.year}.`
+  // The window's own calendar dates as the route sends them; never parsed in local time.
+  const [from, to] = [win.first.slice(0, 10), win.last.slice(0, 10)]
+  const dates = from === to ? DAY_MONTH.format(new Date(`${from}T00:00Z`)) : windowDates({ from, to })
+  return `Your model covers ${dates} (${win.hours} h): a generated profile takes these dates from ${w.year}.`
 }
 
 export function WeatherBar({ project }: { project: string }) {
@@ -65,7 +66,7 @@ export function WeatherBar({ project }: { project: string }) {
       <p className="text-muted" data-testid="weather-time-basis">
         Snapshots are read as {w.time_basis.value}
         {w.time_basis.assumed ? ': no site time is set' : ''}.{' '}
-        <button type="button" className="text-accent hover:underline" onClick={openSiteConnection}>
+        <button type="button" className="text-link hover:underline" onClick={openSiteConnection}>
           Edit in Connection &amp; grid ›
         </button>
       </p>

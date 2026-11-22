@@ -18,9 +18,9 @@ import functools
 import operator
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
 
-from harness import predicates
+from harness import answer_sections, predicates
 from harness.assurance_scope import RequestScope
 
 
@@ -180,8 +180,27 @@ class Slot(_Closed):
     reason: str | None = None
     valid_snapshots: int | None = None
     requested_snapshots: int | None = None
-    excluded_indices: list[str] | None = None  # snapshot labels
+    # The labels (ISO timestamps) of the window's snapshots a value leaves
+    # out; a warning slot names the same labels on the same basis (AA-13).
+    excluded_indices: list[str] | None = None
     partial_value: Value = None
+
+
+class WarningSlot(_Closed):
+    """A required warning slot (AA-13, A2.8): an interval the answer's values
+    leave out, such as AC power-flow snapshots that did not converge. It stays
+    in the receipt whatever metrics were requested, never answers, and so
+    keeps `request_complete` false. `excluded_indices` are snapshot labels, as
+    on `Slot`, and `valid_snapshots` of `requested_snapshots` is the share the
+    metric slots cover.
+    """
+
+    metric: Annotated[str, Field(min_length=1, max_length=64)]
+    disposition: Literal["warning"]
+    reason: Annotated[str, Field(min_length=1, max_length=256)]
+    valid_snapshots: Annotated[int, Field(ge=0)]
+    requested_snapshots: Annotated[int, Field(ge=1)]
+    excluded_indices: Annotated[list[str], Field(min_length=1)]
 
 
 class CalculatedEvidence(_Evidence):
@@ -361,7 +380,65 @@ class PredicateReceipt(Receipt):
     ]
 
 
-RECEIPTS = {"1": Receipt, "2": DerivedReceipt, "3": PredicateReceipt}
+class SectionSlot(Slot):
+    """A result slot of a sectioned answer: the slot plus the entity it is for."""
+
+    entity_id: Annotated[str, Field(min_length=1, max_length=128)]
+    component_class: Annotated[str, Field(min_length=1, max_length=64)]
+
+
+class Section(_Closed):
+    """One server-written section; the heading is absent only for a lone section."""
+
+    heading: Annotated[str, Field(min_length=1, max_length=64)] | None
+    result_slots: Annotated[
+        list[SectionSlot], Field(min_length=1, max_length=answer_sections.SECTION_SLOTS)
+    ]
+
+
+class SectionedReceipt(Receipt):
+    """Policy "4" (issue 10, S6a): every entity of one component type, in at most
+    five sections of at most twenty slots (so at most a hundred); `result_slots`
+    stays absent and each slot lives in exactly one section.
+    """
+
+    policy_version: Literal["4"]
+    checked_block_ids: Annotated[list[str], Field(max_length=answer_sections.MAX_SLOTS)]
+    sections: Annotated[
+        list[Section], Field(min_length=1, max_length=answer_sections.MAX_SECTIONS)
+    ]
+
+
+class WarnedReceipt(Receipt):
+    """Policy "5" (AA-13, A2.8): policy "1" plus at least one required warning
+    slot, first in `result_slots`; no derived entries, predicates or sections.
+    Warnings count toward the twenty slots and are never dropped
+    (`calculations.required_warnings` refuses a request that would need it).
+    An answer with no warning keeps its own policy, byte for byte.
+    """
+
+    policy_version: Literal["5"]
+    result_slots: Annotated[
+        list[WarningSlot | Slot], Field(min_length=1, max_length=20)
+    ]
+
+    @model_validator(mode="after")
+    def _warned_first(self):
+        kinds = [s.disposition == "warning" for s in self.result_slots]
+        if not any(kinds) or kinds != sorted(kinds, reverse=True):
+            raise ValueError("a policy 5 receipt starts with its warning slots")
+        if self.request_complete is not False:
+            raise ValueError("a warned request is never complete")
+        return self
+
+
+RECEIPTS = {
+    "1": Receipt,
+    "2": DerivedReceipt,
+    "3": PredicateReceipt,
+    "4": SectionedReceipt,
+    "5": WarnedReceipt,
+}
 
 
 # --- Checked tool results, keyed by tool name. ---

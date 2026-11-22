@@ -149,8 +149,11 @@ def test_post_without_archetype_takes_the_goal_default(
 
 def test_post_without_archetype_takes_the_stored_goal(
         client, install_network, monkeypatch):
+    from tests.test_energy_hub_mvp_b import _weak_mvp_b_network
+
     _install_stub(monkeypatch)
-    _setup(client, install_network, site_archetype="weak_flexible")
+    # A weak-grid study needs the network's connection limit (template-e2e 02c).
+    _setup(client, install_network, _weak_mvp_b_network(), site_archetype="weak_flexible")
     r = client.post(STUDY_URL, json={"stages": ["apply_pack", "ens_solve", "assemble"]})
     assert r.status_code == 200, r.text
     assert r.json()["archetype"] == "weak_flexible"

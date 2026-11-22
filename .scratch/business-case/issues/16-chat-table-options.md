@@ -3,7 +3,11 @@
 
 # 16 — Chat reads of the line table's options and the preset
 
-Status: needs-triage
+Status: ready-for-agent
+Blocked by: none (business-case 09 merged)
+Model tier: sonnet
+Size: S
+Likely files: `pypsa-gui/backend/routers/results.py` (`business_case/options`, `business_case/preset`), `services/not_via_chat.py`, `harness/catalogue*`, the two held declarations under `smoke/assistant_route_parity_declarations.d/`
 Gated: GK B
 Type: enhancement
 Parent: business-case 09 (the line-item editor)
@@ -28,3 +32,7 @@ so this issue settles only its route-parity limitation for the preset.
 
 A read tool (or an extension of `get_business_case`) that serves both routes, with
 the route-parity binding, and the held declarations removed.
+
+## Comments
+
+**2026-11-17 triage (SCALE-1).** Still needed on master: the options route has no chat tool and `business_case_table_options` is still declared unbuilt. A tool-list change, so the ChatPanel tool-list tests apply.

@@ -335,6 +335,28 @@ class FinanceInputs(BaseModel):
         return self
 
 
+class FinanceAssumedValue(BaseModel):
+    """One finance input a template ships as an assumption (WALK-IMPROVE-1 b):
+    the value it shipped and where it comes from. The value is read as
+    assumed while the stored input still equals it, and as typed once edited.
+    Never an input to the case or to any fingerprint."""
+
+    model_config = ConfigDict(extra="forbid")
+    value: Any
+    source: str = Field(min_length=1)
+    source_year: int | None = None
+    note: str | None = None
+
+
+def parse_finance_assumed(raw: dict) -> dict[str, FinanceAssumedValue]:
+    """``raw`` validated: each key names a `FinanceInputs` field (a typo is a
+    ValueError, never a record that labels nothing)."""
+    unknown = sorted(set(raw) - set(FinanceInputs.model_fields))
+    if unknown:
+        raise ValueError(f"finance_assumed names no finance input: {unknown}")
+    return {k: FinanceAssumedValue.model_validate(v) for k, v in raw.items()}
+
+
 # ------------------------------------------------------------------ cashflow lines
 
 

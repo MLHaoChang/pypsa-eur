@@ -8,6 +8,7 @@ the time weight. No claim about which unit sets the price.
 import math
 
 from harness import profile_common as common
+from harness import solve_validity
 
 PROFILE = "bus-price/1"
 VOLL_TOLERANCE = 1e-6
@@ -54,6 +55,9 @@ def source(ctx, entity):
         "price": [_number(v) for v in prices[entity]] if entity in prices.columns else [None] * len(index),
         "voll": _number(settings.get("voll_eur_per_mwh")),
         "valid_solve": common.lp_outputs_live(ctx),
+        # A MIP's buses_t.marginal_price is not a marginal price (S2, G2d).
+        "solve_limit": solve_validity.price_limit(
+            solve_validity.classify(n, ctx.solver_state.get("solver_config"))),
     }
 
 
@@ -64,7 +68,9 @@ def calculate(raw, scope):
     price, weight = raw["price"][a : b + 1], raw["weight"][a : b + 1]
     available, reasons = {}, {}
     base = "unverified_solve" if not raw["valid_solve"] else "invalid_or_missing_price_data"
-    if raw["valid_solve"] and common.finite(price + weight) and all(w >= 0 for w in weight) and sum(weight) > 0:
+    if raw["valid_solve"] and raw.get("solve_limit"):
+        base = raw["solve_limit"]
+    elif raw["valid_solve"] and common.finite(price + weight) and all(w >= 0 for w in weight) and sum(weight) > 0:
         available = {
             "mean_price": math.fsum(w * p for w, p in zip(weight, price)) / math.fsum(weight),
             "min_price": min(price),

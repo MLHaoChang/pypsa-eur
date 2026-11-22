@@ -19,6 +19,7 @@ from pydantic import BaseModel as _BaseModel
 from models.schemas import Finite as _Finite
 from services.adequacy.link_supply import nothing_to_sample, sampled_fleet
 from services.adequacy.coupling import snapshot_hash as _snapshot_hash
+from services.adequacy.eh_study_runner import voll_refusal
 from services.adequacy.lole_verdict import goal_fields, not_confident_copy
 from services.pypsa_service import PyPSAService
 
@@ -157,7 +158,7 @@ def start_coupling_loop(
     # ── the synchronous 422 set ───────────────────────────────────────────
     # W3b-R: an omitted target or draws is the project's one stored goal
     # (its h/yr target on this network's horizon basis).
-    from services.reliability_goal import active_loop_goal
+    from services.reliability_goal import active_loop_goal, no_target_hint
     target, draws, goal_sources = active_loop_goal(body, solver_state)
     try:
         target = float(target) if target is not None else None
@@ -171,7 +172,7 @@ def start_coupling_loop(
             "target of zero (or none) is not a standard — it is the demand "
             "that no draw ever sheds an hour, which no finite plan can buy. "
             "Set the reliability goal's allowed shortfall in Scenarios & "
-            "optimisation")
+            "optimisation" + no_target_hint(solver_state))
 
     if draws < 1:
         raise HTTPException(422, "draws must be a positive number of samples")
@@ -202,10 +203,10 @@ def start_coupling_loop(
 
     cfg = solver_state.get("solver_config")
     if cfg is None or float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
+        # With no load-shedding slacks the cap constrains nothing and every
+        # iterate collapses to the same unconstrained plan.
         raise HTTPException(
-            422, "the coupling loop requires a VOLL > 0 in solver settings — "
-                 "with no load-shedding slacks the cap constrains nothing and "
-                 "every iterate collapses to the same unconstrained plan")
+            422, voll_refusal("the reliability-targeted planning loop"))
 
     strategy = str(getattr(cfg, "solve_strategy", "full") or "full")
     if strategy in ("rolling", "myopic"):

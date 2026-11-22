@@ -24,7 +24,7 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
     resultsApi: {
       ...actual.resultsApi,
       getEhStudy: vi.fn(), getEhReview: vi.fn(), getEhTemplate: vi.fn(),
-      getFmeaModes: vi.fn(),
+      getFmeaModes: vi.fn(), getEhLevers: vi.fn(), getEhReferenceDesign: vi.fn(),
     },
   }
 })
@@ -49,6 +49,8 @@ beforeEach(() => {
   vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done', report: REPORT })
   vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
   vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(DC_TEMPLATE)
+  vi.mocked(resultsApi.getEhLevers).mockResolvedValue(null)
+  vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(null)
   sweep.mutate.mockReset()
   sweep.reset.mockReset()
   sweep.isSuccess = false
@@ -187,10 +189,10 @@ describe('ImproveCard', () => {
     expect(screen.getByTestId('hub-improve-not_established_frontier').textContent)
       .toContain('Cost versus reliability could not be worked out')
     expect(screen.getByTestId('hub-improve-fmea_dominant_mode').textContent)
-      .toContain('Site transformer accounts for 93% of the outage risk')
+      .toContain('Site transformer accounts for 93% of the outage risk from links')
     expect(screen.getByTestId('hub-improve-fmea_dominant_mode').textContent)
       // P26 gate friction 4: the button runs the study; the effect is its aim.
-      .toContain('The assistant would run the reliability study again. Aim: compare the cost with and without a spare unit or extra storage (rough estimate).')
+      .toContain('This change: run the reliability study again. Aim: compare the cost with and without a spare unit or extra storage (rough estimate).')
     // the engine prose moved into Why, verbatim
     const ev = screen.getByTestId('hub-improve-evidence-certification_fail').textContent ?? ''
     expect(ev).toContain(ENGINE[0].recommendation)
@@ -220,7 +222,8 @@ describe('ImproveCard', () => {
   it('no high or medium finding: says so', async () => {
     vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ findings: [F[2], F[3]] }))
     mount()
-    expect((await screen.findByTestId('hub-improve-none')).textContent).toMatch(/nothing urgent/i)
+    expect((await screen.findByTestId('hub-improve-none')).textContent)
+      .toBe('Nothing urgent: the study found no important or worthwhile change.')
   })
 })
 
@@ -261,15 +264,15 @@ describe('ImproveCard follows the sweep it started (P26)', () => {
 // P26 gate friction 4: the description said "the assistant would size the
 // local capacity…" while the button opens a "Run the reliability study" card.
 // For a study re-run the text now says so; the effect becomes its aim. Other
-// tools keep "The assistant would <effect>".
+// tools read "This change: <effect>".
 describe('Improve description matches the action (P26 gate)', () => {
   it('run_eh_study → "run the reliability study again. Aim: …"', async () => {
     mount()
     const li = await screen.findByTestId('hub-improve-certification_fail')
-    expect(li.textContent).toContain('The assistant would run the reliability study again. Aim: size the local capacity.')
+    expect(li.textContent).toContain('This change: run the reliability study again. Aim: size the local capacity.')
   })
 
-  it('another tool keeps "The assistant would <effect>"', async () => {
+  it('another tool reads "This change: <effect>"', async () => {
     vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ findings: [
       { id: 'voll_missing', severity: 'high', title: 'frontier: not established', evidence: {},
         recommendation: 'Set VOLL.', actions: [{ tool: 'update_solver_config',
@@ -277,7 +280,7 @@ describe('Improve description matches the action (P26 gate)', () => {
     ] }))
     mount()
     const li = await screen.findByTestId('hub-improve-voll_missing')
-    expect(li.textContent).toContain('The assistant would set the price of undelivered energy to 5000 €/MWh.')
+    expect(li.textContent).toContain('This change: set the price of undelivered energy to 5000 €/MWh.')
   })
 })
 
@@ -345,5 +348,140 @@ describe('ImproveCard while a risk check runs (A1-FE)', () => {
     })
     await waitFor(() => expect(doBtn.disabled).toBe(false))
     expect(screen.queryByTestId('hub-live-study-note')).toBeNull()
+  })
+})
+
+describe('Improve on the only feeder to a must-stay-on bus (asset-walk 2026-11-17, issue 04)', () => {
+  it('states the share with its scope and a feeder remedy, with no re-run button', async () => {
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ findings: [
+      { id: 'fmea_dominant_mode', severity: 'medium',
+        title: 'hospital_feeder carries 100% of ranked Link risk (42% of all ranked risk)',
+        evidence: { mode: 'hospital_feeder', share: 1.0, share_of_all_ranked: 0.42,
+          feeds_critical_buses: ['hospital'] },
+        recommendation: 'hospital_feeder is the only path to the must-stay-on bus hospital.',
+        actions: [] },
+    ] }))
+    mount()
+    const li = await screen.findByTestId('hub-improve-fmea_dominant_mode')
+    expect(li.textContent).toContain('Hospital feeder: 42% of the outage risk, and all of the risk from links')
+    expect(screen.getByTestId('hub-improve-advice-fmea_dominant_mode').textContent)
+      .toBe('Add a second feeder or backup supply at Hospital. A spare unit or storage elsewhere cannot supply Hospital while Hospital feeder is out.')
+    expect(li.textContent).not.toContain('spare unit or extra storage (rough estimate)')
+    expect(screen.queryByTestId('hub-improve-do-fmea_dominant_mode')).toBeNull()
+  })
+})
+
+// Template-e2e 22 (IMPROVE-MANUAL-1, KEY-LATER-1): every finding has a manual
+// way in that needs no assistant.
+describe('ImproveCard — Open in Expert', () => {
+  it('every finding has it, before the assistant button, naming its destination', async () => {
+    mount()
+    await screen.findByTestId('hub-improve-certification_fail')
+    for (const id of ['certification_fail', 'not_established_frontier']) {
+      const li = screen.getByTestId(`hub-improve-${id}`)
+      const open = screen.getByTestId(`hub-improve-open-${id}`) as HTMLButtonElement
+      expect(open.disabled).toBe(false)
+      expect(open.getAttribute('aria-label')).toMatch(/^Open in Expert: /)
+      const buttons = [...li.querySelectorAll('button')].map(b => b.dataset.testid)
+      const doBtn = buttons.indexOf(`hub-improve-do-${id}`)
+      if (doBtn >= 0) expect(buttons.indexOf(`hub-improve-open-${id}`)).toBeLessThan(doBtn)
+    }
+    expect(screen.getByTestId('hub-improve-open-certification_fail').getAttribute('aria-label'))
+      .toBe('Open in Expert: Results › Adequacy')
+  })
+
+  it('opens Expert with a way back and hands the change over, writing nothing', async () => {
+    const { default: client } = await import('../../../api/client')
+    const writes = (['post', 'put', 'patch', 'delete'] as const).map(m => vi.spyOn(client, m))
+    const user = mount()
+    await user.click(await screen.findByTestId('hub-improve-open-certification_fail'))
+    await new Promise(r => setTimeout(r, 0))
+    for (const w of writes) expect(w).not.toHaveBeenCalled()
+    const ui = useUIStore.getState()
+    expect(ui.uiMode).toBe('expert')
+    expect(ui.activeSlidePanel).toBe('results')
+    expect(ui.resultsTabRequest).toBe('adequacy')
+    expect(ui.flowReturn).not.toBeNull()
+    const { useImprovePrefillStore } = await import('../improvePrefill')
+    expect(useImprovePrefillStore.getState().prefill?.pack?.stages)
+      .toEqual(['dtc_stress', 'dtc_planning'])
+    expect(useChatStore.getState().requestQueue).toEqual([])
+  })
+})
+
+describe('ImproveCard — way back and the stress scenarios (UX 2 on #1757)', () => {
+  it('the Back pill names the Improve card', async () => {
+    const user = mount()
+    await user.click(await screen.findByTestId('hub-improve-open-certification_fail'))
+    expect(useUIStore.getState().flowReturn?.label).toBe('Improve')
+  })
+
+  it('"Open the hard conditions" opens the Goal card’s editor in Guided, with Back to Improve', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    const user = mount()
+    const btn = await screen.findByTestId('hub-improve-open-stress')
+    expect(btn.textContent).toContain('Open the hard conditions')
+    await user.click(btn)
+    expect(useHubDesignStore.getState().goalAdvancedRequested).toBe(true)
+    expect(useUIStore.getState().uiMode).not.toBe('expert')
+    expect(useUIStore.getState().flowReturn?.label).toBe('Improve')
+  })
+})
+
+// WALK-IMPROVE-1: the Results card's cheaper battery duration, repeated as one
+// row without a link.
+describe('ImproveCard cheaper battery duration', () => {
+  const SENTENCE = 'A 24 h battery also meets the energy-not-served cap at a system cost of € 3.1 m a year (design: 4 h, € 3.5 m)'
+  function withLevers(meets: boolean | null = true) {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done', report: { ...REPORT,
+      sections: { ...REPORT.sections, sizing: { status: 'ok', payload: { assets: [
+        { component: 'StorageUnit', name: 'battery', carrier: 'battery', built_mw: 2, built_mwh: 8, max_hours: 4 },
+      ] } } } } })
+    const rv = review()
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue({ ...rv, findings: [...rv.findings,
+      { id: 'levers_best_option', severity: 'info', title: 'Cheapest lever option',
+        evidence: { kind: 'storage_duration', value: 24, cost_at_target_eur: 3_100_000, spread_eur: 400_000 },
+        recommendation: '', actions: [] }] })
+    vi.mocked(resultsApi.getEhLevers).mockResolvedValue({ kind: 'storage_duration', options: [
+      { kind: 'storage_duration', value: 4, unit: 'h', status: 'ok', cost_at_target_eur: 3_500_000, meets_target: true },
+      { kind: 'storage_duration', value: 24, unit: 'h', status: 'ok', cost_at_target_eur: 3_100_000, meets_target: meets },
+    ] })
+  }
+
+  it('shows the sentence as one row, without a link', async () => {
+    withLevers()
+    mount()
+    const row = await screen.findByTestId('hub-improve-cheaper-duration')
+    expect(row.textContent?.replace(/\u00a0/g, ' ')).toBe(SENTENCE)
+    expect(row.querySelector('button, a')).toBeNull()
+    // an info finding: still not in the findings list
+    expect(screen.queryByTestId('hub-improve-levers_best_option')).toBeNull()
+  })
+
+  it('nothing urgent and a cheaper option: the top line leads into the row', async () => {
+    withLevers()
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ findings: [F[2], F[3],
+      { id: 'levers_best_option', severity: 'info', title: 'Cheapest lever option',
+        evidence: { kind: 'storage_duration', value: 24, cost_at_target_eur: 3_100_000, spread_eur: 400_000 },
+        recommendation: '', actions: [] }] }))
+    mount()
+    await screen.findByTestId('hub-improve-cheaper-duration')
+    expect(screen.getByTestId('hub-improve-none').textContent).toBe('Nothing urgent. One cheaper option:')
+  })
+
+  it('nothing when the levers table does not say the option meets the cap', async () => {
+    withLevers(false)
+    mount()
+    await screen.findByTestId('hub-improve-certification_fail')
+    await waitFor(() => expect(resultsApi.getEhLevers).toHaveBeenCalled())
+    expect(screen.queryByTestId('hub-improve-cheaper-duration')).toBeNull()
+  })
+
+  it('nothing when the levers table leaves meets_target unknown (null)', async () => {
+    withLevers(null)
+    mount()
+    await screen.findByTestId('hub-improve-certification_fail')
+    await waitFor(() => expect(resultsApi.getEhLevers).toHaveBeenCalled())
+    expect(screen.queryByTestId('hub-improve-cheaper-duration')).toBeNull()
   })
 })

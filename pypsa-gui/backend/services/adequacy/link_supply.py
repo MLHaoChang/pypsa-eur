@@ -87,12 +87,18 @@ def loop_scope(n, *, keep_zero_capacity: bool = False):
     from models.energy_hub import ImportOverlaySpec
     from services.adequacy.eh_stages import hub_fleet_scope
 
-    return hub_fleet_scope(
+    from services.adequacy.critical_feeders import loop_note
+
+    scope = hub_fleet_scope(
         n,
         ImportOverlaySpec(import_carriers=[]),
         sample_links=True,
         keep_zero_capacity=keep_zero_capacity,
     )
+    # GK A F8 (walkthrough 2026-11-17 issue 02): these views keep the copper
+    # plate, so they say which must-stay-on feeders only certification adds.
+    scope.loop_note = loop_note(scope.critical_feeders)
+    return scope
 
 
 def fleet_side(n, scope):
@@ -182,6 +188,8 @@ def assemble_fleet(
     from services.adequacy.mc import snapshot_inputs
 
     notes: list[str] = []
+    if getattr(scope, "loop_note", None):
+        notes.append(scope.loop_note)
     candidates: list[str] = []
     import_units: list = []
     firm = None

@@ -1,0 +1,32 @@
+# eh_datacenter back-half walk (Data Center Energy Hub), 2026-11-17
+Shots: /tmp/claude-0/out/dc/ (full size; read .small.png). Scripts: /tmp/claude-0/out/dc/*.js, lib.js, lib2.js, api.py.
+Project created with defaults (create ~21 s). Settings: LOLE goal 3 h/yr, Simulation runs per check = 1 (UI min). No budget/quick-profile control exists in the UI (only "Simulation runs per check", min 1).
+Run: Guided Run study (hub-run-start) -> verdict in 33 s (11 of 30 solves). No solver problem.
+
+## Headline numbers
+- Guided results (12-guided-results.png): "Not decided: the shortfall estimate (0.0-0.0 h/yr) straddles the 3 h/yr goal: more simulation runs would settle it." Yearly cost EUR 34.7 M "From the study". Biggest risk: Site transformer ~EUR 7.04 M/yr. Expected shortfall 0.0 h/yr. Investment, Grid plan, Operation: "Not run yet".
+- Expert Reliability > Energy hub reference design (18-expert-refdesign.png): ENS cap 10 bp, achieved 0.00, Cost@target EUR 34.7m excl. shed, MC LOLE 0.00 [0.00-0.00], "Not certified (inconclusive vs 3 h/yr)", Solves 11/30, LCOE EUR 91/MWh, FMEA B1 site_transformer EUR 7.0m. Levers: storage_duration 4/24/72 h all EUR 34.2m; import_cap 0/25/50 MW = 64.2/45.5/31.8m.
+- Report docx/PDF (guided-report.docx, exp-*.pdf; identical docx content): cost 34,700,616 EUR, LCOE 90.7, MC LOLE 0.00, inconclusive; installed capacity gas 76.7 MW, grid 500.0 MW, solar 4.0 MW, total 580.7 MW; grid readiness: 4 red flags, 13 unknown, 17 assumed limits.
+- Guided, Expert and report agree on cost, LOLE, verdict, transformer risk. They disagree elsewhere (gaps below).
+
+## Checks
+1 Run/hand-off. Guided: PASS for hand-off (after Run, panel switches to section 10 Results with the verdict, 'Next: Improve' shown; but only if you stay on section 9: if you navigate away the run finishes silently, 37-after-run-guided.png). GAP progress text: only "Studying... (up to 30 calculation steps) 0:03 elapsed" + Abort, no step name. RUN-READONLY-1 Guided: PASS-ish (section 5 hides the list, shows "? not known yet / The list shows again once the project check has run", 35-readonly-guided.png; text does not say a run is in progress). Expert: GAP (see G4). UX-FLOW-NEXT-1: PASS in Guided (Next: Results & reports; Next: Improve); Expert: header "Next: ..." buttons only, nothing leads from the run to results.
+2 Results. Guided PASS (verdict + cost + risk). Expert: GAP, Results/Summary/Capacity/Commercial/AC flow all say "Not run yet" after the study; the numbers live only in Reliability > Energy hub reference design (collapsed by default) and 'Show the engineering detail' from Guided (header badge there also says "not run yet"). Capacities built: not shown in Guided or Expert results, only in report (gas 76.7 MW).
+3 Decide/compare. GAP/BLOCKED, see G5-G8.
+4 Report. PASS build/preview/export: Expert Results > Reports > "Create evidence report" (v1, 19 sections, 17 tables, 2 figures), Export .docx, Export PDF, "Upload edited copy" (Word edit round-trip: tracked changes and comments come back as next version). Guided: Download report (.docx). Same bytes content as Expert. In-app comment thread: not found (only Word round trip). Assumed values: PASS in report (assumed column, "Template assumptions are input metadata", assumed target_lole 3 h/yr); GAP in Guided results (G9).
+
+## Gaps (severity)
+G1 misleads: Guided verdict says "estimate (0.0-0.0 h/yr) straddles the 3 h/yr goal" - 0.0-0.0 cannot straddle 3. Real reason (Expert/report): "target 3 h is below the MC resolution floor 52.1 h at 1 draws". Repro: set runs=1, Run study. Expected: say the run count is too low to test a 3 h goal.
+G2 blocks decision: Improve step (section 10 "Improve") recommends "re-run with 2 runs (was 1)" which cannot resolve the 52 h floor; both WORTH DOING cards only offer "Let the assistant do this" (disabled without API key, tooltip says "Everything on this card also works by hand") and "Ask". No manual action. Fix: show the needed run count and a button to set it.
+G3 misleads: UI exposes no budget/quick profile; runs=1 is allowed and yields a meaningless certification; goal panel says "No goal yet" while rail says "Reliability goal (LOLE): 3 h/yr (assumed)" (06-s8.png).
+G4 misleads: Expert during a study run: header says "Idle", "Run LOPF" enabled, Capacity bounds editable (36-readonly-expert.png); no run indicator or Abort. RUN-READONLY-1 not met in Expert.
+G5 blocks decision: what-if. Expert Scenarios "+" (Branch a child scenario) creates project "whatif-small-grid"; in Guided its section 8 says "Not offered for this site: Needs an Energy Hub site" so the study cannot be run on a what-if; Compare needs LOPF objective ("Solved 0"). Compare view says only "Scenario comparison". Child project is not listed in Projects, reachable only by id (API). No way to compare study numbers.
+G6 blocks decision: the main choice (how big the new genset/battery) is not visible: sections 5 say "Capacity: sized by the study" and results never show it. Only report shows "gas 76.7 MW". The report also lists "grid 500.0 MW" (placeholder grid_supply, connection is 40 MW) and total 580.7 MW. Misleads.
+G7 misleads: lever table: storage_duration 4/24/72 h all EUR 34.2 m (no discrimination) and 34.2 m differs from base 34.7 m with no explanation; nothing says which to pick.
+G8 misleads: Guided "Grid plan: Not run yet" and "Grid import: no shortfall" while the report has 4 red flags (ramp, oscillation, rapid voltage) and 13 unknown; Guided risk table (Improve > See the risk table) shows gensets EUR 0/yr vs Expert FMEA EUR 760/yr; genset_new (A1 EUR 12,529) appears only in Expert.
+G9 misleads: Guided results do not label the assumed inputs (3 h/yr goal, synthetic template data banner appears only in Expert pack panel: "synthetic illustrative data ... replace with project data before any decision"), nor the missing site location ("no bus is placed" note only in section 9).
+G10 cosmetic: raw names in Expert/report (weak_flexible, dsr_opt_in, import_firmness=outage_sampled, genset_new); "not run yet" badge shown on populated reliability view.
+Edit of a generator capacity in the Guided drawer (genset_1 10 -> 5) did not persist (checked via API) - not investigated (BLOCKED for what-if).
+
+## API log
+Only: 409 on /api/gridspine/<name>/status (x2), 503 on /api/projects and /scenarios once (startup), many "network has not been optimized yet" and "carriers not defined" warnings, HiGHS warnings. No tracebacks.

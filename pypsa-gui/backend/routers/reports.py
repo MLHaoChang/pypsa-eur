@@ -70,6 +70,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import pathlib
 import uuid
 from types import SimpleNamespace
@@ -86,6 +87,7 @@ from db.session import get_db
 from deps import optional_user
 from models.report import ReportDocument
 from routers.deps import AuthorizedProject, ProjectAccessDep
+from services import project_write_gate
 from services.http_filenames import content_disposition
 from services.reports import pdf, roundtrip_service, store, templates
 from services.reports.docx_reader import TemplateOutline
@@ -282,6 +284,25 @@ def _check_lock(project: AuthorizedProject, db: DBSession, user: User | None) ->
         _check_project_lock(db, _lock, user)
 
 
+def _check_lock_unless_viewer(project: AuthorizedProject, db: DBSession,
+                              user: User | None) -> bool:
+    """`_check_lock`, skipped for a viewer (VIEWER-ROLE-1 Q3/Q4, GK B F1 on #1622).
+    Returns whether the caller is a viewer, so a handler reuses this one read.
+
+    A viewer can never take the edit lock, so without the skip an editor's
+    open project would refuse every viewer comment and export. The skip is
+    safe: a comment writes only the report's comments file under
+    `store.report_lock` (cross-process, honours a directory close), and an
+    export renders the saved version from disk into a new upload, never the
+    editor's in-memory state or the report's files. The role is read once per
+    request, here, before the report lock is taken (R3: per request, never
+    cached); an editor keeps the foreign-lock refusal."""
+    viewer = project_write_gate.is_viewer(db, user, project.uuid)
+    if not viewer:
+        _check_lock(project, db, user)
+    return viewer
+
+
 def _current_eh_report() -> dict | None:
     """The stored EH `ReferenceDesignReport` of the session, as the chat tool reads it."""
     from routers import results as results_router
@@ -406,6 +427,23 @@ def _current_chapter_sources(project: AuthorizedProject) -> dict[str, Any]:
     template = read_template(d)
     if template is not None:
         out["template_ledger"] = template
+        # What the last study run assumed (template-e2e 08), from its record;
+        # a record from before the list existed, or a stored study report
+        # whose record is gone, says "not recorded".
+        # The study record is the open project's; another project's is not read.
+        from services.pypsa_service import PyPSAService
+
+        try:
+            is_open = str(PyPSAService.get_active_context().project_uuid or "") \
+                == str(getattr(project, "uuid", ""))
+        except Exception:                                   # noqa: BLE001 - no open project
+            is_open = False
+        record = results_router._state.get("eh_study") or {}
+        if is_open and record.get("report") is not None:
+            out["run_assumptions"] = {"recorded": "assumptions" in record,
+                                      "rows": record.get("assumptions") or []}
+        elif is_open and _current_eh_report() is not None:
+            out["run_assumptions"] = {"recorded": False, "rows": []}
     if (d / "island_config.json").is_file() \
             or (d / "campus_electrical" / "run" / "campus_freq_events.csv").is_file():
         import importlib
@@ -432,7 +470,8 @@ def _current_chapter_sources(project: AuthorizedProject) -> dict[str, Any]:
         row = SimpleNamespace(name=project.name, storage_path=str(d), project_kind=None,
                               org_id=project.org_id, id=project.uuid)
         try:
-            out["grid_readiness"] = grid_readiness_for(row)
+            # The saved project, as the report's other chapters read it (walkthrough 04).
+            out["grid_readiness"] = grid_readiness_for(row, source="saved")
         except Exception as exc:                            # noqa: BLE001 - stated as not established
             logger.info("reports: grid readiness not read: %s", exc)
             out["grid_readiness"] = {}
@@ -507,8 +546,6 @@ def create_report(body: CreateReportBody,
     Build and store the evidence-only report (v1) from the session's current
     result state. Returns the `ReportMeta` fields plus `document`.
     """
-    from services.reports.assemble import DEFAULT_TITLE, evidence_only_document
-
     if body.mode != "evidence_only":
         raise HTTPException(400, {
             "error_kind": "report_mode_not_supported",
@@ -519,7 +556,17 @@ def create_report(body: CreateReportBody,
 
     evidence, eh_report = _current_evidence(project)
     figure_pngs = _render_figures(eh_report, project.directory, charts=not assistant_strict_active())
-    title = (body.title or "").strip() or f"{DEFAULT_TITLE} — {project.name}"
+    return store_evidence_only_report(project, evidence, figure_pngs, body.title)
+
+
+def store_evidence_only_report(project: AuthorizedProject, evidence: Evidence,
+                               figure_pngs: dict, title: str | None) -> dict:
+    """Build the evidence-only document from `evidence`, store it as v1 with
+    its figures and return the `ReportMeta` fields plus `document`. The one
+    builder behind `POST /{name}/reports` and the no-LLM `Generate report`."""
+    from services.reports.assemble import DEFAULT_TITLE, evidence_only_document
+
+    title = (title or "").strip() or f"{DEFAULT_TITLE} — {project.name}"
     doc = evidence_only_document(evidence, title=title,
                                  report_id=store.new_report_id(),
                                  figure_pngs=figure_pngs)
@@ -624,7 +671,7 @@ def export_report(report_id: str, body: ExportReportBody,
             "message": "PDF export needs LibreOffice (soffice) on this host's PATH, "
                        "and it is not installed here. Export the .docx instead.",
         })
-    _check_lock(project, db, user)
+    _check_lock_unless_viewer(project, db, user)
     try:
         doc = store.load_report(project.directory, report_id, body.version)
     except store.ReportStoreError as exc:
@@ -1126,7 +1173,7 @@ def add_report_comment(report_id: str, body: CommentBody,
     from services.reports import revisions
 
     _latest_or_404(project, report_id)
-    _check_lock(project, db, user)
+    _check_lock_unless_viewer(project, db, user)
     text = body.text.strip()
     if not text or len(text) > revisions.MAX_COMMENT_CHARS:
         raise HTTPException(422, {
@@ -1151,7 +1198,13 @@ def withdraw_report_comment(report_id: str, comment_id: str,
     from services.reports import revisions
 
     _latest_or_404(project, report_id)
-    _check_lock(project, db, user)
+    viewer = _check_lock_unless_viewer(project, db, user)
+    # A viewer may withdraw only their own comment (owner decision VIEWER-ROLE-1, Q3).
+    if viewer:
+        mine = [c for c in revisions.load_comments(project.directory, report_id)
+                if c.comment_id == comment_id and c.created_by == getattr(user, "email", None)]
+        if not mine:
+            raise project_write_gate.refusal()
     try:
         comment = revisions.withdraw(project.directory, report_id, comment_id)
     except (revisions.RevisionError, store.ReportStoreError) as exc:
@@ -1194,3 +1247,133 @@ def address_report_comment(report_id: str, comment_id: str, body: AddressBody,
         raise _revision_http(exc) from exc
     return {"comment": comment.model_dump(mode="json"), "version": doc.version,
             "digest": comment.revision.digest, "document": doc.model_dump(mode="json")}
+
+
+# ── model-drafted revisions (study harness 07d) ────────────────────────────
+
+
+class RunDraftBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    task_id: str
+
+
+def _own_run(project: AuthorizedProject, user: User | None, task_id: str) -> pathlib.Path:
+    """The caller's own harness run in this project, named by the caller:
+    never inferred from the report (SH-07). Anything else is
+    `task_not_found` (404), the same bytes for every miss."""
+    import json
+
+    missing = HTTPException(404, {"error_kind": "task_not_found", "message": "No such run in this project."})
+    try:
+        canonical = str(uuid.UUID(task_id)) == task_id
+    except (ValueError, TypeError):
+        canonical = False
+    if user is None or not canonical:
+        raise missing
+    # Realpath plus a prefix check: the run file must resolve directly inside
+    # `assistant_tasks/` (the form CodeQL reads as a py/path-injection
+    # barrier; the uuid check above is correct but not one it models).
+    root = os.path.realpath(os.path.join(project.directory, "assistant_tasks"))
+    target = os.path.realpath(os.path.join(root, f"{task_id}.json"))
+    if not target.startswith(root + os.sep) or os.path.dirname(target) != root:
+        raise missing
+    path = pathlib.Path(target)
+    try:
+        task = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise missing from None
+    if (not isinstance(task, dict) or task.get("version") != 3 or not task.get("run")
+            or task.get("owner_id") != str(user.id) or task.get("project_id") != project.uuid):
+        raise missing
+    return path
+
+
+def _draft_http(exc: Exception) -> HTTPException:
+    from harness import run_revise
+
+    if isinstance(exc, run_revise.DraftError):
+        return HTTPException(exc.status, {"error_kind": exc.kind, "message": exc.message})
+    return _revision_http(exc)
+
+
+@router.post("/{name}/reports/{report_id}/comments/{comment_id}/drafts")
+def request_revision_draft(report_id: str, comment_id: str, body: RunDraftBody,
+                           project: AuthorizedProject = ProjectAccessDep,
+                           db: DBSession = Depends(get_db),
+                           user: User | None = Depends(optional_user)) -> dict:
+    """
+    Ask the named run (`task_id`, the caller's own, completed) to draft an
+    edit for an open comment on the report that run made. Charges nothing:
+    the harness drafts it on the run's own lease and budget, and nothing is
+    applied until the draft's confirm. Returns the request row.
+
+    404 `task_not_found`; 409 `revision_draft_not_run_report`,
+    `revision_draft_run_state`, `revision_draft_limit`,
+    `report_comment_closed`, `revision_stale_base`; 422
+    `report_revision_unsupported`.
+    """
+    from harness import run_revise
+    from services.reports import revisions
+
+    _latest_or_404(project, report_id)
+    _check_lock(project, db, user)
+    path = _own_run(project, user, body.task_id)
+    try:
+        row = run_revise.request(path, project.directory, report_id, comment_id, by=str(user.id))
+    except (run_revise.DraftError, revisions.RevisionError, store.ReportStoreError) as exc:
+        raise _draft_http(exc) from exc
+    return {"draft": row}
+
+
+@router.post("/{name}/reports/{report_id}/drafts/{draft_id}/confirm")
+def confirm_revision_draft(report_id: str, draft_id: str, body: RunDraftBody,
+                           project: AuthorizedProject = ProjectAccessDep,
+                           db: DBSession = Depends(get_db),
+                           user: User | None = Depends(optional_user)) -> dict:
+    """
+    Apply the run's drafted edit as 07c's address does, against the digest
+    the draft was made from. Returns `{comment, version, digest, document}`.
+
+    404 `task_not_found`, `revision_draft_not_found`; 409
+    `revision_draft_not_drafted`, `revision_stale_base`,
+    `report_comment_closed`, `report_job_in_flight`; 422
+    `report_revision_unsupported` with `reasons` (the comment stays open).
+    """
+    from harness import run_revise
+    from services.reports import revisions
+
+    _latest_or_404(project, report_id)
+    _check_lock(project, db, user)
+    if _job_slot_busy():
+        raise HTTPException(409, {
+            "error_kind": "report_job_in_flight",
+            "message": "A report job is writing this project's reports; wait for it to "
+                       "finish (or abort it) before revising.",
+        })
+    path = _own_run(project, user, body.task_id)
+    try:
+        comment, doc = run_revise.confirm(path, project.directory, draft_id, report_id=report_id,
+                                          by=str(user.id))
+    except (run_revise.DraftError, revisions.RevisionError, store.ReportStoreError) as exc:
+        raise _draft_http(exc) from exc
+    return {"comment": comment.model_dump(mode="json"), "version": doc.version,
+            "digest": comment.revision.digest, "document": doc.model_dump(mode="json")}
+
+
+@router.post("/{name}/reports/{report_id}/drafts/{draft_id}/discard")
+def discard_revision_draft(report_id: str, draft_id: str, body: RunDraftBody,
+                           project: AuthorizedProject = ProjectAccessDep,
+                           db: DBSession = Depends(get_db),
+                           user: User | None = Depends(optional_user)) -> dict:
+    """Set a drafted edit aside; the comment stays open. 404
+    `task_not_found`, `revision_draft_not_found`; 409
+    `revision_draft_not_drafted`."""
+    from harness import run_revise
+
+    _check_lock(project, db, user)
+    path = _own_run(project, user, body.task_id)
+    try:
+        row = run_revise.discard(path, draft_id, report_id=report_id, by=str(user.id))
+    except run_revise.DraftError as exc:
+        raise _draft_http(exc) from exc
+    return {"draft": row}

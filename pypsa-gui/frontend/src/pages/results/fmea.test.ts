@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { buildManualRow, mergeWorksheet, unpricedRankingWarning, WORKSHEET_CSV_HEADER, worksheetCsvRows, ZERO_REASON_TEXT, CRITICALITY_PER_YEAR_LABEL } from './fmea'
+import { buildManualRow, mergeWorksheet, unpricedRankingWarning, WORKSHEET_CSV_HEADER, worksheetCsvRows, ZERO_REASON_TEXT, CRITICALITY_PER_YEAR_LABEL, unpricedModeCount, setVollText, SOLVER_VOLL_LABEL } from './fmea'
+import { GOAL_CARD_TITLE, GOAL_VOLL_LABEL } from '../hubDesign/cards/goalCardWords'
 import type { CoptPayload } from './adequacy'
 
 const copt: CoptPayload = {
@@ -46,6 +47,51 @@ describe('mergeWorksheet', () => {
     expect(mergeWorksheet(null, null)).toEqual([])
     expect(mergeWorksheet(copt, null)).toHaveLength(2)
     expect(mergeWorksheet(null, sidecar)).toHaveLength(1)
+  })
+})
+
+describe('mergeWorksheet — unpriced modes (no VOLL)', () => {
+  // Since #1645 /fmea_modes with no VOLL sends null € fields: never €0.
+  const unpriced: CoptPayload = {
+    ...copt,
+    voll_eur_per_mwh: 0,
+    per_mode: [
+      { ...copt.per_mode![0], name: 'zeta', severity_eur: null, criticality_eur_per_year: null },
+      { ...copt.per_mode![1], name: 'alpha', severity_eur: null, criticality_eur_per_year: null },
+    ],
+  } as unknown as CoptPayload
+  it('keeps a null severity and criticality as null, not 0', () => {
+    const rows = mergeWorksheet(unpriced, null)
+    expect(rows.map(r => r.severity_eur)).toEqual([null, null])
+    expect(rows.map(r => r.criticality_eur_per_year)).toEqual([null, null])
+  })
+  it('keeps a manual row with no € as null, not 0', () => {
+    const rows = mergeWorksheet(null, { ...sidecar, manual_rows: [{ ...sidecar.manual_rows[0],
+      severity_eur: null, criticality_eur_per_year: undefined }] })
+    expect(rows[0].severity_eur).toBeNull()
+    expect(rows[0].criticality_eur_per_year).toBeNull()
+  })
+  it('sorts unpriced modes after every priced one, by name', () => {
+    const rows = mergeWorksheet(unpriced, sidecar)
+    expect(rows.map(r => r.name)).toEqual(['cyber', 'alpha', 'zeta'])
+  })
+  it('counts the unpriced modes for the visible line', () => {
+    expect(unpricedModeCount(mergeWorksheet(unpriced, sidecar))).toBe(2)
+    expect(unpricedModeCount(mergeWorksheet(copt, sidecar))).toBe(0)
+  })
+  it('writes an empty CSV cell for an unpriced €', () => {
+    const [row] = worksheetCsvRows(mergeWorksheet(unpriced, null))
+    expect(row[WORKSHEET_CSV_HEADER.indexOf('severity_eur')]).toBe('')
+    expect(row[WORKSHEET_CSV_HEADER.indexOf('criticality_eur_per_year')]).toBe('')
+  })
+  it('closes the CSV with a note row saying why, only when a mode is unpriced', () => {
+    const csv = worksheetCsvRows(mergeWorksheet(unpriced, null))
+    expect(csv).toHaveLength(3)
+    expect(csv[2]).toEqual(['Not priced: 2 modes are listed last and left out of the ranking. ' +
+      'Set the Value of Lost Load (VOLL) in Solver settings.'])
+    expect(worksheetCsvRows(mergeWorksheet(copt, sidecar))).toHaveLength(3)
+    expect(worksheetCsvRows(mergeWorksheet(unpriced, null), true)[2][0])
+      .toContain('Set the price of undelivered energy on the Goal card.')
   })
 })
 
@@ -178,5 +224,20 @@ describe('criticality column label', () => {
       expect(src).toContain('CRITICALITY_PER_YEAR_LABEL')
       expect(src).not.toMatch(/Criticality[ (]*€\/yr/)
     }
+  })
+})
+
+// UX 2 on #1662: the VOLL link names the input as the place it lands names
+// it, in each mode (EXPERT-GUIDED-1). Each label is pinned to its owner.
+describe('setVollText names the VOLL input as its landing place does', () => {
+  const read = (rel: string) => readFileSync(`${__dirname}/${rel}`, 'utf8')
+  it('Expert: Solver settings\' own field label', () => {
+    expect(read('../SolverSettings.tsx')).toContain(`label="${SOLVER_VOLL_LABEL}"`)
+    expect(setVollText(false)).toBe('Set the Value of Lost Load (VOLL) in Solver settings')
+  })
+  it('Guided: the Goal card\'s own row label and title', () => {
+    expect(read('../hubDesign/cards/GoalCard.tsx')).toContain('<Term k="voll_plain">{GOAL_VOLL_LABEL}</Term>')
+    expect(read('../hubDesign/shared/CardShell.tsx')).toContain(`goal: '${GOAL_CARD_TITLE}'`)
+    expect(setVollText(true)).toBe('Set the price of undelivered energy on the Goal card')
   })
 })

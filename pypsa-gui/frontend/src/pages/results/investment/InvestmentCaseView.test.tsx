@@ -100,7 +100,7 @@ afterEach(() => { cleanup(); vi.clearAllMocks() })
 describe('InvestmentCaseView', () => {
   it('runs, shows the progress, and aborts', async () => {
     const { container } = renderView()
-    expect((await screen.findByTestId('ic-not-run')).textContent).toMatch(/No investment case/)
+    expect((await screen.findByTestId('ic-not-run')).textContent).toMatch(/^Not run yet\. /)
     const running: InvestmentCaseStudy = { status: 'running', stage: 'run_engine',
       stages: ['build_case', 'load_pack', 'run_engine', 'assemble', 'store'],
       stages_done: ['build_case', 'load_pack'] }
@@ -140,7 +140,7 @@ describe('InvestmentCaseView', () => {
                                               error_code: 'no_owner' })
     renderView()
     expect((await screen.findByTestId('ic-error')).textContent)
-      .toBe('The case was refused: no owner assets (no_owner)')
+      .toBe('The investment case could not finish: no owner assets.')
   })
 
   it('a stale report with no named part names every input, the IC G3 ones too', async () => {

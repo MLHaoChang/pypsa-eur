@@ -135,6 +135,11 @@ def test_the_study_verdict_is_the_start_refusal(client, tmp_projects_dir, bound_
     meta = json.loads(path.read_text())
     meta["pack_overrides"] = {**meta["pack_overrides"], "import_energy_mwh_per_year": 1000.0}
     path.write_text(json.dumps(meta))
+    # The template's PoC binding refuses a two-way import (WALK-IMPROVE-1 b ships a
+    # commercial block); without it the study's own refusal is the blocker.
+    _cfg = client.get("/api/simulation/solver_config").json()
+    assert client.put("/api/simulation/solver_config",
+                      json={**_cfg, "commercial": None}).status_code == 200
     grid = next(r for r in client.get("/api/network/links").json() if r["name"] == "grid_import")
     assert client.put("/api/network/links/grid_import",
                       json={**grid, "p_min_pu": -1.0}).status_code == 200
@@ -294,9 +299,10 @@ def test_loadflow_switched_on_reports_the_first_blocker_in_flow_order(
     assert v["loadflow"]["blocker"] == flow["run_blocker"]
 
 
-def test_the_load_flow_overwrites_the_lp_flows(client, site, bound_ctx):
-    """Shared state: Stage 2 rewrites the LP's flows and voltages in place; the
-    LP's are kept aside in `lopf_results`."""
+def test_the_load_flow_keeps_the_lp_flows_live_and_its_own_aside(client, site, bound_ctx):
+    """Shared state (owner decision PF-SAVE-1): Stage 2's flows and voltages are
+    kept in `ac_pf_results`; the live network keeps the LP's flows, with the
+    PF-only tables (q0, |V|) empty, and the LP's are also in `lopf_results`."""
     site(_line_network(), name="lf3")
     assert client.post("/api/simulation/run").status_code == 200
     _wait_idle(client)
@@ -309,11 +315,15 @@ def test_the_load_flow_overwrites_the_lp_flows(client, site, bound_ctx):
     assert st["status"] == "completed", st
     with bound_ctx(client):
         n = PyPSAService.get_network()
-        assert (n.lines_t.q0["ab"].abs() > 1e-6).all()            # the LP has no reactive flow
-        assert not n.lines_t.p0["ab"].equals(lp_p0)               # losses: p0 moved
-        assert (n.buses_t.v_mag_pu["b"] < 1.0 - 1e-6).all()       # a voltage drop to the load
-        assert lp_v.empty or not n.buses_t.v_mag_pu.equals(lp_v)
-        assert PyPSAService.get_solver_state()["lopf_results"] is not None
+        state = PyPSAService.get_solver_state()
+        flow = state["ac_pf_results"]
+        assert (flow["lines_t.q0"]["ab"].abs() > 1e-6).all()      # the LP has no reactive flow
+        assert not flow["lines_t.p0"]["ab"].equals(lp_p0)         # losses: p0 moved
+        assert (flow["buses_t.v_mag_pu"]["b"] < 1.0 - 1e-6).all() # a voltage drop to the load
+        assert lp_v.empty or not flow["buses_t.v_mag_pu"].equals(lp_v)
+        pd.testing.assert_series_equal(n.lines_t.p0["ab"], lp_p0, check_exact=True)
+        assert n.lines_t.q0.columns.empty and n.buses_t.v_mag_pu.columns.empty
+        assert state["lopf_results"] is not None
 
 
 # ── the optimisation's implicit sub-step ────────────────────────────────────

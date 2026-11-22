@@ -14,12 +14,17 @@ import Markdown, { defaultUrlTransform } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Components, Options } from 'react-markdown'
 import { extractCopyText } from '../utils/chatUi'
+import { guideLinkId } from '../catalogue/guideLink'
+import { openGuide } from '../catalogue/guideStore'
 
 // Models occasionally include this label inside a Markdown destination rather
 // than outside the link. Repair only a complete authenticated artifact route;
 // all other destinations retain react-markdown's normal URL safety checks.
+// A Parameter guide link (`guide:<id>`, exactly the shared pattern) is kept for
+// the link renderer below, which opens it in the guide drawer.
 function artifactUrlTransform(url: string, key: string): string {
   if (key === 'href') {
+    if (guideLinkId(url)) return url
     try {
       const match = /^authenticated download link:\s*(\/api\/projects\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/uploads\/[0-9a-f]{16}\/blob)$/i.exec(decodeURI(url))
       if (match) return defaultUrlTransform(match[1])
@@ -73,7 +78,11 @@ const components: Components = {
   ul: ({ node, ...p }) => <ul className="my-1.5 ml-4 list-disc space-y-0.5 marker:text-muted" {...p} />,
   ol: ({ node, ...p }) => <ol className="my-1.5 ml-4 list-decimal space-y-0.5 marker:text-muted" {...p} />,
   li: ({ node, ...p }) => <li className="leading-relaxed" {...p} />,
-  a:  ({ node, ...p }) => <a className="text-accent underline hover:no-underline" target="_blank" rel="noreferrer" {...p} />,
+  a:  ({ node, ...p }) => (guideLinkId(p.href)
+    // In-app: a button, not a link; the click re-checks the id with the same pattern.
+    ? <button type="button" className="text-accent underline hover:no-underline"
+        onClick={e => { const id = guideLinkId(p.href); if (id) openGuide(id, e.currentTarget) }}>{p.children}</button>
+    : <a className="text-accent underline hover:no-underline" target="_blank" rel="noreferrer" {...p} />),
   hr: ({ node, ...p }) => <hr className="my-2 border-border" {...p} />,
   blockquote: ({ node, ...p }) => <blockquote className="my-1.5 border-l-2 border-border pl-2 text-muted" {...p} />,
   // v10 dropped the `inline` prop — inline code has no `language-*` class, fenced

@@ -158,7 +158,7 @@ export default function Curtailment() {
           still hit the server's MAX_RESPONSE_VALUES cap. */}
       <WindowCapBanner payloads={[curtailTS as TSPayload | null, gensTS as TSPayload | null]} />
       <header>
-        <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
+        <h3 className="text-h3 font-semibold text-text">
           Renewable curtailment
           <span className="ml-2 text-[10px] font-normal text-muted">{periodLabel}</span>
         </h3>
@@ -184,7 +184,7 @@ export default function Curtailment() {
       </div>
 
       {/* Per-carrier table */}
-      <section className="rounded-[10px] border border-border bg-bg overflow-hidden">
+      <section className="rounded-card border border-border bg-bg overflow-hidden">
         <header className="px-4 py-2.5 border-b border-border bg-bg-2">
           <span className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">By carrier</span>
         </header>

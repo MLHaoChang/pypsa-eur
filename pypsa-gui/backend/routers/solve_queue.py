@@ -38,6 +38,7 @@ import local_mode
 from db.models import User
 from db.session import get_db
 from deps import optional_user
+from services import project_acl, project_write_gate
 from services.pypsa_service import PyPSAService
 from services.solve_queue import _TERMINAL, _row_epoch, solve_queue
 
@@ -104,6 +105,8 @@ def enqueue_solve(
 
     project_registry.require_user(user)
     project = project_registry.resolve_project(db, user, req.project_id)
+    # A viewer may not solve (and so save) the project (project-viewer-role 01).
+    project_write_gate.require_writable(db, user, project)
     # TWO INDEPENDENT PRE-CONDITIONS, both 409, checked in this order.
     #
     # The lock check goes first because its refusal is the more actionable one:
@@ -329,7 +332,6 @@ def _may_abort(db: DBSession, user: User, job: dict) -> bool:
         return False
 
     from db.models import Project
-    from services import project_acl
 
     project = db.get(Project, project_id)
     if project is None:
@@ -337,6 +339,20 @@ def _may_abort(db: DBSession, user: User, job: dict) -> bool:
     if f"{project.org_id}:" != prefix:
         return False  # the key's org half lied about the row's real owner
     return project_acl.can_access_project(db, user, project)
+
+
+def _job_view_only(db: DBSession, user: User, job: dict) -> bool:
+    """True when `job`'s project is one the caller only views."""
+    from db.models import Project
+
+    project_id = _project_uuid(job, _org_prefix(db, user))
+    project = db.get(Project, project_id) if project_id is not None else None
+    return project is not None and project_acl.project_role(db, user, project) == project_acl.VIEW
+
+
+def _require_job_writable(db: DBSession, user: User, job: dict) -> None:
+    if _job_view_only(db, user, job):
+        raise project_write_gate.refusal()
 
 
 def _parse_job_id(job_id: str) -> uuid.UUID | None:
@@ -368,7 +384,6 @@ def _visible_job_or_404(db: DBSession, user: User, job_id: str) -> dict:
     about stopping work, not about reading the deleted project's log, so the
     listing predicate is the right one here.
     """
-    from services import project_acl
 
     not_found = HTTPException(404, f"No solve job with id {job_id}.")
     parsed = _parse_job_id(job_id)
@@ -440,6 +455,39 @@ def job_log_history(
     q = solve_queue.get_log_queue(parsed)
     lines = q.history() if q is not None else []
     return {"lines": lines, "status": job["status"]}
+
+
+@router.get("/{job_id}/estimate")
+def job_estimate(
+    job_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    How long this job is likely to run, from its project's past runs of the
+    same kind and settings (`services.run_estimate`; run progress spec §2).
+
+    `seconds` is None when fewer than two such runs exist: the estimate is
+    unknown, never 0. `samples` and `run_ids` are its basis. A read: anyone who
+    may see the job may ask, whoever holds the project's edit lock. Same
+    visibility and the same byte-for-byte 404 as `/log_history`.
+    """
+    from services import project_registry, run_estimate, solve_job_store
+    from services.solve_queue import KIND_SOLVE, KINDS
+
+    project_registry.require_user(user)
+    job = _visible_job_or_404(db, user, job_id)
+    kind = job.get("kind") or KIND_SOLVE
+    project_key = job.get("project_key")
+    if kind not in KINDS or not project_key:
+        return {"kind": kind, **run_estimate.unknown()}
+    row = solve_job_store.load_job(_parse_job_id(job_id))
+    if row is None:
+        # No stored row means no settings snapshot to compare on. Reading that
+        # as "no snapshot" would match the project's snapshot-less runs, which
+        # is a different mode, so the estimate is unknown (GK B 63, R1).
+        return {"kind": kind, **run_estimate.unknown()}
+    return run_estimate.for_job(job_id, project_key, kind, row.get("solver_config"))
 
 
 @router.get("/{job_id}/log_stream")
@@ -595,6 +643,17 @@ def _can_dismiss(job: dict, owner, user: User) -> bool:
     """
     if job.get("status") not in _TERMINAL:
         return False
+    return _started_by(owner, user)
+
+
+def _started_by(owner, user: User) -> bool:
+    """
+    Whether this caller queued the job: the one ownership test behind both
+    `can_dismiss` and `started_by_me` (run progress slice 3, GK B3 N1).
+
+    `owner` comes from the `owners` map `list_queue` pops, never from the job
+    dict. A NULL owner (a legacy row) is false for everybody.
+    """
     return owner is not None and str(owner) == str(user.id)
 
 
@@ -755,7 +814,7 @@ def list_queue(
     a hot path — and answering on org membership instead would leak names that
     `GET /api/projects/` already hides from the same caller.
     """
-    from services import project_acl, project_registry
+    from services import project_registry
 
     project_registry.require_user(user)
     prefix = _org_prefix(db, user)
@@ -797,6 +856,11 @@ def list_queue(
                 # never have been queued by this caller, so it is already
                 # false for every redacted row.
                 "can_dismiss": _can_dismiss(job, owners.get(job["id"]), user),
+                # The finish/fail notification fires only for runs this caller
+                # started (run progress slice 3). A capability, like
+                # `can_dismiss`: true in every status, and false for every
+                # redacted row for the same reason.
+                "started_by_me": _started_by(owners.get(job["id"]), user),
             }
             for job, ok in zip(jobs, seen)
         ],
@@ -845,6 +909,8 @@ def abort_job(
         return persisted
     if not _may_abort(db, user, job):
         raise not_found
+    # Stopping a live solve undoes an editor's work: a viewer may not.
+    _require_job_writable(db, user, job)
     res = solve_queue.abort(parsed)
     if res is None:
         # Cleared by a concurrent clear_finished between the two lookups.
@@ -953,6 +1019,9 @@ def requeue_job(
         project = db.get(Project, project_uuid)
         if project is None:
             raise not_found
+        # Requeue solves and saves this project; `_visible_job_or_404` above
+        # already hid it from anyone who cannot see it. A viewer may not.
+        project_write_gate.require_writable(db, user, project)
         project_name = project.name
         # HOLDER CHECK — the precondition for this route's foreign-lock
         # exemption (`main._FOREIGN_LOCK_GATE_EXEMPT_PATTERNS`), not an
@@ -1200,6 +1269,8 @@ def cancel_queued(
             continue
         if not _may_abort(db, user, job):
             continue
+        if _job_view_only(db, user, job):
+            continue  # a viewer's sweep leaves an editor's queued work alone
         parsed = _parse_job_id(job["id"])
         if parsed is None:
             continue

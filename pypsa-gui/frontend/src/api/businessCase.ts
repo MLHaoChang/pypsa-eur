@@ -70,6 +70,9 @@ export interface LineItem {
 export interface BusinessCaseInputs {
   preset?: string | null
   receivable_days?: number | null
+  /** Lease-up (BC 15): the share of full served volume by year, a fraction 0..1; a year
+   *  not listed is 1 (100 %). */
+  volume_factor_by_year?: Record<string, number>
   lines: LineItem[]
 }
 
@@ -166,6 +169,14 @@ export interface BusinessCasePnl {
   /** Display key (BC 17): every input each row that reads None lacks, in the engine's
    *  reason codes; absent on a report stored before it. */
   row_reason?: Record<string, BusinessCaseRowReasonItem[]>
+  /** Display key (walk 03): the P&L row each KPI is computed from, so a KPI not
+   *  established reads that row's `row_reason`; absent on a report stored before it. */
+  kpi_row?: Record<string, string>
+  /** Lease-up display keys (BC 15), absent at full volume: each operating year below
+   *  100 % (a fraction), the basis note, and stated years outside the operating years. */
+  volume_factor?: Record<string, number>
+  volume_factor_note?: string
+  volume_factor_ignored?: number[]
 }
 
 export interface BusinessCaseRowReasonItem {
@@ -203,7 +214,8 @@ export interface BusinessCaseReport {
 export interface BusinessCaseStudy {
   status: string
   stage?: string | null
-  refusal?: string | null
+  /** The runner's refusal detail (`runner.py` refusal dict), set on a refused run. */
+  refusal?: BusinessCaseRefusal | null
   error?: string | null
   error_code?: string | null
   stages?: string[]

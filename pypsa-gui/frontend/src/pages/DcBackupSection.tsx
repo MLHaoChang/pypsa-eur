@@ -78,13 +78,6 @@ function storedMode(meta: unknown): DcBackupMode | null {
   return dc.spec.backup?.mode ?? 'genset'
 }
 
-/** The backup mode the saved network was built in, when not gensets: the
- *  network already has the strings, so the assessment refuses it (GK A Q1). */
-function builtMode(meta: unknown): DcBackupMode | null {
-  const m = (meta as { dc_load?: { network_backup_mode?: DcBackupMode } } | null)?.dc_load?.network_backup_mode
-  return m && m !== 'genset' ? m : null
-}
-
 export default function DcBackupSection({ name }: { name: string }) {
   const qc = useQueryClient()
   const key = nk(name, 'adequacy', 'eh_template')
@@ -94,7 +87,6 @@ export default function DcBackupSection({ name }: { name: string }) {
     staleTime: Infinity,
   })
   const mode = storedMode(meta)
-  const built = builtMode(meta)
   const [refusal, setRefusal] = useState<string | null>(null)
   const [result, setResult] = useState<DcBackupAssessment | null>(null)
   const [assessError, setAssessError] = useState<string | null>(null)
@@ -127,18 +119,16 @@ export default function DcBackupSection({ name }: { name: string }) {
             }))}
             title={BACKUP_MODE_FIELD}
           />
-          {!built && (
-            <Btn onClick={() => assess.mutate()} disabled={assess.isPending || save.isPending}>
-              <span data-testid="dc-backup-assess">{assess.isPending ? 'Assessing…' : 'Assess'}</span>
-            </Btn>
+          <Btn onClick={() => assess.mutate()} disabled={assess.isPending || save.isPending}
+               aria-describedby={save.isPending ? 'dc-backup-assess-wait' : undefined}>
+            <span data-testid="dc-backup-assess">{assess.isPending ? 'Assessing…' : 'Assess'}</span>
+          </Btn>
+          {save.isPending && (
+            <span id="dc-backup-assess-wait" className="text-[12px] text-muted" data-testid="dc-backup-assess-wait">
+              Saving the {BACKUP_MODE_FIELD}. Assess is ready once it is saved.
+            </span>
           )}
         </div>
-        {built && (
-          <p className="mt-1 text-[12px] text-muted" data-testid="dc-backup-not-assessable">
-            This project was created with {BACKUP_MODE_FIELD} set to {MODE_LABEL[built]}, so its saved network already has the
-            battery strings. To assess a backup, create the project with {MODE_LABEL.genset} and switch the {BACKUP_MODE_FIELD} here.
-          </p>
-        )}
         {refusal && <p className="mt-1 text-[12px] text-danger" data-testid="dc-backup-refusal">{refusal}</p>}
         {assessError && <p className="mt-1 text-[12px] text-danger" data-testid="dc-backup-error">{assessError}</p>}
         {result && <Assessment result={result} stale={result.mode !== mode} stored={mode} />}
@@ -170,7 +160,7 @@ function ReserveLine({ name }: { name: string }) {
         ? <span className="text-muted">not set</span>
         : `${num(data.headroom_h_per_string)}${NBSP}h per string`}
       {' · '}
-      <button type="button" className="text-accent hover:underline" data-testid="dc-backup-reserves-open"
+      <button type="button" className="text-link hover:underline" data-testid="dc-backup-reserves-open"
         onClick={() => showResultsTab('storage', { section: RESERVE_SECTION, from: 'Grid study' })}>Storage view ›</button>
     </p>
   )
@@ -189,6 +179,12 @@ function Assessment({ result, stale, stored }: { result: DcBackupAssessment; sta
   const assumed = c.inputs.filter(i => i.assumed)
   return (
     <div className="mt-2 space-y-2 text-[12px]" data-testid="dc-backup-result" data-stale={stale}>
+      {result.built.mode !== 'genset' && (
+        <p className="text-muted" data-testid="dc-backup-built">
+          This project was created with {BACKUP_MODE_FIELD} set to {MODE_LABEL[result.built.mode]}, so it is assessed as
+          if created with {MODE_LABEL.genset}. {result.built.notes.join(' ')}
+        </p>
+      )}
       {stale && (
         <p className="flex items-center gap-2" data-testid="dc-backup-stale">
           <StatePill state="stale" />

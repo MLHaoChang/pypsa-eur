@@ -8,6 +8,7 @@ export const FIELD_LABELS: Record<string, string> = {
   eh_sk_mva: 'Short-circuit level (MVA)',
   site_anchor: 'Site coordinates',
   poc_xr: 'PoC X/R',
+  connection_limit: 'Connection limit (MW)',
   target_lole_h: 'LOLE target',
   p_nom: 'Capacity',
   p_nom_max: 'Maximum capacity',
@@ -38,6 +39,15 @@ export const FIELD_LABELS: Record<string, string> = {
   pressure_bar: 'Header pressure',
   max_supply_temp_c: 'Max supply temperature',
   max_pressure_bar: 'Max steam pressure',
+  // Set only in Expert; Guided names them (design §3.5). The Expert editors' own words.
+  grid_code_profile: 'Grid code', // CampusElectricalPanel "Grid code and PCC"
+  grid_code_document: 'Grid-code document', // CampusGridCodeSection upload
+  timezone: 'Site time zone',
+  dsr_share_of_load: 'DSR volume', // SolverSettings "Demand-response tier"
+  dsr_price_eur_per_mwh: 'Demand-response price',
+  business_case: 'Business case', // Results › Investment case, its "Business case" section
+  committable: 'Unit commitment', // the asset form (asset_schema/fields.py); its schema label wins
+  variants: 'Project variants', // ScenariosPanel "project variants"
 }
 
 /** The ledger's label for each field its rows point at (DC-02: the grid

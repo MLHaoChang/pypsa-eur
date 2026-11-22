@@ -124,11 +124,11 @@ def owned_forks(db, base_row, study_id: str) -> list:
 
 def _copy_walk(src: pathlib.Path, dst: pathlib.Path) -> None:
     """The bundle, minus what a fork must not inherit (`SKIPPED`)."""
-    from routers.projects import _BUNDLE_DIRS, _BUNDLE_FILES
+    from routers.projects import _BUNDLE_DIRS, _BUNDLE_FILES, _FORK_SKIPPED_FILES
     from services.atomic_io import atomic_write_bytes
 
     for fname in _BUNDLE_FILES:
-        if fname in SKIPPED:
+        if fname in SKIPPED or fname in _FORK_SKIPPED_FILES:
             continue
         f = src / fname
         if f.is_file():
