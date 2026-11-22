@@ -65,3 +65,15 @@ new `pypsa-gui/backend/services/market_prices.py`, the time-series routes, secti
   - SCU06-K8-3 = (a): reserve prices come from user upload only.
   - SCU06-K8-4 = (a): flexible loads are deferred.
   - The ENTSO-E token (`ENTSOE_API_TOKEN`) is still to be added by the owner; E2E-DONE-1 stays blocked on it.
+
+### 2026-11-21: S2a gatekeeper conditions (GK B4 (2))
+
+S2a ships the PPA/CfD defaults as five `common` Library contract items (`eu-ppa-pay-as-produced`, `eu-ppa-baseload`, `eu-ppa-as-consumed-btm`, `eu-ppa-sleeved`, `eu-cfd`). No swap or shaped off-site item: there is no model type for them yet (K7 gated plan).
+
+1. Home of the defaults: the owner answered SCU06-S2-HOME-1 = (a), shared read-only common Library items (relayed 2026-11-22), which is what S2a builds.
+2. Versioning: a shipped item is never edited in place; a later change ships as a new ref version with the v1 bytes still pinned. `PINNED` covers all five, and a one-byte change fails the hash check.
+3. Placeholders fail closed on the server: seller, buyer and asset_ids (a CfD's generator_owner, counterparty and asset_ids) hold a fill-in marker that can never be a valid component name. Saving refuses a contract that still holds one, with a plain message, and settlement (what billing and finance read) refuses it too. Tests: save refused with each of the three left, accepted once all three are replaced; dropping the check turns them red.
+4. Every numeric value has a cited range (source, URL, year) and lies inside it; a test parses the notes. A copied contract keeps `library_ref`, so `source="illustrative"` stays traceable.
+5. Settlement with exact values: the CfD settled with the reference above and below the strike (opposite signs, exact amounts); baseload at baseload_mw against a profile that under- and over-produces; sleeved, with the fee landing as a cost.
+6. `changes_dispatch` is false or absent on all five, pinned by a test.
+7. Mutation runs (`scripts/coord/mutants.py`) on `common.py` and the placeholder-check module, survivors explained in the PR.
