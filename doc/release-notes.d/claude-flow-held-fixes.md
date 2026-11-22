@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Guided names the NH3 delivery in its own unit (MW_NH3), files a connection link's missing outage data under the connection, and the section card's state reads the rail's open-item count first.
