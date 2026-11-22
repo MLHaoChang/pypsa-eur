@@ -2643,6 +2643,9 @@ def _canon(o):
             # case keeps its hash; stated, the report re-runs to state its figures.
             if o.inputs.island_outage is None and isinstance(out.get("inputs"), dict):
                 out["inputs"].pop("island_outage", None)
+        # Walk 03 case B: an asset without a terminal-only life keeps its hash.
+        if isinstance(o, AssetFinance) and o.terminal_lifetime_years is None:
+            del out["terminal_lifetime_years"]
         # A line that is not a difference line (IPP ticket 01) keeps its hash.
         if isinstance(o, TemplateLine) and o.price_qty_mwh is None:
             del out["price_qty_mwh"]

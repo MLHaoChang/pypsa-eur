@@ -46,9 +46,16 @@ the PSS/E conventions and their source).
   under the RAW's identity (``PsseNetIndex``) into ``psse_contingencies.json``;
   every element it does not map is an unmapped row with its line.
 
-``s_nom`` is the PSS/E rating RATEA (v33) or RATE1 (v35/v36). A line without a
-rating keeps ``s_nom`` = 0 and a transformer without one takes its impedance
-base SBASE1-2 as ``s_nom``; both are listed in ``assumed``.
+``s_nom`` is the PSS/E rating RATEA (v33) or RATE1 (v35/v36). A zero rating
+means unrated. A line with RATEA/RATE1 = 0 takes the first positive later rating
+(RATEB, RATEC; RATE2..RATE12), else the never-binding bound of
+``gridspine.ingest.ratings``: ceil(max(10 × L, the voltage-class floor of its
+higher-voltage end)) MVA, where L is Σ |S| of the in-service loads floored at
+SBASE. Such a line is listed in ``assumed`` and marked ``s_nom_source`` =
+"assumed"; the column exists only when a line is, and the other lines read "file".
+Only "assumed" means assumed: a row added later (empty or NaN) is not. A
+transformer without a rating takes its
+impedance base SBASE1-2 as ``s_nom``, listed in ``assumed``.
 """
 
 from __future__ import annotations
@@ -91,6 +98,12 @@ from gridspine.ingest.psse_raw_parse import (
     read_raw_text,
     shunt_siemens,
     transformer_windings,
+)
+from gridspine.ingest.ratings import (
+    assumed_rating_mva,
+    default_marginal_costs,
+    source_column,
+    total_load_mva,
 )
 from gridspine.schema.contracts import ContractError
 
@@ -432,7 +445,16 @@ def build_network(case: RawCase):
 
     # ---------------------------------------------------------- branches
     br = t["branch"]
-    rate1 = "RATE1" if case.version >= 35 else "RATEA"
+    rate_cols = (
+        [f"RATE{k}" for k in range(1, 13)]
+        if case.version >= 35
+        else ["RATEA", "RATEB", "RATEC"]
+    )
+    rate1 = rate_cols[0]
+    # the bound an unrated line takes (gridspine.ingest.ratings): total load
+    # floored at SBASE, so a load-free case still scales with its base
+    load_mva = total_load_mva(n.loads)
+    assumed_lines: list[str] = []
     n_lines = n_branch_tr = 0
     if len(br):
         branch_names = _branch_names(br, bname, case.version)
@@ -492,6 +514,11 @@ def build_network(case: RawCase):
                 phys = branch_physical(case, r)
             else:
                 phys = branch_physical(case, r)
+                s_nom = rate
+                if rate <= 0:
+                    s_nom, why = _line_rating(r, rate_cols, load_mva, sb, kv[i], kv[j])
+                    assumed_lines.append(nm)
+                    assumed.append(Assumed(nm, "thermal rating (MVA)", s_nom, why))
                 n.add(
                     "Line",
                     nm,
@@ -500,21 +527,12 @@ def build_network(case: RawCase):
                     r=phys["r_ohm"],
                     x=phys["x_ohm"],
                     b=phys["b_siemens"],
-                    s_nom=rate,
+                    s_nom=s_nom,
                     active=on,
                     length=r["LEN"],
                 )
                 n.lines.at[nm, "psse_circuit"] = r["CKT"]
                 n_lines += 1
-                if rate <= 0:
-                    assumed.append(
-                        Assumed(
-                            nm,
-                            "thermal rating (MVA)",
-                            0.0,
-                            "no rating in the file; left at 0 for you to set",
-                        )
-                    )
             for end, bno in (("from", i), ("to", j)):
                 g, b = phys[f"g_{end}_siemens"], phys[f"b_{end}_siemens"]
                 if g or b:
@@ -650,6 +668,11 @@ def build_network(case: RawCase):
             for r in sw.to_dict("records")
         ]
 
+    if assumed_lines:  # marks a rating results must not read as real
+        n.lines["s_nom_source"] = source_column(n.lines.index, assumed_lines)
+    # RAW carries no cost data
+    assumed += [Assumed(*a) for a in default_marginal_costs(n.generators)]
+
     lone = _lone_buses(n)
     if lone:
         warnings.append(
@@ -674,6 +697,27 @@ def build_network(case: RawCase):
     }
     counts = {k: int(v) for k, v in counts.items() if v}
     return n, counts, assumed, warnings
+
+
+def _line_rating(r, rate_cols, load_mva, sb, kv_from, kv_to):
+    """
+    ``(s_nom, why)`` for a line whose first rating is 0: the first positive
+    later rating, else the never-binding bound (SBASE ``sb`` floors the load).
+    """
+    first = rate_cols[0]
+    for col in rate_cols[1:]:
+        if r[col] > 0:
+            return float(r[col]), (
+                f"{first} is 0; {col} = {r[col]:g} MVA is used, the first rating "
+                "the file gives. Set the normal rating before you read loading"
+            )
+    bound = assumed_rating_mva(max(load_mva, sb), kv_from, kv_to)
+    return bound, (
+        f"the case gives no rating ({first} = 0 means unrated), so a bound that "
+        f"never binds is used: 10 × the total load {load_mva:.1f} MVA (at least SBASE "
+        f"{sb:g} MVA), or the {max(kv_from, kv_to):g} kV class floor if higher. "
+        "Set a real rating before you read loading"
+    )
 
 
 def _lone_buses(n):

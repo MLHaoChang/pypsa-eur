@@ -116,6 +116,13 @@ export interface AssetCostsPayload {
   assets: AssetCostRow[]
 }
 
+export interface TableUnits {
+  component: string
+  rows: Record<string, Record<string, { unit: string; scale: number }>>
+  unreadable: string[]
+  cost_fields: string[]
+}
+
 export const assetSchemaApi = {
   costs: () => client.get<AssetCostsPayload>('/network/asset_costs').then(r => r.data),
   get: (component: string) =>
@@ -132,6 +139,10 @@ export const assetSchemaApi = {
       /** Cost-field unit and scale on a tonne bus (EUR/t, scale 1); empty on an energy bus. */
       costs?: Record<string, { unit: string; scale: number }> }>(
       `/network/asset_schema/${component}/units/${encodeURIComponent(name)}`).then(r => r.data),
+  /** For a table: each asset on a tonne bus with its cost units (the card's unit and scale), the assets whose bus is
+   *  unreadable (no per-unit claim) and the class's cost columns that follow the bus. */
+  tableUnits: (component: string) =>
+    client.get<TableUnits>(`/network/asset_schema/${component}/table_units`).then(r => r.data),
   provenance: (component: string, name: string) =>
     client.get<{ component: string; name: string; fields: Record<string, ProvenanceEntry> }>(
       `/network/asset_schema/${component}/provenance/${encodeURIComponent(name)}`).then(r => r.data),

@@ -1,0 +1,6 @@
+{
+ "routes": {
+  "POST /api/model-import/import": {"category": "creates-project", "reason": "creates a new project the caller owns, from uploaded model files; it never touches the open network or an existing project, and a taken name is the database's 409"},
+  "POST /api/model-import/preview": {"category": "not-project-data", "reason": "reads uploaded model files in a child process and writes nothing a project keeps; its staging folder is removed on every path"}
+ }
+}

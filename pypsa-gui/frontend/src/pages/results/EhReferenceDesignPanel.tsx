@@ -1112,7 +1112,7 @@ export function EhReferenceDesignPanel() {
     queryFn: () => resultsApi.getEhRedundancy(),
     enabled: !running,
   })
-  const { data: levers } = useQuery({
+  const { data: levers, status: leversStatus, isFetching: leversFetching } = useQuery({
     queryKey: levKey,
     queryFn: () => resultsApi.getEhLevers(),
     enabled: !running,
@@ -1162,6 +1162,15 @@ export function EhReferenceDesignPanel() {
     requestAnimationFrame(() => document.querySelector('[data-testid="eh-levers"]')
       ?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }))
   }, [sectionRequest, open, hasLevers])
+  // The levers query settled (error, or no options) without a levers block:
+  // drop the request, so a later remount with levers does not jump unasked.
+  const leversSettledEmpty = !running && !leversFetching && !hasLevers
+    && (leversStatus === 'error' || leversStatus === 'success')
+  useEffect(() => {
+    if (sectionRequest === LEVERS_SECTION && leversSettledEmpty) {
+      useUIStore.getState().clearResultsSectionRequest()
+    }
+  }, [sectionRequest, leversSettledEmpty])
   const dtcTable = running ? null : (dtcStress ?? null) as EhDtcStressTable | null
   const dtcPlanTable = running ? null
     : (dtcPlanning ?? null) as EhDtcPlanningTable | null

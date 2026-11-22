@@ -82,6 +82,28 @@ describe('levers section request', () => {
     expect(levers.textContent).toContain('Battery duration')
     expect(levers.textContent).not.toContain('storage_duration')
   })
+
+  // A request the levers query cannot honour is dropped once the query
+  // settles, so a later mount with levers does not jump there unasked.
+  it('clears the request when the levers query fails', async () => {
+    vi.mocked(resultsApi.getEhLevers).mockRejectedValue(new Error('boom'))
+    useUIStore.getState().requestResultsTab('adequacy', LEVERS_SECTION)
+    mount()
+    await waitFor(() => expect(resultsApi.getEhLevers).toHaveBeenCalled())
+    await waitFor(() => expect(useUIStore.getState().resultsSectionRequest).toBeNull())
+    expect(screen.queryByTestId('eh-levers')).toBeNull()
+    expect(scrolled).not.toContain('eh-levers')
+  })
+
+  it('clears the request when the levers query returns no options', async () => {
+    vi.mocked(resultsApi.getEhLevers).mockResolvedValue({ kind: 'storage_duration', options: [] })
+    useUIStore.getState().requestResultsTab('adequacy', LEVERS_SECTION)
+    mount()
+    await waitFor(() => expect(resultsApi.getEhLevers).toHaveBeenCalled())
+    await waitFor(() => expect(useUIStore.getState().resultsSectionRequest).toBeNull())
+    expect(screen.queryByTestId('eh-levers')).toBeNull()
+    expect(scrolled).not.toContain('eh-levers')
+  })
 })
 
 describe('shared study query options (spec §9: cache shared with the cards)', () => {

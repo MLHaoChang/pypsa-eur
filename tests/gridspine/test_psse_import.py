@@ -20,6 +20,7 @@ from gridspine.handoff.raw_writer import SECTIONS, write_raw
 from gridspine.ingest.import_result import ImportFormatError, ImportResult
 from gridspine.ingest.psse_import import THRSHZ, read_psse
 from gridspine.ingest.psse_raw_parse import read_raw
+from gridspine.ingest.ratings import assumed_rating_mva
 
 FIX = Path(__file__).parent / "fixtures" / "psse"
 logging.getLogger("pypsa").setLevel(logging.ERROR)
@@ -424,11 +425,12 @@ def test_no_other_assumptions_in_features(features):
     params = sorted({a.parameter for a in features.report.assumed})
     assert params == [
         "branch type",
+        "marginal cost (€/MWh)",  # RAW carries no cost: both generators
         "regulated bus",
         "susceptance setting",
         "voltage dependence",
     ]
-    assert len(features.report.assumed) == 1 + 1 + 2 + 1
+    assert len(features.report.assumed) == 1 + 2 + 1 + 2 + 1
 
 
 def test_row_accounting_features(features):
@@ -840,8 +842,26 @@ def test_unrated_line_assumed(tmp_path):
     res = _case(
         tmp_path, BUS=_BUSES, GENERATOR=[_SWING], BRANCH=["1,2,'1',0.01,0.1,0.0,0.0"]
     )
-    assert res.network.lines.at["Line A - B 1", "s_nom"] == 0.0
+    # no load, so the total load floors at SBASE 100 MVA: 10 × 100 = 1000 MVA,
+    # above the 110 kV class floor (250 MVA)
+    assert res.network.lines.at["Line A - B 1", "s_nom"] == 1000.0
+    assert res.network.lines.at["Line A - B 1", "s_nom_source"] == "assumed"
     assert _assumed(res.report, "thermal rating (MVA)") == ["Line A - B 1"]
+    (row,) = [a for a in res.report.assumed if a.parameter == "thermal rating (MVA)"]
+    assert row.value == 1000.0 and "SBASE" in row.why
+
+
+def test_v35_zero_rate1_line_uses_the_first_positive_rate(tmp_path):
+    res = _case(
+        tmp_path,
+        rev=35,
+        BUS=_BUSES,
+        GENERATOR=[_SWING],
+        BRANCH=["1,2,'1',0.01,0.1,0.0,'',0.0,0.0,30.0"],
+    )
+    assert res.network.lines.at["Line A - B 1", "s_nom"] == 30.0
+    (row,) = [a for a in res.report.assumed if a.parameter == "thermal rating (MVA)"]
+    assert row.value == 30.0 and "RATE1 is 0; RATE3 = 30 MVA is used" in row.why
 
 
 def test_line_end_shunts_rebased_to_each_end(tmp_path):
@@ -971,3 +991,186 @@ def test_parallel_circuits_with_distinct_ckt_are_both_kept(tmp_path):
     n = res.network
     assert len(n.lines) == res.report.counts["Lines"] == 3
     assert n.lines["r"].nunique() == 3
+
+
+# ---------------------------------------------------------------- unrated lines (issue psse-import 04)
+#: case14: Σ|S| of its 11 loads is 275.65 MVA; 10 × that, rounded up to a whole
+#: MVA, is above the 138 kV class floor (250 MVA).
+CASE14_ASSUMED_LINE_MVA = 2757.0
+
+
+def _rating_rows(rep):
+    return {a.asset: a for a in rep.assumed if a.parameter == "thermal rating (MVA)"}
+
+
+def test_case14_unrated_lines_get_a_stated_bound():
+    res = _read("case14")
+    n = res.network
+    assert len(n.lines) == 17
+    assert n.lines["s_nom"].tolist() == [CASE14_ASSUMED_LINE_MVA] * 17
+    assert n.lines["s_nom_source"].tolist() == ["assumed"] * 17
+    rows = _rating_rows(res.report)
+    assert sorted(rows) == sorted(n.lines.index)
+    for a in rows.values():
+        assert a.value == 2757.0
+        assert "RATEA = 0 means unrated" in a.why
+        assert "275.7 MVA" in a.why  # the total load the bound is 10 times
+    # the transformers keep their SBASE1-2 base, as before
+    assert n.transformers["s_nom"].tolist() == [100.0, 100.0, 100.0]
+    assert "s_nom_source" not in n.transformers.columns
+
+
+def test_a_zero_ratea_line_falls_back_to_a_positive_rateb(tmp_path):
+    text = (FIX / "case14.raw").read_text().splitlines()
+    first = (
+        "     1,     2,'1 ',1.93800E-2,5.91700E-2,5.28000E-2,   0.00,   0.00,   0.00,"
+    )
+    assert text[37].startswith(first)
+    text[37] = text[37].replace(
+        first, first[: -len("   0.00,   0.00,")] + "  45.00,   0.00,", 1
+    )
+    p = tmp_path / "case14_rateb.raw"
+    p.write_text("\n".join(text) + "\n")
+    res = read_psse([p], {})
+    n = res.network
+    line = "Line Bus 1     HV - Bus 2     HV 1"
+    assert n.lines.at[line, "s_nom"] == 45.0
+    assert n.lines.at[line, "s_nom_source"] == "assumed"
+    assert set(n.lines.drop(line)["s_nom_source"]) == {"assumed"}
+    row = _rating_rows(res.report)[line]
+    assert row.value == 45.0
+    assert "RATEA is 0; RATEB = 45 MVA is used" in row.why
+    others = n.lines.drop(line)
+    assert others["s_nom"].tolist() == [2757.0] * 16
+
+
+def test_a_fully_rated_case_is_unchanged():
+    """
+    case30 rates every line: its line and transformer frames equal master
+    3b9ea4f9's, column for column. Its generator frame is master's except for the
+    cost default (marginal_cost 0 → 1.0 on all 6, and marginal_cost_source).
+    """
+    golden = json.loads((FIX / "case30_frames_3b9ea4f9.json").read_text())
+    n = _read("case30").network
+    for comp in ("lines", "generators", "transformers"):
+        df = getattr(n, comp)
+        assert list(df.columns) == golden[comp]["columns"], comp
+        for name, row in golden[comp]["rows"].items():
+            for col, want in row.items():
+                got = df.at[name, col]
+                if hasattr(got, "item"):
+                    got = got.item()
+                if want == "NaN":
+                    assert isinstance(got, float) and math.isnan(got), (comp, name, col)
+                elif want in ("inf", "-inf"):
+                    assert got == float(want), (comp, name, col)
+                else:
+                    assert got == want, (comp, name, col, got, want)
+    assert n.lines.at[n.lines.index[0], "s_nom"] == 138.0  # RATEA 138 in the file
+
+
+def test_features_rated_line_keeps_its_ratea(features):
+    ln = features.network.lines
+    assert ln["s_nom"].tolist() == [100.0]
+    assert "s_nom_source" not in ln.columns
+    assert _rating_rows(features.report) == {}
+
+
+@pytest.mark.parametrize(
+    "load_mva, kv, want",
+    [
+        (275.65, 138.0, 2757.0),  # 10 × load wins over the 250 MVA floor
+        (10.0, 138.0, 250.0),  # 100 MVA < the ≤150 kV floor
+        (10.0, 0.4, 100.0),  # <1 kV floor is 1 MVA
+        (0.01, 0.4, 1.0),
+        (0.01, 1.0, 50.0),  # 1 kV is in the ≤36 kV class
+        (1.0, 20.0, 50.0),  # ≤36 kV floor
+        (1.0, 36.0, 50.0),
+        (1.0, 36.1, 250.0),
+        (1.0, 150.0, 250.0),
+        (1.0, 220.0, 1000.0),  # ≤300 kV floor
+        (1.0, 300.0, 1000.0),
+        (1.0, 380.0, 3000.0),  # >300 kV floor
+        (0.21, 0.0, 3.0),  # BASKV 0: lowest class, still 10 × load (2.1 → 3)
+        (0.21, math.nan, 3.0),  # BASKV missing: the same
+    ],
+)
+def test_assumed_bound_rule(load_mva, kv, want):
+    assert assumed_rating_mva(load_mva, kv) == want
+
+
+def test_assumed_bound_takes_the_higher_end_voltage():
+    assert assumed_rating_mva(1.0, 20.0, 380.0) == 3000.0
+    assert assumed_rating_mva(1.0, 0.0, 220.0) == 1000.0
+
+
+def test_an_out_of_service_load_is_not_in_the_bound(tmp_path):
+    # 2000 MW switched off (STATUS 0): the bound stays 10 × SBASE 100 = 1000 MVA
+    res = _case(
+        tmp_path,
+        BUS=_BUSES,
+        LOAD=["2,'1',0,1,1,2000.0,0.0"],
+        GENERATOR=[_SWING],
+        BRANCH=["1,2,'1',0.01,0.1,0.0,0.0"],
+    )
+    assert bool(res.network.loads["active"].iloc[0]) is False
+    assert res.network.lines.at["Line A - B 1", "s_nom"] == 1000.0
+
+
+def test_an_in_service_load_sets_the_bound(tmp_path):
+    res = _case(
+        tmp_path,
+        BUS=_BUSES,
+        LOAD=["2,'1',1,1,1,300.0,400.0"],
+        GENERATOR=[_SWING],
+        BRANCH=["1,2,'1',0.01,0.1,0.0,0.0"],
+    )
+    # |S| = 500 MVA, 10 × 500 = 5000 MVA
+    assert res.network.lines.at["Line A - B 1", "s_nom"] == 5000.0
+
+
+# ---------------------------------------------------------------- cost default (issue psse-import 04)
+def test_case14_generators_take_the_stated_cost_default():
+    res = _read("case14")
+    g = res.network.generators
+    assert g["marginal_cost"].tolist() == [1.0] * 5
+    assert g["marginal_cost_source"].tolist() == ["assumed"] * 5
+    rows = [a for a in res.report.assumed if a.parameter == "marginal cost (€/MWh)"]
+    assert sorted(a.asset for a in rows) == sorted(g.index)
+    for a in rows:
+        assert a.value == 1.0
+        assert "the file gives no cost, so 1 €/MWh is used" in a.why
+        assert "dispatch between them is arbitrary" in a.why
+
+
+def test_a_cost_the_file_gives_is_kept_even_when_zero():
+    import pandas as pd
+
+    from gridspine.ingest.ratings import default_marginal_costs
+
+    gens = pd.DataFrame(
+        {"marginal_cost": [0.0, 0.0, 7.5]}, index=["given 0", "none", "given"]
+    )
+    rows = default_marginal_costs(gens, given=["given 0", "given"])
+    assert gens["marginal_cost"].to_dict() == {
+        "given 0": 0.0,
+        "none": 1.0,
+        "given": 7.5,
+    }
+    assert gens["marginal_cost_source"].to_dict() == {
+        "given 0": "file",
+        "none": "assumed",
+        "given": "file",
+    }
+    assert [(a, v) for a, _, v, _ in rows] == [("none", 1.0)]
+    every = pd.DataFrame({"marginal_cost": [3.0]}, index=["g"])
+    assert default_marginal_costs(every, given=["g"]) == []
+    assert "marginal_cost_source" not in every.columns
+
+
+def test_case14_lopf_solves():
+    n = _read("case14").network
+    status, condition = n.optimize(solver_name="highs")
+    assert (status, condition) == ("ok", "optimal")
+    # load 259 MW at 1 €/MWh for one snapshot; lossless LOPF
+    assert n.objective == pytest.approx(259.0)

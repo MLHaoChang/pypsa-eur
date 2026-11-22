@@ -3,7 +3,7 @@
 
 # 05 — Preset leaves required fields empty; the refusals are raw strings
 
-Status: ready-for-agent
+Status: done (#1683: refusals name the line and field in words; #1868: presets fill an empty contract indexation from the finance inputs' PPA escalation, chat apply keeps receivable days and lease-up)
 Severity: medium
 Group: Investment and business case. Walk 2026-11-17, master 9491878d.
 Breaks: `.scratch/business-case/spec.md` §6.6 (insurance default from the pack) and G9; owner decisions RAW-NAMES-1, DECISION-GAPS-1.
