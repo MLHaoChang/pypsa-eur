@@ -58,6 +58,7 @@ from gridspine.ingest.plexos_csv import (
     match_files,
     read_series,
 )
+from gridspine.ingest.plexos_pattern import mask
 from gridspine.ingest.plexos_xml import (
     PlexosModel,
     PlexosRefused,
@@ -129,7 +130,6 @@ _UNSUPPORTED = {
     "Reserve": "reserves are not imported yet",
     "Transformer": "transformers are not imported yet",
     "Interface": "interfaces (flow-gate limits) are not imported yet",
-    "Timeslice": "timeslices are applied in slice 3b",
     "Scenario": "scenario settings (such as a priority) are not read",
     "Waterway": "waterways (hydro cascades) are not imported yet",
 }
@@ -255,6 +255,30 @@ def _percent(value: float | None) -> float | None:
     if value is None or not math.isfinite(value) or not 0 < value <= 100:
         return None
     return value / 100.0
+
+
+def _windowed(row: PropertyRow) -> bool:
+    """A row that holds only on its dates or timeslice (slice 3b)."""
+    return bool(
+        row.date_from or row.date_to or any(t.cls == "Timeslice" for t in row.tags)
+    )
+
+
+def _when(raw: str, what: str) -> pd.Timestamp | str:
+    """
+    A row's Date From/To, or why not: ISO only, as t_date_from / t_date_to
+    store it ("01/02/2015" is never guessed), and without a UTC offset, since
+    the snapshots have none (GK A N1).
+    """
+    try:
+        t = pd.to_datetime(raw, format="ISO8601")
+    except (ValueError, TypeError, OverflowError):
+        return f"{what} {raw!r} not read"
+    if pd.isna(t):
+        return f"{what} {raw!r} not read"
+    if t.tzinfo is not None:
+        return f"{what} {raw!r} has a UTC offset; the snapshots have none"
+    return t
 
 
 def _label(obj: tuple[str, str]) -> str:
@@ -460,6 +484,11 @@ class _Converter:
         self._var_rows: dict[str, list[PropertyRow]] = {}
         self._var_why: dict[str, str] = {}
         self._var_users: dict[str, list[str]] = defaultdict(list)
+        # slice 3b: rows of each Timeslice object, and each dated or
+        # timesliced group by the data_id of the row that stands for it
+        self._slice_rows: dict[str, list[PropertyRow]] = defaultdict(list)
+        self._groups: dict[str, tuple[PropertyRow | None, list[PropertyRow]]] = {}
+        self._slices: dict[str, np.ndarray | str] = {}  # filled by dated()
         self.names: dict[str, set[str]] = defaultdict(set)
         self.base: dict[tuple[str, str], dict[str, PropertyRow]] = defaultdict(dict)
         self.children: dict[tuple[str, str], dict[str, list[tuple[str, str]]]] = (
@@ -541,21 +570,23 @@ class _Converter:
         for row in self.m.rows:
             scen = row.scenarios
             on_here = [x for x in scen if x in on]
-            if row.value is None:
+            if row.child[0] == "Timeslice":
+                self._slice_rows[row.child[1]].append(row)  # see timeslices()
+            elif row.value is None:
                 self.skip(row, f"value unreadable ({row.unreadable or 'empty'})")
             elif scen and not on_here:
                 why = "scenario " + ", ".join(repr(x) for x in scen) + " not selected"
                 self.skip(row, why)
             elif row.band != 1:
                 self.skip(row, f"band {row.band}: only band 1 is used")
-            elif row.date_from or row.date_to:
-                self.skip(row, "dated row: dates are applied in slice 3b")
             elif other := [
                 t
                 for t in row.tags
-                if t.cls not in ("Data File", "Scenario", "Variable")
+                if t.cls not in ("Data File", "Scenario", "Variable", "Timeslice")
             ]:
-                self.skip(row, f"scaled by {other[0].cls} {other[0].name!r}: slice 3b")
+                self.skip(
+                    row, f"tagged with {other[0].cls} {other[0].name!r}: not read"
+                )
             elif bad := [
                 t for t in row.tags if t.cls == "Variable" and t.action not in _ACTIONS
             ]:
@@ -601,6 +632,8 @@ class _Converter:
                         self.skip(row, f"replaced by scenario {scen}")
                 rows = [r for r in rows if r.data_id in scen_of]
                 what = f"values of scenario {scen}"
+            win = [r for r in rows if _windowed(r)]
+            rows = [r for r in rows if not _windowed(r)]
             filed = [r for r in rows if r.data_id in self.source]
             if len(rows) > 1 and len(filed) == 1:
                 for row in rows:
@@ -608,12 +641,29 @@ class _Converter:
                         self.skip(row, f"the data-file row for {prop!r} is used")
                 rows = filed
             if len(rows) > 1:
-                for row in rows:
+                for row in [*rows, *win]:
                     self.source.pop(row.data_id, None)
                     self.skip(row, f"{len(rows)} {what} for {prop!r}; none used")
                 continue
+            if win and [
+                r
+                for r in (*rows, *win)
+                if r.data_id in self.source or any(t.cls == "Variable" for t in r.tags)
+            ]:
+                # GK A Q3: no overlay onto a file or variable series
+                for row in (*rows, *win):
+                    self.source.pop(row.data_id, None)
+                    self.skip(
+                        row,
+                        "dated or timesliced rows with a data-file or variable row "
+                        f"for {prop!r}: not read",
+                    )
+                continue
+            first = rows[0] if rows else win[0]
+            if win:
+                self._groups[first.data_id] = (rows[0] if rows else None, win)
             key = child if parent[0] == "System" else (parent, child)
-            self.base[key][prop] = rows[0]  # type: ignore[index]
+            self.base[key][prop] = first  # type: ignore[index]
 
     def take(self, obj, prop: str) -> PropertyRow | None:
         row = self.base.get(obj, {}).pop(prop, None)
@@ -945,6 +995,233 @@ class _Converter:
                         self._var_why.get(name, "no imported row uses it"),
                         item=_label(("Variable", name)),
                     )
+
+    # -- slice 3b: dated and timesliced rows
+    def timeslices(self) -> dict[str, np.ndarray | str]:
+        """
+        Each Timeslice's mask over the snapshots, or why it has none (GK A P4).
+        The pattern is the text of its one undated, untagged band-1 ``Include``
+        row; with no such row, its name when the whole name parses.
+        """
+        out: dict[str, np.ndarray | str] = {}
+        snaps, step = self.n.snapshots, self.step
+        for ts in sorted(self.m.objects_of("Timeslice"), key=lambda o: o.name):
+            rows = self._slice_rows.get(ts.name, [])
+            inc = [r for r in rows if r.property == "Include"]
+            pattern: str | None = None
+            if len(inc) > 1:
+                why = f"{len(inc)} pattern rows; none used"
+            elif inc:
+                r = inc[0]
+                texts = [x.strip() for _, x in r.texts if x and x.strip()]
+                if r.date_from or r.date_to or r.tags or r.band != 1:
+                    why = "its pattern row is dated, tagged or banded; not read"
+                elif not r.value:
+                    why = "its pattern row's value is 0 or unreadable"
+                elif len(texts) != 1:
+                    why = "its pattern row gives no single pattern"
+                else:
+                    pattern, why = texts[0], ""
+            else:
+                pattern, why = ts.name, ""
+            got: np.ndarray | str
+            if pattern is None:
+                got = why
+            elif not isinstance(snaps, pd.DatetimeIndex) or not self.step:
+                got = "the network has no time horizon"
+            else:
+                got = mask(pattern, snaps, step)
+                if isinstance(got, str):
+                    got = f"pattern {pattern!r}: {got}"
+                elif not inc:
+                    self.assume(
+                        _label(ts.key),
+                        "pattern",
+                        pattern,
+                        "the Timeslice has no pattern row; its name is read as the pattern",
+                    )
+            out[ts.name] = got
+        if any(not isinstance(v, str) for v in out.values()):
+            self.assume(
+                "timeslices",
+                "pattern reading",
+                "W1 = Sunday; ',' joins items (OR within a symbol, AND across); "
+                "';' joins alternatives",
+                "from the PLEXOS documentation, not checked on a real file",
+            )
+        return out
+
+    def dated(self) -> None:
+        """
+        Each dated or timesliced group (sort_rows) to one value or one step
+        series over the snapshots (GK A D1-D5). A gap, an overlap with
+        different values, a date inside a snapshot or an unreadable timeslice
+        leaves the whole group unmapped.
+        """
+        self._slices = self.timeslices()
+        if not self._groups:
+            return
+        if any(
+            r.date_from or r.date_to for _, win in self._groups.values() for r in win
+        ):
+            self.assume(
+                "dated rows",
+                "Date To",
+                "a midnight Date To covers that whole day",
+                "from the PLEXOS documentation, not checked on a real file",
+            )
+        for key, props in self.base.items():
+            obj = key[1] if isinstance(key[0], tuple) else key
+            for prop, first in list(props.items()):
+                group = self._groups.get(first.data_id)
+                if group is None:
+                    continue
+                plain, win = group
+                every = [*([plain] if plain else []), *win]
+                got = self._window_values(plain, win, prop)
+                if isinstance(got, str):
+                    why = got
+                else:
+                    values, touched = got
+                    why = ""
+                if why:
+                    pass
+                elif not touched and plain is not None:
+                    # mapping "Dates": all outside the horizon -> the undated row
+                    del self._groups[first.data_id]
+                    for r in win:
+                        self.skip(r, "dated or timesliced row covers no snapshot")
+                    self.r.warnings.append(
+                        f"{_label(obj)}: the dated or timesliced rows of {prop!r} all "
+                        "fall outside the horizon; the undated value is used"
+                    )
+                    continue
+                elif (values == values[0]).all():
+                    props[prop] = replace(first, value=float(values[0]))
+                    self.assume(
+                        _label(obj),
+                        prop,
+                        float(values[0]),
+                        "its dated or timesliced rows give one value over the horizon",
+                    )
+                    continue
+                elif (obj[0], prop) in SERIES_PROPERTIES:
+                    self.ts[first.data_id] = pd.Series(values, index=self.n.snapshots)
+                    self.source[first.data_id] = ("dated", prop)
+                    continue
+                else:
+                    at = self.n.snapshots[(values != values[0]).argmax()]
+                    why = (
+                        f"{prop!r} changes within the horizon (at {at}); it is static "
+                        "in PyPSA"
+                    )
+                del self._groups[first.data_id]
+                props.pop(prop)
+                for r in every:
+                    self.skip(r, why)
+
+    def _window_values(
+        self, plain: PropertyRow | None, win: list[PropertyRow], prop: str
+    ) -> tuple[np.ndarray, bool] | str:
+        """(value per snapshot, whether any windowed row covers one), or why not."""
+        snaps = self.n.snapshots
+        if not isinstance(snaps, pd.DatetimeIndex) or not self.step:
+            return "the network has no time horizon"
+        step = pd.Timedelta(minutes=self.step)
+        ends = snaps + step
+
+        def inside(t: pd.Timestamp, what: str) -> str | None:
+            hit = (snaps < t) & (t < ends)
+            if hit.any():
+                return f"{what} {t} falls inside snapshot {snaps[hit.argmax()]}; not rounded"
+            return None
+
+        base = np.full(len(snaps), np.nan if plain is None else plain.value)
+        over = np.full(len(snaps), np.nan)
+        for r in win:
+            m = np.ones(len(snaps), dtype=bool)
+            if r.date_from:
+                t = _when(r.date_from, "Date From")
+                if isinstance(t, str):
+                    return t
+                if why := inside(t, "Date From"):
+                    return why
+                m &= snaps >= t
+            if r.date_to:
+                t = _when(r.date_to, "Date To")
+                if isinstance(t, str):
+                    return t
+                if t == t.normalize():  # GK A D2: a midnight Date To is the whole day
+                    end = t + pd.Timedelta(days=1)
+                    if why := inside(end, "end of Date To"):
+                        return why
+                    m &= snaps < end
+                else:
+                    if why := inside(t, "Date To"):
+                        return why
+                    m &= snaps <= t
+            tags = [t for t in r.tags if t.cls == "Timeslice"]
+            if len(tags) > 1:
+                return f"{len(tags)} timeslices on one row; none used"
+            if tags:
+                sl = self._slices.get(tags[0].name, "does not exist")
+                if isinstance(sl, str):
+                    return f"timeslice {tags[0].name!r}: {sl}"
+                m &= sl
+            clash = m & ~np.isnan(over) & (over != r.value)
+            if clash.any():
+                return (
+                    f"rows of {prop!r} overlap at {snaps[clash.argmax()]} with "
+                    "different values; none used"
+                )
+            over[m] = r.value
+        values = np.where(np.isnan(over), base, over)
+        gap = np.isnan(values)
+        if gap.any():
+            return (
+                f"no value for {int(gap.sum())} of {len(snaps)} snapshots, first "
+                f"{snaps[gap.argmax()]}"
+            )
+        return values, bool((~np.isnan(over)).any())
+
+    def dated_rows(self) -> None:
+        """
+        After the handlers: a group's other rows go where the row that stood
+        for it went; a Timeslice's rows count as network when a row it tags
+        was imported, else unmapped.
+        """
+        users: dict[str, list[str]] = defaultdict(list)
+        for first_id, (plain, win) in self._groups.items():
+            dest = self.ledger.dest.get((_ROW_TABLE, first_id))
+            for r in (*([plain] if plain else []), *win):
+                for t in r.tags:
+                    if t.cls == "Timeslice":
+                        users[t.name].append(first_id)
+                if r.data_id == first_id:
+                    continue
+                if dest in ("network", "sidecar"):
+                    self.used(r, dest)
+                else:
+                    self.skip(r, f"its {r.property!r} group was not imported")
+        for name, rows in sorted(self._slice_rows.items()):
+            used = any(
+                self.ledger.dest.get((_ROW_TABLE, d)) in ("network", "sidecar")
+                for d in users.get(name, [])
+            )
+            why = self._slices.get(name)
+            for row in rows:
+                if used and row.property == "Include":
+                    self.used(row)
+                elif used:
+                    self.skip(row, f"Timeslice property {row.property!r} not read")
+                else:
+                    self.skip(
+                        row,
+                        why if isinstance(why, str) else "no imported row uses it",
+                    )
+        for name, why in self._slices.items():
+            if isinstance(why, str) and name not in self._slice_rows:
+                self._skip.setdefault((_label(("Timeslice", name)), why), [])
 
     def _scaled(
         self,
@@ -1860,6 +2137,7 @@ class _Converter:
         self.sort_rows(on)
         self.horizon(model)
         self.data_files()
+        self.dated()
         self.variables()
         self.nodes()
         self.areas()
@@ -1870,6 +2148,7 @@ class _Converter:
         self.hydro()
         self.rest()
         self.variable_rows()
+        self.dated_rows()
         for name in sorted(self.carriers):
             kw = {"co2_emissions": self.co2[name]} if name in self.co2 else {}
             self.n.add("Carrier", name, **kw)

@@ -11,10 +11,13 @@ import {
 import type { LibraryItemRef, Tariff } from '../../../api/types'
 import { Dialog } from '../../../components/Dialog'
 import { useUIStore } from '../../../store/uiStore'
+import { withReturnFrom } from '../../../layout/flowNavigation'
 import { nk } from '../../../utils/queryKeys'
 import { formatApiDetail } from '../../../api/client'
 import { pinnedVersions, replacesInline, urdbRate, type RateChoice } from './libraryModel'
 import { LibraryReferences } from './LibraryReferences'
+import { DayAheadPrices } from './DayAheadPrices'
+import { isPlaceholder } from './contractModel'
 
 const input = 'border border-border rounded px-1 py-0.5 text-[11px] bg-bg'
 const KINDS: Array<{ id: LibraryItemKind; label: string }> = [
@@ -46,15 +49,18 @@ function itemSummary(kind: LibraryItemKind, p: Record<string, unknown>): string 
       p.capacity_fee ? ', with a capacity fee' : ''}`
   }
   const parties = ['seller', 'buyer', 'lessor', 'lessee', 'provider', 'customer', 'retailer',
-                   'counterparty', 'generator_owner'].filter(k => p[k]).map(k => `${k} ${String(p[k])}`)
+                   'counterparty', 'generator_owner'].filter(k => p[k])
+    .map(k => `${k.replace(/_/g, ' ')} ${isPlaceholder(p[k]) ? '(to fill in)' : String(p[k])}`)
   const money = ['price', 'strike', 'annual_payment', 'fee_eur_per_mwh', 'fee_eur_per_year',
                  'availability_eur_per_mw_year'].filter(k => p[k] != null).map(k => `${k.replace(/_/g, ' ')} ${String(p[k])}`)
   return `${String(p.type ?? 'contract').toUpperCase()}${p.kind ? ` (${String(p.kind)})` : ''}: ${
     [...parties, ...money].join(', ')}${p.tenor_years ? `; ${String(p.tenor_years)} years` : ''}`
 }
 
-function ItemView({ kind, refItem, onAttach, startVersion }: {
+function ItemView({ kind, refItem, onAttach, onStart, startVersion }: {
   kind: LibraryItemKind; refItem: LibraryItemRef; onAttach: (ref: LibraryItemRef) => void
+  /** "Use as a starting point": a contract copied into the project's contracts. */
+  onStart?: (ref: LibraryItemRef, payload: Record<string, unknown>) => void
   /** The version to show first (a linked pin); the latest when it is not one of this item's. */
   startVersion?: number
 }) {
@@ -87,10 +93,19 @@ function ItemView({ kind, refItem, onAttach, startVersion }: {
           <button type="button" className="underline" onClick={() => onAttach(item.data.ref)}>
             Attach v{item.data.ref.version} as the import tariff</button>
         )}
+        {kind === 'contract' && item.data && onStart && (
+          <button type="button" className="underline"
+                  onClick={() => onStart(item.data.ref, item.data.payload as Record<string, unknown>)}>
+            Use v{item.data.ref.version} as a starting point</button>
+        )}
       </div>
       {item.isError && <p role="alert" className="text-danger">{detailText(item.error)}</p>}
       {item.data && (
         <>
+          {item.data.meta?.source === 'illustrative' && (
+            <p className="text-warn" data-testid="lib-illustrative">
+              Illustrative EU default: its prices are a starting point, not market data.</p>
+          )}
           <p data-testid="lib-item-summary">{itemSummary(kind, item.data.payload as Record<string, unknown>)}</p>
           <details>
             <summary>JSON</summary>
@@ -243,6 +258,7 @@ function SeriesPanel() {
         ))}
         {series.data?.length === 0 && <li className="text-muted">No series yet.</li>}
       </ul>
+      <DayAheadPrices />
       <fieldset className="space-y-1 border border-border rounded p-1">
         <legend>Upload</legend>
         <div className="flex flex-wrap gap-2 items-center">
@@ -338,6 +354,16 @@ export default function LibraryBrowser({ onOpenInputs }: { onOpenInputs?: () => 
       setMessage({ tone: 'error', text: `The tariff could not be attached: ${detailText(e)}` })
     }
   }
+  // The copy is added in Tariffs & contracts, unsaved; that editor says what to fill in.
+  // "Back to Commercial library" returns to this item at this version (UX 27 on S2b).
+  const startFrom = (ref: LibraryItemRef, payload: Record<string, unknown>) => {
+    setMessage(null)
+    withReturnFrom(() => {
+      useUIStore.getState().startContractFrom({ ref, payload })
+      onOpenInputs?.()
+    }, 'Commercial library')
+    useUIStore.getState().focusLibraryItem({ kind: ref.kind, id: ref.id, version: ref.version })
+  }
   const requestAttach = async (ref: LibraryItemRef) => {
     setMessage(null)
     try {
@@ -381,7 +407,8 @@ export default function LibraryBrowser({ onOpenInputs }: { onOpenInputs?: () => 
         <div ref={itemView}>
           <ItemView key={`${kind}:${open.id}:${open.version}`} kind={kind} refItem={open}
                     startVersion={openId === open.id ? startVersion : undefined}
-                    onAttach={r => { void requestAttach(r) }} />
+                    onAttach={r => { void requestAttach(r) }}
+                    onStart={onOpenInputs ? startFrom : undefined} />
         </div>
       )}
       {kind === 'tariff' && (

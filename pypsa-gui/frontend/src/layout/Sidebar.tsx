@@ -61,6 +61,13 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
   const workbookOff = exportFmt === 'workbook' && workbookBlock(workbookViews.data, workbook) !== null
   const [exportFilename, setExportFilename] = useState(slugify(projectName))
   const [exporting, setExporting] = useState(false)
+  const [elapsed, setElapsed] = useState(0)
+  useEffect(() => {
+    if (!exporting) { setElapsed(0); return }
+    const t0 = Date.now()
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 1000)
+    return () => clearInterval(id)
+  }, [exporting])
   const qc = useQueryClient()
   const { setProjectName, currentProject } = useUIStore()
   // The input workbook holds the project as last saved: offer "Save first" while edits are unsaved.
@@ -146,7 +153,7 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
       URL.revokeObjectURL(url)
       toast.success(`Downloaded ${fname}`)
     } catch (e) {
-      toast.error(['workbook', 'input', 'template'].includes(exportFmt) && e instanceof Error && !('isAxiosError' in e) ? e.message : 'Export failed')
+      toast.error(['workbook', 'input', 'template', 'excel'].includes(exportFmt) && e instanceof Error && !('isAxiosError' in e) ? e.message : 'Export failed')
     } finally { setExporting(false) }
   }
 
@@ -255,7 +262,7 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
                 <button onClick={onClose} className="px-3 py-1.5 border border-border rounded text-xs text-muted hover:text-text transition-colors">Cancel</button>
                 <button onClick={handleExport} disabled={exporting || workbookOff || inputOff}
                   className="flex items-center gap-1.5 px-4 py-1.5 bg-accent text-white rounded text-xs font-semibold hover:bg-accent/90 disabled:opacity-50 transition-colors">
-                  <Download size={12} /> {exporting ? 'Downloading…' : 'Download File'}
+                  <Download size={12} /> {exporting ? `Preparing… ${elapsed} s` : 'Download File'}
                 </button>
               </div>
             </>

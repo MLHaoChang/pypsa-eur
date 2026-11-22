@@ -212,3 +212,105 @@ def test_chat_csv_cell_escapes_like_the_io_export(raw):
     from services.chat_tools import _inert_csv_cell
 
     assert _inert_csv_cell(raw) == _escape_formula(raw)
+
+
+def _client(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import routers.io as rio
+
+    app = FastAPI()
+    app.include_router(rio.router)
+    return rio, TestClient(app)
+
+
+def _use_network(monkeypatch, rio, n):
+    monkeypatch.setattr(rio.PyPSAService, "get_network", staticmethod(lambda: n))
+    monkeypatch.setattr(rio.change_log_service, "log", lambda *a, **k: None)
+
+
+def test_excel_export_real_child_round_trips_escaping_and_leaves_no_temp(monkeypatch, tmp_path):
+    """Issue 09: the real spawn child writes the workbook; EXPORT-INJECT-1 still holds."""
+    import tempfile
+
+    rio, client = _client(monkeypatch)
+    _use_network(monkeypatch, rio, _network())
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    r = client.get("/export/excel")
+    assert r.status_code == 200
+    wb = openpyxl.load_workbook(io.BytesIO(r.content))
+    cells = {str(c.value) for ws in wb for row in ws.iter_rows() for c in row if c.value is not None}
+    assert "'" + BAD in cells and BAD not in cells
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_excel_child_failure_paths(monkeypatch, tmp_path, caplog):
+    """A child that raises, a child that exits silently, and a timeout kill."""
+    import multiprocessing
+    import tempfile
+
+    rio, client = _client(monkeypatch)
+    _use_network(monkeypatch, rio, _network())
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+
+    from tests import _excel_child_stubs as stubs
+
+    for target, kind in ((stubs.raises, "excel_export_failed"), (stubs.exits, "excel_export_failed")):
+        monkeypatch.setattr(rio, "_excel_child", target)
+        r = client.get("/export/excel")
+        assert r.status_code == 500
+        d = r.json()["detail"]
+        assert d["error_kind"] == kind and "Traceback" not in d["message"] and "boom" not in d["message"]
+    assert "boom" in caplog.text
+    monkeypatch.setattr(rio, "_excel_child", stubs.hangs)
+    monkeypatch.setattr(rio, "EXCEL_EXPORT_SECONDS", 1.0)
+    r = client.get("/export/excel")
+    d = r.json()["detail"]
+    assert r.status_code == 500 and d["error_kind"] == "excel_export_timeout" and "1 s" in d["message"]
+    assert [c for c in multiprocessing.active_children() if c.name == "excel-export"] == []
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_slow_excel_export_does_not_block_csv(monkeypatch):
+    """Issue 09: a slow Excel write runs off the event loop; a concurrent CSV returns at once."""
+    import threading
+    import time
+
+    rio, client = _client(monkeypatch)
+    gate, started = threading.Event(), threading.Event()
+
+    def slow_excel() -> bytes:
+        started.set()
+        gate.wait(10)
+        return b"xlsx"
+
+    monkeypatch.setattr(rio, "_export_excel_bytes", slow_excel)
+    monkeypatch.setattr(rio, "_export_csv_zip_bytes", lambda: b"zip")
+    out: dict = {}
+    t = threading.Thread(target=lambda: out.update(r=client.get("/export/excel")))
+    t.start()
+    assert started.wait(5)
+    t0 = time.monotonic()
+    assert client.get("/export/csv").status_code == 200 and time.monotonic() - t0 < 2
+    gate.set()
+    t.join(10)
+    assert out["r"].status_code == 200
+
+
+def test_excel_child_reports_its_own_exception(monkeypatch, tmp_path):
+    """`_excel_child` sends the failure text to the parent instead of dying silently."""
+    import multiprocessing
+
+    import routers.io as rio
+
+    def boom(n, tmp):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(rio, "_write_excel", boom)
+    n = _network()
+    nc = tmp_path / "n.nc"
+    n.export_to_netcdf(str(nc))
+    recv, send = multiprocessing.Pipe(duplex=False)
+    rio._excel_child(str(nc), str(tmp_path / "o.xlsx"), send)
+    assert recv.recv() == "ValueError: boom"

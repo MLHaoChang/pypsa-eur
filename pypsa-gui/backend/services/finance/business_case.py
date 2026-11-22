@@ -53,6 +53,7 @@ from models.business_case import (
     LinkedOutputMissing,
     NameDuplicate,
     VolumeFactorUnclassified,
+    takes_derating,
 )
 from services.business_case.linked_outputs import (
     LostProductionMap,
@@ -281,8 +282,15 @@ def volume_factors_below_full(
 def _quantity(ln: LineItem, year: int, outputs: dict) -> float | None:
     if ln.source == "linked":
         q = _linked_q(outputs.get(ln.name), year)
-        # The line's sold share of the series (GK B BC 07 P3).
-        return None if q is None else q * ln.linked_share_at(year)
+        # The line's sold share of the series (GK B BC 07 P3), and a capacity payment's
+        # de-rated share of the capacity in service (walk 04, GK B2 B1): applied here once.
+        if q is None:
+            return None
+        if ln.derating is not None:
+            q *= ln.derating
+        elif takes_derating(ln.category, ln.quantity_source):
+            return None  # never read as 1.0 (Q2); the run refuses it first
+        return q * ln.linked_share_at(year)
     return ln.cell("quantity", year).value
 
 
@@ -760,6 +768,8 @@ def _line_blob(ln: LineItem, horizon: tuple[int, int]) -> dict:
         del d["linked_share"]
     if not d["linked_share_by_year"]:
         del d["linked_share_by_year"]
+    if d["derating"] is None:
+        del d["derating"]
     if not ln.default_keys:
         del d["default_units"]
     for a in d["assumed"].values():
@@ -1168,6 +1178,24 @@ def _ratio(num: float, den: float, unit=None) -> Kpi:
     if den == 0.0:
         return Kpi(None, "n/a", "no_revenue", unit)
     return _ok(_finite_ratio(num, den), unit)
+
+
+#: The P&L row each KPI is computed from (walk 03; GK B2 on #1683): a KPI not
+#: established for a section reads that row's `row_reason`. Served with the report as
+#: `pnl.kpi_row`; a test pins its keys to `kpis()` and its rows to `PnL.rows`.
+KPI_ROW: dict[str, str] = {
+    "project_npv": "project_post_tax",
+    "project_irr": "project_post_tax",
+    "equity_npv": "equity_post_tax",
+    "equity_irr": "equity_post_tax",
+    "payback_years": "equity_post_tax",
+    "min_dscr": "debt_service",
+    "avg_dscr": "debt_service",
+    "ebitda_margin_gross": "ebitda",
+    "ebitda_margin_net": "ebitda",
+    "revenue_per_capacity_gross": "ebitda",
+    "revenue_per_capacity_net": "ebitda",
+}
 
 
 def kpis(

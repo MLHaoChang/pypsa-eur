@@ -498,6 +498,14 @@ def _stage_mc_certify(st: _Study) -> None:
             "not_established", None, "MC aborted — no verdict")
         return
 
+    # Walkthrough 2026-11-17 issue 02: a must-stay-on bus whose only feeder
+    # is out loses supply whatever the hub's fleet does; the copper-plate MC
+    # never draws that, so its hours are added here (`critical_feeders`).
+    from services.adequacy import critical_feeders as cf
+
+    feeders = list(scope.get("critical_feeders") or [])
+    res = cf.compose(res, list(frozen.critical_pockets or []),
+                     weights=inputs.weights, periods=inputs.periods)
     lole = float(res["lole_hours"])
     lo, hi = (float(x) for x in res["lole_ci"])
     floor = res.get("resolution_floor_h")
@@ -509,6 +517,16 @@ def _stage_mc_certify(st: _Study) -> None:
     verdict, note = certification_verdict(
         lole_ci=(lo, hi), target_h=target_h, resolution_floor_h=floor,
         n_samples=res.get("n_samples"), ens_met=st.ens_met)
+    # GK A F6': pockets with units of their own (or chained) can still break
+    # a pass this run cannot see; their upper bound decides.
+    verdict, note, feeder_bound = cf.bounded_verdict(
+        verdict, note, hi=hi, pockets=list(frozen.critical_pockets or []),
+        rows=feeders, weights=inputs.weights, target_h=target_h,
+        years=horizon_years)
+    if verdict != "pass" and confident:
+        confident = False
+    pocket_bound_h = cf.bound_hours(list(frozen.critical_pockets or []),
+                                    inputs.weights)
     dsr_on = bool(getattr(st.cfg, "dsr_buses", None)) and float(
         getattr(st.cfg, "dsr_price_eur_per_mwh", 0.0) or 0.0) > 0
     payload = {
@@ -545,6 +563,21 @@ def _stage_mc_certify(st: _Study) -> None:
         "met_on_mean": met,
         "confident": confident,
         "ens_met": st.ens_met,
+        "critical_feeders": feeders,
+        "critical_feeder_note": cf.certification_note(feeders),
+        # Why a pass was withheld (F6'), or None: read by the review and the
+        # Guided headline so they name the feeder, not "more draws".
+        "feeder_bound": feeder_bound,
+        "critical_pocket_lole_h_per_year": (
+            res["critical_pocket_lole_hours"] / horizon_years
+            if "critical_pocket_lole_hours" in res else None),
+        "critical_pocket_eue_overlap_bound_mwh": res.get(
+            "critical_pocket_eue_overlap_bound_mwh"),
+        # GK R1: the bounded pockets' upper bound (h/yr), which every other
+        # reader of ``lole_ci`` adds before it reads "within the goal"
+        # (the readiness row); None with no bounded pocket.
+        "critical_pocket_bound_h_per_year": (
+            None if pocket_bound_h is None else pocket_bound_h / horizon_years),
         "dsr_note": (
             "the LP plan uses demand response but the MC does not model it — "
             "this LOLE is pessimistic relative to the plan" if dsr_on else None),
