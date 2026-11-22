@@ -705,3 +705,11 @@ cost is the lost tonnes, priced by the Lost-production value, not a start-up
 cost (design §1.2, §2.3).
 _Avoid_: start-up cost (PyPSA's own attribute, unweighted by the time-step
 weighting)
+
+**Island-capability break-even**:
+The yearly value of being able to island at which the investment case's NPV is
+0: a threshold the island capability would have to reach, shown beside the NPV
+and never added to it (`backend/services/finance/breakeven.py`, `LABEL`). It is
+not the grid-extension break-even distance km\*, which compares extending the
+grid with supplying the site off-grid. The JSON keys keep `island_breakeven`.
+_Avoid_: island break-even, break-even distance (that is km\*)

@@ -30,6 +30,14 @@ How far should 05 go?
 - [ ] An accepted suggestion moves its row from "Assumed"/"Not carried" to "Applied (suggested)" in the stored import report. A skipped one stays where it was.
 - [ ] End to end in the real app: import a fixture that yields at least one suggestion, accept it, create the project, and see the value in Expert and the report entry.
 
+## Routes held for chat
+
+Issue 04 (done) left the model-import routes out of chat "until 05 or a chat tool lands". This issue now holds their chat disposition (route parity `held-by-spec`):
+
+- `GET /api/model-import/formats`
+- `POST /api/model-import/preview`
+- `POST /api/model-import/import`
+
 ## Likely files
 
 `pypsa-gui/backend/services/model_import_service.py`, `pypsa-gui/backend/routers/model_import.py` (both from 04), the preview component from 04 B.

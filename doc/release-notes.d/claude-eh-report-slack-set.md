@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The energy-hub report's sizing now drops every slack generator that slack.py knows (including `voll_slack`, `dc_curtailment` and the `__lost_` lost-production slack), so none of them counts in the carrier totals or shows as a sized asset.

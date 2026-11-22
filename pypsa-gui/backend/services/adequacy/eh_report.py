@@ -21,6 +21,7 @@ from models.energy_hub import (
     SectionStatus,
     TeaBlock,
 )
+from services.adequacy import slack
 
 EH_REPORT_STORE_KEY = "eh_reference_design_report"
 
@@ -45,14 +46,18 @@ EXPORT_KEYS: tuple[str, ...] = (
 )
 
 
-#: Carriers of the VOLL / load-shedding / demand-response slack GENERATORS the
-#: solve adds: never a unit anyone sized or installed.
-_SLACK_CARRIERS = frozenset({"voll", "load_shedding", "dsr", "demand_response"})
+#: Slack carriers this report always dropped that slack.py does not hold
+#: (older networks). slack.SLACK_CARRIERS stays the canonical set.
+_LEGACY_ALIASES = frozenset({"voll", "dsr"})
 
 
 def _is_slack(name: Any, carrier: str) -> bool:
-    """A slack generator, by its ``__voll`` name or its carrier."""
-    return str(name).startswith("__voll") or carrier in _SLACK_CARRIERS
+    """A slack generator the solve adds, never a unit anyone sized or installed:
+    by slack.py's carriers or name prefixes, a legacy alias, the bare ``__voll``
+    prefix, or the lost-production slack (``__lost_``, outside slack.py's sets)."""
+    return (slack.is_slack_carrier(carrier) or carrier in _LEGACY_ALIASES
+            or slack.is_slack_name(name)
+            or str(name).startswith(("__voll", slack.LOST_SLACK_PREFIX)))
 
 
 #: ``process_role`` of a product bus's slack generators: bought in or lost,

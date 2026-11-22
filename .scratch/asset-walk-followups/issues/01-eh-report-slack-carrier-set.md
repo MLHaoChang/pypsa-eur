@@ -1,6 +1,6 @@
 # eh_report's slack-carrier set disagrees with slack.py
 
-Status: ready-for-agent
+Status: done
 
 Raised by GK A 30 on #1677 (GK OK @bb7fb4fe); older than that PR, not blocking it.
 

@@ -1397,3 +1397,55 @@ def test_an_operational_run_with_a_fractional_duration_holds_every_run(monkeypat
         1,
         1,
     ]
+
+
+# ── asset-walk-followups 01 (GK A F4): the EH report's sizing never counts it ─
+
+
+def _sizing_with_the_old_slack_set(n, monkeypatch) -> dict:
+    """The EH report's sizing under eh_report's old private slack set."""
+    from services.adequacy import eh_report as R
+
+    with monkeypatch.context() as m:
+        m.setattr(
+            R,
+            "_is_slack",
+            lambda name, carrier: (
+                str(name).startswith("__voll")
+                or carrier in {"voll", "load_shedding", "dsr", "demand_response"}
+            ),
+        )
+        return R.sizing_summary_from_network(n)
+
+
+def test_the_eh_report_sizing_drops_the_curtailable_load_mid_solve(monkeypatch):
+    """With the generator in the network (between apply and restore), the report
+    differs from the old slack set only by the dc_curtailment entry."""
+    from services.adequacy import eh_report as R
+
+    n = _network()
+    C.apply(n, lambda _m: None, [], {}, terms=_terms())
+    assert C.GENERATOR in n.generators.index
+    old = _sizing_with_the_old_slack_set(n, monkeypatch)
+    new = R.sizing_summary_from_network(n)
+    peak = float(n.generators.at[C.GENERATOR, "p_nom"])
+    assert old["by_carrier"] == {"AC": 1000.0, "dc_curtailment": peak}
+    assert new["by_carrier"] == {"AC": 1000.0}
+    assert old["total_p_nom_mw"] == pytest.approx(1000.0 + peak)
+    assert new["total_p_nom_mw"] == pytest.approx(1000.0)
+    assert new["assets"] == old["assets"] == []
+
+
+def test_the_eh_report_sizing_of_a_solved_dc07_network_is_unchanged(monkeypatch):
+    """After a real solve the restore has removed the generator, so the report on
+    the solved network is the same under the old and the new slack sets."""
+    from services.adequacy import eh_report as R
+
+    n = _network()
+    status, _, sink, _ = _solve(n, monkeypatch, _terms())
+    assert status in ("ok", "optimal")
+    assert _curtailed(sink).sum() > 0
+    assert C.GENERATOR not in n.generators.index
+    new = R.sizing_summary_from_network(n)
+    assert new == _sizing_with_the_old_slack_set(n, monkeypatch)
+    assert new["by_carrier"] == {"AC": 1000.0}
