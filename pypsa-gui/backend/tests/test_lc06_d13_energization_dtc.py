@@ -117,6 +117,9 @@ def solve_p_nom(monkeypatch):
 
 
 def ens_at(seam, n, cap) -> float:
+    # the cap is the network's connection limit (template-e2e 02c): a different
+    # cap is set on the import Link, and the override then equals it
+    n.links.loc['import_poc', ['p_nom', 'p_nom_max']] = cap
     sections = run_study(seam, n, stages=['apply_pack', 'ens_solve'],
                          pack_overrides={'import_p_nom_mw': cap})
     target = sections['target']

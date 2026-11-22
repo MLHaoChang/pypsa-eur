@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextvars as _contextvars
 import logging
+import math
 import queue as _queue
 import threading as _threading
 import time
@@ -216,6 +217,24 @@ def normalised_overrides(overrides: dict | None) -> dict | None:
         exclude_none=True) or None
 
 
+def _stale_import_cap(cap_mw: float, archetype: str, n) -> str | None:
+    """The sentence when the network's connection limit is no longer
+    ``cap_mw``, the cap the study was started with; None when it still is.
+    The caller holds the network lock (template-e2e 02c, GK A 32 D1)."""
+    from services import flow_service
+
+    cap = flow_service.import_capacity(n, {"archetype": archetype})
+    if cap.refusal is not None:
+        return (f"The study was asked for on a {cap_mw:.12g} MW connection "
+                f"limit, but the network changed before it started: "
+                f"{cap.refusal} Start the study again.")
+    if not _same_mw(cap.mw, cap_mw):
+        return (f"The study was asked for on a {cap_mw:.12g} MW connection "
+                f"limit, but the network's limit changed to {cap.mw:.12g} MW "
+                "before it started. Start the study again.")
+    return None
+
+
 def _validate_dtc_config(raw: dict, n) -> DtcConfig:
     try:
         dtc = DtcConfig.model_validate(
@@ -232,6 +251,40 @@ def _validate_dtc_config(raw: dict, n) -> DtcConfig:
             422, "dtc_config names components not on the network: "
             + ", ".join(missing))
     return dtc
+
+
+def _same_mw(a: float, b: float) -> bool:
+    """Equal connection limits up to float summing: 10.7 + 12.6 MW of links
+    is 23.299999999999997 and still 23.3 (GK B 68). 1e-9 relative keeps
+    45.000001 against 45 a different value."""
+    return math.isclose(a, b, rel_tol=1e-9, abs_tol=0.0)
+
+
+def _with_network_import_cap(body: EhStudyRequest, archetype: str, n
+                             ) -> tuple[EhStudyRequest, ArchetypePack]:
+    """``body`` and its pack with ``pack_overrides.import_p_nom_mw`` taken
+    from the network ``n`` (`flow_service.import_capacity`, as `run_eh.freeze`
+    takes it; template-e2e 02c). 422 with the plain sentence where the
+    network fixes no limit, and with both values where an explicit cap is not
+    exactly the network's. The caller holds the network lock."""
+    from services import flow_service
+
+    cap = flow_service.import_capacity(n, {"archetype": archetype})
+    if cap.refusal is not None:
+        raise HTTPException(422, cap.refusal)
+    overrides = dict(body.pack_overrides or {})
+    asked = overrides.get("import_p_nom_mw")
+    # `apply_pack_overrides` validated it first: a finite number > 0, or None.
+    if asked is not None and not _same_mw(float(asked), cap.mw):
+        raise HTTPException(
+            422,
+            f"pack_overrides.import_p_nom_mw is {float(asked):.12g} MW but the "
+            f"network's connection limit is {cap.mw:.12g} MW: change it on the "
+            "network, or leave the import cap out.")
+    overrides["import_p_nom_mw"] = cap.mw
+    body = body.model_copy(update={"pack_overrides": overrides})
+    return body, apply_pack_overrides(
+        _PACK_FACTORY[archetype](), body.pack_overrides, raise_http=True)
 
 
 class EhStudyLockBusy(Exception):
@@ -271,8 +324,16 @@ def _assumptions_recorder(record: dict, cfg, body, goal_sources: dict):
 # test_run_assumptions pins the two together), so the refusal names what the
 # user sees there.
 VOLL_FIELD_LABEL = "Value of Lost Load (VOLL)"
-VOLL_REFUSAL = (f"{VOLL_FIELD_LABEL}: must be above 0 to run the reliability study. "
-                "Set it in Solver settings.")
+
+
+def voll_refusal(study: str) -> str:
+    """The refusal every study that needs VOLL > 0 gives at VOLL 0, in one form:
+    the panel's label, what it would run, where to set it (RAW-NAMES-1)."""
+    return (f"{VOLL_FIELD_LABEL}: must be above 0 to run {study}. "
+            "Set it in Solver settings.")
+
+
+VOLL_REFUSAL = voll_refusal("the reliability study")
 
 
 def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
@@ -338,6 +399,13 @@ def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
     if not lock.acquire(blocking=lock_blocking):
         raise EhStudyLockBusy()
     try:
+        if pack.import_overlay.import_p_nom_mw is not None:
+            # template-e2e 02c (GK B (63), (64)): a weak-grid study's import
+            # cap is the network's connection limit, filled here under the
+            # lock before the pack the worker runs is built; never the pack's
+            # constant. `import_capacity` takes no PyPSAService lock (pinned
+            # in tests/test_eh_study_import_cap.py).
+            body, pack = _with_network_import_cap(body, archetype, n)
         dtc_config = (_validate_dtc_config(raw_dtc, n)
                       if raw_dtc is not None else None)
         bus_names = set(map(str, n.buses.index))
@@ -455,7 +523,22 @@ def start_eh_study(
     def worker():
         try:
             # ★ Here, not on the request thread nor in `run_eh_study`: see `dirty_state.capture`.
-            dirty_state.capture(record, study_ctx, lock=lock)
+            cap_mw = pack.import_overlay.import_p_nom_mw
+            if cap_mw is None:
+                dirty_state.capture(record, study_ctx, lock=lock)
+            else:
+                # template-e2e 02c (GK A 32 D1): an edit between the start
+                # check and here would run a stale cap that `edited_since`
+                # cannot see, so the limit is read again under the lock the
+                # revision is captured under; any later edit is counted.
+                with lock:
+                    dirty_state.capture(record, study_ctx)
+                    stale = _stale_import_cap(cap_mw, archetype, n)
+                if stale is not None:
+                    with PyPSAService.get_solver_state_lock():
+                        record.update(status="failed", report=None,
+                                      error=stale, finished_at=time.time())
+                    return
             report = run_eh_study(
                 n,
                 pack,

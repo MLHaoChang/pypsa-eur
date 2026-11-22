@@ -55,6 +55,8 @@ from tests.test_harness_runner import detached, task_path  # noqa: F401
 PINNED = {
     "eh_site@1": "8d8f09dec396579ec12bd9344959ac6ecd5cef1eaa0a47de737bd83bca51cf46",
     "eh_site@2": "2eefcb14bc7d5f05a465be591bf54238d9e4f1c7bf7948cff935c461b381f9f8",
+    # Study harness 36 (L8): @3 as on master ea2f7ebe, before eh_site@4.
+    "eh_site@3": "446df3bb5862d095fe54bd3a52ca3fe010dc2dca16776da366ee952efa92e9a6",
 }
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "overpass_eemshaven.json"
 SITE = {"lat": 53.4396, "lon": 6.8321}
@@ -930,17 +932,17 @@ def _start_task_run_args(profile):
     }
 
 
-@pytest.mark.parametrize("profile", ["eh_site@2", "eh_site@3"])
+@pytest.mark.parametrize("profile", ["eh_site@2", "eh_site@3", "eh_site@4"])
 def test_start_task_offers_v2_and_v3(profile):
     from harness import catalogue, guards
 
     tool = next(t for t in catalogue.TOOLS if t["name"] == "start_task")
     enum = tool["input_schema"]["properties"]["run"]["properties"]["profile"]["enum"]
-    assert enum == ["eh_site@2", "eh_site@3"]
+    assert enum == ["eh_site@2", "eh_site@3", "eh_site@4"]
     assert guards.check("start_task", _start_task_run_args(profile), "write") is None
 
 
-@pytest.mark.parametrize("profile", ["eh_site@1", "eh_site@4", None, 3, ["eh_site@3"]])
+@pytest.mark.parametrize("profile", ["eh_site@1", "eh_site@5", None, 3, ["eh_site@3"]])
 def test_start_task_refuses_every_other_profile(profile):
     from harness import guards
 

@@ -33,7 +33,7 @@ export function FieldDrawer({ children }: { children: (t: NonNullable<ReturnType
         </span>
         <button type="button" data-testid="field-drawer-expert"
           onClick={() => openSectionInExpert(target.section)}
-          className="text-[11px] text-muted hover:text-accent hover:underline">
+          className="text-[11px] text-muted hover:text-link hover:underline">
           Open in Expert
         </button>
         <button type="button" data-testid="field-drawer-close" aria-label="Close" onClick={() => close(null)}

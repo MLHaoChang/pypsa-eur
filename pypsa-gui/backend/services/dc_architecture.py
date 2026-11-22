@@ -566,10 +566,13 @@ def compare(
     rate_kwargs: dict | None = None,
     island_offered: list[str] | None = None,
     finance_currency: str | None = None,
+    tariff_shipped: bool = False,
     island_offered_sources: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     """Every architecture against the project's own on the saved network ``n``
-    (read, never changed). See the module docstring for the algebra."""
+    (read, never changed). See the module docstring for the algebra.
+    ``tariff_shipped``: the project's tariff is still the template's default,
+    so a price read from it is assumed (WALK-IMPROVE-1 b)."""
     from services.adequacy.dc_backup import (
         DcBackupError,
         _check_years,
@@ -652,8 +655,9 @@ def compare(
             )
         rate_t = tr["rate"]
         price = {
-            "source": tr["source"],
-            "assumed": False,
+            "source": tr["source"]
+            + (" (the template's default tariff, assumed)" if tariff_shipped else ""),
+            "assumed": tariff_shipped,
             "currency": tr["currency"],
             "currency_note": tr["currency_note"],
         }
@@ -677,6 +681,8 @@ def compare(
             f"finance case nominal wacc {rk['rate']:g} made real with its inflation "
             f"{rk.get('inflation') or 0.0:g}"
         )
+    if rk.get("rate") is not None and rk.get("rate_assumed"):
+        rate_source += " (the template's shipped wacc, assumed)"
     if not math.isfinite(r) or r <= -1.0:
         raise _err(
             f"Discount rate: the real rate {r:g} is not usable",
@@ -860,6 +866,23 @@ def _peak(n, island, facility, spec, unset, peak_check) -> dict[str, Any]:
 # ── the project ───────────────────────────────────────────────────────────
 
 
+def _tariff_is_shipped(tpl, tid: str, plan, commercial: dict | None) -> bool:
+    """The project's import tariff still equals the one its template ships."""
+    from models.commercial import CommercialConfig
+
+    tariff = (commercial or {}).get("import_tariff")
+    shipped = tpl.solver_config(tid, plan).get("commercial") or {}
+    if not tariff or not shipped.get("import_tariff"):
+        return False
+    try:
+        want = CommercialConfig.model_validate(shipped).model_dump(mode="json")[
+            "import_tariff"
+        ]
+    except ValueError:
+        return False
+    return tariff == want
+
+
 def compare_project(
     project_dir, tpl, *, energy_price_per_mwh: float | None = None
 ) -> dict:
@@ -904,7 +927,9 @@ def compare_project(
         ) from None
     finance = getattr(cfg, "finance", None)
     try:
-        rate_kwargs = dc_backup.finance_rate(finance)
+        rate_kwargs = dc_backup.finance_rate(
+            finance, getattr(cfg, "finance_assumed", None)
+        )
     except dc_backup.DcBackupError as exc:
         raise _err(str(exc), "invalid", exc.field) from None
     from models.finance import FinanceInputs
@@ -936,6 +961,7 @@ def compare_project(
     if commercial is not None and hasattr(commercial, "model_dump"):
         commercial = commercial.model_dump(mode="json")
     it_mw = max(float(p.it_mw) for p in spec.phases)
+    tariff_shipped = _tariff_is_shipped(tpl, tid, plan, commercial)
     out = compare(
         n,
         spec,
@@ -949,6 +975,7 @@ def compare_project(
         energy_price_per_mwh=energy_price_per_mwh,
         rate_kwargs=rate_kwargs,
         island_offered=offered,
+        tariff_shipped=tariff_shipped,
         island_offered_sources=offered_sources,
         finance_currency=finance_currency,
     )

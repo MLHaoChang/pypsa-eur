@@ -223,10 +223,10 @@ def test_priced_rows_derive_at_the_workbook_s_rate_not_the_open_project_s(
     data = _workbook(rate=rate)
     preview = _preview(client, data)
     assert preview.status_code == 200, preview.text
-    assert preview.json()["rederived"] == ["Storage 's'"]
+    assert preview.json()["rederived"] == ["Storage “s”"]
     r = _import(client, data, name=f"Rate {rate}")
     assert r.status_code == 200, r.text
-    assert r.json()["rederived"] == ["Storage 's'"]
+    assert r.json()["rederived"] == ["Storage “s”"]
     su = _saved_network(_saved(_auth_db[1], r.json()["project_id"])).storage_units
     for col, v in _expected(BATTERY, want).items():
         assert su.at["s", col] == pytest.approx(v, rel=1e-12), col
@@ -506,6 +506,10 @@ def test_a_failed_sidecar_write_removes_the_row_and_the_folder(
     before = store()
     r = _import(client, _workbook(), name="Half written")
     assert r.status_code == 500 and _kind(r) == "import_write_failed", r.text
+    # Plain words: no engine class name ("OSError") in the user's text (#1466).
+    assert r.json()["detail"]["message"] == (
+        "The project could not be written; nothing was created."
+    )
     assert store() == before
 
 
@@ -788,6 +792,284 @@ def test_a_project_s_workbook_round_trips_as_saved(
         ("loads", "p_set", "L1")
     }
     assert inputs(copied) == want
+
+
+def test_a_project_s_own_outage_columns_round_trip_with_nothing_left_out(
+    client, install_network, session_ctx, _auth_db
+):
+    """Issue 07: the asset form's outage fields the writer emits are read back, not left out."""
+    n = _network(stale=False)
+    n.generators.loc["G1", ["outage_rate_value", "outage_rate_basis", "mttr_hours"]] = [
+        0.05,
+        "EFORd",
+        40.0,
+    ]
+    n.storage_units.loc["s", ["outage_rate_value", "mttr_hours"]] = [0.02, 12.0]
+    n.add(
+        "Generator", "G2", bus="B1", p_nom=5.0
+    )  # no outage values: blank cells, not a refusal
+    install_network(n)
+    session_ctx(client)
+    assert client.post("/api/projects/WB Outages").status_code == 200
+    with _auth_db[1]() as db:
+        src_id = str(db.query(Project).filter_by(name="WB Outages").one().id)
+    data = client.get(f"/api/projects/{src_id}/workbook").content
+    preview = _preview(client, data, "WB Outages.xlsx").json()
+    assert preview["report"]["unmapped"] == []
+    made = _import(client, data, name="WB Outages Copy", sha=preview["sha256"])
+    assert made.status_code == 200, made.text
+    assert (
+        client.post(f"/api/projects/{made.json()['project_id']}/activate").status_code
+        == 200
+    )
+    got = session_ctx(client).network
+    g = got.generators.loc["G1"]
+    assert (g["outage_rate_value"], g["outage_rate_basis"], g["mttr_hours"]) == (
+        0.05,
+        "EFORd",
+        40.0,
+    )
+    assert got.generators.loc["G2", ["outage_rate_value", "mttr_hours"]].isna().all()
+    s = got.storage_units.loc["s"]
+    assert (s["outage_rate_value"], s["mttr_hours"]) == (0.02, 12.0)
+
+
+# H2 (GK B 69, issue 07): the asset form's inputs a workbook carries beyond PyPSA's attributes and the other
+# custom columns. A field added to the form fails here until someone decides it belongs in the workbook.
+FORM_COLUMNS = {
+    "Carrier": ["unit"],
+    "Bus": ["country"],
+    "Line": ["outage_rate_value", "outage_rate_basis", "mttr_hours"],
+    "Generator": [
+        "lifetime_run_hours",
+        "fuel_price",
+        "om_cost_per_run_hour",
+        "curtailment_cost",
+        "fuel_curve_slope",
+        "fuel_curve_no_load",
+        "outage_rate_value",
+        "outage_rate_basis",
+        "mttr_hours",
+    ],
+    "StorageUnit": ["outage_rate_value", "outage_rate_basis", "mttr_hours"],
+    "Store": ["outage_rate_value", "outage_rate_basis", "mttr_hours"],
+    "Link": ["outage_rate_value", "outage_rate_basis", "mttr_hours"],
+}
+
+
+def test_the_form_columns_a_workbook_carries_are_pinned():
+    assert excel_workbook.form_columns() == FORM_COLUMNS
+
+
+@pytest.mark.parametrize(
+    ("cls", "key", "why"),
+    [
+        ("Generator", "p_nom", "a PyPSA attribute"),
+        (
+            "StorageUnit",
+            "inv_power_overnight",
+            "an investment part, read as a custom column",
+        ),
+        ("Link", "eh_process", "an eh_* tag, read as a custom column"),
+        (
+            "Generator",
+            "p_max_pu_includes_outages",
+            "the outage flag, read as a custom column",
+        ),
+        ("Link", "bus2", "a bus reference"),
+        ("Link", "efficiency2", "a Link port column"),
+        (
+            "Transformer",
+            "v_nom_0",
+            "shown by the form, never written by the single edit",
+        ),
+        ("GlobalConstraint", "carrier", "not declared by a Create model"),
+    ],
+)
+def test_a_form_field_of_each_excluded_kind_is_not_a_form_column(cls, key, why):
+    assert key not in excel_workbook.form_columns().get(cls, []), why
+
+
+def test_a_derived_form_field_is_not_a_form_column():
+    from services.asset_schema.fields import fields_for
+
+    derived = {f.key for f in fields_for("StorageUnit") if f.derived}
+    assert derived and not derived & set(excel_workbook.form_columns()["StorageUnit"])
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "heading"),
+    [
+        ("outage_rate_value", 1.5, "Generators · Forced-outage rate"),
+        ("outage_rate_basis", "EFOR", "Generators · Outage-rate basis"),
+    ],
+)
+def test_a_form_value_the_asset_form_refuses_refuses_the_import(
+    client, store, key, value, heading
+):
+    """H1: the single-edit validators run on every form column an import writes."""
+    n = _network(stale=False)
+    n.generators.loc["G1", key] = value
+    data = _workbook(n)
+    before = store()
+    for r in (_preview(client, data), _import(client, data, name="Bad Rate")):
+        assert r.status_code == 422, r.text
+        assert _kind(r) == "invalid_edit_value"
+        assert r.json()["detail"]["message"] == (
+            f"{heading}: the value for “G1” is not one the asset form accepts. Nothing was imported."
+        )
+    assert store() == before
+
+
+def test_a_form_value_refused_on_the_open_network_import_says_it_is_unchanged():
+    """H5's split: the open-network import keeps its own ending, not both."""
+    from fastapi import HTTPException
+
+    n = _network(stale=False)
+    n.generators.loc["G1", "outage_rate_value"] = 1.5
+    with pytest.raises(HTTPException) as exc:
+        excel_workbook.refuse_bad_form_values(n, " The open network is unchanged.")
+    assert exc.value.detail == {
+        "error_kind": "invalid_edit_value",
+        "message": "Generators · Forced-outage rate: the value for “G1” is not one the asset form "
+        "accepts. The open network is unchanged.",
+    }
+
+
+def test_a_fuel_curve_the_single_edit_refuses_refuses_the_import(client, store):
+    """N1: `fuel_curve.guard` runs on import, as on the single edit (homer-parity 02a)."""
+    n = _network(stale=False)
+    n.generators.loc["G1", "fuel_curve_slope"] = 0.3
+    data = _workbook(n)
+    before = store()
+    for r in (_preview(client, data), _import(client, data, name="Bad Curve")):
+        assert r.status_code == 422, r.text
+        assert r.json()["detail"] == {
+            "error_kind": "invalid_edit_value",
+            "message": "Generators · “G1”: Fuel price: enter the price per MWh of fuel, which the fuel "
+            "curve needs. Nothing was imported.",
+        }
+    assert store() == before
+
+
+def test_a_fuel_curve_s_costs_are_derived_on_import(client, _auth_db):
+    """N1: the curve sets the costs, as the single edit's `_apply_fuel_curve` does."""
+    n = _network(stale=False)
+    n.generators.loc["G1", ["fuel_curve_slope", "fuel_curve_no_load", "fuel_price"]] = [
+        2.0,
+        0.5,
+        30.0,
+    ]
+    n.generators.loc["G1", "committable"] = (
+        True  # no-load fuel burns only while the unit is on
+    )
+    made = _import(client, _workbook(n), name="Curve")
+    assert made.status_code == 200, made.text
+    got = _saved_network(_saved(_auth_db[1], made.json()["project_id"]))
+    assert got.generators.at["G1", "marginal_cost"] == 60.0  # 2.0 × 30
+    assert got.generators.at["G1", "stand_by_cost"] == 300.0  # 0.5 × 20 MW × 30
+
+
+def test_a_fuel_curve_with_a_marginal_cost_profile_refuses_the_import(client, store):
+    """F1: the guard sees the generator's cost series (`fuel_curve.cost_series`), as the single edit does."""
+    n = _network(stale=False)
+    n.generators.loc["G1", ["fuel_curve_slope", "fuel_price"]] = [2.0, 30.0]
+    n.generators_t.marginal_cost = pd.DataFrame({"G1": [11.0, 12.0]}, index=n.snapshots)
+    data = _workbook(n)
+    before = store()
+    for r in (_preview(client, data), _import(client, data, name="Curve Profile")):
+        assert r.status_code == 422, r.text
+        assert r.json()["detail"] == {
+            "error_kind": "invalid_edit_value",
+            "message": "Generators · “G1”: Marginal cost: remove its profile, or clear the fuel curve. The "
+            "curve sets this cost, so the profile would be ignored. Nothing was imported.",
+        }
+    assert store() == before
+
+
+def test_a_cost_the_fuel_curve_replaces_is_reported(client):
+    """F2: the create path's `fuel_curve.replace_notice`, named per generator, on preview and import."""
+    n = _network(stale=False)  # G1's marginal cost is 10
+    n.generators.loc["G1", ["fuel_curve_slope", "fuel_price"]] = [2.0, 30.0]
+    data = _workbook(n)
+    for r in (_preview(client, data), _import(client, data, name="Replaced")):
+        assert r.status_code == 200, r.text
+        assert r.json()["report"]["warnings"] == [
+            "Generators · “G1”: The fuel curve replaces the marginal cost of 10 €/MWh with 60 €/MWh."
+        ]
+
+
+def test_a_round_tripped_fuel_curve_reports_nothing(client):
+    """F2: a workbook whose costs already agree with its curve (as an export writes them) gives no row."""
+    from services import fuel_curve
+
+    n = _network(stale=False)
+    n.generators.loc["G1", ["fuel_curve_slope", "fuel_curve_no_load", "fuel_price"]] = [
+        2.0,
+        0.5,
+        30.0,
+    ]
+    n.generators.loc["G1", "committable"] = True
+    fuel_curve.apply(n, stamp=False)
+    r = _preview(client, _workbook(n))
+    assert r.status_code == 200, r.text
+    assert r.json()["report"]["warnings"] == []
+
+
+@pytest.mark.parametrize("spelling", ["nan", "None"])
+def test_a_blank_spelling_of_the_outage_basis_imports_as_unset(client, spelling):
+    """N4: the basis's own BeforeValidator applies on import, as the edit accepts it."""
+    n = _network(stale=False)
+    n.generators.loc["G1", "outage_rate_basis"] = spelling
+    made = _import(client, _workbook(n), name=f"Basis {spelling}")
+    assert made.status_code == 200, made.text
+
+
+def test_a_form_value_refused_on_the_open_network_excel_import_says_it_is_unchanged(
+    client, install_network, session_ctx, tmp_path
+):
+    """N3: /api/io/import/excel end to end (PyPSA's own layout carries the column)."""
+    install_network(_network(stale=False))
+    session_ctx(client)
+    n = _network(stale=False)
+    n.generators.loc["G1", "outage_rate_value"] = 1.5
+    path = tmp_path / "native.xlsx"
+    n.export_to_excel(str(path))
+    r = client.post(
+        "/api/io/import/excel", files={"file": ("native.xlsx", path.read_bytes(), MIME)}
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == {
+        "error_kind": "invalid_edit_value",
+        "message": "Generators · Forced-outage rate: the value for “G1” is not one the asset form "
+        "accepts. The open network is unchanged.",
+    }
+
+
+def test_a_project_without_form_values_imports_none(
+    client, install_network, session_ctx, _auth_db
+):
+    """H3: no form column the source never held appears, NaN or default, and the inputs are equal."""
+    from services.workflow_tools import _network_input_fingerprint
+
+    install_network(_network(stale=False))
+    session_ctx(client)
+    assert client.post("/api/projects/WB Plain").status_code == 200
+    want = _network_input_fingerprint(session_ctx(client), exact=True)
+    with _auth_db[1]() as db:
+        src_id = str(db.query(Project).filter_by(name="WB Plain").one().id)
+    data = client.get(f"/api/projects/{src_id}/workbook").content
+    assert _preview(client, data).json()["report"]["unmapped"] == []
+    made = _import(client, data, name="WB Plain Copy")
+    assert made.status_code == 200, made.text
+    got = _saved_network(_saved(_auth_db[1], made.json()["project_id"]))
+    for cls, keys in FORM_COLUMNS.items():
+        assert not set(keys) & set(got.static(cls).columns), cls
+    assert (
+        client.post(f"/api/projects/{made.json()['project_id']}/activate").status_code
+        == 200
+    )
+    assert _network_input_fingerprint(session_ctx(client), exact=True) == want
 
 
 @pytest.mark.parametrize("broken", ["solver_config.json", "user_ts.json", None])
