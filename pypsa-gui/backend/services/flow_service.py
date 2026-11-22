@@ -528,8 +528,9 @@ def _number(value) -> float | None:
 
 
 def _size_unit(n, bus, *, stock: bool) -> str | None:
-    """The unit of a size on ``bus``: MW (MWh for a stock) on an energy bus, MW_NH3 (MWh_NH3)
-    on the NH3 product bus, t/h (t) on a tonne bus, None where the bus's unit is not known."""
+    """The unit of a size on ``bus``: MW (MWh for a stock) on an energy bus, MW_<carrier>
+    (MWh_<carrier>) on a catalogued product bus counted in MWh (today NH3), t/h (t) on a tonne
+    bus, None where the bus's unit is not known."""
     from services.process_products import bus_unit, is_product_bus
 
     try:
@@ -848,6 +849,12 @@ def readiness_warning_filing(text: str) -> tuple[str, str] | None:
                  if text.startswith(prefix)), None)
 
 
+#: The two "no outage data" notes, one per section (see `_readiness_items`).
+OUTAGE_ASSETS_CODE = "eh_outage_data_missing"
+OUTAGE_CONNECTION_CODE = "eh_connection_outage_data_missing"
+OUTAGE_NOTE_CODES = (OUTAGE_ASSETS_CODE, OUTAGE_CONNECTION_CODE)
+
+
 def _readiness_items(r: dict | Exception, *, voll_noted: bool,
                      connection_links: frozenset[str] = frozenset()) -> list[dict]:
     if isinstance(r, Exception):
@@ -879,13 +886,17 @@ def _readiness_items(r: dict | Exception, *, voll_noted: bool,
     missing = (r.get("outage_units") or {}).get("missing") or []
     # A connection Link (the grid import, a tie) is the connection's, not an asset of the site
     # (`_site_assets`): its missing outage data is a section 3 note, the units' stay in section 5.
-    for section, pick in (("connection", True), ("assets", False)):
+    # Each note has its own code: an acknowledgement is stored per (code, entity), and neither
+    # note names an entity, so one shared code would let one stand in for the other.
+    for section, code, noun, pick in (
+            ("connection", OUTAGE_CONNECTION_CODE, "connection link", True),
+            ("assets", OUTAGE_ASSETS_CODE, "unit", False)):
         rows = [m for m in missing if (str(m.get("name", "")) in connection_links) is pick]
         if rows:
             names = ", ".join(m.get("name", "") for m in rows[:5])
             more = f" and {len(rows) - 5} more" if len(rows) > 5 else ""
-            out.append(_item("eh_outage_data_missing", "warning",
-                             f"{_count(len(rows), 'unit')} {'has' if len(rows) == 1 else 'have'} "
+            out.append(_item(code, "warning",
+                             f"{_count(len(rows), noun)} {'has' if len(rows) == 1 else 'have'} "
                              f"no outage data ({names}{more}).",
                              "eh_readiness", section, fld="outage_rate_value"))
     for w in r.get("warnings") or []:
