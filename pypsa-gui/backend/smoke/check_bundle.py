@@ -230,6 +230,7 @@ ROOTED = (
     # The shipped common Library items (GS-EU P2d): `common.COMMON_DIR` = the module's
     # sibling `common_items/`; one probe per shipped kind.
     "services/library/common_items/tariff/nl-tennet-2026-hs.json",
+    "services/library/common_items/contract/eu-ppa-pay-as-produced.json",
     # GS-2 regional cost packs (`<date>+<region>`), one manifest per region.
     "services/library/defaults_pack/versions/2026-10-21+ca_federal/manifest.json",
     "services/library/defaults_pack/versions/2026-10-21+uk/manifest.json",

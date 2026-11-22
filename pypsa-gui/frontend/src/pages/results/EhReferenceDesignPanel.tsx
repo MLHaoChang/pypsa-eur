@@ -41,6 +41,7 @@ import { prepareTaggingTour } from './prepareTaggingTour'
 import { InfoTip } from '../../layout/properties/cardKit'
 import type { ZeroReason } from './fmea'
 import { CRITICALITY_PER_YEAR_LABEL } from './fmea'
+import { takeImprovePrefill, useImprovePrefillStore } from '../hubDesign/improvePrefill'
 import { leverKindWords } from './leverKindWords'
 
 const ARCHETYPES: { id: EhArchetype; label: string; blurb: string }[] = [
@@ -993,6 +994,31 @@ export function EhReferenceDesignPanel() {
   }, [template, currentProject])
   const setField = (k: keyof PackForm) =>
     (e: { target: { value: string } }) => setForm(f => ({ ...f, [k]: e.target.value }))
+  // Template-e2e 22 (IMPROVE-MANUAL-1): an Improve card's "Open in Expert"
+  // hands over a filled-in form, once, for this project. It opens the panel
+  // and its settings; nothing runs until the user presses Run. The note
+  // stands only while the form is still the one handed over.
+  const prefillPending = useImprovePrefillStore(s => !!s.prefill?.pack)
+  const [filledFrom, setFilledFrom] = useState<{ title: string; form: PackForm } | null>(null)
+  useEffect(() => {
+    if (!prefillPending) return
+    const got = takeImprovePrefill(currentProject, 'pack')
+    if (!got) return
+    preselectedFor.current = currentProject
+    setForm(got.pack)
+    setFilledFrom({ title: got.title, form: got.pack })
+    setOpen(true)
+    setSettingsOpen(true)
+  }, [prefillPending, currentProject])
+  const filledNote = filledFrom && JSON.stringify(filledFrom.form) === JSON.stringify(form)
+    ? filledFrom.title : null
+  useEffect(() => { if (filledFrom && !filledNote) setFilledFrom(null) }, [filledFrom, filledNote])
+  const filledProject = useRef(currentProject)
+  useEffect(() => {
+    if (filledProject.current === currentProject) return
+    filledProject.current = currentProject
+    setFilledFrom(null)
+  }, [currentProject])
 
   const studyKey = nk(currentProject, 'results', 'eh_study')
   const reportKey = nk(currentProject, 'results', 'eh_reference_design')
@@ -1425,6 +1451,11 @@ export function EhReferenceDesignPanel() {
             )}
           </div>
 
+          {filledNote && (
+            <p role="status" data-testid="eh-filled-from-improve" className="text-[11px] text-muted">
+              Filled in from the Improve card: {filledNote}. Review and run.
+            </p>
+          )}
           <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
