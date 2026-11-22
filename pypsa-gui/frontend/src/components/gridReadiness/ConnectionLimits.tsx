@@ -11,14 +11,14 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { PageSection } from '../PageKit'
-import type { FlowTarget } from '../../api/flow'
+import type { FlowEnergization, FlowTarget } from '../../api/flow'
 import {
   campusApi, type GridLimitItem, type GridLimitSetting, type GridLimitSource, type GridReadinessRow,
 } from '../../api/campusElectrical'
 import { networkApi } from '../../api/network'
 import type { Link } from '../../api/types'
 import { assetSchemaApi } from '../../api/assetSchema'
-import { useConnectionLimit, useHubTemplate, useImportLinks } from '../../pages/hubDesign/useHubData'
+import { useConnectionLimit, useEnergization, useHubTemplate, useImportLinks } from '../../pages/hubDesign/useHubData'
 import { displayName } from '../../utils/displayName'
 import { updateAsset } from '../../utils/assetWrite'
 import { useUIStore } from '../../store/uiStore'
@@ -27,6 +27,7 @@ import { blockerMessage } from '../../utils/blockerMessage'
 import { nk } from '../../utils/queryKeys'
 import { useFlowScope } from '../flowScope/useFlowScope'
 import { fmt, useGridReadiness } from './GridReadinessScorecard'
+import { ENERGIZED_SENTENCE, EnergizationRows } from './EnergizationRows'
 
 const SHOWN: Record<string, string> = {
   energization_peak: 'Energization',
@@ -187,7 +188,7 @@ function LimitEditor({ row, setting, label, faultBuses }: {
 export { useImportLinks }
 
 /** A staged site: its energization schedule caps every period, so the one connection limit is not
- *  what binds and is shown, not edited, until per-period editing exists (template-e2e 02b). */
+ *  what binds; it is edited per period instead (template-e2e 02b, `EnergizationRows`). */
 export function useStagedConnection(): boolean {
   const { template } = useHubTemplate()
   return (template?.energization ?? []).length > 0
@@ -205,8 +206,11 @@ export const connectionLimitLabel = (unit: string, link?: string) =>
   `Connection limit (${unit})${link ? `, ${displayName(link)}` : ''}`
 
 /** The connection limit (template-e2e 02): an import link's capacity, written through the ordinary link
- *  update, so Expert's Properties shows the same number. One line per import link. */
-function ConnectionLimitLine({ link, named, staged }: { link: Link; named: boolean; staged: boolean }) {
+ *  update, so Expert's Properties shows the same number. One line per import link. A link with an
+ *  energization schedule (`schedule`) is edited per period instead, beside its energization check. */
+function ConnectionLimitLine({ link, named, staged, schedule, readiness }: {
+  link: Link; named: boolean; staged: boolean; schedule?: FlowEnergization; readiness: GridReadinessRow[]
+}) {
   const project = useUIStore(s => s.currentProject) ?? ''
   const qc = useQueryClient()
   const unit = useCapacityUnit(link.name)
@@ -226,13 +230,14 @@ function ConnectionLimitLine({ link, named, staged }: { link: Link; named: boole
     ]),
     onError: (e: unknown) => setError(`Connection limit: ${blockerMessage(e)}`),
   })
+  if (schedule) return <EnergizationRows entry={schedule} rating={link.p_nom} unit={unit} named={named} readiness={readiness} />
   return (
     <li data-testid="connection-limit-connection_limit" data-link={link.name} className="text-[12px]">
       <span className="font-semibold">Connection limit{named ? ` · ${displayName(link.name)}` : ''}</span>
       {': '}<span className="tabular-nums">{`${Number(link.p_nom.toPrecision(6))} ${unit}`}</span>
       {staged ? (
         <span className="block text-muted" data-testid="connection-limit-staged">
-          Set per period: see Energization below, which caps each period. Editing it per period comes later.
+          Set per period by the energization schedule, which caps each period.
         </span>
       ) : (
         <>
@@ -282,12 +287,18 @@ export function ConnectionLimits({ only }: { only?: string[] } = {}) {
   // One line per kind. Energization has one row per period: every period is listed,
   // so a connection that grows from 20 to 60 MW is never shown as 20 MW.
   const link = rows.find(r => kindOf(r) === 'ramp_rate')?.target as FlowTarget | undefined
+  const importLinks = useImportLinks()
+  const showLimit = importLinks.length > 0 && (!only || only.includes('connection_limit'))
+  // A staged site's links with a schedule are edited per period, with the energization check beside
+  // each row; the Energization line below would say it twice, so it gives way (UX 25, once per surface).
+  const schedules = useEnergization()
+  const scheduleOf = (name: string) => schedules.find(e => e.link === name)
+  const perPeriod = showLimit && importLinks.some(l => scheduleOf(l.name))
   const kinds = Object.keys(SHOWN).filter(k => rows.some(r => kindOf(r) === k))
+    .filter(k => !(perPeriod && k === 'energization_peak'))
   // Connection rows the scorecard left out (an off-grid island with its tie open): named with their reason,
   // never reported as "not tagged", since the connection is there.
   const excluded = (q.data?.excluded ?? []).filter(r => kindOf(r) in SHOWN && kindOf(r) !== 'scr')
-  const importLinks = useImportLinks()
-  const showLimit = importLinks.length > 0 && (!only || only.includes('connection_limit'))
   const staged = useStagedConnection()
   // The server's reason the network fixes no limit (`flow_service.import_capacity`): the same sentence
   // that blocks a weak-grid study, so Guided's drawer and Expert say the same thing (template-e2e 02).
@@ -297,11 +308,12 @@ export function ConnectionLimits({ only }: { only?: string[] } = {}) {
       {refusal && (!only || only.includes('connection_limit')) && (
         <p role="alert" className="mb-2 text-[12px] text-warn" data-testid="connection-limit-refusal">{refusal}</p>
       )}
+      {perPeriod && <p className="mb-2 text-[11px] text-muted" data-testid="energization-sentence">{ENERGIZED_SENTENCE}</p>}
       {showLimit && (
         <ul className="mb-3 flex flex-col gap-3">
           {/* Keyed on what is stored, so a save reloads the field. */}
           {importLinks.map(l => <ConnectionLimitLine key={`${l.name}:${l.p_nom}`} link={l}
-            named={importLinks.length > 1} staged={staged} />)}
+            named={importLinks.length > 1} staged={staged} schedule={scheduleOf(l.name)} readiness={q.data?.rows ?? []} />)}
         </ul>
       )}
       {only && kinds.length === 0 && showLimit ? null
