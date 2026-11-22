@@ -1,0 +1,1 @@
+* Perf(pypsa-gui): Enqueuing a solve on a full-year project no longer spends seconds on the exact input fingerprint, which now encodes plain numeric and date columns in bulk. Every fingerprint stays byte-identical, so no stored run turns stale.
