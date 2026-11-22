@@ -79,6 +79,7 @@ def _no_repr(tables):
 
 def test_a_judged_run_gives_both_tables_cell_for_cell(tmp_path, monkeypatch):
     uif = _uif_table()
+    uif[0] = {**uif[0], "threshold": " "}  # a blank number
     uif[1] = {
         **uif[1],
         "machine": None,
@@ -93,7 +94,7 @@ def test_a_judged_run_gives_both_tables_cell_for_cell(tmp_path, monkeypatch):
     assert state == "present" and list(t) == ["ssti_uif", "subsync_series_resonance"]
     assert t["ssti_uif"].columns == UIF_HEAD
     assert t["ssti_uif"].rows == [
-        ["MV", "max", "GAS", "0.25", "0.1", "warn", ""],
+        ["MV", "max", "GAS", "0.25", "", "warn", ""],
         ["MV", "min", "", "0.125", "—", "warn", ""],
     ]
     assert t["ssti_uif"].caption == rows["ssti_uif"]["note"]
@@ -116,6 +117,34 @@ def test_a_clear_uif_at_the_threshold_passes_each_bus(tmp_path, monkeypatch):
     _write(tmp_path, uif=_uif_meta("clear", worst=0.1), uif_rows=_uif_table(0.1))
     _, t = _pack(_project(monkeypatch, tmp_path))
     assert [r[5] for r in t["ssti_uif"].rows] == ["pass", "pass"]
+
+
+def test_a_margin_at_the_clearance_passes(tmp_path, monkeypatch):
+    # the scorecard's rule: a margin equal to the clearance clears
+    _write(
+        tmp_path, subsync=_sub_meta("clear"), resonance=_resonance((1.0, 3.0), "clear")
+    )
+    _, t = _pack(_project(monkeypatch, tmp_path))
+    assert [r[6] for r in t["subsync_series_resonance"].rows] == ["pass", "pass"]
+
+
+@pytest.mark.parametrize("damage", ["missing", "no_column"])
+def test_a_missing_or_malformed_table_gives_empty_tables_with_the_reason(
+    tmp_path, monkeypatch, damage
+):
+    from tests.test_grid_readiness_ssti import _run_dir
+
+    _write(tmp_path, subsync=_sub_meta("flag"))
+    for name in ("campus_ssti_uif.csv", "campus_subsync_resonance.csv"):
+        path = _run_dir(tmp_path) / name
+        if damage == "missing":
+            path.unlink()
+        else:
+            path.write_text("other\n1\n")
+    rows, _ = _card(tmp_path)
+    _, t = _pack(_project(monkeypatch, tmp_path))
+    for rid in ("ssti_uif", "subsync_series_resonance"):
+        assert t[rid].rows == [] and t[rid].caption == rows[rid]["note"]
 
 
 # ── S1: what the scorecard refused, the pack does not judge ───────────────────

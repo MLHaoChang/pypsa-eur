@@ -64,8 +64,6 @@ def _number(v) -> str:
 
 def _text(v) -> str:
     """A name the run wrote, as plain text (S4): blank when empty, a number as a number."""
-    if _missing(v):
-        return ""
     return v.strip() if isinstance(v, str) else _number(v)
 
 
