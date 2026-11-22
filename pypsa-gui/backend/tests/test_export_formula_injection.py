@@ -212,3 +212,39 @@ def test_chat_csv_cell_escapes_like_the_io_export(raw):
     from services.chat_tools import _inert_csv_cell
 
     assert _inert_csv_cell(raw) == _escape_formula(raw)
+
+
+def test_slow_excel_export_does_not_block_csv_and_failure_has_reason(monkeypatch):
+    """Issue 09: a slow Excel write runs off the event loop; a failure says why."""
+    import threading
+    import time
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import routers.io as rio
+
+    gate = threading.Event()
+    started = threading.Event()
+
+    def slow_excel() -> bytes:
+        started.set()
+        gate.wait(10)
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(rio, "_export_excel_bytes", slow_excel)
+    monkeypatch.setattr(rio, "_export_csv_zip_bytes", lambda: b"zip")
+    app = FastAPI()
+    app.include_router(rio.router)
+    client = TestClient(app)
+    out: dict = {}
+    t = threading.Thread(target=lambda: out.update(r=client.get("/export/excel")))
+    t.start()
+    assert started.wait(5)
+    t0 = time.monotonic()
+    csv_resp = client.get("/export/csv")
+    assert csv_resp.status_code == 200 and time.monotonic() - t0 < 2
+    gate.set()
+    t.join(10)
+    assert out["r"].status_code == 500
+    assert "disk full" in out["r"].json()["detail"]

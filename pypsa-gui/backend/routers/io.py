@@ -181,8 +181,17 @@ def _export_excel_bytes() -> bytes:
 
 @router.get("/export/excel")
 def export_excel():
+    # A plain `def` route runs on the threadpool, so a slow write leaves the
+    # event loop (and a concurrent CSV export) free. A failure carries its reason.
+    try:
+        data = _export_excel_bytes()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logging.getLogger(__name__).exception("Excel export failed")
+        raise HTTPException(500, f"Excel export failed: {exc}") from exc
     return StreamingResponse(
-        io.BytesIO(_export_excel_bytes()),
+        io.BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=network.xlsx"},
     )
