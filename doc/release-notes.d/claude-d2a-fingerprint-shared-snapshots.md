@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The exact input fingerprint of an eh_datacenter network no longer depends on whether another eh_datacenter was solved earlier in the same process (a solve named the shared snapshot index in place).

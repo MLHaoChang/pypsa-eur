@@ -328,7 +328,10 @@ def _week(planning: Planning | None = None) -> pd.DatetimeIndex:
     """The representative week: ``SNAPSHOTS``, or the same week (1 July on)
     in the entered start year of a single-year example (E1d)."""
     if planning is None or planning.start_year == SNAPSHOTS[0].year:
-        return SNAPSHOTS
+        # A copy: a network's time-series frames take this very Index as theirs, and a solve
+        # names it "snapshot" in place. The shared constant would carry that name into every
+        # later build in the process (and move the exact input fingerprint).
+        return SNAPSHOTS.copy()
     return pd.date_range(f"{planning.start_year}-07-01", periods=HOURS, freq="h")
 
 

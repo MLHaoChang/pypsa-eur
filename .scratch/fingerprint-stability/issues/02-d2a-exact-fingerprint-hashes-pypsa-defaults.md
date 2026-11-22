@@ -3,7 +3,7 @@
 
 # The exact fingerprint hashes PyPSA's process-wide component defaults table, so it can be order-dependent
 
-Status: needs-triage
+Status: in-progress
 Size: M
 Blocked by: none
 Gated: GK B
