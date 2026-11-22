@@ -3,7 +3,7 @@
 
 # The exact fingerprint hashes PyPSA's process-wide component defaults table, so it can be order-dependent
 
-Status: needs-triage
+Status: done
 Size: M
 Blocked by: none
 Gated: GK B
@@ -26,3 +26,9 @@ SCU06 (4) saw the d2a failure on #1880's CI, passing locally and on re-run, and 
 ## Notes
 
 Not reproduced. If nothing mutates the table today, close as wontfix and keep the test as a guard.
+
+## Resolution
+
+Done by #1874, not by a defaults-table fix. The table was never the cause. `eh_templates._week()` returned the module-level `SNAPSHOTS` Index, which a template's time-series frames used as their own `index=`; a solve names that Index "snapshot" in place, so a later eh_datacenter in the same process hashed `index_names` as `[["str","snapshot"]]` instead of `[["missing"]]`. Only the exact fingerprint reads index names, so the plain one matched. Seen on #1849 shard 1, #1880 shard 8 and #1692 shard 3 (gw1 ran `test_dc_backup.py`, which solves an eh_datacenter, before `test_energization_per_period.py`).
+
+Fixed on master by cbc6347d (`_week()` returns a copy), 588afab8 (every builder copies the module index) and 6e6da228 (frames indexed by `n.snapshots`). Checked on master 01b1d98b: `pytest tests/test_dc_backup.py tests/test_energization_per_period.py` in one process, 147 passed. On 9bfe70ec7 the same order failed d2a.

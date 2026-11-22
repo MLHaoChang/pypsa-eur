@@ -875,8 +875,8 @@ def test_an_element_pointing_at_the_wrong_type_is_reported(tmp_path):
     )
     res = read_text(tmp_path, dgs_text(rows))
     got = _unmapped(res)
-    assert ("ElmLne 'L1'", "no TypLne type") in got
-    assert ("ElmSym 'Gen'", "no TypSym type") in got
+    assert ("ElmLne 'L1'", "the file gives no line type for it") in got
+    assert ("ElmSym 'Gen'", "the file gives no synchronous machine type for it") in got
     assert (
         "ElmLod 'Load'",
         "its harmonic source is not a harmonic current type",
@@ -888,7 +888,7 @@ def test_a_line_type_class_absent_from_the_file_is_reported(tmp_path):
     rows = _with(ElmLne=["31;L1;2;;10.0;2;0"])
     del rows["TypLne"]
     got = _unmapped(read_text(tmp_path, dgs_text(rows)))
-    assert ("ElmLne 'L1'", "no TypLne type") in got
+    assert ("ElmLne 'L1'", "the file gives no line type for it") in got
 
 
 def test_a_closed_switch_keeps_its_element_in_service(tmp_path):
@@ -902,7 +902,7 @@ def test_a_type_pointer_into_another_class_with_its_own_class_absent(tmp_path):
     rows = _with(ElmLne=["31;L1;2;32;10.0;2;0"])
     del rows["TypLne"]
     got = _unmapped(read_text(tmp_path, dgs_text(rows)))
-    assert ("ElmLne 'L1'", "no TypLne type") in got
+    assert ("ElmLne 'L1'", "the file gives no line type for it") in got
 
 
 # --- GK A2 (4) review asks -----------------------------------------------------
@@ -1256,7 +1256,7 @@ def test_the_unbounded_grid_takes_its_short_circuit_level(hand):
     }
     (row,) = _grid_rows(hand.report)
     assert (row.asset, row.value) == ("Grid", 1000.0)
-    assert "unbounded in the file (ElmXnet)" in row.why
+    assert "unbounded in the file, so a limit" in row.why
     assert "short-circuit level 1000 MVA" in row.why
 
 

@@ -371,7 +371,7 @@ def test_a_shortfall_that_delivered_is_its_own_row_never_in_the_total():
         5.0 * float(n.snapshot_weightings.generators.iloc[0])
     )
     rows = dict(E._t_sizing(p).rows)
-    assert rows["Shortfall, NH3 shortfall (not counted)"].startswith("32.3 MW; ")
+    assert rows["Shortfall, NH3 shortfall (not counted)"].startswith("32.3 MW_NH3; ")
     assert not any(k.startswith("Bought in") for k in rows)  # bought nothing: no row
 
 
