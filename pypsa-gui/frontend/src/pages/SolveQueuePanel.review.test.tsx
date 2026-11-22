@@ -41,6 +41,7 @@ function job(status: SolveJobStatus | string, project_id: string | null = 'demo'
     // Not the subject of this file; false keeps the Dismiss control out of
     // the DOM so it cannot interfere with the queries below.
     can_dismiss: false,
+    started_by_me: false,
   }
 }
 
@@ -51,7 +52,7 @@ const clearMutate = vi.fn()
 const enqueueMutateAsync = vi.fn()
 let authState: { user: { is_super_admin: boolean } | null } = { user: null }
 
-vi.mock('../auth/AuthProvider', () => ({ useAuth: () => authState }))
+vi.mock('../auth/AuthProvider', () => ({ useAuth: () => authState, useIsSuperAdmin: () => true }))
 vi.mock('../store/uiStore', () => ({
   useUIStore: () => ({ currentProject, openTabs: [], markProjectSaved: vi.fn() }),
 }))

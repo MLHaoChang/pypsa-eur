@@ -65,6 +65,12 @@ describe('mergeWorksheet — unpriced modes (no VOLL)', () => {
     expect(rows.map(r => r.severity_eur)).toEqual([null, null])
     expect(rows.map(r => r.criticality_eur_per_year)).toEqual([null, null])
   })
+  it('keeps a manual row with no € as null, not 0', () => {
+    const rows = mergeWorksheet(null, { ...sidecar, manual_rows: [{ ...sidecar.manual_rows[0],
+      severity_eur: null, criticality_eur_per_year: undefined }] })
+    expect(rows[0].severity_eur).toBeNull()
+    expect(rows[0].criticality_eur_per_year).toBeNull()
+  })
   it('sorts unpriced modes after every priced one, by name', () => {
     const rows = mergeWorksheet(unpriced, sidecar)
     expect(rows.map(r => r.name)).toEqual(['cyber', 'alpha', 'zeta'])

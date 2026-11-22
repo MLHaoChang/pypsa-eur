@@ -21,6 +21,7 @@ function job(status: SolveJobStatus, project_id: string | null = 'demo'): SolveJ
     // Not the subject of this file; false keeps the Dismiss control out of
     // the DOM so it cannot interfere with the queries below.
     can_dismiss: false,
+    started_by_me: false,
   }
 }
 

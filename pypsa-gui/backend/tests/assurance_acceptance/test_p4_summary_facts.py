@@ -268,6 +268,7 @@ def test_stage_7_admits_the_same_set_through_the_same_path(project, monkeypatch)
     # The kwargs harness/run_report.start passes, with a caller's declaration.
     report_jobs._start(
         proj,
+        user_id=None,
         evidence=evidence,
         figure_pngs=figures,
         profile=llm,

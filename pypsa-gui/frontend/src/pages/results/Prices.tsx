@@ -235,7 +235,7 @@ export default function Prices() {
 
       {/* ── KPI strip ──────────────────────────────────────────── */}
       <section>
-        <h3 className="text-[12.5px] font-semibold text-text mb-2.5 tracking-[-0.005em]">System prices</h3>
+        <h3 className="text-h3 font-semibold text-text mb-2.5">System prices</h3>
         <div className="grid grid-cols-4 gap-3">
           <KPI accent label="System mean"
                value={kpis ? `${kpis.systemMean.toFixed(2)} €/MWh` : '—'}
@@ -265,7 +265,7 @@ export default function Prices() {
       {/* ── Per-bus table ──────────────────────────────────────── */}
       <section>
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Buses · marginal prices ({busStats?.length ?? 0})</h3>
+          <h3 className="text-h3 font-semibold text-text">Buses · marginal prices ({busStats?.length ?? 0})</h3>
           <button onClick={exportBusStatsCSV} disabled={!busStats}
             className="flex items-center gap-1 text-[11px] text-muted hover:text-accent disabled:opacity-40"
           ><Download size={11} /> CSV</button>
@@ -477,7 +477,7 @@ export default function Prices() {
       {priceTS && (
         <section>
           <div className="flex items-center gap-2 mb-2">
-            <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Price drivers</h3>
+            <h3 className="text-h3 font-semibold text-text">Price drivers</h3>
             <label className="text-[10px] text-muted ml-2">|price| ≥</label>
             <input type="number" step="100" min={0}
               value={driverThreshold}

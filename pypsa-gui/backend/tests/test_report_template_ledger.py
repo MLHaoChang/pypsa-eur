@@ -204,3 +204,18 @@ def test_growth_without_any_ledger_discloses_each_missing_assumption_without_a_f
     text = " ".join(b.text for b in section.blocks)
     assert "dc_load 2042" in text and "no template ledger for this project" in text
     assert "999" not in text
+
+
+def test_a_run_with_no_rows_reads_recorded_but_empty():
+    from services.reports.chapters import template_ledger_payload
+
+    assert template_ledger_payload({"ledger": []}, {"recorded": False})["run"] == {
+        "recorded": False, "rows": []}
+
+
+def test_only_the_runs_labelled_rows_reach_the_report():
+    from services.reports.chapters import template_ledger_payload
+
+    run = {"recorded": True, "rows": ["junk", {"shown": "x"}, {"label": "L", "shown": "s", "reason": "r"}]}
+    assert template_ledger_payload({"ledger": []}, run)["run"]["rows"] == [
+        {"label": "L", "shown": "s", "reason": "r"}]

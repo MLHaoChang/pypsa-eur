@@ -3,7 +3,8 @@
 
 # GC-06c EMT workbook: earthing-transformer and tap-changer data
 
-Status: ready-for-agent
+Status: done (#1790)
+Landed in #1790.
 Model tier: sonnet
 Blocked by: none
 Type: task

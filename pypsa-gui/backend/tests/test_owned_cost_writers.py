@@ -115,7 +115,7 @@ def test_an_excel_bad_priced_row_after_a_good_one_refuses_and_leaves_the_network
     r = _import(client, _legacy_workbook([BATTERY, bad]))
     assert r.status_code == 422, r.text
     assert r.json()["detail"]["error_kind"] == "invalid_edit_value"
-    assert "Storage 's1'" in r.json()["detail"]["message"]
+    assert "Storage “s1”" in r.json()["detail"]["message"]
     if (
         bad.get("inv_energy_overnight") == "inf"
         or bad.get("inv_power_lifetime") == "inf"
@@ -167,7 +167,7 @@ def test_a_priced_row_is_checked_at_its_own_rate():
     n.storage_units.at["bess", "discount_rate"] = float("inf")
     with pytest.raises(HTTPException) as exc:
         rederive_imported_parts(n)
-    assert "Storage 'bess'" in exc.value.detail["message"]
+    assert "Storage “bess”" in exc.value.detail["message"]
 
 
 # ── the native exports: Excel, netCDF, CSV bundle ────────────────────────────
@@ -228,7 +228,7 @@ def test_a_native_import_of_a_priced_line_with_an_infinite_length_is_refused(
     )
     assert r.status_code == 422, r.text
     assert r.json()["detail"]["error_kind"] == "invalid_edit_value"
-    assert "Line 'ab'" in r.json()["detail"]["message"]
+    assert "Line “ab”" in r.json()["detail"]["message"]
     assert session_ctx(client).network is good
 
 
@@ -379,9 +379,9 @@ def test_the_import_lists_only_the_priced_rows_it_rederived():
     n = _network()
     n.add("StorageUnit", "plain", bus="B1", p_nom=1.0, capital_cost=5.0)
     assert rederive_imported_parts(n) == [
-        "Storage 'bess'",
-        "Storage 'bess2'",
-        "Line 'ab'",
+        "Storage “bess”",
+        "Storage “bess2”",
+        "Line “ab”",
     ]
     assert n.storage_units.at["plain", "capital_cost"] == 5.0
 
@@ -395,7 +395,7 @@ def test_a_blank_part_cell_on_a_priced_row_is_not_a_refusal():
     for col in ("inv_energy_overnight", "inv_energy_lifetime", "inv_energy_fom_share"):
         su[col] = su[col].astype(object)
         su.at["bess", col] = None
-    assert "Storage 'bess'" in rederive_imported_parts(n)
+    assert "Storage “bess”" in rederive_imported_parts(n)
 
 
 def test_a_nan_part_cell_on_a_priced_row_is_blank():
@@ -404,7 +404,7 @@ def test_a_nan_part_cell_on_a_priced_row_is_blank():
     n = _network()
     for col in ("inv_energy_overnight", "inv_energy_lifetime", "inv_energy_fom_share"):
         n.storage_units.at["bess", col] = float("nan")
-    assert "Storage 'bess'" in rederive_imported_parts(n)
+    assert "Storage “bess”" in rederive_imported_parts(n)
     power = {k: v for k, v in BATTERY.items() if k.startswith("inv_power")}
     want = _expected(power)
     assert n.storage_units.at["bess", "capital_cost"] == pytest.approx(
@@ -418,7 +418,7 @@ def test_the_import_log_note_names_the_rederived_rows():
     assert _rederived_note([]) == ""
     ten = [f"StorageUnit 's{i}'" for i in range(10)]
     assert _rederived_note(ten).endswith("10 row(s): " + ", ".join(ten))
-    assert _rederived_note([*ten, "Line 'x'"]).endswith(", ".join(ten) + " and 1 more")
+    assert _rederived_note([*ten, "Line “x”"]).endswith(", ".join(ten) + " and 1 more")
 
 
 # ── project bundle import (TCU 11) ───────────────────────────────────────────
@@ -825,7 +825,7 @@ def test_a_bad_row_in_a_second_class_refuses_with_nothing_left_behind(
     r = _import_bundle(client, data, "tcu11_line")
     assert r.status_code == 422, r.text
     assert r.json()["detail"]["error_kind"] == "invalid_edit_value"
-    assert "Line 'ab'" in r.json()["detail"]["message"]
+    assert "Line “ab”" in r.json()["detail"]["message"]
     assert project_row("tcu11_line") is None
     assert {p.name for p in root.iterdir()} == before
     assert session_ctx(client).network is good
@@ -873,7 +873,7 @@ def _assert_refused_unwritten(
     assert r.status_code == 422, r.text
     assert r.json()["detail"]["error_kind"] == "invalid_edit_value"
     msg = r.json()["detail"]["message"]
-    assert "Storage 'bess2'" in msg
+    assert "Storage “bess2”" in msg
     assert phrase in msg
     assert project_row(name) is None  # refused before the project row
     assert {p.name for p in root.iterdir()} == before  # and before its folder
@@ -900,7 +900,7 @@ def test_a_bundle_rate_that_overflows_a_parts_lifetime_is_refused_before_anythin
         r, "tcu11_overflow", client, session_ctx, project_row, good, root, before
     )
     assert msg == (
-        "Storage 'bess2': its investment parts cannot be annuitised at rate 10 "
+        "Storage “bess2”: its investment parts cannot be annuitised at rate 10 "
         "over 10 and 300 years. The open network is unchanged."
     )
 
@@ -909,7 +909,7 @@ def _own_rate_message(rate):
     from services.solver.periodized_costs import discount_rate_problem
 
     return (
-        f"Storage 'bess2': its discount rate {rate:g} cannot be used "
+        f"Storage “bess2”: its discount rate {rate:g} cannot be used "
         f"({discount_rate_problem(rate)}). The open network is unchanged."
     )
 
@@ -1024,9 +1024,34 @@ def test_the_annuity_refusal_names_only_the_priced_parts_lifetimes():
     with pytest.raises(HTTPException) as exc:
         rederive_imported_parts(n, global_rate=10)
     assert exc.value.detail["message"] == (
-        "Storage 'bess2': its investment parts cannot be annuitised at rate 10 "
+        "Storage “bess2”: its investment parts cannot be annuitised at rate 10 "
         "over 300 years. The open network is unchanged."
     )
+
+
+def test_a_new_project_import_s_refusal_says_nothing_was_imported():
+    """The Excel workbook's new-project path rewords the tail; every other caller keeps it byte for byte."""
+    from fastapi import HTTPException
+
+    from services.network_crud import rederive_imported_parts
+
+    def message(**kw):
+        n = _network()
+        n.storage_units.at["bess2", "inv_power_overnight"] = float("nan")
+        n.storage_units.at["bess2", "inv_power_lifetime"] = 50.0
+        n.storage_units.at["bess2", "inv_energy_lifetime"] = 300.0
+        with pytest.raises(HTTPException) as exc:
+            rederive_imported_parts(n, global_rate=10, **kw)
+        assert exc.value.detail["error_kind"] == "invalid_edit_value"
+        return exc.value.detail["message"]
+
+    head = "Storage “bess2”: its investment parts cannot be annuitised at rate 10 over 300 years. "
+    assert (
+        message()
+        == message(new_project=False)
+        == head + "The open network is unchanged."
+    )
+    assert message(new_project=True) == head + "Nothing was imported."
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), 10**400])

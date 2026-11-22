@@ -109,18 +109,22 @@ def claim_push_slot(window_s: float = COALESCE_WINDOW_S) -> bool:
         return False
 
 
-def push(netcdf_bytes: bytes, user_ts_data: dict, template_meta: bytes | None = None) -> None:
+def push(netcdf_bytes: bytes, user_ts_data: dict, template_meta: bytes | None = None,
+         profile_cutouts: dict | None = None) -> None:
     """
     Serialize network + time-series state and push onto the active stack.
     ``template_meta``: the project's ``eh_template.json`` bytes, which a
     series edit may change (``growth_placeholders``), restored with them.
+    ``profile_cutouts``: the project's cutout record
+    (``weather_prefs.snapshot_cutouts``), which a profile apply changes.
 
     Evicts oldest entries when cumulative payload size would exceed MAX_BYTES.
     Always retains at least one entry so a single-step undo is always available
     regardless of network size.
     """
     payload = pickle.dumps({"netcdf": netcdf_bytes, "user_ts": user_ts_data,
-                            "template_meta": template_meta})
+                            "template_meta": template_meta,
+                            "profile_cutouts": profile_cutouts})
     size = len(payload)
     u = _active()
     with u.lock:
@@ -159,7 +163,8 @@ def pop() -> tuple[bytes, dict] | None:
 
 
 def pop_entry() -> dict | None:
-    """``pop`` with the whole entry: ``{netcdf, user_ts, template_meta}``."""
+    """``pop`` with the whole entry: ``{netcdf, user_ts, template_meta,
+    profile_cutouts}``."""
     u = _active()
     with u.lock:
         if not u.stack:
@@ -172,6 +177,7 @@ def pop_entry() -> dict | None:
             watch.append(hashlib.sha256(payload).hexdigest())
     data = pickle.loads(payload)
     data.setdefault("template_meta", None)
+    data.setdefault("profile_cutouts", None)
     return data
 
 
@@ -198,6 +204,7 @@ def peek_entry() -> tuple[str, int, dict] | None:
         payload, pops = u.stack[-1][0], u.pops
     entry = pickle.loads(payload)
     entry.setdefault("template_meta", None)
+    entry.setdefault("profile_cutouts", None)
     return hashlib.sha256(payload).hexdigest(), pops, entry
 
 

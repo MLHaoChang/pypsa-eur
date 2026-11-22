@@ -29,6 +29,8 @@ type Props = {
   /** The user's last Live line, flashed above the input and then cleared. */
   liveEcho?: string
   modelKeyMissing?: boolean
+  /** Issue 49: false for a user who cannot set the key; they get no "Set up the assistant" chip. */
+  canSetUp?: boolean
   onLiveSubmit?: (text: string) => void
   /** LC-07: continuous voice. With the server flag on, "Start voice" sits beside Send (disabled while
    *  `blocked`: no media link) and the voice note is hidden; flag off, the note is master's. */
@@ -85,7 +87,7 @@ function LiveNode({ lit }: { lit: boolean }) {
 
 export default function CompanionLauncher({
   workState = 'idle', navigating = false, profileLabel, onCompose, onSpeak, onLive, onProfiles,
-  liveOpen = false, liveCaption = '', liveEcho = '', modelKeyMissing = false, onLiveSubmit, speech,
+  liveOpen = false, liveCaption = '', liveEcho = '', modelKeyMissing = false, canSetUp = true, onLiveSubmit, speech,
   children,
 }: Props) {
   const reduce = useReducedMotion()
@@ -223,7 +225,7 @@ export default function CompanionLauncher({
           (the launcher is described by the voice note); hover, keyboard
           focus or live chat shows them (index.css .companion-extras). */}
       <div className="companion-extras flex flex-col items-end gap-2" data-testid="companion-extras">
-      {modelKeyMissing && (
+      {modelKeyMissing && canSetUp && (
       <button
         type="button"
         onClick={onProfiles}

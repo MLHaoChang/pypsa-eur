@@ -206,6 +206,16 @@ API credentials; without them the backend refuses with a 422 that names the
 setup (`cds_preflight` → `CdsCredentialError`).
 _Avoid_: weather cache, ERA5 database, download folder
 
+**Cutout record**:
+The project's note, per applied profile target, of the cutout its series came
+from: the cutout's own bbox, weather year and sha256 (`profile_cutouts` in
+`metadata.json`, written by `weather_prefs.record_cutouts`). The project keeps
+the series, never the cutout's cells (owner decision PROJ-WEATHER-1). Undo
+puts the record back with the profile. Known limits: it is written at apply
+time, so closing without saving keeps it (as `eh_template.json` does), and an
+entry for a target later deleted or renamed stays.
+_Avoid_: weather copy, cutout snapshot
+
 **Profile preset**:
 A named bundle of technology parameters — a wind turbine or solar
 panel/orientation — that the generator resolves into engine params

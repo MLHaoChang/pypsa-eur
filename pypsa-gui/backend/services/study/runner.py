@@ -59,6 +59,7 @@ from __future__ import annotations
 import contextvars
 import hashlib
 import json
+import math
 import logging
 import pathlib
 import threading
@@ -77,7 +78,7 @@ from models.study import (
     FindingsHashes,
     OptionResult,
 )
-from services import dirty_state
+from services import dirty_state, project_write_gate
 from services.pypsa_service import PyPSAService
 from services.study import forks as study_forks
 from services.study import library as study_library
@@ -145,6 +146,35 @@ class RunRefused(RuntimeError):
 
 
 # ── context plumbing ──────────────────────────────────────────────────────
+
+# Project-viewer-role 02: runs refused because their requester lost edit
+# access mid-run, by (base project id, study id, kind). Nothing of a refused
+# run is written into the project, and the base context is dropped once the
+# run releases it, so this is where its status reads find the refusal. A run
+# finished on disk after it wins (`refused_or_saved`); a restart forgets it.
+_REFUSED: dict[tuple[str, str, str], dict] = {}
+_REFUSED_LOCK = threading.Lock()
+
+
+def remember_refusal(base_uuid, study_id: str, kind: str, record: dict) -> None:
+    with _REFUSED_LOCK:
+        _REFUSED[(str(base_uuid), study_id, kind)] = dict(record)
+
+
+def refused_or_saved(base_uuid, study_id: str, kind: str, saved):
+    """The refused run's record when it is newer than `saved` (the last one on
+    disk), else `saved`."""
+    with _REFUSED_LOCK:
+        refused = _REFUSED.get((str(base_uuid), study_id, kind))
+    if refused is None:
+        return saved
+    finished = saved.get("finished_at") if isinstance(saved, dict) else None
+    # A malformed saved timestamp reads as older (review-gk: never a 500).
+    if (isinstance(finished, (int, float)) and not isinstance(finished, bool)
+            and math.isfinite(finished) and finished > refused["finished_at"]):
+        return saved
+    return dict(refused)
+
 
 def _on_ctx(ctx, fn, *args, **kwargs):
     """Call ``fn`` with ``ctx`` as the active context, without leaking it."""
@@ -637,10 +667,13 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
     finance_digests: dict[str, str | None] = {}
     finance_refused: dict[str, tuple[str, str]] = {}
     status, error = "failed", None
+    view_only = False  # the run met a `RequesterViewOnly` (project-viewer-role 02)
     study = None
+    prior_options: list[str] | None = None  # restored when the run is refused
     try:
         base_row = db.get(Project, _uuid(base_row_id))
         study = store.load_study(base_dir, study_id)
+        prior_options = list(study.option_projects)
         question = Q.get_question(study.question_id)
         library = packs.library_for(ledger)
         # The ledger and intake captured when the run started (BC-S4-2), not
@@ -660,6 +693,7 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
         from services.study import compile as study_compile
 
         idx = packs.snapshots_for(intake)
+        project_write_gate.check_requester(user_id, base_row_id)
         try:
             ref = study_compile.mint_export_series(
                 db, base_row.org_id, base_uuid=base_row_id, study_id=study_id,
@@ -707,10 +741,14 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
             flags = export_cycling_flags(issues)
             if flags:
                 preflight_flags[opt.option_id] = flags
+            # Project-viewer-role 02: the requester's role is read again
+            # before each fork is written into the project.
+            project_write_gate.check_requester(user_id, base_row_id)
             row = study_forks.create_option_fork(
                 db, user_id, base_row=base_row, study_id=study_id,
                 option_id=opt.option_id, network=net, solver_config=cfg)
             created.append((opt, row, cfg))
+        project_write_gate.check_requester(user_id, base_row_id)
         with store.WRITE_LOCK:
             study = store.load_study(base_dir, study_id)
             study = study.model_copy(update={
@@ -779,6 +817,8 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
                 break
         status = ("aborted" if stop_event.is_set()
                   else "failed" if error is not None else "done")
+    except project_write_gate.RequesterViewOnly as exc:
+        error, status, view_only = str(exc), "failed", True
     except Exception as exc:  # noqa: BLE001 — recorded on the run
         logger.exception("decision study %s run failed", study_id)
         error = f"{type(exc).__name__}: {exc}"
@@ -799,7 +839,8 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
         try:
             final = _finish(db, ctx, record, study_id=study_id, base_row_id=base_row_id,
                             base_dir=base_dir, created=created, outcomes=outcomes,
-                            fidelity=fidelity, status=status, error=error,
+                            fidelity=fidelity, status=status, error=error, user_id=user_id,
+                            view_only=view_only, prior_options=prior_options,
                             run_ledger=ledger, run_intake=intake,
                             preflight_flags=preflight_flags)
         except Exception as exc:  # noqa: BLE001
@@ -845,16 +886,38 @@ def _flag_codes(preflight_flags: dict[str, list[str]] | None) -> list[str]:
     return list(dict.fromkeys(c for codes in (preflight_flags or {}).values() for c in codes))
 
 
+def _fork_exists(db, project_id: str) -> bool:
+    from db.models import Project
+
+    try:
+        return db.get(Project, _uuid(project_id)) is not None
+    except ValueError:  # a malformed id names no project
+        return False
+
+
 def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcomes,
             fidelity, status, error, run_ledger, run_intake,
-            preflight_flags: dict[str, list[str]] | None = None) -> dict:
+            preflight_flags: dict[str, list[str]] | None = None, user_id,
+            view_only: bool = False, prior_options: list[str] | None = None) -> dict:
     """
     Remove unsolved forks, write the findings and the run record; return the
     live record's terminal fields, which the worker publishes after release.
+
+    A requester who may no longer write the base project (made a viewer, or
+    removed, mid-run: project-viewer-role 02) gets nothing written: every fork
+    goes, no findings or run record land, and the study's `option_projects`,
+    which the run saved while its requester could still write, is put back as
+    it was before the run (`prior_options`), less any fork the run replaced. The refusal is kept in memory
+    (`remember_refusal`) for `get_study_run`.
     """
-    solved_rows = {o.option_id: r for o, r, _c in created
-                   if outcomes.get(o.option_id, {}).get("result") is not None
-                   and outcomes[o.option_id]["result"].solve_status == "ok"}
+    # A refusal the run already met stays final, whatever a second read says.
+    refused = view_only or project_write_gate.requester_may_not_write(user_id, base_row_id)
+    if refused:
+        status, error = "failed", project_write_gate.REFUSAL
+    solved_rows = {} if refused else {
+        o.option_id: r for o, r, _c in created
+        if outcomes.get(o.option_id, {}).get("result") is not None
+        and outcomes[o.option_id]["result"].solve_status == "ok"}
     removal_errors = []
     for opt, row, _cfg in created:
         if opt.option_id in solved_rows:
@@ -872,6 +935,23 @@ def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcom
                              study_id, opt.option_id)
             removal_errors.append(f"fork_removal_failed:{type(exc).__name__}")
             db.rollback()
+    if refused:
+        final = {"status": status, "error": error,
+                 "error_code": project_write_gate.KIND, "finished_at": time.time(),
+                 "current": None, "pending": [o.option_id for o, _r, _c in created],
+                 "solved": [], "fork_removal_refused": removal_errors}
+        if prior_options is not None:
+            # A re-run replaces the last run's forks as it makes its own, so
+            # only the prior forks that still exist are put back: the list
+            # never names a project that is gone (GK B4 condition 5).
+            kept = [pid for pid in prior_options if _fork_exists(db, pid)]
+            with store.WRITE_LOCK:
+                study = store.load_study(base_dir, study_id)
+                if list(study.option_projects) != kept:
+                    store.save_study(base_dir, study.model_copy(update={
+                        "option_projects": kept}))
+        remember_refusal(base_row_id, study_id, "run", {**_public(record), **final})
+        return final
 
     with store.WRITE_LOCK:
         study = store.load_study(base_dir, study_id)
@@ -976,7 +1056,8 @@ def get_study_run(study_id: str, *, base_row, base_dir) -> dict | None:
             if (rec and rec.get("study_id") == study_id and rec.get("status") == "running"
                     and rec.get("kind", "run") == "run"):
                 return _public(rec)
-    return store.load_aux(base_dir, study_id, "run")
+    return refused_or_saved(base_row.id, study_id, "run",
+                            store.load_aux(base_dir, study_id, "run"))
 
 
 def abort_study_run(study_id: str, *, base_row, base_dir) -> dict:

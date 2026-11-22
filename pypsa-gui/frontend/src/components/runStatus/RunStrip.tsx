@@ -1,8 +1,12 @@
 import { Lock } from 'lucide-react'
 import { useUIStore } from '../../store/uiStore'
 import { useProjectRun } from '../../hooks/useProjectRun'
+import { useRunOutcome } from '../../hooks/useRunOutcome'
 import { RUN_READ_ONLY_LINE } from '../../utils/mutationGuard'
+import { outcomeText } from '../../utils/runStatus'
 import { RunStatusLine } from './RunStatusLine'
+import { RunOutcomeLine } from './RunOutcomeLine'
+import { NotifyOptIn } from './NotifyOptIn'
 
 /**
  * The run strip at the top of the tab, above the header (run progress spec §1
@@ -11,15 +15,22 @@ import { RunStatusLine } from './RunStatusLine'
  * read-only because it is being solved, the same line says so once
  * (owner decision RUN-READONLY-1). It takes the place of the read-only banner
  * for that reason (`LockBanner` yields), so there is one line, not two.
+ * When a run it watched ends, the strip keeps one line saying how
+ * ("Optimisation finished · 6 min" + Open results, or "… failed" + See why)
+ * until dismissed or the next run starts (slice 2b, `RunOutcomeLine`).
  * Renders nothing otherwise.
  */
 export default function RunStrip() {
   const run = useProjectRun()
   const solving = useUIStore(s => s.readOnly && s.readOnlyReason === 'solving')
+  const { outcome, dismiss } = useRunOutcome()
+  const ended = !run && !solving ? outcome : null
   // The live region stays mounted, empty, while nothing runs: a screen reader
   // reliably announces text that arrives in an existing region, not one that
   // is mounted already filled, so the first stage is heard too (UX GO (a)).
-  const announce = <span className="sr-only" role="status">{run ? `${run.name}: ${run.stage}` : ''}</span>
+  const announce = <span className="sr-only" role="status">
+    {run ? `${run.name}: ${run.stage}` : ended ? outcomeText(ended) : ''}
+  </span>
   return (
     <>
     {announce}
@@ -27,6 +38,7 @@ export default function RunStrip() {
     <div data-testid="run-strip"
       className="flex items-center gap-3 px-3 h-8 shrink-0 overflow-hidden border-b border-warn/30 bg-warn/10 text-[11.5px] text-warn">
       {run && <RunStatusLine run={run} />}
+      {run && <NotifyOptIn />}
       {solving && (
         <span data-testid="run-strip-readonly" className="ml-auto flex shrink-0 items-center gap-1.5 text-warn/80">
           <Lock size={12} className="shrink-0" aria-hidden />
@@ -35,6 +47,7 @@ export default function RunStrip() {
       )}
     </div>
     )}
+    {ended && <RunOutcomeLine outcome={ended} onDismiss={dismiss} />}
     </>
   )
 }

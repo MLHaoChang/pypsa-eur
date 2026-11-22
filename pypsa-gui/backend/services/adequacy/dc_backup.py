@@ -639,13 +639,16 @@ def real_rate(rate: float, inflation: float | None) -> float:
     return (1.0 + rate) / (1.0 + (inflation or 0.0)) - 1.0
 
 
-def finance_rate(finance: dict | None) -> dict[str, Any]:
+def finance_rate(finance: dict | None, assumed: dict | None = None) -> dict[str, Any]:
     """The discount-rate kwargs of ``backup_cost_delta`` from the finance
     case (``SolverConfig.finance``, ``FinanceInputs``), on the IC engine's
     basis (GK B K3): ``wacc_nominal`` is made real with the case's
     ``inflation`` when ``price_basis`` is nominal, and read as real when it
     is real. No case or no rate: the pack's rate (real, assumed), with the
-    reason. A nominal rate without inflation, or an invalid case, is refused."""
+    reason. A nominal rate without inflation, or an invalid case, is refused.
+    ``assumed`` (``SolverConfig.finance_assumed``): while ``wacc_nominal``
+    still equals the template's shipped value, the rate is assumed too
+    (WALK-IMPROVE-1 b)."""
     from pydantic import ValidationError
 
     from models.finance import FinanceInputs
@@ -661,8 +664,15 @@ def finance_rate(finance: dict | None) -> dict[str, Any]:
         ) from None
     if fin.wacc_nominal is None:
         return {"rate": None, "rate_note": "the finance case sets no wacc_nominal"}
+    shipped = (assumed.get("wacc_nominal") or {}) if isinstance(assumed, dict) else {}
+    flag = {"rate_assumed": True} if shipped.get("value") == fin.wacc_nominal else {}
     if fin.price_basis == "real":
-        return {"rate": fin.wacc_nominal, "inflation": None, "rate_is_real": True}
+        return {
+            "rate": fin.wacc_nominal,
+            "inflation": None,
+            "rate_is_real": True,
+            **flag,
+        }
     if fin.inflation is None:
         # GK B F3: never a nominal rate read as real, never an assumed 0.
         raise DcBackupError(
@@ -670,7 +680,7 @@ def finance_rate(finance: dict | None) -> dict[str, Any]:
             "inflation to make it real; set finance.inflation or price_basis real",
             "finance.inflation",
         )
-    return {"rate": fin.wacc_nominal, "inflation": fin.inflation}
+    return {"rate": fin.wacc_nominal, "inflation": fin.inflation, **flag}
 
 
 def _repurchase_years(life: float, years: int) -> list[int]:
@@ -822,6 +832,7 @@ def backup_cost_delta(
     heat_rate_source: str | None = None,
     rate_is_real: bool = False,
     rate_note: str | None = None,
+    rate_assumed: bool = False,
     kept_genset_mw: float | None = None,
     genset_mw_source: str | None = None,
     fuel_curve_fleet: dict[str, Any] | None = None,
@@ -874,6 +885,8 @@ def backup_cost_delta(
             f"finance case nominal wacc {rate:g} made real with its inflation "
             f"{inflation or 0.0:g}: (1 + r) / (1 + i) − 1"
         )
+    if rate is not None and rate_assumed:
+        basis += " (the template's shipped wacc, assumed)"
     if r <= -1.0:
         raise DcBackupError(
             f"discount_rate: the real rate {r:g} is not above −100 %", "discount_rate"
@@ -1038,7 +1051,7 @@ def backup_cost_delta(
             "key": "discount_rate",
             "value": r,
             "unit": "real, per year",
-            "assumed": rate is None,
+            "assumed": rate is None or rate_assumed,
             "source": basis,
         },
         *(
@@ -1291,6 +1304,7 @@ def assess(
     inflation: float | None = None,
     rate_is_real: bool = False,
     rate_note: str | None = None,
+    rate_assumed: bool = False,
     cfg=None,
     lock=None,
     stop_event=None,
@@ -1415,6 +1429,7 @@ def assess(
         heat_rate_source=heat_src,
         rate_is_real=rate_is_real,
         rate_note=rate_note,
+        rate_assumed=rate_assumed,
         kept_genset_mw=fleets["hybrid"]["mw"],
         genset_mw_source=fleets["all_genset"]["source"],
         fuel_curve_fleet=fleet,
@@ -1776,7 +1791,9 @@ def assess_project(project_dir, tpl, mode: str | None = None) -> dict[str, Any]:
             prices=prices,
             cfg=cfg,
             lock=PyPSAService.get_lock(),
-            **finance_rate(getattr(cfg, "finance", None)),
+            **finance_rate(
+                getattr(cfg, "finance", None), getattr(cfg, "finance_assumed", None)
+            ),
         )
     return {
         **out,

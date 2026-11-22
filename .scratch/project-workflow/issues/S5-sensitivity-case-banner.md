@@ -3,7 +3,8 @@
 
 # S5 A sensitivity case has no banner and no "Back to base"
 
-Status: needs-triage
+Status: ready-for-agent
+Owner: PWS5-TE23-1.
 Blocked by: `template-e2e/23` (what-if scenario cannot run or compare; in triage, #1760)
 Design: `.scratch/project-workflow/integration-sensitivities.md` §5 and §6 rows S5–S7. Owner decisions: Q11–Q16.
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), design map.

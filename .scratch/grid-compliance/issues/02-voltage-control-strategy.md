@@ -46,3 +46,28 @@ Q(V) droop, no V-control or PF mode, and no plant power controller (PPC) setpoin
 - Existing `campus_reactive` and `campus_compliance` tests still pass unchanged.
 
 Release note: one new file under `doc/release-notes.d/` (see its README).
+
+## Comments
+
+**GK A2 plan verdict (2026-11-17): GO, one PR, with conditions.**
+
+- (a) "≤ vs <" at ±d is an equivalent mutant (the offset droop is continuous there). Killing tests cover the
+  offset (dropping −d), the sign (both sides of v_ref), the slope unit (s % taken as pu) and the ±Q_max clamp.
+- (b) Fail closed: judge all five voltages, V named in the detail. Optional key `q_band_v_range_pu`
+  ({min, max, clause, source}, finite, min < max) narrows the judged range; rows outside read "reported".
+  No shipped value; a test covers both cases.
+- V1 Grid equivalent Z = c·Un²/S_k'' with c stated; v_control and q_of_v run at the S_k min and max
+  equivalents; impedance hand-value test.
+- V2 Non-convergence at any root-finder evaluation makes the case non-converged (never at_limit, never
+  pass); at_limit records the bound and the shortfall. Both tested, incl. a swallowed-LF-error mutant.
+- V3 g evaluated at both bounds first; equal signs → at_limit at the nearer bound; g(−1) > g(+1) → named
+  error. Tested.
+- V4 Q_max of the droop stated (plant level) and the same in the hand test; the pf mode's sign tested at
+  P > 0 and Q > 0.
+- V5 PPC sharing tested with two unequal units; a unit at P = S (no headroom) is distinct from a unit
+  with no rating.
+- V6 The P–Q chart states whether STATCOM counts (it does); switched banks in their own column, not
+  judged. The 1.0 pu hand test takes the transformer Q loss from literal numbers.
+- V7 New keys finite and > 0, modes a subset of the four, unknown refused, a reason test each.
+- V8 control=None leaves solve_cases unchanged; one HourFlow pinned equal to master's.
+- V9 Shared files: own step and own section only.

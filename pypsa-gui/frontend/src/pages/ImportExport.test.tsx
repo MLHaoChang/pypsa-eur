@@ -182,3 +182,48 @@ describe('ImportZone pending + save-first behaviour', () => {
     expect(toast.error).not.toHaveBeenCalled()
   })
 })
+
+// Excel input workbook S3 (UX 27 Q5): the open-network import refuses an input
+// workbook with 422 `import_as_new_project`; the zone hands the same file to the
+// workbook dialog, with no toast, and leaves the open network as it was.
+describe('an input workbook dropped on the Import zone', () => {
+  const refusal = {
+    response: { status: 422, data: { detail: { error_kind: 'import_as_new_project', message: 'This is a PyPSA Studio input workbook…' } } },
+  }
+
+  it('opens the workbook dialog with the same file; the open network is untouched', async () => {
+    useUIStore.setState({ currentProject: 'Alpha', projectName: 'Alpha', workbookImportRequest: null })
+    vi.mocked(ioApi.importExcel).mockRejectedValue(refusal)
+    const onSuccess = vi.fn()
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={qc}><ImportZone onSuccess={onSuccess} /></QueryClientProvider>)
+    const file = await pickFile('Hub.xlsx')
+    await waitFor(() => expect(useUIStore.getState().workbookImportRequest?.file).toBe(file))
+    expect(onSuccess).not.toHaveBeenCalled()
+    expect(useUIStore.getState().currentProject).toBe('Alpha')
+    expect(useUIStore.getState().projectName).toBe('Alpha')
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('a scratch network with unsaved work still asks before the Excel import', async () => {
+    useUIStore.setState({ currentProject: null, workbookImportRequest: null })
+    vi.mocked(networkApi.undoInfo).mockResolvedValue({ depth: 1, unsaved: true })
+    vi.mocked(ioApi.importExcel).mockRejectedValue(refusal)
+    renderZone()
+    await pickFile('Hub.xlsx')
+    expect(ioApi.importExcel).not.toHaveBeenCalled()
+    await screen.findByRole('dialog')
+    await userEvent.click(screen.getByRole('button', { name: 'Import' }))
+    await waitFor(() => expect(useUIStore.getState().workbookImportRequest).not.toBeNull())
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('any other Excel refusal shows once, in the backend words', async () => {
+    useUIStore.setState({ currentProject: 'Alpha', workbookImportRequest: null })
+    vi.mocked(ioApi.importExcel).mockRejectedValue({ response: { status: 422, data: { detail: { error_kind: 'import_unreadable', message: 'The file is not a readable Excel workbook.' } } }, message: 'Request failed' })
+    renderZone()
+    await pickFile('grid.xlsx')
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('The file is not a readable Excel workbook.'))
+    expect(useUIStore.getState().workbookImportRequest).toBeNull()
+  })
+})
