@@ -44,6 +44,7 @@ from services.adequacy.study_report import (
     _SECTION_QUESTION,
     SECTION_ORDER,
 )
+from services.adequacy.eh_report import CONNECTION_TOL_MW
 from services.reports import formatting as F
 
 # ── vocabulary ───────────────────────────────────────────────────────────
@@ -519,16 +520,160 @@ def _t_frontier(payload: dict) -> EvidenceTable:
         source_path="/sections/frontier/payload/points")
 
 
+#: The key only a sizing payload that leaves the grid supply and the product
+#: slacks out of the total carries (issue template-e2e 20). An older stored
+#: payload lacks it and renders as it always did (GK A 33 S4).
+NEW_SIZING_KEY = "grid_connection_mw"
+
+
+def _connection_cell(payload: dict) -> str:
+    """The connection's limit and the peak import checked against it; the
+    refusal's words where the network fixes no limit, never a number."""
+    check = payload.get("connection_check")
+    if check == "unbounded":
+        return ("unbounded connection: a grid generator sits at the point of "
+                "connection with no import link, so no limit applies")
+    limit = payload.get("grid_connection_mw")
+    if limit is None:
+        return f"not established: {payload.get('grid_connection_refusal') or 'no connection limit'}"
+    cell = F.fmt_number(limit, unit="MW", digits=1)
+    peak = payload.get("grid_import_peak_mw")
+    if peak is not None and check in ("within", "exceeds"):
+        cell += (f"; peak import {F.fmt_number(peak, unit='MW', digits=1)}, "
+                 f"{'within' if check == 'within' else 'EXCEEDS'} the limit")
+        over = [k for k, v in (payload.get("grid_import_peak_by_period") or {}).items()
+                if v > limit + CONNECTION_TOL_MW]
+        if over:
+            cell += f" in {', '.join(over)}"
+    return cell
+
+
+def _slack_rows(payload: dict) -> list[list[str]]:
+    """A product's shortfall or buy-in that delivered energy: its own row,
+    never in the total and never hidden (GK A 33 S3)."""
+    words = {"shortfall": "Shortfall", "buy_in": "Bought in"}
+    rows = []
+    for s in payload.get("product_slacks") or []:
+        energy = s.get("energy")
+        if energy is None or abs(energy) < 1e-9:
+            continue
+        rows.append([f"{words.get(s.get('process_role'), s.get('process_role'))}, "
+                     f"{s.get('carrier') or s.get('name')} (not counted)",
+                     f"{F.fmt_number(s.get('p_nom'), unit=s.get('unit'), digits=1)}; "
+                     f"{F.fmt_number(energy, unit=s.get('energy_unit'), digits=1)} over the horizon"])
+    for line in payload.get("grid_supply_counted") or []:
+        rows.append(["Grid supply counted", str(line)])
+    return rows
+
+
 def _t_sizing(payload: dict) -> EvidenceTable:
+    """Installed capacity by carrier and its total: the site's own
+    generation. The grid connection's limit rides below, not summed: the
+    supply behind it is a placeholder price source (issue template-e2e 20)."""
     by_carrier = payload.get("by_carrier") or {}
     rows = [[str(k), F.fmt_number(v, unit="MW", digits=1)]
             for k, v in by_carrier.items()]
     rows.append(["Total", F.fmt_number(payload.get("total_p_nom_mw"),
                                        unit="MW", digits=1)])
+    if NEW_SIZING_KEY in payload:
+        rows.append(["Grid connection (import limit, not counted)", _connection_cell(payload)])
+        rows += _slack_rows(payload)
+    caption = "Installed capacity of the least-cost plan by carrier"
+    if NEW_SIZING_KEY in payload:
+        # A report stored before the key existed counted the grid supply:
+        # only a payload that left it out says so, and an old one renders as
+        # it did (GK A 33 S4).
+        caption += (": the site's own generation. Not counted: the grid supply "
+                    "behind the connection, a product's buy-in or shortfall, "
+                    "and load shedding")
     return EvidenceTable(
         table_id="sizing", columns=["Carrier", "Installed capacity"],
-        rows=rows, caption="Installed capacity of the least-cost plan by carrier",
-        source_path="/sections/sizing/payload")
+        rows=rows, caption=caption, source_path="/sections/sizing/payload")
+
+
+#: ``componentLabel`` (frontend ``utils/componentLabels.ts``) for the sized
+#: classes: the Kind cell reads as Guided and Expert's.
+_KIND = {"Generator": "Generator", "StorageUnit": "Storage", "Link": "Link", "Store": "Store"}
+#: A power unit's stock unit (``SizedDesignTable.STOCK_OF``).
+_STOCK_OF = {"MW": "MWh", "t/h": "t"}
+
+
+def _ui_num(v: float) -> str:
+    """``SizedDesignTable.num``: en-GB grouping, at most two decimals, no
+    trailing zeros; a solver's -0 or 1e-9 reads 0."""
+    from decimal import ROUND_HALF_UP, Decimal
+
+    if abs(v) < 0.005:
+        v = 0.0
+    d = Decimal(repr(float(v))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    text = f"{d:,.2f}".rstrip("0").rstrip(".")
+    return "0" if text in ("-0", "") else text
+
+
+def _ui_with_unit(v: float, unit: str | None) -> str:
+    return f"{_ui_num(v)} {unit}" if unit else _ui_num(v)
+
+
+def _sized_built(a: dict) -> str:
+    """The Built cell, as ``SizedDesignTable.sizedBuilt`` writes it."""
+    unit = a.get("unit")
+    if a.get("component") == "Store":
+        mwh = a.get("built_mwh")
+        if mwh is None:
+            return "not reported"
+        return "none built" if abs(mwh) < 0.005 else _ui_with_unit(mwh, unit)
+    mw = a.get("built_mw")
+    if mw is None:
+        return "not reported"
+    if abs(mw) < 0.005:
+        return "none built"
+    power = _ui_with_unit(mw, unit)
+    if a.get("component") != "StorageUnit" or a.get("built_mwh") is None:
+        return power
+    hours = f" ({_ui_num(a['max_hours'])} h)" if a.get("max_hours") is not None else ""
+    stock = _STOCK_OF.get(unit) if unit else None
+    return f"{power} · {_ui_with_unit(a['built_mwh'], stock)}{hours}"
+
+
+def _sized_range(a: dict) -> str:
+    """The Allowed range cell, as ``SizedDesignTable.sizedRange`` writes it."""
+    unit = a.get("unit")
+    store = a.get("component") == "Store"
+    lo = a.get("min_mwh" if store else "min_mw")
+    hi = a.get("max_mwh" if store else "max_mw")
+    if hi is not None:
+        return f"up to {_ui_with_unit(hi, unit)}" if lo is None \
+            else f"{_ui_num(lo)}–{_ui_with_unit(hi, unit)}"
+    if lo is not None and lo > 0:
+        return f"at least {_ui_with_unit(lo, unit)}"
+    return "no limit"
+
+
+def sized_rows(assets: list[dict]) -> list[dict]:
+    """The sized assets in the order every view lists them: by stage (a
+    staged build's period), then as the network lists them."""
+    return sorted(assets, key=lambda a: a.get("stage") or 0)
+
+
+def _t_sized_assets(payload: dict) -> EvidenceTable:
+    """Every asset the study sized, with what it built (issue template-e2e
+    20): the rows and figures Guided and Expert's sized-design table shows,
+    with a Period column (the build year) on a staged template."""
+    assets = sized_rows([a for a in payload.get("assets") or [] if isinstance(a, dict)])
+    staged = any(a.get("stage") is not None for a in assets)
+    rows = []
+    for a in assets:
+        kind = _KIND.get(str(a.get("component")), str(a.get("component")))
+        if a.get("carrier"):
+            kind += f", {a['carrier']}"
+        row = [str(a.get("name")), kind, _sized_built(a), _sized_range(a)]
+        rows.append(([str(a.get("stage") or "")] if staged else []) + row)
+    return EvidenceTable(
+        table_id="sized_assets",
+        columns=(["Period"] if staged else []) + ["Asset", "Kind", "Built", "Allowed range"],
+        rows=rows,
+        caption="What the study chose to build: every asset it sized, per stage on a staged plan",
+        source_path="/sections/sizing/payload/assets")
 
 
 def fmea_top_modes(payload: dict | None) -> list[dict]:
@@ -697,6 +842,8 @@ def _tables(sections: dict[str, EvidenceSection], headline: dict[str, Any],
         out["frontier"] = _t_frontier(p)
     if (p := ok("sizing")) is not None:
         out["sizing"] = _t_sizing(p)
+        if p.get("assets") and NEW_SIZING_KEY in p:
+            out["sized_assets"] = _t_sized_assets(p)
     if (p := ok("fmea_top")) is not None:
         out["fmea_top"] = _t_fmea_top(p)
     if (p := ok(WORKSHEET_SECTION)) is not None:

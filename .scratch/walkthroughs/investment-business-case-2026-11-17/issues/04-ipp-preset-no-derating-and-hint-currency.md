@@ -3,7 +3,7 @@
 
 # 04 — IPP preset: capacity payment has no de-rating row; price hints are in another currency
 
-Status: ready-for-agent
+Status: done (#1683: a price range in another currency says it is not converted; #1868: typed capacity de-rating with no default, the IPP preset's de-rating and insurance ship empty and the run asks for them)
 Severity: medium (overstates capacity revenue unless the user knows to scale the price)
 Group: Investment and business case. Walk 2026-11-17, master 9491878d.
 Breaks: `.scratch/business-case/spec.md` §6.6 ("`capacity:bess` × de-rating (typed)"); `.scratch/ipp-renewables-bess/spec.md` (hints with source and year); G5 (price unit = currency per unit, no conversion in the model); owner decision HOLISTIC-1 (results trace to inputs).

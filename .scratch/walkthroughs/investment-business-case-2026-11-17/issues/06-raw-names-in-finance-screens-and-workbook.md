@@ -3,7 +3,7 @@
 
 # 06 — Raw and mangled names on the finance screens and in the workbook
 
-Status: ready-for-agent
+Status: done (#1683: finance screens in words; #1868: the workbook "Business case" sheet and the "Quantity from" options in words)
 Severity: low to medium (plain words, RAW-NAMES-1)
 Group: Investment and business case. Walk 2026-11-17, master 9491878d. Extends `.scratch/ux-walkthrough-2026-11/issues/06-raw-tool-names-on-screens.md`, which covers the Expert header and chat cards; these are different strings.
 Breaks: owner decision RAW-NAMES-1; workbook spec RW-KPI-1 (readable KPI rows).

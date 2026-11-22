@@ -1,0 +1,1098 @@
+{
+ "eh_datacenter": {
+  "assets": [
+   {
+    "component": "Generator",
+    "name": "genset_new",
+    "carrier": "gas",
+    "built_mw": 20.0,
+    "min_mw": 0.0,
+    "max_mw": 40.0,
+    "unit": "MW"
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new",
+    "carrier": "battery",
+    "built_mw": 15.0,
+    "min_mw": 0.0,
+    "max_mw": 30.0,
+    "unit": "MW",
+    "max_hours": 4.0,
+    "built_mwh": 60.0
+   }
+  ],
+  "built": {
+   "genset_new": "20 MW",
+   "bess_new": "15 MW · 60 MWh (4 h)"
+  },
+  "range": {
+   "genset_new": "0–40 MW",
+   "bess_new": "0–30 MW"
+  }
+ },
+ "eh_datacenter_staged": {
+  "assets": [
+   {
+    "component": "Generator",
+    "name": "genset_new_2027",
+    "carrier": "gas",
+    "built_mw": 20.0,
+    "min_mw": 0.0,
+    "max_mw": 40.0,
+    "unit": "MW",
+    "stage": 2027
+   },
+   {
+    "component": "Generator",
+    "name": "genset_new_2030",
+    "carrier": "gas",
+    "built_mw": 20.0,
+    "min_mw": 0.0,
+    "max_mw": 40.0,
+    "unit": "MW",
+    "stage": 2030
+   },
+   {
+    "component": "Generator",
+    "name": "genset_new_2035",
+    "carrier": "gas",
+    "built_mw": 20.0,
+    "min_mw": 0.0,
+    "max_mw": 40.0,
+    "unit": "MW",
+    "stage": 2035
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new_2027",
+    "carrier": "battery",
+    "built_mw": 15.0,
+    "min_mw": 0.0,
+    "max_mw": 30.0,
+    "unit": "MW",
+    "stage": 2027,
+    "max_hours": 4.0,
+    "built_mwh": 60.0
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new_2030",
+    "carrier": "battery",
+    "built_mw": 15.0,
+    "min_mw": 0.0,
+    "max_mw": 30.0,
+    "unit": "MW",
+    "stage": 2030,
+    "max_hours": 4.0,
+    "built_mwh": 60.0
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new_2035",
+    "carrier": "battery",
+    "built_mw": 15.0,
+    "min_mw": 0.0,
+    "max_mw": 30.0,
+    "unit": "MW",
+    "stage": 2035,
+    "max_hours": 4.0,
+    "built_mwh": 60.0
+   }
+  ],
+  "built": {
+   "genset_new_2027": "20 MW",
+   "bess_new_2027": "15 MW · 60 MWh (4 h)",
+   "genset_new_2030": "20 MW",
+   "bess_new_2030": "15 MW · 60 MWh (4 h)",
+   "genset_new_2035": "20 MW",
+   "bess_new_2035": "15 MW · 60 MWh (4 h)"
+  },
+  "range": {
+   "genset_new_2027": "0–40 MW",
+   "bess_new_2027": "0–30 MW",
+   "genset_new_2030": "0–40 MW",
+   "bess_new_2030": "0–30 MW",
+   "genset_new_2035": "0–40 MW",
+   "bess_new_2035": "0–30 MW"
+  }
+ },
+ "eh_h2_hub": {
+  "assets": [
+   {
+    "component": "Generator",
+    "name": "wind_new",
+    "carrier": "wind",
+    "built_mw": 150.0,
+    "min_mw": 0.0,
+    "max_mw": 300.0,
+    "unit": "MW"
+   },
+   {
+    "component": "Generator",
+    "name": "solar_new",
+    "carrier": "solar",
+    "built_mw": 75.0,
+    "min_mw": 0.0,
+    "max_mw": 150.0,
+    "unit": "MW"
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new",
+    "carrier": "battery",
+    "built_mw": 100.0,
+    "min_mw": 0.0,
+    "max_mw": 200.0,
+    "unit": "MW",
+    "max_hours": 6.0,
+    "built_mwh": 600.0
+   },
+   {
+    "component": "Link",
+    "name": "fuel_cell",
+    "carrier": "fuel cell",
+    "built_mw": 40.0,
+    "min_mw": 10.0,
+    "max_mw": 80.0,
+    "basis": "bus0",
+    "unit": "MW"
+   }
+  ],
+  "built": {
+   "wind_new": "150 MW",
+   "solar_new": "75 MW",
+   "bess_new": "100 MW · 600 MWh (6 h)",
+   "fuel_cell": "40 MW"
+  },
+  "range": {
+   "wind_new": "0–300 MW",
+   "solar_new": "0–150 MW",
+   "bess_new": "0–200 MW",
+   "fuel_cell": "10–80 MW"
+  }
+ },
+ "eh_microgrid": {
+  "assets": [
+   {
+    "component": "Generator",
+    "name": "diesel_new",
+    "carrier": "diesel",
+    "built_mw": 6.0,
+    "min_mw": 0.0,
+    "max_mw": 12.0,
+    "unit": "MW"
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new",
+    "carrier": "battery",
+    "built_mw": 7.5,
+    "min_mw": 0.0,
+    "max_mw": 15.0,
+    "unit": "MW",
+    "max_hours": 4.0,
+    "built_mwh": 30.0
+   }
+  ],
+  "built": {
+   "diesel_new": "6 MW",
+   "bess_new": "7.5 MW · 30 MWh (4 h)"
+  },
+  "range": {
+   "diesel_new": "0–12 MW",
+   "bess_new": "0–15 MW"
+  }
+ },
+ "eh_h2_hub_staged": {
+  "assets": [
+   {
+    "component": "Generator",
+    "name": "wind_new_2027",
+    "carrier": "wind",
+    "built_mw": 75.0,
+    "min_mw": 0.0,
+    "max_mw": 150.0,
+    "unit": "MW",
+    "stage": 2027
+   },
+   {
+    "component": "Generator",
+    "name": "solar_new_2027",
+    "carrier": "solar",
+    "built_mw": 40.0,
+    "min_mw": 0.0,
+    "max_mw": 80.0,
+    "unit": "MW",
+    "stage": 2027
+   },
+   {
+    "component": "Generator",
+    "name": "wind_new_2030",
+    "carrier": "wind",
+    "built_mw": 75.0,
+    "min_mw": 0.0,
+    "max_mw": 150.0,
+    "unit": "MW",
+    "stage": 2030
+   },
+   {
+    "component": "Generator",
+    "name": "solar_new_2030",
+    "carrier": "solar",
+    "built_mw": 40.0,
+    "min_mw": 0.0,
+    "max_mw": 80.0,
+    "unit": "MW",
+    "stage": 2030
+   },
+   {
+    "component": "Generator",
+    "name": "wind_new_2035",
+    "carrier": "wind",
+    "built_mw": 75.0,
+    "min_mw": 0.0,
+    "max_mw": 150.0,
+    "unit": "MW",
+    "stage": 2035
+   },
+   {
+    "component": "Generator",
+    "name": "solar_new_2035",
+    "carrier": "solar",
+    "built_mw": 40.0,
+    "min_mw": 0.0,
+    "max_mw": 80.0,
+    "unit": "MW",
+    "stage": 2035
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new_2027",
+    "carrier": "battery",
+    "built_mw": 40.0,
+    "min_mw": 0.0,
+    "max_mw": 80.0,
+    "unit": "MW",
+    "stage": 2027,
+    "max_hours": 4.0,
+    "built_mwh": 160.0
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new_2030",
+    "carrier": "battery",
+    "built_mw": 40.0,
+    "min_mw": 0.0,
+    "max_mw": 80.0,
+    "unit": "MW",
+    "stage": 2030,
+    "max_hours": 4.0,
+    "built_mwh": 160.0
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new_2035",
+    "carrier": "battery",
+    "built_mw": 40.0,
+    "min_mw": 0.0,
+    "max_mw": 80.0,
+    "unit": "MW",
+    "stage": 2035,
+    "max_hours": 4.0,
+    "built_mwh": 160.0
+   },
+   {
+    "component": "Link",
+    "name": "electrolyser_new_2027",
+    "carrier": "electrolysis",
+    "built_mw": 20.0,
+    "min_mw": 0.0,
+    "max_mw": 40.0,
+    "basis": "bus0",
+    "unit": "MW",
+    "stage": 2027
+   },
+   {
+    "component": "Link",
+    "name": "electrolyser_new_2030",
+    "carrier": "electrolysis",
+    "built_mw": 20.0,
+    "min_mw": 0.0,
+    "max_mw": 40.0,
+    "basis": "bus0",
+    "unit": "MW",
+    "stage": 2030
+   },
+   {
+    "component": "Link",
+    "name": "electrolyser_new_2035",
+    "carrier": "electrolysis",
+    "built_mw": 20.0,
+    "min_mw": 0.0,
+    "max_mw": 40.0,
+    "basis": "bus0",
+    "unit": "MW",
+    "stage": 2035
+   }
+  ],
+  "built": {
+   "wind_new_2027": "75 MW",
+   "solar_new_2027": "40 MW",
+   "bess_new_2027": "40 MW · 160 MWh (4 h)",
+   "electrolyser_new_2027": "20 MW",
+   "wind_new_2030": "75 MW",
+   "solar_new_2030": "40 MW",
+   "bess_new_2030": "40 MW · 160 MWh (4 h)",
+   "electrolyser_new_2030": "20 MW",
+   "wind_new_2035": "75 MW",
+   "solar_new_2035": "40 MW",
+   "bess_new_2035": "40 MW · 160 MWh (4 h)",
+   "electrolyser_new_2035": "20 MW"
+  },
+  "range": {
+   "wind_new_2027": "0–150 MW",
+   "solar_new_2027": "0–80 MW",
+   "bess_new_2027": "0–80 MW",
+   "electrolyser_new_2027": "0–40 MW",
+   "wind_new_2030": "0–150 MW",
+   "solar_new_2030": "0–80 MW",
+   "bess_new_2030": "0–80 MW",
+   "electrolyser_new_2030": "0–40 MW",
+   "wind_new_2035": "0–150 MW",
+   "solar_new_2035": "0–80 MW",
+   "bess_new_2035": "0–80 MW",
+   "electrolyser_new_2035": "0–40 MW"
+  }
+ },
+ "eh_microgrid_staged": {
+  "assets": [
+   {
+    "component": "Generator",
+    "name": "diesel_new_2027",
+    "carrier": "diesel",
+    "built_mw": 4.0,
+    "min_mw": 0.0,
+    "max_mw": 8.0,
+    "unit": "MW",
+    "stage": 2027
+   },
+   {
+    "component": "Generator",
+    "name": "pv_new_2027",
+    "carrier": "solar",
+    "built_mw": 5.0,
+    "min_mw": 0.0,
+    "max_mw": 10.0,
+    "unit": "MW",
+    "stage": 2027
+   },
+   {
+    "component": "Generator",
+    "name": "wind_new_2027",
+    "carrier": "wind",
+    "built_mw": 3.0,
+    "min_mw": 0.0,
+    "max_mw": 6.0,
+    "unit": "MW",
+    "stage": 2027
+   },
+   {
+    "component": "Generator",
+    "name": "diesel_new_2030",
+    "carrier": "diesel",
+    "built_mw": 4.0,
+    "min_mw": 0.0,
+    "max_mw": 8.0,
+    "unit": "MW",
+    "stage": 2030
+   },
+   {
+    "component": "Generator",
+    "name": "pv_new_2030",
+    "carrier": "solar",
+    "built_mw": 5.0,
+    "min_mw": 0.0,
+    "max_mw": 10.0,
+    "unit": "MW",
+    "stage": 2030
+   },
+   {
+    "component": "Generator",
+    "name": "wind_new_2030",
+    "carrier": "wind",
+    "built_mw": 3.0,
+    "min_mw": 0.0,
+    "max_mw": 6.0,
+    "unit": "MW",
+    "stage": 2030
+   },
+   {
+    "component": "Generator",
+    "name": "diesel_new_2035",
+    "carrier": "diesel",
+    "built_mw": 4.0,
+    "min_mw": 0.0,
+    "max_mw": 8.0,
+    "unit": "MW",
+    "stage": 2035
+   },
+   {
+    "component": "Generator",
+    "name": "pv_new_2035",
+    "carrier": "solar",
+    "built_mw": 5.0,
+    "min_mw": 0.0,
+    "max_mw": 10.0,
+    "unit": "MW",
+    "stage": 2035
+   },
+   {
+    "component": "Generator",
+    "name": "wind_new_2035",
+    "carrier": "wind",
+    "built_mw": 3.0,
+    "min_mw": 0.0,
+    "max_mw": 6.0,
+    "unit": "MW",
+    "stage": 2035
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new_2027",
+    "carrier": "battery",
+    "built_mw": 5.0,
+    "min_mw": 0.0,
+    "max_mw": 10.0,
+    "unit": "MW",
+    "stage": 2027,
+    "max_hours": 4.0,
+    "built_mwh": 20.0
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new_2030",
+    "carrier": "battery",
+    "built_mw": 5.0,
+    "min_mw": 0.0,
+    "max_mw": 10.0,
+    "unit": "MW",
+    "stage": 2030,
+    "max_hours": 4.0,
+    "built_mwh": 20.0
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new_2035",
+    "carrier": "battery",
+    "built_mw": 5.0,
+    "min_mw": 0.0,
+    "max_mw": 10.0,
+    "unit": "MW",
+    "stage": 2035,
+    "max_hours": 4.0,
+    "built_mwh": 20.0
+   }
+  ],
+  "built": {
+   "diesel_new_2027": "4 MW",
+   "pv_new_2027": "5 MW",
+   "wind_new_2027": "3 MW",
+   "bess_new_2027": "5 MW · 20 MWh (4 h)",
+   "diesel_new_2030": "4 MW",
+   "pv_new_2030": "5 MW",
+   "wind_new_2030": "3 MW",
+   "bess_new_2030": "5 MW · 20 MWh (4 h)",
+   "diesel_new_2035": "4 MW",
+   "pv_new_2035": "5 MW",
+   "wind_new_2035": "3 MW",
+   "bess_new_2035": "5 MW · 20 MWh (4 h)"
+  },
+  "range": {
+   "diesel_new_2027": "0–8 MW",
+   "pv_new_2027": "0–10 MW",
+   "wind_new_2027": "0–6 MW",
+   "bess_new_2027": "0–10 MW",
+   "diesel_new_2030": "0–8 MW",
+   "pv_new_2030": "0–10 MW",
+   "wind_new_2030": "0–6 MW",
+   "bess_new_2030": "0–10 MW",
+   "diesel_new_2035": "0–8 MW",
+   "pv_new_2035": "0–10 MW",
+   "wind_new_2035": "0–6 MW",
+   "bess_new_2035": "0–10 MW"
+  }
+ },
+ "eh_ammonia_staged": {
+  "assets": [
+   {
+    "component": "Generator",
+    "name": "wind_new_2027",
+    "carrier": "wind",
+    "built_mw": 75.0,
+    "min_mw": 0.0,
+    "max_mw": 150.0,
+    "unit": "MW",
+    "stage": 2027
+   },
+   {
+    "component": "Generator",
+    "name": "solar_new_2027",
+    "carrier": "solar",
+    "built_mw": 40.0,
+    "min_mw": 0.0,
+    "max_mw": 80.0,
+    "unit": "MW",
+    "stage": 2027
+   },
+   {
+    "component": "Generator",
+    "name": "wind_new_2030",
+    "carrier": "wind",
+    "built_mw": 75.0,
+    "min_mw": 0.0,
+    "max_mw": 150.0,
+    "unit": "MW",
+    "stage": 2030
+   },
+   {
+    "component": "Generator",
+    "name": "solar_new_2030",
+    "carrier": "solar",
+    "built_mw": 40.0,
+    "min_mw": 0.0,
+    "max_mw": 80.0,
+    "unit": "MW",
+    "stage": 2030
+   },
+   {
+    "component": "Generator",
+    "name": "wind_new_2035",
+    "carrier": "wind",
+    "built_mw": 75.0,
+    "min_mw": 0.0,
+    "max_mw": 150.0,
+    "unit": "MW",
+    "stage": 2035
+   },
+   {
+    "component": "Generator",
+    "name": "solar_new_2035",
+    "carrier": "solar",
+    "built_mw": 40.0,
+    "min_mw": 0.0,
+    "max_mw": 80.0,
+    "unit": "MW",
+    "stage": 2035
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new_2027",
+    "carrier": "battery",
+    "built_mw": 40.0,
+    "min_mw": 0.0,
+    "max_mw": 80.0,
+    "unit": "MW",
+    "stage": 2027,
+    "max_hours": 4.0,
+    "built_mwh": 160.0
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new_2030",
+    "carrier": "battery",
+    "built_mw": 40.0,
+    "min_mw": 0.0,
+    "max_mw": 80.0,
+    "unit": "MW",
+    "stage": 2030,
+    "max_hours": 4.0,
+    "built_mwh": 160.0
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new_2035",
+    "carrier": "battery",
+    "built_mw": 40.0,
+    "min_mw": 0.0,
+    "max_mw": 80.0,
+    "unit": "MW",
+    "stage": 2035,
+    "max_hours": 4.0,
+    "built_mwh": 160.0
+   },
+   {
+    "component": "Link",
+    "name": "electrolyser_new_2027",
+    "carrier": "electrolysis",
+    "built_mw": 20.0,
+    "min_mw": 0.0,
+    "max_mw": 40.0,
+    "basis": "bus0",
+    "unit": "MW",
+    "stage": 2027
+   },
+   {
+    "component": "Link",
+    "name": "electrolyser_new_2030",
+    "carrier": "electrolysis",
+    "built_mw": 20.0,
+    "min_mw": 0.0,
+    "max_mw": 40.0,
+    "basis": "bus0",
+    "unit": "MW",
+    "stage": 2030
+   },
+   {
+    "component": "Link",
+    "name": "electrolyser_new_2035",
+    "carrier": "electrolysis",
+    "built_mw": 20.0,
+    "min_mw": 0.0,
+    "max_mw": 40.0,
+    "basis": "bus0",
+    "unit": "MW",
+    "stage": 2035
+   },
+   {
+    "component": "Store",
+    "name": "h2_storage",
+    "carrier": "H2",
+    "built_mwh": 5000.0,
+    "min_mwh": 0.0,
+    "max_mwh": 10000.0,
+    "unit": "MWh",
+    "stage": 2027
+   },
+   {
+    "component": "Store",
+    "name": "nh3_tank",
+    "carrier": "NH3",
+    "built_mwh": 3000.0,
+    "min_mwh": 0.0,
+    "max_mwh": 6000.0,
+    "unit": "MWh",
+    "stage": 2027
+   }
+  ],
+  "built": {
+   "wind_new_2027": "75 MW",
+   "solar_new_2027": "40 MW",
+   "bess_new_2027": "40 MW · 160 MWh (4 h)",
+   "electrolyser_new_2027": "20 MW",
+   "h2_storage": "5,000 MWh",
+   "nh3_tank": "3,000 MWh",
+   "wind_new_2030": "75 MW",
+   "solar_new_2030": "40 MW",
+   "bess_new_2030": "40 MW · 160 MWh (4 h)",
+   "electrolyser_new_2030": "20 MW",
+   "wind_new_2035": "75 MW",
+   "solar_new_2035": "40 MW",
+   "bess_new_2035": "40 MW · 160 MWh (4 h)",
+   "electrolyser_new_2035": "20 MW"
+  },
+  "range": {
+   "wind_new_2027": "0–150 MW",
+   "solar_new_2027": "0–80 MW",
+   "bess_new_2027": "0–80 MW",
+   "electrolyser_new_2027": "0–40 MW",
+   "h2_storage": "0–10,000 MWh",
+   "nh3_tank": "0–6,000 MWh",
+   "wind_new_2030": "0–150 MW",
+   "solar_new_2030": "0–80 MW",
+   "bess_new_2030": "0–80 MW",
+   "electrolyser_new_2030": "0–40 MW",
+   "wind_new_2035": "0–150 MW",
+   "solar_new_2035": "0–80 MW",
+   "bess_new_2035": "0–80 MW",
+   "electrolyser_new_2035": "0–40 MW"
+  }
+ },
+ "eh_concentrator_staged": {
+  "assets": [
+   {
+    "component": "Generator",
+    "name": "pv_new_2027",
+    "carrier": "solar",
+    "built_mw": 20.0,
+    "min_mw": 0.0,
+    "max_mw": 40.0,
+    "unit": "MW",
+    "stage": 2027
+   },
+   {
+    "component": "Generator",
+    "name": "pv_new_2030",
+    "carrier": "solar",
+    "built_mw": 20.0,
+    "min_mw": 0.0,
+    "max_mw": 40.0,
+    "unit": "MW",
+    "stage": 2030
+   },
+   {
+    "component": "Generator",
+    "name": "pv_new_2035",
+    "carrier": "solar",
+    "built_mw": 20.0,
+    "min_mw": 0.0,
+    "max_mw": 40.0,
+    "unit": "MW",
+    "stage": 2035
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new_2027",
+    "carrier": "battery",
+    "built_mw": 10.0,
+    "min_mw": 0.0,
+    "max_mw": 20.0,
+    "unit": "MW",
+    "stage": 2027,
+    "max_hours": 4.0,
+    "built_mwh": 40.0
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new_2030",
+    "carrier": "battery",
+    "built_mw": 10.0,
+    "min_mw": 0.0,
+    "max_mw": 20.0,
+    "unit": "MW",
+    "stage": 2030,
+    "max_hours": 4.0,
+    "built_mwh": 40.0
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new_2035",
+    "carrier": "battery",
+    "built_mw": 10.0,
+    "min_mw": 0.0,
+    "max_mw": 20.0,
+    "unit": "MW",
+    "stage": 2035,
+    "max_hours": 4.0,
+    "built_mwh": 40.0
+   },
+   {
+    "component": "Store",
+    "name": "coarse_ore_stockpile_new_2027",
+    "carrier": "ore",
+    "built_mwh": 30000.0,
+    "min_mwh": 0.0,
+    "max_mwh": 60000.0,
+    "unit": "t",
+    "stage": 2027
+   },
+   {
+    "component": "Store",
+    "name": "coarse_ore_stockpile_new_2030",
+    "carrier": "ore",
+    "built_mwh": 30000.0,
+    "min_mwh": 0.0,
+    "max_mwh": 60000.0,
+    "unit": "t",
+    "stage": 2030
+   },
+   {
+    "component": "Store",
+    "name": "coarse_ore_stockpile_new_2035",
+    "carrier": "ore",
+    "built_mwh": 30000.0,
+    "min_mwh": 0.0,
+    "max_mwh": 60000.0,
+    "unit": "t",
+    "stage": 2035
+   }
+  ],
+  "built": {
+   "pv_new_2027": "20 MW",
+   "bess_new_2027": "10 MW · 40 MWh (4 h)",
+   "coarse_ore_stockpile_new_2027": "30,000 t",
+   "pv_new_2030": "20 MW",
+   "bess_new_2030": "10 MW · 40 MWh (4 h)",
+   "coarse_ore_stockpile_new_2030": "30,000 t",
+   "pv_new_2035": "20 MW",
+   "bess_new_2035": "10 MW · 40 MWh (4 h)",
+   "coarse_ore_stockpile_new_2035": "30,000 t"
+  },
+  "range": {
+   "pv_new_2027": "0–40 MW",
+   "bess_new_2027": "0–20 MW",
+   "coarse_ore_stockpile_new_2027": "0–60,000 t",
+   "pv_new_2030": "0–40 MW",
+   "bess_new_2030": "0–20 MW",
+   "coarse_ore_stockpile_new_2030": "0–60,000 t",
+   "pv_new_2035": "0–40 MW",
+   "bess_new_2035": "0–20 MW",
+   "coarse_ore_stockpile_new_2035": "0–60,000 t"
+  }
+ },
+ "eh_ipp_hybrid": {
+  "assets": [
+   {
+    "component": "Generator",
+    "name": "wind_farm",
+    "carrier": "wind",
+    "built_mw": 30.0,
+    "min_mw": 60.0,
+    "max_mw": 60.0,
+    "unit": "MW"
+   },
+   {
+    "component": "Generator",
+    "name": "pv_plant",
+    "carrier": "solar",
+    "built_mw": 20.833333333333336,
+    "min_mw": 41.66666666666667,
+    "max_mw": 41.66666666666667,
+    "unit": "MW"
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess",
+    "carrier": "battery",
+    "built_mw": 25.0,
+    "min_mw": 0.0,
+    "max_mw": 50.0,
+    "unit": "MW",
+    "max_hours": 2.0,
+    "built_mwh": 50.0
+   }
+  ],
+  "built": {
+   "wind_farm": "30 MW",
+   "pv_plant": "20.83 MW",
+   "bess": "25 MW · 50 MWh (2 h)"
+  },
+  "range": {
+   "wind_farm": "60–60 MW",
+   "pv_plant": "41.67–41.67 MW",
+   "bess": "0–50 MW"
+  }
+ },
+ "eh_site": {
+  "assets": [
+   {
+    "component": "Generator",
+    "name": "genset_new_2027",
+    "carrier": "gas",
+    "built_mw": 6.0,
+    "min_mw": 0.0,
+    "max_mw": 12.0,
+    "unit": "MW",
+    "stage": 2027
+   },
+   {
+    "component": "Generator",
+    "name": "pv_new_2027",
+    "carrier": "solar",
+    "built_mw": 2.5,
+    "min_mw": 0.0,
+    "max_mw": 5.0,
+    "unit": "MW",
+    "stage": 2027
+   },
+   {
+    "component": "Generator",
+    "name": "genset_new_2030",
+    "carrier": "gas",
+    "built_mw": 6.0,
+    "min_mw": 0.0,
+    "max_mw": 12.0,
+    "unit": "MW",
+    "stage": 2030
+   },
+   {
+    "component": "Generator",
+    "name": "pv_new_2030",
+    "carrier": "solar",
+    "built_mw": 2.5,
+    "min_mw": 0.0,
+    "max_mw": 5.0,
+    "unit": "MW",
+    "stage": 2030
+   },
+   {
+    "component": "Generator",
+    "name": "genset_new_2035",
+    "carrier": "gas",
+    "built_mw": 6.0,
+    "min_mw": 0.0,
+    "max_mw": 12.0,
+    "unit": "MW",
+    "stage": 2035
+   },
+   {
+    "component": "Generator",
+    "name": "pv_new_2035",
+    "carrier": "solar",
+    "built_mw": 2.5,
+    "min_mw": 0.0,
+    "max_mw": 5.0,
+    "unit": "MW",
+    "stage": 2035
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new_2027",
+    "carrier": "battery",
+    "built_mw": 4.0,
+    "min_mw": 0.0,
+    "max_mw": 8.0,
+    "unit": "MW",
+    "stage": 2027,
+    "max_hours": 4.0,
+    "built_mwh": 16.0
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new_2030",
+    "carrier": "battery",
+    "built_mw": 4.0,
+    "min_mw": 0.0,
+    "max_mw": 8.0,
+    "unit": "MW",
+    "stage": 2030,
+    "max_hours": 4.0,
+    "built_mwh": 16.0
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_new_2035",
+    "carrier": "battery",
+    "built_mw": 4.0,
+    "min_mw": 0.0,
+    "max_mw": 8.0,
+    "unit": "MW",
+    "stage": 2035,
+    "max_hours": 4.0,
+    "built_mwh": 16.0
+   }
+  ],
+  "built": {
+   "genset_new_2027": "6 MW",
+   "pv_new_2027": "2.5 MW",
+   "bess_new_2027": "4 MW · 16 MWh (4 h)",
+   "genset_new_2030": "6 MW",
+   "pv_new_2030": "2.5 MW",
+   "bess_new_2030": "4 MW · 16 MWh (4 h)",
+   "genset_new_2035": "6 MW",
+   "pv_new_2035": "2.5 MW",
+   "bess_new_2035": "4 MW · 16 MWh (4 h)"
+  },
+  "range": {
+   "genset_new_2027": "0–12 MW",
+   "pv_new_2027": "0–5 MW",
+   "bess_new_2027": "0–8 MW",
+   "genset_new_2030": "0–12 MW",
+   "pv_new_2030": "0–5 MW",
+   "bess_new_2030": "0–8 MW",
+   "genset_new_2035": "0–12 MW",
+   "pv_new_2035": "0–5 MW",
+   "bess_new_2035": "0–8 MW"
+  }
+ },
+ "_edge": {
+  "assets": [
+   {
+    "component": "Generator",
+    "name": "off",
+    "carrier": "solar",
+    "built_mw": 0.004,
+    "min_mw": 0.0,
+    "max_mw": null,
+    "unit": "MW"
+   },
+   {
+    "component": "Generator",
+    "name": "unsolved",
+    "carrier": null,
+    "built_mw": null,
+    "min_mw": 2.0,
+    "max_mw": null,
+    "unit": "MW"
+   },
+   {
+    "component": "Link",
+    "name": "fixed_floor",
+    "carrier": "AC",
+    "built_mw": 0.005,
+    "min_mw": 1.5,
+    "max_mw": 9.999,
+    "unit": "MW"
+   },
+   {
+    "component": "StorageUnit",
+    "name": "bess_bare",
+    "carrier": "battery",
+    "built_mw": 1234.567,
+    "min_mw": null,
+    "max_mw": 2000.0,
+    "unit": "MW"
+   },
+   {
+    "component": "StorageUnit",
+    "name": "tank_th",
+    "carrier": "nh3",
+    "built_mw": 3.0,
+    "min_mw": 0.0,
+    "max_mw": 5.0,
+    "unit": "t/h",
+    "max_hours": null,
+    "built_mwh": 72.0
+   },
+   {
+    "component": "Store",
+    "name": "silo",
+    "carrier": "ore",
+    "built_mwh": 0.0,
+    "min_mwh": 0.0,
+    "max_mwh": 400.0,
+    "min_mw": 999.0,
+    "max_mw": 1.0,
+    "unit": "t"
+   },
+   {
+    "component": "Store",
+    "name": "silo_unsolved",
+    "carrier": "ore",
+    "built_mwh": null,
+    "built_mw": 5.0,
+    "min_mwh": 10.0,
+    "max_mwh": null,
+    "unit": "t"
+   },
+   {
+    "component": "Store",
+    "name": "h2_cav",
+    "carrier": "H2",
+    "built_mwh": -0.0001,
+    "built_mw": 3.0,
+    "unit": "MWh"
+   }
+  ],
+  "built": {
+   "off": "none built",
+   "unsolved": "not reported",
+   "fixed_floor": "0.01 MW",
+   "bess_bare": "1,234.57 MW",
+   "tank_th": "3 t/h · 72 t",
+   "silo": "none built",
+   "silo_unsolved": "not reported",
+   "h2_cav": "none built"
+  },
+  "range": {
+   "off": "no limit",
+   "unsolved": "at least 2 MW",
+   "fixed_floor": "1.5–10 MW",
+   "bess_bare": "up to 2,000 MW",
+   "tank_th": "0–5 t/h",
+   "silo": "0–400 t",
+   "silo_unsolved": "at least 10 t",
+   "h2_cav": "no limit"
+  }
+ }
+}
