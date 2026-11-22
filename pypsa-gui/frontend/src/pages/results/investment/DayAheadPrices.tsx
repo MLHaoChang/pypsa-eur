@@ -64,6 +64,8 @@ export function DayAheadPrices() {
   const [fetching, setFetching] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
   const [landed, setLanded] = useState<DayAheadResult | null>(null)
+  // The token is the workspace's: removing it asks first, inline (UX 27 on S1c).
+  const [confirmClear, setConfirmClear] = useState(false)
 
   const data = info.data
   useEffect(() => {
@@ -74,6 +76,10 @@ export function DayAheadPrices() {
 
   if (!project || !data) return null
   const picked = data.zones.find(z => z.code === zone)
+  const zoneName = (code: string) => {
+    const z = data.zones.find(x => x.code === code)
+    return z ? `${z.code} · ${z.label}` : code
+  }
   const first = picked?.first_year ?? 2015
   const y = Number(year)
   const yearError = year.trim() === '' || !Number.isInteger(y) || y < first || y > data.last_year
@@ -127,7 +133,7 @@ export function DayAheadPrices() {
       {data.token_set && data.can_fetch && (
         <div className="text-muted space-y-0.5">
           <p>{data.pin_zone
-            ? (zone === data.pin_zone ? 'Zone from the site pin.' : `The site pin is in ${data.pin_zone}.`)
+            ? (zone === data.pin_zone ? 'Zone from the site pin.' : `The site pin is in ${zoneName(data.pin_zone)}.`)
             : 'The site pin does not settle the zone: choose one.'}</p>
           {yearError && <p id="da-year-hint" className="text-danger">{yearError}</p>}
           {blocked && <p>{blocked}</p>}
@@ -146,16 +152,24 @@ export function DayAheadPrices() {
           {' '}· fetched {landed.fetched} · EUR/MWh ({landed.year} EUR)
         </p>
       )}
-      {data.token_set && data.can_set_token && (
+      {data.token_set && data.can_set_token && !confirmClear && (
         <button type="button" className="underline text-muted" data-testid="da-token-clear"
-                onClick={async () => {
-                  try {
-                    await marketPricesApi.clearToken()
-                    await qc.invalidateQueries({ queryKey: key })
-                  } catch (e) {
-                    setRefusal(refusalText(e))
-                  }
-                }}>Remove the access token</button>
+                onClick={() => setConfirmClear(true)}>Remove the access token</button>
+      )}
+      {data.token_set && data.can_set_token && confirmClear && (
+        <p className="text-muted" data-testid="da-token-confirm">Remove for everyone?{' '}
+          <button type="button" className="underline text-danger"
+                  onClick={async () => {
+                    setConfirmClear(false)
+                    try {
+                      await marketPricesApi.clearToken()
+                      await qc.invalidateQueries({ queryKey: key })
+                    } catch (e) {
+                      setRefusal(refusalText(e))
+                    }
+                  }}>Remove</button>{' · '}
+          <button type="button" className="underline" onClick={() => setConfirmClear(false)}>Keep</button>
+        </p>
       )}
     </fieldset>
   )
