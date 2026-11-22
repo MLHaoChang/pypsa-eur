@@ -5,15 +5,15 @@ import { useUIStore } from '../../store/uiStore'
 import { resultsApi, type OperatingReserveResult } from '../../api/simulation'
 import OperatingReserve from './OperatingReserve'
 
-const openOffGrid = vi.hoisted(() => vi.fn())
-vi.mock('../../layout/flowNavigation', () => ({ openOffGridConstraints: openOffGrid }))
+const openReserve = vi.hoisted(() => vi.fn())
+vi.mock('../../layout/flowNavigation', () => ({ openOperatingReserve: openReserve }))
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
   return { ...actual, resultsApi: { ...actual.resultsApi, getOperatingReserve: vi.fn() } }
 })
 
 beforeEach(() => useUIStore.setState({ currentProject: 'Demo' }))
-afterEach(() => { cleanup(); vi.restoreAllMocks(); openOffGrid.mockReset(); useUIStore.setState({ currentProject: null }) })
+afterEach(() => { cleanup(); vi.restoreAllMocks(); openReserve.mockReset(); useUIStore.setState({ currentProject: null }) })
 
 const base: OperatingReserveResult = {
   shares: { load: 0.1, pv: 0.2, wind: 0.15 }, not_counted: [], per_snapshot: [], binding: [], reason: null,
@@ -49,8 +49,10 @@ it('lists the binding hours with the shares in plain text and the inputs link', 
   expect(screen.getByText('0.5')).toBeTruthy()
   expect(screen.getByText(/bat\./)).toBeTruthy()
   expect(screen.getByTestId('operating-reserve-holders').textContent).toBe('Diesel 1.2 MW · Battery (storage) 0.3 MW')
-  fireEvent.click(screen.getByTestId('operating-reserve-inputs'))
-  expect(openOffGrid).toHaveBeenCalledTimes(1)
+  const link = screen.getByTestId('operating-reserve-inputs')
+  expect(link.textContent).toBe('Edit the reserve shares ›')  // names the input it opens
+  fireEvent.click(link)
+  expect(openReserve).toHaveBeenCalledTimes(1)
 })
 
 it('says so when the reserve never bound', async () => {
