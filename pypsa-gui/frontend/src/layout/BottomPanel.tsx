@@ -1400,7 +1400,7 @@ function SolverLog() {
         {userScrolledRef.current && (
           <button
             onClick={scrollToBottom}
-            className="text-[10px] text-accent hover:underline"
+            className="text-[10px] text-link hover:underline"
           >↓ scroll to bottom</button>
         )}
         <button

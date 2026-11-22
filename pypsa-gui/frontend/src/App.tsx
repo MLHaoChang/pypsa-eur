@@ -49,10 +49,12 @@ import { ConnectionLimits } from './components/gridReadiness/ConnectionLimits'
 import CommandPalette from './components/CommandPalette'
 import ShortcutsHelp from './components/ShortcutsHelp'
 import RescaleDialogHost from './components/RescaleDialogHost'
+import { WorkbookImportHost } from './components/workbook/WorkbookImportDialog'
 import { GuidedTourHost } from './components/GuidedTour'
 import CrashRecoveryBanner from './components/CrashRecoveryBanner'
 import LockBanner from './components/LockBanner'
 import RunStrip from './components/runStatus/RunStrip'
+import RunNotices from './components/runStatus/RunNotices'
 import ProjectMismatchBanner from './components/ProjectMismatchBanner'
 import { ProjectMismatchWatcher } from './hooks/useProjectMismatchDetection'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -159,7 +161,8 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
 }
 
 /** The flow items whose Guided drawer shows a grid-readiness limit line: item field → row kind. */
-const LIMIT_FIELDS: Record<string, string[]> = { connection_ramp: ['ramp_rate'], oscillation: ['oscillation'], eh_sk_mva: ['scr'] }
+const LIMIT_FIELDS: Record<string, string[]> = { connection_ramp: ['ramp_rate'], oscillation: ['oscillation'], eh_sk_mva: ['scr'],
+  connection_limit: ['connection_limit'] }
 
 // Tabs that take the whole main area (canvas hidden) rather than opening as a
 // half-width panel beside the canvas — their charts, tables, and two-column
@@ -724,6 +727,8 @@ export default function App() {
         {/* While this project's run is queued or going on: what runs, how
             far, the estimate, and the read-only line while it is solved. */}
         <RunStrip />
+        {/* Finish/fail notices for my runs (slice 3); they render in the toaster. */}
+        <RunNotices />
 
         {/* ── Tab / backend project mismatch (A2) ───────────────────── */}
         {/* Renders only while this tab's project and the backend's binding
@@ -880,6 +885,8 @@ export default function App() {
             asks about it. See store/rescaleStore.ts for why this moved out of
             MapCanvasInner. */}
         <RescaleDialogHost />
+        {/* The Excel input workbook import (Start tile, wizard From file, Import redirect). */}
+        <WorkbookImportHost />
         {/* Tours launched with a `prepare` step (the EH tagging tour closes
             the Results panel its button lives in, so the button cannot host
             it). Renders nothing until such a tour starts. */}

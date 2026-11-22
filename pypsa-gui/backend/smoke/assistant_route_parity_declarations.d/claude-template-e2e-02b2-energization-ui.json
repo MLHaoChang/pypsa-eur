@@ -1,0 +1,10 @@
+{
+ "limitations": [
+  {
+   "method": "PUT",
+   "path": "/api/projects/{name}/flow/energization",
+   "reason": "held-by-spec",
+   "issue": ".scratch/template-e2e/issues/02-connection-limit-in-guided.md"
+  }
+ ]
+}
