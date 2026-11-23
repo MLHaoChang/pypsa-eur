@@ -26,11 +26,15 @@ def _block(monkeypatch, flags):
         monkeypatch.setattr(R, name, lambda *_: None)
     result = SimpleNamespace(flags=flags, reasons={})
     template = SimpleNamespace(lines=[], first_year=2030)
-    case = SimpleNamespace(counterfactual=[template], templates=[template], counterfactual_hash=None)
+    case = SimpleNamespace(
+        counterfactual=[template], templates=[template], counterfactual_hash=None
+    )
     return R._counterfactual_block(result, case)
 
 
-def test_a_report_with_the_island_relaxed_flag_serves_its_sentence_in_the_notes(monkeypatch):
+def test_a_report_with_the_island_relaxed_flag_serves_its_sentence_in_the_notes(
+    monkeypatch,
+):
     text = flag_text(FLAG)
     assert text, "the island-relaxed flag must always have words"
     block = _block(monkeypatch, ["counterfactual_basis:site_today", FLAG])
