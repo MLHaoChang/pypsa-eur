@@ -51,6 +51,14 @@ new `pypsa-gui/backend/services/market_prices.py`, the time-series routes, secti
     5. "Update available" never overwrites user edits: compare per field against what the last apply wrote (per cell, LC-43a T1), show conflicts, and list every value it would change on a card (#1379 F2).
     6. `region` is typed to S1's `BIDDING_ZONES` keys and validated at load; each part of the zone/currency mismatch refusal has its own test (#1257 F1a).
     7. Mutants on the hash, the pin, the region type, the empty-ref guard and the per-field compare, each with its killing test.
+    - Build deviations GK B4 (2) accepted (2026-11-22): the pin is K8a's own sidecar `market_pack.json` (K2 "update available" is not on master); apply goes through `update_solver_config`; `capacity_price` is nullable (no price = refused at solve, K8-3); `region` is a `BiddingZone` Literal. Asks the PR shows:
+      - 1a: the pin survives save, Save-As, Save-a-Copy and export→import→save (a test).
+      - 1b: an unreadable pin (bad JSON, null, [], wrong-typed fields) shows no "update available" and refuses apply (tests).
+      - 1c: a hand-revert after an apply is kept as a user edit (test).
+      - 2a: the stale check and the pin write run inside the PUT's solver-state lock; a test that turns red when the check moves above the lock.
+      - 2c: the revision bump through the real PUT (test).
+      - 2d: route_chat_disposition, project_route_acl_policy, write_surface_lock_policy and golden_coverage pass at the trial merge.
+      - 4a: a malformed pack is refused `market_pack_invalid`; 4b: a project stating no currency is refused `market_pack_currency_unknown`.
   - **K8b (GK A): GO, conditional on SCU06-K8-1 = (a).**
     - B1: the stored "no backup obligation" attestation is a named second floor source in `derive_floors`; the docstring says a floor of 0 comes only from it. An unreadable floor or a missing attestation stays not eligible (R3), with a test for each.
     - B2: the attestation is refused on any DC-03 string or spare and on any storage the island sidecar lists as ride-through; each refusal tested.
