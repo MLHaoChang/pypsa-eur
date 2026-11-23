@@ -239,3 +239,9 @@ def test_the_fault_level_gates_do_not_read_the_generator_pair():
 
     inp = G._Inputs("/nonexistent", _net(sk_min=4000.0, sk_max=3000.0), None, "no profile", None, None)
     assert G._poc_sk_min(inp) == (None, None)
+
+
+def test_a_tick_is_never_read_as_a_number():
+    from services.adequacy.eh_columns import check_grid_strength_pair
+
+    check_grid_strength_pair("Generator", {"sk_min_mva": True, "sk_max_mva": 0.5})
