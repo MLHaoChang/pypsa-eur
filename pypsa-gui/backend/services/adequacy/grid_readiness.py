@@ -1608,8 +1608,8 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
         # a row worse than the run's verdict contradicts it (GK A2 H2); margins come from judged rows only (G1)
         if worse := _worse_rows(series, verdict):
             return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(
-                f"The run's resonance table has a {_ssti_shown(worse[0])} row, worse than its verdict "
-                f"{_ssti_shown(verdict)}"), **unknown)
+                f"The run's resonance table has a row with verdict {_ssti_shown(worse[0])}, worse than its "
+                f"verdict {_ssti_shown(verdict)}"), **unknown)
         series = series[subsync_judged(series)]
     if series is None or series.empty or "margin_hz" not in series:
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR],
@@ -1658,13 +1658,13 @@ def subsync_judged(series):
 
 def _worse_rows(series, verdict: str) -> list:
     """The series rows' verdicts worse than the run's ``verdict`` (``SUBSYNC_VERDICT_ORDER``, worst first; a
-    string outside it counts as worst), GK A2 H2."""
+    blank, non-string or other value outside it counts as worst), GK A2 H2, J1."""
     from gridspine.drivers.campus_study import SUBSYNC_VERDICT_ORDER as order
 
     if "verdict" not in series:
         return []
     rank = {v: i for i, v in enumerate(order)}
-    return [v for v in series["verdict"].astype(str) if rank.get(v, -1) < rank[verdict]]
+    return [v for v in series["verdict"] if rank.get(v if isinstance(v, str) else None, -1) < rank[verdict]]
 
 
 def _assumed_modes(series) -> str:

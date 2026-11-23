@@ -535,7 +535,27 @@ def test_a_row_worse_than_the_runs_verdict_reads_unknown(tmp_path):
     assert row["verdict"] == "unknown"
     assert (
         row["note"]
-        == f"The run's resonance table has a check row, worse than its verdict clear. {SCREENING}"
+        == f"The run's resonance table has a row with verdict check, worse than its verdict clear. {SCREENING}"
+    )
+
+
+@pytest.mark.parametrize(
+    "bad, shown",
+    [("bogus", "bogus"), (float("nan"), "an empty value"), (7, "7")],
+    ids=["bogus", "blank", "seven"],
+)
+def test_an_unknown_row_verdict_beside_a_clear_reads_unknown(tmp_path, bad, shown):
+    # GK A2 J1, J2: a verdict outside the engine's order counts as worst, and prints plainly
+    other = {**_resonance((3.0,), "clear")[0], "verdict": bad}
+    _write(
+        tmp_path,
+        subsync=_sub_meta("clear"),
+        resonance=[*_resonance((3.0,), "clear"), other],
+    )
+    row = _card(tmp_path)[0]["subsync_series_resonance"]
+    assert row["verdict"] == "unknown"
+    assert row["note"] == (
+        f"The run's resonance table has a row with verdict {shown}, worse than its verdict clear. {SCREENING}"
     )
 
 

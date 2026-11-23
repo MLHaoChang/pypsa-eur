@@ -152,6 +152,24 @@ def test_a_row_the_card_skips_is_not_judged_in_the_pack(tmp_path, monkeypatch):
     assert [r[6] for r in t["subsync_series_resonance"].rows] == ["warn", "not judged"]
 
 
+@pytest.mark.parametrize(
+    "bad", ["bogus", float("nan"), 7], ids=["bogus", "blank", "seven"]
+)
+def test_an_unknown_row_verdict_judges_nothing_in_the_pack(tmp_path, monkeypatch, bad):
+    other = {**_resonance((3.0,), "clear")[0], "verdict": bad}
+    _write(
+        tmp_path,
+        subsync=_sub_meta("clear"),
+        resonance=[*_resonance((3.0,), "clear"), other],
+    )
+    _, t = _pack(_project(monkeypatch, tmp_path))
+    assert [r[6] for r in t["subsync_series_resonance"].rows] == [
+        "not judged",
+        "not judged",
+    ]
+    _no_repr(t)
+
+
 @pytest.mark.parametrize("damage", ["missing", "no_column"])
 def test_a_missing_or_malformed_table_gives_empty_tables_with_the_reason(
     tmp_path, monkeypatch, damage
