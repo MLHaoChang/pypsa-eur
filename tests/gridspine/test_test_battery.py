@@ -15,7 +15,6 @@ import math
 import pytest
 
 from gridspine.handoff.test_battery import (
-    C_MAX,
     CHANNELS,
     CONTRACT_VERSION,
     KIND_PARAMS,
@@ -30,6 +29,7 @@ from gridspine.handoff.test_battery import (
     fault_impedance_ohm,
     thevenin_impedances_ohm,
     validate_battery,
+    voltage_factor,
 )
 from gridspine.schema.contracts import ContractError
 
@@ -605,7 +605,7 @@ def test_json_golden_case_text():
     "i_poc_pu"
    ],
    "grid": {
-    "c": 1.1,
+    "c_kind": "c_max",
     "label": "skmin_xrmin",
     "sk_mva": 1000.0,
     "x0_over_r0": 4.0,
@@ -773,35 +773,37 @@ def test_thevenin_impedances_without_zero_sequence():
 
 
 # --- GC-14: IEC 60909 voltage factor c, conservative bracket ----------------
+# Expectations are hand-written literals (GK A2 T1), never the module's own constants.
 
 
-def test_bracket_pins_c_max_on_sk_min_and_c_min_on_sk_max():
-    cases = _bb(1000, 3000, 3, 10)
+def test_bracket_names_c_max_on_sk_min_and_c_min_on_sk_max():
     by_level = {}
-    for c in cases:
-        by_level.setdefault(c.grid.label.split("_")[0], set()).add(c.grid.c)
-    assert by_level == {"skmin": {1.1}, "skmax": {1.0}}
-    assert C_MAX == 1.1
+    for c in _bb(1000, 3000, 3, 10):
+        by_level.setdefault(c.grid.label.split("_")[0], set()).add(c.grid.c_kind)
+    assert by_level == {"skmin": {"c_max"}, "skmax": {"c_min"}}
 
 
-def test_c_scales_the_source_and_fault_impedances_by_hand():
+def test_hv_ends_of_the_bracket_by_hand():
     cases = {c.case_id: c for c in _bb(1000, 3000, 3, 10)}
-    # Sk-min corner, X/R 3, c_max: |Z1| = 1.1 * 110^2 / 1000 = 13.31 ohm (10 % above c-less 12.1)
     weak = cases["fault_3ph_skmin_xrmin_v000"].grid
+    strong = cases["fault_3ph_skmax_xrmax_v000"].grid
+    assert (voltage_factor(weak, 110.0), voltage_factor(strong, 110.0)) == (1.1, 1.0)
+    # Sk-min, c_max: |Z1| = 1.1 * 110^2 / 1000 = 13.31 ohm; Z0 = 1.5 |Z1| = 19.965 ohm
     z1, z0 = thevenin_impedances_ohm(weak, 110.0)
     assert abs(z1) == pytest.approx(13.31, rel=1e-12)
-    assert abs(z0) == pytest.approx(1.5 * 13.31, rel=1e-12)
-    # Sk-max corner at 110 kV, c_min 1.0: |Z1| = 110^2 / 3000
-    strong = cases["fault_3ph_skmax_xrmax_v000"].grid
+    assert abs(z0) == pytest.approx(19.965, rel=1e-12)
+    # Sk-max, c_min 1.0 at 110 kV: |Z1| = 110^2 / 3000 = 4.0333... ohm
     assert abs(thevenin_impedances_ohm(strong, 110.0)[0]) == pytest.approx(
         12100 / 3000, rel=1e-12
     )
-    # the fault impedance follows the corrected source: Z_f = Z_th v / (1 - v)
+
+
+def test_fault_impedance_follows_the_corrected_source_by_hand():
+    cases = {c.case_id: c for c in _bb(1000, 3000, 3, 10)}
     f = next(
         c
-        for c in cases.values()
-        if c.case_id.startswith("fault_3ph_skmin_xrmin_v")
-        and c.params["v_retained_pu"] > 0
+        for cid, c in cases.items()
+        if cid.startswith("fault_3ph_skmin_xrmin_v") and c.params["v_retained_pu"] > 0
     )
     v = f.params["v_retained_pu"]
     assert abs(fault_impedance_ohm(f, 110.0)) == pytest.approx(
@@ -809,40 +811,56 @@ def test_c_scales_the_source_and_fault_impedances_by_hand():
     )
 
 
-def test_c_min_is_095_at_or_below_1_kv():
-    assert (c_min(), c_min(110.0), c_min(1.0), c_min(0.4)) == (1.0, 1.0, 0.95, 0.95)
-    lv = _bb(1, 3, 3, 10, vn_kv=0.4)
-    assert {c.grid.c for c in lv if "_skmax_" in c.case_id} == {0.95}
-    assert {c.grid.c for c in lv if "_skmin_" in c.case_id} == {1.1}
+def test_lv_end_takes_c_min_095_from_the_source_un():
+    # 0.4 kV PoC, Sk 5 / 10 MVA: Sk-max |Z1| = 0.95 * 0.16 / 10 = 0.0152 ohm,
+    # Sk-min |Z1| = 1.1 * 0.16 / 5 = 0.0352 ohm.
+    cases = {c.case_id: c for c in _bb(5, 10, 3, 10)}
+    strong = cases["fault_3ph_skmax_xrmax_v000"].grid
+    weak = cases["fault_3ph_skmin_xrmin_v000"].grid
+    assert (voltage_factor(strong, 0.4), voltage_factor(weak, 0.4)) == (0.95, 1.1)
+    assert abs(thevenin_impedances_ohm(strong, 0.4)[0]) == pytest.approx(
+        0.0152, rel=1e-12
+    )
+    assert abs(thevenin_impedances_ohm(weak, 0.4)[0]) == pytest.approx(
+        0.0352, rel=1e-12
+    )
+    assert voltage_factor(strong, 1.0) == 0.95  # "at or below 1 kV"
+    assert voltage_factor(Thevenin("g", 10.0, 3.0, c_kind="unity"), 0.4) == 1.0
+
+
+@pytest.mark.parametrize("vn", [0.0, -1.0, math.nan, math.inf, True])
+def test_c_min_refuses_a_bad_un(vn):
     with pytest.raises(ContractError, match="vn_kv"):
-        c_min(0.0)
+        c_min(vn)
 
 
-def test_c_none_is_no_c_and_is_never_relabelled():
-    # A source without c (a battery written before GC-14) keeps |Z1| = Un^2 / Sk and reads back without c.
-    assert abs(
-        thevenin_impedances_ohm(Thevenin("g", 1000.0, 10.0), 110.0)[0]
-    ) == pytest.approx(12.1)
+def test_c_kind_none_is_no_c_and_is_never_relabelled():
+    # A source without c (a battery written before GC-14) keeps |Z1| = Un^2 / Sk = 12.1 ohm.
+    g = Thevenin("g", 1000.0, 10.0)
+    assert voltage_factor(g, 110.0) is None
+    assert abs(thevenin_impedances_ohm(g, 110.0)[0]) == pytest.approx(12.1)
     old = [
-        dataclasses.replace(c, grid=dataclasses.replace(c.grid, c=None))
+        dataclasses.replace(c, grid=dataclasses.replace(c.grid, c_kind=None))
         for c in _bb(1000, 3000, 3, 10)
     ]
     text = battery_json(old)
-    assert '"c"' not in text
-    assert {c.grid.c for c in cases_from_json(text)} == {None}
-    frame = battery_frame(old).drop(columns=["c"])  # a frame from before the column
-    assert {c.grid.c for c in cases_from_frame(frame)} == {None}
+    assert '"c_kind"' not in text
+    assert {c.grid.c_kind for c in cases_from_json(text)} == {None}
+    frame = battery_frame(old).drop(
+        columns=["c_kind"]
+    )  # a frame from before the column
+    assert {c.grid.c_kind for c in cases_from_frame(frame)} == {None}
 
 
 def test_frame_and_json_name_each_cases_c():
     cases = _bb(1000, 3000, 3, 10)
-    frame = battery_frame(cases)
-    assert list(frame["c"]) == [c.grid.c for c in cases]
+    want = ["c_max" if "_skmin_" in c.case_id else "c_min" for c in cases]
+    assert list(battery_frame(cases)["c_kind"]) == want
     doc = json.loads(battery_json(cases))
-    assert [c["grid"]["c"] for c in doc["cases"]] == [c.grid.c for c in cases]
+    assert [c["grid"]["c_kind"] for c in doc["cases"]] == want
 
 
-@pytest.mark.parametrize("bad", [*BAD_NUMBERS, 0.9, 1.2, True])
-def test_c_outside_iec_range_or_not_a_number_refused(bad):
-    with pytest.raises(ContractError, match="thevenin g: c="):
-        Thevenin("g", 1000.0, 10.0, c=bad)
+@pytest.mark.parametrize("bad", [True, math.nan, 1.1, "c_mid", "C_MAX", ""])
+def test_c_kind_not_a_known_name_refused(bad):
+    with pytest.raises(ContractError, match="thevenin g: c_kind="):
+        Thevenin("g", 1000.0, 10.0, c_kind=bad)

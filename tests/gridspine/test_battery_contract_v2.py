@@ -149,9 +149,9 @@ def test_v1_pack_written_before_v2_loads_and_reserialises_byte_equal():
 def test_default_writer_still_writes_the_v1_bytes_but_for_c():
     # GC-14 added each corner's c (absent when None); without it the bytes are the v1 fixture's.
     battery = build_battery(1000, 3000, 3, 10, **Z0)
-    assert {c.grid.c for c in battery} == {1.0, 1.1}
+    assert {c.grid.c_kind for c in battery} == {"c_max", "c_min"}
     no_c = [
-        dataclasses.replace(c, grid=dataclasses.replace(c.grid, c=None))
+        dataclasses.replace(c, grid=dataclasses.replace(c.grid, c_kind=None))
         for c in battery
     ]
     assert battery_json(no_c) == _v1_text()

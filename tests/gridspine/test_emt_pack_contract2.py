@@ -146,6 +146,27 @@ def test_caller_battery_rows_and_readme_say_caller(tmp_path):
     )
 
 
+def test_caller_battery_without_c_is_not_relabelled(tmp_path):
+    # GC-14: a battery written before c keeps |Z| = Un^2/Sk and its rows say c was not applied.
+    camp = build_campus(spec())
+    b = [
+        dataclasses.replace(c, grid=dataclasses.replace(c.grid, c_kind=None))
+        for c in emt_pack.battery_from_campus(camp)
+    ]
+    p = write_emt_pack(tmp_path / "emt", camp, battery=b)
+    rows = json.loads((p.path / "thevenin_set.json").read_text())["sources"]
+    corners = [r for r in rows if r["group"] == "battery"]
+    assert corners and all(
+        r["c"] is None and r["note"] == emt_pack.NO_C_NOTE for r in corners
+    )
+    (skmin,) = [r for r in corners if r["label"] == "skmin_xrmin"]
+    assert math.hypot(skmin["r_ohm"], skmin["x_ohm"]) == pytest.approx(
+        110.0**2 / 2000.0, rel=1e-12
+    )
+    assert all(r["note"] == C_NOTE for r in rows if r["group"] == "study")
+    assert any(emt_pack.NO_C_NOTE in a for a in p.manifest["assumptions"])
+
+
 def test_case_schedule_refuses_a_v1_battery():
     v1 = build_battery(2000, 3000, 8, 10, z0_over_z1=3.0, x0_over_r0=10.0)
     with pytest.raises(ContractError, match="needs the 'connected' channel"):
@@ -209,13 +230,13 @@ def test_scalar_pair_battery_bytes_are_unchanged_but_for_c():
     # GC-14: the pre-c fixture reads back with no c and re-serialises byte-equal (never
     # re-labelled); a new battery differs from it only by each corner's c.
     old = cases_from_json(V1_FIXTURE.read_text())
-    assert {c.grid.c for c in old} == {None}
+    assert {c.grid.c_kind for c in old} == {None}
     assert battery_json(old) == V1_FIXTURE.read_text()
     battery = build_battery(1000, 3000, 3, 10, z0_over_z1=1.5, x0_over_r0=4.0)
     assert (
         battery_json(
             [
-                dataclasses.replace(c, grid=dataclasses.replace(c.grid, c=None))
+                dataclasses.replace(c, grid=dataclasses.replace(c.grid, c_kind=None))
                 for c in battery
             ]
         )

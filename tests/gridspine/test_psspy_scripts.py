@@ -892,3 +892,47 @@ def test_golden_script_bytes(tmp_path):
         [dataclasses.replace(flat, channels=("v_poc_pu",))], str(tmp_path), **kw
     )
     assert (tmp_path / out[CID]).read_bytes() == GOLDEN_SCRIPT.encode("utf-8")
+
+
+def test_c_scales_script_z_by_1_1_on_sk_min_rows_only(tmp_path):
+    # GC-14: per corner, Z1_PU and Z0_PU against the same corner written without c.
+    cases = build_battery(500.0, 1000.0, 0.75, 2.0, z0_over_z1=1.5, x0_over_r0=0.75)
+    flats = [
+        dataclasses.replace(c, channels=("v_poc_pu",))
+        for c in cases
+        if c.kind == "flat"
+    ]
+    kw = {
+        **KW,
+        "grid_machine": (900, "G2"),
+        "plant_branch": None,
+        "plant_machine": None,
+        "plant_mbase_mva": None,
+    }
+
+    def z(batch, sub):
+        out = write_scripts(batch, str(tmp_path / sub), **kw)
+        got = {}
+        for c in batch:
+            text = (tmp_path / sub / out[c.case_id]).read_text()
+            got[c.grid.label] = [
+                complex(*ast.literal_eval(ln.split("=", 1)[1].split("#")[0]))
+                for ln in text.splitlines()
+                if ln.startswith(("Z1_PU =", "Z0_PU ="))
+            ]
+        return got
+
+    with_c = z(flats, "c")
+    no_c = z(
+        [
+            dataclasses.replace(c, grid=dataclasses.replace(c.grid, c_kind=None))
+            for c in flats
+        ],
+        "none",
+    )
+    assert set(with_c) == {"skmin_xrmin", "skmin_xrmax", "skmax_xrmin", "skmax_xrmax"}
+    for label, zs in with_c.items():
+        factor = 1.1 if label.startswith("skmin") else 1.0
+        assert len(zs) == 2, label
+        for a, b in zip(zs, no_c[label]):
+            assert a == pytest.approx(factor * b, rel=1e-12), label

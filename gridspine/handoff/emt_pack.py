@@ -17,10 +17,11 @@ without it is listed as to be supplied, never borrowed silently.
 
 R and X come from :func:`test_battery.thevenin_impedances_ohm`, |Z| =
 c·Un² / Sk at ``atan(X/R)``, with the test battery's IEC 60909 c bracket:
-c_max on the min case, c_min on the max case, 1.0 on the normal case (not an
-IEC 60909 case). Every row names its ``c`` and says so (:data:`C_NOTE`); the
-manifest lists it as an assumption to confirm with the TSO. A caller's battery
-without c shows an empty ``c`` (no c applied).
+c_max on the min case, c_min (at the PCC's kV) on the max case, 1.0 on the
+normal case (not an IEC 60909 case). Every row names its ``c`` and says so
+(:data:`C_NOTE`); the manifest lists it as an assumption to confirm with the
+TSO. A row of a caller's battery written without c shows an empty ``c`` and
+:data:`NO_C_NOTE` instead.
 
 Per stage (an ``installed`` unit set, e.g. an investment period), the IEC
 60909 fault level at the PoC bus with that stage's units energised
@@ -77,19 +78,18 @@ import pandas as pd
 from gridspine.handoff.emt_workbook import RSCAD_NOTES, rscad_notes, workbook
 from gridspine.handoff.test_battery import (
     C_BRACKET_NOTE,
-    C_MAX,
     CHANNEL_SEP,
     CHANNELS,
     PARAM_NAMES,
     Thevenin,
     battery_json,
     build_battery,
-    c_min,
     contract_channels,
     corner_level,
     fault_impedance_ohm,
     thevenin_impedances_ohm,
     validate_battery,
+    voltage_factor,
 )
 from gridspine.schema.contracts import ContractError
 from gridspine.static import series_caps as SC
@@ -102,6 +102,7 @@ EMT_CONTRACT_VERSION = "2"
 #: The mhi.pscad API the stub is written for (PSCAD 5 automation library).
 MHI_PSCAD_API = "2"
 C_NOTE = f"{C_BRACKET_NOTE}; 1.0 on the normal case; |Z| = c·Un²/Sk, c per row"
+NO_C_NOTE = "IEC 60909 c not applied: this battery was written without c (|Z| = Un²/Sk)"
 STAGE_NOTE = "reference, not the EMT source: IEC 60909 at the PoC bus with the stage's units energised"
 BATTERY_Z0_NOTE = "assumed: from max"
 STUDY_CASES = ("max", "min", "normal")
@@ -203,17 +204,16 @@ def _x_over_r(case, rx_name, rx) -> float:
     return 1.0 / rx
 
 
-def study_sources(pcc: dict, vn_kv=None) -> tuple:
+def study_sources(pcc: dict) -> tuple:
     """
     ``(sources, gaps)`` for the paired study cases.
 
     ``pcc`` maps a PCC parameter to ``(value, source)``. ``sources`` is a
     tuple of ``(Thevenin, source_tag)``; ``gaps`` lists ``(case, param, why)``
-    for a study case whose zero sequence is not held. Each source carries
-    the c of its case (module docstring); ``vn_kv`` (the PCC's nominal kV)
-    sets c_min, ``None`` meaning above 1 kV.
+    for a study case whose zero sequence is not held. Each source names the
+    c of its case (module docstring).
     """
-    c_of = {"min": C_MAX, "max": c_min(vn_kv), "normal": 1.0}
+    c_of = {"min": "c_max", "max": "c_min", "normal": "unity"}
     missing = [f for f in _REQUIRED_PCC if f not in pcc]
     if missing:
         raise EmtPackError(
@@ -263,7 +263,7 @@ def study_sources(pcc: dict, vn_kv=None) -> tuple:
                         )
                     )
         tags = "/".join(sorted({pcc[n][1] for n in used}))
-        out.append((Thevenin(case, pcc[sk_name][0], xr, **z0, c=c_of[case]), tags))
+        out.append((Thevenin(case, pcc[sk_name][0], xr, **z0, c_kind=c_of[case]), tags))
     return tuple(out), gaps
 
 
@@ -307,8 +307,8 @@ def battery_from_campus(campus, overrides=None) -> tuple:
     (``assumed: from max``, module docstring). Without the max case's zero
     sequence the battery is refused.
     """
-    _, vn_kv, pcc = pcc_data(campus)
-    sources, _ = study_sources(pcc, vn_kv)
+    _, _, pcc = pcc_data(campus)
+    sources, _ = study_sources(pcc)
     by = {g.label: g for g, _ in sources}
     xrs = (by["max"].x_over_r, by["min"].x_over_r)
     z0 = _corner_zero_sequence(sources)
@@ -321,7 +321,6 @@ def battery_from_campus(campus, overrides=None) -> tuple:
         x0_over_r0=z0.x0_over_r0,
         overrides=overrides,
         contract_version=EMT_CONTRACT_VERSION,
-        vn_kv=vn_kv,
     )
 
 
@@ -383,7 +382,7 @@ def _impedance_row(g: Thevenin, vn_kv) -> dict:
         "sk_mva": g.sk_mva,
         "x_over_r": g.x_over_r,
         "vn_kv": float(vn_kv),
-        "c": g.c,
+        "c": voltage_factor(g, vn_kv),
         "r_ohm": z1.real,
         "x_ohm": z1.imag,
         "r0_ohm": None if z0 is None else z0.real,
@@ -426,7 +425,7 @@ def thevenin_set(
                     if min_assumed and corner_level(c.grid.label) == "skmin"
                     else battery_source
                 ),
-                "note": C_NOTE,
+                "note": C_NOTE if c.grid.c_kind is not None else NO_C_NOTE,
             }
         )
     return rows
@@ -607,7 +606,7 @@ def write_emt_pack(
     )  # GC-01b: the workbook has no series-capacitor sheet yet (GC-01f)
     out = Path(outdir)
     bus, vn_kv, pcc = pcc_data(campus)
-    sources, gaps = study_sources(pcc, vn_kv)
+    sources, gaps = study_sources(pcc)
     supply = [
         {"sheet": "thevenin", "element": bus, "param": p, "why": why}
         for _, p, why in gaps
@@ -639,6 +638,8 @@ def write_emt_pack(
     battery = (
         validate_battery(battery, EMT_CONTRACT_VERSION) if battery is not None else None
     )
+    if battery is not None and any(c.grid.c_kind is None for c in battery):
+        assumptions.append(f"battery: {NO_C_NOTE}")
     if min_assumed:
         z0_assumed = {
             c.case_id: BATTERY_Z0_NOTE
