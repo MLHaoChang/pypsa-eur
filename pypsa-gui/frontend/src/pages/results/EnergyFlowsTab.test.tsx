@@ -62,6 +62,14 @@ describe('EnergyFlowsTab', () => {
     expectAllButtonsNamed(container)
   })
 
+  it('labels the process swatch in words, not by colour alone', async () => {
+    vi.mocked(energyFlowsApi.get).mockResolvedValue(
+      { ...OK, rows: [...ROWS, { source: 'solar', via: 'Direct', destination: 'Process nh3', mwh: 10 }] })
+    mount()
+    expect((await screen.findByTestId('ef-process-label')).textContent).toBe('Process nodes')
+    expect(screen.getByTestId('ef-process-key').textContent).toContain('Process nodes:')
+  })
+
   it('exports exactly the rows it draws', async () => {
     const spy = vi.spyOn(shared, 'downloadCSV').mockImplementation(() => {})
     mount()

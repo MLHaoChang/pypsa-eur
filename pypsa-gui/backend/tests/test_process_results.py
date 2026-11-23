@@ -512,3 +512,19 @@ def test_the_buy_in_cost_is_on_the_objective_weights_not_the_energy_ones():
     p = n.generators_t.p["__buy_nh3"].clip(lower=0)
     assert nh3["buy_in"]["eur"] == pytest.approx(float((p * 97.0 * 2.0).sum()))
     assert nh3["buy_in"]["value"] == pytest.approx(float(p.sum()))
+
+
+@pytest.mark.parametrize("value, is_process", [
+    ("true", True), ("1", True), ("1.0", True), ("yes", True),
+    ("false", False), ("0", False), (float("nan"), False), ("on", False), ("y", False),
+])
+def test_eh_process_is_read_with_the_solvers_truthy(hb, value, is_process):
+    # The solver and the energy-flow Sankey read the flag with process_chain.truthy; the view must agree.
+    before = hb.links["eh_process"].copy()
+    try:
+        hb.links["eh_process"] = hb.links["eh_process"].astype(object)
+        hb.links.loc["hb", "eh_process"] = value
+        units = compute_process_view(hb)["process_units"]
+    finally:
+        hb.links["eh_process"] = before
+    assert len(units) == (1 if is_process else 0)

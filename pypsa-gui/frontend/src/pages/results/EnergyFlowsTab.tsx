@@ -291,8 +291,8 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
           <p className="mt-1 text-[11px] text-muted" data-testid="ef-process-key">
             <span className="mr-1 inline-block h-2 w-2 align-baseline" aria-hidden="true"
                   style={{ background: PROCESS_COLOR }} data-testid="ef-process-swatch" />
-            Process &lt;name&gt;: the electricity into the process unit ends here, and what it
-            delivers starts again from here. All links are energy; the “entered the site” total
+            <span className="font-medium" data-testid="ef-process-label">Process nodes</span>:
+            the electricity into a process unit ends here, and what it delivers starts again from here. All links are energy; the “entered the site” total
             leaves out the energy that restarts at a process unit.
           </p>
         )}
