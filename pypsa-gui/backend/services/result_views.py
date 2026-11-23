@@ -289,7 +289,8 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                "what the site makes in the product's own unit, how long its process units ran and, for "
                "hydrogen, the cost per kg",
                "results",
-               (_rp("get_process_view", "products"), _r("get_results", result_kind="lcoh")),
+               (Read("get_process_view", MappingProxyType({}), empty_key="products"),
+                _r("get_results", result_kind="lcoh")),
                guided_label="Products",
                claim_limits="Output is what the solve made; the hydrogen cost is the electrolysers' "
                             "levelised cost, as in Economics and the report. No cost per tonne is "

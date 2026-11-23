@@ -530,3 +530,40 @@ def test_a_process_unit_carries_the_horizon_in_its_own_weighting(hb):
     u = compute_process_view(hb)["process_units"][0]
     assert u["weighted_hours"] == pytest.approx(6.0)
     assert 0 < u["running_hours"] / u["weighted_hours"] <= 1
+
+
+def _two_period_network():
+    """Two periods (years 10 and 5), uneven generator weights [1,2,3 | 4,1,1], constant objective weight; no solve:
+    the unit's p0/p1 are set by hand so every expected figure below is a hand-computed literal."""
+    n = pypsa.Network()
+    idx = pd.MultiIndex.from_product([[2030, 2035], [0, 1, 2]], names=["period", "timestep"])
+    n.set_snapshots(idx)
+    n.investment_periods = [2030, 2035]
+    n.investment_period_weightings["years"] = [10.0, 5.0]
+    n.investment_period_weightings["objective"] = [1.0, 1.0]
+    n.snapshot_weightings["generators"] = [1.0, 2.0, 3.0, 4.0, 1.0, 1.0]
+    n.snapshot_weightings["objective"] = 1.0
+    n.snapshot_weightings["stores"] = 1.0
+    n.add("Carrier", ["AC", "NH3"])
+    n.add("Bus", "el", carrier="AC")
+    n.add("Bus", "nh3", carrier="NH3", unit="t")
+    n.add("Link", "hb", bus0="el", bus1="nh3", p_nom=10.0, efficiency=1.0)
+    n.links["eh_process"] = False
+    n.links.loc["hb", "eh_process"] = True
+    n.links_t.p0["hb"] = pd.Series([1.0, 0.0, 1.0, 1.0, 0.0, 0.0], index=idx)
+    n.links_t.p1["hb"] = pd.Series([-2.0, -2.0, -2.0, -4.0, -4.0, -4.0], index=idx)
+    return n
+
+
+def test_two_uneven_periods_put_hours_running_and_tonnes_on_one_basis():
+    """weighted hours = 10*(1+2+3) + 5*(4+1+1) = 90; running = 10*(1+3) + 5*4 = 60 (share 2/3);
+    tonnes made = 10*(1*2+2*2+3*2) + 5*(4*4+1*4+1*4) = 240, so 240 * 24 / 90 = 64 t/d."""
+    view = compute_process_view(_two_period_network())
+    unit = view["process_units"][0]
+    assert unit["weighted_hours"] == pytest.approx(90.0)
+    assert unit["running_hours"] == pytest.approx(60.0)
+    assert unit["modelled_hours"] == pytest.approx(6.0)  # the unweighted snapshot sum: not the basis
+    assert unit["running_hours"] / unit["weighted_hours"] == pytest.approx(2 / 3)
+    nh3 = _product(view, "nh3")
+    assert nh3["production"]["t"] == pytest.approx(240.0)
+    assert nh3["production"]["t"] * 24 / unit["weighted_hours"] == pytest.approx(64.0)
