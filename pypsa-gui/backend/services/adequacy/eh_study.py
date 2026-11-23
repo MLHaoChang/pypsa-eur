@@ -459,13 +459,13 @@ def draws_short_for(weight: tuple[float, float] | None, pack,
 
     need = min_draws_for_weight(w_min, target_h)
     runs = "1 run" if draws == 1 else f"{draws} runs"
-    seen = (f"Simulation runs per check: at {runs}, a check that sees no "
-            f"shortfall cannot certify the {float(target):g} h/yr goal (its "
-            f"smallest step is {w_min / draws / years:.3g} h/yr)")
+    seen = (f"Simulation runs per check: at {runs}, a check that finds no "
+            f"shortfall still cannot show that the {float(target):g} h/yr goal "
+            f"is met (its smallest step is {w_min / draws / years:.3g} h/yr)")
     if need <= MAX_DRAWS:
         return f"{seen}: set at least {need}."
-    return (f"{seen}, and no run count up to the {MAX_DRAWS} cap can: "
-            "allow more shortfall in the goal.")
+    return (f"{seen}, and even {MAX_DRAWS} runs (the most allowed) could not "
+            "decide it: allow more shortfall in the goal.")
 
 
 def certification_verdict(*, lole_ci, target_h: float | None,

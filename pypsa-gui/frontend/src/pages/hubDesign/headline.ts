@@ -65,7 +65,7 @@ function belowFloor(report: EhReferenceDesignReport | null, target: number): str
   const seen = `with ${runs(n)}, the smallest shortfall it can show is ${g3(floor / years)} h/yr`
   const need = num(p.min_draws)
   if (need != null && need > MAX_GOAL_DRAWS)
-    return `${verdictWord('inconclusive')}: ${seen}, more than your ${g(target)} h/yr goal, and no run count up to the ${MAX_GOAL_DRAWS} cap resolves it. Allow more shortfall (${where}) to decide it.`
+    return `${verdictWord('inconclusive')}: ${seen}, more than your ${g(target)} h/yr goal, and even ${MAX_GOAL_DRAWS} runs (the most allowed) could not decide it. Allow more shortfall (${where}) to decide it.`
   return need != null
     ? `${verdictWord('inconclusive')}: ${seen}, more than your ${g(target)} h/yr goal. Set at least ${need} runs per check (${where}) to decide it.`
     : `${verdictWord('inconclusive')}: ${seen}, and a ${g(target)} h/yr goal allows none. Allow some shortfall (${where}) to decide it.`

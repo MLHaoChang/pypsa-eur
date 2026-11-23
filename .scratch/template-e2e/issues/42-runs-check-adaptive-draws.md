@@ -10,7 +10,7 @@ Journey fit: inputs → run. A study the MC could have decided is refused before
 
 ## What
 
-`eh_study.draws_short_for` takes the requested draws as the run's length. `mc_adequacy` runs with its default `max_draws=MAX_DRAWS` (2000): a first batch that sees a rare non-zero LOLE has an infinite CoV, so the MC keeps drawing up to 2000, and the floor it reports is `w_min / n_total`. Such a run can resolve the goal, or show a fail, at the draw count the start check refused. A run that sees no shortfall converges at its first batch, so the refusal is right for that common case. Since #1927 the refusal says only that ("at N runs, a check that sees no shortfall cannot certify the goal").
+`eh_study.draws_short_for` takes the requested draws as the run's length. `mc_adequacy` runs with its default `max_draws=MAX_DRAWS` (2000): a first batch that sees a rare non-zero LOLE has an infinite CoV, so the MC keeps drawing up to 2000, and the floor it reports is `w_min / n_total`. Such a run can resolve the goal, or show a fail, at the draw count the start check refused. A run that sees no shortfall converges at its first batch, so the refusal is right for that common case. Since #1927 the refusal says only that ("at N runs, a check that finds no shortfall still cannot show that the goal is met").
 
 ## Acceptance
 

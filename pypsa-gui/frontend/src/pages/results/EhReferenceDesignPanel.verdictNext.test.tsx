@@ -83,7 +83,7 @@ describe('certificationHeadline.next', () => {
     // GK A ask 1: past the 2000-run cap no run count is named.
     expect(certificationHeadline(report({ verdict: 'inconclusive', target_lole_h: 0.01,
       below_floor: true, min_draws: 2001 }))!.next).toBe(
-      'Next: allow more shortfall in the reliability goal. No number of simulation runs up to the 2000 cap can show that this goal is met.')
+      'Next: allow more shortfall in the reliability goal. Even 2000 simulation runs (the most allowed) could not show that this goal is met.')
     expect(certificationHeadline(report({ verdict: 'inconclusive', target_lole_h: 0.01,
       below_floor: true, min_draws: 2000 }))!.next).toMatch(/at least 2000\./)
   })

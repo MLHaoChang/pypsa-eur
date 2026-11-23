@@ -512,9 +512,9 @@ def test_pre_run_weights_match_the_runs_floor():
     assert float(w[w > 0].min()) == 1.0
     assert p["resolution_floor_h"] * p["n_samples"] == pytest.approx(1.0)
     assert S.draws_short_of_target(n, _pack(target=3.0), 1) == (
-        "Simulation runs per check: at 1 run, a check that sees no shortfall "
-        "cannot certify the 3 h/yr goal (its smallest step is 52.1 h/yr): set "
-        "at least 18.")
+        "Simulation runs per check: at 1 run, a check that finds no shortfall "
+        "still cannot show that the 3 h/yr goal is met (its smallest step is "
+        "52.1 h/yr): set at least 18.")
     assert S.draws_short_of_target(n, _pack(target=3.0), 18) is None
     assert S.draws_short_of_target(n, _pack(target=3.0), 17) is not None
 
@@ -539,15 +539,16 @@ def test_the_minimum_draws_put_the_floor_at_the_target(draws, below, min_draws):
 # weight of 20 h on one year resolves 0.01 h/yr at exactly 2000 draws.
 @pytest.mark.parametrize("w_min,tail", [
     (20.0, ": set at least 2000."),
-    (20.02, ", and no run count up to the 2000 cap can: allow more shortfall "
-            "in the goal."),
-    (168.0, ", and no run count up to the 2000 cap can: allow more shortfall "
-            "in the goal."),
+    (20.02, ", and even 2000 runs (the most allowed) could not decide it: "
+            "allow more shortfall in the goal."),
+    (168.0, ", and even 2000 runs (the most allowed) could not decide it: "
+            "allow more shortfall in the goal."),
 ])
 def test_the_start_refusal_names_no_count_past_the_draw_cap(w_min, tail):
     msg = S.draws_short_for((w_min, 1.0), _pack(target=0.01), 1)
     assert msg.startswith("Simulation runs per check: at 1 run, a check that "
-                          "sees no shortfall cannot certify the 0.01 h/yr goal")
+                          "finds no shortfall still cannot show that the 0.01 "
+                          "h/yr goal is met")
     assert msg.endswith(tail)
     assert "16800" not in msg
 
