@@ -327,8 +327,10 @@ def _derive_dc(
         if math.isfinite(floor) and floor >= 0:
             out[str(s)] = floor
     known = backup.mode == "genset" or sizing is not None
-    return out, frozenset(strings), (
-        frozenset(roles) | _ride_through(island) if known else None
+    return (
+        out,
+        frozenset(strings),
+        (frozenset(roles) | _ride_through(island) if known else None),
     )
 
 

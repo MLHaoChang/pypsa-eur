@@ -35,7 +35,9 @@ def test_every_kind_has_a_literal_emitter_and_a_fragment_entry():
 def _refusal(n, products, floors, monkeypatch, bind=True):
     if bind:
         _bind(n, products, {p.id: 1.0 for p in products})
-    monkeypatch.setattr(RP, "project_backup", lambda _n, _cfg=None: (floors, frozenset({STRING})))
+    monkeypatch.setattr(
+        RP, "project_backup", lambda _n, _cfg=None: (floors, frozenset({STRING}))
+    )
     return SIM._reserve_refusal(n, _cfg(products))
 
 
@@ -127,8 +129,11 @@ def _put_check(monkeypatch, tmp_path, n, attested, stored=None):
 
     from models.commercial import CommercialConfig
 
-    monkeypatch.setattr(SIM.PyPSAService, "get_active_context",
-                        lambda: SimpleNamespace(storage_dir=str(tmp_path)))
+    monkeypatch.setattr(
+        SIM.PyPSAService,
+        "get_active_context",
+        lambda: SimpleNamespace(storage_dir=str(tmp_path)),
+    )
     monkeypatch.setattr(SIM, "_solver_in_flight_ctx", lambda _c: False)
     monkeypatch.setattr(SIM.PyPSAService, "get_network", lambda: n)
     cfg = CommercialConfig(poc_link="poc", reserve_no_backup_storages=attested)
@@ -146,8 +151,10 @@ def test_the_put_refuses_an_attested_backup_string(monkeypatch, tmp_path):
     assert e.value.detail["error_kind"] == RP.ATTESTATION_REFUSED
     assert s in e.value.detail["message"]
     # The same list already stored is never refused again.
-    assert _put_check(monkeypatch, tmp_path, n, [s],
-                      {"reserve_no_backup_storages": [s]}) is None
+    assert (
+        _put_check(monkeypatch, tmp_path, n, [s], {"reserve_no_backup_storages": [s]})
+        is None
+    )
 
 
 def test_the_put_refuses_ride_through_storage(monkeypatch, tmp_path):

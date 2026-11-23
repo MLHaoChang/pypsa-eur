@@ -36,9 +36,7 @@ def _bess_site(snaps=4, p_nom=10.0, max_hours=1.0, load=None, gen_avail=None):
     n.add("Bus", "site")
     n.add("Generator", "supply", bus="site", p_nom=100.0, marginal_cost=1.0)
     if gen_avail is not None:
-        n.generators_t.p_max_pu = pd.DataFrame(
-            {"supply": gen_avail}, index=n.snapshots
-        )
+        n.generators_t.p_max_pu = pd.DataFrame({"supply": gen_avail}, index=n.snapshots)
     if load is not None:
         n.add("Load", "site_load", bus="site", p_set=pd.Series(load, index=n.snapshots))
     n.add(
@@ -134,12 +132,19 @@ def test_b2_backup_roles_refuse_the_attestation(tmp_path):
         assert floors[s] > 0  # the DC-03 floor stays
     # A spare is a role whether or not the network holds it (string_names).
     spare = f"{dc_backup.SPARE_PREFIX}1"
-    n.add("StorageUnit", spare, bus=n.storage_units.at[strings[0], "bus"], p_nom=1.0,
-          max_hours=1.0)
+    n.add(
+        "StorageUnit",
+        spare,
+        bus=n.storage_units.at[strings[0], "bus"],
+        p_nom=1.0,
+        max_hours=1.0,
+    )
     if spare in roles:
         assert RP.attestation_refusal(n, tmp_path, [spare]) is not None
-        assert spare not in RP.derive_backup(n, tmp_path, [spare])[0] or \
-            RP.derive_backup(n, tmp_path, [spare])[0][spare] > 0
+        assert (
+            spare not in RP.derive_backup(n, tmp_path, [spare])[0]
+            or RP.derive_backup(n, tmp_path, [spare])[0][spare] > 0
+        )
 
 
 def test_b2_a_spare_is_refused(tmp_path):
@@ -199,8 +204,9 @@ def test_b3_no_attestation_equals_master_and_one_moves_the_inputs_digest(tmp_pat
     plain = RP.derive_backup(n, tmp_path)
     assert RP.derive_backup(n, tmp_path, []) == plain
     every = _product()  # storages empty: every eligible storage
-    assert RP.inputs_digest([every], RP.derive_backup(n, tmp_path, [])[0]) == \
-        RP.inputs_digest([every], plain[0])
+    assert RP.inputs_digest(
+        [every], RP.derive_backup(n, tmp_path, [])[0]
+    ) == RP.inputs_digest([every], plain[0])
     widened = RP.derive_backup(n, tmp_path, [BESS])[0]
     assert RP.inputs_digest([every], widened) != RP.inputs_digest([every], plain[0])
     # A config without the field dumps and hashes as master's.
@@ -290,19 +296,26 @@ def test_project_backup_reads_the_attestation_of_the_config_being_solved(
     from services.pypsa_service import PyPSAService
 
     n = _plain_project(tmp_path, _bess_site())
-    stored = {"solver_config": SimpleNamespace(
-        commercial={"reserve_no_backup_storages": [BESS]})}
+    stored = {
+        "solver_config": SimpleNamespace(
+            commercial={"reserve_no_backup_storages": [BESS]}
+        )
+    }
     ctx = SimpleNamespace(storage_dir=str(tmp_path), solver_state=stored)
     monkeypatch.setattr(PyPSAService, "solve_target_context", lambda: ctx)
     # Default: the project's current config.
     assert RP.project_backup(n) == ({BESS: 0.0}, frozenset())
     # A config passed in (the one being solved) wins over the stored one.
     assert RP.project_backup(n, _cfg([])) == ({}, frozenset())
-    assert RP.project_backup(n, SimpleNamespace(
-        commercial={"reserve_no_backup_storages": [BESS]})) == ({BESS: 0.0}, frozenset())
+    assert RP.project_backup(
+        n, SimpleNamespace(commercial={"reserve_no_backup_storages": [BESS]})
+    ) == ({BESS: 0.0}, frozenset())
     # Unsaved: nothing, whatever the config attests.
-    monkeypatch.setattr(PyPSAService, "solve_target_context",
-                        lambda: SimpleNamespace(storage_dir=None, solver_state=stored))
+    monkeypatch.setattr(
+        PyPSAService,
+        "solve_target_context",
+        lambda: SimpleNamespace(storage_dir=None, solver_state=stored),
+    )
     assert RP.project_backup(n) == ({}, frozenset())
     monkeypatch.setattr(PyPSAService, "solve_target_context", lambda: None)
     assert RP.project_backup(n) == ({}, frozenset())
@@ -313,10 +326,12 @@ def test_attested_of_reads_only_a_list_of_names():
     assert RP.attested_of({"reserve_no_backup_storages": [1, BESS]}) == []
     assert RP.attested_of({"reserve_no_backup_storages": BESS}) == []
     assert RP.attested_of(None) == []
+    assert RP.attested_of({"commercial": {"reserve_no_backup_storages": [BESS]}}) == [
+        BESS
+    ]
     assert RP.attested_of(
-        {"commercial": {"reserve_no_backup_storages": [BESS]}}) == [BESS]
-    assert RP.attested_of(SimpleNamespace(
-        commercial={"reserve_no_backup_storages": [BESS]})) == [BESS]
+        SimpleNamespace(commercial={"reserve_no_backup_storages": [BESS]})
+    ) == [BESS]
 
 
 def test_another_templates_project_reads_its_sidecar_roles(tmp_path):
@@ -336,8 +351,11 @@ def test_project_backup_without_a_solver_state_reads_no_attestation(
     from services.pypsa_service import PyPSAService
 
     n = _plain_project(tmp_path, _bess_site())
-    monkeypatch.setattr(PyPSAService, "solve_target_context",
-                        lambda: SimpleNamespace(storage_dir=str(tmp_path)))
+    monkeypatch.setattr(
+        PyPSAService,
+        "solve_target_context",
+        lambda: SimpleNamespace(storage_dir=str(tmp_path)),
+    )
     assert RP.project_backup(n) == ({}, frozenset())
 
 
@@ -345,8 +363,10 @@ def test_the_not_eligible_text_names_the_storage_or_says_none():
     n = _bess_site()
     named, every = _product("a", storages=[BESS]), _product("b")
     _bind(n, [named, every], {"a": 1.0, "b": 1.0})
-    for p, want, not_want in ((named, f"“{BESS}” cannot", "no storage"),
-                              (every, "no storage cannot", "“")):
+    for p, want, not_want in (
+        (named, f"“{BESS}” cannot", "no storage"),
+        (every, "no storage cannot", "“"),
+    ):
         with pytest.raises(RP.ReserveRefusal) as e:
             RP.plan(n, [p], {}, frozenset())
         head = str(e.value).split(". Only")[0]
@@ -367,10 +387,18 @@ def test_the_views_read_the_attestation_of_the_config_they_are_given(
     frame = _solve_attested(n, [p])
     assert frame[f"{BESS}|fcr"].to_numpy().sum() > 0
     # The project now holds no attestation; the solved config did.
-    monkeypatch.setattr(PyPSAService, "solve_target_context", lambda: SimpleNamespace(
-        storage_dir=str(tmp_path), solver_state={"solver_config": _cfg([p])}))
-    solved_cfg = SimpleNamespace(commercial=SimpleNamespace(
-        reserve_products=[p], reserve_no_backup_storages=[BESS]))
+    monkeypatch.setattr(
+        PyPSAService,
+        "solve_target_context",
+        lambda: SimpleNamespace(
+            storage_dir=str(tmp_path), solver_state={"solver_config": _cfg([p])}
+        ),
+    )
+    solved_cfg = SimpleNamespace(
+        commercial=SimpleNamespace(
+            reserve_products=[p], reserve_no_backup_storages=[BESS]
+        )
+    )
     lines, _flags = reserve_lines(n, solved_cfg)
     # r = 10 (power) at soc 5 on 10 MWh with sustain 0.5 h: 4 h x 10 x 10.
     assert [ln.amount for ln in lines] == [pytest.approx(400.0, rel=1e-6)]
