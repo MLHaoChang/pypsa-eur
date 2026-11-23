@@ -149,7 +149,7 @@ def test_a_unit_that_is_not_a_genset_may_not_carry_modes():
     _refused(_modes(spec, [t(12.0)], unit=other), rf"units\.{other}: unknown field\(s\) \['torsional_modes_hz'\]")
 
 
-# --- the scan judgesthe capacitor's resonance against them ----------------------
+# --- the scan judges the capacitor's resonance against them ----------------------
 #
 # Hand calculation (GC-01b's X_TOTAL): f0 - f_er = 50 - 50 * sqrt(0.5 / X_total) is 9.054943536 Hz in the max
 # case and 10.428075202 Hz in the min case. The scan interpolates f_er linearly between 0.1 Hz points and X_TOTAL
@@ -167,8 +167,8 @@ def _gen2(spec, modes=None):
     return spec
 
 
-def test_the_hand_computed_complement_is_the_scans():
-    for case, x_total in X_TOTAL.items():
+def test_the_complement_literals_follow_the_hand_formula():
+    for case in X_TOTAL:
         assert _comp(case) == pytest.approx(COMP[case], abs=1e-9)
 
 
@@ -218,7 +218,7 @@ def test_a_genset_without_modes_keeps_the_screen_from_reading_clear(tmp_path, mo
     assert set(series["verdict"]) == {"check"}
     for note in series["note"]:
         assert note.startswith(
-            "no torsional modes given for genset(s) ['GEN2']; the screen does not pass on the others alone; ")
+            "no torsional modes given for genset(s) GEN2; the screen does not pass on the others alone; ")
     assert out.subsync_verdict == "check"
 
 
@@ -258,6 +258,7 @@ def test_a_margin_equal_to_the_clearance_clears_and_one_below_flags(tmp_path, mo
 def test_without_modes_the_resonance_still_reads_check(tmp_path, monkeypatch):
     out, series = _screens(tmp_path, monkeypatch, cap_spec(xc_ohm=t(XC)))
     assert set(series["verdict"]) == {"check"}
+    assert series["mode_source"].isna().all()
     assert set(series["note"]) == {"no torsional modes given; " + series["note"].iloc[0].split("; ", 1)[1]}
     assert out.subsync_verdict == "check"
 

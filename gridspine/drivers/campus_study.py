@@ -1270,9 +1270,10 @@ def _mode_coverage(campus, resonance):
     from gridspine.static import subsync_scan as ss
 
     modes, sources = campus.torsional_modes, campus.torsional_mode_sources
-    if not modes or resonance.empty:
-        return resonance
     out = resonance.copy()
+    out["mode_source"] = None
+    if not modes or out.empty:
+        return out
     gensets = campus.units.index[campus.units["kind"] == "genset"]
     missing = sorted(g for g in gensets if g not in modes)
     assumed = {g: [f for f, src in zip(modes[g], sources[g]) if src == "assumed"] for g in modes}
@@ -1284,12 +1285,11 @@ def _mode_coverage(campus, resonance):
         given = [src for f, src in zip(modes[row.machine], sources[row.machine]) if f == row.mode_hz]
         return "assumed" if "assumed" in given else given[0]
 
-    out["mode_source"] = None
     out.loc[judged, "mode_source"] = [source(r) for r in out[judged].itertuples()]
     out.loc[judged & (out["mode_source"] == "assumed"), "assumed"] = True
     clear = judged & (out["verdict"] == "clear")
     if missing:
-        out.loc[clear, "note"] = [_join_note(NO_MODES_FOR.format(missing), n) for n in out.loc[clear, "note"]]
+        out.loc[clear, "note"] = [_join_note(NO_MODES_FOR.format(", ".join(missing)), n) for n in out.loc[clear, "note"]]
         out.loc[clear, "verdict"] = "check"
     elif assumed:
         said = "; ".join(f"{g} {', '.join(f'{f:g}' for f in fl)} Hz" for g, fl in sorted(assumed.items()))
