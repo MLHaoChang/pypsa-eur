@@ -680,3 +680,11 @@ def test_the_raw_power_flow_is_pandapowers_within_the_placement_gap(
     assert np.abs(a - pa).max() < 5e-3  # degrees
     # about 60 kW of the ~63 kW loss is the iron loss; dropping MAG misses it
     assert abs(loss - ploss) < 3e-4  # MW
+
+
+@pytest.mark.parametrize("col", ["pfe_kw", "i0_percent"])
+def test_a_missing_magnetising_value_is_refused_not_written_zero(col):
+    n = _trafo_net("hv")
+    n.trafo[col] = np.nan
+    with pytest.raises(ContractError, match=f"{col}=nan"):
+        trafo_magnetising(n, n.trafo.iloc[0])

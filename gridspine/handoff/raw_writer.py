@@ -212,8 +212,14 @@ def trafo_magnetising(net, tr):
     """
     sn = tr["sn_mva"]
     par = int(tr.get("parallel", 1))
-    pfe_mw = float(tr.get("pfe_kw", 0.0) or 0.0) / 1000.0
-    ym_mva = float(tr.get("i0_percent", 0.0) or 0.0) / 100.0 * sn
+    pfe_kw, i0 = float(tr.get("pfe_kw", 0.0)), float(tr.get("i0_percent", 0.0))
+    if not (np.isfinite(pfe_kw) and np.isfinite(i0)):
+        raise ContractError(
+            f"transformer {tr.get('name')!r}: pfe_kw={pfe_kw!r}, i0_percent={i0!r} "
+            "must be finite to write its magnetising branch"
+        )
+    pfe_mw = pfe_kw / 1000.0
+    ym_mva = i0 / 100.0 * sn
     b_mva = -np.sqrt(max(ym_mva ** 2 - pfe_mw ** 2, 0.0))
     _r, _x, windv1, _windv2 = trafo_impedance(net, tr)
     conv = par / SBASE_MVA / windv1 ** 2
