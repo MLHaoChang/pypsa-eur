@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): An Expert card row with a long label now wraps the label and keeps the value right-aligned, and an edit-form dropdown with a long option name (Harmonic source) takes the full row so it reads in full.
