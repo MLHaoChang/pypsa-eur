@@ -17,7 +17,7 @@ import { downloadCSV } from '../shared'
 import {
   AVOIDED_PREFIX, basisStatement, cashflowPivot, cashTotals, completenessRows, missingLines, counterfactualStatement, fmtCell, fmtHeadline, gateLegs,
   baselineCaveats, counterfactualBasis, HEADLINE_KEYS, islandBreakeven, headlines, label, NOT_ESTABLISHED, perYearLists, progressFraction, progressText,
-  projectFlagWords, reportFlags, reportYears, sectionOf, stalePartLabel, studyProgress, studyStale, toTable,
+  projectFlagWords, reportFlags, statedFlags, reportYears, sectionOf, stalePartLabel, studyProgress, studyStale, toTable,
   uncheckableReason, waccGate, campusEquipment, campusRefusal, unmetNeedsLink,
   type CampusLink,
   type GateState, type Table,
@@ -193,7 +193,7 @@ function Headlines({ report }: { report: InvestmentCaseReportPayload }) {
 
 function Counterfactual({ report }: { report: InvestmentCaseReportPayload }) {
   const stated = counterfactualStatement(report)
-  const flags = projectFlagWords(reportFlags(report, 'project'))
+  const flags = projectFlagWords(reportFlags(report, 'project'), statedFlags(report))
   return (
     <div className="space-y-1" data-testid="ic-counterfactual">
       <h3 className="text-[11px] font-semibold">Incremental against the counterfactual</h3>

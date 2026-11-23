@@ -47,3 +47,15 @@ On any template in the group, either the investment case runs from the template'
   - Not fixed here (noted): Guided has no in-section control for the billing site connection; the needs checklist's "connection" button jumps to the Expert editor. The Expert tax-layer detail table (Advanced) shows `eu_de`, `offset_other_income`, `not_deducted` as values. After the dispatch solve, Guided says "Expected shortfall is out of date".
 
 - 2026-11-23 GK B2 (5), the old PR B plan conditions (from GK B2 (2)'s hand-off): B1, one shared section-7-needed predicate. B2, one refusal-words map whose keys a test compares to the backend refusal kinds as an exact set (the `detail.needs` codes included), with a generic fallback. B3, the connection fix reuses SiteConnectionForm and refetches after the save, with no optimistic update. B4, after #1626 (merged a8f35cc71, met). The billing control moves to section 3 (UX 2's call). After the re-walk above: the remaining work, finance-flag words and the Guided/Expert smoke, touches none of B1–B3. Refusals already go through `investmentCaseNeeds.json` and its parity test.
+
+- 2026-11-23 GK B2 (5) plan GO, conditions G1–G8:
+  - G1: one words map for both modes.
+  - G2: the live flag set is checked as an exact set (`projectFlagKeys.json`, read by both the unit test and the smoke), and an unknown code shows as "Other check: <code>".
+  - G3: skips match their exact prefix, with tests and killed mutants.
+  - G4: every sentence states today's behaviour (timeline.py:69, cashflow.py:253).
+  - G5: the smoke checks the prose against `/\b[a-z]+(?:_[a-z0-9]+)+\b/` and is shown red on 443ec313.
+  - G6: Guided and Expert NPV match to 0.1 M with the sign; the needs match by text; an absent value fails.
+  - G7: a mutant for each new word, the fold, each skip, the fallback and LCOS `no_discharge`.
+  - G8: the out-of-scope findings are filed as 07, 08 and 09.
+
+  Built: `island_critical_load_mw` and `baseline_island_rows_relaxed` are worded, not skipped: the 32.161 MW critical load appears in no other sentence. Only `counterfactual_basis:site_today` is skipped, and only when the report's counterfactual basis is `site_today`.

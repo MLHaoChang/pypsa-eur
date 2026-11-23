@@ -271,7 +271,16 @@ function lcosReason(payload: Obj, real: boolean): string | null {
   const reasons = lcosBlock(payload)?.reasons
   if (!Array.isArray(reasons)) return null
   const shown = reasons.map(String).filter(r => real || !r.startsWith('real_not_established'))
-  return shown.length ? shown.join('; ') : null
+  return shown.length ? shown.map(lcosReasonWords).join('; ') : null
+}
+
+/** One LCOS reason in words where it has them (lcos.py: `no_discharge:<asset>`
+ *  when the solved dispatch discharges nothing); any other reason as written. */
+function lcosReasonWords(reason: string): string {
+  const NO_DISCHARGE = 'no_discharge:'
+  return reason.startsWith(NO_DISCHARGE)
+    ? `${assetLabel(reason.slice(NO_DISCHARGE.length))} does not discharge in the solved dispatch`
+    : reason
 }
 
 /** The price basis in words ("real basis, 2020 EUR", or "nominal basis, costs in
@@ -806,17 +815,60 @@ const PROJECT_FLAG_WORDS: Record<string, (tail: string) => string> = {
   ledger_conservation_failed: () => 'The cash ledger does not balance.',
   ledger_conservation_not_established: () => 'Whether the cash ledger balances is not established.',
   extra_asset_money_year_unstated: () => 'No case money year is stated to compare with the additional equipment costs.',
+  // IBA-02: the flags a data-centre case emits (finance_case.py, engine.py, tax.py, lcos.py).
+  baseline_island_rows_relaxed: () => 'The site as it stands cannot meet the island requirements, so it is compared without them.',
+  degradation_bill_first_order: () => 'The bill effect of generator degradation is a first-order estimate.',
+  degradation_bill_volume_items_only: () => 'The bill effect of generator degradation covers only the bill items priced by volume.',
+  island_critical_load_mw: v => `The island capability carries a mean critical load of ${v} MW.`,
+  lcoe_on_incremental_value: () => 'The LCOE is computed on the incremental cash against the comparison site.',
+  lcos_not_established: v => `Levelised storage cost is not established: ${lcosReasonWords(v)}.`,
+  meter_link_not_investment: v => `${sentenceStart(assetLabel(v))} is a meter link with no cost of its own, so it is not counted as an investment.`,
+  remaining_basis_written_off: v => `${taxLayerLabel(v)}: the tax value not yet depreciated is deducted in the last year of the case.`,
+}
+
+const sentenceStart = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+
+/** The German pack's tax layers by name; any other layer by its own name. */
+const TAX_LAYER_LABELS: Record<string, string> = { kst: 'Corporate income tax (KSt)', gewst: 'Trade tax (GewSt)' }
+function taxLayerLabel(layer: string): string {
+  return TAX_LAYER_LABELS[layer] ?? sentenceStart(layer)
+}
+
+const LIFETIME_UNKNOWN = 'asset_lifetime_unknown:'
+
+/** Every flag key the list words, folds or leaves to another block; `projectFlagKeys.json`
+ *  lists the same set for the template smoke (IBA-02). */
+export const PROJECT_FLAG_KEYS: ReadonlySet<string> = new Set([
+  ...Object.keys(PROJECT_FLAG_WORDS), ...BASELINE_CAVEATS.map(([code]) => code),
+  LIFE_ENDS.slice(0, -1), NOT_REPLACED.slice(0, -1), AFTER_HORIZON.slice(0, -1), LIFETIME_UNKNOWN.slice(0, -1),
+])
+
+/** The flags the report's own sentences already state, so the list leaves them
+ *  out: the site-today basis, when the counterfactual sentence is the site-today one. */
+export function statedFlags(report: InvestmentCaseReportPayload): ReadonlySet<string> {
+  return new Set(counterfactualBasis(report)?.basis === 'site_today' ? ['counterfactual_basis:site_today'] : [])
 }
 
 /** The project flag list in words. A campus asset's life-end and later-renewal
  *  flags are worded in the campus equipment block, so they are not repeated;
  *  `part_not_replaced` for an asset that has a life-end flag states the same fact
- *  and is left out. Known finance flags are worded; unknown flags pass through unchanged. */
-export function projectFlagWords(flags: string[]): string[] {
+ *  and is left out. Known finance flags are worded; an unknown flag shows as an "Other check" line with its code. */
+export function projectFlagWords(flags: string[], stated: ReadonlySet<string> = new Set()): string[] {
   const lifeEnds = flags.filter(f => f.startsWith(LIFE_ENDS))
     .map(f => f.slice(LIFE_ENDS.length).split(':').slice(0, -2).join(':'))
+  const noLifetime = flags.filter(f => f.startsWith(LIFETIME_UNKNOWN)).map(f => assetLabel(f.slice(LIFETIME_UNKNOWN.length)))
+  let lifetimeSaid = false
   return flags.flatMap(f => {
-    if (f.startsWith(LIFE_ENDS) || f.startsWith(AFTER_HORIZON)) return []
+    if (f.startsWith(LIFE_ENDS) || f.startsWith(AFTER_HORIZON) || stated.has(f)) return []
+    if (f.startsWith(LIFETIME_UNKNOWN)) {
+      // One line for every asset of unknown lifetime, where the first one stood (timeline.py: not checked).
+      if (lifetimeSaid) return []
+      lifetimeSaid = true
+      const many = noLifetime.length > 1
+      const names = many ? `${noLifetime.slice(0, -1).join(', ')} and ${noLifetime[noLifetime.length - 1]}` : noLifetime[0]
+      return [`No lifetime is stated for ${names}: the case does not check whether ${many ? 'they need' : 'it needs'} `
+        + 'replacing inside its horizon.']
+    }
     if (f.startsWith(NOT_REPLACED)) {
       const segs = f.slice(NOT_REPLACED.length).split(':')      // an asset name may contain ':'
       const partName = (segs.pop() ?? '').replace(/_/g, ' ')
@@ -830,7 +882,7 @@ export function projectFlagWords(flags: string[]): string[] {
     // Headline caveats and Counterfactual are both rendered in this report.
     if (BASELINE_CAVEATS.some(([code]) => code === key)) return []
     const words = PROJECT_FLAG_WORDS[key]
-    return [words ? words(colon < 0 ? '' : f.slice(colon + 1)) : f]
+    return [words ? words(colon < 0 ? '' : f.slice(colon + 1)) : `Other check: ${f}`]
   })
 }
 

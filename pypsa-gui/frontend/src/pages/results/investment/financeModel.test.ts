@@ -1,12 +1,13 @@
 // The finance form and report mappings (IC P4 WP4.7a/b), without a DOM.
 import { describe, expect, it } from 'vitest'
 import {
-  assetLabel, projectFlagWords,
+  assetLabel, projectFlagWords, PROJECT_FLAG_KEYS, statedFlags,
   baselineCaveats, basisStatement, cashflowPivot, cashTotals, counterfactualStatement, errorKey, errorsFor, established, financeErrors, fmtCell,
   fmtHeadline, headlines, numOrNull, parseRateOrList, perYearLists, progressFraction, progressText,
   rateOrListText, studyProgress, studyStale, toTable, waccGate, withKey,
 } from './financeModel'
 import type { CashflowLine, InvestmentCaseReportPayload } from '../../../api/types'
+import projectFlagKeys from './projectFlagKeys.json'
 
 describe('the form mappings', () => {
   it('an empty number is null, never 0', () => {
@@ -101,9 +102,9 @@ describe('the report', () => {
     const noInfl = headlines({ sections: { project: { status: 'ok', payload: {
       lcos_nominal_per_mwh: null, lcos_real_per_mwh: null,
       lcos: { assets: { bess: {} }, reasons: ['no_discharge:bess', 'real_not_established:inflation_missing'] } } } } })
-    expect(noInfl.find(h => h.id === 'lcos')!.note).toBe('no_discharge:bess')
+    expect(noInfl.find(h => h.id === 'lcos')!.note).toBe('bess does not discharge in the solved dispatch')
     expect(noInfl.find(h => h.id === 'lcos_real')!.note)
-      .toBe('no_discharge:bess; real_not_established:inflation_missing')
+      .toBe('bess does not discharge in the solved dispatch; real_not_established:inflation_missing')
   })
 
   it('states the price basis in words, or null', () => {
@@ -318,7 +319,7 @@ describe('campus wording', () => {
     ])
     expect(out).toEqual([
       "bess, power: its life ends inside the case's horizon and no replacement is planned.",
-      'unknown_future_flag:12.5',
+      'Other check: unknown_future_flag:12.5',
     ])
   })
 })
@@ -337,11 +338,11 @@ describe('project finance flags in plain words', () => {
       'bess charges from 4.5 MWh of surplus generation, valued at the export price.',
     ])
   })
-  it('keeps unknown flags verbatim and only removes caveats already explained beside the figures', () => {
+  it('shows unknown flags as an Other check line and only removes caveats already explained beside the figures', () => {
     const caveats = ['counterfactual_exceeds_connection', 'counterfactual_shed_at_voll:5',
       'counterfactual_buys:H2', 'co2_price_period:2030:2025:50', 'counterfactual_exceeds_supply']
     expect(projectFlagWords([...caveats, 'new_flag:keep:this', 'part_not_replaced:bess:power']))
-      .toEqual(['new_flag:keep:this', "bess, power: its life ends inside the case's horizon and no replacement is planned."])
+      .toEqual(['Other check: new_flag:keep:this', "bess, power: its life ends inside the case's horizon and no replacement is planned."])
     expect(baselineCaveats({ sections: { project: { payload: { flags: caveats } } } } as never)).toHaveLength(5)
   })
 })
@@ -356,5 +357,66 @@ describe('the two break-even prices say which question they answer (WALK-IMPROVE
     expect(lcoe.asks).toMatch(/^Break-even for all output: .*every MWh generated.*no other revenue\.$/)
     expect(ppa.asks).toMatch(/^Break-even for the PPA alone: .*target equity IRR.*other revenue kept as they are\.$/)
     expect(rows.filter(h => h.asks).map(h => h.id)).toEqual(['lcoe', 'ppa_price'])
+  })
+})
+
+// The flags a Data Center Energy Hub case emits with the template's defaults
+// (IBA-02 re-walk, master 443ec313). The smoke-template-journey-investment
+// smoke reads the live list and checks it against projectFlagKeys.json.
+const DC_FLAGS = [
+  'asset_lifetime_unknown:genset_1', 'asset_lifetime_unknown:genset_2', 'asset_lifetime_unknown:genset_3',
+  'asset_lifetime_unknown:genset_4', 'asset_lifetime_unknown:rooftop_pv', 'asset_lifetime_unknown:site_transformer',
+  'asset_lifetime_unknown:ups_battery', 'baseline_island_rows_relaxed', 'baseline_removed:genset_new',
+  'counterfactual_basis:site_today', 'degradation_bill_first_order', 'degradation_bill_volume_items_only',
+  'island_critical_load_mw:32.161', 'lcoe_on_incremental_value', 'lcos_not_established:no_discharge:bess_new',
+  'meter_link_not_investment:grid_import', 'remaining_basis_written_off:gewst', 'remaining_basis_written_off:kst',
+]
+const SNAKE = /\b[a-z]+(?:_[a-z0-9]+)+\b/
+const siteToday = { sections: { project: { status: 'ok', payload: {
+  flags: DC_FLAGS, counterfactual: { basis: 'compared with the site as it stands today', counterfactual_basis: 'site_today' } } } } } as never
+
+describe('the data-centre case flags in plain words (IBA-02)', () => {
+  it('words every flag the data-centre case emits, with no raw code left', () => {
+    const out = projectFlagWords(DC_FLAGS, statedFlags(siteToday))
+    expect(out).toEqual([
+      'No lifetime is stated for genset 1, genset 2, genset 3, genset 4, rooftop pv, site transformer and ups battery: '
+        + 'the case does not check whether they need replacing inside its horizon.',
+      'The site as it stands cannot meet the island requirements, so it is compared without them.',
+      'The site-today baseline removes genset new.',
+      'The bill effect of generator degradation is a first-order estimate.',
+      'The bill effect of generator degradation covers only the bill items priced by volume.',
+      'The island capability carries a mean critical load of 32.161 MW.',
+      'The LCOE is computed on the incremental cash against the comparison site.',
+      'Levelised storage cost is not established: bess new does not discharge in the solved dispatch.',
+      'Grid import is a meter link with no cost of its own, so it is not counted as an investment.',
+      'Trade tax (GewSt): the tax value not yet depreciated is deducted in the last year of the case.',
+      'Corporate income tax (KSt): the tax value not yet depreciated is deducted in the last year of the case.',
+    ])
+    for (const line of out) expect(line).not.toMatch(SNAKE)
+  })
+  it('says a single asset of unknown lifetime in the singular', () => {
+    expect(projectFlagWords(['asset_lifetime_unknown:genset_1'])).toEqual([
+      'No lifetime is stated for genset 1: the case does not check whether it needs replacing inside its horizon.'])
+  })
+  it('names a tax layer it does not know by its own name', () => {
+    expect(projectFlagWords(['remaining_basis_written_off:state'])).toEqual([
+      'State: the tax value not yet depreciated is deducted in the last year of the case.'])
+  })
+  it('skips the site-today basis only when the counterfactual sentence states it', () => {
+    expect(statedFlags(siteToday)).toEqual(new Set(['counterfactual_basis:site_today']))
+    expect(projectFlagWords(['counterfactual_basis:site_today'], statedFlags(siteToday))).toEqual([])
+    // No stated basis: the flag stays, as a line.
+    expect(projectFlagWords(['counterfactual_basis:site_today'])).toEqual(['Other check: counterfactual_basis:site_today'])
+    // A neighbouring value is never skipped.
+    expect(projectFlagWords(['counterfactual_basis:analytic'], statedFlags(siteToday)))
+      .toEqual(['Other check: counterfactual_basis:analytic'])
+    const analytic = { sections: { project: { status: 'ok', payload: {
+      counterfactual: { basis: 'compared with an analytic baseline', counterfactual_basis: 'analytic' } } } } } as never
+    expect(statedFlags(analytic)).toEqual(new Set())
+  })
+  it('keeps the handled flag keys and projectFlagKeys.json the same set', () => {
+    expect(new Set(projectFlagKeys.worded)).toEqual(PROJECT_FLAG_KEYS)
+    expect(projectFlagKeys.worded).toHaveLength(PROJECT_FLAG_KEYS.size)
+    expect(projectFlagKeys.stated).toEqual(['counterfactual_basis:site_today'])
   })
 })
