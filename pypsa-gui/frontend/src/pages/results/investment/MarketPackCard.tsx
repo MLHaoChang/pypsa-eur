@@ -15,7 +15,7 @@ import type { CommercialConfig, LibraryRef, ReserveProduct } from '../../../api/
 import { withReturnFrom } from '../../../layout/flowNavigation'
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
-import { cellWords, productWords, refusalText, valueWords } from './marketPackWords'
+import { addedWords, cellField, cellWords, productWords, refusalText, valueWords } from './marketPackWords'
 import NoBackupChecklist from './NoBackupChecklist'
 import { SeriesSelect } from './SeriesSelect'
 
@@ -33,21 +33,42 @@ export function LibraryLink({ children = 'Library' }: { children?: string }) {
   )
 }
 
-/** Why a cell was left as it is, in words. */
-function KeptLine({ kept, products }: { kept: PackKept; products: ReserveProduct[] }) {
+/** Why a cell was left as it is, in words; "No price" only where the project's own
+ *  product has none (UX 3 term 1), never where only the pack is empty. */
+function KeptLine({ kept, products, held }: { kept: PackKept; products: ReserveProduct[]; held: ReserveProduct[] }) {
   if (kept.cell === 'export_price_ref') {
     return <li>{kept.reason === 'no_export_link'
       ? 'Export price: the site has no export connection, so no export price is set.'
       : 'Export price: the pack has no day-ahead price, so yours is left as it is.'}</li>
   }
+  const pid = /^reserve_products\/([^/]+)\//.exec(kept.cell)?.[1]
+  const mine = held.find(p => p.id === pid)
+  if (mine?.capacity_price) {
+    return <li>{mine ? productWords(mine) : pid}: the pack has no capacity price, so yours is kept.</li>
+  }
   return <li>{cellWords(kept.cell, products)}. No price: upload one in the <LibraryLink />.</li>
 }
 
-interface Row { cell: string; now: unknown; after: unknown; yours: boolean; pack?: unknown }
+/** The products a plan adds whole (every cell from nothing), by id. */
+function addedIds(plan: MarketPackPlan): Set<string> {
+  return new Set(plan.changes.filter(c => cellField(c.cell) === 'id' && c.from == null)
+    .map(c => /^reserve_products\/([^/]+)\//.exec(c.cell)?.[1] ?? ''))
+}
+const productOf = (cell: string) => /^reserve_products\/([^/]+)\//.exec(cell)?.[1]
+
+interface Row { cell: string; now: unknown; after: unknown; yours: boolean; pack?: unknown; words?: boolean }
 
 function PlanTable({ plan, products }: { plan: MarketPackPlan; products: ReserveProduct[] }) {
+  // An added product is one row, not one "none → none" row per field.
+  const added = addedIds(plan)
   const rows: Row[] = [
-    ...plan.changes.map(c => ({ cell: c.cell, now: c.from, after: c.to, yours: false })),
+    ...[...added].map(id => {
+      const p = products.find(q => q.id === id)
+      return { cell: `reserve_products/${id}/id`, now: 'not in the project',
+               after: p ? addedWords(p) : 'Added', yours: false, words: true }
+    }),
+    ...plan.changes.filter(c => !added.has(productOf(c.cell) ?? ''))
+      .map(c => ({ cell: c.cell, now: c.from, after: c.to, yours: false })),
     ...plan.conflicts.map(c => ({ cell: c.cell, now: c.yours, after: c.yours, yours: true, pack: c.pack })),
   ]
   const [all, setAll] = useState(false)
@@ -62,11 +83,13 @@ function PlanTable({ plan, products }: { plan: MarketPackPlan; products: Reserve
         <tbody>{shown.map(r => (
           <tr key={r.cell} className={r.yours ? 'bg-warn/10' : ''} data-testid="mp-preview-row" data-yours={r.yours}>
             <th scope="row" className="p-1 border-b border-border font-normal">{cellWords(r.cell, products)}</th>
-            <td className="p-1 border-b border-border">{valueWords(r.now)}</td>
+            <td className="p-1 border-b border-border">{r.words ? String(r.now) : valueWords(r.now, cellField(r.cell), products)}</td>
             <td className="p-1 border-b border-border">
-              {valueWords(r.after)}
+              {r.words ? String(r.after) : r.yours && cellField(r.cell) === 'id' ? 'kept removed'
+                : valueWords(r.after, cellField(r.cell), products)}
               {r.yours && <span className="block text-[10px] text-muted">
-                Kept as yours (the pack has {valueWords(r.pack)})</span>}
+                {cellField(r.cell) === 'id' ? 'You removed it after the last apply, so it is not added again'
+                  : `Kept as yours (the pack has ${valueWords(r.pack, cellField(r.cell), products)})`}</span>}
             </td>
           </tr>
         ))}</tbody>
@@ -79,14 +102,22 @@ function PlanTable({ plan, products }: { plan: MarketPackPlan; products: Reserve
   )
 }
 
+/** "2 products to add" / "3 values to change", counting an added product once. */
+function counts(plan: Pick<MarketPackPlan, 'changes'>): { added: number; values: number } {
+  const added = addedIds(plan as MarketPackPlan)
+  return { added: added.size, values: plan.changes.filter(c => !added.has(productOf(c.cell) ?? '')).length }
+}
+const many = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`
+
 function totals(plan: MarketPackPlan): string {
-  const n = plan.changes.length
-  return `${n} value${n === 1 ? '' : 's'} to change, ${plan.conflicts.length} kept as yours, `
-    + `${plan.kept.length} left as they are.`
+  const { added, values } = counts(plan)
+  return `${added ? `${many(added, 'product')} to add, ` : ''}${many(values, 'value')} to change, `
+    + `${plan.conflicts.length} kept as yours, ${plan.kept.length} left as they are.`
 }
 
 function PackPreview({ pack, products, onApplied, onClose }: {
   pack: MarketPackRow
+  /** The project's own products. */
   products: ReserveProduct[]
   onApplied: (out: MarketPackApplied) => void
   onClose: () => void
@@ -126,18 +157,19 @@ function PackPreview({ pack, products, onApplied, onClose }: {
           {/* The totals and Apply sit above the list, so a long list never hides them. */}
           <p className="text-[11px]" data-testid="mp-preview-totals">{totals(plan)}</p>
           <div className="flex items-center gap-2">
-            <button type="button" disabled={busy || plan.changes.length === 0} data-testid="mp-apply"
-                    className="px-2 py-0.5 rounded bg-accent text-on-accent text-[11px] disabled:opacity-40"
-                    onClick={() => { void apply() }}>Apply {pack.label}</button>
+            {plan.changes.length > 0 && (
+              <button type="button" disabled={busy} data-testid="mp-apply"
+                      className="px-2 py-0.5 rounded bg-accent text-on-accent text-[11px] disabled:opacity-40"
+                      onClick={() => { void apply() }}>Apply {pack.label}</button>)}
             <button type="button" className="px-2 py-0.5 text-[11px]" onClick={onClose}>Cancel</button>
-            {plan.changes.length === 0 && <span className="text-[11px] text-muted">
+            {plan.changes.length === 0 && <span className="text-[11px] text-muted" data-testid="mp-nothing">
               Nothing to apply: every value already matches the pack or is yours.</span>}
           </div>
           {error && <p role="alert" className="text-[11px] text-danger" data-testid="mp-apply-refused">{error}</p>}
           <PlanTable plan={plan} products={named} />
           {plan.kept.length > 0 && (
             <ul className="list-disc pl-4 text-[11px] text-muted" data-testid="mp-preview-kept">
-              {plan.kept.map(k => <KeptLine key={k.cell} kept={k} products={named} />)}</ul>
+              {plan.kept.map(k => <KeptLine key={k.cell} kept={k} products={named} held={products} />)}</ul>
           )}
         </>
       )}
@@ -145,22 +177,28 @@ function PackPreview({ pack, products, onApplied, onClose }: {
   )
 }
 
-function Receipt({ pack, out, products, onClose }: {
-  pack: MarketPackRow; out: MarketPackApplied; products: ReserveProduct[]; onClose: () => void
+function Receipt({ pack, out, products, held, onClose }: {
+  pack: MarketPackRow; out: MarketPackApplied; products: ReserveProduct[]; held: ReserveProduct[]; onClose: () => void
 }) {
+  const { added, values } = counts(out)
+  const unpricedAdded = [...addedIds(out)].map(id => products.find(p => p.id === id))
+    .filter((p): p is ReserveProduct => !!p && p.capacity_price == null)
   return (
     <div className="rounded border border-border p-2 space-y-1 text-[11px]" role="status" data-testid="mp-receipt">
-      <p>Applied {pack.label}: {out.changed} value{out.changed === 1 ? '' : 's'} changed.</p>
+      <p>Applied {pack.label}: {added ? `${many(added, 'product')} added, ` : ''}{many(values, 'value')} changed.</p>
+      {unpricedAdded.length > 0 && <p className="text-warn" data-testid="mp-receipt-unpriced">
+        {unpricedAdded.map(productWords).join(', ')} came in with no price: pick one with “Open here”
+        on this card, or upload one in the <LibraryLink />.</p>}
       {out.conflicts.length > 0 && (
         <div data-testid="mp-receipt-kept">
           <p>{out.conflicts.length} kept as yours:</p>
           <ul className="list-disc pl-4">{out.conflicts.map(c => (
-            <li key={c.cell}>{cellWords(c.cell, products)}: {valueWords(c.yours)} (the pack has {valueWords(c.pack)})</li>
+            <li key={c.cell}>{cellWords(c.cell, products)}: {valueWords(c.yours, cellField(c.cell), products)} (the pack has {valueWords(c.pack, cellField(c.cell), products)})</li>
           ))}</ul>
         </div>
       )}
       {out.kept.length > 0 && <ul className="list-disc pl-4 text-muted">
-        {out.kept.map(k => <KeptLine key={k.cell} kept={k} products={products} />)}</ul>}
+        {out.kept.map(k => <KeptLine key={k.cell} kept={k} products={products} held={held} />)}</ul>}
       <p className="text-muted">{RESULTS_WHERE}</p>
       <div className="flex justify-end"><button type="button" className="px-2 py-0.5" onClick={onClose}>Close</button></div>
     </div>
@@ -304,7 +342,7 @@ export default function MarketPackCard({ cfg }: { cfg: CommercialConfig }) {
           ))}
         </ul>
       )}
-      {done && <Receipt pack={done.pack} out={done.out} products={done.products} onClose={() => setDone(null)} />}
+      {done && <Receipt pack={done.pack} out={done.out} products={done.products} held={products} onClose={() => setDone(null)} />}
       <NoBackupChecklist cfg={cfg} />
     </section>
   )

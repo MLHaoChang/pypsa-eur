@@ -74,7 +74,7 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
 const noKeys = (el: HTMLElement) => {
-  expect(el.textContent).not.toMatch(/reserve_products\/|reserve_no_backup_storages|market_pack_|_symmetric|Pinned/)
+  expect(el.textContent).not.toMatch(/reserve_products\/|reserve_no_backup_storages|market_pack_|_symmetric|secondary_up|\btso\b|Pinned/)
 }
 
 describe('MarketPackCard: the pack list', () => {
@@ -227,11 +227,56 @@ describe('MarketPackCard: preview and apply', () => {
     noKeys(container)
   })
 
-  it('offers no Apply when nothing would change', async () => {
+  it('offers no Apply when nothing would change, and says so', async () => {
     api.preview.mockResolvedValue(PLAN({ changes: [] }))
     wrap(<MarketPackCard cfg={CFG()} />)
     fireEvent.click(await screen.findByTestId('mp-preview-no-1-2026'))
-    expect((await screen.findByTestId('mp-apply') as HTMLButtonElement).disabled).toBe(true)
+    expect((await screen.findByTestId('mp-nothing')).textContent).toContain('Nothing to apply')
+    expect(screen.queryByTestId('mp-apply')).toBeNull()
+  })
+
+  it('shows a product the pack adds as one row in words, never its fields from none to none', async () => {
+    const fields = ['id', 'kind', 'direction', 'sustain_h', 'capacity_price', 'max_commit_mw', 'storages', 'counterparty']
+    const to: Record<string, unknown> = { id: 'secondary_up', kind: 'secondary', direction: 'up', sustain_h: 1,
+      capacity_price: null, max_commit_mw: null, storages: [], counterparty: 'tso' }
+    const plan = PLAN({ changes: fields.map(f => ({ cell: `reserve_products/secondary_up/${f}`, from: null, to: to[f] })),
+      conflicts: [], kept: [{ cell: 'reserve_products/secondary_up/capacity_price', reason: 'empty_ref' }] })
+    api.preview.mockResolvedValue(plan)
+    api.apply.mockResolvedValue({ ...plan, changed: fields.length })
+    const { container } = wrap(<MarketPackCard cfg={CFG()} />)
+    fireEvent.click(await screen.findByTestId('mp-preview-no-1-2026'))
+    expect((await screen.findByTestId('mp-preview-totals')).textContent)
+      .toBe('1 product to add, 0 values to change, 0 kept as yours, 1 left as they are.')
+    expect(screen.getAllByTestId('mp-preview-row').map(r => r.textContent)).toEqual([
+      'Secondary reserve (up)not in the projectAdded: holds 1 h, any storage that may offer reserves, '
+        + 'buyer the grid operator (TSO), no price yet'])
+    expect(screen.getByTestId('mp-preview-kept').textContent).toContain('No price: upload one in the Library.')
+    noKeys(container)
+    fireEvent.click(screen.getByTestId('mp-apply'))
+    const receipt = await screen.findByTestId('mp-receipt')
+    expect(receipt.textContent).toContain('Applied NO-1 2026: 1 product added, 0 values changed.')
+    expect(within(receipt).getByTestId('mp-receipt-unpriced').textContent)
+      .toContain('Secondary reserve (up) came in with no price')
+    noKeys(container)
+  })
+
+  it('says the price is kept, not missing, when only the pack has none', async () => {
+    const mine = prod('secondary_up', 'secondary', 'up', { capacity_price: PRICE })
+    wrap(<MarketPackCard cfg={CFG({ reserve_products: [mine] })} />)
+    fireEvent.click(await screen.findByTestId('mp-preview-no-1-2026'))
+    const kept = await screen.findByTestId('mp-preview-kept')
+    expect(kept.textContent).toBe('Secondary reserve (up): the pack has no capacity price, so yours is kept.')
+  })
+
+  it('names a product the user removed in words and keeps it removed', async () => {
+    api.preview.mockResolvedValue(PLAN({ changes: [], kept: [], conflicts: [
+      { cell: 'reserve_products/secondary_up/id', yours: null, pack: 'secondary_up', last_applied: 'secondary_up' }] }))
+    const { container } = wrap(<MarketPackCard cfg={CFG()} />)
+    fireEvent.click(await screen.findByTestId('mp-preview-no-1-2026'))
+    const [row] = await screen.findAllByTestId('mp-preview-row')
+    expect(row.textContent).toBe('Secondary reserve (up)not in the projectkept removed'
+      + 'You removed it after the last apply, so it is not added again')
+    noKeys(container)
   })
 })
 
@@ -254,7 +299,7 @@ describe('NoBackupChecklist', () => {
   it('shows a refusal as its plain sentence and keeps the unsaved tick', async () => {
     commercial.saveCommercial.mockRejectedValue({ response: { status: 422, data: { detail: {
       code: 'reserve_attestation_refused', error_kind: 'reserve_attestation_refused',
-      message: 'string_a holds the site\'s backup energy (a backup string, a spare or ride-through storage), so it cannot be attested as having no backup obligation' } } } })
+      message: 'string_a holds the site\'s backup energy (a backup string, a spare or ride-through storage), so it cannot be marked as having no backup obligation.' } } } })
     const { container } = wrap(<NoBackupChecklist cfg={CFG()} />)
     fireEvent.click(await screen.findByTestId('mp-no-backup-string_a'))
     fireEvent.click(screen.getByTestId('mp-no-backup-save'))

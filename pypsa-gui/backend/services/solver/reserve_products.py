@@ -252,14 +252,16 @@ def attestation_refusal(n, project_dir, attested) -> str | None:
     roles = backup_roles(n, project_dir)
     if roles is None:
         return (
-            "No backup obligation can be attested: the project's backup setting or "
-            "island sidecar cannot be read (save the project first)"
+            "No storage can be marked as having no backup obligation: the project's "
+            "backup setting or island settings cannot be read. Save the project first."
         )
     held = [s for s in attested if s in roles]
     if held:
+        verb, pron = ("holds", "it") if len(held) == 1 else ("hold", "they")
         return (
-            f"{_names(held)} hold the site's backup energy (a backup string, a spare or "
-            "ride-through storage), so they cannot be attested as having no backup obligation"
+            f"{_names(held)} {verb} the site's backup energy (a backup string, a spare or "
+            f"ride-through storage), so {pron} cannot be marked as having no backup "
+            "obligation."
         )
     return None
 
