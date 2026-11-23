@@ -25,3 +25,7 @@ One Run entry that runs the verdict study; Expert readiness shows the same to-ch
 Checked by code reading only; the app was not re-run. Overlaps issue 09 (study size) and issue 12 slice (c) (stage and elapsed time). Question for the coordinator: what is the Run entry? (1) Recommended: the header 'Run' runs the verdict study, Expert readiness lists the same to-check items as Guided, and stage x of N with elapsed time shows (reuse 12 (c)). (2) Keep two entries but label each by the question it answers, and add stage and elapsed time. (3) Only add stage and elapsed time (12 (c)) and drop the rest.
 
 Decision (owner, 2026-11-20, TE2E-17-RUN-1): the header 'Run' runs the verdict study; Expert readiness lists the same to-check items as Guided; 'stage x of N' with elapsed time shows (reuse issue 12 slice (c), do it once). Acceptance: one Run entry that runs the verdict study; Expert readiness and Guided list the same items; stage and elapsed time show while it runs; the header reflects the running study. Gated: UX. Blocked by: none (shares 12 (c)).
+
+## Comments
+
+- 2026-11-23 status sweep: landed in #1627 (44387a69); #1630 (233c38fd): run strip gives stage, elapsed time and a running header. Remains: one Run entry that runs the verdict study and Expert readiness matching Guided.

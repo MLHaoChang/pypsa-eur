@@ -20,3 +20,7 @@ Ammonia is shown in MW, never t/h or t/d; LCOH (EUR/kg: H2 1.60–2.59, ammonia 
 ## Triage (2026-11-20, master b7e5dee3)
 
 Checked by code reading only; the app was not re-run. Still true: 'AI-training load step' is still in `grid_readiness.py`, a data-centre phrase on every template. Slice (PR-SIZE-1): (a) report wording is template-specific; (b) non-electric flows in their own units (t/h, t/d) in results and report; (c) LCOH and product cost in Guided results; (d) the report horizon equals the Guided horizon. Gated: GK A and UX. Blocked by: none.
+
+## Comments
+
+- 2026-11-23 status sweep: landed in #1786 (f08b8d44); #1787 (ce38457d): sized-design table and report take their own units. Remains: AI-training load step wording in grid_readiness.py, LCOH and product cost in Guided, template-specific report wording.
