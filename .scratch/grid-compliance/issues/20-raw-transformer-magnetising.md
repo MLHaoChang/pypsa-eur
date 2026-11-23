@@ -3,7 +3,8 @@
 
 # GC-20: transformer magnetising branch (MAG1/MAG2) in the PSS/E RAW
 
-Status: ready-for-agent
+Status: done
+Done in #1909 (a63ef368).
 Type: task
 Parent: `.scratch/grid-compliance/issues/04-psse-pack.md`
 Gated: yes (GK A2, gridspine)
