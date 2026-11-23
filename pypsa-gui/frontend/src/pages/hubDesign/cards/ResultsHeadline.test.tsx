@@ -16,7 +16,7 @@ import captured from '../../../test/fixtures/headlineKpis.json'
 import { ResultsCard } from './ResultsCard'
 import { chartFigure } from '../../../components/charts/chartTheme'
 import { HEADLINE_WORDS, headlineFigure } from '../../results/headlineWords'
-import { FEEDER_HELD_PILL, LCOE_NO_SOLVE, LCOE_NOT_APPLICABLE, LCOE_UNREAD, mixedSourceNote, ReliabilityBullet } from './ResultsHeadline'
+import { BELOW_FLOOR_PILL, FEEDER_HELD_PILL, LCOE_NO_SOLVE, LCOE_NOT_APPLICABLE, LCOE_UNREAD, mixedSourceNote, ReliabilityBullet } from './ResultsHeadline'
 
 vi.mock('../../../hooks/useProjectFlow', () => ({ useProjectFlow: vi.fn() }))
 vi.mock('../../../api/finance', async (importOriginal) => {
@@ -299,6 +299,16 @@ describe('ReliabilityBullet', () => {
   it('within the goal says so in words', () => {
     render(<ReliabilityBullet lole={0.4} target={1} ci={null} stale={false} />)
     expect(screen.getByTestId('hub-results-reliability-against').textContent).toBe('Within goal')
+  })
+  // template-e2e 21: a 0 h/yr bar under a goal the run cannot resolve is not a pass.
+  it('a goal under the resolution floor: neutral pill and bar, not the pass green', () => {
+    render(<ReliabilityBullet lole={0} target={3} ci={null} stale={false} belowFloor />)
+    const pill = screen.getByTestId('hub-results-reliability-against')
+    expect(pill.textContent).toBe(BELOW_FLOOR_PILL)
+    expect(BELOW_FLOOR_PILL).toBe('Too few runs to tell')
+    expect(pill.className).toContain('text-muted')
+    expect(pill.className).not.toContain('text-success')
+    expect(screen.getByTestId('hub-results-reliability-bar').className).not.toContain('bg-success')
   })
   it('under the goal but held back by a feeder bound: neutral, not the pass green (UX 2, #1729)', () => {
     render(<ReliabilityBullet lole={0.6} target={3} ci={null} stale={false} feederBound />)

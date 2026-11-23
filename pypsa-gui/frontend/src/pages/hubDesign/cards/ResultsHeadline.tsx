@@ -132,12 +132,16 @@ function LcoeFigure({ read }: { read: { kind: 'card'; card: HeadlineCard | null 
 
 /** The pill when the shortfall is under the goal but a feeder bound holds the verdict back. */
 export const FEEDER_HELD_PILL = 'Under goal · verdict not decided'
+/** template-e2e 21: the goal is under the smallest shortfall the run can show,
+ *  so a 0 h/yr bar says nothing about it: neutral, never the pass green. */
+export const BELOW_FLOOR_PILL = 'Too few runs to tell'
 
 /** Shortfall against the goal: one bar, the goal as a marker, the study's interval when it gave one. */
-export function ReliabilityBullet({ lole, target, ci: range, stale, freshnessUnknown = false, feederBound = false }: {
+export function ReliabilityBullet({ lole, target, ci: range, stale, freshnessUnknown = false, feederBound = false, belowFloor = false }: {
   lole: number; target: number | null; ci: [number, number] | null; stale: boolean; freshnessUnknown?: boolean
   /** The verdict is held back by a feeder bound (GK A F6'): under the goal is not a pass. */
   feederBound?: boolean
+  belowFloor?: boolean
 }) {
   const top = Math.max(lole, target ?? 0, range?.[1] ?? 0) * 1.2 || 1
   const x = (v: number) => `${Math.min(100, (v / top) * 100)}%`
@@ -153,8 +157,9 @@ export function ReliabilityBullet({ lole, target, ci: range, stale, freshnessUnk
     : `Expected shortfall ${words(lole)}, no goal set`
   // The band is not the only cue: the result is also said in words (UX 23, 7).
   // Under the goal but held back by a feeder bound: neutral, never the pass green (UX 2, #1729).
-  const held = pass && feederBound
-  const against = target == null ? null : held ? FEEDER_HELD_PILL : pass ? 'Within goal' : 'Above goal'
+  const held = pass && (feederBound || belowFloor)
+  const against = target == null ? null : held ? (belowFloor ? BELOW_FLOOR_PILL : FEEDER_HELD_PILL)
+    : pass ? 'Within goal' : 'Above goal'
   return (
     <ChartSourceProvider value={{ line: `Reliability study · Monte Carlo${freshnessUnknown ? " · can't tell if current" : ''}`, stale }}>
       <ChartFrame testId="hub-results-reliability-chart" title={title} bodyClassName="px-4 py-3"
@@ -172,7 +177,7 @@ export function ReliabilityBullet({ lole, target, ci: range, stale, freshnessUnk
             <div className="absolute inset-y-2 left-0 rounded-sm bg-success/15" style={{ width: x(target) }} />
           )}
           <div data-testid="hub-results-reliability-bar"
-            className={`absolute inset-y-2 left-0 rounded-sm ${target == null ? 'bg-accent' : pass ? 'bg-success' : 'bg-danger'}`}
+            className={`absolute inset-y-2 left-0 rounded-sm ${target == null ? 'bg-accent' : pass && belowFloor ? 'bg-muted' : pass ? 'bg-success' : 'bg-danger'}`}
             // A zero still shows a mark at the axis.
             style={{ width: x(lole), minWidth: 3 }} />
           {ci && (
@@ -254,7 +259,7 @@ export function ResultsHeadline({ reliability, cost, costEur = null, ci, freshne
       {reliability.lole != null && (
         <ReliabilityBullet lole={reliability.lole} target={reliability.target} ci={ci}
           stale={reliability.stale === true} freshnessUnknown={freshnessUnknown}
-          feederBound={reliability.feederBound === true} />
+          feederBound={reliability.feederBound === true} belowFloor={reliability.belowFloor === true} />
       )}
     </section>
   )
