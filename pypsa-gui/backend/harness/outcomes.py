@@ -735,6 +735,15 @@ def _allowed(note: dict, path: str, carriers: set[str] = frozenset()) -> bool:
         if item["kind"] == "cell":
             if path == f"/{cls}/{item['name']}/{item['attr']}":
                 return True
+            # A rating write owns that row's own marker cell (psse-import 05): entering
+            # s_nom / p_nom marks it stated. Only that cell, only on the row written.
+            from services.assumed_rating import SOURCE_COLUMN
+
+            if (
+                item["attr"] in SOURCE_COLUMN
+                and path == f"/{cls}/{item['name']}/{SOURCE_COLUMN[item['attr']]}"
+            ):
+                return True
         elif path.startswith("/user_ts/") and _own_series(note, item, path):
             return True
         elif path.startswith(f"/{cls}/{item['name']}/"):

@@ -27,13 +27,17 @@ const VIA_COLOR = '#475569'
 const LOSS_COLOR = '#dc2626'
 const EXPORT_COLOR = '#0891b2'
 const DEST_COLOR = '#2563eb'
+/** A process unit's node, either side: its own colour so it never reads as a load. */
+export const PROCESS_COLOR = '#7c3aed'
 
 export function sourceColor(name: string, index: number): string {
+  if (isProcessNode(name)) return PROCESS_COLOR
   return SOURCE_COLORS[name.toLowerCase()] ?? SOURCE_COLORS[name]
     ?? PALETTE[index % PALETTE.length]
 }
 
 export function destinationColor(name: string): string {
+  if (isProcessNode(name)) return PROCESS_COLOR
   return name === 'Losses' ? LOSS_COLOR : name === 'Export' ? EXPORT_COLOR : DEST_COLOR
 }
 
@@ -89,6 +93,16 @@ export function sankeyData(rows: EnergyFlowRow[]): FlowSankey {
     l.color = colorOf.get(top) ?? VIA_COLOR
   })
   return { nodes, links: out }
+}
+
+/** A process unit's node ("Process <name>"): what flows into it ends there, and
+ *  what it delivers starts again from it, in the product's own unit. */
+export const isProcessNode = (name: string) => name.startsWith('Process ')
+
+/** MWh that entered the site's picture: rows that restart at a process node
+ *  repeat energy already counted where it flowed in, so they are left out. */
+export function flowTotal(rows: EnergyFlowRow[]): number {
+  return rows.reduce((s, r) => (isProcessNode(r.source) ? s : s + r.mwh), 0)
 }
 
 export const CSV_HEADER = ['Source', 'Via', 'Destination', 'MWh']

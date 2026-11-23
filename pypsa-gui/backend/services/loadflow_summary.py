@@ -39,7 +39,7 @@ import numpy as np
 import pandas as pd
 from fastapi import HTTPException
 
-from services import retained_results, run_evidence
+from services import assumed_rating, retained_results, run_evidence
 from services.pypsa_service import PyPSAService
 
 SOURCES = ("lopf", "ac_pf")
@@ -307,6 +307,7 @@ def _summarise_class(n: Any, cls: str, comp: str, t_accessor: str, source: str,
             skipped.append({"name": label, "class": cls, "reason": "rating_missing_or_zero",
                             "rating_field": rating_field})
             continue
+        assumed = assumed_rating.is_assumed(comp_df.loc[name], "p_nom" if cls == "Link" else "s_nom")
         a0 = p0[name].where(mask & np.isfinite(p0[name]))
         two_terminals = p1 is not None and name in p1.columns
         flow = a0.abs()
@@ -339,6 +340,8 @@ def _summarise_class(n: Any, cls: str, comp: str, t_accessor: str, source: str,
         mean_util = float((util.fillna(0.0) * wp).sum() / wsum) if wsum > 0 else None
         at_limit = float(((util >= AT_LIMIT_FRACTION).astype(float) * wp).sum())
         over = float(((util > 1.0 + OVER_LIMIT_TOLERANCE).astype(float) * wp).sum())
+        if assumed:  # an assumed rating never binds: loading stays, no overload is claimed
+            at_limit = over = 0.0
         smin, smax_v = float(smax_col.min()), float(smax_col.max())
         row = {
             "name": label,
@@ -362,6 +365,9 @@ def _summarise_class(n: Any, cls: str, comp: str, t_accessor: str, source: str,
             },
             "mean_flow": _r(float((flow.where(valid_limit, 0.0) * wp).sum() / wsum) if wsum > 0 else None, 2),
         }
+        if assumed:
+            row["rating_assumed"] = True
+            row["rating_label"] = assumed_rating.LABEL
         if series_names is not None:
             row["_series"] = {"flow": [_r(x, 8) for x in flow.where(valid_limit).iloc[:800]],
                               "util_pct": [_r(x * 100, 8) for x in util.iloc[:800]]}

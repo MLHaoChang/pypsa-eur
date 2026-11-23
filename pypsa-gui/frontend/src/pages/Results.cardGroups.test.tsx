@@ -16,6 +16,9 @@ const { stub, status, getFlowScope } = vi.hoisted(() => ({
 }))
 
 vi.mock('./results/CapacityExpansion', () => stub('capex-stub'))
+vi.mock('./ReportsPanel', () => stub('reports-stub'))
+vi.mock('./results/ExportsTab', () => stub('exports-stub'))
+vi.mock('./results/SpecialistPacketTab', () => stub('packet-stub'))
 vi.mock('./results/Dispatch', () => stub('dispatch-stub'))
 vi.mock('./results/LoadFlow', () => stub('loadflow-stub'))
 vi.mock('./results/Prices', () => stub('prices-stub'))
@@ -126,7 +129,8 @@ describe('the group strip', () => {
     expect(Array.from(document.querySelectorAll('[data-testid^="results-cardtab-"]')).map(el => el.textContent))
       .toEqual(['Island & ride-through', 'Grid-forming'])
     fireEvent.click(screen.getByTestId('results-group-handoff'))
-    expect(screen.getByTestId('results-gempty').textContent).toContain('Open Reports ›')
+    expect(Array.from(document.querySelectorAll('[data-testid^="results-cardtab-"]')).map(el => el.textContent))
+      .toEqual(['Reports', 'Exports', 'Specialist packet'])
     fireEvent.click(screen.getByTestId('results-group-capacity'))
     const tabs = Array.from(document.querySelectorAll('[data-testid^="results-cardtab-"]'))
       .map(el => el.textContent)
@@ -136,18 +140,46 @@ describe('the group strip', () => {
   })
 })
 
-describe('the empty groups', () => {
-  it('Hand-off opens Reports in Expert and its section in Guided, through the shared navigation', async () => {
+describe('Hand-off (R6)', () => {
+  it('opens on Reports, and Exports and the Specialist packet are its other tabs', async () => {
     await renderResults()
     fireEvent.click(screen.getByTestId('results-group-handoff'))
-    expect(screen.getByTestId('results-gempty').textContent).toContain('Open Reports ›')
-    fireEvent.click(screen.getByTestId('results-gempty-open'))
-    expect(useUIStore.getState().activeSlidePanel).toBe('reports')
-    expect(useUIStore.getState().activeSection).toBe('results')
-    useUIStore.setState({ uiMode: 'guided' })
-    fireEvent.click(screen.getByTestId('results-group-handoff'))
-    fireEvent.click(screen.getByTestId('results-gempty-open'))
-    expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
+    expect(screen.getByTestId('reports-stub')).toBeTruthy()
+    expect(screen.queryByTestId('results-gempty')).toBeNull()
+    fireEvent.click(screen.getByTestId('results-cardtab-exports'))
+    expect(screen.getByTestId('exports-stub')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('results-cardtab-specialist_packet'))
+    expect(screen.getByTestId('packet-stub')).toBeTruthy()
+    // Hand-off is the end of the road: no "Next" pointing on.
+    expect(screen.queryByTestId('results-next-handoff')).toBeNull()
+  })
+
+  it('the last tab of another group ends with Next: Hand-off › Reports', async () => {
+    await renderResults()
+    fireEvent.click(screen.getByTestId('results-group-capacity'))
+    expect(screen.queryByTestId('results-next-handoff')).toBeNull()   // Build is not the last card tab
+    fireEvent.click(screen.getByTestId('results-cardtab-costs_prices'))
+    fireEvent.click(within(screen.getByTestId('results-next-handoff')).getByRole('button'))
+    expect(screen.getByTestId('reports-stub')).toBeTruthy()
+    expect(screen.getByTestId('results-group-handoff').getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('with a past run on screen, Hand-off still shows its tabs beside the run chrome', async () => {
+    useUIStore.setState({ discussedRun: { runId: 'run-past', section: 'results_capacity' } })
+    try {
+      await renderResults()
+      fireEvent.click(screen.getByTestId('results-group-handoff'))
+      fireEvent.click(screen.getByTestId('results-cardtab-exports'))
+      expect(screen.getByTestId('exports-stub')).toBeTruthy()
+      expect(screen.getByTestId('discussed-run-chrome').getAttribute('data-run-id')).toBe('run-past')
+    } finally { useUIStore.setState({ discussedRun: null }) }
+  })
+
+  it('the Reports sidebar row and every other entry land on Hand-off › Reports', () => {
+    useUIStore.setState({ activeSlidePanel: null, resultsTabRequest: null })
+    useUIStore.getState().setSlidePanel('reports')
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
+    expect(useUIStore.getState().resultsTabRequest).toBe('reports')
   })
 })
 

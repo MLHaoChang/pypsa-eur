@@ -88,7 +88,8 @@ def series_table(record, window=None):
         return raw["index"], {
             "p0": ("MW", POWER, branch["p0"]),
             "p1": ("MW", POWER, branch["p1"]),
-            "loading": ("%", "% of rating x s_max_pu per snapshot", loading),
+            "loading": ("%", "% of rating x s_max_pu per snapshot"
+                        + (" (rating assumed)" if branch.get("rating_assumed") else ""), loading),
         }
     return raw.get("index") or [], {}
 

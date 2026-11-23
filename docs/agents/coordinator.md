@@ -1,8 +1,8 @@
 # Coordinator
 
-Current coordinator session: `session_01G7qCuo9KbZdm4EGTioVTbs`
+Current coordinator session: `session_01G7qCunj2bnpAnf1sU3rNJm`
 
-Engine gatekeeper A (34; gridspine, DC, grid-to-process and IC/adequacy engine reviews; owner decision GK-SPLIT-1): `session_01G7qCuit2j5CJeVWXjvctmH`
+Engine gatekeeper A (35; gridspine, DC, grid-to-process and IC/adequacy engine reviews; owner decision GK-SPLIT-1): `session_01G7qCujKAKQmVNCseLAsSPN`
 
 Engine gatekeeper B (70; harness, app backend, investment/finance and outsourced reviews; GK-SPLIT-1): `session_01G7qCukDcy1uyorGvnspvg8`
 
@@ -12,7 +12,7 @@ Engine gatekeeper A2 (7; grid-compliance packages GC-01..GC-08 and the PowerFact
 
 Engine gatekeeper B3 (6; new template-e2e, ux-next, project-io app side, project-viewer-role and site-scene reviews from 2026-11-17 13:00Z; owner decision SCALE-1): `session_01G7qCum6HUJsEnApmq7PQMr`
 
-UX reviewer (27; UI coherence gate, owner decision 2026-10-20): `session_01G7qCun2pPxcrFefoJ2K6NB`
+UX reviewer (28; UI coherence gate, owner decision 2026-10-20): `session_01G7qCumS1PHmhWWrSDM5zsb`
 
 UX reviewer 2 (6; new template-e2e, ux-next and ui-cohesion UI reviews from 2026-11-17 13:00Z; owner decision SCALE-1): `session_01G7qCunnbAYRFp93JbLcx2R`
 
