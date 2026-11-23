@@ -45,3 +45,5 @@ That test does **not** count as coverage for this ticket.
 - Gated: GK B; design plan to GK B first.
 - Size: L.
 - The listed blocker is the work itself: add a warning disposition to the slot contract, then the profiles; L: the builder proposes a split.
+
+- 2026-11-23 status sweep: landed in #1831 (503155ec11): A2.8 warning-slot tests and a warning disposition from the AC branch-loading profile landed; not checked against every scope bullet, so the status stays until confirmed.

@@ -3,7 +3,9 @@
 
 # A cancelled plan step reads cancelled, not failed
 
-Status: ready-for-agent
+Status: done
+
+Done in #1655 (8bc33d4102).
 Blocked by: none (live-voice 11b merged, #1548)
 Model tier: opus
 Size: M

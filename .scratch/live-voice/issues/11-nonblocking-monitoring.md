@@ -179,3 +179,5 @@ again" is a follow-up if UX wants it. Conditions:
 - F7: the button has an accessible name, works by keyboard, and its state is words.
 - F8: at the trial merge, tsc, the manifest tests and the inventory, route-parity and
   control-matrix checks.
+
+- 2026-11-23 status sweep: landed in #1543 (0ed6dd9f5b); #1548 (53a7765760); #1550 (051ac658dc); #1556 (537876d32b): 11a, 11b, 11c-1, 11c-2. Remains: adapters for all families, wait_for_job, D-I2, D-C1.

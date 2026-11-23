@@ -32,3 +32,5 @@ Touches J6. Hands off from J5 (the run ends on section 10) and to J7 (compare): 
 ## Comments
 
 **2026-11-17 triage (SCALE-1).** Taken by the CS-C builder (coordinator, 16:14Z). Do not open a package for it. Related: Guided results legibility (#1611).
+
+- 2026-11-23 status sweep: landed in #1700 (0814422569): SummaryTab shows the study verdict and a "Run the solve" link when the dispatch solve has not run. Likely complete; moderate confidence.

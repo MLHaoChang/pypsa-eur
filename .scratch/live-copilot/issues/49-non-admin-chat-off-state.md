@@ -3,7 +3,9 @@
 
 # 49 With no API key, a non-admin's chat panel hangs on "Loading models…" and is offered setup they cannot do
 
-Status: ready-for-agent
+Status: done
+
+Done in #1822 (a68541e6bc).
 Blocked by: none
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), walk W4 (shots `member_setup`, `member_app`).
 Model: sonnet. Review: UX.

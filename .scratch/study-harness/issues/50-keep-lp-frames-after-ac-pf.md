@@ -65,3 +65,5 @@ The approach is to restore the LP values into the live frames, keep the PF value
 - **F10 Mutants.** Run each targeted mutant on its single test with `-x` and a timeout: drop the restore, restore before the snapshot, drop links from `_RESULT_DYNAMIC_ATTRS`, drop the legacy reload restore. List the survivors in the PR body.
 
 The SH 50 profile parts and SH 51 go to GK B and UX.
+
+- 2026-11-23 status sweep: landed in #1616 (b28e67aa5a): PF-SAVE-1: restore of LP frames, PF results kept separately. Remains: report-stage re-enable and KPI-after-PF, legacy projects still show the dispatch-saved warning.
