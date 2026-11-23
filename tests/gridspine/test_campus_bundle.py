@@ -220,11 +220,12 @@ def test_a_control_record_with_a_missing_value_is_refused():
 #: plant or model set, recorded from origin/master 8a5b1296 (before GC-04c). A
 #: change that means to alter the default output re-records these.
 #: GC-14 (IEC 60909 c in the Thevenin source) re-recorded the six marked entries.
+#: Its follow-up (the c note cites IEC 60909-0 Table 1) re-recorded the five EMT and top-level ones.
 MASTER_SHA256 = {
     "README.md": "697a8c45a0d7f303b1d194ed8721154a625eee2dacef5caa59d786d1a59575a6",
     "TEST_HUB_h18.dyr": "605fa8911ebb98c5942d74069172afbf01713af3ca135f626845b206091923c4",
     "TEST_HUB_h18.raw": "e326b91847fc5ff6f943f6ccf7529ed9bf1e18a4b262b41619444047aef06ef7",
-    "emt/README.md": "b395be249802357c5fb48806cfc0b1d90025ffc3a110f9894943b235c300d1db",  # GC-14: README's source-impedance line states the c bracket
+    "emt/README.md": "fb4939ffe8a47faf49f4ad8f9379610771fe0d4c1a09b3794659d3c527ce8995",  # GC-14: README's source-impedance line states the c bracket; GC-14 follow-up: its basis is IEC 60909-0 Table 1
     "emt/RSCAD_NOTES.md": "be12376e26799425ed992cfa063df31874849a655a581168f6fe4b1aabf3c46f",
     "emt/cables.csv": "ab71639d60c2f1f9ef6c5e6b74022ebe8170a14a91269250f7b692ba53fb12bf",
     "emt/converters.csv": "94986f0fe8b579855935079cd0534b049a595e4643b9d91a1805c8543efc3de8",
@@ -232,17 +233,17 @@ MASTER_SHA256 = {
     "emt/filters.csv": "dea3c8e1b304894569137c8b04bdeed1163c841bbab0b2a3c1d8076b3b0c885d",
     "emt/gensets.csv": "c3f9f15688f2c0b527af561171aacf8ef9b2732dde1debddcb84554441a6bb8e",
     "emt/insulation.csv": "28545e4d1ba616b621789a96554cdf91a8d23e555a4dbb6134665d9b47a3e940",
-    "emt/manifest.json": "89cfdfef34b4692f90b0afd31909a4be42541985ed63317e7831a602392583d1",  # GC-14: assumptions carry the c-bracket C_NOTE
+    "emt/manifest.json": "99166506a34db6c97c5f5ecd738490c61524a60989bc561fcf8b226139b4b5a4",  # GC-14: assumptions carry the c-bracket C_NOTE; follow-up: IEC 60909-0 Table 1 basis
     "emt/plant_units.csv": "6b419a3a3a03dd4179da259cb635987dce13ae850f95e0d2335aad2d5e0da542",
     "emt/protection_relays.csv": "8146034b47da26b89b6e1dc7b7417c18cec06ca47301fa815b86a56be9330cc5",
-    "emt/thevenin_set.csv": "5b02937bb9ca4744ad00b0ec8b4f61faf50311135c9aea4185d913decc62ae60",  # GC-14: c column, |Z| = c·Un²/Sk, C_NOTE
-    "emt/thevenin_set.json": "d40b514b8c865bfba57a597a75cc6c5af54f39c5b81fc33aae83b2138ed8d103",  # GC-14: c per row, |Z| = c·Un²/Sk, C_NOTE
+    "emt/thevenin_set.csv": "f6cde30356a138b0b6edeb34de8b9bbfb02fbfaef349f2a43017c0c9e19792d5",  # GC-14: c column, |Z| = c·Un²/Sk, C_NOTE; follow-up: IEC 60909-0 Table 1 basis
+    "emt/thevenin_set.json": "533a775cc47d37c4a7b213bf529360609045ec2333bb8492d854711b3857a8d2",  # GC-14: c per row, |Z| = c·Un²/Sk, C_NOTE; follow-up: IEC 60909-0 Table 1 basis
     "emt/thevenin_stages.csv": "bf2bef4209441e202a650c3cbf0c6fb890be191746d2f94007fe645aef3c1365",
     "emt/to_be_supplied.csv": "5f38eedac5f8eb50f4ff2d0fc5c367d0bfdd8d464975a6ce7b5f0ed0d4013b74",
     "emt/transformers.csv": "4c884604346c64d7008be9d76cb52a2d88a80e02173c8c98700c10b79eb2abef",
     "gfm_models.csv": "bac9e6eabd15162aba26ea15de2cf27d491c150b9b20127dec64e1c743f86077",
-    "manifest.json": "6f427c8fc446479d58f39b9480bcedcb5869dda0c200e52630e650f96b7381f1",  # GC-14: embeds the PSS/E pack's c line in battery_assumed and the EMT pack's
-    "psse_v35/README.md": "b05848f4a2932fcf9531d0ffeeaacec81affa1d62557c62a0a1014b7ee273259",  # GC-14: c line in battery_assumed and the c README section
+    "manifest.json": "942ffe28f8f6332e61032831cc434789b584bb15cb06995dcba977da25f044a3",  # GC-14: only the EMT pack's data_hash moves (the default bundle's PSS/E pack has no battery)
+    "psse_v35/README.md": "b05848f4a2932fcf9531d0ffeeaacec81affa1d62557c62a0a1014b7ee273259",  # GC-14: the c README section (no battery in the default bundle, so no battery_assumed line)
     "psse_v35/TEST_HUB_h18.con": "e646da8c52d6c573434fc702d8af4f5f03c3dba47b2430bffab220d1d8302d63",
     "psse_v35/TEST_HUB_h18.conmap.csv": "4d343381be2bcda347d5fd9044ab9e6da9eb2f229a231eda4e39b1659df3d257",
     "psse_v35/TEST_HUB_h18.dyr": "1f7c7882464baa79aa2d4032d6cbf726c8ef9b22ac0e29711a03d729f9c67f61",

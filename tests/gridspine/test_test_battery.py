@@ -875,3 +875,11 @@ def test_c_agrees_with_the_short_circuit_engines_c_factor(vn):
     assert c_min(vn) == c_factor(vn, "min")
     g_max = Thevenin("g", 10.0, 3.0, c_kind="c_max")
     assert voltage_factor(g_max, vn) == c_factor(vn, "max")
+
+
+def test_exported_c_note_cites_the_standard_not_a_review():
+    # The note reaches the TSO through the EMT and PSS/E packs.
+    from gridspine.handoff.test_battery import C_BRACKET_NOTE
+
+    assert "IEC 60909-0 Table 1" in C_BRACKET_NOTE
+    assert "GK" not in C_BRACKET_NOTE and "GC-02" not in C_BRACKET_NOTE
