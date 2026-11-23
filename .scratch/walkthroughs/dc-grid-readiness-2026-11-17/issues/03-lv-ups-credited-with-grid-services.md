@@ -3,7 +3,9 @@
 
 # 03: "AC (LV UPS)" offers no grid services, yet frequency support and voltage control pass
 
-Status: ready-for-agent
+Status: done
+
+Done in #1691 (9d1a3ae2).
 Type: task
 Impact: high (a pass that contradicts the stated input; the architecture compare can't tell the options apart on grid services)
 Templates: eh_datacenter, eh_datacenter_staged (Guided scorecard, Expert scorecard, Expert Power architecture compare, report)

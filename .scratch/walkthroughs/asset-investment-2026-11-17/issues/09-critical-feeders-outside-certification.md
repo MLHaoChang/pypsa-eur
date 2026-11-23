@@ -27,3 +27,7 @@ Issue 02 adds a must-stay-on bus's loss of supply to the certified LOLE when eve
 - A chained pocket is simulated, not withheld.
 - Expert Monte Carlo and the loops report the same feeder hours as the certification on Island Microgrid.
 - A test pins each.
+
+## Comments
+
+- 2026-11-23 status sweep: landed in #1729 (9713f895): feeder bound added: unread feeders rate as a bound and never pass, plain feeder remedy. Remains: simulating the it_bus pocket and chained pockets in the zonal Monte Carlo, and Monte Carlo/loops matching the certification feeder hours.

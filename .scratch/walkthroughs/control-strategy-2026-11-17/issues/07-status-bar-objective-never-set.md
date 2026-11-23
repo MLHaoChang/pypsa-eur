@@ -3,7 +3,9 @@
 
 # 07: Status bar reads "Obj: —" after every solve, and would show € M costs as "0.003 B€"
 
-Status: ready-for-agent
+Status: done
+
+Done in #1670 (17cf71cf).
 Impact: low
 Templates: all
 Found by: control-strategy walkthrough, 2026-11-17 (master 9491878d)
