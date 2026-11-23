@@ -24,7 +24,7 @@ import {
   ChartFrame, ChartSourceProvider, useChartSource, type ChartSource, ChartActions, ChartZero, chartFigure, LABEL_PASS, CHART_LEGEND, CHART_HEIGHT, carrierColour, directLabel, bandLabelIndices, legendName, fmtPower,
 } from './shared'
 import {
-  CSV_HEADER, csvRows, flowTotal, fmtMwh, periodLabel, sankeyData, share,
+  CSV_HEADER, csvRows, flowTotal, fmtMwh, isProcessNode, periodLabel, sankeyData, share,
   type FlowNode, type FlowSankey,
 } from './energyFlows'
 
@@ -42,7 +42,7 @@ function FlowNodeShape(props: {
             dy={payload.column === 'via' ? 0 : '0.35em'}
             textAnchor={payload.column === 'via' ? 'middle' : anchor}
             fontSize={10} fill="currentColor">
-        {legendName(payload.name)}
+        {payload.column === 'source' && isProcessNode(payload.name) ? '' : legendName(payload.name)}
       </text>
     </Layer>
   )
@@ -225,6 +225,7 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
   const frameSource: ChartSource = shellPeriod == null && data.period != null && source.line
     ? { ...source, line: source.line.replace(/(?: · [^·]*→[^·]*)? · all periods$/, ` · period ${data.period}`) }
     : source
+  const hasProcess = data.rows.some(r => isProcessNode(r.destination))
   const lossShare = share(data.rows.filter(r => r.destination === 'Losses').reduce((s, r) => s + r.mwh, 0), total)
   const periods = data.periods.filter((p): p is number => p != null)
   const exportName = `energy_flows_${data.period ?? 'year'}`
@@ -260,7 +261,7 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
       <ChartSourceProvider value={frameSource}>
       <ChartFrame testId="ef-flow"
         title={`Energy flow · ${periodLabel(data.period)}`}
-        figure={graph.links.length ? chartFigure(fmtMwh(total), 'delivered or lost') : undefined}
+        figure={graph.links.length ? chartFigure(fmtMwh(total), hasProcess ? 'entered the site (MWh; process outputs left out)' : 'delivered or lost') : undefined}
         hint="source → via → destination"
         right={
           <ChartActions chartRef={graph.links.length ? chartRef : undefined} filename={exportName}
@@ -283,6 +284,13 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
           <div ref={chartRef} data-testid="ef-sankey"><FlowSankeyChart data={graph} width={sankeyWidth} /></div>
         ) : (
           <div data-testid="ef-empty"><ChartZero>No energy moved in this window.</ChartZero></div>
+        )}
+        {hasProcess && (
+          <p className="mt-1 text-[11px] text-muted" data-testid="ef-process-key">
+            Process &lt;name&gt;: the electricity into the process unit ends here, and what it
+            delivers starts again from here. All links are MWh; the “entered the site” total
+            leaves out the energy that restarts at a process unit.
+          </p>
         )}
         <p className="mt-1 text-[11px] text-muted">
           “Via” is Direct, or the storage the energy was last held in;
