@@ -599,3 +599,84 @@ def test_zero_magnetising_writes_the_case39_zeros(tmp_path):
     _h, _sw, recs, _t = read_raw((tmp_path / "t.raw").read_text())
     (rec,) = recs["TRANSFORMER"]
     assert rec[0][7:9] == ["0.00000", "0.00000"]
+
+
+# GK A2 (GC-20 plan): a power-flow oracle. pandapower's pi model splits the
+# magnetising shunt half to each end of the series impedance (MATPOWER BR_B/2);
+# PSS/E puts all of it at bus I. So the RAW, read back by gridspine's own PSS/E
+# import (which places MAG1/MAG2 as a shunt at bus I) and solved, is checked
+# twice: tightly against pandapower with the same shunt placed at the HV bus
+# (the PSS/E placement), and loosely against pandapower's own pi model, whose
+# measured placement gap here is 2.8e-4..3.2e-4 pu in |V| and 0.19 kW in losses.
+def _pf_net(tap_side, tap_pos, vn_lv_kv, slack):
+    import pandapower as pp
+
+    n = _trafo_net(tap_side)
+    n.trafo["tap_pos"] = tap_pos
+    n.trafo["vn_lv_kv"] = vn_lv_kv
+    n.trafo["pfe_kw"] = 30.0
+    n.trafo["i0_percent"] = 0.5
+    n.sn_mva = SBASE_MVA
+    n.bus["name"] = ["HV", "LV"]
+    src, sink = (0, 1) if slack == "hv" else (1, 0)
+    pp.create_ext_grid(n, src)
+    pp.create_load(n, sink, p_mw=10.0, q_mvar=2.0)
+    return n
+
+
+def _raw_pf(n, tmp_path):
+    from gridspine.ingest.psse_import import read_psse
+
+    write_raw(n, tmp_path / "t.raw")
+    m = read_psse([tmp_path / "t.raw"], {}).network
+    assert m.pf()["converged"].all().all()
+    v = m.buses_t.v_mag_pu.iloc[0][["HV", "LV"]].to_numpy()
+    a = np.degrees(m.buses_t.v_ang.iloc[0][["HV", "LV"]].to_numpy())
+    slack = n.ext_grid["bus"].iloc[0]
+    loss = m.generators_t.p.iloc[0].sum() - m.loads_t.p.iloc[0].sum()
+    return v, a - a[slack], loss
+
+
+def _pp_pf(n):
+    slack = n.ext_grid["bus"].iloc[0]
+    va = n.res_bus["va_degree"].to_numpy()
+    loss = n.res_ext_grid["p_mw"].sum() - n.res_load["p_mw"].sum()
+    return n.res_bus["vm_pu"].to_numpy(), va - va[slack], loss
+
+
+@pytest.mark.parametrize("tap_side, tap_pos, vn_lv_kv", _OFF_NOMINAL)
+@pytest.mark.parametrize("slack", ["hv", "lv"])
+def test_the_raw_power_flow_is_the_magnetising_shunt_at_bus_i(
+    tmp_path, tap_side, tap_pos, vn_lv_kv, slack
+):
+    import pandapower as pp
+
+    n = _pf_net(tap_side, tap_pos, vn_lv_kv, slack)
+    mag1, mag2 = trafo_magnetising(n, n.trafo.iloc[0])
+    n.trafo["pfe_kw"] = 0.0
+    n.trafo["i0_percent"] = 0.0
+    # pandapower shunt: P consumed and Q absorbed at 1 pu, so g = p, b = -q
+    pp.create_shunt(n, 0, p_mw=mag1 * SBASE_MVA, q_mvar=-mag2 * SBASE_MVA)
+    pp.runpp(n)
+    v, a, loss = _raw_pf(_pf_net(tap_side, tap_pos, vn_lv_kv, slack), tmp_path)
+    pv, pa, ploss = _pp_pf(n)
+    assert np.abs(v - pv).max() < 1e-6
+    assert np.abs(a - pa).max() < 1e-4  # degrees; R/X hold five decimals
+    assert abs(loss - ploss) < 1e-6  # MW
+
+
+@pytest.mark.parametrize("tap_side, tap_pos, vn_lv_kv", _OFF_NOMINAL)
+@pytest.mark.parametrize("slack", ["hv", "lv"])
+def test_the_raw_power_flow_is_pandapowers_within_the_placement_gap(
+    tmp_path, tap_side, tap_pos, vn_lv_kv, slack
+):
+    import pandapower as pp
+
+    n = _pf_net(tap_side, tap_pos, vn_lv_kv, slack)
+    pp.runpp(n, trafo_model="pi")
+    v, a, loss = _raw_pf(n, tmp_path)
+    pv, pa, ploss = _pp_pf(n)
+    assert np.abs(v - pv).max() < 5e-4
+    assert np.abs(a - pa).max() < 5e-3  # degrees
+    # about 60 kW of the ~63 kW loss is the iron loss; dropping MAG misses it
+    assert abs(loss - ploss) < 3e-4  # MW
