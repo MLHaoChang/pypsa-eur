@@ -2222,7 +2222,7 @@ def _grid_strength_rows(inp: _Inputs) -> list[dict]:
 
     Every edit path refuses such a pair, but an import (Excel workbook, DGS, PSS/E, legacy) loads it as the file
     gives it (C9). No row at all when no pair is reversed; no gate reads these two columns."""
-    from services.adequacy.eh_columns import sk_number
+    from services.adequacy.eh_columns import sk_number, sk_shown
 
     gens = getattr(inp.n, "generators", None)
     if gens is None or not {"sk_min_mva", "sk_max_mva"} <= set(gens.columns):
@@ -2236,8 +2236,8 @@ def _grid_strength_rows(inp: _Inputs) -> list[dict]:
             f"grid_strength_pair:{name}", "Minimum short-circuit power not above the maximum",
             limit=hi, unit="MVA", source="the generator's entered short-circuit powers", project_value=lo,
             verdict="warn", assumed=False,
-            note=(f"Generator {name}: the minimum short-circuit power ({lo:g} MVA) is above the maximum "
-                  f"({hi:g} MVA). It was imported as given; correct one of the two. No check reads these "
+            note=(f"Generator {name}: the minimum short-circuit power ({sk_shown(lo)} MVA) is above the maximum "
+                  f"({sk_shown(hi)} MVA). It was imported as given; correct one of the two. No check reads these "
                   "two values as they stand."),
             section="connection", target=_target("connection", "Generator", name, "sk_min_mva")))
     return rows

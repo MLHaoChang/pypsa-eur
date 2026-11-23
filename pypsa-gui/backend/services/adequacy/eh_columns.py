@@ -148,6 +148,11 @@ def sk_number(value) -> float | None:
     return None if math.isnan(v) else v
 
 
+def sk_shown(value: float) -> str:
+    """A short-circuit power at full precision, so two nearby values never read the same (1234567.89, not 1.23457e+06)."""
+    return format(Decimal(repr(float(value))).normalize(), "f")
+
+
 def check_grid_strength_pair(component_class: str, row, submitted=None) -> None:
     """A slack Generator's minimum short-circuit power never exceeds its maximum (catalogue 06, GK B X8).
 
@@ -163,8 +168,7 @@ def check_grid_strength_pair(component_class: str, row, submitted=None) -> None:
     lo, hi = sk_number(row.get("sk_min_mva")), sk_number(row.get("sk_max_mva"))
     if lo is not None and hi is not None and lo > hi:
         # The stated limit is the stored maximum at full precision, so entering it as the minimum passes.
-        shown = format(Decimal(repr(hi)).normalize(), "f")
-        raise ValueError(f"Minimum short-circuit power: it is above the maximum short-circuit power ({shown} MVA).")
+        raise ValueError(f"Minimum short-circuit power: it is above the maximum short-circuit power ({sk_shown(hi)} MVA).")
 
 
 def dc_ac_ratio(value, label: str | None = "DC/AC ratio") -> float:

@@ -321,44 +321,71 @@ def test_the_stated_limit_never_exceeds_the_true_maximum(client, install_network
     assert r.status_code == 200, r.text
 
 
-def test_the_readiness_flag_names_the_generator_and_both_values():
-    from services.adequacy import grid_readiness as G
+def _site(tmp_path, sk_min, sk_max):
+    """One PoC bus with a slack generator on it, and a campus description that states its own minimum case."""
+    import json
 
-    n = _net(sk_min=4000.0, sk_max=3000.0)
-    inp = G._Inputs("/nonexistent", n, None, "no profile", None, None)
-    rows = G._grid_strength_rows(inp)
-    assert [r["id"] for r in rows] == ["grid_strength_pair:g"]
-    assert rows[0]["verdict"] == "warn"
-    assert (
-        "Generator g" in rows[0]["note"]
-        and "4000" in rows[0]["note"]
-        and "3000" in rows[0]["note"]
-    )
-    assert (
-        G._grid_strength_rows(
-            G._Inputs("/nonexistent", _net(), None, "no profile", None, None)
+    n = pypsa.Network()
+    n.add("Bus", "grid", v_nom=110.0)
+    n.add("Generator", "g", bus="grid", carrier="AC", p_nom=10.0, control="Slack")
+    n.generators.loc["g", ["sk_min_mva", "sk_max_mva"]] = [sk_min, sk_max]
+    n.buses["eh_poc"] = [True]
+    n.buses["eh_sk_mva"] = [150.0]
+    (tmp_path / "campus_electrical").mkdir()
+    (tmp_path / "campus_electrical" / "campus_input.yaml").write_text(
+        json.dumps(
+            {
+                "campus": {
+                    "pcc": {
+                        "bus": "PCC",
+                        "pypsa_name": "grid",
+                        "vn_kv": 110.0,
+                        "sk_min_mva": 120.0,
+                        "sk_max_mva": 150.0,
+                    }
+                }
+            }
         )
-        == []
     )
+    return n
 
 
-def test_the_fault_level_gates_do_not_read_the_generator_pair():
-    """The minimum S_k'' that sizing, run gates and readiness use comes from the campus description (with none:
-    not evaluated), never from the slack generator's columns, so a reversed imported pair cannot pass a gate."""
+def test_the_scorecard_flags_a_reversed_pair_naming_the_generator_and_both_values(
+    tmp_path,
+):
+    """End to end through `grid_readiness`: the row exists, names the generator and tells two close values apart."""
+    from tests.test_grid_readiness import PROFILE, _rows
     from services.adequacy import grid_readiness as G
 
-    inp = G._Inputs(
-        "/nonexistent",
-        _net(sk_min=4000.0, sk_max=3000.0),
-        None,
-        "no profile",
-        None,
-        None,
+    rows = _rows(
+        G.grid_readiness(tmp_path, _site(tmp_path, 1234570.0, 1234567.89), PROFILE)
     )
-    assert G._poc_sk_min(inp) == (None, None)
+    row = rows["grid_strength_pair:g"]
+    assert row["verdict"] == "warn" and row["target"]["entity"] == "g"
+    assert (
+        "Generator g" in row["note"]
+        and "1234570 MVA" in row["note"]
+        and "1234567.89 MVA" in row["note"]
+    )
 
 
-def test_a_tick_is_never_read_as_a_number():
-    from services.adequacy.eh_columns import check_grid_strength_pair
+def test_the_scorecard_has_no_pair_row_when_the_pair_is_in_order(tmp_path):
+    from tests.test_grid_readiness import PROFILE, _rows
+    from services.adequacy import grid_readiness as G
 
-    check_grid_strength_pair("Generator", {"sk_min_mva": True, "sk_max_mva": 0.5})
+    rows = _rows(G.grid_readiness(tmp_path, _site(tmp_path, 1200.0, 3000.0), PROFILE))
+    assert not [i for i in rows if i.startswith("grid_strength_pair")]
+
+
+def test_the_fault_level_readers_take_the_campus_minimum_not_the_generator_pair(
+    tmp_path,
+):
+    """The minimum S_k'' that sizing, run gates and readiness use is the campus description's (120 MVA at 110 kV),
+    whatever a reversed generator pair says, so such a pair cannot pass a gate."""
+    from services.adequacy import grid_readiness as G
+
+    n = _site(tmp_path, 4000.0, 3000.0)
+    assert G._poc_sk_min(G._Inputs(tmp_path, n, None, "no profile", None, None)) == (
+        120.0,
+        110.0,
+    )
