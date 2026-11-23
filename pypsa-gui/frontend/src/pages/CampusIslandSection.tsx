@@ -237,7 +237,7 @@ export default function CampusIslandSection({ name }: { name: string }) {
 
   return (
     <div data-testid="island-section" data-panel-section="island">
-      <PageSection panelSection="island" title="Island" hint="Ride-through, the instant of islanding, and the cost of island capability">
+      <PageSection title="Island" hint="Ride-through, the instant of islanding, and the cost of island capability">
         {island.isError && <p className="text-[12px] text-danger mb-2">{errorText(island.error)}</p>}
         {refusal && <p className="text-[12px] text-danger mb-2" data-testid="island-refusal">{refusal}</p>}
         {stale && (
