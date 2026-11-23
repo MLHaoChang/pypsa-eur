@@ -24,7 +24,7 @@ import {
   ChartFrame, ChartSourceProvider, useChartSource, type ChartSource, ChartActions, ChartZero, chartFigure, LABEL_PASS, CHART_LEGEND, CHART_HEIGHT, carrierColour, directLabel, bandLabelIndices, legendName, fmtPower,
 } from './shared'
 import {
-  CSV_HEADER, csvRows, fmtMwh, periodLabel, sankeyData, share,
+  CSV_HEADER, csvRows, flowTotal, fmtMwh, isProcessNode, PROCESS_COLOR, periodLabel, sankeyData, share,
   type FlowNode, type FlowSankey,
 } from './energyFlows'
 
@@ -42,7 +42,7 @@ function FlowNodeShape(props: {
             dy={payload.column === 'via' ? 0 : '0.35em'}
             textAnchor={payload.column === 'via' ? 'middle' : anchor}
             fontSize={10} fill="currentColor">
-        {legendName(payload.name)}
+        {payload.column === 'source' && isProcessNode(payload.name) ? '' : legendName(payload.name)}
       </text>
     </Layer>
   )
@@ -65,7 +65,7 @@ type TipLink = {
   value?: number; rows?: Array<{ source: string; via: string; destination: string; mwh: number }>
 }
 
-function FlowTip({ active, payload }: {
+export function FlowTip({ active, payload }: {
   active?: boolean
   payload?: Array<{ payload?: { payload?: TipLink } }>
 }) {
@@ -119,7 +119,9 @@ function ConservationChip({ c }: { c: NonNullable<EnergyFlowsPayload['conservati
   const ok = c.status === 'ok'
   return (
     <span role="status" data-testid="ef-conservation" data-status={c.status}
-          title={`generation ${fmtMwh(c.generation_mwh)} = destinations ${fmtMwh(c.destinations_mwh)}`
+          title={`generation ${fmtMwh(c.generation_mwh)}`
+            + (c.process_output_mwh ? ` + process output ${fmtMwh(c.process_output_mwh)}` : '')
+            + ` = destinations ${fmtMwh(c.destinations_mwh)}`
             + ` + stored ${fmtMwh(c.storage_delta_mwh)}; residual ${c.residual_mwh.toExponential(1)} MWh`}
           className={`inline-block rounded border px-2 py-0.5 text-[11px] ${
             ok ? 'text-success border-success/40' : 'text-danger border-danger/40'}`}>
@@ -218,13 +220,14 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
 
   const win = data.window!
   const graph = sankeyData(data.rows)
-  const total = data.rows.reduce((s, r) => s + r.mwh, 0)
+  const total = flowTotal(data.rows)
   // With "all periods" chosen above, this tab still draws ONE period (its own
   // picker, the first by default): its charts' source line names that period
   // and drops the dates, which are the whole horizon's and not that period's.
   const frameSource: ChartSource = shellPeriod == null && data.period != null && source.line
     ? { ...source, line: source.line.replace(/(?: · [^·]*→[^·]*)? · all periods$/, ` · period ${data.period}`) }
     : source
+  const hasProcess = data.rows.some(r => isProcessNode(r.destination))
   const lossShare = share(data.rows.filter(r => r.destination === 'Losses').reduce((s, r) => s + r.mwh, 0), total)
   const periods = data.periods.filter((p): p is number => p != null)
   const exportName = `energy_flows_${data.period ?? 'year'}`
@@ -260,7 +263,7 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
       <ChartSourceProvider value={frameSource}>
       <ChartFrame testId="ef-flow"
         title={`Energy flow · ${periodLabel(data.period)}`}
-        figure={graph.links.length ? chartFigure(fmtMwh(total), 'delivered or lost') : undefined}
+        figure={graph.links.length ? chartFigure(fmtMwh(total), hasProcess ? 'entered the site; process outputs left out' : 'delivered or lost') : undefined}
         hint="source → via → destination"
         right={
           <ChartActions chartRef={graph.links.length ? chartRef : undefined} filename={exportName}
@@ -283,6 +286,15 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
           <div ref={chartRef} data-testid="ef-sankey"><FlowSankeyChart data={graph} width={sankeyWidth} /></div>
         ) : (
           <div data-testid="ef-empty"><ChartZero>No energy moved in this window.</ChartZero></div>
+        )}
+        {hasProcess && (
+          <p className="mt-1 text-[11px] text-muted" data-testid="ef-process-key">
+            <span className="mr-1 inline-block h-2 w-2 align-baseline" aria-hidden="true"
+                  style={{ background: PROCESS_COLOR }} data-testid="ef-process-swatch" />
+            Process &lt;name&gt;: the electricity into the process unit ends here, and what it
+            delivers starts again from here. All links are energy; the “entered the site” total
+            leaves out the energy that restarts at a process unit.
+          </p>
         )}
         <p className="mt-1 text-[11px] text-muted">
           “Via” is Direct, or the storage the energy was last held in;
