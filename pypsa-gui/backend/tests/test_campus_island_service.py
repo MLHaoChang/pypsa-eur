@@ -173,7 +173,8 @@ def hub(client, _auth_db, seeded_identity):
 
 @pytest.mark.parametrize("method, path, function, payload, expected_args", [
     ("get", "/island", "get_island", None, ()),
-    ("put", "/island", "save_island", {"config": {"units": {}}}, ({"units": {}},)),
+    ("put", "/island", "save_island", {"config": {"units": {}}}, ({"units": {}}, None)),
+    ("put", "/island", "save_island", {"config": {"units": {}}, "base": "r1"}, ({"units": {}}, "r1")),
     ("patch", "/island", "patch_island", {"patch": {"requirements": {}}, "base": "r1"},
      ({"requirements": {}}, "r1")),
     ("patch", "/island", "patch_island", {"patch": {"units": {}}}, ({"units": {}}, None)),

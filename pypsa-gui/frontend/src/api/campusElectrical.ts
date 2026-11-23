@@ -1136,9 +1136,11 @@ export const campusApi = {
   island: (project: string) =>
     client.get<IslandState>(`${base(project)}/island`, quiet).then(r => r.data),
 
-  /** Save the island sidecar; 422 names the field, 413 over 256 kB. Drops the old study. */
-  saveIsland: (project: string, config: IslandConfig) =>
-    client.put<IslandState>(`${base(project)}/island`, { config }, quiet).then(r => r.data),
+  /** Save the island sidecar; 422 names the field, 413 over 256 kB. Drops the old study.
+   *  409 `{error_kind: island_config_changed}` when `base` is not the stored revision. */
+  saveIsland: (project: string, config: IslandConfig, revision?: string | null) =>
+    client.put<IslandState>(`${base(project)}/island`,
+      revision == null ? { config } : { config, base: revision }, quiet).then(r => r.data),
 
   /** Change some island fields. 422 detail opens with the field path; 409
    *  `{error_kind: island_config_changed}` when `base` is not the stored revision. */

@@ -106,6 +106,9 @@ class IslandConfigBody(BaseModel):
     #: The raw sidecar; gridspine's schema validates it in the service (422
     #: naming the field) and the service caps its size (413).
     config: dict
+    #: The ``revision`` the editor read (GET); a changed sidecar is a 409, so a
+    #: whole-config save cannot drop a change made since (optional, as on PATCH).
+    base: str | None = None
 
 
 class IslandStudyBody(BaseModel):
@@ -450,9 +453,10 @@ def save_island(
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ):
-    """Save the island sidecar, validated by gridspine's schema."""
+    """Save the island sidecar, validated by gridspine's schema. A stale
+    ``base`` is a 409 ``island_config_changed``."""
     _check_lock(proj, db, user)
-    return ce.save_island(_row(proj, db), body.config)
+    return ce.save_island(_row(proj, db), body.config, body.base)
 
 
 @router.patch("/{name}/island")

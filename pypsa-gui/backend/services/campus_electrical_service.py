@@ -1551,7 +1551,9 @@ def get_island(project) -> dict:
 
     require_capacity_expansion(project)
     sidecar, study = _island_paths(project)
-    config = json.loads(sidecar.read_text()) if sidecar.is_file() else None
+    # One read: the revision is the hash of the very bytes parsed (GK B3 (6)).
+    raw = sidecar.read_bytes() if sidecar.is_file() else None
+    config = json.loads(raw) if raw is not None else None
     services, warnings = None, []
     if config is not None:
         try:
@@ -1563,7 +1565,7 @@ def get_island(project) -> dict:
     return {"config": config,
             # The sidecar's content hash: a PATCH passes it back as ``base`` and
             # is refused (409) when the file changed since (GK B3 K1).
-            "revision": island_revision(sidecar),
+            "revision": _revision(raw),
             "study": json.loads(study.read_text()) if study.is_file() else None,
             # When the study was written (UTC, ISO 8601): the Results tab says "run <date>".
             "study_at": (datetime.fromtimestamp(study.stat().st_mtime, tz=timezone.utc).isoformat(timespec="seconds")
@@ -1597,11 +1599,19 @@ def select_island_preset(project, preset: str | None) -> dict:
     if not sidecar.is_file():
         raise HTTPException(status_code=422, detail="the project has no island_config.json; "
                                                     "save the island requirements first")
-    try:
-        raw, skipped = select_preset(json.loads(sidecar.read_text()), preset, _fixed_ratings(project))
-    except ContractError as exc:
-        raise _unprocessable(exc)
-    return {**save_island(project, raw), "skipped": skipped}
+    ratings = _fixed_ratings(project)            # the network, read before the sidecar lock
+    # Read, select and write under the sidecar's lock, like PUT and PATCH, so a
+    # concurrent edit is not overwritten by a preset made from an older file.
+    with _lock(sidecar):
+        if not sidecar.is_file():
+            raise HTTPException(status_code=422, detail="the project has no island_config.json; "
+                                                        "save the island requirements first")
+        try:
+            raw, skipped = select_preset(json.loads(sidecar.read_text()), preset, ratings)
+        except ContractError as exc:
+            raise _unprocessable(exc)
+        _write_island(project, raw)
+    return {**get_island(project), "skipped": skipped}
 
 
 def checked_island_text(project, config: dict) -> str:
@@ -1621,13 +1631,16 @@ def checked_island_text(project, config: dict) -> str:
     return text
 
 
-def save_island(project, config: dict) -> dict:
+def save_island(project, config: dict, base: str | None = None) -> dict:
     """Validate the island sidecar with gridspine's schema and write it; a
     bad one is a 422 naming the field and leaves the previous file. The
     last study was made with the old sidecar, so it goes. Returns
-    ``get_island``. Writes under the sidecar's lock, like ``patch_island``."""
+    ``get_island``. Writes under the sidecar's lock, like ``patch_island``,
+    and a ``base`` that is not the current ``revision`` is the same 409, so a
+    whole-config save cannot drop a change made since it was read."""
     sidecar, _ = _island_paths(project)
     with _lock(sidecar):
+        _check_base(sidecar, base)
         _write_island(project, config)
     return get_island(project)
 
@@ -1644,9 +1657,25 @@ def _write_island(project, config: dict) -> None:
     study.unlink(missing_ok=True)
 
 
+def _revision(raw: bytes | None) -> str | None:
+    """The content hash (sha256 hex) of sidecar bytes, None for no sidecar."""
+    return hashlib.sha256(raw).hexdigest() if raw is not None else None
+
+
 def island_revision(sidecar: Path) -> str | None:
     """The sidecar's content hash (sha256 hex), None when it has none."""
-    return hashlib.sha256(sidecar.read_bytes()).hexdigest() if sidecar.is_file() else None
+    return _revision(sidecar.read_bytes() if sidecar.is_file() else None)
+
+
+def _check_base(sidecar: Path, base: str | None) -> None:
+    """A ``base`` that is not the current revision is a 409
+    ``island_config_changed``; None skips the check (GK B3 K1). The caller
+    holds ``_lock(sidecar)``."""
+    if base is not None and base != island_revision(sidecar):
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "island_config_changed",
+            "message": "The island settings changed since you opened them. Reload and try again.",
+        })
 
 
 #: The keys a PATCH may change: the per-unit settings (section 5's Controls
@@ -1672,7 +1701,23 @@ def _merge_value(where: str, old, new):
         if isinstance(new, dict):
             raise _bad_patch(where, "send the number only; its source is set by the server")
         return old if new == old["value"] else {"value": new, "source": EDITED_SOURCE}
+    if old is None:
+        # A field the sidecar does not have yet: every number (a list or curve
+        # is one value) is tagged in gridspine's schema, so a new number takes
+        # the server's source, and a client-sent source is refused (GK B3 K2).
+        if isinstance(new, dict) and "source" in new:
+            raise _bad_patch(where, "send the number only; its source is set by the server")
+        if _is_number(new):
+            return {"value": new, "source": EDITED_SOURCE}
     return new
+
+
+def _is_number(v) -> bool:
+    """A number, or a list (curve) of numbers or of lists of numbers; bools
+    (flags) and names are not."""
+    if isinstance(v, list):
+        return bool(v) and all(_is_number(x) for x in v)
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
 def merge_island_patch(config: dict, patch: dict) -> None:
@@ -1716,11 +1761,7 @@ def patch_island(project, patch: dict, base: str | None = None) -> dict:
     with _lock(sidecar):
         if not sidecar.is_file():
             raise _bad_patch("island config", "the project has none yet; choose a preset first")
-        if base is not None and base != island_revision(sidecar):
-            raise HTTPException(status_code=409, detail={
-                "error_kind": "island_config_changed",
-                "message": "The island settings changed since you opened them. Reload and try again.",
-            })
+        _check_base(sidecar, base)
         config = json.loads(sidecar.read_text())
         merge_island_patch(config, patch)
         _write_island(project, config)
