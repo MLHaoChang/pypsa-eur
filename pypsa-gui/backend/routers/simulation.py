@@ -650,7 +650,7 @@ def _reserve_refusal(n, config) -> dict | None:
     if not products:
         return None
     try:
-        floors, strings = RP.project_backup(n)
+        floors, strings = RP.project_backup(n, config)
         RP.plan(n, products, floors, strings)
     except RP.ReserveRefusal as exc:
         return {**_RESERVE_REFUSALS[exc.kind], "code": exc.kind, "message": str(exc)}

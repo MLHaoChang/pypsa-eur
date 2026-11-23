@@ -225,6 +225,8 @@ def derive_backup(
 def attested_of(cfg) -> list[str]:
     """The config's ``reserve_no_backup_storages`` (the solve's plain dict or the
     typed model); [] when it holds none or the value is not a list of names."""
+    if isinstance(cfg, dict) and "commercial" in cfg:
+        cfg = cfg["commercial"]  # a whole solver-config dict
     commercial = getattr(cfg, "commercial", cfg)
     raw = (
         commercial.get("reserve_no_backup_storages")

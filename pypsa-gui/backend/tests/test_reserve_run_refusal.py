@@ -35,7 +35,7 @@ def test_every_kind_has_a_literal_emitter_and_a_fragment_entry():
 def _refusal(n, products, floors, monkeypatch, bind=True):
     if bind:
         _bind(n, products, {p.id: 1.0 for p in products})
-    monkeypatch.setattr(RP, "project_backup", lambda _n: (floors, frozenset({STRING})))
+    monkeypatch.setattr(RP, "project_backup", lambda _n, _cfg=None: (floors, frozenset({STRING})))
     return SIM._reserve_refusal(n, _cfg(products))
 
 

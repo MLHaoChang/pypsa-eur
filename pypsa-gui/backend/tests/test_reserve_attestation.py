@@ -313,6 +313,10 @@ def test_attested_of_reads_only_a_list_of_names():
     assert RP.attested_of({"reserve_no_backup_storages": [1, BESS]}) == []
     assert RP.attested_of({"reserve_no_backup_storages": BESS}) == []
     assert RP.attested_of(None) == []
+    assert RP.attested_of(
+        {"commercial": {"reserve_no_backup_storages": [BESS]}}) == [BESS]
+    assert RP.attested_of(SimpleNamespace(
+        commercial={"reserve_no_backup_storages": [BESS]})) == [BESS]
 
 
 def test_another_templates_project_reads_its_sidecar_roles(tmp_path):
@@ -347,3 +351,30 @@ def test_the_not_eligible_text_names_the_storage_or_says_none():
             RP.plan(n, [p], {}, frozenset())
         head = str(e.value).split(". Only")[0]
         assert want in head and not_want not in head.split(": ", 1)[1]
+
+
+def test_the_views_read_the_attestation_of_the_config_they_are_given(
+    tmp_path, monkeypatch
+):
+    """The reserve view and the settlement read floors from the config they
+    settle, not from whatever the project holds now."""
+    from services.pypsa_service import PyPSAService
+    from services.results.billing import reserve_lines
+    from services.results.reserves import reserve_view
+
+    n = _plain_project(tmp_path, _bess_site())
+    p = _product()
+    frame = _solve_attested(n, [p])
+    assert frame[f"{BESS}|fcr"].to_numpy().sum() > 0
+    # The project now holds no attestation; the solved config did.
+    monkeypatch.setattr(PyPSAService, "solve_target_context", lambda: SimpleNamespace(
+        storage_dir=str(tmp_path), solver_state={"solver_config": _cfg([p])}))
+    solved_cfg = SimpleNamespace(commercial=SimpleNamespace(
+        reserve_products=[p], reserve_no_backup_storages=[BESS]))
+    lines, _flags = reserve_lines(n, solved_cfg)
+    # r = 10 (power) at soc 5 on 10 MWh with sustain 0.5 h: 4 h x 10 x 10.
+    assert [ln.amount for ln in lines] == [pytest.approx(400.0, rel=1e-6)]
+    view = reserve_view(n, solved_cfg, solved=True)
+    assert view is not None and BESS in str(view)
+    stale, _ = reserve_lines(n, _cfg([p]))
+    assert all(ln.amount is None for ln in stale)
