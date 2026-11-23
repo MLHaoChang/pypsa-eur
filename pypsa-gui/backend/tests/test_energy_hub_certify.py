@@ -251,14 +251,14 @@ def test_below_floor_note_names_the_floor_and_the_runs_needed():
     assert verdict == "inconclusive"
     # Per year: goal 3 h/yr, floor 52.1 h/yr at 1 draw; 104.2 / 6 → 18 draws.
     assert note == ("target 3 h/yr is below the MC resolution floor 52.1 h/yr "
-                    "at 1 draws: at least 18 draws resolve it")
+                    "at 1 draw: at least 18 draws resolve it")
 
 
 def test_below_floor_note_for_a_zero_goal_says_no_draw_count_resolves_it():
     _v, note = S.certification_verdict(
         lole_ci=(0.0, 0.0), target_h=0.0, resolution_floor_h=52.1, n_samples=1)
     assert note == ("target 0 h/yr is below the MC resolution floor 52.1 h/yr "
-                    "at 1 draws: no draw count resolves a zero target")
+                    "at 1 draw: no draw count resolves a zero target")
 
 
 @pytest.mark.parametrize("floor,n,target", [
@@ -338,3 +338,14 @@ def test_runs_check_ignores_zero_weight_snapshots():
     n = _weighted_network()
     n.snapshot_weightings.loc[n.snapshots[0], :] = 0.0
     assert "set at least 18." in S.draws_short_of_target(n, _goal_pack(3.0 * 168 / 167), 1)
+
+
+def test_below_floor_note_counts_one_draw_and_many_draws():
+    """UX 3 on #1927: '1 draw', '18 draws' (the Expert panel shows this note)."""
+    _v, one = S.certification_verdict(lole_ci=(0.0, 0.0), target_h=3.0,
+                                      resolution_floor_h=52.1, n_samples=1)
+    _v, many = S.certification_verdict(lole_ci=(0.0, 0.0), target_h=3.0,
+                                       resolution_floor_h=52.1 / 18 * 1.5,
+                                       n_samples=18)
+    assert "at 1 draw:" in one and "at 1 draws" not in one
+    assert "at 18 draws:" in many

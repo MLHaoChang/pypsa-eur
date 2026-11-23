@@ -74,10 +74,10 @@ describe('certificationHeadline.next', () => {
   it('inconclusive below the floor → the minimum draws', () => {
     expect(certificationHeadline(report({ verdict: 'inconclusive', target_lole_h: 3,
       below_floor: true, min_draws: 18 }))!.next).toBe(
-      'Next: raise the MC draws in the reliability goal to at least 18; the goal is under the smallest shortfall fewer draws can show, so a tighter plan does not settle it.')
+      'Next: raise the simulation runs per check to at least 18. With fewer, the smallest shortfall it can show is above your goal, so a tighter plan cannot settle it.')
     expect(certificationHeadline(report({ verdict: 'inconclusive', target_lole_h: 0,
       below_floor: true, min_draws: null }))!.next).toBe(
-      'Next: allow some shortfall in the reliability goal; no number of MC draws can show that a 0 h/yr goal is met.')
+      'Next: allow some shortfall in the reliability goal. No number of simulation runs can show that a 0 h/yr goal is met.')
     expect(certificationHeadline(report({ verdict: 'inconclusive', target_lole_h: 3,
       below_floor: false }))!.next).toBe(INCONCLUSIVE_NEXT)
   })

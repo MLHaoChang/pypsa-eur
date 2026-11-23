@@ -305,8 +305,8 @@ function feederNext(fb: unknown): string {
  *  tighter plan does not. */
 export function belowFloorNext(minDraws: unknown): string {
   return typeof minDraws === 'number' && Number.isFinite(minDraws)
-    ? `Next: raise the MC draws in the reliability goal to at least ${minDraws}; the goal is under the smallest shortfall fewer draws can show, so a tighter plan does not settle it.`
-    : 'Next: allow some shortfall in the reliability goal; no number of MC draws can show that a 0 h/yr goal is met.'
+    ? `Next: raise the simulation runs per check to at least ${minDraws}. With fewer, the smallest shortfall it can show is above your goal, so a tighter plan cannot settle it.`
+    : 'Next: allow some shortfall in the reliability goal. No number of simulation runs can show that a 0 h/yr goal is met.'
 }
 
 /** MC certification headline from the `certification` section, if it ran. */

@@ -477,7 +477,7 @@ def certification_verdict(*, lole_ci, target_h: float | None,
         return "inconclusive", (
             f"target {target_h / years:g} h/yr is below the MC resolution "
             f"floor {float(resolution_floor_h) / years:g} h/yr at "
-            f"{n_samples} draws: " + (
+            f"{n_samples} draw{'' if n_samples == 1 else 's'}: " + (
                 f"at least {need} draws resolve it" if need is not None
                 else "no draw count resolves a zero target"))
     if hi <= target_h:
