@@ -164,10 +164,14 @@ def _gfm_rows(campus, uid, block, num, mid):
     return rows
 
 
-def export_campus_bundle(outdir, campus, rows, hour, ledger=()) -> CampusBundle:
+def export_campus_bundle(outdir, campus, rows, hour, ledger=(), *, plant=None, model_set=None,
+                         variant=None) -> CampusBundle:
     """Write the bundle for one island ``hour`` (a label) from that hour's
     rows of the campus hourly table. ``ledger`` adds the caller's entries
-    to the README's."""
+    to the README's. ``plant`` (the aggregated plant, a ``psse_pack.Plant``)
+    and ``model_set``/``variant`` (the GC-01 model set) go to the PSS/E
+    pack, which then writes REPCA1, the psspy scripts and the citation;
+    the bundle's own files do not change with them."""
     case = f"{campus.name}_{hour}"
     out = Path(outdir) / case
     out.mkdir(parents=True, exist_ok=True)
@@ -220,7 +224,8 @@ def export_campus_bundle(outdir, campus, rows, hour, ledger=()) -> CampusBundle:
                 "omitted": [u for u, _ in omitted], "pending_verification": PENDING,
                 "event": {"kind": "islanding", "trip_machine": list(grid_id) if grid_id else None, "t_s": 0.0}}
     from gridspine.handoff.psse_pack import SUBDIR, write_psse_pack  # noqa: PLC0415 (GC-04 pack, one call)
-    manifest["psse_pack"] = write_psse_pack(out / SUBDIR, hour_campus, case, lines, grid_id)
+    manifest["psse_pack"] = write_psse_pack(out / SUBDIR, hour_campus, case, lines, grid_id, plant=plant,
+                                            model_set=model_set, variant=variant)
     from gridspine.handoff.emt_pack import bundle_emt_pack  # GC-06 EMT pack; local import
     manifest["emt_pack"] = bundle_emt_pack(out, hour_campus, rows)
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
