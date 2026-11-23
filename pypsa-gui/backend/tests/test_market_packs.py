@@ -409,9 +409,7 @@ def test_a_cleared_export_pick_is_never_re_filled_after_a_link_detour():
     assert {"cell": MP.EXPORT_CELL, "reason": "no_export_link"} in no_link["kept"]
     assert no_link["applied"][MP.EXPORT_CELL] == full
     # The user adds the Link back; the pick stays cleared.
-    back = MP.plan_apply(
-        pack, {**mine, "export_link": "export"}, _pin(pack, no_link)
-    )
+    back = MP.plan_apply(pack, {**mine, "export_link": "export"}, _pin(pack, no_link))
     assert back["commercial"].get("export_price_ref") is None
     assert back["changes"] == []
     assert back["conflicts"] == [
