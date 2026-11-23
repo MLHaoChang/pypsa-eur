@@ -439,7 +439,11 @@ def _channel_lines(case):
             "psspy.branch_p_and_q_channel([-1, -1, -1, BR_FROM, BR_TO], BR_CKT, "
             "['raw_p_poc_mw', 'raw_q_poc_mvar'])"
         )
-    for name, code in (("raw_id_pu", 22), ("raw_iq_pu", 23), ("raw_i_term_pu", ITERM_CODE)):
+    for name, code in (
+        ("raw_id_pu", 22),
+        ("raw_iq_pu", 23),
+        ("raw_i_term_pu", ITERM_CODE),
+    ):
         if name in raw:
             out.append(
                 f"psspy.machine_array_channel([-1, {code}, PLANT_BUS], PLANT_ID, {name!r})"

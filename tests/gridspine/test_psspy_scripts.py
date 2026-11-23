@@ -407,10 +407,20 @@ def test_the_current_is_rebased_from_mbase_to_the_plant_rating(pack):
     # ITERM is pu on the machine's MBASE as the case holds it; the contract is pu
     # on S_rated: 0.5 pu on 100 MVA is 50 MVA at 1 pu V, 0.625 pu on 80 MVA.
     ns = _pure(pack[1]["phase_jump_skmin_xrmin_up"])
-    rec = {k: [0.0] for k in (
-        "t_s", "raw_v_poc_pu", "raw_theta_poc_deg", "raw_theta_src", "raw_f_hz",
-        "raw_p_poc_mw", "raw_q_poc_mvar", "raw_id_pu", "raw_iq_pu",
-    )}
+    rec = {
+        k: [0.0]
+        for k in (
+            "t_s",
+            "raw_v_poc_pu",
+            "raw_theta_poc_deg",
+            "raw_theta_src",
+            "raw_f_hz",
+            "raw_p_poc_mw",
+            "raw_q_poc_mvar",
+            "raw_id_pu",
+            "raw_iq_pu",
+        )
+    }
     rec["raw_i_term_pu"] = [0.5]
     assert ns["_convert"](rec, 50.0, 80.0, 100.0)["i_poc_pu"] == [0.625]
     assert ns["_convert"](rec, 50.0, 100.0, 80.0)["i_poc_pu"] == [0.4]
@@ -420,7 +430,9 @@ def test_the_current_is_rebased_from_mbase_to_the_plant_rating(pack):
 def test_the_current_does_not_depend_on_the_voltage_base(tmp_path, poc_kv):
     # In pu a nominal-ratio transformer leaves the current unchanged; the
     # conversion carries no kV, so the PoC's base kV cannot reach it.
-    out = write_scripts([_flat(("i_poc_pu",))], str(tmp_path), **{**KW, "poc_kv": poc_kv})
+    out = write_scripts(
+        [_flat(("i_poc_pu",))], str(tmp_path), **{**KW, "poc_kv": poc_kv}
+    )
     ns = _pure((tmp_path / out[CID]).read_text(encoding="utf-8"))
     rec = {"t_s": [0.0], "raw_i_term_pu": [0.9]}
     assert ns["_convert"](rec, 50.0, 80.0, 80.0)["i_poc_pu"] == [0.9]
