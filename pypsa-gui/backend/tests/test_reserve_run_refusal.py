@@ -160,7 +160,7 @@ def test_the_put_refuses_ride_through_storage(monkeypatch, tmp_path):
 
 
 def test_the_put_keeps_a_storage_with_no_backup_role(monkeypatch, tmp_path):
-    from tests.test_reserve_products import _bess_site
+    from tests.test_reserve_attestation import _bess_site
 
     assert _put_check(monkeypatch, tmp_path, _bess_site(), ["bess"]) is None
     assert _put_check(monkeypatch, tmp_path, _bess_site(), []) is None
