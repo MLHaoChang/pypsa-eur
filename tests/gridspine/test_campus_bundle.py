@@ -212,3 +212,58 @@ def test_a_control_record_with_a_missing_value_is_refused():
     with pytest.raises(ContractError, match="te"):
         format_record(3, "1", "SEXS", {"ta_tb": 0.1, "tb": 10.0, "k": 50.0, "emin": 0.0, "emax": 4.0})
     assert format_record(3, "1", "GENCLS", {"h": 0.0, "d": 0.0}) == "     3 'GENCLS' '1 '    0.00000   0.00000 /"
+
+
+# GC-04c: the bundle hands the aggregated plant and the GC-01 model set to its PSS/E pack
+
+
+def _plant_and_model_set():
+    import datetime
+
+    from gridspine.handoff.dyr_writer import PocBranch
+    from gridspine.handoff.psse_pack import Plant
+    from gridspine.schema.model_set import new_model_set
+
+    ms = new_model_set(spec(), {"hour": "h18"}, now=datetime.datetime(2026, 11, 17, tzinfo=datetime.UTC))
+    return Plant("PV1", PocBranch("trafo", 0, 0)), ms  # TR1, grid end at the PCC
+
+
+def test_a_bundle_given_the_plant_and_model_set_writes_repca1_scripts_and_the_citation(tmp_path):
+    from gridspine.handoff.psse_pack import SUBDIR
+    from gridspine.schema.model_set import manifest as model_set_manifest
+    from tests.gridspine.test_dyr_wecc import _records
+
+    plant, ms = _plant_and_model_set()
+    b = CB.export_campus_bundle(tmp_path, build_campus(spec()), rows(), "h18", plant=plant, model_set=ms,
+                                variant="detailed")
+    pack = b.path / SUBDIR
+    m = json.loads((pack / "manifest.json").read_text())
+    assert json.loads(read(b, "manifest.json"))["psse_pack"] == m
+    recs = _records((pack / f"{m['case']}.dyr").read_text())
+    pcc = next(bus for bus, model, _i, _t in recs if model == "GENCLS")
+    pv = next(bus for bus, model, _i, _t in recs if model == "REGCA1")
+    repc = [t for _b, model, _i, t in recs if model == "REPCA1"]
+    assert len(repc) == 1
+    assert tuple(int(x) for x in repc[0][:3]) == (pcc, pv, pcc)
+    scripts = sorted(f for f in m["files"] if f.startswith("run_"))
+    assert scripts and len(scripts) == len(m["outputs"])
+    assert sorted(p.name for p in pack.glob("run_*.py")) == scripts
+    assert m["model_set"] == model_set_manifest(ms, "detailed")
+    assert m["plant_controller_not_written"] is None and m["scripts_not_written"] is None
+
+
+def test_the_plant_and_model_set_leave_the_bundles_own_files_byte_identical(tmp_path):
+    plant, ms = _plant_and_model_set()
+    _camp, a = bundle(tmp_path / "bare")
+    b = CB.export_campus_bundle(tmp_path / "wired", build_campus(spec()), rows(), "h18", plant=plant,
+                                model_set=ms, variant="detailed")
+    for name in (f"{a.path.name}.raw", f"{a.path.name}.dyr", "README.md", "gfm_models.csv"):
+        assert (a.path / name).read_bytes() == (b.path / name).read_bytes(), name
+
+
+def test_a_bundle_given_a_model_set_without_its_variant_is_refused(tmp_path):
+    from gridspine.schema.contracts import ContractError
+
+    _plant, ms = _plant_and_model_set()
+    with pytest.raises(ContractError, match="model_set and its variant together"):
+        CB.export_campus_bundle(tmp_path, build_campus(spec()), rows(), "h18", model_set=ms)
