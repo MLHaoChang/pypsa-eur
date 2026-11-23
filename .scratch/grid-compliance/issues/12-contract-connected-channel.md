@@ -68,3 +68,5 @@ Merge order: PR-A any time; PR-B after #1608 and #1609; PR-C after PR-A. Item 4 
 - T11 PR-B: contract test: CSV text from psspy_scripts' converter on a hand-literal table (a V = 0 row, a failed poll, a trip) is read by channels.read_csv and checked against literal values; the old header is refused, the new one read.
 - T12 PR-B: the body states master's PSS/E results are unreadable today (#1607), with a one-line release fragment. Hand mutants: bare-name header, status column restored, blank I read as 0; name the killing test for each.
 - PR-D: a literal -1 (the not-read marker) in a `connected` status column is refused per case, tested in both the CSV and PSCAD readers.
+
+- 2026-11-23 status sweep: landed in #1647 (edd9e7bb); #1708 (4643ab46): v2 contract, EMT pack connected channel, read-back v2. Remains: PR-B, the PSS/E per-case CSV connected export.
