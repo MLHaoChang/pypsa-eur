@@ -406,3 +406,72 @@ def test_the_views_read_the_attestation_of_the_config_they_are_given(
     assert view is not None and BESS in str(view)
     stale, _ = reserve_lines(n, _cfg([p]))
     assert all(ln.amount is None for ln in stale)
+
+
+# GK A K1 (W1 ruling): literals computed by master's own functions on a clean
+# origin/master 8a5b1296 worktree, on the same fixture (the hybrid DC project
+# plus a storage "bess" with no backup role).
+MASTER_FLOORS = {
+    "backup_bess_1": 22.208407953709422,
+    "backup_bess_2": 22.208407953709422,
+    "backup_bess_3": 22.208407953709422,
+    "backup_bess_4": 22.208407953709422,
+    "backup_bess_spare_1": 22.208407953709422,
+    "bess_new": 8.06872084649982,
+}
+MASTER_STRINGS = [
+    "backup_bess_1",
+    "backup_bess_2",
+    "backup_bess_3",
+    "backup_bess_4",
+    "backup_bess_spare_1",
+]
+MASTER_INPUTS_DIGEST = (
+    "523b2dcc47d033b3f4c336716fcbc2d755b1fddbf6dd6cf0672b1754a6cc39da"
+)
+MASTER_FP_PLAIN = "4cd91e31fcad778afaf0ef46e0fbde89f7eec6b185126a43389b720fe7a17f0f"
+MASTER_FP_PRODUCTS = "c3146876a727aa76625fc9d1e4ac8cb749b2637d6a58423c049f512fee62b92b"
+
+
+def test_b3_without_an_attestation_the_floors_digest_and_fingerprints_are_masters(
+    tmp_path,
+):
+    from models.commercial import CommercialConfig
+    from services.solver_service import SolverConfig
+    from services.workflow_tools import _network_input_fingerprint
+
+    n = _dc_project(tmp_path, {"mode": "hybrid"})
+    n.add(
+        "StorageUnit", BESS, bus=n.storage_units.bus.iloc[0], p_nom=1.0, max_hours=1.0
+    )
+    every = _product()
+    for attested in ((), []):
+        floors, strings = RP.derive_backup(n, tmp_path, attested)
+        assert floors == MASTER_FLOORS
+        assert sorted(strings) == MASTER_STRINGS
+        assert RP.inputs_digest([every], floors) == MASTER_INPUTS_DIGEST
+
+    def fp(cfg):
+        return _network_input_fingerprint(
+            SimpleNamespace(
+                network=n,
+                solver_state={"solver_config": cfg},
+                user_ts={},
+                storage_dir=str(tmp_path),
+            )
+        )
+
+    def products(**kw):
+        return SolverConfig(
+            commercial=CommercialConfig(
+                poc_link="poc", reserve_products=[every], **kw
+            ).model_dump(mode="json")
+        )
+
+    assert fp(SolverConfig()) == MASTER_FP_PLAIN
+    assert fp(products()) == MASTER_FP_PRODUCTS
+    assert fp(products(reserve_no_backup_storages=[])) == MASTER_FP_PRODUCTS
+    # With one, the digest and the fingerprint move.
+    widened, _ = RP.derive_backup(n, tmp_path, [BESS])
+    assert RP.inputs_digest([every], widened) != MASTER_INPUTS_DIGEST
+    assert fp(products(reserve_no_backup_storages=[BESS])) != MASTER_FP_PRODUCTS
