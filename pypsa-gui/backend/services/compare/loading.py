@@ -112,8 +112,6 @@ def _compute_loading_summary(n, periods, is_multi, has_solve) -> LoadingComparis
                 (loading.fillna(0.0) >= 0.99).astype(float).mul(weights_present).sum()
             )
 
-            if assumed:  # an assumed rating never binds: no binding hours are claimed
-                binding_total = 0.0
             peak_pp: dict[str, float] = {}
             mean_pp: dict[str, float] = {}
             binding_pp: dict[str, float] = {}
@@ -145,7 +143,7 @@ def _compute_loading_summary(n, periods, is_multi, has_solve) -> LoadingComparis
                             if wsum > 0 else 0.0
                         )
                         try:
-                            binding_pp[str(p)] = 0.0 if assumed else float(by_period_binding.loc[p])
+                            binding_pp[str(p)] = float(by_period_binding.loc[p])
                         except KeyError:
                             binding_pp[str(p)] = 0.0
                 except Exception:
@@ -158,7 +156,10 @@ def _compute_loading_summary(n, periods, is_multi, has_solve) -> LoadingComparis
                 carrier=link_carrier,
                 peak_loading=CarrierPeriodValue(total=peak_total, by_period=peak_pp),
                 mean_loading=CarrierPeriodValue(total=mean_total, by_period=mean_pp),
-                binding_hours=CarrierPeriodValue(total=binding_total, by_period=binding_pp),
+                # an assumed rating is not evaluated: None, never a 0 that reads as a pass
+                binding_hours=None if assumed else CarrierPeriodValue(
+                    total=binding_total, by_period=binding_pp
+                ),
                 rating_assumed=assumed,
             ))
 

@@ -240,6 +240,9 @@ def calculate(raw, scope):
                 "max_branch_utilisation": max(v["peak_branch_utilisation"] for v in values.values()),
                 "branches_above_rating": sum(v["_above"] for v in values.values()),
             }
+            if all(v["_assumed"] for v in values.values()):
+                # nothing was judged: a total of 0 would read as a pass (#1409 F1)
+                available.pop("branches_above_rating")
         else:
             available = {k: v for k, v in next(iter(values.values())).items() if not k.startswith("_")}
             if next(iter(values.values()))["_assumed"]:
@@ -267,8 +270,10 @@ def calculate(raw, scope):
         else:
             slot["reason"] = (
                 "unverified_solve" if not raw["valid_solve"]
-                else "rating_assumed" if metric == "hours_above_rating" and any(
-                    b.get("rating_assumed") for b in raw["branches"].values())
+                else "rating_assumed" if metric in ("hours_above_rating", "branches_above_rating")
+                and any(b.get("rating_assumed") for b in raw["branches"].values())
+                and (metric == "hours_above_rating" or all(
+                    b.get("rating_assumed") for b in raw["branches"].values()))
                 else "invalid_or_missing_branch_data" if metric in definitions
                 else "unsupported_metric"
             )
