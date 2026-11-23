@@ -936,3 +936,30 @@ def test_c_scales_script_z_by_1_1_on_sk_min_rows_only(tmp_path):
         assert len(zs) == 2, label
         for a, b in zip(zs, no_c[label]):
             assert a == pytest.approx(factor * b, rel=1e-12), label
+
+
+def test_lv_poc_scripts_take_c_min_095_on_sk_max_rows(tmp_path):
+    # GC-14 F2: PoC 0.4 kV, Sk 10 / 20 MVA, grid MBASE 250 MVA; Z_pu = Z_ohm * 250 / 0.4^2.
+    # Sk-max: |Z1| = 0.95 * 0.16 / 20 = 0.0076 ohm = 11.875 pu;
+    # Sk-min: |Z1| = 1.1 * 0.16 / 10 = 0.0176 ohm = 27.5 pu.
+    cases = build_battery(10.0, 20.0, 0.75, 2.0, z0_over_z1=1.5, x0_over_r0=0.75)
+    flats = [
+        dataclasses.replace(c, channels=("v_poc_pu",))
+        for c in cases
+        if c.kind == "flat"
+    ]
+    kw = {
+        **KW,
+        "poc_kv": 0.4,
+        "grid_machine": (900, "G2"),
+        "plant_branch": None,
+        "plant_machine": None,
+        "plant_mbase_mva": None,
+    }
+    out = write_scripts(flats, str(tmp_path), **kw)
+    for c in flats:
+        text = (tmp_path / out[c.case_id]).read_text()
+        (line,) = [ln for ln in text.splitlines() if ln.startswith("Z1_PU =")]
+        z1 = complex(*ast.literal_eval(line.split("=", 1)[1].split("#")[0]))
+        want = 11.875 if c.grid.label.startswith("skmax") else 27.5
+        assert abs(z1) == pytest.approx(want, rel=1e-12), c.case_id

@@ -864,3 +864,14 @@ def test_frame_and_json_name_each_cases_c():
 def test_c_kind_not_a_known_name_refused(bad):
     with pytest.raises(ContractError, match="thevenin g: c_kind="):
         Thevenin("g", 1000.0, 10.0, c_kind=bad)
+
+
+@pytest.mark.parametrize("vn", [0.4, 1.0, 110.0])
+def test_c_agrees_with_the_short_circuit_engines_c_factor(vn):
+    # GC-14 F3: test_battery keeps its own c table (it imports no engine); it must agree
+    # with gridspine.static.island_sc_seq.c_factor, the pandapower-convention table.
+    from gridspine.static.island_sc_seq import c_factor
+
+    assert c_min(vn) == c_factor(vn, "min")
+    g_max = Thevenin("g", 10.0, 3.0, c_kind="c_max")
+    assert voltage_factor(g_max, vn) == c_factor(vn, "max")
