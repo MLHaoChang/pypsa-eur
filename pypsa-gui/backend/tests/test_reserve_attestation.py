@@ -306,3 +306,21 @@ def test_project_backup_reads_the_attestation_of_the_config_being_solved(
     assert RP.project_backup(n) == ({}, frozenset())
     monkeypatch.setattr(PyPSAService, "solve_target_context", lambda: None)
     assert RP.project_backup(n) == ({}, frozenset())
+
+
+def test_attested_of_reads_only_a_list_of_names():
+    assert RP.attested_of({"reserve_no_backup_storages": [BESS]}) == [BESS]
+    assert RP.attested_of({"reserve_no_backup_storages": [1, BESS]}) == []
+    assert RP.attested_of({"reserve_no_backup_storages": BESS}) == []
+    assert RP.attested_of(None) == []
+
+
+def test_another_templates_project_reads_its_sidecar_roles(tmp_path):
+    import json
+
+    from services.adequacy import dc_backup
+
+    n = _plain_project(tmp_path, _bess_site())
+    (tmp_path / dc_backup.META_FILE).write_text(json.dumps({"id": "eh_ipp_bess"}))
+    assert RP.derive_backup(n, tmp_path, [BESS]) == ({BESS: 0.0}, frozenset())
+    assert RP.attestation_refusal(n, tmp_path, [BESS]) is None
