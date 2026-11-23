@@ -136,7 +136,7 @@ def coerce_eh_value(component_class: str, col: str, value):
     raise ValueError(f"{col}: unknown kind {kind!r}")  # pragma: no cover
 
 
-def _sk_number(value) -> float | None:
+def sk_number(value) -> float | None:
     """The number in a short-circuit cell, or None when blank, NaN or not a number. An infinity is kept:
     the write paths refuse it, but an import can store it, and an infinite minimum is above any finite maximum."""
     if value is None or isinstance(value, bool):
@@ -160,7 +160,7 @@ def check_grid_strength_pair(component_class: str, row, submitted=None) -> None:
         return
     if submitted is not None and not ({"sk_min_mva", "sk_max_mva"} & set(submitted)):
         return
-    lo, hi = _sk_number(row.get("sk_min_mva")), _sk_number(row.get("sk_max_mva"))
+    lo, hi = sk_number(row.get("sk_min_mva")), sk_number(row.get("sk_max_mva"))
     if lo is not None and hi is not None and lo > hi:
         # The stated limit is the stored maximum at full precision, so entering it as the minimum passes.
         shown = format(Decimal(repr(hi)).normalize(), "f")

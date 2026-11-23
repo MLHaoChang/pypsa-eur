@@ -2222,14 +2222,14 @@ def _grid_strength_rows(inp: _Inputs) -> list[dict]:
 
     Every edit path refuses such a pair, but an import (Excel workbook, DGS, PSS/E, legacy) loads it as the file
     gives it (C9). No row at all when no pair is reversed; no gate reads these two columns."""
-    from services.adequacy.eh_columns import _sk_number
+    from services.adequacy.eh_columns import sk_number
 
     gens = getattr(inp.n, "generators", None)
     if gens is None or not {"sk_min_mva", "sk_max_mva"} <= set(gens.columns):
         return []
     rows = []
     for name, g in gens.iterrows():
-        lo, hi = _sk_number(g["sk_min_mva"]), _sk_number(g["sk_max_mva"])
+        lo, hi = sk_number(g["sk_min_mva"]), sk_number(g["sk_max_mva"])
         if lo is None or hi is None or lo <= hi:
             continue
         rows.append(_row(
