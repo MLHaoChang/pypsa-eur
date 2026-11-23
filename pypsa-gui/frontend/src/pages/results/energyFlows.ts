@@ -27,13 +27,17 @@ const VIA_COLOR = '#475569'
 const LOSS_COLOR = '#dc2626'
 const EXPORT_COLOR = '#0891b2'
 const DEST_COLOR = '#2563eb'
+/** A process unit's node, either side: its own colour so it never reads as a load. */
+export const PROCESS_COLOR = '#7c3aed'
 
 export function sourceColor(name: string, index: number): string {
+  if (isProcessNode(name)) return PROCESS_COLOR
   return SOURCE_COLORS[name.toLowerCase()] ?? SOURCE_COLORS[name]
     ?? PALETTE[index % PALETTE.length]
 }
 
 export function destinationColor(name: string): string {
+  if (isProcessNode(name)) return PROCESS_COLOR
   return name === 'Losses' ? LOSS_COLOR : name === 'Export' ? EXPORT_COLOR : DEST_COLOR
 }
 

@@ -24,7 +24,7 @@ import {
   ChartFrame, ChartSourceProvider, useChartSource, type ChartSource, ChartActions, ChartZero, chartFigure, LABEL_PASS, CHART_LEGEND, CHART_HEIGHT, carrierColour, directLabel, bandLabelIndices, legendName, fmtPower,
 } from './shared'
 import {
-  CSV_HEADER, csvRows, flowTotal, fmtMwh, isProcessNode, periodLabel, sankeyData, share,
+  CSV_HEADER, csvRows, flowTotal, fmtMwh, isProcessNode, PROCESS_COLOR, periodLabel, sankeyData, share,
   type FlowNode, type FlowSankey,
 } from './energyFlows'
 
@@ -263,7 +263,7 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
       <ChartSourceProvider value={frameSource}>
       <ChartFrame testId="ef-flow"
         title={`Energy flow · ${periodLabel(data.period)}`}
-        figure={graph.links.length ? chartFigure(fmtMwh(total), hasProcess ? 'entered the site (MWh; process outputs left out)' : 'delivered or lost') : undefined}
+        figure={graph.links.length ? chartFigure(fmtMwh(total), hasProcess ? 'entered the site; process outputs left out' : 'delivered or lost') : undefined}
         hint="source → via → destination"
         right={
           <ChartActions chartRef={graph.links.length ? chartRef : undefined} filename={exportName}
@@ -289,8 +289,10 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
         )}
         {hasProcess && (
           <p className="mt-1 text-[11px] text-muted" data-testid="ef-process-key">
+            <span className="mr-1 inline-block h-2 w-2 align-baseline" aria-hidden="true"
+                  style={{ background: PROCESS_COLOR }} data-testid="ef-process-swatch" />
             Process &lt;name&gt;: the electricity into the process unit ends here, and what it
-            delivers starts again from here. All links are MWh; the “entered the site” total
+            delivers starts again from here. All links are energy; the “entered the site” total
             leaves out the energy that restarts at a process unit.
           </p>
         )}

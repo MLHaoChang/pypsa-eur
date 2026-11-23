@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { EnergyFlowRow } from '../../api/energyFlows'
-import { CSV_HEADER, csvRows, flowTotal, fmtMwh, sankeyData, share } from './energyFlows'
+import { CSV_HEADER, csvRows, flowTotal, fmtMwh, PROCESS_COLOR, sankeyData, share } from './energyFlows'
 
 export const ROWS: EnergyFlowRow[] = [
   { source: 'solar', via: 'Direct', destination: 'load', mwh: 600 },
@@ -86,6 +86,12 @@ describe('process units (A1b)', () => {
     expect(dest).toEqual(expect.arrayContaining(['Process nh3', 'Process h2']))
     expect(g.nodes.filter(n => n.column === 'source').map(n => n.name))
       .toEqual(expect.arrayContaining(['Process nh3', 'Process h2']))
+  })
+  it('colours process nodes on both sides apart from loads', () => {
+    const g = sankeyData(rows)
+    const colours = g.nodes.filter(n => n.name.startsWith('Process ')).map(n => n.color)
+    expect(new Set(colours)).toEqual(new Set([PROCESS_COLOR]))
+    expect(g.nodes.find(n => n.name === 'nh3_load')!.color).not.toBe(PROCESS_COLOR)
   })
   it("does not count the process outputs twice in the total", () => {
     expect(flowTotal(rows)).toBe(140)
