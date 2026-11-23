@@ -3,7 +3,7 @@
 
 # GC-04c: wire the campus bundle's PSS/E pack to the GC-01 plant and model set
 
-Status: done
+Status: done (#1922)
 Type: task
 Parent: `.scratch/grid-compliance/issues/04-psse-pack.md`
 Gated: yes (GK A2, gridspine)
