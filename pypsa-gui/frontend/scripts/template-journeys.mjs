@@ -326,8 +326,7 @@ async function journey(t) {
       assert.ok(sheets.includes('About') && sheets.includes('Nodes'), `input workbook sheets are ${sheets}`)
     })
     ctx.added.inputWorkbookS = Math.round((Date.now() - inputStarted) / 100) / 10  // CI-PACE: seconds this slice adds
-    // The chooser's own Cancel: the one beside its Download button.
-    await page.locator('div:has(> button:has-text("Download File"))').getByRole('button', { name: 'Cancel', exact: true }).click()
+    // Exports is a Results tab now (Hand-off), with no Cancel of its own: switching to Guided leaves it.
     await L.chooseMode(ctx, 'Guided')
     ctx.added.workbookS = Math.round((Date.now() - workbookStarted) / 100) / 10  // CI-PACE: seconds this slice adds
     await L.step(ctx, 'hand-off: Improve opens after a result and offers the risk check', async () => {

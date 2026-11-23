@@ -45,7 +45,7 @@ from gridspine.handoff.psspy_scripts import PENDING as PSSPY_NOTE
 from gridspine.handoff.psspy_scripts import check_script, write_scripts
 from gridspine.handoff.raw_writer import write_raw
 from gridspine.handoff.seq_writer import NOT_WRITTEN, write_seq
-from gridspine.handoff.test_battery import build_battery
+from gridspine.handoff.test_battery import C_BRACKET_NOTE, build_battery
 from gridspine.ingest.pandapower_source import registry_from_net
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.model_set import manifest as model_set_manifest
@@ -81,6 +81,13 @@ MON_ASSUMED = (
 BATTERY_ASSUMED = (
     "test battery: grid |Z0|/|Z1| = 1.0 (as the .seq's grid X0 = X1)",
     "test battery: grid X0/R0 = the grid's largest X/R",
+    f"test battery: {C_BRACKET_NOTE}; c_min from the PoC kV (GC-14)",
+)
+#: GC-14: the psspy Thevenin source carries IEC 60909 c; older packs did not say.
+C_NOTE = (
+    "The psspy scripts' Thevenin source is |Z| = c·Un²/Sk'' with c_max = 1.1 on the "
+    "Sk-min corners and c_min on the Sk-max corners. Packs written before GC-14 used "
+    "c = 1 (Sk-min |Z| 10 % lower); regenerate them."
 )
 #: GC-04 PR6: the README says which transformer convention this pack uses, since
 #: the manifest has no writer-version field to tell old packs apart.
@@ -410,6 +417,10 @@ def _readme(m) -> str:
         "## Transformer impedance",
         "",
         TRAFO_NOTE,
+        "",
+        "## Thevenin source voltage factor c",
+        "",
+        C_NOTE,
         "",
     ]
     return "\n".join(lines)

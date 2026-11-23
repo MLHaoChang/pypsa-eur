@@ -3,7 +3,7 @@
 
 # 07 — Card rows: a long label pushes the value onto the next line
 
-Status: ready-for-agent
+Status: done
 Type: task
 Gated: yes (UX)
 Depends on: DGS-EXTRAS-1 (#1765); lands with slice 03 (Expert panels and mode parity).
