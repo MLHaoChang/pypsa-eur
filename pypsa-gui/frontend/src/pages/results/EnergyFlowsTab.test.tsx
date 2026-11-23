@@ -6,7 +6,7 @@ import type { ChartSpec } from '../../api/reports'
 import { resetReportCharts } from './reportCharts'
 import { useUIStore } from '../../store/uiStore'
 import { energyFlowsApi, type EnergyFlowsPayload } from '../../api/energyFlows'
-import EnergyFlowsTab, { FlowSankeyChart, seriesName } from './EnergyFlowsTab'
+import EnergyFlowsTab, { FlowSankeyChart, FlowTip, seriesName } from './EnergyFlowsTab'
 import { fmtMwh, sankeyData } from './energyFlows'
 import { ROWS } from './energyFlows.test'
 import { expectAllButtonsNamed } from '../../test-utils/accessibleName'
@@ -257,5 +257,20 @@ describe('energy flow · report', () => {
     const b = await save('23')
     expect(b.figure).toBe('energy_flows_year_0-23')
     expect(a.figure).not.toBe(b.figure)
+  })
+})
+
+
+describe('FlowTip on a link into a process node', () => {
+  it('lists the electricity rows with their source and the Process destination in MWh', () => {
+    const rows = [
+      { source: 'wind', via: 'Direct', destination: 'Process nh3', mwh: 60 },
+      { source: 'solar', via: 'Direct', destination: 'Process nh3', mwh: 20 },
+    ]
+    render(<FlowTip active payload={[{ payload: { payload: { value: 80, rows } } }]} />)
+    const tip = screen.getByTestId('ef-tip')
+    expect(tip.textContent).toContain('Process nh3')
+    expect(tip.textContent).toContain('wind')
+    expect(tip.textContent).toContain('60')
   })
 })

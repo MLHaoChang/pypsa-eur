@@ -65,7 +65,7 @@ type TipLink = {
   value?: number; rows?: Array<{ source: string; via: string; destination: string; mwh: number }>
 }
 
-function FlowTip({ active, payload }: {
+export function FlowTip({ active, payload }: {
   active?: boolean
   payload?: Array<{ payload?: { payload?: TipLink } }>
 }) {
