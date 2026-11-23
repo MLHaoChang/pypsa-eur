@@ -38,3 +38,7 @@ of the gate record; these are the places it is read:
 The frontend's run monitor shows a rule's verdict and value, not its reason.
 `tests/test_ic_baseline_keeps_fact.py` pins the new words for the dropped
 asset, no case, and a stale case.
+
+## Comments
+
+- 2026-11-23 status sweep: landed in #1433 (d0ed44a1cb): ic_counterfactual.reason_words with baseline_drops and no_baseline_plan words, plus tests. Likely complete; the file has no checklist to confirm against.

@@ -75,3 +75,5 @@ The catalogue is mode-free: `depth: essentials` is the Guided set, everything el
   - X6: harmonic_spectrum length bounded with a typed 422; no reader parses or evaluates it unsafely.
   - X7: the re-record is pinned: every class other than Generator and Load is byte-equal to the previous recording.
   - X8: the deferred sk_min ≤ sk_max cross-check is ticketed now (01a-3) and linked in the PR body.
+
+- 2026-11-23 status sweep: landed in #1634 (347f55dd8c); #1804 (3cfc9173be); #1807 (3af79cda45); #1812 (a65c921c3c): catalogue core, routers and generated names are on master. Likely complete; PR-body rename table and range validators on every write path not checked.
