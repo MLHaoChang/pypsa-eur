@@ -32,3 +32,9 @@ DGS-import session (IMPORTS-1) has the manifest's layout and names.
 ## Comments
 
 **2026-11-17 triage (SCALE-1).** Still needed: GC-16 (#1602) lists `not_written` only in the writer's return value. Ready once the three PRs merge; the DGS-import session (IMPORTS-1) has the manifest layout, so check it before the plan.
+
+**2026-11-23 GK A2 plan GO on M1–M4.**
+- M1: test expectations are literal (record dict, key list, reason text), never `NOT_WRITTEN_COLUMNS` or the code's constants.
+- M2: `not_written` is plain JSON: NaN/None as null, numpy scalars as Python numbers; tested by reading back with `parse_constant` raising on a NaN record.
+- M3: the PR body names every reader of the case `manifest.json`; a reader of `not_written` gets a writer→reader contract test (ruling 2), or the body says none reads it.
+- M4: if `not_written` is user-visible, show it end to end (E2E-DONE-1); otherwise the body says nothing reads it yet.
