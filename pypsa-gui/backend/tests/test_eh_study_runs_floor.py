@@ -105,3 +105,28 @@ def test_every_shipped_template_runs_at_its_default_draws(
     name = _project(client, tid, "shipped")
     body, items = _runs_items(client, name)
     assert items == [], (tid, [i["message"] for i in items])
+
+
+@pytest.mark.parametrize(
+    "stages,field",
+    [
+        (None, "mc_draws"),
+        (["apply_pack", "ens_solve", "mc_certify", "assemble"], "mc_draws"),
+        (["apply_pack", "ens_solve", "assemble"], "voll"),
+    ],
+)
+def test_the_runs_check_applies_only_when_the_study_certifies(
+    client, tmp_projects_dir, stages, field
+):
+    """A request whose stages skip mc_certify draws nothing: no runs check.
+    VOLL is unset so the later VOLL refusal shows the runs check passed,
+    without starting a study."""
+    _project(client)
+    cfg = client.get("/api/simulation/solver_config").json()
+    r = client.put(
+        "/api/simulation/solver_config", json={**cfg, "mc_draws": 1, "voll": 0.0}
+    )
+    assert r.status_code == 200, r.text
+    r = client.post("/api/results/eh_study", json={"stages": stages} if stages else {})
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["field"] == field

@@ -402,27 +402,41 @@ def min_draws_for_weight(w_min: float, target_h: float) -> int:
     return m
 
 
-def draws_short_of_target(n, pack, draws: int | None) -> str | None:
-    """The study start's runs check (template-e2e 21): the refusal text when
-    ``draws`` cannot resolve the pack's LOLE target on network ``n``, else
-    None. The weights are the MC's (``copt.fleet_weights``), the target goes
-    on the horizon as ``_stage_mc_certify`` puts it. No target, a zero target
-    (no draw count resolves it; the verdict says so) or a network without a
-    positive weight or horizon is not refused here."""
+def resolution_weight(n) -> tuple[float, float] | None:
+    """``(w_min, horizon_years)`` of network ``n`` as the MC samples it: the
+    smallest positive weight of ``copt.fleet_weights`` (the MC's own) and
+    ``metrics.horizon_years``. None without a positive weight or horizon.
+    Read under the network lock."""
     from services.adequacy.copt import fleet_weights
     from services.adequacy.metrics import horizon_years
 
-    target = pack.availability.target_lole_h
-    if target is None or not float(target) > 0:
-        return None
     years = float(horizon_years(n))
     w = fleet_weights(n)
     w_pos = w[w > 0]
     if not (years > 0 and w_pos.size):
         return None
+    return float(w_pos.min()), years
+
+
+def draws_short_of_target(n, pack, draws: int | None) -> str | None:
+    """The study start's runs check (template-e2e 21) on network ``n``: see
+    ``draws_short_for``."""
+    return draws_short_for(resolution_weight(n), pack, draws)
+
+
+def draws_short_for(weight: tuple[float, float] | None, pack,
+                    draws: int | None) -> str | None:
+    """The refusal text when ``draws`` (None: the pack's) cannot resolve the
+    pack's LOLE target on a network of ``weight`` (``resolution_weight``),
+    else None. The target goes on the horizon as ``_stage_mc_certify`` puts
+    it. No target, a zero target (no draw count resolves it; the verdict says
+    so) or a network without a positive weight or horizon is not refused."""
+    target = pack.availability.target_lole_h
+    if weight is None or target is None or not float(target) > 0:
+        return None
+    w_min, years = weight
     if draws is None:
         draws = int(getattr(pack, "mc_draws", DEFAULT_MC_DRAWS))
-    w_min = float(w_pos.min())
     target_h = float(target) * years
     if w_min / draws <= target_h:
         return None

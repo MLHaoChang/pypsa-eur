@@ -416,6 +416,9 @@ def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
             _arch.import_energy_patch(n, pack)
         except _arch.ArchetypePackError as exc:
             raise HTTPException(422, str(exc)) from exc
+        # template-e2e 21: the MC's weights, for the runs check below.
+        from services.adequacy.eh_study import draws_short_for, resolution_weight
+        weight = resolution_weight(n)
     finally:
         lock.release()
     dsr_buses = None
@@ -440,13 +443,7 @@ def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
     # template-e2e 21: too few runs for the goal refuse here, before the run;
     # readiness files the refusal on the runs field and blocks Run.
     if stages is None or "mc_certify" in stages:
-        from services.adequacy.eh_study import draws_short_of_target
-        if not lock.acquire(blocking=lock_blocking):
-            raise EhStudyLockBusy()
-        try:
-            short = draws_short_of_target(n, pack, mc_opts.draws)
-        finally:
-            lock.release()
+        short = draws_short_for(weight, pack, mc_opts.draws)
         if short is not None:
             from services.adequacy.campaign import unsupported_scope
             refusal = unsupported_scope(short)
