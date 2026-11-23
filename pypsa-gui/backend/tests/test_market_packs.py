@@ -79,6 +79,23 @@ def test_a_pack_for_no_bidding_zone_is_refused_at_load(bad):
         _pack(region=bad)
 
 
+@pytest.mark.parametrize("bad", ["DE", "GB", "no-1", "", None, 7])
+def test_a_stored_pack_for_no_bidding_zone_is_a_typed_refusal(bad):
+    """GK B4 4a: `load_pack` (stored JSON) refuses with its code and names the
+    field; no pydantic error passes through."""
+    raw = {**_pack().model_dump(mode="json"), "region": bad}
+    with pytest.raises(MP.PackRefusal) as e:
+        MP.load_pack(raw)
+    assert (e.value.code, e.value.status) == (MP.INVALID, 422)
+    assert "region" in str(e.value)
+    assert not isinstance(e.value, ValidationError)
+
+
+def test_a_stored_legacy_pack_loads_through_load_pack():
+    raw = json.loads((FIXTURES / "market_pack_legacy.json").read_text())
+    assert MP.load_pack(raw).flags == [M.LEGACY_PACK_FIELDS_STRIPPED]
+
+
 def test_a_zone_pack_loads():
     assert _pack(region="DE-LU").region == "DE-LU"
 
@@ -537,6 +554,38 @@ def test_an_apply_with_nothing_to_change_writes_no_config(monkeypatch, tmp_path)
     )
     assert out["changes"] == [] and calls == [] and out["changed"] == 0
     assert MP.read_pin(tmp_path)["pack_id"] == pack.id
+
+
+def test_an_apply_never_writes_a_conflict_and_counts_only_its_changes(
+    monkeypatch, tmp_path
+):
+    """GK B4 2b: a cell the user edited after the last apply is kept and listed;
+    `changed` counts only the cells the apply wrote."""
+    pack = MP.get("no-1-2026")
+    first = MP.plan_apply(pack, _commercial(), None)
+    mine = json.loads(json.dumps(first["commercial"]))
+    mine["reserve_products"][0]["sustain_h"] = 9.0
+    older = {**_pin(pack, first), "pack_hash": "an-older-hash"}
+    older["applied"] = {**older["applied"]}
+    # The pack's last apply wrote `counterparty` and the user left it as written.
+    other = "counterparty"
+    cell = f"reserve_products/{pack.products[0].id}/{other}"
+    old_value = "an-older-value"
+    older["applied"][cell] = old_value
+    mine["reserve_products"][0][other] = old_value
+    (tmp_path / MP.PIN_FILE).write_text(json.dumps(older))
+    SIM, calls = _route(monkeypatch, tmp_path, mine)
+    out = SIM.apply_market_pack(
+        pack.id, SIM.MarketPackApplyIn(pack_hash=pack.pack_hash), db=None, user=None
+    )
+    kept = f"reserve_products/{pack.products[0].id}/sustain_h"
+    assert [c["cell"] for c in out["conflicts"]] == [kept]
+    assert [c["cell"] for c in out["changes"]] == [cell]
+    assert out["changed"] == 1
+    (written,) = calls
+    prod = written.commercial.reserve_products[0]
+    assert prod.sustain_h == 9.0
+    assert getattr(prod, other) == getattr(pack.products[0], other)
 
 
 @pytest.mark.parametrize(
