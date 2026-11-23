@@ -216,6 +216,7 @@ def test_a_genset_without_modes_keeps_the_screen_from_reading_clear(tmp_path, mo
     spec = _gen2(_modes(cap_spec(xc_ohm=t(XC)), [t(12.0, "datasheet")]))
     out, series = _screens(tmp_path, monkeypatch, spec)
     assert set(series["verdict"]) == {"check"}
+    assert series["margin_hz"].isna().all()  # not judged, so no margin to show
     for note in series["note"]:
         assert note.startswith(
             "no torsional modes given for genset(s) GEN2; the screen does not pass on the others alone; ")
@@ -241,6 +242,25 @@ def test_the_clearance_splits_flag_below_from_clear_above(tmp_path, monkeypatch)
     assert (series.at["max", "verdict"], series.at["min", "verdict"]) == ("flag", "clear")
     assert series.at["min", "clearance_hz"] == 0.7
     assert out.subsync_verdict == "flag"
+
+
+#: f_er = 50 * sqrt(0.5 / X_total) per case, as literals; margins against them are exact to rounding.
+F_ER = {"max": 40.945056464, "min": 39.571924798}
+
+
+@pytest.mark.parametrize(
+    "case, mode, margin, verdict",
+    [("max", 9.5, 0.445056464, "flag"), ("min", 9.5, 0.928075202, "flag"),
+     ("max", 12.0, 2.945056464, "clear"), ("min", 12.0, 1.571924798, "clear")],
+)
+def test_the_margin_is_the_hand_computed_literal(tmp_path, monkeypatch, case, mode, margin, verdict):
+    from gridspine.static import subsync_scan as ss
+
+    monkeypatch.setattr(ss, "crossings", lambda fs, z: [(F_ER[case], 0.0)])
+    _, series = _screens(tmp_path, monkeypatch, _modes(cap_spec(xc_ohm=t(XC)), [t(mode)]), clearance=1.0)
+    for m in series["margin_hz"]:
+        assert m == pytest.approx(margin, abs=1e-9)
+    assert set(series["verdict"]) == {verdict}
 
 
 @pytest.mark.parametrize("mode, margin, verdict", [(9.0, 0.5, "clear"), (9.0625, 0.4375, "flag")])

@@ -1291,6 +1291,8 @@ def _mode_coverage(campus, resonance):
     if missing:
         out.loc[clear, "note"] = [_join_note(NO_MODES_FOR.format(", ".join(missing)), n) for n in out.loc[clear, "note"]]
         out.loc[clear, "verdict"] = "check"
+        # not judged, so no margin shown for it (GK A2 ruling (b): a pack never shows a value the scorecard refused)
+        out.loc[clear, "margin_hz"] = math.nan
     elif assumed:
         said = "; ".join(f"{g} {', '.join(f'{f:g}' for f in fl)} Hz" for g, fl in sorted(assumed.items()))
         out.loc[clear, "note"] = [_join_note(ASSUMED_MODES.format(said), n) for n in out.loc[clear, "note"]]
