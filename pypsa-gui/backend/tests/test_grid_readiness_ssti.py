@@ -486,6 +486,35 @@ def test_a_pass_on_two_gensets_assumed_modes_names_both(tmp_path):
     )
 
 
+def test_the_assumed_sentence_skips_rows_without_one(tmp_path):
+    rows = _assumed_rows("GEN1 30.5 Hz")
+    rows[0]["assumed_modes"], rows[1]["assumed_modes"] = float("nan"), "GEN1 30.5 Hz"
+    _write(tmp_path, subsync=_sub_meta("clear"), resonance=rows)
+    note = _card(tmp_path)[0]["subsync_series_resonance"]["note"]
+    assert "Clear rests on assumed torsional mode(s): GEN1 30.5 Hz. " in note
+
+
+def test_a_blank_assumed_modes_cell_adds_no_sentence(tmp_path):
+    _write(tmp_path, subsync=_sub_meta("clear"), resonance=_assumed_rows("   "))
+    assert (
+        "assumed torsional"
+        not in _card(tmp_path)[0]["subsync_series_resonance"]["note"]
+    )
+
+
+def test_a_resonance_table_without_margins_has_no_judged_margin(tmp_path):
+    rows = [
+        {k: v for k, v in r.items() if k != "margin_hz"} for r in _resonance((0.4,))
+    ]
+    _write(tmp_path, subsync=_sub_meta("flag"), resonance=rows)
+    row = _card(tmp_path)[0]["subsync_series_resonance"]
+    assert row["verdict"] == "unknown"
+    assert (
+        row["note"]
+        == f"The run wrote no torsional margin for a series resonance. {SCREENING}"
+    )
+
+
 def test_a_warn_never_carries_the_assumed_clear_sentence(tmp_path):
     _write(
         tmp_path,

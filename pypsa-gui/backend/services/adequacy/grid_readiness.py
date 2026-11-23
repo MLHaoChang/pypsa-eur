@@ -1604,7 +1604,7 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(moved), **unknown)
     series = (resonance[resonance["kind"].astype(str) == SERIES] if resonance is not None and "kind" in resonance
               else None)
-    if series is not None and "margin_hz" in series:
+    if series is not None:
         # a row worse than the run's verdict contradicts it (GK A2 H2); margins come from judged rows only (G1)
         if worse := _worse_rows(series, verdict):
             return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(
