@@ -578,3 +578,39 @@ def test_tool_is_offered_in_the_results_toolset_and_all():
         assert 'get_loadflow_summary' in names
     names = {t['name'] for t in toolsets.filter_tools(catalogue.TOOLS, 'network')}
     assert 'get_loadflow_summary' not in names
+
+
+# ── an assumed rating is not a stated one (psse-import 05) ──────────────
+
+def test_assumed_rating_row_is_labelled_and_left_out_of_the_limit_counts(solved):
+    n = solved['network']
+    n.lines_t.p0.loc[SNAPSHOTS[0], 'L_hot'] = 400.0  # 400 % of the assumed 100 MVA
+    n.lines_t.p1.loc[SNAPSHOTS[0], 'L_hot'] = -390.0
+    stated = lf.get_loadflow_summary(limit=25)['counts']
+    assert stated['over_limit'] == 1  # the same row, with a stated rating, is over
+    n.lines['s_nom_source'] = 'file'
+    n.lines.loc['L_hot', 's_nom_source'] = 'assumed'
+    out = lf.get_loadflow_summary(limit=25)
+    rows = _by_name(out)
+    assert rows['L_hot']['rating_assumed'] is True
+    assert rows['L_hot']['rating_label'] == 'rating assumed'
+    assert rows['L_hot']['util_pct'] == pytest.approx(400.0)  # the loading % stays
+    assert rows['L_hot']['h_over_limit'] == 0 and rows['L_hot']['h_at_limit'] == 0
+    assert 'rating_assumed' not in rows['L_p1']
+    assert out['counts']['over_limit'] == stated['over_limit'] - 1
+    assert out['counts']['at_limit'] == stated['at_limit'] - 1
+
+
+@pytest.mark.parametrize('marker', ['', None, 'file'])
+def test_a_marker_other_than_assumed_reads_as_stated(solved, marker):
+    n = solved['network']
+    n.lines['s_nom_source'] = marker
+    n.lines_t.p0.loc[SNAPSHOTS[0], 'L_hot'] = 400.0
+    row = _by_name(lf.get_loadflow_summary(limit=25))['L_hot']
+    assert 'rating_assumed' not in row and row['h_over_limit'] > 0
+
+
+def test_a_network_without_the_marker_column_is_unchanged(solved):
+    assert 's_nom_source' not in solved['network'].lines.columns
+    out = lf.get_loadflow_summary(limit=25)
+    assert all('rating_assumed' not in r for r in out['top'])

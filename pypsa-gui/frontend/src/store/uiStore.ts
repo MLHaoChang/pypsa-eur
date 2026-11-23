@@ -1086,6 +1086,11 @@ export const useUIStore = create<UIStore>((set, get) => ({
         fieldDrawer: { section: 'profiles', panel: 'timeseries', component: null, entity: null, field: null } })
       return
     }
+    // Reports live in Results › Hand-off › Reports (R6): there is no separate Reports panel.
+    if (requested === 'reports') {
+      set({ activeSlidePanel: 'results', activeSection: PANEL_SECTION.results, resultsTabRequest: 'reports', resultsSectionRequest: null })
+      return
+    }
     const p = requested
     const section = p ? PANEL_SECTION[p] : undefined
     set(section ? { activeSlidePanel: p, activeSection: section } : { activeSlidePanel: p })

@@ -92,11 +92,15 @@ def _branch(component, name, index):
             flows[attribute] = [None] * len(index)
         else:
             flows[attribute] = [_number(v) for v in table[name]]
+    from services import assumed_rating
+
     return {
         "rating": _number(row[field]),
         "rating_field": field,
         "s_max_pu": _s_max_pu(component, name, index),
         **flows,
+        # only when set, so a network without the marker seals the same raw as before
+        **({"rating_assumed": True} if assumed_rating.is_assumed(row, "s_nom") else {}),
     }
 
 
