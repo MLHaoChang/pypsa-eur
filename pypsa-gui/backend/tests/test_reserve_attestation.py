@@ -324,3 +324,26 @@ def test_another_templates_project_reads_its_sidecar_roles(tmp_path):
     (tmp_path / dc_backup.META_FILE).write_text(json.dumps({"id": "eh_ipp_bess"}))
     assert RP.derive_backup(n, tmp_path, [BESS]) == ({BESS: 0.0}, frozenset())
     assert RP.attestation_refusal(n, tmp_path, [BESS]) is None
+
+
+def test_project_backup_without_a_solver_state_reads_no_attestation(
+    tmp_path, monkeypatch
+):
+    from services.pypsa_service import PyPSAService
+
+    n = _plain_project(tmp_path, _bess_site())
+    monkeypatch.setattr(PyPSAService, "solve_target_context",
+                        lambda: SimpleNamespace(storage_dir=str(tmp_path)))
+    assert RP.project_backup(n) == ({}, frozenset())
+
+
+def test_the_not_eligible_text_names_the_storage_or_says_none():
+    n = _bess_site()
+    named, every = _product("a", storages=[BESS]), _product("b")
+    _bind(n, [named, every], {"a": 1.0, "b": 1.0})
+    for p, want, not_want in ((named, f"“{BESS}” cannot", "no storage"),
+                              (every, "no storage cannot", "“")):
+        with pytest.raises(RP.ReserveRefusal) as e:
+            RP.plan(n, [p], {}, frozenset())
+        head = str(e.value).split(". Only")[0]
+        assert want in head and not_want not in head.split(": ", 1)[1]
