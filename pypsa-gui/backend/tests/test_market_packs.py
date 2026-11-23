@@ -375,6 +375,50 @@ def test_a_hand_revert_after_an_apply_is_kept_as_a_user_edit():
         assert plan["applied"][cell] == 0.5
 
 
+def test_the_compare_is_per_cell_not_against_any_pinned_value():
+    """GK B4 K1 (condition 5): a user value equal to another cell's pinned value
+    is still a user edit of this cell."""
+    pack = _pack(
+        products=[
+            _prod("secondary_up", kind="secondary", direction="up", sustain_h=1.0),
+            _prod("tertiary_up", kind="tertiary", direction="up", sustain_h=2.0),
+        ]
+    )
+    first = MP.plan_apply(pack, _commercial(), None)
+    mine = json.loads(json.dumps(first["commercial"]))
+    mine["reserve_products"][0]["sustain_h"] = 2.0
+    cell = "reserve_products/secondary_up/sustain_h"
+    plan = MP.plan_apply(pack, mine, _pin(pack, first))
+    assert plan["changes"] == []
+    assert plan["conflicts"] == [
+        {"cell": cell, "yours": 2.0, "pack": 1.0, "last_applied": 1.0}
+    ]
+    assert plan["commercial"]["reserve_products"][0]["sustain_h"] == 2.0
+
+
+def test_a_cleared_export_pick_is_never_re_filled_after_a_link_detour():
+    """GK B4 K2 (condition 4 / ask 3a): the user clears the pick an apply wrote and
+    removes the export Link; an apply then keeps the pin, so after the Link comes
+    back the next apply still keeps the pick the user cleared."""
+    pack = _pack(day_ahead=REF)
+    first = MP.plan_apply(pack, _commercial(export_link="export"), None)
+    full = first["applied"][MP.EXPORT_CELL]
+    # The user clears the pick and removes the export Link.
+    mine = {**first["commercial"], "export_price_ref": None, "export_link": None}
+    no_link = MP.plan_apply(pack, mine, _pin(pack, first))
+    assert {"cell": MP.EXPORT_CELL, "reason": "no_export_link"} in no_link["kept"]
+    assert no_link["applied"][MP.EXPORT_CELL] == full
+    # The user adds the Link back; the pick stays cleared.
+    back = MP.plan_apply(
+        pack, {**mine, "export_link": "export"}, _pin(pack, no_link)
+    )
+    assert back["commercial"].get("export_price_ref") is None
+    assert back["changes"] == []
+    assert back["conflicts"] == [
+        {"cell": MP.EXPORT_CELL, "yours": None, "pack": full, "last_applied": full}
+    ]
+
+
 def test_a_hand_entered_product_of_the_same_id_is_never_overwritten():
     have = _commercial(reserve_products=[_prod(sustain_h=2.0, capacity_price=PRICE)])
     plan = MP.plan_apply(_pack(), have, None)

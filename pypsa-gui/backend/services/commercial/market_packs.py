@@ -331,6 +331,8 @@ def plan_apply(pack: MarketPack, commercial: dict | None, pin: dict | None) -> d
             applied[EXPORT_CELL] = pinned[EXPORT_CELL]
     elif cur_da is None and not commercial.get("export_link"):
         kept.append({"cell": EXPORT_CELL, "reason": "no_export_link"})
+        if EXPORT_CELL in pinned:
+            applied[EXPORT_CELL] = pinned[EXPORT_CELL]
     elif cur_da is None and EXPORT_CELL not in pinned:
         changes.append({"cell": EXPORT_CELL, "from": None, "to": new_da})
         applied[EXPORT_CELL] = new_da
