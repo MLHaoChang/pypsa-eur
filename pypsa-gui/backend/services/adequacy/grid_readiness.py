@@ -1604,10 +1604,12 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(moved), **unknown)
     series = (resonance[resonance["kind"].astype(str) == SERIES] if resonance is not None and "kind" in resonance
               else None)
-    if series is not None and "margin_hz" in series and "verdict" in series:
+    if series is not None and "margin_hz" in series:
         # margins come from the judged rows only (GC-01c, GK A2 G1): a row the scan left undecided (check, not
-        # evaluated) and a band row with no series resonance in it (no f_er, no margin) carry none
-        undecided = series["verdict"].astype(str).isin(("check", "not evaluated"))
+        # evaluated) and a band row with no series resonance in it (no f_er, no margin) carry none; a table
+        # with no verdicts has no judged row (fail closed)
+        undecided = (series["verdict"].astype(str).isin(("check", "not evaluated")) if "verdict" in series
+                     else True)
         no_resonance = (series["f_er_hz"].isna() if "f_er_hz" in series else True) & series["margin_hz"].isna()
         series = series[~undecided & ~no_resonance]
     if series is None or series.empty or "margin_hz" not in series:

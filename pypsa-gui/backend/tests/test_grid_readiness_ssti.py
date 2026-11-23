@@ -417,6 +417,14 @@ def test_a_judged_row_without_a_margin_still_reads_unknown(tmp_path):
     assert _card(tmp_path)[0]["subsync_series_resonance"]["verdict"] == "unknown"
 
 
+def test_a_resonance_table_without_verdicts_has_no_judged_margin(tmp_path):
+    rows = [{k: v for k, v in r.items() if k != "verdict"} for r in _resonance((0.4,))]
+    _write(tmp_path, subsync=_sub_meta("flag"), resonance=rows)
+    row = _card(tmp_path)[0]["subsync_series_resonance"]
+    assert row["verdict"] == "unknown"
+    assert row["note"] == f"The run wrote no torsional margin for a series resonance. {SCREENING}"
+
+
 def test_a_pass_resting_on_assumed_modes_says_so(tmp_path):
     rows = _resonance((1.0, 3.0), "clear")
     rows[0]["note"] = "clear rests on assumed torsional mode(s): GEN1 30.5 Hz; synchronous machine impedance is not in the scan"
