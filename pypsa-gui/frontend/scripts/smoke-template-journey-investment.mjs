@@ -140,9 +140,12 @@ try {
   const report = await (await api(ctx, 'GET', '/api/results/investment_case/report?detail=full')).json()
   const flags = report.sections?.project?.payload?.flags ?? []
   assert(flags.length > 0, 'The data-centre case reports its flags')
-  // A stated flag is exempt only when the report states it (financeModel.statedFlags): the site-today basis.
-  const siteToday = report.sections?.project?.payload?.counterfactual?.counterfactual_basis === 'site_today'
-  const stated = f => keys.stated.includes(f) && (f !== 'counterfactual_basis:site_today' || siteToday)
+  // A stated flag is exempt only when the report states it (financeModel.statedFlags): the site-today
+  // basis under the site-today sentence, the island-relaxed baseline under the counterfactual notes.
+  const cf = report.sections?.project?.payload?.counterfactual ?? {}
+  const statedNow = { 'counterfactual_basis:site_today': cf.counterfactual_basis === 'site_today',
+    baseline_island_rows_relaxed: Array.isArray(cf.notes) && cf.notes.length > 0 }
+  const stated = f => keys.stated.includes(f) && statedNow[f] === true
   const unworded = flags.filter(f => !stated(f) && !keys.worded.includes(f.split(':')[0]))
   assert.deepEqual(unworded, [], 'Every data-centre flag has words in projectFlagWords')
   for (const id of ['ic-run-panel', 'ic-headlines', 'ic-counterfactual']) {

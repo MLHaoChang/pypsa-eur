@@ -1,7 +1,7 @@
 // The finance form and report mappings (IC P4 WP4.7a/b), without a DOM.
 import { describe, expect, it } from 'vitest'
 import {
-  assetLabel, projectFlagLines, projectFlagWords, PROJECT_FLAG_KEYS, statedFlags, UNDESCRIBED_FLAG, UNDESCRIBED_REASON,
+  assetLabel, projectFlagLines, projectFlagWords, PROJECT_FLAG_KEYS, LCOS_REASON_KEYS, statedFlags, UNDESCRIBED_FLAG, UNDESCRIBED_REASON,
   baselineCaveats, basisStatement, cashflowPivot, cashTotals, counterfactualStatement, errorKey, errorsFor, established, financeErrors, fmtCell,
   fmtHeadline, headlines, numOrNull, parseRateOrList, perYearLists, progressFraction, progressText,
   rateOrListText, studyProgress, studyStale, toTable, waccGate, withKey,
@@ -374,7 +374,8 @@ const DC_FLAGS = [
 ]
 const SNAKE = /\b[a-z]+(?:_[a-z0-9]+)+\b/
 const siteToday = { sections: { project: { status: 'ok', payload: {
-  flags: DC_FLAGS, counterfactual: { basis: 'compared with the site as it stands today', counterfactual_basis: 'site_today' } } } } } as never
+  flags: DC_FLAGS, counterfactual: { basis: 'compared with the site as it stands today', counterfactual_basis: 'site_today',
+    notes: ['The site as it stands cannot meet the island requirements without the new builds, so it is compared without them.'] } } } } } as never
 
 describe('the data-centre case flags in plain words (IBA-02)', () => {
   it('words every flag the data-centre case emits, with no raw code left', () => {
@@ -382,7 +383,6 @@ describe('the data-centre case flags in plain words (IBA-02)', () => {
     expect(out).toEqual([
       'No lifetime is stated for genset 1, genset 2, genset 3, genset 4, rooftop pv, site transformer and ups battery: '
         + 'the case does not check whether they need replacing inside its horizon.',
-      'The site as it stands cannot meet the island requirements, so it is compared without them.',
       'The site-today baseline removes genset new.',
       'The bill effect of generator degradation is a first-order estimate.',
       'The bill effect of generator degradation covers only the bill items priced by volume.',
@@ -404,7 +404,7 @@ describe('the data-centre case flags in plain words (IBA-02)', () => {
       'State: the tax value not yet depreciated is deducted in the last year of the case.'])
   })
   it('skips the site-today basis only when the counterfactual sentence states it', () => {
-    expect(statedFlags(siteToday)).toEqual(new Set(['counterfactual_basis:site_today']))
+    expect(statedFlags(siteToday)).toEqual(new Set(['counterfactual_basis:site_today', 'baseline_island_rows_relaxed']))
     expect(projectFlagWords(['counterfactual_basis:site_today'], statedFlags(siteToday))).toEqual([])
     // No stated basis: the flag stays, as a line.
     expect(projectFlagWords(['counterfactual_basis:site_today'])).toEqual([UNDESCRIBED_FLAG])
@@ -418,7 +418,7 @@ describe('the data-centre case flags in plain words (IBA-02)', () => {
   it('keeps the handled flag keys and projectFlagKeys.json the same set', () => {
     expect(new Set(projectFlagKeys.worded)).toEqual(PROJECT_FLAG_KEYS)
     expect(projectFlagKeys.worded).toHaveLength(PROJECT_FLAG_KEYS.size)
-    expect(projectFlagKeys.stated).toEqual(['counterfactual_basis:site_today'])
+    expect(projectFlagKeys.stated).toEqual(['baseline_island_rows_relaxed', 'counterfactual_basis:site_today'])
   })
 })
 
@@ -456,5 +456,31 @@ describe('a code with no words stays out of the text, in the title (UX rule c, G
       .find(h => h.id === 'lcos_real')!
     expect(odd.note).toBe(`${UNDESCRIBED_REASON}; ${UNDESCRIBED_REASON}`)
     expect(odd.noteCode).toBe('brand_new_reason:b; real_not_established:cpi_gone')
+  })
+})
+
+describe('the island-relaxed baseline is said once, by the counterfactual notes (GK F1)', () => {
+  const withNotes = (notes: string[]) => ({ sections: { project: { status: 'ok', payload: {
+    counterfactual: { basis: 'compared with the site as it stands today', counterfactual_basis: 'site_today', notes } } } } }) as never
+  it('leaves the flag out when the notes are served', () => {
+    expect(projectFlagWords(['baseline_island_rows_relaxed'], statedFlags(withNotes(['The site as it stands cannot …'])))).toEqual([])
+  })
+  it('keeps it, as an undescribed line with its code, when no notes are served', () => {
+    expect(statedFlags(withNotes([]))).toEqual(new Set(['counterfactual_basis:site_today']))
+    expect(projectFlagLines(['baseline_island_rows_relaxed'], statedFlags(withNotes([]))))
+      .toEqual([{ text: UNDESCRIBED_FLAG, code: 'baseline_island_rows_relaxed' }])
+  })
+})
+
+describe('the LCOS reason words cover what lcos.py emits (GK, exact set)', () => {
+  it('words exactly the reason kinds lcos.py gives, listed by hand from lcos.py', () => {
+    // lcos.py: 116 wacc_nominal_missing, 122 degradation_missing, 140 charging_cost_not_established,
+    // 149/186 escalation_missing, 156 om_not_established, 162 capex_not_established, 164 overnight_cost_missing,
+    // 182 terminal_needs_part_lifetimes, 183 terminal_part_unknown, 186 terminal_needs_lp_rate,
+    // 200 no_discharge, 218 real_not_established.
+    expect(LCOS_REASON_KEYS).toEqual(new Set(['wacc_nominal_missing', 'degradation_missing',
+      'charging_cost_not_established', 'escalation_missing', 'om_not_established', 'capex_not_established',
+      'overnight_cost_missing', 'terminal_needs_part_lifetimes', 'terminal_part_unknown', 'terminal_needs_lp_rate',
+      'no_discharge', 'real_not_established']))
   })
 })

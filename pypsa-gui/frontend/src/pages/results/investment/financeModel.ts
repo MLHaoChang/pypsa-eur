@@ -6,6 +6,7 @@
 // without edits PUTs exactly what was read. An empty input is `null` / absent —
 // "not stated" (plan C12) — never 0. The server judges every combination; its
 // 422 is mapped to the field it names (the WP3.7 pattern).
+import { listWords } from './businessCaseModel'
 import type {
   CashflowLine, FinanceInputs, InvestmentCaseReportPayload, InvestmentCaseStudy, IcSectionState,
 } from '../../../api/types'
@@ -299,6 +300,9 @@ const LCOS_REASON_WORDS: Record<string, (tail: string) => string> = {
   no_discharge: v => `${assetLabel(v)} does not discharge in the solved dispatch`,
   real_not_established: v => v === 'inflation_missing' ? 'the real figure needs an inflation rate' : UNDESCRIBED_REASON,
 }
+
+/** The LCOS reasons that have words (a test holds them to lcos.py's list, written out by hand). */
+export const LCOS_REASON_KEYS: ReadonlySet<string> = new Set(Object.keys(LCOS_REASON_WORDS))
 
 /** One LCOS reason in words; one with none says so, and its code stays in the row's title. */
 function lcosReasonWords(reason: string): string {
@@ -840,7 +844,6 @@ const PROJECT_FLAG_WORDS: Record<string, (tail: string) => string> = {
   ledger_conservation_not_established: () => 'Whether the cash ledger balances is not established.',
   extra_asset_money_year_unstated: () => 'No case money year is stated to compare with the additional equipment costs.',
   // IBA-02: the flags a data-centre case emits (finance_case.py, engine.py, tax.py, lcos.py).
-  baseline_island_rows_relaxed: () => 'The site as it stands cannot meet the island requirements, so it is compared without them.',
   degradation_bill_first_order: () => 'The bill effect of generator degradation is a first-order estimate.',
   degradation_bill_volume_items_only: () => 'The bill effect of generator degradation covers only the bill items priced by volume.',
   island_critical_load_mw: v => `The island capability carries a mean critical load of ${v} MW.`,
@@ -867,10 +870,17 @@ export const PROJECT_FLAG_KEYS: ReadonlySet<string> = new Set([
   LIFE_ENDS.slice(0, -1), NOT_REPLACED.slice(0, -1), AFTER_HORIZON.slice(0, -1), LIFETIME_UNKNOWN.slice(0, -1),
 ])
 
-/** The flags the report's own sentences already state, so the list leaves them
- *  out: the site-today basis, when the counterfactual sentence is the site-today one. */
+/** The flags the report's own sentences already state, so the list leaves them out:
+ *  - the site-today basis, when the counterfactual sentence is the site-today one;
+ *  - `baseline_island_rows_relaxed`, when the counterfactual notes are served: report.py words
+ *    every case flag through `baseline_text.flag_text` into them, and this one always has words
+ *    (a backend contract test pins it). */
 export function statedFlags(report: InvestmentCaseReportPayload): ReadonlySet<string> {
-  return new Set(counterfactualBasis(report)?.basis === 'site_today' ? ['counterfactual_basis:site_today'] : [])
+  const cf = counterfactualBasis(report)
+  return new Set([
+    ...(cf?.basis === 'site_today' ? ['counterfactual_basis:site_today'] : []),
+    ...(cf && cf.notes.length > 0 ? ['baseline_island_rows_relaxed'] : []),
+  ])
 }
 
 /** The project flag list in words. A campus asset's life-end and later-renewal
@@ -897,8 +907,7 @@ export function projectFlagLines(flags: string[], stated: ReadonlySet<string> = 
       if (lifetimeSaid) return []
       lifetimeSaid = true
       const many = noLifetime.length > 1
-      const names = many ? `${noLifetime.slice(0, -1).join(', ')} and ${noLifetime[noLifetime.length - 1]}` : noLifetime[0]
-      return [line(`No lifetime is stated for ${names}: the case does not check whether ${many ? 'they need' : 'it needs'} `
+      return [line(`No lifetime is stated for ${listWords(noLifetime)}: the case does not check whether ${many ? 'they need' : 'it needs'} `
         + 'replacing inside its horizon.', f)]
     }
     if (f.startsWith(NOT_REPLACED)) {

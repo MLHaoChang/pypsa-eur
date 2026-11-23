@@ -70,3 +70,10 @@ On any template in the group, either the investment case runs from the template'
   - The smoke fails on any "no description yet" text.
   - 19 more mutants (each LCOS word, the inflation word, the unknown-reason fallback, the title code on flag and reason lines, noteCode), all killed.
   - Light and dark shots are under `../shots/iba-02-*`.
+- 2026-11-23 GK NOT OK F1 @99e8a263 addressed:
+  - `baseline_island_rows_relaxed` is dropped from `PROJECT_FLAG_WORDS`. `statedFlags` now skips it whenever `counterfactual.notes` are served, and it is moved to `stated` in projectFlagKeys.json.
+  - The backend contract test `tests/test_ic_counterfactual_notes_contract.py` pins that the notes carry `flag_text(...)`. A mutant that empties report.py's notes is killed.
+  - Frontend tests: skipped when the notes are present, kept (as an undescribed line with its code) when they are absent. The skip mutants are killed.
+  - The LCOS reason keys are checked as an exact set against a list written out by hand from lcos.py.
+  - The lifetime list reuses `listWords`, now exported from businessCaseModel.
+  - Filed 10 for the three master-side double wordings.

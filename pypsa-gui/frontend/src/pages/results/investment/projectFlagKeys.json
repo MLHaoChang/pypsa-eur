@@ -3,7 +3,6 @@
   "worded": [
     "annualise_monthly_item_not_established",
     "asset_lifetime_unknown",
-    "baseline_island_rows_relaxed",
     "baseline_removed",
     "campus_life_ends_unreplaced",
     "campus_renewal_after_horizon",
@@ -61,6 +60,7 @@
     "template_annualised_monthly"
   ],
   "stated": [
+    "baseline_island_rows_relaxed",
     "counterfactual_basis:site_today"
   ]
 }
