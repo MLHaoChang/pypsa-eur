@@ -13,6 +13,8 @@ import { networkApi } from '../../../api/network'
 import type { CommercialConfig, ReserveProduct } from '../../../api/types'
 import MarketPackCard, { FOLD_AT } from './MarketPackCard'
 import NoBackupChecklist from './NoBackupChecklist'
+import { productWords, refusalText, valueWords } from './marketPackWords'
+import { AxiosError } from 'axios'
 import { expectAllButtonsNamed } from '../../../test-utils/accessibleName'
 
 vi.mock('../../../api/marketPacks', async (importOriginal) => {
@@ -23,7 +25,7 @@ vi.mock('../../../api/commercial', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/commercial')>()
   return {
     ...actual,
-    commercialApi: { ...actual.commercialApi, saveCommercial: vi.fn() },
+    commercialApi: { ...actual.commercialApi, saveCommercial: vi.fn(), getCommercial: vi.fn() },
     libraryApi: { ...actual.libraryApi, listSeries: vi.fn() },
   }
 })
@@ -106,7 +108,9 @@ describe('MarketPackCard: the pack list', () => {
     api.list.mockResolvedValue(LIST({ saved: false, pin_error: { code: 'market_pack_pin_unreadable', message: 'x' } }))
     const { container } = wrap(<MarketPackCard cfg={CFG()} />)
     expect((await screen.findByTestId('mp-unsaved')).textContent).toContain('Save the project first')
-    expect(screen.getByTestId('mp-pin-unreadable').textContent).toMatch(/Restore .* or delete it .* and reload/)
+    const note = screen.getByTestId('mp-pin-unreadable').textContent
+    expect(note).toMatch(/Restore the project from a backup.*and reload/)
+    expect(note).not.toContain('market_pack.json')
     noKeys(container)
   })
 
@@ -114,8 +118,9 @@ describe('MarketPackCard: the pack list', () => {
     useUIStore.setState({ uiMode: 'expert' } as never)
     api.list.mockResolvedValue(LIST({ packs: [PACK({ pinned: true })] }))
     wrap(<MarketPackCard cfg={CFG()} />)
-    expect((await screen.findByTestId('mp-badge-no-1-2026')).textContent).toBe('Using version 2026 · abcdef01')
+    expect((await screen.findByTestId('mp-badge-no-1-2026')).textContent).toBe('Using version 2026')
     expect(screen.getByTestId('mp-pack-no-1-2026').textContent).toContain('no-1-2026')
+    expect(screen.getByTestId('mp-card').textContent).not.toContain('abcdef01')
     expect(screen.getByTestId('mp-no-backup')).toBeTruthy()
   })
 })
@@ -143,7 +148,9 @@ describe('MarketPackCard: a product with no price', () => {
   it('saves the picked price onto that product only', async () => {
     commercial.saveCommercial.mockResolvedValue({} as never)
     const other = prod('afrr', 'secondary', 'up', { capacity_price: PRICE })
-    wrap(<MarketPackCard cfg={CFG({ reserve_products: [prod('fcr', 'fast_symmetric', 'symmetric'), other] })} />)
+    // Stored since the card last read the config: kept by the save.
+    commercial.getCommercial.mockResolvedValue(CFG({ reserve_products: [prod('fcr', 'fast_symmetric', 'symmetric'), other] }) as never)
+    wrap(<MarketPackCard cfg={CFG({ reserve_products: [prod('fcr', 'fast_symmetric', 'symmetric')] })} />)
     fireEvent.click(await screen.findByTestId('mp-unpriced-open-fcr'))
     const pick = screen.getByRole('combobox', { name: 'Capacity price for Fast frequency reserve (up and down)' })
     await waitFor(() => expect(within(pick).getAllByRole('option').length).toBeGreaterThan(1))
@@ -160,7 +167,7 @@ describe('MarketPackCard: preview and apply', () => {
     fireEvent.click(await screen.findByTestId('mp-preview-no-1-2026'))
     const box = await screen.findByTestId('mp-preview')
     expect((await within(box).findByTestId('mp-preview-totals')).textContent)
-      .toBe('1 value to change, 1 kept as yours, 1 left as they are.')
+      .toBe('1 value to change · 1 kept as yours · 1 left as they are')
     const rows = within(box).getAllByTestId('mp-preview-row')
     expect(rows.map(r => r.textContent)).toEqual([
       'Secondary reserve (up): hours it must hold10.5',
@@ -186,8 +193,10 @@ describe('MarketPackCard: preview and apply', () => {
     expect(screen.getAllByTestId('mp-preview-row').length).toBeLessThan(FOLD_AT)
     expect(screen.getByTestId('mp-preview-totals').textContent).toContain(`${FOLD_AT} values to change`)
     expect(screen.getByTestId('mp-apply')).toBeTruthy()
+    expect(showAll.textContent).toBe(`▸ (${FOLD_AT - 20} more) Show all`)
     fireEvent.click(showAll)
     expect(screen.getAllByTestId('mp-preview-row').length).toBe(FOLD_AT)
+    expect(screen.getByTestId('mp-preview-show-all').textContent).toBe('▾ Show fewer')
   })
 
   it('does not fold below the threshold', async () => {
@@ -246,7 +255,7 @@ describe('MarketPackCard: preview and apply', () => {
     const { container } = wrap(<MarketPackCard cfg={CFG()} />)
     fireEvent.click(await screen.findByTestId('mp-preview-no-1-2026'))
     expect((await screen.findByTestId('mp-preview-totals')).textContent)
-      .toBe('1 product to add, 0 values to change, 0 kept as yours, 1 left as they are.')
+      .toBe('1 product to add · 0 values to change · 0 kept as yours · 1 left as they are')
     expect(screen.getAllByTestId('mp-preview-row').map(r => r.textContent)).toEqual([
       'Secondary reserve (up)not in the projectAdded: holds 1 h, any storage that may offer reserves, '
         + 'buyer the grid operator (TSO), no price yet'])
@@ -320,5 +329,59 @@ describe('NoBackupChecklist', () => {
     fireEvent.click(screen.getByTestId('mp-no-backup-discard'))
     expect((screen.getByTestId('mp-no-backup-bess') as HTMLInputElement).checked).toBe(false)
     expect(screen.getByTestId('mp-no-backup-state').textContent).toBe('Saved')
+  })
+})
+
+describe('MarketPackCard: links and plain words (UX 3 on #1938)', () => {
+  it('links the receipt to Results → Storage cycling in Expert', async () => {
+    useUIStore.setState({ uiMode: 'expert' } as never)
+    api.apply.mockResolvedValue({ ...PLAN(), changed: 1 })
+    wrap(<MarketPackCard cfg={CFG()} />)
+    fireEvent.click(await screen.findByTestId('mp-preview-no-1-2026'))
+    fireEvent.click(await screen.findByTestId('mp-apply'))
+    const link = within(await screen.findByTestId('mp-receipt')).getByRole('button', { name: 'Results → Storage cycling' })
+    fireEvent.click(link)
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
+    expect(useUIStore.getState().resultsTabRequest).toBe('storage')
+  })
+
+  it('in Guided names the view as Expert and opens Results in Expert', async () => {
+    api.apply.mockResolvedValue({ ...PLAN(), changed: 1 })
+    wrap(<MarketPackCard cfg={CFG()} />)
+    fireEvent.click(await screen.findByTestId('mp-preview-no-1-2026'))
+    fireEvent.click(await screen.findByTestId('mp-apply'))
+    const receipt = await screen.findByTestId('mp-receipt')
+    expect(receipt.textContent).toContain('Results → Storage cycling, an Expert view')
+    fireEvent.click(within(receipt).getByRole('button', { name: 'open Results in Expert' }))
+    expect(useUIStore.getState().uiMode).toBe('expert')
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
+    expect(useUIStore.getState().resultsTabRequest).toBe('storage')
+  })
+
+  it('folds the packs for other zones under one toggle', async () => {
+    api.list.mockResolvedValue(LIST({ packs: [PACK(),
+      ...['NO-2', 'NO-3'].map(z => PACK({ id: z, label: z, region: z, refusal: { code: 'market_pack_zone_mismatch', message: `The pack is for ${z}.` } }))] }))
+    wrap(<MarketPackCard cfg={CFG()} />)
+    const other = await screen.findByTestId('mp-other-zones')
+    expect(other.querySelector('summary')?.textContent).toBe('Packs for other zones or currencies (2)')
+    expect(within(screen.getByTestId('mp-list')).queryByTestId('mp-pack-NO-2')).toBeNull()
+  })
+
+  it('never shows raw transport or exception text', () => {
+    expect(refusalText(new AxiosError('Network Error', 'ERR_NETWORK')))
+      .toBe('The server could not be reached. Check the connection, then try again.')
+    expect(refusalText({ response: { status: 500, data: {} }, message: 'Request failed with status code 500' }))
+      .toBe('The server could not do this. Try again; if it happens again, reload the page.')
+    expect(refusalText(new Error('TypeError: x is undefined'))).not.toContain('TypeError')
+    expect(refusalText({ response: { status: 422, data: { detail: [{ loc: ['body'], msg: 'bad' }] } } }))
+      .not.toContain('loc')
+  })
+
+  it('reads an unknown code as a plain fallback, never the code', () => {
+    expect(productWords({ kind: 'weird_kind' as never, direction: 'sideways' as never })).toBe('Reserve product')
+    expect(valueWords('weird_kind', 'kind')).toBe('another kind')
+    expect(valueWords('sideways', 'direction')).toBe('another direction')
+    expect(valueWords('dso_x', 'counterparty')).toBe('another buyer')
+    expect(valueWords('ghost_id', 'id', [])).toBe('a reserve product')
   })
 })

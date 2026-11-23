@@ -12,26 +12,19 @@ import {
   marketPacksApi, type MarketPackApplied, type MarketPackPlan, type MarketPackRow, type PackKept,
 } from '../../../api/marketPacks'
 import type { CommercialConfig, LibraryRef, ReserveProduct } from '../../../api/types'
-import { withReturnFrom } from '../../../layout/flowNavigation'
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
-import { addedWords, cellField, cellWords, productWords, refusalText, valueWords } from './marketPackWords'
+import { LibraryLink, ResultsWhere } from './marketPackLinks'
+import {
+  addedWords, cellField, cellWords, namedProducts, productOf, productWords, refusalText, valueWords,
+} from './marketPackWords'
 import NoBackupChecklist from './NoBackupChecklist'
 import { SeriesSelect } from './SeriesSelect'
 
-/** From this many cells the preview folds behind "Show all" (UX 3 term 4). */
+/** From this many cells (changed or kept as yours) the preview folds behind
+ *  "Show all" (UX 3 term 4); an added product is one row but counts every cell. */
 export const FOLD_AT = 100
 const FOLDED_ROWS = 20
-
-const RESULTS_WHERE = 'Re-solve, then see the reserves in Results → Storage cycling.'
-
-export function LibraryLink({ children = 'Library' }: { children?: string }) {
-  return (
-    <button type="button" className="underline" data-testid="mp-open-library"
-            onClick={() => withReturnFrom(() => useUIStore.getState().setSlidePanel('library'))}>
-      {children}</button>
-  )
-}
 
 /** Why a cell was left as it is, in words; "No price" only where the project's own
  *  product has none (UX 3 term 1), never where only the pack is empty. */
@@ -41,20 +34,18 @@ function KeptLine({ kept, products, held }: { kept: PackKept; products: ReserveP
       ? 'Export price: the site has no export connection, so no export price is set.'
       : 'Export price: the pack has no day-ahead price, so yours is left as it is.'}</li>
   }
-  const pid = /^reserve_products\/([^/]+)\//.exec(kept.cell)?.[1]
-  const mine = held.find(p => p.id === pid)
+  const mine = held.find(p => p.id === productOf(kept.cell))
   if (mine?.capacity_price) {
-    return <li>{mine ? productWords(mine) : pid}: the pack has no capacity price, so yours is kept.</li>
+    return <li title={kept.cell}>{productWords(mine)}: the pack has no capacity price, so yours is kept.</li>
   }
-  return <li>{cellWords(kept.cell, products)}. No price: upload one in the <LibraryLink />.</li>
+  return <li title={kept.cell}>{cellWords(kept.cell, products)}. No price: upload one in the <LibraryLink />.</li>
 }
 
-/** The products a plan adds whole (every cell from nothing), by id. */
-function addedIds(plan: MarketPackPlan): Set<string> {
+/** The products a plan adds whole (their id cell from nothing). */
+function addedIds(plan: Pick<MarketPackPlan, 'changes'>): Set<string> {
   return new Set(plan.changes.filter(c => cellField(c.cell) === 'id' && c.from == null)
-    .map(c => /^reserve_products\/([^/]+)\//.exec(c.cell)?.[1] ?? ''))
+    .map(c => productOf(c.cell) ?? ''))
 }
-const productOf = (cell: string) => /^reserve_products\/([^/]+)\//.exec(cell)?.[1]
 
 interface Row { cell: string; now: unknown; after: unknown; yours: boolean; pack?: unknown; words?: boolean }
 
@@ -73,30 +64,36 @@ function PlanTable({ plan, products }: { plan: MarketPackPlan; products: Reserve
   ]
   const [all, setAll] = useState(false)
   if (rows.length === 0) return null
-  const folded = rows.length >= FOLD_AT && !all
+  const cells = plan.changes.length + plan.conflicts.length
+  const folded = cells >= FOLD_AT && !all && rows.length > FOLDED_ROWS
   const shown = folded ? rows.slice(0, FOLDED_ROWS) : rows
   return (
     <div className="space-y-1">
       <table className="w-full text-left border-collapse text-[11px]" data-testid="mp-preview-table">
         <thead><tr>{['Value', 'Now', 'After the apply'].map(h => (
           <th key={h} scope="col" className="p-1 border-b border-border">{h}</th>))}</tr></thead>
-        <tbody>{shown.map(r => (
-          <tr key={r.cell} className={r.yours ? 'bg-warn/10' : ''} data-testid="mp-preview-row" data-yours={r.yours}>
-            <th scope="row" className="p-1 border-b border-border font-normal">{cellWords(r.cell, products)}</th>
-            <td className="p-1 border-b border-border">{r.words ? String(r.now) : valueWords(r.now, cellField(r.cell), products)}</td>
-            <td className="p-1 border-b border-border">
-              {r.words ? String(r.after) : r.yours && cellField(r.cell) === 'id' ? 'kept removed'
-                : valueWords(r.after, cellField(r.cell), products)}
-              {r.yours && <span className="block text-[10px] text-muted">
-                {cellField(r.cell) === 'id' ? 'You removed it after the last apply, so it is not added again'
-                  : `Kept as yours (the pack has ${valueWords(r.pack, cellField(r.cell), products)})`}</span>}
-            </td>
-          </tr>
-        ))}</tbody>
+        <tbody>{shown.map(r => {
+          const field = cellField(r.cell)
+          return (
+            <tr key={r.cell} className={r.yours ? 'bg-warn/10' : ''} data-testid="mp-preview-row" data-yours={r.yours}>
+              <th scope="row" title={r.cell} className="p-1 border-b border-border font-normal">
+                {cellWords(r.cell, products)}</th>
+              <td className="p-1 border-b border-border">{r.words ? String(r.now) : valueWords(r.now, field, products)}</td>
+              <td className="p-1 border-b border-border">
+                {r.words ? String(r.after) : r.yours && field === 'id' ? 'kept removed'
+                  : valueWords(r.after, field, products)}
+                {r.yours && <span className="block text-[10px] text-muted">
+                  {field === 'id' ? 'You removed it after the last apply, so it is not added again'
+                    : `Kept as yours (the pack has ${valueWords(r.pack, field, products)})`}</span>}
+              </td>
+            </tr>
+          )
+        })}</tbody>
       </table>
-      {folded && (
+      {rows.length > FOLDED_ROWS && cells >= FOLD_AT && (
         <button type="button" className="underline text-[11px]" data-testid="mp-preview-show-all"
-                onClick={() => setAll(true)}>Show all {rows.length}</button>
+                aria-expanded={all} onClick={() => setAll(!all)}>
+          {all ? '▾ Show fewer' : `▸ (${rows.length - FOLDED_ROWS} more) Show all`}</button>
       )}
     </div>
   )
@@ -104,15 +101,16 @@ function PlanTable({ plan, products }: { plan: MarketPackPlan; products: Reserve
 
 /** "2 products to add" / "3 values to change", counting an added product once. */
 function counts(plan: Pick<MarketPackPlan, 'changes'>): { added: number; values: number } {
-  const added = addedIds(plan as MarketPackPlan)
+  const added = addedIds(plan)
   return { added: added.size, values: plan.changes.filter(c => !added.has(productOf(c.cell) ?? '')).length }
 }
 const many = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`
 
 function totals(plan: MarketPackPlan): string {
   const { added, values } = counts(plan)
-  return `${added ? `${many(added, 'product')} to add, ` : ''}${many(values, 'value')} to change, `
-    + `${plan.conflicts.length} kept as yours, ${plan.kept.length} left as they are.`
+  return [added ? `${many(added, 'product')} to add` : null, `${many(values, 'value')} to change`,
+    `${plan.conflicts.length} kept as yours`, `${plan.kept.length} left as they are`]
+    .filter(Boolean).join(' · ')
 }
 
 function PackPreview({ pack, products, onApplied, onClose }: {
@@ -130,8 +128,7 @@ function PackPreview({ pack, products, onApplied, onClose }: {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const plan = preview.data
-  // The products named in the words: the project's, then the pack's new ones.
-  const named = [...products, ...pack.products.filter(p => !products.some(q => q.id === p.id))]
+  const named = namedProducts(products, pack.products)
 
   const apply = async () => {
     if (!plan) return
@@ -192,14 +189,16 @@ function Receipt({ pack, out, products, held, onClose }: {
       {out.conflicts.length > 0 && (
         <div data-testid="mp-receipt-kept">
           <p>{out.conflicts.length} kept as yours:</p>
-          <ul className="list-disc pl-4">{out.conflicts.map(c => (
-            <li key={c.cell}>{cellWords(c.cell, products)}: {valueWords(c.yours, cellField(c.cell), products)} (the pack has {valueWords(c.pack, cellField(c.cell), products)})</li>
-          ))}</ul>
+          <ul className="list-disc pl-4">{out.conflicts.map(c => {
+            const field = cellField(c.cell)
+            return <li key={c.cell} title={c.cell}>{cellWords(c.cell, products)}: {valueWords(c.yours, field, products)}{' '}
+              (the pack has {valueWords(c.pack, field, products)})</li>
+          })}</ul>
         </div>
       )}
       {out.kept.length > 0 && <ul className="list-disc pl-4 text-muted">
         {out.kept.map(k => <KeptLine key={k.cell} kept={k} products={products} held={held} />)}</ul>}
-      <p className="text-muted">{RESULTS_WHERE}</p>
+      <p className="text-muted"><ResultsWhere /></p>
       <div className="flex justify-end"><button type="button" className="px-2 py-0.5" onClick={onClose}>Close</button></div>
     </div>
   )
@@ -207,7 +206,7 @@ function Receipt({ pack, out, products, held, onClose }: {
 
 /** The project's reserve products with no price (UX 3 term 1): each named in words,
  *  with "Open here" to pick its price series in place. */
-function UnpricedProducts({ cfg, unpriced }: { cfg: CommercialConfig; unpriced: ReserveProduct[] }) {
+function UnpricedProducts({ unpriced }: { unpriced: ReserveProduct[] }) {
   const project = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
   const [openId, setOpenId] = useState<string | null>(null)
@@ -219,12 +218,15 @@ function UnpricedProducts({ cfg, unpriced }: { cfg: CommercialConfig; unpriced: 
     if (!pick) return
     setMessage(null)
     try {
+      // The products as stored now, not as this card last read them, so a change
+      // made elsewhere since is kept.
+      const fresh = await commercialApi.getCommercial()
       await commercialApi.saveCommercial({
-        reserve_products: (cfg.reserve_products ?? []).map(p => p.id === id ? { ...p, capacity_price: pick } : p),
+        reserve_products: (fresh?.reserve_products ?? []).map(p => p.id === id ? { ...p, capacity_price: pick } : p),
       })
       setOpenId(null)
       setPick(null)
-      setMessage({ tone: 'ok', text: `The price is saved. ${RESULTS_WHERE}` })
+      setMessage({ tone: 'ok', text: 'The price is saved.' })
       await qc.invalidateQueries({ queryKey: nk(project, 'commercial') })
       await qc.invalidateQueries({ queryKey: nk(project, 'results') })
     } catch (e) {
@@ -239,6 +241,7 @@ function UnpricedProducts({ cfg, unpriced }: { cfg: CommercialConfig; unpriced: 
           <p className="text-warn">
             {productWords(p)} has no price, so the solve refuses it.{' '}
             <button type="button" className="underline" data-testid={`mp-unpriced-open-${p.id}`}
+                    aria-expanded={openId === p.id}
                     onClick={() => { setOpenId(openId === p.id ? null : p.id); setPick(null); setMessage(null) }}>
               Open here</button></p>
           {openId === p.id && (
@@ -253,20 +256,43 @@ function UnpricedProducts({ cfg, unpriced }: { cfg: CommercialConfig; unpriced: 
           )}
         </div>
       ))}
-      {message && <p role={message.tone === 'error' ? 'alert' : 'status'}
-                     className={message.tone === 'error' ? 'text-danger' : 'text-success'}>{message.text}</p>}
+      {message && <p role={message.tone === 'error' ? 'alert' : 'status'} data-testid="mp-unpriced-message"
+                     className={message.tone === 'error' ? 'text-danger' : 'text-success'}>
+        {message.text}{message.tone === 'ok' && <> <ResultsWhere /></>}</p>}
     </div>
   )
 }
 
-function Badge({ pack, expert }: { pack: MarketPackRow; expert: boolean }) {
+function Badge({ pack }: { pack: MarketPackRow }) {
   if (pack.update_available) {
     return <span className="rounded px-1 bg-warn/15 text-warn" data-testid={`mp-badge-${pack.id}`}>Update available</span>
   }
   if (!pack.pinned) return null
   return (
     <span className="rounded px-1 bg-success/15 text-success" data-testid={`mp-badge-${pack.id}`}>
-      Using version {pack.valid_year}{expert ? ` · ${pack.pack_hash.slice(0, 8)}` : ''}</span>
+      Using version {pack.valid_year}</span>
+  )
+}
+
+function PackItem({ p, expert, open, onToggle, preview }: {
+  p: MarketPackRow; expert: boolean; open: boolean; onToggle: () => void; preview: React.ReactNode
+}) {
+  return (
+    <li className="space-y-0.5" data-testid={`mp-pack-${p.id}`}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="font-medium">{p.label}</span>
+        <span className="text-muted">{p.region}, {p.currency}, {p.valid_year}</span>
+        {expert && <span className="text-muted">{p.id}</span>}
+        <Badge pack={p} />
+        {!p.refusal && (
+          <button type="button" className="underline ml-auto" data-testid={`mp-preview-${p.id}`}
+                  aria-expanded={open} onClick={onToggle}>
+            {open ? 'Hide' : p.update_available ? 'See the update' : 'See what it changes'}</button>
+        )}
+      </div>
+      {p.refusal && <p className="text-muted" data-testid={`mp-refusal-${p.id}`}>{p.refusal.message}</p>}
+      {open && preview}
+    </li>
   )
 }
 
@@ -283,16 +309,23 @@ export default function MarketPackCard({ cfg }: { cfg: CommercialConfig }) {
   // one a pack merely lists.
   const unpriced = products.filter(p => p.capacity_price == null)
   const data = list.data
+  const fits = data?.packs.filter(p => !p.refusal) ?? []
+  const others = data?.packs.filter(p => p.refusal) ?? []
 
   const applied = async (pack: MarketPackRow, out: MarketPackApplied) => {
     // The answer carries the cells kept as yours; after the apply the pack no
     // longer reads as an update, so the receipt is the one place they show.
-    const named = [...products, ...pack.products.filter(p => !products.some(q => q.id === p.id))]
-    setDone({ pack, out, products: named })
+    setDone({ pack, out, products: namedProducts(products, pack.products) })
     setOpenId(null)
     await qc.invalidateQueries({ queryKey: nk(project, 'commercial') })
     await qc.invalidateQueries({ queryKey: nk(project, 'results') })
   }
+  const item = (p: MarketPackRow) => (
+    <PackItem key={p.id} p={p} expert={expert} open={openId === p.id}
+              onToggle={() => { setDone(null); setOpenId(openId === p.id ? null : p.id) }}
+              preview={<PackPreview pack={p} products={products} onClose={() => setOpenId(null)}
+                                    onApplied={out => { void applied(p, out) }} />} />
+  )
 
   return (
     <section className="space-y-2 border border-border rounded p-2" data-testid="mp-card">
@@ -314,35 +347,21 @@ export default function MarketPackCard({ cfg }: { cfg: CommercialConfig }) {
       {data?.pin_error && (
         <p className="text-[11px] text-warn" data-testid="mp-pin-unreadable">
           The record of what the last pack applied cannot be read, so the card cannot tell your edits from
-          the pack's and applies nothing. Restore the project's market_pack.json from a backup, or delete it
-          (every filled value then counts as yours), and reload.</p>
+          the pack's and applies nothing.{' '}
+          {expert
+            ? 'Restore the project\'s market_pack.json from a backup, or delete it (every filled value then counts as yours), and reload.'
+            : 'Restore the project from a backup, or ask whoever manages the project files to delete its market-pack record (every filled value then counts as yours), and reload.'}</p>
       )}
-      <UnpricedProducts cfg={cfg} unpriced={unpriced} />
-      {data && data.packs.length > 0 && (
-        <ul className="space-y-1 text-[11px]" data-testid="mp-list">
-          {data.packs.map(p => (
-            <li key={p.id} className="space-y-0.5" data-testid={`mp-pack-${p.id}`}>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-medium">{p.label}</span>
-                <span className="text-muted">{p.region}, {p.currency}, {p.valid_year}</span>
-                {expert && <span className="text-muted">{p.id}</span>}
-                <Badge pack={p} expert={expert} />
-                {!p.refusal && (
-                  <button type="button" className="underline ml-auto" data-testid={`mp-preview-${p.id}`}
-                          onClick={() => { setDone(null); setOpenId(openId === p.id ? null : p.id) }}>
-                    {openId === p.id ? 'Hide' : p.update_available ? 'See the update' : 'See what it changes'}</button>
-                )}
-              </div>
-              {p.refusal && <p className="text-muted" data-testid={`mp-refusal-${p.id}`}>{p.refusal.message}</p>}
-              {openId === p.id && (
-                <PackPreview pack={p} products={products} onClose={() => setOpenId(null)}
-                             onApplied={out => { void applied(p, out) }} />
-              )}
-            </li>
-          ))}
-        </ul>
+      <UnpricedProducts unpriced={unpriced} />
+      {fits.length > 0 && <ul className="space-y-1 text-[11px]" data-testid="mp-list">{fits.map(item)}</ul>}
+      {others.length > 0 && (
+        <details className="text-[11px]" data-testid="mp-other-zones">
+          <summary className="cursor-pointer text-muted">Packs for other zones or currencies ({others.length})</summary>
+          <ul className="space-y-1 pt-1">{others.map(item)}</ul>
+        </details>
       )}
-      {done && <Receipt pack={done.pack} out={done.out} products={done.products} held={products} onClose={() => setDone(null)} />}
+      {done && <Receipt pack={done.pack} out={done.out} products={done.products} held={products}
+                        onClose={() => setDone(null)} />}
       <NoBackupChecklist cfg={cfg} />
     </section>
   )

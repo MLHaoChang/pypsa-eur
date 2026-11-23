@@ -1,5 +1,6 @@
 // Plain words for the market-pack card (SCU06 K8a, UX 3 terms 1–3): a product by its
-// kind and direction, a cell by its product and field, never a slot key.
+// kind and direction, a cell by its product and field, never a slot key or a code.
+// An unknown code reads as a plain fallback; the card puts the raw cell in a title.
 import type { LibraryRef, ReserveProduct } from '../../../api/types'
 import { librarySeriesLabel } from '../../../plainNames'
 
@@ -23,33 +24,44 @@ const FIELD: Record<string, string> = {
   storages: 'storage that may offer it',
   counterparty: 'buyer',
 }
+const BUYER: Record<string, string> = { tso: 'the grid operator (TSO)' }
 
-/** "Secondary reserve (up)". */
+/** "Secondary reserve (up)"; "Reserve product" for a kind the card does not know. */
 export function productWords(p: Pick<ReserveProduct, 'kind' | 'direction'>): string {
-  return `${KIND[p.kind] ?? p.kind} (${DIRECTION[p.direction] ?? p.direction})`
+  const kind = KIND[p.kind] ?? 'Reserve product'
+  const dir = DIRECTION[p.direction]
+  return dir ? `${kind} (${dir})` : kind
 }
 
-/** A cell (`export_price_ref` or `reserve_products/<id>/<field>`) in words; `products`
- *  names a product by its kind, else the product's id is shown as given. */
+const CELL = /^reserve_products\/([^/]+)\/(.+)$/
+
+/** The product id of a `reserve_products/<id>/<field>` cell, or null. */
+export function productOf(cell: string): string | null {
+  return CELL.exec(cell)?.[1] ?? null
+}
+
+/** The field of a cell (`sustain_h`), or null for the export pick. */
+export function cellField(cell: string): string | null {
+  return CELL.exec(cell)?.[2] ?? null
+}
+
+/** The products a card names: the project's own, then those only the pack lists. */
+export function namedProducts(held: ReserveProduct[], pack: ReserveProduct[]): ReserveProduct[] {
+  return [...held, ...pack.filter(p => !held.some(q => q.id === p.id))]
+}
+
+/** A cell (`export_price_ref` or `reserve_products/<id>/<field>`) in words. */
 export function cellWords(cell: string, products: ReserveProduct[]): string {
   if (cell === 'export_price_ref') return 'Export price'
-  const m = /^reserve_products\/([^/]+)\/(.+)$/.exec(cell)
-  if (!m) return cell
+  const m = CELL.exec(cell)
+  if (!m) return 'Another setting'
   const prod = products.find(p => p.id === m[1])
-  const name = prod ? productWords(prod) : m[1]
-  return m[2] === 'id' ? name : `${name}: ${FIELD[m[2]] ?? m[2].replace(/_/g, ' ')}`
+  const name = prod ? productWords(prod) : 'A reserve product'
+  return m[2] === 'id' ? name : `${name}: ${FIELD[m[2]] ?? 'another setting'}`
 }
 
 function isRef(v: unknown): v is LibraryRef {
   return typeof v === 'object' && v !== null && 'id' in v && 'version' in v
-}
-
-const BUYER: Record<string, string> = { tso: 'the grid operator (TSO)' }
-
-/** The field of a cell (`sustain_h`), or null for the export pick. */
-export function cellField(cell: string): string | null {
-  const m = /^reserve_products\/[^/]+\/(.+)$/.exec(cell)
-  return m ? m[1] : null
 }
 
 /** A cell's value as the user reads it; `field` picks the words for a kind,
@@ -59,34 +71,37 @@ export function valueWords(v: unknown, field: string | null = null, products: Re
   if (isRef(v)) return `Library series ${librarySeriesLabel(v.id, v.version)}`
   if (Array.isArray(v)) return v.length ? v.map(x => valueWords(x)).join(', ') : 'any'
   if (typeof v === 'string') {
-    if (field === 'kind') return KIND[v] ?? v
-    if (field === 'direction') return DIRECTION[v] ?? v
-    if (field === 'counterparty') return BUYER[v] ?? v
+    if (field === 'kind') return KIND[v] ?? 'another kind'
+    if (field === 'direction') return DIRECTION[v] ?? 'another direction'
+    if (field === 'counterparty') return BUYER[v] ?? 'another buyer'
     if (field === 'id') {
       const prod = products.find(p => p.id === v)
-      return prod ? productWords(prod) : v
+      return prod ? productWords(prod) : 'a reserve product'
     }
     return v
   }
   if (typeof v === 'number') return String(v)
-  return JSON.stringify(v)
+  return 'a value the card cannot show'
 }
 
 /** A product the pack adds, in one line. */
 export function addedWords(p: ReserveProduct): string {
   const parts = [`holds ${p.sustain_h} h`,
     p.storages.length ? `storage ${p.storages.join(', ')}` : 'any storage that may offer reserves',
-    `buyer ${BUYER[p.counterparty] ?? p.counterparty}`]
+    `buyer ${valueWords(p.counterparty, 'counterparty')}`]
   if (p.max_commit_mw != null) parts.push(`at most ${p.max_commit_mw} MW`)
   parts.push(p.capacity_price ? `price ${valueWords(p.capacity_price)}` : 'no price yet')
   return `Added: ${parts.join(', ')}`
 }
 
-/** A refused pack or a failed request as one plain sentence (never the code). */
+/** A refused pack or a failed request as one plain sentence: the server's own
+ *  sentence when it sent one, else a fixed one; never raw transport or exception text. */
 export function refusalText(e: unknown): string {
-  const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
-  if (typeof d === 'string') return d
+  const r = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response
+  const d = r?.data?.detail
+  if (typeof d === 'string' && d.trim()) return d
   const msg = (d as { message?: unknown } | undefined)?.message
-  if (typeof msg === 'string') return msg
-  return e instanceof Error ? e.message : 'The request failed.'
+  if (typeof msg === 'string' && msg.trim()) return msg
+  if (r) return 'The server could not do this. Try again; if it happens again, reload the page.'
+  return 'The server could not be reached. Check the connection, then try again.'
 }

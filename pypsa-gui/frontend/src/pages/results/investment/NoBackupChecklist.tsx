@@ -11,6 +11,7 @@ import { networkApi } from '../../../api/network'
 import type { CommercialConfig } from '../../../api/types'
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
+import { ResultsWhere } from './marketPackLinks'
 import { refusalText } from './marketPackWords'
 
 const same = (a: string[], b: string[]) => a.length === b.length && a.every(x => b.includes(x))
@@ -38,7 +39,7 @@ export default function NoBackupChecklist({ cfg }: { cfg: CommercialConfig }) {
     try {
       await commercialApi.saveCommercial({ reserve_no_backup_storages: draft })
       setDraft(null)
-      setMessage({ tone: 'ok', text: 'Saved. Re-solve to use it; see the reserves in Results → Storage cycling.' })
+      setMessage({ tone: 'ok', text: 'Saved.' })
       await qc.invalidateQueries({ queryKey: nk(project, 'commercial') })
       await qc.invalidateQueries({ queryKey: nk(project, 'results') })
     } catch (e) {
@@ -81,7 +82,7 @@ export default function NoBackupChecklist({ cfg }: { cfg: CommercialConfig }) {
       </div>
       {message && <p role={message.tone === 'error' ? 'alert' : 'status'} data-testid="mp-no-backup-message"
                      className={`text-[11px] ${message.tone === 'error' ? 'text-danger' : 'text-success'}`}>
-        {message.text}</p>}
+        {message.text}{message.tone === 'ok' && <> <ResultsWhere /></>}</p>}
     </fieldset>
   )
 }
