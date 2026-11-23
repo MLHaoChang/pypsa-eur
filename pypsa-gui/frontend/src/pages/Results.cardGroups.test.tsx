@@ -164,6 +164,17 @@ describe('Hand-off (R6)', () => {
     expect(screen.getByTestId('results-group-handoff').getAttribute('aria-pressed')).toBe('true')
   })
 
+  it('with a past run on screen, Hand-off still shows its tabs beside the run chrome', async () => {
+    useUIStore.setState({ discussedRun: { runId: 'run-past', section: 'results_capacity' } })
+    try {
+      await renderResults()
+      fireEvent.click(screen.getByTestId('results-group-handoff'))
+      fireEvent.click(screen.getByTestId('results-cardtab-exports'))
+      expect(screen.getByTestId('exports-stub')).toBeTruthy()
+      expect(screen.getByTestId('discussed-run-chrome').getAttribute('data-run-id')).toBe('run-past')
+    } finally { useUIStore.setState({ discussedRun: null }) }
+  })
+
   it('the Reports sidebar row and every other entry land on Hand-off › Reports', () => {
     useUIStore.setState({ activeSlidePanel: null, resultsTabRequest: null })
     useUIStore.getState().setSlidePanel('reports')

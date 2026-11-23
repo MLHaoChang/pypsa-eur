@@ -1075,7 +1075,9 @@ export default function Results() {
             {(() => {
               // Overview is multi-period-only; if it's somehow the active tab on
               // a single-period run, fall back to Dispatch.
-              if (discussedRun) return <RunBoundView run={discussedRun} tab={effectiveTab} tabLabel={id => ALL_TABS.find(t => t.id === id)?.label} />
+              // Hand-off holds no result view: a past run on screen leaves its tabs as they are (the
+              // Exports picker reads the discussed run itself).
+              if (discussedRun && activeGroup !== 'handoff') return <RunBoundView run={discussedRun} tab={effectiveTab} tabLabel={id => ALL_TABS.find(t => t.id === id)?.label} />
               const t = (bodyTab === 'overview' && uniquePeriods.length === 0) ? 'dispatch' : bodyTab
               // A group with no tab yet, or a card outside the scope (RC3 A):
               // the scope gate says so, the earlier results stay below, dimmed
