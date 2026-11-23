@@ -3,7 +3,9 @@
 
 # GC-06a EMT pack: a 'connected' channel once GC-04 bumps the battery contract
 
-Status: ready-for-agent
+Status: done
+
+Done in #1708 (4643ab46).
 Model tier: opus
 Blocked by: 12 (same package, slice c); #1608, #1609
 Type: task

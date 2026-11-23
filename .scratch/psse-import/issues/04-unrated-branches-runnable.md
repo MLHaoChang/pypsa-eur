@@ -3,7 +3,9 @@
 
 # Imported PSS/E and DGS networks fail Run LOPF: an unrated line keeps s_nom = 0, and the DGS external grid comes in with p_nom = inf
 
-Status: needs-triage
+Status: done
+
+Done in #1867 (9bfe70ec).
 Owner decisions: IMPORT-ZERO-RATING-1, IMPORTS-1, RAW-NAMES-1
 Source: project-io 04 Slice A end-to-end check (2026-11-21, session_01G7qCuntcK5Xsp2Xx628rDX).
 Review: GK A (importers).
