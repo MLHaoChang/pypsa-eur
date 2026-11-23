@@ -283,6 +283,19 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                             "and are out of date when it is stale.",
                units="t/yr, EUR/yr",
                card="reliability", sub_option="goal_study", card_tab="grid_risk"),
+    # Guided-results 09 (R8): what the site makes, in the product's own unit, with the hydrogen cost per kg
+    # the report quotes. Read from the process view and the LCOH result; nothing is priced here.
+    ResultView("products", _RESULTS, "products", "Products",
+               "what the site makes in the product's own unit, how long its process units ran and, for "
+               "hydrogen, the cost per kg",
+               "results",
+               (_rp("get_process_view", "products"), _r("get_results", result_kind="lcoh")),
+               guided_label="Products",
+               claim_limits="Output is what the solve made; the hydrogen cost is the electrolysers' "
+                            "levelised cost, as in Economics and the report. No cost per tonne is "
+                            "calculated for ammonia or other products: it is not shown, never zero.",
+               units="kg/h, t/d, %, EUR/kg",
+               card="capacity", sub_option="dispatch", card_tab="costs_prices"),
     ResultView("investment", _RESULTS, "investment", "Investment case",
                "the investment case verdict and its cash flows", "investment",
                (_r("get_investment_case"),),

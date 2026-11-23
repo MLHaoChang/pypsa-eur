@@ -52,7 +52,7 @@ def test_load_flow_is_the_only_view_that_proves_displayed_data_today():
 
 def test_guided_labels_follow_guided_tabs():
     guided = {v.tab for v in rv.RESULT_VIEWS if v.guided_label}
-    assert guided == {'summary', 'adequacy', 'fmea', 'flows', 'loadshape', 'grid_risk'}
+    assert guided == {'summary', 'adequacy', 'fmea', 'flows', 'loadshape', 'grid_risk', 'products'}
 
 
 def test_gated_views_wait_for_their_tools():
@@ -129,6 +129,7 @@ BY_CARD = {
     'adequacy': ('reliability', 'goal_study', 'adequacy'),
     'fmea': ('reliability', 'stress', 'stress_fmea'),
     'grid_risk': ('reliability', 'goal_study', 'grid_risk'),  # G2P-13
+    'products': ('capacity', 'dispatch', 'costs_prices'),  # guided-results 09
     'investment': ('commercial', 'investment_case', 'investment_case'),
     'asset': (None, None, None),
 }

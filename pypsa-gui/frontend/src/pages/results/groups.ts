@@ -8,7 +8,7 @@ export type ResultsTab =
   | 'summary' | 'overview' | 'capex' | 'dispatch' | 'loadflow' | 'prices' | 'emissions'
   | 'economics' | 'curtailment' | 'lostload' | 'adequacy' | 'storage'
   | 'asset' | 'fmea' | 'investment' | 'flows' | 'loadshape' | 'grid_code' | 'electrical_design'
-  | 'island' | 'grid_forming' | 'grid_risk'
+  | 'island' | 'grid_forming' | 'grid_risk' | 'products'
   | 'reports' | 'exports' | 'specialist_packet'
 
 export type ResultsGroup = 'summary' | 'investment' | 'grid_plan' | 'reliability' | 'operation'
@@ -28,7 +28,7 @@ export const RESULT_GROUPS: ReadonlyArray<{
   { id: 'reliability', label: 'Reliability', question: 'Whether the critical load stays on',
     tabs: ['adequacy', 'lostload', 'fmea', 'grid_risk'] },
   { id: 'operation', label: 'Operation', question: 'How it runs hour by hour',
-    tabs: ['dispatch', 'flows', 'loadshape', 'storage', 'curtailment', 'emissions'] },
+    tabs: ['dispatch', 'flows', 'loadshape', 'storage', 'curtailment', 'emissions', 'products'] },
 ]
 
 export function groupOf(tab: ResultsTab): ResultsGroup | null {
@@ -69,7 +69,7 @@ export const CARD_GROUPS: readonly CardGroup[] = [
       { id: 'build', label: 'Build', views: ['capex', 'overview'] },
       { id: 'operation', label: 'Operation', views: ['dispatch', 'flows', 'loadshape', 'storage', 'emissions', 'lostload'] },
       { id: 'curtailment', label: 'Curtailment', views: ['curtailment'] },
-      { id: 'costs_prices', label: 'Costs & prices', views: ['prices', 'economics'] },
+      { id: 'costs_prices', label: 'Costs & prices', views: ['prices', 'economics', 'products'] },
     ] },
   { id: 'grid', label: 'AC power flow & grid', question: 'Whether the network and the connection carry it',
     tabs: [

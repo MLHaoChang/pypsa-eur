@@ -32,6 +32,7 @@ import LoadShapeTab from './results/LoadShapeTab'
 import { GridCodeTab, ElectricalDesignTab } from './results/GridStudyTabs'
 import { IslandTab, GridFormingTab } from './results/ControlStudyTabs'
 import GridRiskTab from './results/GridRiskTab'
+import ProductsTab from './results/ProductsTab'
 import AssetDetail from './results/asset/AssetDetail'
 import SummaryTab from './results/SummaryTab'
 import type { SimulationStatus } from '../api/types'
@@ -81,7 +82,7 @@ const VALID_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>([
   'summary', 'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'emissions',
   'economics', 'curtailment', 'lostload', 'adequacy', 'storage', 'asset',
   'fmea', 'investment', 'flows', 'loadshape', 'grid_code', 'electrical_design',
-  'island', 'grid_forming', 'grid_risk', 'reports', 'exports', 'specialist_packet',
+  'island', 'grid_forming', 'grid_risk', 'products', 'reports', 'exports', 'specialist_packet',
 ])
 
 function loadInitialTab(): ResultsTab {
@@ -108,7 +109,7 @@ function solveSignature(s: SimulationStatus | undefined): string | null {
 // on a flat single-period run. `expertOnly` tabs are hidden in Guided mode
 // (guided-mode spec §3.5): Guided keeps adequacy and FMEA, the two the
 // hub-design flow reads.
-export const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip: string; multiOnly?: boolean; expertOnly?: boolean; processOnly?: boolean }> = [
+export const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip: string; multiOnly?: boolean; expertOnly?: boolean; processOnly?: boolean; productsOnly?: boolean }> = [
   { id: 'summary',    label: 'Summary',            Icon: Gauge,            tip: 'The solve at a glance: cost, emissions, adequacy and the key capacities, each linking to its tab' },
   { id: 'overview',   label: 'Overview',           Icon: Layers,           tip: 'Per-period economics, generation mix & storage — the whole horizon at a glance', multiOnly: true, expertOnly: true },
   { id: 'capex',      label: 'Capacity expansion', Icon: TrendingUp,       tip: 'CAPEX, OPEX, sized assets', expertOnly: true },
@@ -128,6 +129,7 @@ export const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingU
   { id: 'adequacy',   label: 'Adequacy',           Icon: ShieldCheck,      tip: 'Reliability targets, COPT screening, the cost-vs-availability frontier, sequential Monte Carlo and the reliability-targeted planning loop' },
   { id: 'storage',    label: 'Storage cycling',    Icon: BatteryCharging,  tip: 'Equivalent full-cycle count per storage unit + carrier rollup', expertOnly: true },
   { id: 'grid_risk',  label: 'Grid risk to production', Icon: ShieldAlert, tip: 'Each grid risk (ride-through, island, N-1, connection curtailment) as lost tonnes, then EUR, per year', processOnly: true },
+  { id: 'products',   label: 'Products',           Icon: Package,          tip: 'What the site makes (hydrogen, ammonia, …): output in its own unit, running time and, for hydrogen, the cost per kg', productsOnly: true },
   { id: 'fmea',       label: 'FMEA',               Icon: ShieldAlert,      tip: 'Failure modes ranked by criticality (€ per year): computed rows + expert class-D rows, mitigability, CSV export' },
   { id: 'investment', label: 'Investment case',    Icon: Briefcase,        tip: 'The investment case: the site bill, participants and value flows, the Library, tariffs and contracts', expertOnly: true },
   { id: 'asset',      label: 'Asset Detail',       Icon: Crosshair,        tip: 'One asset in full — every applicable result, as numbers or charts, exportable', expertOnly: true },
@@ -175,6 +177,7 @@ const RESULTS_TO_COMPARE_TAB: Record<ResultsTab, CompareTab> = {
   asset: 'overview',
   // No FMEA compare tab exists (yet) — alias to overview like `asset`.
   fmea: 'overview',
+  products: 'overview',        // no compared frame for the product view: alias to overview like `asset`
   grid_risk: 'lost_load',      // G2P-13: the nearest compared frame is the lost production
   // No investment compare tab exists (IC P3 WP3.5) — alias to overview.
   investment: 'overview',
@@ -480,6 +483,7 @@ export default function Results() {
     queryKey: nk(currentProject, 'results', 'process_view'), queryFn: resultsApi.getProcessView, retry: false,
   })
   const hasProcessUnits = (processView?.process_units?.length ?? 0) > 0
+  const hasProducts = hasProcessUnits || (processView?.products?.length ?? 0) > 0
   const firstSnap = snap?.snapshots?.[0]
   const lastSnap = snap?.snapshots?.[snap.count - 1]
   // datetime-local input format: "YYYY-MM-DDTHH:mm".
@@ -700,7 +704,7 @@ export default function Results() {
   // ── UX overhaul S3: groups ───────────────────────────────────────────
   const tabVisible = (t: (typeof ALL_TABS)[number]) =>
     (!t.multiOnly || uniquePeriods.length > 0) && (!t.expertOnly || uiMode === 'expert' || t.id === advancedTab)
-    && (!t.processOnly || hasProcessUnits)
+    && (!t.processOnly || hasProcessUnits) && (!t.productsOnly || hasProducts)
   const visibleTabIds = new Set<ResultsTab>(ALL_TABS.filter(tabVisible).map(t => t.id))
   // The drawer sits over the last non-asset tab; a first load on 'asset' falls back to Summary.
   const bodyTab: ResultsTab = effectiveTab === 'asset' ? lastBodyTab.current : effectiveTab
@@ -800,6 +804,7 @@ export default function Results() {
       {t === 'island'      && <IslandTab />}
       {t === 'grid_forming' && <GridFormingTab />}
       {t === 'grid_risk'   && <GridRiskTab />}
+      {t === 'products'    && <ProductsTab />}
       {t === 'reports'     && <ReportsPanel />}
       {t === 'exports'     && <ExportsTab />}
       {t === 'specialist_packet' && <SpecialistPacketTab />}

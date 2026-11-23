@@ -1439,7 +1439,15 @@ export interface ProcessProduct {
   lost: ProcessAmount
   inventory: ProcessInventory[]
 }
-export interface ProcessView { products: ProcessProduct[]; process_units: { name: string }[] }
+export interface ProcessUnit {
+  name: string
+  product_bus?: string
+  /** Hours the unit ran over the modelled snapshots, and the hours modelled (null when not finite). */
+  running_hours?: number | null
+  modelled_hours?: number | null
+  flag?: string | null
+}
+export interface ProcessView { products: ProcessProduct[]; process_units: ProcessUnit[] }
 
 // Grid-to-process ticket 13: "Grid risk to production" (GET /results/grid_risk_production).
 export interface GridRiskTarget {
