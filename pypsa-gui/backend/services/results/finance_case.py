@@ -2354,6 +2354,24 @@ def _extra_fom_lines(extra_finance: tuple[AssetFinance, ...], k: str, base_year:
 
 # ── the entry point ──────────────────────────────────────────────────────────
 
+def connection_need(cfg) -> str | None:
+    """The connection code a run would refuse with that the start can tell
+    without the dispatch (template-e2e issue 40): `value_flows_not_configured`
+    with no commercial config or no `value_flows` in it, `value_flows_invalid`
+    for one that does not parse; None otherwise, the run states the rest. Only
+    the start's `detail.needs` reads it; the start never refuses with it."""
+    commercial = getattr(cfg, "commercial", None)
+    if not commercial:
+        return "value_flows_not_configured"
+    try:
+        vf = P.parse_value_flows(_lp._parse(commercial).value_flows)
+    except P.ValueFlowsInvalid:
+        return "value_flows_invalid"
+    except Exception:                                   # noqa: BLE001
+        return None                                     # the run says what it is
+    return "value_flows_not_configured" if vf is None else None
+
+
 def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
                        owner: str | None = None,
                        extra_assets: Sequence[ExtraOwnerAsset] = (),

@@ -384,6 +384,32 @@ def test_post_refusals(client, install_network, monkeypatch):
     assert client.post(STUDY_URL, json={"bogus": 1}).status_code == 422
 
 
+def test_one_refusal_lists_every_need(client, install_network, session_ctx, monkeypatch):
+    """Template-e2e issue 40: the refusal keeps the first blocker's code and
+    status; `detail.needs` lists every need the start can tell, in one answer."""
+    _fake_build(monkeypatch)
+    install_network(build_network())
+    d = client.post(STUDY_URL, json={}).json()["detail"]
+    assert d["code"] == "not_solved"
+    assert d["needs"] == ["not_solved", "value_flows_not_configured", "finance_inputs_missing"]
+    assert _put_fin(client, {**_s2_inputs(), "tax_pack_id": "xx_nowhere"}).status_code == 200
+    d = client.post(STUDY_URL, json={}).json()["detail"]
+    assert d["needs"] == ["not_solved", "value_flows_not_configured", "tax_pack_not_found"]
+    _solved(install_network)
+    assert _put_fin(client, {**_s2_inputs(), "tax_pack_id": "xx_nowhere"}).status_code == 200
+    r = client.post(STUDY_URL, json={})
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "tax_pack_not_found"
+    assert r.json()["detail"]["needs"] == ["value_flows_not_configured", "tax_pack_not_found"]
+    session_ctx(client).solver_state["solver_config"].finance = None
+    r = client.post(STUDY_URL, json={})
+    assert r.status_code == 422 and r.json()["detail"]["needs"] == [
+        "value_flows_not_configured", "finance_inputs_missing"]
+    session_ctx(client).solver_state["solver_config"].commercial = {
+        "poc_link": "x", "value_flows": {"participants": "not a list"}}
+    assert client.post(STUDY_URL, json={}).json()["detail"]["needs"] == [
+        "value_flows_invalid", "finance_inputs_missing"]
+
+
 def test_409_during_a_solve_or_another_study(client, install_network, session_state,
                                              monkeypatch):
     _fake_build(monkeypatch)

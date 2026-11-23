@@ -70,3 +70,37 @@ def test_the_table_matches_the_backend():
 
 def test_the_start_route_refuses_unsolved_as_not_solved():
     assert re.findall(r'409, \{"code": "([a-z_0-9]+)', _start_route()) == ["not_solved"]
+
+
+def _fn_source(rel: str, name: str) -> str:
+    src = (_BACKEND / rel).read_text()
+    start = src.index(f"\ndef {name}(")
+    end = src.find("\ndef ", start + 1)
+    return src[start : end if end != -1 else len(src)]
+
+
+def _needs_codes() -> set[str]:
+    """Every code the start can send in `detail.needs` (issue 40): the
+    refusals' own `needs=[*needs, "<code>"]`, the 409's `"needs": ["<code>"`,
+    and what `finance_needs` and `connection_need` return."""
+    runner = (_BACKEND / "services/finance/investment_case_runner.py").read_text()
+    codes = set(re.findall(r'"needs": \[\*needs, "([a-z_0-9]+)"\]', runner))
+    codes |= set(re.findall(r'needs=\[\*needs, "([a-z_0-9]+)"\]', runner))
+    codes |= set(re.findall(r'"needs": \["([a-z_0-9]+)"', _start_route()))
+    codes |= set(re.findall(r'return \["([a-z_0-9]+)"\]',
+                            _fn_source("services/finance/investment_case_runner.py",
+                                       "finance_needs")))
+    codes |= set(re.findall(r'return "([a-z_0-9]+)"',
+                            _fn_source("services/results/finance_case.py", "connection_need")))
+    return codes
+
+
+def test_every_listed_need_has_a_plain_fix():
+    """`detail.needs` names only codes the table gives a need (never `generic`):
+    the run panel words each one as a checklist line."""
+    table = _table()
+    with_fix = {c for k, codes in table.items() if k != "generic" for c in codes}
+    codes = _needs_codes()
+    assert {"not_solved", "value_flows_not_configured", "value_flows_invalid",
+            "finance_inputs_missing", "finance_inputs_invalid", "tax_pack_not_found"} <= codes
+    assert codes - with_fix == set(), "a need the run panel has no words for"

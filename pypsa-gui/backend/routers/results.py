@@ -2365,14 +2365,20 @@ def post_investment_case(body: InvestmentCaseRequest | None = None,
     (IC G3, `_ic_campus_source`).
     """
     from routers.simulation import _state_update
-    from services.finance.investment_case_runner import start_investment_case
+    from services.finance.investment_case_runner import finance_needs, start_investment_case
+    from services.results.finance_case import connection_need
     _refuse_if_mesh_busy("investment_case")
     n = PyPSAService.get_network()
+    cfg = _state.get("solver_config")
+    # Template-e2e issue 40: every need the start can tell rides in
+    # `detail.needs`; the refusal keeps the first blocker's own code.
+    known = [c for c in (connection_need(cfg),) if c]
     if not _dispatch_ready(n):
         raise HTTPException(409, {"code": "not_solved",
                                   "message": "solve the network first: the investment case "
-                                             "values the solved dispatch"})
-    cfg = _state["solver_config"]
+                                             "values the solved dispatch",
+                                  "needs": ["not_solved", *known,
+                                            *finance_needs(getattr(cfg, "finance", None))]})
     owner = body.owner if body is not None else None
     # IC G3 R-2: the campus study read once, outside the network lock; the case
     # and the staleness key take the same source.
@@ -2389,6 +2395,7 @@ def post_investment_case(body: InvestmentCaseRequest | None = None,
         case_hash=_ic_case_hash,
         state_lock=PyPSAService.get_solver_state_lock(),
         requester=_run_requester(user),
+        needs=known,
     )
 
 
