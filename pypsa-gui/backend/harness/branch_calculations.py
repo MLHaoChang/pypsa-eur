@@ -234,8 +234,8 @@ def calculate(raw, scope):
         if raw["valid_solve"] else {key: None for key in raw["branches"]}
     )
     available = {}
-    complete = all(v is not None for v in values.values())
-    if complete:
+    left_out = set()  # metrics withheld because the rating is assumed, never for another cause
+    if all(v is not None for v in values.values()):
         if scope["profile"] == NETWORK_PROFILE:
             available = {
                 "max_branch_utilisation": max(v["peak_branch_utilisation"] for v in values.values()),
@@ -244,17 +244,14 @@ def calculate(raw, scope):
             if all(v["_assumed"] for v in values.values()):
                 # nothing was judged: a total of 0 would read as a pass (#1409 F1)
                 available.pop("branches_above_rating")
+                left_out.add("branches_above_rating")
         else:
             available = {k: v for k, v in next(iter(values.values())).items() if not k.startswith("_")}
             if next(iter(values.values()))["_assumed"]:
                 available.pop("hours_above_rating", None)
+                left_out.add("hours_above_rating")
     definitions = NETWORK_METRICS if scope["profile"] == NETWORK_PROFILE else METRICS
     facts, slots = [], []
-    flags = [bool(b.get("rating_assumed")) for b in raw["branches"].values()]
-    # what an assumed rating takes away: a branch's hours; a network count only when no branch was judged
-    left_out = {"hours_above_rating"} if any(flags) else set()
-    if flags and all(flags):
-        left_out.add("branches_above_rating")
     for metric in requested_metrics(scope):
         value = available.get(metric)
         answered = metric in definitions and value is not None and math.isfinite(value)
@@ -276,7 +273,7 @@ def calculate(raw, scope):
         else:
             slot["reason"] = (
                 "unverified_solve" if not raw["valid_solve"]
-                else "rating_assumed" if metric in left_out and metric in definitions and complete
+                else "rating_assumed" if metric in left_out
                 else "invalid_or_missing_branch_data" if metric in definitions
                 else "unsupported_metric"
             )
