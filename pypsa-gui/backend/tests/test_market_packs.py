@@ -857,3 +857,89 @@ def test_the_pin_survives_save_save_as_save_a_copy_and_export_import_save(
     assert client.post(f"/api/projects/{pid}/activate").status_code == 200
     assert client.post(f"/api/projects/{dst}").status_code == 200
     assert (project_storage_dir(dst) / MP.PIN_FILE).read_bytes() == pin
+
+
+# ── condition 7: tests for the mutants the first run left alive ────────────
+
+
+def test_a_template_names_its_zone_and_year_and_the_pin_records_its_version(tmp_path):
+    pack = MP.get("no-1-2026")
+    assert pack.label == "NO-1 market bundle (2026 template)"
+    MP.write_pin(tmp_path, pack, {})
+    raw = json.loads((tmp_path / MP.PIN_FILE).read_text())
+    assert raw["version"] == MP.PIN_VERSION
+
+
+def test_a_removed_product_keeps_only_the_cells_the_pin_holds():
+    cell = "reserve_products/fast_symmetric/id"
+    pin = {
+        "pack_id": _pack().id,
+        "pack_hash": "old",
+        "applied": {cell: "fast_symmetric"},
+    }
+    plan = MP.plan_apply(_pack(), _commercial(), pin)
+    assert (
+        "reserve_products" not in plan["commercial"]
+        or not plan["commercial"]["reserve_products"]
+    )
+    assert plan["applied"] == {cell: "fast_symmetric"}
+    assert [c["cell"] for c in plan["conflicts"]] == [cell]
+
+
+def test_a_stored_product_missing_a_field_reads_it_as_none():
+    have = _commercial()
+    have["reserve_products"] = [
+        {k: v for k, v in _prod().items() if k != "max_commit_mw"}
+    ]
+    plan = MP.plan_apply(_pack(), have, None)
+    assert plan["changes"] == [] and plan["conflicts"] == []
+    assert plan["kept"] == [{"cell": MP.EXPORT_CELL, "reason": "empty_ref"}]
+    price = "reserve_products/fast_symmetric/capacity_price"
+    assert plan["applied"][price] is None
+    assert plan["applied"]["reserve_products/fast_symmetric/max_commit_mw"] is None
+
+
+def test_an_empty_pack_value_is_kept_only_for_a_price():
+    """A user's `max_commit_mw` against the pack's None is a conflict (only an
+    empty PRICE is kept); a priced pack replaces a price the pin says it wrote."""
+    have = _commercial(reserve_products=[_prod(max_commit_mw=5.0)])
+    plan = MP.plan_apply(_pack(), have, None)
+    assert [c["cell"] for c in plan["conflicts"]] == [
+        "reserve_products/fast_symmetric/max_commit_mw"
+    ]
+    assert plan["kept"] == [{"cell": MP.EXPORT_CELL, "reason": "empty_ref"}]
+    cell = "reserve_products/fast_symmetric/capacity_price"
+    mine = M.PriceSeriesRef.model_validate(PRICE).model_dump(mode="json")
+    theirs = M.PriceSeriesRef.model_validate(REF).model_dump(mode="json")
+    have = _commercial(reserve_products=[_prod(capacity_price=mine)])
+    pack = _pack(products=[_prod(capacity_price=theirs)])
+    pin = {"pack_id": pack.id, "pack_hash": "old", "applied": {cell: mine}}
+    plan = MP.plan_apply(pack, have, pin)
+    assert plan["changes"] == [{"cell": cell, "from": mine, "to": theirs}]
+    assert MP.plan_apply(pack, have, None)["conflicts"][0]["cell"] == cell
+
+
+def test_the_products_key_is_kept_when_empty_and_never_added():
+    empty = _pack(products=[])
+    have = {**_commercial(), "reserve_products": []}
+    assert MP.plan_apply(empty, have, None)["commercial"]["reserve_products"] == []
+    bare = {k: v for k, v in _commercial().items() if k != "reserve_products"}
+    assert "reserve_products" not in MP.plan_apply(empty, bare, None)["commercial"]
+
+
+def test_the_reserve_view_names_a_price_source_only_for_a_priced_product():
+    from services.results.reserves import reserve_view
+    from tests.test_reserve_products import STRING, _cfg, _product, _site
+
+    priced = _product("fcr")
+    unpriced = _product("bare").model_copy(update={"capacity_price": None})
+    v = reserve_view(
+        _site(),
+        _cfg([priced, unpriced]),
+        solved=False,
+        backup=({STRING: 20.0}, frozenset({STRING})),
+    )
+    assert [p["price_source"] for p in v["products"]] == [
+        priced.capacity_price.source,
+        None,
+    ]
