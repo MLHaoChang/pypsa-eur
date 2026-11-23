@@ -40,5 +40,9 @@ def mark_entered(n: Any, component_class: str, name: str, fields: Any) -> None:
     if name not in frame.index:
         return
     for nom, column in SOURCE_COLUMN.items():
-        if nom in fields and column in frame.columns and frame.at[name, column] == ASSUMED:
+        if (
+            nom in fields
+            and column in frame.columns
+            and frame.at[name, column] == ASSUMED
+        ):
             frame.at[name, column] = "file"

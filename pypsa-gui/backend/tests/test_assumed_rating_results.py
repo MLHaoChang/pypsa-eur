@@ -21,7 +21,14 @@ from services.asset_results import compute as C
 from services.asset_schema import provenance
 from services.checked_charts import series_table
 
-CASE14 = Path(__file__).resolve().parents[3] / "tests" / "gridspine" / "fixtures" / "psse" / "case14.raw"
+CASE14 = (
+    Path(__file__).resolve().parents[3]
+    / "tests"
+    / "gridspine"
+    / "fixtures"
+    / "psse"
+    / "case14.raw"
+)
 SNAPSHOTS = pd.date_range("2030-01-01", periods=3, freq="h")
 
 
@@ -42,10 +49,16 @@ def _overloaded(n, name):
 
 
 def _evidence(n):
-    frames = {f"lines_t.{t}": getattr(n.lines_t, t).copy() for t in ("p0", "p1", "q0", "q1")}
+    frames = {
+        f"lines_t.{t}": getattr(n.lines_t, t).copy() for t in ("p0", "p1", "q0", "q1")
+    }
     for t in ("p0", "p1", "q0", "q1"):  # the transformers carry no flow
-        frames[f"transformers_t.{t}"] = pd.DataFrame(0.0, index=n.snapshots, columns=n.transformers.index)
-    return run_grid_pf.Evidence(converged=np.ones(len(n.snapshots), bool), unknown=0, failed=0, frames=frames)
+        frames[f"transformers_t.{t}"] = pd.DataFrame(
+            0.0, index=n.snapshots, columns=n.transformers.index
+        )
+    return run_grid_pf.Evidence(
+        converged=np.ones(len(n.snapshots), bool), unknown=0, failed=0, frames=frames
+    )
 
 
 def test_the_imported_case_marks_which_ratings_were_assumed():
@@ -60,11 +73,14 @@ def test_is_assumed_reads_only_the_exact_marker():
     for stated in ("file", "", None, float("nan")):
         assert not assumed_rating.is_assumed({"s_nom_source": stated})
     assert not assumed_rating.is_assumed({})  # no column
-    assert not assumed_rating.is_assumed({"s_nom_source": "assumed", "s_nom_extendable": True})
+    assert not assumed_rating.is_assumed(
+        {"s_nom_source": "assumed", "s_nom_extendable": True}
+    )
     assert assumed_rating.is_assumed({"p_nom_source": "assumed"}, "p_nom")
 
 
 # ── AC power flow ────────────────────────────────────────────────────────
+
 
 def _grid_loading(n):
     ctx = SimpleNamespace(network=n)
@@ -106,36 +122,53 @@ def test_ac_pf_without_the_marker_is_unchanged():
 
 # ── per-asset results ────────────────────────────────────────────────────
 
+
 def _ctx(n, name):
     return C.build_ctx(n, "Line", name, source="lopf", sns=n.snapshots)
 
 
-def test_asset_results_label_the_assumed_branch_and_count_no_congested_hour(monkeypatch):
+def test_asset_results_label_the_assumed_branch_and_count_no_congested_hour(
+    monkeypatch,
+):
     n = _imported()
     name = n.lines.index[0]
     _overloaded(n, name)
     n.lines["s_nom_opt"] = n.lines["s_nom"]
     n.lines["s_nom_source"] = "file"
-    monkeypatch.setattr(C, "series_for", lambda ctx, attr: getattr(n.lines_t, attr)[name])
+    monkeypatch.setattr(
+        C, "series_for", lambda ctx, attr: getattr(n.lines_t, attr)[name]
+    )
     stated = C.br_congested_hours(_ctx(n, name))
     assert stated > 0 and C.rating_assumed_flags(_ctx(n, name)) == {}
     n.lines.loc[name, "s_nom_source"] = "assumed"
     ctx = _ctx(n, name)
     assert C.br_congested_hours(ctx) == 0.0
     assert float(C.br_loading(ctx).max()) == pytest.approx(150.0)  # the loading % stays
-    assert C.rating_assumed_flags(ctx) == {"rating_assumed": True, "rating_label": "rating assumed"}
+    assert C.rating_assumed_flags(ctx) == {
+        "rating_assumed": True,
+        "rating_label": "rating assumed",
+    }
 
 
 # ── checked branch-loading chart ─────────────────────────────────────────
+
 
 def _chart_series(n, name):
     raw = {
         "index": [t.isoformat() for t in n.snapshots],
         "energy_weight": [1.0] * len(n.snapshots),
-        "branches": {f"Line:{name}": {"class": "Line", "name": name,
-                                      **branch_calculations._branch(n.components["Line"], name, n.snapshots)}},
+        "branches": {
+            f"Line:{name}": {
+                "class": "Line",
+                "name": name,
+                **branch_calculations._branch(n.components["Line"], name, n.snapshots),
+            }
+        },
     }
-    record = {"request_scope": {"profile": "branch-loading/1", "entity_id": name}, "raw": raw}
+    record = {
+        "request_scope": {"profile": "branch-loading/1", "entity_id": name},
+        "raw": raw,
+    }
     return raw, series_table(record)[1]["loading"]
 
 
@@ -145,7 +178,10 @@ def test_the_branch_loading_chart_marks_an_assumed_rating():
     _overloaded(n, name)
     n.lines["s_nom_source"] = "file"
     raw, (unit, label, _) = _chart_series(n, name)
-    assert "rating_assumed" not in raw["branches"][f"Line:{name}"] and "assumed" not in label
+    assert (
+        "rating_assumed" not in raw["branches"][f"Line:{name}"]
+        and "assumed" not in label
+    )
     n.lines.loc[name, "s_nom_source"] = "assumed"
     raw, (unit, label, values) = _chart_series(n, name)
     assert raw["branches"][f"Line:{name}"]["rating_assumed"] is True
@@ -153,6 +189,7 @@ def test_the_branch_loading_chart_marks_an_assumed_rating():
 
 
 # ── entering a rating ────────────────────────────────────────────────────
+
 
 def test_a_rating_the_person_sets_reads_as_stated():
     n = _imported()
@@ -165,7 +202,9 @@ def test_a_rating_the_person_sets_reads_as_stated():
     assert not assumed_rating.is_assumed(n.lines.loc[a])
 
 
-def test_setting_the_rating_through_the_edit_route_reads_as_stated_on_the_next_run(monkeypatch):
+def test_setting_the_rating_through_the_edit_route_reads_as_stated_on_the_next_run(
+    monkeypatch,
+):
     from services import network_crud
     from services.pypsa_service import PyPSAService
 
@@ -178,4 +217,6 @@ def test_setting_the_rating_through_the_edit_route_reads_as_stated_on_the_next_r
     assert n.lines.at[name, "s_nom"] == 321.0
     assert n.lines.at[name, "s_nom_source"] == "file"
     _overloaded(n, name)
-    assert any(name in o for o in _grid_loading(n)[1])  # the next run reads it as a real rating
+    assert any(
+        name in o for o in _grid_loading(n)[1]
+    )  # the next run reads it as a real rating
