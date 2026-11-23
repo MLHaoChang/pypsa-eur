@@ -13,10 +13,6 @@ from __future__ import annotations
 
 import math
 
-try:
-    from gridspine.drivers.process_chain import truthy as _truthy
-except ImportError:  # a build without gridspine: the one pinned fallback, not a new copy
-    from services.solver.process_uc import _fallback_truthy as _truthy
 from services.adequacy.eh_columns import _as_bool
 from services.carrier_catalog import bus_tonne_factor
 from services.compare.support import _build_snapshot_weights, _per_period_groupby
@@ -285,5 +281,5 @@ def compute_process_view(n, lost_load=None) -> dict:
     view = _View(n, lost_load)
     units = []
     if "eh_process" in n.links.columns:
-        units = [_process_unit(view, link) for link in n.links.index if _truthy(n.links.at[link, "eh_process"])]
+        units = [_process_unit(view, link) for link in n.links.index if _as_bool(n.links.at[link, "eh_process"])]
     return {"products": [_product(view, b) for b in product_buses(n)], "process_units": units}
