@@ -110,6 +110,11 @@ class _Rerun:
         return args
 
 
+def _draws(n) -> str:
+    """``1 draw`` / ``N draws``: the Guided card words them as runs."""
+    return f"{n} draw" if n == 1 else f"{n} draws"
+
+
 def _action(tool: str, args: dict, effect: str) -> dict:
     return {"tool": tool, "args": args, "effect": effect}
 
@@ -213,6 +218,35 @@ def review_report(report: dict, record: dict | None = None,
             why + " second feeder, a lower outage rate on the feeder or "
             "simulating the bus as its own area (the two-area treatment, "
             "issue 09) settles it; more simulation draws do not.")
+    elif verdict == "inconclusive" and cert.get("below_floor") is True:
+        # template-e2e 21: the target sits under what this many draws can
+        # resolve; doubling cannot settle a floor many times the target. The
+        # re-run offers the fewest draws that resolve it, or none past the cap.
+        draws = int(cert.get("draws") or 500)
+        need = cert.get("min_draws")
+        years = _num(cert.get("horizon_years")) or 1.0
+        floor = (_num(cert.get("resolution_floor_h")) or 0.0) / years
+        acts = []
+        if isinstance(need, int) and not isinstance(need, bool) \
+                and need <= _MC_MAX_DRAWS:
+            more = min(_MC_MAX_DRAWS, max(need, draws * 2))
+            acts.append(_action("run_eh_study", rerun.with_(mc={"draws": more}),
+                                f"set simulation runs per check to {more} "
+                                f"(was {draws})"))
+            why = (f"Not a failure: {_draws(draws)} cannot show a shortfall "
+                   f"as small as the goal: at least {need} draws can.")
+        else:
+            why = ("Not a failure: no draw count within the "
+                   f"{_MC_MAX_DRAWS}-draw cap resolves this target, so more "
+                   "draws do not settle it; a larger target does.")
+        add("certification_inconclusive", "medium",
+            f"Certification inconclusive: with "
+            f"{_draws(cert.get('n_samples') or draws)} the smallest shortfall "
+            f"it can show is {_fmt(floor, 'h/yr')}, more than the "
+            f"{_fmt(target, 'h/yr')} goal",
+            {**ev, "resolution_floor_h": cert.get("resolution_floor_h"),
+             "min_draws": need},
+            why, acts)
     elif verdict == "inconclusive":
         draws = int(cert.get("draws") or 500)
         more = min(_MC_MAX_DRAWS, max(draws * 2, draws + 1))

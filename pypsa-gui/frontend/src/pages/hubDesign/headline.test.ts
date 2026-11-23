@@ -71,7 +71,7 @@ describe('headline (§5.5)', () => {
       below_floor: true, min_draws: 18 }) })
     const rv = review({ verdict: 'inconclusive', mc_lole_h_per_year: 0, target_lole_h: 3 })
     expect(headline(rv, r)).toBe(
-      'Not decided: 1 simulation run can only see shortfalls of 52.1 h/yr or more, above the 3 h/yr goal: set at least 18 simulation runs per check in section 8, Scenarios & optimisation, to decide it.')
+      'Not decided: with 1 simulation run, the smallest shortfall it can show is 52.1 h/yr, more than your 3 h/yr goal. Set at least 18 runs per check (section 8, Scenarios & optimisation) to decide it.')
   })
 
   it('below the floor with a zero goal: no run count settles it', () => {
@@ -80,7 +80,7 @@ describe('headline (§5.5)', () => {
       below_floor: true, min_draws: null }) })
     const rv = review({ verdict: 'inconclusive', mc_lole_h_per_year: 0, target_lole_h: 0 })
     expect(headline(rv, r)).toBe(
-      'Not decided: a 0 h/yr goal cannot be checked by simulation, since 500 simulation runs can only see shortfalls of 0.104 h/yr or more: allow some shortfall in section 8, Scenarios & optimisation, to decide it.')
+      'Not decided: with 500 simulation runs, the smallest shortfall it can show is 0.104 h/yr, and a 0 h/yr goal allows none. Allow some shortfall (section 8, Scenarios & optimisation) to decide it.')
   })
 
   it('inconclusive held by a feeder bound names the feeder, not more runs (GK A F6\')', () => {

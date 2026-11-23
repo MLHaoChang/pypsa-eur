@@ -9,9 +9,17 @@ section 8 on the runs field, blocking Run.
 """
 from __future__ import annotations
 
+import pathlib
 import re
+import sys
 
 import pytest
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "project_templates"))
+import eh_templates as T  # noqa: E402
+
+STUDY_IDS = sorted(
+    t for t in T.BUILDERS if not T.TEMPLATE_META.get(t, {}).get("generation_only"))
 
 LABEL = "Simulation runs per check: "
 
@@ -44,8 +52,9 @@ def test_one_run_below_the_floor_is_refused_at_the_study_start(client, tmp_proje
     assert detail["field"] == "mc_draws"
     msg = detail["message"]
     assert msg.startswith(LABEL), msg
-    assert re.search(r"1 run cannot resolve the 3 h/yr goal \(the smallest "
-                     r"shortfall it can see is [\d.]+ h/yr\): set at least \d+\.$", msg), msg
+    # The microgrid's 168 h weeks at 1 draw: 8760/168 = 52.1 h/yr per step.
+    assert msg == (LABEL + "1 run cannot tell whether the 3 h/yr goal is met "
+                   "(its smallest step is 52.1 h/yr): set at least 18."), msg
 
 
 def test_readiness_blocks_run_on_too_few_runs_and_the_minimum_clears_it(
@@ -72,3 +81,12 @@ def test_no_goal_refuses_no_run_count(client, tmp_projects_dir, tid):
     name = _project(client, tid, "nogoal")
     _draws(client, 1)
     assert _runs_items(client, name)[1] == []
+
+
+@pytest.mark.parametrize("tid", STUDY_IDS)
+def test_every_shipped_template_runs_at_its_default_draws(client, tmp_projects_dir, tid):
+    """GK A V2: the new refusal never blocks a shipped template at the draws it
+    ships with (the study's default), whatever goal its site type assumes."""
+    name = _project(client, tid, "shipped")
+    body, items = _runs_items(client, name)
+    assert items == [], (tid, [i["message"] for i in items])

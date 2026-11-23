@@ -300,6 +300,15 @@ function feederNext(fb: unknown): string {
     ? CERTIFICATION_NEXT.feederNoData : CERTIFICATION_NEXT.feederBound
 }
 
+/** template-e2e 21: the goal is under the smallest shortfall the run can
+ *  show, so only the stated draw count (or a goal above zero) settles it; a
+ *  tighter plan does not. */
+export function belowFloorNext(minDraws: unknown): string {
+  return typeof minDraws === 'number' && Number.isFinite(minDraws)
+    ? `Next: raise the MC draws in the reliability goal to at least ${minDraws}; the goal is under the smallest shortfall fewer draws can show, so a tighter plan does not settle it.`
+    : 'Next: allow some shortfall in the reliability goal; no number of MC draws can show that a 0 h/yr goal is met.'
+}
+
 /** MC certification headline from the `certification` section, if it ran. */
 export function certificationHeadline(report: EhReferenceDesignReport): {
   perYear: number
@@ -328,7 +337,9 @@ export function certificationHeadline(report: EhReferenceDesignReport): {
   // metric both leave the verdict empty: the next step is to set a target.
   const next = verdict === 'fail' ? CERTIFICATION_NEXT.fail
     : verdict === 'inconclusive'
-      ? (payload.feeder_bound ? feederNext(payload.feeder_bound) : CERTIFICATION_NEXT.inconclusive)
+      ? (payload.feeder_bound ? feederNext(payload.feeder_bound)
+        : payload.below_floor === true ? belowFloorNext(payload.min_draws)
+          : CERTIFICATION_NEXT.inconclusive)
       : verdict === 'pass' ? null
         : (verdict == null || verdict === 'none' || payload.metric === 'none')
           ? CERTIFICATION_NEXT.noTarget : null

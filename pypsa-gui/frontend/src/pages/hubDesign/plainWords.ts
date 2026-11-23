@@ -37,6 +37,7 @@ const RULES: [RegExp, string][] = [
   [/\bMC\b/g, 'simulation'],
   // P26: the inconclusive re-run effect ("… with 1000 draws … confidence interval").
   [/\b(\d+) draws\b/g, '$1 runs'],
+  [/\b1 draw\b/g, '1 run'],
   [/\bconfidence interval\b/g, 'range of the estimate'],
   [/\bstages?\b/g, 'step'],
   // P30 (C12): an amount of energy ("… is lost: 12.5 MWh"); a price per MWh

@@ -69,6 +69,19 @@ describe('certificationHeadline.next', () => {
     expect(next).not.toMatch(/raise the MC draws/)
   })
 
+  // template-e2e 21: a goal under the resolution floor names the draws, not
+  // a tighter plan (Guided's verdict says the same).
+  it('inconclusive below the floor → the minimum draws', () => {
+    expect(certificationHeadline(report({ verdict: 'inconclusive', target_lole_h: 3,
+      below_floor: true, min_draws: 18 }))!.next).toBe(
+      'Next: raise the MC draws in the reliability goal to at least 18; the goal is under the smallest shortfall fewer draws can show, so a tighter plan does not settle it.')
+    expect(certificationHeadline(report({ verdict: 'inconclusive', target_lole_h: 0,
+      below_floor: true, min_draws: null }))!.next).toBe(
+      'Next: allow some shortfall in the reliability goal; no number of MC draws can show that a 0 h/yr goal is met.')
+    expect(certificationHeadline(report({ verdict: 'inconclusive', target_lole_h: 3,
+      below_floor: false }))!.next).toBe(INCONCLUSIVE_NEXT)
+  })
+
   it('no target (verdict null) → set a target', () => {
     expect(certificationHeadline(report({ verdict: null, target_lole_h: null }))!.next)
       .toBe(NO_TARGET_NEXT)

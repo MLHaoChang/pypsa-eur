@@ -437,6 +437,21 @@ def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
         raise HTTPException(
             422, f"mc.draws must be at most {_mc.MAX_DRAWS} (the MC draw cap); "
             f"got {mc_opts.draws}")
+    # template-e2e 21: too few runs for the goal refuse here, before the run;
+    # readiness files the refusal on the runs field and blocks Run.
+    if stages is None or "mc_certify" in stages:
+        from services.adequacy.eh_study import draws_short_of_target
+        if not lock.acquire(blocking=lock_blocking):
+            raise EhStudyLockBusy()
+        try:
+            short = draws_short_of_target(n, pack, mc_opts.draws)
+        finally:
+            lock.release()
+        if short is not None:
+            from services.adequacy.campaign import unsupported_scope
+            refusal = unsupported_scope(short)
+            refusal.detail["field"] = "mc_draws"
+            raise refusal
     mc_kwargs = {k: v for k, v in (("mc_draws", mc_opts.draws),
                                    ("mc_seed", mc_opts.seed),
                                    ("mc_cov_target", mc_opts.cov_target))

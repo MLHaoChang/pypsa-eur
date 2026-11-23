@@ -556,13 +556,14 @@ def test_below_the_floor_offers_the_minimum_draws_not_double():
     out = review_report(_report(sections={"certification": {
         "status": "ok", "payload": _floor_cert()}}), RECORD)
     f = _by_id(out, "certification_inconclusive")
-    assert f["title"] == ("Certification inconclusive: the 3 h/yr target is "
-                          "below the 52.1 h/yr resolution floor at 1 draws")
+    assert f["title"] == ("Certification inconclusive: with 1 draw the "
+                          "smallest shortfall it can show is 52.1 h/yr, more "
+                          "than the 3 h/yr goal")
     assert "at least 18 draws" in f["recommendation"]
     assert "straddles" not in f["title"]
     act = f["actions"][0]
     assert act["args"]["mc"] == {"draws": 18}
-    assert "18 draws (was 1)" in act["label"]
+    assert act["effect"] == "set simulation runs per check to 18 (was 1)"
     _validate_action(act)
 
 
@@ -583,3 +584,21 @@ def test_below_the_floor_beyond_the_draw_cap_offers_no_rerun(min_draws):
     f = _by_id(out, "certification_inconclusive")
     assert f["actions"] == []
     assert "more draws do not" in f["recommendation"]
+
+
+def test_the_straddle_finding_is_unchanged_when_not_below_the_floor():
+    """GK A V4: a straddle (below_floor False or absent) keeps its words."""
+    for extra in ({}, {"below_floor": False, "min_draws": None}):
+        cert = {"verdict": "inconclusive", "target_lole_h": 3.0, "draws": 500,
+                **extra}
+        f = _by_id(review_report(_report(sections={"certification": {
+            "status": "ok", "payload": cert}}), RECORD),
+            "certification_inconclusive")
+        assert f["title"] == ("Certification inconclusive: the LOLE interval "
+                              "straddles 3 h/yr")
+        assert f["recommendation"] == (
+            "Not a failure: the sample cannot yet tell pass from fail. More MC "
+            "draws narrow the interval; a slightly tighter plan moves it clear.")
+        assert f["actions"][0]["effect"] == (
+            "re-run the MC with 1000 draws (was 500) to narrow the confidence "
+            "interval")

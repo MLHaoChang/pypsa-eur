@@ -492,3 +492,50 @@ def test_abort_before_mc_certify_leaves_a_reason_on_the_section():
     sec = _cert(report)
     assert sec.status == "not_established"
     assert "abort" in (sec.note or "")
+
+
+# ── template-e2e 21: the floor and the fewest draws (GK A V1) ───────────────
+# `_cert_network` is 168 hourly snapshots (weight 1 h): the horizon is
+# 168/8760 yr, a 3 h/yr goal is 0.05753 h on it, and one draw resolves 1 h,
+# so 1/18 = 0.0556 ≤ 0.0575 < 1/17 = 0.0588: 18 draws, as on a 168 h template.
+
+
+@pytest.mark.live_solve
+def test_pre_run_weights_match_the_runs_floor():
+    """The study start's w_min (`copt.fleet_weights`) is what the run's floor
+    reports: floor × n_samples."""
+    from services.adequacy.copt import fleet_weights
+    n = _cert_network(units=8)
+    w = fleet_weights(n)
+    report = _run(n, _pack(target=3.0), mc_draws=1)
+    p = _cert(report).payload
+    assert float(w[w > 0].min()) == 1.0
+    assert p["resolution_floor_h"] * p["n_samples"] == pytest.approx(1.0)
+    assert S.draws_short_of_target(n, _pack(target=3.0), 1) == (
+        "Simulation runs per check: 1 run cannot tell whether the 3 h/yr goal "
+        "is met (its smallest step is 52.1 h/yr): set at least 18.")
+    assert S.draws_short_of_target(n, _pack(target=3.0), 18) is None
+    assert S.draws_short_of_target(n, _pack(target=3.0), 17) is not None
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("draws,below,min_draws", [(17, True, 18), (18, False, None)])
+def test_the_minimum_draws_put_the_floor_at_the_target(draws, below, min_draws):
+    report = _run(_cert_network(units=8), _pack(target=3.0), mc_draws=draws)
+    p = _cert(report).payload
+    assert p["n_samples"] == draws          # an all-zero first batch converges
+    assert (p["resolution_floor_h"] > p["target_lole_h_per_horizon"]) is below
+    assert p["below_floor"] is below
+    assert p["min_draws"] == min_draws
+    if below:
+        assert p["verdict"] == "inconclusive"
+        assert _cert(report).note == (
+            "target 3 h/yr is below the MC resolution floor 3.06723 h/yr at "
+            "17 draws: at least 18 draws resolve it")
+
+
+@pytest.mark.parametrize("target", [0.0, None])
+def test_a_zero_or_absent_goal_is_not_refused_at_the_start(target):
+    """GK A V3: a 0 h/yr goal stays unrefused before the run (the verdict
+    names the floor); no goal has nothing to resolve."""
+    assert S.draws_short_of_target(_cert_network(), _pack(target=target), 1) is None
