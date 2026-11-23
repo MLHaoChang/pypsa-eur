@@ -379,6 +379,10 @@ def test_a_non_finite_or_numpy_value_is_written_as_plain_json(tmp_path, monkeypa
             [
                 ("shunt", "S1", "S1", "p_mw", float("nan"), "r"),
                 ("shunt", "S2", "S2", "p_mw", np.int64(3), "r"),
+                ("shunt", "S3", "S3", "p_mw", float("inf"), "r"),
+                ("shunt", "S4", "S4", "p_mw", float("-inf"), "r"),
+                ("shunt", "S5", "S5", "p_mw", np.float32(1.5), "r"),
+                ("shunt", "S6", "S6", "p_mw", np.bool_(True), "r"),
             ],
             columns=exp.not_written.columns,
             dtype=object,
@@ -388,7 +392,15 @@ def test_a_non_finite_or_numpy_value_is_written_as_plain_json(tmp_path, monkeypa
     monkeypatch.setattr(dgs_writer, "write_dgs", with_odd_values)
     (out,) = powerfactory_campus(str(run), hours=[_hour(run)])
     values = [r["value"] for r in _manifest(out)["not_written"]]
-    assert values == [None, 3] and type(values[1]) is int
+    assert values == [None, 3, None, None, 1.5, True]
+    assert [type(v) for v in values] == [
+        type(None),
+        int,
+        type(None),
+        type(None),
+        float,
+        bool,
+    ]
 
 
 def test_a_lossless_campus_lists_nothing_not_written(case):
