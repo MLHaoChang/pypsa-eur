@@ -259,3 +259,68 @@ def test_below_floor_note_for_a_zero_goal_says_no_draw_count_resolves_it():
         lole_ci=(0.0, 0.0), target_h=0.0, resolution_floor_h=52.1, n_samples=1)
     assert note == ("target 0 h/yr is below the MC resolution floor 52.1 h/yr "
                     "at 1 draws: no draw count resolves a zero target")
+
+
+@pytest.mark.parametrize("floor,n,target", [
+    (52.1, 1, None), (float("inf"), 1, 3.0), (52.1, 1, float("nan")),
+    (52.1, 1, -1.0)])
+def test_min_draws_has_no_answer_without_a_finite_positive_target(floor, n, target):
+    assert S.min_draws_to_resolve(floor, n, target) is None
+
+
+def test_one_draw_suffices_when_the_weight_is_under_the_target():
+    assert S.min_draws_to_resolve(0.5, 1, 3.0) == 1
+
+
+# ── the study start's runs check, on a network without a solve ─────────────
+
+
+def _weighted_network(hours: int = 168, weight: float = 1.0):
+    import pypsa
+    n = pypsa.Network()
+    n.set_snapshots(range(hours))
+    n.snapshot_weightings.loc[:, :] = weight
+    n.add("Bus", "hub")
+    n.add("Generator", "g", bus="hub", p_nom=10.0)
+    return n
+
+
+def _goal_pack(target, draws=500):
+    from models.energy_hub import AvailabilityTarget, default_off_grid_pack
+    return default_off_grid_pack().model_copy(update={
+        "mc_draws": draws,
+        "availability": AvailabilityTarget(
+            ens_cap_permyriad=5000.0, target_lole_h=target,
+            certification_metric="mc_lole" if target is not None else "none")})
+
+
+def test_runs_check_refuses_below_and_passes_at_the_minimum():
+    # 168 h of weight 1: 3 h/yr is 0.05753 h on the horizon; 1/18 ≤ it < 1/17.
+    n = _weighted_network()
+    msg = S.draws_short_of_target(n, _goal_pack(3.0), 17)
+    assert msg == ("Simulation runs per check: 17 runs cannot tell whether the "
+                   "3 h/yr goal is met (its smallest step is 3.07 h/yr): set at "
+                   "least 18.")
+    assert S.draws_short_of_target(n, _goal_pack(3.0), 18) is None
+    # Unset draws are the pack's own.
+    assert S.draws_short_of_target(n, _goal_pack(3.0, draws=17), None) == msg
+    assert S.draws_short_of_target(n, _goal_pack(3.0, draws=18), None) is None
+
+
+def test_runs_check_at_the_exact_boundary_passes():
+    # Weight 2 h over 168 snapshots: horizon 336/8760 yr; a goal making
+    # target_h exactly 2/4 = 0.5 h resolves at 4 draws, not 3.
+    n = _weighted_network(weight=2.0)
+    goal = 0.5 / (336 / 8760)
+    assert S.draws_short_of_target(n, _goal_pack(goal), 4) is None
+    assert "set at least 4." in S.draws_short_of_target(n, _goal_pack(goal), 3)
+
+
+@pytest.mark.parametrize("target", [None, 0.0])
+def test_runs_check_has_nothing_to_refuse_without_a_positive_goal(target):
+    assert S.draws_short_of_target(_weighted_network(), _goal_pack(target), 1) is None
+
+
+def test_runs_check_has_nothing_to_refuse_without_weights():
+    n = _weighted_network(weight=0.0)
+    assert S.draws_short_of_target(n, _goal_pack(3.0), 1) is None
