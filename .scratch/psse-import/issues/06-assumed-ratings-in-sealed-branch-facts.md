@@ -24,3 +24,13 @@ The sealed facts and the comparison leave an assumed branch out of their above-r
 
 - [ ] On an imported case14 with one assumed line, the sealed above-rating facts exclude it and say so.
 - [ ] A network without the marker seals and compares as before.
+
+## Comments
+
+GK B4 plan verdict (GO with conditions), recorded:
+1. Compare: an assumed entry's `binding_hours` is None, never 0. `types.ts` and `CompareView.readPV` still type it non-null; the null-aware change is a follow-up for #1838 (CompareView).
+2. All branches assumed: network `branches_above_rating` is unavailable (reason `rating_assumed`), never 0. With some assumed, the notes give the true count (no name list).
+3. Marker-less sealed facts, slots and notes pinned to a literal. Stored raws are recalculated, not trusted: a raw without the marker recalculates unchanged; one carrying it that now leaves nothing answered is refused as `unavailable_conversation_snapshot`, not a 500.
+4. `assumed_rating_count` and `rating_assumed` default; `LoadingComparison` is not persisted or hashed.
+5. Mutants run on both modules; survivors listed in the PR body.
+6. Trial-merge test list: harness manifest/inventory, branch-loading assurance (LOPF and AC), compare suites.
