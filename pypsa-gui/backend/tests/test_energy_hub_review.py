@@ -616,7 +616,7 @@ def test_below_the_floor_states_the_floor_per_year_on_a_longer_horizon():
 
 def test_below_floor_flags_only_an_inconclusive_verdict():
     out = review_report(_report(sections={"certification": {
-        "status": "ok", "payload": _floor_cert(verdict="fail")}}), RECORD)
+        "status": "ok", "payload": _floor_cert(verdict="pass")}}), RECORD)
     assert all(f["id"] != "certification_inconclusive" for f in out["findings"])
 
 
@@ -625,3 +625,30 @@ def test_a_boolean_min_draws_is_not_a_draw_count():
         "status": "ok", "payload": _floor_cert(min_draws=True)}}), RECORD),
         "certification_inconclusive")
     assert f["actions"] == []
+
+
+def test_below_the_floor_reads_the_draws_it_ran():
+    # The title counts the samples the MC drew; the action's "was" the draws asked.
+    def finding(**over):
+        return _by_id(review_report(_report(sections={"certification": {
+            "status": "ok", "payload": _floor_cert(**over)}}), RECORD),
+            "certification_inconclusive")
+    assert "with 3 draws the" in finding(n_samples=3)["title"]
+    assert "with 1 draw the" in finding(n_samples=None)["title"]
+    f = finding(draws=None, n_samples=500, min_draws=1200)
+    assert f["actions"][0]["effect"] == "set simulation runs per check to 1200 (was 500)"
+    assert "with 500 draws" in f["title"]
+
+
+def test_below_the_floor_at_the_draw_cap_still_offers_it():
+    act = _by_id(review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(min_draws=2000)}}), RECORD),
+        "certification_inconclusive")["actions"][0]
+    assert act["args"]["mc"] == {"draws": 2000}
+
+
+def test_below_the_floor_without_a_floor_value_does_not_raise():
+    f = _by_id(review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(resolution_floor_h=None)}}), RECORD),
+        "certification_inconclusive")
+    assert f["title"].startswith("Certification inconclusive: with 1 draw")
