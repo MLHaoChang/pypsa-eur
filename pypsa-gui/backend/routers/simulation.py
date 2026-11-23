@@ -4,6 +4,7 @@ import asyncio
 import collections
 import contextvars
 import json
+import pathlib
 import logging
 import queue
 import threading
@@ -759,6 +760,115 @@ def update_solver_config(
         from services import dirty_state
         dirty_state.bump_revision()
         return get_solver_config()   # the read form: a tariff states its currency (GK B C2)
+
+
+# ── market packs (SCU06 K8a) ────────────────────────────────────────────────
+
+
+def _pack_context():
+    """(storage dir or None, stored commercial dict or None, the project's stated
+    currency or None), read under the solver-state lock."""
+    from services.commercial.binding import project_currency
+
+    ctx = PyPSAService.get_active_context()
+    with PyPSAService.get_solver_state_lock():
+        cfg = _state["solver_config"]
+        commercial = getattr(cfg, "commercial", None)
+        commercial = dict(commercial) if isinstance(commercial, dict) else None
+        currency = project_currency(getattr(cfg, "finance", None))
+    storage = getattr(ctx, "storage_dir", None) if ctx is not None else None
+    return (pathlib.Path(storage) if storage else None), commercial, currency
+
+
+def _pack_refusal(exc) -> HTTPException:
+    return HTTPException(exc.status, {"code": exc.code, "error_kind": exc.code,
+                                      "message": str(exc)})
+
+
+@router.get("/commercial/market_packs")
+def list_market_packs():
+    """The market packs (SCU06 K8a) with each one's fit to the project (zone and
+    currency), whether it is the pinned one and whether an update is available."""
+    from services.commercial import market_packs as MP
+
+    storage, _commercial, currency = _pack_context()
+    zone = MP.project_zone(storage) if storage is not None else None
+    try:
+        pin, pin_error = MP.read_pin(storage), None
+    except MP.PackRefusal as exc:
+        pin, pin_error = None, {"code": exc.code, "message": str(exc)}
+    out = []
+    for pack in MP.shipped().values():
+        try:
+            MP.check_fit(pack, zone, currency)
+            fit = None
+        except MP.PackRefusal as exc:
+            fit = {"code": exc.code, "message": str(exc)}
+        out.append({
+            "id": pack.id, "label": pack.label, "region": pack.region,
+            "currency": pack.currency, "valid_year": pack.valid_year,
+            "pack_hash": pack.pack_hash, "flags": pack.flags,
+            "day_ahead": pack.day_ahead.model_dump(mode="json") if pack.day_ahead else None,
+            "products": [p.model_dump(mode="json") for p in pack.products],
+            "refusal": fit,
+            "pinned": bool(pin) and pin.get("pack_id") == pack.id,
+            "update_available": MP.update_available(pack, pin),
+        })
+    return {"zone": zone, "currency": currency, "packs": out, "pin_error": pin_error,
+            "saved": storage is not None}
+
+
+def _pack_plan(pack_id: str, *, saved: bool = False):
+    from services.commercial import market_packs as MP
+
+    storage, commercial, currency = _pack_context()
+    try:
+        pack = MP.get(pack_id)
+        if saved and storage is None:
+            raise MP.PackRefusal(MP.UNSAVED, (
+                "Save the project first: the pack records what it wrote in the project folder."))
+        zone = MP.project_zone(storage) if storage is not None else None
+        MP.check_fit(pack, zone, currency)
+        return storage, pack, MP.plan_apply(pack, commercial, MP.read_pin(storage))
+    except MP.PackRefusal as exc:
+        raise _pack_refusal(exc) from exc
+
+
+@router.get("/commercial/market_packs/{pack_id}/preview")
+def preview_market_pack(pack_id: str):
+    """Every value applying the pack would change, the conflicts it keeps (cells
+    the user edited since the last apply) and the cells it leaves (empty refs)."""
+    _storage, _pack, plan = _pack_plan(pack_id)
+    return {k: v for k, v in plan.items() if k not in ("commercial", "applied")}
+
+
+class MarketPackApplyIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    pack_hash: str = Field(min_length=8)
+
+
+@router.post("/commercial/market_packs/{pack_id}/apply")
+def apply_market_pack(
+    pack_id: str,
+    body: MarketPackApplyIn,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Apply the pack as an ordinary edit: the new commercial config goes through
+    `PUT /solver_config` (its validators, write gate and lock), then the pin
+    records what this apply wrote. `pack_hash` is the previewed pack's: a pack
+    that changed since is refused (409 `market_pack_stale`)."""
+    from services.commercial import market_packs as MP
+
+    storage, pack, plan = _pack_plan(pack_id, saved=True)
+    if body.pack_hash != pack.pack_hash:
+        raise _pack_refusal(MP.PackRefusal(MP.STALE, (
+            "The pack changed since it was previewed; preview it again.")))
+    if plan["changes"]:
+        update_solver_config(SolverConfigSchema.model_validate(
+            {"commercial": plan["commercial"]}), db, user)
+    MP.write_pin(storage, pack, plan["applied"])
+    return {k: v for k, v in plan.items() if k not in ("commercial", "applied")}
 
 
 class ValueFlowsIn(BaseModel):

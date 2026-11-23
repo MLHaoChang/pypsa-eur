@@ -150,7 +150,9 @@ def reserve_view(
                 "direction": p.direction,
                 "sustain_h": p.sustain_h,
                 "counterparty": p.counterparty,
-                "price_source": p.capacity_price.source,
+                "price_source": (
+                    p.capacity_price.source if p.capacity_price is not None else None
+                ),
             }
             for p in products
         ],

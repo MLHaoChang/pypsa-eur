@@ -1,0 +1,443 @@
+"""SCU06 K8a: market packs per bidding zone (GK B4 conditions 1-7).
+
+Owner answers: SCU06-K8-2 = (a) AncillaryProduct is deleted; SCU06-K8-3 = (a)
+reserve prices come from user upload only; SCU06-K8-4 = (a) flexible loads deferred.
+"""
+
+from __future__ import annotations
+
+import json
+import pathlib
+import sys
+from typing import get_args
+
+import pytest
+from fastapi import HTTPException
+from pydantic import ValidationError
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+
+from models import commercial as M  # noqa: E402
+from services.commercial import market_packs as MP  # noqa: E402
+
+FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures"
+REF = {"id": "series-da", "version": 1, "hash": "hash-da-0000", "source": "user"}
+PRICE = {"id": "series-fcr", "version": 2, "hash": "hash-fcr-0000", "source": "user"}
+
+
+def _pack(**kw) -> M.MarketPack:
+    body = {"id": "no-1-2026", "region": "NO-1", "currency": "EUR", "valid_year": 2026,
+            "day_ahead": None, "products": [_prod()], **kw}
+    return M.MarketPack.model_validate({**body, "pack_hash": MP.pack_hash(
+        M.MarketPack.model_validate({**body, "pack_hash": "0" * 8}))})
+
+
+def _prod(pid="fast_symmetric", **kw) -> dict:
+    return {"id": pid, "kind": "fast_symmetric", "direction": "symmetric",
+            "sustain_h": 1.0, "capacity_price": None, "max_commit_mw": None,
+            "storages": [], "counterparty": "tso", **kw}
+
+
+def _commercial(**kw) -> dict:
+    return M.CommercialConfig(poc_link="import", **kw).model_dump(mode="json")
+
+
+# ── condition 6: the region is a bidding zone ──────────────────────────────
+
+
+def test_the_region_type_is_exactly_s1s_bidding_zones():
+    from services.market_prices import BIDDING_ZONES
+
+    assert set(get_args(M.BiddingZone)) == set(BIDDING_ZONES)
+
+
+@pytest.mark.parametrize("bad", ["DE", "GB", "US_ERCOT", "no-1", ""])
+def test_a_pack_for_no_bidding_zone_is_refused_at_load(bad):
+    with pytest.raises(ValidationError):
+        _pack(region=bad)
+
+
+def test_a_zone_pack_loads():
+    assert _pack(region="DE-LU").region == "DE-LU"
+
+
+# ── condition 2: AncillaryProduct is deleted; old packs still load ─────────
+
+
+def test_ancillary_product_is_gone():
+    assert not hasattr(M, "AncillaryProduct")
+    assert not hasattr(M, "MarketRegion")
+
+
+def test_a_pack_with_the_old_fields_loads_stripped_with_a_named_flag():
+    raw = json.loads((FIXTURES / "market_pack_legacy.json").read_text())
+    pack = M.MarketPack.model_validate(raw)
+    assert pack.flags == [M.LEGACY_PACK_FIELDS_STRIPPED]
+    assert [p.id for p in pack.products] == ["fast_symmetric"]  # the new-shape one stays
+    assert "price_series" not in pack.model_dump()
+
+
+def test_a_pack_without_old_fields_has_no_flag():
+    assert _pack().flags == []
+
+
+def test_configs_re_serialise_byte_equal_to_master():
+    """Pinned on master c898a83c3: a config with a priced reserve product dumps
+    and hashes as before (capacity_price is now nullable, never omitted)."""
+    from services.commercial import hashing
+
+    cfg = M.CommercialConfig(poc_link="import", reserve_products=[
+        _prod("fcr", capacity_price=PRICE)])
+    assert cfg.model_dump_json() == MASTER_DUMP
+    assert hashing.digest(cfg) == MASTER_DIGEST
+    assert M.CommercialConfig.model_validate_json(MASTER_DUMP).model_dump_json() == MASTER_DUMP
+
+
+MASTER_DUMP = (
+    '{"poc_link":"import","import_tariff_id":null,"import_tariff":null,"import_tariff_ref":null,"export_price_ref":null,"import_price_ref":null,"export_link":null,"timezone":null,"connection":null,"contracts":[],"grid_cfe_share_ref":null,"site_party":"site","group_contract":null,"group_members":[],"group_cap_mw":null,"demand_items":[],"meter_history_peaks_kw":{},"meter_history_energy_kwh":{},"initial_peak_lower_bound":{},"power_factor":null,"value_flows":null,"reference_purchases":[],"provenance":{},"co2_price":null,"reserve_products":[{"id":"fcr","kind":"fast_symmetric","direction":"symmetric","sustain_h":1.0,"capacity_price":{"id":"series-fcr","version":2,"hash":"hash-fcr-0000","source":"user","vintage_year":null,"provider":null},"max_commit_mw":null,"storages":[],"counterparty":"tso"}]}'
+)
+MASTER_DIGEST = "f926bd2f51dd3004"
+
+
+# ── condition 7: the hash ────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("change", [
+    {"sustain_h": 0.5}, {"direction": "symmetric", "id": "other"}, {"max_commit_mw": 3.0},
+    {"capacity_price": PRICE}, {"storages": ["bess"]}, {"counterparty": "bsp"},
+])
+def test_the_hash_changes_with_a_product(change):
+    assert _pack(products=[_prod(**change)]).pack_hash != _pack().pack_hash
+
+
+def test_the_hash_changes_with_the_pack_fields_and_not_with_flags():
+    base = _pack()
+    assert _pack(products=[_prod(), _prod("secondary_up", kind="secondary",
+                                          direction="up")]).pack_hash != base.pack_hash
+    assert _pack(day_ahead=REF).pack_hash != base.pack_hash
+    assert _pack(currency="NOK").pack_hash != base.pack_hash
+    assert _pack(valid_year=2027).pack_hash != base.pack_hash
+    assert _pack(region="NO-2").pack_hash != base.pack_hash
+    assert MP.pack_hash(base.model_copy(update={"flags": ["x"]})) == base.pack_hash
+    assert MP.pack_hash(base) == base.pack_hash
+    assert len(base.pack_hash) == 64
+
+
+def test_the_shipped_templates_are_no1_to_no5_with_empty_refs():
+    packs = MP.shipped()
+    assert sorted(p.region for p in packs.values()) == ["NO-1", "NO-2", "NO-3", "NO-4", "NO-5"]
+    for p in packs.values():
+        assert p.pack_hash == MP.pack_hash(p)
+        assert p.day_ahead is None
+        assert p.products and all(x.capacity_price is None for x in p.products)
+        assert p.currency == "EUR" and p.flags == []
+    with pytest.raises(MP.PackRefusal) as e:
+        MP.get("de-lu-2026")
+    assert (e.value.code, e.value.status) == (MP.UNKNOWN, 404)
+
+
+# ── condition 6: each part of the zone/currency refusal ────────────────────
+
+
+def test_no_project_zone_is_refused():
+    with pytest.raises(MP.PackRefusal) as e:
+        MP.check_fit(_pack(), None, "EUR")
+    assert e.value.code == MP.ZONE_UNKNOWN
+
+
+def test_another_zone_is_refused():
+    with pytest.raises(MP.PackRefusal) as e:
+        MP.check_fit(_pack(), "NO-2", "EUR")
+    assert e.value.code == MP.ZONE_MISMATCH
+    assert "NO-1" in str(e.value) and "NO-2" in str(e.value)
+
+
+def test_another_currency_is_refused():
+    with pytest.raises(MP.PackRefusal) as e:
+        MP.check_fit(_pack(), "NO-1", "NOK")
+    assert e.value.code == MP.CURRENCY_MISMATCH
+    assert "EUR" in str(e.value) and "NOK" in str(e.value)
+
+
+def test_the_same_zone_and_currency_or_no_stated_currency_fit():
+    assert MP.check_fit(_pack(), "NO-1", "EUR") is None
+    assert MP.check_fit(_pack(), "NO-1", None) is None
+
+
+def test_the_project_zone_is_the_pick_else_the_pin(tmp_path, monkeypatch):
+    from services import market_prices
+
+    assert MP.project_zone(tmp_path) is None
+    monkeypatch.setattr(market_prices, "pin_of", lambda _s: (59.9, 10.75))
+    monkeypatch.setattr(market_prices, "zone_for_pin", lambda lat, lng: "NO-1")
+    assert MP.project_zone(tmp_path) == "NO-1"
+    market_prices.store_zone(tmp_path, "NO-2")
+    assert MP.project_zone(tmp_path) == "NO-2"
+
+
+# ── conditions 4 and 5: the per-cell plan ──────────────────────────────────
+
+
+def test_a_first_apply_adds_the_products_without_a_price():
+    plan = MP.plan_apply(_pack(), _commercial(), None)
+    assert plan["commercial"]["reserve_products"] == [_prod()]
+    cells = {c["cell"] for c in plan["changes"]}
+    assert cells == {f"reserve_products/fast_symmetric/{f}" for f in _prod()}
+    assert plan["conflicts"] == []
+    assert plan["kept"] == [{"cell": MP.EXPORT_CELL, "reason": "empty_ref"}]
+    assert plan["applied"]["reserve_products/fast_symmetric/capacity_price"] is None
+    assert MP.EXPORT_CELL not in plan["applied"]
+
+
+def test_an_empty_day_ahead_ref_never_clears_the_export_pick():
+    have = _commercial(export_link="export", export_price_ref=PRICE)
+    plan = MP.plan_apply(_pack(), have, None)
+    assert plan["commercial"]["export_price_ref"] == have["export_price_ref"]
+    assert {"cell": MP.EXPORT_CELL, "reason": "empty_ref"} in plan["kept"]
+    # Even when the last apply wrote it.
+    pin = {"pack_id": _pack().id, "pack_hash": "old", "applied": {
+        MP.EXPORT_CELL: have["export_price_ref"]}}
+    plan = MP.plan_apply(_pack(), have, pin)
+    assert plan["commercial"]["export_price_ref"] == have["export_price_ref"]
+    assert plan["applied"][MP.EXPORT_CELL] == have["export_price_ref"]
+
+
+def test_a_day_ahead_ref_fills_an_empty_pick_never_a_users():
+    pack = _pack(day_ahead=REF)
+    no_link = MP.plan_apply(pack, _commercial(), None)
+    assert {"cell": MP.EXPORT_CELL, "reason": "no_export_link"} in no_link["kept"]
+    assert no_link["commercial"].get("export_price_ref") is None
+    filled = MP.plan_apply(pack, _commercial(export_link="export"), None)
+    full = M.PriceSeriesRef.model_validate(REF).model_dump(mode="json")
+    assert filled["commercial"]["export_price_ref"] == full
+    assert filled["applied"][MP.EXPORT_CELL] == full
+    users = MP.plan_apply(pack, _commercial(export_link="export", export_price_ref=PRICE),
+                          None)
+    assert users["commercial"]["export_price_ref"]["id"] == PRICE["id"]
+    assert users["conflicts"][0]["cell"] == MP.EXPORT_CELL
+
+
+def test_an_empty_capacity_price_never_overwrites_a_users_price():
+    have = _commercial(reserve_products=[_prod(capacity_price=PRICE)])
+    plan = MP.plan_apply(_pack(), have, None)
+    assert plan["commercial"]["reserve_products"][0]["capacity_price"]["id"] == PRICE["id"]
+    assert {"cell": "reserve_products/fast_symmetric/capacity_price",
+            "reason": "empty_ref"} in plan["kept"]
+    assert plan["changes"] == []
+
+
+def test_an_update_changes_only_cells_the_user_left_as_applied():
+    first = MP.plan_apply(_pack(), _commercial(), None)
+    pin = {"pack_id": _pack().id, "pack_hash": _pack().pack_hash, "applied": first["applied"]}
+    newer = _pack(products=[_prod(sustain_h=0.5, max_commit_mw=4.0)])
+    assert MP.update_available(newer, pin)
+    assert not MP.update_available(_pack(), pin)
+    # The user edited max_commit_mw by hand after the first apply.
+    stored = json.loads(json.dumps(first["commercial"]))
+    stored["reserve_products"][0]["max_commit_mw"] = 2.0
+    plan = MP.plan_apply(newer, stored, pin)
+    assert plan["changes"] == [{"cell": "reserve_products/fast_symmetric/sustain_h",
+                                "from": 1.0, "to": 0.5}]
+    assert plan["conflicts"] == [{"cell": "reserve_products/fast_symmetric/max_commit_mw",
+                                  "yours": 2.0, "pack": 4.0, "last_applied": None}]
+    got = plan["commercial"]["reserve_products"][0]
+    assert (got["sustain_h"], got["max_commit_mw"]) == (0.5, 2.0)
+    # The pin keeps what the LAST apply wrote for the kept cell.
+    assert plan["applied"]["reserve_products/fast_symmetric/max_commit_mw"] is None
+    assert plan["applied"]["reserve_products/fast_symmetric/sustain_h"] == 0.5
+
+
+def test_a_hand_entered_product_of_the_same_id_is_never_overwritten():
+    have = _commercial(reserve_products=[_prod(sustain_h=2.0, capacity_price=PRICE)])
+    plan = MP.plan_apply(_pack(), have, None)
+    assert plan["changes"] == []
+    assert [c["cell"] for c in plan["conflicts"]] == [
+        "reserve_products/fast_symmetric/sustain_h"]
+    assert plan["commercial"]["reserve_products"][0]["sustain_h"] == 2.0
+
+
+def test_a_product_the_user_removed_is_not_re_added():
+    first = MP.plan_apply(_pack(), _commercial(), None)
+    pin = {"pack_id": _pack().id, "pack_hash": "old", "applied": first["applied"]}
+    plan = MP.plan_apply(_pack(), _commercial(), pin)
+    assert plan["changes"] == []
+    assert plan["conflicts"][0]["cell"] == "reserve_products/fast_symmetric/id"
+    assert plan["commercial"].get("reserve_products", []) == []
+
+
+def test_another_packs_pin_is_not_read_as_this_ones():
+    first = MP.plan_apply(_pack(), _commercial(), None)
+    pin = {"pack_id": "no-2-2026", "pack_hash": "x", "applied": first["applied"]}
+    plan = MP.plan_apply(_pack(), _commercial(), pin)
+    assert len(plan["changes"]) == len(_prod())
+
+
+def test_no_commercial_config_is_refused():
+    for none in (None, {}):
+        with pytest.raises(MP.PackRefusal) as e:
+            MP.plan_apply(_pack(), none, None)
+        assert e.value.code == MP.NO_COMMERCIAL
+
+
+def test_the_pin_round_trips_and_an_unreadable_one_is_refused(tmp_path):
+    assert MP.read_pin(tmp_path) is None and MP.read_pin(None) is None
+    MP.write_pin(tmp_path, _pack(), {"a": 1})
+    pin = MP.read_pin(tmp_path)
+    assert (pin["pack_id"], pin["pack_hash"], pin["applied"]) == (
+        _pack().id, _pack().pack_hash, {"a": 1})
+    for bad in ("{not json", json.dumps({"applied": []}), json.dumps(["x"])):
+        (tmp_path / MP.PIN_FILE).write_text(bad)
+        with pytest.raises(MP.PackRefusal) as e:
+            MP.read_pin(tmp_path)
+        assert e.value.code == MP.PIN_UNREADABLE
+
+
+# ── condition 4: no price is refused at solve and settlement ──────────────
+
+
+def test_a_product_with_no_price_is_refused_at_solve_never_0():
+    from services.solver import reserve_products as RP
+    from tests.test_reserve_products import STRING, _site
+
+    n = _site()
+    p = M.ReserveProduct.model_validate(_prod())
+    with pytest.raises(RP.ReserveRefusal) as e:
+        RP.plan(n, [p], {STRING: 20.0}, frozenset({STRING}))
+    assert e.value.kind == RP.PRICE_MISSING
+    assert "no capacity price" in str(e.value)
+
+
+def test_a_product_with_no_price_settles_to_none_flagged():
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    from services.results.billing import reserve_lines
+    from services.solver import reserve_products as RP
+    from tests.test_reserve_products import STRING, _site
+
+    n = _site()
+    p = M.ReserveProduct.model_validate(_prod())
+    cfg = SimpleNamespace(commercial=SimpleNamespace(reserve_products=[p]))
+    n.storage_units_t[RP.OUT_FRAME] = pd.DataFrame(
+        {f"{STRING}{RP.SEP}{p.id}": 1.0}, index=n.snapshots)
+    lines, _ = reserve_lines(n, cfg, backup=({STRING: 20.0}, frozenset({STRING})))
+    assert [ln.amount for ln in lines] == [None]
+    assert lines[0].flags  # named, never 0
+
+
+def test_binding_skips_a_product_with_no_price():
+    from tests.test_reserve_binding import _bind, _net
+
+    cfg = M.CommercialConfig(poc_link="import",
+                             reserve_products=[M.ReserveProduct.model_validate(_prod())])
+    stored = _bind(_net(), cfg)
+    assert stored["reserve_products"][0]["capacity_price"] is None
+
+
+# ── condition 3: apply is an ordinary edit ─────────────────────────────────
+
+
+def _hand(commercial: dict) -> dict:
+    return {**commercial, "reserve_products": [_prod()]}
+
+
+def test_apply_equals_hand_entry_in_the_stored_config_the_fingerprint_and_the_ic_digest():
+    from types import SimpleNamespace
+
+    from services.solver_service import SolverConfig
+    from services.workflow_tools import _network_input_fingerprint
+    from tests.test_reserve_binding import _bind, _ic_digest, _net
+
+    base = _commercial()
+    applied = MP.plan_apply(_pack(), base, None)["commercial"]
+    hand = _hand(base)
+    a = _bind(_net(), M.CommercialConfig.model_validate(applied))
+    h = _bind(_net(), M.CommercialConfig.model_validate(hand))
+    assert json.dumps(a, sort_keys=True) == json.dumps(h, sort_keys=True)
+    assert _ic_digest(a) == _ic_digest(h)
+    n = _net()
+
+    def fp(stored):
+        return _network_input_fingerprint(SimpleNamespace(
+            network=n, solver_state={"solver_config": SolverConfig(commercial=stored)},
+            user_ts={}, storage_dir=None))
+
+    assert fp(a) == fp(h)
+    # ... and it moves them as hand entry does.
+    assert _ic_digest(a) != _ic_digest(_bind(_net(), M.CommercialConfig.model_validate(base)))
+    assert fp(a) != fp(_bind(_net(), M.CommercialConfig.model_validate(base)))
+
+
+def _route(monkeypatch, tmp_path, commercial, currency="EUR", zone="NO-1", saved=True):
+    from routers import simulation as SIM
+
+    calls = []
+    monkeypatch.setattr(SIM, "_pack_context", lambda: (
+        tmp_path if saved else None, commercial, currency))
+    monkeypatch.setattr(MP, "project_zone", lambda _d: zone)
+    monkeypatch.setattr(SIM, "update_solver_config",
+                        lambda cfg, db, user: calls.append(cfg))
+    return SIM, calls
+
+
+def test_the_apply_route_goes_through_the_put_and_pins(monkeypatch, tmp_path):
+    from models.schemas import SolverConfigSchema
+
+    pack = MP.get("no-1-2026")
+    SIM, calls = _route(monkeypatch, tmp_path, _commercial())
+    out = SIM.apply_market_pack(pack.id, SIM.MarketPackApplyIn(pack_hash=pack.pack_hash),
+                                db=None, user=None)
+    assert out["changes"] and "commercial" not in out
+    hand = {**_commercial(), "reserve_products": [
+        p.model_dump(mode="json") for p in pack.products]}
+    assert calls == [SolverConfigSchema.model_validate({"commercial": hand})]
+    pin = MP.read_pin(tmp_path)
+    assert (pin["pack_id"], pin["pack_hash"]) == (pack.id, pack.pack_hash)
+
+
+def test_an_apply_with_nothing_to_change_writes_no_config(monkeypatch, tmp_path):
+    pack = MP.get("no-1-2026")
+    have = {**_commercial(), "reserve_products": [
+        p.model_dump(mode="json") for p in pack.products]}
+    SIM, calls = _route(monkeypatch, tmp_path, have)
+    out = SIM.apply_market_pack(pack.id, SIM.MarketPackApplyIn(pack_hash=pack.pack_hash),
+                                db=None, user=None)
+    assert out["changes"] == [] and calls == []
+    assert MP.read_pin(tmp_path)["pack_id"] == pack.id
+
+
+@pytest.mark.parametrize("case, code, status", [
+    ("stale", MP.STALE, 409), ("unsaved", MP.UNSAVED, 409),
+    ("zone", MP.ZONE_MISMATCH, 409), ("currency", MP.CURRENCY_MISMATCH, 409),
+    ("unknown", MP.UNKNOWN, 404),
+])
+def test_the_apply_route_refusals_write_nothing(monkeypatch, tmp_path, case, code, status):
+    pack = MP.get("no-1-2026")
+    SIM, calls = _route(monkeypatch, tmp_path, _commercial(),
+                        currency="NOK" if case == "currency" else "EUR",
+                        zone="NO-2" if case == "zone" else "NO-1",
+                        saved=case != "unsaved")
+    with pytest.raises(HTTPException) as e:
+        SIM.apply_market_pack("nope" if case == "unknown" else pack.id,
+                              SIM.MarketPackApplyIn(
+                                  pack_hash="0" * 64 if case == "stale" else pack.pack_hash),
+                              db=None, user=None)
+    assert (e.value.status_code, e.value.detail["error_kind"]) == (status, code)
+    assert calls == [] and MP.read_pin(tmp_path) is None
+
+
+def test_the_list_says_fit_pin_and_update_available(monkeypatch, tmp_path):
+    SIM, _ = _route(monkeypatch, tmp_path, _commercial())
+    MP.write_pin(tmp_path, MP.get("no-1-2026"), {})
+    pin = json.loads((tmp_path / MP.PIN_FILE).read_text())
+    pin["pack_hash"] = "an-older-hash"
+    (tmp_path / MP.PIN_FILE).write_text(json.dumps(pin))
+    out = SIM.list_market_packs()
+    by = {p["region"]: p for p in out["packs"]}
+    assert by["NO-1"]["refusal"] is None
+    assert by["NO-2"]["refusal"]["code"] == MP.ZONE_MISMATCH
+    assert by["NO-1"]["pinned"] and by["NO-1"]["update_available"]
+    assert not by["NO-2"]["pinned"] and not by["NO-2"]["update_available"]
+    prev = SIM.preview_market_pack("no-1-2026")
+    assert prev["changes"] and "commercial" not in prev and "applied" not in prev
