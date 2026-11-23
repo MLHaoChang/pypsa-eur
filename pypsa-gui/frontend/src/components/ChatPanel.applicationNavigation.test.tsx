@@ -25,7 +25,9 @@ describe.each(['expert', 'guided'] as const)('assistant application navigation i
   it.each(panels)('opens the %s panel through the ordinary UI event', panel => {
     useUIStore.setState({ uiMode: mode })
     applyUiNavigate({ kind: 'navigate', panel_id: panel })
-    expect(useUIStore.getState().activeSlidePanel).toBe(panel)
+    // Reports are Results › Hand-off › Reports (R6): no separate panel.
+    expect(useUIStore.getState().activeSlidePanel).toBe(panel === 'reports' ? 'results' : panel)
+    if (panel === 'reports') expect(useUIStore.getState().resultsTabRequest).toBe('reports')
   })
 
   it.each(results)('requests the actual %s results tab', tab => {
