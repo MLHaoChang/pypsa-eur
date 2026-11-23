@@ -147,3 +147,95 @@ def test_an_experiment_case_cannot_reach_the_pair():
     from services.workflow_tools import _ATTRIBUTES
 
     assert not ({"sk_min_mva", "sk_max_mva"} & set().union(*_ATTRIBUTES.values()))
+
+
+# ── GK B4 conditions ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_bulk_checks_each_targets_own_row_and_writes_nothing_when_one_is_reversed(client, install_network):
+    n = _net()
+    n.add("Generator", "g2", bus="b", carrier="AC", p_nom=10.0, control="Slack")
+    n.generators.loc["g2", ["sk_min_mva", "sk_max_mva"]] = [1000.0, 9000.0]
+    install_network(n)
+    # min 5000: fine against g2's max 9000, reversed against g's own max 3000.
+    r = client.patch("/api/network/_bulk", json={
+        "component_class": "Generator", "names": ["g2", "g"], "updates": {"sk_min_mva": 5000.0}})
+    assert r.status_code == 422 and RULE in r.text, r.text
+    assert n.generators.at["g2", "sk_min_mva"] == 1000.0 and _stored(n) == (1200.0, 3000.0)
+
+
+def test_an_unrelated_bulk_edit_of_a_reversed_pair_goes_through(client, install_network):
+    n = _net(sk_min=4000.0, sk_max=3000.0)
+    install_network(n)
+    r = client.patch("/api/network/_bulk", json={
+        "component_class": "Generator", "names": ["g"], "updates": {"p_nom": 30.0}})
+    assert r.status_code == 200, r.text
+    assert _stored(n) == (4000.0, 3000.0)
+
+
+@pytest.mark.parametrize("lo, hi, refused", [
+    (float("nan"), 100.0, False),      # blank minimum
+    (500.0, float("nan"), False),      # blank maximum
+    (100.0, 100.0, False),             # equal values
+    (float("inf"), 3000.0, True),      # an imported infinite minimum is above a finite maximum
+    (3000.0, float("inf"), False),
+    (100.0000001, 100.0, True),
+])
+def test_skip_rules_each_have_their_own_case(lo, hi, refused):
+    from services.adequacy.eh_columns import check_grid_strength_pair
+
+    row = {"sk_min_mva": lo, "sk_max_mva": hi}
+    if refused:
+        with pytest.raises(ValueError):
+            check_grid_strength_pair("Generator", row)
+    else:
+        check_grid_strength_pair("Generator", row)
+
+
+@pytest.mark.parametrize("path", ["post", "put", "bulk"])
+def test_no_path_stores_an_infinite_value(client, install_network, path):
+    n = _net()
+    install_network(n)
+    base = {"name": "g", "bus": "b", "carrier": "AC", "p_nom": 10.0, "control": "Slack"}
+    if path == "post":
+        r = client.post("/api/network/generators", json={**base, "name": "g3", "sk_max_mva": "inf"})
+    elif path == "put":
+        r = client.put("/api/network/generators/g", json={**base, "sk_max_mva": "inf"})
+    else:
+        r = client.patch("/api/network/_bulk", json={
+            "component_class": "Generator", "names": ["g"], "updates": {"sk_max_mva": "inf"}})
+    assert r.status_code in (400, 422), r.text
+    assert _stored(n) == (1200.0, 3000.0)
+
+
+def test_the_stated_limit_never_exceeds_the_true_maximum(client, install_network):
+    n = _net(sk_min=1200.0, sk_max=1234567.89)
+    install_network(n)
+    base = {"name": "g", "bus": "b", "carrier": "AC", "p_nom": 10.0, "control": "Slack"}
+    r = client.put("/api/network/generators/g", json={**base, "sk_min_mva": 2000000.0})
+    assert r.status_code == 422
+    assert "(1234567.89 MVA)" in r.text, r.text
+    # The user enters the stated value and is accepted.
+    r = client.put("/api/network/generators/g", json={**base, "sk_min_mva": 1234567.89})
+    assert r.status_code == 200, r.text
+
+
+def test_the_readiness_flag_names_the_generator_and_both_values():
+    from services.adequacy import grid_readiness as G
+
+    n = _net(sk_min=4000.0, sk_max=3000.0)
+    inp = G._Inputs("/nonexistent", n, None, "no profile", None, None)
+    rows = G._grid_strength_rows(inp)
+    assert [r["id"] for r in rows] == ["grid_strength_pair:g"]
+    assert rows[0]["verdict"] == "warn"
+    assert "Generator g" in rows[0]["note"] and "4000" in rows[0]["note"] and "3000" in rows[0]["note"]
+    assert G._grid_strength_rows(G._Inputs("/nonexistent", _net(), None, "no profile", None, None)) == []
+
+
+def test_the_fault_level_gates_do_not_read_the_generator_pair():
+    """The minimum S_k'' that sizing, run gates and readiness use comes from the campus description (with none:
+    not evaluated), never from the slack generator's columns, so a reversed imported pair cannot pass a gate."""
+    from services.adequacy import grid_readiness as G
+
+    inp = G._Inputs("/nonexistent", _net(sk_min=4000.0, sk_max=3000.0), None, "no profile", None, None)
+    assert G._poc_sk_min(inp) == (None, None)
