@@ -828,8 +828,9 @@ interface MergedLoadingRow {
   peak_b: number
   mean_a: number
   mean_b: number
-  binding_a: number
-  binding_b: number
+  // null: the rating is assumed, so binding hours were not evaluated (never 0)
+  binding_a: number | null
+  binding_b: number | null
 }
 
 function mergeLoadingByName(
@@ -857,8 +858,8 @@ function mergeLoadingByName(
       peak_b: readPV(B?.peak_loading, period),
       mean_a: readPV(A?.mean_loading, period),
       mean_b: readPV(B?.mean_loading, period),
-      binding_a: readPV(A?.binding_hours, period),
-      binding_b: readPV(B?.binding_hours, period),
+      binding_a: A?.binding_hours == null ? null : readPV(A.binding_hours, period),
+      binding_b: B?.binding_hours == null ? null : readPV(B.binding_hours, period),
     })
   }
   // Rank by worst peak side so the chart top-N is the most informative.
@@ -940,6 +941,7 @@ function LoadingTable({
 }) {
   if (rows.length === 0) return null
   const fmtPct = (v: number) => `${(v * 100).toFixed(1)} %`
+  const notEvaluated = <span title="The rating is assumed, not stated in the file, so binding hours are not evaluated">not evaluated</span>
   const fmtHr  = (v: number) => v >= 1 ? `${v.toFixed(0)} h` : (v > 0 ? `${v.toFixed(1)} h` : '—')
   const dash = <span className="text-muted" title="Branch not present in this scenario">—</span>
   const unavailable = <UnavailableCell />
@@ -977,8 +979,8 @@ function LoadingTable({
             </td>
             <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : r.hasA ? fmtPct(r.mean_a) : dash}</td>
             <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : r.hasB ? fmtPct(r.mean_b) : dash}</td>
-            <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : r.hasA ? fmtHr(r.binding_a) : dash}</td>
-            <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : r.hasB ? fmtHr(r.binding_b) : dash}</td>
+            <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : r.hasA ? (r.binding_a == null ? notEvaluated : fmtHr(r.binding_a)) : dash}</td>
+            <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : r.hasB ? (r.binding_b == null ? notEvaluated : fmtHr(r.binding_b)) : dash}</td>
           </tr>
         ))}
       </tbody>

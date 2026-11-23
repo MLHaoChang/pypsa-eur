@@ -631,3 +631,70 @@ def test_the_unavailable_reason_names_the_assumed_rating_only_when_that_is_the_c
         "hours_above_rating": "rating_assumed",
         "branches_above_rating": "unsupported_metric",
     }
+
+
+def _case14_raw(monkeypatch, *, assumed, transformers_assumed=False):
+    """case14 through the real source(): every line at 150 %, the named lines assumed."""
+    from services import workflow_tools
+
+    n = _imported()
+    _overloaded(n, n.lines.index[0])
+    for line in n.lines.index:  # every line at 150 % of its own rating
+        rating = float(n.lines.at[line, "s_nom"])
+        n.lines_t.p0[line], n.lines_t.p1[line] = 1.5 * rating, -1.5 * rating
+    for t in ("p0", "p1"):
+        frame = getattr(n.transformers_t, t)
+        for tr in n.transformers.index:
+            frame[tr] = 0.0
+    n.lines["s_nom_source"] = [
+        "assumed" if i in assumed else "file" for i in n.lines.index
+    ]
+    n.transformers["s_nom_source"] = "assumed" if transformers_assumed else "file"
+    monkeypatch.setattr(
+        workflow_tools, "_network_input_fingerprint", lambda ctx, exact=False: "fp"
+    )
+    n.meta["assistant_solve_input_fingerprint"] = "fp"
+    n.meta["assistant_solve_exact_input_fingerprint"] = "fp"
+    ctx = SimpleNamespace(
+        network=n, solver_state={"status": "completed", "condition": "optimal"}
+    )
+    return n, branch_calculations.source(ctx, "network", True)
+
+
+def _network_facts(raw, monkeypatch):
+    from harness import calculations
+
+    monkeypatch.setattr(
+        calculations, "requested_metrics", lambda scope: scope["metrics"]
+    )
+    facts, slots = branch_calculations.calculate(raw, _scope())
+    return {f["metric"]: f["value"] for f in facts}, slots
+
+
+def test_case14_one_assumed_line_is_left_out_of_the_sealed_count(monkeypatch):
+    n, raw = _case14_raw(monkeypatch, assumed={"__none__"})
+    stated, _ = _network_facts(raw, monkeypatch)
+    assert stated["branches_above_rating"] == len(n.lines)  # every line at 150 %
+    n, raw = _case14_raw(monkeypatch, assumed={n.lines.index[0]})
+    got, _ = _network_facts(raw, monkeypatch)
+    assert got["branches_above_rating"] == len(n.lines) - 1
+    assert got["max_branch_utilisation"] == pytest.approx(150)
+    assert any(
+        "1 branch(es) with an assumed rating" in x
+        for x in branch_calculations.notes(raw)
+    )
+
+
+def test_case14_all_lines_assumed_leaves_the_count_unavailable_not_zero(monkeypatch):
+    n, raw = _case14_raw(
+        monkeypatch, assumed=set(_imported().lines.index), transformers_assumed=True
+    )
+    got, slots = _network_facts(raw, monkeypatch)
+    assert "branches_above_rating" not in got
+    assert got["max_branch_utilisation"] == pytest.approx(150)
+    reasons = {s["metric"]: s.get("reason") for s in slots}
+    assert reasons["branches_above_rating"] == "rating_assumed"
+    assert any(
+        f"{len(n.lines) + len(n.transformers)} branch(es) with an assumed rating" in x
+        for x in branch_calculations.notes(raw)
+    )

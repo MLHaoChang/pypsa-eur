@@ -3,7 +3,7 @@
 
 # Sealed branch-loading facts count an assumed rating as a stated one
 
-Status: done
+Status: done (#1934; AC sealed facts: issue 07)
 Owner decisions: IMPORT-ZERO-RATING-1
 Review: GK B (app backend).
 Blocked by: none (issue 05 landed the marker reads in the four result views).
