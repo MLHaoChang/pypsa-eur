@@ -8,6 +8,7 @@ import json
 import pandas as pd
 import pytest
 
+from gridspine.drivers import campus_study
 from gridspine.drivers.campus_study import (
     HARMONIC_SOURCES_CSV,
     HARMONICS_CSV,
@@ -19,6 +20,7 @@ from gridspine.drivers.campus_study import (
     load_run_campus,
     powerfactory_campus,
 )
+from gridspine.handoff.dgs_writer import NOT_WRITTEN_COLUMNS, SHUNT_P_NOT_WRITTEN
 from gridspine.ingest.background_harmonics import combine
 from gridspine.readback.results import DGS_NAMES_CSV, read_back
 from gridspine.schema.contracts import ContractError
@@ -309,6 +311,49 @@ def test_a_statcom_is_a_converter_to_list(tmp_path):
         "pp_name"
     )
     assert hs.at["ST1", "status"] == "no spectrum"
+
+
+def test_a_lossy_shunt_is_listed_in_the_manifest_with_the_writers_columns(
+    tmp_path, monkeypatch
+):
+    def edit(spec):
+        spec["campus"].setdefault("compensation", []).append(
+            {
+                "name": "CB1",
+                "bus": spec["campus"]["pcc"]["bus"],
+                "kind": "capacitor_bank",
+                "q_mvar": {"value": 2.0, "source": "assumed"},
+                "steps": 1,
+            }
+        )
+
+    run, _ = _run(tmp_path, _hub(), edit)
+    load = campus_study.load_run_campus
+
+    def lossy(run_dir):
+        # Campus data writes shunts lossless; the loss is set here as an imported network would carry it.
+        campus = load(run_dir)
+        campus.net.shunt.loc[campus.net.shunt["name"] == "CB1", "p_mw"] = 0.05
+        return campus
+
+    monkeypatch.setattr(campus_study, "load_run_campus", lossy)
+    (out,) = powerfactory_campus(str(run), hours=[_hour(run)])
+    (row,) = json.loads((out / "manifest.json").read_text())["not_written"]
+    assert list(row) == list(NOT_WRITTEN_COLUMNS)
+    assert row == {
+        "pp_table": "shunt",
+        "pp_name": "CB1",
+        "dgs_name": row["dgs_name"],
+        "attribute": "p_mw",
+        "value": 0.05,
+        "reason": SHUNT_P_NOT_WRITTEN,
+    }
+    names = pd.read_csv(out / DGS_NAMES_CSV, keep_default_na=False)
+    assert row["dgs_name"] in set(names["dgs_name"])
+
+
+def test_a_lossless_campus_lists_nothing_not_written(case):
+    assert json.loads((case / "manifest.json").read_text())["not_written"] == []
 
 
 def test_a_branch_name_the_dgs_never_wrote_is_refused(case, tmp_path):

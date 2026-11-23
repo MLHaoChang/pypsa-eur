@@ -1955,12 +1955,14 @@ def powerfactory_campus(run_dir, hours=None) -> list:
     harmonic spectrum), ``dgs_names.csv``, ``harmonic_sources.csv`` (every
     converter, with or without a spectrum, and any harmonic source the
     network does not model), the hour's pandapower load flow
-    (``lf_bus.csv``, ``lf_branch_flow.csv``) and ``manifest.json`` — so
+    (``lf_bus.csv``, ``lf_branch_flow.csv``) and ``manifest.json`` (its
+    ``not_written``: each value the DGS could not carry, one record per
+    ``DgsExport.not_written`` row with its ``NOT_WRITTEN_COLUMNS``) — so
     ``readback.results.read_back`` compares a PowerFactory export of it
     directly. Returns the directories."""
     import copy
 
-    from gridspine.handoff.dgs_writer import HARMONIC_COLUMNS, PENDING_VERIFICATION, write_dgs
+    from gridspine.handoff.dgs_writer import HARMONIC_COLUMNS, NOT_WRITTEN_COLUMNS, PENDING_VERIFICATION, write_dgs
     from gridspine.readback.results import DGS_NAMES_CSV
     from gridspine.static.campus_flow import apply_hour
     from gridspine.static.loadflow import run_lf
@@ -1996,6 +1998,7 @@ def powerfactory_campus(run_dir, hours=None) -> list:
                     "files": [f"{case}.dgs", DGS_NAMES_CSV, HARMONIC_SOURCES_CSV, "lf_bus.csv",
                               "lf_branch_flow.csv", "manifest.json"],
                     "no_spectrum": sorted(sources.loc[sources["status"] != "spectrum", "pp_name"]),
+                    "not_written": exp.not_written[list(NOT_WRITTEN_COLUMNS)].to_dict("records"),
                     "pending_verification": [PENDING_VERIFICATION]}
         _write_text_atomic(out / "manifest.json", json.dumps(manifest, indent=2) + "\n")
         out_dirs.append(out)
