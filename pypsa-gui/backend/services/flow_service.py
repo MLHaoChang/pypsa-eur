@@ -1137,7 +1137,6 @@ def _assumed_items(template: dict, cfg: dict | None = None) -> list[dict]:
     return out
 
 
-<<<<<<< HEAD
 #: The off-grid dispatch limits Guided shows as assumed while they are off
 #: (owner RESERVE-SHOW-1; control-strategy walkthrough 03, asset-investment
 #: walkthrough improvement 2): code, label (the Solver settings word, no unit),
@@ -1163,7 +1162,9 @@ def _dispatch_limit_items(cfg: dict | None) -> list[dict]:
         out.append(_item(code, "warning", f"{label}: {off} (assumed): confirm it or set your own.",
                          "flow", "scenarios", panel="simparams", fld=fields[0],
                          value=off))
-=======
+    return out
+
+
 def _run_default_items(rows: list[dict], template: dict | None) -> list[dict]:
     """The run's fallbacks (``run_assumptions``) as warnings, filed where the
     value is set: nothing the run assumes is silent (DECISION-GAPS-1). A
@@ -1181,7 +1182,6 @@ def _run_default_items(rows: list[dict], template: dict | None) -> list[dict]:
                          component=r["component"], entity=r["entity"], fld=r["field"],
                          value=json.dumps(r["value"])))
         out[-1]["card"] = r["card"]
->>>>>>> origin/master
     return out
 
 
@@ -1591,13 +1591,10 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
                 i["code"] == "presence_voll" for i in presence),
                 connection_links=frozenset(facts.connection_links))
         items += _assumed_items(template, facts.cfg_dict)
-<<<<<<< HEAD
         if islanded:
             items += _dispatch_limit_items(facts.cfg_dict)
-=======
         if not loads_not_needed:
             items += _run_default_items(facts.run_defaults, template)
->>>>>>> origin/master
     items += _bind_items(facts, db, org_id, project_dir, n)
     # Load flow and N-1 security are on exactly when their solver settings are.
     scope = S.apply_settings(scope, facts.cfg_dict)
