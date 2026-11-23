@@ -322,11 +322,11 @@ describe('Task 18 — sign convention', () => {
 // manufactures a fake 100%-scale swing that isn't in the data at all.
 
 describe('Task 18 — zero vs absent baseline', () => {
-  it('loading: an assumed rating reads "not evaluated", never as zero binding hours', async () => {
+  it.each(['A', 'B'])('loading: an assumed rating on side %s reads "not evaluated", never as zero binding hours', async (assumedSide) => {
     seedPicker('loading')
     vi.mocked(projectsApi.resultsSummary).mockImplementation(async (name: string) => {
       const s = summary(name, 1)
-      if (name === 'B') {
+      if (name === assumedSide) {
         s.loading!.lines[0] = { ...s.loading!.lines[0], binding_hours: null, rating_assumed: true }
         s.loading!.assumed_rating_count = 1
       }
@@ -335,6 +335,10 @@ describe('Task 18 — zero vs absent baseline', () => {
     renderCompare()
     await waitFor(() => expect(screen.getAllByText('not evaluated')).toHaveLength(1))
     expect(screen.getByText('100 h')).toBeTruthy()  // the side that stated its rating still reads its hours
+    // the "not evaluated" cell sits in the assumed side's binding column
+    const cell = screen.getByText('not evaluated').closest('td')!
+    const cells = Array.from(cell.parentElement!.querySelectorAll('td'))
+    expect(cells.indexOf(cell)).toBe(assumedSide === 'A' ? 6 : 7)
   })
 
   it('emissions: a null side correctly bails to a message, not a fabricated -100%', async () => {
