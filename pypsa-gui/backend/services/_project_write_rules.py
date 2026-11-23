@@ -314,6 +314,7 @@ POST   /api/results/margin_loop/abort  write active
 POST   /api/results/mc  write active
 POST   /api/results/mc/abort  write active
 POST   /api/simulation/abort  write active
+POST   /api/simulation/commercial/market_packs/{pack_id}/apply  write active
 PUT    /api/simulation/commercial/value_flows  write active
 POST   /api/simulation/document_values/apply  write active
 PUT    /api/simulation/finance  write active
