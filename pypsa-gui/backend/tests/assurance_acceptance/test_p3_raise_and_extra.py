@@ -1274,3 +1274,59 @@ def test_the_marker_allowance_covers_only_the_row_written(baseline):
     block = outcomes.project_write(note)
     assert (block["outcome"], block["reason"]) == ("partial", "extra_edits")
     assert block["paths_extra"] == ["/Line/LY/s_nom_source"]
+
+
+def test_a_write_to_another_attribute_does_not_own_the_marker_cell(
+    baseline, monkeypatch
+):
+    _two_assumed_lines("assumed")
+
+    def flip():
+        _net().lines.at["LX", "s_nom_source"] = "file"
+
+    _wrap(monkeypatch, "bulk_update_components", after=flip)
+    args = {"component_class": "Line", "names": ["LX"], "updates": {"x": 0.2}}
+    block = _result(_frames(monkeypatch, "bulk_update_components", args))["_outcome"]
+    assert (block["outcome"], block["reason"]) == ("partial", "extra_edits")
+    assert block["paths_extra"] == ["/Line/LX/s_nom_source"]
+
+
+def test_a_rating_write_owns_only_its_own_marker_column(baseline, monkeypatch):
+    _two_assumed_lines("assumed")
+    _net().lines["p_nom_source"] = "assumed"
+
+    def flip():
+        _net().lines.at["LX", "p_nom_source"] = "file"
+
+    _wrap(monkeypatch, "bulk_update_components", after=flip)
+    args = {"component_class": "Line", "names": ["LX"], "updates": {"s_nom": 250.0}}
+    block = _result(_frames(monkeypatch, "bulk_update_components", args))["_outcome"]
+    assert (block["outcome"], block["reason"]) == ("partial", "extra_edits")
+    assert block["paths_extra"] == ["/Line/LX/p_nom_source"]
+
+
+@pytest.mark.parametrize(
+    "cls, attr", [("Transformer", "transformers"), ("Generator", "generators")]
+)
+def test_a_rating_write_does_not_own_a_marker_of_another_class_with_the_same_name(
+    baseline, monkeypatch, cls, attr
+):
+    _two_assumed_lines("assumed")
+    n = _net()
+    if cls == "Transformer":
+        n.add("Transformer", "LX", bus0="B1", bus1="B2", s_nom=50.0, x=0.1, r=0.01)
+    else:
+        n.add("Generator", "LX", bus="B1", p_nom=5.0)
+    getattr(n, attr)["s_nom_source" if cls == "Transformer" else "p_nom_source"] = (
+        "assumed"
+    )
+    column = "s_nom_source" if cls == "Transformer" else "p_nom_source"
+
+    def flip():
+        getattr(_net(), attr).at["LX", column] = "file"
+
+    _wrap(monkeypatch, "bulk_update_components", after=flip)
+    args = {"component_class": "Line", "names": ["LX"], "updates": {"s_nom": 250.0}}
+    block = _result(_frames(monkeypatch, "bulk_update_components", args))["_outcome"]
+    assert (block["outcome"], block["reason"]) == ("partial", "extra_edits")
+    assert block["paths_extra"] == [f"/{cls}/LX/{column}"]

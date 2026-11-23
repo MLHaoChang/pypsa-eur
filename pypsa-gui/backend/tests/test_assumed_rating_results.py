@@ -305,3 +305,45 @@ def test_the_unrated_list_carries_the_true_total_past_the_cap():
     _zero_flows(n)
     out = _grid_loading(n)
     assert out.code == "branch_unrated" and f"({len(n.lines)} in all)" in out.reason
+
+
+def test_the_summary_headline_says_why_an_assumed_line_has_no_congested_hours(
+    monkeypatch,
+):
+    from services.asset_results import service
+
+    n = _imported()
+    name = n.lines.index[0]
+    n.lines["s_nom_opt"] = n.lines["s_nom"]
+    n.lines["s_nom_source"] = "file"
+    _overloaded(n, name)
+    monkeypatch.setattr("routers.simulation._state_snapshot", lambda: {})
+    monkeypatch.setattr(
+        C, "series_for", lambda ctx, attr: getattr(n.lines_t, attr)[ctx.name]
+    )
+    monkeypatch.setattr(C, "_dispatch_status", lambda net: "fresh")
+    monkeypatch.setattr(type(n), "is_solved", True, raising=False)
+
+    def headline(assumed):
+        n.lines.loc[name, "s_nom_source"] = "assumed" if assumed else "file"
+        out = service.build_response(
+            n,
+            "Line",
+            name,
+            category="summary",
+            metric_ids=[],
+            source="lopf",
+            from_iso=None,
+            to_iso=None,
+            period=None,
+            mode="raw",
+        )
+        return {h["id"]: h for h in out["headline"]}["congested_hours"]
+
+    row = headline(True)
+    assert (row["status"], row["reason"]) == (
+        "blocked",
+        "rating assumed: not evaluated",
+    )
+    stated = headline(False)
+    assert stated["status"] == "ok" and stated["value"] > 0

@@ -221,6 +221,13 @@ def apply_view_mode(
     }
 
 
+def _none_reason(metric, ctx) -> str:
+    """Why a metric that passed its preconditions computed to nothing."""
+    if metric.compute is C.br_congested_hours and C.rating_assumed(ctx):
+        return "rating assumed: not evaluated"
+    return "not produced by this solve"
+
+
 def _compute_one(n, component_class: str, name: str, metric, *, source: str, sns):
     """
     Run a single metric and return a JSON-ready value, or None.
@@ -289,7 +296,8 @@ def build_headline(n, component_class: str, name: str, *, precond: dict,
                 # every precondition passed, which does not guarantee the
                 # solver actually wrote the column.
                 row["status"] = "blocked"
-                row["reason"] = "not produced by this solve"
+                row["reason"] = _none_reason(
+                    m, C.build_ctx(n, component_class, name, source=source, sns=sns))
                 row.pop("remedy", None)
             else:
                 row["value"] = value
@@ -368,11 +376,7 @@ def build_response(
             # row in place so the checklist tells the truth.
             row = rows_by_id[mid]
             row["status"] = "blocked"
-            row["reason"] = (
-                "rating assumed: not evaluated"
-                if C.rating_assumed(ctx)
-                else "not produced by this solve"
-            )
+            row["reason"] = _none_reason(m, ctx)
             row.pop("remedy", None)
             continue
         if m.kind == "series":
