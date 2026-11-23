@@ -512,8 +512,9 @@ def test_pre_run_weights_match_the_runs_floor():
     assert float(w[w > 0].min()) == 1.0
     assert p["resolution_floor_h"] * p["n_samples"] == pytest.approx(1.0)
     assert S.draws_short_of_target(n, _pack(target=3.0), 1) == (
-        "Simulation runs per check: 1 run cannot tell whether the 3 h/yr goal "
-        "is met (its smallest step is 52.1 h/yr): set at least 18.")
+        "Simulation runs per check: at 1 run, a check that sees no shortfall "
+        "cannot certify the 3 h/yr goal (its smallest step is 52.1 h/yr): set "
+        "at least 18.")
     assert S.draws_short_of_target(n, _pack(target=3.0), 18) is None
     assert S.draws_short_of_target(n, _pack(target=3.0), 17) is not None
 
@@ -532,6 +533,39 @@ def test_the_minimum_draws_put_the_floor_at_the_target(draws, below, min_draws):
         assert _cert(report).note == (
             "target 3 h/yr is below the MC resolution floor 3.06723 h/yr at "
             "17 draws: at least 18 draws resolve it")
+
+
+# GK A ask 1: past the 2000-draw cap the refusal names no draw count. A
+# weight of 20 h on one year resolves 0.01 h/yr at exactly 2000 draws.
+@pytest.mark.parametrize("w_min,tail", [
+    (20.0, ": set at least 2000."),
+    (20.02, ", and no run count up to the 2000 cap can: allow more shortfall "
+            "in the goal."),
+    (168.0, ", and no run count up to the 2000 cap can: allow more shortfall "
+            "in the goal."),
+])
+def test_the_start_refusal_names_no_count_past_the_draw_cap(w_min, tail):
+    msg = S.draws_short_for((w_min, 1.0), _pack(target=0.01), 1)
+    assert msg.startswith("Simulation runs per check: at 1 run, a check that "
+                          "sees no shortfall cannot certify the 0.01 h/yr goal")
+    assert msg.endswith(tail)
+    assert "16800" not in msg
+
+
+# GK A ask 3: a target equal to the floor is resolved; its verdict follows
+# the interval (here a straddle), not the below-floor branch.
+def test_a_target_at_the_floor_is_a_straddle_not_below_the_floor():
+    assert S.below_floor(0.05, 0.05) is False
+    assert S.below_floor(0.05, 0.0500001) is True
+    assert S.below_floor(None, 0.05) is False
+    assert S.below_floor(0.05, None) is False
+    assert S.certification_verdict(
+        lole_ci=(0.0, 0.1), target_h=0.05, resolution_floor_h=0.05,
+        n_samples=20) == ("inconclusive", "the LOLE 95% CI straddles the target")
+    verdict, note = S.certification_verdict(
+        lole_ci=(0.0, 0.1), target_h=0.05, resolution_floor_h=0.0500001,
+        n_samples=20)
+    assert verdict == "inconclusive" and "below the MC resolution floor" in note
 
 
 @pytest.mark.parametrize("target", [0.0, None])

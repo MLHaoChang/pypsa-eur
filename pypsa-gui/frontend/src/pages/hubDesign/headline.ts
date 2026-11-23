@@ -7,6 +7,7 @@ import { certificationHeadline, certificationPayload, fmeaTopRows } from '../res
 import { displayName } from '../../utils/displayName'
 import { verdictWord } from './verdictWords'
 import { sectionMeta } from '../../layout/flowSections'
+import { MAX_GOAL_DRAWS } from '../../hooks/useReliabilityGoal'
 
 type OkReview = Extract<EhReview, { status: 'ok' }>
 
@@ -63,6 +64,8 @@ function belowFloor(report: EhReferenceDesignReport | null, target: number): str
   const where = `section ${goal.number}, ${goal.label}`
   const seen = `with ${runs(n)}, the smallest shortfall it can show is ${g3(floor / years)} h/yr`
   const need = num(p.min_draws)
+  if (need != null && need > MAX_GOAL_DRAWS)
+    return `${verdictWord('inconclusive')}: ${seen}, more than your ${g(target)} h/yr goal, and no run count up to the ${MAX_GOAL_DRAWS} cap resolves it. Allow more shortfall (${where}) to decide it.`
   return need != null
     ? `${verdictWord('inconclusive')}: ${seen}, more than your ${g(target)} h/yr goal. Set at least ${need} runs per check (${where}) to decide it.`
     : `${verdictWord('inconclusive')}: ${seen}, and a ${g(target)} h/yr goal allows none. Allow some shortfall (${where}) to decide it.`

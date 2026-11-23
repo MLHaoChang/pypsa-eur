@@ -27,7 +27,7 @@ import {
   type EhStudyRequestBody,
 } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
-import { goalText, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
+import { MAX_GOAL_DRAWS, goalText, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import { ReliabilityGoalSummary } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
 import { openReliabilityGoal } from '../../layout/flowNavigation'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
@@ -304,6 +304,8 @@ function feederNext(fb: unknown): string {
  *  show, so only the stated draw count (or a goal above zero) settles it; a
  *  tighter plan does not. */
 export function belowFloorNext(minDraws: unknown): string {
+  if (typeof minDraws === 'number' && minDraws > MAX_GOAL_DRAWS && Number.isFinite(minDraws))
+    return `Next: allow more shortfall in the reliability goal. No number of simulation runs up to the ${MAX_GOAL_DRAWS} cap can show that this goal is met.`
   return typeof minDraws === 'number' && Number.isFinite(minDraws)
     ? `Next: raise the simulation runs per check to at least ${minDraws}. With fewer, the smallest shortfall it can show is above your goal, so a tighter plan cannot settle it.`
     : 'Next: allow some shortfall in the reliability goal. No number of simulation runs can show that a 0 h/yr goal is met.'

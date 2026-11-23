@@ -305,9 +305,9 @@ def test_runs_check_refuses_below_and_passes_at_the_minimum():
     # 168 h of weight 1: 3 h/yr is 0.05753 h on the horizon; 1/18 ≤ it < 1/17.
     n = _weighted_network()
     msg = S.draws_short_of_target(n, _goal_pack(3.0), 17)
-    assert msg == ("Simulation runs per check: 17 runs cannot tell whether the "
-                   "3 h/yr goal is met (its smallest step is 3.07 h/yr): set at "
-                   "least 18.")
+    assert msg == ("Simulation runs per check: at 17 runs, a check that sees "
+                   "no shortfall cannot certify the 3 h/yr goal (its smallest "
+                   "step is 3.07 h/yr): set at least 18.")
     assert S.draws_short_of_target(n, _goal_pack(3.0), 18) is None
     # Unset draws are the pack's own.
     assert S.draws_short_of_target(n, _goal_pack(3.0, draws=17), None) == msg

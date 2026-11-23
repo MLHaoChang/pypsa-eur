@@ -64,8 +64,8 @@ def test_one_run_below_the_floor_is_refused_at_the_study_start(
     assert msg.startswith(LABEL), msg
     # The microgrid's 168 h weeks at 1 draw: 8760/168 = 52.1 h/yr per step.
     assert msg == (
-        LABEL + "1 run cannot tell whether the 3 h/yr goal is met "
-        "(its smallest step is 52.1 h/yr): set at least 18."
+        LABEL + "at 1 run, a check that sees no shortfall cannot certify "
+        "the 3 h/yr goal (its smallest step is 52.1 h/yr): set at least 18."
     ), msg
 
 

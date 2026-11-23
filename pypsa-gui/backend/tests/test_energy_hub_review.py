@@ -575,6 +575,16 @@ def test_below_the_floor_keeps_doubling_when_that_is_more():
     assert act["args"]["mc"] == {"draws": 600}
 
 
+def test_below_the_floor_clamps_the_offer_at_the_draw_cap():
+    """GK A ask 2: doubling 1500 would pass the cap; the offer is exactly 2000."""
+    out = review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(draws=1500, n_samples=1500,
+                                               min_draws=1600)}}), RECORD)
+    act = _by_id(out, "certification_inconclusive")["actions"][0]
+    assert act["args"]["mc"] == {"draws": 2000}
+    assert act["effect"] == "set simulation runs per check to 2000 (was 1500)"
+
+
 @pytest.mark.parametrize("min_draws", [2001, None])
 def test_below_the_floor_beyond_the_draw_cap_offers_no_rerun(min_draws):
     out = review_report(_report(sections={"certification": {

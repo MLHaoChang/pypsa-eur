@@ -74,6 +74,20 @@ describe('headline (§5.5)', () => {
       'Not decided: with 1 simulation run, the smallest shortfall it can show is 52.1 h/yr, more than your 3 h/yr goal. Set at least 18 runs per check (section 8, Scenarios & optimisation) to decide it.')
   })
 
+  // GK A ask 1: past the 2000-run cap the sentence names no run count.
+  it('below the floor past the 2000-run cap: no run count, allow more shortfall', () => {
+    const r = report({ ...cert({ verdict: 'inconclusive', lole_h_per_year: 0, lole_ci: [0, 0],
+      horizon_years: 1, target_lole_h: 0.01, resolution_floor_h: 168, n_samples: 1,
+      below_floor: true, min_draws: 16800 }) })
+    const rv = review({ verdict: 'inconclusive', mc_lole_h_per_year: 0, target_lole_h: 0.01 })
+    expect(headline(rv, r)).toBe(
+      'Not decided: with 1 simulation run, the smallest shortfall it can show is 168 h/yr, more than your 0.01 h/yr goal, and no run count up to the 2000 cap resolves it. Allow more shortfall (section 8, Scenarios & optimisation) to decide it.')
+    const at = report({ ...cert({ verdict: 'inconclusive', lole_h_per_year: 0, lole_ci: [0, 0],
+      horizon_years: 1, target_lole_h: 0.01, resolution_floor_h: 20, n_samples: 1,
+      below_floor: true, min_draws: 2000 }) })
+    expect(headline(rv, at)).toMatch(/Set at least 2000 runs per check/)
+  })
+
   it('below the floor with a zero goal: no run count settles it', () => {
     const r = report({ ...cert({ verdict: 'inconclusive', lole_h_per_year: 0, lole_ci: [0, 0],
       horizon_years: 1, target_lole_h: 0, resolution_floor_h: 0.104, n_samples: 500,
