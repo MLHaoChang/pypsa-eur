@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import pathlib
 import sys
+import types
 from typing import get_args
 
 import pytest
@@ -201,9 +202,16 @@ def test_another_currency_is_refused():
     assert "EUR" in str(e.value) and "NOK" in str(e.value)
 
 
-def test_the_same_zone_and_currency_or_no_stated_currency_fit():
+def test_the_same_zone_and_currency_fit():
     assert MP.check_fit(_pack(), "NO-1", "EUR") is None
-    assert MP.check_fit(_pack(), "NO-1", None) is None
+
+
+@pytest.mark.parametrize("currency", [None, ""])
+def test_no_stated_currency_is_refused(currency):
+    with pytest.raises(MP.PackRefusal) as e:
+        MP.check_fit(_pack(), "NO-1", currency)
+    assert e.value.code == MP.CURRENCY_UNKNOWN
+    assert "EUR" in str(e.value)
 
 
 def test_the_project_zone_is_the_pick_else_the_pin(tmp_path, monkeypatch):
@@ -306,6 +314,36 @@ def test_an_update_changes_only_cells_the_user_left_as_applied():
     # The pin keeps what the LAST apply wrote for the kept cell.
     assert plan["applied"]["reserve_products/fast_symmetric/max_commit_mw"] is None
     assert plan["applied"]["reserve_products/fast_symmetric/sustain_h"] == 0.5
+
+
+def _pin(pack, plan) -> dict:
+    return {"pack_id": pack.id, "pack_hash": pack.pack_hash, "applied": plan["applied"]}
+
+
+def test_a_hand_revert_after_an_apply_is_kept_as_a_user_edit():
+    """GK B4 1c: the user sets a cell the pack updated back to its old value by
+    hand. Re-applying that pack, or a newer one, keeps the user's value."""
+    v1, v2, v3 = (_pack(products=[_prod(sustain_h=h)]) for h in (1.0, 0.5, 0.25))
+    first = MP.plan_apply(v1, _commercial(), None)
+    second = MP.plan_apply(v2, first["commercial"], _pin(v1, first))
+    cell = "reserve_products/fast_symmetric/sustain_h"
+    assert second["changes"] == [{"cell": cell, "from": 1.0, "to": 0.5}]
+    reverted = json.loads(json.dumps(second["commercial"]))
+    reverted["reserve_products"][0]["sustain_h"] = 1.0
+    for pack in (v2, v3):
+        plan = MP.plan_apply(pack, reverted, _pin(v2, second))
+        assert plan["changes"] == []
+        assert plan["conflicts"] == [
+            {
+                "cell": cell,
+                "yours": 1.0,
+                "pack": pack.products[0].sustain_h,
+                "last_applied": 0.5,
+            }
+        ]
+        assert plan["commercial"] == reverted
+        # The pin keeps what the pack last wrote, so the revert stays a user edit.
+        assert plan["applied"][cell] == 0.5
 
 
 def test_a_hand_entered_product_of_the_same_id_is_never_overwritten():
@@ -453,9 +491,18 @@ def _route(monkeypatch, tmp_path, commercial, currency="EUR", zone="NO-1", saved
         lambda: (tmp_path if saved else None, commercial, currency),
     )
     monkeypatch.setattr(MP, "project_zone", lambda _d: zone)
-    monkeypatch.setattr(
-        SIM, "update_solver_config", lambda cfg, db, user: calls.append(cfg)
+    monkeypatch.setitem(
+        SIM._state, "solver_config", types.SimpleNamespace(commercial=commercial)
     )
+
+    def put(cfg, db, user):
+        # The PUT's lock-entry guard and on-commit hook, as the real PUT runs them.
+        guard, commit = SIM._PUT_HOOKS.get()
+        guard(SIM._state["solver_config"])
+        calls.append(cfg)
+        commit()
+
+    monkeypatch.setattr(SIM, "update_solver_config", put)
     return SIM, calls
 
 
@@ -468,6 +515,7 @@ def test_the_apply_route_goes_through_the_put_and_pins(monkeypatch, tmp_path):
         pack.id, SIM.MarketPackApplyIn(pack_hash=pack.pack_hash), db=None, user=None
     )
     assert out["changes"] and "commercial" not in out
+    assert out["changed"] == len(out["changes"])
     hand = {
         **_commercial(),
         "reserve_products": [p.model_dump(mode="json") for p in pack.products],
@@ -487,7 +535,7 @@ def test_an_apply_with_nothing_to_change_writes_no_config(monkeypatch, tmp_path)
     out = SIM.apply_market_pack(
         pack.id, SIM.MarketPackApplyIn(pack_hash=pack.pack_hash), db=None, user=None
     )
-    assert out["changes"] == [] and calls == []
+    assert out["changes"] == [] and calls == [] and out["changed"] == 0
     assert MP.read_pin(tmp_path)["pack_id"] == pack.id
 
 
@@ -542,12 +590,193 @@ def test_the_list_says_fit_pin_and_update_available(monkeypatch, tmp_path):
     assert prev["changes"] and "commercial" not in prev and "applied" not in prev
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "",
+        "{not json",
+        "null",
+        "[]",
+        '"no-1-2026"',
+        json.dumps({"pack_id": 1, "pack_hash": "h", "applied": {}}),
+        json.dumps({"pack_id": "no-1-2026", "pack_hash": None, "applied": {}}),
+        json.dumps({"pack_id": "no-1-2026", "pack_hash": "h", "applied": []}),
+        json.dumps({"pack_id": "no-1-2026", "pack_hash": "h"}),
+    ],
+)
+def test_an_unreadable_pin_shows_no_update_and_refuses_apply(
+    monkeypatch, tmp_path, raw
+):
+    """GK B4 1b: an unreadable pin is never read as no pin: the list names the
+    error and offers no update; preview and apply are refused and write nothing."""
+    pack = MP.get("no-1-2026")
+    SIM, calls = _route(monkeypatch, tmp_path, _commercial())
+    (tmp_path / MP.PIN_FILE).write_text(raw)
+    out = SIM.list_market_packs()
+    assert out["pin_error"]["code"] == MP.PIN_UNREADABLE
+    assert not any(p["pinned"] or p["update_available"] for p in out["packs"])
+    with pytest.raises(HTTPException) as e:
+        SIM.preview_market_pack(pack.id)
+    assert (e.value.status_code, e.value.detail["error_kind"]) == (
+        409,
+        MP.PIN_UNREADABLE,
+    )
+    with pytest.raises(HTTPException) as e:
+        SIM.apply_market_pack(
+            pack.id, SIM.MarketPackApplyIn(pack_hash=pack.pack_hash), db=None, user=None
+        )
+    assert e.value.detail["error_kind"] == MP.PIN_UNREADABLE
+    assert calls == [] and (tmp_path / MP.PIN_FILE).read_text() == raw
+
+
 def test_every_refusal_code_has_a_literal_emitter_and_a_fragment_entry():
     from routers import simulation as SIM
 
-    codes = {v for k, v in vars(MP).items() if k.isupper() and isinstance(v, str)
-             and v.startswith("market_pack_")}
+    codes = {
+        v
+        for k, v in vars(MP).items()
+        if k.isupper() and isinstance(v, str) and v.startswith("market_pack_")
+    }
     assert set(SIM._MARKET_PACK_REFUSALS) == codes
-    frag = (pathlib.Path(__file__).resolve().parents[2] / "tool-error-kinds.d"
-            / "claude-scu06-k8a-market-packs.json")
+    frag = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "tool-error-kinds.d"
+        / "claude-scu06-k8a-market-packs.json"
+    )
     assert set(json.loads(frag.read_text())["kinds"]) == codes
+
+
+# ── the real app: PUT, lock, revision, the pin's carry (GK B4 1a, 2a, 2c) ──
+
+
+def _live(client, install_network, project_storage_dir, monkeypatch, name="packpin"):
+    """A saved project in NO-1 with an EUR currency and a commercial config whose
+    connection is the network's `import` Link."""
+    from services import market_prices
+    from services.commercial import binding
+    from tests.conftest import build_network
+
+    n = build_network()
+    n.add("Bus", "grid")
+    n.add("Link", "import", bus0="grid", bus1="B1", p_nom=50.0)
+    install_network(n, name=name)
+    r = client.post(f"/api/projects/{name}", params={"force": True, "rebind": True})
+    assert r.status_code == 200, r.text
+    pdir = project_storage_dir(name)
+    market_prices.store_zone(pdir, "NO-1")
+    monkeypatch.setattr(binding, "project_currency", lambda _fin: "EUR")
+    r = client.put("/api/simulation/solver_config", json={"commercial": _commercial()})
+    assert r.status_code == 200, r.text
+    return name, pdir
+
+
+def _apply(client, pack):
+    return client.post(
+        f"/api/simulation/commercial/market_packs/{pack.id}/apply",
+        json={"pack_hash": pack.pack_hash},
+    )
+
+
+def test_the_apply_goes_through_the_real_put_and_bumps_the_revision(
+    client, install_network, project_storage_dir, session_ctx, monkeypatch
+):
+    """GK B4 2c: the apply is an ordinary edit: the stored config is the hand-entry
+    one and the edit revision moves once, as a PUT's does."""
+    from services import dirty_state
+
+    _name, pdir = _live(client, install_network, project_storage_dir, monkeypatch)
+    pack = MP.get("no-1-2026")
+    prev = client.get(f"/api/simulation/commercial/market_packs/{pack.id}/preview")
+    assert prev.status_code == 200 and prev.json()["changes"], prev.text
+    before = dirty_state.revision(session_ctx(client))
+    r = _apply(client, pack)
+    assert r.status_code == 200, r.text
+    assert r.json()["changed"] == len(prev.json()["changes"])
+    assert dirty_state.revision(session_ctx(client)) == before + 1
+    stored = client.get("/api/simulation/solver_config").json()["commercial"]
+    assert stored["reserve_products"] == [
+        p.model_dump(mode="json") for p in pack.products
+    ]
+    assert MP.read_pin(pdir)["pack_hash"] == pack.pack_hash
+    # Applied again: nothing to change, no config write, no revision bump.
+    r = _apply(client, pack)
+    assert (r.status_code, r.json()["changed"]) == (200, 0)
+    assert dirty_state.revision(session_ctx(client)) == before + 1
+
+
+def test_a_change_at_the_puts_lock_entry_is_refused_stale(
+    client, install_network, project_storage_dir, monkeypatch
+):
+    """GK B4 2a: the stale check runs INSIDE the PUT's solver-state lock. An edit
+    that lands after the PUT's pre-lock steps and before it takes the lock is
+    refused 409 and nothing is written; a check moved above the lock would miss it
+    and apply over the edit."""
+    import dataclasses
+
+    from routers import simulation as SIM
+    from services.pypsa_service import PyPSAService
+
+    _name, pdir = _live(client, install_network, project_storage_dir, monkeypatch)
+    pack = MP.get("no-1-2026")
+    edited = {**_commercial(), "reserve_products": [_prod("mine", capacity_price=3.0)]}
+    armed = []
+    gate, get_lock = SIM._gate_user_code, PyPSAService.get_solver_state_lock
+
+    def gate_then_arm(submitted, db, user):
+        gate(submitted, db, user)
+        armed.append(True)  # the PUT's last step before its lock
+
+    class EditAtEntry:
+        def __init__(self, lock):
+            self.lock = lock
+
+        def __enter__(self):
+            self.lock.__enter__()
+            if armed and armed.pop():
+                SIM._state["solver_config"] = dataclasses.replace(
+                    SIM._state["solver_config"], commercial=edited
+                )
+            return self
+
+        def __exit__(self, *exc):
+            return self.lock.__exit__(*exc)
+
+    monkeypatch.setattr(SIM, "_gate_user_code", gate_then_arm)
+    monkeypatch.setattr(
+        PyPSAService,
+        "get_solver_state_lock",
+        classmethod(lambda cls: EditAtEntry(get_lock())),
+    )
+    r = _apply(client, pack)
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["error_kind"] == MP.STALE
+    stored = client.get("/api/simulation/solver_config").json()["commercial"]
+    assert stored["reserve_products"] == edited["reserve_products"]
+    assert MP.read_pin(pdir) is None
+
+
+def test_the_pin_survives_save_save_as_save_a_copy_and_export_import_save(
+    client, install_network, project_storage_dir, monkeypatch
+):
+    """GK B4 1a: `market_pack.json` is carried by every save path (project_contents
+    `_ALL`), byte-equal, so an update is still told apart from a user edit."""
+    name, pdir = _live(client, install_network, project_storage_dir, monkeypatch)
+    assert _apply(client, MP.get("no-1-2026")).status_code == 200
+    pin = (pdir / MP.PIN_FILE).read_bytes()
+    assert client.post(f"/api/projects/{name}").status_code == 200
+    assert (pdir / MP.PIN_FILE).read_bytes() == pin
+    blob = client.get(f"/api/projects/{name}/bundle").content
+    r = client.post(
+        "/api/projects/import_bundle?name=packpin_imported",
+        files={"file": ("a.pypsaproj.zip", blob, "application/zip")},
+    )
+    assert r.status_code in (200, 201), r.text
+    for dst, rebind in (("packpin_copy", False), ("packpin_as", True)):
+        r = client.post(f"/api/projects/{dst}", params={"rebind": rebind})
+        assert r.status_code == 200, r.text
+        assert (project_storage_dir(dst) / MP.PIN_FILE).read_bytes() == pin, dst
+    dst = "packpin_imported"
+    pid = next(p["id"] for p in client.get("/api/projects/").json() if p["name"] == dst)
+    assert client.post(f"/api/projects/{pid}/activate").status_code == 200
+    assert client.post(f"/api/projects/{dst}").status_code == 200
+    assert (project_storage_dir(dst) / MP.PIN_FILE).read_bytes() == pin

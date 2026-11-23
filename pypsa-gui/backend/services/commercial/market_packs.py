@@ -103,9 +103,11 @@ def load_pack(raw: Any) -> MarketPack:
     except ValidationError as exc:
         first = exc.errors()[0]
         where = ".".join(str(x) for x in first.get("loc", ())) or "pack"
-        raise PackRefusal(INVALID, (
-            f"The market pack cannot be read: {where}: {first.get('msg', 'invalid')}"),
-            422) from exc
+        raise PackRefusal(
+            INVALID,
+            (f"The market pack cannot be read: {where}: {first.get('msg', 'invalid')}"),
+            422,
+        ) from exc
 
 
 def _template(zone: str) -> MarketPack:
@@ -189,9 +191,13 @@ def check_fit(pack: MarketPack, zone: str | None, currency: str | None) -> None:
             ),
         )
     if not currency:
-        raise PackRefusal(CURRENCY_UNKNOWN, (
-            f"The project's finance inputs state no currency, so the pack's {pack.currency} "
-            "prices cannot be checked against it: set the project's currency first."))
+        raise PackRefusal(
+            CURRENCY_UNKNOWN,
+            (
+                f"The project's finance inputs state no currency, so the pack's {pack.currency} "
+                "prices cannot be checked against it: set the project's currency first."
+            ),
+        )
     if pack.currency != currency:
         raise PackRefusal(
             CURRENCY_MISMATCH,
