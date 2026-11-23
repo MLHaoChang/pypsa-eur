@@ -364,3 +364,11 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A written file that needs a sidecar marks itself, so a reader refuses it without the sidecar. Hand-written files are unaffected. An importer takes the sidecar from the files it is given, not only from disk, and never reports a sidecar it used as unread (GC-19 #1743).
 - A docstring "known edge" states today's behaviour, and the edge is filed as an issue (#1742).
 - A test of a mapping compares whole dicts against a hand-written mapping, never against the code's own constants, and includes a blank value (#1767, #1790).
+
+## Standing rulings (GK A2 (6) and GK B2 (4), recorded 2026-11-23)
+
+- A table entry's skip is honoured by every op path, the bundle zip included (GK A2 (6), #1577).
+- A pack table never shows a judged value the scorecard refused, and never shows the grid-counted number as the island answer (GK A2 (6), #1879).
+- Ids print as text, never number-formatted. A judged value never prints equal to its limit (GK A2 (6), #1879 B2/B3).
+- A lookup map in user-facing text has a plain fallback and a whole-dict test (GK A2 (6), #1897 N1).
+- A test fix that copies a module-level pandas index into each frame can break index-name parity with `n.snapshots`; index the frames by `n.snapshots`, and copy only what `set_snapshots` and module helpers hand out (GK B2 (4), #1874).

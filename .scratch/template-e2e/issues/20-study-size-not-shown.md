@@ -44,3 +44,5 @@ GK A 33 NOT OK @06ba9e54, both fixed in #1786: the peak import is clipped at 0 (
 ## Triage (2026-11-20, master 8a039460)
 
 Checked by code reading only; the app was not re-run. Partly done: #1734 (merged) added `SizedDesignTable.tsx`, shown in section 10, the reference-design panel and section 5, with sizes in each asset's own unit. Remaining, to re-check in the app first: the report lists every built asset per stage; a placeholder grid capacity and shortfall are not counted as installed capacity and the total is checked against the connection limit; Guided, Expert and report show the same figures (a test per template). Gated: GK A. Blocked by: none.
+
+- 2026-11-23 status sweep: landed in #1734 (ca90503f); #1786 (f08b8d44); #1787 (ce38457d): SizedDesignTable with per-unit sizes; report lists every sized asset by stage. Remains: grid supply and slack left out of installed capacity, and a per-template Guided/Expert/report parity test.

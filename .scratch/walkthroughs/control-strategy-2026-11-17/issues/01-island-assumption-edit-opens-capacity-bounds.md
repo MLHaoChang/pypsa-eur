@@ -3,7 +3,9 @@
 
 # 01: "Edit ›" on the island-control assumptions jumps to Expert Capacity bounds
 
-Status: ready-for-agent
+Status: done
+
+Done in #1673 (20728b0b).
 Impact: high
 Templates: Island Microgrid (any template whose ledger rows file to Assets with no panel)
 Found by: control-strategy walkthrough, 2026-11-17 (master 9491878d)

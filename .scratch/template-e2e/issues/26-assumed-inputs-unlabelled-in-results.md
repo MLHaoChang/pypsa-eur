@@ -20,3 +20,7 @@ The report has an 'assumed' column and the grid-readiness count of assumed limit
 ## Triage (2026-11-20, master b7e5dee3)
 
 Checked by code reading only; the app was not re-run. Still true: no 'Assumptions behind this result' text exists in the frontend. Acceptance as above. Reuse the assumed-input label from #1734 and the one from issue 13; do not build a third. Gated: UX. Blocked by: none.
+
+## Comments
+
+- 2026-11-23 status sweep: landed in #1645 (41318c60): the report chapter lists the assumed inputs. Remains: the "Assumptions behind this result" group in Guided and Expert results.

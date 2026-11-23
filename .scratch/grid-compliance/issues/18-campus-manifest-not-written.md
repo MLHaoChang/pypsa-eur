@@ -32,3 +32,17 @@ DGS-import session (IMPORTS-1) has the manifest's layout and names.
 ## Comments
 
 **2026-11-17 triage (SCALE-1).** Still needed: GC-16 (#1602) lists `not_written` only in the writer's return value. Ready once the three PRs merge; the DGS-import session (IMPORTS-1) has the manifest layout, so check it before the plan.
+
+**2026-11-23 GK A2 plan GO on M1–M4 (verbatim, GK A2 (6)).**
+
+M1. Literal expectations. Test 1 compares the record against a hand-written dict, and the key order against a hand-written list of column names. Never use NOT_WRITTEN_COLUMNS or the code's own constants (#1786 M6a, ruling 10). The SHUNT_P_NOT_WRITTEN reason likewise appears as its literal text.
+
+M2. JSON-safe values. to_dict("records") can carry numpy scalars and NaN. The manifest must hold plain JSON:
+- a NaN or None value is written as null, never the bare NaN token;
+- numpy ints and floats become Python numbers.
+
+Test it by reading manifest.json back with json.loads(..., parse_constant=<raise>) on a record whose value is NaN.
+
+M3. The reader. Name in the PR body every consumer of the case manifest.json (the GUI, a report, the importer, a pack source). If one reads it, add a writer→reader contract test for not_written (ruling 2). If none reads it, say so.
+
+M4. If not_written is user-visible anywhere today, show it end to end (E2E-DONE-1). If nothing reads it yet, the PR body says so and no end-to-end check is needed.

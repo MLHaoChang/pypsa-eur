@@ -3,7 +3,9 @@
 
 # Slice 3: Finish/fail notifications
 
-Status: ready-for-agent
+Status: done
+
+Done in #1716 (1676808a).
 Type: task
 Blocked by: 02b (stacked on PR #1630)
 

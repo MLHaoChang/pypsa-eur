@@ -3,7 +3,9 @@
 
 # 04: The grid-readiness scorecard keeps showing the old verdict after an edit, until the project is saved
 
-Status: ready-for-agent
+Status: done
+
+Done in #1690 (a8f6c4fa).
 Type: task
 Impact: high (misleads: a weak grid reads as a pass for up to the 5-minute autosave)
 Templates: every template with the scorecard; walked on eh_datacenter (Guided and Expert)

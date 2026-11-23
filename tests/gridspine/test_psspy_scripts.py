@@ -14,6 +14,7 @@ from gridspine.handoff.psspy_scripts import (
     CONVERSIONS,
     EVENT_CALLS,
     FNSL_OPTIONS,
+    ITERM_CODE,
     PENDING,
     UNVERIFIED,
     check_script,
@@ -328,12 +329,13 @@ def test_convert_gives_contract_units_on_hand_values(pack):
         "raw_q_poc_mvar": [-40.0, 4.0],
         "raw_id_pu": [0.6, 0.0],
         "raw_iq_pu": [0.8, 1.0],
+        "raw_i_term_pu": [1.25, 0.5],
     }
     rec["raw_v_poc_pu"] = [0.5, 1.0]
-    out = ns["_convert"](rec, 50.0, 80.0)
+    out = ns["_convert"](rec, 50.0, 80.0, 80.0)
     assert out["f_hz"] == [pytest.approx(50.5), 50.0]  # 50 * (1 + 0.01)
-    assert out["i_poc_pu"] == [pytest.approx(50.0 / (0.5 * 80.0)), 5.0 / 80.0]
-    assert all(math.isfinite(v) for v in out["i_poc_pu"])
+    # MBASE = S_rated: ITERM is already pu on the plant rating
+    assert out["i_poc_pu"] == [1.25, 0.5]
     assert out["theta_poc_deg"] == [20.0, 0.0]
     # measured at the PoC into the plant branch; the contract is plant -> grid
     assert out["q_poc_mvar"] == [40.0, -4.0] and out["p_poc_mw"] == [-30.0, -3.0]
@@ -359,16 +361,17 @@ def test_export_from_the_plant_is_positive(pack):
         "raw_q_poc_mvar": [-20.0],
         "raw_id_pu": [0.75],
         "raw_iq_pu": [0.25],
+        "raw_i_term_pu": [0.79],
     }
-    out = ns["_convert"](rec, 50.0, 80.0)
+    out = ns["_convert"](rec, 50.0, 80.0, 80.0)
     assert out["p_poc_mw"] == [60.0] and out["q_poc_mvar"] == [20.0]
     assert out["p_poc_mw"][0] > 0 and out["q_poc_mvar"][0] > 0
 
 
-def test_v0_at_the_poc_keeps_the_row_with_i_poc_not_evaluated(pack):
+def test_v0_at_the_poc_still_gives_the_current(pack):
     """
-    A bolted PoC fault (V = 0): the CSV is still written, the row keeps
-    every other channel, i_poc_pu is empty (never NaN) and status says why.
+    A bolted PoC fault (V = 0): the current is the recorded terminal current,
+    defined at V = 0, so the row is complete and ``status`` is empty (GC-21).
     """
     cases, texts = pack
     cid = "phase_jump_skmin_xrmin_up"
@@ -383,20 +386,67 @@ def test_v0_at_the_poc_keeps_the_row_with_i_poc_not_evaluated(pack):
         "raw_q_poc_mvar": [-30.0, 4.0],
         "raw_id_pu": [0.5, 0.0],
         "raw_iq_pu": [0.0, 1.0],
+        "raw_i_term_pu": [0.625, 1.1],
     }
-    data = ns["_convert"](rec, 50.0, 80.0)
+    data = ns["_convert"](rec, 50.0, 80.0, 80.0)
     header = ["t_s", *cases[cid].channels, "status"]
     text = ns["_csv_text"](data, header)
     lines = text.splitlines()
     assert lines[0] == ",".join(header) and len(lines) == 3
     rows = [dict(zip(header, ln.split(","))) for ln in lines[1:]]
     assert all(len(ln.split(",")) == len(header) for ln in lines)
-    assert rows[0]["i_poc_pu"] == repr(50.0 / 80.0) and rows[0]["status"] == ""
-    assert rows[1]["i_poc_pu"] == ""
-    assert rows[1]["status"] == "not evaluated: V = 0 at PoC"
-    assert rows[1]["v_poc_pu"] == "0.0" and rows[1]["p_poc_mw"] == "3.0"
-    assert rows[1]["q_poc_mvar"] == "-4.0" and rows[1]["iq_pu"] == "1.0"
+    assert rows[0]["i_poc_pu"] == "0.625" and rows[0]["status"] == ""
+    assert rows[1]["v_poc_pu"] == "0.0"
+    assert rows[1]["i_poc_pu"] == "1.1" and rows[1]["status"] == ""
+    assert "not evaluated" not in text
+    assert rows[1]["p_poc_mw"] == "3.0" and rows[1]["iq_pu"] == "1.0"
     assert "nan" not in text.lower() and "inf" not in text.lower()
+
+
+def test_the_current_is_rebased_from_mbase_to_the_plant_rating(pack):
+    # ITERM is pu on the machine's MBASE as the case holds it; the contract is pu
+    # on S_rated: 0.5 pu on 100 MVA is 50 MVA at 1 pu V, 0.625 pu on 80 MVA.
+    ns = _pure(pack[1]["phase_jump_skmin_xrmin_up"])
+    rec = {
+        k: [0.0]
+        for k in (
+            "t_s",
+            "raw_v_poc_pu",
+            "raw_theta_poc_deg",
+            "raw_theta_src",
+            "raw_f_hz",
+            "raw_p_poc_mw",
+            "raw_q_poc_mvar",
+            "raw_id_pu",
+            "raw_iq_pu",
+        )
+    }
+    rec["raw_i_term_pu"] = [0.5]
+    assert ns["_convert"](rec, 50.0, 80.0, 100.0)["i_poc_pu"] == [0.625]
+    assert ns["_convert"](rec, 50.0, 100.0, 80.0)["i_poc_pu"] == [0.4]
+
+
+@pytest.mark.parametrize("poc_kv", [33.0, 132.0, 400.0])
+def test_the_current_does_not_depend_on_the_voltage_base(tmp_path, poc_kv):
+    # In pu a nominal-ratio transformer leaves the current unchanged; the
+    # conversion carries no kV, so the PoC's base kV cannot reach it.
+    out = write_scripts(
+        [_flat(("i_poc_pu",))], str(tmp_path), **{**KW, "poc_kv": poc_kv}
+    )
+    ns = _pure((tmp_path / out[CID]).read_text(encoding="utf-8"))
+    rec = {"t_s": [0.0], "raw_i_term_pu": [0.9]}
+    assert ns["_convert"](rec, 50.0, 80.0, 80.0)["i_poc_pu"] == [0.9]
+
+
+def test_the_plant_machine_mbase_is_read_from_the_case(pack):
+    lines = pack[1][CID].splitlines()
+    assert "ierr, M_BASE = psspy.macdat(PLANT_BUS, PLANT_ID, 'MBASE')" in lines
+    assert "data = _convert(rec, F0_HZ, PLANT_MBASE, M_BASE)" in lines
+
+
+def test_the_current_channel_is_listed_unverified():
+    assert "ITERM channel" in UNVERIFIED
+    assert f"code {ITERM_CODE} is ITERM" in UNVERIFIED["ITERM channel"]
 
 
 def _check(text):
@@ -469,6 +519,8 @@ CHANNEL_LINE = {
     "['raw_p_poc_mw', 'raw_q_poc_mvar'])",
     "raw_id_pu": "psspy.machine_array_channel([-1, 22, PLANT_BUS], PLANT_ID, 'raw_id_pu')",
     "raw_iq_pu": "psspy.machine_array_channel([-1, 23, PLANT_BUS], PLANT_ID, 'raw_iq_pu')",
+    "raw_i_term_pu": f"psspy.machine_array_channel([-1, {ITERM_CODE}, PLANT_BUS], "
+    "PLANT_ID, 'raw_i_term_pu')",
 }
 V_ONLY = "psspy.voltage_channel([-1, -1, -1, POC_BUS], 'raw_v_poc_pu')"
 
@@ -511,21 +563,21 @@ def test_no_plant_lines_when_no_case_needs_them(tmp_path):
     assert "F0_HZ, PLANT_MBASE = 50.0, None" in text
 
 
-@pytest.mark.parametrize("ch", ["p_poc_mw", "q_poc_mvar", "i_poc_pu"])
-def test_each_pq_current_channel_needs_plant_branch(tmp_path, ch):
+@pytest.mark.parametrize("ch", ["p_poc_mw", "q_poc_mvar"])
+def test_each_pq_channel_needs_plant_branch(tmp_path, ch):
     _refuse(
         tmp_path,
-        f"case {CID}: P/Q/current channels need plant_branch",
+        f"case {CID}: P/Q channels need plant_branch",
         cases=[_flat((ch,))],
         plant_branch=None,
     )
 
 
-@pytest.mark.parametrize("ch", ["id_pu", "iq_pu"])
-def test_id_iq_channels_need_plant_machine(tmp_path, ch):
+@pytest.mark.parametrize("ch", ["id_pu", "iq_pu", "i_poc_pu"])
+def test_id_iq_current_channels_need_plant_machine(tmp_path, ch):
     _refuse(
         tmp_path,
-        f"case {CID}: setpoint steps and id/iq channels need plant_machine",
+        f"case {CID}: setpoint steps and id/iq/current channels need plant_machine",
         cases=[_flat((ch,))],
         plant_machine=None,
     )
@@ -827,7 +879,7 @@ F0_HZ, PLANT_MBASE = 50.0, None
 HEADER = ['t_s', 'v_poc_pu', 'status']
 
 
-def _convert(rec, f0_hz, s_rated):
+def _convert(rec, f0_hz, s_rated, m_base):
     out = {'t_s': list(rec['t_s'])}
     # v_poc_pu = V
     out['v_poc_pu'] = [a for (a,) in zip(rec['raw_v_poc_pu'])]
@@ -849,6 +901,7 @@ psspy.resq(SEQ)
 ierr, mbase = psspy.macdat(GRID_BUS, GRID_ID, 'MBASE')
 if ierr or abs(mbase - GRID_MBASE) > 1e-6:
     raise SystemExit('grid machine MBASE differs from the generated base')
+M_BASE = None
 _i, _f = psspy.getdefaultint(), psspy.getdefaultreal()
 psspy.machine_chng_2(GRID_BUS, GRID_ID, [_i] * 6, [_f] * 7 + list(Z1_PU) + [_f] * 8)
 Z0_PU = (0.6600000000000001, 0.49500000000000005)  # Thevenin Z0 on GRID_MBASE
@@ -871,7 +924,7 @@ psspy.run(0, T_END, 1000, 1, 0)
 _title, idents, values = dyntools.CHNF(OUT).get_data()
 rec = {idents[k]: values[k] for k in idents if k != 'time'}
 rec['t_s'] = values['time']
-data = _convert(rec, F0_HZ, PLANT_MBASE)
+data = _convert(rec, F0_HZ, PLANT_MBASE, M_BASE)
 with open(os.path.join(HERE, 'flat_skmin_xrmin.csv'), 'w') as fh:
     fh.write(_csv_text(data, HEADER))
 '''

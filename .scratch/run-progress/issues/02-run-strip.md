@@ -3,7 +3,9 @@
 
 # Slice 2a: run strip (status line, ETA, read-only line)
 
-Status: ready-for-agent
+Status: done
+
+Done in #1627 (44387a69).
 Type: task
 Blocked by: 01 (stacked on PR #1614)
 

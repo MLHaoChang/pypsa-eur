@@ -79,3 +79,5 @@ Plan sent to GK B on master 701328bd9. D05 and D08 were checked closed first. GO
 ### 2026-11-14: engine chosen (Q-SS-2)
 
 2026-11-14, owner answer Q-SS-2 (coordinator card): "option 1 (Recommended)". Engines chosen, see [research-engines.md](../research-engines.md) (#1490): Blender-free GLB+manifest by default (trimesh/pygltflib, MIT); Blender 5.2 LTS only as a separate pinned no-network container for optional `.blend` output; photos via OpenDroneMap/NodeODM, out-of-process and unmodified (AGPL). Change: the photo half uses OpenDroneMap through NodeODM as a separate unmodified service (AGPL-3.0 kept out-of-process), aerial set first; it needs OBJ-to-GLB conversion and a ground-level suitability check (UNVERIFIED in research-engines.md). COLMAP + OpenMVS is the alternative if a CUDA host appears. Photo capability still needs SC-00 P evidence (V39-46, V55-58).
+
+- 2026-11-23 status sweep: landed in no merged PR: #1405 layout half merged 2026-11-12 (no merge commit found). Remains: photo prototype.

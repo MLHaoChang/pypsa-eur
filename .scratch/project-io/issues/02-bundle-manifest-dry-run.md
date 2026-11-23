@@ -1,6 +1,8 @@
 # 02 Bundle manifest and import dry run
 
-Status: ready-for-agent
+Status: done
+
+Done in #1661 (a2015ce5f4).
 Blocked by: 01
 
 `manifest.json` in the bundle zip: schema version, app version, project kind, and the sha256 and size of each member. Import refuses a corrupted or newer bundle in plain words; an old bundle with no manifest imports with a warning. `POST /projects/import/bundle?dry_run=true` answers what an import would create and writes nothing.
