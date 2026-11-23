@@ -30,7 +30,8 @@ function millions(text, { euro }) {
   const m = euro ? flat.match(/([−-])?\s*€\s*([\d,]+(?:\.\d+)?)\s*(k|M|bn)?\b/) : flat.match(/([−-])?\s*([\d,]+(?:\.\d+)?)/)
   if (!m) return null
   const value = Number(m[2].replace(/,/g, '')) * (m[1] ? -1 : 1)
-  return Math.round((euro ? value * UNIT[m[3] ?? 'M'] : value / 1e6) * 10) / 10
+  const mn = euro ? value * UNIT[m[3] ?? 'M'] : value / 1e6
+  return Math.sign(mn) * Math.round(Math.abs(mn) * 10) / 10   // half away from zero, either sign
 }
 
 const needsOf = async scope => (await scope.getByTestId('ic-needs').innerText()).replace(/\s+/g, ' ').trim()
@@ -139,7 +140,10 @@ try {
   const report = await (await api(ctx, 'GET', '/api/results/investment_case/report?detail=full')).json()
   const flags = report.sections?.project?.payload?.flags ?? []
   assert(flags.length > 0, 'The data-centre case reports its flags')
-  const unworded = flags.filter(f => !keys.stated.includes(f) && !keys.worded.includes(f.split(':')[0]))
+  // A stated flag is exempt only when the report states it (financeModel.statedFlags): the site-today basis.
+  const siteToday = report.sections?.project?.payload?.counterfactual?.counterfactual_basis === 'site_today'
+  const stated = f => keys.stated.includes(f) && (f !== 'counterfactual_basis:site_today' || siteToday)
+  const unworded = flags.filter(f => !stated(f) && !keys.worded.includes(f.split(':')[0]))
   assert.deepEqual(unworded, [], 'Every data-centre flag has words in projectFlagWords')
   for (const id of ['ic-run-panel', 'ic-headlines', 'ic-counterfactual']) {
     const text = await page.getByTestId(id).last().innerText()

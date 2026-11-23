@@ -59,3 +59,8 @@ On any template in the group, either the investment case runs from the template'
   - G8: the out-of-scope findings are filed as 07, 08 and 09.
 
   Built: `island_critical_load_mw` and `baseline_island_rows_relaxed` are worded, not skipped: the 32.161 MW critical load appears in no other sentence. Only `counterfactual_basis:site_today` is skipped, and only when the report's counterfactual basis is `site_today`.
+
+- 2026-11-23 PR #1935 evidence:
+  - G5: the smoke, run on 443ec313's financeModel.ts and InvestmentCaseView.tsx (same build otherwise), failed: "ic-headlines shows raw codes [no_discharge, bess_new, …]". With the fix it passes: Guided −18.2 M = Expert −18.2 M, 18 live flags, all worded.
+  - G7: 20 hand-made TS mutants against financeModel.test.ts, all killed. They cover each of the 8 new words removed, the KSt label, the tax-layer and meter-link capitals, the fold said once / plural / dropped, the stated skip, `statedFlags` `===`→`!==`, the "Other check" fallback, LCOS `no_discharge`, and `asset_lifetime_unknown` in PROJECT_FLAG_KEYS.
+  - Left for review: `baseline_island_rows_relaxed` is also stated by the backend's counterfactual note (baseline_text.py:13, rendered in `ic-cf-notes`). The report does not say which note comes from which flag, so the frontend cannot skip it without matching on the text.
