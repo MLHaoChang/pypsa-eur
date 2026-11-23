@@ -1,0 +1,1 @@
+* Feat(gridspine): A campus genset may list its shaft torsional modes (`torsional_modes_hz`, each a tagged frequency below f0); the sub-synchronous scan judges each series resonance against them, never reads clear while another genset has no modes, and says when a clear rests on assumed modes (grid-compliance GC-01c).

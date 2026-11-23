@@ -84,7 +84,11 @@ replace it at the end of its life. It changes nothing in the net.
     * ``bess``, ``pv``, ``wind``, ``fuel_cell``: ``p_mw``, the inverter
       ``s_mva``, and ``k_sc`` and ``rx_sc`` for IEC 60909. A ``bess`` also
       needs ``e_mwh``.
-    * ``genset``: ``p_mw``, ``s_mva``, ``xd_pp`` and ``rx_sc``.
+    * ``genset``: ``p_mw``, ``s_mva``, ``xd_pp`` and ``rx_sc``; optionally
+      ``torsional_modes_hz`` (GC-01c), a non-empty list of ``{value,
+      source}`` shaft torsional modes in (0, f0) Hz, stored on
+      ``Campus.torsional_modes`` for GC-08's sub-synchronous scan
+      (``schema/campus.check_torsional_modes``).
 
 **Every number is ``{value, source}``**, with ``source`` one of
 ``measured``, ``datasheet`` or ``assumed``. This follows the unit templates:
@@ -181,7 +185,7 @@ import pandapower as pp
 import pandas as pd
 import yaml
 
-from gridspine.schema.campus import check_vendor_models
+from gridspine.schema.campus import TORSIONAL_MODES_KEY, check_torsional_modes, check_vendor_models
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.island import (
     EARTHINGS,
@@ -343,6 +347,12 @@ class Campus:
     #: ``source`` and ``protection``; empty when none is given. Each is also a
     #: pandapower ``impedance`` of the same name in ``net``.
     series_capacitors: pd.DataFrame = dataclasses.field(default_factory=lambda: _empty_series_capacitors())
+    #: The gensets' torsional modes (GC-01c), ``{genset: [Hz, ...]}`` as
+    #: GC-08's sub-synchronous scan takes them; only gensets that give
+    #: ``torsional_modes_hz`` appear. Empty when none does.
+    torsional_modes: dict = dataclasses.field(default_factory=dict)
+    #: Each mode's source, ``{genset: [source, ...]}`` in the same order.
+    torsional_mode_sources: dict = dataclasses.field(default_factory=dict)
 
     @property
     def series_caps(self) -> list:
@@ -755,6 +765,7 @@ def build_campus(spec) -> Campus:
         raise ContractError(f"campus: bus(es) {stranded} are not connected to the PCC {pcc_bus!r}")
 
     unit_rows, reg_rows, island_units = [], [{"unit_id": GRID_NAME, "bus": pcc_bus, "kind": "ext_grid"}], {}
+    torsional_modes, torsional_mode_sources = {}, {}
     for uname, us in units.items():
         where = f"units.{uname}"
         if not isinstance(us, dict):
@@ -763,7 +774,8 @@ def build_campus(spec) -> Campus:
         if kind not in UNIT_KINDS:
             raise ContractError(f"{where}: unknown kind {kind!r}; allowed {list(UNIT_KINDS)}")
         required = _UNIT_FIELDS[kind]
-        _fields(where, us, required, ("kind", "bus", "pypsa_name", "island"))
+        _fields(where, us, required,
+                ("kind", "bus", "pypsa_name", "island", *((TORSIONAL_MODES_KEY,) if kind == "genset" else ())))
         bus = str(us.get("bus"))
         _bus_kv(where, buses, bus)
         v = {f: _tagged(where, f, us, rows) for f in required}
@@ -784,6 +796,11 @@ def build_campus(spec) -> Campus:
                            generator_type="current_source")
             reg_rows.append({"unit_id": uname, "bus": bus, "kind": REGISTRY_KIND[kind]})
         unit_rows.append(row)
+        if TORSIONAL_MODES_KEY in us:
+            modes = check_torsional_modes(where, us[TORSIONAL_MODES_KEY], f_hz, SOURCES)
+            torsional_modes[uname] = [f for f, _ in modes]
+            torsional_mode_sources[uname] = [src for _, src in modes]
+            rows.extend({"element": uname, "param": "torsional_mode_hz", "value": f, "source": src} for f, src in modes)
         if "island" in us:
             block = validate_unit_island(f"{where}.island", kind, us["island"])
             island_units[uname] = block
@@ -828,7 +845,8 @@ def build_campus(spec) -> Campus:
                   island=island, earthing=earthing, relays=relays, windings=windings,
                   earthing_transformers=earthing_transformers, assumptions=assumptions, taps=taps,
                   tie_normally_open=tie_open, vendor_models=vendor_models,
-                  series_capacitors=series_capacitors)
+                  series_capacitors=series_capacitors, torsional_modes=torsional_modes,
+                  torsional_mode_sources=torsional_mode_sources)
 
 
 def _island_requirements(c, units_df, island_units, rows):
