@@ -38,7 +38,7 @@ const commercial = vi.mocked(commercialApi)
 const library = vi.mocked(libraryApi)
 const net = vi.mocked(networkApi)
 
-const PRICE = { id: 'fcr-no1', version: 2, hash: 'h', source: 'user' }
+const PRICE = { id: 'fcr-no1', version: 2, hash: 'hash-fcr-0000', source: 'user' }
 const prod = (id: string, kind: ReserveProduct['kind'], direction: ReserveProduct['direction'],
   extra: Partial<ReserveProduct> = {}): ReserveProduct => ({
   id, kind, direction, sustain_h: 1, capacity_price: null, max_commit_mw: null, storages: [], counterparty: 'tso', ...extra,
@@ -53,10 +53,10 @@ const LIST = (over: Partial<MarketPackList> = {}): MarketPackList => ({
 })
 const CFG = (over: Partial<CommercialConfig> = {}): CommercialConfig => ({ poc_link: 'import', ...over }) as CommercialConfig
 const PLAN = (over: Partial<MarketPackPlan> = {}): MarketPackPlan => ({
-  pack_id: 'no-1-2026', pack_hash: 'abcdef0123456789',
+  pack_id: 'no-1-2026', pack_hash: 'fedcba9876543210', plan_digest: 'd'.repeat(64),
   changes: [{ cell: 'reserve_products/secondary_up/sustain_h', from: 1, to: 0.5 }],
   conflicts: [{ cell: 'reserve_products/secondary_up/max_commit_mw', yours: 4, pack: 2, last_applied: 2 }],
-  kept: [{ cell: 'reserve_products/secondary_up/capacity_price', reason: 'empty_ref' }],
+  kept: [{ cell: 'export_price_ref', reason: 'empty_ref' }],
   ...over,
 })
 
@@ -69,6 +69,7 @@ function wrap(node: React.ReactNode) {
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo', uiMode: 'guided', activeSlidePanel: null } as never)
   api.list.mockResolvedValue(LIST())
+  commercial.getCommercial.mockResolvedValue(CFG() as never)
   api.preview.mockResolvedValue(PLAN())
   library.listSeries.mockResolvedValue([PRICE] as never)
   net.getStorageUnits.mockResolvedValue([{ name: 'bess' }, { name: 'string_a' }] as never)
@@ -178,8 +179,7 @@ describe('MarketPackCard: preview and apply', () => {
     const apply = within(box).getByTestId('mp-apply')
     expect(apply.compareDocumentPosition(within(box).getByTestId('mp-preview-table')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     const kept = within(box).getByTestId('mp-preview-kept')
-    expect(kept.textContent).toContain('Secondary reserve (up): capacity price. No price: upload one in the Library.')
-    expect(within(kept).getByRole('button', { name: 'Library' })).toBeTruthy()
+    expect(kept.textContent).toBe('Export price: the pack has no day-ahead price, so yours is left as it is.')
     noKeys(container)
     expectAllButtonsNamed(container)
   })
@@ -215,10 +215,12 @@ describe('MarketPackCard: preview and apply', () => {
     fireEvent.click(await screen.findByTestId('mp-preview-no-1-2026'))
     fireEvent.click(await screen.findByTestId('mp-apply'))
     const receipt = await screen.findByTestId('mp-receipt')
-    expect(api.apply).toHaveBeenCalledWith('no-1-2026', 'abcdef0123456789')
+    // The preview's hash and digest, not the list's hash (GK B4 P1, P2).
+    expect(api.apply).toHaveBeenCalledWith('no-1-2026', 'fedcba9876543210', 'd'.repeat(64))
     expect(receipt.textContent).toContain('Applied NO-1 2026: 1 value changed.')
-    expect(within(receipt).getByTestId('mp-receipt-kept').textContent)
-      .toContain('Secondary reserve (up): most it may offer (MW): 4 (the pack has 2)')
+    expect(within(receipt).getAllByTestId('mp-preview-row').map(r => r.textContent)).toEqual([
+      'Secondary reserve (up): hours it must hold10.5',
+      'Secondary reserve (up): most it may offer (MW)44Kept as yours (the pack has 2)'])
     expect(receipt.textContent).toContain('Results → Storage cycling')
     expect(screen.queryByTestId('mp-preview')).toBeNull()
   })
@@ -246,20 +248,20 @@ describe('MarketPackCard: preview and apply', () => {
 
   it('shows a product the pack adds as one row in words, never its fields from none to none', async () => {
     const fields = ['id', 'kind', 'direction', 'sustain_h', 'capacity_price', 'max_commit_mw', 'storages', 'counterparty']
-    const to: Record<string, unknown> = { id: 'secondary_up', kind: 'secondary', direction: 'up', sustain_h: 1,
+    // The cached list says 1 h (PACK); the plan says 4 h, and the row follows the plan (P3).
+    const to: Record<string, unknown> = { id: 'secondary_up', kind: 'secondary', direction: 'up', sustain_h: 4,
       capacity_price: null, max_commit_mw: null, storages: [], counterparty: 'tso' }
     const plan = PLAN({ changes: fields.map(f => ({ cell: `reserve_products/secondary_up/${f}`, from: null, to: to[f] })),
-      conflicts: [], kept: [{ cell: 'reserve_products/secondary_up/capacity_price', reason: 'empty_ref' }] })
+      conflicts: [], kept: [] })
     api.preview.mockResolvedValue(plan)
     api.apply.mockResolvedValue({ ...plan, changed: fields.length })
     const { container } = wrap(<MarketPackCard cfg={CFG()} />)
     fireEvent.click(await screen.findByTestId('mp-preview-no-1-2026'))
     expect((await screen.findByTestId('mp-preview-totals')).textContent)
-      .toBe('1 product to add · 0 values to change · 0 kept as yours · 1 left as they are')
+      .toBe('1 product to add · 0 values to change · 0 kept as yours · 0 left as they are')
     expect(screen.getAllByTestId('mp-preview-row').map(r => r.textContent)).toEqual([
-      'Secondary reserve (up)not in the projectAdded: holds 1 h, any storage that may offer reserves, '
+      'Secondary reserve (up)not in the projectAdded: holds 4 h, any storage that may offer reserves, '
         + 'buyer the grid operator (TSO), no price yet'])
-    expect(screen.getByTestId('mp-preview-kept').textContent).toContain('No price: upload one in the Library.')
     noKeys(container)
     fireEvent.click(screen.getByTestId('mp-apply'))
     const receipt = await screen.findByTestId('mp-receipt')
@@ -271,6 +273,8 @@ describe('MarketPackCard: preview and apply', () => {
 
   it('says the price is kept, not missing, when only the pack has none', async () => {
     const mine = prod('secondary_up', 'secondary', 'up', { capacity_price: PRICE })
+    api.preview.mockResolvedValue(PLAN({ changes: [], conflicts: [],
+      kept: [{ cell: 'reserve_products/secondary_up/capacity_price', reason: 'empty_ref' }] }))
     wrap(<MarketPackCard cfg={CFG({ reserve_products: [mine] })} />)
     fireEvent.click(await screen.findByTestId('mp-preview-no-1-2026'))
     const kept = await screen.findByTestId('mp-preview-kept')
@@ -290,6 +294,16 @@ describe('MarketPackCard: preview and apply', () => {
 })
 
 describe('NoBackupChecklist', () => {
+  it('saves the toggles onto a fresh read, keeping a change saved elsewhere (GK B4 P5)', async () => {
+    commercial.saveCommercial.mockResolvedValue({} as never)
+    commercial.getCommercial.mockResolvedValue(CFG({ reserve_no_backup_storages: ['other_bess'] }) as never)
+    wrap(<NoBackupChecklist cfg={CFG()} />)
+    fireEvent.click(await screen.findByTestId('mp-no-backup-bess'))
+    fireEvent.click(screen.getByTestId('mp-no-backup-save'))
+    await waitFor(() => expect(commercial.saveCommercial)
+      .toHaveBeenCalledWith({ reserve_no_backup_storages: ['other_bess', 'bess'] }))
+  })
+
   it('has a plain lead-in, shows save state, and saves the ticks', async () => {
     commercial.saveCommercial.mockResolvedValue({} as never)
     const { container } = wrap(<NoBackupChecklist cfg={CFG()} />)

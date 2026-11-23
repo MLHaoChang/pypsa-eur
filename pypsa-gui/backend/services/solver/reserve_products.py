@@ -433,8 +433,9 @@ def plan(
                     f"Reserve product \u201c{p.id}\u201d: {_names(bad) or 'no storage'} cannot carry reserves. Only "
                     "storage with a readable backup floor can: the battery strings of a battery or hybrid "
                     "project, a storage its island sidecar lists as ride-through storage, or a storage "
-                    "attested as having no backup obligation (floor 0). A product naming no storage "
-                    "uses all of them, attested storage included"
+                    "marked under \u201cConfirm no backup obligation\u201d (it may then offer reserves "
+                    "down to empty). A product naming no storage uses all of them, the marked storage "
+                    "included"
                 ),
             )
         if p.capacity_price is None:

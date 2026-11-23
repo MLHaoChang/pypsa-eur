@@ -47,6 +47,9 @@ export interface MarketPackPlan {
   changes: PackChange[]
   conflicts: PackConflict[]
   kept: PackKept[]
+  /** The digest of this plan; the apply sends it back and is refused (stale)
+   *  when the plan it would write is not the one previewed. */
+  plan_digest: string
 }
 
 export interface MarketPackApplied extends MarketPackPlan { changed: number }
@@ -58,7 +61,7 @@ export const marketPacksApi = {
     client.get('/simulation/commercial/market_packs').then(r => r.data),
   preview: (packId: string): Promise<MarketPackPlan> =>
     client.get(`/simulation/commercial/market_packs/${enc(packId)}/preview`).then(r => r.data),
-  apply: (packId: string, packHash: string): Promise<MarketPackApplied> =>
-    client.post(`/simulation/commercial/market_packs/${enc(packId)}/apply`, { pack_hash: packHash })
-      .then(r => r.data),
+  apply: (packId: string, packHash: string, planDigest: string): Promise<MarketPackApplied> =>
+    client.post(`/simulation/commercial/market_packs/${enc(packId)}/apply`,
+      { pack_hash: packHash, plan_digest: planDigest }).then(r => r.data),
 }

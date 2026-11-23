@@ -37,7 +37,13 @@ export default function NoBackupChecklist({ cfg }: { cfg: CommercialConfig }) {
     setBusy(true)
     setMessage(null)
     try {
-      await commercialApi.saveCommercial({ reserve_no_backup_storages: draft })
+      // Only the storages ticked or unticked here change, on the list as stored
+      // now, so a change saved elsewhere since this card's read is kept.
+      const on = draft.filter(s => !saved.includes(s))
+      const off = saved.filter(s => !draft.includes(s))
+      const fresh = (await commercialApi.getCommercial())?.reserve_no_backup_storages ?? []
+      const next = [...fresh.filter(s => !off.includes(s)), ...on.filter(s => !fresh.includes(s))]
+      await commercialApi.saveCommercial({ reserve_no_backup_storages: next })
       setDraft(null)
       setMessage({ tone: 'ok', text: 'Saved.' })
       await qc.invalidateQueries({ queryKey: nk(project, 'commercial') })

@@ -26,19 +26,17 @@ import { SeriesSelect } from './SeriesSelect'
 export const FOLD_AT = 100
 const FOLDED_ROWS = 20
 
-/** Why a cell was left as it is, in words; "No price" only where the project's own
- *  product has none (UX 3 term 1), never where only the pack is empty. */
-function KeptLine({ kept, products, held }: { kept: PackKept; products: ReserveProduct[]; held: ReserveProduct[] }) {
+/** Why a cell was left as it is, in words. The server keeps a product's cell only
+ *  where the pack has no price and the project's product has one, so the line
+ *  says the price is kept (a product with no price is named by UnpricedProducts). */
+function KeptLine({ kept, products }: { kept: PackKept; products: ReserveProduct[] }) {
   if (kept.cell === 'export_price_ref') {
     return <li>{kept.reason === 'no_export_link'
       ? 'Export price: the site has no export connection, so no export price is set.'
       : 'Export price: the pack has no day-ahead price, so yours is left as it is.'}</li>
   }
-  const mine = held.find(p => p.id === productOf(kept.cell))
-  if (mine?.capacity_price) {
-    return <li title={kept.cell}>{productWords(mine)}: the pack has no capacity price, so yours is kept.</li>
-  }
-  return <li title={kept.cell}>{cellWords(kept.cell, products)}. No price: upload one in the <LibraryLink />.</li>
+  return <li title={kept.cell}>{cellWords(kept.cell.replace(/[^/]+$/, 'id'), products)}: the pack has no capacity
+    price, so yours is kept.</li>
 }
 
 /** The products a plan adds whole (their id cell from nothing). */
@@ -47,17 +45,26 @@ function addedIds(plan: Pick<MarketPackPlan, 'changes'>): Set<string> {
     .map(c => productOf(c.cell) ?? ''))
 }
 
+/** Each product the plan adds, as its cells' new values say (never the cached list). */
+function addedFromPlan(plan: Pick<MarketPackPlan, 'changes'>): ReserveProduct[] {
+  const ids = addedIds(plan)
+  return [...ids].map(id => Object.fromEntries(plan.changes.filter(c => productOf(c.cell) === id)
+    .map(c => [cellField(c.cell), c.to])) as unknown as ReserveProduct)
+}
+
 interface Row { cell: string; now: unknown; after: unknown; yours: boolean; pack?: unknown; words?: boolean }
 
-function PlanTable({ plan, products }: { plan: MarketPackPlan; products: ReserveProduct[] }) {
-  // An added product is one row, not one "none → none" row per field.
+function PlanTable({ plan, products, testId = 'mp-preview-table' }: {
+  plan: MarketPackPlan; products: ReserveProduct[]; testId?: string
+}) {
+  // An added product is one row, not one "none → none" row per field; its words
+  // come from the plan's own values.
   const added = addedIds(plan)
+  const fresh = addedFromPlan(plan)
+  products = namedProducts(fresh, products)
   const rows: Row[] = [
-    ...[...added].map(id => {
-      const p = products.find(q => q.id === id)
-      return { cell: `reserve_products/${id}/id`, now: 'not in the project',
-               after: p ? addedWords(p) : 'Added', yours: false, words: true }
-    }),
+    ...fresh.map(p => ({ cell: `reserve_products/${p.id}/id`, now: 'not in the project',
+                         after: addedWords(p), yours: false, words: true })),
     ...plan.changes.filter(c => !added.has(productOf(c.cell) ?? ''))
       .map(c => ({ cell: c.cell, now: c.from, after: c.to, yours: false })),
     ...plan.conflicts.map(c => ({ cell: c.cell, now: c.yours, after: c.yours, yours: true, pack: c.pack })),
@@ -69,7 +76,7 @@ function PlanTable({ plan, products }: { plan: MarketPackPlan; products: Reserve
   const shown = folded ? rows.slice(0, FOLDED_ROWS) : rows
   return (
     <div className="space-y-1">
-      <table className="w-full text-left border-collapse text-[11px]" data-testid="mp-preview-table">
+      <table className="w-full text-left border-collapse text-[11px]" data-testid={testId}>
         <thead><tr>{['Value', 'Now', 'After the apply'].map(h => (
           <th key={h} scope="col" className="p-1 border-b border-border">{h}</th>))}</tr></thead>
         <tbody>{shown.map(r => {
@@ -135,7 +142,7 @@ function PackPreview({ pack, products, onApplied, onClose }: {
     setBusy(true)
     setError(null)
     try {
-      onApplied(await marketPacksApi.apply(pack.id, plan.pack_hash))
+      onApplied(await marketPacksApi.apply(pack.id, plan.pack_hash, plan.plan_digest))
     } catch (e) {
       setError(`Nothing was applied. ${refusalText(e)}`)
     } finally {
@@ -166,7 +173,7 @@ function PackPreview({ pack, products, onApplied, onClose }: {
           <PlanTable plan={plan} products={named} />
           {plan.kept.length > 0 && (
             <ul className="list-disc pl-4 text-[11px] text-muted" data-testid="mp-preview-kept">
-              {plan.kept.map(k => <KeptLine key={k.cell} kept={k} products={named} held={products} />)}</ul>
+              {plan.kept.map(k => <KeptLine key={k.cell} kept={k} products={named} />)}</ul>
           )}
         </>
       )}
@@ -174,30 +181,22 @@ function PackPreview({ pack, products, onApplied, onClose }: {
   )
 }
 
-function Receipt({ pack, out, products, held, onClose }: {
-  pack: MarketPackRow; out: MarketPackApplied; products: ReserveProduct[]; held: ReserveProduct[]; onClose: () => void
+function Receipt({ pack, out, products, onClose }: {
+  pack: MarketPackRow; out: MarketPackApplied; products: ReserveProduct[]; onClose: () => void
 }) {
   const { added, values } = counts(out)
-  const unpricedAdded = [...addedIds(out)].map(id => products.find(p => p.id === id))
-    .filter((p): p is ReserveProduct => !!p && p.capacity_price == null)
+  const unpricedAdded = addedFromPlan(out).filter(p => p.capacity_price == null)
   return (
     <div className="rounded border border-border p-2 space-y-1 text-[11px]" role="status" data-testid="mp-receipt">
       <p>Applied {pack.label}: {added ? `${many(added, 'product')} added, ` : ''}{many(values, 'value')} changed.</p>
       {unpricedAdded.length > 0 && <p className="text-warn" data-testid="mp-receipt-unpriced">
         {unpricedAdded.map(productWords).join(', ')} came in with no price: pick one with “Open here”
         on this card, or upload one in the <LibraryLink />.</p>}
-      {out.conflicts.length > 0 && (
-        <div data-testid="mp-receipt-kept">
-          <p>{out.conflicts.length} kept as yours:</p>
-          <ul className="list-disc pl-4">{out.conflicts.map(c => {
-            const field = cellField(c.cell)
-            return <li key={c.cell} title={c.cell}>{cellWords(c.cell, products)}: {valueWords(c.yours, field, products)}{' '}
-              (the pack has {valueWords(c.pack, field, products)})</li>
-          })}</ul>
-        </div>
-      )}
+      {/* Every cell, old → new, beside the ones kept as yours (from the apply's answer:
+          after it the pack no longer reads as an update). */}
+      <PlanTable plan={out} products={products} testId="mp-receipt-table" />
       {out.kept.length > 0 && <ul className="list-disc pl-4 text-muted">
-        {out.kept.map(k => <KeptLine key={k.cell} kept={k} products={products} held={held} />)}</ul>}
+        {out.kept.map(k => <KeptLine key={k.cell} kept={k} products={products} />)}</ul>}
       <p className="text-muted"><ResultsWhere /></p>
       <div className="flex justify-end"><button type="button" className="px-2 py-0.5" onClick={onClose}>Close</button></div>
     </div>
@@ -360,8 +359,7 @@ export default function MarketPackCard({ cfg }: { cfg: CommercialConfig }) {
           <ul className="space-y-1 pt-1">{others.map(item)}</ul>
         </details>
       )}
-      {done && <Receipt pack={done.pack} out={done.out} products={done.products} held={products}
-                        onClose={() => setDone(null)} />}
+      {done && <Receipt pack={done.pack} out={done.out} products={done.products} onClose={() => setDone(null)} />}
       <NoBackupChecklist cfg={cfg} />
     </section>
   )

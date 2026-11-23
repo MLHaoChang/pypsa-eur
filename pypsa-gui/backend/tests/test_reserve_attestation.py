@@ -84,7 +84,8 @@ def test_b1_an_attested_storage_is_the_only_floor_0_source(tmp_path):
     with pytest.raises(RP.ReserveRefusal) as e:
         RP.plan(n, [p], *RP.derive_backup(n, tmp_path, []))
     assert e.value.kind == RP.NOT_ELIGIBLE
-    assert "attested as having no backup obligation" in str(e.value)
+    assert "\u201cConfirm no backup obligation\u201d" in str(e.value)
+    assert "attest" not in str(e.value).lower()
     # An attestation names a storage the network does not hold: nothing.
     assert RP.derive_backup(n, tmp_path, ["ghost"]) == ({}, frozenset())
     # An unsaved project: the roles cannot be read, so no attestation counts.
