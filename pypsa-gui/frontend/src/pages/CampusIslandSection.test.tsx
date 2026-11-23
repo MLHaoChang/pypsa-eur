@@ -229,6 +229,19 @@ describe('island section: the form', () => {
     expect(screen.queryByTestId('island-stale')).toBeNull()
   })
 
+  it('shows another 409 (a locked project) as its own refusal, not as a reload', async () => {
+    // GK B3 (6) ask 6: only island_config_changed means the file moved.
+    api.saveIsland.mockRejectedValue({ response: { status: 409, data: { detail: {
+      error_kind: 'project_locked', message: 'The project is locked by another user.' } } } })
+    renderSection()
+    const user = userEvent.setup()
+    await screen.findByTestId('island-form')
+    await user.click(screen.getByLabelText('Seamless'))
+    await user.click(screen.getByRole('button', { name: /Save island config/ }))
+    expect((await screen.findByTestId('island-refusal')).textContent).toContain('locked by another user')
+    expect(screen.queryByTestId('island-stale')).toBeNull()
+  })
+
   it('runs the study on a saved, unchanged config and reads the island data again', async () => {
     renderSection()
     const user = userEvent.setup()

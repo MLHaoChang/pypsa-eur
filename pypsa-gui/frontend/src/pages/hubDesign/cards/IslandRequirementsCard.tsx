@@ -15,7 +15,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { simulationApi } from '../../../api/simulation'
 import type { SolverConfig } from '../../../api/types'
 import {
-  campusApi, errorText, isOtherKind, ISLAND_SCENARIOS,
+  campusApi, errorText, isIslandConfigChanged, ISLAND_SCENARIOS,
   type IslandConfig, type IslandScenario, type IslandSource,
 } from '../../../api/campusElectrical'
 import { useUIStore } from '../../../store/uiStore'
@@ -148,7 +148,7 @@ function useIslandPatch(name: string, revision: string | null | undefined, onSav
 
 function SaveError({ error, onReload }: { error: unknown; onReload: () => void }) {
   if (!error) return null
-  if (isOtherKind(error)) {
+  if (isIslandConfigChanged(error)) {
     return (
       <p role="alert" data-testid="island-stale" className="text-[12px] text-danger">
         {STALE}{' '}<button type="button" className={BTN} onClick={onReload}>Reload</button>

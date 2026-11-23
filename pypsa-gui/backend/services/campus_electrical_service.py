@@ -1693,20 +1693,29 @@ def _bad_patch(where: str, why: str) -> HTTPException:
 
 def _merge_value(where: str, old, new):
     """One field: a tagged number keeps its tag (the source turns
-    ``EDITED_SOURCE`` when the value changes); anything else is replaced whole
-    (lists included). None is refused: a PATCH never deletes."""
+    ``EDITED_SOURCE`` when the value changes); an untagged mapping merges key by
+    key with the same rules; a list or a name is replaced whole. None is
+    refused: a PATCH never deletes."""
     if new is None:
         raise _bad_patch(where, "a value is required (a PATCH cannot remove a setting)")
     if isinstance(old, dict) and set(old) == {"value", "source"}:
         if isinstance(new, dict):
             raise _bad_patch(where, "send the number only; its source is set by the server")
         return old if new == old["value"] else {"value": new, "source": EDITED_SOURCE}
+    if isinstance(new, dict):
+        # An untagged mapping (``frequency_limits``, a limit set) merges key by
+        # key with these same rules, so a tagged number at any depth keeps or
+        # takes the server's source and a client source is refused (GK B3 (6) ask 5).
+        if "source" in new:
+            raise _bad_patch(where, "send the number only; its source is set by the server")
+        merged = dict(old) if isinstance(old, dict) else {}
+        for k, v in new.items():
+            merged[k] = _merge_value(f"{where}.{k}", merged.get(k), v)
+        return merged
     if old is None:
         # A field the sidecar does not have yet: every number (a list or curve
         # is one value) is tagged in gridspine's schema, so a new number takes
         # the server's source, and a client-sent source is refused (GK B3 K2).
-        if isinstance(new, dict) and "source" in new:
-            raise _bad_patch(where, "send the number only; its source is set by the server")
         if _is_number(new):
             return {"value": new, "source": EDITED_SOURCE}
     return new

@@ -95,14 +95,61 @@ def test_each_refusal_is_the_merge_s_own_sentence(island, patch, says):
     assert _sidecar_path(island).read_text() == text
 
 
-def test_an_untagged_mapping_and_a_new_field_are_set_whole(island):
+def test_an_untagged_mapping_merges_by_key_and_a_new_flag_is_set(island):
+    """GK B3 (6) ask 5: ``frequency_limits`` merges key by key with the same
+    rules, so its tagged numbers keep or take the server's source."""
     limits = _stored(island)["requirements"]["frequency_limits"]
     ce.patch_island(
-        island, {"requirements": {"frequency_limits": limits, "linearised_uc": True}}
+        island,
+        {
+            "requirements": {
+                "frequency_limits": {"transition": {"f_min_hz": 47.0}},
+                "linearised_uc": True,
+            }
+        },
     )
     req = _stored(island)["requirements"]
-    assert req["frequency_limits"] == limits
+    want = json.loads(json.dumps(limits))
+    want["transition"]["f_min_hz"] = {"value": 47.0, "source": ce.EDITED_SOURCE}
+    assert req["frequency_limits"] == want
     assert req["linearised_uc"] is True
+
+
+@pytest.mark.parametrize(
+    "limits, where",
+    [
+        (
+            {"transition": {"f_min_hz": {"value": 47.0, "source": "measured"}}},
+            "requirements.frequency_limits.transition.f_min_hz",
+        ),
+        (
+            {"transition": {"value": 47.0, "source": "measured"}},
+            "requirements.frequency_limits.transition",
+        ),
+        (
+            {"new_set": {"f_min_hz": {"value": 47.0, "source": "measured"}}},
+            "requirements.frequency_limits.new_set.f_min_hz",
+        ),
+    ],
+)
+def test_a_client_source_is_refused_at_any_depth(island, limits, where):
+    """The probe GK B3 (6) ran: a nested "measured" was stored as sent."""
+    text = _sidecar_path(island).read_text()
+    with pytest.raises(HTTPException) as exc:
+        ce.patch_island(island, {"requirements": {"frequency_limits": limits}})
+    assert exc.value.status_code == 422
+    assert exc.value.detail == (
+        f"{where}: send the number only; its source is set by the server"
+    )
+    assert _sidecar_path(island).read_text() == text
+
+
+def test_a_new_empty_list_stays_untagged():
+    """An empty list is no number (a names list such as ride_through_storage
+    can be empty), so a new one is set as sent (GK B3 (6) nit, mutant D7)."""
+    config = {"requirements": {}}
+    ce.merge_island_patch(config, {"requirements": {"ride_through_storage": []}})
+    assert config["requirements"]["ride_through_storage"] == []
 
 
 def test_lists_are_replaced_whole(island):

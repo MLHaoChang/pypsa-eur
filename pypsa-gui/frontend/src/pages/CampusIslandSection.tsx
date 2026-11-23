@@ -19,7 +19,7 @@ import { controlModeLabel, islandScenarioLabel } from '../plainNames'
 import { displayName } from '../utils/displayName'
 import { Play, Save } from 'lucide-react'
 import {
-  campusApi, errorText, isOtherKind, ISLAND_SCENARIOS,
+  campusApi, errorText, isIslandConfigChanged, ISLAND_SCENARIOS,
   type IslandConfig, type IslandGroup, type IslandReport, type IslandScenario, type IslandSource, type IslandTable,
 } from '../api/campusElectrical'
 import { Btn, PageSection, Tag } from '../components/PageKit'
@@ -214,7 +214,7 @@ export default function CampusIslandSection({ name }: { name: string }) {
     mutationFn: () => campusApi.saveIsland(name, config as IslandConfig, island.data?.revision),
     onMutate: () => { setRefusal(null); setStale(false) },
     onSuccess: d => { qc.setQueryData(ISLAND_KEY(name), d); refresh() },
-    onError: e => (isOtherKind(e) ? setStale(true) : setRefusal(errorText(e))),
+    onError: e => (isIslandConfigChanged(e) ? setStale(true) : setRefusal(errorText(e))),
   })
   const run = useMutation({
     mutationFn: () => campusApi.runIslandStudy(name),

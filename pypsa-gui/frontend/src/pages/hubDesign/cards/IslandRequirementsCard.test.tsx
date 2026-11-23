@@ -152,6 +152,17 @@ describe('IslandRequirementsCard', () => {
     await waitFor(() => expect(campusApi.island).toHaveBeenCalledTimes(2))
   })
 
+  it('shows another 409 (a locked project) as its own refusal, not as a reload', async () => {
+    // GK B3 (6) ask 6: only island_config_changed means the file moved.
+    vi.mocked(campusApi.patchIsland).mockRejectedValue(
+      { response: { status: 409, data: { detail: { error_kind: 'project_locked', message: 'The project is locked by another user.' } } } })
+    const user = userEvent.setup()
+    mount()
+    await user.click(await screen.findByLabelText('Planned'))
+    expect((await screen.findByTestId('island-save-error')).textContent).toContain('locked by another user')
+    expect(screen.queryByTestId('island-stale')).toBeNull()
+  })
+
   it('opens Grid study › Island in Expert, scrolled to the Island block', async () => {
     useUIStore.setState({ uiMode: 'guided', activeSection: 'scenarios', flowReturn: null })
     const user = userEvent.setup()

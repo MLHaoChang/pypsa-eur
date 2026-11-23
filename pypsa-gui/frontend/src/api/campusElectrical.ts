@@ -1287,3 +1287,12 @@ export function isNoAnswer(err: unknown): boolean {
 export function isOtherKind(err: unknown): boolean {
   return (err as { response?: { status?: number } } | null)?.response?.status === 409
 }
+
+/** The island sidecar changed since it was read: a 409 whose
+ *  `detail.error_kind` is `island_config_changed` (PATCH or PUT with a stale
+ *  `base`). Any other 409 (a locked project, say) is not this. */
+export function isIslandConfigChanged(err: unknown): boolean {
+  const r = (err as { response?: { status?: number; data?: { detail?: unknown } } } | null)?.response
+  const detail = r?.data?.detail as { error_kind?: unknown } | null | undefined
+  return r?.status === 409 && detail?.error_kind === 'island_config_changed'
+}
