@@ -119,7 +119,9 @@ function ConservationChip({ c }: { c: NonNullable<EnergyFlowsPayload['conservati
   const ok = c.status === 'ok'
   return (
     <span role="status" data-testid="ef-conservation" data-status={c.status}
-          title={`generation ${fmtMwh(c.generation_mwh)} = destinations ${fmtMwh(c.destinations_mwh)}`
+          title={`generation ${fmtMwh(c.generation_mwh)}`
+            + (c.process_output_mwh ? ` + process output ${fmtMwh(c.process_output_mwh)}` : '')
+            + ` = destinations ${fmtMwh(c.destinations_mwh)}`
             + ` + stored ${fmtMwh(c.storage_delta_mwh)}; residual ${c.residual_mwh.toExponential(1)} MWh`}
           className={`inline-block rounded border px-2 py-0.5 text-[11px] ${
             ok ? 'text-success border-success/40' : 'text-danger border-danger/40'}`}>

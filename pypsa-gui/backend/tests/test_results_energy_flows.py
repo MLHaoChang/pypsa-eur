@@ -440,3 +440,51 @@ def test_process_unit_is_one_node_with_its_electric_input():
 def test_no_process_units_adds_no_process_node():
     p = energy_flows(_solve(_battery_net()))
     assert not any("Process" in f"{r['source']}{r['destination']}" for r in p["rows"])
+
+
+@pytest.mark.parametrize("flag,is_process", [
+    ("true", True), ("1", True), ("1.0", True), ("yes", True),
+    ("false", False), ("0", False), (np.nan, False), ("on", False), ("y", False),
+])
+def test_eh_process_flag_reads_like_the_solver(flag, is_process):
+    n = _process_net(("nh3",))
+    n.links["eh_process"] = n.links["eh_process"].astype(object)
+    n.links.loc["nh3", "eh_process"] = flag
+    p = energy_flows(_solve(n))
+    assert any(r["destination"] == "Process nh3" for r in p["rows"]) is is_process
+
+
+def test_process_rows_scale_with_snapshot_weightings_and_the_series_balance():
+    n = _process_net(("nh3",))
+    n.snapshot_weightings.loc[:, :] = 3.0
+    p = energy_flows(_solve(n))
+    _assert_conserves(p)
+    assert _by(p["rows"], "destination")[("Process nh3",)] == pytest.approx(240.0)
+    sr = p["series"]
+    sup = np.sum([v for v in sr["supply"].values()], axis=0)
+    dem = np.sum([v for v in sr["demand"].values()], axis=0)
+    assert sup == pytest.approx(dem)
+    assert "Process nh3" in sr["supply"]
+    c = p["conservation"]
+    assert c["process_output_mwh"] == pytest.approx(120.0)
+
+
+def test_a_process_that_exports_is_not_dropped():
+    n = _process_net(("nh3",))
+    n.add("Bus", "ext", carrier="AC", unit="MWh")
+    n.add("Generator", "ext_grid", bus="ext", carrier="AC", p_nom=100, marginal_cost=1, p_min_pu=-1)
+    n.links.loc["nh3", "bus2"] = "ext"
+    n.links.loc["nh3", "efficiency2"] = 0.2
+    p = energy_flows(_solve(n))
+    if p["status"] == "ok":
+        assert any(r["destination"] == "Export" and r["source"] == "Process nh3" for r in p["rows"])
+    else:
+        assert p["flags"]
+
+
+def test_a_carrier_named_like_the_process_node_is_refused():
+    n = _process_net(("nh3",))
+    n.generators.loc["grid", "carrier"] = "Process nh3"
+    n.add("Carrier", "Process nh3")
+    p = energy_flows(_solve(n))
+    assert p["status"] == "not_established" and "Process nh3" in p["reason"]
