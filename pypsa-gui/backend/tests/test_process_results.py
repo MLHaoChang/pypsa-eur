@@ -556,7 +556,7 @@ def _two_period_network():
 
 
 def test_two_uneven_periods_put_hours_running_and_tonnes_on_one_basis():
-    """weighted hours = 10*(1+2+3) + 5*(4+1+1) = 90; running = 10*(1+3) + 5*4 = 60 (share 2/3);
+    """Weighted hours = 10*(1+2+3) + 5*(4+1+1) = 90; running = 10*(1+3) + 5*4 = 60 (share 2/3);
     tonnes made = 10*(1*2+2*2+3*2) + 5*(4*4+1*4+1*4) = 240, so 240 * 24 / 90 = 64 t/d."""
     view = compute_process_view(_two_period_network())
     unit = view["process_units"][0]
