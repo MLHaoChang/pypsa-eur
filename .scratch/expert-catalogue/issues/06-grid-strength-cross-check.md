@@ -3,7 +3,7 @@
 
 # 06 — Slack grid strength: minimum never above maximum
 
-Status: ready-for-agent
+Status: done
 Type: task
 Gated: yes (GK B)
 Depends on: DGS-EXTRAS-1 (claude/dgs-extras-fields); lands with 01a-3 (ranges and one validator in every write path).

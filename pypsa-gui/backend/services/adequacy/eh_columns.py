@@ -135,6 +135,34 @@ def coerce_eh_value(component_class: str, col: str, value):
     raise ValueError(f"{col}: unknown kind {kind!r}")  # pragma: no cover
 
 
+def _finite(value) -> float | None:
+    """The number in a cell, or None when blank, NaN or not a number."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def check_grid_strength_pair(component_class: str, row, submitted=None) -> None:
+    """A slack Generator's minimum short-circuit power never exceeds its maximum (catalogue 06, GK B X8).
+
+    `row` is the whole row after the edit (a one-sided edit is checked against the stored other value).
+    With `submitted`, the check runs only when that edit names `sk_min_mva` or `sk_max_mva`, so an
+    unrelated edit of an imported, reversed pair still goes through. A blank on either side skips it.
+    Raises ValueError with the user-facing rule; the write path makes it a 422.
+    """
+    if component_class != "Generator":
+        return
+    if submitted is not None and not ({"sk_min_mva", "sk_max_mva"} & set(submitted)):
+        return
+    lo, hi = _finite(row.get("sk_min_mva")), _finite(row.get("sk_max_mva"))
+    if lo is not None and hi is not None and lo > hi:
+        raise ValueError(f"Minimum short-circuit power: it is above the maximum short-circuit power ({hi:g} MVA).")
+
+
 def dc_ac_ratio(value, label: str | None = "DC/AC ratio") -> float:
     """A Generator's DC/AC ratio: blank is NaN (not declared, never 1); else finite within (0, DC_AC_RATIO_MAX].
     One check for every write path and for pricing, which re-checks a stored value an import may have

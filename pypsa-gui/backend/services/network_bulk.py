@@ -550,6 +550,17 @@ def apply_bulk_update(body: dict) -> dict:
 
             pending.append((_targets, coerced))
 
+        # Catalogue 06: a slack's minimum short-circuit power never above its maximum, before the first write.
+        if component_class == "Generator":
+            from services.adequacy.eh_columns import check_grid_strength_pair
+
+            for _targets, coerced in pending:
+                for t in _targets:
+                    try:
+                        check_grid_strength_pair(component_class, {**df.loc[t].to_dict(), **coerced}, coerced)
+                    except ValueError as exc:
+                        raise HTTPException(422, str(exc)) from exc
+
         # OPEN-ITEMS item 8: every carrier the batch would CREATE, checked
         # before the first write, so a bad one cannot leave a half-applied batch.
         from services.component_names import require_valid_name
