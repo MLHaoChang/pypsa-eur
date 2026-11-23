@@ -5,7 +5,7 @@
 // mousedown outside it, the sidebar and [data-no-panel-close], and the
 // chooser and the flyout render outside the <aside>.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
@@ -76,34 +76,37 @@ function seed(mode: 'guided' | 'expert') {
   })
 }
 
-describe('the Export chooser over Results', () => {
+describe('Export requests open Results › Hand-off › Exports (R6)', () => {
   for (const mode of ['guided', 'expert'] as const) {
-    it(`opens on the results workbook and, cancelled, leaves Results with the past run (${mode})`, async () => {
+    it(`an export request shows Hand-off › Exports over Results and keeps the past run (${mode})`, async () => {
       seed(mode)
       await renderSidebar()
       act(() => { useUIStore.getState().requestIoModal('export', 'workbook') })
-      const modal = await screen.findByTestId('io-modal')
-      const workbook = within(modal).getByDisplayValue('workbook') as HTMLInputElement
-      expect(workbook.checked).toBe(true)
-      // App.tsx's capture-phase dismiss sees each of these first.
-      const cancel = within(modal).getByRole('button', { name: 'Cancel' })
-      expect(slidePanelClickShouldClose(workbook, null)).toBe(false)
-      expect(slidePanelClickShouldClose(cancel, null)).toBe(false)
-      expect(slidePanelClickShouldClose(modal, null)).toBe(false)  // the backdrop
-      fireEvent.click(cancel)
+      await act(async () => { await new Promise(r => setTimeout(r, 10)) })
       expect(screen.queryByTestId('io-modal')).toBeNull()
       const s = useUIStore.getState()
       expect(s.activeSlidePanel).toBe('results')
+      expect(s.resultsTabRequest).toBe('exports')
+      expect(s.ioModalFormat).toBe('workbook')   // carried for the Exports tab to read
+      expect(s.ioModalRequest).toBeNull()
       expect(s.discussedRun).toEqual(PAST)
     })
   }
 
-  it('opens on the bundle when asked without a format', async () => {
+  it('an import request still opens the Import dialog', async () => {
     seed('expert')
     await renderSidebar()
-    act(() => { useUIStore.getState().requestIoModal('export') })
-    const modal = await screen.findByTestId('io-modal')
-    expect((within(modal).getByDisplayValue('bundle') as HTMLInputElement).checked).toBe(true)
+    act(() => { useUIStore.getState().requestIoModal('import') })
+    expect(await screen.findByTestId('io-modal')).toBeTruthy()
+  })
+
+  it('the Export… row in the Project menu opens Hand-off › Exports, not a dialog', async () => {
+    seed('expert')
+    await renderSidebar()
+    if (!screen.queryByRole('button', { name: 'Export…' })) fireEvent.click(screen.getByTestId('sidebar-project-menu'))
+    fireEvent.click(screen.getAllByRole('button', { name: 'Export…' })[0])
+    expect(screen.queryByTestId('io-modal')).toBeNull()
+    expect(useUIStore.getState().resultsTabRequest).toBe('exports')
   })
 
   it('keeps Results for a click in the icon strip\'s flyout', async () => {

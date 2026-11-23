@@ -2,7 +2,7 @@ import { manualNavigation } from '../utils/navigationEpoch'
 import RunBoundView from './results/RunBoundView'
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase, Workflow, CalendarClock, Zap } from 'lucide-react'
+import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase, Workflow, CalendarClock, Zap, FileText, FileDown, Package } from 'lucide-react'
 import { simulationApi, resultsApi } from '../api/simulation'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
@@ -63,6 +63,9 @@ import { openFlowTarget, openSectionInGuided } from '../layout/flowNavigation'
 import type { FlowTarget } from '../api/flow'
 
 import BackToHubResults from '../components/BackToHubResults'
+import ReportsPanel from './ReportsPanel'
+import ExportsTab from './results/ExportsTab'
+import SpecialistPacketTab from './results/SpecialistPacketTab'
 
 // What an empty card group points to (one line each to re-point).
 // Mode-aware, through the shared navigation.
@@ -71,7 +74,6 @@ const flowTarget = (section: FlowTarget['section'], panel: string): FlowTarget =
 const EMPTY_GROUP_NEXT: Record<string, { note: string; label: string; section: FlowTarget['section']; panel: string }> = {
   control: { note: 'Control results come from the island study. ', label: 'Run the island study in Grid study',
     section: 'scenarios', panel: 'campusStudy' },
-  handoff: { note: 'Reports and exports are made from Reports. ', label: 'Open Reports', section: 'results', panel: 'reports' },
 }
 const RESULTS_TAB_KEY = 'results:active-tab'
 
@@ -79,7 +81,7 @@ const VALID_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>([
   'summary', 'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'emissions',
   'economics', 'curtailment', 'lostload', 'adequacy', 'storage', 'asset',
   'fmea', 'investment', 'flows', 'loadshape', 'grid_code', 'electrical_design',
-  'island', 'grid_forming', 'grid_risk',
+  'island', 'grid_forming', 'grid_risk', 'reports', 'exports', 'specialist_packet',
 ])
 
 function loadInitialTab(): ResultsTab {
@@ -128,6 +130,9 @@ export const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingU
   { id: 'grid_risk',  label: 'Grid risk to production', Icon: ShieldAlert, tip: 'Each grid risk (ride-through, island, N-1, connection curtailment) as lost tonnes, then EUR, per year', processOnly: true },
   { id: 'fmea',       label: 'FMEA',               Icon: ShieldAlert,      tip: 'Failure modes ranked by criticality (€ per year): computed rows + expert class-D rows, mitigability, CSV export' },
   { id: 'investment', label: 'Investment case',    Icon: Briefcase,        tip: 'The investment case: the site bill, participants and value flows, the Library, tariffs and contracts', expertOnly: true },
+  { id: 'reports',    label: 'Reports',            Icon: FileText,         tip: 'Study reports written from the Energy Hub reference design and the adequacy study; read them here and export to Word' },
+  { id: 'exports',    label: 'Exports',            Icon: FileDown,         tip: 'Export the project: bundle, NetCDF, CSV, Excel, MATPOWER or the results workbook' },
+  { id: 'specialist_packet', label: 'Specialist packet', Icon: Package,   tip: 'What a dynamics specialist receives: the dispatch source, ranked snapshots, assumptions ledger and per-hour bundles' },
   { id: 'asset',      label: 'Asset Detail',       Icon: Crosshair,        tip: 'One asset in full — every applicable result, as numbers or charts, exportable', expertOnly: true },
 ]
 
@@ -166,6 +171,10 @@ const RESULTS_TO_COMPARE_TAB: Record<ResultsTab, CompareTab> = {
   grid_risk: 'lost_load',      // G2P-13: the nearest compared frame is the lost production
   // No investment compare tab exists (IC P3 WP3.5) — alias to overview.
   investment: 'overview',
+  // Hand-off tabs are not result frames the rail can compare.
+  reports: 'overview',
+  exports: 'overview',
+  specialist_packet: 'overview',
   // The grid studies are not result frames the rail can compare.
   grid_code: 'overview',
   electrical_design: 'overview',
@@ -784,6 +793,9 @@ export default function Results() {
       {t === 'island'      && <IslandTab />}
       {t === 'grid_forming' && <GridFormingTab />}
       {t === 'grid_risk'   && <GridRiskTab />}
+      {t === 'reports'     && <ReportsPanel />}
+      {t === 'exports'     && <ExportsTab />}
+      {t === 'specialist_packet' && <SpecialistPacketTab />}
     </>
   )
 
@@ -1051,7 +1063,8 @@ export default function Results() {
       <div ref={splitWrapRef} className="flex flex-1 min-h-0 overflow-hidden">
         <ResultsFilterProvider value={filterValue}>
           <ChartSourceProvider value={chartSource}>
-          <div className="flex-1 min-w-0 overflow-hidden">
+          <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
+          <div className="flex-1 min-h-0 overflow-hidden">
             {(() => {
               // Overview is multi-period-only; if it's somehow the active tab on
               // a single-period run, fall back to Dispatch.
@@ -1096,6 +1109,16 @@ export default function Results() {
               }
               return renderBody(t)
             })()}
+          </div>
+          {/* The last card tab of every group but Hand-off ends on the way out of the tool. */}
+          {activeGroup && activeGroup !== 'handoff' && emptyGroup == null && !outside && !discussedRun
+            && groupTabs.length > 0 && groupTabs[groupTabs.length - 1].id === activeCardTab && (
+            <div data-testid="results-next-handoff" className="shrink-0 border-t border-border px-4 py-1.5 text-[11px] text-muted">
+              Next:{' '}
+              <button type="button" className="text-link hover:underline"
+                onClick={() => pickTab('reports')}>Hand-off › Reports ›</button>
+            </div>
+          )}
           </div>
           </ChartSourceProvider>
         </ResultsFilterProvider>

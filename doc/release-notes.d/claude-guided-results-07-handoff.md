@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Results › Hand-off now holds Reports, Exports and the Specialist packet. The sidebar's Reports and Export… rows open those tabs instead of a separate panel and dialog, and the last tab of every other group ends with "Next: Hand-off › Reports ›".
