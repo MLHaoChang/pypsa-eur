@@ -602,3 +602,26 @@ def test_the_straddle_finding_is_unchanged_when_not_below_the_floor():
         assert f["actions"][0]["effect"] == (
             "re-run the MC with 1000 draws (was 500) to narrow the confidence "
             "interval")
+
+
+def test_below_the_floor_states_the_floor_per_year_on_a_longer_horizon():
+    # 104.2 h over a 2-year horizon is 52.1 h/yr; no horizon reads as 1 year.
+    for extra, floor in (({"horizon_years": 2.0, "resolution_floor_h": 104.2}, "52.1"),
+                         ({"horizon_years": None}, "52.1")):
+        f = _by_id(review_report(_report(sections={"certification": {
+            "status": "ok", "payload": _floor_cert(**extra)}}), RECORD),
+            "certification_inconclusive")
+        assert f"can show is {floor} h/yr" in f["title"], f["title"]
+
+
+def test_below_floor_flags_only_an_inconclusive_verdict():
+    out = review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(verdict="fail")}}), RECORD)
+    assert all(f["id"] != "certification_inconclusive" for f in out["findings"])
+
+
+def test_a_boolean_min_draws_is_not_a_draw_count():
+    f = _by_id(review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(min_draws=True)}}), RECORD),
+        "certification_inconclusive")
+    assert f["actions"] == []
