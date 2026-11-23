@@ -470,7 +470,7 @@ def stage_network(n: pypsa.Network, years: list[int], *, load_scale: dict[int, d
     product across weeks (``year_snapshots`` says what it accepts)."""
     if time_base not in TIME_BASES:
         raise ValueError(f"time_base: {time_base!r} is not one of {TIME_BASES}")
-    timesteps = SNAPSHOTS if time_base == "week" else year_snapshots(n.snapshots)
+    timesteps = SNAPSHOTS.copy() if time_base == "week" else year_snapshots(n.snapshots)
     flat = {(frame, attr): getattr(n, frame)[attr].copy()
             for frame, attr in (("generators_t", "p_max_pu"), ("generators_t", "marginal_cost"),
                                 ("loads_t", "p_set"))}
@@ -568,7 +568,7 @@ def build_eh_site(params: dict | None = None) -> pypsa.Network:
     price = 70.0 + 40.0 * np.exp(-((_HOD - 19) ** 2) / 8.0)
     n.add("Generator", "grid_supply", bus="grid", carrier="grid",
           p_nom=10.0 * p["connection_mw"], marginal_cost=0.0)
-    n.generators_t.marginal_cost = pd.DataFrame({"grid_supply": price}, index=SNAPSHOTS)
+    n.generators_t.marginal_cost = pd.DataFrame({"grid_supply": price}, index=n.snapshots)
     # The PoC and the critical feeder are loss-free (the ledger says so).
     n.add("Link", "grid_import", bus0="grid", bus1="site_mv", p_nom=p["connection_mw"],
           efficiency=1.0, carrier="AC")
@@ -582,7 +582,7 @@ def build_eh_site(params: dict | None = None) -> pypsa.Network:
     n.add("Load", "general_load", bus="site_mv", carrier="AC")
     n.loads_t.p_set = pd.DataFrame({"critical_load": share * last_peak * shape,
                                     "general_load": (1.0 - share) * last_peak * shape},
-                                   index=SNAPSHOTS)
+                                   index=n.snapshots)
 
     for i in range(1, ex["gensets"]["count"] + 1):
         g = f"genset_{i}"
@@ -603,7 +603,7 @@ def build_eh_site(params: dict | None = None) -> pypsa.Network:
         n.add("StorageUnit", "ups_battery", bus="critical", carrier="battery",
               p_nom=ex["ups"]["mw"], max_hours=ex["ups"]["minutes"] / 60.0,
               efficiency_store=0.95, efficiency_dispatch=0.95, cyclic_state_of_charge=True)
-    n.generators_t.p_max_pu = pd.DataFrame(pmax, index=SNAPSHOTS)
+    n.generators_t.p_max_pu = pd.DataFrame(pmax, index=n.snapshots)
 
     _T._tag_columns(n)
     ibr = ex["pv_mw"] + ex["battery"]["mw"] + sum(
@@ -687,6 +687,9 @@ def finance_inputs(p: dict) -> dict:
         "replacement_rule": "part_lifetimes",
         "terminal_value": {"method": "remaining_life_annuity"},
         "wacc_nominal": DISCOUNT_RATE, "cost_of_equity": DISCOUNT_RATE, "inflation": 0.02,
+        # The templates' tax default (eh_templates.TAX_DEFAULT): German
+        # corporate tax at the average Hebesatz.
+        **_T.TAX_DEFAULT,
     }
 
 
@@ -699,10 +702,21 @@ def commercial_and_finance(p: dict, n: pypsa.Network | None = None) -> dict:
 
     base = CommercialConfig.model_validate(
         {"poc_link": "grid_import", "import_tariff": SITE_TARIFF, "timezone": "UTC"})
-    vf = VFT.build("single_owner", n if n is not None else build_eh_site(p), base).config
+    net = n if n is not None else build_eh_site(p)
+    vf = VFT.build("single_owner", net, base).config
     commercial = base.model_copy(update={"value_flows": vf.model_dump(mode="json")})
-    return {"commercial": commercial.model_dump(mode="json"),
-            "finance": FinanceInputs.model_validate(finance_inputs(p)).model_dump(mode="json")}
+    fin = finance_inputs(p)
+    # As the templates ship them: bought at the first COD (else the first
+    # stage's day one), and each owned asset's AfA class; without one a
+    # battery leaves the tax section not established.
+    fin["acquisition_date"] = min(fin["cod_by_asset"].values(),
+                                  default=f"{p['stages'][0]['year']}-01-01")
+    fin["depreciation_class_by_asset"] = {
+        o.asset_id: _T._afa_class(net, o.component, o.asset_id) for o in vf.asset_owners}
+    fin = FinanceInputs.model_validate(fin).model_dump(mode="json")
+    # Every shipped value is marked assumed with its source (GK B2 F1).
+    return {"commercial": commercial.model_dump(mode="json"), "finance": fin,
+            "finance_assumed": _T.finance_assumed(fin)}
 
 
 def solver_config(p: dict, n: pypsa.Network | None = None) -> dict:

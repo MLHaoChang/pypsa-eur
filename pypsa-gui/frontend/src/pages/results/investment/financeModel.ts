@@ -115,7 +115,7 @@ export function errorsFor(errors: Record<string, string[]>, path: string,
 // ── the report ───────────────────────────────────────────────────────────
 
 type Obj = Record<string, unknown>
-const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
+export const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
 
 /** A value as a number, or null when it is not established (null, absent,
  *  the string "not_established", a `{value: null}` record). */
@@ -149,6 +149,8 @@ export interface Headline {
   note: string | null
   /** The question the figure answers, when two figures could be confused. */
   asks?: string
+  /** A plain note on the figure itself (shown under it, muted). */
+  aside?: string
 }
 
 interface HeadlineSpec {
@@ -243,7 +245,24 @@ export function headlines(report: InvestmentCaseReportPayload): Headline[] {
       id: 'avoided_co2', label: 'Of which avoided CO2 cost (undiscounted, whole horizon)',
       kind: 'money', value: v, note: v === null ? 'a CO2 line is not established' : null })
   }
+  // F4 (UX 2 on #1761): with no counterfactual the lifecycle-cost NPV is the
+  // equity NPV (services/finance/engine.py nets nothing against it), so say
+  // so beside the figure — only when the two figures do agree.
+  const lc = out.find(h => h.id === 'lifecycle_npv')
+  const eq = out.find(h => h.id === 'equity_npv_post_tax')
+  if (lc && eq && lc.value !== null && eq.value !== null && hasNoCounterfactual(report)
+      && Math.abs(lc.value - eq.value) < 0.5) {
+    lc.aside = SAME_AS_EQUITY_NPV
+  }
   return out
+}
+
+export const SAME_AS_EQUITY_NPV = 'Same as equity NPV: there is no counterfactual.'
+
+/** The report says the case compares with nothing (no counterfactual). */
+export function hasNoCounterfactual(report: InvestmentCaseReportPayload): boolean {
+  const p = payloadOf(report, 'project')
+  return p.has_counterfactual === false || (isObj(p.counterfactual) && p.counterfactual.present === false)
 }
 
 /** Why an LCOS is not established: the nominal one reads the block's reasons
@@ -663,16 +682,6 @@ export function uncheckableReason(reason: string | null): string | null {
       return "can't check whether this report is current: the current inputs are not established"
     default: return null
   }
-}
-
-/** The failure a finished run ended in (error / failed / refused), or null. */
-export function studyFailure(s: InvestmentCaseStudy | null | undefined): string | null {
-  if (!s || !['error', 'failed', 'refused'].includes(s.status)) return null
-  const why = s.message ?? s.error ?? null
-  const code = s.code ?? s.error_code ?? null
-  const text = why ?? code ?? 'no reason given'
-  return `${s.status === 'refused' ? 'The case was refused' : 'The run failed'}: ${text}`
-    + (why && code && !why.includes(code) ? ` (${code})` : '')
 }
 
 // ── the campus equipment the case took (campus-IC issues 02 and 05) ─────

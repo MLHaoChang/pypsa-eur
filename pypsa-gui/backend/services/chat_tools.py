@@ -48,6 +48,7 @@ lists which Phase 2 turns into Messages-API content blocks.
 from __future__ import annotations
 
 import contextlib
+import copy
 import inspect
 import json
 import logging
@@ -1562,6 +1563,15 @@ def site_scene_cancel(site_id: str, proposal_id: str) -> dict:
     return chat.cancel(site_id, proposal_id)
 
 
+def site_scene_results(site_id: str, snapshot: str | None = None, period: str | None = None,
+                       window_from: str | None = None, window_to: str | None = None,
+                       run: str | None = None, building: str | None = None) -> dict:
+    """`GET .../scene/results` (SC-03): the route's numbers in words, bounded; the gate alone decides availability."""
+    from services.site_scene import chat_results
+    return chat_results.read(site_id, snapshot=snapshot, period=period, window_from=window_from,
+                             window_to=window_to, run=run, building=building)
+
+
 def get_process_view() -> dict:
     """`GET /api/results/process_view` on the network the route reads: the
     caller's foreground project, resolved per request as the route's is. A
@@ -2948,7 +2958,9 @@ def run_investment_case(owner: str | None = None) -> dict:
 
     def start():
         with _ic_errors():
-            return _h(body)
+            # No HTTP caller here: `user=None` makes the handler take the
+            # requester from the chat's acting user (project-viewer-role 02).
+            return _h(body, user=None)
 
     out = _campaign_gated("investment_case", start)
     out = {k: (_cut(v) if k in ("owner", "case_id") else v) for k, v in out.items()}
@@ -3574,6 +3586,7 @@ _BC_CODES = {
     "business_case_inputs_invalid": "business_case_inputs_invalid",
     "solver_config_invalid": "business_case_inputs_invalid",
     "business_case_changed": "business_case_changed",
+    "network_busy": "business_case_busy",
     "investment_case_missing": "investment_case_missing",
     "solver_in_flight": "solver_in_flight",
     "finance_inputs_missing": "finance_inputs_missing",
@@ -3709,16 +3722,56 @@ def _bc_inputs() -> dict:
     return out
 
 
+# Cut first when the options outgrow the cap, whole entries from the end (never part of a
+# unit list); the refusals go last. Each cut is named in `truncated`.
+_BC_OPTIONS_CUT_ORDER = ("offered_rows", "outputs", "refusals")
+
+
+def _bc_options_cut(out: dict) -> dict:
+    cut: dict = {}
+    for section in _BC_OPTIONS_CUT_ORDER:
+        while _json_len(out) > _BC_INPUTS_CHARS and out.get(section):
+            gone = out[section].pop()
+            if section == "outputs":
+                out["units_by_source"]["linked"].pop(gone["id"], None)
+            cut.setdefault(section, []).append(
+                str(gone.get("id") or gone.get("name") or gone.get("field") or gone.get("code"))[:80])
+    return cut
+
+
+def _bc_options() -> dict:
+    """The line table's options and the refusals of the stored lines (bc 16), as the
+    route reads them: one source, no re-derivation. A busy model is `business_case_busy`;
+    None stays None with its reason (never [])."""
+    from routers.results import get_business_case_options as _h
+
+    with _bc_errors():
+        out = copy.deepcopy(_h())
+    cut = _bc_options_cut(out)
+    if cut:
+        out["truncated"] = cut
+        out["truncated_note"] = ("cut to fit the chat, whole entries only: "
+                                 + ", ".join(cut) + "; a cut output is NOT offered here, "
+                                 "not 'has no units'; say the rest was not read")
+    out["hint"] = ("offer a unit only from units_by_source; name each refusal in plain words "
+                   "(its field and why); a part that reads None was not read, say so")
+    return out
+
+
 def get_business_case(detail: str = "summary") -> dict:
-    """The business-case run and its stored report (detail='summary'), or the
-    stored inputs with their digest and the citable turns (detail='inputs')."""
+    """The business-case run and its stored report (detail='summary'), the
+    stored inputs with their digest and the citable turns (detail='inputs'), or what
+    the line table offers and refuses (detail='options')."""
     from routers.results import get_business_case as _h
     from services.business_case.verdict import verdict as bc_verdict
 
-    if detail not in ("summary", "inputs"):
-        _ic_raise(422, "business_case_request_invalid", "detail is 'summary' or 'inputs'")
+    if detail not in ("summary", "inputs", "options"):
+        _ic_raise(422, "business_case_request_invalid",
+                  "detail is 'summary', 'inputs' or 'options'")
     if detail == "inputs":
         return _bc_inputs()
+    if detail == "options":
+        return _bc_options()
     body = _h()
     if getattr(body, "status_code", None) == 204:
         out = _no_data("business_case", _BC_NO_DATA)
@@ -3832,7 +3885,8 @@ def run_business_case() -> dict:
 
     def start():
         with _bc_errors():
-            return _h()
+            # As run_investment_case: the requester is the chat's acting user.
+            return _h(user=None)
 
     out = dict(_campaign_gated("business_case", start))
     out["hint"] = ("poll get_business_case() until status is done / refused / failed; a "
@@ -5950,8 +6004,13 @@ def update_project_layout(name: str, layout: dict) -> dict:
 def download_project_bundle(name: str) -> dict:
     from routers.projects import _project_bundle_bytes
     proj = _authorized_project(name)
+    with _acting() as (db, user):
+        from services import project_registry
+
+        row = project_registry.find_project(db, user, proj.uuid) if user is not None else None
     return _save_agent_export(
-        _project_bundle_bytes(proj.name, proj.directory),
+        _project_bundle_bytes(proj.name, proj.directory,
+                              project_kind=getattr(row, "project_kind", None)),
         f"{proj.name}.pypsaproj.zip",
         "application/zip",
     )
@@ -10610,6 +10669,19 @@ DISPATCHERS: dict[str, Any] = {
 }
 
 
+# Excel input workbook issue 06 (3): the template / a project's workbook as a
+# browser download, and a chat upload previewed then imported as a NEW project.
+from services.workbook_chat import (  # noqa: E402
+    get_input_workbook, import_input_workbook, preview_input_workbook,
+)
+
+DISPATCHERS.update({
+    "get_input_workbook": get_input_workbook,
+    "preview_input_workbook": preview_input_workbook,
+    "import_input_workbook": import_input_workbook,
+})
+
+
 # LV08 B2a (12) — live-voice 08 slice B2: registered before the lock and
 # study gates below wrap DISPATCHERS, so they apply to these as to the rest.
 DISPATCHERS.update({
@@ -10649,6 +10721,7 @@ DISPATCHERS.update({
     "site_scene_prepare": site_scene_prepare,
     "site_scene_apply": site_scene_apply,
     "site_scene_cancel": site_scene_cancel,
+    "site_scene_results": site_scene_results,
     "get_process_view": get_process_view,
     "get_grid_risk_production": get_grid_risk_production,
     "campus_save_campus": campus_save_campus,

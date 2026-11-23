@@ -644,7 +644,7 @@ def test_the_reactive_range_counts_gfm_and_gfl_qu_units_at_rated_p(tmp_path):
     # bess_new (gfm_droop) is extendable and unsized: only the 4 MW PV counts so far
     assert row["project_value"] == pytest.approx(4.0 * math.tan(math.acos(0.95)), rel=1e-4)
     assert row["limit"] == pytest.approx(0.48 * 40.0)
-    assert row["verdict"] == "unknown" and "bess_new" in row["note"]
+    assert row["verdict"] == "unknown" and "\u201cBESS new\u201d" in row["note"]
     n.storage_units.at["bess_new", "p_nom_extendable"] = False
     n.storage_units.at["bess_new", "p_nom"] = 60.0
     row = _rows(G.grid_readiness(d, n, PROFILE))["reactive_range"]
@@ -702,6 +702,7 @@ def test_ride_through_reads_the_stored_island_study(tmp_path, status, verdict):
     row = _rows(G.grid_readiness(d, n, PROFILE))["ride_through:ups_bridged"]
     assert row["verdict"] == verdict and row["assumed"]
     assert "600" in row["limit"]
+    assert "'" not in row["limit"] and "\u201c" in row["limit"] and "ups_battery" not in row["limit"]
 
 
 # ── LOLE ────────────────────────────────────────────────────────────────────
@@ -743,6 +744,95 @@ def test_the_lole_goal_is_the_one_the_study_certified_against(tmp_path):
                                  study_edited=False))["lole"]
     assert row["limit"] == 1.5 and not row["assumed"] and row["verdict"] == "warn"
     assert "Scenarios" in row["source"]
+
+
+def _held(study, **payload):
+    study["report"]["sections"]["certification"]["payload"].update(payload)
+    return study
+
+
+_FB = {"pockets": [{"buses": ["it_bus"], "feeders": ["site_transformer"], "bound_h_per_year": 43.8}],
+       "chained": [], "target_h_per_year": 3.0}
+
+
+def test_a_certification_held_by_a_feeder_bound_never_reads_pass(tmp_path):
+    # GK R1: the interval alone sits under the goal, but the certification
+    # withheld the pass on the feeder's bound: the scorecard follows it.
+    d, n = _project(tmp_path, "eh_datacenter")
+    # The GK probe: the verdict and its feeder_bound alone, as a record without the bound figure.
+    study = _held(_study(1.0, [0.0, 2.0], target=3.0), verdict="inconclusive", feeder_bound=_FB)
+    row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=study, study_edited=False))["lole"]
+    assert row["verdict"] == "warn" and row["limit"] == 3.0
+    assert "it_bus could be cut off up to 43.8 h/yr while site_transformer is out" in row["note"]
+
+
+@pytest.mark.parametrize("bound, verdict", [(1.0, "pass"), (2.0, "warn")])
+def test_the_feeder_bound_counts_toward_the_goal(tmp_path, bound, verdict):
+    # No study goal (the template's 3 h/yr): CI upper 2 + bound ≤ 3 passes.
+    d, n = _project(tmp_path, "eh_datacenter")
+    study = _held(_study(1.0, [0.0, 2.0]), critical_pocket_bound_h_per_year=bound)
+    row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=study, study_edited=False))["lole"]
+    assert row["verdict"] == verdict
+
+
+def test_a_chained_feeder_withholds_the_scorecards_pass(tmp_path):
+    d, n = _project(tmp_path, "eh_datacenter")
+    study = _held(_study(1.0, [0.0, 2.0]), critical_feeders=[
+        {"name": "g", "model": "unsampled", "chained": True, "upper_bound": False}])
+    row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=study, study_edited=False))["lole"]
+    assert row["verdict"] == "warn" and "g" in row["note"]
+
+
+def test_a_bound_never_turns_the_row_into_a_fail(tmp_path):
+    d, n = _project(tmp_path, "eh_datacenter")
+    study = _held(_study(1.0, [0.0, 2.0]), critical_pocket_bound_h_per_year=8760.0)
+    row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=study, study_edited=False))["lole"]
+    assert row["verdict"] == "warn"
+
+
+@pytest.mark.parametrize("payload", [
+    {"critical_feeders": [{"name": "g", "model": "unsampled", "chained": True, "upper_bound": False}]},
+    {"verdict": "fail"},
+    {"verdict": "inconclusive", "feeder_bound": _FB},
+])
+def test_a_fail_stays_a_fail_whatever_held_the_pass(tmp_path, payload):
+    # CI lower 4 > the 3 h/yr goal: the chained and withheld-verdict guards
+    # only stop a pass, they never soften a fail to a warn.
+    d, n = _project(tmp_path, "eh_datacenter")
+    study = _held(_study(5.0, [4.0, 6.0]), **payload)
+    row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=study, study_edited=False))["lole"]
+    assert row["verdict"] == "fail"
+
+
+def test_a_composed_feeder_row_does_not_withhold_the_pass(tmp_path):
+    # Only a row flagged ``chained`` withholds the pass; a composed feeder's
+    # hours are already in the certified interval.
+    d, n = _project(tmp_path, "eh_datacenter")
+    study = _held(_study(1.0, [0.0, 2.0]), critical_feeders=[
+        {"name": "c", "model": "composed", "chained": False, "upper_bound": False}])
+    row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=study, study_edited=False))["lole"]
+    assert row["verdict"] == "pass"
+
+
+def test_a_lower_bound_exactly_at_the_goal_is_not_a_fail(tmp_path):
+    # fail needs the CI lower bound above the 3 h/yr goal, not at it.
+    d, n = _project(tmp_path, "eh_datacenter")
+    row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=_study(3.5, [3.0, 4.0]),
+                                 study_edited=False))["lole"]
+    assert row["verdict"] == "warn"
+
+
+@pytest.mark.parametrize("payload", [
+    {"verdict": "inconclusive", "feeder_bound": None},
+    {"verdict": "pass", "feeder_bound": _FB},
+])
+def test_the_feeder_text_comes_only_with_a_bound_held_verdict(tmp_path, payload):
+    # A plain-CI inconclusive has no feeder_bound, and a stale feeder_bound
+    # beside a pass names nothing: the pocket text needs both.
+    d, n = _project(tmp_path, "eh_datacenter")
+    study = _held(_study(1.0, [0.0, 2.0]), **payload)
+    row = _rows(G.grid_readiness(d, n, PROFILE, eh_study=study, study_edited=False))["lole"]
+    assert "could be cut off" not in row["note"]
 
 
 def test_the_h2_hub_sets_no_lole_goal(tmp_path):

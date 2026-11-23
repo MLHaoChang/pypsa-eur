@@ -237,8 +237,10 @@ def test_a_second_job_while_one_is_active_is_409(client, geo, worker):
     [
         "not-a-uuid",
         "x" * 36,
-        str(uuid.uuid4()).upper(),
-        str(uuid.uuid4()).replace("-", ""),
+        # Fresh values each run, fixed ids: pytest-xdist needs every worker to
+        # collect the same test ids, and a random value in an id breaks that.
+        pytest.param(str(uuid.uuid4()).upper(), id="upper-case-uuid"),
+        pytest.param(str(uuid.uuid4()).replace("-", ""), id="uuid-without-dashes"),
     ],
 )
 def test_an_artifact_id_that_is_not_a_canonical_uuid_is_404(client, geo, bad):
@@ -256,7 +258,7 @@ def test_an_artifact_id_that_is_not_a_canonical_uuid_is_404(client, geo, bad):
         "/etc/passwd",
         "",
         None,
-        "{" + str(uuid.uuid4()) + "}",
+        pytest.param("{" + str(uuid.uuid4()) + "}", id="braced-uuid"),
     ],
 )
 def test_artifact_dir_never_builds_a_path_from_a_non_uuid(tmp_path, bad):
@@ -481,9 +483,10 @@ def test_a_timed_out_job_fails_typed_with_no_artifact_and_frees_the_dispatcher(
     monkeypatch.setattr(
         sq.SolveQueue,
         "_run_solve_job",
+        # Recorded once finished: the assert below reads the finished status.
         lambda self, job: (
-            started.append(time.monotonic()),
             self._finish(job, "completed"),
+            started.append(time.monotonic()),
         ),
     )
     scene = client.post(JOBS).json()

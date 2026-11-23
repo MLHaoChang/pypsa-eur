@@ -37,4 +37,23 @@ describe('Guided section heading', () => {
     expect(screen.getAllByTestId('section-held')).toHaveLength(9)
     expect(screen.getByTestId('section-open-expert-assets').textContent).toBe('Open assets & sizing in Expert ›')
   })
+  it('a section that waits only on its assumed defaults says so on the collapsed card', () => {
+    const assumed = (n: number) => ({ code: `assumed_r${n}`, severity: 'warning' as const, source: 'template' as const,
+      blocking: false, acknowledged: false, card: null, in_scope: true, message: `Row ${n}`,
+      target: { section: 'connection' as const, panel: null, component: null, entity: `e${n}`, field: null } })
+    rows.connection = { state: 'warning', summary: null, items: [assumed(1), assumed(2)] }
+    heading('connection')
+    expect(screen.getByTestId('assumptions-toggle').textContent).toBe('▸ Assumed · 2 not yet confirmed')
+    expect(screen.getByTestId('assumptions-waiting').textContent).toContain('waits on these 2 defaults')
+  })
+  it('the card state reads the rail\'s open-item count first, as the step rail does', () => {
+    const open = (code: string, severity: 'error' | 'warning') => ({ code, severity, source: 'validation' as const,
+      blocking: false, acknowledged: false, card: null, in_scope: true, message: code,
+      target: { section: 'commercial' as const, panel: null, component: null, entity: code, field: null } })
+    rows.commercial = { state: 'incomplete', summary: '3 contracts', items: [open('a', 'error'), open('b', 'warning'), open('c', 'warning')] }
+    expect(heading('commercial')).toBe('1 to do · 2 to check · 3 contracts')
+    cleanup()
+    rows.commercial = { state: 'complete', summary: null, items: [] }
+    expect(heading('commercial')).toBe('complete')
+  })
 })

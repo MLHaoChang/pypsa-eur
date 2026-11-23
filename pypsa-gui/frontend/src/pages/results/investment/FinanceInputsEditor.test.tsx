@@ -111,7 +111,7 @@ describe('FinanceInputsEditor', () => {
     const state = screen.getByLabelText('State / provincial rate') as HTMLInputElement
     expect(state.value).toBe('')
     expect(state.placeholder).toBe('not stated')
-    expect((screen.getByLabelText('Small business (§163(j) exempt)') as HTMLSelectElement).value).toBe('')
+    expect((screen.getByLabelText('Small business (section 163(j) exempt)') as HTMLSelectElement).value).toBe('')
     expect((screen.getByLabelText('Financing fee tax') as HTMLSelectElement)
       .selectedOptions[0].textContent).toBe('not stated')
     expect((screen.getByLabelText('Tranche 1 commitment fee') as HTMLInputElement).value).toBe('')
@@ -313,7 +313,7 @@ describe('FinanceInputsEditor', () => {
     expect(api.putFinance.mock.calls[0][1]).toBe('digest-0')
   })
 
-  it('states the expected outage hours and their source for the island break-even', async () => {
+  it('states the expected outage hours and their source for the island-capability break-even', async () => {
     api.getFinance.mockResolvedValue({ finance: null, digest: 'digest-0', status: 'not_set' })
     renderEditor()
     fireEvent.click(await screen.findByRole('button', { name: 'State the finance inputs' }))

@@ -95,7 +95,7 @@ def test_the_investment_chapter_carries_the_headline_figures_and_the_basis():
     table = ev.tables["investment_case"]
     rows = dict(table.rows)
     assert rows["Compared with"].startswith("compared with the site")
-    assert rows["Island capability break-even"].startswith("The island capability must be worth")
+    assert rows["Island-capability break-even"].startswith("The island capability must be worth")
     assert table.source_path.startswith(f"/sections/{chapters.INVESTMENT}")
     # the number audit can verify an IRR quoted in percent
     facts = E.flatten_numbers(ev)

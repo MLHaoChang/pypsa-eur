@@ -4,6 +4,8 @@
 # GC-06a EMT pack: a 'connected' channel once GC-04 bumps the battery contract
 
 Status: ready-for-agent
+Model tier: opus
+Blocked by: 12 (same package, slice c); #1608, #1609
 Type: task
 Parent: `06-pscad-emt-pack.md` (GC-06 follow-up, GK A2 on #1596)
 Gated: **yes** (GK A, gridspine)
@@ -16,4 +18,5 @@ GC-07's readback (issue 07, J1) judges stays-connected only from a `connected` c
 
 ## Comments
 
+**2026-11-17 triage (SCALE-1; GK A2 4 priority view).** Part of the GC-12 package, slice (c). See 12.
 **2026-11-17, GK A2 plan GO** (GC-12 PR-C, with 06b). `connected` goes on every case kind (contract v2). T1: the EMT pack pins `EMT_CONTRACT_VERSION` and switches to "2" in the same PR that makes its schedule record `connected`; a test checks that the manifest's channels equal the channels the schedule records. The `connected` sentence in `stub_text` belongs to the 06c/06d builder (no edits to `stub_text` or the workbook here). Conditions T1–T7 are in `12-contract-connected-channel.md`.

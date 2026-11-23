@@ -50,3 +50,28 @@ The catalogue is mode-free: `depth: essentials` is the Guided set, everything el
   - T3: `options_plain` is display only; the stored value stays the raw option (round-trip test). An unknown stored option reads as itself and is flagged, never blank or coerced.
 - UX (23), OK on #1597 @887ab0d6: existing projects show the plain display name where one exists (a label beside the unchanged id); `internal: true` assets stay reachable in Results and reports as what they mean ("Concentrate shortfall").
 - Agreed with homer-parity 04a and GK B (62): "Load growth starts from year" has default source `none`, required when a rate is set; the UI pre-fills the first period and saves it explicitly; the server's 422 stays.
+- GK B (63), plan GO for 01a as three PRs, landed in order 01a-1 (core + route) → 01a-2 (settings, coverage, display names) → 01a-3 (range validation; last because it touches every write path). GK B (64) keeps the GO.
+  - Ids: derived `<scope>.<slug(plain name)>`, pinned by `catalogue.ids.txt`; the pin test fails on any change to a derived id and tells the author to set an explicit `id` equal to the old one. Unique case-insensitively; a slug collision is refused, never suffixed or truncated (#1127).
+  - T1 location: a dict keyed on (template id, component class, component id), served on the network meta payload; a user-added component with the same id under another class gets no name; delete and re-add of the same class and id keeps it (state in the PR); fallback test.
+  - C1: ETag = hash of the exact response bytes per query; `?depth` and `?function` each change it; a stale If-None-Match gets 200 with the new body.
+  - C2: `asset_schema/{component}` as a view is byte-equal to a full payload recorded before the move.
+  - C3: guide ids are dict lookups only; unknown id, `../`, `%2e%2e` and empty all return the same 404 body.
+  - C4: route parity, ACL policy, write-surface lock, golden coverage, route_chat_disposition and test_packaging_requirements run at the trial merge.
+  - C5: `EH_CUSTOM_COLUMNS` derived from entries keeps its exact order; fingerprint and IC digest pinned before the move.
+  - C6: load growth rate finite and > -100; the base year has no default and is required with a rate (422); same words as homer 04a/#1604.
+  - C7: the coverage test asserts `KNOWN_GAPS` only shrinks, against a committed list.
+  - C8: validate only the fields a write changes; an edit to another field of an asset already out of range is never refused (test).
+  - C9: imports (legacy, PSS/E, Library apply of a stored project) load out-of-range values and flag them, never refuse or clamp; interactive edits, bulk, preview/apply and chat writes refuse. One test per path.
+  - C10: ranges are in the stored model unit; a bus-unit-dependent field is checked in the stored unit, with a test on a non-MW bus (#1347).
+  - C11: inf accepted only on fields whose engine default is inf (listed, tested); NaN refused everywhere.
+  - C12: one mutant per write path that skips the validator, each killed by that path's own test; a redundant layer is mutated together with its sibling (#1127 M10).
+- UX (24), OK on #1634 @701e2dea (01a-1): Generator `p_max_pu` keeps "Availability" and `p_min_pu` "Minimum output". For slice 03: a parity test for "Rating" (Line/Transformer `s_nom`) against today's "Capacity"; the `committable` plain name keeps "unit commitment".
+- GK B (65), 2026-11-17 16:20Z, plan GO for DGS-EXTRAS-1 (claude/dgs-extras-fields, after #1634) on these conditions:
+  - X1: the solve reads none of rated_mva, harmonic_*, sk_*, rx_*; a pin test sets each on a Load and a Generator and shows `_network_input_fingerprint` and the IC digest byte-identical (or a field that feeds a calculation is named and folded in under AS-02, appended only when present).
+  - X2: one validator on every write path (POST, PUT, bulk/preview, chat edit tool, experiment copy, Excel input if it writes these classes); bulk and the chat tool refuse a negative sk_max_mva, a bad harmonic_source, NaN and inf like the single edit (#738); floats finite (#1320); bool refused.
+  - X3: Generator/Load in PROCESS_CUSTOM_COLUMNS makes no reader treat a plain generator or load as a process unit; readers listed in the PR body; a test shows a generator with only the new fields is not a process unit.
+  - X4: list every ensure_eh_column caller that can pass Load and what it now writes; test that untouched loads gain no column (save/load byte-identical).
+  - X5: "" and null (and NaN after a netcdf/csv round trip) read as not set everywhere (drawer, exports, importer); round-trip test through save, reload and bundle export/import.
+  - X6: harmonic_spectrum length bounded with a typed 422; no reader parses or evaluates it unsafely.
+  - X7: the re-record is pinned: every class other than Generator and Load is byte-equal to the previous recording.
+  - X8: the deferred sk_min ≤ sk_max cross-check is ticketed now (01a-3) and linked in the PR body.

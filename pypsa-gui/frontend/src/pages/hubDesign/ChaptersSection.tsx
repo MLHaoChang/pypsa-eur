@@ -16,7 +16,10 @@ import { useHubDesignStore } from './hubDesignStore'
 import RunGridChecks from './RunGridChecks'
 import ProductionTiles from '../results/ProductionTiles'
 import { useInScope } from '../../components/flowScope/useFlowScope'
+import { ControlChapter } from './ControlChapter'
 import { AddToScope } from '../../components/flowScope/ScopeCards'
+import InvestmentCaseRunPanel from '../results/investment/InvestmentCaseRunPanel'
+import { useInvestmentCaseRun } from '../results/investment/useInvestmentCaseRun'
 
 const OPEN_LABEL = (o: ChapterOpen) =>
   'step' in o ? 'Go to Goal' : o.panel === 'campusResults' || o.panel === 'campusStudy' ? 'Open the grid checks' : 'Open the detail'
@@ -67,7 +70,10 @@ export function useChapterTiles(reliability: ChapterInputs['reliability']) {
     reliability: { ...reliability, solved: status.isSuccess ? dispatchSolved(status.data) : undefined },
     operation: { status: status.data ?? null, gfm: gfm.data ?? null },
   })
-  return { tiles, processView: processView.data }
+  // The stored report as the run panel reads it: null before a run (or while
+  // one runs), undefined while it is not read yet (issue 22, S2b).
+  const report = icRunning ? null : icReport.isSuccess ? (icReport.data ?? null) : undefined
+  return { tiles, processView: processView.data, icReport: report }
 }
 
 /** `headlined`: tiles whose figure, state and Expert link the Results headline shows; here
@@ -77,10 +83,15 @@ export function ChaptersSection({ reliability, headlined = [] }: {
 }) {
   const project = useUIStore(s => s.currentProject)
   const setStep = useHubDesignStore(s => s.setStep)
-  const { tiles, processView } = useChapterTiles(reliability)
+  const { tiles, processView, icReport } = useChapterTiles(reliability)
+  // Before the study has results the Investment tile is not headlined: it runs
+  // the investment case itself (issue 22, S2b), as the headline's NPV does after.
+  const icRun = useInvestmentCaseRun()
 
   // The grid checks are Grid › Grid code & electrical design's (W4a).
   const gridInScope = useInScope('grid', 'grid_code')
+  // The grid-forming line is Control's: none when Control is out of scope (control-strategy 06).
+  const controlInScope = useInScope('control')
 
   const open = (o: ChapterOpen) => {
     if ('step' in o) { setStep(o.step, { user: true }); return }
@@ -94,7 +105,7 @@ export function ChaptersSection({ reliability, headlined = [] }: {
       <h3 className="text-[12px] font-semibold text-text">The whole picture</h3>
       <div className="grid grid-cols-2 gap-2">
         {tiles.map(t => (
-          <div key={t.id} className="flex flex-col gap-1.5 rounded-[10px] border border-border/70 p-2" data-testid={`hub-chapter-${t.id}`}>
+          <div key={t.id} className="flex flex-col gap-1.5 rounded-card border border-border/70 p-2" data-testid={`hub-chapter-${t.id}`}>
             <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">{t.group}</span>
             {headlined.includes(t.id) ? (
               <p className="text-[11.5px] text-muted" data-testid={`hub-chapter-${t.id}-headlined`}>
@@ -102,18 +113,23 @@ export function ChaptersSection({ reliability, headlined = [] }: {
               </p>
             ) : (
               <Kpi label={t.label} value={t.value} unit={t.unit} basis={t.basis}
-                state={t.state} reason={t.reason} fromStudy={t.fromStudy}
+                state={t.state} fromStudy={t.fromStudy}
+                // The run panel states "not run yet" and a refusal's needs itself.
+                reason={t.id === 'investment' && (t.state === 'not_run' || icRun.blocker) ? undefined : t.reason}
                 hint={t.fromStudy ? FROM_STUDY_HINT : undefined} testId={`hub-chapter-${t.id}-kpi`} />
             )}
-            {t.control && (
+            {t.control && controlInScope && (
               <p className="text-[11.5px] text-muted" data-testid={`hub-chapter-${t.id}-control`}>
                 {t.control.text}{' '}
                 {t.control.resolve && (
                   <button type="button" data-testid={`hub-chapter-${t.id}-solve`}
                     onClick={() => useUIStore.getState().requestRunSolve()}
-                    className="text-accent hover:underline">Solve</button>
+                    className="text-link hover:underline">Solve</button>
                 )}
               </p>
+            )}
+            {t.id === 'investment' && !headlined.includes(t.id) && (
+              <InvestmentCaseRunPanel run={icRun} mode="guided" report={icReport} stateShown />
             )}
             {t.id === 'grid_plan' && project && ['not_run', 'stale', 'unavailable'].includes(t.state) && (
               gridInScope
@@ -123,12 +139,13 @@ export function ChaptersSection({ reliability, headlined = [] }: {
             {/* A headlined figure's way in is its link in the headline: one entry point per destination. */}
             {!headlined.includes(t.id) && (
               <button type="button" data-testid={`hub-chapter-${t.id}-open`} onClick={() => open(t.open)}
-                className="self-start text-[11.5px] text-accent hover:underline">
+                className="self-start text-[11.5px] text-link hover:underline">
                 {OPEN_LABEL(t.open)}
               </button>
             )}
           </div>
         ))}
+        <ControlChapter />
       </div>
       <ProductionTiles view={processView} />
     </section>

@@ -1,9 +1,15 @@
 // P24-FE re-gate R8 and notes: every rule of the Improve card's glossary has a
 // case, including the review effects the three templates do not reach.
 import { describe, expect, it } from 'vitest'
-import { costTileLabel, evidenceValue, kpiMoney, plainIds, plainWords } from './plainWords'
+import { costTileLabel, evidenceValue, feederAdvice, kpiMoney, plainIds, plainWords } from './plainWords'
+import { GROUP_TITLES } from './holdWords'
 
 describe('plainWords', () => {
+  it('a feeder-bound title names the bus and feeder as the project does (GK A F6\')', () => {
+    expect(plainWords('Certification not decided: it_bus could be cut off up to 43.8 h/yr while site_transformer is out'))
+      .toBe('Certification not decided: IT bus could be cut off up to 43.8 h/yr while Site transformer is out')
+  })
+
   it('a bare dtc_planning (dtc_critical_unserved effect)', () => {
     expect(plainWords('size what islanded operation needs (dtc_planning)'))
       .toBe('size what islanded operation needs (a plan for running without the grid)')
@@ -70,10 +76,45 @@ describe('plainWords', () => {
 
 describe('plainWords: the dominant-risk line names the unit in plain words (UX audit M5)', () => {
   it('a raw id before "carries … of ranked Link risk" becomes its display name', () => {
+    // The share is of the ranked connections only: the plain line keeps
+    // that scope (asset-investment walkthrough 2026-11-17, issue 04).
     expect(plainWords('site_transformer carries 100% of ranked Link risk'))
-      .toBe('Site transformer accounts for 100% of the outage risk')
+      .toBe('Site transformer accounts for 100% of the outage risk from links')
     expect(plainWords('grid_import carries 62.5% of ranked Link risk'))
-      .toBe('Grid import accounts for 62.5% of the outage risk')
+      .toBe('Grid import accounts for 62.5% of the outage risk from links')
+  })
+  it('leads with the share of all ranked risk when the review states it', () => {
+    // Hand check: 657,000 / (657,000 + 3 × 302,114) = 42 %.
+    expect(plainWords('hospital_feeder carries 100% of ranked Link risk (42% of all ranked risk)'))
+      .toBe('Hospital feeder: 42% of the outage risk, and all of the risk from links')
+  })
+})
+
+describe('plainWords: the dominant-risk line names links as the Guided assets list does', () => {
+  it('uses the same word as the assets list group title for a Link', () => {
+    const word = GROUP_TITLES.Link.toLowerCase()
+    expect(plainWords('feeder_a carries 100% of ranked Link risk')).toContain(`risk from ${word}`)
+    expect(plainWords('feeder_a carries 100% of ranked Link risk (42% of all ranked risk)'))
+      .toContain(`risk from ${word}`)
+  })
+})
+
+describe('plainWords: a Link share below 100% is stated, not rounded to "all"', () => {
+  it('names the share of links when it is not all of it', () => {
+    expect(plainWords('grid_import carries 62% of ranked Link risk (30% of all ranked risk)'))
+      .toBe('Grid import: 30% of the outage risk, and 62% of the risk from links')
+  })
+})
+
+describe('feederAdvice: the only feeder to a must-stay-on bus gets a feeder remedy', () => {
+  it('names the bus as the project shows it', () => {
+    expect(feederAdvice({ id: 'fmea_dominant_mode',
+      evidence: { mode: 'hospital_feeder', feeds_critical_buses: ['hospital'] } }))
+      .toBe('Add a second feeder or backup supply at Hospital. A spare unit or storage elsewhere cannot supply Hospital while Hospital feeder is out.')
+  })
+  it('says nothing for another finding or a Link that feeds no must-stay-on bus', () => {
+    expect(feederAdvice({ id: 'fmea_dominant_mode', evidence: { mode: 'grid_import' } })).toBeNull()
+    expect(feederAdvice({ id: 'dsr_off', evidence: { feeds_critical_buses: ['hospital'], mode: 'x' } })).toBeNull()
   })
 })
 
@@ -104,5 +145,20 @@ describe('costTileLabel (UX review N3, decision B)', () => {
     expect(costTileLabel('npv_multi_period', undefined))
       .toBe('Cost over the plan (discounted, before any shortfall costs)')
     expect(costTileLabel('npv_multi_period', [2030])).not.toMatch(/Yearly|–/)
+  })
+})
+
+describe('plainReason (issue 19, RAW-NAMES-1)', () => {
+  it('puts the run limit, import model and Class-B terms in plain words', async () => {
+    const { plainReason } = await import('./plainWords')
+    expect(plainReason('not run: budget_solves exhausted (1/1) before this stage'))
+      .toBe("not run: the study's run limit was reached (1 of 1 runs used) before this stage")
+    expect(plainReason('import peak 12 MW (import_model=sampled_unit, import_firmness=firm)')).toBe('import peak 12 MW')
+    expect(plainReason('no Class-B-eligible Links')).toBe('no links that carry the outage risk')
+    expect(plainReason('pack has dsr_opt_in=True but no buses')).toBe('pack has demand response switched on but no buses')
+    expect(plainReason('genset_new is capped')).toBe('Genset new is capped')
+    expect(plainReason('Class-B Link sweep skipped')).toBe('link-by-link risk sweep skipped')
+    // a name the reader must type stays as written
+    expect(plainReason('Type `reserve_margin` or "p_nom_max" in the field')).toBe('Type `reserve_margin` or "p_nom_max" in the field')
   })
 })

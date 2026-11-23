@@ -6,7 +6,8 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { ISLAND_SCENARIOS } from '../api/campusElectrical'
 import { NUMBERS } from './CampusIslandSection'
-import { ISLAND_REQUIREMENT_LABELS, ISLAND_SCENARIO_LABELS } from './islandWords'
+import { ISLAND_REQUIREMENT_LABELS } from './islandWords'
+import { islandScenarioLabel } from '../plainNames'
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
 
@@ -17,14 +18,14 @@ describe('island word map parity', () => {
 
   it('names every scenario in words', () => {
     for (const sc of ISLAND_SCENARIOS) {
-      expect(ISLAND_SCENARIO_LABELS[sc]).toBeTruthy()
-      expect(ISLAND_SCENARIO_LABELS[sc]).not.toContain('_')
+      expect(islandScenarioLabel(sc)).toBeTruthy()
+      expect(islandScenarioLabel(sc)).not.toContain('_')
     }
   })
 
   it('both editors read the scenario words from the map', () => {
     for (const f of ['./CampusIslandSection.tsx', './hubDesign/cards/IslandRequirementsCard.tsx']) {
-      expect(read(f)).toContain('ISLAND_SCENARIO_LABELS[sc]')
+      expect(read(f)).toContain('islandScenarioLabel(sc)')
     }
     expect(read('./hubDesign/cards/IslandRequirementsCard.tsx')).toContain('ISLAND_REQUIREMENT_LABELS')
   })

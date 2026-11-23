@@ -2639,10 +2639,13 @@ def _canon(o):
                 del out["product_shortfall"]
             if o.inputs.stage_capex_lead_years == 1 and isinstance(out.get("inputs"), dict):
                 out["inputs"].pop("stage_capex_lead_years", None)
-            # The island break-even's outage hours (2026-10-15): not stated, the
+            # The island-capability break-even's outage hours (2026-10-15): not stated, the
             # case keeps its hash; stated, the report re-runs to state its figures.
             if o.inputs.island_outage is None and isinstance(out.get("inputs"), dict):
                 out["inputs"].pop("island_outage", None)
+        # Walk 03 case B: an asset without a terminal-only life keeps its hash.
+        if isinstance(o, AssetFinance) and o.terminal_lifetime_years is None:
+            del out["terminal_lifetime_years"]
         # A line that is not a difference line (IPP ticket 01) keeps its hash.
         if isinstance(o, TemplateLine) and o.price_qty_mwh is None:
             del out["price_qty_mwh"]

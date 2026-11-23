@@ -10,6 +10,7 @@ import type { SizingMode } from '../site3d/sizing'
 // Results.tsx enforcing the same number independently is how they can drift.
 import type { FlowSectionId, FlowTarget, SitePart } from '../api/flow'
 import type { FlowReturn } from '../layout/flowNavigation'
+import type { LibraryItemRef } from '../api/types'
 import { PANEL_SECTION, SECTION_OPEN, sectionForComponent } from '../layout/flowSections'
 import { RAIL_MIN_W } from '../pages/results/railWidth'
 import { appLog } from './simulationStore'
@@ -109,6 +110,8 @@ const THEME_KEY = 'network-diagram:theme'
 const THEME_SCHEMA_KEY = 'network-diagram:theme-schema'
 const THEME_SCHEMA = '2'
 const DENSITY_KEY = 'network-diagram:density'
+// Browser notifications when a run of mine ends (run progress slice 3).
+const BROWSER_NOTIFY_KEY = 'network-diagram:run-browser-notify'
 const COMPARE_RAIL_KEY = 'network-diagram:compare-rail'
 const COMPARE_RAIL_WIDTH_KEY = 'network-diagram:compare-rail-width'
 const ASSISTANT_DOCK_KEY = 'network-diagram:assistant-dock'
@@ -278,6 +281,10 @@ function storedTheme(): Theme {
   return 'light'
 }
 
+function storedBrowserNotify(): boolean {
+  try { return localStorage.getItem(BROWSER_NOTIFY_KEY) === 'true' } catch { return false }
+}
+
 function storedDensity(): Density {
   try {
     const v = localStorage.getItem(DENSITY_KEY)
@@ -417,6 +424,13 @@ export interface TimeSeriesFocus {
   openEditor?: boolean
 }
 
+/** One-shot: a Library contract the Contracts editor adds as an unsaved copy
+ *  ("Use as a starting point", SCU06 S2b). */
+export interface ContractStart {
+  ref: LibraryItemRef
+  payload: Record<string, unknown>
+}
+
 /** The Commercial library item to open once: its kind, id and the version a gap names. */
 export interface LibraryFocus {
   kind: string
@@ -538,9 +552,13 @@ interface UIStore {
   // Economics opens on this tab once (the commercial library's "Open Tariffs & contracts").
   economicsTabRequest: 'basis' | 'assets' | 'tariffs' | null
   // Solver Settings opens on this block once (the lifetime and CO₂ links in Assets and Economics).
-  solverBlockRequest: 'economic' | 'sclopf' | 'goal' | 'voll' | 'strategy' | 'offgrid' | null
+  solverBlockRequest: 'economic' | 'sclopf' | 'goal' | 'voll' | 'strategy' | 'offgrid' | 'island' | 'reserve' | null
   /** Request-then-scroll to the Grid codes section of the Grid connection part (AS-10). */
   gridCodeScrollRequest: boolean
+  /** "Terminal value ›" asks the finance inputs to scroll to the terminal-value field. */
+  terminalValueScrollRequest: boolean
+  requestTerminalValueScroll: () => void
+  clearTerminalValueScrollRequest: () => void
   requestGridCodeScroll: () => void
   clearGridCodeScrollRequest: () => void
   /** Set by showGridReadiness: Issues scrolls to the Grid readiness group once it is mounted. */
@@ -550,6 +568,8 @@ interface UIStore {
   timeSeriesFocus: TimeSeriesFocus | null
   /** One-shot: the Commercial library opens this item at this version ("Update it there ›"). */
   libraryFocus: LibraryFocus | null
+  /** One-shot: the Contracts editor appends a copy of this Library contract. */
+  contractStart: ContractStart | null
   /** One-shot: bumped by a "Run the solve" outside the header (a result tab's
    *  empty state, UX template audit H2). The header runs its own run path when
    *  it changes, so there is one way to queue a solve. */
@@ -591,6 +611,13 @@ interface UIStore {
   // The export format to preselect with that request (the discussed-run
   // row's Export… picks the results workbook); consumed with it.
   ioModalFormat: 'workbook' | null
+  // The Excel input workbook import dialog (one per page): open, with the file
+  // to preview when the caller already has it. Cleared when the dialog closes.
+  workbookImportRequest: { file: File | null; id: number } | null
+  /** A model file (or files) waiting in the model-import preview dialog. */
+  modelImportRequest: { files: File[]; id: number } | null
+  /** A raw .nc/.xlsx/.m import replaced the loaded network and it belongs to no saved project yet: its file name. */
+  unsavedNetwork: string | null
   // Multi-user edit lock (Task 14). `readOnly` is true when another user holds
   // the active project's lock (or acquisition failed) — every destructive /
   // mutating affordance is gated on it. `lockHolderEmail` names the current
@@ -606,6 +633,13 @@ interface UIStore {
   // solving project editable, and vice versa.
   lockReadOnly: boolean
   solvingReadOnly: boolean
+  // Name/id of the project a switch is in flight for (null = none). Drives the
+  // "Opening …" progress bar; a cold open can take a minute on a big template.
+  openingProject: string | null
+  setOpeningProject: (target: string | null) => void
+  // A deep-link open that failed: the target and why, shown with a Retry.
+  openFailure: { target: string; message: string } | null
+  setOpenFailure: (f: { target: string; message: string } | null) => void
   currentProject: string | null
   // Resume target for auth / projects-home flows. Prefer a stable UUID when a
   // caller knows it, but keep the project name as a compatible fallback so
@@ -630,6 +664,8 @@ interface UIStore {
   // attributes which the CSS-var overrides in index.css key off.
   theme: Theme
   density: Density
+  /** Browser notifications when a run of mine ends while the tab is hidden; off until chosen. */
+  browserNotify: boolean
   // Guided / Expert (spec §3.1). `uiModeExplicit` is true once the user chose
   // a mode themselves; the new-project rule never overrides that choice.
   uiMode: UiMode
@@ -647,6 +683,7 @@ interface UIStore {
   releaseGuidedTour: () => void
   setTheme: (t: Theme) => void
   setDensity: (d: Density) => void
+  setBrowserNotify: (on: boolean) => void
   toggleTheme: () => void
   toggleDensity: () => void
   toggleSidebar: () => void
@@ -727,7 +764,7 @@ interface UIStore {
   clearResultsWindowRequest: () => void
   requestEconomicsTab: (tab: 'basis' | 'assets' | 'tariffs') => void
   clearEconomicsTabRequest: () => void
-  requestSolverBlock: (block: 'economic' | 'sclopf' | 'goal' | 'voll' | 'strategy' | 'offgrid') => void
+  requestSolverBlock: (block: 'economic' | 'sclopf' | 'goal' | 'voll' | 'strategy' | 'offgrid' | 'island' | 'reserve') => void
   clearSolverBlockRequest: () => void
   requestGridReadiness: () => void
   clearGridReadinessRequest: () => void
@@ -735,6 +772,8 @@ interface UIStore {
   clearTimeSeriesFocus: () => void
   focusLibraryItem: (focus: LibraryFocus) => void
   clearLibraryFocus: () => void
+  startContractFrom: (start: ContractStart) => void
+  clearContractStart: () => void
   requestSettingsSection: (section: string) => void
   clearSettingsSectionRequest: () => void
   requestReportGenerate: () => void
@@ -755,6 +794,11 @@ interface UIStore {
   clearCompareNavRequest: () => void
   requestIoModal: (tab: 'import' | 'export', format?: 'workbook') => void
   clearIoModalRequest: () => void
+  requestWorkbookImport: (file?: File) => void
+  requestModelImport: (files: File[]) => void
+  setUnsavedNetwork: (name: string | null) => void
+  clearModelImportRequest: () => void
+  clearWorkbookImportRequest: () => void
   // Apply a derived lock state (from utils/lockState.lockStateFromAcquire).
   setLockState: (s: LockState) => void
   // A queue job is (or is no longer) solving the project the user is viewing.
@@ -826,9 +870,11 @@ export const useUIStore = create<UIStore>((set, get) => ({
   economicsTabRequest: null,
   solverBlockRequest: null,
   gridCodeScrollRequest: false,
+  terminalValueScrollRequest: false,
   gridReadinessRequest: false,
   timeSeriesFocus: null,
   libraryFocus: null,
+  contractStart: null,
   runSolveRequest: 0,
   settingsSectionRequest: null,
   panelSectionRequest: null,
@@ -840,11 +886,18 @@ export const useUIStore = create<UIStore>((set, get) => ({
   compareNavRequest: null,
   ioModalRequest: null,
   ioModalFormat: null,
+  workbookImportRequest: null,
+  modelImportRequest: null,
+  unsavedNetwork: null,
   readOnly: false,
   lockHolderEmail: null,
   readOnlyReason: 'writable',
   lockReadOnly: false,
   solvingReadOnly: false,
+  openingProject: null,
+  setOpeningProject: (target) => set({ openingProject: target }),
+  openFailure: null,
+  setOpenFailure: (f) => set({ openFailure: f }),
   currentProject: storedCurrentProject(),
   lastProjectId: storedLastProjectId(),
   autosaveEnabled: storedAutosave(INITIAL_UI_MODE.mode),
@@ -867,6 +920,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   paletteMode: null,
   theme: storedTheme(),
   density: storedDensity(),
+  browserNotify: storedBrowserNotify(),
   uiMode: INITIAL_UI_MODE.mode,
   uiModeExplicit: INITIAL_UI_MODE.explicit,
   setUiMode: (mode, opts) => {
@@ -933,6 +987,10 @@ export const useUIStore = create<UIStore>((set, get) => ({
   setTheme: (t) => {
     try { localStorage.setItem(THEME_KEY, t) } catch { /* noop */ }
     set({ theme: t })
+  },
+  setBrowserNotify: (on) => {
+    try { localStorage.setItem(BROWSER_NOTIFY_KEY, String(on)) } catch { /* noop */ }
+    set({ browserNotify: on })
   },
   setDensity: (d) => {
     try { localStorage.setItem(DENSITY_KEY, d) } catch { /* noop */ }
@@ -1105,6 +1163,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
   requestSolverBlock: (block) => set({ solverBlockRequest: block }),
   clearSolverBlockRequest: () => set({ solverBlockRequest: null }),
   requestGridCodeScroll: () => set({ gridCodeScrollRequest: true }),
+  requestTerminalValueScroll: () => set({ terminalValueScrollRequest: true }),
+  clearTerminalValueScrollRequest: () => set({ terminalValueScrollRequest: false }),
   clearGridCodeScrollRequest: () => set({ gridCodeScrollRequest: false }),
   requestGridReadiness: () => set({ gridReadinessRequest: true }),
   clearGridReadinessRequest: () => set({ gridReadinessRequest: false }),
@@ -1114,6 +1174,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
   clearTimeSeriesFocus: () => set({ timeSeriesFocus: null }),
   focusLibraryItem: (focus) => set({ libraryFocus: focus }),
   clearLibraryFocus: () => set({ libraryFocus: null }),
+  startContractFrom: (start) => set({ contractStart: start }),
+  clearContractStart: () => set({ contractStart: null }),
   requestRunSolve: () => set(s => ({ runSolveRequest: s.runSolveRequest + 1 })),
   requestSettingsSection: (section) => set({ settingsSectionRequest: section }),
   clearSettingsSectionRequest: () => set({ settingsSectionRequest: null }),
@@ -1144,6 +1206,11 @@ export const useUIStore = create<UIStore>((set, get) => ({
   clearCompareNavRequest: () => set({ compareNavRequest: null }),
   requestIoModal: (tab, format) => set({ ioModalRequest: tab, ioModalFormat: format ?? null }),
   clearIoModalRequest: () => set({ ioModalRequest: null, ioModalFormat: null }),
+  requestWorkbookImport: (file) => set(s => ({ workbookImportRequest: { file: file ?? null, id: (s.workbookImportRequest?.id ?? 0) + 1 } })),
+  clearWorkbookImportRequest: () => set({ workbookImportRequest: null }),
+  requestModelImport: (files) => set(s => ({ modelImportRequest: { files, id: (s.modelImportRequest?.id ?? 0) + 1 } })),
+  clearModelImportRequest: () => set({ modelImportRequest: null }),
+  setUnsavedNetwork: (name) => set({ unsavedNetwork: name }),
   setLockState: (s) => set((state) => {
     const { readOnly, reason } = effectiveLockState(s.readOnly, state.solvingReadOnly)
     return {
@@ -1182,6 +1249,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
       // same-named asset in project B.
       const patch: Partial<UIStore> = {
         currentProject: name,
+        // A project is open: the imported network was saved into one, or replaced by it.
+        ...(name ? { unsavedNetwork: null } : {}),
         // The section this project was left in (design §7), else none.
         activeSection: readActiveSection(name),
         fieldDrawer: null,

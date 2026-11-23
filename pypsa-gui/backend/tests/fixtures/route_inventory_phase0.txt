@@ -163,6 +163,7 @@ PATCH   /api/network/_bulk                                                      
 GET     /api/network/asset_costs                                                   -> get_asset_costs_api_network_asset_costs_get
 GET     /api/network/asset_schema/{component}                                      -> get_asset_schema_api_network_asset_schema__component__get
 GET     /api/network/asset_schema/{component}/units/{name}                         -> get_asset_units_api_network_asset_schema__component__units__name__get
+GET     /api/network/asset_schema/{component}/table_units                         -> get_table_units_api_network_asset_schema__component__table_units_get
 GET     /api/network/asset_schema/{component}/provenance/{name}                    -> get_asset_provenance_api_network_asset_schema__component__provenance__name__get
 GET     /api/network/asset_schema/{component}/provenance/{name}/why/{field}        -> get_asset_provenance_why_api_network_asset_schema__component__provenance__name__why__field__get
 GET     /api/network/buses                                                         -> get_buses_api_network_buses_get
@@ -345,6 +346,7 @@ POST    /api/projects/{name}/sites/{site_id}/scene/proposals                    
 GET     /api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}         -> get_proposal_api_projects__name__sites__site_id__scene_proposals__proposal_id__get
 POST    /api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/apply   -> apply_proposal_api_projects__name__sites__site_id__scene_proposals__proposal_id__apply_post
 POST    /api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/cancel  -> cancel_proposal_api_projects__name__sites__site_id__scene_proposals__proposal_id__cancel_post
+GET     /api/projects/{name}/sites/{site_id}/scene/results                         -> get_scene_results_api_projects__name__sites__site_id__scene_results_get
 GET     /api/projects/{name}/sites/{site_id}/thumbnail                             -> get_site_thumbnail_api_projects__name__sites__site_id__thumbnail_get
 PUT     /api/projects/{name}/sites/{site_id}/thumbnail                             -> put_site_thumbnail_api_projects__name__sites__site_id__thumbnail_put
 GET     /api/projects/{name}/snapshots                                             -> list_snapshots_api_projects__name__snapshots_get
@@ -393,6 +395,7 @@ DELETE  /api/projects/{name}/uploads/{file_id}                                  
 GET     /api/projects/{name}/uploads/{file_id}/blob                                -> get_upload_blob_api_projects__name__uploads__file_id__blob_get
 GET     /api/projects/{name}/uploads/{file_id}/meta                                -> get_upload_meta_route_api_projects__name__uploads__file_id__meta_get
 GET     /api/projects/{name}/uploads/{file_id}/signature                           -> get_upload_signature_api_projects__name__uploads__file_id__signature_get
+GET     /api/projects/{name}/workbook                                              -> download_workbook_api_projects__name__workbook_get
 GET     /api/projects/{name}/worksheet                                             -> get_worksheet_api_projects__name__worksheet_get
 PUT     /api/projects/{name}/worksheet                                             -> put_worksheet_api_projects__name__worksheet_put
 POST    /api/projects/{project_id}/activate                                        -> activate_project_api_projects__project_id__activate_post
@@ -414,6 +417,7 @@ POST    /api/results/business_case                                              
 POST    /api/results/business_case/abort                                           -> post_business_case_abort_api_results_business_case_abort_post
 GET     /api/results/business_case/inputs                                          -> get_business_case_inputs_api_results_business_case_inputs_get
 PUT     /api/results/business_case/inputs                                          -> put_business_case_inputs_api_results_business_case_inputs_put
+GET     /api/results/business_case/options                                         -> get_business_case_options_api_results_business_case_options_get
 GET     /api/results/business_case/preset                                          -> get_business_case_preset_api_results_business_case_preset_get
 GET     /api/results/carrier_kpis                                                  -> get_carrier_kpis_api_results_carrier_kpis_get
 GET     /api/results/cfe_score                                                     -> get_cfe_score_api_results_cfe_score_get
@@ -523,3 +527,6 @@ PUT     /api/simulation/solver_config                                           
 GET     /api/simulation/status                                                     -> get_status_api_simulation_status_get
 GET     /api/simulation/value_flows/designer                                       -> get_value_flow_designer_api_simulation_value_flows_designer_get
 POST    /api/simulation/value_flows/template                                       -> build_value_flow_template_api_simulation_value_flows_template_post
+POST    /api/workbook/import                                                       -> import_workbook_api_workbook_import_post
+POST    /api/workbook/preview                                                      -> preview_workbook_api_workbook_preview_post
+GET     /api/workbook/template                                                     -> download_template_api_workbook_template_get

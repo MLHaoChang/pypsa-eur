@@ -373,3 +373,142 @@ def test_the_shared_role_predicate_reads_the_column_never_the_name():
     assert list(product_role_generators(n, "shortfall")) == ["__lost_nh3"]
     assert list(product_role_generators(n, "buy_in")) == ["grid"]
     assert list(product_role_generators(n, "lost")) == []
+
+
+# ── Control-strategy walkthrough issue 10: the buy-in is priced and the tiles add up ──
+def test_the_buy_in_is_priced_at_its_marginal_cost(hb):
+    nh3 = _product(compute_process_view(hb), "nh3")
+    p = hb.generators_t.p["__buy_nh3"].clip(lower=0)
+    w = hb.snapshot_weightings.objective
+    assert nh3["buy_in"]["eur"] == pytest.approx(float((p * 97.0 * w).sum()))
+    assert nh3["buy_in"]["eur"] > 0
+    assert nh3["buy_in"]["eur_flag"] is None
+    assert nh3["buy_in"]["carriers"] == ["NH3"]
+    assert nh3["lost"]["carriers"] == ["NH3"]
+
+
+def test_a_time_varying_buy_in_price_is_summed_per_hour():
+    n = _hb_network()
+    n.generators_t.marginal_cost["__buy_nh3"] = [90.0, 91.0, 92.0, 93.0, 94.0, 95.0]
+    nh3 = _product(compute_process_view(n), "nh3")
+    p = n.generators_t.p["__buy_nh3"].clip(lower=0)
+    expected = float((p * pd.Series([90.0, 91.0, 92.0, 93.0, 94.0, 95.0], index=n.snapshots)).sum())
+    assert nh3["buy_in"]["eur"] == pytest.approx(expected)
+
+
+def test_a_bus_without_a_buy_in_has_no_buy_in_carriers():
+    n = _hb_network()
+    n.remove("Generator", "__buy_nh3")
+    nh3 = _product(compute_process_view(n), "nh3")
+    assert nh3["buy_in"]["carriers"] == []
+    assert nh3["buy_in"]["eur"] is None and nh3["buy_in"]["eur_flag"] == "no_buy_in"
+
+
+def test_a_buy_in_with_no_dispatch_column_is_unknown_not_zero():
+    n = _hb_network()
+    n.generators_t.p = n.generators_t.p.drop(columns="__buy_nh3")
+    nh3 = _product(compute_process_view(n), "nh3")
+    assert nh3["buy_in"]["eur"] is None and nh3["buy_in"]["eur_flag"] == "buy_in_dispatch_missing"
+    assert nh3["buy_in"]["value"] is None and nh3["buy_in"]["t"] is None
+    assert nh3["buy_in"]["flag"] == nh3["buy_in"]["t_flag"] == "buy_in_dispatch_missing"
+
+
+def test_a_non_finite_buy_in_price_is_unknown_not_zero():
+    n = _hb_network()
+    n.generators_t.marginal_cost["__buy_nh3"] = [90.0, float("nan"), 92.0, 93.0, 94.0, 95.0]
+    nh3 = _product(compute_process_view(n), "nh3")
+    assert nh3["buy_in"]["eur"] is None and nh3["buy_in"]["eur_flag"] == "non_finite_values"
+
+
+def test_a_quadratic_buy_in_cost_is_counted():
+    n = _hb_network()
+    n.generators.loc["__buy_nh3", "marginal_cost_quadratic"] = 0.5
+    n.snapshot_weightings["objective"] = 3.0
+    nh3 = _product(compute_process_view(n), "nh3")
+    p = n.generators_t.p["__buy_nh3"].clip(lower=0)
+    assert nh3["buy_in"]["eur"] == pytest.approx(float(((p * 97.0 + 0.5 * p * p) * 3.0).sum()))
+
+
+def test_the_buy_in_carries_a_name_guessed_role_as_assumed():
+    n = _hb_network(roles=False)
+    nh3 = _product(compute_process_view(n), "nh3")
+    assert nh3["buy_in"]["role_flag"] == "role_from_name"
+    assert _product(compute_process_view(_hb_network()), "nh3")["buy_in"]["role_flag"] is None
+
+
+def test_the_payload_only_adds_keys():
+    nh3 = _product(compute_process_view(_hb_network()), "nh3")
+    old = {"value", "unit", "weighting", "by_period", "flag", "t", "t_flag", "mwh", "mwh_flag"}
+    assert old <= set(nh3["buy_in"]) and old <= set(nh3["lost"])
+    assert {"eur", "eur_flag", "eur_by_period", "eur_weighting", "carriers", "role_flag"} <= set(nh3["buy_in"])
+    assert nh3["buy_in"]["eur_weighting"] == "objective"
+    p = hb_p = _hb_network().generators_t.p["__buy_nh3"].clip(lower=0)
+    assert nh3["buy_in"]["value"] == pytest.approx(float(p.sum())) and nh3["buy_in"]["unit"] == "MWh"
+    assert nh3["buy_in"]["weighting"] == "generators" and nh3["buy_in"]["flag"] is None
+    del hb_p
+
+
+def test_a_bus_with_its_own_source_makes_no_identity_claim():
+    # GK A B5: with a plain source generator on the bus, Made + Bought in + Lost is not Delivered; the
+    # payload states the terms only, never a balance check.
+    n = _hb_network()
+    n.add("Generator", "nh3_spot", bus="nh3", carrier="NH3", p_nom=10.0, marginal_cost=10.0)
+    n.optimize(solver_name="highs")
+    nh3 = _product(compute_process_view(n), "nh3")
+    assert nh3["unused_supply"]["value"] is not None
+    spot_t = float(n.generators_t.p["nh3_spot"].clip(lower=0).sum()) / MWH_PER_T
+    assert spot_t > 1
+    terms = nh3["production"]["t"] + nh3["buy_in"]["t"] + nh3["lost"]["t"]
+    assert abs(terms - nh3["delivery"]["t"]) > 1  # the tiles' terms leave the bus's own source out
+    assert not any(k in nh3 for k in ("balance", "identity", "balanced"))
+
+
+def test_made_plus_bought_in_plus_lost_is_delivered(hb):
+    # The tiles' identity: the shortfall slack feeds the bus, so the load's p (Delivered) counts it;
+    # the cyclic tank's level change is zero over the horizon.
+    nh3 = _product(compute_process_view(hb), "nh3")
+    assert nh3["lost"]["t"] > 0 and nh3["buy_in"]["t"] > 0
+    made, bought, lost = nh3["production"]["t"], nh3["buy_in"]["t"], nh3["lost"]["t"]
+    assert made + bought + lost == pytest.approx(nh3["delivery"]["t"], rel=1e-6)
+
+
+def test_a_time_varying_buy_in_price_under_multi_period_weights():
+    n = pypsa.Network()
+    n.set_snapshots(pd.MultiIndex.from_product([[2030, 2040], range(3)]))
+    n.set_investment_periods([2030, 2040])
+    n.investment_period_weightings["years"] = [10.0, 5.0]
+    n.snapshot_weightings.loc[:, :] = 2.0
+    n.add("Carrier", "NH3")
+    n.add("Bus", "nh3", carrier="NH3", unit="MWh")
+    n.buses["mwh_per_t"] = MWH_PER_T
+    n.add("Load", "d", bus="nh3", carrier="NH3", p_set=4.0)
+    n.add("Generator", "__buy_nh3", bus="nh3", carrier="NH3", p_nom=10.0, marginal_cost=50.0)
+    n.generators["process_role"] = "buy_in"
+    n.generators_t.marginal_cost["__buy_nh3"] = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0]
+    n.optimize(solver_name="highs", multi_investment_periods=True)
+    nh3 = _product(compute_process_view(n), "nh3")
+    # 4 MWh/h × price × 2 h weight × the period's years.
+    expected = {"2030": 4 * (10 + 20 + 30) * 2 * 10, "2040": 4 * (40 + 50 + 60) * 2 * 5}
+    assert nh3["buy_in"]["eur"] == pytest.approx(sum(expected.values()))
+    assert {str(k): v for k, v in nh3["buy_in"]["eur_by_period"].items()} == pytest.approx(expected)
+
+
+def test_a_negative_buy_in_flow_costs_nothing():
+    # GK A B7 mutant: the cost clips the flow as the quantity does.
+    n = _hb_network()
+    p = n.generators_t.p["__buy_nh3"].copy()
+    p.iloc[0] = -3.0
+    n.generators_t.p["__buy_nh3"] = p
+    nh3 = _product(compute_process_view(n), "nh3")
+    assert nh3["buy_in"]["eur"] == pytest.approx(float((p.clip(lower=0) * 97.0).sum()))
+
+
+def test_the_buy_in_cost_is_on_the_objective_weights_not_the_energy_ones():
+    # GK A B7 mutant: with objective weights unlike the generator weights, the cost follows the objective's.
+    n = _hb_network()
+    n.snapshot_weightings["objective"] = 2.0
+    n.snapshot_weightings["generators"] = 1.0
+    nh3 = _product(compute_process_view(n), "nh3")
+    p = n.generators_t.p["__buy_nh3"].clip(lower=0)
+    assert nh3["buy_in"]["eur"] == pytest.approx(float((p * 97.0 * 2.0).sum()))
+    assert nh3["buy_in"]["value"] == pytest.approx(float(p.sum()))

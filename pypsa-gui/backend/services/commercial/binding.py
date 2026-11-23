@@ -25,6 +25,7 @@ import pandas as pd
 from services.adequacy.stress import StressValidationError
 from services.commercial import connection as conn
 from services.commercial import lp_bindings
+from services.commercial import placeholders
 
 
 class BindingRefusal(Exception):
@@ -237,6 +238,10 @@ def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
         return None
 
     commercial = resolve_tariff_ref(commercial, resolve_item)
+    unfilled = placeholders.first_problem(commercial.contracts)
+    if unfilled:
+        # A Library contract template still naming no party or asset (SCU06 S2a).
+        raise BindingRefusal(422, placeholders.CODE, unfilled)
     if commercial.import_tariff_ref is not None:
         clash = tariff_currency_mismatch(commercial.import_tariff, currency)
         if clash:
@@ -405,9 +410,25 @@ def context_resolvers(ctx, user=None) -> tuple[Callable[[object], pd.Series],
     from services.library import items as library_items
     from services.library import series_store
 
+    # The project's own copies first (project-io 03), then the org's Library.
+    copies = (
+        pathlib.Path(ctx.storage_dir) if getattr(ctx, "storage_dir", None) else None
+    )
     # Looked up at call time, so a patched store is the one used.
-    return (_in_org(ctx, user, lambda db, org, ref: series_store.resolve(db, org, ref)),
-            _in_org(ctx, user, lambda db, org, ref: library_items.resolve(db, org, ref)))
+    return (
+        _in_org(
+            ctx,
+            user,
+            lambda db, org, ref: series_store.resolve(db, org, ref, project_dir=copies),
+        ),
+        _in_org(
+            ctx,
+            user,
+            lambda db, org, ref: library_items.resolve(
+                db, org, ref, project_dir=copies
+            ),
+        ),
+    )
 
 
 def context_series_meta(ctx, user=None) -> Callable[[object], dict]:

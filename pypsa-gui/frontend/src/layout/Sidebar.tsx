@@ -12,6 +12,10 @@ import { useUIStore } from '../store/uiStore'
 import { networkApi } from '../api/network'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ioApi } from '../api/io'
+import { workbookApi } from '../api/workbook'
+import {
+  AS_LAST_SAVED, INPUT_WORKBOOK_DESC, INPUT_WORKBOOK_LABEL, SAVE_FIRST_REASON, TEMPLATE_DESC, TEMPLATE_LABEL,
+} from '../components/workbook/workbookWords'
 import { projectsApi } from '../api/projects'
 import type { ImportSummary, ProjectInfo } from '../api/types'
 import { ImportZone } from '../pages/ImportExport'
@@ -34,8 +38,11 @@ import { SItem, SectionHdr, SubHdr } from './sidebar/SidebarRows'
 import {
   ResultsWorkbookPicker, WORKBOOK_DEFAULT, useWorkbookViews, workbookBlock, type WorkbookChoice,
 } from './sidebar/ResultsWorkbookPicker'
-import { STEPS, type StepId } from './sidebar/steps'
+import { STEPS, stepsForKind, type Step, type StepId } from './sidebar/steps'
+import { useOpenProjectKind, useOpenProjectKindPending } from '../hooks/useOpenProjectKind'
+import { STUDY_KIND } from '../utils/projectActions'
 import { flushPendingMapLayoutToServer } from '../pages/mapLayoutStore'
+import { BrowserNotifyPref } from '../components/runStatus/NotifyOptIn'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const SIDEBAR_EXPANDED_W = 240
@@ -48,14 +55,37 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
   onClose: () => void; initialTab?: 'import' | 'export'; initialFormat?: 'workbook' | null; projectName: string
 }) {
   const [tab, setTab] = useState<'import' | 'export'>(initialTab)
-  const [exportFmt, setExportFmt] = useState<'bundle' | 'netcdf' | 'csv' | 'excel' | 'matpower' | 'workbook'>(initialFormat ?? 'bundle')
+  const [exportFmt, setExportFmt] = useState<'bundle' | 'netcdf' | 'csv' | 'excel' | 'matpower' | 'workbook' | 'input' | 'template'>(initialFormat ?? 'bundle')
   const [workbook, setWorkbook] = useState<WorkbookChoice>(WORKBOOK_DEFAULT)
   const workbookViews = useWorkbookViews(tab === 'export' && exportFmt === 'workbook')
   const workbookOff = exportFmt === 'workbook' && workbookBlock(workbookViews.data, workbook) !== null
   const [exportFilename, setExportFilename] = useState(slugify(projectName))
   const [exporting, setExporting] = useState(false)
+  const [elapsed, setElapsed] = useState(0)
+  useEffect(() => {
+    if (!exporting) { setElapsed(0); return }
+    const t0 = Date.now()
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 1000)
+    return () => clearInterval(id)
+  }, [exporting])
   const qc = useQueryClient()
   const { setProjectName, currentProject } = useUIStore()
+  // The input workbook holds the project as last saved: offer "Save first" while edits are unsaved.
+  const { data: undoInfo } = useQuery({
+    queryKey: nk(currentProject, 'undoInfo'), queryFn: networkApi.undoInfo,
+    enabled: tab === 'export' && exportFmt === 'input' && !!currentProject, staleTime: 0,
+  })
+  const [savingFirst, setSavingFirst] = useState(false)
+  const saveFirst = async () => {
+    if (!currentProject) return
+    setSavingFirst(true)
+    const saved = await saveProjectQuietly(currentProject, true)
+    setSavingFirst(false)
+    qc.invalidateQueries({ queryKey: nk(currentProject, 'undoInfo') })
+    qc.invalidateQueries({ queryKey: ['projects'] })
+    if (!saved) toast.error(`Could not save ‘${currentProject}’.`)
+  }
+  const inputOff = exportFmt === 'input' && !currentProject
 
   const handleImportSuccess = (summary: ImportSummary, fileName?: string) => {
     // Scope to the active project's network + results (the import replaced the
@@ -87,6 +117,7 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
     try {
       let blob: Blob
       let ext: string
+      let templateName: string | null = null
       if (exportFmt === 'bundle') {
         if (!currentProject) {
           toast.error('Save the project first, then export as bundle.')
@@ -102,20 +133,27 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
         }
         blob = wb
         ext = '.xlsx'
+      } else if (exportFmt === 'input' || exportFmt === 'template') {
+        if (exportFmt === 'input' && !currentProject) return
+        const f = exportFmt === 'input' ? await workbookApi.project(currentProject!) : await workbookApi.template()
+        blob = f.blob
+        ext = '.xlsx'
+        // The blank template keeps its own name: it is no project's file.
+        if (exportFmt === 'template') templateName = f.filename
       } else {
         const fns = { netcdf: ioApi.exportNetcdf, csv: ioApi.exportCsv, excel: ioApi.exportExcel, matpower: ioApi.exportMatpower }
         const exts = { netcdf: '.nc', csv: '.zip', excel: '.xlsx', matpower: '.m' }
         blob = await fns[exportFmt]()
         ext = exts[exportFmt]
       }
-      const fname = (exportFilename.trim() || slugify(projectName)) + ext
+      const fname = templateName ?? (exportFilename.trim() || slugify(projectName)) + ext
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url; a.download = fname; a.click()
       URL.revokeObjectURL(url)
       toast.success(`Downloaded ${fname}`)
     } catch (e) {
-      toast.error(exportFmt === 'workbook' && e instanceof Error && !('isAxiosError' in e) ? e.message : 'Export failed')
+      toast.error(['workbook', 'input', 'template', 'excel'].includes(exportFmt) && e instanceof Error && !('isAxiosError' in e) ? e.message : 'Export failed')
     } finally { setExporting(false) }
   }
 
@@ -160,7 +198,7 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
           )}
           {tab === 'export' && (
             <>
-              <label className="flex flex-col gap-1 mb-4">
+              {exportFmt !== 'template' && <label className="flex flex-col gap-1 mb-4">
                 <span className="text-xs font-medium text-text">File name</span>
                 <div className="flex items-center gap-1">
                   <input
@@ -171,10 +209,10 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
                     className="flex-1 px-2.5 py-1.5 text-xs border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20"
                   />
                   <span className="text-[10px] text-muted font-mono">
-                    {exportFmt === 'bundle' ? '.pypsaproj.zip' : exportFmt === 'netcdf' ? '.nc' : exportFmt === 'csv' ? '.zip' : exportFmt === 'excel' || exportFmt === 'workbook' ? '.xlsx' : '.m'}
+                    {exportFmt === 'bundle' ? '.pypsaproj.zip' : exportFmt === 'netcdf' ? '.nc' : exportFmt === 'csv' ? '.zip' : exportFmt === 'matpower' ? '.m' : '.xlsx'}
                   </span>
                 </div>
-              </label>
+              </label>}
               <p className="text-xs text-muted mb-3">Format:</p>
               <div className="space-y-2 mb-4">
                 {([
@@ -182,6 +220,8 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
                   { id: 'netcdf',   label: 'NetCDF (.nc)',   desc: 'Native PyPSA format — lossless' },
                   { id: 'excel',    label: 'Excel (.xlsx)',  desc: 'One sheet per component' },
                   { id: 'workbook', label: 'Results workbook (Excel)', desc: 'The solved results: overview, key charts and one sheet per result tab' },
+                  { id: 'input',    label: INPUT_WORKBOOK_LABEL, desc: INPUT_WORKBOOK_DESC },
+                  { id: 'template', label: TEMPLATE_LABEL, desc: TEMPLATE_DESC },
                   { id: 'csv',      label: 'CSV zip (.zip)', desc: 'Folder of CSVs' },
                   { id: 'matpower', label: 'MATPOWER (.m)',  desc: 'AC-only, for MATLAB/Octave' },
                 ] as const).map(f => (
@@ -192,6 +232,20 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
                       <div>
                         <div className="text-xs font-semibold text-text">{f.label}</div>
                         <div className="text-[10px] text-muted">{f.desc}</div>
+                        {f.id === 'input' && (currentProject ? (
+                          <div className="flex items-baseline gap-2 text-[10px] text-muted" data-testid="input-workbook-note">
+                            <span>{AS_LAST_SAVED}</span>
+                            {undoInfo?.unsaved && (
+                              <button type="button" data-testid="input-workbook-save-first" disabled={savingFirst}
+                                onClick={e => { e.preventDefault(); void saveFirst() }}
+                                className="shrink-0 text-text underline disabled:opacity-50">
+                                {savingFirst ? 'Saving…' : 'Save first'}
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-warn" data-testid="input-workbook-why">{SAVE_FIRST_REASON}</div>
+                        ))}
                       </div>
                     </label>
                     {f.id === 'workbook' && exportFmt === 'workbook' && (
@@ -206,9 +260,9 @@ function IoModal({ onClose, initialTab = 'import', initialFormat, projectName }:
               </p>
               <div className="flex gap-2 justify-end">
                 <button onClick={onClose} className="px-3 py-1.5 border border-border rounded text-xs text-muted hover:text-text transition-colors">Cancel</button>
-                <button onClick={handleExport} disabled={exporting || workbookOff}
+                <button onClick={handleExport} disabled={exporting || workbookOff || inputOff}
                   className="flex items-center gap-1.5 px-4 py-1.5 bg-accent text-white rounded text-xs font-semibold hover:bg-accent/90 disabled:opacity-50 transition-colors">
-                  <Download size={12} /> {exporting ? 'Downloading…' : 'Download File'}
+                  <Download size={12} /> {exporting ? `Preparing… ${elapsed} s` : 'Download File'}
                 </button>
               </div>
             </>
@@ -337,7 +391,7 @@ function SaveNameModal({
 // carries the button that opens the project's actions (the Expert footer).
 function ProjectHeaderCard({
   currentProject, lastSavedIso, dirty, autosaveEnabled, onToggleAutosave,
-  menu,
+  menu, unsavedNetwork, onSaveUnsaved,
 }: {
   currentProject: string | null
   lastSavedIso: string | null
@@ -345,6 +399,9 @@ function ProjectHeaderCard({
   autosaveEnabled: boolean
   onToggleAutosave: () => void
   menu?: { open: boolean; onToggle: () => void; controls: string }
+  /** A file import replaced the network and it is in no project yet: the file's name. */
+  unsavedNetwork?: string | null
+  onSaveUnsaved?: () => void
 }) {
   // Tick once per minute so "Saved Xm ago" updates without polling the
   // backend. 60 s granularity is fine — the label only changes minute-to-minute.
@@ -353,6 +410,24 @@ function ProjectHeaderCard({
     const id = setInterval(() => setTick(t => t + 1), 60_000)
     return () => clearInterval(id)
   }, [])
+
+  if (!currentProject && unsavedNetwork) {
+    return (
+      <div className="mx-3 mt-2 mb-2 p-3 rounded border border-[var(--color-border)] bg-panel" data-testid="sidebar-network-unsaved">
+        <div className="flex items-start gap-1.5">
+          <div className="text-[12px] font-semibold text-ink-600 mb-0.5 flex-1 min-w-0">Network not saved yet</div>
+          {menu && <ProjectMenuButton {...menu} />}
+        </div>
+        <div className="text-[10px] text-ink-400 leading-relaxed">
+          ‘{unsavedNetwork}’ was loaded from a file and is not in a project.
+        </div>
+        <button type="button" data-testid="sidebar-save-as-project" onClick={onSaveUnsaved}
+          className="mt-2 px-2.5 py-1 text-[11px] rounded bg-accent text-white hover:opacity-90">
+          Save as project
+        </button>
+      </div>
+    )
+  }
 
   if (!currentProject) {
     return (
@@ -481,8 +556,10 @@ function ProjectSectionContent({
     autosaveEnabled, setAutosaveEnabled, markProjectSaved,
     lastSavedByProject, recents,
     activeSlidePanel, setSlidePanel, setProjectSwitchInProgress,
-    readOnly, readOnlyReason, projectMismatch,
+    readOnly, readOnlyReason, projectMismatch, unsavedNetwork,
   } = useUIStore()
+  // "Save as project" for a network a file import loaded that belongs to no project yet.
+  const [showSaveUnsaved, setShowSaveUnsaved] = useState(false)
   // Separate flag for the "Save a Copy" flow so its modal can pre-fill a
   // distinct default name and the confirm handler doesn't switch the active
   // project to the copy.
@@ -987,8 +1064,36 @@ function ProjectSectionContent({
     </>
   )
 
+  const handleSaveUnsaved = async (name: string) => {
+    setShowSaveUnsaved(false)
+    try {
+      // rebind: the loaded network becomes this project's, as the wizard's .nc import does.
+      await projectsApi.save(name, false, true, undefined, true)
+    } catch (e) {
+      // Plain words, never the status line: a taken name is the common refusal.
+      const status = (e as { response?: { status?: number } })?.response?.status
+      toast.error(status === 409
+        ? `A project named ‘${name}’ already exists, so nothing was saved. Choose another name.`
+        : `Could not save as ‘${name}’: the project was not created.`)
+      return
+    }
+    useUIStore.getState().noteNewProjectCreated('file')
+    setCurrentProject(name)
+    setProjectName(name)
+    qc.invalidateQueries({ queryKey: ['projects'] })
+    invalidateNetworkQueries(qc, name)
+    toast.success(`Saved as project '${name}'`)
+  }
+
   const modals = (
     <>
+      {showSaveUnsaved && unsavedNetwork && (
+        <SaveNameModal
+          initial={slugify(unsavedNetwork)}
+          onSave={handleSaveUnsaved}
+          onClose={() => setShowSaveUnsaved(false)}
+        />
+      )}
       {showCopyModal && (
         <SaveNameModal
           initial={slugify(`${currentProject || pn}_copy`)}
@@ -1032,6 +1137,8 @@ function ProjectSectionContent({
       dirty={dirty}
       autosaveEnabled={autosaveEnabled}
       onToggleAutosave={() => setAutosaveEnabled(!autosaveEnabled)}
+      unsavedNetwork={unsavedNetwork}
+      onSaveUnsaved={() => setShowSaveUnsaved(true)}
       menu={variant === 'footer'
         ? { open: menuOpen, onToggle: () => setMenuOpen(o => !o), controls: menuId }
         : undefined}
@@ -1072,6 +1179,16 @@ function ProjectSectionContent({
  * Guided mode's one navigation entry for the hub-design flow (spec §3.5).
  * Rendered only in Guided; Expert never shows it.
  */
+/** One step of the expanded sidebar: its header and, when open, its rows. */
+function StepGroup({ step, open, onToggle }: { step: Step; open: boolean; onToggle: () => void }) {
+  return (
+    <section aria-label={step.label} data-testid={`sidebar-group-${step.id}`}>
+      <SectionHdr title={step.title} open={open} onToggle={onToggle} testId={`sidebar-section-${step.id}`} />
+      {open && <step.Content />}
+    </section>
+  )
+}
+
 function HubDesignNavButton({ compact = false, onCloseModal }: {
   compact?: boolean
   onCloseModal?: () => void
@@ -1197,6 +1314,7 @@ function PreferencesFooter({ small = false }: { small?: boolean }) {
           <span className="capitalize">{density === 'comfortable' ? 'Comfy' : 'Compact'}</span>
         </button>
       </div>
+      <BrowserNotifyPref />
     </div>
   )
 }
@@ -1305,6 +1423,12 @@ export default function Sidebar() {
   } = useUIStore()
   // Guided (spec §3.5) is a render condition only — `sections` below is untouched.
   const guided = uiMode === 'guided'
+  // A planning → dynamics study shows only the steps that apply to it, and no
+  // hub-design entry: it has no network (pio/08).
+  const kind = useOpenProjectKind()
+  const isStudy = kind === STUDY_KIND
+  // Held while the kind is loading, so a study never flashes the hub bands.
+  const steps = useOpenProjectKindPending() ? [] : stepsForKind(kind)
   const [sections, setSections] = useState<Record<FlyoutSection, boolean>>({
     project: true, setup: true, model: true, run: true, results: true, reports: true,
   })
@@ -1438,7 +1562,7 @@ export default function Sidebar() {
             </button>
           </div>
 
-          {guided && (
+          {guided && !isStudy && (
             <div className="w-full border-b border-border shrink-0">
               <HubDesignNavButton compact onCloseModal={() => setActiveFlyout(null)} />
             </div>
@@ -1448,7 +1572,7 @@ export default function Sidebar() {
               expanded sidebar keeps it in its footer). Guided shows only the
               project (spec §3.5). */}
           <div className="flex-1 flex flex-col w-full">
-            {!guided && STEPS.map(step => (
+            {(!guided || isStudy) && steps.map(step => (
               <IconStripBtn key={step.id} icon={step.icon} label={step.label} sectionId={step.id}
                 activeFlyout={activeFlyout} onClick={() => toggleFlyout(step.id)} />
             ))}
@@ -1514,7 +1638,7 @@ export default function Sidebar() {
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden py-1">
 
-          {guided && (
+          {guided && !isStudy && (
             <div className="px-2 pt-1 pb-1">
               <HubDesignNavButton />
             </div>
@@ -1533,11 +1657,11 @@ export default function Sidebar() {
                 guided
               />
             )}
-          </>) : STEPS.map(step => (
-            <section key={step.id} aria-label={step.label} data-testid={`sidebar-group-${step.id}`}>
-              <SectionHdr title={step.title} open={sections[step.id]} onToggle={() => toggleSection(step.id)} testId={`sidebar-section-${step.id}`} />
-              {sections[step.id] && <step.Content />}
-            </section>
+            {isStudy && steps.map(step => (
+              <StepGroup key={step.id} step={step} open={sections[step.id]} onToggle={() => toggleSection(step.id)} />
+            ))}
+          </>) : steps.map(step => (
+            <StepGroup key={step.id} step={step} open={sections[step.id]} onToggle={() => toggleSection(step.id)} />
           ))}
         </div>
 

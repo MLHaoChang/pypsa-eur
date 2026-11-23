@@ -28,7 +28,7 @@ describe('SizedDesignTable', () => {
       { component: 'StorageUnit', entity: 'bess_new', unit: 'MW' }]
     render(<SizedDesignTable testId="t" mode="guided"
       report={report({ status: 'ok', payload: { by_carrier: {}, total_p_nom_mw: 0, assets: [DIESEL, BESS] } })} />)
-    expect(screen.getByTestId('t-row-diesel_new').textContent).toBe('diesel_newGenerator, diesel4.2 MW0–12 MW')
+    expect(screen.getByTestId('t-row-diesel_new').textContent).toBe('Diesel newGenerator, diesel4.2 MW0–12 MW')
     expect(screen.getByTestId('t-row-bess_new').textContent)
       .toContain('2.5 MW · 10 MWh (4 h)')
   })
@@ -64,7 +64,7 @@ describe('SizedDesignTable', () => {
     holds = [{ component: 'Store', entity: 'nh3_tank', unit: 't' }]
     render(<SizedDesignTable testId="t" mode="expert"
       report={report({ status: 'ok', payload: { assets: [nh3] } })} />)
-    expect(screen.getByTestId('t-row-nh3_tank').textContent).toBe('nh3_tankStore, NH3500 t0–900 t')
+    expect(screen.getByTestId('t-row-nh3_tank').textContent).toBe('NH3 tankStore, NH3500 t0–900 t')
   })
 
   it('an asset whose unit is not known shows the figure without one', () => {
@@ -75,6 +75,30 @@ describe('SizedDesignTable', () => {
     expect(sizedBuilt(BESS, 'kW')).toBe('2.5 kW · 10 (4 h)')
     render(<SizedDesignTable testId="t" mode="expert"
       report={report({ status: 'ok', payload: { assets: [DIESEL] } })} />)
-    expect(screen.getByTestId('t-row-diesel_new').textContent).toBe('diesel_newGenerator, diesel4.20–12')
+    expect(screen.getByTestId('t-row-diesel_new').textContent).toBe('Diesel newGenerator, diesel4.20–12')
+  })
+  it("a row's own unit wins; an older row without one takes section 5's (issue 20)", () => {
+    const ore: EhSizedAsset = { component: 'Store', name: 'ore', carrier: 'ore', built_mwh: 30000,
+      min_mwh: 0, max_mwh: 60000, unit: 't' }
+    const pv: EhSizedAsset = { component: 'Generator', name: 'pv', carrier: 'solar', built_mw: 5,
+      min_mw: 0, max_mw: 10, unit: null }
+    // Section 5 lists neither row with that unit (past its 200-row cap, or a stale unit).
+    holds = [{ component: 'Store', entity: 'ore', unit: 'MWh' }, { component: 'Generator', entity: 'pv', unit: 'MW' },
+      { component: 'Generator', entity: 'diesel_new', unit: 'MW' }]
+    render(<SizedDesignTable testId="t" mode="guided"
+      report={report({ status: 'ok', payload: { assets: [ore, pv, DIESEL] } })} />)
+    expect(screen.getByTestId('t-row-ore').textContent).toBe('OreStore, ore30,000 t0–60,000 t')
+    expect(screen.getByTestId('t-row-pv').textContent).toBe('PVGenerator, solar50–10')
+    expect(screen.getByTestId('t-row-diesel_new').textContent).toBe('Diesel newGenerator, diesel4.2 MW0–12 MW')
+  })
+
+  it('a staged plan leads with the period and lists by it', () => {
+    const late: EhSizedAsset = { ...DIESEL, name: 'diesel_2035', stage: 2035, unit: 'MW' }
+    const early: EhSizedAsset = { ...DIESEL, name: 'diesel_2027', stage: 2027, unit: 'MW' }
+    render(<SizedDesignTable testId="t" mode="expert"
+      report={report({ status: 'ok', payload: { assets: [late, early] } })} />)
+    expect(screen.getByTestId('t').querySelector('th')?.textContent).toBe('Period')
+    expect([...screen.getByTestId('t').querySelectorAll('tbody tr')].map(r => r.firstChild?.textContent))
+      .toEqual(['2027', '2035'])
   })
 })

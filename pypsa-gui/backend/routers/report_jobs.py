@@ -57,6 +57,7 @@ from routers.reports import (
     _render_figures,
     _resolve_template,
     _template_not_untagged,
+    store_evidence_only_report,
 )
 from services.pypsa_service import PyPSAService
 from services.reports import store, templates
@@ -190,14 +191,17 @@ def _in_flight(exc: Exception) -> HTTPException:
     })
 
 
-def _start(project: AuthorizedProject, **kwargs: Any) -> str:
+def _start(project: AuthorizedProject, *, user_id: Any, **kwargs: Any) -> str:
     # AA-05 S4 (V2): strict only from the assistant's in-process switch;
     # no request field reaches it.
     if "strict" not in kwargs and assistant_strict_active():
         kwargs["strict"] = True
     try:
+        # Project-viewer-role 02: the requester and the project row's id, so
+        # the job reads the role again before it saves.
         return start_report_job(
             project_name=project.name, project_dir=project.directory,
+            user_id=user_id, project_id=project.uuid,
             lock=PyPSAService.get_solver_state_lock(), state=_state(), **kwargs)
     except ReportJobInFlight as exc:
         raise _in_flight(exc) from exc
@@ -231,6 +235,35 @@ def _summaries(declared: list[SummaryDeclaration] | None) -> dict[str, list[str]
     return out
 
 
+_NO_LLM_KINDS = ("missing_api_key", "sdk_not_installed")
+
+
+def _plain_report_if_no_llm(project: AuthorizedProject, profile: Any,
+                            body: GenerateReportBody) -> dict | None:
+    """TE2E-16-PLAIN-1: with no usable LLM profile (`missing_api_key` or
+    `sdk_not_installed` only), Generate report stores the plain evidence-only
+    report built from the stored results (no key needed) and answers
+    `{status: "done", mode: "plain"}`; no job starts. `None` keeps today's path.
+
+    Never plain: the assistant's strict call (the chat tool polls a job), and a
+    body with an LLM-only input — a template, an instruction, summaries, a
+    section subset or a language other than English — which a plain report
+    cannot honour, so those keep the 400 naming the missing key. `title`
+    carries over."""
+    if assistant_strict_active():
+        return None
+    if (body.template_file_id is not None or (body.instruction or "").strip()
+            or body.summaries or body.sections
+            or (body.language or "en").strip().lower() != "en"):
+        return None
+    _provider, err = _provider_for_profile(profile)
+    if err not in _NO_LLM_KINDS:
+        return None
+    evidence, figure_pngs = _evidence_for(project)
+    stored = store_evidence_only_report(project, evidence, figure_pngs, body.title)
+    return {"status": "done", "report_id": stored["report_id"], "mode": "plain"}
+
+
 # ── routes ──────────────────────────────────────────────────────────────────
 
 
@@ -258,10 +291,13 @@ def generate_report(body: GenerateReportBody,
         }
         language = language or outline.language
     profile = _resolve_profile()
+    plain = _plain_report_if_no_llm(project, profile, body)
+    if plain is not None:
+        return plain
     provider = _provider_or_400(profile)
     evidence, figure_pngs = _evidence_for(project)
     report_id = _start(
-        project, evidence=evidence, figure_pngs=figure_pngs, profile=profile,
+        project, user_id=user.id if user else None, evidence=evidence, figure_pngs=figure_pngs, profile=profile,
         provider=provider, language=language or "en",
         sections=body.sections, instruction=body.instruction, title=body.title,
         summaries=_summaries(body.summaries), **template_kwargs)
@@ -303,7 +339,8 @@ def propose_template_plan(report_id: str, body: ProposeMappingBody,
         start_mapping_job(
             project_name=project.name, project_dir=project.directory,
             document=doc, outline=outline, profile=profile, provider=provider,
-            language=language, lock=PyPSAService.get_solver_state_lock(), state=_state())
+            language=language, user_id=user.id if user else None, project_id=project.uuid,
+            lock=PyPSAService.get_solver_state_lock(), state=_state())
     except ReportJobInFlight as exc:
         raise _in_flight(exc) from exc
     except store.ReportBusy as exc:
@@ -394,7 +431,7 @@ def regenerate_section(report_id: str, section_id: str, body: RegenerateSectionB
     provider = _provider_or_400(profile)
     evidence, figure_pngs = _evidence_for(project)
     _start(
-        project, evidence=evidence, figure_pngs=figure_pngs, profile=profile,
+        project, user_id=user.id if user else None, evidence=evidence, figure_pngs=figure_pngs, profile=profile,
         provider=provider, language=body.language or base.language or "en",
         instruction=instruction, base_document=base,
         regenerate_section=section_id)

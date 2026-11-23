@@ -51,7 +51,11 @@ def take_constraint_hints() -> list[dict]:
 
 
 def add_constraint_hint(constraint: str, text: str, setting: str) -> None:
-    """Record one named-constraint hint for the failure card."""
+    """Record one named-constraint hint for the failure card.
+
+    ``setting`` names the Solver settings block the card links to: "offgrid"
+    (Network › Off-grid constraints) or "reserve" (Dispatch › Operating reserve).
+    """
     hints = getattr(_CONSTRAINT_HINTS, "hints", None)
     if hints is None:
         hints = _CONSTRAINT_HINTS.hints = []
@@ -200,7 +204,7 @@ def _diagnose_infeasibility(network, config, log_queue,
             emit(f"[INFEASIBLE]   • {line}")
             body = line[len(_OR_LABEL) + 2:] if line.startswith(f"{_OR_LABEL}: ") else line
             body = _regex.sub(r" \(row [^)]*\)", "", body.split(". ", 1)[0].rstrip(".") + ".")
-            add_constraint_hint(_OR_LABEL, body, "offgrid")
+            add_constraint_hint(_OR_LABEL, body, "reserve")
             hints += 1
     except Exception:
         pass

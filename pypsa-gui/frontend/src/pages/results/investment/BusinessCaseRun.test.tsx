@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
-  businessCaseApi, InvestmentCaseMissing,
+  businessCaseApi, InvestmentCaseMissing, NetworkBusy,
   type BusinessCasePnl, type BusinessCaseReport, type BusinessCaseStudy,
 } from '../../../api/businessCase'
 import { useUIStore } from '../../../store/uiStore'
@@ -213,6 +213,18 @@ describe('the run', () => {
     fireEvent.click(screen.getByTestId('bc-run-button'))
     await screen.findByTestId('bc-blocked')
     expect(screen.queryByTestId('bc-not-run')).toBeNull()
+  })
+
+  it('a busy project says so with a Retry, never "out of date"', async () => {
+    api.startRun.mockRejectedValueOnce(new NetworkBusy())
+    mount(null)
+    fireEvent.click(screen.getByTestId('bc-run-button'))
+    const b = await screen.findByTestId('bc-blocked')
+    expect(b.textContent ?? '').toContain('busy with another job')
+    expect(b.textContent ?? '').not.toMatch(/out of date|investment case/i)
+    api.startRun.mockResolvedValueOnce({ status: 'running' } as never)
+    fireEvent.click(screen.getByTestId('bc-retry'))
+    await waitFor(() => expect(api.startRun).toHaveBeenCalledTimes(2))
   })
 
   it('Run says why it is off', () => {

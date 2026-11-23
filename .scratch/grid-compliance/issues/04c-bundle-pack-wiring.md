@@ -3,7 +3,7 @@
 
 # GC-04c: wire the campus bundle's PSS/E pack to the GC-01 plant and model set
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Parent: `.scratch/grid-compliance/issues/04-psse-pack.md`
 Gated: yes (GK A2, gridspine)
@@ -30,3 +30,7 @@ psspy scripts and no GC-01 citation. The pack's README and manifest say so
   REPCA1 on the PoC branch, one psspy script per test-battery case, and the manifest's
   `model_set` citation; `plant_controller_not_written` and `scripts_not_written` are null.
 - The bundle's own `.raw`, `.dyr`, README and GFM table stay byte-identical.
+
+## Triage (2026-11-20, master 87cf52a7)
+
+Checked by code reading only. Acceptance is the 'Done when' section above. Still true: `gridspine/handoff/campus_bundle.py:223` calls `write_psse_pack` with no `plant`, `model_set` or `variant`. Depends on GC-01's freeze: merged (#1595). Gated: GK A2. Blocked by: none.

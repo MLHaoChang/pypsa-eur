@@ -127,6 +127,7 @@ describe('RunMonitor', () => {
     ['solves_used_up', /^Solve budget used up: the run waits for you: Change the budget ›$/],
     ['expired', /^Unattended approval expired: Continue step by stepNothing runs until you resume: it picks up at Solve\.$/],
     ['solver_error', /^Solve did not finish: Open the solve log ›$/],
+    ['solve_stopped', /^The solve was stopped: the run waits for you: Open the solve log ›$/],
     ['out_of_date', /^Inputs out of date: Review a new brief ›$/],
   ] as const)('says the %s failure in words with a › fix', async (state, words) => {
     show(state)
@@ -173,6 +174,37 @@ describe('RunMonitor', () => {
     await screen.findByTestId('run-state')
     const row = screen.getAllByTestId('run-stage').find(r => r.getAttribute('aria-current') === 'step')!
     expect(row.querySelector('[data-testid="run-stage-words"]')?.textContent).toBe(words)
+  })
+
+  it('a stage the profile skips says why under its row, and no other stage carries a reason line', async () => {
+    show('gate_fail')
+    await screen.findByTestId('run-state')
+    const rows = screen.getAllByTestId('run-stage')
+    const reason = (stage: string) =>
+      rows.find(r => r.getAttribute('data-stage') === stage)?.querySelector('[data-testid="run-stage-reason"]')?.textContent
+    expect(reason('report')).toBe('The run report is not part of a run yet.')
+    expect(reason('explore')).toBe('Exploring cases is not part of a run yet.')
+    expect(screen.getAllByTestId('run-stage-reason')).toHaveLength(2)
+  })
+
+  it('a reason on a stage that was not skipped never shows a reason line', async () => {
+    show('finished_with_stage_reasons')
+    await screen.findByTestId('run-state')
+    const rows = screen.getAllByTestId('run-stage')
+    for (const stage of ['solve', 'input_gate']) {
+      const row = rows.find(r => r.getAttribute('data-stage') === stage)!
+      expect(row.querySelector('[data-testid="run-stage-reason"]')).toBeNull()
+    }
+    expect(screen.getByTestId('run-monitor').textContent).not.toMatch(/A solve note|A gate note/)
+  })
+
+  it('a finished grid-only run says why it has no report, in words without a tracker number', async () => {
+    show('finished_grid_only')
+    await screen.findByTestId('run-state')
+    const row = screen.getAllByTestId('run-stage').find(r => r.getAttribute('data-stage') === 'report')!
+    const reason = row.querySelector('[data-testid="run-stage-reason"]')?.textContent ?? ''
+    expect(reason).toMatch(/^No report from grid-only runs yet/)
+    expect(screen.getByTestId('run-monitor').textContent).not.toMatch(/issue \d|#\d/i)
   })
 
   it.each(['over_budget', 'solves_used_up'] as const)('%s: a held run offers Stop but not Pause', async (state) => {

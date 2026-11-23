@@ -36,7 +36,11 @@ CUSTOM_BY_CLASS = {"Bus": {"country", "mwh_per_t", "product_value", "lost_produc
                    # Typed-cost-units issue 02: the declared DC/AC ratio (models/process_unit.py).
                    # homer-parity 02a: the fuel curve; 02b: the run-hour pair (services/fuel_curve.py).
                    "Generator": {"process_role", "dc_ac_ratio", "fuel_curve_slope", "fuel_curve_no_load", "fuel_price",
-                                 "om_cost_per_run_hour", "lifetime_run_hours"},
+                                 "om_cost_per_run_hour", "lifetime_run_hours",
+                                 # DGS-EXTRAS-1: the harmonic screen's inputs and the slack's grid strength.
+                                 "rated_mva", "harmonic_source", "harmonic_spectrum",
+                                 "sk_max_mva", "sk_min_mva", "rx_max", "rx_min"},
+                   "Load": {"rated_mva", "harmonic_source", "harmonic_spectrum"},
                    "GlobalConstraint": {"carrier"},
                    # Grid-to-process ticket 02: the process-unit columns (models/energy_hub.py EH_CUSTOM_COLUMNS).
                    "Link": {"eh_process", "criticality_tier", "throughput_unit", "specific_energy_kwh_per_t",

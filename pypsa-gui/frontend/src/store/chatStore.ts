@@ -118,6 +118,8 @@ export interface PendingConfirmationCard {
   sweep_card?: unknown
   /** Issue 04 S5: the earlier job call this card repeats (components/ConfirmationCard.tsx). */
   repeat_card?: unknown
+  /** Excel input workbook 06: what an import creates (components/workbook/WorkbookChatCard.tsx). */
+  workbook_card?: unknown
   /** LC-47: the rows of a change-set card, each with a tick box (components/ChangeSetCard.tsx). */
   change_set?: unknown
   /** Issue 19: set when the tool comes from an admin's MCP server (harness/confirm.py). */

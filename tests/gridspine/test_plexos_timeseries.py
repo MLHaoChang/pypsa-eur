@@ -127,11 +127,179 @@ def test_year_month_day_period_layout():
     assert series(body, snaps=half, step=30)["A"].tolist() == [10, 20, 30]
     bad = "Year,Month,Day,Period,A\n2015,1,1,25,1\n"
     assert "period 25 outside 1..24" in series(bad)["A"]
+    # GK A N2: an infinite key is refused, never cast to int
+    inf = "Year,Month,Day,Period,A\ninf,1,1,1,1\n"
+    assert series(inf)["A"] == "Year 'inf' is not a whole number"
+    inf = "Year,Month,Day,Period,A\n2015,1,1,-inf,1\n"
+    assert series(inf)["A"] == "Period '-inf' is not a whole number"
 
 
-def test_monthly_layout_waits_for_slice_3():
-    body = "NAME,M1,M2,M3,M4,M5,M6,M7,M8,M9,M10,M11,M12\nA,1,2,3,4,5,6,7,8,9,10,11,12\n"
-    assert series(body)["A"] == "monthly layout not read in this slice"
+MONTHLY = "NAME,M1,M2,M3,M4,M5,M6,M7,M8,M9,M10,M11,M12\n"
+JAN_FEB = pd.date_range("2015-01-31 22:00", periods=4, freq="h")
+
+
+def test_monthly_layout_gives_each_snapshot_its_months_value():
+    """Slice 3b: 31 Jan 22:00 and 23:00 are January, 1 Feb 00:00 is February."""
+    body = MONTHLY + "a,1,2,3,4,5,6,7,8,9,10,11,12\nB,0,0,0,0,0,0,0,0,0,0,0,0\n"
+    got = series(body, names=("A", "B"), snaps=JAN_FEB)
+    assert got["A"].tolist() == [1, 1, 2, 2]  # case-insensitive name match
+    assert got["B"].tolist() == [0, 0, 0, 0]
+
+
+@pytest.mark.parametrize(
+    "rows, reason",
+    [
+        (
+            "A,1,2,3,4,5,6,7,8,9,10,11,12\nA,1,2,3,4,5,6,7,8,9,10,11,12\n",
+            "row 'A' appears 2 times",
+        ),
+        ("B,1,2,3,4,5,6,7,8,9,10,11,12\n", "no row 'A'"),
+        ("A,1,nan,3,4,5,6,7,8,9,10,11,12\n", "value 'nan' at M2 is not a number"),
+        ("A,1,2,inf,4,5,6,7,8,9,10,11,12\n", "value 'inf' at M3 is not a number"),
+        ("A,1,2,3,4,5,6,7,8,9,10,11,\n", "value '' at M12 is not a number"),
+        ("A,1,2\n", "value '' at M3 is not a number"),
+    ],
+)
+def test_monthly_layout_refusals(rows, reason):
+    """GK A C2: non-finite cells, duplicate and missing rows leave the name unread."""
+    assert series(MONTHLY + rows, snaps=JAN_FEB)["A"] == reason
+
+
+def _mdp(days, periods=24, value=lambda m, d, p: m * 10000 + d * 100 + p):
+    body = "Month,Day,Period,A\n"
+    for m, d in days:
+        body += "".join(
+            f"{m},{d},{p},{value(m, d, p)}\n" for p in range(1, periods + 1)
+        )
+    return body
+
+
+def test_month_day_period_repeats_in_every_horizon_year():
+    """Slice 3b, GK A C1: the year-free layout over a New Year horizon."""
+    snaps = pd.date_range("2015-12-31 22:00", periods=4, freq="h")
+    got = series(_mdp([(1, 1), (12, 31)]), snaps=snaps)["A"]
+    assert got.tolist() == [123123, 123124, 10101, 10102]
+
+
+def test_month_day_period_leap_day():
+    """29 Feb rows are used in a leap year only; a leap year without them is a gap."""
+    leap = pd.date_range("2016-02-29 23:00", periods=2, freq="h")
+    days = [(2, 28), (2, 29), (3, 1)]
+    assert series(_mdp(days), snaps=leap)["A"].tolist() == [22924, 30101]
+    plain = pd.date_range("2015-02-28 23:00", periods=2, freq="h")
+    assert series(_mdp(days), snaps=plain)["A"].tolist() == [22824, 30101]
+    got = series(_mdp([(2, 28), (3, 1)]), snaps=leap)["A"]
+    assert got == "file has no value for 1 of 2 snapshots, first 2016-02-29 23:00:00"
+
+
+@pytest.mark.parametrize(
+    "body, snaps, step, reason",
+    [
+        (
+            _mdp([(1, 1)], periods=48),
+            HOURS[:3],
+            60,
+            "file step 30 minutes (48 periods a day) is finer than the 60-minute "
+            "snapshots; not resampled",
+        ),
+        (
+            _mdp([(1, 1)], periods=24),
+            pd.date_range("2015-01-01", periods=3, freq="30min"),
+            30,
+            "file step 60 minutes (24 periods a day) is coarser than the 30-minute "
+            "snapshots; not resampled",
+        ),
+        (
+            _mdp([(1, 1)]) + "1,2,1,5\n",
+            HOURS[:3],
+            60,
+            "month 1 day 2 has 1 periods, other days 24; periods per day differ",
+        ),
+        (_mdp([(2, 30)]), HOURS[:3], 60, "month 2 day 30 is not a date"),
+        (
+            "Month,Day,Period,A\n1,1,inf,5\n",
+            HOURS[:3],
+            60,
+            "Period 'inf' is not a whole number",
+        ),
+        (
+            "Month,Day,Period,A\n1,-inf,1,5\n",
+            HOURS[:3],
+            60,
+            "Day '-inf' is not a whole number",
+        ),
+        (
+            "Month,Day,Period,A\n1,1,x,5\n",
+            HOURS[:3],
+            60,
+            "Period 'x' is not a whole number",
+        ),
+    ],
+)
+def test_month_day_period_refusals(body, snaps, step, reason):
+    """GK A C1: file step from periods per day, a finer and a coarser one refused."""
+    assert series(body, snaps=snaps, step=step)["A"] == reason
+
+
+def test_monthly_layout_partly_covered_snapshot_and_row_cap(monkeypatch):
+    days = pd.date_range("2015-01-31 12:00", periods=2, freq="D")
+    got = series(MONTHLY + "A,1,2,3,4,5,6,7,8,9,10,11,12\n", snaps=days, step=1440)
+    assert got["A"] == (
+        "pattern 'M1' covers snapshot 2015-01-31 12:00:00 only partly; not rounded"
+    )
+    body = MONTHLY + "A,1,2,3,4,5,6,7,8,9,10,11,12\nB,1,2,3,4,5,6,7,8,9,10,11,12\n"
+    monkeypatch.setattr("gridspine.ingest.plexos_csv.MAX_CSV_ROWS", 2)
+    assert series(body, snaps=JAN_FEB)["A"].tolist() == [1, 1, 2, 2]
+    monkeypatch.setattr("gridspine.ingest.plexos_csv.MAX_CSV_ROWS", 1)
+    assert series(body, snaps=JAN_FEB)["A"] == "more than 1 rows; not read"
+
+
+def test_month_day_period_empty_and_period_zero():
+    assert series("Month,Day,Period,A\n")["A"] == (
+        "file has no value for 3 of 3 snapshots, first 2015-01-01 00:00:00"
+    )
+    assert series("Month,Day,Period,A\n1,1,0,5\n")["A"] == "period 0 is below 1"
+
+
+def test_month_day_period_with_matching_half_hours():
+    snaps = pd.date_range("2015-01-01", periods=3, freq="30min")
+    assert series(_mdp([(1, 1)], periods=48), snaps=snaps, step=30)["A"].tolist() == [
+        10101,
+        10102,
+        10103,
+    ]
+
+
+def test_pattern_layout():
+    """Slice 3b: each row's pattern sets its value; equal overlaps are fine."""
+    body = "Pattern,A,B\nH1-2,1,7\nH2-24,2,7\n"
+    got = series(body, names=("A", "B"))
+    assert (
+        got["A"] == "row 3 gives 2 at 2015-01-01 01:00:00, an earlier row another value"
+    )
+    assert got["B"].tolist() == [7, 7, 7]
+    body = "Pattern,A\nH1,1\nH2-24,2\n"
+    assert series(body)["A"].tolist() == [1, 2, 2]
+
+
+@pytest.mark.parametrize(
+    "body, reason",
+    [
+        (
+            "Pattern,A\nH1,1\n",
+            "no pattern covers 2 of 3 snapshots, first 2015-01-01 01:00:00",
+        ),
+        ("Pattern,A\nH1-24,inf\n", "value 'inf' at row 2 is not a number"),
+        ("Pattern,A\nH1-24,nan\n", "value 'nan' at row 2 is not a number"),
+        (
+            "Pattern,A\nY1,1\n",
+            "row 2: pattern symbol 'Y' not read (read are M, W, D, H)",
+        ),
+    ],
+)
+def test_pattern_layout_refusals(body, reason):
+    """GK A C2: gaps, non-finite cells and unreadable patterns leave the name unread."""
+    assert series(body)["A"] == reason
 
 
 @pytest.mark.parametrize(
@@ -416,7 +584,7 @@ def test_data_file_rows_not_read_never_use_the_placeholder():
         "Generator 'G' (Max Capacity)",
         "time series for 'Max Capacity' is not imported yet",
     ) in got
-    assert ("Node 'A' (Load)", "scaled by Variable 'V': later slice") in got
+    assert ("Node 'A' (Load)", "data file: no column 'A'") in got
     assert ("Node 'A' (Voltage)", "2 data files on one row; none used") in got
 
 
@@ -640,7 +808,18 @@ def test_world_fixture_with_its_csvs_in_a_zip(tmp_path):
     assert not conv.report.warnings
 
 
+def _no_scenarios(m):
+    """The Europe Model with its scenarios off: the 2b base rows and files."""
+    m.memberships = [
+        x
+        for x in m.memberships
+        if not (x.parent[0] == "Model" and x.child[0] == "Scenario")
+    ]
+    return m
+
+
 def run_files(m, files):
+    m = _no_scenarios(m)
     conv = convert(m, {"model": "PLEXOS World 2015 Europe"}, None, files)
     check_ledger(m, conv)
     return conv

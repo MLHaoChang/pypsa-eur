@@ -359,6 +359,128 @@ def test_stub_imports_and_calls_are_restricted(tmp_path):
     assert "subprocess" not in text and "os." not in text
 
 
+def _stub_read_keys(tree):
+    """Every schedule column the stub reads: the SOURCE_KEYS/EVENT_KEYS keys and case[...]."""
+    keys = set()
+    for n in ast.walk(tree):
+        if (
+            isinstance(n, ast.Assign)
+            and isinstance(n.targets[0], ast.Name)
+            and n.targets[0].id in ("SOURCE_KEYS", "EVENT_KEYS")
+        ):
+            keys |= {k.value for k in n.value.keys}
+        elif (
+            isinstance(n, ast.Subscript)
+            and isinstance(n.value, ast.Name)
+            and n.value.id == "case"
+            and isinstance(n.slice, ast.Constant)
+        ):
+            keys.add(n.slice.value)
+    return keys
+
+
+def test_every_column_the_stub_reads_is_a_schedule_column(tmp_path):
+    _, text = _stub(tmp_path)
+    keys = _stub_read_keys(ast.parse(text))
+    assert {"r_ohm", "t_end_s", "output_name", "kind"} <= keys
+    assert keys <= set(emt_pack.SCHEDULE_COLUMNS), keys - set(emt_pack.SCHEDULE_COLUMNS)
+
+
+def test_schedule_json_keys_and_csv_header_are_the_schedule_columns(tmp_path):
+    p, _ = _stub(tmp_path)
+    cases = rows(p.path, "case_schedule.json")
+    assert cases
+    for c in cases:
+        assert set(c) == set(emt_pack.SCHEDULE_COLUMNS)  # JSON keys are sorted
+    header = (p.path / "case_schedule.csv").read_text().splitlines()[0]
+    assert header.split(",") == list(emt_pack.SCHEDULE_COLUMNS)
+
+
+def test_stub_runs_once_per_case_with_that_cases_values(tmp_path, monkeypatch):
+    import runpy
+    import sys
+    import types
+
+    p, _ = _stub(tmp_path)
+    cases = rows(p.path, "case_schedule.json")
+    calls = []
+
+    class Comp:
+        def __init__(self, name):
+            self.name = name
+
+        def parameters(self, **kw):
+            calls.append((self.name, kw))
+
+    class Project:
+        def find(self, name):
+            return Comp(name)
+
+        def parameters(self, **kw):
+            calls.append(("project", kw))
+
+        def run(self):
+            calls.append(("run", {}))
+
+    class Pscad:
+        def load(self, ws):
+            calls.append(("load", ws))
+
+        def project(self, name):
+            return Project()
+
+        def quit(self):
+            calls.append(("quit", {}))
+
+    mhi = types.ModuleType("mhi")
+    mod = types.ModuleType("mhi.pscad")
+    mod.launch = Pscad
+    mhi.pscad = mod
+    monkeypatch.setitem(sys.modules, "mhi", mhi)
+    monkeypatch.setitem(sys.modules, "mhi.pscad", mod)
+    ns = runpy.run_path(str(p.path / "run_schedule.py"), run_name="stub")
+    ns["main"](["ws.pswx", "proj"])
+
+    runs = [i for i, c in enumerate(calls) if c[0] == "run"]
+    assert len(runs) == len(cases)
+    assert calls[0] == ("load", "ws.pswx") and calls[-1][0] == "quit"
+    assert (p.path / "results").is_dir()
+    for case, end in zip(cases, runs):
+        block = calls[end - 3 : end]  # source, event, project parameters
+        assert block[2][1] == {
+            "time_duration": case["t_end_s"],
+            "output_filename": case["output_name"] + ".out",
+        }
+        assert block[0][0] == "GRID_SOURCE" and block[1][0] == "EVENT"
+        # Expected parameter names are written by hand, not read from the stub;
+        # a blank (None) column must not be passed at all.
+        source = {
+            "R": case["r_ohm"],
+            "X": case["x_ohm"],
+            "R0": case["r0_ohm"],
+            "X0": case["x0_ohm"],
+        }
+        event = {
+            "KIND": case["kind"],
+            "T_EVENT": case["t_event_s"],
+            "T_DUR": case["duration_s"],
+            "RF": case["fault_r_ohm"],
+            "XF": case["fault_x_ohm"],
+            "VRET": case["v_retained_pu"],
+            "STEP_PU": case["step_pu"],
+            "STEP_HZ": case["step_hz"],
+            "RAMP_HZ_S": case["ramp_hz_per_s"],
+            "ANGLE_DEG": case["angle_deg"],
+        }
+        assert block[0][1] == {k: v for k, v in source.items() if v is not None}
+        assert block[1][1] == {k: v for k, v in event.items() if v is not None}
+    # The schedule has blank event columns and distinct values, so a dropped
+    # None filter or swapped names (R0/X0, T_EVENT/T_DUR) cannot pass.
+    assert any(c["duration_s"] is None for c in cases)
+    assert any(c["t_event_s"] != c["duration_s"] and c["duration_s"] for c in cases)
+    assert all(c["r0_ohm"] != c["x0_ohm"] for c in cases)
+
+
 # --- manifest ---------------------------------------------------------------
 
 

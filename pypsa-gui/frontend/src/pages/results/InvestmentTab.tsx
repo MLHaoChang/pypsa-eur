@@ -6,6 +6,7 @@
 // a zero (ADR-0001).
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import EmptyState from '../../components/EmptyState'
 import {
   commercialApi, NoCommercialConfigError, SolverInFlightError, type BillingPayload,
   type ValueFlowsPayload,
@@ -67,14 +68,19 @@ export function completeness(billing: BillingPayload | null | undefined,
   ]
 }
 
-function BillSection({ billing, error }: { billing: BillingPayload | null | undefined;
-                                           error: unknown }) {
+/** One next step when the site connection is what is missing: the line above holds its action. */
+const CONNECTION_FIRST = 'Needs the site connection first: use the action above.'
+
+function BillSection({ billing, error, connectionMissing }: { billing: BillingPayload | null | undefined;
+                                           error: unknown; connectionMissing?: boolean }) {
   if (error) {
     return <p className="text-[11px] text-warn py-2" data-testid="ic-bill-error">
       The bill: {loadFailure(error)}</p>
   }
   if (!billing) {
-    return <p className="text-[11px] text-muted py-2">No bill: solve with a commercial config first.</p>
+    return <EmptyState testId="ic-bill-state" title="Not yet available">
+      {connectionMissing ? CONNECTION_FIRST : 'Solve with a commercial config first to see the bill.'}
+    </EmptyState>
   }
   const periods = Object.entries(billing.summary ?? {})
   return (
@@ -178,7 +184,7 @@ export default function InvestmentTab() {
           Island: no grid in operation; compared with the island as it stands today. The tie
           {' '}{poc.data?.poc_link} is open, so there is no connection, tariff or export to set.
         </p>
-      ) : rootMissing ? <SiteConnectionNeeded /> : commercial.isSuccess && <SiteConnectionSummary />}
+      ) : rootMissing ? (section !== 'case' && <SiteConnectionNeeded />) : commercial.isSuccess && <SiteConnectionSummary />}
       <CompletenessChips rows={completeness(billing.data, flows.data,
                                             billing.isError ? billing.error : undefined)}
                          testId="ic-completeness"
@@ -198,14 +204,15 @@ export default function InvestmentTab() {
       <div role="tabpanel" id={`ic-panel-${section}`} aria-labelledby={`ic-tab-${section}`}
            tabIndex={0}>
         {section === 'bill' && (
-          <BillSection billing={billing.data} error={billing.isError ? billing.error : null} />
+          <BillSection billing={billing.data} error={billing.isError ? billing.error : null}
+            connectionMissing={!island && rootMissing} />
         )}
         {section === 'participants' && (
           <div className="space-y-3">
             {flows.data?.status === 'ok' ? <ValueFlowsView payload={flows.data} /> : (
-              <p className="text-[11px] text-muted py-2" data-testid="ic-participants-state">
-                {participantsText}
-              </p>
+              <EmptyState testId="ic-participants-state"
+                title={flows.isError ? 'Not available' : flows.data == null ? 'Not yet available' : 'Not set'}>
+                {flows.data == null && !flows.isError && !island && rootMissing ? CONNECTION_FIRST : participantsText}</EmptyState>
             )}
             <p className="text-[11px] text-muted" data-testid="ic-edit-in-economics">
               The tariff, contracts, finance inputs and participants are set in Commercial &amp; parties.{' '}
@@ -215,7 +222,7 @@ export default function InvestmentTab() {
             </p>
           </div>
         )}
-        {section === 'case' && <InvestmentCaseView />}
+        {section === 'case' && <InvestmentCaseView connectionMissing={!island && rootMissing} />}
         {section === 'business_case' && <BusinessCaseLines />}
         {section === 'grid_extension' && <GridExtensionCard />}
       </div>

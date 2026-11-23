@@ -543,3 +543,9 @@ describe('A8 — unredactable key disclosure', () => {
     await waitFor(() => expect(postLLMRole).toHaveBeenLastCalledWith('memory_analyzer', null))
   })
 })
+
+// Issue 49: the shared key and model settings are only asked for by a super-admin.
+vi.mock('../auth/AuthProvider', async (orig) => ({
+  ...(await orig<typeof import('../auth/AuthProvider')>()),
+  useIsSuperAdmin: () => true,
+}))

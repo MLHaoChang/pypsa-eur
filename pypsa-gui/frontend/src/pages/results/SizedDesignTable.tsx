@@ -2,6 +2,7 @@
 // build, from the stored report's `sizing` section. One table for Guided
 // section 10, the engineering detail and Expert's Energy Hub panel, so the
 // two modes show the same numbers (EXPERT-GUIDED-1, HOLISTIC-1).
+import AssetName from '../../components/AssetName'
 import type { EhReferenceDesignReport, EhSizedAsset } from '../../api/simulation'
 import { componentLabel } from '../../utils/componentLabels'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
@@ -16,12 +17,15 @@ export function notBuilt(a: EhSizedAsset): boolean {
   return built != null && Math.abs(built) < 0.005
 }
 
-/** The rows of a report's sizing section; [] when it has none. */
+/** The rows of a report's sizing section; [] when it has none. In the
+ *  report's order (`evidence.sized_rows`): by stage, then as the network
+ *  lists them. */
 export function sizedAssets(report: EhReferenceDesignReport | null | undefined): EhSizedAsset[] {
   const section = report?.sections?.sizing
   if (section?.status !== 'ok') return []
   const assets = (section.payload as { assets?: unknown } | null | undefined)?.assets
-  return Array.isArray(assets) ? (assets as EhSizedAsset[]) : []
+  if (!Array.isArray(assets)) return []
+  return [...(assets as EhSizedAsset[])].sort((a, b) => (a.stage ?? 0) - (b.stage ?? 0))
 }
 
 /** The size one asset was built at, by name (step 5's rows read it). */
@@ -84,6 +88,11 @@ export function SizedDesignTable({ report, mode, testId }: {
   const { flow } = useProjectFlow()
   const units = heldUnits(flow?.sections?.find(x => x.section === 'assets')?.holds)
   if (rows.length === 0) return null
+  // The row's own unit (the report prints the same); a report stored before
+  // rows carried one falls back to section 5's.
+  const unitOf = (a: EhSizedAsset): SizeUnit =>
+    a.unit !== undefined ? a.unit : units.get(`${a.component}:${a.name}`)
+  const staged = rows.some(a => a.stage != null)
   const guided = mode === 'guided'
   const cell = guided ? 'py-1 pr-3' : 'py-0.5 pr-3'
   return (
@@ -96,6 +105,7 @@ export function SizedDesignTable({ report, mode, testId }: {
         <table className={`w-full ${guided ? 'text-[12px]' : 'text-[10px]'}`}>
           <thead className="text-muted">
             <tr>
+              {staged && <th className={`text-left font-medium ${cell}`}>Period</th>}
               <th className={`text-left font-medium ${cell}`}>Asset</th>
               <th className={`text-left font-medium ${cell}`}>Kind</th>
               <th className={`text-right font-medium ${cell}`}>Built</th>
@@ -106,10 +116,11 @@ export function SizedDesignTable({ report, mode, testId }: {
             {rows.map(a => (
               <tr key={`${a.component}:${a.name}`} data-testid={`${testId}-row-${a.name}`}
                 className="border-t border-border/50">
-                <td className={`${cell} font-mono`}>{a.name}</td>
+                {staged && <td className={`${cell} font-mono`}>{a.stage ?? ''}</td>}
+                <td className={cell}><AssetName id={a.name} /></td>
                 <td className={cell}>{componentLabel(a.component)}{a.carrier ? `, ${a.carrier}` : ''}</td>
-                <td className={`${cell} text-right font-mono`}>{sizedBuilt(a, units.get(`${a.component}:${a.name}`))}</td>
-                <td className={`${cell} text-right font-mono text-muted`}>{sizedRange(a, units.get(`${a.component}:${a.name}`))}</td>
+                <td className={`${cell} text-right font-mono`}>{sizedBuilt(a, unitOf(a))}</td>
+                <td className={`${cell} text-right font-mono text-muted`}>{sizedRange(a, unitOf(a))}</td>
               </tr>
             ))}
           </tbody>

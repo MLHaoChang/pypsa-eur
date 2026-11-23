@@ -367,6 +367,14 @@ function Form({ d, set, errors, report, assets }: {
   const debt = (d.debt ?? []) as DebtTranche[]
   const incentives = (d.incentives ?? []) as Incentive[]
   const tv = (d.terminal_value ?? {}) as TerminalValueRule
+  // "Terminal value ›" in the business case asks for this field: scroll to it once it is on screen.
+  const tvRequest = useUIStore(s => s.terminalValueScrollRequest)
+  const clearTvRequest = useUIStore(s => s.clearTerminalValueScrollRequest)
+  useEffect(() => {
+    if (!tvRequest) return
+    document.querySelector('[data-testid="finance-terminal-value"]')?.scrollIntoView?.({ block: 'center' })
+    clearTvRequest()
+  }, [tvRequest, clearTvRequest])
   const sp = d.solve_ppa as SolvePpa | null | undefined
   const io = (d.island_outage ?? null) as IslandOutage | null
   // Both blank: not stated (no default); otherwise the pair, the server judges it.
@@ -466,7 +474,7 @@ function Form({ d, set, errors, report, assets }: {
                      onChange={v => set('financing_fee_tax', v)} />
         <TriField label="Prevailing wage and apprenticeship met" value={d.pwa_met} errors={e('pwa_met')}
                   onChange={v => set('pwa_met', v)} />
-        <TriField label="Small business (§163(j) exempt)" value={d.small_business_163j}
+        <TriField label="Small business (section 163(j) exempt)" value={d.small_business_163j}
                   errors={e('small_business_163j')} onChange={v => set('small_business_163j', v)} />
       </fieldset>
       <AssetMap title="Depreciation class" noun="a depreciation class" path="depreciation_class_by_asset"
@@ -496,7 +504,7 @@ function Form({ d, set, errors, report, assets }: {
         <NumField label="Reserves interest rate" value={d.reserves_rate} errors={e('reserves_rate')}
                   onChange={v => set('reserves_rate', v)} />
       </fieldset>
-      <fieldset className="border border-border rounded p-2 space-y-1">
+      <fieldset className="border border-border rounded p-2 space-y-1" data-testid="finance-terminal-value">
         <legend className="font-semibold">Terminal value</legend>
         <SelectField label="Terminal value method" value={tv.method} errors={e('terminal_value.method')}
                      empty="(default: none)"

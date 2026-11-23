@@ -8,10 +8,12 @@ Layouts read (the header decides; the column for an object is its name):
 
 - ``Datetime,<name>…``: one row per timestamp;
 - ``Year,Month,Day,Period,<name>…``: period p of a day starts (p − 1) steps
-  after midnight.
-
-The monthly ``NAME,M1..M12`` layout is recognised but not read in this slice
-(GK A 30, 2b plan answer C).
+  after midnight;
+- ``Month,Day,Period,<name>…``: the same, repeated in every horizon year
+  (slice 3b, GK A C1);
+- ``Pattern,<name>…``: each row's timeslice pattern (``plexos_pattern``) sets
+  the value on the snapshots it covers (slice 3b);
+- ``NAME,M1..M12``: one row per object, a value per month (slice 3b).
 
 Day/month order is decided once per file, never per cell (GK A T1): the Data
 File's ``Locale`` when it is a known one, otherwise from the dates themselves
@@ -34,6 +36,8 @@ from typing import IO
 
 import numpy as np
 import pandas as pd
+
+from gridspine.ingest.plexos_pattern import mask
 
 #: Windows locale ids (the Data File ``Locale`` attribute) whose short dates put
 #: the day first, and those that put the month first.
@@ -163,13 +167,18 @@ def read_series(
         keys = header[:1]
     elif low[:4] == ["year", "month", "day", "period"]:
         keys = header[:4]
+    elif low[:3] == ["month", "day", "period"]:
+        keys = header[:3]
+    elif low[:1] == ["pattern"]:
+        keys = header[:1]
     elif low[:1] == ["name"] and all(m.casefold() in low for m in _MONTHS):
-        return dict.fromkeys(names, "monthly layout not read in this slice")
+        return _monthly(opener, names, snapshots, step_minutes)
     else:
         return dict.fromkeys(
             names,
             f"layout not read (header starts {', '.join(header[:4])}); read are "
-            "Datetime and Year/Month/Day/Period",
+            "Datetime, Year/Month/Day/Period, Month/Day/Period, Pattern and "
+            "NAME,M1..M12",
         )
     cols = {n: _column(header[len(keys) :], n) for n in names}
     if all(c is None for c in cols.values()):
@@ -195,8 +204,12 @@ def read_series(
         return dict.fromkeys(names, f"more than {MAX_CSV_ROWS:,} rows; not read")
     body.columns = [c.strip() for c in body.columns]
     body = body.fillna("")
+    if low[:1] == ["pattern"]:
+        return _by_pattern(body, keys[0], cols, names, snapshots, step_minutes)
     if len(keys) == 1:
         index = _parse_dates(body[keys[0]], locale)
+    elif len(keys) == 3:
+        body, index = _year_free(body, keys, step_minutes, snapshots)
     else:
         index = _periods(body, keys, step_minutes)
     return _wide(body, cols, index, names, snapshots, step_minutes)
@@ -208,8 +221,9 @@ def _periods(
     parts = {}
     for col in header[:4]:
         v = pd.to_numeric(body[col].str.strip(), errors="coerce")
-        if v.isna().any() or (v != v.round()).any():
-            return f"{col} {body[col][v.isna() | (v != v.round())].iloc[0]!r} is not a whole number"
+        bad = ~np.isfinite(v) | (v != v.round())  # NaN, text and ±inf (GK A N2)
+        if bad.any():
+            return f"{col} {body[col][bad].iloc[0]!r} is not a whole number"
         parts[col.casefold()] = v.astype(int)
     per_day = 1440 / step
     p = parts["period"]
@@ -221,6 +235,168 @@ def _periods(
     if days.isna().any():
         return "a Year/Month/Day is not a date"
     return pd.DatetimeIndex(days + pd.to_timedelta((p - 1) * step, unit="min"))
+
+
+def _year_free(
+    body: pd.DataFrame, keys: list[str], step: float, snapshots: pd.DatetimeIndex
+) -> tuple[pd.DataFrame, pd.DatetimeIndex | str]:
+    """
+    ``Month,Day,Period``: the same days in every year of the horizon (GK A C1).
+    The file step is a day over its periods per day; it must equal the
+    snapshot step, and every day must have that many periods. A 29 February
+    row is used only in leap years.
+    """
+    parts = {}
+    for col in keys:
+        v = pd.to_numeric(body[col].str.strip(), errors="coerce")
+        bad = ~np.isfinite(v) | (v != v.round())  # NaN, text and ±inf (GK A N2)
+        if bad.any():
+            return body, f"{col} {body[col][bad].iloc[0]!r} is not a whole number"
+        parts[col.casefold()] = v.astype(int)
+    if body.empty:
+        return body, pd.DatetimeIndex([])
+    p = parts["period"]
+    per_day = int(p.max())
+    if p.min() < 1:
+        return body, f"period {p.min()} is below 1"
+    counts = p.groupby([parts["month"], parts["day"]]).size()
+    if (counts != per_day).any():
+        (m, d), c = next(iter(counts[counts != per_day].items()))
+        return body, (
+            f"month {m} day {d} has {c} periods, other days {per_day}; "
+            "periods per day differ"
+        )
+    file_step = 1440 / per_day
+    if not math.isclose(file_step, step):
+        what = "finer" if file_step < step else "coarser"
+        return body, (
+            f"file step {file_step:g} minutes ({per_day} periods a day) is {what} "
+            f"than the {step:g}-minute snapshots; not resampled"
+        )
+    years = sorted(set(snapshots.year))
+    frames, stamps = [], []
+    for year in years:
+        days = pd.to_datetime(
+            pd.DataFrame({"year": year, "month": parts["month"], "day": parts["day"]}),
+            errors="coerce",
+        )
+        leap_day = (parts["month"] == 2) & (parts["day"] == 29)
+        bad = days.isna() & ~leap_day
+        if bad.any():
+            i = bad.to_numpy().argmax()
+            return body, (
+                f"month {parts['month'].iloc[i]} day {parts['day'].iloc[i]} is not a date"
+            )
+        keep = days.notna().to_numpy()
+        frames.append(body[keep])
+        stamps.append(days[keep] + pd.to_timedelta((p[keep] - 1) * step, unit="min"))
+    out = pd.concat(frames, ignore_index=True)
+    return out, pd.DatetimeIndex(pd.concat(stamps, ignore_index=True))
+
+
+def _by_pattern(
+    body: pd.DataFrame,
+    key: str,
+    cols: dict[str, str | None],
+    names: list[str],
+    snapshots: pd.DatetimeIndex,
+    step: float,
+) -> Result:
+    """
+    ``Pattern,<name>…``: each row's value holds on the snapshots its pattern
+    covers. Two rows giving one snapshot different values, or a snapshot no
+    row covers, leave the name unread.
+    """
+    masks = []
+    for i, pat in enumerate(body[key]):
+        got = mask(pat.strip(), snapshots, step)
+        if isinstance(got, str):
+            return dict.fromkeys(names, f"row {i + 2}: {got}")
+        masks.append(got)
+    out: Result = {}
+    for name in names:
+        col = cols[name]
+        if col is None:
+            out[name] = f"no column {name!r}"
+            continue
+        got = _numbers(body[col], pd.Index([f"row {i + 2}" for i in range(len(body))]))
+        if isinstance(got, str):
+            out[name] = got
+            continue
+        values = np.full(len(snapshots), np.nan)
+        why = None
+        for i, (m, v) in enumerate(zip(masks, got.to_numpy())):
+            clash = m & ~np.isnan(values) & (values != v)
+            if clash.any():
+                why = (
+                    f"row {i + 2} gives {v:g} at {snapshots[clash.argmax()]}, "
+                    "an earlier row another value"
+                )
+                break
+            values[m] = v
+        if why is None and np.isnan(values).any():
+            gap = np.isnan(values)
+            why = (
+                f"no pattern covers {int(gap.sum())} of {len(snapshots)} snapshots, "
+                f"first {snapshots[gap.argmax()]}"
+            )
+        out[name] = why if why else pd.Series(values, index=snapshots)
+    return out
+
+
+def _monthly(
+    opener: Callable[[], IO[bytes]],
+    names: list[str],
+    snapshots: pd.DatetimeIndex,
+    step: float,
+) -> Result:
+    """``NAME,M1..M12``: one row per object; a snapshot takes its month's value."""
+    months = []
+    for i in range(1, 13):
+        got = mask(f"M{i}", snapshots, step)
+        if isinstance(got, str):
+            return dict.fromkeys(names, got)
+        months.append(got)
+    try:
+        with opener() as raw:
+            body = pd.read_csv(
+                raw,
+                dtype=str,
+                keep_default_na=False,
+                encoding="utf-8-sig",
+                skipinitialspace=True,
+                nrows=MAX_CSV_ROWS + 1,
+            )
+    except (ValueError, UnicodeDecodeError) as exc:
+        return dict.fromkeys(names, f"not a readable CSV ({str(exc).splitlines()[0]})")
+    if len(body) > MAX_CSV_ROWS:
+        return dict.fromkeys(names, f"more than {MAX_CSV_ROWS:,} rows; not read")
+    body.columns = [c.strip() for c in body.columns]
+    body = body.fillna("")
+    month_col = {c.casefold(): c for c in body.columns}
+    keys = body[body.columns[0]].str.strip()
+    out: Result = {}
+    for name in names:
+        hit = keys == name
+        if not hit.any():
+            hit = keys.str.casefold() == name.casefold()
+        if not hit.any():
+            out[name] = f"no row {name!r}"
+            continue
+        if hit.sum() > 1:
+            out[name] = f"row {name!r} appears {int(hit.sum())} times"
+            continue
+        row = body[hit].iloc[0]
+        cells = pd.Series([row[month_col[m.casefold()]] for m in _MONTHS])
+        got = _numbers(cells, pd.Index(_MONTHS))
+        if isinstance(got, str):
+            out[name] = got
+            continue
+        values = np.full(len(snapshots), np.nan)
+        for m, v in zip(months, got.to_numpy()):
+            values[m] = v
+        out[name] = pd.Series(values, index=snapshots)
+    return out
 
 
 def _wide(

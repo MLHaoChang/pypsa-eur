@@ -21,7 +21,7 @@ import { fieldWords, isOpenItem } from '../utils/flowItems'
 import { useFieldLabels } from '../hooks/useFieldLabels'
 import type { FlowItem } from '../api/flow'
 import { sectionForComponent, sectionMeta } from '../layout/flowSections'
-import { openFlowTarget, openOffGridConstraints } from '../layout/flowNavigation'
+import { openFlowTarget, openOffGridConstraints, openOperatingReserve } from '../layout/flowNavigation'
 import { useTopologyFindings } from './useTopologyFindings'
 import { TOPOLOGY_FINDING_TITLES, type TopologyFinding } from '../utils/topologyCheck'
 import { GridReadinessScorecard, useGridReadiness } from '../components/gridReadiness/GridReadinessScorecard'
@@ -210,8 +210,14 @@ export default function IssuesPanel() {
                     <span className="font-semibold text-text">{h.constraint}</span>: {h.text}
                     {h.setting === 'offgrid' && (
                       <button type="button" onClick={openOffGridConstraints}
-                        className="ml-1.5 inline-flex items-center gap-0.5 text-accent hover:underline">
+                        className="ml-1.5 inline-flex items-center gap-0.5 text-link hover:underline">
                         Open Off-grid constraints <ArrowRight size={11} />
+                      </button>
+                    )}
+                    {h.setting === 'reserve' && (
+                      <button type="button" onClick={openOperatingReserve}
+                        className="ml-1.5 inline-flex items-center gap-0.5 text-link hover:underline">
+                        Open Operating reserve <ArrowRight size={11} />
                       </button>
                     )}
                   </div>
@@ -512,7 +518,7 @@ function FlowItemRow({ item }: { item: FlowItem }) {
       </span>
       <button type="button" data-testid="issues-flow-item-open" onClick={() => openFlowTarget(item.target)}
         title={`Open ${field ?? 'this field'}`}
-        className="shrink-0 text-[11px] text-accent hover:underline">
+        className="shrink-0 text-[11px] text-link hover:underline">
         Open ›
       </button>
     </div>
@@ -655,7 +661,7 @@ function FixCarrierZeroCo2Button({ carrierName, suggested, carriers }: {
     <button
       onClick={() => fixMut.mutate()}
       disabled={fixMut.isPending}
-      title={`Set '${carrierName}' co2_emissions to the catalog value`}
+      title={`Set the CO₂ emissions of “${carrierName}” to the catalog value`}
       className="shrink-0 flex items-center gap-1 self-center rounded-md border border-accent/30 bg-accent/5 px-2 py-1 text-[10.5px] font-medium text-accent hover:bg-accent/10 hover:border-accent/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
     >
       <Wrench size={11} />

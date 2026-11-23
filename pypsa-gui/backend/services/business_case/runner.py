@@ -44,6 +44,7 @@ from models.business_case import (
     BusinessCaseInputs,
     BusinessCaseRefused,
 )
+from services import project_write_gate
 from services.finance.cashflow import STREAM_CLASS
 from services.finance.investment_case_runner import json_digest
 
@@ -253,7 +254,11 @@ def report_body(
     """The stored report: P&L by year by stream, the KPIs (gross and net of
     pass-through), break-even, the locked rows, each linked output's state and every
     assumed default the run used."""
-    from services.finance.business_case import row_reasons, volume_factor_display
+    from services.finance.business_case import (
+        KPI_ROW,
+        row_reasons,
+        volume_factor_display,
+    )
 
     return {
         "business_case_hash": bc.hash,
@@ -279,6 +284,8 @@ def report_body(
             "row_reason": row_reasons(
                 result, p, outputs, receivable_days=inputs.receivable_days
             ),
+            # A display key too (walk 03): the P&L row each KPI is computed from.
+            "kpi_row": dict(KPI_ROW),
             # Display keys (BC 15): the lease-up applied, its basis and the stated
             # years it ignored. Absent for a full-volume case, so its report is as it was.
             **volume_factor_display(inputs, result.tl.operating_years),
@@ -349,8 +356,14 @@ def start_business_case(
     publish_study: Callable[[str, dict, _threading.Thread], None],
     load_pack: Callable[[Any], Any] | None = None,
     state_lock=None,
+    requester: tuple[Any, Any] | None = None,
 ) -> dict:
     """Start the business-case run in a worker thread (module docstring).
+
+    `requester` is (user id, project id) of the person who started it: their role
+    is read again before the report is stored, and a person made a viewer, or
+    removed, mid-run gets a `project_view_only` failure and no report
+    (project-viewer-role 02).
 
     `rebuild_ic_case` → the IC `FinanceCase` (the IC route's adapter); `case_hash` its
     hash; `read_solve(case, cfg)` → (outputs by line name, lost production), read under
@@ -481,6 +494,15 @@ def start_business_case(
             with lock:
                 if aborted():
                     return
+                if project_write_gate.requester_may_not_write(
+                    *(requester or (None, None))
+                ):
+                    finish(
+                        "failed",
+                        error=project_write_gate.MESSAGE,
+                        error_code=project_write_gate.KIND,
+                    )
+                    return
                 state_update(**{REPORT_KEY: body})
                 finish("done", error=None, business_case_hash=bc.hash)
         except RunRefused as exc:
@@ -507,10 +529,17 @@ def start_business_case(
     return {"status": "running", "study": STUDY_KEY, "ic_assumptions_hash": ic_hash}
 
 
+NETWORK_BUSY_MESSAGE = "the project is busy with another job; try again in a moment"
+
+
 class StaleInvestmentCase(RunRefused):
     """The IC key moved between the route's check and the solve read (C4)."""
 
     def __init__(self, reason: str):
+        if reason == "network_busy":
+            # The key could not be read in time: the case is not known to be out of date.
+            super().__init__("network_busy", NETWORK_BUSY_MESSAGE, reason=reason)
+            return
         super().__init__(
             "investment_case_missing",
             "the investment case is out of date (the project changed since it "

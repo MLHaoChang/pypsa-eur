@@ -3,7 +3,7 @@
 
 # 03 — "Not established" names the wrong cause, or a raw code
 
-Status: ready-for-agent
+Status: done (#1683: the UI names the first blocker in words; #1868: the workbook sheet names reasons in words and the report serves `pnl.kpi_row`; IB-B PR C, branch `claude/ib-b-terminal-life`: case B's cause, a typed capex line's life now feeds the remaining-life terminal rule instead of `terminal_part_unknown`)
 Severity: high (the user cannot tell what to fix to get NPV and IRR)
 Group: Investment and business case. Walk 2026-11-17, master 9491878d.
 Breaks: `.scratch/business-case/spec.md` §7 and G9 (typed refusals name the line and the column); owner decisions RAW-NAMES-1, DECISION-GAPS-1. Not-established-never-zero itself holds (see README).

@@ -1,0 +1,10 @@
+{
+  "limitations": [
+    {
+      "method": "GET",
+      "path": "/api/network/asset_schema/{component}/table_units",
+      "reason": "ui-pointer",
+      "decision": "TONNE-ASSETS-POINTER-1"
+    }
+  ]
+}

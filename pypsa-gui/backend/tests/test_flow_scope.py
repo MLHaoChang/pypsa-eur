@@ -74,8 +74,12 @@ def test_a_preset_names_real_sub_options_and_never_preselects_an_unavailable_one
     # Capacity and Hand-off are always on; capacity with sizing and dispatch.
     assert {"capacity", "handoff"} <= set(eff["groups"])
     assert eff["options"]["capacity"][:2] == ["sizing", "dispatch"]
-    # An EH example keeps today's reliability study, except the IPP hybrid.
-    if pid not in ("blank", "eh_ipp_hybrid"):
+    # An EH example keeps today's reliability study, except the IPP hybrid;
+    # a grid template has no EH reliability study and runs its load flow (issue 51).
+    if pid in S.GRID_TEMPLATES:
+        assert not S.selected(eff, "reliability", "goal_study"), pid
+        assert S.selected(eff, "grid", "load_flow"), pid
+    elif pid not in ("blank", "eh_ipp_hybrid"):
         assert S.selected(eff, "reliability", "goal_study"), pid
     # The stored form passes the strict check the PUT route applies.
     S.validate(eff, has_template=pid != "blank")
@@ -446,6 +450,11 @@ def test_a_study_refusal_with_reliability_off_blocks_nothing(client, tmp_project
     meta["pack_overrides"] = {**meta["pack_overrides"], "import_energy_mwh_per_year": 1000.0}
     path.write_text(json.dumps(meta))
     links = client.get("/api/network/links").json()
+    # The template's PoC binding refuses a two-way import (WALK-IMPROVE-1 b ships a
+    # commercial block); without it the study's own refusal is the blocker.
+    _cfg = client.get("/api/simulation/solver_config").json()
+    assert client.put("/api/simulation/solver_config",
+                      json={**_cfg, "commercial": None}).status_code == 200
     grid = next(r for r in links if r["name"] == "grid_import")
     assert client.put("/api/network/links/grid_import",
                       json={**grid, "p_min_pu": -1.0}).status_code == 200

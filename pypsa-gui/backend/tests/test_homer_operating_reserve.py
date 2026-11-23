@@ -886,7 +886,7 @@ def test_the_infeasible_card_hint_is_plain_words(short):
     ]
     assert len(hints) == 1, card
     text = hints[0]["text"]
-    assert hints[0]["setting"] == "offgrid"
+    assert hints[0]["setting"] == "reserve"  # Solver settings › Dispatch
     assert ROW not in text and "reserve_share" not in text and "row " not in text, text
     assert text.endswith(".") and not text.endswith(".."), text
     assert ("at " in text and "MW" in text) if short else "may contribute" in text, text

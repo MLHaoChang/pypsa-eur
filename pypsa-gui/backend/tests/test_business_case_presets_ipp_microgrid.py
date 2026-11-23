@@ -7,13 +7,16 @@ VoLL appears (B4); GK B ruling C3 puts the EaaS-fee help in the preset."""
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from models.business_case import LineItem
 from services.business_case import linked_outputs as L
 from services.business_case import presets as P
 from services.finance.business_case import DoubleCount, build_business_case, pnl
-from services.finance.case import TemplateLine
+from models.finance import TerminalValueRule
+from services.finance.case import LpBasis, TemplateLine
 from services.finance.engine import run_case
 from tests.test_business_case_engine import PACK, _ic, _inputs, _line
 from tests.test_business_case_guards import OPS, _by_year
@@ -51,10 +54,10 @@ def test_the_ipp_rows_are_spec_6_6():
         "kW_year",
     )
     assert cap.quantity_source == "linked:capacity.StorageUnit.bess@1"
-    # linked_share is the contracted share only; the de-rating lives in the typed price (#1430 F2).
-    assert (
-        cap.linked_share is None and "de-rating" in cap.note and "nameplate" in cap.note
-    )
+    # linked_share is the contracted share only (#1430 F2); the de-rating is its own
+    # typed field, empty until the user sets it (walk 04, GK B2 Q1/Q2).
+    assert cap.linked_share is None and cap.derating is None
+    assert "de-rating" in cap.note and "Per de-rated kW" in cap.hint.note
     goo = by["Guarantees of origin"]
     assert goo.quantity_source == "typed" and goo.unit == "MWh"
     assert "never above the renewable generation" in goo.note
@@ -75,7 +78,11 @@ def test_the_ipp_rows_are_spec_6_6():
     assert not [
         ln for ln in case.lines if ln.quantity_source.startswith("linked:export")
     ]
-    assert not [ln for ln in case.lines if ln.assumed]
+    # Only the plant capex life is a pack default, recorded `assumed` with its source (#21).
+    assert [(ln.name, sorted(ln.assumed)) for ln in case.lines if ln.assumed] == [
+        ("Plant capex", ["life_years"])
+    ]
+    assert not any(ln.price is not None for ln in case.lines if ln.kind == "revenue")
 
 
 @pytest.mark.parametrize("template", MG)
@@ -137,10 +144,12 @@ def _ipp_filled() -> list[LineItem]:
         d = ln.model_dump()
         if ln.kind == "revenue":
             d.update(price=10.0, indexation=0.0)
+            if ln.category == "capacity_payment":
+                d.update(derating=1.0)  # the whole capacity: the hand check below
             if ln.quantity_source == "typed":
                 d.update(quantity=100.0)
         elif ln.kind == "capex":
-            d.update(quantity=1.0, price=1000.0, life_years=10.0)
+            d.update(quantity=1.0, price=1000.0, life_years=ln.life_years or 10.0)
         elif ln.category == "insurance":
             d.update(quantity=0.01)
         else:
@@ -244,7 +253,7 @@ def _filled(template: str) -> list[LineItem]:
         if ln.kind == "revenue":
             d.update(price=100.0, indexation=0.0)
         elif ln.kind == "capex":
-            d.update(quantity=1.0, price=1000.0, life_years=10.0)
+            d.update(quantity=1.0, price=1000.0, life_years=ln.life_years or 10.0)
         elif ln.category in ("insurance", "maintenance"):
             d.update(quantity=0.01)
         elif ln.category == "staff":
@@ -281,3 +290,129 @@ def test_g2_each_capex_line_is_in_at_most_one_maintenance_share_base(template):
             if kind == "capex" and (not cat or cap.category == cat):
                 bases.append(sh.name)
         assert len(bases) <= 1, (cap.name, bases)
+
+
+def test_21_the_ipp_preset_runs_once_only_prices_are_typed():
+    """Prices (and the plant capex quantity) are all a user types: no indexation, life or
+    terminal-value refusal remains, and NPV, IRR and payback are established."""
+    ppa = TemplateLine("asset:ppa_wind", "ppa_settlement", 5000.0, "ppa")
+    ppa = TemplateLine("asset:ppa_wind", "ppa_settlement", 5000.0, "ppa")
+    # The IPP template's own method: the remaining life (its replacement rule is
+    # `part_lifetimes`); `_rla_ic` is IB-B PR C's fixture for it, with an LP rate.
+    ic = dataclasses.replace(
+        _ic(
+            lines=(ppa, TemplateLine("fom", "fom", -20.0, "opex")),
+            analysis_years=8,
+            terminal_value=TerminalValueRule(method="remaining_life_annuity"),
+            replacement_rule="part_lifetimes",
+        ),
+        lp_basis=LpBasis(discount_rate=0.06),
+    )
+    rows = []
+    for ln in P.preset(IPP, "ipp_hybrid", currency="USD").lines:
+        d = ln.model_dump()
+        if ln.kind == "revenue":
+            # Prices, and the capacity payment's de-rating (a typed input since IB-B PR B).
+            # Indexation: the apply reads the finance inputs' rate (walk 05); 0.0 stands in.
+            d.update(price=10.0, indexation=0.0)
+            if d.get("category") == "capacity_payment":
+                d.update(derating=0.9)
+            if ln.quantity_source == "typed":
+                d.update(quantity=100.0)
+        elif ln.kind == "capex":
+            d.update(quantity=1.0, price=600000.0)
+        elif ln.category == "insurance":
+            d.update(quantity=0.01)
+        else:
+            d.update(price=5.0)
+        rows.append(LineItem.model_validate(d))
+    inputs = _inputs(*rows)
+    assert not inputs.refusals(horizon=(2030, 2037), base_year=2030)
+    series = {
+        "Capacity payment (BESS, firm capacity)": L.Series(
+            "capacity.StorageUnit.bess", "kW_year", {None: 10000.0}, {}
+        ),
+        "Land lease, wind farm": L.Series(
+            "capacity.Generator.wind_farm", "MW_year", {None: 40.0}, {}
+        ),
+        "Land lease, PV plant": L.Series(
+            "capacity.Generator.pv_plant", "MW_year", {None: 60.0}, {}
+        ),
+    }
+    r = run_case(build_business_case(ic, inputs, series).case, PACK)
+    for k in ("project_post_tax_npv", "project_post_tax_irr", "payback_years"):
+        assert r.metrics.get(k) is not None, (k, r.op.reasons)
+    # The three figures against arithmetic written here, on the case's own cash series
+    # (not the engine's npv/irr/payback functions): end-of-year discounting at the WACC,
+    # the rate that zeroes it by bisection, and the cumulative equity cash's first crossing.
+    cash_p = [float(x) for x in r.cash["project_post_tax"]]
+    cash_e = [float(x) for x in r.cash["equity_post_tax"]]
+
+    def pv(rate):
+        return sum(c / (1.0 + rate) ** t for t, c in enumerate(cash_p))
+
+    lo, hi = -0.5, 1.0
+    for _ in range(200):
+        mid = (lo + hi) / 2.0
+        lo, hi = (mid, hi) if pv(mid) > 0.0 else (lo, mid)
+    cum, back = 0.0, None
+    for t, c in enumerate(cash_e):
+        prev, cum = cum, cum + c
+        if t > 0 and prev < 0.0 <= cum:
+            back = (t - 1) + (-prev) / c
+            break
+    assert r.metrics["project_post_tax_npv"] == pytest.approx(
+        pv(ic.inputs.wacc_nominal), rel=1e-9
+    )
+    assert r.metrics["project_post_tax_irr"] == pytest.approx(lo, abs=1e-6)
+    assert back is not None
+    assert r.metrics["payback_years"] == pytest.approx(back, abs=1e-9)
+    # Hand computation: the plant capex (600 000, life 30 y from the pack) is valued at the
+    # horizon on the annuity of its purchase over the years still to run.
+    (term,) = [x for x in r.op.terminal_terms if x.asset == "Plant capex"]
+    rate, life, left = 0.06, 30.0, term.remaining_years
+    crf = rate / (1.0 - (1.0 + rate) ** -life)
+    apf = (1.0 - (1.0 + rate) ** -left) / rate
+    assert term.lifetime_years == 30.0 and 0.0 < left < life
+    assert term.value == pytest.approx(600000.0 * crf * apf)
+
+
+def test_21_a_stated_plant_capex_life_is_never_overwritten_by_the_default():
+    f = P._for_template(IPP, P.PRESETS_DIR)
+    lines = [ln.model_copy(deep=True) for ln in f.variants["ipp_hybrid"].lines]
+    plant = next(ln for ln in lines if ln.name == "Plant capex")
+    plant.life_years = 12.0
+    out = _inputs(*lines).with_cost_defaults(P._pack(f), currency="GBP")
+    got = next(ln for ln in out.lines if ln.name == "Plant capex")
+    assert got.life_years == 12.0 and "life_years" not in got.assumed
+    # Unstated, the same fill writes the pack's 30 years and records its source.
+    fresh = P.preset(IPP, "ipp_hybrid", currency="GBP")
+    p0 = next(ln for ln in fresh.lines if ln.name == "Plant capex")
+    assert p0.life_years == 30.0 and p0.assumed["life_years"].source
+
+
+def test_21_opex_prices_left_unset_refuse_the_run_so_no_margin_is_read_as_100_percent():
+    """The EBITDA margin cannot read 100 % from opex lines that are zero only because
+    they are unset: the lines are refused `cost_not_established` and the run is blocked,
+    so no report (and no margin) exists."""
+    rows = []
+    for ln in P.preset(IPP, "ipp_hybrid", currency="USD").lines:
+        d = ln.model_dump()
+        if ln.kind == "revenue":
+            d.update(price=10.0, indexation=0.0)
+            if ln.quantity_source == "typed":
+                d.update(quantity=100.0)
+            if ln.category == "capacity_payment":
+                d.update(derating=0.9)
+        elif ln.kind == "capex":
+            d.update(quantity=1.0, price=600000.0)
+        rows.append(LineItem.model_validate(d))  # land leases and insurance left unset
+    refused = _inputs(*rows).refusals(horizon=(2030, 2037), base_year=2030)
+    unset = {
+        r.args[0] if r.args else str(r)
+        for r in refused
+        if r.kind == "cost_not_established"
+    }
+    assert any("lines[2]" in x for x in unset) and any(
+        "lines[3]" in x for x in unset
+    ), refused

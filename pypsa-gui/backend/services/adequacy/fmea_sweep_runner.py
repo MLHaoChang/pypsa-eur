@@ -15,6 +15,7 @@ import time
 from fastapi import HTTPException
 from pydantic import BaseModel as _BaseModel
 
+from services.adequacy.eh_study_runner import voll_refusal
 from services.pypsa_service import PyPSAService
 
 logger = logging.getLogger("pypsa_gui.results")
@@ -51,7 +52,7 @@ def start_fmea_sweep(
 
     cfg = solver_state.get("solver_config")
     if cfg is None or float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
-        raise HTTPException(422, "the sweep requires a VOLL > 0 in solver settings")
+        raise HTTPException(422, voll_refusal("the contingency sweep"))
     n = PyPSAService.get_network()
     lock = PyPSAService.get_lock()
 

@@ -1,6 +1,6 @@
 # The sized-asset rows carry no unit
 
-Status: needs-triage
+Status: done
 
 Raised by GK B3 (3) on #1734 (GK NOT OK @79ec862b, point 1); the frontend half is fixed in #1734.
 
@@ -20,3 +20,11 @@ Store its stock unit) from `flow_service._size_unit`, and the frontend reads
 it before the flow's. Test: an NH3 Store on a tonne bus reads `unit: "t"`;
 an energy-bus StorageUnit reads `unit: "MW"`. The EH report fixtures and
 fingerprint tests must stay unchanged (display-only key).
+
+## Triage (2026-11-20, master 87cf52a7)
+
+Checked by code reading only. Still true: `sizing_summary_from_network` still names every size `built_mw`/`built_mwh`, whatever the bus. Acceptance: each sized row carries its own unit (t/h, t for a stock, MW, MWh), using `flow_service._size_unit`; the frontend takes the unit from the row, not only from the flow's section 5. Gated: GK B3. Blocked by: none.
+
+## Done (2026-11-22, master 033a1fa1)
+
+The backend half and `SizedDesignTable` landed with #1786 (2d10e1c8): each `assets` row carries `unit` from `flow_service._size_unit`, pinned in `test_sized_design_parity.py` (a tonne-bus Store reads `t`, PV and every single-stage asset `MW`). The rest, `holdWords.heldFigure` reading the sized row's unit before the flow row's, is in its own PR, with a test. No EH report fixture or fingerprint changed.

@@ -25,8 +25,9 @@ import {
   MIN_RENEWABLE_FRACTION_LABEL, RESERVE_LABELS, ShareField,
 } from '../../solver/OffGridConstraints'
 import { ISLAND_KEY } from '../../CampusIslandSection'
+import { islandScenarioLabel } from '../../../plainNames'
 import {
-  ISLAND_OTHER_REQUIREMENT_LABELS, ISLAND_REQUIREMENT_LABELS, ISLAND_SCENARIO_LABELS,
+  ISLAND_OTHER_REQUIREMENT_LABELS, ISLAND_REQUIREMENT_LABELS,
   type IslandRequirementNumber,
 } from '../../islandWords'
 import { withReturnFrom } from '../../../layout/flowNavigation'
@@ -171,7 +172,7 @@ function Scenarios({ name, config, revision, reload }: {
           <label key={sc} className="flex gap-1 items-center">
             <input type="checkbox" checked={chosen.includes(sc)} disabled={save.isPending}
               onChange={() => toggle(sc)} />
-            {ISLAND_SCENARIO_LABELS[sc]}
+            {islandScenarioLabel(sc)}
           </label>
         ))}
       </div>

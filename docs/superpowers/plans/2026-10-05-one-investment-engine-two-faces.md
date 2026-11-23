@@ -260,6 +260,15 @@ omitting it binds as before.
 **Changes (2026-11-06, DC-06 flex revenue):** `commercial.binding.bind_commercial` gains the trailing optional keyword
 `series_meta: Callable[[object], dict] | None = None` (a Library series ref's meta, read for each reserve product's
 price-series currency); `CommercialConfig` gains `reserve_products`. Omitting both binds as before.
+**Changes (2026-11-17, project-io 03, `.scratch/project-io/issues/03-self-contained-folder.md`):**
+`library.items.resolve` and `library.series_store.resolve` gain the trailing keyword-only `project_dir: Path | None = None`:
+they read the project's own copy under `library/` first, when it hashes to the ref. Omitting it resolves from the org's
+Library as before.
+**Additions (2026-11-22, investment walk 03 case B, `.scratch/walkthroughs/investment-business-case-2026-11-17/issues/03-not-established-reasons-wrong-or-raw.md`):**
+`AssetFinance` gains the trailing field `terminal_lifetime_years: float | None = None` (after `parts`): the life the
+`remaining_life_annuity` terminal values an asset over when it is not its replacement life (a business-case capex
+line's depreciation life). Refused on more than one part and on an asset whose lifetime is not infinite. None reads
+as before and is left out of the case hash, so other cases keep their hash.
 
 ## 7. Coordination protocol
 
