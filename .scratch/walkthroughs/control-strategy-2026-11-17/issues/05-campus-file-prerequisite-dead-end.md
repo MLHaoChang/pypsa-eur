@@ -3,7 +3,9 @@
 
 # 05: Island results say "Not yet available" with no step to take; the campus-file prerequisite has no link
 
-Status: ready-for-agent
+Status: done
+
+Done in #1673 (20728b0b).
 Impact: medium
 Templates: Island Microgrid
 Found by: control-strategy walkthrough, 2026-11-17 (master 9491878d). Shot: `../shots/05-not-yet-available-above-results.png`

@@ -3,7 +3,9 @@
 
 # 12: Island site warns "subsea_tie has no outage data" while section 3 marks outage data done
 
-Status: ready-for-agent
+Status: done
+
+Done in #1673 (20728b0b).
 Impact: low
 Templates: Island Microgrid
 Found by: control-strategy walkthrough, 2026-11-17 (master 9491878d)

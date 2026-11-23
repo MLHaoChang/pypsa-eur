@@ -3,7 +3,9 @@
 
 # 01 — Data-centre business case: the IT-capacity output is never offered
 
-Status: ready-for-agent
+Status: done
+
+Done in #1679 (9100d3cb).
 Severity: high (the data-centre business case cannot run from its own preset)
 Group: Investment and business case. Walk 2026-11-17, master 9491878d.
 Breaks: `.scratch/business-case/spec.md` §6.2 and §5 (linked outputs); `.scratch/dc-business-case/issues/03-it-energy-series.md` and `06-business-case-view.md` (the IT reader is the only IT source, LO-10); owner decision HOLISTIC-1 (the results trace to the inputs).

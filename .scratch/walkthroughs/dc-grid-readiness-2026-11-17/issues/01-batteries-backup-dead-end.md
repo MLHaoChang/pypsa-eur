@@ -3,7 +3,9 @@
 
 # 01: Backup mode "Batteries" is a dead end at the template's own defaults
 
-Status: ready-for-agent
+Status: done
+
+Done in #1693 (20950317); #1696 (7004431d).
 Type: task
 Impact: high (blocks a decision the spec offers: battery backup in place of diesel, DC 03)
 Templates: eh_datacenter, eh_datacenter_staged (New project wizard, Guided and Expert)
