@@ -287,3 +287,24 @@ def test_modes_without_a_capacitor_still_read_not_evaluated(tmp_path, monkeypatc
     out, series = _screens(tmp_path, monkeypatch, _modes(campus_spec(), [t(12.0)]))
     assert set(series["verdict"]) == {"not evaluated"}
     assert out.subsync_verdict == "not evaluated"
+
+
+def test_a_capacitor_with_no_resonance_in_the_band_reads_clear_even_with_a_genset_unmoded(tmp_path, monkeypatch):
+    # GK A2 ruling: with no series resonance in the scan band no machine can interact, so the far-side row stays
+    # clear whatever the modes. Xc = 0.005 ohm resonates at 4.1 Hz, below the 5 Hz edge.
+    spec = _gen2(_modes(cap_spec(xc_ohm=t(0.005)), [t(12.0, "datasheet")]))
+    out, series = _screens(tmp_path, monkeypatch, spec)
+    assert set(series["verdict"]) == {"clear"}
+    assert set(series["note"]) == {
+        "clear in the 5-45 Hz scan band: series capacitor(s) ['SC1'] scanned, no series resonance"}
+    assert out.subsync_verdict == "clear"
+
+
+def test_the_aggregated_model_hash_is_masters():
+    import datetime as dt
+
+    from gridspine.ingest.aggregate import freeze
+    from tests.gridspine.test_aggregate import plant
+
+    ms = freeze(plant(), {}, now=dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc))
+    assert ms.model_hashes["aggregated"] == "1ad21188b30ced1fd376ddf97d8d36d841999652bfb8cb51ba4916810f6f9df5"
