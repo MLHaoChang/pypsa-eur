@@ -1604,6 +1604,12 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(moved), **unknown)
     series = (resonance[resonance["kind"].astype(str) == SERIES] if resonance is not None and "kind" in resonance
               else None)
+    if series is not None and "margin_hz" in series and "verdict" in series:
+        # margins come from the judged rows only (GC-01c, GK A2 G1): a row the scan left undecided (check, not
+        # evaluated) and a band row with no series resonance in it (no f_er, no margin) carry none
+        undecided = series["verdict"].astype(str).isin(("check", "not evaluated"))
+        no_resonance = (series["f_er_hz"].isna() if "f_er_hz" in series else True) & series["margin_hz"].isna()
+        series = series[~undecided & ~no_resonance]
     if series is None or series.empty or "margin_hz" not in series:
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR],
                     note=_ssti_say("The run wrote no torsional margin for a series resonance"), **unknown)
@@ -1630,10 +1636,25 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
     words = "below" if verdict == "flag" else "at or above"
     note = (f"Least margin {margin:.4g} Hz: the electrical resonance's complement {f_comp:g} Hz "
             f"against the torsional mode {f_mode:g} Hz of {r['machine']} ({r['case']}), {words} "
-            f"the clearance {limit:g} Hz. {SSTI_SCREENING}")
+            f"the clearance {limit:g} Hz. {_assumed_modes(series) if verdict == 'clear' else ''}{SSTI_SCREENING}")
     return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], limit=limit, source=source, unit="Hz", rule=RULE_SUBSYNC,
                 project_value=margin, verdict=SSTI_VERDICTS[SUBSYNC_SR][verdict], note=note,
                 **{k: v for k, v in common.items() if k not in ("limit", "source", "unit", "rule")})
+
+
+def _assumed_modes(series) -> str:
+    """The sentence a pass resting on assumed torsional modes adds (GC-01c, GK A2 G2): the engine's own
+    clause from the first judged row that carries it, else ``""``."""
+    try:
+        from gridspine.drivers.campus_study import ASSUMED_MODES
+    except ImportError:  # pragma: no cover - build-shape branch
+        return ""
+    head = ASSUMED_MODES.split("{}")[0]
+    for note in series["note"] if "note" in series else ():
+        clause = str(note).split("; ")[0] if isinstance(note, str) else ""
+        if clause.startswith(head):
+            return f"{clause[0].upper()}{clause[1:]}. "
+    return ""
 
 
 def _ssti_read(inp: _Inputs) -> dict:
