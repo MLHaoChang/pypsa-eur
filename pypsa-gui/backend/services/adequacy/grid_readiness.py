@@ -1605,13 +1605,12 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
     series = (resonance[resonance["kind"].astype(str) == SERIES] if resonance is not None and "kind" in resonance
               else None)
     if series is not None and "margin_hz" in series:
-        # margins come from the judged rows only (GC-01c, GK A2 G1): a row the scan left undecided (check, not
-        # evaluated) and a band row with no series resonance in it (no f_er, no margin) carry none; a table
-        # with no verdicts has no judged row (fail closed)
-        undecided = (series["verdict"].astype(str).isin(("check", "not evaluated")) if "verdict" in series
-                     else True)
-        no_resonance = (series["f_er_hz"].isna() if "f_er_hz" in series else True) & series["margin_hz"].isna()
-        series = series[~undecided & ~no_resonance]
+        # a row worse than the run's verdict contradicts it (GK A2 H2); margins come from judged rows only (G1)
+        if worse := _worse_rows(series, verdict):
+            return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(
+                f"The run's resonance table has a {_ssti_shown(worse[0])} row, worse than its verdict "
+                f"{_ssti_shown(verdict)}"), **unknown)
+        series = series[subsync_judged(series)]
     if series is None or series.empty or "margin_hz" not in series:
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR],
                     note=_ssti_say("The run wrote no torsional margin for a series resonance"), **unknown)
@@ -1644,17 +1643,40 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
                 **{k: v for k, v in common.items() if k not in ("limit", "source", "unit", "rule")})
 
 
+def subsync_judged(series):
+    """True on the series-resonance rows the card judges a margin on (GC-01c, GK A2 G1, H1): not a row the
+    scan left undecided (check, not evaluated), not a band row with no series resonance in it (no f_er, no
+    margin); none at all in a table without verdicts or margins (fail closed). The pack reads the same."""
+    import pandas as pd
+
+    if "margin_hz" not in series or "verdict" not in series:
+        return pd.Series(False, index=series.index)
+    undecided = series["verdict"].astype(str).isin(("check", "not evaluated"))
+    no_resonance = (series["f_er_hz"].isna() if "f_er_hz" in series else True) & series["margin_hz"].isna()
+    return ~undecided & ~no_resonance
+
+
+def _worse_rows(series, verdict: str) -> list:
+    """The series rows' verdicts worse than the run's ``verdict`` (``SUBSYNC_VERDICT_ORDER``, worst first; a
+    string outside it counts as worst), GK A2 H2."""
+    from gridspine.drivers.campus_study import SUBSYNC_VERDICT_ORDER as order
+
+    if "verdict" not in series:
+        return []
+    rank = {v: i for i, v in enumerate(order)}
+    return [v for v in series["verdict"].astype(str) if rank.get(v, -1) < rank[verdict]]
+
+
 def _assumed_modes(series) -> str:
-    """The sentence a pass resting on assumed torsional modes adds (GC-01c, GK A2 G2): the engine's own
-    clause from the first judged row that carries it, else ``""``."""
+    """The sentence a pass resting on assumed torsional modes adds (GC-01c, GK A2 G2, H3): the engine's
+    ``assumed_modes`` of the first judged row that has one, else ``""``."""
     try:
         from gridspine.drivers.campus_study import ASSUMED_MODES
     except ImportError:  # pragma: no cover - build-shape branch
         return ""
-    head = ASSUMED_MODES.split("{}")[0]
-    for note in series["note"] if "note" in series else ():
-        clause = str(note).split("; ")[0] if isinstance(note, str) else ""
-        if clause.startswith(head):
+    for said in series["assumed_modes"] if "assumed_modes" in series else ():
+        if isinstance(said, str) and said.strip():
+            clause = ASSUMED_MODES.format(said.strip())
             return f"{clause[0].upper()}{clause[1:]}. "
     return ""
 

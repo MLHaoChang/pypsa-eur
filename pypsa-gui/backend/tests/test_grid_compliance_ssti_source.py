@@ -24,6 +24,8 @@ from tests.test_grid_readiness_off_grid import _open_tie
 from tests.test_grid_readiness_ssti import (
     _card,
     _profile_dir,
+    _band_clear_row,
+    _check_row,
     _resonance,
     _sub_meta,
     _two_genset_run,
@@ -130,6 +132,24 @@ def test_a_margin_at_the_clearance_passes(tmp_path, monkeypatch):
     )
     _, t = _pack(_project(monkeypatch, tmp_path))
     assert [r[6] for r in t["subsync_series_resonance"].rows] == ["pass", "pass"]
+
+
+def test_a_row_the_card_skips_is_not_judged_in_the_pack(tmp_path, monkeypatch):
+    # GK A2 H1 (ruling (b)): a band row with no resonance and a row turned check carry no judged margin
+    _write(
+        tmp_path,
+        subsync=_sub_meta("clear"),
+        resonance=[*_resonance((3.0,), "clear"), _band_clear_row()],
+    )
+    _, t = _pack(_project(monkeypatch, tmp_path))
+    assert [r[6] for r in t["subsync_series_resonance"].rows] == ["pass", "not judged"]
+    _write(
+        tmp_path,
+        subsync=_sub_meta("flag"),
+        resonance=[*_resonance((0.4,)), _check_row()],
+    )
+    _, t = _pack(_project(monkeypatch, tmp_path))
+    assert [r[6] for r in t["subsync_series_resonance"].rows] == ["warn", "not judged"]
 
 
 @pytest.mark.parametrize("damage", ["missing", "no_column"])

@@ -257,7 +257,20 @@ def test_a_clear_resting_on_an_assumed_mode_says_so(tmp_path, monkeypatch):
         assert row["note"].startswith(
             "clear rests on assumed torsional mode(s): GEN1 30.5 Hz; "
         )
+        assert row["assumed_modes"] == "GEN1 30.5 Hz"
     assert out.subsync_verdict == "clear"
+
+
+def test_assumed_modes_of_two_gensets_are_named_in_their_own_column(
+    tmp_path, monkeypatch
+):
+    spec = _gen2(
+        _modes(cap_spec(xc_ohm=t(XC)), [t(12.0, "datasheet"), t(30.5, "assumed")]),
+        [t(20.0, "assumed"), t(35.0, "assumed")],
+    )
+    _, series = _screens(tmp_path, monkeypatch, spec, clearance=1.0)
+    assert set(series["verdict"]) == {"clear"}
+    assert set(series["assumed_modes"]) == {"GEN1 30.5 Hz; GEN2 20, 35 Hz"}
 
 
 def test_a_row_judged_on_an_assumed_mode_carries_its_source(tmp_path, monkeypatch):

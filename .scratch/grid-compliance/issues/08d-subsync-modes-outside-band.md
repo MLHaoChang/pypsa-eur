@@ -24,6 +24,8 @@ outside that band is never found, and nothing tells the user that such a mode wa
 - A mode outside the scan band is named on the resonance rows (or the screen's notes) as not judged
   by the scan, with the band, and the scorecard reason carries it.
 - A test pins the note text literally for a mode below 5 Hz and one above f0 − 5 Hz.
+- A run whose only series rows are far-side "no series resonance in the band" rows says so on the
+  scorecard (today it reads unknown with "The run wrote no torsional margin for a series resonance").
 
 ## Comments
 

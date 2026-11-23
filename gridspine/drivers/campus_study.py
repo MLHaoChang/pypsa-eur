@@ -1272,6 +1272,7 @@ def _mode_coverage(campus, resonance):
     modes, sources = campus.torsional_modes, campus.torsional_mode_sources
     out = resonance.copy()
     out["mode_source"] = None
+    out["assumed_modes"] = None  # the clause ASSUMED_MODES names, on a clear row resting on assumed modes
     gensets = campus.units.index[campus.units["kind"] == "genset"]
     missing = sorted(g for g in gensets if g not in modes)
     assumed = {g: [f for f, src in zip(modes[g], sources[g]) if src == "assumed"] for g in modes}
@@ -1294,6 +1295,7 @@ def _mode_coverage(campus, resonance):
     elif assumed:
         said = "; ".join(f"{g} {', '.join(f'{f:g}' for f in fl)} Hz" for g, fl in sorted(assumed.items()))
         out.loc[clear, "note"] = [_join_note(ASSUMED_MODES.format(said), n) for n in out.loc[clear, "note"]]
+        out.loc[clear, "assumed_modes"] = said
         out.loc[clear, "assumed"] = True
     return out
 

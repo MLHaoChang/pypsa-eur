@@ -454,12 +454,16 @@ def test_a_resonance_table_without_verdicts_has_no_judged_margin(tmp_path):
     )
 
 
+def _assumed_rows(said, margins=(1.0, 3.0), verdict="clear"):
+    rows = _resonance(margins, verdict)
+    rows[0]["assumed_modes"] = said
+    return rows
+
+
 def test_a_pass_resting_on_assumed_modes_says_so(tmp_path):
-    rows = _resonance((1.0, 3.0), "clear")
-    rows[0]["note"] = (
-        "clear rests on assumed torsional mode(s): GEN1 30.5 Hz; synchronous machine impedance is not in the scan"
+    _write(
+        tmp_path, subsync=_sub_meta("clear"), resonance=_assumed_rows("GEN1 30.5 Hz")
     )
-    _write(tmp_path, subsync=_sub_meta("clear"), resonance=rows)
     row = _card(tmp_path)[0]["subsync_series_resonance"]
     assert row["verdict"] == "pass"
     assert row["note"] == (
@@ -467,6 +471,52 @@ def test_a_pass_resting_on_assumed_modes_says_so(tmp_path):
         "(max), at or above the clearance 1 Hz. Clear rests on assumed torsional mode(s): GEN1 30.5 Hz. "
         f"{SCREENING}"
     )
+
+
+def test_a_pass_on_two_gensets_assumed_modes_names_both(tmp_path):
+    _write(
+        tmp_path,
+        subsync=_sub_meta("clear"),
+        resonance=_assumed_rows("GEN1 30.5 Hz; GEN2 20, 35 Hz"),
+    )
+    note = _card(tmp_path)[0]["subsync_series_resonance"]["note"]
+    assert (
+        "at or above the clearance 1 Hz. Clear rests on assumed torsional mode(s): GEN1 30.5 Hz; GEN2 20, 35 Hz. "
+        f"{SCREENING}" in note
+    )
+
+
+def test_a_warn_never_carries_the_assumed_clear_sentence(tmp_path):
+    _write(
+        tmp_path,
+        subsync=_sub_meta("flag"),
+        resonance=_assumed_rows("GEN1 30.5 Hz", (0.4, 3.0), "flag"),
+    )
+    row = _card(tmp_path)[0]["subsync_series_resonance"]
+    assert row["verdict"] == "warn" and "assumed torsional" not in row["note"]
+
+
+def test_a_row_worse_than_the_runs_verdict_reads_unknown(tmp_path):
+    _write(
+        tmp_path,
+        subsync=_sub_meta("clear"),
+        resonance=[*_resonance((3.0,), "clear"), _check_row()],
+    )
+    row = _card(tmp_path)[0]["subsync_series_resonance"]
+    assert row["verdict"] == "unknown"
+    assert (
+        row["note"]
+        == f"The run's resonance table has a check row, worse than its verdict clear. {SCREENING}"
+    )
+
+
+def test_a_check_row_beside_a_flag_is_not_worse(tmp_path):
+    _write(
+        tmp_path,
+        subsync=_sub_meta("flag"),
+        resonance=[*_resonance((0.4,)), _check_row()],
+    )
+    assert _card(tmp_path)[0]["subsync_series_resonance"]["verdict"] == "warn"
 
 
 def test_a_pass_on_given_modes_adds_no_assumed_sentence(tmp_path):
