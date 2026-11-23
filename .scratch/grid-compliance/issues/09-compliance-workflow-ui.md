@@ -87,3 +87,5 @@ Release note: one new file under `doc/release-notes.d/` (see its README).
 - U5. The pack download uses the server's filename and bytes. The button is disabled while the pack builds, and a failed build shows the server's text.
 - U6. The screen shows no hash ids or file paths. The test covers `model_set_id` and `data_hash`.
 - A targeted mutant runs on each guard's test, and the PR body lists them. The PR opens after #1577 merges.
+
+- 2026-11-23 status sweep: landed in #1577 (0578ffac); #1854 (6cf22fbb): backend and Grid compliance UI section. Remains: item 6 (DGS export download and background-harmonics upload wiring).

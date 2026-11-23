@@ -12,3 +12,5 @@ Plan GO: GK B (60), Q1 a, Q2 a, conditions F1–F7.
 ## Comments
 
 Follow-up left out by GK B Q2 (a), see `02-tool-registry-fragments.md`.
+
+- 2026-11-23 status sweep: landed in #1566 (13665b26); #1610 (500068dd): loaders and docs. Remains: migrating the existing Python rows into the JSON bases (item 3).

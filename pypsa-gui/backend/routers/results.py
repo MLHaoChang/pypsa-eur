@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Any, Literal
 import threading as _threading
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from services.finance.case import CampusSummary
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
@@ -2352,6 +2354,16 @@ def _run_requester(user) -> tuple:
     return uid, PyPSAService.get_active_context().project_uuid
 
 
+def _ic_needs(read: Callable[[], list[str]]) -> list[str]:
+    """The needs `read` establishes for the start's `detail.needs`, or none:
+    a need it cannot read never changes the refusal (template-e2e issue 40)."""
+    try:
+        return read()
+    except Exception as exc:                            # noqa: BLE001
+        logger.debug("investment_case: a need was not established: %r", exc)
+        return []
+
+
 @results_router.post("/investment_case")
 def post_investment_case(body: InvestmentCaseRequest | None = None,
                          user: User | None = Depends(optional_user)):
@@ -2365,14 +2377,21 @@ def post_investment_case(body: InvestmentCaseRequest | None = None,
     (IC G3, `_ic_campus_source`).
     """
     from routers.simulation import _state_update
-    from services.finance.investment_case_runner import start_investment_case
+    from services.finance.investment_case_runner import finance_needs, start_investment_case
+    from services.results.finance_case import connection_need
     _refuse_if_mesh_busy("investment_case")
     n = PyPSAService.get_network()
+    cfg = _state.get("solver_config")
+    # Template-e2e issue 40: every need the start can tell rides in
+    # `detail.needs`, the first blocker's own code first; the refusal keeps
+    # that code and status.
+    known = _ic_needs(lambda: [c for c in (connection_need(cfg),) if c])
     if not _dispatch_ready(n):
         raise HTTPException(409, {"code": "not_solved",
                                   "message": "solve the network first: the investment case "
-                                             "values the solved dispatch"})
-    cfg = _state["solver_config"]
+                                             "values the solved dispatch",
+                                  "needs": ["not_solved", *known, *_ic_needs(
+                                      lambda: finance_needs(getattr(cfg, "finance", None)))]})
     owner = body.owner if body is not None else None
     # IC G3 R-2: the campus study read once, outside the network lock; the case
     # and the staleness key take the same source.
@@ -2389,6 +2408,7 @@ def post_investment_case(body: InvestmentCaseRequest | None = None,
         case_hash=_ic_case_hash,
         state_lock=PyPSAService.get_solver_state_lock(),
         requester=_run_requester(user),
+        needs=known,
     )
 
 

@@ -16,7 +16,7 @@ applies :data:`CONVERSIONS` in a pure ``_convert`` function and writes the CSV
 with the header ``t_s``, the case's channels by their contract names, in
 contract units (``test_battery.CHANNELS``), then ``status``. So the read-back
 never sees a PSS/E unit. ``status`` is always in the header, so the header is
-fixed per case; it is empty on every evaluated row (see V = 0 below). id/iq come from the plant converter's current commands, pu on the plant
+fixed per case; it is empty on every row. id/iq come from the plant converter's current commands, pu on the plant
 machine's MBASE: the pack sets MBASE = plant rated apparent power, which is
 the contract base. P and Q are measured at the PoC: ``plant_branch`` is
 ``(from = poc_bus, to = plant side bus, ckt)``, so PSS/E reports the flow
@@ -44,13 +44,17 @@ source impedance each script solves the power flow (``fnsl`` with
 never starts from an unsolved case. :func:`check_script` refuses a script
 without ``fnsl``, then that convergence check, then ``cong``, in that order.
 
-**Current magnitude at V = 0.** ``i_poc_pu`` is ``|S| / (V * S_rated)``,
-undefined when the PoC voltage is 0 (a bolted fault at the PoC, the core LVRT
-cases). The script still writes the CSV: on a sample with V <= 1e-6 the
-``i_poc_pu`` cell is empty and ``status`` reads :data:`STATUS_V0`; every other
-channel of that row is written as usual. It never writes NaN or inf, so the
-read-back reads that sample's current as unknown. Reading the current from a
-direct channel instead is issue 21.
+**Current, measured at the machine terminal.** ``i_poc_pu`` is the plant
+machine's terminal current ITERM, recorded directly (``machine_array_channel``
+code :data:`ITERM_CODE`, pu on the machine's MBASE), so it is defined at V = 0:
+a bolted fault at the PoC (the core LVRT cases) still gives the fault current.
+The script reads that MBASE from the case (``macdat``) and ``_convert`` rebases
+the current to pu on the plant rating, ``I * MBASE / S_rated``. The channel is
+at the plant machine's terminal, not at the PoC end of ``plant_branch``: no
+documented psspy branch-current channel was found (GK A ruling, issue 21). In
+pu the two currents differ by the plant branch's shunt and charging current and
+by any off-nominal ratio on it; a nominal-ratio transformer changes the
+current in A, not in pu. ``status`` stays in the header and is empty.
 
 The psspy calls were written without a PSS/E licence: :data:`PENDING` is
 repeated in every script, :data:`EVENT_CALLS` / :data:`CHANNEL_CALLS`
@@ -81,6 +85,9 @@ PENDING = (
 FNSL_OPTIONS = (0, 0, 0, 0, 0, 0, 0, 1)
 #: GENCLS angle state = STATE K + this offset, K from ``mdlind(..., 'STATE')``.
 ANGLE_STATE_OFFSET = 1
+#: machine_array_channel quantity code of ITERM (machine terminal current, pu on
+#: MBASE); listed in UNVERIFIED
+ITERM_CODE = 12
 
 #: call or convention -> what is assumed and unverified
 UNVERIFIED = {
@@ -92,6 +99,12 @@ UNVERIFIED = {
     ),
     "fnsl": "option order and meaning of FNSL_OPTIONS",
     "solved": "psspy.solved() returns 0 when the last solution converged",
+    "ITERM channel": (
+        f"machine_array_channel quantity code {ITERM_CODE} is ITERM, the terminal current "
+        "magnitude in pu on MBASE (recalled from the PSS/E API table, not checked; "
+        "CHSB numbers ITERM 19); the same unchecked table gives the Ip/Iq command "
+        "codes 22/23"
+    ),
 }
 
 #: kind -> (psspy calls used, note)
@@ -152,6 +165,12 @@ CHANNEL_CALLS = {
         "code 23, Iq command, pu on MBASE = plant rated; positive = capacitive "
         "injection assumed (REEC_A convention), unverified",
     ),
+    "raw_i_term_pu": (
+        "machine_array_channel",
+        f"code {ITERM_CODE}, ITERM terminal current magnitude of the plant machine, "
+        "pu on its MBASE; measured at the machine terminal, not the PoC; code "
+        "unverified",
+    ),
 }
 
 #: contract channel -> (recorded inputs a, b, c..., per-sample expression, formula)
@@ -168,14 +187,12 @@ CONVERSIONS = {
     "id_pu": (("raw_id_pu",), "a", "Ip command on MBASE = plant rated"),
     "iq_pu": (("raw_iq_pu",), "a", "Iq command on MBASE = plant rated"),
     "i_poc_pu": (
-        ("raw_p_poc_mw", "raw_q_poc_mvar", "raw_v_poc_pu"),
-        "(a * a + b * b) ** 0.5 / (c * s_rated) if c > 1e-6 else ''",
-        "|I| = sqrt(P^2 + Q^2) / (V * S_rated), S_rated = plant MBASE; empty at V = 0",
+        ("raw_i_term_pu",),
+        "a * m_base / s_rated",
+        "|I| = ITERM * MBASE / S_rated: plant machine terminal current, pu on the "
+        "plant rating",
     ),
 }
-
-#: ``status`` cell of a row whose ``i_poc_pu`` is not evaluated (V = 0 at the PoC)
-STATUS_V0 = "not evaluated: V = 0 at PoC"
 
 ALLOWED_IMPORTS = frozenset({"psspy", "dyntools", "os"})
 _FORBIDDEN_CALLS = frozenset(
@@ -422,7 +439,11 @@ def _channel_lines(case):
             "psspy.branch_p_and_q_channel([-1, -1, -1, BR_FROM, BR_TO], BR_CKT, "
             "['raw_p_poc_mw', 'raw_q_poc_mvar'])"
         )
-    for name, code in (("raw_id_pu", 22), ("raw_iq_pu", 23)):
+    for name, code in (
+        ("raw_id_pu", 22),
+        ("raw_iq_pu", 23),
+        ("raw_i_term_pu", ITERM_CODE),
+    ):
         if name in raw:
             out.append(
                 f"psspy.machine_array_channel([-1, {code}, PLANT_BUS], PLANT_ID, {name!r})"
@@ -432,12 +453,13 @@ def _channel_lines(case):
 
 def _convert_lines(case):
     """
-    A pure ``_convert(rec, f0_hz, s_rated)``: recorded lists -> contract units
-    plus ``status``; and a pure ``_csv_text(data, header)`` that formats them
+    A pure ``_convert(rec, f0_hz, s_rated, m_base)``: recorded lists -> contract
+    units plus ``status`` (empty); ``m_base`` is the plant machine's MBASE as the
+    case holds it (``None`` without a plant machine); and a pure ``_csv_text(data, header)`` that formats them
     (a str cell as is, a number by ``repr(float(x))``).
     """
     out = [
-        "def _convert(rec, f0_hz, s_rated):",
+        "def _convert(rec, f0_hz, s_rated, m_base):",
         "    out = {'t_s': list(rec['t_s'])}",
     ]
     for ch in case.channels:
@@ -452,13 +474,8 @@ def _convert_lines(case):
             f"    # {formula}",
             f"    out[{ch!r}] = [{expr} for ({', '.join(names)},) in zip({cols})]",
         ]
-    status = (
-        f"[{STATUS_V0!r} if x == '' else '' for x in out['i_poc_pu']]"
-        if "i_poc_pu" in case.channels
-        else "['' for _ in out['t_s']]"
-    )
     return out + [
-        f"    out['status'] = {status}",
+        "    out['status'] = ['' for _ in out['t_s']]",
         "    return out",
         "",
         "",
@@ -534,6 +551,15 @@ def _script(
         "ierr, mbase = psspy.macdat(GRID_BUS, GRID_ID, 'MBASE')",
         "if ierr or abs(mbase - GRID_MBASE) > 1e-6:",
         "    raise SystemExit('grid machine MBASE differs from the generated base')",
+        *(
+            [
+                "ierr, M_BASE = psspy.macdat(PLANT_BUS, PLANT_ID, 'MBASE')",
+                "if ierr or not M_BASE > 0:",
+                "    raise SystemExit('plant machine MBASE not read from the case')",
+            ]
+            if plant_machine is not None
+            else ["M_BASE = None"]
+        ),
         "_i, _f = psspy.getdefaultint(), psspy.getdefaultreal()",
         "psspy.machine_chng_2(GRID_BUS, GRID_ID, [_i] * 6, "
         "[_f] * 7 + list(Z1_PU) + [_f] * 8)",
@@ -563,7 +589,7 @@ def _script(
         "_title, idents, values = dyntools.CHNF(OUT).get_data()",
         "rec = {idents[k]: values[k] for k in idents if k != 'time'}",
         "rec['t_s'] = values['time']",
-        "data = _convert(rec, F0_HZ, PLANT_MBASE)",
+        "data = _convert(rec, F0_HZ, PLANT_MBASE, M_BASE)",
         f"with open(os.path.join(HERE, {csv!r}), 'w') as fh:",
         "    fh.write(_csv_text(data, HEADER))",
         "",
@@ -610,13 +636,13 @@ def write_scripts(
     ``raw``/``seq``/``dyr`` are pack-local file names; ``poc_bus`` the RAW bus
     number of the PoC, ``poc_kv`` its base kV; ``grid_machine`` the grid source
     ``(bus, id)`` with MBASE ``grid_mbase_mva``; ``plant_branch`` the PoC branch
-    ``(from_bus = poc_bus, to_bus = plant side, ckt)`` for P/Q/current
+    ``(from_bus = poc_bus, to_bus = plant side, ckt)`` for the P/Q
     channels, measured at the PoC (a pack whose PoC branch is BUS1 = plant
     side, BUS2 = grid side passes ``(BUS2, BUS1, CKT)``);
     ``plant_machine`` the ``(bus, id)`` whose references the V/Q/P steps move
-    and whose current commands id/iq record; ``f0_hz`` the base frequency that
+    and whose current commands id/iq and terminal current i_poc record; ``f0_hz`` the base frequency that
     turns PSS/E's pu frequency deviation into Hz; ``plant_mbase_mva`` the plant
-    machine's MBASE (= plant rated), needed when a case records ``i_poc_pu``.
+    rating S_rated (the generated MBASE), needed when a case records ``i_poc_pu``.
     """
     cases = tuple(cases)
     if not cases:
@@ -657,18 +683,17 @@ def write_scripts(
         if not ok or not math.isfinite(v) or v <= 0:
             raise ContractError(f"{label}={v!r} must be a finite number > 0")
     for c in cases:
-        if plant_branch is None and set(c.channels) & {
-            "p_poc_mw",
-            "q_poc_mvar",
+        if plant_branch is None and set(c.channels) & {"p_poc_mw", "q_poc_mvar"}:
+            raise ContractError(f"case {c.case_id}: P/Q channels need plant_branch")
+        needs_machine = c.kind in _PLANT_KINDS or set(c.channels) & {
+            "id_pu",
+            "iq_pu",
             "i_poc_pu",
-        }:
-            raise ContractError(
-                f"case {c.case_id}: P/Q/current channels need plant_branch"
-            )
-        needs_machine = c.kind in _PLANT_KINDS or set(c.channels) & {"id_pu", "iq_pu"}
+        }
         if plant_machine is None and needs_machine:
             raise ContractError(
-                f"case {c.case_id}: setpoint steps and id/iq channels need plant_machine"
+                f"case {c.case_id}: setpoint steps and id/iq/current channels need "
+                "plant_machine"
             )
     os.makedirs(pack_dir, exist_ok=True)
     written = {}

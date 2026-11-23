@@ -36,3 +36,7 @@ This is the mirror of `.scratch/ux-walkthrough-2026-11/issues/01-guided-expert-r
 - EXPERT-GUIDED-1.
 - HOLISTIC-1.
 - `.scratch/project-workflow/design.md:402`, rule 7 ("Same section, same state in both modes").
+
+## Comments
+
+- 2026-11-23 status sweep: landed in #1700 (08144225): source-run line, Guided headline after an Expert solve, Control card landed. Unverified: that the Operation card cost line and the grid-forming line (when Control is out of scope) are fixed.

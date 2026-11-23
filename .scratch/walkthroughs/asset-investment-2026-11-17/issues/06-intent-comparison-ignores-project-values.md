@@ -3,7 +3,9 @@
 
 # The intent comparison asks again for values the project already holds
 
-Status: ready-for-agent
+Status: done
+
+Done in #1698 (62d4bf7c).
 Type: bug (asset-investment walkthrough, WALK-E2E-1)
 Journey steps: J1 Design intent → sizing loop (Expert)
 Severity: medium

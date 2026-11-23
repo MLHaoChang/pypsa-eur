@@ -3,11 +3,14 @@ The campus PowerFactory handoff (DGS + harmonic sources), its closed-loop
 read-back, and the field background in the harmonic screen (GC-05).
 """
 
+import dataclasses
 import json
 
+import numpy as np
 import pandas as pd
 import pytest
 
+from gridspine.drivers import campus_study
 from gridspine.drivers.campus_study import (
     HARMONIC_SOURCES_CSV,
     HARMONICS_CSV,
@@ -19,6 +22,7 @@ from gridspine.drivers.campus_study import (
     load_run_campus,
     powerfactory_campus,
 )
+from gridspine.handoff import dgs_writer
 from gridspine.ingest.background_harmonics import combine
 from gridspine.readback.results import DGS_NAMES_CSV, read_back
 from gridspine.schema.contracts import ContractError
@@ -309,6 +313,98 @@ def test_a_statcom_is_a_converter_to_list(tmp_path):
         "pp_name"
     )
     assert hs.at["ST1", "status"] == "no spectrum"
+
+
+def _cb1(spec):
+    spec["campus"].setdefault("compensation", []).append(
+        {
+            "name": "CB1",
+            "bus": spec["campus"]["pcc"]["bus"],
+            "kind": "capacitor_bank",
+            "q_mvar": {"value": 2.0, "source": "assumed"},
+            "steps": 1,
+        }
+    )
+
+
+def _manifest(out):
+    def refuse(token):
+        raise ValueError(f"manifest.json holds the bare token {token}")
+
+    return json.loads((out / "manifest.json").read_text(), parse_constant=refuse)
+
+
+def test_a_lossy_shunt_is_listed_in_the_manifest_with_the_writers_columns(
+    tmp_path, monkeypatch
+):
+    run, _ = _run(tmp_path, _hub(), _cb1)
+    load = campus_study.load_run_campus
+
+    def lossy(run_dir):
+        # Campus data writes shunts lossless; the loss is set here as an imported network would carry it.
+        campus = load(run_dir)
+        campus.net.shunt.loc[campus.net.shunt["name"] == "CB1", "p_mw"] = 0.05
+        return campus
+
+    monkeypatch.setattr(campus_study, "load_run_campus", lossy)
+    (out,) = powerfactory_campus(str(run), hours=[_hour(run)])
+    (row,) = _manifest(out)["not_written"]
+    names = pd.read_csv(out / DGS_NAMES_CSV, keep_default_na=False)
+    (dgs_name,) = names.loc[names["pp_name"] == "CB1", "dgs_name"]
+    assert list(row) == [
+        "pp_table",
+        "pp_name",
+        "dgs_name",
+        "attribute",
+        "value",
+        "reason",
+    ]
+    assert row == {
+        "pp_table": "shunt",
+        "pp_name": "CB1",
+        "dgs_name": dgs_name,
+        "attribute": "p_mw",
+        "value": 0.05,
+        "reason": "active power not written: no verified attribute",
+    }
+
+
+def test_a_non_finite_or_numpy_value_is_written_as_plain_json(tmp_path, monkeypatch):
+    run, _ = _run(tmp_path, _hub())
+    real = dgs_writer.write_dgs
+
+    def with_odd_values(*args, **kwargs):
+        exp = real(*args, **kwargs)
+        rows = pd.DataFrame(
+            [
+                ("shunt", "S1", "S1", "p_mw", float("nan"), "r"),
+                ("shunt", "S2", "S2", "p_mw", np.int64(3), "r"),
+                ("shunt", "S3", "S3", "p_mw", float("inf"), "r"),
+                ("shunt", "S4", "S4", "p_mw", float("-inf"), "r"),
+                ("shunt", "S5", "S5", "p_mw", np.float32(1.5), "r"),
+                ("shunt", "S6", "S6", "p_mw", np.bool_(True), "r"),
+            ],
+            columns=exp.not_written.columns,
+            dtype=object,
+        )
+        return dataclasses.replace(exp, not_written=rows)
+
+    monkeypatch.setattr(dgs_writer, "write_dgs", with_odd_values)
+    (out,) = powerfactory_campus(str(run), hours=[_hour(run)])
+    values = [r["value"] for r in _manifest(out)["not_written"]]
+    assert values == [None, 3, None, None, 1.5, True]
+    assert [type(v) for v in values] == [
+        type(None),
+        int,
+        type(None),
+        type(None),
+        float,
+        bool,
+    ]
+
+
+def test_a_lossless_campus_lists_nothing_not_written(case):
+    assert _manifest(case)["not_written"] == []
 
 
 def test_a_branch_name_the_dgs_never_wrote_is_refused(case, tmp_path):

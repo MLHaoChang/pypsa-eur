@@ -36,7 +36,8 @@ import logging
 import threading as _threading
 import time
 from contextlib import nullcontext
-from typing import Any, Callable
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -187,14 +188,39 @@ def _422(code: str, message: str, **extra) -> HTTPException:
     return HTTPException(422, {"code": code, "message": message, **extra})
 
 
-def finance_inputs_or_422(raw: Any) -> FinanceInputs:
+def finance_inputs_or_422(raw: Any, *, needs: Sequence[str] | None = None) -> FinanceInputs:
+    """The stored finance inputs, or 422 `finance_inputs_invalid`. `needs`
+    (the start only, template-e2e issue 40): the other needs already
+    established, sent after this one as `detail.needs`."""
     try:
         return FinanceInputs.model_validate(raw)
     except ValidationError as exc:
         errs = exc.errors()
+        extra = {} if needs is None else {"needs": ["finance_inputs_invalid", *needs]}
         raise _422("finance_inputs_invalid", str(errs[0].get("msg"))[:300] if errs else str(exc),
                    errors=[{"loc": list(e.get("loc", ())), "msg": str(e.get("msg"))[:200]}
-                           for e in errs[:20]]) from exc
+                           for e in errs[:20]], **extra) from exc
+
+
+def finance_needs(raw: Any) -> list[str]:
+    """The finance-input need a start would refuse with, without starting
+    (template-e2e issue 40): `finance_inputs_missing`, `finance_inputs_invalid`
+    or `tax_pack_not_found`, in the start's own order; [] when the inputs are
+    set, valid and their tax pack loads. The 409 `not_solved` lists it in its
+    `detail.needs`."""
+    from services.finance.packs.base import PackNotFound, load_pack
+    if raw is None:
+        return ["finance_inputs_missing"]
+    try:
+        fin = FinanceInputs.model_validate(raw)
+    except ValidationError:
+        return ["finance_inputs_invalid"]
+    if fin.tax_pack_id:
+        try:
+            load_pack(fin.tax_pack_id, as_of=fin.financial_close)
+        except PackNotFound:
+            return ["tax_pack_not_found"]
+    return []
 
 
 def start_investment_case(
@@ -209,6 +235,7 @@ def start_investment_case(
     layers: Callable[[FinanceCase], tuple] | tuple | None = None,
     state_lock=None,
     requester: tuple[Any, Any] | None = None,
+    needs: Sequence[str] = (),
 ) -> dict:
     """Start the investment-case run in a worker thread (see the module
     docstring). The mesh refusal (409 while a solve or another study runs) is
@@ -222,7 +249,12 @@ def start_investment_case(
     `requester` is (user id, project id) of the person who started it: their
     role is read again before each report is stored, and a person made a
     viewer, or removed, mid-run gets a `project_view_only` failure and no
-    report (project-viewer-role 02)."""
+    report (project-viewer-role 02).
+
+    `needs` (template-e2e issue 40): the codes of the needs the caller has
+    established and the start does not refuse with (the site connection). A
+    finance-input refusal sends its own code first, then these, as
+    `detail.needs`, so one answer lists every need the start can tell."""
     from services.finance.engine import run_case
     from services.finance.packs.base import PackNotFound, load_pack
     from services.finance.report import (
@@ -238,15 +270,18 @@ def start_investment_case(
     body = body or InvestmentCaseRequest()
     cfg = solver_state.get("solver_config")
     raw = getattr(cfg, "finance", None)
+    needs = list(needs)
     if raw is None:
         raise _422("finance_inputs_missing",
-                   "set the finance inputs first (PUT /api/simulation/finance)")
-    fin = finance_inputs_or_422(raw)
+                   "set the finance inputs first (PUT /api/simulation/finance)",
+                   needs=["finance_inputs_missing", *needs])
+    fin = finance_inputs_or_422(raw, needs=needs)
     if fin.tax_pack_id:
         try:
             pack0 = load_pack(fin.tax_pack_id, as_of=fin.financial_close)
         except PackNotFound as exc:
-            raise _422("tax_pack_not_found", str(exc)) from exc
+            raise _422("tax_pack_not_found", str(exc),
+                       needs=["tax_pack_not_found", *needs]) from exc
         packs = {fin.tax_pack_id: pack0.pack_hash}
     else:
         packs = {}

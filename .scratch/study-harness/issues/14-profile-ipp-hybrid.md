@@ -121,3 +121,5 @@ Plan: a native runner step `ppa_price` (reads only, 0 solves) after the run's ow
 - S6: `read_kpis` gets the record source; one normaliser: malformed reads not_evaluated, mismatches stale, never a 500 and never retained_results; an edit after the step reads stale (tested).
 - S7: @1 and @2 stay byte-equal and startable; a run started on @2 resolves @2 at every later stage after @3 lands (tested).
 - S8: a new error kind goes in a `tool-error-kinds.d/` fragment; `test_tool_error_kind_manifest` and `test_harness_run_monitor` at the trial merge.
+
+- 2026-11-23 status sweep: landed in #1454 (837cb6a78b); #1492 (a0169f265c); #1508 (787ace4c26); #1532 (6e99aee5cd); #1544 (755cbe3b59); #1575 (91f43242ee); #1590 (c3800b71b2): slices through eh_ipp_hybrid@3 (PPA price read natively). Unconfirmed: slice S-D.

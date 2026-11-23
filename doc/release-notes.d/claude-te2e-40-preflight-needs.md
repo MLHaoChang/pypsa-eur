@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The investment case's start now lists every need it can tell (the solve, the site connection, the finance inputs) in one refusal, as an additive `detail.needs` field; the run panel shows them all in its checklist instead of one per run.

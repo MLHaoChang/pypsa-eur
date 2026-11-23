@@ -1,45 +1,41 @@
-// Excel input workbook S3 (UX 27 GO): the Export chooser's two input workbook
+// Excel input workbook S3 (UX 27 GO), now Results › Hand-off › Exports (R6): the Export chooser's two input workbook
 // rows. The project's row always says it holds the project as last saved, with
 // "Save first" on that line only while edits are unsaved; with no saved project
 // it says why Download is off. The blank template keeps its own file name.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { useUIStore } from '../store/uiStore'
-import { networkApi } from '../api/network'
-import { workbookApi } from '../api/workbook'
-import { saveProjectQuietly } from '../utils/projectActions'
-import Sidebar from './Sidebar'
+import { useUIStore } from '../../store/uiStore'
+import { networkApi } from '../../api/network'
+import { workbookApi } from '../../api/workbook'
+import { saveProjectQuietly } from '../../utils/projectActions'
+import ExportsTab from './ExportsTab'
 
-vi.mock('../api/network', () => ({
+vi.mock('../../api/network', () => ({
   networkApi: {
     getMeta: vi.fn().mockResolvedValue({ bus_count: 3 }),
     undoInfo: vi.fn(),
   },
 }))
-vi.mock('../api/io', () => ({
+vi.mock('../../api/io', () => ({
   ioApi: { resultsWorkbookViews: vi.fn().mockResolvedValue({ views: [], run: null }) },
 }))
-vi.mock('../api/workbook', () => ({ workbookApi: { project: vi.fn(), template: vi.fn() } }))
-vi.mock('../api/projects', () => ({
+vi.mock('../../api/workbook', () => ({ workbookApi: { project: vi.fn(), template: vi.fn() } }))
+vi.mock('../../api/projects', () => ({
   projectsApi: { list: vi.fn().mockResolvedValue([]), save: vi.fn() },
 }))
-vi.mock('../api/simulation', () => ({
+vi.mock('../../api/simulation', () => ({
   simulationApi: { preflight: vi.fn().mockResolvedValue({ errors: 0, warnings: 0 }) },
 }))
-vi.mock('../api/solveQueue', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../api/solveQueue')>()
+vi.mock('../../api/solveQueue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/solveQueue')>()
   return { ...actual, solveQueueApi: { list: vi.fn().mockResolvedValue({ jobs: [] }) } }
 })
-vi.mock('../api/localSettings', () => ({
+vi.mock('../../api/localSettings', () => ({
   fetchLocalSettings: vi.fn().mockResolvedValue({ api_key_hint: null, log_path: '/tmp/app.log' }),
 }))
-vi.mock('../pages/ImportExport', () => ({ ImportZone: () => <div /> }))
-vi.mock('./NewProjectWizard', () => ({ default: () => <div /> }))
-vi.mock('../components/ProjectPicker', () => ({ default: () => <div /> }))
-vi.mock('../utils/projectActions', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../utils/projectActions')>()
+vi.mock('../../utils/projectActions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../utils/projectActions')>()
   return {
     ...actual,
     invalidateNetworkQueries: vi.fn(),
@@ -54,9 +50,8 @@ vi.mock('../utils/projectActions', async (importOriginal) => {
 async function openChooser(mode: 'guided' | 'expert', project: string | null) {
   useUIStore.setState({ uiMode: mode, currentProject: project, projectName: project ?? 'Untitled' })
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  render(<QueryClientProvider client={client}><MemoryRouter><Sidebar /></MemoryRouter></QueryClientProvider>)
-  act(() => { useUIStore.getState().requestIoModal('export') })
-  return screen.findByTestId('io-modal')
+  render(<QueryClientProvider client={client}><ExportsTab /></QueryClientProvider>)
+  return screen.findByTestId('handoff-exports')
 }
 const pick = (modal: HTMLElement, value: string) => fireEvent.click(within(modal).getByDisplayValue(value))
 const download = (modal: HTMLElement) => within(modal).getByRole('button', { name: /Download File/ }) as HTMLButtonElement

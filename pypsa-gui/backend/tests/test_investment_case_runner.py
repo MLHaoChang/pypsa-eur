@@ -23,6 +23,8 @@ from services.finance.investment_case_runner import (
     STAGES,
     assumptions_digest,
     finance_digest,
+    finance_inputs_or_422,
+    finance_needs,
     public_record,
     staleness,
     start_investment_case,
@@ -200,6 +202,28 @@ def test_the_pack_is_loaded_when_the_inputs_name_one():
     rep = InvestmentCaseReport.model_validate(stored)
     assert rep.packs == {"us_federal": pack.pack_hash}
     assert "tax_pack_missing" not in (rep.sections["tax"].note or "")
+
+
+def test_the_finance_need_matches_the_start_refusal():
+    """Issue 40: `finance_needs` names the code the start refuses with; the
+    start sends the caller's needs with its own as `detail.needs`; the other
+    callers of `finance_inputs_or_422` get no `needs` key."""
+    cases = [(None, "finance_inputs_missing"),
+             ({"financial_close": "2030-01-01", "capex_phasing": [0.3]}, "finance_inputs_invalid"),
+             ({"financial_close": "2030-01-01", "tax_pack_id": "zz"}, "tax_pack_not_found")]
+    for raw, code in cases:
+        assert finance_needs(raw) == [code]
+        with pytest.raises(HTTPException) as e:
+            start_investment_case(None, build_case=lambda: None,
+                                  solver_state={"solver_config": _Cfg(raw)},
+                                  state_update=lambda **k: None, publish_study=lambda *a: None,
+                                  needs=["value_flows_not_configured"])
+        assert e.value.detail["code"] == code
+        assert e.value.detail["needs"] == [code, "value_flows_not_configured"]
+    assert finance_needs({"financial_close": "2030-01-01"}) == []
+    with pytest.raises(HTTPException) as e:
+        finance_inputs_or_422({"financial_close": "2030-01-01", "capex_phasing": [0.3]})
+    assert "needs" not in e.value.detail
 
 
 def test_synchronous_refusals():

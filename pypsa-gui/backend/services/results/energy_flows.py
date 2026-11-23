@@ -62,6 +62,10 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
+try:
+    from gridspine.drivers.process_chain import truthy as _truthy
+except ImportError:  # a build without gridspine: the one pinned fallback, not a new copy
+    from services.solver.process_uc import _fallback_truthy as _truthy
 from services.adequacy.slack import slack_generator_mask
 from services.period_utils import is_multi_period
 from services.process_products import shortfalls
@@ -352,7 +356,13 @@ def _read(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
             _refuse(f"bus {buses[b]} is in {bus_unit[b]}, not an energy unit; "
                                  "the flows are shown for energy carriers only")
 
+    # A process unit (a Link flagged `eh_process`) ends what flows into it at one
+    # "Process <name>" node; its outputs start again from that node (A1b).
+    process = set()
+    if len(links) and "eh_process" in links.columns:
+        process = {f"Link {nm}" for nm in links.index if _truthy(links.at[nm, "eh_process"])}
     return {"T": T, "buses": buses, "bus_ix": bus_ix, "nb": nb, "wg": wg, "dt": dt, "gnames": gnames,
+            "process": process,
             "gp": gp, "g_bus": g_bus, "g_lab": g_lab, "external": external, "lnames": lnames, "lp": lp,
             "l_bus": l_bus, "shed": shed, "lost": lost, "curtailed": curtailed, "served": served,
             "elems": elems, "storages": storages, "bus_unit": bus_unit}
@@ -388,13 +398,20 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
         _refuse("the network is too large for the flow attribution")
     nst = len(storages)
     # ---- labels -----------------------------------------------------------------
+    process = R["process"]
+    proc_names = [nm for nm, _ in elems if nm in process]
+    plabel = {nm: f"Process {nm[len('Link '):]}" for nm in proc_names}
+    clash = {plabel[nm] for nm in proc_names} & (set(g_lab) | set(lnames))
+    if clash:
+        _refuse(f"{', '.join(sorted(clash))} is also the name of a carrier or load; rename it so the "
+                "process node is not merged with it")
     srcs = sorted(set(g_lab))
-    srcs += [STOCK_BEFORE, UNATTRIBUTED]
+    srcs += [STOCK_BEFORE, UNATTRIBUTED] + [plabel[nm] for nm in proc_names]
     ns, nv = len(srcs), 1 + nst
     s_ix = {s: i for i, s in enumerate(srcs)}
     K = ns * nv
     vias = [DIRECT] + [s.name for s in storages]
-    dests = lnames + [EXPORT, LOSSES]
+    dests = lnames + [EXPORT, LOSSES] + [plabel[nm] for nm in proc_names]
     d_ix = {d: i for i, d in enumerate(dests)}
     nd = len(dests)
 
@@ -430,9 +447,15 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
     loss_share: list[tuple[list[tuple[int, np.ndarray]], np.ndarray]] = []
     elem_in: list[list[tuple[int, np.ndarray]]] = []
     elem_out: list[list[tuple[int, np.ndarray]]] = []
-    for _, pl in elems:
+    for nm_e, pl in elems:
         ins = [(b, np.maximum(p, 0.0)) for b, p in pl]
         outs = [(b, np.maximum(-p, 0.0)) for b, p in pl]
+        if nm_e in process:
+            # No mixing through a process: inputs end at its node, outputs are its own supply.
+            elem_in.append(ins)
+            loss_share.append((ins, np.zeros(T)))
+            elem_out.append([])
+            continue
         X = sum(x for _, x in ins) if ins else np.zeros(T)
         Xs = np.where(X > _EPS, X, np.inf)
         for b_o, y in outs:
@@ -456,6 +479,19 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
     for j, b in enumerate(g_bus):
         S_ext[:, b, s_ix[g_lab[j]] * nv] += np.maximum(gp[:, j], 0.0)
 
+    proc_out = np.zeros(T)
+    proc_by: dict[str, np.ndarray] = {}
+    proc_export: list[tuple[str, np.ndarray]] = []
+    for nm_e, pl in elems:
+        if nm_e in process:
+            for b, p in pl:
+                y = np.maximum(-p, 0.0)
+                proc_out += y
+                proc_by[plabel[nm_e]] = proc_by.get(plabel[nm_e], 0.0) + y
+                if external[b]:
+                    proc_export.append((plabel[nm_e], y))      # leaves the site: Export, never dropped
+                else:
+                    S_ext[:, b, s_ix[plabel[nm_e]] * nv] += y
     # ---- the storage pools, replayed over the period -----------------------------
     Fg = np.einsum("tab,tbk->tak", N, S_ext)           # flux from external supply alone
     st_idx = np.arange(nst)
@@ -540,6 +576,13 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
                 share = _share_into(ins, y, I, T)
                 for b_i, x in ins:
                     D[:, :, d_ix[EXPORT]] += F[:, b_i, :] * (x / I[:, b_i] * share)[:, None]
+    for (nm_e, pl) in elems:
+        if nm_e in process:
+            for b_i, p in pl:
+                x = np.maximum(p, 0.0)
+                D[:, :, d_ix[plabel[nm_e]]] += F[:, b_i, :] * (x / I[:, b_i])[:, None]
+    for lab, y in proc_export:
+        D[:, s_ix[lab] * nv, d_ix[EXPORT]] += y
     for k in range(nst):
         for s in range(ns):
             D[:, s * nv + 1 + k, d_ix[LOSSES]] += loss_pool[:, k, s]
@@ -560,7 +603,7 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
         "ns": ns, "nv": nv, "D": D, "gp": gp, "g_lab": g_lab, "storages": storages,
         "served": served, "lnames": lnames, "shed": shed, "lost": lost,
         "curtailed": R["curtailed"], "dsoc_t": dsoc_t,
-        "bus_bad": bus_bad, "soc_bad": soc_bad, "passes": passes,
+        "bus_bad": bus_bad, "soc_bad": soc_bad, "passes": passes, "proc_out": proc_out, "proc_by": proc_by,
     }
 
 
@@ -595,6 +638,8 @@ def _series(att, win: slice, n, mask) -> dict[str, Any]:
         supply[lab] = bucket(np.maximum(gp[:, cols], 0.0).sum(axis=1))
     for st in att["storages"]:
         supply[f"{st.name} discharge"] = bucket(st.d)
+    for lab, y in att["proc_by"].items():            # a process unit's output is supply that restarts there
+        supply[lab] = bucket(y)
     D = att["D"].sum(axis=1)                       # T × dests, MW
     demand = {d: bucket(D[:, i]) for i, d in enumerate(att["dests"]) if D[:, i].any()}
     sns = n.snapshots.get_level_values(-1) if is_multi_period(n) else n.snapshots
@@ -658,6 +703,10 @@ def energy_flows(n, period=None, window: tuple[int, int] | None = None, *,
     # ---- conservation: Σ generation = Σ destinations + Δ storage ------------------
     w = wg[win]
     gen = float((np.maximum(att["gp"][win], 0.0).sum(axis=1) * w).sum()) if att["gp"].size else 0.0
+    # What a process unit delivers restarts at its node: it is supply for the closure
+    # (its input is already a destination), so the sums still balance.
+    proc_mwh = float((att["proc_out"][win] * w).sum())
+    gen += proc_mwh
     dest_total = float(per_label.sum())
     dsoc = float(att["dsoc_t"][win].sum()) if att["storages"] else 0.0
     # energy delivered from stock the window started with: a source of its own in the rows
@@ -680,7 +729,7 @@ def energy_flows(n, period=None, window: tuple[int, int] | None = None, *,
         "rows": rows if not failed else [],
         "series": _series(att, win, n, mask),
         "conservation": {"status": "ok" if not failed else "failed", "checks": failed,
-                         "generation_mwh": gen, "destinations_mwh": dest_total,
+                         "generation_mwh": gen - proc_mwh, "process_output_mwh": proc_mwh, "destinations_mwh": dest_total,
                          "storage_delta_mwh": dsoc, "stock_mwh": stock,
                          "residual_mwh": residual, "tolerance_mwh": tol},
         "unserved_product_mwh": {ld: float((att["lost"][win, i] * w).sum()) for i, ld in enumerate(att["lnames"])

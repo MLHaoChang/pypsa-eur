@@ -3,7 +3,9 @@
 
 # 02: The staged energization refusal prints Python code text
 
-Status: ready-for-agent
+Status: done
+
+Done in #1693 (20950317).
 Type: task
 Impact: medium (misleads; the user sees program internals)
 Templates: eh_datacenter_staged (New project wizard), and any API or chat caller of the same check

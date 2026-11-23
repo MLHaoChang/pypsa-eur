@@ -3,7 +3,9 @@
 
 # 04: Island study cost tables give no unit, and limits show constraint names
 
-Status: ready-for-agent
+Status: done
+
+Done in #1673 (20728b0b).
 Impact: medium
 Templates: Island Microgrid (any project that runs Grid study › Island)
 Found by: control-strategy walkthrough, 2026-11-17 (master 9491878d). Shot: `../shots/04-island-cost-no-unit.png`

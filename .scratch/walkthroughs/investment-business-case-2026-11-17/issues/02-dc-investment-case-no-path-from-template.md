@@ -36,3 +36,5 @@ On any template in the group, either the investment case runs from the template'
 ## Comments
 
 - Seen again 2026-11-20 (template walk, master 1f6905e3): DC: Guided Results 'Investment case ›' and Expert Results > Commercial & finance still say 'The investment case needs the site connection. Set it in Connection & grid' although the connection point is set (Guided step 3 shows 'Grid import (40 MW)'). H2 does reach 'Run the investment case'.
+
+- 2026-11-23 status sweep: landed in #1711 (56987f69); #1683 (c779c3d1): the DC template ships a point of connection, owners, dates and finance inputs; refusals name their need. Unverified: Guided section 7 status reflecting finance inputs, and the Playwright Guided/Expert agreement check.

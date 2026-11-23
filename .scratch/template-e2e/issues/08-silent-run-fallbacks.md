@@ -29,3 +29,7 @@ None of them shows as "assumed" in its section, in Results or in the report.
 - Each defaulted run input shows as "Assumed" in its own section, and in the Results group "Assumptions behind this result", and in the report.
 - The backend VOLL fallback refuses the run instead of using 0.0 (06 carries the user-facing half).
 - A test runs each template's study with the input missing and checks that the assumption appears in the result.
+
+## Comments
+
+- 2026-11-23 status sweep: landed in #1645 (41318c60): assumed values shown before the run, in the run record and in the report chapter; VOLL fallback refuses. Remains: the "Assumptions behind this result" group (issue 26).

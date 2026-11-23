@@ -46,3 +46,7 @@ but its shipped template keeps no existing asset, so it needs no baseline.
 - A run whose solves left cannot cover the baseline is refused `baseline_solve`, nothing solved.
 - `tests/test_run_profile_concentrator_runs.py`: the demo run reaches the hand-off with the case
   established against `site_today` and both case rules `block` and passing.
+
+## Comments
+
+- 2026-11-23 status sweep: landed in #1624 (31abc36a30): baseline_solves reservation in run_envelope. Remains: the run still refuses the re-solve (routers/results.py FinanceRefused baseline_solve).
