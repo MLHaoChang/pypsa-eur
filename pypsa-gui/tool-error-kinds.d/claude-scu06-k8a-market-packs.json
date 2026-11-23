@@ -31,6 +31,14 @@
   "market_pack_pin_unreadable": {
    "surface": "inline",
    "why": "Market-pack preview/apply refuses when market_pack.json cannot be read: what the last apply wrote is unknown, so user edits cannot be told apart. The assistant asks the user to restore or delete the file."
+  },
+  "market_pack_currency_unknown": {
+   "surface": "inline",
+   "why": "Market-pack preview/apply refuses when the project's finance inputs state no currency, so the pack's currency cannot be checked. The assistant asks the user to set the project's currency first."
+  },
+  "market_pack_invalid": {
+   "surface": "inline",
+   "why": "A stored market pack does not validate (an unknown bidding zone or another invalid field); it is refused with the field named, never a raw validation error. The assistant names the field."
   }
  }
 }

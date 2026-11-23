@@ -39,6 +39,8 @@ STALE = "market_pack_stale"
 ZONE_UNKNOWN = "market_pack_zone_unknown"
 ZONE_MISMATCH = "market_pack_zone_mismatch"
 CURRENCY_MISMATCH = "market_pack_currency_mismatch"
+CURRENCY_UNKNOWN = "market_pack_currency_unknown"
+INVALID = "market_pack_invalid"
 NO_COMMERCIAL = "market_pack_needs_connection"
 UNSAVED = "market_pack_needs_saved_project"
 PIN_UNREADABLE = "market_pack_pin_unreadable"
@@ -88,6 +90,22 @@ def pack_hash(pack: MarketPack | dict) -> str:
     """sha256 of the pack's canonical content (sorted keys, no whitespace)."""
     text = json.dumps(_content(pack), sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(text.encode()).hexdigest()
+
+
+def load_pack(raw: Any) -> MarketPack:
+    """A pack from stored JSON: an unknown region or any other invalid field is a
+    typed refusal (``market_pack_invalid``), never a validation error passing
+    through; a pre-K8a pack loads stripped with a named flag."""
+    from pydantic import ValidationError
+
+    try:
+        return MarketPack.model_validate(raw)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        where = ".".join(str(x) for x in first.get("loc", ())) or "pack"
+        raise PackRefusal(INVALID, (
+            f"The market pack cannot be read: {where}: {first.get('msg', 'invalid')}"),
+            422) from exc
 
 
 def _template(zone: str) -> MarketPack:
@@ -170,7 +188,11 @@ def check_fit(pack: MarketPack, zone: str | None, currency: str | None) -> None:
                 "or change the project's bidding zone."
             ),
         )
-    if currency and pack.currency != currency:
+    if not currency:
+        raise PackRefusal(CURRENCY_UNKNOWN, (
+            f"The project's finance inputs state no currency, so the pack's {pack.currency} "
+            "prices cannot be checked against it: set the project's currency first."))
+    if pack.currency != currency:
         raise PackRefusal(
             CURRENCY_MISMATCH,
             (
