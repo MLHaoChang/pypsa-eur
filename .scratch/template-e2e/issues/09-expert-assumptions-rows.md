@@ -3,7 +3,9 @@
 
 # 09 — Expert shows none of the Assumptions rows Guided shows
 
-Status: ready-for-agent
+Status: done
+
+Done in #1682 (e1b334a5).
 Owner: template-e2e slice-2 builder (successor of session_01G7qCukBqpE7RUE97mdvTio)
 Size: M
 Gated: UX (UX 2 session_01G7qCukikR93QrY7d2YFJ1c)

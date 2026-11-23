@@ -30,3 +30,5 @@ J4 (the run button name) and J2 (panel names).
 ## Comments
 
 **2026-11-17 triage (SCALE-1).** Owned by RAW-NAMES-1 and the expert-catalogue track (#1597, #1634); template-e2e 05 covers part of the screens. Build after the catalogue core so labels come from it. The chat-card rows (`run_lopf (waiting)`, job ids, `diff.attribute`) are to confirm live first; no new package until the catalogue session says they are outside its scope.
+
+- 2026-11-23 status sweep: landed in #1827 (46b5a40f4f); #1820 (afd3992a33); #1821 (1cd3c835a1); #1897 (d76e562211); #1738 (6c32315cbb): several RAW-NAMES-1 surfaces. Remains: chat-card rows and the rest, unverified.

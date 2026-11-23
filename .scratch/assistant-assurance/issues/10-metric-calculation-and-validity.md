@@ -146,3 +146,5 @@ Branch `claude/aa-10-s4-metric-parity`, plan GK B GO. `tests/assurance_acceptanc
 | AA10-S4-10 lost-load/1 energy, cost, shed hours, peak | `_covered` | `/results/lost_load` and the Lost load sheet (peak from the route series only) |
 
 Filed from the plan review, not found by these tests: ticket 21 (adequacy total system cost reads 0 for a non-finite objective).
+
+- 2026-11-23 status sweep: landed in #1644 (321152e43f); #1680 (6bff977ac9); #1704 (1e4600d600); #1705 (bda99bbbcb); #1712 (76707f136c); #1707 (00856ef95a): all six PRs are merged (the status line still lists four as open). Remains: NPV and other-domain metrics, plausibility adapter, per-metric domain review.

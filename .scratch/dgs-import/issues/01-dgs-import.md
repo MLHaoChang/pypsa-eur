@@ -3,7 +3,9 @@
 
 # PowerFactory DGS import into a new project
 
-Status: claimed
+Status: done
+
+Done in #1612 (9491878d); #1678 (c5368463); #1731 (c9c874cb). S1 parser, S2 mapping, S3 CSV/XLSX.
 Type: task
 Blocked by: none for S1; S2 waits for the import contract (`gridspine/ingest/import_result.py`, PR #1600)
 Gated: **yes** (GK A2, all slices; coordinator 2026-11-17)

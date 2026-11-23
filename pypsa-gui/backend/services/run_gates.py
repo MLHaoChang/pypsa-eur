@@ -1372,8 +1372,11 @@ def _grid_loading(ctx, ev):
     if isinstance(out, pf.Missing):
         return out
     peak, over = out
-    return Detailed(round(peak, 2), over, "peak apparent power at either end of any line or transformer, % of "
-                                          "its MVA rating x s_max_pu, on the converged AC power-flow snapshots")
+    skipped = pf.assumed_branches(ctx.network)
+    note = (f"; {len(skipped)} with an assumed rating not judged ({pf._named(skipped)})") if skipped else ""
+    return Detailed(round(peak, 2), over, "peak apparent power at either end of the lines and transformers with "
+                                          "a stated rating, % of its MVA rating x s_max_pu, on the converged AC "
+                                          "power-flow snapshots" + note)
 
 
 def _grid_voltage(ctx, ev):

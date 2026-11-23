@@ -87,6 +87,17 @@ describe('the needs (F1)', () => {
     expect(blockerOf(http(422, { code: 'finance_inputs_missing', message: 'PUT /api/simulation/finance' }), null))
       .toEqual({ kind: 'needs', needs: ['finance'] })
   })
+  it('one refusal names every need it lists, in the checklist order (issue 40)', () => {
+    expect(blockerOf(new StudyBusyError('solve first', 'not_solved',
+      ['not_solved', 'value_flows_not_configured', 'finance_inputs_missing']), null))
+      .toEqual({ kind: 'needs', needs: ['solve', 'connection', 'finance'] })
+    expect(blockerOf(http(422, { code: 'tax_pack_not_found', message: 'x',
+                                 needs: ['value_flows_invalid', 'tax_pack_not_found'] }), null))
+      .toEqual({ kind: 'needs', needs: ['connection', 'finance'] })
+    // A code with no plain fix, or not a string, adds no line; the refusal's own code always does.
+    expect(blockerOf(http(422, { code: 'finance_inputs_missing', needs: ['template_missing', 7] }), null))
+      .toEqual({ kind: 'needs', needs: ['finance'] })
+  })
   it('a missing or unknown code falls to "could not finish"', () => {
     expect(blockerOf(http(500, 'boom'), null)).toEqual({ kind: 'unknown', detail: null })
     expect(blockerOf(null, { status: 'refused' })).toEqual({ kind: 'unknown', detail: null })
@@ -136,6 +147,17 @@ describe('InvestmentCaseRunPanel', () => {
     expect(container.textContent).not.toMatch(/finance_inputs_missing|PUT \/api/)
     fireEvent.click(within(needs).getByRole('button', { name: 'Set the finance inputs ›' }))
     expect(openPanel).toHaveBeenCalledWith('commercial', 'economics')
+  })
+
+  it('one refusal lists every need the start could tell (issue 40)', async () => {
+    api.startInvestmentCase.mockRejectedValue(new StudyBusyError('solve the network first', 'not_solved',
+      ['not_solved', 'value_flows_not_configured', 'finance_inputs_missing']))
+    const { container } = renderPanel()
+    fireEvent.click(await screen.findByRole('button', { name: 'Run the investment case' }))
+    await screen.findByTestId('ic-needs')
+    expect(screen.getAllByRole('listitem').map(li => li.getAttribute('data-testid')))
+      .toEqual(['ic-need-solve', 'ic-need-connection', 'ic-need-finance'])
+    expect(container.textContent).not.toMatch(/not_solved|value_flows|finance_inputs/)
   })
 
   it('an unsolved project: the solve link asks the header to run it', async () => {

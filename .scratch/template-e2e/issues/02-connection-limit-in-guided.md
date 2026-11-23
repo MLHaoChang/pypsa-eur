@@ -195,3 +195,5 @@ Each condition is quoted verbatim from the gatekeepers' messages (GK B 65 sessio
 **GK B 68 (not blocking)**
 
   - A non-dict request body gets FastAPI's untyped 422 (the `body: dict` parameter), not one of the five kinds — for the PR body.
+
+- 2026-11-23 status sweep: landed in #1626 (a8f35cc7); #1773 (a1176d99); #1778 (954ab859): Guided Connection limit field, staged per-period drawer and energization check. Remains: chat parity for energization_per_period (declared unbuilt in not_via_chat).

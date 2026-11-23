@@ -3,7 +3,9 @@
 
 # Slice 1: run estimate service and route
 
-Status: ready-for-agent
+Status: done
+
+Done in #1614 (0bca65ec).
 Type: task
 Blocked by: None
 

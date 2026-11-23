@@ -1,6 +1,8 @@
 # 02c — A weak-grid study from chat or the route runs on the network's connection limit
 
-Status: ready-for-agent
+Status: done
+
+Done in #1772 (40cdc9f9).
 
 Raised by GK B (64) on #1626 (ask 5, C6). Follow-up to 02a (#1626).
 

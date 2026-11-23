@@ -30,3 +30,7 @@ On a busy host this goes past the harness `PER_TOOL_TIMEOUT_SECONDS` (30 s). Use
 - The investment-case digest and every stored fingerprint stay byte-identical, so no existing record turns stale.
 - The PR carries a timing figure, before and after, on the 8760 h case.
 - The plan goes to GK B first.
+
+## Comments
+
+- 2026-11-23 status sweep: landed in #1882 (be3dcbcd): exact fingerprint encodes plain numeric/date columns in bulk. Remains: encode once and derive both fingerprints, and the before/after timing figure.

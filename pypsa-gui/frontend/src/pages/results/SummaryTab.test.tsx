@@ -248,7 +248,8 @@ describe('the Summary hands on (UX-flow #25)', () => {
     fireEvent.click(await screen.findByTestId('summary-open-export'))
     expect(useUIStore.getState().ioModalRequest).toBe('export')
     fireEvent.click(screen.getByTestId('summary-open-reports'))
-    expect(useUIStore.getState().activeSlidePanel).toBe('reports')
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
+    expect(useUIStore.getState().resultsTabRequest).toBe('reports')   // Hand-off › Reports (R6)
   })
 })
 
