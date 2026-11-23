@@ -59,10 +59,19 @@ class PackRefusal(ValueError):
 # the template's starting values; the user confirms them against the TSO's
 # prequalification, like any hand-entered product.
 _NORDIC_PRODUCTS: tuple[dict[str, Any], ...] = (
-    {"id": "fast_symmetric", "kind": "fast_symmetric", "direction": "symmetric",
-     "sustain_h": 1.0},
+    {
+        "id": "fast_symmetric",
+        "kind": "fast_symmetric",
+        "direction": "symmetric",
+        "sustain_h": 1.0,
+    },
     {"id": "secondary_up", "kind": "secondary", "direction": "up", "sustain_h": 1.0},
-    {"id": "secondary_down", "kind": "secondary", "direction": "down", "sustain_h": 1.0},
+    {
+        "id": "secondary_down",
+        "kind": "secondary",
+        "direction": "down",
+        "sustain_h": 1.0,
+    },
     {"id": "tertiary_up", "kind": "tertiary", "direction": "up", "sustain_h": 1.0},
 )
 _SHIPPED_ZONES = ("NO-1", "NO-2", "NO-3", "NO-4", "NO-5")
@@ -90,13 +99,24 @@ def _template(zone: str) -> MarketPack:
         "valid_year": _VALID_YEAR,
         "day_ahead": None,
         "products": [
-            {**p, "capacity_price": None, "max_commit_mw": None, "storages": [],
-             "counterparty": "tso"}
+            {
+                **p,
+                "capacity_price": None,
+                "max_commit_mw": None,
+                "storages": [],
+                "counterparty": "tso",
+            }
             for p in _NORDIC_PRODUCTS
         ],
     }
-    return MarketPack.model_validate({**body, "pack_hash": pack_hash(
-        MarketPack.model_validate({**body, "pack_hash": "0" * 8}))})
+    return MarketPack.model_validate(
+        {
+            **body,
+            "pack_hash": pack_hash(
+                MarketPack.model_validate({**body, "pack_hash": "0" * 8})
+            ),
+        }
+    )
 
 
 def shipped() -> dict[str, MarketPack]:
@@ -135,18 +155,30 @@ def check_fit(pack: MarketPack, zone: str | None, currency: str | None) -> None:
     """Refuses a pack for another zone, a project with no known zone, and a
     pack whose currency is not the project's stated one."""
     if zone is None:
-        raise PackRefusal(ZONE_UNKNOWN, (
-            f"The project has no bidding zone, so the {pack.region} pack cannot be checked "
-            "against it: place the site pin or pick the zone in the market-price card first."))
+        raise PackRefusal(
+            ZONE_UNKNOWN,
+            (
+                f"The project has no bidding zone, so the {pack.region} pack cannot be checked "
+                "against it: place the site pin or pick the zone in the market-price card first."
+            ),
+        )
     if pack.region != zone:
-        raise PackRefusal(ZONE_MISMATCH, (
-            f"The pack is for {pack.region}; the project is in {zone}. Use the {zone} pack, "
-            "or change the project's bidding zone."))
+        raise PackRefusal(
+            ZONE_MISMATCH,
+            (
+                f"The pack is for {pack.region}; the project is in {zone}. Use the {zone} pack, "
+                "or change the project's bidding zone."
+            ),
+        )
     if currency and pack.currency != currency:
-        raise PackRefusal(CURRENCY_MISMATCH, (
-            f"The pack's prices are in {pack.currency}; the project's finance inputs are in "
-            f"{currency}. Nothing is converted: change the project's currency, or enter the "
-            "products by hand."))
+        raise PackRefusal(
+            CURRENCY_MISMATCH,
+            (
+                f"The pack's prices are in {pack.currency}; the project's finance inputs are in "
+                f"{currency}. Nothing is converted: change the project's currency, or enter the "
+                "products by hand."
+            ),
+        )
 
 
 # ── the pin ──────────────────────────────────────────────────────────────────
@@ -164,25 +196,49 @@ def read_pin(project_dir: Path | None) -> dict | None:
     try:
         pin = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        raise PackRefusal(PIN_UNREADABLE, (
-            f"{PIN_FILE} cannot be read, so what the last pack apply wrote is unknown; "
-            "restore or delete it")) from exc
-    if not (isinstance(pin, dict) and isinstance(pin.get("applied"), dict)
-            and isinstance(pin.get("pack_id"), str) and isinstance(pin.get("pack_hash"), str)):
-        raise PackRefusal(PIN_UNREADABLE, f"{PIN_FILE} does not hold a pack pin; restore or delete it")
+        raise PackRefusal(
+            PIN_UNREADABLE,
+            (
+                f"{PIN_FILE} cannot be read, so what the last pack apply wrote is unknown; "
+                "restore or delete it"
+            ),
+        ) from exc
+    if not (
+        isinstance(pin, dict)
+        and isinstance(pin.get("applied"), dict)
+        and isinstance(pin.get("pack_id"), str)
+        and isinstance(pin.get("pack_hash"), str)
+    ):
+        raise PackRefusal(
+            PIN_UNREADABLE, f"{PIN_FILE} does not hold a pack pin; restore or delete it"
+        )
     return pin
 
 
 def write_pin(project_dir: Path, pack: MarketPack, applied: dict) -> None:
     from services.atomic_io import atomic_write_text
 
-    atomic_write_text(Path(project_dir) / PIN_FILE, json.dumps({
-        "version": PIN_VERSION, "pack_id": pack.id, "pack_hash": pack.pack_hash,
-        "applied": applied}, sort_keys=True, indent=1))
+    atomic_write_text(
+        Path(project_dir) / PIN_FILE,
+        json.dumps(
+            {
+                "version": PIN_VERSION,
+                "pack_id": pack.id,
+                "pack_hash": pack.pack_hash,
+                "applied": applied,
+            },
+            sort_keys=True,
+            indent=1,
+        ),
+    )
 
 
 def update_available(pack: MarketPack, pin: dict | None) -> bool:
-    return bool(pin) and pin.get("pack_id") == pack.id and pin.get("pack_hash") != pack.pack_hash
+    return (
+        bool(pin)
+        and pin.get("pack_id") == pack.id
+        and pin.get("pack_hash") != pack.pack_hash
+    )
 
 
 # ── the per-cell plan ────────────────────────────────────────────────────────
@@ -200,10 +256,16 @@ def plan_apply(pack: MarketPack, commercial: dict | None, pin: dict | None) -> d
     (kept: the user edited it), ``kept`` [{cell, reason}] (empty refs, no export
     Link), the new ``commercial`` dict and the ``applied`` pin to store."""
     if not isinstance(commercial, dict) or not commercial.get("poc_link"):
-        raise PackRefusal(NO_COMMERCIAL, (
-            "Set the site's grid connection (Commercial & parties) first: a market pack "
-            "adds to the commercial settings, which start from the connection."))
-    pinned = (pin or {}).get("applied", {}) if (pin or {}).get("pack_id") == pack.id else {}
+        raise PackRefusal(
+            NO_COMMERCIAL,
+            (
+                "Set the site's grid connection (Commercial & parties) first: a market pack "
+                "adds to the commercial settings, which start from the connection."
+            ),
+        )
+    pinned = (
+        (pin or {}).get("applied", {}) if (pin or {}).get("pack_id") == pack.id else {}
+    )
     out = json.loads(json.dumps(commercial))
     changes: list[dict] = []
     conflicts: list[dict] = []
@@ -220,8 +282,14 @@ def plan_apply(pack: MarketPack, commercial: dict | None, pin: dict | None) -> d
             changes.append({"cell": cell, "from": cur, "to": new})
             applied[cell] = new
             return True
-        conflicts.append({"cell": cell, "yours": cur, "pack": new,
-                          "last_applied": None if last is _MISSING else last})
+        conflicts.append(
+            {
+                "cell": cell,
+                "yours": cur,
+                "pack": new,
+                "last_applied": None if last is _MISSING else last,
+            }
+        )
         if last is not _MISSING:
             applied[cell] = last
         return False
@@ -251,8 +319,14 @@ def plan_apply(pack: MarketPack, commercial: dict | None, pin: dict | None) -> d
         if have is None:
             if any(c in pinned for c in cells.values()):
                 # The last apply added it and the user removed it: not re-added.
-                conflicts.append({"cell": _cell(prod.id, "id"), "yours": None,
-                                  "pack": prod.id, "last_applied": prod.id})
+                conflicts.append(
+                    {
+                        "cell": _cell(prod.id, "id"),
+                        "yours": None,
+                        "pack": prod.id,
+                        "last_applied": prod.id,
+                    }
+                )
                 applied.update({c: pinned[c] for c in cells.values() if c in pinned})
                 continue
             for f, c in cells.items():

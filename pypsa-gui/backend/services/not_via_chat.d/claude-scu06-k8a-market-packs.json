@@ -1,0 +1,19 @@
+{
+ "entries": [
+  {
+   "id": "market_packs",
+   "title": "Market packs per bidding zone",
+   "disposition": "manual",
+   "reason": "Applying a market pack writes reserve products and the export price into the commercial settings after a per-value review of conflicts, so it is done on the market pack card, not in chat.",
+   "page": "Commercial & parties, Market pack",
+   "panel": null,
+   "keywords": ["market", "pack", "reserve", "products"],
+   "routes": [
+    ["GET", "/api/simulation/commercial/market_packs"],
+    ["GET", "/api/simulation/commercial/market_packs/{pack_id}/preview"],
+    ["POST", "/api/simulation/commercial/market_packs/{pack_id}/apply"]
+   ]
+  }
+ ],
+ "goals": {"Apply the market pack for my bidding zone": "market_packs"}
+}

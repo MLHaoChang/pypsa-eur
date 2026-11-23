@@ -780,8 +780,22 @@ def _pack_context():
     return (pathlib.Path(storage) if storage else None), commercial, currency
 
 
+# SCU06 K8a: the market-pack refusals (`services.commercial.market_packs.PackRefusal`
+# codes), as `error_kind` literals for the manifest.
+_MARKET_PACK_REFUSALS = {d["error_kind"]: d for d in (
+    {"error_kind": "market_pack_unknown"},
+    {"error_kind": "market_pack_stale"},
+    {"error_kind": "market_pack_zone_unknown"},
+    {"error_kind": "market_pack_zone_mismatch"},
+    {"error_kind": "market_pack_currency_mismatch"},
+    {"error_kind": "market_pack_needs_connection"},
+    {"error_kind": "market_pack_needs_saved_project"},
+    {"error_kind": "market_pack_pin_unreadable"},
+)}
+
+
 def _pack_refusal(exc) -> HTTPException:
-    return HTTPException(exc.status, {"code": exc.code, "error_kind": exc.code,
+    return HTTPException(exc.status, {**_MARKET_PACK_REFUSALS[exc.code], "code": exc.code,
                                       "message": str(exc)})
 
 
