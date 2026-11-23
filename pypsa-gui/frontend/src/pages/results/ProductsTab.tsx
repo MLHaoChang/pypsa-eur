@@ -11,8 +11,13 @@ import { resultsApi } from '../../api/simulation'
 import type { ProcessProduct, ProcessUnit } from '../../api/types'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
-import { productionTiles } from './ProductionTiles'
+import { fmtTonnage } from '../../utils/format'
+import { productionTiles, productName } from './ProductionTiles'
 
+/** A process unit in the panel's words: "haber_bosch" reads "Haber bosch" (never the engine key). */
+const unitWords = (name: string) => { const w = name.replace(/[_-]+/g, ' ').trim(); return w.charAt(0).toUpperCase() + w.slice(1) }
+/** The tonnes made in the unit the page speaks: kg for hydrogen, t otherwise. */
+const madeIn = (p: ProcessProduct, t: number) => isHydrogen(p) ? `${Math.round(t * 1000).toLocaleString('en-US')} kg` : fmtTonnage(t)
 const isHydrogen = (p: ProcessProduct) => /^(h2|hydrogen)$/i.test((p.carrier || p.bus).trim())
 
 /** The average output over the modelled hours, in the unit the product is sold in: kg/h for hydrogen, t/d otherwise.
@@ -73,11 +78,11 @@ export default function ProductsTab() {
           const tiles = productionTiles(p)
           const made = tiles.find(t => t.id === 'made')
           return (
-            <PageSection key={p.bus} title={p.bus} hint={p.carrier || 'product'}>
+            <PageSection key={p.bus} title={productName(p.carrier || p.bus)} hint="what the site makes">
               <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
-                {made && <Kpi testId={`products-${p.bus}-made`} label="Made" value={made.value} unit={made.unit}
-                  state={made.state} reason={made.reason}
-                  basis={p.production.value != null ? `${made.basis} · ${p.production.value.toLocaleString('en-US', { maximumFractionDigits: 0 })} ${p.production.unit}` : made.basis} />}
+                {made && (p.production.t != null
+                  ? <Kpi testId={`products-${p.bus}-made`} label="Made" value={madeIn(p, p.production.t)} state="ready" basis={made.basis} />
+                  : <Kpi testId={`products-${p.bus}-made`} label="Made" value={made.value} state={made.state} reason={made.reason} basis={made.basis} />)}
                 {out
                   ? <Kpi testId={`products-${p.bus}-rate`} label="Average output" value={out.value} unit={out.unit} state="ready" basis="whole horizon" />
                   : <Kpi testId={`products-${p.bus}-rate`} label="Average output" value="" state="not_modelled"
@@ -85,9 +90,9 @@ export default function ProductsTab() {
                 {mine.map(u => {
                   const share = runningShare(u)
                   return share != null
-                    ? <Kpi key={u.name} testId={`products-${u.name}-running`} label={`${u.name} running`} value={share.toFixed(0)} unit="%"
+                    ? <Kpi key={u.name} testId={`products-${u.name}-running`} label={`${unitWords(u.name)} running`} value={share.toFixed(0)} unit="%"
                         state="ready" basis="of the modelled hours" />
-                    : <Kpi key={u.name} testId={`products-${u.name}-running`} label={`${u.name} running`} value="" state="not_modelled"
+                    : <Kpi key={u.name} testId={`products-${u.name}-running`} label={`${unitWords(u.name)} running`} value="" state="not_modelled"
                         reason="The solve recorded no finite running hours for this unit." />
                 })}
                 {isHydrogen(p) && (h2Kg != null && Number.isFinite(h2Kg)
@@ -99,7 +104,7 @@ export default function ProductsTab() {
               </div>
               {!isHydrogen(p) && (
                 <p data-testid={`products-${p.bus}-no-cost`} className="mt-2 text-[11px] text-muted">
-                  No cost per tonne is calculated for this product yet; the output above is what the solve made.
+                  No cost per tonne is worked out for this product yet, so only what the solve made is shown.
                 </p>
               )}
             </PageSection>
