@@ -28,3 +28,9 @@ On a hydrogen or ammonia project, the product the site makes (tonnes, kg) and wh
 `pypsa-gui/frontend/src/pages/results/groups.ts`, a new `pypsa-gui/frontend/src/pages/results/ProductsTab.tsx`, the process-view read in `pypsa-gui/backend/routers/results.py` (read only), `pypsa-gui/frontend/src/pages/hubDesign/HeadlineStrip.tsx`.
 
 ## Comments
+
+### Builder, 2026-11-23: scope and placement as built
+
+- Placement deviates from "a Products tab": Capacity expansion already has the maximum four card tabs (`groups.test.ts`), so Products is a view inside Costs & prices (`views: prices, economics, products`). Coordinator ruled A.
+- Scope: output in the product's own unit (kg/h for hydrogen, t/d otherwise, plus the bus-unit amount), running share of each process unit, and for hydrogen the LCOH read verbatim (EUR/kg, same figure as Economics and the report). Utilisation is the unit's running hours over modelled hours, both read. Ammonia has output only: no EUR/t exists in any read, filed as `10-ammonia-cost-per-tonne-read.md`. The Guided section-10 headline is `11-section-10-product-cost-headline.md` (after te2e 21).
+- GK B4 conditions (plan GO): one availability predicate (the tab shows when the process view lists a product bus, the same `products` empty_key the read uses); a failed or missing read shows "not available" with the reason, never 0; the LCOH is verbatim with unit and basis; the vitest expects hand-written literals; `process_view.py` reads `eh_process` with `process_chain.truthy` (the #1917 residual) with a parametrised test; the inventory, route-parity and control-matrix checks run at the trial merge.

@@ -57,3 +57,22 @@ it('averageOutput and runningShare are unit changes of read figures, null when a
   expect(runningShare({ name: 'u', running_hours: 3, modelled_hours: 12 })).toBe(25)
   expect(runningShare({ name: 'u', running_hours: null, modelled_hours: 12 })).toBeNull()
 })
+
+it('a failed process view says "not available", never a blank or a zero', async () => {
+  vi.mocked(resultsApi.getProcessView).mockRejectedValue(new Error('409'))
+  vi.mocked(resultsApi.getLcoh).mockResolvedValue(null as never)
+  mount()
+  expect((await screen.findByTestId('products-unavailable')).textContent).toMatch(/not available/i)
+})
+
+it('a failed LCOH read shows the hydrogen cost as not available with the reason, never 0', async () => {
+  vi.mocked(resultsApi.getProcessView).mockResolvedValue({
+    products: [product('H2 bus', 'H2', 240)],
+    process_units: [{ name: 'electrolyser', product_bus: 'H2 bus', running_hours: 6, modelled_hours: 8 }],
+  } as never)
+  vi.mocked(resultsApi.getLcoh).mockRejectedValue(new Error('404'))
+  mount()
+  const cost = await screen.findByTestId('products-H2 bus-cost')
+  await vi.waitFor(() => expect(cost.textContent).not.toMatch(/\b0(\.0+)?\s*€\/kg/))
+  expect(screen.getByTestId('products-H2 bus-made').textContent).toContain('240')
+})

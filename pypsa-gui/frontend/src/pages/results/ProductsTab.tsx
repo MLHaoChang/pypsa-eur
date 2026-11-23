@@ -38,7 +38,7 @@ function CostTile({ testId, kg }: { testId: string; kg: number }) {
     <div data-testid={testId} className="flex flex-col gap-0.5 rounded border border-border px-3 py-2">
       <span className="text-[11px] text-muted">Hydrogen cost</span>
       <span className="text-sm font-semibold text-text whitespace-nowrap">{kg.toFixed(2)} €/kg</span>
-      <span className="text-[10px] text-muted">as in Economics and the report</span>
+      <span className="text-[10px] text-muted">electrolysers only: annualised fixed cost + variable cost + electricity, per kg H₂ made; as in Economics and the report</span>
     </div>
   )
 }
@@ -56,6 +56,10 @@ export default function ProductsTab() {
   const h2Kg = lcoh.data?.total?.lcoh_eur_per_kg_h2
   const hasH2Product = products.some(isHydrogen)
 
+  if (view.isError) {
+    return <PageBody><p data-testid="products-unavailable" className="text-xs text-muted">
+      Products are not available: the process view could not be read for this solve.</p></PageBody>
+  }
   if (view.isLoading) return <PageBody><p className="text-xs text-muted">Reading the products…</p></PageBody>
   if (!products.length && !units.length) {
     return <PageBody><p data-testid="products-empty" className="text-xs text-muted">This solve has no product the site makes.</p></PageBody>
@@ -72,7 +76,8 @@ export default function ProductsTab() {
             <PageSection key={p.bus} title={p.bus} hint={p.carrier || 'product'}>
               <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
                 {made && <Kpi testId={`products-${p.bus}-made`} label="Made" value={made.value} unit={made.unit}
-                  state={made.state} reason={made.reason} basis={made.basis} />}
+                  state={made.state} reason={made.reason}
+                  basis={p.production.value != null ? `${made.basis} · ${p.production.value.toLocaleString('en-US', { maximumFractionDigits: 0 })} ${p.production.unit}` : made.basis} />}
                 {out
                   ? <Kpi testId={`products-${p.bus}-rate`} label="Average output" value={out.value} unit={out.unit} state="ready" basis="whole horizon" />
                   : <Kpi testId={`products-${p.bus}-rate`} label="Average output" value="" state="not_modelled"
@@ -88,7 +93,9 @@ export default function ProductsTab() {
                 {isHydrogen(p) && (h2Kg != null && Number.isFinite(h2Kg)
                   ? <CostTile testId={`products-${p.bus}-cost`} kg={h2Kg} />
                   : <Kpi testId={`products-${p.bus}-cost`} label="Hydrogen cost" value="" state="not_modelled"
-                      reason="The solve has no hydrogen produced by an electrolyser, so no cost per kg." />)}
+                      reason={lcoh.isError
+                        ? 'Not available: the hydrogen cost could not be read for this solve.'
+                        : 'The solve has no hydrogen produced by an electrolyser, so no cost per kg.'} />)}
               </div>
               {!isHydrogen(p) && (
                 <p data-testid={`products-${p.bus}-no-cost`} className="mt-2 text-[11px] text-muted">

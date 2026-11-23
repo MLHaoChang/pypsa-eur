@@ -483,7 +483,8 @@ export default function Results() {
     queryKey: nk(currentProject, 'results', 'process_view'), queryFn: resultsApi.getProcessView, retry: false,
   })
   const hasProcessUnits = (processView?.process_units?.length ?? 0) > 0
-  const hasProducts = hasProcessUnits || (processView?.products?.length ?? 0) > 0
+  // Products shows on the read path's own predicate: the process view lists a product bus (empty_key `products`).
+  const hasProducts = (processView?.products?.length ?? 0) > 0
   const firstSnap = snap?.snapshots?.[0]
   const lastSnap = snap?.snapshots?.[snap.count - 1]
   // datetime-local input format: "YYYY-MM-DDTHH:mm".

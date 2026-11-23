@@ -512,3 +512,14 @@ def test_the_buy_in_cost_is_on_the_objective_weights_not_the_energy_ones():
     p = n.generators_t.p["__buy_nh3"].clip(lower=0)
     assert nh3["buy_in"]["eur"] == pytest.approx(float((p * 97.0 * 2.0).sum()))
     assert nh3["buy_in"]["value"] == pytest.approx(float(p.sum()))
+
+
+@pytest.mark.parametrize("flag", ["1.0", "1", "true", "True", "yes", True, 1.0])
+def test_an_eh_process_flag_written_as_text_still_marks_a_process_unit(hb, flag):
+    """The flag rule is the one `process_chain.truthy`: "1.0" or "yes" must not raise (the #1917 residual)."""
+    saved = hb.links["eh_process"].copy()
+    try:
+        hb.links["eh_process"] = pd.Series({"elz": "0", "hb": flag}, dtype=object)
+        assert [u["name"] for u in compute_process_view(hb)["process_units"]] == ["hb"]
+    finally:
+        hb.links["eh_process"] = saved
