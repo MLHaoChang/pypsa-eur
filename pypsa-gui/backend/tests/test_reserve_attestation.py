@@ -282,3 +282,27 @@ def test_b4_energy_and_reserve_never_share_a_mw(tmp_path):
     assert r[:3].sum() == pytest.approx(36.0, abs=1e-5)
     assert n.storage_units_t.p_dispatch[BESS].iloc[3] == pytest.approx(6.0, abs=TOL)
     assert n.objective == pytest.approx(-394.0, abs=1e-4)
+
+
+def test_project_backup_reads_the_attestation_of_the_config_being_solved(
+    tmp_path, monkeypatch
+):
+    from services.pypsa_service import PyPSAService
+
+    n = _plain_project(tmp_path, _bess_site())
+    stored = {"solver_config": SimpleNamespace(
+        commercial={"reserve_no_backup_storages": [BESS]})}
+    ctx = SimpleNamespace(storage_dir=str(tmp_path), solver_state=stored)
+    monkeypatch.setattr(PyPSAService, "solve_target_context", lambda: ctx)
+    # Default: the project's current config.
+    assert RP.project_backup(n) == ({BESS: 0.0}, frozenset())
+    # A config passed in (the one being solved) wins over the stored one.
+    assert RP.project_backup(n, _cfg([])) == ({}, frozenset())
+    assert RP.project_backup(n, SimpleNamespace(
+        commercial={"reserve_no_backup_storages": [BESS]})) == ({BESS: 0.0}, frozenset())
+    # Unsaved: nothing, whatever the config attests.
+    monkeypatch.setattr(PyPSAService, "solve_target_context",
+                        lambda: SimpleNamespace(storage_dir=None, solver_state=stored))
+    assert RP.project_backup(n) == ({}, frozenset())
+    monkeypatch.setattr(PyPSAService, "solve_target_context", lambda: None)
+    assert RP.project_backup(n) == ({}, frozenset())
