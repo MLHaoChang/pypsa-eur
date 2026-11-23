@@ -950,6 +950,12 @@ class CommercialConfig(BaseModel):
     # Reserve products the backup storage may commit headroom to (DC grid readiness 06);
     # bound like the contract reference prices (`ic_reserve_price`), read by the LP.
     reserve_products: list[ReserveProduct] = Field(default_factory=list)
+    # Storages the user attests carry no backup obligation (SCU06-K8-1): each may
+    # commit reserves on a backup floor of 0, the floor's only 0 source (GK A B1).
+    # A product naming no storage widens to them. Refused at save on a DC-03 string
+    # or spare and on ride-through storage (B2); ignored where the backup roles
+    # cannot be read. Read by the LP through the floors.
+    reserve_no_backup_storages: list[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -971,6 +977,8 @@ class CommercialConfig(BaseModel):
         out = handler(self)
         if isinstance(out, dict) and not self.reserve_products:
             out.pop("reserve_products", None)
+        if isinstance(out, dict) and not self.reserve_no_backup_storages:
+            out.pop("reserve_no_backup_storages", None)
         return out
 
     @model_validator(mode="after")
@@ -987,6 +995,9 @@ class CommercialConfig(BaseModel):
             # One `ic:reserve:<id>` price column per product.
             raise ValueError(f"reserve products: id(s) {sorted({i for i in rp if rp.count(i) > 1})} "
                              "appear more than once")
+        att = self.reserve_no_backup_storages
+        if len(att) != len(set(att)) or not all(s.strip() for s in att):
+            raise ValueError("reserve_no_backup_storages: each storage is named once, never blank")
         return self
 
     @model_validator(mode="after")
