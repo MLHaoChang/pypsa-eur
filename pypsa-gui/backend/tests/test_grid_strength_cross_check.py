@@ -34,23 +34,44 @@ def test_post_refuses_a_reversed_pair(client, install_network):
     n = pypsa.Network()
     n.add("Bus", "b", carrier="AC")
     install_network(n)
-    body = {"name": "grid", "bus": "b", "carrier": "AC", "p_nom": 10.0, "control": "Slack"}
-    r = client.post("/api/network/generators", json={**body, "sk_min_mva": 4000.0, "sk_max_mva": 3000.0})
+    body = {
+        "name": "grid",
+        "bus": "b",
+        "carrier": "AC",
+        "p_nom": 10.0,
+        "control": "Slack",
+    }
+    r = client.post(
+        "/api/network/generators",
+        json={**body, "sk_min_mva": 4000.0, "sk_max_mva": 3000.0},
+    )
     assert r.status_code == 422 and RULE in r.text, r.text
     assert "grid" not in n.generators.index
-    ok = client.post("/api/network/generators", json={**body, "sk_min_mva": 3000.0, "sk_max_mva": 3000.0})
+    ok = client.post(
+        "/api/network/generators",
+        json={**body, "sk_min_mva": 3000.0, "sk_max_mva": 3000.0},
+    )
     assert ok.status_code in (200, 201), ok.text
 
 
-def test_put_refuses_a_reversed_pair_and_checks_a_one_sided_edit(client, install_network):
+def test_put_refuses_a_reversed_pair_and_checks_a_one_sided_edit(
+    client, install_network
+):
     n = _net()
     install_network(n)
     base = {"name": "g", "bus": "b", "carrier": "AC", "p_nom": 10.0, "control": "Slack"}
-    r = client.put("/api/network/generators/g", json={**base, "sk_min_mva": 4000.0, "sk_max_mva": 3000.0})
+    r = client.put(
+        "/api/network/generators/g",
+        json={**base, "sk_min_mva": 4000.0, "sk_max_mva": 3000.0},
+    )
     assert r.status_code == 422 and RULE in r.text, r.text
-    r = client.put("/api/network/generators/g", json={**base, "sk_min_mva": 3500.0})  # stored max is 3000
+    r = client.put(
+        "/api/network/generators/g", json={**base, "sk_min_mva": 3500.0}
+    )  # stored max is 3000
     assert r.status_code == 422 and RULE in r.text, r.text
-    r = client.put("/api/network/generators/g", json={**base, "sk_max_mva": 1000.0})  # stored min is 1200
+    r = client.put(
+        "/api/network/generators/g", json={**base, "sk_max_mva": 1000.0}
+    )  # stored min is 1200
     assert r.status_code == 422, r.text
     assert _stored(n) == (1200.0, 3000.0)
     r = client.put("/api/network/generators/g", json={**base, "sk_min_mva": 2000.0})
@@ -62,15 +83,21 @@ def test_a_blank_on_either_side_skips_the_check(client, install_network):
     n = _net(sk_min=float("nan"), sk_max=3000.0)
     install_network(n)
     base = {"name": "g", "bus": "b", "carrier": "AC", "p_nom": 10.0, "control": "Slack"}
-    r = client.put("/api/network/generators/g", json={**base, "sk_max_mva": 100.0})  # stored min is blank
+    r = client.put(
+        "/api/network/generators/g", json={**base, "sk_max_mva": 100.0}
+    )  # stored min is blank
     assert r.status_code == 200, r.text
     n.generators.loc["g", ["sk_min_mva", "sk_max_mva"]] = [5000.0, float("nan")]
-    r = client.put("/api/network/generators/g", json={**base, "sk_min_mva": 9000.0})  # stored max is blank
+    r = client.put(
+        "/api/network/generators/g", json={**base, "sk_min_mva": 9000.0}
+    )  # stored max is blank
     assert r.status_code == 200, r.text
     assert n.generators.at["g", "sk_min_mva"] == 9000.0
 
 
-def test_an_unrelated_edit_of_a_reversed_stored_pair_goes_through(client, install_network):
+def test_an_unrelated_edit_of_a_reversed_stored_pair_goes_through(
+    client, install_network
+):
     n = _net(sk_min=4000.0, sk_max=3000.0)  # as an import leaves it (C9)
     install_network(n)
     base = {"name": "g", "bus": "b", "carrier": "AC", "p_nom": 20.0, "control": "Slack"}
@@ -82,15 +109,33 @@ def test_an_unrelated_edit_of_a_reversed_stored_pair_goes_through(client, instal
 def test_bulk_refuses_a_reversed_pair_and_changes_nothing(client, install_network):
     n = _net()
     install_network(n)
-    r = client.patch("/api/network/_bulk", json={
-        "component_class": "Generator", "names": ["g"], "updates": {"sk_min_mva": 3500.0}})
+    r = client.patch(
+        "/api/network/_bulk",
+        json={
+            "component_class": "Generator",
+            "names": ["g"],
+            "updates": {"sk_min_mva": 3500.0},
+        },
+    )
     assert r.status_code == 422 and RULE in r.text, r.text
-    r = client.patch("/api/network/_bulk", json={
-        "component_class": "Generator", "names": ["g"], "updates": {"sk_min_mva": 4000.0, "sk_max_mva": 3000.0}})
+    r = client.patch(
+        "/api/network/_bulk",
+        json={
+            "component_class": "Generator",
+            "names": ["g"],
+            "updates": {"sk_min_mva": 4000.0, "sk_max_mva": 3000.0},
+        },
+    )
     assert r.status_code == 422 and RULE in r.text, r.text
     assert _stored(n) == (1200.0, 3000.0)
-    r = client.patch("/api/network/_bulk", json={
-        "component_class": "Generator", "names": ["g"], "updates": {"sk_min_mva": 2500.0}})
+    r = client.patch(
+        "/api/network/_bulk",
+        json={
+            "component_class": "Generator",
+            "names": ["g"],
+            "updates": {"sk_min_mva": 2500.0},
+        },
+    )
     assert r.status_code == 200, r.text
 
 
@@ -100,8 +145,16 @@ def test_chat_edit_and_bulk_tools_refuse(bound_ctx, client, install_network):
     n = _net()
     install_network(n)
     with bound_ctx(client):
-        assert RULE in _refusal(lambda: chat_tools.update_component("Generator", "g", attrs={"sk_min_mva": 3500.0}))
-        assert RULE in _refusal(lambda: chat_tools.bulk_update_components("Generator", ["g"], {"sk_min_mva": 3500.0}))
+        assert RULE in _refusal(
+            lambda: chat_tools.update_component(
+                "Generator", "g", attrs={"sk_min_mva": 3500.0}
+            )
+        )
+        assert RULE in _refusal(
+            lambda: chat_tools.bulk_update_components(
+                "Generator", ["g"], {"sk_min_mva": 3500.0}
+            )
+        )
     assert _stored(n) == (1200.0, 3000.0)
 
 
@@ -113,8 +166,22 @@ def test_the_edit_card_preview_refuses(bound_ctx, client, install_network):
     install_network(_net())
     with bound_ctx(client):
         for tool, args in (
-            ("update_component", {"component_class": "Generator", "name": "g", "attrs": {"sk_min_mva": 3500.0}}),
-            ("bulk_update_components", {"component_class": "Generator", "names": ["g"], "updates": {"sk_min_mva": 3500.0}}),
+            (
+                "update_component",
+                {
+                    "component_class": "Generator",
+                    "name": "g",
+                    "attrs": {"sk_min_mva": 3500.0},
+                },
+            ),
+            (
+                "bulk_update_components",
+                {
+                    "component_class": "Generator",
+                    "names": ["g"],
+                    "updates": {"sk_min_mva": 3500.0},
+                },
+            ),
         ):
             with pytest.raises(HTTPException) as exc:
                 edit_card.preview(tool, args, with_state=False)
@@ -152,35 +219,61 @@ def test_an_experiment_case_cannot_reach_the_pair():
 # ── GK B4 conditions ─────────────────────────────────────────────────────────────────────────────
 
 
-def test_bulk_checks_each_targets_own_row_and_writes_nothing_when_one_is_reversed(client, install_network):
+def test_bulk_checks_each_targets_own_row_and_writes_nothing_when_one_is_reversed(
+    client, install_network
+):
     n = _net()
     n.add("Generator", "g2", bus="b", carrier="AC", p_nom=10.0, control="Slack")
     n.generators.loc["g2", ["sk_min_mva", "sk_max_mva"]] = [1000.0, 9000.0]
     install_network(n)
     # min 5000: fine against g2's max 9000, reversed against g's own max 3000.
-    r = client.patch("/api/network/_bulk", json={
-        "component_class": "Generator", "names": ["g2", "g"], "updates": {"sk_min_mva": 5000.0}})
+    r = client.patch(
+        "/api/network/_bulk",
+        json={
+            "component_class": "Generator",
+            "names": ["g2", "g"],
+            "updates": {"sk_min_mva": 5000.0},
+        },
+    )
     assert r.status_code == 422 and RULE in r.text, r.text
-    assert n.generators.at["g2", "sk_min_mva"] == 1000.0 and _stored(n) == (1200.0, 3000.0)
+    assert n.generators.at["g2", "sk_min_mva"] == 1000.0 and _stored(n) == (
+        1200.0,
+        3000.0,
+    )
 
 
-def test_an_unrelated_bulk_edit_of_a_reversed_pair_goes_through(client, install_network):
+def test_an_unrelated_bulk_edit_of_a_reversed_pair_goes_through(
+    client, install_network
+):
     n = _net(sk_min=4000.0, sk_max=3000.0)
     install_network(n)
-    r = client.patch("/api/network/_bulk", json={
-        "component_class": "Generator", "names": ["g"], "updates": {"p_nom": 30.0}})
+    r = client.patch(
+        "/api/network/_bulk",
+        json={
+            "component_class": "Generator",
+            "names": ["g"],
+            "updates": {"p_nom": 30.0},
+        },
+    )
     assert r.status_code == 200, r.text
     assert _stored(n) == (4000.0, 3000.0)
 
 
-@pytest.mark.parametrize("lo, hi, refused", [
-    (float("nan"), 100.0, False),      # blank minimum
-    (500.0, float("nan"), False),      # blank maximum
-    (100.0, 100.0, False),             # equal values
-    (float("inf"), 3000.0, True),      # an imported infinite minimum is above a finite maximum
-    (3000.0, float("inf"), False),
-    (100.0000001, 100.0, True),
-])
+@pytest.mark.parametrize(
+    "lo, hi, refused",
+    [
+        (float("nan"), 100.0, False),  # blank minimum
+        (500.0, float("nan"), False),  # blank maximum
+        (100.0, 100.0, False),  # equal values
+        (
+            float("inf"),
+            3000.0,
+            True,
+        ),  # an imported infinite minimum is above a finite maximum
+        (3000.0, float("inf"), False),
+        (100.0000001, 100.0, True),
+    ],
+)
 def test_skip_rules_each_have_their_own_case(lo, hi, refused):
     from services.adequacy.eh_columns import check_grid_strength_pair
 
@@ -198,12 +291,20 @@ def test_no_path_stores_an_infinite_value(client, install_network, path):
     install_network(n)
     base = {"name": "g", "bus": "b", "carrier": "AC", "p_nom": 10.0, "control": "Slack"}
     if path == "post":
-        r = client.post("/api/network/generators", json={**base, "name": "g3", "sk_max_mva": "inf"})
+        r = client.post(
+            "/api/network/generators", json={**base, "name": "g3", "sk_max_mva": "inf"}
+        )
     elif path == "put":
         r = client.put("/api/network/generators/g", json={**base, "sk_max_mva": "inf"})
     else:
-        r = client.patch("/api/network/_bulk", json={
-            "component_class": "Generator", "names": ["g"], "updates": {"sk_max_mva": "inf"}})
+        r = client.patch(
+            "/api/network/_bulk",
+            json={
+                "component_class": "Generator",
+                "names": ["g"],
+                "updates": {"sk_max_mva": "inf"},
+            },
+        )
     assert r.status_code in (400, 422), r.text
     assert _stored(n) == (1200.0, 3000.0)
 
@@ -228,8 +329,17 @@ def test_the_readiness_flag_names_the_generator_and_both_values():
     rows = G._grid_strength_rows(inp)
     assert [r["id"] for r in rows] == ["grid_strength_pair:g"]
     assert rows[0]["verdict"] == "warn"
-    assert "Generator g" in rows[0]["note"] and "4000" in rows[0]["note"] and "3000" in rows[0]["note"]
-    assert G._grid_strength_rows(G._Inputs("/nonexistent", _net(), None, "no profile", None, None)) == []
+    assert (
+        "Generator g" in rows[0]["note"]
+        and "4000" in rows[0]["note"]
+        and "3000" in rows[0]["note"]
+    )
+    assert (
+        G._grid_strength_rows(
+            G._Inputs("/nonexistent", _net(), None, "no profile", None, None)
+        )
+        == []
+    )
 
 
 def test_the_fault_level_gates_do_not_read_the_generator_pair():
@@ -237,7 +347,14 @@ def test_the_fault_level_gates_do_not_read_the_generator_pair():
     not evaluated), never from the slack generator's columns, so a reversed imported pair cannot pass a gate."""
     from services.adequacy import grid_readiness as G
 
-    inp = G._Inputs("/nonexistent", _net(sk_min=4000.0, sk_max=3000.0), None, "no profile", None, None)
+    inp = G._Inputs(
+        "/nonexistent",
+        _net(sk_min=4000.0, sk_max=3000.0),
+        None,
+        "no profile",
+        None,
+        None,
+    )
     assert G._poc_sk_min(inp) == (None, None)
 
 
