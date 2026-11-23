@@ -22,8 +22,6 @@
 
 pandas only, like every other contract in ``schema/``.
 """
-import math
-
 import numpy as np
 import pandas as pd
 
@@ -195,7 +193,7 @@ def check_torsional_modes(where, entries, f0, sources) -> list:
         v = entry["value"]
         if isinstance(v, bool) or not isinstance(v, (int, float)):
             raise ContractError(f"{at} value must be a number, got {v!r}")
-        if not math.isfinite(v) or not 0 < v < f0:
+        if not 0 < v < f0:  # also false for NaN and +-inf
             raise ContractError(f"{at} must be a finite frequency in (0, {f0:g}) Hz, got {v!r}")
         out.append((float(v), entry["source"]))
     return out

@@ -1272,8 +1272,6 @@ def _mode_coverage(campus, resonance):
     modes, sources = campus.torsional_modes, campus.torsional_mode_sources
     out = resonance.copy()
     out["mode_source"] = None
-    if not modes or out.empty:
-        return out
     gensets = campus.units.index[campus.units["kind"] == "genset"]
     missing = sorted(g for g in gensets if g not in modes)
     assumed = {g: [f for f, src in zip(modes[g], sources[g]) if src == "assumed"] for g in modes}
