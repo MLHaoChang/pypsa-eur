@@ -1957,7 +1957,8 @@ def powerfactory_campus(run_dir, hours=None) -> list:
     network does not model), the hour's pandapower load flow
     (``lf_bus.csv``, ``lf_branch_flow.csv``) and ``manifest.json`` (its
     ``not_written``: each value the DGS could not carry, one record per
-    ``DgsExport.not_written`` row with its ``NOT_WRITTEN_COLUMNS``) — so
+    ``DgsExport.not_written`` row with its ``NOT_WRITTEN_COLUMNS``, a
+    non-finite value as null) — so
     ``readback.results.read_back`` compares a PowerFactory export of it
     directly. Returns the directories."""
     import copy
@@ -1998,7 +1999,7 @@ def powerfactory_campus(run_dir, hours=None) -> list:
                     "files": [f"{case}.dgs", DGS_NAMES_CSV, HARMONIC_SOURCES_CSV, "lf_bus.csv",
                               "lf_branch_flow.csv", "manifest.json"],
                     "no_spectrum": sorted(sources.loc[sources["status"] != "spectrum", "pp_name"]),
-                    "not_written": exp.not_written[list(NOT_WRITTEN_COLUMNS)].to_dict("records"),
+                    "not_written": _json_ready(exp.not_written[list(NOT_WRITTEN_COLUMNS)].to_dict("records")),
                     "pending_verification": [PENDING_VERIFICATION]}
         _write_text_atomic(out / "manifest.json", json.dumps(manifest, indent=2) + "\n")
         out_dirs.append(out)
