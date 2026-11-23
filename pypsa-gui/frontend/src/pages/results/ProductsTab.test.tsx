@@ -27,7 +27,7 @@ function mount() {
 it('hydrogen: kg/h and the LCOH read verbatim (equals the report figure)', async () => {
   vi.mocked(resultsApi.getProcessView).mockResolvedValue({
     products: [product('H2 bus', 'H2', 240)],
-    process_units: [{ name: 'electrolyser', product_bus: 'H2 bus', running_hours: 6, modelled_hours: 8 }],
+    process_units: [{ name: 'electrolyser', product_bus: 'H2 bus', running_hours: 6, weighted_hours: 8 }],
   } as never)
   vi.mocked(resultsApi.getLcoh).mockResolvedValue({ rows: [], total: { lcoh_eur_per_kg_h2: 4.2561 }, currency: 'EUR' } as never)
   mount()
@@ -41,7 +41,7 @@ it('hydrogen: kg/h and the LCOH read verbatim (equals the report figure)', async
 it('ammonia: t/d output and a plain note that no cost per tonne exists', async () => {
   vi.mocked(resultsApi.getProcessView).mockResolvedValue({
     products: [product('NH3 bus', 'NH3', 600)],
-    process_units: [{ name: 'haber', product_bus: 'NH3 bus', running_hours: 24, modelled_hours: 24 }],
+    process_units: [{ name: 'haber', product_bus: 'NH3 bus', running_hours: 24, weighted_hours: 24 }],
   } as never)
   vi.mocked(resultsApi.getLcoh).mockResolvedValue(null as never)
   mount()
@@ -54,8 +54,8 @@ it('averageOutput and runningShare are unit changes of read figures, null when a
   expect(averageOutput(product('b', 'H2', 24) as never, 24)).toEqual({ value: '1000.0', unit: 'kg/h' })
   expect(averageOutput(product('b', 'NH3', 1) as never, 24)).toEqual({ value: '1.0', unit: 't/d' })
   expect(averageOutput(product('b', 'NH3', 1) as never, null)).toBeNull()
-  expect(runningShare({ name: 'u', running_hours: 3, modelled_hours: 12 })).toBe(25)
-  expect(runningShare({ name: 'u', running_hours: null, modelled_hours: 12 })).toBeNull()
+  expect(runningShare({ name: 'u', running_hours: 3, weighted_hours: 12 })).toBe(25)
+  expect(runningShare({ name: 'u', running_hours: null, weighted_hours: 12 })).toBeNull()
 })
 
 it('a failed process view says "not available", never a blank or a zero', async () => {
@@ -68,7 +68,7 @@ it('a failed process view says "not available", never a blank or a zero', async 
 it('a failed LCOH read shows the hydrogen cost as not available with the reason, never 0', async () => {
   vi.mocked(resultsApi.getProcessView).mockResolvedValue({
     products: [product('H2 bus', 'H2', 240)],
-    process_units: [{ name: 'electrolyser', product_bus: 'H2 bus', running_hours: 6, modelled_hours: 8 }],
+    process_units: [{ name: 'electrolyser', product_bus: 'H2 bus', running_hours: 6, weighted_hours: 8 }],
   } as never)
   vi.mocked(resultsApi.getLcoh).mockRejectedValue(new Error('404'))
   mount()

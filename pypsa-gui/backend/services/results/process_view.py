@@ -274,6 +274,10 @@ def _process_unit(view: _View, link: str) -> dict:
         "starts": starts,
         "starts_basis": "modelled_snapshots",
         "modelled_hours": hours,
+        # The horizon in the same energy weighting as `running_hours` and the product amounts: running_hours /
+        # weighted_hours is the share of time the unit ran, and a product's t / weighted_hours its average rate.
+        # (`modelled_hours` is the unweighted snapshot sum: not comparable on a multi-period solve.)
+        "weighted_hours": _finite(view.w_energy.sum()),
         "flag": flag if running is not None and starts is not None and hours is not None else "non_finite_values",
     }
 

@@ -523,3 +523,10 @@ def test_an_eh_process_flag_written_as_text_still_marks_a_process_unit(hb, flag)
         assert [u["name"] for u in compute_process_view(hb)["process_units"]] == ["hb"]
     finally:
         hb.links["eh_process"] = saved
+
+
+def test_a_process_unit_carries_the_horizon_in_its_own_weighting(hb):
+    """`running_hours / weighted_hours` is a share (<= 1); `modelled_hours` is the unweighted snapshot sum."""
+    u = compute_process_view(hb)["process_units"][0]
+    assert u["weighted_hours"] == pytest.approx(6.0)
+    assert 0 < u["running_hours"] / u["weighted_hours"] <= 1

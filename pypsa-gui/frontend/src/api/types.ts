@@ -1445,6 +1445,8 @@ export interface ProcessUnit {
   /** Hours the unit ran over the modelled snapshots, and the hours modelled (null when not finite). */
   running_hours?: number | null
   modelled_hours?: number | null
+  /** The horizon in the energy weighting running_hours and the product amounts use (years-weighted on a multi-period solve). */
+  weighted_hours?: number | null
   flag?: string | null
 }
 export interface ProcessView { products: ProcessProduct[]; process_units: ProcessUnit[] }

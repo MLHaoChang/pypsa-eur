@@ -20,7 +20,7 @@ const unitWords = (name: string) => { const w = name.replace(/[_-]+/g, ' ').trim
 const madeIn = (p: ProcessProduct, t: number) => isHydrogen(p) ? `${Math.round(t * 1000).toLocaleString('en-US')} kg` : fmtTonnage(t)
 const isHydrogen = (p: ProcessProduct) => /^(h2|hydrogen)$/i.test((p.carrier || p.bus).trim())
 
-/** The average output over the modelled hours, in the unit the product is sold in: kg/h for hydrogen, t/d otherwise.
+/** The average output over the horizon (tonnes made / weighted hours, the same weighting), in the unit the product is sold in: kg/h for hydrogen, t/d otherwise.
  *  A unit change of two read figures (tonnes made, hours modelled), not a new result. */
 export function averageOutput(p: ProcessProduct, hours: number | null | undefined): { value: string; unit: string } | null {
   const t = p.production.t
@@ -30,9 +30,9 @@ export function averageOutput(p: ProcessProduct, hours: number | null | undefine
     : { value: ((t * 24) / hours).toFixed(1), unit: 't/d' }
 }
 
-/** Share of the modelled hours the unit ran (read: running_hours, modelled_hours). */
+/** Share of the horizon the unit ran (read: running_hours and weighted_hours, the same weighting). */
 export function runningShare(u: ProcessUnit): number | null {
-  const { running_hours: r, modelled_hours: h } = u
+  const { running_hours: r, weighted_hours: h } = u
   if (r == null || h == null || !Number.isFinite(r) || !Number.isFinite(h) || h <= 0) return null
   return (100 * r) / h
 }
@@ -74,7 +74,7 @@ export default function ProductsTab() {
       <div data-testid="products-tab" className="flex flex-col gap-5">
         {products.map(p => {
           const mine = units.filter(u => u.product_bus === p.bus)
-          const out = averageOutput(p, mine.find(u => u.modelled_hours != null)?.modelled_hours)
+          const out = averageOutput(p, mine.find(u => u.weighted_hours != null)?.weighted_hours)
           const tiles = productionTiles(p)
           const made = tiles.find(t => t.id === 'made')
           return (
@@ -91,7 +91,7 @@ export default function ProductsTab() {
                   const share = runningShare(u)
                   return share != null
                     ? <Kpi key={u.name} testId={`products-${u.name}-running`} label={`${unitWords(u.name)} running`} value={share.toFixed(0)} unit="%"
-                        state="ready" basis="of the modelled hours" />
+                        state="ready" basis="of the horizon" />
                     : <Kpi key={u.name} testId={`products-${u.name}-running`} label={`${unitWords(u.name)} running`} value="" state="not_modelled"
                         reason="The solve recorded no finite running hours for this unit." />
                 })}
