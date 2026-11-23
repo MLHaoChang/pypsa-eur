@@ -195,6 +195,7 @@ import calendar
 import dataclasses
 import hashlib
 import json
+import logging
 import math
 from collections.abc import Sequence
 from datetime import date
@@ -228,6 +229,9 @@ BUILD_YEAR_MIN, BUILD_YEAR_MAX = 1900, 2200     # a COD from build_year (S3): `c
 
 _CAPACITY_COLS = {"Generator": "p_nom", "StorageUnit": "p_nom", "Store": "e_nom", "Link": "p_nom",
                   "Line": "s_nom", "Transformer": "s_nom"}
+
+
+_log = logging.getLogger(__name__)
 
 
 def _num(x: float) -> str:
@@ -2367,7 +2371,8 @@ def connection_need(cfg) -> str | None:
         vf = P.parse_value_flows(_lp._parse(commercial).value_flows)
     except P.ValueFlowsInvalid:
         return "value_flows_invalid"
-    except Exception:                                   # noqa: BLE001
+    except Exception as exc:                            # noqa: BLE001
+        _log.debug("connection_need: not established: %r", exc)
         return None                                     # the run says what it is
     return "value_flows_not_configured" if vf is None else None
 

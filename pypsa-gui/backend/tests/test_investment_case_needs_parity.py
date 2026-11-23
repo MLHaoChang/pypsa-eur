@@ -81,11 +81,11 @@ def _fn_source(rel: str, name: str) -> str:
 
 def _needs_codes() -> set[str]:
     """Every code the start can send in `detail.needs` (issue 40): the
-    refusals' own `needs=[*needs, "<code>"]`, the 409's `"needs": ["<code>"`,
+    refusals' own `needs=["<code>", *needs]`, the 409's `"needs": ["<code>"`,
     and what `finance_needs` and `connection_need` return."""
     runner = (_BACKEND / "services/finance/investment_case_runner.py").read_text()
-    codes = set(re.findall(r'"needs": \[\*needs, "([a-z_0-9]+)"\]', runner))
-    codes |= set(re.findall(r'needs=\[\*needs, "([a-z_0-9]+)"\]', runner))
+    codes = set(re.findall(r'"needs": \["([a-z_0-9]+)", \*needs\]', runner))
+    codes |= set(re.findall(r'needs=\["([a-z_0-9]+)", \*needs\]', runner))
     codes |= set(re.findall(r'"needs": \["([a-z_0-9]+)"', _start_route()))
     codes |= set(re.findall(r'return \["([a-z_0-9]+)"\]',
                             _fn_source("services/finance/investment_case_runner.py",

@@ -219,7 +219,7 @@ def test_the_finance_need_matches_the_start_refusal():
                                   state_update=lambda **k: None, publish_study=lambda *a: None,
                                   needs=["value_flows_not_configured"])
         assert e.value.detail["code"] == code
-        assert e.value.detail["needs"] == ["value_flows_not_configured", code]
+        assert e.value.detail["needs"] == [code, "value_flows_not_configured"]
     assert finance_needs({"financial_close": "2030-01-01"}) == []
     with pytest.raises(HTTPException) as e:
         finance_inputs_or_422({"financial_close": "2030-01-01", "capex_phasing": [0.3]})

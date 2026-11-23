@@ -191,12 +191,12 @@ def _422(code: str, message: str, **extra) -> HTTPException:
 def finance_inputs_or_422(raw: Any, *, needs: Sequence[str] | None = None) -> FinanceInputs:
     """The stored finance inputs, or 422 `finance_inputs_invalid`. `needs`
     (the start only, template-e2e issue 40): the other needs already
-    established, sent with this one as `detail.needs`."""
+    established, sent after this one as `detail.needs`."""
     try:
         return FinanceInputs.model_validate(raw)
     except ValidationError as exc:
         errs = exc.errors()
-        extra = {} if needs is None else {"needs": [*needs, "finance_inputs_invalid"]}
+        extra = {} if needs is None else {"needs": ["finance_inputs_invalid", *needs]}
         raise _422("finance_inputs_invalid", str(errs[0].get("msg"))[:300] if errs else str(exc),
                    errors=[{"loc": list(e.get("loc", ())), "msg": str(e.get("msg"))[:200]}
                            for e in errs[:20]], **extra) from exc
@@ -253,8 +253,8 @@ def start_investment_case(
 
     `needs` (template-e2e issue 40): the codes of the needs the caller has
     established and the start does not refuse with (the site connection). A
-    finance-input refusal sends them with its own code as `detail.needs`,
-    so one answer lists every need the start can tell."""
+    finance-input refusal sends its own code first, then these, as
+    `detail.needs`, so one answer lists every need the start can tell."""
     from services.finance.engine import run_case
     from services.finance.packs.base import PackNotFound, load_pack
     from services.finance.report import (
@@ -274,14 +274,14 @@ def start_investment_case(
     if raw is None:
         raise _422("finance_inputs_missing",
                    "set the finance inputs first (PUT /api/simulation/finance)",
-                   needs=[*needs, "finance_inputs_missing"])
+                   needs=["finance_inputs_missing", *needs])
     fin = finance_inputs_or_422(raw, needs=needs)
     if fin.tax_pack_id:
         try:
             pack0 = load_pack(fin.tax_pack_id, as_of=fin.financial_close)
         except PackNotFound as exc:
             raise _422("tax_pack_not_found", str(exc),
-                       needs=[*needs, "tax_pack_not_found"]) from exc
+                       needs=["tax_pack_not_found", *needs]) from exc
         packs = {fin.tax_pack_id: pack0.pack_hash}
     else:
         packs = {}

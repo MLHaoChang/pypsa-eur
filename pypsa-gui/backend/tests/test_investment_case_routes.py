@@ -399,15 +399,50 @@ def test_one_refusal_lists_every_need(client, install_network, session_ctx, monk
     assert _put_fin(client, {**_s2_inputs(), "tax_pack_id": "xx_nowhere"}).status_code == 200
     r = client.post(STUDY_URL, json={})
     assert r.status_code == 422 and r.json()["detail"]["code"] == "tax_pack_not_found"
-    assert r.json()["detail"]["needs"] == ["value_flows_not_configured", "tax_pack_not_found"]
+    assert r.json()["detail"]["needs"] == ["tax_pack_not_found", "value_flows_not_configured"]
     session_ctx(client).solver_state["solver_config"].finance = None
     r = client.post(STUDY_URL, json={})
     assert r.status_code == 422 and r.json()["detail"]["needs"] == [
-        "value_flows_not_configured", "finance_inputs_missing"]
+        "finance_inputs_missing", "value_flows_not_configured"]
     session_ctx(client).solver_state["solver_config"].commercial = {
         "poc_link": "x", "value_flows": {"participants": "not a list"}}
     assert client.post(STUDY_URL, json={}).json()["detail"]["needs"] == [
-        "value_flows_invalid", "finance_inputs_missing"]
+        "finance_inputs_missing", "value_flows_invalid"]
+
+
+def test_a_need_that_cannot_be_read_leaves_the_refusal(client, install_network, monkeypatch):
+    """GK B2 N2/N3 on issue 40: reading the needs never changes the refusal. A
+    reader that raises leaves the 409 `not_solved` with `needs: ["not_solved"]`;
+    an unexpected error in `connection_need` is no need, never in the body."""
+    import services.finance.investment_case_runner as RUN
+    from services.commercial import participants as P
+    from services.results import finance_case as FC
+
+    _fake_build(monkeypatch)
+    install_network(build_network())
+    boom = RuntimeError("secret detail")
+    monkeypatch.setattr(FC, "connection_need", lambda cfg: (_ for _ in ()).throw(boom))
+    monkeypatch.setattr(RUN, "finance_needs", lambda raw: (_ for _ in ()).throw(boom))
+    r = client.post(STUDY_URL, json={})
+    assert r.status_code == 409
+    assert r.json()["detail"] == {"code": "not_solved", "needs": ["not_solved"],
+                                  "message": "solve the network first: the investment case "
+                                             "values the solved dispatch"}
+    monkeypatch.undo()
+
+    def parse_raises(raw):
+        raise boom
+    monkeypatch.setattr(P, "parse_value_flows", parse_raises)
+    assert FC.connection_need(type("C", (), {"commercial": {"poc_link": "x"}})()) is None
+    assert FC.connection_need(None) == "value_flows_not_configured"
+    # Set value flows are no need; unset ones are.
+    monkeypatch.setattr(FC._lp, "_parse", lambda c: type("Parsed", (), {"value_flows": c})())
+    monkeypatch.setattr(P, "parse_value_flows", lambda raw: raw)
+    assert FC.connection_need(type("C", (), {"commercial": {"set": 1}})()) is None
+    assert FC.connection_need(type("C", (), {"commercial": None})()) == "value_flows_not_configured"
+    monkeypatch.setattr(P, "parse_value_flows", lambda raw: None)
+    assert FC.connection_need(type("C", (), {"commercial": {"set": 1}})()) == \
+        "value_flows_not_configured"
 
 
 def test_409_during_a_solve_or_another_study(client, install_network, session_state,

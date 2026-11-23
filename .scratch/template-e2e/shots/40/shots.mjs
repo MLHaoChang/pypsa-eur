@@ -1,8 +1,9 @@
 // Template-e2e 40 shots: one start refusal lists every need it can tell
 // (`detail.needs`). Real API, no mocks: the data-centre template is not solved,
-// and the script clears this throwaway project's finance inputs (PUT
-// /simulation/finance null). So the start is refused with not_solved and lists
-// the solve and the finance inputs in one checklist. Before issue 40 it listed
+// and the script clears this throwaway project's value flows and finance inputs
+// (PUT /simulation/commercial/value_flows null, PUT /simulation/finance null).
+// So the start is refused with not_solved and lists the solve, the site
+// connection and the finance inputs in one checklist. Before issue 40 it listed
 // the solve only. Guided: the Results card's Investment
 // tile. Expert: Results → Investment → Investment case.
 // Run: node .scratch/template-e2e/shots/40/shots.mjs (app on :8000/:5173), then
@@ -67,9 +68,12 @@ try {
     const f = path.join(OUT, `${name}-${scheme}.png`)
     await (target ? target.screenshot({ path: f }) : page.screenshot({ path: f })); written.push(f)
   }
-  async function clearFinance(page) {
+  async function clearInputs(page) {
     const status = await page.evaluate(async () => {
       const { financeApi } = await import('/src/api/finance.ts')
+      const { commercialApi } = await import('/src/api/commercial.ts')
+      const v = await commercialApi.getValueFlows()
+      if (v.value_flows) await commercialApi.putValueFlows(null, v.digest)
       const f = await financeApi.getFinance()
       return f.status === 'not_set' ? f.status : (await financeApi.putFinance(null, f.digest)).status
     })
@@ -90,7 +94,7 @@ try {
   for (const scheme of ['light', 'dark']) {
     let { ctx, page } = await open(scheme, { project: DC.project, mode: 'guided' })
     try {
-      await land(page); await clearFinance(page); await guidedResults(page)
+      await land(page); await clearInputs(page); await guidedResults(page)
       await page.getByTestId('ic-run').click()
       await page.getByTestId('ic-need-finance').waitFor(); await page.waitForTimeout(800)
       console.log(scheme, 'guided needs', await page.getByTestId('ic-needs').locator('li').evaluateAll(l => l.map(x => x.dataset.testid)))
