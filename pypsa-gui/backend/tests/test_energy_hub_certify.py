@@ -214,3 +214,48 @@ def test_no_stage_is_recorded_as_unimplemented_anymore():
     src = inspect.getsource(S)
     assert "not implemented in P1.5" not in src
     assert "not implemented in sync driver" not in src
+
+
+# template-e2e 21: a goal below the resolution floor names the floor and the
+# fewest draws that resolve it. The first MC batch is min(draws, MAX_DRAWS),
+# so draws >= ceil(w_min / target_h) puts the floor (w_min / n) at or under
+# the target.
+@pytest.mark.parametrize(
+    "floor,n,target,expected",
+    [
+        (52.1, 1, 3.0, 18),          # 52.1 / 3 = 17.37 → 18
+        (52.1, 2, 3.0, 35),          # w_min = floor·n = 104.2 h → 34.7 → 35
+        (6.0, 1, 3.0, 2),            # exact boundary: 6 / 3 = 2 draws
+        (1.0, 500, 3.0, 167),        # w_min 500 h → 166.7 → 167
+        (52.1, 1, 0.0, None),        # no draw count resolves a zero goal
+        (None, 1, 3.0, None),        # no floor → nothing to state
+        (52.1, None, 3.0, None),
+    ],
+)
+def test_min_draws_to_resolve(floor, n, target, expected):
+    assert S.min_draws_to_resolve(floor, n, target) == expected
+
+
+def test_min_draws_resolves_the_target_exactly_at_the_boundary():
+    """At `min_draws` the floor is at or under the target, one fewer is not."""
+    for w_min, target in ((52.1, 3.0), (6.0, 3.0), (0.25, 0.1), (168.0, 8.4)):
+        m = S.min_draws_to_resolve(w_min, 1, target)
+        assert w_min / m <= target
+        assert m == 1 or w_min / (m - 1) > target
+
+
+def test_below_floor_note_names_the_floor_and_the_runs_needed():
+    verdict, note = S.certification_verdict(
+        lole_ci=(0.0, 0.0), target_h=6.0, resolution_floor_h=104.2,
+        n_samples=1, horizon_years=2.0)
+    assert verdict == "inconclusive"
+    # Per year: goal 3 h/yr, floor 52.1 h/yr at 1 draw; 104.2 / 6 → 18 draws.
+    assert note == ("target 3 h/yr is below the MC resolution floor 52.1 h/yr "
+                    "at 1 draws: at least 18 draws resolve it")
+
+
+def test_below_floor_note_for_a_zero_goal_says_no_draw_count_resolves_it():
+    _v, note = S.certification_verdict(
+        lole_ci=(0.0, 0.0), target_h=0.0, resolution_floor_h=52.1, n_samples=1)
+    assert note == ("target 0 h/yr is below the MC resolution floor 52.1 h/yr "
+                    "at 1 draws: no draw count resolves a zero target")

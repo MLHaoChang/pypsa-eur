@@ -540,3 +540,46 @@ def test_a_bound_with_missing_fields_still_reads():
 def test_a_feeder_bound_on_a_pass_adds_no_inconclusive_finding():
     out = _bound_review("pass", _BOUND)
     assert all(f["id"] != "certification_inconclusive" for f in out["findings"])
+
+
+# template-e2e 21: below the resolution floor, doubling the draws cannot
+# settle it; the finding names the floor and Improve offers the fewest draws
+# that resolve the goal.
+def _floor_cert(**over):
+    return {"verdict": "inconclusive", "target_lole_h": 3.0, "draws": 1,
+            "n_samples": 1, "horizon_years": 1.0, "lole_ci": [0.0, 0.0],
+            "resolution_floor_h": 52.1, "below_floor": True, "min_draws": 18,
+            **over}
+
+
+def test_below_the_floor_offers_the_minimum_draws_not_double():
+    out = review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert()}}), RECORD)
+    f = _by_id(out, "certification_inconclusive")
+    assert f["title"] == ("Certification inconclusive: the 3 h/yr target is "
+                          "below the 52.1 h/yr resolution floor at 1 draws")
+    assert "at least 18 draws" in f["recommendation"]
+    assert "straddles" not in f["title"]
+    act = f["actions"][0]
+    assert act["args"]["mc"] == {"draws": 18}
+    assert "18 draws (was 1)" in act["label"]
+    _validate_action(act)
+
+
+def test_below_the_floor_keeps_doubling_when_that_is_more():
+    out = review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(draws=300, n_samples=300,
+                                               min_draws=320)}}), RECORD)
+    act = _by_id(out, "certification_inconclusive")["actions"][0]
+    assert act["args"]["mc"] == {"draws": 600}
+
+
+@pytest.mark.parametrize("min_draws", [2001, None])
+def test_below_the_floor_beyond_the_draw_cap_offers_no_rerun(min_draws):
+    out = review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(min_draws=min_draws,
+                                               target_lole_h=0.0 if min_draws is None else 3.0)}}),
+        RECORD)
+    f = _by_id(out, "certification_inconclusive")
+    assert f["actions"] == []
+    assert "more draws do not" in f["recommendation"]

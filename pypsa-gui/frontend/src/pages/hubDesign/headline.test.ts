@@ -63,6 +63,26 @@ describe('headline (§5.5)', () => {
       'Not decided: the shortfall estimate (1.6–4.2 h/yr) straddles the 3 h/yr goal: more simulation runs would settle it.')
   })
 
+  // template-e2e 21: a goal under the resolution floor is not a straddle; the
+  // sentence names the floor and the fewest runs that resolve the goal.
+  it('inconclusive below the resolution floor: names the floor and the minimum runs', () => {
+    const r = report({ ...cert({ verdict: 'inconclusive', lole_h_per_year: 0, lole_ci: [0, 0],
+      horizon_years: 2, target_lole_h: 3, resolution_floor_h: 104.2, n_samples: 1,
+      below_floor: true, min_draws: 18 }) })
+    const rv = review({ verdict: 'inconclusive', mc_lole_h_per_year: 0, target_lole_h: 3 })
+    expect(headline(rv, r)).toBe(
+      'Not decided: 1 simulation run can only see shortfalls of 52.1 h/yr or more, above the 3 h/yr goal: set at least 18 simulation runs per check in section 8, Scenarios & optimisation, to decide it.')
+  })
+
+  it('below the floor with a zero goal: no run count settles it', () => {
+    const r = report({ ...cert({ verdict: 'inconclusive', lole_h_per_year: 0, lole_ci: [0, 0],
+      horizon_years: 1, target_lole_h: 0, resolution_floor_h: 0.104, n_samples: 500,
+      below_floor: true, min_draws: null }) })
+    const rv = review({ verdict: 'inconclusive', mc_lole_h_per_year: 0, target_lole_h: 0 })
+    expect(headline(rv, r)).toBe(
+      'Not decided: a 0 h/yr goal cannot be checked by simulation, since 500 simulation runs can only see shortfalls of 0.104 h/yr or more: allow some shortfall in section 8, Scenarios & optimisation, to decide it.')
+  })
+
   it('inconclusive held by a feeder bound names the feeder, not more runs (GK A F6\')', () => {
     // The interval (≈ 10–21 h/yr) sits under the 25 h/yr goal: it does not straddle.
     const r = report({ ...cert({ verdict: 'inconclusive', lole_h_per_year: 15,
