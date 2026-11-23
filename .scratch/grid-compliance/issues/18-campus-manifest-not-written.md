@@ -3,7 +3,7 @@
 
 # GC-18 Campus study: carry the DGS export's `not_written` list into the campus manifest
 
-Status: ready-for-agent
+Status: done
 Model tier: sonnet
 Size: S
 Blocked by: #1578, #1584, #1589 merged (they change `gridspine/drivers/campus_study.py`)

@@ -372,3 +372,9 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - Ids print as text, never number-formatted. A judged value never prints equal to its limit (GK A2 (6), #1879 B2/B3).
 - A lookup map in user-facing text has a plain fallback and a whole-dict test (GK A2 (6), #1897 N1).
 - A test fix that copies a module-level pandas index into each frame can break index-name parity with `n.snapshots`; index the frames by `n.snapshots`, and copy only what `set_snapshots` and module helpers hand out (GK B2 (4), #1874).
+
+## Standing rulings (GK A2 (7) and GK B3 (6), recorded 2026-11-23)
+
+- Re-recording a byte-identity digest or golden after a master merge is not a clean merge. The PR names the upstream change behind each re-recorded digest, and the GK re-reviews it (GK A2 (7), #1922/#1916).
+- A read that hands out a revision with content hashes the same bytes it parses, never a second read of the file (GK B3 (6), #1913).
+- Every read-modify-write writer of a locked file (for example a preset select) does its read inside the same lock, not only its write (GK B3 (6), #1913).
