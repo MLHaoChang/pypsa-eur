@@ -268,6 +268,13 @@ def test_min_draws_has_no_answer_without_a_finite_positive_target(floor, n, targ
     assert S.min_draws_to_resolve(floor, n, target) is None
 
 
+def test_min_draws_compares_as_the_floor_does_not_by_rounded_ratio():
+    # 2.1 / 0.15 is 14.000000000000002 in floats, but 2.1 / 14 == 0.15: the
+    # MC's floor at 14 draws is exactly the target, so 14 resolve it.
+    assert 2.1 / 0.15 > 14 and 2.1 / 14 == 0.15
+    assert S.min_draws_to_resolve(2.1, 1, 0.15) == 14
+
+
 def test_one_draw_suffices_when_the_weight_is_under_the_target():
     assert S.min_draws_to_resolve(0.5, 1, 3.0) == 1
 
@@ -324,3 +331,10 @@ def test_runs_check_has_nothing_to_refuse_without_a_positive_goal(target):
 def test_runs_check_has_nothing_to_refuse_without_weights():
     n = _weighted_network(weight=0.0)
     assert S.draws_short_of_target(n, _goal_pack(3.0), 1) is None
+
+
+def test_runs_check_ignores_zero_weight_snapshots():
+    # A snapshot of weight 0 is never sampled into the floor (mc: w > 0).
+    n = _weighted_network()
+    n.snapshot_weightings.loc[n.snapshots[0], :] = 0.0
+    assert "set at least 18." in S.draws_short_of_target(n, _goal_pack(3.0 * 168 / 167), 1)
