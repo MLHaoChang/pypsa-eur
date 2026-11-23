@@ -380,32 +380,58 @@ def test_a_series_resonance_clear_passes(tmp_path):
 
 def _check_row(case="min"):
     """A series row turned ``check`` because a genset gave no modes: a resonance, no margin."""
-    return {**_resonance((0.4,))[0], "case": case, "margin_hz": float("nan"), "verdict": "check",
-            "note": "no torsional modes given for genset(s) GEN2; the screen does not pass on the others alone"}
+    return {
+        **_resonance((0.4,))[0],
+        "case": case,
+        "margin_hz": float("nan"),
+        "verdict": "check",
+        "note": "no torsional modes given for genset(s) GEN2; the screen does not pass on the others alone",
+    }
 
 
 def _band_clear_row():
     """A far-side series row with no series resonance in the scan band: clear, no f_er, no margin."""
-    return {"case": "max", "kind": SERIES, "f_er_hz": float("nan"), "f_comp_hz": float("nan"),
-            "machine": float("nan"), "mode_hz": float("nan"), "margin_hz": float("nan"), "clearance_hz": 1.0,
-            "verdict": "clear", "assumed": True,
-            "note": "clear in the 5-45 Hz scan band: series capacitor(s) ['SC1'] scanned, no series resonance"}
+    return {
+        "case": "max",
+        "kind": SERIES,
+        "f_er_hz": float("nan"),
+        "f_comp_hz": float("nan"),
+        "machine": float("nan"),
+        "mode_hz": float("nan"),
+        "margin_hz": float("nan"),
+        "clearance_hz": 1.0,
+        "verdict": "clear",
+        "assumed": True,
+        "note": "clear in the 5-45 Hz scan band: series capacitor(s) ['SC1'] scanned, no series resonance",
+    }
 
 
 def test_a_flag_beside_an_unjudged_row_warns_with_its_margin(tmp_path):
-    _write(tmp_path, subsync=_sub_meta("flag"), resonance=[*_resonance((0.4,)), _check_row()])
+    _write(
+        tmp_path,
+        subsync=_sub_meta("flag"),
+        resonance=[*_resonance((0.4,)), _check_row()],
+    )
     row = _card(tmp_path)[0]["subsync_series_resonance"]
     assert (row["verdict"], row["project_value"]) == ("warn", 0.4)
 
 
 def test_a_flag_beside_a_band_clear_row_warns(tmp_path):
-    _write(tmp_path, subsync=_sub_meta("flag"), resonance=[*_resonance((0.4,)), _band_clear_row()])
+    _write(
+        tmp_path,
+        subsync=_sub_meta("flag"),
+        resonance=[*_resonance((0.4,)), _band_clear_row()],
+    )
     row = _card(tmp_path)[0]["subsync_series_resonance"]
     assert (row["verdict"], row["project_value"]) == ("warn", 0.4)
 
 
 def test_a_clear_beside_a_band_clear_row_passes(tmp_path):
-    _write(tmp_path, subsync=_sub_meta("clear"), resonance=[*_resonance((3.0,), "clear"), _band_clear_row()])
+    _write(
+        tmp_path,
+        subsync=_sub_meta("clear"),
+        resonance=[*_resonance((3.0,), "clear"), _band_clear_row()],
+    )
     row = _card(tmp_path)[0]["subsync_series_resonance"]
     assert (row["verdict"], row["project_value"]) == ("pass", 3.0)
 
@@ -422,24 +448,35 @@ def test_a_resonance_table_without_verdicts_has_no_judged_margin(tmp_path):
     _write(tmp_path, subsync=_sub_meta("flag"), resonance=rows)
     row = _card(tmp_path)[0]["subsync_series_resonance"]
     assert row["verdict"] == "unknown"
-    assert row["note"] == f"The run wrote no torsional margin for a series resonance. {SCREENING}"
+    assert (
+        row["note"]
+        == f"The run wrote no torsional margin for a series resonance. {SCREENING}"
+    )
 
 
 def test_a_pass_resting_on_assumed_modes_says_so(tmp_path):
     rows = _resonance((1.0, 3.0), "clear")
-    rows[0]["note"] = "clear rests on assumed torsional mode(s): GEN1 30.5 Hz; synchronous machine impedance is not in the scan"
+    rows[0]["note"] = (
+        "clear rests on assumed torsional mode(s): GEN1 30.5 Hz; synchronous machine impedance is not in the scan"
+    )
     _write(tmp_path, subsync=_sub_meta("clear"), resonance=rows)
     row = _card(tmp_path)[0]["subsync_series_resonance"]
     assert row["verdict"] == "pass"
     assert row["note"] == (
         "Least margin 1 Hz: the electrical resonance's complement 21 Hz against the torsional mode 20 Hz of GAS "
         "(max), at or above the clearance 1 Hz. Clear rests on assumed torsional mode(s): GEN1 30.5 Hz. "
-        f"{SCREENING}")
+        f"{SCREENING}"
+    )
 
 
 def test_a_pass_on_given_modes_adds_no_assumed_sentence(tmp_path):
-    _write(tmp_path, subsync=_sub_meta("clear"), resonance=_resonance((1.0, 3.0), "clear"))
-    assert "assumed torsional" not in _card(tmp_path)[0]["subsync_series_resonance"]["note"]
+    _write(
+        tmp_path, subsync=_sub_meta("clear"), resonance=_resonance((1.0, 3.0), "clear")
+    )
+    assert (
+        "assumed torsional"
+        not in _card(tmp_path)[0]["subsync_series_resonance"]["note"]
+    )
 
 
 _TSP = "not evaluated: grid-side series compensation needs the TSP's data"
@@ -788,9 +825,17 @@ def _moded_run(d, modes):
     c = spec["campus"]
     c["buses"]["MVT"] = {"vn_kv": 20.0}
     c["transformers"]["GRID_IMPORT"]["lv_bus"] = "MVT"
-    c["series_capacitors"] = {"SC1": {"from_bus": "MVT", "to_bus": "MV", "xc_ohm": {"value": 0.5, "source": "datasheet"}}}
+    c["series_capacitors"] = {
+        "SC1": {
+            "from_bus": "MVT",
+            "to_bus": "MV",
+            "xc_ohm": {"value": 0.5, "source": "datasheet"},
+        }
+    }
     for unit, given in modes.items():
-        c["units"][unit]["torsional_modes_hz"] = [{"value": f, "source": src} for f, src in given]
+        c["units"][unit]["torsional_modes_hz"] = [
+            {"value": f, "source": src} for f, src in given
+        ]
     run = _run_dir(d)
     prepare_campus(run, spec, path)
     ce._ssti_screens(run, PROFILE, ())
@@ -806,7 +851,9 @@ def test_a_real_flag_beside_an_unmoded_genset_warns_on_the_card(tmp_path):
     assert set(series["verdict"]) == {"flag"} and set(series["machine"]) == {"GAS_A"}
     row = _card(tmp_path)[0]["subsync_series_resonance"]
     assert row["verdict"] == "warn"
-    assert row["project_value"] == pytest.approx(float(series["margin_hz"].min()), abs=1e-9)
+    assert row["project_value"] == pytest.approx(
+        float(series["margin_hz"].min()), abs=1e-9
+    )
     assert row["project_value"] < 1.0
 
 
@@ -814,14 +861,19 @@ def test_a_clear_on_one_genset_reads_unknown_while_the_other_has_no_modes(tmp_pa
     _moded_run(tmp_path, {"GAS_A": [(14.0, "datasheet")]})
     row = _card(tmp_path)[0]["subsync_series_resonance"]
     assert row["verdict"] == "unknown" and row["project_value"] is None
-    assert row["note"].startswith("No torsional modes given for genset(s) GAS_B; the screen does not pass on the others alone; ")
+    assert row["note"].startswith(
+        "No torsional modes given for genset(s) GAS_B; the screen does not pass on the others alone; "
+    )
 
 
 def test_a_real_pass_on_an_assumed_mode_says_so_on_the_card(tmp_path):
     _moded_run(tmp_path, {"GAS_A": [(14.0, "datasheet")], "GAS_B": [(20.0, "assumed")]})
     row = _card(tmp_path)[0]["subsync_series_resonance"]
     assert row["verdict"] == "pass"
-    assert "at or above the clearance 1 Hz. Clear rests on assumed torsional mode(s): GAS_B 20 Hz. " in row["note"]
+    assert (
+        "at or above the clearance 1 Hz. Clear rests on assumed torsional mode(s): GAS_B 20 Hz. "
+        in row["note"]
+    )
 
 
 # ── guards the mutant run found unfed (R7) ────────────────────────────────────
