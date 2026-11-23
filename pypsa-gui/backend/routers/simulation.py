@@ -847,6 +847,10 @@ def list_market_packs():
             "saved": storage is not None}
 
 
+# What a plan carries for the apply only; never part of an answer.
+_PLAN_INTERNAL = ("commercial", "applied", "planned_from", "planned_pin")
+
+
 def _pack_plan(pack_id: str, *, saved: bool = False):
     from services.commercial import market_packs as MP
 
@@ -858,8 +862,9 @@ def _pack_plan(pack_id: str, *, saved: bool = False):
                 "Save the project first: the pack records what it wrote in the project folder."))
         zone = MP.project_zone(storage) if storage is not None else None
         MP.check_fit(pack, zone, currency)
-        plan = MP.plan_apply(pack, commercial, MP.read_pin(storage))
-        return storage, pack, {**plan, "planned_from": commercial}
+        pin = MP.read_pin(storage)
+        plan = MP.plan_apply(pack, commercial, pin)
+        return storage, pack, {**plan, "planned_from": commercial, "planned_pin": pin}
     except MP.PackRefusal as exc:
         raise _pack_refusal(exc) from exc
 
@@ -869,7 +874,7 @@ def preview_market_pack(pack_id: str):
     """Every value applying the pack would change, the conflicts it keeps (cells
     the user edited since the last apply) and the cells it leaves (empty refs)."""
     _storage, _pack, plan = _pack_plan(pack_id)
-    return {k: v for k, v in plan.items() if k not in ("commercial", "applied", "planned_from")}
+    return {k: v for k, v in plan.items() if k not in _PLAN_INTERNAL}
 
 
 class MarketPackApplyIn(BaseModel):
@@ -887,8 +892,8 @@ def apply_market_pack(
     """Apply the pack as an ordinary edit: the new commercial config goes through
     `PUT /solver_config` (its validators, write gate, lock and revision bump; no
     undo, exactly as hand entry). `pack_hash` is the previewed pack's. Inside the
-    PUT's lock the pack hash and the commercial config the plan was made from are
-    checked again, and the pin is written there: a change in between is refused
+    PUT's lock the pack hash, the commercial config and the pin the plan was made
+    from are checked again, and the pin is written there: a change in between is refused
     (409 `market_pack_stale`), never applied over. A conflicting cell is never
     written; the answer lists it, and `changed` counts only the cells written."""
     from services.commercial import market_packs as MP
@@ -903,6 +908,12 @@ def apply_market_pack(
     def guard(stored_cfg) -> None:
         commercial = getattr(stored_cfg, "commercial", None)
         if MP.get(pack_id).pack_hash != body.pack_hash or commercial != planned_from:
+            raise _pack_refusal(stale)
+        try:
+            pin_now = MP.read_pin(storage)
+        except MP.PackRefusal as exc:
+            raise _pack_refusal(exc) from exc
+        if pin_now != plan["planned_pin"]:
             raise _pack_refusal(stale)
 
     def commit() -> None:
@@ -919,7 +930,7 @@ def apply_market_pack(
         with PyPSAService.get_solver_state_lock():
             guard(_state["solver_config"])
             commit()
-    out = {k: v for k, v in plan.items() if k not in ("commercial", "applied", "planned_from")}
+    out = {k: v for k, v in plan.items() if k not in _PLAN_INTERNAL}
     return {**out, "changed": len(plan["changes"])}
 
 

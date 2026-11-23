@@ -286,6 +286,18 @@ def test_a_day_ahead_ref_fills_an_empty_pick_never_a_users():
     )
     assert users["commercial"]["export_price_ref"]["id"] == PRICE["id"]
     assert users["conflicts"][0]["cell"] == MP.EXPORT_CELL
+    # The user cleared the pick an apply wrote: a user edit, never re-filled.
+    cleared = MP.plan_apply(
+        pack,
+        _commercial(export_link="export"),
+        {"pack_id": pack.id, "pack_hash": "old", "applied": {MP.EXPORT_CELL: full}},
+    )
+    assert cleared["commercial"].get("export_price_ref") is None
+    assert MP.EXPORT_CELL not in {c["cell"] for c in cleared["changes"]}
+    assert cleared["applied"][MP.EXPORT_CELL] == full
+    assert cleared["conflicts"] == [
+        {"cell": MP.EXPORT_CELL, "yours": None, "pack": full, "last_applied": full}
+    ]
 
 
 def test_an_empty_capacity_price_never_overwrites_a_users_price():
@@ -442,9 +454,17 @@ def test_a_product_with_no_price_settles_to_none_flagged():
     n.storage_units_t[RP.OUT_FRAME] = pd.DataFrame(
         {f"{STRING}{RP.SEP}{p.id}": 1.0}, index=n.snapshots
     )
-    lines, _ = reserve_lines(n, cfg, backup=({STRING: 20.0}, frozenset({STRING})))
+    floors = {STRING: 20.0}
+    # A fresh solved read (no flags, hours for every snapshot): only the price is missing.
+    read = RP.Solved(
+        n.storage_units_t[RP.OUT_FRAME],
+        [],
+        pd.Series(1.0, index=n.snapshots),
+        RP.inputs_digest([p], floors),
+    )
+    lines, _ = reserve_lines(n, cfg, backup=(floors, frozenset({STRING})), read=read)
     assert [ln.amount for ln in lines] == [None]
-    assert lines[0].flags  # named, never 0
+    assert {"reserve_price_not_bound", RP.PRICE_MISSING} <= set(lines[0].flags)
 
 
 def test_binding_skips_a_product_with_no_price():
@@ -753,8 +773,9 @@ def test_the_apply_goes_through_the_real_put_and_bumps_the_revision(
     assert dirty_state.revision(session_ctx(client)) == before + 1
 
 
+@pytest.mark.parametrize("change", ["cell", "pin"])
 def test_a_change_at_the_puts_lock_entry_is_refused_stale(
-    client, install_network, project_storage_dir, monkeypatch
+    client, install_network, project_storage_dir, monkeypatch, change
 ):
     """GK B4 2a: the stale check runs INSIDE the PUT's solver-state lock. An edit
     that lands after the PUT's pre-lock steps and before it takes the lock is
@@ -782,9 +803,12 @@ def test_a_change_at_the_puts_lock_entry_is_refused_stale(
         def __enter__(self):
             self.lock.__enter__()
             if armed and armed.pop():
-                SIM._state["solver_config"] = dataclasses.replace(
-                    SIM._state["solver_config"], commercial=edited
-                )
+                if change == "cell":
+                    SIM._state["solver_config"] = dataclasses.replace(
+                        SIM._state["solver_config"], commercial=edited
+                    )
+                else:  # another apply's pin landed first
+                    MP.write_pin(pdir, pack, {"reserve_products/x/id": "x"})
             return self
 
         def __exit__(self, *exc):
@@ -800,8 +824,12 @@ def test_a_change_at_the_puts_lock_entry_is_refused_stale(
     assert r.status_code == 409, r.text
     assert r.json()["detail"]["error_kind"] == MP.STALE
     stored = client.get("/api/simulation/solver_config").json()["commercial"]
-    assert stored["reserve_products"] == edited["reserve_products"]
-    assert MP.read_pin(pdir) is None
+    if change == "cell":
+        assert stored["reserve_products"] == edited["reserve_products"]
+        assert MP.read_pin(pdir) is None
+    else:
+        assert not stored.get("reserve_products")
+        assert MP.read_pin(pdir)["applied"] == {"reserve_products/x/id": "x"}
 
 
 def test_the_pin_survives_save_save_as_save_a_copy_and_export_import_save(
