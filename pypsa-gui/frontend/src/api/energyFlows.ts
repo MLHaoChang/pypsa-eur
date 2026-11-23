@@ -32,6 +32,8 @@ export interface EnergyFlowsPayload {
     status: 'ok' | 'failed'
     checks: string[]
     generation_mwh: number
+    /** Energy process units deliver after their node (absent: none). */
+    process_output_mwh?: number
     destinations_mwh: number
     storage_delta_mwh: number
     stock_mwh: number

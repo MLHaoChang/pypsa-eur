@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { EnergyFlowRow } from '../../api/energyFlows'
-import { CSV_HEADER, csvRows, fmtMwh, sankeyData, share } from './energyFlows'
+import { CSV_HEADER, csvRows, flowTotal, fmtMwh, PROCESS_COLOR, sankeyData, share } from './energyFlows'
 
 export const ROWS: EnergyFlowRow[] = [
   { source: 'solar', via: 'Direct', destination: 'load', mwh: 600 },
@@ -70,5 +70,34 @@ describe('formatting', () => {
     expect(fmtMwh(null)).toBe('not established')
     expect(share(1, 0)).toBeNull()
     expect(share(1, 4)).toBe(0.25)
+  })
+})
+
+describe('process units (A1b)', () => {
+  const rows: EnergyFlowRow[] = [
+    { source: 'Grid import', via: 'Direct', destination: 'Process nh3', mwh: 80 },
+    { source: 'Grid import', via: 'Direct', destination: 'Process h2', mwh: 60 },
+    { source: 'Process nh3', via: 'Direct', destination: 'nh3_load', mwh: 40 },
+    { source: 'Process h2', via: 'Direct', destination: 'h2_load', mwh: 30 },
+  ]
+  it('ends the electricity at one node per process and restarts the product after it', () => {
+    const g = sankeyData(rows)
+    const dest = g.nodes.filter(n => n.column === 'destination').map(n => n.name)
+    expect(dest).toEqual(expect.arrayContaining(['Process nh3', 'Process h2']))
+    expect(g.nodes.filter(n => n.column === 'source').map(n => n.name))
+      .toEqual(expect.arrayContaining(['Process nh3', 'Process h2']))
+  })
+  it('colours process nodes on both sides apart from loads', () => {
+    const g = sankeyData(rows)
+    const colours = g.nodes.filter(n => n.name.startsWith('Process ')).map(n => n.color)
+    expect(new Set(colours)).toEqual(new Set([PROCESS_COLOR]))
+    expect(g.nodes.find(n => n.name === 'nh3_load')!.color).not.toBe(PROCESS_COLOR)
+  })
+  it("does not count the process outputs twice in the total", () => {
+    expect(flowTotal(rows)).toBe(140)
+  })
+  it('is unchanged for a site with no process unit', () => {
+    const plain: EnergyFlowRow[] = [{ source: 'solar', via: 'Direct', destination: 'Load', mwh: 5 }]
+    expect(flowTotal(plain)).toBe(5)
   })
 })
