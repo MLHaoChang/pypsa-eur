@@ -347,3 +347,95 @@ def test_the_summary_headline_says_why_an_assumed_line_has_no_congested_hours(
     )
     stated = headline(False)
     assert stated["status"] == "ok" and stated["value"] > 0
+
+
+# --- psse-import 06: sealed facts and the what-if comparison ---------------------------
+
+
+def _raw(*, assumed_second):
+    """Two lines over three snapshots: both at 150 % of a rating of 10 MVA."""
+    def branch(assumed):
+        flow = [15.0, 15.0, 15.0]
+        return {
+            "class": "Line", "rating": 10.0, "rating_field": "s_nom",
+            "s_max_pu": [1.0] * 3, "p0": flow, "p1": [-f for f in flow],
+            **({"rating_assumed": True} if assumed else {}),
+        }
+
+    return {
+        "version": 1, "profile": branch_calculations.NETWORK_PROFILE, "entity_id": "network",
+        "valid_solve": True, "index": ["a", "b", "c"], "energy_weight": [1.0, 1.0, 1.0],
+        "branches": {"L1": branch(False), "L2": branch(assumed_second)}, "links_excluded": 0,
+    }
+
+
+def _scope(profile=branch_calculations.NETWORK_PROFILE, entity="network"):
+    return {"profile": profile, "entity_id": entity,
+            "metrics": ["max_branch_utilisation", "branches_above_rating"]}
+
+
+def _facts(raw, scope):
+    facts, _ = branch_calculations.calculate(raw, scope)
+    return {f["metric"]: f["value"] for f in facts}
+
+
+def test_sealed_above_rating_count_leaves_an_assumed_branch_out_and_says_so(monkeypatch):
+    from harness import calculations
+
+    monkeypatch.setattr(calculations, "requested_metrics", lambda scope: scope["metrics"])
+    assert _facts(_raw(assumed_second=False), _scope())["branches_above_rating"] == 2
+    assumed = _raw(assumed_second=True)
+    facts = _facts(assumed, _scope())
+    assert facts["branches_above_rating"] == 1
+    assert facts["max_branch_utilisation"] == pytest.approx(150)  # loading stays
+    assert any("1 branch(es) with an assumed rating" in line for line in branch_calculations.notes(assumed))
+    assert not any("assumed" in line for line in branch_calculations.notes(_raw(assumed_second=False)))
+
+
+def test_sealed_hours_above_rating_of_an_assumed_branch_is_unavailable(monkeypatch):
+    from harness import calculations
+
+    monkeypatch.setattr(calculations, "requested_metrics", lambda scope: scope["metrics"])
+    scope = {**_scope(branch_calculations.PROFILE, "L2"),
+             "metrics": ["peak_branch_utilisation", "hours_above_rating"]}
+    for name, hours_available in (("stated", True), ("assumed", False)):
+        raw = _raw(assumed_second=name == "assumed")
+        raw["profile"] = branch_calculations.PROFILE
+        raw["entity_id"] = "L2"
+        raw["branches"] = {"L2": raw["branches"]["L2"]}
+        facts, slots = branch_calculations.calculate(raw, scope)
+        got = {f["metric"]: f["value"] for f in facts}
+        assert ("hours_above_rating" in got) is hours_available
+        assert got["peak_branch_utilisation"] == pytest.approx(150)
+        if not hours_available:
+            assert [s["reason"] for s in slots if s["disposition"] == "unavailable"] == ["rating_assumed"]
+
+
+def test_what_if_loading_comparison_claims_no_binding_hours_for_an_assumed_line():
+    from services.compare.loading import _compute_loading_summary
+
+    n = _imported()
+    name = next(i for i in n.lines.index if n.lines.at[i, "s_nom_source"] == "assumed")
+    _overloaded(n, name)
+    n.lines["s_nom_opt"] = n.lines["s_nom"]  # as after a solve
+    result = _compute_loading_summary(n, [], False, True)
+    rows = {e.name: e for e in result.lines}
+    assert rows[name].rating_assumed is True
+    assert rows[name].binding_hours.total == 0.0
+    assert rows[name].peak_loading.total == pytest.approx(1.5)
+    assert result.assumed_rating_count == sum(e.rating_assumed for e in result.lines) >= 1
+    assert result.assumed_rating_count == int((n.lines["s_nom_source"] == "assumed").sum())
+
+
+def test_what_if_loading_comparison_without_the_marker_is_unchanged():
+    from services.compare.loading import _compute_loading_summary
+
+    n = _imported()
+    name = n.lines.index[0]
+    n.lines["s_nom_source"] = "file"
+    _overloaded(n, name)
+    n.lines["s_nom_opt"] = n.lines["s_nom"]
+    result = _compute_loading_summary(n, [], False, True)
+    row = next(e for e in result.lines if e.name == name)
+    assert row.rating_assumed is False and row.binding_hours.total > 0
+    assert result.assumed_rating_count == 0
