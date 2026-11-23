@@ -185,6 +185,7 @@ def test_every_thevenin_row_still_states_the_c_note(held):
     assert rows and all(r["note"] == C_NOTE for r in rows)
     assert "c_max on Sk-min, c_min on Sk-max" in C_NOTE
     assert any(C_NOTE in a for a in p.manifest["assumptions"])
+    assert not any(emt_pack.NO_C_NOTE in a for a in p.manifest["assumptions"])
 
 
 # --- README ----------------------------------------------------------------

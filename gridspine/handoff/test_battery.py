@@ -277,9 +277,7 @@ class Thevenin:
                 raise ContractError(
                     f"thevenin {self.label}: {name}={float(v)} must be > 0"
                 )
-        if self.c_kind is not None and (
-            not isinstance(self.c_kind, str) or self.c_kind not in C_KINDS
-        ):
+        if self.c_kind is not None and self.c_kind not in C_KINDS:
             raise ContractError(
                 f"thevenin {self.label}: c_kind={self.c_kind!r} is not one of {list(C_KINDS)}"
             )
