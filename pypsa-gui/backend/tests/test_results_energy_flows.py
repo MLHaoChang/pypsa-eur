@@ -471,15 +471,25 @@ def test_process_rows_scale_with_snapshot_weightings_and_the_series_balance():
 
 def test_a_process_that_exports_is_not_dropped():
     n = _process_net(("nh3",))
+    n.add("Carrier", "grid")
     n.add("Bus", "ext", carrier="AC", unit="MWh")
-    n.add("Generator", "ext_grid", bus="ext", carrier="AC", p_nom=100, marginal_cost=1, p_min_pu=-1)
+    n.add("Generator", "ext_grid", bus="ext", carrier="grid", p_nom=100, marginal_cost=1, p_min_pu=-1)
     n.links.loc["nh3", "bus2"] = "ext"
     n.links.loc["nh3", "efficiency2"] = 0.2
     p = energy_flows(_solve(n))
-    if p["status"] == "ok":
-        assert any(r["destination"] == "Export" and r["source"] == "Process nh3" for r in p["rows"])
-    else:
-        assert p["flags"]
+    _assert_conserves(p)
+    out = _by(p["rows"], "source", "destination")
+    assert out[("Process nh3", "Export")] == pytest.approx(16.0)      # 4 h × 20 MW in × 0.2
+    assert out[("Process nh3", "nh3_load")] == pytest.approx(40.0)
+
+
+def test_a_load_named_like_the_process_node_is_refused():
+    n = _process_net(("nh3",))
+    n.add("Bus", "other_bus", carrier="prod", unit="MWh")
+    n.add("Load", "Process nh3", bus="other_bus", p_set=1)
+    n.add("Generator", "other_gen", bus="other_bus", carrier="AC", p_nom=5, marginal_cost=1)
+    p = energy_flows(_solve(n))
+    assert p["status"] == "not_established" and "Process nh3" in p["reason"]
 
 
 def test_a_carrier_named_like_the_process_node_is_refused():
