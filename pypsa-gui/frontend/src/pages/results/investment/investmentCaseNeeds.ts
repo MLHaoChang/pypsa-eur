@@ -80,6 +80,15 @@ const errorCode = (e: unknown): string | null => {
   return isObj(d) && typeof d.code === 'string' ? d.code : null
 }
 
+/** Every need a start refusal names (issue 40): its `detail.needs`, else its code's. */
+function refusalNeeds(e: unknown): Need[] {
+  const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+  const listed = e instanceof StudyBusyError ? e.needs
+    : isObj(d) && Array.isArray(d.needs) ? d.needs : undefined
+  const codes = [errorCode(e), ...(listed ?? [])]
+  return NEED_ORDER.filter(n => codes.some(c => typeof c === 'string' && needOf(c) === n))
+}
+
 /** A stored run's reason without its code: a refusal is stored as
  *  "<code>: <detail>" (services/finance/case.py, FinanceRefused). */
 function reasonOf(study: InvestmentCaseStudy, code: string | null): string | null {
@@ -95,8 +104,7 @@ function reasonOf(study: InvestmentCaseStudy, code: string | null): string | nul
 export function blockerOf(err: unknown, study: InvestmentCaseStudy | null | undefined): Blocker | null {
   if (err) {
     if (err instanceof SolverInFlightError) return { kind: 'wait', text: 'a solve is running; wait for it to finish.' }
-    const need = needOf(errorCode(err))
-    if (need) return { kind: 'needs', needs: [need] }
+    if (needOf(errorCode(err))) return { kind: 'needs', needs: refusalNeeds(err) }
     if (err instanceof StudyBusyError) return { kind: 'wait', text: err.message }
     return { kind: 'unknown', detail: null }
   }
