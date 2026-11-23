@@ -117,7 +117,11 @@ C_MAX = 1.1
 #: The c a source may name (module docstring, "Voltage factor c").
 C_KINDS = ("c_max", "c_min", "unity")
 #: How the battery picks c per corner (module docstring, "Voltage factor c").
-C_BRACKET_NOTE = "IEC 60909 c bracket: c_max on Sk-min, c_min on Sk-max (conservative, GK A2 GC-02 V1)"
+#: Exported to the packs (TSO-facing), so it cites the engineering basis only.
+C_BRACKET_NOTE = (
+    "IEC 60909 c bracket: c_max on Sk-min, c_min on Sk-max (c per IEC 60909-0 Table 1; "
+    "conservative: larger |Z| on the weak grid, smaller on the strong)"
+)
 
 
 def c_min(vn_kv) -> float:
