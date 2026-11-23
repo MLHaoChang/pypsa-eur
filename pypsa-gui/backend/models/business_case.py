@@ -139,6 +139,18 @@ QUANTITY_SOURCE_PATTERN = (
     rf"^(typed|linked:{_ID}@{_ID}|share_of:(revenue|opex|capex)(/[a-z_]+)?)$"
 )
 PRESET_PATTERN = rf"^{_ID}@{_ID}$"
+# A contract indexation is stored as a fraction per year (0.02 = 2 %/yr) and shown in %/yr.
+# Outside the hard band the case refuses (typing 2 for 2 % stores 2.0 = 200 %/yr, GAP W2);
+# beyond the soft band the UI and chat cards ask for a confirmation, the API does not.
+INDEXATION_MIN, INDEXATION_MAX = -0.20, 0.30
+INDEXATION_SOFT = 0.10
+
+
+def indexation_unusual(v: Any) -> bool:
+    """A stated indexation beyond the soft band (|rate| > 10 %/yr), inside or outside the hard one."""
+    return isinstance(v, (int, float)) and not -INDEXATION_SOFT <= v <= INDEXATION_SOFT
+
+
 MONEY_YEAR_MIN = 1990
 MONEY_YEAR_AFTER_BASE = 5
 #: The most years a volume factor may list (BC 15, GK B2 C3).
@@ -545,6 +557,11 @@ class BusinessCaseInputs(BaseModel):
             out.append(YearOutOfRange(f"{at}.money_year"))
         if ln.escalation == "contract" and ln.indexation is None:
             out.append(IndexationMissing(f"{at}.indexation"))
+        # `not in-band` also catches NaN, whose comparisons are all false.
+        if ln.indexation is not None and not (
+            INDEXATION_MIN <= ln.indexation <= INDEXATION_MAX
+        ):
+            out.append(IndexationOutOfRange(f"{at}.indexation"))
         if ln.derating is None and takes_derating(ln.category, ln.quantity_source):
             out.append(DeratingMissing(f"{at}.derating"))
         if ln.start_year is not None and not horizon[0] <= ln.start_year <= horizon[1]:
@@ -719,6 +736,10 @@ class IndexationMissing(BusinessCaseRefused):
     kind = "indexation_missing"
 
 
+class IndexationOutOfRange(BusinessCaseRefused):
+    kind = "indexation_out_of_range"
+
+
 class DeratingMissing(BusinessCaseRefused):
     kind = "derating_missing"
 
@@ -811,6 +832,7 @@ REFUSAL_KINDS: tuple[str, ...] = (
     "outside_horizon",
     "year_out_of_range",
     "indexation_missing",
+    "indexation_out_of_range",
     "derating_missing",
     "life_missing",
     "rate_missing",

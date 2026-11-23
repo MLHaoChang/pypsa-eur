@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Business-case indexation is typed and shown in %/yr like the volume factor beside it (the stored value stays a fraction per year); a rate outside -20 to +30 %/yr is refused, and one beyond ±10 %/yr asks for a confirmation in the line table and on chat cards. A plain API write relies on the hard band only.
