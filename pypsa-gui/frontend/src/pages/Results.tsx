@@ -130,15 +130,22 @@ export const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingU
   { id: 'grid_risk',  label: 'Grid risk to production', Icon: ShieldAlert, tip: 'Each grid risk (ride-through, island, N-1, connection curtailment) as lost tonnes, then EUR, per year', processOnly: true },
   { id: 'fmea',       label: 'FMEA',               Icon: ShieldAlert,      tip: 'Failure modes ranked by criticality (€ per year): computed rows + expert class-D rows, mitigability, CSV export' },
   { id: 'investment', label: 'Investment case',    Icon: Briefcase,        tip: 'The investment case: the site bill, participants and value flows, the Library, tariffs and contracts', expertOnly: true },
-  { id: 'reports',    label: 'Reports',            Icon: FileText,         tip: 'Study reports written from the Energy Hub reference design and the adequacy study; read them here and export to Word' },
-  { id: 'exports',    label: 'Exports',            Icon: FileDown,         tip: 'Export the project: bundle, NetCDF, CSV, Excel, MATPOWER or the results workbook' },
-  { id: 'specialist_packet', label: 'Specialist packet', Icon: Package,   tip: 'What a dynamics specialist receives: the dispatch source, ranked snapshots, assumptions ledger and per-hour bundles' },
   { id: 'asset',      label: 'Asset Detail',       Icon: Crosshair,        tip: 'One asset in full — every applicable result, as numbers or charts, exportable', expertOnly: true },
 ]
 
+// Hand-off tabs (R6): what leaves the tool, not a solve output. Kept apart from TABS, which is
+// the list of result views (the workbook picker and the assistant inventory read it as such).
+const HANDOFF_TABS: typeof TABS = [
+  { id: 'reports',    label: 'Reports',            Icon: FileText,         tip: 'Study reports written from the Energy Hub reference design and the adequacy study; read them here and export to Word' },
+  { id: 'exports',    label: 'Exports',            Icon: FileDown,         tip: 'Export the project: bundle, NetCDF, CSV, Excel, MATPOWER or the results workbook' },
+  { id: 'specialist_packet', label: 'Specialist packet', Icon: Package,   tip: 'What a dynamics specialist receives: the dispatch source, ranked snapshots, assumptions ledger and per-hour bundles' },
+]
+// Every tab the panel can show: the result views, then Hand-off.
+const ALL_TABS: typeof TABS = [...TABS, ...HANDOFF_TABS]
+
 // The tabs Guided mode shows (every other row is `expertOnly`).
 const GUIDED_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>(
-  TABS.filter(t => !t.expertOnly).map(t => t.id),
+  ALL_TABS.filter(t => !t.expertOnly).map(t => t.id),
 )
 
 // Maps the Results tab the user is viewing → the equivalent CompareView tab,
@@ -266,7 +273,7 @@ export default function Results() {
   // the last tab is ever shown.
   if (
     resultsTabRequest
-    && TABS.some((item) => item.id === resultsTabRequest)
+    && ALL_TABS.some((item) => item.id === resultsTabRequest)
   ) {
     if (resultsTabRequest !== tab) setTab(resultsTabRequest as ResultsTab)
     if (requestedTab !== resultsTabRequest) setRequestedTab(resultsTabRequest as ResultsTab)
@@ -691,10 +698,10 @@ export default function Results() {
   }
 
   // ── UX overhaul S3: groups ───────────────────────────────────────────
-  const tabVisible = (t: (typeof TABS)[number]) =>
+  const tabVisible = (t: (typeof ALL_TABS)[number]) =>
     (!t.multiOnly || uniquePeriods.length > 0) && (!t.expertOnly || uiMode === 'expert' || t.id === advancedTab)
     && (!t.processOnly || hasProcessUnits)
-  const visibleTabIds = new Set<ResultsTab>(TABS.filter(tabVisible).map(t => t.id))
+  const visibleTabIds = new Set<ResultsTab>(ALL_TABS.filter(tabVisible).map(t => t.id))
   // The drawer sits over the last non-asset tab; a first load on 'asset' falls back to Summary.
   const bodyTab: ResultsTab = effectiveTab === 'asset' ? lastBodyTab.current : effectiveTab
   if (effectiveTab !== 'asset') lastBodyTab.current = effectiveTab
@@ -708,7 +715,7 @@ export default function Results() {
   const activeCardTab = place?.cardTab ?? null
   const subViews = (() => {
     const ct = shownGroup?.tabs.find(t => t.id === activeCardTab)
-    return ct ? ct.views.filter(v => visibleTabIds.has(v)).map(id => TABS.find(t => t.id === id)!) : []
+    return ct ? ct.views.filter(v => visibleTabIds.has(v)).map(id => ALL_TABS.find(t => t.id === id)!) : []
   })()
   if (activeGroup && emptyGroup == null) lastInGroup.current[activeGroup] = bodyTab
   const { scope: flowScope, isSuccess: scopeRead } = useFlowScope()
@@ -730,7 +737,7 @@ export default function Results() {
     pickTab(views.includes(lastInGroup.current[shownGroup!.id] as ResultsTab)
       ? lastInGroup.current[shownGroup!.id]! : views[0])
   }
-  const renderTab = ({ id, label, Icon, tip }: (typeof TABS)[number]) => {
+  const renderTab = ({ id, label, Icon, tip }: (typeof ALL_TABS)[number]) => {
     const active = effectiveTab === id
     const advanced = id === advancedTab
     return (
@@ -849,7 +856,7 @@ export default function Results() {
             {discussedRun.mode ? ` · ${activityModeWord(discussedRun.mode)}` : ''}
           </span>
           {discussedRun.section && (
-            <span className="text-muted">Section: {sectionWords(discussedRun.section, id => TABS.find(t => t.id === id)?.label)}</span>
+            <span className="text-muted">Section: {sectionWords(discussedRun.section, id => ALL_TABS.find(t => t.id === id)?.label)}</span>
           )}
           {discussedRun.baselineRunId && (
             <span className="text-muted">baseline {discussedRun.baselineRunId}</span>
@@ -903,7 +910,7 @@ export default function Results() {
           )
         })}
         <div className="flex-1" />
-        {visibleTabIds.has('asset') && renderTab(TABS.find(t => t.id === 'asset')!)}
+        {visibleTabIds.has('asset') && renderTab(ALL_TABS.find(t => t.id === 'asset')!)}
         {/* Docked comparison rail toggle — keeps the live results visible while
             an A-vs-B scenario comparison sits alongside on the right. */}
         <button
@@ -1068,7 +1075,7 @@ export default function Results() {
             {(() => {
               // Overview is multi-period-only; if it's somehow the active tab on
               // a single-period run, fall back to Dispatch.
-              if (discussedRun) return <RunBoundView run={discussedRun} tab={effectiveTab} tabLabel={id => TABS.find(t => t.id === id)?.label} />
+              if (discussedRun) return <RunBoundView run={discussedRun} tab={effectiveTab} tabLabel={id => ALL_TABS.find(t => t.id === id)?.label} />
               const t = (bodyTab === 'overview' && uniquePeriods.length === 0) ? 'dispatch' : bodyTab
               // A group with no tab yet, or a card outside the scope (RC3 A):
               // the scope gate says so, the earlier results stay below, dimmed
