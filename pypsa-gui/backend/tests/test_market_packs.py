@@ -943,3 +943,17 @@ def test_the_reserve_view_names_a_price_source_only_for_a_priced_product():
         priced.capacity_price.source,
         None,
     ]
+
+
+def test_preflight_skips_an_unpriced_product_with_a_stale_bound_currency():
+    """GK A (#1932): currency meta left from a bind made while the product had a
+    price must not make the preflight read the emptied price (AttributeError)."""
+    from models import reserve_products as RP
+    from services.commercial.preflight import _reserve_currency_findings
+
+    n = types.SimpleNamespace(meta={RP.CURRENCY_META: {"fast_symmetric": "NOK"}})
+    cfg = M.CommercialConfig.model_validate(
+        {**_commercial(), "reserve_products": [_prod()]}
+    )
+    assert cfg.reserve_products[0].capacity_price is None
+    assert _reserve_currency_findings(n, cfg, "EUR") == []
