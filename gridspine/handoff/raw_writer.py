@@ -227,8 +227,9 @@ def trafo_magnetising(net, tr):
 
 
 def _mag_field(v):
-    """A MAG field: case39's zero as it always was, else eight decimals."""
-    return " 0.00000" if v == 0 else f"{v:11.8f}"
+    """A MAG field: case39's zero as it always was, else ten decimals (a 1 MVA
+    unit's G is about 2e-5 pu on SBASE)."""
+    return " 0.00000" if v == 0 else f"{v:13.10f}"
 
 
 def branch_ids(net):

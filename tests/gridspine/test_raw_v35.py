@@ -562,8 +562,8 @@ def test_the_written_raw_magnetising_read_as_psse_is_the_ppc_shunt(
     got = mag_as_read_by_psse(
         float(rec[0][7]), float(rec[0][8]), float(rec[2][0]), float(rec[3][0])
     )
-    # a nonzero MAG is written with eight decimals
-    assert got == pytest.approx(_ppc_shunt(n), rel=1e-4)
+    # a nonzero MAG is written with ten decimals
+    assert got == pytest.approx(_ppc_shunt(n), rel=1e-6)
 
 
 def test_trafo_magnetising_by_hand():
@@ -656,7 +656,8 @@ def test_the_raw_power_flow_is_the_magnetising_shunt_at_bus_i(
     n.trafo["pfe_kw"] = 0.0
     n.trafo["i0_percent"] = 0.0
     # pandapower shunt: P consumed and Q absorbed at 1 pu, so g = p, b = -q
-    pp.create_shunt(n, 0, p_mw=mag1 * SBASE_MVA, q_mvar=-mag2 * SBASE_MVA)
+    hv = n.trafo["hv_bus"].iloc[0]  # bus I of the RAW record
+    pp.create_shunt(n, hv, p_mw=mag1 * SBASE_MVA, q_mvar=-mag2 * SBASE_MVA)
     pp.runpp(n)
     v, a, loss = _raw_pf(_pf_net(tap_side, tap_pos, vn_lv_kv, slack), tmp_path)
     pv, pa, ploss = _pp_pf(n)
@@ -688,3 +689,19 @@ def test_a_missing_magnetising_value_is_refused_not_written_zero(col):
     n.trafo[col] = np.nan
     with pytest.raises(ContractError, match=f"{col}=nan"):
         trafo_magnetising(n, n.trafo.iloc[0])
+
+
+def test_a_small_unit_magnetising_keeps_its_precision(tmp_path):
+    # 1 MVA, pfe 2 kW, i0 0.3 %: G = 0.002 / 100 = 2e-5, B = -sqrt(0.003**2 -
+    # 0.002**2) / 100 = -2.2360680e-5 on SBASE; ten decimals keep 1e-5 relative.
+    n = _trafo_net("lv")
+    n.trafo["sn_mva"] = 1.0
+    n.trafo["parallel"] = 1
+    n.trafo["pfe_kw"] = 2.0
+    n.trafo["i0_percent"] = 0.3
+    n.bus["name"] = ["HV", "LV"]
+    write_raw(n, tmp_path / "t.raw")
+    _h, _sw, recs, _t = read_raw((tmp_path / "t.raw").read_text())
+    (rec,) = recs["TRANSFORMER"]
+    assert float(rec[0][7]) == pytest.approx(2e-5, rel=1e-5)
+    assert float(rec[0][8]) == pytest.approx(-2.2360680e-5, rel=1e-5)
