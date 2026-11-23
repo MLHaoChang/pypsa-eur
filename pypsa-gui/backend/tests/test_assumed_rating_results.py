@@ -82,6 +82,11 @@ def test_is_assumed_reads_only_the_exact_marker():
 # ── AC power flow ────────────────────────────────────────────────────────
 
 
+def _zero_flows(n):
+    for t in ("p0", "p1", "q0", "q1"):
+        setattr(n.lines_t, t, pd.DataFrame(0.0, index=SNAPSHOTS, columns=n.lines.index))
+
+
 def _grid_loading(n):
     ctx = SimpleNamespace(network=n)
     return run_grid_pf.loading(ctx, _evidence(n))
@@ -142,7 +147,7 @@ def test_asset_results_label_the_assumed_branch_and_count_no_congested_hour(
     assert stated > 0 and C.rating_assumed_flags(_ctx(n, name)) == {}
     n.lines.loc[name, "s_nom_source"] = "assumed"
     ctx = _ctx(n, name)
-    assert C.br_congested_hours(ctx) == 0.0
+    assert C.br_congested_hours(ctx) is None  # not evaluated, never a 0 h pass
     assert float(C.br_loading(ctx).max()) == pytest.approx(150.0)  # the loading % stays
     assert C.rating_assumed_flags(ctx) == {
         "rating_assumed": True,
@@ -220,3 +225,83 @@ def test_setting_the_rating_through_the_edit_route_reads_as_stated_on_the_next_r
     assert any(
         name in o for o in _grid_loading(n)[1]
     )  # the next run reads it as a real rating
+
+
+def test_a_stated_line_with_no_congestion_still_reads_zero_hours(monkeypatch):
+    n = _imported()
+    name = n.lines.index[0]
+    n.lines["s_nom_opt"] = n.lines["s_nom"]
+    n.lines["s_nom_source"] = "file"
+    idle = pd.Series(0.0, index=n.snapshots)
+    monkeypatch.setattr(C, "series_for", lambda ctx, attr: idle)
+    assert C.br_congested_hours(_ctx(n, name)) == 0.0
+
+
+def test_build_response_carries_the_assumed_flags(monkeypatch):
+    from services.asset_results import service
+
+    n = _imported()
+    name = n.lines.index[0]
+    n.lines["s_nom_source"] = "file"
+    n.lines.loc[name, "s_nom_source"] = "assumed"
+    monkeypatch.setattr("routers.simulation._state_snapshot", lambda: {})
+
+    def respond(line):
+        return service.build_response(
+            n,
+            "Line",
+            line,
+            category="loadflow",
+            metric_ids=["congested_hours"],
+            source="lopf",
+            from_iso=None,
+            to_iso=None,
+            period=None,
+            mode="raw",
+        )
+
+    out = respond(name)
+    assert (
+        out["asset"]["rating_assumed"] is True
+        and out["asset"]["rating_label"] == "rating assumed"
+    )
+    other = respond(n.lines.index[1])
+    assert "rating_assumed" not in other["asset"]
+
+
+# ── the AC power flow names what it did not judge ────────────────────────
+
+
+def test_the_ac_pf_gate_names_the_assumed_branches_and_their_total():
+    from services import run_gates
+
+    n = _imported()
+    n.lines["s_nom_source"] = "file"
+    n.lines.loc[n.lines.index[0], "s_nom_source"] = "assumed"
+    _zero_flows(n)
+    assert run_grid_pf.assumed_branches(n) == [f"Line {n.lines.index[0]}"]
+    detailed = run_gates._grid_loading(SimpleNamespace(network=n), _evidence(n))
+    assert (
+        f"Line {n.lines.index[0]}" in detailed.basis
+        and "1 with an assumed rating" in detailed.basis
+    )
+    assert "of any line" not in detailed.basis
+
+
+def test_the_assumed_list_carries_the_true_total_past_the_cap():
+    n = _imported()
+    n.transformers.drop(n.transformers.index, inplace=True)
+    n.lines["s_nom_source"] = "assumed"
+    for t in ("p0", "p1", "q0", "q1"):
+        setattr(n.lines_t, t, pd.DataFrame(0.0, index=SNAPSHOTS, columns=n.lines.index))
+    out = _grid_loading(n)
+    assert f"({len(n.lines)} in all)" in out.reason and len(n.lines) > 5
+
+
+def test_the_unrated_list_carries_the_true_total_past_the_cap():
+    n = _imported()
+    n.lines["s_nom_source"] = "file"
+    n.lines["s_nom"] = 0.0
+    _zero_flows(n)
+    out = _grid_loading(n)
+    assert out.code == "branch_unrated" and f"({len(n.lines)} in all)" in out.reason

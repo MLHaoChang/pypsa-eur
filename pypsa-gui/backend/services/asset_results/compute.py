@@ -1312,7 +1312,7 @@ def rating_assumed_flags(ctx: Ctx) -> dict:
 def br_congested_hours(ctx: Ctx):
     load = br_loading(ctx)
     if load is not None and rating_assumed(ctx):
-        return 0.0  # an assumed rating never binds: its loading % stays, no hour counts as congested
+        return None  # not evaluated: an assumed rating never binds, so no congested hour is claimed or denied
     return None if load is None else _whours(ctx, load >= _LOADED * 100.0)
 
 

@@ -368,7 +368,11 @@ def build_response(
             # row in place so the checklist tells the truth.
             row = rows_by_id[mid]
             row["status"] = "blocked"
-            row["reason"] = "not produced by this solve"
+            row["reason"] = (
+                "rating assumed: not evaluated"
+                if C.rating_assumed(ctx)
+                else "not produced by this solve"
+            )
             row.pop("remedy", None)
             continue
         if m.kind == "series":

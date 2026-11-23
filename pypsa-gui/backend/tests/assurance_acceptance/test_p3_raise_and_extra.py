@@ -1232,3 +1232,45 @@ def test_a_series_value_change_is_its_own_path():
 
 def test_derived_classes_are_left_out():
     assert outcomes.DERIVED_CLASSES == frozenset({"SubNetwork"})
+
+
+# ── a rating write owns its marker cell (psse-import 05) ─────────────────────
+
+
+def _two_assumed_lines(marker="assumed"):
+    n = _net()
+    n.add("Bus", "B2", v_nom=110)
+    for name in ("LX", "LY"):
+        n.add("Line", name, bus0="B1", bus1="B2", x=0.1, r=0.01, s_nom=100.0)
+    n.lines["s_nom_source"] = marker
+
+
+def _write_rating(attr_value=250.0):
+    note = outcomes.note_write(
+        "bulk_update_components",
+        {"component_class": "Line", "names": ["LX"], "updates": {"s_nom": attr_value}},
+    )
+    chat_tools.bulk_update_components("Line", ["LX"], {"s_nom": attr_value})
+    return note
+
+
+def test_a_rating_write_on_an_assumed_line_owns_its_marker_cell(baseline):
+    _two_assumed_lines("assumed")
+    note = _write_rating()
+    assert _net().lines.at["LX", "s_nom_source"] == "file"  # the write marked it stated
+    block = outcomes.project_write(note)
+    assert block["outcome"] == "completed", block
+
+
+def test_a_rating_write_on_a_stated_line_reads_completed(baseline):
+    _two_assumed_lines("file")
+    assert outcomes.project_write(_write_rating())["outcome"] == "completed"
+
+
+def test_the_marker_allowance_covers_only_the_row_written(baseline):
+    _two_assumed_lines("assumed")
+    note = _write_rating()
+    _net().lines.at["LY", "s_nom_source"] = "file"  # another line's marker moves too
+    block = outcomes.project_write(note)
+    assert (block["outcome"], block["reason"]) == ("partial", "extra_edits")
+    assert block["paths_extra"] == ["/Line/LY/s_nom_source"]

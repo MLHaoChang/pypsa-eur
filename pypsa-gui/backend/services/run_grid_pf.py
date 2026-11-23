@@ -125,6 +125,31 @@ def _frame(ev, key, index):
         return None
 
 
+def _named(names: list[str], cap: int = 5) -> str:
+    """The first few names and the true total, so a capped list never hides how many."""
+    shown = ", ".join(names[:cap])
+    return (
+        f"{shown} ({len(names)} in all)"
+        if len(names) > cap
+        else f"{shown} ({len(names)})"
+    )
+
+
+def assumed_branches(n) -> list[str]:
+    """Every line and transformer whose rating an importer assumed, as "Line <name>"."""
+    out = []
+    for cls, comp, _ in BRANCHES:
+        static = getattr(n, comp)
+        if static is None or static.empty:
+            continue
+        out += [
+            f"{cls} {name}"
+            for name in static.index
+            if assumed_rating.is_assumed(static.loc[name], "s_nom")
+        ]
+    return out
+
+
 def loading(ctx, ev) -> Any:
     """Peak apparent-power loading of every line and transformer on the
     converged snapshots: the larger apparent power at either end against the MVA
@@ -203,12 +228,12 @@ def loading(ctx, ev) -> Any:
     if unrated:
         return Missing(
             "branch_unrated",
-            f"no rating to judge {', '.join(unrated[:5])} against; none is assumed",
+            f"no rating to judge {_named(unrated)} against; none is assumed",
         )
     if not branches and assumed:
         return Missing(
             "rating_assumed",
-            f"{', '.join(assumed[:5])} carry only an assumed rating ({assumed_rating.LABEL}); "
+            f"{_named(assumed)} carry only an assumed rating ({assumed_rating.LABEL}); "
             "no stated rating to judge them against",
         )
     if not branches:
