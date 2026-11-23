@@ -24,7 +24,7 @@ import {
   ChartFrame, ChartSourceProvider, useChartSource, type ChartSource, ChartActions, ChartZero, chartFigure, LABEL_PASS, CHART_LEGEND, CHART_HEIGHT, carrierColour, directLabel, bandLabelIndices, legendName, fmtPower,
 } from './shared'
 import {
-  CSV_HEADER, csvRows, fmtMwh, periodLabel, sankeyData, share,
+  CSV_HEADER, csvRows, flowTotal, fmtMwh, periodLabel, sankeyData, share,
   type FlowNode, type FlowSankey,
 } from './energyFlows'
 
@@ -218,7 +218,7 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
 
   const win = data.window!
   const graph = sankeyData(data.rows)
-  const total = data.rows.reduce((s, r) => s + r.mwh, 0)
+  const total = flowTotal(data.rows)
   // With "all periods" chosen above, this tab still draws ONE period (its own
   // picker, the first by default): its charts' source line names that period
   // and drops the dates, which are the whole horizon's and not that period's.

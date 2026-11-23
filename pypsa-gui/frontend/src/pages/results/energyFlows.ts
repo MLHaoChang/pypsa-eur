@@ -91,6 +91,16 @@ export function sankeyData(rows: EnergyFlowRow[]): FlowSankey {
   return { nodes, links: out }
 }
 
+/** A process unit's node ("Process <name>"): what flows into it ends there, and
+ *  what it delivers starts again from it, in the product's own unit. */
+export const isProcessNode = (name: string) => name.startsWith('Process ')
+
+/** MWh that entered the site's picture: rows that restart at a process node
+ *  repeat energy already counted where it flowed in, so they are left out. */
+export function flowTotal(rows: EnergyFlowRow[]): number {
+  return rows.reduce((s, r) => (isProcessNode(r.source) ? s : s + r.mwh), 0)
+}
+
 export const CSV_HEADER = ['Source', 'Via', 'Destination', 'MWh']
 
 /** The chart's rows, in the order and with the values the server's CSV has. */
