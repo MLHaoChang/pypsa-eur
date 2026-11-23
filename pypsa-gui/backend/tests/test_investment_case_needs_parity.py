@@ -87,11 +87,18 @@ def _needs_codes() -> set[str]:
     codes = set(re.findall(r'"needs": \["([a-z_0-9]+)", \*needs\]', runner))
     codes |= set(re.findall(r'needs=\["([a-z_0-9]+)", \*needs\]', runner))
     codes |= set(re.findall(r'"needs": \["([a-z_0-9]+)"', _start_route()))
-    codes |= set(re.findall(r'return \["([a-z_0-9]+)"\]',
-                            _fn_source("services/finance/investment_case_runner.py",
-                                       "finance_needs")))
-    codes |= set(re.findall(r'return "([a-z_0-9]+)"',
-                            _fn_source("services/results/finance_case.py", "connection_need")))
+    codes |= set(
+        re.findall(
+            r'return \["([a-z_0-9]+)"\]',
+            _fn_source("services/finance/investment_case_runner.py", "finance_needs"),
+        )
+    )
+    codes |= set(
+        re.findall(
+            r'return "([a-z_0-9]+)"',
+            _fn_source("services/results/finance_case.py", "connection_need"),
+        )
+    )
     return codes
 
 
@@ -101,6 +108,12 @@ def test_every_listed_need_has_a_plain_fix():
     table = _table()
     with_fix = {c for k, codes in table.items() if k != "generic" for c in codes}
     codes = _needs_codes()
-    assert {"not_solved", "value_flows_not_configured", "value_flows_invalid",
-            "finance_inputs_missing", "finance_inputs_invalid", "tax_pack_not_found"} <= codes
+    assert {
+        "not_solved",
+        "value_flows_not_configured",
+        "value_flows_invalid",
+        "finance_inputs_missing",
+        "finance_inputs_invalid",
+        "tax_pack_not_found",
+    } <= codes
     assert codes - with_fix == set(), "a need the run panel has no words for"
