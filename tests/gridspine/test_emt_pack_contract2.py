@@ -7,6 +7,7 @@ X0/X1 3.0/2.5; R0/X0 0.1/0.2), never from the pack's own reader. The
 scalar-pair battery stays byte-identical to the frozen version-1 output.
 """
 
+import dataclasses
 import json
 import math
 from pathlib import Path
@@ -15,23 +16,29 @@ import pytest
 
 from gridspine.handoff import emt_pack
 from gridspine.handoff.emt_pack import C_NOTE, write_emt_pack
-from gridspine.handoff.test_battery import battery_json, build_battery, corner_level
+from gridspine.handoff.test_battery import (
+    battery_json,
+    build_battery,
+    cases_from_json,
+    corner_level,
+)
 from gridspine.ingest.campus import build_campus
 from gridspine.schema.contracts import ContractError
 from tests.gridspine.test_emt_pack import spec
 
 V1_FIXTURE = Path(__file__).parent / "data" / "battery" / "battery_v1.json"
 
-# Hand values. |Z1| = Un^2 / Sk; X1 = |Z1| / sqrt(1 + (R/X)^2); X0 = (X0/X1) X1; R0 = (R0/X0) X0.
-_X1_MAX = 110.0**2 / 3000.0 / math.sqrt(1.0 + 0.1**2)
-_X1_MIN = 110.0**2 / 2000.0 / math.sqrt(1.0 + 0.12**2)
+# Hand values. |Z1| = c Un^2 / Sk, c = 1.1 (c_max) on Sk-min and 1.0 (c_min above 1 kV) on Sk-max;
+# X1 = |Z1| / sqrt(1 + (R/X)^2); X0 = (X0/X1) X1; R0 = (R0/X0) X0.
+_X1_MAX = 1.0 * 110.0**2 / 3000.0 / math.sqrt(1.0 + 0.1**2)
+_X1_MIN = 1.1 * 110.0**2 / 2000.0 / math.sqrt(1.0 + 0.12**2)
 Z0_OHM = {
     "skmax": (0.1 * 3.0 * _X1_MAX, 3.0 * _X1_MAX),
     "skmin": (0.2 * 2.5 * _X1_MIN, 2.5 * _X1_MIN),
 }
 # Min case not held: the Sk-min corners take the max case's ratios on their own |Z1|:
-# |Z0| = 3.0 * 110^2 / 2000 at atan(X0/R0) = atan(10).
-_Z0_MIN_FROM_MAX = 3.0 * 110.0**2 / 2000.0
+# |Z0| = 3.0 * 1.1 * 110^2 / 2000 at atan(X0/R0) = atan(10).
+_Z0_MIN_FROM_MAX = 3.0 * 1.1 * 110.0**2 / 2000.0
 Z0_OHM_MIN_ASSUMED = (
     _Z0_MIN_FROM_MAX / math.sqrt(101.0),
     _Z0_MIN_FROM_MAX * 10.0 / math.sqrt(101.0),
@@ -155,7 +162,7 @@ def test_every_thevenin_row_still_states_the_c_note(held):
     p, _ = held
     rows = json.loads((p.path / "thevenin_set.json").read_text())["sources"]
     assert rows and all(r["note"] == C_NOTE for r in rows)
-    assert "10 % higher" in C_NOTE
+    assert "c_max on Sk-min, c_min on Sk-max" in C_NOTE
     assert any(C_NOTE in a for a in p.manifest["assumptions"])
 
 
@@ -198,9 +205,22 @@ def test_readme_without_a_battery_says_why(tmp_path):
 # --- build_battery: per-corner zero sequence --------------------------------
 
 
-def test_scalar_pair_battery_bytes_are_unchanged():
+def test_scalar_pair_battery_bytes_are_unchanged_but_for_c():
+    # GC-14: the pre-c fixture reads back with no c and re-serialises byte-equal (never
+    # re-labelled); a new battery differs from it only by each corner's c.
+    old = cases_from_json(V1_FIXTURE.read_text())
+    assert {c.grid.c for c in old} == {None}
+    assert battery_json(old) == V1_FIXTURE.read_text()
     battery = build_battery(1000, 3000, 3, 10, z0_over_z1=1.5, x0_over_r0=4.0)
-    assert battery_json(battery) == V1_FIXTURE.read_text()
+    assert (
+        battery_json(
+            [
+                dataclasses.replace(c, grid=dataclasses.replace(c.grid, c=None))
+                for c in battery
+            ]
+        )
+        == V1_FIXTURE.read_text()
+    )
 
 
 def test_equal_per_corner_mapping_equals_the_scalar_pair():

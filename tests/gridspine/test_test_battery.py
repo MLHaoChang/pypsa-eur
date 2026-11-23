@@ -8,11 +8,14 @@ test and not by a neighbour's.
 """
 
 import cmath
+import dataclasses
+import json
 import math
 
 import pytest
 
 from gridspine.handoff.test_battery import (
+    C_MAX,
     CHANNELS,
     CONTRACT_VERSION,
     KIND_PARAMS,
@@ -21,6 +24,7 @@ from gridspine.handoff.test_battery import (
     battery_frame,
     battery_json,
     build_battery,
+    c_min,
     cases_from_frame,
     cases_from_json,
     fault_impedance_ohm,
@@ -601,6 +605,7 @@ def test_json_golden_case_text():
     "i_poc_pu"
    ],
    "grid": {
+    "c": 1.1,
     "label": "skmin_xrmin",
     "sk_mva": 1000.0,
     "x0_over_r0": 4.0,
@@ -765,3 +770,79 @@ def test_thevenin_impedances_without_zero_sequence():
     z1, z0 = thevenin_impedances_ohm(Thevenin("g", 1000.0, 10.0), 110.0)
     assert z0 is None
     assert z1 == pytest.approx(complex(1.2039950, 12.039950), rel=1e-7)
+
+
+# --- GC-14: IEC 60909 voltage factor c, conservative bracket ----------------
+
+
+def test_bracket_pins_c_max_on_sk_min_and_c_min_on_sk_max():
+    cases = _bb(1000, 3000, 3, 10)
+    by_level = {}
+    for c in cases:
+        by_level.setdefault(c.grid.label.split("_")[0], set()).add(c.grid.c)
+    assert by_level == {"skmin": {1.1}, "skmax": {1.0}}
+    assert C_MAX == 1.1
+
+
+def test_c_scales_the_source_and_fault_impedances_by_hand():
+    cases = {c.case_id: c for c in _bb(1000, 3000, 3, 10)}
+    # Sk-min corner, X/R 3, c_max: |Z1| = 1.1 * 110^2 / 1000 = 13.31 ohm (10 % above c-less 12.1)
+    weak = cases["fault_3ph_skmin_xrmin_v000"].grid
+    z1, z0 = thevenin_impedances_ohm(weak, 110.0)
+    assert abs(z1) == pytest.approx(13.31, rel=1e-12)
+    assert abs(z0) == pytest.approx(1.5 * 13.31, rel=1e-12)
+    # Sk-max corner at 110 kV, c_min 1.0: |Z1| = 110^2 / 3000
+    strong = cases["fault_3ph_skmax_xrmax_v000"].grid
+    assert abs(thevenin_impedances_ohm(strong, 110.0)[0]) == pytest.approx(
+        12100 / 3000, rel=1e-12
+    )
+    # the fault impedance follows the corrected source: Z_f = Z_th v / (1 - v)
+    f = next(
+        c
+        for c in cases.values()
+        if c.case_id.startswith("fault_3ph_skmin_xrmin_v")
+        and c.params["v_retained_pu"] > 0
+    )
+    v = f.params["v_retained_pu"]
+    assert abs(fault_impedance_ohm(f, 110.0)) == pytest.approx(
+        13.31 * v / (1 - v), rel=1e-12
+    )
+
+
+def test_c_min_is_095_at_or_below_1_kv():
+    assert (c_min(), c_min(110.0), c_min(1.0), c_min(0.4)) == (1.0, 1.0, 0.95, 0.95)
+    lv = _bb(1, 3, 3, 10, vn_kv=0.4)
+    assert {c.grid.c for c in lv if "_skmax_" in c.case_id} == {0.95}
+    assert {c.grid.c for c in lv if "_skmin_" in c.case_id} == {1.1}
+    with pytest.raises(ContractError, match="vn_kv"):
+        c_min(0.0)
+
+
+def test_c_none_is_no_c_and_is_never_relabelled():
+    # A source without c (a battery written before GC-14) keeps |Z1| = Un^2 / Sk and reads back without c.
+    assert abs(
+        thevenin_impedances_ohm(Thevenin("g", 1000.0, 10.0), 110.0)[0]
+    ) == pytest.approx(12.1)
+    old = [
+        dataclasses.replace(c, grid=dataclasses.replace(c.grid, c=None))
+        for c in _bb(1000, 3000, 3, 10)
+    ]
+    text = battery_json(old)
+    assert '"c"' not in text
+    assert {c.grid.c for c in cases_from_json(text)} == {None}
+    frame = battery_frame(old).drop(columns=["c"])  # a frame from before the column
+    assert {c.grid.c for c in cases_from_frame(frame)} == {None}
+
+
+def test_frame_and_json_name_each_cases_c():
+    cases = _bb(1000, 3000, 3, 10)
+    frame = battery_frame(cases)
+    assert list(frame["c"]) == [c.grid.c for c in cases]
+    doc = json.loads(battery_json(cases))
+    assert [c["grid"]["c"] for c in doc["cases"]] == [c.grid.c for c in cases]
+
+
+@pytest.mark.parametrize("bad", [*BAD_NUMBERS, 0.9, 1.2, True])
+def test_c_outside_iec_range_or_not_a_number_refused(bad):
+    with pytest.raises(ContractError, match="thevenin g: c="):
+        Thevenin("g", 1000.0, 10.0, c=bad)

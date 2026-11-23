@@ -91,9 +91,11 @@ def test_x_over_r_is_one_over_rx_paired_with_its_own_case(tmp_path):
     s = by_label(p)
     assert (s["max"]["sk_mva"], s["max"]["x_over_r"]) == (3000.0, pytest.approx(4.0))
     assert (s["min"]["sk_mva"], s["min"]["x_over_r"]) == (2000.0, pytest.approx(2.0))
-    # min case: |Z| = 121/20 = 6.05 ohm at X/R 2: R = 6.05/sqrt(5) = 2.705642, X = 2 R = 5.411285
-    assert s["min"]["r_ohm"] == pytest.approx(2.705642253, abs=1e-6)
-    assert s["min"]["x_ohm"] == pytest.approx(5.411284506, abs=1e-6)
+    # min case, c_max 1.1: |Z| = 1.1 * 121/20 = 6.655 ohm at X/R 2: R = 6.655/sqrt(5) = 2.976206,
+    # X = 2 R = 5.952413
+    assert s["min"]["c"] == 1.1
+    assert s["min"]["r_ohm"] == pytest.approx(2.976206478, abs=1e-6)
+    assert s["min"]["x_ohm"] == pytest.approx(5.952412956, abs=1e-6)
     # battery corners span the smaller and larger X/R
     assert s["skmin_xrmin"]["x_over_r"] == pytest.approx(2.0)
     assert s["skmax_xrmax"]["x_over_r"] == pytest.approx(4.0)
@@ -138,8 +140,19 @@ def test_pack_errors_are_contract_errors_and_typed():
 
 def test_every_row_states_the_c_factor_and_the_manifest_lists_it(tmp_path):
     p = pack(tmp_path)
-    assert by_label(p)["max"]["note"] == C_NOTE
-    assert "IEC 60909 c not applied" in C_NOTE and "10 % higher" in C_NOTE
+    rows = by_label(p)
+    assert rows["max"]["note"] == C_NOTE
+    assert "c_max on Sk-min, c_min on Sk-max" in C_NOTE
+    # GC-14: each row names its c; c_min is 1.0 at the 110 kV PCC; normal is no IEC 60909 case
+    assert {k: r["c"] for k, r in rows.items()} == {
+        "max": 1.0,
+        "min": 1.1,
+        **({"normal": 1.0} if "normal" in rows else {}),
+        "skmin_xrmin": 1.1,
+        "skmin_xrmax": 1.1,
+        "skmax_xrmin": 1.0,
+        "skmax_xrmax": 1.0,
+    }
     csv_lines = (p.path / "thevenin_set.csv").read_text().splitlines()[1:]
     assert csv_lines and all(C_NOTE in ln for ln in csv_lines)
     assert any(C_NOTE in a for a in p.manifest["assumptions"])

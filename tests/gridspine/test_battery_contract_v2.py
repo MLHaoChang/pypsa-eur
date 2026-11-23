@@ -10,6 +10,7 @@ tuples, and a hand-written version-2 battery.json. A writer/reader round trip
 is never the only check. Each refusal test asserts its own guard's reason.
 """
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -145,8 +146,15 @@ def test_v1_pack_written_before_v2_loads_and_reserialises_byte_equal():
     assert battery_json(cases, "1") == text
 
 
-def test_default_writer_still_writes_the_v1_bytes():
-    assert battery_json(build_battery(1000, 3000, 3, 10, **Z0)) == _v1_text()
+def test_default_writer_still_writes_the_v1_bytes_but_for_c():
+    # GC-14 added each corner's c (absent when None); without it the bytes are the v1 fixture's.
+    battery = build_battery(1000, 3000, 3, 10, **Z0)
+    assert {c.grid.c for c in battery} == {1.0, 1.1}
+    no_c = [
+        dataclasses.replace(c, grid=dataclasses.replace(c.grid, c=None))
+        for c in battery
+    ]
+    assert battery_json(no_c) == _v1_text()
 
 
 # --- version 2 -----------------------------------------------------------

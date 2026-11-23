@@ -22,6 +22,15 @@ for a single-phase fault also carries its zero sequence: ``z0_over_z1``
 (|Z0| / |Z1|) and ``x0_over_r0``. The source voltage is 1.0 pu before the
 event.
 
+**Voltage factor c.** The source impedance carries the IEC 60909 voltage
+factor c, ``|Z1| = c * Un**2 / sk_mva`` (``Thevenin.c``). The battery uses a
+conservative bracket (GK A2 ruling GC-02 V1), not the IEC 60909 pairing:
+:data:`C_MAX` on the Sk-min corners (weak grid, larger Z) and c_min
+(:func:`c_min`, 1.0 above 1 kV, 0.95 at or below) on the Sk-max corners
+(strong grid, smaller Z). Each case names its c in the frame and the JSON. A
+source with ``c=None`` has no c applied (``c = 1``): a battery written before
+c existed reads back so and is never re-labelled with a c it was not made with.
+
 **Fault definition.** ``v_retained_pu`` is the retained voltage at the PoC
 with the plant DISCONNECTED (the open-circuit voltage the fault leaves), so
 it fixes the fault impedance independently of the plant's response and every
@@ -99,6 +108,22 @@ from types import MappingProxyType
 import pandas as pd
 
 from gridspine.schema.contracts import ContractError
+
+#: IEC 60909-0 Table 1 voltage factor c_max (and the range a source's c may take).
+C_MAX = 1.1
+_C_RANGE = (0.95, 1.1)
+#: How the battery picks c per corner (module docstring, "Voltage factor c").
+C_BRACKET_NOTE = "IEC 60909 c bracket: c_max on Sk-min, c_min on Sk-max (conservative, GK A2 GC-02 V1)"
+
+
+def c_min(vn_kv=None) -> float:
+    """IEC 60909-0 Table 1 c_min: 0.95 at or below 1 kV, else 1.0; ``None`` means above 1 kV."""
+    if vn_kv is None:
+        return 1.0
+    if not _finite(vn_kv) or vn_kv <= 0:
+        raise ContractError(f"vn_kv={vn_kv!r} must be a finite number > 0")
+    return 1.0 if vn_kv > 1.0 else 0.95
+
 
 #: The version a writer uses unless it passes another (see "Contract versions").
 CONTRACT_VERSION = "1"
@@ -229,6 +254,7 @@ class Thevenin:
     x_over_r: float
     z0_over_z1: float | None = None
     x0_over_r0: float | None = None
+    c: float | None = None
 
     def __post_init__(self):
         if not isinstance(self.label, str) or not _ID.fullmatch(self.label):
@@ -248,6 +274,16 @@ class Thevenin:
             if v <= 0:
                 raise ContractError(
                     f"thevenin {self.label}: {name}={float(v)} must be > 0"
+                )
+        if self.c is not None:
+            if not _finite(self.c):
+                raise ContractError(
+                    f"thevenin {self.label}: c={self.c!r} is not a finite number"
+                )
+            object.__setattr__(self, "c", float(self.c))
+            if not _C_RANGE[0] <= self.c <= _C_RANGE[1]:
+                raise ContractError(
+                    f"thevenin {self.label}: c={self.c} is outside IEC 60909's {list(_C_RANGE)}"
                 )
 
     @property
@@ -371,12 +407,14 @@ def thevenin_impedances_ohm(grid: Thevenin, vn_kv: float) -> tuple:
     """
     ``(Z1, Z0)`` of the source in ohms at the nominal PoC voltage ``vn_kv``.
 
-    ``|Z1| = vn_kv**2 / sk_mva`` at ``atan(x_over_r)``; ``Z0`` is ``None``
-    for a source without zero-sequence data.
+    ``|Z1| = c * vn_kv**2 / sk_mva`` at ``atan(x_over_r)``, ``c = 1`` when
+    ``grid.c`` is ``None`` (module docstring, "Voltage factor c"); ``Z0`` is
+    ``None`` for a source without zero-sequence data.
     """
     if not _finite(vn_kv) or vn_kv <= 0:
         raise ContractError(f"vn_kv={vn_kv!r} must be a finite number > 0")
-    z1 = cmath.rect(vn_kv**2 / grid.sk_mva, math.atan(grid.x_over_r))
+    c = 1.0 if grid.c is None else grid.c
+    z1 = cmath.rect(c * vn_kv**2 / grid.sk_mva, math.atan(grid.x_over_r))
     if not grid.has_zero_sequence:
         return z1, None
     return z1, cmath.rect(abs(z1) * grid.z0_over_z1, math.atan(grid.x0_over_r0))
@@ -496,6 +534,7 @@ def build_battery(
     x0_over_r0,
     overrides=None,
     contract_version=CONTRACT_VERSION,
+    vn_kv=None,
 ) -> tuple:
     """
     The default DMAT battery for a PoC with the given Sk and X/R range.
@@ -515,7 +554,11 @@ def build_battery(
     ``contract_version`` picks the channel contract; under ``"2"`` every case
     also carries ``connected``. Pass it only from a pack whose script or
     schedule records every channel of that version.
+
+    ``vn_kv`` is the nominal PoC voltage, used only for c_min (module
+    docstring, "Voltage factor c"); ``None`` means a PoC above 1 kV.
     """
+    c_by_level = {"skmin": C_MAX, "skmax": c_min(vn_kv)}
     status = (CONNECTED,) if CONNECTED in contract_channels(contract_version) else ()
     z0 = {
         level: (
@@ -540,7 +583,9 @@ def build_battery(
     if xr_min > xr_max:
         raise ContractError(f"xr_min={xr_min} exceeds xr_max={xr_max}")
     grids = {
-        label: Thevenin(label, sk, xr, *z0[corner_level(label)])
+        label: Thevenin(
+            label, sk, xr, *z0[corner_level(label)], c=c_by_level[corner_level(label)]
+        )
         for label, sk, xr in (
             ("skmin_xrmin", sk_min_mva, xr_min),
             ("skmin_xrmax", sk_min_mva, xr_max),
@@ -651,6 +696,7 @@ _FRAME_HEAD = [
     "x_over_r",
     "z0_over_z1",
     "x0_over_r0",
+    "c",
     "t_event_s",
     "t_end_s",
 ]
@@ -674,6 +720,7 @@ def battery_frame(cases) -> pd.DataFrame:
             "x_over_r": c.grid.x_over_r,
             "z0_over_z1": _nan_if_none(c.grid.z0_over_z1),
             "x0_over_r0": _nan_if_none(c.grid.x0_over_r0),
+            "c": _nan_if_none(c.grid.c),
             "t_event_s": c.t_event_s,
             "t_end_s": c.t_end_s,
             "channels": CHANNEL_SEP.join(c.channels),
@@ -689,8 +736,11 @@ def _none_if_nan(v):
 
 
 def cases_from_frame(frame: pd.DataFrame) -> tuple:
-    """Inverse of :func:`battery_frame`. NaN means "not taken": a taken value is never NaN."""
-    missing = [c for c in FRAME_COLUMNS if c not in frame.columns]
+    """
+    Inverse of :func:`battery_frame`. NaN means "not taken": a taken value is never NaN.
+    A frame without the ``c`` column predates it: its sources take ``c=None``.
+    """
+    missing = [c for c in FRAME_COLUMNS if c not in frame.columns and c != "c"]
     if missing:
         raise ContractError(f"battery frame lacks column(s) {missing}")
     cases = []
@@ -702,6 +752,7 @@ def cases_from_frame(frame: pd.DataFrame) -> tuple:
             float(r["x_over_r"]),
             _none_if_nan(r["z0_over_z1"]),
             _none_if_nan(r["x0_over_r0"]),
+            _none_if_nan(r.get("c", math.nan)),
         )
         cases.append(
             Case(
@@ -723,6 +774,21 @@ def _contract_dict(version) -> dict:
     return {name: vars(CHANNELS[name]) for name in contract_channels(version)}
 
 
+def _grid_dict(g: Thevenin) -> dict:
+    out = {
+        "label": g.label,
+        "sk_mva": g.sk_mva,
+        "x_over_r": g.x_over_r,
+        "z0_over_z1": g.z0_over_z1,
+        "x0_over_r0": g.x0_over_r0,
+    }
+    if (
+        g.c is not None
+    ):  # absent, not null: a battery without c re-serialises byte-equal
+        out["c"] = g.c
+    return out
+
+
 def battery_json(cases, contract_version=CONTRACT_VERSION) -> str:
     """Deterministic manifest form at ``contract_version``: same cases give byte-equal text."""
     cases = validate_battery(cases, contract_version)
@@ -734,13 +800,7 @@ def battery_json(cases, contract_version=CONTRACT_VERSION) -> str:
                 "case_id": c.case_id,
                 "kind": c.kind,
                 "trgc": c.trgc,
-                "grid": {
-                    "label": c.grid.label,
-                    "sk_mva": c.grid.sk_mva,
-                    "x_over_r": c.grid.x_over_r,
-                    "z0_over_z1": c.grid.z0_over_z1,
-                    "x0_over_r0": c.grid.x0_over_r0,
-                },
+                "grid": _grid_dict(c.grid),
                 "t_event_s": c.t_event_s,
                 "t_end_s": c.t_end_s,
                 "channels": list(c.channels),
@@ -781,6 +841,7 @@ def cases_from_json(text: str) -> tuple:
                         c["grid"]["x_over_r"],
                         c["grid"].get("z0_over_z1"),
                         c["grid"].get("x0_over_r0"),
+                        c["grid"].get("c"),
                     ),
                     c["t_event_s"],
                     c["t_end_s"],

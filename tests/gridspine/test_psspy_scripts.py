@@ -821,7 +821,7 @@ DYR = os.path.join(HERE, 'pack.dyr')
 OUT = os.path.join(HERE, 'flat_skmin_xrmin.out')
 POC_BUS, POC_KV = 101, 132.0
 GRID_BUS, GRID_ID, GRID_MBASE = 900, 'G2', 250.0
-Z1_PU = (0.39999999999999997, 0.3)  # Thevenin Z1 on GRID_MBASE
+Z1_PU = (0.44000000000000006, 0.33)  # Thevenin Z1 on GRID_MBASE
 T_EVENT, T_END = 1.0, 10.0
 F0_HZ, PLANT_MBASE = 50.0, None
 HEADER = ['t_s', 'v_poc_pu', 'status']
@@ -851,7 +851,7 @@ if ierr or abs(mbase - GRID_MBASE) > 1e-6:
     raise SystemExit('grid machine MBASE differs from the generated base')
 _i, _f = psspy.getdefaultint(), psspy.getdefaultreal()
 psspy.machine_chng_2(GRID_BUS, GRID_ID, [_i] * 6, [_f] * 7 + list(Z1_PU) + [_f] * 8)
-Z0_PU = (0.6, 0.44999999999999996)  # Thevenin Z0 on GRID_MBASE
+Z0_PU = (0.6600000000000001, 0.49500000000000005)  # Thevenin Z0 on GRID_MBASE
 psspy.seq_machine_data_3(GRID_BUS, GRID_ID, 0, list(Z1_PU) + list(Z1_PU) + list(Z0_PU) + [_f, _f])
 psspy.fnsl([0, 0, 0, 0, 0, 0, 0, 1])
 if psspy.solved() != 0:
@@ -878,6 +878,7 @@ with open(os.path.join(HERE, 'flat_skmin_xrmin.csv'), 'w') as fh:
 
 
 def test_golden_script_bytes(tmp_path):
+    # GC-14: the Sk-min corner carries c_max = 1.1, so Z1 and Z0 are 1.1 x the c-less (0.4, 0.3), (0.6, 0.45)
     cases = build_battery(500.0, 500.0, 0.75, 0.75, z0_over_z1=1.5, x0_over_r0=0.75)
     flat = next(c for c in cases if c.case_id == CID)
     kw = {
