@@ -408,6 +408,15 @@ def test_the_readme_states_the_transformer_impedance_convention(tmp_path):
     assert "Packs written before this fix carry an impedance too high" in PP.TRAFO_NOTE
 
 
+def test_the_readme_and_manifest_state_the_c_bracket(tmp_path):
+    # GC-14: the PSS/E pack discloses the c its psspy Thevenin source carries.
+    _hc, m, out = _write(tmp_path, plant=PLANT)
+    readme = (out / "README.md").read_text()
+    assert "## Thevenin source voltage factor c\n\n" + PP.C_NOTE in readme
+    assert "c_max = 1.1 on the Sk-min corners" in PP.C_NOTE
+    assert any("c_max on Sk-min, c_min on Sk-max" in a for a in m["battery_assumed"])
+
+
 # --------------------------------------------------------------------------
 # RAW machines with no .dyr record, and the missing plant controller
 
