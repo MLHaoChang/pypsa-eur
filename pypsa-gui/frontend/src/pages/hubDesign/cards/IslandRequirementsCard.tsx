@@ -31,6 +31,7 @@ import {
   type IslandRequirementNumber,
 } from '../../islandWords'
 import { withReturnFrom } from '../../../layout/flowNavigation'
+import { Btn } from '../../../components/PageKit'
 import type { FlowTarget } from '../../../api/flow'
 
 type ShareKey = 'min_renewable_fraction' | keyof typeof RESERVE_LABELS
@@ -150,8 +151,9 @@ function SaveError({ error, onReload }: { error: unknown; onReload: () => void }
   if (!error) return null
   if (isIslandConfigChanged(error)) {
     return (
-      <p role="alert" data-testid="island-stale" className="text-[12px] text-danger">
-        {STALE}{' '}<button type="button" className={BTN} onClick={onReload}>Reload</button>
+      <p role="alert" data-testid="island-stale" className="text-[12px] text-danger flex gap-2 items-center">
+        {STALE}
+        <Btn onClick={onReload}>Reload</Btn>
       </p>
     )
   }
