@@ -131,7 +131,10 @@ def test_weak_override_makes_the_mvp_b_fixture_feasible(client, install_network)
     # limit; 50 MW keeps the default ENS target infeasible.
     n = _weak_net()
     n.links.loc["import_poc", ["p_nom", "p_nom_max"]] = 50.0
-    _setup(client, install_network, n, voll=500.0)
+    # template-e2e 21: 500 runs cannot resolve the 3 h/yr goal on this
+    # network, so the start check refuses them; the cap clears it and the
+    # default study still fails at the ENS solve, before the MC.
+    _setup(client, install_network, n, voll=500.0, mc_draws=2000)
     r = client.post(STUDY_URL, json={"archetype": "weak_flexible"})
     assert r.status_code == 200, r.text
     default = _poll(client)
