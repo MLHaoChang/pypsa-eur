@@ -234,7 +234,8 @@ def calculate(raw, scope):
         if raw["valid_solve"] else {key: None for key in raw["branches"]}
     )
     available = {}
-    if all(v is not None for v in values.values()):
+    complete = all(v is not None for v in values.values())
+    if complete:
         if scope["profile"] == NETWORK_PROFILE:
             available = {
                 "max_branch_utilisation": max(v["peak_branch_utilisation"] for v in values.values()),
@@ -249,6 +250,11 @@ def calculate(raw, scope):
                 available.pop("hours_above_rating", None)
     definitions = NETWORK_METRICS if scope["profile"] == NETWORK_PROFILE else METRICS
     facts, slots = [], []
+    flags = [bool(b.get("rating_assumed")) for b in raw["branches"].values()]
+    # what an assumed rating takes away: a branch's hours; a network count only when no branch was judged
+    left_out = {"hours_above_rating"} if any(flags) else set()
+    if flags and all(flags):
+        left_out.add("branches_above_rating")
     for metric in requested_metrics(scope):
         value = available.get(metric)
         answered = metric in definitions and value is not None and math.isfinite(value)
@@ -270,10 +276,7 @@ def calculate(raw, scope):
         else:
             slot["reason"] = (
                 "unverified_solve" if not raw["valid_solve"]
-                else "rating_assumed" if metric in ("hours_above_rating", "branches_above_rating")
-                and any(b.get("rating_assumed") for b in raw["branches"].values())
-                and (metric == "hours_above_rating" or all(
-                    b.get("rating_assumed") for b in raw["branches"].values()))
+                else "rating_assumed" if metric in left_out and metric in definitions and complete
                 else "invalid_or_missing_branch_data" if metric in definitions
                 else "unsupported_metric"
             )

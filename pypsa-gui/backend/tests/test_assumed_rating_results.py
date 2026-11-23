@@ -563,3 +563,71 @@ def test_what_if_loading_reads_the_link_p_nom_marker():
         e for e in _compute_loading_summary(n, [], False, True).lines if e.name == "lk"
     )
     assert row.rating_assumed is False and row.binding_hours.total > 0
+
+
+def _slots(raw, scope, monkeypatch):
+    from harness import calculations
+
+    monkeypatch.setattr(calculations, "requested_metrics", lambda s: s["metrics"])
+    return {
+        s["metric"]: s.get("reason")
+        for s in branch_calculations.calculate(raw, scope)[1]
+    }
+
+
+def test_a_stated_branch_under_its_rating_is_not_counted_beside_an_assumed_one(
+    monkeypatch,
+):
+    raw = _raw(assumed_second=True)
+    raw["branches"]["L1"]["p0"] = [5.0] * 3
+    raw["branches"]["L1"]["p1"] = [-5.0] * 3
+    facts, _ = branch_calculations.calculate(raw, _scope())
+    assert {f["metric"]: f["value"] for f in facts}[
+        "branches_above_rating"
+    ] == 0  # one stated, judged
+    raw["branches"]["L1"]["p0"] = [15.0] * 3
+    raw["branches"]["L1"]["p1"] = [-15.0] * 3
+    raw["branches"]["L1"]["rating"] = 15.0  # exactly at its rating: not above
+    facts, _ = branch_calculations.calculate(raw, _scope())
+    assert {f["metric"]: f["value"] for f in facts}["branches_above_rating"] == 0
+
+
+def test_the_unavailable_reason_names_the_assumed_rating_only_when_that_is_the_cause(
+    monkeypatch,
+):
+    two = {**_scope(), "metrics": ["hours_above_rating", "branches_above_rating"]}
+    # network profile: hours is not a network metric, so it stays unsupported; some assumed: the count answers
+    some = _raw(assumed_second=True)
+    assert _slots(some, two, monkeypatch) == {
+        "hours_above_rating": "unsupported_metric",
+        "branches_above_rating": None,
+    }
+    # every branch assumed: the count is the one left out
+    every = _raw(assumed_second=True)
+    every["branches"]["L1"]["rating_assumed"] = True
+    assert _slots(every, two, monkeypatch) == {
+        "hours_above_rating": "unsupported_metric",
+        "branches_above_rating": "rating_assumed",
+    }
+    # missing data wins over the marker
+    broken = _raw(assumed_second=True)
+    broken["branches"]["L1"]["p0"][0] = None
+    assert (
+        _slots(broken, two, monkeypatch)["branches_above_rating"]
+        == "invalid_or_missing_branch_data"
+    )
+    # single branch: its count is not a branch metric; a stated branch keeps its hours
+    single = {
+        **_scope(branch_calculations.PROFILE, "L2"),
+        "metrics": ["hours_above_rating", "branches_above_rating"],
+    }
+    raw = _raw(assumed_second=True)
+    raw["profile"], raw["entity_id"], raw["branches"] = (
+        branch_calculations.PROFILE,
+        "L2",
+        {"L2": raw["branches"]["L2"]},
+    )
+    assert _slots(raw, single, monkeypatch) == {
+        "hours_above_rating": "rating_assumed",
+        "branches_above_rating": "unsupported_metric",
+    }
