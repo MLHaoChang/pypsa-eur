@@ -1,7 +1,7 @@
 // The finance form and report mappings (IC P4 WP4.7a/b), without a DOM.
 import { describe, expect, it } from 'vitest'
 import {
-  assetLabel, projectFlagWords, PROJECT_FLAG_KEYS, statedFlags,
+  assetLabel, projectFlagLines, projectFlagWords, PROJECT_FLAG_KEYS, statedFlags, UNDESCRIBED_FLAG, UNDESCRIBED_REASON,
   baselineCaveats, basisStatement, cashflowPivot, cashTotals, counterfactualStatement, errorKey, errorsFor, established, financeErrors, fmtCell,
   fmtHeadline, headlines, numOrNull, parseRateOrList, perYearLists, progressFraction, progressText,
   rateOrListText, studyProgress, studyStale, toTable, waccGate, withKey,
@@ -98,13 +98,14 @@ describe('the report', () => {
     expect(rows.find(h => h.id === 'lcos')!.value).toBe(136.39)
     const real = rows.find(h => h.id === 'lcos_real')!
     expect(real.value).toBeNull()
-    expect(real.note).toBe('wacc_nominal_missing')
+    expect(real.note).toBe('no nominal discount rate (WACC) is stated')
+    expect(real.noteCode).toBe('wacc_nominal_missing')
     const noInfl = headlines({ sections: { project: { status: 'ok', payload: {
       lcos_nominal_per_mwh: null, lcos_real_per_mwh: null,
       lcos: { assets: { bess: {} }, reasons: ['no_discharge:bess', 'real_not_established:inflation_missing'] } } } } })
     expect(noInfl.find(h => h.id === 'lcos')!.note).toBe('bess does not discharge in the solved dispatch')
     expect(noInfl.find(h => h.id === 'lcos_real')!.note)
-      .toBe('bess does not discharge in the solved dispatch; real_not_established:inflation_missing')
+      .toBe('bess does not discharge in the solved dispatch; the real figure needs an inflation rate')
   })
 
   it('states the price basis in words, or null', () => {
@@ -319,7 +320,7 @@ describe('campus wording', () => {
     ])
     expect(out).toEqual([
       "bess, power: its life ends inside the case's horizon and no replacement is planned.",
-      'Other check: unknown_future_flag:12.5',
+      UNDESCRIBED_FLAG,
     ])
   })
 })
@@ -338,11 +339,11 @@ describe('project finance flags in plain words', () => {
       'bess charges from 4.5 MWh of surplus generation, valued at the export price.',
     ])
   })
-  it('shows unknown flags as an Other check line and only removes caveats already explained beside the figures', () => {
+  it('shows unknown flags as an undescribed line and only removes caveats already explained beside the figures', () => {
     const caveats = ['counterfactual_exceeds_connection', 'counterfactual_shed_at_voll:5',
       'counterfactual_buys:H2', 'co2_price_period:2030:2025:50', 'counterfactual_exceeds_supply']
     expect(projectFlagWords([...caveats, 'new_flag:keep:this', 'part_not_replaced:bess:power']))
-      .toEqual(['Other check: new_flag:keep:this', "bess, power: its life ends inside the case's horizon and no replacement is planned."])
+      .toEqual([UNDESCRIBED_FLAG, "bess, power: its life ends inside the case's horizon and no replacement is planned."])
     expect(baselineCaveats({ sections: { project: { payload: { flags: caveats } } } } as never)).toHaveLength(5)
   })
 })
@@ -406,10 +407,10 @@ describe('the data-centre case flags in plain words (IBA-02)', () => {
     expect(statedFlags(siteToday)).toEqual(new Set(['counterfactual_basis:site_today']))
     expect(projectFlagWords(['counterfactual_basis:site_today'], statedFlags(siteToday))).toEqual([])
     // No stated basis: the flag stays, as a line.
-    expect(projectFlagWords(['counterfactual_basis:site_today'])).toEqual(['Other check: counterfactual_basis:site_today'])
+    expect(projectFlagWords(['counterfactual_basis:site_today'])).toEqual([UNDESCRIBED_FLAG])
     // A neighbouring value is never skipped.
     expect(projectFlagWords(['counterfactual_basis:analytic'], statedFlags(siteToday)))
-      .toEqual(['Other check: counterfactual_basis:analytic'])
+      .toEqual([UNDESCRIBED_FLAG])
     const analytic = { sections: { project: { status: 'ok', payload: {
       counterfactual: { basis: 'compared with an analytic baseline', counterfactual_basis: 'analytic' } } } } } as never
     expect(statedFlags(analytic)).toEqual(new Set())
@@ -418,5 +419,42 @@ describe('the data-centre case flags in plain words (IBA-02)', () => {
     expect(new Set(projectFlagKeys.worded)).toEqual(PROJECT_FLAG_KEYS)
     expect(projectFlagKeys.worded).toHaveLength(PROJECT_FLAG_KEYS.size)
     expect(projectFlagKeys.stated).toEqual(['counterfactual_basis:site_today'])
+  })
+})
+
+describe('a code with no words stays out of the text, in the title (UX rule c, GK G2)', () => {
+  it('keeps an undescribed flag as a line whose title carries its code', () => {
+    expect(projectFlagLines(['new_flag:keep:this', 'template_annualised:52', 'lcos_not_established:brand_new:bess'])).toEqual([
+      { text: UNDESCRIBED_FLAG, code: 'new_flag:keep:this' },
+      { text: 'The sampled operating cash is scaled to a full year by a factor of 52.', code: null },
+      { text: `Levelised storage cost is not established: ${UNDESCRIBED_REASON}.`, code: 'lcos_not_established:brand_new:bess' },
+    ])
+    for (const l of projectFlagLines(['new_flag:keep:this'])) expect(l.text).not.toMatch(SNAKE)
+  })
+  it('words every reason lcos.py gives, and an unknown one plainly with its code in the title', () => {
+    const reasons = ['wacc_nominal_missing', 'degradation_missing:bess_a', 'charging_cost_not_established:bess_a',
+      'escalation_missing:fixed_om', 'om_not_established:fom_bess', 'capex_not_established', 'overnight_cost_missing:bess_a',
+      'terminal_needs_part_lifetimes:bess_a', 'terminal_part_unknown:bess_a:power_unit', 'terminal_needs_lp_rate',
+      'no_discharge:bess_a', 'real_not_established:inflation_missing']
+    const row = headlines({ sections: { project: { status: 'ok', payload: {
+      lcos_nominal_per_mwh: null, lcos_real_per_mwh: null, lcos: { assets: { bess_a: {} }, reasons } } } } })
+      .find(h => h.id === 'lcos_real')!
+    expect(row.note!.split('; ')).toEqual([
+      'no nominal discount rate (WACC) is stated', 'no degradation rate is stated for bess a',
+      'the charging cost of bess a is not established', 'no escalation rate is stated for fixed om costs',
+      'the operating cost fom bess is not established', 'the investment cost is not established',
+      'no investment cost is stated for bess a', "the value of bess a at the end of the case needs its parts' lifetimes",
+      'the lifetime of bess a, power unit, is not known',
+      "the value at the end of the case needs the optimisation's discount rate",
+      'bess a does not discharge in the solved dispatch', 'the real figure needs an inflation rate',
+    ])
+    expect(row.note).not.toMatch(SNAKE)
+    expect(row.noteCode).toBe(reasons.join('; '))
+    const odd = headlines({ sections: { project: { status: 'ok', payload: {
+      lcos_nominal_per_mwh: null, lcos_real_per_mwh: null,
+      lcos: { assets: { b: {} }, reasons: ['brand_new_reason:b', 'real_not_established:cpi_gone'] } } } } })
+      .find(h => h.id === 'lcos_real')!
+    expect(odd.note).toBe(`${UNDESCRIBED_REASON}; ${UNDESCRIBED_REASON}`)
+    expect(odd.noteCode).toBe('brand_new_reason:b; real_not_established:cpi_gone')
   })
 })

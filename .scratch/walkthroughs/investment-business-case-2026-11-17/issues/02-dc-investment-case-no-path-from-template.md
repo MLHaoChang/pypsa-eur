@@ -64,3 +64,9 @@ On any template in the group, either the investment case runs from the template'
   - G5: the smoke, run on 443ec313's financeModel.ts and InvestmentCaseView.tsx (same build otherwise), failed: "ic-headlines shows raw codes [no_discharge, bess_new, …]". With the fix it passes: Guided −18.2 M = Expert −18.2 M, 18 live flags, all worded.
   - G7: 20 hand-made TS mutants against financeModel.test.ts, all killed. They cover each of the 8 new words removed, the KSt label, the tax-layer and meter-link capitals, the fold said once / plural / dropped, the stated skip, `statedFlags` `===`→`!==`, the "Other check" fallback, LCOS `no_discharge`, and `asset_lifetime_unknown` in PROJECT_FLAG_KEYS.
   - Left for review: `baseline_island_rows_relaxed` is also stated by the backend's counterfactual note (baseline_text.py:13, rendered in `ic-cf-notes`). The report does not say which note comes from which flag, so the frontend cannot skip it without matching on the text.
+- 2026-11-23 UX 3 NOT OK @99e8a263 (rule c: no code in visible text) addressed:
+  - A flag with no words reads "A check with no description yet applies to this case.", with its code in the line's title (`projectFlagLines`). It is never dropped (GK G2).
+  - Every reason lcos.py gives for an unestablished storage LCOS is worded. An unknown one reads "a reason with no description yet", with the raw reasons in the row's title (`Headline.noteCode`).
+  - The smoke fails on any "no description yet" text.
+  - 19 more mutants (each LCOS word, the inflation word, the unknown-reason fallback, the title code on flag and reason lines, noteCode), all killed.
+  - Light and dark shots are under `../shots/iba-02-*`.

@@ -149,7 +149,7 @@ try {
     const text = await page.getByTestId(id).last().innerText()
     const raw = [...text.matchAll(SNAKE)].map(m => m[0])
     assert.deepEqual(raw, [], `${id} shows raw codes`)
-    assert(!/Other check:/.test(text), `${id} shows an unworded flag`)
+    assert(!/no description yet/.test(text), `${id} shows a flag or reason with no words (its code is in the title)`)
   }
   console.log(JSON.stringify({ ok: true, guidedNeeds, guidedNpv, expertNpv, flags: flags.length }))
 } catch (error) {
