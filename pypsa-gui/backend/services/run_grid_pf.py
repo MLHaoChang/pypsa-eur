@@ -18,6 +18,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from services import assumed_rating
+
 NO_PF = (
     "no_ac_pf",
     "the run has no AC power-flow result: switch Load flow on and re-run "
@@ -136,7 +138,7 @@ def loading(ctx, ev) -> Any:
             "no_converged_snapshot", "no snapshot converged, so no loading is certified"
         )
     index = n.snapshots[ev.converged]
-    peak, over, unrated, branches = 0.0, [], [], 0
+    peak, over, unrated, assumed, branches = 0.0, [], [], [], 0
     for cls, comp, t in BRANCHES:
         static = getattr(n, comp)
         if static is None or static.empty:
@@ -189,6 +191,10 @@ def loading(ctx, ev) -> Any:
                 return Missing(
                     "flow_not_finite", f"{cls} {name}'s AC flow is not finite"
                 )
+            if assumed_rating.is_assumed(row, "s_nom"):
+                # an assumed rating never binds: it certifies neither a peak nor an overload
+                assumed.append(str(name))
+                continue
             util = float((s / (rating * smax)).max()) * 100.0
             branches += 1
             peak = max(peak, util)
@@ -198,6 +204,12 @@ def loading(ctx, ev) -> Any:
         return Missing(
             "branch_unrated",
             f"no rating to judge {', '.join(unrated[:5])} against; none is assumed",
+        )
+    if not branches and assumed:
+        return Missing(
+            "rating_assumed",
+            f"{', '.join(assumed[:5])} carry only an assumed rating ({assumed_rating.LABEL}); "
+            "no stated rating to judge them against",
         )
     if not branches:
         return Missing(

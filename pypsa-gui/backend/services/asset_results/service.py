@@ -398,7 +398,8 @@ def build_response(
     )
 
     return {
-        "asset": {**C.summary_identity(ctx0), "params": C.summary_params(ctx0)},
+        "asset": {**C.summary_identity(ctx0), "params": C.summary_params(ctx0),
+                  **C.rating_assumed_flags(ctx0)},
         "solve": {
             "source": source,
             "objective": clean_scalar(state.get("objective")),
