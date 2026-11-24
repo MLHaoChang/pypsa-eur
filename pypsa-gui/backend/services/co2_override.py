@@ -6,6 +6,7 @@ by period). One reader for every surface that counts or prices CO2 — the two
 Emissions views, the solve diagnostics, the asset results and the LP's CO2
 price — so they cannot disagree. A generator with no column there is counted
 at its carrier's ``co2_emissions`` / efficiency, bit for bit as before."""
+
 from __future__ import annotations
 
 import pandas as pd
@@ -19,10 +20,12 @@ def has_override(n, name) -> bool:
 
 
 def override_series(n, name, default: float, index=None) -> pd.Series | None:
-    """t CO2 per MWh el of generator ``name`` at each snapshot of ``index`` (the
+    """Tonnes CO2 per MWh el of generator ``name`` at each snapshot of ``index`` (the
     network's snapshots by default); a snapshot with no figure reads ``default``,
     the carrier's own t/MWh el. None when the generator has no override."""
     if not has_override(n, name):
         return None
     s = n.generators_t[OVERRIDE_ATTR][name]
-    return s.reindex(n.snapshots if index is None else index).fillna(default).astype(float)
+    return (
+        s.reindex(n.snapshots if index is None else index).fillna(default).astype(float)
+    )
