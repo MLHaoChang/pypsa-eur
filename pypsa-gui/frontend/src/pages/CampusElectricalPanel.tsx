@@ -57,6 +57,7 @@ import { GRID_CODE_CHANGED } from '../components/gridReadiness/GridReadinessScor
 import CampusIslandSection, { ISLAND_REPORT_KEY, openCampusFile } from './CampusIslandSection'
 import DcArchitectureSection from './DcArchitectureSection'
 import DcBackupSection from './DcBackupSection'
+import SwitchgearRatingTable from './SwitchgearRatingTable'
 import CampusLibrarySection from './CampusLibrarySection'
 import { useCampusMilpJob } from './useCampusMilpJob'
 import { elapsed, failureLine, stageLabel, stepText, useTick } from './campusRunProgress'
@@ -813,7 +814,7 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
         </TableScroll>
       </PageSection>
 
-      <PageSection title="Short circuit" hint="IEC 60909, every installed unit energised, per period">
+      <PageSection panelSection="short_circuit" title="Short circuit" hint="IEC 60909, every installed unit energised, per period">
         <TableScroll>
           <table className="w-full text-[12px]">
             <thead>
@@ -832,7 +833,7 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
                   <td className="pr-3 tabular-nums">{num(f.ikss_max_ka)} kA</td>
                   <td className="pr-3 tabular-nums">{num(f.ip_max_ka)} kA</td>
                   <td className="pr-3 tabular-nums">{num(f.ikss_min_ka)} kA</td>
-                  <td className="pr-3 tabular-nums">{f.rated_ka == null ? '—' : `${num(f.rated_ka)} kA`}</td>
+                  <td className={`pr-3 ${f.rated_ka == null ? 'text-muted' : 'tabular-nums'}`}>{f.rated_ka == null ? 'Not declared' : `${num(f.rated_ka)} kA`}</td>
                   <td>{f.adequate == null ? <Tag tone="neutral">not rated</Tag>
                     : <Tag tone={f.adequate ? 'ok' : 'err'}>{f.adequate ? 'within rating' : 'over rating'}</Tag>}</td>
                 </tr>
@@ -840,6 +841,7 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
             </tbody>
           </table>
         </TableScroll>
+        <SwitchgearRatingTable />
       </PageSection>
 
       <PageSection title="Critical hours" count={r.selection.length} hint="selected per investment period">
