@@ -285,7 +285,7 @@ def _basis_snapshots(spec: DataCentreLoadSpec) -> pd.DatetimeIndex:
     """A whole year of hours from the first phase's year: the ambient cosine's
     design-day peak is found on a full cycle, whatever week the template solves."""
     year = pd.Timestamp(spec.phases[0].cod).year
-    return pd.date_range(f"{year}-01-01", periods=8760, freq="h")
+    return pd.date_range(f"{year}-01-01", f"{year}-12-31 23:00", freq="1h")
 
 
 def meta_block(spec: DataCentreLoadSpec, timezone: str | None) -> dict:
