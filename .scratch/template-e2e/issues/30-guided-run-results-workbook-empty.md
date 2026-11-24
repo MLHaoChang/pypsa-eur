@@ -3,7 +3,7 @@
 
 # 30 After a Guided study run, the results workbook is empty and Expert reads "Not run yet"
 
-Status: needs-triage
+Status: ready-for-agent
 Blocked by: none. Related: `provenance-graph/13` (an edit drops the last run to not_run), which may share the cause: the run kinds a Guided study writes vs the LOPF results Expert and the workbook read.
 Source: TE2E-29 builder (session_01G7qCuk2dRcskiyXzKdfgdo), relayed by the coordinator 2026-11-21; filed in the gap review (`.scratch/gap-review-2026-11-21/README.md`). The `template-journeys.mjs` workbook step is xfail-keyed (`L.gap`) to this issue.
 Severity: blocks a journey (a Guided user cannot export results)
@@ -24,6 +24,9 @@ A user who works in Guided, the default path, cannot export the results workbook
 
 ## Question for the owner
 
+Answered 2026-11-24 (owner decision TE2E-30-1): option 1, the study's own solve.
+
+
 What should the workbook export after a Guided study run?
 1. **(Recommended) The study's own solve**: the workbook reads the solve the Guided study produced (the reference-design dispatch), and the Expert header reads that run as the latest. One run, one set of figures, everywhere.
 2. Only the network LOPF results: after a study run, the export says "This workbook holds the network run; run Run LOPF in Expert", with a link, and Expert's "Not run yet" names the study run beside it.
@@ -41,3 +44,4 @@ What should the workbook export after a Guided study run?
 `pypsa-gui/backend/services/results_workbook/` (source run choice), the run-state read behind the Expert header (`services/flow_service.py` freshness), `pypsa-gui/frontend/src/layout/Sidebar.tsx` (export download), `pypsa-gui/frontend/scripts/template-journeys.mjs` (the xfail).
 
 ## Comments
+- 2026-11-24 coordinator: owner chose option 1 (TE2E-30-1); Status → ready-for-agent. Found blocking guided-results 07's export check (#1944). Opens after template-e2e 11 (#1948) merges: both edit `template-journeys.mjs`.
