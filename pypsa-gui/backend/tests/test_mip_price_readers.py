@@ -77,6 +77,23 @@ def test_the_gate_reads_the_config_that_decides_commitment():
     assert mip_price_limit(n, SolverConfig(process_uc="binary")) == DUALS_NOT_MARGINAL
 
 
+def test_a_stochastic_mip_is_gated_where_classify_says_stochastic():
+    """`classify` reports a scenario run as "stochastic" first; its zeros are still a MIP's."""
+    from harness.solve_validity import classify
+
+    def net(committable):
+        n = pypsa.Network()
+        n.set_snapshots(range(3))
+        n.add("Bus", "a")
+        n.add("Generator", "g", bus="a", p_nom=1, committable=committable)
+        n.set_scenarios({"s1": 0.5, "s2": 0.5})
+        return n
+
+    assert classify(net(True), CFG)["kind"] == "stochastic"
+    assert mip_price_limit(net(True), CFG) == DUALS_NOT_MARGINAL
+    assert mip_price_limit(net(False), CFG) is None
+
+
 def test_the_solve_records_its_own_judgement_and_it_outlives_a_config_edit(mip, lp):
     """A1: the record from the solve wins over today's config; no record, today's."""
     n = _process_unit_net()
