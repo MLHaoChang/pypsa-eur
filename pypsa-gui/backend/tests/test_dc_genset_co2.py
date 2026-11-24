@@ -64,3 +64,15 @@ def test_staged_grid_intensity_is_per_period_and_counted():
     w = _build_snapshot_weights(n, "generators")
     expect = float((w * t).sum()) / 1000.0
     assert res.by_carrier_kt["grid"].total == pytest.approx(expect)
+
+
+def test_results_emissions_agrees_with_compare_on_the_staged_grid():
+    from services.results.emissions import compute_emissions
+    n = T.build_eh_datacenter_staged()
+    n.generators_t.p = pd.DataFrame(0.0, index=n.snapshots, columns=n.generators.index)
+    n.generators_t.p["grid_supply"] = 1.0
+    n.generators_t.p["genset_1"] = 2.0
+    cmp_ = _compute_emissions_summary(n, [], True, True)
+    res = compute_emissions(n, "lopf", result_df=lambda n_, comp, attr, src: getattr(getattr(n_, comp), attr))
+    total = res["total_tCO2"] if isinstance(res, dict) else res.total_tCO2
+    assert total == pytest.approx(cmp_.total_kt.total * 1000.0, rel=1e-6)

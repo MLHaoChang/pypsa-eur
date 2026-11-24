@@ -161,6 +161,18 @@ def compute_emissions(n, source, *, result_df):
     total_t = 0.0
     carrier_totals: dict[str, float] = {}
 
+    # A per-period generator intensity (t/MWh el, e.g. the grid's, in
+    # `generators_t.eh_co2_t_per_mwh`) replaces the carrier's single figure.
+    ovr_t = n.generators_t.get("eh_co2_t_per_mwh")
+
+    def _ovr(name, period_key):
+        if ovr_t is None or name not in ovr_t.columns:
+            return None
+        col = ovr_t[name]
+        if period_key is not None and is_multi:
+            col = col[col.index.get_level_values(0) == period_key]
+        return float(col.mean()) if len(col) else None
+
     # ── Generator loop ──────────────────────────────────────────────────
     for name in gens.index:
         g_carrier = (str(gens.at[name, "carrier"]) if "carrier" in gens.columns else "").lower()
@@ -178,6 +190,10 @@ def compute_emissions(n, source, *, result_df):
         if not _math.isfinite(mwh_horizon):
             mwh_horizon = 0.0
         tCO2_horizon = mwh_horizon * out_intensity
+        if ovr_t is not None and name in ovr_t.columns:
+            tCO2_horizon = sum(
+                float(ep.get(name, 0.0)) * (_ovr(name, pk) or 0.0)
+                for pk, ep in gen_energy_per_period.items())
         no_load_tCO2 = float(no_load_horizon.get(name, 0.0)) * intensity
         tCO2_horizon += no_load_tCO2
         total_t += tCO2_horizon
@@ -197,7 +213,9 @@ def compute_emissions(n, source, *, result_df):
             mwh = float(energy_p.get(name, 0.0))
             if not _math.isfinite(mwh):
                 mwh = 0.0
-            tCO2 = mwh * out_intensity
+            p_out = _ovr(name, period_key)
+            p_out = out_intensity if p_out is None else p_out
+            tCO2 = mwh * p_out
             nl_p = no_load_per_period.get(period_key)
             nl_tCO2 = float(nl_p.get(name, 0.0)) * intensity if nl_p is not None else 0.0
             tCO2 += nl_tCO2
@@ -206,7 +224,7 @@ def compute_emissions(n, source, *, result_df):
                 "carrier": g_carrier,
                 "energy_mwh": mwh,
                 "tCO2": tCO2,
-                "intensity_tCO2_per_MWh_out": out_intensity,
+                "intensity_tCO2_per_MWh_out": p_out,
                 **({"no_load_tCO2": nl_tCO2} if name in no_load_t.columns else {}),
             })
 
