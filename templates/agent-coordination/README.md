@@ -36,7 +36,7 @@ The coordinator skill holds the steps, under "Bootstrap" and "Taking on tasks".
 | `docs/agents/review-gk.md`, `review-ux.md` | Each reviewer's standing rules, so hand-off notes carry only live state |
 | `docs/agents/session-brief.md` | The first message the coordinator sends each new session |
 | `docs/agents/issue-tracker.md`, `triage-labels.md`, `domain.md` | Local markdown issues under `.scratch/`, triage roles, glossary layout |
-| `scripts/coord/premerge.sh` | The whole merge gate: conflicts, overlap, optional semantic tests, reviewer verdict comments, every check run |
+| `scripts/coord/premerge.sh` | The whole merge gate: conflicts, overlap, optional semantic tests, reviewer verdict comments, every check run, every workflow run on the head |
 | `scripts/coord/sessions.py` | One line per live session from a saved `list_sessions` result, with context used and a `ROTATE` flag past 200k |
 | `scripts/coord/mutants.py` | AST mutants on the lines a PR changed in one module, run against one targeted test; prints survivors. A project-specific pre-push script (lint, the fixed contract tests first, mapped tests under a wall-clock cap, a diff guard such as `scripts/coord/prepush.sh` here) is written per project |
 | `scripts/coord/ciwait.sh` | Waits for CI on a PR that has no session; prints READY, FAIL, MACOS or TIMEOUT. `--board <board.json>` watches every `prs` row in one process and prints one line per PR head |

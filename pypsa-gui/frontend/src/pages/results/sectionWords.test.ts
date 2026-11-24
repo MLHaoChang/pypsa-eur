@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { TABS } from '../Results'
-import { NOT_KEPT_WORDS, SECTION_TAB, notKeptSentence, notKeptShort, sectionWords } from './sectionWords'
+import { NOT_KEPT_WORDS, SECTION_TAB, notKeptSentence, notKeptShort, sectionWords, withheldCell, withheldTotalNote } from './sectionWords'
 
 const label = (id: string) => TABS.find(t => t.id === id)?.label
 
@@ -41,5 +41,13 @@ describe('not_kept words (LC-03 slice 2)', () => {
       .toBe('This run kept no Study result: too large to keep. Current results are not shown in their place.')
     expect(notKeptShort('multi_period_not_digested')).toBe('multi-period run')
     expect(notKeptShort('something_new')).toBe('could not be kept')
+  })
+})
+
+describe('withheld figure words (MIP price limit)', () => {
+  it('pins one wording for a withheld cell and a total that leaves one out', () => {
+    expect(withheldCell('mip_duals_not_marginal')).toBe('Not available (integer solve)')
+    expect(withheldTotalNote('revenue', 'mip_duals_not_marginal'))
+      .toBe('Total excludes revenue: an integer (MIP) solve has no marginal prices.')
   })
 })

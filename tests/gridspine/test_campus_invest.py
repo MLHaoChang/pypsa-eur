@@ -1317,10 +1317,10 @@ def test_with_measures_pairs_each_re_checked_value_with_its_own_worst_hour_and_c
     recheck = pd.DataFrame([
         {"check": "switchgear", "status_as_is": "pass", "status_with_measures": "pass", "value": 25.1,
          "limit": 31.5, "unit": "kA", "worst_period": 2040, "worst_hour": None, "worst_case": None,
-         "clause": "c", "source": "assumed", "detail": "re-checked sc"},
+         "clause": "c", "source": "assumed", "detail": "re-checked sc", "limit_min": None, "limit_max": None},
         {"check": "campus_voltage", "status_as_is": "pass", "status_with_measures": "pass", "value": 0.9001,
          "limit": 0.9, "unit": "pu", "worst_period": 2030, "worst_hour": 117, "worst_case": "N-1:SITE_TRANSFO",
-         "clause": "c", "source": "assumed", "detail": "re-checked"}])
+         "clause": "c", "source": "assumed", "detail": "re-checked", "limit_min": None, "limit_max": None}])
     table = with_measures(as_is, recheck)
     out = table.set_index("check")
     v = out.loc["campus_voltage"]
@@ -1332,7 +1332,12 @@ def test_with_measures_pairs_each_re_checked_value_with_its_own_worst_hour_and_c
         "check", "status_as_is", "status_with_measures", "value", "limit", "unit", "worst_period", "worst_hour",
         "clause", "source", "detail", "value_with_measures", "detail_with_measures",       # in use first
         "worst_case", "limit_min", "limit_max",
-        "worst_period_with_measures", "worst_hour_with_measures", "worst_case_with_measures"]
+        "worst_period_with_measures", "worst_hour_with_measures", "worst_case_with_measures",
+        "limit_with_measures", "limit_min_with_measures", "limit_max_with_measures"]
+    assert out.loc["switchgear", "limit_with_measures"] == 31.5             # the rating the verdict used
+    no_limit = recheck.assign(limit=float("nan"))
+    held = with_measures(as_is, no_limit).set_index("check").loc["switchgear"]
+    assert held["status_with_measures"] == "unknown" and "not checked" in held["detail_with_measures"]
     s = out.loc["switchgear"]
     assert s["worst_period_with_measures"] == 2040 and pd.isna(s["worst_hour_with_measures"])
     assert pd.isna(s["worst_case_with_measures"])

@@ -1575,9 +1575,13 @@ export const resultsApi = {
         capacity_factor_pct: number
         curtailment_mwh: number
         curtailment_pct: number
-        market_value_eur_per_mwh: number
-        revenue_eur: number
+        // null (never 0) on an integer (MIP) solve: priced at bus prices
+        // that are not prices — see price_limit.
+        market_value_eur_per_mwh: number | null
+        revenue_eur: number | null
       }>
+      // "mip_duals_not_marginal" when the price-based columns are withheld.
+      price_limit?: string
     }>('/results/carrier_kpis').then(r => r.status === 204 ? null : r.data),
   // Per-carrier + per-generator CO₂ emissions over the solved horizon, plus
   // the shadow price of any active primary-energy CO₂ cap. See backend
@@ -1676,17 +1680,21 @@ export const resultsApi = {
     // than a measurement — ADR-0001. Optional so a response from an older
     // backend, which omitted the field entirely, is not read as `false`.
     available?: boolean
+    // revenue / storage charge cost (and opex + LCOE of a carrier holding
+    // one) are null on an integer (MIP) solve — see unavailable_reason.
     by_carrier?: Record<string, {
-      revenue_meur: { total: number; by_period: Record<string, number> }
-      opex_meur:    { total: number; by_period: Record<string, number> }
+      revenue_meur: { total: number; by_period: Record<string, number> } | null
+      opex_meur:    { total: number; by_period: Record<string, number> } | null
       gen_cost_meur?: { total: number; by_period: Record<string, number> }
-      storage_charge_cost_meur?: { total: number; by_period: Record<string, number> }
+      storage_charge_cost_meur?: { total: number; by_period: Record<string, number> } | null
       curtailment_cost_meur?:    { total: number; by_period: Record<string, number> }
       lost_load_cost_meur?:      { total: number; by_period: Record<string, number> }
       capex_meur:   { total: number; by_period: Record<string, number> }
       dispatch_gwh: { total: number; by_period: Record<string, number> }
-      lcoe_eur_per_mwh: { total: number; by_period: Record<string, number> }
+      lcoe_eur_per_mwh: { total: number; by_period: Record<string, number> } | null
     }>
+    // "mip_duals_not_marginal" when the price-based figures are withheld.
+    unavailable_reason?: string
     error?: string
   }>('/results/economics_by_carrier').then(r => r.status === 204 ? null : r.data),
   getLoadResults: (source?: ResultSource, range?: TSRange) => client.get('/results/loads', tsParams(source, range)).then(r => r.status === 204 ? null : r.data),
@@ -1969,6 +1977,11 @@ export const resultsApi = {
 // into one (`?? 0` here is the bug this nullability exists to prevent).
 // `AssetEconomicsPayload.capital_costs_available` is the matching summary
 // flag; see its comment below.
+//
+// On an integer (MIP) solve the bus prices are not prices: every figure priced
+// at them (revenue, charge cost, net profit, LCOS / link LCOE, spreads and
+// average prices) is also `null`, and `AssetEconomicsPayload.price_limit`
+// says so ("mip_duals_not_marginal").
 export interface GeneratorEconomicsRow {
   name: string
   bus: string
@@ -1976,7 +1989,7 @@ export interface GeneratorEconomicsRow {
   p_nom_opt_mw: number
   energy_mwh: number
   capacity_factor: number | null
-  revenue_eur: number
+  revenue_eur: number | null
   vom_cost_eur: number
   fixed_cost_eur: number | null       // (capital_cost + fom_cost) × p_nom_opt × years — the LP's fixed-cost term
   fom_cost_eur: number | null         // fom_cost × p_nom_opt × years — the FOM share OF fixed_cost_eur
@@ -1986,7 +1999,7 @@ export interface GeneratorEconomicsRow {
   by_period: Array<{
     period: number | string
     energy_mwh: number
-    revenue_eur: number
+    revenue_eur: number | null
     fixed_cost_eur: number | null
     fom_cost_eur: number | null
     vom_cost_eur: number
@@ -2005,8 +2018,8 @@ export interface StorageUnitEconomicsRow {
   round_trip_efficiency: number | null
   discharge_mwh: number
   charge_mwh: number
-  discharge_revenue_eur: number
-  charge_cost_eur: number
+  discharge_revenue_eur: number | null
+  charge_cost_eur: number | null
   vom_cost_eur: number
   fixed_cost_eur: number | null
   fom_cost_eur: number | null
@@ -2019,8 +2032,8 @@ export interface StorageUnitEconomicsRow {
     period: number | string
     discharge_mwh: number
     charge_mwh: number
-    discharge_revenue_eur: number
-    charge_cost_eur: number
+    discharge_revenue_eur: number | null
+    charge_cost_eur: number | null
     fixed_cost_eur: number | null
     fom_cost_eur: number | null
     vom_cost_eur: number
@@ -2036,8 +2049,8 @@ export interface StoreEconomicsRow {
   e_nom_opt_mwh: number
   discharge_mwh: number
   charge_mwh: number
-  discharge_revenue_eur: number
-  charge_cost_eur: number
+  discharge_revenue_eur: number | null
+  charge_cost_eur: number | null
   vom_cost_eur: number
   fixed_cost_eur: number | null
   fom_cost_eur: number | null
@@ -2063,9 +2076,9 @@ export interface LinkEconomicsRow {
   energy_mwh: number           // OUTPUT at bus1, not input
   input_energy_mwh: number
   capacity_factor: number | null   // measured on the input, which p_nom bounds
-  revenue_eur: number          // gross_revenue − input_cost
-  gross_revenue_eur: number
-  input_cost_eur: number
+  revenue_eur: number | null          // gross_revenue − input_cost
+  gross_revenue_eur: number | null
+  input_cost_eur: number | null
   vom_cost_eur: number
   fixed_cost_eur: number | null
   fom_cost_eur: number | null
@@ -2075,9 +2088,9 @@ export interface LinkEconomicsRow {
   by_period: Array<{
     period: number | string
     energy_mwh: number
-    revenue_eur: number
-    gross_revenue_eur: number
-    input_cost_eur: number
+    revenue_eur: number | null
+    gross_revenue_eur: number | null
+    input_cost_eur: number | null
     fixed_cost_eur: number | null
     fom_cost_eur: number | null
     vom_cost_eur: number
@@ -2099,6 +2112,9 @@ export interface AssetEconomicsPayload {
   storage_units: StorageUnitEconomicsRow[]
   stores: StoreEconomicsRow[]
   links: LinkEconomicsRow[]
+  /** "mip_duals_not_marginal" when every price-based figure is null because
+   *  the solve was an integer one. Absent on an LP. */
+  price_limit?: string
   /** Framing the surfaces must show beside the numbers, e.g. the
    *  zero-profit-by-construction note for an interior optimum. Absent or
    *  empty when there is nothing to say. */
