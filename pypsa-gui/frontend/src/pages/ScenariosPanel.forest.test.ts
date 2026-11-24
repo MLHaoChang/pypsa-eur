@@ -10,7 +10,8 @@
 // buttons pointing at the same directory.
 import { describe, expect, it } from 'vitest'
 import {
-  buildScenarioForest, collectSubtree, describeDescendants, formatSignedCount,
+  buildScenarioForest,
+  scopeToProjectTree, collectSubtree, describeDescendants, formatSignedCount,
   formatSignedPct, scenarioDelta, solvableSubtree, type ScenarioNode,
 } from './ScenariosPanel'
 import type { ProjectInfo } from '../api/types'
@@ -321,5 +322,31 @@ describe('describeDescendants', () => {
       'base',
     )
     expect(msg).not.toContain('cascade=true')
+  })
+})
+
+describe('scopeToProjectTree', () => {
+  const all = [
+    p('DC1'), p('DC1-kid', 'DC1'), p('DC1-grandkid', 'DC1-kid'),
+    p('MG1'), p('MG1-kid', 'MG1'),
+  ]
+  const n = (l: ProjectInfo[]) => l.map(x => x.name).sort()
+
+  it('keeps the root and every descendant when the root is open', () => {
+    expect(n(scopeToProjectTree(all, 'DC1'))).toEqual(['DC1', 'DC1-grandkid', 'DC1-kid'])
+  })
+  it('keeps the whole tree when a child is open', () => {
+    expect(n(scopeToProjectTree(all, 'DC1-kid'))).toEqual(['DC1', 'DC1-grandkid', 'DC1-kid'])
+  })
+  it('drops other templates children', () => {
+    expect(n(scopeToProjectTree(all, 'MG1'))).toEqual(['MG1', 'MG1-kid'])
+  })
+  it('returns the whole list with no open project or an unknown one', () => {
+    expect(scopeToProjectTree(all, null)).toBe(all)
+    expect(scopeToProjectTree(all, 'gone')).toBe(all)
+  })
+  it('survives a parent cycle', () => {
+    const cyc = [p('A', 'B'), p('B', 'A')]
+    expect(n(scopeToProjectTree(cyc, 'A'))).toEqual(['A', 'B'])
   })
 })

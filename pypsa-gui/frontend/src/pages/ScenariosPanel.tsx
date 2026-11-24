@@ -37,6 +37,37 @@ export interface ScenarioNode {
   depth: number
 }
 
+/**
+ * Only the open project's own tree: its root plus everything under that root.
+ * The list endpoint is workspace-wide, so without this another template's
+ * children showed up next to the open study (issue 23c). Falls back to the
+ * whole list when no project is open or the open one isn't in it yet.
+ */
+export function scopeToProjectTree(projects: ProjectInfo[], current: string | null | undefined): ProjectInfo[] {
+  const byName = new Map(projects.map(p => [p.name, p]))
+  if (!current || !byName.has(current)) return projects
+  const seen = new Set<string>()
+  let root = current
+  while (!seen.has(root)) {
+    seen.add(root)
+    const pp = byName.get(root)?.parent_project
+    if (!pp || !byName.has(pp)) break
+    root = pp
+  }
+  const keep = new Set<string>([root])
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const p of projects) {
+      if (!keep.has(p.name) && p.parent_project && keep.has(p.parent_project)) {
+        keep.add(p.name)
+        grew = true
+      }
+    }
+  }
+  return projects.filter(p => keep.has(p.name))
+}
+
 export function buildScenarioForest(projects: ProjectInfo[]): ScenarioNode[] {
   // Map by name for O(1) parent lookups.
   const byName = new Map<string, ScenarioNode>()
@@ -320,13 +351,18 @@ export default function ScenariosPanel() {
   const readOnly = useUIStore(s => s.readOnly)
   const readOnlyReason = useUIStore(s => s.readOnlyReason)
 
-  const { data: projects = [], isLoading } = useQuery({
+  const { data: allProjects = [], isLoading } = useQuery({
     queryKey: ['projects'],
     queryFn: projectsApi.list,
     staleTime: 5_000,
     refetchInterval: 10_000,
   })
 
+  // This panel lists the open project's tree only (issue 23c).
+  const projects = useMemo(
+    () => scopeToProjectTree(allProjects as ProjectInfo[], currentProject),
+    [allProjects, currentProject],
+  )
   const forest = useMemo(() => buildScenarioForest(projects as ProjectInfo[]), [projects])
 
   // Map project name → stable UUID (when known). Auth-mode routes are

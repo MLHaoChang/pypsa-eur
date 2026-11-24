@@ -106,7 +106,7 @@ beforeEach(() => {
   vi.mocked(projectsApi.createScenario).mockResolvedValue({ name: 'child' } as never)
   vi.mocked(projectsApi.delete).mockResolvedValue({ deleted: [], failed: [] } as never)
   vi.mocked(switchToProject).mockResolvedValue({ status: 'switched' } as never)
-  useUIStore.setState({ currentProject: 'loaded', readOnly: false })
+  useUIStore.setState({ currentProject: null, readOnly: false })
   queueJobs = []
   enqueueMock.mockReset().mockResolvedValue({})
 })
@@ -154,6 +154,7 @@ describe('branching from a row that is not the active project', () => {
 
 describe('branching the active project captures what is on screen', () => {
   it('saves the base before copying it', async () => {
+    useUIStore.setState({ currentProject: 'loaded' })
     // `POST /{base}/scenarios` copies the base's on-DISK bundle. Without this
     // flush the child forks from the last autosave — up to five minutes of
     // edits missing, silently, until the branch is opened much later.
@@ -169,6 +170,7 @@ describe('branching the active project captures what is on screen', () => {
   })
 
   it('refuses to branch at all when that save fails', async () => {
+    useUIStore.setState({ currentProject: 'loaded' })
     // saveProjectQuietly returns false rather than throwing — notably while a
     // solve is running. Proceeding anyway would silently produce the stale
     // fork this flush exists to prevent.
@@ -539,7 +541,7 @@ describe('difference from the parent, shown inline', () => {
 describe('picking two rows to compare', () => {
   it('routes the pair into the compare view', async () => {
     const requestCompareNav = vi.fn()
-    useUIStore.setState({ currentProject: 'loaded', readOnly: false, requestCompareNav })
+    useUIStore.setState({ currentProject: null, readOnly: false, requestCompareNav })
     renderPanel()
     const a = await rowFor('base')
     await userEvent.click(within(a).getByRole('checkbox'))
@@ -605,7 +607,7 @@ describe('picking two rows to compare', () => {
 
   it('the section Compare button uses the ticked pair', async () => {
     const requestCompareNav = vi.fn()
-    useUIStore.setState({ currentProject: 'loaded', readOnly: false, requestCompareNav })
+    useUIStore.setState({ currentProject: null, readOnly: false, requestCompareNav })
     renderPanel()
     for (const name of ['base', 'variant']) {
       await userEvent.click(within(await rowFor(name)).getByRole('checkbox'))
@@ -810,10 +812,24 @@ describe('the edit lock covers the project it is held on', () => {
     // loaded; the backend gates that delete on the ACL, not on any lock.
     // Disabling it here only produced a button that looked broken.
     useUIStore.setState({ currentProject: 'loaded', readOnly: true })
+    // The panel lists only the open project's tree, so 'base' is a child here.
+    vi.mocked(projectsApi.list).mockResolvedValue([
+      project({ name: 'loaded', id: 'id-loaded' }),
+      project({ name: 'base', id: 'id-base', parent_project: 'loaded' }),
+    ] as never)
     renderPanel()
     const row = await rowFor('base')
     expect(within(row).getByTitle('Delete this scenario')).toHaveProperty('disabled', false)
     expect(within(row).getByTitle(/^Branch a child scenario/)).toHaveProperty('disabled', false)
+  })
+})
+
+describe('the list is per project (issue 23c)', () => {
+  it('hides another template\'s projects while a project is open', async () => {
+    useUIStore.setState({ currentProject: 'base' })
+    renderPanel()
+    await screen.findAllByText('variant')
+    expect(screen.queryByText('loaded')).toBeNull()
   })
 })
 
