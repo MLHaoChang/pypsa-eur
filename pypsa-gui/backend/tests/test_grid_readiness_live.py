@@ -243,9 +243,12 @@ def test_each_solved_size_row_says_when_an_edit_followed_the_solve(client, hub):
     motor = [r for i, r in rows.items() if i.startswith("motor_start")]
     assert motor and all(STALE in r["note"] for r in motor)
     # A row that reads no solved size gets no note (dropping an id from the set, or widening it, fails here).
-    quiet = [i for i, r in rows.items()
-             if STALE in (r.get("note") or "")
-             and not (i in ("scr", "reactive_range") or i.startswith("motor_start"))]
+    quiet = [
+        i
+        for i, r in rows.items()
+        if STALE in (r.get("note") or "")
+        and not (i in ("scr", "reactive_range") or i.startswith("motor_start"))
+    ]
     assert quiet == []
     assert rows["scr"]["note"].count(STALE) == 1
     assert rows["scr"]["note"].startswith(fresh["scr"]["note"].split(";")[0])
@@ -263,8 +266,10 @@ def test_a_real_solve_leaves_the_rows_current_until_an_edit(client, hub):
     storage = client.get("/api/network/storage_units").json()
     storage = storage.get("items", storage) if isinstance(storage, dict) else storage
     unit = next(u for u in storage if float(u.get("p_nom") or 0) > 0)
-    r = client.put(f"/api/network/storage_units/{unit['name']}",
-                   json={**unit, "p_nom": float(unit["p_nom"]) * 2})
+    r = client.put(
+        f"/api/network/storage_units/{unit['name']}",
+        json={**unit, "p_nom": float(unit["p_nom"]) * 2},
+    )
     assert r.status_code == 200, r.text
     assert STALE in _rows(client, hub)["scr"]["note"]
 
@@ -281,7 +286,9 @@ def test_a_bool_is_not_a_solve_stamp():
     from services import dirty_state
     from services.adequacy.grid_readiness import _edited_since_solve
 
-    ctx = SimpleNamespace(network=SimpleNamespace(_solved_network_revision=True), network_revision=7)
+    ctx = SimpleNamespace(
+        network=SimpleNamespace(_solved_network_revision=True), network_revision=7
+    )
     assert _edited_since_solve(ctx) is False
     ctx.network._solved_network_revision = 1
     assert _edited_since_solve(ctx) is True
