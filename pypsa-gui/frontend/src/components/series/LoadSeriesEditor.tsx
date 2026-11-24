@@ -52,7 +52,7 @@ function coerce(raw: string, like: unknown): unknown {
 const DC_OWNED_LOADS = ['it_load', 'cooling']
 
 interface AmbientBasis {
-  source: 'default' | 'site_location' | 'entered'; mean_c: number
+  source: 'default' | 'site_location' | 'entered'; entered?: string[]; mean_c: number
   design_day_peak_c: number; peak_pue: number; peak_facility_mw: number
 }
 const AMBIENT_SOURCE_TEXT = {
@@ -60,9 +60,17 @@ const AMBIENT_SOURCE_TEXT = {
   default: 'the default temperate curve. No site location was set',
   entered: 'as entered',
 } as const
+const ENTERED_NAME: Record<string, string> = {
+  ambient_annual_mean_c: 'mean', ambient_seasonal_amplitude_k: 'seasonal swing',
+  ambient_diurnal_amplitude_k: 'daily swing',
+}
 
 function ambientBasisText(a: AmbientBasis): string {
-  return `Ambient temperature: ${AMBIENT_SOURCE_TEXT[a.source]}. Mean ${a.mean_c.toFixed(1)} °C · design-day peak ${a.design_day_peak_c.toFixed(1)} °C · peak PUE ${a.peak_pue.toFixed(2)} · peak facility load ${a.peak_facility_mw.toFixed(1)} MW`
+  const names = (a.entered ?? []).map(k => ENTERED_NAME[k] ?? k)
+  const source = a.source !== 'entered' && names.length
+    ? `your entries (${names.join(', ')}), the rest ${AMBIENT_SOURCE_TEXT[a.source]}`
+    : AMBIENT_SOURCE_TEXT[a.source]
+  return `Ambient temperature: ${source}. Mean ${a.mean_c.toFixed(1)} °C · design-day peak ${a.design_day_peak_c.toFixed(1)} °C · peak PUE ${a.peak_pue.toFixed(2)} · peak facility load ${a.peak_facility_mw.toFixed(1)} MW`
 }
 
 export default function LoadSeriesEditor({ project, component, mode, initialTab = 'archetype' }: LoadSeriesEditorProps) {

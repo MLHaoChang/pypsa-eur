@@ -69,6 +69,16 @@ describe('LoadSeriesEditor', () => {
     expect(screen.queryByRole('button', { name: /Preview/ })).toBeNull()
   })
 
+  it('names the ambient basis, and which fields were entered, on the card', async () => {
+    const ambient = { source: 'site_location', entered: ['ambient_diurnal_amplitude_k'], mean_c: 27,
+      design_day_peak_c: 45, peak_pue: 1.8, peak_facility_mw: 60.2 }
+    eh.getEhTemplate.mockResolvedValue({ dc_load: { spec: { pue_at_design: 1.3, phases: [{ it_mw: 36 }] }, ambient } })
+    renderEditor('guided', undefined, 'it_load')
+    const note = await screen.findByTestId('dc-ambient-basis')
+    expect(note.textContent).toBe('Ambient temperature: your entries (daily swing), the rest from the site location. '
+      + 'It is a climate zone, not weather data. Mean 27.0 °C · design-day peak 45.0 °C · peak PUE 1.80 · peak facility load 60.2 MW')
+  })
+
   it('keeps the picker for another load of a data-centre project', async () => {
     eh.getEhTemplate.mockResolvedValue({ dc_load: { spec: { pue_at_design: 1.3, phases: [{ it_mw: 36 }] } } })
     renderEditor('guided', undefined, 'office')

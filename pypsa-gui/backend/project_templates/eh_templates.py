@@ -672,17 +672,24 @@ def _apply_dc_profile(n, spec, snapshots, it_mw: float, *, timezone, period=None
 
 
 def _apply_ambient_source(merged: dict, raw: dict) -> None:
-    """Fill the three ambient fields from the site latitude's climate zone,
-    those the body states staying as stated; record where they came from."""
-    from services.dc_load_profile import AMBIENT_FIELDS, climate_preset
+    """Fill the ambient fields the body does not state from the site latitude's
+    climate zone, and record which it stated and where the rest came from.
+    The latitude is checked here (a string or a boolean is refused, not coerced)."""
+    from services.dc_load_profile import AMBIENT_FIELDS, DcLoadError, climate_preset
 
-    stated = any(k in raw for k in AMBIENT_FIELDS)
     lat = raw.get("site_latitude")
-    if isinstance(lat, (int, float)) and not isinstance(lat, bool) and -90 <= lat <= 90:
+    if lat is not None:
+        if (isinstance(lat, bool) or not isinstance(lat, (int, float))
+                or not math.isfinite(lat) or not -90 <= lat <= 90):
+            raise DcLoadError("dc_load.site_latitude: must be a number from -90 to 90",
+                              "dc_load.site_latitude")
+        merged["site_latitude"] = float(lat)
         for k, v in climate_preset(lat).items():
             if k != "zone" and k not in raw:
                 merged[k] = v
-    merged["ambient_source"] = ("entered" if stated
+    entered = [k for k in AMBIENT_FIELDS if k in raw]
+    merged["ambient_entered"] = entered
+    merged["ambient_source"] = ("entered" if len(entered) == len(AMBIENT_FIELDS)
                                 else "site_location" if lat is not None else "default")
 
 

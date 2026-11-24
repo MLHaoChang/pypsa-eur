@@ -130,7 +130,8 @@ def ambient_basis(spec: DataCentreLoadSpec, snapshots, timezone: str | None = No
     temp = ambient_c(spec, snapshots, timezone)
     it_mw = max(p.it_mw for p in spec.phases)
     facility = hourly_profile(spec, snapshots, it_mw, timezone)
-    return {"source": spec.ambient_source, "site_latitude": spec.site_latitude,
+    return {"source": spec.ambient_source, "entered": list(spec.ambient_entered),
+            "site_latitude": spec.site_latitude,
             "mean_c": spec.ambient_annual_mean_c,
             "design_day_peak_c": float(temp.max()),
             "peak_pue": float(pue(spec, temp).max()),
@@ -312,7 +313,10 @@ def read_ambient(project_dir) -> dict | None:
     spec = block.get("spec") if isinstance(block, dict) else None
     if not isinstance(spec, dict) or not all(k in spec for k in AMBIENT_FIELDS):
         return None
-    return {k: float(spec[k]) for k in AMBIENT_FIELDS}
+    out = {k: float(spec[k]) for k in AMBIENT_FIELDS}
+    if "ambient_peak_day" in spec:
+        out["ambient_peak_day"] = int(spec["ambient_peak_day"])
+    return out
 
 
 def read_envelope(project_dir) -> dict | None:

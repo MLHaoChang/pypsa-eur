@@ -364,7 +364,8 @@ def test_ambient_source_says_where_the_temperature_came_from():
     assert T.dc_load_spec("eh_datacenter", {}).ambient_source == "default"
     assert T.dc_load_spec("eh_datacenter", {"site_latitude": 24.7}).ambient_source == "site_location"
     stated = T.dc_load_spec("eh_datacenter", {"site_latitude": 24.7, "ambient_annual_mean_c": 31.0})
-    assert stated.ambient_source == "entered" and stated.ambient_annual_mean_c == 31.0
+    assert stated.ambient_source == "site_location" and stated.ambient_annual_mean_c == 31.0
+    assert stated.ambient_entered == ["ambient_annual_mean_c"]
 
 
 def test_basis_block_reports_mean_peak_pue_and_facility_mw():
@@ -374,3 +375,162 @@ def test_basis_block_reports_mean_peak_pue_and_facility_mw():
     assert b["source"] == "site_location" and b["mean_c"] == 27.0
     assert b["design_day_peak_c"] == pytest.approx(45.0) and b["peak_pue"] == pytest.approx(1.80)
     assert 20.0 * 1.3 < b["peak_facility_mw"] <= 20.0 * 1.80
+
+
+# Hand-derived (hot preset 27/10/8 against the default 10/9/5, slope 0.02, 20 MW IT):
+# the annual energy difference above, and the peak 20 x 0.92833 (training mean) x 1.80.
+HOT_MINUS_DEFAULT_MWH = 25832.878462
+HOT_PEAK_MW = 33.42
+
+
+# ── GK A review of DC 04 ────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("bad", ["24.7", True, 91, -90.5, float("nan"), float("inf"), [24.7]])
+def test_a_bad_site_latitude_is_refused_not_coerced(bad):
+    with pytest.raises(P.DcLoadError) as exc:
+        T.dc_load_spec("eh_datacenter", {"site_latitude": bad})
+    assert exc.value.field == "dc_load.site_latitude"
+
+
+def test_an_integer_latitude_applies_its_preset():
+    spec = T.dc_load_spec("eh_datacenter", {"site_latitude": 25})
+    assert spec.site_latitude == 25.0 and spec.ambient_annual_mean_c == 27.0  # hot, |lat| <= 25
+
+
+def test_a_partial_entry_names_the_entered_fields_and_keeps_the_preset_for_the_rest():
+    spec = T.dc_load_spec("eh_datacenter", {"site_latitude": 24.7, "ambient_diurnal_amplitude_k": 2.0})
+    assert spec.ambient_entered == ["ambient_diurnal_amplitude_k"]
+    assert spec.ambient_source == "site_location"
+    assert (spec.ambient_annual_mean_c, spec.ambient_seasonal_amplitude_k,
+            spec.ambient_diurnal_amplitude_k) == (27.0, 10.0, 2.0)
+    block = P.meta_block(spec, None)  # spec -> meta_block -> the card's data
+    assert block["ambient"]["entered"] == ["ambient_diurnal_amplitude_k"]
+    assert block["ambient"]["source"] == "site_location"
+    assert block["spec"]["ambient_entered"] == ["ambient_diurnal_amplitude_k"]
+
+
+def test_all_three_entered_is_source_entered_and_no_latitude_is_default():
+    full = T.dc_load_spec("eh_datacenter", {"ambient_annual_mean_c": 30.0,
+                                            "ambient_seasonal_amplitude_k": 8.0,
+                                            "ambient_diurnal_amplitude_k": 6.0})
+    assert full.ambient_source == "entered" and len(full.ambient_entered) == 3
+    none = T.dc_load_spec("eh_datacenter", {})
+    assert none.ambient_source == "default" and none.ambient_entered == []
+
+
+@pytest.mark.parametrize("lat,zone_mean", [
+    (0.0, 27.0), (14.99, 27.0), (15.0, 27.0), (15.01, 27.0),   # 15 closes the tropical zone
+    (24.99, 27.0), (25.0, 27.0), (25.01, 21.0),
+    (34.99, 21.0), (35.0, 21.0), (35.01, 15.0),
+    (44.99, 15.0), (45.0, 15.0), (45.01, 10.0),
+    (59.99, 10.0), (60.0, 10.0), (60.01, 3.0),
+    (90.0, 3.0), (-90.0, 3.0), (-25.0, 27.0), (-25.01, 21.0), (-60.01, 3.0),
+])
+def test_climate_preset_zone_edges(lat, zone_mean):
+    assert P.climate_preset(lat)["ambient_annual_mean_c"] == zone_mean
+
+
+def test_climate_preset_whole_table():
+    expect = {  # |lat| bound: (mean, seasonal, diurnal)
+        10.0: (27.0, 1.5, 5.0), 20.0: (27.0, 10.0, 8.0), 30.0: (21.0, 9.0, 6.0),
+        40.0: (15.0, 9.0, 5.0), 50.0: (10.0, 9.0, 5.0), 75.0: (3.0, 11.0, 4.0),
+    }
+    for lat, (m, s, d) in expect.items():
+        for sign, day in ((1, 200), (-1, 17)):
+            p = P.climate_preset(sign * lat)
+            assert (p["ambient_annual_mean_c"], p["ambient_seasonal_amplitude_k"],
+                    p["ambient_diurnal_amplitude_k"], p["ambient_peak_day"]) == (m, s, d, day)
+    assert P.climate_preset(0.0)["ambient_peak_day"] == 200  # the equator is not southern
+
+
+def test_hot_site_energy_and_peak_are_pinned():
+    spec_hot = T.dc_load_spec("eh_datacenter", {"site_latitude": 24.7,
+                                                "phases": [{"cod": "2030-01-01", "it_mw": 20.0}]})
+    spec_def = T.dc_load_spec("eh_datacenter", {"phases": [{"cod": "2030-01-01", "it_mw": 20.0}]})
+    snaps = _year_hours()
+    u = P.utilisation(spec_hot, snaps)
+    # Independent of P.ambient_c: the cosines written out.
+    doy, hod = snaps.dayofyear.to_numpy(), snaps.hour.to_numpy()
+
+    def temp(mean, seas, diur):
+        return (mean + seas * np.cos(2 * np.pi * (doy - 200) / 365.0)
+                + diur * np.cos(2 * np.pi * (hod - 15.0) / 24.0))
+
+    excess = lambda t: np.maximum(0.0, t - 20.0)  # noqa: E731
+    d_excess = excess(temp(27.0, 10.0, 8.0)) - excess(temp(10.0, 9.0, 5.0))
+    want = float(np.sum(u * 20.0 * 0.02 * d_excess))
+    got = (P.hourly_profile(spec_hot, snaps, 20.0).sum() - P.hourly_profile(spec_def, snaps, 20.0).sum())
+    assert got == pytest.approx(want, rel=1e-9)
+    assert got == pytest.approx(HOT_MINUS_DEFAULT_MWH, rel=1e-6)
+    assert P.ambient_basis(spec_hot, snaps)["peak_facility_mw"] == pytest.approx(HOT_PEAK_MW, rel=1e-9)
+
+
+def test_read_ambient_carries_the_peak_day(monkeypatch):
+    import services.template_marker as M
+    spec = T.dc_load_spec("eh_datacenter", {"site_latitude": -23.0})
+    monkeypatch.setattr(M, "read_marker", lambda d: {P.META_KEY: {"spec": spec.model_dump(mode="json")}})
+    amb = P.read_ambient("anywhere")
+    assert amb["ambient_peak_day"] == 17 and amb["ambient_annual_mean_c"] == 27.0
+
+
+def test_southern_peak_day_reaches_the_cop_and_availability_generators():
+    from services.profile_gen import availability, series
+    south = {"ambient_annual_mean_c": 20.0, "ambient_seasonal_amplitude_k": 10.0,
+             "ambient_diurnal_amplitude_k": 0.0, "ambient_peak_day": 17}
+    north = {**south, "ambient_peak_day": 200}
+    # derating: the hottest hour has the lowest availability.
+    der = {"threshold_c": 15.0, "per_k": 0.02, "floor": 0.5}
+    a_s, _ = availability.generate_frame(["g"], "derating", {**der, **south}, 2025)
+    a_n, _ = availability.generate_frame(["g"], "derating", {**der, **north}, 2025)
+    assert a_s["g"].idxmin().month == 1 and a_n["g"].idxmin().month == 7
+    # air COP: the coldest source hour (lowest COP) is in July in the south.
+    c_s, _ = series.generate_frame(["hp"], "cop", south, 2025)
+    c_n, _ = series.generate_frame(["hp"], "cop", north, 2025)
+    assert c_s["hp"].idxmin().month == 7 and c_n["hp"].idxmin().month == 1
+
+
+# ── mutant survivors of the GK A review ─────────────────────────────────────
+
+@pytest.mark.parametrize("lat,triple", [
+    (14.5, (27.0, 1.5, 5.0)), (15.0, (27.0, 1.5, 5.0)), (15.5, (27.0, 10.0, 8.0)),
+    (24.5, (27.0, 10.0, 8.0)), (25.0, (27.0, 10.0, 8.0)), (25.5, (21.0, 9.0, 6.0)),
+    (34.5, (21.0, 9.0, 6.0)), (35.0, (21.0, 9.0, 6.0)), (35.5, (15.0, 9.0, 5.0)),
+    (44.5, (15.0, 9.0, 5.0)), (45.0, (15.0, 9.0, 5.0)), (45.5, (10.0, 9.0, 5.0)),
+    (59.5, (10.0, 9.0, 5.0)), (60.0, (10.0, 9.0, 5.0)), (60.5, (3.0, 11.0, 4.0)),
+])
+def test_climate_zone_edges_on_the_whole_triple(lat, triple):
+    p = P.climate_preset(lat)
+    assert (p["ambient_annual_mean_c"], p["ambient_seasonal_amplitude_k"],
+            p["ambient_diurnal_amplitude_k"]) == triple
+
+
+@pytest.mark.parametrize("lat", [90, -90, 89.9, 0])
+def test_the_latitude_range_is_inclusive(lat):
+    assert T.dc_load_spec("eh_datacenter", {"site_latitude": lat}).site_latitude == float(lat)
+
+
+def test_the_basis_reads_the_largest_phase_the_first_phases_year_and_a_full_year():
+    spec = T.dc_load_spec("eh_datacenter", {"site_latitude": 24.7, "phases": [
+        {"cod": "2023-01-01", "it_mw": 20.0}, {"cod": "2024-01-01", "it_mw": 40.0}]})
+    snaps = P._basis_snapshots(spec)
+    assert (len(snaps), snaps[0], snaps[-1]) == (
+        8760, pd.Timestamp("2023-01-01 00:00"), pd.Timestamp("2023-12-31 23:00"))
+    b = P.ambient_basis(spec, snaps)
+    assert b["site_latitude"] == 24.7
+    assert b["peak_facility_mw"] == pytest.approx(2 * 33.42)  # the 40 MW phase, not the first
+    block = P.meta_block(spec, None)["ambient"]
+    assert block["design_day_peak_c"] == pytest.approx(45.0) and block["peak_pue"] == pytest.approx(1.80)
+
+
+def test_read_ambient_is_none_without_a_complete_spec(monkeypatch):
+    import services.template_marker as M
+    spec = T.dc_load_spec("eh_datacenter", {}).model_dump(mode="json")
+    partial = {k: v for k, v in spec.items() if k != "ambient_diurnal_amplitude_k"}
+    for marker in (None, {}, {P.META_KEY: None}, {P.META_KEY: {"spec": None}},
+                   {P.META_KEY: {"spec": partial}}, {P.META_KEY: "x"}, "x"):
+        monkeypatch.setattr(M, "read_marker", lambda d, m=marker: m)
+        assert P.read_ambient("anywhere") is None
+
+
+def test_the_zone_is_named():
+    assert P.climate_preset(24.7)["zone"].startswith("hot") and P.climate_preset(70)["zone"] == "cold"
