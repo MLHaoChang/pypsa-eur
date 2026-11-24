@@ -193,6 +193,7 @@ from gridspine.static.campus_ratings import (
     assumptions_table,
     choose_cable,
     choose_switchgear,
+    join_flags,
     thermal_current,
 )
 from gridspine.static.campus_sc import campus_fault_levels
@@ -931,8 +932,8 @@ def rate_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriteria
         c = choose_cable(lib, vn_kv=row["vn_kv"], length_km=row["length_km"], i_ka=float(top.i_ka), ith_ka=ith_ka,
                          margin=criteria.margin, a=cables)
         flag = ("no_library_cable" if c["chosen_id"] is None
-                else "declared_below_chosen" if row["declared_i_ka"] < c["chosen_i_ka"] - 1e-12
-                else "withstand_not_evaluated" if not c["withstand_evaluated"] else None)
+                else join_flags("declared_below_chosen" if row["declared_i_ka"] < c["chosen_i_ka"] - 1e-12 else None,
+                                None if c["withstand_evaluated"] else "withstand_not_evaluated"))
         rows.append({**row, "design_i_ka": float(top.i_ka),
                      "design_case": f"{top.case}, period {int(top.period)} hour {int(top.hour)}",
                      "ith_ka": ith_ka, **c, "flag": flag})
