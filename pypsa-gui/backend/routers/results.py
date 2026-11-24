@@ -2327,8 +2327,25 @@ def get_investment_case():
         stored = stored.model_dump(mode="json")
     current, why = _ic_current_assumptions() if stored else (None, None)
     body = record or {"status": "idle", "study": "investment_case"}
-    body["report"] = staleness(stored, current, reason=why)
+    body["report"] = _ic_report_after_stale_run(staleness(stored, current, reason=why))
     return body
+
+
+def _ic_report_after_stale_run(report: dict) -> dict:
+    """The case valued the run the inputs have since left (provenance-graph 13): an edit that keeps the
+    dispatch's shape leaves the dispatch digest alone, so the key reads fresh while the optimisation's own
+    verdict is stale. The report is then out of date on `dispatch`, as it was when an edit cleared the run."""
+    if not report.get("present") or report.get("stale") is not False:
+        return report
+    try:
+        from services.provenance_graph import runs
+
+        read = runs.read(cached=True)
+        if read.dispatch == "none" or runs.results_verdicts(read)["optimisation"].state != "stale":
+            return report
+    except Exception:  # noqa: BLE001 — a freshness read must not 500 the case
+        return report
+    return {**report, "stale": True, "changed": ["dispatch"], "reason": "inputs_changed"}
 
 
 @results_router.post("/investment_case/abort")

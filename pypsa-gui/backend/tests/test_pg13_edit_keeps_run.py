@@ -74,3 +74,37 @@ def test_the_expert_table_bulk_edit_marks_the_last_run_stale(client, site):  # n
     assert r.status_code == 200, r.text
     assert _kinds(_flow(client, project))["optimisation"] == "stale"
     assert client.get("/api/results/generators").status_code == 200
+
+
+def test_a_value_edit_marks_the_investment_case_out_of_date(
+    client, install_network, session_ctx, monkeypatch
+):
+    """The case priced the run the edit makes stale, so its report reads out of date too (issue 13)."""
+    from tests.test_investment_case_routes import (
+        STUDY_URL,
+        _fake_build,
+        _poll,
+        _put_fin,
+        _s2_inputs,
+        _solved,
+    )
+
+    _fake_build(monkeypatch)
+    _solved(install_network)
+    assert _put_fin(client, _s2_inputs()).status_code == 200
+    assert client.post("/api/simulation/run").status_code == 200
+    assert _wait_idle(client)["status"] == "completed"
+    assert client.post(STUDY_URL, json={}).status_code == 200
+    assert _poll(client)["report"]["stale"] is False
+
+    r = client.patch(
+        "/api/network/_bulk",
+        json={
+            "component_class": "Generator",
+            "names": ["gas"],
+            "updates": {"p_nom_max": 7.0},
+        },
+    )
+    assert r.status_code == 200, r.text
+    rep = client.get(STUDY_URL).json()["report"]
+    assert rep["stale"] is True and rep["changed"] == ["dispatch"]
