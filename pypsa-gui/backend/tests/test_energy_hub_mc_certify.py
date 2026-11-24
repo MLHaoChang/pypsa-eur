@@ -541,8 +541,8 @@ def test_the_minimum_draws_put_the_floor_at_the_target(draws, below, min_draws):
 
 # GK A ask 1 and the owner decision on #1927: the start refuses only past
 # the 2000-draw cap, and then names no draw count. A weight of 20 h on one
-# year resolves 0.01 h/yr at exactly 2000 draws.
-@pytest.mark.parametrize("w_min,refused", [(20.0, False), (20.02, True),
+# year resolves 0.01 h/yr at exactly 2000 draws; 20.01 h needs 2001.
+@pytest.mark.parametrize("w_min,refused", [(20.0, False), (20.01, True),
                                            (168.0, True)])
 @pytest.mark.parametrize("draws", [1, 2000])
 def test_the_start_refuses_only_a_goal_past_the_draw_cap(w_min, refused, draws):
@@ -556,6 +556,35 @@ def test_the_start_refuses_only_a_goal_past_the_draw_cap(w_min, refused, draws):
                           "decide it")
     assert msg.endswith(": allow more shortfall in the goal.")
     assert "16800" not in msg and "set at least" not in msg
+
+
+# GK A R3 (owner decision on #1927): a study requested below the floor is not
+# refused at the start; it runs, and the verdict, payload and Improve name the
+# floor and the fewest draws.
+@pytest.mark.live_solve
+def test_a_study_started_below_the_floor_runs_and_ends_with_the_floor_note(
+        client, install_network):
+    import time
+    install_network(_cert_network(units=8))
+    r = client.put("/api/simulation/solver_config",
+                   json={"solver_name": "highs", "voll": 5000.0, "mc_draws": 17})
+    assert r.status_code == 200, r.text
+    r = client.post("/api/results/eh_study", json={
+        "archetype": "off_grid", "stages": list(CERT_STAGES),
+        "pack_overrides": {"ens_cap_permyriad": 5000.0, "target_lole_h": 3.0}})
+    assert r.status_code == 200, r.text
+    deadline = time.monotonic() + 180
+    while (body := client.get("/api/results/eh_study").json()).get("status") == "running":
+        assert time.monotonic() < deadline, "eh_study never finished"
+        time.sleep(0.05)
+    assert body["status"] == "done", body.get("error")
+    p = body["report"]["sections"]["certification"]["payload"]
+    assert (p["n_samples"], p["verdict"]) == (17, "inconclusive")
+    assert (p["below_floor"], p["min_draws"]) == (True, 18)
+    review = client.get("/api/results/eh_review").json()
+    f = next(f for f in review["findings"] if f["id"] == "certification_inconclusive")
+    assert "at least 18 draws" in f["recommendation"]
+    assert f["actions"][0]["args"]["mc"] == {"draws": 34}
 
 
 # GK A ask 3: a target equal to the floor is resolved; its verdict follows
