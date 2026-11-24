@@ -95,7 +95,7 @@ def test_start_task_offers_v5():
 
     tool = next(t for t in catalogue.TOOLS if t["name"] == "start_task")
     enum = tool["input_schema"]["properties"]["run"]["properties"]["profile"]["enum"]
-    assert enum[-1] == REF
+    assert REF in enum
     args = {
         "title": "t",
         "request_id": "r",

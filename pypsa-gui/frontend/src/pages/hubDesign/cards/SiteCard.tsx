@@ -27,6 +27,7 @@ import { useCapacityUnit, useImportLinks, useStagedConnection } from '../../../c
 import type { Link } from '../../../api/types'
 import type { FlowEnergization } from '../../../api/flow'
 import { energizationSummary } from '../../../components/gridReadiness/EnergizationRows'
+import { EnergizationTimeline } from '../../../components/gridReadiness/EnergizationTimeline'
 import { GridReadinessScorecard, summaryText, useGridReadiness, useScorecardOpen }
   from '../../../components/gridReadiness/GridReadinessScorecard'
 
@@ -312,6 +313,7 @@ function SiteGridReadiness({ template }: { template: EhTemplateMeta | null }) {
         <span className="font-semibold">Grid readiness:</span> {summaryText(data.summary, 'guided')}
       </button>
       {open && <GridReadinessScorecard data={data} mode="guided" fieldLabels={fieldLabels} />}
+      {open && <EnergizationTimeline />}
     </section>
   )
 }
