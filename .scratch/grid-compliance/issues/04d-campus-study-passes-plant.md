@@ -3,7 +3,7 @@
 
 # GC-04d: the campus study passes the aggregated plant and model set to its bundles
 
-Status: ready-for-agent
+Status: done
 Type: task
 Parent: `.scratch/grid-compliance/issues/04c-bundle-pack-wiring.md`
 Gated: yes (GK A2, gridspine)

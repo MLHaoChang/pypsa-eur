@@ -1,4 +1,5 @@
-"""The campus study passes the plant and the model set to its PSS/E bundles (GC-04d, GK A2 Q1-Q5).
+"""
+The campus study passes the plant and the model set to its PSS/E bundles (GC-04d, GK A2 Q1-Q5).
 
 A run directory is written by hand (``write_run``), so the driver is tested
 without a solve. Oracles:
@@ -25,7 +26,11 @@ from gridspine.schema.model_set import new_model_set
 from tests.gridspine.test_campus_bundle import SCRIPTS
 from tests.gridspine.test_campus_island_frequency_driver import campus_spec, write_run
 
-THREE = ((0, "max_island_dp_up"), (1, "max_import"), (2, "min_stored_energy"))  # island hours 0 and 2
+THREE = (
+    (0, "max_island_dp_up"),
+    (1, "max_import"),
+    (2, "min_stored_energy"),
+)  # island hours 0 and 2
 PLANT = Plant("PV1", PocBranch("trafo", 0, 0))  # TR1, grid end at the PCC
 
 #: Every file ``psse_campus`` writes for ``_run`` with no plant or model set,
@@ -101,20 +106,30 @@ def _run(tmp_path):
 def _model_set(s=None):
     import datetime
 
-    return new_model_set(campus_spec() if s is None else s, {"study": "GC-04d"},
-                         now=datetime.datetime(2026, 11, 24, tzinfo=datetime.UTC))
+    return new_model_set(
+        campus_spec() if s is None else s,
+        {"study": "GC-04d"},
+        now=datetime.datetime(2026, 11, 24, tzinfo=datetime.UTC),
+    )
 
 
 def _digests(out):
-    return {p.relative_to(out).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in sorted(out.rglob("*")) if p.is_file()}
+    return {
+        p.relative_to(out).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in sorted(out.rglob("*"))
+        if p.is_file()
+    }
 
 
 def test_without_a_plant_or_model_set_every_file_matches_master(tmp_path):
     run = _run(tmp_path)
     D.psse_campus(run)
-    assert _digests(run / D.PSSE_DIR) == MASTER_SHA256  # the whole set: no new file escapes
-    assert [p.name for p in run.iterdir() if p.name.startswith(".")] == []  # no staging left behind
+    assert (
+        _digests(run / D.PSSE_DIR) == MASTER_SHA256
+    )  # the whole set: no new file escapes
+    assert [
+        p.name for p in run.iterdir() if p.name.startswith(".")
+    ] == []  # no staging left behind
 
 
 def test_every_island_hour_carries_the_plant_the_scripts_and_the_citation(tmp_path):
@@ -125,9 +140,20 @@ def test_every_island_hour_carries_the_plant_the_scripts_and_the_citation(tmp_pa
     bundles = D.psse_campus(run, plant=PLANT, model_set=ms, variant="detailed")
     assert [b.path.name for b in bundles] == ["TEST_HUB_p2030_h0", "TEST_HUB_p2030_h2"]
     hc, case, lines, grid = _hour_campus(tmp_path / "direct")
-    direct = write_psse_pack(tmp_path / "pack", hc, case, lines, grid, plant=PLANT, model_set=ms,
-                             variant="detailed")
-    assert direct["model_set"]["variant"] == "detailed" and direct["model_set"]["model_set_id"] == ms.model_set_id
+    direct = write_psse_pack(
+        tmp_path / "pack",
+        hc,
+        case,
+        lines,
+        grid,
+        plant=PLANT,
+        model_set=ms,
+        variant="detailed",
+    )
+    assert (
+        direct["model_set"]["variant"] == "detailed"
+        and direct["model_set"]["model_set_id"] == ms.model_set_id
+    )
     for b in bundles:
         assert b.path.parent == run / D.PSSE_DIR and b.path.is_dir()
         pack = b.path / SUBDIR
@@ -135,19 +161,26 @@ def test_every_island_hour_carries_the_plant_the_scripts_and_the_citation(tmp_pa
         dyr = (pack / f"{b.path.name}.dyr").read_text().splitlines()
         # PV1 on MV1 (bus 2), one REPCA1 measuring TR1 (bus 2 -> PCC, bus 1)
         assert [ln for ln in dyr if "'REPCA1'" in ln] == [
-            "     2 'REPCA1' '2 '     1     2     1  '1 '     0     1     1"]
+            "     2 'REPCA1' '2 '     1     2     1  '1 '     0     1     1"
+        ]
         assert sorted(p.name for p in pack.glob("run_*.py")) == SCRIPTS
         assert sorted(f for f in m["files"] if f.startswith("run_")) == SCRIPTS
         assert m["model_set"] == direct["model_set"]
-        assert m["plant_controller_not_written"] is None and m["scripts_not_written"] is None
+        assert (
+            m["plant_controller_not_written"] is None
+            and m["scripts_not_written"] is None
+        )
 
 
 def test_a_model_set_of_another_campus_is_refused_before_anything_is_written(tmp_path):
     other = campus_spec()
     other["campus"]["name"] = "OTHER_HUB"
     run, ms = _run(tmp_path), _model_set(other)
-    with pytest.raises(ContractError, match=rf"psse: model set {ms.model_set_id} detailed does not describe "
-                                            r"this run's campus \(model hash [0-9a-f]{12}, the model set's"):
+    with pytest.raises(
+        ContractError,
+        match=rf"psse: model set {ms.model_set_id} detailed does not describe "
+        r"this run's campus \(model hash [0-9a-f]{12}, the model set's",
+    ):
         D.psse_campus(run, plant=PLANT, model_set=ms, variant="detailed")
     assert not (run / D.PSSE_DIR).exists()
 
@@ -157,7 +190,10 @@ def test_the_check_reads_the_variant_given_not_another(tmp_path):
     run, s = _run(tmp_path), campus_spec()
     ms = _model_set_with_aggregated(s)
     D.psse_campus(run, model_set=ms, variant="detailed")
-    with pytest.raises(ContractError, match=rf"{ms.model_set_id} aggregated does not describe this run's campus"):
+    with pytest.raises(
+        ContractError,
+        match=rf"{ms.model_set_id} aggregated does not describe this run's campus",
+    ):
         D.psse_campus(_run(tmp_path / "b"), model_set=ms, variant="aggregated")
     assert not (tmp_path / "b" / "run" / D.PSSE_DIR).exists()
 
@@ -167,21 +203,32 @@ def _model_set_with_aggregated(s):
 
     agg = campus_spec()
     agg["campus"]["name"] = "TEST_HUB_EQ"
-    return new_model_set(s, {"study": "GC-04d"}, aggregated=agg,
-                         now=datetime.datetime(2026, 11, 24, tzinfo=datetime.UTC))
+    return new_model_set(
+        s,
+        {"study": "GC-04d"},
+        aggregated=agg,
+        now=datetime.datetime(2026, 11, 24, tzinfo=datetime.UTC),
+    )
 
 
 def test_a_variant_not_frozen_is_refused_naming_the_model_set(tmp_path):
     run, ms = _run(tmp_path), _model_set()
-    with pytest.raises(ContractError, match=rf"model set {ms.model_set_id}: the aggregated variant was not frozen"):
+    with pytest.raises(
+        ContractError,
+        match=rf"model set {ms.model_set_id}: the aggregated variant was not frozen",
+    ):
         D.psse_campus(run, model_set=ms, variant="aggregated")
-    with pytest.raises(ContractError, match=rf"model set {ms.model_set_id}: unknown variant 'both'"):
+    with pytest.raises(
+        ContractError, match=rf"model set {ms.model_set_id}: unknown variant 'both'"
+    ):
         D.psse_campus(run, model_set=ms, variant="both")
     assert not (run / D.PSSE_DIR).exists()
 
 
 @pytest.mark.parametrize("campus_yaml", [None, "campus: [unclosed\n", b"\xff\xfe\x00"])
-def test_a_run_whose_campus_cannot_be_read_is_refused_naming_the_model_set(tmp_path, campus_yaml):
+def test_a_run_whose_campus_cannot_be_read_is_refused_naming_the_model_set(
+    tmp_path, campus_yaml
+):
     run, ms = _run(tmp_path), _model_set()
     path = run / D.CAMPUS_YAML
     if campus_yaml is None:
@@ -190,26 +237,39 @@ def test_a_run_whose_campus_cannot_be_read_is_refused_naming_the_model_set(tmp_p
         path.write_bytes(campus_yaml)
     else:
         path.write_text(campus_yaml)
-    with pytest.raises(ContractError, match=rf"psse: model set {ms.model_set_id} detailed: cannot read this "
-                                            r"run's campus"):
+    with pytest.raises(
+        ContractError,
+        match=rf"psse: model set {ms.model_set_id} detailed: cannot read this "
+        r"run's campus",
+    ):
         D.psse_campus(run, model_set=ms, variant="detailed")
     assert not (run / D.PSSE_DIR).exists()
 
 
-def test_a_model_set_without_its_variant_is_refused_by_the_pack_leaving_no_tree(tmp_path):
+def test_a_model_set_without_its_variant_is_refused_by_the_pack_leaving_no_tree(
+    tmp_path,
+):
     run = _run(tmp_path)
-    with pytest.raises(ContractError, match="give the GC-01 model_set and its variant together"):
+    with pytest.raises(
+        ContractError, match="give the GC-01 model_set and its variant together"
+    ):
         D.psse_campus(run, model_set=_model_set())
-    with pytest.raises(ContractError, match="give the GC-01 model_set and its variant together"):
+    with pytest.raises(
+        ContractError, match="give the GC-01 model_set and its variant together"
+    ):
         D.psse_campus(run, variant="detailed")
     assert not (run / D.PSSE_DIR).exists()
     assert [p.name for p in run.iterdir() if p.name.startswith(".")] == []
 
 
-def test_a_plant_that_is_not_a_converter_is_refused_by_the_pack_leaving_no_tree(tmp_path):
+def test_a_plant_that_is_not_a_converter_is_refused_by_the_pack_leaving_no_tree(
+    tmp_path,
+):
     """psse_pack's own rule, met after the first bundle's files: the staging tree goes with it (GK A2 Q3)."""
     run = _run(tmp_path)
-    with pytest.raises(ContractError, match="plant unit 'GEN1' is not a grid-following converter"):
+    with pytest.raises(
+        ContractError, match="plant unit 'GEN1' is not a grid-following converter"
+    ):
         D.psse_campus(run, plant=Plant("GEN1", PocBranch("trafo", 0, 0)))
     assert not (run / D.PSSE_DIR).exists()
     assert [p.name for p in run.iterdir() if p.name.startswith(".")] == []
@@ -220,10 +280,14 @@ def test_a_refusal_keeps_the_earlier_tree_and_a_new_call_replaces_it_whole(tmp_p
     D.psse_campus(run, hours=[(2030, 1)])
     before = _digests(run / D.PSSE_DIR)
     with pytest.raises(ContractError, match="no hour 7"):
-        D.psse_campus(run, hours=[(2030, 0), (2030, 7)])  # hour 0 is written before hour 7 is refused
+        D.psse_campus(
+            run, hours=[(2030, 0), (2030, 7)]
+        )  # hour 0 is written before hour 7 is refused
     assert _digests(run / D.PSSE_DIR) == before
     D.psse_campus(run)
-    assert _digests(run / D.PSSE_DIR) == MASTER_SHA256  # hour 1's bundle is gone, not mixed in
+    assert (
+        _digests(run / D.PSSE_DIR) == MASTER_SHA256
+    )  # hour 1's bundle is gone, not mixed in
 
 
 def test_the_check_hashes_the_campus_yaml_as_stored(tmp_path):
@@ -240,11 +304,21 @@ def test_a_run_of_the_aggregated_campus_cites_the_aggregated_variant(tmp_path):
     agg = ms.spec("aggregated")
     run = write_run(tmp_path / "run", agg, selected=THREE)
     bundles = D.psse_campus(run, model_set=ms, variant="aggregated")
-    assert [b.path.name for b in bundles] == ["TEST_HUB_EQ_p2030_h0", "TEST_HUB_EQ_p2030_h2"]
+    assert [b.path.name for b in bundles] == [
+        "TEST_HUB_EQ_p2030_h0",
+        "TEST_HUB_EQ_p2030_h2",
+    ]
     for b in bundles:
         m = json.loads((b.path / SUBDIR / "manifest.json").read_text())
-        assert m["model_set"] == {"model_set_id": ms.model_set_id, "data_hash": ms.data_hash,
-                                  "variant": "aggregated", "model_hash": ms.model_hashes["aggregated"]}
+        assert m["model_set"] == {
+            "model_set_id": ms.model_set_id,
+            "data_hash": ms.data_hash,
+            "variant": "aggregated",
+            "model_hash": ms.model_hashes["aggregated"],
+        }
         assert ms.model_hashes["aggregated"] != ms.model_hashes["detailed"]
-    with pytest.raises(ContractError, match=rf"{ms.model_set_id} detailed does not describe this run's campus"):
+    with pytest.raises(
+        ContractError,
+        match=rf"{ms.model_set_id} detailed does not describe this run's campus",
+    ):
         D.psse_campus(run, model_set=ms, variant="detailed")
