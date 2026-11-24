@@ -1136,10 +1136,11 @@ def test_load_flow_freshness_follows_its_inputs(client, site, set_cfg, edit, bou
         n.add("Load", "l2", bus="a", p_set=1.0)
     assert _kinds(_flow(client, name)) == {"optimisation": "stale", "study": None,
                                            "loadflow": "stale"}
-    # An HTTP value edit keeps the run (provenance-graph 13), so neither loses its results: both read stale.
+    # An HTTP edit on a dispatch whose shape is already stale clears it: neither has results any more.
+    # (On a fresh-shaped dispatch a value edit keeps the run and reads stale: test_pg13_edit_keeps_run.)
     _put(client, "loads", "l", p_set=11.0)
-    assert _kinds(_flow(client, name)) == {"optimisation": "stale", "study": None,
-                                           "loadflow": "stale"}
+    assert _kinds(_flow(client, name)) == {"optimisation": "not_run", "study": None,
+                                           "loadflow": "not_run"}
 
 
 def test_a_standalone_load_flow_is_fresh_until_an_edit(client, site, bound_ctx):
