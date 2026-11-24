@@ -74,3 +74,8 @@ def test_the_live_solve_wins(client, install_network, after_study):
         "network_revision": dirty_state.revision(),
     }
     assert study_solve.fallback(ctx) is None
+
+
+def test_the_chooser_lists_the_study_solve_tabs(client, after_study):
+    rows = client.get("/api/results/workbook/views").json()["views"]
+    assert any(r["available"] for r in rows), [r["reason"] for r in rows]

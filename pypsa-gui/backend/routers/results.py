@@ -1750,7 +1750,7 @@ def post_eh_study_abort():
 
 
 @results_router.post("/eh_study")
-def post_eh_study(body: EhStudyRequest | None = None):
+def post_eh_study(body: EhStudyRequest | None = None, user: User = Depends(require_user)):
     """
     Start the Energy Hub reference-design study in a worker thread.
 
@@ -1762,12 +1762,15 @@ def post_eh_study(body: EhStudyRequest | None = None):
     from routers.simulation import _state_update
     from services.adequacy.eh_study_runner import start_eh_study
     _refuse_if_mesh_busy("eh_study")
-    return start_eh_study(
-        body,
-        solver_state=_state,
-        state_update=_state_update,
-        publish_study=_publish_study,
-    )
+    # The study's run record is bound to the starting user (`run_evidence.start_study_run` reads the
+    # acting user); without it the record was silently skipped and no run existed (template-e2e 30).
+    with _result_actor(user):
+        return start_eh_study(
+            body,
+            solver_state=_state,
+            state_update=_state_update,
+            publish_study=_publish_study,
+        )
 
 
 # ── Edge Investment Case P4: the single-owner finance run (WP4.6b) ──────────
@@ -2982,12 +2985,18 @@ def get_results_workbook_views(user: User = Depends(require_user)):
     n = PyPSAService.get_network()
     default = set(resolve_views(_workbook_scope(n, _workbook_template())))
     solved = _dispatch_ready(n)  # before a solve every tab is empty, whatever its probe reads
+    # After a Guided study only the study's solve exists (template-e2e 30): the probes read the live
+    # network, so which tabs the workbook would fill is read off a build from the study's solve.
+    from services import study_solve
+
+    from_study = None if solved or study_solve.fallback() is None else _study_workbook_views(user)
     previous = chat_tools.acting_user_id()
     chat_tools.set_acting_user(str(user.id))  # the probes read through the chat tools
     try:
         rows = []
         for v in workbook_views():
-            status = _probe(v)[0] if solved else "no_data"
+            status = (_probe(v)[0] if solved else "no_data" if from_study is None
+                      else "available" if v.label in from_study else "no_data")
             rows.append({"view_id": v.view_id, "label": v.label, "card": v.card,
                          "card_label": CARD_BY_ID[v.card].label, "selected": v.view_id in default,
                          "available": status == "available",
@@ -3000,6 +3009,25 @@ def get_results_workbook_views(user: User = Depends(require_user)):
     # chooser says which run it exports, beside a past run on Results.
     return {"views": rows, "run": None if run is None else {
         "run_id": run.get("run_id"), "started_at": run.get("started_at")}}
+
+
+def _study_workbook_views(user: User) -> set[str]:
+    """The labels of the views a workbook built from the study's solve fills (About's "In this
+    workbook" column reads "sheets: ..." for them); empty when that build is refused or fails."""
+    import io
+
+    from openpyxl import load_workbook
+
+    try:
+        resp = get_results_workbook(views="", all_views=True, stored=False, run_id=None, user=user)
+        if resp.status_code != 200:
+            return set()
+        about = load_workbook(io.BytesIO(resp.body))["About"]
+    except Exception:  # noqa: BLE001 — no readable workbook: every tab reads empty
+        logger.info("results workbook: the study's tabs could not be probed", exc_info=True)
+        return set()
+    return {str(r[0]) for r in about.iter_rows(values_only=True)
+            if r[0] and isinstance(r[2], str) and r[2].startswith("sheets:")}
 
 
 def _workbook_run(user: User) -> dict | None:
