@@ -315,3 +315,62 @@ def test_create_refuses_wrong_staged_years_with_a_typed_422(
     assert r2.status_code == 422 and r2.json()["detail"]["field"] == "site_type"
     # nothing was created
     assert client.get("/api/projects/dc_bad/eh_template").status_code in (403, 404)
+
+
+# ── DC template review 04: the ambient follows the site's location ──────────
+
+def _year_hours() -> pd.DatetimeIndex:
+    return pd.date_range("2025-01-01", periods=8760, freq="h")
+
+
+def test_hot_site_peak_pue_hand_checked():
+    # Hot preset (|lat| 15-25): mean 27, seasonal 10, diurnal 8 -> peak 45 degC
+    # (day 200, 15:00). PUE = 1.3 + 0.02 x (45 - 20) = 1.80.
+    spec = T.dc_load_spec("eh_datacenter", {"site_latitude": 24.7})
+    assert (spec.ambient_annual_mean_c, spec.ambient_seasonal_amplitude_k,
+            spec.ambient_diurnal_amplitude_k) == (27.0, 10.0, 8.0)
+    temp = P.ambient_c(spec, _year_hours())
+    assert temp.max() == pytest.approx(45.0, abs=1e-9)
+    assert P.pue(spec, temp).max() == pytest.approx(1.80)
+
+
+def test_cool_site_peak_pue_hand_checked():
+    # Cold preset (|lat| > 60): mean 3, seasonal 11, diurnal 4 -> peak 18 degC,
+    # below the 20 degC design temperature, so PUE stays 1.30 all year.
+    spec = T.dc_load_spec("eh_datacenter", {"site_latitude": 65.0})
+    temp = P.ambient_c(spec, _year_hours())
+    assert temp.max() == pytest.approx(18.0, abs=1e-9)
+    assert P.pue(spec, temp).max() == pytest.approx(1.30)
+
+
+def test_southern_site_peaks_in_january():
+    spec = T.dc_load_spec("eh_datacenter", {"site_latitude": -23.0})
+    temp = P.ambient_c(spec, _year_hours())
+    assert pd.Timestamp(_year_hours()[int(temp.argmax())]).month in (1, 2)
+
+
+def test_hot_site_loads_more_than_default():
+    snaps = _year_hours()
+    hot = T.dc_load_spec("eh_datacenter", {"site_latitude": 24.7})
+    default = T.dc_load_spec("eh_datacenter", {})
+    p_hot = P.hourly_profile(hot, snaps, 100.0)
+    p_def = P.hourly_profile(default, snaps, 100.0)
+    assert p_hot.max() > p_def.max() and p_hot.sum() > p_def.sum()
+    # Same utilisation, so the peak ratio is the PUE ratio: 1.80 / 1.38.
+    assert p_hot.max() / p_def.max() == pytest.approx(1.80 / 1.38)
+
+
+def test_ambient_source_says_where_the_temperature_came_from():
+    assert T.dc_load_spec("eh_datacenter", {}).ambient_source == "default"
+    assert T.dc_load_spec("eh_datacenter", {"site_latitude": 24.7}).ambient_source == "site_location"
+    stated = T.dc_load_spec("eh_datacenter", {"site_latitude": 24.7, "ambient_annual_mean_c": 31.0})
+    assert stated.ambient_source == "entered" and stated.ambient_annual_mean_c == 31.0
+
+
+def test_basis_block_reports_mean_peak_pue_and_facility_mw():
+    spec = T.dc_load_spec("eh_datacenter", {"site_latitude": 24.7,
+                                            "phases": [{"cod": "2030-01-01", "it_mw": 20.0}]})
+    b = P.ambient_basis(spec, _year_hours(), None)
+    assert b["source"] == "site_location" and b["mean_c"] == 27.0
+    assert b["design_day_peak_c"] == pytest.approx(45.0) and b["peak_pue"] == pytest.approx(1.80)
+    assert 20.0 * 1.3 < b["peak_facility_mw"] <= 20.0 * 1.80

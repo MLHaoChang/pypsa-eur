@@ -8,10 +8,10 @@ import { useState } from 'react'
 import { dcLoadRefusal, type TemplateCreate } from '../../../hooks/useCreateFromTemplate'
 import {
   ARCH_HINT, BACKUP_HINT, DC_ARCH_OPTIONS, DC_BACKUP_OPTIONS, DC_DEFAULTS, DC_FIELD_LABEL, STAGED_BESS_LINE,
-  dcFieldOf, dcLoadBody, dcRefusalText, initialDcDraft, validateDc,
+  ambientSourceText, dcFieldOf, dcLoadBody, emptyAmbient, dcRefusalText, initialDcDraft, validateDc,
   type DcDraft, type DcField,
 } from '../dcLoadForm'
-import { emptyLocation, validateLocation, writeCreatedLocation, type LocationDraft } from '../siteLocation'
+import { emptyLocation, locationOf, validateLocation, writeCreatedLocation, type LocationDraft } from '../siteLocation'
 import { SiteLocationFields, showLocationSaveFailure } from './SiteLocationFields'
 
 interface CreateMutation {
@@ -31,6 +31,8 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
   const [draft, setDraft] = useState<DcDraft>(initialDcDraft)
   const [server, setServer] = useState<{ field: DcField | null; text: string } | null>(null)
   const [loc, setLoc] = useState<LocationDraft>(emptyLocation)
+  const [amb, setAmb] = useState(emptyAmbient)
+  const lat = locationOf(loc)?.lat ?? null
   const locErrors = validateLocation(loc)
   const staged = templateId === 'eh_datacenter_staged'
   const local = validateDc(draft, templateId)
@@ -42,7 +44,7 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
   const saveLocation = (project: string) => writeCreatedLocation(project, loc).then(m => { if (m) showLocationSaveFailure(m) })
   const submit = () => {
     if (nErrors || disabledReason) return
-    create.mutate({ templateId, params: dcLoadBody(draft, templateId), afterCreate: saveLocation }, {
+    create.mutate({ templateId, params: dcLoadBody(draft, templateId, { lat, ambient: amb }), afterCreate: saveLocation }, {
       onError: (e: unknown) => {
         const r = dcLoadRefusal(e)
         if (!r) return
@@ -129,6 +131,18 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
       </div>
 
       <SiteLocationFields value={loc} errors={locErrors} onChange={setLoc} />
+      <p data-testid="dc-form-ambient-source" className="text-[11px] text-muted">{ambientSourceText(lat, amb)}</p>
+      <details className="text-[11px]" data-testid="dc-form-ambient">
+        <summary className="cursor-pointer text-muted">Ambient temperature (advanced)</summary>
+        <div className="mt-1 flex flex-wrap gap-3">
+          {([['mean', 'Annual mean (°C)'], ['seasonal', 'Seasonal swing (±K)'], ['diurnal', 'Daily swing (±K)']] as const).map(([k, label]) => (
+            <label key={k} className="flex flex-col gap-1 font-semibold text-text">{label}
+              <input data-testid={`dc-form-ambient-${k}`} type="number" step="any" className={`${INPUT} w-24`}
+                placeholder="from site" value={amb[k]} onChange={e => setAmb({ ...amb, [k]: e.target.value })} />
+            </label>
+          ))}
+        </div>
+      </details>
 
       {server && !server.field && (
         <p role="alert" data-testid="dc-form-error-other" className="text-[11px] text-danger">{server.text}</p>

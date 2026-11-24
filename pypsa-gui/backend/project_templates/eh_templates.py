@@ -671,6 +671,21 @@ def _apply_dc_profile(n, spec, snapshots, it_mw: float, *, timezone, period=None
     p_set.loc[rows, "cooling"] = (1.0 - spec.critical_share) * facility
 
 
+def _apply_ambient_source(merged: dict, raw: dict) -> None:
+    """Fill the three ambient fields from the site latitude's climate zone,
+    those the body states staying as stated; record where they came from."""
+    from services.dc_load_profile import AMBIENT_FIELDS, climate_preset
+
+    stated = any(k in raw for k in AMBIENT_FIELDS)
+    lat = raw.get("site_latitude")
+    if isinstance(lat, (int, float)) and not isinstance(lat, bool) and -90 <= lat <= 90:
+        for k, v in climate_preset(lat).items():
+            if k != "zone" and k not in raw:
+                merged[k] = v
+    merged["ambient_source"] = ("entered" if stated
+                                else "site_location" if lat is not None else "default")
+
+
 def dc_load_spec(template_id: str, raw: dict | None, planning: Planning | None = None):
     """The checked opt-in spec from a create body's ``dc_load`` (merged over
     ``dc_load_preset``), or ``DcLoadError`` naming the field. The staged
@@ -683,6 +698,7 @@ def dc_load_spec(template_id: str, raw: dict | None, planning: Planning | None =
     if not isinstance(raw, dict):
         raise DcLoadError("dc_load: must be an object", "dc_load")
     merged = {**dc_load_preset(template_id, planning), **raw}
+    _apply_ambient_source(merged, raw)
     merged.setdefault("ai_workload", None)
     if merged["ai_workload"] is None:
         merged["ai_workload"] = {}

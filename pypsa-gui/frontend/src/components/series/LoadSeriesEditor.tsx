@@ -51,6 +51,20 @@ function coerce(raw: string, like: unknown): unknown {
 // The loads a data-centre project's set-up owns (backend DC_SPLIT_LOADS).
 const DC_OWNED_LOADS = ['it_load', 'cooling']
 
+interface AmbientBasis {
+  source: 'default' | 'site_location' | 'entered'; mean_c: number
+  design_day_peak_c: number; peak_pue: number; peak_facility_mw: number
+}
+const AMBIENT_SOURCE_TEXT = {
+  site_location: 'from the site location (climate zone, not weather data)',
+  default: 'the default temperate curve (no site location was set)',
+  entered: 'as entered',
+} as const
+
+function ambientBasisText(a: AmbientBasis): string {
+  return `Ambient temperature: ${AMBIENT_SOURCE_TEXT[a.source]}. Mean ${a.mean_c.toFixed(1)} °C, design-day peak ${a.design_day_peak_c.toFixed(1)} °C; peak PUE ${a.peak_pue.toFixed(2)}, peak facility load ${a.peak_facility_mw.toFixed(1)} MW.`
+}
+
 export default function LoadSeriesEditor({ project, component, mode, initialTab = 'archetype' }: LoadSeriesEditorProps) {
   const [tab, setTab] = useState<'archetype' | 'upload'>(initialTab)
   const [choice, setChoice] = useState('industrial')
@@ -99,8 +113,9 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
     queryKey: ['eh-template', project], queryFn: () => resultsApi.getEhTemplate(project, { quiet: true }),
     staleTime: 60_000,
   })
-  const dcSpec = (eh as { dc_load?: { spec?: { pue_at_design?: number; phases?: { it_mw?: number }[] } } } | null)
-    ?.dc_load?.spec
+  const dcBlock = (eh as { dc_load?: { spec?: { pue_at_design?: number; phases?: { it_mw?: number }[] }; ambient?: AmbientBasis } } | null)
+    ?.dc_load
+  const dcSpec = dcBlock?.spec
   if (dcSpec && DC_OWNED_LOADS.includes(component)) {
     const it = dcSpec.phases?.map(p => p.it_mw).filter((v): v is number => typeof v === 'number').pop()
     const detail = [it != null ? `IT ${it} MW` : null, dcSpec.pue_at_design != null ? `PUE ${dcSpec.pue_at_design}` : null]
@@ -111,6 +126,7 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
           This load follows the data-centre set-up{detail ? ` (${detail})` : ''}. The IT load and PUE are fixed when the project is
           created and cannot be changed afterwards, so a profile cannot replace them.
         </p>
+        {dcBlock?.ambient && <p className="mt-1 text-muted" data-testid="dc-ambient-basis">{ambientBasisText(dcBlock.ambient)}</p>}
       </div>
     )
   }
