@@ -378,6 +378,15 @@ describe('CampusElectricalPanel', () => {
     expect(screen.getByTestId('compliance-limit-pcc_power_factor').textContent?.trim()).toBe('0.950')
   })
 
+  it('says "no limit set" in the Limit cell of a row with neither a limit nor a band', async () => {
+    const state = sized()
+    state.results!.compliance = [{ ...state.results!.compliance[0], limit: null } as never]
+    api.state.mockResolvedValue(state)
+    renderPanel()
+    await screen.findByTestId('compliance-pcc_reactive')
+    expect(screen.getByTestId('compliance-limit-pcc_reactive').textContent?.trim()).toBe('no limit set')
+  })
+
   it('shows an unknown check that lacks an input as "not checked", not "no limit"', async () => {
     const state = sized()
     state.results!.compliance = [...state.results!.compliance, {
