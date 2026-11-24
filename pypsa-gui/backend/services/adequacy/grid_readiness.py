@@ -1567,7 +1567,7 @@ def _uif_row(inp: _Inputs, screen: dict, table, common: dict, case: str = "grid"
     in_island = uif_island(chosen) if chosen is not None else None
     island_rows = chosen[in_island] if chosen is not None else None
     judged = chosen[~in_island] if chosen is not None else None
-    alone = case == "islanded" and island_rows is not None and not island_rows.empty
+    alone = uif_islanded(table, case) == "screened"
     pairs, flagged, scope, unfed = [], False, SSTI_GRID_ONLY, []
     if alone:
         missing = [c for c in UIF_ROW_COLUMNS if c not in island_rows]
@@ -1630,15 +1630,30 @@ def _uif_row(inp: _Inputs, screen: dict, table, common: dict, case: str = "grid"
                 + ("an EMT SSTI study is warranted" if flagged else "no EMT SSTI study indicated")
                 + f" ({SSTI_GRID_ONLY}). {SSTI_SCREENING}")
     else:
+        from services.grid_compliance.ssti_source import _text
+
         where = (f"islanded, {ISLAND_CASES.get(str(top['case']), top['case'])}"
                  if str(top["role"]) in UIF_ROLES_ISLAND else top["case"])
-        note = (f"Worst UIF {value:.4g} · bus {top['bus']} · {where} fault level · machine {top['machine']}. "
-                f"This is {words} {against} {limit:g}, so "
+        shown, bound = ssti_apart(value, limit)  # the note is the pack's caption: never "0.1 above 0.1"
+        note = (f"Worst UIF {shown} · bus {_text(top['bus'])} · {where} fault level · machine "
+                f"{_text(top['machine'])}. This is {words} {against} {bound}, so "
                 + ("an EMT SSTI study is warranted" if flagged else "no EMT SSTI study is indicated")
                 + f" for {scope}. " + (f"{_uif_unfed(unfed)}. " if unfed else "") + SSTI_SCREENING)
     return _row(SSTI_UIF, _SSTI_REQ[SSTI_UIF], limit=limit, source=source, unit="UIF", rule=RULE_UIF,
                 project_value=value, verdict=SSTI_VERDICTS[SSTI_UIF]["flag" if flagged else "clear"], note=note,
                 **{k: v for k, v in common.items() if k not in ("limit", "source", "unit", "rule")})
+
+
+def ssti_apart(x: float, y: float) -> tuple[str, str]:
+    """``x`` and the limit ``y`` it is judged against, in four significant figures, with more where four would
+    print two different values alike (GK A2 B3: 0.10004 against 0.1 never reads "0.1"). The pack's cells and
+    the islanding UIF notes share it."""
+    figures = 4
+    a, b = f"{x:.{figures}g}", f"{y:.{figures}g}"
+    while a == b and x != y and figures < 17:
+        figures += 1
+        a, b = f"{x:.{figures}g}", f"{y:.{figures}g}"
+    return a, b
 
 
 def _uif_unchecked(cause: str, unknown: dict) -> dict:
@@ -1661,6 +1676,8 @@ def _uif_island(screen: dict, island, limit: float):
     the row is unknown. A run whose record has no islanded verdict predates it (``SSTI_ISLAND_PREDATES``)."""
     import pandas as pd
 
+    from services.grid_compliance.ssti_source import _text
+
     if "island_verdict" not in screen:
         return SSTI_ISLAND_PREDATES
     verdict = screen["island_verdict"]
@@ -1677,8 +1694,8 @@ def _uif_island(screen: dict, island, limit: float):
         if u is not None:
             pairs.append((u, r))
         elif not isinstance(v, str) and pd.isna(v) and str(r.get("verdict")) == "not evaluated":
-            if str(r["bus"]) not in unfed:
-                unfed.append(str(r["bus"]))
+            if _text(r["bus"]) not in unfed:
+                unfed.append(_text(r["bus"]))
         else:
             return f"the UIF table has an islanded UIF that is not a finite number ({_ssti_shown(v)})"
     top = max((u for u, _ in pairs), default=None)
@@ -1716,9 +1733,18 @@ def uif_judged(table, case: str):
     if table is None or "role" not in table:
         return pd.Series(False, index=getattr(table, "index", None), dtype=bool)
     island = uif_island(table)
-    if case == "islanded" and island.any():
+    if uif_islanded(table, case) == "screened":
         return island
     return (table["role"].astype(str) == UIF_ROLE_GRID) | island
+
+
+def uif_islanded(table, case: str) -> str | None:
+    """How the run screened an islanded project (``case``, ``grid_case``): ``"screened"`` when it wrote island
+    rows, which the card and the pack judge alone; ``"unscreened"`` when it did not, so its grid rows counted
+    an infeed the island lacks (``SSTI_ISLAND``); None for any other project (GC-08e, GK A2 N2)."""
+    if case != "islanded":
+        return None
+    return "screened" if uif_island(table).any() else "unscreened"
 
 
 def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
@@ -1908,7 +1934,7 @@ def _ssti_judged(inp: _Inputs, read: dict) -> list[dict]:
     uif = (_uif_row(inp, meta["uif"], read["uif"], common, case) if isinstance(meta.get("uif"), dict)
            else unreadable(SSTI_UIF))
     # an islanded project the run did not screen islanded: its grid rows count an infeed the island lacks
-    if uif["verdict"] in ("pass", "warn") and case == "islanded" and not uif_island(read["uif"]).any():
+    if uif["verdict"] in ("pass", "warn") and uif_islanded(read["uif"], case) == "unscreened":
         uif.update(verdict="unknown", project_value=None,
                    note=_ssti_say(SSTI_ISLAND))
     sub = (_subsync_row(inp, meta["subsync"], read["resonance"], common)

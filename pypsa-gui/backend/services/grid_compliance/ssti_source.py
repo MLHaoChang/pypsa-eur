@@ -75,16 +75,13 @@ def _number(v) -> str:
 def _apart(v, ref) -> tuple[str, str]:
     """``v`` and the limit ``ref`` it is judged against, as ``_number`` shows them, with more figures where
     four would print two different values alike (GK A2 B3: 0.10004 against 0.1 never reads "0.1")."""
-    shown, limit = _number(v), _number(ref)
-    from services.adequacy.grid_readiness import _ssti_hz
+    from services.adequacy.grid_readiness import _ssti_hz, ssti_apart
 
     # a blank or unreadable side never prints like a number, so only two different numbers tie
     x, y = (None if _missing(u) else _ssti_hz(u) for u in (v, ref))
-    figures = 4
-    while shown == limit and x != y and figures < 17:
-        figures += 1
-        shown, limit = f"{x:.{figures}g}", f"{y:.{figures}g}"
-    return shown, limit
+    if x is not None and y is not None:
+        return ssti_apart(x, y)
+    return _number(v), _number(ref)
 
 
 def _text(v) -> str:
@@ -131,7 +128,7 @@ def _uif_table(row: dict, frame, case: str, path: str) -> Table:
     """The UIF rows the scorecard row judges (``grid_readiness.uif_judged``: the grid rows, then the island
     rows; the island rows alone for an islanded project the run screened islanded), each judged under the
     row's own limit and rule when the row is judged, else "not judged" (GC-08e)."""
-    from services.adequacy.grid_readiness import uif_island, uif_judged
+    from services.adequacy.grid_readiness import uif_island, uif_islanded, uif_judged
 
     rows = []
     shown = []
@@ -139,9 +136,10 @@ def _uif_table(row: dict, frame, case: str, path: str) -> Table:
     if frame is not None and "role" in frame:
         judged, island = uif_judged(frame, case), uif_island(frame)
         shown = [frame[judged & ~island], frame[judged & island]]
+        islanded = uif_islanded(frame, case)
         # islanded, a run without island rows counted the grid's infeed: no number to show
-        unscreened = case == "islanded" and not island.any()
-        if case == "islanded" and island.any():
+        unscreened = islanded == "unscreened"
+        if islanded == "screened":
             caption = f"{caption} {GRID_ROWS_LEFT_OUT}"
     for part in shown:
         for _, r in part.iterrows():

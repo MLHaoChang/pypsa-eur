@@ -543,3 +543,56 @@ def test_a_campus_without_island_data_does_not_island():
     assert su.islands(
         SimpleNamespace(tie_normally_open=False, island={"requirements": {}})
     )
+
+
+def test_a_worst_just_above_the_limit_never_prints_like_it(tmp_path, monkeypatch):
+    # GK A2 N1: the note is the pack's caption; 0.10004 against 0.1 reads apart, in the note and the cells
+    rows = _uif_table(0.08) + _island(0.10004)
+    row = _grid(tmp_path, _island_meta("clear", 0.08, "flag", 0.10004), rows)
+    assert row["verdict"] == "warn"
+    assert row["note"].startswith(
+        "Worst UIF 0.10004 · bus MV · islanded, max fault level · machine GAS. This is above the assumed "
+        "screening threshold 0.1, so"
+    )
+    _, pack = _pack(_project(monkeypatch, tmp_path))
+    assert pack["ssti_uif"].caption == row["note"]
+    cell = next(r for r in pack["ssti_uif"].rows if r[1] == "islanded max")
+    assert (cell[3], cell[4], cell[5]) == ("0.10004", "0.1", "warn")
+
+
+def test_ssti_apart_widens_only_a_tie():
+    assert G.ssti_apart(0.10004, 0.1) == ("0.10004", "0.1")
+    assert G.ssti_apart(0.25, 0.1) == ("0.25", "0.1")
+    assert G.ssti_apart(0.1, 0.1) == ("0.1", "0.1")
+
+
+def test_uif_islanded_names_the_islanded_projects_state():
+    # GK A2 N2: the one predicate the card, its override and the pack read
+    both = pd.DataFrame(_uif_table(0.25) + _island(0.5))
+    grid = pd.DataFrame(_uif_table(0.25))
+    assert G.uif_islanded(both, "islanded") == "screened"
+    assert G.uif_islanded(grid, "islanded") == "unscreened"
+    assert G.uif_islanded(None, "islanded") == "unscreened"
+    for case in ("grid", "off_grid"):
+        assert G.uif_islanded(both, case) is None and G.uif_islanded(grid, case) is None
+
+
+def test_an_unfed_bus_id_prints_whole(tmp_path):
+    # a numeric bus id prints through the pack's id formatter (``ssti_source._text``), as the id
+    rows = _uif_table(0.08) + _island(math.nan, bus=110012)
+    row = _grid(tmp_path, _island_meta("clear", 0.08, "not evaluated", None), rows)
+    assert row["note"].startswith("The islanded UIF is not evaluated at bus 110012: ")
+
+
+def test_an_islanded_projects_worst_row_is_in_the_pack(tmp_path, monkeypatch):
+    row = _islanded(
+        tmp_path,
+        _island_meta("clear", 0.08, "flag", 0.5),
+        _uif_table(0.08) + _island(0.5, bus="LV"),
+    )
+    assert row["note"].startswith(
+        "Worst UIF 0.5 · bus LV · islanded, max fault level · machine GAS."
+    )
+    _, pack = _pack(_project(monkeypatch, tmp_path, n=_open_tie(_site())))
+    assert ("LV", "islanded max", "GAS") in _rows_of(pack["ssti_uif"])
+    assert {r[1] for r in pack["ssti_uif"].rows} == ISLANDED
