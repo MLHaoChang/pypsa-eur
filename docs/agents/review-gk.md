@@ -398,3 +398,10 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A fingerprint or digest literal is computed on master in a fresh worktree, under the same process warm-up the test uses. In-memory template builds depend on the process's history (harness issue 226, PyPSA port-2 registration), so "fresh process" is not the same as "pytest worker" (GK B (70), #1949).
 - A new item code that splits one warning across sections gets its own code, since acks key on (code, entity). Test that each one can be acknowledged on its own (GK B (70), #1869).
 - A seam that tests swap for master's function keeps master's signature. Run the parity tests (`test_exact_frame_json_parity`) for any change to an encoder's signature (GK B (70), #1949 shard 5).
+
+## Standing rulings (GK B2 (5), recorded 2026-11-24)
+
+- A reader of a solve's results judges the solve that produced them: a record stamped at solve time, never today's draft config (GK B2 (5), AA-17 A1).
+- A config that cannot be read never falls back to defaults where the defaults would show an unjudged value. It fails closed with its own reason (GK B2 (5), AA-17 A2; #1079 and #1009 applied).
+- A total over parts where any part is withheld reads not available, or is labelled as excluding that part. Test it with a mixed case, and mutate each sum helper (GK B2 (5), AA-17 S1; #1970 F1).
+- When the backend already words a flag into rendered notes, the frontend skips that flag and does not word it a second time. Pin it with a writer→reader contract test (GK B2 (5), #1935 F1).
