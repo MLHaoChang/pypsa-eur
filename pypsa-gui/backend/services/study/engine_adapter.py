@@ -774,6 +774,8 @@ def _view(ctx: Mapping[str, Any], case, result, *, centre: bool,
                    opex_fixed=fom + 0.0, opex_variable=vom + 0.0,
                    salvage=float(result.terminal[t]) + 0.0)
         if t == 0:
+            # Year 0 is the build year for every case: no bill and no saving are counted,
+            # so nothing operates and its market revenue is a judged 0.0, also on a MIP.
             row.update(bill_baseline=None, bill_option=None, savings=0.0,
                        market_revenue_at_duals=0.0)
             flags = {"bill_baseline": "build_year", "bill_option": "build_year"}

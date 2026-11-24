@@ -964,8 +964,7 @@ def compute_asset_economics(n, cfg, *, result_df, price_limit: str | None = None
     # CONSTRUCTION; until this key existed that sentence reached only the
     # chat model, and the Economics tab showed the zero bare.
     from services.results.economics_caveats import interior_optimum_notes
-    # The zero-profit framing is a property of an LP's duals; a MIP has no such prices.
-    reading_notes = [] if price_limit else interior_optimum_notes(n, {
+    reading_notes = interior_optimum_notes(n, {
         "Generator": [r["name"] for r in gen_rows],
         "StorageUnit": [r["name"] for r in su_rows],
         "Store": [r["name"] for r in store_rows],
@@ -974,6 +973,9 @@ def compute_asset_economics(n, cfg, *, result_df, price_limit: str | None = None
 
     if price_limit:
         _withhold_priced(gen_rows, su_rows, store_rows, link_rows)
+        # A note that rests on the LP's duals (the zero-profit framing) does not hold on a
+        # MIP, which has no such prices; any other note stands.
+        reading_notes = [x for x in reading_notes if x not in DUAL_DERIVED_NOTES]
     out = {
         "currency": "EUR",
         "is_multi_period": is_multi,
@@ -1010,6 +1012,15 @@ PRICED_KEYS = {
               "lcoe_eur_per_mwh", "avg_price_eur_per_mwh", "spread_eur_per_mwh"),
 }
 PRICED_KEYS["stores"] = PRICED_KEYS["storage_units"]
+
+
+def _dual_derived_notes() -> frozenset[str]:
+    from services.results.economics_caveats import ZERO_PROFIT_BY_CONSTRUCTION
+
+    return frozenset({ZERO_PROFIT_BY_CONSTRUCTION})
+
+
+DUAL_DERIVED_NOTES = _dual_derived_notes()
 
 
 def _withhold_priced(gen_rows, su_rows, store_rows, link_rows) -> None:

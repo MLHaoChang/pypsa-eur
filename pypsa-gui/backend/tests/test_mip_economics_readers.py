@@ -233,3 +233,40 @@ def test_the_live_routes_gate_by_the_solve_s_record(mip, lp, monkeypatch):
         assert ae.get("price_limit") == expect
         kp = results.get_carrier_kpis()
         assert kp.get("price_limit") == expect
+
+
+def test_a_price_independent_reading_note_survives_on_a_mip(mip, monkeypatch):
+    """GK: only the notes that rest on the LP's duals go; any other note stands."""
+    from services.results import economics_caveats
+
+    monkeypatch.setattr(economics_caveats, "interior_optimum_notes",
+                        lambda n, names: [economics_caveats.ZERO_PROFIT_BY_CONSTRUCTION, "other"])
+    assert _assets(mip, DUALS_NOT_MARGINAL)["reading_notes"] == ["other"]
+    assert _assets(mip)["reading_notes"] == [economics_caveats.ZERO_PROFIT_BY_CONSTRUCTION, "other"]
+
+
+# ── the study case: market revenue at duals (GK ruling c) ────────────────
+
+def test_the_study_case_withholds_market_revenue_on_a_mip_record():
+    """The run record's `price_limit` makes the case's market revenue None with the reason,
+    and each operating year's excluded cash-flow column too. Year 0 is the build year for
+    every case (no bill and no saving counted), so its 0.0 is a judged value."""
+    from tests.test_engine_adapter_case_golden import OPTIONS, _bundle
+
+    option = OPTIONS[0]
+    record = {"generators": [], "storage_units": [], "stores": [], "links": [],
+              "price_limit": DUALS_NOT_MARGINAL}
+    view = _bundle(option, asset_economics=record).view
+    mr = view.market_revenue_at_duals
+    assert mr.annual_value is None and mr.unavailable == {"annual_value": DUALS_NOT_MARGINAL}
+    y0, *rest = view.years
+    assert y0.bill_option is None and y0.unavailable.get("bill_option") == "build_year"
+    assert y0.savings == 0.0 and y0.market_revenue_at_duals == 0.0
+    assert rest
+    for y in rest:
+        assert y.market_revenue_at_duals is None
+        assert y.unavailable["market_revenue_at_duals"] == DUALS_NOT_MARGINAL
+    lp_view = _bundle(option).view
+    assert lp_view.market_revenue_at_duals.annual_value is not None
+    assert all(y.market_revenue_at_duals is not None for y in lp_view.years)
+    assert all("market_revenue_at_duals" not in y.unavailable for y in lp_view.years)
