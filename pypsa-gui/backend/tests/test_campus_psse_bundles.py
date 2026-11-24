@@ -200,3 +200,13 @@ def test_a_psse_folder_that_is_a_symlink_lists_nothing(island_run, tmp_path):
     shutil.rmtree(run / "psse")
     (run / "psse").symlink_to(elsewhere, target_is_directory=True)
     assert ce.psse_bundles(project)["bundles"] == []
+
+
+def test_without_a_run_manifest_nothing_is_listed_or_served(island_run):
+    project, run = island_run
+    name = ce.psse_bundles(project)["bundles"][0]["name"]
+    (run / ce.cs.CAMPUS_MANIFEST).unlink()
+    assert ce.psse_bundles(project)["bundles"] == []
+    with pytest.raises(HTTPException) as e:
+        ce.psse_bundle_zip(project, name)
+    assert e.value.status_code == 404

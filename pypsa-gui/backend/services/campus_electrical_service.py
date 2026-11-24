@@ -2497,7 +2497,8 @@ def psse_bundle_zip(project, name: str) -> tuple:
     a path, ``..`` or a symlink out of ``psse/`` matches nothing and is 404."""
     listing = psse_bundles(project)
     root = _psse_root(project)
-    bundle = next((b for b in _psse_bundle_dirs(root) if b.name == name), None)
+    listed = {b["name"] for b in listing["bundles"]}       # no run (no manifest) lists nothing, so serves nothing
+    bundle = next((b for b in _psse_bundle_dirs(root) if b.name == name and name in listed), None)
     if bundle is None:
         raise HTTPException(status_code=404, detail="no such PSS/E bundle in the latest campus run")
     buf = io.BytesIO()
