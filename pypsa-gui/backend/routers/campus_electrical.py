@@ -70,6 +70,7 @@ from deps import optional_user
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services import campus_electrical_service as ce
 from services import campus_grid_code_service as gc
+from services.http_filenames import content_disposition
 from services.upload_guard import UploadBudget
 
 router = APIRouter()
@@ -446,7 +447,7 @@ def download_psse_bundle(bundle: str, proj: AuthorizedProject = ProjectAccessDep
     with ``X-Run-Stale: true``."""
     data, stale = ce.psse_bundle_zip(_row(proj, db), bundle)
     return Response(data, media_type="application/zip",
-                    headers={"Content-Disposition": f'attachment; filename="{bundle}.zip"',
+                    headers={"Content-Disposition": content_disposition(f"{bundle}.zip"),
                              "X-Run-Stale": "true" if stale else "false"})
 
 
