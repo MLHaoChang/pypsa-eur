@@ -5,7 +5,6 @@ Every function takes a single `Ctx` and returns either a pandas Series aligned
 to `ctx.sns` (series metrics) or a JSON-ready scalar/dict (scalar metrics). No
 HTTP, no serialisation, no NaN scrubbing — the router owns all three.
 """
-
 from __future__ import annotations
 
 import logging
@@ -31,14 +30,9 @@ if TYPE_CHECKING:
     from .applicability import Status
 
 _ATTR: dict[str, str] = {
-    "Bus": "buses",
-    "Generator": "generators",
-    "Load": "loads",
-    "Line": "lines",
-    "Transformer": "transformers",
-    "Link": "links",
-    "StorageUnit": "storage_units",
-    "Store": "stores",
+    "Bus": "buses", "Generator": "generators", "Load": "loads",
+    "Line": "lines", "Transformer": "transformers", "Link": "links",
+    "StorageUnit": "storage_units", "Store": "stores",
 }
 
 
@@ -53,10 +47,10 @@ class Ctx:
     component_class: str
     name: str
     source: str
-    sns: Any  # pd.Index — the (already filtered) snapshot slice
-    weights: Any  # pd.Series aligned to sns — snapshot × period weight
+    sns: Any             # pd.Index — the (already filtered) snapshot slice
+    weights: Any         # pd.Series aligned to sns — snapshot × period weight
     is_multi: bool
-    params: dict  # the asset's static row, NaN-scrubbed
+    params: dict         # the asset's static row, NaN-scrubbed
 
 
 def build_ctx(n, component_class: str, name: str, *, source: str, sns) -> Ctx:
@@ -89,20 +83,11 @@ def build_ctx(n, component_class: str, name: str, *, source: str, sns) -> Ctx:
     except Exception:
         w = pd.Series(1.0, index=sns)
     multi = is_multi_period(n)
-    return Ctx(
-        n=n,
-        component_class=component_class,
-        name=name,
-        source=source,
-        sns=sns,
-        weights=w,
-        is_multi=multi,
-        params=params,
-    )
+    return Ctx(n=n, component_class=component_class, name=name, source=source,
+               sns=sns, weights=w, is_multi=multi, params=params)
 
 
 # ── Preconditions ───────────────────────────────────────────────────────────
-
 
 def preconditions(n, component_class: str, name: str) -> dict[str, Status]:
     """
@@ -144,21 +129,15 @@ def preconditions(n, component_class: str, name: str) -> dict[str, Status]:
         )
     else:
         out[REQ_DISPATCH] = Status(
-            "blocked",
-            "the network has not been solved",
+            "blocked", "the network has not been solved",
             Remedy("run_simulation", "Run simulation"),
         )
 
     # 2. AC power flow stage results.
     ac = _state_snapshot().get("ac_pf_results")
-    out[REQ_AC_PF] = (
-        OK
-        if isinstance(ac, dict) and ac
-        else Status(
-            "blocked",
-            "AC power flow has not been run",
-            Remedy("run_ac_pf", "Run AC power flow"),
-        )
+    out[REQ_AC_PF] = OK if isinstance(ac, dict) and ac else Status(
+        "blocked", "AC power flow has not been run",
+        Remedy("run_ac_pf", "Run AC power flow"),
     )
 
     # 3. LP duals for this component class + nodal prices.
@@ -183,7 +162,6 @@ def preconditions(n, component_class: str, name: str) -> dict[str, Status]:
 
 def _port_status(n, component_class: str, name: str, port: int) -> Status:
     from .applicability import OK, Status
-
     if component_class != "Link":
         return OK
     col = f"bus{port}"
@@ -269,14 +247,10 @@ def _annuity_status(n, component_class: str, name: str) -> Status:
 
 # ── summary (every class) ───────────────────────────────────────────────────
 
-
 def summary_identity(ctx: Ctx) -> dict:
     p = ctx.params
-    out = {
-        "name": ctx.name,
-        "class": ctx.component_class,
-        "carrier": p.get("carrier", ""),
-    }
+    out = {"name": ctx.name, "class": ctx.component_class,
+           "carrier": p.get("carrier", "")}
     for key in ("bus", "bus0", "bus1", "bus2", "type"):
         if key in p and p[key] not in (None, ""):
             out[key] = p[key]
@@ -287,56 +261,21 @@ def summary_identity(ctx: Ctx) -> dict:
 # parameter sheet stays in PropertiesPanel, which can also edit it.
 _SUMMARY_PARAMS: dict[str, tuple[str, ...]] = {
     "Bus": ("v_nom", "control", "x", "y", "carrier"),
-    "Generator": (
-        "p_nom",
-        "p_nom_extendable",
-        "p_nom_min",
-        "p_nom_max",
-        "marginal_cost",
-        "capital_cost",
-        "efficiency",
-        "committable",
-        "build_year",
-        "lifetime",
-    ),
+    "Generator": ("p_nom", "p_nom_extendable", "p_nom_min", "p_nom_max",
+                  "marginal_cost", "capital_cost", "efficiency", "committable",
+                  "build_year", "lifetime"),
     "Load": ("p_set", "q_set"),
-    "Line": (
-        "s_nom",
-        "s_nom_extendable",
-        "length",
-        "r",
-        "x",
-        "b",
-        "capital_cost",
-        "v_nom",
-    ),
-    "Transformer": ("s_nom", "s_nom_extendable", "r", "x", "tap_ratio", "capital_cost"),
-    "Link": (
-        "p_nom",
-        "p_nom_extendable",
-        "efficiency",
-        "marginal_cost",
-        "capital_cost",
-        "committable",
-    ),
-    "StorageUnit": (
-        "p_nom",
-        "p_nom_extendable",
-        "max_hours",
-        "efficiency_store",
-        "efficiency_dispatch",
-        "marginal_cost",
-        "capital_cost",
-        "cyclic_state_of_charge",
-    ),
-    "Store": (
-        "e_nom",
-        "e_nom_extendable",
-        "e_cyclic",
-        "marginal_cost",
-        "capital_cost",
-        "standing_loss",
-    ),
+    "Line": ("s_nom", "s_nom_extendable", "length", "r", "x", "b",
+             "capital_cost", "v_nom"),
+    "Transformer": ("s_nom", "s_nom_extendable", "r", "x", "tap_ratio",
+                    "capital_cost"),
+    "Link": ("p_nom", "p_nom_extendable", "efficiency", "marginal_cost",
+             "capital_cost", "committable"),
+    "StorageUnit": ("p_nom", "p_nom_extendable", "max_hours",
+                    "efficiency_store", "efficiency_dispatch", "marginal_cost",
+                    "capital_cost", "cyclic_state_of_charge"),
+    "Store": ("e_nom", "e_nom_extendable", "e_cyclic", "marginal_cost",
+              "capital_cost", "standing_loss"),
 }
 
 
@@ -346,7 +285,6 @@ def summary_params(ctx: Ctx) -> dict:
 
 
 # ── Series access ───────────────────────────────────────────────────────────
-
 
 def series_for(ctx: Ctx, attr: str):
     """
@@ -419,10 +357,8 @@ def raw(attr: str):
     differ only in the attribute name. A factory keeps them one line each in
     the registry instead of ~40 identical two-line functions.
     """
-
     def _f(ctx: Ctx):
         return series_for(ctx, attr)
-
     _f.__name__ = f"raw_{attr}"
     _f.__qualname__ = _f.__name__
     return _f
@@ -451,12 +387,8 @@ def _dense(ctx: Ctx, col: str):
 # from becoming four near-identical copies of the same four metrics.
 
 _NOM_COL: dict[str, str] = {
-    "Generator": "p_nom",
-    "Link": "p_nom",
-    "StorageUnit": "p_nom",
-    "Line": "s_nom",
-    "Transformer": "s_nom",
-    "Store": "e_nom",
+    "Generator": "p_nom", "Link": "p_nom", "StorageUnit": "p_nom",
+    "Line": "s_nom", "Transformer": "s_nom", "Store": "e_nom",
 }
 
 
@@ -518,18 +450,14 @@ def capex_annual(ctx: Ctx):
         entry = costs.get(attr_for(ctx.component_class), {}).get(ctx.name, {}) or {}
         fixed = entry.get("fixed_cost")
         if fixed is None:
-            fixed = float(entry.get("capital_cost", 0.0) or 0.0) + float(
-                entry.get("fom_cost", 0.0) or 0.0
-            )
+            fixed = float(entry.get("capital_cost", 0.0) or 0.0) + float(entry.get("fom_cost", 0.0) or 0.0)
         cc = float(fixed)
     except Exception as exc:  # noqa: BLE001 — fall back to the raw columns, never crash
         logger.warning(
             "capex_annual: periodized_capital_costs failed for %s %r, falling "
             "back to raw capital_cost + fom_cost columns (reports 0.0 for an "
             "overnight_cost-priced asset): %s",
-            ctx.component_class,
-            ctx.name,
-            exc,
+            ctx.component_class, ctx.name, exc,
         )
         from services.solver_service import fom_horizon_factor
 
@@ -539,10 +467,8 @@ def capex_annual(ctx: Ctx):
         # Both typed figures are annual; the LP charged them per modelled
         # horizon (overnight-priced assets read 0 here, as before).
         factor = fom_horizon_factor(ctx.n)
-        cc = (
-            (float(raw) if raw is not None else 0.0)
-            + (float(raw_fom) if raw_fom is not None else 0.0)
-        ) * factor
+        cc = ((float(raw) if raw is not None else 0.0)
+              + (float(raw_fom) if raw_fom is not None else 0.0)) * factor
 
     return cc * opt
 
@@ -573,11 +499,7 @@ def horizon_years(ctx: Ctx) -> float:
     The share is taken on the cost basis (`objective`), matching `_cost_wsum` —
     the same weights the revenue it is subtracted from was summed with.
     """
-    from services.period_utils import (
-        active_period_years,
-        period_years_map,
-        snapshot_weights,
-    )
+    from services.period_utils import active_period_years, period_years_map, snapshot_weights
 
     years_map = period_years_map(ctx.n)
     total = float(sum(years_map.values())) if years_map else 1.0
@@ -728,7 +650,7 @@ def gen_p_nom_by_vintage(ctx: Ctx):
         rs = str(row)
         if not rs.startswith(prefix):
             continue
-        year = rs[len(prefix) :]
+        year = rs[len(prefix):]
         if not year.isdigit():
             continue
         try:
@@ -739,7 +661,6 @@ def gen_p_nom_by_vintage(ctx: Ctx):
 
 
 # ── dispatch: series ────────────────────────────────────────────────────────
-
 
 def gen_p(ctx: Ctx):
     return series_for(ctx, "p")
@@ -799,7 +720,6 @@ def gen_q(ctx: Ctx):
 
 # ── dispatch: scalars ───────────────────────────────────────────────────────
 
-
 def gen_energy(ctx: Ctx):
     return _wsum(ctx, gen_p(ctx))
 
@@ -853,7 +773,6 @@ def gen_n_starts(ctx: Ctx):
 # figures use `objective`. `/results/asset_economics` draws the same
 # distinction, and the reconciliation test in this task depends on matching it.
 
-
 def cost_weights(ctx: Ctx):
     import pandas as pd
 
@@ -876,7 +795,6 @@ def _cost_wsum(ctx: Ctx, s) -> float | None:
 
 
 # ── prices ──────────────────────────────────────────────────────────────────
-
 
 def price_at_bus(ctx: Ctx, bus: str | None):
     """
@@ -985,7 +903,6 @@ gen_binding_hours = binding_hours
 
 # ── economics ───────────────────────────────────────────────────────────────
 
-
 def gen_revenue(ctx: Ctx):
     p, lam = gen_p(ctx), bus_price_series(ctx)
     return None if p is None or lam is None else _cost_wsum(ctx, p * lam)
@@ -1038,7 +955,6 @@ def gen_lcoe(ctx: Ctx):
 
 
 # ── emissions ───────────────────────────────────────────────────────────────
-
 
 def _co2_intensity_of_carrier(ctx: Ctx) -> float | None:
     carrier = ctx.params.get("carrier")
@@ -1106,7 +1022,6 @@ def gen_co2_intensity(ctx: Ctx):
 # generation sits here, how much load does it serve") is an aggregate over the
 # components ATTACHED to it, so these helpers walk the other frames.
 
-
 def _attached(ctx: Ctx, component_class: str, col: str = "bus") -> list[str]:
     """Names of `component_class` rows whose `col` points at this bus."""
     df = getattr(ctx.n, attr_for(component_class), None)
@@ -1123,7 +1038,6 @@ def _attached(ctx: Ctx, component_class: str, col: str = "bus") -> list[str]:
 # solve", which reads as a solver problem rather than as a fact about the
 # topology. `None` stays reserved for "the frame or column does not exist",
 # which genuinely is unknown.
-
 
 def _zeros(ctx: Ctx):
     import pandas as pd
@@ -1160,9 +1074,8 @@ def _sum_dense(ctx: Ctx, component_class: str, col: str, names: list[str]):
     return df[cols].sum(axis=1).reindex(ctx.sns).fillna(0.0)
 
 
-def _sum_static(
-    ctx: Ctx, component_class: str, col: str, names: list[str]
-) -> float | None:
+def _sum_static(ctx: Ctx, component_class: str, col: str,
+                names: list[str]) -> float | None:
     df = getattr(ctx.n, attr_for(component_class), None)
     if df is None or col not in getattr(df, "columns", []):
         return None
@@ -1176,7 +1089,6 @@ def _sum_static(
 
 
 # ── Bus: capacity ───────────────────────────────────────────────────────────
-
 
 def bus_gen_p_nom(ctx: Ctx):
     return _sum_static(ctx, "Generator", "p_nom", _attached(ctx, "Generator"))
@@ -1208,7 +1120,8 @@ def bus_capacity_by_carrier(ctx: Ctx):
 
 
 def bus_storage_p_nom_opt(ctx: Ctx):
-    return _sum_static(ctx, "StorageUnit", "p_nom_opt", _attached(ctx, "StorageUnit"))
+    return _sum_static(ctx, "StorageUnit", "p_nom_opt",
+                       _attached(ctx, "StorageUnit"))
 
 
 def bus_store_e_nom_opt(ctx: Ctx):
@@ -1221,7 +1134,6 @@ def bus_load_p_set(ctx: Ctx):
 
 
 # ── Bus: dispatch ───────────────────────────────────────────────────────────
-
 
 def bus_net_injection(ctx: Ctx):
     """`buses_t.p` — positive when the bus is a net exporter."""
@@ -1298,7 +1210,6 @@ def bus_self_sufficiency(ctx: Ctx):
 
 # ── Bus: load flow ──────────────────────────────────────────────────────────
 
-
 def bus_v_min(ctx: Ctx):
     return _smin(series_for(ctx, "v_mag_pu"))
 
@@ -1312,7 +1223,6 @@ def bus_v_mean(ctx: Ctx):
 
 
 # ── Bus: prices ─────────────────────────────────────────────────────────────
-
 
 def bus_price(ctx: Ctx):
     """This bus IS the pricing node, so look its own name up directly."""
@@ -1350,7 +1260,6 @@ def bus_load_weighted_price(ctx: Ctx):
 
 # ── Bus: economics ──────────────────────────────────────────────────────────
 
-
 def bus_load_cost(ctx: Ctx):
     lam, load = bus_price(ctx), bus_load_series(ctx)
     return None if lam is None or load is None else _cost_wsum(ctx, load * lam)
@@ -1370,7 +1279,7 @@ def bus_generation_revenue(ctx: Ctx):
 # MW and a Line's in MVA — the registry labels each metric with its own unit,
 # so nothing here needs to know which.
 
-_LOADED = 0.99  # loading fraction at which a branch counts as congested
+_LOADED = 0.99   # loading fraction at which a branch counts as congested
 
 
 def br_loading(ctx: Ctx):
@@ -1402,19 +1311,13 @@ def rating_assumed(ctx: Ctx) -> bool:
     """The branch's rating is an importer's assumption, not a stated one (psse-import 05)."""
     from services import assumed_rating
 
-    return assumed_rating.is_assumed(
-        ctx.params, "p_nom" if ctx.component_class == "Link" else "s_nom"
-    )
+    return assumed_rating.is_assumed(ctx.params, "p_nom" if ctx.component_class == "Link" else "s_nom")
 
 
 def rating_assumed_flags(ctx: Ctx) -> dict:
     from services import assumed_rating
 
-    return (
-        {"rating_assumed": True, "rating_label": assumed_rating.LABEL}
-        if rating_assumed(ctx)
-        else {}
-    )
+    return {"rating_assumed": True, "rating_label": assumed_rating.LABEL} if rating_assumed(ctx) else {}
 
 
 def br_congested_hours(ctx: Ctx):
@@ -1462,11 +1365,11 @@ def br_utilisation(ctx: Ctx):
     """Gross transfer ÷ what the branch could have carried flat out."""
     gross, s_nom = br_gross_transfer_mwh(ctx), nom_capacity_opt(ctx)
     hours = float(ctx.weights.sum())
-    return None if gross is None or not s_nom or not hours else gross / (s_nom * hours)
+    return None if gross is None or not s_nom or not hours else \
+        gross / (s_nom * hours)
 
 
 # ── Branch: prices ──────────────────────────────────────────────────────────
-
 
 def br_price0(ctx: Ctx):
     return bus_price_at(ctx, "bus0")
@@ -1507,7 +1410,6 @@ def br_fixed_cost(ctx: Ctx):
 # branch), so it declares metrics in BOTH categories: throughput, efficiency
 # and commitment under Dispatch; loading and congestion under Load flow.
 
-
 def link_output(ctx: Ctx):
     """
     −p1: power actually delivered at bus1. PyPSA signs p1 negative when the
@@ -1546,7 +1448,8 @@ def link_full_load_hours(ctx: Ctx):
 def link_mean_capacity_factor(ctx: Ctx):
     gross, opt = br_gross_transfer_mwh(ctx), nom_capacity_opt(ctx)
     hours = float(ctx.weights.sum())
-    return None if gross is None or not opt or not hours else gross / (opt * hours)
+    return None if gross is None or not opt or not hours else \
+        gross / (opt * hours)
 
 
 def link_max_ramp_up(ctx: Ctx):
@@ -1582,11 +1485,8 @@ def link_net_profit(ctx: Ctx):
     rev = link_output_revenue(ctx)
     if rev is None:
         return None
-    return rev - (
-        (link_input_cost(ctx) or 0.0)
-        + (link_vom(ctx) or 0.0)
-        + (capex_over_horizon(ctx) or 0.0)
-    )
+    return rev - ((link_input_cost(ctx) or 0.0) + (link_vom(ctx) or 0.0)
+                  + (capex_over_horizon(ctx) or 0.0))
 
 
 def link_co2_rate(ctx: Ctx):
@@ -1615,7 +1515,6 @@ def link_co2_intensity(ctx: Ctx):
 # PyPSA splits a storage unit's power into p_dispatch (out) and p_store (in),
 # both non-negative, with `p = p_dispatch − p_store`. Charge and discharge are
 # therefore separate metrics, not one signed series read two ways.
-
 
 def su_energy_capacity(ctx: Ctx):
     """p_nom_opt × max_hours — the usable reservoir, in MWh."""
@@ -1769,11 +1668,8 @@ def su_net_profit(ctx: Ctx):
     rev = su_revenue(ctx)
     if rev is None:
         return None
-    return rev - (
-        (su_charging_cost(ctx) or 0.0)
-        + (su_vom(ctx) or 0.0)
-        + (capex_over_horizon(ctx) or 0.0)
-    )
+    return rev - ((su_charging_cost(ctx) or 0.0) + (su_vom(ctx) or 0.0)
+                  + (capex_over_horizon(ctx) or 0.0))
 
 
 def su_lcos(ctx: Ctx):
@@ -1781,11 +1677,8 @@ def su_lcos(ctx: Ctx):
     out = su_energy_discharged(ctx)
     if not out:
         return None
-    return (
-        (capex_over_horizon(ctx) or 0.0)
-        + (su_vom(ctx) or 0.0)
-        + (su_charging_cost(ctx) or 0.0)
-    ) / out
+    return ((capex_over_horizon(ctx) or 0.0) + (su_vom(ctx) or 0.0)
+            + (su_charging_cost(ctx) or 0.0)) / out
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -1793,7 +1686,6 @@ def su_lcos(ctx: Ctx):
 # ════════════════════════════════════════════════════════════════════════════
 # A Store has one signed power series (`p`, positive when discharging into the
 # bus) and an energy level `e`. Charge and discharge are recovered by clipping.
-
 
 def store_discharge(ctx: Ctx):
     p = series_for(ctx, "p")
@@ -1896,17 +1788,13 @@ def store_net_profit(ctx: Ctx):
     rev = store_revenue(ctx)
     if rev is None:
         return None
-    return rev - (
-        (store_charging_cost(ctx) or 0.0)
-        + (store_vom(ctx) or 0.0)
-        + (capex_over_horizon(ctx) or 0.0)
-    )
+    return rev - ((store_charging_cost(ctx) or 0.0) + (store_vom(ctx) or 0.0)
+                  + (capex_over_horizon(ctx) or 0.0))
 
 
 # ════════════════════════════════════════════════════════════════════════════
 # Load
 # ════════════════════════════════════════════════════════════════════════════
-
 
 def load_profile(ctx: Ctx):
     """

@@ -24,7 +24,6 @@ still does — repointing it at this module would be a behaviour-neutral tidy-up
 that widened the diff of a refactor whose whole claim is that no call site
 changed.
 """
-
 import contextlib
 import contextvars
 import math
@@ -60,9 +59,8 @@ from services.vintage_service import apply_vintage_bounds
 # is built from every solve request body and saved project, and R5 requires
 # the premium never reach ens_solve, the frontier, a sweep or a user solve.
 # A ContextVar is scoped to the caller's own (synchronous) run_simulation.
-_VOLL_LOAD_PREMIUM: contextvars.ContextVar[dict[str, float]] = contextvars.ContextVar(
-    "voll_load_premium", default={}
-)
+_VOLL_LOAD_PREMIUM: contextvars.ContextVar[dict[str, float]] = (
+    contextvars.ContextVar("voll_load_premium", default={}))
 
 
 def current_voll_load_premium() -> dict[str, float]:
@@ -80,8 +78,7 @@ def voll_load_premium(premium: dict[str, float]):
         m = float(mult)
         if not (math.isfinite(m) and m >= 1.0):
             raise ValueError(
-                f"VOLL premium for Load {load_id!r} must be >= 1, got {mult!r}"
-            )
+                f"VOLL premium for Load {load_id!r} must be >= 1, got {mult!r}")
         clean[str(load_id)] = m
     token = _VOLL_LOAD_PREMIUM.set(clean)
     try:
@@ -90,16 +87,9 @@ def voll_load_premium(premium: dict[str, float]):
         _VOLL_LOAD_PREMIUM.reset(token)
 
 
-_LOAD_ELECTRICAL_ALIASES = frozenset(
-    {
-        "",
-        "ac",
-        "electricity",
-        "electric",
-        "electrical",
-        "el",
-    }
-)
+_LOAD_ELECTRICAL_ALIASES = frozenset({
+    "", "ac", "electricity", "electric", "electrical", "el",
+})
 # Substring-based matching for heat and hydrogen — covers PyPSA-Eur naming
 # conventions: "urban central heat", "rural heat", "low T heat", "district
 # heat", "H2 for industry", "H2 for power", "hydrogen storage", etc.
@@ -133,12 +123,9 @@ def _canonical_load_carrier_key(raw) -> str:
     if any(tok in c for tok in _LOAD_HEAT_TOKENS):
         return "heat"
     return c or "unspecified"
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Modelling assumptions (applied transiently at solve time)
 # ─────────────────────────────────────────────────────────────────────────────
-
 
 def resolve_branch_outages(n, cfg: "SolverConfig") -> "list[tuple[str, str]]":
     """
@@ -179,12 +166,8 @@ def resolve_branch_outages(n, cfg: "SolverConfig") -> "list[tuple[str, str]]":
             names.update(n.lines.index.astype(str))
         if thr > 0:
             for name in n.lines.index:
-                if (
-                    _branch_v_nom_max(
-                        str(n.lines.at[name, "bus0"]), str(n.lines.at[name, "bus1"])
-                    )
-                    >= thr
-                ):
+                if _branch_v_nom_max(str(n.lines.at[name, "bus0"]),
+                                     str(n.lines.at[name, "bus1"])) >= thr:
                     names.add(str(name))
         for nm in cfg.sclopf_extra_lines or []:
             if str(nm) in n.lines.index:
@@ -199,13 +182,8 @@ def resolve_branch_outages(n, cfg: "SolverConfig") -> "list[tuple[str, str]]":
             names.update(n.transformers.index.astype(str))
         if thr > 0:
             for name in n.transformers.index:
-                if (
-                    _branch_v_nom_max(
-                        str(n.transformers.at[name, "bus0"]),
-                        str(n.transformers.at[name, "bus1"]),
-                    )
-                    >= thr
-                ):
+                if _branch_v_nom_max(str(n.transformers.at[name, "bus0"]),
+                                     str(n.transformers.at[name, "bus1"])) >= thr:
                     names.add(str(name))
         for nm in cfg.sclopf_extra_transformers or []:
             if str(nm) in n.transformers.index:
@@ -261,11 +239,8 @@ def _compute_loss_atol(n) -> dict | bool:
         for name in n.transformers.index:
             r = n.transformers.at[name, "r"]
             s_nom = n.transformers.at[name, "s_nom"]
-            tap = (
-                n.transformers.at[name, "tap_ratio"]
-                if "tap_ratio" in n.transformers.columns
-                else 1.0
-            )
+            tap = n.transformers.at[name, "tap_ratio"] \
+                if "tap_ratio" in n.transformers.columns else 1.0
             if not (math.isfinite(r) and r > 0):
                 continue
             if not (math.isfinite(s_nom) and s_nom > 0):
@@ -284,14 +259,14 @@ _PRESOLVE_KEYS_BY_SOLVER = {
     # Each entry: (option_key, on_value, off_value). User-supplied values in
     # solver_options always win over the toggle so power users can pin specific
     # behaviour (e.g. "choose" for HiGHS auto-detection).
-    "highs": ("presolve", "on", "off"),
-    "gurobi": ("Presolve", 2, 0),
-    "cplex": ("preprocessing_presolve", "y", "n"),
-    "copt": ("Presolve", 1, 0),
-    "scip": ("presolving/maxrounds", -1, 0),
-    "glpk": ("presol", "on", "off"),
-    "xpress": ("PRESOLVE", 1, 0),
-    "mosek": ("MSK_IPAR_PRESOLVE_USE", "MSK_PRESOLVE_MODE_ON", "MSK_PRESOLVE_MODE_OFF"),
+    "highs":   ("presolve", "on", "off"),
+    "gurobi":  ("Presolve", 2, 0),
+    "cplex":   ("preprocessing_presolve", "y", "n"),
+    "copt":    ("Presolve", 1, 0),
+    "scip":    ("presolving/maxrounds", -1, 0),
+    "glpk":    ("presol", "on", "off"),
+    "xpress":  ("PRESOLVE", 1, 0),
+    "mosek":   ("MSK_IPAR_PRESOLVE_USE", "MSK_PRESOLVE_MODE_ON", "MSK_PRESOLVE_MODE_OFF"),
 }
 
 
@@ -299,14 +274,14 @@ _MIP_KEYS_BY_SOLVER = {
     # (gap_key, time_limit_key). User values via the dispatcher are decimal
     # gap (0.01) and seconds (e.g. 3600). The dispatcher converts where the
     # solver expects different units.
-    "highs": ("mip_rel_gap", "time_limit"),
-    "gurobi": ("MIPGap", "TimeLimit"),
-    "cplex": ("mip_tolerances_mipgap", "timelimit"),
-    "copt": ("RelGap", "TimeLimit"),
-    "scip": ("limits/gap", "limits/time"),
-    "glpk": ("mipgap", "tmlim"),
-    "xpress": ("MIPRELSTOP", "MAXTIME"),
-    "mosek": ("MSK_DPAR_MIO_TOL_REL_GAP", "MSK_DPAR_MIO_MAX_TIME"),
+    "highs":   ("mip_rel_gap",                "time_limit"),
+    "gurobi":  ("MIPGap",                     "TimeLimit"),
+    "cplex":   ("mip_tolerances_mipgap",      "timelimit"),
+    "copt":    ("RelGap",                     "TimeLimit"),
+    "scip":    ("limits/gap",                 "limits/time"),
+    "glpk":    ("mipgap",                     "tmlim"),
+    "xpress":  ("MIPRELSTOP",                 "MAXTIME"),
+    "mosek":   ("MSK_DPAR_MIO_TOL_REL_GAP",   "MSK_DPAR_MIO_MAX_TIME"),
 }
 
 
@@ -336,9 +311,7 @@ def _resolve_mip_kwargs(
     return base
 
 
-def _resolve_presolve_kwargs(
-    solver_name: str, enabled: bool, user_options: dict | None
-) -> dict:
+def _resolve_presolve_kwargs(solver_name: str, enabled: bool, user_options: dict | None) -> dict:
     """
     Map the user's presolve toggle to a solver-specific option key.
 
@@ -415,13 +388,9 @@ def _normalise_dynamic_indexes(n, phase=None) -> int:
             # of the reshape; later-created empties otherwise carry .name=None
             # and xarray would still see dim_0 for them.
             try:
-                if getattr(df.index, "name", None) != "snapshot" and not isinstance(
-                    df.index, pd.MultiIndex
-                ):
+                if getattr(df.index, "name", None) != "snapshot" and not isinstance(df.index, pd.MultiIndex):
                     df.index.name = "snapshot"
-                elif (
-                    isinstance(df.index, pd.MultiIndex) and df.index.name != "snapshot"
-                ):
+                elif isinstance(df.index, pd.MultiIndex) and df.index.name != "snapshot":
                     df.index.name = "snapshot"
             except Exception:
                 pass
@@ -433,9 +402,7 @@ def _normalise_dynamic_indexes(n, phase=None) -> int:
                 dyn[attr] = pd.DataFrame(index=snap, columns=df.columns)
                 fixed += 1
                 continue
-            if isinstance(df.index, pd.MultiIndex) and not isinstance(
-                snap, pd.MultiIndex
-            ):
+            if isinstance(df.index, pd.MultiIndex) and not isinstance(snap, pd.MultiIndex):
                 # Stale MultiIndex on a flat network — keep period-0's slice.
                 first_p = df.index.get_level_values(0).unique()[0]
                 mask = df.index.get_level_values(0) == first_p
@@ -494,9 +461,7 @@ def _clear_dispatch_fix(n, phase=None) -> None:
             except Exception:
                 pass
     if cleared and phase is not None:
-        phase(
-            f"Cleared stale dispatch-fix on {len(cleared)} accessor(s): {', '.join(cleared)}"
-        )
+        phase(f"Cleared stale dispatch-fix on {len(cleared)} accessor(s): {', '.join(cleared)}")
 
 
 def _sanitise_transformer_types(n, phase) -> None:
@@ -632,7 +597,6 @@ def _run_undo_actions(n, undo_actions: list, phase) -> None:
     try:
         from services.adequacy.eh_columns import normalise_eh_columns
         from services.adequacy.occurrence import normalise_flag_column
-
         normalise_flag_column(n)
         normalise_eh_columns(n)
     except Exception:
@@ -694,6 +658,7 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
     # do, then let the original exception travel — the caller still needs to
     # fail the solve, it just must not fail it with a corrupted network.
     try:
+
         # 2) CO2 price. Adds emissions × price / efficiency to fossil generators.
         #    We index by carrier so any generator on a non-zero-CO2 carrier gets
         #    the bump; efficiency=0 is a model error elsewhere — skip silently.
@@ -713,19 +678,12 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
         #    scalar + surcharge. Bumping only the scalar silently dropped the
         #    CO2 cost of every series; writing scalar + surcharge into the
         #    table overwrote the user's series.
-        has_per_period_price = bool(
-            getattr(cfg, "co2_price_per_period", None)
-        ) and isinstance(n.snapshots, pd.MultiIndex)
-        if (
-            (cfg.co2_price > 0 or has_per_period_price)
-            and not n.generators.empty
-            and not n.carriers.empty
-        ):
-            co2 = (
-                n.carriers["co2_emissions"]
-                if "co2_emissions" in n.carriers.columns
-                else pd.Series(dtype=float)
-            )
+        has_per_period_price = (
+            bool(getattr(cfg, "co2_price_per_period", None))
+            and isinstance(n.snapshots, pd.MultiIndex)
+        )
+        if (cfg.co2_price > 0 or has_per_period_price) and not n.generators.empty and not n.carriers.empty:
+            co2 = n.carriers["co2_emissions"] if "co2_emissions" in n.carriers.columns else pd.Series(dtype=float)
             co2 = co2[co2 > 0]
             if not co2.empty:
                 gens = n.generators
@@ -741,17 +699,12 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                     period_lvl = n.snapshots.get_level_values(0)
                     price_series = pd.Series(
                         [period_price.get(int(p), cfg.co2_price) for p in period_lvl],
-                        index=n.snapshots,
-                        dtype=float,
+                        index=n.snapshots, dtype=float,
                     )
                 # A generator with a per-snapshot intensity (`services.co2_override`) is priced at it
                 # whatever its carrier says; every other emitter keeps its carrier's figure, bit for bit.
-                ovr_mask = pd.Series(
-                    [has_override(n, g) for g in gens.index], index=gens.index
-                )
-                mask = (gens["carrier"].isin(co2.index) | ovr_mask) & (
-                    gens["efficiency"] > 0
-                )
+                ovr_mask = pd.Series([has_override(n, g) for g in gens.index], index=gens.index)
+                mask = (gens["carrier"].isin(co2.index) | ovr_mask) & (gens["efficiency"] > 0)
                 if mask.any():
                     idx = gens.index[mask]
                     # homer-parity 02e (GK B H1): a curve genset's CO2 per MWh follows its slope, the fuel its
@@ -759,10 +712,8 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                     # An overridden generator is priced at its override whatever its curve says: the slope is
                     # only its fallback on a snapshot the override leaves empty (`_ovr_fallback`).
                     slopes = {
-                        g: s
-                        for g in idx
-                        if not ovr_mask.loc[g]
-                        and (s := _fuel_curve.curve_slope(gens.loc[g])) is not None
+                        g: s for g in idx
+                        if not ovr_mask.loc[g] and (s := _fuel_curve.curve_slope(gens.loc[g])) is not None
                     }
 
                     def _ovr_fallback(g):
@@ -771,39 +722,22 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         as the Emissions views fall back (`services.co2_override`)."""
                         intensity = float(co2.get(gens.at[g, "carrier"], 0.0))
                         slope = _fuel_curve.curve_slope(gens.loc[g])
-                        return (
-                            intensity * slope
-                            if slope is not None
-                            else intensity / float(gens.at[g, "efficiency"])
-                        )
-
+                        return intensity * slope if slope is not None else intensity / float(gens.at[g, "efficiency"])
                     if has_per_period_price:
                         # Build the time-varying surcharge per emitting generator:
                         # surcharge[g, t] = price_series[t] × co2[carrier(g)] / efficiency[g]
                         # (× slope[g] for a curve genset)
-                        intensity_per_gen = (
-                            gens.loc[idx, "carrier"].map(co2).fillna(0.0)
-                        )
+                        intensity_per_gen = gens.loc[idx, "carrier"].map(co2).fillna(0.0)
                         eff_per_gen = gens.loc[idx, "efficiency"]
 
                         base_mc = n.get_switchable_as_dense(
-                            "Generator", "marginal_cost", inds=idx
-                        )
+                            "Generator", "marginal_cost", inds=idx)
                         # outer = snapshot × generator; broadcast price (T,) × intensity (G,)
                         surcharge = pd.DataFrame(
-                            {
-                                g: price_series
-                                * override_series(n, g, _ovr_fallback(g))
-                                if ovr_mask.loc[g]
-                                else price_series
-                                * float(intensity_per_gen.loc[g])
-                                * slopes[g]
-                                if g in slopes
-                                else price_series
-                                * float(intensity_per_gen.loc[g])
-                                / float(eff_per_gen.loc[g])
-                                for g in idx
-                            },
+                            {g: price_series * override_series(n, g, _ovr_fallback(g)) if ovr_mask.loc[g]
+                             else price_series * float(intensity_per_gen.loc[g]) * slopes[g] if g in slopes
+                             else price_series * float(intensity_per_gen.loc[g]) / float(eff_per_gen.loc[g])
+                             for g in idx},
                             index=n.snapshots,
                         )
                         # Time-varying marginal_cost = dense base (series or
@@ -812,15 +746,11 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         # Capture the pre-existing time-varying columns we're
                         # about to overwrite so restore() can put them back.
                         existing_cols = [g for g in idx if g in mc_t.columns]
-                        saved_t_mc = (
-                            mc_t[existing_cols].copy() if existing_cols else None
-                        )
+                        saved_t_mc = mc_t[existing_cols].copy() if existing_cols else None
                         new_cols = [g for g in idx if g not in mc_t.columns]
                         for g in idx:
                             n.generators_t.marginal_cost[g] = base_mc[g] + surcharge[g]
-                        undo_actions.append(
-                            ("t_marginal_cost", saved_t_mc, list(new_cols))
-                        )
+                        undo_actions.append(("t_marginal_cost", saved_t_mc, list(new_cols)))
                         by_period_msg = ", ".join(
                             f"{p}: {period_price.get(p, cfg.co2_price):.1f}"
                             for p in sorted(set(int(x) for x in period_lvl))
@@ -832,55 +762,32 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                     else:
                         # Single-period network OR no per-period dict: uniform price path.
                         add_per_mwh = (
-                            gens.loc[idx, "carrier"].map(co2).fillna(0.0)
-                            * cfg.co2_price
-                            / gens.loc[idx, "efficiency"]
+                            gens.loc[idx, "carrier"].map(co2).fillna(0.0) * cfg.co2_price / gens.loc[idx, "efficiency"]
                         )
                         for g, slope in slopes.items():
-                            add_per_mwh.loc[g] = (
-                                float(co2[gens.at[g, "carrier"]])
-                                * cfg.co2_price
-                                * slope
-                            )
+                            add_per_mwh.loc[g] = float(co2[gens.at[g, "carrier"]]) * cfg.co2_price * slope
                         # A per-snapshot intensity is priced on the dense cost below, not as a scalar.
                         ovr_gens = [g for g in idx if ovr_mask.loc[g]]
                         for g in ovr_gens:
                             add_per_mwh.loc[g] = 0.0
                         original_mc = gens.loc[idx, "marginal_cost"].copy()
                         gens.loc[idx, "marginal_cost"] = original_mc + add_per_mwh
-                        undo_actions.append(
-                            ("col", "generators", "marginal_cost", idx, original_mc)
-                        )
+                        undo_actions.append(("col", "generators", "marginal_cost", idx, original_mc))
                         mc_t = n.generators_t.marginal_cost
                         with_series = [g for g in idx if g in mc_t.columns]
                         if with_series:
                             saved_t_mc = mc_t[with_series].copy()
                             for g in with_series:
-                                n.generators_t.marginal_cost[g] = mc_t[g] + float(
-                                    add_per_mwh.loc[g]
-                                )
+                                n.generators_t.marginal_cost[g] = mc_t[g] + float(add_per_mwh.loc[g])
                             undo_actions.append(("t_marginal_cost", saved_t_mc, []))
                         if ovr_gens:
                             saved_ovr = n.generators_t.marginal_cost[
-                                [
-                                    g
-                                    for g in ovr_gens
-                                    if g in n.generators_t.marginal_cost.columns
-                                ]
-                            ].copy()
-                            new_ovr = [
-                                g
-                                for g in ovr_gens
-                                if g not in n.generators_t.marginal_cost.columns
-                            ]
-                            base_ovr = n.get_switchable_as_dense(
-                                "Generator", "marginal_cost", inds=ovr_gens
-                            )
+                                [g for g in ovr_gens if g in n.generators_t.marginal_cost.columns]].copy()
+                            new_ovr = [g for g in ovr_gens if g not in n.generators_t.marginal_cost.columns]
+                            base_ovr = n.get_switchable_as_dense("Generator", "marginal_cost", inds=ovr_gens)
                             for g in ovr_gens:
                                 t_per_mwh = override_series(n, g, _ovr_fallback(g))
-                                n.generators_t.marginal_cost[g] = (
-                                    base_ovr[g] + cfg.co2_price * t_per_mwh
-                                )
+                                n.generators_t.marginal_cost[g] = base_ovr[g] + cfg.co2_price * t_per_mwh
                             undo_actions.append(("t_marginal_cost", saved_ovr, new_ovr))
                         phase(
                             f"Applied CO2 price {cfg.co2_price:.1f} EUR/tCO2 to {len(idx)} "
@@ -892,8 +799,7 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                 # above covers the output-proportional fuel (the slope) only. Transient like that adder.
                 no_load_t_co2_per_h = pd.Series(
                     {
-                        g: _fuel_curve.no_load_fuel(gens.loc[g])
-                        * float(co2[gens.at[g, "carrier"]])
+                        g: _fuel_curve.no_load_fuel(gens.loc[g]) * float(co2[gens.at[g, "carrier"]])
                         for g in gens.index[gens["carrier"].isin(co2.index)]
                     },
                     dtype=float,
@@ -907,13 +813,11 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         sb_t = n.generators_t.stand_by_cost
                         saved_sb = sb_t[[g for g in nl_idx if g in sb_t.columns]].copy()
                         added_sb = [g for g in nl_idx if g not in sb_t.columns]
-                        base_sb = n.get_switchable_as_dense(
-                            "Generator", "stand_by_cost", inds=nl_idx
-                        )
+                        base_sb = n.get_switchable_as_dense("Generator", "stand_by_cost", inds=nl_idx)
                         for g in nl_idx:
-                            n.generators_t.stand_by_cost[g] = base_sb[
-                                g
-                            ] + price_series * float(no_load_t_co2_per_h[g])
+                            n.generators_t.stand_by_cost[g] = (
+                                base_sb[g] + price_series * float(no_load_t_co2_per_h[g])
+                            )
 
                         def _restore_stand_by_series(saved=saved_sb, added=added_sb):
                             frame = n.generators_t.stand_by_cost
@@ -926,19 +830,13 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         undo_actions.append(("call", _restore_stand_by_series))
                     else:
                         original_sb = gens.loc[nl_idx, "stand_by_cost"].copy()
-                        gens.loc[nl_idx, "stand_by_cost"] = (
-                            original_sb + no_load_t_co2_per_h * cfg.co2_price
-                        )
-                        undo_actions.append(
-                            ("col", "generators", "stand_by_cost", nl_idx, original_sb)
-                        )
+                        gens.loc[nl_idx, "stand_by_cost"] = original_sb + no_load_t_co2_per_h * cfg.co2_price
+                        undo_actions.append(("col", "generators", "stand_by_cost", nl_idx, original_sb))
                     phase(
                         f"Applied the CO2 price to the no-load fuel of {len(nl_idx)} curve generator(s) via "
                         "stand_by_cost."
                     )
-        elif getattr(cfg, "co2_price_per_period", None) and not isinstance(
-            n.snapshots, pd.MultiIndex
-        ):
+        elif getattr(cfg, "co2_price_per_period", None) and not isinstance(n.snapshots, pd.MultiIndex):
             # User set per-period prices but the network is flat — log so the
             # silent no-op doesn't go unnoticed.
             phase(
@@ -967,7 +865,6 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                 periods = sorted(int(p) for p in cfg.investment_periods)
                 n.set_investment_periods(periods=periods)
                 phase(f"Configured {len(periods)} investment period(s): {periods}.")
-
                 def _restore_periods(orig=original_periods, started_flat=was_flat):
                     if orig:
                         n.set_investment_periods(periods=orig)
@@ -980,7 +877,6 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         # routers.network.
                         try:
                             from routers.network import _flatten_snapshot_state
-
                             _flatten_snapshot_state(n)
                             phase(
                                 "Reverted snapshots to flat — cfg.investment_periods "
@@ -992,12 +888,9 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                                 "Reload the project to fully reset, or accept the "
                                 "MultiIndex shape on disk."
                             )
-
                 undo_actions.append(("call", _restore_periods))
             except Exception as exc:
-                phase(
-                    f"Investment periods setup failed: {exc}. Continuing with single-period."
-                )
+                phase(f"Investment periods setup failed: {exc}. Continuing with single-period.")
 
         # 4b) Auto period discount via investment_period_weightings.objective.
         #     Computes PV factors (1+r)^-(P-ref_year) per period and writes them
@@ -1045,26 +938,18 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                     pv = (1.0 + r) ** -(p - ref_year)
                     new_factors[p] = pv * yrs
                     ipw.at[p, "objective"] = new_factors[p]
-                infl_note = (
-                    f", inflation_rate={infl:.3f}, real={r:.3f}" if infl != 0.0 else ""
-                )
+                infl_note = f", inflation_rate={infl:.3f}, real={r:.3f}" if infl != 0.0 else ""
                 phase(
                     f"Auto-discount: ipw.objective set to PV × years for {len(periods_active)} "
-                    f"period(s) at discount_rate={r_nom:.3f}{infl_note}: "
-                    + ", ".join(f"{p}:{new_factors[p]:.3f}" for p in periods_active)
+                    f"period(s) at discount_rate={r_nom:.3f}{infl_note}: " +
+                    ", ".join(f"{p}:{new_factors[p]:.3f}" for p in periods_active)
                 )
-
                 def _restore_ipw_objective(orig=original_obj):
                     for p in orig.index:
-                        n.investment_period_weightings.at[p, "objective"] = float(
-                            orig.at[p]
-                        )
-
+                        n.investment_period_weightings.at[p, "objective"] = float(orig.at[p])
                 undo_actions.append(("call", _restore_ipw_objective))
             except Exception as exc:
-                phase(
-                    f"Auto-discount setup failed: {exc}. Periods stay at original weights."
-                )
+                phase(f"Auto-discount setup failed: {exc}. Periods stay at original weights.")
 
         # 5) Per-period × per-carrier load scaling. For each load column, look up
         #    its (canonical carrier, period) and multiply by the resolved factor.
@@ -1082,7 +967,6 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
         # column) rule are that module's, applied here in place with the same
         # snapshot-and-restore as before.
         from services.adequacy.demand import load_scale_factors
-
         _factors = load_scale_factors(n, cfg)
         if _factors:
             p_set = n.loads_t.p_set
@@ -1094,20 +978,16 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                 p_set.loc[_masks[period], col] = p_set.loc[_masks[period], col] * factor
                 applied.append(f"{period}/{carrier_key}/{col}×{factor:g}")
             if original_p_set is not None:
-
                 def _restore_p_set(orig=original_p_set):
                     n.loads_t["p_set"] = orig
-
                 undo_actions.append(("call", _restore_p_set))
                 # Summarise — listing every (period, carrier, col) explosion in the
                 # log would be noisy on networks with many loads; collapse to
                 # unique (period, carrier) factor combos.
-                unique_combos = sorted(
-                    set(
-                        f"{a.split('/')[0]}/{a.split('/')[1]}×{a.split('×')[-1]}"
-                        for a in applied
-                    )
-                )
+                unique_combos = sorted(set(
+                    f"{a.split('/')[0]}/{a.split('/')[1]}×{a.split('×')[-1]}"
+                    for a in applied
+                ))
                 phase(f"Applied per-carrier load scaling: {', '.join(unique_combos)}.")
 
         # 5b) VOLL (post-scaling sizing). Relocated from step 3 so the slack
@@ -1139,9 +1019,7 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
             max_pu: dict[str, pd.Series] = {}
             nan_loads: list[str] = []
             for load_id in n.loads.index:
-                bus = (
-                    str(n.loads.at[load_id, "bus"]) if "bus" in n.loads.columns else ""
-                )
+                bus = str(n.loads.at[load_id, "bus"]) if "bus" in n.loads.columns else ""
                 if not bus or bus not in n.buses.index:
                     skipped_orphan += 1
                     continue
@@ -1150,22 +1028,16 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                     continue  # don't double-add if a previous run leaked
                 # This Load's demand per snapshot (time series overrides static).
                 try:
-                    if p_set_t is not None and load_id in getattr(
-                        p_set_t, "columns", []
-                    ):
+                    if p_set_t is not None and load_id in getattr(p_set_t, "columns", []):
                         demand = p_set_t[load_id].reindex(n.snapshots)
                         if demand.isna().any():
                             nan_loads.append(str(load_id))
                             demand = demand.fillna(0.0)
                     else:
-                        static = (
-                            float(n.loads.at[load_id, "p_set"])
-                            if "p_set" in n.loads.columns
-                            else 0.0
-                        )
+                        static = (float(n.loads.at[load_id, "p_set"])
+                                  if "p_set" in n.loads.columns else 0.0)
                         demand = pd.Series(
-                            static if static == static else 0.0, index=n.snapshots
-                        )
+                            static if static == static else 0.0, index=n.snapshots)
                     peak = float(demand.max()) if len(demand) else 0.0
                 except (TypeError, ValueError):
                     demand, peak = None, 0.0
@@ -1178,8 +1050,7 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                 max_pu[name] = (
                     (demand.clip(lower=0.0) / slack_pnom).clip(upper=1.0)
                     if demand is not None
-                    else pd.Series(1.0, index=n.snapshots)
-                )
+                    else pd.Series(1.0, index=n.snapshots))
                 names.append(name)
                 buses.append(bus)
                 p_noms.append(slack_pnom)
@@ -1188,8 +1059,7 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                 phase(
                     f"WARNING: {len(nan_loads)} Load(s) have p_set gaps "
                     f"({', '.join(nan_loads[:5])}); their VOLL slack is 0 in the "
-                    "missing snapshots — no shedding is available there."
-                )
+                    "missing snapshots — no shedding is available there.")
             if names:
                 # One batched add (a per-Load add with a time series is ~3× slower
                 # on large networks). Mark BEFORE n.add so a GET landing during
@@ -1198,8 +1068,7 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                     PyPSAService.mark_transient("Generator", name)
                 try:
                     n.add(
-                        "Generator",
-                        names,
+                        "Generator", names,
                         bus=buses,
                         p_nom=p_noms,
                         marginal_cost=costs if premium else cfg.voll,
@@ -1216,20 +1085,11 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                 phase(
                     f"Added {len(added)} VOLL slack generator(s) at {cfg.voll:.0f} EUR/MWh "
                     f"(one per Load; each sized to 10× that Load's peak)."
-                    + (
-                        f" DtC priority: {sum(1 for c in costs if c != cfg.voll)} "
-                        "critical Load slack(s) carry a VOLL premium for this "
-                        "re-dispatch only."
-                        if premium
-                        else ""
-                    )
-                    + (
-                        f" Skipped {skipped_orphan} Load(s) with missing bus."
-                        if skipped_orphan
-                        else ""
-                    )
+                    + (f" DtC priority: {sum(1 for c in costs if c != cfg.voll)} "
+                       "critical Load slack(s) carry a VOLL premium for this "
+                       "re-dispatch only." if premium else "")
+                    + (f" Skipped {skipped_orphan} Load(s) with missing bus." if skipped_orphan else "")
                 )
-
                 # Restore = remove the slacks.
                 def _capture_and_remove_slacks(names=added, voll=cfg.voll):
                     # Capture lost-load dispatch BEFORE removing the slack
@@ -1243,9 +1103,7 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                                 sub = df[live].copy()
                                 # Strip prefix → Load id (P6b). Legacy bus-scoped
                                 # names strip to the bus id the same way.
-                                sub.columns = [
-                                    strip_slack_prefix(c) for c in sub.columns
-                                ]
+                                sub.columns = [strip_slack_prefix(c) for c in sub.columns]
                                 # Aggregate stats for the KPI tiles. SNAPSHOT-
                                 # WEIGHTED (canonical, spec §6.3): the frame stays
                                 # unweighted MW, but the totals integrate over the
@@ -1258,16 +1116,13 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                                 from services.adequacy.metrics import (
                                     lost_load_totals,
                                 )
-
                                 w_energy = _period_utils.snapshot_weights(
-                                    n, "generators", sns=sub.index
-                                )
+                                    n, "generators", sns=sub.index)
                                 totals = lost_load_totals(
                                     sub,
                                     energy_weights=w_energy,
                                     cost_weights=_period_utils.snapshot_weights(
-                                        n, "objective", sns=sub.index
-                                    ),
+                                        n, "objective", sns=sub.index),
                                     voll=float(voll),
                                 )
                                 captured["lost_load_t"] = sub
@@ -1280,16 +1135,14 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                                     electrical_columns,
                                     shed_hours,
                                 )
-
                                 load_e = sub.clip(lower=0).mul(
-                                    w_energy.reindex(sub.index).fillna(0.0), axis=0
-                                )
+                                    w_energy.reindex(sub.index).fillna(0.0), axis=0)
                                 if isinstance(sub.index, pd.MultiIndex):
                                     lp = load_e.groupby(
-                                        sub.index.get_level_values(0)
-                                    ).sum()
+                                        sub.index.get_level_values(0)).sum()
                                 else:
-                                    lp = pd.DataFrame([load_e.sum()], index=["ALL"])
+                                    lp = pd.DataFrame(
+                                        [load_e.sum()], index=["ALL"])
                                 captured["lost_load_load_period_mwh"] = lp
                                 # Bus roll-up for DtC / electrical consumers that
                                 # still key on buses (P4b honesty pin unchanged).
@@ -1308,10 +1161,10 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                                     bus_snap = bus_snap.T.groupby(level=0).sum().T
                                 if isinstance(sub.index, pd.MultiIndex):
                                     bp = bus_snap.groupby(
-                                        sub.index.get_level_values(0)
-                                    ).sum()
+                                        sub.index.get_level_values(0)).sum()
                                 else:
-                                    bp = pd.DataFrame([bus_snap.sum()], index=["ALL"])
+                                    bp = pd.DataFrame(
+                                        [bus_snap.sum()], index=["ALL"])
                                 captured["lost_load_bus_period_mwh"] = bp
                                 captured["shed_hours_electrical"] = shed_hours(
                                     sub[electrical_columns(n, list(sub.columns))],
@@ -1333,7 +1186,6 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         if nm in n.generators.index:
                             n.remove("Generator", nm)
                         PyPSAService.unmark_transient("Generator", nm)
-
                 undo_actions.append(("call", _capture_and_remove_slacks))
 
         # 5b') Lost-production slacks (grid-to-process ticket 08): one per product bus with a
@@ -1377,11 +1229,7 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                             series = 0.0
                     per_snap = series if per_snap is None else per_snap + series
                 try:
-                    peak = (
-                        float(per_snap.max())
-                        if hasattr(per_snap, "max")
-                        else float(per_snap or 0.0)
-                    )
+                    peak = float(per_snap.max()) if hasattr(per_snap, "max") else float(per_snap or 0.0)
                 except (TypeError, ValueError):
                     peak = 0.0
                 if peak <= 0:
@@ -1395,16 +1243,14 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                 # and export the surplus over Links — cheaper than VoLL, so it
                 # displaced shedding and peakers anywhere it could reach.
                 if hasattr(per_snap, "reindex"):
-                    dsr_max_pu = (
-                        per_snap.reindex(n.snapshots).fillna(0.0).clip(lower=0.0) / peak
-                    ).clip(upper=1.0)
+                    dsr_max_pu = (per_snap.reindex(n.snapshots).fillna(0.0)
+                                  .clip(lower=0.0) / peak).clip(upper=1.0)
                 else:
                     dsr_max_pu = 1.0
                 PyPSAService.mark_transient("Generator", name)
                 try:
                     n.add(
-                        "Generator",
-                        name,
+                        "Generator", name,
                         bus=bus,
                         p_nom=dsr_share * peak,
                         p_max_pu=dsr_max_pu,
@@ -1431,20 +1277,15 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                             if live:
                                 sub = df[live].copy()
                                 sub.columns = [
-                                    c.removeprefix(DSR_SLACK_PREFIX)
-                                    for c in sub.columns
+                                    c.removeprefix(DSR_SLACK_PREFIX) for c in sub.columns
                                 ]
                                 w_energy = _period_utils.snapshot_weights(
-                                    n, "generators", sns=sub.index
-                                )
+                                    n, "generators", sns=sub.index)
                                 captured["dsr_t"] = sub
                                 captured["dsr_total_mwh"] = float(
                                     sub.clip(lower=0)
-                                    .mul(
-                                        w_energy.reindex(sub.index).fillna(0.0), axis=0
-                                    )
-                                    .to_numpy()
-                                    .sum()
+                                    .mul(w_energy.reindex(sub.index).fillna(0.0), axis=0)
+                                    .to_numpy().sum()
                                 )
                     except Exception:
                         pass
@@ -1478,19 +1319,12 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
             if mp_periods:
                 first_p, last_p = mp_periods[0], mp_periods[-1]
                 rebased: list[str] = []
-                for comp_attr in (
-                    "generators",
-                    "storage_units",
-                    "stores",
-                    "links",
-                    "lines",
-                    "transformers",
-                ):
+                for comp_attr in ("generators", "storage_units", "stores",
+                                  "links", "lines", "transformers"):
                     df = getattr(n, comp_attr, None)
                     if df is None or df.empty or "build_year" not in df.columns:
                         continue
                     lifetimes = df["lifetime"] if "lifetime" in df.columns else None
-
                     # COLLECT-THEN-APPLY: walk df.index once into a local snapshot
                     # list, then mutate the frame in a second pass. Pandas tolerates
                     # `df.at[name, col] = …` during iteration on `df.index`, but a
@@ -1540,11 +1374,7 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         # Stretch lifetime only when finite AND too short to cover
                         # the horizon from the new build_year.
                         resize_lt: float | None = None
-                        if (
-                            lifetimes is not None
-                            and np.isfinite(lt)
-                            and first_p + lt <= last_p
-                        ):
+                        if lifetimes is not None and np.isfinite(lt) and first_p + lt <= last_p:
                             resize_lt = float(last_p - first_p + 1)
                         pending.append((name, by, raw_by, resize_lt, raw_lt))
 
@@ -1552,26 +1382,16 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                     # un-rebased neighbours (none do today, but future-proof).
                     for name, _by, raw_by, resize_lt, raw_lt in pending:
                         df.at[name, "build_year"] = first_p
-                        undo_actions.append(
-                            (
-                                "col",
-                                comp_attr,
-                                "build_year",
-                                pd.Index([name]),
-                                pd.Series({name: raw_by}),
-                            )
-                        )
+                        undo_actions.append((
+                            "col", comp_attr, "build_year",
+                            pd.Index([name]), pd.Series({name: raw_by}),
+                        ))
                         if resize_lt is not None:
                             df.at[name, "lifetime"] = resize_lt
-                            undo_actions.append(
-                                (
-                                    "col",
-                                    comp_attr,
-                                    "lifetime",
-                                    pd.Index([name]),
-                                    pd.Series({name: raw_lt}),
-                                )
-                            )
+                            undo_actions.append((
+                                "col", comp_attr, "lifetime",
+                                pd.Index([name]), pd.Series({name: raw_lt}),
+                            ))
                         rebased.append(f"{comp_attr[:-1]} '{name}'")
                 if rebased:
                     preview = ", ".join(rebased[:4]) + ("…" if len(rebased) > 4 else "")
@@ -1593,9 +1413,7 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
             try:
                 apply_vintage_bounds(n, undo_actions, phase)
             except Exception as exc:
-                phase(
-                    f"Vintage expansion failed: {exc}. Continuing without per-period bounds."
-                )
+                phase(f"Vintage expansion failed: {exc}. Continuing without per-period bounds.")
 
     except BaseException:
         # BaseException, not Exception: the abort path raises a
@@ -1612,5 +1430,4 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
         # The walk itself is `_run_undo_actions`, shared with the failure
         # path below — see its docstring.
         _run_undo_actions(n, undo_actions, phase)
-
     return restore, captured
