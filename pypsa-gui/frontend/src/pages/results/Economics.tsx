@@ -23,6 +23,7 @@ import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { canonicaliseCarrier, type ComponentClass } from './carrierAliases'
 import NotSolved from './NotSolved'
+import { withheldCell, withheldTotalNote } from './sectionWords'
 
 // ── Economics tab ──────────────────────────────────────────────────────────
 // Per-asset profitability view. Each row is one Generator / StorageUnit /
@@ -55,8 +56,11 @@ interface AggregatedAssetRow {
   capacity_factor: number | null // decimal 0–1, generators only (null for storage / group totals)
   energy_mwh: number             // for generators: energy dispatched; storage: discharged
   charge_mwh: number             // 0 for generators; storage charge MWh — needed for group spread
-  revenue_eur: number            // for storage: discharge_revenue
-  charge_cost_eur: number        // 0 for generators
+  // Priced at bus prices: null (never 0) on an integer (MIP) solve, flagged
+  // by the payload's price_limit. So are net profit, storage LCOS / converter
+  // LCOE and the spread / avg price.
+  revenue_eur: number | null     // for storage: discharge_revenue
+  charge_cost_eur: number | null // 0 for generators
   vom_cost_eur: number
   // The four capital-cost-derived figures. `null` means the backend's
   // capital-cost resolver raised, so the value could not be computed — see
@@ -75,8 +79,8 @@ interface AggregatedAssetRow {
     period: number | string
     energy_mwh: number           // discharge MWh for storage, energy for generators
     charge_mwh: number           // exact per-period charge MWh for storage; 0 for generators
-    revenue_eur: number          // discharge revenue for storage
-    charge_cost_eur: number
+    revenue_eur: number | null   // discharge revenue for storage
+    charge_cost_eur: number | null
     vom_cost_eur: number
     fixed_cost_eur: number | null
     fom_cost_eur: number | null
@@ -110,6 +114,18 @@ function Unavailable() {
       {COST_UNAVAILABLE}
     </span>
   )
+}
+
+// A figure priced at bus prices that are not prices (an integer solve):
+// "Not available (integer solve)" — one wording, never 0 or "—".
+function Withheld({ reason }: { reason: string }) {
+  return <span className="font-mono text-[11px] text-muted">{withheldCell(reason)}</span>
+}
+
+// Whether a null LCOE / LCOS is a price-limit one: storage LCOS and converter
+// LCOE include the charge / input cost at bus prices; a generator LCOE does not.
+function priceBasedLcoe(group: GroupKey): boolean {
+  return group === 'Storage' || group === 'Converters'
 }
 
 // Null propagates through every total. One asset whose capital cost could not
@@ -268,7 +284,9 @@ function sumGroup(rows: AggregatedAssetRow[], group: GroupKey, period?: number |
   // When `period` is non-null we sum the matching by_period entry instead of
   // the row's top-level totals. The capacity label / LCOE come from a
   // weighted aggregation since per-asset capacities differ.
-  let energy = 0, charge = 0, revenue = 0, charge_cost = 0, vom = 0, lcoe_denom = 0
+  let energy = 0, charge = 0, vom = 0, lcoe_denom = 0
+  // revenue / charge cost go null when any part is withheld (integer solve).
+  let revenue: number | null = 0, charge_cost: number | null = 0
   let fixed: number | null = 0, fom: number | null = 0, net: number | null = 0
   let lcoe_num: number | null = 0
   for (const r of rows) {
@@ -276,33 +294,35 @@ function sumGroup(rows: AggregatedAssetRow[], group: GroupKey, period?: number |
       const pe = r.by_period.find(p => p.period === period)
       if (!pe) continue
       energy += pe.energy_mwh
-      revenue += pe.revenue_eur
-      charge_cost += pe.charge_cost_eur
+      revenue = addOrNull(revenue, pe.revenue_eur)
+      charge_cost = addOrNull(charge_cost, pe.charge_cost_eur)
       // Exact per-period charge MWh from the backend payload.
       charge += pe.charge_mwh ?? 0
       vom += pe.vom_cost_eur
       fixed = addOrNull(fixed, pe.fixed_cost_eur)
       fom = addOrNull(fom, pe.fom_cost_eur)
       net = addOrNull(net, pe.net_profit_eur)
-      lcoe_num = addOrNull(lcoe_num, addOrNull(pe.fixed_cost_eur, pe.vom_cost_eur + pe.charge_cost_eur))
+      lcoe_num = addOrNull(lcoe_num, addOrNull(pe.fixed_cost_eur, addOrNull(pe.vom_cost_eur, pe.charge_cost_eur)))
       lcoe_denom += pe.energy_mwh
     } else {
       energy += r.energy_mwh
       charge += r.charge_mwh
-      revenue += r.revenue_eur
-      charge_cost += r.charge_cost_eur
+      revenue = addOrNull(revenue, r.revenue_eur)
+      charge_cost = addOrNull(charge_cost, r.charge_cost_eur)
       vom += r.vom_cost_eur
       fixed = addOrNull(fixed, r.fixed_cost_eur)
       fom = addOrNull(fom, r.fom_cost_eur)
       net = addOrNull(net, r.net_profit_eur)
-      lcoe_num = addOrNull(lcoe_num, addOrNull(r.fixed_cost_eur, r.vom_cost_eur + r.charge_cost_eur))
+      lcoe_num = addOrNull(lcoe_num, addOrNull(r.fixed_cost_eur, addOrNull(r.vom_cost_eur, r.charge_cost_eur)))
       lcoe_denom += r.energy_mwh
     }
   }
   // For storage groups: spread = avg_discharge_price − avg_charge_price.
   // For generator groups: avg_price = revenue / energy.
   let spread: number | null = null
-  if (group === 'Storage') {
+  if (revenue == null || charge_cost == null) {
+    spread = null
+  } else if (group === 'Storage') {
     if (revenue > 0 && energy > 1e-6 && charge_cost !== 0 && charge > 1e-6) {
       spread = (revenue / energy) - (charge_cost / charge)
     } else if (revenue > 0 && energy > 1e-6) {
@@ -334,7 +354,7 @@ function sumGroup(rows: AggregatedAssetRow[], group: GroupKey, period?: number |
   }
 }
 
-function ProfitChip({ value }: { value: number | null }) {
+function ProfitChip({ value, priceLimit }: { value: number | null; priceLimit?: string }) {
   // Coloured chip used in net-profit cells: green for positive, red for
   // negative, neutral for ~zero. The colour makes scanning a table of
   // dozens of generators much faster than reading every number.
@@ -342,7 +362,8 @@ function ProfitChip({ value }: { value: number | null }) {
   // Net profit subtracts fixed cost, so an unresolvable capital cost makes it
   // unknowable — and the old zero-fallback made it read as a PROFIT equal to
   // the whole revenue, chipped green. Refuse rather than colour a fiction.
-  if (value == null) return <Unavailable />
+  // On an integer solve net profit is withheld (its revenue has no prices).
+  if (value == null) return priceLimit ? <Withheld reason={priceLimit} /> : <Unavailable />
   if (Math.abs(value) < 1) {
     return <span className="font-mono text-[11px] text-muted">{fmtCurrency(value)}</span>
   }
@@ -389,6 +410,9 @@ export default function Economics() {
   // this field has no opinion on it, and the rows it carries do hold real
   // numbers. Only an explicit `false` means the resolver failed.
   const costsAvailable = payload?.capital_costs_available !== false
+  // "mip_duals_not_marginal" on an integer solve: every price-based figure
+  // is null and reads withheldCell(priceLimit). Absent on an LP.
+  const priceLimit = payload?.price_limit
 
   // Unfiltered list of every asset row. Used to derive the carrier filter's
   // option list AND as the source for `allRows` below (which applies the
@@ -472,7 +496,9 @@ export default function Economics() {
         // unavailable state back into a printable 0.
         return {
           ...r,
-          energy_mwh: 0, charge_mwh: 0, revenue_eur: 0, charge_cost_eur: 0,
+          energy_mwh: 0, charge_mwh: 0,
+          revenue_eur: r.revenue_eur == null ? null : 0,
+          charge_cost_eur: r.charge_cost_eur == null ? null : 0,
           vom_cost_eur: 0,
           fixed_cost_eur: r.fixed_cost_eur == null ? null : 0,
           fom_cost_eur: r.fom_cost_eur == null ? null : 0,
@@ -494,7 +520,7 @@ export default function Economics() {
         fom_cost_eur: pe.fom_cost_eur,
         net_profit_eur: pe.net_profit_eur,
         lcoe_or_lcos: pe.lcoe_or_lcos,
-        spread_or_avg_price: pe.energy_mwh > 0 ? pe.revenue_eur / pe.energy_mwh : null,
+        spread_or_avg_price: pe.revenue_eur != null && pe.energy_mwh > 0 ? pe.revenue_eur / pe.energy_mwh : null,
       }
     })
   }, [allRows, filter.selectedPeriod])
@@ -503,10 +529,11 @@ export default function Economics() {
     const arr = [...projectedRows]
     const getKey = (r: AggregatedAssetRow): number => {
       switch (sortKey) {
-        // `?? -Infinity` sinks unknowable values to one end of the sort rather
-        // than mixing them in as zeros — same treatment `lcoe` already had.
+        // `?? -Infinity` sinks unknowable values (an unavailable capital cost, or a
+        // figure withheld on an integer solve) to one end of the sort rather than
+        // mixing them in as zeros — same treatment `lcoe` already had.
         case 'net_profit': return r.net_profit_eur ?? Number.NEGATIVE_INFINITY
-        case 'revenue':    return r.revenue_eur
+        case 'revenue':    return r.revenue_eur ?? Number.NEGATIVE_INFINITY
         case 'energy':     return r.energy_mwh
         case 'lcoe':       return r.lcoe_or_lcos ?? Number.NEGATIVE_INFINITY
         case 'fixed_cost': return r.fixed_cost_eur ?? Number.NEGATIVE_INFINITY
@@ -523,15 +550,17 @@ export default function Economics() {
 
   // Top KPIs — horizon-wide totals (or selected-period totals when filtered).
   const kpis = useMemo(() => {
-    let revenue = 0, charge_cost = 0, vom = 0, energy = 0
+    let vom = 0, energy = 0
+    // null when any asset's figure is withheld (integer solve) — no partial sum.
+    let revenue: number | null = 0, charge_cost: number | null = 0
     // `fixed` is the portfolio CAPEX headline. It goes null the moment ANY
     // asset's capital cost is unknowable — a partial sum under a whole-
     // portfolio label is the same lie as a zero, just harder to spot.
     let fixed: number | null = 0
     let profitable = 0, unprofitable = 0
     for (const r of projectedRows) {
-      revenue += r.revenue_eur
-      charge_cost += r.charge_cost_eur
+      revenue = addOrNull(revenue, r.revenue_eur)
+      charge_cost = addOrNull(charge_cost, r.charge_cost_eur)
       vom += r.vom_cost_eur
       fixed = addOrNull(fixed, r.fixed_cost_eur)
       energy += r.energy_mwh
@@ -539,17 +568,18 @@ export default function Economics() {
       if (r.net_profit_eur > 1) profitable += 1
       else if (r.net_profit_eur < -1) unprofitable += 1
     }
-    const net = fixed == null ? null : revenue - charge_cost - vom - fixed
+    const net = fixed == null || revenue == null || charge_cost == null
+      ? null : revenue - charge_cost - vom - fixed
     // System-level LCOE = (Σ fixed + Σ vom + Σ charge_cost) / Σ energy.
     // For generators charge_cost is 0; for storage it's the discharged-MWh
     // weighted purchase cost. Useful for comparing whole-portfolio €/MWh.
-    const sysLcoe = fixed != null && energy > 1e-6
+    const sysLcoe = fixed != null && charge_cost != null && energy > 1e-6
       ? (fixed + vom + charge_cost) / energy
       : null
     // Volume-weighted avg capture price — pair with sysLcoe (price vs cost).
-    const avgCapture = energy > 1e-6 ? revenue / energy : null
+    const avgCapture = revenue != null && energy > 1e-6 ? revenue / energy : null
     // Margin on revenue; undefined when no revenue (avoid ÷0).
-    const profitMarginPct = net != null && Math.abs(revenue) > 1e-6
+    const profitMarginPct = net != null && revenue != null && Math.abs(revenue) > 1e-6
       ? (net / revenue) * 100
       : null
     return {
@@ -620,8 +650,9 @@ export default function Economics() {
       rows.push([
         r.group, r.name, r.carrier, r.bus, 'Total',
         r.energy_mwh.toFixed(2),
-        r.revenue_eur.toFixed(2),
-        r.charge_cost_eur.toFixed(2),
+        // Withheld on an integer solve: an empty cell, never 0.
+        r.revenue_eur != null ? r.revenue_eur.toFixed(2) : '',
+        r.charge_cost_eur != null ? r.charge_cost_eur.toFixed(2) : '',
         r.vom_cost_eur.toFixed(2),
         // Empty cell, never "0.00": a spreadsheet SUM over this column must
         // not silently absorb an unavailable capital cost as a zero.
@@ -635,8 +666,8 @@ export default function Economics() {
         rows.push([
           r.group, r.name, r.carrier, r.bus, String(pe.period),
           pe.energy_mwh.toFixed(2),
-          pe.revenue_eur.toFixed(2),
-          pe.charge_cost_eur.toFixed(2),
+          pe.revenue_eur != null ? pe.revenue_eur.toFixed(2) : '',
+          pe.charge_cost_eur != null ? pe.charge_cost_eur.toFixed(2) : '',
           pe.vom_cost_eur.toFixed(2),
           pe.fixed_cost_eur != null ? pe.fixed_cost_eur.toFixed(2) : '',
           pe.net_profit_eur != null ? pe.net_profit_eur.toFixed(2) : '',
@@ -715,7 +746,9 @@ export default function Economics() {
               {/* "0 profitable · 0 loss-making" is exactly the reading a
                   null-summing count would produce, and it looks like a
                   finding rather than a gap. Say what is actually known. */}
-              {costsAvailable
+              {priceLimit
+                ? `${allRows.length} assets · profitability ${withheldCell(priceLimit)}`
+                : costsAvailable
                 ? `${kpis.profitable} profitable · ${kpis.unprofitable} loss-making · ${allRows.length} total`
                 : `${allRows.length} assets · profitability ${COST_UNAVAILABLE}`}
             </span>
@@ -723,7 +756,7 @@ export default function Economics() {
         </div>
         <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
           <KPI accent label="Total revenue"
-               value={fmtCurrency(kpis.revenue)}
+               value={kpis.revenue != null ? fmtCurrency(kpis.revenue) : withheldCell(priceLimit)}
                sub="Σ dispatch × bus marginal price"
                hint="Annualised market revenue across every generator, storage unit and store. Storage uses discharge revenue only (charge cost is booked separately)." />
           <KPI label="Fixed cost"
@@ -733,18 +766,22 @@ export default function Economics() {
                  : 'capital-cost resolver failed — see the note above'}
                hint="Σ ((overnight × annuity, or capital_cost) + fom_cost) × p_nom_opt over generators, storage units, stores and converters (electrolysers / heat pumps / P2X) — the fixed cost the LP objective actually paid (PyPSA's periodized_cost). FOM is shown separately in the table but is already part of this figure. Reconciles EXACTLY with the Dispatch tab's CAPEX (annuitised) KPI — measured Δ 0.00. It does NOT match Capacity expansion's cost_breakdown.capex, which also includes line and transformer CAPEX and is several times larger. Shown as 'unavailable' rather than 0 when the capital-cost resolver fails." />
           <KPI label="Variable cost"
-               value={fmtCurrency(kpis.vom + kpis.charge_cost)}
-               sub={kpis.charge_cost > 0
+               value={fmtCurrency(kpis.vom + (kpis.charge_cost ?? 0))}
+               sub={kpis.charge_cost == null
+                 // VOM alone, labelled as such: the charge cost is withheld.
+                 ? `VOM only. ${withheldTotalNote('charge cost', priceLimit)}`
+                 : kpis.charge_cost > 0
                  ? `VOM ${fmtCurrency(kpis.vom)} + charge ${fmtCurrency(kpis.charge_cost)}`
                  : 'Σ dispatch × marginal_cost'}
                hint="Σ |p| × marginal_cost. For storage assets this also includes the cost of charging energy (charge_mwh × bus price) — the market price paid to fill the reservoir." />
           <KPI label="Net profit"
-               value={kpis.net != null ? fmtCurrency(kpis.net) : COST_UNAVAILABLE}
+               value={kpis.net != null ? fmtCurrency(kpis.net)
+                 : priceLimit ? withheldCell(priceLimit) : COST_UNAVAILABLE}
                sub={kpis.net == null
-                 ? 'needs fixed cost, which could not be computed'
+                 ? (priceLimit ? 'needs revenue, which is withheld' : 'needs fixed cost, which could not be computed')
                  : kpis.profitMarginPct != null
-                 ? `margin ${kpis.profitMarginPct >= 0 ? '' : '−'}${Math.abs(kpis.profitMarginPct).toFixed(1)}% · = revenue − ${kpis.charge_cost > 0 ? 'charge − ' : ''}vom − fixed`
-                 : `= revenue − ${kpis.charge_cost > 0 ? 'charge − ' : ''}vom − fixed`}
+                 ? `margin ${kpis.profitMarginPct >= 0 ? '' : '−'}${Math.abs(kpis.profitMarginPct).toFixed(1)}% · = revenue − ${(kpis.charge_cost ?? 0) > 0 ? 'charge − ' : ''}vom − fixed`
+                 : `= revenue − ${(kpis.charge_cost ?? 0) > 0 ? 'charge − ' : ''}vom − fixed`}
                deltaState={kpis.net == null ? 'warn' : kpis.net > 0 ? 'ok' : kpis.net < 0 ? 'err' : undefined}
                hint="Sum of per-asset net profits (revenue − charge − VOM − fixed). Margin = net ÷ revenue. Negative means the portfolio doesn't recover its annualised costs at market prices." />
         </div>
@@ -754,21 +791,23 @@ export default function Economics() {
                sub="MWh sold into the market (Σ p+ × weight)"
                hint="Σ dispatch × weight. For storage, this is the discharged energy (positive p only) — charge MWh isn't double-counted." />
           <KPI label="Charge cost (storage)"
-               value={fmtCurrency(kpis.charge_cost)}
+               value={kpis.charge_cost != null ? fmtCurrency(kpis.charge_cost) : withheldCell(priceLimit)}
                sub="market price paid to fill"
                {...(!hasStorage
                  ? { state: 'not_applicable' as const, reason: 'This network has no storage.' }
-                 : Math.abs(kpis.charge_cost) > 1e-3 ? {} : { state: 'zero' as const })}
+                 : kpis.charge_cost == null || Math.abs(kpis.charge_cost) > 1e-3 ? {} : { state: 'zero' as const })}
                hint="Σ charge_mwh × bus price across every storage asset. Zero on networks without storage. Subtracts directly from storage revenue in the net-profit roll-up." />
           <KPI label="System LCOE / LCOS"
                value={kpis.sysLcoe != null
                  ? `${kpis.sysLcoe.toFixed(2)} €/MWh`
+                 : kpis.charge_cost == null ? withheldCell(priceLimit)
                  : costsAvailable ? '—' : COST_UNAVAILABLE}
                sub="(Σ fixed + vom + charge) / Σ energy"
                {...(nothingDispatched ? NOTHING_DISPATCHED : {})}
                hint="Portfolio-wide €/MWh — what every MWh delivered into the market costs the system to produce, on average. Useful as a yardstick: the avg capture price needs to exceed this for the portfolio to recover costs." />
           <KPI label="Avg capture price"
-               value={kpis.avgCapture != null ? `${kpis.avgCapture.toFixed(2)} €/MWh` : '—'}
+               value={kpis.avgCapture != null ? `${kpis.avgCapture.toFixed(2)} €/MWh`
+                 : kpis.revenue == null ? withheldCell(priceLimit) : '—'}
                sub="Σ revenue / Σ energy delivered"
                {...(nothingDispatched ? NOTHING_DISPATCHED : {})}
                hint="Volume-weighted average price the portfolio earned on delivered MWh (discharge for storage). Compare to System LCOE / LCOS: capture above LCOE means market prices cover production cost on average." />
@@ -940,6 +979,7 @@ export default function Economics() {
                       isMultiPeriod={payload.is_multi_period}
                       selectedPeriod={filter.selectedPeriod}
                       costsAvailable={costsAvailable}
+                      priceLimit={priceLimit}
                     />
                   )
                 })
@@ -961,6 +1001,7 @@ export default function Economics() {
                       // since we're already viewing one period.
                       showByPeriod={filter.selectedPeriod == null}
                       costsAvailable={costsAvailable}
+                      priceLimit={priceLimit}
                     />
                   )
                 })
@@ -1029,7 +1070,7 @@ export default function Economics() {
 // ── Group section ────────────────────────────────────────────────────────
 function GroupSection({
   groupKey, open, onToggle, total, assets, openAssets, setOpenAssets,
-  isMultiPeriod, selectedPeriod, costsAvailable,
+  isMultiPeriod, selectedPeriod, costsAvailable, priceLimit,
 }: {
   groupKey: GroupKey
   open: boolean
@@ -1044,6 +1085,8 @@ function GroupSection({
   // undefined" (render `—`) and "capital costs unavailable" (render the
   // marker). The value alone cannot tell them apart.
   costsAvailable: boolean
+  // Set on an integer solve: a null price-based figure reads withheldCell.
+  priceLimit?: string
 }) {
   return (
     <>
@@ -1061,19 +1104,26 @@ function GroupSection({
         <td className="px-2 py-1 text-right text-[10px] text-muted">{total.capacity_label}</td>
         <td className="px-2 py-1 text-right text-[10px] text-muted">—</td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">{fmtEnergy(total.energy_mwh)}</td>
-        <td className="px-2 py-1 text-right font-mono text-[11px]">{fmtCurrency(total.revenue_eur)}</td>
-        <td className="px-2 py-1 text-right font-mono text-[11px]">{total.charge_cost_eur > 0 ? fmtCurrency(total.charge_cost_eur) : '—'}</td>
+        <td className="px-2 py-1 text-right font-mono text-[11px]">
+          {total.revenue_eur != null ? fmtCurrency(total.revenue_eur) : <Withheld reason={priceLimit ?? ''} />}
+        </td>
+        <td className="px-2 py-1 text-right font-mono text-[11px]">
+          {total.charge_cost_eur == null ? <Withheld reason={priceLimit ?? ''} />
+            : total.charge_cost_eur > 0 ? fmtCurrency(total.charge_cost_eur) : '—'}
+        </td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">{fmtCurrency(total.vom_cost_eur)}</td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">
           {total.fixed_cost_eur != null ? fmtCurrency(total.fixed_cost_eur) : <Unavailable />}
         </td>
-        <td className="px-2 py-1 text-right"><ProfitChip value={total.net_profit_eur} /></td>
+        <td className="px-2 py-1 text-right"><ProfitChip value={total.net_profit_eur} priceLimit={priceLimit} /></td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">
           {total.lcoe_or_lcos != null ? `${total.lcoe_or_lcos.toFixed(2)} €/MWh`
+            : priceLimit && priceBasedLcoe(groupKey) ? <Withheld reason={priceLimit} />
             : costsAvailable ? '—' : <Unavailable />}
         </td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">
-          {total.spread_or_avg_price != null ? `${total.spread_or_avg_price.toFixed(2)} €/MWh` : '—'}
+          {total.spread_or_avg_price != null ? `${total.spread_or_avg_price.toFixed(2)} €/MWh`
+            : priceLimit ? <Withheld reason={priceLimit} /> : '—'}
         </td>
       </tr>
       {open && assets.map((r, i) => {
@@ -1091,6 +1141,7 @@ function GroupSection({
             isMultiPeriod={isMultiPeriod}
             showByPeriod={selectedPeriod == null}
             costsAvailable={costsAvailable}
+            priceLimit={priceLimit}
           />
         )
       })}
@@ -1101,7 +1152,7 @@ function GroupSection({
 // ── Asset row + (optional) per-period sub-table ───────────────────────────
 function AssetRow({
   row, indent = false, zebra = false, open, onToggle, isMultiPeriod, showByPeriod,
-  costsAvailable,
+  costsAvailable, priceLimit,
 }: {
   row: AggregatedAssetRow
   indent?: boolean
@@ -1111,7 +1162,9 @@ function AssetRow({
   isMultiPeriod: boolean
   showByPeriod: boolean
   costsAvailable: boolean
+  priceLimit?: string
 }) {
+  const lcoeWithheld = !!priceLimit && priceBasedLcoe(row.group)
   const expandable = isMultiPeriod && showByPeriod && row.by_period.length > 0
   return (
     <>
@@ -1132,19 +1185,26 @@ function AssetRow({
           {row.capacity_factor != null ? `${(row.capacity_factor * 100).toFixed(0)}%` : '—'}
         </td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">{fmtEnergy(row.energy_mwh)}</td>
-        <td className="px-2 py-1 text-right font-mono text-[11px]">{fmtCurrency(row.revenue_eur)}</td>
-        <td className="px-2 py-1 text-right font-mono text-[11px]">{row.charge_cost_eur > 0 ? fmtCurrency(row.charge_cost_eur) : '—'}</td>
+        <td className="px-2 py-1 text-right font-mono text-[11px]">
+          {row.revenue_eur != null ? fmtCurrency(row.revenue_eur) : <Withheld reason={priceLimit ?? ''} />}
+        </td>
+        <td className="px-2 py-1 text-right font-mono text-[11px]">
+          {row.charge_cost_eur == null ? <Withheld reason={priceLimit ?? ''} />
+            : row.charge_cost_eur > 0 ? fmtCurrency(row.charge_cost_eur) : '—'}
+        </td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">{fmtCurrency(row.vom_cost_eur)}</td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">
           {row.fixed_cost_eur != null ? fmtCurrency(row.fixed_cost_eur) : <Unavailable />}
         </td>
-        <td className="px-2 py-1 text-right"><ProfitChip value={row.net_profit_eur} /></td>
+        <td className="px-2 py-1 text-right"><ProfitChip value={row.net_profit_eur} priceLimit={priceLimit} /></td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">
           {row.lcoe_or_lcos != null ? `${row.lcoe_or_lcos.toFixed(2)} €/MWh`
+            : lcoeWithheld ? <Withheld reason={priceLimit!} />
             : costsAvailable ? '—' : <Unavailable />}
         </td>
         <td className="px-2 py-1 text-right font-mono text-[11px]">
-          {row.spread_or_avg_price != null ? `${row.spread_or_avg_price.toFixed(2)} €/MWh` : '—'}
+          {row.spread_or_avg_price != null ? `${row.spread_or_avg_price.toFixed(2)} €/MWh`
+            : priceLimit ? <Withheld reason={priceLimit} /> : '—'}
         </td>
       </tr>
       {expandable && open && (
@@ -1171,15 +1231,21 @@ function AssetRow({
                   <tr key={String(pe.period)} className="border-b border-border/20">
                     <td className="px-2 py-0.5 font-mono">{pe.period}</td>
                     <td className="px-2 py-0.5 text-right font-mono">{fmtEnergy(pe.energy_mwh)}</td>
-                    <td className="px-2 py-0.5 text-right font-mono">{fmtCurrency(pe.revenue_eur)}</td>
-                    <td className="px-2 py-0.5 text-right font-mono">{pe.charge_cost_eur > 0 ? fmtCurrency(pe.charge_cost_eur) : '—'}</td>
+                    <td className="px-2 py-0.5 text-right font-mono">
+                      {pe.revenue_eur != null ? fmtCurrency(pe.revenue_eur) : <Withheld reason={priceLimit ?? ''} />}
+                    </td>
+                    <td className="px-2 py-0.5 text-right font-mono">
+                      {pe.charge_cost_eur == null ? <Withheld reason={priceLimit ?? ''} />
+                        : pe.charge_cost_eur > 0 ? fmtCurrency(pe.charge_cost_eur) : '—'}
+                    </td>
                     <td className="px-2 py-0.5 text-right font-mono">{fmtCurrency(pe.vom_cost_eur)}</td>
                     <td className="px-2 py-0.5 text-right font-mono">
                       {pe.fixed_cost_eur != null ? fmtCurrency(pe.fixed_cost_eur) : <Unavailable />}
                     </td>
-                    <td className="px-2 py-0.5 text-right"><ProfitChip value={pe.net_profit_eur} /></td>
+                    <td className="px-2 py-0.5 text-right"><ProfitChip value={pe.net_profit_eur} priceLimit={priceLimit} /></td>
                     <td className="px-2 py-0.5 text-right font-mono">
                       {pe.lcoe_or_lcos != null ? `${pe.lcoe_or_lcos.toFixed(2)} €/MWh`
+                        : lcoeWithheld ? <Withheld reason={priceLimit!} />
                         : costsAvailable ? '—' : <Unavailable />}
                     </td>
                   </tr>
