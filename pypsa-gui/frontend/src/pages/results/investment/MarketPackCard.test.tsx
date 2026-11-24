@@ -253,7 +253,7 @@ describe('MarketPackCard: preview and apply', () => {
     noKeys(container)
   })
 
-  it('keeps Apply off when the plan cannot be fetched again after a stale refusal', async () => {
+  it('hides the out-of-date plan when it cannot be fetched again after a stale refusal, and previews again', async () => {
     api.apply.mockRejectedValueOnce({ response: { status: 409, data: { detail: {
       error_kind: 'market_pack_stale', code: 'market_pack_stale', message: 'changed' } } } })
     wrap(<MarketPackCard cfg={CFG()} />)
@@ -262,8 +262,22 @@ describe('MarketPackCard: preview and apply', () => {
     api.preview.mockRejectedValueOnce({ response: { status: 500, data: {} } })
     fireEvent.click(screen.getByTestId('mp-apply'))
     await screen.findByTestId('mp-preview-refused')
-    expect((screen.getByTestId('mp-apply') as HTMLButtonElement).disabled).toBe(true)
+    // The out-of-date plan is neither shown nor appliable; the line says what to do next (GK B2 F1).
+    expect(screen.getByTestId('mp-apply-stale').textContent).toBe(
+      'Changed since you looked, so nothing was applied, and the new changes could not be worked out. Preview again.')
+    expect(screen.queryByTestId('mp-apply')).toBeNull()
+    expect(screen.queryByTestId('mp-preview-table')).toBeNull()
+    expect(screen.queryByTestId('mp-preview-totals')).toBeNull()
     expect(api.apply).toHaveBeenCalledTimes(1)
+    // Preview again fetches the plan; once it lands, Apply sends its digest.
+    api.preview.mockResolvedValueOnce(PLAN({ plan_digest: 'f'.repeat(64) }))
+    api.apply.mockResolvedValueOnce({ ...PLAN({ plan_digest: 'f'.repeat(64) }), changed: 1 })
+    fireEvent.click(screen.getByTestId('mp-preview-again'))
+    await screen.findByTestId('mp-preview-table')
+    expect(screen.getByTestId('mp-apply-stale').textContent).toContain('The list below is up to date.')
+    fireEvent.click(screen.getByTestId('mp-apply'))
+    await screen.findByTestId('mp-receipt')
+    expect(api.apply).toHaveBeenLastCalledWith('no-1-2026', 'fedcba9876543210', 'f'.repeat(64))
   })
 
   it('shows a refused apply as a plain sentence and keeps the preview', async () => {

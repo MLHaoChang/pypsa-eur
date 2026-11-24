@@ -167,13 +167,28 @@ function PackPreview({ pack, products, onApplied, onClose }: {
       {preview.isPending && <p className="text-[11px] text-muted">Working out the changes…</p>}
       {preview.isError && <p role="alert" className="text-[11px] text-danger" data-testid="mp-preview-refused">
         {refusalText(preview.error)}</p>}
-      {plan && (
+      {/* A failed fetch after a stale refusal (GK B2 F1): the plan still held is out of
+          date, so it is not shown and cannot be applied; the user previews again. */}
+      {plan && preview.isError && (
+        <>
+          {stale && <p role="status" className="text-[11px] text-warn" data-testid="mp-apply-stale">
+            Changed since you looked, so nothing was applied, and the new changes could not be worked out.
+            Preview again.</p>}
+          <div className="flex items-center gap-2">
+            <button type="button" disabled={preview.isFetching} data-testid="mp-preview-again"
+                    className="px-2 py-0.5 rounded bg-accent text-on-accent text-[11px] disabled:opacity-40"
+                    onClick={() => { void preview.refetch() }}>Preview again</button>
+            <button type="button" className="px-2 py-0.5 text-[11px]" onClick={onClose}>Cancel</button>
+          </div>
+        </>
+      )}
+      {plan && !preview.isError && (
         <>
           {/* The totals and Apply sit above the list, so a long list never hides them. */}
           <p className="text-[11px]" data-testid="mp-preview-totals">{totals(plan)}</p>
           <div className="flex items-center gap-2">
             {plan.changes.length > 0 && (
-              <button type="button" disabled={busy || preview.isFetching || preview.isError} data-testid="mp-apply"
+              <button type="button" disabled={busy || preview.isFetching} data-testid="mp-apply"
                       className="px-2 py-0.5 rounded bg-accent text-on-accent text-[11px] disabled:opacity-40"
                       onClick={() => { void apply() }}>Apply {pack.label}</button>)}
             <button type="button" className="px-2 py-0.5 text-[11px]" onClick={onClose}>Cancel</button>
