@@ -79,10 +79,15 @@ def capture(session):
         return None  # Unsaved drafts have no saved-project rules.
     with chat_tools._acting() as (db, user):
         if session.owner_user_id is not None and session.owner_user_id != str(user.id):
-            raise HTTPException(403, 'Chat ownership changed.')
+            raise HTTPException(403, {'error_kind': 'chat_ownership_changed',
+                                      'message': 'This chat belongs to another user. No tool was admitted.'})
         try:
             project = current_project(db, user, project_id)
         except HTTPException as exc:
+            if exc.status_code == 409:
+                # The save route keeps current_project's string detail (issue 21).
+                raise HTTPException(409, {'error_kind': 'project_binding_changed',
+                                          'message': 'The open project changed since this chat started. No tool was admitted.'}) from exc
             if exc.status_code != 404:
                 raise
             # No access is not an unreadable store (issue 17); still 404, so a
