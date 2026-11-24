@@ -1255,6 +1255,55 @@ SUBSYNC_RESONANCE_CSV = "campus_subsync_resonance.csv"
 SUBSYNC_VERDICT_ORDER = ("flag", "check", "not evaluated", "clear")
 
 
+#: A clear series row while some genset gives no torsional modes (GC-01c, GK A2 C1).
+NO_MODES_FOR = "no torsional modes given for genset(s) {}; the screen does not pass on the others alone"
+#: A clear series row resting on assumed torsional modes (GC-01c, GK A2 C2).
+ASSUMED_MODES = "clear rests on assumed torsional mode(s): {}"
+
+
+def _mode_coverage(campus, resonance):
+    """The series rows of ``resonance`` with the campus's torsional-mode
+    coverage applied (see ``ssti_screens_campus``): ``mode_source`` on each
+    judged row, ``assumed`` set by an assumed mode, and a ``clear`` judged row
+    turned ``check`` while a genset lacks modes, or noted when assumed modes
+    carry it."""
+    from gridspine.static import subsync_scan as ss
+
+    modes, sources = campus.torsional_modes, campus.torsional_mode_sources
+    out = resonance.copy()
+    out["mode_source"] = None
+    out["assumed_modes"] = None  # the clause ASSUMED_MODES names, on a clear row resting on assumed modes
+    gensets = campus.units.index[campus.units["kind"] == "genset"]
+    missing = sorted(g for g in gensets if g not in modes)
+    assumed = {g: [f for f, src in zip(modes[g], sources[g]) if src == "assumed"] for g in modes}
+    assumed = {g: fl for g, fl in assumed.items() if fl}
+    judged = (out["kind"] == ss.SERIES) & out["machine"].notna()
+
+    def source(row):
+        # an equal frequency given twice under different sources counts as assumed if either is
+        given = [src for f, src in zip(modes[row.machine], sources[row.machine]) if f == row.mode_hz]
+        return "assumed" if "assumed" in given else given[0]
+
+    out.loc[judged, "mode_source"] = [source(r) for r in out[judged].itertuples()]
+    out.loc[judged & (out["mode_source"] == "assumed"), "assumed"] = True
+    clear = judged & (out["verdict"] == "clear")
+    if missing:
+        out.loc[clear, "note"] = [_join_note(NO_MODES_FOR.format(", ".join(missing)), n) for n in out.loc[clear, "note"]]
+        out.loc[clear, "verdict"] = "check"
+        # not judged, so no margin shown for it (GK A2 ruling (b): a pack never shows a value the scorecard refused)
+        out.loc[clear, "margin_hz"] = math.nan
+    elif assumed:
+        said = "; ".join(f"{g} {', '.join(f'{f:g}' for f in fl)} Hz" for g, fl in sorted(assumed.items()))
+        out.loc[clear, "note"] = [_join_note(ASSUMED_MODES.format(said), n) for n in out.loc[clear, "note"]]
+        out.loc[clear, "assumed_modes"] = said
+        out.loc[clear, "assumed"] = True
+    return out
+
+
+def _join_note(first, rest):
+    return "; ".join(filter(None, [first, rest if isinstance(rest, str) else ""]))
+
+
 @dataclasses.dataclass
 class SstiScreens:
     uif: object                 # ssti_uif.UifStudy
@@ -1280,7 +1329,16 @@ def ssti_screens_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()
     scanned from, and the verdict is the worst over all rows. A capacitor
     scanned with no crossing reads ``clear`` within the scan band. Without
     any capacitor the series verdict reads ``not evaluated`` (grid-side series
-    compensation needs the TSP's data). No torsional mode is entered.
+    compensation needs the TSP's data).
+
+    The gensets' torsional modes (``Campus.torsional_modes``, GC-01c) go to
+    every scan. Each judged series row carries ``mode_source``, the source of
+    the mode it was judged on; one judged on an ``assumed`` mode is marked
+    ``assumed``. A ``clear`` row reads ``check`` while any genset of the
+    campus has no modes (``NO_MODES_FOR``: the screen never passes on the
+    machines it knows only), and a ``clear`` resting on any ``assumed`` mode
+    says so in its note (``ASSUMED_MODES``). A row with no series resonance in
+    the band is clear whatever the modes.
     Screening only: the binding answer is the EMT study."""
     from gridspine.static import harmonic_scan as hs
     from gridspine.static import series_caps as SC
@@ -1298,12 +1356,14 @@ def ssti_screens_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()
     net, caps = campus.net, campus.series_caps
     far = [(c, b) for c, b in SC.far_side(net, bus) if b != bus]
     points = [bus] + [b for _, b in far]
-    studies = [(b, ss.subsync_scan(net, b, cases, series_caps=caps, clearance_hz=clearance,
+    modes = campus.torsional_modes
+    studies = [(b, ss.subsync_scan(net, b, cases, series_caps=caps, torsional_modes=modes, clearance_hz=clearance,
                                    clearance_assumed=assumed, notes=notes))
                for b in dict.fromkeys(points)]
     name = net.bus["name"].astype(str)
     scan = pd.concat([s.scan.assign(bus=name[b]) for b, s in studies], ignore_index=True)
-    resonance = pd.concat([s.resonance.assign(bus=name[b]) for b, s in studies], ignore_index=True)
+    resonance = _mode_coverage(campus, pd.concat([s.resonance.assign(bus=name[b]) for b, s in studies],
+                                                 ignore_index=True))
     # each far-side bus with no series crossing reads clear, naming the capacitors scanned from it
     crossed = set(resonance.loc[resonance["kind"] == ss.SERIES, "bus"])
     band = f"{ss.F_MIN_HZ:g}-{float(net.f_hz) - ss.F_MIN_HZ:g} Hz"

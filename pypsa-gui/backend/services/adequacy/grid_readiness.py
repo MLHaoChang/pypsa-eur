@@ -1604,6 +1604,13 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(moved), **unknown)
     series = (resonance[resonance["kind"].astype(str) == SERIES] if resonance is not None and "kind" in resonance
               else None)
+    if series is not None:
+        # a row worse than the run's verdict contradicts it (GK A2 H2); margins come from judged rows only (G1)
+        if worse := _worse_rows(series, verdict):
+            return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], note=_ssti_say(
+                f"The run's resonance table has a row with verdict {_ssti_shown(worse[0])}, worse than its "
+                f"verdict {_ssti_shown(verdict)}"), **unknown)
+        series = series[subsync_judged(series)]
     if series is None or series.empty or "margin_hz" not in series:
         return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR],
                     note=_ssti_say("The run wrote no torsional margin for a series resonance"), **unknown)
@@ -1630,10 +1637,56 @@ def _subsync_row(inp: _Inputs, screen: dict, resonance, common: dict) -> dict:
     words = "below" if verdict == "flag" else "at or above"
     note = (f"Least margin {margin:.4g} Hz: the electrical resonance's complement {f_comp:g} Hz "
             f"against the torsional mode {f_mode:g} Hz of {r['machine']} ({r['case']}), {words} "
-            f"the clearance {limit:g} Hz. {SSTI_SCREENING}")
+            f"the clearance {limit:g} Hz. {_assumed_modes(series) if verdict == 'clear' else ''}{SSTI_SCREENING}")
     return _row(SUBSYNC_SR, _SSTI_REQ[SUBSYNC_SR], limit=limit, source=source, unit="Hz", rule=RULE_SUBSYNC,
                 project_value=margin, verdict=SSTI_VERDICTS[SUBSYNC_SR][verdict], note=note,
                 **{k: v for k, v in common.items() if k not in ("limit", "source", "unit", "rule")})
+
+
+def subsync_judged(series):
+    """True on the series-resonance rows the card judges a margin on (GC-01c, GK A2 G1, H1): not a row the
+    scan left undecided (check, not evaluated), not a band row with no series resonance in it (no f_er, no
+    margin); none at all in a table without verdicts or margins (fail closed). The pack reads the same."""
+    import pandas as pd
+
+    if "margin_hz" not in series or "verdict" not in series:
+        return pd.Series(False, index=series.index)
+    undecided = series["verdict"].astype(str).isin(("check", "not evaluated"))
+    no_resonance = (series["f_er_hz"].isna() if "f_er_hz" in series else True) & series["margin_hz"].isna()
+    return ~undecided & ~no_resonance
+
+
+#: ``gridspine.drivers.campus_study.SUBSYNC_VERDICT_ORDER`` for a build without gridspine (worst first);
+#: ``test_grid_readiness_ssti`` holds it equal to the engine's.
+FALLBACK_SUBSYNC_VERDICT_ORDER = ("flag", "check", "not evaluated", "clear")
+
+
+def _worse_rows(series, verdict: str) -> list:
+    """The series rows' verdicts worse than the run's ``verdict`` (``SUBSYNC_VERDICT_ORDER``, worst first; a
+    blank, non-string or other value outside it counts as worst), GK A2 H2, J1."""
+    try:
+        from gridspine.drivers.campus_study import SUBSYNC_VERDICT_ORDER as order
+    except ImportError:  # a build without gridspine: the engine's order, pinned by a test
+        order = FALLBACK_SUBSYNC_VERDICT_ORDER
+
+    if "verdict" not in series:
+        return []
+    rank = {v: i for i, v in enumerate(order)}
+    return [v for v in series["verdict"] if rank.get(v if isinstance(v, str) else None, -1) < rank[verdict]]
+
+
+def _assumed_modes(series) -> str:
+    """The sentence a pass resting on assumed torsional modes adds (GC-01c, GK A2 G2, H3): the engine's
+    ``assumed_modes`` of the first judged row that has one, else ``""``."""
+    try:
+        from gridspine.drivers.campus_study import ASSUMED_MODES
+    except ImportError:  # pragma: no cover - build-shape branch
+        return ""
+    for said in series["assumed_modes"] if "assumed_modes" in series else ():
+        if isinstance(said, str) and said.strip():
+            clause = ASSUMED_MODES.format(said.strip())
+            return f"{clause[0].upper()}{clause[1:]}. "
+    return ""
 
 
 def _ssti_read(inp: _Inputs) -> dict:
