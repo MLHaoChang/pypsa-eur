@@ -488,7 +488,9 @@ def test_d2a_an_unscheduled_network_keeps_its_pre_02b_key_and_reads_fresh():
 def test_d2a_the_fingerprint_of_an_unscheduled_template_is_pre_02b():
     n = build_eh_datacenter()
     assert E.energization_frame(n) is None
-    assert _fps(n) == MASTER_FP_EH_DATACENTER  # the pinned digest (moved by DC review 03: gas genset efficiency)
+    assert (
+        _fps(n) == MASTER_FP_EH_DATACENTER
+    )  # the pinned digest (moved by DC review 03: gas genset efficiency)
 
 
 def test_d2a_a_build_shares_no_snapshot_index_with_an_earlier_one():
