@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): On an integer (MIP) solve, the prices digest, Compare prices, LCOH (and the energy-hub TEA note) and the decision-study report no longer present the solve's 0.0 bus prices as prices: each reads the solve kind and says the figure is not available on an integer solve.
