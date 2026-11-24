@@ -221,8 +221,8 @@ def test_the_dual_is_the_rebuilt_rows_not_the_flat_one():
     assert n.generators_t.p["clean"].sum() == pytest.approx(0.0, abs=1e-6)
     row = sink["last_co2_cap"]["rows"][0]
     assert row["mu"] == pytest.approx(0.0, abs=1e-9)
-    assert row["binding"] is False
-    assert row["shadow_price_eur_per_t"] is None
+    (cap,) = co2_cap.cap_entries(sink["last_co2_cap"], 2.0, {})
+    assert cap["binding"] is False and cap["cost_eur_per_t"] is None
 
 
 @pytest.mark.parametrize("scale", [1.0, 1e-3])
@@ -235,9 +235,9 @@ def test_a_binding_cap_prices_the_marginal_switch_at_any_objective_scale(scale):
     )
     assert status == "ok"
     assert n.generators_t.p["clean"].sum() == pytest.approx(8.0, rel=1e-6)
-    row = sink["last_co2_cap"]["rows"][0]
-    assert row["binding"] is True
-    assert row["shadow_price_eur_per_t"] == pytest.approx(180.0, rel=1e-6)
+    (cap,) = co2_cap.cap_entries(sink["last_co2_cap"], 6.0, {})
+    assert cap["binding"] is True
+    assert cap["cost_eur_per_t"] == pytest.approx(180.0, rel=1e-6)
 
 
 # ── state restored (C4) ───────────────────────────────────────────────────
@@ -351,7 +351,7 @@ def test_a_network_infeasible_without_the_cap_says_so():
     n = _hand(clean_mw=4.0, grid_mw=3.0)
     status, condition, sink, _ = _solve(n, co2_limit_t_per_yr=10_000.0)
     ref = sink["last_co2_cap"]["refusal"]
-    assert ref["least_t_per_yr"] is None
+    assert ref["least_t_per_yr"] is None and ref["without_limit"] == "infeasible"
     assert "the limit is not the cause" in ref["message"]
 
 
@@ -387,8 +387,11 @@ def test_on_the_single_year_dc_template_a_cap_binds_and_cuts_genset_energy():
     assert status == "ok"
     assert _annual_t(n) == pytest.approx(limit, rel=1e-6)
     assert _gas_mwh(n) < free_gas
-    row = sink["last_co2_cap"]["rows"][0]
-    assert row["binding"] is True and row["shadow_price_eur_per_t"] > 0
+    a = co2_cap.annual(
+        sink["last_co2_cap"], _annual_t(n) * co2_cap.year_fraction(n), {}
+    )
+    assert a["binding"] is True and a["shadow_price_eur_per_t"] > 0
+    assert a["t_per_yr"] == pytest.approx(limit, rel=1e-6)
     assert n.global_constraints.empty
 
 
@@ -420,7 +423,9 @@ def test_on_the_staged_template_the_cap_and_the_emissions_view_count_the_same_to
     }
     for p in n.investment_periods:
         assert got[p] == pytest.approx(limit * scale[p], rel=1e-6)
-    assert all(r["binding"] for r in sink["last_co2_cap"]["rows"])
+    assert all(
+        c["binding"] for c in co2_cap.cap_entries(sink["last_co2_cap"], None, got)
+    )
 
 
 # ── results (C8) ──────────────────────────────────────────────────────────
@@ -530,3 +535,50 @@ def test_expert_emissions_lists_the_goals_cap_like_a_stored_one():
     assert cap["shadow_price_eur_per_tCO2"] == pytest.approx(-180.0, rel=1e-6)
     assert out["cap"]["name"] == "co2_cap"
     assert compute_emissions(n, "lopf", result_df=_live)["caps"] == []
+
+
+def test_a_period_with_no_counted_tonnes_reads_not_available_never_zero():
+    a = co2_cap.annual(_GOAL, 2000.0, {2030: 500.0})  # 2035 withheld
+    assert a["t_per_yr"] is None and a["by_period"] == {}
+    entries = co2_cap.cap_entries(_GOAL, 2000.0, {2030: 500.0})
+    assert entries[1]["used_tCO2"] is None and entries[1]["slack_tCO2"] is None
+    assert co2_cap.annual(_GOAL, None, {})["t_per_yr"] is None
+
+
+def test_the_goal_and_a_stored_cap_share_the_binding_verdict():
+    # Used up (slack 0) binds even with a zero dual, as `_cap_binding` says.
+    from services.results.emissions import _cap_binding
+
+    row = {
+        "name": "co2_cap",
+        "period": None,
+        "cap_t": 100.0,
+        "row_scale": 1.0,
+        "mu": 0.0,
+        "shadow_price_eur_per_t": 0.0,
+    }
+    (cap,) = co2_cap.cap_entries({"rows": [row]}, 100.0, {})
+    assert cap["binding"] is True is _cap_binding(0.0, 0.0, 100.0)
+
+
+def test_an_extra_lp_that_cannot_run_does_not_blame_the_network():
+    n = _hand()
+    goal = {
+        "limit_t_per_yr": 1.0,
+        "rows": [
+            {
+                "name": "co2_cap",
+                "period": None,
+                "cap_t": 1.0,
+                "row_scale": 1.0,
+                "mu": None,
+                "shadow_price_eur_per_t": None,
+            }
+        ],
+    }
+    ref = co2_cap.unreachable(n, goal, {}, "highs")
+    assert ref["without_limit"] == "not_found" and ref["least_t_per_yr"] is None
+    assert ref["message"] == (
+        "CO₂ limit: no design meets 1 t CO₂/yr. The least "
+        "emissions reachable could not be found."
+    )

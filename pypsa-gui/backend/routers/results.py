@@ -3374,10 +3374,20 @@ def _co2_goal_headline(n) -> dict | None:
     if not goal or goal.get("refusal"):
         return None
     e = compute_emissions(n, "lopf", result_df=_result_df)
-    if e is None:
-        return {**annual(goal, 0.0, {}), "t_per_yr": None}
+    if e is None:  # nothing counted: the card reads not available, never 0 t
+        return annual(goal, None, {})
     totals = {r["period"]: r["total_tCO2"] for r in e.get("by_period") or []}
     return annual(goal, e["total_tCO2"], totals)
+
+
+@results_router.get("/co2_limit")
+def get_co2_limit():
+    """The CO₂ limit goal of the last solve (DC review 02): the limit, each
+    period's cap and dual, and after an infeasible solve its typed refusal
+    (``refusal.code`` ``co2_cap_unreachable``, with the least emissions
+    reachable). 204 when the last solve had no CO₂ limit."""
+    goal = _state.get("last_co2_cap")
+    return goal if goal else Response(status_code=204)
 
 
 def _headline_comparison(cards: list[dict], actor_id) -> dict | None:
