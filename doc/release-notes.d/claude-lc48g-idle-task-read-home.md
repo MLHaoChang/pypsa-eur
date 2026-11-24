@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): after a project switch, an idle assistant task (ready, needs review, paused at a card) in the other project no longer blocks starting a new plan; a task that still runs there keeps blocking it.

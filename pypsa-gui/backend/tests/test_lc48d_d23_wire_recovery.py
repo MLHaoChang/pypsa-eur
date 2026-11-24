@@ -27,6 +27,7 @@ Hand oracle on the baseline project (G1 20 MW):
 """
 
 # ruff: noqa: F811 -- shared public harness fixtures
+import json
 import uuid
 
 import pytest
@@ -361,11 +362,12 @@ def test_after_a_project_switch_the_running_task_still_blocks_a_start(
         chat_tools.start_task(title="Other", request_id="second", steps=WAIT)
     assert switch.value.status_code == 409
     assert switch.value.detail["error_kind"] == "switch_in_progress"
+    # LC48G-READ-1: the guard reads it in its own project, so it names it.
     assert switch.value.detail["active"] == {
         "kind": "task",
         "id": first["task_id"],
-        "title": None,
-        "status": "unreadable",
+        "title": "Wait",
+        "status": "running",
     }
     assert chat.task_id == first["task_id"]
     assert not _stored("second").exists()
@@ -388,7 +390,7 @@ def test_a_detached_task_keeps_blocking_until_it_reads_as_ended(
     _switch_refused(
         lambda: chat_tools.start_task(title="Other", request_id="second", steps=WAIT),
         first["task_id"],
-        "unreadable",
+        "running",
     )
     assert chat.task_id is None and not _stored("second").exists()
     # Back in its project, the user cancels it: the detach is let go.
@@ -397,6 +399,72 @@ def test_a_detached_task_keeps_blocking_until_it_reads_as_ended(
     assert chat.detached_task_id is None
     second = chat_tools.start_task(title="Other", request_id="second", steps=WAIT)
     assert chat.task_id == second["task_id"]
+
+
+# LC-48g (owner decision LC48G-READ-1): after a switch the guard reads the
+# chat's task in its own project; an idle one lets another plan start.
+
+
+@pytest.mark.parametrize("status", ["ready", "needs_review", "paused_at_card"])
+@pytest.mark.parametrize("detach", [False, True])
+def test_an_idle_task_in_another_project_lets_another_plan_start(
+    chat, monkeypatch, tmp_path, status, detach
+):
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    _set_stored(first["task_id"], status=status)
+    _, _, owner = tasks._authority()
+    away = (tmp_path, str(uuid.uuid4()), owner)
+    monkeypatch.setattr(tasks, "_authority", lambda: away)
+    if detach:
+        assert tasks.begin_step(chat, "project_readiness", {}) is None
+        assert chat.task_id is None and getattr(chat, "detached_task_id", None) == first["task_id"]
+    second = chat_tools.start_task(title="Other", request_id="second", steps=WAIT)
+    assert chat.task_id == second["task_id"] and getattr(chat, "detached_task_id", None) is None
+    assert _stored("second").exists()
+
+
+def test_a_task_whose_project_is_not_known_still_blocks_a_start(
+    chat, monkeypatch, tmp_path
+):
+    """Fail closed (LC48F-REFUSE-1): a task the guard cannot place, say after
+    a restart, reads as `unreadable` even when it is idle."""
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    monkeypatch.delitem(tasks._HOMES, first["task_id"])
+    _, _, owner = tasks._authority()
+    away = (tmp_path, str(uuid.uuid4()), owner)
+    monkeypatch.setattr(tasks, "_authority", lambda: away)
+    _switch_refused(
+        lambda: chat_tools.start_task(title="Other", request_id="second", steps=WAIT),
+        first["task_id"],
+        "unreadable",
+    )
+    assert chat.task_id == first["task_id"] and not _stored("second").exists()
+
+
+@pytest.mark.parametrize("damage", ["corrupt", "other_owner", "other_project"])
+def test_a_task_unreadable_in_its_own_project_still_blocks_a_start(
+    chat, monkeypatch, tmp_path, damage
+):
+    """The home read keeps `_read`'s checks: a file that does not parse, or
+    names another owner or project, fails closed."""
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    home = _stored("first")
+    if damage == "corrupt":
+        home.write_text("{not json")
+    else:
+        stored = json.loads(home.read_text())
+        stored["owner_id" if damage == "other_owner" else "project_id"] = str(uuid.uuid4())
+        stored["status"] = "ready"
+        home.write_text(json.dumps(stored))
+    _, _, owner = tasks._authority()
+    away = (tmp_path, str(uuid.uuid4()), owner)
+    monkeypatch.setattr(tasks, "_authority", lambda: away)
+    _switch_refused(
+        lambda: chat_tools.start_task(title="Other", request_id="second", steps=WAIT),
+        first["task_id"],
+        "unreadable",
+    )
+    assert chat.task_id == first["task_id"]
 
 
 def test_a_task_that_ended_before_the_switch_never_blocks_a_start(
