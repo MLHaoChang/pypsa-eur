@@ -11,6 +11,7 @@ from gridspine.static.campus_ratings import (
     choose_cable,
     choose_switchgear,
     dc_factor_m,
+    join_flags,
     switchgear_duty,
 )
 from gridspine.templates.campus_assets import load_asset_library
@@ -755,7 +756,7 @@ def test_a_nan_period_is_skipped_in_either_row_order(rows):
         and r.ikss_ka == 35.0
         and r.governing == "Ik'' 35.00 kA, period 2"
     )
-    assert pd.isna(r.flag)
+    assert r.flag == "partly_evaluated" and r.skipped_periods == "1"
 
 
 def test_a_bus_with_no_finite_fault_level_is_not_evaluated():
@@ -890,6 +891,7 @@ SWITCHGEAR_COLUMNS = [
     "utilisation",
     "governing",
     "flag",
+    "skipped_periods",
 ]
 
 
@@ -904,3 +906,50 @@ SWITCHGEAR_COLUMNS = [
 def test_every_switchgear_row_has_every_column(row):
     out = choose_switchgear(_sc(row), LIB, 50, 0.1)
     assert sorted(out.columns) == sorted(SWITCHGEAR_COLUMNS)
+
+
+def test_a_partly_evaluated_bus_keeps_its_declared_flag_too():
+    rows = [
+        ("B1", 33.0, 30.0, 30.0 * NO_DC, 25.0, 2030),
+        ("B1", 33.0, math.nan, 50.0, 25.0, 2040),
+    ]
+    r = _one(rows)  # 30 x 1.1 = 33 -> 40 above the declared 25
+    assert r.chosen_ka == 40.0 and r.skipped_periods == "2040"
+    assert r.flag == "declared_below_chosen; partly_evaluated"
+    full = _one(rows[:1])
+    assert full.flag == "declared_below_chosen" and pd.isna(full.skipped_periods)
+
+
+def test_join_flags():
+    assert join_flags(None, None) is None
+    assert join_flags("a", None, "b") == "a; b"
+
+
+def test_a_derating_above_one_is_refused():
+    with pytest.raises(ValueError, match="derating"):
+        CableAssumptions(derating=1.2)
+    assert CableAssumptions(derating=1.0).derating == 1.0
+
+
+def test_rate_campus_takes_the_cable_ith_over_the_clearing_time_not_tk(tmp_path):
+    from gridspine.drivers.campus_study import rate_campus
+    from gridspine.static.campus_ratings import thermal_current
+
+    run = _run(tmp_path)
+    cb = rate_campus(
+        run,
+        switchgear=SwitchgearAssumptions(tk_s=3.0, tkr_s=3.0),
+        cables=CableAssumptions(t_clear_s=0.1),
+    )["cables"].iloc[0]
+    assert cb.ith_ka == pytest.approx(thermal_current(21.0, 52.0, 50, 0.1))
+    assert cb.ith_ka != pytest.approx(thermal_current(21.0, 52.0, 50, 3.0))
+
+
+def test_rate_campus_a_declared_cable_below_with_an_unknown_end_shows_both(tmp_path):
+    from gridspine.drivers.campus_study import SHORT_CIRCUIT_CSV, rate_campus
+
+    run = _run(tmp_path, declared_i_ka=0.1)
+    sc = pd.read_csv(run / SHORT_CIRCUIT_CSV)
+    sc[sc.bus != "MV2"].to_csv(run / SHORT_CIRCUIT_CSV, index=False)
+    cb = rate_campus(run)["cables"].iloc[0]
+    assert cb.flag == "declared_below_chosen; withstand_not_evaluated"

@@ -250,6 +250,15 @@ def _switchgear_options(library, vn_kv):
     return [(f"IEC 62271-1 {r:g} kA", r, None) for r in SWITCHGEAR_LADDER_KA]
 
 
+def join_flags(*flags) -> str | None:
+    """
+    The flags that hold, most severe first, joined by "; "; None when none
+    does. One flag never hides another (``partly_evaluated`` and
+    ``declared_below_chosen`` both show).
+    """
+    return "; ".join(f for f in flags if f) or None
+
+
 def _finite(x) -> bool:
     try:
         return math.isfinite(float(x))
@@ -269,9 +278,11 @@ def choose_switchgear(
     ``bus``, ``vn_kv``, the worst duty (``ikss_ka``, ``ib_ka``, ``ith_ka``,
     ``ith_tkr_ka``, ``ip_ka``), ``tk_s``, ``tkr_s``, ``chosen_id``,
     ``chosen_ka``, ``chosen_ip_ka``, ``capex_eur``, ``governing``,
-    ``utilisation``, ``declared_ka``, ``flag`` (``declared_below_chosen``,
-    ``beyond_ladder``, ``not_evaluated`` or None). The result does not depend
-    on the order of the rows.
+    ``utilisation``, ``declared_ka``, ``skipped_periods`` (the periods with
+    no finite fault level, comma-separated, or None) and ``flag``: None, or
+    ``not_evaluated``, ``beyond_ladder``, ``declared_below_chosen`` and
+    ``partly_evaluated`` joined by "; " (``join_flags``). The result does
+    not depend on the order of the rows.
     """
     check_margin(margin)
     sc = short_circuit.copy()
@@ -280,8 +291,10 @@ def choose_switchgear(
     rows = []
     for bus, block in sc.groupby("bus", sort=False):
         worst: dict = {}
+        skipped: list = []
         for r in block.sort_values("period", kind="stable").itertuples(index=False):
             if not (_finite(r.ikss_max_ka) and _finite(r.ip_max_ka)):
+                skipped.append(str(r.period))
                 continue  # not evaluated: never a duty of nan or 0
             for q, x in switchgear_duty(
                 float(r.ikss_max_ka), float(r.ip_max_ka), f_hz, a
@@ -305,6 +318,7 @@ def choose_switchgear(
             "tk_s": a.tk_s,
             "tkr_s": a.tkr_s,
             "declared_ka": declared_ka,
+            "skipped_periods": ", ".join(skipped) or None,
         }
         empty = {
             "chosen_id": None,
@@ -360,6 +374,8 @@ def choose_switchgear(
                 utilisation=util[q],
                 flag="declared_below_chosen" if declared_ka < rated else None,
             )
+        if skipped:  # rated on the other periods: say which were left out
+            row["flag"] = join_flags(row["flag"], "partly_evaluated")
         rows.append(row)
     return pd.DataFrame(rows)
 
