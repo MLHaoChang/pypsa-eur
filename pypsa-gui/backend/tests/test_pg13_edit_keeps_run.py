@@ -3,6 +3,7 @@
 Slice 04 (D1 a): "a value edit keeping the dispatch shape reads stale". The route middleware cleared the
 dispatch on every accepted `/api/network/*` write, so the flow read `not_run` and Results lost the run.
 """
+
 import pandas as pd
 import pypsa
 import pytest
@@ -46,7 +47,9 @@ def test_a_value_edit_marks_the_last_run_stale(client, site, route, name, field,
     assert _wait_idle(client)["status"] == "completed"
     assert _kinds(_flow(client, project))["optimisation"] == "fresh"
 
-    row = next(r for r in client.get(f"/api/network/{route}").json() if r["name"] == name)
+    row = next(
+        r for r in client.get(f"/api/network/{route}").json() if r["name"] == name
+    )
     r = client.put(f"/api/network/{route}/{name}", json={**row, field: value})
     assert r.status_code == 200, r.text
 
