@@ -1,0 +1,10 @@
+{
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/flow/energization_timeline",
+   "reason": "ui-pointer",
+   "decision": "AS19-POINTER-1"
+  }
+ ]
+}
