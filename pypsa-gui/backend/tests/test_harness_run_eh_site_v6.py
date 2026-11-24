@@ -1094,3 +1094,20 @@ def test_a_name_another_tariff_holds_is_refused_at_the_grant(project):
         "Commercial"
     ]
     assert record["refused"]["kind"] == run_urdb.NAME_TAKEN and "hash" not in record
+
+
+def test_a_foreign_v1_under_the_granted_name_is_never_attached(project):
+    """GK B (71) on 981855d9: the grant saw a free name (version 1); a foreign
+    tariff stored there as v1 matches name and version, so the hash decides."""
+    envelope, row = _granted(project, _ctx())
+    assert _record(envelope)["version"] == 1
+    rate = json.loads(FIXTURE.read_text())
+    rate["items"][0]["fixedchargefirstmeter"] = 99.0
+    other = _upload(json.dumps(rate).encode())
+    _import(dict(row["args"], file_id=other.file_id))  # the foreign v1
+    assert _versions(row["args"]["name"]) == 1
+    args = {"name": row["args"]["name"], "version": 1}
+    assert (
+        run_envelope._match_fill(envelope, "attach_tariff", args, CARD, _ctx(), {})
+        == "not_granted_source"
+    )
