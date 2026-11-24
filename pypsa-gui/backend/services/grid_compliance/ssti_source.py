@@ -38,8 +38,11 @@ RESONANCE_COLUMNS = [
 #: A row the scorecard did not judge: the table shows what the run wrote, never a verdict.
 NOT_JUDGED = "not judged"
 ISLANDED = "not evaluated (islanded)"
-#: An island row with no UIF (no machine feeds its bus with the grid out), on a judged row.
+#: An island row with no UIF (no machine feeds its bus with the grid out), on a judged row, and its reason.
 NOT_EVALUATED = "not evaluated"
+UNFED_NOTE = "No synchronous machine feeds this bus with the grid out"
+#: The caption's last line for an islanded project whose run screened the island: why no grid row prints.
+GRID_ROWS_LEFT_OUT = "Grid-connected rows are left out: the project has no grid connection."
 NON_FINITE = "—"
 UNREADABLE_NOTE = "an unreadable note"
 
@@ -116,6 +119,12 @@ def _cell(r, column: str, kind):
     return kind(r[column]) if column in r else ""
 
 
+def _case(text: str) -> str:
+    """A UIF row's case as the pack prints it: the engine's island cases ("island max") read "islanded max",
+    the word the scorecard note uses (UX 29)."""
+    return f"islanded {text[len('island '):]}" if text.startswith("island ") else text
+
+
 def _uif_table(row: dict, frame, case: str, path: str) -> Table:
     """The UIF rows the scorecard row judges (``grid_readiness.uif_judged``: the grid rows, then the island
     rows; the island rows alone for an islanded project the run screened islanded), each judged under the
@@ -124,14 +133,18 @@ def _uif_table(row: dict, frame, case: str, path: str) -> Table:
 
     rows = []
     shown = []
+    caption = row["note"]
     if frame is not None and "role" in frame:
         judged, island = uif_judged(frame, case), uif_island(frame)
         shown = [frame[judged & ~island], frame[judged & island]]
         # islanded, a run without island rows counted the grid's infeed: no number to show
         unscreened = case == "islanded" and not island.any()
+        if case == "islanded" and island.any():
+            caption = f"{caption} {GRID_ROWS_LEFT_OUT}"
     for part in shown:
         for _, r in part.iterrows():
             uif, threshold = _apart(r.get("uif"), r.get("threshold"))
+            note = _cell(r, "note", _note)
             if unscreened:
                 verdict, uif = ISLANDED, NON_FINITE
             elif row["verdict"] not in ("pass", "warn"):
@@ -139,24 +152,25 @@ def _uif_table(row: dict, frame, case: str, path: str) -> Table:
             elif _missing(r.get("uif")):
                 # an island bus no machine feeds: the scorecard checked it reads "not evaluated"
                 verdict, uif = NOT_EVALUATED, NON_FINITE
+                note = "; ".join(x for x in (UNFED_NOTE, note) if x)
             else:
                 verdict = _judged(r["uif"], row)
             rows.append(
                 [
                     _cell(r, "bus", _text),
-                    _cell(r, "case", _text),
+                    _case(_cell(r, "case", _text)),
                     _cell(r, "machine", _text),
                     uif,
                     threshold,
                     verdict,
-                    _cell(r, "note", _note),
+                    note,
                 ]
             )
     return Table(
         table_id="ssti_uif",
         columns=UIF_COLUMNS,
         rows=rows,
-        caption=row["note"],
+        caption=caption,
         source_path=path,
     )
 

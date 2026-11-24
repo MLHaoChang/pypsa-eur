@@ -31,6 +31,12 @@ from tests.test_grid_readiness_ssti import (
 from tests.test_grid_readiness_voltage_stability import _template
 
 SCREENING = "Screening; the binding answer is the EMT study."
+#: The pack's Case cells of the island rows.
+ISLANDED = {"islanded max", "islanded min"}
+UNCHECKED = (
+    "The islanded UIF result could not be checked: the run's results disagree with each other. Run the grid "
+    f"study again. {SCREENING}"
+)
 #: The open-tie hub's run (``_grid_run_with_open_tie`` at 2000 MVA), recorded from the engine: the grid cases'
 #: worst UIF (GAS_B, max) and the island cases' (GAS_B, the island's SC_i from GAS_A alone).
 GRID_WORST = 0.13671203327453138
@@ -68,8 +74,9 @@ def test_an_open_tie_grid_project_warns_on_its_island_uif(tmp_path):
     row = _card(tmp_path, n=n)[0]["ssti_uif"]
     assert row["verdict"] == "warn" and row["project_value"] == ISLAND_WORST
     assert row["note"] == (
-        "Worst UIF 1.97 at bus MV (islanded, max fault level, machine GAS_B), above the assumed screening "
-        "threshold 0.1: an EMT SSTI study is warranted (grid-connected and islanded states). " + SCREENING
+        "Worst UIF 1.97 · bus MV · islanded, max fault level · machine GAS_B. This is above the assumed screening "
+        "threshold 0.1, so an EMT SSTI study is warranted for the grid-connected and islanded states. "
+        + SCREENING
     )
 
 
@@ -79,16 +86,16 @@ def test_the_pack_judges_the_island_rows_and_holds_the_cards_worst_row(tmp_path,
     _, pack = _pack(_project(monkeypatch, tmp_path, n=n))
     t = pack["ssti_uif"]
     assert t.caption == card["note"]
-    printed = [r for r in t.rows if r[1] in su.ISLAND_CASES]
+    printed = [r for r in t.rows if r[1] in ISLANDED]
     assert [(r[1], r[2], r[3], r[5]) for r in printed] == [
-        ("island max", "GAS_A", "0.788", "warn"),
-        ("island max", "GAS_B", "1.97", "warn"),
-        ("island min", "GAS_A", "0.788", "warn"),
-        ("island min", "GAS_B", "1.97", "warn"),
+        ("islanded max", "GAS_A", "0.788", "warn"),
+        ("islanded max", "GAS_B", "1.97", "warn"),
+        ("islanded min", "GAS_A", "0.788", "warn"),
+        ("islanded min", "GAS_B", "1.97", "warn"),
     ]
     # GK A2 C1: the card's worst row is one of the rows the pack prints judged
-    assert ("MV", "island max", "GAS_B") in _rows_of(t)
-    assert next(r for r in t.rows if r[1] == "island max" and r[2] == "GAS_B")[5] == "warn"
+    assert ("MV", "islanded max", "GAS_B") in _rows_of(t)
+    assert next(r for r in t.rows if r[1] == "islanded max" and r[2] == "GAS_B")[5] == "warn"
     # the grid rows print first and judged as before
     assert [(r[1], r[2], r[5]) for r in t.rows[:4]] == [
         ("max", "GAS_A", "pass"),
@@ -111,10 +118,12 @@ def test_a_run_from_before_the_island_verdict_reads_rerun_on_the_card_and_not_ju
     (run / SSTI_UIF_CSV).write_text(text.replace(f",{su.ROLE_ISLAND},", ",island converter bus (not judged),"))
     row = _card(tmp_path, n=n)[0]["ssti_uif"]
     assert row["verdict"] == "unknown" and row["project_value"] is None
-    assert row["note"] == f"The run predates the islanded UIF verdict: rerun the grid study. {SCREENING}"
+    assert row["note"] == (
+        f"This run was saved before islanded cases were judged. Run the grid study again. {SCREENING}"
+    )
     _, pack = _pack(_project(monkeypatch, tmp_path, n=n))
     t = pack["ssti_uif"]
-    printed = [r for r in t.rows if r[1] in su.ISLAND_CASES]
+    printed = [r for r in t.rows if r[1] in ISLANDED]
     assert len(printed) == 4 and {r[5] for r in printed} == {S.NOT_JUDGED}
     assert {r[5] for r in t.rows} == {S.NOT_JUDGED}
 
@@ -156,9 +165,9 @@ def test_without_gridspine_the_saved_island_rows_still_print(tmp_path, monkeypat
         "uif.csv",
     ).rows
     monkeypatch.setattr(builtins, "__import__", real)
-    printed = [r for r in rows if r[1] in su.ISLAND_CASES]
+    printed = [r for r in rows if r[1] in ISLANDED]
     assert printed and {r[5] for r in printed} == {S.NOT_JUDGED}
-    assert len(printed) == sum(r[1] in su.ISLAND_CASES for r in with_engine["ssti_uif"].rows)
+    assert len(printed) == sum(r[1] in ISLANDED for r in with_engine["ssti_uif"].rows)
 
 
 # ── hand-written runs: which rows the card judges, and what it refuses ────────
@@ -196,8 +205,8 @@ def test_a_closed_tie_campus_whose_worst_uif_is_islanded_says_so(tmp_path):
     row = _grid(tmp_path, _island_meta("clear", 0.08, "flag", 0.5), _uif_table(0.08) + _island(0.5, bus="LV"))
     assert row["verdict"] == "warn" and row["project_value"] == 0.5
     assert row["note"] == (
-        "Worst UIF 0.5 at bus LV (islanded, max fault level, machine GAS), above the assumed screening "
-        f"threshold 0.1: an EMT SSTI study is warranted (grid-connected and islanded states). {SCREENING}"
+        "Worst UIF 0.5 · bus LV · islanded, max fault level · machine GAS. This is above the assumed screening "
+        f"threshold 0.1, so an EMT SSTI study is warranted for the grid-connected and islanded states. {SCREENING}"
     )
 
 
@@ -205,14 +214,15 @@ def test_a_campus_that_islands_with_both_states_clear_passes(tmp_path):
     row = _grid(tmp_path, _island_meta("clear", 0.08, "clear", 0.06), _uif_table(0.08) + _island(0.06))
     assert row["verdict"] == "pass" and row["project_value"] == 0.08
     assert row["note"] == (
-        "Worst UIF 0.08 at bus MV (max fault level, machine GAS), at or below the assumed screening threshold "
-        f"0.1: no EMT SSTI study indicated (grid-connected and islanded states). {SCREENING}"
+        "Worst UIF 0.08 · bus MV · max fault level · machine GAS. This is at or below the assumed screening "
+        "threshold 0.1, so no EMT SSTI study is indicated for the grid-connected and islanded states. "
+        + SCREENING
     )
 
 
 def test_on_a_tie_the_grid_row_is_named(tmp_path):
     row = _grid(tmp_path, _island_meta("flag", 0.5, "flag", 0.5), _uif_table(0.5) + _island(0.5, bus="LV"))
-    assert row["verdict"] == "warn" and "at bus MV (max fault level" in row["note"]
+    assert row["verdict"] == "warn" and row["note"].startswith("Worst UIF 0.5 · bus MV · max fault level ·")
 
 
 def test_an_islanded_project_is_judged_on_its_island_rows_alone(tmp_path, monkeypatch):
@@ -220,23 +230,23 @@ def test_an_islanded_project_is_judged_on_its_island_rows_alone(tmp_path, monkey
     row = _islanded(tmp_path, _island_meta("flag", 0.25, "clear", 0.06), _uif_table(0.25) + _island(0.06))
     assert row["verdict"] == "pass" and row["project_value"] == 0.06
     assert row["note"] == (
-        "Worst UIF 0.06 at bus MV (islanded, max fault level, machine GAS), at or below the assumed screening "
-        f"threshold 0.1: no EMT SSTI study indicated (islanded state only). {SCREENING}"
+        "Worst UIF 0.06 · bus MV · islanded, max fault level · machine GAS. This is at or below the assumed "
+        f"screening threshold 0.1, so no EMT SSTI study is indicated for the islanded state only. {SCREENING}"
     )
     _, pack = _pack(_project(monkeypatch, tmp_path, n=_open_tie(_site())))
     t = pack["ssti_uif"]
-    # the grid rows leave the pack; the island rows print judged under the card's limit
+    # the grid rows leave the pack, and the caption says why; the island rows print judged under the card's limit
     assert [r[1:] for r in t.rows] == [
-        ["island max", "GAS", "0.06", "0.1", "pass", ""],
-        ["island min", "GAS", "0.03", "0.1", "pass", ""],
+        ["islanded max", "GAS", "0.06", "0.1", "pass", ""],
+        ["islanded min", "GAS", "0.03", "0.1", "pass", ""],
     ]
-    assert t.caption == row["note"]
+    assert t.caption == f"{row['note']} Grid-connected rows are left out: the project has no grid connection."
 
 
 def test_an_islanded_project_warns_on_its_island_uif(tmp_path):
     row = _islanded(tmp_path, _island_meta("clear", 0.08, "flag", 0.5), _uif_table(0.08) + _island(0.5))
     assert row["verdict"] == "warn" and row["project_value"] == 0.5
-    assert row["note"].endswith(f"an EMT SSTI study is warranted (islanded state only). {SCREENING}")
+    assert row["note"].endswith(f"an EMT SSTI study is warranted for the islanded state only. {SCREENING}")
 
 
 def test_an_islanded_project_without_island_rows_keeps_its_override(tmp_path, monkeypatch):
@@ -265,15 +275,19 @@ def test_a_flag_warns_beside_an_island_bus_no_machine_feeds(tmp_path, monkeypatc
     row = _grid(tmp_path, _island_meta("clear", 0.08, "flag", 0.5), rows)
     assert row["verdict"] == "warn" and row["project_value"] == 0.5
     assert row["note"] == (
-        "Worst UIF 0.5 at bus MV (islanded, max fault level, machine GAS), above the assumed screening "
-        "threshold 0.1: an EMT SSTI study is warranted (grid-connected and islanded states). The islanded UIF "
-        f"is not evaluated at buses LV, HV: no synchronous machine feeds them with the grid out. {SCREENING}"
+        "Worst UIF 0.5 · bus MV · islanded, max fault level · machine GAS. This is above the assumed screening "
+        "threshold 0.1, so an EMT SSTI study is warranted for the grid-connected and islanded states. The "
+        f"islanded UIF is not evaluated at buses LV, HV: no synchronous machine feeds them with the grid out. "
+        f"{SCREENING}"
     )
     _, pack = _pack(_project(monkeypatch, tmp_path))
-    by_bus = {(r[0], r[1]): (r[3], r[5]) for r in pack["ssti_uif"].rows}
-    assert by_bus[("MV", "island max")] == ("0.5", "warn")
-    assert by_bus[("LV", "island max")] == (S.NON_FINITE, S.NOT_EVALUATED)
-    assert by_bus[("MV", "max")] == ("0.08", "pass")
+    by_bus = {(r[0], r[1]): (r[3], r[5], r[6]) for r in pack["ssti_uif"].rows}
+    assert by_bus[("MV", "islanded max")] == ("0.5", "warn", "")
+    # a "—" carries its reason in the Note cell
+    assert by_bus[("LV", "islanded max")] == (
+        S.NON_FINITE, S.NOT_EVALUATED, "No synchronous machine feeds this bus with the grid out"
+    )
+    assert by_bus[("MV", "max")] == ("0.08", "pass", "")
 
 
 @pytest.mark.parametrize(
@@ -283,84 +297,101 @@ def test_a_flag_warns_beside_an_island_bus_no_machine_feeds(tmp_path, monkeypatc
         (
             _island_meta("clear", 0.08, "flag", 0.5001),
             _uif_table(0.08) + _island(0.5),
-            "The run's UIF table's worst islanded UIF 0.5 is not the worst islanded UIF 0.5001 its record "
+            "the UIF table's worst islanded UIF 0.5 is not the worst islanded UIF 0.5001 the record "
             "gives",
         ),
         (
             _island_meta("clear", 0.08, "flag", None),
             _uif_table(0.08) + _island(0.5),
-            "The run's UIF table's worst islanded UIF 0.5 is not the worst islanded UIF no value its record gives",
+            "the UIF table's worst islanded UIF 0.5 is not the worst islanded UIF no value the record gives",
         ),
         (
             _island_meta("clear", 0.08, "clear", None),
             _uif_table(0.08) + _island(0.06),
-            "The run's UIF table's worst islanded UIF 0.06 is not the worst islanded UIF no value its record "
+            "the UIF table's worst islanded UIF 0.06 is not the worst islanded UIF no value the record "
             "gives",
         ),
         (
             _island_meta("clear", 0.08, "flag", None),
             _uif_table(0.08) + _island(math.nan),
-            "The run's worst islanded UIF no value contradicts its islanded verdict flag against the threshold 0.1",
+            "the worst islanded UIF no value contradicts the islanded verdict flag against the threshold 0.1",
         ),
         (
             _island_meta("clear", 0.08, "clear", None),
             _uif_table(0.08) + _island(math.nan),
-            "The run's worst islanded UIF no value contradicts its islanded verdict clear against the threshold "
+            "the worst islanded UIF no value contradicts the islanded verdict clear against the threshold "
             "0.1",
         ),
         (
             _island_meta("clear", 0.08, "clear", 0.5),
             _uif_table(0.08) + _island(0.5),
-            "The run's worst islanded UIF 0.5 contradicts its islanded verdict clear against the threshold 0.1",
+            "the worst islanded UIF 0.5 contradicts the islanded verdict clear against the threshold 0.1",
         ),
         (
             _island_meta("clear", 0.08, "flag", 0.06),
             _uif_table(0.08) + _island(0.06),
-            "The run's worst islanded UIF 0.06 contradicts its islanded verdict flag against the threshold 0.1",
+            "the worst islanded UIF 0.06 contradicts the islanded verdict flag against the threshold 0.1",
         ),
         (
             # a clear beside an unfed bus: the engine never clears then
             _island_meta("clear", 0.08, "clear", 0.06),
             _uif_table(0.08) + _island(0.06) + _island(math.nan, bus="LV"),
-            "The run's worst islanded UIF 0.06 contradicts its islanded verdict clear against the threshold 0.1",
+            "the worst islanded UIF 0.06 contradicts the islanded verdict clear against the threshold 0.1",
         ),
         (
             _island_meta("clear", 0.08, "maybe", 0.5),
             _uif_table(0.08) + _island(0.5),
-            "The screen returned maybe for the islanded case",
+            "the screen returned maybe for the islanded case",
         ),
         (
             _island_meta("clear", 0.08, None, 0.5),
             _uif_table(0.08) + _island(0.5),
-            "The screen returned an empty value for the islanded case",
+            "the screen returned an empty value for the islanded case",
         ),
         (
             _island_meta("clear", 0.08, "flag", "0.5"),
             _uif_table(0.08) + _island(0.5),
-            "The run's islanded worst UIF is not a finite number (0.5)",
+            "the islanded worst UIF is not a finite number (0.5)",
         ),
         (
             _island_meta("clear", 0.08, "flag", 0.5),
             _uif_table(0.08),
-            "The run's record gives the islanded verdict flag, but its UIF table has no islanded rows",
+            "the record gives the islanded verdict flag, but the UIF table has no islanded rows",
         ),
         (
             # an island row with no UIF that does not read "not evaluated"
             _island_meta("clear", 0.08, "flag", 0.5),
             _uif_table(0.08) + _island(0.5) + [{**_island(math.nan, bus="LV")[0], "verdict": "flag"}],
-            "The run's UIF table has a UIF that is not a finite number (an empty value)",
+            "the UIF table has an islanded UIF that is not a finite number (an empty value)",
         ),
         (
-            {k: v for k, v in _island_meta("clear", 0.08).items() if k not in ("island_verdict", "island_worst_uif")},
+            # GK A2 C7 on the islanded worst at the threshold exactly: equal clears, as the engine judges
+            _island_meta("clear", 0.08, "flag", 0.1),
+            _uif_table(0.08) + _island(0.1),
+            "the worst islanded UIF 0.1 contradicts the islanded verdict flag against the threshold 0.1",
+        ),
+        (
+            _island_meta("clear", 0.08, ["flag"], 0.5),
             _uif_table(0.08) + _island(0.5),
-            "The run predates the islanded UIF verdict: rerun the grid study",
+            "the screen returned an unreadable value for the islanded case",
+        ),
+        (
+            # a "not evaluated" island row whose UIF is a number, or text: never an unfed bus
+            _island_meta("clear", 0.08, "flag", 0.5),
+            _uif_table(0.08) + _island(0.5) + [{**_island(math.nan, bus="LV")[0], "uif": "x"}],
+            "the UIF table has an islanded UIF that is not a finite number (x)",
         ),
     ],
 )
-def test_an_island_record_the_table_contradicts_reads_unknown(tmp_path, monkeypatch, meta, rows, why):
-    row = _grid(tmp_path, meta, rows)
+def test_an_island_record_the_table_contradicts_reads_unknown(tmp_path, monkeypatch, caplog, meta, rows, why):
+    # one plain line on the card (UX-RULES-1122); each guard's own cause in the log
+    with caplog.at_level("WARNING", logger=G.__name__):
+        row = _grid(tmp_path, meta, rows)
     assert row["verdict"] == "unknown" and row["project_value"] is None
-    assert row["note"] == f"{why}. {SCREENING}"
+    assert row["note"] == UNCHECKED
+    assert [r.getMessage() for r in caplog.records if r.name == G.__name__] == [
+        f"SSTI UIF: the islanded result could not be checked: {why}"
+    ]
     if any(r["role"] == G.UIF_ROLE_ISLAND for r in rows):
         # GK A2 C3: the pack never judges a row the card did not
         _, pack = _pack(_project(monkeypatch, tmp_path))
@@ -377,3 +408,43 @@ def test_uif_judged_picks_the_rows_by_case():
     alone = pd.DataFrame(_uif_table(0.25))
     assert G.uif_judged(alone, "islanded").tolist() == (alone["role"] == G.UIF_ROLE_GRID).tolist()
     assert not G.uif_judged(None, "grid").any()
+
+
+def test_uif_judged_and_uif_island_on_a_table_without_roles():
+    table = pd.DataFrame(_uif_table(0.25)).drop(columns="role")
+    assert G.uif_judged(table, "grid").tolist() == [False] * len(table)
+    assert G.uif_island(table).tolist() == [False] * len(table)
+    assert not G.uif_island(None).any()
+
+
+def test_a_grid_flag_warns_when_the_island_clears(tmp_path):
+    row = _grid(tmp_path, _island_meta("flag", 0.25, "clear", 0.06), _uif_table(0.25) + _island(0.06))
+    assert row["verdict"] == "warn" and row["project_value"] == 0.25
+    assert row["note"].startswith("Worst UIF 0.25 · bus MV · max fault level · machine GAS. This is above")
+
+
+def test_a_grid_flag_warns_beside_an_island_no_machine_feeds(tmp_path):
+    rows = _uif_table(0.25) + _island(math.nan, bus="LV")
+    row = _grid(tmp_path, _island_meta("flag", 0.25, "not evaluated", None), rows)
+    assert row["verdict"] == "warn" and row["project_value"] == 0.25
+    assert "The islanded UIF is not evaluated at bus LV: no synchronous machine feeds it with the grid out." in (
+        row["note"]
+    )
+
+
+def test_an_islanded_worst_at_the_threshold_clears(tmp_path):
+    row = _islanded(tmp_path, _island_meta("clear", 0.08, "clear", 0.1), _uif_table(0.08) + _island(0.1))
+    assert row["verdict"] == "pass" and row["project_value"] == 0.1
+
+
+def test_an_islanded_project_is_not_held_to_its_grid_rows(tmp_path):
+    # the grid rows the island never runs in are not checked: a grid worst its table disagrees with stays out
+    row = _islanded(tmp_path, _island_meta("flag", 0.9, "clear", 0.06), _uif_table(0.25) + _island(0.06))
+    assert row["verdict"] == "pass" and row["project_value"] == 0.06
+
+
+def test_a_campus_without_island_data_does_not_island():
+    from types import SimpleNamespace
+
+    assert not su.islands(SimpleNamespace(tie_normally_open=False, island=None))
+    assert su.islands(SimpleNamespace(tie_normally_open=False, island={"requirements": {}}))
