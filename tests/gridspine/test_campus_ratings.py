@@ -953,3 +953,21 @@ def test_rate_campus_a_declared_cable_below_with_an_unknown_end_shows_both(tmp_p
     sc[sc.bus != "MV2"].to_csv(run / SHORT_CIRCUIT_CSV, index=False)
     cb = rate_campus(run)["cables"].iloc[0]
     assert cb.flag == "declared_below_chosen; withstand_not_evaluated"
+
+
+def test_a_string_assumption_is_refused():
+    with pytest.raises(ValueError, match="pf"):
+        CableAssumptions(pf="0.9")
+
+
+def test_rate_campus_takes_a_str_run_dir_and_an_unknown_from_end(tmp_path):
+    from gridspine.drivers.campus_study import SHORT_CIRCUIT_CSV, rate_campus
+
+    run = _run(tmp_path)
+    sc = pd.read_csv(run / SHORT_CIRCUIT_CSV)
+    sc[sc.bus != "MV1"].to_csv(
+        run / SHORT_CIRCUIT_CSV, index=False
+    )  # the cable's from bus
+    cb = rate_campus(str(run))["cables"].iloc[0]
+    assert cb.from_bus == "MV1" and math.isnan(cb.ith_ka)
+    assert cb.flag == "withstand_not_evaluated"
