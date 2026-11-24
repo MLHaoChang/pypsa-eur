@@ -2509,7 +2509,9 @@ def _live_network(project) -> tuple[Any, str]:
     if not lock.acquire(timeout=LIVE_LOCK_TIMEOUT_S):
         return None, "out_of_date"
     try:
-        live = ctx.network.copy()
+        from services.study.findings import copy_network
+
+        live = copy_network(ctx.network)  # a solved network holds its solver model, which PyPSA will not copy
         live._solve_edited = _edited_since_solve(ctx)
         return live, "live"
     finally:

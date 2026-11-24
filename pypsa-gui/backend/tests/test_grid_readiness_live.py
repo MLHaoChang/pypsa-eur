@@ -214,20 +214,55 @@ def test_a_project_not_loaded_reads_its_saved_file(client, hub, monkeypatch):
     assert next(r for r in out["rows"] if r["id"] == "scr")["project_value"] == saved
 
 
-def test_rows_reading_solved_sizes_say_when_an_edit_followed_the_solve(client, hub):
-    """A solve stamps the edit counter on the network; a size edit after it makes
-    the rows that rate a unit by its solved size say the solve is not current."""
+STALE = "edited after the solve"
+
+
+def _rows(client, name) -> dict:
+    return {r["id"]: r for r in _get(client, name)["rows"]}
+
+
+def _stamp_now(hub):
     from services import dirty_state, project_registry
     from services.pypsa_service import PyPSAService
 
     ctx = PyPSAService.get_context(project_registry.registry_key(_project(hub)))
     assert ctx is not None
     ctx.network._solved_network_revision = dirty_state.revision(ctx)
-    assert "after the solve" not in _scr(client, hub)["note"]
+
+
+def test_each_solved_size_row_says_when_an_edit_followed_the_solve(client, hub):
+    """A solve stamps the edit counter on the network; a size edit after it makes
+    every row that rates a unit by its solved size say the solve is not current."""
+    _stamp_now(hub)
+    fresh = _rows(client, hub)
+    assert not [i for i, r in fresh.items() if STALE in (r.get("note") or "")]
     _edit_fault(client, hub, 0.9)
-    assert "edited after the solve" in _scr(client, hub)["note"]
+    rows = _rows(client, hub)
+    assert STALE in rows["scr"]["note"]
+    assert STALE in rows["reactive_range"]["note"]
+    motor = [r for i, r in rows.items() if i.startswith("motor_start")]
+    assert motor and all(STALE in r["note"] for r in motor)
+    # A row that reads no solved size gets no note (dropping an id from the set, or widening it, fails here).
+    quiet = [i for i, r in rows.items()
+             if STALE in (r.get("note") or "")
+             and not (i in ("scr", "reactive_range") or i.startswith("motor_start"))]
+    assert quiet == []
+    assert rows["scr"]["note"].count(STALE) == 1
+    assert rows["scr"]["note"].startswith(fresh["scr"]["note"].split(";")[0])
+
+
+def test_a_real_solve_leaves_the_rows_current_until_an_edit(client, hub):
+    """The result write after the stamp bumps no revision: right after a real solve no row
+    says the solve is stale, and one edit after it does."""
+    from tests.test_run_separability import _wait_idle
+
+    assert client.post("/api/simulation/run").status_code == 200
+    assert _wait_idle(client)["status"] == "completed"
+    assert STALE not in _rows(client, hub)["scr"]["note"]
+    _edit_fault(client, hub, 0.9)
+    assert STALE in _rows(client, hub)["scr"]["note"]
 
 
 def test_a_network_with_no_solve_stamp_makes_no_stale_claim(client, hub):
     _edit_fault(client, hub, 0.9)
-    assert "after the solve" not in _scr(client, hub)["note"]
+    assert STALE not in _scr(client, hub)["note"]
