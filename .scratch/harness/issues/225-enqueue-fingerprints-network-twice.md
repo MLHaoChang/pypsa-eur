@@ -3,7 +3,7 @@
 
 # Enqueuing a solve fingerprints the whole network twice
 
-Status: ready-for-agent
+Status: done (#1949)
 Gated: GK B (plan first)
 Type: task
 Found by: SH-16 landing (#1594): `test_a_run_on_the_demo_data_reaches_the_hand_off` hit the harness per-tool deadline (`tool_timeout` at `solve.1`, `solve_queue_enqueue`) twice on CI.
@@ -34,3 +34,4 @@ On a busy host this goes past the harness `PER_TOOL_TIMEOUT_SECONDS` (30 s). Use
 ## Comments
 
 - 2026-11-23 status sweep: landed in #1882 (be3dcbcd): exact fingerprint encodes plain numeric/date columns in bulk. Remains: encode once and derive both fingerprints, and the before/after timing figure.
+- 2026-11-24 SH 225 builder: #1949: both forms from one walk (`one_input_walk`, identity and the solve stamp), empty series written from an empty copy, exact index text reused by exact bytes. identity() on the 8760 h stage 1.23 s → 0.39 s; every digest byte-identical to master 5e8cbcdc.
