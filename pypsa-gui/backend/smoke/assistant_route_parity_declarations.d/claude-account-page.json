@@ -1,0 +1,4 @@
+{"limitations": [
+ {"method": "GET", "path": "/api/auth/account", "reason": "account-auth"},
+ {"method": "POST", "path": "/api/auth/change-password", "reason": "account-auth"}
+]}
