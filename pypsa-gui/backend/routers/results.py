@@ -470,9 +470,10 @@ def get_economics_by_carrier():
     # Foreground project: the VOLL capture lives in the live solver state, not
     # on the network (solver_service strips the slacks). The solver config is
     # the same one cost_breakdown / asset_economics resolve their `cfg` from.
+    from harness.solve_validity import solved_price_limit
     return compute_economics_by_carrier(
         n, _state.get("solver_config"), _state.get("last_lost_load"),
-        result_df=_result_df,
+        result_df=_result_df, price_limit=solved_price_limit(_state, n),
     )
 
 
@@ -682,7 +683,9 @@ def get_lcoh():
     if not _dispatch_ready(n):
         return _not_solved()
     # Effective capital_cost via the same fill PyPSA uses for n.statistics().
-    payload = compute_lcoh(n, _state.get('solver_config') or SolverConfig(), result_df=_result_df)
+    from harness.solve_validity import solved_price_limit
+    payload = compute_lcoh(n, _state.get('solver_config') or SolverConfig(), result_df=_result_df,
+                           price_limit=solved_price_limit(_state, n))
     return _not_solved() if payload is None else payload
 
 
@@ -799,7 +802,8 @@ def get_carrier_kpis():
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return _not_solved()
-    payload = compute_carrier_kpis(n, result_df=_result_df)
+    from harness.solve_validity import solved_price_limit
+    payload = compute_carrier_kpis(n, result_df=_result_df, price_limit=solved_price_limit(_state, n))
     return _not_solved() if payload is None else payload
 
 
@@ -3582,7 +3586,9 @@ def get_asset_economics():
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return _not_solved()
-    payload = compute_asset_economics(n, _state['solver_config'], result_df=_result_df)
+    from harness.solve_validity import solved_price_limit
+    payload = compute_asset_economics(n, _state['solver_config'], result_df=_result_df,
+                                      price_limit=solved_price_limit(_state, n))
     return _not_solved() if payload is None else payload
 
 

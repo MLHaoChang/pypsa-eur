@@ -759,7 +759,7 @@ class BaselineResult(_FigureBlock):
 class CashFlowYear(_FigureBlock):
     _figure_fields: ClassVar[tuple[str, ...]] = (
         "bill_baseline", "bill_option", "resilience_value", "tax",
-        "depreciation", "debt_service", "salvage",
+        "depreciation", "debt_service", "salvage", "market_revenue_at_duals",
     )
 
     year: int
@@ -773,7 +773,8 @@ class CashFlowYear(_FigureBlock):
     bill_option: float | None
     savings: float
     contract_revenue: float
-    market_revenue_at_duals: float
+    # None, flagged, on an integer (MIP) solve (assistant-assurance 17).
+    market_revenue_at_duals: float | None
     resilience_value: float | None
     tax: float | None
     depreciation: float | None

@@ -22,7 +22,7 @@ from services.results.load_frames import corrected_marginal_prices
 
 
 
-def compute_lcoh(n, cfg, *, result_df):
+def compute_lcoh(n, cfg, *, result_df, price_limit=...):
     """
     Levelised cost of hydrogen per electrolyser Link.
 
@@ -99,6 +99,18 @@ def compute_lcoh(n, cfg, *, result_df):
         fom_costs = fom_per_horizon(n, links_df["fom_cost"])
     else:
         fom_costs = _pd.Series(0.0, index=links_df.index)
+
+    # assistant-assurance 17 (after the electrolyser filter, so a network
+    # without one keeps its empty answer): an integer (MIP) solve's bus prices are 0.0, not
+    # prices, so the electricity-cost term (and the LCOH) is not established.
+    # `price_limit` is the caller's judgement of the solve that wrote the
+    # prices (the route's `solved_price_limit`); without one, `n` under `cfg`.
+    from harness.solve_validity import MIP_PRICES_TEXT, mip_price_limit
+    if price_limit is ...:
+        price_limit = mip_price_limit(n, cfg)
+    if price_limit is not None:
+        return {"rows": [], "total": None, "currency": "EUR",
+                "unavailable_reason": price_limit, "message": MIP_PRICES_TEXT}
 
     # bus0 marginal prices for the electricity-cost term. Use the merit-order
     # SUBSIDY-REMOVED duals (the same correction asset_economics and the Compare

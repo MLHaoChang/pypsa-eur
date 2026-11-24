@@ -17,6 +17,7 @@ import { canonicaliseCarrier, carrierDisplayName, type ComponentClass } from './
 import { useCarrierFilter, CarrierFilter, bindCarrierFilter } from './results/CarrierFilter'
 import { COST_UNAVAILABLE, UnavailableBlock, UnavailableCell } from './results/shared'
 import { signFirstEuro } from '../utils/format'
+import { withheldCell } from './results/sectionWords'
 
 // ── Compare view ─────────────────────────────────────────────────────────────
 // Tabbed A/B comparison across two saved projects. Each tab loads its own
@@ -1568,24 +1569,28 @@ export function EconomicsTab({ a, b }: { a: string; b: string }) {
       // ?? guards keep canon total when a scenario omits one.
       const clonePV = (pv?: CarrierPeriodValue): CarrierPeriodValue =>
         ({ total: pv?.total ?? 0, by_period: { ...(pv?.by_period ?? {}) } })
+      // A price-based bucket the backend withheld (null on an integer solve)
+      // stays null — never cloned into a zero.
+      const cloneNullablePV = (pv?: CarrierPeriodValue | null): CarrierPeriodValue | null =>
+        pv === null ? null : clonePV(pv)
       const out: Record<string, CarrierEconomics> = {}
       for (const [c, e] of Object.entries(side)) {
         const key = canonicaliseCarrier('Generator', c)
         const existing = out[key]
         if (!existing) {
           out[key] = {
-            revenue_meur: clonePV(e.revenue_meur),
-            opex_meur:    clonePV(e.opex_meur),
+            revenue_meur: cloneNullablePV(e.revenue_meur),
+            opex_meur:    cloneNullablePV(e.opex_meur),
             // Carry the OPEX split buckets through the merge — the table renders
             // them as sub-rows AND the LCOE re-derivation below needs the
             // curtailment / lost-load penalties to subtract them out.
             gen_cost_meur:            clonePV(e.gen_cost_meur),
-            storage_charge_cost_meur: clonePV(e.storage_charge_cost_meur),
+            storage_charge_cost_meur: cloneNullablePV(e.storage_charge_cost_meur),
             curtailment_cost_meur:    clonePV(e.curtailment_cost_meur),
             lost_load_cost_meur:      clonePV(e.lost_load_cost_meur),
             capex_meur:   clonePV(e.capex_meur),
             dispatch_gwh: clonePV(e.dispatch_gwh),
-            lcoe_eur_per_mwh: clonePV(e.lcoe_eur_per_mwh),
+            lcoe_eur_per_mwh: cloneNullablePV(e.lcoe_eur_per_mwh),
           }
         } else {
           const sum = (acc?: CarrierPeriodValue, add?: CarrierPeriodValue) => {
@@ -1595,10 +1600,19 @@ export function EconomicsTab({ a, b }: { a: string; b: string }) {
               acc.by_period[p] = (acc.by_period[p] ?? 0) + v
             }
           }
-          sum(existing.revenue_meur, e.revenue_meur)
-          sum(existing.opex_meur, e.opex_meur)
+          // A withheld (null) part withholds the merged bucket: no silent
+          // partial sum of a price-based figure.
+          const sumNullable = (
+            acc: CarrierPeriodValue | null | undefined, add: CarrierPeriodValue | null | undefined,
+          ): CarrierPeriodValue | null => {
+            if (acc == null || add === null) return null
+            sum(acc, add)
+            return acc
+          }
+          existing.revenue_meur = sumNullable(existing.revenue_meur, e.revenue_meur)
+          existing.opex_meur = sumNullable(existing.opex_meur, e.opex_meur)
           sum(existing.gen_cost_meur, e.gen_cost_meur)
-          sum(existing.storage_charge_cost_meur, e.storage_charge_cost_meur)
+          existing.storage_charge_cost_meur = sumNullable(existing.storage_charge_cost_meur, e.storage_charge_cost_meur)
           sum(existing.curtailment_cost_meur, e.curtailment_cost_meur)
           sum(existing.lost_load_cost_meur, e.lost_load_cost_meur)
           sum(existing.capex_meur, e.capex_meur)
@@ -1614,6 +1628,12 @@ export function EconomicsTab({ a, b }: { a: string; b: string }) {
       // both tabs. The penalties remain visible in the OPEX (total) row + their
       // own split sub-rows — just not inside the LCOE ratio.
       for (const e of Object.values(out)) {
+        // OPEX withheld (it holds a storage charge cost priced at no prices):
+        // the LCOE built on it is withheld too.
+        if (e.opex_meur === null || e.lcoe_eur_per_mwh === null) {
+          e.lcoe_eur_per_mwh = null
+          continue
+        }
         const cashOpexTotal =
           e.opex_meur.total - (e.curtailment_cost_meur?.total ?? 0) - (e.lost_load_cost_meur?.total ?? 0)
         const denomTotal = e.dispatch_gwh.total * 1000  // GWh → MWh
@@ -1680,8 +1700,8 @@ export function EconomicsTab({ a, b }: { a: string; b: string }) {
   const projectMetric = (
     side: Record<string, CarrierEconomics>,
     metric: keyof CarrierEconomics,
-  ): Record<string, CarrierPeriodValue> =>
-    Object.fromEntries(Object.entries(side).map(([c, e]) => [c, e[metric] as CarrierPeriodValue]))
+  ): Record<string, CarrierPeriodValue | null> =>
+    Object.fromEntries(Object.entries(side).map(([c, e]) => [c, e[metric] as CarrierPeriodValue | null]))
 
   const lcoeA = projectMetric(ecA, 'lcoe_eur_per_mwh')
   const lcoeB = projectMetric(ecB, 'lcoe_eur_per_mwh')
@@ -1714,6 +1734,8 @@ export function EconomicsTab({ a, b }: { a: string; b: string }) {
           selectedCarrier={filter.selectedCarrier}
           availableA={availableA}
           availableB={availableB}
+          withheldA={sa.economics?.unavailable_reason}
+          withheldB={sb.economics?.unavailable_reason}
         />
       </Section>
 
@@ -1732,10 +1754,13 @@ export function EconomicsTab({ a, b }: { a: string; b: string }) {
           fmtEurMwh={fmtEurMwh}
           availableA={availableA}
           availableB={availableB}
+          reasonA={sa.economics?.unavailable_reason}
+          reasonB={sb.economics?.unavailable_reason}
         />
       </Section>
 
-      {(lcohA.length > 0 || lcohB.length > 0) && (
+      {(lcohA.length > 0 || lcohB.length > 0 || sa.economics?.unavailable_reason
+        || sb.economics?.unavailable_reason) && (
         <Section
           title="Per-asset levelised cost (LCOH / LCOE)"
           subtitle={periodLabel(period) + ' — extendable Links (electrolysers, heat pumps, P2X) with non-trivial dispatch. LCOH unit = €/MWh of the Link’s output, regardless of carrier label.'}
@@ -1745,6 +1770,8 @@ export function EconomicsTab({ a, b }: { a: string; b: string }) {
             bName={sb.project}
             rowsA={lcohA}
             rowsB={lcohB}
+            reasonA={sa.economics?.unavailable_reason}
+            reasonB={sb.economics?.unavailable_reason}
             period={period}
             fmtMEur={fmtMEur}
             fmtEurMwh={fmtEurMwh}
@@ -1761,7 +1788,7 @@ export function EconomicsTab({ a, b }: { a: string; b: string }) {
 // dimensions, not the same metric across carriers.
 function EconomicsTable({
   aName, bName, carriers, ecA, ecB, period, fmtMEur, fmtEurMwh,
-  availableA = true, availableB = true,
+  availableA = true, availableB = true, reasonA, reasonB,
 }: {
   aName: string
   bName: string
@@ -1780,6 +1807,10 @@ function EconomicsTable({
   // compiling.
   availableA?: boolean
   availableB?: boolean
+  // Why a side's price-based figures are null ("mip_duals_not_marginal");
+  // a null cell reads withheldCell(reason), never 0.
+  reasonA?: string
+  reasonB?: string
 }) {
   return (
     <table className="w-full text-xs">
@@ -1806,21 +1837,27 @@ function EconomicsTable({
           // lost-load cost). Sub-rows render only when ANY scenario has a
           // non-trivial value for that bucket — keeps the table compact
           // on carriers without storage / curtailment / lost-load.
-          type Row = { label: string; va: number; vb: number; fmt: (n: number) => string; invert: boolean; sub?: boolean }
+          // va/vb null = withheld for a price limit (an integer solve).
+          type Row = { label: string; va: number | null; vb: number | null; fmt: (n: number) => string; invert: boolean; sub?: boolean }
           const splitRows: Row[] = [
             { label: 'Gen cost',           va: readPV(A?.gen_cost_meur, period),            vb: readPV(B?.gen_cost_meur, period),            fmt: fmtMEur, invert: true, sub: true },
-            { label: 'Storage charge cost', va: readPV(A?.storage_charge_cost_meur, period), vb: readPV(B?.storage_charge_cost_meur, period), fmt: fmtMEur, invert: true, sub: true },
+            { label: 'Storage charge cost', va: readNullablePV(A?.storage_charge_cost_meur, period), vb: readNullablePV(B?.storage_charge_cost_meur, period), fmt: fmtMEur, invert: true, sub: true },
             { label: 'Curtailment cost',   va: readPV(A?.curtailment_cost_meur, period),    vb: readPV(B?.curtailment_cost_meur, period),    fmt: fmtMEur, invert: true, sub: true },
             { label: 'Lost-load cost',     va: readPV(A?.lost_load_cost_meur, period),      vb: readPV(B?.lost_load_cost_meur, period),      fmt: fmtMEur, invert: true, sub: true },
           ]
-          const visibleSplits = splitRows.filter(r => Math.abs(r.va) > 1e-6 || Math.abs(r.vb) > 1e-6)
+          // A withheld split shows when that side's OPEX is withheld too (the
+          // carrier holds a charge cost) — a MIP nulls the bucket on every
+          // carrier, and most of them have none.
+          const nonTrivial = (v: number | null, opex: CarrierPeriodValue | null | undefined) =>
+            v === null ? opex === null : Math.abs(v) > 1e-6
+          const visibleSplits = splitRows.filter(r => nonTrivial(r.va, A?.opex_meur) || nonTrivial(r.vb, B?.opex_meur))
           const rows: Row[] = [
-            { label: 'Revenue',  va: readPV(A?.revenue_meur, period), vb: readPV(B?.revenue_meur, period), fmt: fmtMEur,    invert: false },
-            { label: 'OPEX (total)', va: readPV(A?.opex_meur, period), vb: readPV(B?.opex_meur, period), fmt: fmtMEur, invert: true },
+            { label: 'Revenue',  va: readNullablePV(A?.revenue_meur, period), vb: readNullablePV(B?.revenue_meur, period), fmt: fmtMEur,    invert: false },
+            { label: 'OPEX (total)', va: readNullablePV(A?.opex_meur, period), vb: readNullablePV(B?.opex_meur, period), fmt: fmtMEur, invert: true },
             ...visibleSplits,
             { label: 'CAPEX',    va: readPV(A?.capex_meur,   period), vb: readPV(B?.capex_meur,   period), fmt: fmtMEur,    invert: true  },
             { label: 'Dispatch', va: readPV(A?.dispatch_gwh, period), vb: readPV(B?.dispatch_gwh, period), fmt: v => `${v.toFixed(1)} GWh`, invert: false },
-            { label: 'LCOE',     va: readPV(A?.lcoe_eur_per_mwh, period), vb: readPV(B?.lcoe_eur_per_mwh, period), fmt: fmtEurMwh, invert: true  },
+            { label: 'LCOE',     va: readNullablePV(A?.lcoe_eur_per_mwh, period), vb: readNullablePV(B?.lcoe_eur_per_mwh, period), fmt: fmtEurMwh, invert: true  },
           ]
           return rows.map((r, i) => (
             <tr key={`${c}-${r.label}`} className="border-b border-border/40">
@@ -1829,15 +1866,19 @@ function EconomicsTable({
               )}
               <td className={`py-1 text-right ${r.sub ? 'text-muted/70 pr-1 pl-3 italic' : 'text-muted'}`}>{r.label}</td>
               <td className={`py-1 text-right font-mono ${r.sub ? 'text-text/80' : 'text-text'}`}>
-                {availableA ? r.fmt(r.va) : <UnavailableCell />}
+                {!availableA ? <UnavailableCell />
+                  : r.va === null ? <span className="text-muted">{withheldCell(reasonA)}</span> : r.fmt(r.va)}
               </td>
               <td className={`py-1 text-right font-mono ${r.sub ? 'text-text/80' : 'text-text'}`}>
-                {availableB ? r.fmt(r.vb) : <UnavailableCell />}
+                {!availableB ? <UnavailableCell />
+                  : r.vb === null ? <span className="text-muted">{withheldCell(reasonB)}</span> : r.fmt(r.vb)}
               </td>
               <td className="py-1 text-right font-mono">
-                {(availableA && availableB)
-                  ? <Delta v={r.vb - r.va} fmt={r.fmt} invert={r.invert} />
-                  : <span className="text-muted" title="Δ undefined — a scenario is unresolved">—</span>}
+                {!(availableA && availableB)
+                  ? <span className="text-muted" title="Δ undefined — a scenario is unresolved">—</span>
+                  : (r.va === null || r.vb === null)
+                    ? <span className="text-muted">{withheldCell(r.va === null ? reasonA : reasonB)}</span>
+                    : <Delta v={r.vb - r.va} fmt={r.fmt} invert={r.invert} />}
               </td>
             </tr>
           ))
@@ -1854,12 +1895,16 @@ function EconomicsTable({
 // side-by-side; orphans (asset in A but not B, or vice-versa) still
 // render with — placeholders.
 function AssetLCOHTable({
-  aName, bName, rowsA, rowsB, period, fmtMEur, fmtEurMwh, selectedCarrier,
+  aName, bName, rowsA, rowsB, reasonA, reasonB, period, fmtMEur, fmtEurMwh, selectedCarrier,
 }: {
   aName: string
   bName: string
   rowsA: AssetLCOHEntry[]
   rowsB: AssetLCOHEntry[]
+  // A side's integer (MIP) solve withholds its LCOH (input electricity priced at
+  // the bus duals): its cells read withheldCell, never a dash or 0.
+  reasonA?: string
+  reasonB?: string
   period: PeriodChoice
   fmtMEur: (n: number) => string
   fmtEurMwh: (n: number) => string
@@ -1904,6 +1949,10 @@ function AssetLCOHTable({
     return merged.filter(r => canonicaliseCarrier('Link', r.carrier) === selectedCarrier)
   }, [merged, selectedCarrier])
 
+  if (merged.length === 0 && (reasonA || reasonB)) {
+    // Both sides withheld (or one withheld, one with no Link rows): say why, not "no assets".
+    return <p className="text-[11px] text-muted py-2">{withheldCell(reasonA || reasonB)}</p>
+  }
   if (filtered.length === 0) {
     return <p className="text-[11px] text-muted py-2">No assets match the selected carrier.</p>
   }
@@ -1929,20 +1978,24 @@ function AssetLCOHTable({
           const lA = readPV(r.A?.lcoh_eur_per_mwh, period)
           const lB = readPV(r.B?.lcoh_eur_per_mwh, period)
           const dash = '—'
+          const wA = reasonA ? <span className="text-muted">{withheldCell(reasonA)}</span> : dash
+          const wB = reasonB ? <span className="text-muted">{withheldCell(reasonB)}</span> : dash
           return (
             <tr key={r.name} className="border-b border-border/40"
               title={`Asset CAPEX (A): ${fmtMEur(readPV(r.A?.capex_meur, period))}\nAsset OPEX  (A): ${fmtMEur(readPV(r.A?.opex_meur, period))}\nInput cost  (A): ${fmtMEur(readPV(r.A?.input_cost_meur, period))}\n— vs —\nAsset CAPEX (B): ${fmtMEur(readPV(r.B?.capex_meur, period))}\nAsset OPEX  (B): ${fmtMEur(readPV(r.B?.opex_meur, period))}\nInput cost  (B): ${fmtMEur(readPV(r.B?.input_cost_meur, period))}`}
             >
               <td className="py-1 text-text font-mono">{r.name}</td>
               <td className="py-1 text-muted">{r.carrier ? carrierDisplayName(canonicaliseCarrier('Link', r.carrier)) : dash}</td>
-              <td className="py-1 text-right font-mono text-text">{r.A ? fmtGwh(oA) : dash}</td>
-              <td className="py-1 text-right font-mono text-text">{r.B ? fmtGwh(oB) : dash}</td>
-              <td className="py-1 text-right font-mono text-text">{r.A && lA > 0 ? fmtEurMwh(lA) : dash}</td>
-              <td className="py-1 text-right font-mono text-text">{r.B && lB > 0 ? fmtEurMwh(lB) : dash}</td>
+              <td className="py-1 text-right font-mono text-text">{r.A ? fmtGwh(oA) : wA}</td>
+              <td className="py-1 text-right font-mono text-text">{r.B ? fmtGwh(oB) : wB}</td>
+              <td className="py-1 text-right font-mono text-text">{r.A && lA > 0 ? fmtEurMwh(lA) : wA}</td>
+              <td className="py-1 text-right font-mono text-text">{r.B && lB > 0 ? fmtEurMwh(lB) : wB}</td>
               <td className="py-1 text-right font-mono">
                 {r.A && r.B && lA > 0 && lB > 0
                   ? <Delta v={lB - lA} fmt={fmtEurMwh} invert />
-                  : <span className="text-muted">{dash}</span>}
+                  : (reasonA || reasonB)
+                    ? <span className="text-muted">{withheldCell(reasonA || reasonB)}</span>
+                    : <span className="text-muted">{dash}</span>}
               </td>
             </tr>
           )
@@ -2697,11 +2750,14 @@ function StorageUnitTable({
 
 function ABBarChart({
   aName, bName, mapA, mapB, period, unit, selectedCarrier, availableA = true, availableB = true,
+  withheldA, withheldB,
 }: {
   aName: string
   bName: string
-  mapA: Record<string, CarrierPeriodValue>
-  mapB: Record<string, CarrierPeriodValue>
+  // A null entry is a figure withheld for a price limit: no bar, and the
+  // tooltip reads withheldCell(withheldA/B) instead of a zero.
+  mapA: Record<string, CarrierPeriodValue | null>
+  mapB: Record<string, CarrierPeriodValue | null>
   period: PeriodChoice
   unit: string
   // When set to a specific canonical carrier, only that bar pair renders.
@@ -2715,14 +2771,16 @@ function ABBarChart({
   // (LoadingTab/PricesTab/LostLoadTab/OverviewTab) use ABBarChart at all.
   availableA?: boolean
   availableB?: boolean
+  withheldA?: string
+  withheldB?: string
 }) {
   const data = useMemo(() => {
     const carriers = unionCarriers(mapA, mapB)
       .filter(c => selectedCarrier == null || c === selectedCarrier)
     return carriers.map(c => ({
       carrier: carrierDisplayName(c),
-      [aName]: readPV(mapA[c], period),
-      [bName]: readPV(mapB[c], period),
+      [aName]: readNullablePV(mapA[c], period),
+      [bName]: readNullablePV(mapB[c], period),
     }))
   }, [aName, bName, mapA, mapB, period, selectedCarrier])
 
@@ -2742,7 +2800,10 @@ function ABBarChart({
           <CartesianGrid strokeDasharray="3 3" stroke="rgba(127,127,127,0.2)" />
           <XAxis dataKey="carrier" tick={{ fontSize: 11 }} />
           <YAxis tick={{ fontSize: 11 }} label={{ value: unit, angle: -90, position: 'insideLeft', style: { fontSize: 10, fill: '#888' } }} />
-          <Tooltip contentStyle={{ fontSize: 11 }} formatter={(v: number) => `${(v ?? 0).toFixed(2)} ${unit}`} />
+          <Tooltip contentStyle={{ fontSize: 11 }} formatter={(v: number, name: string) =>
+            v == null && (withheldA || withheldB)
+              ? withheldCell(name === aName ? withheldA : withheldB)
+              : `${(v ?? 0).toFixed(2)} ${unit}`} />
           {/* Legend at the top so it never collides with an axis label below. */}
           <Legend verticalAlign="top" align="right" height={20} wrapperStyle={{ fontSize: 11, paddingBottom: 4 }} />
           {/* An unavailable side plots NO bar at all — a zero-height bar
@@ -3378,7 +3439,12 @@ function readPV(pv: CarrierPeriodValue | undefined, period: PeriodChoice): numbe
   return pv.by_period[period] ?? 0
 }
 
-function unionCarriers(a: Record<string, CarrierPeriodValue>, b: Record<string, CarrierPeriodValue>): string[] {
+// readPV for a price-based figure the backend may withhold: null stays null.
+function readNullablePV(pv: CarrierPeriodValue | null | undefined, period: PeriodChoice): number | null {
+  return pv === null ? null : readPV(pv, period)
+}
+
+function unionCarriers(a: Record<string, unknown>, b: Record<string, unknown>): string[] {
   return [...new Set([...Object.keys(a), ...Object.keys(b)])].sort()
 }
 

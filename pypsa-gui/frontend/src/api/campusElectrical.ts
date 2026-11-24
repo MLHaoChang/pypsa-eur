@@ -167,6 +167,11 @@ export interface InvestedComplianceRow extends ComplianceRow {
   worst_period_with_measures?: number | null
   worst_hour_with_measures?: number | null
   worst_case_with_measures?: string | null
+  /** The limit the "with the assets" verdict used (the bought switchgear's kA);
+   *  absent in a run from before it was kept. */
+  limit_with_measures?: number | null
+  limit_min_with_measures?: number | null
+  limit_max_with_measures?: number | null
 }
 
 export interface HistoryRow { iteration: number; need: string; from: string; to: string; check: string; detail: string }
