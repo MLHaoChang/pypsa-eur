@@ -467,6 +467,55 @@ def test_a_task_unreadable_in_its_own_project_still_blocks_a_start(
     assert chat.task_id == first["task_id"]
 
 
+def test_a_read_refusal_other_than_not_found_is_not_read_in_the_home(
+    chat, monkeypatch
+):
+    """Only a task missing from this project is read in its own one; any
+    other refusal of `_read` fails closed even when the home copy is idle."""
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    read = tasks._read
+
+    def refusing(task_id):
+        if task_id == first["task_id"]:
+            tasks._refuse("task_unreadable", "The task checkpoint needs repair.")
+        return read(task_id)
+
+    monkeypatch.setattr(tasks, "_read", refusing)
+    _switch_refused(
+        lambda: chat_tools.start_task(title="Other", request_id="second", steps=WAIT),
+        first["task_id"],
+        "unreadable",
+    )
+
+
+@pytest.mark.parametrize("failure", ["database", "not_an_object"])
+def test_a_home_read_failure_still_blocks_a_start(
+    chat, monkeypatch, tmp_path, failure
+):
+    """A database error while placing the task, or a checkpoint that is not
+    an object, fails closed as `unreadable`, not as a 500."""
+    from services import project_registry
+
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    home = _stored("first")
+    _, _, owner = tasks._authority()
+    away = (tmp_path, str(uuid.uuid4()), owner)
+    monkeypatch.setattr(tasks, "_authority", lambda: away)
+    if failure == "database":
+
+        def down(*_args, **_kwargs):
+            raise RuntimeError("database unavailable")
+
+        monkeypatch.setattr(project_registry, "resolve_project", down)
+    else:
+        home.write_text("[]")
+    _switch_refused(
+        lambda: chat_tools.start_task(title="Other", request_id="second", steps=WAIT),
+        first["task_id"],
+        "unreadable",
+    )
+
+
 def test_a_task_that_ended_before_the_switch_never_blocks_a_start(
     chat, monkeypatch, tmp_path
 ):

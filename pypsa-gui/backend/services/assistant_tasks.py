@@ -183,6 +183,8 @@ def _read_home(task_id):
         project = project_registry.resolve_project(db, user, home)
         root, project_id, owner = project_registry.project_dir(project), str(project.id), str(user.id)
     task = json.loads((root / "assistant_tasks" / (task_id + ".json")).read_text())
+    if not isinstance(task, dict):
+        raise ValueError("task checkpoint is not an object")
     if task.get("project_id") != project_id or task.get("owner_id") != owner or project_id != home:
         _refuse("task_not_found", "Task not found in this project.", 404)
     return task
@@ -602,7 +604,7 @@ def _refuse_switch(session, task_id):
                 if exc.status_code != 404:
                     raise
                 task = _read_home(active)  # LC48G-READ-1: read it where it lives
-        except (HTTPException, OSError, ValueError):
+        except Exception:  # noqa: BLE001 — any read failure fails closed (LC48F-REFUSE-1), a DB error too
             raise HTTPException(409, {
                 "error_kind": "switch_in_progress",
                 "active": {"kind": "task", "id": active, "title": None, "status": "unreadable"},
