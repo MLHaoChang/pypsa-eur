@@ -419,3 +419,132 @@ def test_master_digests_return_with_the_gas_efficiency_at_one(monkeypatch, tmp_p
         rows = [a for a in T.DC_EXISTING if a in df.index]
         df.loc[rows, ["overnight_cost", "discount_rate"]] = np.nan
     assert _digest(n) == "32b282c3eb61543e"
+
+
+# ── branches the mutant runs left open ─────────────────────────────────────
+def test_the_helper_reads_the_snapshots_it_is_asked_for_and_fills_the_default():
+    from services.co2_override import has_override, override_series
+
+    n, half = _hand_net()
+    assert has_override(n, "grid_supply") and not has_override(n, "genset_1")
+    assert override_series(n, "genset_1", 0.5) is None
+    full = override_series(n, "grid_supply", 0.5)
+    assert list(full.index) == list(n.snapshots)
+    sub = n.snapshots[10:13]
+    assert list(override_series(n, "grid_supply", 0.5, sub).index) == list(sub)
+    n.generators_t["eh_co2_t_per_mwh"].loc[sub[0], "grid_supply"] = float("nan")
+    assert (
+        override_series(n, "grid_supply", 0.5, sub).iloc[0] == 0.5
+    )  # no figure: the default
+
+
+def test_the_results_view_counts_a_plain_generator_at_its_carrier_per_period():
+    n, _ = _hand_net()
+    n.generators_t.p["genset_1"] = 10.0
+    _, res = _both(n)
+    row = next(
+        r for r in res["by_period"][0]["by_generator"] if r["name"] == "genset_1"
+    )
+    assert row["tCO2"] == pytest.approx(
+        3 * 8760 * 10.0 * GAS_T_PER_MWH_FUEL / PACK_EFFICIENCY
+    )
+
+
+def test_the_diagnostics_count_every_emitter_and_a_zero_intensity_overridden_one():
+    from services.solver.diagnostics import _log_cost_decomposition_post_solve
+    from services.solver_service import SolverConfig
+
+    def kt_of_2027(n):
+        lines: list[str] = []
+        _log_cost_decomposition_post_solve(
+            n, SolverConfig(co2_price=PRICE), n.snapshots, None, lines.append
+        )
+        row = next(x for x in lines if "2027:" in x)
+        return row.split("kt)")[0].rsplit("(", 1)[1].strip()
+
+    n, _ = _hand_net()
+    n.generators_t.p["genset_1"] = 10.0
+    gas_t = 3 * 8760 * 10.0 * GAS_T_PER_MWH_FUEL / PACK_EFFICIENCY
+    assert (
+        kt_of_2027(n) == f"{(HAND_T + gas_t) / 1e3:.1f}"
+    )  # a plain emitter is counted with the override
+    n.carriers.loc["grid", "co2_emissions"] = 0.0
+    assert (
+        kt_of_2027(n) == f"{(HAND_T + gas_t) / 1e3:.1f}"
+    )  # and an overridden one on a zero carrier
+
+
+def _price_step(n, cfg):
+    from services.solver.assumptions import _apply_modelling_assumptions
+
+    cols = list(n.generators.index)
+    before = n.get_switchable_as_dense("Generator", "marginal_cost", inds=cols)
+    restore, _ = _apply_modelling_assumptions(n, cfg, lambda *a, **k: None)
+    try:
+        after = n.get_switchable_as_dense("Generator", "marginal_cost", inds=cols)
+        step = after - before
+        has_series = list(n.generators_t.marginal_cost.columns)
+    finally:
+        restore()
+    again = n.get_switchable_as_dense("Generator", "marginal_cost", inds=cols)
+    assert again.equals(before)  # the price is transient
+    return step, has_series
+
+
+def test_the_lp_price_reads_a_per_period_price_times_the_per_snapshot_intensity():
+    from services.solver_service import SolverConfig
+
+    n, half = _hand_net()
+    prices = {2027: 100.0, 2030: 200.0, 2035: 300.0}
+    step, _ = _price_step(n, SolverConfig(co2_price_per_period=prices))
+    s = step["grid_supply"]
+    assert s.loc[half].to_numpy() == pytest.approx(100.0 * 0.10)
+    period_2030 = s.index.get_level_values(0) == 2030
+    assert s[period_2030].to_numpy() == pytest.approx(
+        200.0 * 0.30
+    )  # the 2030 intensity
+
+
+def test_the_lp_price_of_an_overridden_generator_without_a_cost_series_is_transient():
+    from services.solver_service import SolverConfig
+
+    n, _ = _hand_net()
+    n.generators_t["eh_co2_t_per_mwh"]["genset_1"] = 0.30
+    assert "genset_1" not in n.generators_t.marginal_cost.columns
+    step, during = _price_step(n, SolverConfig(co2_price=PRICE))
+    assert step["genset_1"].to_numpy() == pytest.approx(PRICE * 0.30)
+    assert "genset_1" in during  # priced per snapshot while the solve runs
+    assert (
+        "genset_1" not in n.generators_t.marginal_cost.columns
+    )  # dropped again on restore
+    assert n.generators.at["genset_1", "marginal_cost"] == 165.0
+
+
+def test_a_zero_efficiency_emitter_is_not_priced(monkeypatch):
+    import numpy as np
+
+    from services.solver_service import SolverConfig
+
+    n, _ = _hand_net()
+    n.generators.at["genset_2", "efficiency"] = 0.0
+    step, _ = _price_step(n, SolverConfig(co2_price=PRICE))
+    assert np.isfinite(step["genset_2"]).all() and (step["genset_2"] == 0.0).all()
+
+
+def test_a_fuel_curve_generator_keeps_its_slope_price_over_an_override(monkeypatch):
+    from services import fuel_curve
+    from services.solver_service import SolverConfig
+
+    n, _ = _hand_net()
+    n.generators_t["eh_co2_t_per_mwh"]["genset_1"] = 0.30
+    real = fuel_curve.curve_slope
+    monkeypatch.setattr(
+        fuel_curve,
+        "curve_slope",
+        lambda row: 2.0 if row.name == "genset_1" else real(row),
+    )
+    step, during = _price_step(n, SolverConfig(co2_price=PRICE))
+    assert step["genset_1"].to_numpy() == pytest.approx(
+        PRICE * GAS_T_PER_MWH_FUEL * 2.0
+    )
+    assert "genset_1" not in during
