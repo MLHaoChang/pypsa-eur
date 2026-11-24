@@ -128,6 +128,7 @@ from services.solver.pcs_statcom import HORIZON_BASIS as _PQ_HORIZON_BASIS
 from services.solver.pcs_statcom import MAX_BASIS as _PQ_MAX_BASIS
 from services.solver import lost_production as _lost_production
 from services.solver import dc_curtailment as _dc_curtailment
+from services.solver import co2_cap as _co2_cap
 from services.solver import process_uc as _process_uc
 # Edge Investment Case commercial layer (spec §5.1): the PoC price writer and
 # the LP-terms wrapper, re-exported with the rest of the solver seams.
@@ -201,6 +202,11 @@ class SolverConfig:
     # On flat (single-period) networks this dict is ignored — log a warning
     # at solve time so the user notices the silent no-op.
     co2_price_per_period: dict = field(default_factory=dict)
+    # CO2 limit goal (DC template review 02): t CO2 per YEAR, written per
+    # investment period as PyPSA's primary_energy CO2 cap for the solve only
+    # (`services/solver/co2_cap.py`). None = off; 0 = no emissions at all.
+    # Dropped from fingerprints while None (`reliability_goal.OFF_WHEN_NONE`).
+    co2_limit_t_per_yr: float | None = None
     voll: float = 0.0                   # €/MWh — when >0, slack gens get added per bus
     # Reliability target (adequacy spec §5.1): unserved ELECTRICAL energy
     # cap in parts per ten thousand (‱) of the period's weighted electrical
@@ -641,6 +647,9 @@ def build_lp_chain(network, config, log_queue):
     extra_fn = _wrap_with_reserve_products(network, extra_fn, config, log_queue=log_queue)
     # Curtailable data-centre load (DC-07 S2): the duration's energy-proxy rows. No-op when off.
     extra_fn = _dc_curtailment._wrap_with_dc_curtailment(network, extra_fn, log_queue=log_queue)
+    # CO2 limit goal (DC review 02): rebuild its cap rows so a generator with a per-snapshot
+    # intensity (services.co2_override) counts at it. No-op when off.
+    extra_fn = _co2_cap.wrap_lp(network, extra_fn, config, log_queue=log_queue)
     # Edge Investment Case LP-level commercial terms (peaks, ratchets,
     # tiers, group caps; spec §5.1). After the reserve margin, before the
     # objective scale, which must stay last.
@@ -689,6 +698,8 @@ def run_simulation(
 
     t_start = time.time()
     status, condition = "error", "unknown"
+    # Filled by `_apply_modelling_assumptions` on the LOPF path; empty otherwise.
+    captured: dict = {}
     tmp_log, _drop_solve_log = _make_solve_log_path()
     tail_stop = threading.Event()
     tail_thread: threading.Thread | None = None
@@ -1676,6 +1687,29 @@ def run_simulation(
                         margin_targets=_margin_targets)
                 except Exception as _dexc:
                     phase(f"Infeasibility diagnosis skipped: {_dexc}")
+
+            # CO2 limit goal (DC review 02): its caps and duals, and after a
+            # confirmed-infeasible solve its typed refusal with the least
+            # emissions reachable (one extra LP). None when the goal is off.
+            _co2 = captured.get("co2_cap")
+            _co2_lhs = _co2_cap.take_lhs(network)
+            if (_co2 is not None and status not in ("ok", "optimal")
+                    and "infeasible" in str(condition).lower()):
+                try:
+                    phase("CO2 limit: the solve is infeasible; one extra LP finds the "
+                          "least emissions reachable without the cap.")
+                    _co2 = dict(_co2, refusal=_co2_cap.unreachable(
+                        network, _co2, _co2_lhs, config.solver_name,
+                        getattr(config, "solver_options", None) or {}))
+                    phase(_co2["refusal"]["message"])
+                except Exception as _cexc:
+                    phase(f"CO2 limit: least emissions reachable not found ({_cexc}).")
+                    _co2 = dict(_co2, refusal={
+                        "code": _co2_cap.UNREACHABLE, "limit_t_per_yr": _co2["limit_t_per_yr"],
+                        "least_t_per_yr": None, "extra_solves": 1,
+                        "message": f"No design meets the CO2 limit of "
+                                   f"{_co2['limit_t_per_yr']:,.0f} t CO2/yr."})
+            _emit_state(last_co2_cap=_co2)
 
             # Post-process — PyPSA already populates the result DataFrames in
             # place during n.optimize() / n.pf(). We don't need to
