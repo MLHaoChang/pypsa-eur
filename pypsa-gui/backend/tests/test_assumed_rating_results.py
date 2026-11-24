@@ -347,3 +347,354 @@ def test_the_summary_headline_says_why_an_assumed_line_has_no_congested_hours(
     )
     stated = headline(False)
     assert stated["status"] == "ok" and stated["value"] > 0
+
+
+# --- psse-import 06: sealed facts and the what-if comparison ---------------------------
+
+
+def _raw(*, assumed_second):
+    """Two lines over three snapshots: both at 150 % of a rating of 10 MVA."""
+
+    def branch(assumed):
+        flow = [15.0, 15.0, 15.0]
+        return {
+            "class": "Line",
+            "rating": 10.0,
+            "rating_field": "s_nom",
+            "s_max_pu": [1.0] * 3,
+            "p0": flow,
+            "p1": [-f for f in flow],
+            **({"rating_assumed": True} if assumed else {}),
+        }
+
+    return {
+        "version": 1,
+        "profile": branch_calculations.NETWORK_PROFILE,
+        "entity_id": "network",
+        "valid_solve": True,
+        "index": ["a", "b", "c"],
+        "energy_weight": [1.0, 1.0, 1.0],
+        "branches": {"L1": branch(False), "L2": branch(assumed_second)},
+        "links_excluded": 0,
+    }
+
+
+def _scope(profile=branch_calculations.NETWORK_PROFILE, entity="network"):
+    return {
+        "profile": profile,
+        "entity_id": entity,
+        "metrics": ["max_branch_utilisation", "branches_above_rating"],
+    }
+
+
+def _facts(raw, scope):
+    facts, _ = branch_calculations.calculate(raw, scope)
+    return {f["metric"]: f["value"] for f in facts}
+
+
+def test_sealed_above_rating_count_leaves_an_assumed_branch_out_and_says_so(
+    monkeypatch,
+):
+    from harness import calculations
+
+    monkeypatch.setattr(
+        calculations, "requested_metrics", lambda scope: scope["metrics"]
+    )
+    assert _facts(_raw(assumed_second=False), _scope())["branches_above_rating"] == 2
+    assumed = _raw(assumed_second=True)
+    facts = _facts(assumed, _scope())
+    assert facts["branches_above_rating"] == 1
+    assert facts["max_branch_utilisation"] == pytest.approx(150)  # loading stays
+    assert any(
+        "1 branch(es) with an assumed rating" in line
+        for line in branch_calculations.notes(assumed)
+    )
+    assert not any(
+        "assumed" in line
+        for line in branch_calculations.notes(_raw(assumed_second=False))
+    )
+
+
+def test_sealed_hours_above_rating_of_an_assumed_branch_is_unavailable(monkeypatch):
+    from harness import calculations
+
+    monkeypatch.setattr(
+        calculations, "requested_metrics", lambda scope: scope["metrics"]
+    )
+    scope = {
+        **_scope(branch_calculations.PROFILE, "L2"),
+        "metrics": ["peak_branch_utilisation", "hours_above_rating"],
+    }
+    for name, hours_available in (("stated", True), ("assumed", False)):
+        raw = _raw(assumed_second=name == "assumed")
+        raw["profile"] = branch_calculations.PROFILE
+        raw["entity_id"] = "L2"
+        raw["branches"] = {"L2": raw["branches"]["L2"]}
+        facts, slots = branch_calculations.calculate(raw, scope)
+        got = {f["metric"]: f["value"] for f in facts}
+        assert ("hours_above_rating" in got) is hours_available
+        assert got["peak_branch_utilisation"] == pytest.approx(150)
+        if not hours_available:
+            assert [
+                s["reason"] for s in slots if s["disposition"] == "unavailable"
+            ] == ["rating_assumed"]
+
+
+def test_what_if_loading_comparison_claims_no_binding_hours_for_an_assumed_line():
+    from services.compare.loading import _compute_loading_summary
+
+    n = _imported()
+    name = next(i for i in n.lines.index if n.lines.at[i, "s_nom_source"] == "assumed")
+    _overloaded(n, name)
+    n.lines["s_nom_opt"] = n.lines["s_nom"]  # as after a solve
+    result = _compute_loading_summary(n, [], False, True)
+    rows = {e.name: e for e in result.lines}
+    assert rows[name].rating_assumed is True
+    assert (
+        rows[name].binding_hours is None
+    )  # not evaluated, never a 0 that reads as a pass
+    assert rows[name].peak_loading.total == pytest.approx(1.5)
+    assert (
+        result.assumed_rating_count == sum(e.rating_assumed for e in result.lines) >= 1
+    )
+    assert result.assumed_rating_count == int(
+        (n.lines["s_nom_source"] == "assumed").sum()
+    )
+
+
+def test_what_if_loading_comparison_without_the_marker_is_unchanged():
+    from services.compare.loading import _compute_loading_summary
+
+    n = _imported()
+    name = n.lines.index[0]
+    n.lines["s_nom_source"] = "file"
+    _overloaded(n, name)
+    n.lines["s_nom_opt"] = n.lines["s_nom"]
+    result = _compute_loading_summary(n, [], False, True)
+    row = next(e for e in result.lines if e.name == name)
+    assert row.rating_assumed is False and row.binding_hours.total > 0
+    assert result.assumed_rating_count == 0
+
+
+def test_every_branch_assumed_leaves_the_network_count_unavailable_not_zero(
+    monkeypatch,
+):
+    from harness import calculations
+
+    monkeypatch.setattr(
+        calculations, "requested_metrics", lambda scope: scope["metrics"]
+    )
+    raw = _raw(assumed_second=True)
+    raw["branches"]["L1"]["rating_assumed"] = True
+    facts, slots = branch_calculations.calculate(raw, _scope())
+    got = {f["metric"]: f["value"] for f in facts}
+    assert "branches_above_rating" not in got and got[
+        "max_branch_utilisation"
+    ] == pytest.approx(150)
+    assert [s["reason"] for s in slots if s["disposition"] == "unavailable"] == [
+        "rating_assumed"
+    ]
+    assert any(
+        "2 branch(es) with an assumed rating" in n
+        for n in branch_calculations.notes(raw)
+    )
+
+
+def test_marker_less_sealed_facts_equal_the_literal_master_output(monkeypatch):
+    from harness import calculations
+
+    monkeypatch.setattr(
+        calculations, "requested_metrics", lambda scope: scope["metrics"]
+    )
+    raw = _raw(assumed_second=False)
+    facts, slots = branch_calculations.calculate(raw, _scope())
+    assert facts == [
+        {
+            "path": "/max_branch_utilisation",
+            "entity_id": "network",
+            "metric": "max_branch_utilisation",
+            "value": 150.0,
+            "unit": "%",
+            "formula_id": "network-max-branch-utilisation/1",
+        },
+        {
+            "path": "/branches_above_rating",
+            "entity_id": "network",
+            "metric": "branches_above_rating",
+            "value": 2,
+            "unit": "branches",
+            "formula_id": "network-branches-above-rating/1",
+        },
+    ]
+    assert slots == [
+        {
+            "metric": "max_branch_utilisation",
+            "disposition": "answered",
+            "requested_snapshots": 3,
+        },
+        {
+            "metric": "branches_above_rating",
+            "disposition": "answered",
+            "requested_snapshots": 3,
+        },
+    ]
+    assert branch_calculations.notes(raw) == [
+        "2 Lines and 0 Transformers; 0 Links excluded."
+    ]
+
+
+def test_what_if_loading_reads_the_link_p_nom_marker():
+    from services.compare.loading import _compute_loading_summary
+
+    n = _imported()
+    name = n.lines.index[0]
+    _overloaded(n, name)
+    n.lines["s_nom_opt"] = n.lines["s_nom"]
+    n.add("Bus", "far")
+    n.add("Link", "lk", bus0=n.buses.index[0], bus1="far", p_nom=10.0, p_nom_opt=10.0)
+    n.links["p_nom_source"] = "assumed"
+    n.links_t.p0["lk"] = 15.0
+    row = next(
+        e for e in _compute_loading_summary(n, [], False, True).lines if e.name == "lk"
+    )
+    assert row.rating_assumed is True and row.binding_hours is None
+    n.links["p_nom_source"] = "file"
+    row = next(
+        e for e in _compute_loading_summary(n, [], False, True).lines if e.name == "lk"
+    )
+    assert row.rating_assumed is False and row.binding_hours.total > 0
+
+
+def _slots(raw, scope, monkeypatch):
+    from harness import calculations
+
+    monkeypatch.setattr(calculations, "requested_metrics", lambda s: s["metrics"])
+    return {
+        s["metric"]: s.get("reason")
+        for s in branch_calculations.calculate(raw, scope)[1]
+    }
+
+
+def test_a_stated_branch_under_its_rating_is_not_counted_beside_an_assumed_one(
+    monkeypatch,
+):
+    raw = _raw(assumed_second=True)
+    raw["branches"]["L1"]["p0"] = [5.0] * 3
+    raw["branches"]["L1"]["p1"] = [-5.0] * 3
+    facts, _ = branch_calculations.calculate(raw, _scope())
+    assert {f["metric"]: f["value"] for f in facts}[
+        "branches_above_rating"
+    ] == 0  # one stated, judged
+    raw["branches"]["L1"]["p0"] = [15.0] * 3
+    raw["branches"]["L1"]["p1"] = [-15.0] * 3
+    raw["branches"]["L1"]["rating"] = 15.0  # exactly at its rating: not above
+    facts, _ = branch_calculations.calculate(raw, _scope())
+    assert {f["metric"]: f["value"] for f in facts}["branches_above_rating"] == 0
+
+
+def test_the_unavailable_reason_names_the_assumed_rating_only_when_that_is_the_cause(
+    monkeypatch,
+):
+    two = {**_scope(), "metrics": ["hours_above_rating", "branches_above_rating"]}
+    # network profile: hours is not a network metric, so it stays unsupported; some assumed: the count answers
+    some = _raw(assumed_second=True)
+    assert _slots(some, two, monkeypatch) == {
+        "hours_above_rating": "unsupported_metric",
+        "branches_above_rating": None,
+    }
+    # every branch assumed: the count is the one left out
+    every = _raw(assumed_second=True)
+    every["branches"]["L1"]["rating_assumed"] = True
+    assert _slots(every, two, monkeypatch) == {
+        "hours_above_rating": "unsupported_metric",
+        "branches_above_rating": "rating_assumed",
+    }
+    # missing data wins over the marker
+    broken = _raw(assumed_second=True)
+    broken["branches"]["L1"]["p0"][0] = None
+    assert (
+        _slots(broken, two, monkeypatch)["branches_above_rating"]
+        == "invalid_or_missing_branch_data"
+    )
+    # single branch: its count is not a branch metric; a stated branch keeps its hours
+    single = {
+        **_scope(branch_calculations.PROFILE, "L2"),
+        "metrics": ["hours_above_rating", "branches_above_rating"],
+    }
+    raw = _raw(assumed_second=True)
+    raw["profile"], raw["entity_id"], raw["branches"] = (
+        branch_calculations.PROFILE,
+        "L2",
+        {"L2": raw["branches"]["L2"]},
+    )
+    assert _slots(raw, single, monkeypatch) == {
+        "hours_above_rating": "rating_assumed",
+        "branches_above_rating": "unsupported_metric",
+    }
+
+
+def _case14_raw(monkeypatch, *, assumed, transformers_assumed=False):
+    """case14 through the real source(): every line at 150 %, the named lines assumed."""
+    from services import workflow_tools
+
+    n = _imported()
+    _overloaded(n, n.lines.index[0])
+    for line in n.lines.index:  # every line at 150 % of its own rating
+        rating = float(n.lines.at[line, "s_nom"])
+        n.lines_t.p0[line], n.lines_t.p1[line] = 1.5 * rating, -1.5 * rating
+    for t in ("p0", "p1"):
+        frame = getattr(n.transformers_t, t)
+        for tr in n.transformers.index:
+            frame[tr] = 0.0
+    n.lines["s_nom_source"] = [
+        "assumed" if i in assumed else "file" for i in n.lines.index
+    ]
+    n.transformers["s_nom_source"] = "assumed" if transformers_assumed else "file"
+    monkeypatch.setattr(
+        workflow_tools, "_network_input_fingerprint", lambda ctx, exact=False: "fp"
+    )
+    n.meta["assistant_solve_input_fingerprint"] = "fp"
+    n.meta["assistant_solve_exact_input_fingerprint"] = "fp"
+    ctx = SimpleNamespace(
+        network=n, solver_state={"status": "completed", "condition": "optimal"}
+    )
+    return n, branch_calculations.source(ctx, "network", True)
+
+
+def _network_facts(raw, monkeypatch):
+    from harness import calculations
+
+    monkeypatch.setattr(
+        calculations, "requested_metrics", lambda scope: scope["metrics"]
+    )
+    facts, slots = branch_calculations.calculate(raw, _scope())
+    return {f["metric"]: f["value"] for f in facts}, slots
+
+
+def test_case14_one_assumed_line_is_left_out_of_the_sealed_count(monkeypatch):
+    n, raw = _case14_raw(monkeypatch, assumed={"__none__"})
+    stated, _ = _network_facts(raw, monkeypatch)
+    assert stated["branches_above_rating"] == len(n.lines)  # every line at 150 %
+    n, raw = _case14_raw(monkeypatch, assumed={n.lines.index[0]})
+    got, _ = _network_facts(raw, monkeypatch)
+    assert got["branches_above_rating"] == len(n.lines) - 1
+    assert got["max_branch_utilisation"] == pytest.approx(150)
+    assert any(
+        "1 branch(es) with an assumed rating" in x
+        for x in branch_calculations.notes(raw)
+    )
+
+
+def test_case14_all_lines_assumed_leaves_the_count_unavailable_not_zero(monkeypatch):
+    n, raw = _case14_raw(
+        monkeypatch, assumed=set(_imported().lines.index), transformers_assumed=True
+    )
+    got, slots = _network_facts(raw, monkeypatch)
+    assert "branches_above_rating" not in got
+    assert got["max_branch_utilisation"] == pytest.approx(150)
+    reasons = {s["metric"]: s.get("reason") for s in slots}
+    assert reasons["branches_above_rating"] == "rating_assumed"
+    assert any(
+        f"{len(n.lines) + len(n.transformers)} branch(es) with an assumed rating" in x
+        for x in branch_calculations.notes(raw)
+    )

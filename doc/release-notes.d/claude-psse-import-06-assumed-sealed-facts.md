@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The sealed branches-above-rating and hours-above-rating facts and the what-if loading comparison leave a branch with an assumed (importer-set) rating out of their above-rating counts and name how many were left out.

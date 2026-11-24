@@ -1289,7 +1289,12 @@ class LineLoadingEntry(BaseModel):
     # Hours where loading ≥ 0.99 — proxy for "binding N-0 thermal limit".
     # Already snapshot-weight × period-year multiplied so a representative-
     # week network reports the equivalent annual hour count.
-    binding_hours: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
+    # None: not evaluated because the importer assumed this rating (below). A 0 would
+    # read as "never binding", a pass on a rating the file never stated.
+    binding_hours: CarrierPeriodValue | None = Field(default_factory=CarrierPeriodValue)
+    # The importer assumed this rating (s_nom_source/p_nom_source == "assumed"):
+    # loading stays, binding hours are not evaluated against it (psse-import 06).
+    rating_assumed: bool = False
 
 
 class LoadingComparison(BaseModel):
@@ -1307,6 +1312,8 @@ class LoadingComparison(BaseModel):
     # Ordered by peak loading (descending) on the SCENARIO-WIDE aggregate so
     # the worst-loaded branches surface first. Frontend renders top-N.
     lines: list[LineLoadingEntry] = Field(default_factory=list)
+    # Branches whose rating is assumed; left out of the binding-hours figures.
+    assumed_rating_count: int = 0
 
 
 class CarrierPriceStats(BaseModel):
