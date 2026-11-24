@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): On an integer (MIP) solve, the Results Prices tab, the price drivers, the per-asset price metrics and the checked bus-price answers now say the prices are not available instead of showing 0 or a generator-cost estimate, because a MIP has no marginal prices. The checked answers judge the solve that wrote the prices, not a later config edit.
