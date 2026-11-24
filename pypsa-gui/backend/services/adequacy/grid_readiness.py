@@ -2217,7 +2217,33 @@ def _load_profile(profile_id: str, profile_dirs) -> tuple[dict | None, str | Non
 SK_OFF_GRID = ("off-grid: the tie is open, so the PoC's fault level does not apply; "
                "the island's fault level comes from its own units")
 #: The scorecard's row builders, in the scorecard's order.
-_BUILDERS = (_scr_rows, _peak_rows, _ramp_row, _oscillation_row, _rvc_row, _rvc_infrequent_row,
+def _grid_strength_rows(inp: _Inputs) -> list[dict]:
+    """One warning per generator whose stored minimum short-circuit power is above its maximum (catalogue 06).
+
+    Every edit path refuses such a pair, but an import (Excel workbook, DGS, PSS/E, legacy) loads it as the file
+    gives it (C9). No row at all when no pair is reversed; no gate reads these two columns."""
+    from services.adequacy.eh_columns import sk_number, sk_shown
+
+    gens = getattr(inp.n, "generators", None)
+    if gens is None or not {"sk_min_mva", "sk_max_mva"} <= set(gens.columns):
+        return []
+    rows = []
+    for name, g in gens.iterrows():
+        lo, hi = sk_number(g["sk_min_mva"]), sk_number(g["sk_max_mva"])
+        if lo is None or hi is None or lo <= hi:
+            continue
+        rows.append(_row(
+            f"grid_strength_pair:{name}", "Minimum short-circuit power not above the maximum",
+            limit=hi, unit="MVA", source="the generator's entered short-circuit powers", project_value=lo,
+            verdict="warn", assumed=False,
+            note=(f"Generator {name}: the minimum short-circuit power ({sk_shown(lo)} MVA) is above the maximum "
+                  f"({sk_shown(hi)} MVA). It was imported as given; correct one of the two. No check reads these "
+                  "two values as they stand."),
+            section="connection", target=_target("connection", "Generator", name, "sk_min_mva")))
+    return rows
+
+
+_BUILDERS = (_grid_strength_rows, _scr_rows, _peak_rows, _ramp_row, _oscillation_row, _rvc_row, _rvc_infrequent_row,
              _harmonic_row, _tdd_row, _flicker_row, _motor_start_rows, _unbalance_row, _vs_rows,
              _ssti_rows, _reactive_row, _support_rows, _island_rows, _lole_row)
 #: The builders whose rows are judged against the PoC's fault level: the SCR

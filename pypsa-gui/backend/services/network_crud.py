@@ -518,6 +518,16 @@ def _refuse_cost_basis_mismatch(n, component_class: str, row: dict, claimed: str
             "error_kind": "cost_basis_mismatch", "claimed": claimed, "actual": actual, "message": message})
 
 
+def _refuse_reversed_grid_strength(component_class: str, row: dict, submitted=None) -> None:
+    """Catalogue 06: 422 when an edit leaves a slack's `sk_min_mva` above its `sk_max_mva`."""
+    from services.adequacy.eh_columns import check_grid_strength_pair
+
+    try:
+        check_grid_strength_pair(component_class, row, submitted)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 def _create_component(component_class: str, attr: str, name: str, kwargs: dict,
                       cost_basis: str | None = None) -> dict:
     _refuse_edit_during_live_study()
@@ -537,6 +547,7 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict,
     kwargs, parts = split_parts(component_class, kwargs)
     kwargs = _drop_unknown_extras(component_class, attr, kwargs)
     _check_investment_parts(component_class, parts, row=kwargs)
+    _refuse_reversed_grid_strength(component_class, kwargs)
     notice = check_fuel_curve(component_class, kwargs)
     with PyPSAService.get_lock():
         _refuse_cost_basis_mismatch(n, component_class, kwargs, cost_basis)
@@ -768,6 +779,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict,
                                     stored_row=df.loc[name].to_dict() if cost_basis else None)
         parts = {**current_parts, **submitted_parts}
         _check_investment_parts(component_class, parts, row=merged)
+        _refuse_reversed_grid_strength(component_class, merged, submitted=kwargs)
         stored = df.loc[name].to_dict()
         check_parts_own_costs(component_class, parts, before=stored, submitted=kwargs)
         notice = check_fuel_curve(component_class, merged, n=n, name=name, before=stored, submitted=kwargs)
