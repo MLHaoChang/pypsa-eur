@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import pathlib
 from collections.abc import Mapping
 
 from fastapi import HTTPException
@@ -196,7 +197,7 @@ def stamp(ctx, tariff) -> tuple[str, str] | None:
         where = f"Investment period(s) {', '.join(map(str, off))}" if off else None
     if where:
         return YEAR, (
-            f"{where} fall outside tariff {tariff.id!r}'s validity {start}..{end or 'open'}; "
+            f"{where} fall outside tariff \u201c{tariff.id}\u201d's validity {start}..{end or 'open'}; "
             "a URDB tariff is never stretched to another year."
         )
     return None
@@ -208,8 +209,9 @@ def upload_bytes(ctx, file_id: str) -> bytes:
     not this project's is `upload_not_found`, C6."""
     from services import upload_service
 
+    storage = getattr(ctx, "storage_dir", None)  # a str on a bound context (pypsa_service)
     return upload_service.get_upload_bytes(
-        ctx.loaded_project, file_id, project_dir=getattr(ctx, "storage_dir", None)
+        ctx.loaded_project, file_id, project_dir=pathlib.Path(storage) if storage else None
     )
 
 
