@@ -33,4 +33,4 @@ for _ in $(seq 1 60); do
   timeout 1 tail -f /dev/null || true
 done
 NODE_PATH=$(npm root -g) PWFILE=$data/dev-admin-password OUT=$out THEME=${2:-} \
-  node "$here/grid-compliance-shots.mjs"
+  node "${SHOOT:-$here/grid-compliance-shots.mjs}"
