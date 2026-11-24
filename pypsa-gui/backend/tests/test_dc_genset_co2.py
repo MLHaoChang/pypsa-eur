@@ -593,7 +593,9 @@ def test_an_overridden_curve_genset_counts_its_override_and_the_slope_only_on_a_
 
 
 @pytest.mark.parametrize("carrier", ["solar", "no_such_carrier"])
-def test_an_overridden_generator_on_a_carrier_without_co2_is_counted_and_priced(carrier):
+def test_an_overridden_generator_on_a_carrier_without_co2_is_counted_and_priced(
+    carrier,
+):
     from services.solver_service import SolverConfig
 
     n, half = _hand_net()
@@ -612,8 +614,11 @@ def test_the_per_period_price_does_not_divide_an_override_by_efficiency():
     n, half = _hand_net()
     n.generators.loc["grid_supply", "efficiency"] = 0.5
     first = int(n.snapshots.get_level_values(0)[0])
-    cfg = SolverConfig(co2_price=PRICE, co2_price_per_period={str(first): 2 * PRICE},
-                       multi_investment_periods=True)
+    cfg = SolverConfig(
+        co2_price=PRICE,
+        co2_price_per_period={str(first): 2 * PRICE},
+        multi_investment_periods=True,
+    )
     step = _grid_step(n, cfg)
     assert step.loc[half].to_numpy() == pytest.approx(2 * PRICE * 0.10)
 
