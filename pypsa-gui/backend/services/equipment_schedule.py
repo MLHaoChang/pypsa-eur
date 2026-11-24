@@ -120,7 +120,7 @@ CRITERION_LABELS = {
 }
 #: The assumptions' names in plain words.
 ASSUMPTION_LABELS = {
-    "mu": "Breaking-current factor (Ib / Ik'')",
+    "mu": "Breaking-current factor",
     "n": "Thermal heat factor",
     "tk_s": "Fault duration",
     "tkr_s": "Rated short-time duration",
@@ -134,6 +134,10 @@ ASSUMPTION_LABELS = {
     "margin": "Margin",
     "bays": "Switchgear bays",
 }
+
+
+#: The label of an assumption the word map does not know: never its engine name.
+OTHER_ASSUMPTION = "Other study setting"
 
 
 def _plain(text: str) -> str:
@@ -358,6 +362,12 @@ def _bays(spec: dict) -> dict:
     return n
 
 
+def _no_fault_level(periods: str) -> str:
+    """A sentence naming the periods with no fault level ("2040" or "2040, 2050")."""
+    word = "Periods" if "," in periods else "Period"
+    return f"{word} {periods} had no fault level."
+
+
 def _switchgear(run: Path, spec: dict) -> list:
     sg = _read(
         run / cs.SWITCHGEAR_RATING_CSV,
@@ -373,28 +383,41 @@ def _switchgear(run: Path, spec: dict) -> list:
         ),
     )
     bays = _bays(spec)
+    buses = spec.get("buses") or {}
     rows = []
     for r in sg.itertuples(index=False):
         n = max(1, bays.get(str(r.bus), 1))
         rated = _num(r.chosen_ka)
         capex = _num(r.capex_eur) if rated is not None else None
+        skipped = _text(r.skipped_periods) and _text(r.flag) != "not_evaluated"
+        kv = _num(r.vn_kv)
+        if kv is None:  # a bus voltage is an input: take it from the campus file
+            kv = _num((buses.get(str(r.bus)) or {}).get("vn_kv"))
         row = _row(
             kind="switchgear",
             asset=f"{r.bus} switchgear",
-            location=f"{r.bus} ({_fmt(r.vn_kv, 'g', ' kV')})",
+            location=f"{r.bus} ({kv:g} kV)" if kv is not None else str(r.bus),
             rating=rated,
             unit="kA",
             quantity=n,
-            governing=(
-                f"{_plain(r.governing)}; fault duration {_fmt(r.tk_s, 'g', ' s')}, "
-                f"rated duration {_fmt(r.tkr_s, 'g', ' s')}"
-                if rated is not None
-                else _switchgear_text(r.governing, _text(r.flag))
-            )
-            + (
-                f"; no fault level in period {_text(r.skipped_periods)}"
-                if _text(r.skipped_periods) and _text(r.flag) != "not_evaluated"
-                else ""
+            governing=" ".join(
+                s
+                for s in (
+                    (
+                        f"{_plain(r.governing)}."
+                        if rated is not None
+                        else _switchgear_text(r.governing, _text(r.flag))
+                        + ("." if skipped else "")
+                    ),
+                    _no_fault_level(_text(r.skipped_periods)) if skipped else "",
+                    (
+                        f"Fault duration {_fmt(r.tk_s, 'g', ' s')} · "
+                        f"rated duration {_fmt(r.tkr_s, 'g', ' s')}."
+                    )
+                    if rated is not None
+                    else "",
+                )
+                if s
             ),
             source="computed",
             declared_rating=_num(r.declared_ka),
@@ -451,21 +474,21 @@ def _cables(run: Path) -> list:
         chosen = _text(r.chosen_id) is not None and _num(r.section_mm2) is not None
         if chosen:
             design = _num(r.design_i_ka)
-            then = f"design {_fmt(design * 1e3 if design is not None else None, '.0f', ' A')} with {_case(r.design_case)}"
+            then = f"Design {_fmt(design * 1e3 if design is not None else None, '.0f', ' A')} with {_case(r.design_case)}"
             if r.governing == "voltage drop":
                 limit = (
                     f"of the {_fmt(vd_limit, 'g', ' %')} limit"
                     if _num(vd_limit) is not None
                     else f"{_fmt(r.utilisation, '.0%')} of the limit"
                 )
-                gov = f"Voltage drop {_fmt(r.vd_pct, '.2f', ' %')} {limit}; {then}"
+                gov = f"Voltage drop {_fmt(r.vd_pct, '.2f', ' %')} {limit}. {then}."
             elif r.governing == "short-circuit withstand":
                 gov = (
                     f"Short-circuit withstand: thermal current {_fmt(r.ith_ka, '.1f', ' kA')} needs "
-                    f"{_fmt(r.s_min_mm2, '.0f', ' mm2')}; {then}"
+                    f"{_fmt(r.s_min_mm2, '.0f', ' mm²')}. {then}."
                 )
             else:
-                gov = f"{_plain(str(r.governing))}, {_fmt(r.utilisation, '.0%')} used; {then}"
+                gov = f"{_plain(str(r.governing))}, {_fmt(r.utilisation, '.0%')} used. {then}."
         else:
             gov = _text(r.governing) or NOT_EVALUATED
         runs = _num(r.runs) if chosen else _num(r.declared_runs)
@@ -476,7 +499,7 @@ def _cables(run: Path) -> list:
                 asset=_text(r.cable),
                 location=f"{r.from_bus} - {r.to_bus}, {_fmt(r.length_km, 'g', ' km')}",
                 rating=_num(r.section_mm2) if chosen else None,
-                unit=f"mm2 {r.conductor}" if _text(r.conductor) else "mm2",
+                unit=f"mm² {r.conductor}" if _text(r.conductor) else "mm²",
                 quantity=int(runs) if runs is not None else None,
                 governing=gov,
                 source="computed",
@@ -549,7 +572,7 @@ def build(run_dir, library_path=None) -> dict:
     if assumptions:
         assumptions.append(BAYS_ASSUMPTION)
     assumptions = [
-        {**a, "label": ASSUMPTION_LABELS.get(a.get("name"), a.get("name"))}
+        {**a, "label": ASSUMPTION_LABELS.get(a.get("name"), OTHER_ASSUMPTION)}
         for a in assumptions
     ]
     for r in rows:

@@ -1,0 +1,14 @@
+{
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/campus-electrical/{name}/psse",
+   "reason": "binary-transfer"
+  },
+  {
+   "method": "GET",
+   "path": "/api/campus-electrical/{name}/psse/{bundle}/download",
+   "reason": "binary-transfer"
+  }
+ ]
+}

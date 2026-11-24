@@ -208,6 +208,7 @@ NOT_CARRIED: dict[str, str] = {
     "campus_milp_basis.json": "campus: derived on every run",
     "campus_milp_summary.json": "campus: derived on every run",
     "campus_profile_used.json": "campus: derived on every run",
+    "psse_status.json": "campus: derived on every run (the PSS/E bundle outcome)",
     "draft_notes.json": "campus: a grid-code draft stays with its licensee",
     "settings.json": "campus: per-install settings",
     "gfm_applied.json": "campus island tuning: derived from island_config.json",

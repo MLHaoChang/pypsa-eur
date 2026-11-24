@@ -245,7 +245,7 @@ def test_every_kind_with_rating_source_and_criterion(tmp_path):
     )
     assert (
         mv1["governing"]
-        == "Thermal short-circuit current 21.36 kA, period 2040; fault duration 1 s, rated duration 1 s"
+        == "Thermal short-circuit current 21.36 kA, period 2040. Fault duration 1 s · rated duration 1 s."
     )
     # MV1: TR1, TR2 lv ends, two cable runs, BESS1 = 5 bays (one per connection)
     assert mv1["quantity"] == 5
@@ -257,12 +257,12 @@ def test_every_kind_with_rating_source_and_criterion(tmp_path):
 
     (cb,) = _by(rows, "cable")
     assert (
-        cb["unit"] == "mm2 Al"
+        cb["unit"] == "mm² Al"
         and cb["source"] == "computed"
         and cb["library_id"].startswith("CB_20_")
     )
     assert (
-        "design 620 A with TR1 out of service, period 2040 hour 19" in cb["governing"]
+        "Design 620 A with TR1 out of service, period 2040 hour 19." in cb["governing"]
     )
     assert cb["declared_rating"] == pytest.approx(2400.0)  # 2 runs x 1.2 kA, in A
     assert cb["flag"] is None
@@ -511,7 +511,7 @@ def test_one_rating_table_alone_is_still_missing(tmp_path, keep):
         ("voltage drop", "Voltage drop 2.50 % 90% of the limit"),
         (
             "short-circuit withstand",
-            "Short-circuit withstand: thermal current 12.0 kA needs 128 mm2",
+            "Short-circuit withstand: thermal current 12.0 kA needs 128 mm²",
         ),
         ("ampacity", "Current-carrying capacity, 90% used"),
     ],
@@ -547,7 +547,7 @@ def test_the_cable_criterion_text_names_its_number(tmp_path, governing, words):
     (cb,) = es._cables(run)
     assert (
         cb["governing"]
-        == f"{words}; design 300 A with all in service, period 2030 hour 7"
+        == f"{words}. Design 300 A with all in service, period 2030 hour 7."
     )
 
 
@@ -575,7 +575,7 @@ def test_a_run_that_rated_no_cable_reads(tmp_path):
         cb["governing"] == "no load flow reached this cable"
         and cb["flag"] == "not_rated"
     )
-    assert cb["quantity"] == 2 and cb["unit"] == "mm2"
+    assert cb["quantity"] == 2 and cb["unit"] == "mm²"
     assert cb["declared_rating"] == pytest.approx(2400.0) and cb["declared_unit"] == "A"
     _dumps(out)
 
@@ -659,7 +659,7 @@ def test_nan_figures_read_not_evaluated(tmp_path):
     out = es.build(run)
     (c,) = _by(out["rows"], "cable")
     assert (
-        "; design not evaluated with " in c["governing"] and "nan" not in c["governing"]
+        ". Design not evaluated with " in c["governing"] and "nan" not in c["governing"]
     )
     for t in _by(out["rows"], "transformer"):
         assert t["rating"] is None and t["capex_eur"] is None and t["flag"] is None
@@ -757,8 +757,8 @@ def test_the_voltage_drop_names_its_limit_and_the_case_its_outage(tmp_path):
     ]
     cb.to_csv(run / cs.CABLE_RATING_CSV, index=False)
     (c,) = _by(es.build(run)["rows"], "cable")
-    assert c["governing"].startswith("Voltage drop 2.90 % of the 3 % limit; design ")
-    assert c["governing"].endswith(" with TR1 out of service, period 2040 hour 19")
+    assert c["governing"].startswith("Voltage drop 2.90 % of the 3 % limit. Design ")
+    assert c["governing"].endswith(" with TR1 out of service, period 2040 hour 19.")
 
 
 @pytest.mark.parametrize(
@@ -812,7 +812,9 @@ def test_a_partly_evaluated_bus_names_its_skipped_period_and_keeps_both_flags(tm
     mv1 = next(r for r in es.build(run)["rows"] if r["asset"] == "MV1 switchgear")
     assert mv1["flag"] == "declared_below_chosen; partly_evaluated"
     assert es.flags_of(mv1["flag"]) == ["declared_below_chosen", "partly_evaluated"]
-    assert mv1["governing"].endswith("; no fault level in period 2050")
+    assert mv1["governing"].endswith(
+        "period 2040. Period 2050 had no fault level. Fault duration 1 s · rated duration 1 s."
+    )
     assert mv1["rating"] == 31.5
 
 
@@ -828,3 +830,40 @@ def test_a_switchgear_row_carries_its_rated_peak(tmp_path):
     rows = es.build(_run(tmp_path))["rows"]
     mv1 = next(r for r in rows if r["asset"] == "MV1 switchgear")
     assert (mv1["rating"], mv1["rated_peak_ka"]) == (31.5, 78.75)  # 2.5 x 31.5 at 50 Hz
+
+
+def test_a_bus_voltage_the_study_left_out_comes_from_the_campus_file(tmp_path):
+    run = _run(tmp_path)
+    sg = pd.read_csv(run / cs.SWITCHGEAR_RATING_CSV, dtype={"bus": str})
+    sg["vn_kv"] = math.nan
+    sg.loc[sg.bus == "MV2", "bus"] = "AUX"  # a bus the campus file does not list
+    sg.to_csv(run / cs.SWITCHGEAR_RATING_CSV, index=False)
+    rows = {r["asset"]: r for r in es.build(run)["rows"] if r["kind"] == "switchgear"}
+    assert rows["MV1 switchgear"]["location"] == "MV1 (20 kV)"
+    assert rows["AUX switchgear"]["location"] == "AUX"  # the table says "Not stated"
+
+
+def test_an_assumption_the_word_map_does_not_know_never_shows_its_engine_name(tmp_path):
+    run = _run(tmp_path)
+    path = run / cs.RATING_ASSUMPTIONS_JSON
+    path.write_text(
+        json.dumps([*json.loads(path.read_text()), {"name": "zeta_x", "value": 1}])
+    )
+    (a,) = [a for a in es.build(run)["assumptions"] if a["name"] == "zeta_x"]
+    assert a["label"] == es.OTHER_ASSUMPTION == "Other study setting"
+    assert es.ASSUMPTION_LABELS["mu"] == "Breaking-current factor"
+
+
+def test_several_skipped_periods_read_as_one_sentence():
+    assert es._no_fault_level("2040") == "Period 2040 had no fault level."
+    assert es._no_fault_level("2040, 2050") == "Periods 2040, 2050 had no fault level."
+
+
+def test_no_criterion_chains_clauses_or_writes_mm2(tmp_path):
+    for rated in (True, False):
+        (tmp_path / str(rated)).mkdir()
+        out = es.build(_run(tmp_path / str(rated), rated=rated))
+        for r in out["rows"]:
+            if r["kind"] in ("switchgear", "cable"):
+                assert "; " not in r["governing"], r["governing"]
+            assert "mm2" not in (r["governing"] or "") + (r["unit"] or "")
