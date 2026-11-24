@@ -193,6 +193,7 @@ from gridspine.static.campus_ratings import (
     assumptions_table,
     choose_cable,
     choose_switchgear,
+    thermal_current,
 )
 from gridspine.static.campus_sc import campus_fault_levels
 from gridspine.static.campus_taps import PCC_TAP_CONTROL  # noqa: F401  (re-exported: the backend's seam)
@@ -904,7 +905,13 @@ def rate_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriteria
     short_circuit = pd.read_csv(_require(run_dir, SHORT_CIRCUIT_CSV))
     sg = choose_switchgear(short_circuit, lib, f_hz, criteria.margin, switchgear)
     lines = pd.read_csv(_require(run_dir, LF_LINE_CSV))
-    ik = short_circuit.groupby(short_circuit["bus"].astype(str))["ikss_max_ka"].max()
+    ith: dict[str, float] = {}   # per bus, the largest Ith over the clearing time; a bus with none is absent
+    for r in short_circuit.itertuples(index=False):
+        ikss, ip = pd.to_numeric(pd.Series([r.ikss_max_ka, r.ip_max_ka]), errors="coerce")
+        if not (math.isfinite(ikss) and math.isfinite(ip)):
+            continue                                # not evaluated there: never 0, never nan-poisoned
+        x = thermal_current(float(ikss), float(ip), f_hz, cables.t_clear_s, switchgear.n)
+        ith[str(r.bus)] = max(x, ith.get(str(r.bus), x))
     names = net.bus["name"].astype(str)
     rows = []
     for i, ln in net.line.iterrows():
@@ -915,18 +922,20 @@ def rate_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriteria
                "length_km": float(ln.length_km), "declared_runs": int(ln.parallel),
                "declared_i_ka": float(ln.max_i_ka) * int(ln.parallel), "design_basis": CABLE_DESIGN_BASIS}
         if mine.empty or mine["i_ka"].isna().all():
-            rows.append({**row, "design_i_ka": math.nan, "design_case": None, "ik_ka": math.nan, "chosen_id": None,
+            rows.append({**row, "design_i_ka": math.nan, "design_case": None, "ith_ka": math.nan, "chosen_id": None,
                          "governing": "no load flow reached this cable", "flag": "not_rated"})
             continue
         top = mine.loc[mine["i_ka"].idxmax()]
-        ik_ka = float(max(ik.get(fb, 0.0), ik.get(tb, 0.0)))
-        c = choose_cable(lib, vn_kv=row["vn_kv"], length_km=row["length_km"], i_ka=float(top.i_ka), ik_ka=ik_ka,
+        # the larger end governs; either end unknown leaves the withstand not evaluated
+        ith_ka = max(ith[fb], ith[tb]) if fb in ith and tb in ith else math.nan
+        c = choose_cable(lib, vn_kv=row["vn_kv"], length_km=row["length_km"], i_ka=float(top.i_ka), ith_ka=ith_ka,
                          margin=criteria.margin, a=cables)
         flag = ("no_library_cable" if c["chosen_id"] is None
-                else "declared_below_chosen" if row["declared_i_ka"] < c["chosen_i_ka"] - 1e-12 else None)
+                else "declared_below_chosen" if row["declared_i_ka"] < c["chosen_i_ka"] - 1e-12
+                else "withstand_not_evaluated" if not c["withstand_evaluated"] else None)
         rows.append({**row, "design_i_ka": float(top.i_ka),
                      "design_case": f"{top.case}, period {int(top.period)} hour {int(top.hour)}",
-                     "ik_ka": ik_ka, **c, "flag": flag})
+                     "ith_ka": ith_ka, **c, "flag": flag})
     cb = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["cable", "from_bus", "to_bus", "vn_kv", "chosen_id"])
     assumptions = assumptions_table(switchgear, cables) + [
         {"applies_to": "cables", "name": "design_cases", "value": CABLE_DESIGN_BASIS, "unit": "", "source": "computed"},

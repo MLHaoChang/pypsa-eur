@@ -156,7 +156,7 @@ def test_peak_governs():
 
 
 def test_peak_boundary_at_60_hz_and_50_hz():
-    a = SwitchgearAssumptions(tk_s=3.0)  # Ith 24.37 kA stays under 25
+    a = SwitchgearAssumptions(tk_s=3.0, tkr_s=3.0)  # gear rated for 3 s: Ith 24.37 kA stays under 25
     assert (
         _one(
             [("B1", 33.0, 24.0, 65.0, math.nan, 1)], f_hz=60, margin=0.0, a=a
@@ -203,7 +203,22 @@ def test_declared_below_chosen_is_flagged_not_overwritten():
 def test_beyond_ladder():
     r = _one([("B1", 33.0, 40.0, 50.0, math.nan, 1)])  # 44 kA > 40
     assert r.chosen_id is None and math.isnan(r.chosen_ka) and r.flag == "beyond_ladder"
-    assert "beyond the largest rating at 33 kV" in r.governing
+    assert r.governing == (
+        "Ik'' 44.00 kA with the 10% margin, above the largest rated short-time current 40 kA at 33 kV"
+    )
+
+
+def test_beyond_ladder_names_the_peak_when_the_peak_fails():
+    # Ik'' 37, ip 101: Ith 39.47 kA fits 40, the peak 101 > 2.5 x 40 does not
+    r = _one([("B1", 33.0, 37.0, 101.0, math.nan, 1)], margin=0.0)
+    assert r.flag == "beyond_ladder"
+    assert r.governing == "ip 101.00 kA with the 0% margin, above the largest rated peak 100 kA at 33 kV"
+
+
+def test_beyond_ladder_never_prints_a_need_equal_to_the_limit():
+    r = _one([("B1", 33.0, 40.001, 40.001 * NO_DC, math.nan, 1)], margin=0.0)
+    assert r.flag == "beyond_ladder"
+    assert r.governing.startswith("Ik'' 40.001 kA with the 0% margin")
 
 
 def test_iec_ladder_when_library_has_no_voltage():
@@ -233,7 +248,7 @@ def test_one_row_per_bus():
 def _cable(
     i_ka,
     length_km=0.5,
-    ik_ka=5.0,
+    ith_ka=5.0,
     margin=0.0,
     a=CableAssumptions(),
     library=LIB,
@@ -244,7 +259,7 @@ def _cable(
         vn_kv=vn_kv,
         length_km=length_km,
         i_ka=i_ka,
-        ik_ka=ik_ka,
+        ith_ka=ith_ka,
         margin=margin,
         a=a,
     )
@@ -273,12 +288,12 @@ def test_cable_margin_on_current():
 
 
 def test_cable_short_circuit_withstand_governs():
-    c = _cable(0.1, ik_ka=10.0)  # S_min = 10000 / 94 = 106.4 > 95, not divided by runs
+    c = _cable(0.1, ith_ka=10.0)  # S_min = 10000 / 94 = 106.4 > 95, not divided by runs
     assert c["chosen_id"] == "A240" and c["runs"] == 1
     assert c["governing"] == "short-circuit withstand"
     assert c["s_min_mm2"] == pytest.approx(1e4 / 94)
     assert c["utilisation"] == pytest.approx(1e4 / 94 / 240)
-    t = _cable(0.1, ik_ka=10.0, a=CableAssumptions(t_clear_s=0.25))  # 53.2 mm2
+    t = _cable(0.1, ith_ka=10.0, a=CableAssumptions(t_clear_s=0.25))  # 53.2 mm2
     assert t["chosen_id"] == "A95"
 
 
@@ -316,8 +331,8 @@ BOUNDARY = {
 UNITY = CableAssumptions(derating=1.0, pf=1.0)
 
 
-def _checks(i_ka, ik_ka=1.0, n=1, a=UNITY, margin=0.0):
-    return cable_checks(BOUNDARY, n, i_ka, 1.0, 10.0, ik_ka, margin, a)
+def _checks(i_ka, ith_ka=1.0, n=1, a=UNITY, margin=0.0):
+    return cable_checks(BOUNDARY, n, i_ka, 1.0, 10.0, ith_ka, margin, a)
 
 
 def test_voltage_drop_units_literal():
@@ -334,7 +349,7 @@ def test_voltage_drop_units_literal():
         vn_kv=10.0,
         length_km=1.0,
         i_ka=0.1,
-        ik_ka=1.0,
+        ith_ka=1.0,
         margin=0.0,
         a=CableAssumptions(derating=1.0, pf=1.0, vd_limit_pct=limit),
     )
@@ -353,14 +368,14 @@ def test_ampacity_boundary_literal():
 
 def test_short_circuit_withstand_boundary_literal():
     # S >= Ik'' sqrt(t) / k: 95 mm2 x 94 = 8.93 kA for 1 s (Al); copper 143 carries 13.585 kA
-    assert _checks(0.01, ik_ka=8.93)["short-circuit withstand"] == pytest.approx(1.0)
-    assert _checks(0.01, ik_ka=8.94)["short-circuit withstand"] > 1.0
+    assert _checks(0.01, ith_ka=8.93)["short-circuit withstand"] == pytest.approx(1.0)
+    assert _checks(0.01, ith_ka=8.94)["short-circuit withstand"] > 1.0
     cu = CableAssumptions(derating=1.0, pf=1.0, conductor="Cu")
     assert cu.k == 143.0 and CableAssumptions().k == 94.0
-    assert _checks(0.01, ik_ka=13.585, a=cu)[
+    assert _checks(0.01, ith_ka=13.585, a=cu)[
         "short-circuit withstand"
     ] == pytest.approx(1.0)
-    assert _checks(0.01, ik_ka=8.93, n=3)["short-circuit withstand"] == pytest.approx(
+    assert _checks(0.01, ith_ka=8.93, n=3)["short-circuit withstand"] == pytest.approx(
         1.0
     )  # not split
 
@@ -383,7 +398,7 @@ def test_shipped_library_picks():
     lib = load_asset_library()
     sg = choose_switchgear(_sc(("B", 33.0, 20.0, 50.0, math.nan, 1)), lib, 50, 0.2)
     assert sg.iloc[0].chosen_id == "SG_33_25p0"  # 24 kA, peak 60 <= 62.5
-    c = choose_cable(lib, vn_kv=33.0, length_km=1.0, i_ka=0.2, ik_ka=10.0, margin=0.2)
+    c = choose_cable(lib, vn_kv=33.0, length_km=1.0, i_ka=0.2, ith_ka=10.0, margin=0.2)
     assert c["chosen_id"] is not None and c["section_mm2"] >= 1e4 / 94
 
 
@@ -395,6 +410,7 @@ def test_assumptions_table_all_assumed():
         "n",
         "conductor",
         "tk_s",
+        "tkr_s",
         "derating",
         "vd_limit_pct",
         "pf",
@@ -423,7 +439,7 @@ def _run(tmp_path, declared_i_ka=1.2):
     spec["campus"]["cables"]["CB1"]["max_i_ka"] = t(declared_i_ka)
     spec["campus"]["buses"]["MV1"]["ik_rated_ka"] = t(20.0)
     run = tmp_path / "run"
-    run.mkdir()
+    run.mkdir(parents=True)
     (run / CAMPUS_YAML).write_text(yaml.safe_dump(spec))
     _sc(
         ("PCC", 110.0, 15.0, 37.0, math.nan, 2030),
@@ -474,10 +490,10 @@ def test_rate_campus_names_the_n_minus_1_case_and_writes_its_tables(tmp_path):
     )
     assert cb.design_i_ka == pytest.approx(0.31)
     assert cb.design_case == "N-1:TR1, period 2030 hour 7"
-    assert cb.ik_ka == pytest.approx(21.0)  # the larger end, worst period
+    assert cb.ith_ka == pytest.approx(21.363422451751465)  # Ith over 1 s at the larger end, worst period
     assert cb.chosen_id.startswith("CB_20_")
     assert cb.chosen_i_ka * 0.8 >= 0.31 * 1.2
-    assert cb.section_mm2 >= 21e3 / 94
+    assert cb.section_mm2 >= 21.363422451751465e3 / 94
     assert cb.flag is None or (
         isinstance(cb.flag, float) and math.isnan(cb.flag)
     )  # 1.2 kA declared covers it
@@ -514,6 +530,70 @@ def test_rate_campus_without_a_flow_on_a_cable_says_so(tmp_path):
     cb = rate_campus(run)["cables"].iloc[0]
     assert cb.flag == "not_rated" and cb.chosen_id is None
     assert cb.governing == "no load flow reached this cable"
+
+
+def _rewrite_sc(run, *rows):
+    from gridspine.drivers.campus_study import SHORT_CIRCUIT_CSV
+
+    _sc(*rows).to_csv(run / SHORT_CIRCUIT_CSV, index=False)
+
+
+def test_rate_campus_a_cable_with_only_nan_currents_is_not_rated(tmp_path):
+    from gridspine.drivers.campus_study import LF_LINE_CSV, rate_campus
+
+    run = _run(tmp_path)
+    pd.DataFrame(
+        [(2030, 7, "intact", "CB1", math.nan), (2040, 19, "N-1:TR2", "CB1", math.nan)],
+        columns=["period", "hour", "case", "cable", "i_ka"],
+    ).to_csv(run / LF_LINE_CSV, index=False)
+    cb = rate_campus(run)["cables"].iloc[0]
+    assert cb.flag == "not_rated" and cb.chosen_id is None and math.isnan(cb.ith_ka)
+
+
+def test_rate_campus_the_larger_end_governs_when_it_is_the_to_bus(tmp_path):
+    from gridspine.drivers.campus_study import rate_campus
+    from gridspine.static.campus_ratings import thermal_current
+
+    run = _run(tmp_path)
+    cb = rate_campus(run)["cables"].iloc[0]
+    assert (cb.from_bus, cb.to_bus) == ("MV1", "MV2")
+    _rewrite_sc(run, ("MV1", 20.0, 9.0, 20.0, math.nan, 2030), ("MV2", 20.0, 21.0, 52.0, math.nan, 2040),
+                ("MV2", 20.0, 18.0, 45.0, math.nan, 2030), ("PCC", 110.0, 15.0, 37.0, math.nan, 2030))
+    cb = rate_campus(run)["cables"].iloc[0]
+    assert cb.ith_ka == pytest.approx(thermal_current(21.0, 52.0, 50, 1.0)) == pytest.approx(21.363422451751465)
+    assert cb.withstand_evaluated
+
+
+@pytest.mark.parametrize("mv2", [None, (math.nan, 20.0), (10.0, math.nan)])
+def test_rate_campus_an_unknown_end_leaves_the_withstand_not_evaluated(tmp_path, mv2):
+    from gridspine.drivers.campus_study import rate_campus
+
+    run = _run(tmp_path)
+    rows = [("MV1", 20.0, 21.0, 52.0, math.nan, 2040), ("PCC", 110.0, 15.0, 37.0, math.nan, 2030)]
+    if mv2 is not None:
+        rows.append(("MV2", 20.0, *mv2, math.nan, 2040))
+    _rewrite_sc(run, *rows)
+    cb = rate_campus(run)["cables"].iloc[0]
+    assert math.isnan(cb.ith_ka) and math.isnan(cb.s_min_mm2)
+    assert not cb.withstand_evaluated and cb.flag == "withstand_not_evaluated"
+    assert cb.chosen_id is not None  # chosen on ampacity and voltage drop, the withstand shown as unknown
+
+
+def test_rate_campus_a_declared_cable_equal_to_the_chosen_one_is_not_flagged(tmp_path):
+    from gridspine.drivers.campus_study import rate_campus
+
+    first = rate_campus(_run(tmp_path / "a"))["cables"].iloc[0]
+    assert first.declared_runs == 1
+    cb = rate_campus(_run(tmp_path / "b", declared_i_ka=float(first.chosen_i_ka)))["cables"].iloc[0]
+    assert cb.declared_i_ka == cb.chosen_i_ka and pd.isna(cb.flag)
+
+
+def test_a_zero_fault_level_is_rated_without_dividing_by_it():
+    from gridspine.static.campus_ratings import thermal_current
+
+    assert thermal_current(0.0, 0.0, 50, 1.0) == 0.0
+    r = _one([("B1", 33.0, 0.0, 0.0, math.nan, 1)])
+    assert r.chosen_ka == 25.0 and r.ith_ka == 0.0
 
 
 def test_size_then_rate_a_cabled_campus_reads_what_sizing_wrote(tmp_path):
@@ -575,13 +655,93 @@ def test_size_then_rate_a_cabled_campus_reads_what_sizing_wrote(tmp_path):
 
 
 def test_the_margin_applies_to_the_peak_too():
-    # Ik'' 23, ip 60 (kappa 1.845), Tk 10 s: Ith 23.07 x 1.05 = 24.2 <= 25, but ip 60 x 1.05 = 63 > 62.5
-    a = SwitchgearAssumptions(tk_s=10.0)
-    assert (
-        _one([("B1", 33.0, 23.0, 60.0, math.nan, 1)], margin=0.0, a=a).chosen_ka == 25.0
+    # Ik'' 19, ip 50 (kappa 1.861): Ith 19.62 x 1.25 = 24.53 <= 25, and ip 50 x 1.25 = 62.5 = 2.5 x 25 exactly
+    r = _one([("B1", 33.0, 19.0, 50.0, math.nan, 1)], margin=0.25)
+    assert r.chosen_ka == 25.0 and r.governing == "ip 50.00 kA, period 1"
+    above = _one([("B1", 33.0, 19.0, 50.0001, math.nan, 1)], margin=0.25)
+    assert above.chosen_ka == 31.5
+
+
+def test_the_ith_margin_boundary_is_exact():
+    # m = 0 and Tk 4 s on Tkr 1 s: Ith@Tkr = 2 Ik'' exactly; 2 x 10 x 1.25 = 25
+    a = SwitchgearAssumptions(tk_s=4.0)
+    r = _one([("B1", 33.0, 10.0, 10.0 * NO_DC, math.nan, 1)], margin=0.25, a=a)
+    assert r.chosen_ka == 25.0 and r.ith_tkr_ka == 20.0
+    assert r.governing == "Ith over 4 s referred to 1 s 20.00 kA, period 1"
+    assert _one([("B1", 33.0, 10.0001, 10.0001 * NO_DC, math.nan, 1)], margin=0.25, a=a).chosen_ka == 31.5
+
+
+def test_a_fault_longer_than_the_rated_duration_needs_more():
+    # IEC 62271-1: Ith sqrt(Tk) <= Ithr sqrt(Tkr). Ik'' 15 with no DC over 3 s on 1 s gear: 15 sqrt(3) = 25.98 kA
+    longer = _one([("B1", 33.0, 15.0, 15.0 * NO_DC, math.nan, 1)], margin=0.0, a=SwitchgearAssumptions(tk_s=3.0))
+    assert longer.ith_ka == 15.0 and longer.ith_tkr_ka == pytest.approx(25.980762113533157)
+    assert longer.chosen_ka == 31.5
+    rated = _one([("B1", 33.0, 15.0, 15.0 * NO_DC, math.nan, 1)], margin=0.0,
+                 a=SwitchgearAssumptions(tk_s=3.0, tkr_s=3.0))
+    assert rated.chosen_ka == 25.0
+
+
+def test_a_three_second_fault_on_one_second_gear_is_beyond_the_ladder():
+    # the probe: Ith(3 s) 24.37 kA, I2t 1782 kA2s; referred to 1 s that is 42.21 kA > 40
+    r = _one([("B1", 33.0, 24.0, 65.0, math.nan, 1)], f_hz=60, margin=0.0, a=SwitchgearAssumptions(tk_s=3.0))
+    assert r.chosen_id is None and r.flag == "beyond_ladder"
+    assert r.governing == (
+        "Ith over 3 s referred to 1 s 42.21 kA with the 0% margin, above the largest rated short-time current 40 kA at 33 kV"
     )
-    r = _one([("B1", 33.0, 23.0, 60.0, math.nan, 1)], margin=0.05, a=a)
-    assert r.chosen_ka == 31.5 and r.governing.startswith("ip 60.00 kA")
+
+
+def test_a_shorter_fault_is_not_credited_below_the_rated_current():
+    r = _one([("B1", 33.0, 24.0, 24.0 * NO_DC, math.nan, 1)], margin=0.0,
+             a=SwitchgearAssumptions(tk_s=0.2))
+    assert r.ith_tkr_ka == r.ith_ka == 24.0 and r.chosen_ka == 25.0
+
+
+NAN_FIRST = [("B1", 33.0, math.nan, 10.0, math.nan, 1), ("B1", 33.0, 35.0, 49.0, math.nan, 2)]
+
+
+@pytest.mark.parametrize("rows", [NAN_FIRST, NAN_FIRST[::-1]])
+def test_a_nan_period_is_skipped_in_either_row_order(rows):
+    r = _one(rows, margin=0.1)  # 35 x 1.1 = 38.5 -> 40
+    assert r.chosen_ka == 40.0 and r.ikss_ka == 35.0 and r.governing == "Ik'' 35.00 kA, period 2"
+    assert pd.isna(r.flag)
+
+
+def test_a_bus_with_no_finite_fault_level_is_not_evaluated():
+    r = _one([("B1", 33.0, math.nan, 10.0, 25.0, 1), ("B1", 33.0, 12.0, math.nan, 25.0, 2)])
+    assert r.chosen_id is None and math.isnan(r.chosen_ka) and math.isnan(r.utilisation)
+    assert r.flag == "not_evaluated" and r.governing == "no fault level was computed at this bus"
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [dict(mu=math.nan), dict(n=math.nan), dict(tk_s=0.0), dict(tk_s=-1.0), dict(tk_s=math.inf),
+     dict(tkr_s=0.0), dict(tkr_s=math.nan)],
+)
+def test_switchgear_assumptions_are_validated(kw):
+    with pytest.raises(ValueError, match=next(iter(kw))):
+        SwitchgearAssumptions(**kw)
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [dict(derating=0.0), dict(derating=math.nan), dict(vd_limit_pct=0.0), dict(pf=1.5), dict(pf=math.nan),
+     dict(t_clear_s=-0.1), dict(t_clear_s=math.inf), dict(conductor="Fe")],
+)
+def test_cable_assumptions_are_validated(kw):
+    with pytest.raises(ValueError, match=next(iter(kw))):
+        CableAssumptions(**kw)
+
+
+@pytest.mark.parametrize("margin", [math.nan, -0.5, math.inf])
+def test_a_bad_margin_is_refused(margin):
+    with pytest.raises(ValueError, match="margin"):
+        choose_switchgear(_sc(("B1", 33.0, 20.0, 28.0, math.nan, 1)), LIB, 50, margin)
+    with pytest.raises(ValueError, match="margin"):
+        choose_cable(LIB, vn_kv=33.0, length_km=1.0, i_ka=0.1, ith_ka=1.0, margin=margin)
+
+
+def test_a_zero_margin_is_allowed():
+    assert _one([("B1", 33.0, 25.0, 25.0 * NO_DC, math.nan, 1)], margin=0.0).chosen_ka == 25.0
 
 
 def test_the_row_carries_the_voltage_and_duration():
@@ -595,7 +755,7 @@ def test_a_cable_exactly_at_its_ampacity_passes_in_one_run():
         vn_kv=10.0,
         length_km=1.0,
         i_ka=0.2,
-        ik_ka=1.0,
+        ith_ka=1.0,
         margin=0.0,
         a=UNITY,
     )
