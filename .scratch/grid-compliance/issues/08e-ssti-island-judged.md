@@ -18,9 +18,13 @@ Likely files: `pypsa-gui/backend/services/adequacy/grid_readiness.py`, `pypsa-gu
 
 GC-08b screens an open-tie campus (`tie_normally_open`) with the grid out, but keeps the island rows out of every GC-08 reader (GK A2 U4): their role is
 `ssti_uif.ROLE_ISLAND`, their verdict is `UifStudy.island_verdict` / `island_worst_uif`, and the run's meta
-carries only the grid cases' verdict and worst. So the scorecard still reads unknown on an open tie
-(`grid_readiness.SSTI_ISLAND`), says "grid-connected state only" on every judged row (`SSTI_GRID_ONLY`), and
-the pack prints the island rows "not judged".
+carries only the grid cases' verdict and worst. The pack prints the island rows "not judged".
+
+**Urgency (GK A2).** The scorecard's `SSTI_ISLAND` override fires only for an off-grid project
+(`grid_case == "islanded"`). An open-tie *grid* project therefore reads warn or pass on its grid cases under
+"grid-connected state only" (`SSTI_GRID_ONLY`), while its island UIF goes unjudged: 0.788 against the
+threshold 0.1 on the GC-08b backend fixture (`tests/test_grid_compliance_ssti_island.py`). An islanded
+SSTI risk is computed but shown to no one until this lands.
 
 ## What to build
 
