@@ -2345,7 +2345,9 @@ def _ic_report_after_stale_run(report: dict) -> dict:
             return report
     except Exception:  # noqa: BLE001 — a freshness read must not 500 the case
         return report
-    return {**report, "stale": True, "changed": ["dispatch"], "reason": "inputs_changed"}
+    # The client reads the verdict first (`studyStale`), so it says stale too.
+    verdict = {**(report.get("verdict") or {}), "state": "stale"}
+    return {**report, "stale": True, "changed": ["dispatch"], "reason": "inputs_changed", "verdict": verdict}
 
 
 @results_router.post("/investment_case/abort")

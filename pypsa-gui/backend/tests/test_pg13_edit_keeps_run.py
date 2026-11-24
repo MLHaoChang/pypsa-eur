@@ -108,3 +108,4 @@ def test_a_value_edit_marks_the_investment_case_out_of_date(
     assert r.status_code == 200, r.text
     rep = client.get(STUDY_URL).json()["report"]
     assert rep["stale"] is True and rep["changed"] == ["dispatch"]
+    assert rep["verdict"]["state"] == "stale"
