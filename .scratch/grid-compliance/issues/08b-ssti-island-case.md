@@ -3,7 +3,7 @@
 
 # GC-08b SSTI UIF screen: the islanded case
 
-Status: ready-for-agent
+Status: done
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: none (follows GC-08)

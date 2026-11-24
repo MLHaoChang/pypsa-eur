@@ -1,0 +1,1 @@
+* Feat(gridspine): The SSTI unit-interaction-factor screen (TRGC 19) now also screens a campus that operates islanded (its PCC tie normally open, or island requirements declared) with the grid out: SC_i and SC_tot come from the gensets alone, the island rows carry their own case label and c, and the verdict is the worst over the grid and island cases (grid-compliance GC-08b).

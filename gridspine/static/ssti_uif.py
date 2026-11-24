@@ -28,6 +28,15 @@ pandapower) with the machines alone energised, in its max and min cases (a
 converter's current-source infeed would raise SC_tot and understate UIF); the verdict is the worst over buses,
 cases and machines, since a weak grid raises a machine's share.
 
+**Island (GC-08b).** A campus that operates islanded (its PCC tie normally open,
+``tie_normally_open``, or island requirements declared) is also screened with the
+grid out, in the cases ``ISLAND_CASES``: SC_i and SC_tot then come from the
+machines alone, so a lone genset has SC_i = 0 and UIF = S_plant / S_i. Counting
+the grid's infeed there would understate the islanded UIF many times over. The
+island rows carry their own case label and IEC 60909's c for that case, the PCC
+information row is left out (no grid dominates it), and the verdict is the worst
+over the grid and island cases.
+
 Screening only: the binding answer is the EMT study.
 """
 
@@ -46,6 +55,8 @@ DEFAULT_THRESHOLD = 0.1
 SC_TOLERANCE = 1e-6
 PROFILE_KEY = "ssti_uif_threshold"
 CASES = ("max", "min")
+#: The island cases (grid out): their label and the IEC 60909 case they run.
+ISLAND_CASES = {"island max": "max", "island min": "min"}
 #: Unit kinds that connect through a converter (the load is rectifier-fed).
 CONVERTER_KINDS = ("bess", "pv", "wind", "fuel_cell", "ups", "load")
 MACHINE_KIND = "genset"
@@ -225,12 +236,21 @@ def _s_mva(levels: pd.DataFrame, bus: str, case: str) -> float:
     return math.sqrt(3.0) * float(row["vn_kv"]) * float(row[f"ikss_{case}_ka"])
 
 
+def islands(campus) -> bool:
+    """Whether the campus operates islanded: its PCC tie is normally open, or it declares island
+    requirements."""
+    return bool(getattr(campus, "tie_normally_open", False)) or bool(
+        (getattr(campus, "island", None) or {}).get("requirements")
+    )
+
+
 def campus_uif(
     campus, threshold: float | None = None, *, assumed: bool = False, fault_levels=None
 ) -> UifStudy:
     """
-    The UIF screen of a built campus (module docstring). ``fault_levels(campus, installed)`` defaults to
-    ``campus_sc.campus_fault_levels``.
+    The UIF screen of a built campus (module docstring). ``fault_levels(campus, installed, island=False)``
+    defaults to ``campus_sc.campus_fault_levels``; it is called with ``island=True`` only for a campus that
+    ``islands``.
     """
     from gridspine.static.harmonic_scan import grid_c
 
@@ -251,33 +271,47 @@ def campus_uif(
     every = set(
         machines.index
     )  # the machines alone: a converter's infeed would understate UIF
-    full = fault_levels(campus, every)
-    out = {uid: fault_levels(campus, every - {uid}) for uid in machines.index}
     evaluate = [(b, s, ROLE_CONVERTER) for b, s in sorted(plants.items())] + [
         (pcc, sum(plants.values()), ROLE_PCC)
     ]
+    full = fault_levels(campus, every)
+    out = {uid: fault_levels(campus, every - {uid}) for uid in machines.index}
+    states = [(full, out, {case: case for case in CASES}, evaluate)]
+    if islands(campus):
+        full_i = fault_levels(campus, every, island=True)
+        # with the grid out and no other machine, nothing feeds the fault
+        out_i = {
+            uid: fault_levels(campus, every - {uid}, island=True) if every - {uid} else None
+            for uid in machines.index
+        }
+        # islanded there is no grid to dominate the PCC: its information row is left out
+        states.append((full_i, out_i, ISLAND_CASES, evaluate[:-1]))
     frames = []
-    for case in CASES:
-        for bus, s_plant, role in evaluate:
-            vn = float(full.loc[full["bus"] == bus, "vn_kv"].iloc[0])
-            ms = {
-                uid: (float(machines.at[uid, "s_mva"]), _s_mva(out[uid], bus, case))
-                for uid in machines.index
-            }
-            frames.append(
-                screen(
-                    s_plant,
-                    ms,
-                    _s_mva(full, bus, case),
-                    threshold,
-                    assumed=assumed,
-                    bus=bus,
-                    role=role,
-                    case=case,
-                    c=grid_c(vn, case),
-                    notes=[PLANT_NOTE],
+    for levels, without, cases, buses in states:
+        for label, case in cases.items():
+            for bus, s_plant, role in buses:
+                vn = float(levels.loc[levels["bus"] == bus, "vn_kv"].iloc[0])
+                ms = {
+                    uid: (
+                        float(machines.at[uid, "s_mva"]),
+                        0.0 if without[uid] is None else _s_mva(without[uid], bus, case),
+                    )
+                    for uid in machines.index
+                }
+                frames.append(
+                    screen(
+                        s_plant,
+                        ms,
+                        _s_mva(levels, bus, case),
+                        threshold,
+                        assumed=assumed,
+                        bus=bus,
+                        role=role,
+                        case=label,
+                        c=grid_c(vn, case),
+                        notes=[PLANT_NOTE],
+                    )
                 )
-            )
     rows = pd.concat(frames, ignore_index=True)
     judged = rows[rows["role"] == ROLE_CONVERTER]
     worst = float(judged["uif"].max())

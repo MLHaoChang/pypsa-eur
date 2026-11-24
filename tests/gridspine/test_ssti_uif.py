@@ -305,3 +305,82 @@ def test_fault_levels_with_the_machines_alone():
     spec["campus"]["units"]["BESS1"]["k_sc"] = t(6.0)
     stiff = su.campus_uif(build_campus(spec)).rows["uif"]
     assert np.allclose(stiff, base, rtol=1e-12, atol=0)
+
+
+# ── the islanded case (GC-08b) ────────────────────────────────────────────────
+
+
+def _island_spec(**gens):
+    """campus_spec with its PCC tie normally open, DC_LOAD 81 MW at pf 0.98 on MV2 and ``gens`` (name:
+    (s_mva, xd_pp)) as the gensets on MV2, each with R/X 0.07."""
+    spec = campus_spec()
+    c = spec["campus"]
+    c["pcc"].update(tie_normally_open=True, p_connection_mw=t(20.0))
+    c["units"]["DC_LOAD"]["p_mw"] = t(81.0)
+    del c["units"]["GEN1"]
+    for name, (s, xd) in gens.items():
+        c["units"][name] = {"kind": "genset", "bus": "MV2", "p_mw": t(0.8 * s), "s_mva": t(s),
+                            "xd_pp": t(xd), "rx_sc": t(0.07)}
+    return spec
+
+
+def _genset_sc(s_mva, xd, c):
+    """IEC 60909 S''k (MVA) of a genset at its own terminals, rated at the bus voltage: c Un^2 / |K_G Z_G|,
+    K_G = c_max / (1 + x''d sin phi) with cos phi 0.8, |Z_G| = x''d (1 + (R/X)^2)^0.5 Un^2 / S_r."""
+    k_g = 1.1 / (1.0 + xd * 0.6)
+    return c * s_mva / (k_g * xd * math.sqrt(1.0 + 0.07**2))
+
+
+def test_island_one_genset_is_its_own_fault_level():
+    """Tie open, one 10 MVA genset: SC_i = 0 and SC_tot is the genset's own, so UIF = S_plant / S_i ~ 8.3."""
+    campus = build_campus(_island_spec(GEN1=(10.0, 0.15)))
+    study = su.campus_uif(campus)
+    rows = study.rows.set_index(["bus", "case"])
+    s_plant = 81.0 / 0.98
+    for label, c in (("island max", 1.1), ("island min", 1.0)):
+        row = rows.loc[("MV2", label)]
+        assert row["sc_without_mva"] == 0.0
+        assert row["sc_tot_mva"] == pytest.approx(_genset_sc(10.0, 0.15, c), abs=1e-6)
+        assert row["uif"] == pytest.approx(s_plant / 10.0, abs=1e-6)
+        assert row["c"] == c and row["role"] == su.ROLE_CONVERTER and row["verdict"] == "flag"
+    assert study.worst_uif == pytest.approx(s_plant / 10.0, abs=1e-6)
+    assert study.verdict == "flag"
+    # the grid cases still run, counting the grid's infeed: far lower
+    assert rows.at[("MV2", "max"), "uif"] < 0.2
+
+
+def test_island_two_gensets_hand_computed():
+    """Two gensets on MV2 with the same x''d and R/X, so SC_tot = SC_1 + SC_2 and SC_i is the other
+    machine's alone."""
+    campus = build_campus(_island_spec(GEN1=(12.5, 0.15), GEN2=(8.0, 0.15)))
+    rows = su.campus_uif(campus).rows.set_index(["bus", "case", "machine"])
+    s_plant = 81.0 / 0.98
+    for label, c in (("island max", 1.1), ("island min", 1.0)):
+        sc = {"GEN1": _genset_sc(12.5, 0.15, c), "GEN2": _genset_sc(8.0, 0.15, c)}
+        tot = sc["GEN1"] + sc["GEN2"]
+        for uid, s_i, other in (("GEN1", 12.5, "GEN2"), ("GEN2", 8.0, "GEN1")):
+            row = rows.loc[("MV2", label, uid)]
+            assert row["sc_tot_mva"] == pytest.approx(tot, abs=1e-6)
+            assert row["sc_without_mva"] == pytest.approx(sc[other], abs=1e-6)
+            assert row["uif"] == pytest.approx(s_plant / s_i * (1 - sc[other] / tot) ** 2, abs=1e-6)
+
+
+def test_island_case_only_when_the_campus_islands():
+    """A closed tie without island requirements keeps the grid cases alone (the GC-08 calls); an open tie
+    adds the grid-out calls, one with every machine and one per machine that leaves another."""
+    seen = []
+
+    def spy(campus, installed, island=False):
+        seen.append((set(installed), island))
+        return _stub(campus, installed)
+
+    su.campus_uif(build_campus(campus_spec()), fault_levels=spy)
+    assert seen == [({"GEN1"}, False), (set(), False)]
+    seen.clear()
+    spec = campus_spec()
+    spec["campus"]["pcc"].update(tie_normally_open=True, p_connection_mw=t(20.0))
+    study = su.campus_uif(build_campus(spec), fault_levels=spy)
+    assert seen == [({"GEN1"}, False), (set(), False), ({"GEN1"}, True)]
+    assert set(study.rows["case"]) == {"max", "min", "island max", "island min"}
+    island = study.rows[study.rows["case"].str.startswith("island")]
+    assert set(island["role"]) == {su.ROLE_CONVERTER} and set(island["bus"]) == {"MV1", "MV2"}
