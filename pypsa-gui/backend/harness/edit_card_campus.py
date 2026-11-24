@@ -10,6 +10,7 @@ creates nothing: the readers here use the `_if_any` paths, not the ones that mkd
 """
 from __future__ import annotations
 
+import copy
 import json
 import pathlib
 import re
@@ -434,15 +435,33 @@ def _island_preview(args: dict) -> list[dict]:
     from services import campus_electrical_service as ce
     from services import project_registry
 
-    config = args.get("config")
+    from services.chat_tools import island_tool_args
+
+    config, patch, base = args.get("config"), args.get("patch"), args.get("base")
+    island_tool_args(config, patch, base)
 
     def run(project, db, user):
+        nonlocal config
+        old = _stored_island(project)
+        if patch is not None:
+            # The patch's own card (GK B3 K10): the merged config, diffed against
+            # the stored one, so the rows are exactly the fields it changes.
+            sidecar, _ = ce._island_paths(project)
+            if old is None:
+                _refuse("invalid_edit_value", "The project has no island config yet; choose a preset first.")
+            if base != ce.island_revision(sidecar):
+                raise HTTPException(409, {
+                    "error_kind": "island_config_changed",
+                    "message": "The island settings changed since you read them. Read them again and retry.",
+                })
+            config = copy.deepcopy(old)
+            with _as_card_refusal():
+                ce.merge_island_patch(config, patch)
         with _as_card_refusal():
             try:
                 ce.checked_island_text(project, config)
             except (TypeError, ValueError) as exc:
                 _refuse("invalid_edit_value", f"The island config is not valid JSON: {exc}")
-        old = _stored_island(project)
         rows = _document_rows(_ISLAND_NAME, old, config, _ISLAND_GROUPS, _island_label,
                               lambda member: f"Unit {member.split('.', 1)[1]}", ("not set", "removed"))
         if not rows:

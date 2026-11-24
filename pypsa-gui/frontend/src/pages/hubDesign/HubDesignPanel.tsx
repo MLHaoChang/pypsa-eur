@@ -17,6 +17,7 @@ import type { FlowSectionId } from '../../api/flow'
 import { StepRail } from './StepRail'
 import { AssistantSetupCard } from './shared/AssistantSetupCard'
 import { GoalCard } from './cards/GoalCard'
+import { IslandRequirementsCard } from './cards/IslandRequirementsCard'
 import { ImproveCard } from './cards/ImproveCard'
 import { ResultsCard } from './cards/ResultsCard'
 import { SiteCard } from './cards/SiteCard'
@@ -24,8 +25,13 @@ import { SiteThumbnailCard } from './cards/SiteThumbnailCard'
 import { StartCard } from './cards/StartCard'
 import { useHubReadiness, useHubReview, useHubStudy, useHubTemplate } from './useHubData'
 
+/** Section 8: the goal, then an island's requirements (control-strategy 03). */
+function GoalSection() {
+  return <><GoalCard /><IslandRequirementsCard /></>
+}
+
 const CARDS: Record<HubStep, ComponentType> = {
-  start: StartCard, site: SiteCard, goal: GoalCard, results: ResultsCard, improve: ImproveCard,
+  start: StartCard, site: SiteCard, goal: GoalSection, results: ResultsCard, improve: ImproveCard,
 }
 
 export default function HubDesignPanel() {

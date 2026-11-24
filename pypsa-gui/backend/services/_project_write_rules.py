@@ -34,6 +34,7 @@ POST   /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/publish  wri
 DELETE /api/campus-electrical/{name}/grid-codes/published/{profile_id}  write path:name
 DELETE /api/campus-electrical/{name}/grid-readiness/limits/{item}  write path:name
 PUT    /api/campus-electrical/{name}/grid-readiness/limits/{item}  write path:name
+PATCH  /api/campus-electrical/{name}/island  write path:name
 PUT    /api/campus-electrical/{name}/island  write path:name
 DELETE /api/campus-electrical/{name}/island/cuts  write path:name
 POST   /api/campus-electrical/{name}/island/cuts/apply  write path:name

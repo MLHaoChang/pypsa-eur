@@ -331,7 +331,9 @@ def test_an_off_grid_section_keeps_its_defaults_out_of_scope(client, tmp_project
     assert not [i for s in flow["sections"] for i in s["items"]
                 if i["code"] == "eh_outage_data_missing"]
     assert _run_defaults(flow) == MICROGRID_RUN_DEFAULTS
-    assert by_id["readiness"]["summary"] == "0 to do, 19 to check"
+    # 21: 19 rows plus the off-grid dispatch limits (operating reserve,
+    # minimum renewable fraction; RESERVE-SHOW-1).
+    assert by_id["readiness"]["summary"] == "0 to do, 21 to check"
     assert [i["target"]["entity"] for i in by_id["commercial"]["items"]
             if i["code"] == "assumed_default" and i["target"].get("entity") == "tax"] == ["tax"]
     # The assumed rows of the sections the project does need are still asked for.
@@ -357,8 +359,9 @@ def test_the_staged_microgrid_keeps_its_feeder_losses_counted(client, tmp_projec
     assert not [i for s in flow["sections"] for i in s["items"]
                 if i["code"] == "eh_outage_data_missing"]
     assert _run_defaults(flow) == MICROGRID_RUN_DEFAULTS
-    # plus the tax rule as an assumption (WALK-IMPROVE-1 b).
-    assert readiness["summary"] == "0 to do, 16 to check"
+    # plus the tax rule as an assumption (WALK-IMPROVE-1 b), plus the two
+    # dispatch limits (RESERVE-SHOW-1).
+    assert readiness["summary"] == "0 to do, 18 to check"
 
 
 def test_a_section_the_scope_leaves_out_says_so(client, tmp_projects_dir, monkeypatch):

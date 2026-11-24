@@ -3763,9 +3763,16 @@ TOOLS: list[dict[str, Any]] = [
         "source tag honest: a value from a datasheet is datasheet, a guess "
         "stays assumed. You must ask before replacing a config the user "
         "already saved. The last island study is dropped, since it was made "
-        "with the old config. Safety: write.",
-        {"project_id": {"type": "string"}, "config": {"type": "object"}},
-        ["project_id", "config"],
+        "with the old config. To change a few fields, pass patch instead of "
+        "config: {requirements: {field: value}, units: {unit: {field: value}}} "
+        "with plain values (a changed tagged number becomes datasheet), plus "
+        "base, the revision campus_island_config returned; a stale base is "
+        "refused (409 island_config_changed: read it again). Pass exactly one "
+        "of config or patch. Safety: write.",
+        {"project_id": {"type": "string"}, "config": {"type": "object"},
+         "patch": {"type": "object", "description": "only the fields to change"},
+         "base": {"type": "string", "description": "the revision the patch was read at"}},
+        ["project_id"],
     ),
     _t(
         "campus_run_island_study",

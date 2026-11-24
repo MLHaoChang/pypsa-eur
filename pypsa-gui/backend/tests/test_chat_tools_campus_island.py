@@ -40,7 +40,9 @@ def test_the_island_tools_are_registered_routed_and_tiered():
     assert safety_tier_for("campus_run_island_study") == "write"
     schema = {t["name"]: t["input_schema"] for t in TOOLS}
     assert schema["campus_island_config"]["required"] == ["project_id"]
-    assert schema["campus_set_island_config"]["required"] == ["project_id", "config"]
+    # config or patch (+ base): exactly one, checked by the dispatcher (GK B3 K9).
+    assert schema["campus_set_island_config"]["required"] == ["project_id"]
+    assert {"config", "patch", "base"} <= set(schema["campus_set_island_config"]["properties"])
     assert schema["campus_run_island_study"]["required"] == ["project_id"]
     assert schema["campus_run_island_study"]["properties"]["scenarios"]["items"]["enum"] == [
         "ups_bridged", "seamless", "planned"]

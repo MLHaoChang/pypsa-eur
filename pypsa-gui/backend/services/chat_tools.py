@@ -5557,12 +5557,32 @@ def campus_grid_readiness(project_id: str, profile: str | None = None) -> dict:
         return _h(_gridspine_project(db, user, project_id), profile)
 
 
-def campus_set_island_config(project_id: str, config: dict) -> dict:
-    from services.campus_electrical_service import save_island as _h
+def island_tool_args(config, patch, base) -> None:
+    """``campus_set_island_config`` takes the whole ``config`` or a ``patch``
+    with the ``base`` revision it was read at, never both (GK B3 K9)."""
+    if (config is None) == (patch is None):
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "invalid_tool_args",
+            "message": "pass exactly one of config (the whole island config) or patch (the fields to change)"})
+    if patch is not None and not isinstance(patch, dict):
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "invalid_tool_args", "message": "patch must be an object of the fields to change"})
+    if patch is not None and not base:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "invalid_tool_args",
+            "message": "patch needs base: the revision campus_island_config returned"})
+
+
+def campus_set_island_config(project_id: str, config: dict | None = None,
+                             patch: dict | None = None, base: str | None = None) -> dict:
+    from services.campus_electrical_service import patch_island, save_island
+    island_tool_args(config, patch, base)
     with _acting() as (db, user):
         project = _gridspine_project(db, user, project_id)
         _campus_check_lock(db, user, project)
-        return _h(project, config)
+        if patch is not None:
+            return patch_island(project, patch, base)
+        return save_island(project, config)
 
 
 def campus_run_island_study(project_id: str, scenarios: list[str] | None = None) -> dict:
