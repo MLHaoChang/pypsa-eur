@@ -687,7 +687,7 @@ export function CampusPsseSection({ name }: { name: string }) {
         {d.bundles.map(b => (
           <li key={b.name} data-testid={`psse-bundle-${b.name}`} className="flex items-center gap-3 text-[12px]">
             <span className="whitespace-nowrap">{b.period != null && b.hour != null ? `Period ${b.period}, hour ${b.hour}` : b.name}</span>
-            <span className="text-muted tabular-nums">{b.files.length} files, {Math.max(1, Math.round(b.size / 1024))} kB</span>
+            <span className="text-muted tabular-nums">{b.files.length} {b.files.length === 1 ? 'file' : 'files'}, {Math.max(1, Math.round(b.size / 1024))} kB</span>
             <Btn onClick={() => download(b.name)} disabled={busy === b.name} aria-label={`Download PSS/E case, ${b.period != null && b.hour != null ? `period ${b.period}, hour ${b.hour}` : b.name}`}
               title="The .raw, .dyr, grid-forming converter parameters, README and manifest of this case, as a zip">
               Download PSS/E case
