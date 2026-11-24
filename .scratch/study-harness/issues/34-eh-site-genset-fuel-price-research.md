@@ -3,7 +3,7 @@
 
 # 34 — eh_site: genset fuel price as a research gap
 
-Status: done
+Status: done (#1950; electrical-marker edge, issue 63)
 Type: task
 Gated: yes (GK B)
 Model tier: opus

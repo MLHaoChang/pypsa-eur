@@ -791,6 +791,11 @@ _UNIT_WINDOW = 60
 
 
 def _states_electrical(text: str, value: float) -> bool:
+    """`text` states `value` with an electrical unit after it, within
+    `_UNIT_WINDOW` characters and before the next number. Known edge (study
+    harness issue 63, GK B (70) N3b): the words in between are not parsed, so
+    "diesel EUR 60 per MWh, unlike electricity MWh tariffs" still passes; the
+    user's research card shows the quote before anything is written."""
     numbers = list(source_ledger._NUMBER.finditer(text))
     for i, match in enumerate(numbers):
         if not any(

@@ -700,6 +700,9 @@ def test_a_chp_and_a_fuel_supply_generator_are_never_written(fuel_run):
         # N3: the electrical unit must be the stated value's own
         "Grid electricity price EUR 200/MWh; diesel EUR 172.40 per MWh",
         "EUR 172.40 per MWh; genset efficiency 38 % per MWh electrical",
+        # N3a: an electrical unit beyond the value's window is not its own
+        "diesel EUR 172.40 per MWh; the site notes that the comparable grid tariff is "
+        "quoted per MWh electrical",
     ],
 )
 def test_the_electrical_unit_belongs_to_the_value_and_no_fuel_energy_is_priced(quote):
