@@ -45,9 +45,10 @@ MASTER_FP_EDGE = (
     "a02c34a9864a9920f79781b1f3ff3385806e122f40b1a9dee73dfda12836854a",
     "d6b1e08f9698c4e580b3424bec3aa38376186d966841977897d7562d2c622cb9",
 )
+# The full year is built after a Link port 2 is registered (`full_year_ctx`), as in any process that built one.
 MASTER_FP_FULL_YEAR = (
-    "0ba25ecd41d524a6406eb750566e0516756067ef2228e0d11ef926dc11ea208a",
-    "5c081ccc233e8d5301cd12c7aed3e25ea756093542e00ee7efc83e6e10ed1843",
+    "bdb0aeb4bb2ae36f9a4ef28aa5cc2d4df0235b4fca29208e418484940ddc51f1",
+    "6232901daab6a01aa55b1b52181f43514808e4b762eeef9d2f229fc793ec5b39",
 )
 # Master 5e8cbcdc's sha256 of "\n".join(_exact_frame_json(f) for f in frames()).
 MASTER_EXACT_TEXT = "4b92464b2bf24b18c82a0738f1f73b1cfddf5fe004525bea666d1e7fd55a06f5"
@@ -323,8 +324,15 @@ def template_ctx(name):
 
 
 def full_year_ctx():
+    """The 2027 stage. PyPSA registers a Link's port 2 process-wide once any network uses one, and the stage's
+    `grid_import` (efficiency2 = -eff, no bus2) then reads efficiency2 1.0 instead of NaN: the built network,
+    and so its fingerprint, depends on what the process built before (on master too). Registering the port first
+    makes the build the same in every test order."""
     import eh_concentrator as C
 
+    ports = pypsa.Network()
+    ports.add("Bus", ["a", "b", "c"])
+    ports.add("Link", "port 2", bus0="a", bus1="b", bus2="c")
     return _ctx(
         C.build_eh_concentrator_staged(T, years=(2027,)),
         SolverConfig(**T.solver_config("eh_concentrator_staged")),
