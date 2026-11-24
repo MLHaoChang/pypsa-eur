@@ -80,6 +80,16 @@ describe('the PSS/E case section of the grid-code results', () => {
     api.psseZip.mockRejectedValue(new Error('network down'))
     renderSection()
     await userEvent.click(await screen.findByRole('button', { name: /^Download PSS\/E case/ }))
-    expect((await screen.findByTestId('psse-download-error')).textContent).toMatch(/network down/)
+    const text = (await screen.findByTestId('psse-download-error')).textContent
+    expect(text).toBe('The PSS/E case could not be downloaded. Try again.')
+    expect(text).not.toMatch(/network down/)               // the raw request text stays off the screen
+  })
+
+  it('says in plain words when the list cannot be loaded', async () => {
+    api.psse.mockRejectedValue(new Error('Request failed with status code 500'))
+    renderSection()
+    const text = (await screen.findByTestId('psse-error')).textContent
+    expect(text).toBe('The PSS/E cases could not be loaded. Reload the page to try again.')
+    expect(text).not.toMatch(/status code/)
   })
 })

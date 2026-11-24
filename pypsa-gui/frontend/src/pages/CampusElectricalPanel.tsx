@@ -664,14 +664,14 @@ export function CampusPsseSection({ name }: { name: string }) {
       a.click()
       a.remove()
       URL.revokeObjectURL(url)
-    } catch (e) {
-      setFailure(errorText(e))
+    } catch {
+      setFailure('The PSS/E case could not be downloaded. Try again.')
     } finally {
       setBusy(null)
     }
   }
   let body: ReactNode
-  if (psse.isError) body = <p data-testid="psse-error" className="text-[12px] text-warn">{errorText(psse.error)}</p>
+  if (psse.isError) body = <p data-testid="psse-error" className="text-[12px] text-warn">The PSS/E cases could not be loaded. Reload the page to try again.</p>
   else if (!d) body = <p className="text-[12px] text-muted">Loading the PSS/E cases</p>
   else if (!d.has_run) body = <p data-testid="psse-none" className="text-[12px] text-muted">No grid study has run yet. Run the study in the Grid study panel. It then writes one PSS/E case for each island critical hour.</p>
   else if (d.error) body = <p data-testid="psse-write-error" className="text-[12px] text-warn">The study could not write the PSS/E cases. The other results are not affected. Run the study again.</p>
