@@ -395,3 +395,27 @@ def test_the_study_runner_records_the_option_s_price_limit(limit, monkeypatch):
     assert d["asset_economics"].get("price_limit") == limit
     if limit is None:
         assert "price_limit" not in d and "price_limit" not in d["asset_economics"]
+
+
+def test_the_chat_results_tool_carries_the_reason_on_a_mip(mip, monkeypatch):
+    """S6: `get_results` hands the model the routes' payloads, so on a MIP the
+    revenue it reads is None with the reason, never a 0.0 at the zero duals."""
+    import routers.results as results
+    from services import chat_tools
+    from services.pypsa_service import PyPSAService
+
+    monkeypatch.setattr(results, "_dispatch_ready", lambda n: True)
+    monkeypatch.setattr(PyPSAService, "get_network", classmethod(lambda cls: mip))
+    monkeypatch.setitem(
+        results._state, "last_solve_settings", {"price_limit": DUALS_NOT_MARGINAL}
+    )
+    monkeypatch.setitem(results._state, "solver_config", CFG)
+    ebc = chat_tools.get_results("economics_by_carrier")
+    assert ebc["unavailable_reason"] == DUALS_NOT_MARGINAL
+    assert all(b["revenue_meur"] is None for b in ebc["by_carrier"].values())
+    ae = chat_tools.get_results("asset_economics")
+    assert ae["price_limit"] == DUALS_NOT_MARGINAL
+    assert all(row["revenue_eur"] is None for row in ae["generators"])
+    kp = chat_tools.get_results("carrier_kpis")
+    assert kp["price_limit"] == DUALS_NOT_MARGINAL
+    assert all(row["revenue_eur"] is None for row in kp["rows"])
