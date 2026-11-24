@@ -736,3 +736,221 @@ def test_pilot_v6_imports_and_attaches_the_cited_urdb_tariff_offline(project):
     assert ref["hash"] == _record(envelope)["hash"] and _versions(ref["id"]) == 1
     plan = copy.deepcopy(importer["args"])
     assert run_urdb.plan(FIXTURE.read_bytes(), plan)["hash"] == ref["hash"]
+
+
+# ── a bound context: `storage_dir` is a str (as pypsa_service sets it) ───────
+
+
+def test_c6_a_bound_context_with_a_str_storage_dir_reads_the_upload(project):
+    ctx = SimpleNamespace(**{**vars(_ctx()), "storage_dir": str(project)})
+    envelope, row = _granted(project, ctx)
+    record = _record(envelope)
+    assert "refused" not in record and record["upload_sha256"] == row["source"]["sha256"]
+    note = {}
+    assert (
+        run_envelope._match_prepare(envelope, "import_urdb_tariff", row["args"], ctx, note)
+        is None
+    )
+    assert note == {"source": record["hash"]}
+
+
+# ── run_urdb.plan: each refusal kind, and the meta it hashes ─────────────────
+
+
+def _rate(**change):
+    rate = json.loads(FIXTURE.read_text())
+    rate["items"][0].update(change)
+    return rate
+
+
+def _plan_error(blob, **args):
+    with pytest.raises(run_urdb.PlanError) as exc:
+        run_urdb.plan(blob, {**run_urdb.pinned_args("f", "a" * 64), **args})
+    return exc.value
+
+
+def test_plan_names_the_upload_reads_own_error_kind():
+    rate = json.loads(FIXTURE.read_text())
+    rate["items"].append(copy.deepcopy(rate["items"][0]))
+    err = _plan_error(json.dumps(rate).encode())
+    assert err.kind == "urdb_multiple_rates" and "pass item_index" in str(err)
+
+
+@pytest.mark.parametrize("detail", ["plain words", {"message": "plain words"}])
+def test_plan_an_upload_read_without_an_error_kind_is_unreadable(monkeypatch, detail):
+    def refuse(data, item_index):
+        raise HTTPException(status_code=422, detail=detail)
+
+    monkeypatch.setattr(chat_tools, "_urdb_rate", refuse)
+    err = _plan_error(FIXTURE.read_bytes())
+    assert err.kind == "urdb_upload_unreadable" and str(err) == "plain words"
+
+
+def test_plan_an_upload_that_is_no_rate_object_is_unreadable():
+    err = _plan_error(b"[1, 2]")
+    assert err.kind == "urdb_upload_unreadable" and "no URDB rate object" in str(err)
+
+
+@pytest.mark.parametrize(
+    "label,description", [("x" * 600, "x" * 500), ("", None), (None, None)]
+)
+def test_plan_describes_the_item_by_its_label_truncated(monkeypatch, label, description):
+    from services.library import items as I
+
+    seen, real = [], I.prepare_item
+    monkeypatch.setattr(
+        I, "prepare_item", lambda *a: seen.append(a[3]) or real(*a)
+    )
+    run_urdb.plan(json.dumps(_rate(label=label)).encode(), run_urdb.pinned_args("f", "a" * 64))
+    assert seen[0]["description"] == description
+    assert seen[0]["source"] == "urdb" and seen[0]["provider"] == "OpenEI URDB"
+
+
+def test_plan_a_refused_rate_is_urdb_refused():
+    assert _plan_error(json.dumps(_rate(foo=1)).encode()).kind == "urdb_refused"
+
+
+def test_plan_a_jurisdiction_without_a_currency_is_tariff_currency_required():
+    err = _plan_error(FIXTURE.read_bytes(), jurisdiction="generic")
+    assert err.kind == "tariff_currency_required"
+
+
+def test_plan_a_rate_without_a_startdate_is_urdb_invalid():
+    rate = json.loads(FIXTURE.read_text())
+    del rate["items"][0]["startdate"]
+    err = _plan_error(json.dumps(rate).encode())
+    assert err.kind == "urdb_invalid" and "startdate" in str(err)
+
+
+# ── run_urdb: the project's finance and commercial config ────────────────────
+
+
+@pytest.mark.parametrize(
+    "ctx", [SimpleNamespace(solver_state=None), SimpleNamespace()]
+)
+def test_no_solver_state_states_no_currency_and_holds_no_tariff(ctx):
+    assert run_urdb._finance(ctx) is None
+    assert run_urdb.tariff_held(ctx) is False
+
+
+def test_tariff_held_reads_a_typed_commercial_config():
+    from models.commercial import CommercialConfig
+
+    tariff = run_urdb.plan(FIXTURE.read_bytes(), run_urdb.pinned_args("f", "a" * 64))[
+        "tariff"
+    ]
+    for held, commercial in (
+        (True, CommercialConfig(poc_link="poc", import_tariff=tariff)),
+        (False, CommercialConfig(poc_link="poc")),
+    ):
+        for cfg in ({"commercial": commercial}, SimpleNamespace(commercial=commercial)):
+            ctx = SimpleNamespace(solver_state={"solver_config": cfg})
+            assert run_urdb.tariff_held(ctx) is held
+
+
+# ── run_urdb.modelled_years and stamp: the edges ─────────────────────────────
+
+
+def test_modelled_years_of_no_snapshots_is_no_span():
+    """pypsa refuses empty snapshots, but the guard is what keeps NaT out of
+    `stamp`'s date comparisons (which raise TypeError on NaT): not equivalent."""
+    empty = SimpleNamespace(snapshots=pd.DatetimeIndex([]))
+    assert run_urdb.modelled_years(empty) == ([], None)
+    tariff = run_urdb.plan(FIXTURE.read_bytes(), run_urdb.pinned_args("f", "a" * 64))[
+        "tariff"
+    ]
+    assert run_urdb.stamp(SimpleNamespace(**{**vars(_ctx()), "network": empty}), tariff) is None
+
+
+def test_c7_a_span_exactly_on_the_validity_bounds_is_admitted():
+    tariff = run_urdb.plan(FIXTURE.read_bytes(), run_urdb.pinned_args("f", "a" * 64))[
+        "tariff"
+    ]
+    assert str(tariff.valid_from) == "2025-01-01" and str(tariff.valid_to) == "2027-12-31"
+    on_bounds = pd.DatetimeIndex(["2025-01-01 00:00", "2027-12-31 23:00"])
+    assert _stamp(snapshots=on_bounds) is None
+    assert _stamp(snapshots=on_bounds, periods=[2025, 2027]) is None
+
+
+def test_c7_the_refusal_names_the_validity_end_or_open():
+    got = _stamp(snapshots=pd.date_range("2024-12-31", periods=48, freq="h"))
+    assert "validity 2025-01-01..2027-12-31;" in got[1]
+    rate = json.loads(FIXTURE.read_text())
+    del rate["items"][0]["enddate"]
+    tariff = run_urdb.plan(
+        json.dumps(rate).encode(), run_urdb.pinned_args("f", "a" * 64)
+    )["tariff"]
+    early = _ctx(snapshots=pd.date_range("2024-06-01", periods=24, freq="h"))
+    assert "validity 2025-01-01..open;" in run_urdb.stamp(early, tariff)[1]
+
+
+@pytest.mark.parametrize("status,raises", [(404, False), (500, True), (403, True)])
+def test_library_hash_reads_only_a_missing_item_as_none(monkeypatch, status, raises):
+    def call(*a, **k):
+        raise HTTPException(status_code=status, detail="x")
+
+    monkeypatch.setattr(chat_tools, "_library_call", call)
+    if raises:
+        with pytest.raises(HTTPException) as exc:
+            run_urdb.library_hash("urdb-x")
+        assert exc.value.status_code == status
+    else:
+        assert run_urdb.library_hash("urdb-x") is None
+
+
+# ── run_envelope: the urdb source, steps, grant check and import match ──────
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["urdb_upload", ["urdb_upload"], {"kind": "weather_choices"}, {"kind": "urdb_upload", "x": 1}],
+)
+def test_an_attach_tariff_gap_names_a_urdb_source_by_its_kind_only(source):
+    assert run_envelope._check_source("attach_tariff", {"kind": "urdb_upload"}) == {
+        "kind": "urdb_upload"
+    }
+    with pytest.raises(run_envelope.EnvelopeError):
+        run_envelope._check_source("attach_tariff", source)
+
+
+@pytest.mark.parametrize("state", [None, "proposed", "revoked"])
+def test_urdb_steps_only_from_a_granted_envelope(project, monkeypatch, state):
+    envelope, _ = _granted(project, _ctx())
+    loaded = None if state is None else dict(envelope, state=state)
+    monkeypatch.setattr(run_envelope, "_load", lambda path: loaded)
+    assert run_envelope.urdb_steps("t", "inputs") == []
+
+
+@pytest.mark.parametrize(
+    "gaps,write,writable",
+    [
+        ([{"source": {"kind": "library_tariff"}}], "import_urdb_tariff", False),
+        ([dict(run_profiles.URDB_GAP)], "attach_tariff", False),
+        ([dict(run_profiles.URDB_GAP)], "import_urdb_tariff", True),
+    ],
+)
+def test_c5_the_grant_refuses_only_a_urdb_gap_and_row_on_an_unwritable_library(
+    monkeypatch, gaps, write, writable
+):
+    monkeypatch.setattr(run_urdb, "may_write_library", lambda: writable)
+    run_envelope._urdb_grant_check({"gaps": gaps}, [{"write": write, "status": "confirmed"}])
+
+
+def test_urdb_refused_keeps_a_grant_refusal_and_a_record_without_a_hash():
+    refused = {"refused": {"kind": "currency_mismatch"}, "hash": "h"}
+    assert run_envelope._urdb_refused([refused], _ctx()) == "currency_mismatch"
+    assert run_envelope._urdb_refused([{"refused": {}}], _ctx()) == "not_granted_source"
+    assert run_envelope._urdb_refused([{"args": {}}], _ctx()) == "not_granted_source"
+
+
+def test_the_import_matches_exactly_one_granted_record(project):
+    envelope, row = _granted(project, _ctx())
+    urdb = next(g for g in envelope["gaps"] if g["source"]["kind"] == "urdb_upload")
+    record = _record(envelope)
+    for at_grant in ({}, {"Commercial": record, "Other": copy.deepcopy(record)}):
+        entries = [dict(urdb, at_grant=at_grant)]
+        assert (
+            run_envelope._match_urdb_import(entries, row["args"], _ctx(), {})
+            == "not_granted_source"
+        )
+    assert run_envelope._match_urdb_import([urdb], row["args"], _ctx(), {}) is None
