@@ -1656,10 +1656,18 @@ def subsync_judged(series):
     return ~undecided & ~no_resonance
 
 
+#: ``gridspine.drivers.campus_study.SUBSYNC_VERDICT_ORDER`` for a build without gridspine (worst first);
+#: ``test_grid_readiness_ssti`` holds it equal to the engine's.
+FALLBACK_SUBSYNC_VERDICT_ORDER = ("flag", "check", "not evaluated", "clear")
+
+
 def _worse_rows(series, verdict: str) -> list:
     """The series rows' verdicts worse than the run's ``verdict`` (``SUBSYNC_VERDICT_ORDER``, worst first; a
     blank, non-string or other value outside it counts as worst), GK A2 H2, J1."""
-    from gridspine.drivers.campus_study import SUBSYNC_VERDICT_ORDER as order
+    try:
+        from gridspine.drivers.campus_study import SUBSYNC_VERDICT_ORDER as order
+    except ImportError:  # a build without gridspine: the engine's order, pinned by a test
+        order = FALLBACK_SUBSYNC_VERDICT_ORDER
 
     if "verdict" not in series:
         return []

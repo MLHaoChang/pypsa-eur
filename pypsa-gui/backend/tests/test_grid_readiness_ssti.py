@@ -1611,3 +1611,21 @@ def test_a_non_scalar_value_in_a_note_is_unreadable():
     assert G._ssti_shown({"a": 1}) == "an unreadable value"
     assert G._ssti_shown([1]) == "an unreadable value"
     assert G._ssti_shown("0.3") == "0.3"
+
+
+def test_the_fallback_verdict_order_is_the_engines():
+    """A build without gridspine ranks series rows by the pinned copy, so it must not drift (GC-01c)."""
+    from gridspine.drivers.campus_study import SUBSYNC_VERDICT_ORDER
+
+    assert G.FALLBACK_SUBSYNC_VERDICT_ORDER == SUBSYNC_VERDICT_ORDER
+
+
+def test_worse_rows_ranks_by_the_fallback_without_gridspine(monkeypatch):
+    """With gridspine's campus driver unimportable, a flag row still contradicts a clear verdict (GC-01c)."""
+    import sys
+
+    monkeypatch.setitem(sys.modules, "gridspine.drivers.campus_study", None)
+    series = pd.DataFrame({"verdict": ["clear", "flag", "", "check"]})
+    assert G._worse_rows(series, "clear") == ["flag", "", "check"]
+    assert G._worse_rows(series, "flag") == [""]
+    assert G._assumed_modes(pd.DataFrame({"assumed_modes": ["G1"]})) == ""
