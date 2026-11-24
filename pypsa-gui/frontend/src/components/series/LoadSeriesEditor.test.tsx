@@ -79,6 +79,25 @@ describe('LoadSeriesEditor', () => {
       + 'It is a climate zone, not weather data. Mean 27.0 °C · design-day peak 45.0 °C · peak PUE 1.80 · peak facility load 60.2 MW')
   })
 
+  it('says "the rest from the default temperate curve" for a partial entry with no site location', async () => {
+    const ambient = { source: 'default', entered: ['ambient_annual_mean_c'], mean_c: 30,
+      design_day_peak_c: 44, peak_pue: 1.78, peak_facility_mw: 50.1 }
+    eh.getEhTemplate.mockResolvedValue({ dc_load: { spec: { pue_at_design: 1.3, phases: [{ it_mw: 36 }] }, ambient } })
+    renderEditor('guided', undefined, 'it_load')
+    const note = await screen.findByTestId('dc-ambient-basis')
+    expect(note.textContent).toContain('your entries (mean), the rest from the default temperate curve. No site location was set.')
+  })
+
+  it('never prints an engine key for an unknown entered field', async () => {
+    const ambient = { source: 'site_location', entered: ['ambient_future_key'], mean_c: 27,
+      design_day_peak_c: 45, peak_pue: 1.8, peak_facility_mw: 60.2 }
+    eh.getEhTemplate.mockResolvedValue({ dc_load: { spec: { pue_at_design: 1.3, phases: [{ it_mw: 36 }] }, ambient } })
+    renderEditor('guided', undefined, 'it_load')
+    const note = await screen.findByTestId('dc-ambient-basis')
+    expect(note.textContent).toContain('your entries, the rest from the site location.')
+    expect(note.textContent).not.toContain('ambient_future_key')
+  })
+
   it('keeps the picker for another load of a data-centre project', async () => {
     eh.getEhTemplate.mockResolvedValue({ dc_load: { spec: { pue_at_design: 1.3, phases: [{ it_mw: 36 }] } } })
     renderEditor('guided', undefined, 'office')

@@ -57,7 +57,7 @@ interface AmbientBasis {
 }
 const AMBIENT_SOURCE_TEXT = {
   site_location: 'from the site location. It is a climate zone, not weather data',
-  default: 'the default temperate curve. No site location was set',
+  default: 'from the default temperate curve. No site location was set',
   entered: 'as entered',
 } as const
 const ENTERED_NAME: Record<string, string> = {
@@ -66,9 +66,11 @@ const ENTERED_NAME: Record<string, string> = {
 }
 
 function ambientBasisText(a: AmbientBasis): string {
-  const names = (a.entered ?? []).map(k => ENTERED_NAME[k] ?? k)
-  const source = a.source !== 'entered' && names.length
-    ? `your entries (${names.join(', ')}), the rest ${AMBIENT_SOURCE_TEXT[a.source]}`
+  // An unknown engine key is dropped, not printed.
+  const names = (a.entered ?? []).map(k => ENTERED_NAME[k]).filter((n): n is string => !!n)
+  const entered = (a.entered ?? []).length > 0
+  const source = a.source !== 'entered' && entered
+    ? `${names.length ? `your entries (${names.join(', ')})` : 'your entries'}, the rest ${AMBIENT_SOURCE_TEXT[a.source]}`
     : AMBIENT_SOURCE_TEXT[a.source]
   return `Ambient temperature: ${source}. Mean ${a.mean_c.toFixed(1)} °C · design-day peak ${a.design_day_peak_c.toFixed(1)} °C · peak PUE ${a.peak_pue.toFixed(2)} · peak facility load ${a.peak_facility_mw.toFixed(1)} MW`
 }
