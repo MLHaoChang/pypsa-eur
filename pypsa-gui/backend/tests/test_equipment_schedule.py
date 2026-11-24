@@ -186,7 +186,12 @@ def test_every_kind_with_rating_source_and_criterion(tmp_path):
         "genset",
         "bess",
     }
-    assert all(set(r) == {*es.COLUMNS, "kind_label"} for r in rows)
+    assert all(
+        set(r)
+        == {*es.COLUMNS, "kind_label"}
+        | ({"rated_peak_ka"} if r["kind"] == "switchgear" else set())
+        for r in rows
+    )
     assert all(r["kind_label"] == es.KIND_LABELS[r["kind"]] for r in rows)
 
     (tr,) = _by(rows, "transformer")
@@ -817,3 +822,9 @@ def test_flags_of():
         "beyond_ladder",
         "partly_evaluated",
     ]
+
+
+def test_a_switchgear_row_carries_its_rated_peak(tmp_path):
+    rows = es.build(_run(tmp_path))["rows"]
+    mv1 = next(r for r in rows if r["asset"] == "MV1 switchgear")
+    assert (mv1["rating"], mv1["rated_peak_ka"]) == (31.5, 78.75)  # 2.5 x 31.5 at 50 Hz

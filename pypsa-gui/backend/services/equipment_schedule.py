@@ -362,7 +362,15 @@ def _switchgear(run: Path, spec: dict) -> list:
     sg = _read(
         run / cs.SWITCHGEAR_RATING_CSV,
         ("bus", "chosen_id", "governing", "flag", "skipped_periods"),
-        ("vn_kv", "chosen_ka", "capex_eur", "tk_s", "tkr_s", "declared_ka"),
+        (
+            "vn_kv",
+            "chosen_ka",
+            "chosen_ip_ka",
+            "capex_eur",
+            "tk_s",
+            "tkr_s",
+            "declared_ka",
+        ),
     )
     bays = _bays(spec)
     rows = []
@@ -370,33 +378,35 @@ def _switchgear(run: Path, spec: dict) -> list:
         n = max(1, bays.get(str(r.bus), 1))
         rated = _num(r.chosen_ka)
         capex = _num(r.capex_eur) if rated is not None else None
-        rows.append(
-            _row(
-                kind="switchgear",
-                asset=f"{r.bus} switchgear",
-                location=f"{r.bus} ({_fmt(r.vn_kv, 'g', ' kV')})",
-                rating=rated,
-                unit="kA",
-                quantity=n,
-                governing=(
-                    f"{_plain(r.governing)}; fault duration {_fmt(r.tk_s, 'g', ' s')}, "
-                    f"rated duration {_fmt(r.tkr_s, 'g', ' s')}"
-                    if rated is not None
-                    else _switchgear_text(r.governing, _text(r.flag))
-                )
-                + (
-                    f"; no fault level in period {_text(r.skipped_periods)}"
-                    if _text(r.skipped_periods) and _text(r.flag) != "not_evaluated"
-                    else ""
-                ),
-                source="computed",
-                declared_rating=_num(r.declared_ka),
-                declared_unit="kA" if _num(r.declared_ka) is not None else None,
-                flag=_text(r.flag),
-                library_id=_text(r.chosen_id) if rated is not None else None,
-                capex_eur=n * capex if capex is not None else None,
+        row = _row(
+            kind="switchgear",
+            asset=f"{r.bus} switchgear",
+            location=f"{r.bus} ({_fmt(r.vn_kv, 'g', ' kV')})",
+            rating=rated,
+            unit="kA",
+            quantity=n,
+            governing=(
+                f"{_plain(r.governing)}; fault duration {_fmt(r.tk_s, 'g', ' s')}, "
+                f"rated duration {_fmt(r.tkr_s, 'g', ' s')}"
+                if rated is not None
+                else _switchgear_text(r.governing, _text(r.flag))
             )
+            + (
+                f"; no fault level in period {_text(r.skipped_periods)}"
+                if _text(r.skipped_periods) and _text(r.flag) != "not_evaluated"
+                else ""
+            ),
+            source="computed",
+            declared_rating=_num(r.declared_ka),
+            declared_unit="kA" if _num(r.declared_ka) is not None else None,
+            flag=_text(r.flag),
+            library_id=_text(r.chosen_id) if rated is not None else None,
+            capex_eur=n * capex if capex is not None else None,
         )
+        row["rated_peak_ka"] = (
+            _num(r.chosen_ip_ka) if rated is not None else None
+        )  # JSON only
+        rows.append(row)
     return rows
 
 
