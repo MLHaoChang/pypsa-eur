@@ -158,7 +158,9 @@ def test_the_no_limit_guard_per_row(status, limit, lo, hi, want):
     nan = float("nan")
     frame = pd.DataFrame([{"check": "x", "status_as_is": status, "detail": "d", "limit": nan if limit is None else limit,
                            "limit_min": nan if lo is None else lo, "limit_max": nan if hi is None else hi}])
+    before = frame.copy()
     row = no_pass_without_limit(frame).iloc[0].to_dict()
+    pd.testing.assert_frame_equal(frame, before)         # the caller's frame is left as it was
     assert row["status_as_is"] == want
     assert row["detail"] == (f"{NO_LIMIT_NOT_CHECKED}; d" if want == "unknown" and status == "pass" else "d")
 
