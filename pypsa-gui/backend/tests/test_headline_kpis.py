@@ -495,7 +495,9 @@ def test_an_energy_hub_leads_with_lcoe_and_says_when_the_case_has_not_run(
     as_template(monkeypatch, "eh_datacenter")
     kind, by_id, order = cards(client)
     # No data-centre load: the time-to-power card is absent, not a tile.
-    expected = tuple(c for c in hk.ORDER["energy_hub"] if c != "time_to_power")
+    # Time to power (with a data-centre load) and CO2 (with a CO2 limit) are
+    # absent here: the project has neither.
+    expected = tuple(c for c in hk.ORDER["energy_hub"] if c not in ("time_to_power", "co2_annual"))
     assert (kind, tuple(order)) == ("energy_hub", expected)
     assert (by_id["lcoe"]["value"], by_id["lcoe"]["state"]) == (None, "not_run")
     assert by_id["lcoe"]["reason"] == "The investment case has not run on this solve."
@@ -571,8 +573,11 @@ def test_project_kind(template, kind):
 
 
 def test_card_sets_are_short_and_reasons_carry_no_engine_identifier():
-    # Five, and an energy hub's sixth: time to power, only with a data-centre load.
-    assert all(len(ids) <= 6 and len(set(ids)) == len(ids) for ids in hk.ORDER.values())
+    # Five, and an energy hub's two that appear only with their input: time to
+    # power (a data-centre load) and CO2 (a CO2 limit, DC review 02).
+    conditional = {"time_to_power", "co2_annual"}
+    assert all(len(set(ids) - conditional) <= 5 and len(set(ids)) == len(ids) for ids in hk.ORDER.values())
+    assert [c for c in hk.ORDER["energy_hub"] if c in conditional] == ["co2_annual", "time_to_power"]
     assert all(len(ids) <= 5 for kind, ids in hk.ORDER.items() if kind != "energy_hub")
     split = [
         hk._UNAVAILABLE,

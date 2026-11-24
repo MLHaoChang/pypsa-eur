@@ -29,6 +29,7 @@ A confirmed-infeasible solve under the goal is explained by one extra LP:
 ``unreachable`` drops the cap rows from the solved model, minimises the same
 weighted emissions and names the least emissions reachable per period.
 """
+
 from __future__ import annotations
 
 import math
@@ -78,7 +79,8 @@ def target_of(cfg: Any) -> float | None:
 
 def _multi(n, cfg) -> bool:
     return bool(getattr(cfg, "multi_investment_periods", False)) and isinstance(
-        n.snapshots, pd.MultiIndex)
+        n.snapshots, pd.MultiIndex
+    )
 
 
 def _years(n, period) -> float:
@@ -121,17 +123,22 @@ def apply(n, cfg, phase, captured: dict):
     if limit is None:
         return None
     from services import fuel_curve
+
     existing = fuel_curve.co2_caps(n)
     if existing:
         raise Co2CapRefusal(
             DUPLICATE,
             f"{LABEL}: the network already has a CO₂ cap ({', '.join(map(str, existing))}). "
-            f"Remove that constraint or clear the limit in the Goal step.")
+            f"Remove that constraint or clear the limit in the Goal step.",
+        )
     # The fuel curve guard (homer-parity 02a) reads the caps as the LP chain is
     # built, before these rows exist: run it here against them.
     names = [row_name(p) for p in periods(n, cfg)]
-    refusals = [f"{g}: {msg}" for g in n.generators.index
-                if (msg := fuel_curve.co2_cap_refusal(n, g, names))]
+    refusals = [
+        f"{g}: {msg}"
+        for g in n.generators.index
+        if (msg := fuel_curve.co2_cap_refusal(n, g, names))
+    ]
     if refusals:
         raise fuel_curve.FuelCurveError("; ".join(refusals))
     gc = n.c.global_constraints
@@ -140,15 +147,23 @@ def apply(n, cfg, phase, captured: dict):
     for p in periods(n, cfg):
         scale = row_scale(n, p)
         name = row_name(p)
-        n.add("GlobalConstraint", name, type="primary_energy",
-              carrier_attribute=CARRIER_ATTRIBUTE, sense="<=",
-              constant=limit * scale,
-              investment_period=np.nan if p is None else p)
-        built[name] = {"period": p, "scale": scale, "years": 1.0 if p is None else _years(n, p),
-                       "constant": limit * scale}
+        n.add(
+            "GlobalConstraint",
+            name,
+            type="primary_energy",
+            carrier_attribute=CARRIER_ATTRIBUTE,
+            sense="<=",
+            constant=limit * scale,
+            investment_period=np.nan if p is None else p,
+        )
+        built[name] = {
+            "period": p,
+            "scale": scale,
+            "years": 1.0 if p is None else _years(n, p),
+            "constant": limit * scale,
+        }
     setattr(n, _BUILT, {"limit": limit, "rows": built})
-    phase(f"{LABEL}: {_fmt(limit)} as {len(built)} cap row(s) "
-          f"({', '.join(built)}).")
+    phase(f"{LABEL}: {_fmt(limit)} as {len(built)} cap row(s) ({', '.join(built)}).")
 
     def undo() -> None:
         captured["co2_cap"] = capture(n, limit, built)
@@ -194,15 +209,19 @@ def capture(n, limit: float, built: dict) -> dict:
             v = gc.at[name, "mu"]
             mu = float(v) if v is not None and math.isfinite(float(v)) else None
         price = shadow_price(n, b["period"], mu)
-        rows.append({
-            "name": name,
-            "period": None if b["period"] is None else int(b["period"]),
-            "cap_t": b["constant"],
-            "row_scale": b["scale"],
-            "mu": mu,
-            "shadow_price_eur_per_t": price if price is not None and abs(price) > 1e-6 else None,
-            "binding": None if mu is None else abs(mu) > 1e-6,
-        })
+        rows.append(
+            {
+                "name": name,
+                "period": None if b["period"] is None else int(b["period"]),
+                "cap_t": b["constant"],
+                "row_scale": b["scale"],
+                "mu": mu,
+                "shadow_price_eur_per_t": price
+                if price is not None and abs(price) > 1e-6
+                else None,
+                "binding": None if mu is None else abs(mu) > 1e-6,
+            }
+        )
     return {"limit_t_per_yr": limit, "rows": rows}
 
 
@@ -220,7 +239,10 @@ def _period_snapshots(sns, period):
 def _flat_t_per_mwh(n, g, sns_p) -> pd.Series:
     """What PyPSA counts for ``g`` per MWh el without an override: its
     carrier's co2_emissions / efficiency(t)."""
-    co2 = float(n.c.carriers.static[CARRIER_ATTRIBUTE].get(n.generators.at[g, "carrier"], 0.0) or 0.0)
+    co2 = float(
+        n.c.carriers.static[CARRIER_ATTRIBUTE].get(n.generators.at[g, "carrier"], 0.0)
+        or 0.0
+    )
     eff = n.get_switchable_as_dense("Generator", "efficiency", inds=[g]).loc[sns_p, g]
     return (co2 / eff).astype(float)
 
@@ -310,8 +332,9 @@ def _fmt(t: float) -> str:
     return f"{t:,.0f} t CO₂/yr"
 
 
-def unreachable(n, result: dict, lhs: dict, solver_name: str, solver_options=None,
-                log=None) -> dict:
+def unreachable(
+    n, result: dict, lhs: dict, solver_name: str, solver_options=None, log=None
+) -> dict:
     """The typed refusal of a confirmed-infeasible solve under the goal: one
     extra LP on the solved model without the cap rows, minimising the same
     weighted emissions; the least reachable per period is its row value over
@@ -333,21 +356,36 @@ def unreachable(n, result: dict, lhs: dict, solver_name: str, solver_options=Non
         if status == "ok" and str(condition) == "optimal":
             least = {}
             for r in rows:
-                val = float(np.asarray(lhs[r["name"]].solution.sum()).item()
-                            if hasattr(lhs[r["name"]].solution, "sum")
-                            else lhs[r["name"]].solution)
+                val = float(
+                    np.asarray(lhs[r["name"]].solution.sum()).item()
+                    if hasattr(lhs[r["name"]].solution, "sum")
+                    else lhs[r["name"]].solution
+                )
                 least[str(r["period"]) if r["period"] is not None else "all"] = (
-                    val / r["row_scale"] if r["row_scale"] > 0 else None)
+                    val / r["row_scale"] if r["row_scale"] > 0 else None
+                )
     if least is None:
-        message = (f"{LABEL}: no design meets {_fmt(limit)}. No design works without "
-                   f"the limit either, so the limit is not the cause.")
+        message = (
+            f"{LABEL}: no design meets {_fmt(limit)}. No design works without "
+            f"the limit either, so the limit is not the cause."
+        )
     else:
-        parts = [f"{_fmt(v)}" + ("" if k == "all" else f" in {k}")
-                 for k, v in least.items() if v is not None]
-        message = (f"{LABEL}: no design meets {_fmt(limit)}. The least reachable is "
-                   f"{' and '.join(parts)}.")
-    return {"code": UNREACHABLE, "message": message, "limit_t_per_yr": limit,
-            "least_t_per_yr": least, "extra_solves": 1}
+        parts = [
+            f"{_fmt(v)}" + ("" if k == "all" else f" in {k}")
+            for k, v in least.items()
+            if v is not None
+        ]
+        message = (
+            f"{LABEL}: no design meets {_fmt(limit)}. The least reachable is "
+            f"{' and '.join(parts)}."
+        )
+    return {
+        "code": UNREACHABLE,
+        "message": message,
+        "limit_t_per_yr": limit,
+        "least_t_per_yr": least,
+        "extra_solves": 1,
+    }
 
 
 # ── results ───────────────────────────────────────────────────────────────
@@ -361,18 +399,20 @@ def cap_entries(goal: dict, total_t: float, period_totals: dict) -> list[dict]:
     for r in goal.get("rows") or []:
         p = r.get("period")
         used = float(total_t if p is None else period_totals.get(p, 0.0))
-        out.append({
-            "active": True,
-            "goal": True,
-            "name": r["name"],
-            "investment_period": p,
-            "scope": "period" if p is not None else "horizon",
-            "cap_tCO2": r["cap_t"],
-            "used_tCO2": used,
-            "shadow_price_eur_per_tCO2": r.get("mu"),
-            "slack_tCO2": r["cap_t"] - used,
-            "binding": r.get("binding"),
-        })
+        out.append(
+            {
+                "active": True,
+                "goal": True,
+                "name": r["name"],
+                "investment_period": p,
+                "scope": "period" if p is not None else "horizon",
+                "cap_tCO2": r["cap_t"],
+                "used_tCO2": used,
+                "shadow_price_eur_per_tCO2": r.get("mu"),
+                "slack_tCO2": r["cap_t"] - used,
+                "binding": r.get("binding"),
+            }
+        )
     return out
 
 
@@ -390,8 +430,11 @@ def annual(goal: dict, total_t: float, period_totals: dict) -> dict:
             by_period[p] = t / r["row_scale"]
         used += t
         scale += r["row_scale"]
-    prices = [r["shadow_price_eur_per_t"] for r in rows
-              if r.get("binding") and r.get("shadow_price_eur_per_t") is not None]
+    prices = [
+        r["shadow_price_eur_per_t"]
+        for r in rows
+        if r.get("binding") and r.get("shadow_price_eur_per_t") is not None
+    ]
     # A multi-period run's figure is its highest period's, named (`period`):
     # the limit holds per period, so the period nearest it is the one to show.
     period = None

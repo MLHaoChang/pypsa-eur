@@ -8,6 +8,7 @@ solve only, with a per-snapshot grid intensity counted at the shared helper's
 figure. Hand networks carry literal figures; the DC templates show the goal
 binds on the real thing.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -41,8 +42,13 @@ def _solve(n, **cfg_kw):
     sink: dict = {}
     q: queue.SimpleQueue = queue.SimpleQueue()
     status, condition = run_simulation(
-        SolverConfig(**cfg_kw), n, PyPSAService.get_lock(), threading.Event(), q,
-        state_update=lambda **kw: sink.update(kw))
+        SolverConfig(**cfg_kw),
+        n,
+        PyPSAService.get_lock(),
+        threading.Event(),
+        q,
+        state_update=lambda **kw: sink.update(kw),
+    )
     logs = []
     while True:
         try:
@@ -62,10 +68,21 @@ def _hand(grid_ovr=None, clean_mw=20.0, grid_mw=20.0, load=10.0, weight=1.0):
     n.add("Carrier", "clean", co2_emissions=0.0)
     n.add("Bus", "b")
     n.add("Load", "d", bus="b", p_set=load)
-    n.add("Generator", "grid", bus="b", carrier="grid", p_nom=grid_mw, marginal_cost=10.0)
-    n.add("Generator", "clean", bus="b", carrier="clean", p_nom=clean_mw, marginal_cost=100.0)
+    n.add(
+        "Generator", "grid", bus="b", carrier="grid", p_nom=grid_mw, marginal_cost=10.0
+    )
+    n.add(
+        "Generator",
+        "clean",
+        bus="b",
+        carrier="clean",
+        p_nom=clean_mw,
+        marginal_cost=100.0,
+    )
     if grid_ovr is not None:
-        n.generators_t[OVERRIDE_ATTR] = pd.DataFrame({"grid": grid_ovr}, index=n.snapshots)
+        n.generators_t[OVERRIDE_ATTR] = pd.DataFrame(
+            {"grid": grid_ovr}, index=n.snapshots
+        )
     return n
 
 
@@ -74,6 +91,7 @@ TO_ROW = 2.0 / 8760.0
 
 
 # ── the input (C5) ────────────────────────────────────────────────────────
+
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), -1.0])
 def test_the_schema_refuses_a_limit_that_is_not_a_finite_non_negative_number(bad):
@@ -93,12 +111,15 @@ def test_zero_is_a_limit_and_none_is_off():
 
 # sha256 of master's (84a2d1a1) `goal_free_config(SolverConfig())`, the input
 # to the network fingerprint and the investment-case digest.
-MASTER_DEFAULT_CONFIG_SHA = "9b89ba730791f6d73b395db5f74240d82204cc3c58ba5109b8212cd5385fb281"
+MASTER_DEFAULT_CONFIG_SHA = (
+    "9b89ba730791f6d73b395db5f74240d82204cc3c58ba5109b8212cd5385fb281"
+)
 
 
 def _cfg_sha(cfg) -> str:
     return hashlib.sha256(
-        json.dumps(goal_free_config(cfg), sort_keys=True, default=str).encode()).hexdigest()
+        json.dumps(goal_free_config(cfg), sort_keys=True, default=str).encode()
+    ).hexdigest()
 
 
 def test_goal_off_keeps_masters_fingerprint_input():
@@ -112,6 +133,7 @@ def test_a_limit_zero_included_changes_the_fingerprint_input(v):
 
 # ── the rows (C1, C2) ─────────────────────────────────────────────────────
 
+
 def test_goal_off_writes_no_rows():
     n = _hand()
     status, _, sink, _ = _solve(n)
@@ -121,7 +143,7 @@ def test_goal_off_writes_no_rows():
 
 
 def test_the_single_period_constant_annualises_the_snapshots():
-    n = _hand(weight=438.0)   # 2 × 438 h = 0.1 yr
+    n = _hand(weight=438.0)  # 2 × 438 h = 0.1 yr
     rows = []
     undo = co2_cap.apply(n, SolverConfig(co2_limit_t_per_yr=1000.0), rows.append, {})
     gc = n.global_constraints
@@ -139,14 +161,20 @@ def test_the_staged_rows_are_per_period_and_scaled_by_years_and_weights():
     n = T.build_eh_datacenter_staged()
     yrs = n.investment_period_weightings.years
     w = n.snapshot_weightings.generators
-    co2_cap.apply(n, SolverConfig(co2_limit_t_per_yr=1000.0, multi_investment_periods=True),
-                  lambda _m: None, {})
+    co2_cap.apply(
+        n,
+        SolverConfig(co2_limit_t_per_yr=1000.0, multi_investment_periods=True),
+        lambda _m: None,
+        {},
+    )
     gc = n.global_constraints
     for p in n.investment_periods:
         name = f"co2_cap_{p}"
         share = w[w.index.get_level_values(0) == p].sum() / 8760.0
         assert gc.at[name, "investment_period"] == p
-        assert gc.at[name, "constant"] == pytest.approx(1000.0 * yrs[p] * share, rel=1e-12)
+        assert gc.at[name, "constant"] == pytest.approx(
+            1000.0 * yrs[p] * share, rel=1e-12
+        )
 
 
 def test_the_rebuilt_row_counts_the_override_and_falls_back_on_a_nan_snapshot():
@@ -174,12 +202,15 @@ def test_the_staged_grid_row_carries_weight_times_years_times_the_override():
     for p, ovr in T.DC_GRID_CO2_T_PER_MWH.items():
         sns = n.snapshots[n.snapshots.get_level_values(0) == p]
         lhs = n.model.constraints[f"GlobalConstraint-co2_cap_{p}"].lhs
-        labels = n.model["Generator-p"].sel(name="grid_supply", snapshot=sns).labels.values
+        labels = (
+            n.model["Generator-p"].sel(name="grid_supply", snapshot=sns).labels.values
+        )
         got = co2_cap._row_coefficients(lhs, labels)
         assert got == pytest.approx((w.loc[sns] * yrs[p] * ovr).to_numpy(), rel=1e-12)
 
 
 # ── duals (C3) ────────────────────────────────────────────────────────────
+
 
 def test_the_dual_is_the_rebuilt_rows_not_the_flat_one():
     # Override 0.1: the grid emits 2 t in the 2 h, under the 3 t cap, so the
@@ -199,7 +230,9 @@ def test_a_binding_cap_prices_the_marginal_switch_at_any_objective_scale(scale):
     # Cap 6 t of the grid's 10: 8 MWh must move to clean at +90 EUR/MWh and
     # each MWh saves 0.5 t, so a tonne costs 180 EUR.
     n = _hand()
-    status, _, sink, _ = _solve(n, co2_limit_t_per_yr=6.0 / TO_ROW, user_objective_scale=scale)
+    status, _, sink, _ = _solve(
+        n, co2_limit_t_per_yr=6.0 / TO_ROW, user_objective_scale=scale
+    )
     assert status == "ok"
     assert n.generators_t.p["clean"].sum() == pytest.approx(8.0, rel=1e-6)
     row = sink["last_co2_cap"]["rows"][0]
@@ -216,8 +249,13 @@ _SOLVE_STAMPS = ("control", "p_max_pu_includes_outages")
 
 def _frozen(n):
     """The input frames the goal could touch, and the dynamic inputs."""
-    gens = n.generators[[c for c in n.generators.columns
-                         if not c.endswith("_opt") and c not in _SOLVE_STAMPS]]
+    gens = n.generators[
+        [
+            c
+            for c in n.generators.columns
+            if not c.endswith("_opt") and c not in _SOLVE_STAMPS
+        ]
+    ]
     dyn = {k: v.copy() for k, v in n.generators_t.items() if not v.empty}
     return (n.global_constraints.copy(), gens.copy(), n.carriers.copy(), dyn)
 
@@ -250,16 +288,24 @@ def test_rows_are_gone_when_the_lp_build_raises():
     n = _hand()
     before = _frozen(n)  # the LP build raises before any result is written
     status, _, _, _ = _solve(
-        n, co2_limit_t_per_yr=6.0 / TO_ROW,
-        extra_functionality_code="def extra_functionality(n, snapshots):\n    raise RuntimeError('boom')\n")
+        n,
+        co2_limit_t_per_yr=6.0 / TO_ROW,
+        extra_functionality_code="def extra_functionality(n, snapshots):\n    raise RuntimeError('boom')\n",
+    )
     assert status != "ok"
     _same(before, _frozen(n))
 
 
 def test_a_hand_made_cap_is_left_alone_and_the_goal_refused():
     n = _hand()
-    n.add("GlobalConstraint", "my_cap", type="primary_energy",
-          carrier_attribute="co2_emissions", sense="<=", constant=9.0)
+    n.add(
+        "GlobalConstraint",
+        "my_cap",
+        type="primary_energy",
+        carrier_attribute="co2_emissions",
+        sense="<=",
+        constant=9.0,
+    )
     with pytest.raises(co2_cap.Co2CapRefusal) as exc:
         co2_cap.apply(n, SolverConfig(co2_limit_t_per_yr=1.0), lambda _m: None, {})
     assert exc.value.code == co2_cap.DUPLICATE
@@ -273,14 +319,17 @@ def test_a_hand_made_cap_is_left_alone_and_the_goal_refused():
 def test_a_fuel_curve_genset_is_still_refused_under_the_goal(monkeypatch):
     n = _hand()
     monkeypatch.setattr(
-        fuel_curve, "co2_cap_refusal",
-        lambda n, name, caps=None: "curve" if name == "grid" and caps else None)
+        fuel_curve,
+        "co2_cap_refusal",
+        lambda n, name, caps=None: "curve" if name == "grid" and caps else None,
+    )
     with pytest.raises(fuel_curve.FuelCurveError):
         co2_cap.apply(n, SolverConfig(co2_limit_t_per_yr=1.0), lambda _m: None, {})
     assert n.global_constraints.empty
 
 
 # ── unreachable (C7) ──────────────────────────────────────────────────────
+
 
 def test_an_unreachable_cap_names_the_least_emissions_reachable():
     # Clean is 4 MW: the grid must give 6 MWh × 2 h = 12 MWh, 6 t in the 2 h,
@@ -292,8 +341,10 @@ def test_an_unreachable_cap_names_the_least_emissions_reachable():
     assert ref["code"] == "co2_cap_unreachable"
     assert ref["extra_solves"] == 1
     assert ref["least_t_per_yr"] == {"all": pytest.approx(26_280.0, rel=1e-9)}
-    assert ref["message"] == ("CO₂ limit: no design meets 10,000 t CO₂/yr. "
-                              "The least reachable is 26,280 t CO₂/yr.")
+    assert ref["message"] == (
+        "CO₂ limit: no design meets 10,000 t CO₂/yr. "
+        "The least reachable is 26,280 t CO₂/yr."
+    )
 
 
 def test_a_network_infeasible_without_the_cap_says_so():
@@ -306,6 +357,7 @@ def test_a_network_infeasible_without_the_cap_says_so():
 
 # ── the DC templates ──────────────────────────────────────────────────────
 
+
 def _gas_mwh(n):
     w = n.snapshot_weightings.generators
     gas = [g for g in n.generators.index if n.generators.at[g, "carrier"] == "gas"]
@@ -317,7 +369,10 @@ def _annual_t(n):
     co2 = n.carriers.co2_emissions
     t = 0.0
     for g in n.generators.index:
-        f = co2.get(n.generators.at[g, "carrier"], 0.0) / n.generators.at[g, "efficiency"]
+        f = (
+            co2.get(n.generators.at[g, "carrier"], 0.0)
+            / n.generators.at[g, "efficiency"]
+        )
         t += float((n.generators_t.p[g] * w).sum()) * f
     return t / (w.sum() / 8760.0)
 
@@ -350,13 +405,19 @@ def test_on_the_staged_template_the_cap_and_the_emissions_view_count_the_same_to
     cfg = dict(voll=5000.0, multi_investment_periods=True)
     n0 = T.build_eh_datacenter_staged()
     assert _solve(n0, **cfg)[0] == "ok"
-    free = {r["period"]: r["total_tCO2"] for r in compute_emissions(n0, "lopf", result_df=_live)["by_period"]}
+    free = {
+        r["period"]: r["total_tCO2"]
+        for r in compute_emissions(n0, "lopf", result_df=_live)["by_period"]
+    }
     scale = {p: co2_cap.row_scale(n0, p) for p in n0.investment_periods}
     limit = round(0.9 * min(free[p] / scale[p] for p in n0.investment_periods))
     n = T.build_eh_datacenter_staged()
     status, _, sink, _ = _solve(n, co2_limit_t_per_yr=limit, **cfg)
     assert status == "ok"
-    got = {r["period"]: r["total_tCO2"] for r in compute_emissions(n, "lopf", result_df=_live)["by_period"]}
+    got = {
+        r["period"]: r["total_tCO2"]
+        for r in compute_emissions(n, "lopf", result_df=_live)["by_period"]
+    }
     for p in n.investment_periods:
         assert got[p] == pytest.approx(limit * scale[p], rel=1e-6)
     assert all(r["binding"] for r in sink["last_co2_cap"]["rows"])
@@ -364,12 +425,29 @@ def test_on_the_staged_template_the_cap_and_the_emissions_view_count_the_same_to
 
 # ── results (C8) ──────────────────────────────────────────────────────────
 
-_GOAL = {"limit_t_per_yr": 1000.0, "rows": [
-    {"name": "co2_cap_2030", "period": 2030, "cap_t": 500.0, "row_scale": 0.5,
-     "mu": -180.0, "shadow_price_eur_per_t": 180.0, "binding": True},
-    {"name": "co2_cap_2035", "period": 2035, "cap_t": 2000.0, "row_scale": 2.0,
-     "mu": 0.0, "shadow_price_eur_per_t": None, "binding": False},
-]}
+_GOAL = {
+    "limit_t_per_yr": 1000.0,
+    "rows": [
+        {
+            "name": "co2_cap_2030",
+            "period": 2030,
+            "cap_t": 500.0,
+            "row_scale": 0.5,
+            "mu": -180.0,
+            "shadow_price_eur_per_t": 180.0,
+            "binding": True,
+        },
+        {
+            "name": "co2_cap_2035",
+            "period": 2035,
+            "cap_t": 2000.0,
+            "row_scale": 2.0,
+            "mu": 0.0,
+            "shadow_price_eur_per_t": None,
+            "binding": False,
+        },
+    ],
+}
 
 
 def test_a_multi_period_figure_is_its_highest_periods_and_names_it():
@@ -380,9 +458,20 @@ def test_a_multi_period_figure_is_its_highest_periods_and_names_it():
 
 
 def test_a_single_period_figure_is_the_tonnes_over_the_year_share():
-    one = {"limit_t_per_yr": 1000.0, "rows": [
-        {"name": "co2_cap", "period": None, "cap_t": 100.0, "row_scale": 0.1,
-         "mu": 0.0, "shadow_price_eur_per_t": None, "binding": False}]}
+    one = {
+        "limit_t_per_yr": 1000.0,
+        "rows": [
+            {
+                "name": "co2_cap",
+                "period": None,
+                "cap_t": 100.0,
+                "row_scale": 0.1,
+                "mu": 0.0,
+                "shadow_price_eur_per_t": None,
+                "binding": False,
+            }
+        ],
+    }
     a = co2_cap.annual(one, 80.0, {None: 80.0})
     assert a["t_per_yr"] == pytest.approx(800.0) and a["period"] is None
     assert a["binding"] is False and a["shadow_price_eur_per_t"] is None
@@ -397,8 +486,15 @@ def test_the_card_carries_the_limit_and_the_price_only_when_reached():
     assert card["value"] == pytest.approx(1000.0) and card["period"] == 2030
     assert card["limit_t_per_yr"] == 1000.0
     assert card["reached"] is True and card["shadow_price_eur_per_t"] == 180.0
-    slack = _co2({"limit_t_per_yr": 1000.0, "t_per_yr": 0.0, "binding": False,
-                  "shadow_price_eur_per_t": 5.0, "period": None})
+    slack = _co2(
+        {
+            "limit_t_per_yr": 1000.0,
+            "t_per_yr": 0.0,
+            "binding": False,
+            "shadow_price_eur_per_t": 5.0,
+            "period": None,
+        }
+    )
     assert slack["reached"] is False and slack["shadow_price_eur_per_t"] is None
     assert slack["state"] == "zero"
 
@@ -406,8 +502,15 @@ def test_the_card_carries_the_limit_and_the_price_only_when_reached():
 def test_a_card_whose_co2_cannot_be_counted_is_not_zero():
     from services.results.headline_kpis import _co2
 
-    card = _co2({"limit_t_per_yr": 1000.0, "t_per_yr": None, "binding": False,
-                 "shadow_price_eur_per_t": None, "period": None})
+    card = _co2(
+        {
+            "limit_t_per_yr": 1000.0,
+            "t_per_yr": None,
+            "binding": False,
+            "shadow_price_eur_per_t": None,
+            "period": None,
+        }
+    )
     assert card["value"] is None and card["state"] == "unavailable"
 
 
@@ -420,7 +523,9 @@ def test_expert_emissions_lists_the_goals_cap_like_a_stored_one():
     out = compute_emissions(n, "lopf", result_df=_live, goal_cap=sink["last_co2_cap"])
     (cap,) = out["caps"]
     assert cap["goal"] is True and cap["name"] == "co2_cap"
-    assert cap["cap_tCO2"] == pytest.approx(6.0) and cap["used_tCO2"] == pytest.approx(6.0)
+    assert cap["cap_tCO2"] == pytest.approx(6.0) and cap["used_tCO2"] == pytest.approx(
+        6.0
+    )
     assert cap["binding"] is True
     assert cap["shadow_price_eur_per_tCO2"] == pytest.approx(-180.0, rel=1e-6)
     assert out["cap"]["name"] == "co2_cap"
