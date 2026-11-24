@@ -27,7 +27,7 @@ import {
   type EhStudyRequestBody,
 } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
-import { goalText, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
+import { MAX_GOAL_DRAWS, goalText, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import { ReliabilityGoalSummary } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
 import { openReliabilityGoal } from '../../layout/flowNavigation'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
@@ -300,6 +300,17 @@ function feederNext(fb: unknown): string {
     ? CERTIFICATION_NEXT.feederNoData : CERTIFICATION_NEXT.feederBound
 }
 
+/** template-e2e 21: the goal is under the smallest shortfall the run can
+ *  show, so only the stated draw count (or a goal above zero) settles it; a
+ *  tighter plan does not. */
+export function belowFloorNext(minDraws: unknown): string {
+  if (typeof minDraws === 'number' && minDraws > MAX_GOAL_DRAWS && Number.isFinite(minDraws))
+    return `Next: allow more shortfall in the reliability goal. Even ${MAX_GOAL_DRAWS} simulation runs (the most allowed) could not show that this goal is met.`
+  return typeof minDraws === 'number' && Number.isFinite(minDraws)
+    ? `Next: raise the simulation runs per check to at least ${minDraws}. With fewer, the smallest shortfall it can show is above your goal, so a tighter plan cannot settle it.`
+    : 'Next: allow some shortfall in the reliability goal. No number of simulation runs can show that a 0 h/yr goal is met.'
+}
+
 /** MC certification headline from the `certification` section, if it ran. */
 export function certificationHeadline(report: EhReferenceDesignReport): {
   perYear: number
@@ -328,7 +339,9 @@ export function certificationHeadline(report: EhReferenceDesignReport): {
   // metric both leave the verdict empty: the next step is to set a target.
   const next = verdict === 'fail' ? CERTIFICATION_NEXT.fail
     : verdict === 'inconclusive'
-      ? (payload.feeder_bound ? feederNext(payload.feeder_bound) : CERTIFICATION_NEXT.inconclusive)
+      ? (payload.feeder_bound ? feederNext(payload.feeder_bound)
+        : payload.below_floor === true ? belowFloorNext(payload.min_draws)
+          : CERTIFICATION_NEXT.inconclusive)
       : verdict === 'pass' ? null
         : (verdict == null || verdict === 'none' || payload.metric === 'none')
           ? CERTIFICATION_NEXT.noTarget : null

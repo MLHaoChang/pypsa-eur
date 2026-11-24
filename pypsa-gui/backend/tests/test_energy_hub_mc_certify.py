@@ -492,3 +492,119 @@ def test_abort_before_mc_certify_leaves_a_reason_on_the_section():
     sec = _cert(report)
     assert sec.status == "not_established"
     assert "abort" in (sec.note or "")
+
+
+# ── template-e2e 21: the floor and the fewest draws (GK A V1) ───────────────
+# `_cert_network` is 168 hourly snapshots (weight 1 h): the horizon is
+# 168/8760 yr, a 3 h/yr goal is 0.05753 h on it, and one draw resolves 1 h,
+# so 1/18 = 0.0556 ≤ 0.0575 < 1/17 = 0.0588: 18 draws, as on a 168 h template.
+
+
+@pytest.mark.live_solve
+def test_pre_run_weights_match_the_runs_floor():
+    """The study start's w_min (`copt.fleet_weights`) is what the run's floor
+    reports: floor × n_samples."""
+    from services.adequacy.copt import fleet_weights
+    n = _cert_network(units=8)
+    w = fleet_weights(n)
+    report = _run(n, _pack(target=3.0), mc_draws=1)
+    p = _cert(report).payload
+    assert float(w[w > 0].min()) == 1.0
+    assert p["resolution_floor_h"] * p["n_samples"] == pytest.approx(1.0)
+    # Owner decision on #1927: 1 draw below the floor still runs (above);
+    # only a goal 2000 draws cannot resolve is refused: 1 h / 2000 on the
+    # 168 h horizon is 0.0261 h/yr.
+    assert S.draws_short_of_target(n, _pack(target=3.0), 1) is None
+    assert S.draws_short_of_target(n, _pack(target=0.01), 1) == (
+        "Simulation runs per check: the 0.01 h/yr goal cannot be decided. A "
+        "check that finds no shortfall cannot show it is met. Even 2000 runs "
+        "(the most allowed) have a smallest step of 0.0261 h/yr. Allow more "
+        "shortfall in the goal.")
+    assert S.draws_short_of_target(n, _pack(target=0.03), 1) is None
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("draws,below,min_draws", [(17, True, 18), (18, False, None)])
+def test_the_minimum_draws_put_the_floor_at_the_target(draws, below, min_draws):
+    report = _run(_cert_network(units=8), _pack(target=3.0), mc_draws=draws)
+    p = _cert(report).payload
+    assert p["n_samples"] == draws          # an all-zero first batch converges
+    assert (p["resolution_floor_h"] > p["target_lole_h_per_horizon"]) is below
+    assert p["below_floor"] is below
+    assert p["min_draws"] == min_draws
+    if below:
+        assert p["verdict"] == "inconclusive"
+        assert _cert(report).note == (
+            "target 3 h/yr is below the MC resolution floor 3.06723 h/yr at "
+            "17 draws: at least 18 draws resolve it")
+
+
+# GK A ask 1 and the owner decision on #1927: the start refuses only past
+# the 2000-draw cap, and then names no draw count. A weight of 20 h on one
+# year resolves 0.01 h/yr at exactly 2000 draws; 20.01 h needs 2001.
+@pytest.mark.parametrize("w_min,refused", [(20.0, False), (20.01, True),
+                                           (168.0, True)])
+@pytest.mark.parametrize("draws", [1, 2000])
+def test_the_start_refuses_only_a_goal_past_the_draw_cap(w_min, refused, draws):
+    msg = S.draws_short_for((w_min, 1.0), _pack(target=0.01), draws)
+    if not refused:
+        assert msg is None
+        return
+    assert msg.startswith("Simulation runs per check: the 0.01 h/yr goal "
+                          "cannot be decided. A check that finds no shortfall "
+                          "cannot show it is met. Even 2000 runs (the most "
+                          "allowed) have a smallest step of")
+    assert msg.endswith(" h/yr. Allow more shortfall in the goal.")
+    assert "16800" not in msg and "set at least" not in msg
+
+
+# GK A R3 (owner decision on #1927): a study requested below the floor is not
+# refused at the start; it runs, and the verdict, payload and Improve name the
+# floor and the fewest draws.
+@pytest.mark.live_solve
+def test_a_study_started_below_the_floor_runs_and_ends_with_the_floor_note(
+        client, install_network):
+    import time
+    install_network(_cert_network(units=8))
+    r = client.put("/api/simulation/solver_config",
+                   json={"solver_name": "highs", "voll": 5000.0, "mc_draws": 17})
+    assert r.status_code == 200, r.text
+    r = client.post("/api/results/eh_study", json={
+        "archetype": "off_grid", "stages": list(CERT_STAGES),
+        "pack_overrides": {"ens_cap_permyriad": 5000.0, "target_lole_h": 3.0}})
+    assert r.status_code == 200, r.text
+    deadline = time.monotonic() + 180
+    while (body := client.get("/api/results/eh_study").json()).get("status") == "running":
+        assert time.monotonic() < deadline, "eh_study never finished"
+        time.sleep(0.05)
+    assert body["status"] == "done", body.get("error")
+    p = body["report"]["sections"]["certification"]["payload"]
+    assert (p["n_samples"], p["verdict"]) == (17, "inconclusive")
+    assert (p["below_floor"], p["min_draws"]) == (True, 18)
+    review = client.get("/api/results/eh_review").json()
+    f = next(f for f in review["findings"] if f["id"] == "certification_inconclusive")
+    assert "at least 18 draws" in f["recommendation"]
+    assert f["actions"][0]["args"]["mc"] == {"draws": 34}
+
+
+# GK A ask 3: a target equal to the floor is resolved; its verdict follows
+# the interval (here a straddle), not the below-floor branch.
+def test_a_target_at_the_floor_is_a_straddle_not_below_the_floor():
+    assert S.below_floor(0.05, 0.05) is False
+    assert S.below_floor(0.05, 0.0500001) is True
+    assert S.below_floor(None, 0.05) is False
+    assert S.below_floor(0.05, None) is False
+    assert S.certification_verdict(
+        lole_ci=(0.0, 0.1), target_h=0.05, resolution_floor_h=0.05,
+        n_samples=20) == ("inconclusive", "the LOLE 95% CI straddles the target")
+    verdict, note = S.certification_verdict(
+        lole_ci=(0.0, 0.1), target_h=0.05, resolution_floor_h=0.0500001,
+        n_samples=20)
+    assert verdict == "inconclusive" and "below the MC resolution floor" in note
+
+
+@pytest.mark.parametrize("target", [0.0, None])
+def test_a_zero_or_absent_goal_is_not_refused_at_the_start(target):
+    """GK A V3: a 0 h/yr goal stays unrefused before the run (the verdict
+    names the floor); no goal has nothing to resolve."""
+    assert S.draws_short_of_target(_cert_network(), _pack(target=target), 1) is None

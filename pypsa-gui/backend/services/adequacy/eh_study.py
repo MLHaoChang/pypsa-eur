@@ -373,9 +373,97 @@ def _max_mttr(frozen) -> float:
     return max(mttrs) if mttrs else 0.0
 
 
+def min_draws_to_resolve(resolution_floor_h, n_samples,
+                         target_h) -> int | None:
+    """The fewest MC draws whose resolution floor is at or under ``target_h``
+    (template-e2e 21). The MC's floor is ``w_min / n`` (``mc_adequacy``) and
+    its first batch is ``min(draws, MAX_DRAWS)``, so a run of ``draws`` draws
+    has ``n ≥ draws``: ``w_min = floor · n_samples`` comes back from any run,
+    and the answer is the least ``m`` with ``w_min / m ≤ target_h``. None
+    when there is no floor to state, or the target is 0 (no draw count
+    resolves a zero target)."""
+    if resolution_floor_h is None or n_samples is None or target_h is None:
+        return None
+    w_min = float(resolution_floor_h) * int(n_samples)
+    target_h = float(target_h)
+    if not (math.isfinite(w_min) and math.isfinite(target_h)) or target_h <= 0:
+        return None
+    return min_draws_for_weight(w_min, target_h)
+
+
+def min_draws_for_weight(w_min: float, target_h: float) -> int:
+    """The least ``m ≥ 1`` with ``w_min / m ≤ target_h`` (``target_h > 0``),
+    compared as the MC computes its floor, not through a rounded ratio."""
+    m = max(1, math.ceil(w_min / target_h))
+    while w_min / m > target_h:
+        m += 1
+    while m > 1 and w_min / (m - 1) <= target_h:
+        m -= 1
+    return m
+
+
+def below_floor(target_h, resolution_floor_h) -> bool:
+    """template-e2e 21: the target sits strictly under the MC resolution
+    floor. A target equal to the floor is resolved: its verdict follows the
+    LOLE interval (pass, fail or a straddle)."""
+    return (target_h is not None and resolution_floor_h is not None
+            and float(target_h) < float(resolution_floor_h))
+
+
+def resolution_weight(n) -> tuple[float, float] | None:
+    """``(w_min, horizon_years)`` of network ``n`` as the MC samples it: the
+    smallest positive weight of ``copt.fleet_weights`` (the MC's own) and
+    ``metrics.horizon_years``. None without a positive weight or horizon.
+    Read under the network lock."""
+    from services.adequacy.copt import fleet_weights
+    from services.adequacy.metrics import horizon_years
+
+    years = float(horizon_years(n))
+    w = fleet_weights(n)
+    w_pos = w[w > 0]
+    if not (years > 0 and w_pos.size):
+        return None
+    return float(w_pos.min()), years
+
+
+def draws_short_of_target(n, pack, draws: int | None) -> str | None:
+    """The study start's runs check (template-e2e 21) on network ``n``: see
+    ``draws_short_for``."""
+    return draws_short_for(resolution_weight(n), pack, draws)
+
+
+def draws_short_for(weight: tuple[float, float] | None, pack,
+                    draws: int | None = None) -> str | None:
+    """The refusal text when no draw count up to the MC's cap (``MAX_DRAWS``)
+    can resolve the pack's LOLE target on a network of ``weight``
+    (``resolution_weight``), else None (owner decision on #1927: refuse at the
+    start only then). The target goes on the horizon as ``_stage_mc_certify``
+    puts it. ``draws`` is the requested count; it does not decide the
+    refusal: a run below the floor at that count still runs, as the MC may
+    draw on to the cap, and the verdict then names the floor and the fewest
+    draws. No target, a zero target (no draw count resolves it; the verdict
+    says so) or a network without a positive weight or horizon is not
+    refused."""
+    from services.adequacy.mc import MAX_DRAWS
+
+    target = pack.availability.target_lole_h
+    if weight is None or target is None or not float(target) > 0:
+        return None
+    w_min, years = weight
+    target_h = float(target) * years
+    if w_min / MAX_DRAWS <= target_h:
+        return None
+    return (f"Simulation runs per check: the {float(target):g} h/yr goal "
+            "cannot be decided. A check that finds no shortfall cannot show "
+            f"it is met. Even {MAX_DRAWS} runs (the most allowed) have a "
+            f"smallest step of {w_min / MAX_DRAWS / years:.3g} h/yr. Allow "
+            "more shortfall in the goal.")
+
+
 def certification_verdict(*, lole_ci, target_h: float | None,
                           resolution_floor_h: float | None = None,
                           n_samples=None, ens_met: bool | None = None,
+                          horizon_years: float = 1.0,
                           ) -> tuple[str | None, str | None]:
     """The P11 verdict rule (spec §4 amendment, Q1; decision 2) →
     ``(verdict, note)``.
@@ -394,11 +482,17 @@ def certification_verdict(*, lole_ci, target_h: float | None,
     if target_h is None:
         return None, "no target_lole_h — LOLE reported, not certified"
     lo, hi = (float(x) for x in lole_ci)
-    if resolution_floor_h is not None and target_h < float(resolution_floor_h):
+    if below_floor(target_h, resolution_floor_h):
+        # template-e2e 21: per year, as the goal is set, with the fewest draws
+        # that resolve it.
+        years = float(horizon_years) if horizon_years else 1.0
+        need = min_draws_to_resolve(resolution_floor_h, n_samples, target_h)
         return "inconclusive", (
-            f"target {target_h:g} h over the horizon is below the MC "
-            f"resolution floor {float(resolution_floor_h):g} h at "
-            f"{n_samples} draws — more draws needed")
+            f"target {target_h / years:g} h/yr is below the MC resolution "
+            f"floor {float(resolution_floor_h) / years:g} h/yr at "
+            f"{n_samples} draw{'' if n_samples == 1 else 's'}: " + (
+                f"at least {need} draws resolve it" if need is not None
+                else "no draw count resolves a zero target"))
     if hi <= target_h:
         return "pass", None
     if lo > target_h:
@@ -516,7 +610,11 @@ def _stage_mc_certify(st: _Study) -> None:
         confident = hi <= target_h
     verdict, note = certification_verdict(
         lole_ci=(lo, hi), target_h=target_h, resolution_floor_h=floor,
-        n_samples=res.get("n_samples"), ens_met=st.ens_met)
+        n_samples=res.get("n_samples"), ens_met=st.ens_met,
+        horizon_years=horizon_years)
+    # template-e2e 21: a target under the floor is not a straddle; the
+    # verdict text and Improve state the floor and the fewest draws.
+    is_below = below_floor(target_h, floor)
     # GK A F6': pockets with units of their own (or chained) can still break
     # a pass this run cannot see; their upper bound decides.
     verdict, note, feeder_bound = cf.bounded_verdict(
@@ -553,6 +651,9 @@ def _stage_mc_certify(st: _Study) -> None:
         "seed": st.mc_seed,
         "cov_target": st.mc_cov_target,
         "resolution_floor_h": floor,
+        "below_floor": is_below,
+        "min_draws": (min_draws_to_resolve(floor, res.get("n_samples"), target_h)
+                      if is_below else None),
         "time_basis": res.get("time_basis"),
         "warning": res.get("warning") or mc_mod.MC_WARNING_V1,
         "engine": "mc_zonal" if zonal is not None else "mc",

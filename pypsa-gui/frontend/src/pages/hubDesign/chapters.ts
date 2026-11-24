@@ -54,7 +54,9 @@ export interface ChapterInputs {
                  horizonYears?: number | null
                  /** A must-stay-on bus behind one feeder holds the verdict back
                   *  (review `summary.feeder_bound`, GK A F6'). */
-                 feederBound?: boolean }
+                 feederBound?: boolean
+                 /** The goal is under the run's resolution floor (template-e2e 21). */
+                 belowFloor?: boolean }
   /** `gfm`: the campus GFM settings (null when the project has no campus or no island). */
   operation: { status: SimulationStatus | null; gfm?: GfmSettingsState | null }
 }

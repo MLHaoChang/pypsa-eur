@@ -540,3 +540,125 @@ def test_a_bound_with_missing_fields_still_reads():
 def test_a_feeder_bound_on_a_pass_adds_no_inconclusive_finding():
     out = _bound_review("pass", _BOUND)
     assert all(f["id"] != "certification_inconclusive" for f in out["findings"])
+
+
+# template-e2e 21: below the resolution floor, doubling the draws cannot
+# settle it; the finding names the floor and Improve offers the fewest draws
+# that resolve the goal.
+def _floor_cert(**over):
+    return {"verdict": "inconclusive", "target_lole_h": 3.0, "draws": 1,
+            "n_samples": 1, "horizon_years": 1.0, "lole_ci": [0.0, 0.0],
+            "resolution_floor_h": 52.1, "below_floor": True, "min_draws": 18,
+            **over}
+
+
+def test_below_the_floor_offers_the_minimum_draws_not_double():
+    out = review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert()}}), RECORD)
+    f = _by_id(out, "certification_inconclusive")
+    assert f["title"] == ("Certification inconclusive: with 1 draw the "
+                          "smallest shortfall it can show is 52.1 h/yr, more "
+                          "than the 3 h/yr goal")
+    assert "at least 18 draws" in f["recommendation"]
+    assert "straddles" not in f["title"]
+    act = f["actions"][0]
+    assert act["args"]["mc"] == {"draws": 18}
+    assert act["effect"] == "set simulation runs per check to 18 (was 1)"
+    _validate_action(act)
+
+
+def test_below_the_floor_keeps_doubling_when_that_is_more():
+    out = review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(draws=300, n_samples=300,
+                                               min_draws=320)}}), RECORD)
+    act = _by_id(out, "certification_inconclusive")["actions"][0]
+    assert act["args"]["mc"] == {"draws": 600}
+
+
+def test_below_the_floor_clamps_the_offer_at_the_draw_cap():
+    """GK A ask 2: doubling 1500 would pass the cap; the offer is exactly 2000."""
+    out = review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(draws=1500, n_samples=1500,
+                                               min_draws=1600)}}), RECORD)
+    act = _by_id(out, "certification_inconclusive")["actions"][0]
+    assert act["args"]["mc"] == {"draws": 2000}
+    assert act["effect"] == "set simulation runs per check to 2000 (was 1500)"
+
+
+@pytest.mark.parametrize("min_draws", [2001, None])
+def test_below_the_floor_beyond_the_draw_cap_offers_no_rerun(min_draws):
+    out = review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(min_draws=min_draws,
+                                               target_lole_h=0.0 if min_draws is None else 3.0)}}),
+        RECORD)
+    f = _by_id(out, "certification_inconclusive")
+    assert f["actions"] == []
+    assert "more draws do not" in f["recommendation"]
+
+
+def test_the_straddle_finding_is_unchanged_when_not_below_the_floor():
+    """GK A V4: a straddle (below_floor False or absent) keeps its words."""
+    for extra in ({}, {"below_floor": False, "min_draws": None}):
+        cert = {"verdict": "inconclusive", "target_lole_h": 3.0, "draws": 500,
+                **extra}
+        f = _by_id(review_report(_report(sections={"certification": {
+            "status": "ok", "payload": cert}}), RECORD),
+            "certification_inconclusive")
+        assert f["title"] == ("Certification inconclusive: the LOLE interval "
+                              "straddles 3 h/yr")
+        assert f["recommendation"] == (
+            "Not a failure: the sample cannot yet tell pass from fail. More MC "
+            "draws narrow the interval; a slightly tighter plan moves it clear.")
+        assert f["actions"][0]["effect"] == (
+            "re-run the MC with 1000 draws (was 500) to narrow the confidence "
+            "interval")
+
+
+def test_below_the_floor_states_the_floor_per_year_on_a_longer_horizon():
+    # 104.2 h over a 2-year horizon is 52.1 h/yr; no horizon reads as 1 year.
+    for extra, floor in (({"horizon_years": 2.0, "resolution_floor_h": 104.2}, "52.1"),
+                         ({"horizon_years": None}, "52.1")):
+        f = _by_id(review_report(_report(sections={"certification": {
+            "status": "ok", "payload": _floor_cert(**extra)}}), RECORD),
+            "certification_inconclusive")
+        assert f"can show is {floor} h/yr" in f["title"], f["title"]
+
+
+def test_below_floor_flags_only_an_inconclusive_verdict():
+    out = review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(verdict="pass")}}), RECORD)
+    assert all(f["id"] != "certification_inconclusive" for f in out["findings"])
+
+
+def test_a_boolean_min_draws_is_not_a_draw_count():
+    f = _by_id(review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(min_draws=True)}}), RECORD),
+        "certification_inconclusive")
+    assert f["actions"] == []
+
+
+def test_below_the_floor_reads_the_draws_it_ran():
+    # The title counts the samples the MC drew; the action's "was" the draws asked.
+    def finding(**over):
+        return _by_id(review_report(_report(sections={"certification": {
+            "status": "ok", "payload": _floor_cert(**over)}}), RECORD),
+            "certification_inconclusive")
+    assert "with 3 draws the" in finding(n_samples=3)["title"]
+    assert "with 1 draw the" in finding(n_samples=None)["title"]
+    f = finding(draws=None, n_samples=500, min_draws=1200)
+    assert f["actions"][0]["effect"] == "set simulation runs per check to 1200 (was 500)"
+    assert "with 500 draws" in f["title"]
+
+
+def test_below_the_floor_at_the_draw_cap_still_offers_it():
+    act = _by_id(review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(min_draws=2000)}}), RECORD),
+        "certification_inconclusive")["actions"][0]
+    assert act["args"]["mc"] == {"draws": 2000}
+
+
+def test_below_the_floor_without_a_floor_value_does_not_raise():
+    f = _by_id(review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(resolution_floor_h=None)}}), RECORD),
+        "certification_inconclusive")
+    assert f["title"].startswith("Certification inconclusive: with 1 draw")

@@ -416,6 +416,9 @@ def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
             _arch.import_energy_patch(n, pack)
         except _arch.ArchetypePackError as exc:
             raise HTTPException(422, str(exc)) from exc
+        # template-e2e 21: the MC's weights, for the runs check below.
+        from services.adequacy.eh_study import draws_short_for, resolution_weight
+        weight = resolution_weight(n)
     finally:
         lock.release()
     dsr_buses = None
@@ -437,6 +440,15 @@ def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
         raise HTTPException(
             422, f"mc.draws must be at most {_mc.MAX_DRAWS} (the MC draw cap); "
             f"got {mc_opts.draws}")
+    # template-e2e 21: a goal no draw count up to the cap resolves refuses here,
+    # before the run; readiness files it on the runs field and blocks Run.
+    if stages is None or "mc_certify" in stages:
+        short = draws_short_for(weight, pack, mc_opts.draws)
+        if short is not None:
+            from services.adequacy.campaign import unsupported_scope
+            refusal = unsupported_scope(short)
+            refusal.detail["field"] = "mc_draws"
+            raise refusal
     mc_kwargs = {k: v for k, v in (("mc_draws", mc_opts.draws),
                                    ("mc_seed", mc_opts.seed),
                                    ("mc_cov_target", mc_opts.cov_target))

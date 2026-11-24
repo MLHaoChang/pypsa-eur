@@ -3,10 +3,11 @@
 // `review_report` from the report — and the report's own `mc_lole_h`; nothing
 // is re-computed here, only rounded for reading.
 import type { EhReferenceDesignReport, EhReview } from '../../api/simulation'
-import { certificationHeadline, fmeaTopRows } from '../results/EhReferenceDesignPanel'
+import { certificationHeadline, certificationPayload, fmeaTopRows } from '../results/EhReferenceDesignPanel'
 import { displayName } from '../../utils/displayName'
 import { verdictWord } from './verdictWords'
 import { sectionMeta } from '../../layout/flowSections'
+import { MAX_GOAL_DRAWS } from '../../hooks/useReliabilityGoal'
 
 type OkReview = Extract<EhReview, { status: 'ok' }>
 
@@ -45,6 +46,31 @@ function topRisk(report: EhReferenceDesignReport | null): string {
   return row ? riskName(String(row.name || row.mode_id)) : "the plan's energy limit"
 }
 
+/** Three significant digits, as the study start's refusal words the step. */
+const g3 = (v: number): string => String(Number(v.toPrecision(3)))
+
+const runs = (k: number): string => `${k} simulation run${k === 1 ? '' : 's'}`
+
+/** The below-floor sentence (template-e2e 21), or null when the report does
+ *  not say the goal is under the resolution floor. */
+function belowFloor(report: EhReferenceDesignReport | null, target: number): string | null {
+  const p = report ? certificationPayload(report) : null
+  if (p?.below_floor !== true) return null
+  const floor = num(p.resolution_floor_h)
+  const n = num(p.n_samples)
+  const years = num(p.horizon_years) ?? 1
+  if (floor == null || n == null || !(years > 0)) return null
+  const goal = sectionMeta('scenarios')
+  const where = `section ${goal.number}, ${goal.label}`
+  const seen = `with ${runs(n)}, the smallest shortfall it can show is ${g3(floor / years)} h/yr`
+  const need = num(p.min_draws)
+  if (need != null && need > MAX_GOAL_DRAWS)
+    return `${verdictWord('inconclusive')}: ${seen}, more than your ${g(target)} h/yr goal, and even ${MAX_GOAL_DRAWS} runs (the most allowed) could not decide it. Allow more shortfall (${where}) to decide it.`
+  return need != null
+    ? `${verdictWord('inconclusive')}: ${seen}, more than your ${g(target)} h/yr goal. Set at least ${need} runs per check (${where}) to decide it.`
+    : `${verdictWord('inconclusive')}: ${seen}, and a ${g(target)} h/yr goal allows none. Allow some shortfall (${where}) to decide it.`
+}
+
 export function headline(review: OkReview, report: EhReferenceDesignReport | null): string {
   const s = review.summary ?? {}
   const verdict = typeof s.verdict === 'string' ? s.verdict : null
@@ -75,6 +101,10 @@ export function headline(review: OkReview, report: EhReferenceDesignReport | nul
     }
     return `${verdictWord('inconclusive')}: ${names(fb.chained ?? [])} reaches a must-stay-on bus only through a bus with no supply of its own, which this check cannot bound: a feeder straight from a supplied bus would settle it.`
   }
+  // template-e2e 21: a goal under the smallest shortfall the run can show is
+  // not a straddle; more runs settle it only up to the stated count.
+  const floorLine = verdict === 'inconclusive' && target != null ? belowFloor(report, target) : null
+  if (floorLine) return floorLine
   if (verdict === 'inconclusive' && target != null) {
     const ci = interval(review, report)
     if (ci) {

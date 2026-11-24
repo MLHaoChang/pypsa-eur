@@ -734,6 +734,15 @@ def deterministic_output(deterministic, H: int) -> np.ndarray:  # noqa: N803
     return out
 
 
+def fleet_weights(n):
+    """The per-snapshot weights the MC samples with (``MCInputs.weights``):
+    the generators' weighting over every snapshot. One call, so the study
+    start's resolution check (template-e2e 21) reads what the MC reads."""
+    from services import period_utils as _period_utils
+
+    return _period_utils.snapshot_weights(n, "generators", sns=n.snapshots)
+
+
 def fleet_and_residual(n, *, keep_zero_capacity: bool = False, cfg=None,
                        demand_scaled_in_place: bool = False,
                        ) -> tuple[list[CoptUnit], pd.Series, pd.Series]:
@@ -758,14 +767,13 @@ def fleet_and_residual(n, *, keep_zero_capacity: bool = False, cfg=None,
     transforms are already in place. ``cfg=None`` reads the raw frame, which
     is the LP's basis whenever no scaler is configured.
     """
-    from services import period_utils as _period_utils
     from services.adequacy.metrics import electrical_columns
 
     gens = n.generators
     buses = n.buses
     loads = n.loads
     snapshots = n.snapshots
-    w = _period_utils.snapshot_weights(n, "generators", sns=snapshots)
+    w = fleet_weights(n)
 
     elec_buses = set(electrical_columns(n, list(buses.index)))
 

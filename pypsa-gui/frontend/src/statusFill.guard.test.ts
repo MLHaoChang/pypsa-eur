@@ -19,7 +19,7 @@ const NO_TEXT = new Set([
   'components/runStatus/RunsIndicator.tsx:"w-1.5 h-1.5 rounded-full bg-warn"', // Runs indicator dot, aria-hidden; the count is the text
   "components/PageKit.tsx:on ? 'bg-success' : 'bg-border-2'}`", // toggle track; its knob is a white disc, not text
   // the reliability bar's fill; its words ("Within goal", the title) sit outside it, in theme text
-  "pages/hubDesign/cards/ResultsHeadline.tsx:target == null ? 'bg-accent' : pass ? 'bg-success' : 'bg-danger'}`",
+  "pages/hubDesign/cards/ResultsHeadline.tsx:target == null ? 'bg-accent' : pass && belowFloor ? 'bg-muted' : pass ? 'bg-success' : 'bg-danger'}`",
 ])
 
 function sources(dir: string): string[] {

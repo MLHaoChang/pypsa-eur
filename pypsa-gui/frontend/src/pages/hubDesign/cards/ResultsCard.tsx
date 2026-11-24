@@ -7,7 +7,7 @@ import { FileText } from 'lucide-react'
 import Kpi from '../../../components/Kpi'
 import ResultState from '../../../components/ResultState'
 import { useUIStore } from '../../../store/uiStore'
-import { fmeaTopRows, LEVERS_SECTION, notEstablishedNotes } from '../../results/EhReferenceDesignPanel'
+import { certificationPayload, fmeaTopRows, LEVERS_SECTION, notEstablishedNotes } from '../../results/EhReferenceDesignPanel'
 import { zeroReasonText } from '../../results/fmea'
 import { fmtCurrency } from '../../results/shared'
 import { studyHasResults } from '../flow'
@@ -129,6 +129,7 @@ export function ResultsCard() {
     stale,
     verdict: verdict === 'pass' || verdict === 'fail' || verdict === 'inconclusive' ? verdict : null,
     feederBound: summary.feeder_bound != null,
+    belowFloor: (report ? certificationPayload(report) : null)?.below_floor === true,
   } as const
 
   if (!studyHasResults(study)) {

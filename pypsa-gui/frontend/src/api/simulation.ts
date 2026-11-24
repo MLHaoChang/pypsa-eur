@@ -914,6 +914,9 @@ export interface EhCertificationPayload {
   draws_requested?: number | null
   converged?: boolean | null
   resolution_floor_h?: number | null
+  /** template-e2e 21: the target is under the floor; `min_draws` resolve it (null for a zero target). */
+  below_floor?: boolean | null
+  min_draws?: number | null
   time_basis?: string | null
   ens_met?: boolean | null
   verdict?: EhCertificationVerdict

@@ -69,6 +69,25 @@ describe('certificationHeadline.next', () => {
     expect(next).not.toMatch(/raise the MC draws/)
   })
 
+  // template-e2e 21: a goal under the resolution floor names the draws, not
+  // a tighter plan (Guided's verdict says the same).
+  it('inconclusive below the floor → the minimum draws', () => {
+    expect(certificationHeadline(report({ verdict: 'inconclusive', target_lole_h: 3,
+      below_floor: true, min_draws: 18 }))!.next).toBe(
+      'Next: raise the simulation runs per check to at least 18. With fewer, the smallest shortfall it can show is above your goal, so a tighter plan cannot settle it.')
+    expect(certificationHeadline(report({ verdict: 'inconclusive', target_lole_h: 0,
+      below_floor: true, min_draws: null }))!.next).toBe(
+      'Next: allow some shortfall in the reliability goal. No number of simulation runs can show that a 0 h/yr goal is met.')
+    expect(certificationHeadline(report({ verdict: 'inconclusive', target_lole_h: 3,
+      below_floor: false }))!.next).toBe(INCONCLUSIVE_NEXT)
+    // GK A ask 1: past the 2000-run cap no run count is named.
+    expect(certificationHeadline(report({ verdict: 'inconclusive', target_lole_h: 0.01,
+      below_floor: true, min_draws: 2001 }))!.next).toBe(
+      'Next: allow more shortfall in the reliability goal. Even 2000 simulation runs (the most allowed) could not show that this goal is met.')
+    expect(certificationHeadline(report({ verdict: 'inconclusive', target_lole_h: 0.01,
+      below_floor: true, min_draws: 2000 }))!.next).toMatch(/at least 2000\./)
+  })
+
   it('no target (verdict null) → set a target', () => {
     expect(certificationHeadline(report({ verdict: null, target_lole_h: null }))!.next)
       .toBe(NO_TARGET_NEXT)
