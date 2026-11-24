@@ -89,6 +89,23 @@ def _compute_emissions_summary(n, periods, is_multi, has_solve) -> EmissionsComp
 
         carrier = str(gens.at[g, "carrier"]).lower() if "carrier" in gens.columns else ""
         intensity = co2_map.get(carrier, 0.0)
+        # A per-period generator intensity (t/MWh el, e.g. the grid's, in
+        # `generators_t.eh_co2_t_per_mwh`) replaces the carrier's single figure.
+        gen_t = n.generators_t.get("eh_co2_t_per_mwh")
+        if gen_t is not None and g in gen_t.columns:
+            t_int = gen_t[g].reindex(sns).fillna(0.0).astype(float)
+            by_t = weighted * t_int
+            co2_total_kt = float(by_t.sum()) / 1000.0
+            co2_pp_kt = {p: v / 1000.0 for p, v in _per_period_groupby(by_t, sns, is_multi).items()}
+            if co2_total_kt < 1e-9:
+                continue
+            total_bucket["total"] += co2_total_kt
+            b = by_carrier_kt.setdefault(carrier, {"total": 0.0, "by_period": {}})
+            b["total"] += co2_total_kt
+            for p, v in co2_pp_kt.items():
+                total_bucket["by_period"][p] = total_bucket["by_period"].get(p, 0.0) + v
+                b["by_period"][p] = b["by_period"].get(p, 0.0) + v
+            continue
         if intensity <= 0:
             continue
         eff = float(gens.at[g, "efficiency"]) if "efficiency" in gens.columns else 1.0
