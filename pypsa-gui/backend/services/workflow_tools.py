@@ -430,14 +430,20 @@ def _plain_frame_json(frame, iso=False):
     return frame.to_json(date_format="iso") if iso else frame.to_json()
 
 
-def _exact_frame_json(frame, *, indexes=None):
+# Issue 225: the index texts one fingerprint walk has encoded, by their bytes (see `_exact_frame_json`). Set by
+# `_input_digests` for its walk only and reset after it, so no text crosses walks. A ContextVar, not a parameter:
+# `_exact_frame_json(frame)` stays the one-argument seam the parity tests swap for master's encoder.
+_INDEX_TEXTS: ContextVar[dict | None] = ContextVar("exact_index_texts", default=None)
+
+
+def _exact_frame_json(frame):
     """Encode typed input values without pandas' JSON float rounding.
 
     The text is exactly `json.dumps` of the per-value `scalar` encoding below
     (sort_keys, default separators). Issue 225: a column or index of a plain
     numpy dtype is written straight to that text (no per-value lists, no float
     maths), and everything else falls back to `scalar`, column by column.
-    `indexes` (a dict one walk keeps across its frames, never longer) reuses an index's text
+    Inside a fingerprint walk (`_INDEX_TEXTS`) it reuses an index's text
     for the next frame whose index has the same bytes: a network's series
     each carry their own copy of the snapshots."""
     from datetime import date, datetime
@@ -511,6 +517,7 @@ def _exact_frame_json(frame, *, indexes=None):
         return None
 
     def index_items(index):
+        indexes = _INDEX_TEXTS.get()
         key = signature(index) if indexes is not None else None
         if key is None:
             return items(index)
@@ -637,7 +644,17 @@ def _network_input_fingerprint(ctx, *, exact=False):
 def _input_digests(ctx, forms):
     """`{exact: digest}` for each form in `forms` (False: plain, True: exact), from one private copy and one
     pass over it: the copy, the topology and every read outside the frames are shared, and each form's parts
-    are the text and order its own hash has always had."""
+    are the text and order its own hash has always had. The walk's index texts (`_INDEX_TEXTS`) live for it
+    alone."""
+    token = _INDEX_TEXTS.set({})
+    try:
+        return _walk_digests(ctx, forms)
+    finally:
+        _INDEX_TEXTS.reset(token)
+
+
+def _walk_digests(ctx, forms):
+    """`_input_digests`' walk."""
     # PyPSA assigns a slack control while solving. Canonicalise controls on a
     # private copy, retaining user PV/slack choices, rather than mistaking the
     # deterministic PQ→Slack assignment for a parameter edit.
@@ -655,12 +672,11 @@ def _input_digests(ctx, forms):
         for form in parts.values():
             form.append(text)
 
-    indexes = {}  # the exact form's encoded indexes, by their bytes (see `_exact_frame_json`)
 
     def frame(value, iso=False):
         """A frame as each form writes it: `_plain_frame_json` or `_exact_frame_json`."""
         for exact, form in parts.items():
-            form.append(_exact_frame_json(value, indexes=indexes) if exact else _plain_frame_json(value, iso))
+            form.append(_exact_frame_json(value) if exact else _plain_frame_json(value, iso))
 
     if True in parts:
         parts[True].extend(['exact-network-input/1', _exact_frame_json(n.snapshots.to_series().to_frame()),

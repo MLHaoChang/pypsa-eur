@@ -1,7 +1,7 @@
 """Issue 225: both input fingerprints from one walk of the network, byte-identical to the two walks.
 
 `workflow_tools.one_input_walk()` serves the second form from the first read's walk; `_plain_frame_json`
-writes a frame with no columns from an empty copy; `_exact_frame_json(indexes=)` reuses an index's text for an
+writes a frame with no columns from an empty copy; `_exact_frame_json` reuses, within one walk (`_INDEX_TEXTS`), an index's text for an
 index of the same bytes. Each is compared with `==` against the text or digest master writes (the bit-identity
 rule): the templates, a full-year network, and frames of inexact floats, NaN, ±inf, -0.0, mixed dtypes and
 object columns. Every pinned literal was computed on master 5e8cbcdc, never by this branch."""
@@ -121,6 +121,15 @@ def frames():
     return out
 
 
+def _memo_json(frame, indexes):
+    """`_exact_frame_json` as inside a walk whose index texts are `indexes`."""
+    token = W._INDEX_TEXTS.set(indexes)
+    try:
+        return W._exact_frame_json(frame)
+    finally:
+        W._INDEX_TEXTS.reset(token)
+
+
 def test_the_exact_text_is_masters():
     text = "\n".join(W._exact_frame_json(f) for f in frames())
     assert hashlib.sha256(text.encode()).hexdigest() == MASTER_EXACT_TEXT
@@ -132,9 +141,9 @@ def test_a_reused_index_text_is_the_text_of_that_index():
     indexes = {}
     for _ in range(2):
         for f, text in zip(frames(), alone):
-            assert W._exact_frame_json(f, indexes=indexes) == text
+            assert _memo_json(f, indexes) == text
         for f, text in zip(reversed(frames()), reversed(alone)):
-            assert W._exact_frame_json(f, indexes=indexes) == text
+            assert _memo_json(f, indexes) == text
 
 
 @pytest.mark.parametrize("pair", list(lookalikes()))
@@ -142,9 +151,7 @@ def test_indexes_that_differ_share_no_text(pair):
     a, b = lookalikes()[pair]
     indexes = {}
     texts = [
-        W._exact_frame_json(
-            pd.DataFrame({"v": np.arange(len(i))}, index=i), indexes=indexes
-        )
+        _memo_json(pd.DataFrame({"v": np.arange(len(i))}, index=i), indexes)
         for i in (a, b)
     ]
     assert len(indexes) == 2
@@ -419,9 +426,7 @@ def test_an_index_of_objects_is_never_reused():
         pd.MultiIndex.from_arrays([STAMPS[:2].tz_localize("UTC"), [1, 2]]),
     ]
     indexes = {}
-    texts = [
-        W._exact_frame_json(pd.DataFrame(index=i), indexes=indexes) for i in objects
-    ]
+    texts = [_memo_json(pd.DataFrame(index=i), indexes) for i in objects]
     assert indexes == {}
     assert texts == [W._exact_frame_json(pd.DataFrame(index=i)) for i in objects]
     assert texts[3] != texts[4]
@@ -453,6 +458,23 @@ def test_the_walk_leaves_the_network_as_it_was(tmp_path):
         for k, f in dynamic.items():
             pd.testing.assert_frame_equal(c.dynamic[k], f)
             assert c.dynamic[k].index.names == f.index.names
+
+
+def test_the_index_texts_live_for_one_walk_only(tmp_path, monkeypatch):
+    """Each walk starts with no index text and leaves none behind (U3)."""
+    seen = []
+    real = W._walk_digests
+
+    def walk(ctx, forms):
+        seen.append(dict(W._INDEX_TEXTS.get()))
+        return real(ctx, forms)
+
+    monkeypatch.setattr(W, "_walk_digests", walk)
+    ctx = edge_network(tmp_path)
+    for _ in range(2):
+        W._network_input_fingerprint(ctx, exact=True)
+        assert W._INDEX_TEXTS.get() is None
+    assert seen == [{}, {}]
 
 
 def test_identity_reads_both_forms_from_one_walk(tmp_path, walks):
