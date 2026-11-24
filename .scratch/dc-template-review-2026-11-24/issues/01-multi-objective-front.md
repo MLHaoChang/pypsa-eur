@@ -3,7 +3,7 @@
 
 # 01 A real front of reliability vs capex vs opex vs CO2 for the data-centre templates
 
-Status: needs-triage
+Status: in progress
 Blocked by: none (02 adds the CO2 axis cap)
 Source: DC template review 2026-11-24 (`../README.md`). Stage 3.
 Severity: blocker (the owner's core ask)
