@@ -378,3 +378,9 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - Re-recording a byte-identity digest or golden after a master merge is not a clean merge. The PR names the upstream change behind each re-recorded digest, and the GK re-reviews it (GK A2 (7), #1922/#1916).
 - A read that hands out a revision with content hashes the same bytes it parses, never a second read of the file (GK B3 (6), #1913).
 - Every read-modify-write writer of a locked file (for example a preset select) does its read inside the same lock, not only its write (GK B3 (6), #1913).
+
+## Standing rulings (GK A2 (7), recorded 2026-11-24)
+
+- A screen or pack that skips rows it cannot judge uses one shared predicate in the card and the pack (`subsync_judged`). A row worse than the meta verdict reads unknown (GK A2 (7), #1930 H1/H2/J1).
+- An output tree that a run replaces is staged in a unique directory per call, then swapped in by rename-aside, rename-in and deleting the aside copy. A run never clears a shared stage at entry (GK A2 (7), #1941 K1–K3).
+- Exported pack text (TSO-facing) cites the engineering basis, never an internal GK or ruling reference (GK A2 (7), #1916 → #1931).
