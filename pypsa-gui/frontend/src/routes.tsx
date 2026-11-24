@@ -6,6 +6,7 @@ import AdminLayout from './pages/admin/AdminLayout'
 import LoginPage from './pages/auth/LoginPage'
 import ResetPasswordPage from './pages/auth/ResetPasswordPage'
 import SetPasswordPage from './pages/auth/SetPasswordPage'
+import AccountPage from './pages/AccountPage'
 import ProjectsHomePage from './pages/ProjectsHomePage'
 
 /**
@@ -22,6 +23,7 @@ export default function AppRoutes() {
       <Route element={<RequireAuth />}>
         <Route element={<Navigate replace to="/projects" />} path="/" />
         <Route element={<ProjectsHomePage />} path="/projects" />
+        <Route element={<AccountPage />} path="/account" />
         <Route element={<App />} path="/app" />
         <Route
           element={(

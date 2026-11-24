@@ -57,7 +57,8 @@ import uuid
 from types import SimpleNamespace
 from typing import Literal
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session as DBSession
 from starlette.concurrency import run_in_threadpool
@@ -430,6 +431,25 @@ async def compare_dc_architecture(
     except dc_architecture.DcArchitectureError as exc:
         raise HTTPException(status_code=422, detail={
             "error_kind": exc.kind, "message": str(exc), "field": exc.field}) from exc
+
+
+# ── the PSS/E hand-off bundles of the latest run (grid-compliance 23) ───────
+
+@router.get("/{name}/psse")
+def list_psse_bundles(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """The latest campus run's PSS/E bundles, and whether the run is stale."""
+    return ce.psse_bundles(_row(proj, db))
+
+
+@router.get("/{name}/psse/{bundle}/download")
+def download_psse_bundle(bundle: str, proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """One bundle as a zip. The name must be in the listing, so no path
+    assembled from client input is opened; a bundle of a stale run is served
+    with ``X-Run-Stale: true``."""
+    data, stale = ce.psse_bundle_zip(_row(proj, db), bundle)
+    return Response(data, media_type="application/zip",
+                    headers={"Content-Disposition": content_disposition(f"{bundle}.zip"),
+                             "X-Run-Stale": "true" if stale else "false"})
 
 
 # ── the island sidecar and study (campus island plan, I9a) ──────────────────
