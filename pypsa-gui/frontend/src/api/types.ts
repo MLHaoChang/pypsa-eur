@@ -947,20 +947,23 @@ export interface EmissionsComparison {
 }
 
 export interface CarrierEconomics {
-  revenue_meur: CarrierPeriodValue
+  // null (never 0) when priced at bus prices that are not prices: an integer
+  // (MIP) solve, flagged by EconomicsComparison.unavailable_reason.
+  revenue_meur: CarrierPeriodValue | null
   // Headline TOTAL OPEX — sum of the four split fields below. The split
   // lets the Compare View show users WHAT they paid for per carrier
   // (gas: mostly gen cost; battery: gen + charge cost; solar: curtailment
   // cost; etc.). Storage_charge_cost can be NEGATIVE when bus prices go
   // negative during charging hours (solar curtailment).
-  opex_meur: CarrierPeriodValue
+  // null on a MIP when it holds a storage charge cost (e.g. battery).
+  opex_meur: CarrierPeriodValue | null
   gen_cost_meur?: CarrierPeriodValue
-  storage_charge_cost_meur?: CarrierPeriodValue
+  storage_charge_cost_meur?: CarrierPeriodValue | null
   curtailment_cost_meur?: CarrierPeriodValue
   lost_load_cost_meur?: CarrierPeriodValue
   capex_meur: CarrierPeriodValue
   dispatch_gwh: CarrierPeriodValue
-  lcoe_eur_per_mwh: CarrierPeriodValue
+  lcoe_eur_per_mwh: CarrierPeriodValue | null
   // Grid-to-process shortfall at its lost-production value: lost revenue, not
   // part of opex_meur. null when the carrier has none, or (flagged
   // lost_production_value_missing) when it has no value (ADR-0001).
@@ -987,6 +990,9 @@ export interface EconomicsComparison {
   // See CapacityComparison.available — same ADR-0001 contract.
   available: boolean
   by_carrier: Record<string, CarrierEconomics>
+  // "mip_duals_not_marginal" on an integer solve: the price-based figures
+  // above are null and per_asset_lcoh is empty. Absent on an LP.
+  unavailable_reason?: string
   // Per-Link LCOH rows (electrolysers, heat pumps, P2X, ...). Empty when
   // no extendable Link in either project has non-trivial dispatch.
   per_asset_lcoh?: AssetLCOHEntry[]
