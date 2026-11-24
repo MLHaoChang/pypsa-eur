@@ -417,9 +417,15 @@ def test_an_idle_task_in_another_project_lets_another_plan_start(
     monkeypatch.setattr(tasks, "_authority", lambda: away)
     if detach:
         assert tasks.begin_step(chat, "project_readiness", {}) is None
-        assert chat.task_id is None and getattr(chat, "detached_task_id", None) == first["task_id"]
+        assert (
+            chat.task_id is None
+            and getattr(chat, "detached_task_id", None) == first["task_id"]
+        )
     second = chat_tools.start_task(title="Other", request_id="second", steps=WAIT)
-    assert chat.task_id == second["task_id"] and getattr(chat, "detached_task_id", None) is None
+    assert (
+        chat.task_id == second["task_id"]
+        and getattr(chat, "detached_task_id", None) is None
+    )
     assert _stored("second").exists()
 
 
@@ -453,7 +459,9 @@ def test_a_task_unreadable_in_its_own_project_still_blocks_a_start(
         home.write_text("{not json")
     else:
         stored = json.loads(home.read_text())
-        stored["owner_id" if damage == "other_owner" else "project_id"] = str(uuid.uuid4())
+        stored["owner_id" if damage == "other_owner" else "project_id"] = str(
+            uuid.uuid4()
+        )
         stored["status"] = "ready"
         home.write_text(json.dumps(stored))
     _, _, owner = tasks._authority()
@@ -467,9 +475,7 @@ def test_a_task_unreadable_in_its_own_project_still_blocks_a_start(
     assert chat.task_id == first["task_id"]
 
 
-def test_a_read_refusal_other_than_not_found_is_not_read_in_the_home(
-    chat, monkeypatch
-):
+def test_a_read_refusal_other_than_not_found_is_not_read_in_the_home(chat, monkeypatch):
     """Only a task missing from this project is read in its own one; any
     other refusal of `_read` fails closed even when the home copy is idle."""
     first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
@@ -489,9 +495,7 @@ def test_a_read_refusal_other_than_not_found_is_not_read_in_the_home(
 
 
 @pytest.mark.parametrize("failure", ["database", "not_an_object"])
-def test_a_home_read_failure_still_blocks_a_start(
-    chat, monkeypatch, tmp_path, failure
-):
+def test_a_home_read_failure_still_blocks_a_start(chat, monkeypatch, tmp_path, failure):
     """A database error while placing the task, or a checkpoint that is not
     an object, fails closed as `unreadable`, not as a 500."""
     from services import project_registry
