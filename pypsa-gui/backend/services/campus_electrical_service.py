@@ -2459,6 +2459,13 @@ def _bundle_files(bundle: Path, root: Path) -> list:
     return out
 
 
+def _psse_bundle_dirs(root: Path) -> list:
+    """The bundle folders under ``root``: real directories only, never a symlink."""
+    if not root.is_dir() or root.is_symlink():
+        return []
+    return sorted(p for p in root.iterdir() if p.is_dir() and not p.is_symlink())
+
+
 def psse_bundles(project) -> dict:
     """``{status, stale, run_at, bundles}``: the latest campus run's PSS/E
     bundles (name, period, hour, files with sizes), whether the run is older
@@ -2473,27 +2480,28 @@ def psse_bundles(project) -> dict:
     status = json.loads(status_file.read_text()) if status_file.is_file() else {}
     root = run_dir / cs.PSSE_DIR
     bundles = []
-    if root.is_dir() and not root.is_symlink():
-        for b in sorted(p for p in root.iterdir() if p.is_dir() and not p.is_symlink()):
-            files = _bundle_files(b, root)
-            m = re.search(r"p(\d+)_h(\d+)$", b.name)
-            bundles.append({"name": b.name, "period": int(m[1]) if m else None, "hour": int(m[2]) if m else None,
-                            "files": [{"name": n, "size": f.stat().st_size} for f, n in files],
-                            "size": sum(f.stat().st_size for f, _ in files)})
+    for b in _psse_bundle_dirs(root):
+        files = _bundle_files(b, root)
+        m = re.search(r"p(\d+)_h(\d+)$", b.name)
+        bundles.append({"name": b.name, "period": int(m[1]) if m else None, "hour": int(m[2]) if m else None,
+                        "files": [{"name": n, "size": f.stat().st_size} for f, n in files],
+                        "size": sum(f.stat().st_size for f, _ in files)})
     run_at = datetime.fromtimestamp(manifest.stat().st_mtime, tz=timezone.utc).isoformat()
     return {"has_run": True, "stale": _stale(project, d), "run_at": run_at, "bundles": bundles,
             "skipped": status.get("skipped"), "error": status.get("error")}
 
 
 def psse_bundle_zip(project, name: str) -> tuple:
-    """``(zip bytes, stale)`` of one bundle of the latest run. ``name`` must be
-    in the listing: a path, ``..`` or a symlink out of ``psse/`` is 404."""
+    """``(zip bytes, stale)`` of one bundle of the latest run. The folder is
+    picked from the listing of ``psse/`` by its name, never built from ``name``:
+    a path, ``..`` or a symlink out of ``psse/`` matches nothing and is 404."""
     listing = psse_bundles(project)
-    if name not in {b["name"] for b in listing["bundles"]}:
-        raise HTTPException(status_code=404, detail=f"no PSS/E bundle {name} in the latest campus run")
     root = _psse_root(project)
+    bundle = next((b for b in _psse_bundle_dirs(root) if b.name == name), None)
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="no such PSS/E bundle in the latest campus run")
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f, rel in _bundle_files(root / name, root):
-            zf.write(f, arcname=f"{name}/{rel}")
+        for f, rel in _bundle_files(bundle, root):
+            zf.write(f, arcname=f"{bundle.name}/{rel}")
     return buf.getvalue(), listing["stale"]
