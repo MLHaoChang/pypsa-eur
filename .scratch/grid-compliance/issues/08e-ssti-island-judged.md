@@ -16,8 +16,7 @@ Likely files: `pypsa-gui/backend/services/adequacy/grid_readiness.py`, `pypsa-gu
 
 ## Why
 
-GC-08b screens an islanding campus (tie normally open, or island requirements declared) with the grid
-out, but keeps the island rows out of every GC-08 reader (GK A2 U4): their role is
+GC-08b screens an open-tie campus (`tie_normally_open`) with the grid out, but keeps the island rows out of every GC-08 reader (GK A2 U4): their role is
 `ssti_uif.ROLE_ISLAND`, their verdict is `UifStudy.island_verdict` / `island_worst_uif`, and the run's meta
 carries only the grid cases' verdict and worst. So the scorecard still reads unknown on an open tie
 (`grid_readiness.SSTI_ISLAND`), says "grid-connected state only" on every judged row (`SSTI_GRID_ONLY`), and
@@ -25,6 +24,8 @@ the pack prints the island rows "not judged".
 
 ## What to build
 
+0. `ssti_uif.islands` also selects a closed-tie campus that declares island requirements
+   (`campus.island["requirements"]`), per GK A2's GC-08b ruling (Q1 = B there, widening here).
 1. The SSTI screens' meta records the island verdict and worst UIF (`campus_study.ssti_screens_campus`,
    `campus_electrical_service`).
 2. The scorecard's UIF row judges the island rows on a campus that islands: the open-tie override

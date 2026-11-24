@@ -28,13 +28,15 @@ pandapower) with the machines alone energised, in its max and min cases (a
 converter's current-source infeed would raise SC_tot and understate UIF); the verdict is the worst over buses,
 cases and machines, since a weak grid raises a machine's share.
 
-**Island (GC-08b).** A campus that operates islanded (its PCC tie normally open,
-``tie_normally_open``, or island requirements declared) is also screened with the
-grid out, in the cases ``ISLAND_CASES``: SC_i and SC_tot then come from the
+**Island (GC-08b).** A campus whose PCC tie is normally open
+(``tie_normally_open``) is also screened with the grid out (a closed-tie campus
+that declares island requirements waits for GC-08e), in the cases ``ISLAND_CASES``: SC_i and SC_tot then come from the
 machines alone, so a lone genset has SC_i = 0 and UIF = S_plant / S_i. Counting
 the grid's infeed there would understate the islanded UIF many times over. The
 island rows carry their own case label, IEC 60909's c for that case and the role
-``ROLE_ISLAND``; the PCC information row is left out (no grid dominates it). A
+``ROLE_ISLAND``. The PCC information row is left out of the island cases: with no
+grid there is no infeed to dominate it, and the PCC is screened, if at all, as a
+converter bus. A
 bus no machine feeds islanded (SC_tot 0) reads "not evaluated", never clear.
 ``UifStudy.island_verdict`` is the worst over the island rows (any "not
 evaluated" row keeps it from clearing); ``verdict`` and ``worst_uif`` stay the
@@ -251,12 +253,10 @@ def _s_mva(levels: pd.DataFrame, bus: str, case: str) -> float:
 
 def islands(campus) -> bool:
     """
-    Whether the campus operates islanded: its PCC tie is normally open, or it declares island
-    requirements.
+    Whether the campus is screened islanded: its PCC tie is normally open. Declared island requirements on
+    a closed tie do not count yet (GK A2 ruling; GC-08e widens it).
     """
-    return (
-        bool(campus.tie_normally_open) or campus.island.get("requirements") is not None
-    )
+    return bool(campus.tie_normally_open)
 
 
 def campus_uif(
@@ -266,6 +266,10 @@ def campus_uif(
     The UIF screen of a built campus (module docstring). ``fault_levels(campus, installed, island=False)``
     defaults to ``campus_sc.campus_fault_levels``; it is called with ``island=True`` only for a campus that
     ``islands``.
+
+    Known edge (GC-08f): with the grid out, two gensets of unequal x''d on one bus get a combined Ik'' about
+    2-4 % above the sum of each alone from ``campus_fault_levels``, so SC_tot and the UIF are overstated
+    (the safe side); with equal x''d they add exactly.
     """
     from gridspine.static.harmonic_scan import grid_c
 

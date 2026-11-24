@@ -82,4 +82,11 @@ Every judged UIF row says "grid-connected state only" (R4d).
 >
 > U6. Body and docs. File 08e: the scorecard SSTI_ISLAND override reads the island rows, and the pack judges them. Add a release note that names the new island cases and that grid results are unchanged. Confidentiality (GC-TEXT-1) applies to fixtures and names.
 
+**GK A2 ruling on the builder's addendum (2026-11-24, after the GO):** Q1 = B (tie_normally_open only)
+accepted, widening to declared island requirements moves to 08e; U3 changes to match (an open tie gets
+the island case; a closed tie, with or without island requirements, gets no island calls and today's
+rows). U4 still applies to open-tie campuses. Leaving out the PCC information row on island cases is
+accepted (said in the docstring). 08f accepted as a diagnosis issue; `campus_uif`'s docstring states the
+unequal-x''d edge as known, with today's behaviour; the equal-x''d two-genset test stays the exact oracle.
+
 **Built (builder).** Island rows carry the role `island converter bus (not judged)` and the cases `island max` / `island min`; `UifStudy.island_verdict` / `island_worst_uif` hold their verdict, while `verdict` / `worst_uif` (the meta the readers use) stay the grid cases'. Item 3 is GC-08e. The pandapower two-genset anomaly found here is GC-08f.

@@ -502,8 +502,9 @@ def test_converter_only_campus_with_island_data_is_not_evaluated():
 
 def test_island_case_selection_both_ways():
     """
-    A closed tie without island data: no island call and the GC-08 rows. An open tie, or a closed tie
-    with island requirements: the grid-out calls, one with every machine (a lone machine's SC_i is 0).
+    A closed tie, with or without island requirements: no island call and the GC-08 rows (GK A2: the
+    declared-requirements case waits for GC-08e). An open tie: the grid-out call with every machine (a lone
+    machine's SC_i is 0).
     """
     seen = []
 
@@ -511,28 +512,27 @@ def test_island_case_selection_both_ways():
         seen.append((set(installed), island))
         return _stub(campus, installed)
 
-    closed = build_campus(campus_spec())
-    assert not su.islands(closed)
-    study = su.campus_uif(closed, fault_levels=spy)
-    assert seen == [({"GEN1"}, False), (set(), False)]
-    assert (
-        set(study.rows["case"]) == set(su.CASES)
-        and study.island_verdict == "not evaluated"
-    )
-    assert math.isnan(study.island_worst_uif)
-    spec = campus_spec()
-    spec["campus"]["pcc"].update(tie_normally_open=True, p_connection_mw=t(20.0))
     declared = build_campus(campus_spec())
     declared.island["requirements"] = {
         "values": {},
         "sources": {},
     }  # island operation declared
-    for campus in (build_campus(spec), declared):
-        assert su.islands(campus)
+    for closed in (build_campus(campus_spec()), declared):
+        assert not su.islands(closed)
         seen.clear()
-        study = su.campus_uif(campus, fault_levels=spy)
-        assert seen == [({"GEN1"}, False), (set(), False), ({"GEN1"}, True)]
-        assert set(study.rows["case"]) == {*su.CASES, *ISLAND}
+        study = su.campus_uif(closed, fault_levels=spy)
+        assert seen == [({"GEN1"}, False), (set(), False)]
+        assert set(study.rows["case"]) == set(su.CASES)
+        assert study.island_verdict == "not evaluated"
+        assert math.isnan(study.island_worst_uif)
+    spec = campus_spec()
+    spec["campus"]["pcc"].update(tie_normally_open=True, p_connection_mw=t(20.0))
+    open_tie = build_campus(spec)
+    assert su.islands(open_tie)
+    seen.clear()
+    study = su.campus_uif(open_tie, fault_levels=spy)
+    assert seen == [({"GEN1"}, False), (set(), False), ({"GEN1"}, True)]
+    assert set(study.rows["case"]) == {*su.CASES, *ISLAND}
 
 
 @pytest.mark.parametrize("sc", [0.0, math.nan, math.inf])
