@@ -65,3 +65,20 @@ def test_timeline_refuses_a_project_with_no_dc_load(client, tmp_projects_dir):
     r = _get(client, name)
     assert r.status_code == 422, r.text
     assert r.json()["detail"]["error_kind"] == "energization_timeline_unavailable"
+
+
+def test_timeline_of_a_project_that_is_not_open_is_refused(client, tmp_projects_dir):
+    first = _create(client, "eh_datacenter_staged", "tl06d")
+    _create(client, "eh_datacenter_staged", "tl06e")  # opens the second
+    r = _get(client, first)
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["error_kind"] == "flow_project_not_open"
+
+
+def test_timeline_of_a_single_period_network_has_one_all_period(
+    client, tmp_projects_dir
+):
+    name = _create(client, "eh_datacenter", "tl06f")
+    body = _get(client, name).json()
+    assert [p["period"] for p in body["periods"]] == ["all"]
+    assert body["periods"][0]["demand_mw"] > 0

@@ -103,7 +103,7 @@ def _overlay(n, masks) -> list[dict] | None:
         if "generators" in n.snapshot_weightings
         else np.ones(len(n.snapshots))
     )
-    p = n.generators_t.p.reindex(columns=n.generators.index, fill_value=0.0)
+    p = n.generators_t.p.reindex(columns=n.generators.index, fill_value=0.0).fillna(0.0)
     slack = [
         g
         for g in n.generators.index
@@ -111,7 +111,9 @@ def _overlay(n, masks) -> list[dict] | None:
     ]
     shed = p[slack].sum(axis=1).to_numpy(dtype=float) if slack else np.zeros(len(w))
     pmax = n.get_switchable_as_dense("Generator", "p_max_pu")
-    avail = (pmax * n.generators.p_nom_opt.reindex(pmax.columns)).to_numpy(float)
+    avail = np.nan_to_num(
+        (pmax * n.generators.p_nom_opt.reindex(pmax.columns)).to_numpy(float)
+    )
     curt = np.clip(avail - p.reindex(columns=pmax.columns).to_numpy(float), 0.0, None)
     var = [
         i
