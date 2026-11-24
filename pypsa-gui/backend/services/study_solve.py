@@ -11,6 +11,7 @@ whenever the live network holds dispatch, fresh or stale.
 
 `PREFERRED` is the one place the order sits (study first or live first).
 """
+
 from __future__ import annotations
 
 import math
@@ -49,7 +50,11 @@ def fallback(ctx: Any = None) -> dict | None:
     state = getattr(ctx, "solver_state", None) or {}
     held = state.get(KEY)
     record = state.get("eh_study")
-    if not isinstance(held, dict) or not isinstance(record, dict) or record.get("status") != "done":
+    if (
+        not isinstance(held, dict)
+        or not isinstance(record, dict)
+        or record.get("status") != "done"
+    ):
         return None
     if study_state.edited_since(record) is not False:
         return None

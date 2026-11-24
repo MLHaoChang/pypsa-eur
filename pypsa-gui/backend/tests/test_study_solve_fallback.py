@@ -1,5 +1,6 @@
 """template-e2e 30 (TE2E-30-1): after a Guided study the workbook, the dispatch status and the run state
 read the study's own solve when the live network has no dispatch of its own."""
+
 from __future__ import annotations
 
 import io
@@ -34,7 +35,10 @@ def after_study(install_network, tmp_projects_dir, monkeypatch):
     (tmp_projects_dir / "P").mkdir(parents=True, exist_ok=True)
     ctx = PyPSAService.get_active_context()
     ctx.solver_state[study_solve.KEY] = {"network": solved, "objective": 123.0}
-    ctx.solver_state["eh_study"] = {"status": "done", "network_revision": dirty_state.revision()}
+    ctx.solver_state["eh_study"] = {
+        "status": "done",
+        "network_revision": dirty_state.revision(),
+    }
     return ctx
 
 
@@ -52,7 +56,9 @@ def test_status_reads_the_study_solve(client, after_study):
 
 
 def test_an_edit_after_the_study_drops_it(client, after_study):
-    after_study.solver_state["eh_study"]["network_revision"] = dirty_state.revision() + 1
+    after_study.solver_state["eh_study"]["network_revision"] = (
+        dirty_state.revision() + 1
+    )
     assert client.get(URL).status_code == 204
     assert client.get("/api/simulation/status").json()["dispatch"] == "none"
 
@@ -63,5 +69,8 @@ def test_the_live_solve_wins(client, install_network, after_study):
 
     ctx = PyPSAService.get_active_context()
     ctx.solver_state[study_solve.KEY] = {"network": _network(), "objective": 123.0}
-    ctx.solver_state["eh_study"] = {"status": "done", "network_revision": dirty_state.revision()}
+    ctx.solver_state["eh_study"] = {
+        "status": "done",
+        "network_revision": dirty_state.revision(),
+    }
     assert study_solve.fallback(ctx) is None
