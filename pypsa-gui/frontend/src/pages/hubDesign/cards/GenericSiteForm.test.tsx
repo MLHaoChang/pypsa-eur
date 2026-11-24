@@ -10,6 +10,7 @@ import { projectsApi } from '../../../api/projects'
 import formJson from '../siteFormFixture.json'
 import type { SiteForm, SiteParams } from '../genericSite'
 import { GenericSiteForm } from './GenericSiteForm'
+import { BACK_TO_RATE, FROM_RATE } from '../../../utils/loadGrowthWords'
 
 const FORM = formJson as unknown as SiteForm
 const create = { mutate: vi.fn(), isPending: false }
@@ -122,4 +123,81 @@ describe('GenericSiteForm', () => {
     expect(screen.getByRole('alert').textContent).toMatch(/needs a battery/)
     expect((screen.getByTestId('site-create') as HTMLButtonElement).disabled).toBe(true)
   })
+
+// homer-parity 04a2 (LOADGROWTH-FORM-1), UX 26's conditions 1-7.
+describe('Grow from the first stage', () => {
+  const growth = () => screen.queryByTestId('site-field-growth_pct') as HTMLInputElement | null
+  const captions = () => screen.queryAllByText(FROM_RATE)
+
+  it('uses the words Model Horizon uses for a value from the rate', () => {
+    expect([FROM_RATE, BACK_TO_RATE]).toEqual(['from rate', 'Back to the rate'])
+  })
+
+  it('sits under the stage table with a visible unit, and is hidden with one stage', async () => {
+    const user = await mount()
+    expect(growth()!.closest('label')!.textContent).toBe('Grow from the first stage at% per year')
+    expect(screen.getByText(/^Fills the later stages' peak load from the first stage\./)).toBeTruthy()
+    await user.click(screen.getByTestId('site-stage-remove-2'))
+    await user.click(screen.getByTestId('site-stage-remove-1'))
+    expect(growth()).toBeNull()
+  })
+
+  it('fills the later peaks with a visible "from rate", a typed peak wins and ↺ gives it back', async () => {
+    const user = await mount()
+    expect(captions()).toHaveLength(0)                          // no rate: as before
+    await user.type(growth()!, '5')
+    expect([1, 2].map(i => fieldOf(`stages[${i}].peak_mw`).value)).toEqual(['9.26', '11.82'])
+    expect(captions()).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: /Back to the rate/ })).toBeNull()
+    await user.clear(fieldOf('stages[1].peak_mw'))
+    await user.type(fieldOf('stages[1].peak_mw'), '10')
+    expect(captions()).toHaveLength(1)
+    const reset = screen.getByRole('button', { name: `${BACK_TO_RATE}, stage 2` })
+    expect(reset.getAttribute('title')).toBe(BACK_TO_RATE)
+    await user.click(reset)
+    expect(fieldOf('stages[1].peak_mw').value).toBe('9.26')
+    expect(captions()).toHaveLength(2)
+    // The first stage is the base: a normal field, never "from rate".
+    expect(screen.queryByTestId('stages[0].peak_mw-from-rate')).toBeNull()
+  })
+
+  it('clearing the rate keeps the values and drops every caption and ↺ in one step', async () => {
+    const user = await mount()
+    await user.type(growth()!, '5')
+    await user.clear(fieldOf('stages[2].peak_mw'))
+    await user.type(fieldOf('stages[2].peak_mw'), '13')
+    await user.clear(growth()!)
+    expect([1, 2].map(i => fieldOf(`stages[${i}].peak_mw`).value)).toEqual(['9.26', '13'])
+    expect(captions()).toHaveLength(0)
+    expect(screen.queryByRole('button', { name: /Back to the rate/ })).toBeNull()
+  })
+
+  it('refuses -100 % beside the field in role="status", and clears it once valid', async () => {
+    const user = await mount()
+    await user.type(growth()!, '-100')
+    expect(screen.getByRole('status').textContent).toBe(
+      'Grow from the first stage: enter a number above -100 % per year.')
+    expect(growth()!.getAttribute('aria-invalid')).toBe('true')
+    await user.clear(growth()!)
+    await user.type(growth()!, '-5')
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('a filled peak over the grid keeps the per-stage wording', async () => {
+    const user = await mount()
+    await user.type(growth()!, '20')                            // 8·1.2^8 = 34.4 > 20 MW
+    expect(fieldOf('stages[2].peak_mw').getAttribute('aria-invalid')).toBe('true')
+    expect(screen.getByRole('alert').textContent).toMatch(
+      /^Peak load in 2035 \(34\.4 MW\) is above the 20 MW available from the grid that year\./)
+  })
+
+  it('sends the filled peaks and never the rate', async () => {
+    const user = await mount()
+    await user.type(growth()!, '5')
+    await user.click(screen.getByTestId('site-create'))
+    const params = create.mutate.mock.calls[0][0].params
+    expect(params.stages.map((s: { peak_mw: number }) => s.peak_mw)).toEqual([8, 9.26, 11.82])
+    expect(JSON.stringify(params)).not.toMatch(/growth|rate/i)
+  })
+})
 })

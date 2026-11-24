@@ -130,8 +130,11 @@ def build(
     envelope: dict | None,
     missing_chapters: list[tuple[str, str, str | None]],
     coverage: list[dict] | None = None,
+    *,
+    fuel: dict | None = None,
 ) -> tuple[dict, dict[str, tuple[list[str], list[list[str]], str]]]:
-    """(payload, tables): tables by id as (columns, rows, caption)."""
+    """(payload, tables): tables by id as (columns, rows, caption). `fuel`:
+    the fuel gensets' prices now (`research.fuel_prices`), for its gap row."""
     from harness import run_handoff
 
     run = task.get("run") or {}
@@ -147,6 +150,11 @@ def build(
     ppa_gap = run_ppa.gap_line(task)
     if ppa_gap:
         gap_lines.append(ppa_gap)  # study harness 14 S-C: not evaluated, never met
+    from harness import research
+
+    fuel_gap = research.fuel_gap_line(task, fuel)
+    if fuel_gap:
+        gap_lines.append(fuel_gap)  # study harness 34: the template's price kept, named
     refusals = refusal_rows(envelope)
     payload = {
         "mode": run.get("mode"),

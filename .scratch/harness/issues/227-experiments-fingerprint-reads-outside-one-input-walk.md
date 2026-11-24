@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-# 226 `experiments.py` reads both fingerprint forms back to back outside `one_input_walk()`
+# 227 `experiments.py` reads both fingerprint forms back to back outside `one_input_walk()`
 
 Status: needs-triage
 Source: #1949 hand-off

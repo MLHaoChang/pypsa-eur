@@ -3,7 +3,7 @@
 
 # Grid-readiness rows that read solved sizes say when the solve is not current
 
-Status: ready-for-agent
+Status: done
 Size: S
 Blocked by: none
 Gated: GK A
