@@ -940,11 +940,11 @@ def test_start_task_offers_v2_and_v3(profile):
 
     tool = next(t for t in catalogue.TOOLS if t["name"] == "start_task")
     enum = tool["input_schema"]["properties"]["run"]["properties"]["profile"]["enum"]
-    assert enum == ["eh_site@2", "eh_site@3", "eh_site@4", "eh_site@5"]
+    assert enum == ["eh_site@2", "eh_site@3", "eh_site@4", "eh_site@5", "eh_site@6"]
     assert guards.check("start_task", _start_task_run_args(profile), "write") is None
 
 
-@pytest.mark.parametrize("profile", ["eh_site@1", "eh_site@6", None, 3, ["eh_site@3"]])
+@pytest.mark.parametrize("profile", ["eh_site@1", "eh_site@7", None, 3, ["eh_site@3"]])
 def test_start_task_refuses_every_other_profile(profile):
     from harness import guards
 
