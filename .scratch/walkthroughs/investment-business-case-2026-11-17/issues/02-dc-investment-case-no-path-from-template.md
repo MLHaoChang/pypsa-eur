@@ -38,3 +38,42 @@ On any template in the group, either the investment case runs from the template'
 - Seen again 2026-11-20 (template walk, master 1f6905e3): DC: Guided Results 'Investment case ›' and Expert Results > Commercial & finance still say 'The investment case needs the site connection. Set it in Connection & grid' although the connection point is set (Guided step 3 shows 'Grid import (40 MW)'). H2 does reach 'Run the investment case'.
 
 - 2026-11-23 status sweep: landed in #1711 (56987f69); #1683 (c779c3d1): the DC template ships a point of connection, owners, dates and finance inputs; refusals name their need. Unverified: Guided section 7 status reflecting finance inputs, and the Playwright Guided/Expert agreement check.
+
+- 2026-11-23 re-walk (IBA-02-QUEUE-1), master 443ec313, real app (Playwright, 1600×1000), "Data Center Energy Hub" from the template form with every default:
+  - Passes. Guided section 7 reads "2 to check · Assumed · 2 not yet confirmed", not "complete". The template ships the site connection (Expert: "Site connection: imports through grid_import, no export link"), the asset dates and the finance inputs. The "needs the site connection" screen no longer shows.
+  - Passes. Guided 9 › Run study (reliability) → 10 › Investment tile › "Run the investment case" lists "The investment case needs: A solved project — Run the solve", with no raw code. "Run the solve" solves, and the case then runs: Guided headline "What the design is worth −€18.2 M, Net present value at the WACC, after tax"; Expert › Results › Commercial & finance › Investment case "Unlevered NPV at WACC −18,220,995.22", IRR −5.16 % post-tax, LCOE 99.04/MWh real. Guided and Expert agree.
+  - Still fails (acceptance 2, raw codes and asset-id lists). Expert › Investment case › Counterfactual lists unworded flags: `asset_lifetime_unknown:genset_1` … `:ups_battery` (seven asset ids), `baseline_island_rows_relaxed`, `counterfactual_basis:site_today`, `degradation_bill_first_order`, `degradation_bill_volume_items_only`, `island_critical_load_mw:32.161`, `lcoe_on_incremental_value`, `lcos_not_established:no_discharge:bess_new`, `meter_link_not_investment:grid_import`, `remaining_basis_written_off:gewst`/`:kst`. The LCOS rows read "not established (no_discharge:bess_new)". `projectFlagWords` (financeModel.ts) has no words for these keys, so they pass through as codes.
+  - Still fails (acceptance 4). No Playwright check compares the Guided and Expert investment screens; the agreement above was checked by hand.
+  - Not fixed here (noted): Guided has no in-section control for the billing site connection; the needs checklist's "connection" button jumps to the Expert editor. The Expert tax-layer detail table (Advanced) shows `eu_de`, `offset_other_income`, `not_deducted` as values. After the dispatch solve, Guided says "Expected shortfall is out of date".
+
+- 2026-11-23 GK B2 (5), the old PR B plan conditions (from GK B2 (2)'s hand-off): B1, one shared section-7-needed predicate. B2, one refusal-words map whose keys a test compares to the backend refusal kinds as an exact set (the `detail.needs` codes included), with a generic fallback. B3, the connection fix reuses SiteConnectionForm and refetches after the save, with no optimistic update. B4, after #1626 (merged a8f35cc71, met). The billing control moves to section 3 (UX 2's call). After the re-walk above: the remaining work, finance-flag words and the Guided/Expert smoke, touches none of B1–B3. Refusals already go through `investmentCaseNeeds.json` and its parity test.
+
+- 2026-11-23 GK B2 (5) plan GO, conditions G1–G8:
+  - G1: one words map for both modes.
+  - G2: the live flag set is checked as an exact set (`projectFlagKeys.json`, read by both the unit test and the smoke), and an unknown code shows as "Other check: <code>".
+  - G3: skips match their exact prefix, with tests and killed mutants.
+  - G4: every sentence states today's behaviour (timeline.py:69, cashflow.py:253).
+  - G5: the smoke checks the prose against `/\b[a-z]+(?:_[a-z0-9]+)+\b/` and is shown red on 443ec313.
+  - G6: Guided and Expert NPV match to 0.1 M with the sign; the needs match by text; an absent value fails.
+  - G7: a mutant for each new word, the fold, each skip, the fallback and LCOS `no_discharge`.
+  - G8: the out-of-scope findings are filed as 07, 08 and 09.
+
+  Built: `island_critical_load_mw` and `baseline_island_rows_relaxed` are worded, not skipped: the 32.161 MW critical load appears in no other sentence. Only `counterfactual_basis:site_today` is skipped, and only when the report's counterfactual basis is `site_today`.
+
+- 2026-11-23 PR #1935 evidence:
+  - G5: the smoke, run on 443ec313's financeModel.ts and InvestmentCaseView.tsx (same build otherwise), failed: "ic-headlines shows raw codes [no_discharge, bess_new, …]". With the fix it passes: Guided −18.2 M = Expert −18.2 M, 18 live flags, all worded.
+  - G7: 20 hand-made TS mutants against financeModel.test.ts, all killed. They cover each of the 8 new words removed, the KSt label, the tax-layer and meter-link capitals, the fold said once / plural / dropped, the stated skip, `statedFlags` `===`→`!==`, the "Other check" fallback, LCOS `no_discharge`, and `asset_lifetime_unknown` in PROJECT_FLAG_KEYS.
+  - Left for review: `baseline_island_rows_relaxed` is also stated by the backend's counterfactual note (baseline_text.py:13, rendered in `ic-cf-notes`). The report does not say which note comes from which flag, so the frontend cannot skip it without matching on the text.
+- 2026-11-23 UX 3 NOT OK @99e8a263 (rule c: no code in visible text) addressed:
+  - A flag with no words reads "A check with no description yet applies to this case.", with its code in the line's title (`projectFlagLines`). It is never dropped (GK G2).
+  - Every reason lcos.py gives for an unestablished storage LCOS is worded. An unknown one reads "a reason with no description yet", with the raw reasons in the row's title (`Headline.noteCode`).
+  - The smoke fails on any "no description yet" text.
+  - 19 more mutants (each LCOS word, the inflation word, the unknown-reason fallback, the title code on flag and reason lines, noteCode), all killed.
+  - Light and dark shots are under `../shots/iba-02-*`.
+- 2026-11-23 GK NOT OK F1 @99e8a263 addressed:
+  - `baseline_island_rows_relaxed` is dropped from `PROJECT_FLAG_WORDS`. `statedFlags` now skips it whenever `counterfactual.notes` are served, and it is moved to `stated` in projectFlagKeys.json.
+  - The backend contract test `tests/test_ic_counterfactual_notes_contract.py` pins that the notes carry `flag_text(...)`. A mutant that empties report.py's notes is killed.
+  - Frontend tests: skipped when the notes are present, kept (as an undescribed line with its code) when they are absent. The skip mutants are killed.
+  - The LCOS reason keys are checked as an exact set against a list written out by hand from lcos.py.
+  - The lifetime list reuses `listWords`, now exported from businessCaseModel.
+  - Filed 10 for the three master-side double wordings.
