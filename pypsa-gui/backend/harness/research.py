@@ -32,8 +32,10 @@ admission refuse it). An unverified row is listed, never offered.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import logging
+import math
 import re
 import threading
 import time
@@ -63,7 +65,12 @@ READ_TOOLS = frozenset(
     }
 )
 _GAP_KEYS = {"key", "stage", "tool", "target", "unit", "basis", "question"}
-_TOOLS = {"attach_tariff"}  # proposal-first (#970 item 4): gaps with an edit adapter
+# Study harness 34 (GK B (70)): the genset fuel price, one carded bulk write.
+FUEL_TOOL = "bulk_update_components"
+_TOOLS = {
+    "attach_tariff",
+    FUEL_TOOL,
+}  # proposal-first (#970 item 4): gaps with an edit adapter
 # Issue 29 (SH-06, GK B E11): an explore gap may take a sourced range. It has
 # no edit adapter (`tool: null`); issue 06's case admission reads its rows.
 SHAPES = ("point", "range")
@@ -82,6 +89,7 @@ ERROR_KINDS = (
     {"error_kind": "research_not_available"},
     {"error_kind": "research_cleanup_failed"},
     {"error_kind": "research_range_not_applicable"},
+    {"error_kind": "research_mixed_fuel"},
 )
 
 
@@ -622,6 +630,8 @@ def record_source(
             "invalid_source_row",
             "record_source works only in a research turn, for its gaps.",
         )
+    if turn.gaps[gap]["tool"] == FUEL_TOOL:
+        _check_electrical(quote, value)
     try:
         row = source_ledger.propose(
             {
@@ -702,7 +712,8 @@ def write_steps(task: dict[str, Any], row: dict[str, Any]) -> list[dict[str, Any
     """The run steps that write a confirmed row, each through its own card:
     every step carries the row's `research_ref`, so envelope admission
     refuses it (R4) and the user approves it. Ids start with the gap's stage,
-    so its gate waits for them. Only `attach_tariff` gaps exist (#970 item 4)."""
+    so its gate waits for them. A tariff gap writes a Library tariff and
+    attaches it (#970 item 4); the genset fuel price one bulk edit (issue 34)."""
     from services import run_profiles
 
     if (
@@ -719,6 +730,8 @@ def write_steps(task: dict[str, Any], row: dict[str, Any]) -> list[dict[str, Any
     )
     name = f"research {key} {row['id']}"
     prefix = f"{gap['stage']}.research.{row['id']}"
+    if gap["tool"] == FUEL_TOOL:
+        return _fuel_steps(row, gap, prefix)
     meta = {
         "source": RESEARCH_SOURCE + row["url"],
         "research_ref": row["id"],
@@ -746,6 +759,252 @@ def write_steps(task: dict[str, Any], row: dict[str, Any]) -> list[dict[str, Any
             "args": {"name": name, "research_ref": row["id"]},
         },
     ]
+
+
+# ── The genset fuel price (study harness 34, GK B (70)) ─────────────────────
+
+
+def _active_network():
+    from services.pypsa_service import PyPSAService
+
+    network = getattr(PyPSAService.get_active_context(), "network", None)
+    if network is None:
+        raise ResearchError(
+            "research_not_available", "No project network is open; nothing was written."
+        )
+    return network
+
+
+# The quote must state the price per MWh of electrical output: a fuel-energy
+# price (thermal, calorific basis) is refused, not converted (Q1).
+_THERMAL = re.compile(
+    r"thermal|MWh[\s_(-]*th\b|\b(?:Hs|Hi|LHV|HHV|GCV|NCV)\b|calorific|fuel input",
+    re.IGNORECASE,
+)
+# GK B (70) N3: the electrical unit is the stated value's own, i.e. it follows
+# that number before any other number does.
+_ELECTRICAL_UNIT = re.compile(
+    r"MWh[\s_(-]*el?\b|electric\w*\s+MWh|MWh\s+(?:of\s+)?(?:\w+\s+){0,2}electric",
+    re.IGNORECASE,
+)
+_UNIT_WINDOW = 60
+
+
+def _states_electrical(text: str, value: float) -> bool:
+    """`text` states `value` with an electrical unit after it, within
+    `_UNIT_WINDOW` characters and before the next number. Known edge (study
+    harness issue 63, GK B (70) N3b): the words in between are not parsed, so
+    "diesel EUR 60 per MWh, unlike electricity MWh tariffs" still passes; the
+    user's research card shows the quote before anything is written."""
+    numbers = list(source_ledger._NUMBER.finditer(text))
+    for i, match in enumerate(numbers):
+        if not any(
+            math.isclose(r, value, rel_tol=1e-9, abs_tol=1e-12)
+            for r in source_ledger._readings(match.group(0))
+        ):
+            continue
+        end = numbers[i + 1].start() if i + 1 < len(numbers) else len(text)
+        if _ELECTRICAL_UNIT.search(
+            text[match.end() : min(end, match.end() + _UNIT_WINDOW)]
+        ):
+            return True
+    return False
+
+
+def _check_electrical(quote: Any, value: Any) -> None:
+    """Refuse a fuel-price quote that prices fuel energy anywhere, or does not
+    state `value` per MWh of electrical output."""
+    text = source_ledger.normalise(quote) if isinstance(quote, str) else ""
+    number = isinstance(value, (int, float)) and not isinstance(value, bool)
+    if (
+        _THERMAL.search(text)
+        or not number
+        or not math.isfinite(value)
+        or not _states_electrical(text, float(value))
+    ):
+        raise ResearchError(
+            "research_unit_mismatch",
+            "A genset fuel price is quoted per MWh of electrical output; a quote that does not "
+            "say so, or prices fuel energy, is refused, not converted.",
+        )
+
+
+def fuel_gensets(
+    network, gap: dict[str, Any]
+) -> tuple[str | None, list[str], list[str], list[str]]:
+    """(carrier, names, curved, others) for a fuel-price gap on `network`:
+    the one fuel carrier of the gensets (the generators the gap's target glob
+    names), those to write, those whose fuel curve sets their marginal cost
+    (S2: never written raw), and the other Generators of that carrier (a CHP,
+    a fuel supply: never written, GK B (70) N1; the report names them).
+    Raises `research_mixed_fuel` when the gensets burn two fuels (S1)."""
+    from services import fuel_curve
+
+    gens = network.generators
+    matched = [
+        str(n) for n in gens.index if fnmatch.fnmatchcase(str(n), gap["target"]["name"])
+    ]
+    carriers = sorted({str(gens.at[n, "carrier"]) for n in matched})
+    if len(carriers) > 1:
+        raise ResearchError(
+            "research_mixed_fuel",
+            f"The site's gensets burn {', '.join(carriers)}; one researched price is never "
+            "written to two fuels. Nothing was written.",
+        )
+    if not carriers:
+        return None, [], [], []
+    curved = [
+        n for n in matched if fuel_curve.curve_of(gens.loc[n].to_dict()) is not None
+    ]
+    others = [
+        str(n)
+        for n in gens.index
+        if str(gens.at[n, "carrier"]) == carriers[0] and str(n) not in matched
+    ]
+    return carriers[0], [n for n in matched if n not in curved], curved, others
+
+
+def _fuel_steps(
+    row: dict[str, Any], gap: dict[str, Any], prefix: str
+) -> list[dict[str, Any]]:
+    """One carded bulk edit of the fuel gensets' marginal cost, carrying the
+    row (R4). Fails closed on a range or a unit not the gap's (refused, not
+    converted) and on a value not above 0 (Q3)."""
+    if row.get("range") is not None or row.get("value") is None:
+        raise ResearchError(
+            "research_range_not_applicable",
+            "A sourced range is read by a case change, never written as a fuel price.",
+        )
+    if row.get("unit") != gap["unit"] or row.get("basis") != gap["basis"]:
+        raise ResearchError(
+            "research_unit_mismatch",
+            f"A researched genset fuel price takes {gap['unit']} ({gap['basis']}); "
+            f"{row.get('unit')} is refused, not converted.",
+        )
+    if not row["value"] > 0:
+        raise ResearchError("invalid_source_row", "A genset fuel price is above 0.")
+    _check_electrical(row.get("quote"), row["value"])
+    _, names, _, _ = fuel_gensets(_active_network(), gap)
+    if not names:  # the report's gap line names why nothing was written
+        return []
+    return [
+        {
+            "id": f"{prefix}.fuel",
+            "tool": FUEL_TOOL,
+            "status": "pending",
+            "args": {
+                "component_class": "Generator",
+                "names": names,
+                "updates": {gap["target"]["attr"]: row["value"]},
+                "research_ref": row["id"],
+            },
+        }
+    ]
+
+
+def fuel_prices(network, profile: dict[str, Any]) -> dict[str, Any] | None:
+    """The report's read of the fuel gensets now (`fuel_gap_line`): None when
+    the profile has no fuel-price gap. Never raises."""
+    gap = next(
+        (
+            g
+            for g in (profile.get("research") or {}).get("gaps") or []
+            if g.get("tool") == FUEL_TOOL
+        ),
+        None,
+    )
+    if gap is None:
+        return None
+    try:
+        carrier, names, curved, others = fuel_gensets(network, gap)
+        gens = network.generators
+        return {
+            "key": gap["key"],
+            "unit": gap["unit"],
+            "carrier": carrier,
+            "prices": {n: float(gens.at[n, gap["target"]["attr"]]) for n in names},
+            "curved": curved,
+            "others": others,
+        }
+    except ResearchError as exc:
+        return {"key": gap["key"], "error": exc.kind}
+    except Exception:  # noqa: BLE001 -- the report names the gap, never fails on it
+        logger.exception("genset fuel prices unreadable")
+        return {"key": gap["key"], "error": "fuel_read_failed"}
+
+
+FUEL_LINE = "Genset fuel price not researched: template value kept"
+
+
+def _fmt(prices: dict[str, float]) -> str:
+    return ", ".join(f"{v:g}" for v in sorted(set(prices.values())))
+
+
+def fuel_gap_line(task: dict[str, Any], fuel: dict[str, Any] | None) -> str | None:
+    """The report's gap row for the genset fuel price (S4): None for a
+    profile without the gap, or when a confirmed row's value is what every
+    written genset holds now and no genset was left out."""
+    if fuel is None:
+        return None
+    if fuel.get("error") == "research_mixed_fuel":
+        return f"{FUEL_LINE}: the gensets burn more than one fuel"
+    if fuel.get("error"):
+        return f"{FUEL_LINE}: the gensets' prices could not be read"
+    if fuel["carrier"] is None:
+        return "Genset fuel price not researched: the site has no genset"
+    kept = (
+        f"{FUEL_LINE} ({_fmt(fuel['prices'])} {fuel['unit']}, {fuel['carrier']})"
+        if fuel["prices"]
+        else FUEL_LINE
+    )
+    block = (task.get("run") or {}).get("research") or {}
+    rows = [
+        r
+        for r in block.get("rows") or []
+        if (r.get("for") or {}).get("gap") == fuel["key"]
+    ]
+    confirmed = next((r for r in rows if r.get("status") == "confirmed"), None)
+    if confirmed is not None:
+        if not fuel["prices"]:
+            return f"{FUEL_LINE}: every genset's cost is set by its fuel curve"
+        if any(v != confirmed["value"] for v in fuel["prices"].values()):
+            return f"{kept}: the researched value was not written"
+        left = [
+            *(
+                [
+                    "left out, as their fuel curve sets their cost: "
+                    + ", ".join(fuel["curved"])
+                ]
+                if fuel["curved"]
+                else []
+            ),
+            *(
+                [
+                    f"not written to the other {fuel['carrier']} generators: "
+                    + ", ".join(fuel["others"])
+                ]
+                if fuel.get("others")
+                else []
+            ),
+        ]
+        return "Genset fuel price researched; " + "; ".join(left) if left else None
+    step = next(
+        (s for s in block.get("steps") or [] if s.get("stage") == "inputs"), None
+    )
+    status = (step or {}).get("status")
+    if status == "not_granted":
+        return f"{kept}: research not granted"
+    if status == "cap_reached":
+        return f"{kept}: research cost cap reached"
+    if status in ("not_available", "error", "cleanup_failed"):
+        return f"{kept}: research not available"
+    if any(
+        r.get("status") == "rejected"
+        for r in rows
+        if r.get("verification") == "verified"
+    ):
+        return f"{kept}: the researched sources were rejected"
+    return f"{kept}: no verified source"
 
 
 def decide(task_id: str, row_id: str, verdict: str, *, by: str) -> dict[str, Any]:
@@ -783,6 +1042,25 @@ def settle(task_path, row_id: str, verdict: str, *, by: str) -> dict[str, Any]:
         block["rows"][block["rows"].index(row)] = settled
         out["row"] = settled
         if settled["status"] == "confirmed":
+            try:
+                steps = write_steps(task, settled)
+            except ResearchError as exc:
+                if exc.kind != "research_mixed_fuel":
+                    raise
+                # Study harness 34: no row of this gap can be written, so each is
+                # rejected with the reason and the run is not left waiting on one.
+                out["refused"] = exc
+                for i, other in enumerate(block["rows"]):
+                    if other["for"]["gap"] == settled["for"]["gap"] and (
+                        other["id"] == row_id or other["status"] == "proposed"
+                    ):
+                        base = row if other["id"] == row_id else other
+                        block["rows"][i] = source_ledger.settle(
+                            base, "rejected", by=by
+                        ) | {"rejected_reason": exc.kind}
+                out["row"] = next(r for r in block["rows"] if r["id"] == row_id)
+                steps = None
+        if settled["status"] == "confirmed" and steps is not None:
             # The user picks one source per gap (#970 item 3): the others are rejected.
             for i, other in enumerate(block["rows"]):
                 if (
@@ -792,7 +1070,7 @@ def settle(task_path, row_id: str, verdict: str, *, by: str) -> dict[str, Any]:
                     block["rows"][i] = source_ledger.settle(
                         other, "rejected", by=by
                     ) | {"rejected_reason": "other_source_picked"}
-            task["steps"].extend(write_steps(task, settled))
+            task["steps"].extend(steps)
         waiting = task["run"].get("waiting") or {}
         if waiting.get("kind") == "research_confirm" and waiting.get("ref") == row_id:
             nxt = next(
@@ -819,4 +1097,6 @@ def settle(task_path, row_id: str, verdict: str, *, by: str) -> dict[str, Any]:
         _update(task_path, change)
     except source_ledger.LedgerError as exc:
         raise ResearchError(exc.kind, str(exc)) from exc
+    if "refused" in out:
+        raise out["refused"]
     return out["row"]

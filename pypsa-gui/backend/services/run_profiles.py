@@ -640,6 +640,31 @@ def _eh_site_v4() -> dict:
 
 EH_SITE_V4 = _eh_site_v4()
 
+# Study harness 34 (GK B (70) plan GO, Q1-Q3 (a), S1-S7): eh_site@5. The genset
+# fuel price is a research gap of the inputs stage: a cited, verified row in
+# EUR/MWh of genset electrical output (the template's own `marginal_cost`,
+# efficiency 1), confirmed by the user, is written through one carded
+# `bulk_update_components` to every genset of the site's one fuel carrier
+# (`harness.research.fuel_gensets`); a row in another unit is refused, not
+# converted. A grant without research keeps the template's price and the
+# report names it (`research.fuel_gap_line`). eh_site@1-@4 stay byte-equal (L8).
+FUEL_GAP = {
+    "key": "genset_fuel_price", "stage": "inputs", "tool": "bulk_update_components",
+    "target": {"component": "Generator", "name": "genset*", "attr": "marginal_cost"},
+    "unit": "EUR/MWh", "basis": "genset fuel cost per MWh electrical output, excl. VAT",
+    "question": "What is the published fuel cost of this site's gensets (their fuel carrier, gas or diesel) "
+                "per MWh of genset electrical output?"}
+
+
+def _eh_site_v5() -> dict:
+    profile = copy.deepcopy(EH_SITE_V4)
+    profile["version"] = 5
+    profile["research"]["gaps"].append(copy.deepcopy(FUEL_GAP))
+    return profile
+
+
+EH_SITE_V5 = _eh_site_v5()
+
 # Study harness 10a (GK B (36) D1-D8, Q1-Q5): eh_datacenter@1. The solve stage
 # runs the solve, the EH study (LOLE as eh_site@2, Q5), the campus run held to
 # the run's frozen grid-code profile and the scorecard read with it
@@ -1403,7 +1428,7 @@ def _grid_only() -> dict:
 GRID_ONLY = _grid_only()
 
 PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2, "eh_site@3": EH_SITE_V3,
-                              "eh_site@4": EH_SITE_V4,
+                              "eh_site@4": EH_SITE_V4, "eh_site@5": EH_SITE_V5,
                               "eh_datacenter@1": EH_DATACENTER,
                               "eh_datacenter_staged@1": EH_DATACENTER_STAGED,
                               "eh_h2_hub@1": EH_H2_HUB, "eh_h2_hub_staged@1": EH_H2_HUB_STAGED,
