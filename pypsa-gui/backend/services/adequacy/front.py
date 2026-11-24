@@ -46,6 +46,14 @@ MAX_FRONT_SOLVES = 16
 # Full certification stays with the chosen point (the EH study's mc_certify).
 DEFAULT_MC_DRAWS = 500
 FRONT_SEED = 0
+# Recorded with every point. The draws are pinned (draws = max_draws), so the
+# MC stops at the draw count, not at this target; ``converged`` says whether
+# the target was met within them.
+FRONT_COV_TARGET = 0.05
+# Upper bounds for the request (the schema's reserve-margin bound; an ENS cap
+# above all demand constrains nothing).
+MAX_MARGIN = 5.0
+MAX_ENS_PERMYRIAD = 10_000.0
 
 CO2_CAP_NAME = "co2_cap"
 LEVERS = ("ens_cap", "reserve_margin")
@@ -143,10 +151,15 @@ def _clean_levels(lever: str, levels) -> list[float]:
             f = float(v)
         except (TypeError, ValueError):
             raise FrontConfigError(f"reliability level {v} is not a number") from None
-        if not math.isfinite(f) or f <= 0:
+        hi = MAX_ENS_PERMYRIAD if lever == "ens_cap" else MAX_MARGIN
+        if not math.isfinite(f) or f <= 0 or f > hi:
+            unit = (
+                "‱ of demand, at most 10,000"
+                if lever == "ens_cap"
+                else "a margin fraction, at most 5 (0.15 means 15 %)"
+            )
             raise FrontConfigError(
-                f"reliability level {v} must be a positive number "
-                f"({'‱ of demand' if lever == 'ens_cap' else 'margin fraction'})"
+                f"reliability level {v} must be a positive number ({unit})"
             )
         out.append(f)
     if not out:
@@ -334,20 +347,31 @@ def _annual_costs(n, rep: dict | None) -> tuple[float, float, float]:
     shed cost (the frontier's CostBlock basis), divided by the objective's
     years. ``capex`` is the objective's capacity terms (annualised capital
     and fixed O&M as the LP counts them) on the same basis; ``opex`` is the
-    rest: dispatch, fuel, import tariff, CO2 price. NaN when unreadable."""
-    nan = float("nan")
+    rest: dispatch, fuel, import tariff, CO2 price. ``None`` when unreadable,
+    never NaN (an unjudged value reads None and the result stays JSON)."""
     years = _objective_years(n)
     try:
         total_obj = float(((rep or {}).get("cost") or {})["total_system_cost_eur"])
         n_obj = float(n.objective)
     except (KeyError, TypeError, ValueError, AttributeError):
-        return nan, nan, nan
+        return None, None, None
+    total = _finite(total_obj / years) if years > 0 else None
     share = _lp_capex_share(n)
-    if years <= 0 or share is None or not math.isfinite(n_obj):
-        return nan, nan, (total_obj / years if years > 0 else nan)
-    capex = share * n_obj / years
-    total = total_obj / years
+    if total is None or share is None or not math.isfinite(n_obj):
+        return None, None, total
+    capex = _finite(share * n_obj / years)
+    if capex is None:
+        return None, None, total
     return capex, total - capex, total
+
+
+def _finite(x) -> float | None:
+    """``float(x)`` when finite, else None."""
+    try:
+        f = float(x)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
 
 
 def _co2(n, names: list[str]) -> tuple[float | None, float | None, bool | None]:
@@ -361,7 +385,7 @@ def _co2(n, names: list[str]) -> tuple[float | None, float | None, bool | None]:
     payload = compute_emissions(n, "lopf", result_df=_reader)
     years = horizon_years(n)
     total = float(payload["total_tCO2"]) if payload and years > 0 else None
-    t_per_yr = total / years if total is not None else None
+    t_per_yr = _finite(total / years) if total is not None else None
     if not names:
         return t_per_yr, None, None
     gc = n.global_constraints
@@ -429,9 +453,13 @@ def _solve_point(base, cfg, lock, log_queue, lever, level, cap):
     sink: dict = {}
     _solve_once(_cfg_for(cfg, lever, level), work, lock, log_queue, sink)
     status = sink.get("_status")
-    rec = {"lever": lever, "level": level, "co2_cap_t_per_yr": cap}
-    if status not in ("ok", "optimal"):
-        rec.update(status=str(sink.get("_condition") or status or "failed"), point=None)
+    # Judge on the CONDITION (sweep.py's rule): linopy's status `ok` also
+    # covers time_limit, iteration_limit, suboptimal and imprecise, none of
+    # which is a point on the front.
+    word = str(sink.get("_condition") or status or "failed")
+    rec = {"lever": lever, "level": level, "co2_cap_t_per_yr": cap, "condition": word}
+    if not word.startswith("optimal"):
+        rec.update(status=word, point=None)
         return rec, None
     rep = sink.get("adequacy_report")
     capex, opex, total = _annual_costs(work, rep)
@@ -443,11 +471,7 @@ def _solve_point(base, cfg, lock, log_queue, lever, level, cap):
             "capex_eur_per_yr": capex,
             "opex_eur_per_yr": opex,
             "total_eur_per_yr": total,
-            "lp_ens_mwh": (
-                float(metrics["ens_mwh"])
-                if metrics.get("ens_mwh") is not None
-                else None
-            ),
+            "lp_ens_mwh": _finite(metrics.get("ens_mwh")),
             "reliability_binding": _reliability_binding(lever, rep),
             "co2_t_per_yr": co2,
             "co2_shadow_eur_per_t": shadow,
@@ -465,7 +489,7 @@ def _solve_point(base, cfg, lock, log_queue, lever, level, cap):
 
 
 def _mc_point(
-    work, cfg, lock, pack, draws: int, seed
+    work, cfg, lock, pack, draws: int, seed, cov_target: float = FRONT_COV_TARGET
 ) -> tuple[dict | None, str | None]:
     """Sampled-outage LOLE/EUE of the fleet ``work`` built, pinned draws."""
     from services.adequacy import eh_stages
@@ -495,26 +519,52 @@ def _mc_point(
                 max_draws=draws,
                 batch=draws,
                 seed=seed,
+                cov_target=cov_target,
             )
         else:
             res = mc_mod.mc_adequacy(
-                frozen.mc_inputs, draws=draws, max_draws=draws, batch=draws, seed=seed
+                frozen.mc_inputs,
+                draws=draws,
+                max_draws=draws,
+                batch=draws,
+                seed=seed,
+                cov_target=cov_target,
             )
     except Exception as exc:  # noqa: BLE001
         logger.exception("front: MC failed")
         return None, f"MC failed: {exc}"
-    floor = res.get("resolution_floor_h")
-    lole = float(res["lole_hours"])
+    try:
+        return _mc_record(res, cov_target), None
+    except Exception as exc:  # noqa: BLE001  one malformed result fails this point only
+        logger.exception("front: MC result unreadable")
+        return None, f"MC result unreadable: {exc}"
+
+
+def _mc_record(res: dict, cov_target: float) -> dict:
+    lole, eue = _finite(res["lole_hours"]), _finite(res["eue_mwh"])
+    if lole is None or eue is None:
+        raise ValueError("LOLE or EUE is not a finite number")
+    floor = _finite(res.get("resolution_floor_h"))
+
+    def _ci(key):
+        ci = res.get(key)
+        if ci is None:
+            return None
+        vals = [_finite(v) for v in ci]
+        return None if None in vals else vals
+
     return {
         "lole_hours": lole,
-        "lole_ci": list(res["lole_ci"]) if res.get("lole_ci") is not None else None,
-        "eue_mwh": float(res["eue_mwh"]),
-        "eue_ci": list(res["eue_ci"]) if res.get("eue_ci") is not None else None,
+        "lole_ci": _ci("lole_ci"),
+        "eue_mwh": eue,
+        "eue_ci": _ci("eue_ci"),
         "n_samples": int(res["n_samples"]),
+        "cov_target": cov_target,
+        "converged": res.get("converged"),
         "resolution_floor_h": floor,
         "below_floor": bool(floor is not None and lole < floor),
         "time_basis": res.get("time_basis"),
-    }, None
+    }
 
 
 # --------------------------------------------------------------------------
@@ -739,6 +789,19 @@ def _guarded_point(base, cfg, lock, log_queue, lever, level, cap):
         }, None
 
 
+def _int_arg(field: str, v, lo: int, hi: int) -> int:
+    """A whole number in ``[lo, hi]``, or a FrontConfigError naming ``field``."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise FrontConfigError(f"{field} {v} is not a number") from None
+    if not math.isfinite(f) or f != int(f) or not lo <= f <= hi:
+        raise FrontConfigError(
+            f"{field} must be a whole number from {lo} to {hi}, not {v}"
+        )
+    return int(f)
+
+
 def run_front_study(
     network,
     lock,
@@ -761,8 +824,13 @@ def run_front_study(
     once under ``lock`` and never written. A point whose solve is not optimal
     is kept with its status and no numbers; an aborted study keeps the
     points already swept (``aborted``).
+
+    ``stop_event`` is checked between points: a stop lets the point being
+    solved finish (the point solve does not take the stop), then ends the
+    sweep and skips the reference solve.
     """
     from services.adequacy.frontier import non_convexity_warning
+    from services.adequacy.mc import MAX_DRAWS
     from services.project_context import ProjectContext
     from services.pypsa_service import PyPSAService
 
@@ -775,9 +843,9 @@ def run_front_study(
             "the ENS lever requires VOLL > 0: with no slack generators the cap "
             "constrains nothing"
         )
-    need = check_budget(lvls, caps, int(budget_solves))
-    if int(mc_draws) < 1:
-        raise FrontConfigError("mc_draws must be at least 1")
+    budget = _int_arg("budget_solves", budget_solves, 1, MAX_FRONT_SOLVES)
+    draws = _int_arg("mc_draws", mc_draws, 1, MAX_DRAWS)
+    need = check_budget(lvls, caps, budget)
 
     if lever_used == "reserve_margin":
         _margin_preflight(network, lock, cfg, max(lvls), lever_why)
@@ -795,7 +863,8 @@ def run_front_study(
         "solves_planned": need,
         "solves": 0,
         "mc_budget": {
-            "draws_per_point": int(mc_draws),
+            "draws_per_point": draws,
+            "cov_target": FRONT_COV_TARGET,
             "seed": seed,
             "pinned": True,
             "note": (
@@ -831,7 +900,7 @@ def run_front_study(
             lever_used,
             lvls,
             caps,
-            mc_draws,
+            draws,
             seed,
             pack,
             stop_event,
@@ -872,14 +941,18 @@ def _sweep(
         points.append(rec)
 
     ok = [p for p in points if p["status"] == "ok"]
+    # the loosest reliability level: the largest ENS cap, the smallest margin
+    loosest = max(lvls) if lever_used == "ens_cap" else min(lvls)
     if None in caps:
-        ref = [p["point"]["co2_t_per_yr"] for p in ok if p["co2_cap_t_per_yr"] is None]
-        result["reference_co2_t_per_yr"] = min(ref) if ref else None
+        ref = [
+            p["point"]["co2_t_per_yr"]
+            for p in ok
+            if p["co2_cap_t_per_yr"] is None and p["level"] == loosest
+        ]
+        result["reference_co2_t_per_yr"] = ref[0] if ref else None
     elif stop_event is not None and stop_event.is_set():
         result["aborted"] = True  # the reference solve is skipped too
     else:
-        # the loosest reliability level: the largest ENS cap, the smallest margin
-        loosest = max(lvls) if lever_used == "ens_cap" else min(lvls)
         rec, _work = _guarded_point(base, cfg, lock, lq, lever_used, loosest, None)
         result["solves"] += 1
         if rec["status"] == "ok":
