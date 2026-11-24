@@ -72,3 +72,35 @@ Safe:
 Slice 2 condition (GK B2 A3): on a MIP, Compare and Results economics show revenue and storage charge cost as null and "not available", never 0.
 
 Known edge (GK B2 A1): a MIP solved before the `last_solve_settings["price_limit"]` record existed, whose config has since been changed to make it an LP (`process_uc` on a process-unit network), is judged under today's config. Every other record-less case errs toward withholding.
+
+## GK B2 slice 2 plan GO (2026-11-24)
+
+Slice 2 is two PRs (PR-SIZE-1): 2a economics, then 2b prices. Each opens after #1957 merges. 2b's results_workbook part waits for template-e2e 30 (coordinator ruling).
+
+Rulings:
+- (a) The 2a/2b split is accepted.
+- (b) On a MIP, the prices fallback (generator marginal cost shown as a price) is withheld. On an LP it stays byte-for-byte.
+- (c) `CashFlowYear.market_revenue_at_duals` is rendered: it is a study-workbook cash-flow column. So it is `float | None`: None with the reason flag on a MIP, and 0.0 only in a year when nothing operates (year 0, the build year, for every case).
+
+Conditions:
+- **S1, no silent partial sums.** A total over a withheld part reads not available, or is labelled with what it excludes (UX words). This covers CompareView, Economics.tsx, the Dispatch sums and the backend aggregates, including the carrier totals. Test it with a mixed case.
+- **S2, one reason on every surface.** The reason is worded through sectionWords, and no surface shows 0, "—" or NaN. Each touched component has a vitest.
+- **S3, the right solve, fail closed.** Each reader judges by the recorded limit of the solve that produced the values. Compare judges each project by its own record, then its config, and fails closed. A workbook scenario is judged by its own state.
+- **S4, LP unchanged.** Compare economics, asset_economics, carrier_kpis, prices, price_drivers and any touched workbook view are byte-equal to master on an LP.
+- **S5, mutants.** Each gate call and each None substitution, including the `_safe_finite` skip on the MIP path, has a named killing test.
+- **S6, chat and parity at the trial merge.** Run the tool-error-kind manifest, ChatPanel.manifest, `assistant_inventory --check`, plus route_parity and control_matrix if routes, tools or the frontend change. A chat tool that returns these payloads is tested on a MIP.
+
+2a refinements (GK, 2026-11-24):
+1. The storage charge cost is inside `opex_meur`. So a carrier that booked one has opex and LCOE None on a MIP, while other carriers keep theirs, and the Σ-carriers total reads None. Mutate the condition both ways.
+2. The year-0 0.0 rests on "no operation that year". Year 0 is the build year for every case (`engine_adapter`: no bill and no saving counted), and a test pins that.
+3. On a MIP, only the reading notes that rest on the LP's duals are dropped (the zero-profit note). A price-independent note survives, and a test pins it.
+
+- **S7 (2b, GK 2026-11-24).** `harness/price_calculations.py:59-60` (the checked bus-price answers) still classifies with today's solver_config. It moves to `solved_price_limit(ctx.solver_state, n)`, with a test of a MIP solve followed by a config edit to linearised UC and no re-solve.
+
+UX 28 placement GO: one cell wording ("Not available (integer solve)", from sectionWords `short`, pinned by a parity test). A total that skips a withheld part says so beside the figure. Expert shows no less than Guided. No toast. Before/after shots in Guided and Expert, light and dark, on each PR.
+
+Follow-up: `27-study-report-lp-flags-untested.md`. These are the LP-path flags in the study report that survived slice 1's mutant run; GK ruled they don't block #1957.
+
+GK B2 on #1970 (2a), non-blocking edges, recorded:
+- A MIP study run recorded before #1970, with no `price_limit` key in its stored asset economics, still shows its stored 0.0 market rows through `engine_adapter._econ_rows`. It is the same known edge accepted in slice 1 (A4): a stored record is not re-judged.
+- The scenario workbook (`results_workbook/overview.py:136`, `views_network.py:176`) still calls `compute_economics_by_carrier` without the limit. It is deferred to 2b by the coordinator's ruling (after template-e2e 30, #1963) and is a 2b condition (S3).

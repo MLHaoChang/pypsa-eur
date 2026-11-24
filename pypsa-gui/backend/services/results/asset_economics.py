@@ -40,7 +40,7 @@ def link_capacity_factor(input_energy_mwh: float, p_nom_mw: float, hours: float)
         return input_energy_mwh / (p_nom_mw * hours)
     return None
 
-def compute_asset_economics(n, cfg, *, result_df):
+def compute_asset_economics(n, cfg, *, result_df, price_limit: str | None = None):
     """
     Per-asset economics for Generator / StorageUnit / Store / Link.
 
@@ -971,7 +971,12 @@ def compute_asset_economics(n, cfg, *, result_df):
         "Link": [r["name"] for r in link_rows],
     })
 
-    return {
+    if price_limit:
+        _withhold_priced(gen_rows, su_rows, store_rows, link_rows)
+        # A note that rests on the LP's duals (the zero-profit framing) does not hold on a
+        # MIP, which has no such prices; any other note stands.
+        reading_notes = [x for x in reading_notes if x not in DUAL_DERIVED_NOTES]
+    out = {
         "currency": "EUR",
         "is_multi_period": is_multi,
         "reading_notes": reading_notes,
@@ -988,3 +993,41 @@ def compute_asset_economics(n, cfg, *, result_df):
         "stores": store_rows,
         "links": link_rows,
     }
+    if price_limit:
+        # Only when set, so an LP's payload is unchanged.
+        out["price_limit"] = price_limit
+    return out
+
+
+# assistant-assurance 17: the figures priced at the bus duals, per class. On an integer (MIP)
+# solve the duals are 0.0, not prices, so these are None (never 0), in each row and each
+# `by_period` entry; `price_limit` on the payload names why. A Link's LCOE holds its input
+# electricity cost at bus0's dual, and an LCOS its charging cost, so they go too.
+PRICED_KEYS = {
+    "generators": ("revenue_eur", "net_profit_eur", "avg_price_eur_per_mwh"),
+    "storage_units": ("discharge_revenue_eur", "charge_cost_eur", "net_profit_eur", "lcos_eur_per_mwh",
+                      "spread_eur_per_mwh", "avg_discharge_price_eur_per_mwh",
+                      "avg_charge_price_eur_per_mwh"),
+    "links": ("revenue_eur", "gross_revenue_eur", "input_cost_eur", "net_profit_eur",
+              "lcoe_eur_per_mwh", "avg_price_eur_per_mwh", "spread_eur_per_mwh"),
+}
+PRICED_KEYS["stores"] = PRICED_KEYS["storage_units"]
+
+
+def _dual_derived_notes() -> frozenset[str]:
+    from services.results.economics_caveats import ZERO_PROFIT_BY_CONSTRUCTION
+
+    return frozenset({ZERO_PROFIT_BY_CONSTRUCTION})
+
+
+DUAL_DERIVED_NOTES = _dual_derived_notes()
+
+
+def _withhold_priced(gen_rows, su_rows, store_rows, link_rows) -> None:
+    for cls, rows in (("generators", gen_rows), ("storage_units", su_rows),
+                      ("stores", store_rows), ("links", link_rows)):
+        for row in rows:
+            for entry in [row, *(row.get("by_period") or [])]:
+                for key in PRICED_KEYS[cls]:
+                    if key in entry:
+                        entry[key] = None

@@ -32,7 +32,8 @@ from services.results.load_frames import corrected_marginal_prices
 
 
 def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_state: bool = True,
-                               lost_load_cap: dict | None = None, *, cfg=None, result_df=None) -> EconomicsComparison:
+                               lost_load_cap: dict | None = None, *, cfg=None, result_df=None,
+                               price_limit: str | None = None) -> EconomicsComparison:
     """
     Per-carrier economic summary for the Economics comparison tab.
 
@@ -409,6 +410,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                         cc_pp = _per_period_groupby(cc_t, sns, is_multi)
                         _accum(b["opex_eur"], cc_total, cc_pp)
                         _accum(b["storage_charge_cost_eur"], cc_total, cc_pp)
+                        b["charge_priced"] = True
                 except Exception:
                     pass
 
@@ -660,18 +662,22 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
             lcoe_pp[p] = _lcoe(capex_pp, cash_opex_pp, mwh)
 
         lost_prod = agg.get("lost_production_eur")
+        # assistant-assurance 17: on an integer (MIP) solve the bus duals are not prices, so every figure
+        # priced at them is withheld (None), never shown as 0: revenue, the storage charge cost, and the
+        # opex and LCOE of a carrier whose opex holds a charge cost priced at them.
+        priced_opex = bool(price_limit) and bool(agg.get("charge_priced"))
         out[c] = CarrierEconomics(
             lost_production_meur=CarrierPeriodValue(**_to_meur(lost_prod)) if isinstance(lost_prod, dict) else None,
             lost_production_flag=agg.get("lost_production_flag"),
-            revenue_meur=CarrierPeriodValue(**rev_m),
-            opex_meur=CarrierPeriodValue(**opex_m),
+            revenue_meur=None if price_limit else CarrierPeriodValue(**rev_m),
+            opex_meur=None if priced_opex else CarrierPeriodValue(**opex_m),
             gen_cost_meur=CarrierPeriodValue(**gen_cost_m),
-            storage_charge_cost_meur=CarrierPeriodValue(**storage_charge_m),
+            storage_charge_cost_meur=None if price_limit else CarrierPeriodValue(**storage_charge_m),
             curtailment_cost_meur=CarrierPeriodValue(**curtailment_m),
             lost_load_cost_meur=CarrierPeriodValue(**lost_load_m),
             capex_meur=CarrierPeriodValue(**capex_m),
             dispatch_gwh=CarrierPeriodValue(**disp_g),
-            lcoe_eur_per_mwh=CarrierPeriodValue(total=lcoe_total, by_period=lcoe_pp),
+            lcoe_eur_per_mwh=None if priced_opex else CarrierPeriodValue(total=lcoe_total, by_period=lcoe_pp),
         )
 
     # Per-Link levelised cost. Closes BLOCKER from Compare View audit
@@ -684,7 +690,8 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
     # the input cost at its bus's price, and every output port is valued at
     # its product value in `output_value_meur`, which never enters the LCOH.
     per_asset_lcoh: list[AssetLCOHEntry] = []
-    if n.links is not None and not n.links.empty:
+    # Its input electricity is priced at bus0's dual: withheld on a MIP (assistant-assurance 17).
+    if not price_limit and n.links is not None and not n.links.empty:
         links_p0 = getattr(n.links_t, "p0", None) if hasattr(n, "links_t") else None
         if links_p0 is not None and not links_p0.empty:
             for link_name in n.links.index:
@@ -859,4 +866,5 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
         # Cheapest LCOH first — surface the most competitive Link on top.
         per_asset_lcoh.sort(key=lambda e: e.lcoh_eur_per_mwh.total)
 
-    return EconomicsComparison(available=True, by_carrier=out, per_asset_lcoh=per_asset_lcoh)
+    return EconomicsComparison(available=True, unavailable_reason=price_limit or None,
+                               by_carrier=out, per_asset_lcoh=per_asset_lcoh)

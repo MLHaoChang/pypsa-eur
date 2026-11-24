@@ -405,3 +405,7 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A config that cannot be read never falls back to defaults where the defaults would show an unjudged value. It fails closed with its own reason (GK B2 (5), AA-17 A2; #1079 and #1009 applied).
 - A total over parts where any part is withheld reads not available, or is labelled as excluding that part. Test it with a mixed case, and mutate each sum helper (GK B2 (5), AA-17 S1; #1970 F1).
 - When the backend already words a flag into rendered notes, the frontend skips that flag and does not word it a second time. Pin it with a writer→reader contract test (GK B2 (5), #1935 F1).
+
+## Standing rulings (GK A (35), recorded 2026-11-24)
+
+- A pre-run gate that predicts Monte Carlo resolution judges at the draws the MC can actually reach (mc_adequacy runs adaptively to MAX_DRAWS unless max_draws is pinned), never the requested count. A comparison across points pins max_draws=draws (GK A (35), #1927, DRAW-FLOOR-1).
