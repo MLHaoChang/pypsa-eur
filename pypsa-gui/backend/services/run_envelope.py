@@ -1815,8 +1815,12 @@ def identity(ctx, exact=True):
     chain's fingerprint, the exact fingerprint (unless `exact=False`) and the
     edit counter (`dirty_state.capture`, LC-40b). A fingerprint that cannot
     be read is None."""
-    from services import dirty_state
-    found = {"fingerprint": _fingerprint(ctx), "exact": _exact(ctx) if exact else None}
+    from contextlib import nullcontext
+
+    from services import dirty_state, workflow_tools
+    # Issue 225: both forms from one walk of the network; the plain form alone walks once anyway.
+    with workflow_tools.one_input_walk() if exact else nullcontext():
+        found = {"fingerprint": _fingerprint(ctx), "exact": _exact(ctx) if exact else None}
     dirty_state.capture(found, ctx)  # no lock=: the caller holds the mutation lock (one int read)
     return found
 

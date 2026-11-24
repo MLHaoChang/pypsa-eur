@@ -3,7 +3,7 @@
 
 # Enqueuing a solve fingerprints the whole network twice
 
-Status: ready-for-agent
+Status: done
 Gated: GK B (plan first)
 Type: task
 Found by: SH-16 landing (#1594): `test_a_run_on_the_demo_data_reaches_the_hand_off` hit the harness per-tool deadline (`tool_timeout` at `solve.1`, `solve_queue_enqueue`) twice on CI.

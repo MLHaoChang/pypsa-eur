@@ -15,6 +15,7 @@ import threading
 import time
 from collections import Counter, OrderedDict
 from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Literal
 
@@ -419,13 +420,25 @@ class SensitivityCase(BaseModel):
     changes: list[SensitivityChange] = Field(min_length=1, max_length=20)
 
 
-def _exact_frame_json(frame):
+def _plain_frame_json(frame, iso=False):
+    """`frame.to_json()` (`date_format="iso"` with `iso`), the plain fingerprint's text. A frame with no columns
+    (most of a network's series) is written from an empty copy: pandas writes the same `{}` for it, without first
+    formatting every row label it never writes (issue 225)."""
+    if len(frame.columns) == 0:
+        frame = frame.iloc[:0].reset_index(drop=True)
+    return frame.to_json(date_format="iso") if iso else frame.to_json()
+
+
+def _exact_frame_json(frame, *, indexes=None):
     """Encode typed input values without pandas' JSON float rounding.
 
     The text is exactly `json.dumps` of the per-value `scalar` encoding below
     (sort_keys, default separators). Issue 225: a column or index of a plain
     numpy dtype is written straight to that text (no per-value lists, no float
-    maths), and everything else falls back to `scalar`, column by column."""
+    maths), and everything else falls back to `scalar`, column by column.
+    `indexes` (a dict the caller keeps across frames) reuses an index's text
+    for the next frame whose index has the same bytes: a network's series
+    each carry their own copy of the snapshots."""
     from datetime import date, datetime
     import numpy as np
     import pandas as pd
@@ -479,10 +492,31 @@ def _exact_frame_json(frame):
     def array(texts):
         return '[' + ', '.join(texts) + ']'
 
+    def signature(index):
+        """The index's exact bytes (type, dtype, values; a MultiIndex's levels and codes), which alone decide
+        `items`' text; None for an index of objects or extension dtypes, whose text is never reused."""
+        if isinstance(index, pd.MultiIndex):
+            levels = [signature(level) for level in index.levels]
+            if None in levels:
+                return None
+            return ('multi', tuple(levels), tuple((c.dtype.str, c.tobytes()) for c in index.codes))
+        if isinstance(index.dtype, np.dtype) and index.dtype.kind in 'iufbM':
+            values = index.to_numpy()
+            return (type(index).__name__, values.dtype.str, values.tobytes())
+        return None
+
+    def index_items(index):
+        key = signature(index) if indexes is not None else None
+        if key is None:
+            return items(index)
+        if key not in indexes:
+            indexes[key] = items(index)
+        return indexes[key]
+
     # The keys in sort_keys order, as json.dumps(..., sort_keys=True, allow_nan=False) wrote them.
     return ('{"columns": ' + json.dumps([scalar(v) for v in frame.columns.tolist()], allow_nan=False)
             + ', "dtypes": ' + json.dumps([str(v) for v in frame.dtypes])
-            + ', "index": ' + array(items(frame.index))
+            + ', "index": ' + array(index_items(frame.index))
             + ', "index_names": ' + json.dumps([scalar(v) for v in frame.index.names], allow_nan=False)
             + ', "values_by_column": ' + array(array(items(frame.iloc[:, position]))
                                                for position in range(len(frame.columns))) + '}')
@@ -546,8 +580,46 @@ def _canonical_branch_carriers(n):
             branches.loc[branches["carrier"] == "", "carrier"] = "AC"
 
 
+# Issue 225: a caller that reads both forms back to back (the run envelope's identity, the solve's stamp, the
+# results' freshness check) wraps the pair in `one_input_walk()`. Inside it the first read of a context hashes
+# both forms in one walk and keeps the other form for that context's next read of it, served once. The pair is
+# read under one lock, so nothing edits the network between the two reads; outside the scope every read walks
+# the network itself, as before.
+_ONE_WALK: ContextVar[list | None] = ContextVar("one_input_walk", default=None)
+
+
+@contextmanager
+def one_input_walk():
+    """Both input fingerprints of a context from one walk of its network, for reads made in this block."""
+    token = _ONE_WALK.set([])
+    try:
+        yield
+    finally:
+        _ONE_WALK.reset(token)
+
+
 def _network_input_fingerprint(ctx, *, exact=False):
     """Hash model inputs, excluding solver outputs so a solve can be reused."""
+    kept = _ONE_WALK.get()
+    if kept is None:
+        return _input_digests(ctx, (exact,))[exact]
+    network = ctx.network
+    for i, (owner, net, form, digest) in enumerate(kept):
+        if owner is ctx and net is network and form == exact:
+            del kept[i]
+            return digest
+    try:
+        digests = _input_digests(ctx, (False, True))
+    except Exception:  # noqa: BLE001 — the form asked for answers (or raises) on its own
+        return _input_digests(ctx, (exact,))[exact]
+    kept.append((ctx, network, not exact, digests[not exact]))
+    return digests[exact]
+
+
+def _input_digests(ctx, forms):
+    """`{exact: digest}` for each form in `forms` (False: plain, True: exact), from one private copy and one
+    pass over it: the copy, the topology and every read outside the frames are shared, and each form's parts
+    are the text and order its own hash has always had."""
     # PyPSA assigns a slack control while solving. Canonicalise controls on a
     # private copy, retaining user PV/slack choices, rather than mistaking the
     # deterministic PQ→Slack assignment for a parameter edit.
@@ -559,55 +631,66 @@ def _network_input_fingerprint(ctx, *, exact=False):
     for subnet in n.sub_networks.obj:
         subnet.find_bus_controls()
     _canonical_branch_carriers(n)
-    def encode(frame):
-        return _exact_frame_json(frame) if exact else frame.to_json(date_format="iso")
+    parts = {exact: [] for exact in forms}
 
-    if exact:
-        parts = ['exact-network-input/1', encode(n.snapshots.to_series().to_frame()),
-                 encode(n.snapshot_weightings), encode(n.investment_period_weightings)]
-    else:
+    def both(text):
+        for form in parts.values():
+            form.append(text)
+
+    indexes = {}  # the exact form's encoded indexes, by their bytes (see `_exact_frame_json`)
+
+    def frame(value, iso=False):
+        """A frame as each form writes it: `_plain_frame_json` or `_exact_frame_json`."""
+        for exact, form in parts.items():
+            form.append(_exact_frame_json(value, indexes=indexes) if exact else _plain_frame_json(value, iso))
+
+    if True in parts:
+        parts[True].extend(['exact-network-input/1', _exact_frame_json(n.snapshots.to_series().to_frame()),
+                            _exact_frame_json(n.snapshot_weightings),
+                            _exact_frame_json(n.investment_period_weightings)])
+    if False in parts:
         # Preserve existing run/chart/cache identities byte-for-byte.
-        parts = [n.snapshots.to_series().to_json(date_format="iso"), n.snapshot_weightings.to_json(),
-                 n.investment_period_weightings.to_json()]
+        parts[False].extend([n.snapshots.to_series().to_json(date_format="iso"), n.snapshot_weightings.to_json(),
+                             n.investment_period_weightings.to_json()])
     # The goal fields the LP never reads stay out (W3b-R), so a saved goal
     # leaves this fingerprint, and every one computed before it, unchanged.
-    parts.append(json.dumps(goal_free_config(ctx.solver_state["solver_config"]),
-                            sort_keys=True, default=str))
+    both(json.dumps(goal_free_config(ctx.solver_state["solver_config"]),
+                    sort_keys=True, default=str))
     for component in n.components:
         defaults = component.defaults
         unused = _unused_extra_ports(component)
         columns = [name for name in defaults.index if "Input" in str(defaults.at[name, "status"]) and name in component.static.columns
                    and name not in unused]
-        if exact:
-            parts.append(str(component.name))
-            parts.append(_exact_frame_json(defaults.loc[columns, ['type', 'unit', 'status']]))
-        parts.append(_exact_frame_json(component.static[columns]) if exact else component.static[columns].to_json())
+        if True in parts:
+            parts[True].append(str(component.name))
+            parts[True].append(_exact_frame_json(defaults.loc[columns, ['type', 'unit', 'status']]))
+        frame(component.static[columns])
         for name in sorted(component.dynamic):
             if name in defaults.index and "Input" in str(defaults.at[name, "status"]) and name not in unused:
-                parts.append(encode(component.dynamic[name]))
+                frame(component.dynamic[name], iso=True)
     # AS-02: a split storage's custom Store columns (hours, C-rate) change the
     # LP. Appended only when a Store carries them, so the fingerprint of a
     # network without one stays byte-identical.
     from services.solver.split_storage import split_storage_tags
     tags = split_storage_tags(n)
     if tags is not None:
-        parts.append("split-storage/1")
-        parts.append(_exact_frame_json(tags) if exact else tags.to_json())
+        both("split-storage/1")
+        frame(tags)
     # AS-03: the envelope-floor flags and run-hour caps, likewise only when present.
     from services.solver.envelope_floors import GENERATOR_COLUMNS, STORE_COLUMNS
-    for frame, cols in ((n.stores, STORE_COLUMNS), (n.generators, GENERATOR_COLUMNS)):
-        present = [c for c in cols if c in frame.columns]
+    for table, cols in ((n.stores, STORE_COLUMNS), (n.generators, GENERATOR_COLUMNS)):
+        present = [c for c in cols if c in table.columns]
         if present:
-            parts.append("envelope-floors/1")
-            parts.append(_exact_frame_json(frame[present]) if exact else frame[present].to_json())
+            both("envelope-floors/1")
+            frame(table[present])
     # AS-02, template-e2e 02b: the energization schedule in MW, which a solve turns into p_max_pu
     # (`energization.apply_energization`). Not a PyPSA input, so the loop above skips it: a schedule edited or
     # uploaded left the fingerprint as it was. Appended only when the column holds a value.
     from services.adequacy.energization import energization_frame
     schedule = energization_frame(n)
     if schedule is not None and schedule.notna().any().any():
-        parts.append("energization/1")
-        parts.append(encode(schedule))
+        both("energization/1")
+        frame(schedule, iso=True)
     # AS-02, homer-parity 02a: a generator fuel curve's inputs, which the solve staging turns into marginal_cost
     # and stand_by_cost (both already hashed as PyPSA columns). Appended only when present.
     # homer-parity 02b: the O&M per running hour rides in the same block (a lifetime in running hours is the
@@ -615,38 +698,38 @@ def _network_input_fingerprint(ctx, *, exact=False):
     from services.fuel_curve import LP_COLUMNS as FUEL_CURVE_COLUMNS
     present = [c for c in FUEL_CURVE_COLUMNS if c in n.generators.columns]
     if present:
-        parts.append("fuel-curve/1")
-        parts.append(_exact_frame_json(n.generators[present]) if exact else n.generators[present].to_json())
+        both("fuel-curve/1")
+        frame(n.generators[present])
     # TCU 08: a composite asset's investment parts, which the solve staging turns into capital_cost, fom_cost and
     # lifetime (hashed as PyPSA columns). A backstop for a writer that sets a part without re-deriving (the
     # legacy Excel sheet import). Appended only when a part column holds a value.
     from services.asset_schema.schema import CLASS_ATTR, COMPOSITE, part_columns
     for comp_class in COMPOSITE:
-        frame = getattr(n, CLASS_ATTR[comp_class])
-        present = [c for c in part_columns(comp_class) if c in frame.columns]
-        if present and frame[present].notna().any().any():
-            parts.append(f"composite-parts/{comp_class}/1")
-            parts.append(_exact_frame_json(frame[present]) if exact else frame[present].to_json())
+        table = getattr(n, CLASS_ATTR[comp_class])
+        present = [c for c in part_columns(comp_class) if c in table.columns]
+        if present and table[present].notna().any().any():
+            both(f"composite-parts/{comp_class}/1")
+            frame(table[present])
     # AS-05: the PCS/STATCOM tags and their costs change the LP rows and the
     # objective. Appended only when a Store or Link carries one.
     from services.solver.pcs_statcom import pcs_statcom_tags
     for label, tags in zip(("pcs-statcom-stores/1", "pcs-statcom-links/1"), pcs_statcom_tags(n)):
         if tags is not None:
-            parts.append(label)
-            parts.append(_exact_frame_json(tags) if exact else tags.to_json())
+            both(label)
+            frame(tags)
     # AS-06: the sizing loop's cut tags, likewise only when a Store or Link carries one.
     from services.solver.sizing_cuts import sizing_cuts_tags
     for label, tags in zip(("sizing-cuts-stores/1", "sizing-cuts-links/1"), sizing_cuts_tags(n)):
         if tags is not None:
-            parts.append(label)
-            parts.append(_exact_frame_json(tags) if exact else tags.to_json())
+            both(label)
+            frame(tags)
     # DC 07 S2: the curtailable load's price, share and duration come from the saved DC
     # spec, outside the network and the config; appended only when curtailment is on.
     from services.solver import dc_curtailment as _dcc
     terms = _dcc.terms_for(getattr(ctx, "storage_dir", None))
     if terms is not None:
-        parts.append("dc-curtailment/1")
-        parts.append(json.dumps([terms.price, terms.share, terms.max_duration_h]))
+        both("dc-curtailment/1")
+        both(json.dumps([terms.price, terms.share, terms.max_duration_h]))
     # DC 06: the reserve rows read floors from the saved DC spec, outside the network
     # and the config; appended only when the config has reserve products.
     from services.solver import reserve_products as _rp
@@ -657,25 +740,26 @@ def _network_input_fingerprint(ctx, *, exact=False):
     else:
         invalid = False
     if products or invalid:
-        parts.append("reserve-products/1")
+        both("reserve-products/1")
         if invalid:
-            parts.append("invalid")
+            both("invalid")
         else:
             floors, strings = _rp.derive_backup(
                 n, getattr(ctx, "storage_dir", None),
                 _rp.attested_of(ctx.solver_state["solver_config"]))
-            parts.append(json.dumps({"inputs": _rp.inputs_digest(products, floors),
-                                     "strings": sorted(strings)}, sort_keys=True))
+            both(json.dumps({"inputs": _rp.inputs_digest(products, floors),
+                             "strings": sorted(strings)}, sort_keys=True))
     # DC 07: an operational run keys on the capacity run's recorded sizes, so a
     # new plan makes it stale (C7). Appended only for an operational run.
     from services.solver import operational as _op
     digest = _op.sizes_digest(n, ctx.solver_state["solver_config"])
     if digest is not None:
-        parts.append("operational-sizes/1")
-        parts.append(digest)
-    parts.extend(str(key) + (encode(series.to_frame()) if exact else series.to_json(date_format="iso"))
-                 for key, series in sorted(ctx.user_ts.items()))
-    return hashlib.sha256("\n".join(parts).encode()).hexdigest()
+        both("operational-sizes/1")
+        both(digest)
+    for exact, form in parts.items():
+        form.extend(str(key) + (_exact_frame_json(series.to_frame()) if exact else series.to_json(date_format="iso"))
+                    for key, series in sorted(ctx.user_ts.items()))
+    return {exact: hashlib.sha256("\n".join(form).encode()).hexdigest() for exact, form in parts.items()}
 
 
 _SWEEP_LOCK = threading.Lock()
@@ -963,5 +1047,6 @@ def _record_solve_inputs(network, config):
         ctx = PyPSAService.build_context()
         ctx.network = network
         ctx.solver_state["solver_config"] = config
-    network.meta["assistant_solve_input_fingerprint"] = _network_input_fingerprint(ctx)
-    network.meta["assistant_solve_exact_input_fingerprint"] = _network_input_fingerprint(ctx, exact=True)
+    with one_input_walk():  # issue 225
+        network.meta["assistant_solve_input_fingerprint"] = _network_input_fingerprint(ctx)
+        network.meta["assistant_solve_exact_input_fingerprint"] = _network_input_fingerprint(ctx, exact=True)
