@@ -134,6 +134,10 @@ function PackPreview({ pack, products, onApplied, onClose }: {
   })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // A stale refusal (UX 3): the plan on screen is out of date, so it is fetched
+  // again and Apply stays off until the new plan lands; a second click never
+  // re-sends the refused digest.
+  const [stale, setStale] = useState(false)
   const plan = preview.data
   const named = namedProducts(products, pack.products)
 
@@ -141,10 +145,17 @@ function PackPreview({ pack, products, onApplied, onClose }: {
     if (!plan) return
     setBusy(true)
     setError(null)
+    setStale(false)
     try {
       onApplied(await marketPacksApi.apply(pack.id, plan.pack_hash, plan.plan_digest))
     } catch (e) {
-      setError(`Nothing was applied. ${refusalText(e)}`)
+      const code = (e as { response?: { data?: { detail?: { code?: unknown } } } })?.response?.data?.detail?.code
+      if (code === 'market_pack_stale') {
+        setStale(true)
+        await preview.refetch()
+      } else {
+        setError(`Nothing was applied. ${refusalText(e)}`)
+      }
     } finally {
       setBusy(false)
     }
@@ -162,7 +173,7 @@ function PackPreview({ pack, products, onApplied, onClose }: {
           <p className="text-[11px]" data-testid="mp-preview-totals">{totals(plan)}</p>
           <div className="flex items-center gap-2">
             {plan.changes.length > 0 && (
-              <button type="button" disabled={busy} data-testid="mp-apply"
+              <button type="button" disabled={busy || preview.isFetching || preview.isError} data-testid="mp-apply"
                       className="px-2 py-0.5 rounded bg-accent text-on-accent text-[11px] disabled:opacity-40"
                       onClick={() => { void apply() }}>Apply {pack.label}</button>)}
             <button type="button" className="px-2 py-0.5 text-[11px]" onClick={onClose}>Cancel</button>
@@ -170,6 +181,9 @@ function PackPreview({ pack, products, onApplied, onClose }: {
               Nothing to apply: every value already matches the pack or is yours.</span>}
           </div>
           {error && <p role="alert" className="text-[11px] text-danger" data-testid="mp-apply-refused">{error}</p>}
+          {stale && <p role="status" className="text-[11px] text-warn" data-testid="mp-apply-stale">
+            {preview.isFetching ? 'Changed since you looked, so nothing was applied. Working out the changes again…'
+              : 'Changed since you looked, so nothing was applied. The list below is up to date.'}</p>}
           <PlanTable plan={plan} products={named} />
           {plan.kept.length > 0 && (
             <ul className="list-disc pl-4 text-[11px] text-muted" data-testid="mp-preview-kept">

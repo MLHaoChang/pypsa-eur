@@ -225,6 +225,47 @@ describe('MarketPackCard: preview and apply', () => {
     expect(screen.queryByTestId('mp-preview')).toBeNull()
   })
 
+  it('after a stale refusal fetches the plan again, keeps Apply off until it lands, then sends the new digest', async () => {
+    const stale = { response: { status: 409, data: { detail: {
+      error_kind: 'market_pack_stale', code: 'market_pack_stale',
+      message: 'The pack or the commercial settings changed since the preview; preview it again.' } } } }
+    api.apply.mockRejectedValueOnce(stale).mockResolvedValueOnce({ ...PLAN({ plan_digest: 'e'.repeat(64) }), changed: 1 })
+    let land: (p: MarketPackPlan) => void = () => {}
+    const { container } = wrap(<MarketPackCard cfg={CFG()} />)
+    fireEvent.click(await screen.findByTestId('mp-preview-no-1-2026'))
+    await screen.findByTestId('mp-preview-table')
+    api.preview.mockReturnValueOnce(new Promise<MarketPackPlan>(r => { land = r }))
+    fireEvent.click(screen.getByTestId('mp-apply'))
+    const note = await screen.findByTestId('mp-apply-stale')
+    expect(note.textContent).toContain('Changed since you looked, so nothing was applied.')
+    expect(screen.queryByTestId('mp-apply-refused')).toBeNull()
+    await waitFor(() => expect(api.preview).toHaveBeenCalledTimes(2))
+    // The refused plan is still on screen while the new one loads: Apply stays off.
+    expect((screen.getByTestId('mp-apply') as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.click(screen.getByTestId('mp-apply'))
+    expect(api.apply).toHaveBeenCalledTimes(1)
+    land(PLAN({ plan_digest: 'e'.repeat(64) }))
+    await waitFor(() => expect((screen.getByTestId('mp-apply') as HTMLButtonElement).disabled).toBe(false))
+    expect(screen.getByTestId('mp-apply-stale').textContent).toContain('The list below is up to date.')
+    fireEvent.click(screen.getByTestId('mp-apply'))
+    await screen.findByTestId('mp-receipt')
+    expect(api.apply).toHaveBeenLastCalledWith('no-1-2026', 'fedcba9876543210', 'e'.repeat(64))
+    noKeys(container)
+  })
+
+  it('keeps Apply off when the plan cannot be fetched again after a stale refusal', async () => {
+    api.apply.mockRejectedValueOnce({ response: { status: 409, data: { detail: {
+      error_kind: 'market_pack_stale', code: 'market_pack_stale', message: 'changed' } } } })
+    wrap(<MarketPackCard cfg={CFG()} />)
+    fireEvent.click(await screen.findByTestId('mp-preview-no-1-2026'))
+    await screen.findByTestId('mp-preview-table')
+    api.preview.mockRejectedValueOnce({ response: { status: 500, data: {} } })
+    fireEvent.click(screen.getByTestId('mp-apply'))
+    await screen.findByTestId('mp-preview-refused')
+    expect((screen.getByTestId('mp-apply') as HTMLButtonElement).disabled).toBe(true)
+    expect(api.apply).toHaveBeenCalledTimes(1)
+  })
+
   it('shows a refused apply as a plain sentence and keeps the preview', async () => {
     api.apply.mockRejectedValue({ response: { status: 409, data: { detail: {
       error_kind: 'market_pack_needs_saved_project', code: 'market_pack_needs_saved_project',
