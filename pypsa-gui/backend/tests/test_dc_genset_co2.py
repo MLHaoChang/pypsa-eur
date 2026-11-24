@@ -531,7 +531,9 @@ def test_a_zero_efficiency_emitter_is_not_priced(monkeypatch):
     assert np.isfinite(step["genset_2"]).all() and (step["genset_2"] == 0.0).all()
 
 
-def test_a_fuel_curve_generator_keeps_its_slope_price_over_an_override(monkeypatch):
+def test_an_overridden_fuel_curve_generator_is_priced_at_its_override(monkeypatch):
+    # GK A (36) @a8f34cb4: the override wins on every surface; the slope is only
+    # the fallback on a snapshot the override leaves empty.
     from services import fuel_curve
     from services.solver_service import SolverConfig
 
@@ -544,7 +546,82 @@ def test_a_fuel_curve_generator_keeps_its_slope_price_over_an_override(monkeypat
         lambda row: 2.0 if row.name == "genset_1" else real(row),
     )
     step, during = _price_step(n, SolverConfig(co2_price=PRICE))
-    assert step["genset_1"].to_numpy() == pytest.approx(
-        PRICE * GAS_T_PER_MWH_FUEL * 2.0
-    )
-    assert "genset_1" not in during
+    assert step["genset_1"].to_numpy() == pytest.approx(PRICE * 0.30)
+    assert "genset_1" in during
+
+
+# ── GK A (36) @a8f34cb4: an override wins over a fuel curve, on every surface ──
+
+W_H = 8760 / 168  # each staged snapshot's weight
+
+
+def _grid_step(n, cfg):
+    return _price_step(n, cfg)[0]["grid_supply"]
+
+
+def _five(n, cfg):
+    """The tonnes compare, results, asset results and diagnostics count (t)."""
+    from services.asset_results import compute as C
+    from services.solver.diagnostics import _log_cost_decomposition_post_solve
+
+    cmp_, res = _both(n)
+    ctx = C.build_ctx(n, "Generator", "grid_supply", source="lopf", sns=n.snapshots)
+    lines: list[str] = []
+    _log_cost_decomposition_post_solve(n, cfg, n.snapshots, None, lines.append)
+    row = next(x for x in lines if "2027:" in x)
+    return cmp_.total_kt.total * 1000.0, res["total_tCO2"], C.gen_co2_total(ctx), row
+
+
+def test_an_overridden_curve_genset_counts_its_override_and_the_slope_only_on_a_gap():
+    from services.solver_service import SolverConfig
+
+    n, half = _hand_net()
+    n.generators.loc["grid_supply", "fuel_curve_slope"] = 3.0
+    gap = half[0]
+    n.generators_t["eh_co2_t_per_mwh"].loc[gap, "grid_supply"] = float("nan")
+    # 83 snapshots at the override 0.10, one at the carrier's 0.35 x the slope 3.
+    want = 3 * W_H * 1000.0 * (83 * 0.10 + 1 * 0.35 * 3.0)
+    cfg = SolverConfig(co2_price=PRICE)
+    cmp_t, res_t, asset_t, diag = _five(n, cfg)
+    assert cmp_t == pytest.approx(want, rel=1e-9)
+    assert res_t == pytest.approx(want, rel=1e-9)
+    assert asset_t == pytest.approx(want, rel=1e-9)
+    assert f"({want / 1e3:.1f} kt)" in diag
+    step = _grid_step(n, cfg)
+    assert step.loc[half[1:]].to_numpy() == pytest.approx(PRICE * 0.10)
+    assert step.loc[gap] == pytest.approx(PRICE * 0.35 * 3.0)
+
+
+@pytest.mark.parametrize("carrier", ["solar", "no_such_carrier"])
+def test_an_overridden_generator_on_a_carrier_without_co2_is_counted_and_priced(carrier):
+    from services.solver_service import SolverConfig
+
+    n, half = _hand_net()
+    n.generators.loc["grid_supply", "carrier"] = carrier
+    n.generators.loc["grid_supply", "fuel_curve_slope"] = 3.0
+    cfg = SolverConfig(co2_price=PRICE)
+    _, res_t, asset_t, _ = _five(n, cfg)
+    assert res_t == pytest.approx(HAND_T, rel=1e-9)
+    assert asset_t == pytest.approx(HAND_T, rel=1e-9)
+    assert _grid_step(n, cfg).loc[half].to_numpy() == pytest.approx(PRICE * 0.10)
+
+
+def test_the_per_period_price_does_not_divide_an_override_by_efficiency():
+    from services.solver_service import SolverConfig
+
+    n, half = _hand_net()
+    n.generators.loc["grid_supply", "efficiency"] = 0.5
+    first = int(n.snapshots.get_level_values(0)[0])
+    cfg = SolverConfig(co2_price=PRICE, co2_price_per_period={str(first): 2 * PRICE},
+                       multi_investment_periods=True)
+    step = _grid_step(n, cfg)
+    assert step.loc[half].to_numpy() == pytest.approx(2 * PRICE * 0.10)
+
+
+def test_a_zero_intensity_carrier_with_an_override_is_priced_on_the_uniform_path():
+    from services.solver_service import SolverConfig
+
+    n, half = _hand_net()
+    n.generators.loc["grid_supply", "carrier"] = "solar"
+    step = _grid_step(n, SolverConfig(co2_price=PRICE))
+    assert step.loc[half].to_numpy() == pytest.approx(PRICE * 0.10)
