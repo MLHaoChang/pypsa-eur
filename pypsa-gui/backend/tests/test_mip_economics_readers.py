@@ -445,19 +445,43 @@ def test_a_mip_withholds_the_priced_keys_of_every_period_too():
     assert [e["energy_mwh"] for e in row["by_period"]] == [1.0, 2.0]
 
 
-def test_a_case_with_no_economics_rows_is_not_read_as_withheld(lp, monkeypatch):
-    """When the live frames answer no rows (`econ` None), the case reads market revenue
-    as not established, never as a price-limit withholding, and does not fail."""
+def test_an_lp_case_with_no_economics_rows_is_not_read_as_withheld(monkeypatch):
+    """When the live frames answer no rows (`econ` None) on an LP, the case is not
+    flagged as withheld for a price limit, and does not fail."""
+    import harness.solve_validity as sv
     from services.study import engine_adapter
     from tests.test_engine_adapter_case_golden import OPTIONS, _bundle
 
-    mr = engine_adapter._market(lp, None)
-    assert "annual_value" not in (mr.unavailable or {}) or (
-        mr.unavailable["annual_value"] != DUALS_NOT_MARGINAL
+    _pending = (  # noqa: F841 — an open defect, not pinned here
+        "issue 27: an LP's not-established market revenue reads 0.0 in its operating "
+        "years (`annual_value or 0.0`); it should be None with a flag."
     )
     monkeypatch.setattr(engine_adapter, "_econ_rows", lambda *a, **k: (None, None))
+    monkeypatch.setattr(sv, "mip_price_limit", lambda n, cfg: None)
     view = _bundle(OPTIONS[0]).view
     assert view.market_revenue_at_duals.unavailable.get("annual_value") != (
         DUALS_NOT_MARGINAL
     )
     assert all("market_revenue_at_duals" not in y.unavailable for y in view.years)
+
+
+def test_a_mip_case_with_no_economics_rows_still_withholds_market_revenue(monkeypatch):
+    """GK B2 F2: when the live asset economics raise on a MIP (`econ` None), the case
+    judges the network: market revenue and each operating year's column are None
+    with the reason, never an unflagged 0.0. Year 0 stays the build year's 0.0."""
+    import harness.solve_validity as sv
+    from services.study import engine_adapter
+    from tests.test_engine_adapter_case_golden import OPTIONS, _bundle
+
+    monkeypatch.setattr(engine_adapter, "_econ_rows", lambda *a, **k: (None, None))
+    monkeypatch.setattr(sv, "mip_price_limit", lambda n, cfg: DUALS_NOT_MARGINAL)
+    view = _bundle(OPTIONS[0]).view
+    mr = view.market_revenue_at_duals
+    assert mr.annual_value is None
+    assert mr.unavailable == {"annual_value": DUALS_NOT_MARGINAL}
+    y0, *rest = view.years
+    assert y0.market_revenue_at_duals == 0.0
+    assert rest
+    for y in rest:
+        assert y.market_revenue_at_duals is None
+        assert y.unavailable["market_revenue_at_duals"] == DUALS_NOT_MARGINAL

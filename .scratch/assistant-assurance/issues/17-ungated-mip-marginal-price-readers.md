@@ -100,3 +100,7 @@ Conditions:
 UX 28 placement GO: one cell wording ("Not available (integer solve)", from sectionWords `short`, pinned by a parity test). A total that skips a withheld part says so beside the figure. Expert shows no less than Guided. No toast. Before/after shots in Guided and Expert, light and dark, on each PR.
 
 Follow-up: `27-study-report-lp-flags-untested.md`. These are the LP-path flags in the study report that survived slice 1's mutant run; GK ruled they don't block #1957.
+
+GK B2 on #1970 (2a), non-blocking edges, recorded:
+- A MIP study run recorded before #1970, with no `price_limit` key in its stored asset economics, still shows its stored 0.0 market rows through `engine_adapter._econ_rows`. It is the same known edge accepted in slice 1 (A4): a stored record is not re-judged.
+- The scenario workbook (`results_workbook/overview.py:136`, `views_network.py:176`) still calls `compute_economics_by_carrier` without the limit. It is deferred to 2b by the coordinator's ruling (after template-e2e 30, #1963) and is a 2b condition (S3).

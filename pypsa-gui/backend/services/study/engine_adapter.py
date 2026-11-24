@@ -643,13 +643,13 @@ def _econ_row(econ: Mapping | None, cls: str, name: str) -> Mapping | None:
     return None
 
 
-def _market(n, econ) -> MarketRevenueAtDuals:
+def _market(n, econ, limit: str | None = None) -> MarketRevenueAtDuals:
     """The option's assets' revenue at the LP's bus prices (BC-7), reported."""
     from services.study import packs
 
     # assistant-assurance 17: on an integer (MIP) solve the rows' revenue and charge cost
     # are withheld (None), never read as 0.
-    if (limit := (econ or {}).get("price_limit")):
+    if limit:
         return MarketRevenueAtDuals(annual_value=None, by_asset={},
                                     unavailable={"annual_value": limit})
     by: dict[str, float] = {}
@@ -943,6 +943,14 @@ def option_case(n, cfg, ledger: AssumptionsLedger, *, compiled: C.CompiledCommer
         bill_meter(n, compiled, _served_load(n), np.zeros(len(n.snapshots)), fidelity=fidelity)
 
     econ, econ_ref = _econ_rows(n, cfg, asset_economics)
+    # The run's price limit: the rows' own; when the live frames gave no rows, the
+    # network's, so a MIP without rows still reads withheld, never 0.0 (GK B2 F2). A
+    # stored record without the key (a run from before AA-17) stays as it was (A4).
+    econ_limit = (econ or {}).get("price_limit")
+    if econ is None and asset_economics is None:
+        from harness.solve_validity import mip_price_limit
+
+        econ_limit = mip_price_limit(n, cfg)
     sizes = {}
     for comp, name in (("storage_units", packs.BATTERY_NAME), ("generators", packs.PV_NAME)):
         df = getattr(n, comp)
@@ -987,7 +995,7 @@ def option_case(n, cfg, ledger: AssumptionsLedger, *, compiled: C.CompiledCommer
     ctx = {"case_id": f"{study_id}.{option_id}", "study_id": study_id, "option_id": option_id,
            "fidelity": fidelity, "sources": sources, "provenance": provenance, "bills": got,
            "finance": finance, "notes": tuple(notes), "tail_notes": tuple(tail),
-           "market": _market(n, econ), "econ_price_limit": (econ or {}).get("price_limit"),
+           "market": _market(n, econ, econ_limit), "econ_price_limit": econ_limit,
            "upfront_gaps": gaps, "sizes": sizes,
            "centre_values": {k: float(v) for k, v in packs.ledger_values(ledger).items()
                              if v is not None}}
