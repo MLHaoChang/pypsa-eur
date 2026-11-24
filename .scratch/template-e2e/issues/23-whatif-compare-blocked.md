@@ -30,3 +30,6 @@ Checked by code reading only; the app was not re-run. Three slices (PR-SIZE-1): 
   - (c) reproduced on master (DC1's Scenarios list showed MG1 and MG1-kid, count 4). Fixed here: the panel lists only the open project's tree (root plus descendants); with DC1 open it now shows 2.
 - Not walked: hospital, IPP and the staged templates (the fix is template-independent: it filters by the parent pointer).
 - The genset_1 Guided-drawer persistence point was not re-walked in this slice, so no new issue was filed for it.
+- GK B2 notes on #1953 (non-blocking):
+  - Switching to a project in another tree now prunes compare selections and collapse state that belong to the old tree. This is intended: both are session state keyed by project name, and a pick for a project no longer listed could not be compared from this panel.
+  - The whole workspace list shows briefly while the open project is not yet in the loaded list (first load, or just after opening a project). Known and left as is: the list is the fallback until the open project resolves. A follow-up could show nothing instead.
