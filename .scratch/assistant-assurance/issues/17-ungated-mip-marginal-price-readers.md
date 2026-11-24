@@ -31,16 +31,16 @@ Checked by code reading only. Still true: only `checked_charts.py` and `harness/
 
 ## Readers on master 84857588 (2026-11-24)
 
-Gate: `harness/solve_validity.mip_price_limit(n, config)` (classify's MIP test).
+Gate: `harness/solve_validity.mip_price_limit(n, config)` (classify's MIP test). `solver_service` records it in `last_solve_settings["price_limit"]` (only when set), and `solved_price_limit(state, n)` reads that record. A saved project in Compare is judged by `routers/compare._price_limit`, which fails closed with `solver_config_unreadable`.
 
 Slice 1 (backend), gated:
 - `services/results/prices_digest.py` (live and retained digest): unavailable with reason `mip_duals_not_marginal`.
 - `services/compare/prices.py`: `PricesComparison.unavailable_reason`, against the project's own saved config.
-- `services/compare/economics.py`: `EconomicsComparison.price_limit`, and `per_asset_lcoh` is emptied.
 - `services/results/lcoh.py` and the EH TEA LCOH (`services/adequacy/eh_report.py`).
 - The decision-study report (`services/study/report.py`, via `runner._read_option`): LCOS incl. charging and market revenue at duals.
 
 Slice 2 (Results UI and the rest), still open:
+- `services/compare/economics.py` and `results/economics_by_carrier.py`: revenue and storage charge cost become nullable on a MIP, and `per_asset_lcoh` is withheld, together with the Compare and Results economics UI (GK B2 A3: no numeric placeholder before the UI renders null)
 - `services/results/prices.py` (prices, price_drivers)
 - `carrier_kpis.py`
 - `asset_economics.py`
@@ -58,3 +58,13 @@ Safe:
 - `checked_charts.py` renders `price_calculations`, which is already gated.
 - `user_timeseries.py`, `economics.py`, `routers/projects.py` and `models/schemas.py` hold comments or docstrings only.
 - `smoke/qa_e2e.py` checks only that the import is callable.
+
+## GK B2 plan GO conditions (2026-11-24)
+
+- **A1:** Gate on the solve that made the prices, not on today's config. The limit is recorded at solve time in `last_solve_settings`.
+- **A2:** Fail closed when a saved config cannot be read (rulings #1079 and #1009).
+- **A3:** No numeric 0 for an unjudged value. Compare economics moved to slice 2, with its UI.
+- **A4:** An LP report and its detail stay byte-equal to master's. Reports stored without `price_limit` keep working.
+- **A5:** Each gate is killed by a test. The killing test is named in the PR body.
+- **A6:** If a new reason reaches a chat tool result, add a kind fragment. Run the manifest, ChatPanel and inventory checks at the trial merge.
+- **A7:** Keep the reasons the "safe" readers are safe.
