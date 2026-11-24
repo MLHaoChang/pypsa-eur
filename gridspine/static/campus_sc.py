@@ -50,11 +50,11 @@ def judge(ik_ka: float, ip_ka: float, rated_ka: float, f_hz: int):
     return True, f"Ik'' {ik_ka:.2f} kA and peak {ip_ka:.2f} kA within {rated_ka:g} kA / {peak_rated:.2f} kA"
 
 
-def campus_fault_levels(campus, installed) -> pd.DataFrame:
+def campus_fault_levels(campus, installed, *, island=False) -> pd.DataFrame:
     """One row per bus: ``bus``, ``vn_kv``, ``ikss_max_ka``, ``ip_max_ka``,
     ``ikss_min_ka``, ``rated_ka``, ``rating_source``, ``adequate``,
-    ``detail``."""
-    net = machine_net(campus, installed)
+    ``detail``. ``island`` takes the grid out (GC-08b)."""
+    net = machine_net(campus, installed, island=island)
     sc.calc_sc(net, case="max", ip=True)
     ik_max = net.res_bus_sc["ikss_ka"].copy()
     ip_max = net.res_bus_sc["ip_ka"].copy()

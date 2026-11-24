@@ -111,13 +111,22 @@ def _cell(r, column: str, kind):
     return kind(r[column]) if column in r else ""
 
 
+#: ``gridspine.static.ssti_uif.ROLE_ISLAND`` for a build without gridspine, so a saved run's island rows
+#: still print; ``test_grid_compliance_ssti_island`` holds it equal to the engine's.
+FALLBACK_ROLE_ISLAND = "island converter bus (not judged)"
+
+
 def _uif_table(row: dict, frame, case: str, path: str) -> Table:
+    try:
+        from gridspine.static.ssti_uif import ROLE_ISLAND
+    except (
+        ImportError
+    ):  # a build without gridspine: the engine's role, pinned by a test
+        ROLE_ISLAND = FALLBACK_ROLE_ISLAND
+
     rows = []
-    judged = (
-        frame[frame["role"].astype(str) == "converter bus"]
-        if frame is not None and "role" in frame
-        else None
-    )
+    role = frame["role"].astype(str) if frame is not None and "role" in frame else None
+    judged = frame[role == "converter bus"] if role is not None else None
     for _, r in judged.iterrows() if judged is not None else ():
         uif, threshold = _apart(r.get("uif"), r.get("threshold"))
         if case == "islanded":
@@ -135,6 +144,21 @@ def _uif_table(row: dict, frame, case: str, path: str) -> Table:
                 uif,
                 threshold,
                 verdict,
+                _cell(r, "note", _note),
+            ]
+        )
+    # GC-08b: the island cases' rows are printed, not judged, until the scorecard judges them (GC-08e)
+    island = frame[role == ROLE_ISLAND] if role is not None else None
+    for _, r in island.iterrows() if island is not None else ():
+        uif, threshold = _apart(r.get("uif"), r.get("threshold"))
+        rows.append(
+            [
+                _cell(r, "bus", _text),
+                _cell(r, "case", _text),
+                _cell(r, "machine", _text),
+                uif,
+                threshold,
+                NOT_JUDGED,
                 _cell(r, "note", _note),
             ]
         )

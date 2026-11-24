@@ -28,6 +28,21 @@ pandapower) with the machines alone energised, in its max and min cases (a
 converter's current-source infeed would raise SC_tot and understate UIF); the verdict is the worst over buses,
 cases and machines, since a weak grid raises a machine's share.
 
+**Island (GC-08b).** A campus whose PCC tie is normally open
+(``tie_normally_open``) is also screened with the grid out (a closed-tie campus
+that declares island requirements waits for GC-08e), in the cases ``ISLAND_CASES``: SC_i and SC_tot then come from the
+machines alone, so a lone genset has SC_i = 0 and UIF = S_plant / S_i. Counting
+the grid's infeed there would understate the islanded UIF many times over. The
+island rows carry their own case label, IEC 60909's c for that case and the role
+``ROLE_ISLAND``. The PCC information row is left out of the island cases: with no
+grid there is no infeed to dominate it, and the PCC is screened, if at all, as a
+converter bus. A
+bus no machine feeds islanded (SC_tot 0) reads "not evaluated", never clear.
+``UifStudy.island_verdict`` is the worst over the island rows (any "not
+evaluated" row keeps it from clearing); ``verdict`` and ``worst_uif`` stay the
+grid cases' alone, so the readers of GC-08 judge what they judged before
+(GC-08e moves them onto the island rows).
+
 Screening only: the binding answer is the EMT study.
 """
 
@@ -46,11 +61,18 @@ DEFAULT_THRESHOLD = 0.1
 SC_TOLERANCE = 1e-6
 PROFILE_KEY = "ssti_uif_threshold"
 CASES = ("max", "min")
+#: The island cases (grid out): their label and the IEC 60909 case they run.
+ISLAND_CASES = {"island max": "max", "island min": "min"}
 #: Unit kinds that connect through a converter (the load is rectifier-fed).
 CONVERTER_KINDS = ("bess", "pv", "wind", "fuel_cell", "ups", "load")
 MACHINE_KIND = "genset"
 ROLE_CONVERTER = "converter bus"
 ROLE_PCC = "PCC (information)"
+#: An island-case row at a converter bus: computed, not yet judged by the scorecard or pack (GC-08e).
+ROLE_ISLAND = "island converter bus (not judged)"
+NO_ISLAND_SOURCE = (
+    "no synchronous machine feeds this bus with the grid out: SC_tot is 0, so no UIF"
+)
 PLANT_NOTE = (
     "S_plant is the sum at the bus of each converter-interfaced unit's s_mva and the rectifier-fed load's "
     "p_mw / pf (conservative)"
@@ -81,9 +103,13 @@ COLUMNS = (
 @dataclasses.dataclass
 class UifStudy:
     rows: pd.DataFrame
-    verdict: str  # "flag", "clear" or "not evaluated"
+    verdict: str  # "flag", "clear" or "not evaluated": the grid cases (GC-08) alone
     worst_uif: float
     notes: list
+    #: The island cases' own verdict and worst UIF (GC-08b); "not evaluated" for a campus that does not
+    #: ``islands``. Kept apart from ``verdict`` until the scorecard and pack judge them (GC-08e).
+    island_verdict: str = "not evaluated"
+    island_worst_uif: float = math.nan
 
 
 def _finite(name: str, v) -> float:
@@ -225,12 +251,25 @@ def _s_mva(levels: pd.DataFrame, bus: str, case: str) -> float:
     return math.sqrt(3.0) * float(row["vn_kv"]) * float(row[f"ikss_{case}_ka"])
 
 
+def islands(campus) -> bool:
+    """
+    Whether the campus is screened islanded: its PCC tie is normally open. Declared island requirements on
+    a closed tie do not count yet (GK A2 ruling; GC-08e widens it).
+    """
+    return bool(campus.tie_normally_open)
+
+
 def campus_uif(
     campus, threshold: float | None = None, *, assumed: bool = False, fault_levels=None
 ) -> UifStudy:
     """
-    The UIF screen of a built campus (module docstring). ``fault_levels(campus, installed)`` defaults to
-    ``campus_sc.campus_fault_levels``.
+    The UIF screen of a built campus (module docstring). ``fault_levels(campus, installed, island=False)``
+    defaults to ``campus_sc.campus_fault_levels``; it is called with ``island=True`` only for a campus that
+    ``islands``.
+
+    Known edge (GC-08f): with the grid out, two gensets of unequal x''d on one bus get a combined Ik'' about
+    2-4 % above the sum of each alone from ``campus_fault_levels``, so SC_tot and the UIF are overstated
+    (the safe side); with equal x''d they add exactly.
     """
     from gridspine.static.harmonic_scan import grid_c
 
@@ -251,35 +290,122 @@ def campus_uif(
     every = set(
         machines.index
     )  # the machines alone: a converter's infeed would understate UIF
-    full = fault_levels(campus, every)
-    out = {uid: fault_levels(campus, every - {uid}) for uid in machines.index}
     evaluate = [(b, s, ROLE_CONVERTER) for b, s in sorted(plants.items())] + [
         (pcc, sum(plants.values()), ROLE_PCC)
     ]
-    frames = []
-    for case in CASES:
-        for bus, s_plant, role in evaluate:
-            vn = float(full.loc[full["bus"] == bus, "vn_kv"].iloc[0])
-            ms = {
-                uid: (float(machines.at[uid, "s_mva"]), _s_mva(out[uid], bus, case))
-                for uid in machines.index
-            }
-            frames.append(
-                screen(
-                    s_plant,
-                    ms,
-                    _s_mva(full, bus, case),
-                    threshold,
-                    assumed=assumed,
-                    bus=bus,
-                    role=role,
-                    case=case,
-                    c=grid_c(vn, case),
-                    notes=[PLANT_NOTE],
-                )
+    full = fault_levels(campus, every)
+    out = {uid: fault_levels(campus, every - {uid}) for uid in machines.index}
+    states = [(full, out, {case: case for case in CASES}, evaluate)]
+    if islands(campus):
+        full_i = fault_levels(campus, every, island=True)
+        # with the grid out and no other machine, nothing feeds the fault
+        out_i = {
+            uid: fault_levels(campus, every - {uid}, island=True)
+            if every - {uid}
+            else None
+            for uid in machines.index
+        }
+        # islanded there is no grid to dominate the PCC: its information row is left out
+        states.append(
+            (
+                full_i,
+                out_i,
+                ISLAND_CASES,
+                [(b, s, ROLE_ISLAND) for b, s, _ in evaluate[:-1]],
             )
+        )
+    frames = []
+    for levels, without, cases, buses in states:
+        for label, case in cases.items():
+            for bus, s_plant, role in buses:
+                vn = float(levels.loc[levels["bus"] == bus, "vn_kv"].iloc[0])
+                sc_tot = _s_mva(levels, bus, case)
+                if role == ROLE_ISLAND and not (math.isfinite(sc_tot) and sc_tot > 0):
+                    frames.append(
+                        _unevaluated(
+                            s_plant,
+                            machines,
+                            threshold,
+                            assumed,
+                            bus,
+                            label,
+                            grid_c(vn, case),
+                        )
+                    )
+                    continue
+                ms = {
+                    uid: (
+                        float(machines.at[uid, "s_mva"]),
+                        0.0
+                        if without[uid] is None
+                        else _s_mva(without[uid], bus, case),
+                    )
+                    for uid in machines.index
+                }
+                frames.append(
+                    screen(
+                        s_plant,
+                        ms,
+                        sc_tot,
+                        threshold,
+                        assumed=assumed,
+                        bus=bus,
+                        role=role,
+                        case=label,
+                        c=grid_c(vn, case),
+                        notes=[PLANT_NOTE],
+                    )
+                )
     rows = pd.concat(frames, ignore_index=True)
     judged = rows[rows["role"] == ROLE_CONVERTER]
     worst = float(judged["uif"].max())
     verdict = "flag" if (judged["verdict"] == "flag").any() else "clear"
-    return UifStudy(rows=rows, verdict=verdict, worst_uif=worst, notes=[PLANT_NOTE])
+    island = rows[rows["role"] == ROLE_ISLAND]
+    island_verdict, island_worst = "not evaluated", math.nan
+    if not island.empty:
+        island_worst = float(
+            island["uif"].max()
+        )  # NaN rows (not evaluated) are skipped
+        if (island["verdict"] == "flag").any():
+            island_verdict = "flag"
+        elif (island["verdict"] == "clear").all():
+            island_verdict = "clear"
+    return UifStudy(
+        rows=rows,
+        verdict=verdict,
+        worst_uif=worst,
+        notes=[PLANT_NOTE],
+        island_verdict=island_verdict,
+        island_worst_uif=island_worst,
+    )
+
+
+def _unevaluated(s_plant, machines, threshold, assumed, bus, case, c) -> pd.DataFrame:
+    """The rows of an island bus that no machine feeds (``NO_ISLAND_SOURCE``): no UIF, not evaluated."""
+    limit = DEFAULT_THRESHOLD if threshold is None else _finite("threshold", threshold)
+    note = "; ".join(
+        [PLANT_NOTE, NO_ISLAND_SOURCE, *([NO_THRESHOLD] if threshold is None else [])]
+    )
+    return pd.DataFrame(
+        [
+            {
+                "bus": bus,
+                "role": ROLE_ISLAND,
+                "case": case,
+                "c": c,
+                "machine": uid,
+                "s_plant_mva": float(s_plant),
+                "s_machine_mva": float(machines.at[uid, "s_mva"]),
+                "sc_without_mva": 0.0,
+                "sc_tot_mva": 0.0,
+                "uif": math.nan,
+                "threshold": limit,
+                "verdict": "not evaluated",
+                "assumed": threshold is None or assumed,
+                "note": note,
+                "label": LABEL,
+            }
+            for uid in machines.index
+        ],
+        columns=list(COLUMNS),
+    )
