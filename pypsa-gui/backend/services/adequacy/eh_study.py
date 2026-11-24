@@ -265,7 +265,7 @@ def _stage_ens_solve(st: _Study) -> None:
 
     st.mark("ens_solve", "run", solves_charged=1)
     from services import study_solve
-    study_solve.keep(st.store, st.network)  # the workbook and run state read this solve (template-e2e 30)
+    study_solve.keep(st.store, st.network, st.cfg, sink)  # the workbook and run state read this solve (template-e2e 30)
     adequacy_report = sink.get("adequacy_report")
     st.adequacy_report = adequacy_report
     if not isinstance(adequacy_report, dict):

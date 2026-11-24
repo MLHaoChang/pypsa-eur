@@ -21,14 +21,24 @@ KEY = "eh_study_solve"
 PREFERRED = "live"  # "live": the study's solve only when the live network has none
 
 
-def keep(store: dict | None, network: Any) -> None:
-    """Remember the study's solved network (a copy, so later stages cannot change it)."""
+def keep(
+    store: dict | None, network: Any, cfg: Any = None, state: dict | None = None
+) -> None:
+    """Remember the study's solved network (a copy, so later stages cannot change it) with that
+    solve's own state: its solver config and the side-results the solve published (`state`: the
+    lost-load capture, adequacy report, solve settings, result snapshots). A reader of this solve
+    reads these, never the live `_state` (a different solve's)."""
     if store is None:
         return
     from services.adequacy.redundancy import _detach_solver_model
 
     _detach_solver_model(network)
-    store[KEY] = {"network": network.copy(), "objective": _objective(network)}
+    store[KEY] = {
+        "network": network.copy(),
+        "objective": _objective(network),
+        "cfg": cfg,
+        "state": dict(state or {}),
+    }
 
 
 def _objective(network: Any) -> float | None:
@@ -40,7 +50,7 @@ def _objective(network: Any) -> float | None:
 
 
 def fallback(ctx: Any = None) -> dict | None:
-    """`{"network", "objective"}` of the finished, unedited study's solve when the
+    """`{"network", "objective", "cfg", "state"}` of the finished, unedited study's solve when the
     live network has no dispatch of its own; None otherwise."""
     from services import study_state
     from services.dispatch_status import dispatch_status

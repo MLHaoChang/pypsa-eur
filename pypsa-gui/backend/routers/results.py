@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import dataclasses
 from contextlib import contextmanager
+import functools
 import logging
 import re
 from typing import TYPE_CHECKING, Any, Literal
@@ -3121,7 +3122,10 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
             "error_kind": "results_workbook_stale",
             "message": f"{why} Run the model again, or export the stored run instead."})
     template = _workbook_template()
-    cfg = _state.get("solver_config")
+    # A study's solve is judged by its own state (config, lost-load capture, adequacy report, settings,
+    # result snapshots): never the live `_state`, which belongs to another solve (template-e2e 30).
+    held = {} if study is None else study["state"]
+    cfg = _state.get("solver_config") if study is None else study["cfg"]
     scope = _workbook_scope(n, template)
     try:
         included = resolve_views(scope, views.split(","), all_views)
@@ -3148,14 +3152,18 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
     previous = chat_tools.acting_user_id()
     chat_tools.set_acting_user(str(user.id))
     try:
-        scenarios = _workbook_scenarios(cfg, n, freshness)
+        scenarios = _workbook_scenarios(cfg, n, freshness) if study is None else None
         blob = RW.build_results_workbook(RW.WorkbookInputs(
-            network=n, cfg=cfg, lost_load=_state.get("last_lost_load"),
-            result_df=_result_df, views=included, ic_report=report, case_state=case_state,
+            network=n, cfg=cfg,
+            lost_load=_state.get("last_lost_load") if study is None else held.get("last_lost_load"),
+            result_df=_result_df if study is None else functools.partial(_result_df, state=held),
+            views=included, ic_report=report, case_state=case_state,
             bc_report=bc_report, bc_state=bc_state,
             project=project, scope=scope, template=template, freshness=freshness,
             stored=stored, run=runs[0] if runs else None, scenarios=scenarios,
-            solved_settings=_solved_settings,
+            solved_settings=(_solved_settings if study is None
+                             else functools.partial(_solved_settings, held, n=n)),
+            solver_state=None if study is None else held,
             project_id=getattr(PyPSAService.get_active_context(), "project_uuid", None),
             project_for=_workbook_project))
     except RW.WorkbookTooLarge as exc:
