@@ -100,7 +100,7 @@ def year_fraction(n, period: Any = None) -> float:
 
 
 def row_scale(n, period: Any) -> float:
-    """t in the cap row per t/yr of the limit: years(p) × year_fraction(p) for a
+    """T in the cap row per t/yr of the limit: years(p) × year_fraction(p) for a
     period's row, year_fraction for the single-period row."""
     if period is None:
         return year_fraction(n)
