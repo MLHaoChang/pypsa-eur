@@ -43,7 +43,7 @@ def _is_renewable_carrier(name: str) -> bool:
     return any(k in carrier for k in _RENEWABLE_KW)
 
 
-def compute_carrier_kpis(n, *, result_df):
+def compute_carrier_kpis(n, *, result_df, price_limit: str | None = None):
     """
     Per-carrier KPI rows: energy, capacity factor, market value, revenue.
 
@@ -280,6 +280,13 @@ def compute_carrier_kpis(n, *, result_df):
     except Exception:
         pass
 
+    # assistant-assurance 17: on an integer (MIP) solve the bus duals are 0.0, not prices,
+    # so revenue and market value are None (never 0) and `price_limit` names why.
+    if price_limit:
+        for row in rows:
+            row["revenue_eur"] = None
+            row["market_value_eur_per_mwh"] = None
+
     # Sort by revenue desc (biggest earners first); ties broken by energy.
     rows.sort(key=lambda r: (-(r["revenue_eur"] or 0), -(r["energy_mwh"] or 0)))
-    return {"rows": rows}
+    return {"rows": rows, "price_limit": price_limit} if price_limit else {"rows": rows}

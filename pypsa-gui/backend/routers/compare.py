@@ -425,7 +425,7 @@ def get_results_summary(
     emissions = _compute_emissions_summary(temp_n, periods, is_multi, has_solve)
     economics = _compute_economics_summary(
         temp_n, periods, is_multi, has_solve, prices_from_state=False,
-        lost_load_cap=_read_lost_load_capture(src),
+        lost_load_cap=_read_lost_load_capture(src), price_limit=price_limit,
     )
     curtailment = _compute_curtailment_summary(temp_n, periods, is_multi, has_solve)
     lost_load = _compute_lost_load_summary(src, temp_n, periods, is_multi, has_solve)
@@ -528,10 +528,10 @@ def _compute_dispatch_summary(n, periods, is_multi, has_solve):
 
 
 def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_state: bool = True,
-                               lost_load_cap: dict | None = None):
+                               lost_load_cap: dict | None = None, *, price_limit: str | None = None):
     return _svc_economics._compute_economics_summary(
         n, periods, is_multi, has_solve, prices_from_state, lost_load_cap,
-        cfg=_live_solver_config(), result_df=_result_df,
+        cfg=_live_solver_config(), result_df=_result_df, price_limit=price_limit,
     )
 
 

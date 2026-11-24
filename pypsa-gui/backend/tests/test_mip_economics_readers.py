@@ -1,0 +1,235 @@
+"""The economics readers of a MIP's bus prices (assistant-assurance 17, slice 2a).
+
+On an integer (MIP) solve HiGHS returns no duals and PyPSA writes 0.0 to every
+bus price. Revenue, the storage charge cost and every figure that holds them
+(the storage carrier's opex and LCOE, an LCOS, a Link's LCOE) are then not
+established: each reader returns None with the gate's reason, never 0. An LP
+of the same network is the control: its figures are still read.
+"""
+
+from __future__ import annotations
+
+import pandas as pd
+import pypsa
+import pytest
+
+from harness.solve_validity import DUALS_NOT_MARGINAL, mip_price_limit
+from services.solver_service import SolverConfig
+
+CFG = SolverConfig()
+
+
+def _rdf(*args, **kwargs):
+    from routers.results import _result_df
+
+    return _result_df(*args, **kwargs)
+
+
+def _solved(committable: bool) -> pypsa.Network:
+    """A committable (MIP) or plain (LP) generator, a battery that charges in the
+    cheap hour, and an electrolyser Link: one row per asset class."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
+    n.add("Bus", "el", carrier="AC")
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Load", "d", bus="el", p_set=[2.0, 12.0, 3.0, 12.0])
+    n.add("Load", "h2_demand", bus="h2", p_set=1.0)
+    n.add("Generator", "cheap", bus="el", carrier="wind", p_nom=8, marginal_cost=5,
+          committable=committable, p_min_pu=0.1 if committable else 0.0)
+    n.add("Generator", "peak", bus="el", carrier="gas", p_nom_extendable=True, p_nom_max=20,
+          capital_cost=1.0, marginal_cost=60)
+    n.add("StorageUnit", "battery", bus="el", carrier="battery", p_nom_extendable=True,
+          p_nom_max=4, max_hours=2,
+          capital_cost=10.0, efficiency_store=0.95, efficiency_dispatch=0.95)
+    n.add("Link", "electrolysis", bus0="el", bus1="h2", carrier="H2 electrolysis",
+          p_nom_extendable=True, p_nom_max=5, efficiency=0.7, capital_cost=100.0)
+    status, _ = n.optimize(solver_name="highs")
+    assert status == "ok"
+    return n
+
+
+@pytest.fixture(scope="module")
+def mip():
+    n = _solved(committable=True)
+    assert mip_price_limit(n, CFG) == DUALS_NOT_MARGINAL
+    assert (n.buses_t.marginal_price == 0.0).all().all()
+    assert (n.storage_units_t.p["battery"] < -1e-6).any()  # it charges
+    return n
+
+
+@pytest.fixture(scope="module")
+def lp():
+    n = _solved(committable=False)
+    assert mip_price_limit(n, CFG) is None
+    assert (n.buses_t.marginal_price["el"] > 0).all()
+    assert (n.storage_units_t.p["battery"] < -1e-6).any()
+    return n
+
+
+def _economics(n, price_limit=None):
+    from services.compare.economics import _compute_economics_summary
+
+    return _compute_economics_summary(n, [], False, True, prices_from_state=False,
+                                      cfg=CFG, price_limit=price_limit)
+
+
+# ── Compare / Results economics (by carrier) ─────────────────────────────
+
+def test_compare_economics_of_a_mip_withholds_every_figure_priced_at_its_duals(mip):
+    econ = _economics(mip, mip_price_limit(mip, CFG))
+    assert econ.available is True
+    assert econ.unavailable_reason == DUALS_NOT_MARGINAL
+    assert econ.per_asset_lcoh == []
+    for carrier, row in econ.by_carrier.items():
+        assert row.revenue_meur is None, carrier
+        assert row.storage_charge_cost_meur is None, carrier
+    battery = econ.by_carrier["battery"]
+    assert battery.opex_meur is None  # it holds the charge cost
+    assert battery.lcoe_eur_per_mwh is None
+    gas = econ.by_carrier["gas"]  # no charge cost: its opex and LCOE stand
+    assert gas.opex_meur is not None and gas.opex_meur.total > 0
+    assert gas.lcoe_eur_per_mwh is not None
+    assert gas.capex_meur is not None and gas.dispatch_gwh.total > 0
+
+
+def test_compare_economics_of_an_lp_keeps_its_figures_and_its_json(lp):
+    econ = _economics(lp)
+    assert econ.unavailable_reason is None
+    assert "unavailable_reason" not in econ.model_dump()
+    assert "unavailable_reason" not in econ.model_dump_json()
+    assert econ.by_carrier["gas"].revenue_meur.total > 0
+    assert econ.by_carrier["battery"].storage_charge_cost_meur.total > 0
+    assert econ.by_carrier["battery"].opex_meur is not None
+    assert econ.per_asset_lcoh  # the electrolyser's row
+
+
+@pytest.mark.parametrize("which", ["mip", "lp"])
+def test_compare_judges_a_saved_project_s_economics_by_its_own_solve(tmp_path, which, request):
+    """S3: the Compare summary's economics take the project's own limit, the one its prices take."""
+    from types import SimpleNamespace
+
+    from routers.compare import get_results_summary
+
+    n = request.getfixturevalue(which)
+    n.export_to_netcdf(str(tmp_path / "network.nc"))
+    summary = get_results_summary(project=SimpleNamespace(name="p", directory=tmp_path))
+    econ = summary.economics
+    if which == "mip":
+        assert econ.unavailable_reason == DUALS_NOT_MARGINAL
+        assert summary.prices.unavailable_reason == DUALS_NOT_MARGINAL
+        assert all(r.revenue_meur is None for r in econ.by_carrier.values())
+    else:
+        assert econ.unavailable_reason is None
+        assert econ.by_carrier["gas"].revenue_meur.total > 0
+
+
+def test_economics_by_carrier_names_the_reason_only_on_a_mip(mip, lp):
+    from services.results.economics_by_carrier import compute_economics_by_carrier
+
+    out = compute_economics_by_carrier(mip, CFG, None, result_df=_rdf,
+                                       price_limit=DUALS_NOT_MARGINAL)
+    assert out["unavailable_reason"] == DUALS_NOT_MARGINAL
+    assert all(row["revenue_meur"] is None for row in out["by_carrier"].values())
+    assert out["by_carrier"]["battery"]["opex_meur"] is None
+    out_lp = compute_economics_by_carrier(lp, CFG, None, result_df=_rdf)
+    assert "unavailable_reason" not in out_lp
+    assert out_lp["by_carrier"]["gas"]["revenue_meur"] is not None
+
+
+def test_a_workbook_opex_total_over_a_withheld_carrier_is_not_a_partial_sum(mip, lp):
+    """S1: a carrier's withheld opex makes the Σ-carriers total unknown, never the
+    smaller sum of the rest."""
+    from services.results_workbook.overview import _econ_sum
+    from services.results.economics_by_carrier import compute_economics_by_carrier
+
+    by_mip = compute_economics_by_carrier(mip, CFG, None, result_df=_rdf,
+                                          price_limit=DUALS_NOT_MARGINAL)["by_carrier"]
+    assert _econ_sum(by_mip, "opex_meur", []) == (None, {})
+    assert _econ_sum(by_mip, "revenue_meur", []) == (None, {})
+    assert _econ_sum(by_mip, "capex_meur", [])[0] is not None
+    by_lp = compute_economics_by_carrier(lp, CFG, None, result_df=_rdf)["by_carrier"]
+    assert _econ_sum(by_lp, "opex_meur", [])[0] > 0
+
+
+# ── asset economics (per asset) ──────────────────────────────────────────
+
+def _assets(n, price_limit=None):
+    from services.results.asset_economics import compute_asset_economics
+
+    return compute_asset_economics(n, CFG, result_df=_rdf, price_limit=price_limit)
+
+
+def _row(payload, cls, name):
+    return next(r for r in payload[cls] if r["name"] == name)
+
+
+def test_asset_economics_of_a_mip_withholds_its_priced_keys(mip):
+    from services.results.asset_economics import PRICED_KEYS
+
+    ae = _assets(mip, DUALS_NOT_MARGINAL)
+    assert ae["price_limit"] == DUALS_NOT_MARGINAL
+    assert ae["reading_notes"] == []
+    for cls, name in (("generators", "peak"),
+                      ("storage_units", "battery"), ("links", "electrolysis")):
+        rows = [r for r in ae[cls] if r["name"] == name]
+        for row in rows:
+            for entry in [row, *(row.get("by_period") or [])]:
+                for key in PRICED_KEYS[cls]:
+                    if key in entry:
+                        assert entry[key] is None, (cls, name, key)
+    battery = _row(ae, "storage_units", "battery")
+    assert battery["discharge_revenue_eur"] is None
+    assert battery["charge_cost_eur"] is None
+    assert battery["lcos_eur_per_mwh"] is None
+    assert battery["discharge_mwh"] > 0  # physical quantities stand
+    peak = _row(ae, "generators", "peak")
+    assert peak["revenue_eur"] is None and peak["net_profit_eur"] is None
+    assert peak["energy_mwh"] > 0
+    link = _row(ae, "links", "electrolysis")
+    assert link["lcoe_eur_per_mwh"] is None and link["input_cost_eur"] is None
+
+
+def test_asset_economics_of_an_lp_is_unchanged(lp):
+    ae = _assets(lp)
+    assert "price_limit" not in ae
+    battery = _row(ae, "storage_units", "battery")
+    assert battery["charge_cost_eur"] > 0
+    assert battery["lcos_eur_per_mwh"] is not None
+    assert _row(ae, "generators", "peak")["revenue_eur"] > 0
+    assert _assets(lp) == _assets(lp, None)
+
+
+# ── carrier KPIs ─────────────────────────────────────────────────────────
+
+def test_carrier_kpis_of_a_mip_withhold_revenue_and_market_value(mip, lp):
+    from services.results.carrier_kpis import compute_carrier_kpis
+
+    out = compute_carrier_kpis(mip, result_df=_rdf, price_limit=DUALS_NOT_MARGINAL)
+    assert out["price_limit"] == DUALS_NOT_MARGINAL
+    assert out["rows"]
+    for row in out["rows"]:
+        assert row["revenue_eur"] is None and row["market_value_eur_per_mwh"] is None
+    assert any((row["energy_mwh"] or 0) > 0 for row in out["rows"])
+    out_lp = compute_carrier_kpis(lp, result_df=_rdf)
+    assert "price_limit" not in out_lp
+    assert any((row["revenue_eur"] or 0) > 0 for row in out_lp["rows"])
+
+
+# ── the live routes read the solve's own record (S3) ─────────────────────
+
+def test_the_live_routes_gate_by_the_solve_s_record(mip, lp, monkeypatch):
+    import routers.results as results
+    from services.pypsa_service import PyPSAService
+
+    monkeypatch.setattr(results, "_dispatch_ready", lambda n: True)
+    for n, record, expect in ((mip, {"price_limit": DUALS_NOT_MARGINAL}, DUALS_NOT_MARGINAL),
+                              (lp, {}, None)):
+        monkeypatch.setattr(PyPSAService, "get_network", classmethod(lambda cls, n=n: n))
+        monkeypatch.setitem(results._state, "last_solve_settings", record)
+        monkeypatch.setitem(results._state, "solver_config", CFG)
+        ebc = results.get_economics_by_carrier()
+        assert ebc.get("unavailable_reason") == expect
+        ae = results.get_asset_economics()
+        assert ae.get("price_limit") == expect
+        kp = results.get_carrier_kpis()
+        assert kp.get("price_limit") == expect

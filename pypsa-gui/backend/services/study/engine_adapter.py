@@ -628,7 +628,10 @@ def _econ_rows(n, cfg, asset_economics) -> tuple[Mapping | None, str | None]:
         from services.adequacy.eh_report import _live_result_df
         from services.results.asset_economics import compute_asset_economics
 
-        return compute_asset_economics(n, cfg, result_df=_live_result_df), "live_frames"
+        from harness.solve_validity import mip_price_limit
+
+        return compute_asset_economics(n, cfg, result_df=_live_result_df,
+                                       price_limit=mip_price_limit(n, cfg)), "live_frames"
     except Exception:  # noqa: BLE001 — reported as not established, never a zero
         return None, None
 
@@ -644,6 +647,11 @@ def _market(n, econ) -> MarketRevenueAtDuals:
     """The option's assets' revenue at the LP's bus prices (BC-7), reported."""
     from services.study import packs
 
+    # assistant-assurance 17: on an integer (MIP) solve the rows' revenue and charge cost
+    # are withheld (None), never read as 0.
+    if (limit := (econ or {}).get("price_limit")):
+        return MarketRevenueAtDuals(annual_value=None, by_asset={},
+                                    unavailable={"annual_value": limit})
     by: dict[str, float] = {}
     missing = False
     if packs.BATTERY_NAME in n.storage_units.index:
@@ -770,10 +778,14 @@ def _view(ctx: Mapping[str, Any], case, result, *, centre: bool,
                        market_revenue_at_duals=0.0)
             flags = {"bill_baseline": "build_year", "bill_option": "build_year"}
         else:
+            # assistant-assurance 17: a MIP's market revenue is withheld, so its excluded
+            # cash-flow column is None with the reason, never 0.
+            limit = (ctx.get("econ_price_limit") if ctx["market"].annual_value is None else None)
             row.update(bill_baseline=float(base.annual_bill), bill_option=float(opt.annual_bill),
                        savings=savings,
-                       market_revenue_at_duals=float(ctx["market"].annual_value or 0.0))
-            flags = {}
+                       market_revenue_at_duals=None if limit else
+                       float(ctx["market"].annual_value or 0.0))
+            flags = {"market_revenue_at_duals": limit} if limit else {}
             want = savings - fom - vom
             if inc is None or abs(float(inc[t]) - want) > _RECONCILE_TOL * max(1.0, abs(want)):
                 return InvestmentCase(
@@ -973,7 +985,8 @@ def option_case(n, cfg, ledger: AssumptionsLedger, *, compiled: C.CompiledCommer
     ctx = {"case_id": f"{study_id}.{option_id}", "study_id": study_id, "option_id": option_id,
            "fidelity": fidelity, "sources": sources, "provenance": provenance, "bills": got,
            "finance": finance, "notes": tuple(notes), "tail_notes": tuple(tail),
-           "market": _market(n, econ), "upfront_gaps": gaps, "sizes": sizes,
+           "market": _market(n, econ), "econ_price_limit": (econ or {}).get("price_limit"),
+           "upfront_gaps": gaps, "sizes": sizes,
            "centre_values": {k: float(v) for k, v in packs.ledger_values(ledger).items()
                              if v is not None}}
     view = _view(ctx, case, result, centre=centre)
