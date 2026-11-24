@@ -439,12 +439,41 @@ def test_a_task_whose_project_is_not_known_still_blocks_a_start(
     _, _, owner = tasks._authority()
     away = (tmp_path, str(uuid.uuid4()), owner)
     monkeypatch.setattr(tasks, "_authority", lambda: away)
+    from services import project_registry
+
+    looked_up = []
+    monkeypatch.setattr(
+        project_registry,
+        "resolve_project",
+        lambda *args, **kwargs: looked_up.append(args) or None,
+    )
     _switch_refused(
         lambda: chat_tools.start_task(title="Other", request_id="second", steps=WAIT),
         first["task_id"],
         "unreadable",
     )
+    # GK B2 T2: an unknown home is refused before any project lookup.
+    assert looked_up == []
     assert chat.task_id == first["task_id"] and not _stored("second").exists()
+
+
+def test_a_task_first_read_in_its_project_is_placed_by_that_read(
+    chat, monkeypatch, tmp_path
+):
+    """GK B2 T1: a checkpoint this process never saved (written before a
+    restart) is placed by the `_read` that finds it in its project, so after
+    a switch its idle task lets another plan start."""
+    first = chat_tools.start_task(title="Wait", request_id="first", steps=WAIT)
+    home = _stored("first")
+    stored = home.read_text()
+    monkeypatch.delitem(tasks._HOMES, first["task_id"])
+    home.write_text(stored)  # written directly, as by an earlier process
+    tasks._read(first["task_id"])
+    _, _, owner = tasks._authority()
+    away = (tmp_path, str(uuid.uuid4()), owner)
+    monkeypatch.setattr(tasks, "_authority", lambda: away)
+    second = chat_tools.start_task(title="Other", request_id="second", steps=WAIT)
+    assert chat.task_id == second["task_id"]
 
 
 @pytest.mark.parametrize("damage", ["corrupt", "other_owner", "other_project"])
