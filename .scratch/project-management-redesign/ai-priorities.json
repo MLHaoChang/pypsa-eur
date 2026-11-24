@@ -1,0 +1,144 @@
+{
+  "version": 1,
+  "focused_assessment_baseline": "87546ef5d184a9b20c80a65e2164f7fac0930f15",
+  "original_audit_baseline": "a68db6cfcf254df17a5b0d96da7a4c995f26423f",
+  "runtime_implementation": false,
+  "roi_measured": false,
+  "paid_calls_performed": false,
+  "rank_basis": "ordinal source-reuse/UX judgment, not measured ROI or price benchmark",
+  "initial_additional_model_subscriptions_required": 0,
+  "use_existing_configured_provider": true,
+  "roles": [
+    {
+      "id": "ROI-A",
+      "rank": 1,
+      "name": "Explain what to do next",
+      "primary_output_tokens": 320,
+      "evidence_bytes": 8192,
+      "max_native_attempts": 2,
+      "benefit": "Understand blockers/assumptions and reach the owning field",
+      "relative_inference_cost": "very_low",
+      "engineering_effort": "low_to_medium",
+      "existing_tool_refs": [
+        "get_project_flow",
+        "project_readiness",
+        "resolve_reference"
+      ],
+      "owner_package": "PM10",
+      "acceptance_ids": [
+        "RI01",
+        "RI02",
+        "RI03",
+        "RI04",
+        "RI05",
+        "RI06"
+      ],
+      "early_increment": "Existing readiness/section UI plus source-bound help; does not require complete management shell or shared writes"
+    },
+    {
+      "id": "ROI-B",
+      "rank": 2,
+      "name": "Explain these results",
+      "primary_output_tokens": 512,
+      "evidence_bytes": 12288,
+      "max_native_attempts": 3,
+      "benefit": "Understand native outcomes/trade-offs and evidence limits in context",
+      "relative_inference_cost": "low",
+      "engineering_effort": "low_to_medium_on_supported_readers",
+      "existing_tool_refs": [
+        "get_study_evidence",
+        "compare_scenarios"
+      ],
+      "owner_package": "PM12",
+      "acceptance_ids": [
+        "RI07",
+        "RI08",
+        "RI09",
+        "RI10",
+        "RI11",
+        "RI12"
+      ],
+      "early_increment": "Current supported result and native A/B readers; exact-version/base-plus-N/extra checked adapters remain gated"
+    },
+    {
+      "id": "ROI-C",
+      "rank": 3,
+      "name": "Suggest useful variants",
+      "primary_output_tokens": 640,
+      "evidence_bytes": 12288,
+      "max_native_attempts": 3,
+      "benefit": "Create a small reviewable sensitivity draft with clear differences",
+      "relative_inference_cost": "low_to_moderate",
+      "engineering_effort": "medium",
+      "existing_tool_refs": [
+        "run_sensitivity_sweep"
+      ],
+      "owner_package": "PM07",
+      "acceptance_ids": [
+        "RI13",
+        "RI14",
+        "RI15",
+        "RI16",
+        "RI17",
+        "RI18"
+      ],
+      "early_increment": "Side-effect-free preview extraction and draft card; execution through ordinary admitted native actions later"
+    }
+  ],
+  "proposed_common_task_policy": {
+    "target_primary_inference_rounds": 1,
+    "max_primary_inference_rounds": 2,
+    "mandatory_checked_review_budget": "additional explicit reserve under existing checked policy; no silent omission",
+    "retry_accounting": "bounded current SDK retries separately reserved/count all requests",
+    "daily_cap_already_enabled_by_default": false,
+    "evidence_byte_caps_are_total_prompt_token_caps": false,
+    "hover_page_load_keystroke_generation": false,
+    "automatic_solver_execution": false,
+    "optional_second_reviewer_on_every_ordinary_task": false,
+    "cache": "private actor/org/project/source/question/model/policy revision scoped; authorize and revalidate on read"
+  },
+  "release_increments": [
+    {
+      "id": "ROI-A0",
+      "owner_package": "PM10",
+      "scope": "Existing readiness/section UI plus source-bound help; does not require complete management shell or shared writes",
+      "dependencies": "Existing native supported source/context/approval/budget contracts plus new bounded adapter; no dependency on all management packages",
+      "acceptance_ids": [
+        "RI01",
+        "RI02",
+        "RI03",
+        "RI04",
+        "RI05",
+        "RI06"
+      ]
+    },
+    {
+      "id": "ROI-B0",
+      "owner_package": "PM12",
+      "scope": "Current supported result and native A/B readers; exact-version/base-plus-N/extra checked adapters remain gated",
+      "dependencies": "Existing native supported source/context/approval/budget contracts plus new bounded adapter; no dependency on all management packages",
+      "acceptance_ids": [
+        "RI07",
+        "RI08",
+        "RI09",
+        "RI10",
+        "RI11",
+        "RI12"
+      ]
+    },
+    {
+      "id": "ROI-C0",
+      "owner_package": "PM07",
+      "scope": "Side-effect-free preview extraction and draft card; execution through ordinary admitted native actions later",
+      "dependencies": "Existing native supported source/context/approval/budget contracts plus new bounded adapter; no dependency on all management packages",
+      "acceptance_ids": [
+        "RI13",
+        "RI14",
+        "RI15",
+        "RI16",
+        "RI17",
+        "RI18"
+      ]
+    }
+  ]
+}

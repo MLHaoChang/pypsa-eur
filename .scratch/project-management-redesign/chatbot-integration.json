@@ -1,0 +1,181 @@
+{
+  "version": 1,
+  "baseline": "a68db6cfcf254df17a5b0d96da7a4c995f26423f",
+  "runtime_implementation": false,
+  "new_features_validated": false,
+  "native_ui_required_without_llm": true,
+  "single_companion": true,
+  "ui_hints_are_authority": false,
+  "new_mandatory_external_model_provider": false,
+  "paid_calls_performed": false,
+  "existing_four_case_sweep_cap_unchanged": true,
+  "proposed_batch_target_cap": 8,
+  "proposed_batch_cap_is_execution_authority": false,
+  "capabilities": [
+    {
+      "id": "PMAI01",
+      "capability": "Find, resume or create a project",
+      "source_confirmed_existing_tool_refs": [
+        "list_projects",
+        "resolve_project_target",
+        "activate_project"
+      ],
+      "delivery_boundary": "reuse_existing_with_management_context",
+      "full_new_journey_implemented": false
+    },
+    {
+      "id": "PMAI02",
+      "capability": "Explain readiness and open owning input",
+      "source_confirmed_existing_tool_refs": [
+        "project_readiness",
+        "resolve_reference"
+      ],
+      "delivery_boundary": "extend_native_summary_and_navigation",
+      "full_new_journey_implemented": false
+    },
+    {
+      "id": "PMAI03",
+      "capability": "Prepare one supported parameter edit",
+      "source_confirmed_existing_tool_refs": [],
+      "delivery_boundary": "reuse_existing_native_edit_adapters",
+      "full_new_journey_implemented": false
+    },
+    {
+      "id": "PMAI04",
+      "capability": "Edit common assumptions across selected existing variants",
+      "source_confirmed_existing_tool_refs": [],
+      "delivery_boundary": "new_native_batch_service_and_harness_adapters_required",
+      "full_new_journey_implemented": false
+    },
+    {
+      "id": "PMAI05",
+      "capability": "Generate supported sensitivity copies",
+      "source_confirmed_existing_tool_refs": [
+        "run_sensitivity_sweep"
+      ],
+      "delivery_boundary": "existing_four_case_seam_broader_conversation_pending",
+      "full_new_journey_implemented": false
+    },
+    {
+      "id": "PMAI06",
+      "capability": "Request exact-target variant runs",
+      "source_confirmed_existing_tool_refs": [],
+      "delivery_boundary": "reuse_queue_add_native_request_adapter_as_supported",
+      "full_new_journey_implemented": false
+    },
+    {
+      "id": "PMAI07",
+      "capability": "Follow jobs and explain their outcomes",
+      "source_confirmed_existing_tool_refs": [
+        "wait_for_job",
+        "get_study_evidence"
+      ],
+      "delivery_boundary": "reuse_single_job_continuation_multi_job_contract_required",
+      "full_new_journey_implemented": false
+    },
+    {
+      "id": "PMAI08",
+      "capability": "Compare variant results",
+      "source_confirmed_existing_tool_refs": [
+        "compare_scenarios"
+      ],
+      "delivery_boundary": "existing_pairwise_base_plus_n_pending",
+      "full_new_journey_implemented": false
+    },
+    {
+      "id": "PMAI09",
+      "capability": "Inspect saved versions",
+      "source_confirmed_existing_tool_refs": [
+        "list_project_snapshots",
+        "resolve_reference"
+      ],
+      "delivery_boundary": "reuse_reading_with_exact_source_context",
+      "full_new_journey_implemented": false
+    },
+    {
+      "id": "PMAI10",
+      "capability": "Restore safely, revert operation or run exact earlier version",
+      "source_confirmed_existing_tool_refs": [],
+      "delivery_boundary": "blocked_on_safe_native_restore_and_version_copy",
+      "full_new_journey_implemented": false
+    },
+    {
+      "id": "PMAI11",
+      "capability": "Locate evidence and supported reports",
+      "source_confirmed_existing_tool_refs": [],
+      "delivery_boundary": "native_evidence_and_export_adapters_only",
+      "full_new_journey_implemented": false
+    },
+    {
+      "id": "PMAI12",
+      "capability": "Explain access and supported lifecycle settings",
+      "source_confirmed_existing_tool_refs": [],
+      "delivery_boundary": "read_native_access_new_writes_need_services_and_adapters",
+      "full_new_journey_implemented": false
+    }
+  ],
+  "implementation_slices": {
+    "PM-AI0": [
+      "PM-V0"
+    ],
+    "PM-AI1": [
+      "authorized native summary",
+      "existing navigation/context contract"
+    ],
+    "PM-AI2": [
+      "PM-R0",
+      "PM-B0",
+      "PM-B1"
+    ],
+    "PM-AI3": [
+      "PM-B2",
+      "durable multi-job group contract"
+    ],
+    "PM-AI4": [
+      "native comparison and evidence",
+      "S6/LC-18 for base-plus-N"
+    ],
+    "PM-AI5": [
+      "safe native restore/version-copy",
+      "admitted lifecycle writers",
+      "voice decision parity"
+    ]
+  },
+  "acceptance_ids": [
+    "AI01",
+    "AI02",
+    "AI03",
+    "AI04",
+    "AI05",
+    "AI06",
+    "AI07",
+    "AI08",
+    "AI09",
+    "AI10",
+    "AI11",
+    "AI12",
+    "AI13",
+    "AI14",
+    "AI15",
+    "AI16",
+    "AI17",
+    "AI18",
+    "AI19",
+    "AI20",
+    "AI21",
+    "AI22",
+    "AI23",
+    "AI24",
+    "AI25",
+    "AI26"
+  ],
+  "strict_checked_new_tools_default": "refuse_until_explicitly_admitted",
+  "approval_history_restores_authority": false,
+  "batch_writes_use_active_project_switch_loop": false,
+  "safe_restore_findings_still_open": [
+    "F01",
+    "F02",
+    "F03"
+  ],
+  "external_review_and_real_use_calibration": "pending"
+}
