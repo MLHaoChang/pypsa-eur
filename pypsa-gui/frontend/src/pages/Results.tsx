@@ -2,7 +2,7 @@ import { manualNavigation } from '../utils/navigationEpoch'
 import RunBoundView from './results/RunBoundView'
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase, Workflow, CalendarClock, Zap } from 'lucide-react'
+import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase, Workflow, CalendarClock, Zap, FileText, FileDown, Package } from 'lucide-react'
 import { simulationApi, resultsApi } from '../api/simulation'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
@@ -32,6 +32,7 @@ import LoadShapeTab from './results/LoadShapeTab'
 import { GridCodeTab, ElectricalDesignTab } from './results/GridStudyTabs'
 import { IslandTab, GridFormingTab } from './results/ControlStudyTabs'
 import GridRiskTab from './results/GridRiskTab'
+import ProductsTab from './results/ProductsTab'
 import AssetDetail from './results/asset/AssetDetail'
 import SummaryTab from './results/SummaryTab'
 import type { SimulationStatus } from '../api/types'
@@ -63,6 +64,9 @@ import { openFlowTarget, openSectionInGuided } from '../layout/flowNavigation'
 import type { FlowTarget } from '../api/flow'
 
 import BackToHubResults from '../components/BackToHubResults'
+import ReportsPanel from './ReportsPanel'
+import ExportsTab from './results/ExportsTab'
+import SpecialistPacketTab from './results/SpecialistPacketTab'
 
 // What an empty card group points to (one line each to re-point).
 // Mode-aware, through the shared navigation.
@@ -71,7 +75,6 @@ const flowTarget = (section: FlowTarget['section'], panel: string): FlowTarget =
 const EMPTY_GROUP_NEXT: Record<string, { note: string; label: string; section: FlowTarget['section']; panel: string }> = {
   control: { note: 'Control results come from the island study. ', label: 'Run the island study in Grid study',
     section: 'scenarios', panel: 'campusStudy' },
-  handoff: { note: 'Reports and exports are made from Reports. ', label: 'Open Reports', section: 'results', panel: 'reports' },
 }
 const RESULTS_TAB_KEY = 'results:active-tab'
 
@@ -79,7 +82,7 @@ const VALID_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>([
   'summary', 'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'emissions',
   'economics', 'curtailment', 'lostload', 'adequacy', 'storage', 'asset',
   'fmea', 'investment', 'flows', 'loadshape', 'grid_code', 'electrical_design',
-  'island', 'grid_forming', 'grid_risk',
+  'island', 'grid_forming', 'grid_risk', 'products', 'reports', 'exports', 'specialist_packet',
 ])
 
 function loadInitialTab(): ResultsTab {
@@ -106,7 +109,7 @@ function solveSignature(s: SimulationStatus | undefined): string | null {
 // on a flat single-period run. `expertOnly` tabs are hidden in Guided mode
 // (guided-mode spec §3.5): Guided keeps adequacy and FMEA, the two the
 // hub-design flow reads.
-export const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip: string; multiOnly?: boolean; expertOnly?: boolean; processOnly?: boolean }> = [
+export const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip: string; multiOnly?: boolean; expertOnly?: boolean; processOnly?: boolean; productsOnly?: boolean }> = [
   { id: 'summary',    label: 'Summary',            Icon: Gauge,            tip: 'The solve at a glance: cost, emissions, adequacy and the key capacities, each linking to its tab' },
   { id: 'overview',   label: 'Overview',           Icon: Layers,           tip: 'Per-period economics, generation mix & storage — the whole horizon at a glance', multiOnly: true, expertOnly: true },
   { id: 'capex',      label: 'Capacity expansion', Icon: TrendingUp,       tip: 'CAPEX, OPEX, sized assets', expertOnly: true },
@@ -126,14 +129,25 @@ export const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingU
   { id: 'adequacy',   label: 'Adequacy',           Icon: ShieldCheck,      tip: 'Reliability targets, COPT screening, the cost-vs-availability frontier, sequential Monte Carlo and the reliability-targeted planning loop' },
   { id: 'storage',    label: 'Storage cycling',    Icon: BatteryCharging,  tip: 'Equivalent full-cycle count per storage unit + carrier rollup', expertOnly: true },
   { id: 'grid_risk',  label: 'Grid risk to production', Icon: ShieldAlert, tip: 'Each grid risk (ride-through, island, N-1, connection curtailment) as lost tonnes, then EUR, per year', processOnly: true },
+  { id: 'products',   label: 'Products',           Icon: Package,          tip: 'What the site makes (hydrogen, ammonia, …): output in its own unit, running time and, for hydrogen, the cost per kg', productsOnly: true },
   { id: 'fmea',       label: 'FMEA',               Icon: ShieldAlert,      tip: 'Failure modes ranked by criticality (€ per year): computed rows + expert class-D rows, mitigability, CSV export' },
   { id: 'investment', label: 'Investment case',    Icon: Briefcase,        tip: 'The investment case: the site bill, participants and value flows, the Library, tariffs and contracts', expertOnly: true },
   { id: 'asset',      label: 'Asset Detail',       Icon: Crosshair,        tip: 'One asset in full — every applicable result, as numbers or charts, exportable', expertOnly: true },
 ]
 
+// Hand-off tabs (R6): what leaves the tool, not a solve output. Kept apart from TABS, which is
+// the list of result views (the workbook picker and the assistant inventory read it as such).
+const HANDOFF_TABS: typeof TABS = [
+  { id: 'reports',    label: 'Reports',            Icon: FileText,         tip: 'Study reports written from the Energy Hub reference design and the adequacy study; read them here and export to Word' },
+  { id: 'exports',    label: 'Exports',            Icon: FileDown,         tip: 'Export the project: bundle, NetCDF, CSV, Excel, MATPOWER or the results workbook' },
+  { id: 'specialist_packet', label: 'Specialist packet', Icon: Package,   tip: 'What a dynamics specialist receives: the dispatch source, ranked snapshots, assumptions ledger and per-hour bundles' },
+]
+// Every tab the panel can show: the result views, then Hand-off.
+const ALL_TABS: typeof TABS = [...TABS, ...HANDOFF_TABS]
+
 // The tabs Guided mode shows (every other row is `expertOnly`).
 const GUIDED_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>(
-  TABS.filter(t => !t.expertOnly).map(t => t.id),
+  ALL_TABS.filter(t => !t.expertOnly).map(t => t.id),
 )
 
 // Maps the Results tab the user is viewing → the equivalent CompareView tab,
@@ -163,9 +177,14 @@ const RESULTS_TO_COMPARE_TAB: Record<ResultsTab, CompareTab> = {
   asset: 'overview',
   // No FMEA compare tab exists (yet) — alias to overview like `asset`.
   fmea: 'overview',
+  products: 'overview',        // no compared frame for the product view: alias to overview like `asset`
   grid_risk: 'lost_load',      // G2P-13: the nearest compared frame is the lost production
   // No investment compare tab exists (IC P3 WP3.5) — alias to overview.
   investment: 'overview',
+  // Hand-off tabs are not result frames the rail can compare.
+  reports: 'overview',
+  exports: 'overview',
+  specialist_packet: 'overview',
   // The grid studies are not result frames the rail can compare.
   grid_code: 'overview',
   electrical_design: 'overview',
@@ -257,7 +276,7 @@ export default function Results() {
   // the last tab is ever shown.
   if (
     resultsTabRequest
-    && TABS.some((item) => item.id === resultsTabRequest)
+    && ALL_TABS.some((item) => item.id === resultsTabRequest)
   ) {
     if (resultsTabRequest !== tab) setTab(resultsTabRequest as ResultsTab)
     if (requestedTab !== resultsTabRequest) setRequestedTab(resultsTabRequest as ResultsTab)
@@ -464,6 +483,8 @@ export default function Results() {
     queryKey: nk(currentProject, 'results', 'process_view'), queryFn: resultsApi.getProcessView, retry: false,
   })
   const hasProcessUnits = (processView?.process_units?.length ?? 0) > 0
+  // Products shows on the read path's own predicate: the process view lists a product bus (empty_key `products`).
+  const hasProducts = (processView?.products?.length ?? 0) > 0
   const firstSnap = snap?.snapshots?.[0]
   const lastSnap = snap?.snapshots?.[snap.count - 1]
   // datetime-local input format: "YYYY-MM-DDTHH:mm".
@@ -682,10 +703,10 @@ export default function Results() {
   }
 
   // ── UX overhaul S3: groups ───────────────────────────────────────────
-  const tabVisible = (t: (typeof TABS)[number]) =>
+  const tabVisible = (t: (typeof ALL_TABS)[number]) =>
     (!t.multiOnly || uniquePeriods.length > 0) && (!t.expertOnly || uiMode === 'expert' || t.id === advancedTab)
-    && (!t.processOnly || hasProcessUnits)
-  const visibleTabIds = new Set<ResultsTab>(TABS.filter(tabVisible).map(t => t.id))
+    && (!t.processOnly || hasProcessUnits) && (!t.productsOnly || hasProducts)
+  const visibleTabIds = new Set<ResultsTab>(ALL_TABS.filter(tabVisible).map(t => t.id))
   // The drawer sits over the last non-asset tab; a first load on 'asset' falls back to Summary.
   const bodyTab: ResultsTab = effectiveTab === 'asset' ? lastBodyTab.current : effectiveTab
   if (effectiveTab !== 'asset') lastBodyTab.current = effectiveTab
@@ -699,7 +720,7 @@ export default function Results() {
   const activeCardTab = place?.cardTab ?? null
   const subViews = (() => {
     const ct = shownGroup?.tabs.find(t => t.id === activeCardTab)
-    return ct ? ct.views.filter(v => visibleTabIds.has(v)).map(id => TABS.find(t => t.id === id)!) : []
+    return ct ? ct.views.filter(v => visibleTabIds.has(v)).map(id => ALL_TABS.find(t => t.id === id)!) : []
   })()
   if (activeGroup && emptyGroup == null) lastInGroup.current[activeGroup] = bodyTab
   const { scope: flowScope, isSuccess: scopeRead } = useFlowScope()
@@ -721,7 +742,7 @@ export default function Results() {
     pickTab(views.includes(lastInGroup.current[shownGroup!.id] as ResultsTab)
       ? lastInGroup.current[shownGroup!.id]! : views[0])
   }
-  const renderTab = ({ id, label, Icon, tip }: (typeof TABS)[number]) => {
+  const renderTab = ({ id, label, Icon, tip }: (typeof ALL_TABS)[number]) => {
     const active = effectiveTab === id
     const advanced = id === advancedTab
     return (
@@ -784,6 +805,10 @@ export default function Results() {
       {t === 'island'      && <IslandTab />}
       {t === 'grid_forming' && <GridFormingTab />}
       {t === 'grid_risk'   && <GridRiskTab />}
+      {t === 'products'    && <ProductsTab />}
+      {t === 'reports'     && <ReportsPanel />}
+      {t === 'exports'     && <ExportsTab />}
+      {t === 'specialist_packet' && <SpecialistPacketTab />}
     </>
   )
 
@@ -837,7 +862,7 @@ export default function Results() {
             {discussedRun.mode ? ` · ${activityModeWord(discussedRun.mode)}` : ''}
           </span>
           {discussedRun.section && (
-            <span className="text-muted">Section: {sectionWords(discussedRun.section, id => TABS.find(t => t.id === id)?.label)}</span>
+            <span className="text-muted">Section: {sectionWords(discussedRun.section, id => ALL_TABS.find(t => t.id === id)?.label)}</span>
           )}
           {discussedRun.baselineRunId && (
             <span className="text-muted">baseline {discussedRun.baselineRunId}</span>
@@ -891,7 +916,7 @@ export default function Results() {
           )
         })}
         <div className="flex-1" />
-        {visibleTabIds.has('asset') && renderTab(TABS.find(t => t.id === 'asset')!)}
+        {visibleTabIds.has('asset') && renderTab(ALL_TABS.find(t => t.id === 'asset')!)}
         {/* Docked comparison rail toggle — keeps the live results visible while
             an A-vs-B scenario comparison sits alongside on the right. */}
         <button
@@ -1051,11 +1076,14 @@ export default function Results() {
       <div ref={splitWrapRef} className="flex flex-1 min-h-0 overflow-hidden">
         <ResultsFilterProvider value={filterValue}>
           <ChartSourceProvider value={chartSource}>
-          <div className="flex-1 min-w-0 overflow-hidden">
+          <div className="flex-1 min-w-0 overflow-hidden flex flex-col">
+          <div className="flex-1 min-h-0 overflow-hidden">
             {(() => {
               // Overview is multi-period-only; if it's somehow the active tab on
               // a single-period run, fall back to Dispatch.
-              if (discussedRun) return <RunBoundView run={discussedRun} tab={effectiveTab} tabLabel={id => TABS.find(t => t.id === id)?.label} />
+              // Hand-off holds no result view: a past run on screen leaves its tabs as they are (the
+              // Exports picker reads the discussed run itself).
+              if (discussedRun && activeGroup !== 'handoff') return <RunBoundView run={discussedRun} tab={effectiveTab} tabLabel={id => ALL_TABS.find(t => t.id === id)?.label} />
               const t = (bodyTab === 'overview' && uniquePeriods.length === 0) ? 'dispatch' : bodyTab
               // A group with no tab yet, or a card outside the scope (RC3 A):
               // the scope gate says so, the earlier results stay below, dimmed
@@ -1096,6 +1124,16 @@ export default function Results() {
               }
               return renderBody(t)
             })()}
+          </div>
+          {/* The last card tab of every group but Hand-off ends on the way out of the tool. */}
+          {activeGroup && activeGroup !== 'handoff' && emptyGroup == null && !outside && !discussedRun
+            && groupTabs.length > 0 && groupTabs[groupTabs.length - 1].id === activeCardTab && (
+            <div data-testid="results-next-handoff" className="shrink-0 border-t border-border px-4 py-1.5 text-[11px] text-muted">
+              Next:{' '}
+              <button type="button" className="text-link hover:underline"
+                onClick={() => pickTab('reports')}>Hand-off › Reports ›</button>
+            </div>
+          )}
           </div>
           </ChartSourceProvider>
         </ResultsFilterProvider>

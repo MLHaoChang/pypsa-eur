@@ -44,9 +44,11 @@ export function heldFigure(section: FlowSectionId, h: FlowHeld, sized?: EhSizedA
     return `${label}: fixed at ${number(h.fixed_size)}${h.unit ? ` ${h.unit}` : ''}`
   }
   // After a study, the size it chose (walkthrough asset-investment 03).
-  // The row's own unit (MW, or t/h on a tonne bus), never an assumed MW.
-  if (h.extendable && sized && sizedBuilt(sized, h.unit) !== 'not reported') {
-    return `${label}: ${sizedBuilt(sized, h.unit)} (by the last study)`
+  // The sized row's own unit (MW, or t/h on a tonne bus), never an assumed MW;
+  // a report stored before rows carried one falls back to this row's.
+  const unit = sized?.unit !== undefined ? sized.unit : h.unit
+  if (h.extendable && sized && sizedBuilt(sized, unit) !== 'not reported') {
+    return `${label}: ${sizedBuilt(sized, unit)} (by the last study)`
   }
   if (h.extendable) return `${label}: sized by the study`
   if (h.value === null) return `${label}: ${h.series ? 'its profile has no values yet' : 'not set'}`

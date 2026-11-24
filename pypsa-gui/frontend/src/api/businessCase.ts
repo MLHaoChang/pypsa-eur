@@ -63,6 +63,8 @@ export interface LineItem {
   default_units?: Partial<Record<DefaultColumn, string>>
   preset_rule?: PresetRule | null
   linked_share?: number | null
+  /** A capacity payment linked to capacity in service: the share the market pays for (0 to 1). */
+  derating?: number | null
   linked_share_by_year?: Record<string, number>
   hint?: PriceHint | null
 }
@@ -169,6 +171,9 @@ export interface BusinessCasePnl {
   /** Display key (BC 17): every input each row that reads None lacks, in the engine's
    *  reason codes; absent on a report stored before it. */
   row_reason?: Record<string, BusinessCaseRowReasonItem[]>
+  /** Display key (walk 03): the P&L row each KPI is computed from, so a KPI not
+   *  established reads that row's `row_reason`; absent on a report stored before it. */
+  kpi_row?: Record<string, string>
   /** Lease-up display keys (BC 15), absent at full volume: each operating year below
    *  100 % (a fraction), the basis note, and stated years outside the operating years. */
   volume_factor?: Record<string, number>
@@ -233,6 +238,14 @@ export class InvestmentCaseMissing extends Error {
   }
 }
 
+/** A 409 `network_busy` from the run POST: the project lock was not free in time; retry. */
+export class NetworkBusy extends Error {
+  constructor(message?: string) {
+    super(message ?? 'The project is busy with another job; try again in a moment')
+    this.name = 'NetworkBusy'
+  }
+}
+
 export class BusinessCaseRejected extends Error {
   constructor(public detail: {
     code?: string; refusal?: string; field?: string; message?: string
@@ -260,6 +273,7 @@ function typed(e: unknown): never {
   if (status === 409 && detail.code === 'solver_in_flight') {
     throw new SolverInFlightError(message ?? 'a solve is running')
   }
+  if (status === 409 && detail.code === 'network_busy') throw new NetworkBusy()
   if (status === 409 && detail.code === 'investment_case_missing') {
     throw new InvestmentCaseMissing((detail.reason as string | undefined) ?? null)
   }

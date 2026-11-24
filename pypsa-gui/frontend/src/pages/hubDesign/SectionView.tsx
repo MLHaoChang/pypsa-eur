@@ -67,6 +67,8 @@ export function SectionView({ id, onNext, children }: {
   const assumed = open.filter(isAssumedItem)
   const items = open.filter(i => !isAssumedItem(i))
   const infos = (s?.items ?? []).filter(i => !i.acknowledged && i.severity === 'info')
+  // The step rail's rule: the open-item count where there is one, else the state word.
+  const stateWord = countWords(countOpen(s?.items ?? [])) || FLOW_STATE_WORDS[s?.state ?? 'unknown']
   return (
     <div data-testid={`section-view-${id}`} className="flex flex-col gap-4">
       <div className="flex items-center gap-2">
@@ -76,7 +78,7 @@ export function SectionView({ id, onNext, children }: {
         <span className="text-lead text-muted" data-testid="section-summary">
           {isError ? 'The flow could not be read from the server.'
             : stateless ? (s?.summary ?? '')
-              : `${FLOW_STATE_WORDS[s?.state ?? 'unknown']}${s?.summary ? ` · ${s.summary}` : ''}`}
+              : `${stateWord}${s?.summary ? ` · ${s.summary}` : ''}`}
         </span>
       </div>
       {items.length > 0 && (

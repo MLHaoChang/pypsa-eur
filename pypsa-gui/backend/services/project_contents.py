@@ -64,13 +64,19 @@ def _f(path, ops, why, group=SIDECAR, **kw):
     return Entry(path, FILE, group, frozenset(ops), why, **kw)
 
 
-def _importer(path, writer):
-    return _f(
-        path,
-        _ALL,
-        "an importer's record of the source model it read",
-        pending_writer=writer,
-    )
+#: The files a model importer may store beside network.nc; `services.model_import_service`
+#: refuses any other name a reader returns (project-io 04).
+IMPORTER_SIDECARS = (
+    "psse_case.json",
+    "psse_dynamics.json",
+    "psse_contingencies.json",
+    "plexos_areas.json",
+    "plexos_fuel_prices.json",
+)
+
+
+def _importer(path):
+    return _f(path, _ALL, "an importer's record of the source model it read")
 
 
 def _marker_entry() -> Entry:
@@ -107,6 +113,7 @@ TABLE: tuple[Entry, ...] = (
     _f("flow_acks.json", _ALL, "acknowledged project-flow warnings"),
     _f("flow_scope.json", _ALL, "the Run's work cards (W4a)"),
     _f("grid_readiness_limits.json", _ALL, "the user's grid-readiness limits"),
+    _f("market_pack.json", _ALL, "what the last market-pack apply wrote (SCU06 K8a)"),
     _f(
         "sensitivity_case.json",
         _ALL - {FORK},
@@ -121,11 +128,8 @@ TABLE: tuple[Entry, ...] = (
         _ALL - {FORK} | {TEMPLATE},
         "a template's pre-built sensitivity cases",
     ),
-    _importer("psse_case.json", "PSS/E importer"),
-    _importer("psse_dynamics.json", "PSS/E importer"),
-    _importer("plexos_areas.json", "PLEXOS importer"),
-    _importer("plexos_fuel_prices.json", "PLEXOS importer"),
-    _importer("import_report.json", "shared import contract (#1600)"),
+    *(_importer(p) for p in IMPORTER_SIDECARS),
+    _f("import_report.json", _ALL, "what a model import read, mapped and assumed"),
     # The campus electrical study (plan C9): bundle only. The grid-code
     # documents and drafts stay with their licensee.
     *(

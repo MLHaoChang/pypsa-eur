@@ -133,3 +133,5 @@ The manual job ran on `ubuntu-24.04` (4 vCPU, 16 GiB, 3 GiB swap). Artifact `sc0
 - All three were fixed at f200722c.
 - GK B (62) OK @f200722c4060851cb5bf8f3d9cae07a736eed5d0, sent by message before the PR opened (#1561 had not merged). The OK carries to the PR head if that head is f200722c plus a clean master merge; a rebase or hand resolution gets a delta check.
 - GK B (62) was archived afterwards. GK B (63) is session_01G7qCundFLhgXpNk7ehKZQT.
+
+- 2026-11-23 status sweep: landed in #1557 (6b559a5e44); #1561 (3fbc9f943f); #1619 (4a00498b19): slice a (worker) and b (backend reviewed return). Remains: slice c, the review UI.

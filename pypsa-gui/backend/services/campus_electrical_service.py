@@ -142,6 +142,8 @@ HARMONIC_SCAN_META = "campus_harmonic_scan.json"
 HARMONIC_SCAN_ERROR = "harmonic_scan_error.json"
 VOLTAGE_STABILITY_META = "campus_voltage_stability.json"
 VOLTAGE_STABILITY_ERROR = "voltage_stability_error.json"
+#: The voltage-control step (plan GC-02) could not run: why.
+VOLTAGE_CONTROL_ERROR = "voltage_control_error.json"
 #: The dip and restart screens (grid-to-process issue 12b): each process unit's restart, ride-through and motor
 #: inputs as the run read them, so a field changed since marks that unit out of date; or, when the screens could
 #: not run, why.
@@ -330,6 +332,43 @@ def _voltage_stability(run: Path, profile: str, profile_dirs) -> None:
         (run / VOLTAGE_STABILITY_ERROR).write_text(json.dumps({"error": str(exc) or type(exc).__name__}))
         return
     (run / VOLTAGE_STABILITY_META).write_text(json.dumps(summary))
+
+
+def _voltage_control(run: Path, profile: str, profile_dirs) -> None:
+    """The plant's voltage-control strategy on the sized run in ``run`` (plan
+    GC-02, ``campus_study.voltage_control_campus``): the PoC P-Q chart, the
+    Q(V) droop in the load flow and their scorecard rows. Run inside the
+    voltage-stability stage, so ``RUN_STAGES`` is unchanged. As that screen,
+    its failure never fails the run: the reason goes to
+    ``VOLTAGE_CONTROL_ERROR`` and none of its files stays."""
+    files = (cs.POC_PQ_CSV, cs.VOLTAGE_CONTROL_LF_CSV, cs.VOLTAGE_CONTROL_CSV, VOLTAGE_CONTROL_ERROR)
+
+    def clear():
+        for name in files:
+            (run / name).unlink(missing_ok=True)
+
+    clear()
+    try:
+        cs.voltage_control_campus(run, profile, profile_dirs)
+    except Exception as exc:  # noqa: BLE001 - a screen failure is shown with the results, never a failed run
+        if not isinstance(exc, ContractError):
+            logger.exception("campus run: the voltage-control step failed in %s", run)
+        clear()
+        (run / VOLTAGE_CONTROL_ERROR).write_text(json.dumps({"error": str(exc) or type(exc).__name__}))
+
+
+def _voltage_control_results(run: Path) -> dict | None:
+    """The voltage-control step for ``get_state``: ``{error}`` when it could not
+    run, else its scorecard rows, the PoC P-Q chart and the droop's load-flow
+    outcomes; None for a run from before the step."""
+    error = run / VOLTAGE_CONTROL_ERROR
+    if error.is_file():
+        return json.loads(error.read_text())
+    if not (run / cs.VOLTAGE_CONTROL_CSV).is_file():
+        return None
+    return {"scorecard": _read_csv(run / cs.VOLTAGE_CONTROL_CSV) or [],
+            "poc_pq": _read_csv(run / cs.POC_PQ_CSV) or [],
+            "droop": _read_csv(run / cs.VOLTAGE_CONTROL_LF_CSV) or []}
 
 
 def _dips_restart_inputs(n) -> dict:
@@ -623,6 +662,8 @@ def _results(run: Path):
         "harmonic_scan": _harmonic_scan_results(run),
         # Study harness 18: the P–V/Q–V margin at the PCC (``_voltage_stability_results``).
         "voltage_stability": _voltage_stability_results(run),
+        # Plan GC-02: the voltage-control strategy (``_voltage_control_results``).
+        "voltage_control": _voltage_control_results(run),
         # Grid-to-process 12b: dips to trips to lost tonnes, and the restart sequence (``_dips_restart_results``).
         "dips_restart": _dips_restart_results(run),
         # GC-08: the SSTI UIF screen and the sub-synchronous scan (``_ssti_screens_results``).
@@ -1510,7 +1551,9 @@ def get_island(project) -> dict:
 
     require_capacity_expansion(project)
     sidecar, study = _island_paths(project)
-    config = json.loads(sidecar.read_text()) if sidecar.is_file() else None
+    # One read: the revision is the hash of the very bytes parsed (GK B3 (6)).
+    raw = sidecar.read_bytes() if sidecar.is_file() else None
+    config = json.loads(raw) if raw is not None else None
     services, warnings = None, []
     if config is not None:
         try:
@@ -1520,6 +1563,9 @@ def get_island(project) -> dict:
         if valid is not None:
             services, warnings = offered_services(valid), island_warnings(valid)
     return {"config": config,
+            # The sidecar's content hash: a PATCH passes it back as ``base`` and
+            # is refused (409) when the file changed since (GK B3 K1).
+            "revision": _revision(raw),
             "study": json.loads(study.read_text()) if study.is_file() else None,
             # When the study was written (UTC, ISO 8601): the Results tab says "run <date>".
             "study_at": (datetime.fromtimestamp(study.stat().st_mtime, tz=timezone.utc).isoformat(timespec="seconds")
@@ -1553,11 +1599,19 @@ def select_island_preset(project, preset: str | None) -> dict:
     if not sidecar.is_file():
         raise HTTPException(status_code=422, detail="the project has no island_config.json; "
                                                     "save the island requirements first")
-    try:
-        raw, skipped = select_preset(json.loads(sidecar.read_text()), preset, _fixed_ratings(project))
-    except ContractError as exc:
-        raise _unprocessable(exc)
-    return {**save_island(project, raw), "skipped": skipped}
+    ratings = _fixed_ratings(project)            # the network, read before the sidecar lock
+    # Read, select and write under the sidecar's lock, like PUT and PATCH, so a
+    # concurrent edit is not overwritten by a preset made from an older file.
+    with _lock(sidecar):
+        if not sidecar.is_file():
+            raise HTTPException(status_code=422, detail="the project has no island_config.json; "
+                                                        "save the island requirements first")
+        try:
+            raw, skipped = select_preset(json.loads(sidecar.read_text()), preset, ratings)
+        except ContractError as exc:
+            raise _unprocessable(exc)
+        _write_island(project, raw)
+    return {**get_island(project), "skipped": skipped}
 
 
 def checked_island_text(project, config: dict) -> str:
@@ -1577,17 +1631,149 @@ def checked_island_text(project, config: dict) -> str:
     return text
 
 
-def save_island(project, config: dict) -> dict:
+def save_island(project, config: dict, base: str | None = None) -> dict:
     """Validate the island sidecar with gridspine's schema and write it; a
     bad one is a 422 naming the field and leaves the previous file. The
     last study was made with the old sidecar, so it goes. Returns
-    ``get_island``."""
+    ``get_island``. Writes under the sidecar's lock, like ``patch_island``,
+    and a ``base`` that is not the current ``revision`` is the same 409, so a
+    whole-config save cannot drop a change made since it was read."""
+    sidecar, _ = _island_paths(project)
+    with _lock(sidecar):
+        _check_base(sidecar, base)
+        _write_island(project, config)
+    return get_island(project)
+
+
+def _write_island(project, config: dict) -> None:
+    """The one island writer (PUT, PATCH, preset): every check
+    ``checked_island_text`` makes, the atomic write, and the stale study gone.
+    The caller holds ``_lock(sidecar)``."""
     from services.atomic_io import atomic_write_text
 
     text = checked_island_text(project, config)
     sidecar, study = _island_paths(project)
     atomic_write_text(sidecar, text)
     study.unlink(missing_ok=True)
+
+
+def _revision(raw: bytes | None) -> str | None:
+    """The content hash (sha256 hex) of sidecar bytes, None for no sidecar."""
+    return hashlib.sha256(raw).hexdigest() if raw is not None else None
+
+
+def island_revision(sidecar: Path) -> str | None:
+    """The sidecar's content hash (sha256 hex), None when it has none."""
+    return _revision(sidecar.read_bytes() if sidecar.is_file() else None)
+
+
+def _check_base(sidecar: Path, base: str | None) -> None:
+    """A ``base`` that is not the current revision is a 409
+    ``island_config_changed``; None skips the check (GK B3 K1). The caller
+    holds ``_lock(sidecar)``."""
+    if base is not None and base != island_revision(sidecar):
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "island_config_changed",
+            "message": "The island settings changed since you opened them. Reload and try again.",
+        })
+
+
+#: The keys a PATCH may change: the per-unit settings (section 5's Controls
+#: block) and the island requirements (section 8's card).
+ISLAND_PATCH_KEYS = ("units", "requirements")
+#: The source a user's own edit of a tagged number takes ({value, source}); the
+#: client never sends a source (GK B3 K2). gridspine's sources are measured,
+#: datasheet and assumed: an entered value is no longer assumed.
+EDITED_SOURCE = "datasheet"
+
+
+def _bad_patch(where: str, why: str) -> HTTPException:
+    return HTTPException(status_code=422, detail=f"{where}: {why}")
+
+
+def _merge_value(where: str, old, new):
+    """One field: a tagged number keeps its tag (the source turns
+    ``EDITED_SOURCE`` when the value changes); an untagged mapping merges key by
+    key with the same rules; a list or a name is replaced whole. None is
+    refused: a PATCH never deletes."""
+    if new is None:
+        raise _bad_patch(where, "a value is required (a PATCH cannot remove a setting)")
+    if isinstance(old, dict) and set(old) == {"value", "source"}:
+        if isinstance(new, dict):
+            raise _bad_patch(where, "send the number only; its source is set by the server")
+        return old if new == old["value"] else {"value": new, "source": EDITED_SOURCE}
+    if isinstance(new, dict):
+        # An untagged mapping (``frequency_limits``, a limit set) merges key by
+        # key with these same rules, so a tagged number at any depth keeps or
+        # takes the server's source and a client source is refused (GK B3 (6) ask 5).
+        if "source" in new:
+            raise _bad_patch(where, "send the number only; its source is set by the server")
+        merged = dict(old) if isinstance(old, dict) else {}
+        for k, v in new.items():
+            merged[k] = _merge_value(f"{where}.{k}", merged.get(k), v)
+        return merged
+    if old is None:
+        # A field the sidecar does not have yet: every number (a list or curve
+        # is one value) is tagged in gridspine's schema, so a new number takes
+        # the server's source, and a client-sent source is refused (GK B3 K2).
+        if _is_number(new):
+            return {"value": new, "source": EDITED_SOURCE}
+    return new
+
+
+def _is_number(v) -> bool:
+    """A number, or a list (curve) of numbers or of lists of numbers; bools
+    (flags) and names are not."""
+    if isinstance(v, list):
+        return bool(v) and all(_is_number(x) for x in v)
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def merge_island_patch(config: dict, patch: dict) -> None:
+    """Apply a partial island change to ``config`` in place, with
+    ``patch_island``'s merge rules and refusals (the edit card previews the
+    tool's patch with it, without writing)."""
+    for key, change in patch.items():
+        if key not in ISLAND_PATCH_KEYS:
+            raise _bad_patch(key, "cannot be changed here")
+        if not isinstance(change, dict):
+            raise _bad_patch(key, "send the fields to change, by name")
+        current = config.setdefault(key, {})
+        for name, value in change.items():
+            where = f"{key}.{name}"
+            if key == "units":
+                if name not in current:
+                    raise _bad_patch(where, "no such unit in the island settings")
+                if not isinstance(value, dict):
+                    raise _bad_patch(where, "send the unit's fields to change, by name")
+                unit = current[name]
+                for f, v in value.items():
+                    unit[f] = _merge_value(f"{where}.{f}", unit.get(f), v)
+            else:
+                current[name] = _merge_value(where, current.get(name), value)
+
+
+def patch_island(project, patch: dict, base: str | None = None) -> dict:
+    """Merge a partial change into the stored island sidecar and save it
+    through ``_write_island`` (same checks, 422 naming the field, atomic write,
+    stale study gone). Read, merge, check and write run under the sidecar's
+    lock, which PUT takes too, so two edits to different keys both survive. A
+    ``base`` that is not the current ``revision`` is a 409
+    ``island_config_changed`` and leaves the file as it was.
+
+    Merge rules: only ``units`` and ``requirements``; ``units[name]`` merges
+    one level deep and an unknown unit is refused, not created;
+    ``requirements`` merges one level deep; lists are replaced whole; None is
+    refused."""
+    require_capacity_expansion(project)
+    sidecar, _ = _island_paths(project)
+    with _lock(sidecar):
+        if not sidecar.is_file():
+            raise _bad_patch("island config", "the project has none yet; choose a preset first")
+        _check_base(sidecar, base)
+        config = json.loads(sidecar.read_text())
+        merge_island_patch(config, patch)
+        _write_island(project, config)
     return get_island(project)
 
 
@@ -1829,6 +2015,7 @@ def run(project, settings: dict, *, progress=None, should_stop=None) -> dict:
                 _harmonic_scan(work, s["profile"], profile_dirs)
                 stage("voltage_stability")
                 _voltage_stability(work, s["profile"], profile_dirs)
+                _voltage_control(work, s["profile"], profile_dirs)      # plan GC-02, inside this stage
                 stage("dips_restart")
                 _dips_restart(work, s["profile"], profile_dirs, nc)
                 stage("ssti_screens")

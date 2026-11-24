@@ -1075,6 +1075,18 @@ network files by upload ID and invokes the existing NC/CSV/Excel/MATPOWER
 importers through normal destructive confirmation and project rebinding.
 Native binary files are tool-accessible attachments, represented as metadata.
 
+The Excel input workbook (excel-input-workbook issue 06, IMPORT-FLOW-1,
+`services/workbook_chat.py`): `get_input_workbook` offers the blank template or
+a readable project's workbook as last saved as a browser download (no bytes in
+context, nothing written; the panel's `WorkbookDownloadCard` fetches it).
+`preview_input_workbook(file_id)` runs `POST /api/workbook/preview` on a chat
+upload and writes nothing. `import_input_workbook(file_id, expected_sha256,
+name?)` is destructive-tier, so it is carded in Expert and Guided; its
+confirmation carries `workbook_card` (`harness/workbook_card.py`), the preview
+of the same bytes, and a hash that is not the preview's refuses
+(`import_file_changed`) before any card. The import route creates a NEW project
+only (a taken name refuses), re-checks the hash, and leaves it closed.
+
 `preview_project_changes` validates typed engineering inputs on an isolated
 copy and stores an owner/project-bound preview. `apply_project_changes`
 requires normal execution confirmation, unchanged inputs, an idle project,
@@ -1622,7 +1634,7 @@ solve stage uses.
   readiness step's frozen id, and gives no evidence on every row once the
   digest moved. A block row passing on assumed inputs is `not_evaluated`. A
   warn row reading `unknown` is "not evaluated". `ride_through:` and
-  `dynamic:` never pass. `run_profiles.DC_SCORECARD` lists each row or
+  `dynamic:` and `ssci` never pass. `run_profiles.DC_SCORECARD` lists each row or
   family with its severity, basis and the run that produces its input;
   `lole` is listed as not gated.
 - **Facts.** `dc.gridcode.published` (stage 2 waits on "publish the

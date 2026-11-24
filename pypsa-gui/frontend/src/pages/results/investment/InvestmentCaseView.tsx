@@ -17,7 +17,7 @@ import { downloadCSV } from '../shared'
 import {
   AVOIDED_PREFIX, basisStatement, cashflowPivot, cashTotals, completenessRows, missingLines, counterfactualStatement, fmtCell, fmtHeadline, gateLegs,
   baselineCaveats, counterfactualBasis, HEADLINE_KEYS, islandBreakeven, headlines, label, NOT_ESTABLISHED, perYearLists, progressFraction, progressText,
-  projectFlagWords, reportFlags, reportYears, sectionOf, stalePartLabel, studyProgress, studyStale, toTable,
+  projectFlagLines, reportFlags, statedFlags, reportYears, sectionOf, stalePartLabel, studyProgress, studyStale, toTable,
   uncheckableReason, waccGate, campusEquipment, campusRefusal, unmetNeedsLink,
   type CampusLink,
   type GateState, type Table,
@@ -165,10 +165,11 @@ function Headlines({ report }: { report: InvestmentCaseReportPayload }) {
         <div key={h.id} className="contents">
           <dt className="text-muted">{h.label}</dt>
           <dd data-testid={`ic-headline-${h.id}`} data-established={h.value !== null}
-              className={h.value === null ? 'text-muted' : ''} title={h.note ?? undefined}>
+              className={h.value === null ? 'text-muted' : ''} title={h.noteCode ?? h.note ?? undefined}>
             {fmtHeadline(h.kind, h.value)}{h.value === null && h.note ? ` (${h.note})` : ''}
           </dd>
           {h.asks && <dd className="col-span-2 text-muted pl-3 pb-0.5" data-testid={`ic-headline-asks-${h.id}`}>{h.asks}</dd>}
+          {h.aside && <dd className="col-span-2 text-muted pl-3 pb-0.5" data-testid={`ic-headline-aside-${h.id}`}>{h.aside}</dd>}
         </div>
       ))}
     </dl>
@@ -192,7 +193,7 @@ function Headlines({ report }: { report: InvestmentCaseReportPayload }) {
 
 function Counterfactual({ report }: { report: InvestmentCaseReportPayload }) {
   const stated = counterfactualStatement(report)
-  const flags = projectFlagWords(reportFlags(report, 'project'))
+  const flags = projectFlagLines(reportFlags(report, 'project'), statedFlags(report))
   return (
     <div className="space-y-1" data-testid="ic-counterfactual">
       <h3 className="text-[11px] font-semibold">Incremental against the counterfactual</h3>
@@ -205,7 +206,7 @@ function Counterfactual({ report }: { report: InvestmentCaseReportPayload }) {
         {stated ?? 'The report states no counterfactual for this case.'}</p>
       {flags.length > 0 && (
         <ul className="text-muted pl-3 list-disc" data-testid="ic-project-flags">
-          {flags.slice(0, 20).map(f => <li key={f}>{f}</li>)}
+          {flags.slice(0, 20).map((f, i) => <li key={`${i}-${f.text}`} title={f.code ?? undefined}>{f.text}</li>)}
           {flags.length > 20 && <li>+{flags.length - 20} more</li>}
         </ul>
       )}

@@ -34,6 +34,7 @@ POST   /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/publish  wri
 DELETE /api/campus-electrical/{name}/grid-codes/published/{profile_id}  write path:name
 DELETE /api/campus-electrical/{name}/grid-readiness/limits/{item}  write path:name
 PUT    /api/campus-electrical/{name}/grid-readiness/limits/{item}  write path:name
+PATCH  /api/campus-electrical/{name}/island  write path:name
 PUT    /api/campus-electrical/{name}/island  write path:name
 DELETE /api/campus-electrical/{name}/island/cuts  write path:name
 POST   /api/campus-electrical/{name}/island/cuts/apply  write path:name
@@ -135,6 +136,8 @@ PATCH  /api/memory/items/{item_id}  none personal assistant memory
 POST   /api/memory/items/{item_id}/{action}  none personal assistant memory
 POST   /api/memory/parameters  none personal assistant memory
 POST   /api/memory/suggestions/{item_id}/preview  none personal assistant memory
+POST   /api/model-import/import  none creates a new project the caller owns
+POST   /api/model-import/preview  none parses uploads, writes nothing
 PATCH  /api/network/_bulk  write active
 POST   /api/network/buses  write active
 DELETE /api/network/buses/{name}  write active
@@ -312,6 +315,7 @@ POST   /api/results/margin_loop/abort  write active
 POST   /api/results/mc  write active
 POST   /api/results/mc/abort  write active
 POST   /api/simulation/abort  write active
+POST   /api/simulation/commercial/market_packs/{pack_id}/apply  write active
 PUT    /api/simulation/commercial/value_flows  write active
 POST   /api/simulation/document_values/apply  write active
 PUT    /api/simulation/finance  write active

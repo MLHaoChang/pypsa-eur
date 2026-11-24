@@ -3,7 +3,7 @@
 
 # 09 Network Excel export fails on an hourly year (30 s client timeout) and blocks the next request
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), walk W2 (shot `s17-Excel`).
 Model: sonnet. Review: GK B.

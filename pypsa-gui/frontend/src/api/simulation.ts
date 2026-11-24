@@ -740,6 +740,11 @@ export interface EhSizedAsset {
   max_hours?: number | null
   /** A Link's MW is on its bus0 side. */
   basis?: 'bus0'
+  /** The size's unit from its bus (MW or t/h; a Store's MWh or t); absent
+   *  on a report stored before it was written, null where not known. */
+  unit?: string | null
+  /** A staged build's period (its build_year); only on a staged plan. */
+  stage?: number | null
 }
 
 /** TEA wrap (spec decision 9). LCOH is null + a flag when it cannot be
@@ -821,8 +826,46 @@ export interface EhCommonModeEvent {
 }
 
 /** Which fleet the MC / COPT saw (`fleet_scope` on certification / fmea_top). */
+/** One Link that is the only path to a must-stay-on bus inside the hub
+ *  (`critical_feeders.critical_feeder_rows`, walkthrough 2026-11-17 issue 02). */
+export interface EhCriticalFeeder {
+  name: string
+  /** composed: added to the LOLE; unsampled: own units, chained or beside a
+   *  feeder without data, an upper bound when `upper_bound`; no_outage_data:
+   *  its rate is not known and is taken as 1 (GK R2), so its pocket is
+   *  bounded (`upper_bound`) unless chained. */
+  model: 'composed' | 'unsampled' | 'no_outage_data'
+  buses: string[]
+  pocket_buses?: string[]
+  feeders?: string[]
+  /** The pocket's feeders without usable outage data. */
+  no_data_feeders?: string[]
+  own_units?: boolean
+  /** null for a feeder without usable outage data. */
+  q?: number | null
+  mttr_hours?: number | null
+  pocket_unavailability?: number
+  reason?: string | null
+  chained?: boolean
+  upper_bound?: boolean
+  /** h/yr the pocket is cut off (an upper bound when `upper_bound`). */
+  lole_h?: number | null
+  eue_mwh?: number | null
+}
+
+/** Why a pass was withheld by pockets the certification cannot simulate
+ *  (GK A F6'); null when it was not. */
+export interface EhFeederBound {
+  pockets: { buses: string[]; feeders: string[]; bound_h_per_year: number
+    /** Feeders whose outage rate is not known, taken as always out (GK R2). */
+    no_data?: string[]; own_units?: boolean }[]
+  chained: string[]
+  target_h_per_year?: number
+}
+
 export interface EhFleetScope {
   mode: 'hub_side' | 'whole_network'
+  critical_feeders?: EhCriticalFeeder[]
   import_links?: string[]
   excluded_buses?: string[]
   excluded_units?: string[]
@@ -849,6 +892,14 @@ export interface EhFleetScope {
 
 /** `sections.certification.payload` from the mc_certify stage. */
 export interface EhCertificationPayload {
+  /** Must-stay-on feeders inside the hub, one sentence (walkthrough 2026-11-17 issue 02). */
+  critical_feeder_note?: string | null
+  critical_feeders?: EhCriticalFeeder[]
+  critical_pocket_lole_h_per_year?: number | null
+  /** The bounded pockets' upper bound, h/yr (GK R1); null with none. */
+  critical_pocket_bound_h_per_year?: number | null
+  critical_pocket_eue_overlap_bound_mwh?: number | null
+  feeder_bound?: EhFeederBound | null
   metric?: string
   target_lole_h?: number | null
   /** LOLE per YEAR (the report headline). */
@@ -1077,6 +1128,7 @@ export type EhReview =
         archetype?: EhArchetype | null
         certified?: boolean | null
         verdict?: string | null
+        feeder_bound?: EhFeederBound | null
         mc_lole_h_per_year?: number | null
         target_lole_h?: number | null
         ens_cap_permyriad?: number | null

@@ -33,3 +33,7 @@ Guided reads `GET /api/results/eh_study/why/{figure}` from 02b-2 on. Chat cannot
 (`services/not_via_chat.d/claude-guided-results-02a.json`) is "unbuilt", and route parity holds it on this issue
 (`smoke/assistant_route_parity_declarations.d/claude-guided-results-02b-frontend.json`). This slice, or one named
 here before it closes, adds the chat tool and removes both declarations.
+
+## Comments
+
+- 2026-11-23 status sweep: landed in #1700 (0814422569): SummaryTab study verdict plus source-run line. Remains: expected shortfall and WhyThisNumber in Expert.

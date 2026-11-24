@@ -155,5 +155,5 @@ def test_the_summary_states_the_island_capability_break_even():
         "their source). No value of lost load is assumed."}
     wb = openpyxl.load_workbook(io.BytesIO(build_workbook(rep)))
     rows = {r[0]: r[1] for r in _values(wb["Summary"])}
-    assert rows["Island capability break-even"].startswith(
+    assert rows["Island-capability break-even"].startswith(
         "The island capability must be worth at least EUR 693,523 a year")

@@ -21,7 +21,7 @@ import { fieldWords, isOpenItem } from '../utils/flowItems'
 import { useFieldLabels } from '../hooks/useFieldLabels'
 import type { FlowItem } from '../api/flow'
 import { sectionForComponent, sectionMeta } from '../layout/flowSections'
-import { openFlowTarget, openOffGridConstraints } from '../layout/flowNavigation'
+import { openFlowTarget, openOffGridConstraints, openOperatingReserve } from '../layout/flowNavigation'
 import { useTopologyFindings } from './useTopologyFindings'
 import { TOPOLOGY_FINDING_TITLES, type TopologyFinding } from '../utils/topologyCheck'
 import { GridReadinessScorecard, useGridReadiness } from '../components/gridReadiness/GridReadinessScorecard'
@@ -212,6 +212,12 @@ export default function IssuesPanel() {
                       <button type="button" onClick={openOffGridConstraints}
                         className="ml-1.5 inline-flex items-center gap-0.5 text-link hover:underline">
                         Open Off-grid constraints <ArrowRight size={11} />
+                      </button>
+                    )}
+                    {h.setting === 'reserve' && (
+                      <button type="button" onClick={openOperatingReserve}
+                        className="ml-1.5 inline-flex items-center gap-0.5 text-link hover:underline">
+                        Open Operating reserve <ArrowRight size={11} />
                       </button>
                     )}
                   </div>

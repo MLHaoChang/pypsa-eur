@@ -19,7 +19,7 @@ import { controlModeLabel, islandScenarioLabel } from '../plainNames'
 import { displayName } from '../utils/displayName'
 import { Play, Save } from 'lucide-react'
 import {
-  campusApi, errorText, ISLAND_SCENARIOS,
+  campusApi, errorText, isIslandConfigChanged, ISLAND_SCENARIOS,
   type IslandConfig, type IslandGroup, type IslandReport, type IslandScenario, type IslandSource, type IslandTable,
 } from '../api/campusElectrical'
 import { Btn, PageSection, Tag } from '../components/PageKit'
@@ -27,6 +27,7 @@ import CampusIslandCutsSection, { scenarioWords } from './CampusIslandCutsSectio
 import { openFlowTargetInPlace, showResultsTab, withReturnFrom } from '../layout/flowNavigation'
 import { useUIStore } from '../store/uiStore'
 import { money } from '../utils/money'
+import { ISLAND_REQUIREMENT_LABELS } from './islandWords'
 
 export const ISLAND_KEY = (name: string) => ['campusElectrical', 'island', name] as const
 export const ISLAND_REPORT_KEY = (name: string) => ['campusElectrical', 'islandReport', name] as const
@@ -35,12 +36,7 @@ const INPUT = 'px-2 py-1 text-sm border border-border rounded focus:outline-none
 const SOURCES: IslandSource[] = ['measured', 'datasheet', 'assumed']
 const CONTROLS = ['gfl_pq', 'gfl_qu', 'gfl_pf', 'gfl_fw', 'gfm_droop', 'gfm_vsm']
 /** The requirements the form edits, each a tagged number. */
-const NUMBERS: [string, string][] = [
-  ['sustained_h', 'Sustained ride-through (h)'],
-  ['bridge_s', 'UPS bridge (s)'],
-  ['fuel_autonomy_h', 'Fuel autonomy (h)'],
-  ['genset_redundancy_n', 'Genset redundancy (N+k)'],
-]
+export const NUMBERS: [string, string][] = Object.entries(ISLAND_REQUIREMENT_LABELS)
 
 type Tagged = { value: number; source: IslandSource }
 
@@ -199,6 +195,9 @@ export default function CampusIslandSection({ name }: { name: string }) {
   const [text, setText] = useState('')
   const [textError, setTextError] = useState<string | null>(null)
   const [refusal, setRefusal] = useState<string | null>(null)
+  // The sidecar changed since it was read (chat, the Guided card): the save is
+  // refused (409) rather than dropping that change; Reload shows the new file.
+  const [stale, setStale] = useState(false)
   const saved = island.data?.config ?? null
 
   useEffect(() => {
@@ -212,10 +211,10 @@ export default function CampusIslandSection({ name }: { name: string }) {
     qc.invalidateQueries({ queryKey: ISLAND_REPORT_KEY(name) })
   }
   const save = useMutation({
-    mutationFn: () => campusApi.saveIsland(name, config as IslandConfig),
-    onMutate: () => setRefusal(null),
+    mutationFn: () => campusApi.saveIsland(name, config as IslandConfig, island.data?.revision),
+    onMutate: () => { setRefusal(null); setStale(false) },
     onSuccess: d => { qc.setQueryData(ISLAND_KEY(name), d); refresh() },
-    onError: e => setRefusal(errorText(e)),
+    onError: e => (isIslandConfigChanged(e) ? setStale(true) : setRefusal(errorText(e))),
   })
   const run = useMutation({
     mutationFn: () => campusApi.runIslandStudy(name),
@@ -241,6 +240,12 @@ export default function CampusIslandSection({ name }: { name: string }) {
       <PageSection title="Island" hint="Ride-through, the instant of islanding, and the cost of island capability">
         {island.isError && <p className="text-[12px] text-danger mb-2">{errorText(island.error)}</p>}
         {refusal && <p className="text-[12px] text-danger mb-2" data-testid="island-refusal">{refusal}</p>}
+        {stale && (
+          <p role="alert" className="text-[12px] text-danger mb-2 flex gap-2 items-center" data-testid="island-stale">
+            The island settings changed since you opened them. Reload and try again.
+            <Btn onClick={() => { setStale(false); refresh() }}>Reload</Btn>
+          </p>
+        )}
         {island.isSuccess && !saved && (
           <p className="text-[12px] text-muted mb-2">
             This project has no island requirements yet. Paste an island config below and save it.

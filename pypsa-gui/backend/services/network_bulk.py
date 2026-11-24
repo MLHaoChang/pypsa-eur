@@ -550,6 +550,14 @@ def apply_bulk_update(body: dict) -> dict:
 
             pending.append((_targets, coerced))
 
+        # Catalogue 06: a slack's minimum short-circuit power never above its maximum, on each target's own merged
+        # row, before the first write. (A row named twice is refused above, so no row has two batches.)
+        from services.network_crud import _refuse_reversed_grid_strength
+
+        for _targets, coerced in pending:
+            for t in _targets:
+                _refuse_reversed_grid_strength(component_class, {**df.loc[t].to_dict(), **coerced}, coerced)
+
         # OPEN-ITEMS item 8: every carrier the batch would CREATE, checked
         # before the first write, so a bad one cannot leave a half-applied batch.
         from services.component_names import require_valid_name

@@ -1087,7 +1087,9 @@ def test_the_sizing_loop_names_reserve_products_and_its_chain_carries_the_rows(
     cfg = SolverConfig(commercial={"reserve_products": [fcr.model_dump(mode="json")]})
     assert any("commercial bindings" in r for r in slr.refusals(cfg))
     monkeypatch.setattr(
-        RP, "project_backup", lambda _n: ({STRING: 20.0}, frozenset({STRING}))
+        RP,
+        "project_backup",
+        lambda _n, _cfg=None: ({STRING: 20.0}, frozenset({STRING})),
     )
     undo: list = []
     status, _ = n.optimize(solver_name="highs", **slr._prepare(n, cfg, undo))

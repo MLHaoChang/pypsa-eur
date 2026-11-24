@@ -18,7 +18,9 @@ the G2 additions of `2026-10-07-ic-g1-g2-campus-equipment.md` G-11:
 `FinanceCase.product_shortfall`; and gridspine-library-eu 01 of 2026-11-06: the
 `currency` keyword of `bind_commercial` and `bind_commercial_on_context`; and DC-06 of
 2026-11-06: the `series_meta` keyword of `bind_commercial` and
-`CommercialConfig.reserve_products`).
+`CommercialConfig.reserve_products`; and investment walk 03 case B of 2026-11-22:
+`AssetFinance.terminal_lifetime_years`; and SCU06 K8b of 2026-11-23:
+`CommercialConfig.reserve_no_backup_storages`).
 
 Every facade name is imported and its call signature pinned with
 `inspect.signature` against the expectation below, so any change — a renamed
@@ -98,7 +100,8 @@ SIGNATURES: dict[str, str] = {
     "services.finance.case.AssetFinance":
         "(name: 'str', component: 'str', overnight_cost: 'float | None', "
         "lifetime_years: 'float | None' = None, carrier: 'str | None' = None, "
-        "parts: 'tuple[AssetPart, ...]' = ()) -> None",
+        "parts: 'tuple[AssetPart, ...]' = (), "
+        "terminal_lifetime_years: 'float | None' = None) -> None",
     "services.finance.replacements.schedule":
         "(case: 'FinanceCase', tl: 'Timeline') -> 'tuple[Replacement, ...]'",
     "services.finance.report.assemble_finance_sections":
@@ -256,7 +259,9 @@ DATACLASS_FIELDS: dict[str, tuple[str, ...]] = {
         "flags", "notes", "unsupported_items", "per_item_sampled", "demand_lines"),
     # IC S0b (plan S2, S4): the parts on the case and a scheduled replacement.
     "services.finance.case.AssetFinance": (
-        "name", "component", "overnight_cost", "lifetime_years", "carrier", "parts"),
+        "name", "component", "overnight_cost", "lifetime_years", "carrier", "parts",
+        # Investment walk 03 case B (2026-11-22): the terminal-only life.
+        "terminal_lifetime_years"),
     "services.finance.case.AssetPart": ("name", "overnight_cost", "lifetime_years", "fom_share"),
     "services.finance.replacements.Replacement": ("year", "asset", "part", "amount", "source"),
     # IC G2 (plan G-4, G-5): the extra asset and the case field that carries it.
@@ -295,7 +300,9 @@ MODEL_FIELDS: dict[str, tuple[str, ...]] = {
         # Data-to-model slice 2: where a tariff or PPA value was read from (metadata, not LP).
         "provenance",
         # DC-06 (2026-11-06): the reserve products and their price series.
-        "reserve_products"),
+        "reserve_products",
+        # SCU06 K8b (2026-11-23): storage attested to carry no backup obligation.
+        "reserve_no_backup_storages"),
     "models.finance.FinanceInputs": (
         "acquisition_date", "analysis_years", "annualise", "capex_phasing", "cod_by_asset",
         "construction_months_by_asset", "construction_start", "contingency_share",

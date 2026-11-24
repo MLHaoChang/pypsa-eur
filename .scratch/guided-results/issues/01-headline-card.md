@@ -46,3 +46,5 @@ UX (23): plan GO with conditions (Q1-Q3 as recommended):
 8. Summary lines use "·"; section 5 chart unit-labelled axis, direct carrier labels, tonne buses never on one axis with MW, extendable assets named in a visible line, demo-data label kept (slice 3).
 9. HOLISTIC: the PR lists where the three figures appear (Summary, Compare, reports, chat) and that they read the same source.
 10. Shots dark and light, dc- and mg-, all states; one Expert shot of the Results headline.
+
+- 2026-11-23 status sweep: landed in #1611 (fdd3bc283c): headline card merged. Remains: mismatched-revision vitest (G1) and the one-number rule on chapter tiles.

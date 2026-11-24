@@ -13,36 +13,58 @@ import { switchToProject } from '../utils/projectActions'
 import { STUDY_RUNNING_NOT_OPENED, notOpenedReason } from '../components/workbook/workbookWords'
 import { resultsApi } from '../api/simulation'
 
-export type WorkbookPhase =
+export type ImportPhase<P> =
   | { step: 'pick' }
   | { step: 'previewing' }
-  | { step: 'preview'; preview: WorkbookPreview }
-  | { step: 'importing'; preview: WorkbookPreview }
+  | { step: 'preview'; preview: P }
+  | { step: 'importing'; preview: P }
   | { step: 'opening'; name: string }
   | { step: 'not-opened'; name: string; reason: string }
+export type WorkbookPhase = ImportPhase<WorkbookPreview>
+
+/** What the flow needs of a previewable import: the workbook and the model-file imports both fit. */
+export interface ImportSource<P extends { sha256: string }> {
+  preview: (files: File[]) => Promise<P>
+  /** Creates the project (left closed) and says its name. */
+  create: (files: File[], sha256: string, name: string) => Promise<{ name: string }>
+  /** One line for the app log, once the project exists. */
+  logLine: (files: File[], created: string) => string
+}
+
+const workbookSource: ImportSource<WorkbookPreview> = {
+  preview: ([f]) => workbookApi.preview(f),
+  create: ([f], sha, name) => workbookApi.import(f, sha, name),
+  logLine: ([f], created) => `Imported the Excel input workbook '${f.name}' as '${created}'`,
+}
 
 export function useWorkbookImport(onOpened: (name: string) => void) {
+  const r = useFileImport(workbookSource, onOpened)
+  const preview = useCallback((f: File) => r.preview([f]), [r.preview])
+  return { ...r, file: r.files[0] ?? null, preview }
+}
+
+export function useFileImport<P extends { sha256: string }>(source: ImportSource<P>, onOpened: (name: string) => void) {
   const qc = useQueryClient()
-  const [file, setFile] = useState<File | null>(null)
-  const [phase, setPhase] = useState<WorkbookPhase>({ step: 'pick' })
+  const [files, setFiles] = useState<File[]>([])
+  const [phase, setPhase] = useState<ImportPhase<P>>({ step: 'pick' })
   const [refusal, setRefusal] = useState<WorkbookRefusal | null>(null)
   // A newer pick supersedes a preview still in flight.
   const seq = useRef(0)
 
-  const preview = useCallback(async (f: File) => {
+  const preview = useCallback(async (fs: File[]) => {
     const mine = ++seq.current
-    setFile(f)
+    setFiles(fs)
     setRefusal(null)
     setPhase({ step: 'previewing' })
     try {
-      const p = await workbookApi.preview(f)
+      const p = await source.preview(fs)
       if (mine === seq.current) setPhase({ step: 'preview', preview: p })
     } catch (e) {
       if (mine !== seq.current) return
       setRefusal(workbookRefusal(e))
       setPhase({ step: 'pick' })
     }
-  }, [])
+  }, [source])
 
   const open = useCallback(async (name: string) => {
     setRefusal(null)
@@ -65,25 +87,25 @@ export function useWorkbookImport(onOpened: (name: string) => void) {
   }, [qc, onOpened])
 
   const importAs = useCallback(async (name: string) => {
-    if (!file || phase.step !== 'preview') return
+    if (files.length === 0 || phase.step !== 'preview') return
     const p = phase.preview
     setRefusal(null)
     setPhase({ step: 'importing', preview: p })
     let created: string
     try {
-      created = (await workbookApi.import(file, p.sha256, name.trim())).name
+      created = (await source.create(files, p.sha256, name.trim())).name
     } catch (e) {
       setRefusal(workbookRefusal(e))
       setPhase({ step: 'preview', preview: p })
       return
     }
-    appLog('INFO', `Imported the Excel input workbook '${file.name}' as '${created}'`)
+    appLog('INFO', source.logLine(files, created))
     // G4 (guided-mode spec §3.4): a new project starts Guided unless the user chose a mode.
     useUIStore.getState().noteNewProjectCreated('file')
     qc.invalidateQueries({ queryKey: ['projects'] })
     await open(created)
-  }, [file, phase, qc, open])
+  }, [files, phase, qc, open, source])
 
   const busy = phase.step === 'previewing' || phase.step === 'importing' || phase.step === 'opening'
-  return { file, phase, refusal, busy, preview, importAs, open }
+  return { files, phase, refusal, busy, preview, importAs, open }
 }

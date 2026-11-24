@@ -264,6 +264,15 @@ price-series currency); `CommercialConfig` gains `reserve_products`. Omitting bo
 `library.items.resolve` and `library.series_store.resolve` gain the trailing keyword-only `project_dir: Path | None = None`:
 they read the project's own copy under `library/` first, when it hashes to the ref. Omitting it resolves from the org's
 Library as before.
+**Additions (2026-11-22, investment walk 03 case B, `.scratch/walkthroughs/investment-business-case-2026-11-17/issues/03-not-established-reasons-wrong-or-raw.md`):**
+`AssetFinance` gains the trailing field `terminal_lifetime_years: float | None = None` (after `parts`): the life the
+`remaining_life_annuity` terminal values an asset over when it is not its replacement life (a business-case capex
+line's depreciation life). Refused on more than one part and on an asset whose lifetime is not infinite. None reads
+as before and is left out of the case hash, so other cases keep their hash.
+**Additions (2026-11-23, SCU06 K8b, `.scratch/site-commercial-ux/issues/06-market-data-and-ppa-defaults.md`):**
+`CommercialConfig` gains `reserve_no_backup_storages: list[str]` (storage the user attests carries no backup
+obligation, so it may earn reserve products on a backup floor of 0; owner SCU06-K8-1). Empty is dropped from the dump
+and left out of the hash, so every existing config dumps and hashes as before.
 
 ## 7. Coordination protocol
 

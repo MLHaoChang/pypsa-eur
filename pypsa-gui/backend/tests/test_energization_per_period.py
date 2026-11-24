@@ -288,8 +288,8 @@ MASTER_FP_SINGLE = (
     "c5d6c416f41b319c4043f2db0c30def9f22e9273ded7664a958c355bcda81433",
 )
 MASTER_FP_EH_DATACENTER = (
-    "92e01e3cda191c9dd1845288d676bb2dd64bafce69a1b821c802297e947f274f",
-    "dcd48fe494a0683fa8716bb12c8ba1e2899d1466052d8c0e6714b9784857e0f4",
+    "4ae621820bfa2bbdf0295d5fe6d9557ed89025a5197cd4826898bf550e13a0bd",
+    "9766df8fdb39a263d938f2b2ded7d83f52be73968322a43128d6389b0715141b",
 )
 
 
@@ -489,6 +489,16 @@ def test_d2a_the_fingerprint_of_an_unscheduled_template_is_pre_02b():
     n = build_eh_datacenter()
     assert E.energization_frame(n) is None
     assert _fps(n) == MASTER_FP_EH_DATACENTER  # master's, byte for byte
+
+
+def test_d2a_a_build_shares_no_snapshot_index_with_an_earlier_one():
+    # A frame's index is named in place downstream (a live solve does); the next
+    # build must not inherit the name through a shared module-level index, or
+    # its exact fingerprint moves (CI shard order exposed it on #1874).
+    build_eh_datacenter().loads_t.p_set.index.name = "snapshot"
+    n = build_eh_datacenter()
+    assert n.loads_t.p_set.index.name is None
+    assert _fps(n) == MASTER_FP_EH_DATACENTER
 
 
 def test_d2b_a_scheduled_network_reads_inputs_changed_once_then_fresh(monkeypatch):

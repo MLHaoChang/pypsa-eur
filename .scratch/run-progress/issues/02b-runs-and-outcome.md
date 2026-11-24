@@ -3,7 +3,9 @@
 
 # Slice 2b: Runs indicator and the run's end in the strip
 
-Status: ready-for-agent
+Status: done
+
+Done in #1630 (233c38fd).
 Type: task
 Blocked by: 02a (stacked on PR #1627)
 

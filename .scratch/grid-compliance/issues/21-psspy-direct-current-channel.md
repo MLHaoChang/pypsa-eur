@@ -3,7 +3,8 @@
 
 # GC-21: read the PoC current from a direct branch-current channel
 
-Status: ready-for-agent
+Status: done
+Done in #1910 (8a5b1296). Follow-up: GC-25 (PoC-end channel, ITERM code check).
 Type: task
 Parent: `.scratch/grid-compliance/issues/04-psse-pack.md`
 Gated: yes (GK A2, gridspine)

@@ -168,7 +168,9 @@ import hashlib
 import json
 import math
 import os
+import shutil
 import tempfile
+import uuid
 from pathlib import Path
 
 import pandas as pd
@@ -220,6 +222,13 @@ IBR_CAPABILITY_CSV = "campus_ibr_capability.csv"
 IBR_Q_CURVE_CSV = "campus_ibr_q_curve.csv"
 #: What the profile requires that a steady-state study cannot show.
 REPORTED_REQUIREMENTS_JSON = "campus_reported_requirements.json"
+#: The voltage-control step (plan GC-02): the PoC P-Q chart across voltage, the Q(V) droop in the load flow
+#: and their scorecard rows.
+POC_PQ_CSV = "campus_poc_pq.csv"
+VOLTAGE_CONTROL_LF_CSV = "campus_voltage_control_lf.csv"
+VOLTAGE_CONTROL_CSV = "campus_voltage_control.csv"
+#: How the voltage-control step pairs IEC 60909's c with S_k'' (GK A2, GC-02 V1), stated in its droop row.
+C_BRACKET_NOTE = "c_max on S_k''min / c_min on S_k''max (conservative bracket, not the IEC 60909 pairing)"
 INVESTMENT_CSV = "campus_investment.csv"
 COST_CSV = "campus_cost.csv"
 INVESTED_YAML = "campus_invested.yaml"
@@ -362,9 +371,14 @@ def campus_tables(run_dir):
     return hourly, pcc
 
 
+def _run_campus_spec(run_dir):
+    """The campus description a prepared run stores (``campus.yaml``), as read."""
+    return yaml.safe_load(_require(Path(run_dir), CAMPUS_YAML).read_text())
+
+
 def load_run_campus(run_dir) -> Campus:
     """The campus of a prepared run, built from its stored ``campus.yaml``."""
-    return build_campus(yaml.safe_load(_require(Path(run_dir), CAMPUS_YAML).read_text()))
+    return build_campus(_run_campus_spec(run_dir))
 
 
 def _island_tables(run_dir: Path):
@@ -637,25 +651,103 @@ def _json_ready(x):
     return x
 
 
-def psse_campus(run_dir, hours=None) -> list:
+def _cited_spec(run_dir, model_set, variant):
+    """The run's campus description, checked to be the ``variant`` of ``model_set`` (GC-04d P3, GK A2 Q2): a
+    pack never cites a model set that is not the network it ships."""
+    from gridspine.schema.model_set import model_hash
+
+    model_set.spec(variant)  # refuses a variant that is unknown or was not frozen
+    who = f"psse: model set {model_set.model_set_id} {variant}"
+    try:
+        spec = _run_campus_spec(run_dir)
+        found = model_hash(spec)
+    except (ContractError, OSError, UnicodeDecodeError, yaml.YAMLError, TypeError, ValueError) as exc:
+        raise ContractError(f"{who}: cannot read this run's campus ({exc})") from exc
+    if found != model_set.model_hashes[variant]:
+        raise ContractError(f"{who} does not describe this run's campus (model hash {found[:12]}, "
+                            f"the model set's {model_set.model_hashes[variant][:12]})")
+    return spec
+
+
+def psse_campus(run_dir, hours=None, *, plant=None, model_set=None, variant=None) -> list:
     """The PSS/E handoff of a ranked run (plan I8): one bundle per island
     critical hour (``island_hours``), or per ``hours`` given, under
-    ``psse/``, each named ``p<period>_h<hour>``. Returns the bundles."""
+    ``psse/``, each named ``p<period>_h<hour>``. Returns the bundles.
+
+    ``plant`` (a ``psse_pack.Plant``) and ``model_set``/``variant`` (the
+    GC-01 model set the run's campus is a variant of) go to every bundle's
+    PSS/E pack (GC-04d). The bundles are written aside and replace ``psse/``
+    only once all are written, so a refusal keeps the previous tree and
+    leaves no partial one, and a new call never mixes with an older one.
+    No hours: no ``psse/`` is written and an earlier one is left as it is."""
     from gridspine.handoff.campus_bundle import export_campus_bundle
     from gridspine.static.frequency import LEDGER
 
     run_dir = Path(run_dir)
-    campus = load_run_campus(run_dir)
+    if model_set is not None and variant is not None:
+        campus = build_campus(_cited_spec(run_dir, model_set, variant))
+    else:  # one without the other: the pack refuses it, before psse/ is touched
+        campus = load_run_campus(run_dir)
     hourly, _ = campus_tables(run_dir)
     out = run_dir / PSSE_DIR
+    stage = _aside(run_dir, "partial")  # this call's own: a concurrent call never touches it (GK A2 K1)
+    stage.mkdir()
     bundles = []
-    for period, hour in (island_hours(run_dir) if hours is None else hours):
-        rows = hourly[(hourly["period"] == period) & (hourly["hour"] == hour)][["unit_id", "p_mw", "status"]]
-        if rows.empty:
-            raise ContractError(f"the run has no hour {hour} in period {period}")
-        bundles.append(export_campus_bundle(out, campus, rows.reset_index(drop=True), f"p{period}_h{hour}",
-                                            ledger=LEDGER))
-    return bundles
+    try:
+        for period, hour in (island_hours(run_dir) if hours is None else hours):
+            rows = hourly[(hourly["period"] == period) & (hourly["hour"] == hour)][["unit_id", "p_mw", "status"]]
+            if rows.empty:
+                raise ContractError(f"the run has no hour {hour} in period {period}")
+            bundles.append(export_campus_bundle(stage, campus, rows.reset_index(drop=True), f"p{period}_h{hour}",
+                                                ledger=LEDGER, plant=plant, model_set=model_set, variant=variant))
+        if bundles:
+            _swap_in(stage, out)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)  # gone on a refusal; already renamed on success
+    return [dataclasses.replace(b, path=out / b.path.name) for b in bundles]
+
+
+def _aside(run_dir: Path, what: str) -> Path:
+    """A fresh hidden sibling of ``psse/`` (``.psse.<what>-<hex>``), unique to the caller."""
+    return run_dir / f".{PSSE_DIR}.{what}-{uuid.uuid4().hex}"
+
+
+def _discard(old) -> None:
+    """Delete an aside tree; a failure leaves it hidden beside ``psse/``, which nothing reads."""
+    if old is not None:
+        try:
+            shutil.rmtree(old)
+        except OSError:
+            pass
+
+
+#: How often ``_swap_in`` retries when another call swapped its tree in between.
+SWAP_TRIES = 8
+
+
+def _swap_in(stage: Path, out: Path) -> None:
+    """Make ``stage`` the ``out`` tree (GK A2 K2): the old tree is renamed aside, the stage renamed in, then the
+    aside copy deleted, so ``out`` is always a whole tree, old or new. When a concurrent call's tree lands
+    between the two renames, this call's tree replaces it (last writer wins). A failed delete of the aside copy
+    leaves a hidden ``.psse.old-*`` beside the new tree, never a half-deleted ``psse/``."""
+    for _ in range(SWAP_TRIES):
+        old = _aside(out.parent, "old")
+        try:
+            out.rename(old)
+        except FileNotFoundError:
+            old = None
+        try:
+            stage.rename(out)
+        except OSError:
+            if not out.exists():  # not a concurrent call: put the old tree back and say why
+                if old is not None:
+                    old.rename(out)
+                raise
+            _discard(old)
+            continue  # another call's tree landed in between: put it aside too
+        _discard(old)
+        return
+    raise ContractError(f"psse: {out} kept changing under concurrent calls; tried {SWAP_TRIES} times")
 
 
 #: P_ref of a normally open tie (``pcc.tie_normally_open``): its rating
@@ -1248,6 +1340,55 @@ SUBSYNC_RESONANCE_CSV = "campus_subsync_resonance.csv"
 SUBSYNC_VERDICT_ORDER = ("flag", "check", "not evaluated", "clear")
 
 
+#: A clear series row while some genset gives no torsional modes (GC-01c, GK A2 C1).
+NO_MODES_FOR = "no torsional modes given for genset(s) {}; the screen does not pass on the others alone"
+#: A clear series row resting on assumed torsional modes (GC-01c, GK A2 C2).
+ASSUMED_MODES = "clear rests on assumed torsional mode(s): {}"
+
+
+def _mode_coverage(campus, resonance):
+    """The series rows of ``resonance`` with the campus's torsional-mode
+    coverage applied (see ``ssti_screens_campus``): ``mode_source`` on each
+    judged row, ``assumed`` set by an assumed mode, and a ``clear`` judged row
+    turned ``check`` while a genset lacks modes, or noted when assumed modes
+    carry it."""
+    from gridspine.static import subsync_scan as ss
+
+    modes, sources = campus.torsional_modes, campus.torsional_mode_sources
+    out = resonance.copy()
+    out["mode_source"] = None
+    out["assumed_modes"] = None  # the clause ASSUMED_MODES names, on a clear row resting on assumed modes
+    gensets = campus.units.index[campus.units["kind"] == "genset"]
+    missing = sorted(g for g in gensets if g not in modes)
+    assumed = {g: [f for f, src in zip(modes[g], sources[g]) if src == "assumed"] for g in modes}
+    assumed = {g: fl for g, fl in assumed.items() if fl}
+    judged = (out["kind"] == ss.SERIES) & out["machine"].notna()
+
+    def source(row):
+        # an equal frequency given twice under different sources counts as assumed if either is
+        given = [src for f, src in zip(modes[row.machine], sources[row.machine]) if f == row.mode_hz]
+        return "assumed" if "assumed" in given else given[0]
+
+    out.loc[judged, "mode_source"] = [source(r) for r in out[judged].itertuples()]
+    out.loc[judged & (out["mode_source"] == "assumed"), "assumed"] = True
+    clear = judged & (out["verdict"] == "clear")
+    if missing:
+        out.loc[clear, "note"] = [_join_note(NO_MODES_FOR.format(", ".join(missing)), n) for n in out.loc[clear, "note"]]
+        out.loc[clear, "verdict"] = "check"
+        # not judged, so no margin shown for it (GK A2 ruling (b): a pack never shows a value the scorecard refused)
+        out.loc[clear, "margin_hz"] = math.nan
+    elif assumed:
+        said = "; ".join(f"{g} {', '.join(f'{f:g}' for f in fl)} Hz" for g, fl in sorted(assumed.items()))
+        out.loc[clear, "note"] = [_join_note(ASSUMED_MODES.format(said), n) for n in out.loc[clear, "note"]]
+        out.loc[clear, "assumed_modes"] = said
+        out.loc[clear, "assumed"] = True
+    return out
+
+
+def _join_note(first, rest):
+    return "; ".join(filter(None, [first, rest if isinstance(rest, str) else ""]))
+
+
 @dataclasses.dataclass
 class SstiScreens:
     uif: object                 # ssti_uif.UifStudy
@@ -1273,7 +1414,16 @@ def ssti_screens_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()
     scanned from, and the verdict is the worst over all rows. A capacitor
     scanned with no crossing reads ``clear`` within the scan band. Without
     any capacitor the series verdict reads ``not evaluated`` (grid-side series
-    compensation needs the TSP's data). No torsional mode is entered.
+    compensation needs the TSP's data).
+
+    The gensets' torsional modes (``Campus.torsional_modes``, GC-01c) go to
+    every scan. Each judged series row carries ``mode_source``, the source of
+    the mode it was judged on; one judged on an ``assumed`` mode is marked
+    ``assumed``. A ``clear`` row reads ``check`` while any genset of the
+    campus has no modes (``NO_MODES_FOR``: the screen never passes on the
+    machines it knows only), and a ``clear`` resting on any ``assumed`` mode
+    says so in its note (``ASSUMED_MODES``). A row with no series resonance in
+    the band is clear whatever the modes.
     Screening only: the binding answer is the EMT study."""
     from gridspine.static import harmonic_scan as hs
     from gridspine.static import series_caps as SC
@@ -1291,12 +1441,14 @@ def ssti_screens_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()
     net, caps = campus.net, campus.series_caps
     far = [(c, b) for c, b in SC.far_side(net, bus) if b != bus]
     points = [bus] + [b for _, b in far]
-    studies = [(b, ss.subsync_scan(net, b, cases, series_caps=caps, clearance_hz=clearance,
+    modes = campus.torsional_modes
+    studies = [(b, ss.subsync_scan(net, b, cases, series_caps=caps, torsional_modes=modes, clearance_hz=clearance,
                                    clearance_assumed=assumed, notes=notes))
                for b in dict.fromkeys(points)]
     name = net.bus["name"].astype(str)
     scan = pd.concat([s.scan.assign(bus=name[b]) for b, s in studies], ignore_index=True)
-    resonance = pd.concat([s.resonance.assign(bus=name[b]) for b, s in studies], ignore_index=True)
+    resonance = _mode_coverage(campus, pd.concat([s.resonance.assign(bus=name[b]) for b, s in studies],
+                                                 ignore_index=True))
     # each far-side bus with no series crossing reads clear, naming the capacitors scanned from it
     crossed = set(resonance.loc[resonance["kind"] == ss.SERIES, "bus"])
     band = f"{ss.F_MIN_HZ:g}-{float(net.f_hz) - ss.F_MIN_HZ:g} Hz"
@@ -1466,6 +1618,67 @@ def voltage_stability_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_di
               "source EMF: 1.0 pu, or the period's lowest converged PCC voltage when lower"]
     return {"ledger": ledger, "notes": notes, "basis": SCREENING_BASIS, "sk_min_mva": sk, "rx_min": rx,
             "c": c, "vn_kv": vn}
+
+
+def voltage_control_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> dict:
+    """The plant's voltage-control strategy on a prepared run (plan GC-02,
+    ``static/voltage_control.py``): the PoC P-Q chart across voltage
+    (``campus_poc_pq.csv``), the profile's Q(V) droop in the load flow at
+    every selected hour, intact and N-1, on the S_k''min and S_k''max grid
+    equivalents (``campus_voltage_control_lf.csv``), and the scorecard rows
+    (``campus_voltage_control.csv``). A setting the profile does not state
+    makes its row "unknown"; a normally open tie or a PCC without S_k''
+    leaves the droop unrun, with the reason in its row."""
+    import copy
+
+    from gridspine.static.voltage_control import (
+        OUTCOME_COLUMNS,
+        droop_from,
+        grid_equivalent,
+        outcome_rows,
+        poc_pq_chart,
+        scorecard_rows,
+    )
+
+    run_dir = Path(run_dir)
+    code = load_grid_code(profile, extra_dirs=profile_dirs)
+    hourly, pcc = campus_tables(run_dir)
+    campus = load_run_campus(run_dir)
+    p_ref = _p_ref(campus, pcc)[0]
+    chart = poc_pq_chart(campus, code, p_ref)
+    control, why = droop_from(code, campus)
+    if control is not None and campus.tie_normally_open:
+        control, why = None, "the tie to the grid is normally open: no grid voltage to droop against"
+    if control is not None and _sk_source(yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text()),
+                                          _unchanged_project(run_dir))[1]:
+        control, why = None, NO_SK_MIN + ": the droop needs the grid's strength, not the typical fallback"
+    if control is not None:
+        try:                                    # the grid's strength, both equivalents, before any hour runs
+            for grid in ("min", "max"):
+                grid_equivalent(copy.deepcopy(campus.net), grid)
+        except ContractError as e:
+            control, why = None, str(e)
+    lf_rows = []
+    if control is not None:
+        selection = selected_hours(run_dir)
+        for period, hour in selection[["period", "hour"]].itertuples(index=False):
+            period, hour = int(period), int(hour)
+            rows = hourly[(hourly["period"] == period) & (hourly["hour"] == hour)]
+            for grid in ("min", "max"):
+                flows = solve_cases(campus, rows, control=dataclasses.replace(control, grid=grid))
+                lf_rows += outcome_rows({"period": period, "hour": hour}, grid, flows)
+    outcomes = pd.DataFrame(lf_rows, columns=list(OUTCOME_COLUMNS))
+    eg = campus.net.ext_grid.iloc[0]
+    grid_note = (f"S_k''min {float(eg['s_sc_min_mva']):g} MVA (R/X {float(eg['rx_min']):g}), "
+                 f"S_k''max {float(eg['s_sc_max_mva']):g} MVA (R/X {float(eg['rx_max']):g}); "
+                 f"{C_BRACKET_NOTE}")
+    if float(eg["s_sc_max_mva"]) == float(eg["s_sc_min_mva"]):
+        grid_note += ": no separate S_k''max entered, so the strong grid differs from the weak one only by c"
+    card = scorecard_rows(code, chart, outcomes, why, grid_note=grid_note)
+    _write_text_atomic(run_dir / POC_PQ_CSV, chart.to_csv(index=False))
+    _write_text_atomic(run_dir / VOLTAGE_CONTROL_LF_CSV, outcomes.to_csv(index=False))
+    _write_text_atomic(run_dir / VOLTAGE_CONTROL_CSV, card.to_csv(index=False))
+    return {"chart": chart, "outcomes": outcomes, "scorecard": card, "p_ref_mw": p_ref}
 
 
 # --- GC-03: planning criteria and grid strength in the campus run (TRGC 15) ---
@@ -1887,12 +2100,15 @@ def powerfactory_campus(run_dir, hours=None) -> list:
     harmonic spectrum), ``dgs_names.csv``, ``harmonic_sources.csv`` (every
     converter, with or without a spectrum, and any harmonic source the
     network does not model), the hour's pandapower load flow
-    (``lf_bus.csv``, ``lf_branch_flow.csv``) and ``manifest.json`` — so
+    (``lf_bus.csv``, ``lf_branch_flow.csv``) and ``manifest.json`` (its
+    ``not_written``: each value the DGS could not carry, one record per
+    ``DgsExport.not_written`` row with its ``NOT_WRITTEN_COLUMNS``, a
+    non-finite value as null) — so
     ``readback.results.read_back`` compares a PowerFactory export of it
     directly. Returns the directories."""
     import copy
 
-    from gridspine.handoff.dgs_writer import HARMONIC_COLUMNS, PENDING_VERIFICATION, write_dgs
+    from gridspine.handoff.dgs_writer import HARMONIC_COLUMNS, NOT_WRITTEN_COLUMNS, PENDING_VERIFICATION, write_dgs
     from gridspine.readback.results import DGS_NAMES_CSV
     from gridspine.static.campus_flow import apply_hour
     from gridspine.static.loadflow import run_lf
@@ -1928,6 +2144,7 @@ def powerfactory_campus(run_dir, hours=None) -> list:
                     "files": [f"{case}.dgs", DGS_NAMES_CSV, HARMONIC_SOURCES_CSV, "lf_bus.csv",
                               "lf_branch_flow.csv", "manifest.json"],
                     "no_spectrum": sorted(sources.loc[sources["status"] != "spectrum", "pp_name"]),
+                    "not_written": _json_ready(exp.not_written[list(NOT_WRITTEN_COLUMNS)].to_dict("records")),
                     "pending_verification": [PENDING_VERIFICATION]}
         _write_text_atomic(out / "manifest.json", json.dumps(manifest, indent=2) + "\n")
         out_dirs.append(out)

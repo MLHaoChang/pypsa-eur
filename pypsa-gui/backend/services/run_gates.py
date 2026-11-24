@@ -1124,7 +1124,7 @@ def _dc_campus_study(env):
     """The run's own campus job: `done` only once its step settled completed."""
     from services import run_actions
     step = run_actions.latest(env.task, run_actions.CAMPUS)
-    if step is None or step["status"] not in ("completed", "failed"):
+    if step is None or step["status"] not in ("completed", "failed", "cancelled"):
         return None
     return "done" if step["status"] == "completed" else ((step.get("job") or {}).get("outcome") or "failed")
 
@@ -1372,8 +1372,11 @@ def _grid_loading(ctx, ev):
     if isinstance(out, pf.Missing):
         return out
     peak, over = out
-    return Detailed(round(peak, 2), over, "peak apparent power at either end of any line or transformer, % of "
-                                          "its MVA rating x s_max_pu, on the converged AC power-flow snapshots")
+    skipped = pf.assumed_branches(ctx.network)
+    note = (f"; {len(skipped)} with an assumed rating not judged ({pf._named(skipped)})") if skipped else ""
+    return Detailed(round(peak, 2), over, "peak apparent power at either end of the lines and transformers with "
+                                          "a stated rating, % of its MVA rating x s_max_pu, on the converged AC "
+                                          "power-flow snapshots" + note)
 
 
 def _grid_voltage(ctx, ev):

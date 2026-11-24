@@ -3,7 +3,7 @@
 
 # 23 Business-case indexation takes a fraction while the field beside it takes %, and 200 %/yr is accepted silently
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), walk W2.
 Severity: wrong figures

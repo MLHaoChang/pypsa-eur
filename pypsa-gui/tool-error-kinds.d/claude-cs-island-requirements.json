@@ -1,0 +1,1 @@
+{"kinds": {"island_config_changed": {"surface": "inline", "why": "campus_set_island_config with patch (and PATCH /campus-electrical/{name}/island): the island config changed after the revision passed as base was read, so nothing was written. The model reads campus_island_config again and retries the patch with the new revision."}}}

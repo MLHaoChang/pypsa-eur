@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Results › Capacity expansion › Costs & prices › Products shows, on a project with process units or a product Load, what the site makes (output in kg/h or t/d, running time of each process unit) and, for hydrogen, the cost per kg exactly as Economics and the report give it. Ammonia shows its output; no cost per tonne is calculated for it yet.

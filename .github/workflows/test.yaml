@@ -404,6 +404,8 @@ jobs:
         node scripts/smoke-copilot-lc06-d24.mjs || status=1
         # E2E-TEMPLATES-1: the template journey, section 3 (template-e2e 02).
         node scripts/smoke-template-journey-connection.mjs || status=1
+        # Investment walkthrough 02: the data centre's investment case, Guided = Expert, no raw codes.
+        node scripts/smoke-template-journey-investment.mjs || status=1
         exit $status
 
     - name: Upload journey screenshots

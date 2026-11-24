@@ -12,6 +12,7 @@ They are NOT PyPSA attributes, so three boundaries need help:
 from __future__ import annotations
 
 import math
+from decimal import Decimal
 
 import numpy as np
 import pandas as pd
@@ -20,7 +21,7 @@ from models.energy_hub import EH_CUSTOM_COLUMNS, EH_INTERNAL_ROLES, EH_LINK_ROLE
 from models.process_unit import (CRITICALITY_TIERS, DC_AC_RATIO_MAX, HARMONIC_SOURCES, PROCESS_CUSTOM_COLUMNS,
                                  PROCESS_GENERATOR_ROLES, START_METHODS)
 
-_ATTR_OF = {"Bus": "buses", "Link": "links", "Generator": "generators", "Store": "stores"}
+_ATTR_OF = {"Bus": "buses", "Link": "links", "Generator": "generators", "Store": "stores", "Load": "loads"}
 _TRUE = ("true", "1", "yes", "y", "t")
 _FALSE = ("false", "0", "no", "n", "f", "")
 
@@ -64,6 +65,8 @@ def coerce_eh_value(component_class: str, col: str, value):
     if kind == "float_nonneg":
         if value is None or value == "":
             return float("nan")
+        if isinstance(value, bool):  # float(True) is 1.0: a tick is never a size (GK B X2)
+            raise ValueError(f"{col}: expected a number, got {value}")
         try:
             v = float(value)
         except (TypeError, ValueError):
@@ -133,6 +136,41 @@ def coerce_eh_value(component_class: str, col: str, value):
     raise ValueError(f"{col}: unknown kind {kind!r}")  # pragma: no cover
 
 
+def sk_number(value) -> float | None:
+    """The number in a short-circuit cell, or None when blank, NaN or not a number. An infinity is kept:
+    the write paths refuse it, but an import can store it, and an infinite minimum is above any finite maximum."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(v) else v
+
+
+def sk_shown(value: float) -> str:
+    """A short-circuit power at full precision, so two nearby values never read the same (1234567.89, not 1.23457e+06)."""
+    return format(Decimal(repr(float(value))).normalize(), "f")
+
+
+def check_grid_strength_pair(component_class: str, row, submitted=None) -> None:
+    """A slack Generator's minimum short-circuit power never exceeds its maximum (catalogue 06, GK B X8).
+
+    `row` is the whole row after the edit (a one-sided edit is checked against the stored other value).
+    With `submitted`, the check runs only when that edit names `sk_min_mva` or `sk_max_mva`, so an
+    unrelated edit of an imported, reversed pair still goes through. A blank (NaN) on either side skips it.
+    Raises ValueError with the user-facing rule; the write path makes it a 422.
+    """
+    if component_class != "Generator":
+        return
+    if submitted is not None and not ({"sk_min_mva", "sk_max_mva"} & set(submitted)):
+        return
+    lo, hi = sk_number(row.get("sk_min_mva")), sk_number(row.get("sk_max_mva"))
+    if lo is not None and hi is not None and lo > hi:
+        # The stated limit is the stored maximum at full precision, so entering it as the minimum passes.
+        raise ValueError(f"Minimum short-circuit power: it is above the maximum short-circuit power ({sk_shown(hi)} MVA).")
+
+
 def dc_ac_ratio(value, label: str | None = "DC/AC ratio") -> float:
     """A Generator's DC/AC ratio: blank is NaN (not declared, never 1); else finite within (0, DC_AC_RATIO_MAX].
     One check for every write path and for pricing, which re-checks a stored value an import may have
@@ -165,9 +203,15 @@ def declared_dc_ac_ratio(frame, name: str) -> float:
     return ratio
 
 
+#: Orders 2–50 once each at "50:100.25, " fit well inside this; a longer value is a paste slip (GK B X6).
+SPECTRUM_MAX_CHARS = 600
+
+
 def _checked_text(kind: str, value) -> str:
     """A text column gridspine parses (a harmonic spectrum, a ride-through curve), refused when malformed."""
     v = "" if value is None else str(value).strip()
+    if kind == "harmonic_spectrum" and len(v) > SPECTRUM_MAX_CHARS:
+        raise ValueError(f"Harmonic spectrum: it is {len(v)} characters long; the most is {SPECTRUM_MAX_CHARS}.")
     try:
         from gridspine.schema.contracts import ContractError
         if kind == "harmonic_spectrum":

@@ -1190,6 +1190,7 @@ def advance(path, *, boot, clock) -> bool:
         if step["tool"] == "run_sensitivity_sweep" and step["status"] in (
             "completed",
             "failed",
+            "cancelled",
             "uncertain",
         ):
             outcomes = _outcomes(step)
@@ -1291,7 +1292,9 @@ def advance(path, *, boot, clock) -> bool:
             case = cases.get(mark.get("case"))
             if case is None:
                 continue
-            if step["status"] in ("failed", "uncertain") and case["status"] in (
+            if step["status"] in ("failed", "cancelled", "uncertain") and case[
+                "status"
+            ] in (
                 "admitted",
                 "running",
             ):

@@ -505,6 +505,7 @@ export const REFUSAL_ACTION: Record<string, string> = {
   outside_horizon: 'set years inside the investment case',
   year_out_of_range: 'keep each year between its start and end',
   indexation_missing: 'set an indexation rate',
+  indexation_out_of_range: 'keep the indexation between −20 and +30 %/yr',
   life_missing: 'set a life in years',
   rate_missing: 'set a declining-balance rate',
   price_not_established: 'set a price',

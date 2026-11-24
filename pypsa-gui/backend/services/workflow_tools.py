@@ -420,8 +420,14 @@ class SensitivityCase(BaseModel):
 
 
 def _exact_frame_json(frame):
-    """Encode typed input values without pandas' JSON float rounding."""
+    """Encode typed input values without pandas' JSON float rounding.
+
+    The text is exactly `json.dumps` of the per-value `scalar` encoding below
+    (sort_keys, default separators). Issue 225: a column or index of a plain
+    numpy dtype is written straight to that text (no per-value lists, no float
+    maths), and everything else falls back to `scalar`, column by column."""
     from datetime import date, datetime
+    import numpy as np
     import pandas as pd
 
     def scalar(value):
@@ -443,13 +449,43 @@ def _exact_frame_json(frame):
             return ['str', value]
         _refuse('input_capture_unavailable', 'An input has an unsupported scalar type; exact preflight is unavailable.', 409)
 
-    return json.dumps({'columns': [scalar(v) for v in frame.columns.tolist()],
-        'index': [scalar(v) for v in frame.index.tolist()],
-        'index_names': [scalar(v) for v in frame.index.names],
-        'dtypes': [str(v) for v in frame.dtypes],
-        'values_by_column': [[scalar(v) for v in frame.iloc[:, position].tolist()]
-                             for position in range(len(frame.columns))]},
-        sort_keys=True, allow_nan=False)
+    def items(values):
+        """Each value's `json.dumps(scalar(value))` text, for an Index or a Series."""
+        if isinstance(values, pd.MultiIndex):
+            if not any((codes == -1).any() for codes in values.codes):
+                # Each used level value once, then taken by code: the tuples master iterates.
+                # Unused level values (left by a slice) are never encoded, as in master.
+                values = values.remove_unused_levels()
+                levels = [items(level) for level in values.levels]
+                taken = [[text[code] for code in codes.tolist()] for text, codes in zip(levels, values.codes)]
+                return ['["tuple", [' + ', '.join(row) + ']]' for row in zip(*taken)]
+        elif isinstance(values.dtype, np.dtype):
+            kind = values.dtype.kind
+            if kind == 'f' and values.dtype.itemsize <= 8:  # .tolist() gives Python floats, widened exactly
+                return ['["float", "' + v.hex() + '"]' for v in values.tolist()]
+            if kind in 'iu':
+                return ['["int", "' + str(v) + '"]' for v in values.tolist()]
+            if kind == 'b':
+                return ['["bool", true]' if v else '["bool", false]' for v in values.tolist()]
+            if kind == 'M' and not values.isna().any():
+                stamps = values.to_numpy()
+                seconds = stamps.astype('datetime64[s]')
+                # Whole seconds in years 1-9999 only: there numpy's text is Timestamp.isoformat()'s.
+                if ((seconds == stamps).all() and (seconds >= np.datetime64('0001-01-01T00:00:00', 's')).all()
+                        and (seconds <= np.datetime64('9999-12-31T23:59:59', 's')).all()):
+                    return ['["datetime", "' + v + '"]' for v in np.datetime_as_string(seconds, unit='s').tolist()]
+        return [json.dumps(scalar(v)) for v in values.tolist()]
+
+    def array(texts):
+        return '[' + ', '.join(texts) + ']'
+
+    # The keys in sort_keys order, as json.dumps(..., sort_keys=True, allow_nan=False) wrote them.
+    return ('{"columns": ' + json.dumps([scalar(v) for v in frame.columns.tolist()], allow_nan=False)
+            + ', "dtypes": ' + json.dumps([str(v) for v in frame.dtypes])
+            + ', "index": ' + array(items(frame.index))
+            + ', "index_names": ' + json.dumps([scalar(v) for v in frame.index.names], allow_nan=False)
+            + ', "values_by_column": ' + array(array(items(frame.iloc[:, position]))
+                                               for position in range(len(frame.columns))) + '}')
 
 
 def solve_freshness(ctx=None, after_pf=False):
@@ -625,7 +661,9 @@ def _network_input_fingerprint(ctx, *, exact=False):
         if invalid:
             parts.append("invalid")
         else:
-            floors, strings = _rp.derive_backup(n, getattr(ctx, "storage_dir", None))
+            floors, strings = _rp.derive_backup(
+                n, getattr(ctx, "storage_dir", None),
+                _rp.attested_of(ctx.solver_state["solver_config"]))
             parts.append(json.dumps({"inputs": _rp.inputs_digest(products, floors),
                                      "strings": sorted(strings)}, sort_keys=True))
     # DC 07: an operational run keys on the capacity run's recorded sizes, so a

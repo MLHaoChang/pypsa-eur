@@ -364,3 +364,17 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A written file that needs a sidecar marks itself, so a reader refuses it without the sidecar. Hand-written files are unaffected. An importer takes the sidecar from the files it is given, not only from disk, and never reports a sidecar it used as unread (GC-19 #1743).
 - A docstring "known edge" states today's behaviour, and the edge is filed as an issue (#1742).
 - A test of a mapping compares whole dicts against a hand-written mapping, never against the code's own constants, and includes a blank value (#1767, #1790).
+
+## Standing rulings (GK A2 (6) and GK B2 (4), recorded 2026-11-23)
+
+- A table entry's skip is honoured by every op path, the bundle zip included (GK A2 (6), #1577).
+- A pack table never shows a judged value the scorecard refused, and never shows the grid-counted number as the island answer (GK A2 (6), #1879).
+- Ids print as text, never number-formatted. A judged value never prints equal to its limit (GK A2 (6), #1879 B2/B3).
+- A lookup map in user-facing text has a plain fallback and a whole-dict test (GK A2 (6), #1897 N1).
+- A test fix that copies a module-level pandas index into each frame can break index-name parity with `n.snapshots`; index the frames by `n.snapshots`, and copy only what `set_snapshots` and module helpers hand out (GK B2 (4), #1874).
+
+## Standing rulings (GK A2 (7) and GK B3 (6), recorded 2026-11-23)
+
+- Re-recording a byte-identity digest or golden after a master merge is not a clean merge. The PR names the upstream change behind each re-recorded digest, and the GK re-reviews it (GK A2 (7), #1922/#1916).
+- A read that hands out a revision with content hashes the same bytes it parses, never a second read of the file (GK B3 (6), #1913).
+- Every read-modify-write writer of a locked file (for example a preset select) does its read inside the same lock, not only its write (GK B3 (6), #1913).

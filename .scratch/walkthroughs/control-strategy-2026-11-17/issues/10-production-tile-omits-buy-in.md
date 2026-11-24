@@ -32,3 +32,7 @@ Hand check:
 
 - WALK-E2E-1 (results traceable to inputs).
 - `.scratch/grid-to-process/design.md:338-339`: buy-in (97 €/MWh_NH3) and lost production (800 €/t) are separate outcomes.
+
+## Comments
+
+- 2026-11-23 status sweep: landed in #1676 (0b42e632): "Bought in" tile and its cost landed. Unverified: the "Key capacities use same words" item.

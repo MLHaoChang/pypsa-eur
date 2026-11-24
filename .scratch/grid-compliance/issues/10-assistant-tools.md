@@ -20,6 +20,17 @@ GC-09 ships `/api/grid-compliance` with no chat tool. Its seven routes sit in th
 `grid_compliance_workflow` group of `UI_INTERNAL` (`tests/test_route_chat_disposition.py`), whose
 cap went from 11 to 12 for it.
 
+The seven routes, held for this issue in route parity
+(`smoke/assistant_route_parity_declarations.d/claude-gc09-compliance-workflow-ui.json`):
+
+- `GET /api/grid-compliance/{name}`
+- `PUT /api/grid-compliance/{name}/deliverables/{code}/status`
+- `PUT /api/grid-compliance/{name}/deliverables/{code}/data`
+- `POST /api/grid-compliance/{name}/deliverables/{code}/freeze`
+- `POST /api/grid-compliance/{name}/deliverables/{code}/comments`
+- `PATCH /api/grid-compliance/{name}/deliverables/{code}/comments/{comment_id}`
+- `POST /api/grid-compliance/{name}/deliverables/{code}/pack`
+
 ## What to build
 
 Chat tools that serve every `/api/grid-compliance` route (read the tracker; set a status; edit
@@ -32,3 +43,6 @@ the data list; freeze; log and answer a TSO comment; build a pack), registered i
 - `grid_compliance_workflow` is gone from `UI_INTERNAL` and the cap in
   `test_ui_internal_stays_small` is back to 11.
 - Each write tool goes through the same guards and lock as its route (tests).
+- `ui_open_panel` can open the section: `grid_compliance` joins its `panel_section` enum and
+  `_SECTION_FILES` in `tests/test_navigation_reach.py`, and the section gets its
+  `panelSection="grid_compliance"` marker back (GC-09 ships without one, as no id names it yet).

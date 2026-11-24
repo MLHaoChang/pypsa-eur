@@ -72,14 +72,16 @@ def test_the_issue_rows_are_declared():
         'dc_operational_gap': ('manual', 'results'), 'results_headline_strip': ('manual', 'results'),
         'library_uploads_and_tariff_edit': ('manual', 'library'),
         'power_trace_spectrum': ('unbuilt', None),
+        'model_import': ('unbuilt', None),  # project-io 04; chat in issue 05 or later
         'parameter_catalogue': ('unbuilt', None),  # expert-catalogue 01a; chat tools in 01b
         'report_comment_revisions': ('unbuilt', None),
         'report_revision_drafts': ('out of chat', None),
-        'excel_input_workbook': ('unbuilt', None),  # excel-input-workbook 02; chat in issue 06
         'report_chart_snapshots': ('manual', 'results'),
         'energization_per_period': ('unbuilt', None),  # template-e2e 02b (not_via_chat.d/)
         'eh_study_why': ('unbuilt', None),  # guided-results 02a; a later slice adds the chat tool
         'entsoe_day_ahead_prices': ('manual', 'library'),  # SCU06 S1: spends the stored token
+        'table_tonne_unit_marks': ('manual', None),  # ui-modern 05f (not_via_chat.d/)
+        'market_packs': ('manual', None),  # SCU06 K8a (not_via_chat.d/), SCU06-CHAT-1
     }
     assert 'grid_code_publish' not in entries  # GRIDCODE-CHAT-1: chat tools behind a card
     assert {k: (e['disposition'], e['panel']) for k, e in entries.items()} == expected

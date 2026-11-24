@@ -313,7 +313,7 @@ describe('FinanceInputsEditor', () => {
     expect(api.putFinance.mock.calls[0][1]).toBe('digest-0')
   })
 
-  it('states the expected outage hours and their source for the island break-even', async () => {
+  it('states the expected outage hours and their source for the island-capability break-even', async () => {
     api.getFinance.mockResolvedValue({ finance: null, digest: 'digest-0', status: 'not_set' })
     renderEditor()
     fireEvent.click(await screen.findByRole('button', { name: 'State the finance inputs' }))

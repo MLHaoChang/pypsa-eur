@@ -18,6 +18,12 @@ from services.finance.case import TemplateLine
 
 _KEY = "island_capability_breakeven_unit"
 
+#: The one display name for this figure (owner decision, UX ruling): the yearly
+#: value of being able to island at which the investment's NPV is 0. Not the
+#: grid-extension break-even distance. Used by the report, the xlsx export and
+#: the template ledger (lowercased there); the JSON keys keep their names.
+LABEL = "Island-capability break-even"
+
 
 def _flag_value(flags, prefix: str) -> float | None:
     for f in flags:

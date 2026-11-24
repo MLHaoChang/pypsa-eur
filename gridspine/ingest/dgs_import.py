@@ -28,7 +28,13 @@ or 7.x) or its Excel form (``dgs_xlsx``) and returns the shared
 - ``ElmLod`` → Load (``plini``/``qlini`` · ``scale0``); ``ElmGenstat`` → Generator
   PQ; ``ElmSym`` + ``TypSym`` → Generator PV (Slack with ``ip_ctrl`` 1), its
   ``usetp`` the bus voltage set-point; ``ElmXnet`` → Generator Slack (PV or PQ by
-  ``bustp``) with p_nom = inf. A machine's p_nom is ``sgn`` · ``cosn``, or ``sgn``
+  ``bustp``). The file leaves an external grid unbounded, so its p_nom is the
+  larger of its short-circuit level ``snss`` (when given) and the never-binding
+  bound of ``gridspine.ingest.ratings`` (ceil(max(10 × Σ |S| of the in-service
+  loads, the voltage-class floor of its bus)) MVA, used as MW), listed in
+  ``assumed`` and marked ``p_nom_source`` = "assumed" (other generators read
+  "file"; only "assumed" means assumed, so a row added later, empty or NaN, is
+  not). A machine's p_nom is ``sgn`` · ``cosn``, or ``sgn``
   (MVA used as MW, assumed) without ``cosn``.
 - ``ElmShnt`` (``shtype`` 1 R-L or 2 C) → ShuntImpedance, b = ±``qtotn`` ·
   ``ncapa``/``ncapx``/``ushnm``² (capacitive positive); g 0, assumed (the file
@@ -65,6 +71,12 @@ from gridspine.ingest.import_result import (
     ImportReport,
     ImportResult,
     Unmapped,
+)
+from gridspine.ingest.ratings import (
+    assumed_rating_mva,
+    default_marginal_costs,
+    source_column,
+    total_load_mva,
 )
 from gridspine.schema.contracts import ContractError
 
@@ -133,6 +145,41 @@ def read_dgs(paths: Sequence[Path], options: Mapping[str, Any] | None = None):
         return _Mapper(tables, path.name).run()
     except ContractError as exc:
         raise ImportFormatError(f"{path.name}: {exc}") from exc
+
+
+def _plain(parameter: str) -> str:
+    """
+    A parameter label as it reads mid-sentence ("Tap position" -> "tap position",
+    an acronym kept: "HV vector group number"); a blank label reads "value",
+    never the raw DGS attribute.
+    """
+    if not parameter:
+        return "value"
+    if parameter[1:2].isupper():
+        return parameter
+    return parameter[:1].lower() + parameter[1:]
+
+
+#: Plain names of the DGS type classes an element refers to, for unmapped text.
+_TYPE_NAMES = {
+    "TypLne": "line",
+    "TypTr2": "two-winding transformer",
+    "TypTr3": "three-winding transformer",
+    "TypSym": "synchronous machine",
+}
+
+
+def _type_name(tcls: str) -> str:
+    """The plain name of a DGS type class; an unlisted one reads "matching"."""
+    return _TYPE_NAMES.get(tcls, "matching")
+
+
+def _no_value(parameter: str) -> str:
+    """The assumed why for a value the file omits; "no no-load losses" never reads."""
+    plain = _plain(parameter)
+    if plain.lower().startswith(("no-", "no ")):
+        return f"the file gives no value for {plain}"
+    return f"the file gives no {plain}"
 
 
 def _int(item: str, what: str, v) -> int:
@@ -214,7 +261,7 @@ class _Mapper:
         """``row[attr]``, or ``default`` listed as assumed when the file omits it."""
         v = self.get(row, attr)
         if v is None:
-            self.assume(asset, parameter, default, f"the file gives no {attr}")
+            self.assume(asset, parameter, default, _no_value(parameter))
             return default
         return v
 
@@ -224,7 +271,9 @@ class _Mapper:
     def typ(self, cls, oid, row, tcls):
         tid = self.get(row, "typ_id")
         if not self.holds(tcls, tid):
-            self.skip(cls, oid, row, f"no {tcls} type")
+            self.skip(
+                cls, oid, row, f"the file gives no {_type_name(tcls)} type for it"
+            )
             return None
         self.used_types.add(tid)
         return self.t[tcls].loc[tid]
@@ -305,6 +354,9 @@ class _Mapper:
         self._machines()
         self._xnets()
         self._shunts()
+        # no cost attribute is read from DGS, so every generator takes the default
+        for row in default_marginal_costs(self.n.generators):
+            self.assume(*row)
         for component in ("Load", "Generator"):
             df = self.n.components[component].static
             for col in ("harmonic_source", "harmonic_spectrum"):
@@ -482,7 +534,9 @@ class _Mapper:
             g = self.get(typ, "gline")
             if g is None:
                 g = 0.0
-                self.assume(name, "Conductance", 0.0, "the line type gives no gline")
+                self.assume(
+                    name, "Conductance", 0.0, "the line type gives no conductance"
+                )
             g = _finite(item, "conductance per km", g)
             if r < 0 or x <= 0 or b < 0 or g < 0:
                 raise ContractError(
@@ -890,6 +944,7 @@ class _Mapper:
         self.n.buses.at[bus, "v_mag_pu_set"] = v
 
     def _xnets(self):
+        bounded = []
         for oid, row, item, name, bus in self._injection("ElmXnet", "Generator"):
             kind = str(self.get(row, "bustp", "SL")).strip().upper()
             control = {"SL": "Slack", "PV": "PV", "PQ": "PQ"}.get(kind)
@@ -909,20 +964,46 @@ class _Mapper:
                     "reactive power (Mvar)",
                     self.opt(name, row, "qgini", 0.0, "Reactive power (Mvar)"),
                 )
+            p_nom, why = self._grid_limit(item, bus, row)
             self.n.add(
                 "Generator",
                 name,
                 bus=bus,
                 control=control,
-                p_nom=math.inf,
+                p_nom=p_nom,
                 p_set=p,
                 q_set=q,
                 active=self.active(oid, row),
             )
+            self.assume(name, "active power limit (MW)", p_nom, why)
+            bounded.append(name)
             if control != "PQ" and self.active(oid, row):
                 self._setpoint(item, bus, row)
             self._grid_strength(item, name, row)
             self.record("ElmXnet", oid, row, "Generator", name)
+        if bounded:  # marks a limit results must not read as real
+            gens = self.n.generators
+            gens["p_nom_source"] = source_column(gens.index, bounded)
+
+    def _grid_limit(self, item, bus, row):
+        """``(p_nom, why)`` for an external grid, which the file leaves unbounded."""
+        load = total_load_mva(self.n.loads)
+        kv = self.n.buses.at[bus, "v_nom"]
+        bound = assumed_rating_mva(load, kv)
+        why = (
+            "the external grid is unbounded in the file, so a limit that "
+            f"never binds is used: 10 × the total load {load:.1f} MVA, or the "
+            f"{kv:g} kV class floor if higher"
+        )
+        sk = self.get(row, "snss")
+        if sk is not None:
+            sk = _finite(item, "sk max mva", sk, positive=True)
+            if sk > bound:
+                return sk, (
+                    f"{why}; its short-circuit level {sk:g} MVA is higher, so that "
+                    "is used"
+                )
+        return bound, why
 
     def _shunts(self):
         for oid, row, item, name, bus in self._injection("ElmShnt", "ShuntImpedance"):

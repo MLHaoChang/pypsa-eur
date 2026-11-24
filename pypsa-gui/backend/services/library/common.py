@@ -24,6 +24,14 @@ PINNED: dict[tuple[str, str], str] = {
     # EU-C09: ACM Tarievenbesluit TenneT 2026 (owner clearance, common, 2026-10-21).
     ("tariff", "nl-tennet-2026-ehs"): "78fc38dd84734834663ebbeae3e630fe888fc3daeffaa7515d0e03fa95716c5c",
     ("tariff", "nl-tennet-2026-hs"): "b866852dc70e65828e411f28c5fae72da87f760795fb27c5b8cb7304acc32b5a",
+    # SCU06 S2a: illustrative EU PPA/CfD templates (owner Q11 = A), not market data. Each
+    # cites its value ranges in `meta.notes`; party and asset fields hold placeholders
+    # (`services.commercial.placeholders`) that the server refuses to save or settle.
+    ("contract", "eu-cfd"): "2a19864b8bd9191fc53d798a510bb43581bddced8654db2746eb6e3f5f93bc85",
+    ("contract", "eu-ppa-as-consumed-btm"): "1b26b5579e520a7f46cfaad3633b88174f010853704a93a51365dac5c2769a4b",
+    ("contract", "eu-ppa-baseload"): "631646fbf8e8dc82231176cfc84c7300a53b8ff50a374db1be3a8b790d655e9c",
+    ("contract", "eu-ppa-pay-as-produced"): "a395ffdfccde46698d9ed1fa1ff76f5f152d0419ef8fc5a8dd55b623ae31f57d",
+    ("contract", "eu-ppa-sleeved"): "2fd70afa1a86d47873542da3f2094c5b8cfcfb79bf767d1d400eb9a1bb8bb771",
 }
 
 

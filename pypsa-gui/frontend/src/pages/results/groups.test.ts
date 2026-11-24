@@ -6,7 +6,8 @@ import { CARD_GROUPS, RESULT_GROUPS, cardPlaceOf, groupOf, type ResultsTab } fro
 const ALL_TABS: ResultsTab[] = [
   'summary', 'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'emissions',
   'economics', 'curtailment', 'lostload', 'adequacy', 'storage', 'asset', 'fmea', 'investment', 'flows', 'loadshape',
-  'grid_code', 'electrical_design', 'island', 'grid_forming', 'grid_risk',
+  'grid_code', 'electrical_design', 'island', 'grid_forming', 'grid_risk', 'products',
+  'reports', 'exports', 'specialist_packet',
 ]
 
 describe('Results groups (UX overhaul S3, owner decisions D1a / D2a)', () => {
@@ -21,7 +22,8 @@ describe('Results groups (UX overhaul S3, owner decisions D1a / D2a)', () => {
     // The Control tabs (W10 R3) are filed under the Control card only: the five Guided chapters
     // have no Control tile until R7, and a tab filed under none of them opens no chapter.
     const control = ['island', 'grid_forming']
-    expect(new Set(grouped)).toEqual(new Set(ALL_TABS.filter(t => t !== 'asset' && !control.includes(t))))
+    const handoff = ['reports', 'exports', 'specialist_packet']
+    expect(new Set(grouped)).toEqual(new Set(ALL_TABS.filter(t => t !== 'asset' && !control.includes(t) && !handoff.includes(t))))
     expect(groupOf('asset')).toBeNull()
     for (const t of control) expect(groupOf(t as ResultsTab)).toBeNull()
   })
@@ -66,6 +68,30 @@ describe('Results card groups (W10 R1)', () => {
       expect({ id: m[1], ...place }).toEqual({ id: m[1], group: card, cardTab })
       seen++
     }
-    expect(seen).toBe(20)
+    expect(seen).toBe(21)
+  })
+})
+
+// R6: Hand-off holds what leaves the tool; the card tab ids are flow_scope.py's.
+describe('Results › Hand-off (R6)', () => {
+  it('holds Reports, Exports and the Specialist packet, in that order', () => {
+    const g = CARD_GROUPS.find(x => x.id === 'handoff')!
+    expect(g.tabs.map(t => t.id)).toEqual(['reports', 'exports', 'specialist_packet'])
+    expect(g.tabs.map(t => t.views)).toEqual([['reports'], ['exports'], ['specialist_packet']])
+  })
+
+  it.each(['reports', 'exports', 'specialist_packet'] as const)('cardPlaceOf finds %s under Hand-off', (tab) => {
+    expect(cardPlaceOf(tab)).toEqual({ group: 'handoff', cardTab: tab })
+  })
+
+  it('matches the handoff card tabs of services/flow_scope.py', () => {
+    const src = readFileSync(resolve(__dirname, '../../../../backend/services/flow_scope.py'), 'utf8')
+    const ids = [...src.matchAll(/\("handoff", "(\w+)"\)/g)].map(m => m[1])
+    expect(ids).toEqual(CARD_GROUPS.find(x => x.id === 'handoff')!.tabs.map(t => t.id))
+  })
+
+  it('files no view in two groups', () => {
+    const views = CARD_GROUPS.flatMap(g => g.tabs.flatMap(t => t.views))
+    expect(new Set(views).size).toBe(views.length)
   })
 })

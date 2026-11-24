@@ -116,6 +116,7 @@ RESULTS_TAB_ENUM = [
     "island",       # W10 R3 (Control: Island & ride-through)
     "grid_forming",  # W10 R3 (Control: Grid-forming)
     "grid_risk",    # G2P-13 (Reliability: Grid risk to production)
+    "products",     # guided-results 09 (Capacity expansion: Products)
 ]
 BOTTOM_TAB_ENUM = [
     "Log", "History", "Buses", "Lines", "Transformers", "Generators",
@@ -2349,8 +2350,8 @@ TOOLS: list[dict[str, Any]] = [
         "generators, lines, links, storage_units, stores, loads, transformers, "
         "snapshots, report} per schemas.py:455-464; report lists what the file "
         "held that was not read. The PyPSA Studio input workbook is refused "
-        "(import_as_new_project): the user imports it as a new project in the "
-        "app. Safety: destructive.",
+        "(import_as_new_project): preview_input_workbook then import_input_workbook "
+        "import it as a new project. Safety: destructive.",
         {
             "bytes_b64": {"type": "string"},
             "filename": {"type": "string"},
@@ -3763,9 +3764,16 @@ TOOLS: list[dict[str, Any]] = [
         "source tag honest: a value from a datasheet is datasheet, a guess "
         "stays assumed. You must ask before replacing a config the user "
         "already saved. The last island study is dropped, since it was made "
-        "with the old config. Safety: write.",
-        {"project_id": {"type": "string"}, "config": {"type": "object"}},
-        ["project_id", "config"],
+        "with the old config. To change a few fields, pass patch instead of "
+        "config: {requirements: {field: value}, units: {unit: {field: value}}} "
+        "with plain values (a changed tagged number becomes datasheet), plus "
+        "base, the revision campus_island_config returned; a stale base is "
+        "refused (409 island_config_changed: read it again). Pass exactly one "
+        "of config or patch. Safety: write.",
+        {"project_id": {"type": "string"}, "config": {"type": "object"},
+         "patch": {"type": "object", "description": "only the fields to change"},
+         "base": {"type": "string", "description": "the revision the patch was read at"}},
+        ["project_id"],
     ),
     _t(
         "campus_run_island_study",
@@ -4728,7 +4736,9 @@ TOOLS: list[dict[str, Any]] = [
         "(a citable_turns message, word for word, unit right after the number), or "
         "upload_id + sheet + cell, or upload_id + page + quote + unit} — never the value "
         "itself; otherwise price_not_from_user: ask the user. linked_share is the line's "
-        "SOLD share of its linked series, never a lease-up or volume factor. The user "
+        "SOLD share of its linked series, never a lease-up or volume factor. `indexation` "
+        "is a FRACTION per year (0.02 = 2 %/yr; the app shows %/yr): beyond -0.2 to 0.3 "
+        "the case is refused (indexation_out_of_range), beyond +-0.1 the card warns. The user "
         "approves a card showing every line added, changed (old → new) or removed and "
         "each price's source; an edit too large for one card is refused "
         "(business_case_card_too_large): split it. clear=true (no business_case) removes "
@@ -5280,6 +5290,36 @@ TOOLS: list[dict[str, Any]] = [
                              "required": ["component", "digest"]}}},
         ["project_id", "items"],
     ),
+    # Excel input workbook issue 06 (IMPORT-FLOW-1): download, preview, import as NEW.
+    _t(
+        "get_input_workbook",
+        "Offer the PyPSA Studio Excel input workbook as a download the user's browser fetches: "
+        "with no project, the blank template (plain-named sheets with units and validation lists, "
+        "filled in Excel); with project, that project's workbook as last saved (unsaved edits are "
+        "not in it). Returns filename and download_url; no bytes, nothing written. Safety: read.",
+        {"project": {"type": "string", "description": "Exact project name; omit for the blank template."}},
+        [],
+    ),
+    _t(
+        "preview_input_workbook",
+        "Preview importing a filled-in Excel input workbook the user attached (file_id) as a NEW "
+        "project: what it creates (counts per sheet, summary) and what it could not read "
+        "(unmapped, assumed, warnings). Writes nothing. Returns sha256 and suggested_name for "
+        "import_input_workbook. Safety: read.",
+        {"file_id": {"type": "string"}},
+        ["file_id"],
+    ),
+    _t(
+        "import_input_workbook",
+        "Import the previewed Excel input workbook (file_id, expected_sha256 from "
+        "preview_input_workbook) as a NEW project named name (default suggested_name). Never "
+        "overwrites: a taken name refuses. The user confirms a card showing the preview first. "
+        "The new project stays closed and the open one unchanged; activate_project opens it. "
+        "Safety: destructive.",
+        {"file_id": {"type": "string"}, "expected_sha256": {"type": "string"},
+         "name": {"type": "string"}},
+        ["file_id", "expected_sha256"],
+    ),
 ]
 
 
@@ -5335,7 +5375,7 @@ TOOLS.extend([
     _t("get_task", "Read a durable task in the active project owned by the caller. Returns completed steps and the next exact call; no completed step is replayed. Safety: read.", {"task_id": {"type": "string"}}, ["task_id"]),
     _t("resume_task", "Attach a durable task to this chat and return next_step. Execute it as an ordinary offered tool call; all normal gates apply. Interrupted writes become uncertain and require explicit review. No implicit tool execution or job polling. Safety: write.", {"task_id": {"type": "string"}}, ["task_id"]),
     _t("cancel_task", "Stop future task steps; retain its checkpoint. Does not abort a running queue job or solver. Use solve_queue_abort separately for a job. Safety: write.", {"task_id": {"type": "string"}}, ["task_id"]),
-    _t("resolve_task_step", "After inspecting a failed or uncertain step, mark it completed or authorize retry. Completed resolves only from native evidence (the call's own late receipt, its job's published run, or a fresh edit read-back); a supplied result is ignored, and without evidence the step stays to review. Refuses a still-running originating session. Normal destructive confirmation required. Safety: destructive.", {"task_id": {"type": "string"}, "outcome": {"type": "string", "enum": ["completed", "retry"]}, "result": {"type": "object"}}, ["task_id", "outcome"]),
+    _t("resolve_task_step", "After inspecting a failed, stopped or uncertain step, mark it completed or authorize retry. Completed resolves only from native evidence (the call's own late receipt, its job's published run, or a fresh edit read-back); a supplied result is ignored, and without evidence the step stays to review. Refuses a still-running originating session. Normal destructive confirmation required. Safety: destructive.", {"task_id": {"type": "string"}, "outcome": {"type": "string", "enum": ["completed", "retry"]}, "result": {"type": "object"}}, ["task_id", "outcome"]),
     _t("get_file_delivery", "Get a file's authenticated browser download link, content hash, size and project provenance by upload ID. Never returns binary bytes or server paths. Safety: read.", {"file_id": {"type": "string"}}, ["file_id"]),
     _t("inspect_import", "Inspect uploaded CSV/Excel metadata: up to five sheets, 200 sampled rows and 20 columns. Returns missing-value/time-axis diagnostics, explicit sample limits and native import format. Units and column mappings require user confirmation; never guessed. Other native formats receive format guidance. Safety: read.", {"file_id": {"type": "string"}}, ["file_id"]),
     _t("import_uploaded_network", "Replace the current network using an authorized upload ID and the existing native import handler. Binary bytes stay server-side. Rebinds to an unsaved draft; save under a chosen project afterward. Normal destructive confirmation and locks apply. Safety: destructive.", {"file_id": {"type": "string"}, "format": {"type": "string", "enum": ["netcdf", "csv_bundle", "excel", "matpower"]}}, ["file_id", "format"]),
@@ -6124,6 +6164,9 @@ TOOL_ROUTES: dict[str, list] = {
     "campus_publish_grid_code": [("POST", "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/publish")],
     "campus_get_published_grid_code": [("GET", "/api/campus-electrical/{name}/grid-codes/published/{profile_id}")],
     "campus_delete_published_grid_code": [("DELETE", "/api/campus-electrical/{name}/grid-codes/published/{profile_id}")],
+    "get_input_workbook": [("GET", "/api/workbook/template"), ("GET", "/api/projects/{name}/workbook")],
+    "preview_input_workbook": [("POST", "/api/workbook/preview")],
+    "import_input_workbook": [("POST", "/api/workbook/import")],
 }
 
 

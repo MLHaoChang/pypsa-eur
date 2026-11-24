@@ -5,10 +5,14 @@ import { SECTION_LABEL } from './sectionLabels'
 import { displayName } from '../../utils/displayName'
 import { fmtCurrency } from '../results/shared'
 import { kpiFigure, splitValueUnit } from '../../utils/format'
+import { GROUP_TITLES } from './holdWords'
+
+/** Links as the Guided assets list names them (UX: one word per concept). */
+const LINKS = GROUP_TITLES.Link.toLowerCase()
 
 const RULES: [RegExp, string][] = [
   // Whole review phrasings first (eh_review.py: fmea_dominant_mode).
-  [/\bcarries (\d+(?:\.\d+)?%) of ranked Link risk\b/g, 'accounts for $1 of the outage risk'],
+  [/\bcarries (\d+(?:\.\d+)?%) of ranked Link risk\b/g, `accounts for $1 of the outage risk from ${LINKS}`],
   [/\bprice generic N\s*\/\s*N\+1\s*\/\s*storage scenarios \(indicative\)/g,
     'compare the cost with and without a spare unit or extra storage (rough estimate)'],
   [/\boutage-driven\b/g, 'caused by equipment outages'],
@@ -46,10 +50,30 @@ export function plainWords(text: string): string {
   const ne = /^(\w+): not established$/.exec(text.trim())
   if (ne) return `${SECTION_LABEL[ne[1]] ?? 'A part of the study'} could not be worked out`
   // The dominant-risk line names its unit in plain words (UX audit M5).
-  let out = text.replace(/\b([a-z0-9]+(?:_[a-z0-9]+)+) carries (\d+(?:\.\d+)?%) of ranked Link risk\b/g,
-    (_m, id: string, pct: string) => `${displayName(id)} accounts for ${pct} of the outage risk`)
+  let out = text.replace(/\b([a-z0-9]+(?:_[a-z0-9]+)+) (carries \d+(?:\.\d+)?% of ranked Link risk)/g,
+    (_m, id: string, rest: string) => `${displayName(id)} ${rest}`)
+  // The review states the share of ALL ranked risk beside the Link share
+  // (asset-investment walkthrough 2026-11-17, issue 04): that one leads.
+  out = out.replace(/ carries (\d+(?:\.\d+)?%) of ranked Link risk \((\d+(?:\.\d+)?%) of all ranked risk\)/g,
+    (_m, link: string, all: string) =>
+      `: ${all} of the outage risk, and ${link === '100%' ? 'all' : link} of the risk from ${LINKS}`)
   for (const [re, plain] of RULES) out = out.replace(re, plain)
+  // A pass held back by a feeder bound names the bus and the feeder by id
+  // (GK A F6'): shown as the project names them.
+  if (out.startsWith('Certification not decided: ')) out = plainIds(out)
   return out
+}
+
+/** The plain advice for a dominant-risk finding on the only feeder to a
+ *  must-stay-on bus (the review drops the generic re-run for it); null for
+ *  any other finding. Buses are named as the project shows them. */
+export function feederAdvice(f: { id: string; evidence?: Record<string, unknown> | null }): string | null {
+  if (f.id !== 'fmea_dominant_mode') return null
+  const buses = f.evidence?.feeds_critical_buses
+  const mode = f.evidence?.mode
+  if (!Array.isArray(buses) || buses.length === 0 || typeof mode !== 'string') return null
+  const at = buses.map(b => displayName(String(b))).join(', ')
+  return `Add a second feeder or backup supply at ${at}. A spare unit or storage elsewhere cannot supply ${at} while ${displayName(mode)} is out.`
 }
 
 /** A template note with its raw component ids (`it_bus`) in plain words

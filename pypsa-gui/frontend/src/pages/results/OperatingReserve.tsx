@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { resultsApi, type ReserveHolder } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
-import { openOffGridConstraints } from '../../layout/flowNavigation'
+import { openOperatingReserve } from '../../layout/flowNavigation'
 
 /** Most binding hours listed; the rest are counted in the visible cap line. */
 export const RESERVE_ROW_CAP = 50
@@ -68,9 +68,9 @@ export default function OperatingReserve() {
         Reserve for load {pct(load)}, solar {pct(pv)}, wind {pct(wind)}
       </p>
       <p className="text-[11px] text-muted mb-2">
-        The hours where the reserve decided the dispatch: the headroom held equals the headroom required. The shares are set in Solver settings.{' '}
-        <button type="button" data-testid="operating-reserve-inputs" onClick={() => openOffGridConstraints()}
-          className="text-link hover:underline">Reserve inputs ›</button>
+        The hours where the reserve decided the dispatch: the headroom held equals the headroom required. The shares are set in Solver settings › Dispatch.{' '}
+        <button type="button" data-testid="operating-reserve-inputs" onClick={() => openOperatingReserve()}
+          className="text-link hover:underline">Edit the reserve shares ›</button>
       </p>
       {data.reason ? (
         <p data-testid="operating-reserve-reason" className="text-[11px] text-muted">{plainReason(data.reason)}</p>
