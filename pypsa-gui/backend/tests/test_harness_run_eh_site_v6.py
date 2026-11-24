@@ -479,6 +479,17 @@ def test_c3_bytes_changed_between_the_card_and_the_grant_are_refused(project):
     assert record["refused"]["kind"] == run_urdb.CHANGED and "hash" not in record
 
 
+@pytest.mark.parametrize("commercial", [{"import_tariff_ref": {"kind": "library", "id": "t", "version": 1}},
+                                        {"import_tariff": {"id": "inline"}}])
+def test_c3_a_project_that_prices_imports_already_writes_nothing(project, commercial):
+    envelope, row = _granted(project, _ctx())
+    ctx = _ctx()
+    ctx.solver_state["solver_config"]["commercial"] = commercial
+    before = _count()
+    assert run_envelope._match_prepare(envelope, "import_urdb_tariff", row["args"], ctx, {}) == "not_a_gap"
+    assert _count() == before
+
+
 # ── C4: one Library write ────────────────────────────────────────────────────
 
 

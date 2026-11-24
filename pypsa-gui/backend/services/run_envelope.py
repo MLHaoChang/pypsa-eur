@@ -1484,6 +1484,8 @@ def _match_urdb_import(entries, args, ctx, note):
     if not isinstance(args, dict) or {k: args.get(k) for k in run_urdb.ARGS} != record["args"] \
             or set(args) - set(run_urdb.ARGS):
         return "not_granted_source"
+    if run_urdb.tariff_held(ctx):
+        return "not_a_gap"
     try:
         blob = run_urdb.upload_bytes(ctx, record["args"]["file_id"])
         planned = run_urdb.plan(blob, record["args"])

@@ -147,6 +147,19 @@ def _finance(ctx):
     return finance.model_dump() if hasattr(finance, "model_dump") else finance
 
 
+def tariff_held(ctx) -> bool:
+    """Whether the project already prices imports (a Library ref or an inline
+    tariff): the gap is filled, so the import would only leave an unused
+    Library item (the attach is refused `not_a_gap` anyway)."""
+    cfg = (getattr(ctx, "solver_state", None) or {}).get("solver_config")
+    commercial = cfg.get("commercial") if isinstance(cfg, Mapping) else getattr(cfg, "commercial", None)
+    if hasattr(commercial, "model_dump"):
+        commercial = commercial.model_dump()
+    if not isinstance(commercial, Mapping):
+        return False
+    return commercial.get("import_tariff_ref") not in (None, "", {}) or commercial.get("import_tariff") is not None
+
+
 def modelled_years(network) -> tuple[list[int], tuple | None]:
     """The investment periods, or the first and last modelled dates."""
     import pandas as pd
