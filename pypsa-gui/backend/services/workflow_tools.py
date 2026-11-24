@@ -423,8 +423,9 @@ class SensitivityCase(BaseModel):
 def _plain_frame_json(frame, iso=False):
     """`frame.to_json()` (`date_format="iso"` with `iso`), the plain fingerprint's text. A frame with no columns
     (most of a network's series) is written from an empty copy: pandas writes the same `{}` for it, without first
-    formatting every row label it never writes (issue 225)."""
-    if len(frame.columns) == 0:
+    formatting every row label it never writes (issue 225). Only on a unique index: on any other pandas refuses
+    the frame ("index must be unique"), and still does."""
+    if frame.shape[1] == 0 and frame.index.is_unique:
         frame = frame.iloc[:0].reset_index(drop=True)
     return frame.to_json(date_format="iso") if iso else frame.to_json()
 
@@ -436,7 +437,7 @@ def _exact_frame_json(frame, *, indexes=None):
     (sort_keys, default separators). Issue 225: a column or index of a plain
     numpy dtype is written straight to that text (no per-value lists, no float
     maths), and everything else falls back to `scalar`, column by column.
-    `indexes` (a dict the caller keeps across frames) reuses an index's text
+    `indexes` (a dict one walk keeps across its frames, never longer) reuses an index's text
     for the next frame whose index has the same bytes: a network's series
     each carry their own copy of the snapshots."""
     from datetime import date, datetime
@@ -493,16 +494,20 @@ def _exact_frame_json(frame, *, indexes=None):
         return '[' + ', '.join(texts) + ']'
 
     def signature(index):
-        """The index's exact bytes (type, dtype, values; a MultiIndex's levels and codes), which alone decide
-        `items`' text; None for an index of objects or extension dtypes, whose text is never reused."""
+        """Everything `items` reads from an index, as exact bytes: its type, its numpy dtype (kind, itemsize
+        and datetime unit, all in `dtype.str`) and its values; for a MultiIndex each level's own signature and
+        each codes array's dtype and bytes. The names too, which `items` does not read (the frame's text
+        writes them apart, as `index_names`), so two indexes that differ in anything share no text. None for
+        an index of objects or extension dtypes (tz-aware stamps among them), whose text is never reused."""
+        names = tuple(repr(name) for name in index.names)
         if isinstance(index, pd.MultiIndex):
             levels = [signature(level) for level in index.levels]
             if None in levels:
                 return None
-            return ('multi', tuple(levels), tuple((c.dtype.str, c.tobytes()) for c in index.codes))
+            return ('multi', names, tuple(levels), tuple((c.dtype.str, c.tobytes()) for c in index.codes))
         if isinstance(index.dtype, np.dtype) and index.dtype.kind in 'iufbM':
             values = index.to_numpy()
-            return (type(index).__name__, values.dtype.str, values.tobytes())
+            return (type(index).__name__, names, values.dtype.str, values.tobytes())
         return None
 
     def index_items(index):
@@ -580,22 +585,33 @@ def _canonical_branch_carriers(n):
             branches.loc[branches["carrier"] == "", "carrier"] = "AC"
 
 
-# Issue 225: a caller that reads both forms back to back (the run envelope's identity, the solve's stamp, the
-# results' freshness check) wraps the pair in `one_input_walk()`. Inside it the first read of a context hashes
-# both forms in one walk and keeps the other form for that context's next read of it, served once. The pair is
-# read under one lock, so nothing edits the network between the two reads; outside the scope every read walks
-# the network itself, as before.
+# Issue 225: a caller that reads both forms back to back (the run envelope's identity, the solve's stamp) wraps
+# the two reads, and nothing else, in `one_input_walk()`. Inside it the first read of a context hashes both forms
+# in one walk and keeps the other form for that context's next read of it: served once, then dropped, and dropped
+# with the scope. Precondition: nothing writes the inputs between the two reads (both run under one lock). The
+# kept form is served only to the same context object holding the same network object, whose frame shapes and
+# series are as they were (`_walk_guard`, a cheap backstop: an in-place value write between the reads is not
+# seen, which the precondition rules out). Outside the scope every read walks the network itself, as before.
 _ONE_WALK: ContextVar[list | None] = ContextVar("one_input_walk", default=None)
 
 
 @contextmanager
 def one_input_walk():
-    """Both input fingerprints of a context from one walk of its network, for reads made in this block."""
+    """Both input fingerprints of a context from one walk of its network, for the two reads made in this block
+    (see `_ONE_WALK`)."""
     token = _ONE_WALK.set([])
     try:
         yield
     finally:
         _ONE_WALK.reset(token)
+
+
+def _walk_guard(ctx):
+    """The context's inputs' shapes: every component frame's and every uploaded series' length."""
+    return (tuple((component.name, component.static.shape,
+                   tuple(sorted((name, frame.shape) for name, frame in component.dynamic.items())))
+                  for component in ctx.network.components),
+            tuple(sorted((str(key), len(series)) for key, series in ctx.user_ts.items())))
 
 
 def _network_input_fingerprint(ctx, *, exact=False):
@@ -604,15 +620,17 @@ def _network_input_fingerprint(ctx, *, exact=False):
     if kept is None:
         return _input_digests(ctx, (exact,))[exact]
     network = ctx.network
-    for i, (owner, net, form, digest) in enumerate(kept):
+    for i, (owner, net, guard, form, digest) in enumerate(kept):
         if owner is ctx and net is network and form == exact:
             del kept[i]
-            return digest
+            if guard == _walk_guard(ctx):
+                return digest
+            break
     try:
         digests = _input_digests(ctx, (False, True))
     except Exception:  # noqa: BLE001 — the form asked for answers (or raises) on its own
         return _input_digests(ctx, (exact,))[exact]
-    kept.append((ctx, network, not exact, digests[not exact]))
+    kept.append((ctx, network, _walk_guard(ctx), not exact, digests[not exact]))
     return digests[exact]
 
 
