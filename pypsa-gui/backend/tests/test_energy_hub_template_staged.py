@@ -6,7 +6,6 @@ energizing its connection in steps (15 MW until 2030), and one genset
 and one battery candidate per period with that period as its build year. The
 single-year template is untouched (a golden digest of its build).
 """
-
 from __future__ import annotations
 
 import hashlib
@@ -45,9 +44,7 @@ def _digest(n) -> str:
             if d is not None and len(col) and (col.astype(object) == d).all():
                 continue
             h.update(str(c).encode())
-            if pd.api.types.is_numeric_dtype(col) and not pd.api.types.is_bool_dtype(
-                col
-            ):
+            if pd.api.types.is_numeric_dtype(col) and not pd.api.types.is_bool_dtype(col):
                 h.update(np.round(col.to_numpy(dtype=float), 6).tobytes())
             else:
                 h.update("|".join(map(str, col.tolist())).encode())
@@ -56,11 +53,8 @@ def _digest(n) -> str:
         comp = n.components[c]
         if not len(comp.static):
             continue
-        defaults = {
-            a: comp.attrs.at[a, "default"]
-            for a in comp.attrs.index
-            if a in comp.static.columns
-        }
+        defaults = {a: comp.attrs.at[a, "default"] for a in comp.attrs.index
+                    if a in comp.static.columns}
         feed(c, comp.static, defaults)
         for attr, ts in sorted(comp.dynamic.items()):
             if len(ts.columns):
@@ -77,10 +71,10 @@ def staged():
 @pytest.fixture(scope="module")
 def solved(staged):
     probe = staged.copy()
-    probe.snapshots.name = "snapshot"  # PyPSA's copy() drops the MultiIndex's name
+    probe.snapshots.name = "snapshot"      # PyPSA's copy() drops the MultiIndex's name
     from services.adequacy.energization import apply_energization
 
-    apply_energization(probe)  # as run_simulation does
+    apply_energization(probe)                # as run_simulation does
     status, cond = probe.optimize(solver_name="highs", multi_investment_periods=True)
     assert (status, cond) == ("ok", "optimal")
     return probe
@@ -100,11 +94,7 @@ def test_the_single_year_template_is_unchanged():
     for frame in ("generators", "storage_units", "links"):
         df = getattr(n, frame)
         rows = [a for a in T.DC_EXISTING if a in df.index]
-        assert (
-            (df.loc[rows, ["overnight_cost", "discount_rate"]] == [0.0, 0.07])
-            .all()
-            .all()
-        )
+        assert (df.loc[rows, ["overnight_cost", "discount_rate"]] == [0.0, 0.07]).all().all()
         df.loc[rows, ["overnight_cost", "discount_rate"]] = np.nan
         typed += len(rows)
     assert typed == 7
@@ -127,11 +117,8 @@ def test_the_it_load_and_cooling_ramp_with_the_projected_load(staged):
         scale = it_mw / 36.0
         for load in ("it_load", "cooling"):
             assert p.loc[y, load].to_numpy() == pytest.approx(
-                flat.loads_t.p_set[load].to_numpy() * scale
-            ), (y, load)
-    assert p.loc[2035, "it_load"].max() == pytest.approx(
-        flat.loads_t.p_set["it_load"].max()
-    )
+                flat.loads_t.p_set[load].to_numpy() * scale), (y, load)
+    assert p.loc[2035, "it_load"].max() == pytest.approx(flat.loads_t.p_set["it_load"].max())
 
 
 def test_the_import_follows_the_energization_schedule(staged):
@@ -149,30 +136,17 @@ def test_one_candidate_per_period_that_outlives_the_horizon(staged):
     gens = staged.generators[staged.generators.p_nom_extendable]
     bess = staged.storage_units[staged.storage_units.p_nom_extendable]
     assert sorted(gens.build_year) == YEARS and sorted(bess.build_year) == YEARS
-    assert (
-        "genset_new" not in staged.generators.index
-        and "bess_new" not in staged.storage_units.index
-    )
-    horizon_end = YEARS[-1] + T.DC_PERIOD_YEARS[YEARS[-1]]  # 2045
+    assert "genset_new" not in staged.generators.index and "bess_new" not in staged.storage_units.index
+    horizon_end = YEARS[-1] + T.DC_PERIOD_YEARS[YEARS[-1]]          # 2045
     for df in (gens, bess):
         assert ((df.build_year + df.lifetime) >= horizon_end).all()
     # A part that ends inside the horizon (the battery inverter, 10 y) is
     # stated in the ledger, never hidden behind the row's 25-year lifetime.
-    parts = [
-        c for c in bess.columns if c.startswith("inv_") and c.endswith("_lifetime")
-    ]
-    short = sorted(
-        {
-            (name, c)
-            for name, row in bess.iterrows()
-            for c in parts
-            if row[c] == row[c] and row.build_year + row[c] < horizon_end
-        }
-    )
+    parts = [c for c in bess.columns if c.startswith("inv_") and c.endswith("_lifetime")]
+    short = sorted({(name, c) for name, row in bess.iterrows() for c in parts
+                    if row[c] == row[c] and row.build_year + row[c] < horizon_end})
     assert short, "the inverter really does end inside the horizon"
-    ledger = " ".join(
-        f"{r['item']} {r['note']}" for r in T.TEMPLATE_META[TID]["ledger"]
-    )
+    ledger = " ".join(f"{r['item']} {r['note']}" for r in T.TEMPLATE_META[TID]["ledger"])
     for name, _c in short:
         if name.endswith(("2027", "2030")):
             assert name in ledger and "part_lifetimes" in ledger, name
@@ -194,15 +168,12 @@ def test_the_plan_solves_and_respects_the_energized_cap_in_2027(solved):
 def test_the_meta_and_solver_config_say_staged_and_multi_period():
     meta = T.TEMPLATE_META[TID]
     assert [r["year"] for r in meta["projected_load"]] == YEARS
-    assert [r["available_import_mw"] for r in meta["energization"]] == [
-        T.DC_ENERGIZATION_MW[y] for y in YEARS
-    ]
+    assert [r["available_import_mw"] for r in meta["energization"]] == \
+        [T.DC_ENERGIZATION_MW[y] for y in YEARS]
     assert all(r["source"] == "assumed" for r in meta["energization"])
     assert meta["ledger"] and meta["ledger"][0]["source"] == "assumed"
     cfg = T.solver_config(TID)
-    assert (
-        cfg["multi_investment_periods"] is True and cfg["auto_discount_periods"] is True
-    )
+    assert cfg["multi_investment_periods"] is True and cfg["auto_discount_periods"] is True
     assert cfg["voll"] == T.SOLVER_CONFIG["voll"] and cfg["discount_rate"] == 0.07
     assert any(r["item"] == "discount rate" for r in meta["ledger"])
 
@@ -212,15 +183,9 @@ def test_the_island_sidecar_names_every_per_period_candidate(staged):
     for y in YEARS:
         assert f"genset_new_{y}" in cfg["units"] and f"bess_new_{y}" in cfg["units"]
     assert "genset_new" not in cfg["units"] and "bess_new" not in cfg["units"]
-    assert set(cfg["requirements"]["ride_through_storage"]) == {
-        f"bess_new_{y}" for y in YEARS
-    }
-    named = (
-        set(staged.generators.index)
-        | set(staged.storage_units.index)
-        | set(staged.links.index)
-        | set(staged.loads.index)
-    )
+    assert set(cfg["requirements"]["ride_through_storage"]) == {f"bess_new_{y}" for y in YEARS}
+    named = (set(staged.generators.index) | set(staged.storage_units.index)
+             | set(staged.links.index) | set(staged.loads.index))
     assert set(cfg["units"]) <= named
     # the single-year sidecar is not mutated by the copy
     assert "genset_new" in T.ISLAND_CONFIG["eh_datacenter"]["units"]
@@ -261,31 +226,22 @@ def test_with_the_island_rows_the_plan_stages():
 
     n = T.BUILDERS[TID]()
     n.snapshots.name = "snapshot"
-    apply_energization(n)  # as run_simulation does
-    status, cond = n.optimize(
-        solver_name="highs",
-        multi_investment_periods=True,
-        extra_functionality=I.island_extra_functionality(isl),
-    )
+    apply_energization(n)                    # as run_simulation does
+    status, cond = n.optimize(solver_name="highs", multi_investment_periods=True,
+                              extra_functionality=I.island_extra_functionality(isl))
     assert (status, cond) == ("ok", "optimal")
-    built = {
-        y: float(n.generators.at[f"genset_new_{y}", "p_nom_opt"])
-        + float(n.storage_units.at[f"bess_new_{y}", "p_nom_opt"])
-        for y in YEARS
-    }
+    built = {y: float(n.generators.at[f"genset_new_{y}", "p_nom_opt"])
+             + float(n.storage_units.at[f"bess_new_{y}", "p_nom_opt"]) for y in YEARS}
     assert sum(1 for v in built.values() if v > 0.1) >= 2, built
     assert built[2035] > built[2027], built
     assert n.links_t.p0["grid_import"].loc[2027].max() == pytest.approx(
-        T.DC_ENERGIZATION_MW[2027], abs=1e-4
-    )
+        T.DC_ENERGIZATION_MW[2027], abs=1e-4)
 
 
 def test_the_wizard_describes_the_staged_connection_as_the_template_builds_it():
     """#294 review: the New-project wizard's text for the staged template is
     hand-written; it names the template's own connection and first-period cap."""
-    tsx = (
-        BACKEND.parent / "frontend" / "src" / "layout" / "NewProjectWizard.tsx"
-    ).read_text()
+    tsx = (BACKEND.parent / "frontend" / "src" / "layout" / "NewProjectWizard.tsx").read_text()
     line = next(ln for ln in tsx.splitlines() if "id: 'eh_datacenter_staged'" in ln)
     assert f"{T._DC_POC_MW:g} MW connection" in line
     assert f"{T.DC_ENERGIZATION_MW[2027]:g} MW until 2030" in line
