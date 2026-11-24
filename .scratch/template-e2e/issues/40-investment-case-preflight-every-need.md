@@ -3,7 +3,7 @@
 
 # 40 — The investment case's start refuses with one need at a time
 
-Status: needs-triage
+Status: done
 Source: issue 22, slice S2 (#1761); GK B3 (4) on #1761, scoped by GK A
 Severity: friction
 Journey fit: results → decide (investment case).
@@ -30,3 +30,7 @@ fix one, run, meet the next.
 ## Notes
 
 Backend (GK A area); the frontend part is small once the field exists.
+
+## Comments
+
+- 2026-11-24 status sweep: done; evidence in #1919 (branch claude/te2e-40-preflight-needs; commit c7e9ae7f3: one start refusal lists every need).

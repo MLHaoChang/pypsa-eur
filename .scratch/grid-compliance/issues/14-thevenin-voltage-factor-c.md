@@ -3,7 +3,7 @@
 
 # GC-14: IEC 60909 voltage factor c in the test battery's Thevenin source
 
-Status: ready-for-agent
+Status: done
 Type: task
 Parent: `.scratch/grid-compliance/issues/04-psse-pack.md`
 Gated: yes (GK A2, gridspine)
@@ -52,3 +52,5 @@ Checked by code reading only. Acceptance is the 'Done when' section above. Still
   > T5. If the battery's c is user-visible in the app (the EMT pack, a report), check it end to end in the real app (E2E-DONE-1). Otherwise the body says where it shows.
 
 - Builder note: a `Thevenin` holds no Un; Un arrives only at `thevenin_impedances_ohm(grid, vn_kv)`. So a source names its c (`c_kind`: `c_max` / `c_min` / `unity`) and `voltage_factor(grid, vn_kv)` resolves the number at that Un. T3 is met by refusing any `c_kind` outside those names. Under GK A2 (7) review on #1916.
+
+- 2026-11-24 status sweep: done; evidence in #1916 and #1931.
