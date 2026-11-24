@@ -93,7 +93,10 @@ def _compute_emissions_summary(n, periods, is_multi, has_solve) -> EmissionsComp
         # `generators_t.eh_co2_t_per_mwh`) replaces the carrier's single figure.
         gen_t = n.generators_t.get("eh_co2_t_per_mwh")
         if gen_t is not None and g in gen_t.columns:
-            t_int = gen_t[g].reindex(sns).fillna(0.0).astype(float)
+            # A snapshot with no override reads the carrier's own t/MWh el.
+            g_eff = float(gens.at[g, "efficiency"]) if "efficiency" in gens.columns else 1.0
+            carrier_out = intensity / g_eff if _math.isfinite(g_eff) and g_eff > 0 else intensity
+            t_int = gen_t[g].reindex(sns).fillna(carrier_out).astype(float)
             by_t = weighted * t_int
             co2_total_kt = float(by_t.sum()) / 1000.0
             co2_pp_kt = {p: v / 1000.0 for p, v in _per_period_groupby(by_t, sns, is_multi).items()}

@@ -58,7 +58,7 @@
     },
     {
       "item": "grid carbon intensity",
-      "note": "one figure per period, not a measured grid mix; the Emissions view counts grid imports at it. Gas gensets emit at the carrier's 0.20 t/MWh of fuel times the heat rate (2.8 unless the load spec says otherwise)",
+      "note": "one figure per period, not a measured grid mix; the Emissions view counts grid imports at it. Gas gensets emit at the carrier's 0.20 t/MWh of fuel times the heat rate (the load spec's, else the pack's gas-genset efficiency)",
       "source": "assumed",
       "value": "2027: 0.35, 2030: 0.3, 2035: 0.22 t CO2/MWh el"
     },

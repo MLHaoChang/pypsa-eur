@@ -288,8 +288,8 @@ MASTER_FP_SINGLE = (
     "c5d6c416f41b319c4043f2db0c30def9f22e9273ded7664a958c355bcda81433",
 )
 MASTER_FP_EH_DATACENTER = (
-    "a36eaefbe70fd52ec595ec9a4417f3039c48b9573c2758974c3f2bae9c828f5f",
-    "e122c656f3b9e325aeea788204f5bb1304804c6338df5a31a9294ac88379eb12",
+    "839f0ce0e2ca23b9e41b87cb790fa185731f2d17e917c0c7f175190898650c8a",
+    "f705089c9810e3bb4a02b8808cbe2fb3d5f9b37eb617fffb28ccade22692ea8d",
 )
 
 
@@ -490,7 +490,7 @@ def test_d2a_the_fingerprint_of_an_unscheduled_template_is_pre_02b():
     assert E.energization_frame(n) is None
     assert (
         _fps(n) == MASTER_FP_EH_DATACENTER
-    )  # the pinned digest (moved by DC review 03: gas genset efficiency)
+    )  # master's digest with the gas efficiency at the pack's 0.41 (DC review 03)
 
 
 def test_d2a_a_build_shares_no_snapshot_index_with_an_earlier_one():

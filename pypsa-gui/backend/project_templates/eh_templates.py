@@ -145,16 +145,25 @@ _GRID_CO2_ATTR = "eh_co2_t_per_mwh"
 
 
 def _genset_efficiency(load_spec) -> float:
-    """Electric efficiency of a gas genset = 1 / heat rate (MWh fuel per MWh el),
-    from the load spec's first genset entry, else the library default (assumed).
-    The carrier's ``co2_emissions`` is per MWh of fuel, so t/MWh_el = intensity x
-    heat rate; the marginal cost stays per MWh el (PyPSA prices the output)."""
+    """Electric efficiency of a gas genset = 1 / heat rate (MWh fuel per MWh el).
+    The heat rate is the load spec's first genset entry, else the defaults pack's
+    ``gas-genset.investment.efficiency`` (the row the candidates are priced from
+    and the backup costing reads, ``services.adequacy.dc_backup``), else the
+    ``GensetSpec`` default (assumed). The carrier's ``co2_emissions`` is per MWh
+    of fuel, so t/MWh_el = intensity x heat rate; the marginal cost stays per MWh
+    el (PyPSA prices the output)."""
     from models.flex_archetypes import GensetSpec
+    from services.adequacy.dc_backup import EFFICIENCY_KEY
+    from services.library.defaults_pack.loader import load_defaults_pack
 
-    gensets = getattr(load_spec, "gensets", None) or []
-    heat = gensets[0].heat_rate_mwh_fuel_per_mwh_el if gensets else \
-        GensetSpec(power_mw=1.0).heat_rate_mwh_fuel_per_mwh_el
-    return 1.0 / heat
+    gensets = getattr(load_spec, "gensets", None)
+    if gensets:
+        return 1.0 / gensets[0].heat_rate_mwh_fuel_per_mwh_el
+    row = next((r for r in load_defaults_pack(TEMPLATE_PACK_VERSION).cost_values
+                if r.key == EFFICIENCY_KEY), None)
+    if row is not None and row.value:
+        return float(row.value)
+    return 1.0 / GensetSpec.model_fields["heat_rate_mwh_fuel_per_mwh_el"].default
 
 
 def build_eh_datacenter(phases=None, load_spec=None, planning=None) -> pypsa.Network:
@@ -1359,7 +1368,7 @@ def _dc_staged_meta(plan: _DcPlan, load_spec=None) -> dict:
              "source": "assumed",
              "note": "one figure per period, not a measured grid mix; the Emissions view "
                      "counts grid imports at it. Gas gensets emit at the carrier's 0.20 t/MWh "
-                     "of fuel times the heat rate (2.8 unless the load spec says otherwise)"},
+                     "of fuel times the heat rate (the load spec's, else the pack's gas-genset efficiency)"},
             {"item": "tariff clock", "value": "UTC",
              "source": "assumed",
              "note": "the representative week's hours are the site clock; stating them as UTC "

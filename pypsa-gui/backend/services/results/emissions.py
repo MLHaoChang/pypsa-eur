@@ -166,12 +166,17 @@ def compute_emissions(n, source, *, result_df):
     ovr_t = n.generators_t.get("eh_co2_t_per_mwh")
 
     def _ovr(name, period_key):
+        """The override's mean over the period, weighted by snapshot weight;
+        None when the generator has none (or none in that period)."""
         if ovr_t is None or name not in ovr_t.columns:
             return None
-        col = ovr_t[name]
+        col = ovr_t[name].dropna()
         if period_key is not None and is_multi:
             col = col[col.index.get_level_values(0) == period_key]
-        return float(col.mean()) if len(col) else None
+        if not len(col):
+            return None
+        w = w_series.reindex(col.index).fillna(0.0)
+        return float((col * w).sum() / w.sum()) if w.sum() > 0 else float(col.mean())
 
     # ── Generator loop ──────────────────────────────────────────────────
     for name in gens.index:
@@ -191,13 +196,15 @@ def compute_emissions(n, source, *, result_df):
             mwh_horizon = 0.0
         tCO2_horizon = mwh_horizon * out_intensity
         if ovr_t is not None and name in ovr_t.columns:
-            tCO2_horizon = sum(
-                float(ep.get(name, 0.0)) * (_ovr(name, pk) or 0.0)
-                for pk, ep in gen_energy_per_period.items())
+            # a period with no override falls back to the carrier's own t/MWh el
+            tCO2_horizon = 0.0
+            for pk, ep in gen_energy_per_period.items():
+                o = _ovr(name, pk)
+                tCO2_horizon += float(ep.get(name, 0.0)) * (out_intensity if o is None else o)
         no_load_tCO2 = float(no_load_horizon.get(name, 0.0)) * intensity
         tCO2_horizon += no_load_tCO2
         total_t += tCO2_horizon
-        if intensity != 0:
+        if intensity != 0 or (ovr_t is not None and name in ovr_t.columns):
             carrier_totals[g_carrier] = carrier_totals.get(g_carrier, 0.0) + tCO2_horizon
         rows_by_gen.append({
             "name": str(name),

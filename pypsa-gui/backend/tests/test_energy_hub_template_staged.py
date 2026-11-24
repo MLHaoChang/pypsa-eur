@@ -86,7 +86,7 @@ def test_the_single_year_template_is_unchanged():
     # capacity so the SCR derives it from the converters.
     # The existing campus is typed sunk since WALK-IMPROVE-1 b (GK B2 condition
     # 2 a): with those 14 cells back at master's NaN the build is master's.
-    # Re-pinned for DC review 03: gas gensets carry efficiency 1 / heat rate.
+    # Re-pinned for DC review 03: gas gensets carry the pack's efficiency (0.41).
     import numpy as np
 
     n = T.build_eh_datacenter()
@@ -98,7 +98,7 @@ def test_the_single_year_template_is_unchanged():
         df.loc[rows, ["overnight_cost", "discount_rate"]] = np.nan
         typed += len(rows)
     assert typed == 7
-    assert _digest(n) == "576eac2737ec11ff"
+    assert _digest(n) == "3a20073d9244fb53"
 
 
 def test_three_periods_each_a_year_of_hours_with_their_own_length(staged):
