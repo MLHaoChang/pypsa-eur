@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -10,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DBSession
 
 import security
-from db.models import Organization, Session, User
+from db.models import Organization, User
 from db.session import get_db
 from deps import require_user
 from services import email_service
@@ -19,6 +18,7 @@ from services.auth_service import (
     issue_password_token,
     hash_password,
     resolve_session_row,
+    revoke_all_sessions_for_user,
     revoke_session,
     set_password_from_token,
     verify_password,
@@ -358,12 +358,14 @@ def change_password(
 
     security.clear_login_attempts(ip, user.email)
     # `user` may belong to another DB session (require_user's); write through ours.
-    db.get(User, user.id).password_hash = hash_password(payload.new_password)
+    stored = db.get(User, user.id)
+    if stored is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    stored.password_hash = hash_password(payload.new_password)
     raw_token = request.cookies.get(get_settings().session_cookie_name)
     keep = resolve_session_row(db, raw_token) if raw_token else None
-    now = datetime.now(tz=UTC)
-    for session in db.scalars(select(Session).where(Session.user_id == user.id)):
-        if session.revoked_at is None and (keep is None or session.id != keep.id):
-            session.revoked_at = now
+    revoke_all_sessions_for_user(
+        db, stored.id, keep_session_id=keep.id if keep is not None else None, commit=False
+    )
     db.commit()
     return {"ok": True}

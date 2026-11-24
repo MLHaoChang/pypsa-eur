@@ -64,7 +64,7 @@ export default function AccountPage() {
       <section className="space-y-1">
         <label htmlFor="account-email" className="text-[10px] font-mono uppercase tracking-[0.14em] text-muted">Email</label>
         <input id="account-email" className={inputClass} value={email} readOnly aria-describedby="account-email-note" />
-        <p id="account-email-note" className="text-[10px] text-muted">Your email is your sign-in name. It cannot be changed here; ask a workspace admin.</p>
+        <p id="account-email-note" className="text-[10px] text-muted">Your email is your sign-in name. It cannot be changed here. Ask a workspace admin.</p>
       </section>
 
       <section className="space-y-1" aria-label="Workspaces">
