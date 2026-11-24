@@ -12,8 +12,10 @@
 # non-zero on a conflict, a code-file overlap with master, a failing semantic
 # test, frontend tool-list test or catalogue inventory check on the trial merge,
 # or any check run on the head that is not success or skipped (or that it could
-# not read), a GK/UX "NOT OK" PR comment newer than that reviewer's last OK, or a
-# live coordination-file change with no matching template change. Docs-only
+# not read), a workflow run on the head that has not completed (or no Test run
+# yet), a GK/UX "NOT OK" PR comment newer than that reviewer's last OK, a GK or
+# UX OK missing or stale where the PR's files need it (see "Required reviews"),
+# or a live coordination-file change with no matching template change. Docs-only
 # overlap and files identical on both sides are reported, not fatal. A code
 # overlap is waived when the trial merge is clean, the semantic tests pass and
 # the tests that exercise each overlapping file pass (see "code overlap tests").
@@ -21,6 +23,10 @@
 # Environment:
 #   PREMERGE_REMOTE  remote to fetch from (default: origin)
 #   PREMERGE_BASE    base branch (default: master)
+#   PREMERGE_MAIN_WORKFLOW  workflow that must have a run on the head
+#                    (default: Test; empty skips that check)
+#   PREMERGE_WAIVE   "GK: <reason>" and/or "UX: <reason>" (";"-separated) to
+#                    waive a required review; the waiver is printed
 #   PREMERGE_REPO    GitHub repo whose check runs are read
 #                    (default: MLHaoChang/pypsa-eur)
 #   PREMERGE_TEMPLATE_SYNC  "skip" to pass a live coordination-file change
@@ -338,11 +344,23 @@ fi
 echo
 echo "== reviewer verdicts"
 # The gatekeeper (GK) and UX reviewer post "GK OK @<sha>: ..." / "GK NOT OK @<sha>: ..."
-# (and UX) as PR comments. A missing or stale OK is reported, not blocking:
-# premerge cannot know whether this PR needs that review. A NOT OK newer than
-# the reviewer's last OK blocks. An OK carries to the head when every commit
-# after it is a clean merge of $base_branch, or when its tree merged with the
-# current $base_branch equals the head tree.
+# (and UX) as PR comments. A NOT OK newer than the reviewer's last OK blocks.
+# An OK carries to the head when every commit after it is a clean merge of
+# $base_branch, or when its tree merged with the current $base_branch equals
+# the head tree.
+#
+# Required reviews (owner decision STRUCTURE-1): a missing or stale OK blocks
+# when the PR's own files need that reviewer. GK is needed for non-test code
+# under gridspine/, pypsa-gui/backend/ or scripts/ (other than scripts/coord/);
+# UX for non-test files under pypsa-gui/frontend/src/. Anything else (docs,
+# .scratch, tests only) needs neither. PREMERGE_WAIVE="GK: <reason>" (or UX,
+# or "GK: ...; UX: ...") waives one, and the waiver is printed.
+needs_gk=$(grep -E '^(gridspine/|pypsa-gui/backend/|scripts/)' <<<"$changed" \
+  | grep -vE '^scripts/coord/|(^|/)tests?/|(^|/)test_[^/]*$|_test\.py$|conftest\.py$' | sed -n 1p || true)
+needs_ux=$(grep -E '^pypsa-gui/frontend/src/' <<<"$changed" \
+  | grep -vE '\.test\.(ts|tsx)$|(^|/)__tests__/|\.tmp\.tsx$' | sed -n 1p || true)
+waive=${PREMERGE_WAIVE:-}
+declare -A ok_held=([GK]=0 [UX]=0)
 verdict_carries() { # verdict_carries <full-sha>: succeeds when an OK at <sha> still holds for the head
   local x=$1 c p1 p2 extra mt ok=1
   git merge-base --is-ancestor "$x" "$head" || return 1
@@ -365,7 +383,7 @@ if verdicts=$(command -v gh >/dev/null &&
   for who in GK UX; do
     mine=$(awk -F'\t' -v w="$who" '$1 == w' <<<"$verdicts")
     if [[ -z $mine ]]; then
-      echo "$who: no verdict posted (not blocking: premerge cannot tell whether this PR needs it)"
+      echo "$who: no verdict posted (blocks only when required below)"
       continue
     fi
     last_ok=$(awk -F'\t' '$2 == "OK" { n = NR } END { print n + 0 }' <<<"$mine")
@@ -383,11 +401,26 @@ if verdicts=$(command -v gh >/dev/null &&
       echo "$who OK @$x: unknown commit (not fetched), cannot compare to the head"
     elif [[ $full == "$head" ]]; then
       echo "$who OK @$full: current"
+      ((last_no > last_ok)) || ok_held[$who]=1
     elif verdict_carries "$full"; then
       echo "$who OK @$full: carries (clean $base_branch merge)"
+      ((last_no > last_ok)) || ok_held[$who]=1
     else
       files=$(git diff --name-only "$full" "$head" 2>/dev/null | sed -n 1,15p | paste -sd' ')
       echo "$who OK @$full: stale: changed since: ${files:-unreadable}"
+    fi
+  done
+  for who in GK UX; do
+    if [[ $who == GK ]]; then need=$needs_gk; else need=$needs_ux; fi
+    [[ -n $need ]] || continue
+    if ((ok_held[$who])); then
+      echo "$who required (e.g. $need): held"
+    elif [[ $waive =~ (^|;)[[:space:]]*$who:[[:space:]]*([^;]+) ]]; then
+      echo "$who required (e.g. $need): WAIVED: ${BASH_REMATCH[2]}"
+    else
+      echo "$who required (e.g. $need): no current or carried $who OK: blocks"
+      fail=1
+      reasons+=("$who OK missing")
     fi
   done
 else
@@ -443,6 +476,36 @@ else
   echo "checks: not read"
   fail=1
   reasons+=("checks: not read")
+fi
+
+echo
+echo "== workflows"
+# The check runs above only exist once a workflow's jobs start, so a queued
+# main Test workflow left "all success" on the quick checks (coord-tooling
+# issue 01). Every workflow run on the head must be completed, and a run of
+# $PREMERGE_MAIN_WORKFLOW (when set) must exist.
+main_wf=${PREMERGE_MAIN_WORKFLOW-Test}
+if wruns=$(command -v gh >/dev/null &&
+  gh api "repos/$gh_repo/actions/runs?head_sha=$head&per_page=100" \
+    --jq '.workflow_runs[] | [.name, .status, (.conclusion // "-")] | @tsv'); then
+  if [[ -n $main_wf ]] && ! awk -F'\t' -v w="$main_wf" '$1 == w' <<<"$wruns" | grep -q .; then
+    echo "  $main_wf workflow: not started on this head"
+    fail=1
+    reasons+=("$main_wf workflow not started")
+  fi
+  pending=$(awk -F'\t' 'NF && $2 != "completed" { print $1 " (" $2 ")" }' <<<"$wruns" | sort -u)
+  if [[ -n $pending ]]; then
+    sed 's/^/  /' <<<"$pending"
+    fail=1
+    reasons+=("workflows: $(grep -c . <<<"$pending") not completed")
+  fi
+  if [[ -z $pending ]] && { [[ -z $main_wf ]] || awk -F'\t' -v w="$main_wf" '$1 == w' <<<"$wruns" | grep -q .; }; then
+    echo "all completed"
+  fi
+else
+  echo "workflows: not read"
+  fail=1
+  reasons+=("workflows: not read")
 fi
 
 echo
