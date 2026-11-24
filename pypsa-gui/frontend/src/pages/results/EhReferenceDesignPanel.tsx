@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { plainReason } from '../hubDesign/plainWords'
 import { SizedDesignTable } from './SizedDesignTable'
+import { hasNoVerdict, NoVerdictNote } from '../hubDesign/noVerdict'
 import { CompletenessChips, statusTone as sharedStatusTone } from '../../components/CompletenessChips'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Hexagon, Square } from 'lucide-react'
@@ -1230,7 +1231,8 @@ export function EhReferenceDesignPanel() {
     () => completenessRows(report?.completeness),
     [report?.completeness],
   )
-  const cert = report ? certificationHeadline(report) : null
+  const noVerdict = hasNoVerdict(template?.id)
+  const cert = report && !noVerdict ? certificationHeadline(report) : null
   const frPoints = report ? frontierPoints(report) : []
   const frPayload = report?.sections?.frontier?.payload as
     | EhFrontierPayload | null | undefined
@@ -1550,7 +1552,7 @@ export function EhReferenceDesignPanel() {
                   <span className="text-muted">Archetype </span>
                   <span className="text-text font-medium">{report.archetype}</span>
                 </span>
-                {report.ens_cap_permyriad != null && (
+                {!noVerdict && report.ens_cap_permyriad != null && (
                   <span data-testid="eh-report-ens-cap">
                     <span className="text-muted">ENS cap </span>
                     <span className="text-text font-mono">
@@ -1558,7 +1560,7 @@ export function EhReferenceDesignPanel() {
                     </span>
                   </span>
                 )}
-                {report.achieved_ens_permyriad != null && (
+                {!noVerdict && report.achieved_ens_permyriad != null && (
                   <span data-testid="eh-report-ens-achieved">
                     <span className="text-muted">Achieved </span>
                     <span className="text-text font-mono">
@@ -1696,8 +1698,9 @@ export function EhReferenceDesignPanel() {
                 </ul>
               )}
 
+              <NoVerdictNote templateId={template?.id} testId="eh-no-verdict" />
               <CompletenessChips
-                rows={completeness.map(({ name, status }) => ({
+                rows={completeness.filter(({ name }) => !(noVerdict && name === 'certification')).map(({ name, status }) => ({
                   name, status, note: report.sections?.[name]?.note ?? null }))}
                 testId="eh-completeness"
                 itemTestIdPrefix="eh-section-"

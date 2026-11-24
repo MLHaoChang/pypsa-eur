@@ -1927,3 +1927,24 @@ describe("owner's Q3 rule: the knee needs three solved points", () => {
     expect(screen.queryByTestId('eh-frontier-knee-note')).toBeNull()
   })
 })
+
+describe('no reliability verdict for this site type (template-e2e 11)', () => {
+  for (const id of ['eh_h2_hub', 'eh_h2_hub_staged', 'eh_ammonia_staged', 'eh_ipp_hybrid']) {
+    it(`${id}: plain statement; no ENS figures or certification chip`, async () => {
+      vi.mocked(resultsApi.getEhTemplate).mockResolvedValue({
+        id, name: id, recommended_archetype: 'strong_grid' } as never)
+      vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+        status: 'done', study: 'eh_study', archetype: 'strong_grid',
+        report: { ...REPORT, ens_cap_permyriad: 10, achieved_ens_permyriad: 0,
+          completeness: { ...(REPORT.completeness ?? {}), certification: 'skipped' } },
+      } as never)
+      await openPanel()
+      const note = await screen.findByTestId('eh-no-verdict')
+      expect(note.textContent).toContain('No reliability verdict for this site type.')
+      expect(note.textContent).toContain('Check instead:')
+      expect(screen.queryByTestId('eh-report-ens-cap')).toBeNull()
+      expect(screen.queryByTestId('eh-report-ens-achieved')).toBeNull()
+      expect(screen.queryByTestId('eh-section-certification')).toBeNull()
+    })
+  }
+})

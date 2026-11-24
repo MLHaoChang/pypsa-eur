@@ -15,7 +15,7 @@ import { headline, riskName } from '../headline'
 import { useHubDesignStore } from '../hubDesignStore'
 import { CardShell } from '../shared/CardShell'
 import { Term, TERM_FALLBACK } from '../shared/Term'
-import { useDispatchSolved, useHubLevers, useHubReport, useHubReview, useHubStudy } from '../useHubData'
+import { useDispatchSolved, useHubLevers, useHubReport, useHubReview, useHubStudy, useHubTemplate } from '../useHubData'
 import { cheaperDuration, leversFinding } from '../cheaperDuration'
 import { showResultsTab } from '../../../layout/flowNavigation'
 import { FROM_STUDY_HINT } from '../chapters'
@@ -32,6 +32,7 @@ import SourceRunLine from '../../../components/SourceRunLine'
 import { useDispatchRun } from '../../../hooks/useDispatchRun'
 import { money } from '../../../utils/money'
 import GridExtensionCard from '../../results/GridExtensionCard'
+import { hasNoVerdict, NoVerdictNote } from '../noVerdict'
 import { HEADLINED, ResultsHeadline } from './ResultsHeadline'
 import { WhyThisNumber } from './WhyThisNumber'
 
@@ -89,6 +90,7 @@ export function ResultsCard() {
   const { study, running } = useHubStudy()
   const { review } = useHubReview(studyHasResults(study))
   const report = useHubReport(study, running)
+  const { template } = useHubTemplate()
   const solved = useDispatchSolved()
   // The dispatch solve, for the source-run line (control-strategy 06, improvement 2).
   const run = useDispatchRun()
@@ -152,6 +154,7 @@ export function ResultsCard() {
           <ResultState state="not_run" reason="The study writes its verdict, cost and risks here."
             action={{ label: 'Go to Goal and run the study', onClick: () => setStep('goal', { user: true }) }} />
         )}
+        <NoVerdictNote templateId={template?.id} testId="hub-results-no-verdict" />
         <GridExtensionCard />
         {/* No headline yet, so every tile keeps its figure. */}
         <ChaptersSection reliability={reliability} />
@@ -192,10 +195,13 @@ export function ResultsCard() {
           <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
             <Term k="verdict">Verdict</Term>
           </span>
-          <p data-testid="hub-results-verdict" className="text-[14px] font-semibold text-text">
-            {headline(review, report)}
-          </p>
-          <WhyThisNumber figure="verdict" />
+          {!hasNoVerdict(template?.id) && (<>
+            <p data-testid="hub-results-verdict" className="text-[14px] font-semibold text-text">
+              {headline(review, report)}
+            </p>
+            <WhyThisNumber figure="verdict" />
+          </>)}
+          <NoVerdictNote templateId={template?.id} testId="hub-results-no-verdict" />
           {cheaper && (
             <p data-testid="hub-results-cheaper-duration" className="text-[12px] text-text">
               {cheaper}{' '}
@@ -206,7 +212,7 @@ export function ResultsCard() {
             </p>
           )}
           {/* P26 gate: with no goal the headline asks for one — take the user there. */}
-          {review.status === 'ok' && review.summary?.target_lole_h == null && (
+          {review.status === 'ok' && review.summary?.target_lole_h == null && !hasNoVerdict(template?.id) && (
             <button type="button" data-testid="hub-results-set-goal"
               onClick={() => setStep('goal', { user: true })}
               className="self-start mt-1 inline-flex items-center gap-1 rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white">

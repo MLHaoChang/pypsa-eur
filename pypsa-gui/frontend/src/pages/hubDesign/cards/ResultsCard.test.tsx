@@ -515,3 +515,24 @@ describe('ResultsCard cheaper battery duration', () => {
     expect(resultsApi.getEhLevers).not.toHaveBeenCalled()
   })
 })
+
+// template-e2e 11 (TE2E-11-PLAIN-1): four templates have no reliability verdict.
+describe('no reliability verdict for this site type (template-e2e 11)', () => {
+  for (const id of ['eh_h2_hub', 'eh_h2_hub_staged', 'eh_ammonia_staged', 'eh_ipp_hybrid']) {
+    it(`${id}: plain statement and check-instead, no verdict line`, async () => {
+      vi.mocked(resultsApi.getEhTemplate).mockResolvedValue({ id, name: id, recommended_archetype: 'strong_grid' } as never)
+      mount()
+      const note = await screen.findByTestId('hub-results-no-verdict')
+      expect(note.textContent).toContain('No reliability verdict for this site type.')
+      expect(note.textContent).toContain('Check instead:')
+      expect(screen.queryByTestId('hub-results-verdict')).toBeNull()
+      expect(screen.queryByTestId('hub-results-set-goal')).toBeNull()
+    })
+  }
+  it('a template with a verdict shows none of it', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue({ id: 'eh_datacenter', name: 'DC', recommended_archetype: 'weak_flexible' } as never)
+    mount()
+    await screen.findByTestId('hub-results-verdict')
+    expect(screen.queryByTestId('hub-results-no-verdict')).toBeNull()
+  })
+})
