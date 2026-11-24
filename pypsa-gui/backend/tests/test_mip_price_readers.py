@@ -33,11 +33,26 @@ def _solved(committable: bool) -> pypsa.Network:
     n.add("Bus", "h2", carrier="H2")
     n.add("Load", "d", bus="el", p_set=[5.0, 8.0, 3.0])
     n.add("Load", "h2_demand", bus="h2", p_set=1.0)
-    n.add("Generator", "g1", bus="el", p_nom=20, marginal_cost=10, committable=committable,
-          p_min_pu=0.1 if committable else 0.0)
+    n.add(
+        "Generator",
+        "g1",
+        bus="el",
+        p_nom=20,
+        marginal_cost=10,
+        committable=committable,
+        p_min_pu=0.1 if committable else 0.0,
+    )
     n.add("Generator", "g2", bus="el", p_nom=20, marginal_cost=30)
-    n.add("Link", "electrolysis", bus0="el", bus1="h2", carrier="H2 electrolysis",
-          p_nom=5, efficiency=0.7, capital_cost=100.0)
+    n.add(
+        "Link",
+        "electrolysis",
+        bus0="el",
+        bus1="h2",
+        carrier="H2 electrolysis",
+        p_nom=5,
+        efficiency=0.7,
+        capital_cost=100.0,
+    )
     status, _ = n.optimize(solver_name="highs")
     assert status == "ok"
     return n
@@ -97,13 +112,19 @@ def test_a_stochastic_mip_is_gated_where_classify_says_stochastic():
 def test_the_solve_records_its_own_judgement_and_it_outlives_a_config_edit(mip, lp):
     """A1: the record from the solve wins over today's config; no record, today's."""
     n = _process_unit_net()
-    recorded = {"last_solve_settings": {"price_limit": DUALS_NOT_MARGINAL},
-                "solver_config": SolverConfig()}  # edited to an LP after a binary solve
+    recorded = {
+        "last_solve_settings": {"price_limit": DUALS_NOT_MARGINAL},
+        "solver_config": SolverConfig(),
+    }  # edited to an LP after a binary solve
     assert solved_price_limit(recorded, n) == DUALS_NOT_MARGINAL
-    unrecorded = {"last_solve_settings": {"voll_eur_per_mwh": 0.0},
-                  "solver_config": SolverConfig(process_uc="binary")}
+    unrecorded = {
+        "last_solve_settings": {"voll_eur_per_mwh": 0.0},
+        "solver_config": SolverConfig(process_uc="binary"),
+    }
     assert solved_price_limit(unrecorded, n) == DUALS_NOT_MARGINAL
-    assert solved_price_limit({**unrecorded, "solver_config": SolverConfig()}, n) is None
+    assert (
+        solved_price_limit({**unrecorded, "solver_config": SolverConfig()}, n) is None
+    )
     assert solved_price_limit({}, lp) is None
 
 
@@ -114,8 +135,14 @@ def _settings_after_run_simulation(n):
     from services.solver_service import run_simulation
 
     emitted = {}
-    status, _ = run_simulation(SolverConfig(), n, threading.Lock(), threading.Event(),
-                               queue.SimpleQueue(), state_update=lambda **kw: emitted.update(kw))
+    status, _ = run_simulation(
+        SolverConfig(),
+        n,
+        threading.Lock(),
+        threading.Event(),
+        queue.SimpleQueue(),
+        state_update=lambda **kw: emitted.update(kw),
+    )
     assert status in ("ok", "optimal")
     return emitted["last_solve_settings"]
 
@@ -145,8 +172,13 @@ def test_compare_prices_of_a_mip_are_unavailable_with_the_reason(mip, lp):
 
     got = _compute_prices_summary(mip, [], False, True, price_limit=DUALS_NOT_MARGINAL)
     assert not got.available and got.unavailable_reason == DUALS_NOT_MARGINAL
-    assert got.duration_curve == [] and got.max_price == 0.0  # defaults under available=False
-    assert _compute_prices_summary(mip, [], False, True).unavailable_reason == DUALS_NOT_MARGINAL
+    assert (
+        got.duration_curve == [] and got.max_price == 0.0
+    )  # defaults under available=False
+    assert (
+        _compute_prices_summary(mip, [], False, True).unavailable_reason
+        == DUALS_NOT_MARGINAL
+    )
     ok = _compute_prices_summary(lp, [], False, True, price_limit=None)
     assert ok.available and ok.unavailable_reason is None and ok.max_price > 0
 
@@ -154,7 +186,9 @@ def test_compare_prices_of_a_mip_are_unavailable_with_the_reason(mip, lp):
 def test_compare_judges_each_project_by_its_own_saved_solve(tmp_path, mip, lp):
     from routers.compare import _price_limit
 
-    assert _price_limit(tmp_path, mip) == DUALS_NOT_MARGINAL       # defaults: committable Generator
+    assert (
+        _price_limit(tmp_path, mip) == DUALS_NOT_MARGINAL
+    )  # defaults: committable Generator
     assert _price_limit(tmp_path, lp) is None
     (tmp_path / "solver_config.json").write_text('{"process_uc": "binary"}')
     assert _price_limit(tmp_path, _process_unit_net()) == DUALS_NOT_MARGINAL
@@ -162,7 +196,8 @@ def test_compare_judges_each_project_by_its_own_saved_solve(tmp_path, mip, lp):
     import pickle
 
     (tmp_path / "results_state.pkl").write_bytes(
-        pickle.dumps({"last_solve_settings": {"price_limit": DUALS_NOT_MARGINAL}}))
+        pickle.dumps({"last_solve_settings": {"price_limit": DUALS_NOT_MARGINAL}})
+    )
     (tmp_path / "solver_config.json").write_text('{"process_uc": "auto"}')
     assert _price_limit(tmp_path, _process_unit_net()) == DUALS_NOT_MARGINAL
 
@@ -173,8 +208,8 @@ def test_compare_fails_closed_when_the_saved_config_cannot_be_read(tmp_path, mip
 
     (tmp_path / "solver_config.json").write_text("{not json")
     assert _price_limit(tmp_path, _process_unit_net()) == SOLVER_CONFIG_UNREADABLE
-    assert _price_limit(tmp_path, mip) == DUALS_NOT_MARGINAL       # a MIP under any config
-    assert _price_limit(tmp_path, lp) is None                       # no committable unit at all
+    assert _price_limit(tmp_path, mip) == DUALS_NOT_MARGINAL  # a MIP under any config
+    assert _price_limit(tmp_path, lp) is None  # no committable unit at all
     assert price_limit_without_config(lp) is None
 
 
@@ -187,7 +222,10 @@ def test_lcoh_of_a_mip_is_not_established(mip, lp):
     assert "integer (MIP) solve" in got["message"]
     assert compute_lcoh(lp, CFG, result_df=None)["rows"]
     # The route passes the solve's own judgement (A1).
-    assert compute_lcoh(lp, CFG, result_df=None, price_limit=DUALS_NOT_MARGINAL)["rows"] == []
+    assert (
+        compute_lcoh(lp, CFG, result_df=None, price_limit=DUALS_NOT_MARGINAL)["rows"]
+        == []
+    )
     assert compute_lcoh(mip, CFG, result_df=None, price_limit=None)["rows"]
 
 
@@ -214,7 +252,8 @@ class _CommittableGrid(FakeSolver):
 
 
 def test_the_study_report_withholds_figures_priced_at_a_mip_s_duals(
-        client, api_project, studies_on, monkeypatch):
+    client, api_project, studies_on, monkeypatch
+):
     from services import solver_service
 
     monkeypatch.setattr(solver_service, "run_simulation", _CommittableGrid())
@@ -228,12 +267,16 @@ def test_the_study_report_withholds_figures_priced_at_a_mip_s_duals(
     assert "integer (MIP) solve has no marginal prices" in text
     assert "zero profit" not in text
     codes = {d["code"] for d in body["required_disclosures"]}
-    assert not any(c.startswith("market_revenue_at_duals_") and c != "market_revenue_at_duals_excluded_from_cash_flow"
-                   for c in codes)
+    assert not any(
+        c.startswith("market_revenue_at_duals_")
+        and c != "market_revenue_at_duals_excluded_from_cash_flow"
+        for c in codes
+    )
 
 
 def test_an_lp_study_report_keeps_its_figures_and_its_detail_has_no_limit(
-        client, api_project, studies_on, monkeypatch):
+    client, api_project, studies_on, monkeypatch
+):
     """A4: a run detail without `price_limit` (every LP, every stored run) reads as before."""
     from services import solver_service
 
@@ -246,7 +289,8 @@ def test_an_lp_study_report_keeps_its_figures_and_its_detail_has_no_limit(
 
 
 def test_a_stored_study_detail_without_the_key_reports_as_before(
-        client, api_project, studies_on, monkeypatch, project_storage_dir):
+    client, api_project, studies_on, monkeypatch, project_storage_dir
+):
     """A4: a run stored before this change carries no `price_limit`; its report reads as it did."""
     from services import solver_service
     from services.study import store
@@ -273,7 +317,8 @@ from tests.test_result_configured_fields import _run_and_join  # noqa: E402
 
 
 def test_the_solved_settings_routes_read_a_mip_solve_as_they_read_an_lp(
-        client, install_network, session_state):
+    client, install_network, session_state
+):
     """The record adds `price_limit` to `last_solve_settings` on a MIP; every reader of
     those settings reads its own keys, so the solved-settings routes answer as before."""
     from tests.test_adequacy_reserve_margin import _network
@@ -285,7 +330,10 @@ def test_the_solved_settings_routes_read_a_mip_solve_as_they_read_an_lp(
     session_state(client)["solver_config"] = SolverConfig(voll=3000.0)
     state = _run_and_join(client, session_state)
     settings = state["last_solve_settings"]
-    assert settings["price_limit"] == DUALS_NOT_MARGINAL and settings["voll_eur_per_mwh"] == 3000.0
+    assert (
+        settings["price_limit"] == DUALS_NOT_MARGINAL
+        and settings["voll_eur_per_mwh"] == 3000.0
+    )
     ll = client.get("/api/results/lost_load")
     assert ll.status_code == 200, ll.text
     assert ll.json()["voll_applied"] is True and ll.json()["voll_eur_per_mwh"] == 3000.0
