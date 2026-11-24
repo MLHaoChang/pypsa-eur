@@ -3,7 +3,7 @@
 
 # LC-48g — An idle task in another project blocks a new plan after a switch
 
-Status: ready-for-agent
+Status: done
 Model tier: opus
 Size: S
 Blocked by: none
@@ -28,3 +28,5 @@ Since #1558 (owner decision LC48F-REFUSE-1), `_refuse_switch` fails closed when 
 **2026-11-17 triage (SCALE-1).** Not ready: the issue itself needs an owner decision (keep refusing, read the task in its own project, or detach the idle task at the switch). Sent to the coordinator as options; set ready-for-agent with the chosen option.
 
 **2026-11-17 owner decision LC48G-READ-1 (via the coordinator).** Option 2: the switch guard reads an idle task in its own project (by its `project_id`, with the owner check) and refuses only when the task really runs; it still fails closed when the task cannot be read. Status is now ready-for-agent (opus, S, GK B).
+
+**2026-11-24 build.** `_refuse_switch` reads a task it cannot find in the open project in its own one (`_read_home`: the project recorded by every `_read`/`_save` of that task, the acting user's ACL check, then the file's owner and project checks). An idle task there lets a new plan start; a running one refuses with its real status and title; a task whose project is not known, or that cannot be read there, still refuses as `unreadable` (LC48F-REFUSE-1). Tests in `tests/test_lc48d_d23_wire_recovery.py`.

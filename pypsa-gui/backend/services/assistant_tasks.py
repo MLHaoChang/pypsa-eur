@@ -162,7 +162,32 @@ def _read(task_id):
         _refuse("task_unreadable", "The task checkpoint needs repair.")
     if task.get("project_id") != project or task.get("owner_id") != owner:
         _refuse("task_not_found", "Task not found in this project.", 404)
+    _HOMES[task_id] = project
     return path, task
+
+
+# LC-48g (owner decision LC48G-READ-1): the project each task this process has
+# read or written lives in, so the start guard can read a chat's task in its
+# own project after a switch. In memory, like `session.task_id`.
+_HOMES: dict[str, str] = {}
+
+
+def _read_home(task_id):
+    """The task read in the project it lives in, with the same ACL and owner
+    checks as `_read`; 404 `task_not_found` when its project is not known."""
+    from services import chat_tools, project_registry
+    home = _HOMES.get(task_id)
+    if home is None:
+        _refuse("task_not_found", "Task not found in this project.", 404)
+    with chat_tools._acting() as (db, user):
+        project = project_registry.resolve_project(db, user, home)
+        root, project_id, owner = project_registry.project_dir(project), str(project.id), str(user.id)
+    task = json.loads((root / "assistant_tasks" / (task_id + ".json")).read_text())
+    if not isinstance(task, dict):
+        raise ValueError("task checkpoint is not an object")
+    if task.get("project_id") != project_id or task.get("owner_id") != owner or project_id != home:
+        _refuse("task_not_found", "Task not found in this project.", 404)
+    return task
 
 
 def _save(path, task):
@@ -176,6 +201,8 @@ def _save(path, task):
         os.replace(temp, path)
     finally:
         temp.unlink(missing_ok=True)
+    if task.get("task_id") and task.get("project_id"):
+        _HOMES[task["task_id"]] = task["project_id"]
     if task.get("status") in _ENDED_TASK:
         _release_sessions(task.get("task_id"))
 
@@ -561,14 +588,23 @@ def _refuse_switch(session, task_id):
     needs repair) may still run where it lives, so it refuses too: fail closed
     (owner decision LC48F-REFUSE-1). `begin_step` detaches a task it cannot
     find after a switch; it keeps the id as `session.detached_task_id`, which
-    this guard reads the same way until it reads as not running (GK B D)."""
+    this guard reads the same way until it reads as not running (GK B D).
+    A task not in this project is read in its own one (`_read_home`, owner
+    decision LC48G-READ-1): an idle one (`ready`, `needs_review`,
+    `paused_at_card`) lets a new plan start; one that runs refuses with its
+    status. Only a task that cannot be read there either reads as `unreadable`."""
     for active, detached in ((getattr(session, "task_id", None), False),
                              (getattr(session, "detached_task_id", None), True)):
         if not active or active == task_id:
             continue
         try:
-            _, task = _read(active)
-        except (HTTPException, OSError, ValueError):
+            try:
+                _, task = _read(active)
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+                task = _read_home(active)  # LC48G-READ-1: read it where it lives
+        except Exception:  # noqa: BLE001 — any read failure fails closed (LC48F-REFUSE-1), a DB error too
             raise HTTPException(409, {
                 "error_kind": "switch_in_progress",
                 "active": {"kind": "task", "id": active, "title": None, "status": "unreadable"},
