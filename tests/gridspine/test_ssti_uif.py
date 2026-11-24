@@ -480,7 +480,7 @@ def test_island_case_selection_both_ways():
         assert set(study.rows["case"]) == {*su.CASES, *ISLAND}
 
 
-@pytest.mark.parametrize("sc", [0.0, math.nan])
+@pytest.mark.parametrize("sc", [0.0, math.nan, math.inf])
 @pytest.mark.parametrize("threshold, assumed, limit, flagged",
                          [(None, False, su.DEFAULT_THRESHOLD, True), (0.5, False, 0.5, False),
                           (0.5, True, 0.5, True)])
