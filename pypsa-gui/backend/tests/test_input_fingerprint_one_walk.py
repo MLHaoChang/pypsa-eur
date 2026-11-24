@@ -400,6 +400,34 @@ def test_one_walk_gives_each_template_its_own_walks_digests(name, walks):
     assert _pair_in_scope(ctx) == _pair_in_scope(ctx, (True, False)) == single
 
 
+def test_an_index_of_objects_is_never_reused():
+    """Object, tz-aware and mixed-level indexes key on nothing (their numpy bytes would be pointers)."""
+    objects = [
+        pd.Index(["a", "b"]),
+        pd.Index([1, "b"], dtype=object),
+        STAMPS.tz_localize("UTC"),
+        pd.MultiIndex.from_arrays([["a", "b"], [1, 2]]),
+        pd.MultiIndex.from_arrays([["c", "d"], [1, 2]]),
+        pd.MultiIndex.from_arrays([STAMPS[:2].tz_localize("UTC"), [1, 2]]),
+    ]
+    indexes = {}
+    texts = [
+        W._exact_frame_json(pd.DataFrame(index=i), indexes=indexes) for i in objects
+    ]
+    assert indexes == {}
+    assert texts == [W._exact_frame_json(pd.DataFrame(index=i)) for i in objects]
+    assert texts[3] != texts[4]
+
+
+def test_a_part_column_of_no_value_adds_no_block(tmp_path):
+    """A composite part column that holds no value leaves the fingerprint as without the column (TCU 08)."""
+    ctx = edge_network(tmp_path)
+    ctx.network.storage_units.drop(columns="inv_power_overnight", inplace=True)
+    without = _pair_in_scope(ctx)
+    ctx.network.storage_units["inv_power_overnight"] = np.nan
+    assert _pair_in_scope(ctx) == without
+
+
 def test_the_walk_leaves_the_network_as_it_was(tmp_path):
     ctx = edge_network(tmp_path)
     n = ctx.network
@@ -446,6 +474,13 @@ def test_the_kept_form_is_served_once(tmp_path, walks):
         assert (
             W._network_input_fingerprint(ctx, exact=True) == MASTER_FP_EDGE[1]
         )  # a third read walks again
+    assert walks == [(False, True)] * 2
+    walks.clear()
+    with (
+        W.one_input_walk()
+    ):  # the kept form is the other one: never served for the same form again
+        assert W._network_input_fingerprint(ctx) == MASTER_FP_EDGE[0]
+        assert W._network_input_fingerprint(ctx) == MASTER_FP_EDGE[0]
     assert walks == [(False, True)] * 2
 
 
