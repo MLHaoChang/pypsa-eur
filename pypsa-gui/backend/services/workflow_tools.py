@@ -1066,7 +1066,7 @@ def _record_solve_inputs(network, config):
         ctx.network = network
         ctx.solver_state["solver_config"] = config
     with one_input_walk():  # issue 225: the two reads, and nothing between them
-        plain = _network_input_fingerprint(ctx)
-        exact = _network_input_fingerprint(ctx, exact=True)
-    network.meta["assistant_solve_input_fingerprint"] = plain
-    network.meta["assistant_solve_exact_input_fingerprint"] = exact
+        plain_digest = _network_input_fingerprint(ctx)
+        exact_digest = _network_input_fingerprint(ctx, exact=True)
+    network.meta["assistant_solve_input_fingerprint"] = plain_digest
+    network.meta["assistant_solve_exact_input_fingerprint"] = exact_digest
