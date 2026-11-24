@@ -345,3 +345,55 @@ def test_the_solved_settings_routes_read_a_mip_solve_as_they_read_an_lp(
     from services.results.prices_digest import prices_digest
 
     assert prices_digest(n, solver_state=state)["reason"] == DUALS_NOT_MARGINAL
+
+
+def test_the_live_readers_judge_by_the_solve_s_record(
+    client, install_network, session_state, monkeypatch
+):
+    """A1 at the route and the retained digest: an LP network whose solve recorded a MIP
+    (its config since edited) is withheld; without the record its prices are read."""
+    from services import retained_results
+    from services.pypsa_service import PyPSAService
+
+    n = _solved(committable=False)
+    install_network(n)
+    session_state(client)["solver_config"] = SolverConfig()
+    state = _run_and_join(client, session_state)
+    assert "price_limit" not in state["last_solve_settings"]
+    # The retained digest runs outside a request: point it at this session's run.
+    monkeypatch.setattr(
+        PyPSAService, "get_solver_state", classmethod(lambda cls: state)
+    )
+    monkeypatch.setattr(PyPSAService, "get_network", classmethod(lambda cls: n))
+    monkeypatch.setattr("routers.results._result_df", lambda *a, **k: None)
+    assert client.get("/api/results/lcoh").json()["rows"]
+    assert retained_results._prices_digest().get("reason") != DUALS_NOT_MARGINAL
+
+    state["last_solve_settings"] = {
+        **state["last_solve_settings"],
+        "price_limit": DUALS_NOT_MARGINAL,
+    }
+    lcoh = client.get("/api/results/lcoh").json()
+    assert lcoh["rows"] == [] and lcoh["unavailable_reason"] == DUALS_NOT_MARGINAL
+    assert retained_results._prices_digest() == {
+        "status": "unavailable",
+        "reason": DUALS_NOT_MARGINAL,
+    }
+
+
+def test_the_not_kept_reason_is_the_gate_s_own_code():
+    from services.not_kept import MIP_NO_PRICES
+
+    assert MIP_NO_PRICES == DUALS_NOT_MARGINAL
+
+
+def test_lcoh_without_an_electrolyser_stays_empty_on_a_mip(mip):
+    from services.results.lcoh import compute_lcoh
+
+    n = _solved(committable=True)
+    n.remove("Link", "electrolysis")
+    assert compute_lcoh(n, CFG, result_df=None) == {
+        "rows": [],
+        "total": None,
+        "currency": "EUR",
+    }

@@ -612,15 +612,15 @@ def _price_limit(directory: pathlib.Path, n):
     saved solver config; failing closed when that config cannot be read."""
     from harness import solve_validity
 
-    state = {"last_solve_settings": _saved_results_state(directory).get("last_solve_settings")}
+    settings = _saved_results_state(directory).get("last_solve_settings")
+    recorded = isinstance(settings, dict) and bool(settings.get("price_limit"))
     try:
-        state["solver_config"] = _project_solver_config(directory)
+        cfg = _project_solver_config(directory)
     except HTTPException:
-        settings = state["last_solve_settings"]
-        if isinstance(settings, dict) and settings.get("price_limit"):
-            return settings["price_limit"]
-        return solve_validity.price_limit_without_config(n)
-    return solve_validity.solved_price_limit(state, n)
+        if not recorded:
+            return solve_validity.price_limit_without_config(n)
+        cfg = None  # the record decides; the config is not read
+    return solve_validity.solved_price_limit({"last_solve_settings": settings, "solver_config": cfg}, n)
 
 
 def _load_project_network(directory: pathlib.Path):

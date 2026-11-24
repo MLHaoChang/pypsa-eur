@@ -48,6 +48,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from harness import solve_validity
+
 from models.study import (
     MVP1_BASIS,
     AssumptionsLedger,
@@ -281,8 +283,7 @@ HELP: dict[str, str] = {
     "currency_year_unknown": "No case states a currency year, so the money figure is not shown.",
     "fidelity_unknown": "The run that produced the figure is not recorded, so it is not shown.",
     "not_computed": "The figure was not computed.",
-    "mip_duals_not_marginal": (
-        "Not available on an integer (MIP) solve: it has no marginal prices."),
+    solve_validity.DUALS_NOT_MARGINAL: solve_validity.MIP_PRICES_TEXT,
     # stale reasons
     "ledger_changed_since_findings": (
         "The assumptions ledger changed after the findings were computed; re-run the study."),
