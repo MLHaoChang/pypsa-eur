@@ -397,3 +397,33 @@ def test_lcoh_without_an_electrolyser_stays_empty_on_a_mip(mip):
         "total": None,
         "currency": "EUR",
     }
+
+
+def test_a_modular_only_mip_fails_closed_without_its_config():
+    """Mutant kill: a modular extendable is a MIP under any config."""
+    n = pypsa.Network()
+    n.set_snapshots(range(3))
+    n.add("Bus", "a")
+    n.add(
+        "Generator", "m", bus="a", p_nom_extendable=True, p_nom_mod=5.0, p_nom_max=20.0
+    )
+    assert price_limit_without_config(n) == DUALS_NOT_MARGINAL
+
+
+def test_the_digest_without_a_solver_state_judges_under_the_defaults(mip, lp):
+    from services.results.prices_digest import prices_digest
+
+    assert prices_digest(mip)["reason"] == DUALS_NOT_MARGINAL
+    assert prices_digest(lp)["status"] == "ok"
+
+
+def test_compare_s_record_decides_even_when_the_config_cannot_be_read(tmp_path, lp):
+    import pickle
+
+    from routers.compare import _price_limit
+
+    (tmp_path / "solver_config.json").write_text("{not json")
+    (tmp_path / "results_state.pkl").write_bytes(
+        pickle.dumps({"last_solve_settings": {"price_limit": DUALS_NOT_MARGINAL}})
+    )
+    assert _price_limit(tmp_path, lp) == DUALS_NOT_MARGINAL
