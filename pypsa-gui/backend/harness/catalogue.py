@@ -2018,6 +2018,7 @@ TOOLS: list[dict[str, Any]] = [
         "list_projects",
         "All projects on disk as ProjectInfo entries: name, id, created_at, "
         "has_solver_config, bus_count, snapshot_count, objective, "
+        "study_finished (a finished Guided study was saved), "
         "has_orphan_tmp, missing, parent_project, scenario_description, "
         "scenario_type, project_kind (null = capacity_expansion; "
         "'planning_dynamics' for a gridspine study), study_owned, "
@@ -2132,8 +2133,8 @@ TOOLS: list[dict[str, Any]] = [
         "Derived tool (no /scenarios endpoint exists — B2 fix). Returns "
         "list_projects filtered to entries where parent_project == name. Each "
         "entry is a ProjectInfo {name, id, created_at, has_solver_config, "
-        "bus_count, snapshot_count, objective, has_orphan_tmp, missing, "
-        "parent_project, scenario_description, scenario_type, project_kind, "
+        "bus_count, snapshot_count, objective, study_finished, has_orphan_tmp, "
+        "missing, parent_project, scenario_description, scenario_type, project_kind, "
         "study_owned, owner_study_id, owner_study_name, settings, my_access} per "
         "schemas.py:467-491. "
         "Safety: read.",
