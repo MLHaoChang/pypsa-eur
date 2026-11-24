@@ -485,6 +485,29 @@ def _check_site_connection(commercial, stored) -> None:
                                          "message": exc.message}) from exc
 
 
+def _check_reserve_attestation(commercial, stored) -> None:
+    """SCU06 K8b (GK A B2): a submitted "no backup obligation" attestation that
+    differs from the stored one is refused on a DC-03 string or spare, on
+    ride-through storage, and where the project's backup roles cannot be read.
+    An unchanged stored list is never refused (the floors then ignore it)."""
+    from fastapi import HTTPException
+
+    from services.solver import reserve_products as RP
+
+    attested = list(commercial.reserve_no_backup_storages)
+    before = stored.get("reserve_no_backup_storages") if isinstance(stored, dict) else None
+    if not attested or attested == (before or []):
+        return
+    ctx = PyPSAService.get_active_context()
+    if _solver_in_flight_ctx(ctx):
+        return   # `_bind_commercial` refuses it (solver_in_flight) before any read
+    why = RP.attestation_refusal(PyPSAService.get_network(), getattr(ctx, "storage_dir", None),
+                                 attested)
+    if why is not None:
+        raise HTTPException(422, {"code": RP.ATTESTATION_REFUSED,
+                                  "error_kind": "reserve_attestation_refused", "message": why})
+
+
 def user_code_authorized(db, actor) -> bool:
     """
     True iff `actor` may set `extra_functionality_code` in this deployment.
@@ -627,7 +650,7 @@ def _reserve_refusal(n, config) -> dict | None:
     if not products:
         return None
     try:
-        floors, strings = RP.project_backup(n)
+        floors, strings = RP.project_backup(n, config)
         RP.plan(n, products, floors, strings)
     except RP.ReserveRefusal as exc:
         return {**_RESERVE_REFUSALS[exc.kind], "code": exc.kind, "message": str(exc)}
@@ -701,6 +724,7 @@ def update_solver_config(
         # touches nothing (WP1.4 round 3 #6).
         if cfg.commercial is not None:
             _check_site_connection(cfg.commercial, stored_commercial)
+            _check_reserve_attestation(cfg.commercial, stored_commercial)
         from services.commercial.binding import project_currency
 
         # The currency gate is for a ref this PUT attaches or changes: a client echoing the

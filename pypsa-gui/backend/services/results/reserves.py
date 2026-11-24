@@ -90,7 +90,7 @@ def reserve_view(
     products = RP.products_of(cfg)
     if not products:
         return None
-    floors, strings = RP.project_backup(n) if backup is None else backup
+    floors, strings = RP.project_backup(n, cfg) if backup is None else backup
     used = sorted({s for p in products for s in (p.storages or floors)})
     # One read: the lines price this frame at the hours read with it (PG-13).
     read = (
