@@ -112,6 +112,12 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - No raw axios or Python exception text in a toast (UX-RULES-1122).
 - A table header suffix is computed from the filtered rows, with a shot of a mixed table (UX-RULES-1122).
 
+- (aa) EmptyState wording: "Not run yet" means the study exists but has not run; "Not yet available" means a precondition is missing. The sentence names the precondition or the action, and each tab gives one next step (#1837).
+- (ab) A verdict key line is not repeated by a tile sentence. A tile with no number shows no "Why this number" (#1948).
+- (ac) A text control with the sentence colour and no underline is not a control: use the shared `Btn` or an ink underlined link (#1913).
+- (ad) Euro amounts put the minus before the euro sign, "-€16.31 M", through the one shared helper `signFirstEuro` in `utils/format.ts` (#1836).
+- (ae) A red link is the existing text-link token (accent red). It is not blocking; log it for UI-COHESION-1 (UX (ae)).
+
 ## Master merges
 
 A master merge carries an OK when the head tree equals `git merge-tree --write-tree <old> <master>`. Any difference is the conflict resolution and needs a real look. `scripts/coord/premerge.sh` prints whether an OK carries.

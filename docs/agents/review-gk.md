@@ -384,3 +384,10 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A screen or pack that skips rows it cannot judge uses one shared predicate in the card and the pack (`subsync_judged`). A row worse than the meta verdict reads unknown (GK A2 (7), #1930 H1/H2/J1).
 - An output tree that a run replaces is staged in a unique directory per call, then swapped in by rename-aside, rename-in and deleting the aside copy. A run never clears a shared stage at entry (GK A2 (7), #1941 K1–K3).
 - Exported pack text (TSO-facing) cites the engineering basis, never an internal GK or ruling reference (GK A2 (7), #1916 → #1931).
+
+## Standing rulings (GK B4, recorded 2026-11-24)
+
+- A probe test binds its arguments to `inspect.signature(DISPATCHERS[tool])`, so a renamed or dropped parameter fails the test (GK B4, #1932/#1938).
+- An apply that re-plans binds the previewed plan's digest and refuses a mismatch with a typed 409 (GK B4, #1938).
+- A "sends X not Y" fixture uses distinct literals for X and Y, so a swap cannot pass (GK B4, #1939).
+- A value left unjudged because an input is assumed reads `None` / "not evaluated" on every surface, never 0 or "—" (GK B4, #1934).

@@ -3,7 +3,7 @@
 
 # 02 — Data-centre investment case: no path from the template, and the screens contradict each other
 
-Status: ready-for-agent
+Status: done
 Severity: high (no investment decision is reachable on the first template in the group)
 Group: Investment and business case. Walk 2026-11-17, master 9491878d.
 Breaks: owner decisions HOLISTIC-1 (one journey, no dead ends), EXPERT-GUIDED-1 (Guided and Expert agree), RAW-NAMES-1 (no tool or field names on screens), DECISION-GAPS-1. Extends `.scratch/template-e2e/issues/22-improve-and-investment-no-manual-path.md` (in flight on `claude/template-e2e-decide-report`): that one says the Guided path needs a manual action; this one lists the walls a manual path meets.
@@ -77,3 +77,5 @@ On any template in the group, either the investment case runs from the template'
   - The LCOS reason keys are checked as an exact set against a list written out by hand from lcos.py.
   - The lifetime list reuses `listWords`, now exported from businessCaseModel.
   - Filed 10 for the three master-side double wordings.
+
+- 2026-11-24 status sweep: done; evidence in its Comments above.
