@@ -35,17 +35,21 @@ def _draws(client, value):
 
 def _goal(client, value):
     cfg = client.get("/api/simulation/solver_config").json()
-    r = client.put("/api/simulation/solver_config", json={**cfg, "target_lole_h": value})
+    r = client.put(
+        "/api/simulation/solver_config", json={**cfg, "target_lole_h": value}
+    )
     assert r.status_code == 200, r.text
 
 
 # Owner decision on #1927: the start refuses only a goal that no draw count up
 # to the 2000 cap resolves. The microgrid's 168 h weeks: one draw resolves
 # 8760/168 = 52.1 h/yr, 2000 draws 0.0261 h/yr.
-CAP_REFUSAL = (LABEL + "a check that finds no shortfall cannot show that the "
-               "0.01 h/yr goal is met, and even 2000 runs (the most allowed) "
-               "could not decide it (its smallest step there is 0.0261 h/yr): "
-               "allow more shortfall in the goal.")
+CAP_REFUSAL = (
+    LABEL + "a check that finds no shortfall cannot show that the "
+    "0.01 h/yr goal is met, and even 2000 runs (the most allowed) "
+    "could not decide it (its smallest step there is 0.0261 h/yr): "
+    "allow more shortfall in the goal."
+)
 
 
 def _runs_items(client, name):
@@ -71,8 +75,9 @@ def test_one_run_below_the_floor_is_not_refused_at_the_study_start(
     study runs (VOLL unset refuses next, so no study starts here)."""
     _project(client)
     cfg = client.get("/api/simulation/solver_config").json()
-    r = client.put("/api/simulation/solver_config",
-                   json={**cfg, "mc_draws": 1, "voll": 0.0})
+    r = client.put(
+        "/api/simulation/solver_config", json={**cfg, "mc_draws": 1, "voll": 0.0}
+    )
     assert r.status_code == 200, r.text
     r = client.post("/api/results/eh_study", json={})
     assert r.status_code == 422, r.text
@@ -100,7 +105,7 @@ def test_readiness_blocks_run_only_past_the_draw_cap_and_a_larger_goal_clears_it
 ):
     name = _project(client)
     _draws(client, 1)
-    assert _runs_items(client, name)[1] == []      # 1 run below the floor runs
+    assert _runs_items(client, name)[1] == []  # 1 run below the floor runs
     _goal(client, 0.01)
     body, items = _runs_items(client, name)
     assert body["run_ready"] is False
@@ -108,7 +113,7 @@ def test_readiness_blocks_run_only_past_the_draw_cap_and_a_larger_goal_clears_it
     item = items[0]
     assert item["blocking"] and item["target"]["section"] == "scenarios"
     assert item["message"] == CAP_REFUSAL
-    _draws(client, 2000)                           # more runs do not clear it
+    _draws(client, 2000)  # more runs do not clear it
     assert len(_runs_items(client, name)[1]) == 1
     _goal(client, 0.03)
     assert _runs_items(client, name)[1] == []
