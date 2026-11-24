@@ -117,7 +117,7 @@ def choose_lever(n, requested: str | None) -> tuple[str, str]:
     if requested not in (None, "auto"):
         if requested not in LEVERS:
             raise FrontConfigError(
-                f"unknown reliability lever {requested!r}; use one of {', '.join(LEVERS)}"
+                f"unknown reliability lever {requested}; use one of {', '.join(LEVERS)}"
             )
         return requested, "chosen by the user"
     if lp_has_outage_model(n):
@@ -142,10 +142,10 @@ def _clean_levels(lever: str, levels) -> list[float]:
         try:
             f = float(v)
         except (TypeError, ValueError):
-            raise FrontConfigError(f"reliability level {v!r} is not a number") from None
+            raise FrontConfigError(f"reliability level {v} is not a number") from None
         if not math.isfinite(f) or f <= 0:
             raise FrontConfigError(
-                f"reliability level {v!r} must be a positive number "
+                f"reliability level {v} must be a positive number "
                 f"({'‱ of demand' if lever == 'ens_cap' else 'margin fraction'})"
             )
         out.append(f)
@@ -165,9 +165,9 @@ def _clean_caps(caps) -> list[float | None]:
         try:
             f = float(v)
         except (TypeError, ValueError):
-            raise FrontConfigError(f"CO2 cap {v!r} is not a number") from None
+            raise FrontConfigError(f"CO2 cap {v} is not a number") from None
         if not math.isfinite(f) or f < 0:
-            raise FrontConfigError(f"CO2 cap {v!r} must be a finite t/yr ≥ 0")
+            raise FrontConfigError(f"CO2 cap {v} must be a finite t/yr ≥ 0")
         out.append(f)
     if len(set(out)) != len(out):
         raise FrontConfigError("CO2 caps repeat")
