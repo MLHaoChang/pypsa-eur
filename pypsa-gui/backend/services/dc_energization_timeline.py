@@ -173,9 +173,15 @@ def timeline(n, meta: dict | None) -> dict:
         by_run = {r["period"]: r for r in run}
         for p in periods:
             p["run"] = by_run.get(p["period"])
+    run_state = None
+    if run is not None:
+        from services.dispatch_status import dispatch_status
+
+        run_state = "out_of_date" if dispatch_status(n) == "stale" else "fresh"
     return {
         "unit": "MW",
         "basis": "run" if run is not None else "inputs",
+        "run_state": run_state,
         "basis_note": BASIS_RUN if run is not None else BASIS_INPUTS,
         "periods": periods,
         "time_to_power": ttp,

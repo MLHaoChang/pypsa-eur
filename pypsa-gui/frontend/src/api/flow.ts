@@ -374,6 +374,7 @@ export interface EnergizationTimelinePeriod {
 export interface EnergizationTimeline {
   unit: 'MW'
   basis: 'inputs' | 'run'
+  run_state?: 'fresh' | 'out_of_date' | null
   basis_note: string
   periods: EnergizationTimelinePeriod[]
   time_to_power:

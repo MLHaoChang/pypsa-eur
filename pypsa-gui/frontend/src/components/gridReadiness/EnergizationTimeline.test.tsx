@@ -42,8 +42,17 @@ describe('EnergizationTimeline', () => {
     const run = { ...base, basis: 'run' as const, periods: base.periods.map(p => ({
       ...p, run: { served_mwh: 1000, shed_mwh: 12, curtailed_mwh: 3 } })) }
     render(<EnergizationTimelineView data={run} />)
-    expect(screen.getByTestId('energization-timeline-basis').textContent).toContain('last run')
+    expect(screen.getByTestId('energization-timeline-basis').textContent).toContain('Last run')
     expect(screen.getByTestId('energization-timeline-run').textContent).toContain('shed 12 MWh')
+  })
+
+  it('says when the run is out of date and keys power apart from energy', () => {
+    const run = { ...base, basis: 'run' as const, run_state: 'out_of_date' as const,
+      periods: base.periods.map(p => ({ ...p, run: { served_mwh: 1, shed_mwh: 0, curtailed_mwh: 0 } })) }
+    render(<EnergizationTimelineView data={run} />)
+    expect(screen.getByTestId('energization-timeline-basis').textContent).toContain('out of date')
+    expect(screen.getByTestId('energization-timeline-run').textContent).toContain('MWh (not power)')
+    expect(screen.getByTestId('energization-timeline-key').textContent).toContain('assumed profile')
   })
 
   it('reads a missing time to power as not available, never 0', () => {
