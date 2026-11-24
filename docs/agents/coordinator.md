@@ -14,7 +14,7 @@ Engine gatekeeper B3 (6; new template-e2e, ux-next, project-io app side, project
 
 UX reviewer (28; UI coherence gate, owner decision 2026-10-20): `session_01G7qCumS1PHmhWWrSDM5zsb`
 
-UX reviewer 2 (6; new template-e2e, ux-next and ui-cohesion UI reviews from 2026-11-17 13:00Z; owner decision SCALE-1): `session_01G7qCunnbAYRFp93JbLcx2R`
+UX reviewer 2 (area routed to UX (28) from 2026-11-24 08:50Z, after UX 2 (6) rotated out; template-e2e, ux-next, ui-cohesion, CS-B and guided-results UI reviews; owner decisions SCALE-1, SCALE-4): `session_01G7qCumS1PHmhWWrSDM5zsb`
 
 Engine gatekeeper B4 (area routed to GK B2 (5) from 2026-11-24 00:41Z, after B4 (4) rotated out; owner decision SCALE-4): `session_01G7qCunMhwXEgi1uSaq95qh`
 
