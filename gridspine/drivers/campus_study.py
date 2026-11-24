@@ -170,6 +170,7 @@ import math
 import os
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 
 import pandas as pd
@@ -677,7 +678,8 @@ def psse_campus(run_dir, hours=None, *, plant=None, model_set=None, variant=None
     GC-01 model set the run's campus is a variant of) go to every bundle's
     PSS/E pack (GC-04d). The bundles are written aside and replace ``psse/``
     only once all are written, so a refusal keeps the previous tree and
-    leaves no partial one, and a new call never mixes with an older one."""
+    leaves no partial one, and a new call never mixes with an older one.
+    No hours: no ``psse/`` is written and an earlier one is left as it is."""
     from gridspine.handoff.campus_bundle import export_campus_bundle
     from gridspine.static.frequency import LEDGER
 
@@ -688,8 +690,8 @@ def psse_campus(run_dir, hours=None, *, plant=None, model_set=None, variant=None
         campus = load_run_campus(run_dir)
     hourly, _ = campus_tables(run_dir)
     out = run_dir / PSSE_DIR
-    stage = run_dir / f".{PSSE_DIR}.partial"
-    shutil.rmtree(stage, ignore_errors=True)
+    stage = _aside(run_dir, "partial")  # this call's own: a concurrent call never touches it (GK A2 K1)
+    stage.mkdir()
     bundles = []
     try:
         for period, hour in (island_hours(run_dir) if hours is None else hours):
@@ -698,13 +700,54 @@ def psse_campus(run_dir, hours=None, *, plant=None, model_set=None, variant=None
                 raise ContractError(f"the run has no hour {hour} in period {period}")
             bundles.append(export_campus_bundle(stage, campus, rows.reset_index(drop=True), f"p{period}_h{hour}",
                                                 ledger=LEDGER, plant=plant, model_set=model_set, variant=variant))
-        stage.mkdir(exist_ok=True)  # no hours: psse/ is replaced by an empty tree
-    except BaseException:
-        shutil.rmtree(stage, ignore_errors=True)
-        raise
-    shutil.rmtree(out, ignore_errors=True)
-    stage.rename(out)
+        if bundles:
+            _swap_in(stage, out)
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)  # gone on a refusal; already renamed on success
     return [dataclasses.replace(b, path=out / b.path.name) for b in bundles]
+
+
+def _aside(run_dir: Path, what: str) -> Path:
+    """A fresh hidden sibling of ``psse/`` (``.psse.<what>-<hex>``), unique to the caller."""
+    return run_dir / f".{PSSE_DIR}.{what}-{uuid.uuid4().hex}"
+
+
+def _discard(old) -> None:
+    """Delete an aside tree; a failure leaves it hidden beside ``psse/``, which nothing reads."""
+    if old is not None:
+        try:
+            shutil.rmtree(old)
+        except OSError:
+            pass
+
+
+#: How often ``_swap_in`` retries when another call swapped its tree in between.
+SWAP_TRIES = 8
+
+
+def _swap_in(stage: Path, out: Path) -> None:
+    """Make ``stage`` the ``out`` tree (GK A2 K2): the old tree is renamed aside, the stage renamed in, then the
+    aside copy deleted, so ``out`` is always a whole tree, old or new. When a concurrent call's tree lands
+    between the two renames, this call's tree replaces it (last writer wins). A failed delete of the aside copy
+    leaves a hidden ``.psse.old-*`` beside the new tree, never a half-deleted ``psse/``."""
+    for _ in range(SWAP_TRIES):
+        old = _aside(out.parent, "old")
+        try:
+            out.rename(old)
+        except FileNotFoundError:
+            old = None
+        try:
+            stage.rename(out)
+        except OSError:
+            if not out.exists():  # not a concurrent call: put the old tree back and say why
+                if old is not None:
+                    old.rename(out)
+                raise
+            _discard(old)
+            continue  # another call's tree landed in between: put it aside too
+        _discard(old)
+        return
+    raise ContractError(f"psse: {out} kept changing under concurrent calls; tried {SWAP_TRIES} times")
 
 
 #: P_ref of a normally open tie (``pcc.tie_normally_open``): its rating

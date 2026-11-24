@@ -14,6 +14,7 @@ without a solve. Oracles:
 
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 import yaml
@@ -121,15 +122,22 @@ def _digests(out):
     }
 
 
+def _psse_entries(run):
+    """``psse/`` and every hidden ``.psse*`` sibling in the run directory (GK A2 K5)."""
+    return sorted(
+        p.name
+        for p in run.iterdir()
+        if p.name.startswith((D.PSSE_DIR, f".{D.PSSE_DIR}"))
+    )
+
+
 def test_without_a_plant_or_model_set_every_file_matches_master(tmp_path):
     run = _run(tmp_path)
     D.psse_campus(run)
     assert (
         _digests(run / D.PSSE_DIR) == MASTER_SHA256
     )  # the whole set: no new file escapes
-    assert [
-        p.name for p in run.iterdir() if p.name.startswith(".")
-    ] == []  # no staging left behind
+    assert _psse_entries(run) == ["psse"]  # no staging left behind
 
 
 def test_every_island_hour_carries_the_plant_the_scripts_and_the_citation(tmp_path):
@@ -182,7 +190,7 @@ def test_a_model_set_of_another_campus_is_refused_before_anything_is_written(tmp
         r"this run's campus \(model hash [0-9a-f]{12}, the model set's",
     ):
         D.psse_campus(run, plant=PLANT, model_set=ms, variant="detailed")
-    assert not (run / D.PSSE_DIR).exists()
+    assert _psse_entries(run) == []
 
 
 def test_the_check_reads_the_variant_given_not_another(tmp_path):
@@ -195,7 +203,7 @@ def test_the_check_reads_the_variant_given_not_another(tmp_path):
         match=rf"{ms.model_set_id} aggregated does not describe this run's campus",
     ):
         D.psse_campus(_run(tmp_path / "b"), model_set=ms, variant="aggregated")
-    assert not (tmp_path / "b" / "run" / D.PSSE_DIR).exists()
+    assert _psse_entries(tmp_path / "b" / "run") == []
 
 
 def _model_set_with_aggregated(s):
@@ -222,7 +230,7 @@ def test_a_variant_not_frozen_is_refused_naming_the_model_set(tmp_path):
         ContractError, match=rf"model set {ms.model_set_id}: unknown variant 'both'"
     ):
         D.psse_campus(run, model_set=ms, variant="both")
-    assert not (run / D.PSSE_DIR).exists()
+    assert _psse_entries(run) == []
 
 
 @pytest.mark.parametrize("campus_yaml", [None, "campus: [unclosed\n", b"\xff\xfe\x00"])
@@ -243,7 +251,7 @@ def test_a_run_whose_campus_cannot_be_read_is_refused_naming_the_model_set(
         r"run's campus",
     ):
         D.psse_campus(run, model_set=ms, variant="detailed")
-    assert not (run / D.PSSE_DIR).exists()
+    assert _psse_entries(run) == []
 
 
 def test_a_model_set_without_its_variant_is_refused_by_the_pack_leaving_no_tree(
@@ -258,8 +266,7 @@ def test_a_model_set_without_its_variant_is_refused_by_the_pack_leaving_no_tree(
         ContractError, match="give the GC-01 model_set and its variant together"
     ):
         D.psse_campus(run, variant="detailed")
-    assert not (run / D.PSSE_DIR).exists()
-    assert [p.name for p in run.iterdir() if p.name.startswith(".")] == []
+    assert _psse_entries(run) == []
 
 
 def test_a_plant_that_is_not_a_converter_is_refused_by_the_pack_leaving_no_tree(
@@ -271,8 +278,7 @@ def test_a_plant_that_is_not_a_converter_is_refused_by_the_pack_leaving_no_tree(
         ContractError, match="plant unit 'GEN1' is not a grid-following converter"
     ):
         D.psse_campus(run, plant=Plant("GEN1", PocBranch("trafo", 0, 0)))
-    assert not (run / D.PSSE_DIR).exists()
-    assert [p.name for p in run.iterdir() if p.name.startswith(".")] == []
+    assert _psse_entries(run) == []
 
 
 def test_a_refusal_keeps_the_earlier_tree_and_a_new_call_replaces_it_whole(tmp_path):
@@ -284,6 +290,7 @@ def test_a_refusal_keeps_the_earlier_tree_and_a_new_call_replaces_it_whole(tmp_p
             run, hours=[(2030, 0), (2030, 7)]
         )  # hour 0 is written before hour 7 is refused
     assert _digests(run / D.PSSE_DIR) == before
+    assert _psse_entries(run) == ["psse"]
     D.psse_campus(run)
     assert (
         _digests(run / D.PSSE_DIR) == MASTER_SHA256
@@ -322,3 +329,145 @@ def test_a_run_of_the_aggregated_campus_cites_the_aggregated_variant(tmp_path):
         match=rf"{ms.model_set_id} detailed does not describe this run's campus",
     ):
         D.psse_campus(run, model_set=ms, variant="detailed")
+
+
+def test_no_hours_write_no_tree_and_leave_an_earlier_one_alone(tmp_path):
+    """As on master (GK A2 K4): an empty hour list writes nothing and replaces nothing."""
+    run = _run(tmp_path)
+    assert D.psse_campus(run, hours=[]) == []
+    assert _psse_entries(run) == []
+    D.psse_campus(run)
+    assert D.psse_campus(run, hours=[]) == []
+    assert _digests(run / D.PSSE_DIR) == MASTER_SHA256 and _psse_entries(run) == [
+        "psse"
+    ]
+
+
+def test_a_stale_stage_of_a_killed_call_is_neither_read_nor_cleared(tmp_path):
+    """
+    Each call stages in its own fresh ``.psse.partial-<hex>`` (GK A2 K3): a stage a killed process left is
+    never written into or read, and is not cleared either, since it may be a running call's.
+    """
+    run = _run(tmp_path)
+    for stale in (".psse.partial", ".psse.partial-dead", ".psse.old-dead"):
+        (run / stale / "TEST_HUB_p2030_h0").mkdir(parents=True)
+        (run / stale / "TEST_HUB_p2030_h0" / "junk.txt").write_text("stale")
+    D.psse_campus(run)
+    assert _digests(run / D.PSSE_DIR) == MASTER_SHA256
+    assert _psse_entries(run) == [
+        ".psse.old-dead",
+        ".psse.partial",
+        ".psse.partial-dead",
+        "psse",
+    ]
+    assert (
+        run / ".psse.partial-dead" / "TEST_HUB_p2030_h0" / "junk.txt"
+    ).read_text() == "stale"
+
+
+def test_a_call_interleaved_with_another_keeps_its_own_hours(tmp_path, monkeypatch):
+    """
+    Call B runs whole while call A is between its hours (GK A2 K1): B's tree is whole when B returns, A's
+    stage is untouched by B, and A's tree replaces B's when A returns (last writer wins).
+    """
+    from gridspine.handoff import campus_bundle as CB
+
+    run, real, seen = _run(tmp_path), CB.export_campus_bundle, {}
+
+    def export(outdir, *a, **kw):
+        b = real(outdir, *a, **kw)
+        if not seen:
+            seen["started"] = True  # B's own exports pass straight through
+            seen["b"] = D.psse_campus(run, hours=[(2030, 1)])
+            seen["b_tree"] = _digests(run / D.PSSE_DIR)
+            assert all(x.path.is_dir() for x in seen["b"])
+        return b
+
+    monkeypatch.setattr(CB, "export_campus_bundle", export)
+    a = D.psse_campus(run)
+    assert sorted(seen["b_tree"]) and all(
+        k.startswith("TEST_HUB_p2030_h1/") for k in seen["b_tree"]
+    )
+    assert all(x.path.is_dir() for x in a)
+    assert _digests(run / D.PSSE_DIR) == MASTER_SHA256 and _psse_entries(run) == [
+        "psse"
+    ]
+
+
+def test_the_old_tree_is_put_aside_before_the_new_one_lands(tmp_path, monkeypatch):
+    """A delete of the old tree that fails leaves the new tree whole and the old one hidden aside (GK A2 K2)."""
+    run = _run(tmp_path)
+    D.psse_campus(run, hours=[(2030, 1)])
+    real = D.shutil.rmtree
+
+    def rmtree(path, *a, **kw):
+        if Path(path).name.startswith(".psse.old-"):
+            raise OSError("cannot delete")
+        return real(path, *a, **kw)
+
+    monkeypatch.setattr(D.shutil, "rmtree", rmtree)
+    D.psse_campus(run)
+    assert _digests(run / D.PSSE_DIR) == MASTER_SHA256
+    (old,) = [p for p in run.iterdir() if p.name.startswith(".psse.old-")]
+    assert sorted(p.name for p in old.iterdir()) == ["TEST_HUB_p2030_h1"]
+    assert [p for p in _psse_entries(run) if p.startswith(".psse.partial")] == []
+
+
+def test_a_failed_swap_puts_the_old_tree_back(tmp_path, monkeypatch):
+    """When the stage cannot be renamed in, the earlier tree is restored and the error is raised."""
+    run = _run(tmp_path)
+    D.psse_campus(run, hours=[(2030, 1)])
+    before, real = _digests(run / D.PSSE_DIR), Path.rename
+
+    def rename(self, target):
+        if self.name.startswith(".psse.partial-"):
+            raise PermissionError("rename refused")
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename)
+    with pytest.raises(PermissionError, match="rename refused"):
+        D.psse_campus(run)
+    assert _digests(run / D.PSSE_DIR) == before and _psse_entries(run) == ["psse"]
+
+
+def test_a_tree_landing_between_the_renames_is_replaced_not_mixed(
+    tmp_path, monkeypatch
+):
+    """Another call's tree landing between this call's two renames is put aside in turn: last writer wins."""
+    run = _run(tmp_path)
+    D.psse_campus(run, hours=[(2030, 1)])
+    real, landed = Path.rename, []
+
+    def rename(self, target):
+        if self.name.startswith(".psse.partial-") and not landed:
+            landed.append(True)
+            (run / D.PSSE_DIR / "OTHER").mkdir(parents=True)
+            (run / D.PSSE_DIR / "OTHER" / "x.txt").write_text("other call")
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename)
+    D.psse_campus(run)
+    assert (
+        landed
+        and _digests(run / D.PSSE_DIR) == MASTER_SHA256
+        and _psse_entries(run) == ["psse"]
+    )
+
+
+def test_a_swap_that_never_settles_is_refused_leaving_no_stage(tmp_path, monkeypatch):
+    run = _run(tmp_path)
+    real = Path.rename
+
+    def rename(self, target):
+        if self.name.startswith(".psse.partial-"):
+            (run / D.PSSE_DIR / "OTHER").mkdir(parents=True, exist_ok=True)
+            (run / D.PSSE_DIR / "OTHER" / "x.txt").write_text("other call")
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename)
+    with pytest.raises(
+        ContractError,
+        match=rf"kept changing under concurrent calls; tried {D.SWAP_TRIES} times",
+    ):
+        D.psse_campus(run)
+    assert [p for p in _psse_entries(run) if p.startswith(".psse.partial")] == []
