@@ -91,13 +91,7 @@ def certify(seam, n, import_cap: float = IMPORT_CAP) -> dict:
         chat_tools._CHAT_SESSION.get(),
         {'id': f'lc06-d12z-{time.monotonic_ns()}', 'name': 'run_eh_study',
          'input': {'archetype': 'weak_flexible', 'stages': ['apply_pack', 'ens_solve', 'mc_certify'],
-                   # template-e2e 21: the pack's 3 h/yr goal is under what 200 draws resolve on
-                   # these 1095 h snapshots (5.47 h/yr), so the start check refuses it; these
-                   # tests read EUE and LOLE, not the verdict, so a goal above the floor keeps
-                   # the seeded draws they were computed at.
-                   'pack_overrides': {'ens_cap_permyriad': 10000, 'import_p_nom_mw': import_cap,
-                                      'target_lole_h': 10.0},
-                   'mc': {'seed': SEED, 'draws': DRAWS}}}, []))
+                   'pack_overrides': {'ens_cap_permyriad': 10000, 'import_p_nom_mw': import_cap}, 'mc': {'seed': SEED, 'draws': DRAWS}}}, []))
     assert not [d for e, d in frames if e == 'tool_error'], frames
     deadline = time.monotonic() + 300
     while time.monotonic() < deadline:

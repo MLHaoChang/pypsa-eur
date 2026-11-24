@@ -440,8 +440,8 @@ def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
         raise HTTPException(
             422, f"mc.draws must be at most {_mc.MAX_DRAWS} (the MC draw cap); "
             f"got {mc_opts.draws}")
-    # template-e2e 21: too few runs for the goal refuse here, before the run;
-    # readiness files the refusal on the runs field and blocks Run.
+    # template-e2e 21: a goal no draw count up to the cap resolves refuses here,
+    # before the run; readiness files it on the runs field and blocks Run.
     if stages is None or "mc_certify" in stages:
         short = draws_short_for(weight, pack, mc_opts.draws)
         if short is not None:

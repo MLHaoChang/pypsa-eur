@@ -433,39 +433,31 @@ def draws_short_of_target(n, pack, draws: int | None) -> str | None:
 
 
 def draws_short_for(weight: tuple[float, float] | None, pack,
-                    draws: int | None) -> str | None:
-    """The refusal text when ``draws`` (None: the pack's) cannot resolve the
-    pack's LOLE target on a network of ``weight`` (``resolution_weight``),
-    else None. The target goes on the horizon as ``_stage_mc_certify`` puts
-    it. No target, a zero target (no draw count resolves it; the verdict says
-    so) or a network without a positive weight or horizon is not refused.
+                    draws: int | None = None) -> str | None:
+    """The refusal text when no draw count up to the MC's cap (``MAX_DRAWS``)
+    can resolve the pack's LOLE target on a network of ``weight``
+    (``resolution_weight``), else None (owner decision on #1927: refuse at the
+    start only then). The target goes on the horizon as ``_stage_mc_certify``
+    puts it. ``draws`` is the requested count; it does not decide the
+    refusal: a run below the floor at that count still runs, as the MC may
+    draw on to the cap, and the verdict then names the floor and the fewest
+    draws. No target, a zero target (no draw count resolves it; the verdict
+    says so) or a network without a positive weight or horizon is not
+    refused."""
+    from services.adequacy.mc import MAX_DRAWS
 
-    The check takes the requested draws as the run's length, which holds for
-    a run that sees no shortfall (its first batch converges). Today's
-    behaviour (GK A, issue 42): ``mc_adequacy`` keeps drawing up to
-    ``MAX_DRAWS`` when a batch sees a rare shortfall, so such a run could
-    resolve or fail a goal this refuses; the text claims only the no-shortfall
-    case."""
     target = pack.availability.target_lole_h
     if weight is None or target is None or not float(target) > 0:
         return None
     w_min, years = weight
-    if draws is None:
-        draws = int(getattr(pack, "mc_draws", DEFAULT_MC_DRAWS))
     target_h = float(target) * years
-    if w_min / draws <= target_h:
+    if w_min / MAX_DRAWS <= target_h:
         return None
-    from services.adequacy.mc import MAX_DRAWS
-
-    need = min_draws_for_weight(w_min, target_h)
-    runs = "1 run" if draws == 1 else f"{draws} runs"
-    seen = (f"Simulation runs per check: at {runs}, a check that finds no "
-            f"shortfall still cannot show that the {float(target):g} h/yr goal "
-            f"is met (its smallest step is {w_min / draws / years:.3g} h/yr)")
-    if need <= MAX_DRAWS:
-        return f"{seen}: set at least {need}."
-    return (f"{seen}, and even {MAX_DRAWS} runs (the most allowed) could not "
-            "decide it: allow more shortfall in the goal.")
+    return (f"Simulation runs per check: a check that finds no shortfall "
+            f"cannot show that the {float(target):g} h/yr goal is met, and "
+            f"even {MAX_DRAWS} runs (the most allowed) could not decide it "
+            f"(its smallest step there is {w_min / MAX_DRAWS / years:.3g} "
+            "h/yr): allow more shortfall in the goal.")
 
 
 def certification_verdict(*, lole_ci, target_h: float | None,

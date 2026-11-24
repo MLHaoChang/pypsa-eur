@@ -301,26 +301,32 @@ def _goal_pack(target, draws=500):
             certification_metric="mc_lole" if target is not None else "none")})
 
 
-def test_runs_check_refuses_below_and_passes_at_the_minimum():
-    # 168 h of weight 1: 3 h/yr is 0.05753 h on the horizon; 1/18 ≤ it < 1/17.
+# Owner decision on #1927: the start refuses only a goal that no draw count up
+# to the 2000-draw cap resolves; fewer requested draws still run (the verdict
+# names the floor and the fewest draws afterwards).
+CAP_REFUSAL = ("Simulation runs per check: a check that finds no shortfall "
+               "cannot show that the 0.01 h/yr goal is met, and even 2000 runs "
+               "(the most allowed) could not decide it (its smallest step there "
+               "is 0.0261 h/yr): allow more shortfall in the goal.")
+
+
+def test_runs_check_refuses_only_past_the_draw_cap():
+    # 168 h of weight 1: one draw resolves 1 h on a 168/8760 yr horizon, so
+    # 2000 draws resolve 0.0261 h/yr. 3 h/yr needs 18 draws: never refused.
     n = _weighted_network()
-    msg = S.draws_short_of_target(n, _goal_pack(3.0), 17)
-    assert msg == ("Simulation runs per check: at 17 runs, a check that finds "
-                   "no shortfall still cannot show that the 3 h/yr goal is met "
-                   "(its smallest step is 3.07 h/yr): set at least 18.")
-    assert S.draws_short_of_target(n, _goal_pack(3.0), 18) is None
-    # Unset draws are the pack's own.
-    assert S.draws_short_of_target(n, _goal_pack(3.0, draws=17), None) == msg
-    assert S.draws_short_of_target(n, _goal_pack(3.0, draws=18), None) is None
+    for draws in (1, 17, 2000, None):
+        assert S.draws_short_of_target(n, _goal_pack(3.0), draws) is None
+        assert S.draws_short_of_target(n, _goal_pack(0.01), draws) == CAP_REFUSAL
+    assert S.draws_short_of_target(n, _goal_pack(0.01, draws=1), None) == CAP_REFUSAL
 
 
-def test_runs_check_at_the_exact_boundary_passes():
+def test_runs_check_at_the_exact_cap_boundary_passes():
     # Weight 2 h over 168 snapshots: horizon 336/8760 yr; a goal making
-    # target_h exactly 2/4 = 0.5 h resolves at 4 draws, not 3.
+    # target_h exactly 2/2000 = 0.001 h resolves at the cap, so it runs.
     n = _weighted_network(weight=2.0)
-    goal = 0.5 / (336 / 8760)
-    assert S.draws_short_of_target(n, _goal_pack(goal), 4) is None
-    assert "set at least 4." in S.draws_short_of_target(n, _goal_pack(goal), 3)
+    goal = 0.001 / (336 / 8760)
+    assert S.draws_short_of_target(n, _goal_pack(goal), 1) is None
+    assert S.draws_short_of_target(n, _goal_pack(goal * 0.999), 1) is not None
 
 
 @pytest.mark.parametrize("target", [None, 0.0])
@@ -337,7 +343,9 @@ def test_runs_check_ignores_zero_weight_snapshots():
     # A snapshot of weight 0 is never sampled into the floor (mc: w > 0).
     n = _weighted_network()
     n.snapshot_weightings.loc[n.snapshots[0], :] = 0.0
-    assert "set at least 18." in S.draws_short_of_target(n, _goal_pack(3.0 * 168 / 167), 1)
+    # A zero w_min would never refuse; the 1 h weight still does.
+    assert "allow more shortfall" in S.draws_short_of_target(n, _goal_pack(0.01), 1)
+    assert S.draws_short_of_target(n, _goal_pack(3.0), 1) is None
 
 
 def test_below_floor_note_counts_one_draw_and_many_draws():

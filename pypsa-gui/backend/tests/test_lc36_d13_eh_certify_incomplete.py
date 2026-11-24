@@ -22,7 +22,7 @@ certification is not built (`LC-D13.finalist_certification` is
 Verdict by hand (`certification_verdict`, eh_study.py): pass iff the CI's
 upper bound <= target x horizon_years, fail iff its lower bound > target,
 inconclusive otherwise; `certified` is the pass. Mutation: the target moves
-through the three bands: 10 h/yr fails, the hand COPT LOLE 1270.2 (inside the
+through the three bands: 3 h/yr fails, the hand COPT LOLE 1270.2 (inside the
 CI) is inconclusive, 8760 h/yr passes.
 
 Budget cut. ens_solve charges one solve, so redundancy gets
@@ -48,9 +48,6 @@ PEAKER_MC, SPARE_MC = 300.0, 180.0
 LOAD_MW, BASE_MW = 100.0, 60.0
 STAGES = ['apply_pack', 'ens_solve', 'redundancy', 'mc_certify']
 MC = {'draws': 200, 'seed': 7}
-# template-e2e 21: a goal 200 draws resolve on these 1095 h snapshots (step
-# 5.47 h/yr); the study start refuses 3 h/yr. Still far below the CI.
-FAIL_GOAL = 10.0
 
 
 def ens_plan_lole() -> float:
@@ -77,9 +74,9 @@ def test_the_certification_oracle_by_hand():
     assert certification_verdict(lole_ci=(1155.0, 1414.0), target_h=HOURS_PER_YEAR)[0] == 'pass'
 
 
-@pytest.mark.parametrize('target, verdict', [(FAIL_GOAL, 'fail'), (round(ens_plan_lole(), 1), 'inconclusive'),
+@pytest.mark.parametrize('target, verdict', [(3.0, 'fail'), (round(ens_plan_lole(), 1), 'inconclusive'),
                                              (HOURS_PER_YEAR, 'pass')],
-                         ids=['fail_10h', 'inconclusive_copt', 'pass_8760h'])
+                         ids=['fail_3h', 'inconclusive_copt', 'pass_8760h'])
 def test_certification_covers_the_ens_plan_and_the_finalist_is_disclosed_uncertified(seam, target, verdict):
     sections = certify(seam, target)
     cert = sections['certification']
@@ -112,7 +109,7 @@ def test_certification_covers_the_ens_plan_and_the_finalist_is_disclosed_uncerti
 
 @pytest.mark.parametrize('budget', [2, 10], ids=['budget_2', 'budget_10'])
 def test_a_redundancy_compare_cut_by_the_budget_selects_nothing(seam, budget):
-    certify(seam, FAIL_GOAL, budget_solves=budget)
+    certify(seam, 3.0, budget_solves=budget)
     table = chat_tools.get_adequacy_results('eh_redundancy')
     if budget == 2:
         assert table['solves_attempted'] == budget - 1
