@@ -136,9 +136,11 @@ export function missingRating(r: EquipmentScheduleRow): string {
   return flags.includes('not_rated') ? 'Not rated' : 'Not evaluated'
 }
 
-/** The rating as written: figure and unit, or the reason there is none. */
+/** The rating as written: figure and unit (switchgear with its rated peak), or the reason there is none. */
 export function ratingText(r: EquipmentScheduleRow): string {
-  return r.rating == null ? missingRating(r) : withUnit(r.rating, r.unit)
+  if (r.rating == null) return missingRating(r)
+  const peak = r.rated_peak_ka != null ? ` · peak ${fig(r.rated_peak_ka)} kA` : ''
+  return withUnit(r.rating, r.unit) + peak
 }
 
 /** The Declared cell: a declared figure, the rating itself for a declared asset, or why there is none. */

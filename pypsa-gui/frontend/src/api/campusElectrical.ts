@@ -1072,6 +1072,8 @@ export interface EquipmentScheduleRow {
   flag: string | null; library_id: string | null
   /** Library price of the chosen rating times the quantity; null when unpriced. */
   capex_eur: number | null
+  /** Switchgear only: the rated peak (ip) of the chosen rating, kA. */
+  rated_peak_ka?: number | null
 }
 export interface EquipmentScheduleAssumption {
   applies_to: string; name: string; label: string; value: unknown; unit: string; source: string

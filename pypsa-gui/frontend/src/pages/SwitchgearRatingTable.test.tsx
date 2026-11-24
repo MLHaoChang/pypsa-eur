@@ -34,7 +34,7 @@ describe('Short circuit › Switchgear rating chosen', () => {
     api.equipmentSchedule.mockResolvedValue({
       rows: [
         { ...sg({ kind: 'transformer', asset: 'TR1' }) },
-        sg({}),
+        sg({ rated_peak_ka: 78.75 }),
         sg({ asset: 'MV_BUS switchgear', location: 'MV_BUS (not evaluated)', rating: null, declared_rating: null,
              declared_unit: null, governing: 'no fault level was computed at this bus', flag: 'not_evaluated' }),
         sg({ asset: 'HV_BUS switchgear', location: 'HV_BUS (132 kV)', rating: null, declared_rating: null, declared_unit: null,
@@ -47,7 +47,7 @@ describe('Short circuit › Switchgear rating chosen', () => {
     const itBus = await screen.findByTestId('switchgear-IT_BUS')
     expect(screen.queryByTestId('switchgear-TR1')).toBeNull()
     expect(itBus.textContent).toContain('11')
-    expect(itBus.textContent).toContain('31.5 kA')
+    expect(itBus.textContent).toContain('31.5 kA · peak 78.75 kA')
     expect(itBus.textContent).toContain('Declared 25 kA is below the chosen 31.5 kA')
     const mv = screen.getByTestId('switchgear-MV_BUS')
     expect(mv.textContent).toContain('Not evaluated')

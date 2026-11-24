@@ -480,6 +480,8 @@ describe('CampusElectricalPanel', () => {
     const row = await screen.findByTestId('fault-IT_BUS-2030')
     expect(row.textContent).toContain('Not declared')
     expect(row.textContent).not.toContain('—')
+    // the Verdict says what follows from it, not "not rated" a second time
+    expect(row.querySelector('td:last-child')!.textContent).toBe('nothing to judge against')
     expect((await screen.findByTestId('switchgear-IT_BUS')).textContent).toContain('31.5 kA')
   })
 

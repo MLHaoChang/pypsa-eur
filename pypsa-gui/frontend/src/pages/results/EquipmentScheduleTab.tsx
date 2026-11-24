@@ -42,7 +42,7 @@ function ScheduleTable({ data }: { data: EquipmentSchedule }) {
   return (
     <>
       <ChipKey />
-      <ScheduleScroll rows={12} testId="schedule-scroll">
+      <ScheduleScroll rows={10} testId="schedule-scroll">
         <table className="w-full text-[11px]" data-testid="schedule-table">
           <thead>
             <tr>
@@ -141,8 +141,9 @@ export default function EquipmentScheduleTab() {
       </PageBody>
     )
   }
+  // pb-20: the floating Back pill never covers the capex total or the assumptions.
   return (
-    <PageBody>
+    <PageBody className="pb-20">
       {data.stale && (
         <p data-testid="schedule-stale" className="text-[12px] text-warn border border-warn/40 rounded px-3 py-2">
           The campus file, the network or the ratings library changed since this study ran. Run the DC Grid study

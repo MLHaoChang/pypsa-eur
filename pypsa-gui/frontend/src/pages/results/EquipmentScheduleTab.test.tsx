@@ -30,7 +30,7 @@ const SCHEDULE: EquipmentSchedule = {
     row({ kind: 'filter', kind_label: 'Harmonic filter', asset: 'harmonic filters', location: null, rating: null, unit: null,
           quantity: 0, governing: 'not sized yet: filter sizing is not part of this study', source: 'not sized',
           library_id: null, capex_eur: null }),
-    row({ declared_rating: 25, declared_unit: 'kA', flag: 'declared_below_chosen' }),
+    row({ declared_rating: 25, declared_unit: 'kA', flag: 'declared_below_chosen', rated_peak_ka: 78.75 }),
     row({ asset: 'MV_BUS switchgear', location: 'MV_BUS (not evaluated)', rating: null, quantity: 2,
           governing: 'no fault level was computed at this bus', flag: 'not_evaluated', library_id: null, capex_eur: null }),
     row({ kind: 'genset', kind_label: 'Genset', asset: 'G1', location: 'IT_BUS', rating: 2.5, unit: 'MVA', quantity: 1,
@@ -64,6 +64,7 @@ describe('Hand-off › Equipment schedule', () => {
     expect(warn.className).not.toContain('danger')
     // the declared value stays in its own column
     expect(screen.getByTestId('schedule-row-2').textContent).toContain('25 kA')
+    expect(screen.getByTestId('schedule-row-2').textContent).toContain('31.5 kA · peak 78.75 kA')
     expect(screen.getByTestId('schedule-row-1').textContent).toContain('Not sized yet')
     expect(screen.getByTestId('schedule-row-3').textContent).toContain('Not evaluated')
     expect(screen.getByTestId('schedule-row-3').textContent).toContain('Not declared')

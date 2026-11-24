@@ -834,7 +834,7 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
                   <td className="pr-3 tabular-nums">{num(f.ip_max_ka)} kA</td>
                   <td className="pr-3 tabular-nums">{num(f.ikss_min_ka)} kA</td>
                   <td className={`pr-3 ${f.rated_ka == null ? 'text-muted' : 'tabular-nums'}`}>{f.rated_ka == null ? 'Not declared' : `${num(f.rated_ka)} kA`}</td>
-                  <td>{f.adequate == null ? <Tag tone="neutral">not rated</Tag>
+                  <td>{f.adequate == null ? <Tag tone="neutral">nothing to judge against</Tag>
                     : <Tag tone={f.adequate ? 'ok' : 'err'}>{f.adequate ? 'within rating' : 'over rating'}</Tag>}</td>
                 </tr>
               ))}
