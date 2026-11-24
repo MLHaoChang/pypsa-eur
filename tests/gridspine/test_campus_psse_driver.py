@@ -231,3 +231,20 @@ def test_the_check_hashes_the_campus_yaml_as_stored(tmp_path):
     run, ms = _run(tmp_path), _model_set()
     assert yaml.safe_load((run / D.CAMPUS_YAML).read_text()) == campus_spec()
     assert D._cited_spec(run, ms, "detailed") == campus_spec()
+
+
+def test_a_run_of_the_aggregated_campus_cites_the_aggregated_variant(tmp_path):
+    """The variant given reaches every pack: a run whose campus is the aggregated spec cites that variant."""
+    s = campus_spec()
+    ms = _model_set_with_aggregated(s)
+    agg = ms.spec("aggregated")
+    run = write_run(tmp_path / "run", agg, selected=THREE)
+    bundles = D.psse_campus(run, model_set=ms, variant="aggregated")
+    assert [b.path.name for b in bundles] == ["TEST_HUB_EQ_p2030_h0", "TEST_HUB_EQ_p2030_h2"]
+    for b in bundles:
+        m = json.loads((b.path / SUBDIR / "manifest.json").read_text())
+        assert m["model_set"] == {"model_set_id": ms.model_set_id, "data_hash": ms.data_hash,
+                                  "variant": "aggregated", "model_hash": ms.model_hashes["aggregated"]}
+        assert ms.model_hashes["aggregated"] != ms.model_hashes["detailed"]
+    with pytest.raises(ContractError, match=rf"{ms.model_set_id} detailed does not describe this run's campus"):
+        D.psse_campus(run, model_set=ms, variant="detailed")
