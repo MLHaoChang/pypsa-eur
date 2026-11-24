@@ -112,12 +112,11 @@ def _cell(r, column: str, kind):
 
 
 def _uif_table(row: dict, frame, case: str, path: str) -> Table:
+    from gridspine.static.ssti_uif import ROLE_ISLAND
+
     rows = []
-    judged = (
-        frame[frame["role"].astype(str) == "converter bus"]
-        if frame is not None and "role" in frame
-        else None
-    )
+    role = frame["role"].astype(str) if frame is not None and "role" in frame else None
+    judged = frame[role == "converter bus"] if role is not None else None
     for _, r in judged.iterrows() if judged is not None else ():
         uif, threshold = _apart(r.get("uif"), r.get("threshold"))
         if case == "islanded":
@@ -139,13 +138,7 @@ def _uif_table(row: dict, frame, case: str, path: str) -> Table:
             ]
         )
     # GC-08b: the island cases' rows are printed, not judged, until the scorecard judges them (GC-08e)
-    from gridspine.static.ssti_uif import ROLE_ISLAND
-
-    island = (
-        frame[frame["role"].astype(str) == ROLE_ISLAND]
-        if frame is not None and "role" in frame
-        else None
-    )
+    island = frame[role == ROLE_ISLAND] if role is not None else None
     for _, r in island.iterrows() if island is not None else ():
         uif, threshold = _apart(r.get("uif"), r.get("threshold"))
         rows.append(
