@@ -31,6 +31,8 @@ TARGETS = (
     "tests/test_harness_run_stepwise_intake.py::test_pilot_stepwise_mode_reaches_the_hand_off_with_one_card_per_write_or_run",
     # Issue 33 (L7): eh_site@3 fetches the named site's map context from a fixture.
     "tests/test_harness_run_eh_site_v3_pilot.py::test_pilot_v3_fetches_the_named_site_offline_and_the_rule_passes",
+    # Study harness 35 (L7): eh_site@6 imports and attaches a cited URDB tariff from a fixture upload.
+    "tests/test_harness_run_eh_site_v6.py::test_pilot_v6_imports_and_attaches_the_cited_urdb_tariff_offline",
 )
 _BACKEND = pathlib.Path(__file__).resolve().parent.parent
 _LOCAL_NAMES = {"localhost", "localhost.localdomain", "ip6-localhost", ""}

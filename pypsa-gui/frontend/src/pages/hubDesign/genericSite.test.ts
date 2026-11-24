@@ -7,6 +7,7 @@ import formJson from './siteFormFixture.json'
 import {
   addStage, firstErrorField, initialDraft, isDefault, presetSummary, removeStage, requestBody,
   setEnergization, setField, setStage, validate, withSiteType, type SiteForm,
+  isFilledFromRate, resetStageToRate, setGrowth,
 } from './genericSite'
 
 const FORM = formJson as unknown as SiteForm
@@ -106,5 +107,81 @@ describe('generic site form logic', () => {
     expect(presetSummary(FORM.presets.hospital, x => String(x))).toBe(
       'Peak 4 → 5 → 6 MW, 8 MW connection, 3 diesel gensets of 2 MW, 0.3 MW solar PV, '
       + 'a UPS on the must-stay-on load.')
+  })
+})
+
+// homer-parity 04a2 (owner decision LOADGROWTH-FORM-1): "Grow from the first
+// stage at X % per year" fills the later stages' peaks; a typed peak wins.
+describe('grow from the first stage', () => {
+  const peaks = (d: ReturnType<typeof initialDraft>) => d.values.stages.map(s => s.peak_mw)
+  // industrial: 8 MW in 2027, stages in 2030 and 2035.
+  it('fills every later stage compounded from the first stage year (hand-checked)', () => {
+    const d = setGrowth(initialDraft(FORM, 'industrial'), 5)
+    expect(peaks(d)).toEqual([8, 9.26, 11.82])           // 8·1.05^3, 8·1.05^8
+    expect([0, 1, 2].map(i => isFilledFromRate(d, i))).toEqual([false, true, true])
+    expect(requestBody(d)).toEqual({ site_type: 'industrial', stages: d.values.stages })
+  })
+
+  it('the rate is a form helper only: it is never in the request body', () => {
+    const d = setGrowth(initialDraft(FORM, 'industrial'), 5)
+    expect(JSON.stringify(requestBody(d))).not.toMatch(/growth|rate/i)
+  })
+
+  it('a typed peak wins for its stage and the reset gives it back to the rate', () => {
+    let d = setGrowth(initialDraft(FORM, 'industrial'), 5)
+    d = setStage(d, 1, 'peak_mw', 10)
+    expect(peaks(d)).toEqual([8, 10, 11.82])
+    expect(isFilledFromRate(d, 1)).toBe(false)
+    d = setGrowth(d, 10)
+    expect(peaks(d)).toEqual([8, 10, 17.15])             // 8·1.1^8 = 17.148…
+    d = resetStageToRate(d, 1)
+    expect(peaks(d)).toEqual([8, 10.65, 17.15])          // 8·1.1^3 = 10.648
+    expect(isFilledFromRate(d, 1)).toBe(true)
+  })
+
+  it('a new first peak or a moved year refills the untyped stages', () => {
+    let d = setGrowth(initialDraft(FORM, 'industrial'), 5)
+    d = setStage(d, 0, 'peak_mw', 10)
+    expect(peaks(d)).toEqual([10, 11.58, 14.77])
+    d = setStage(d, 2, 'year', 2031)
+    expect(peaks(d)).toEqual([10, 11.58, 12.16])         // 10·1.05^4 = 12.155
+    expect(isFilledFromRate(d, 2)).toBe(true)            // a year is not a typed peak
+  })
+
+  it('an added stage is filled; a removed stage keeps the others typed or filled', () => {
+    let d = removeStage(initialDraft(FORM, 'industrial'), 2)
+    d = setGrowth(setStage(d, 1, 'peak_mw', 9), 5)
+    d = addStage(d, B)
+    expect(d.values.stages.map(s => s.year)).toEqual([2027, 2030, 2033])
+    expect(peaks(d)).toEqual([8, 9, 10.72])              // 8·1.05^6 = 10.720
+    d = removeStage(d, 1)
+    expect(isFilledFromRate(d, 1)).toBe(true)
+  })
+
+  it('clearing the rate leaves the filled peaks as ordinary values', () => {
+    let d = setGrowth(initialDraft(FORM, 'industrial'), 5)
+    d = setGrowth(d, null)
+    expect(peaks(d)).toEqual([8, 9.26, 11.82])
+    expect([1, 2].map(i => isFilledFromRate(d, i))).toEqual([false, false])
+    d = setStage(d, 0, 'peak_mw', 20)
+    expect(peaks(d)).toEqual([20, 9.26, 11.82])
+  })
+
+  it('a rate at or below -100 % or not a number is refused beside the field and fills nothing', () => {
+    for (const g of [-100, -150, NaN]) {
+      const d = setGrowth(initialDraft(FORM, 'industrial'), g)
+      expect(validate(d, B).growth_pct).toBe(
+        'Grow from the first stage: enter a number above -100 % per year.')
+      expect(peaks(d)).toEqual([8, 12, 15])
+    }
+    expect(validate(setGrowth(initialDraft(FORM, 'industrial'), -5), B).growth_pct).toBeUndefined()
+    // One stage hides the row, so its rate cannot block the form unseen.
+    const one = removeStage(removeStage(setGrowth(initialDraft(FORM, 'industrial'), NaN), 2), 1)
+    expect(validate(one, B).growth_pct).toBeUndefined()
+  })
+
+  it('a filled peak over the grid that year shows on that stage\'s peak field', () => {
+    const d = setGrowth(initialDraft(FORM, 'industrial'), 200)
+    expect(Object.keys(validate(d, B))).toContain('stages[2].peak_mw')
   })
 })

@@ -1377,6 +1377,10 @@ class PricesComparison(BaseModel):
     # default zero, not a measurement — see ADR-0001. True guarantees the
     # figures were computed from a solved network.
     available: bool = False
+    # Why `available` is False when a reason is known: "mip_duals_not_marginal"
+    # on an integer (MIP) solve, whose 0.0 bus prices are not prices
+    # (assistant-assurance 17).
+    unavailable_reason: str | None = None
     # Sampled duration curve. Index 0 = highest price (0th percentile), index
     # 100 = lowest. Empty for unsolved networks.
     duration_curve: list[float] = Field(default_factory=list)

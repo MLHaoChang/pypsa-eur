@@ -952,6 +952,8 @@ def _advance_run(path, ctx=None):
                     # intake order, with the envelope's args.
                     from services import run_envelope
                     planned = run_envelope.planned_steps(path, name)
+                    # Study harness 35: then the granted URDB tariff's import and attach.
+                    planned += run_envelope.urdb_steps(path, name, start=1 + len(planned))
                 steps = planned + run_profiles.materialise(profile, name, task["project_id"],
                                                            start=start + len(planned))
                 if any(run_eh.is_eh_step(s) for s in steps):

@@ -125,7 +125,9 @@ def _prices_digest() -> dict:
     drivers = chat_tools._payload_or_no_data(
         'price_drivers', chat_tools._resolve_results_handler('price_drivers')(),
         chat_tools._RESULTS_NO_DATA_MESSAGE)
-    return prices_digest.prices_digest(PyPSAService.get_network(), result_df=_result_df, price_drivers=drivers)
+    return prices_digest.prices_digest(
+        PyPSAService.get_network(), result_df=_result_df, price_drivers=drivers,
+        solver_state=PyPSAService.get_solver_state())
 
 
 def _digest_family(section: str, label: str, kinds: tuple[str, ...], build: Callable[[], dict],

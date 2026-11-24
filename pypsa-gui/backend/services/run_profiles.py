@@ -665,6 +665,27 @@ def _eh_site_v5() -> dict:
 
 EH_SITE_V5 = _eh_site_v5()
 
+# Study harness 35 (GK B (71) plan GO, Q1-Q3 (a), C1-C10): eh_site@6. The intake
+# may cite an uploaded URDB JSON (`run_intake._urdb_row`); the grant pins it in
+# a `urdb_upload` gap (the upload's sha256, every import arg, the tariff's
+# Library hash) and refuses it on a currency or year mismatch (`run_urdb.stamp`),
+# and the inputs stage imports and attaches it as the harness's own steps
+# (`run_envelope.urdb_steps`). The library_tariff gap stays for a run without
+# one. eh_site@1-@5 stay byte-equal (L8).
+URDB_GAP = {"tool": "attach_tariff",
+            "target": {"component": "Settings", "name": "Commercial", "attr": "import_tariff_ref"},
+            "source": {"kind": "urdb_upload"}}
+
+
+def _eh_site_v6() -> dict:
+    profile = copy.deepcopy(EH_SITE_V5)
+    profile["version"] = 6
+    profile["envelope"]["gaps"].append(copy.deepcopy(URDB_GAP))
+    return profile
+
+
+EH_SITE_V6 = _eh_site_v6()
+
 # Study harness 10a (GK B (36) D1-D8, Q1-Q5): eh_datacenter@1. The solve stage
 # runs the solve, the EH study (LOLE as eh_site@2, Q5), the campus run held to
 # the run's frozen grid-code profile and the scorecard read with it
@@ -1429,6 +1450,7 @@ GRID_ONLY = _grid_only()
 
 PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2, "eh_site@3": EH_SITE_V3,
                               "eh_site@4": EH_SITE_V4, "eh_site@5": EH_SITE_V5,
+                              "eh_site@6": EH_SITE_V6,
                               "eh_datacenter@1": EH_DATACENTER,
                               "eh_datacenter_staged@1": EH_DATACENTER_STAGED,
                               "eh_h2_hub@1": EH_H2_HUB, "eh_h2_hub_staged@1": EH_H2_HUB_STAGED,

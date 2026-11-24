@@ -366,7 +366,10 @@ def campus_compliance(bus, trafo, reactive, sizing, compensation, short_circuit,
     k = short_circuit["ikss_max_ka"].idxmax()
     failing = [f"{r.bus}: {r.detail}" for r in rated.itertuples(index=False) if not _true(r.adequate)]
     detail = "; ".join(failing) or (
-        f"no rating for {sorted(set(unrated['bus']))}" if len(unrated) else "every rated bus within its rating")
+        f"no rating for {sorted(set(unrated['bus']))}" if len(unrated)
+        else f"every rated bus within its rating (worst bus {short_circuit.at[k, 'bus']}: "
+             f"{float(short_circuit.at[k, 'rated_ka']):g} kA, source: "
+             f"{short_circuit.at[k, 'rating_source'] if 'rating_source' in short_circuit else 'not recorded'})")
     rows.append(_row("switchgear", status, status, float(short_circuit.at[k, "ikss_max_ka"]),
                      float(short_circuit.at[k, "rated_ka"]), "kA", (int(short_circuit.at[k, "period"]), None),
                      "equipment rating (IEC 62271-1 peak ratio, assumed)", "assumed", detail))
@@ -380,4 +383,23 @@ def campus_compliance(bus, trafo, reactive, sizing, compensation, short_circuit,
         for r in rows[-2:]:
             if r["clause"]:
                 r["clause"] += OPEN_TIE_CLAUSE
-    return pd.DataFrame(rows, columns=COLUMNS)
+    return no_pass_without_limit(pd.DataFrame(rows, columns=COLUMNS))
+
+
+#: What a row reads when it would pass without a limit to pass against.
+NO_LIMIT_NOT_CHECKED = "not checked: this row carries no limit to pass against"
+
+
+def no_pass_without_limit(frame: pd.DataFrame, limit="limit", lo="limit_min", hi="limit_max",
+                          status="status_as_is", detail="detail") -> pd.DataFrame:
+    """A row with no limit (no ``limit`` and no ``lo``/``hi`` band) never reads
+    ``pass``: it reads ``unknown`` and its detail says what is missing. The
+    column names pick the side (as is, or with measures)."""
+    bad = (frame[status] == "pass") & frame[limit].isna() & ~(frame[lo].notna() & frame[hi].notna())
+    if bad.any():
+        frame = frame.copy()
+        frame[detail] = frame[detail].astype(object)
+        frame.loc[bad, detail] = frame.loc[bad, detail].map(
+            lambda d: f"{NO_LIMIT_NOT_CHECKED}; {d}" if d else NO_LIMIT_NOT_CHECKED)
+        frame.loc[bad, status] = "unknown"
+    return frame

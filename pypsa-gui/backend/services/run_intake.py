@@ -78,6 +78,7 @@ _KIND_TEXT = {
     "turn_not_citable": "only text you typed in this chat can be cited",
     "not_in_enum": "it is not one of the choices",
     "source_not_accepted": "this kind of source cannot give it",
+    "urdb_unusable": "the upload gives no URDB tariff the run can import",
     "missing": "not given yet",
 }
 
@@ -539,6 +540,73 @@ def _write_row(c, host: Host):
     }, None
 
 
+_URDB_KEYS = {"write", "upload_id", "item_index", "accept_partial"}
+
+
+def _urdb_row(c, host: Host):
+    """Study harness 35: `({row}, None)` or `(None, gap)` for a URDB tariff
+    citation (`run_urdb`): the upload read through the owner's ACL, its bytes'
+    sha256 bound and the rate converted as the import would (nothing written).
+    Every import arg is fixed here (C2); accept_partial only from the citation."""
+    from services import run_urdb, upload_service
+
+    param = run_urdb.PARAM
+    index, partial = c.get("item_index"), c.get("accept_partial", False)
+    if (
+        set(c) - _URDB_KEYS
+        or not isinstance(c.get("upload_id"), str)
+        or not c["upload_id"]
+        or (
+            index is not None
+            and (isinstance(index, bool) or not isinstance(index, int))
+        )
+        or not isinstance(partial, bool)
+    ):
+        return None, _gap(
+            param,
+            "source_not_accepted",
+            "A URDB tariff names its upload, and optionally the rate's item_index.",
+        )
+    try:
+        meta = upload_service.get_upload_meta(
+            host.name, c["upload_id"], project_dir=host.dir
+        )
+        blob = upload_service.get_upload_bytes(
+            host.name, c["upload_id"], project_dir=host.dir
+        )
+    except HTTPException as exc:
+        return None, _reader_gap(param, exc)
+    sha = hashlib.sha256(blob).hexdigest()
+    args = run_urdb.pinned_args(c["upload_id"], sha, index, partial)
+    try:
+        planned = run_urdb.plan(blob, args)
+    except run_urdb.PlanError as exc:
+        return None, _gap(param, "urdb_unusable", str(exc))
+    tariff = planned["tariff"]
+    value = {
+        "name": args["name"],
+        "jurisdiction": tariff.jurisdiction,
+        "currency": tariff.currency,
+        "valid_from": str(tariff.valid_from),
+        "valid_to": str(tariff.valid_to) if tariff.valid_to else None,
+    }
+    source = {
+        "kind": "json",
+        "upload_id": c["upload_id"],
+        "filename": meta.filename,
+        "sha256": sha,
+        "item_index": index,
+    }
+    return {
+        "param": param,
+        "write": run_urdb.TOOL,
+        "args": args,
+        "value": value,
+        "unit": "",
+        "source": source,
+    }, None
+
+
 def _source_kind(c) -> str | None:
     if "turn_id" in c:
         return "text"
@@ -571,7 +639,9 @@ def read(citations: list, fields: dict, host: Host) -> dict:
                 "A citation names where a value is, never the value.",
             )
         if "write" in c:
-            row, gap = _write_row(c, host)
+            row, gap = (
+                _urdb_row if c.get("write") == "import_urdb_tariff" else _write_row
+            )(c, host)
             if gap:
                 gaps.append(gap)
             else:
@@ -919,6 +989,8 @@ def describe_source(row) -> str:
         text = f"{s['filename']} {s['sheet']}!{s['cell']}"
     elif s["kind"] == "card":
         text = "you entered it on the card"
+    elif s["kind"] == "json":
+        text = f"{s['filename']} (URDB rate)"
     else:
         text = f"you wrote '{quote}'"
     return f"mapped by the assistant from: '{quote}'" if row.get("mapped") else text
@@ -1091,6 +1163,21 @@ def take(request, profile: dict, ctx, owner_id: str, project_id: str) -> dict:
         request.get("citations") or [], profile["params"].get("fields", {}), host
     )
     rows, gaps = out["rows"], list(out["gaps"])
+    if not any(
+        g["source"]["kind"] == "urdb_upload"
+        for g in profile.get("envelope", {}).get("gaps", [])
+    ):
+        # Study harness 35: only a profile with a URDB gap takes a URDB tariff (eh_site@6 on).
+        gaps += [
+            _gap(
+                r["param"],
+                "source_not_accepted",
+                "This run's profile takes no URDB tariff.",
+            )
+            for r in rows
+            if r.get("write") == "import_urdb_tariff"
+        ]
+        rows = [r for r in rows if r.get("write") != "import_urdb_tariff"]
     refused = check(rows, eh_site.site_params)
     if refused is not None:
         gaps.append(refused)
