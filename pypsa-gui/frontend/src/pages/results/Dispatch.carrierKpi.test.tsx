@@ -130,3 +130,41 @@ describe('CarrierKpiPanel — result states', () => {
     expect(screen.queryByTestId('not-recorded-note')).toBeNull()
   })
 })
+
+// An integer (MIP) solve: revenue and storage charge cost are null on every
+// carrier, and so are opex + LCOE of a carrier holding a charge cost.
+describe('CarrierKpiPanel — integer solve withholds price-based economics', () => {
+  const WITHHELD = 'Not available (integer solve)'
+  const mipEcon = (dispatchGwh: number, holdsCharge: boolean) => ({
+    ...econ(dispatchGwh),
+    revenue_meur: null, storage_charge_cost_meur: null,
+    ...(holdsCharge ? { opex_meur: null, lcoe_eur_per_mwh: null } : {}),
+  })
+  const withStorage: Partial<Props> = {
+    group: { gens: new Set(['Gas']), loads: new Set(), storage: new Set(['Bat']), stores: new Set(), busNames: new Set(['B']) },
+    storPowerTS: ts(['Bat'], [2]),
+    storageUnits: [battery],
+    econWithheld: 'mip_duals_not_marginal',
+    // A priced carrier (gas: opex kept) beside a withheld one (battery).
+    econByCarrier: { gas: mipEcon(0.01, false), battery: mipEcon(0.002, true) },
+  }
+
+  it('withholds the OPEX total, storage charge cost and LCOE rather than summing the priced part', () => {
+    renderPanel(withStorage)
+    for (const label of ['OPEX (total)', 'Storage charge cost', 'LCOE']) {
+      const t = tile(label)
+      expect(t.textContent, label).toContain(WITHHELD)
+      expect(t.querySelector('[data-kpi-value]'), label).toBeNull()
+      expect(t.textContent, label).not.toContain('NaN')
+    }
+    // Gen cost is not price-based: it stays a figure.
+    expect(tile('Gen cost').querySelector('[data-kpi-value]')).not.toBeNull()
+  })
+
+  it('keeps OPEX and LCOE for a carrier with no charge cost', () => {
+    renderPanel({ econWithheld: 'mip_duals_not_marginal', econByCarrier: { gas: mipEcon(0.01, false) } })
+    expect(tile('OPEX (total)').querySelector('[data-kpi-value]')).not.toBeNull()
+    expect(tile('LCOE').querySelector('[data-kpi-value]')).not.toBeNull()
+    expect(screen.queryByText(WITHHELD)).toBeNull()
+  })
+})

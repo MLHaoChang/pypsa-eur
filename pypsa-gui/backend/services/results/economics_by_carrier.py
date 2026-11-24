@@ -17,7 +17,7 @@ from services.compare.economics import _compute_economics_summary
 logger = logging.getLogger("pypsa_gui.results")
 
 
-def compute_economics_by_carrier(n, cfg, lost_load_cap, *, result_df):
+def compute_economics_by_carrier(n, cfg, lost_load_cap, *, result_df, price_limit: str | None = None):
     """
     Return ``{"by_carrier": {carrier: {...}}}``, or an ``{"error"}`` dict if the
     roll-up raises — the same graceful degradation the endpoint has always had.
@@ -39,6 +39,7 @@ def compute_economics_by_carrier(n, cfg, lost_load_cap, *, result_df):
         result = _compute_economics_summary(
             n, periods, is_multi, True,
             lost_load_cap=lost_load_cap, cfg=cfg, result_df=result_df,
+            price_limit=price_limit,
         )
         # Return just the by_carrier dict — that's what the Results tab needs.
         # Drop per_asset_lcoh (lives in /api/results/lcoh) to keep the payload small.
@@ -48,10 +49,15 @@ def compute_economics_by_carrier(n, cfg, lost_load_cap, *, result_df):
         # never resolved, which is the exact conflation ADR-0001 forbids.
         # Still drops per_asset_lcoh (lives in /api/results/lcoh) to keep the
         # payload small.
-        return {
+        out = {
             "available": bool(result.available),
             "by_carrier": {k: v.model_dump() for k, v in result.by_carrier.items()},
         }
+        # assistant-assurance 17: on an integer (MIP) solve the figures priced at the
+        # bus duals are None and this names why; an LP's payload is as before.
+        if result.unavailable_reason:
+            out["unavailable_reason"] = result.unavailable_reason
+        return out
     except Exception:
         # The graceful degradation is deliberate — one bad carrier must not
         # blank the Results tab — but it used to degrade into
