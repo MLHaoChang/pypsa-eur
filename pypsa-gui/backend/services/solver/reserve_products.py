@@ -435,6 +435,15 @@ def plan(
                     "uses all of them, attested storage included"
                 ),
             )
+        if p.capacity_price is None:
+            raise ReserveRefusal(
+                PRICE_MISSING,
+                (
+                    f"Reserve product \u201c{p.id}\u201d has no capacity price series: upload "
+                    "its price to the Library and pick it (reserve prices come from your "
+                    "own upload only); it is never priced at 0"
+                ),
+            )
         price, flags = bound_price(n, p)
         if price is None:
             kind = (

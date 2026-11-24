@@ -1,0 +1,13 @@
+{
+ "id": "no-1-legacy",
+ "region": "NO-1",
+ "currency": "EUR",
+ "valid_year": 2026,
+ "pack_hash": "pppppppppppppppp",
+ "price_series": {"day_ahead": {"id": "series-da", "version": 1, "hash": "hash-da-0000", "source": "user"}},
+ "products": [
+  {"name": "aFRR", "capacity_price": {"id": "s", "version": 1, "hash": "hhhhhhhh", "source": "user"}, "min_bid_mw": 1.0},
+  {"name": "FCR", "activation_price": null},
+  {"id": "fast_symmetric", "kind": "fast_symmetric", "direction": "symmetric", "sustain_h": 1.0, "capacity_price": null}
+ ]
+}
