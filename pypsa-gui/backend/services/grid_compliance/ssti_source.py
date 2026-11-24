@@ -42,7 +42,9 @@ ISLANDED = "not evaluated (islanded)"
 NOT_EVALUATED = "not evaluated"
 UNFED_NOTE = "No synchronous machine feeds this bus with the grid out"
 #: The caption's last line for an islanded project whose run screened the island: why no grid row prints.
-GRID_ROWS_LEFT_OUT = "Grid-connected rows are left out: the project has no grid connection."
+GRID_ROWS_LEFT_OUT = (
+    "Grid-connected rows are left out: the project has no grid connection."
+)
 NON_FINITE = "—"
 UNREADABLE_NOTE = "an unreadable note"
 
@@ -122,7 +124,7 @@ def _cell(r, column: str, kind):
 def _case(text: str) -> str:
     """A UIF row's case as the pack prints it: the engine's island cases ("island max") read "islanded max",
     the word the scorecard note uses (UX 29)."""
-    return f"islanded {text[len('island '):]}" if text.startswith("island ") else text
+    return f"islanded {text[len('island ') :]}" if text.startswith("island ") else text
 
 
 def _uif_table(row: dict, frame, case: str, path: str) -> Table:

@@ -547,12 +547,16 @@ def test_closed_tie_with_island_requirements_flags_islanded_alone():
     campus = build_campus(spec)
     campus.island["requirements"] = {"values": {}, "sources": {}}
     study = su.campus_uif(campus, 1.0)
-    grid = study.rows[study.rows["case"].isin(su.CASES)].set_index(["bus", "case", "machine"])
+    grid = study.rows[study.rows["case"].isin(su.CASES)].set_index(
+        ["bus", "case", "machine"]
+    )
     assert sorted(grid.index) == sorted(MASTER_ONE)
     for key, value in MASTER_ONE.items():
         assert _close(grid.at[key, "uif"], value), key
     assert study.verdict == "clear"
-    assert _close(study.worst_uif, max(v for (b, _, _), v in MASTER_ONE.items() if b != "PCC"))
+    assert _close(
+        study.worst_uif, max(v for (b, _, _), v in MASTER_ONE.items() if b != "PCC")
+    )
     island = study.rows[study.rows["role"] == su.ROLE_ISLAND].set_index(["bus", "case"])
     for label in ISLAND:
         assert _close(island.at[("MV2", label), "uif"], 8.265306122448980)
