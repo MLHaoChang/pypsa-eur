@@ -17,7 +17,8 @@ export type ChapterId = Exclude<ResultsGroup, 'summary'>
 
 /** Where a tile's detail is: a Results tab, the campus panel, or a Guided step. */
 export type ChapterOpen =
-  | { panel: 'results'; tab: ResultsTab }
+  /** `report`: land on the Expert reference-design report, not only the tab. */
+  | { panel: 'results'; tab: ResultsTab; report?: boolean }
   | { panel: 'campusStudy' | 'campusResults' }
   | { step: 'goal' }
 
@@ -151,8 +152,8 @@ function gridPlan({ campus, notHub }: ChapterInputs['grid']): Omit<ChapterTile, 
 function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 'group'> {
   const label = 'Expected shortfall'
   if (r.noVerdict) {
-    return { label, value: '', state: 'not_modelled', reason: 'No reliability verdict for this site type.',
-      open: { panel: 'results', tab: 'adequacy' } }
+    // The Verdict line above says it; the tile keeps its pill and a way to the report.
+    return { label, value: '', state: 'not_modelled', open: { panel: 'results', tab: 'adequacy', report: true } }
   }
   if (r.running) {
     return { label, value: '', state: 'running', reason: 'The reliability study is running.',

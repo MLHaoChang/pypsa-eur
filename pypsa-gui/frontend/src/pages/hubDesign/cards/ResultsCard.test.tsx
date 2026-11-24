@@ -534,6 +534,7 @@ describe('no reliability verdict for this site type (template-e2e 11)', () => {
     mount()
     await screen.findByTestId('hub-results-verdict')
     expect(screen.queryByTestId('hub-results-no-verdict')).toBeNull()
+    expect(screen.getAllByText('Why this number')).toHaveLength(3)
   })
 })
 
@@ -543,5 +544,9 @@ describe('no-verdict template: the shortfall tile agrees with the note (template
     mount()
     await screen.findByTestId('hub-results-no-verdict')
     expect(screen.queryByText(/Set an allowed shortfall in Goal/)).toBeNull()
+    // One sentence, said once (the Verdict line); no figure, so no "Why this number".
+    expect(screen.getAllByText(/No reliability verdict for this site type/)).toHaveLength(1)
+    // Only the cost tile keeps its "Why this number"; the shortfall tile has no figure.
+    expect(screen.getAllByText('Why this number')).toHaveLength(1)
   })
 })
