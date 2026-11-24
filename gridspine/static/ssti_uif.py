@@ -239,9 +239,7 @@ def _s_mva(levels: pd.DataFrame, bus: str, case: str) -> float:
 def islands(campus) -> bool:
     """Whether the campus operates islanded: its PCC tie is normally open, or it declares island
     requirements."""
-    return bool(getattr(campus, "tie_normally_open", False)) or bool(
-        (getattr(campus, "island", None) or {}).get("requirements")
-    )
+    return bool(campus.tie_normally_open) or campus.island.get("requirements") is not None
 
 
 def campus_uif(

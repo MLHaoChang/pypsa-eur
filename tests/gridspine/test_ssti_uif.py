@@ -384,3 +384,13 @@ def test_island_case_only_when_the_campus_islands():
     assert set(study.rows["case"]) == {"max", "min", "island max", "island min"}
     island = study.rows[study.rows["case"].str.startswith("island")]
     assert set(island["role"]) == {su.ROLE_CONVERTER} and set(island["bus"]) == {"MV1", "MV2"}
+
+
+def test_islands_on_an_open_tie_or_declared_island_requirements():
+    campus = build_campus(campus_spec())
+    assert not su.islands(campus)  # a closed tie, no island data: grid cases only
+    campus.island["requirements"] = {"values": {}, "sources": {}}  # declared island operation
+    assert su.islands(campus)
+    spec = campus_spec()
+    spec["campus"]["pcc"].update(tie_normally_open=True, p_connection_mw=t(20.0))
+    assert su.islands(build_campus(spec))
