@@ -109,3 +109,93 @@ def test_a_value_edit_marks_the_investment_case_out_of_date(
     rep = client.get(STUDY_URL).json()["report"]
     assert rep["stale"] is True and rep["changed"] == ["dispatch"]
     assert rep["verdict"]["state"] == "stale"
+
+
+# ── Edits the keep-the-run rule must not reach ───────────────────────────────
+
+
+def _solved_site(client, site, name):  # noqa: F811
+    project = site(_all_components_network(), name=name)
+    assert client.post("/api/simulation/run").status_code == 200
+    assert _wait_idle(client)["status"] == "completed"
+    assert _kinds(_flow(client, project))["optimisation"] == "fresh"
+    return project
+
+
+def test_a_bus_edit_still_clears_the_run(client, site):  # noqa: F811
+    """Only the six value-edit routes keep the run; any other route clears it as before."""
+    project = _solved_site(client, site, "pg13_bus")
+    row = next(r for r in client.get("/api/network/buses").json() if r["name"] == "a")
+    r = client.put("/api/network/buses/a", json={**row, "v_nom": 400.0})
+    assert r.status_code == 200, r.text
+    assert _kinds(_flow(client, project))["optimisation"] == "not_run"
+
+
+def test_a_bulk_edit_of_another_class_still_clears_the_run(client, site):  # noqa: F811
+    project = _solved_site(client, site, "pg13_bulk_bus")
+    r = client.patch(
+        "/api/network/_bulk",
+        json={"component_class": "Bus", "names": ["a"], "updates": {"v_nom": 400.0}},
+    )
+    assert r.status_code == 200, r.text
+    assert _kinds(_flow(client, project))["optimisation"] == "not_run"
+
+
+def test_deleting_a_component_still_clears_the_run(client, site):  # noqa: F811
+    """A write other than PUT on a value-edit route (here DELETE) changes the dispatch shape."""
+    project = _solved_site(client, site, "pg13_delete")
+    r = client.delete("/api/network/loads/lc")
+    assert r.status_code in (200, 204), r.text
+    assert _kinds(_flow(client, project))["optimisation"] == "not_run"
+
+
+# ── The investment-case verdict merge ────────────────────────────────────────
+
+
+def _stale_run(monkeypatch, *, dispatch="fresh", state="stale"):
+    from types import SimpleNamespace
+
+    from services.provenance_graph import runs
+
+    monkeypatch.setattr(
+        runs, "read", lambda cached=True: SimpleNamespace(dispatch=dispatch)
+    )
+    monkeypatch.setattr(
+        runs,
+        "results_verdicts",
+        lambda read: {"optimisation": SimpleNamespace(state=state)},
+    )
+
+
+def test_a_stale_run_keeps_the_other_verdict_fields(monkeypatch):
+    from routers.results import _ic_report_after_stale_run
+
+    _stale_run(monkeypatch)
+    report = {
+        "present": True,
+        "stale": False,
+        "verdict": {"state": "fresh", "broken": ["x"]},
+    }
+    out = _ic_report_after_stale_run(report)
+    assert out["stale"] is True and out["changed"] == ["dispatch"]
+    assert out["verdict"] == {"state": "stale", "broken": ["x"]}
+    # A report with no verdict gets one.
+    out = _ic_report_after_stale_run({"present": True, "stale": False})
+    assert out["verdict"] == {"state": "stale"}
+
+
+@pytest.mark.parametrize(
+    "report,run",
+    [
+        ({"present": False, "stale": False}, {}),
+        ({"present": True, "stale": True}, {}),
+        ({"present": True, "stale": False}, {"state": "fresh"}),
+        ({"present": True, "stale": False}, {"dispatch": "none"}),
+    ],
+    ids=["no-report", "already-stale", "run-fresh", "no-dispatch"],
+)
+def test_the_report_is_left_alone_unless_the_run_is_stale(monkeypatch, report, run):
+    from routers.results import _ic_report_after_stale_run
+
+    _stale_run(monkeypatch, **run)
+    assert _ic_report_after_stale_run(report) == report
