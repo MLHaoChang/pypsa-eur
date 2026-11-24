@@ -796,3 +796,24 @@ def test_every_kind_and_assumption_has_words():
         for a in assumptions_table(SwitchgearAssumptions(), CableAssumptions())
     }
     assert names | {"design_cases", "margin", "bays"} <= set(es.ASSUMPTION_LABELS)
+
+
+def test_a_partly_evaluated_bus_names_its_skipped_period_and_keeps_both_flags(tmp_path):
+    run = _run(tmp_path, rated=False)
+    sc = pd.read_csv(run / cs.SHORT_CIRCUIT_CSV)
+    extra = sc[sc.bus == "MV1"].assign(period=2050, ikss_max_ka=math.nan)
+    pd.concat([sc, extra]).to_csv(run / cs.SHORT_CIRCUIT_CSV, index=False)
+    cs.rate_campus(run, criteria=SizingCriteria(margin=0.2))
+    mv1 = next(r for r in es.build(run)["rows"] if r["asset"] == "MV1 switchgear")
+    assert mv1["flag"] == "declared_below_chosen; partly_evaluated"
+    assert es.flags_of(mv1["flag"]) == ["declared_below_chosen", "partly_evaluated"]
+    assert mv1["governing"].endswith("; no fault level in period 2050")
+    assert mv1["rating"] == 31.5
+
+
+def test_flags_of():
+    assert es.flags_of(None) == [] and es.flags_of("a") == ["a"]
+    assert es.flags_of("beyond_ladder; partly_evaluated") == [
+        "beyond_ladder",
+        "partly_evaluated",
+    ]

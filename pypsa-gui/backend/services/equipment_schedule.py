@@ -165,11 +165,16 @@ _BEYOND = re.compile(
 )
 
 
+def flags_of(flag) -> list:
+    """The flags of a row: the engine joins several with "; "."""
+    return [f for f in (_text(flag) or "").split("; ") if f]
+
+
 def _switchgear_text(governing, flag) -> str:
     text = _text(governing)
     if text is None:
         return NOT_EVALUATED
-    m = _BEYOND.match(text) if flag == "beyond_ladder" else None
+    m = _BEYOND.match(text) if "beyond_ladder" in flags_of(flag) else None
     if m is None:
         return _plain(text)
     largest = (
@@ -356,7 +361,7 @@ def _bays(spec: dict) -> dict:
 def _switchgear(run: Path, spec: dict) -> list:
     sg = _read(
         run / cs.SWITCHGEAR_RATING_CSV,
-        ("bus", "chosen_id", "governing", "flag"),
+        ("bus", "chosen_id", "governing", "flag", "skipped_periods"),
         ("vn_kv", "chosen_ka", "capex_eur", "tk_s", "tkr_s", "declared_ka"),
     )
     bays = _bays(spec)
@@ -373,10 +378,17 @@ def _switchgear(run: Path, spec: dict) -> list:
                 rating=rated,
                 unit="kA",
                 quantity=n,
-                governing=f"{_plain(r.governing)}; fault duration {_fmt(r.tk_s, 'g', ' s')}, "
-                f"rated duration {_fmt(r.tkr_s, 'g', ' s')}"
-                if rated is not None
-                else _switchgear_text(r.governing, _text(r.flag)),
+                governing=(
+                    f"{_plain(r.governing)}; fault duration {_fmt(r.tk_s, 'g', ' s')}, "
+                    f"rated duration {_fmt(r.tkr_s, 'g', ' s')}"
+                    if rated is not None
+                    else _switchgear_text(r.governing, _text(r.flag))
+                )
+                + (
+                    f"; no fault level in period {_text(r.skipped_periods)}"
+                    if _text(r.skipped_periods) and _text(r.flag) != "not_evaluated"
+                    else ""
+                ),
                 source="computed",
                 declared_rating=_num(r.declared_ka),
                 declared_unit="kA" if _num(r.declared_ka) is not None else None,
