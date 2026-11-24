@@ -26,6 +26,7 @@ same design, instead of drawing a flat line (``degenerate``).
 The front never writes to the network it was given, nor to any fingerprint
 or investment-case digest: it returns a plain dict.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -67,6 +68,7 @@ class FrontConfigError(ValueError):
 # --------------------------------------------------------------------------
 # Lever choice
 # --------------------------------------------------------------------------
+
 
 def _outage_series(series, has_outage_data: bool) -> bool:
     """A two-state availability series: reaches 0 and every other value is
@@ -115,20 +117,24 @@ def choose_lever(n, requested: str | None) -> tuple[str, str]:
     if requested not in (None, "auto"):
         if requested not in LEVERS:
             raise FrontConfigError(
-                f"unknown reliability lever {requested!r}; use one of {', '.join(LEVERS)}")
+                f"unknown reliability lever {requested!r}; use one of {', '.join(LEVERS)}"
+            )
         return requested, "chosen by the user"
     if lp_has_outage_model(n):
-        return "ens_cap", ("the dispatch model has outage series, so an energy "
-                           "(ENS) cap can bind")
+        return "ens_cap", (
+            "the dispatch model has outage series, so an energy (ENS) cap can bind"
+        )
     return "reserve_margin", (
         "the dispatch model has no outages, so an energy (ENS) cap cannot bind; "
         "the reserve margin changes the firm fleet, which the sampled-outage "
-        "LOLE measures")
+        "LOLE measures"
+    )
 
 
 # --------------------------------------------------------------------------
 # Grid and budget
 # --------------------------------------------------------------------------
+
 
 def _clean_levels(lever: str, levels) -> list[float]:
     out: list[float] = []
@@ -140,7 +146,8 @@ def _clean_levels(lever: str, levels) -> list[float]:
         if not math.isfinite(f) or f <= 0:
             raise FrontConfigError(
                 f"reliability level {v!r} must be a positive number "
-                f"({'‱ of demand' if lever == 'ens_cap' else 'margin fraction'})")
+                f"({'‱ of demand' if lever == 'ens_cap' else 'margin fraction'})"
+            )
         out.append(f)
     if not out:
         raise FrontConfigError("the front needs at least one reliability level")
@@ -180,7 +187,8 @@ def check_budget(levels: list, caps: list, budget: int) -> int:
         extra = "" if None in caps else " + 1 uncapped reference"
         raise FrontBudgetError(
             f"{len(levels)} × {len(caps)} points{extra} = {need} solves exceed "
-            f"the {budget}-solve budget; drop levels or caps")
+            f"the {budget}-solve budget; drop levels or caps"
+        )
     return need
 
 
@@ -188,8 +196,10 @@ def check_budget(levels: list, caps: list, budget: int) -> int:
 # One point
 # --------------------------------------------------------------------------
 
+
 def _periods(n):
     import pandas as pd
+
     if isinstance(n.snapshots, pd.MultiIndex):
         return [p for p in n.snapshots.unique("period")]
     return [None]
@@ -213,15 +223,28 @@ def apply_co2_cap(n, cap_t_per_yr: float | None) -> list[str]:
         if p is None:
             name = CO2_CAP_NAME
             years = horizon_years(n)
-            n.add("GlobalConstraint", name, type="primary_energy",
-                  carrier_attribute="co2_emissions", sense="<=",
-                  constant=cap_t_per_yr * years)
+            n.add(
+                "GlobalConstraint",
+                name,
+                type="primary_energy",
+                carrier_attribute="co2_emissions",
+                sense="<=",
+                constant=cap_t_per_yr * years,
+            )
         else:
             name = f"{CO2_CAP_NAME}_{p}"
-            years = horizon_years(n, sns=n.snapshots[n.snapshots.get_level_values(0) == p])
-            n.add("GlobalConstraint", name, type="primary_energy",
-                  carrier_attribute="co2_emissions", sense="<=",
-                  constant=cap_t_per_yr * years, investment_period=p)
+            years = horizon_years(
+                n, sns=n.snapshots[n.snapshots.get_level_values(0) == p]
+            )
+            n.add(
+                "GlobalConstraint",
+                name,
+                type="primary_energy",
+                carrier_attribute="co2_emissions",
+                sense="<=",
+                constant=cap_t_per_yr * years,
+                investment_period=p,
+            )
         names.append(name)
     return names
 
@@ -229,8 +252,13 @@ def apply_co2_cap(n, cap_t_per_yr: float | None) -> list[str]:
 def _capacities(n) -> dict[str, float]:
     """Built capacity of every extendable asset, MW (MWh for Stores)."""
     out: dict[str, float] = {}
-    for comp, nom in (("generators", "p_nom"), ("storage_units", "p_nom"),
-                      ("links", "p_nom"), ("stores", "e_nom"), ("lines", "s_nom")):
+    for comp, nom in (
+        ("generators", "p_nom"),
+        ("storage_units", "p_nom"),
+        ("links", "p_nom"),
+        ("stores", "e_nom"),
+        ("lines", "s_nom"),
+    ):
         df = getattr(n, comp, None)
         if df is None or df.empty or f"{nom}_extendable" not in df.columns:
             continue
@@ -253,6 +281,7 @@ def _objective_years(n) -> float:
     an objective total by this gives an equivalent annual cost; on one
     period it is the modelled share of a year."""
     import pandas as pd
+
     sw = n.snapshot_weightings.objective
     if isinstance(n.snapshots, pd.MultiIndex):
         per = sw.groupby(level=0).sum() / 8760.0
@@ -279,8 +308,7 @@ def _lp_capex_share(n) -> float | None:
             vf = m.variables[name].flat
             labels = vf["labels"].astype(int).tolist()
             sol.update(zip(labels, vf["solution"].astype(float).tolist()))
-            if (name.split("-", 1)[-1] in _CAPACITY_VARS
-                    or name == _CAPEX_CONSTANT_VAR):
+            if name.split("-", 1)[-1] in _CAPACITY_VARS or name == _CAPEX_CONSTANT_VAR:
                 cap.update(labels)
         expr = m.objective.expression
         obj = expr.flat
@@ -289,7 +317,7 @@ def _lp_capex_share(n) -> float | None:
         # wrappers put penalty constants there), so it counts in the whole only.
         whole = float(vals.sum()) + float(getattr(expr, "const", 0.0) or 0.0)
         part = float(vals[obj["vars"].isin(cap)].sum())
-    except Exception:                                         # noqa: BLE001
+    except Exception:  # noqa: BLE001
         logger.exception("front: reading the LP objective failed")
         return None
     if not (math.isfinite(whole) and math.isfinite(part)) or whole == 0:
@@ -343,10 +371,16 @@ def _co2(n, names: list[str]) -> tuple[float | None, float | None, bool | None]:
         # modelled tonne `years` times while its objective counts the cost
         # `objective` (discounted) times, so the undiscounted EUR/t is
         # −mu × years / objective.
-        shadows.append(-mu * _period_shadow_factor(n, gc, name)
-                       if math.isfinite(mu) else float("nan"))
-        binds.append(_cap_binding(mu if math.isfinite(mu) else None, None,
-                                  float(gc.at[name, "constant"])))
+        shadows.append(
+            -mu * _period_shadow_factor(n, gc, name)
+            if math.isfinite(mu)
+            else float("nan")
+        )
+        binds.append(
+            _cap_binding(
+                mu if math.isfinite(mu) else None, None, float(gc.at[name, "constant"])
+            )
+        )
     if any(b is None for b in binds):
         return t_per_yr, None, None
     binding = any(binds)
@@ -401,19 +435,25 @@ def _solve_point(base, cfg, lock, log_queue, lever, level, cap):
     capex, opex, total = _annual_costs(work, rep)
     co2, shadow, co2_bind = _co2(work, names)
     metrics = (rep or {}).get("metrics") or {}
-    rec.update(status="ok", point={
-        "capex_eur_per_yr": capex,
-        "opex_eur_per_yr": opex,
-        "total_eur_per_yr": total,
-        "lp_ens_mwh": (float(metrics["ens_mwh"])
-                       if metrics.get("ens_mwh") is not None else None),
-        "reliability_binding": _reliability_binding(lever, rep),
-        "co2_t_per_yr": co2,
-        "co2_shadow_eur_per_t": shadow,
-        "co2_binding": co2_bind,
-        "capacities": _capacities(work),
-        "excludes_shed_cost": True,
-    })
+    rec.update(
+        status="ok",
+        point={
+            "capex_eur_per_yr": capex,
+            "opex_eur_per_yr": opex,
+            "total_eur_per_yr": total,
+            "lp_ens_mwh": (
+                float(metrics["ens_mwh"])
+                if metrics.get("ens_mwh") is not None
+                else None
+            ),
+            "reliability_binding": _reliability_binding(lever, rep),
+            "co2_t_per_yr": co2,
+            "co2_shadow_eur_per_t": shadow,
+            "co2_binding": co2_bind,
+            "capacities": _capacities(work),
+            "excludes_shed_cost": True,
+        },
+    )
     return rec, work
 
 
@@ -421,7 +461,10 @@ def _solve_point(base, cfg, lock, log_queue, lever, level, cap):
 # MC per point
 # --------------------------------------------------------------------------
 
-def _mc_point(work, cfg, lock, pack, draws: int, seed) -> tuple[dict | None, str | None]:
+
+def _mc_point(
+    work, cfg, lock, pack, draws: int, seed
+) -> tuple[dict | None, str | None]:
     """Sampled-outage LOLE/EUE of the fleet ``work`` built, pinned draws."""
     from services.adequacy import eh_stages
     from services.adequacy import mc as mc_mod
@@ -430,12 +473,14 @@ def _mc_point(work, cfg, lock, pack, draws: int, seed) -> tuple[dict | None, str
     try:
         if pack is not None:
             from services.adequacy import archetypes as arch
+
             _mc_net, boundary = arch.hub_boundary_copy(work, pack)
             frozen = eh_stages.freeze_fixed_plan(
-                work, cfg, lock, overlay=pack.import_overlay, boundary=boundary)
+                work, cfg, lock, overlay=pack.import_overlay, boundary=boundary
+            )
         else:
             frozen = eh_stages.freeze_fixed_plan(work, cfg, lock)
-    except Exception as exc:                                  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         logger.exception("front: freezing the fleet failed")
         return None, f"fleet could not be frozen: {exc}"
     if frozen.mc_inputs is None:
@@ -443,11 +488,17 @@ def _mc_point(work, cfg, lock, pack, draws: int, seed) -> tuple[dict | None, str
     try:
         if frozen.zonal_inputs is not None:
             res = mc_zonal.zonal_mc_adequacy(
-                frozen.zonal_inputs, draws=draws, max_draws=draws, batch=draws, seed=seed)
+                frozen.zonal_inputs,
+                draws=draws,
+                max_draws=draws,
+                batch=draws,
+                seed=seed,
+            )
         else:
             res = mc_mod.mc_adequacy(
-                frozen.mc_inputs, draws=draws, max_draws=draws, batch=draws, seed=seed)
-    except Exception as exc:                                  # noqa: BLE001
+                frozen.mc_inputs, draws=draws, max_draws=draws, batch=draws, seed=seed
+            )
+    except Exception as exc:  # noqa: BLE001
         logger.exception("front: MC failed")
         return None, f"MC failed: {exc}"
     floor = res.get("resolution_floor_h")
@@ -467,6 +518,7 @@ def _mc_point(work, cfg, lock, pack, draws: int, seed) -> tuple[dict | None, str
 # --------------------------------------------------------------------------
 # Front marking and degenerate detection
 # --------------------------------------------------------------------------
+
 
 def _close(a: float, b: float, abs_tol: float) -> bool:
     return math.isclose(a, b, rel_tol=_REL_TOL, abs_tol=abs_tol)
@@ -508,7 +560,11 @@ def _objectives(p: dict, basis: str) -> tuple | None:
     if p.get("status") != "ok" or not p.get("point"):
         return None
     pt = p["point"]
-    rel = (p.get("mc") or {}).get("eue_mwh") if basis == "mc_eue" else pt.get("lp_ens_mwh")
+    rel = (
+        (p.get("mc") or {}).get("eue_mwh")
+        if basis == "mc_eue"
+        else pt.get("lp_ens_mwh")
+    )
     vals = (pt.get("total_eur_per_yr"), rel, pt.get("co2_t_per_yr"))
     if any(v is None or not math.isfinite(float(v)) for v in vals):
         return None
@@ -529,8 +585,14 @@ def _fmt(x: float) -> str:
     return f"{x:,.0f}" if abs(x) >= 10 else f"{x:.3g}"
 
 
-def degenerate_findings(points: list[dict], lever: str, *, voll: float,
-                        outage_model: bool, reference_co2: float | None) -> dict:
+def degenerate_findings(
+    points: list[dict],
+    lever: str,
+    *,
+    voll: float,
+    outage_model: bool,
+    reference_co2: float | None,
+) -> dict:
     """Which axes never bound, in words, with the lever to pull."""
     ok = [p for p in points if p.get("status") == "ok" and p.get("point")]
     axes: dict[str, dict] = {}
@@ -538,70 +600,93 @@ def degenerate_findings(points: list[dict], lever: str, *, voll: float,
         if not points:
             return {"axes": axes, "all": False, "text": None}
         words = sorted({str(p.get("status")) for p in points})
-        return {"axes": axes, "all": False,
-                "text": (f"No point solved ({', '.join(words)}), so there is no "
-                         "front to read.")}
+        return {
+            "axes": axes,
+            "all": False,
+            "text": (
+                f"No point solved ({', '.join(words)}), so there is no front to read."
+            ),
+        }
     rel_b = [p["point"].get("reliability_binding") for p in ok]
     lever_words = "ENS target" if lever == "ens_cap" else "reserve margin"
     if not any(rel_b) and any(b is None for b in rel_b):
         # Unread is not "never bound": say what we do not know.
         axes[lever] = {
-            "text": (f"Whether the {lever_words} bound could not be read at "
-                     f"{sum(b is None for b in rel_b)} of {len(ok)} points, and it "
-                     "did not bind at the rest."),
-            "levers": [], "unknown": True,
+            "text": (
+                f"Whether the {lever_words} bound could not be read at "
+                f"{sum(b is None for b in rel_b)} of {len(ok)} points, and it "
+                "did not bind at the rest."
+            ),
+            "levers": [],
+            "unknown": True,
         }
     elif not any(rel_b):
         if lever == "ens_cap":
-            why = ("the dispatch model has no outages, so " if not outage_model
-                   else "")
+            why = "the dispatch model has no outages, so " if not outage_model else ""
             axes["ens_cap"] = {
-                "text": (f"The ENS target never bound at any of {len(ok)} points: "
-                         f"{why}at VOLL {_fmt(voll)} EUR/MWh serving every MWh is "
-                         "already the cheapest plan. Use the reserve-margin lever, "
-                         "lower VOLL, or read the sampled-outage LOLE per point."),
+                "text": (
+                    f"The ENS target never bound at any of {len(ok)} points: "
+                    f"{why}at VOLL {_fmt(voll)} EUR/MWh serving every MWh is "
+                    "already the cheapest plan. Use the reserve-margin lever, "
+                    "lower VOLL, or read the sampled-outage LOLE per point."
+                ),
                 "levers": ["reserve_margin", "lower_voll", "outage_sampling"],
             }
         else:
             tightest = max(p["level"] for p in ok)
             axes["reserve_margin"] = {
-                "text": (f"The reserve margin never bound at any of {len(ok)} points: "
-                         f"the least-cost fleet already holds more firm capacity than "
-                         f"the tightest margin swept ({tightest:.0%}). Sweep higher margins."),
+                "text": (
+                    f"The reserve margin never bound at any of {len(ok)} points: "
+                    f"the least-cost fleet already holds more firm capacity than "
+                    f"the tightest margin swept ({tightest:.0%}). Sweep higher margins."
+                ),
                 "levers": ["higher_margin"],
             }
     capped = [p for p in ok if p.get("co2_cap_t_per_yr") is not None]
     co2_b = [p["point"].get("co2_binding") for p in capped]
     if capped and not any(co2_b) and any(b is None for b in co2_b):
         axes["co2"] = {
-            "text": (f"Whether the CO2 limit bound could not be read at "
-                     f"{sum(b is None for b in co2_b)} of {len(capped)} capped "
-                     "points, and it did not bind at the rest."),
-            "levers": [], "unknown": True,
+            "text": (
+                f"Whether the CO2 limit bound could not be read at "
+                f"{sum(b is None for b in co2_b)} of {len(capped)} capped "
+                "points, and it did not bind at the rest."
+            ),
+            "levers": [],
+            "unknown": True,
         }
     elif capped and not any(co2_b):
         lowest = min(p["co2_cap_t_per_yr"] for p in capped)
-        ref = (f"with no limit, at the loosest reliability level swept, the "
-               f"design emits {_fmt(reference_co2)} t/yr, "
-               if reference_co2 is not None else "")
+        ref = (
+            f"with no limit, at the loosest reliability level swept, the "
+            f"design emits {_fmt(reference_co2)} t/yr, "
+            if reference_co2 is not None
+            else ""
+        )
         axes["co2"] = {
-            "text": (f"The CO2 limit never bound: {ref}within every limit swept "
-                     f"(lowest {_fmt(lowest)} t/yr). Sweep limits below the "
-                     "unconstrained emissions."),
+            "text": (
+                f"The CO2 limit never bound: {ref}within every limit swept "
+                f"(lowest {_fmt(lowest)} t/yr). Sweep limits below the "
+                "unconstrained emissions."
+            ),
             "levers": ["lower_co2_cap"],
         }
-    all_same = len(ok) > 1 and all(same_design(ok[0]["point"], p["point"]) for p in ok[1:])
+    all_same = len(ok) > 1 and all(
+        same_design(ok[0]["point"], p["point"]) for p in ok[1:]
+    )
     text = None
     if all_same:
-        text = (f"Every one of the {len(ok)} points is the same design (same "
-                "capacities, same cost): there is no trade-off in this range, so "
-                "the front is one point.")
+        text = (
+            f"Every one of the {len(ok)} points is the same design (same "
+            "capacities, same cost): there is no trade-off in this range, so "
+            "the front is one point."
+        )
     return {"axes": axes, "all": all_same, "text": text}
 
 
 # --------------------------------------------------------------------------
 # The study
 # --------------------------------------------------------------------------
+
 
 def _margin_preflight(network, lock, cfg, margin: float, lever_why: str) -> None:
     """Refuse before any solve when the margin cannot be enforced on this
@@ -610,15 +695,21 @@ def _margin_preflight(network, lock, cfg, margin: float, lever_why: str) -> None
     from services.validation_service import _check_reserve_margin
 
     with lock:
-        issues = _check_reserve_margin(network, dataclasses.replace(cfg, reserve_margin=margin))
+        issues = _check_reserve_margin(
+            network, dataclasses.replace(cfg, reserve_margin=margin)
+        )
     for iss in issues:
-        if iss.code == "reserve_margin_unpriceable_assets" or iss.code.startswith("nonfinite_"):
+        if iss.code == "reserve_margin_unpriceable_assets" or iss.code.startswith(
+            "nonfinite_"
+        ):
             raise FrontConfigError(
-                f"{iss.message} (The reserve-margin lever was used because {lever_why}.)")
+                f"{iss.message} (The reserve-margin lever was used because {lever_why}.)"
+            )
 
 
 def _private_base(network, lock):
     from services.adequacy.redundancy import _detach_solver_model
+
     # Copying a network with a live solver model attached raises; detach it
     # under the lock first, as the hub-side copy does (the foreground keeps
     # its solution, only the solver handle is dropped).
@@ -634,17 +725,33 @@ def _guarded_point(base, cfg, lock, log_queue, lever, level, cap):
     an interpreter exit) still propagates."""
     try:
         return _solve_point(base, cfg, lock, log_queue, lever, level, cap)
-    except Exception as exc:                                  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         logger.exception("front: point (%s, %s) raised", level, cap)
-        return {"lever": lever, "level": level, "co2_cap_t_per_yr": cap,
-                "status": "error", "error": str(exc) or type(exc).__name__,
-                "point": None}, None
+        return {
+            "lever": lever,
+            "level": level,
+            "co2_cap_t_per_yr": cap,
+            "status": "error",
+            "error": str(exc) or type(exc).__name__,
+            "point": None,
+        }, None
 
 
-def run_front_study(network, lock, cfg, *, levels, co2_caps_t=None,
-                    lever: str | None = None, budget_solves: int = MAX_FRONT_SOLVES,
-                    mc_draws: int = DEFAULT_MC_DRAWS, seed=FRONT_SEED, pack=None,
-                    log_queue=None, stop_event=None) -> dict:
+def run_front_study(
+    network,
+    lock,
+    cfg,
+    *,
+    levels,
+    co2_caps_t=None,
+    lever: str | None = None,
+    budget_solves: int = MAX_FRONT_SOLVES,
+    mc_draws: int = DEFAULT_MC_DRAWS,
+    seed=FRONT_SEED,
+    pack=None,
+    log_queue=None,
+    stop_event=None,
+) -> dict:
     """The front over ``levels`` (reliability lever) × ``co2_caps_t`` (t/yr,
     ``None`` = uncapped).
 
@@ -664,7 +771,8 @@ def run_front_study(network, lock, cfg, *, levels, co2_caps_t=None,
     if lever_used == "ens_cap" and float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
         raise FrontConfigError(
             "the ENS lever requires VOLL > 0: with no slack generators the cap "
-            "constrains nothing")
+            "constrains nothing"
+        )
     need = check_budget(lvls, caps, int(budget_solves))
     if int(mc_draws) < 1:
         raise FrontConfigError("mc_draws must be at least 1")
@@ -677,34 +785,73 @@ def run_front_study(network, lock, cfg, *, levels, co2_caps_t=None,
     outage_model = lp_has_outage_model(base)
     points: list[dict] = []
     result = {
-        "lever": lever_used, "lever_reason": lever_why,
-        "levels": lvls, "co2_caps_t_per_yr": caps,
+        "lever": lever_used,
+        "lever_reason": lever_why,
+        "levels": lvls,
+        "co2_caps_t_per_yr": caps,
         "lp_outage_model": outage_model,
-        "solves_planned": need, "solves": 0,
-        "mc_budget": {"draws_per_point": int(mc_draws), "seed": seed,
-                      "pinned": True,
-                      "note": ("every point is sampled with the same seed and the "
-                               "same number of draws; certify the chosen point "
-                               "with the full MC"),
-                      "unit_note": ("each asset row is sampled as one unit at its "
-                                    "built size, so an extendable block fails as "
-                                    "one unit")},
-        "cost_basis": ("equivalent annual cost: the LP objective less shed cost, "
-                       "divided by the years the objective counts; capex is its "
-                       "capacity terms (annualised capital and fixed O&M), opex "
-                       "the rest (dispatch, fuel, import tariff, CO2 price)"),
-        "points": points, "reference_co2_t_per_yr": None,
+        "solves_planned": need,
+        "solves": 0,
+        "mc_budget": {
+            "draws_per_point": int(mc_draws),
+            "seed": seed,
+            "pinned": True,
+            "note": (
+                "every point is sampled with the same seed and the "
+                "same number of draws; certify the chosen point "
+                "with the full MC"
+            ),
+            "unit_note": (
+                "each asset row is sampled as one unit at its "
+                "built size, so an extendable block fails as "
+                "one unit"
+            ),
+        },
+        "cost_basis": (
+            "equivalent annual cost: the LP objective less shed cost, "
+            "divided by the years the objective counts; capex is its "
+            "capacity terms (annualised capital and fixed O&M), opex "
+            "the rest (dispatch, fuel, import tariff, CO2 price)"
+        ),
+        "points": points,
+        "reference_co2_t_per_yr": None,
         "warning": non_convexity_warning(base, cfg),
         "aborted": False,
     }
     with PyPSAService.solving_context(ProjectContext(network=base)):
-        _sweep(result, points, base, cfg, lock, lq, lever_used, lvls, caps,
-               mc_draws, seed, pack, stop_event)
+        _sweep(
+            result,
+            points,
+            base,
+            cfg,
+            lock,
+            lq,
+            lever_used,
+            lvls,
+            caps,
+            mc_draws,
+            seed,
+            pack,
+            stop_event,
+        )
     return _finish(result, points, cfg, lever_used, outage_model)
 
 
-def _sweep(result, points, base, cfg, lock, lq, lever_used, lvls, caps,
-           mc_draws, seed, pack, stop_event) -> None:
+def _sweep(
+    result,
+    points,
+    base,
+    cfg,
+    lock,
+    lq,
+    lever_used,
+    lvls,
+    caps,
+    mc_draws,
+    seed,
+    pack,
+    stop_event,
+) -> None:
     """Every grid point, then the uncapped reference when no column is
     uncapped. Runs inside the study's solving context, so the solver's
     transient marks land on the private base, never the foreground."""
@@ -717,7 +864,9 @@ def _sweep(result, points, base, cfg, lock, lq, lever_used, lvls, caps,
         rec["index"] = idx
         rec["mc"], rec["mc_error"] = (None, "point not solved")
         if work is not None:
-            rec["mc"], rec["mc_error"] = _mc_point(work, cfg, lock, pack, int(mc_draws), seed)
+            rec["mc"], rec["mc_error"] = _mc_point(
+                work, cfg, lock, pack, int(mc_draws), seed
+            )
         points.append(rec)
 
     ok = [p for p in points if p["status"] == "ok"]
@@ -725,7 +874,7 @@ def _sweep(result, points, base, cfg, lock, lq, lever_used, lvls, caps,
         ref = [p["point"]["co2_t_per_yr"] for p in ok if p["co2_cap_t_per_yr"] is None]
         result["reference_co2_t_per_yr"] = min(ref) if ref else None
     elif stop_event is not None and stop_event.is_set():
-        result["aborted"] = True        # the reference solve is skipped too
+        result["aborted"] = True  # the reference solve is skipped too
     else:
         # the loosest reliability level: the largest ENS cap, the smallest margin
         loosest = max(lvls) if lever_used == "ens_cap" else min(lvls)
@@ -742,14 +891,20 @@ def _finish(result, points, cfg, lever_used, outage_model) -> dict:
     basis = "mc_eue" if mc_all else "lp_ens"
     result["reliability_basis"] = basis
     result["reliability_basis_note"] = (
-        None if mc_all else
-        "Sampled-outage reliability was not available for every point, so the "
-        "whole front is ranked on the dispatch model's ENS instead.")
+        None
+        if mc_all
+        else "Sampled-outage reliability was not available for every point, so the "
+        "whole front is ranked on the dispatch model's ENS instead."
+    )
     mark_dominance(points, basis)
     _flag_indistinct(points, basis)
     result["degenerate"] = degenerate_findings(
-        points, lever_used, voll=float(getattr(cfg, "voll", 0.0) or 0.0),
-        outage_model=outage_model, reference_co2=result["reference_co2_t_per_yr"])
+        points,
+        lever_used,
+        voll=float(getattr(cfg, "voll", 0.0) or 0.0),
+        outage_model=outage_model,
+        reference_co2=result["reference_co2_t_per_yr"],
+    )
     return result
 
 
@@ -762,6 +917,6 @@ def _flag_indistinct(points: list[dict], basis: str) -> None:
         if ci and p.get("status") == "ok":
             cis[i] = ci
     for i, p in enumerate(points):
-        p["reliability_indistinct"] = (
-            i in cis and any(j != i and cis[j][0] <= cis[i][1] and cis[i][0] <= cis[j][1]
-                             for j in cis))
+        p["reliability_indistinct"] = i in cis and any(
+            j != i and cis[j][0] <= cis[i][1] and cis[i][0] <= cis[j][1] for j in cis
+        )
