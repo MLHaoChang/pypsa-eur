@@ -1343,7 +1343,7 @@ def test_a_grid_project_with_an_open_tie_screens_with_the_grids_infeed(tmp_path)
     row = _card(tmp_path, n=n)[0]["ssti_uif"]
     assert row["verdict"] in ("pass", "warn") and row["project_value"] is not None
     # the campus's tie is normally open, so it is screened islanded too and the row judges both (GC-08e)
-    assert "(grid-connected and islanded states)" in row["note"]
+    assert "for the grid-connected and islanded states." in row["note"]
 
 
 # ── the resonance table's least-margin row, and verdicts the tables contradict (GK A2 R2) ──
