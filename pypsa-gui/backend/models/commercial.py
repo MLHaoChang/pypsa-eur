@@ -40,7 +40,16 @@ MeasuredOn = Literal["import", "export", "net", "peak_import"]
 Direction = Literal["cost", "revenue"]
 ConnectionKind = Literal["firm", "non_firm_static", "non_firm_dynamic", "fca"]
 PpaKind = Literal["pay_as_produced", "baseload", "as_consumed_btm", "sleeved"]
-MarketRegion = Literal["DE", "NL", "GB", "US_ERCOT", "US_PJM", "US_CAISO", "CA_ON", "AU_NEM"]
+# The ENTSO-E bidding zones a market pack is for: exactly the keys of
+# `services.market_prices.BIDDING_ZONES` (S1), pinned by test_market_packs (a
+# literal here: the models layer stays free of the service layer).
+BiddingZone = Literal[
+    "AT", "BE", "BG", "CH", "CZ", "DE-LU", "DK-1", "DK-2", "EE", "ES", "FI", "FR",
+    "GR", "HR", "HU", "IE-SEM", "IT-CALA", "IT-CNOR", "IT-CSUD", "IT-NORD",
+    "IT-SARD", "IT-SICI", "IT-SUD", "LT", "LV", "NL", "NO-1", "NO-2", "NO-3",
+    "NO-4", "NO-5", "PL", "PT", "RO", "RS", "SE-1", "SE-2", "SE-3", "SE-4", "SI",
+    "SK"
+]
 
 
 # ------------------------------------------------------------------ participants
@@ -758,22 +767,6 @@ def _contract_type_from_shape(c: dict) -> str:
     return "ppa"
 
 
-class AncillaryProduct(BaseModel):
-    name: str
-    capacity_price: TimeSeriesRef | None = None
-    activation_price: TimeSeriesRef | None = None
-    min_bid_mw: float | None = Field(default=None, ge=0)
-
-
-class MarketPack(BaseModel):
-    id: str = Field(min_length=1)
-    region: MarketRegion
-    price_series: dict[str, TimeSeriesRef] = Field(default_factory=dict)
-    products: list[AncillaryProduct] = Field(default_factory=list)
-    pack_hash: str = Field(min_length=8)
-    valid_year: int
-
-
 # ------------------------------------------------------------------ counterfactual purchases (H2e)
 
 
@@ -840,13 +833,15 @@ class ReserveProduct(BaseModel):
 
     ``sustain_h`` is how long each committed MW must be deliverable (the
     energy it reserves is MW × ``sustain_h``); there is no default, the user
-    states it. ``storages`` empty means every eligible storage."""
+    states it. ``storages`` empty means every eligible storage.
+    ``capacity_price`` None (a market-pack template's empty ref, SCU06 K8a) is
+    no price: the solve refuses the product and its settlement is None, never 0."""
 
     id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
     kind: ReserveKind
     direction: ReserveDirection
     sustain_h: float = Field(gt=0, le=24, allow_inf_nan=False)
-    capacity_price: PriceSeriesRef
+    capacity_price: PriceSeriesRef | None
     max_commit_mw: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     storages: list[str] = Field(default_factory=list)
     counterparty: str = Field(default="tso", min_length=1)
@@ -868,6 +863,57 @@ class ReserveProduct(BaseModel):
     @property
     def down(self) -> bool:
         return self.direction in ("symmetric", "down")
+
+
+# Market packs (SCU06 K8a): one bundle per bidding zone, applied onto a project's
+# commercial config as an ordinary edit (`services.commercial.market_packs`).
+#: Set on a pack that held pre-K8a `AncillaryProduct` entries or `price_series`
+#: (SCU06-K8-2: deleted); they are stripped at load, never a 500.
+LEGACY_PACK_FIELDS_STRIPPED = "legacy_pack_fields_stripped"
+
+
+class MarketPack(BaseModel):
+    """A market bundle for one bidding zone: its day-ahead price series and the
+    reserve products (DC-06's one model) the zone offers. Templates ship with
+    empty refs (no data is shipped; reserve prices are user uploads only,
+    SCU06-K8-3). ``pack_hash`` pins the content (``market_packs.pack_hash``);
+    ``flags`` are set at load and are not content."""
+
+    id: str = Field(min_length=1)
+    label: str = ""
+    region: BiddingZone
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+    valid_year: int
+    day_ahead: PriceSeriesRef | None = None
+    products: list[ReserveProduct] = Field(default_factory=list)
+    pack_hash: str = Field(min_length=8)
+    flags: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _strip_legacy(cls, data):
+        # Pre-K8a packs held `AncillaryProduct` rows ({name, capacity_price,
+        # activation_price, min_bid_mw}) and a `price_series` dict: stripped with
+        # a named flag (K8a condition 2), so an old pack loads.
+        if not isinstance(data, dict):
+            return data
+        products = data.get("products")
+        legacy = [x for x in products if isinstance(x, dict) and "kind" not in x] \
+            if isinstance(products, list) else []
+        if not legacy and "price_series" not in data:
+            return data
+        out = {k: v for k, v in data.items() if k != "price_series"}
+        out["products"] = [x for x in products if x not in legacy] \
+            if isinstance(products, list) else products
+        out["flags"] = sorted({*(data.get("flags") or []), LEGACY_PACK_FIELDS_STRIPPED})
+        return out
+
+    @model_validator(mode="after")
+    def _unique_products(self) -> "MarketPack":
+        ids = [p.id for p in self.products]
+        if len(ids) != len(set(ids)):
+            raise ValueError("market pack: a product id appears more than once")
+        return self
 
 
 class CommercialConfig(BaseModel):
@@ -950,6 +996,12 @@ class CommercialConfig(BaseModel):
     # Reserve products the backup storage may commit headroom to (DC grid readiness 06);
     # bound like the contract reference prices (`ic_reserve_price`), read by the LP.
     reserve_products: list[ReserveProduct] = Field(default_factory=list)
+    # Storages the user attests carry no backup obligation (SCU06-K8-1): each may
+    # commit reserves on a backup floor of 0, the floor's only 0 source (GK A B1).
+    # A product naming no storage widens to them. Refused at save on a DC-03 string
+    # or spare and on ride-through storage (B2); ignored where the backup roles
+    # cannot be read. Read by the LP through the floors.
+    reserve_no_backup_storages: list[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -971,6 +1023,8 @@ class CommercialConfig(BaseModel):
         out = handler(self)
         if isinstance(out, dict) and not self.reserve_products:
             out.pop("reserve_products", None)
+        if isinstance(out, dict) and not self.reserve_no_backup_storages:
+            out.pop("reserve_no_backup_storages", None)
         return out
 
     @model_validator(mode="after")
@@ -987,6 +1041,9 @@ class CommercialConfig(BaseModel):
             # One `ic:reserve:<id>` price column per product.
             raise ValueError(f"reserve products: id(s) {sorted({i for i in rp if rp.count(i) > 1})} "
                              "appear more than once")
+        att = self.reserve_no_backup_storages
+        if len(att) != len(set(att)) or not all(s.strip() for s in att):
+            raise ValueError("reserve_no_backup_storages: each storage is named once, never blank")
         return self
 
     @model_validator(mode="after")

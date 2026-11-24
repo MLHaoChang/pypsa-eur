@@ -116,6 +116,7 @@ RESULTS_TAB_ENUM = [
     "island",       # W10 R3 (Control: Island & ride-through)
     "grid_forming",  # W10 R3 (Control: Grid-forming)
     "grid_risk",    # G2P-13 (Reliability: Grid risk to production)
+    "products",     # guided-results 09 (Capacity expansion: Products)
 ]
 BOTTOM_TAB_ENUM = [
     "Log", "History", "Buses", "Lines", "Transformers", "Generators",

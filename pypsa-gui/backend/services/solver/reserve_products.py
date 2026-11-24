@@ -89,6 +89,8 @@ PRICE_MISSING = "reserve_price_missing"
 PRICE_STALE = "reserve_price_stale"
 INITIAL_SOC = "reserve_initial_soc_below_floor"
 STRING_AVAIL = "reserve_string_availability_edited"
+#: A "no backup obligation" attestation refused at save (SCU06 K8b, GK A B2).
+ATTESTATION_REFUSED = "reserve_attestation_refused"
 KINDS = (
     NOT_ELIGIBLE,
     FLOOR_EXCEEDS,
@@ -192,30 +194,101 @@ def inputs_digest(products: list[ReserveProduct], floors: dict[str, float]) -> s
 # ── the floor (one source: the stored DC-03 spec) ────────────────────────────
 
 
-def derive_backup(n, project_dir) -> tuple[dict[str, float], frozenset[str]]:
-    """({storage: floor MWh} for every eligible storage, the DC-03 strings) of the
-    project's saved spec, read as the DC-03 sizing and proof read it. A project
-    without a DC spec or a readable sidecar has none (nothing eligible), never
-    floor 0."""
+def derive_backup(
+    n, project_dir, attested=()
+) -> tuple[dict[str, float], frozenset[str]]:
+    """({storage: floor MWh} for every eligible storage, the DC-03 strings).
+
+    Two floor sources, and only these:
+
+    1. the project's saved DC-03 spec, read as the DC-03 sizing and proof read
+       it (the strings and spares, and the island sidecar's ride-through storage);
+    2. ``attested``: the storages the user attests carry no backup obligation
+       (``CommercialConfig.reserve_no_backup_storages``, SCU06-K8-1). A floor of 0
+       comes only from this source.
+
+    A project without a DC spec or a readable sidecar has no source-1 floors
+    (nothing eligible), never floor 0. An attestation counts only when the
+    project's backup roles can be read and the storage holds none of them: it is
+    ignored on a DC-03 string or spare, on a storage the island sidecar lists as
+    ride-through, on an unsaved project and wherever the spec or the sidecar
+    cannot be read (fail closed; ``attestation_refusal`` names it at save)."""
+    floors, strings, roles = _derive_dc(n, project_dir)
+    if not attested or roles is None:
+        return floors, strings
+    for s in attested:
+        if s in n.storage_units.index and s not in roles and s not in floors:
+            floors[str(s)] = 0.0
+    return floors, strings
+
+
+def attested_of(cfg) -> list[str]:
+    """The config's ``reserve_no_backup_storages`` (the solve's plain dict or the
+    typed model); [] when it holds none or the value is not a list of names."""
+    if isinstance(cfg, dict) and "commercial" in cfg:
+        cfg = cfg["commercial"]  # a whole solver-config dict
+    commercial = getattr(cfg, "commercial", cfg)
+    raw = (
+        commercial.get("reserve_no_backup_storages")
+        if isinstance(commercial, dict)
+        else getattr(commercial, "reserve_no_backup_storages", None)
+    )
+    if not isinstance(raw, list) or not all(isinstance(s, str) for s in raw):
+        return []
+    return list(raw)
+
+
+def backup_roles(n, project_dir) -> frozenset[str] | None:
+    """The storages holding a backup role in the saved project (the DC-03 strings
+    and spares, the island sidecar's ride-through storage); None when the roles
+    cannot be read, so no attestation can be checked."""
+    return _derive_dc(n, project_dir)[2]
+
+
+def attestation_refusal(n, project_dir, attested) -> str | None:
+    """Why ``attested`` cannot be stored, as user copy, or None (GK A B2)."""
+    if not attested:
+        return None
+    roles = backup_roles(n, project_dir)
+    if roles is None:
+        return (
+            "No backup obligation can be attested: the project's backup setting or "
+            "island sidecar cannot be read (save the project first)"
+        )
+    held = [s for s in attested if s in roles]
+    if held:
+        return (
+            f"{_names(held)} hold the site's backup energy (a backup string, a spare or "
+            "ride-through storage), so they cannot be attested as having no backup obligation"
+        )
+    return None
+
+
+def _derive_dc(
+    n, project_dir
+) -> tuple[dict[str, float], frozenset[str], frozenset[str] | None]:
+    """(source-1 floors, the DC-03 strings, every storage holding a backup role
+    or None when the roles cannot be read)."""
     from project_templates import eh_templates as tpl
     from services.adequacy import dc_backup
     from services.adequacy.site_peak import named_load
 
-    none: tuple[dict[str, float], frozenset[str]] = ({}, frozenset())
     if project_dir is None:
-        return none
+        return {}, frozenset(), None
     d = pathlib.Path(project_dir)
     try:
         tid, spec, planning = dc_backup.project_spec(d, tpl)
         island = json.loads((d / "island_config.json").read_text())
     except (dc_backup.DcBackupError, OSError, ValueError):
-        return none
+        return {}, frozenset(), _non_dc_roles(d)
     if not isinstance(island, dict):
-        return none
+        return {}, frozenset(), None
     backup = spec.backup
     critical = named_load(n, dc_backup.critical_loads(island))
     out: dict[str, float] = {}
     strings: list[str] = []
+    sizing = None
+    roles: list[str] = []
     if backup.mode != "genset":
         plan = planning or tpl.NATIVE_PLANNING[tid]
         try:
@@ -229,6 +302,7 @@ def derive_backup(n, project_dir) -> tuple[dict[str, float], frozenset[str]]:
         except dc_backup.DcBackupError:
             sizing = None
         if sizing is not None:
+            roles = dc_backup.string_names(sizing)
             strings = [
                 s for s in dc_backup.string_names(sizing) if s in n.storage_units.index
             ]
@@ -252,7 +326,41 @@ def derive_backup(n, project_dir) -> tuple[dict[str, float], frozenset[str]]:
         floor = peak * ride / 3600.0 / eta if eta > 0 else math.nan
         if math.isfinite(floor) and floor >= 0:
             out[str(s)] = floor
-    return out, frozenset(strings)
+    known = backup.mode == "genset" or sizing is not None
+    return (
+        out,
+        frozenset(strings),
+        (frozenset(roles) | _ride_through(island) if known else None),
+    )
+
+
+def _ride_through(island: dict) -> frozenset[str]:
+    req = island.get("requirements")
+    ride = req.get("ride_through_storage") if isinstance(req, dict) else None
+    return frozenset(str(s) for s in ride) if isinstance(ride, list) else frozenset()
+
+
+def _non_dc_roles(d: pathlib.Path) -> frozenset[str] | None:
+    """The backup roles of a project with no DC-03 spec: its island sidecar's
+    ride-through storage (none without a sidecar); None when the project is a
+    data-centre one whose spec cannot be read, or its sidecar cannot be read."""
+    from services.adequacy import dc_backup
+    from services.template_marker import read_marker
+
+    try:
+        meta = read_marker(d)
+    except (OSError, ValueError):
+        return None
+    if isinstance(meta, dict) and meta.get("id") in dc_backup.DC_TEMPLATES:
+        return None
+    path = d / "island_config.json"
+    if not path.exists():
+        return frozenset()
+    try:
+        island = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    return _ride_through(island) if isinstance(island, dict) else None
 
 
 def _firm(n, island) -> float:
@@ -262,13 +370,18 @@ def _firm(n, island) -> float:
     return g
 
 
-def project_backup(n) -> tuple[dict[str, float], frozenset[str]]:
-    """``derive_backup`` for the project being solved (none when unsaved)."""
+def project_backup(n, cfg=None) -> tuple[dict[str, float], frozenset[str]]:
+    """``derive_backup`` for the project being solved (none when unsaved), with
+    the attestations of ``cfg`` (default: the project's current solver config)."""
     from services.pypsa_service import PyPSAService
 
     ctx = PyPSAService.solve_target_context()
     storage = getattr(ctx, "storage_dir", None) if ctx is not None else None
-    return derive_backup(n, storage) if storage else ({}, frozenset())
+    if not storage:
+        return {}, frozenset()
+    if cfg is None:
+        cfg = (getattr(ctx, "solver_state", None) or {}).get("solver_config")
+    return derive_backup(n, storage, attested_of(cfg))
 
 
 # ── the plan (every refusal before the solve) ────────────────────────────────
@@ -315,9 +428,20 @@ def plan(
             raise ReserveRefusal(
                 NOT_ELIGIBLE,
                 (
-                    f"Reserve product \u201c{p.id}\u201d: {_names(bad) or 'no storage'} cannot carry reserves. Only backup "
+                    f"Reserve product \u201c{p.id}\u201d: {_names(bad) or 'no storage'} cannot carry reserves. Only "
                     "storage with a readable backup floor can: the battery strings of a battery or hybrid "
-                    "project, or a storage its island sidecar lists as ride-through storage"
+                    "project, a storage its island sidecar lists as ride-through storage, or a storage "
+                    "attested as having no backup obligation (floor 0). A product naming no storage "
+                    "uses all of them, attested storage included"
+                ),
+            )
+        if p.capacity_price is None:
+            raise ReserveRefusal(
+                PRICE_MISSING,
+                (
+                    f"Reserve product \u201c{p.id}\u201d has no capacity price series: upload "
+                    "its price to the Library and pick it (reserve prices come from your "
+                    "own upload only); it is never priced at 0"
                 ),
             )
         price, flags = bound_price(n, p)
@@ -799,7 +923,7 @@ def _wrap_with_reserve_products(
         )  # a failed run's record never reaches this run's persist
     if not products:
         return user_fn
-    floors, strings = project_backup(network) if backup is _UNSET else backup
+    floors, strings = project_backup(network, cfg) if backup is _UNSET else backup
     the_plan = plan(network, products, floors, strings)
     record = _Record(
         [p.id for p in products],

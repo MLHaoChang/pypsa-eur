@@ -855,7 +855,9 @@ export interface LineLoadingEntry {
   carrier?: string | null
   peak_loading: CarrierPeriodValue       // fraction (0..1)
   mean_loading: CarrierPeriodValue
-  binding_hours: CarrierPeriodValue
+  // null: not evaluated, the importer assumed this rating (rating_assumed). Never read it as 0.
+  binding_hours: CarrierPeriodValue | null
+  rating_assumed?: boolean
 }
 
 export interface LoadingComparison {
@@ -865,6 +867,7 @@ export interface LoadingComparison {
   // LoadingTable had no way to read it until Task 6 wired it through.
   available: boolean
   lines: LineLoadingEntry[]              // sorted by peak loading desc
+  assumed_rating_count?: number          // branches whose rating is assumed; no binding hours for them
 }
 
 export interface CarrierPriceStats {
@@ -1418,6 +1421,12 @@ export interface ProcessAmount {
   /** Tonnes (value × t_per_unit); null with `t_flag` when the bus has no tonne factor. */
   t: number | null
   t_flag?: string | null
+  /** The weighting the figure is on (`generators` energy weighting × period years) and its per-period split. */
+  weighting?: string
+  by_period?: Record<string, number>
+  /** The amount in MWh, null with `mwh_flag` when the bus is a material one. */
+  mwh?: number | null
+  mwh_flag?: string | null
   flag: string | null
   /** Set on `lost` (the shortfall priced) and `buy_in` (at its marginal cost); null with `eur_flag` when unknown. */
   eur?: number | null
@@ -1439,7 +1448,17 @@ export interface ProcessProduct {
   lost: ProcessAmount
   inventory: ProcessInventory[]
 }
-export interface ProcessView { products: ProcessProduct[]; process_units: { name: string }[] }
+export interface ProcessUnit {
+  name: string
+  product_bus?: string
+  /** Hours the unit ran over the modelled snapshots, and the hours modelled (null when not finite). */
+  running_hours?: number | null
+  modelled_hours?: number | null
+  /** The horizon in the energy weighting running_hours and the product amounts use (years-weighted on a multi-period solve). */
+  weighted_hours?: number | null
+  flag?: string | null
+}
+export interface ProcessView { products: ProcessProduct[]; process_units: ProcessUnit[] }
 
 // Grid-to-process ticket 13: "Grid risk to production" (GET /results/grid_risk_production).
 export interface GridRiskTarget {

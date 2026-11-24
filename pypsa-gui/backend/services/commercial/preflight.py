@@ -181,8 +181,10 @@ def _reserve_currency_findings(n, cfg, currency: str | None) -> list[tuple[str, 
     bound = (getattr(n, "meta", None) or {}).get(RP.CURRENCY_META) or {}
     out = []
     for p in cfg.reserve_products:
-        if bound.get(p.id) is None:
-            continue  # unbound (the solve refuses it, `reserve_price_missing`) or not read
+        if p.capacity_price is None or bound.get(p.id) is None:
+            # No price now (a currency left from an earlier bind is stale) or unbound:
+            # the solve refuses it (`reserve_price_missing`); nothing to compare.
+            continue
         clash = reserve_price_currency_mismatch(p, bound[p.id], currency)
         if clash:
             out.append(("error", "commercial.currency_mismatch", "", "", clash))

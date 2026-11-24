@@ -19,7 +19,8 @@ the G2 additions of `2026-10-07-ic-g1-g2-campus-equipment.md` G-11:
 `currency` keyword of `bind_commercial` and `bind_commercial_on_context`; and DC-06 of
 2026-11-06: the `series_meta` keyword of `bind_commercial` and
 `CommercialConfig.reserve_products`; and investment walk 03 case B of 2026-11-22:
-`AssetFinance.terminal_lifetime_years`).
+`AssetFinance.terminal_lifetime_years`; and SCU06 K8b of 2026-11-23:
+`CommercialConfig.reserve_no_backup_storages`).
 
 Every facade name is imported and its call signature pinned with
 `inspect.signature` against the expectation below, so any change — a renamed
@@ -299,7 +300,9 @@ MODEL_FIELDS: dict[str, tuple[str, ...]] = {
         # Data-to-model slice 2: where a tariff or PPA value was read from (metadata, not LP).
         "provenance",
         # DC-06 (2026-11-06): the reserve products and their price series.
-        "reserve_products"),
+        "reserve_products",
+        # SCU06 K8b (2026-11-23): storage attested to carry no backup obligation.
+        "reserve_no_backup_storages"),
     "models.finance.FinanceInputs": (
         "acquisition_date", "analysis_years", "annualise", "capex_phasing", "cod_by_asset",
         "construction_months_by_asset", "construction_start", "contingency_share",

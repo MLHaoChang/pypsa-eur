@@ -3,7 +3,7 @@
 
 # 07b The process view reads `eh_process` with `_as_bool`, so odd values disagree with the solver
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 Source: GK B4 review of #1917 (residual, not in that PR).
 

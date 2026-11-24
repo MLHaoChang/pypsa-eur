@@ -686,7 +686,7 @@ V1_HASHES = {
     "get_run_evidence": "4abaac2419832365fa560a3c15252f7900510c90f2b42c052298b438a97032cb",
     "get_timeseries": "379ddbdecfeb262575eee58c147e81cb6ffa59905d2c8738d12519f3303a5c88",
     "list_components": "6e4521eb8f8ac1bc72ab54928c82adbab7b47bf4bb8f627ff00b10ceb2dfa353",
-    "ui_open_panel": "376cf3f7a156dae8bb641f93a8203f0f37d851b98100ae0d6f20212db5c8bbe1",  # LC-14: guided_step, panel_section widened the input (additive)
+    "ui_open_panel": "e12d684e38736a09c6a1d412dfaba506eb054eaa635cfd694d44190aacc5ad4b",  # LC-14: guided_step, panel_section widened the input (additive); guided-results 09: results_tab gains "products" (additive)
     "update_component": "620554ac6bc2ecc1d9abf2620676d5e050b7c0f5ad50d0c0d00c1de13f908734",
 }
 

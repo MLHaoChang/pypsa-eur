@@ -269,6 +269,10 @@ Library as before.
 `remaining_life_annuity` terminal values an asset over when it is not its replacement life (a business-case capex
 line's depreciation life). Refused on more than one part and on an asset whose lifetime is not infinite. None reads
 as before and is left out of the case hash, so other cases keep their hash.
+**Additions (2026-11-23, SCU06 K8b, `.scratch/site-commercial-ux/issues/06-market-data-and-ppa-defaults.md`):**
+`CommercialConfig` gains `reserve_no_backup_storages: list[str]` (storage the user attests carries no backup
+obligation, so it may earn reserve products on a backup floor of 0; owner SCU06-K8-1). Empty is dropped from the dump
+and left out of the hash, so every existing config dumps and hashes as before.
 
 ## 7. Coordination protocol
 

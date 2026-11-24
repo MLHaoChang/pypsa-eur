@@ -9,10 +9,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import type { FlowScopeRegistry } from '../api/flow'
 
-const { stub, status, getFlowScope } = vi.hoisted(() => ({
+const { stub, status, getFlowScope, processView } = vi.hoisted(() => ({
   stub: (testid: string) => ({ default: () => <div data-testid={testid} /> }),
   status: { current: {} as Record<string, unknown> },
   getFlowScope: vi.fn(),
+  processView: { current: { products: [], process_units: [] } as { products: unknown[]; process_units: unknown[] } },
 }))
 
 vi.mock('./results/CapacityExpansion', () => stub('capex-stub'))
@@ -49,6 +50,7 @@ vi.mock('../api/simulation', () => ({
   resultsApi: {
     getGeneratorResults: vi.fn().mockResolvedValue({}),
     getSummary: vi.fn().mockResolvedValue({}),
+    getProcessView: () => Promise.resolve(processView.current),
   },
 }))
 vi.mock('../api/network', () => ({
@@ -85,6 +87,7 @@ beforeEach(() => {
   localStorage.clear()
   status.current = { running: false, status: 'done', condition: 'optimal', objective: 5, solve_time: 1, dispatch: 'fresh' }
   getFlowScope.mockResolvedValue(registry(['capacity', 'grid', 'reliability', 'commercial', 'handoff']))
+  processView.current = { products: [], process_units: [] }
   useUIStore.setState({ uiMode: 'expert', currentProject: 'Demo', compareRailOpen: false,
     resultsTabRequest: null, activeSlidePanel: 'results' })
 })
@@ -270,5 +273,24 @@ describe('the Control card (W10 R3)', () => {
     useUIStore.setState({ uiMode: 'guided', resultsTabRequest: 'grid_forming' })
     await renderResults()
     expect(screen.getByTestId('gridforming-stub')).toBeTruthy()
+  })
+})
+
+describe('the Products view (guided-results 09)', () => {
+  const costsViews = async () => {
+    await renderResults()
+    fireEvent.click(screen.getByTestId('results-group-capacity'))
+    fireEvent.click(screen.getByTestId('results-cardtab-costs_prices'))
+    return screen.getByTestId('results-subviews').textContent ?? ''
+  }
+
+  it('shows on a product bus and stays hidden when the solve has process units but no product', async () => {
+    processView.current = { products: [], process_units: [{ name: 'haber', product_bus: 'NH3 bus' }] }
+    expect(await costsViews()).not.toContain('Products')
+  })
+
+  it('shows when the process view lists a product', async () => {
+    processView.current = { products: [{ bus: 'NH3 bus' }], process_units: [{ name: 'haber', product_bus: 'NH3 bus' }] }
+    expect(await costsViews()).toContain('Products')
   })
 })
