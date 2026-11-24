@@ -478,3 +478,41 @@ def test_island_case_selection_both_ways():
         study = su.campus_uif(campus, fault_levels=spy)
         assert seen == [({"GEN1"}, False), (set(), False), ({"GEN1"}, True)]
         assert set(study.rows["case"]) == {*su.CASES, *ISLAND}
+
+
+@pytest.mark.parametrize("sc", [0.0, math.nan])
+@pytest.mark.parametrize("threshold, assumed, limit, flagged",
+                         [(None, False, su.DEFAULT_THRESHOLD, True), (0.5, False, 0.5, False),
+                          (0.5, True, 0.5, True)])
+def test_unevaluated_island_rows_keep_the_threshold_and_its_tag(sc, threshold, assumed, limit, flagged):
+    def levels(campus, installed, island=False):
+        out = _no_source_at_mv1(campus, installed, island)
+        if island:
+            out.loc[out["bus"] == "MV1", ["ikss_max_ka", "ikss_min_ka"]] = sc
+        return out
+
+    study = su.campus_uif(build_campus(_island_spec(GEN1=(10.0, 0.15))), threshold, assumed=assumed,
+                          fault_levels=levels)
+    mv1 = study.rows[(study.rows["bus"] == "MV1") & (study.rows["role"] == su.ROLE_ISLAND)]
+    assert set(mv1["verdict"]) == {"not evaluated"} and (mv1["threshold"] == limit).all()
+    assert set(mv1["assumed"]) == {flagged}
+    assert all((su.NO_THRESHOLD in n) == (threshold is None) for n in mv1["note"])
+    assert list(mv1["case"]) == list(ISLAND) and list(mv1["c"]) == [1.1, 1.0]
+
+
+def test_island_all_clear_clears():
+    study = su.campus_uif(build_campus(_island_spec(GEN1=(10.0, 0.15))), threshold=100.0)
+    assert study.island_verdict == "clear" and study.verdict == "clear"
+
+
+def test_grid_case_without_fault_level_still_refused():
+    """The grid cases keep GC-08's refusal of SC_tot 0; only an island bus reads not evaluated."""
+
+    def levels(campus, installed, island=False):
+        out = _no_source_at_mv1(campus, installed, island)
+        if not island:
+            out.loc[out["bus"] == "MV1", ["ikss_max_ka", "ikss_min_ka"]] = 0.0
+        return out
+
+    with pytest.raises(ContractError, match="SC_tot must be > 0"):
+        su.campus_uif(build_campus(_island_spec(GEN1=(10.0, 0.15))), fault_levels=levels)
