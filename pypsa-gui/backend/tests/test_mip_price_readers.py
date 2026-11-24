@@ -243,3 +243,57 @@ def test_an_lp_study_report_keeps_its_figures_and_its_detail_has_no_limit(
     assert facts["lcos_incl_charging"]["unavailable"] != DUALS_NOT_MARGINAL
     assert facts["market_revenue_at_duals"]["value"] is not None
     assert "integer (MIP) solve" not in _econ_text(body)
+
+
+def test_a_stored_study_detail_without_the_key_reports_as_before(
+        client, api_project, studies_on, monkeypatch, project_storage_dir):
+    """A4: a run stored before this change carries no `price_limit`; its report reads as it did."""
+    from services import solver_service
+    from services.study import store
+
+    monkeypatch.setattr(solver_service, "run_simulation", _CommittableGrid())
+    name = "rep-stored"
+    sid = _full(client, api_project, name)
+    pdir = project_storage_dir(name)
+    run = store.load_aux(pdir, sid, "run")
+    assert any("price_limit" in d for d in run["details"].values())
+    for d in run["details"].values():
+        d.pop("price_limit", None)
+    store.save_aux(pdir, sid, "run", run)
+    body = _post(client, name, sid)
+    facts = body["sections"]["economics"]["facts"]
+    assert facts["market_revenue_at_duals"]["unavailable"] != DUALS_NOT_MARGINAL
+    assert facts["lcos_incl_charging"]["unavailable"] != DUALS_NOT_MARGINAL
+    assert "integer (MIP) solve" not in _econ_text(body)
+
+
+# ── the routes that read the solve-time settings (GK B2 A1) ──────────────
+
+from tests.test_result_configured_fields import _run_and_join  # noqa: E402
+
+
+def test_the_solved_settings_routes_read_a_mip_solve_as_they_read_an_lp(
+        client, install_network, session_state):
+    """The record adds `price_limit` to `last_solve_settings` on a MIP; every reader of
+    those settings reads its own keys, so the solved-settings routes answer as before."""
+    from tests.test_adequacy_reserve_margin import _network
+
+    n = _network(peaker=False)
+    n.generators["committable"] = False
+    n.generators.loc[n.generators.index[0], "committable"] = True
+    install_network(n)
+    session_state(client)["solver_config"] = SolverConfig(voll=3000.0)
+    state = _run_and_join(client, session_state)
+    settings = state["last_solve_settings"]
+    assert settings["price_limit"] == DUALS_NOT_MARGINAL and settings["voll_eur_per_mwh"] == 3000.0
+    ll = client.get("/api/results/lost_load")
+    assert ll.status_code == 200, ll.text
+    assert ll.json()["voll_applied"] is True and ll.json()["voll_eur_per_mwh"] == 3000.0
+    ad = client.get("/api/results/adequacy")
+    assert ad.status_code == 200 and ad.json()["configured"] is False
+    rm = client.get("/api/results/reserve_margin")
+    assert rm.status_code == 200 and rm.json() == {"configured": False}
+    # The live prices reader judges by that record.
+    from services.results.prices_digest import prices_digest
+
+    assert prices_digest(n, solver_state=state)["reason"] == DUALS_NOT_MARGINAL
