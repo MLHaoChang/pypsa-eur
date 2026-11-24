@@ -16,6 +16,8 @@
 # Environment:
 #   PREMERGE_REMOTE  remote to fetch from (default: origin)
 #   PREMERGE_BASE    base branch (default: {{BASE_BRANCH}})
+#   PREMERGE_MAIN_WORKFLOW  workflow that must have a run on the head
+#                    (default: none)
 #   PREMERGE_REPO    GitHub repo whose check runs are read (default: {{REPO}})
 
 set -euo pipefail
@@ -364,6 +366,37 @@ else
   echo "checks: not read"
   fail=1
   reasons+=("checks: not read")
+fi
+
+
+echo
+echo "== workflows"
+# The check runs above only exist once a workflow's jobs start, so a queued
+# main test workflow left "all success" on the quick checks. Every workflow
+# run on the head must be completed, and a run of $PREMERGE_MAIN_WORKFLOW
+# (when set) must exist.
+main_wf=${PREMERGE_MAIN_WORKFLOW-}
+if wruns=$(command -v gh >/dev/null &&
+  gh api "repos/$gh_repo/actions/runs?head_sha=$head&per_page=100" \
+    --jq '.workflow_runs[] | [.name, .status, (.conclusion // "-")] | @tsv'); then
+  if [[ -n $main_wf ]] && ! awk -F'\t' -v w="$main_wf" '$1 == w' <<<"$wruns" | grep -q .; then
+    echo "  $main_wf workflow: not started on this head"
+    fail=1
+    reasons+=("$main_wf workflow not started")
+  fi
+  pending=$(awk -F'\t' 'NF && $2 != "completed" { print $1 " (" $2 ")" }' <<<"$wruns" | sort -u)
+  if [[ -n $pending ]]; then
+    sed 's/^/  /' <<<"$pending"
+    fail=1
+    reasons+=("workflows: $(grep -c . <<<"$pending") not completed")
+  fi
+  if [[ -z $pending ]] && { [[ -z $main_wf ]] || awk -F'\t' -v w="$main_wf" '$1 == w' <<<"$wruns" | grep -q .; }; then
+    echo "all completed"
+  fi
+else
+  echo "workflows: not read"
+  fail=1
+  reasons+=("workflows: not read")
 fi
 
 echo
