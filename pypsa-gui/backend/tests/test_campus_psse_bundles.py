@@ -148,3 +148,21 @@ def test_a_lookup_outside_the_listing_is_refused(island_run, tmp_path):
         assert e.value.status_code == 404, bad
     names = zipfile.ZipFile(io.BytesIO(ce.psse_bundle_zip(project, first)[0])).namelist()
     assert not any("secret" in n or n.endswith("link.raw") for n in names)
+
+
+def test_a_stray_file_in_psse_is_not_a_bundle(island_run):
+    project, run = island_run
+    before = [b["name"] for b in ce.psse_bundles(project)["bundles"]]
+    (run / "psse" / "notes.txt").write_text("not a bundle")
+    assert [b["name"] for b in ce.psse_bundles(project)["bundles"]] == before
+
+
+def test_a_psse_folder_that_is_a_symlink_lists_nothing(island_run, tmp_path):
+    import shutil
+
+    project, run = island_run
+    elsewhere = tmp_path / "elsewhere"
+    shutil.copytree(run / "psse", elsewhere)               # real bundles, but outside the run folder
+    shutil.rmtree(run / "psse")
+    (run / "psse").symlink_to(elsewhere, target_is_directory=True)
+    assert ce.psse_bundles(project)["bundles"] == []
