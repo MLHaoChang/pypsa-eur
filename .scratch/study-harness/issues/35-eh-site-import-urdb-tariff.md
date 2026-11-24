@@ -3,7 +3,7 @@
 
 # 35 — eh_site: import_urdb_tariff in the inputs stage
 
-Status: in-progress (GK B (71) plan GO 2026-11-24)
+Status: done (eh_site@6, PR for claude/sh35-eh-site-urdb-tariff)
 Type: task
 Gated: yes (GK B)
 Model tier: opus
@@ -25,10 +25,10 @@ Checked on master: `eh_site@2` fills the tariff only from a held Library tariff 
 - Likely files: `pypsa-gui/backend/services/run_profiles.py` (a new `eh_site@3` profile, L8), `harness/run_eh.py`, `services/run_gates.py`, `tests/test_harness_run_eh_site_v2.py` and a sibling for v3. Reviewer: GK B (plan first).
 
 Acceptance:
-- [ ] A new profile version imports a URDB tariff in the inputs stage, from a fixture response in the smoke (no network, L7).
-- [ ] The plan says, with GK B, whether it needs its own envelope gap kind; the decision is recorded in the file.
-- [ ] A tariff with a currency or year mismatch is refused as the stamp rules require (GLE-05).
-- [ ] Earlier versions are byte-equal (L8).
+- [x] A new profile version imports a URDB tariff in the inputs stage, from a fixture response in the smoke (no network, L7).
+- [x] The plan says, with GK B, whether it needs its own envelope gap kind; the decision is recorded in the file.
+- [x] A tariff with a currency or year mismatch is refused as the stamp rules require (GLE-05).
+- [x] Earlier versions are byte-equal (L8).
 
 ### 2026-11-24: GK B (71) plan GO
 
