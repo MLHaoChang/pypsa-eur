@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 
 from services.compare.prices import weighted_stats
+from harness.solve_validity import solved_price_limit
 from services.not_kept import MULTI_PERIOD_NOT_DIGESTED, NO_PRICES
 from services.period_utils import is_multi_period, snapshot_weights
 from services.results.dispatch_digest import BUDGET_BYTES, _num, _size
@@ -100,8 +101,12 @@ def _trim(digest: dict) -> dict:
     return digest
 
 
-def prices_digest(n, *, result_df=None, price_drivers: Any = None) -> dict:
+def prices_digest(n, *, result_df=None, price_drivers: Any = None, solver_state=None) -> dict:
     """The digest, or {'status': 'unavailable', 'reason': ...}.
+
+    `solver_state` is the run's solver state: on an integer (MIP) solve, judged
+    by the solve that wrote the prices, the digest is unavailable, since its 0.0
+    bus prices are not prices (assistant-assurance 17).
 
     `result_df` reads the LOPF-stage frames of the live network (the router's
     `_result_df`); without it the network's own frames are read. `price_drivers`
@@ -109,6 +114,8 @@ def prices_digest(n, *, result_df=None, price_drivers: Any = None) -> dict:
     """
     if is_multi_period(n):
         return {'status': 'unavailable', 'reason': MULTI_PERIOD_NOT_DIGESTED}
+    if (limit := solved_price_limit(solver_state or {}, n)) is not None:
+        return {'status': 'unavailable', 'reason': limit}
     sns = n.snapshots
     prices = corrected_marginal_prices(n, from_state=result_df is not None, result_df=result_df)
     if prices is None or prices.empty:

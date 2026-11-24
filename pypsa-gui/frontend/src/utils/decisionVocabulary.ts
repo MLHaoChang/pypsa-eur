@@ -593,6 +593,7 @@ export const HELP: Record<string, string> = {
   "currency_year_unknown": "No case states a currency year, so the money figure is not shown.",
   "fidelity_unknown": "The run that produced the figure is not recorded, so it is not shown.",
   "not_computed": "The figure was not computed.",
+  "mip_duals_not_marginal": "Not available on an integer (MIP) solve: it has no marginal prices.",
   "ledger_changed_since_findings": "The assumptions ledger changed after the findings were computed; re-run the study.",
   "fork_changed_since_findings": "An option's network changed, or is gone, since the findings were computed; re-run the study.",
   "report_has_no_findings_hashes": "The report does not record what it was computed from.",

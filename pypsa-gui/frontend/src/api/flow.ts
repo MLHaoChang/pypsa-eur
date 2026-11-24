@@ -355,3 +355,37 @@ export function getReliabilityGoal(project: string): Promise<ReliabilityGoal> {
   return client.get<ReliabilityGoal>(`${flowPath(project)}/reliability_goal`, { skipErrorToast: true })
     .then(r => r.data)
 }
+
+// ── Demand against energization over time (DC template review 06) ─────────────
+
+export interface EnergizationTimelinePeriod {
+  period: string
+  start: string | null
+  end: string | null
+  demand_mw: number
+  grid_mw: number
+  grid_set: boolean
+  onsite: { kind: 'genset' | 'battery'; mw: number; units: string[] }[]
+  onsite_mw: number
+  shortfall_mw: number
+  run?: { served_mwh: number; shed_mwh: number; curtailed_mwh: number } | null
+}
+
+export interface EnergizationTimeline {
+  unit: 'MW'
+  basis: 'inputs' | 'run'
+  run_state?: 'fresh' | 'out_of_date' | null
+  basis_note: string
+  periods: EnergizationTimelinePeriod[]
+  time_to_power:
+    | { status: 'available'; months: number; first_power: string; stage: string | null }
+    | { status: 'not_available'; words: string }
+  stage_reason: { reason: string; detail: string | null } | null
+}
+
+/** Read from the open network: redraws after any saved edit, no solve. 422
+ *  `energization_timeline_unavailable` where the project has no data-centre load. */
+export function getEnergizationTimeline(project: string): Promise<EnergizationTimeline> {
+  return client.get<EnergizationTimeline>(`${flowPath(project)}/energization_timeline`, { skipErrorToast: true })
+    .then(r => r.data)
+}

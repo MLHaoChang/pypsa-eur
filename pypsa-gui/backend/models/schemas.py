@@ -1377,6 +1377,10 @@ class PricesComparison(BaseModel):
     # default zero, not a measurement — see ADR-0001. True guarantees the
     # figures were computed from a solved network.
     available: bool = False
+    # Why `available` is False when a reason is known: "mip_duals_not_marginal"
+    # on an integer (MIP) solve, whose 0.0 bus prices are not prices
+    # (assistant-assurance 17).
+    unavailable_reason: str | None = None
     # Sampled duration curve. Index 0 = highest price (0th percentile), index
     # 100 = lowest. Empty for unsolved networks.
     duration_curve: list[float] = Field(default_factory=list)
@@ -1436,16 +1440,16 @@ class CarrierEconomics(BaseModel):
     are in M€.
     """
 
-    revenue_meur: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
+    revenue_meur: CarrierPeriodValue | None = Field(default_factory=CarrierPeriodValue)
     # Headline total OPEX = gen + charge + curtailment + lost_load.
-    opex_meur: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
+    opex_meur: CarrierPeriodValue | None = Field(default_factory=CarrierPeriodValue)
     # Marginal-cost OPEX from generators on this carrier (Σ p × mc × w).
     # NOT storage charge cost (that's split out into storage_charge_cost_meur).
     gen_cost_meur: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
     # Net cost the storage units paid for charging — Σ |charge| × bus_price × w.
     # Can be NEGATIVE when bus prices are negative during charging hours
     # (e.g. solar-curtailment-driven negative AC prices).
-    storage_charge_cost_meur: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
+    storage_charge_cost_meur: CarrierPeriodValue | None = Field(default_factory=CarrierPeriodValue)
     # Renewable curtailment penalty Σ over carrier's generators of
     # (max_p_max_pu × p_nom_opt − dispatch) × curtailment_cost × weights.
     curtailment_cost_meur: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
@@ -1454,7 +1458,7 @@ class CarrierEconomics(BaseModel):
     lost_load_cost_meur: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
     capex_meur: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
     dispatch_gwh: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
-    lcoe_eur_per_mwh: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
+    lcoe_eur_per_mwh: CarrierPeriodValue | None = Field(default_factory=CarrierPeriodValue)
     # Grid-to-process shortfall (ticket 04): Σ shortfall-generator dispatch × its lost-production value × w. Lost
     # revenue, NOT part of opex_meur, booked under the product bus's carrier. None where the carrier has no
     # shortfall generator, or (with lost_production_flag "lost_production_value_missing") where one has no value
@@ -1511,6 +1515,10 @@ class EconomicsComparison(BaseModel):
     # cost on average?"; this list answers "which individual electrolyser
     # is most/least competitive in scenario A vs B?".
     per_asset_lcoh: list[AssetLCOHEntry] = Field(default_factory=list)
+    # "mip_duals_not_marginal" on an integer (MIP) solve: every figure priced at the bus duals is None
+    # (revenue, storage charge cost, the opex and LCOE that hold a charge cost) and per_asset_lcoh is
+    # empty (assistant-assurance 17). Left out of the JSON when None, so an LP serialises as before.
+    unavailable_reason: str | None = Field(default=None, exclude_if=lambda v: v is None)
 
 
 class CurtailmentComparison(BaseModel):

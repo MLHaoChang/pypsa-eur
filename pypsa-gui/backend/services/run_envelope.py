@@ -120,7 +120,10 @@ GAP_TARGETS = {
 }
 # The step that prepares a fill: it writes only the pending profile store, for
 # the loads its args name, and is admitted only for gaps a listed entry names.
-GAP_PREPARE = {"generate_load_profile": "apply_generated_profile"}
+GAP_PREPARE = {"generate_load_profile": "apply_generated_profile", "import_urdb_tariff": "attach_tariff"}
+# Study harness 35 (GK B (71) C1): each prepare step serves the gaps of one
+# source kind only; a library_tariff gap never admits an import.
+PREPARE_KIND = {"generate_load_profile": "load_generator", "import_urdb_tariff": "urdb_upload"}
 # GK B's conditions on the gaps grant (issue 04, AI-567b): a fill's value never
 # comes from the model. Each gap names a source, fixed in the profile and
 # resolved to concrete values at the grant; L1 may only copy them.
@@ -129,9 +132,14 @@ GAP_PREPARE = {"generate_load_profile": "apply_generated_profile"}
 #   weather_choices: one of the profile's listed (source, year) pairs;
 #   library_tariff: a Library tariff the project's organisation already holds,
 #     listed at the grant by its hash (L1 never creates or uploads one).
+#   urdb_upload (study harness 35, eh_site@6): the URDB JSON the intake cited,
+#     pinned at the grant by its sha256, the import's args and the Library
+#     hash of the tariff it converts to (`run_urdb`); prepared by the
+#     harness's own `import_urdb_tariff` step.
 # A new kind (an SH-21 intake row) is one more entry here and in the checks.
 GAP_SOURCES = {"apply_generated_profile": "load_generator", "set_weather_choice": "weather_choices",
                "attach_tariff": "library_tariff"}
+GAP_SOURCES_ALSO = {"attach_tariff": ("urdb_upload",)}
 LOAD_ARCHETYPES = ("industrial", "commercial", "residential", "ev_charging", "heat", "data_centre")
 # The energies a load_generator source may name, each resolving
 # (network, load) to the generator's params, or None when it has none for that
@@ -245,9 +253,10 @@ def _check_run(entry):
 
 
 def _check_source(tool, source):
-    kind = GAP_SOURCES[tool]
-    if not isinstance(source, dict) or source.get("kind") != kind:
-        raise EnvelopeError(f"A {tool} gap names its source, of kind {kind}.")
+    kinds = (GAP_SOURCES[tool], *GAP_SOURCES_ALSO.get(tool, ()))
+    if not isinstance(source, dict) or source.get("kind") not in kinds:
+        raise EnvelopeError(f"A {tool} gap names its source, of kind {' or '.join(kinds)}.")
+    kind = source["kind"]
     if kind == "load_generator":
         if set(source) != {"kind", "archetype", "year", "energy"} or source["archetype"] not in LOAD_ARCHETYPES \
                 or isinstance(source["year"], bool) or not isinstance(source["year"], int) \
@@ -261,7 +270,7 @@ def _check_source(tool, source):
                 and isinstance(c["year"], int) and not isinstance(c["year"], bool) for c in choices):
             raise EnvelopeError("A weather_choices source lists its (source, year) choices.")
     elif set(source) != {"kind"}:
-        raise EnvelopeError("A library_tariff source carries its kind only; the grant lists the tariffs.")
+        raise EnvelopeError(f"A {kind} source carries its kind only; the grant fixes the tariff.")
     return copy.deepcopy(source)
 
 
@@ -747,6 +756,13 @@ def _gap_row(gap):
         return f"{fill} from a {source['archetype']} {source['year']} profile from {source['energy']}{never}"
     if source["kind"] == "weather_choices":
         return f"{fill} from one of " + ", ".join(f"{c['source']} {c['year']}" for c in source["choices"]) + never
+    if source["kind"] == "urdb_upload":
+        records = list((gap.get("at_grant") or {}).values())
+        if not records:
+            return f"{fill} from the URDB tariff the intake cites, imported to your Library when you approve{never}"
+        if "refused" in records[0]:
+            return f"- No URDB tariff is filled: {records[0]['refused']['message']}"
+        return f"{fill} from the URDB tariff {records[0]['name']}, imported to your Library{never}"
     if not gap.get("at_grant"):  # the plan, before you approve it
         return f"{fill} from a Library tariff, only when exactly one is held when you approve{never}"
     held = [f"{name} v{version}" for record in gap["at_grant"].values()
@@ -934,13 +950,71 @@ def _tariff_hash(args):
     return ref.hash
 
 
-def _gap_instances(ctx, gap):
+def _urdb_instances(ctx, target, rows):
+    """Study harness 35: the `urdb_upload` gap's grant record, from the one
+    confirmed URDB intake row (`run_intake._urdb_row`). The upload is read in
+    the run's project (copied there by the hand-over, C6) and converted, and
+    must give the bytes the card showed; the record pins the import's args (C2),
+    the upload's sha256 and the tariff's Library hash (C3). A tariff the stamp
+    rules refuse (Q3 (a), C7) is recorded `refused`, never granted. No row, or
+    several: no record."""
+    from services import run_urdb
+    cited = [r for r in rows or () if isinstance(r, dict) and r.get("status") == "confirmed"
+             and r.get("write") == run_urdb.TOOL]
+    if len(cited) != 1:
+        return {}
+    args = copy.deepcopy(cited[0]["args"])
+    try:
+        planned = run_urdb.plan(run_urdb.upload_bytes(ctx, args["file_id"]), args)
+    except run_urdb.PlanError as exc:
+        return {target["name"]: {"refused": {"kind": exc.kind, "message": str(exc)}}}
+    except HTTPException:
+        return {target["name"]: {"refused": {"kind": run_urdb.CHANGED, "message": "The upload cannot be read."}}}
+    if planned["upload_sha256"] != cited[0]["source"].get("sha256"):
+        return {target["name"]: {"refused": {"kind": run_urdb.CHANGED,
+                                             "message": "The upload changed since the card showed it."}}}
+    tariff = planned["tariff"]
+    record = {"args": args, "name": args["name"], "upload_sha256": planned["upload_sha256"],
+              "hash": planned["hash"], "tariff": tariff.model_dump(mode="json")}
+    clash = run_urdb.stamp(ctx, tariff)
+    if clash is not None:
+        return {target["name"]: {"refused": {"kind": clash[0], "message": clash[1]}, "name": args["name"]}}
+    # GK B (71) ask 2: the attach names the exact version the import stores,
+    # never the latest at write time (`chat_tools.attach_tariff` re-resolves it).
+    version = run_urdb.import_version(args["name"], planned["hash"])
+    if version is None:
+        return {target["name"]: {"refused": {"kind": run_urdb.NAME_TAKEN,
+                                             "message": "Another tariff is held under that name."},
+                                 "name": args["name"]}}
+    return {target["name"]: {**record, "version": version}}
+
+
+def urdb_steps(task_path, stage, start=1):
+    """Stage 2's URDB steps (study harness 35): the import and the attach of
+    the granted tariff, with the envelope's args, never a model's (C2)."""
+    envelope = _load(task_path)
+    if envelope is None or envelope.get("state") != "granted":
+        return []
+    records = [r for g in envelope.get("gaps", []) if g["source"]["kind"] == "urdb_upload"
+               for r in g.get("at_grant", {}).values() if "hash" in r]
+    if len(records) != 1:
+        return []
+    return [{"id": f"{stage}.{start}", "tool": "import_urdb_tariff", "args": copy.deepcopy(records[0]["args"]),
+             "status": "pending"},
+            {"id": f"{stage}.{start + 1}", "tool": "attach_tariff",
+             "args": {"name": records[0]["name"], "version": records[0]["version"]},
+             "status": "pending"}]
+
+
+def _gap_instances(ctx, gap, rows=()):
     """`at_grant` of a gap entry: each instance it names that is a gap now,
     with the concrete source its fill must copy (GK B, AI-567b). A component
     made or renamed later is never in it. A Load gap is an electric site load
     only: a named offtake or process load refuses the grant, a glob skips it.
     Anything unreadable names no gap (fail closed)."""
     target, source = gap["target"], gap["source"]
+    if source["kind"] == "urdb_upload":
+        return _urdb_instances(ctx, target, rows)
     if target["component"] == "Settings":
         try:
             if source["kind"] == "weather_choices":
@@ -1098,6 +1172,17 @@ _GRANT_DECISION = {"tool": "grant_envelope", "tier": "envelope"}
 _STEPWISE_DECISION = {"tool": "create_from_intake", "tier": "stage"}  # a card decision; grants nothing
 
 
+def _urdb_grant_check(chosen, rows):
+    """Study harness 35 (C5): an unattended grant that would import a cited
+    URDB tariff needs the import route's own Library write right, checked
+    before anything is created or granted. A step-by-step grant cards each write."""
+    from services import run_urdb
+    if chosen is not None and any(g["source"]["kind"] == run_urdb.KIND for g in chosen["gaps"]) \
+            and any(r.get("write") == run_urdb.TOOL for r in rows) and not run_urdb.may_write_library():
+        _refuse("not_authorized", "You cannot write your organisation's Library, so the cited URDB tariff "
+                "cannot be imported; grant the run without it or ask a Library editor.", 403)
+
+
 def _grant_setup(session, path, task, current, chosen, *, intake_digest, notify_email):
     """Issue 21 §2, create at grant: the intake digest is checked against the
     rows and their sources (R6), the user's decision goes on record, then
@@ -1131,6 +1216,7 @@ def _grant_setup(session, path, task, current, chosen, *, intake_digest, notify_
             _refuse("not_found", str(exc), 404)
         _refuse("intake_stale", str(exc))
     confirmed = run_intake.confirm(rows)
+    _urdb_grant_check(chosen, confirmed)
     prior = run_handover.read_intent(path)
     if prior is not None and prior.get("digest") == intake_digest:
         decision_id = prior["decision_id"]  # a retried grant goes on from its intent (A1)
@@ -1232,7 +1318,7 @@ def grant_handover(task_path, task, chosen, *, handover, ctx, notify_email=False
                    expires_at=_iso(now + chosen["budget"]["wall_time_h"] * 3600),
                    fingerprint=fingerprint, chain=[{"after_change": "handover", "fingerprint": fingerprint}],
                    edits=[dict(e, at_grant=_instances(ctx, e)) for e in chosen["edits"]],
-                   gaps=[dict(g, at_grant=_gap_instances(ctx, g)) for g in chosen["gaps"]], prepared=[],
+                   gaps=[dict(g, at_grant=_gap_instances(ctx, g, rows)) for g in chosen["gaps"]], prepared=[],
                    runs=chosen["runs"], budget=chosen["budget"], research=chosen["research"],
                    notify={"email": bool(notify_email)}, handover=dict(handover), state="granted",
                    planned=_planned_rows(rows), eh_study=_eh_frozen(ctx, task, chosen))
@@ -1281,7 +1367,9 @@ def covers(task_path, tool):
     envelope = _load(task_path) if live(task_path) else None
     return envelope is not None and tool not in ENGINE_TOOLS | REPORT_TOOLS and (
         any(e["tool"] == tool for e in envelope["edits"] + envelope["runs"]) or any(
-        tool in (g["tool"], *[p for p, t in GAP_PREPARE.items() if t == g["tool"]]) for g in envelope.get("gaps", []))
+        tool in (g["tool"], *[p for p, t in GAP_PREPARE.items()
+                              if t == g["tool"] and PREPARE_KIND[p] == g["source"]["kind"]])
+        for g in envelope.get("gaps", []))
         or any(p["tool"] == tool and p["status"] == "pinned" for p in envelope.get("planned", [])))
 
 
@@ -1347,9 +1435,12 @@ def _same_source(args, record):
 
 
 def _match_prepare(envelope, tool, args, ctx, note):
-    entries = [g for g in envelope.get("gaps", []) if g["tool"] == GAP_PREPARE[tool]]
+    entries = [g for g in envelope.get("gaps", [])
+               if g["tool"] == GAP_PREPARE[tool] and g["source"]["kind"] == PREPARE_KIND[tool]]
     if not entries:
         return "unlisted_tool"
+    if tool == "import_urdb_tariff":
+        return _match_urdb_import(entries, args, ctx, note)
     names = args.get("loads") if isinstance(args, dict) else None
     if not isinstance(names, list) or not names or not set(args) <= _PREPARE_ARGS \
             or args.get("replay_refinements") not in (None, False):
@@ -1368,6 +1459,51 @@ def _match_prepare(envelope, tool, args, ctx, note):
         records.append(record)
     note["source"] = source_digest(records[0]) if len(records) == 1 else source_digest(records)
     note["prepare"] = {"loads": [str(n) for n in names], "source": note["source"]}
+    return None
+
+
+def _urdb_refused(records, ctx):
+    """Why a granted URDB tariff may not be used now (C7: the stamp rules read
+    again at use), or None. A record the grant refused stays refused."""
+    from models.commercial import Tariff
+    from services import run_urdb
+    for record in records:
+        if "refused" in record or "hash" not in record:
+            return (record.get("refused") or {}).get("kind") or "not_granted_source"
+        clash = run_urdb.stamp(ctx, Tariff.model_validate(record["tariff"]))
+        if clash is not None:
+            return clash[0]
+    return None
+
+
+def _match_urdb_import(entries, args, ctx, note):
+    """Study harness 35: the harness's own import, with exactly the granted
+    args (C2), of the granted upload's bytes, converting to the granted hash,
+    checked before the route writes anything (C3); the stamp rules again (C7);
+    and never a new version over another tariff of that name (C4)."""
+    from services import run_urdb
+    records = [r for g in entries for r in g.get("at_grant", {}).values()]
+    if len(records) != 1:
+        return "not_granted_source"
+    record = records[0]
+    reason = _urdb_refused(records, ctx)
+    if reason is not None:
+        return reason
+    if not isinstance(args, dict) or {k: args.get(k) for k in run_urdb.ARGS} != record["args"] \
+            or set(args) - set(run_urdb.ARGS):
+        return "not_granted_source"
+    if run_urdb.tariff_held(ctx):
+        return "not_a_gap"
+    try:
+        blob = run_urdb.upload_bytes(ctx, record["args"]["file_id"])
+        planned = run_urdb.plan(blob, record["args"])
+    except (HTTPException, run_urdb.PlanError):
+        return run_urdb.CHANGED
+    if planned["upload_sha256"] != record["upload_sha256"] or planned["hash"] != record["hash"]:
+        return run_urdb.CHANGED
+    if run_urdb.import_version(record["name"], record["hash"]) != record["version"]:
+        return run_urdb.NAME_TAKEN
+    note["source"] = record["hash"]
     return None
 
 
@@ -1409,8 +1545,18 @@ def _match_fill(envelope, tool, args, edit_card, ctx, note):
             return "outside_entry"  # a fill never replaces a tariff
         # Exactly one granted tariff (GK B): with several, the choice is the user's, on a card.
         digest = _tariff_hash(args)
-        if not all(len(r["tariffs"]) == 1 and digest in r["tariffs"] for r in records):
-            return "not_granted_source"
+        held = [r for r in records if "tariffs" in r]
+        urdb = [r for r in records if "tariffs" not in r]
+        if held and all(len(r["tariffs"]) == 1 and digest in r["tariffs"] for r in held):
+            note["source"] = digest
+            return None
+        # Study harness 35 (C1): a urdb_upload gap admits only its own imported tariff.
+        reason = _urdb_refused(urdb, ctx) if urdb else "not_granted_source"
+        if reason is None and not all(args.get("name") == r["name"] and args.get("version") == r["version"]
+                                      and digest == r["hash"] for r in urdb):
+            reason = "not_granted_source"
+        if reason is not None:
+            return reason
         note["source"] = digest
     else:
         # The prepare binding (GK B condition 4): only a pending profile this
@@ -1532,6 +1678,9 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
             note["case_solves"] = granted  # reserved where it is recorded (A2)
     if tool in PPA_TOOLS:
         return "own_step_only"
+    if tool == "import_urdb_tariff" and (not note.get("call_id")
+                                         or note["call_id"] != getattr(session, "run_step_call", None)):
+        return "own_step_only"  # study harness 35 (C2): the harness's own step, with the granted args
     if tool in SETTING_TOOLS:
         # The harness's own setup step, with exactly its frozen args (SH15-PF-1).
         if not note.get("call_id") or note["call_id"] != getattr(session, "run_step_call", None):
@@ -1916,6 +2065,9 @@ ATOMIC_TOOLS = frozenset({
     # Prepares a load fill: writes the pending profile store only (not an edit,
     # so no link), but its pickup compare refuses drift before that write.
     "generate_load_profile",
+    # Study harness 35: prepares a URDB tariff fill; writes one Library item
+    # (not an edit, so no link), after its pickup compare refuses drift.
+    "import_urdb_tariff",
     # Issue 21c: a planned write from the grant; under the held locks it also
     # checks the series and upload it writes against its pin (G2).
     "apply_demand_from_excel",

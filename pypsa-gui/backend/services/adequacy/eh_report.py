@@ -450,6 +450,11 @@ def compute_tea(*, cost_eur: float | None,
         block.lcoh_status = "not_established"
         block.lcoh_note = f"LCOH not established: LCOH engine failed ({exc})"
         return block
+    if (payload or {}).get("unavailable_reason"):
+        # assistant-assurance 17: an integer (MIP) solve has no electricity price.
+        block.lcoh_status = "not_established"
+        block.lcoh_note = "LCOH not established: an integer (MIP) solve has no electricity price"
+        return block
     total = (payload or {}).get("total") or {}
     value = total.get("lcoh_eur_per_kg_h2")
     if value is None or not math.isfinite(float(value)):

@@ -18,6 +18,7 @@ export function sectionWords(section: string, tabLabel: (id: string) => string |
 export const NOT_KEPT_WORDS: Record<string, { why: string; short: string }> = {
   multi_period_not_digested: { why: 'multi-period runs keep no dispatch or prices', short: 'multi-period run' },
   no_prices: { why: 'the solve produced no prices', short: 'no prices' },
+  mip_duals_not_marginal: { why: 'an integer (MIP) solve has no marginal prices', short: 'integer solve' },
   over_section_cap: { why: 'too large to keep', short: 'too large' },
 }
 
@@ -32,4 +33,16 @@ export function notKeptSentence(section: string, reason: string | undefined,
 /** "Prices (not kept: multi-period run)" in a list of a run's sections. */
 export function notKeptShort(reason: string | undefined): string {
   return (reason && NOT_KEPT_WORDS[reason]?.short) || 'could not be kept'
+}
+
+/** A figure withheld for a price limit (assistant-assurance 17), e.g. a MIP's revenue:
+ *  "Not available (integer solve)". One wording for every table cell that shows one. */
+export function withheldCell(reason: string | undefined): string {
+  return `Not available (${(reason && NOT_KEPT_WORDS[reason]?.short) || 'no prices'})`
+}
+
+/** The visible label beside a total that leaves out a withheld part:
+ *  "Total excludes revenue: an integer (MIP) solve has no marginal prices." */
+export function withheldTotalNote(what: string, reason: string | undefined): string {
+  return `Total excludes ${what}: ${(reason && NOT_KEPT_WORDS[reason]?.why) || 'the solve produced no prices'}.`
 }

@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): On an integer (MIP) solve, Compare and Results economics, per-asset economics, carrier KPIs and the decision study's market revenue now show revenue, storage charge cost and the figures that hold them as "Not available (integer solve)" instead of 0, because a MIP's bus prices are not prices.

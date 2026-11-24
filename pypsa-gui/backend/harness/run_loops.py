@@ -565,7 +565,7 @@ def agent_turn(path, ctx, session, *, tools, message, provider=None, recheck, sc
                 result = payload.get("result")
                 if isinstance(result, dict) and isinstance(result.get("_edit_receipt"), dict):
                     call["receipt"] = result["_edit_receipt"]
-                if call["ran"] and scope is not None and call["tool"] in run_envelope.GAP_PREPARE \
+                if call["ran"] and scope is not None and run_envelope.PREPARE_KIND.get(call["tool"]) == "load_generator" \
                         and isinstance(result, dict):
                     # GK B condition 4: the pending profile this round made, bound to it.
                     run_envelope.prepared(path, tid, result.get("job_id"), scope["round"])

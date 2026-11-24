@@ -66,6 +66,7 @@ def test_new_runs_are_offered_eh_site_v2_only():
         "eh_site@3",
         "eh_site@4",
         "eh_site@5",
+        "eh_site@6",
     ]
 
 
