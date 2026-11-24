@@ -41,3 +41,36 @@ def test_island_rows_leave_the_card_and_the_pack_as_master(tmp_path, monkeypatch
     assert len(printed) == len(island)
     assert {r[1] for r in printed} == set(su.ISLAND_CASES)
     assert {r[5] for r in printed} == {S.NOT_JUDGED}
+
+
+def test_the_fallback_island_role_is_the_engines():
+    """A build without gridspine reads a saved run's island rows by this copy of the engine's role."""
+    assert S.FALLBACK_ROLE_ISLAND == su.ROLE_ISLAND
+
+
+def test_without_gridspine_the_saved_island_rows_still_print(tmp_path, monkeypatch):
+    import builtins
+
+    run, n = _grid_run_with_open_tie(tmp_path, 2000.0)
+    project = _project(monkeypatch, tmp_path, n=n)
+    _, with_engine = _pack(project)
+    real = builtins.__import__
+
+    def no_ssti_uif(name, *args, **kwargs):
+        if name == "gridspine.static.ssti_uif":
+            raise ImportError("no gridspine in this build")
+        return real(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", no_ssti_uif)
+    rows = S._uif_table(
+        {"verdict": "unknown", "note": ""},
+        pd.read_csv(run / SSTI_UIF_CSV),
+        "grid",
+        "uif.csv",
+    ).rows
+    monkeypatch.setattr(builtins, "__import__", real)
+    printed = [r for r in rows if r[1] in su.ISLAND_CASES]
+    assert printed and {r[5] for r in printed} == {S.NOT_JUDGED}
+    assert len(printed) == sum(
+        r[1] in su.ISLAND_CASES for r in with_engine["ssti_uif"].rows
+    )

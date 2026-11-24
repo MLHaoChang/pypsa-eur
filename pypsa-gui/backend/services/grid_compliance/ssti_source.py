@@ -111,13 +111,18 @@ def _cell(r, column: str, kind):
     return kind(r[column]) if column in r else ""
 
 
+#: ``gridspine.static.ssti_uif.ROLE_ISLAND`` for a build without gridspine, so a saved run's island rows
+#: still print; ``test_grid_compliance_ssti_island`` holds it equal to the engine's.
+FALLBACK_ROLE_ISLAND = "island converter bus (not judged)"
+
+
 def _uif_table(row: dict, frame, case: str, path: str) -> Table:
     try:
         from gridspine.static.ssti_uif import ROLE_ISLAND
     except (
         ImportError
-    ):  # pragma: no cover - build-shape branch: no gridspine, no island rows to print
-        ROLE_ISLAND = None
+    ):  # a build without gridspine: the engine's role, pinned by a test
+        ROLE_ISLAND = FALLBACK_ROLE_ISLAND
 
     rows = []
     role = frame["role"].astype(str) if frame is not None and "role" in frame else None
