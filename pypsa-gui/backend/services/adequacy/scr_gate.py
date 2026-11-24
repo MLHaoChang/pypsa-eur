@@ -121,7 +121,7 @@ def _solved_assets(n, frame: str) -> frozenset[str]:
 
 def _rating(row, solved: bool = False) -> tuple[float, bool]:
     """``(MVA, unsized)``: installed MW read as MVA. An extendable asset reads
-    its ``p_nom_opt`` (the saved network's last solve), and without one it is
+    its ``p_nom_opt`` (the loaded network's last solve), and without one it is
     an unsized candidate counting 0; any other asset reads ``p_nom``. A
     ``p_nom_opt`` of 0 is PyPSA's default on an asset the last solve did not
     cover (an unsized candidate), but a size the solve chose on one it

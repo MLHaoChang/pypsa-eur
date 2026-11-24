@@ -212,3 +212,22 @@ def test_a_project_not_loaded_reads_its_saved_file(client, hub, monkeypatch):
     out = _get(client, hub)
     assert out["network"] == "saved"
     assert next(r for r in out["rows"] if r["id"] == "scr")["project_value"] == saved
+
+
+def test_rows_reading_solved_sizes_say_when_an_edit_followed_the_solve(client, hub):
+    """A solve stamps the edit counter on the network; a size edit after it makes
+    the rows that rate a unit by its solved size say the solve is not current."""
+    from services import dirty_state, project_registry
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.get_context(project_registry.registry_key(_project(hub)))
+    assert ctx is not None
+    ctx.network._solved_network_revision = dirty_state.revision(ctx)
+    assert "after the solve" not in _scr(client, hub)["note"]
+    _edit_fault(client, hub, 0.9)
+    assert "edited after the solve" in _scr(client, hub)["note"]
+
+
+def test_a_network_with_no_solve_stamp_makes_no_stale_claim(client, hub):
+    _edit_fault(client, hub, 0.9)
+    assert "after the solve" not in _scr(client, hub)["note"]
