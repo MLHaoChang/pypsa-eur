@@ -1,3 +1,5 @@
+import type { ReserveDirection, ReserveKind } from './reserves'
+
 export interface Bus {
   name: string; v_nom: number; carrier: string; x: number; y: number
   country: string; unit: string; control: string; sub_network: string
@@ -614,6 +616,22 @@ export interface CommercialConfig {
   reference_purchases?: ReferencePurchase[]
   /** A CO2 price by year on that purchase and, opt-in, on grid imports (H2e). */
   co2_price?: Co2Price | null
+  /** Reserve products the storage may commit headroom to (DC-06, SCU06 K8); a null price is "no price". */
+  reserve_products?: ReserveProduct[]
+  /** Storages the user confirms carry no backup obligation (SCU06 K8b); refused at save on a backup storage. */
+  reserve_no_backup_storages?: string[]
+}
+
+/** One reserve product as the commercial config stores it (the backend's `ReserveProduct`). */
+export interface ReserveProduct {
+  id: string
+  kind: ReserveKind
+  direction: ReserveDirection
+  sustain_h: number
+  capacity_price: LibraryRef | null
+  max_commit_mw: number | null
+  storages: string[]
+  counterparty: string
 }
 
 /** models/commercial.py::ReferencePurchase (H2e). */

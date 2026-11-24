@@ -278,6 +278,16 @@ def _cell(pid: str, field: str) -> str:
     return f"reserve_products/{pid}/{field}"
 
 
+def plan_digest(pack_hash: str, plan: dict) -> str:
+    """The digest of what a preview showed: the pack hash and every change,
+    conflict and kept cell. The apply sends it back and is refused (stale) when
+    the plan it would write differs, so no cell is written that the user did not
+    see (GK B4 P2 on #1938)."""
+    shown = {k: plan.get(k) for k in ("changes", "conflicts", "kept")}
+    payload = json.dumps({"pack_hash": pack_hash, **shown}, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
 def plan_apply(pack: MarketPack, commercial: dict | None, pin: dict | None) -> dict:
     """What applying ``pack`` onto the stored ``commercial`` would do, per cell:
     ``changes`` [{cell, from, to}], ``conflicts`` [{cell, yours, pack, last_applied}]

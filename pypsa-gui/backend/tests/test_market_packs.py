@@ -591,7 +591,13 @@ def test_the_apply_route_goes_through_the_put_and_pins(monkeypatch, tmp_path):
     pack = MP.get("no-1-2026")
     SIM, calls = _route(monkeypatch, tmp_path, _commercial())
     out = SIM.apply_market_pack(
-        pack.id, SIM.MarketPackApplyIn(pack_hash=pack.pack_hash), db=None, user=None
+        pack.id,
+        SIM.MarketPackApplyIn(
+            pack_hash=pack.pack_hash,
+            plan_digest=SIM.preview_market_pack(pack.id)["plan_digest"],
+        ),
+        db=None,
+        user=None,
     )
     assert out["changes"] and "commercial" not in out
     assert out["changed"] == len(out["changes"])
@@ -612,7 +618,13 @@ def test_an_apply_with_nothing_to_change_writes_no_config(monkeypatch, tmp_path)
     }
     SIM, calls = _route(monkeypatch, tmp_path, have)
     out = SIM.apply_market_pack(
-        pack.id, SIM.MarketPackApplyIn(pack_hash=pack.pack_hash), db=None, user=None
+        pack.id,
+        SIM.MarketPackApplyIn(
+            pack_hash=pack.pack_hash,
+            plan_digest=SIM.preview_market_pack(pack.id)["plan_digest"],
+        ),
+        db=None,
+        user=None,
     )
     assert out["changes"] == [] and calls == [] and out["changed"] == 0
     assert MP.read_pin(tmp_path)["pack_id"] == pack.id
@@ -638,7 +650,13 @@ def test_an_apply_never_writes_a_conflict_and_counts_only_its_changes(
     (tmp_path / MP.PIN_FILE).write_text(json.dumps(older))
     SIM, calls = _route(monkeypatch, tmp_path, mine)
     out = SIM.apply_market_pack(
-        pack.id, SIM.MarketPackApplyIn(pack_hash=pack.pack_hash), db=None, user=None
+        pack.id,
+        SIM.MarketPackApplyIn(
+            pack_hash=pack.pack_hash,
+            plan_digest=SIM.preview_market_pack(pack.id)["plan_digest"],
+        ),
+        db=None,
+        user=None,
     )
     kept = f"reserve_products/{pack.products[0].id}/sustain_h"
     assert [c["cell"] for c in out["conflicts"]] == [kept]
@@ -676,7 +694,8 @@ def test_the_apply_route_refusals_write_nothing(
         SIM.apply_market_pack(
             "nope" if case == "unknown" else pack.id,
             SIM.MarketPackApplyIn(
-                pack_hash="0" * 64 if case == "stale" else pack.pack_hash
+                pack_hash="0" * 64 if case == "stale" else pack.pack_hash,
+                plan_digest="0" * 64,
             ),
             db=None,
             user=None,
@@ -734,7 +753,13 @@ def test_an_unreadable_pin_shows_no_update_and_refuses_apply(
     )
     with pytest.raises(HTTPException) as e:
         SIM.apply_market_pack(
-            pack.id, SIM.MarketPackApplyIn(pack_hash=pack.pack_hash), db=None, user=None
+            pack.id,
+            SIM.MarketPackApplyIn(
+                pack_hash=pack.pack_hash,
+                plan_digest=SIM.preview_market_pack(pack.id)["plan_digest"],
+            ),
+            db=None,
+            user=None,
         )
     assert e.value.detail["error_kind"] == MP.PIN_UNREADABLE
     assert calls == [] and (tmp_path / MP.PIN_FILE).read_text() == raw
@@ -782,9 +807,16 @@ def _live(client, install_network, project_storage_dir, monkeypatch, name="packp
 
 
 def _apply(client, pack):
+    """Preview, then apply with the preview's digest, as the card does."""
+    url = f"/api/simulation/commercial/market_packs/{pack.id}"
+    seen = client.get(f"{url}/preview")
+    digest = (
+        seen.json().get("plan_digest", "0" * 64)
+        if seen.status_code == 200
+        else "0" * 64
+    )
     return client.post(
-        f"/api/simulation/commercial/market_packs/{pack.id}/apply",
-        json={"pack_hash": pack.pack_hash},
+        f"{url}/apply", json={"pack_hash": pack.pack_hash, "plan_digest": digest}
     )
 
 
@@ -999,3 +1031,51 @@ def test_preflight_skips_an_unpriced_product_with_a_stale_bound_currency():
     )
     assert cfg.reserve_products[0].capacity_price is None
     assert _reserve_currency_findings(n, cfg, "EUR") == []
+
+
+def test_an_apply_after_a_config_edit_since_the_preview_is_stale(monkeypatch, tmp_path):
+    """GK B4 P2 on #1938: the apply re-plans; when the config changed after the
+    preview, the plan differs from the one the user saw and nothing is written."""
+    pack = MP.get("no-1-2026")
+    first = _commercial()
+    SIM, calls = _route(monkeypatch, tmp_path, first)
+    seen = SIM.preview_market_pack(pack.id)
+    assert len(seen["plan_digest"]) == 64
+    # A product of the pack, entered by hand after the preview.
+    edited = {**first, "reserve_products": [pack.products[0].model_dump(mode="json")]}
+    edited["reserve_products"][0]["sustain_h"] = 9.0
+    SIM, calls = _route(monkeypatch, tmp_path, edited)
+    with pytest.raises(HTTPException) as e:
+        SIM.apply_market_pack(
+            pack.id,
+            SIM.MarketPackApplyIn(
+                pack_hash=pack.pack_hash, plan_digest=seen["plan_digest"]
+            ),
+            db=None,
+            user=None,
+        )
+    assert (e.value.status_code, e.value.detail["error_kind"]) == (409, MP.STALE)
+    assert calls == [] and MP.read_pin(tmp_path) is None
+    # The same preview digest still applies when nothing changed in between.
+    SIM, calls = _route(monkeypatch, tmp_path, first)
+    out = SIM.apply_market_pack(
+        pack.id,
+        SIM.MarketPackApplyIn(
+            pack_hash=pack.pack_hash, plan_digest=seen["plan_digest"]
+        ),
+        db=None,
+        user=None,
+    )
+    assert out["plan_digest"] == seen["plan_digest"] and calls
+
+
+def test_the_plan_digest_moves_with_every_shown_part():
+    pack = _pack()
+    plan = MP.plan_apply(pack, _commercial(), None)
+    base = MP.plan_digest(pack.pack_hash, plan)
+    assert MP.plan_digest("another-hash", plan) != base
+    for part in ("changes", "conflicts", "kept"):
+        moved = {**plan, part: [*plan[part], {"cell": "x"}]}
+        assert MP.plan_digest(pack.pack_hash, moved) != base
+    # Internal keys do not count; the shown plan does.
+    assert MP.plan_digest(pack.pack_hash, {**plan, "applied": {}}) == base

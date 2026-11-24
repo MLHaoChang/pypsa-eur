@@ -897,13 +897,20 @@ def _pack_plan(pack_id: str, *, saved: bool = False):
 def preview_market_pack(pack_id: str):
     """Every value applying the pack would change, the conflicts it keeps (cells
     the user edited since the last apply) and the cells it leaves (empty refs)."""
-    _storage, _pack, plan = _pack_plan(pack_id)
-    return {k: v for k, v in plan.items() if k not in _PLAN_INTERNAL}
+    from services.commercial import market_packs as MP
+
+    _storage, pack, plan = _pack_plan(pack_id)
+    out = {k: v for k, v in plan.items() if k not in _PLAN_INTERNAL}
+    # The apply sends it back: only the plan the user saw is written.
+    return {**out, "plan_digest": MP.plan_digest(pack.pack_hash, plan)}
 
 
 class MarketPackApplyIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     pack_hash: str = Field(min_length=8)
+    # The preview's `plan_digest`: a plan that differs from the one previewed
+    # (a config edit in between) is refused, never written (GK B4 P2 on #1938).
+    plan_digest: str = Field(min_length=16)
 
 
 @router.post("/commercial/market_packs/{pack_id}/apply")
@@ -925,7 +932,9 @@ def apply_market_pack(
     storage, pack, plan = _pack_plan(pack_id, saved=True)
     stale = MP.PackRefusal(MP.STALE, (
         "The pack or the commercial settings changed since the preview; preview it again."))
-    if body.pack_hash != pack.pack_hash:
+    if body.pack_hash != pack.pack_hash or body.plan_digest != MP.plan_digest(
+        pack.pack_hash, plan
+    ):
         raise _pack_refusal(stale)
     planned_from = plan["planned_from"]
 
@@ -955,7 +964,7 @@ def apply_market_pack(
             guard(_state["solver_config"])
             commit()
     out = {k: v for k, v in plan.items() if k not in _PLAN_INTERNAL}
-    return {**out, "changed": len(plan["changes"])}
+    return {**out, "plan_digest": body.plan_digest, "changed": len(plan["changes"])}
 
 
 class ValueFlowsIn(BaseModel):

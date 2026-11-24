@@ -252,14 +252,16 @@ def attestation_refusal(n, project_dir, attested) -> str | None:
     roles = backup_roles(n, project_dir)
     if roles is None:
         return (
-            "No backup obligation can be attested: the project's backup setting or "
-            "island sidecar cannot be read (save the project first)"
+            "No storage can be marked as having no backup obligation: the project's "
+            "backup setting or island settings cannot be read. Save the project first."
         )
     held = [s for s in attested if s in roles]
     if held:
+        verb, pron = ("holds", "it") if len(held) == 1 else ("hold", "they")
         return (
-            f"{_names(held)} hold the site's backup energy (a backup string, a spare or "
-            "ride-through storage), so they cannot be attested as having no backup obligation"
+            f"{_names(held)} {verb} the site's backup energy (a backup string, a spare or "
+            f"ride-through storage), so {pron} cannot be marked as having no backup "
+            "obligation."
         )
     return None
 
@@ -431,8 +433,9 @@ def plan(
                     f"Reserve product \u201c{p.id}\u201d: {_names(bad) or 'no storage'} cannot carry reserves. Only "
                     "storage with a readable backup floor can: the battery strings of a battery or hybrid "
                     "project, a storage its island sidecar lists as ride-through storage, or a storage "
-                    "attested as having no backup obligation (floor 0). A product naming no storage "
-                    "uses all of them, attested storage included"
+                    "marked under \u201cConfirm no backup obligation\u201d (it may then offer reserves "
+                    "down to empty). A product naming no storage uses all of them, the marked storage "
+                    "included"
                 ),
             )
         if p.capacity_price is None:

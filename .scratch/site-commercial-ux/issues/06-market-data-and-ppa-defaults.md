@@ -82,6 +82,11 @@ new `pypsa-gui/backend/services/market_prices.py`, the time-series routes, secti
   - SCU06-K8-3 = (a): reserve prices come from user upload only.
   - SCU06-K8-4 = (a): flexible loads are deferred.
   - The ENTSO-E token (`ENTSOE_API_TOKEN`) is still to be added by the owner; E2E-DONE-1 stays blocked on it.
+- 2026-11-24: **K8 status: built.**
+  - K8b (attested-zero-backup reserves): #1923 merged at e6070342.
+  - K8a backend (market packs, pin, apply): #1932 merged at e74e6c21.
+  - K8a UI (the Market pack card, the "Confirm no backup obligation" list, and the stale-apply refetch): #1938, which carries this note. GK B2 and UX (28) gave OK at 8224aa23; master merged in since. E2E-DONE-1 passed in the real app (apply NO-1, price the products, tick bess, solve, reserve revenue in Results → Storage cycling).
+  - Follow-ups filed: 06b (pin runs ahead of a discarded apply), 06c (results name products by id), 06d (no revision on the commercial PUT). Flexible loads stay deferred (SCU06-K8-4).
 
 ### 2026-11-21: S2a gatekeeper conditions (GK B4 (2))
 

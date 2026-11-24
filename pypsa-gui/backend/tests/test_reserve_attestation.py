@@ -84,7 +84,8 @@ def test_b1_an_attested_storage_is_the_only_floor_0_source(tmp_path):
     with pytest.raises(RP.ReserveRefusal) as e:
         RP.plan(n, [p], *RP.derive_backup(n, tmp_path, []))
     assert e.value.kind == RP.NOT_ELIGIBLE
-    assert "attested as having no backup obligation" in str(e.value)
+    assert "\u201cConfirm no backup obligation\u201d" in str(e.value)
+    assert "attest" not in str(e.value).lower()
     # An attestation names a storage the network does not hold: nothing.
     assert RP.derive_backup(n, tmp_path, ["ghost"]) == ({}, frozenset())
     # An unsaved project: the roles cannot be read, so no attestation counts.
@@ -145,6 +146,28 @@ def test_b2_backup_roles_refuse_the_attestation(tmp_path):
             spare not in RP.derive_backup(n, tmp_path, [spare])[0]
             or RP.derive_backup(n, tmp_path, [spare])[0][spare] > 0
         )
+
+
+def test_b2_the_refusal_reads_as_one_plain_sentence(tmp_path):
+    """The refusal shows verbatim under "Confirm no backup obligation" (UX 3 terms
+    2–3): singular or plural agrees, it ends with a full stop and never says
+    "attest"."""
+    n = _dc_project(tmp_path, {"mode": "hybrid"})
+    strings = sorted(_strings(n))
+    assert len(strings) >= 2
+    one = RP.attestation_refusal(n, tmp_path, strings[:1])
+    assert one == (
+        f"\u201c{strings[0]}\u201d holds the site's backup energy (a backup string, a "
+        "spare or ride-through storage), so it cannot be marked as having no backup "
+        "obligation."
+    )
+    two = RP.attestation_refusal(n, tmp_path, strings[:2])
+    assert " hold the site's backup energy " in two and "so they cannot" in two
+    unread = RP.attestation_refusal(
+        _plain_project(tmp_path / "p", _bess_site()), None, [BESS]
+    )
+    for why in (one, two, unread):
+        assert "attest" not in why.lower() and why.endswith(".")
 
 
 def test_b2_a_spare_is_refused(tmp_path):
