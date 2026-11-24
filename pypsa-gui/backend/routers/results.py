@@ -2336,22 +2336,9 @@ def get_investment_case():
 
 
 def _ic_report_after_stale_run(report: dict) -> dict:
-    """The case valued the run the inputs have since left (provenance-graph 13): an edit that keeps the
-    dispatch's shape leaves the dispatch digest alone, so the key reads fresh while the optimisation's own
-    verdict is stale. The report is then out of date on `dispatch`, as it was when an edit cleared the run."""
-    if not report.get("present") or report.get("stale") is not False:
-        return report
-    try:
-        from services.provenance_graph import runs
+    from services.finance.investment_case_runner import after_stale_run
 
-        read = runs.read(cached=True)
-        if read.dispatch == "none" or runs.results_verdicts(read)["optimisation"].state != "stale":
-            return report
-    except Exception:  # noqa: BLE001 — a freshness read must not 500 the case
-        return report
-    # The client reads the verdict first (`studyStale`), so it says stale too.
-    verdict = {**(report.get("verdict") or {}), "state": "stale"}
-    return {**report, "stale": True, "changed": ["dispatch"], "reason": "inputs_changed", "verdict": verdict}
+    return after_stale_run(report)
 
 
 @results_router.post("/investment_case/abort")
@@ -2415,6 +2402,13 @@ def post_investment_case(body: InvestmentCaseRequest | None = None,
                                              "values the solved dispatch",
                                   "needs": ["not_solved", *known, *_ic_needs(
                                       lambda: finance_needs(getattr(cfg, "finance", None)))]})
+    from services.provenance_graph import runs
+
+    if runs.optimisation_stale():
+        raise HTTPException(409, {"code": "not_solved",
+                                  "message": "the inputs changed since the last solve: re-run it, "
+                                             "the investment case values the solved dispatch",
+                                  "needs": ["not_solved", *known]})
     owner = body.owner if body is not None else None
     # IC G3 R-2: the campus study read once, outside the network lock; the case
     # and the staleness key take the same source.
@@ -2743,7 +2737,7 @@ def _bc_ic_current() -> str | None:
     current, why = _ic_current_assumptions()
     if current is None:
         return why or "current_assumptions_not_established"
-    if staleness(stored, current, reason=why)["stale"] is False:
+    if _ic_report_after_stale_run(staleness(stored, current, reason=why))["stale"] is False:
         return None
     return "investment_case_out_of_date"
 
@@ -2767,7 +2761,7 @@ def _bc_ic_check() -> tuple[str, str | None]:
         from services.business_case.runner import NETWORK_BUSY_MESSAGE
         raise HTTPException(409, {"code": "network_busy", "reason": "network_busy",
                                   "message": NETWORK_BUSY_MESSAGE})
-    st = staleness(stored, current, reason=why)
+    st = _ic_report_after_stale_run(staleness(stored, current, reason=why))
     if st["stale"] is not False:
         raise HTTPException(409, {"code": "investment_case_missing",
                                   "reason": st.get("reason") or "stale",

@@ -3282,6 +3282,11 @@ def solve_ppa_price(target_irr: float, target_year: int,
     if not _dispatch_ready(n):
         _ic_raise(409, "investment_case_not_solved",
                   "solve the network first: the PPA price is solved on the solved dispatch")
+    from services.provenance_graph import runs
+
+    if runs.optimisation_stale():
+        _ic_raise(409, "investment_case_not_solved",
+                  "the inputs changed since the last solve: re-run it, the PPA price is solved on its dispatch")
     cfg = sim_state["solver_config"]
     raw = getattr(cfg, "finance", None)
     if raw is None:

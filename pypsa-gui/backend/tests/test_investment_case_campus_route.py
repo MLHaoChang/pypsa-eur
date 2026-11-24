@@ -150,7 +150,11 @@ def _asset(name="campus:TR_132_33_40#1", *, currency="EUR", price_year=2025, met
 
 @pytest.mark.live_solve
 def test_the_campus_study_assets_are_the_reports_extra_assets_and_its_capex(
-        client, install_network, session_ctx, _auth_db, reset_backend):
+        client, install_network, session_ctx, _auth_db, reset_backend, monkeypatch):
+    # This setup solves outside the app and puts the solver config back after the save, so the run's recorded
+    # inputs never match and its verdict reads out of date (provenance-graph 13). The run's verdict is not what
+    # this test is about: the report's key parts are.
+    monkeypatch.setattr("services.provenance_graph.runs.optimisation_stale", lambda ctx=None: False)
     from services import campus_electrical_service as ce
     from tests.test_finance_case_storage_and_meters import _commercial, _fin, _single_owner, _site
     from tests.test_value_flow_reconciliation import _solve
@@ -177,9 +181,7 @@ def test_the_campus_study_assets_are_the_reports_extra_assets_and_its_capex(
     assert {b["source_hash"] for b in block} == {want_hash}
     capex = -sum(ln["amount"] for ln in full["cashflow_lines"]
                  if ln["provenance"]["source"] == "capex")
-    # The key is current. (After this setup's save round trip the run's own verdict reads out of date, and the
-    # report with it as `dispatch`: provenance-graph 13. The key's part names are what this test is about.)
-    assert "extra_assets" not in body["report"]["changed"]
+    assert body["report"]["stale"] is False                          # the key is current
 
     # The study removed: the report names `extra_assets`; the re-run drops exactly its capex.
     shutil.rmtree(campus_dir / "run")

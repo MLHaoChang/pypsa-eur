@@ -110,6 +110,25 @@ def test_a_value_edit_marks_the_investment_case_out_of_date(
     assert rep["stale"] is True and rep["changed"] == ["dispatch"]
     assert rep["verdict"]["state"] == "stale"
 
+    # Every reader of the case's staleness agrees, and new work refuses the stale run (GK B2 F2, F3).
+    from fastapi import HTTPException
+
+    from routers.results import _bc_ic_check, _bc_ic_current
+    from services import chat_tools
+
+    assert _bc_ic_current() == "investment_case_out_of_date"
+    with pytest.raises(HTTPException) as exc:
+        _bc_ic_check()
+    assert (
+        exc.value.status_code == 409
+        and exc.value.detail["code"] == "investment_case_missing"
+    )
+    r = client.post(STUDY_URL, json={})
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "not_solved"
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.solve_ppa_price(target_irr=0.1, target_year=10)
+    assert exc.value.detail["error_kind"] == "investment_case_not_solved"
+
 
 # ── Edits the keep-the-run rule must not reach ───────────────────────────────
 
@@ -146,6 +165,36 @@ def test_deleting_a_component_still_clears_the_run(client, site):  # noqa: F811
     project = _solved_site(client, site, "pg13_delete")
     r = client.delete("/api/network/loads/lc")
     assert r.status_code in (200, 204), r.text
+    assert _kinds(_flow(client, project))["optimisation"] == "not_run"
+
+
+def test_ac_power_flow_refuses_a_stale_run(client, site):  # noqa: F811
+    """The load flow fixes dispatch from the last solve; after a value edit that dispatch is out of date."""
+    project = _solved_site(client, site, "pg13_acpf")
+    row = next(r for r in client.get("/api/network/loads").json() if r["name"] == "l")
+    assert (
+        client.put("/api/network/loads/l", json={**row, "p_set": 35.0}).status_code
+        == 200
+    )
+    assert _kinds(_flow(client, project))["optimisation"] == "stale"
+    r = client.post("/api/simulation/run_ac_pf")
+    assert r.status_code == 400, r.text
+    assert "inputs changed since the last solve" in r.text
+
+
+@pytest.mark.parametrize(
+    "route,name,new",
+    [("loads", "l", "l2"), ("generators", "g", "g2")],
+    ids=["two-member-class", "only-member-of-class"],
+)
+def test_a_rename_clears_the_run(client, site, route, name, new):  # noqa: F811
+    """A rename drops the row's results; for a class's only member nothing else shows it (GK B2 F4)."""
+    project = _solved_site(client, site, f"pg13_rename_{route}")
+    row = next(
+        r for r in client.get(f"/api/network/{route}").json() if r["name"] == name
+    )
+    r = client.put(f"/api/network/{route}/{name}", json={**row, "name": new})
+    assert r.status_code == 200, r.text
     assert _kinds(_flow(client, project))["optimisation"] == "not_run"
 
 

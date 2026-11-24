@@ -422,6 +422,22 @@ def reserves_verdict(inputs: pins.Pin | None, weights: pins.Pin) -> Verdict:
     return staleness(b.build(), res)
 
 
+def optimisation_stale(ctx=None) -> bool:
+    """True when a dispatch is kept and the optimisation's own verdict says its inputs changed
+    (provenance-graph 13: a value edit keeps the last run, which then reads stale). One predicate for
+    every gate that must not act on such a run. A read that fails answers False: the gate it feeds
+    must not break on a freshness read."""
+    try:
+        read = read_runs(ctx)
+        return read.dispatch != "none" and results_verdicts(read)["optimisation"].state == "stale"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def read_runs(ctx=None) -> "RunsRead":
+    return read(cached=True) if ctx is None else read(ctx, cached=True)
+
+
 def results_verdicts(r: RunsRead) -> dict[str, Verdict]:
     """Each run kind's verdict on the read `r` (`queries.staleness` through the run graph)."""
     from services.provenance_graph.queries import staleness

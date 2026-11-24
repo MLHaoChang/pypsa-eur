@@ -1833,6 +1833,14 @@ def ac_pf_refusal(n, config) -> tuple[str, str] | None:
     for issue in _check_stage2_ac_pf(n, config):
         if issue.severity == "error":
             return issue.code, issue.message
+    from services.provenance_graph import runs
+
+    if runs.optimisation_stale():
+        # A value edit keeps the last run's dispatch (provenance-graph 13); fixing it would pin a
+        # dispatch the inputs have left.
+        return ("ac_pf_stale_dispatch",
+                "The inputs changed since the last solve, so its dispatch is out of date. "
+                "Re-run the optimisation before Stage 2.")
     return None
 
 

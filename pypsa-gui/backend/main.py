@@ -1231,11 +1231,20 @@ async def undo_snapshot_middleware(request: Request, call_next):
     # very FIRST after a clear (no dispatch state to lose).
     pre_dispatch = None
     bulk_class = None
+    renamed = False
     if request.method == "PATCH" and path == "/api/network/_bulk":
         try:
             bulk_class = (await request.json()).get("component_class")
         except Exception:
             bulk_class = None
+    elif request.method == "PUT" and path.startswith("/api/network/"):
+        # A rename drops the row's result columns, and renaming a class's only member
+        # leaves no shape mismatch to see, so a rename never keeps the run (pg13).
+        try:
+            new_name = (await request.json()).get("name")
+            renamed = new_name is not None and new_name != path.rstrip("/").rsplit("/", 1)[-1]
+        except Exception:
+            renamed = False
     will_check_dispatch = (
         is_write
         and path not in _DISPATCH_INVALIDATE_EXCLUDE
@@ -1320,6 +1329,7 @@ async def undo_snapshot_middleware(request: Request, call_next):
                 kept = (
                     (request.method == "PUT" and len(parts) == 4 and parts[2] in _VALUE_EDIT_ROUTES
                      or bulk_class in _VALUE_EDIT_CLASSES)
+                    and not renamed
                     and pre_dispatch == "fresh"
                     and dispatch_status(PyPSAService.get_network()) == "fresh"
                 )
