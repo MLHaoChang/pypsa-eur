@@ -264,7 +264,7 @@ describe('MarketPackCard: preview and apply', () => {
     await screen.findByTestId('mp-preview-refused')
     // The out-of-date plan is neither shown nor appliable; the line says what to do next (GK B2 F1).
     expect(screen.getByTestId('mp-apply-stale').textContent).toBe(
-      'Changed since you looked, so nothing was applied, and the new changes could not be worked out. Preview again.')
+      'Changed since you looked, so nothing was applied. The new changes could not be worked out.')
     expect(screen.queryByTestId('mp-apply')).toBeNull()
     expect(screen.queryByTestId('mp-preview-table')).toBeNull()
     expect(screen.queryByTestId('mp-preview-totals')).toBeNull()

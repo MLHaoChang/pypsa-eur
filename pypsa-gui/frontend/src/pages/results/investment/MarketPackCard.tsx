@@ -172,8 +172,7 @@ function PackPreview({ pack, products, onApplied, onClose }: {
       {plan && preview.isError && (
         <>
           {stale && <p role="status" className="text-[11px] text-warn" data-testid="mp-apply-stale">
-            Changed since you looked, so nothing was applied, and the new changes could not be worked out.
-            Preview again.</p>}
+            Changed since you looked, so nothing was applied. The new changes could not be worked out.</p>}
           <div className="flex items-center gap-2">
             <button type="button" disabled={preview.isFetching} data-testid="mp-preview-again"
                     className="px-2 py-0.5 rounded bg-accent text-on-accent text-[11px] disabled:opacity-40"
