@@ -16,7 +16,9 @@ Two toys:
 from __future__ import annotations
 
 import math
+import queue
 import threading
+import types
 
 import pandas as pd
 import pypsa
@@ -879,12 +881,24 @@ def _ok(level, cap, *, rel_b, co2_b):
 
 
 def test_an_unread_binding_is_said_as_unknown_not_never_bound():
-    pts = [_ok(1, 10.0, rel_b=None, co2_b=None), _ok(2, 10.0, rel_b=False, co2_b=False)]
+    pts = [
+        _ok(1, 10.0, rel_b=None, co2_b=None),
+        _ok(2, 10.0, rel_b=None, co2_b=None),
+        _ok(3, 10.0, rel_b=False, co2_b=False),
+    ]
     d = fr.degenerate_findings(
         pts, "ens_cap", voll=5000.0, outage_model=False, reference_co2=None
     )
     assert d["axes"]["ens_cap"]["unknown"] is True
-    assert "could not be read at 1 of 2 points" in d["axes"]["ens_cap"]["text"]
+    assert (
+        "Whether the ENS target bound could not be read at 2 of 3 points"
+        in (d["axes"]["ens_cap"]["text"])
+    )
+    assert "could not be read at 2 of 3 capped points" in d["axes"]["co2"]["text"]
+    rm = fr.degenerate_findings(
+        pts, "reserve_margin", voll=0.0, outage_model=False, reference_co2=None
+    )
+    assert "Whether the reserve margin bound" in rm["axes"]["reserve_margin"]["text"]
     assert "never bound" not in d["axes"]["ens_cap"]["text"]
     assert d["axes"]["co2"]["unknown"] is True
     assert "never bound" not in d["axes"]["co2"]["text"]
@@ -1262,3 +1276,328 @@ def test_a_non_finite_margin_input_is_refused_before_any_solve(monkeypatch):
         fr.FrontConfigError, match=r"g has p_nom inf\..*reserve-margin lever"
     ):
         _run(_three_bus(), lever="reserve_margin", levels=[0.1])
+
+
+# --------------------------------------------------------------------------
+# Killing cases for the mutation survivors at e8854735
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "values, expected",
+    [
+        ([float("nan"), 0.0, 1.0], True),  # NaN hours are skipped, not fatal
+        ([float("nan"), float("nan")], False),  # nothing readable
+        (["a", "b"], False),  # not numbers
+    ],
+)
+def test_the_two_state_reader_skips_unreadable_hours(values, expected):
+    assert fr._outage_series(pd.Series(values, dtype=object), True) is expected
+
+
+def test_a_network_with_no_generator_has_no_outage_model():
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
+    assert fr.lp_has_outage_model(n) is False
+
+
+@pytest.mark.parametrize(
+    "lever, levels, match",
+    [
+        ("ens_cap", ["abc"], "reliability level abc is not a number"),
+        ("ens_cap", [float("nan")], "‱ of demand"),
+        ("reserve_margin", [float("nan")], "margin fraction"),
+    ],
+)
+def test_an_unreadable_level_is_refused_in_its_lever_unit(lever, levels, match):
+    with pytest.raises(fr.FrontConfigError, match=match):
+        fr._clean_levels(lever, levels)
+
+
+def test_no_levels_is_refused_by_name():
+    with pytest.raises(fr.FrontConfigError, match="at least one reliability level"):
+        fr._clean_levels("ens_cap", None)
+
+
+def test_co2_caps_are_read_strictly_and_zero_is_a_cap():
+    assert fr._clean_caps([0.0, None]) == [0.0, None]
+    with pytest.raises(fr.FrontConfigError, match="CO2 cap abc is not a number"):
+        fr._clean_caps(["abc"])
+    with pytest.raises(fr.FrontConfigError, match="CO2 cap nan"):
+        fr._clean_caps([float("nan")])
+
+
+def test_an_unreadable_argument_is_refused_by_name(monkeypatch):
+    monkeypatch.setattr(fr, "_solve_point", lambda *a: pytest.fail("solved"))
+    with pytest.raises(fr.FrontConfigError, match="mc_draws many is not a number"):
+        _run(_hand(), lever="ens_cap", levels=[100.0], mc_draws="many")
+
+
+def test_each_period_cap_takes_its_own_years():
+    n = _two_periods()
+    n.investment_period_weightings.loc[:, "years"] = [10.0, 5.0]
+    fr.apply_co2_cap(n, 1000.0)
+    c = n.global_constraints["constant"]
+    assert c["co2_cap_2030"] == pytest.approx(2 * c["co2_cap_2040"])
+
+
+def test_existing_capacity_of_an_extendable_is_not_charged_as_capex():
+    # 20 MW of the gas plant already exist: PyPSA charges only the 80 MW
+    # built on top (its objective_constant takes the 20 MW back out).
+    n = _hand()
+    n.generators.loc["gas", "p_nom"] = 20.0
+    n.generators.loc["gas", "p_nom_min"] = 20.0
+    res = _run(n, lever="ens_cap", levels=[100.0], co2_caps_t=[None])
+    pt = res["points"][0]["point"]
+    assert pt["capacities"]["generators:gas"] == pytest.approx(100.0, abs=1e-3)
+    assert pt["capex_eur_per_yr"] == pytest.approx(80 * 50_000.0, rel=1e-6)
+    assert pt["opex_eur_per_yr"] == pytest.approx(20 * 100 * 8760.0, rel=1e-6)
+
+
+def test_a_zero_cost_plan_has_no_capex_share():
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
+    n.add("Bus", "b", carrier="AC")
+    n.add("Load", "l", bus="b", p_set=10.0)
+    n.add("Generator", "g", bus="b", p_nom=100.0)  # fixed and free
+    res = _run(n, lever="ens_cap", levels=[100.0], co2_caps_t=[None])
+    p = res["points"][0]
+    assert p["status"] == "ok"
+    assert p["point"]["capex_eur_per_yr"] is None
+    assert p["point"]["total_eur_per_yr"] == pytest.approx(0.0, abs=1e-6)
+
+
+def _fake_net(objective):
+    return types.SimpleNamespace(objective=objective)
+
+
+def test_annual_costs_read_none_on_every_unreadable_input(monkeypatch):
+    monkeypatch.setattr(fr, "_objective_years", lambda n: 1.0)
+    monkeypatch.setattr(fr, "_lp_capex_share", lambda n: 0.5)
+    rep = {"cost": {"total_system_cost_eur": 10.0}}
+    assert fr._annual_costs(_fake_net(4.0), rep) == (2.0, 8.0, 10.0)
+    nan_total = {"cost": {"total_system_cost_eur": float("nan")}}
+    assert fr._annual_costs(_fake_net(4.0), nan_total) == (None, None, None)
+    assert fr._annual_costs(_fake_net(float("inf")), rep) == (None, None, 10.0)
+    assert fr._annual_costs(_fake_net(4.0), {"cost": None}) == (None, None, None)
+    assert fr._annual_costs(_fake_net(4.0), None) == (None, None, None)
+    monkeypatch.setattr(fr, "_objective_years", lambda n: 1e-300)
+    monkeypatch.setattr(fr, "_lp_capex_share", lambda n: 1.0)
+    huge = {"cost": {"total_system_cost_eur": 1.0}}
+    assert fr._annual_costs(_fake_net(1e300), huge) == (
+        None,
+        None,
+        pytest.approx(1e300),
+    )
+
+
+def test_a_period_shadow_factor_with_no_objective_weight_is_one():
+    n = _two_periods()
+    fr.apply_co2_cap(n, 1000.0)
+    gc = n.global_constraints
+    n.investment_period_weightings.loc[:, "objective"] = [0.0, 1.0]
+    n.investment_period_weightings.loc[:, "years"] = [10.0, float("inf")]
+    assert fr._period_shadow_factor(n, gc, "co2_cap_2030") == 1.0
+    assert fr._period_shadow_factor(n, gc, "co2_cap_2040") == 1.0
+
+
+@pytest.mark.parametrize(
+    "lever, rep",
+    [
+        ("ens_cap", None),
+        ("ens_cap", {"target": None}),
+        ("reserve_margin", {"reserve_margin": None}),
+        ("reserve_margin", {"reserve_margin": {"by_period": None}}),
+    ],
+)
+def test_a_missing_report_section_reads_binding_unknown(lever, rep):
+    assert fr._reliability_binding(lever, rep) is None
+
+
+def _sink_patch(monkeypatch, **sink):
+    from services.adequacy import sweep
+
+    real = sweep._solve_once
+
+    def patched(cfg, net, lock, lq, s):
+        real(cfg, net, lock, lq, s)
+        s.update(sink)
+
+    monkeypatch.setattr(sweep, "_solve_once", patched)
+
+
+def test_a_missing_condition_falls_back_to_the_status(monkeypatch):
+    _sink_patch(monkeypatch, _condition=None, _status="optimal")
+    p = _run(_hand(), lever="ens_cap", levels=[100.0], co2_caps_t=[None])["points"][0]
+    assert p["status"] == "ok" and p["condition"] == "optimal"
+
+
+def test_no_word_at_all_is_a_failed_point(monkeypatch):
+    _sink_patch(monkeypatch, _condition=None, _status=None)
+    p = _run(_hand(), lever="ens_cap", levels=[100.0], co2_caps_t=[None])["points"][0]
+    assert p["status"] == "failed" and p["point"] is None
+
+
+def test_a_point_names_its_lever_and_its_cost_basis():
+    res = _run(_hand(), lever="ens_cap", levels=[100.0], co2_caps_t=[None])
+    p = res["points"][0]
+    assert p["lever"] == "ens_cap"
+    assert p["point"]["excludes_shed_cost"] is True
+    assert p["point"]["lp_ens_mwh"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_report_metrics_set_to_none_leave_lp_ens_unknown(monkeypatch):
+    from services.adequacy import sweep
+
+    real = sweep._solve_once
+
+    def none_metrics(cfg, net, lock, lq, s):
+        real(cfg, net, lock, lq, s)
+        s["adequacy_report"] = {**s["adequacy_report"], "metrics": None}
+
+    monkeypatch.setattr(sweep, "_solve_once", none_metrics)
+    p = _run(_hand(), lever="ens_cap", levels=[100.0], co2_caps_t=[None])["points"][0]
+    assert p["point"]["lp_ens_mwh"] is None
+
+
+def _frozen(**kw):
+    return types.SimpleNamespace(
+        **{"mc_inputs": "MC", "zonal_inputs": None, "mc_error": None, **kw}
+    )
+
+
+def test_mc_inputs_missing_with_no_reason_say_so(monkeypatch):
+    from services.adequacy import eh_stages
+
+    monkeypatch.setattr(
+        eh_stages, "freeze_fixed_plan", lambda *a, **k: _frozen(mc_inputs=None)
+    )
+    assert fr._mc_point("W", _cfg(), None, None, 4, 0) == (
+        None,
+        "MC inputs unavailable",
+    )
+
+
+@pytest.mark.parametrize(
+    "patch, ok",
+    [
+        ({"lole_hours": float("nan")}, False),
+        ({"resolution_floor_h": None}, True),
+    ],
+)
+def test_the_mc_record_reads_each_field(monkeypatch, patch, ok):
+    from services.adequacy import eh_stages, mc
+
+    monkeypatch.setattr(eh_stages, "freeze_fixed_plan", lambda *a, **k: _frozen())
+    monkeypatch.setattr(
+        mc, "mc_adequacy", lambda i, **kw: {**_mc_result(0.25), **patch}
+    )
+    out, err = fr._mc_point("W", _cfg(), None, None, 4, 0)
+    if ok:
+        assert err is None and out["below_floor"] is False
+    else:
+        assert out is None and "unreadable" in err
+
+
+def test_numbers_of_ten_print_whole():
+    assert fr._fmt(10.0) == "10"
+    assert fr._fmt(9.5) == "9.5"
+
+
+def test_an_unnamed_exception_is_named_by_its_type(monkeypatch):
+    from services.adequacy import sweep
+
+    def bare(cfg, net, lock, lq, s):
+        raise RuntimeError()
+
+    monkeypatch.setattr(sweep, "_solve_once", bare)
+    p = _run(_hand(), lever="ens_cap", levels=[100.0], co2_caps_t=[None])["points"][0]
+    assert p["status"] == "error" and p["error"] == "RuntimeError"
+
+
+def _stub_points(monkeypatch):
+    monkeypatch.setattr(
+        fr,
+        "_solve_point",
+        lambda base, cfg, lock, lq, lever, level, cap: (
+            {
+                "lever": lever,
+                "level": level,
+                "co2_cap_t_per_yr": cap,
+                "status": "infeasible",
+                "point": None,
+            },
+            None,
+        ),
+    )
+
+
+def test_voll_is_required_by_the_ens_lever_only(monkeypatch):
+    _stub_points(monkeypatch)
+    monkeypatch.setattr(fr, "_margin_preflight", lambda *a: None)
+    res = _run(_three_bus(), lever="reserve_margin", levels=[0.1], cfg=_cfg(voll=0.0))
+    assert res["solves"] == 1
+    res = _run(_three_bus(), lever="reserve_margin", levels=[0.1], cfg=_cfg(voll=None))
+    assert res["solves"] == 1
+    with pytest.raises(fr.FrontConfigError, match="VOLL"):
+        _run(_hand(), lever="ens_cap", levels=[100.0], cfg=_cfg(voll=None))
+
+
+def test_the_callers_log_queue_gets_the_solver_log():
+    lq = queue.SimpleQueue()
+    _run(_hand(), lever="ens_cap", levels=[100.0], co2_caps_t=[None], log_queue=lq)
+    assert not lq.empty()
+
+
+def test_an_unset_stop_event_does_not_stop_the_study(monkeypatch):
+    _stub_points(monkeypatch)
+    res = _run(
+        _hand(),
+        lever="ens_cap",
+        levels=[10.0, 20.0],
+        co2_caps_t=[5.0],
+        stop_event=threading.Event(),
+    )
+    assert res["aborted"] is False and res["solves"] == 3
+
+
+def test_the_uncapped_reference_ignores_a_capped_point_at_the_same_level(monkeypatch):
+    def fake_point(base, cfg, lock, lq, lever, level, cap):
+        co2 = cap if cap is not None else 999.0
+        return {
+            "lever": lever,
+            "level": level,
+            "co2_cap_t_per_yr": cap,
+            "status": "ok",
+            "point": {
+                "total_eur_per_yr": 1.0,
+                "lp_ens_mwh": 0.0,
+                "co2_t_per_yr": co2,
+                "capacities": {"g": 1.0},
+                "reliability_binding": True,
+                "co2_binding": True,
+            },
+        }, None
+
+    monkeypatch.setattr(fr, "_solve_point", fake_point)
+    monkeypatch.setattr(fr, "_mc_point", lambda *a, **k: (None, "off"))
+    res = _run(_hand(), lever="ens_cap", levels=[100.0], co2_caps_t=[5.0, None])
+    assert res["reference_co2_t_per_yr"] == 999.0
+
+
+@pytest.mark.parametrize(
+    "a, b, overlap",
+    [
+        ([1.0, 2.0], [2.0, 3.0], True),  # touching ends overlap
+        ([1.0, 2.0], [5.0, 6.0], False),  # disjoint, either order
+        ([5.0, 6.0], [1.0, 2.0], False),
+        ([1.0, 4.0], [2.0, 3.0], True),  # nested
+    ],
+)
+def test_lole_interval_overlap_is_exact(a, b, overlap):
+    pts = [
+        {"status": "ok", "mc": {"lole_ci": a}},
+        {"status": "ok", "mc": {"lole_ci": b}},
+    ]
+    fr._flag_indistinct(pts, "mc_eue")
+    assert [p["reliability_indistinct"] for p in pts] == [overlap, overlap]
