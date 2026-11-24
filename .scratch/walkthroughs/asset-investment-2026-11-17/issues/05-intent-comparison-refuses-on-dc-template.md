@@ -3,7 +3,9 @@
 
 # The intent comparison refuses on the data-centre template, with no way to supply what it needs
 
-Status: ready-for-agent
+Status: done
+
+Done in #1698 (62d4bf7c).
 Type: bug (asset-investment walkthrough, WALK-E2E-1)
 Journey steps: J1 Design intent → sizing loop → sized design (Expert)
 Severity: high

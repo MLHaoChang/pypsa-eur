@@ -83,7 +83,7 @@ export function productionTiles(p: ProcessProduct): ProductionTile[] {
 }
 
 /** "NH3" → "NH₃": a product name with its digits set as subscripts, as the templates write it. */
-function productName(carrier: string): string {
+export function productName(carrier: string): string {
   const SUB = '₀₁₂₃₄₅₆₇₈₉'
   return carrier.replace(/([A-Za-z)])(\d+)/g, (_, a: string, d: string) => a + [...d].map(c => SUB[Number(c)]).join(''))
 }

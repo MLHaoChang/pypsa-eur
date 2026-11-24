@@ -1,0 +1,44 @@
+{
+ "kinds": {
+  "market_pack_unknown": {
+   "surface": "inline",
+   "why": "GET/POST /api/simulation/commercial/market_packs/{pack_id}/... (SCU06 K8a) names a pack that does not exist (404). The assistant lists the packs from GET /api/simulation/commercial/market_packs."
+  },
+  "market_pack_stale": {
+   "surface": "inline",
+   "why": "POST /api/simulation/commercial/market_packs/{pack_id}/apply refuses a pack_hash that is not the pack's current one: the pack changed since the preview. The assistant previews again and shows the new changes before applying."
+  },
+  "market_pack_zone_unknown": {
+   "surface": "inline",
+   "why": "Market-pack preview/apply refuses when the project has no bidding zone (no zone pick and no site pin). The assistant points to the market-price card or the site pin."
+  },
+  "market_pack_zone_mismatch": {
+   "surface": "inline",
+   "why": "Market-pack preview/apply refuses a pack for another bidding zone than the project's. The assistant names both zones and offers the project's zone pack."
+  },
+  "market_pack_currency_mismatch": {
+   "surface": "inline",
+   "why": "Market-pack preview/apply refuses a pack whose currency is not the project's stated finance currency; nothing is converted. The assistant names both currencies."
+  },
+  "market_pack_needs_connection": {
+   "surface": "inline",
+   "why": "Market-pack preview/apply refuses while the project has no commercial config (no grid connection, poc_link). The assistant points to Commercial & parties to set the connection first."
+  },
+  "market_pack_needs_saved_project": {
+   "surface": "inline",
+   "why": "Market-pack apply refuses on an unsaved project: the pin of what the apply wrote lives in the project folder. The assistant asks the user to save the project first."
+  },
+  "market_pack_pin_unreadable": {
+   "surface": "inline",
+   "why": "Market-pack preview/apply refuses when market_pack.json cannot be read: what the last apply wrote is unknown, so user edits cannot be told apart. The assistant asks the user to restore or delete the file."
+  },
+  "market_pack_currency_unknown": {
+   "surface": "inline",
+   "why": "Market-pack preview/apply refuses when the project's finance inputs state no currency, so the pack's currency cannot be checked. The assistant asks the user to set the project's currency first."
+  },
+  "market_pack_invalid": {
+   "surface": "inline",
+   "why": "A stored market pack does not validate (an unknown bidding zone or another invalid field); it is refused with the field named, never a raw validation error. The assistant names the field."
+  }
+ }
+}

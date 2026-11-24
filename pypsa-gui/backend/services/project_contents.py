@@ -113,6 +113,7 @@ TABLE: tuple[Entry, ...] = (
     _f("flow_acks.json", _ALL, "acknowledged project-flow warnings"),
     _f("flow_scope.json", _ALL, "the Run's work cards (W4a)"),
     _f("grid_readiness_limits.json", _ALL, "the user's grid-readiness limits"),
+    _f("market_pack.json", _ALL, "what the last market-pack apply wrote (SCU06 K8a)"),
     _f(
         "sensitivity_case.json",
         _ALL - {FORK},

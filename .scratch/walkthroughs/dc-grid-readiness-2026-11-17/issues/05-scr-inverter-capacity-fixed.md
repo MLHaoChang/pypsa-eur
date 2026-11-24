@@ -3,7 +3,9 @@
 
 # 05: The SCR's inverter capacity is a hidden template constant, so added battery inverters never lower it
 
-Status: ready-for-agent
+Status: done
+
+Done in #1691 (9d1a3ae2).
 Type: task
 Impact: high (the SCR can read Pass while the converter fleet behind the PoC has grown several-fold)
 Templates: eh_datacenter, eh_datacenter_staged (any project whose PoC bus carries `eh_ibr_mva`)

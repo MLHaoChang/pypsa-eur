@@ -113,7 +113,7 @@ async function pastHeader(page, runId) {
   return (await header.textContent()).trim()
 }
 
-/** The one Export chooser (Expert sidebar, Project menu › Export…) on its Results workbook choice. */
+/** The one Export chooser (Hand-off › Exports, opened by the Expert sidebar's Project menu › Export…) on its Results workbook choice. */
 async function openWorkbookChoice(page) {
   const item = page.getByRole('button', { name: 'Export…', exact: true }).first()
   if (!(await item.isVisible())) await page.getByTestId('sidebar-project-menu').click()
@@ -142,8 +142,8 @@ async function stillOnPastRun(page, runId) {
 }
 
 async function closeChooser(page, shot) {
-  // The chooser's own Cancel: the one beside its Download button (Sidebar's other modals have a Cancel too).
-  await page.locator('div:has(> button:has-text("Download File"))').getByRole('button', { name: 'Cancel', exact: true }).click()
+  // The chooser is Results › Hand-off › Exports now (R6), not a dialog: leaving it is leaving Hand-off.
+  await page.getByTestId('results-group-summary').click()
   await page.getByTestId('workbook-run').waitFor({ state: 'detached', timeout: 30000 })
   if (shot) await page.screenshot({ path: path.join(artifacts, shot) })
 }

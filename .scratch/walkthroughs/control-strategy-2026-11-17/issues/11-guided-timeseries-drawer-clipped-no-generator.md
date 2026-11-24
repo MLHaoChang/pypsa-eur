@@ -3,7 +3,9 @@
 
 # 11: Guided section 6 "Edit ›" opens the whole series library, clipped, with no generator
 
-Status: ready-for-agent
+Status: done
+
+Done in #1673 (20728b0b).
 Impact: low
 Templates: Data Center Energy Hub (all templates)
 Found by: control-strategy walkthrough, 2026-11-17 (master 9491878d)

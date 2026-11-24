@@ -92,11 +92,15 @@ def _branch(component, name, index):
             flows[attribute] = [None] * len(index)
         else:
             flows[attribute] = [_number(v) for v in table[name]]
+    from services import assumed_rating
+
     return {
         "rating": _number(row[field]),
         "rating_field": field,
         "s_max_pu": _s_max_pu(component, name, index),
         **flows,
+        # only when set, so a network without the marker seals the same raw as before
+        **({"rating_assumed": True} if assumed_rating.is_assumed(row, "s_nom") else {}),
     }
 
 
@@ -191,6 +195,7 @@ def utilisation_series(branch, a, b):
 def _loading(branch, weights, a, b):
     """Per-branch values over the window; None when any input is missing."""
     rating = branch["rating"]
+    assumed = bool(branch.get("rating_assumed"))
     if any(weights[i] is None or weights[i] < 0 for i in range(a, b + 1)):
         return None
     series = utilisation_series(branch, a, b)
@@ -205,7 +210,9 @@ def _loading(branch, weights, a, b):
             ),
             "peak_branch_flow": max(flows),
             "branch_rating": rating,
-            "_above": any(u > 1 + OVER_LIMIT_TOLERANCE for u in utilisation),
+            # an assumed rating never binds, so it is never judged above (psse-import 06)
+            "_above": not assumed and any(u > 1 + OVER_LIMIT_TOLERANCE for u in utilisation),
+            "_assumed": assumed,
         }
     except (OverflowError, ValueError):
         return None
@@ -227,14 +234,22 @@ def calculate(raw, scope):
         if raw["valid_solve"] else {key: None for key in raw["branches"]}
     )
     available = {}
+    left_out = set()  # metrics withheld because the rating is assumed, never for another cause
     if all(v is not None for v in values.values()):
         if scope["profile"] == NETWORK_PROFILE:
             available = {
                 "max_branch_utilisation": max(v["peak_branch_utilisation"] for v in values.values()),
                 "branches_above_rating": sum(v["_above"] for v in values.values()),
             }
+            if all(v["_assumed"] for v in values.values()):
+                # nothing was judged: a total of 0 would read as a pass (#1409 F1)
+                available.pop("branches_above_rating")
+                left_out.add("branches_above_rating")
         else:
             available = {k: v for k, v in next(iter(values.values())).items() if not k.startswith("_")}
+            if next(iter(values.values()))["_assumed"]:
+                available.pop("hours_above_rating", None)
+                left_out.add("hours_above_rating")
     definitions = NETWORK_METRICS if scope["profile"] == NETWORK_PROFILE else METRICS
     facts, slots = [], []
     for metric in requested_metrics(scope):
@@ -258,6 +273,7 @@ def calculate(raw, scope):
         else:
             slot["reason"] = (
                 "unverified_solve" if not raw["valid_solve"]
+                else "rating_assumed" if metric in left_out
                 else "invalid_or_missing_branch_data" if metric in definitions
                 else "unsupported_metric"
             )
@@ -272,6 +288,12 @@ def notes(raw):
         f"{classes.count('Line')} Lines and {classes.count('Transformer')} Transformers; "
         f"{raw['links_excluded']} Links excluded."
     ]
+    assumed = sum(1 for b in raw["branches"].values() if b.get("rating_assumed"))
+    if assumed:
+        lines.append(
+            f"{assumed} branch(es) with an assumed rating (not stated in the file) are left out of "
+            "the above-rating count and hours; their loading is still shown."
+        )
     for component_class in raw.get("shadowed_branch_classes", []):
         lines.append(f"A {component_class} named network exists; name its class to check that branch.")
     return lines

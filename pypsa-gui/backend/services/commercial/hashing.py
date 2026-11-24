@@ -59,6 +59,7 @@ FIELDS_AFTER_V1: dict[tuple[str, str], Any] = {
     # serializer, gridspine-library-eu 01), so it never reaches a hash.
     ("Tariff", "currency"): None,                        # gridspine-library-eu 01
     ("CommercialConfig", "reserve_products"): [],        # DC grid readiness 06
+    ("CommercialConfig", "reserve_no_backup_storages"): [],  # SCU06 K8b
 }
 
 

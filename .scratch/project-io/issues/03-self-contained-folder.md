@@ -36,3 +36,5 @@ GK B3, 2026-11-18, plan GO with changes (weather part):
 - W5. Writes go through the atomic metadata helper and the apply routes' existing lock checks. A batch writes once, and a refused apply writes nothing.
 - W6. The GET readout is read-only.
 - W7. Run mutants on the bbox source, the sha validation, the per-target overwrite, the OSError path and the batch's single write, and list the kills in the PR body.
+
+- 2026-11-23 status sweep: landed in #1689 (f5611d5853); #1709 (18e84edaaf): library copies, newer_in_library, migration, and weather cutout provenance. Not checked item by item against the acceptance list.

@@ -1,0 +1,1 @@
+* Feat(gridspine): the campus bundle passes an aggregated plant and the GC-01 model set with its variant to its PSS/E pack, so a bundle-written pack can carry REPCA1, the psspy scripts and the model-set citation. The bundle's own files are unchanged.

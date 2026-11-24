@@ -153,16 +153,20 @@ def _resonance_table(row: dict, frame, path: str) -> Table:
     except ImportError as exc:  # pragma: no cover - build-shape branch
         raise SstiSourceUnavailable(f"The SSTI screens need gridspine ({exc})") from exc
 
+    from services.adequacy.grid_readiness import subsync_judged
+
     rows = []
     series = (
         frame[frame["kind"].astype(str) == SERIES]
         if frame is not None and "kind" in frame
         else None
     )
-    for _, r in series.iterrows() if series is not None else ():
+    # a row the card skips (GK A2 H1: undecided, or no resonance in the band) is never judged here either
+    judged = subsync_judged(series) if series is not None else None
+    for i, r in series.iterrows() if series is not None else ():
         verdict = (
             _judged(r["margin_hz"], row)
-            if row["verdict"] in ("pass", "warn")
+            if row["verdict"] in ("pass", "warn") and judged[i]
             else NOT_JUDGED
         )
         rows.append(

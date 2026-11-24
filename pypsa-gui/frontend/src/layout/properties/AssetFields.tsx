@@ -134,9 +134,13 @@ function DerivedRow({ spec, value, stamps }: { spec: AssetFieldSpec; value: unkn
   )
 }
 
+/** An option name longer than this does not fit the half-width column's closed dropdown (#08). */
+const WIDE_OPTION_CHARS = 12
+
 function EnumInput({ spec, fs, set, badge }: { spec: AssetFieldSpec; fs: FS; set: SetFS; badge?: ReactNode }) {
+  const wide = spec.options.some(o => o.length > WIDE_OPTION_CHARS)
   return (
-    <label className="flex flex-col justify-end gap-0.5">
+    <label className={`flex flex-col justify-end gap-0.5${wide ? ' col-span-2' : ''}`} data-testid={`asset-enum-${spec.key}`}>
       <FieldLabel className="text-[9px] text-muted truncate" badge={badge}>
         <InfoTip text={spec.help}>{spec.label}</InfoTip>
       </FieldLabel>

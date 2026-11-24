@@ -81,6 +81,7 @@ def test_the_issue_rows_are_declared():
         'eh_study_why': ('unbuilt', None),  # guided-results 02a; a later slice adds the chat tool
         'entsoe_day_ahead_prices': ('manual', 'library'),  # SCU06 S1: spends the stored token
         'table_tonne_unit_marks': ('manual', None),  # ui-modern 05f (not_via_chat.d/)
+        'market_packs': ('manual', None),  # SCU06 K8a (not_via_chat.d/), SCU06-CHAT-1
     }
     assert 'grid_code_publish' not in entries  # GRIDCODE-CHAT-1: chat tools behind a card
     assert {k: (e['disposition'], e['panel']) for k, e in entries.items()} == expected

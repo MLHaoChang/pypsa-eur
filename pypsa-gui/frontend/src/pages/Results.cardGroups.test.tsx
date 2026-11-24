@@ -9,13 +9,17 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import type { FlowScopeRegistry } from '../api/flow'
 
-const { stub, status, getFlowScope } = vi.hoisted(() => ({
+const { stub, status, getFlowScope, processView } = vi.hoisted(() => ({
   stub: (testid: string) => ({ default: () => <div data-testid={testid} /> }),
   status: { current: {} as Record<string, unknown> },
   getFlowScope: vi.fn(),
+  processView: { current: { products: [], process_units: [] } as { products: unknown[]; process_units: unknown[] } },
 }))
 
 vi.mock('./results/CapacityExpansion', () => stub('capex-stub'))
+vi.mock('./ReportsPanel', () => stub('reports-stub'))
+vi.mock('./results/ExportsTab', () => stub('exports-stub'))
+vi.mock('./results/SpecialistPacketTab', () => stub('packet-stub'))
 vi.mock('./results/Dispatch', () => stub('dispatch-stub'))
 vi.mock('./results/LoadFlow', () => stub('loadflow-stub'))
 vi.mock('./results/Prices', () => stub('prices-stub'))
@@ -46,6 +50,7 @@ vi.mock('../api/simulation', () => ({
   resultsApi: {
     getGeneratorResults: vi.fn().mockResolvedValue({}),
     getSummary: vi.fn().mockResolvedValue({}),
+    getProcessView: () => Promise.resolve(processView.current),
   },
 }))
 vi.mock('../api/network', () => ({
@@ -82,6 +87,7 @@ beforeEach(() => {
   localStorage.clear()
   status.current = { running: false, status: 'done', condition: 'optimal', objective: 5, solve_time: 1, dispatch: 'fresh' }
   getFlowScope.mockResolvedValue(registry(['capacity', 'grid', 'reliability', 'commercial', 'handoff']))
+  processView.current = { products: [], process_units: [] }
   useUIStore.setState({ uiMode: 'expert', currentProject: 'Demo', compareRailOpen: false,
     resultsTabRequest: null, activeSlidePanel: 'results' })
 })
@@ -126,7 +132,8 @@ describe('the group strip', () => {
     expect(Array.from(document.querySelectorAll('[data-testid^="results-cardtab-"]')).map(el => el.textContent))
       .toEqual(['Island & ride-through', 'Grid-forming'])
     fireEvent.click(screen.getByTestId('results-group-handoff'))
-    expect(screen.getByTestId('results-gempty').textContent).toContain('Open Reports ›')
+    expect(Array.from(document.querySelectorAll('[data-testid^="results-cardtab-"]')).map(el => el.textContent))
+      .toEqual(['Reports', 'Exports', 'Specialist packet'])
     fireEvent.click(screen.getByTestId('results-group-capacity'))
     const tabs = Array.from(document.querySelectorAll('[data-testid^="results-cardtab-"]'))
       .map(el => el.textContent)
@@ -136,18 +143,46 @@ describe('the group strip', () => {
   })
 })
 
-describe('the empty groups', () => {
-  it('Hand-off opens Reports in Expert and its section in Guided, through the shared navigation', async () => {
+describe('Hand-off (R6)', () => {
+  it('opens on Reports, and Exports and the Specialist packet are its other tabs', async () => {
     await renderResults()
     fireEvent.click(screen.getByTestId('results-group-handoff'))
-    expect(screen.getByTestId('results-gempty').textContent).toContain('Open Reports ›')
-    fireEvent.click(screen.getByTestId('results-gempty-open'))
-    expect(useUIStore.getState().activeSlidePanel).toBe('reports')
-    expect(useUIStore.getState().activeSection).toBe('results')
-    useUIStore.setState({ uiMode: 'guided' })
-    fireEvent.click(screen.getByTestId('results-group-handoff'))
-    fireEvent.click(screen.getByTestId('results-gempty-open'))
-    expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
+    expect(screen.getByTestId('reports-stub')).toBeTruthy()
+    expect(screen.queryByTestId('results-gempty')).toBeNull()
+    fireEvent.click(screen.getByTestId('results-cardtab-exports'))
+    expect(screen.getByTestId('exports-stub')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('results-cardtab-specialist_packet'))
+    expect(screen.getByTestId('packet-stub')).toBeTruthy()
+    // Hand-off is the end of the road: no "Next" pointing on.
+    expect(screen.queryByTestId('results-next-handoff')).toBeNull()
+  })
+
+  it('the last tab of another group ends with Next: Hand-off › Reports', async () => {
+    await renderResults()
+    fireEvent.click(screen.getByTestId('results-group-capacity'))
+    expect(screen.queryByTestId('results-next-handoff')).toBeNull()   // Build is not the last card tab
+    fireEvent.click(screen.getByTestId('results-cardtab-costs_prices'))
+    fireEvent.click(within(screen.getByTestId('results-next-handoff')).getByRole('button'))
+    expect(screen.getByTestId('reports-stub')).toBeTruthy()
+    expect(screen.getByTestId('results-group-handoff').getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('with a past run on screen, Hand-off still shows its tabs beside the run chrome', async () => {
+    useUIStore.setState({ discussedRun: { runId: 'run-past', section: 'results_capacity' } })
+    try {
+      await renderResults()
+      fireEvent.click(screen.getByTestId('results-group-handoff'))
+      fireEvent.click(screen.getByTestId('results-cardtab-exports'))
+      expect(screen.getByTestId('exports-stub')).toBeTruthy()
+      expect(screen.getByTestId('discussed-run-chrome').getAttribute('data-run-id')).toBe('run-past')
+    } finally { useUIStore.setState({ discussedRun: null }) }
+  })
+
+  it('the Reports sidebar row and every other entry land on Hand-off › Reports', () => {
+    useUIStore.setState({ activeSlidePanel: null, resultsTabRequest: null })
+    useUIStore.getState().setSlidePanel('reports')
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
+    expect(useUIStore.getState().resultsTabRequest).toBe('reports')
   })
 })
 
@@ -238,5 +273,24 @@ describe('the Control card (W10 R3)', () => {
     useUIStore.setState({ uiMode: 'guided', resultsTabRequest: 'grid_forming' })
     await renderResults()
     expect(screen.getByTestId('gridforming-stub')).toBeTruthy()
+  })
+})
+
+describe('the Products view (guided-results 09)', () => {
+  const costsViews = async () => {
+    await renderResults()
+    fireEvent.click(screen.getByTestId('results-group-capacity'))
+    fireEvent.click(screen.getByTestId('results-cardtab-costs_prices'))
+    return screen.getByTestId('results-subviews').textContent ?? ''
+  }
+
+  it('shows on a product bus and stays hidden when the solve has process units but no product', async () => {
+    processView.current = { products: [], process_units: [{ name: 'haber', product_bus: 'NH3 bus' }] }
+    expect(await costsViews()).not.toContain('Products')
+  })
+
+  it('shows when the process view lists a product', async () => {
+    processView.current = { products: [{ bus: 'NH3 bus' }], process_units: [{ name: 'haber', product_bus: 'NH3 bus' }] }
+    expect(await costsViews()).toContain('Products')
   })
 })

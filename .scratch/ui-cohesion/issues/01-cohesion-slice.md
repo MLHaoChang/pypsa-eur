@@ -57,3 +57,7 @@ Titles 15 px; links and eyebrows ink; selection = ink ring plus accent halo; eye
 - The banner shows once per session only if one assistant-setup entry remains elsewhere. The chat launcher gets a reserved gutter.
 - Shots required: the 8 px to 9 px canvas labels, and Section 5 as cards on the microgrid.
 - THEME-LIGHT (c) and expert-catalogue slice 04 are sequenced so the canvas hex tables move once, not twice.
+
+## Comments
+
+- 2026-11-23 status sweep: landed in #1823 (5bf7a297); #1837 (ce472a31); #1856 (a5f2bdca): A, B2 and B1 part 1. Remains: any B1 part 2, optional F8 skeleton, done-when shots and facts check.

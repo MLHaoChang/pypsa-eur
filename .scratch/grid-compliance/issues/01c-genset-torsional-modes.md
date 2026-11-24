@@ -3,7 +3,7 @@
 
 # GC-01c Torsional modes of a genset in the campus description
 
-Status: ready-for-agent
+Status: done
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: none
@@ -43,3 +43,22 @@ as its own issue, kept separate from GC-01b, whose plan already has its GO.
 **2026-11-17.** Filed from GC-08 PR3 (the owner picked option 1 via the coordinator). Conditions
 from GK A2's GC-08 rulings that carry over: an uncomputable row reads "not evaluated" with a reason,
 and a reader round trip is not an oracle (test the margin against a hand-computed f0 − f_er).
+
+**2026-11-23.** GK A2 plan GO on conditions C1–C7 (verbatim). Keep measured/datasheet/assumed; no `code` source is needed.
+
+C1. Partial coverage never reads clear. Take a campus with two gensets where only GEN1 has modes. GEN2's row (or the machine-level result) reads not evaluated, never clear, and subsync_verdict is never `clear` while any genset lacks modes. If subsync_scan cannot express that per machine, say so before building, rather than letting the screen pass on the machines it knows. Test it.
+
+C2. Assumed modes. A row judged on an `assumed` mode carries the mode's source on the row, and a `clear` that rests on assumed modes only says so in its reason (AS11B-RVC-1 analogue: never a silent pass on an assumed input). Test the reason text literally.
+
+C3. Literal oracles (M6a).
+- The margins (0.445…/0.928…, 2.945…/1.572…) are hand-computed literals, compared with a tight tolerance (rel 1e-9 or abs 1e-6), never pytest.approx's default.
+- The clearance in the boundary test is a literal, never the profile's constant (GK A (33)).
+- State whether margin == clearance flags or clears. Pin it with a case at exact equality, chosen so the numbers are exact in binary, or by monkeypatching f_er to a literal. The `<`↔`<=` mutant must die.
+
+C4. Freeze and fingerprint identity. A campus without the key keeps its data/freeze hash and GC-01 model-set hash, pinned against literal digests recorded from master 46f3bdc7, never the same code run without the key (#1773 W1). Adding `Campus.torsional_modes` must not move them. A campus with the key moves the freeze hash: test that too.
+
+C5. Refusals. Your list is right. Each one asserts ContractError and the literal field path `units.<g>.torsional_modes_hz[i]`. bool is refused before the number check (bool is an int). A 60 Hz campus refuses 60 and accepts 59.9. Show the f0 guard's `>=`→`>` mutant dies.
+
+C6. Wiring. Every subsync_scan call in ssti_screens_campus (the PCC and each far-side bus) gets the modes. Test a far-side bus row with a mode, and show the mutant that drops the kwarg at each call site dies (#1548: race and wiring fixes are pinned per call site).
+
+C7. Visibility. Name in the body where these rows reach the user: the scorecard through grid_readiness (flag→warn, clear→pass), the GC-09 pack tables, the GC-08 pack. If a campus the app accepts (upload or editor) can carry the key, check it end to end in the real app (E2E-DONE-1); otherwise say how a user gets modes in today. Respect ruling (b): a pack table never shows a judged value the scorecard refused. Add a release note.

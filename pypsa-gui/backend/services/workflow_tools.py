@@ -661,7 +661,9 @@ def _network_input_fingerprint(ctx, *, exact=False):
         if invalid:
             parts.append("invalid")
         else:
-            floors, strings = _rp.derive_backup(n, getattr(ctx, "storage_dir", None))
+            floors, strings = _rp.derive_backup(
+                n, getattr(ctx, "storage_dir", None),
+                _rp.attested_of(ctx.solver_state["solver_config"]))
             parts.append(json.dumps({"inputs": _rp.inputs_digest(products, floors),
                                      "strings": sorted(strings)}, sort_keys=True))
     # DC 07: an operational run keys on the capacity run's recorded sizes, so a

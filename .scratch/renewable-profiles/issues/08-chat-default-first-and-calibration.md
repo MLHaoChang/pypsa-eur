@@ -14,3 +14,7 @@ Requirements: R7 in [the spec](../spec.md)
 - Tier A journeys OJ-47–OJ-54 (`.scratch/live-copilot/owner-journeys.md`) scripted on the stub wire.
 
 Acceptance: OJ-47–OJ-54 pass in Tier A. The inventory check passes. No profile number in the words lacks a tool fact.
+
+## Comments
+
+- 2026-11-23 status sweep: landed in no merged PR: per the issue audit of 2026-11-19 the readiness, shaping and compare tools and default-first workflow text are on master. Remains: OJ-47..OJ-54 Tier A journeys and the inventory check.

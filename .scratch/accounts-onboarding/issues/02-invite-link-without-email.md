@@ -34,3 +34,5 @@ How should an admin hand over the link when no email goes out?
 `pypsa-gui/backend/routers/admin.py` (~180–243), `pypsa-gui/backend/services/auth_service.py`, `pypsa-gui/frontend/src/pages/admin/UsersPage.tsx`.
 
 ## Comments
+
+- 2026-11-23 status sweep: landed in #1803 (e4585d74): truthful invite toast with copyable link, token pages open when signed out. Remains: POST returning set_password_url to a super-admin when email_sent is false.

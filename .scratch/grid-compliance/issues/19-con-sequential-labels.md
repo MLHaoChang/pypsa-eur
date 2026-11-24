@@ -3,7 +3,9 @@
 
 # GC-19: sequential .con labels with a label-to-id map
 
-Status: ready-for-agent
+Status: done
+
+Done in #1743 (3b9ea4f9).
 Model tier: sonnet
 Size: S
 Blocked by: #1607 (writes `contingencies.py`), #1608, #1609, #1589 (changes `contingency_list.py`)

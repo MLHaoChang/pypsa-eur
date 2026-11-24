@@ -3,7 +3,9 @@
 
 # 21 The IPP business-case preset cannot run as applied: indexation, life and terminal value are missing
 
-Status: ready-for-agent
+Status: done
+
+Done in #1893 (babc7da8).
 Blocked by: none (12, presets, is done with its PR pending; this is what a user meets after applying it)
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), walk W2 (shots `s24-bc-run`, `s28-bc-result`).
 Model: sonnet. Review: GK B (finance).

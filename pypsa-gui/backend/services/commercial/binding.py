@@ -296,7 +296,10 @@ def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
     # Reserve capacity prices (DC grid readiness 06, GK B L3): fully covered only.
     reserve_prices = {RP.price_column(p.id): (aligned(p.capacity_price, "reserve_price_coverage"),
                                               p.capacity_price)
-                      for p in commercial.reserve_products}
+                      for p in commercial.reserve_products
+                      # No price (a pack template's empty ref, SCU06 K8a): nothing is
+                      # bound, so the solve refuses it and settlement is None, never 0.
+                      if p.capacity_price is not None}
     cfe = ({SI.CFE_COLUMN: (aligned(commercial.grid_cfe_share_ref, "grid_cfe_share_coverage"),
                             commercial.grid_cfe_share_ref)}
            if commercial.grid_cfe_share_ref is not None else {})
@@ -348,6 +351,8 @@ def _reserve_currencies(commercial, currency: str | None,
     `currency` does not match (409 `currency_mismatch`), before any write."""
     out: dict[str, str | None] = {}
     for p in commercial.reserve_products:
+        if p.capacity_price is None:
+            continue  # no price, nothing to check (refused at solve)
         if series_meta is None:
             if currency:
                 raise BindingRefusal(409, CURRENCY_MISMATCH, (
