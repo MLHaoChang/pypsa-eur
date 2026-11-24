@@ -267,8 +267,11 @@ def project_readiness(project_id: str | None = None) -> dict:
         if ctx.user_ts_unreadable:
             blockers.append("The saved user time-series store cannot be read.")
         dirty = dirty_state.is_dirty(ctx)
-        engines = _network_engines(not blockers, freshness.get("state") == "fresh",
-                                   solve_freshness(ctx)["results_current"], lf_current)
+        results_current = solve_freshness(ctx)["results_current"]
+        # A value edit keeps the last run's columns (pg13), so the dispatch's shape stays
+        # "fresh"; the load flow seeds from it only while the run itself is still current.
+        engines = _network_engines(not blockers, freshness.get("state") == "fresh" and results_current,
+                                   results_current, lf_current)
         return {**identity, "saved": saved, "dirty": dirty, "ready": not blockers, **_engine_choice(engines),
                 "blockers": blockers, "validation": {**validation, "issues": validation.get("issues", [])[:12]},
                 "validation_issue_count": len(validation.get("issues", [])), "solvers": solvers,
