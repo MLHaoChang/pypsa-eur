@@ -1750,7 +1750,16 @@ def post_eh_study_abort():
 
 
 @results_router.post("/eh_study")
-def post_eh_study(body: EhStudyRequest | None = None, user: User = Depends(require_user)):
+def post_eh_study_http(body: EhStudyRequest | None = None, user: User = Depends(require_user)):
+    """`POST /results/eh_study`. The study's run record is bound to the starting user
+    (`run_evidence.start_study_run` reads the acting user); without it the record was silently
+    skipped and no run existed (template-e2e 30). The chat tool calls `post_eh_study` itself,
+    with its own acting user already set."""
+    with _result_actor(user):
+        return post_eh_study(body)
+
+
+def post_eh_study(body: EhStudyRequest | None = None):
     """
     Start the Energy Hub reference-design study in a worker thread.
 
@@ -1762,15 +1771,12 @@ def post_eh_study(body: EhStudyRequest | None = None, user: User = Depends(requi
     from routers.simulation import _state_update
     from services.adequacy.eh_study_runner import start_eh_study
     _refuse_if_mesh_busy("eh_study")
-    # The study's run record is bound to the starting user (`run_evidence.start_study_run` reads the
-    # acting user); without it the record was silently skipped and no run existed (template-e2e 30).
-    with _result_actor(user):
-        return start_eh_study(
-            body,
-            solver_state=_state,
-            state_update=_state_update,
-            publish_study=_publish_study,
-        )
+    return start_eh_study(
+        body,
+        solver_state=_state,
+        state_update=_state_update,
+        publish_study=_publish_study,
+    )
 
 
 # ── Edge Investment Case P4: the single-owner finance run (WP4.6b) ──────────
