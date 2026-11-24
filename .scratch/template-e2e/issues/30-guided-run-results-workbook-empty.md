@@ -25,6 +25,7 @@ A user who works in Guided, the default path, cannot export the results workbook
 ## Question for the owner
 
 Answered 2026-11-24 (owner decision TE2E-30-1): option 1, the study's own solve.
+How it is held (owner decision TE2E-30-2): "LOPF first, study fallback". The study solve is kept alongside the network (`services/study_solve.py`); the header and workbook use it only when there is no LOPF solve.
 
 
 What should the workbook export after a Guided study run?
