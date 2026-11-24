@@ -984,9 +984,14 @@ def gen_co2_rate(ctx: Ctx):
     # and its no-load fuel (already MWh of fuel, no efficiency) emits in every
     # committed hour.
     from services import fuel_curve
+    from services.co2_override import override_series
 
     slope = fuel_curve.curve_slope(ctx.params)
     rate = p * slope * factor if slope is not None else p / eff * factor
+    # A per-snapshot intensity (`services.co2_override`, e.g. the grid's by period).
+    ovr = override_series(ctx.n, ctx.name, factor / eff, p.index) if slope is None else None
+    if ovr is not None:
+        rate = p * ovr
     no_load = fuel_curve.no_load_fuel(ctx.params)
     status = gen_status(ctx) if no_load > 0 else None
     if status is not None:

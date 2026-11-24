@@ -31,6 +31,7 @@ import math
 import pandas as pd
 
 from services import fuel_curve as _fuel_curve
+from services.co2_override import has_override, override_series
 from services import period_utils as _period_utils
 from services.adequacy.slack import (
     DSR_SLACK_CARRIER,
@@ -700,7 +701,10 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         [period_price.get(int(p), cfg.co2_price) for p in period_lvl],
                         index=n.snapshots, dtype=float,
                     )
-                mask = gens["carrier"].isin(co2.index) & (gens["efficiency"] > 0)
+                # A generator with a per-snapshot intensity (`services.co2_override`) is priced at it
+                # whatever its carrier says; every other emitter keeps its carrier's figure, bit for bit.
+                ovr_mask = pd.Series([has_override(n, g) for g in gens.index], index=gens.index)
+                mask = (gens["carrier"].isin(co2.index) | ovr_mask) & (gens["efficiency"] > 0)
                 if mask.any():
                     idx = gens.index[mask]
                     # homer-parity 02e (GK B H1): a curve genset's CO2 per MWh follows its slope, the fuel its
@@ -712,13 +716,19 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         # Build the time-varying surcharge per emitting generator:
                         # surcharge[g, t] = price_series[t] × co2[carrier(g)] / efficiency[g]
                         # (× slope[g] for a curve genset)
-                        intensity_per_gen = gens.loc[idx, "carrier"].map(co2)
+                        intensity_per_gen = gens.loc[idx, "carrier"].map(co2).fillna(0.0)
                         eff_per_gen = gens.loc[idx, "efficiency"]
+
+                        def _ovr_t(g, intensity_per_gen, eff_per_gen):
+                            return override_series(
+                                n, g, float(intensity_per_gen.loc[g]) / float(eff_per_gen.loc[g]))
+
                         base_mc = n.get_switchable_as_dense(
                             "Generator", "marginal_cost", inds=idx)
                         # outer = snapshot × generator; broadcast price (T,) × intensity (G,)
                         surcharge = pd.DataFrame(
                             {g: price_series * float(intensity_per_gen.loc[g]) * slopes[g] if g in slopes
+                             else price_series * _ovr_t(g, intensity_per_gen, eff_per_gen) if ovr_mask.loc[g]
                              else price_series * float(intensity_per_gen.loc[g]) / float(eff_per_gen.loc[g])
                              for g in idx},
                             index=n.snapshots,
@@ -744,9 +754,15 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         )
                     else:
                         # Single-period network OR no per-period dict: uniform price path.
-                        add_per_mwh = gens.loc[idx, "carrier"].map(co2) * cfg.co2_price / gens.loc[idx, "efficiency"]
+                        add_per_mwh = (
+                            gens.loc[idx, "carrier"].map(co2).fillna(0.0) * cfg.co2_price / gens.loc[idx, "efficiency"]
+                        )
                         for g, slope in slopes.items():
                             add_per_mwh.loc[g] = float(co2[gens.at[g, "carrier"]]) * cfg.co2_price * slope
+                        # A per-snapshot intensity is priced on the dense cost below, not as a scalar.
+                        ovr_gens = [g for g in idx if ovr_mask.loc[g] and g not in slopes]
+                        for g in ovr_gens:
+                            add_per_mwh.loc[g] = 0.0
                         original_mc = gens.loc[idx, "marginal_cost"].copy()
                         gens.loc[idx, "marginal_cost"] = original_mc + add_per_mwh
                         undo_actions.append(("col", "generators", "marginal_cost", idx, original_mc))
@@ -757,6 +773,16 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                             for g in with_series:
                                 n.generators_t.marginal_cost[g] = mc_t[g] + float(add_per_mwh.loc[g])
                             undo_actions.append(("t_marginal_cost", saved_t_mc, []))
+                        if ovr_gens:
+                            saved_ovr = n.generators_t.marginal_cost[
+                                [g for g in ovr_gens if g in n.generators_t.marginal_cost.columns]].copy()
+                            new_ovr = [g for g in ovr_gens if g not in n.generators_t.marginal_cost.columns]
+                            base_ovr = n.get_switchable_as_dense("Generator", "marginal_cost", inds=ovr_gens)
+                            for g in ovr_gens:
+                                t_per_mwh = override_series(
+                                    n, g, float(co2.get(gens.at[g, "carrier"], 0.0)) / float(gens.at[g, "efficiency"]))
+                                n.generators_t.marginal_cost[g] = base_ovr[g] + cfg.co2_price * t_per_mwh
+                            undo_actions.append(("t_marginal_cost", saved_ovr, new_ovr))
                         phase(
                             f"Applied CO2 price {cfg.co2_price:.1f} EUR/tCO2 to {len(idx)} "
                             f"fossil generator(s) (sum surcharge {add_per_mwh.sum():.2f} EUR/MWh)."

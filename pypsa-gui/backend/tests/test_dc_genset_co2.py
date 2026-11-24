@@ -297,3 +297,125 @@ def test_a_pack_row_with_no_value_falls_to_the_default(monkeypatch):
         lambda *a, **k: SimpleNamespace(cost_values=[blank]),
     )
     assert T._genset_efficiency(None) == pytest.approx(1 / 2.8)
+
+
+# ── one hand figure across every surface (owner decision DC03-GRIDCO2-1) ────
+# 1000 MW from the grid on the first 84 of period 2027's 168 snapshots, where the
+# grid intensity is 0.10 t/MWh el; every snapshot stands for 8760/168 h. By hand:
+# 3 years x 84 x (8760/168) h x 1000 MW x 0.10 t/MWh = 1,314,000 t, priced at 50 EUR/t = 65.7 MEUR.
+HAND_T = 3 * 84 * (8760 / 168) * 1000.0 * 0.10  # period 2027 stands for 3 years
+PRICE = 50.0
+
+
+def _hand_net():
+    n = T.build_eh_datacenter_staged()
+    first = n.snapshots.get_level_values(0)[0]
+    in_first = n.snapshots.get_level_values(0) == first
+    half = n.snapshots[in_first][:84]
+    p = pd.DataFrame(0.0, index=n.snapshots, columns=n.generators.index)
+    p.loc[half, "grid_supply"] = 1000.0
+    n.generators_t.p = p
+    n.generators_t["eh_co2_t_per_mwh"].loc[half, "grid_supply"] = 0.10
+    return n, half
+
+
+def test_every_co2_surface_reads_the_same_per_snapshot_intensity():
+    from services.asset_results import compute as C
+    from services.solver.assumptions import _apply_modelling_assumptions
+    from services.solver.diagnostics import _log_cost_decomposition_post_solve
+    from services.solver_service import SolverConfig
+
+    n, half = _hand_net()
+    cmp_, res = _both(n)
+    assert cmp_.total_kt.total * 1000.0 == pytest.approx(HAND_T, rel=1e-9)
+    assert res["total_tCO2"] == pytest.approx(HAND_T, rel=1e-9)
+    first = res["by_period"][0]
+    assert first["total_tCO2"] == pytest.approx(HAND_T, rel=1e-9)
+    # the asset results
+    ctx = C.build_ctx(n, "Generator", "grid_supply", source="lopf", sns=n.snapshots)
+    assert C.gen_co2_total(ctx) == pytest.approx(HAND_T, rel=1e-9)
+    # the solve diagnostics: emitted tonnes and the surcharge, to the log's own rounding
+    lines: list[str] = []
+    cfg = SolverConfig(co2_price=PRICE)
+    _log_cost_decomposition_post_solve(n, cfg, n.snapshots, None, lines.append)
+    row = next(x for x in lines if "2027:" in x)
+    assert f"CO2_surcharge={HAND_T * PRICE / 1e6:.2f}M€ ({HAND_T / 1e3:.1f} kt)" in row
+    # the LP's CO2 price: 50 EUR/t x 0.10 t/MWh on the half, x the carrier's 0.35 elsewhere
+    before = n.get_switchable_as_dense(
+        "Generator", "marginal_cost", inds=["grid_supply"]
+    )["grid_supply"].copy()
+    restore, _ = _apply_modelling_assumptions(n, cfg, lambda *a, **k: None)
+    try:
+        after = n.get_switchable_as_dense(
+            "Generator", "marginal_cost", inds=["grid_supply"]
+        )["grid_supply"]
+        step = after - before
+        assert step.loc[half].to_numpy() == pytest.approx(PRICE * 0.10)
+        rest = step.drop(half)
+        assert rest.to_numpy() == pytest.approx(
+            PRICE
+            * n.generators_t["eh_co2_t_per_mwh"]["grid_supply"].drop(half).to_numpy()
+        )
+    finally:
+        restore()
+    assert n.get_switchable_as_dense(
+        "Generator", "marginal_cost", inds=["grid_supply"]
+    )["grid_supply"].equals(before)
+
+
+def test_a_negative_intensity_carrier_without_an_override_is_not_counted():
+    # master's guard: a generator whose carrier intensity is <= 0 emits nothing here
+    n = T.build_eh_datacenter()
+    n.carriers.loc["gas", "co2_emissions"] = -0.5
+    _dispatch(n, genset_1=-1.0)
+    n.generators_t.p.iloc[1:] = 0.0
+    cmp_ = _compute_emissions_summary(n, [], False, True)
+    assert "gas" not in cmp_.by_carrier_kt
+    assert cmp_.total_kt.total == 0.0
+
+
+def test_the_results_view_sums_each_snapshot_not_a_period_mean():
+    # non-constant dispatch x non-constant intensity: 2 MW only where the intensity is 0.10
+    n, ovr = _staged_with_override()
+    first = n.snapshots.get_level_values(0)[0]
+    idx = ovr.index[ovr.index.get_level_values(0) == first]
+    ovr.loc[idx[: len(idx) // 2], "grid_supply"] = 0.10
+    p = pd.DataFrame(0.0, index=n.snapshots, columns=n.generators.index)
+    p.loc[idx[: len(idx) // 2], "grid_supply"] = 2.0
+    n.generators_t.p = p
+    cmp_, res = _both(n)
+    expect = 3 * (len(idx) // 2) * (8760 / 168) * 2.0 * 0.10  # 2027 stands for 3 years
+    assert res["total_tCO2"] == pytest.approx(expect, rel=1e-9)
+    assert cmp_.total_kt.total * 1000.0 == pytest.approx(expect, rel=1e-9)
+
+
+def test_master_digests_return_with_the_gas_efficiency_at_one(monkeypatch, tmp_path):
+    """The single-year digest and the reserve-attestation fingerprints, re-pinned for
+    this change, are master's old literals again when the efficiency is 1."""
+    import project_templates.eh_templates as P
+    import tests.test_reserve_attestation as RA
+    from tests.test_energy_hub_template_staged import _digest
+
+    for m in (T, P):
+        monkeypatch.setattr(m, "_genset_efficiency", lambda load_spec: 1.0)
+    monkeypatch.setattr(
+        RA,
+        "MASTER_FP_PLAIN",
+        "4cd91e31fcad778afaf0ef46e0fbde89f7eec6b185126a43389b720fe7a17f0f",
+    )
+    monkeypatch.setattr(
+        RA,
+        "MASTER_FP_PRODUCTS",
+        "c3146876a727aa76625fc9d1e4ac8cb749b2637d6a58423c049f512fee62b92b",
+    )
+    RA.test_b3_without_an_attestation_the_floors_digest_and_fingerprints_are_masters(
+        tmp_path
+    )
+    import numpy as np
+
+    n = T.build_eh_datacenter()
+    for frame in ("generators", "storage_units", "links"):
+        df = getattr(n, frame)
+        rows = [a for a in T.DC_EXISTING if a in df.index]
+        df.loc[rows, ["overnight_cost", "discount_rate"]] = np.nan
+    assert _digest(n) == "32b282c3eb61543e"

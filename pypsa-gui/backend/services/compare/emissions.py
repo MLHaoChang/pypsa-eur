@@ -16,6 +16,7 @@ from models.schemas import (
     CarrierPeriodValue,
     EmissionsComparison,
 )
+from services.co2_override import has_override, override_series
 from services.compare.support import (
     _build_snapshot_weights,
     _co2_intensity_map,
@@ -89,10 +90,10 @@ def _compute_emissions_summary(n, periods, is_multi, has_solve) -> EmissionsComp
 
         carrier = str(gens.at[g, "carrier"]).lower() if "carrier" in gens.columns else ""
         intensity = co2_map.get(carrier, 0.0)
-        # A per-period generator intensity (t/MWh el, e.g. the grid's, in
-        # `generators_t.eh_co2_t_per_mwh`) replaces the carrier's single figure.
-        gen_t = n.generators_t.get("eh_co2_t_per_mwh")
-        overridden = gen_t is not None and g in gen_t.columns
+        # A per-snapshot generator intensity (t/MWh el, e.g. the grid's) replaces
+        # the carrier's single figure (`services.co2_override`).
+        if intensity <= 0 and not has_override(n, g):
+            continue
         eff = float(gens.at[g, "efficiency"]) if "efficiency" in gens.columns else 1.0
         if not _math.isfinite(eff) or eff <= 0:
             eff = 1.0
@@ -102,8 +103,9 @@ def _compute_emissions_summary(n, periods, is_multi, has_solve) -> EmissionsComp
         # CO2 mass in tons → /1000 for kt.
         co2_total_kt = mwh_total * out_intensity / 1000.0
         co2_pp_kt = {p: v * out_intensity / 1000.0 for p, v in mwh_pp.items()}
-        if overridden:  # a snapshot with no figure reads the carrier's own t/MWh el
-            by_t = weighted * gen_t[g].reindex(sns).fillna(out_intensity)
+        ovr = override_series(n, g, out_intensity, sns)
+        if ovr is not None:  # a snapshot with no figure reads the carrier's own t/MWh el
+            by_t = weighted * ovr
             co2_total_kt = float(by_t.sum()) / 1000.0
             co2_pp_kt = {p: v / 1000.0 for p, v in _per_period_groupby(by_t, sns, is_multi).items()}
         if g in no_load_t.columns:
