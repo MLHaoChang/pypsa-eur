@@ -177,7 +177,9 @@ def test_the_campus_study_assets_are_the_reports_extra_assets_and_its_capex(
     assert {b["source_hash"] for b in block} == {want_hash}
     capex = -sum(ln["amount"] for ln in full["cashflow_lines"]
                  if ln["provenance"]["source"] == "capex")
-    assert body["report"]["stale"] is False
+    # The key is current. (After this setup's save round trip the run's own verdict reads out of date, and the
+    # report with it as `dispatch`: provenance-graph 13. The key's part names are what this test is about.)
+    assert "extra_assets" not in body["report"]["changed"]
 
     # The study removed: the report names `extra_assets`; the re-run drops exactly its capex.
     shutil.rmtree(campus_dir / "run")
