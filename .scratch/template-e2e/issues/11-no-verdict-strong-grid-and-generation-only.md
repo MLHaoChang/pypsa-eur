@@ -3,7 +3,7 @@
 
 # 11 — No reliability verdict for strong-grid and generation-only templates
 
-Status: ready-for-agent
+Status: done
 Impact: high
 Templates: H2 hub (both), ammonia, IPP
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)

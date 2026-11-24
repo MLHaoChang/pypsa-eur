@@ -74,6 +74,9 @@ const results = []
 
 const panelText = async ctx => (await ctx.page.getByTestId('hub-design-panel').innerText()).replace(/\n+/g, ' | ')
 
+// template-e2e 11: the H2 hub, ammonia and IPP templates have no verdict; the same place says so.
+const verdictOf = page => page.getByTestId('hub-results-verdict').or(page.getByTestId('hub-results-no-verdict'))
+
 async function runStudy(ctx, label) {
   await L.step(ctx, `${label}: run the study from section 9`, async () => {
     await L.goSection(ctx, 'Readiness and run')
@@ -81,7 +84,7 @@ async function runStudy(ctx, label) {
   })
   const started = Date.now()
   await L.step(ctx, `${label}: wait for the verdict`, async () => {
-    await ctx.page.getByTestId('hub-results-verdict').waitFor({ timeout: RUN_TIMEOUT_MS })
+    await verdictOf(ctx.page).waitFor({ timeout: RUN_TIMEOUT_MS })
   })
   return Math.round((Date.now() - started) / 1000)
 }
@@ -258,18 +261,18 @@ async function journey(t) {
     const seconds = await runStudy(ctx, 'first run')
     ctx.runSeconds = seconds
     await L.step(ctx, 'results: verdict with hours per year, a cost in euro and a biggest risk with its cost', async () => {
-      const verdict = await page.getByTestId('hub-results-verdict').innerText()
+      const verdict = await verdictOf(page).innerText()
       // The H2 hub template has no goal yet (gap 06): its verdict then says so instead of giving hours per year.
-      assert.match(verdict, /\d+(\.\d+)? h\/yr|No reliability goal is set/, `verdict is neither a goal result nor the no-goal notice: ${verdict.slice(0, 80)}`)
+      assert.match(verdict, /\d+(\.\d+)? h\/yr|No reliability goal is set|No reliability verdict for this site type/, `verdict is neither a goal result nor the no-goal notice: ${verdict.slice(0, 80)}`)
       const text = await panelText(ctx)
       assert.match(text, /(Yearly cost|Cost over the plan)[\s\S]{0,120}€\s*\d/, 'no cost in euro')
       assert.match(text, /Biggest risks[^|]*\|[^|]*about €\s*\d/, 'no biggest risk with a cost')
       if (mode === 'short') assert.ok(seconds <= SHORT_BUDGET_S, `study took ${seconds}s, over the ${SHORT_BUDGET_S}s short budget`)
     })
     await L.step(ctx, 'section 10 (Results & reports) shows the same verdict the run page handed over', async () => {
-      const verdict = await page.getByTestId('hub-results-verdict').innerText()
+      const verdict = await verdictOf(page).innerText()
       await L.goSection(ctx, 'Results & reports')
-      assert.equal(await page.getByTestId('hub-results-verdict').innerText(), verdict)
+      assert.equal(await verdictOf(page).innerText(), verdict)
     })
     await L.gap(ctx, '08', 'Results show "Assumptions behind this result" listing each defaulted input as Assumed', async () => {
       assert.match(await panelText(ctx), /Assumptions behind this result[\s\S]*Assumed/)

@@ -17,7 +17,8 @@ export type ChapterId = Exclude<ResultsGroup, 'summary'>
 
 /** Where a tile's detail is: a Results tab, the campus panel, or a Guided step. */
 export type ChapterOpen =
-  | { panel: 'results'; tab: ResultsTab }
+  /** `report`: land on the Expert reference-design report, not only the tab. */
+  | { panel: 'results'; tab: ResultsTab; report?: boolean }
   | { panel: 'campusStudy' | 'campusResults' }
   | { step: 'goal' }
 
@@ -48,6 +49,8 @@ export interface ChapterInputs {
                  verdict: 'pass' | 'fail' | 'inconclusive' | null
                  /** The project has its own solve; `false` marks the figure as the study's alone (G5). */
                  solved?: boolean
+                 /** template-e2e 11: this site type has no reliability verdict. */
+                 noVerdict?: boolean
                  /** The review says the study is out of date (N4). */
                  stale?: boolean
                  /** Years the Monte Carlo modelled (`certification.horizon_years`); names the basis line (N10). */
@@ -148,6 +151,10 @@ function gridPlan({ campus, notHub }: ChapterInputs['grid']): Omit<ChapterTile, 
 
 function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 'group'> {
   const label = 'Expected shortfall'
+  if (r.noVerdict) {
+    // The Verdict line above says it; the tile keeps its pill and a way to the report.
+    return { label, value: '', state: 'not_modelled', open: { panel: 'results', tab: 'adequacy', report: true } }
+  }
   if (r.running) {
     return { label, value: '', state: 'running', reason: 'The reliability study is running.',
       open: { panel: 'results', tab: 'adequacy' } }

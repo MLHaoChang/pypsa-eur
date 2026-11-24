@@ -104,7 +104,7 @@ _NEEDS_TEMPLATE = "Needs an Energy Hub site: a project made from an example or y
 # A generation-only template whose network has no Load (the IPP plant, #485's
 # rule in `flow_service`): the study has nothing to make adequate, so the Run
 # never requests it and Reliability is not offered (UX gate).
-_NO_LOAD = "Nothing to make adequate: this site only generates and has no load."
+_NO_LOAD = "No reliability verdict for this site type: it only generates and has no load. Check instead: net revenue, NPV and IRR."
 
 # (card, option) → (status, reason). modular-cards §1, last column; "per W0"
 # reads not yet available until W0 classifies it supported.
