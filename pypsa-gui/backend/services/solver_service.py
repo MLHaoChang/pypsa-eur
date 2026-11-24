@@ -1696,19 +1696,19 @@ def run_simulation(
             if (_co2 is not None and status not in ("ok", "optimal")
                     and "infeasible" in str(condition).lower()):
                 try:
-                    phase("CO2 limit: the solve is infeasible; one extra LP finds the "
-                          "least emissions reachable without the cap.")
+                    phase("CO₂ limit: the solve is infeasible. One extra LP finds the "
+                          "least emissions reachable without the limit.")
                     _co2 = dict(_co2, refusal=_co2_cap.unreachable(
                         network, _co2, _co2_lhs, config.solver_name,
                         getattr(config, "solver_options", None) or {}))
                     phase(_co2["refusal"]["message"])
                 except Exception as _cexc:
-                    phase(f"CO2 limit: least emissions reachable not found ({_cexc}).")
+                    phase(f"CO₂ limit: the least emissions reachable were not found ({_cexc}).")
                     _co2 = dict(_co2, refusal={
                         "code": _co2_cap.UNREACHABLE, "limit_t_per_yr": _co2["limit_t_per_yr"],
                         "least_t_per_yr": None, "extra_solves": 1,
-                        "message": f"No design meets the CO2 limit of "
-                                   f"{_co2['limit_t_per_yr']:,.0f} t CO2/yr."})
+                        "message": f"CO₂ limit: no design meets "
+                                   f"{_co2['limit_t_per_yr']:,.0f} t CO₂/yr."})
             _emit_state(last_co2_cap=_co2)
 
             # Post-process — PyPSA already populates the result DataFrames in

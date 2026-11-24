@@ -292,7 +292,8 @@ def test_an_unreachable_cap_names_the_least_emissions_reachable():
     assert ref["code"] == "co2_cap_unreachable"
     assert ref["extra_solves"] == 1
     assert ref["least_t_per_yr"] == {"all": pytest.approx(26_280.0, rel=1e-9)}
-    assert "10,000 t CO2/yr" in ref["message"] and "26,280 t CO2/yr" in ref["message"]
+    assert ref["message"] == ("CO₂ limit: no design meets 10,000 t CO₂/yr. "
+                              "The least reachable is 26,280 t CO₂/yr.")
 
 
 def test_a_network_infeasible_without_the_cap_says_so():
@@ -300,7 +301,7 @@ def test_a_network_infeasible_without_the_cap_says_so():
     status, condition, sink, _ = _solve(n, co2_limit_t_per_yr=10_000.0)
     ref = sink["last_co2_cap"]["refusal"]
     assert ref["least_t_per_yr"] is None
-    assert "infeasible without the cap too" in ref["message"]
+    assert "the limit is not the cause" in ref["message"]
 
 
 # ── the DC templates ──────────────────────────────────────────────────────
@@ -334,3 +335,93 @@ def test_on_the_single_year_dc_template_a_cap_binds_and_cuts_genset_energy():
     row = sink["last_co2_cap"]["rows"][0]
     assert row["binding"] is True and row["shadow_price_eur_per_t"] > 0
     assert n.global_constraints.empty
+
+
+def _live(n, accessor, attr, source="lopf", **_kw):
+    return getattr(getattr(n, accessor), attr)
+
+
+def test_on_the_staged_template_the_cap_and_the_emissions_view_count_the_same_tonnes():
+    # The grid counts at 0.35 / 0.30 / 0.22 in the cap row, the figure the
+    # Emissions view reports: at the flat 0.35 the 2030 and 2035 rows would
+    # over-count and the view would show a period well under a binding cap.
+    from services.results.emissions import compute_emissions
+
+    cfg = dict(voll=5000.0, multi_investment_periods=True)
+    n0 = T.build_eh_datacenter_staged()
+    assert _solve(n0, **cfg)[0] == "ok"
+    free = {r["period"]: r["total_tCO2"] for r in compute_emissions(n0, "lopf", result_df=_live)["by_period"]}
+    scale = {p: co2_cap.row_scale(n0, p) for p in n0.investment_periods}
+    limit = round(0.9 * min(free[p] / scale[p] for p in n0.investment_periods))
+    n = T.build_eh_datacenter_staged()
+    status, _, sink, _ = _solve(n, co2_limit_t_per_yr=limit, **cfg)
+    assert status == "ok"
+    got = {r["period"]: r["total_tCO2"] for r in compute_emissions(n, "lopf", result_df=_live)["by_period"]}
+    for p in n.investment_periods:
+        assert got[p] == pytest.approx(limit * scale[p], rel=1e-6)
+    assert all(r["binding"] for r in sink["last_co2_cap"]["rows"])
+
+
+# ── results (C8) ──────────────────────────────────────────────────────────
+
+_GOAL = {"limit_t_per_yr": 1000.0, "rows": [
+    {"name": "co2_cap_2030", "period": 2030, "cap_t": 500.0, "row_scale": 0.5,
+     "mu": -180.0, "shadow_price_eur_per_t": 180.0, "binding": True},
+    {"name": "co2_cap_2035", "period": 2035, "cap_t": 2000.0, "row_scale": 2.0,
+     "mu": 0.0, "shadow_price_eur_per_t": None, "binding": False},
+]}
+
+
+def test_a_multi_period_figure_is_its_highest_periods_and_names_it():
+    a = co2_cap.annual(_GOAL, 2000.0, {2030: 500.0, 2035: 1500.0})
+    assert a["by_period"] == {2030: pytest.approx(1000.0), 2035: pytest.approx(750.0)}
+    assert a["t_per_yr"] == pytest.approx(1000.0) and a["period"] == 2030
+    assert a["binding"] is True and a["shadow_price_eur_per_t"] == 180.0
+
+
+def test_a_single_period_figure_is_the_tonnes_over_the_year_share():
+    one = {"limit_t_per_yr": 1000.0, "rows": [
+        {"name": "co2_cap", "period": None, "cap_t": 100.0, "row_scale": 0.1,
+         "mu": 0.0, "shadow_price_eur_per_t": None, "binding": False}]}
+    a = co2_cap.annual(one, 80.0, {None: 80.0})
+    assert a["t_per_yr"] == pytest.approx(800.0) and a["period"] is None
+    assert a["binding"] is False and a["shadow_price_eur_per_t"] is None
+
+
+def test_the_card_carries_the_limit_and_the_price_only_when_reached():
+    from services.results.headline_kpis import _co2
+
+    assert _co2(None) is None
+    card = _co2(co2_cap.annual(_GOAL, 2000.0, {2030: 500.0, 2035: 1500.0}))
+    assert card["id"] == "co2_annual" and card["unit"] == "tCO2/yr"
+    assert card["value"] == pytest.approx(1000.0) and card["period"] == 2030
+    assert card["limit_t_per_yr"] == 1000.0
+    assert card["reached"] is True and card["shadow_price_eur_per_t"] == 180.0
+    slack = _co2({"limit_t_per_yr": 1000.0, "t_per_yr": 0.0, "binding": False,
+                  "shadow_price_eur_per_t": 5.0, "period": None})
+    assert slack["reached"] is False and slack["shadow_price_eur_per_t"] is None
+    assert slack["state"] == "zero"
+
+
+def test_a_card_whose_co2_cannot_be_counted_is_not_zero():
+    from services.results.headline_kpis import _co2
+
+    card = _co2({"limit_t_per_yr": 1000.0, "t_per_yr": None, "binding": False,
+                 "shadow_price_eur_per_t": None, "period": None})
+    assert card["value"] is None and card["state"] == "unavailable"
+
+
+def test_expert_emissions_lists_the_goals_cap_like_a_stored_one():
+    from services.results.emissions import compute_emissions
+
+    n = _hand()
+    status, _, sink, _ = _solve(n, co2_limit_t_per_yr=6.0 / TO_ROW)
+    assert status == "ok"
+    out = compute_emissions(n, "lopf", result_df=_live, goal_cap=sink["last_co2_cap"])
+    (cap,) = out["caps"]
+    assert cap["goal"] is True and cap["name"] == "co2_cap"
+    assert cap["cap_tCO2"] == pytest.approx(6.0) and cap["used_tCO2"] == pytest.approx(6.0)
+    assert cap["binding"] is True
+    assert cap["shadow_price_eur_per_tCO2"] == pytest.approx(-180.0, rel=1e-6)
+    assert out["cap"]["name"] == "co2_cap"
+    assert compute_emissions(n, "lopf", result_df=_live)["caps"] == []

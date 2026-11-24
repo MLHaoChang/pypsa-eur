@@ -39,13 +39,17 @@ def _cap_binding(mu: float | None, slack: float | None, cap_value: float = 0.0) 
     return abs(mu) > 1e-6
 
 
-def compute_emissions(n, source, *, result_df):
+def compute_emissions(n, source, *, result_df, goal_cap: dict | None = None):
     """
     CO2 emissions by carrier, generator and period.
 
     Lifted from `routers.results.get_emissions`, which keeps the network
     lookup, the `_dispatch_ready` gate and the `_state` reads. Returns the
     payload dict, or `None` where the handler returns 204.
+
+    `goal_cap` is the solve's CO2 limit goal result (`last_co2_cap`, DC review
+    02): its rows exist only during the solve, so they are listed in `caps`
+    from it, flagged ``"goal": True``, in the same shape as a stored cap.
     """
     import math as _math
 
@@ -399,6 +403,15 @@ def compute_emissions(n, source, *, result_df):
                     }
     except Exception:
         pass
+    if goal_cap:
+        from services.solver.co2_cap import cap_entries
+
+        for cap_entry in cap_entries(goal_cap, total_t, period_totals):
+            caps.append(cap_entry)
+            if not cap_info.get("active"):
+                cap_info = {k: cap_entry[k] for k in (
+                    "active", "name", "cap_tCO2", "shadow_price_eur_per_tCO2",
+                    "slack_tCO2", "binding")}
 
     return {
         "total_tCO2": total_t,
