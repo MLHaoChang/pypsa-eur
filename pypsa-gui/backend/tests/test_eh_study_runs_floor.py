@@ -45,10 +45,9 @@ def _goal(client, value):
 # to the 2000 cap resolves. The microgrid's 168 h weeks: one draw resolves
 # 8760/168 = 52.1 h/yr, 2000 draws 0.0261 h/yr.
 CAP_REFUSAL = (
-    LABEL + "a check that finds no shortfall cannot show that the "
-    "0.01 h/yr goal is met, and even 2000 runs (the most allowed) "
-    "could not decide it (its smallest step there is 0.0261 h/yr): "
-    "allow more shortfall in the goal."
+    LABEL + "the 0.01 h/yr goal cannot be decided. A check that finds no "
+    "shortfall cannot show it is met. Even 2000 runs (the most allowed) "
+    "have a smallest step of 0.0261 h/yr. Allow more shortfall in the goal."
 )
 
 

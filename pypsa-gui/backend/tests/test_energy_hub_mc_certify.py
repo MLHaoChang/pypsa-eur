@@ -516,10 +516,10 @@ def test_pre_run_weights_match_the_runs_floor():
     # 168 h horizon is 0.0261 h/yr.
     assert S.draws_short_of_target(n, _pack(target=3.0), 1) is None
     assert S.draws_short_of_target(n, _pack(target=0.01), 1) == (
-        "Simulation runs per check: a check that finds no shortfall cannot "
-        "show that the 0.01 h/yr goal is met, and even 2000 runs (the most "
-        "allowed) could not decide it (its smallest step there is 0.0261 "
-        "h/yr): allow more shortfall in the goal.")
+        "Simulation runs per check: the 0.01 h/yr goal cannot be decided. A "
+        "check that finds no shortfall cannot show it is met. Even 2000 runs "
+        "(the most allowed) have a smallest step of 0.0261 h/yr. Allow more "
+        "shortfall in the goal.")
     assert S.draws_short_of_target(n, _pack(target=0.03), 1) is None
 
 
@@ -550,11 +550,11 @@ def test_the_start_refuses_only_a_goal_past_the_draw_cap(w_min, refused, draws):
     if not refused:
         assert msg is None
         return
-    assert msg.startswith("Simulation runs per check: a check that finds no "
-                          "shortfall cannot show that the 0.01 h/yr goal is met, "
-                          "and even 2000 runs (the most allowed) could not "
-                          "decide it")
-    assert msg.endswith(": allow more shortfall in the goal.")
+    assert msg.startswith("Simulation runs per check: the 0.01 h/yr goal "
+                          "cannot be decided. A check that finds no shortfall "
+                          "cannot show it is met. Even 2000 runs (the most "
+                          "allowed) have a smallest step of")
+    assert msg.endswith(" h/yr. Allow more shortfall in the goal.")
     assert "16800" not in msg and "set at least" not in msg
 
 

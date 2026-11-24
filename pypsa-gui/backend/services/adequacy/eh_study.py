@@ -453,11 +453,11 @@ def draws_short_for(weight: tuple[float, float] | None, pack,
     target_h = float(target) * years
     if w_min / MAX_DRAWS <= target_h:
         return None
-    return (f"Simulation runs per check: a check that finds no shortfall "
-            f"cannot show that the {float(target):g} h/yr goal is met, and "
-            f"even {MAX_DRAWS} runs (the most allowed) could not decide it "
-            f"(its smallest step there is {w_min / MAX_DRAWS / years:.3g} "
-            "h/yr): allow more shortfall in the goal.")
+    return (f"Simulation runs per check: the {float(target):g} h/yr goal "
+            "cannot be decided. A check that finds no shortfall cannot show "
+            f"it is met. Even {MAX_DRAWS} runs (the most allowed) have a "
+            f"smallest step of {w_min / MAX_DRAWS / years:.3g} h/yr. Allow "
+            "more shortfall in the goal.")
 
 
 def certification_verdict(*, lole_ci, target_h: float | None,

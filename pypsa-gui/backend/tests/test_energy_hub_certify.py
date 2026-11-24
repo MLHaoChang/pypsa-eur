@@ -304,10 +304,10 @@ def _goal_pack(target, draws=500):
 # Owner decision on #1927: the start refuses only a goal that no draw count up
 # to the 2000-draw cap resolves; fewer requested draws still run (the verdict
 # names the floor and the fewest draws afterwards).
-CAP_REFUSAL = ("Simulation runs per check: a check that finds no shortfall "
-               "cannot show that the 0.01 h/yr goal is met, and even 2000 runs "
-               "(the most allowed) could not decide it (its smallest step there "
-               "is 0.0261 h/yr): allow more shortfall in the goal.")
+CAP_REFUSAL = ("Simulation runs per check: the 0.01 h/yr goal cannot be decided. "
+               "A check that finds no shortfall cannot show it is met. Even "
+               "2000 runs (the most allowed) have a smallest step of 0.0261 "
+               "h/yr. Allow more shortfall in the goal.")
 
 
 def test_runs_check_refuses_only_past_the_draw_cap():
@@ -344,7 +344,7 @@ def test_runs_check_ignores_zero_weight_snapshots():
     n = _weighted_network()
     n.snapshot_weightings.loc[n.snapshots[0], :] = 0.0
     # A zero w_min would never refuse; the 1 h weight still does.
-    assert "allow more shortfall" in S.draws_short_of_target(n, _goal_pack(0.01), 1)
+    assert "Allow more shortfall" in S.draws_short_of_target(n, _goal_pack(0.01), 1)
     assert S.draws_short_of_target(n, _goal_pack(3.0), 1) is None
 
 
