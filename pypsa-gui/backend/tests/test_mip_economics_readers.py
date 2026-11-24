@@ -437,7 +437,9 @@ def test_a_mip_withholds_the_priced_keys_of_every_period_too():
         "energy_mwh": 3.0,
         "by_period": [{key: 2.0, "energy_mwh": 1.0}, {key: 3.0, "energy_mwh": 2.0}],
     }
-    _withhold_priced([row], [], [], [])
+    flat = {"name": "h", key: 1.0}  # a single-period row carries no by_period
+    _withhold_priced([row, flat], [], [], [])
+    assert flat[key] is None
     assert row[key] is None and row["energy_mwh"] == 3.0
     assert [e[key] for e in row["by_period"]] == [None, None]
     assert [e["energy_mwh"] for e in row["by_period"]] == [1.0, 2.0]
