@@ -1,0 +1,526 @@
+"""The campus equipment schedule (DC review 09): every electrical asset with
+its rating, quantity, governing criterion, source and capex; declared
+ratings below the chosen ones flagged, never overwritten."""
+
+import io
+import math
+
+import openpyxl
+import pandas as pd
+import pytest
+import yaml
+
+from db.models import User
+from gridspine.drivers import campus_study as cs
+from gridspine.static.campus_flow import SizingCriteria
+from services import campus_electrical_service as ce
+from services import equipment_schedule as es
+from services import project_registry
+
+
+def t(v, source="assumed"):
+    return {"value": v, "source": source}
+
+
+def _spec(declared_cable_i_ka=1.2, mv1_rated=20.0):
+    trafo = {
+        "hv_bus": "PCC",
+        "lv_bus": "MV1",
+        "sn_mva": t(40.0),
+        "vn_hv_kv": t(110.0),
+        "vn_lv_kv": t(20.0),
+        "vk_percent": t(12.0),
+        "vkr_percent": t(0.4),
+        "pfe_kw": t(25.0),
+        "i0_percent": t(0.05),
+    }
+    return {
+        "campus": {
+            "name": "SCHEDULE",
+            "f_hz": 50,
+            "pcc": {
+                "bus": "PCC",
+                "vn_kv": 110.0,
+                "vm_pu": t(1.0),
+                "sk_max_mva": t(3000.0),
+                "sk_min_mva": t(2000.0),
+                "rx_max": t(0.1),
+                "rx_min": t(0.12),
+            },
+            "buses": {
+                "MV1": {"vn_kv": 20.0, "ik_rated_ka": t(mv1_rated)},
+                "MV2": {"vn_kv": 20.0},
+            },
+            "transformers": {"TR1": dict(trafo), "TR2": dict(trafo)},
+            "cables": {
+                "CB1": {
+                    "from_bus": "MV1",
+                    "to_bus": "MV2",
+                    "length_km": t(2.0),
+                    "r_ohm_per_km": t(0.0754),
+                    "x_ohm_per_km": t(0.11),
+                    "c_nf_per_km": t(330.0),
+                    "max_i_ka": t(declared_cable_i_ka),
+                    "parallel": 2,
+                }
+            },
+            "units": {
+                "DC_LOAD": {
+                    "kind": "load",
+                    "bus": "MV2",
+                    "p_mw": t(50.0),
+                    "pf": t(0.98),
+                },
+                "BESS1": {
+                    "kind": "bess",
+                    "bus": "MV1",
+                    "p_mw": t(20.0),
+                    "e_mwh": t(40.0),
+                    "s_mva": t(22.0),
+                    "k_sc": t(1.2),
+                    "rx_sc": t(0.1),
+                },
+                "GEN1": {
+                    "kind": "genset",
+                    "bus": "MV2",
+                    "p_mw": t(10.0),
+                    "s_mva": t(12.5),
+                    "xd_pp": t(0.15),
+                    "rx_sc": t(0.07),
+                },
+            },
+        }
+    }
+
+
+def _run(tmp_path, rated=True, **spec_kw):
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / cs.CAMPUS_YAML).write_text(yaml.safe_dump(_spec(**spec_kw)))
+    pd.DataFrame(
+        [
+            {
+                "group": "TR1+TR2",
+                "units": 2,
+                "unit_rating_mva": 40.0,
+                "max_s_intact_mva": 46.0,
+                "max_s_n1_mva": 52.0,
+                "required_unit_mva": 62.4,
+                "recommended_unit_mva": 63.0,
+                "adequate": False,
+                "utilisation": 1.3,
+                "worst_unit": "TR1",
+                "worst_period": 2040,
+                "worst_hour": 19,
+                "unconverged_hours": 0,
+                "margin": 0.2,
+                "n_minus_1": True,
+            }
+        ]
+    ).to_csv(run / cs.SIZING_TRAFO_CSV, index=False)
+    pd.DataFrame(
+        [
+            {
+                "direction": "capacitive",
+                "required_mvar": 5.0,
+                "recommended_mvar": 6.0,
+                "worst_period": 2030,
+                "worst_hour": 7,
+                "margin": 0.2,
+            },
+            {
+                "direction": "inductive",
+                "required_mvar": 0.0,
+                "recommended_mvar": 0.0,
+                "worst_period": None,
+                "worst_hour": None,
+                "margin": 0.2,
+            },
+        ]
+    ).to_csv(run / cs.SIZING_COMP_CSV, index=False)
+    pd.DataFrame(
+        [
+            {
+                "bus": b,
+                "vn_kv": kv,
+                "ikss_max_ka": ik,
+                "ip_max_ka": ip,
+                "ikss_min_ka": ik / 2,
+                "rated_ka": r,
+                "period": p,
+            }
+            for b, kv, ik, ip, r, p in [
+                ("PCC", 110.0, 15.0, 37.0, math.nan, 2030),
+                ("MV1", 20.0, 21.0, 52.0, 20.0, 2040),
+                ("MV2", 20.0, 10.0, 22.0, math.nan, 2040),
+            ]
+        ]
+    ).to_csv(run / cs.SHORT_CIRCUIT_CSV, index=False)
+    pd.DataFrame(
+        [(2030, 7, "intact", "CB1", 0.40), (2040, 19, "N-1:TR1", "CB1", 0.62)],
+        columns=["period", "hour", "case", "cable", "i_ka"],
+    ).to_csv(run / cs.LF_LINE_CSV, index=False)
+    if rated:
+        cs.rate_campus(run, criteria=SizingCriteria(margin=0.2))
+    return run
+
+
+def _by(rows, kind):
+    return [r for r in rows if r["kind"] == kind]
+
+
+def test_every_kind_with_rating_source_and_criterion(tmp_path):
+    out = es.build(_run(tmp_path))
+    rows = out["rows"]
+    assert [r["kind"] for r in rows] == sorted(
+        (r["kind"] for r in rows), key=es.KINDS.index
+    )
+    assert {r["kind"] for r in rows} == {
+        "transformer",
+        "reactive",
+        "filter",
+        "switchgear",
+        "cable",
+        "genset",
+        "bess",
+    }
+    assert all(set(r) == set(es.COLUMNS) for r in rows)
+
+    (tr,) = _by(rows, "transformer")
+    assert (tr["asset"], tr["rating"], tr["unit"], tr["quantity"], tr["source"]) == (
+        "TR1+TR2",
+        63.0,
+        "MVA",
+        2,
+        "computed",
+    )
+    assert tr["governing"].startswith(
+        "N-1 52.0 MVA + 20% margin = 62.4 MVA per unit, period 2040 hour 19"
+    )
+    assert (tr["declared_rating"], tr["flag"], tr["location"]) == (
+        40.0,
+        "declared_below_chosen",
+        "PCC / MV1",
+    )
+    from gridspine.templates.campus_assets import (
+        library_entries,
+        load_asset_library,
+        value,
+    )
+
+    (e,) = library_entries(
+        load_asset_library(), "transformers", hv_kv=110.0, lv_kv=20.0, s_mva=63.0
+    )
+    assert tr["library_id"] == e["id"] and tr["capex_eur"] == pytest.approx(
+        2 * value(e["capex_eur"])
+    )
+
+    cap, ind = _by(rows, "reactive")
+    assert (cap["rating"], cap["quantity"], cap["unit"]) == (6.0, 1, "Mvar")
+    assert "5.0 Mvar + 20% margin, period 2030 hour 7" in cap["governing"]
+    assert ind["quantity"] == 0 and ind["governing"].startswith("none needed")
+
+    (f,) = _by(rows, "filter")
+    assert (
+        f["source"] == "not sized"
+        and f["governing"] == "not sized yet: filter sizing is not part of this study"
+        and f["rating"] is None
+    )
+
+    sg = {r["asset"]: r for r in _by(rows, "switchgear")}
+    mv1 = sg["MV1 switchgear"]
+    assert (mv1["rating"], mv1["unit"], mv1["declared_rating"], mv1["flag"]) == (
+        31.5,
+        "kA",
+        20.0,
+        "declared_below_chosen",
+    )
+    assert mv1["governing"] == "Ith 21.36 kA, period 2040, 1 s"
+    # MV1: TR1, TR2 lv ends, two cable runs, BESS1 = 5 bays (one per connection)
+    assert mv1["quantity"] == 5
+    assert mv1["library_id"] == "SG_20_31p5"
+    assert (
+        sg["MV2 switchgear"]["flag"] is None
+        and sg["MV2 switchgear"]["declared_rating"] is None
+    )
+
+    (cb,) = _by(rows, "cable")
+    assert (
+        cb["unit"] == "mm2 Al"
+        and cb["source"] == "computed"
+        and cb["library_id"].startswith("CB_20_")
+    )
+    assert "design 620 A in N-1:TR1, period 2040 hour 19" in cb["governing"]
+    assert cb["declared_rating"] == pytest.approx(2400.0)  # 2 runs x 1.2 kA, in A
+    assert cb["flag"] is None
+    assert cb["location"] == "MV1 - MV2, 2 km"
+
+    gen, bess = _by(rows, "genset")[0], _by(rows, "bess")[0]
+    assert (gen["rating"], gen["unit"], gen["source"]) == (12.5, "MVA", "declared")
+    assert bess["governing"] == "declared in the campus file; 40 MWh"
+    assert not _by(rows, "load")
+    assert out["missing"] == []
+    assert {a["name"] for a in out["assumptions"]} >= {
+        "derating",
+        "vd_limit_pct",
+        "mu",
+        "margin",
+    }
+
+
+def test_switchgear_capex_is_bays_times_the_library_price(tmp_path):
+    from gridspine.templates.campus_assets import load_asset_library, value
+
+    lib = {e["id"]: e for e in load_asset_library()["switchgear"]}
+    mv1 = next(
+        r for r in es.build(_run(tmp_path))["rows"] if r["asset"] == "MV1 switchgear"
+    )
+    assert mv1["capex_eur"] == pytest.approx(5 * value(lib["SG_20_31p5"]["capex_eur"]))
+
+
+def test_a_declared_cable_below_the_chosen_is_flagged_and_kept(tmp_path):
+    run = _run(tmp_path, declared_cable_i_ka=0.1)
+    (cb,) = _by(es.build(run)["rows"], "cable")
+    assert cb["flag"] == "declared_below_chosen" and cb[
+        "declared_rating"
+    ] == pytest.approx(200.0)
+    assert (
+        yaml.safe_load((run / cs.CAMPUS_YAML).read_text())["campus"]["cables"]["CB1"][
+            "max_i_ka"
+        ]["value"]
+        == 0.1
+    )
+
+
+def test_a_run_from_before_ratings_says_what_is_missing(tmp_path):
+    out = es.build(_run(tmp_path, rated=False))
+    assert not _by(out["rows"], "switchgear") and not _by(out["rows"], "cable")
+    assert out["missing"] == [
+        "switchgear and cable ratings: run the DC Grid study again"
+    ]
+    assert out["assumptions"] == []
+
+
+def test_the_bay_count_is_listed_as_an_assumption(tmp_path):
+    out = es.build(_run(tmp_path))
+    assert es.BAYS_ASSUMPTION in out["assumptions"]
+    assert {a["source"] for a in out["assumptions"] if a["name"] == "bays"} == {
+        "assumed"
+    }
+
+
+def test_the_workbook_rows_equal_the_json_rows(tmp_path):
+    out = es.build(_run(tmp_path))
+    wb = openpyxl.load_workbook(io.BytesIO(es.to_xlsx(out)))
+    head, *body = list(wb["Schedule"].values)
+    assert len(body) == len(out["rows"])
+    for got, want in zip(body, out["rows"]):
+        assert list(got) == [want[c] for c in es.COLUMNS]
+
+
+def test_the_workbook_has_the_rows_and_the_assumptions(tmp_path):
+    out = es.build(_run(tmp_path))
+    wb = openpyxl.load_workbook(io.BytesIO(es.to_xlsx(out)))
+    assert wb.sheetnames == ["Schedule", "Assumptions"]
+    sheet = list(wb["Schedule"].values)
+    assert (
+        sheet[0][:3] == ("Kind", "Asset", "Location") and sheet[0][-1] == "Capex (EUR)"
+    )
+    assert len(sheet) == len(out["rows"]) + 1
+    assert len(list(wb["Assumptions"].values)) == len(out["assumptions"]) + 1
+
+
+# ── over HTTP ─────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def hub(client, _auth_db, seeded_identity):
+    _engine, session_local = _auth_db
+    with session_local() as db:
+        user = db.get(User, seeded_identity["user_id"])
+        project_registry.create_root(db, user, "Schedule Hub")
+
+
+BASE = "/api/campus-electrical/Schedule Hub/equipment-schedule"
+
+
+def test_no_study_yet_is_an_empty_schedule_that_says_so(client, hub):
+    resp = client.get(BASE)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {
+        "rows": [],
+        "assumptions": [],
+        "missing": ["no DC Grid study has run: run it in Campus electrical"],
+    }
+    x = client.get(BASE + ".xlsx")
+    assert x.status_code == 200
+    assert x.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml"
+    )
+    assert "Schedule_Hub_equipment_schedule.xlsx" in x.headers[
+        "content-disposition"
+    ].replace(" ", "_")
+    assert openpyxl.load_workbook(io.BytesIO(x.content)).sheetnames == [
+        "Schedule",
+        "Assumptions",
+    ]
+
+
+def test_the_schedule_of_the_published_run_over_http(
+    client, hub, monkeypatch, tmp_path
+):
+    run = _run(tmp_path)
+    monkeypatch.setattr(ce, "campus_dir", lambda project: tmp_path)
+    body = client.get(BASE).json()
+    assert {r["kind"] for r in body["rows"]} >= {"switchgear", "cable", "transformer"}
+    assert body["rows"] == es.build(run)["rows"]
+    for verb in ("post", "put", "delete"):
+        assert getattr(client, verb)(BASE).status_code == 405, verb
+
+
+def test_another_orgs_project_is_404(other_org_client, hub):
+    assert other_org_client.get(BASE).status_code == 404
+    assert other_org_client.get(BASE + ".xlsx").status_code == 404
+
+
+# ── branches the mutants found untested ─────────────────────────────────────
+
+
+def _sizing(run, **kw):
+    row = {
+        "group": "TR1+TR2",
+        "units": 2,
+        "unit_rating_mva": 40.0,
+        "max_s_intact_mva": 46.0,
+        "max_s_n1_mva": 52.0,
+        "required_unit_mva": 62.4,
+        "recommended_unit_mva": 63.0,
+        "adequate": False,
+        "utilisation": 1.3,
+        "worst_unit": "TR1",
+        "worst_period": 2040,
+        "worst_hour": 19,
+        "unconverged_hours": 0,
+        "margin": 0.2,
+        "n_minus_1": True,
+        **kw,
+    }
+    pd.DataFrame([row]).to_csv(run / cs.SIZING_TRAFO_CSV, index=False)
+    return es._transformers(run, _spec()["campus"], {"transformers": []})[0]
+
+
+@pytest.mark.parametrize(
+    "kw, flow",
+    [
+        ({}, "N-1 52.0 MVA"),
+        ({"max_s_n1_mva": 46.0}, "N-1 46.0 MVA"),  # equal: the outage case is named
+        ({"max_s_n1_mva": 45.0}, "intact 46.0 MVA"),
+        ({"n_minus_1": False}, "intact 46.0 MVA"),
+        ({"max_s_n1_mva": math.nan}, "intact 46.0 MVA"),
+    ],
+)
+def test_the_transformer_criterion_names_the_case_that_set_it(tmp_path, kw, flow):
+    assert _sizing(_run(tmp_path, rated=False), **kw)["governing"].startswith(
+        flow + " + 20% margin"
+    )
+
+
+@pytest.mark.parametrize(
+    "declared, flag",
+    [(40.0, "declared_below_chosen"), (63.0, None), (80.0, None), (math.nan, None)],
+)
+def test_the_transformer_flag(tmp_path, declared, flag):
+    tr = _sizing(_run(tmp_path, rated=False), unit_rating_mva=declared)
+    assert tr["flag"] == flag
+    assert tr["declared_rating"] == (None if math.isnan(declared) else declared)
+
+
+def test_the_transformer_price_needs_hv_lv_and_rating_to_match(tmp_path):
+    run = _run(tmp_path, rated=False)
+    _sizing(run)
+
+    def entry(i, hv, lv, s):
+        return {
+            "id": i,
+            "hv_kv": t(hv),
+            "lv_kv": t(lv),
+            "s_mva": t(s),
+            "capex_eur": t(1000.0),
+        }
+
+    near = [
+        entry("HV", 132.0, 20.0, 63.0),
+        entry("LV", 110.0, 33.0, 63.0),
+        entry("S", 110.0, 20.0, 80.0),
+    ]
+    spec = _spec()["campus"]
+    (tr,) = es._transformers(run, spec, {"transformers": near})
+    assert tr["library_id"] is None and tr["capex_eur"] is None
+    (tr,) = es._transformers(
+        run, spec, {"transformers": [*near, entry("OK", 110.0, 20.0, 63.0)]}
+    )
+    assert (tr["library_id"], tr["capex_eur"]) == ("OK", 2000.0)
+
+
+def test_empty_sections_of_the_campus_file_give_no_rows():
+    spec = {"transformers": None, "cables": None, "units": None}
+    assert es._bays(spec) == {} and es._units(spec) == []
+
+
+@pytest.mark.parametrize("keep", [cs.SWITCHGEAR_RATING_CSV, cs.CABLE_RATING_CSV])
+def test_one_rating_table_alone_is_still_missing(tmp_path, keep):
+    run = _run(tmp_path)
+    other = (
+        cs.CABLE_RATING_CSV
+        if keep == cs.SWITCHGEAR_RATING_CSV
+        else cs.SWITCHGEAR_RATING_CSV
+    )
+    (run / other).unlink()
+    out = es.build(run)
+    assert out["missing"] == [
+        "switchgear and cable ratings: run the DC Grid study again"
+    ]
+    assert not _by(out["rows"], "switchgear") and not _by(out["rows"], "cable")
+
+
+@pytest.mark.parametrize(
+    "governing, extra",
+    [
+        ("voltage drop", " (2.50 %)"),
+        ("short-circuit withstand", " (Ik'' 12.0 kA needs 128 mm2)"),
+        ("ampacity", ""),
+    ],
+)
+def test_the_cable_criterion_text_names_its_number(tmp_path, governing, extra):
+    run = tmp_path
+    pd.DataFrame(
+        [
+            {
+                "cable": "CB1",
+                "from_bus": "MV1",
+                "to_bus": "MV2",
+                "length_km": 2.0,
+                "declared_runs": 1,
+                "declared_i_ka": 0.4,
+                "design_i_ka": 0.3,
+                "design_case": "intact, period 2030 hour 7",
+                "ik_ka": 12.0,
+                "chosen_id": "C",
+                "conductor": "Al",
+                "runs": 1,
+                "section_mm2": 150.0,
+                "chosen_i_ka": 0.4,
+                "capex_eur": 10.0,
+                "governing": governing,
+                "utilisation": 0.9,
+                "vd_pct": 2.5,
+                "s_min_mm2": 127.66,
+                "flag": None,
+            }
+        ]
+    ).to_csv(run / cs.CABLE_RATING_CSV, index=False)
+    (cb,) = es._cables(run)
+    assert (
+        cb["governing"]
+        == f"{governing} 90%: design 300 A in intact, period 2030 hour 7{extra}"
+    )

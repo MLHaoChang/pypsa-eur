@@ -725,6 +725,11 @@ def _file_digest(path) -> str:
     return digest
 
 
+def effective_library(d: Path) -> Path:
+    """The library a run now would use (public: the equipment schedule prices from it)."""
+    return _effective_library(d)
+
+
 def _effective_library(d: Path) -> Path:
     """The library a run now would use: the project's copy, else the shipped one."""
     own = d / LIBRARY_FILE
@@ -2009,6 +2014,8 @@ def run(project, settings: dict, *, progress=None, should_stop=None) -> dict:
                     _run_cuts(work, should_stop)
                 stage("size")
                 cs.size_campus(work, criteria, profile=s["profile"], pf=s["pf"], profile_dirs=profile_dirs)
+                # DC review 09: switchgear and cable ratings chosen from this sizing
+                cs.rate_campus(work, _effective_library(d), criteria=criteria)
                 (work / PROFILE_USED_FILE).write_text(json.dumps(
                     {"profile": s["profile"], "sha256": profile_fingerprint(project, s["profile"])}))
                 stage("harmonic_scan")

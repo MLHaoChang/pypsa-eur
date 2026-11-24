@@ -57,7 +57,7 @@ import uuid
 from types import SimpleNamespace
 from typing import Literal
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session as DBSession
 from starlette.concurrency import run_in_threadpool
@@ -69,6 +69,8 @@ from deps import optional_user
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services import campus_electrical_service as ce
 from services import campus_grid_code_service as gc
+from services import equipment_schedule
+from services.http_filenames import content_disposition
 from services.upload_guard import UploadBudget
 
 router = APIRouter()
@@ -672,6 +674,26 @@ def reset_library(
     """Delete the project's copy; the shipped default is used again."""
     _check_lock(proj, db, user)
     return ce.reset_library(_row(proj, db))
+
+
+# ── the equipment schedule (DC review 09) ─────────────────────────────────
+
+@router.get("/{name}/equipment-schedule")
+def get_equipment_schedule(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """Every electrical asset of the last DC Grid study: rating, quantity,
+    governing criterion, source (computed / declared / assumed / not sized)
+    and capex; declared ratings below the chosen ones flagged."""
+    return equipment_schedule.for_project(_row(proj, db))
+
+
+@router.get("/{name}/equipment-schedule.xlsx")
+def get_equipment_schedule_xlsx(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """The equipment schedule as a workbook: a Schedule and an Assumptions sheet."""
+    row = _row(proj, db)
+    blob = equipment_schedule.to_xlsx(equipment_schedule.for_project(row))
+    return Response(content=blob,
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": content_disposition(f"{row.name}_equipment_schedule.xlsx")})
 
 
 # ── the chosen equipment as owner assets (plan, part three D2) ──────────────
