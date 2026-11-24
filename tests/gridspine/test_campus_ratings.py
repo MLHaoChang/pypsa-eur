@@ -838,3 +838,69 @@ def test_a_cable_exactly_at_its_ampacity_passes_in_one_run():
     )
     assert (c["chosen_id"], c["runs"]) == ("B", 1)
     assert c["utilisation"] == pytest.approx(1.0)
+
+
+# --------------------------------------------------------------------------
+# mutant kills (scripts/coord/mutants.py survivors on the GK A fix)
+# --------------------------------------------------------------------------
+
+
+def test_a_boolean_assumption_is_refused():
+    with pytest.raises(ValueError, match="tk_s"):
+        SwitchgearAssumptions(tk_s=True)
+    with pytest.raises(ValueError, match="pf"):
+        CableAssumptions(pf=True)
+
+
+def test_a_fault_level_that_is_not_a_number_reads_not_evaluated():
+    r = _one([("B1", 33.0, "n/a", 10.0, math.nan, 1)])
+    assert r.flag == "not_evaluated" and r.chosen_id is None
+
+
+def test_a_tie_between_periods_names_the_earliest():
+    rows = [
+        ("B1", 33.0, 20.0, 20.0 * NO_DC, math.nan, 2),
+        ("B1", 33.0, 20.0, 20.0 * NO_DC, math.nan, 1),
+    ]
+    assert _one(rows).governing == "Ik'' 20.00 kA, period 1"
+
+
+def test_a_cable_tie_keeps_the_first_in_library_order():
+    twin = {**LIB["cables"][0], "id": "A95_TWIN"}
+    lib = {"cables": [LIB["cables"][0], twin]}
+    c = choose_cable(lib, vn_kv=33.0, length_km=1.0, i_ka=0.1, ith_ka=1.0, margin=0.0)
+    assert c["chosen_id"] == "A95"
+
+
+SWITCHGEAR_COLUMNS = [
+    "bus",
+    "vn_kv",
+    "ikss_ka",
+    "ib_ka",
+    "ith_ka",
+    "ith_tkr_ka",
+    "ip_ka",
+    "tk_s",
+    "tkr_s",
+    "declared_ka",
+    "chosen_id",
+    "chosen_ka",
+    "chosen_ip_ka",
+    "capex_eur",
+    "utilisation",
+    "governing",
+    "flag",
+]
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        ("B1", 33.0, 20.0, 28.0, math.nan, 1),  # chosen
+        ("B1", 33.0, math.nan, 28.0, math.nan, 1),  # not evaluated
+        ("B1", 33.0, 45.0, 60.0, math.nan, 1),  # beyond the ladder
+    ],
+)
+def test_every_switchgear_row_has_every_column(row):
+    out = choose_switchgear(_sc(row), LIB, 50, 0.1)
+    assert sorted(out.columns) == sorted(SWITCHGEAR_COLUMNS)
