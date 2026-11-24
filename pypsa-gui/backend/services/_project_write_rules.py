@@ -13,6 +13,7 @@ POST   /api/admin/legacy-projects/{legacy_name}/claim  none instance administrat
 POST   /api/admin/organizations  none instance administration
 POST   /api/admin/users  none instance administration
 POST   /api/admin/users/{user_id}/resend-set-password  none instance administration
+POST   /api/auth/change-password  none sign-in and account
 POST   /api/auth/forgot-password  none sign-in and account
 POST   /api/auth/login  none sign-in and account
 POST   /api/auth/logout  none sign-in and account
