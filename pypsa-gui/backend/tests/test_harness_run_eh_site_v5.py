@@ -240,12 +240,15 @@ def test_confirming_a_row_adds_one_carded_bulk_write_to_every_gas_genset_but_the
     assert run_envelope._research(step["args"])  # never admitted: the user's card (R4)
 
 
-def test_a_mixed_fuel_site_refuses_the_write(fuel_run):
+def test_a_mixed_fuel_site_refuses_the_write_and_the_run_goes_on(fuel_run):
+    """S1: nothing is written; every row of the gap is rejected with the kind,
+    so the run never waits on a confirmation that cannot succeed."""
     task, path, net = fuel_run
     net["n"] = _network(genset_3="diesel")
-    row = _row()
-    _rows(path, row)
-    before = path.read_text()
+    row, other = _row(), _row(value=180.0)
+    _rows(path, row, other)
+    steps = json.loads(path.read_text())["steps"]
+    prices = net["n"].generators.marginal_cost.copy()
     with pytest.raises(research.ResearchError) as exc:
         research.settle(path, row["id"], "confirmed", by="u1")
     assert exc.value.kind == "research_mixed_fuel"
@@ -253,7 +256,77 @@ def test_a_mixed_fuel_site_refuses_the_write(fuel_run):
         "The site's gensets burn diesel, gas; one researched price is never written to two fuels. "
         "Nothing was written."
     )
+    record = json.loads(path.read_text())
+    assert record["steps"] == steps
+    assert [
+        (r["status"], r["rejected_reason"]) for r in record["run"]["research"]["rows"]
+    ] == [("rejected", "research_mixed_fuel"), ("rejected", "research_mixed_fuel")]
+    assert record["run"]["waiting"] is None
+    pd.testing.assert_series_equal(net["n"].generators.marginal_cost, prices)
+
+
+THERMAL = "Natural gas wholesale price (Hs, thermal): EUR 40.50 per MWh"
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [
+        THERMAL,
+        "Gas price: EUR 40.50 per MWh_th",
+        "Gas: EUR 40.50 per MWh (GCV)",
+        "Genset fuel cost: EUR 172.40 per MWh",
+    ],
+)
+def test_a_quote_not_per_mwh_of_electrical_output_is_refused(fuel_run, quote):
+    """Review F1: a fuel-energy price passes the ledger's EUR + MWh check, so the
+    fuel gap refuses it at settle (and `record_source` refuses it at once)."""
+    task, path, net = fuel_run
+    row = {**_row(), "quote": quote}
+    _rows(path, row)
+    before = path.read_text()
+    with pytest.raises(research.ResearchError) as exc:
+        research.settle(path, row["id"], "confirmed", by="u1")
+    assert (exc.value.kind, str(exc.value)) == (
+        "research_unit_mismatch",
+        "A genset fuel price is quoted per MWh of electrical output; a quote that does not say so, "
+        "or prices fuel energy, is refused, not converted.",
+    )
     assert path.read_text() == before
+
+
+@pytest.mark.parametrize(
+    "quote", [QUOTE, "Diesel genset: EUR 260 per MWhe", "EUR 260/MWh_el"]
+)
+def test_a_quote_per_mwh_of_electrical_output_passes(quote):
+    research._check_electrical(quote)
+
+
+def test_record_source_refuses_a_thermal_quote_for_the_fuel_gap(monkeypatch):
+    from harness import session as harness_session
+
+    chat = harness_session.ChatSession(session_id="run:fuel")
+    turn = research.Turn(
+        "unused", "rt_1", {GAP["key"]: ledger_gap()}, Inner(), (BOOT, lambda: 0.0)
+    )
+    monkeypatch.setitem(research._TURNS, chat.session_id, turn)
+    chat_tools.set_chat_session(chat)
+    try:
+        with pytest.raises(research.ResearchError) as exc:
+            research.record_source(
+                GAP["key"], 40.5, GAP["unit"], GAP["basis"], URL, THERMAL
+            )
+    finally:
+        chat_tools.set_chat_session(None)
+    assert exc.value.kind == "research_unit_mismatch" and turn.rows == []
+
+
+def test_no_open_network_is_a_typed_refusal(monkeypatch):
+    from services.pypsa_service import PyPSAService
+
+    monkeypatch.setattr(PyPSAService, "get_active_context", staticmethod(lambda: None))
+    with pytest.raises(research.ResearchError) as exc:
+        research._active_network()
+    assert exc.value.kind == "research_not_available"
 
 
 @pytest.mark.parametrize(
@@ -412,6 +485,16 @@ def _fuel(n=None):
             [],
             KEPT + ": research not available",
         ),
+        (
+            [{"stage": "inputs", "status": "cleanup_failed"}],
+            [],
+            KEPT + ": research not available",
+        ),
+        (
+            [{"stage": "inputs", "status": "cap_reached"}],
+            [],
+            KEPT + ": research cost cap reached",
+        ),
         ([{"stage": "inputs", "status": "done"}], [], KEPT + ": no verified source"),
         (
             [{"stage": "inputs", "status": "done"}],
@@ -503,7 +586,6 @@ def test_a_v4_run_gets_no_fuel_line_and_its_report_is_unchanged(tmp_path):
     assert set(source) == {"task", "envelope", "chapters", "coverage"}
     payload, _ = H.build(task, None, [])
     assert payload["gaps"] == []
-    assert H.build(task, None, [], fuel=None) == H.build(task, None, [])
 
 
 def test_a_v5_run_without_research_keeps_the_price_and_the_report_says_so(
@@ -541,3 +623,47 @@ def test_a_v5_run_without_research_keeps_the_price_and_the_report_says_so(
     )
     payload, _ = H.build(record, source["envelope"], [], fuel=source["fuel"])
     assert payload["gaps"][-1] == KEPT + ": research not granted"
+
+
+def test_the_gap_line_names_a_site_without_gensets_and_unreadable_prices():
+    n = _network()
+    n.remove("Generator", ["genset_1", "genset_new_2030", "genset_2"])
+    confirmed = [
+        {"for": {"gap": "genset_fuel_price"}, "status": "confirmed", "value": 172.4}
+    ]
+    assert research.fuel_gap_line(_task(rows=confirmed), _fuel(n)) == (
+        "Genset fuel price not researched: the site has no genset"
+    )
+    n = _network()
+    n.generators["marginal_cost"] = n.generators["marginal_cost"].astype(object)
+    n.generators.at["genset_1", "marginal_cost"] = "n/a"
+    fuel = _fuel(n)
+    assert fuel == {"key": "genset_fuel_price", "error": "fuel_read_failed"}
+    assert research.fuel_gap_line(_task(), fuel) == (
+        "Genset fuel price not researched: template value kept: "
+        "the gensets' prices could not be read"
+    )
+
+
+def test_a_run_record_without_research_or_steps_reads_as_no_source():
+    """The None-guards on a record the research step never touched."""
+    for task in (
+        {},
+        {"run": None},
+        {"run": {"research": None}},
+        {"run": {"research": {"rows": None, "steps": None}}},
+        {
+            "run": {
+                "research": {"rows": [{"for": None, "status": "proposed"}], "steps": []}
+            }
+        },
+    ):
+        assert research.fuel_gap_line(task, _fuel()) == KEPT + ": no verified source"
+    for prof in ({}, {"research": None}, {"research": {"gaps": None}}):
+        assert research.fuel_prices(_network(), prof) is None
+
+
+def test_a_row_without_a_value_is_never_written(fuel_run):
+    with pytest.raises(research.ResearchError) as exc:
+        research._fuel_steps({**_row(), "value": None}, GAP, "inputs.research.x")
+    assert exc.value.kind == "research_range_not_applicable"

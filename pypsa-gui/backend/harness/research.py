@@ -629,6 +629,8 @@ def record_source(
             "invalid_source_row",
             "record_source works only in a research turn, for its gaps.",
         )
+    if turn.gaps[gap]["tool"] == FUEL_TOOL:
+        _check_electrical(quote)
     try:
         row = source_ledger.propose(
             {
@@ -764,7 +766,32 @@ def write_steps(task: dict[str, Any], row: dict[str, Any]) -> list[dict[str, Any
 def _active_network():
     from services.pypsa_service import PyPSAService
 
-    return PyPSAService.get_active_context().network
+    network = getattr(PyPSAService.get_active_context(), "network", None)
+    if network is None:
+        raise ResearchError(
+            "research_not_available", "No project network is open; nothing was written."
+        )
+    return network
+
+
+# The quote must state the price per MWh of electrical output: a fuel-energy
+# price (thermal, calorific basis) is refused, not converted (Q1).
+_THERMAL = re.compile(
+    r"thermal|MWh[\s_(-]*th\b|\b(?:Hs|Hi|LHV|HHV|GCV|NCV)\b|calorific|fuel input",
+    re.IGNORECASE,
+)
+_ELECTRICAL = re.compile(r"electric|MWh[\s_(-]*e(?:l)?\b", re.IGNORECASE)
+
+
+def _check_electrical(quote: Any) -> None:
+    """Refuse a fuel-price quote that is not per MWh of electrical output."""
+    text = quote if isinstance(quote, str) else ""
+    if _THERMAL.search(text) or not _ELECTRICAL.search(text):
+        raise ResearchError(
+            "research_unit_mismatch",
+            "A genset fuel price is quoted per MWh of electrical output; a quote that does not "
+            "say so, or prices fuel energy, is refused, not converted.",
+        )
 
 
 def fuel_gensets(
@@ -816,6 +843,7 @@ def _fuel_steps(
         )
     if not row["value"] > 0:
         raise ResearchError("invalid_source_row", "A genset fuel price is above 0.")
+    _check_electrical(row.get("quote"))
     _, names, _ = fuel_gensets(_active_network(), gap)
     if not names:  # the report's gap line names why nothing was written
         return []
@@ -849,16 +877,19 @@ def fuel_prices(network, profile: dict[str, Any]) -> dict[str, Any] | None:
         return None
     try:
         carrier, names, curved = fuel_gensets(network, gap)
+        gens = network.generators
+        return {
+            "key": gap["key"],
+            "unit": gap["unit"],
+            "carrier": carrier,
+            "prices": {n: float(gens.at[n, gap["target"]["attr"]]) for n in names},
+            "curved": curved,
+        }
     except ResearchError as exc:
         return {"key": gap["key"], "error": exc.kind}
-    gens = network.generators
-    return {
-        "key": gap["key"],
-        "unit": gap["unit"],
-        "carrier": carrier,
-        "prices": {n: float(gens.at[n, gap["target"]["attr"]]) for n in names},
-        "curved": curved,
-    }
+    except Exception:  # noqa: BLE001 -- the report names the gap, never fails on it
+        logger.exception("genset fuel prices unreadable")
+        return {"key": gap["key"], "error": "fuel_read_failed"}
 
 
 FUEL_LINE = "Genset fuel price not researched: template value kept"
@@ -876,6 +907,10 @@ def fuel_gap_line(task: dict[str, Any], fuel: dict[str, Any] | None) -> str | No
         return None
     if fuel.get("error") == "research_mixed_fuel":
         return f"{FUEL_LINE}: the gensets burn more than one fuel"
+    if fuel.get("error"):
+        return f"{FUEL_LINE}: the gensets' prices could not be read"
+    if fuel["carrier"] is None:
+        return "Genset fuel price not researched: the site has no genset"
     kept = (
         f"{FUEL_LINE} ({_fmt(fuel['prices'])} {fuel['unit']}, {fuel['carrier']})"
         if fuel["prices"]
@@ -905,7 +940,9 @@ def fuel_gap_line(task: dict[str, Any], fuel: dict[str, Any] | None) -> str | No
     status = (step or {}).get("status")
     if status == "not_granted":
         return f"{kept}: research not granted"
-    if status in ("not_available", "error"):
+    if status == "cap_reached":
+        return f"{kept}: research cost cap reached"
+    if status in ("not_available", "error", "cleanup_failed"):
         return f"{kept}: research not available"
     if any(
         r.get("status") == "rejected"
@@ -951,6 +988,25 @@ def settle(task_path, row_id: str, verdict: str, *, by: str) -> dict[str, Any]:
         block["rows"][block["rows"].index(row)] = settled
         out["row"] = settled
         if settled["status"] == "confirmed":
+            try:
+                steps = write_steps(task, settled)
+            except ResearchError as exc:
+                if exc.kind != "research_mixed_fuel":
+                    raise
+                # Study harness 34: no row of this gap can be written, so each is
+                # rejected with the reason and the run is not left waiting on one.
+                out["refused"] = exc
+                for i, other in enumerate(block["rows"]):
+                    if other["for"]["gap"] == settled["for"]["gap"] and (
+                        other["id"] == row_id or other["status"] == "proposed"
+                    ):
+                        base = row if other["id"] == row_id else other
+                        block["rows"][i] = source_ledger.settle(
+                            base, "rejected", by=by
+                        ) | {"rejected_reason": exc.kind}
+                out["row"] = next(r for r in block["rows"] if r["id"] == row_id)
+                steps = None
+        if settled["status"] == "confirmed" and steps is not None:
             # The user picks one source per gap (#970 item 3): the others are rejected.
             for i, other in enumerate(block["rows"]):
                 if (
@@ -960,7 +1016,7 @@ def settle(task_path, row_id: str, verdict: str, *, by: str) -> dict[str, Any]:
                     block["rows"][i] = source_ledger.settle(
                         other, "rejected", by=by
                     ) | {"rejected_reason": "other_source_picked"}
-            task["steps"].extend(write_steps(task, settled))
+            task["steps"].extend(steps)
         waiting = task["run"].get("waiting") or {}
         if waiting.get("kind") == "research_confirm" and waiting.get("ref") == row_id:
             nxt = next(
@@ -987,4 +1043,6 @@ def settle(task_path, row_id: str, verdict: str, *, by: str) -> dict[str, Any]:
         _update(task_path, change)
     except source_ledger.LedgerError as exc:
         raise ResearchError(exc.kind, str(exc)) from exc
+    if "refused" in out:
+        raise out["refused"]
     return out["row"]
