@@ -36,12 +36,14 @@ import logging
 import threading as _threading
 import time
 from contextlib import nullcontext
-from typing import Any, Callable
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from models.finance import FinanceInputs
+from services import project_write_gate
 from services.finance.case import FinanceCase, FinanceRefused
 from services.reliability_goal import goal_free_config
 
@@ -109,8 +111,8 @@ def pack_versions(fin: FinanceInputs | None, *, load_pack=None) -> dict[str, str
 
 def assumptions_digest(*, finance: dict | None, commercial: dict | None, dispatch: str | None,
                        packs: dict[str, str], solver: dict | None = None,
-                       owner_assets: str | None = None, extra_assets: str | None = None
-                       ) -> tuple[str, dict[str, Any]]:
+                       owner_assets: str | None = None, extra_assets: str | None = None,
+                       energization: str | None = None) -> tuple[str, dict[str, Any]]:
     """(hash, parts): the report's staleness key and the per-input digests
     (so `GET /results/investment_case` can say WHICH input changed).
 
@@ -123,7 +125,13 @@ def assumptions_digest(*, finance: dict | None, commercial: dict | None, dispatc
     `owner_assets` (IC G3 F-2) is the digest of the owner assets' own
     investment columns (`finance_case.owner_assets_digest`); `extra_assets`
     (IC G3 R-4) the digest of the campus study the case takes its extra owner
-    assets from, None when no study applies. Both parts are always present."""
+    assets from, None when no study applies. Both parts are always present.
+
+    `energization` (template-e2e 02b W2) is the digest of the network's
+    energization schedule (`energization.schedule_digest`): the case reads it
+    at build time (`finance_case._import_capacity`), outside the dispatch.
+    A part only when the network carries one, so a key without it stays as
+    it was."""
     commercial = commercial if isinstance(commercial, dict) else None
     parts = {
         "solver_config": json_digest(None if solver is None else
@@ -139,6 +147,8 @@ def assumptions_digest(*, finance: dict | None, commercial: dict | None, dispatc
         "owner_assets": owner_assets,
         "extra_assets": extra_assets,
     }
+    if energization is not None:
+        parts["energization"] = energization
     return json_digest(parts), parts
 
 
@@ -178,14 +188,39 @@ def _422(code: str, message: str, **extra) -> HTTPException:
     return HTTPException(422, {"code": code, "message": message, **extra})
 
 
-def finance_inputs_or_422(raw: Any) -> FinanceInputs:
+def finance_inputs_or_422(raw: Any, *, needs: Sequence[str] | None = None) -> FinanceInputs:
+    """The stored finance inputs, or 422 `finance_inputs_invalid`. `needs`
+    (the start only, template-e2e issue 40): the other needs already
+    established, sent after this one as `detail.needs`."""
     try:
         return FinanceInputs.model_validate(raw)
     except ValidationError as exc:
         errs = exc.errors()
+        extra = {} if needs is None else {"needs": ["finance_inputs_invalid", *needs]}
         raise _422("finance_inputs_invalid", str(errs[0].get("msg"))[:300] if errs else str(exc),
                    errors=[{"loc": list(e.get("loc", ())), "msg": str(e.get("msg"))[:200]}
-                           for e in errs[:20]]) from exc
+                           for e in errs[:20]], **extra) from exc
+
+
+def finance_needs(raw: Any) -> list[str]:
+    """The finance-input need a start would refuse with, without starting
+    (template-e2e issue 40): `finance_inputs_missing`, `finance_inputs_invalid`
+    or `tax_pack_not_found`, in the start's own order; [] when the inputs are
+    set, valid and their tax pack loads. The 409 `not_solved` lists it in its
+    `detail.needs`."""
+    from services.finance.packs.base import PackNotFound, load_pack
+    if raw is None:
+        return ["finance_inputs_missing"]
+    try:
+        fin = FinanceInputs.model_validate(raw)
+    except ValidationError:
+        return ["finance_inputs_invalid"]
+    if fin.tax_pack_id:
+        try:
+            load_pack(fin.tax_pack_id, as_of=fin.financial_close)
+        except PackNotFound:
+            return ["tax_pack_not_found"]
+    return []
 
 
 def start_investment_case(
@@ -199,6 +234,8 @@ def start_investment_case(
     case_hash: Callable[[FinanceCase], str | None] | None = None,
     layers: Callable[[FinanceCase], tuple] | tuple | None = None,
     state_lock=None,
+    requester: tuple[Any, Any] | None = None,
+    needs: Sequence[str] = (),
 ) -> dict:
     """Start the investment-case run in a worker thread (see the module
     docstring). The mesh refusal (409 while a solve or another study runs) is
@@ -207,7 +244,17 @@ def start_investment_case(
     `assumptions` → (hash, parts) of the inputs the case is built from (the
     router closes over the same config snapshot as `build_case`); `case_hash`
     → the built `FinanceCase`'s hash, recorded as provenance; `layers` — tests
-    only — the tax layers `run_case` uses instead of the pack's."""
+    only — the tax layers `run_case` uses instead of the pack's.
+
+    `requester` is (user id, project id) of the person who started it: their
+    role is read again before each report is stored, and a person made a
+    viewer, or removed, mid-run gets a `project_view_only` failure and no
+    report (project-viewer-role 02).
+
+    `needs` (template-e2e issue 40): the codes of the needs the caller has
+    established and the start does not refuse with (the site connection). A
+    finance-input refusal sends its own code first, then these, as
+    `detail.needs`, so one answer lists every need the start can tell."""
     from services.finance.engine import run_case
     from services.finance.packs.base import PackNotFound, load_pack
     from services.finance.report import (
@@ -223,15 +270,18 @@ def start_investment_case(
     body = body or InvestmentCaseRequest()
     cfg = solver_state.get("solver_config")
     raw = getattr(cfg, "finance", None)
+    needs = list(needs)
     if raw is None:
         raise _422("finance_inputs_missing",
-                   "set the finance inputs first (PUT /api/simulation/finance)")
-    fin = finance_inputs_or_422(raw)
+                   "set the finance inputs first (PUT /api/simulation/finance)",
+                   needs=["finance_inputs_missing", *needs])
+    fin = finance_inputs_or_422(raw, needs=needs)
     if fin.tax_pack_id:
         try:
             pack0 = load_pack(fin.tax_pack_id, as_of=fin.financial_close)
         except PackNotFound as exc:
-            raise _422("tax_pack_not_found", str(exc)) from exc
+            raise _422("tax_pack_not_found", str(exc),
+                       needs=["tax_pack_not_found", *needs]) from exc
         packs = {fin.tax_pack_id: pack0.pack_hash}
     else:
         packs = {}
@@ -279,6 +329,15 @@ def start_investment_case(
             return True
         return False
 
+    def store(report) -> bool:
+        """Store `report` unless the requester may no longer write the project."""
+        if project_write_gate.requester_may_not_write(*(requester or (None, None))):
+            finish("failed", error=project_write_gate.MESSAGE,
+                   error_code=project_write_gate.KIND)
+            return False
+        state_update(**{"investment_case_report": report.model_dump(mode="json")})
+        return True
+
     def worker():
         try:
             a_hash, a_parts = (assumptions() if assumptions is not None
@@ -297,7 +356,8 @@ def start_investment_case(
                                                 owner=body.owner)
                 if aborted():           # an aborted run stores nothing (review B5)
                     return
-                state_update(**{"investment_case_report": report.model_dump(mode="json")})
+                if not store(report):
+                    return
                 finish("refused", error=str(exc), error_code=exc.code)
                 return
             if aborted():
@@ -318,7 +378,8 @@ def start_investment_case(
                                                 owner=case.owner)
                 if aborted():           # an aborted run stores nothing (review B5)
                     return
-                state_update(**{"investment_case_report": report.model_dump(mode="json")})
+                if not store(report):
+                    return
                 finish("refused", error=str(exc), error_code=exc.code)
                 return
             if aborted():
@@ -336,7 +397,8 @@ def start_investment_case(
             if aborted():
                 return
             progress("store")
-            state_update(**{"investment_case_report": report.model_dump(mode="json")})
+            if not store(report):
+                return
             finish("done", error=None, flags=list(result.flags),
                    completeness=dict(report.completeness))
         except Exception as exc:  # noqa: BLE001

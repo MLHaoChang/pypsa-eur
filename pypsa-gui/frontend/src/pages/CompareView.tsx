@@ -9,13 +9,14 @@ import { projectsApi } from '../api/projects'
 import { useUIStore } from '../store/uiStore'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 import type {
-  CompareState, ProjectInfo, ResultsSummary, CarrierPeriodValue,
+  CompareState, CompareStudy, ProjectInfo, ResultsSummary, CarrierPeriodValue,
   LineLoadingEntry, CarrierEconomics, StorageUnitCycles, LostLoadBus,
   AssetLCOHEntry, CarrierPriceStats, LostLoadByCarrier,
 } from '../api/types'
 import { canonicaliseCarrier, carrierDisplayName, type ComponentClass } from './results/carrierAliases'
 import { useCarrierFilter, CarrierFilter, bindCarrierFilter } from './results/CarrierFilter'
 import { COST_UNAVAILABLE, UnavailableBlock, UnavailableCell } from './results/shared'
+import { signFirstEuro } from '../utils/format'
 
 // ── Compare view ─────────────────────────────────────────────────────────────
 // Tabbed A/B comparison across two saved projects. Each tab loads its own
@@ -337,6 +338,7 @@ export function OverviewTab({ a, b }: { a: string; b: string }) {
   return (
     <div className="space-y-4">
       <CountsTable a={sa} b={sb} />
+      <StudyTable a={sa} b={sb} />
       <SolverTable a={sa} b={sb} />
       <OverviewCapacityTable
         a={sa} b={sb}
@@ -827,8 +829,9 @@ interface MergedLoadingRow {
   peak_b: number
   mean_a: number
   mean_b: number
-  binding_a: number
-  binding_b: number
+  // null: the rating is assumed, so binding hours were not evaluated (never 0)
+  binding_a: number | null
+  binding_b: number | null
 }
 
 function mergeLoadingByName(
@@ -856,8 +859,8 @@ function mergeLoadingByName(
       peak_b: readPV(B?.peak_loading, period),
       mean_a: readPV(A?.mean_loading, period),
       mean_b: readPV(B?.mean_loading, period),
-      binding_a: readPV(A?.binding_hours, period),
-      binding_b: readPV(B?.binding_hours, period),
+      binding_a: A?.binding_hours == null ? null : readPV(A.binding_hours, period),
+      binding_b: B?.binding_hours == null ? null : readPV(B.binding_hours, period),
     })
   }
   // Rank by worst peak side so the chart top-N is the most informative.
@@ -939,6 +942,7 @@ function LoadingTable({
 }) {
   if (rows.length === 0) return null
   const fmtPct = (v: number) => `${(v * 100).toFixed(1)} %`
+  const notEvaluated = <span title="The rating is assumed, not stated in the file, so binding hours are not evaluated">not evaluated</span>
   const fmtHr  = (v: number) => v >= 1 ? `${v.toFixed(0)} h` : (v > 0 ? `${v.toFixed(1)} h` : '—')
   const dash = <span className="text-muted" title="Branch not present in this scenario">—</span>
   const unavailable = <UnavailableCell />
@@ -976,8 +980,8 @@ function LoadingTable({
             </td>
             <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : r.hasA ? fmtPct(r.mean_a) : dash}</td>
             <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : r.hasB ? fmtPct(r.mean_b) : dash}</td>
-            <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : r.hasA ? fmtHr(r.binding_a) : dash}</td>
-            <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : r.hasB ? fmtHr(r.binding_b) : dash}</td>
+            <td className="py-1 text-right font-mono text-text">{!availableA ? unavailable : r.hasA ? (r.binding_a == null ? notEvaluated : fmtHr(r.binding_a)) : dash}</td>
+            <td className="py-1 text-right font-mono text-text">{!availableB ? unavailable : r.hasB ? (r.binding_b == null ? notEvaluated : fmtHr(r.binding_b)) : dash}</td>
           </tr>
         ))}
       </tbody>
@@ -1456,7 +1460,7 @@ export function EmissionsTab({ a, b }: { a: string; b: string }) {
   const emA = sa.emissions
   const emB = sb.emissions
   if (!emA || !emB) {
-    return <p className="text-[11px] text-muted py-2">No emissions data — neither project has carriers with co2_emissions set.</p>
+    return <p className="text-[11px] text-muted py-2">No emissions data. Neither project has a carrier with CO₂ emissions set.</p>
   }
   // Whether this side's emissions block resolved at all — see CapacityTab's
   // matching computation for the full ADR-0001 rationale.
@@ -1992,7 +1996,7 @@ export function CurtailmentTab({ a, b }: { a: string; b: string }) {
   const hasAnyA = cA && Object.keys(cA.by_carrier_gwh).length > 0
   const hasAnyB = cB && Object.keys(cB.by_carrier_gwh).length > 0
   if (!hasAnyA && !hasAnyB) {
-    return <p className="text-[11px] text-muted py-2">No curtailment data — neither project has renewable generators with a time-varying p_max_pu profile.</p>
+    return <p className="text-[11px] text-muted py-2">No curtailment data. Neither project has a renewable generator with an availability profile that varies over time.</p>
   }
   // A ONE-SIDED absence is not zero. `readPV` maps a null payload to 0, so a
   // project that never reported curtailment rendered identically to one that
@@ -2643,8 +2647,8 @@ function StorageUnitTable({
         <tr className="border-b border-border text-muted">
           <th className="text-left  py-1 font-medium">Unit</th>
           <th className="text-right py-1 font-medium">Carrier</th>
-          <th className="text-right py-1 font-medium">{aName} p_nom</th>
-          <th className="text-right py-1 font-medium">{bName} p_nom</th>
+          <th className="text-right py-1 font-medium">{aName} capacity</th>
+          <th className="text-right py-1 font-medium">{bName} capacity</th>
           <th className="text-right py-1 font-medium">{aName} energy</th>
           <th className="text-right py-1 font-medium">{bName} energy</th>
           <th className="text-right py-1 font-medium">{aName} cycles</th>
@@ -2951,6 +2955,91 @@ function CountsTable({ a, b }: { a: CompareState; b: CompareState }) {
   )
 }
 
+// ── Guided study headline (issue 23) ─────────────────────────────────────────
+
+function fmtPermyriad(v: number): string { return `${v.toFixed(2)} ‱` }
+function fmtHours(v: number): string { return `${v.toFixed(1)} h per year` }
+
+function reliabilityWord(s: CompareStudy): string {
+  if (s.certified === true) return 'Pass'
+  if (s.certified === false) return 'Fail'
+  return 'No goal set'
+}
+
+// The saved Guided study of each side. Both sides: their headline side by
+// side; deltas only while both studies are current. One side: a muted line
+// naming it. Neither: nothing, as for a pair of plain networks.
+function StudyTable({ a, b }: { a: CompareState; b: CompareState }) {
+  const sa = a.eh_study ?? null
+  const sb = b.eh_study ?? null
+  if (!sa && !sb) return null
+  if (!sa || !sb) {
+    return (
+      <p className="text-xs text-muted">
+        Study: only {(sa ? a : b).name} has results
+      </p>
+    )
+  }
+  const comparable = sa.state === 'current' && sb.state === 'current'
+  const npv = (s: CompareStudy) => s.period_basis === 'npv_multi_period'
+  // A per-year cost and a multi-period NPV are not one quantity: no delta.
+  const sameBasis = npv(sa) === npv(sb)
+  const costLabel = !sameBasis ? 'Cost at target (€, per year vs NPV)'
+    : npv(sa) ? 'Cost at target (€, NPV)' : 'Cost at target (€ per year)'
+  const rows: {
+    label: string; v: (s: CompareStudy) => number | null; fmt: (n: number) => string; delta?: boolean
+  }[] = [
+    { label: costLabel, v: s => s.cost_at_target_eur, fmt: n => fmtCurrency(n), delta: sameBasis },
+    { label: 'Unserved energy', v: s => s.achieved_ens_permyriad, fmt: fmtPermyriad },
+    { label: 'Expected loss of load', v: s => s.mc_lole_h, fmt: fmtHours },
+  ]
+  const cell = (s: CompareStudy, v: number | null, fmt: (n: number) => string) => (
+    <td className={`py-1 text-right font-mono ${s.state === 'current' ? 'text-text' : 'text-muted'}`}>
+      {v != null ? fmt(v) : '—'}
+    </td>
+  )
+  const stateWord = (s: CompareStudy) => (s.state === 'current' ? 'Current' : 'Out of date')
+  return (
+    <Section
+      title="Guided study"
+      subtitle="Saved with each project. The optimisation solve below is separate and may not have run."
+    >
+      <table className="w-full text-xs">
+        <tbody>
+          <tr className="border-b border-border/40">
+            <td className="py-1 text-text">Study</td>
+            <td className="py-1 text-right text-muted">{stateWord(sa)}</td>
+            <td className="py-1 text-right text-muted">{stateWord(sb)}</td>
+            <td className="py-1" />
+          </tr>
+          {rows.map(r => {
+            const va = r.v(sa)
+            const vb = r.v(sb)
+            return (
+              <tr key={r.label} className="border-b border-border/40">
+                <td className="py-1 text-text">{r.label}</td>
+                {cell(sa, va, r.fmt)}
+                {cell(sb, vb, r.fmt)}
+                <td className="py-1 text-right font-mono">
+                  {comparable && r.delta !== false && va != null && vb != null
+                    ? <Delta v={vb - va} fmt={r.fmt} invert />
+                    : <span className="text-muted">—</span>}
+                </td>
+              </tr>
+            )
+          })}
+          <tr className="border-b border-border/40">
+            <td className="py-1 text-text">Reliability goal</td>
+            <td className="py-1 text-right text-text">{reliabilityWord(sa)}</td>
+            <td className="py-1 text-right text-text">{reliabilityWord(sb)}</td>
+            <td className="py-1" />
+          </tr>
+        </tbody>
+      </table>
+    </Section>
+  )
+}
+
 function SolverTable({ a, b }: { a: CompareState; b: CompareState }) {
   return (
     <Section title="Solver state">
@@ -3234,7 +3323,7 @@ function OverviewCapacityTable({
     )
   }
   const title = `Generator capacity by carrier ${
-    useOpt ? '(total p_nom_opt = brownfield + built)' : '(installed p_nom — brownfield only)'
+    useOpt ? '(total p_nom_opt = brownfield + built)' : '(installed capacity, brownfield only)'
   }`
   const unavailable = <UnavailableCell />
   return (
@@ -3417,10 +3506,10 @@ function DispatchBadge({ status }: { status: 'none' | 'fresh' | 'stale' }) {
 function fmtCurrency(v: number | null): string {
   if (v == null || !Number.isFinite(v)) return '—'
   const abs = Math.abs(v)
-  if (abs >= 1e9) return `€${(v / 1e9).toFixed(2)}B`
-  if (abs >= 1e6) return `€${(v / 1e6).toFixed(2)}M`
-  if (abs >= 1e3) return `€${(v / 1e3).toFixed(2)}k`
-  return `€${v.toFixed(0)}`
+  if (abs >= 1e9) return signFirstEuro(v, `${(abs / 1e9).toFixed(2)}B`)
+  if (abs >= 1e6) return signFirstEuro(v, `${(abs / 1e6).toFixed(2)}M`)
+  if (abs >= 1e3) return signFirstEuro(v, `${(abs / 1e3).toFixed(2)}k`)
+  return signFirstEuro(v, abs.toFixed(0))
 }
 function fmtMW(v: number): string {
   if (!Number.isFinite(v)) return '—'

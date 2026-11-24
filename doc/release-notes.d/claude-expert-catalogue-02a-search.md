@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The command palette (Ctrl K / ⌘K) finds parameters by their plain name, alias, help or guide text, or model-file name, and lists each one with its value on the project's assets. Enter opens that field: in Expert in the asset's Properties, focused and highlighted; in Guided in the field drawer over the asset's section card, without switching mode.

@@ -35,7 +35,9 @@ def test_every_kind_has_a_literal_emitter_and_a_fragment_entry():
 def _refusal(n, products, floors, monkeypatch, bind=True):
     if bind:
         _bind(n, products, {p.id: 1.0 for p in products})
-    monkeypatch.setattr(RP, "project_backup", lambda _n: (floors, frozenset({STRING})))
+    monkeypatch.setattr(
+        RP, "project_backup", lambda _n, _cfg=None: (floors, frozenset({STRING}))
+    )
     return SIM._reserve_refusal(n, _cfg(products))
 
 
@@ -117,3 +119,60 @@ def test_a_refusal_in_the_worker_is_a_typed_failure_card():
     )
     assert card["category"] == "reserve_refused"
     assert RP.PRICE_STALE in card["detail"]
+
+
+# ── SCU06 K8b: the "no backup obligation" attestation at save (GK A B2) ─────
+
+
+def _put_check(monkeypatch, tmp_path, n, attested, stored=None):
+    from types import SimpleNamespace
+
+    from models.commercial import CommercialConfig
+
+    monkeypatch.setattr(
+        SIM.PyPSAService,
+        "get_active_context",
+        lambda: SimpleNamespace(storage_dir=str(tmp_path)),
+    )
+    monkeypatch.setattr(SIM, "_solver_in_flight_ctx", lambda _c: False)
+    monkeypatch.setattr(SIM.PyPSAService, "get_network", lambda: n)
+    cfg = CommercialConfig(poc_link="poc", reserve_no_backup_storages=attested)
+    return SIM._check_reserve_attestation(cfg, stored)
+
+
+def test_the_put_refuses_an_attested_backup_string(monkeypatch, tmp_path):
+    from tests.test_reserve_products import _dc_project, _strings
+
+    n = _dc_project(tmp_path, {"mode": "hybrid"})
+    s = _strings(n)[0]
+    with pytest.raises(HTTPException) as e:
+        _put_check(monkeypatch, tmp_path, n, [s])
+    assert e.value.status_code == 422
+    assert e.value.detail["error_kind"] == RP.ATTESTATION_REFUSED
+    assert s in e.value.detail["message"]
+    # The same list already stored is never refused again.
+    assert (
+        _put_check(monkeypatch, tmp_path, n, [s], {"reserve_no_backup_storages": [s]})
+        is None
+    )
+
+
+def test_the_put_refuses_ride_through_storage(monkeypatch, tmp_path):
+    from tests.test_reserve_products import UPS_FLOOR, _ups_site
+
+    n = _ups_site(tmp_path, UPS_FLOOR + 1.0)
+    with pytest.raises(HTTPException) as e:
+        _put_check(monkeypatch, tmp_path, n, ["ups"])
+    assert e.value.detail["error_kind"] == RP.ATTESTATION_REFUSED
+
+
+def test_the_put_keeps_a_storage_with_no_backup_role(monkeypatch, tmp_path):
+    from tests.test_reserve_attestation import _bess_site
+
+    assert _put_check(monkeypatch, tmp_path, _bess_site(), ["bess"]) is None
+    assert _put_check(monkeypatch, tmp_path, _bess_site(), []) is None
+
+
+def test_the_attestation_kind_has_a_fragment_entry():
+    frag = FRAGMENT.parent / "claude-scu06-k8b-attested-reserve.json"
+    assert set(json.loads(frag.read_text())["kinds"]) == {RP.ATTESTATION_REFUSED}

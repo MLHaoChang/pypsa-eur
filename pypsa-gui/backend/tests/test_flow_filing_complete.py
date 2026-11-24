@@ -298,6 +298,20 @@ def _connection_defaults(flow: dict) -> tuple[dict, list[dict]]:
     return conn, [i for i in conn["items"] if i["code"].startswith("assumed_")]
 
 
+def _run_defaults(flow: dict) -> list[str]:
+    return sorted(i["code"] for s in flow["sections"] for i in s["items"]
+                  if i["source"] == "run_defaults" and i["in_scope"])
+
+
+# The microgrid study's five assumed run inputs (template-e2e 08): the goal's
+# two, the batteries' carrier-default rate, and the read-as-FOR basis of the
+# diesels' and the hospital feeder's outage rates.
+MICROGRID_RUN_DEFAULTS = sorted([
+    "assumed_run_mc_draws", "assumed_run_site_archetype",
+    "assumed_run_outage_rate:StorageUnit:battery",
+    "assumed_run_outage_basis:Generator", "assumed_run_outage_basis:Link"])
+
+
 def test_an_off_grid_section_keeps_its_defaults_out_of_scope(client, tmp_projects_dir):
     """Section 3 is "not needed" off-grid: its four assumed rows stay listed (the
     audit trail) but are out of scope and counted nowhere; nothing else moves."""
@@ -311,10 +325,17 @@ def test_an_off_grid_section_keeps_its_defaults_out_of_scope(client, tmp_project
     assert not any(i["blocking"] for i in defaults)
     by_id = {s["section"]: s for s in flow["sections"]}
     # The normally-open subsea tie is no unit missing outage data (walkthrough 12):
-    # that one row is gone (it made this 14).
+    # that one row is gone; plus the study's five assumed run inputs
+    # (template-e2e 08) and the templates' tax rule as an assumption
+    # (WALK-IMPROVE-1 b).
     assert not [i for s in flow["sections"] for i in s["items"]
                 if i["code"] == "eh_outage_data_missing"]
-    assert by_id["readiness"]["summary"] == "0 to do, 13 to check"
+    assert _run_defaults(flow) == MICROGRID_RUN_DEFAULTS
+    # 21: 19 rows plus the off-grid dispatch limits (operating reserve,
+    # minimum renewable fraction; RESERVE-SHOW-1).
+    assert by_id["readiness"]["summary"] == "0 to do, 21 to check"
+    assert [i["target"]["entity"] for i in by_id["commercial"]["items"]
+            if i["code"] == "assumed_default" and i["target"].get("entity") == "tax"] == ["tax"]
     # The assumed rows of the sections the project does need are still asked for.
     assert all(i["in_scope"] for s in ("assets", "commercial", "scenarios")
                for i in by_id[s]["items"] if i["code"].startswith("assumed_"))
@@ -333,9 +354,14 @@ def test_the_staged_microgrid_keeps_its_feeder_losses_counted(client, tmp_projec
                      "subsea_tie": False}
     assert len(defaults) == 5
     readiness = next(s for s in flow["sections"] if s["section"] == "readiness")
+    # 10 after the subsea tie's outage row went, plus the study's assumed run
+    # inputs (template-e2e 08).
     assert not [i for s in flow["sections"] for i in s["items"]
                 if i["code"] == "eh_outage_data_missing"]
-    assert readiness["summary"] == "0 to do, 10 to check"
+    assert _run_defaults(flow) == MICROGRID_RUN_DEFAULTS
+    # plus the tax rule as an assumption (WALK-IMPROVE-1 b), plus the two
+    # dispatch limits (RESERVE-SHOW-1).
+    assert readiness["summary"] == "0 to do, 18 to check"
 
 
 def test_a_section_the_scope_leaves_out_says_so(client, tmp_projects_dir, monkeypatch):
@@ -417,3 +443,48 @@ def test_the_outage_sentence_agrees_with_its_count(names, words):
     report = {"outage_units": {"missing": [{"name": n} for n in names]}}
     items = S._readiness_items(report, voll_noted=True)
     assert [i["message"] for i in items if i["code"] == "eh_outage_data_missing"] == [words]
+
+
+def _outage_notes():
+    report = {"outage_units": {"missing": [{"name": "grid_import"}, {"name": "genset_1"},
+                                           {"name": "subsea_tie"}]}}
+    items = S._readiness_items(report, voll_noted=True,
+                               connection_links=frozenset({"grid_import", "subsea_tie"}))
+    return [i for i in items if i["code"] in S.OUTAGE_NOTE_CODES]
+
+
+def test_the_outage_note_files_a_connection_link_under_connection():
+    """A grid import or tie link is the connection's, not an asset of the site (the same rule
+    as `_site_assets`): its missing outage data is a section 3 note, the units' stay in 5."""
+    by_section = {i["target"]["section"]: i["message"] for i in _outage_notes()}
+    assert by_section == {
+        "connection": "2 connection links have no outage data (grid_import, subsea_tie).",
+        "assets": "1 unit has no outage data (genset_1).",
+    }
+
+
+def test_each_outage_note_is_acknowledged_on_its_own(tmp_path):
+    """The two notes carry different codes: an acknowledgement is stored per (code, entity), so
+    one note can never stand in for the other (GK B N1)."""
+    items = _outage_notes()
+    assert len({i["code"] for i in items}) == 2
+    conn = next(i for i in items if i["target"]["section"] == "connection")
+    assets = next(i for i in items if i["target"]["section"] == "assets")
+    S.acknowledge(tmp_path, items, assets["code"], None)
+    S._apply_acks(items, S.read_acks(tmp_path))
+    assert assets["acknowledged"] is True and not conn.get("acknowledged")
+    S.acknowledge(tmp_path, items, conn["code"], None)
+    S._apply_acks(items, S.read_acks(tmp_path))
+    assert assets["acknowledged"] is True and conn["acknowledged"] is True
+
+
+def test_acknowledge_many_keeps_the_two_outage_notes_apart(tmp_path):
+    items = _outage_notes()
+    conn = next(i for i in items if i["target"]["section"] == "connection")
+    assets = next(i for i in items if i["target"]["section"] == "assets")
+    S.acknowledge_many(tmp_path, items, [(conn["code"], None)])
+    S._apply_acks(items, S.read_acks(tmp_path))
+    assert conn["acknowledged"] is True and not assets.get("acknowledged")
+    S.acknowledge_many(tmp_path, items, [(assets["code"], None)])
+    S._apply_acks(items, S.read_acks(tmp_path))
+    assert conn["acknowledged"] is True and assets["acknowledged"] is True

@@ -52,7 +52,7 @@ export function CurtailmentByCauseTable({ payload }: { payload: CurtailmentByCau
     }
   }, [reason])
   return (
-    <section className="rounded-[10px] border border-border bg-bg overflow-hidden"
+    <section className="rounded-card border border-border bg-bg overflow-hidden"
              data-testid="curtailment-by-cause" data-status={payload.status}>
       <header className="px-4 py-2.5 border-b border-border bg-bg-2 flex justify-between items-center">
         <span className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Curtailment by cause</span>

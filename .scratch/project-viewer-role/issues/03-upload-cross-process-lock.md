@@ -3,7 +3,8 @@
 
 # add_upload serialises only within one process
 
-Status: ready-for-agent
+Status: done (#1755)
+Landed in #1755.
 Type: task
 Source: GK B (63) on #1622 (export under a foreign lock); predates the viewer role
 
@@ -14,3 +15,10 @@ Done when `add_upload` also holds a cross-process `harness.durable.file_lock` (G
 ## Triage (2026-11-19, master 9f850d36)
 
 Still true: `upload_service` guards only with the process-local `_project_upload_lock`. Gated: GK B. Blocked by: none. Acceptance is the Done line above.
+
+## Carry-forwards from GK B3 (4) on #1755 (non-blocking, CI-PACE-1)
+
+Recorded by the coordinator 2026-11-24 from #1794, which could not merge after this file's Status changed on master.
+
+- Narrow the `TimeoutError` catch in `add_upload` to the lock acquire only (an `ExitStack` inside the `try`, the body after it), so an unrelated timeout inside the body is not reported as `upload_busy`.
+- Add a UI title for `upload_busy` in `ChatPanel.tsx` (error-title map and banner kinds, if it becomes a banner kind) when an upload surface first shows it.

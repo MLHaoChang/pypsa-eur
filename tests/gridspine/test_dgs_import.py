@@ -19,6 +19,7 @@ import math
 import re
 
 import pandapower as pp
+import pandapower.networks as pn
 import pytest
 
 from gridspine.handoff.dgs_writer import write_dgs
@@ -248,7 +249,8 @@ def test_hand_injections_shunts_and_grid(hand):
     )  # open switch
     assert g.at["Gen", "p_nom"] == pytest.approx(8.0) and g.at["Gen", "control"] == "PV"
     assert n.buses.at["Spare", "v_mag_pu_set"] == pytest.approx(1.02)
-    assert g.at["Grid", "control"] == "Slack" and math.isinf(g.at["Grid", "p_nom"])
+    # the file leaves the grid unbounded: its short-circuit level 1000 MVA is used
+    assert g.at["Grid", "control"] == "Slack" and g.at["Grid", "p_nom"] == 1000.0
     assert [
         g.at["Grid", c] for c in ("sk_max_mva", "sk_min_mva", "rx_max", "rx_min")
     ] == [
@@ -481,7 +483,7 @@ def test_round_trip_counts_and_spectra(tmp_path):
 # --- pypsa behaviour the mapping relies on (D5, D6) ---------------------------
 
 
-def test_an_infinite_slack_rating_does_not_change_the_load_flow(hand):
+def test_the_slack_rating_does_not_change_the_load_flow(hand):
     n = hand.network
     n.lpf()
     n.pf(use_seed=True)
@@ -873,8 +875,8 @@ def test_an_element_pointing_at_the_wrong_type_is_reported(tmp_path):
     )
     res = read_text(tmp_path, dgs_text(rows))
     got = _unmapped(res)
-    assert ("ElmLne 'L1'", "no TypLne type") in got
-    assert ("ElmSym 'Gen'", "no TypSym type") in got
+    assert ("ElmLne 'L1'", "the file gives no line type for it") in got
+    assert ("ElmSym 'Gen'", "the file gives no synchronous machine type for it") in got
     assert (
         "ElmLod 'Load'",
         "its harmonic source is not a harmonic current type",
@@ -886,7 +888,7 @@ def test_a_line_type_class_absent_from_the_file_is_reported(tmp_path):
     rows = _with(ElmLne=["31;L1;2;;10.0;2;0"])
     del rows["TypLne"]
     got = _unmapped(read_text(tmp_path, dgs_text(rows)))
-    assert ("ElmLne 'L1'", "no TypLne type") in got
+    assert ("ElmLne 'L1'", "the file gives no line type for it") in got
 
 
 def test_a_closed_switch_keeps_its_element_in_service(tmp_path):
@@ -900,7 +902,7 @@ def test_a_type_pointer_into_another_class_with_its_own_class_absent(tmp_path):
     rows = _with(ElmLne=["31;L1;2;32;10.0;2;0"])
     del rows["TypLne"]
     got = _unmapped(read_text(tmp_path, dgs_text(rows)))
-    assert ("ElmLne 'L1'", "no TypLne type") in got
+    assert ("ElmLne 'L1'", "the file gives no line type for it") in got
 
 
 # --- GK A2 (4) review asks -----------------------------------------------------
@@ -1237,3 +1239,82 @@ def test_text_in_each_integer_flag_is_refused_by_name(tmp_path, cls, attr, row):
     rows = dict(ROWS, **{cls: [row, *ROWS[cls][1:]]})
     with pytest.raises(ImportFormatError, match=rf"{attr} 'x' is not an integer"):
         read_text(tmp_path, dgs_text(rows, head))
+
+
+# ---------------------------------------------------------------- unbounded external grid (issue psse-import 04)
+def _grid_rows(rep):
+    return [a for a in rep.assumed if a.parameter == "active power limit (MW)"]
+
+
+def test_the_unbounded_grid_takes_its_short_circuit_level(hand):
+    g = hand.network.generators
+    assert g.at["Grid", "p_nom"] == 1000.0
+    assert g["p_nom_source"].to_dict() == {
+        "PV": "file",
+        "Gen": "file",
+        "Grid": "assumed",
+    }
+    (row,) = _grid_rows(hand.report)
+    assert (row.asset, row.value) == ("Grid", 1000.0)
+    assert "unbounded in the file, so a limit" in row.why
+    assert "short-circuit level 1000 MVA" in row.why
+
+
+def test_an_unbounded_grid_without_snss_takes_the_load_bound(tmp_path):
+    # load 6 + j2 MVA: 10 × 6.32 = 64 MVA is under the 132 kV class floor 250 MVA
+    res = read_text(tmp_path, dgs_text(_with(ElmXnet=["44;Grid;2;1.0;;;;;SL;0"])))
+    assert res.network.generators.at["Grid", "p_nom"] == 250.0
+    (row,) = _grid_rows(res.report)
+    assert (row.asset, row.value) == ("Grid", 250.0)
+    assert "short-circuit" not in row.why
+
+
+def _issue_example(tmp_path):
+    net = pn.example_simple()
+    net.ext_grid[["s_sc_max_mva", "s_sc_min_mva", "rx_max", "rx_min"]] = [
+        1000,
+        800,
+        0.1,
+        0.1,
+    ]
+    path = tmp_path / "simple.dgs"
+    write_dgs(net, path)
+    return read_dgs([path], {})
+
+
+def test_the_issue_example_grid_is_finite_and_assumed(tmp_path):
+    res = _issue_example(tmp_path)
+    g = res.network.generators
+    assert g.at["ext_grid_0", "p_nom"] == 1000.0
+    assert g.at["ext_grid_0", "p_nom_source"] == "assumed"
+    assert [(a.asset, a.value) for a in _grid_rows(res.report)] == [
+        ("ext_grid_0", 1000.0)
+    ]
+    # DGS lines carry √3·U·I ratings and are never defaulted
+    assert "s_nom_source" not in res.network.lines.columns
+
+
+def test_a_short_circuit_level_equal_to_the_bound_is_not_named(tmp_path):
+    # snss 250 MVA equals the load bound (the 132 kV floor), so the bound is used
+    res = read_text(tmp_path, dgs_text(_with(ElmXnet=["44;Grid;2;1.0;250.0;;;;SL;0"])))
+    assert res.network.generators.at["Grid", "p_nom"] == 250.0
+    (row,) = _grid_rows(res.report)
+    assert "short-circuit" not in row.why
+
+
+def test_dgs_generators_take_the_stated_cost_default(hand):
+    g = hand.network.generators
+    assert g["marginal_cost"].to_dict() == {"PV": 1.0, "Gen": 1.0, "Grid": 1.0}
+    assert set(g["marginal_cost_source"]) == {"assumed"}
+    rows = [a for a in hand.report.assumed if a.parameter == "marginal cost (€/MWh)"]
+    assert sorted((a.asset, a.value) for a in rows) == [
+        ("Gen", 1.0),
+        ("Grid", 1.0),
+        ("PV", 1.0),
+    ]
+
+
+def test_the_issue_example_lopf_solves(tmp_path):
+    n = _issue_example(tmp_path).network
+    status, condition = n.optimize(solver_name="highs")
+    assert (status, condition) == ("ok", "optimal")

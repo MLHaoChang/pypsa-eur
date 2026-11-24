@@ -8,6 +8,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
+import { seedRows } from '../test/seedRows'
 
 vi.mock('../api/network', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/network')>()
@@ -17,7 +18,9 @@ vi.mock('../api/network', async (importOriginal) => {
     networkApi: {
       ...actual.networkApi,
       getBuses: empty, getCarriers: empty,
-      getStores: empty, getLinks: empty, getLoads: empty,
+      getStores: vi.fn(async () => (await import('../test/seedRows')).servedRows('stores')),
+      getLinks: vi.fn(async () => (await import('../test/seedRows')).servedRows('links')),
+      getLoads: vi.fn(async () => (await import('../test/seedRows')).servedRows('loads')),
       updateStore: vi.fn(async () => ({ name: 'tank' })),
       updateLink: vi.fn(async () => ({ name: 'ely' })),
       updateLoad: vi.fn(async () => ({ name: 'demand' })),
@@ -52,7 +55,7 @@ function client(seed: Array<[string, unknown]>) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } },
   })
-  for (const [key, value] of seed) qc.setQueryData(nk('Demo', key), value)
+  for (const [key, value] of seed) seedRows(qc, 'Demo', key, value as unknown[])
   return qc
 }
 

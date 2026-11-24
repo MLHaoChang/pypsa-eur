@@ -79,10 +79,16 @@ def capture(session):
         return None  # Unsaved drafts have no saved-project rules.
     with chat_tools._acting() as (db, user):
         if session.owner_user_id is not None and session.owner_user_id != str(user.id):
-            raise HTTPException(403, 'Chat ownership changed.')
+            raise HTTPException(403, {'error_kind': 'chat_ownership_changed',
+                                      'message': 'This chat belongs to another user. No tool was admitted.'})
         try:
             project = current_project(db, user, project_id)
         except HTTPException as exc:
+            if exc.status_code == 409:
+                # current_project's only 409 is the binding check above.
+                # The save route keeps current_project's string detail (issue 21).
+                raise HTTPException(409, {'error_kind': 'project_binding_changed',
+                                          'message': 'The open project changed since this chat started. No tool was admitted.'}) from exc
             if exc.status_code != 404:
                 raise
             # No access is not an unreadable store (issue 17); still 404, so a
@@ -97,10 +103,25 @@ def capture(session):
                 'project_role': role}
 
 
+def role_admits(snapshot, tier):
+    """Whether the snapshot's project role admits a tool of `tier`.
+
+    The one rule for a viewer: the chat offers a tool exactly when dispatch
+    would admit it (project-viewer-role 01, GK B3 V5). No snapshot (an
+    unsaved draft) has no role to judge.
+    """
+    return snapshot is None or snapshot.get('project_role') == project_acl.EDIT or tier == 'read'
+
+
+def view_only(snapshot):
+    """True when the snapshot's caller may view the project but not change it."""
+    return not role_admits(snapshot, 'write')
+
+
 def _require_role(snapshot, tier):
     # A viewer's write is refused whatever personal rule is saved: a saved
     # 'standard' rule never loosens the role (project-viewer-role 01).
-    if snapshot is not None and snapshot.get('project_role') != project_acl.EDIT and tier != 'read':
+    if not role_admits(snapshot, tier):
         raise project_write_gate.refusal()
 
 

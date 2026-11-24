@@ -25,6 +25,8 @@ from services.project_settings import POC_XR_MAX
 # The `int` fields of the same set (`build_year`, `min_up_time`, `tap_side`…)
 # already refuse non-finite values as `int` and stay `int`.
 Finite = Annotated[float, Field(allow_inf_nan=False)]
+# A finite number that refuses a tick (float(True) is 1.0) and a numeric string; JSON ints still pass (GK B X2).
+StrictFinite = Annotated[float, Field(strict=True, allow_inf_nan=False)]
 # An outage rate is a probability-like unavailability: finite and in [0, 1).
 # Whole-branch review, finding S1: the five create/update models accepted any
 # float here, the occurrence validator only WARNED, and `/copt` runs on demand
@@ -202,7 +204,11 @@ BUS_LAZY_COLUMNS = frozenset({"mwh_per_t", "product_value", "lost_production_val
 # The fuel curve (homer-parity 02a, `services.fuel_curve`) is written only when sent: a generator without one
 # keeps no column for it and its own marginal_cost.
 GENERATOR_LAZY_COLUMNS = frozenset({"process_role", "dc_ac_ratio", "fuel_curve_slope", "fuel_curve_no_load",
-                                    "fuel_price", "om_cost_per_run_hour", "lifetime_run_hours"})
+                                    "fuel_price", "om_cost_per_run_hour", "lifetime_run_hours",
+                                    # DGS-EXTRAS-1: the harmonic screen's inputs and the slack's grid strength.
+                                    "rated_mva", "harmonic_source", "harmonic_spectrum",
+                                    "sk_max_mva", "sk_min_mva", "rx_max", "rx_min"})
+LOAD_LAZY_COLUMNS = frozenset({"rated_mva", "harmonic_source", "harmonic_spectrum"})
 
 
 class LinkCreate(BaseModel):
@@ -343,6 +349,15 @@ class GeneratorCreate(BaseModel):
     p_max_pu_includes_outages: bool | None = None
     # `buy_in` | `shortfall` on a product bus's Generator (ticket 08); written only when sent.
     process_role: str | None = None
+    # DGS-EXTRAS-1: the harmonic screen's inputs, and on the slack the external grid's strength; written only
+    # when sent (`GENERATOR_LAZY_COLUMNS`), checked by `models/process_unit.py` PROCESS_CUSTOM_COLUMNS.
+    rated_mva: StrictFinite | None = None
+    harmonic_source: str | None = None
+    harmonic_spectrum: str | None = None
+    sk_max_mva: StrictFinite | None = None
+    sk_min_mva: StrictFinite | None = None
+    rx_max: StrictFinite | None = None
+    rx_min: StrictFinite | None = None
     # A PV generator's DC module rating / p_nom (p_nom is the AC rating); written only when sent, checked by
     # `eh_columns.dc_ac_ratio` (TC-02). None or blank = not declared.
     dc_ac_ratio: float | None = None
@@ -525,6 +540,10 @@ class LoadCreate(BaseModel):
     p_set: Finite = 0.0
     q_set: Finite = 0.0
     sign: Finite = -1.0
+    # DGS-EXTRAS-1: the harmonic screen's inputs, written only when sent (`LOAD_LAZY_COLUMNS`).
+    rated_mva: StrictFinite | None = None
+    harmonic_source: str | None = None
+    harmonic_spectrum: str | None = None
 
 
 class TransformerCreate(BaseModel):
@@ -876,6 +895,12 @@ class ImportSummary(BaseModel):
     snapshots: int
 
 
+class ExcelImportSummary(ImportSummary):
+    """/api/io/import/excel: the summary, and what the reader could not read or assumed (an ImportReport)."""
+
+    report: dict
+
+
 class ImportFolderRequest(BaseModel):
     """
     A folder the desktop user points at, to import pre-desktop projects from.
@@ -942,6 +967,10 @@ class ProjectInfo(BaseModel):
     bus_count: int
     snapshot_count: int
     objective: float | None = None
+    #: A finished Guided (Energy Hub) study was saved with the project
+    #: (``metadata.json`` ``eh_study_done``; issue 23). False for a project
+    #: saved before it was recorded, until its next save.
+    study_finished: bool = False
     # True when the project dir contains an orphaned `*.tmp` sibling — left
     # behind by `_atomic_write_with` if the process was killed mid-save.
     # The main `network.nc` is still the previous good version (atomic rename
@@ -961,6 +990,9 @@ class ProjectInfo(BaseModel):
     # a handle to delete the row) or purged (a project on an unmounted share
     # would be destroyed).
     missing: bool = False
+    # The caller's access: "edit" or "view" (project-viewer-role 01), from
+    # `project_acl.project_role`. None where the route does not report it.
+    my_access: str | None = None
     # Name of the parent project (None = root scenario, not a child).
     # A non-null value means this project is a scenario branched off another.
     # The frontend reconstructs the scenario tree by walking these pointers.
@@ -1054,6 +1086,27 @@ class RenameProjectRequest(BaseModel):
     new_name: str = Field(..., min_length=1, max_length=64)
 
 
+class CompareStudy(BaseModel):
+    """The headline of a project's saved, finished Guided (Energy Hub) study,
+    as Compare shows it side by side (issue 23). Read from the study's report
+    (``ReferenceDesignReport``)."""
+
+    #: ``current`` when the study ran on the network as saved; ``out_of_date``
+    #: when the network was edited after it ran, or that cannot be told.
+    state: Literal["current", "out_of_date"]
+    #: EUR, excluding the cost of shed load; ``period_basis`` says per year
+    #: (``single_period``) or a multi-period NPV.
+    cost_at_target_eur: float | None = None
+    period_basis: str | None = None
+    #: Unserved energy reached and allowed, ‱ of demand.
+    achieved_ens_permyriad: float | None = None
+    ens_cap_permyriad: float | None = None
+    #: Expected loss of load, h per year (Monte Carlo).
+    mc_lole_h: float | None = None
+    #: True on a pass verdict, False on a fail, None when no goal was set.
+    certified: bool | None = None
+
+
 class CompareState(BaseModel):
     """
     Compact snapshot of a non-active project's state, suitable for
@@ -1112,6 +1165,9 @@ class CompareState(BaseModel):
     scenario_type: str | None = None
     created_at: str | None = None
     last_saved: str | None = None
+    # The saved Guided (Energy Hub) study's headline, or None when the
+    # project has no finished study (issue 23).
+    eh_study: CompareStudy | None = None
 
 
 # ── Results-Summary types (Compare Scenarios v2) ─────────────────────────────
@@ -1261,7 +1317,12 @@ class LineLoadingEntry(BaseModel):
     # Hours where loading ≥ 0.99 — proxy for "binding N-0 thermal limit".
     # Already snapshot-weight × period-year multiplied so a representative-
     # week network reports the equivalent annual hour count.
-    binding_hours: CarrierPeriodValue = Field(default_factory=CarrierPeriodValue)
+    # None: not evaluated because the importer assumed this rating (below). A 0 would
+    # read as "never binding", a pass on a rating the file never stated.
+    binding_hours: CarrierPeriodValue | None = Field(default_factory=CarrierPeriodValue)
+    # The importer assumed this rating (s_nom_source/p_nom_source == "assumed"):
+    # loading stays, binding hours are not evaluated against it (psse-import 06).
+    rating_assumed: bool = False
 
 
 class LoadingComparison(BaseModel):
@@ -1279,6 +1340,8 @@ class LoadingComparison(BaseModel):
     # Ordered by peak loading (descending) on the SCENARIO-WIDE aggregate so
     # the worst-loaded branches surface first. Frontend renders top-N.
     lines: list[LineLoadingEntry] = Field(default_factory=list)
+    # Branches whose rating is assumed; left out of the binding-hours figures.
+    assumed_rating_count: int = 0
 
 
 class CarrierPriceStats(BaseModel):

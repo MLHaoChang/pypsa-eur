@@ -34,6 +34,7 @@ POST   /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/publish  wri
 DELETE /api/campus-electrical/{name}/grid-codes/published/{profile_id}  write path:name
 DELETE /api/campus-electrical/{name}/grid-readiness/limits/{item}  write path:name
 PUT    /api/campus-electrical/{name}/grid-readiness/limits/{item}  write path:name
+PATCH  /api/campus-electrical/{name}/island  write path:name
 PUT    /api/campus-electrical/{name}/island  write path:name
 DELETE /api/campus-electrical/{name}/island/cuts  write path:name
 POST   /api/campus-electrical/{name}/island/cuts/apply  write path:name
@@ -96,6 +97,12 @@ POST   /api/durable-conversations/{thread_id}/speech/segment  allow the caller's
 POST   /api/durable-conversations/{thread_id}/speech/start  allow the caller's own conversation thread and speech records; writes no project
 POST   /api/durable-conversations/{thread_id}/speech/usage  allow the caller's own conversation thread and speech records; writes no project
 POST   /api/equipment_table/preview  allow declared non-mutating (assistant_route_parity non_mutating_routes): computes and returns, writes nothing
+PATCH  /api/grid-compliance/{name}/deliverables/{code}/comments/{comment_id}  write path:name
+POST   /api/grid-compliance/{name}/deliverables/{code}/comments  write path:name
+PUT    /api/grid-compliance/{name}/deliverables/{code}/data  write path:name
+POST   /api/grid-compliance/{name}/deliverables/{code}/freeze  write path:name
+POST   /api/grid-compliance/{name}/deliverables/{code}/pack  write path:name
+PUT    /api/grid-compliance/{name}/deliverables/{code}/status  write path:name
 POST   /api/gridspine/projects  none creates a new project the caller owns
 POST   /api/gridspine/{name}/capacity  write path:name
 PUT    /api/gridspine/{name}/config  write path:name
@@ -106,7 +113,7 @@ POST   /api/gridspine/{name}/readback/{hour}  write path:name
 POST   /api/gridspine/{name}/run  write path:name
 PUT    /api/gridspine/{name}/templates/{unit_id}/{param}  write path:name
 POST   /api/io/import/csv  none replaces the open network with an unsaved scratch copy; writes no project
-POST   /api/io/import/excel  none replaces the open network with an unsaved scratch copy; writes no project
+POST   /api/io/import/excel  write active
 POST   /api/io/import/matpower  none replaces the open network with an unsaved scratch copy; writes no project
 POST   /api/io/import/netcdf  none replaces the open network with an unsaved scratch copy; writes no project
 POST   /api/library/items/tariff/import_urdb  none the org library, not a project
@@ -117,6 +124,8 @@ POST   /api/library/series/upload  none the org library, not a project
 POST   /api/library_reference/preview  allow declared non-mutating (assistant_route_parity non_mutating_routes): computes and returns, writes nothing
 PUT    /api/local-settings/anthropic-key  none desktop settings
 POST   /api/local-settings/reveal-log  none desktop settings
+DELETE /api/market-prices/token  none instance administration
+PUT    /api/market-prices/token  none instance administration
 DELETE /api/mcp  none personal MCP connections
 POST   /api/mcp  none personal MCP connections
 POST   /api/memory/dismissals  none personal assistant memory
@@ -127,6 +136,8 @@ PATCH  /api/memory/items/{item_id}  none personal assistant memory
 POST   /api/memory/items/{item_id}/{action}  none personal assistant memory
 POST   /api/memory/parameters  none personal assistant memory
 POST   /api/memory/suggestions/{item_id}/preview  none personal assistant memory
+POST   /api/model-import/import  none creates a new project the caller owns
+POST   /api/model-import/preview  none parses uploads, writes nothing
 PATCH  /api/network/_bulk  write active
 POST   /api/network/buses  write active
 DELETE /api/network/buses/{name}  write active
@@ -202,12 +213,14 @@ POST   /api/projects/{name}  write path:name
 PUT    /api/projects/{name}/asset_health  write path:name
 POST   /api/projects/{name}/flow/ack  write path:name
 POST   /api/projects/{name}/flow/ack-many  write path:name
+PUT    /api/projects/{name}/flow/energization  write path:name
 PUT    /api/projects/{name}/flow/scope  write path:name
 POST   /api/projects/{name}/intent-comparison  write path:name
 POST   /api/projects/{name}/intent-comparison/abort  write path:name
 PUT    /api/projects/{name}/layout  write path:name
 PUT    /api/projects/{name}/map_layout  write path:name
 POST   /api/projects/{name}/map_layout/import  write path:name
+POST   /api/projects/{name}/market-prices/day-ahead  write path:name
 PUT    /api/projects/{name}/members  write path:name
 POST   /api/projects/{name}/profiles/apply  write path:name
 POST   /api/projects/{name}/profiles/apply-batch  write path:name
@@ -302,6 +315,7 @@ POST   /api/results/margin_loop/abort  write active
 POST   /api/results/mc  write active
 POST   /api/results/mc/abort  write active
 POST   /api/simulation/abort  write active
+POST   /api/simulation/commercial/market_packs/{pack_id}/apply  write active
 PUT    /api/simulation/commercial/value_flows  write active
 POST   /api/simulation/document_values/apply  write active
 PUT    /api/simulation/finance  write active
@@ -320,4 +334,6 @@ POST   /api/simulation/run_ac_pf  write active
 PUT    /api/simulation/solver_config  write active
 POST   /api/simulation/value_flows/template  write active
 POST   /api/spectrum/trace  none analyses an uploaded trace in memory; stores nothing
+POST   /api/workbook/import  none creates a new project the caller owns
+POST   /api/workbook/preview  none parses an upload, writes nothing
 """

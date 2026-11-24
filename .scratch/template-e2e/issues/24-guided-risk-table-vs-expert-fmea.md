@@ -3,7 +3,7 @@
 
 # 24 — Guided risk table disagrees with Expert FMEA and the report
 
-Status: needs-triage
+Status: ready-for-agent
 Source: decide-report-journeys.md (walk 2026-11-17, master 0ab07339)
 Severity: misleads
 Journey fit: results: numbers must agree between Guided, Expert and report.
@@ -17,3 +17,11 @@ Cost, LOLE and the top risk agree across all three on every template (PASS). The
 - Guided risk rows equal Expert FMEA rows.
 - Results state the critical share and MW kept on.
 - Implausible LCOE carries a caveat.
+
+## Triage (2026-11-20, master b7e5dee3)
+
+Checked by code reading only; the app was not re-run. Acceptance as above: Guided risk rows equal Expert FMEA rows, results state the critical share and MW kept on, implausible LCOE carries a caveat. Overlaps the FMEA-unpriced work already merged (#1662): re-check the EUR 0 rows in the app first. Gated: GK A. Blocked by: none.
+
+## Comments
+
+- 2026-11-23 status sweep: landed in #1662 (a3e82685): unpriced FMEA rows no longer show EUR 0. Remains: Guided-versus-Expert row equality, critical share and MW kept on, LCOE caveat.

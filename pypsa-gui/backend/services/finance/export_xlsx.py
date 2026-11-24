@@ -29,6 +29,7 @@ from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from models.finance import (
     IC_EXPORT_KEYS, IC_REPORT_SECTIONS, InvestmentCaseReport, export_investment_case,
 )
+from services.finance.breakeven import LABEL as ISLAND_BREAKEVEN_LABEL
 from services.finance.debt import CFADS_DEFINITION
 
 NOT_ESTABLISHED = "not_established"
@@ -214,7 +215,7 @@ def build_workbook(report: InvestmentCaseReport, *, project: str | None = None) 
     # (owner decision 2026-10-15), next to the figures.
     be = project_payload.get("island_breakeven")
     if isinstance(be, dict) and be.get("text"):
-        _rows(summary, [["Island capability break-even", be["text"]]], summary.max_row + 1)
+        _rows(summary, [[ISLAND_BREAKEVEN_LABEL, be["text"]]], summary.max_row + 1)
     cf = project_payload.get("counterfactual")
     if isinstance(cf, dict) and cf.get("basis"):
         _rows(summary, [["Compared with", cf["basis"]]]

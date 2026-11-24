@@ -94,10 +94,21 @@ class IslandPresetBody(BaseModel):
     preset: str | None = None
 
 
+class IslandPatchBody(BaseModel):
+    #: The fields to change, by name: ``{units?: {unit: {field: value}},
+    #: requirements?: {field: value}}``; the service merges, checks and saves.
+    patch: dict
+    #: The ``revision`` the editor read (GET); a changed sidecar is a 409.
+    base: str | None = None
+
+
 class IslandConfigBody(BaseModel):
     #: The raw sidecar; gridspine's schema validates it in the service (422
     #: naming the field) and the service caps its size (413).
     config: dict
+    #: The ``revision`` the editor read (GET); a changed sidecar is a 409, so a
+    #: whole-config save cannot drop a change made since (optional, as on PATCH).
+    base: str | None = None
 
 
 class IslandStudyBody(BaseModel):
@@ -248,9 +259,11 @@ async def get_grid_readiness(profile: str | None = None, proj: AuthorizedProject
     """The project's grid-readiness scorecard against grid-code ``profile``
     (default: the campus study's last-run profile, else ``eu_rfg_dcc_ce``):
     rows ``{id, requirement, limit, unit, source, project_value, verdict,
-    assumed, note, section, target}``. Advisory and read only; it reads the
-    saved network, so it parses a netCDF off the event loop. 422 for an
-    unknown profile."""
+    assumed, note, section, target}``, and ``network`` (``live``, ``saved`` or
+    ``out_of_date``). Advisory and read only: it scores a copy of the loaded
+    network (unsaved edits included), or the saved netCDF when the project is
+    not loaded or a run holds it (DC walkthrough 04), off the event loop. 422
+    for an unknown profile."""
     from services.adequacy.grid_readiness import grid_readiness_for
 
     return await run_in_threadpool(grid_readiness_for, _row(proj, db), profile)
@@ -440,9 +453,24 @@ def save_island(
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ):
-    """Save the island sidecar, validated by gridspine's schema."""
+    """Save the island sidecar, validated by gridspine's schema. A stale
+    ``base`` is a 409 ``island_config_changed``."""
     _check_lock(proj, db, user)
-    return ce.save_island(_row(proj, db), body.config)
+    return ce.save_island(_row(proj, db), body.config, body.base)
+
+
+@router.patch("/{name}/island")
+def patch_island(
+    body: IslandPatchBody,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Change some island settings (a unit's controls, a requirement) without
+    resending the rest: merged into the stored sidecar, validated, saved. A
+    stale ``base`` is a 409 ``island_config_changed``."""
+    _check_lock(proj, db, user)
+    return ce.patch_island(_row(proj, db), body.patch, body.base)
 
 
 @router.post("/{name}/island/preset")

@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Guided and Expert's sized-design table shows each asset's size in its own unit (MW, t/h, MWh or t), as the report does. On a staged plan it leads with the period and lists the assets by period.

@@ -453,14 +453,16 @@ def _imported_parts_problem(component_class: str, row, global_rate: float) -> st
     return None
 
 
-def rederive_imported_parts(n, *, global_rate: float | None = None) -> list[str]:
+def rederive_imported_parts(n, *, global_rate: float | None = None, new_project: bool = False) -> list[str]:
     """An imported network's composite rows (TCU 10, N5). Every priced row is checked first, as the create path
     checks one (`_check_investment_parts`), and also for a non-finite part or scale: the first bad row refuses
     the import (422 `invalid_edit_value`, naming it) before anything is written. Then every priced row is
     re-derived so its parts own its costs (a stale `capital_cost`, `fom_cost` or `lifetime` from the file
     included) at the rate in force: the asset's own, else the open project's (a network file carries no
     solver settings; a project bundle does, and passes its rate as `global_rate`). Returns the re-derived rows
-    as "Storage 'name'". `n` is the import's candidate, not yet open, so no lock is needed."""
+    as "Storage 'name'". `n` is the import's candidate, not yet open, so no lock is needed. `new_project`: the
+    upload would create a new project (the Excel input workbook), so the refusal says nothing was imported
+    rather than that the open network is unchanged."""
     if global_rate is None:
         global_rate = _global_discount_rate()
     priced = []
@@ -473,12 +475,12 @@ def rederive_imported_parts(n, *, global_rate: float | None = None) -> list[str]
             if problem := _imported_parts_problem(component_class, row, global_rate):
                 raise HTTPException(422, {
                     "error_kind": "invalid_edit_value",
-                    "message": f"{class_label(component_class)} '{name}': {problem}. "
-                               "The open network is unchanged."})
+                    "message": f"{class_label(component_class)} “{name}”: {problem}. "
+                               + ("Nothing was imported." if new_project else "The open network is unchanged.")})
             priced.append((component_class, name))
     for component_class, name in priced:
         rederive_scaled_parts(n, component_class, name, global_rate=global_rate)
-    return [f"{class_label(component_class)} '{name}'" for component_class, name in priced]
+    return [f"{class_label(component_class)} “{name}”" for component_class, name in priced]
 
 
 def _refuse_edit_during_live_study() -> None:
@@ -516,6 +518,16 @@ def _refuse_cost_basis_mismatch(n, component_class: str, row: dict, claimed: str
             "error_kind": "cost_basis_mismatch", "claimed": claimed, "actual": actual, "message": message})
 
 
+def _refuse_reversed_grid_strength(component_class: str, row: dict, submitted=None) -> None:
+    """Catalogue 06: 422 when an edit leaves a slack's `sk_min_mva` above its `sk_max_mva`."""
+    from services.adequacy.eh_columns import check_grid_strength_pair
+
+    try:
+        check_grid_strength_pair(component_class, row, submitted)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 def _create_component(component_class: str, attr: str, name: str, kwargs: dict,
                       cost_basis: str | None = None) -> dict:
     _refuse_edit_during_live_study()
@@ -535,6 +547,7 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict,
     kwargs, parts = split_parts(component_class, kwargs)
     kwargs = _drop_unknown_extras(component_class, attr, kwargs)
     _check_investment_parts(component_class, parts, row=kwargs)
+    _refuse_reversed_grid_strength(component_class, kwargs)
     notice = check_fuel_curve(component_class, kwargs)
     with PyPSAService.get_lock():
         _refuse_cost_basis_mismatch(n, component_class, kwargs, cost_basis)
@@ -766,6 +779,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict,
                                     stored_row=df.loc[name].to_dict() if cost_basis else None)
         parts = {**current_parts, **submitted_parts}
         _check_investment_parts(component_class, parts, row=merged)
+        _refuse_reversed_grid_strength(component_class, merged, submitted=kwargs)
         stored = df.loc[name].to_dict()
         check_parts_own_costs(component_class, parts, before=stored, submitted=kwargs)
         notice = check_fuel_curve(component_class, merged, n=n, name=name, before=stored, submitted=kwargs)

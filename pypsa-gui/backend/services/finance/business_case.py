@@ -53,6 +53,7 @@ from models.business_case import (
     LinkedOutputMissing,
     NameDuplicate,
     VolumeFactorUnclassified,
+    takes_derating,
 )
 from services.business_case.linked_outputs import (
     LostProductionMap,
@@ -281,8 +282,15 @@ def volume_factors_below_full(
 def _quantity(ln: LineItem, year: int, outputs: dict) -> float | None:
     if ln.source == "linked":
         q = _linked_q(outputs.get(ln.name), year)
-        # The line's sold share of the series (GK B BC 07 P3).
-        return None if q is None else q * ln.linked_share_at(year)
+        # The line's sold share of the series (GK B BC 07 P3), and a capacity payment's
+        # de-rated share of the capacity in service (walk 04, GK B2 B1): applied here once.
+        if q is None:
+            return None
+        if ln.derating is not None:
+            q *= ln.derating
+        elif takes_derating(ln.category, ln.quantity_source):
+            return None  # never read as 1.0 (Q2); the run refuses it first
+        return q * ln.linked_share_at(year)
     return ln.cell("quantity", year).value
 
 
@@ -661,7 +669,13 @@ def build_business_case(
                 )
             )
         overnight[ln.name] = v
-        assets.append(AssetFinance(ln.name, SOURCE, v, math.inf))
+        # The life values the terminal only (walk 03 case B); the refresh years, never
+        # the life, replace the line, so `lifetime_years` stays infinite.
+        assets.append(
+            AssetFinance(
+                ln.name, SOURCE, v, math.inf, terminal_lifetime_years=ln.life_years
+            )
+        )
         dep[ln.name] = _depreciation_class(ln)
         if first > tl.cod_year:
             # A later stage (P5). With staged CODs every other asset states the case COD,
@@ -669,7 +683,8 @@ def build_business_case(
             for a in assets[:-1]:
                 cod.setdefault(a.name, ic_case.cod)
             cod[ln.name] = _cod_in(ic_case.cod, first)
-        if ln.refresh_years and v is not None:
+        # A typed 0 buys nothing, so nothing is refreshed (no zero entry; C3).
+        if ln.refresh_years and v:
             k = 1
             while (y := first + math.floor(k * ln.refresh_years + 1e-9)) <= last:
                 rep.append((y, ln.name, v))
@@ -753,6 +768,8 @@ def _line_blob(ln: LineItem, horizon: tuple[int, int]) -> dict:
         del d["linked_share"]
     if not d["linked_share_by_year"]:
         del d["linked_share_by_year"]
+    if d["derating"] is None:
+        del d["derating"]
     if not ln.default_keys:
         del d["default_units"]
     for a in d["assumed"].values():
@@ -793,6 +810,12 @@ def business_case_hash(
         # Only the operating years it scales, so a full-volume case keeps its digest
         # (BC 15; a digest gate enters only when it changes an outcome, GK B (49)).
         blob["volume_factor"] = sorted([y, float(f)] for y, f in lease_up.items())
+    if ic_case.inputs.terminal_value.method == "remaining_life_annuity" and any(
+        ln.kind == "capex" for ln in inputs.lines
+    ):
+        # Walk 03 case B: a capex line's life now values its terminal, so a report
+        # stored before reads stale; a case the rule does not reach keeps its digest.
+        blob["capex_terminal_life"] = True
     lp = lost_production
     if (
         lp is not None
@@ -1155,6 +1178,24 @@ def _ratio(num: float, den: float, unit=None) -> Kpi:
     if den == 0.0:
         return Kpi(None, "n/a", "no_revenue", unit)
     return _ok(_finite_ratio(num, den), unit)
+
+
+#: The P&L row each KPI is computed from (walk 03; GK B2 on #1683): a KPI not
+#: established for a section reads that row's `row_reason`. Served with the report as
+#: `pnl.kpi_row`; a test pins its keys to `kpis()` and its rows to `PnL.rows`.
+KPI_ROW: dict[str, str] = {
+    "project_npv": "project_post_tax",
+    "project_irr": "project_post_tax",
+    "equity_npv": "equity_post_tax",
+    "equity_irr": "equity_post_tax",
+    "payback_years": "equity_post_tax",
+    "min_dscr": "debt_service",
+    "avg_dscr": "debt_service",
+    "ebitda_margin_gross": "ebitda",
+    "ebitda_margin_net": "ebitda",
+    "revenue_per_capacity_gross": "ebitda",
+    "revenue_per_capacity_net": "ebitda",
+}
 
 
 def kpis(

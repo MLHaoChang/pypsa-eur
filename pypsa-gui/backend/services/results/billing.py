@@ -254,7 +254,7 @@ def reserve_lines(n, cfg, site_party: str = "site", *,
     products = RP.products_of(cfg)
     if not products:
         return [], []
-    floors, _strings = RP.project_backup(n) if backup is None else backup
+    floors, _strings = RP.project_backup(n, cfg) if backup is None else backup
     if read is None or (not read.flags and read.inputs != _digest_or_none(RP, products, floors)):
         # A read taken for other products or floors is never priced here: read again (GK B P1).
         read = RP.solved_read(n, lambda: RP.inputs_digest(products, floors))

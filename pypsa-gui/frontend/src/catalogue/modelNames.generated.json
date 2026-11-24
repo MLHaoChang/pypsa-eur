@@ -39,6 +39,8 @@
     "fuel_curve_no_load": "No-load fuel",
     "fuel_curve_slope": "Fuel curve slope",
     "fuel_price": "Fuel price",
+    "harmonic_source": "Harmonic source",
+    "harmonic_spectrum": "Harmonic spectrum",
     "lifetime": "Lifetime",
     "lifetime_run_hours": "Lifetime in running hours",
     "marginal_cost": "Running cost",
@@ -60,7 +62,12 @@
     "process_role": "Process role",
     "ramp_limit_down": "Ramp-down limit",
     "ramp_limit_up": "Ramp-up limit",
+    "rated_mva": "Rated apparent power",
+    "rx_max": "R/X ratio at maximum short circuit",
+    "rx_min": "R/X ratio at minimum short circuit",
     "shut_down_cost": "Shut-down cost",
+    "sk_max_mva": "Maximum short-circuit power",
+    "sk_min_mva": "Minimum short-circuit power",
     "stand_by_cost": "Stand-by cost",
     "start_up_cost": "Start-up cost"
   },
@@ -151,9 +158,12 @@
   "Load": {
     "bus": "Connected to",
     "carrier": "Carrier",
+    "harmonic_source": "Harmonic source",
+    "harmonic_spectrum": "Harmonic spectrum",
     "name": "Name",
     "p_set": "Demand",
     "q_set": "Reactive demand",
+    "rated_mva": "Rated apparent power",
     "sign": "Sign"
   },
   "ShuntImpedance": {

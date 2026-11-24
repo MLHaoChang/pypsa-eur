@@ -3,7 +3,9 @@
 
 # 51 — A scope preset for the grid templates
 
-Status: needs-triage
+Status: done
+
+Done in #1586 (81409bbd10).
 Gated: GK B + UX
 Type: task
 Parent: SH 15 (grid_only@1) follow-up; owner decision SH15-SCOPE (A, under PR-SIZE-1)

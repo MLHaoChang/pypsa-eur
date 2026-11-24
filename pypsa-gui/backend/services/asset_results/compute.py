@@ -1296,8 +1296,23 @@ def br_mean_loading(ctx: Ctx):
     return _wmean(ctx, br_loading(ctx))
 
 
+def rating_assumed(ctx: Ctx) -> bool:
+    """The branch's rating is an importer's assumption, not a stated one (psse-import 05)."""
+    from services import assumed_rating
+
+    return assumed_rating.is_assumed(ctx.params, "p_nom" if ctx.component_class == "Link" else "s_nom")
+
+
+def rating_assumed_flags(ctx: Ctx) -> dict:
+    from services import assumed_rating
+
+    return {"rating_assumed": True, "rating_label": assumed_rating.LABEL} if rating_assumed(ctx) else {}
+
+
 def br_congested_hours(ctx: Ctx):
     load = br_loading(ctx)
+    if load is not None and rating_assumed(ctx):
+        return None  # not evaluated: an assumed rating never binds, so no congested hour is claimed or denied
     return None if load is None else _whours(ctx, load >= _LOADED * 100.0)
 
 

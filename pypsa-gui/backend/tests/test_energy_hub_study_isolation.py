@@ -220,7 +220,11 @@ def test_infeasible_ens_solve_is_failed_not_aborted():
 @pytest.mark.live_solve
 def test_http_failed_ens_solve_record_is_failed_with_report(
         client, install_network):
-    _setup_http(client, install_network, _weak_mvp_b_network(), voll=500.0)
+    # template-e2e 02c: the study's import cap is the network's connection
+    # limit; 50 MW keeps the default ENS target infeasible.
+    n = _weak_mvp_b_network()
+    n.links.loc["import_poc", ["p_nom", "p_nom_max"]] = 50.0
+    _setup_http(client, install_network, n, voll=500.0)
     r = client.post(STUDY_URL, json={"archetype": "weak_flexible"})
     assert r.status_code == 200, r.text
     body = _poll(client)

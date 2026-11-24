@@ -88,7 +88,8 @@ def series_table(record, window=None):
         return raw["index"], {
             "p0": ("MW", POWER, branch["p0"]),
             "p1": ("MW", POWER, branch["p1"]),
-            "loading": ("%", "% of rating x s_max_pu per snapshot", loading),
+            "loading": ("%", "% of rating x s_max_pu per snapshot"
+                        + (" (rating assumed)" if branch.get("rating_assumed") else ""), loading),
         }
     return raw.get("index") or [], {}
 
@@ -211,6 +212,8 @@ def render(ctx, record, requested):
         "render_spec": {"kind": "line", "points": "every snapshot as stored", "caption": lines},
         "artifact_sha256": byte_hash,
     }
+    if "definition_hash" in record:  # AA-10 S7: the definitions it was checked under
+        manifest["definition_hash"] = record["definition_hash"]
     manifest["render_spec_sha256"] = canonical_sha256(manifest["render_spec"])
     provenance = {"manifest": manifest}
     sidecar = root / "assistant_artifacts" / (byte_hash[:16] + ".json")

@@ -81,3 +81,5 @@ once they are 90 days old. Still open: the live probe and its evidence, the
 hosted audio worker (it needs the thread id as well as the room in its dispatch
 metadata, which `MediaTransport.open_session` does not pass yet), cold-start
 and Build-quota measurement, and the browser join.
+
+- 2026-11-23 status sweep: landed in #1482 (b2a2419609); #1483 (1fae2a7223): 01a adapters and 01b probe gate. Remains: live budgeted probe (owner keys), WebRTC/LiveKit.

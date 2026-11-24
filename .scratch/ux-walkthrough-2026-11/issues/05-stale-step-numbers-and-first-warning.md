@@ -31,3 +31,5 @@ J3 to J6.
 ## Comments
 
 **2026-11-17 triage (SCALE-1).** Narrowed to the stale "step 3 (Goal)" text (name the section with a link) and the em dashes. The amber first screen from "no site location" is template-e2e 01 (ready), so not repeated here. Check #1611 first: it may already rewrite the sentence.
+
+- 2026-11-23 status sweep: landed in #1611 (fdd3bc283c); #1695 (2ed46afa01): stale step numbers fixed. Remains: em dashes in SiteTypeSelect.tsx and the amber first screen (needs template-e2e 01).

@@ -214,3 +214,146 @@ def test_no_stage_is_recorded_as_unimplemented_anymore():
     src = inspect.getsource(S)
     assert "not implemented in P1.5" not in src
     assert "not implemented in sync driver" not in src
+
+
+# template-e2e 21: a goal below the resolution floor names the floor and the
+# fewest draws that resolve it. The first MC batch is min(draws, MAX_DRAWS),
+# so draws >= ceil(w_min / target_h) puts the floor (w_min / n) at or under
+# the target.
+@pytest.mark.parametrize(
+    "floor,n,target,expected",
+    [
+        (52.1, 1, 3.0, 18),          # 52.1 / 3 = 17.37 → 18
+        (52.1, 2, 3.0, 35),          # w_min = floor·n = 104.2 h → 34.7 → 35
+        (6.0, 1, 3.0, 2),            # exact boundary: 6 / 3 = 2 draws
+        (1.0, 500, 3.0, 167),        # w_min 500 h → 166.7 → 167
+        (52.1, 1, 0.0, None),        # no draw count resolves a zero goal
+        (None, 1, 3.0, None),        # no floor → nothing to state
+        (52.1, None, 3.0, None),
+    ],
+)
+def test_min_draws_to_resolve(floor, n, target, expected):
+    assert S.min_draws_to_resolve(floor, n, target) == expected
+
+
+def test_min_draws_resolves_the_target_exactly_at_the_boundary():
+    """At `min_draws` the floor is at or under the target, one fewer is not."""
+    for w_min, target in ((52.1, 3.0), (6.0, 3.0), (0.25, 0.1), (168.0, 8.4)):
+        m = S.min_draws_to_resolve(w_min, 1, target)
+        assert w_min / m <= target
+        assert m == 1 or w_min / (m - 1) > target
+
+
+def test_below_floor_note_names_the_floor_and_the_runs_needed():
+    verdict, note = S.certification_verdict(
+        lole_ci=(0.0, 0.0), target_h=6.0, resolution_floor_h=104.2,
+        n_samples=1, horizon_years=2.0)
+    assert verdict == "inconclusive"
+    # Per year: goal 3 h/yr, floor 52.1 h/yr at 1 draw; 104.2 / 6 → 18 draws.
+    assert note == ("target 3 h/yr is below the MC resolution floor 52.1 h/yr "
+                    "at 1 draw: at least 18 draws resolve it")
+
+
+def test_below_floor_note_for_a_zero_goal_says_no_draw_count_resolves_it():
+    _v, note = S.certification_verdict(
+        lole_ci=(0.0, 0.0), target_h=0.0, resolution_floor_h=52.1, n_samples=1)
+    assert note == ("target 0 h/yr is below the MC resolution floor 52.1 h/yr "
+                    "at 1 draw: no draw count resolves a zero target")
+
+
+@pytest.mark.parametrize("floor,n,target", [
+    (52.1, 1, None), (float("inf"), 1, 3.0), (52.1, 1, float("nan")),
+    (52.1, 1, -1.0)])
+def test_min_draws_has_no_answer_without_a_finite_positive_target(floor, n, target):
+    assert S.min_draws_to_resolve(floor, n, target) is None
+
+
+def test_min_draws_compares_as_the_floor_does_not_by_rounded_ratio():
+    # 2.1 / 0.15 is 14.000000000000002 in floats, but 2.1 / 14 == 0.15: the
+    # MC's floor at 14 draws is exactly the target, so 14 resolve it.
+    assert 2.1 / 0.15 > 14 and 2.1 / 14 == 0.15
+    assert S.min_draws_to_resolve(2.1, 1, 0.15) == 14
+
+
+def test_one_draw_suffices_when_the_weight_is_under_the_target():
+    assert S.min_draws_to_resolve(0.5, 1, 3.0) == 1
+
+
+# ── the study start's runs check, on a network without a solve ─────────────
+
+
+def _weighted_network(hours: int = 168, weight: float = 1.0):
+    import pypsa
+    n = pypsa.Network()
+    n.set_snapshots(range(hours))
+    n.snapshot_weightings.loc[:, :] = weight
+    n.add("Bus", "hub")
+    n.add("Generator", "g", bus="hub", p_nom=10.0)
+    return n
+
+
+def _goal_pack(target, draws=500):
+    from models.energy_hub import AvailabilityTarget, default_off_grid_pack
+    return default_off_grid_pack().model_copy(update={
+        "mc_draws": draws,
+        "availability": AvailabilityTarget(
+            ens_cap_permyriad=5000.0, target_lole_h=target,
+            certification_metric="mc_lole" if target is not None else "none")})
+
+
+# Owner decision on #1927: the start refuses only a goal that no draw count up
+# to the 2000-draw cap resolves; fewer requested draws still run (the verdict
+# names the floor and the fewest draws afterwards).
+CAP_REFUSAL = ("Simulation runs per check: the 0.01 h/yr goal cannot be decided. "
+               "A check that finds no shortfall cannot show it is met. Even "
+               "2000 runs (the most allowed) have a smallest step of 0.0261 "
+               "h/yr. Allow more shortfall in the goal.")
+
+
+def test_runs_check_refuses_only_past_the_draw_cap():
+    # 168 h of weight 1: one draw resolves 1 h on a 168/8760 yr horizon, so
+    # 2000 draws resolve 0.0261 h/yr. 3 h/yr needs 18 draws: never refused.
+    n = _weighted_network()
+    for draws in (1, 17, 2000, None):
+        assert S.draws_short_of_target(n, _goal_pack(3.0), draws) is None
+        assert S.draws_short_of_target(n, _goal_pack(0.01), draws) == CAP_REFUSAL
+    assert S.draws_short_of_target(n, _goal_pack(0.01, draws=1), None) == CAP_REFUSAL
+
+
+def test_runs_check_at_the_exact_cap_boundary_passes():
+    # Weight 2 h over 168 snapshots: horizon 336/8760 yr; a goal making
+    # target_h exactly 2/2000 = 0.001 h resolves at the cap, so it runs.
+    n = _weighted_network(weight=2.0)
+    goal = 0.001 / (336 / 8760)
+    assert S.draws_short_of_target(n, _goal_pack(goal), 1) is None
+    assert S.draws_short_of_target(n, _goal_pack(goal * 0.999), 1) is not None
+
+
+@pytest.mark.parametrize("target", [None, 0.0])
+def test_runs_check_has_nothing_to_refuse_without_a_positive_goal(target):
+    assert S.draws_short_of_target(_weighted_network(), _goal_pack(target), 1) is None
+
+
+def test_runs_check_has_nothing_to_refuse_without_weights():
+    n = _weighted_network(weight=0.0)
+    assert S.draws_short_of_target(n, _goal_pack(3.0), 1) is None
+
+
+def test_runs_check_ignores_zero_weight_snapshots():
+    # A snapshot of weight 0 is never sampled into the floor (mc: w > 0).
+    n = _weighted_network()
+    n.snapshot_weightings.loc[n.snapshots[0], :] = 0.0
+    # A zero w_min would never refuse; the 1 h weight still does.
+    assert "Allow more shortfall" in S.draws_short_of_target(n, _goal_pack(0.01), 1)
+    assert S.draws_short_of_target(n, _goal_pack(3.0), 1) is None
+
+
+def test_below_floor_note_counts_one_draw_and_many_draws():
+    """UX 3 on #1927: '1 draw', '18 draws' (the Expert panel shows this note)."""
+    _v, one = S.certification_verdict(lole_ci=(0.0, 0.0), target_h=3.0,
+                                      resolution_floor_h=52.1, n_samples=1)
+    _v, many = S.certification_verdict(lole_ci=(0.0, 0.0), target_h=3.0,
+                                       resolution_floor_h=52.1 / 18 * 1.5,
+                                       n_samples=18)
+    assert "at 1 draw:" in one and "at 1 draws" not in one
+    assert "at 18 draws:" in many

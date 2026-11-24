@@ -9,6 +9,7 @@ from models.schemas import (
     BUS_LAZY_COLUMNS,
     GENERATOR_LAZY_COLUMNS,
     LINK_LAZY_COLUMNS,
+    LOAD_LAZY_COLUMNS,
     BusCreate,
     CarrierCreate,
     GeneratorCreate,
@@ -489,7 +490,8 @@ def get_loads():
 
 @router.post("/loads", status_code=201)
 def create_load(load: LoadCreate):
-    return _create_component("Load", "loads", load.name, load.model_dump(exclude={"name"}))
+    unset_lazy = LOAD_LAZY_COLUMNS - load.model_fields_set
+    return _create_component("Load", "loads", load.name, load.model_dump(exclude={"name"} | unset_lazy))
 
 
 @router.put("/loads/{name}")
@@ -815,6 +817,16 @@ def get_asset_units(component: str, name: str, bus: str | None = None) -> dict:
             raise HTTPException(404, f"Bus '{bus}' not found")
     return {"component": component, "name": name, "units": asset_fields.size_units(n, component, name, bus),
             "costs": asset_fields.cost_units(n, component, name, bus)}
+
+
+@router.get("/asset_schema/{component}/table_units")
+def get_table_units(component: str) -> dict:
+    """For a table of one class: each asset on a tonne bus with its cost units (the card's unit and scale), and the
+    assets whose bus is unreadable (no per-unit claim). Read-only; an energy-bus asset is in neither list."""
+    if component not in CLASS_ATTR:
+        raise HTTPException(400, f"No asset schema for '{component}'.")
+    return {"component": component,
+            **asset_fields.table_cost_units(PyPSAService.get_network(), component, keep=filter_transient_names)}
 
 
 @router.get("/asset_costs")

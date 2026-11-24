@@ -92,6 +92,12 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - A lens or filter never hides Essentials or Guided blockers, and shows a "Showing for … Clear" chip.
 - Folds use ▸/▾, never ">".
 - "·" separates data fields; a comma separates names inside one field.
+- A re-OK after a master merge compares the PR's own frontend diff at both heads, non-test files and test files separately: `diff <(git diff $(git merge-base origin/master $OLD) $OLD -- pypsa-gui/frontend/src ':!*.test.*' | grep '^[+-][^+-]') <(git diff origin/master...$NEW -- pypsa-gui/frontend/src ':!*.test.*' | grep '^[+-][^+-]')`. Identical means the OK carries.
+- Evidence shots go in the PR diff under `.scratch/<feature>/shots/`, downscaled (owner decision SHOTS-HOME-1, which replaces the `claude/campus-ic-02-05-shots` branch for new PRs).
+- A toast or notice left over from an earlier step in a shot is retaken or explained (#1803).
+- A persistent notice with a copy field (a credential link) is `role="status"`, not a toast, and never times out (#1803).
+- One word per concept across palette rows, notices and guide, e.g. "parameter" (#1804).
+- A hosted drawer hides a link whose destination its Back control already goes to (#1807).
 - Hand-resolved master merge: read the resolved files. A clean merge carries after comparing the PR's own non-test frontend diff against master at both heads (`git diff origin/master...<head> -- pypsa-gui/frontend/src ':!*.test.*'`); stat diffs against a sha are polluted by master drift.
 - Strings with nested brackets or a semicolon chain are split into short sentences, cause first (#1729 headline, #1757 goal line).
 - A banner describing a state the user can change (e.g. "Filled in from…") is muted, never red.
@@ -99,6 +105,18 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - A button whose line says "wait" is disabled or reads "Try again" (#1761).
 - Two "needs" lines on one screen agree: one checklist only (#1761).
 - A cross-mode link (Guided to Expert) sets the Back pill labelled with the origin card's own title; a same-mode link does not (#1757, #1752).
+
+- A user-visible reason names only actions its real caller can take: never "check the server log" (UX-RULES-1122).
+- "›" only on a real link (UX-RULES-1122).
+- No raw slot key or reason code on a card (UX-RULES-1122).
+- No raw axios or Python exception text in a toast (UX-RULES-1122).
+- A table header suffix is computed from the filtered rows, with a shot of a mixed table (UX-RULES-1122).
+
+- (aa) EmptyState wording: "Not run yet" means the study exists but has not run; "Not yet available" means a precondition is missing. The sentence names the precondition or the action, and each tab gives one next step (#1837).
+- (ab) A verdict key line is not repeated by a tile sentence. A tile with no number shows no "Why this number" (#1948).
+- (ac) A text control with the sentence colour and no underline is not a control: use the shared `Btn` or an ink underlined link (#1913).
+- (ad) Euro amounts put the minus before the euro sign, "-€16.31 M", through the one shared helper `signFirstEuro` in `utils/format.ts` (#1836).
+- (ae) A red link is the existing text-link token (accent red). It is not blocking; log it for UI-COHESION-1 (UX (ae)).
 
 ## Master merges
 

@@ -276,15 +276,16 @@ def _write(path: pathlib.Path, meta: dict) -> None:
 
 def snapshot_meta() -> bytes | None:
     """The active project's own ``eh_template.json`` bytes for the undo stack
-    (None when it has none: a sensitivity case reads its base's)."""
-    from services.template_marker import is_case
+    (None when it has none: a sensitivity case or a scenario child reads its
+    base's)."""
+    from services.template_marker import inherits
     path = _own_meta_path()
     if path is None or not path.is_file():
         return None
     try:
         return path.read_bytes()
     except OSError:
-        if is_case(path.parent):
+        if inherits(path.parent):
             # None would read "no copy" and an undo would remove it: the
             # caller skips this snapshot instead.
             raise
@@ -368,13 +369,14 @@ def _rows_of(meta: dict):
 
 def _old_marker(data: bytes | None, project_dir):
     """The marker the undone edit started from: ``data`` parsed; for None,
-    the base's marker on a sensitivity case (it had no copy of its own) or
+    the base's marker on a sensitivity case or a scenario child (it had no
+    copy of its own) or
     {} for a project with no marker. UNREADABLE_ROWS when it cannot be read."""
     from services import template_marker as tm
     if data is not None:
         old = _parse(data)
         return old if old is not None else UNREADABLE_ROWS
-    if project_dir is None or not tm.is_case(project_dir):
+    if project_dir is None or not tm.inherits(project_dir):
         return {}
     base = tm.resolve_base(project_dir)
     if base.state == tm.UNREADABLE:
@@ -400,7 +402,8 @@ def restore_meta(data: bytes | None) -> str | None:
     undone edit does not stay entered. Only the keys an edit writes go back
     (``growth_inputs`` and the placeholder ledger rows, UM10-UNDO-1): a write
     that is not on the undo stack, such as ``dc_backup.save_backup``,
-    survives. ``data`` None on a sensitivity case: the case read its base's
+    survives. ``data`` None on a sensitivity case or a scenario child: it
+    read its base's
     marker, whose rows go back; a copy that then equals the base's is
     removed, so the case reads its base's again (UM07-KIND-1).
 
@@ -411,7 +414,7 @@ def restore_meta(data: bytes | None) -> str | None:
     keeps its file."""
     from services import template_marker as tm
     path = _own_meta_path()
-    if path is None or (data is None and not tm.is_case(path.parent)):
+    if path is None or (data is None and not tm.inherits(path.parent)):
         return None  # no marker at the snapshot: a marker never goes
     try:
         with tm.write_lock(path.parent):

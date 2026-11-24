@@ -89,7 +89,7 @@ def validate_hourly(df: pd.DataFrame) -> pd.DataFrame:
         raise ContractError(f"{where}: hour must be non-negative")
     bad = ~out["status"].isin((0, 1))
     if bad.any():
-        raise ContractError(f"{where}: status must be 0 or 1, got {sorted(out.loc[bad, 'status'].unique())}")
+        raise ContractError(f"{where}: status must be 0 or 1, got {sorted(int(s) for s in out.loc[bad, 'status'].unique())}")
     off = (out["status"] == 0) & (out["p_mw"].abs() > P_TOL_MW)
     if off.any():
         raise ContractError(f"{where}: units with status 0 carry power: {sorted(out.loc[off, 'unit_id'].unique())}")
@@ -164,4 +164,36 @@ def check_vendor_models(block, kinds) -> dict:
             raise ContractError(f"{where}.sha256: must be 64 hex digits, got non-hex {sorted(set(sha) - _HEX)}")
         clean["sha256"] = sha
         out[kind] = clean
+    return out
+
+
+#: A genset's optional torsional modes (GC-01c), the key under ``units.<genset>``.
+TORSIONAL_MODES_KEY = "torsional_modes_hz"
+
+
+def check_torsional_modes(where, entries, f0, sources) -> list:
+    """A genset's ``torsional_modes_hz``: a non-empty list of ``{value,
+    source}`` entries, each a finite number in (0, ``f0``) Hz with ``source``
+    in ``sources``. Returns ``[(Hz, source)]`` in the given order. Refused,
+    naming ``<where>.torsional_modes_hz[i]``: not a list, an empty list, an
+    entry that is not exactly ``{value, source}``, an unknown source, a bool or
+    other non-number, a non-finite value, a value <= 0 or >= f0."""
+    key = f"{where}.{TORSIONAL_MODES_KEY}"
+    if not isinstance(entries, list):
+        raise ContractError(f"{key}: must be a list of {{value, source}} frequencies, got {type(entries).__name__}")
+    if not entries:
+        raise ContractError(f"{key}: give at least one mode, or leave the key out")
+    out = []
+    for i, entry in enumerate(entries):
+        at = f"{key}[{i}]"
+        if not isinstance(entry, dict) or set(entry) != {"value", "source"}:
+            raise ContractError(f"{at} must be a mapping with exactly 'value' and 'source', got {entry!r}")
+        if entry["source"] not in sources:
+            raise ContractError(f"{at} has unknown source {entry['source']!r}; allowed {sorted(sources)}")
+        v = entry["value"]
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise ContractError(f"{at} value must be a number, got {v!r}")
+        if not 0 < v < f0:  # also false for NaN and +-inf
+            raise ContractError(f"{at} must be a finite frequency in (0, {f0:g}) Hz, got {v!r}")
+        out.append((float(v), entry["source"]))
     return out

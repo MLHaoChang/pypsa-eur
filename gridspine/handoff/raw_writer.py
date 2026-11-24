@@ -15,7 +15,8 @@ the European study grid.
 v33 layout decisions that differ from a naive single-line dump:
 - 2-winding transformers are FOUR-line records (control words CW=CZ=CM=1:
   WINDV in p.u. of bus base voltage, R/X in p.u. on system SBASE, MAG in
-  p.u. admittance on system base). Line 3 carries all 17 fields through
+  p.u. admittance on system base at the winding-1 bus base voltage; see
+  ``trafo_magnetising``). Line 3 carries all 17 fields through
   CNXA1.
 - Off-nominal turns ratios are NOT dropped: WINDV on the tapped side is
   (vn_winding / vn_bus) * (1 + (tap_pos - tap_neutral) * tap_step_percent
@@ -75,6 +76,7 @@ off two-winding records) are omitted, so the importer's defaults apply.
 import numpy as np
 
 from gridspine.schema.contracts import ContractError
+from gridspine.static import series_caps as SC
 
 SBASE_MVA = 100.0
 VERSIONS = (33, 35, 36)
@@ -192,6 +194,44 @@ def trafo_impedance(net, tr):
     return r_pu, x_pu, vn_hv_eff / bus_vn_hv, vn_lv_eff / bus_vn_lv
 
 
+def trafo_magnetising(net, tr):
+    """``(mag1, mag2)`` of a two-winding transformer row as the RAW writes it
+    (CM=1): the magnetising conductance and susceptance in pu on system SBASE
+    at the winding-1 (HV) bus base voltage. PSS/E connects this admittance to
+    ground at bus I, outside the WINDV1 ratio (PSS/E POM transformer data;
+    PowSyBl's PSS/E import reads it the same way). PowerModels.jl's psse.jl
+    instead puts MAG inside the tap (``g_fr``); this writer follows PSS/E.
+
+    The admittance on the rating is pandapower's
+    (``build_branch._calc_y_from_dataframe``): G = pfe, |Y| = i0 * sn,
+    B = -sqrt(|Y|**2 - G**2) clipped at 0, times ``parallel``. Like the series
+    impedance it is at the rated winding voltage, tap-adjusted on the tapped
+    side (see ``trafo_impedance``). pandapower holds it on the branch (bus-J)
+    base as Y / WINDV2**2; a bus-I shunt reads MAG * (WINDV1 / WINDV2)**2 there,
+    so MAG = Y / WINDV1**2. Zero pfe_kw and i0_percent (case39) give 0, 0.
+    """
+    sn = tr["sn_mva"]
+    par = int(tr.get("parallel", 1))
+    pfe_kw, i0 = float(tr.get("pfe_kw", 0.0)), float(tr.get("i0_percent", 0.0))
+    if not (np.isfinite(pfe_kw) and np.isfinite(i0)):
+        raise ContractError(
+            f"transformer {tr.get('name')!r}: pfe_kw={pfe_kw!r}, i0_percent={i0!r} "
+            "must be finite to write its magnetising branch"
+        )
+    pfe_mw = pfe_kw / 1000.0
+    ym_mva = i0 / 100.0 * sn
+    b_mva = -np.sqrt(max(ym_mva ** 2 - pfe_mw ** 2, 0.0))
+    _r, _x, windv1, _windv2 = trafo_impedance(net, tr)
+    conv = par / SBASE_MVA / windv1 ** 2
+    return pfe_mw * conv, b_mva * conv
+
+
+def _mag_field(v):
+    """A MAG field: case39's zero as it always was, else ten decimals (a 1 MVA
+    unit's G is about 2e-5 pu on SBASE)."""
+    return " 0.00000" if v == 0 else f"{v:13.10f}"
+
+
 def branch_ids(net):
     """``(lines, trafos)``: per row, in table order, the RAW's ``(I, J, CKT)``
     for each line (from, to) and ``(I, J, CKT)`` for each transformer (hv, lv).
@@ -218,6 +258,7 @@ def _rates(rate):
 def write_raw(net, path, title="gridspine export", f_hz=50.0, version=33):
     if version not in VERSIONS:
         raise ContractError(f"RAW version {version!r} not in {VERSIONS}")
+    SC.refuse(net, "PSS/E RAW writer")  # GC-01b: not written yet (follow-up)
     nums = _bus_numbers(net)
     name_of = net.bus["name"]
     slack_buses = set(net.ext_grid["bus"])
@@ -350,10 +391,10 @@ def write_raw(net, path, title="gridspine export", f_hz=50.0, version=33):
         stat = 1 if tr["in_service"] else 0
         rate = sn * par
         xname = f"TR_{hv}_{lv}"[:12]
-        # MAG1/MAG2 = 0: deliberate case39-scope simplification — case39 has
-        # pfe_kw == i0_percent == 0 everywhere, so zero is exact, not lossy.
+        mag1, mag2 = trafo_magnetising(net, tr)
         lines.append(
-            f"{hv},{lv},0,'{ckt:<2s}',1,1,1, 0.00000, 0.00000,2,'{xname:<12s}',{stat},1,1.0000"
+            f"{hv},{lv},0,'{ckt:<2s}',1,1,1,{_mag_field(mag1)},{_mag_field(mag2)},"
+            f"2,'{xname:<12s}',{stat},1,1.0000"
         )
         lines.append(f"{r_pu:10.5f},{x_pu:10.5f},{sn:8.2f}")
         if version >= 35:

@@ -199,6 +199,24 @@ def _uc_rows() -> tuple[FieldSpec, ...]:
     )
 
 
+def _harmonic_rows(what: str) -> tuple[FieldSpec, ...]:
+    """The harmonic screen's inputs on a Load or Generator (DGS-EXTRAS-1), as the DGS import writes them."""
+    return (
+        FieldSpec("rated_mva", "performance", "Rated apparent power", f"Rated apparent power of the {what}, for "
+                  "the harmonic screen. Leave empty when unknown: the check then reads unknown. It is never taken "
+                  "from the capacity.", "MVA", "MVA"),
+        FieldSpec("harmonic_source", "performance", "Harmonic source", "The drive topology or converter that sets "
+                  f"the {what}'s harmonic currents. linear declares no harmonic emission. Leave empty when unknown: "
+                  "the check then reads unknown.", kind="enum", options=HARMONIC_SOURCES),
+        FieldSpec("harmonic_spectrum", "performance", "Harmonic spectrum", "Harmonic current per order, as "
+                  "order:% of rated current, e.g. 5:20, 7:14. Leave empty to use the default for the harmonic "
+                  "source.", kind="text"),
+    )
+
+
+_SLACK = {"control": "Slack"}
+
+
 # ── Generator (single part) ──────────────────────────────────────────────────
 
 GENERATOR: tuple[FieldSpec, ...] = (
@@ -264,7 +282,19 @@ GENERATOR: tuple[FieldSpec, ...] = (
     FieldSpec("e_sum_max", "performance", "Maximum energy", "Most energy the generator may produce over the "
               "modelled horizon, e.g. a fuel or water budget. Empty for no upper bound.", "MWh", "MWh"),
     FieldSpec("control", "performance", "AC control", "Control type in the AC power flow only: PQ fixes P and Q, "
-              "PV holds the voltage, Slack absorbs the imbalance.", kind="enum", options=("PQ", "PV", "Slack")),
+              "PV holds the voltage, Slack absorbs the imbalance. Slack also shows the external grid's short-circuit "
+              "power and resistance-to-reactance ratio.", kind="enum", options=("PQ", "PV", "Slack")),
+    FieldSpec("sk_max_mva", "performance", "Maximum short-circuit power", "Short-circuit power of the external "
+              "grid at its strongest, for fault and harmonic studies. Leave empty when unknown.", "MVA", "MVA",
+              reveal_when=_SLACK),
+    FieldSpec("sk_min_mva", "performance", "Minimum short-circuit power", "Short-circuit power of the external "
+              "grid at its weakest, for fault and harmonic studies. Leave empty when unknown.", "MVA", "MVA",
+              reveal_when=_SLACK),
+    FieldSpec("rx_max", "performance", "R/X ratio at maximum short circuit", "Resistance-to-reactance ratio (R/X) "
+              "of the external grid at its strongest, e.g. 0.1. Leave empty when unknown.", "", "", reveal_when=_SLACK),
+    FieldSpec("rx_min", "performance", "R/X ratio at minimum short circuit", "Resistance-to-reactance ratio (R/X) "
+              "of the external grid at its weakest, e.g. 0.15. Leave empty when unknown.", "", "", reveal_when=_SLACK),
+    *_harmonic_rows("generator"),
     *_outages(with_cf_flag=True),
 )
 
@@ -380,6 +410,7 @@ LOAD: tuple[FieldSpec, ...] = (
               "MVAr"),
     FieldSpec("sign", "performance", "Sign", "Power sign convention: −1 for a consumer (the default), +1 to make the "
               "load inject power.", "", ""),
+    *_harmonic_rows("load"),
 )
 
 # ── Link (single part, priced per MW of its input, bus0) ─────────────────────
@@ -668,12 +699,15 @@ _CLEAR = {"p_nom_max", "e_nom_max", "s_nom_max", "v_nom_0", "v_nom_1", "lifetime
 # M5: per class. `empty` sends "" (a text column the write model types `str = ""`: an emptied country or display
 # name is a decision, and null would be refused); GlobalConstraint's optional columns clear to null.
 _EMPTY_BY_CLASS = {"Bus": {"country", "sub_network", "unit"}, "Carrier": {"nice_name", "color", "unit"},
-                   "Generator": {"process_role"},
+                   "Generator": {"process_role", "harmonic_source", "harmonic_spectrum"},
+                   "Load": {"harmonic_source", "harmonic_spectrum"},
                    "Link": {"bus2", "bus3", "bus4", "criticality_tier", "harmonic_source", "harmonic_spectrum",
                             "start_method", "ride_through_curve"}}
 _CLEAR_BY_CLASS = {"GlobalConstraint": {"carrier_attribute", "carrier", "investment_period"},
                    "Generator": {"dc_ac_ratio", "fuel_curve_slope", "fuel_curve_no_load", "fuel_price",
-                                 "om_cost_per_run_hour", "lifetime_run_hours"},
+                                 "om_cost_per_run_hour", "lifetime_run_hours", "rated_mva", "sk_max_mva",
+                                 "sk_min_mva", "rx_max", "rx_min"},
+                   "Load": {"rated_mva"},
                    "Bus": {"mwh_per_t", "product_value", "lost_production_value", "temperature_c", "pressure_bar"},
                    "Link": {"rated_mva", "flicker_step_mva", "flicker_changes_per_min",
                             "single_phase_share", "motor_kw", "i_start_pu", "restart_time_h", "max_supply_temp_c", "max_pressure_bar"}}
@@ -789,6 +823,34 @@ def on_tonne_bus(n, component: str, name: str) -> bool:
 
     size_bus = _size_bus_of(n, component, name, None)
     return size_bus is not None and _size_unit(n, size_bus, stock=False) in ("t", "t/h")
+
+
+def table_cost_units(n, component: str, *, keep=None) -> dict:
+    """What a table of one class needs to read each row's costs: ``rows`` maps every asset on a tonne bus to its
+    `cost_units` (unit and scale, as the card and the drawer show them); ``unreadable`` lists the assets whose
+    size bus is missing or has no known unit, which are neither tonne nor energy and so make no per-unit claim.
+    An asset on an energy bus is in neither. ``cost_fields`` are the class's cost columns that follow the bus. ``keep(component, names)`` drops transient names."""
+    from services.flow_service import _size_unit
+
+    col = _SIZE_BUS.get(component)
+    table = getattr(n, CLASS_ATTR.get(component, ""), None)
+    if col is None or table is None or col not in table.columns:
+        return {"rows": {}, "unreadable": [], "cost_fields": []}
+    names = list(table.index) if keep is None else keep(component, list(table.index))
+    seen: dict = {}
+    rows: dict[str, dict] = {}
+    unreadable: list[str] = []
+    for name in names:
+        bus = table.at[name, col]
+        if bus not in seen:
+            unit = _size_unit(n, bus, stock=False) if bus in n.buses.index else None
+            seen[bus] = "tonne" if unit in ("t", "t/h") else ("energy" if unit else None)
+        if seen[bus] == "tonne":
+            rows[str(name)] = cost_units(n, component, str(name))
+        elif seen[bus] is None:
+            unreadable.append(str(name))
+    return {"rows": rows, "unreadable": unreadable,
+            "cost_fields": [f.key for f in fields_for(component) if f.unit_display in _TONNE_COST_UNIT]}
 
 
 def cost_basis_of_row(n, component: str, row) -> str | None:

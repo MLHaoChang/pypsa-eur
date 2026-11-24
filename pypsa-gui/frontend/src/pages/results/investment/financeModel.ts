@@ -6,6 +6,7 @@
 // without edits PUTs exactly what was read. An empty input is `null` / absent —
 // "not stated" (plan C12) — never 0. The server judges every combination; its
 // 422 is mapped to the field it names (the WP3.7 pattern).
+import { listWords } from './businessCaseModel'
 import type {
   CashflowLine, FinanceInputs, InvestmentCaseReportPayload, InvestmentCaseStudy, IcSectionState,
 } from '../../../api/types'
@@ -115,7 +116,7 @@ export function errorsFor(errors: Record<string, string[]>, path: string,
 // ── the report ───────────────────────────────────────────────────────────
 
 type Obj = Record<string, unknown>
-const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
+export const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
 
 /** A value as a number, or null when it is not established (null, absent,
  *  the string "not_established", a `{value: null}` record). */
@@ -147,8 +148,12 @@ export interface Headline {
   value: number | null
   /** Why it is not established, when the report says. */
   note: string | null
+  /** The report's own reason codes behind `note`, for its title (never the visible text). */
+  noteCode?: string
   /** The question the figure answers, when two figures could be confused. */
   asks?: string
+  /** A plain note on the figure itself (shown under it, muted). */
+  aside?: string
 }
 
 interface HeadlineSpec {
@@ -226,10 +231,12 @@ export function headlines(report: InvestmentCaseReportPayload): Headline[] {
       const sec = h.section ? sectionOf(report, h.section) : null
       note = (isObj(raw) && typeof raw.reason === 'string' ? raw.reason : null)
         ?? (h.id === 'ppa_price' && typeof payload.solve_ppa_status === 'string' ? payload.solve_ppa_status : null)
-        ?? (h.storage ? lcosReason(payload, h.id === 'lcos_real') : null)
+        ?? (h.storage ? lcosReason(payload, h.id === 'lcos_real', lcosReasonWords) : null)
         ?? (sec && sec.status !== 'ok' ? sec.note ?? `the ${h.section} section is ${sec.status.replace(/_/g, ' ')}` : null)
     }
-    out.push({ id: h.id, label: h.label, kind: h.kind, value, note, ...(h.asks ? { asks: h.asks } : {}) })
+    const noteCode = value === null && h.storage && note !== null ? lcosReason(payload, h.id === 'lcos_real', r => r) : null
+    out.push({ id: h.id, label: h.label, kind: h.kind, value, note, ...(noteCode ? { noteCode } : {}),
+      ...(h.asks ? { asks: h.asks } : {}) })
   }
   // H2e: "of which avoided CO2 cost" beside the NPV, when the case prices CO2
   // (gatekeeper Q1: lenders ask). Undiscounted over the horizon; a priced but
@@ -243,16 +250,65 @@ export function headlines(report: InvestmentCaseReportPayload): Headline[] {
       id: 'avoided_co2', label: 'Of which avoided CO2 cost (undiscounted, whole horizon)',
       kind: 'money', value: v, note: v === null ? 'a CO2 line is not established' : null })
   }
+  // F4 (UX 2 on #1761): with no counterfactual the lifecycle-cost NPV is the
+  // equity NPV (services/finance/engine.py nets nothing against it), so say
+  // so beside the figure — only when the two figures do agree.
+  const lc = out.find(h => h.id === 'lifecycle_npv')
+  const eq = out.find(h => h.id === 'equity_npv_post_tax')
+  if (lc && eq && lc.value !== null && eq.value !== null && hasNoCounterfactual(report)
+      && Math.abs(lc.value - eq.value) < 0.5) {
+    lc.aside = SAME_AS_EQUITY_NPV
+  }
   return out
+}
+
+export const SAME_AS_EQUITY_NPV = 'Same as equity NPV: there is no counterfactual.'
+
+/** The report says the case compares with nothing (no counterfactual). */
+export function hasNoCounterfactual(report: InvestmentCaseReportPayload): boolean {
+  const p = payloadOf(report, 'project')
+  return p.has_counterfactual === false || (isObj(p.counterfactual) && p.counterfactual.present === false)
 }
 
 /** Why an LCOS is not established: the nominal one reads the block's reasons
  *  but the real-only ones (`real_not_established:*`); the real one reads all. */
-function lcosReason(payload: Obj, real: boolean): string | null {
+function lcosReason(payload: Obj, real: boolean, words: (reason: string) => string): string | null {
   const reasons = lcosBlock(payload)?.reasons
   if (!Array.isArray(reasons)) return null
   const shown = reasons.map(String).filter(r => real || !r.startsWith('real_not_established'))
-  return shown.length ? shown.join('; ') : null
+  return shown.length ? shown.map(words).join('; ') : null
+}
+
+/** What a reason with no words of its own says; its code goes to a title, never the text (UX rule c). */
+export const UNDESCRIBED_REASON = 'a reason with no description yet'
+
+/** Every reason lcos.py gives for a storage LCOS it does not establish, in words (IBA-02). */
+const LCOS_REASON_WORDS: Record<string, (tail: string) => string> = {
+  wacc_nominal_missing: () => 'no nominal discount rate (WACC) is stated',
+  degradation_missing: v => `no degradation rate is stated for ${assetLabel(v)}`,
+  charging_cost_not_established: v => `the charging cost of ${assetLabel(v)} is not established`,
+  escalation_missing: v => `no escalation rate is stated for ${v.replace(/_/g, ' ')} costs`,
+  om_not_established: v => `the operating cost ${v.replace(/_/g, ' ')} is not established`,
+  capex_not_established: () => 'the investment cost is not established',
+  overnight_cost_missing: v => `no investment cost is stated for ${assetLabel(v)}`,
+  terminal_needs_part_lifetimes: v => `the value of ${assetLabel(v)} at the end of the case needs its parts' lifetimes`,
+  terminal_part_unknown: v => {
+    const split = v.lastIndexOf(':')
+    return `the lifetime of ${assetLabel(v.slice(0, split))}, ${v.slice(split + 1).replace(/_/g, ' ')}, is not known`
+  },
+  terminal_needs_lp_rate: () => "the value at the end of the case needs the optimisation's discount rate",
+  no_discharge: v => `${assetLabel(v)} does not discharge in the solved dispatch`,
+  real_not_established: v => v === 'inflation_missing' ? 'the real figure needs an inflation rate' : UNDESCRIBED_REASON,
+}
+
+/** The LCOS reasons that have words (a test holds them to lcos.py's list, written out by hand). */
+export const LCOS_REASON_KEYS: ReadonlySet<string> = new Set(Object.keys(LCOS_REASON_WORDS))
+
+/** One LCOS reason in words; one with none says so, and its code stays in the row's title. */
+function lcosReasonWords(reason: string): string {
+  const colon = reason.indexOf(':')
+  const words = LCOS_REASON_WORDS[colon < 0 ? reason : reason.slice(0, colon)]
+  return words ? words(colon < 0 ? '' : reason.slice(colon + 1)) : UNDESCRIBED_REASON
 }
 
 /** The price basis in words ("real basis, 2020 EUR", or "nominal basis, costs in
@@ -665,16 +721,6 @@ export function uncheckableReason(reason: string | null): string | null {
   }
 }
 
-/** The failure a finished run ended in (error / failed / refused), or null. */
-export function studyFailure(s: InvestmentCaseStudy | null | undefined): string | null {
-  if (!s || !['error', 'failed', 'refused'].includes(s.status)) return null
-  const why = s.message ?? s.error ?? null
-  const code = s.code ?? s.error_code ?? null
-  const text = why ?? code ?? 'no reason given'
-  return `${s.status === 'refused' ? 'The case was refused' : 'The run failed'}: ${text}`
-    + (why && code && !why.includes(code) ? ` (${code})` : '')
-}
-
 // ── the campus equipment the case took (campus-IC issues 02 and 05) ─────
 
 export interface CampusEquipmentRow {
@@ -797,33 +843,93 @@ const PROJECT_FLAG_WORDS: Record<string, (tail: string) => string> = {
   ledger_conservation_failed: () => 'The cash ledger does not balance.',
   ledger_conservation_not_established: () => 'Whether the cash ledger balances is not established.',
   extra_asset_money_year_unstated: () => 'No case money year is stated to compare with the additional equipment costs.',
+  // IBA-02: the flags a data-centre case emits (finance_case.py, engine.py, tax.py, lcos.py).
+  degradation_bill_first_order: () => 'The bill effect of generator degradation is a first-order estimate.',
+  degradation_bill_volume_items_only: () => 'The bill effect of generator degradation covers only the bill items priced by volume.',
+  island_critical_load_mw: v => `The island capability carries a mean critical load of ${v} MW.`,
+  lcoe_on_incremental_value: () => 'The LCOE is computed on the incremental cash against the comparison site.',
+  lcos_not_established: v => `Levelised storage cost is not established: ${lcosReasonWords(v)}.`,
+  meter_link_not_investment: v => `${sentenceStart(assetLabel(v))} is a meter link with no cost of its own, so it is not counted as an investment.`,
+  remaining_basis_written_off: v => `${taxLayerLabel(v)}: the tax value not yet depreciated is deducted in the last year of the case.`,
+}
+
+const sentenceStart = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+
+/** The German pack's tax layers by name; any other layer by its own name. */
+const TAX_LAYER_LABELS: Record<string, string> = { kst: 'Corporate income tax (KSt)', gewst: 'Trade tax (GewSt)' }
+function taxLayerLabel(layer: string): string {
+  return TAX_LAYER_LABELS[layer] ?? sentenceStart(layer)
+}
+
+const LIFETIME_UNKNOWN = 'asset_lifetime_unknown:'
+
+/** Every flag key the list words, folds or leaves to another block; `projectFlagKeys.json`
+ *  lists the same set for the template smoke (IBA-02). */
+export const PROJECT_FLAG_KEYS: ReadonlySet<string> = new Set([
+  ...Object.keys(PROJECT_FLAG_WORDS), ...BASELINE_CAVEATS.map(([code]) => code),
+  LIFE_ENDS.slice(0, -1), NOT_REPLACED.slice(0, -1), AFTER_HORIZON.slice(0, -1), LIFETIME_UNKNOWN.slice(0, -1),
+])
+
+/** The flags the report's own sentences already state, so the list leaves them out:
+ *  - the site-today basis, when the counterfactual sentence is the site-today one;
+ *  - `baseline_island_rows_relaxed`, when the counterfactual notes are served: report.py words
+ *    every case flag through `baseline_text.flag_text` into them, and this one always has words
+ *    (a backend contract test pins it). */
+export function statedFlags(report: InvestmentCaseReportPayload): ReadonlySet<string> {
+  const cf = counterfactualBasis(report)
+  return new Set([
+    ...(cf?.basis === 'site_today' ? ['counterfactual_basis:site_today'] : []),
+    ...(cf && cf.notes.length > 0 ? ['baseline_island_rows_relaxed'] : []),
+  ])
 }
 
 /** The project flag list in words. A campus asset's life-end and later-renewal
  *  flags are worded in the campus equipment block, so they are not repeated;
  *  `part_not_replaced` for an asset that has a life-end flag states the same fact
- *  and is left out. Known finance flags are worded; unknown flags pass through unchanged. */
-export function projectFlagWords(flags: string[]): string[] {
+ *  and is left out. Known finance flags are worded; an unknown flag shows as UNDESCRIBED_FLAG (`projectFlagLines` keeps its code). */
+export function projectFlagWords(flags: string[], stated: ReadonlySet<string> = new Set()): string[] {
+  return projectFlagLines(flags, stated).map(line => line.text)
+}
+
+/** `projectFlagWords` with each line's code for its title: a line short of words keeps its code, never shown as text. */
+export function projectFlagLines(flags: string[], stated: ReadonlySet<string> = new Set()):
+  { text: string; code: string | null }[] {
   const lifeEnds = flags.filter(f => f.startsWith(LIFE_ENDS))
     .map(f => f.slice(LIFE_ENDS.length).split(':').slice(0, -2).join(':'))
+  const noLifetime = flags.filter(f => f.startsWith(LIFETIME_UNKNOWN)).map(f => assetLabel(f.slice(LIFETIME_UNKNOWN.length)))
+  let lifetimeSaid = false
+  const line = (text: string, code: string) =>
+    ({ text, code: text === UNDESCRIBED_FLAG || text.includes(UNDESCRIBED_REASON) ? code : null })
   return flags.flatMap(f => {
-    if (f.startsWith(LIFE_ENDS) || f.startsWith(AFTER_HORIZON)) return []
+    if (f.startsWith(LIFE_ENDS) || f.startsWith(AFTER_HORIZON) || stated.has(f)) return []
+    if (f.startsWith(LIFETIME_UNKNOWN)) {
+      // One line for every asset of unknown lifetime, where the first one stood (timeline.py: not checked).
+      if (lifetimeSaid) return []
+      lifetimeSaid = true
+      const many = noLifetime.length > 1
+      return [line(`No lifetime is stated for ${listWords(noLifetime)}: the case does not check whether ${many ? 'they need' : 'it needs'} `
+        + 'replacing inside its horizon.', f)]
+    }
     if (f.startsWith(NOT_REPLACED)) {
       const segs = f.slice(NOT_REPLACED.length).split(':')      // an asset name may contain ':'
       const partName = (segs.pop() ?? '').replace(/_/g, ' ')
       const asset = segs.join(':')
       if (lifeEnds.includes(asset)) return []
-      return [`${assetLabel(asset)}${partName ? `, ${partName}` : ''}: its life ends inside the case's `
-        + 'horizon and no replacement is planned.']
+      return [line(`${assetLabel(asset)}${partName ? `, ${partName}` : ''}: its life ends inside the case's `
+        + 'horizon and no replacement is planned.', f)]
     }
     const colon = f.indexOf(':')
     const key = colon < 0 ? f : f.slice(0, colon)
     // Headline caveats and Counterfactual are both rendered in this report.
     if (BASELINE_CAVEATS.some(([code]) => code === key)) return []
     const words = PROJECT_FLAG_WORDS[key]
-    return [words ? words(colon < 0 ? '' : f.slice(colon + 1)) : f]
+    return [line(words ? words(colon < 0 ? '' : f.slice(colon + 1)) : UNDESCRIBED_FLAG, f)]
   })
 }
+
+/** What a flag with no words of its own says (UX rule c); `projectFlagLines` keeps its code. */
+export const UNDESCRIBED_FLAG = 'A check with no description yet applies to this case.'
+
 
 const CAMPUS_METHODS: Record<string, string> = {
   milp: 'joint optimisation',

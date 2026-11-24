@@ -1,3 +1,5 @@
+import type { ReserveDirection, ReserveKind } from './reserves'
+
 export interface Bus {
   name: string; v_nom: number; carrier: string; x: number; y: number
   country: string; unit: string; control: string; sub_network: string
@@ -614,6 +616,22 @@ export interface CommercialConfig {
   reference_purchases?: ReferencePurchase[]
   /** A CO2 price by year on that purchase and, opt-in, on grid imports (H2e). */
   co2_price?: Co2Price | null
+  /** Reserve products the storage may commit headroom to (DC-06, SCU06 K8); a null price is "no price". */
+  reserve_products?: ReserveProduct[]
+  /** Storages the user confirms carry no backup obligation (SCU06 K8b); refused at save on a backup storage. */
+  reserve_no_backup_storages?: string[]
+}
+
+/** One reserve product as the commercial config stores it (the backend's `ReserveProduct`). */
+export interface ReserveProduct {
+  id: string
+  kind: ReserveKind
+  direction: ReserveDirection
+  sustain_h: number
+  capacity_price: LibraryRef | null
+  max_commit_mw: number | null
+  storages: string[]
+  counterparty: string
 }
 
 /** models/commercial.py::ReferencePurchase (H2e). */
@@ -660,6 +678,9 @@ export interface SimulationStatus {
   // exist but columns diverge), 'none' (no/cleared results). A topology edit on
   // a solved network clears it → the UI flags "results invalidated, re-run".
   dispatch?: 'fresh' | 'stale' | 'none'
+  /** When the solve behind the dispatch was recorded (ISO-8601 UTC), saved with the project; null when the
+   *  dispatch is gone or the project predates the stamp (control-strategy 06). */
+  solved_at?: string | null
 }
 export interface ValidationIssue {
   severity: 'error' | 'warning'
@@ -698,6 +719,8 @@ export interface ProjectInfo {
   id?: string | null
   name: string; created_at: string; has_solver_config: boolean
   bus_count: number; snapshot_count: number; objective: number | null
+  // A finished Guided (Energy Hub) study was saved with the project (issue 23).
+  study_finished?: boolean
   // True when an interrupted save left a `*.tmp` sibling next to the
   // main bundle file. The main file is still the previous good version
   // (atomic rename only commits at the end), but the partial write hasn't
@@ -788,6 +811,24 @@ export interface CompareState {
   scenario_description: string | null
   created_at: string | null
   last_saved: string | null
+  // The saved Guided study's headline; null without a finished one (issue 23).
+  eh_study?: CompareStudy | null
+}
+
+// The headline of a saved Guided (Energy Hub) study (backend `CompareStudy`).
+export interface CompareStudy {
+  // `out_of_date`: the network was edited after the study ran.
+  state: 'current' | 'out_of_date'
+  // EUR, excluding shed load; per year when period_basis is single_period.
+  cost_at_target_eur: number | null
+  period_basis: string | null
+  // Unserved energy reached and allowed, ‱ of demand.
+  achieved_ens_permyriad: number | null
+  ens_cap_permyriad: number | null
+  // Expected loss of load, h per year.
+  mc_lole_h: number | null
+  // True on a pass, false on a fail, null when no goal was set.
+  certified: boolean | null
 }
 
 // ── Results-Summary types (Compare Scenarios v2) ─────────────────────────────
@@ -852,7 +893,9 @@ export interface LineLoadingEntry {
   carrier?: string | null
   peak_loading: CarrierPeriodValue       // fraction (0..1)
   mean_loading: CarrierPeriodValue
-  binding_hours: CarrierPeriodValue
+  // null: not evaluated, the importer assumed this rating (rating_assumed). Never read it as 0.
+  binding_hours: CarrierPeriodValue | null
+  rating_assumed?: boolean
 }
 
 export interface LoadingComparison {
@@ -862,6 +905,7 @@ export interface LoadingComparison {
   // LoadingTable had no way to read it until Task 6 wired it through.
   available: boolean
   lines: LineLoadingEntry[]              // sorted by peak loading desc
+  assumed_rating_count?: number          // branches whose rating is assumed; no binding hours for them
 }
 
 export interface CarrierPriceStats {
@@ -1178,7 +1222,7 @@ export interface SolvePpa {
   target_year: number
 }
 
-/** The island break-even's outage hours, as the user states them with their source. */
+/** The island-capability break-even's outage hours, as the user states them with their source. */
 export interface IslandOutage {
   hours_per_year: number | null
   source: string | null
@@ -1415,10 +1459,20 @@ export interface ProcessAmount {
   /** Tonnes (value × t_per_unit); null with `t_flag` when the bus has no tonne factor. */
   t: number | null
   t_flag?: string | null
+  /** The weighting the figure is on (`generators` energy weighting × period years) and its per-period split. */
+  weighting?: string
+  by_period?: Record<string, number>
+  /** The amount in MWh, null with `mwh_flag` when the bus is a material one. */
+  mwh?: number | null
+  mwh_flag?: string | null
   flag: string | null
-  /** Set on `lost` only: the shortfall priced, null with `eur_flag` when unknown. */
+  /** Set on `lost` (the shortfall priced) and `buy_in` (at its marginal cost); null with `eur_flag` when unknown. */
   eur?: number | null
   eur_flag?: string | null
+  /** Set on `buy_in` and `lost`: the carriers of the buy-in / shortfall generators (empty: none on the bus). */
+  carriers?: string[]
+  /** Set on `buy_in`: `role_from_name` when a generator's buy-in role was guessed from its name. */
+  role_flag?: string | null
 }
 export interface ProcessInventory { name: string; unit: string; e: (number | null)[]; flag: string | null }
 export interface ProcessProduct {
@@ -1432,7 +1486,17 @@ export interface ProcessProduct {
   lost: ProcessAmount
   inventory: ProcessInventory[]
 }
-export interface ProcessView { products: ProcessProduct[]; process_units: { name: string }[] }
+export interface ProcessUnit {
+  name: string
+  product_bus?: string
+  /** Hours the unit ran over the modelled snapshots, and the hours modelled (null when not finite). */
+  running_hours?: number | null
+  modelled_hours?: number | null
+  /** The horizon in the energy weighting running_hours and the product amounts use (years-weighted on a multi-period solve). */
+  weighted_hours?: number | null
+  flag?: string | null
+}
+export interface ProcessView { products: ProcessProduct[]; process_units: ProcessUnit[] }
 
 // Grid-to-process ticket 13: "Grid risk to production" (GET /results/grid_risk_production).
 export interface GridRiskTarget {

@@ -3,7 +3,9 @@
 
 # GC-06b Per-corner Z0 in the GC-04 test battery
 
-Status: ready-for-agent
+Status: done
+
+Done in #1708 (4643ab46).
 Model tier: opus
 Blocked by: 12 (same package, slice c); #1608, #1609
 Type: task

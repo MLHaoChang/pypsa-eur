@@ -63,7 +63,7 @@ describe('GridReadinessScorecard', () => {
     ] }
     it('shows only on the row that assumes the X/R', () => {
       render(<GridReadinessScorecard data={xrData} mode="expert" />)
-      expect(screen.getByTestId('gr-set-xr-rapid_voltage_change').textContent).toBe('Set PoC X/R ›')
+      expect(screen.getByTestId('gr-set-xr-rapid_voltage_change').textContent).toBe('Set point-of-connection X/R ›')
       expect(screen.queryByTestId('gr-set-xr-scr')).toBeNull()
     })
     it('Expert: opens Project info with the field requested, and Back returns to the readiness view', async () => {

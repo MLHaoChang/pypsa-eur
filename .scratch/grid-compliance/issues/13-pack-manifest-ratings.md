@@ -3,7 +3,7 @@
 
 # GC-13 Pack manifest: plant ratings bound by the data hash
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Parent: `.scratch/grid-compliance/spec.md` (follow-up of GC-07, GK A2 condition K2d)
 Gated: yes (GK A, gridspine)
@@ -34,3 +34,7 @@ and reads every MVA-based case "unknown" unless the caller states a rated MVA an
   changes the `data_hash`.
 - A pack whose `campus_data_hash` differs from the campus run it is judged for is refused,
   naming both hashes; a test covers it.
+
+## Triage (2026-11-20, master 87cf52a7)
+
+Checked by code reading only. Acceptance is the 'Done when' section above. Still true: the pack manifests record no plant rating. GC-07 read-back (done) already reads these channels in pu. Gated: GK A. Owner: GC-06 for the EMT pack, GC-04 for the PSS/E pack; slice per pack. Blocked by: none.

@@ -34,6 +34,34 @@ def _num(v) -> float | None:
     return f if math.isfinite(f) else None
 
 
+
+def _share_of_all_ranked(c: float, class_b: list, class_a) -> float | None:
+    """``c`` over the criticality of every ranked row: the class-B rows plus
+    the class-A rows (``fmea_top.class_a.rows`` when its status is ``ok``).
+    None when the class-A ranking is absent, a row is not finite, or the
+    total is not positive — never a guess."""
+    if not isinstance(class_a, dict) or class_a.get("status") != "ok":
+        return None
+    vals = [_num(r.get("criticality_eur_per_year"))
+            for r in list(class_b) + list(class_a.get("rows") or [])]
+    if any(v is None for v in vals):
+        return None
+    total = sum(vals)
+    return c / total if total > 0 else None
+
+
+def _critical_feeder(sections: dict, name) -> dict | None:
+    """The certification's critical-feeder row for Link ``name`` when its
+    outages were composed into the LOLE (``model == "composed"``) or bound it
+    from above (``upper_bound``, GK A F6')."""
+    scope = (((sections.get("certification") or {}).get("payload") or {})
+             .get("fleet_scope") or {})
+    for f in scope.get("critical_feeders") or []:
+        if f.get("name") == name and (f.get("model") == "composed"
+                                      or f.get("upper_bound")):
+            return f
+    return None
+
 def _fmt(v, unit: str = "", digits: int = 2) -> str:
     f = _num(v)
     if f is None:
@@ -80,6 +108,11 @@ class _Rerun:
             top = {**top, "mc": {**(args.get("mc") or {}), **top["mc"]}}
         args.update(top)
         return args
+
+
+def _draws(n) -> str:
+    """``1 draw`` / ``N draws``: the Guided card words them as runs."""
+    return f"{n} draw" if n == 1 else f"{n} draws"
 
 
 def _action(tool: str, args: dict, effect: str) -> dict:
@@ -156,6 +189,64 @@ def review_report(report: dict, record: dict | None = None,
                          rerun.with_(add_stages=["dtc_stress", "dtc_planning"]),
                          "size the local capacity that islanded operation "
                          "needs (dtc_stress + dtc_planning)")])
+    elif verdict == "inconclusive" and isinstance(cert.get("feeder_bound"), dict):
+        # GK A F6': the interval may sit under the goal; what withholds the
+        # pass is a must-stay-on bus behind one feeder whose own units the
+        # certification does not simulate. More draws cannot clear it.
+        fb = cert["feeder_bound"]
+        pk = list(fb.get("pockets") or [])
+        names = [b for p in pk for b in (p.get("buses") or [])]
+        feeders = [f for p in pk for f in (p.get("feeders") or [])]
+        feeders += list(fb.get("chained") or [])
+        bound = sum(_num(p.get("bound_h_per_year")) or 0.0 for p in pk)
+        title = ("Certification not decided: "
+                 + (f"{', '.join(names)} could be cut off up to "
+                    f"{_fmt(bound, 'h/yr')} while {', '.join(feeders)} is out"
+                    if pk else f"{', '.join(feeders)} cannot be bounded"))
+        # GK R2: a feeder without outage data is taken as always out; its
+        # data is then the first thing that settles the verdict.
+        unread = sorted({str(f) for p in pk for f in (p.get("no_data") or [])})
+        why = ("Not a failure: this upper bound takes the outage rate of "
+               f"{', '.join(unread)}, which is not known, as certain. Outage "
+               f"data for {', '.join(unread)}, a"
+               if unread else
+               "Not a failure: this upper bound leaves out the bus's own "
+               "units, which the certification does not simulate behind its "
+               "feeder. A")
+        add("certification_inconclusive", "medium", title,
+            {**ev, "feeder_bound": fb},
+            why + " second feeder, a lower outage rate on the feeder or "
+            "simulating the bus as its own area (the two-area treatment, "
+            "issue 09) settles it; more simulation draws do not.")
+    elif verdict == "inconclusive" and cert.get("below_floor") is True:
+        # template-e2e 21: the target sits under what this many draws can
+        # resolve; doubling cannot settle a floor many times the target. The
+        # re-run offers the fewest draws that resolve it, or none past the cap.
+        draws = int(cert.get("draws") or 500)
+        need = cert.get("min_draws")
+        years = _num(cert.get("horizon_years")) or 1.0
+        floor = (_num(cert.get("resolution_floor_h")) or 0.0) / years
+        acts = []
+        if isinstance(need, int) and not isinstance(need, bool) \
+                and need <= _MC_MAX_DRAWS:
+            more = min(_MC_MAX_DRAWS, max(need, draws * 2))
+            acts.append(_action("run_eh_study", rerun.with_(mc={"draws": more}),
+                                f"set simulation runs per check to {more} "
+                                f"(was {draws})"))
+            why = (f"Not a failure: {_draws(draws)} cannot show a shortfall "
+                   f"as small as the goal: at least {need} draws can.")
+        else:
+            why = ("Not a failure: no draw count within the "
+                   f"{_MC_MAX_DRAWS}-draw cap resolves this target, so more "
+                   "draws do not settle it; a larger target does.")
+        add("certification_inconclusive", "medium",
+            f"Certification inconclusive: with "
+            f"{_draws(cert.get('n_samples') or draws)} the smallest shortfall "
+            f"it can show is {_fmt(floor, 'h/yr')}, more than the "
+            f"{_fmt(target, 'h/yr')} goal",
+            {**ev, "resolution_floor_h": cert.get("resolution_floor_h"),
+             "min_draws": need},
+            why, acts)
     elif verdict == "inconclusive":
         draws = int(cert.get("draws") or 500)
         more = min(_MC_MAX_DRAWS, max(draws * 2, draws + 1))
@@ -269,30 +360,55 @@ def review_report(report: dict, record: dict | None = None,
                     f"re-plan at the knee target {kt:g} ‱")])
 
     # ── fmea_top concentration ─────────────────────────────────────────
-    rows = ((sections.get("fmea_top") or {}).get("payload") or {}).get("rows") or []
+    fmea = (sections.get("fmea_top") or {}).get("payload") or {}
+    rows = fmea.get("rows") or []
     crit = [(r, _num(r.get("criticality_eur_per_year")) or 0.0) for r in rows]
     total = sum(c for _, c in crit)
     if total > 0:
         top, c = max(crit, key=lambda rc: rc[1])
         share = c / total
         if share >= 0.5:
-            add("fmea_dominant_mode", "medium",
-                f"{top.get('name')} carries {share:.0%} of ranked Link risk",
-                {"mode": top.get("name"), "criticality_eur_per_year": c,
-                 "share": round(share, 3), "occurrence_per_year":
-                 top.get("occurrence_per_year"), "severity_eur":
-                 top.get("severity_eur")},
-                f"One failure mode dominates: consider a redundant path or a "
-                f"spare for {top.get('name')}, or reduce its outage rate / "
-                "repair time. The redundancy stage prices GENERIC N+1 "
-                "generation / conversion / storage options (indicative "
-                f"costs), not a spare {top.get('name')} itself — use it as "
-                "an order of magnitude.",
-                [_action("run_eh_study",
-                         rerun.with_(levers={"redundancy": True},
-                                     add_stages=["redundancy"]),
-                         "price generic N / N+1 / storage scenarios "
-                         "(indicative)")])
+            name = top.get("name")
+            # The share above is of the ranked Links (class B) only. Beside it,
+            # the share of ALL ranked risk: the class-B rows plus the class-A
+            # rows, as the FMEA table shows them (asset-investment walkthrough
+            # 2026-11-17, issue 04). None when any row is unreadable.
+            share_all = _share_of_all_ranked(c, rows, fmea.get("class_a"))
+            title = f"{name} carries {share:.0%} of ranked Link risk"
+            if share_all is not None:
+                title += f" ({share_all:.0%} of all ranked risk)"
+            evidence = {"mode": name, "criticality_eur_per_year": c,
+                        "share": round(share, 3),
+                        "share_of_all_ranked": (None if share_all is None
+                                                else round(share_all, 3)),
+                        "occurrence_per_year": top.get("occurrence_per_year"),
+                        "severity_eur": top.get("severity_eur")}
+            feeder = _critical_feeder(sections, name)
+            if feeder is not None:
+                # Spare generation or storage in the hub cannot serve a
+                # must-stay-on bus while its only path is out.
+                buses = ", ".join(str(b) for b in feeder.get("buses") or [])
+                evidence["feeds_critical_buses"] = feeder.get("buses") or []
+                add("fmea_dominant_mode", "medium", title, evidence,
+                    f"{name} is the only path to the must-stay-on bus "
+                    f"{buses}: add a second feeder or backup supply at "
+                    f"{buses}, or reduce its outage rate / repair time. A "
+                    "spare unit or storage elsewhere in the hub cannot serve "
+                    f"{buses} while {name} is out.",
+                    [])
+            else:
+                add("fmea_dominant_mode", "medium", title, evidence,
+                    f"One failure mode dominates: consider a redundant path or a "
+                    f"spare for {name}, or reduce its outage rate / "
+                    "repair time. The redundancy stage prices GENERIC N+1 "
+                    "generation / conversion / storage options (indicative "
+                    f"costs), not a spare {name} itself — use it as "
+                    "an order of magnitude.",
+                    [_action("run_eh_study",
+                             rerun.with_(levers={"redundancy": True},
+                                         add_stages=["redundancy"]),
+                             "price generic N / N+1 / storage scenarios "
+                             "(indicative)")])
 
     # ── DtC ────────────────────────────────────────────────────────────
     dtc = (sections.get("dtc") or {}).get("payload") or {}
@@ -409,6 +525,9 @@ def review_report(report: dict, record: dict | None = None,
         "archetype": report.get("archetype"),
         "certified": report.get("certified"),
         "verdict": verdict,
+        # Why an inconclusive verdict is held (GK A F6'), or None.
+        "feeder_bound": (cert.get("feeder_bound")
+                         if isinstance(cert.get("feeder_bound"), dict) else None),
         "mc_lole_h_per_year": lole,
         "target_lole_h": target,
         "ens_cap_permyriad": pack_ens,

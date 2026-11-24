@@ -5,10 +5,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { kpiFigure, splitValueUnit } from '../../../utils/format'
 import { TERM_FALLBACK } from '../shared/Term'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { resultsApi, type EhReferenceDesignReport } from '../../../api/simulation'
+import { resultsApi, simulationApi, type EhReferenceDesignReport } from '../../../api/simulation'
 import { useUIStore } from '../../../store/uiStore'
 import { fmtCurrency } from '../../results/shared'
 import { headline } from '../headline'
@@ -35,6 +35,7 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
       getEhStudy: vi.fn(), getEhReview: vi.fn(), getEhReferenceDesign: vi.fn(),
       getEhTemplate: vi.fn(), getEhLevers: vi.fn(),
     },
+    simulationApi: { ...actual.simulationApi, getStatus: vi.fn() },
   }
 })
 
@@ -52,6 +53,8 @@ beforeEach(() => {
   vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
   vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(null)
   vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(null)
+  // Unread by default, as before this mock existed: no claim either way about the solve.
+  vi.mocked(simulationApi.getStatus).mockRejectedValue(new Error('no status'))
   vi.mocked(resultsApi.getEhLevers).mockResolvedValue(null)
 })
 afterEach(() => { cleanup(); vi.clearAllMocks() })
@@ -375,6 +378,69 @@ describe('ResultsCard before the study (UX S6, G2)', () => {
   })
 })
 
+// Control-strategy walkthrough 06 / improvement 2: the headline names its source run; an Expert solve is
+// never "Not run yet" in Guided.
+describe('ResultsCard source run (control-strategy 06)', () => {
+  const solved = (o: Record<string, unknown> = {}) => vi.mocked(simulationApi.getStatus).mockResolvedValue(
+    { status: 'completed', objective: 3473806.32, solve_time: 2.8, dispatch: 'fresh',
+      solved_at: '2026-11-17T15:42:00Z', ...o } as never)
+
+  it('after an Expert solve with no study, shows the solve cost from the dispatch solve, not "Not run yet"', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
+    solved()
+    flowWith({ optimisation: 'fresh', study: 'not_run', loadflow: 'not_run' })
+    mount()
+    const cost = await screen.findByTestId('hub-results-dispatch-cost')
+    expect(cost.textContent).toContain('3.5')
+    expect(cost.getAttribute('data-state')).toBe('ready')
+    expect(screen.getByTestId('hub-results-source-from').textContent).toMatch(/^From the dispatch solve, 2026-11-1[78] \d\d:\d\d$/)
+    expect(screen.getByTestId('hub-results-source-missing').textContent)
+      .toBe('The reliability study has not run·Go to Goal and run the study ›')
+    // The headline's own "Not run yet" is gone; the other chapters keep theirs.
+    expect(screen.getByTestId('hub-card-results').textContent).not.toContain('The study writes its verdict, cost and risks here.')
+  })
+
+  it('a solve older than the inputs shows its figure out of date, never as current (GK B3 C2)', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
+    solved()
+    flowWith({ optimisation: 'stale', study: 'not_run', loadflow: 'not_run' })
+    mount()
+    const cost = await screen.findByTestId('hub-results-dispatch-cost')
+    expect(cost.getAttribute('data-state')).toBe('stale')
+    expect(screen.getByTestId('hub-results-source-stale').textContent).toContain('Out of date')
+  })
+
+  it('a reopened project with no stamp names the solve without a time, never "has not run" (GK B3 C1)', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
+    solved({ solved_at: null })
+    flowWith({ optimisation: 'fresh', study: 'not_run', loadflow: 'not_run' })
+    mount()
+    expect((await screen.findByTestId('hub-results-source-from')).textContent).toBe('From the dispatch solve')
+  })
+
+  it('with the study and no solve, names the study and offers the solve', async () => {
+    vi.mocked(simulationApi.getStatus).mockResolvedValue(
+      { status: 'idle', objective: null, solve_time: null, dispatch: 'none', solved_at: null } as never)
+    const run = vi.fn()
+    useUIStore.setState({ requestRunSolve: run })
+    mount()
+    const line = await screen.findByTestId('hub-results-source')
+    expect(within(line).getByTestId('hub-results-source-from').textContent).toBe('From the reliability study')
+    await waitFor(() => expect(within(line).getByTestId('hub-results-source-missing').textContent)
+      .toBe('The dispatch solve has not run·Run the solve ›'))
+    fireEvent.click(within(line).getByTestId('hub-results-source-action'))
+    expect(run).toHaveBeenCalledTimes(1)
+  })
+
+  it('with the study and a solve, names the study only', async () => {
+    solved()
+    mount()
+    const line = await screen.findByTestId('hub-results-source')
+    await waitFor(() => expect(simulationApi.getStatus).toHaveBeenCalled())
+    await waitFor(() => expect(within(line).queryByTestId('hub-results-source-missing')).toBeNull())
+  })
+})
+
 // WALK-IMPROVE-1: the cheaper battery duration the study's levers found, under
 // the verdict, with one link to the design options.
 describe('ResultsCard cheaper battery duration', () => {
@@ -447,5 +513,40 @@ describe('ResultsCard cheaper battery duration', () => {
     await screen.findByTestId('hub-results-verdict')
     expect(screen.queryByTestId('hub-results-cheaper-duration')).toBeNull()
     expect(resultsApi.getEhLevers).not.toHaveBeenCalled()
+  })
+})
+
+// template-e2e 11 (TE2E-11-PLAIN-1): four templates have no reliability verdict.
+describe('no reliability verdict for this site type (template-e2e 11)', () => {
+  for (const id of ['eh_h2_hub', 'eh_h2_hub_staged', 'eh_ammonia_staged', 'eh_ipp_hybrid']) {
+    it(`${id}: plain statement and check-instead, no verdict line`, async () => {
+      vi.mocked(resultsApi.getEhTemplate).mockResolvedValue({ id, name: id, recommended_archetype: 'strong_grid' } as never)
+      mount()
+      const note = await screen.findByTestId('hub-results-no-verdict')
+      expect(note.textContent).toContain('No reliability verdict for this site type.')
+      expect(note.textContent).toContain('Check instead:')
+      expect(screen.queryByTestId('hub-results-verdict')).toBeNull()
+      expect(screen.queryByTestId('hub-results-set-goal')).toBeNull()
+    })
+  }
+  it('a template with a verdict shows none of it', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue({ id: 'eh_datacenter', name: 'DC', recommended_archetype: 'weak_flexible' } as never)
+    mount()
+    await screen.findByTestId('hub-results-verdict')
+    expect(screen.queryByTestId('hub-results-no-verdict')).toBeNull()
+    expect(screen.getAllByText('Why this number')).toHaveLength(3)
+  })
+})
+
+describe('no-verdict template: the shortfall tile agrees with the note (template-e2e 11)', () => {
+  it('does not ask for a goal', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue({ id: 'eh_h2_hub', name: 'H2', recommended_archetype: 'strong_grid' } as never)
+    mount()
+    await screen.findByTestId('hub-results-no-verdict')
+    expect(screen.queryByText(/Set an allowed shortfall in Goal/)).toBeNull()
+    // One sentence, said once (the Verdict line); no figure, so no "Why this number".
+    expect(screen.getAllByText(/No reliability verdict for this site type/)).toHaveLength(1)
+    // Only the cost tile keeps its "Why this number"; the shortfall tile has no figure.
+    expect(screen.getAllByText('Why this number')).toHaveLength(1)
   })
 })

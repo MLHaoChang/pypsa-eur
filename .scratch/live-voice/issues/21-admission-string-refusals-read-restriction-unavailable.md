@@ -3,7 +3,7 @@
 
 # Two admission refusals still read as restriction_unavailable
 
-Status: needs-triage
+Status: done
 Type: task
 Found by: live-voice 17 (`17-no-access-actor-reads-restriction-unavailable.md`).
 
@@ -25,3 +25,7 @@ Neither is about the rule store. The user is told the store is down.
 - Tests through `dispatch_tool_call` for both.
 
 ## Comments
+
+## Triage (2026-11-20, master 87cf52a7)
+
+Checked by code reading only. Still true: `harness/restrictions.py` still raises the two plain-string refusals (lines 39 and 82). Acceptance: each gets its own typed kind like `project_access_denied` (issue 17) with a plain message, `dispatch_tool_call` maps them to it instead of `restriction_unavailable`, a test per refusal, and a new error-kind fragment under `pypsa-gui/tool-error-kinds.d/`. Gated: GK B. Blocked by: none.

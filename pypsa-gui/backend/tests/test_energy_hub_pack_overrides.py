@@ -127,7 +127,11 @@ def test_dsr_buses_on_a_pack_without_dsr_opt_in_is_refused(
 
 @pytest.mark.live_solve
 def test_weak_override_makes_the_mvp_b_fixture_feasible(client, install_network):
-    _setup(client, install_network, _weak_net(), voll=500.0)
+    # template-e2e 02c: the study's import cap is the network's connection
+    # limit; 50 MW keeps the default ENS target infeasible.
+    n = _weak_net()
+    n.links.loc["import_poc", ["p_nom", "p_nom_max"]] = 50.0
+    _setup(client, install_network, n, voll=500.0)
     r = client.post(STUDY_URL, json={"archetype": "weak_flexible"})
     assert r.status_code == 200, r.text
     default = _poll(client)
@@ -144,7 +148,7 @@ def test_weak_override_makes_the_mvp_b_fixture_feasible(client, install_network)
     assert rep["completeness"]["target"] == "ok"
     assert rep["ens_cap_permyriad"] == 5000.0
     assert rep["pack_hash"] != default["report"]["pack_hash"]
-    assert body["pack_overrides"] == {"ens_cap_permyriad": 5000.0}
+    assert body["pack_overrides"] == {"ens_cap_permyriad": 5000.0, "import_p_nom_mw": 50.0}
 
 
 @pytest.mark.live_solve
@@ -307,7 +311,8 @@ def test_record_carries_normalised_overrides_and_dsr_buses_are_deduplicated(
     })
     assert r.status_code == 200, r.text
     body = _poll(client)
-    assert body["pack_overrides"] == {"ens_cap_permyriad": 5000.0}
+    # The import cap is the network's connection limit (template-e2e 02c).
+    assert body["pack_overrides"] == {"ens_cap_permyriad": 5000.0, "import_p_nom_mw": 100.0}
     assert seen["dsr_buses"] == ["flex"]
 
 

@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { isAxiosError } from 'axios'
 import {
   decideResearch, getRun, pauseRun, presentRun, resumeRun, stopRun,
-  type GateRule, type ResearchRow, type RunMonitorView, type RunStage,
+  type GateRule, type ResearchRow, type RunMonitorView, type RunPpaPrice, type RunStage,
 } from '../../api/runMonitor'
 import { useChatStore } from '../../store/chatStore'
 import { useUIStore, type SlidePanel } from '../../store/uiStore'
@@ -98,6 +98,17 @@ function CurrentStage({ stage, view }: { stage: RunStage; view: RunMonitorView }
   </div>
 }
 
+/** Study harness 14 S-C: the PPA price, as the backend words it. A price not
+ *  evaluated or out of date is amber with its reason, never a pass. */
+function PpaPrice({ ppa }: { ppa: RunPpaPrice }) {
+  const amber = ppa.state === 'not_evaluated' || ppa.state === 'out_of_date'
+  return <div data-testid="run-ppa" data-state={ppa.state} className="mt-1 rounded border border-border p-2">
+    <div className="font-medium">{ppa.title}</div>
+    <div data-testid="run-ppa-text" className={amber ? 'text-amber-400' : 'text-text'}>{ppa.text}</div>
+    <ul className="text-muted">{ppa.lines.map((line, i) => <li key={i} data-testid="run-ppa-line">{line}</li>)}</ul>
+  </div>
+}
+
 // A run that waits on the user, not one that stopped.
 // LC-48e: what a run whose resume the goal-switch guard refused waits for,
 // read now on the server (`_held_view`); the task named by its title only.
@@ -137,7 +148,7 @@ function ResearchCard({ row, others, busy, onDecide }: {
       {row.range ? `${row.range.low}–${row.range.high}` : row.value} {row.unit} <span className="text-muted">({row.basis}{row.jurisdiction ? `, ${row.jurisdiction}` : ''})</span>
     </div>
     {sourced ? <>
-      <a href={row.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline break-all"
+      <a href={row.url} target="_blank" rel="noopener noreferrer" className="text-link hover:underline break-all"
         data-testid="run-research-source">{row.title || row.url}</a>
       <blockquote data-testid="run-research-quote" className="my-1 border-l-2 border-border pl-2 italic">“{row.quote}”</blockquote>
     </> : <div data-testid="run-research-unverified" className="text-warn">Unverified source: not used</div>}
@@ -145,7 +156,7 @@ function ResearchCard({ row, others, busy, onDecide }: {
       {others} other {others === 1 ? 'source' : 'sources'} for this {thing}: using this one rejects {others === 1 ? 'it' : 'them'}.</div>}
     <div className="mt-1 flex gap-3">
       {usable && <button type="button" disabled={busy} data-testid="run-research-use"
-        className="text-accent hover:underline disabled:opacity-40" onClick={() => onDecide('confirmed')}>Use this {thing}</button>}
+        className="text-link hover:underline disabled:opacity-40" onClick={() => onDecide('confirmed')}>Use this {thing}</button>}
       <button type="button" disabled={busy} data-testid="run-research-reject"
         className="text-muted hover:text-text disabled:opacity-40" onClick={() => onDecide('rejected')}>Reject</button>
     </div>
@@ -161,13 +172,13 @@ function Link({ children, onClick, disabled, testId }: {
   children: string; onClick: () => void; disabled?: boolean; testId?: string
 }) {
   return <button type="button" disabled={disabled} onClick={onClick} data-testid={testId} data-run-link=""
-    className="text-accent hover:underline disabled:opacity-40">{children} ›</button>
+    className="text-link hover:underline disabled:opacity-40">{children} ›</button>
 }
 
 /** An action in place (resume, retry): no "›". */
 function Action({ children, onClick, disabled }: { children: string; onClick: () => void; disabled?: boolean }) {
   return <button type="button" disabled={disabled} onClick={onClick}
-    className="text-accent hover:underline disabled:opacity-40">{children}</button>
+    className="text-link hover:underline disabled:opacity-40">{children}</button>
 }
 
 export default function RunMonitor({ task, disabled, disabledReason, onRequest }: {
@@ -328,6 +339,7 @@ export default function RunMonitor({ task, disabled, disabledReason, onRequest }
         <Link testId="run-report-link" onClick={() => open('reports')}>Open the report</Link>
       </li>}
     </ol>
+    {view.monitor.ppa && <PpaPrice ppa={view.monitor.ppa} />}
 
     {gateFailed && <div data-testid="run-failure">
       {stoppedAt} failed: {failedRules} {failedRules === 1 ? 'rule' : 'rules'} did not pass.{' '}

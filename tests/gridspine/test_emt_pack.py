@@ -91,9 +91,11 @@ def test_x_over_r_is_one_over_rx_paired_with_its_own_case(tmp_path):
     s = by_label(p)
     assert (s["max"]["sk_mva"], s["max"]["x_over_r"]) == (3000.0, pytest.approx(4.0))
     assert (s["min"]["sk_mva"], s["min"]["x_over_r"]) == (2000.0, pytest.approx(2.0))
-    # min case: |Z| = 121/20 = 6.05 ohm at X/R 2: R = 6.05/sqrt(5) = 2.705642, X = 2 R = 5.411285
-    assert s["min"]["r_ohm"] == pytest.approx(2.705642253, abs=1e-6)
-    assert s["min"]["x_ohm"] == pytest.approx(5.411284506, abs=1e-6)
+    # min case, c_max 1.1: |Z| = 1.1 * 121/20 = 6.655 ohm at X/R 2: R = 6.655/sqrt(5) = 2.976206,
+    # X = 2 R = 5.952413
+    assert s["min"]["c"] == 1.1
+    assert s["min"]["r_ohm"] == pytest.approx(2.976206478, abs=1e-6)
+    assert s["min"]["x_ohm"] == pytest.approx(5.952412956, abs=1e-6)
     # battery corners span the smaller and larger X/R
     assert s["skmin_xrmin"]["x_over_r"] == pytest.approx(2.0)
     assert s["skmax_xrmax"]["x_over_r"] == pytest.approx(4.0)
@@ -138,8 +140,19 @@ def test_pack_errors_are_contract_errors_and_typed():
 
 def test_every_row_states_the_c_factor_and_the_manifest_lists_it(tmp_path):
     p = pack(tmp_path)
-    assert by_label(p)["max"]["note"] == C_NOTE
-    assert "IEC 60909 c not applied" in C_NOTE and "10 % higher" in C_NOTE
+    rows = by_label(p)
+    assert rows["max"]["note"] == C_NOTE
+    assert "c_max on Sk-min, c_min on Sk-max" in C_NOTE
+    # GC-14: each row names its c; c_min is 1.0 at the 110 kV PCC; normal is no IEC 60909 case
+    assert {k: r["c"] for k, r in rows.items()} == {
+        "max": 1.0,
+        "min": 1.1,
+        **({"normal": 1.0} if "normal" in rows else {}),
+        "skmin_xrmin": 1.1,
+        "skmin_xrmax": 1.1,
+        "skmax_xrmin": 1.0,
+        "skmax_xrmax": 1.0,
+    }
     csv_lines = (p.path / "thevenin_set.csv").read_text().splitlines()[1:]
     assert csv_lines and all(C_NOTE in ln for ln in csv_lines)
     assert any(C_NOTE in a for a in p.manifest["assumptions"])
@@ -157,6 +170,11 @@ def test_normal_case_appears_when_given(tmp_path):
     assert s["normal"]["sk_mva"] == 2500.0
     assert s["normal"]["x_over_r"] == pytest.approx(1 / 0.11)
     assert s["normal"]["x0_ohm"] is None
+    # GC-14: the normal case is no IEC 60909 case: c = 1.0, |Z| = 110^2 / 2500 = 4.84 ohm
+    assert s["normal"]["c"] == 1.0
+    assert math.hypot(s["normal"]["r_ohm"], s["normal"]["x_ohm"]) == pytest.approx(
+        4.84, rel=1e-12
+    )
 
 
 def test_a_case_without_zero_sequence_is_to_be_supplied_not_borrowed(tmp_path):
@@ -357,6 +375,128 @@ def test_stub_imports_and_calls_are_restricted(tmp_path):
     assert not ({"eval", "exec", "compile", "__import__"} & names)
     assert not ({"system", "popen", "Popen", "run_command"} & attrs)
     assert "subprocess" not in text and "os." not in text
+
+
+def _stub_read_keys(tree):
+    """Every schedule column the stub reads: the SOURCE_KEYS/EVENT_KEYS keys and case[...]."""
+    keys = set()
+    for n in ast.walk(tree):
+        if (
+            isinstance(n, ast.Assign)
+            and isinstance(n.targets[0], ast.Name)
+            and n.targets[0].id in ("SOURCE_KEYS", "EVENT_KEYS")
+        ):
+            keys |= {k.value for k in n.value.keys}
+        elif (
+            isinstance(n, ast.Subscript)
+            and isinstance(n.value, ast.Name)
+            and n.value.id == "case"
+            and isinstance(n.slice, ast.Constant)
+        ):
+            keys.add(n.slice.value)
+    return keys
+
+
+def test_every_column_the_stub_reads_is_a_schedule_column(tmp_path):
+    _, text = _stub(tmp_path)
+    keys = _stub_read_keys(ast.parse(text))
+    assert {"r_ohm", "t_end_s", "output_name", "kind"} <= keys
+    assert keys <= set(emt_pack.SCHEDULE_COLUMNS), keys - set(emt_pack.SCHEDULE_COLUMNS)
+
+
+def test_schedule_json_keys_and_csv_header_are_the_schedule_columns(tmp_path):
+    p, _ = _stub(tmp_path)
+    cases = rows(p.path, "case_schedule.json")
+    assert cases
+    for c in cases:
+        assert set(c) == set(emt_pack.SCHEDULE_COLUMNS)  # JSON keys are sorted
+    header = (p.path / "case_schedule.csv").read_text().splitlines()[0]
+    assert header.split(",") == list(emt_pack.SCHEDULE_COLUMNS)
+
+
+def test_stub_runs_once_per_case_with_that_cases_values(tmp_path, monkeypatch):
+    import runpy
+    import sys
+    import types
+
+    p, _ = _stub(tmp_path)
+    cases = rows(p.path, "case_schedule.json")
+    calls = []
+
+    class Comp:
+        def __init__(self, name):
+            self.name = name
+
+        def parameters(self, **kw):
+            calls.append((self.name, kw))
+
+    class Project:
+        def find(self, name):
+            return Comp(name)
+
+        def parameters(self, **kw):
+            calls.append(("project", kw))
+
+        def run(self):
+            calls.append(("run", {}))
+
+    class Pscad:
+        def load(self, ws):
+            calls.append(("load", ws))
+
+        def project(self, name):
+            return Project()
+
+        def quit(self):
+            calls.append(("quit", {}))
+
+    mhi = types.ModuleType("mhi")
+    mod = types.ModuleType("mhi.pscad")
+    mod.launch = Pscad
+    mhi.pscad = mod
+    monkeypatch.setitem(sys.modules, "mhi", mhi)
+    monkeypatch.setitem(sys.modules, "mhi.pscad", mod)
+    ns = runpy.run_path(str(p.path / "run_schedule.py"), run_name="stub")
+    ns["main"](["ws.pswx", "proj"])
+
+    runs = [i for i, c in enumerate(calls) if c[0] == "run"]
+    assert len(runs) == len(cases)
+    assert calls[0] == ("load", "ws.pswx") and calls[-1][0] == "quit"
+    assert (p.path / "results").is_dir()
+    for case, end in zip(cases, runs):
+        block = calls[end - 3 : end]  # source, event, project parameters
+        assert block[2][1] == {
+            "time_duration": case["t_end_s"],
+            "output_filename": case["output_name"] + ".out",
+        }
+        assert block[0][0] == "GRID_SOURCE" and block[1][0] == "EVENT"
+        # Expected parameter names are written by hand, not read from the stub;
+        # a blank (None) column must not be passed at all.
+        source = {
+            "R": case["r_ohm"],
+            "X": case["x_ohm"],
+            "R0": case["r0_ohm"],
+            "X0": case["x0_ohm"],
+        }
+        event = {
+            "KIND": case["kind"],
+            "T_EVENT": case["t_event_s"],
+            "T_DUR": case["duration_s"],
+            "RF": case["fault_r_ohm"],
+            "XF": case["fault_x_ohm"],
+            "VRET": case["v_retained_pu"],
+            "STEP_PU": case["step_pu"],
+            "STEP_HZ": case["step_hz"],
+            "RAMP_HZ_S": case["ramp_hz_per_s"],
+            "ANGLE_DEG": case["angle_deg"],
+        }
+        assert block[0][1] == {k: v for k, v in source.items() if v is not None}
+        assert block[1][1] == {k: v for k, v in event.items() if v is not None}
+    # The schedule has blank event columns and distinct values, so a dropped
+    # None filter or swapped names (R0/X0, T_EVENT/T_DUR) cannot pass.
+    assert any(c["duration_s"] is None for c in cases)
+    assert any(c["t_event_s"] != c["duration_s"] and c["duration_s"] for c in cases)
+    assert all(c["r0_ohm"] != c["x0_ohm"] for c in cases)
 
 
 # --- manifest ---------------------------------------------------------------
@@ -706,3 +846,28 @@ def test_stub_says_what_connected_means_only_when_the_contract_has_it(monkeypatc
     assert CONNECTED_NOTE in head
     assert "momentary cessation or current blocking is not a trip" in head
     compile(text, "run_schedule.py", "exec")
+
+
+def test_lv_pcc_takes_c_min_095_on_sk_max_rows(tmp_path):
+    # GC-14 F2: a 0.4 kV PCC, Sk 20 / 10 MVA. Sk-max rows: c 0.95, |Z| = 0.95 * 0.16 / 20 =
+    # 0.0076 ohm; Sk-min rows: c 1.1, |Z| = 1.1 * 0.16 / 10 = 0.0176 ohm.
+    s = spec(sk_max_mva=20.0, sk_min_mva=10.0)
+    c = s["campus"]
+    c["pcc"]["vn_kv"] = 0.4
+    c["buses"] = {b: {"vn_kv": 0.4} for b in c["buses"]}
+    for tr in c["transformers"].values():
+        tr["vn_hv_kv"], tr["vn_lv_kv"] = t(0.42, "datasheet"), t(0.4, "datasheet")
+    rows_ = by_label(pack(tmp_path, s))
+    want = {
+        "max": (0.95, 0.0076),
+        "min": (1.1, 0.0176),
+        "skmax_xrmin": (0.95, 0.0076),
+        "skmax_xrmax": (0.95, 0.0076),
+        "skmin_xrmin": (1.1, 0.0176),
+        "skmin_xrmax": (1.1, 0.0176),
+    }
+    assert set(rows_) == set(want)
+    for label, (cv, z) in want.items():
+        r = rows_[label]
+        assert r["vn_kv"] == 0.4 and r["c"] == cv, label
+        assert math.hypot(r["r_ohm"], r["x_ohm"]) == pytest.approx(z, rel=1e-12), label

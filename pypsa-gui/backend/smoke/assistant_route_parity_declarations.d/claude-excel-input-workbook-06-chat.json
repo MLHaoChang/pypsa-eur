@@ -1,0 +1,9 @@
+{
+ "non_mutating_routes": [
+  {
+   "method": "POST",
+   "path": "/api/workbook/preview",
+   "reason": "parses an uploaded workbook and returns what an import would create; writes nothing"
+  }
+ ]
+}

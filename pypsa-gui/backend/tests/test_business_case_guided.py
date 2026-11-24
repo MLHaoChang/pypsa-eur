@@ -1030,7 +1030,7 @@ def test_a_report_from_before_the_list_reads_not_established(bc, monkeypatch):
     ]
     cells = [[c.value for c in row] for row in ws.iter_rows()]
     at = next(i for i, r in enumerate(cells) if r[0] == "Assumed default")
-    assert cells[at + 1][0] == "not_established" and "again" in cells[at + 1][3]
+    assert cells[at + 1][0] == "not established" and "again" in cells[at + 1][3]
 
 
 def test_the_workbook_row_without_a_unit_is_blank_never_none():
@@ -1312,3 +1312,165 @@ def test_bc15_a_whole_object_write_shows_a_lease_up_change_on_the_card():
     )
     assert _label(None, ("inputs", "receivable_days")) == "Receivable days"
     assert _label("x", ("price_by_year", "2031")) == "x · Price 2031"
+
+
+# ── #21: the plan card names a terminal value that cannot price the plant ───
+
+
+def _with_terminal(method):
+    import routers.results as R
+
+    cfg = R._state["solver_config"]
+    fin = dict(cfg.finance)
+    if method is None:  # the finance default: the key is absent
+        fin.pop("terminal_value", None)
+    else:
+        fin["terminal_value"] = {"method": method, "value": None}
+    cfg.finance = fin
+
+
+@pytest.mark.parametrize("method", ["none", None])
+def test_21_a_capex_preset_with_no_terminal_value_warns_on_the_card(
+    bc, template, method
+):
+    template["id"] = "eh_ipp_hybrid"
+    _with_terminal(method)
+    row = _rows(preset_apply.plan(_args(variant="ipp_hybrid")))["Terminal value"]
+    assert row["warn"] is True and row["path"] == [
+        "finance",
+        "terminal_value",
+        "method",
+    ]
+    assert row["reason"].startswith(
+        "Plant capex has no end-of-life value"
+    )  # the applied capex line
+    assert "terminal-value method" in row["reason"] and row["new"] == "none"
+
+
+@pytest.mark.parametrize(
+    "method", ["book_value", "fixed", "multiple_of_ebitda", "remaining_life_annuity"]
+)
+def test_21_a_method_the_project_already_has_shows_no_terminal_row(
+    bc, template, method
+):
+    template["id"] = "eh_ipp_hybrid"
+    _with_terminal(method)
+    assert "Terminal value" not in _rows(preset_apply.plan(_args(variant="ipp_hybrid")))
+
+
+# ── walk 05: indexation from the finance inputs (GK B2 B2) ─────────────────
+
+
+def test_b2_a_preset_contract_line_reads_the_finance_ppa_rate(bc, template):
+    """The IPP's two contract revenue lines read the s2 finance inputs' `ppa` rate (the
+    rate the investment case indexes contract lines by); a non-contract line takes none."""
+    template["id"] = "eh_ipp_hybrid"
+    new = preset_apply.plan(_args(variant="ipp_hybrid"))["new"]
+    lines = new["inputs"]["lines"]
+    contract = [ln for ln in lines if ln["escalation"] == "contract"]
+    assert len(contract) == 2
+    assert all(ln["indexation"] == 0.01 for ln in contract)
+    assert all(ln.get("indexation") is None for ln in lines if ln not in contract)
+    asks = preset_apply.to_ask(new)
+    assert not [r for r in asks if r.get("column") == "indexation"]
+    # The de-rating is the user's to type (Q2): asked for, by line, never filled.
+    assert [r["line"] for r in asks if r.get("column") == "derating"] == [
+        "Capacity payment (BESS, firm capacity)"
+    ]
+
+
+def test_bc23_a_preset_row_beyond_the_soft_band_warns_and_a_usual_one_does_not(
+    bc, template, monkeypatch
+):
+    """The finance rate fills the preset's contract lines: a rate beyond +-10 %/yr is shown
+    on the card with `warn` and the reason, so it is never silently confirmed (bc-23)."""
+    template["id"] = "eh_ipp_hybrid"
+    real = preset_apply._finance
+
+    def finance_at(rate):
+        def read(cfg):
+            fin = real(cfg)
+            return fin.model_copy(
+                update={"escalation": {**fin.escalation, "ppa": rate}}
+            )
+
+        return read
+
+    def indexation_rows():
+        card = preset_apply.plan(_args(variant="ipp_hybrid"))
+        return [r for r in card["rows"] if r["path"][-1:] == ["indexation"]]
+
+    monkeypatch.setattr(preset_apply, "_finance", finance_at(0.15))
+    high = indexation_rows()
+    assert high and all(
+        r["warn"] is True and "unusually high" in r["reason"] for r in high
+    )
+    monkeypatch.setattr(preset_apply, "_finance", finance_at(0.05))
+    usual = indexation_rows()
+    assert usual and all("warn" not in r for r in usual)
+
+
+def test_b2_the_card_marks_the_rate_from_the_finance_inputs(bc, template):
+    """Guided: the card says where the indexation came from, and shows the empty
+    de-rating, so the user sees both before applying (walk 04, 05)."""
+    template["id"] = "eh_ipp_hybrid"
+    rows = _rows(preset_apply.plan(_args(variant="ipp_hybrid")))
+    cap = "Capacity payment (BESS, firm capacity)"
+    assert rows[f"{cap} · indexation"]["new"] == 0.01
+    assert rows[f"{cap} · indexation"]["unit"] == preset_apply.FROM_FINANCE
+    assert rows[f"{cap} · de-rating"]["new"] == preset_apply.EMPTY
+    # Only the filled indexation reads "from the finance inputs".
+    marked = {k for k, r in rows.items() if r["unit"] == preset_apply.FROM_FINANCE}
+    assert marked == {
+        f"{r['line']} · indexation"
+        for r in rows.values()
+        if r["path"][-1:] == ["indexation"]
+    }
+    assert f"{cap} · price" not in marked
+
+
+def test_b2_a_stated_indexation_stays_and_no_rate_leaves_it_empty():
+    from models.business_case import BusinessCaseInputs, LineItem
+    from services.business_case import presets as P
+
+    def line(name, **kw):
+        return LineItem(
+            name=name,
+            kind="revenue",
+            category="capacity_payment",
+            unit="kW_year",
+            quantity=1.0,
+            escalation="contract",
+            **kw,
+        )
+
+    case = BusinessCaseInputs(
+        lines=[
+            line("stated", indexation=0.03),
+            line("zero", indexation=0.0),  # a stated 0 is stated, never "unset"
+            line("empty"),
+        ]
+    )
+    filled = P.with_finance_indexation(case, {"ppa": 0.02, "opex": 0.05})
+    assert [ln.indexation for ln in filled.lines] == [0.03, 0.0, 0.02]
+    assert case.lines[2].indexation is None  # the input is not changed in place
+    # No PPA rate: the line stays empty (the run names it), never filled with 0.
+    none = P.with_finance_indexation(case, {"opex": 0.05})
+    assert [ln.indexation for ln in none.lines] == [0.03, 0.0, None]
+    assert P.with_finance_indexation(case, {}) == case
+
+
+def test_b2_a_preset_keeps_the_stored_receivable_days(bc, template):
+    from tests.test_business_case_chat_tools import _line as _bc_line
+    from tests.test_business_case_chat_tools import _store
+
+    _store(bc, {"inputs": {"lines": [_bc_line(price=None)], "receivable_days": 30.0}})
+    new = preset_apply.plan(_args(variant="gpu_cloud"))["new"]
+    assert new["inputs"]["receivable_days"] == 30.0
+
+
+def test_21_lines_without_capex_show_no_terminal_row(bc, template):
+    template["id"] = "eh_site"  # the generic rows: revenue and opex only
+    _with_terminal("none")
+    card = preset_apply.plan(_args(rows=["Product sales", "Staff"]))
+    assert "Terminal value" not in _rows(card)

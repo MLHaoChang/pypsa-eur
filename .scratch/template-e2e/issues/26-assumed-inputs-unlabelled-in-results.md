@@ -3,7 +3,7 @@
 
 # 26 — Assumed inputs are labelled only in the report, not in Guided or Expert results
 
-Status: needs-triage
+Status: ready-for-agent
 Source: decide-report-journeys.md (walk 2026-11-17, master 0ab07339)
 Severity: misleads
 Journey fit: results → report (template-e2e 08 is built elsewhere; this is the results half).
@@ -16,3 +16,11 @@ The report has an 'assumed' column and the grid-readiness count of assumed limit
 
 - Guided and Expert results list the assumed inputs behind the verdict and cost, and the synthetic-data banner.
 - The same list appears in the report (test per template).
+
+## Triage (2026-11-20, master b7e5dee3)
+
+Checked by code reading only; the app was not re-run. Still true: no 'Assumptions behind this result' text exists in the frontend. Acceptance as above. Reuse the assumed-input label from #1734 and the one from issue 13; do not build a third. Gated: UX. Blocked by: none.
+
+## Comments
+
+- 2026-11-23 status sweep: landed in #1645 (41318c60): the report chapter lists the assumed inputs. Remains: the "Assumptions behind this result" group in Guided and Expert results.

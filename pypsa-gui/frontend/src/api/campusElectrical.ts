@@ -512,7 +512,7 @@ export interface CampusState {
 }
 
 /** The run's stages, as the backend names them (`RUN_STAGES`), then `done`. */
-export type CampusRunStage = 'prepare' | 'rank' | 'island_checks' | 'cuts' | 'size' | 'harmonic_scan' | 'voltage_stability' | 'dips_restart' | 'invest'
+export type CampusRunStage = 'prepare' | 'rank' | 'island_checks' | 'cuts' | 'size' | 'harmonic_scan' | 'voltage_stability' | 'dips_restart' | 'ssti_screens' | 'invest'
   | 'gfm_settings' | 'done'
 
 /** The campus run's solve-queue job, with the stage it reached. */
@@ -690,6 +690,14 @@ export interface IslandState {
   study: Record<string, unknown> | null
   /** When the study was written (UTC, ISO 8601); null without one. Absent from a server that predates it. */
   study_at?: string | null
+  /** The sidecar's revision, sent back as `base` on a PATCH; null without one. */
+  revision?: string | null
+}
+
+/** A partial island edit: plain values (the server sets each number's source). */
+export interface IslandPatch {
+  requirements?: Record<string, unknown>
+  units?: Record<string, Record<string, unknown>>
 }
 
 // ── the frequency cuts (campus island plan, I7; owner Q6: manual) ───────────
@@ -939,6 +947,9 @@ export interface GridReadiness {
   rows: GridReadinessRow[]
   /** Rows that do not apply to this project, outside the summary counts. */
   excluded?: GridReadinessExcluded[]
+  /** Walkthrough 04: "live" reads the loaded network (unsaved edits included); "out_of_date" read the
+   *  saved file because a run held the network; "saved" when the project is not loaded. Absent from an older server. */
+  network?: 'live' | 'saved' | 'out_of_date'
   summary: Record<GridReadinessVerdict, number> & { assumed: number; red_flags: number
     /** Rows that fail or warn before mitigation and pass after the battery/UPS (DC 03). */
     pass_after_mitigation?: number }
@@ -1125,9 +1136,17 @@ export const campusApi = {
   island: (project: string) =>
     client.get<IslandState>(`${base(project)}/island`, quiet).then(r => r.data),
 
-  /** Save the island sidecar; 422 names the field, 413 over 256 kB. Drops the old study. */
-  saveIsland: (project: string, config: IslandConfig) =>
-    client.put<IslandState>(`${base(project)}/island`, { config }, quiet).then(r => r.data),
+  /** Save the island sidecar; 422 names the field, 413 over 256 kB. Drops the old study.
+   *  409 `{error_kind: island_config_changed}` when `base` is not the stored revision. */
+  saveIsland: (project: string, config: IslandConfig, revision?: string | null) =>
+    client.put<IslandState>(`${base(project)}/island`,
+      revision == null ? { config } : { config, base: revision }, quiet).then(r => r.data),
+
+  /** Change some island fields. 422 detail opens with the field path; 409
+   *  `{error_kind: island_config_changed}` when `base` is not the stored revision. */
+  patchIsland: (project: string, patch: IslandPatch, revision?: string | null) =>
+    client.patch<IslandState>(`${base(project)}/island`,
+      revision == null ? { patch } : { patch, base: revision }, quiet).then(r => r.data),
 
   /** Solve the islanding variants (minutes on a large project). */
   runIslandStudy: (project: string, scenarios?: IslandScenario[]) =>
@@ -1267,4 +1286,13 @@ export function isNoAnswer(err: unknown): boolean {
 
 export function isOtherKind(err: unknown): boolean {
   return (err as { response?: { status?: number } } | null)?.response?.status === 409
+}
+
+/** The island sidecar changed since it was read: a 409 whose
+ *  `detail.error_kind` is `island_config_changed` (PATCH or PUT with a stale
+ *  `base`). Any other 409 (a locked project, say) is not this. */
+export function isIslandConfigChanged(err: unknown): boolean {
+  const r = (err as { response?: { status?: number; data?: { detail?: unknown } } } | null)?.response
+  const detail = r?.data?.detail as { error_kind?: unknown } | null | undefined
+  return r?.status === 409 && detail?.error_kind === 'island_config_changed'
 }

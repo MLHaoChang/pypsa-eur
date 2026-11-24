@@ -155,7 +155,7 @@ describe('island section: the report', () => {
     expect(costs.textContent).toContain('Cost of island capability (per year)')
     expect(costs.textContent).toMatch(/€\u00a0\d/)
     const table = await screen.findByTestId('island-table-binding')
-    expect(table.textContent).toContain('Island N-1: loss of bess new, downward reserve')
+    expect(table.textContent).toContain('Island N-1: loss of BESS new, downward reserve')
     expect(table.textContent).toContain('Cost of the limit (per year)')
     expect(within(table).getByTestId('island-binding-note').textContent).toContain('do not add up')
   })
@@ -184,7 +184,7 @@ describe('island section: the form', () => {
     await user.type(sustained, '12')
     await user.selectOptions(screen.getByLabelText('Sustained ride-through (h) source'), 'datasheet')
     await user.click(screen.getByLabelText(/Linearised unit commitment/))
-    await user.selectOptions(screen.getByLabelText('Control mode of bess'), 'gfm_vsm')
+    await user.selectOptions(screen.getByLabelText('Control mode of BESS'), 'gfm_vsm')
     await user.click(screen.getByRole('button', { name: /Save island config/ }))
     await waitFor(() => expect(api.saveIsland).toHaveBeenCalledTimes(1))
     const [project, sent] = api.saveIsland.mock.calls[0] as [string, IslandConfig]
@@ -206,6 +206,40 @@ describe('island section: the form', () => {
     await user.click(screen.getByLabelText('Seamless'))
     await user.click(screen.getByRole('button', { name: /Save island config/ }))
     expect((await screen.findByTestId('island-refusal')).textContent).toContain('pickup_blocks')
+  })
+
+  it('sends the revision it read, and a 409 offers a reload instead of overwriting', async () => {
+    // GK B3 (6) ask 4: a whole-config save cannot drop a chat unit patch.
+    api.island.mockResolvedValue({ config: CONFIG, study: null, revision: 'r1' })
+    api.saveIsland.mockRejectedValue({ response: { status: 409, data: { detail: {
+      error_kind: 'island_config_changed', message: 'changed' } } } })
+    renderSection()
+    const user = userEvent.setup()
+    await screen.findByTestId('island-form')
+    await user.click(screen.getByLabelText('Seamless'))
+    await user.click(screen.getByRole('button', { name: /Save island config/ }))
+    await waitFor(() => expect(api.saveIsland).toHaveBeenCalledTimes(1))
+    expect(api.saveIsland.mock.calls[0][2]).toBe('r1')
+    const stale = await screen.findByTestId('island-stale')
+    expect(stale.textContent).toContain('changed since you opened them')
+    expect(screen.queryByTestId('island-refusal')).toBeNull()
+    const before = api.island.mock.calls.length
+    await user.click(within(stale).getByRole('button', { name: 'Reload' }))
+    await waitFor(() => expect(api.island.mock.calls.length).toBeGreaterThan(before))
+    expect(screen.queryByTestId('island-stale')).toBeNull()
+  })
+
+  it('shows another 409 (a locked project) as its own refusal, not as a reload', async () => {
+    // GK B3 (6) ask 6: only island_config_changed means the file moved.
+    api.saveIsland.mockRejectedValue({ response: { status: 409, data: { detail: {
+      error_kind: 'project_locked', message: 'The project is locked by another user.' } } } })
+    renderSection()
+    const user = userEvent.setup()
+    await screen.findByTestId('island-form')
+    await user.click(screen.getByLabelText('Seamless'))
+    await user.click(screen.getByRole('button', { name: /Save island config/ }))
+    expect((await screen.findByTestId('island-refusal')).textContent).toContain('locked by another user')
+    expect(screen.queryByTestId('island-stale')).toBeNull()
   })
 
   it('runs the study on a saved, unchanged config and reads the island data again', async () => {

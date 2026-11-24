@@ -14,6 +14,10 @@ from __future__ import annotations
 import math
 
 from services.adequacy.eh_columns import _as_bool
+try:
+    from gridspine.drivers.process_chain import truthy as _truthy
+except ImportError:  # a build without gridspine: the one pinned fallback, not a new copy
+    from services.solver.process_uc import _fallback_truthy as _truthy
 from services.carrier_catalog import bus_tonne_factor
 from services.compare.support import _build_snapshot_weights, _per_period_groupby
 from services.period_utils import is_multi_period
@@ -112,13 +116,14 @@ def _product(view: _View, bus: str) -> dict:
 
     gens = n.generators.index[n.generators["bus"] == bus]
     gen_p = getattr(n.generators_t, "p", None)
-    buy, sources, role_flags = [], [], set()
+    buy, sources, role_flags, buy_flags = [], [], set(), set()
     for g in gens:
         role, flag = generator_role(n, g)
         if role == BUY_IN:
             buy.append(g)
             if flag:
                 role_flags.add(flag)
+                buy_flags.add(flag)
         elif not role:
             sources.append(g)
     # The shortfall from the one accessor: a role Generator, else the solve's capture (ticket 08).
@@ -151,7 +156,8 @@ def _product(view: _View, bus: str) -> dict:
     if capture_flag and not lost_amount.get("flag"):
         lost_amount["flag"] = capture_flag              # stale: shown, never as current
     lost_amount.update(eur=eur, eur_flag=eur_flag or capture_flag, eur_by_period=eur_pp,
-                       eur_weighting=COST_BASIS)
+                       eur_weighting=COST_BASIS,
+                       carriers=_carriers(n, [s.name for s in lost if s.source == "generator"]))
 
     inventory = []
     for st in n.stores.index[n.stores["bus"] == bus]:
@@ -168,13 +174,51 @@ def _product(view: _View, bus: str) -> dict:
         "product_value": product_value(n, bus),
         "production": view.amount(made, unit, tf),
         "delivery": view.amount([s for s in delivered if s is not None], unit, tf),
-        "buy_in": view.amount([s.clip(lower=0) for s in (_frame_col(gen_p, g, sns) for g in buy) if s is not None],
-                              unit, tf),
+        "buy_in": _buy_in(n, view, buy, gen_p, unit, tf, buy_flags),
         "lost": lost_amount,
         "unused_supply": view.amount([u for u in (_unused(view, g) for g in sources) if u is not None], unit, tf),
         "inventory": inventory,
         "role_flag": sorted(role_flags)[0] if role_flags else None,
     }
+
+
+def _carriers(n, gens) -> list[str]:
+    """The carriers of these Generators, sorted, so the Key-capacities rows can use the tile words."""
+    return sorted({str(n.generators.at[g, "carrier"]) for g in gens if g in n.generators.index})
+
+
+def _buy_in(n, view: _View, buy: list, gen_p, unit: str, tf: float | None, role_flags: set) -> dict:
+    """The product bought in: its amount, and what it cost at the buy-in generators' marginal cost
+    (linear and quadratic, per snapshot, on the objective basis, as `lost.eur` is), control-strategy
+    walkthrough issue 10. An unknown cost is None with a flag, never 0."""
+    flows = {g: _frame_col(gen_p, g, view.sns) for g in buy}
+    out = view.amount([s.clip(lower=0) for s in flows.values() if s is not None], unit, tf)
+    eur, eur_flag, eur_pp = None, None, {}
+    if not buy:
+        eur_flag = "no_buy_in"
+    elif any(s is None for s in flows.values()):
+        # A buy-in with no dispatch column: its amount is unknown too, never the others' sum (GK A).
+        eur_flag = "buy_in_dispatch_missing"
+        out.update(value=None, by_period={}, flag=eur_flag, t=None, t_flag=eur_flag,
+                   mwh=None, mwh_flag=eur_flag if unit == "MWh" else out["mwh_flag"])
+    else:
+        mc = n.get_switchable_as_dense("Generator", "marginal_cost", view.sns, inds=buy)
+        mq = n.get_switchable_as_dense("Generator", "marginal_cost_quadratic", view.sns, inds=buy) \
+            if "marginal_cost_quadratic" in n.generators.columns else None
+        eur = 0.0
+        for g, s in flows.items():
+            p = s.clip(lower=0)
+            cost = p * mc[g] + (p * p * mq[g] if mq is not None else 0.0)
+            t, pp = view.wsum(cost, view.w_cost)
+            if t is None:
+                eur, eur_flag, eur_pp = None, "non_finite_values", {}
+                break
+            eur += t
+            for k, v in pp.items():
+                eur_pp[k] = eur_pp.get(k, 0.0) + v
+    out.update(eur=eur, eur_flag=eur_flag, eur_by_period=eur_pp, eur_weighting=COST_BASIS,
+               carriers=_carriers(n, buy), role_flag=sorted(role_flags)[0] if role_flags else None)
+    return out
 
 
 def _unused(view: _View, gen: str):
@@ -230,6 +274,10 @@ def _process_unit(view: _View, link: str) -> dict:
         "starts": starts,
         "starts_basis": "modelled_snapshots",
         "modelled_hours": hours,
+        # The horizon in the same energy weighting as `running_hours` and the product amounts: running_hours /
+        # weighted_hours is the share of time the unit ran, and a product's t / weighted_hours its average rate.
+        # (`modelled_hours` is the unweighted snapshot sum: not comparable on a multi-period solve.)
+        "weighted_hours": _finite(view.w_energy.sum()),
         "flag": flag if running is not None and starts is not None and hours is not None else "non_finite_values",
     }
 
@@ -241,5 +289,5 @@ def compute_process_view(n, lost_load=None) -> dict:
     view = _View(n, lost_load)
     units = []
     if "eh_process" in n.links.columns:
-        units = [_process_unit(view, link) for link in n.links.index if _as_bool(n.links.at[link, "eh_process"])]
+        units = [_process_unit(view, link) for link in n.links.index if _truthy(n.links.at[link, "eh_process"])]
     return {"products": [_product(view, b) for b in product_buses(n)], "process_units": units}

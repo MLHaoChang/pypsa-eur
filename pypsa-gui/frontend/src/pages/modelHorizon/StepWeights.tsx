@@ -28,7 +28,7 @@ export function StepWeights({
 }: StepWeightsProps) {
   return (
     <section>
-      <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Snapshot weightings</h3>
+      <h3 className="text-h3 font-semibold text-text mb-2.5">Snapshot weightings</h3>
       <p className="text-[11px] text-muted mb-2 leading-relaxed">
         Per-snapshot weight in the LP objective and storage SoC equations.
         Default <code>1</code>. For representative-day workflows set

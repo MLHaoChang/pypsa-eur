@@ -339,7 +339,8 @@ def test_the_manifest_lists_exactly_the_files_written(tmp_path):
     case = m["case"]
     assert m["files"] == [
         f"{case}.{e}" for e in ("raw", "seq", "dyr", "con", "sub", "mon")
-    ] + ["README.md", "manifest.json"]
+    ] + [f"{case}.conmap.csv", "README.md", "manifest.json"]
+    assert m["contingencies"]["label_map"] == f"{case}.conmap.csv"
     assert sorted(p.name for p in out.iterdir()) == sorted(m["files"])
 
 
@@ -405,6 +406,15 @@ def test_the_readme_states_the_transformer_impedance_convention(tmp_path):
     readme = (out / "README.md").read_text()
     assert "## Transformer impedance\n\n" + PP.TRAFO_NOTE in readme
     assert "Packs written before this fix carry an impedance too high" in PP.TRAFO_NOTE
+
+
+def test_the_readme_and_manifest_state_the_c_bracket(tmp_path):
+    # GC-14: the PSS/E pack discloses the c its psspy Thevenin source carries.
+    _hc, m, out = _write(tmp_path, plant=PLANT)
+    readme = (out / "README.md").read_text()
+    assert "## Thevenin source voltage factor c\n\n" + PP.C_NOTE in readme
+    assert "c_max = 1.1 on the Sk-min corners" in PP.C_NOTE
+    assert any("c_max on Sk-min, c_min on Sk-max" in a for a in m["battery_assumed"])
 
 
 # --------------------------------------------------------------------------
@@ -478,3 +488,26 @@ def test_without_a_plant_the_readme_says_no_plant_controller(tmp_path):
     assert (
         "plant controller (REPCA1) not written" not in (out / "README.md").read_text()
     )
+
+
+def test_the_readme_says_the_map_turns_a_label_back_into_its_id(tmp_path):
+    _hc, m, out = _write(tmp_path)
+    readme = (out / "README.md").read_text()
+    assert (
+        f"`{m['case']}.conmap.csv` turns each label back into its contingency id"
+        in readme
+    )
+
+
+def test_an_all_compound_set_declares_no_map(tmp_path):
+    from gridspine.static.contingency_set import (
+        branch_contingencies,
+        n_1_1_contingencies,
+    )
+
+    hc, case, lines, grid = _hour_campus(tmp_path)
+    cs = n_1_1_contingencies(branch_contingencies(hc.net))
+    m = PP.write_psse_pack(tmp_path / "pack", hc, case, lines, grid, contingency_set=cs)
+    assert m["contingencies"]["label_map"] is None
+    assert f"{case}.conmap.csv" not in m["files"]
+    assert sorted(p.name for p in (tmp_path / "pack").iterdir()) == sorted(m["files"])

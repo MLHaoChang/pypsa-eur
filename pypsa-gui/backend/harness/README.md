@@ -265,6 +265,15 @@ key: an unknown, deleted or foreign one is the route's `not_found`.
   the `scene_apply_outcome_unknown` error kind, never a receipt.
 - **Cancel** reaches only the caller's own preview and carries no card
   (`GUIDED_UNCARDED`).
+- **Results** (`site_scene_results`, `chat_results.py`, S6a) runs the scene
+  results route's own `parse_query`, `gate` and `project` in the route's lock
+  order: the store lock for the scene read, released, then the network lock.
+  The gate alone decides whether a number is shown, so out-of-date results
+  carry only the gate's reason. Buildings and groups are named in
+  `feature_words`, never by scene id or model uid. `building` narrows to one,
+  matched exactly, and an ambiguous or unknown word is `invalid_input`. Whole
+  items are cut to `MAX_ITEMS` and the answer to `MAX_READ_BYTES`, with every
+  cut named in `truncated`.
 - **Per-turn block.** The browser's `ui_context.site_scene` hint only names the
   Site. The `[site 3d]` lines in the per-turn block (`compose._format_ui_context`,
   D11's frozen block) come from a server re-read.
@@ -584,7 +593,16 @@ Stores and always discloses how many it excluded. `branch-loading/1` and
 `network-loading/1` (`branch_calculations.py`, also opt-in) check one Line or
 Transformer, or the whole network, against `loadflow_summary`'s LOPF definition:
 P-only flow max(|p0|, |p1|) over rating·s_max_pu(t), overload above 1 + 1e-6. They
-refuse whenever AC power-flow results exist. `lost-load/1` (`lost_load_calculations.py`,
+refuse whenever AC power-flow results exist. `ac-branch-loading/1`
+(`ac_branch_calculations.py`, opt-in, AA-13) reads one Line or Transformer from the AC
+flow's own results with the tab's `ac_pf` readers (apparent power; a branch with no q
+recorded answers its rating only, its flow metrics `reactive_flow_unavailable`) over the
+window's converged snapshots only. Any snapshot not
+converged or unknown adds a **required warning slot** (`ac_pf_convergence`, disposition
+`warning`), stored as the evidence's hidden `required_warnings` and put first in the
+receipt's `result_slots` under policy "5" (policy "1" plus warnings, nothing else), so
+`request_complete` stays false; warnings count toward the twenty slots and a request
+that would overflow them is refused (`calculations.required_warnings`). `lost-load/1` (`lost_load_calculations.py`,
 opt-in) rebuilds one Load's or the network's unserved energy, peak, weighted shed
 hours and VoLL cost from the solve's own VoLL-slack capture, which every solve
 claim wipes and rewrites beside the input fingerprints. Monte Carlo LOLE (and
@@ -640,6 +658,13 @@ unit, or the reason when not answered) and its `warnings`, the receipt's limitat
 (`calculations.slot_warnings`), both read from the sealed record only. A chart stored without both keys
 verifies as before. Evidence from another project is refused (`other_project`) before anything is drawn
 or written. Table exports, reports and download headers carry no checked fact (AA05-A46-SCOPE-1).
+A profile's definition hash (`calculations.definition_hash`, AA-10 S7) covers each metric's label,
+unit and formula_id in order and `RENDERER_VERSION`, not formula code: a formula change bumps its
+formula_id. New scoped evidence stores it as a hidden identity key (`records.IDENTITY_KEYS`, so the
+public evidence shape is unchanged), the answer record and a checked chart's manifest store it, and
+a chart reports the hash it was drawn under (`not recorded` before S7). `GET /answers/{id}` and its
+export add `definition_changed` (`records.definition_changed`), compared and never recomputed into
+the record; absent when the answer recorded no hash.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,
@@ -1049,6 +1074,18 @@ Units and mappings are not guessed. `import_uploaded_network` reads native
 network files by upload ID and invokes the existing NC/CSV/Excel/MATPOWER
 importers through normal destructive confirmation and project rebinding.
 Native binary files are tool-accessible attachments, represented as metadata.
+
+The Excel input workbook (excel-input-workbook issue 06, IMPORT-FLOW-1,
+`services/workbook_chat.py`): `get_input_workbook` offers the blank template or
+a readable project's workbook as last saved as a browser download (no bytes in
+context, nothing written; the panel's `WorkbookDownloadCard` fetches it).
+`preview_input_workbook(file_id)` runs `POST /api/workbook/preview` on a chat
+upload and writes nothing. `import_input_workbook(file_id, expected_sha256,
+name?)` is destructive-tier, so it is carded in Expert and Guided; its
+confirmation carries `workbook_card` (`harness/workbook_card.py`), the preview
+of the same bytes, and a hash that is not the preview's refuses
+(`import_file_changed`) before any card. The import route creates a NEW project
+only (a taken name refuses), re-checks the hash, and leaves it closed.
 
 `preview_project_changes` validates typed engineering inputs on an isolated
 copy and stores an owner/project-bound preview. `apply_project_changes`
@@ -1597,7 +1634,7 @@ solve stage uses.
   readiness step's frozen id, and gives no evidence on every row once the
   digest moved. A block row passing on assumed inputs is `not_evaluated`. A
   warn row reading `unknown` is "not evaluated". `ride_through:` and
-  `dynamic:` never pass. `run_profiles.DC_SCORECARD` lists each row or
+  `dynamic:` and `ssci` never pass. `run_profiles.DC_SCORECARD` lists each row or
   family with its severity, basis and the run that produces its input;
   `lole` is listed as not gated.
 - **Facts.** `dc.gridcode.published` (stage 2 waits on "publish the
@@ -1657,7 +1694,7 @@ kind refuses (GK B (46) M2). The data-centre record is unchanged (M1).
     fails the frequency judge in, each (period, hour) once and named, not
     weighted, with that basis in the gate record (M11, C5); no evidence once
     the island sidecar is newer than the judgement (B6).
-  - `mg.tie.open`: `open`, `closed` or `no_tie` on the live network (M12).
+  - `mg.tie.open`: `open`, `closed` or `no_tie` on the live network (M12). A `no_tie` row names, as detail, each untagged internal link read as the island's own feeder (SH 54). An `open`, `closed` or `no_tie` row also carries, as detail after any carrying ties and that warning, the `idle_warning` naming each supply the island sidecar does not list that sits on an island bus and is never available (`p_max_pu` 0 in every hour), left out of the mainland check (SH 56); it is present only when there is such a supply.
   - `mg.critical.tagged`: `tagged`, `none` or `mismatch` (M12).
   - `mg.fuel.autonomy`: always no evidence: the gensets draw no modelled
     fuel (GK A Q5).
@@ -1760,6 +1797,51 @@ C1-C7). The scope is the template's; there is no EH study and no LOLE loop.
   report, g2p 13); a run whose `grid_risk` section is not established lists
   it as a gap.
 
+### The concentrator profile (study harness 16)
+
+`eh_concentrator_staged@1` (`run_profiles._eh_concentrator_staged`; GK A (28)
+GO, Q1-Q8). The readers are `services/run_gates_concentrator.py`, registered
+in `run_gates.FACTS` through `_concentrator(name)` (imported when read). No EH
+study and no LOLE loop; the solve stage is the queued solve only. The
+investment case stays out of the run (Q8): a run's case refuses its baseline
+re-solve (`baseline_solve`), so the case rules read a case the user ran on
+this network.
+
+- **Result gate.** The core rules, `kpi.unserved_mwh` (electrical load only:
+  concentrate short of the shipments is lost production, never served), and:
+  - `process.mass_balance` (block, ≤ 1e-6): per tonne bus and period,
+    Σ w·|Σ flows| over every component on the bus (one-ports by `sign`, Links
+    at every port by −p_i) over the period's tonnes fed in from outside the
+    site (supply Generators on tonne buses; a `shortfall` role and any LP
+    slack, `slack_generator_mask`, are not a supply). Nothing fed in is no evidence. The LP enforces nodal balance, so
+    this catches corrupt results, not a design flaw;
+  - `process.motor_start` (warn, `eq pass`): the scorecard's own rows
+    (`grid_readiness._motor_start_rows`) on the live network and the project's
+    campus grid code (settings or a grid code it cannot read are no evidence,
+    `grid_code_unreadable`, never the default); a FAIL names the unit, its ΔU and the limit; an unknown
+    row with no fail is no evidence;
+  - `process.restart` (warn, `eq 0`): the units that fail to restart after a
+    grid trip (`gridspine` restart sequence on the units the dip classes trip,
+    each start on the motor-start rows' PoC source);
+  - `process.n_1.site_transformer` (warn, `empty`): the site transformers
+    whose outage stops a process unit (`process_loss.units_cut_off`); the
+    shipped template has none, so it is not evaluated and listed missing;
+  - `ic.counterfactual` and `ic.counterfactual.basis` (warn): established,
+    and against `site_today`, from a stored case current for this run's solve
+    and inputs (`ic_counterfactual.read`); with none they are not evaluated
+    with their reason, never a pass;
+  - KPIs as warn rules that pass when read: `process.lost_production` (the
+    grid-risk `connection` line, t/yr and EUR/yr per period),
+    `process.shed_level` (least, peak, last per period) and `ic.returns` (not
+    evaluated, no number, without that case). NPV by stage is listed missing.
+- **Levers.** `pv_new_*`, `bess_new_*` and `coarse_ore_stockpile_new_*` caps,
+  each up to twice the template's. The process units, the mine, the
+  shipments, the services load, the grid import, the shed and the slack are
+  never levers.
+- **Solves.** The plan is the envelope's solve (`CONC_SOLVES = 1`). The case
+  in the run, with its baseline re-solve counted, is study-harness issue 52;
+  `missing_tools` names it (`CONC_CASE_OUTSIDE`).
+
 ### The IPP hybrid profile (study harness 14)
 
 `eh_ipp_hybrid@1` (`run_profiles._eh_ipp_hybrid`; GK B (52) GO, I1-I10). A
@@ -1769,8 +1851,8 @@ the preset turns off (grid, control, reliability), with its reason, read from
 `flow_scope.preset_for`.
 
 - **Solve stage.** The queued solve, then `run_investment_case` (a
-  `BOUND_CONTEXT_TOOLS` member with `solve_ppa_price`, which joins for the next
-  slice). The case runs in a worker thread, so the step waits on its own job and
+  `BOUND_CONTEXT_TOOLS` member with `solve_ppa_price`; no profile lists the
+  latter, see the PPA price below). The case runs in a worker thread, so the step waits on its own job and
   `harness/run_ic.py` settles it from the case's record, the one whose
   `started_at` the start receipt names (the shape of `run_eh`; nothing
   polls, LC-45). A refused, failed or aborted case fails the step; a replaced
@@ -1804,6 +1886,23 @@ the preset turns off (grid, control, reliability), with its reason, read from
   reaches (`missing_tools`).
 - **Explore.** Skipped, with its reason, until the shipped `cases.json` run as
   explore cases (the next slice).
+- **The PPA price (`eh_ipp_hybrid@3`, GK B (61) S-C).** @3 is @2 plus the
+  native `ppa_price` step (`run_actions.REGISTRY`, reads only, 0 solves) after
+  `run_investment_case`, and a record KPI. `harness/run_ppa.py` freezes the
+  target from `finance.solve_ppa` at solve-stage entry (none set: not
+  evaluated, never a default) and shows it on the step's card in words. The
+  step reads the price the case solved from the report the run's own case
+  step stored (its `started_at`, re-read after the report reads). Only status
+  `ok` with no `solve_ppa_*` flag and a positive price counts. It writes
+  `run.ppa_price`, bound to the run, the case, its assumptions hash, the
+  network revision and fingerprint, the target and the price. A model turn
+  never solves it: the stage allowlists do not offer `solve_ppa_price`, and
+  `run_envelope.PPA_TOOLS` refuses it as defence in depth.
+- **Record KPIs.** A profile KPI with `record` (not `section`) is read by
+  `run_handoff.read_kpis` from the run's record only (`run_ppa.read`), never
+  from retained results. A malformed record is not evaluated and a broken
+  binding stale. `kpis_read` takes a not-evaluated record the run's own step
+  judged, with the same reason as its row, as read back.
 
 ### The grid-only profile (study harness 15)
 

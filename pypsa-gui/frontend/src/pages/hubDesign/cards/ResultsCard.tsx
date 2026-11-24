@@ -7,7 +7,7 @@ import { FileText } from 'lucide-react'
 import Kpi from '../../../components/Kpi'
 import ResultState from '../../../components/ResultState'
 import { useUIStore } from '../../../store/uiStore'
-import { fmeaTopRows, LEVERS_SECTION, notEstablishedNotes } from '../../results/EhReferenceDesignPanel'
+import { certificationPayload, fmeaTopRows, LEVERS_SECTION, notEstablishedNotes } from '../../results/EhReferenceDesignPanel'
 import { zeroReasonText } from '../../results/fmea'
 import { fmtCurrency } from '../../results/shared'
 import { studyHasResults } from '../flow'
@@ -15,12 +15,12 @@ import { headline, riskName } from '../headline'
 import { useHubDesignStore } from '../hubDesignStore'
 import { CardShell } from '../shared/CardShell'
 import { Term, TERM_FALLBACK } from '../shared/Term'
-import { useDispatchSolved, useHubLevers, useHubReport, useHubReview, useHubStudy } from '../useHubData'
+import { useDispatchSolved, useHubLevers, useHubReport, useHubReview, useHubStudy, useHubTemplate } from '../useHubData'
 import { cheaperDuration, leversFinding } from '../cheaperDuration'
 import { showResultsTab } from '../../../layout/flowNavigation'
 import { FROM_STUDY_HINT } from '../chapters'
 import { SECTION_LABEL } from '../sectionLabels'
-import { costTileLabel, kpiMoney } from '../plainWords'
+import { costTileLabel, kpiMoney, plainReason } from '../plainWords'
 import { SizedDesignTable } from '../../results/SizedDesignTable'
 import { useQuery } from '@tanstack/react-query'
 import { uncheckedKindsSentence, useUncheckedRunKinds } from '../../../hooks/useStaleRunKinds'
@@ -28,8 +28,13 @@ import { networkApi } from '../../../api/network'
 import { nk } from '../../../utils/queryKeys'
 import { ChaptersSection } from '../ChaptersSection'
 import DownloadReport from '../DownloadReport'
+import SourceRunLine from '../../../components/SourceRunLine'
+import { useDispatchRun } from '../../../hooks/useDispatchRun'
+import { money } from '../../../utils/money'
 import GridExtensionCard from '../../results/GridExtensionCard'
+import { hasNoVerdict, NoVerdictNote } from '../noVerdict'
 import { HEADLINED, ResultsHeadline } from './ResultsHeadline'
+import { WhyThisNumber } from './WhyThisNumber'
 
 
 // It names the figures it covers: the investment case's NPV and LCOE above carry their own state (UX 23).
@@ -85,7 +90,11 @@ export function ResultsCard() {
   const { study, running } = useHubStudy()
   const { review } = useHubReview(studyHasResults(study))
   const report = useHubReport(study, running)
+  const { template } = useHubTemplate()
   const solved = useDispatchSolved()
+  // The dispatch solve, for the source-run line (control-strategy 06, improvement 2).
+  const run = useDispatchRun()
+  const requestRunSolve = useUIStore(s => s.requestRunSolve)
   // A unit whose loss causes no shortfall is not a risk (UX S6, G3): it is
   // named once under the list, never ranked in it.
   const rows = report ? fmeaTopRows(report) : []
@@ -120,7 +129,10 @@ export function ResultsCard() {
     target: summary.target_lole_h ?? null,
     horizonYears: horizonYearsOf(report),
     stale,
+    noVerdict: hasNoVerdict(template?.id),
     verdict: verdict === 'pass' || verdict === 'fail' || verdict === 'inconclusive' ? verdict : null,
+    feederBound: summary.feeder_bound != null,
+    belowFloor: (report ? certificationPayload(report) : null)?.below_floor === true,
   } as const
 
   if (!studyHasResults(study)) {
@@ -129,10 +141,21 @@ export function ResultsCard() {
       <CardShell step="results" next="improve" testId="hub-card-results" title="Results">
         {running ? (
           <ResultState state="running" reason="The study is running; its verdict, cost and risks appear here when it finishes." />
+        ) : run?.solved && run.objective != null ? (
+          // An Expert solve with no study is never "Not run yet" (control-strategy 06): its cost, from the
+          // dispatch solve, out of date when the backend says so, and the study offered by name.
+          <div className="flex flex-col gap-1.5" data-testid="hub-results-dispatch">
+            <Kpi testId="hub-results-dispatch-cost" headline label="Total system cost"
+              value={`${run.objective < 0 ? '−' : ''}${money(run.objective, 'EUR')}`}
+              state={run.current ? 'ready' : 'stale'} basis="the dispatch solve's objective" />
+            <SourceRunLine testId="hub-results-source" source="dispatch" at={run.at} outOfDate={!run.current}
+              missing={{ run: 'study', action: { label: 'Go to Goal and run the study', onClick: () => setStep('goal', { user: true }) } }} />
+          </div>
         ) : (
           <ResultState state="not_run" reason="The study writes its verdict, cost and risks here."
             action={{ label: 'Go to Goal and run the study', onClick: () => setStep('goal', { user: true }) }} />
         )}
+        <NoVerdictNote templateId={template?.id} testId="hub-results-no-verdict" />
         <GridExtensionCard />
         {/* No headline yet, so every tile keeps its figure. */}
         <ChaptersSection reliability={reliability} />
@@ -173,9 +196,13 @@ export function ResultsCard() {
           <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
             <Term k="verdict">Verdict</Term>
           </span>
-          <p data-testid="hub-results-verdict" className="text-[14px] font-semibold text-text">
-            {headline(review, report)}
-          </p>
+          {!hasNoVerdict(template?.id) && (<>
+            <p data-testid="hub-results-verdict" className="text-[14px] font-semibold text-text">
+              {headline(review, report)}
+            </p>
+            <WhyThisNumber figure="verdict" />
+          </>)}
+          <NoVerdictNote templateId={template?.id} testId="hub-results-no-verdict" />
           {cheaper && (
             <p data-testid="hub-results-cheaper-duration" className="text-[12px] text-text">
               {cheaper}{' '}
@@ -186,7 +213,7 @@ export function ResultsCard() {
             </p>
           )}
           {/* P26 gate: with no goal the headline asks for one — take the user there. */}
-          {review.status === 'ok' && review.summary?.target_lole_h == null && (
+          {review.status === 'ok' && review.summary?.target_lole_h == null && !hasNoVerdict(template?.id) && (
             <button type="button" data-testid="hub-results-set-goal"
               onClick={() => setStep('goal', { user: true })}
               className="self-start mt-1 inline-flex items-center gap-1 rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white">
@@ -200,10 +227,15 @@ export function ResultsCard() {
         </p>
       )}
 
+      {/* Which run the verdict and figures come from; the dispatch solve offered when it has not run. */}
+      <SourceRunLine testId="hub-results-source" source="study" at={study?.finished_at ?? null}
+        outOfDate={stale || study?.edited_since_study === true}
+        missing={run && !run.solved ? { run: 'dispatch', action: { label: 'Run the solve', onClick: requestRunSolve } } : undefined} />
+
       {/* An edit since the study makes the study's figures out of date too: the edited banner is their
           mark, and the headline's mixed-source line and chart then say so (review P1, GK B G1). */}
       <ResultsHeadline reliability={{ ...reliability, stale: stale || study?.edited_since_study === true }}
-        freshnessUnknown={freshnessUnknown} ci={loleCi(report)} cost={cost != null && (
+        freshnessUnknown={freshnessUnknown} ci={loleCi(report)} costEur={cost ?? null} cost={cost != null && (
         // The cost of the planned design at the pack's energy target, without
         // shortfall costs — never "the cost of your goal" (P24-FE gate B1).
         // The shared KPI tile (UX S6, G-item 2), the glossary text on hover.
@@ -253,7 +285,7 @@ export function ResultsCard() {
             {gaps.map(g => (
               <li key={g.name}>
                 <span className="text-text">{SECTION_LABEL[g.name] ?? 'Another part of the study'}</span>
-                <span className="text-muted">: {g.note}</span>
+                <span className="text-muted">: {plainReason(g.note)}</span>
               </li>
             ))}
           </ul>

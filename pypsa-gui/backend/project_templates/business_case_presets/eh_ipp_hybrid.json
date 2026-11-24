@@ -16,14 +16,14 @@
           "unit": "kW_year",
           "quantity_source": "linked:capacity.StorageUnit.bess@1",
           "escalation": "contract",
-          "note": "Battery capacity in service, in kW a year. Price per nameplate kW a year: the market's clearing price times the de-rating factor you expect, typed in the price. linked_share is only the contracted (sold) share of the capacity, never the de-rating. The PPAs, merchant export and CfD are the energy model's locked rows, never lines here.",
+          "note": "Battery capacity in service, in kW a year, times the de-rating you type (the share of its power the market pays for, 0 to 1; empty until you set it). Price per de-rated kW a year: the market's clearing price. linked_share is only the contracted (sold) share of the capacity, never the de-rating. The PPAs, merchant export and CfD are the energy model's locked rows, never lines here.",
           "hint": {
             "low": 20.0,
             "high": 60.0,
             "unit": "GBP/kW_year",
             "source": "Ofgem, annual report on capacity market operations 2024/25: GB clearing prices per de-rated kW-year, in GBP (T-1 2025/26 and T-4 2028/29)",
             "year": 2025,
-            "note": "GBP, not converted. Per de-rated kW: multiply by the de-rating factor to get the price per nameplate kW."
+            "note": "GBP, not converted. Per de-rated kW, as the price here is: the de-rating has its own field."
           }
         },
         {
@@ -66,7 +66,13 @@
           "category": "equipment",
           "unit": "lump",
           "escalation": "capex",
-          "note": "Plant capex not in the energy model's asset capex (grid connection, balance of plant, installation): the base of the insurance share. Capex is priced once: do not re-enter the generators or the battery. No sourced default: enter the price and life."
+          "note": "Plant capex not in the energy model's asset capex (grid connection, balance of plant, installation): the base of the insurance share. Capex is priced once: do not re-enter the generators or the battery. No sourced default for the price: enter it. Life: the onshore-wind lifetime of the pinned pack, assumed for the balance of plant; change it to your plant.",
+          "default_keys": {
+            "life_years": "onwind.investment.lifetime"
+          },
+          "default_units": {
+            "life_years": "years"
+          }
         },
         {
           "name": "Insurance",

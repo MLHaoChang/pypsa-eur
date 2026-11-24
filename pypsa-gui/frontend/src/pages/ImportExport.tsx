@@ -2,6 +2,7 @@ import { useCallback, useState, useRef } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Upload, Download, RotateCcw, FileText, Archive, Table2, Cpu } from 'lucide-react'
 import { ioApi } from '../api/io'
+import { formatApiDetail } from '../api/client'
 import { networkApi } from '../api/network'
 import { projectsApi } from '../api/projects'
 import type { ImportSummary } from '../api/types'
@@ -89,6 +90,11 @@ function ExportCard({ format }: { format: typeof EXPORT_FORMATS[number] }) {
   )
 }
 
+/** The input workbook the open-network import refused: it goes to the workbook dialog. */
+class WorkbookRedirect extends Error {
+  constructor(readonly file: File) { super('import_as_new_project') }
+}
+
 export function ImportZone({ onSuccess }: { onSuccess: (summary: ImportSummary, fileName?: string) => void }) {
   const [dragging, setDragging] = useState(false)
   const [pendingImport, setPendingImport] = useState<{ file: File; message: string } | null>(null)
@@ -113,7 +119,18 @@ export function ImportZone({ onSuccess }: { onSuccess: (summary: ImportSummary, 
       }
       const ext = lower.split('.').pop() ?? ''
       if (ext === 'nc') return ioApi.importNetcdf(file)
-      if (ext === 'xlsx') return ioApi.importExcel(file)
+      if (ext === 'xlsx') {
+        try {
+          return await ioApi.importExcel(file)
+        } catch (e) {
+          const res = (e as { response?: { status?: number; data?: { detail?: unknown } } }).response
+          const detail = res?.data?.detail as { error_kind?: string } | undefined
+          // An Excel input workbook is imported as a new project, after a preview
+          // (IMPORT-FLOW-1). The backend changed nothing: hand the same file over.
+          if (res?.status === 422 && detail?.error_kind === 'import_as_new_project') throw new WorkbookRedirect(file)
+          throw new Error(formatApiDetail(res?.data?.detail ?? (e as Error).message))
+        }
+      }
       if (ext === 'zip') return ioApi.importCsv(file)
       if (ext === 'm') return ioApi.importMatpower(file)
       return Promise.reject(new Error(`Unknown file type: .${ext}`))
@@ -141,9 +158,21 @@ export function ImportZone({ onSuccess }: { onSuccess: (summary: ImportSummary, 
         // intentionally, not silently.
         setCurrentProject(null)
       }
+      if (!name) {
+        // A raw network import: the network has no project yet. Name it after its file, so the
+        // sidebar offers "Save as project" and the exports carry that name, not "Unnamed Network".
+        const stem = pendingFileRef.current.replace(/\.[^.]+$/, '').trim()
+        if (stem) {
+          setProjectName(stem)
+          useUIStore.getState().setUnsavedNetwork(stem)
+        }
+      }
       onSuccess(s, pendingFileRef.current)
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => {
+      if (e instanceof WorkbookRedirect) useUIStore.getState().requestWorkbookImport(e.file)
+      else toast.error(e.message)
+    },
     // M2: the DIALOG closes here, on settle — not in onConfirm. Clearing
     // `pendingImport` synchronously in onConfirm unmounted the dialog on the
     // same tick, so `pending={importMut.isPending}` had nothing left to render

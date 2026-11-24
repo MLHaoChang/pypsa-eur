@@ -16,14 +16,16 @@
  * full:  the scheduled journey: adds the goal decision and its hand-off into a
  *        second run, and the Expert switch (ten section blocks, goal still saved
  *        in Guided afterwards). The gap predicates also edit in Guided and read
- *        back in Expert (gap 02). Not done: Keep-all-defaults, an edit made in
- *        Expert and read in Guided, the report's content. The staged concentrator
+ *        back in Expert (gap 02). An edit made in Expert (Solver settings goal) is read back in
+ *        Guided. Every mode exports the results workbook (.xlsx) after the .docx. Not done: Keep-all-defaults, the
+ *        report's content. The staged concentrator
  *        (slow) only starts, shows progress and aborts in short mode: it has no
  *        results, report or Improve step there.
  * No model, no paid inference (chat is out of scope, KEY-LATER-1).
  */
 import path from 'node:path'
 import fs from 'node:fs/promises'
+import JSZip from 'jszip'
 import * as L from './template-journeys-lib.mjs'
 
 const { assert } = L
@@ -72,6 +74,9 @@ const results = []
 
 const panelText = async ctx => (await ctx.page.getByTestId('hub-design-panel').innerText()).replace(/\n+/g, ' | ')
 
+// template-e2e 11: the H2 hub, ammonia and IPP templates have no verdict; the same place says so.
+const verdictOf = page => page.getByTestId('hub-results-verdict').or(page.getByTestId('hub-results-no-verdict'))
+
 async function runStudy(ctx, label) {
   await L.step(ctx, `${label}: run the study from section 9`, async () => {
     await L.goSection(ctx, 'Readiness and run')
@@ -79,7 +84,7 @@ async function runStudy(ctx, label) {
   })
   const started = Date.now()
   await L.step(ctx, `${label}: wait for the verdict`, async () => {
-    await ctx.page.getByTestId('hub-results-verdict').waitFor({ timeout: RUN_TIMEOUT_MS })
+    await verdictOf(ctx.page).waitFor({ timeout: RUN_TIMEOUT_MS })
   })
   return Math.round((Date.now() - started) / 1000)
 }
@@ -225,6 +230,7 @@ async function journey(t) {
         assert.match(await page.getByTestId('hub-run-solve-why').innerText(), /no reliability study/i)
         assert.equal(await page.getByTestId('hub-run-start').count(), 0, 'the study Run is offered')
       })
+      L.skip(ctx, 'workbook export, Expert-edit parity', 'no results: a generation-only site has no study to run')
       assert.equal(ctx.problems.length, 0, `page errors: ${ctx.problems.slice(0, 2).join(' | ')}`)
       return ctx
     }
@@ -248,24 +254,25 @@ async function journey(t) {
         await page.getByRole('button', { name: 'Abort' }).click()
         await page.getByRole('button', { name: /^(Run study|Run again)/ }).first().waitFor({ timeout: 120000 })
       })
+      L.skip(ctx, 'workbook export, Expert-edit parity', 'aborted run: the staged concentrator only starts and aborts in short mode')
       assert.equal(ctx.problems.length, 0, `page errors: ${ctx.problems.slice(0, 2).join(' | ')}`)
       return ctx
     }
     const seconds = await runStudy(ctx, 'first run')
     ctx.runSeconds = seconds
     await L.step(ctx, 'results: verdict with hours per year, a cost in euro and a biggest risk with its cost', async () => {
-      const verdict = await page.getByTestId('hub-results-verdict').innerText()
+      const verdict = await verdictOf(page).innerText()
       // The H2 hub template has no goal yet (gap 06): its verdict then says so instead of giving hours per year.
-      assert.match(verdict, /\d+(\.\d+)? h\/yr|No reliability goal is set/, `verdict is neither a goal result nor the no-goal notice: ${verdict.slice(0, 80)}`)
+      assert.match(verdict, /\d+(\.\d+)? h\/yr|No reliability goal is set|No reliability verdict for this site type/, `verdict is neither a goal result nor the no-goal notice: ${verdict.slice(0, 80)}`)
       const text = await panelText(ctx)
       assert.match(text, /(Yearly cost|Cost over the plan)[\s\S]{0,120}€\s*\d/, 'no cost in euro')
       assert.match(text, /Biggest risks[^|]*\|[^|]*about €\s*\d/, 'no biggest risk with a cost')
       if (mode === 'short') assert.ok(seconds <= SHORT_BUDGET_S, `study took ${seconds}s, over the ${SHORT_BUDGET_S}s short budget`)
     })
     await L.step(ctx, 'section 10 (Results & reports) shows the same verdict the run page handed over', async () => {
-      const verdict = await page.getByTestId('hub-results-verdict').innerText()
+      const verdict = await verdictOf(page).innerText()
       await L.goSection(ctx, 'Results & reports')
-      assert.equal(await page.getByTestId('hub-results-verdict').innerText(), verdict)
+      assert.equal(await verdictOf(page).innerText(), verdict)
     })
     await L.gap(ctx, '08', 'Results show "Assumptions behind this result" listing each defaulted input as Assumed', async () => {
       assert.match(await panelText(ctx), /Assumptions behind this result[\s\S]*Assumed/)
@@ -277,6 +284,54 @@ async function journey(t) {
       ])
       assert.match(download.suggestedFilename(), /\.docx$/)
     })
+    // Gap 30: a Guided study leaves Expert's Results empty, so the workbook has nothing to export. The chooser
+    // lives in the Expert sidebar: go there for the export, then back to Guided for the hand-off below.
+    const workbookStarted = Date.now()
+    await L.chooseMode(ctx, 'Expert')
+    await L.gap(ctx, '30', 'Export > Results workbook (Excel) after a Guided study delivers an .xlsx with content', async () => {
+      const item = page.getByRole('button', { name: 'Export…', exact: true }).first()
+      if (!(await item.isVisible())) await page.getByTestId('sidebar-project-menu').click()
+      await item.click()
+      await page.getByText('Results workbook (Excel)', { exact: true }).click()
+      // The listing probes every result view first; it ends on the run note or, with no solve, on the empty tabs.
+      await page.locator('[data-testid="workbook-run"], :text("No results for this view in this solve")').first().waitFor({ timeout: 60000 })
+      assert.ok(await page.getByTestId('workbook-run').count(), 'the chooser holds no run: nothing to export')
+      const [download] = await Promise.all([
+        page.waitForEvent('download', { timeout: 20000 }),
+        page.getByRole('button', { name: 'Download File', exact: true }).click(),
+      ])
+      assert.match(download.suggestedFilename(), /\.xlsx$/)
+      const file = path.join(out, `${t.id}-${mode}-workbook.xlsx`)
+      await download.saveAs(file)
+      const bytes = await fs.readFile(file)
+      assert.ok(bytes.length > 1000, `workbook is only ${bytes.length} bytes`)
+      // Open the file: a zip that is not a workbook (a .docx, an error page) fails. The sheets the export promises
+      // are "About" and "Overview" first (pypsa-gui/backend/services/results_workbook/__init__.py, test_results_workbook_scenarios.py).
+      const zip = await JSZip.loadAsync(bytes)
+      assert.ok(zip.file('xl/workbook.xml'), 'workbook has no xl/workbook.xml')
+      const sheets = [...(await zip.file('xl/workbook.xml').async('string')).matchAll(/<sheet [^>]*name="([^"]+)"/g)].map(m => m[1])
+      assert.deepEqual(sheets.slice(0, 2), ['About', 'Overview'], `first sheets are ${sheets.slice(0, 2)}`)
+    })
+    // Excel input workbook (S3): the same chooser gives the project as last saved, with its About sheet.
+    const inputStarted = Date.now()
+    await L.step(ctx, 'export: Input workbook (Excel) delivers the saved project as an .xlsx with an About sheet', async () => {
+      await page.getByText('Input workbook (Excel)', { exact: true }).click()
+      await page.getByTestId('input-workbook-note').waitFor()
+      const [download] = await Promise.all([
+        page.waitForEvent('download', { timeout: 60000 }),
+        page.getByRole('button', { name: 'Download File', exact: true }).click(),
+      ])
+      assert.match(download.suggestedFilename(), /\.xlsx$/)
+      const file = path.join(out, `${t.id}-${mode}-input-workbook.xlsx`)
+      await download.saveAs(file)
+      const zip = await JSZip.loadAsync(await fs.readFile(file))
+      const sheets = [...(await zip.file('xl/workbook.xml').async('string')).matchAll(/<sheet [^>]*name="([^"]+)"/g)].map(m => m[1])
+      assert.ok(sheets.includes('About') && sheets.includes('Nodes'), `input workbook sheets are ${sheets}`)
+    })
+    ctx.added.inputWorkbookS = Math.round((Date.now() - inputStarted) / 100) / 10  // CI-PACE: seconds this slice adds
+    // Exports is a Results tab now (Hand-off), with no Cancel of its own: switching to Guided leaves it.
+    await L.chooseMode(ctx, 'Guided')
+    ctx.added.workbookS = Math.round((Date.now() - workbookStarted) / 100) / 10  // CI-PACE: seconds this slice adds
     await L.step(ctx, 'hand-off: Improve opens after a result and offers the risk check', async () => {
       await L.ensurePanel(ctx)
       const improve = page.getByTestId('hub-rail-step-improve')
@@ -311,6 +366,35 @@ async function journey(t) {
           await L.chooseMode(ctx, 'Guided')
           await L.goSection(ctx, 'Scenarios & optimisation')
           assert.equal(await page.getByTestId('hub-goal-lole').inputValue(), '2')
+        })
+      }
+      if (!t.goal) L.skip(ctx, 'Expert-edit parity', 'template asks for no reliability goal')
+      if (t.goal) {
+        await L.step(ctx, 'parity: a goal edited in Expert (Solver settings) reads the same in Guided section 8 after a reload', async () => {
+          await L.chooseMode(ctx, 'Guided')  // an open gap 06 leaves the journey in Expert
+          await L.goSection(ctx, 'Scenarios & optimisation')
+          const before = await page.getByTestId('hub-goal-lole').inputValue()
+          assert.notEqual(before, '3', 'the parity value 3 is already the saved goal')
+          await L.chooseMode(ctx, 'Expert')
+          // The sidebar settles after the mode switch: open the panel again if the first click is lost.
+          const network = page.getByRole('button', { name: 'Network', exact: true })
+          for (let attempt = 0; attempt < 3 && !(await network.isVisible()); attempt++) {
+            await page.getByText(/^Solver settings$/i).locator('visible=true').first().click()
+            await network.waitFor({ timeout: 4000 }).catch(() => {})
+          }
+          await network.click()
+          await page.getByTestId('solver-goal-lole').fill('3')
+          await page.getByRole('button', { name: 'Save settings', exact: true }).click()
+          await page.getByText(/saved/i).first().waitFor()
+          // Expert's Save settings changes the open session; Save project writes it to the server.
+          await page.getByRole('button', { name: 'Save project' }).click()
+          await page.getByText(/Saved|saved/).first().waitFor()
+          // A reload: the value must come from the server, not from state the two modes share in the client.
+          await page.reload()
+          await L.chooseMode(ctx, 'Guided')
+          await L.goSection(ctx, 'Scenarios & optimisation')
+          await page.waitForFunction(() => document.querySelector('[data-testid="hub-goal-lole"]')?.value === '3')
+          // The goal stays at 3 afterwards: it is the last step of the journey.
         })
       }
     }

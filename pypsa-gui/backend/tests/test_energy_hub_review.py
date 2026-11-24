@@ -201,6 +201,10 @@ def test_review_then_apply_the_recommended_action_on_the_datacenter(
     sys.path.insert(0, str(BACKEND / "project_templates"))
     import eh_templates as TPL
     install_network(TPL.build_eh_datacenter())
+    # The template's own VOLL: the study start refuses none (template-e2e 06).
+    from services.pypsa_service import PyPSAService
+    PyPSAService.get_solver_state()["solver_config"].voll = \
+        TPL.solver_config("eh_datacenter")["voll"]
     meta = TPL.TEMPLATE_META["eh_datacenter"]
     stages = ["apply_pack", "ens_solve", "mc_certify", "assemble"]
     args = {"archetype": meta["recommended_archetype"], "stages": stages,
@@ -308,6 +312,10 @@ def test_the_study_record_stores_the_whole_request(client, install_network,
     monkeypatch.setattr("services.adequacy.eh_study.run_eh_study", fake_run)
     from tests.test_energy_hub_frontier_fmea import _feeder_hub
     install_network(_feeder_hub())
+    # The study start refuses a missing VOLL (template-e2e 06).
+    cfg = client.get("/api/simulation/solver_config").json()
+    assert client.put("/api/simulation/solver_config",
+                      json={**cfg, "voll": 5000.0}).status_code == 200
     body = {"archetype": "weak_flexible", "mc": {"draws": 300, "seed": 3},
             "dsr_buses": ["hub"],
             "dtc_config": {"critical_bus_ids": ["hub"],
@@ -347,3 +355,310 @@ def test_review_reports_a_knee_from_three_points():
     out = review_report(_frontier_report(3))
     ids = [f.get("id") for f in (out.get("findings") or [])]
     assert "frontier_knee" in ids, ids
+
+
+# ── asset-investment walkthrough 2026-11-17, issue 04 ───────────────────────
+# Island Microgrid: the hospital's only feeder is the one ranked Link, beside
+# three diesels in the class-A ranking. Hand check: 657,000 / (657,000 +
+# 3 × 302,114) = 42 % of all ranked risk, though 100 % of the Link risk.
+def _island_fmea_report(*, critical_feeder: bool = True,
+                        feeder_model: str = "composed"):
+    rep = _report()
+    rep["sections"]["fmea_top"] = {"status": "ok", "payload": {
+        "rows": [{"name": "hospital_feeder",
+                  "criticality_eur_per_year": 657_000.0}],
+        "class_a": {"status": "ok", "rows": [
+            {"name": f"diesel_{i}", "criticality_eur_per_year": 302_114.0}
+            for i in (1, 2, 3)]}}}
+    cert = rep["sections"].setdefault("certification", {
+        "status": "ok", "payload": {}})
+    cert.setdefault("payload", {})["fleet_scope"] = {"critical_feeders": [
+        {"name": "hospital_feeder", "buses": ["hospital"],
+         "model": feeder_model}]
+        if critical_feeder else []}
+    return rep
+
+
+def test_dominant_link_states_its_share_of_all_ranked_risk():
+    dom = _by_id(review_report(_island_fmea_report(), RECORD),
+                 "fmea_dominant_mode")
+    assert dom["title"] == ("hospital_feeder carries 100% of ranked Link risk "
+                            "(42% of all ranked risk)")
+    assert dom["evidence"]["share"] == pytest.approx(1.0)
+    assert dom["evidence"]["share_of_all_ranked"] == pytest.approx(0.42, abs=0.005)
+
+
+def test_a_critical_feeder_gets_a_feeder_remedy_not_generic_spare_capacity():
+    # A spare unit or storage on the island cannot serve the hospital while
+    # its only feeder is out: the remedy is a second feeder or local backup.
+    dom = _by_id(review_report(_island_fmea_report(), RECORD),
+                 "fmea_dominant_mode")
+    rec = dom["recommendation"]
+    assert "second feeder" in rec and "backup supply at hospital," in rec
+    assert dom["evidence"]["feeds_critical_buses"] == ["hospital"]
+    assert "N+1" not in rec
+    assert dom["actions"] == []
+
+
+def test_a_dominant_link_that_feeds_no_critical_bus_keeps_the_redundancy_rerun():
+    dom = _by_id(review_report(_island_fmea_report(critical_feeder=False),
+                               RECORD), "fmea_dominant_mode")
+    assert [a["tool"] for a in dom["actions"]] == ["run_eh_study"]
+
+
+@pytest.mark.parametrize("class_a", [
+    None,                                               # no class-A block
+    {"status": "not_established", "rows": []},          # ranking failed
+    {"status": "ok", "rows": [{"name": "diesel_1",
+                               "criticality_eur_per_year": float("nan")}]},
+])
+def test_share_of_all_ranked_is_none_when_it_cannot_be_stated(class_a):
+    rep = _island_fmea_report()
+    rep["sections"]["fmea_top"]["payload"]["class_a"] = class_a
+    dom = _by_id(review_report(rep, RECORD), "fmea_dominant_mode")
+    assert dom["evidence"]["share_of_all_ranked"] is None
+    assert dom["title"] == "hospital_feeder carries 100% of ranked Link risk"
+
+
+def test_a_feeder_without_outage_data_keeps_the_generic_advice():
+    # F9: the feeder remedy needs a computed pocket, not a missing input.
+    rep = _island_fmea_report(feeder_model="no_outage_data")
+    dom = _by_id(review_report(rep, RECORD), "fmea_dominant_mode")
+    assert [a["tool"] for a in dom["actions"]] == ["run_eh_study"]
+    assert "second feeder" not in dom["recommendation"]
+
+
+def test_a_composed_feeder_that_is_not_the_dominant_link_keeps_the_generic_advice():
+    rep = _island_fmea_report()
+    rep["sections"]["certification"]["payload"]["fleet_scope"][
+        "critical_feeders"][0]["name"] = "other_feeder"
+    dom = _by_id(review_report(rep, RECORD), "fmea_dominant_mode")
+    assert [a["tool"] for a in dom["actions"]] == ["run_eh_study"]
+    assert "second feeder" not in dom["recommendation"]
+
+
+@pytest.mark.parametrize("cert", [None, {"status": "ok", "payload": None}])
+def test_no_certification_payload_keeps_the_generic_advice(cert):
+    # A report stored before the certification ran, or one that has none.
+    rep = _island_fmea_report()
+    rep["sections"]["certification"] = cert
+    dom = _by_id(review_report(rep, RECORD), "fmea_dominant_mode")
+    assert [a["tool"] for a in dom["actions"]] == ["run_eh_study"]
+
+
+def test_a_feeder_row_without_buses_still_reads():
+    rep = _island_fmea_report()
+    rep["sections"]["certification"]["payload"]["fleet_scope"][
+        "critical_feeders"][0]["buses"] = None
+    dom = _by_id(review_report(rep, RECORD), "fmea_dominant_mode")
+    assert "second feeder" in dom["recommendation"]
+    assert dom["evidence"]["feeds_critical_buses"] == []
+
+
+def test_zero_total_risk_has_no_share_of_all_ranked():
+    # Not reachable through review_report (no risk, no dominant mode), so
+    # the helper is pinned directly: 0 / 0 is no share, not a crash.
+    from services.adequacy.eh_review import _share_of_all_ranked
+
+    rows = [{"criticality_eur_per_year": 0.0}]
+    assert _share_of_all_ranked(0.0, rows, {"status": "ok", "rows": rows}) is None
+
+
+def test_class_a_without_rows_counts_the_links_alone():
+    rep = _island_fmea_report()
+    rep["sections"]["fmea_top"]["payload"]["class_a"] = {"status": "ok",
+                                                         "rows": None}
+    dom = _by_id(review_report(rep, RECORD), "fmea_dominant_mode")
+    assert dom["evidence"]["share_of_all_ranked"] == pytest.approx(1.0)
+
+
+# GK A F6': a pass withheld by a pocket's upper bound is not a sampling
+# question — the interval can sit under the goal — so no "more draws".
+_BOUND = {"pockets": [{"buses": ["it_bus"], "feeders": ["site_transformer"],
+                       "bound_h_per_year": 43.8}],
+          "chained": [], "target_h_per_year": 25.0}
+
+
+def test_an_inconclusive_held_by_a_feeder_bound_names_the_feeder_not_draws():
+    cert = {"verdict": "inconclusive", "target_lole_h": 25.0, "draws": 200,
+            "feeder_bound": _BOUND}
+    out = review_report(_report(sections={"certification": {
+        "status": "ok", "payload": cert}}), RECORD)
+    f = _by_id(out, "certification_inconclusive")
+    assert f["actions"] == []
+    assert "it_bus" in f["title"] and "site_transformer" in f["title"]
+    assert "43.8" in f["title"] and "straddles" not in f["title"]
+    assert "second feeder" in f["recommendation"]
+    assert "issue 09" in f["recommendation"]  # GK R6: the two-area treatment
+    assert "Outage data" not in f["recommendation"]
+    assert out["summary"]["feeder_bound"] == _BOUND
+
+
+def test_a_bound_held_by_a_feeder_without_data_asks_for_its_data():
+    # GK R2: the unread rate is taken as certain; its data settles it.
+    fb = {"pockets": [{"buses": ["crit"], "feeders": ["crit_feeder"],
+                       "bound_h_per_year": 8760.0, "no_data": ["crit_feeder"]}],
+          "chained": [], "target_h_per_year": 3.0}
+    cert = {"verdict": "inconclusive", "target_lole_h": 3.0, "draws": 200,
+            "feeder_bound": fb}
+    out = review_report(_report(sections={"certification": {
+        "status": "ok", "payload": cert}}), RECORD)
+    f = _by_id(out, "certification_inconclusive")
+    assert "Outage data for crit_feeder" in f["recommendation"]
+    assert "not known" in f["recommendation"]
+    assert "own units" not in f["recommendation"]
+
+
+def test_a_bounded_dominant_feeder_gets_the_feeder_remedy():
+    rep = _island_fmea_report(feeder_model="unsampled")
+    rep["sections"]["certification"]["payload"]["fleet_scope"][
+        "critical_feeders"][0]["upper_bound"] = True
+    dom = _by_id(review_report(rep, RECORD), "fmea_dominant_mode")
+    assert "second feeder" in dom["recommendation"] and dom["actions"] == []
+
+
+def _bound_review(verdict, fb):
+    cert = {"verdict": verdict, "target_lole_h": 25.0, "draws": 200,
+            "feeder_bound": fb}
+    return review_report(_report(sections={"certification": {
+        "status": "ok", "payload": cert}}), RECORD)
+
+
+def test_a_chained_feeder_alone_cannot_be_bounded():
+    f = _by_id(_bound_review("inconclusive", {"chained": ["mid_feeder"]}),
+               "certification_inconclusive")
+    assert f["title"] == "Certification not decided: mid_feeder cannot be bounded"
+    assert f["actions"] == []
+
+
+def test_a_bound_with_missing_fields_still_reads():
+    f = _by_id(_bound_review("inconclusive", {"pockets": [{}]}),
+               "certification_inconclusive")
+    assert f["title"].startswith("Certification not decided:  could be cut off up to 0")
+
+
+def test_a_feeder_bound_on_a_pass_adds_no_inconclusive_finding():
+    out = _bound_review("pass", _BOUND)
+    assert all(f["id"] != "certification_inconclusive" for f in out["findings"])
+
+
+# template-e2e 21: below the resolution floor, doubling the draws cannot
+# settle it; the finding names the floor and Improve offers the fewest draws
+# that resolve the goal.
+def _floor_cert(**over):
+    return {"verdict": "inconclusive", "target_lole_h": 3.0, "draws": 1,
+            "n_samples": 1, "horizon_years": 1.0, "lole_ci": [0.0, 0.0],
+            "resolution_floor_h": 52.1, "below_floor": True, "min_draws": 18,
+            **over}
+
+
+def test_below_the_floor_offers_the_minimum_draws_not_double():
+    out = review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert()}}), RECORD)
+    f = _by_id(out, "certification_inconclusive")
+    assert f["title"] == ("Certification inconclusive: with 1 draw the "
+                          "smallest shortfall it can show is 52.1 h/yr, more "
+                          "than the 3 h/yr goal")
+    assert "at least 18 draws" in f["recommendation"]
+    assert "straddles" not in f["title"]
+    act = f["actions"][0]
+    assert act["args"]["mc"] == {"draws": 18}
+    assert act["effect"] == "set simulation runs per check to 18 (was 1)"
+    _validate_action(act)
+
+
+def test_below_the_floor_keeps_doubling_when_that_is_more():
+    out = review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(draws=300, n_samples=300,
+                                               min_draws=320)}}), RECORD)
+    act = _by_id(out, "certification_inconclusive")["actions"][0]
+    assert act["args"]["mc"] == {"draws": 600}
+
+
+def test_below_the_floor_clamps_the_offer_at_the_draw_cap():
+    """GK A ask 2: doubling 1500 would pass the cap; the offer is exactly 2000."""
+    out = review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(draws=1500, n_samples=1500,
+                                               min_draws=1600)}}), RECORD)
+    act = _by_id(out, "certification_inconclusive")["actions"][0]
+    assert act["args"]["mc"] == {"draws": 2000}
+    assert act["effect"] == "set simulation runs per check to 2000 (was 1500)"
+
+
+@pytest.mark.parametrize("min_draws", [2001, None])
+def test_below_the_floor_beyond_the_draw_cap_offers_no_rerun(min_draws):
+    out = review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(min_draws=min_draws,
+                                               target_lole_h=0.0 if min_draws is None else 3.0)}}),
+        RECORD)
+    f = _by_id(out, "certification_inconclusive")
+    assert f["actions"] == []
+    assert "more draws do not" in f["recommendation"]
+
+
+def test_the_straddle_finding_is_unchanged_when_not_below_the_floor():
+    """GK A V4: a straddle (below_floor False or absent) keeps its words."""
+    for extra in ({}, {"below_floor": False, "min_draws": None}):
+        cert = {"verdict": "inconclusive", "target_lole_h": 3.0, "draws": 500,
+                **extra}
+        f = _by_id(review_report(_report(sections={"certification": {
+            "status": "ok", "payload": cert}}), RECORD),
+            "certification_inconclusive")
+        assert f["title"] == ("Certification inconclusive: the LOLE interval "
+                              "straddles 3 h/yr")
+        assert f["recommendation"] == (
+            "Not a failure: the sample cannot yet tell pass from fail. More MC "
+            "draws narrow the interval; a slightly tighter plan moves it clear.")
+        assert f["actions"][0]["effect"] == (
+            "re-run the MC with 1000 draws (was 500) to narrow the confidence "
+            "interval")
+
+
+def test_below_the_floor_states_the_floor_per_year_on_a_longer_horizon():
+    # 104.2 h over a 2-year horizon is 52.1 h/yr; no horizon reads as 1 year.
+    for extra, floor in (({"horizon_years": 2.0, "resolution_floor_h": 104.2}, "52.1"),
+                         ({"horizon_years": None}, "52.1")):
+        f = _by_id(review_report(_report(sections={"certification": {
+            "status": "ok", "payload": _floor_cert(**extra)}}), RECORD),
+            "certification_inconclusive")
+        assert f"can show is {floor} h/yr" in f["title"], f["title"]
+
+
+def test_below_floor_flags_only_an_inconclusive_verdict():
+    out = review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(verdict="pass")}}), RECORD)
+    assert all(f["id"] != "certification_inconclusive" for f in out["findings"])
+
+
+def test_a_boolean_min_draws_is_not_a_draw_count():
+    f = _by_id(review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(min_draws=True)}}), RECORD),
+        "certification_inconclusive")
+    assert f["actions"] == []
+
+
+def test_below_the_floor_reads_the_draws_it_ran():
+    # The title counts the samples the MC drew; the action's "was" the draws asked.
+    def finding(**over):
+        return _by_id(review_report(_report(sections={"certification": {
+            "status": "ok", "payload": _floor_cert(**over)}}), RECORD),
+            "certification_inconclusive")
+    assert "with 3 draws the" in finding(n_samples=3)["title"]
+    assert "with 1 draw the" in finding(n_samples=None)["title"]
+    f = finding(draws=None, n_samples=500, min_draws=1200)
+    assert f["actions"][0]["effect"] == "set simulation runs per check to 1200 (was 500)"
+    assert "with 500 draws" in f["title"]
+
+
+def test_below_the_floor_at_the_draw_cap_still_offers_it():
+    act = _by_id(review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(min_draws=2000)}}), RECORD),
+        "certification_inconclusive")["actions"][0]
+    assert act["args"]["mc"] == {"draws": 2000}
+
+
+def test_below_the_floor_without_a_floor_value_does_not_raise():
+    f = _by_id(review_report(_report(sections={"certification": {
+        "status": "ok", "payload": _floor_cert(resolution_floor_h=None)}}), RECORD),
+        "certification_inconclusive")
+    assert f["title"].startswith("Certification inconclusive: with 1 draw")

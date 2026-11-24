@@ -66,3 +66,14 @@ The catalogue is mode-free: `depth: essentials` is the Guided set, everything el
   - C11: inf accepted only on fields whose engine default is inf (listed, tested); NaN refused everywhere.
   - C12: one mutant per write path that skips the validator, each killed by that path's own test; a redundant layer is mutated together with its sibling (#1127 M10).
 - UX (24), OK on #1634 @701e2dea (01a-1): Generator `p_max_pu` keeps "Availability" and `p_min_pu` "Minimum output". For slice 03: a parity test for "Rating" (Line/Transformer `s_nom`) against today's "Capacity"; the `committable` plain name keeps "unit commitment".
+- GK B (65), 2026-11-17 16:20Z, plan GO for DGS-EXTRAS-1 (claude/dgs-extras-fields, after #1634) on these conditions:
+  - X1: the solve reads none of rated_mva, harmonic_*, sk_*, rx_*; a pin test sets each on a Load and a Generator and shows `_network_input_fingerprint` and the IC digest byte-identical (or a field that feeds a calculation is named and folded in under AS-02, appended only when present).
+  - X2: one validator on every write path (POST, PUT, bulk/preview, chat edit tool, experiment copy, Excel input if it writes these classes); bulk and the chat tool refuse a negative sk_max_mva, a bad harmonic_source, NaN and inf like the single edit (#738); floats finite (#1320); bool refused.
+  - X3: Generator/Load in PROCESS_CUSTOM_COLUMNS makes no reader treat a plain generator or load as a process unit; readers listed in the PR body; a test shows a generator with only the new fields is not a process unit.
+  - X4: list every ensure_eh_column caller that can pass Load and what it now writes; test that untouched loads gain no column (save/load byte-identical).
+  - X5: "" and null (and NaN after a netcdf/csv round trip) read as not set everywhere (drawer, exports, importer); round-trip test through save, reload and bundle export/import.
+  - X6: harmonic_spectrum length bounded with a typed 422; no reader parses or evaluates it unsafely.
+  - X7: the re-record is pinned: every class other than Generator and Load is byte-equal to the previous recording.
+  - X8: the deferred sk_min ≤ sk_max cross-check is ticketed now (01a-3) and linked in the PR body.
+
+- 2026-11-23 status sweep: landed in #1634 (347f55dd8c); #1804 (3cfc9173be); #1807 (3af79cda45); #1812 (a65c921c3c): catalogue core, routers and generated names are on master. Likely complete; PR-body rename table and range validators on every write path not checked.

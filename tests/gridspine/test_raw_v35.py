@@ -15,7 +15,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from gridspine.handoff.raw_writer import SBASE_MVA, trafo_impedance, write_raw
+from gridspine.handoff.raw_writer import (
+    SBASE_MVA,
+    trafo_impedance,
+    trafo_magnetising,
+    write_raw,
+)
 from gridspine.ingest.pandapower_source import load_case39
 from gridspine.schema.contracts import ContractError
 
@@ -456,7 +461,7 @@ def test_trafo_impedance_read_as_psse_is_the_ppc_branch(tap_side, tap_pos, vn_lv
     assert as_read_by_psse(r, x, windv1, windv2) == pytest.approx(
         (pr, px, pratio), rel=1e-6
     )
-    assert pb == 0.0  # MAG1 = MAG2 = 0 in the RAW: no magnetising branch
+    assert pb == 0.0  # pfe_kw = i0_percent = 0 here: no magnetising branch
 
 
 @pytest.mark.parametrize("tap_side, tap_pos, vn_lv_kv", _OFF_NOMINAL)
@@ -499,3 +504,204 @@ def test_an_hv_tap_does_not_scale_the_impedance():
     assert at[-3][:2] == at[0][:2] == at[3][:2]
     assert at[-3][3] == at[0][3] == at[3][3] == 21.0 / 20.0
     assert at[-3][2] < at[0][2] < at[3][2]
+
+
+# GC-20: the magnetising branch. CM=1: MAG1/MAG2 are G/B in pu on SBASE at the
+# bus-I base voltage, a shunt to ground at bus I (outside WINDV1). pandapower's
+# ppc branch holds the same shunt on the branch (bus-J) base, inside the ratio
+# WINDV1/WINDV2, where a bus-I shunt reads MAG * (WINDV1/WINDV2)**2. The pi model
+# keeps the series impedance unchanged, so the RAW's R/X oracle still holds.
+def mag_as_read_by_psse(mag1, mag2, windv1, windv2):
+    """``(g, b)`` of the bus-I shunt, referred to the ppc branch base."""
+    tau2 = (windv1 / windv2) ** 2
+    return mag1 * tau2, mag2 * tau2
+
+
+def _magnetised_net(tap_side, tap_pos=1, vn_lv_kv=21.0):
+    import pandapower as pp
+
+    n = _solved_trafo_net(tap_side, tap_pos, vn_lv_kv)
+    n.trafo["pfe_kw"] = 30.0
+    n.trafo["i0_percent"] = 0.5
+    pp.runpp(n, trafo_model="pi")
+    return n
+
+
+def _ppc_shunt(n):
+    from pandapower.pypower.idx_brch import BR_B, BR_G
+
+    start, _end = n._pd2ppc_lookups["branch"]["trafo"]
+    br = n._ppc["branch"][start]
+    return br[BR_G].real, br[BR_B].real
+
+
+@pytest.mark.parametrize("tap_side, tap_pos, vn_lv_kv", _OFF_NOMINAL)
+def test_trafo_magnetising_read_as_psse_is_the_ppc_shunt(tap_side, tap_pos, vn_lv_kv):
+    n = _magnetised_net(tap_side, tap_pos, vn_lv_kv)
+    tr = n.trafo.iloc[0]
+    _r, _x, windv1, windv2 = trafo_impedance(n, tr)
+    mag1, mag2 = trafo_magnetising(n, tr)
+    g, b = _ppc_shunt(n)
+    assert g > 0 and b < 0  # the case the gap is in
+    assert mag_as_read_by_psse(mag1, mag2, windv1, windv2) == pytest.approx(
+        (g, b), rel=1e-6
+    )
+
+
+@pytest.mark.parametrize("tap_side, tap_pos, vn_lv_kv", _OFF_NOMINAL)
+@pytest.mark.parametrize("version", [33, 35])
+def test_the_written_raw_magnetising_read_as_psse_is_the_ppc_shunt(
+    tmp_path, tap_side, tap_pos, vn_lv_kv, version
+):
+    n = _magnetised_net(tap_side, tap_pos, vn_lv_kv)
+    write_raw(n, tmp_path / "t.raw", version=version)
+    _h, _sw, recs, _t = read_raw((tmp_path / "t.raw").read_text())
+    (rec,) = recs["TRANSFORMER"]
+    # line 1: I,J,K,CKT,CW,CZ,CM,MAG1,MAG2,...
+    assert rec[0][4:7] == ["1", "1", "1"]
+    got = mag_as_read_by_psse(
+        float(rec[0][7]), float(rec[0][8]), float(rec[2][0]), float(rec[3][0])
+    )
+    # a nonzero MAG is written with ten decimals
+    assert got == pytest.approx(_ppc_shunt(n), rel=1e-6)
+
+
+def test_trafo_magnetising_by_hand():
+    # 40 MVA, two in parallel, pfe 30 kW, i0 0.5 %, SBASE 100 MVA:
+    #   G = 2 * 0.030 / 100 = 0.0006
+    #   |Y| = 2 * 0.005 * 40 / 100 = 0.004
+    #   B = -sqrt(0.004**2 - 0.0006**2) = -0.0039547
+    # HV tap +1 (2 %): WINDV1 = 1.02, MAG = Y / 1.02**2.
+    n = _trafo_net("lv")
+    n.trafo["pfe_kw"] = 30.0
+    n.trafo["i0_percent"] = 0.5
+    assert trafo_magnetising(n, n.trafo.iloc[0]) == pytest.approx(
+        (0.0006, -0.0039547), abs=1e-7
+    )
+    n.trafo["tap_side"] = "hv"
+    assert trafo_magnetising(n, n.trafo.iloc[0]) == pytest.approx(
+        (0.0006 / 1.02**2, -0.0039547 / 1.02**2), abs=1e-7
+    )
+
+
+def test_trafo_magnetising_clips_pfe_above_the_no_load_apparent_power():
+    # pandapower clips B**2 at 0 when pfe exceeds i0 * sn; so does the RAW.
+    n = _trafo_net("lv")
+    n.trafo["pfe_kw"] = 300.0
+    n.trafo["i0_percent"] = 0.1
+    assert trafo_magnetising(n, n.trafo.iloc[0]) == pytest.approx((0.006, 0.0))
+
+
+def test_zero_magnetising_writes_the_case39_zeros(tmp_path):
+    n = _trafo_net("hv")
+    n.bus["name"] = ["HV", "LV"]
+    write_raw(n, tmp_path / "t.raw")
+    _h, _sw, recs, _t = read_raw((tmp_path / "t.raw").read_text())
+    (rec,) = recs["TRANSFORMER"]
+    assert rec[0][7:9] == ["0.00000", "0.00000"]
+
+
+# GK A2 (GC-20 plan): a power-flow oracle. pandapower's pi model splits the
+# magnetising shunt half to each end of the series impedance (MATPOWER BR_B/2);
+# PSS/E puts all of it at bus I. So the RAW, read back by gridspine's own PSS/E
+# import (which places MAG1/MAG2 as a shunt at bus I) and solved, is checked
+# twice: tightly against pandapower with the same shunt placed at the HV bus
+# (the PSS/E placement), and loosely against pandapower's own pi model, whose
+# measured placement gap here is 2.8e-4..3.2e-4 pu in |V| and 0.19 kW in losses.
+def _pf_net(tap_side, tap_pos, vn_lv_kv, slack):
+    import pandapower as pp
+
+    n = _trafo_net(tap_side)
+    n.trafo["tap_pos"] = tap_pos
+    n.trafo["vn_lv_kv"] = vn_lv_kv
+    n.trafo["pfe_kw"] = 30.0
+    n.trafo["i0_percent"] = 0.5
+    n.sn_mva = SBASE_MVA
+    n.bus["name"] = ["HV", "LV"]
+    src, sink = (0, 1) if slack == "hv" else (1, 0)
+    pp.create_ext_grid(n, src)
+    pp.create_load(n, sink, p_mw=10.0, q_mvar=2.0)
+    return n
+
+
+def _raw_pf(n, tmp_path):
+    from gridspine.ingest.psse_import import read_psse
+
+    write_raw(n, tmp_path / "t.raw")
+    m = read_psse([tmp_path / "t.raw"], {}).network
+    assert m.pf()["converged"].all().all()
+    v = m.buses_t.v_mag_pu.iloc[0][["HV", "LV"]].to_numpy()
+    a = np.degrees(m.buses_t.v_ang.iloc[0][["HV", "LV"]].to_numpy())
+    slack = n.ext_grid["bus"].iloc[0]
+    loss = m.generators_t.p.iloc[0].sum() - m.loads_t.p.iloc[0].sum()
+    return v, a - a[slack], loss
+
+
+def _pp_pf(n):
+    slack = n.ext_grid["bus"].iloc[0]
+    va = n.res_bus["va_degree"].to_numpy()
+    loss = n.res_ext_grid["p_mw"].sum() - n.res_load["p_mw"].sum()
+    return n.res_bus["vm_pu"].to_numpy(), va - va[slack], loss
+
+
+@pytest.mark.parametrize("tap_side, tap_pos, vn_lv_kv", _OFF_NOMINAL)
+@pytest.mark.parametrize("slack", ["hv", "lv"])
+def test_the_raw_power_flow_is_the_magnetising_shunt_at_bus_i(
+    tmp_path, tap_side, tap_pos, vn_lv_kv, slack
+):
+    import pandapower as pp
+
+    n = _pf_net(tap_side, tap_pos, vn_lv_kv, slack)
+    mag1, mag2 = trafo_magnetising(n, n.trafo.iloc[0])
+    n.trafo["pfe_kw"] = 0.0
+    n.trafo["i0_percent"] = 0.0
+    # pandapower shunt: P consumed and Q absorbed at 1 pu, so g = p, b = -q
+    hv = n.trafo["hv_bus"].iloc[0]  # bus I of the RAW record
+    pp.create_shunt(n, hv, p_mw=mag1 * SBASE_MVA, q_mvar=-mag2 * SBASE_MVA)
+    pp.runpp(n)
+    v, a, loss = _raw_pf(_pf_net(tap_side, tap_pos, vn_lv_kv, slack), tmp_path)
+    pv, pa, ploss = _pp_pf(n)
+    assert np.abs(v - pv).max() < 1e-6
+    assert np.abs(a - pa).max() < 1e-4  # degrees; R/X hold five decimals
+    assert abs(loss - ploss) < 1e-6  # MW
+
+
+@pytest.mark.parametrize("tap_side, tap_pos, vn_lv_kv", _OFF_NOMINAL)
+@pytest.mark.parametrize("slack", ["hv", "lv"])
+def test_the_raw_power_flow_is_pandapowers_within_the_placement_gap(
+    tmp_path, tap_side, tap_pos, vn_lv_kv, slack
+):
+    import pandapower as pp
+
+    n = _pf_net(tap_side, tap_pos, vn_lv_kv, slack)
+    pp.runpp(n, trafo_model="pi")
+    v, a, loss = _raw_pf(n, tmp_path)
+    pv, pa, ploss = _pp_pf(n)
+    assert np.abs(v - pv).max() < 5e-4
+    assert np.abs(a - pa).max() < 5e-3  # degrees
+    # about 60 kW of the ~63 kW loss is the iron loss; dropping MAG misses it
+    assert abs(loss - ploss) < 3e-4  # MW
+
+
+@pytest.mark.parametrize("col", ["pfe_kw", "i0_percent"])
+def test_a_missing_magnetising_value_is_refused_not_written_zero(col):
+    n = _trafo_net("hv")
+    n.trafo[col] = np.nan
+    with pytest.raises(ContractError, match=f"{col}=nan"):
+        trafo_magnetising(n, n.trafo.iloc[0])
+
+
+def test_a_small_unit_magnetising_keeps_its_precision(tmp_path):
+    # 1 MVA, pfe 2 kW, i0 0.3 %: G = 0.002 / 100 = 2e-5, B = -sqrt(0.003**2 -
+    # 0.002**2) / 100 = -2.2360680e-5 on SBASE; ten decimals keep 1e-5 relative.
+    n = _trafo_net("lv")
+    n.trafo["sn_mva"] = 1.0
+    n.trafo["parallel"] = 1
+    n.trafo["pfe_kw"] = 2.0
+    n.trafo["i0_percent"] = 0.3
+    n.bus["name"] = ["HV", "LV"]
+    write_raw(n, tmp_path / "t.raw")
+    _h, _sw, recs, _t = read_raw((tmp_path / "t.raw").read_text())
+    (rec,) = recs["TRANSFORMER"]
+    assert float(rec[0][7]) == pytest.approx(2e-5, rel=1e-5)
+    assert float(rec[0][8]) == pytest.approx(-2.2360680e-5, rel=1e-5)

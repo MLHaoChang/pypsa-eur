@@ -29,3 +29,5 @@ Checked by code reading only; the app was not re-run. Still true: `HeadlineStrip
 ## Comments
 
 - Seen again 2026-11-20 (template walk, master 1f6905e3): H2: Guided 'Yearly cost' EUR 7.61 M vs Expert Run LOPF Summary 'Total system cost' EUR 9.02 M (status bar 'Obj: € 9 m'), no basis stated on either. DC (34.7 M) and microgrid (3.47 M) agree.
+
+- Seen again 2026-11-21 (template walk, master 6b421b06): Ammonia (`eh_ammonia_staged`): Guided "Cost over the plan, 2027–2035 (discounted, before any shortfall costs)" EUR 116 M; Expert Results Summary "Total system cost" EUR 188 M (capital 92.9 M, operating 95.5 M); status bar "Obj: € 120 m". The Guided label names a discounted basis, the Expert card says only "in this solve". Sizes agree (electrolyser_new_2030 18.4 MW, electrolyser_new_2035 10.5 MW, h2_storage 22.6 MWh, nh3_tank 446.9 MWh). IPP agrees (Guided and Expert -4.55 M). Concentrator: no Guided figure (run not finished).

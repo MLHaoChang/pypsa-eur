@@ -46,7 +46,7 @@ export const FACT_WORDS: Record<string, string> = {
   'explore.study.status': 'The decision study finished',
   'report.status': 'The report is saved',
   'report.unsupported_listed': 'The report names every chapter it cannot back up',
-  'handoff.kpis_read': 'Every headline result was read back from the model',
+  'handoff.kpis_read': 'Every headline result was read back, or is shown as not evaluated with its reason',
   // Study harness 10a: the data-centre run.
   'dc.gridcode.published': 'A grid-code profile is published for the run',
   'dc.gridcode.frequency_match': 'The campus runs at the grid frequency you gave',
@@ -73,6 +73,14 @@ export const FACT_WORDS: Record<string, string> = {
   'ipp.export.over_limit_mw': 'The power exported never passes the export connection\'s rating',
   'ic.min_dscr': 'The investment case\'s lowest debt cover is at or above the assumed floor (not the lender\'s covenant)',
   'ic.project_pre_tax_irr': 'The investment case reports the project\'s pre-tax IRR',
+  // Study harness 16: the staged mining concentrator's process and comparison facts.
+  'process.mass_balance': 'The ore and concentrate tonnes balance at every tonne bus in every period',
+  'process.motor_start': 'The large process motors start without breaking the site\'s voltage dip limit',
+  'process.restart': 'Every process unit restarts in time after a grid trip',
+  'process.n_1.site_transformer': 'Losing one site transformer cuts off no process unit',
+  'ic.counterfactual.basis': 'The comparison case is the site as it runs today',
+  'process.lost_production': 'The concentrate lost to grid events is reported (lost production, not shipped)',
+  'process.shed_level': 'The highest process load shed is reported',
   // Study harness 15: the grid-only profile.
   'grid.template.source': 'The grid template\'s source data is in place',
   'grid.pf.converged': 'The load flow converged in every hour',
@@ -118,6 +126,8 @@ export const NAME_WORDS: Record<string, string> = {
   bess: 'The battery',
   // Study harness 13: the ammonia hub's levers.
   'wind_new_*': 'New wind', 'solar_new_*': 'New solar', nh3_tank: 'The ammonia tank',
+  // Study harness 16: the concentrator's buffer lever.
+  'coarse_ore_stockpile_new_*': 'New coarse-ore stockpiles',
 }
 
 /** An envelope edit's field: the panels' own word (`FIELD_LABELS`) and its unit. */
@@ -206,6 +216,10 @@ export function stopWords(reason: string | undefined, stage: string): { words: s
       return stage === 'solve'
         ? { words: 'Solve did not finish', fix: 'solve_log', fixWords: 'Open the solve log' }
         : { words: `A step in ${at} did not finish`, fix: 'review', fixWords: 'Review the step' }
+    case 'step_cancelled':  // live-voice 16: the step's job was stopped on purpose; same fix as step_failed
+      return stage === 'solve'
+        ? { words: 'The solve was stopped: the run waits for you', fix: 'solve_log', fixWords: 'Open the solve log' }
+        : { words: `A step in ${at} was stopped: the run waits for you`, fix: 'review', fixWords: 'Review the step' }
     case 'uncertain':
     case 'step_uncertain':
       return { words: 'A step may or may not have run', fix: 'review', fixWords: 'Review the step' }

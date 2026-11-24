@@ -27,3 +27,5 @@ Done when Chromium integration and real-device gates pass; microphone/speaker
 resources close on every exit. See [spec](../spec.md).
 
 ## Comments
+
+- 2026-11-23 status sweep: landed in #1657 (d6e60d7f5d): 03a current-view. Remains: continuous voice UI, captions, lifecycle, mute/end, media acceptance.

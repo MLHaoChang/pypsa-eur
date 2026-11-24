@@ -100,7 +100,7 @@ afterEach(() => { cleanup(); vi.clearAllMocks() })
 describe('InvestmentCaseView', () => {
   it('runs, shows the progress, and aborts', async () => {
     const { container } = renderView()
-    expect((await screen.findByTestId('ic-not-run')).textContent).toMatch(/No investment case/)
+    expect((await screen.findByTestId('ic-not-run')).textContent).toMatch(/^Not run yet\. /)
     const running: InvestmentCaseStudy = { status: 'running', stage: 'run_engine',
       stages: ['build_case', 'load_pack', 'run_engine', 'assemble', 'store'],
       stages_done: ['build_case', 'load_pack'] }
@@ -140,7 +140,7 @@ describe('InvestmentCaseView', () => {
                                               error_code: 'no_owner' })
     renderView()
     expect((await screen.findByTestId('ic-error')).textContent)
-      .toBe('The case was refused: no owner assets (no_owner)')
+      .toBe('The investment case could not finish: no owner assets.')
   })
 
   it('a stale report with no named part names every input, the IC G3 ones too', async () => {
@@ -195,7 +195,7 @@ describe('InvestmentCaseView', () => {
     expect(screen.getByTestId('ic-cf-notes').textContent).toMatch(/pv has no typed cost/)
   })
 
-  it('states the island capability break-even beside the NPV (owner decision 2026-10-15)', async () => {
+  it('states the island-capability break-even beside the NPV (owner decision 2026-10-15)', async () => {
     api.getInvestmentCase.mockResolvedValue({ status: 'done', report: { present: true } })
     const rep = structuredClone(REPORT)
     const project = rep.sections!.project!.payload as Record<string, unknown>

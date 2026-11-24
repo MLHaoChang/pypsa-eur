@@ -234,7 +234,7 @@ export function SectionCard({
       data-section-id={section.section_id}
     >
       <header className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-bg-2">
-        <h3 className="text-[12.5px] font-semibold text-text">{section.heading}</h3>
+        <h3 className="text-h3 font-semibold text-text">{section.heading}</h3>
         <span data-testid="section-status">
           <Tag tone={STATUS_TONE[section.status] ?? 'neutral'}>{STATUS_LABEL[section.status] ?? section.status}</Tag>
         </span>

@@ -28,7 +28,8 @@ import {
   blankLine, edited, hintUnitWords, priceUnitWords, unitWords, linkedSource, OUTPUTS_REASON_WORDS,
   parsePaste, placeRefusals, placeValidation, provenanceDetail, provenanceOf,
   operatingYears, REFUSALS_REASON_WORDS, sourceKind, uniqueName, unitNotAllowed, unitsFor, VOLUME_FIELD,
-  withKind, yearsOf, type Placed,
+  takesDerating, withKind, yearsOf, fractionToPct, pctToFraction, indexationUnusual, INDEXATION_SOFT_PCT,
+  type Placed,
 } from './businessCaseModel'
 
 const KINDS: LineKind[] = ['revenue', 'opex', 'capex']
@@ -145,9 +146,10 @@ function YearGrid({ line, years, onChange, placed }: {
   )
 }
 
-function Details({ line, set, placed, years }: {
+function Details({ line, set, placed, years, indexationConfirmed, onConfirmIndexation }: {
   line: LineItem; placed: Placed[]; years: number[]
   set: (patch: Partial<LineItem>) => void
+  indexationConfirmed: boolean; onConfirmIndexation: (on: boolean) => void
 }) {
   const num = (col: keyof LineItem, label: string, extra?: string) => {
     const bad = cellRefusal(placed, col as string)
@@ -165,8 +167,27 @@ function Details({ line, set, placed, years }: {
     <div className="space-y-2 py-1" data-testid="bc-line-details">
       <div className="flex flex-wrap gap-3 items-center">
         {num('money_year', 'Money year')}
-        {line.escalation === 'contract' && num('indexation', 'Indexation', 'per year, as a fraction (0.02 = 2 %)')}
+        {line.escalation === 'contract' && (
+          <label className="flex items-center gap-1">
+            <span>Indexation</span>
+            <NumInput aria-label={`Indexation, ${line.name}`} data-testid="bc-indexation"
+                      className={CELL + ' w-20' + (cellRefusal(placed, 'indexation') ? BAD : '')}
+                      aria-invalid={cellRefusal(placed, 'indexation') ? true : undefined}
+                      value={fractionToPct(line.indexation)}
+                      onChange={v => set({ indexation: pctToFraction(v) })} />
+            <span className="text-muted">%/yr</span>
+          </label>
+        )}
+        {line.escalation === 'contract' && indexationUnusual(line.indexation) && (
+          <label className="flex items-center gap-1 text-warn" data-testid="bc-indexation-confirm">
+            <input type="checkbox" checked={indexationConfirmed}
+                   onChange={e => onConfirmIndexation(e.target.checked)} />
+            <span>{fractionToPct(line.indexation)} %/yr is beyond ±{INDEXATION_SOFT_PCT} %/yr: confirm it is meant</span>
+          </label>
+        )}
         {sourceKind(line.quantity_source) === 'linked' && num('linked_share', 'Sold share', '0 to 1; empty reads 1')}
+        {takesDerating(line.category, line.quantity_source)
+          && num('derating', 'De-rating', '0 to 1: the share of the capacity the market pays for; no default')}
         {line.kind === 'capex' && (
           <>
             <label className="flex items-center gap-1">
@@ -267,6 +288,7 @@ function LockedRows({ locked, ran }: { locked: LockedRow[] | null; ran: boolean 
 export default function BusinessCaseLines() {
   const project = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
+  const [confirmedRate, setConfirmedRate] = useState<Record<string, number>>({})
   const addId = useId()
   const inputsKey = nk(project, 'results', 'business_case', 'inputs')
   const optionsKey = nk(project, 'results', 'business_case', 'options')
@@ -318,6 +340,11 @@ export default function BusinessCaseLines() {
   // The report's currency, else the finance inputs' (blank reads EUR, as their form says).
   const currency = (study.data?.report?.currency as string | undefined)
     ?? (finance.data?.finance ? (finance.data.finance.currency || 'EUR') : null)
+  // A capex line with no terminal-value method has no end-of-life value: say so, beside the
+  // lines (#21). Read from the project's own saved finance inputs.
+  const capexNames = lines.filter(l => l.kind === 'capex').map(l => l.name)
+  const noTerminal = capexNames.length > 0 && !!finance.data?.finance
+    && ((finance.data.finance as { terminal_value?: { method?: string } }).terminal_value?.method ?? 'none') === 'none'
   const setLines = (next: LineItem[]) => {
     // A break-even line must name a revenue line (the validator's rule): one renamed,
     // retyped or removed leaves the choice empty rather than a refused save.
@@ -334,8 +361,17 @@ export default function BusinessCaseLines() {
     setDraft(d => ({ ...(d ?? {}), inputs: { ...(d?.inputs ?? { lines: [] }), volume_factor_by_year: next } }))
     setVfBad(bad); setDirty(true); setRejected([]); setMessage(null)
   }
-  const setLine = (i: number, patch: Partial<LineItem>) =>
+  // A confirmation belongs to one line as it is now: a rename, a delete, a save, a discard
+  // and a reload each drop it, so it never carries to another line or a re-added one.
+  const dropConfirm = (name?: string) => setConfirmedRate(c => {
+    if (name === undefined) return {}
+    const { [name]: _drop, ...rest } = c
+    return rest
+  })
+  const setLine = (i: number, patch: Partial<LineItem>) => {
+    if (patch.name !== undefined && patch.name !== lines[i].name) dropConfirm(lines[i].name)
     setLines(lines.map((l, k) => (k === i ? edited(l, patch) : l)))
+  }
 
   // Refusals of the stored lines sit on their row only while the table is what was stored.
   const placed: Placed[] = dirty ? rejected : [...rejected, ...placeRefusals(opts?.refusals)]
@@ -343,7 +379,7 @@ export default function BusinessCaseLines() {
   const caseLevel = placed.filter(p => (p.line < 0 || p.line >= lines.length) && p.column !== VOLUME_FIELD)
 
   const reload = async () => {
-    setStale(false); setRejected([]); setMessage(null); setVfBad({})
+    setStale(false); setRejected([]); setMessage(null); setVfBad({}); dropConfirm()
     try {
       const fresh = await qc.fetchQuery({ queryKey: inputsKey, queryFn: () => businessCaseApi.getInputs(), staleTime: 0 })
       setDraft(fresh.business_case ? structuredClone(fresh.business_case) : null)
@@ -359,7 +395,7 @@ export default function BusinessCaseLines() {
       const out = await businessCaseApi.putInputs(draft, digest ?? '')
       setDigest(out.digest)
       if (out.business_case) setDraft(structuredClone(out.business_case))
-      setDirty(false)
+      setDirty(false); dropConfirm()
       setMessage({ tone: 'ok', text: 'Lines saved.' })
       await qc.invalidateQueries({ queryKey: inputsKey })
       await qc.invalidateQueries({ queryKey: optionsKey })
@@ -410,11 +446,19 @@ export default function BusinessCaseLines() {
     const next = new Set(prev); if (next.has(i)) next.delete(i); else next.add(i); return next
   })
   const remove = (i: number) => {
+    dropConfirm(lines[i].name)
     setLines(lines.filter((_, k) => k !== i))
     setOpen(new Set())
   }
   const horizon = opts?.horizon ?? null
   const vfOff = Object.keys(vfBad).length > 0
+  // A rate typed beyond ±10 %/yr is saved only once confirmed (GAP W2: 2 typed for 2 % reads
+  // 200 %/yr). A line whose rate is the one already stored under its name is not asked again;
+  // a renamed or re-added line is a new line and asks.
+  const storedRate = new Map((inputs.data?.business_case?.inputs.lines ?? []).map(l => [l.name, l.indexation]))
+  const unconfirmed = lines.filter(l => l.escalation === 'contract' && indexationUnusual(l.indexation)
+    && storedRate.get(l.name) !== l.indexation && confirmedRate[l.name] !== l.indexation)
+  const rateOff = unconfirmed.length > 0
   const ran = !!study.data?.report
 
   return (
@@ -524,7 +568,9 @@ export default function BusinessCaseLines() {
                         <td className="px-1">
                           <select aria-label={`Category, ${ln.name}`} className={CELL + ' max-w-[8rem]' + (bad('category') ? BAD : '')}
                                   aria-invalid={bad('category') ? true : undefined}
-                                  value={ln.category} onChange={e => setLine(i, { category: e.target.value })}>
+                                  value={ln.category}
+                                  onChange={e => setLine(i, { category: e.target.value,
+                                    ...(takesDerating(e.target.value, ln.quantity_source) ? {} : { derating: null }) })}>
                             {(opts?.categories[ln.kind] ?? [ln.category]).map(c => <option key={c} value={c}>{categoryWords(c)}</option>)}
                           </select>
                         </td>
@@ -536,7 +582,8 @@ export default function BusinessCaseLines() {
                                           const units = unitsFor({ ...next, unit: '' }, opts)
                                           setLine(i, { quantity_source: qs,
                                                        unit: units.includes(ln.unit) ? ln.unit : (units[0] ?? ln.unit),
-                                                       ...(sourceKind(qs) === 'linked' ? { quantity: null } : {}) })
+                                                       ...(sourceKind(qs) === 'linked' ? { quantity: null } : {}),
+                                                       ...(takesDerating(ln.category, qs) ? {} : { derating: null }) })
                                         }} />
                         </td>
                         <td className="px-1">
@@ -591,7 +638,7 @@ export default function BusinessCaseLines() {
                                 <li key={k} data-column={p.column}>
                                   {p.message}{' '}
                                   {!open.has(i) && ['money_year', 'indexation', 'life_years', 'rate', 'refresh_years',
-                                    'quantity_by_year', 'price_by_year', 'linked_share'].includes(p.column) && (
+                                    'quantity_by_year', 'price_by_year', 'linked_share', 'derating'].includes(p.column) && (
                                     <button type="button" className="underline" onClick={() => toggle(i)}>Show details</button>
                                   )}
                                 </li>
@@ -604,7 +651,12 @@ export default function BusinessCaseLines() {
                         <tr>
                           <td colSpan={11} className="px-1 pb-2">
                             <div className="sticky left-0 max-w-[56rem]">
-                            <Details line={ln} placed={here} years={yearsOf(ln, horizon)} set={p => setLine(i, p)} />
+                            <Details line={ln} placed={here} years={yearsOf(ln, horizon)} set={p => setLine(i, p)}
+                                     indexationConfirmed={confirmedRate[ln.name] === ln.indexation}
+                                     onConfirmIndexation={on => setConfirmedRate(c => {
+                                       const { [ln.name]: _drop, ...rest } = c
+                                       return on && typeof ln.indexation === 'number' ? { ...rest, [ln.name]: ln.indexation } : rest
+                                     })} />
                             </div>
                           </td>
                         </tr>
@@ -642,15 +694,22 @@ export default function BusinessCaseLines() {
       {message && <p role="status" className={message.tone === 'ok' ? 'text-success' : 'text-danger'}>{message.text}
         {message.finance && <>{' '}<button type="button" className="underline" data-testid="bc-open-finance"
           onClick={() => openPanel('commercial', 'economics')}>Finance inputs ›</button></>}</p>}
+      {noTerminal && (
+        <p className="text-warn" data-testid="bc-terminal-missing">
+          {capexNames.join(', ')} has no end-of-life value: choose a terminal-value method that can price it.{' '}
+          <button type="button" className="underline" data-testid="bc-open-terminal"
+            onClick={() => { openPanel('commercial', 'economics'); useUIStore.getState().requestTerminalValueScroll() }}>Terminal value ›</button></p>
+      )}
       <div className="flex flex-wrap gap-2 items-center">
         <button type="button" className="px-2 py-1 rounded bg-accent text-on-accent disabled:opacity-50"
-                disabled={!dirty || saving || draft === null || vfOff}
-                aria-describedby={vfOff ? 'bc-save-off' : undefined}
+                disabled={!dirty || saving || draft === null || vfOff || rateOff}
+                aria-describedby={vfOff || rateOff ? 'bc-save-off' : undefined}
                 onClick={() => { void save() }}>Save the lines</button>
         <button type="button" className={ACTION} disabled={!dirty} onClick={() => setConfirmDiscard(true)}>Discard changes</button>
         {!dirty && <span className="text-muted">No unsaved changes.</span>}
-        {dirty && vfOff && <span id="bc-save-off" className="text-muted" data-testid="bc-save-off">
-          Fix the volume factor (lease-up) above to save.</span>}
+        {dirty && (vfOff || rateOff) && <span id="bc-save-off" className="text-muted" data-testid="bc-save-off">
+          {vfOff ? 'Fix the volume factor (lease-up) above to save.'
+            : `Confirm the indexation of ${unconfirmed.map(l => l.name).join(', ')} above to save.`}</span>}
         {dirty && confirmDiscard && (
           <span role="alert" className="text-warn flex flex-wrap gap-2 items-center" data-testid="bc-discard-confirm">
             Discard the unsaved changes to the lines? The stored lines are reloaded.
@@ -661,7 +720,7 @@ export default function BusinessCaseLines() {
       </div>
       <BusinessCaseRun
         study={study.data ?? null} studyKey={studyKey}
-        disabledReason={runOffReason(dirty, lines.length, (opts?.refusals ?? []).length)}
+        disabledReason={runOffReason(dirty, lines.length, placed.length)}
         revenueLines={lines.filter(l => l.kind === 'revenue').map(l => l.name)}
         lineNames={lines.map(l => l.name)}
         breakEvenLine={draft?.break_even_line ?? null}

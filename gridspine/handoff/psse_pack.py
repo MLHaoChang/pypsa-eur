@@ -34,7 +34,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from gridspine.handoff.contingencies import write_con, write_mon, write_sub
+from gridspine.handoff.contingencies import conmap_path, write_con, write_mon, write_sub
 from gridspine.handoff.dyr_writer import (
     PIN_NOTE,
     PocBranch,
@@ -45,7 +45,7 @@ from gridspine.handoff.psspy_scripts import PENDING as PSSPY_NOTE
 from gridspine.handoff.psspy_scripts import check_script, write_scripts
 from gridspine.handoff.raw_writer import write_raw
 from gridspine.handoff.seq_writer import NOT_WRITTEN, write_seq
-from gridspine.handoff.test_battery import build_battery
+from gridspine.handoff.test_battery import C_BRACKET_NOTE, build_battery
 from gridspine.ingest.pandapower_source import registry_from_net
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.model_set import manifest as model_set_manifest
@@ -81,6 +81,13 @@ MON_ASSUMED = (
 BATTERY_ASSUMED = (
     "test battery: grid |Z0|/|Z1| = 1.0 (as the .seq's grid X0 = X1)",
     "test battery: grid X0/R0 = the grid's largest X/R",
+    f"test battery: {C_BRACKET_NOTE}; c_min from the PoC kV (GC-14)",
+)
+#: GC-14: the psspy Thevenin source carries IEC 60909 c; older packs did not say.
+C_NOTE = (
+    "The psspy scripts' Thevenin source is |Z| = c·Un²/Sk'' with c_max = 1.1 on the "
+    "Sk-min corners and c_min on the Sk-max corners. Packs written before GC-14 used "
+    "c = 1 (Sk-min |Z| 10 % lower); regenerate them."
 )
 #: GC-04 PR6: the README says which transformer convention this pack uses, since
 #: the manifest has no writer-version field to tell old packs apart.
@@ -275,7 +282,13 @@ def write_psse_pack(
     write_sub(net, out / names["sub"])
     write_mon(out / names["mon"], *MON_BAND_PU)
 
-    files = [*names.values(), "README.md", "manifest.json"]
+    conmap_name = conmap_path(names["con"]).name if len(cs) > len(con_skipped) else None
+    files = [
+        *names.values(),
+        *([conmap_name] if conmap_name else []),
+        "README.md",
+        "manifest.json",
+    ]
     scripts, outputs, battery_notes = {}, {}, []
     if plant is not None:
         if cases is None:
@@ -330,6 +343,7 @@ def write_psse_pack(
         "contingencies": {
             "written": int(len(cs)) - len(con_skipped),
             "not_written": list(con_skipped),
+            "label_map": conmap_name,
         },
         "scripts_not_written": None if plant is not None else _SCRIPTS_NEED_PLANT,
         "plant_controller_not_written": None
@@ -354,6 +368,12 @@ def _readme(m) -> str:
         mark = m["not_for_submission"]
         lines += [f"**{mark[:1].upper()}{mark[1:]}.**", ""]
     lines += ["## Files", "", *(f"- `{f}`" for f in m["files"]), ""]
+    if m["contingencies"]["label_map"]:
+        lines += [
+            f"The contingencies in the .con are labelled C0001, C0002 and so on. "
+            f"`{m['contingencies']['label_map']}` turns each label back into its contingency id.",
+            "",
+        ]
     if "model_set" in m:
         ms = m["model_set"]
         lines += [
@@ -397,6 +417,10 @@ def _readme(m) -> str:
         "## Transformer impedance",
         "",
         TRAFO_NOTE,
+        "",
+        "## Thevenin source voltage factor c",
+        "",
+        C_NOTE,
         "",
     ]
     return "\n".join(lines)

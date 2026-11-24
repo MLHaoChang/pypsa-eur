@@ -1,0 +1,13 @@
+{
+ "entries": [{
+  "id": "model_import",
+  "title": "Model import (PSS/E, PowerFactory, PLEXOS)",
+  "disposition": "unbuilt",
+  "reason": "Chat cannot read uploaded PSS/E, PowerFactory DGS or PLEXOS files yet. Import them from New project › Import file, which shows a preview before the project is made.",
+  "page": "New project › Import file",
+  "panel": null,
+  "keywords": ["psse", "pss", "plexos", "powerfactory", "dgs"],
+  "routes": [["GET", "/api/model-import/formats"], ["POST", "/api/model-import/preview"], ["POST", "/api/model-import/import"]]
+ }],
+ "goals": {"Import my PLEXOS model": "model_import"}
+}

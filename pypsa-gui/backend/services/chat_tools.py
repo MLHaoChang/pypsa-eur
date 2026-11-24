@@ -1311,12 +1311,16 @@ def _component_index(component_class: str) -> list[str]:
     return [] if df is None else [str(x) for x in df.index]
 
 
-def bulk_update_components(component_class: str, names: list[str], updates: dict) -> dict:
-    """PATCH /api/network/_bulk."""
+def bulk_update_components(component_class: str, names: list[str], updates: dict,
+                           research_ref: str | None = None) -> dict:
+    """PATCH /api/network/_bulk. `research_ref` names the confirmed source row
+    (study harness 34); a call carrying it is always carded, and it is only
+    echoed back."""
     # Handler is bulk_update(body: dict) — it reads body.get("component_class"/
     # "names"/"updates"). The old BulkUpdateRequest model was removed; pass a dict.
     from routers.network import bulk_update as _h
-    return _h({"component_class": component_class, "names": names, "updates": updates})
+    out = _h({"component_class": component_class, "names": names, "updates": updates})
+    return {**out, "research_ref": research_ref} if research_ref else out
 
 
 # ── Carriers (1) ────────────────────────────────────────────────────────────
@@ -1561,6 +1565,15 @@ def site_scene_cancel(site_id: str, proposal_id: str) -> dict:
     """`POST .../proposals/{id}/cancel`: the caller's own preview; unknown or expired changes nothing (G4)."""
     from services.site_scene import chat
     return chat.cancel(site_id, proposal_id)
+
+
+def site_scene_results(site_id: str, snapshot: str | None = None, period: str | None = None,
+                       window_from: str | None = None, window_to: str | None = None,
+                       run: str | None = None, building: str | None = None) -> dict:
+    """`GET .../scene/results` (SC-03): the route's numbers in words, bounded; the gate alone decides availability."""
+    from services.site_scene import chat_results
+    return chat_results.read(site_id, snapshot=snapshot, period=period, window_from=window_from,
+                             window_to=window_to, run=run, building=building)
 
 
 def get_process_view() -> dict:
@@ -2949,7 +2962,9 @@ def run_investment_case(owner: str | None = None) -> dict:
 
     def start():
         with _ic_errors():
-            return _h(body)
+            # No HTTP caller here: `user=None` makes the handler take the
+            # requester from the chat's acting user (project-viewer-role 02).
+            return _h(body, user=None)
 
     out = _campaign_gated("investment_case", start)
     out = {k: (_cut(v) if k in ("owner", "case_id") else v) for k, v in out.items()}
@@ -3874,7 +3889,8 @@ def run_business_case() -> dict:
 
     def start():
         with _bc_errors():
-            return _h()
+            # As run_investment_case: the requester is the chat's acting user.
+            return _h(user=None)
 
     out = dict(_campaign_gated("business_case", start))
     out["hint"] = ("poll get_business_case() until status is done / refused / failed; a "
@@ -5545,12 +5561,32 @@ def campus_grid_readiness(project_id: str, profile: str | None = None) -> dict:
         return _h(_gridspine_project(db, user, project_id), profile)
 
 
-def campus_set_island_config(project_id: str, config: dict) -> dict:
-    from services.campus_electrical_service import save_island as _h
+def island_tool_args(config, patch, base) -> None:
+    """``campus_set_island_config`` takes the whole ``config`` or a ``patch``
+    with the ``base`` revision it was read at, never both (GK B3 K9)."""
+    if (config is None) == (patch is None):
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "invalid_tool_args",
+            "message": "pass exactly one of config (the whole island config) or patch (the fields to change)"})
+    if patch is not None and not isinstance(patch, dict):
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "invalid_tool_args", "message": "patch must be an object of the fields to change"})
+    if patch is not None and not base:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "invalid_tool_args",
+            "message": "patch needs base: the revision campus_island_config returned"})
+
+
+def campus_set_island_config(project_id: str, config: dict | None = None,
+                             patch: dict | None = None, base: str | None = None) -> dict:
+    from services.campus_electrical_service import patch_island, save_island
+    island_tool_args(config, patch, base)
     with _acting() as (db, user):
         project = _gridspine_project(db, user, project_id)
         _campus_check_lock(db, user, project)
-        return _h(project, config)
+        if patch is not None:
+            return patch_island(project, patch, base)
+        return save_island(project, config)
 
 
 def campus_run_island_study(project_id: str, scenarios: list[str] | None = None) -> dict:
@@ -5972,8 +6008,13 @@ def update_project_layout(name: str, layout: dict) -> dict:
 def download_project_bundle(name: str) -> dict:
     from routers.projects import _project_bundle_bytes
     proj = _authorized_project(name)
+    with _acting() as (db, user):
+        from services import project_registry
+
+        row = project_registry.find_project(db, user, proj.uuid) if user is not None else None
     return _save_agent_export(
-        _project_bundle_bytes(proj.name, proj.directory),
+        _project_bundle_bytes(proj.name, proj.directory,
+                              project_kind=getattr(row, "project_kind", None)),
         f"{proj.name}.pypsaproj.zip",
         "application/zip",
     )
@@ -10632,6 +10673,19 @@ DISPATCHERS: dict[str, Any] = {
 }
 
 
+# Excel input workbook issue 06 (3): the template / a project's workbook as a
+# browser download, and a chat upload previewed then imported as a NEW project.
+from services.workbook_chat import (  # noqa: E402
+    get_input_workbook, import_input_workbook, preview_input_workbook,
+)
+
+DISPATCHERS.update({
+    "get_input_workbook": get_input_workbook,
+    "preview_input_workbook": preview_input_workbook,
+    "import_input_workbook": import_input_workbook,
+})
+
+
 # LV08 B2a (12) — live-voice 08 slice B2: registered before the lock and
 # study gates below wrap DISPATCHERS, so they apply to these as to the rest.
 DISPATCHERS.update({
@@ -10671,6 +10725,7 @@ DISPATCHERS.update({
     "site_scene_prepare": site_scene_prepare,
     "site_scene_apply": site_scene_apply,
     "site_scene_cancel": site_scene_cancel,
+    "site_scene_results": site_scene_results,
     "get_process_view": get_process_view,
     "get_grid_risk_production": get_grid_risk_production,
     "campus_save_campus": campus_save_campus,

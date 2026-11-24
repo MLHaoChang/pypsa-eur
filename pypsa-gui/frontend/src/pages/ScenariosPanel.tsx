@@ -23,6 +23,7 @@ import { STUDY_FORK_LABELS } from '../utils/decisionVocabulary'
 import { PageBody, PageSection, RowGrid, StatCard, Btn, Tag } from '../components/PageKit'
 import { Dialog } from '../components/Dialog'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { signFirstEuro } from '../utils/format'
 
 // ── Tree-building helpers ────────────────────────────────────────────────────
 // The backend returns a flat list of projects with `parent_project` pointers.
@@ -34,6 +35,37 @@ export interface ScenarioNode {
   project: ProjectInfo
   children: ScenarioNode[]
   depth: number
+}
+
+/**
+ * Only the open project's own tree: its root plus everything under that root.
+ * The list endpoint is workspace-wide, so without this another template's
+ * children showed up next to the open study (issue 23c). Falls back to the
+ * whole list when no project is open or the open one isn't in it yet.
+ */
+export function scopeToProjectTree(projects: ProjectInfo[], current: string | null | undefined): ProjectInfo[] {
+  const byName = new Map(projects.map(p => [p.name, p]))
+  if (!current || !byName.has(current)) return projects
+  const seen = new Set<string>()
+  let root = current
+  while (!seen.has(root)) {
+    seen.add(root)
+    const pp = byName.get(root)?.parent_project
+    if (!pp || !byName.has(pp)) break
+    root = pp
+  }
+  const keep = new Set<string>([root])
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const p of projects) {
+      if (!keep.has(p.name) && p.parent_project && keep.has(p.parent_project)) {
+        keep.add(p.name)
+        grew = true
+      }
+    }
+  }
+  return projects.filter(p => keep.has(p.name))
 }
 
 export function buildScenarioForest(projects: ProjectInfo[]): ScenarioNode[] {
@@ -319,13 +351,18 @@ export default function ScenariosPanel() {
   const readOnly = useUIStore(s => s.readOnly)
   const readOnlyReason = useUIStore(s => s.readOnlyReason)
 
-  const { data: projects = [], isLoading } = useQuery({
+  const { data: allProjects = [], isLoading } = useQuery({
     queryKey: ['projects'],
     queryFn: projectsApi.list,
     staleTime: 5_000,
     refetchInterval: 10_000,
   })
 
+  // This panel lists the open project's tree only (issue 23c).
+  const projects = useMemo(
+    () => scopeToProjectTree(allProjects as ProjectInfo[], currentProject),
+    [allProjects, currentProject],
+  )
   const forest = useMemo(() => buildScenarioForest(projects as ProjectInfo[]), [projects])
 
   // Map project name → stable UUID (when known). Auth-mode routes are
@@ -686,8 +723,9 @@ export default function ScenariosPanel() {
   })
 
   const projectList = projects as ProjectInfo[]
+  // An optimisation solve (an objective) or a finished Guided study (issue 23).
   const solvedCount = projectList.filter(
-    p => p.objective != null && Number.isFinite(p.objective),
+    p => (p.objective != null && Number.isFinite(p.objective)) || p.study_finished,
   ).length
 
   return (
@@ -696,7 +734,12 @@ export default function ScenariosPanel() {
       <PageBody>
         <RowGrid cols={2}>
           <StatCard accent eyebrow="Scenarios" value={projectList.length} sub="project variants" />
-          <StatCard eyebrow="Solved" value={solvedCount} sub="have an objective" />
+          <StatCard
+            eyebrow="Solved"
+            value={solvedCount}
+            sub="have results"
+            title="Counts projects with an optimisation solve or a finished Guided study"
+          />
         </RowGrid>
 
         {/* Lineage breadcrumb — visible only when the active project has at
@@ -1383,11 +1426,11 @@ function CreateScenarioDialog({ base, baseId, baseIsActive, onClose, onCreated }
 
 // ── Small formatters ────────────────────────────────────────────────────────
 
-function formatObjective(v: number): string {
+export function formatObjective(v: number): string {
   if (!Number.isFinite(v)) return '—'
   const abs = Math.abs(v)
-  if (abs >= 1e9) return `€${(v / 1e9).toFixed(2)}B`
-  if (abs >= 1e6) return `€${(v / 1e6).toFixed(2)}M`
-  if (abs >= 1e3) return `€${(v / 1e3).toFixed(2)}k`
-  return `€${v.toFixed(0)}`
+  if (abs >= 1e9) return signFirstEuro(v, `${(abs / 1e9).toFixed(2)}B`)
+  if (abs >= 1e6) return signFirstEuro(v, `${(abs / 1e6).toFixed(2)}M`)
+  if (abs >= 1e3) return signFirstEuro(v, `${(abs / 1e3).toFixed(2)}k`)
+  return signFirstEuro(v, abs.toFixed(0))
 }

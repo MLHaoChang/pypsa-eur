@@ -11,7 +11,7 @@ from db.models import Session as SessionRow
 from db.session import get_db
 from deps import current_session
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from models.schemas import ImportSummary
+from models.schemas import ExcelImportSummary, ImportSummary
 from services import active_project, change_log_service
 from sqlalchemy.orm import Session as DBSession
 from services.pypsa_service import PyPSAService
@@ -145,17 +145,13 @@ def export_csv():
     )
 
 
-def _export_excel_bytes() -> bytes:
-    n = PyPSAService.get_network()
-    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as f:
-        tmp = pathlib.Path(f.name)
+def _write_excel(n, tmp: pathlib.Path) -> None:
+    """Write the escaped workbook for `n` to `tmp` (CPU-bound; see `_export_excel_bytes`)."""
     try:
         # PyPSA appends when the path already exists. An empty mktemp file
         # is not a workbook; let its writer create the file instead.
-        tmp.unlink()
+        tmp.unlink(missing_ok=True)
         n.export_to_excel(str(tmp))
-        _map_xlsx_strings(tmp, _escape_formula)
-        data = tmp.read_bytes()
     except AttributeError:
         # Fallback: write each component DataFrame as a sheet
         import openpyxl
@@ -171,18 +167,77 @@ def _export_excel_bytes() -> bytes:
                 for row in rows:
                     ws.append(row)
         wb.save(str(tmp))
-        _map_xlsx_strings(tmp, _escape_formula)
-        data = tmp.read_bytes()
+    _map_xlsx_strings(tmp, _escape_formula)
+
+
+EXCEL_EXPORT_SECONDS = 540.0  # under the client's 10 min per-call timeout
+
+
+def _excel_child(nc_path: str, tmp: str, conn) -> None:
+    """The `spawn` child: load the network the parent saved and write the workbook."""
+    try:
+        import pypsa
+
+        _write_excel(pypsa.Network(nc_path), pathlib.Path(tmp))
+        conn.send(None)
+    except BaseException as exc:  # logged by the parent; the client gets a plain sentence
+        conn.send(f"{type(exc).__name__}: {exc}")
     finally:
-        tmp.unlink(missing_ok=True)
+        conn.close()
+
+
+def _export_excel_bytes() -> bytes:
+    """The network as .xlsx. An hourly year is ~30 s of pure-Python work: it runs in a
+    `spawn` child so it does not hold the GIL against other requests (a concurrent
+    CSV export took 21 s instead of 2 s when it ran in a thread). The parent hands the
+    child a .nc file and waits at most `EXCEL_EXPORT_SECONDS`."""
+    import multiprocessing
+
+    n = PyPSAService.get_network()
+    with tempfile.TemporaryDirectory(prefix="excel-export-") as d:
+        nc, tmp = str(pathlib.Path(d) / "network.nc"), str(pathlib.Path(d) / "network.xlsx")
+        with PyPSAService.get_netcdf_io_lock():
+            PyPSAService.export_network_to_netcdf(n, nc)
+        ctx = multiprocessing.get_context("spawn")
+        recv, send = ctx.Pipe(duplex=False)
+        child = ctx.Process(target=_excel_child, args=(nc, tmp, send), daemon=True, name="excel-export")
+        child.start()
+        send.close()
+        err = None
+        try:
+            if not recv.poll(EXCEL_EXPORT_SECONDS):
+                raise HTTPException(500, {
+                    "error_kind": "excel_export_timeout",
+                    "message": f"The Excel export did not finish within {EXCEL_EXPORT_SECONDS:g} s and was stopped. "
+                               "Try the CSV or NetCDF export, or shorten the snapshot range.",
+                    "budget_seconds": EXCEL_EXPORT_SECONDS,
+                })
+            try:
+                err = recv.recv()
+            except (EOFError, OSError):
+                err = "the export process stopped without a result"
+        finally:
+            recv.close()
+            if child.is_alive():
+                child.kill()
+            child.join(5)
+        if err:
+            logging.getLogger(__name__).error("Excel export failed: %s", err)
+            raise HTTPException(500, {
+                "error_kind": "excel_export_failed",
+                "message": "The network could not be written to Excel. Try the CSV or NetCDF export instead.",
+            })
+        data = pathlib.Path(tmp).read_bytes()
     change_log_service.log("export", "Network", "network.xlsx", "Exported network as Excel (.xlsx)")
     return data
 
 
 @router.get("/export/excel")
 def export_excel():
+    # A plain `def` route runs on the threadpool; the write itself is in a child process.
+    data = _export_excel_bytes()
     return StreamingResponse(
-        io.BytesIO(_export_excel_bytes()),
+        io.BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": "attachment; filename=network.xlsx"},
     )
@@ -449,53 +504,26 @@ async def import_excel(
     db: DBSession = Depends(get_db),
     session: SessionRow | None = Depends(current_session),
 ):
-    import openpyxl
+    """An older-layout workbook (PyPSA's own export, raw-named sheets) replaces the open network.
+
+    Read by the input workbook's reader (`services.excel_workbook.prepare`), which
+    reports what it cannot read. The input workbook itself is refused (422
+    ``import_as_new_project``, IMPORT-FLOW-1): it is previewed and imported as a
+    new project (`routers.workbook`).
+    """
+    from services import excel_workbook
+
     data = await read_capped(file)
-    component_map = {
-        "buses": "Bus", "generators": "Generator", "lines": "Line",
-        "links": "Link", "loads": "Load", "storage_units": "StorageUnit",
-        "stores": "Store", "transformers": "Transformer",
-    }
-
-    def parse(n):
-        wb = openpyxl.load_workbook(io.BytesIO(data))
-        if "network" in wb.sheetnames:
-            # Native PyPSA exports include network/snapshot/dynamic sheets.
-            # Keep their horizon and series; legacy custom component sheets
-            # continue through the existing parser below.
-            with tempfile.TemporaryDirectory() as directory:
-                native_file = pathlib.Path(directory) / "network.xlsx"
-                native_file.write_bytes(data)
-                _map_xlsx_strings(native_file, _unescape_formula, data_only=True)
-                n.import_from_excel(str(native_file), engine="openpyxl")
-        else:
-            for sheet_name in wb.sheetnames:
-                comp_class = component_map.get(sheet_name)
-                if comp_class is None:
-                    continue
-                ws = wb[sheet_name]
-                headers = [cell.value for cell in next(ws.iter_rows(min_row=1, max_row=1))]
-                for row in ws.iter_rows(min_row=2, values_only=True):
-                    row_dict = dict(zip(headers, map(_unescape_formula, row)))
-                    name = row_dict.pop("name", row_dict.pop(headers[0], None))
-                    if name:
-                        try:
-                            n.add(comp_class, str(name), **{k: v for k, v in row_dict.items() if v is not None})
-                        except Exception:
-                            pass
-
-    n = _parse_candidate("Excel workbook", parse)
-    rederived = _own_costs_from_parts(n)
-    # P14: typed eh_* tags (a sheet's TRUE/1/blank → bool; netCDF-safe).
-    from services.adequacy.eh_columns import normalise_eh_columns
-    normalise_eh_columns(n)
+    prep = excel_workbook.prepare(data, file.filename, new_project=False)
+    n = prep.network
+    n.name = "Untitled Project"
     with PyPSAService.get_lock():
         _replace_with(n)
-    summary = _build_summary(n)
+    summary = ExcelImportSummary(**_build_summary(n).model_dump(), report=prep.report.to_dict())
     change_log_service.log(
         "import", "Network", file.filename or "network.xlsx",
         f"Imported Excel '{file.filename}': {summary.buses} buses, {summary.generators} generators"
-        + _rederived_note(rederived),
+        + _rederived_note(prep.rederived),
     )
     _unbind_session(db, session)
     return summary

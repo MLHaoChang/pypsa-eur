@@ -25,12 +25,14 @@ from typing import TYPE_CHECKING, Any, Literal
 import threading as _threading
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from services.finance.case import CampusSummary
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from db.models import User
-from deps import require_user
+from deps import optional_user, require_user
 
 from services.dispatch_status import dispatch_status as _dispatch_status
 from services.pypsa_service import PyPSAService
@@ -2189,10 +2191,15 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
     (``_ic_growth_flags``). On a run's own step (`assistant_tasks.RUN_CONTEXT` set,
     study harness 14) the case never re-solves the baseline: the envelope counts
     no solve for it, and a kept asset added after its admission is refused here,
-    under the lock that plans it (`baseline_solve`)."""
+    under the lock that plans it (`baseline_solve`), unless the run's grant
+    reserved the baseline's solves at the case's admission (study harness 36,
+    GK B (60) A2: `run_envelope.case_baseline_reserved`)."""
     from services import assistant_tasks
 
     in_run = assistant_tasks.RUN_CONTEXT.get() is not None
+    if in_run:
+        from services import harness_locks, run_envelope
+        in_run = not run_envelope.case_baseline_reserved(harness_locks.in_run())
 
     def build():
         from models.finance import FinanceInputs
@@ -2266,12 +2273,16 @@ def _ic_assumptions(cfg, n, *, lock, extra_assets: str | None = None,
         fin = None
     solver = dataclasses.asdict(cfg) if dataclasses.is_dataclass(cfg) else None
     commercial = getattr(cfg, "commercial", None)
+    from services.adequacy.energization import schedule_digest
+
     with lock:
         owner_assets = owner_assets_digest(n, commercial)
+        # template-e2e 02b (W2): the case reads the energization schedule at build time.
+        energization = schedule_digest(n)
     return assumptions_digest(finance=raw, commercial=commercial,
                               dispatch=dispatch_digest(n, result_df or _result_df), packs=pack_versions(fin),
                               solver=solver, owner_assets=owner_assets,
-                              extra_assets=extra_assets)
+                              extra_assets=extra_assets, energization=energization)
 
 
 def _ic_current_assumptions() -> tuple[tuple[str, dict] | None, str | None]:
@@ -2330,8 +2341,32 @@ def post_investment_case_abort():
     )
 
 
+def _run_requester(user) -> tuple:
+    """(user id, project id) of who starts an in-process run on the active
+    project: the HTTP caller, else the chat's acting user (a chat tool calls
+    the handler directly). The runner reads their role again before it stores
+    its report (project-viewer-role 02)."""
+    uid = user.id if isinstance(user, User) else None
+    if uid is None:
+        from services.chat_tools import acting_user_id
+
+        uid = acting_user_id()
+    return uid, PyPSAService.get_active_context().project_uuid
+
+
+def _ic_needs(read: Callable[[], list[str]]) -> list[str]:
+    """The needs `read` establishes for the start's `detail.needs`, or none:
+    a need it cannot read never changes the refusal (template-e2e issue 40)."""
+    try:
+        return read()
+    except Exception as exc:                            # noqa: BLE001
+        logger.debug("investment_case: a need was not established: %r", exc)
+        return []
+
+
 @results_router.post("/investment_case")
-def post_investment_case(body: InvestmentCaseRequest | None = None):
+def post_investment_case(body: InvestmentCaseRequest | None = None,
+                         user: User | None = Depends(optional_user)):
     """
     Start the single-owner investment-case run in a worker thread (IC P4
     WP4.6b): build the `FinanceCase` from the solved network and the stored
@@ -2342,14 +2377,21 @@ def post_investment_case(body: InvestmentCaseRequest | None = None):
     (IC G3, `_ic_campus_source`).
     """
     from routers.simulation import _state_update
-    from services.finance.investment_case_runner import start_investment_case
+    from services.finance.investment_case_runner import finance_needs, start_investment_case
+    from services.results.finance_case import connection_need
     _refuse_if_mesh_busy("investment_case")
     n = PyPSAService.get_network()
+    cfg = _state.get("solver_config")
+    # Template-e2e issue 40: every need the start can tell rides in
+    # `detail.needs`, the first blocker's own code first; the refusal keeps
+    # that code and status.
+    known = _ic_needs(lambda: [c for c in (connection_need(cfg),) if c])
     if not _dispatch_ready(n):
         raise HTTPException(409, {"code": "not_solved",
                                   "message": "solve the network first: the investment case "
-                                             "values the solved dispatch"})
-    cfg = _state["solver_config"]
+                                             "values the solved dispatch",
+                                  "needs": ["not_solved", *known, *_ic_needs(
+                                      lambda: finance_needs(getattr(cfg, "finance", None)))]})
     owner = body.owner if body is not None else None
     # IC G3 R-2: the campus study read once, outside the network lock; the case
     # and the staleness key take the same source.
@@ -2365,6 +2407,8 @@ def post_investment_case(body: InvestmentCaseRequest | None = None):
         assumptions=lambda: _ic_assumptions(cfg, n, lock=lock, extra_assets=campus.digest),
         case_hash=_ic_case_hash,
         state_lock=PyPSAService.get_solver_state_lock(),
+        requester=_run_requester(user),
+        needs=known,
     )
 
 
@@ -2494,12 +2538,14 @@ def get_business_case_preset(variant: str | None = Query(default=None)):
                                   "message": "set the finance inputs first: a preset's cost "
                                              "defaults are filled in the case's currency"})
     try:
-        currency = FinanceInputs.model_validate(raw_fin).currency
+        fin = FinanceInputs.model_validate(raw_fin)
     except ValidationError as exc:
         raise HTTPException(422, {"code": "finance_inputs_invalid",
                                   "message": str(exc.errors()[0]["msg"])}) from exc
     try:
-        inputs = P.preset(template_id, variant, currency=currency)
+        inputs = P.with_finance_indexation(
+            P.preset(template_id, variant, currency=fin.currency), fin.escalation
+        )
     except DefaultUnitMismatch as exc:
         raise HTTPException(422, refusal_detail(exc)) from exc
     except LookupError as exc:
@@ -2694,6 +2740,10 @@ def _bc_ic_check() -> tuple[str, str | None]:
         raise HTTPException(409, {"code": "investment_case_missing", "reason": "no_report",
                                   "message": "run the investment case first"})
     current, why = _ic_current_assumptions()
+    if current is None and why == "network_busy":
+        from services.business_case.runner import NETWORK_BUSY_MESSAGE
+        raise HTTPException(409, {"code": "network_busy", "reason": "network_busy",
+                                  "message": NETWORK_BUSY_MESSAGE})
     st = staleness(stored, current, reason=why)
     if st["stale"] is not False:
         raise HTTPException(409, {"code": "investment_case_missing",
@@ -2794,7 +2844,7 @@ def post_business_case_abort():
 
 
 @results_router.post("/business_case")
-def post_business_case():
+def post_business_case(user: User | None = Depends(optional_user)):
     """Start the business-case run on the stored investment case (spec §7). 422 without
     (valid) inputs; 409 `investment_case_missing` without a current investment-case
     report ("run the investment case first", C3); 409 while a solve or another study
@@ -2823,6 +2873,7 @@ def post_business_case():
         publish_study=_publish_study,
         load_pack=_bc_load_pack,
         state_lock=PyPSAService.get_solver_state_lock(),
+        requester=_run_requester(user),
     )
 
 

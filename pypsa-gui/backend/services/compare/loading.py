@@ -50,6 +50,7 @@ def _compute_loading_summary(n, periods, is_multi, has_solve) -> LoadingComparis
     # merely assumed.
     weights = _build_snapshot_weights(n, "generators")
     sns = n.snapshots
+    from services import assumed_rating
 
     def _walk_branches(df, t_df, is_transformer: bool, is_link: bool = False, nom_field: str = "s_nom") -> None:
         if df is None or df.empty or t_df is None or t_df.empty:
@@ -69,6 +70,7 @@ def _compute_loading_summary(n, periods, is_multi, has_solve) -> LoadingComparis
                 continue
             if name not in t_df.columns:
                 continue
+            assumed = assumed_rating.is_assumed(df.loc[name], nom_field)
             link_carrier: str | None = None
             if carrier_col_present:
                 try:
@@ -154,7 +156,11 @@ def _compute_loading_summary(n, periods, is_multi, has_solve) -> LoadingComparis
                 carrier=link_carrier,
                 peak_loading=CarrierPeriodValue(total=peak_total, by_period=peak_pp),
                 mean_loading=CarrierPeriodValue(total=mean_total, by_period=mean_pp),
-                binding_hours=CarrierPeriodValue(total=binding_total, by_period=binding_pp),
+                # an assumed rating is not evaluated: None, never a 0 that reads as a pass
+                binding_hours=None if assumed else CarrierPeriodValue(
+                    total=binding_total, by_period=binding_pp
+                ),
+                rating_assumed=assumed,
             ))
 
     _walk_branches(n.lines,        getattr(n.lines_t, "p0", None) if hasattr(n, "lines_t") else None,        False)
@@ -168,4 +174,6 @@ def _compute_loading_summary(n, periods, is_multi, has_solve) -> LoadingComparis
     _walk_branches(n.links,        getattr(n.links_t, "p0", None) if hasattr(n, "links_t") else None,        False, is_link=True, nom_field="p_nom")
     # Worst-first ordering across all branch types.
     out.sort(key=lambda e: e.peak_loading.total, reverse=True)
-    return LoadingComparison(available=True, lines=out)
+    return LoadingComparison(
+        available=True, lines=out, assumed_rating_count=sum(e.rating_assumed for e in out)
+    )

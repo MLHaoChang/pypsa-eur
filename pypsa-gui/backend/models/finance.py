@@ -208,7 +208,7 @@ class SolvePpa(BaseModel):
 class IslandOutage(BaseModel):
     """The expected grid-outage hours a year the island capability rides
     through, as the user states them with their source (owner decision
-    2026-10-15): the island break-even per outage hour and per MWh is computed
+    2026-10-15): the island-capability break-even per outage hour and per MWh is computed
     only from this. No default: None leaves those figures "needs an outage
     duration". It never enters the cash flows."""
     model_config = ConfigDict(extra="forbid")
@@ -296,7 +296,7 @@ class FinanceInputs(BaseModel):
     small_business_163j: bool | None = None
     reserves_rate: float | None = Field(default=None, ge=0)
     solve_ppa: SolvePpa | None = None
-    # The island break-even's outage hours (`IslandOutage`); None = not stated.
+    # The island-capability break-even's outage hours (`IslandOutage`); None = not stated.
     island_outage: IslandOutage | None = None
     # A depreciation class per owner asset where the pack assigns none (plan
     # WP4.3a, C11): "macrs_<n>", "sl_<n>" (US half-year), "afa_<n>" (DE
@@ -333,6 +333,28 @@ class FinanceInputs(BaseModel):
             if not rates or any(not (0.0 <= r < 1.0) for r in rates):
                 raise ValueError(f"degradation for {asset!r} must be rates in [0, 1)")
         return self
+
+
+class FinanceAssumedValue(BaseModel):
+    """One finance input a template ships as an assumption (WALK-IMPROVE-1 b):
+    the value it shipped and where it comes from. The value is read as
+    assumed while the stored input still equals it, and as typed once edited.
+    Never an input to the case or to any fingerprint."""
+
+    model_config = ConfigDict(extra="forbid")
+    value: Any
+    source: str = Field(min_length=1)
+    source_year: int | None = None
+    note: str | None = None
+
+
+def parse_finance_assumed(raw: dict) -> dict[str, FinanceAssumedValue]:
+    """``raw`` validated: each key names a `FinanceInputs` field (a typo is a
+    ValueError, never a record that labels nothing)."""
+    unknown = sorted(set(raw) - set(FinanceInputs.model_fields))
+    if unknown:
+        raise ValueError(f"finance_assumed names no finance input: {unknown}")
+    return {k: FinanceAssumedValue.model_validate(v) for k, v in raw.items()}
 
 
 # ------------------------------------------------------------------ cashflow lines

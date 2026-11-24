@@ -640,18 +640,27 @@ def delete_project_row(db: DBSession, project: Project) -> None:
 # every project in a tree via a single root membership, so managing membership
 # on a child transparently manages the root's list.
 
-def list_root_members(db: DBSession, project: Project) -> list[dict[str, str | None]]:
+def _stored_role(row: ProjectMembership) -> str:
+    # Mirrors `project_acl.project_role`: only the exact string grants edit.
+    return "editor" if row.role == "editor" else "viewer"
+
+
+def list_root_members(db: DBSession, project: Project) -> list[dict[str, str | bool | None]]:
     root = project_acl.resolve_tree_root(db, project)
     rows = db.scalars(
         select(ProjectMembership).where(ProjectMembership.project_id == root.id)
     ).all()
-    members: list[dict[str, str | None]] = []
+    members: list[dict[str, str | bool | None]] = []
     for pm in rows:
         member_user = db.get(User, pm.user_id)
+        fixed = member_user is not None and project_acl.role_is_fixed(db, member_user, root)
         members.append(
             {
                 "user_id": str(pm.user_id),
                 "email": member_user.email if member_user is not None else None,
+                # Org admins and lineage creators edit whatever the row says.
+                "role": "editor" if fixed else _stored_role(pm),
+                "role_fixed": fixed,
             }
         )
     return members
@@ -662,10 +671,24 @@ def set_root_members(
     actor: User,
     project: Project,
     user_ids: list[uuid.UUID],
-) -> list[dict[str, str | None]]:
+    roles: dict[uuid.UUID, str] | None = None,
+) -> list[dict[str, str | bool | None]]:
+    """Replace the root's member set; `roles` names a role per user.
+
+    A new member with no entry becomes an editor; an existing member with no
+    entry keeps the stored role. Nobody changes their own role
+    (project-viewer-role 01, GK B R5).
+    """
+    roles = roles or {}
     root = project_acl.resolve_tree_root(db, project)
 
     desired: set[uuid.UUID] = set(user_ids)
+    stray = set(roles) - desired
+    if stray:
+        raise HTTPException(
+            status_code=400,
+            detail="roles names a user who is not in user_ids",
+        )
     for member_id in desired:
         membership = get_user_membership(db, member_id)
         if membership is None or membership.org_id != root.org_id:
@@ -681,6 +704,12 @@ def set_root_members(
         ).all()
     }
 
+    own = roles.get(actor.id)
+    if own is not None:
+        current = _stored_role(existing[actor.id]) if actor.id in existing else "editor"
+        if own != current:
+            raise HTTPException(status_code=400, detail="You cannot change your own role")
+
     for member_id in desired - set(existing):
         db.add(
             ProjectMembership(
@@ -688,8 +717,13 @@ def set_root_members(
                 user_id=member_id,
                 assigned_by=actor.id,
                 assigned_at=_now(),
+                # Written explicitly: NULL would read view-only (GK B3 V1).
+                role=roles.get(member_id, "editor"),
             )
         )
+    for member_id in desired & set(existing):
+        if member_id in roles:
+            existing[member_id].role = roles[member_id]
     for member_id in set(existing) - desired:
         db.delete(existing[member_id])
 

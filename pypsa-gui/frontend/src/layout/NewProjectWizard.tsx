@@ -16,6 +16,7 @@ import { DcLoadForm } from '../pages/hubDesign/cards/DcLoadForm'
 import { DC_TEMPLATES } from '../pages/hubDesign/dcLoadForm'
 import FromFolderTab from './FromFolderTab'
 import { ioApi } from '../api/io'
+import { hasModelExtension, modelExtensions, modelImportApi } from '../api/modelImport'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
 import { invalidateNetworkQueries, formatRelativeTime } from '../utils/projectActions'
@@ -32,7 +33,7 @@ import { CREATE_LABEL } from './newProjectVocabulary'
 //
 //   • Blank       — name + create empty project (legacy behaviour)
 //   • Template    — pick a curated example network
-//   • From file   — drop a .pypsaproj.zip (full project + results); .nc wraps as project
+//   • Import file — drop a .pypsaproj.zip (full project + results); .nc wraps as project
 //   • Clone       — fork an existing project under a new name
 //
 // Tabs share a single header + the same `onClose`. Submission paths vary per
@@ -49,6 +50,8 @@ export interface NewProjectWizardProps {
   // separate action cards, so it needs to open the wizard already on the one
   // the user clicked; the workbench omits it and gets 'blank'.
   initialTab?: NewProjectTab
+  // The Duplicate tab starts with this project picked (the card menu's Duplicate).
+  initialCloneSource?: string
   // Called after a decision study's intake was opened (the `decision` tab).
   // The projects home passes a navigation into the workbench, where the
   // decision panel lives; the workbench omits it.
@@ -90,7 +93,7 @@ export const TEMPLATES = [
 ] as const
 
 export default function NewProjectWizard({
-  existingProjects, onConfirm, onClose, isPending, initialTab = 'blank', onDecisionStart,
+  existingProjects, onConfirm, onClose, isPending, initialTab = 'blank', initialCloneSource, onDecisionStart,
 }: NewProjectWizardProps) {
   const [tab, setTab] = useState<Tab>(initialTab)
   const { authEnabled } = useAuthMode()
@@ -140,7 +143,7 @@ export default function NewProjectWizard({
         {tab === 'blank'    && <BlankTab    existingProjects={existingProjects} onConfirm={onConfirm} onClose={onClose} isPending={isPending} />}
         {tab === 'template' && <TemplateTab onClose={onClose} />}
         {tab === 'file'     && <FromFileTab onClose={onClose} />}
-        {tab === 'clone'    && <CloneTab    existingProjects={existingProjects} onClose={onClose} />}
+        {tab === 'clone'    && <CloneTab    existingProjects={existingProjects} onClose={onClose} initialSource={initialCloneSource} />}
         {tab === 'study'    && <StudyTab    existingProjects={existingProjects} onClose={onClose} />}
         {tab === 'decision' && <DecisionTab existingProjects={existingProjects} onClose={onClose} onStarted={onDecisionStart} onBlank={() => setTab('blank')} />}
         {tab === 'folder' && !authEnabled && <FromFolderTab onClose={onClose} />}
@@ -253,7 +256,7 @@ function BlankTab({ existingProjects, onConfirm, onClose, isPending }: NewProjec
 
       <p className="text-[11px] text-muted leading-relaxed">
         Creates a blank project — the canvas starts empty. Add components from the sidebar palette
-        or switch to the <strong>From file</strong> tab to import an existing network.
+        or switch to the <strong>{CREATE_LABEL.file}</strong> tab to import an existing network.
       </p>
 
       <div className="flex gap-2 pt-2 border-t border-border justify-end -mx-5 px-5">
@@ -291,7 +294,7 @@ function TemplateTab({ onClose }: { onClose: () => void }) {
 
   const handlePick = useCallback((id: string, available: boolean) => {
     if (!available) {
-      toast('This template isn\'t bundled yet. Use the From file tab to import a .nc network instead.', {
+      toast(`This template isn't bundled yet. Use the ${CREATE_LABEL.file} tab to import a .nc network instead.`, {
         icon: '📂',
         duration: 5000,
       })
@@ -340,7 +343,7 @@ function TemplateTab({ onClose }: { onClose: () => void }) {
               disabled={disabled}
               title={t.available
                 ? `Create a new project from the ${t.name} template`
-                : 'Not bundled yet — use the From file tab instead'}
+                : `Not bundled yet — use the ${CREATE_LABEL.file} tab instead`}
               className={`text-left border rounded-lg p-3.5 flex flex-col gap-2 transition-all
                 ${t.available
                   ? 'border-border hover:border-accent/60 hover:bg-accent/5 cursor-pointer'
@@ -415,25 +418,29 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
     staleTime: 10_000,
   })
 
+  const { data: formats } = useQuery({
+    queryKey: ['model-import-formats'],
+    queryFn: modelImportApi.formats,
+    staleTime: 300_000,
+    retry: false,
+  })
+  const modelExts = modelExtensions(formats)
+
   const importMut = useMutation({
     mutationFn: async (file: File) => {
       const lower = file.name.toLowerCase()
-      // Full project bundle — network + results + config + layout.
-      if (lower.endsWith('.pypsaproj.zip') || lower.endsWith('.zip')) {
-        return projectsApi.importBundle(file)
-      }
-      // Raw PyPSA netcdf: load into memory, then Save as a new project.
+      // Raw PyPSA netcdf or MATPOWER case: load into memory, then Save as a new project.
       // Network-only (no results_state.pkl / solver sidecars).
-      if (lower.endsWith('.nc')) {
-        const summary = await ioApi.importNetcdf(file)
-        const base = file.name.replace(/\.nc$/i, '').trim() || 'imported_project'
+      if (lower.endsWith('.nc') || lower.endsWith('.m')) {
+        const summary = lower.endsWith('.nc') ? await ioApi.importNetcdf(file) : await ioApi.importMatpower(file)
+        const base = file.name.replace(/\.(nc|m)$/i, '').trim() || 'imported_project'
         const names = (existingProjects as { name: string }[]).map(p => p.name)
         const name = _uniqueProjectName(base, names)
         await projectsApi.save(name, false, true, undefined, true)
         return { imported: name, summary }
       }
       throw new Error(
-        'Unsupported file. Use a .pypsaproj.zip project bundle (network + results), or a .nc network file.',
+        `Unsupported file. Use a .pypsaproj.zip project file, a .nc or .m network file, an .xlsx input workbook or a model file (${modelExts.join(' ') || 'PSS/E, PowerFactory, PLEXOS'}).`,
       )
     },
     onSuccess: (res) => {
@@ -453,8 +460,24 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
     onError: (e: Error) => toast.error(`Import failed: ${e.message}`),
   })
 
-  const onFile = (file: File) => {
+  const onFiles = (list: File[]) => {
+    const file = list[0]
     if (!file) return
+    // A project file or a model file is previewed before anything is created (IMPORT-FLOW-1):
+    // the model dialog takes the files from here. A model can be several files (a PSS/E
+    // case and its dynamics), so a choice of several files goes there as a set.
+    if (/\.pypsaproj\.zip$/i.test(file.name) || list.length > 1 || hasModelExtension(file.name, modelExts) && !/\.xlsx$/i.test(file.name)) {
+      onClose()
+      useUIStore.getState().requestModelImport(list)
+      return
+    }
+    // An Excel input workbook is previewed before anything is created (IMPORT-FLOW-1):
+    // the workbook dialog takes the file from here.
+    if (file.name.toLowerCase().endsWith('.xlsx')) {
+      onClose()
+      useUIStore.getState().requestWorkbookImport(file)
+      return
+    }
     importMut.mutate(file)
   }
 
@@ -468,20 +491,20 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
         onDrop={e => {
           e.preventDefault()
           setDragOver(false)
-          const f = e.dataTransfer.files?.[0]
-          if (f) onFile(f)
+          onFiles(Array.from(e.dataTransfer.files ?? []))
         }}
       >
         <Upload size={28} className="text-muted" />
-        <span className="text-sm font-medium text-text">Drop a .pypsaproj.zip project file here</span>
-        <span className="text-[11px] text-muted">or click to browse · .nc also accepted (network only)</span>
+        <span className="text-sm font-medium text-text">Drop a .pypsaproj.zip project file or a model file here</span>
+        <span className="text-[11px] text-muted">or click to browse · a model in several files: choose them together</span>
         <input
           type="file"
-          accept=".pypsaproj.zip,.zip,.nc"
+          multiple
+          accept={['.pypsaproj.zip', '.nc', '.m', '.xlsx', ...modelExts].join(',')}
           className="hidden"
           onChange={e => {
-            const f = e.target.files?.[0]
-            if (f) onFile(f)
+            onFiles(Array.from(e.target.files ?? []))
+            e.target.value = ''
           }}
         />
       </label>
@@ -495,6 +518,16 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
         Restores Results tabs when the file was saved after a solve.
         <br />
         <strong>.nc</strong> — PyPSA network only; wrapped as a new project (no GUI side-results).
+        <br />
+        <strong>.m</strong> — MATPOWER case; wrapped as a new project like .nc.
+        <br />
+        <strong>.xlsx</strong>: an Excel input workbook you filled in. It shows what it reads before the project is created.
+        {(formats ?? []).filter(f => f.id !== 'excel').map(f => (
+          <Fragment key={f.id}>
+            <br />
+            <strong>{f.extensions.join(' ')}</strong>: {f.label}. It shows what it carries and what it does not before the project is created.
+          </Fragment>
+        ))}
       </p>
     </div>
   )
@@ -502,16 +535,17 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
 
 // ── Tab 4: Clone — fork an existing project ───────────────────────────────
 
-function CloneTab({ existingProjects, onClose }: {
+function CloneTab({ existingProjects, onClose, initialSource }: {
   existingProjects: ProjectInfo[]
   onClose: () => void
+  initialSource?: string
 }) {
   const qc = useQueryClient()
   const setCurrentProject = useUIStore(s => s.setCurrentProject)
   const setProjectName    = useUIStore(s => s.setProjectName)
   const currentProject    = useUIStore(s => s.currentProject)
   const openInWorkbench = useOpenInWorkbench()
-  const [sourceId, setSourceId] = useState<string | null>(null)
+  const [sourceId, setSourceId] = useState<string | null>(initialSource ?? null)
   const [newName, setNewName]   = useState('')
 
   // Auto-suggest "<source>_copy" the first time a source is picked.

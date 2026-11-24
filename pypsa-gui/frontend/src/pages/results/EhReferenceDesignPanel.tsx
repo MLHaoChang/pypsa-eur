@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { plainReason } from '../hubDesign/plainWords'
 import { SizedDesignTable } from './SizedDesignTable'
+import { hasNoVerdict, NoVerdictNote } from '../hubDesign/noVerdict'
 import { CompletenessChips, statusTone as sharedStatusTone } from '../../components/CompletenessChips'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Hexagon, Square } from 'lucide-react'
@@ -26,7 +28,7 @@ import {
   type EhStudyRequestBody,
 } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
-import { goalText, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
+import { MAX_GOAL_DRAWS, goalText, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import { ReliabilityGoalSummary } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
 import { openReliabilityGoal } from '../../layout/flowNavigation'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
@@ -40,6 +42,9 @@ import { prepareTaggingTour } from './prepareTaggingTour'
 import { InfoTip } from '../../layout/properties/cardKit'
 import type { ZeroReason } from './fmea'
 import { CRITICALITY_PER_YEAR_LABEL } from './fmea'
+import { verdictWord } from '../hubDesign/verdictWords'
+import { plainIds } from '../hubDesign/plainWords'
+import { takeImprovePrefill, useImprovePrefillStore } from '../hubDesign/improvePrefill'
 import { leverKindWords } from './leverKindWords'
 
 const ARCHETYPES: { id: EhArchetype; label: string; blurb: string }[] = [
@@ -282,7 +287,30 @@ export const CERTIFICATION_NEXT = {
   // links there ("Change in Scenarios & optimisation ›").
   inconclusive: 'Next: raise the MC draws in the reliability goal or tighten the plan; an inconclusive verdict is not a failure.',
   noTarget: 'Next: set an allowed shortfall in the reliability goal to certify.',
+  // GK A F6': a must-stay-on bus behind one feeder holds the pass back; the
+  // interval may sit under the goal, so more draws would not settle it.
+  feederBound: 'Next: add a second feeder to the must-stay-on bus or make its feeder more reliable; more simulation draws would not settle this verdict.',
+  // GK R2: a feeder without outage data is taken as always out; its data
+  // comes first.
+  feederNoData: "Next: add outage data for the must-stay-on bus's feeder, or add a second feeder; more simulation draws would not settle this verdict.",
 } as const
+
+function feederNext(fb: unknown): string {
+  const pockets = (fb as { pockets?: { no_data?: string[] }[] } | null)?.pockets ?? []
+  return pockets.some((p) => (p.no_data ?? []).length > 0)
+    ? CERTIFICATION_NEXT.feederNoData : CERTIFICATION_NEXT.feederBound
+}
+
+/** template-e2e 21: the goal is under the smallest shortfall the run can
+ *  show, so only the stated draw count (or a goal above zero) settles it; a
+ *  tighter plan does not. */
+export function belowFloorNext(minDraws: unknown): string {
+  if (typeof minDraws === 'number' && minDraws > MAX_GOAL_DRAWS && Number.isFinite(minDraws))
+    return `Next: allow more shortfall in the reliability goal. Even ${MAX_GOAL_DRAWS} simulation runs (the most allowed) could not show that this goal is met.`
+  return typeof minDraws === 'number' && Number.isFinite(minDraws)
+    ? `Next: raise the simulation runs per check to at least ${minDraws}. With fewer, the smallest shortfall it can show is above your goal, so a tighter plan cannot settle it.`
+    : 'Next: allow some shortfall in the reliability goal. No number of simulation runs can show that a 0 h/yr goal is met.'
+}
 
 /** MC certification headline from the `certification` section, if it ran. */
 export function certificationHeadline(report: EhReferenceDesignReport): {
@@ -311,7 +339,10 @@ export function certificationHeadline(report: EhReferenceDesignReport): {
   // No target (the study reports LOLE but certifies nothing) and the 'none'
   // metric both leave the verdict empty: the next step is to set a target.
   const next = verdict === 'fail' ? CERTIFICATION_NEXT.fail
-    : verdict === 'inconclusive' ? CERTIFICATION_NEXT.inconclusive
+    : verdict === 'inconclusive'
+      ? (payload.feeder_bound ? feederNext(payload.feeder_bound)
+        : payload.below_floor === true ? belowFloorNext(payload.min_draws)
+          : CERTIFICATION_NEXT.inconclusive)
       : verdict === 'pass' ? null
         : (verdict == null || verdict === 'none' || payload.metric === 'none')
           ? CERTIFICATION_NEXT.noTarget : null
@@ -911,7 +942,7 @@ export function ReadinessSummary({ r }: { r: EhReadiness }) {
         </ul>
       )}
       {r.warnings.map((w, i) => (
-        <span key={i} className="text-warn">{w}</span>
+        <span key={i} className="text-warn">{plainReason(w)}</span>
       ))}
     </div>
   )
@@ -992,6 +1023,31 @@ export function EhReferenceDesignPanel() {
   }, [template, currentProject])
   const setField = (k: keyof PackForm) =>
     (e: { target: { value: string } }) => setForm(f => ({ ...f, [k]: e.target.value }))
+  // Template-e2e 22 (IMPROVE-MANUAL-1): an Improve card's "Open in Expert"
+  // hands over a filled-in form, once, for this project. It opens the panel
+  // and its settings; nothing runs until the user presses Run. The note
+  // stands only while the form is still the one handed over.
+  const prefillPending = useImprovePrefillStore(s => !!s.prefill?.pack)
+  const [filledFrom, setFilledFrom] = useState<{ title: string; form: PackForm } | null>(null)
+  useEffect(() => {
+    if (!prefillPending) return
+    const got = takeImprovePrefill(currentProject, 'pack')
+    if (!got) return
+    preselectedFor.current = currentProject
+    setForm(got.pack)
+    setFilledFrom({ title: got.title, form: got.pack })
+    setOpen(true)
+    setSettingsOpen(true)
+  }, [prefillPending, currentProject])
+  const filledNote = filledFrom && JSON.stringify(filledFrom.form) === JSON.stringify(form)
+    ? filledFrom.title : null
+  useEffect(() => { if (filledFrom && !filledNote) setFilledFrom(null) }, [filledFrom, filledNote])
+  const filledProject = useRef(currentProject)
+  useEffect(() => {
+    if (filledProject.current === currentProject) return
+    filledProject.current = currentProject
+    setFilledFrom(null)
+  }, [currentProject])
 
   const studyKey = nk(currentProject, 'results', 'eh_study')
   const reportKey = nk(currentProject, 'results', 'eh_reference_design')
@@ -1070,7 +1126,7 @@ export function EhReferenceDesignPanel() {
     queryFn: () => resultsApi.getEhRedundancy(),
     enabled: !running,
   })
-  const { data: levers } = useQuery({
+  const { data: levers, status: leversStatus, isFetching: leversFetching } = useQuery({
     queryKey: levKey,
     queryFn: () => resultsApi.getEhLevers(),
     enabled: !running,
@@ -1120,6 +1176,15 @@ export function EhReferenceDesignPanel() {
     requestAnimationFrame(() => document.querySelector('[data-testid="eh-levers"]')
       ?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }))
   }, [sectionRequest, open, hasLevers])
+  // The levers query settled (error, or no options) without a levers block:
+  // drop the request, so a later remount with levers does not jump unasked.
+  const leversSettledEmpty = !running && !leversFetching && !hasLevers
+    && (leversStatus === 'error' || leversStatus === 'success')
+  useEffect(() => {
+    if (sectionRequest === LEVERS_SECTION && leversSettledEmpty) {
+      useUIStore.getState().clearResultsSectionRequest()
+    }
+  }, [sectionRequest, leversSettledEmpty])
   const dtcTable = running ? null : (dtcStress ?? null) as EhDtcStressTable | null
   const dtcPlanTable = running ? null
     : (dtcPlanning ?? null) as EhDtcPlanningTable | null
@@ -1166,7 +1231,8 @@ export function EhReferenceDesignPanel() {
     () => completenessRows(report?.completeness),
     [report?.completeness],
   )
-  const cert = report ? certificationHeadline(report) : null
+  const noVerdict = hasNoVerdict(template?.id)
+  const cert = report && !noVerdict ? certificationHeadline(report) : null
   const frPoints = report ? frontierPoints(report) : []
   const frPayload = report?.sections?.frontier?.payload as
     | EhFrontierPayload | null | undefined
@@ -1267,7 +1333,7 @@ export function EhReferenceDesignPanel() {
                 <span className="font-mono">{template.recommended_archetype}</span>
               </span>
               {(template.study_notes ?? []).map((note, i) => (
-                <span key={i} className="text-muted">• {note}</span>
+                <span key={i} className="text-muted">• {plainReason(note)}</span>
               ))}
               {template.provenance && (
                 <span className="text-muted italic">{template.provenance}</span>
@@ -1424,6 +1490,11 @@ export function EhReferenceDesignPanel() {
             )}
           </div>
 
+          {filledNote && (
+            <p role="status" data-testid="eh-filled-from-improve" className="text-[11px] text-muted">
+              Filled in from the Improve card: {filledNote}. Review and run.
+            </p>
+          )}
           <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
@@ -1481,7 +1552,7 @@ export function EhReferenceDesignPanel() {
                   <span className="text-muted">Archetype </span>
                   <span className="text-text font-medium">{report.archetype}</span>
                 </span>
-                {report.ens_cap_permyriad != null && (
+                {!noVerdict && report.ens_cap_permyriad != null && (
                   <span data-testid="eh-report-ens-cap">
                     <span className="text-muted">ENS cap </span>
                     <span className="text-text font-mono">
@@ -1489,7 +1560,7 @@ export function EhReferenceDesignPanel() {
                     </span>
                   </span>
                 )}
-                {report.achieved_ens_permyriad != null && (
+                {!noVerdict && report.achieved_ens_permyriad != null && (
                   <span data-testid="eh-report-ens-achieved">
                     <span className="text-muted">Achieved </span>
                     <span className="text-text font-mono">
@@ -1528,7 +1599,7 @@ export function EhReferenceDesignPanel() {
                     className={verdictTone(cert.verdict)}
                     title="MC LOLE certification (decision 2): certified only when the 95% CI upper bound is within the target"
                   >
-                    {cert.verdict === 'pass' ? 'Certified' : 'Not certified'}
+                    {verdictWord(cert.verdict)}
                     {' '}({cert.verdict}
                     {cert.target != null ? ` vs ${cert.target} h/yr` : ''})
                   </span>
@@ -1623,12 +1694,13 @@ export function EhReferenceDesignPanel() {
                   className="flex flex-col gap-0.5 text-[10px] text-warn"
                   data-testid="eh-report-notes"
                 >
-                  {report.notes!.map((note, i) => <li key={i}>{note}</li>)}
+                  {report.notes!.map((note, i) => <li key={i}>{plainReason(note)}</li>)}
                 </ul>
               )}
 
+              <NoVerdictNote templateId={template?.id} testId="eh-no-verdict" />
               <CompletenessChips
-                rows={completeness.map(({ name, status }) => ({
+                rows={completeness.filter(({ name }) => !(noVerdict && name === 'certification')).map(({ name, status }) => ({
                   name, status, note: report.sections?.[name]?.note ?? null }))}
                 testId="eh-completeness"
                 itemTestIdPrefix="eh-section-"
@@ -1690,6 +1762,11 @@ export function EhReferenceDesignPanel() {
                           <span className="text-text">{certification.ens_met ? 'met' : 'missed'}</span>
                         </span>
                       )}
+                      {certification.critical_feeder_note && (
+                        <span data-testid="eh-certification-feeders" className="text-muted">
+                          {plainIds(certification.critical_feeder_note)}
+                        </span>
+                      )}
                       {importModelLabel(certification) && (
                         <span
                           data-testid="eh-certification-import"
@@ -1721,7 +1798,7 @@ export function EhReferenceDesignPanel() {
                   )}
                   {report.sections?.certification?.note && (
                     <p className="text-[10px] text-muted" data-testid="eh-certification-note">
-                      {report.sections.certification.note}
+                      {plainIds(report.sections.certification.note)}
                     </p>
                   )}
                   {certification?.warning && (

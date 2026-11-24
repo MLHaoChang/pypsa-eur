@@ -34,6 +34,7 @@ from models.design_intent import DesignIntentSpec
 from services import period_utils
 from models.schemas import (
     CompareState,
+    CompareStudy,
     ResultsSummary,
 )
 from services.pypsa_service import PyPSAService
@@ -275,6 +276,7 @@ def get_compare_state(
         **_scenario_fields_from_meta(meta),
         created_at=meta.get("created_at"),
         last_saved=meta.get("last_saved"),
+        eh_study=_saved_study(src, meta),
     )
 
 
@@ -302,16 +304,69 @@ def _read_lost_load_capture(project_dir: pathlib.Path) -> dict | None:
     Returns ``None`` for every "no capture" state (no pickle, unreadable
     pickle, key absent) — all of which mean "this project shed nothing".
     """
+    cap = _saved_results_state(project_dir).get("last_lost_load")
+    return cap if isinstance(cap, dict) else None
+
+
+def _saved_results_state(project_dir: pathlib.Path) -> dict:
+    """The project's ``results_state.pkl`` data; ``{}`` when there is none
+    or it cannot be read."""
     results_path = project_dir / "results_state.pkl"
     if not results_path.exists():
-        return None
+        return {}
     try:
         raw = _safe_unpickle_results(results_path.read_bytes())
     except Exception:
-        return None
+        return {}
     data = _unwrap_results_state(raw)
-    cap = data.get("last_lost_load") if isinstance(data, dict) else None
-    return cap if isinstance(cap, dict) else None
+    return data if isinstance(data, dict) else {}
+
+
+def _inherited_marker_changed(project_dir: pathlib.Path, rec: dict) -> bool:
+    """Whether the template marker the project reads from its base (a
+    scenario child's parent, a case's base) changed after the study
+    finished: such an edit is a study input the project's own revision does
+    not count. True when that cannot be told."""
+    from services import template_marker as tm
+
+    found = tm.resolve(project_dir)
+    if found.state != tm.BASE:
+        return found.state == tm.UNREADABLE
+    finished = rec.get("finished_at")
+    if not isinstance(finished, (int, float)) or isinstance(finished, bool):
+        return True
+    try:
+        return found.path.stat().st_mtime > finished
+    except OSError:
+        return True
+
+
+def _saved_study(project_dir: pathlib.Path, meta: dict) -> CompareStudy | None:
+    """The headline of the project's saved Guided study (issue 23), or None
+    when it has no finished (``done``) one. A study the network was edited
+    after, or whose revision is unknown, reads ``out_of_date``
+    (``study_state.edited_since``); so does one whose inherited template
+    marker changed after it finished."""
+    from services.study_state import edited_since
+
+    rec = _saved_results_state(project_dir).get("eh_study_record")
+    if not isinstance(rec, dict) or rec.get("status") != "done":
+        return None
+    report = rec.get("report") if isinstance(rec.get("report"), dict) else {}
+    edited = edited_since(rec, revision=int(meta.get("network_revision") or 0))
+    if edited is False and _inherited_marker_changed(project_dir, rec):
+        edited = True
+    certified = report.get("certified")
+    period = report.get("period_basis")
+    return CompareStudy(
+        state="current" if edited is False else "out_of_date",
+        cost_at_target_eur=_safe_float(report.get("cost_at_target_eur"), None),
+        period_basis=period if isinstance(period, str) else None,
+        achieved_ens_permyriad=_safe_float(report.get("achieved_ens_permyriad"), None),
+        ens_cap_permyriad=_safe_float(report.get("ens_cap_permyriad"), None),
+        mc_lole_h=_safe_float(report.get("mc_lole_h"), None),
+        certified=certified if isinstance(certified, bool) else None,
+    )
 
 
 @router.get("/{name}/results-summary")

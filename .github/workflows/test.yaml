@@ -18,8 +18,87 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Every paths filter runs once, here (RETRO-CI-1). A job with nothing to test
+  # is skipped by its job-level `if:` on one of these outputs, so it never takes
+  # a runner slot: the bottleneck is concurrent job slots, not runner-minutes.
+  # Scheduled and manual runs always run everything.
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    outputs:
+      unit: ${{ steps.filter.outputs.unit_inputs == 'true' || steps.not_docs.outputs.unit == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+      gridspine: ${{ steps.filter.outputs.gridspine == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+      gui_backend: ${{ steps.filter.outputs.gui_backend == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+      gui_frontend: ${{ steps.filter.outputs.gui_frontend == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+      gui_journeys: ${{ steps.filter.outputs.gui_journeys == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+      integration: ${{ steps.filter.outputs.integration == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - uses: dorny/paths-filter@v4
+      id: filter
+      with:
+        filters: |
+          gridspine:
+            - 'gridspine/**'
+            - 'tests/gridspine/**'
+            - 'pixi.toml'
+            - 'pixi.lock'
+            - '.github/workflows/test.yaml'
+          gui_backend:
+            - 'pypsa-gui/backend/**'
+            - 'pypsa-gui/tool-error-kinds.json'
+            - 'pypsa-gui/tool-error-kinds.d/**'
+            - 'pixi.toml'
+            - 'pixi.lock'
+            - '.github/workflows/test.yaml'
+          gui_frontend:
+            - 'pypsa-gui/frontend/**'
+            - 'pypsa-gui/tool-error-kinds.json'
+            - 'pypsa-gui/tool-error-kinds.d/**'
+            - '.github/workflows/test.yaml'
+          gui_journeys:
+            - 'pypsa-gui/backend/**'
+            - 'pypsa-gui/frontend/**'
+            - 'pixi.toml'
+            - 'pixi.lock'
+            - '.github/workflows/test.yaml'
+          integration:
+            - 'scripts/**'
+            - 'rules/**'
+            - 'data/**'
+            - 'Snakefile'
+            - 'config/**'
+            - 'pixi.toml'
+            - 'pixi.lock'
+            - '.github/workflows/test.yaml'
+          # The docs files that `pytest test` reads (OPEN-ITEMS numbering, the
+          # coordination scripts' docs/agents files, the release-notes hook).
+          unit_inputs:
+            - 'docs/agents/**'
+            - 'docs/superpowers/OPEN-ITEMS.md'
+            - 'doc/hooks.py'
+            - 'doc/release_notes.md'
+
+    # Unit ran on every pull request before. It still does, except for a change
+    # that only touches docs, release-note fragments or scratch notes: the
+    # `every` quantifier makes a file count only if it is outside all of these.
+    - uses: dorny/paths-filter@v4
+      id: not_docs
+      with:
+        predicate-quantifier: every
+        filters: |
+          unit:
+            - '**'
+            - '!doc/**'
+            - '!docs/**'
+            - '!.scratch/**'
+
   unit-tests:
     name: Unit
+    needs: changes
+    if: needs.changes.outputs.unit == 'true'
     runs-on: ubuntu-latest
 
     defaults:
@@ -42,6 +121,8 @@ jobs:
 
   gridspine-tests:
     name: Gridspine
+    needs: changes
+    if: needs.changes.outputs.gridspine == 'true'
     runs-on: ubuntu-latest
     # The suite solves real MILPs in its fixtures (~6-11 min observed); the cap
     # is there so a solve that stops converging fails loudly instead of holding
@@ -55,23 +136,7 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
-    - uses: dorny/paths-filter@v4
-      id: filter
-      with:
-        filters: |
-          src:
-            - 'gridspine/**'
-            - 'tests/gridspine/**'
-            - 'pixi.toml'
-            - 'pixi.lock'
-            - '.github/workflows/test.yaml'
-
-    - name: Skip - no gridspine changes
-      if: steps.filter.outputs.src != 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
-      run: echo "Skipping gridspine tests because no gridspine source changes detected"
-
     - name: Setup Pixi
-      if: steps.filter.outputs.src == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       uses: prefix-dev/setup-pixi@v0.10.0
       with:
         pixi-version: v0.68.1
@@ -84,7 +149,6 @@ jobs:
     # documented (no `from_psse` in pandapower 3.1.2; the PowerFactory fixture
     # awaits a manual export), so a green run here is 247 passed, 2 skipped.
     - name: Run gridspine tests
-      if: steps.filter.outputs.src == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       run: |
         pixi run gridspine-tests
 
@@ -100,45 +164,30 @@ jobs:
   # desktop-download tests SKIP and a green suite means nothing.
   #
   # Four jobs, because one serial run of the ~14,000 tests took ~2 h:
-  #   gui-backend-changes  the paths filter, once; the others read its output
-  #   gui-backend-tests    the pytest suite, split by file into 4 shards
+  #   changes              the paths filters, once (the job at the top)
+  #   gui-backend-tests    the pytest suite, split by file into 8 shards, each run with
+  #                        pytest-xdist across the runner's cores (`-n auto --dist
+  #                        loadfile`: a file stays in one worker process)
   #                        (`--num-shards`/`--shard-id`, tests/_shard.py)
   #   gui-backend-qa       the pilot evaluation gate and the qa_*.py drivers,
   #                        once, beside the shards
   #   gui-backend          "GUI backend", the check branch protection and the
   #                        sessions look for: green only if every job above is,
   #                        and green on its own when no backend file changed
-  gui-backend-changes:
-    name: GUI backend changes
-    runs-on: ubuntu-latest
-    outputs:
-      run: ${{ steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-
-    steps:
-    - uses: actions/checkout@v7
-
-    - uses: dorny/paths-filter@v4
-      id: filter
-      with:
-        filters: |
-          gui:
-            - 'pypsa-gui/backend/**'
-            - 'pypsa-gui/tool-error-kinds.json'
-            - 'pypsa-gui/tool-error-kinds.d/**'
-            - 'pixi.toml'
-            - 'pixi.lock'
-            - '.github/workflows/test.yaml'
-
   gui-backend-tests:
-    name: GUI backend shard ${{ matrix.shard }}/4
-    needs: gui-backend-changes
-    if: needs.gui-backend-changes.outputs.run == 'true'
+    name: GUI backend shard ${{ matrix.shard }}/8
+    needs: changes
+    if: needs.changes.outputs.gui_backend == 'true'
     runs-on: ubuntu-latest
+    # Without a cap a hung shard held its runner for GitHub's 6 h limit. The 8
+    # xdist shards took 19-62 min each (run 44899424122); 120 leaves headroom
+    # and frees a wedged runner an hour sooner than 180 did.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
         # 1-based here for the job name; pytest's --shard-id is 0-based.
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
 
     defaults:
       run:
@@ -168,21 +217,24 @@ jobs:
       run: npm ci --no-audit --no-fund
 
     # The full output goes to a log file and the artifact below, so a failure
-    # can be read whole instead of from under the job log's tail.
+    # can be read whole instead of from under the job log's tail. `-vv` (on top
+    # of pytest.ini's -q) prints every test's name, so a shard that stalls
+    # shows which test it stalled on.
     - name: Run backend tests
       run: |
         set -o pipefail
         mkdir -p pypsa-gui/backend/test-results
         pixi run gui-tests \
-          --num-shards=4 --shard-id=$(( ${{ matrix.shard }} - 1 )) \
-          --junitxml=test-results/junit.xml --durations=30 \
+          --num-shards=8 --shard-id=$(( ${{ matrix.shard }} - 1 )) \
+          -n auto --dist loadfile \
+          --junitxml=test-results/junit.xml --durations=30 -vv \
           2>&1 | tee pypsa-gui/backend/test-results/pytest.log
 
     - name: Upload test results
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: gui-backend-shard-${{ matrix.shard }}-of-4
+        name: gui-backend-shard-${{ matrix.shard }}-of-8
         path: pypsa-gui/backend/test-results/
         if-no-files-found: warn
 
@@ -192,8 +244,8 @@ jobs:
   # own red shard. ~2 min.
   gui-backend-qa:
     name: GUI backend pilot gate and QA drivers
-    needs: gui-backend-changes
-    if: needs.gui-backend-changes.outputs.run == 'true'
+    needs: changes
+    if: needs.changes.outputs.gui_backend == 'true'
     runs-on: ubuntu-latest
 
     defaults:
@@ -231,19 +283,19 @@ jobs:
 
   gui-backend:
     name: GUI backend
-    needs: [gui-backend-changes, gui-backend-tests, gui-backend-qa]
+    needs: [changes, gui-backend-tests, gui-backend-qa]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
 
     steps:
     - name: Skip - no backend changes
-      if: needs.gui-backend-changes.result == 'success' && needs.gui-backend-changes.outputs.run != 'true'
+      if: needs.changes.result == 'success' && needs.changes.outputs.gui_backend != 'true'
       run: echo "Skipping tests because no pypsa-gui/backend changes detected"
 
     - name: Require every shard and the QA job
-      if: needs.gui-backend-changes.result != 'success' || needs.gui-backend-changes.outputs.run == 'true'
+      if: needs.changes.result != 'success' || needs.changes.outputs.gui_backend == 'true'
       env:
-        CHANGES: ${{ needs.gui-backend-changes.result }}
+        CHANGES: ${{ needs.changes.result }}
         TESTS: ${{ needs.gui-backend-tests.result }}
         QA: ${{ needs.gui-backend-qa.result }}
       run: |
@@ -256,6 +308,8 @@ jobs:
   # the backend.
   gui-frontend-tests:
     name: GUI frontend
+    needs: changes
+    if: needs.changes.outputs.gui_frontend == 'true'
     runs-on: ubuntu-latest
 
     defaults:
@@ -266,22 +320,7 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
-    - uses: dorny/paths-filter@v4
-      id: filter
-      with:
-        filters: |
-          gui:
-            - 'pypsa-gui/frontend/**'
-            - 'pypsa-gui/tool-error-kinds.json'
-            - 'pypsa-gui/tool-error-kinds.d/**'
-            - '.github/workflows/test.yaml'
-
-    - name: Skip - no frontend changes
-      if: steps.filter.outputs.gui != 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
-      run: echo "Skipping tests because no pypsa-gui/frontend changes detected"
-
     - name: Setup Node
-      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       uses: actions/setup-node@v4
       with:
         node-version: 22
@@ -289,15 +328,12 @@ jobs:
         cache-dependency-path: pypsa-gui/frontend/package-lock.json
 
     - name: Install
-      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       run: npm ci --no-audit --no-fund
 
     - name: Type-check
-      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       run: npx tsc --noEmit -p .
 
     - name: Run frontend tests
-      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       run: npx vitest --run
 
   # Tier A owner journeys in a real browser (LC-13): the built app against the
@@ -306,6 +342,8 @@ jobs:
   # flake must not hold the backend gate, and it has its own paths filter.
   gui-owner-journeys:
     name: GUI owner journeys (browser)
+    needs: changes
+    if: needs.changes.outputs.gui_journeys == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -320,27 +358,12 @@ jobs:
       OJ05_ARTIFACTS: ${{ github.workspace }}/oj-artifacts/oj05
       OJ21_ARTIFACTS: ${{ github.workspace }}/oj-artifacts/oj21
       LC03H_ARTIFACTS: ${{ github.workspace }}/oj-artifacts/lc03h
+      TJ_ARTIFACTS: ${{ github.workspace }}/oj-artifacts/template-journey
 
     steps:
     - uses: actions/checkout@v7
 
-    - uses: dorny/paths-filter@v4
-      id: filter
-      with:
-        filters: |
-          gui:
-            - 'pypsa-gui/backend/**'
-            - 'pypsa-gui/frontend/**'
-            - 'pixi.toml'
-            - 'pixi.lock'
-            - '.github/workflows/test.yaml'
-
-    - name: Skip - no GUI changes
-      if: steps.filter.outputs.gui != 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
-      run: echo "Skipping owner journeys because no GUI changes detected"
-
     - name: Setup Pixi
-      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       uses: prefix-dev/setup-pixi@v0.10.0
       with:
         pixi-version: v0.68.1
@@ -349,7 +372,6 @@ jobs:
         cache-write: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
 
     - name: Setup Node
-      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       uses: actions/setup-node@v4
       with:
         node-version: 22
@@ -357,32 +379,33 @@ jobs:
         cache-dependency-path: pypsa-gui/frontend/package-lock.json
 
     - name: Build the frontend
-      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       working-directory: pypsa-gui/frontend
       run: |
         npm ci --no-audit --no-fund
         npm run build
 
     - name: Install Playwright and its Chromium
-      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       run: |
         npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/pw" "playwright@$PLAYWRIGHT_VERSION"
         "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
 
     - name: Run the owner journeys (OJ-01, OJ-05, OJ-21, LC-03 past runs)
-      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       working-directory: pypsa-gui/frontend
       env:
         PLAYWRIGHT_MODULE_PATH: ${{ runner.temp }}/pw/node_modules/playwright/package.json
         PYPSA_COMPOSER_PYTHON: ${{ github.workspace }}/.pixi/envs/test/bin/python
       run: |
-        mkdir -p "$OJ01_ARTIFACTS" "$OJ05_ARTIFACTS" "$OJ21_ARTIFACTS" "$LC03H_ARTIFACTS"
+        mkdir -p "$OJ01_ARTIFACTS" "$OJ05_ARTIFACTS" "$OJ21_ARTIFACTS" "$LC03H_ARTIFACTS" "$TJ_ARTIFACTS"
         status=0
         node scripts/smoke-copilot-oj01.mjs || status=1
         node scripts/smoke-copilot-oj05.mjs || status=1
         node scripts/smoke-copilot-oj21.mjs || status=1
         node scripts/smoke-copilot-lc03-historical.mjs || status=1
         node scripts/smoke-copilot-lc06-d24.mjs || status=1
+        # E2E-TEMPLATES-1: the template journey, section 3 (template-e2e 02).
+        node scripts/smoke-template-journey-connection.mjs || status=1
+        # Investment walkthrough 02: the data centre's investment case, Guided = Expert, no raw codes.
+        node scripts/smoke-template-journey-investment.mjs || status=1
         exit $status
 
     - name: Upload journey screenshots
@@ -402,6 +425,8 @@ jobs:
   # journeys: a browser flake must not hold the backend gate.
   gui-template-journeys:
     name: GUI template journeys (browser)
+    needs: changes
+    if: needs.changes.outputs.gui_journeys == 'true'
     runs-on: ubuntu-latest
     # The full journey waits for the staged concentrator study (26,280 snapshots,
     # up to 30 steps), which took over 15 minutes locally.
@@ -418,23 +443,7 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
-    - uses: dorny/paths-filter@v4
-      id: filter
-      with:
-        filters: |
-          gui:
-            - 'pypsa-gui/backend/**'
-            - 'pypsa-gui/frontend/**'
-            - 'pixi.toml'
-            - 'pixi.lock'
-            - '.github/workflows/test.yaml'
-
-    - name: Skip - no GUI changes
-      if: steps.filter.outputs.gui != 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
-      run: echo "Skipping template journeys because no GUI changes detected"
-
     - name: Setup Pixi
-      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       uses: prefix-dev/setup-pixi@v0.10.0
       with:
         pixi-version: v0.68.1
@@ -443,7 +452,6 @@ jobs:
         cache-write: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
 
     - name: Setup Node
-      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       uses: actions/setup-node@v4
       with:
         node-version: 22
@@ -451,20 +459,17 @@ jobs:
         cache-dependency-path: pypsa-gui/frontend/package-lock.json
 
     - name: Build the frontend
-      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       working-directory: pypsa-gui/frontend
       run: |
         npm ci --no-audit --no-fund
         npm run build
 
     - name: Install Playwright and its Chromium
-      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       run: |
         npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/pw" "playwright@$PLAYWRIGHT_VERSION"
         "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
 
     - name: Run the template journeys (short on pull requests, full on schedule)
-      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       working-directory: pypsa-gui/frontend
       env:
         PLAYWRIGHT_MODULE_PATH: ${{ runner.temp }}/pw/node_modules/playwright/package.json
@@ -482,6 +487,8 @@ jobs:
 
   integration-tests:
     name: Integration
+    needs: changes
+    if: needs.changes.outputs.integration == 'true'
     runs-on: ${{ matrix.os }}-latest
     strategy:
       fail-fast: false
@@ -496,20 +503,6 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
-    - uses: dorny/paths-filter@v4
-      id: filter
-      with:
-        filters: |
-          src:
-            - 'scripts/**'
-            - 'rules/**'
-            - 'data/**'
-            - 'Snakefile'
-            - 'config/**'
-            - 'pixi.toml'
-            - 'pixi.lock'
-            - '.github/workflows/test.yaml'
-
     - name: Free up disk space
       run: |
         echo "Initial disk space"
@@ -521,12 +514,7 @@ jobs:
         echo "Final disk space"
         df -h
 
-    - name: Skip - no source changes
-      if: steps.filter.outputs.src != 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
-      run: echo "Skipping tests because no source code changes detected"
-
     - name: Setup Pixi
-      if: steps.filter.outputs.src == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       uses: prefix-dev/setup-pixi@v0.10.0
       with:
         pixi-version: v0.68.1
@@ -534,36 +522,30 @@ jobs:
         cache-write: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
 
     - name: Setup cache keys
-      if: steps.filter.outputs.src == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       run: |
         echo "WEEK=$(date +'%Y%U')" >> $GITHUB_ENV # data
         echo "MONTH=$(date +'%Y%m')" >> $GITHUB_ENV # cutouts
         echo "VERSIONS_HASH=${{ hashFiles('data/versions.csv') }}" >> $GITHUB_ENV
 
     - uses: actions/cache@v6
-      if: steps.filter.outputs.src == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       with:
         path: data
         key: data-${{ env.WEEK }}-${{ env.VERSIONS_HASH }}
 
     - uses: actions/cache@v6
-      if: steps.filter.outputs.src == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       with:
         path: cutouts
         key: cutouts-${{ env.MONTH }}
 
     - name: Restore git-tracked files in data/
-      if: steps.filter.outputs.src == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       run: git checkout HEAD -- data/
 
     - name: Run pylint check on scripts
-      if: steps.filter.outputs.src == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       # check for undefined variables to reuse functions across scripts
       run: |
         pixi run -e dev pylint --disable=all --enable=E0601,E0606 --output-format=parseable scripts/add_* scripts/prepare_* scripts/solve_*
 
     - name: Run snakemake test workflows
-      if: steps.filter.outputs.src == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       env:
         SNAKEMAKE_STORAGE_CACHED_HTTP_CACHE: ""
         SNAKEMAKE_STORAGE_CACHED_HTTP_SKIP_REMOTE_CHECKS: "1"

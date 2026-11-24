@@ -31,6 +31,7 @@ import pandapower.shortcircuit as sc
 import pandas as pd
 
 from gridspine.static.island_sc import machine_net
+from gridspine.static.series_caps import PROTECTION, series_caps
 
 #: Rated peak withstand current over rated short-time current (IEC 62271-1).
 PEAK_FACTOR = {50: 2.5, 60: 2.6}
@@ -49,11 +50,11 @@ def judge(ik_ka: float, ip_ka: float, rated_ka: float, f_hz: int):
     return True, f"Ik'' {ik_ka:.2f} kA and peak {ip_ka:.2f} kA within {rated_ka:g} kA / {peak_rated:.2f} kA"
 
 
-def campus_fault_levels(campus, installed) -> pd.DataFrame:
+def campus_fault_levels(campus, installed, *, island=False) -> pd.DataFrame:
     """One row per bus: ``bus``, ``vn_kv``, ``ikss_max_ka``, ``ip_max_ka``,
     ``ikss_min_ka``, ``rated_ka``, ``rating_source``, ``adequate``,
-    ``detail``."""
-    net = machine_net(campus, installed)
+    ``detail``. ``island`` takes the grid out (GC-08b)."""
+    net = machine_net(campus, installed, island=island)
     sc.calc_sc(net, case="max", ip=True)
     ik_max = net.res_bus_sc["ikss_ka"].copy()
     ip_max = net.res_bus_sc["ip_ka"].copy()
@@ -62,6 +63,11 @@ def campus_fault_levels(campus, installed) -> pd.DataFrame:
     p = campus.params
     ratings = p[p["param"] == "ik_rated_ka"].set_index("element")
     f_hz = int(round(float(net.f_hz)))
+    caps = series_caps(campus.net)
+    bypassed = sorted(map(str, caps.loc[caps[PROTECTION] != "none", "name"])) if not caps.empty else []
+    # GC-01b: machine_net shorts each bypassed series capacitor (IEC 60909-0)
+    cap_note = (f"; series capacitor(s) {bypassed} neglected: assumes the MOV or bypass conducts for every fault"
+                if bypassed else "")
     rows = []
     for i in net.bus.index:
         name = str(net.bus.at[i, "name"])
@@ -73,5 +79,6 @@ def campus_fault_levels(campus, installed) -> pd.DataFrame:
             rated = float(ratings.at[name, "value"])
             adequate, detail = judge(row["ikss_max_ka"], row["ip_max_ka"], rated, f_hz)
             row.update(rated_ka=rated, rating_source=ratings.at[name, "source"], adequate=adequate, detail=detail)
+        row["detail"] += cap_note
         rows.append(row)
     return pd.DataFrame(rows)

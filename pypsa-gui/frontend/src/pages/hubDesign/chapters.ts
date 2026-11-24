@@ -11,12 +11,14 @@ import { RESULT_GROUPS, type ResultsGroup, type ResultsTab } from '../results/gr
 import { fmtCurrency } from '../../utils/format'
 import { failureLine, runningLine } from '../campusRunProgress'
 import { studyStale } from '../results/investment/financeModel'
+import { blockerOf, couldNotFinish, NEED_TEXT, NEEDS_LEAD } from '../results/investment/investmentCaseNeeds'
 
 export type ChapterId = Exclude<ResultsGroup, 'summary'>
 
 /** Where a tile's detail is: a Results tab, the campus panel, or a Guided step. */
 export type ChapterOpen =
-  | { panel: 'results'; tab: ResultsTab }
+  /** `report`: land on the Expert reference-design report, not only the tab. */
+  | { panel: 'results'; tab: ResultsTab; report?: boolean }
   | { panel: 'campusStudy' | 'campusResults' }
   | { step: 'goal' }
 
@@ -47,10 +49,17 @@ export interface ChapterInputs {
                  verdict: 'pass' | 'fail' | 'inconclusive' | null
                  /** The project has its own solve; `false` marks the figure as the study's alone (G5). */
                  solved?: boolean
+                 /** template-e2e 11: this site type has no reliability verdict. */
+                 noVerdict?: boolean
                  /** The review says the study is out of date (N4). */
                  stale?: boolean
                  /** Years the Monte Carlo modelled (`certification.horizon_years`); names the basis line (N10). */
-                 horizonYears?: number | null }
+                 horizonYears?: number | null
+                 /** A must-stay-on bus behind one feeder holds the verdict back
+                  *  (review `summary.feeder_bound`, GK A F6'). */
+                 feederBound?: boolean
+                 /** The goal is under the run's resolution floor (template-e2e 21). */
+                 belowFloor?: boolean }
   /** `gfm`: the campus GFM settings (null when the project has no campus or no island). */
   operation: { status: SimulationStatus | null; gfm?: GfmSettingsState | null }
 }
@@ -77,9 +86,14 @@ function investment({ study, report }: ChapterInputs['investment']): Omit<Chapte
   if (study?.status === 'running') {
     return { label, value: '', state: 'running', reason: 'The investment case is running.', open }
   }
-  if (study && ['refused', 'error', 'failed'].includes(String(study.status))) {
-    const why = study.message || study.error || study.error_code || 'see the investment case'
-    return { label, value: '', state: 'unavailable', reason: `The investment case did not complete: ${why}.`, open }
+  // A refusal in plain words (issue 22, S2b): the input it needs, or the run's
+  // own reason without its code; never a raw code.
+  const blocker = blockerOf(null, study)
+  if (blocker) {
+    const reason = blocker.kind === 'needs'
+      ? `${NEEDS_LEAD} ${blocker.needs.map(n => NEED_TEXT[n].item.charAt(0).toLowerCase() + NEED_TEXT[n].item.slice(1)).join('; ')}.`
+      : couldNotFinish('guided', blocker.kind === 'unknown' ? blocker.detail : null, blocker.kind === 'unknown' && !!blocker.internal)
+    return { label, value: '', state: 'unavailable', reason, open }
   }
   if (!report) {
     return { label, value: '', state: 'not_run', open,
@@ -137,6 +151,10 @@ function gridPlan({ campus, notHub }: ChapterInputs['grid']): Omit<ChapterTile, 
 
 function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 'group'> {
   const label = 'Expected shortfall'
+  if (r.noVerdict) {
+    // The Verdict line above says it; the tile keeps its pill and a way to the report.
+    return { label, value: '', state: 'not_modelled', open: { panel: 'results', tab: 'adequacy', report: true } }
+  }
   if (r.running) {
     return { label, value: '', state: 'running', reason: 'The reliability study is running.',
       open: { panel: 'results', tab: 'adequacy' } }

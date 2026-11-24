@@ -345,3 +345,56 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A builder that cannot see the plan conditions it was given gets them from the GK, verbatim. The GK recovers the text from the setter's transcript (`list_events`) and sends it; a restatement is not accepted, even the builder's own (#1773 dropped clauses and changed W5).
 - A new top-level route prefix (e.g. `/api/workbook/`) skips every `/api/io/` middleware gate (undo, foreign-lock, harness-run, solver, live-study), and no middleware caps uploads (`read_capped` is per route). The plan justifies each skipped gate, with a test, and the route calls `read_capped` itself (S2 excel plan G2/G3).
 - A hand-resolved merge that combines two features (e.g. #1712's sectioned wrapper plus the every-entity branch) gets a test pinning the combined behaviour, and the mutant run covers the resolved hunk. Moving the branch found that the sectioned path missed the gap line (#1712).
+
+## Standing rulings (GK A (33), recorded 2026-11-21)
+
+- A sizing or loop runner that skips the commercial layer admits a `commercial` block only on an allowlist of keys with no LP effect, never a deny-list. A test refuses an unknown key (#1711: a tariff adds €/MWh to the import Links' `marginal_cost` at solve time, which the loop does not apply).
+- A tolerance boundary test pins the literal tolerance, never the code's own constant (#1786 M6a).
+- A test of "an order change is refused" uses an exact permutation (`a[::-1]`), never a re-generated series (#1773 E4).
+
+## Standing rulings (GK A2 (4) and GK A2 (5), recorded 2026-11-21)
+
+- A pack never declares a channel it does not record (GK A2 (4)).
+- Two modules that share a file format get a writer→reader contract test (GK A2 (4)).
+- A contract error in one case reads "unknown" for that case only. The other cases are still judged (GK A2 (4)).
+- An open-tie screen reads "not evaluated" (GK A2 (4)).
+- An importer lists its defaults as assumed. A text value in an int field is a format error that names the field (GK A2 (4)).
+- When formats share a file extension, each format sniffs the content. A file that two formats claim is refused, and the refusal names both. Any fallback is an explicit flag, never "this format has no sniff" (#1731 X6).
+- A sniff or a reader turns any parser failure into a format refusal, never a raw exception (#1731).
+- A written file that needs a sidecar marks itself, so a reader refuses it without the sidecar. Hand-written files are unaffected. An importer takes the sidecar from the files it is given, not only from disk, and never reports a sidecar it used as unread (GC-19 #1743).
+- A docstring "known edge" states today's behaviour, and the edge is filed as an issue (#1742).
+- A test of a mapping compares whole dicts against a hand-written mapping, never against the code's own constants, and includes a blank value (#1767, #1790).
+
+## Standing rulings (GK A2 (6) and GK B2 (4), recorded 2026-11-23)
+
+- A table entry's skip is honoured by every op path, the bundle zip included (GK A2 (6), #1577).
+- A pack table never shows a judged value the scorecard refused, and never shows the grid-counted number as the island answer (GK A2 (6), #1879).
+- Ids print as text, never number-formatted. A judged value never prints equal to its limit (GK A2 (6), #1879 B2/B3).
+- A lookup map in user-facing text has a plain fallback and a whole-dict test (GK A2 (6), #1897 N1).
+- A test fix that copies a module-level pandas index into each frame can break index-name parity with `n.snapshots`; index the frames by `n.snapshots`, and copy only what `set_snapshots` and module helpers hand out (GK B2 (4), #1874).
+
+## Standing rulings (GK A2 (7) and GK B3 (6), recorded 2026-11-23)
+
+- Re-recording a byte-identity digest or golden after a master merge is not a clean merge. The PR names the upstream change behind each re-recorded digest, and the GK re-reviews it (GK A2 (7), #1922/#1916).
+- A read that hands out a revision with content hashes the same bytes it parses, never a second read of the file (GK B3 (6), #1913).
+- Every read-modify-write writer of a locked file (for example a preset select) does its read inside the same lock, not only its write (GK B3 (6), #1913).
+
+## Standing rulings (GK A2 (7), recorded 2026-11-24)
+
+- A screen or pack that skips rows it cannot judge uses one shared predicate in the card and the pack (`subsync_judged`). A row worse than the meta verdict reads unknown (GK A2 (7), #1930 H1/H2/J1).
+- An output tree that a run replaces is staged in a unique directory per call, then swapped in by rename-aside, rename-in and deleting the aside copy. A run never clears a shared stage at entry (GK A2 (7), #1941 K1–K3).
+- Exported pack text (TSO-facing) cites the engineering basis, never an internal GK or ruling reference (GK A2 (7), #1916 → #1931).
+
+## Standing rulings (GK B4, recorded 2026-11-24)
+
+- A probe test binds its arguments to `inspect.signature(DISPATCHERS[tool])`, so a renamed or dropped parameter fails the test (GK B4, #1932/#1938).
+- An apply that re-plans binds the previewed plan's digest and refuses a mismatch with a typed 409 (GK B4, #1938).
+- A "sends X not Y" fixture uses distinct literals for X and Y, so a swap cannot pass (GK B4, #1939).
+- A value left unjudged because an input is assumed reads `None` / "not evaluated" on every surface, never 0 or "—" (GK B4, #1934).
+
+## Standing rulings (GK B (70), recorded 2026-11-24)
+
+- A guard with several parts (a text window plus a next-number bound, or thermal and electrical arms) gets a killing case for each part. A quote that fails every arm at once does not count (GK B (70), #1950 N2/N3a).
+- A fingerprint or digest literal is computed on master in a fresh worktree, under the same process warm-up the test uses. In-memory template builds depend on the process's history (harness issue 226, PyPSA port-2 registration), so "fresh process" is not the same as "pytest worker" (GK B (70), #1949).
+- A new item code that splits one warning across sections gets its own code, since acks key on (code, entity). Test that each one can be acknowledged on its own (GK B (70), #1869).
+- A seam that tests swap for master's function keeps master's signature. Run the parity tests (`test_exact_frame_json_parity`) for any change to an encoder's signature (GK B (70), #1949 shard 5).

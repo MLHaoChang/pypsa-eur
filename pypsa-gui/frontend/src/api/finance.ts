@@ -10,30 +10,37 @@ import type {
 export { SolverInFlightError, StaleEditError }
 
 /** A 409 on the finance PUT or the study start that is not a solve: another
- *  study runs (the detail names it). */
+ *  study runs (the detail names it), or the start's coded refusal (`code`,
+ *  e.g. `not_solved`). */
 export class StudyBusyError extends Error {
-  constructor(message: string) { super(message); this.name = 'StudyBusyError' }
+  readonly code?: string
+  /** Every need the investment case's start could tell (`detail.needs`, issue 40). */
+  readonly needs?: string[]
+  constructor(message: string, code?: string, needs?: string[]) {
+    super(message); this.name = 'StudyBusyError'; this.code = code; this.needs = needs
+  }
 }
 
 const QUIET = { skipErrorToast: true } as const
 
-function detailOf(e: unknown): { status?: number; code?: string; message?: string } {
+function detailOf(e: unknown): { status?: number; code?: string; message?: string; needs?: string[] } {
   const r = (e as { response?: { status?: number; data?: { detail?: unknown; code?: unknown } } })?.response
   const d = r?.data?.detail
   const obj = (d && typeof d === 'object' && !Array.isArray(d)) ? d as Record<string, unknown> : {}
   const code = (obj.code ?? obj.error_kind ?? r?.data?.code) as string | undefined
   return { status: r?.status, code,
-           message: (obj.message as string | undefined) ?? (typeof d === 'string' ? d : undefined) }
+           message: (obj.message as string | undefined) ?? (typeof d === 'string' ? d : undefined),
+           needs: Array.isArray(obj.needs) ? obj.needs.filter((c): c is string => typeof c === 'string') : undefined }
 }
 
 /** 412 → StaleEditError (`finance_changed`); 409 → the solve or the study
  *  that blocks it. A 422 is rethrown as is: the form maps its `detail`. */
 function typed(e: unknown): never {
-  const { status, code, message } = detailOf(e)
+  const { status, code, message, needs } = detailOf(e)
   if (status === 412) throw new StaleEditError(message ?? 'the finance inputs changed since they were read')
   if (status === 409) {
     if (code === 'solver_in_flight') throw new SolverInFlightError(message ?? 'a solve is running')
-    throw new StudyBusyError(message ?? 'a solve or another study is running')
+    throw new StudyBusyError(message ?? 'a solve or another study is running', code, needs)
   }
   throw e
 }

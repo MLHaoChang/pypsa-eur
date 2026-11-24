@@ -91,7 +91,7 @@ def test_each_profile_runs_the_eh_study_with_the_stress_then_the_island_check(
         k: list(v) for k, v in flow_scope.TEMPLATE_PRESETS[template].items()
     }
     assert flow_scope.TEMPLATE_PRESETS[template] is flow_scope._MICROGRID
-    assert flow_service._request_for(meta, None)["archetype"] == "off_grid"
+    assert flow_service._template_request(meta, None)["archetype"] == "off_grid"
     assert _rules(ref, "setup")["set.project.template"]["value"] == template
 
 
@@ -650,9 +650,12 @@ def test_the_off_grid_scorecard_excludes_the_sk_rows_with_their_reason(
         "voltage_unbalance",
     } <= set(excluded)
     assert all(
-        reason in (G.SK_OFF_GRID, G.VS_OFF_GRID, G.CONN_OFF_GRID)
+        reason in (G.SK_OFF_GRID, G.VS_OFF_GRID, G.CONN_OFF_GRID, G.SUBSYNC_OFF_GRID)
         for reason in excluded.values()
     )
+    # GC-08 R4: the two screens scanned from the PCC leave too; the UIF row stays.
+    assert all(excluded[rid] == G.SUBSYNC_OFF_GRID for rid in G.SUBSYNC_PCC_ROWS)
+    assert "ssti_uif" in ids
     # SH41-OFFGRID-1: the connection's ramp and oscillation limits leave too.
     assert excluded["ramp_rate"] == excluded["oscillation"] == G.CONN_OFF_GRID
     assert not ids & set(excluded)

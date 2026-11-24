@@ -162,7 +162,32 @@ def _read(task_id):
         _refuse("task_unreadable", "The task checkpoint needs repair.")
     if task.get("project_id") != project or task.get("owner_id") != owner:
         _refuse("task_not_found", "Task not found in this project.", 404)
+    _HOMES[task_id] = project
     return path, task
+
+
+# LC-48g (owner decision LC48G-READ-1): the project each task this process has
+# read or written lives in, so the start guard can read a chat's task in its
+# own project after a switch. In memory, like `session.task_id`.
+_HOMES: dict[str, str] = {}
+
+
+def _read_home(task_id):
+    """The task read in the project it lives in, with the same ACL and owner
+    checks as `_read`; 404 `task_not_found` when its project is not known."""
+    from services import chat_tools, project_registry
+    home = _HOMES.get(task_id)
+    if home is None:
+        _refuse("task_not_found", "Task not found in this project.", 404)
+    with chat_tools._acting() as (db, user):
+        project = project_registry.resolve_project(db, user, home)
+        root, project_id, owner = project_registry.project_dir(project), str(project.id), str(user.id)
+    task = json.loads((root / "assistant_tasks" / (task_id + ".json")).read_text())
+    if not isinstance(task, dict):
+        raise ValueError("task checkpoint is not an object")
+    if task.get("project_id") != project_id or task.get("owner_id") != owner or project_id != home:
+        _refuse("task_not_found", "Task not found in this project.", 404)
+    return task
 
 
 def _save(path, task):
@@ -176,12 +201,18 @@ def _save(path, task):
         os.replace(temp, path)
     finally:
         temp.unlink(missing_ok=True)
+    if task.get("task_id") and task.get("project_id"):
+        _HOMES[task["task_id"]] = task["project_id"]
     if task.get("status") in _ENDED_TASK:
         _release_sessions(task.get("task_id"))
 
 
 # LC-48f (GK B E): the task statuses after which nothing of it runs again.
 _ENDED_TASK = frozenset({"completed", "cancelled"})
+# Issue 16: a step whose job was stopped on purpose (cancel_job, abort_simulation,
+# solve_queue_abort, a study's abort). Worded neutrally: not every stop is the user's.
+STOPPED_ERROR = "The job was stopped before it finished; it did not fail. Run it again only if the user asks."
+STOPPED_CORRECTION = {"stop": "job_stopped", "then": "ask the user before resolve_task_step(retry); or cancel_task"}
 
 
 def _release_sessions(task_id):
@@ -403,6 +434,8 @@ def _correction(step):
     """`next_step.correction` under a brief: proposes, runs nothing."""
     if step.get("retries", 0) >= TASK_STEP_RETRIES_MAX:
         return {"stop": "retry_limit", "then": "explain what failed; the user decides: fix the inputs, or cancel_task"}
+    if step["status"] == "cancelled":
+        return dict(STOPPED_CORRECTION)
     if step.get("job") or step["tool"] in _WAIT_TOOLS | QUEUE_WAIT_TOOLS:
         return {"triage": list(_TRIAGE), "then": "resolve_task_step(retry) after the user approves the fix"}
     if step.get("receipt"):
@@ -470,7 +503,7 @@ def _view(task, fresh=False, current=None):
             # SC-07 S5b (GK B 1a): the stored kind finish_step took from the tool's own typed
             # refusal (N3), read-only and never derived from the message; absent when none.
             out["next_step"]["error_kind"] = step["error_kind"]
-        if brief and step["status"] in ("failed", "uncertain"):
+        if brief and step["status"] in ("failed", "cancelled", "uncertain"):
             out["next_step"]["correction"] = _correction(step)
     receipts = [s["result"]["_edit_receipt"] for s in task["steps"] if s["status"] == "completed"
                 and isinstance(s.get("result"), dict) and isinstance(s["result"].get("_edit_receipt"), dict)
@@ -484,7 +517,7 @@ def _view(task, fresh=False, current=None):
     # result rides with they would only grow it (past the result cap, into a spill). Past the cap
     # they are left out and `says` stands.
     stop = out.get("next_step") or {}
-    if changes and stop.get("tool") in (SCENE_PREPARE, SCENE_APPLY) and stop.get("status") in ("failed", "uncertain"):
+    if changes and stop.get("tool") in (SCENE_PREPARE, SCENE_APPLY) and stop.get("status") in ("failed", "cancelled", "uncertain"):
         edits = [{k: r[k] for k in ("rows", "sets") if k in r} for r in receipts]
         if len(json.dumps(edits, default=str)) <= CHANGE_EDITS_MAX:
             out["change_edits"] = edits
@@ -555,14 +588,23 @@ def _refuse_switch(session, task_id):
     needs repair) may still run where it lives, so it refuses too: fail closed
     (owner decision LC48F-REFUSE-1). `begin_step` detaches a task it cannot
     find after a switch; it keeps the id as `session.detached_task_id`, which
-    this guard reads the same way until it reads as not running (GK B D)."""
+    this guard reads the same way until it reads as not running (GK B D).
+    A task not in this project is read in its own one (`_read_home`, owner
+    decision LC48G-READ-1): an idle one (`ready`, `needs_review`,
+    `paused_at_card`) lets a new plan start; one that runs refuses with its
+    status. Only a task that cannot be read there either reads as `unreadable`."""
     for active, detached in ((getattr(session, "task_id", None), False),
                              (getattr(session, "detached_task_id", None), True)):
         if not active or active == task_id:
             continue
         try:
-            _, task = _read(active)
-        except (HTTPException, OSError, ValueError):
+            try:
+                _, task = _read(active)
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+                task = _read_home(active)  # LC48G-READ-1: read it where it lives
+        except Exception:  # noqa: BLE001 — any read failure fails closed (LC48F-REFUSE-1), a DB error too
             raise HTTPException(409, {
                 "error_kind": "switch_in_progress",
                 "active": {"kind": "task", "id": active, "title": None, "status": "unreadable"},
@@ -1295,8 +1337,8 @@ def resolve_task_step(task_id: str, outcome: str, result: dict | None = None) ->
     with _LOCK:
         path, task = _read(task_id)
         step = _next(task)
-        if not step or task["status"] in ("completed", "cancelled") or step["status"] not in ("uncertain", "failed"):
-            _refuse("task_resolution_not_needed", "Only a failed or uncertain step can be reconciled.")
+        if not step or task["status"] in ("completed", "cancelled") or step["status"] not in ("uncertain", "failed", "cancelled"):
+            _refuse("task_resolution_not_needed", "Only a failed, stopped or uncertain step can be reconciled.")
         from harness.session import get_session
         origin = get_session(step.get("session_id"))
         worker = _WORKERS.get((task_id, step["id"], step.get("attempt_id")))
@@ -1466,6 +1508,9 @@ def _gate_brief(task, step):
     if task["status"] == "paused_at_card":
         _refuse("task_paused_at_card", f"The plan is paused before the {task['pause']['card']} card; "
                 "the user continues from the plan card.")
+    if task.get("brief") and step["status"] == "cancelled" and _effectful(step["tool"]):
+        _refuse("task_step_needs_retry", "This step's job was stopped; ask the user whether to run it "
+                "again, then resolve_task_step(retry) reopens it.")
     if task.get("brief") and step["status"] == "failed" and _effectful(step["tool"]):
         _refuse("task_step_needs_retry", "This step failed; draft the fix from next_step.correction, "
                 "then resolve_task_step(retry) reopens it.")
@@ -1519,7 +1564,20 @@ def settle_job(path, ticket, job_id, native_status, step_status, result=None):
     return view
 
 
+def _stopped(native_status, step_status, result):
+    """Issue 16: a job stopped on purpose (native `aborted`) did not fail. A
+    queued step is stopped only when every one of its jobs was; any failed or
+    completed job keeps it `failed`."""
+    if native_status != "aborted" or step_status != "failed":
+        return False
+    cases = result.get("cases") if isinstance(result, dict) else None
+    return cases is None or (bool(cases) and all(
+        isinstance(c, dict) and c.get("status") == "aborted" for c in cases))
+
+
 def _settle(task, step, native_status, step_status, result):
+    if _stopped(native_status, step_status, result):
+        step_status = "cancelled"
     step["status"] = step_status
     if isinstance(result, dict) and result.get("cases"):
         step["job"]["cases"] = result["cases"]  # LC-17: each queued case's own outcome
@@ -1528,6 +1586,8 @@ def _settle(task, step, native_status, step_status, result):
         step.pop("error", None)
     elif step_status == "failed":
         step["error"] = f"The solve ended {native_status}; inspect its log before retrying."
+    elif step_status == "cancelled":
+        step["error"] = STOPPED_ERROR
     else:
         step["error"] = "The job's outcome cannot be verified; inspect the solver before retrying."
     step["job"]["outcome"] = native_status

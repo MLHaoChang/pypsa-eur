@@ -1,0 +1,1 @@
+* Test(pypsa-gui): checked answers for prices, carrier energy, curtailment, emissions and lost load are now tested against the Results route and the results workbook on a hand-worked network, with weighting, reordering and window fixtures; no user-visible change.

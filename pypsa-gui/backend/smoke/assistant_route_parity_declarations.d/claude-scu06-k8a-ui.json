@@ -1,0 +1,7 @@
+{
+  "limitations": [
+    {"method": "GET", "path": "/api/simulation/commercial/market_packs", "reason": "ui-pointer", "decision": "SCU06-CHAT-1"},
+    {"method": "GET", "path": "/api/simulation/commercial/market_packs/{pack_id}/preview", "reason": "ui-pointer", "decision": "SCU06-CHAT-1"},
+    {"method": "POST", "path": "/api/simulation/commercial/market_packs/{pack_id}/apply", "reason": "ui-pointer", "decision": "SCU06-CHAT-1"}
+  ]
+}

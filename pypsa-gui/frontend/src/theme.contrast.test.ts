@@ -85,7 +85,7 @@ const worst = (fg: Rgb, surfaces: Rgb[]) => Math.min(...surfaces.map(s => contra
 const SURFACES = ['bg', 'bg-2', 'panel', 'panel-2', 'band', 'tint', 'nav'].map(n => `--color-${n}`)
 const TEXT = [
   'text', 'ink-900', 'ink-800', 'ink-700', 'ink-600', 'ink-500', 'muted', 'legend', 'accent',
-  'success', 'warn', 'danger', 'info',
+  'link', 'eyebrow', 'success', 'warn', 'danger', 'info',
 ].map(n => `--color-${n}`)
 // UI components (1.4.11): the chart axis, the focus ring and the strong
 // hairline (hover borders, separators). border and border-2 are decorative

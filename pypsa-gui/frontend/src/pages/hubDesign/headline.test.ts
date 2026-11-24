@@ -63,6 +63,70 @@ describe('headline (§5.5)', () => {
       'Not decided: the shortfall estimate (1.6–4.2 h/yr) straddles the 3 h/yr goal: more simulation runs would settle it.')
   })
 
+  // template-e2e 21: a goal under the resolution floor is not a straddle; the
+  // sentence names the floor and the fewest runs that resolve the goal.
+  it('inconclusive below the resolution floor: names the floor and the minimum runs', () => {
+    const r = report({ ...cert({ verdict: 'inconclusive', lole_h_per_year: 0, lole_ci: [0, 0],
+      horizon_years: 2, target_lole_h: 3, resolution_floor_h: 104.2, n_samples: 1,
+      below_floor: true, min_draws: 18 }) })
+    const rv = review({ verdict: 'inconclusive', mc_lole_h_per_year: 0, target_lole_h: 3 })
+    expect(headline(rv, r)).toBe(
+      'Not decided: with 1 simulation run, the smallest shortfall it can show is 52.1 h/yr, more than your 3 h/yr goal. Set at least 18 runs per check (section 8, Scenarios & optimisation) to decide it.')
+  })
+
+  // GK A ask 1: past the 2000-run cap the sentence names no run count.
+  it('below the floor past the 2000-run cap: no run count, allow more shortfall', () => {
+    const r = report({ ...cert({ verdict: 'inconclusive', lole_h_per_year: 0, lole_ci: [0, 0],
+      horizon_years: 1, target_lole_h: 0.01, resolution_floor_h: 168, n_samples: 1,
+      below_floor: true, min_draws: 16800 }) })
+    const rv = review({ verdict: 'inconclusive', mc_lole_h_per_year: 0, target_lole_h: 0.01 })
+    expect(headline(rv, r)).toBe(
+      'Not decided: with 1 simulation run, the smallest shortfall it can show is 168 h/yr, more than your 0.01 h/yr goal, and even 2000 runs (the most allowed) could not decide it. Allow more shortfall (section 8, Scenarios & optimisation) to decide it.')
+    const at = report({ ...cert({ verdict: 'inconclusive', lole_h_per_year: 0, lole_ci: [0, 0],
+      horizon_years: 1, target_lole_h: 0.01, resolution_floor_h: 20, n_samples: 1,
+      below_floor: true, min_draws: 2000 }) })
+    expect(headline(rv, at)).toMatch(/Set at least 2000 runs per check/)
+  })
+
+  it('below the floor with a zero goal: no run count settles it', () => {
+    const r = report({ ...cert({ verdict: 'inconclusive', lole_h_per_year: 0, lole_ci: [0, 0],
+      horizon_years: 1, target_lole_h: 0, resolution_floor_h: 0.104, n_samples: 500,
+      below_floor: true, min_draws: null }) })
+    const rv = review({ verdict: 'inconclusive', mc_lole_h_per_year: 0, target_lole_h: 0 })
+    expect(headline(rv, r)).toBe(
+      'Not decided: with 500 simulation runs, the smallest shortfall it can show is 0.104 h/yr, and a 0 h/yr goal allows none. Allow some shortfall (section 8, Scenarios & optimisation) to decide it.')
+  })
+
+  it('inconclusive held by a feeder bound names the feeder, not more runs (GK A F6\')', () => {
+    // The interval (≈ 10–21 h/yr) sits under the 25 h/yr goal: it does not straddle.
+    const r = report({ ...cert({ verdict: 'inconclusive', lole_h_per_year: 15,
+      lole_ci: [10, 21], horizon_years: 1, target_lole_h: 25 }) })
+    const rv = review({ verdict: 'inconclusive', mc_lole_h_per_year: 15, target_lole_h: 25,
+      feeder_bound: { pockets: [{ buses: ['it_bus'], feeders: ['site_transformer'],
+        bound_h_per_year: 43.8 }], chained: [] } })
+    const text = headline(rv, r)
+    expect(text).toMatch(/^Not decided: IT bus could be cut off up to 43\.8 h\/yr while Site transformer is out/)
+    expect(text).toMatch(/second feeder/)
+    expect(text).not.toMatch(/straddles|simulation runs|it_bus/)
+  })
+
+  it('a bound held by a feeder without outage data asks for its data (GK R2)', () => {
+    const rv = review({ verdict: 'inconclusive', mc_lole_h_per_year: 0, target_lole_h: 3,
+      feeder_bound: { pockets: [{ buses: ['crit'], feeders: ['crit_feeder'], no_data: ['crit_feeder'],
+        bound_h_per_year: 8760 }], chained: [] } })
+    const text = headline(rv, report())
+    // UX 2 (4): cause first, no bracket, three sentences.
+    expect(text).toBe('Not decided: Crit could be cut off up to 8760.0 h/yr while Crit feeder is out, '
+      + 'against the 3 h/yr goal. Crit feeder\'s outage rate is not known, so it is taken as always out. '
+      + 'Outage data for Crit feeder, a second feeder or a more reliable one would settle it.')
+  })
+
+  it('inconclusive held by a chained feeder says it cannot be bounded', () => {
+    const rv = review({ verdict: 'inconclusive', mc_lole_h_per_year: 1, target_lole_h: 3,
+      feeder_bound: { pockets: [], chained: ['crit_feeder'] } })
+    expect(headline(rv, report())).toMatch(/^Not decided: Crit feeder reaches .* cannot bound/)
+  })
+
   it('pass: one decimal, under the goal', () => {
     expect(headline(review({ verdict: 'pass', mc_lole_h_per_year: 0.44, target_lole_h: 3 }), report()))
       .toBe('Certified: about 0.4 h/yr of shortfall, under the 3 h/yr goal.')
@@ -119,4 +183,14 @@ describe('riskName (UX S6, G1)', () => {
   it('a name a person typed is kept', () => {
     expect(riskName('Main feeder')).toBe('Main feeder')
   })
+})
+
+describe('headline and Expert share one set of verdict words (EXPERT-GUIDED-1)', () => {
+  it.each([['pass', 'Certified:'], ['fail', 'Not certified:'], ['inconclusive', 'Not decided:']])(
+    '%s opens with "%s"', (verdict, words) => {
+      const r = report({ ...cert({ verdict, target_lole_h: 3, lole_h_per_year: 4, lole_ci: [2, 6] }),
+        mc_lole_h: 4 })
+      expect(headline(review({ verdict, mc_lole_h_per_year: 4, target_lole_h: 3 }), r)
+        .startsWith(words)).toBe(true)
+    })
 })

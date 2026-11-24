@@ -85,7 +85,8 @@ def _is_guided(ui_context: Any) -> bool:
 
 # Tools no policy, task, brief or run envelope ever approves: the user's card only.
 # RP-20 (RP20-CHAT-1): only the user says a series with no record is the network's own.
-CARD_ONLY_TOOLS: frozenset[str] = frozenset({"site_scene_apply", "confirm_unrecorded_series"})
+# Excel input workbook 06 (IMPORT-FLOW-1): an import is shown as its preview and approved by the user.
+CARD_ONLY_TOOLS: frozenset[str] = frozenset({"site_scene_apply", "confirm_unrecorded_series", "import_input_workbook"})
 
 # Assistant memory §2.2, §9 M4: a memory proposal is only ever the user's own
 # card, in Guided and Expert. A write-tier tool Expert would run uncarded, so
@@ -182,6 +183,7 @@ def _confirm_destructive_tool(
     sweep_card: dict | None = None,
     map_card: dict | None = None,
     repeat_card: dict | None = None,
+    workbook_card: dict | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, bool]:
     """
     Gate a destructive tool on the user's confirmation. Returns whether to
@@ -308,6 +310,8 @@ def _confirm_destructive_tool(
         card["map_card"] = copy.deepcopy(map_card)  # homer-parity 03b, harness/system_map_card.py
     if repeat_card is not None:
         card["repeat_card"] = copy.deepcopy(repeat_card)  # issue 04 S5, harness/job_holds.py
+    if workbook_card is not None:
+        card["workbook_card"] = copy.deepcopy(workbook_card)  # excel-input-workbook 06, harness/workbook_card.py
     yield "tool_pending_confirmation", card
     decision = session.wait_for_decision(pc.token)
     if decision == 'approve' and confirmation_revision() != revision:

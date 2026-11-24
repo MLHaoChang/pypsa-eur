@@ -269,6 +269,8 @@ def test_every_adapter_receipt_and_checked_tool_has_a_returned_shape(live):
         INPUT_ADAPTERS,
         POLICY_VERSION,
         PREDICATE_POLICY_VERSION,
+        SECTIONED_POLICY_VERSION,
+        WARNED_POLICY_VERSION,
     )
 
     assert set(INPUT_ADAPTERS.values()) <= set(live["evidence_identity"])
@@ -277,6 +279,8 @@ def test_every_adapter_receipt_and_checked_tool_has_a_returned_shape(live):
         POLICY_VERSION,
         DERIVED_POLICY_VERSION,
         PREDICATE_POLICY_VERSION,
+        SECTIONED_POLICY_VERSION,
+        WARNED_POLICY_VERSION,
     }
     assert set(live["checked_tool_results"]) == CHECKED_TOOLS
     for key in ("evidence_identity", "answer_receipt", "checked_tool_results"):
@@ -313,7 +317,7 @@ def test_a_new_returned_field_breaks_and_a_new_version_is_additive(frozen):
         "$.evidence_identity.static-input/1 changed",
     ]
     added = copy.deepcopy(frozen)
-    added["answer_receipt"]["4"] = {"type": "object"}
+    added["answer_receipt"]["6"] = {"type": "object"}
     added["evidence_identity"]["static-input/2"] = {"type": "object"}
     added["checked_tool_results"]["new_tool"] = {"type": "object"}
     assert breaking_changes(frozen, added) == []
@@ -682,7 +686,7 @@ V1_HASHES = {
     "get_run_evidence": "4abaac2419832365fa560a3c15252f7900510c90f2b42c052298b438a97032cb",
     "get_timeseries": "379ddbdecfeb262575eee58c147e81cb6ffa59905d2c8738d12519f3303a5c88",
     "list_components": "6e4521eb8f8ac1bc72ab54928c82adbab7b47bf4bb8f627ff00b10ceb2dfa353",
-    "ui_open_panel": "376cf3f7a156dae8bb641f93a8203f0f37d851b98100ae0d6f20212db5c8bbe1",  # LC-14: guided_step, panel_section widened the input (additive)
+    "ui_open_panel": "e12d684e38736a09c6a1d412dfaba506eb054eaa635cfd694d44190aacc5ad4b",  # LC-14: guided_step, panel_section widened the input (additive); guided-results 09: results_tab gains "products" (additive)
     "update_component": "620554ac6bc2ecc1d9abf2620676d5e050b7c0f5ad50d0c0d00c1de13f908734",
 }
 
