@@ -439,7 +439,7 @@ def list_psse_bundles(proj: AuthorizedProject = ProjectAccessDep, db: DBSession 
     return ce.psse_bundles(_row(proj, db))
 
 
-@router.get("/{name}/psse/{bundle}.zip")
+@router.get("/{name}/psse/{bundle}/download")
 def download_psse_bundle(bundle: str, proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     """One bundle as a zip. The name must be in the listing, so no path
     assembled from client input is opened; a bundle of a stale run is served

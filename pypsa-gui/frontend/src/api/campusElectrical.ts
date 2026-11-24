@@ -1156,7 +1156,7 @@ export const campusApi = {
 
   /** One bundle as a zip blob. */
   psseZip: (project: string, bundle: string) =>
-    client.get<Blob>(`${base(project)}/psse/${encodeURIComponent(bundle)}.zip`, { responseType: 'blob', ...quiet })
+    client.get<Blob>(`${base(project)}/psse/${encodeURIComponent(bundle)}/download`, { responseType: 'blob', ...quiet })
       .then(r => ({ blob: r.data, stale: r.headers['x-run-stale'] === 'true' })),
 
   /** The island sidecar as written and the last island study (null each when absent). */

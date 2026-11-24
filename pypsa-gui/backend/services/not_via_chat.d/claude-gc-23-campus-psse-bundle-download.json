@@ -10,7 +10,7 @@
    "keywords": ["psse", "raw", "dyr", "handoff"],
    "routes": [
     ["GET", "/api/campus-electrical/{name}/psse"],
-    ["GET", "/api/campus-electrical/{name}/psse/{bundle}.zip"]
+    ["GET", "/api/campus-electrical/{name}/psse/{bundle}/download"]
    ]
   }
  ]

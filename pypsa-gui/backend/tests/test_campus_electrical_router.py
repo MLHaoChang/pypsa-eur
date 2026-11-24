@@ -230,10 +230,10 @@ def test_the_psse_bundles_are_reads_a_lock_does_not_refuse_and_the_zip_names_its
     assert client.post("/api/projects/Router Hub/lock").status_code == 200
     base = "/api/campus-electrical/Router Hub/psse"
     assert same_org_other_user.get(base).json()["has_run"] is True                 # a read under another's lock
-    resp = same_org_other_user.get(f"{base}/case_p2030_h1.zip")
+    resp = same_org_other_user.get(f"{base}/case_p2030_h1/download")
     assert resp.status_code == 200 and resp.content == b"PK-case_p2030_h1"
     assert resp.headers["content-type"] == "application/zip" and resp.headers["x-run-stale"] == "true"
     assert 'filename="case_p2030_h1.zip"' in resp.headers["content-disposition"]
     for verb in ("post", "put", "delete"):
         assert getattr(client, verb)(base).status_code == 405, verb
-    assert other_org_client.get(base).status_code == 404 and other_org_client.get(f"{base}/x.zip").status_code == 404
+    assert other_org_client.get(base).status_code == 404 and other_org_client.get(f"{base}/x/download").status_code == 404

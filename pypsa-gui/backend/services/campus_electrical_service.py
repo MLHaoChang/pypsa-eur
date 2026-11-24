@@ -2490,7 +2490,7 @@ def psse_bundle_zip(project, name: str) -> tuple:
     in the listing: a path, ``..`` or a symlink out of ``psse/`` is 404."""
     listing = psse_bundles(project)
     if name not in {b["name"] for b in listing["bundles"]}:
-        raise HTTPException(status_code=404, detail=f"no PSS/E bundle {name!r} in the latest campus run")
+        raise HTTPException(status_code=404, detail=f"no PSS/E bundle {name} in the latest campus run")
     root = _psse_root(project)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
