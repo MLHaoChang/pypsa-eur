@@ -39,44 +39,47 @@ describe('the PSS/E case section of the grid-code results', () => {
     URL.createObjectURL = vi.fn(() => 'blob:x')
     URL.revokeObjectURL = vi.fn()
     renderSection()
-    await userEvent.click(await screen.findByRole('button', { name: 'Download PSS/E case' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Download PSS\/E case/ }))
     await waitFor(() => expect(api.psseZip).toHaveBeenCalledWith('Hub A', 'case_p2030_h12'))
     expect(screen.queryByTestId('psse-stale')).toBeNull()
     expect(screen.getByText(/Period 2030, hour 12/)).toBeTruthy()
+    expect(screen.getByText(/From the run of 2026-11-24 08:00 UTC/)).toBeTruthy()
   })
 
   it('says a bundle from a run older than the last edit is stale', async () => {
     api.psse.mockResolvedValue(listing({ stale: true }))
     renderSection()
-    expect((await screen.findByTestId('psse-stale')).textContent).toMatch(/older than the last edit/)
+    expect((await screen.findByTestId('psse-stale')).textContent).toMatch(/out of date/)
   })
 
   it('has no button and names what to run when there is no run', async () => {
     api.psse.mockResolvedValue(listing({ has_run: false, bundles: [], run_at: null }))
     renderSection()
-    expect((await screen.findByTestId('psse-none')).textContent).toMatch(/Run the study/)
-    expect(screen.queryByRole('button', { name: 'Download PSS/E case' })).toBeNull()
+    expect((await screen.findByTestId('psse-none')).textContent).toMatch(/Run the study in the Grid study panel/)
+    expect(screen.queryByRole('button', { name: /^Download PSS\/E case/ })).toBeNull()
   })
 
   it('shows why a run wrote none, in place of the button', async () => {
     api.psse.mockResolvedValue(listing({ bundles: [], skipped: 'no island critical hours in this run' }))
     renderSection()
     expect((await screen.findByTestId('psse-skipped')).textContent).toMatch(/no island critical hours/)
-    expect(screen.queryByRole('button', { name: 'Download PSS/E case' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Download PSS\/E case/ })).toBeNull()
   })
 
   it('shows a write error in place of the button', async () => {
     api.psse.mockResolvedValue(listing({ bundles: [], error: 'disk full' }))
     renderSection()
-    expect((await screen.findByTestId('psse-write-error')).textContent).toMatch(/disk full/)
-    expect(screen.queryByRole('button', { name: 'Download PSS/E case' })).toBeNull()
+    const text = (await screen.findByTestId('psse-write-error')).textContent
+    expect(text).toMatch(/could not write the PSS\/E cases/)
+    expect(text).not.toMatch(/disk full/)               // the raw error stays out of the screen
+    expect(screen.queryByRole('button', { name: /^Download PSS\/E case/ })).toBeNull()
   })
 
   it('says when the download fails', async () => {
     api.psse.mockResolvedValue(listing())
     api.psseZip.mockRejectedValue(new Error('network down'))
     renderSection()
-    await userEvent.click(await screen.findByRole('button', { name: 'Download PSS/E case' }))
+    await userEvent.click(await screen.findByRole('button', { name: /^Download PSS\/E case/ }))
     expect((await screen.findByTestId('psse-download-error')).textContent).toMatch(/network down/)
   })
 })

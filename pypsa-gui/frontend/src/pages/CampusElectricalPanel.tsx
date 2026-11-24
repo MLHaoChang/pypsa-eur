@@ -645,7 +645,7 @@ function TrafoVerdict({ t, bought }: { t: TransformerSizing; bought: InvestmentR
 }
 
 /** The PSS/E hand-off of the latest run (grid-compliance 23): one case per island critical hour, each a zip
- *  of the .raw, the .dyr, the GFM parameters and the README. A case from a run older than the last edit says so. */
+ *  of the .raw, the .dyr, the grid-forming converter parameters and the README. A case from a run older than the last edit says so. */
 export function CampusPsseSection({ name }: { name: string }) {
   const psse = useQuery({ queryKey: ['campus-psse', name], queryFn: () => campusApi.psse(name), retry: false })
   const [busy, setBusy] = useState<string | null>(null)
@@ -672,15 +672,15 @@ export function CampusPsseSection({ name }: { name: string }) {
   }
   let body: ReactNode
   if (psse.isError) body = <p data-testid="psse-error" className="text-[12px] text-warn">{errorText(psse.error)}</p>
-  else if (!d) body = <p className="text-[12px] text-muted">Loading…</p>
-  else if (!d.has_run) body = <p data-testid="psse-none" className="text-[12px] text-muted">No grid study has run yet. Run the study in Grid study ›; it writes one PSS/E case per island critical hour.</p>
-  else if (d.error) body = <p data-testid="psse-write-error" className="text-[12px] text-warn">The PSS/E cases could not be written: {d.error}. Fix that and run the study again.</p>
-  else if (d.bundles.length === 0) body = <p data-testid="psse-skipped" className="text-[12px] text-muted">No PSS/E case: {d.skipped ?? 'this run wrote none'}. Add island data to the campus and run the study again.</p>
+  else if (!d) body = <p className="text-[12px] text-muted">Loading the PSS/E cases</p>
+  else if (!d.has_run) body = <p data-testid="psse-none" className="text-[12px] text-muted">No grid study has run yet. Run the study in the Grid study panel. It then writes one PSS/E case for each island critical hour.</p>
+  else if (d.error) body = <p data-testid="psse-write-error" className="text-[12px] text-warn">The study could not write the PSS/E cases. The other results are not affected. Run the study again.</p>
+  else if (d.bundles.length === 0) body = <p data-testid="psse-skipped" className="text-[12px] text-muted">This run has no island critical hours, so there is no PSS/E case. Add island data to the campus, then run the study again.</p>
   else body = (
     <>
       {d.stale && (
         <p data-testid="psse-stale" className="text-[12px] text-warn border border-warn/40 rounded px-3 py-2 mb-2">
-          These cases are from a run older than the last edit to the campus or the project. Run the study again before sending them.
+          These cases are out of date: the campus or the project changed after this run. Run the study again before sending them.
         </p>
       )}
       <ul className="space-y-1">
@@ -688,13 +688,14 @@ export function CampusPsseSection({ name }: { name: string }) {
           <li key={b.name} data-testid={`psse-bundle-${b.name}`} className="flex items-center gap-3 text-[12px]">
             <span className="whitespace-nowrap">{b.period != null && b.hour != null ? `Period ${b.period}, hour ${b.hour}` : b.name}</span>
             <span className="text-muted tabular-nums">{b.files.length} files, {Math.max(1, Math.round(b.size / 1024))} kB</span>
-            <Btn onClick={() => download(b.name)} disabled={busy === b.name} title="The .raw, .dyr, GFM parameters, README and manifest of this case, as a zip">
+            <Btn onClick={() => download(b.name)} disabled={busy === b.name} aria-label={`Download PSS/E case, ${b.period != null && b.hour != null ? `period ${b.period}, hour ${b.hour}` : b.name}`}
+              title="The .raw, .dyr, grid-forming converter parameters, README and manifest of this case, as a zip">
               Download PSS/E case
             </Btn>
           </li>
         ))}
       </ul>
-      {d.run_at && <p className="text-[11px] text-muted mt-1">From the run of {new Date(d.run_at).toLocaleString()}.</p>}
+      {d.run_at && <p className="text-[11px] text-muted mt-1">From the run of {d.run_at.slice(0, 16).replace('T', ' ')} UTC.</p>}
       {failure && <p data-testid="psse-download-error" className="text-[12px] text-warn mt-1">{failure}</p>}
     </>
   )
