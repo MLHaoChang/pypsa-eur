@@ -443,3 +443,21 @@ def test_a_mip_withholds_the_priced_keys_of_every_period_too():
     assert row[key] is None and row["energy_mwh"] == 3.0
     assert [e[key] for e in row["by_period"]] == [None, None]
     assert [e["energy_mwh"] for e in row["by_period"]] == [1.0, 2.0]
+
+
+def test_a_case_with_no_economics_rows_is_not_read_as_withheld(lp, monkeypatch):
+    """When the live frames answer no rows (`econ` None), the case reads market revenue
+    as not established, never as a price-limit withholding, and does not fail."""
+    from services.study import engine_adapter
+    from tests.test_engine_adapter_case_golden import OPTIONS, _bundle
+
+    mr = engine_adapter._market(lp, None)
+    assert "annual_value" not in (mr.unavailable or {}) or (
+        mr.unavailable["annual_value"] != DUALS_NOT_MARGINAL
+    )
+    monkeypatch.setattr(engine_adapter, "_econ_rows", lambda *a, **k: (None, None))
+    view = _bundle(OPTIONS[0]).view
+    assert view.market_revenue_at_duals.unavailable.get("annual_value") != (
+        DUALS_NOT_MARGINAL
+    )
+    assert all("market_revenue_at_duals" not in y.unavailable for y in view.years)
