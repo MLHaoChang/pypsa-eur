@@ -976,7 +976,7 @@ def gen_co2_rate(ctx: Ctx):
     # the static column is None/0/NaN) — no separate zero-efficiency guard
     # is reachable, so none is written.
     eff = _static(ctx, "efficiency") or 1.0
-    if p is None or factor is None:
+    if p is None:
         return None
     # PyPSA's convention: co2_emissions is per unit of PRIMARY energy, so the
     # electrical output is divided by efficiency to recover fuel input first.
@@ -984,10 +984,21 @@ def gen_co2_rate(ctx: Ctx):
     # and its no-load fuel (already MWh of fuel, no efficiency) emits in every
     # committed hour.
     from services import fuel_curve
+    from services.co2_override import override_series
 
     slope = fuel_curve.curve_slope(ctx.params)
-    rate = p * slope * factor if slope is not None else p / eff * factor
-    no_load = fuel_curve.no_load_fuel(ctx.params)
+    # A per-snapshot intensity (`services.co2_override`, e.g. the grid's by period) wins whatever the
+    # carrier or the curve says; the carrier's figure (x slope, else / efficiency) only fills a
+    # snapshot it has none for, as in the Emissions views. A carrier with no figure counts 0 there.
+    fallback = (factor or 0.0) * slope if slope is not None else (factor or 0.0) / eff
+    ovr = override_series(ctx.n, ctx.name, fallback, p.index)
+    if ovr is not None:
+        rate = p * ovr
+    elif factor is None:
+        return None
+    else:
+        rate = p * slope * factor if slope is not None else p / eff * factor
+    no_load = fuel_curve.no_load_fuel(ctx.params) if factor is not None else 0.0
     status = gen_status(ctx) if no_load > 0 else None
     if status is not None:
         rate = rate + status.reindex(rate.index).fillna(0.0) * no_load * factor
