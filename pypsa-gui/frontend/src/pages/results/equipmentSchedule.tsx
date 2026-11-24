@@ -83,6 +83,9 @@ export function NoteChip({ children }: { children: ReactNode }) {
   )
 }
 
+/** A flag this build has no words for: a plain note, never its key. */
+export const OTHER_FLAG = 'Another check flagged this row'
+
 /** The Flag cell: one chip per flag (warning or note), in words, or "None". */
 export function FlagCell({ row }: { row: EquipmentScheduleRow }) {
   const flags = flagsOf(row)
@@ -91,7 +94,7 @@ export function FlagCell({ row }: { row: EquipmentScheduleRow }) {
     <span className="inline-flex flex-col items-start gap-1">
       {flags.map(k => {
         const f = FLAG_WORDS[k as EquipmentFlag]
-        if (!f) return <NoteChip key={k}>{cap(k.replace(/_/g, ' '))}</NoteChip>
+        if (!f) return <NoteChip key={k}>{OTHER_FLAG}</NoteChip>
         return f.warn ? <WarnChip key={k}>{f.words(row)}</WarnChip> : <NoteChip key={k}>{f.words(row)}</NoteChip>
       })}
     </span>

@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import type { EquipmentFlag, EquipmentSchedule, EquipmentScheduleRow } from '../../api/campusElectrical'
 import EquipmentScheduleTab from './EquipmentScheduleTab'
-import { FLAG_WORDS, FlagCell } from './equipmentSchedule'
+import { FLAG_WORDS, FlagCell, OTHER_FLAG } from './equipmentSchedule'
 
 const api = vi.hoisted(() => ({ equipmentSchedule: vi.fn(), equipmentScheduleXlsx: vi.fn() }))
 vi.mock('../../api/campusElectrical', async (importOriginal) => {
@@ -37,7 +37,7 @@ const SCHEDULE: EquipmentSchedule = {
           governing: 'declared in the campus file', source: 'declared', library_id: null, capex_eur: null }),
   ],
   assumptions: [
-    { applies_to: 'switchgear', name: 'mu', label: "Breaking-current factor (Ib / Ik'')", value: 1, unit: '', source: 'assumed' },
+    { applies_to: 'switchgear', name: 'mu', label: 'Breaking-current factor', value: 1, unit: '', source: 'assumed' },
     { applies_to: 'switchgear', name: 'tk_s', label: 'Fault duration', value: 1, unit: 's', source: 'assumed' },
   ],
   missing: [],
@@ -71,7 +71,7 @@ describe('Hand-off › Equipment schedule', () => {
     expect(table.textContent).not.toMatch(/—/)
     expect(screen.getByTestId('schedule-total').textContent).toContain('Capex total of the 2 priced rows: €')
     const assumed = screen.getByTestId('schedule-assumptions').textContent!
-    expect(assumed).toContain("Breaking-current factor (Ib / Ik'') 1")
+    expect(assumed).toContain('Breaking-current factor 1')
     expect(assumed).toContain('Fault duration 1 s')
     expect(assumed).not.toMatch(/\bmu\b/)
     expect(screen.queryByTestId('schedule-stale')).toBeNull()
@@ -81,7 +81,18 @@ describe('Hand-off › Equipment schedule', () => {
     useUIStore.setState({ currentProject: 'dc-a' })
     api.equipmentSchedule.mockResolvedValue({ ...SCHEDULE, stale: true })
     renderTab()
-    expect((await screen.findByTestId('schedule-stale')).textContent).toContain('Run the DC Grid study again')
+    const stale = (await screen.findByTestId('schedule-stale')).textContent
+    expect(stale).toContain('These ratings are out of date:')
+    expect(stale).toContain('Run the DC Grid study again')
+  })
+
+  it('a flag it has no words for reads as a plain note, never its key', async () => {
+    useUIStore.setState({ currentProject: 'dc-a' })
+    api.equipmentSchedule.mockResolvedValue({ ...SCHEDULE, rows: [{ ...SCHEDULE.rows[0], flag: 'some_new_check' }] })
+    renderTab()
+    const row = await screen.findByTestId('schedule-row-0')
+    expect(row.textContent).toContain(OTHER_FLAG)
+    expect(row.textContent).not.toMatch(/some.new.check/i)
   })
 
   it('the one download button fetches the workbook', async () => {

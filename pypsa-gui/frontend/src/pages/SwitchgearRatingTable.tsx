@@ -16,7 +16,7 @@ function busAndKv(location: string | null, asset: string): { bus: string; kv: st
   const m = location?.match(/^(.*) \(([^)]*)\)$/)
   if (!m) return { bus: location ?? asset.replace(/ switchgear$/, ''), kv: 'Not stated' }
   const kv = m[2].replace(/ kV$/, '')
-  return { bus: m[1], kv: /not evaluated/i.test(kv) ? 'Not evaluated' : kv }
+  return { bus: m[1], kv: /not evaluated/i.test(kv) ? 'Not stated' : kv }
 }
 
 export default function SwitchgearRatingTable() {
@@ -39,7 +39,7 @@ export default function SwitchgearRatingTable() {
               <thead>
                 <tr>
                   <th className={TH}>Bus</th><th className={TH}>kV</th><th className={TH}>Chosen rating</th>
-                  <th className={TH}>Governing criterion</th><th className={TH}>Declared</th><th className={TH}>Check</th>
+                  <th className={TH}>Governing criterion</th><th className={TH}>Declared</th><th className={TH}>Flag</th>
                 </tr>
               </thead>
               <tbody>

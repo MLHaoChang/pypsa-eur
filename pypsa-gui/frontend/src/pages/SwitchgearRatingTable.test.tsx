@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import type { EquipmentScheduleRow } from '../api/campusElectrical'
@@ -51,6 +51,7 @@ describe('Short circuit › Switchgear rating chosen', () => {
     expect(itBus.textContent).toContain('Declared 25 kA is below the chosen 31.5 kA')
     const mv = screen.getByTestId('switchgear-MV_BUS')
     expect(mv.textContent).toContain('Not evaluated')
+    expect(within(mv).getAllByRole('cell')[1].textContent).toBe('Not stated')   // a bus voltage is an input
     expect(mv.textContent).toContain('Not declared')
     expect(screen.getByTestId('switchgear-HV_BUS').textContent).toContain('Above the largest standard rating:')
     expect(screen.getByTestId('switchgear-HV_BUS').textContent).toContain('None large enough')
@@ -58,6 +59,8 @@ describe('Short circuit › Switchgear rating chosen', () => {
       .toBe('Above the largest standard rating')
     expect(screen.getByTestId('switchgear-chosen').textContent).not.toMatch(/—/)
     expect(screen.getByTestId('schedule-chip-key')).toBeTruthy()
+    expect(screen.getAllByRole('columnheader').map(h => h.textContent)).toContain('Flag')
+    expect(screen.queryByRole('columnheader', { name: 'Check' })).toBeNull()
     expect(screen.getAllByRole('button', { name: /equipment schedule/ })).toHaveLength(1)
     fireEvent.click(screen.getByTestId('switchgear-open-schedule'))
     expect(nav.showResultsTab).toHaveBeenCalledWith('equipment_schedule',

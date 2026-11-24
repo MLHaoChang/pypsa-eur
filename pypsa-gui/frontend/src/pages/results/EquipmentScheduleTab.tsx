@@ -72,7 +72,7 @@ function ScheduleTable({ data }: { data: EquipmentSchedule }) {
       </ScheduleScroll>
       <p className="text-[11px] mt-2 tabular-nums" data-testid="schedule-total">
         Capex total of the {priced.length} priced rows: {money(total, 'EUR')}
-        {rows.length > priced.length && <span className="text-muted"> ({rows.length - priced.length} rows not priced are not in it)</span>}
+        {rows.length > priced.length && <span className="text-muted"> · {rows.length - priced.length} rows not priced are left out</span>}
       </p>
     </>
   )
@@ -146,8 +146,8 @@ export default function EquipmentScheduleTab() {
     <PageBody className="pb-20">
       {data.stale && (
         <p data-testid="schedule-stale" className="text-[12px] text-warn border border-warn/40 rounded px-3 py-2">
-          The campus file, the network or the ratings library changed since this study ran. Run the DC Grid study
-          again before using these ratings.
+          These ratings are out of date: the campus file, the network or the ratings library changed after this
+          study ran. Run the DC Grid study again before using them.
         </p>
       )}
       {data.missing.map(m => (
