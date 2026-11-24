@@ -311,22 +311,32 @@ def test_fault_levels_with_the_machines_alone():
 
 
 def _island_spec(**gens):
-    """campus_spec with its PCC tie normally open, DC_LOAD 81 MW at pf 0.98 on MV2 and ``gens`` (name:
-    (s_mva, xd_pp)) as the gensets on MV2, each with R/X 0.07."""
+    """
+    campus_spec with its PCC tie normally open, DC_LOAD 81 MW at pf 0.98 on MV2 and ``gens`` (name:
+    (s_mva, xd_pp)) as the gensets on MV2, each with R/X 0.07.
+    """
     spec = campus_spec()
     c = spec["campus"]
     c["pcc"].update(tie_normally_open=True, p_connection_mw=t(20.0))
     c["units"]["DC_LOAD"]["p_mw"] = t(81.0)
     del c["units"]["GEN1"]
     for name, (s, xd) in gens.items():
-        c["units"][name] = {"kind": "genset", "bus": "MV2", "p_mw": t(0.8 * s), "s_mva": t(s),
-                            "xd_pp": t(xd), "rx_sc": t(0.07)}
+        c["units"][name] = {
+            "kind": "genset",
+            "bus": "MV2",
+            "p_mw": t(0.8 * s),
+            "s_mva": t(s),
+            "xd_pp": t(xd),
+            "rx_sc": t(0.07),
+        }
     return spec
 
 
 def _genset_sc(s_mva, xd, c):
-    """IEC 60909 S''k (MVA) of a genset at its own terminals, rated at the bus voltage: c Un^2 / |K_G Z_G|,
-    K_G = c_max / (1 + x''d sin phi) with cos phi 0.8, |Z_G| = x''d (1 + (R/X)^2)^0.5 Un^2 / S_r."""
+    """
+    IEC 60909 S''k (MVA) of a genset at its own terminals, rated at the bus voltage: c Un^2 / |K_G Z_G|,
+    K_G = c_max / (1 + x''d sin phi) with cos phi 0.8, |Z_G| = x''d (1 + (R/X)^2)^0.5 Un^2 / S_r.
+    """
     k_g = 1.1 / (1.0 + xd * 0.6)
     return c * s_mva / (k_g * xd * math.sqrt(1.0 + 0.07**2))
 
@@ -346,7 +356,9 @@ def _close(a, b):
 
 def test_genset_sc_literals_are_the_hand_formula():
     for s, (smax, smin) in GENSET_SC.items():
-        assert _close(_genset_sc(s, 0.15, 1.1), smax) and _close(_genset_sc(s, 0.15, 1.0), smin)
+        assert _close(_genset_sc(s, 0.15, 1.1), smax) and _close(
+            _genset_sc(s, 0.15, 1.0), smin
+        )
 
 
 def test_island_one_genset_is_its_own_fault_level():
@@ -358,16 +370,24 @@ def test_island_one_genset_is_its_own_fault_level():
         assert row["sc_without_mva"] == 0.0
         assert _close(row["sc_tot_mva"], GENSET_SC[10.0][k])
         assert _close(row["uif"], 8.265306122448980)  # (81 / 0.98) / 10
-        assert row["c"] == c and row["role"] == su.ROLE_ISLAND and row["verdict"] == "flag"
-        assert _close(rows.at[("MV1", label), "uif"], 3.85)  # 38.5 / 10: SC_i = 0 there too
+        assert (
+            row["c"] == c and row["role"] == su.ROLE_ISLAND and row["verdict"] == "flag"
+        )
+        assert _close(
+            rows.at[("MV1", label), "uif"], 3.85
+        )  # 38.5 / 10: SC_i = 0 there too
     assert study.island_verdict == "flag"
     assert _close(study.island_worst_uif, 8.265306122448980)
 
 
 def test_island_two_gensets_hand_computed():
-    """Two gensets on MV2 with the same x''d and R/X, so SC_tot = SC_1 + SC_2 and SC_i is the other
-    machine's alone."""
-    rows = su.campus_uif(build_campus(_island_spec(GEN1=(12.5, 0.15), GEN2=(8.0, 0.15)))).rows
+    """
+    Two gensets on MV2 with the same x''d and R/X, so SC_tot = SC_1 + SC_2 and SC_i is the other
+    machine's alone.
+    """
+    rows = su.campus_uif(
+        build_campus(_island_spec(GEN1=(12.5, 0.15), GEN2=(8.0, 0.15)))
+    ).rows
     rows = rows.set_index(["bus", "case", "machine"])
     s_plant = 81.0 / 0.98
     for label, (_, _, k) in ISLAND.items():
@@ -387,34 +407,53 @@ def test_island_two_gensets_hand_computed():
 #: The grid-case UIF rows of the islanding fixtures, recorded from master's ``campus_uif`` (GC-08), which
 #: GC-08b must leave as they were (GK A2 U4): {(bus, case, machine): UIF}, and the meta verdict/worst.
 MASTER_ONE = {
-    ("MV1", "max", "GEN1"): 0.04946584244527219, ("MV2", "max", "GEN1"): 0.17598066611394375,
-    ("PCC", "max", "GEN1"): 0.006270726812655763, ("MV1", "min", "GEN1"): 0.055935427407156714,
-    ("MV2", "min", "GEN1"): 0.19422748113521945, ("PCC", "min", "GEN1"): 0.01145306613658685,
+    ("MV1", "max", "GEN1"): 0.04946584244527219,
+    ("MV2", "max", "GEN1"): 0.17598066611394375,
+    ("PCC", "max", "GEN1"): 0.006270726812655763,
+    ("MV1", "min", "GEN1"): 0.055935427407156714,
+    ("MV2", "min", "GEN1"): 0.19422748113521945,
+    ("PCC", "min", "GEN1"): 0.01145306613658685,
 }
 MASTER_TWO = {
-    ("MV1", "max", "GEN1"): 0.04360592101632999, ("MV1", "max", "GEN2"): 0.026962383092670093,
-    ("MV2", "max", "GEN1"): 0.16576847246883214, ("MV2", "max", "GEN2"): 0.10614685151638045,
-    ("PCC", "max", "GEN1"): 0.004736321163903126, ("PCC", "max", "GEN2"): 0.002706262592840422,
-    ("MV1", "min", "GEN1"): 0.0485374484353147, ("MV1", "min", "GEN2"): 0.029978246678375297,
-    ("MV2", "min", "GEN1"): 0.18079756680761608, ("MV2", "min", "GEN2"): 0.1158121289720601,
-    ("PCC", "min", "GEN1"): 0.008532808183664682, ("PCC", "min", "GEN2"): 0.004873432669216666,
+    ("MV1", "max", "GEN1"): 0.04360592101632999,
+    ("MV1", "max", "GEN2"): 0.026962383092670093,
+    ("MV2", "max", "GEN1"): 0.16576847246883214,
+    ("MV2", "max", "GEN2"): 0.10614685151638045,
+    ("PCC", "max", "GEN1"): 0.004736321163903126,
+    ("PCC", "max", "GEN2"): 0.002706262592840422,
+    ("MV1", "min", "GEN1"): 0.0485374484353147,
+    ("MV1", "min", "GEN2"): 0.029978246678375297,
+    ("MV2", "min", "GEN1"): 0.18079756680761608,
+    ("MV2", "min", "GEN2"): 0.1158121289720601,
+    ("PCC", "min", "GEN1"): 0.008532808183664682,
+    ("PCC", "min", "GEN2"): 0.004873432669216666,
 }
 
 
-@pytest.mark.parametrize("gens, master", [({"GEN1": (10.0, 0.15)}, MASTER_ONE),
-                                          ({"GEN1": (12.5, 0.15), "GEN2": (8.0, 0.15)}, MASTER_TWO)])
+@pytest.mark.parametrize(
+    "gens, master",
+    [
+        ({"GEN1": (10.0, 0.15)}, MASTER_ONE),
+        ({"GEN1": (12.5, 0.15), "GEN2": (8.0, 0.15)}, MASTER_TWO),
+    ],
+)
 def test_island_leaves_the_grid_cases_as_master(gens, master):
     study = su.campus_uif(build_campus(_island_spec(**gens)))
-    grid = study.rows[study.rows["case"].isin(su.CASES)].set_index(["bus", "case", "machine"])
+    grid = study.rows[study.rows["case"].isin(su.CASES)].set_index(
+        ["bus", "case", "machine"]
+    )
     assert sorted(grid.index) == sorted(master)
     for key, value in master.items():
         assert _close(grid.at[key, "uif"], value), key
     assert set(grid["role"]) == {su.ROLE_CONVERTER, su.ROLE_PCC}
     # the verdict and worst the GC-08 readers use are the grid cases' alone
-    assert study.verdict == "flag" and _close(study.worst_uif, max(v for (b, _, _), v in master.items()
-                                                                   if b != "PCC"))
+    assert study.verdict == "flag" and _close(
+        study.worst_uif, max(v for (b, _, _), v in master.items() if b != "PCC")
+    )
     island = study.rows[~study.rows["case"].isin(su.CASES)]
-    assert set(island["case"]) == set(ISLAND) and set(island["role"]) == {su.ROLE_ISLAND}
+    assert set(island["case"]) == set(ISLAND) and set(island["role"]) == {
+        su.ROLE_ISLAND
+    }
     assert set(island["bus"]) == {"MV1", "MV2"}  # no PCC information row islanded
 
 
@@ -429,21 +468,29 @@ def _no_source_at_mv1(campus, installed, island=False):
 
 
 def test_island_bus_without_a_source_is_not_evaluated():
-    """SC_tot 0 islanded: the bus's rows read not evaluated with the reason, never inf, NaN-as-clear or a
-    refusal, and the island verdict cannot clear while one reads so."""
+    """
+    SC_tot 0 islanded: the bus's rows read not evaluated with the reason, never inf, NaN-as-clear or a
+    refusal, and the island verdict cannot clear while one reads so.
+    """
     campus = build_campus(_island_spec(GEN1=(10.0, 0.15)))
     study = su.campus_uif(campus, threshold=100.0, fault_levels=_no_source_at_mv1)
-    mv1 = study.rows[(study.rows["bus"] == "MV1") & (study.rows["role"] == su.ROLE_ISLAND)]
+    mv1 = study.rows[
+        (study.rows["bus"] == "MV1") & (study.rows["role"] == su.ROLE_ISLAND)
+    ]
     assert len(mv1) == 2 and set(mv1["verdict"]) == {"not evaluated"}
     assert mv1["uif"].isna().all() and (mv1["sc_tot_mva"] == 0.0).all()
     assert all(su.NO_ISLAND_SOURCE in n for n in mv1["note"])
-    mv2 = study.rows[(study.rows["bus"] == "MV2") & (study.rows["role"] == su.ROLE_ISLAND)]
+    mv2 = study.rows[
+        (study.rows["bus"] == "MV2") & (study.rows["role"] == su.ROLE_ISLAND)
+    ]
     assert set(mv2["verdict"]) == {"clear"}  # 8.27 under the threshold 100
     assert study.island_verdict == "not evaluated"
     assert _close(study.island_worst_uif, 8.265306122448980)
     assert study.verdict == "clear"  # the grid cases are untouched
     # with a flag elsewhere in the island, the island verdict flags
-    assert su.campus_uif(campus, fault_levels=_no_source_at_mv1).island_verdict == "flag"
+    assert (
+        su.campus_uif(campus, fault_levels=_no_source_at_mv1).island_verdict == "flag"
+    )
 
 
 def test_converter_only_campus_with_island_data_is_not_evaluated():
@@ -454,8 +501,10 @@ def test_converter_only_campus_with_island_data_is_not_evaluated():
 
 
 def test_island_case_selection_both_ways():
-    """A closed tie without island data: no island call and the GC-08 rows. An open tie, or a closed tie
-    with island requirements: the grid-out calls, one with every machine (a lone machine's SC_i is 0)."""
+    """
+    A closed tie without island data: no island call and the GC-08 rows. An open tie, or a closed tie
+    with island requirements: the grid-out calls, one with every machine (a lone machine's SC_i is 0).
+    """
     seen = []
 
     def spy(campus, installed, island=False):
@@ -466,12 +515,18 @@ def test_island_case_selection_both_ways():
     assert not su.islands(closed)
     study = su.campus_uif(closed, fault_levels=spy)
     assert seen == [({"GEN1"}, False), (set(), False)]
-    assert set(study.rows["case"]) == set(su.CASES) and study.island_verdict == "not evaluated"
+    assert (
+        set(study.rows["case"]) == set(su.CASES)
+        and study.island_verdict == "not evaluated"
+    )
     assert math.isnan(study.island_worst_uif)
     spec = campus_spec()
     spec["campus"]["pcc"].update(tie_normally_open=True, p_connection_mw=t(20.0))
     declared = build_campus(campus_spec())
-    declared.island["requirements"] = {"values": {}, "sources": {}}  # island operation declared
+    declared.island["requirements"] = {
+        "values": {},
+        "sources": {},
+    }  # island operation declared
     for campus in (build_campus(spec), declared):
         assert su.islands(campus)
         seen.clear()
@@ -481,27 +536,44 @@ def test_island_case_selection_both_ways():
 
 
 @pytest.mark.parametrize("sc", [0.0, math.nan, math.inf])
-@pytest.mark.parametrize("threshold, assumed, limit, flagged",
-                         [(None, False, su.DEFAULT_THRESHOLD, True), (0.5, False, 0.5, False),
-                          (0.5, True, 0.5, True)])
-def test_unevaluated_island_rows_keep_the_threshold_and_its_tag(sc, threshold, assumed, limit, flagged):
+@pytest.mark.parametrize(
+    "threshold, assumed, limit, flagged",
+    [
+        (None, False, su.DEFAULT_THRESHOLD, True),
+        (0.5, False, 0.5, False),
+        (0.5, True, 0.5, True),
+    ],
+)
+def test_unevaluated_island_rows_keep_the_threshold_and_its_tag(
+    sc, threshold, assumed, limit, flagged
+):
     def levels(campus, installed, island=False):
         out = _no_source_at_mv1(campus, installed, island)
         if island:
             out.loc[out["bus"] == "MV1", ["ikss_max_ka", "ikss_min_ka"]] = sc
         return out
 
-    study = su.campus_uif(build_campus(_island_spec(GEN1=(10.0, 0.15))), threshold, assumed=assumed,
-                          fault_levels=levels)
-    mv1 = study.rows[(study.rows["bus"] == "MV1") & (study.rows["role"] == su.ROLE_ISLAND)]
-    assert set(mv1["verdict"]) == {"not evaluated"} and (mv1["threshold"] == limit).all()
+    study = su.campus_uif(
+        build_campus(_island_spec(GEN1=(10.0, 0.15))),
+        threshold,
+        assumed=assumed,
+        fault_levels=levels,
+    )
+    mv1 = study.rows[
+        (study.rows["bus"] == "MV1") & (study.rows["role"] == su.ROLE_ISLAND)
+    ]
+    assert (
+        set(mv1["verdict"]) == {"not evaluated"} and (mv1["threshold"] == limit).all()
+    )
     assert set(mv1["assumed"]) == {flagged}
     assert all((su.NO_THRESHOLD in n) == (threshold is None) for n in mv1["note"])
     assert list(mv1["case"]) == list(ISLAND) and list(mv1["c"]) == [1.1, 1.0]
 
 
 def test_island_all_clear_clears():
-    study = su.campus_uif(build_campus(_island_spec(GEN1=(10.0, 0.15))), threshold=100.0)
+    study = su.campus_uif(
+        build_campus(_island_spec(GEN1=(10.0, 0.15))), threshold=100.0
+    )
     assert study.island_verdict == "clear" and study.verdict == "clear"
 
 
@@ -515,4 +587,6 @@ def test_grid_case_without_fault_level_still_refused():
         return out
 
     with pytest.raises(ContractError, match="SC_tot must be > 0"):
-        su.campus_uif(build_campus(_island_spec(GEN1=(10.0, 0.15))), fault_levels=levels)
+        su.campus_uif(
+            build_campus(_island_spec(GEN1=(10.0, 0.15))), fault_levels=levels
+        )

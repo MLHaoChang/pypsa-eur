@@ -68,7 +68,9 @@ ROLE_CONVERTER = "converter bus"
 ROLE_PCC = "PCC (information)"
 #: An island-case row at a converter bus: computed, not yet judged by the scorecard or pack (GC-08e).
 ROLE_ISLAND = "island converter bus (not judged)"
-NO_ISLAND_SOURCE = "no synchronous machine feeds this bus with the grid out: SC_tot is 0, so no UIF"
+NO_ISLAND_SOURCE = (
+    "no synchronous machine feeds this bus with the grid out: SC_tot is 0, so no UIF"
+)
 PLANT_NOTE = (
     "S_plant is the sum at the bus of each converter-interfaced unit's s_mva and the rectifier-fed load's "
     "p_mw / pf (conservative)"
@@ -248,9 +250,13 @@ def _s_mva(levels: pd.DataFrame, bus: str, case: str) -> float:
 
 
 def islands(campus) -> bool:
-    """Whether the campus operates islanded: its PCC tie is normally open, or it declares island
-    requirements."""
-    return bool(campus.tie_normally_open) or campus.island.get("requirements") is not None
+    """
+    Whether the campus operates islanded: its PCC tie is normally open, or it declares island
+    requirements.
+    """
+    return (
+        bool(campus.tie_normally_open) or campus.island.get("requirements") is not None
+    )
 
 
 def campus_uif(
@@ -290,12 +296,19 @@ def campus_uif(
         full_i = fault_levels(campus, every, island=True)
         # with the grid out and no other machine, nothing feeds the fault
         out_i = {
-            uid: fault_levels(campus, every - {uid}, island=True) if every - {uid} else None
+            uid: fault_levels(campus, every - {uid}, island=True)
+            if every - {uid}
+            else None
             for uid in machines.index
         }
         # islanded there is no grid to dominate the PCC: its information row is left out
         states.append(
-            (full_i, out_i, ISLAND_CASES, [(b, s, ROLE_ISLAND) for b, s, _ in evaluate[:-1]])
+            (
+                full_i,
+                out_i,
+                ISLAND_CASES,
+                [(b, s, ROLE_ISLAND) for b, s, _ in evaluate[:-1]],
+            )
         )
     frames = []
     for levels, without, cases, buses in states:
@@ -305,13 +318,23 @@ def campus_uif(
                 sc_tot = _s_mva(levels, bus, case)
                 if role == ROLE_ISLAND and not (math.isfinite(sc_tot) and sc_tot > 0):
                     frames.append(
-                        _unevaluated(s_plant, machines, threshold, assumed, bus, label, grid_c(vn, case))
+                        _unevaluated(
+                            s_plant,
+                            machines,
+                            threshold,
+                            assumed,
+                            bus,
+                            label,
+                            grid_c(vn, case),
+                        )
                     )
                     continue
                 ms = {
                     uid: (
                         float(machines.at[uid, "s_mva"]),
-                        0.0 if without[uid] is None else _s_mva(without[uid], bus, case),
+                        0.0
+                        if without[uid] is None
+                        else _s_mva(without[uid], bus, case),
                     )
                     for uid in machines.index
                 }
@@ -336,7 +359,9 @@ def campus_uif(
     island = rows[rows["role"] == ROLE_ISLAND]
     island_verdict, island_worst = "not evaluated", math.nan
     if not island.empty:
-        island_worst = float(island["uif"].max())  # NaN rows (not evaluated) are skipped
+        island_worst = float(
+            island["uif"].max()
+        )  # NaN rows (not evaluated) are skipped
         if (island["verdict"] == "flag").any():
             island_verdict = "flag"
         elif (island["verdict"] == "clear").all():
@@ -354,7 +379,9 @@ def campus_uif(
 def _unevaluated(s_plant, machines, threshold, assumed, bus, case, c) -> pd.DataFrame:
     """The rows of an island bus that no machine feeds (``NO_ISLAND_SOURCE``): no UIF, not evaluated."""
     limit = DEFAULT_THRESHOLD if threshold is None else _finite("threshold", threshold)
-    note = "; ".join([PLANT_NOTE, NO_ISLAND_SOURCE, *([NO_THRESHOLD] if threshold is None else [])])
+    note = "; ".join(
+        [PLANT_NOTE, NO_ISLAND_SOURCE, *([NO_THRESHOLD] if threshold is None else [])]
+    )
     return pd.DataFrame(
         [
             {

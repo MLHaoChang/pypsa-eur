@@ -18,7 +18,9 @@ def test_island_rows_leave_the_card_and_the_pack_as_master(tmp_path, monkeypatch
     run, n = _grid_run_with_open_tie(tmp_path, 2000.0)
     table = pd.read_csv(run / SSTI_UIF_CSV)
     island = table[table["role"] == su.ROLE_ISLAND]
-    assert set(island["case"]) == set(su.ISLAND_CASES) and len(island) > 0  # the campus islands
+    assert (
+        set(island["case"]) == set(su.ISLAND_CASES) and len(island) > 0
+    )  # the campus islands
     project = _project(monkeypatch, tmp_path, n=n)
     card = _card(tmp_path, n=n)[0]["ssti_uif"]
     _, pack = _pack(project)
@@ -30,7 +32,10 @@ def test_island_rows_leave_the_card_and_the_pack_as_master(tmp_path, monkeypatch
     assert _card(tmp_path, n=n)[0]["ssti_uif"] == card
     _, master = _pack(project)
     rows = pack["ssti_uif"].rows
-    grid, printed = rows[: len(master["ssti_uif"].rows)], rows[len(master["ssti_uif"].rows):]
+    grid, printed = (
+        rows[: len(master["ssti_uif"].rows)],
+        rows[len(master["ssti_uif"].rows) :],
+    )
     assert grid == master["ssti_uif"].rows
     assert pack["ssti_uif"].caption == master["ssti_uif"].caption
     assert len(printed) == len(island)
