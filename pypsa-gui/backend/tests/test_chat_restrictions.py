@@ -3,6 +3,7 @@ import contextlib
 import uuid
 import json
 import pytest
+from harness import restrictions as restrictions_module
 
 from harness.loop import dispatch_tool_call
 from harness.session import ChatSession
@@ -222,7 +223,7 @@ def test_a_deleted_project_is_refused_like_one_without_access(baseline, client, 
 
 def test_a_changed_binding_is_not_turned_into_no_access(baseline, client, monkeypatch):
     """Issue 17: only current_project's 404 becomes project_access_denied; its
-    409 (binding changed) passes through unchanged."""
+    409 (binding changed) stays a 409, now typed (issue 21)."""
     from fastapi import HTTPException
     from harness import restrictions
 
@@ -235,7 +236,7 @@ def test_a_changed_binding_is_not_turned_into_no_access(baseline, client, monkey
     with pytest.raises(HTTPException) as refused:
         restrictions.capture(ChatSession())
     assert refused.value.status_code == 409
-    assert refused.value.detail == message
+    assert refused.value.detail['error_kind'] == 'project_binding_changed'
 
 
 def test_a_change_set_never_offers_rows_to_an_actor_without_access(
@@ -597,3 +598,46 @@ def test_a_persisted_initial_revision_is_corruption_not_an_absent_rule(baseline,
             'updates': {'marginal_cost': 20}}}, []))
     assert any(d.get('error_kind') == 'restriction_unavailable' for _, d in frames), frames
     assert chat_tools.get_component('Generator', 'G1')['marginal_cost'] == 10
+
+
+def test_chat_ownership_change_is_refused_with_its_own_kind(baseline, client, second_identity):
+    """Issue 21: a chat owned by someone else is not "the rule store is down"."""
+    session = ChatSession()
+    session.owner_user_id = str(second_identity['user_id'])
+    collector = []
+    frames = list(dispatch_tool_call(session, {
+        'id': 'foreign-chat', 'name': 'bulk_update_components', 'input': WRITE_G1}, collector))
+    assert [d.get('error_kind') for e, d in frames if e == 'tool_error'] == ['chat_ownership_changed']
+    assert not any(e in {'tool_pending_confirmation', 'tool_running'} for e, _ in frames)
+    assert chat_tools.get_component('Generator', 'G1')['marginal_cost'] == 10
+
+
+def test_project_binding_change_is_refused_with_its_own_kind(baseline, client):
+    """Issue 21: the active project moved away from the resolved one; the
+    restrictions save route keeps its plain 409 string."""
+    from services.pypsa_service import PyPSAService
+
+    pid = baseline[1]
+    active = PyPSAService.get_active_context()
+    other = str(uuid.uuid4())
+    original = restrictions_module.current_project
+
+    def moved(db, user, expected):
+        active.project_uuid = other
+        try:
+            return original(db, user, expected)
+        finally:
+            active.project_uuid = pid
+
+    restrictions_module.current_project = moved
+    try:
+        frames = list(dispatch_tool_call(ChatSession(), {
+            'id': 'moved', 'name': 'bulk_update_components', 'input': WRITE_G1}, []))
+    finally:
+        restrictions_module.current_project = original
+    assert [d.get('error_kind') for e, d in frames if e == 'tool_error'] == ['project_binding_changed']
+    assert not any(e in {'tool_pending_confirmation', 'tool_running'} for e, _ in frames)
+    body = {'project_id': pid, 'revision': str(uuid.UUID(int=0)), 'mode': 'read_only'}
+    assert client.post('/api/projects/Another', params={'force': True, 'rebind': True}).status_code == 200
+    resp = client.put('/api/chat/restrictions', json=body)
+    assert resp.status_code == 409 and isinstance(resp.json()['detail'], str)

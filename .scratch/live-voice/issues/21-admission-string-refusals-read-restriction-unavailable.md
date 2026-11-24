@@ -3,7 +3,7 @@
 
 # Two admission refusals still read as restriction_unavailable
 
-Status: ready-for-agent
+Status: done
 Type: task
 Found by: live-voice 17 (`17-no-access-actor-reads-restriction-unavailable.md`).
 

@@ -1311,12 +1311,16 @@ def _component_index(component_class: str) -> list[str]:
     return [] if df is None else [str(x) for x in df.index]
 
 
-def bulk_update_components(component_class: str, names: list[str], updates: dict) -> dict:
-    """PATCH /api/network/_bulk."""
+def bulk_update_components(component_class: str, names: list[str], updates: dict,
+                           research_ref: str | None = None) -> dict:
+    """PATCH /api/network/_bulk. `research_ref` names the confirmed source row
+    (study harness 34); a call carrying it is always carded, and it is only
+    echoed back."""
     # Handler is bulk_update(body: dict) — it reads body.get("component_class"/
     # "names"/"updates"). The old BulkUpdateRequest model was removed; pass a dict.
     from routers.network import bulk_update as _h
-    return _h({"component_class": component_class, "names": names, "updates": updates})
+    out = _h({"component_class": component_class, "names": names, "updates": updates})
+    return {**out, "research_ref": research_ref} if research_ref else out
 
 
 # ── Carriers (1) ────────────────────────────────────────────────────────────

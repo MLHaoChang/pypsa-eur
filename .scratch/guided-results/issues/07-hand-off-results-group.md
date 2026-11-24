@@ -4,7 +4,7 @@
 # 07 Results › Hand-off is an empty group: move Reports, Exports and the Specialist packet into it (R6)
 
 Status: ready-for-agent
-Blocked by: none (R0/R1 are on master: `pages/results/groups.ts` `CARD_GROUPS`)
+Blocked by: template-e2e 30 (the Guided-study results workbook is empty; R0/R1 are on master: `pages/results/groups.ts` `CARD_GROUPS`)
 Design: `.scratch/project-workflow/card-workspaces.md` §3.6 and §8 row R6. Owner decisions: RES-CARDS, CARD-WS, HOLISTIC-1.
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), design map.
 Model: sonnet. Review: UX.
@@ -38,3 +38,7 @@ The results journey ends at a card that says "What leaves the tool" and offers n
 `pypsa-gui/frontend/src/pages/results/groups.ts`, `pypsa-gui/frontend/src/pages/Results.tsx`, `pypsa-gui/frontend/src/pages/ReportsPanel.tsx`, `pypsa-gui/frontend/src/pages/ImportExport.tsx` (the chooser part), `pypsa-gui/frontend/src/layout/Sidebar.tsx` (entry points), `pypsa-gui/frontend/src/pages/GridspinePanel.tsx` (bundle list, reused).
 
 ## Comments
+
+- 2026-11-24: built in 0cfee78d (Hand-off tabs, `ExportsTab`, `SpecialistPacketTab`, sidebar and `Export…` retargeted, groups vitest).
+- 2026-11-24 end-to-end check (owner: CHECK FIRST), `template-journeys.mjs --mode short --template eh_datacenter` against the fixture backend on master `5e8cbcdc9`, a solved data-centre template (solve 38 s): PASS 19/19. "Download report (.docx) delivers a file" passed from its Hand-off home. "Input workbook (Excel)" delivered `eh_datacenter-short-input-workbook.xlsx`, 30,495 bytes, a valid zip with 20 parts and an About sheet. NOT delivered: "Results workbook (Excel)" after a Guided study (journey gap 30, xfail; already filed as `.scratch/template-e2e/issues/30-guided-run-results-workbook-empty.md`, needs-triage). Not checked: the bundle download and the per-hour bundle on a planning → dynamics project (the journey does not cover them; no live API/Vite app and no such project in this container), and no screenshots taken. Status therefore back to ready-for-agent until the owner decides on 30 and the missing checks.
+- 2026-11-24 live-app attempt (coordinator: try once): `pixi` is not installed in the builder container, so `pixi install --frozen` could not run. The backend did start from the existing venv (`uvicorn main:app`, `/api/health` 200), but I did not build a planning → dynamics project with ranked hours, so the bundle and per-hour bundle downloads are not checked: no live app with such a project in the builder container. Vite was not started. The router's bundle test (`tests/test_gridspine_router.py`, service mocked) is not a substitute.

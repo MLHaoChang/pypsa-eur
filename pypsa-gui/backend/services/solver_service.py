@@ -1502,6 +1502,8 @@ def run_simulation(
                     if (getattr(config, "fixed_sizes", "off") == "off"
                             and not getattr(network, "_ic_operational", False)):
                         _fixed_sizes.record_sizing(network, _revision_or_none(network))
+                    # The edit counter this solve read: grid readiness says when a solved size is older than an edit.
+                    network._solved_network_revision = _revision_or_none(network)
                     _ic_conn.commit()
                     # The DSR dispatch record (IC P2 WP2.2-0): committed, or
                     # cleared, only after a successful non-operational solve.

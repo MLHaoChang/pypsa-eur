@@ -2345,6 +2345,30 @@ def _tie_open(inp: _Inputs) -> bool:
             and all(_never_conducts(n, x) for x in inp.links))
 
 
+#: Rows that rate a unit by its solved size (``_unit_rating``, the SCR gate's capacity): the same
+#: "edited since" check as the LOLE row, against the edit counter the solve stamped on the network.
+SOLVED_SIZE_ROWS = ("scr", "reactive_range")
+STALE_SOLVE_NOTE = "The network was edited after the solve these sizes come from: re-run the solve"
+
+
+def _edited_since_solve(ctx) -> bool:
+    """True when the context's network was edited after the solve that stamped it; False when it was
+    not, or when no stamp is known (an unsolved or reloaded network says nothing)."""
+    stamp = getattr(ctx.network, "_solved_network_revision", None)
+    if not isinstance(stamp, int) or isinstance(stamp, bool):
+        return False
+    from services import dirty_state
+    return dirty_state.revision(ctx) != stamp
+
+
+def _flag_stale_solve(inp: _Inputs, rows: list[dict]) -> None:
+    if inp.n is None or not getattr(inp.n, "_solve_edited", False):
+        return
+    for r in rows:
+        if r["id"] in SOLVED_SIZE_ROWS or r["id"].startswith("motor_start"):
+            r["note"] = f"{r['note']}; {STALE_SOLVE_NOTE}" if r.get("note") else STALE_SOLVE_NOTE
+
+
 def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
                    eh_study: dict | None = None, study_edited: bool | None = None) -> dict:
     """The scorecard of the project at ``project_dir`` (``network`` its saved
@@ -2377,6 +2401,7 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
         excluded = [{"id": r["id"], "requirement": r["requirement"], "reason": why[r["id"]]}
                     for r in rows if r["id"] in why]
         rows = [r for r in rows if r["id"] not in why]
+    _flag_stale_solve(inp, rows)
     _after_battery(inp, rows)
     settings = {"ramp_rate": ("connection_ramp", _generic_ramp(inp)),
                 "oscillation": ("oscillation", GENERIC_OSCILLATION_PCT),
@@ -2484,7 +2509,11 @@ def _live_network(project) -> tuple[Any, str]:
     if not lock.acquire(timeout=LIVE_LOCK_TIMEOUT_S):
         return None, "out_of_date"
     try:
-        return ctx.network.copy(), "live"
+        from services.study.findings import copy_network
+
+        live = copy_network(ctx.network)  # a solved network holds its solver model, which PyPSA will not copy
+        live._solve_edited = _edited_since_solve(ctx)
+        return live, "live"
     finally:
         lock.release()
 

@@ -391,3 +391,10 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - An apply that re-plans binds the previewed plan's digest and refuses a mismatch with a typed 409 (GK B4, #1938).
 - A "sends X not Y" fixture uses distinct literals for X and Y, so a swap cannot pass (GK B4, #1939).
 - A value left unjudged because an input is assumed reads `None` / "not evaluated" on every surface, never 0 or "—" (GK B4, #1934).
+
+## Standing rulings (GK B (70), recorded 2026-11-24)
+
+- A guard with several parts (a text window plus a next-number bound, or thermal and electrical arms) gets a killing case for each part. A quote that fails every arm at once does not count (GK B (70), #1950 N2/N3a).
+- A fingerprint or digest literal is computed on master in a fresh worktree, under the same process warm-up the test uses. In-memory template builds depend on the process's history (harness issue 226, PyPSA port-2 registration), so "fresh process" is not the same as "pytest worker" (GK B (70), #1949).
+- A new item code that splits one warning across sections gets its own code, since acks key on (code, entity). Test that each one can be acknowledged on its own (GK B (70), #1869).
+- A seam that tests swap for master's function keeps master's signature. Run the parity tests (`test_exact_frame_json_parity`) for any change to an encoder's signature (GK B (70), #1949 shard 5).

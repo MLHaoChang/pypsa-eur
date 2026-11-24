@@ -1,0 +1,1 @@
+* Perf(pypsa-gui): Enqueuing a solve on a full-year project reads its input identity in about a third of the time (1.2 s to 0.4 s on the 8760 h concentrator stage). Both input fingerprints now come from one walk of the network, and the many empty series frames are no longer formatted row by row. Every fingerprint keeps its exact bytes, so no stored record turns stale.
