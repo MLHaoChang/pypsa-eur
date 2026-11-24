@@ -163,6 +163,13 @@
     "card": "reliability"
    },
    {
+    "id": "products",
+    "label": "Products",
+    "data": "available",
+    "shown": false,
+    "card": "capacity"
+   },
+   {
     "id": "investment",
     "label": "Investment case",
     "data": "available",
@@ -341,6 +348,13 @@
     "card": "reliability"
    },
    {
+    "id": "products",
+    "label": "Products",
+    "data": "available",
+    "shown": false,
+    "card": "capacity"
+   },
+   {
     "id": "investment",
     "label": "Investment case",
     "data": "available",
@@ -426,6 +440,13 @@
     "data": "available",
     "shown": false,
     "card": "reliability"
+   },
+   {
+    "id": "products",
+    "label": "Products",
+    "data": "available",
+    "shown": false,
+    "card": "capacity"
    },
    {
     "id": "overview",
@@ -612,6 +633,13 @@
     "data": "available",
     "shown": false,
     "card": "reliability"
+   },
+   {
+    "id": "products",
+    "label": "Products",
+    "data": "available",
+    "shown": false,
+    "card": "capacity"
    },
    {
     "id": "overview",

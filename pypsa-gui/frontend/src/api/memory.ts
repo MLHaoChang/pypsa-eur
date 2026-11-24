@@ -299,7 +299,7 @@ export const VIEW_WORDS: Record<string, string> = {
   island: 'Island & ride-through', grid_forming: 'Grid-forming', prices: 'Prices',
   economics: 'Economics', emissions: 'Emissions', curtailment: 'Curtailment',
   lostload: 'Lost load', adequacy: 'Adequacy', storage: 'Storage cycling', fmea: 'FMEA',
-  grid_risk: 'Grid risk to production', investment: 'Investment case', asset: 'Asset Detail',
+  grid_risk: 'Grid risk to production', products: 'Products', investment: 'Investment case', asset: 'Asset Detail',
   profiles_pending: 'Profile studio', profile_preview: 'Profile studio',
 }
 export const TOPIC_WORDS: Record<string, string> = {
