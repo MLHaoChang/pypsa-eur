@@ -26,6 +26,7 @@ vi.mock('../hubDesign/useHubData', () => ({
   useHubReport: () => null,
   useHubLevers: () => null,
   useDispatchSolved: () => undefined,
+  useHubTemplate: () => ({ template: null }),
 }))
 vi.mock('../hubDesign/ChaptersSection', () => ({ ChaptersSection: () => null }))
 vi.mock('../../hooks/useProjectFlow', () => ({ useProjectFlow: () => ({ flow: null, isPending: false }) }))

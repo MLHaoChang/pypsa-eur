@@ -8,6 +8,7 @@
 // Each figure keeps its own source and state; when some are current and others
 // out of date, one line says which (GK B G1).
 import Kpi from '../../../components/Kpi'
+import { useUIStore } from '../../../store/uiStore'
 import { WhyThisNumber } from './WhyThisNumber'
 import { Skeleton } from '../../../components/Skeleton'
 import type { ResultStateKind } from '../../../components/ResultState'
@@ -65,7 +66,10 @@ const tabLabel = (tab: string): string | null => TABS.find(t => t.id === tab)?.l
 
 function openTile(open: ChapterOpen, setStep: ReturnType<typeof useHubDesignStore.getState>['setStep']) {
   if ('step' in open) { setStep(open.step, { user: true }); return }
-  if (open.panel === 'results') showResultsTab(open.tab, { from: 'Results' })
+  if (open.panel === 'results') {
+    showResultsTab(open.tab, { from: 'Results' })
+    if (open.report) useUIStore.getState().requestEhReport()
+  }
 }
 
 /** The way into the Expert tab that holds the same figure; Back returns here (withReturn). */
@@ -240,7 +244,7 @@ export function ResultsHeadline({ reliability, cost, costEur = null, ci, freshne
     <section aria-label="Headline figures" data-testid="hub-results-headline" className="flex flex-col gap-2">
       <div className="grid grid-cols-2 gap-2">
         {rel && <div className="flex flex-col gap-1 self-start"><TileFigure tile={rel} testId="hub-results-reliability" studyBanner={reliability.stale === true}
-          dimmed={freshnessUnknown} /><WhyThisNumber figure="expected_shortfall" /></div>}
+          dimmed={freshnessUnknown} />{!reliability.noVerdict && <WhyThisNumber figure="expected_shortfall" />}</div>}
         {cost && <div className="flex flex-col gap-1 self-start">{cost}<WhyThisNumber figure="design_cost" value={costEur} /></div>}
         {npv && (
           <div className="flex flex-col gap-1 self-start">

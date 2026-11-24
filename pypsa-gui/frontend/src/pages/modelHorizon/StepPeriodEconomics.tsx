@@ -58,6 +58,7 @@
 import { useState, type ReactNode } from 'react'
 import toast from 'react-hot-toast'
 import { isDerivedScaler, loadGrowthProblem, pvFactor } from '../modelHorizonModel'
+import { BACK_TO_RATE, FROM_RATE } from '../../utils/loadGrowthWords'
 
 export interface StepPeriodEconomicsProps {
   periods: number[]
@@ -365,8 +366,8 @@ export function StepPeriodEconomics({
                                 type="button"
                                 disabled={loadScalerPending}
                                 onClick={() => onLoadScalerChange(carrier, period, null)}
-                                aria-label={`Back to the rate, ${label} ${period}`}
-                                title="Back to the rate"
+                                aria-label={`${BACK_TO_RATE}, ${label} ${period}`}
+                                title={BACK_TO_RATE}
                                 className="mr-1 text-[10px] text-muted hover:text-accent disabled:opacity-40"
                               >↺</button>
                             )}
@@ -392,7 +393,7 @@ export function StepPeriodEconomics({
                               }}
                               className={`w-20 px-1 py-0.5 border border-border rounded text-[11px] font-mono bg-bg focus:outline-none focus:border-accent text-right disabled:opacity-50 disabled:cursor-wait ${fromRate ? 'italic text-muted' : ''}`}
                             />
-                            {fromRate && <span className="block text-[9px] text-muted">from rate</span>}
+                            {fromRate && <span className="block text-[9px] text-muted">{FROM_RATE}</span>}
                           </td>
                         )
                       })}

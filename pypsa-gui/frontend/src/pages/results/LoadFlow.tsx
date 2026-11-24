@@ -22,6 +22,7 @@ import ResultState, { StatePill } from '../../components/ResultState'
 import { nk } from '../../utils/queryKeys'
 import { acPfConvergenceText } from '../../utils/acPfConvergence'
 import { openPanel } from './openPanel'
+import { withheldCell } from './sectionWords'
 import { resultsEvidenceApi } from '../../api/resultsEvidence'
 import { useHubTemplate } from '../hubDesign/useHubData'
 
@@ -629,8 +630,9 @@ export default function LoadFlow() {
                     r.capacity_factor_pct.toFixed(2),
                     r.curtailment_mwh.toFixed(2),
                     r.curtailment_pct.toFixed(2),
-                    r.market_value_eur_per_mwh.toFixed(3),
-                    r.revenue_eur.toFixed(2),
+                    // A withheld figure (integer solve) is an empty cell, never 0.
+                    r.market_value_eur_per_mwh?.toFixed(3) ?? null,
+                    r.revenue_eur?.toFixed(2) ?? null,
                   ]),
                 )
                 toast.success(`Exported ${carrierKpis.rows.length} rows`)
@@ -663,8 +665,16 @@ export default function LoadFlow() {
                     <td className="px-2 py-1 font-mono text-[11px] text-right">{r.capacity_factor_pct.toFixed(1)}</td>
                     <td className="px-2 py-1 font-mono text-[11px] text-right">{r.curtailment_mwh.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
                     <td className={`px-2 py-1 font-mono text-[11px] text-right ${r.curtailment_pct > 50 ? 'text-warn' : ''}`}>{r.curtailment_pct.toFixed(1)}</td>
-                    <td className="px-2 py-1 font-mono text-[11px] text-right">{r.market_value_eur_per_mwh.toFixed(2)}</td>
-                    <td className={`px-2 py-1 font-mono text-[11px] text-right ${r.revenue_eur < 0 ? 'text-danger' : ''}`}>{r.revenue_eur.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                    <td className="px-2 py-1 font-mono text-[11px] text-right">
+                      {r.market_value_eur_per_mwh == null
+                        ? <span className="text-muted">{withheldCell(carrierKpis.price_limit)}</span>
+                        : r.market_value_eur_per_mwh.toFixed(2)}
+                    </td>
+                    <td className={`px-2 py-1 font-mono text-[11px] text-right ${r.revenue_eur != null && r.revenue_eur < 0 ? 'text-danger' : ''}`}>
+                      {r.revenue_eur == null
+                        ? <span className="text-muted">{withheldCell(carrierKpis.price_limit)}</span>
+                        : r.revenue_eur.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                    </td>
                   </tr>
                 ))}
               </tbody>

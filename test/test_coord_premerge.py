@@ -65,15 +65,30 @@ def publish_pr(remote, files, msg="pr"):
 
 
 GREEN = [("completed", "success", "Unit"), ("completed", "skipped", "Docs")]
+WORKFLOWS_DONE = [("Test", "completed", "success"), ("CodeQL", "completed", "success")]
+# Required GK/UX reviews are tested on their own below; elsewhere they are waived.
+WAIVE_REVIEWS = "GK: fixture; UX: fixture"
 
 
-def run(clone, runs=GREEN, gh_exit=0, with_gh=True, comments=None, **env):
-    """Run premerge.sh; a fake gh reports `runs`, or `comments` (bodies) for the PR comments call."""
+def run(
+    clone,
+    runs=GREEN,
+    gh_exit=0,
+    with_gh=True,
+    comments=None,
+    workflows=WORKFLOWS_DONE,
+    **env,
+):
+    """Run premerge.sh against a fake gh (check runs, workflow runs, comments)."""
+    # The fake gh answers `workflows` for the actions/runs call, `comments`
+    # (bodies) for the PR comments call and `runs` for everything else.
+    env.setdefault("PREMERGE_WAIVE", WAIVE_REVIEWS)
     bin_dir = clone.parent / "bin"
     bin_dir.mkdir(exist_ok=True)
     if with_gh:
         gh = bin_dir / "gh"
         rows = "".join("\t".join(r) + "\n" for r in runs)
+        wf_rows = "".join("\t".join(r) + "\n" for r in workflows)
         notes = (
             None
             if comments is None
@@ -86,14 +101,25 @@ def run(clone, runs=GREEN, gh_exit=0, with_gh=True, comments=None, **env):
             "import sys\n"
             f"notes = {notes!r}\n"
             "comments = notes is not None and any(a.endswith('/comments') for a in sys.argv)\n"
-            f"sys.stdout.write(notes if comments else {rows!r})\n"
+            "wf = any('/actions/runs' in a for a in sys.argv)\n"
+            f"sys.stdout.write({wf_rows!r} if wf else notes if comments else {rows!r})\n"
             f"sys.exit({gh_exit})\n"
         )
         gh.chmod(0o755)
         path = f"{bin_dir}:{os.environ['PATH']}"
     else:
         # Only the tools the script needs, so a real gh cannot leak in.
-        for tool in ("git", "bash", "awk", "grep", "sed", "comm", "sort", "mktemp", "dirname"):
+        for tool in (
+            "git",
+            "bash",
+            "awk",
+            "grep",
+            "sed",
+            "comm",
+            "sort",
+            "mktemp",
+            "dirname",
+        ):
             (bin_dir / tool).symlink_to(shutil.which(tool))
         path = str(bin_dir)
     return subprocess.run(
@@ -275,7 +301,6 @@ def test_acl_and_mcp_changes_run_all_six_semantic_tests(repos, tmp_path, path):
     assert "assistant inventory" not in res.stdout
 
 
-
 @pytest.mark.parametrize(
     "path",
     [
@@ -306,6 +331,7 @@ def test_assurance_neighbours_skip_the_semantic_tests(repos, tmp_path):
     res = run(clone, PREMERGE_PYTHON=fake_python(tmp_path, 1))
     assert res.returncode == 0, res.stdout + res.stderr
     assert "test_assurance_contracts.py" not in res.stdout
+
 
 def fake_vitest(tmp_path, code):
     vitest = tmp_path / "fakevitest"
@@ -456,3 +482,84 @@ def test_a_stale_ok_with_many_changed_files_is_reported_not_a_crash(repos):
     assert f"GK OK @{old}: stale: changed since: " in res.stdout, (
         res.stdout + res.stderr
     )
+
+
+def test_a_queued_main_workflow_blocks_even_with_green_checks(repos):
+    # #1970: ciwait said READY on six green checks while Test was still queued.
+    remote, clone = repos
+    publish_pr(remote, {"a.py": "a2\n"})
+    res = run(
+        clone, workflows=[("Test", "queued", "-"), ("CodeQL", "completed", "success")]
+    )
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "Test (queued)" in res.stdout
+    assert "workflows: 1 not completed" in res.stdout
+
+
+def test_no_main_workflow_run_blocks(repos):
+    remote, clone = repos
+    publish_pr(remote, {"a.py": "a2\n"})
+    res = run(clone, workflows=[("CodeQL", "completed", "success")])
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "Test workflow: not started on this head" in res.stdout
+    assert "Test workflow not started" in res.stdout
+
+
+def test_completed_workflows_pass(repos):
+    remote, clone = repos
+    publish_pr(remote, {"a.py": "a2\n"})
+    res = run(clone)
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "all completed" in res.stdout
+
+
+@pytest.mark.parametrize(
+    ("path", "who"),
+    [
+        ("pypsa-gui/backend/services/x.py", "GK"),
+        ("gridspine/x.py", "GK"),
+        ("pypsa-gui/frontend/src/X.tsx", "UX"),
+    ],
+)
+def test_a_required_review_without_an_ok_blocks(repos, path, who):
+    remote, clone = repos
+    publish_pr(remote, {path: "x\n"})
+    res = run(clone, comments=[], PREMERGE_WAIVE="")
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert (
+        f"{who} required (e.g. {path}): no current or carried {who} OK: blocks"
+        in res.stdout
+    )
+    assert f"{who} OK missing" in res.stdout
+
+
+def test_a_current_ok_holds_the_required_review(repos):
+    remote, clone = repos
+    head = publish_pr(remote, {"gridspine/x.py": "x\n"})
+    res = run(clone, comments=[f"GK OK @{head}: checked"], PREMERGE_WAIVE="")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "GK required (e.g. gridspine/x.py): held" in res.stdout
+
+
+def test_a_waiver_is_printed_and_passes(repos):
+    remote, clone = repos
+    publish_pr(remote, {"pypsa-gui/backend/services/x.py": "x\n"})
+    res = run(clone, comments=[], PREMERGE_WAIVE="GK: owner waived")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "WAIVED: owner waived" in res.stdout
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "scripts/coord/x.sh",
+        "pypsa-gui/backend/tests/test_x.py",
+        "pypsa-gui/frontend/src/X.test.tsx",
+        "doc/x.md",
+    ],
+)
+def test_coord_scripts_tests_and_docs_need_no_review(repos, path):
+    remote, clone = repos
+    publish_pr(remote, {path: "x\n"})
+    res = run(clone, comments=[], PREMERGE_WAIVE="")
+    assert "required (e.g." not in res.stdout, res.stdout

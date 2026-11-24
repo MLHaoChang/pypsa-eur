@@ -380,6 +380,34 @@ def _energization_refused(kind: str, message: str) -> HTTPException:
     return HTTPException(422, {"error_kind": kind, "message": message})
 
 
+@router.get("/{name}/flow/energization_timeline")
+def get_energization_timeline(project: AuthorizedProject = ProjectAccessDep) -> dict:
+    """Demand against energization per model period (DC template review 06):
+    ``{unit, basis, basis_note, periods, time_to_power, stage_reason}``, each
+    period with its peak facility demand, energized grid import, committed
+    on-site firm capacity by kind and the shortfall (MW). Read from the open
+    network and its saved edits, so it redraws after an energization edit with
+    no solve; after a run each period carries ``run`` (MWh served, shed,
+    curtailed) and ``basis`` reads ``run``. 409 when the project is not the
+    open one; 422 ``energization_timeline_unavailable`` without a data-centre
+    load."""
+    from services import dc_energization_timeline
+    from services.dc_time_to_power import REASONS
+    from services.pypsa_service import PyPSAService
+
+    _require_open(project)
+    meta = flow_service.read_template(project.directory)
+    from harness.time_to_power_calculations import _spec
+
+    if _spec(meta if isinstance(meta, dict) else {}) is None:
+        raise _energization_refused(
+            "energization_timeline_unavailable",
+            f"No timeline: {REASONS['no_dc_load_spec']}.")
+    with PyPSAService.get_lock():
+        n = PyPSAService.get_network()
+        return dc_energization_timeline.timeline(n, meta)
+
+
 @router.put("/{name}/flow/energization")
 def put_flow_energization(body: dict,
                           project: AuthorizedProject = ProjectAccessDep,

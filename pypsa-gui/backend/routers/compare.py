@@ -418,11 +418,14 @@ def get_results_summary(
     capacity = _compute_capacity_summary(temp_n, periods, is_multi, has_solve)
     dispatch = _compute_dispatch_summary(temp_n, periods, is_multi, has_solve)
     loading = _compute_loading_summary(temp_n, periods, is_multi, has_solve)
-    prices = _compute_prices_summary(temp_n, periods, is_multi, has_solve)
+    # assistant-assurance 17: whether this project's solve was a MIP, judged by
+    # its own saved solve, never by the active project's config.
+    price_limit = _price_limit(src, temp_n)
+    prices = _compute_prices_summary(temp_n, periods, is_multi, has_solve, price_limit=price_limit)
     emissions = _compute_emissions_summary(temp_n, periods, is_multi, has_solve)
     economics = _compute_economics_summary(
         temp_n, periods, is_multi, has_solve, prices_from_state=False,
-        lost_load_cap=_read_lost_load_capture(src),
+        lost_load_cap=_read_lost_load_capture(src), price_limit=price_limit,
     )
     curtailment = _compute_curtailment_summary(temp_n, periods, is_multi, has_solve)
     lost_load = _compute_lost_load_summary(src, temp_n, periods, is_multi, has_solve)
@@ -525,10 +528,10 @@ def _compute_dispatch_summary(n, periods, is_multi, has_solve):
 
 
 def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_state: bool = True,
-                               lost_load_cap: dict | None = None):
+                               lost_load_cap: dict | None = None, *, price_limit: str | None = None):
     return _svc_economics._compute_economics_summary(
         n, periods, is_multi, has_solve, prices_from_state, lost_load_cap,
-        cfg=_live_solver_config(), result_df=_result_df,
+        cfg=_live_solver_config(), result_df=_result_df, price_limit=price_limit,
     )
 
 
@@ -601,6 +604,23 @@ def _project_solver_config(directory: pathlib.Path):
         return _solver_config_from_dict(raw)
     except (TypeError, ValueError) as exc:
         raise HTTPException(422, f"The project's saved solver settings cannot be used: {exc}")
+
+
+def _price_limit(directory: pathlib.Path, n):
+    """The MIP price gate for a saved project (assistant-assurance 17): the limit
+    its solve recorded (`last_solve_settings`), else `n` under the project's own
+    saved solver config; failing closed when that config cannot be read."""
+    from harness import solve_validity
+
+    settings = _saved_results_state(directory).get("last_solve_settings")
+    recorded = isinstance(settings, dict) and bool(settings.get("price_limit"))
+    try:
+        cfg = _project_solver_config(directory)
+    except HTTPException:
+        if not recorded:
+            return solve_validity.price_limit_without_config(n)
+        cfg = None  # the record decides; the config is not read
+    return solve_validity.solved_price_limit({"last_solve_settings": settings, "solver_config": cfg}, n)
 
 
 def _load_project_network(directory: pathlib.Path):
