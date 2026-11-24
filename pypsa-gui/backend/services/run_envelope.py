@@ -979,7 +979,14 @@ def _urdb_instances(ctx, target, rows):
     clash = run_urdb.stamp(ctx, tariff)
     if clash is not None:
         return {target["name"]: {"refused": {"kind": clash[0], "message": clash[1]}, "name": args["name"]}}
-    return {target["name"]: record}
+    # GK B (71) ask 2: the attach names the exact version the import stores,
+    # never the latest at write time (`chat_tools.attach_tariff` re-resolves it).
+    version = run_urdb.import_version(args["name"], planned["hash"])
+    if version is None:
+        return {target["name"]: {"refused": {"kind": run_urdb.NAME_TAKEN,
+                                             "message": "Another tariff is held under that name."},
+                                 "name": args["name"]}}
+    return {target["name"]: {**record, "version": version}}
 
 
 def urdb_steps(task_path, stage, start=1):
@@ -994,7 +1001,8 @@ def urdb_steps(task_path, stage, start=1):
         return []
     return [{"id": f"{stage}.{start}", "tool": "import_urdb_tariff", "args": copy.deepcopy(records[0]["args"]),
              "status": "pending"},
-            {"id": f"{stage}.{start + 1}", "tool": "attach_tariff", "args": {"name": records[0]["name"]},
+            {"id": f"{stage}.{start + 1}", "tool": "attach_tariff",
+             "args": {"name": records[0]["name"], "version": records[0]["version"]},
              "status": "pending"}]
 
 
@@ -1493,7 +1501,7 @@ def _match_urdb_import(entries, args, ctx, note):
         return run_urdb.CHANGED
     if planned["upload_sha256"] != record["upload_sha256"] or planned["hash"] != record["hash"]:
         return run_urdb.CHANGED
-    if run_urdb.library_hash(record["name"]) not in (None, record["hash"]):
+    if run_urdb.import_version(record["name"], record["hash"]) != record["version"]:
         return run_urdb.NAME_TAKEN
     note["source"] = record["hash"]
     return None
@@ -1544,7 +1552,8 @@ def _match_fill(envelope, tool, args, edit_card, ctx, note):
             return None
         # Study harness 35 (C1): a urdb_upload gap admits only its own imported tariff.
         reason = _urdb_refused(urdb, ctx) if urdb else "not_granted_source"
-        if reason is None and not all(args.get("name") == r["name"] and digest == r["hash"] for r in urdb):
+        if reason is None and not all(args.get("name") == r["name"] and args.get("version") == r["version"]
+                                      and digest == r["hash"] for r in urdb):
             reason = "not_granted_source"
         if reason is not None:
             return reason

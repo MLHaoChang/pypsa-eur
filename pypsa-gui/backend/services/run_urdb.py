@@ -226,20 +226,30 @@ def upload_bytes(ctx, file_id: str) -> bytes:
     )
 
 
-def library_hash(name: str) -> str | None:
-    """The hash of the Library's latest tariff `name` in the acting user's
-    organisation, or None when there is none."""
+def library_ref(name: str):
+    """The Library's latest tariff `name` in the acting user's organisation
+    (its ref: version and hash), or None when there is none."""
     from routers.library import ItemKind, get_item
     from services import chat_tools
 
     try:
         return chat_tools._library_call(
             get_item, ItemKind.tariff, name, version=None
-        ).ref.hash
+        ).ref
     except HTTPException as exc:
         if exc.status_code == 404:
             return None
         raise
+
+
+def import_version(name: str, digest: str) -> int | None:
+    """The Library version the import of a tariff hashing to `digest` stores
+    under `name` (GK B (71) ask 2): the latest when it is that tariff (`put_item`
+    adds no version), 1 when the name is free, None when another tariff holds it."""
+    ref = library_ref(name)
+    if ref is None:
+        return 1
+    return ref.version if ref.hash == digest else None
 
 
 def may_write_library() -> bool:

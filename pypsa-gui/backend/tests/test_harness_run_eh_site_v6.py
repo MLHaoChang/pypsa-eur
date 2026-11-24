@@ -307,7 +307,12 @@ def test_c1_a_urdb_gap_never_admits_another_held_tariff(project):
     note = {}
     assert (
         run_envelope._match_fill(
-            envelope, "attach_tariff", {"name": row["args"]["name"]}, CARD, ctx, note
+            envelope,
+            "attach_tariff",
+            {"name": row["args"]["name"], "version": 1},
+            CARD,
+            ctx,
+            note,
         )
         is None
     )
@@ -429,7 +434,7 @@ def test_c2_the_inputs_stage_runs_the_granted_args(project, tmp_path, monkeypatc
         {
             "id": "inputs.4",
             "tool": "attach_tariff",
-            "args": {"name": row["args"]["name"]},
+            "args": {"name": row["args"]["name"], "version": 1},
             "status": "pending",
         },
     ]
@@ -496,6 +501,39 @@ def test_c3_a_project_that_prices_imports_already_writes_nothing(project, commer
             envelope, "import_urdb_tariff", row["args"], ctx, {}
         )
         == "not_a_gap"
+    )
+    assert _count() == before
+
+
+def test_c3_other_bytes_converting_to_the_same_tariff_are_drift(project):
+    """GK B (71) ask 3: the upload's sha256 is checked on its own."""
+    envelope, row = _granted(project, _ctx())
+    path = upload_service.get_upload_path("P", row["args"]["file_id"])
+    path.write_bytes(json.dumps(json.loads(path.read_bytes()), indent=3).encode())
+    assert (
+        run_urdb.plan(path.read_bytes(), row["args"])["hash"]
+        == _record(envelope)["hash"]
+    )
+    before = _count()
+    assert (
+        run_envelope._match_prepare(
+            envelope, "import_urdb_tariff", row["args"], _ctx(), {}
+        )
+        == run_urdb.CHANGED
+    )
+    assert _count() == before
+
+
+def test_c3_the_same_bytes_against_another_granted_hash_are_refused(project):
+    """GK B (71) ask 3: the converted tariff's hash is checked on its own."""
+    envelope, row = _granted(project, _ctx())
+    _record(envelope)["hash"] = "0" * 64
+    before = _count()
+    assert (
+        run_envelope._match_prepare(
+            envelope, "import_urdb_tariff", row["args"], _ctx(), {}
+        )
+        == run_urdb.CHANGED
     )
     assert _count() == before
 
@@ -904,17 +942,17 @@ def test_c7_the_refusal_names_the_validity_end_or_open():
 
 
 @pytest.mark.parametrize("status,raises", [(404, False), (500, True), (403, True)])
-def test_library_hash_reads_only_a_missing_item_as_none(monkeypatch, status, raises):
+def test_library_ref_reads_only_a_missing_item_as_none(monkeypatch, status, raises):
     def call(*a, **k):
         raise HTTPException(status_code=status, detail="x")
 
     monkeypatch.setattr(chat_tools, "_library_call", call)
     if raises:
         with pytest.raises(HTTPException) as exc:
-            run_urdb.library_hash("urdb-x")
+            run_urdb.library_ref("urdb-x")
         assert exc.value.status_code == status
     else:
-        assert run_urdb.library_hash("urdb-x") is None
+        assert run_urdb.library_ref("urdb-x") is None
 
 
 # ── run_envelope: the urdb source, steps, grant check and import match ──────
@@ -980,3 +1018,79 @@ def test_the_import_matches_exactly_one_granted_record(project):
             == "not_granted_source"
         )
     assert run_envelope._match_urdb_import([urdb], row["args"], _ctx(), {}) is None
+
+
+# ── GK B (71) asks 1 and 2: the attach admits exactly the granted version ───
+
+
+def test_a_library_gap_without_a_held_record_admits_nothing_beside_a_urdb_gap(project):
+    envelope, row = _granted(project, _ctx())
+    for g in envelope["gaps"]:
+        if g["source"]["kind"] == "library_tariff":
+            g["at_grant"] = {}  # no held tariff was granted
+    _import(row["args"])
+    _import(dict(row["args"], name="someone-else"))
+    assert (
+        run_envelope._match_fill(
+            envelope, "attach_tariff", {"name": "someone-else"}, CARD, _ctx(), {}
+        )
+        == "not_granted_source"
+    )
+
+
+def test_the_grant_pins_the_version_the_import_stores(project):
+    envelope, row = _granted(project, _ctx())
+    assert _record(envelope)["version"] == 1
+    assert _import(row["args"])["ref"]["version"] == 1
+    # An attach without the version would re-resolve the latest at write time:
+    # refused even while the latest is still the granted tariff.
+    name = row["args"]["name"]
+    assert (
+        run_envelope._match_fill(
+            envelope, "attach_tariff", {"name": name}, CARD, _ctx(), {}
+        )
+        == "not_granted_source"
+    )
+    assert (
+        run_envelope._match_fill(
+            envelope, "attach_tariff", {"name": name, "version": 1}, CARD, _ctx(), {}
+        )
+        is None
+    )
+
+
+def test_a_second_version_under_the_granted_name_is_never_attached(project):
+    envelope, row = _granted(project, _ctx())
+    _import(row["args"])
+    rate = json.loads(FIXTURE.read_text())
+    rate["items"][0]["fixedchargefirstmeter"] = 99.0
+    other = _upload(json.dumps(rate).encode())
+    _import(
+        dict(row["args"], file_id=other.file_id)
+    )  # version 2 under the granted name
+    assert _versions(row["args"]["name"]) == 2
+    name = row["args"]["name"]
+    for args in ({"name": name}, {"name": name, "version": 2}):
+        assert (
+            run_envelope._match_fill(envelope, "attach_tariff", args, CARD, _ctx(), {})
+            == "not_granted_source"
+        )
+    assert (
+        run_envelope._match_fill(
+            envelope, "attach_tariff", {"name": name, "version": 1}, CARD, _ctx(), {}
+        )
+        is None
+    )
+
+
+def test_a_name_another_tariff_holds_is_refused_at_the_grant(project):
+    rate = json.loads(FIXTURE.read_text())
+    rate["items"][0]["fixedchargefirstmeter"] = 99.0
+    upload = _upload()
+    row = _row(project, upload_id=upload.file_id)
+    other = _upload(json.dumps(rate).encode())
+    _import(dict(row["args"], file_id=other.file_id))
+    record = run_envelope._gap_instances(_ctx(), run_profiles.URDB_GAP, [row])[
+        "Commercial"
+    ]
+    assert record["refused"]["kind"] == run_urdb.NAME_TAKEN and "hash" not in record
