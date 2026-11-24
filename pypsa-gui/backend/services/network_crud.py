@@ -598,7 +598,8 @@ def _merge_partial_update(n, attr: str, name: str, submitted: dict) -> dict:
     return {**current, **submitted}
 
 
-def _detach_component_series(n, attr: str, name: str) -> list[tuple[str, "pd.Series"]]:
+def _detach_component_series(n, attr: str, name: str, *,
+                             keep_results: bool = False) -> list[tuple[str, "pd.Series"]]:
     """Every time-varying INPUT column this component owns, copied out before
     a remove+add drops it (IEEE 39-bus review, F2).
 
@@ -619,6 +620,11 @@ def _detach_component_series(n, attr: str, name: str) -> list[tuple[str, "pd.Ser
     network no longer has. If the component defaults cannot be read, every
     column is carried — preserving is strictly safer than dropping, which is
     the behaviour this exists to end.
+
+    ``keep_results`` (provenance-graph 13) carries the solver OUTPUT columns too. An in-place value edit leaves
+    the last run's dispatch the same shape as the network, so it reads stale by the input fingerprint (slice 04
+    D1 a) and Results keeps the figures, marked out of date; dropping this component's columns made the shape
+    differ and the route middleware clear the lot.
     """
     ts_store = getattr(n, f"{attr}_t", None)
     if ts_store is None:
@@ -636,7 +642,7 @@ def _detach_component_series(n, attr: str, name: str) -> list[tuple[str, "pd.Ser
     except Exception:                                         # noqa: BLE001
         return []
     for ts_attr in ts_attrs:
-        if input_attrs is not None and ts_attr not in input_attrs:
+        if not keep_results and input_attrs is not None and ts_attr not in input_attrs:
             continue
         df = (ts_store.get(ts_attr) if hasattr(ts_store, "get")
               else getattr(ts_store, ts_attr, None))
@@ -810,7 +816,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict,
         # remove, so carry them across the remove+add. Taken BEFORE the
         # remove and put back straight after the add, under the old name, so
         # the rename below re-keys them with everything else.
-        saved_series = _detach_component_series(n, attr, name)
+        saved_series = _detach_component_series(n, attr, name, keep_results=new_name == name)
         # An edit keeps the instance: the remove drops its uid (D06), put back after the add.
         held_uid = component_identity.get(n, component_class, name)
         n.remove(component_class, name)

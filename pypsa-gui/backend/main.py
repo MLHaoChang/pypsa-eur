@@ -423,6 +423,9 @@ _SHUTDOWN_GATE_EXEMPT: set[str] = {"/api/simulation/abort"}
 # don't want to clear that. Restoring a project snapshot is handled by the
 # /api/projects/* router which also brings its own dispatch.
 _DISPATCH_INVALIDATE_PREFIXES = ("/api/network/",)
+# A value edit of one of these through `PUT /api/network/<route>/<name>` keeps the last run's dispatch when its
+# shape still matches the network: the run reads stale by its input fingerprint instead of vanishing (pg 13).
+_VALUE_EDIT_ROUTES = frozenset({"generators", "loads", "lines", "links", "storage_units", "stores"})
 _DISPATCH_INVALIDATE_EXCLUDE = {"/api/network/undo", "/api/network/undo/info"}
 _AUTH_PUBLIC_PATHS = {
     "/api/auth/forgot-password",
@@ -1303,10 +1306,16 @@ async def undo_snapshot_middleware(request: Request, call_next):
     ):
         try:
             from services import change_log_service
-            from services.dispatch_status import clear_dispatch
+            from services.dispatch_status import clear_dispatch, dispatch_status
             from services.pypsa_service import PyPSAService
             with PyPSAService.get_lock():
-                cleared = clear_dispatch(PyPSAService.get_network())
+                parts = path.strip("/").split("/")
+                kept = (
+                    request.method == "PUT" and len(parts) == 4 and parts[2] in _VALUE_EDIT_ROUTES
+                    and pre_dispatch == "fresh"
+                    and dispatch_status(PyPSAService.get_network()) == "fresh"
+                )
+                cleared = False if kept else clear_dispatch(PyPSAService.get_network())
             if cleared:
                 # Reset simulation lifecycle state so the StatusBar transitions
                 # back to "Idle" and /results/* gates return 204 until the

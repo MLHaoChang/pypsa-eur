@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A value edit of a generator, load, line, link, storage unit or store after a run now marks the results out of date instead of discarding them, so Expert Results keeps the last run and agrees with the investment case.
