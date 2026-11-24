@@ -8,7 +8,7 @@ import { useState } from 'react'
 import { dcLoadRefusal, type TemplateCreate } from '../../../hooks/useCreateFromTemplate'
 import {
   ARCH_HINT, BACKUP_HINT, DC_ARCH_OPTIONS, DC_BACKUP_OPTIONS, DC_DEFAULTS, DC_FIELD_LABEL, STAGED_BESS_LINE,
-  ambientSourceText, dcFieldOf, dcLoadBody, emptyAmbient, dcRefusalText, initialDcDraft, validateDc,
+  ambientSourceText, validateAmbient, dcFieldOf, dcLoadBody, emptyAmbient, dcRefusalText, initialDcDraft, validateDc,
   type DcDraft, type DcField,
 } from '../dcLoadForm'
 import { emptyLocation, locationOf, validateLocation, writeCreatedLocation, type LocationDraft } from '../siteLocation'
@@ -33,12 +33,13 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
   const [loc, setLoc] = useState<LocationDraft>(emptyLocation)
   const [amb, setAmb] = useState(emptyAmbient)
   const lat = locationOf(loc)?.lat ?? null
+  const ambErrors = validateAmbient(amb)
   const locErrors = validateLocation(loc)
   const staged = templateId === 'eh_datacenter_staged'
   const local = validateDc(draft, templateId)
   const errors: Partial<Record<DcField, string>> = { ...local }
   if (server?.field && !errors[server.field]) errors[server.field] = server.text
-  const nErrors = Object.keys(errors).length + Object.keys(locErrors).length
+  const nErrors = Object.keys(errors).length + Object.keys(locErrors).length + Object.keys(ambErrors).length
   const set = <K extends keyof DcDraft>(k: K, v: DcDraft[K]) => { setDraft({ ...draft, [k]: v }); setServer(null) }
 
   const saveLocation = (project: string) => writeCreatedLocation(project, loc).then(m => { if (m) showLocationSaveFailure(m) })
@@ -132,13 +133,15 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
 
       <SiteLocationFields value={loc} errors={locErrors} onChange={setLoc} />
       <p data-testid="dc-form-ambient-source" className="text-[11px] text-muted">{ambientSourceText(lat, amb)}</p>
-      <details className="text-[11px]" data-testid="dc-form-ambient">
+      <details className="text-[11px]" data-testid="dc-form-ambient" open={Object.keys(ambErrors).length > 0 || undefined}>
         <summary className="cursor-pointer text-muted">Ambient temperature (advanced)</summary>
         <div className="mt-1 flex flex-wrap gap-3">
-          {([['mean', 'Annual mean (°C)'], ['seasonal', 'Seasonal swing (±K)'], ['diurnal', 'Daily swing (±K)']] as const).map(([k, label]) => (
+          {([['mean', 'Annual mean (°C)'], ['seasonal', 'Seasonal swing (±°C)'], ['diurnal', 'Daily swing (±°C)']] as const).map(([k, label]) => (
             <label key={k} className="flex flex-col gap-1 font-semibold text-text">{label}
               <input data-testid={`dc-form-ambient-${k}`} type="number" step="any" className={`${INPUT} w-24`}
-                placeholder="from site" value={amb[k]} onChange={e => setAmb({ ...amb, [k]: e.target.value })} />
+                placeholder={lat != null ? 'from site' : 'default'} value={amb[k]} aria-invalid={!!ambErrors[k]}
+                onChange={e => setAmb({ ...amb, [k]: e.target.value })} />
+              {ambErrors[k] && <span role="alert" data-testid={`dc-form-ambient-error-${k}`} className="max-w-48 font-normal text-danger">{ambErrors[k]}</span>}
             </label>
           ))}
         </div>

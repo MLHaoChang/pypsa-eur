@@ -56,13 +56,13 @@ interface AmbientBasis {
   design_day_peak_c: number; peak_pue: number; peak_facility_mw: number
 }
 const AMBIENT_SOURCE_TEXT = {
-  site_location: 'from the site location (climate zone, not weather data)',
-  default: 'the default temperate curve (no site location was set)',
+  site_location: 'from the site location. It is a climate zone, not weather data',
+  default: 'the default temperate curve. No site location was set',
   entered: 'as entered',
 } as const
 
 function ambientBasisText(a: AmbientBasis): string {
-  return `Ambient temperature: ${AMBIENT_SOURCE_TEXT[a.source]}. Mean ${a.mean_c.toFixed(1)} °C, design-day peak ${a.design_day_peak_c.toFixed(1)} °C; peak PUE ${a.peak_pue.toFixed(2)}, peak facility load ${a.peak_facility_mw.toFixed(1)} MW.`
+  return `Ambient temperature: ${AMBIENT_SOURCE_TEXT[a.source]}. Mean ${a.mean_c.toFixed(1)} °C · design-day peak ${a.design_day_peak_c.toFixed(1)} °C · peak PUE ${a.peak_pue.toFixed(2)} · peak facility load ${a.peak_facility_mw.toFixed(1)} MW`
 }
 
 export default function LoadSeriesEditor({ project, component, mode, initialTab = 'archetype' }: LoadSeriesEditorProps) {

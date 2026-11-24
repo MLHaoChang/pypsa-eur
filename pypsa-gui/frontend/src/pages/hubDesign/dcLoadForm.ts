@@ -57,10 +57,30 @@ const AMBIENT_KEYS = [
 
 /** Which temperature the run will use, in words, from the draft. */
 export function ambientSourceText(lat: number | null, a: AmbientDraft): string {
-  if (Object.values(a).some(v => v.trim() !== '')) return 'Ambient temperature: as you entered it.'
-  return lat != null
-    ? 'Ambient temperature: from the site location (a climate zone chosen from its latitude, not weather data).'
-    : 'Ambient temperature: the default temperate (Central European) curve. No site location is set, so a hot site’s cooling is understated.'
+  const rest = lat != null ? 'the site location' : 'the default curve'
+  if (Object.values(a).every(v => v.trim() === '')) {
+    return lat != null
+      ? 'Ambient temperature: from the site location. A climate zone is chosen from its latitude. It is not weather data.'
+      : 'Ambient temperature: the default temperate (Central European) curve. No site location is set. A hot site’s cooling is understated.'
+  }
+  return Object.values(a).every(v => v.trim() !== '')
+    ? 'Ambient temperature: as you entered it.'
+    : `Ambient temperature: your entries, the rest from ${rest}.`
+}
+
+/** Checks on the three ambient fields; a blank one is fine (it comes from the site or default). */
+export function validateAmbient(a: AmbientDraft): Partial<Record<keyof AmbientDraft, string>> {
+  const e: Partial<Record<keyof AmbientDraft, string>> = {}
+  const check = (k: keyof AmbientDraft, label: string, lo: number, hi: number, unit: string) => {
+    const raw = a[k].trim()
+    if (raw === '') return
+    const v = Number(raw)
+    if (!Number.isFinite(v) || v < lo || v > hi) e[k] = `${label}: enter a number from ${lo} to ${hi} ${unit}, or clear it`
+  }
+  check('mean', 'Annual mean', -60, 60, '°C')
+  check('seasonal', 'Seasonal swing', 0, 40, '°C')
+  check('diurnal', 'Daily swing', 0, 30, '°C')
+  return e
 }
 
 const asNumber = (s: string) => (s.trim() === '' ? NaN : Number(s))
