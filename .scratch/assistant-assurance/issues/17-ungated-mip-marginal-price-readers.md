@@ -68,3 +68,7 @@ Safe:
 - **A5:** Each gate is killed by a test. The killing test is named in the PR body.
 - **A6:** If a new reason reaches a chat tool result, add a kind fragment. Run the manifest, ChatPanel and inventory checks at the trial merge.
 - **A7:** Keep the reasons the "safe" readers are safe.
+
+Slice 2 condition (GK B2 A3): on a MIP, Compare and Results economics show revenue and storage charge cost as null and "not available", never 0.
+
+Known edge (GK B2 A1): a MIP solved before the `last_solve_settings["price_limit"]` record existed, whose config has since been changed to make it an LP (`process_uc` on a process-unit network), is judged under today's config. Every other record-less case errs toward withholding.
