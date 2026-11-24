@@ -138,6 +138,27 @@ def _uif_table(row: dict, frame, case: str, path: str) -> Table:
                 _cell(r, "note", _note),
             ]
         )
+    # GC-08b: the island cases' rows are printed, not judged, until the scorecard judges them (GC-08e)
+    from gridspine.static.ssti_uif import ROLE_ISLAND
+
+    island = (
+        frame[frame["role"].astype(str) == ROLE_ISLAND]
+        if frame is not None and "role" in frame
+        else None
+    )
+    for _, r in island.iterrows() if island is not None else ():
+        uif, threshold = _apart(r.get("uif"), r.get("threshold"))
+        rows.append(
+            [
+                _cell(r, "bus", _text),
+                _cell(r, "case", _text),
+                _cell(r, "machine", _text),
+                uif,
+                threshold,
+                NOT_JUDGED,
+                _cell(r, "note", _note),
+            ]
+        )
     return Table(
         table_id="ssti_uif",
         columns=UIF_COLUMNS,

@@ -1337,7 +1337,7 @@ def test_a_grid_project_with_an_open_tie_screens_with_the_grids_infeed(tmp_path)
     grid = load_run_campus(run).net.ext_grid
     assert len(grid) == 1 and float(grid.iloc[0]["s_sc_max_mva"]) == 2000.0
     table = pd.read_csv(run / SSTI_UIF_CSV)
-    pcc = table[table["role"] != "converter bus"]
+    pcc = table[table["role"] == "PCC (information)"]
     # at the PoC the grid's 2000 MVA dominates: the machines alone could not reach it
     assert (pcc["sc_tot_mva"] > 1000.0).all()
     row = _card(tmp_path, n=n)[0]["ssti_uif"]
