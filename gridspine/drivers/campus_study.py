@@ -168,6 +168,7 @@ import hashlib
 import json
 import math
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -369,9 +370,14 @@ def campus_tables(run_dir):
     return hourly, pcc
 
 
+def _run_campus_spec(run_dir):
+    """The campus description a prepared run stores (``campus.yaml``), as read."""
+    return yaml.safe_load(_require(Path(run_dir), CAMPUS_YAML).read_text())
+
+
 def load_run_campus(run_dir) -> Campus:
     """The campus of a prepared run, built from its stored ``campus.yaml``."""
-    return build_campus(yaml.safe_load(_require(Path(run_dir), CAMPUS_YAML).read_text()))
+    return build_campus(_run_campus_spec(run_dir))
 
 
 def _island_tables(run_dir: Path):
@@ -644,25 +650,61 @@ def _json_ready(x):
     return x
 
 
-def psse_campus(run_dir, hours=None) -> list:
+def _cited_spec(run_dir, model_set, variant):
+    """The run's campus description, checked to be the ``variant`` of ``model_set`` (GC-04d P3, GK A2 Q2): a
+    pack never cites a model set that is not the network it ships."""
+    from gridspine.schema.model_set import model_hash
+
+    model_set.spec(variant)  # refuses a variant that is unknown or was not frozen
+    who = f"psse: model set {model_set.model_set_id} {variant}"
+    try:
+        spec = _run_campus_spec(run_dir)
+        found = model_hash(spec)
+    except (ContractError, OSError, UnicodeDecodeError, yaml.YAMLError, TypeError, ValueError) as exc:
+        raise ContractError(f"{who}: cannot read this run's campus ({exc})") from exc
+    if found != model_set.model_hashes[variant]:
+        raise ContractError(f"{who} does not describe this run's campus (model hash {found[:12]}, "
+                            f"the model set's {model_set.model_hashes[variant][:12]})")
+    return spec
+
+
+def psse_campus(run_dir, hours=None, *, plant=None, model_set=None, variant=None) -> list:
     """The PSS/E handoff of a ranked run (plan I8): one bundle per island
     critical hour (``island_hours``), or per ``hours`` given, under
-    ``psse/``, each named ``p<period>_h<hour>``. Returns the bundles."""
+    ``psse/``, each named ``p<period>_h<hour>``. Returns the bundles.
+
+    ``plant`` (a ``psse_pack.Plant``) and ``model_set``/``variant`` (the
+    GC-01 model set the run's campus is a variant of) go to every bundle's
+    PSS/E pack (GC-04d). The bundles are written aside and replace ``psse/``
+    only once all are written, so a refusal keeps the previous tree and
+    leaves no partial one, and a new call never mixes with an older one."""
     from gridspine.handoff.campus_bundle import export_campus_bundle
     from gridspine.static.frequency import LEDGER
 
     run_dir = Path(run_dir)
-    campus = load_run_campus(run_dir)
+    if model_set is not None and variant is not None:
+        campus = build_campus(_cited_spec(run_dir, model_set, variant))
+    else:  # one without the other: the pack refuses it, before psse/ is touched
+        campus = load_run_campus(run_dir)
     hourly, _ = campus_tables(run_dir)
     out = run_dir / PSSE_DIR
+    stage = run_dir / f".{PSSE_DIR}.partial"
+    shutil.rmtree(stage, ignore_errors=True)
     bundles = []
-    for period, hour in (island_hours(run_dir) if hours is None else hours):
-        rows = hourly[(hourly["period"] == period) & (hourly["hour"] == hour)][["unit_id", "p_mw", "status"]]
-        if rows.empty:
-            raise ContractError(f"the run has no hour {hour} in period {period}")
-        bundles.append(export_campus_bundle(out, campus, rows.reset_index(drop=True), f"p{period}_h{hour}",
-                                            ledger=LEDGER))
-    return bundles
+    try:
+        for period, hour in (island_hours(run_dir) if hours is None else hours):
+            rows = hourly[(hourly["period"] == period) & (hourly["hour"] == hour)][["unit_id", "p_mw", "status"]]
+            if rows.empty:
+                raise ContractError(f"the run has no hour {hour} in period {period}")
+            bundles.append(export_campus_bundle(stage, campus, rows.reset_index(drop=True), f"p{period}_h{hour}",
+                                                ledger=LEDGER, plant=plant, model_set=model_set, variant=variant))
+        stage.mkdir(exist_ok=True)  # no hours: psse/ is replaced by an empty tree
+    except BaseException:
+        shutil.rmtree(stage, ignore_errors=True)
+        raise
+    shutil.rmtree(out, ignore_errors=True)
+    stage.rename(out)
+    return [dataclasses.replace(b, path=out / b.path.name) for b in bundles]
 
 
 #: P_ref of a normally open tie (``pcc.tie_normally_open``): its rating
