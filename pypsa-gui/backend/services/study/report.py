@@ -281,6 +281,8 @@ HELP: dict[str, str] = {
     "currency_year_unknown": "No case states a currency year, so the money figure is not shown.",
     "fidelity_unknown": "The run that produced the figure is not recorded, so it is not shown.",
     "not_computed": "The figure was not computed.",
+    "mip_duals_not_marginal": (
+        "Not available on an integer (MIP) solve: it has no marginal prices."),
     # stale reasons
     "ledger_changed_since_findings": (
         "The assumptions ledger changed after the findings were computed; re-run the study."),
@@ -793,6 +795,11 @@ _DUALS_PROSE = {
         "The market revenue at the model's prices, {{market_revenue_at_duals}}, is not a "
         "second revenue line; how it compares with the annualised cost is not established. "
         "It is excluded from the cash flow because the bill already prices the same energy."),
+    # assistant-assurance 17: the run was an integer (MIP) solve.
+    "mip": (
+        "The market revenue at the model's prices, {{market_revenue_at_duals}}, is not "
+        "available: an integer (MIP) solve has no marginal prices. It would be excluded from "
+        "the cash flow in any case, because the bill already prices the same energy."),
 }
 
 
@@ -1022,6 +1029,9 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
         # flag. U2 WP10: the pro forma's charging-free LCOS, its fact
         # (`lcos_excl_charging`) and the `lcos_both` disclosure are gone with
         # it; a stored report keeps its own facts and sentences.
+        # assistant-assurance 17: on an integer (MIP) solve the figures priced
+        # at the bus duals are not established (the run record's `price_limit`).
+        price_limit = (inp.details.get(econ_oid) or {}).get("price_limit")
         keys = [
             cf("case_npv", "Option NPV", k.npv, "EUR"),
             cf("case_irr", "IRR", k.irr, "per unit"),
@@ -1031,20 +1041,20 @@ def build_decision_report(inp: ReportInputs) -> DecisionReport:
             cf("lcos_finance_engine", "LCOS, charging at what the site paid (investment case)",
                k.levelised_cost, "EUR/MWh", flag=k.unavailable.get("levelised_cost")),
             cf("lcos_incl_charging", "LCOS, charging at the model's hourly price (optimisation)",
-               _lcos_including_charging(inp.details, econ_oid), "EUR/MWh", "lp",
-               flag="asset_economics_row_missing"),
+               None if price_limit else _lcos_including_charging(inp.details, econ_oid),
+               "EUR/MWh", "lp", flag=price_limit or "asset_economics_row_missing"),
             cf("market_revenue_at_duals", "Market revenue at the model's prices (annual)",
                case.market_revenue_at_duals.annual_value
-               if case.market_revenue_at_duals is not None else None, "EUR/yr", "lp_duals",
-               flag="not_computed"),
+               if case.market_revenue_at_duals is not None and not price_limit else None,
+               "EUR/yr", "lp_duals", flag=price_limit or "not_computed"),
             cf("horizon_years", "Horizon", float(case.horizon_years), "years", "ledger"),
             cf("discount_rate", "Real discount rate", case.discount_rate, "per unit", "ledger"),
         ]
         if facts["lcos_finance_engine"].value is not None:
             tags.add("lcos_engine")
         tags.add("economics")
-        duals = _duals_relation(inp.details, econ_oid,
-                                "size_at_upper_bound" in v.disclosures and named == econ_oid)
+        duals = "mip" if price_limit else _duals_relation(
+            inp.details, econ_oid, "size_at_upper_bound" in v.disclosures and named == econ_oid)
         tags.add(f"duals_{duals}")
         prose = [
             "On a real, pre-tax basis without subsidy, in the currency year stated beside each "

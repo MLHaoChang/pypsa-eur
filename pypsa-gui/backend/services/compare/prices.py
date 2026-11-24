@@ -13,6 +13,7 @@ scope.
 from __future__ import annotations
 
 import numpy as np
+from harness.solve_validity import mip_price_limit
 from models.schemas import (
     CarrierPeriodValue,
     CarrierPriceStats,
@@ -46,7 +47,7 @@ def weighted_stats(values, weights_arr):
     return mean, _quantile(0.5), _quantile(0.9)
 
 
-def _compute_prices_summary(n, periods, is_multi, has_solve) -> PricesComparison:
+def _compute_prices_summary(n, periods, is_multi, has_solve, *, solve_config=None) -> PricesComparison:
     """
     Marginal price view. Builds:
 
@@ -72,6 +73,10 @@ def _compute_prices_summary(n, periods, is_multi, has_solve) -> PricesComparison
 
     if not has_solve:
         return PricesComparison()
+    # assistant-assurance 17: a MIP's 0.0 bus prices are not prices.
+    # `solve_config` is the config of the solve that wrote them.
+    if (limit := mip_price_limit(n, solve_config)) is not None:
+        return PricesComparison(unavailable_reason=limit)
     # Curtailment-cost-corrected duals (same merit-order correction the Results
     # Prices tab applies), so the duration curve / mean / max / min match.
     # from_state=False → read this bundle's own buses_t, not the live snapshot.

@@ -37,6 +37,13 @@ def compute_lcoh(n, cfg, *, result_df):
     from services.solver.periodized_costs import periodized_cost_view
 
 
+    # assistant-assurance 17: an integer (MIP) solve's bus prices are 0.0, not
+    # prices, so the electricity-cost term (and the LCOH) is not established.
+    from harness.solve_validity import MIP_PRICES_TEXT, mip_price_limit
+    if (limit := mip_price_limit(n, cfg)) is not None:
+        return {"rows": [], "total": None, "currency": "EUR",
+                "unavailable_reason": limit, "message": MIP_PRICES_TEXT}
+
     links_df = n.links
     if links_df.empty:
         return {"rows": [], "total": None, "currency": "EUR"}

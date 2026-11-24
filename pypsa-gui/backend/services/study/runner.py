@@ -298,6 +298,10 @@ def _read_option(n, cfg, opt, fidelity: Fidelity, currency_year, *, compiled) ->
     from services.study import engine_adapter
 
     detail: dict[str, Any] = {"option_id": opt.option_id, "caveats": []}
+    # assistant-assurance 17: an integer (MIP) solve's bus prices are 0.0, not
+    # prices; the report reads this to withhold the figures priced at them.
+    from harness.solve_validity import mip_price_limit
+    detail["price_limit"] = mip_price_limit(n, cfg)
     bill = engine_adapter.bill(n, compiled, fidelity=fidelity)
     detail["bill"] = bill.model_dump(mode="json")
     try:

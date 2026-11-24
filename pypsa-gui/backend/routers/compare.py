@@ -418,11 +418,14 @@ def get_results_summary(
     capacity = _compute_capacity_summary(temp_n, periods, is_multi, has_solve)
     dispatch = _compute_dispatch_summary(temp_n, periods, is_multi, has_solve)
     loading = _compute_loading_summary(temp_n, periods, is_multi, has_solve)
-    prices = _compute_prices_summary(temp_n, periods, is_multi, has_solve)
+    # assistant-assurance 17: whether this project's solve was a MIP is read
+    # against its own saved solver config, never the active project's.
+    solve_config = _price_solve_config(src)
+    prices = _compute_prices_summary(temp_n, periods, is_multi, has_solve, solve_config=solve_config)
     emissions = _compute_emissions_summary(temp_n, periods, is_multi, has_solve)
     economics = _compute_economics_summary(
         temp_n, periods, is_multi, has_solve, prices_from_state=False,
-        lost_load_cap=_read_lost_load_capture(src),
+        lost_load_cap=_read_lost_load_capture(src), solve_config=solve_config,
     )
     curtailment = _compute_curtailment_summary(temp_n, periods, is_multi, has_solve)
     lost_load = _compute_lost_load_summary(src, temp_n, periods, is_multi, has_solve)
@@ -525,10 +528,10 @@ def _compute_dispatch_summary(n, periods, is_multi, has_solve):
 
 
 def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_state: bool = True,
-                               lost_load_cap: dict | None = None):
+                               lost_load_cap: dict | None = None, solve_config=None):
     return _svc_economics._compute_economics_summary(
         n, periods, is_multi, has_solve, prices_from_state, lost_load_cap,
-        cfg=_live_solver_config(), result_df=_result_df,
+        cfg=_live_solver_config(), result_df=_result_df, solve_config=solve_config,
     )
 
 
@@ -601,6 +604,16 @@ def _project_solver_config(directory: pathlib.Path):
         return _solver_config_from_dict(raw)
     except (TypeError, ValueError) as exc:
         raise HTTPException(422, f"The project's saved solver settings cannot be used: {exc}")
+
+
+def _price_solve_config(directory: pathlib.Path):
+    """The project's own solver config for the MIP price gate (assistant-assurance
+    17); None, read as the defaults, when its saved settings cannot be read, so a
+    summary is never refused over the gate."""
+    try:
+        return _project_solver_config(directory)
+    except HTTPException:
+        return None
 
 
 def _load_project_network(directory: pathlib.Path):

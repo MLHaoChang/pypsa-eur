@@ -28,3 +28,33 @@ views, Compare, reports, headline KPIs, LCOH and `prices_digest`.
 ## Triage (2026-11-20, master 87cf52a7)
 
 Checked by code reading only. Still true: only `checked_charts.py` and `harness/solve_validity.py` handle `mip_duals_not_marginal`. Slice by reader (Results price views, Compare, reports, headline KPIs and LCOH, `prices_digest`), PR-SIZE-1. Acceptance is the section above. Gated: GK B. Blocked by: none.
+
+## Readers on master 84857588 (2026-11-24)
+
+Gate: `harness/solve_validity.mip_price_limit(n, config)` (classify's MIP test).
+
+Slice 1 (backend), gated:
+- `services/results/prices_digest.py` (live and retained digest): unavailable with reason `mip_duals_not_marginal`.
+- `services/compare/prices.py`: `PricesComparison.unavailable_reason`, against the project's own saved config.
+- `services/compare/economics.py`: `EconomicsComparison.price_limit`, and `per_asset_lcoh` is emptied.
+- `services/results/lcoh.py` and the EH TEA LCOH (`services/adequacy/eh_report.py`).
+- The decision-study report (`services/study/report.py`, via `runner._read_option`): LCOS incl. charging and market revenue at duals.
+
+Slice 2 (Results UI and the rest), still open:
+- `services/results/prices.py` (prices, price_drivers)
+- `carrier_kpis.py`
+- `asset_economics.py`
+- `asset_results/compute.py price_at_bus`
+- `results_workbook/views_network.py`
+- `study/workbook_view.py` market revenue
+- the Compare UI rendering of the two flags
+- headline KPIs (after #1948)
+
+Safe:
+- `ac_pf_service.py` snapshots the frame for the AC power flow; it shows no price.
+- `dispatch_status.py` clears the frame or hashes it.
+- `solver/objective.py` rescales the duals (a write).
+- `solver_service.py` logs the frame's shape.
+- `checked_charts.py` renders `price_calculations`, which is already gated.
+- `user_timeseries.py`, `economics.py`, `routers/projects.py` and `models/schemas.py` hold comments or docstrings only.
+- `smoke/qa_e2e.py` checks only that the import is callable.

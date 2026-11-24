@@ -1377,6 +1377,10 @@ class PricesComparison(BaseModel):
     # default zero, not a measurement — see ADR-0001. True guarantees the
     # figures were computed from a solved network.
     available: bool = False
+    # Why `available` is False when a reason is known: "mip_duals_not_marginal"
+    # on an integer (MIP) solve, whose 0.0 bus prices are not prices
+    # (assistant-assurance 17).
+    unavailable_reason: str | None = None
     # Sampled duration curve. Index 0 = highest price (0th percentile), index
     # 100 = lowest. Empty for unsolved networks.
     duration_curve: list[float] = Field(default_factory=list)
@@ -1511,6 +1515,11 @@ class EconomicsComparison(BaseModel):
     # cost on average?"; this list answers "which individual electrolyser
     # is most/least competitive in scenario A vs B?".
     per_asset_lcoh: list[AssetLCOHEntry] = Field(default_factory=list)
+    # "mip_duals_not_marginal" on an integer (MIP) solve (assistant-assurance
+    # 17): its bus prices are 0.0, not prices, so the figures priced at them
+    # (revenue_meur, storage_charge_cost_meur) are not established and
+    # `per_asset_lcoh` is left empty. None when the prices are the solve's duals.
+    price_limit: str | None = None
 
 
 class CurtailmentComparison(BaseModel):

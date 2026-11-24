@@ -209,6 +209,24 @@ def price_limit(cls) -> str | None:
     return None
 
 
+# What a reader outside checked answers says in place of a MIP's bus prices
+# (assistant-assurance 17).
+MIP_PRICES_TEXT = "Not available on an integer (MIP) solve: it has no marginal prices."
+
+
+def mip_price_limit(n, config) -> str | None:
+    """`DUALS_NOT_MARGINAL` when `buses_t.marginal_price` holds a MIP's zeros, else None.
+
+    The one gate for every reader outside checked answers (assistant-assurance
+    17). It is `classify`'s own MIP test, so a reader and a checked answer never
+    disagree on the solve kind; unlike `classify` it also gates a stochastic run
+    that is a MIP. `config` is the solver config of the solve that wrote the
+    prices (process-UC mode decides whether commitment stayed binary); `None`
+    reads as the defaults.
+    """
+    return DUALS_NOT_MARGINAL if is_mip(n, config) else None
+
+
 def _objective(n):
     """The objective as the solver bounded it, in user units: solver_service
     reverses its objective scale on `n.objective` right after the solve."""
