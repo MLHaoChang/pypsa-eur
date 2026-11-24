@@ -146,3 +146,46 @@ describe('Compare economics: LP scenario beside an integer (MIP) one', () => {
     expect(screen.queryByText(WITHHELD)).toBeNull()
   })
 })
+
+// GK B2 F1 (S1): two spellings of one carrier merge into one row (`canonicaliseCarrier`
+// lowercases and trims). A withheld part on either side of the merge withholds the
+// merged figure: never the other spelling's number alone (a partial sum) or 0.
+describe('Compare economics: a merged carrier with one withheld spelling', () => {
+  const bucket = (revenue: number | null, opex: number | null) => ({
+    revenue_meur: revenue === null ? null : pv(revenue), opex_meur: opex === null ? null : pv(opex),
+    gen_cost_meur: pv(5), storage_charge_cost_meur: null,
+    curtailment_cost_meur: pv(0), lost_load_cost_meur: pv(0), capex_meur: pv(3), dispatch_gwh: pv(100),
+    lcoe_eur_per_mwh: null,
+  })
+  const side = (project: string, by_carrier: Record<string, unknown>, withheld: boolean) => ({
+    project, has_solve: true, periods: [],
+    economics: {
+      available: true, ...(withheld ? { unavailable_reason: 'mip_duals_not_marginal' } : {}),
+      by_carrier, per_asset_lcoh: [],
+    },
+  })
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(projectsApi.resultsSummary).mockImplementation((name: string) => Promise.resolve((
+      name === 'alpha'
+        ? side(name, { gas: bucket(12, 5) }, false)
+        // revenue: a number, then a withheld part; opex: a withheld part, then a number.
+        : side(name, { gas: bucket(7, null), 'Gas ': bucket(null, 4) }, true)
+    ) as never))
+  })
+
+  it('reads the merged revenue and OPEX as not available, in either merge order', async () => {
+    renderTab()
+    await screen.findAllByText('Revenue', { selector: 'td' })
+    for (const label of ['Revenue', 'OPEX (total)']) {
+      const rows = metricRows(label)
+      expect(rows, label).toHaveLength(1)
+      const [, a, b, d] = rows[0]
+      expect(a, label).toMatch(/M€/)
+      expect(b, label).toBe(WITHHELD)
+      expect(d, label).toBe(WITHHELD)
+    }
+    expect(document.body.textContent).not.toMatch(/7\.00 M€|4\.00 M€|NaN/)
+  })
+})

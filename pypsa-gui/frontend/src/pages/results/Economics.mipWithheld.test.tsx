@@ -98,3 +98,25 @@ it('withholds the table cells and the group totals', async () => {
   const gasRow = screen.getAllByText('Gas').map(el => el.closest('tr')).find(tr => tr?.textContent?.includes('B1') || tr?.textContent?.includes('gas'))!
   expect(gasRow.textContent).toContain('2.00 €/MWh')
 })
+
+// GK B2 F1 (S1): a group total over rows with a withheld revenue is withheld, never
+// the other rows' sum (a partial sum) or 0 — both for a mixed group and for a group
+// whose every row is withheld (a MIP's normal case).
+it.each([
+  ['a mixed group', [null, 812]],
+  ['an all-withheld group', [null, null]],
+])('withholds the Thermal group revenue for %s', async (_case, revenues) => {
+  const base = mipPayload()
+  const gen = base.generators[0]
+  vi.mocked(resultsApi.getAssetEconomics).mockResolvedValue({
+    ...base,
+    generators: revenues.map((rev, i) => ({
+      ...gen, name: `G${i}`, revenue_eur: rev, net_profit_eur: rev === null ? null : rev - 1000,
+    })),
+  } as never)
+  renderPage()
+  await screen.findAllByText('Total revenue')
+  const thermal = screen.getByText('Thermal').closest('tr')!
+  expect(thermal.textContent).toContain(WITHHELD)
+  expect(thermal.textContent).not.toMatch(/812|€0(?![.\d])|NaN/)
+})
