@@ -38,12 +38,14 @@ export function runningShare(u: ProcessUnit): number | null {
 }
 
 /** The hydrogen cost to two decimals, as the report and the Economics tab print it (a Kpi tile would round it again). */
-function CostTile({ testId, kg }: { testId: string; kg: number }) {
+function CostTile({ testId, kg, multiPeriod }: { testId: string; kg: number; multiPeriod: boolean }) {
   return (
     <div data-testid={testId} className="flex flex-col gap-0.5 rounded border border-border px-3 py-2">
       <span className="text-[11px] text-muted">Hydrogen cost</span>
       <span className="text-sm font-semibold text-text whitespace-nowrap">{kg.toFixed(2)} €/kg</span>
-      <span className="text-[10px] text-muted">electrolysers only: annualised fixed cost + variable cost + electricity, per kg H₂ made; as in Economics and the report</span>
+      <span className="text-[10px] text-muted">
+        {multiPeriod ? 'across all investment periods' : 'for the modelled year'}; electrolysers only: annualised fixed cost + variable cost + electricity, per kg H₂ made; as in Economics and the report
+      </span>
     </div>
   )
 }
@@ -60,6 +62,8 @@ export default function ProductsTab() {
   const units = view.data?.process_units ?? []
   const h2Kg = lcoh.data?.total?.lcoh_eur_per_kg_h2
   const hasH2Product = products.some(isHydrogen)
+  // The basis is the server's own: the lcoh total lists `by_period` only on a multi-period solve (never inferred here).
+  const multiPeriod = (lcoh.data?.total?.by_period?.length ?? 0) > 0
 
   if (view.isError) {
     return <PageBody><p data-testid="products-unavailable" className="text-xs text-muted">
@@ -96,7 +100,7 @@ export default function ProductsTab() {
                         reason="The solve recorded no finite running hours for this unit." />
                 })}
                 {isHydrogen(p) && (h2Kg != null && Number.isFinite(h2Kg)
-                  ? <CostTile testId={`products-${p.bus}-cost`} kg={h2Kg} />
+                  ? <CostTile testId={`products-${p.bus}-cost`} kg={h2Kg} multiPeriod={multiPeriod} />
                   : <Kpi testId={`products-${p.bus}-cost`} label="Hydrogen cost" value="" state="not_modelled"
                       reason={lcoh.isError
                         ? 'Not available: the hydrogen cost could not be read for this solve.'
@@ -113,7 +117,7 @@ export default function ProductsTab() {
         {!hasH2Product && h2Kg != null && Number.isFinite(h2Kg) && (
           <PageSection title="Hydrogen cost" hint="Electrolyser fleet">
             <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
-              <CostTile testId="products-fleet-cost" kg={h2Kg} />
+              <CostTile testId="products-fleet-cost" kg={h2Kg} multiPeriod={multiPeriod} />
             </div>
           </PageSection>
         )}

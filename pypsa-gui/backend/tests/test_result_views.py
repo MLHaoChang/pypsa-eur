@@ -6,6 +6,7 @@ the catalogue without an entry fails here, as does an entry whose read is
 not a real read-tier tool.
 """
 import dataclasses
+import inspect
 import json
 from pathlib import Path
 
@@ -41,6 +42,25 @@ def test_every_live_view_reads_through_real_read_tools(view):
         for key, value in read.args.items():
             enum = schema['properties'][key].get('enum')
             assert enum is None or value in enum, (read.tool, key, value)
+
+
+def test_every_products_read_binds_to_its_dispatcher(monkeypatch):
+    """The probe calls DISPATCHERS[tool](**args): the args must bind to the dispatcher's own signature
+    (the first products probe passed project_id to a no-argument dispatcher and always read_failed)."""
+    monkeypatch.setattr(rv, 'shown_key', lambda: 'golden')
+    for read in rv.for_results_tab('products').reads:
+        inspect.signature(chat_tools.DISPATCHERS[read.tool]).bind(**read.call()['args'])
+
+
+def test_products_probe_reads_the_process_view_empty_key(monkeypatch):
+    """Products is no_data on an empty product list and available on a listed product, through the real probe."""
+    view = rv.for_results_tab('products')
+    served = {}
+    monkeypatch.setitem(chat_tools.DISPATCHERS, 'get_process_view', lambda: served)
+    served.update(products=[], process_units=[{'name': 'haber'}])
+    assert rv._probe(view) == ('no_data', None)
+    served.update(products=[{'bus': 'NH3 bus', 'lcoh': None}])
+    assert rv._probe(view) == ('available', None)
 
 
 def test_load_flow_is_the_only_view_that_proves_displayed_data_today():

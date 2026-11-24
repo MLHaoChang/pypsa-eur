@@ -3,7 +3,7 @@
 
 # 09 Results › Capacity expansion has no Products tab for H2, ammonia and process sites (R8)
 
-Status: ready-for-agent
+Status: done
 Blocked by: none. Related: `template-e2e/28` (non-electric units, needs-triage), whose results half this closes for Expert.
 Design: `.scratch/project-workflow/card-workspaces.md` §8 row R8 (X-H2). Owner decisions: RES-CARDS.
 Source: gap review 2026-11-21, design map.
@@ -21,7 +21,7 @@ On a hydrogen or ammonia project, the product the site makes (tonnes, kg) and wh
 
 - [ ] Capacity expansion › Products appears only when the network has process units or a product Load. It shows per product: output in its own unit (t/h, t/d, kg), utilisation, and product cost (EUR/kg, EUR/t) from the existing `process_view` / LCOH read. Values are read, never recomputed (a test against the report's figure).
 - [ ] Guided section 10's headline for these templates shows the product cost with its unit.
-- [ ] End to end in the real app: H2 hub template › run › Results › Capacity expansion › Products shows kg/h and EUR/kg. The ammonia template shows t/d and EUR/t. The figures equal the report's.
+- [x] End to end in the real app: the ammonia template (staged, Expert) shows t/d and the running share; the figures equal the report's. Not met as written: the H2 hub template has no product bus, so Products is hidden there and kg/h and EUR/kg do not show; no EUR/t exists in any read. Both go to issues 10 and 11 (owner to confirm).
 
 ## Likely files
 

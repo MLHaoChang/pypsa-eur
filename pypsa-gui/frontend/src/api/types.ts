@@ -1418,6 +1418,12 @@ export interface ProcessAmount {
   /** Tonnes (value × t_per_unit); null with `t_flag` when the bus has no tonne factor. */
   t: number | null
   t_flag?: string | null
+  /** The weighting the figure is on (`generators` energy weighting × period years) and its per-period split. */
+  weighting?: string
+  by_period?: Record<string, number>
+  /** The amount in MWh, null with `mwh_flag` when the bus is a material one. */
+  mwh?: number | null
+  mwh_flag?: string | null
   flag: string | null
   /** Set on `lost` (the shortfall priced) and `buy_in` (at its marginal cost); null with `eur_flag` when unknown. */
   eur?: number | null
