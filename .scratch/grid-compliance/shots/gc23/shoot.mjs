@@ -47,10 +47,16 @@ const state = {
 }
 
 
-const bundle = (hour) => ({ name: `p2030_h${hour}`, period: 2030, hour, files: [{ name: 'case.raw', size: 1200 }], size: 2048 })
+const bundle = (hour) => {
+  const n = `p2030_h${hour}`
+  const files = [{ name: `${n}.raw`, size: 120000 }, { name: `${n}.dyr`, size: 6000 }, { name: 'gfm_models.csv', size: 1000 },
+                 { name: 'README.md', size: 4000 }, { name: 'manifest.json', size: 1000 }]
+  return { name: n, period: 2030, hour, files, size: files.reduce((a, f) => a + f.size, 0) }
+}
 const CASES = {
   bundles: { has_run: true, stale: false, run_at: '2026-11-20T10:00:00Z', bundles: [bundle(12), bundle(87)], skipped: null, error: null },
   stale: { has_run: true, stale: true, run_at: '2026-11-20T10:00:00Z', bundles: [bundle(12), bundle(87)], skipped: null, error: null },
+  'download-failed': { has_run: true, stale: false, run_at: '2026-11-20T10:00:00Z', bundles: [bundle(12), bundle(87)], skipped: null, error: null },
   'no-run': { has_run: false, stale: false, run_at: null, bundles: [], skipped: null, error: null },
   'no-island-hours': { has_run: true, stale: false, run_at: '2026-11-20T10:00:00Z', bundles: [], skipped: 'no island critical hours in this run', error: null },
   'write-error': { has_run: true, stale: false, run_at: '2026-11-20T10:00:00Z', bundles: [], skipped: null, error: 'disk full' },
@@ -58,14 +64,14 @@ const CASES = {
 const texts = []
 const b = await chromium.launch()
 try {
-  for (const theme of ['light', 'dark']) for (const [cname, psse] of Object.entries(CASES)) {
+  for (const theme of ['light', 'dark']) for (const [cname, psse] of Object.entries(CASES).filter(([k]) => !process.env.ONLY || process.env.ONLY.split(',').includes(k))) {
     const ctx = await b.newContext({ viewport: { width: 1440, height: 1800 }, deviceScaleFactor: 1 })
     const p = await ctx.newPage()
     await p.route(/\/api\/campus-electrical\/[^/?]+(\?.*)?$/, r =>
       r.request().method() === 'GET' ? r.fulfill({ json: state }) : r.continue())
     await p.route(/\/api\/campus-electrical\/[^/?]+\/psse(\?.*)?$/, r => r.fulfill({ json: psse }))
     await p.route(/\/api\/campus-electrical\/[^/?]+\/psse\/[^/]+\/download(\?.*)?$/, r =>
-      r.fulfill({ status: 200, body: Buffer.from('PK\u0003\u0004'), contentType: 'application/zip', headers: { 'X-Run-Stale': String(psse.stale) } }))
+      cname === 'download-failed' ? r.fulfill({ status: 500, json: { detail: 'boom' } }) : r.fulfill({ status: 200, body: Buffer.from('PK\u0003\u0004'), contentType: 'application/zip', headers: { 'X-Run-Stale': String(psse.stale) } }))
     await p.route(/\/api\/projects\/[^/?]+\/flow\/scope(\?.*)?$/, async r => {
       if (r.request().method() !== 'GET') return r.continue()
       const res = await r.fetch()
@@ -94,6 +100,10 @@ try {
       const section = p.locator('section', { has: p.getByText('PSS/E case', { exact: true }) }).last()
       await section.waitFor({ timeout: 30000 })
       await p.waitForTimeout(1000)
+      if (cname === 'download-failed') {
+        await section.getByRole('button', { name: /Download PSS\/E case/ }).first().click()
+        await p.waitForTimeout(1000)
+      }
       await section.scrollIntoViewIfNeeded()
       const f = path.join(OUT, `${mode}-${theme}-${cname}.png`)
       await section.screenshot({ path: f, animations: 'disabled' })
