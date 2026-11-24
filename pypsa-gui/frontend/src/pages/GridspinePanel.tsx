@@ -18,7 +18,7 @@ import toast from 'react-hot-toast'
 import {
   gridspineApi, isNotAStudy, STAGES,
   type CapacityKind, type CapacityRow, type ConnectionCheck, type ConnectionRow, type DispatchSource, type FigureName, type RankedSnapshot, type ReadbackShort, type StageState, type StageStatus,
-  type StudyConfig, type StudyConfigPatch,
+  type Ledger, type StudyConfig, type StudyConfigPatch,
 } from '../api/gridspine'
 import { projectsApi } from '../api/projects'
 import { formatApiDetail } from '../api/client'
@@ -244,34 +244,41 @@ function StudyView({ name }: { name: string }) {
         </>
       )}
 
-      {ledger.data && (
-        <PageSection
-          panelSection="assumptions_ledger"
-          title="Assumptions ledger"
-          hint={ledger.data.from_run === false ? 'From the templates this study will use — no run yet' : 'From the latest run'}
-        >
-          <div className="flex items-center gap-2 mb-2" data-testid="provenance-counts">
-            <Tag tone="ok">{ledger.data.provenance_counts.measured} measured</Tag>
-            <Tag tone="accent">{ledger.data.provenance_counts.datasheet} datasheet</Tag>
-            <Tag tone="warn">{ledger.data.provenance_counts.assumed} assumed</Tag>
-            <span className="text-[11px] text-muted">{ledger.data.entries.length} ledger entries</span>
-          </div>
-          {ledger.data.edits.length > 0 && (
-            <ul className="text-[11px] text-muted list-disc pl-4" data-testid="template-edits">
-              {ledger.data.edits.map(e => (
-                <li key={`${e.unit_id}.${e.param}`}>
-                  {e.unit_id}.{e.param} = {e.value} ({e.source}, edited by {e.edited_by})
-                </li>
-              ))}
-            </ul>
-          )}
-        </PageSection>
-      )}
+      {ledger.data && <LedgerSection ledger={ledger.data} />}
 
       {done && status.data && Object.keys(status.data.bundles).length > 0 && (
         <ReadbackSection name={name} status={status.data} />
       )}
     </PageBody>
+  )
+}
+
+/** The assumptions ledger: the study's provenance counts and any template edits. Shared with
+ *  Results › Hand-off › Specialist packet. */
+export function LedgerSection({ ledger }: { ledger: Ledger }) {
+  return (
+    <PageSection
+      panelSection="assumptions_ledger"
+      title="Assumptions ledger"
+      hint={ledger.from_run === false ? 'From the templates this study will use — no run yet' : 'From the latest run'}
+    >
+      <div className="flex items-center gap-2 mb-2" data-testid="provenance-counts">
+        <Tag tone="ok">{ledger.provenance_counts.measured} measured</Tag>
+        <Tag tone="accent">{ledger.provenance_counts.datasheet} datasheet</Tag>
+        <Tag tone="warn">{ledger.provenance_counts.assumed} assumed</Tag>
+        <span className="text-[11px] text-muted">{ledger.entries.length} ledger entries</span>
+      </div>
+      {ledger.edits.length > 0 && (
+        <ul className="text-[11px] text-muted list-disc pl-4" data-testid="template-edits">
+          {ledger.edits.map(e => (
+            <li key={`${e.unit_id}.${e.param}`}>
+              {e.unit_id}.{e.param} = {e.value} ({e.source}, edited by {e.edited_by})
+            </li>
+          ))}
+        </ul>
+      )}
+    </PageSection>
+
   )
 }
 
@@ -314,7 +321,7 @@ function currentSourceKind(config: StudyConfig): PickerMode {
   return 'generate'
 }
 
-function describeSource(config: StudyConfig): string {
+export function describeSource(config: StudyConfig): string {
   if (config.from_external) {
     // The filename, not the server path: what the engineer recognises is the
     // file they uploaded.
@@ -771,7 +778,7 @@ function Stages({ status, live }: { status: StageStatus; live: boolean }) {
   )
 }
 
-function SnapshotTable({ rows, name, bundles }: { rows: RankedSnapshot[]; name: string; bundles: Record<string, string> }) {
+export function SnapshotTable({ rows, name, bundles }: { rows: RankedSnapshot[]; name: string; bundles: Record<string, string> }) {
   const sorted = useMemo(() => [...rows].sort((a, b) => a.hour - b.hour), [rows])
   const [downloading, setDownloading] = useState<number | null>(null)
 

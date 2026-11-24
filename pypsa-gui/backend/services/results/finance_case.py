@@ -195,6 +195,7 @@ import calendar
 import dataclasses
 import hashlib
 import json
+import logging
 import math
 from collections.abc import Sequence
 from datetime import date
@@ -228,6 +229,9 @@ BUILD_YEAR_MIN, BUILD_YEAR_MAX = 1900, 2200     # a COD from build_year (S3): `c
 
 _CAPACITY_COLS = {"Generator": "p_nom", "StorageUnit": "p_nom", "Store": "e_nom", "Link": "p_nom",
                   "Line": "s_nom", "Transformer": "s_nom"}
+
+
+_log = logging.getLogger(__name__)
 
 
 def _num(x: float) -> str:
@@ -2353,6 +2357,25 @@ def _extra_fom_lines(extra_finance: tuple[AssetFinance, ...], k: str, base_year:
 
 
 # ── the entry point ──────────────────────────────────────────────────────────
+
+def connection_need(cfg) -> str | None:
+    """The connection code a run would refuse with that the start can tell
+    without the dispatch (template-e2e issue 40): `value_flows_not_configured`
+    with no commercial config or no `value_flows` in it, `value_flows_invalid`
+    for one that does not parse; None otherwise, the run states the rest. Only
+    the start's `detail.needs` reads it; the start never refuses with it."""
+    commercial = getattr(cfg, "commercial", None)
+    if not commercial:
+        return "value_flows_not_configured"
+    try:
+        vf = P.parse_value_flows(_lp._parse(commercial).value_flows)
+    except P.ValueFlowsInvalid:
+        return "value_flows_invalid"
+    except Exception as exc:                            # noqa: BLE001
+        _log.debug("connection_need: not established: %r", exc)
+        return None                                     # the run says what it is
+    return "value_flows_not_configured" if vf is None else None
+
 
 def build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
                        owner: str | None = None,

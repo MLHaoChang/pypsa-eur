@@ -873,7 +873,9 @@ export interface LineLoadingEntry {
   carrier?: string | null
   peak_loading: CarrierPeriodValue       // fraction (0..1)
   mean_loading: CarrierPeriodValue
-  binding_hours: CarrierPeriodValue
+  // null: not evaluated, the importer assumed this rating (rating_assumed). Never read it as 0.
+  binding_hours: CarrierPeriodValue | null
+  rating_assumed?: boolean
 }
 
 export interface LoadingComparison {
@@ -883,6 +885,7 @@ export interface LoadingComparison {
   // LoadingTable had no way to read it until Task 6 wired it through.
   available: boolean
   lines: LineLoadingEntry[]              // sorted by peak loading desc
+  assumed_rating_count?: number          // branches whose rating is assumed; no binding hours for them
 }
 
 export interface CarrierPriceStats {

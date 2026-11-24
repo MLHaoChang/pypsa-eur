@@ -408,3 +408,93 @@ def test_a_process_buy_in_stays_a_source_under_its_own_name():
     _assert_conserves(p)
     assert _by(p["rows"], "source", "destination")[("product_purchase", "delivery")] == pytest.approx(6.0)
     assert p["unserved_product_mwh"] == {}
+
+
+def _process_net(units=("nh3",)):
+    n = pypsa.Network()
+    n.set_snapshots(range(4))
+    n.add("Carrier", ["AC", "prod"])
+    n.add("Bus", "el", carrier="AC", unit="MWh")
+    n.add("Generator", "grid", bus="el", carrier="AC", p_nom=100, marginal_cost=10)
+    for u in units:
+        n.add("Bus", f"{u}_bus", carrier="prod", unit="MWh")
+        n.add("Load", f"{u}_load", bus=f"{u}_bus", p_set=10)
+        n.add("Link", u, bus0="el", bus1=f"{u}_bus", p_nom=50, efficiency=0.5)
+        n.links.loc[u, "eh_process"] = True
+    return n
+
+
+def test_process_unit_is_one_node_with_its_electric_input():
+    p = energy_flows(_solve(_process_net(("nh3", "h2"))))
+    _assert_conserves(p)
+    into = _by(p["rows"], "destination")
+    assert into[("Process nh3",)] == pytest.approx(80.0)     # 4 h × 10 MW load ÷ 0.5 efficiency
+    assert into[("Process h2",)] == pytest.approx(80.0)
+    out = _by(p["rows"], "source", "destination")
+    assert out[("Process nh3", "nh3_load")] == pytest.approx(40.0)
+    assert sum(v for (a, d), v in out.items() if d == "Process nh3" and not a.startswith("Process")) == pytest.approx(80.0)
+    assert "Losses" not in {r["destination"] for r in p["rows"]}
+    assert "Process nh3" in csv_text(p)
+
+
+def test_no_process_units_adds_no_process_node():
+    p = energy_flows(_solve(_battery_net()))
+    assert not any("Process" in f"{r['source']}{r['destination']}" for r in p["rows"])
+
+
+@pytest.mark.parametrize("flag,is_process", [
+    ("true", True), ("1", True), ("1.0", True), ("yes", True),
+    ("false", False), ("0", False), (np.nan, False), ("on", False), ("y", False),
+])
+def test_eh_process_flag_reads_like_the_solver(flag, is_process):
+    n = _process_net(("nh3",))
+    n.links["eh_process"] = n.links["eh_process"].astype(object)
+    n.links.loc["nh3", "eh_process"] = flag
+    p = energy_flows(_solve(n))
+    assert any(r["destination"] == "Process nh3" for r in p["rows"]) is is_process
+
+
+def test_process_rows_scale_with_snapshot_weightings_and_the_series_balance():
+    n = _process_net(("nh3",))
+    n.snapshot_weightings.loc[:, :] = 3.0
+    p = energy_flows(_solve(n))
+    _assert_conserves(p)
+    assert _by(p["rows"], "destination")[("Process nh3",)] == pytest.approx(240.0)
+    sr = p["series"]
+    sup = np.sum([v for v in sr["supply"].values()], axis=0)
+    dem = np.sum([v for v in sr["demand"].values()], axis=0)
+    assert sup == pytest.approx(dem)
+    assert "Process nh3" in sr["supply"]
+    c = p["conservation"]
+    assert c["process_output_mwh"] == pytest.approx(120.0)
+
+
+def test_a_process_that_exports_is_not_dropped():
+    n = _process_net(("nh3",))
+    n.add("Carrier", "grid")
+    n.add("Bus", "ext", carrier="AC", unit="MWh")
+    n.add("Generator", "ext_grid", bus="ext", carrier="grid", p_nom=100, marginal_cost=1, p_min_pu=-1)
+    n.links.loc["nh3", "bus2"] = "ext"
+    n.links.loc["nh3", "efficiency2"] = 0.2
+    p = energy_flows(_solve(n))
+    _assert_conserves(p)
+    out = _by(p["rows"], "source", "destination")
+    assert out[("Process nh3", "Export")] == pytest.approx(16.0)      # 4 h × 20 MW in × 0.2
+    assert out[("Process nh3", "nh3_load")] == pytest.approx(40.0)
+
+
+def test_a_load_named_like_the_process_node_is_refused():
+    n = _process_net(("nh3",))
+    n.add("Bus", "other_bus", carrier="prod", unit="MWh")
+    n.add("Load", "Process nh3", bus="other_bus", p_set=1)
+    n.add("Generator", "other_gen", bus="other_bus", carrier="AC", p_nom=5, marginal_cost=1)
+    p = energy_flows(_solve(n))
+    assert p["status"] == "not_established" and "Process nh3" in p["reason"]
+
+
+def test_a_carrier_named_like_the_process_node_is_refused():
+    n = _process_net(("nh3",))
+    n.generators.loc["grid", "carrier"] = "Process nh3"
+    n.add("Carrier", "Process nh3")
+    p = energy_flows(_solve(n))
+    assert p["status"] == "not_established" and "Process nh3" in p["reason"]

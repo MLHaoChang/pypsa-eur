@@ -207,7 +207,8 @@ export function volumeRefusal(label: string, pct: number): string | null {
 export const operatingYears = (horizon: [number, number] | null): number[] =>
   yearsOf({} as LineItem, horizon)
 
-const listWords = (xs: string[]) =>
+/** "a", "a and b", "a, b and c". */
+export const listWords = (xs: string[]) =>
   xs.length < 2 ? (xs[0] ?? '') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`
 const groupWords = (gs: { words: string }[]) => listWords(gs.map(g => g.words))
 

@@ -3,7 +3,7 @@
 
 # 08 — Edit form: the Harmonic source dropdown cuts off its longest option
 
-Status: ready-for-agent
+Status: done
 Type: task
 Gated: yes (UX)
 Depends on: DGS-EXTRAS-1 (#1765); lands with slice 03 (Expert panels and mode parity, which switches options to their plain names).
