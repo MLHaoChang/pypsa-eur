@@ -276,18 +276,20 @@ _CAPEX_CONSTANT_VAR = "objective_constant"
 
 
 def _objective_years(n) -> float:
-    """The years the LP objective counts: Σ snapshot objective weights / 8760,
-    each period's share times its (discounted) objective weighting. Dividing
+    """The years the LP objective counts: Σ snapshot objective weights (hours)
+    / HOURS_PER_YEAR, each period's share times its (discounted) objective weighting. Dividing
     an objective total by this gives an equivalent annual cost; on one
     period it is the modelled share of a year."""
     import pandas as pd
 
+    from services.adequacy.metrics import HOURS_PER_YEAR
+
     sw = n.snapshot_weightings.objective
     if isinstance(n.snapshots, pd.MultiIndex):
-        per = sw.groupby(level=0).sum() / 8760.0
+        per = sw.groupby(level=0).sum() / HOURS_PER_YEAR
         ipw = n.investment_period_weightings["objective"]
         return float(sum(per[p] * float(ipw.get(p, 1.0)) for p in per.index))
-    return float(sw.sum()) / 8760.0
+    return float(sw.sum()) / HOURS_PER_YEAR
 
 
 def _lp_capex_share(n) -> float | None:
