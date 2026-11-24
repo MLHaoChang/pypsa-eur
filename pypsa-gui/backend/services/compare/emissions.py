@@ -93,8 +93,6 @@ def _compute_emissions_summary(n, periods, is_multi, has_solve) -> EmissionsComp
         # `generators_t.eh_co2_t_per_mwh`) replaces the carrier's single figure.
         gen_t = n.generators_t.get("eh_co2_t_per_mwh")
         overridden = gen_t is not None and g in gen_t.columns
-        if intensity <= 0 and not overridden:
-            continue
         eff = float(gens.at[g, "efficiency"]) if "efficiency" in gens.columns else 1.0
         if not _math.isfinite(eff) or eff <= 0:
             eff = 1.0

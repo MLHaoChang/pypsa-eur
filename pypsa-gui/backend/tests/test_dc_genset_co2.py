@@ -239,6 +239,7 @@ def test_an_overridden_generator_on_a_zero_intensity_carrier_is_still_counted():
     by_carrier = {r["carrier"]: r["tCO2"] for r in res["by_carrier"]}
     assert by_carrier["grid"] == pytest.approx(expect)
     assert "solar" not in by_carrier  # zero intensity and no override: not listed
+    assert by_carrier["gas"] == 0.0  # non-zero intensity, no dispatch: listed at zero
 
 
 def test_an_all_zero_override_lists_no_carrier():
