@@ -35,6 +35,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import logging
+import math
 import re
 import threading
 import time
@@ -630,7 +631,7 @@ def record_source(
             "record_source works only in a research turn, for its gaps.",
         )
     if turn.gaps[gap]["tool"] == FUEL_TOOL:
-        _check_electrical(quote)
+        _check_electrical(quote, value)
     try:
         row = source_ledger.propose(
             {
@@ -780,13 +781,42 @@ _THERMAL = re.compile(
     r"thermal|MWh[\s_(-]*th\b|\b(?:Hs|Hi|LHV|HHV|GCV|NCV)\b|calorific|fuel input",
     re.IGNORECASE,
 )
-_ELECTRICAL = re.compile(r"electric|MWh[\s_(-]*e(?:l)?\b", re.IGNORECASE)
+# GK B (70) N3: the electrical unit is the stated value's own, i.e. it follows
+# that number before any other number does.
+_ELECTRICAL_UNIT = re.compile(
+    r"MWh[\s_(-]*el?\b|electric\w*\s+MWh|MWh\s+(?:of\s+)?(?:\w+\s+){0,2}electric",
+    re.IGNORECASE,
+)
+_UNIT_WINDOW = 60
 
 
-def _check_electrical(quote: Any) -> None:
-    """Refuse a fuel-price quote that is not per MWh of electrical output."""
-    text = quote if isinstance(quote, str) else ""
-    if _THERMAL.search(text) or not _ELECTRICAL.search(text):
+def _states_electrical(text: str, value: float) -> bool:
+    numbers = list(source_ledger._NUMBER.finditer(text))
+    for i, match in enumerate(numbers):
+        if not any(
+            math.isclose(r, value, rel_tol=1e-9, abs_tol=1e-12)
+            for r in source_ledger._readings(match.group(0))
+        ):
+            continue
+        end = numbers[i + 1].start() if i + 1 < len(numbers) else len(text)
+        if _ELECTRICAL_UNIT.search(
+            text[match.end() : min(end, match.end() + _UNIT_WINDOW)]
+        ):
+            return True
+    return False
+
+
+def _check_electrical(quote: Any, value: Any) -> None:
+    """Refuse a fuel-price quote that prices fuel energy anywhere, or does not
+    state `value` per MWh of electrical output."""
+    text = source_ledger.normalise(quote) if isinstance(quote, str) else ""
+    number = isinstance(value, (int, float)) and not isinstance(value, bool)
+    if (
+        _THERMAL.search(text)
+        or not number
+        or not math.isfinite(value)
+        or not _states_electrical(text, float(value))
+    ):
         raise ResearchError(
             "research_unit_mismatch",
             "A genset fuel price is quoted per MWh of electrical output; a quote that does not "
@@ -796,12 +826,13 @@ def _check_electrical(quote: Any) -> None:
 
 def fuel_gensets(
     network, gap: dict[str, Any]
-) -> tuple[str | None, list[str], list[str]]:
-    """(carrier, names, curved) for a fuel-price gap on `network`: the one
-    fuel carrier of the generators the gap's target glob names, every
-    Generator of that carrier (a renamed genset too), and those of them whose
-    fuel curve sets their marginal cost (S2: never written raw). Raises
-    `research_mixed_fuel` when the matched gensets burn two fuels (S1)."""
+) -> tuple[str | None, list[str], list[str], list[str]]:
+    """(carrier, names, curved, others) for a fuel-price gap on `network`:
+    the one fuel carrier of the gensets (the generators the gap's target glob
+    names), those to write, those whose fuel curve sets their marginal cost
+    (S2: never written raw), and the other Generators of that carrier (a CHP,
+    a fuel supply: never written, GK B (70) N1; the report names them).
+    Raises `research_mixed_fuel` when the gensets burn two fuels (S1)."""
     from services import fuel_curve
 
     gens = network.generators
@@ -816,12 +847,16 @@ def fuel_gensets(
             "written to two fuels. Nothing was written.",
         )
     if not carriers:
-        return None, [], []
-    names = [str(n) for n in gens.index if str(gens.at[n, "carrier"]) == carriers[0]]
+        return None, [], [], []
     curved = [
-        n for n in names if fuel_curve.curve_of(gens.loc[n].to_dict()) is not None
+        n for n in matched if fuel_curve.curve_of(gens.loc[n].to_dict()) is not None
     ]
-    return carriers[0], [n for n in names if n not in curved], curved
+    others = [
+        str(n)
+        for n in gens.index
+        if str(gens.at[n, "carrier"]) == carriers[0] and str(n) not in matched
+    ]
+    return carriers[0], [n for n in matched if n not in curved], curved, others
 
 
 def _fuel_steps(
@@ -843,8 +878,8 @@ def _fuel_steps(
         )
     if not row["value"] > 0:
         raise ResearchError("invalid_source_row", "A genset fuel price is above 0.")
-    _check_electrical(row.get("quote"))
-    _, names, _ = fuel_gensets(_active_network(), gap)
+    _check_electrical(row.get("quote"), row["value"])
+    _, names, _, _ = fuel_gensets(_active_network(), gap)
     if not names:  # the report's gap line names why nothing was written
         return []
     return [
@@ -876,7 +911,7 @@ def fuel_prices(network, profile: dict[str, Any]) -> dict[str, Any] | None:
     if gap is None:
         return None
     try:
-        carrier, names, curved = fuel_gensets(network, gap)
+        carrier, names, curved, others = fuel_gensets(network, gap)
         gens = network.generators
         return {
             "key": gap["key"],
@@ -884,6 +919,7 @@ def fuel_prices(network, profile: dict[str, Any]) -> dict[str, Any] | None:
             "carrier": carrier,
             "prices": {n: float(gens.at[n, gap["target"]["attr"]]) for n in names},
             "curved": curved,
+            "others": others,
         }
     except ResearchError as exc:
         return {"key": gap["key"], "error": exc.kind}
@@ -928,12 +964,25 @@ def fuel_gap_line(task: dict[str, Any], fuel: dict[str, Any] | None) -> str | No
             return f"{FUEL_LINE}: every genset's cost is set by its fuel curve"
         if any(v != confirmed["value"] for v in fuel["prices"].values()):
             return f"{kept}: the researched value was not written"
-        if fuel["curved"]:
-            return (
-                "Genset fuel price researched; left out, as their fuel curve sets their cost: "
-                + ", ".join(fuel["curved"])
-            )
-        return None
+        left = [
+            *(
+                [
+                    "left out, as their fuel curve sets their cost: "
+                    + ", ".join(fuel["curved"])
+                ]
+                if fuel["curved"]
+                else []
+            ),
+            *(
+                [
+                    f"not written to the other {fuel['carrier']} generators: "
+                    + ", ".join(fuel["others"])
+                ]
+                if fuel.get("others")
+                else []
+            ),
+        ]
+        return "Genset fuel price researched; " + "; ".join(left) if left else None
     step = next(
         (s for s in block.get("steps") or [] if s.get("stage") == "inputs"), None
     )

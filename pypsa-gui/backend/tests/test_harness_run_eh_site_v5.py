@@ -14,6 +14,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import pathlib
 
 import pandas as pd
 import pypsa
@@ -151,7 +152,8 @@ def test_a_price_in_another_unit_is_refused_not_converted(unit):
 
 
 def _network(**extra):
-    """Two gas gensets (one a curve genset), a renamed gas unit, PV."""
+    """Three gas gensets (one a curve genset), a gas CHP and a gas supply
+    Generator on the same carrier (never gensets: GK B (70) N1), PV."""
     n = pypsa.Network()
     n.add("Bus", "site_mv")
     for c in ("gas", "diesel", "solar"):
@@ -173,12 +175,13 @@ def _network(**extra):
     )
     n.add(
         "Generator",
-        "backup_unit",
+        "gas_chp",
         bus="site_mv",
         carrier="gas",
         p_nom=1.0,
-        marginal_cost=165.0,
+        marginal_cost=90.0,
     )
+    n.add("Generator", "gas supply", bus="site_mv", carrier="gas", marginal_cost=40.0)
     n.add(
         "Generator",
         "genset_2",
@@ -231,8 +234,8 @@ def test_confirming_a_row_adds_one_carded_bulk_write_to_every_gas_genset_but_the
         "status": "pending",
         "args": {
             "component_class": "Generator",
-            # the renamed gas unit too (S1); the curve genset never (S2)
-            "names": ["genset_1", "genset_new_2030", "backup_unit"],
+            # gensets only: never the CHP or the gas supply (N1), nor the curve genset (S2)
+            "names": ["genset_1", "genset_new_2030"],
             "updates": {"marginal_cost": 172.4},
             "research_ref": row["id"],
         },
@@ -295,10 +298,15 @@ def test_a_quote_not_per_mwh_of_electrical_output_is_refused(fuel_run, quote):
 
 
 @pytest.mark.parametrize(
-    "quote", [QUOTE, "Diesel genset: EUR 260 per MWhe", "EUR 260/MWh_el"]
+    "quote, value",
+    [
+        (QUOTE, 172.4),
+        ("Diesel genset: EUR 260 per MWhe", 260),
+        ("EUR 260/MWh_el", 260.0),
+    ],
 )
-def test_a_quote_per_mwh_of_electrical_output_passes(quote):
-    research._check_electrical(quote)
+def test_a_quote_per_mwh_of_electrical_output_passes(quote, value):
+    research._check_electrical(quote, value)
 
 
 def test_record_source_refuses_a_thermal_quote_for_the_fuel_gap(monkeypatch):
@@ -535,16 +543,19 @@ def test_the_gap_line_names_why_the_template_price_was_kept(steps, rows, line):
     assert research.fuel_gap_line(_task(steps, rows), _fuel()) == line
 
 
-def test_a_written_price_leaves_no_line_but_names_the_curve_gensets():
+def test_a_written_price_leaves_no_line_but_names_what_it_left_out():
     n = _network()
-    n.generators.loc[
-        ["genset_1", "genset_new_2030", "backup_unit"], "marginal_cost"
-    ] = 172.4
+    n.generators.loc[["genset_1", "genset_new_2030"], "marginal_cost"] = 172.4
     task = _task(
         rows=[
             {"for": {"gap": "genset_fuel_price"}, "status": "confirmed", "value": 172.4}
         ]
     )
+    assert research.fuel_gap_line(task, _fuel(n)) == (
+        "Genset fuel price researched; left out, as their fuel curve sets their cost: genset_2; "
+        "not written to the other gas generators: gas_chp, gas supply"
+    )
+    n.remove("Generator", ["gas_chp", "gas supply"])
     assert research.fuel_gap_line(task, _fuel(n)) == (
         "Genset fuel price researched; left out, as their fuel curve sets their cost: genset_2"
     )
@@ -616,7 +627,8 @@ def test_a_v5_run_without_research_keeps_the_price_and_the_report_says_so(
         "gaps": ["import_tariff", "genset_fuel_price"],
     }
     assert (
-        net["n"].generators.loc[["genset_1", "backup_unit"], "marginal_cost"] == 165.0
+        net["n"].generators.loc[["genset_1", "genset_new_2030"], "marginal_cost"]
+        == 165.0
     ).all()
     source = run_report.harness_source(
         path, record, run_profiles.resolve(REF), net["n"]
@@ -667,3 +679,92 @@ def test_a_row_without_a_value_is_never_written(fuel_run):
     with pytest.raises(research.ResearchError) as exc:
         research._fuel_steps({**_row(), "value": None}, GAP, "inputs.research.x")
     assert exc.value.kind == "research_range_not_applicable"
+
+
+def test_a_chp_and_a_fuel_supply_generator_are_never_written(fuel_run):
+    """GK B (70) N1: the carrier's other Generators keep their own price."""
+    task, path, net = fuel_run
+    row = _row()
+    _rows(path, row)
+    research.settle(path, row["id"], "confirmed", by="u1")
+    names = json.loads(path.read_text())["steps"][-1]["args"]["names"]
+    assert "gas_chp" not in names and "gas supply" not in names
+    assert research.fuel_gensets(net["n"], GAP)[3] == ["gas_chp", "gas supply"]
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [
+        # N2: an electrical marker does not save a quote that also prices fuel energy
+        "Gas genset: EUR 172.40 per MWh of electrical output (LHV fuel basis)",
+        # N3: the electrical unit must be the stated value's own
+        "Grid electricity price EUR 200/MWh; diesel EUR 172.40 per MWh",
+        "EUR 172.40 per MWh; genset efficiency 38 % per MWh electrical",
+    ],
+)
+def test_the_electrical_unit_belongs_to_the_value_and_no_fuel_energy_is_priced(quote):
+    with pytest.raises(research.ResearchError) as exc:
+        research._check_electrical(quote, 172.4)
+    assert exc.value.kind == "research_unit_mismatch"
+
+
+@pytest.mark.parametrize(
+    "quote",
+    [
+        "Grid electricity price EUR 200/MWh; gas genset EUR 172.40 per MWh electrical",
+        "gas genset fuel cost 172,40 EUR/MWhe",
+        "EUR 172.40 per MWh of genset electrical output",
+        "EUR 172.40 per electrical MWh",
+    ],
+)
+def test_the_value_stated_per_mwh_electrical_passes(quote):
+    research._check_electrical(quote, 172.4)
+
+
+@pytest.mark.parametrize("value", [None, "172.4", True, float("nan")])
+def test_a_value_that_is_not_a_number_is_refused(value):
+    with pytest.raises(research.ResearchError) as exc:
+        research._check_electrical(QUOTE, value)
+    assert exc.value.kind == "research_unit_mismatch"
+
+
+def test_a_v4_report_is_byte_equal_to_masters():
+    """GK B (70) N4: the evidence of a @4 run, as master 941d516a1 built it."""
+    from services.reports import evidence
+
+    task = {
+        "run": {
+            "profile": "eh_site@4",
+            "mode": "stepwise",
+            "status": "done",
+            "stages": {"inputs": {"status": "passed"}},
+            "research": {
+                "steps": [
+                    {
+                        "stage": "inputs",
+                        "status": "not_granted",
+                        "gaps": ["import_tariff"],
+                    }
+                ],
+                "rows": [],
+            },
+        },
+        "steps": [],
+    }
+    ev = evidence.collect_evidence(
+        study_report=None,
+        eh_report=None,
+        worksheet=None,
+        harness_run={
+            "task": task,
+            "envelope": None,
+            "chapters": ["sizing", "mc", "investment_case"],
+            "coverage": [],
+        },
+    )
+    fixture = (
+        pathlib.Path(__file__).parent
+        / "fixtures"
+        / "sh34_eh_site_v4_evidence_master.json"
+    )
+    assert ev.model_dump_json() + "\n" == fixture.read_text()
