@@ -3,7 +3,7 @@
 
 # 06 Demand vs energization over time: one chart, Guided and Expert
 
-Status: needs-triage
+Status: in-progress
 Blocked by: none
 Source: DC template review 2026-11-24 (`../README.md`). Stage 4.
 Severity: major
