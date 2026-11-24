@@ -52,7 +52,7 @@ export default function SpecialistPacketTab() {
   return (
     <PageBody>
       {config.data && (
-        <PageSection panelSection="dispatch_source" title="Dispatch source">
+        <PageSection title="Dispatch source">
           <p className="text-[12px]" data-testid="packet-source">Dispatch from {describeSource(config.data)}.</p>
         </PageSection>
       )}

@@ -95,6 +95,10 @@ def mark_customised(n, component_class: str, name: str, fields: Iterable[str]) -
         entry = {k: v for k, v in entry.items() if k not in _DROPPED_ON_EDIT}
         asset[f] = {**entry, "status": "customised", "illustrative": False}
     _prune(n, component_class, name)
+    # A rating the person typed is stated, not the importer's assumption (psse-import 05).
+    from services import assumed_rating
+
+    assumed_rating.mark_entered(n, component_class, name, set(fields))
 
 
 def rename(n, component_class: str, old: str, new: str) -> None:

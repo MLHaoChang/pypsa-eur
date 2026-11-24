@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Results no longer read loading % on a rating the PSS/E or DGS importer assumed as a stated one: the loadflow summary, AC power-flow loading, per-asset results and the checked branch-loading chart label the row "rating assumed" and leave it out of the over-limit, at-limit and congested counts; entering a rating marks it as stated.

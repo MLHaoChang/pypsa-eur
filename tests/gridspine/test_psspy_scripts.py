@@ -873,7 +873,7 @@ DYR = os.path.join(HERE, 'pack.dyr')
 OUT = os.path.join(HERE, 'flat_skmin_xrmin.out')
 POC_BUS, POC_KV = 101, 132.0
 GRID_BUS, GRID_ID, GRID_MBASE = 900, 'G2', 250.0
-Z1_PU = (0.39999999999999997, 0.3)  # Thevenin Z1 on GRID_MBASE
+Z1_PU = (0.44000000000000006, 0.33)  # Thevenin Z1 on GRID_MBASE
 T_EVENT, T_END = 1.0, 10.0
 F0_HZ, PLANT_MBASE = 50.0, None
 HEADER = ['t_s', 'v_poc_pu', 'status']
@@ -904,7 +904,7 @@ if ierr or abs(mbase - GRID_MBASE) > 1e-6:
 M_BASE = None
 _i, _f = psspy.getdefaultint(), psspy.getdefaultreal()
 psspy.machine_chng_2(GRID_BUS, GRID_ID, [_i] * 6, [_f] * 7 + list(Z1_PU) + [_f] * 8)
-Z0_PU = (0.6, 0.44999999999999996)  # Thevenin Z0 on GRID_MBASE
+Z0_PU = (0.6600000000000001, 0.49500000000000005)  # Thevenin Z0 on GRID_MBASE
 psspy.seq_machine_data_3(GRID_BUS, GRID_ID, 0, list(Z1_PU) + list(Z1_PU) + list(Z0_PU) + [_f, _f])
 psspy.fnsl([0, 0, 0, 0, 0, 0, 0, 1])
 if psspy.solved() != 0:
@@ -931,6 +931,7 @@ with open(os.path.join(HERE, 'flat_skmin_xrmin.csv'), 'w') as fh:
 
 
 def test_golden_script_bytes(tmp_path):
+    # GC-14: the Sk-min corner carries c_max = 1.1, so Z1 and Z0 are 1.1 x the c-less (0.4, 0.3), (0.6, 0.45)
     cases = build_battery(500.0, 500.0, 0.75, 0.75, z0_over_z1=1.5, x0_over_r0=0.75)
     flat = next(c for c in cases if c.case_id == CID)
     kw = {
@@ -944,3 +945,74 @@ def test_golden_script_bytes(tmp_path):
         [dataclasses.replace(flat, channels=("v_poc_pu",))], str(tmp_path), **kw
     )
     assert (tmp_path / out[CID]).read_bytes() == GOLDEN_SCRIPT.encode("utf-8")
+
+
+def test_c_scales_script_z_by_1_1_on_sk_min_rows_only(tmp_path):
+    # GC-14: per corner, Z1_PU and Z0_PU against the same corner written without c.
+    cases = build_battery(500.0, 1000.0, 0.75, 2.0, z0_over_z1=1.5, x0_over_r0=0.75)
+    flats = [
+        dataclasses.replace(c, channels=("v_poc_pu",))
+        for c in cases
+        if c.kind == "flat"
+    ]
+    kw = {
+        **KW,
+        "grid_machine": (900, "G2"),
+        "plant_branch": None,
+        "plant_machine": None,
+        "plant_mbase_mva": None,
+    }
+
+    def z(batch, sub):
+        out = write_scripts(batch, str(tmp_path / sub), **kw)
+        got = {}
+        for c in batch:
+            text = (tmp_path / sub / out[c.case_id]).read_text()
+            got[c.grid.label] = [
+                complex(*ast.literal_eval(ln.split("=", 1)[1].split("#")[0]))
+                for ln in text.splitlines()
+                if ln.startswith(("Z1_PU =", "Z0_PU ="))
+            ]
+        return got
+
+    with_c = z(flats, "c")
+    no_c = z(
+        [
+            dataclasses.replace(c, grid=dataclasses.replace(c.grid, c_kind=None))
+            for c in flats
+        ],
+        "none",
+    )
+    assert set(with_c) == {"skmin_xrmin", "skmin_xrmax", "skmax_xrmin", "skmax_xrmax"}
+    for label, zs in with_c.items():
+        factor = 1.1 if label.startswith("skmin") else 1.0
+        assert len(zs) == 2, label
+        for a, b in zip(zs, no_c[label]):
+            assert a == pytest.approx(factor * b, rel=1e-12), label
+
+
+def test_lv_poc_scripts_take_c_min_095_on_sk_max_rows(tmp_path):
+    # GC-14 F2: PoC 0.4 kV, Sk 10 / 20 MVA, grid MBASE 250 MVA; Z_pu = Z_ohm * 250 / 0.4^2.
+    # Sk-max: |Z1| = 0.95 * 0.16 / 20 = 0.0076 ohm = 11.875 pu;
+    # Sk-min: |Z1| = 1.1 * 0.16 / 10 = 0.0176 ohm = 27.5 pu.
+    cases = build_battery(10.0, 20.0, 0.75, 2.0, z0_over_z1=1.5, x0_over_r0=0.75)
+    flats = [
+        dataclasses.replace(c, channels=("v_poc_pu",))
+        for c in cases
+        if c.kind == "flat"
+    ]
+    kw = {
+        **KW,
+        "poc_kv": 0.4,
+        "grid_machine": (900, "G2"),
+        "plant_branch": None,
+        "plant_machine": None,
+        "plant_mbase_mva": None,
+    }
+    out = write_scripts(flats, str(tmp_path), **kw)
+    for c in flats:
+        text = (tmp_path / out[c.case_id]).read_text()
+        (line,) = [ln for ln in text.splitlines() if ln.startswith("Z1_PU =")]
+        z1 = complex(*ast.literal_eval(line.split("=", 1)[1].split("#")[0]))
+        want = 11.875 if c.grid.label.startswith("skmax") else 27.5
+        assert abs(z1) == pytest.approx(want, rel=1e-12), c.case_id
