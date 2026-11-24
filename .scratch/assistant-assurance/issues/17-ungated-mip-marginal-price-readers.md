@@ -95,6 +95,8 @@ Conditions:
 2. The year-0 0.0 rests on "no operation that year". Year 0 is the build year for every case (`engine_adapter`: no bill and no saving counted), and a test pins that.
 3. On a MIP, only the reading notes that rest on the LP's duals are dropped (the zero-profit note). A price-independent note survives, and a test pins it.
 
+- **S7 (2b, GK 2026-11-24).** `harness/price_calculations.py:59-60` (the checked bus-price answers) still classifies with today's solver_config. It moves to `solved_price_limit(ctx.solver_state, n)`, with a test of a MIP solve followed by a config edit to linearised UC and no re-solve.
+
 UX 28 placement GO: one cell wording ("Not available (integer solve)", from sectionWords `short`, pinned by a parity test). A total that skips a withheld part says so beside the figure. Expert shows no less than Guided. No toast. Before/after shots in Guided and Expert, light and dark, on each PR.
 
 Follow-up: `27-study-report-lp-flags-untested.md`. These are the LP-path flags in the study report that survived slice 1's mutant run; GK ruled they don't block #1957.
