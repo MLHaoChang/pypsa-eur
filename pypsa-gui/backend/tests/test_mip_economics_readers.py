@@ -34,15 +34,49 @@ def _solved(committable: bool) -> pypsa.Network:
     n.add("Bus", "h2", carrier="H2")
     n.add("Load", "d", bus="el", p_set=[2.0, 12.0, 3.0, 12.0])
     n.add("Load", "h2_demand", bus="h2", p_set=1.0)
-    n.add("Generator", "cheap", bus="el", carrier="wind", p_nom=8, marginal_cost=5,
-          committable=committable, p_min_pu=0.1 if committable else 0.0)
-    n.add("Generator", "peak", bus="el", carrier="gas", p_nom_extendable=True, p_nom_max=20,
-          capital_cost=1.0, marginal_cost=60)
-    n.add("StorageUnit", "battery", bus="el", carrier="battery", p_nom_extendable=True,
-          p_nom_max=4, max_hours=2,
-          capital_cost=10.0, efficiency_store=0.95, efficiency_dispatch=0.95)
-    n.add("Link", "electrolysis", bus0="el", bus1="h2", carrier="H2 electrolysis",
-          p_nom_extendable=True, p_nom_max=5, efficiency=0.7, capital_cost=100.0)
+    n.add(
+        "Generator",
+        "cheap",
+        bus="el",
+        carrier="wind",
+        p_nom=8,
+        marginal_cost=5,
+        committable=committable,
+        p_min_pu=0.1 if committable else 0.0,
+    )
+    n.add(
+        "Generator",
+        "peak",
+        bus="el",
+        carrier="gas",
+        p_nom_extendable=True,
+        p_nom_max=20,
+        capital_cost=1.0,
+        marginal_cost=60,
+    )
+    n.add(
+        "StorageUnit",
+        "battery",
+        bus="el",
+        carrier="battery",
+        p_nom_extendable=True,
+        p_nom_max=4,
+        max_hours=2,
+        capital_cost=10.0,
+        efficiency_store=0.95,
+        efficiency_dispatch=0.95,
+    )
+    n.add(
+        "Link",
+        "electrolysis",
+        bus0="el",
+        bus1="h2",
+        carrier="H2 electrolysis",
+        p_nom_extendable=True,
+        p_nom_max=5,
+        efficiency=0.7,
+        capital_cost=100.0,
+    )
     status, _ = n.optimize(solver_name="highs")
     assert status == "ok"
     return n
@@ -69,11 +103,13 @@ def lp():
 def _economics(n, price_limit=None):
     from services.compare.economics import _compute_economics_summary
 
-    return _compute_economics_summary(n, [], False, True, prices_from_state=False,
-                                      cfg=CFG, price_limit=price_limit)
+    return _compute_economics_summary(
+        n, [], False, True, prices_from_state=False, cfg=CFG, price_limit=price_limit
+    )
 
 
 # ── Compare / Results economics (by carrier) ─────────────────────────────
+
 
 def test_compare_economics_of_a_mip_withholds_every_figure_priced_at_its_duals(mip):
     econ = _economics(mip, mip_price_limit(mip, CFG))
@@ -104,7 +140,9 @@ def test_compare_economics_of_an_lp_keeps_its_figures_and_its_json(lp):
 
 
 @pytest.mark.parametrize("which", ["mip", "lp"])
-def test_compare_judges_a_saved_project_s_economics_by_its_own_solve(tmp_path, which, request):
+def test_compare_judges_a_saved_project_s_economics_by_its_own_solve(
+    tmp_path, which, request
+):
     """S3: the Compare summary's economics take the project's own limit, the one its prices take."""
     from types import SimpleNamespace
 
@@ -126,8 +164,9 @@ def test_compare_judges_a_saved_project_s_economics_by_its_own_solve(tmp_path, w
 def test_economics_by_carrier_names_the_reason_only_on_a_mip(mip, lp):
     from services.results.economics_by_carrier import compute_economics_by_carrier
 
-    out = compute_economics_by_carrier(mip, CFG, None, result_df=_rdf,
-                                       price_limit=DUALS_NOT_MARGINAL)
+    out = compute_economics_by_carrier(
+        mip, CFG, None, result_df=_rdf, price_limit=DUALS_NOT_MARGINAL
+    )
     assert out["unavailable_reason"] == DUALS_NOT_MARGINAL
     assert all(row["revenue_meur"] is None for row in out["by_carrier"].values())
     assert out["by_carrier"]["battery"]["opex_meur"] is None
@@ -142,8 +181,9 @@ def test_a_workbook_opex_total_over_a_withheld_carrier_is_not_a_partial_sum(mip,
     from services.results_workbook.overview import _econ_sum
     from services.results.economics_by_carrier import compute_economics_by_carrier
 
-    by_mip = compute_economics_by_carrier(mip, CFG, None, result_df=_rdf,
-                                          price_limit=DUALS_NOT_MARGINAL)["by_carrier"]
+    by_mip = compute_economics_by_carrier(
+        mip, CFG, None, result_df=_rdf, price_limit=DUALS_NOT_MARGINAL
+    )["by_carrier"]
     assert _econ_sum(by_mip, "opex_meur", []) == (None, {})
     assert _econ_sum(by_mip, "revenue_meur", []) == (None, {})
     assert _econ_sum(by_mip, "capex_meur", [])[0] is not None
@@ -152,6 +192,7 @@ def test_a_workbook_opex_total_over_a_withheld_carrier_is_not_a_partial_sum(mip,
 
 
 # ── asset economics (per asset) ──────────────────────────────────────────
+
 
 def _assets(n, price_limit=None):
     from services.results.asset_economics import compute_asset_economics
@@ -169,8 +210,11 @@ def test_asset_economics_of_a_mip_withholds_its_priced_keys(mip):
     ae = _assets(mip, DUALS_NOT_MARGINAL)
     assert ae["price_limit"] == DUALS_NOT_MARGINAL
     assert ae["reading_notes"] == []
-    for cls, name in (("generators", "peak"),
-                      ("storage_units", "battery"), ("links", "electrolysis")):
+    for cls, name in (
+        ("generators", "peak"),
+        ("storage_units", "battery"),
+        ("links", "electrolysis"),
+    ):
         rows = [r for r in ae[cls] if r["name"] == name]
         for row in rows:
             for entry in [row, *(row.get("by_period") or [])]:
@@ -201,6 +245,7 @@ def test_asset_economics_of_an_lp_is_unchanged(lp):
 
 # ── carrier KPIs ─────────────────────────────────────────────────────────
 
+
 def test_carrier_kpis_of_a_mip_withhold_revenue_and_market_value(mip, lp):
     from services.results.carrier_kpis import compute_carrier_kpis
 
@@ -217,14 +262,19 @@ def test_carrier_kpis_of_a_mip_withhold_revenue_and_market_value(mip, lp):
 
 # ── the live routes read the solve's own record (S3) ─────────────────────
 
+
 def test_the_live_routes_gate_by_the_solve_s_record(mip, lp, monkeypatch):
     import routers.results as results
     from services.pypsa_service import PyPSAService
 
     monkeypatch.setattr(results, "_dispatch_ready", lambda n: True)
-    for n, record, expect in ((mip, {"price_limit": DUALS_NOT_MARGINAL}, DUALS_NOT_MARGINAL),
-                              (lp, {}, None)):
-        monkeypatch.setattr(PyPSAService, "get_network", classmethod(lambda cls, n=n: n))
+    for n, record, expect in (
+        (mip, {"price_limit": DUALS_NOT_MARGINAL}, DUALS_NOT_MARGINAL),
+        (lp, {}, None),
+    ):
+        monkeypatch.setattr(
+            PyPSAService, "get_network", classmethod(lambda cls, n=n: n)
+        )
         monkeypatch.setitem(results._state, "last_solve_settings", record)
         monkeypatch.setitem(results._state, "solver_config", CFG)
         ebc = results.get_economics_by_carrier()
@@ -239,13 +289,20 @@ def test_a_price_independent_reading_note_survives_on_a_mip(mip, monkeypatch):
     """GK: only the notes that rest on the LP's duals go; any other note stands."""
     from services.results import economics_caveats
 
-    monkeypatch.setattr(economics_caveats, "interior_optimum_notes",
-                        lambda n, names: [economics_caveats.ZERO_PROFIT_BY_CONSTRUCTION, "other"])
+    monkeypatch.setattr(
+        economics_caveats,
+        "interior_optimum_notes",
+        lambda n, names: [economics_caveats.ZERO_PROFIT_BY_CONSTRUCTION, "other"],
+    )
     assert _assets(mip, DUALS_NOT_MARGINAL)["reading_notes"] == ["other"]
-    assert _assets(mip)["reading_notes"] == [economics_caveats.ZERO_PROFIT_BY_CONSTRUCTION, "other"]
+    assert _assets(mip)["reading_notes"] == [
+        economics_caveats.ZERO_PROFIT_BY_CONSTRUCTION,
+        "other",
+    ]
 
 
 # ── the study case: market revenue at duals (GK ruling c) ────────────────
+
 
 def test_the_study_case_withholds_market_revenue_on_a_mip_record():
     """The run record's `price_limit` makes the case's market revenue None with the reason,
@@ -254,11 +311,18 @@ def test_the_study_case_withholds_market_revenue_on_a_mip_record():
     from tests.test_engine_adapter_case_golden import OPTIONS, _bundle
 
     option = OPTIONS[0]
-    record = {"generators": [], "storage_units": [], "stores": [], "links": [],
-              "price_limit": DUALS_NOT_MARGINAL}
+    record = {
+        "generators": [],
+        "storage_units": [],
+        "stores": [],
+        "links": [],
+        "price_limit": DUALS_NOT_MARGINAL,
+    }
     view = _bundle(option, asset_economics=record).view
     mr = view.market_revenue_at_duals
-    assert mr.annual_value is None and mr.unavailable == {"annual_value": DUALS_NOT_MARGINAL}
+    assert mr.annual_value is None and mr.unavailable == {
+        "annual_value": DUALS_NOT_MARGINAL
+    }
     y0, *rest = view.years
     assert y0.bill_option is None and y0.unavailable.get("bill_option") == "build_year"
     assert y0.savings == 0.0 and y0.market_revenue_at_duals == 0.0
