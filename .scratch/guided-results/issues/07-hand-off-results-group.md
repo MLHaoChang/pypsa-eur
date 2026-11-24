@@ -3,7 +3,7 @@
 
 # 07 Results › Hand-off is an empty group: move Reports, Exports and the Specialist packet into it (R6)
 
-Status: ready-for-agent
+Status: done
 Blocked by: none (R0/R1 are on master: `pages/results/groups.ts` `CARD_GROUPS`)
 Design: `.scratch/project-workflow/card-workspaces.md` §3.6 and §8 row R6. Owner decisions: RES-CARDS, CARD-WS, HOLISTIC-1.
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), design map.
@@ -38,3 +38,5 @@ The results journey ends at a card that says "What leaves the tool" and offers n
 `pypsa-gui/frontend/src/pages/results/groups.ts`, `pypsa-gui/frontend/src/pages/Results.tsx`, `pypsa-gui/frontend/src/pages/ReportsPanel.tsx`, `pypsa-gui/frontend/src/pages/ImportExport.tsx` (the chooser part), `pypsa-gui/frontend/src/layout/Sidebar.tsx` (entry points), `pypsa-gui/frontend/src/pages/GridspinePanel.tsx` (bundle list, reused).
 
 ## Comments
+
+- 2026-11-24: built in 0cfee78d (Hand-off tabs, `ExportsTab`, `SpecialistPacketTab`, sidebar and `Export…` retargeted, groups vitest). Status set to done here. The real-app end-to-end walk-through was not re-run in this session.
