@@ -189,3 +189,44 @@ def test_checked_bus_prices_still_refuse_a_stochastic_run(monkeypatch):
         solver_state={"solver_config": {"process_uc": "linearised"}},
     )
     assert price_calculations.source(ctx, "a")["solve_limit"] == sv.STOCHASTIC
+
+
+# ── the asset-results registry: every price-derived metric (REQ_DUALS) ────
+
+
+@pytest.mark.parametrize(
+    "which, record, withheld",
+    [
+        ("mip", {"price_limit": DUALS_NOT_MARGINAL}, True),
+        ("lp", {"price_limit": DUALS_NOT_MARGINAL}, True),  # the record wins
+        ("mip", {}, True),
+        ("lp", {}, False),
+    ],
+)
+def test_asset_results_block_every_price_metric_on_a_mip(
+    which, record, withheld, request, monkeypatch
+):
+    """`price_at_bus` feeds revenue, capture price, spreads, congestion rent and
+    charge cost; all of them require REQ_DUALS, which a MIP's solve leaves unmet
+    with the one sentence and no re-run remedy (a re-run would not help)."""
+    import routers.results as results
+    from harness.solve_validity import MIP_PRICES_TEXT
+    from services.asset_results import compute as C
+    from services.asset_results import registry as reg
+    from services.asset_results.applicability import resolve_metric
+
+    n = request.getfixturevalue(which)
+    monkeypatch.setitem(results._state, "last_solve_settings", record)
+    monkeypatch.setitem(results._state, "solver_config", CFG)
+    st = C.preconditions(n, "Generator", "cheap")[reg.REQ_DUALS]
+    if withheld:
+        assert st.status == "blocked" and st.reason == MIP_PRICES_TEXT
+        assert st.remedy is None
+    else:
+        assert st.status == "ok"
+    pre = {
+        req: C.preconditions(n, "Generator", "cheap")[req] for req in [reg.REQ_DUALS]
+    }
+    for mid in ("revenue_eur", "capture_price", "bus_marginal_price"):
+        got = resolve_metric(reg.metric_for("Generator", mid), "Generator", pre)
+        assert (got.status == "blocked") is withheld, mid

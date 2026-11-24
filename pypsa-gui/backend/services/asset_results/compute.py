@@ -141,7 +141,10 @@ def preconditions(n, component_class: str, name: str) -> dict[str, Status]:
     )
 
     # 3. LP duals for this component class + nodal prices.
-    out[REQ_DUALS] = _duals_status(n, component_class)
+    from harness.solve_validity import solved_price_limit
+
+    out[REQ_DUALS] = _duals_status(n, component_class,
+                                   solved_price_limit(_state_snapshot(), n))
 
     # 4. Unit commitment on THIS asset.
     out[REQ_COMMITTABLE] = _committable_status(n, component_class, name)
@@ -172,9 +175,15 @@ def _port_status(n, component_class: str, name: str, port: int) -> Status:
     return Status("na", f"this link has no {col}")
 
 
-def _duals_status(n, component_class: str) -> Status:
+def _duals_status(n, component_class: str, price_limit: str | None = None) -> Status:
     from .applicability import OK, Remedy, Status
 
+    if price_limit:
+        # assistant-assurance 17: the solve that wrote the prices (a MIP) has no
+        # duals; its 0.0 prices are not marginal prices. A re-run would not help.
+        from harness.solve_validity import MIP_PRICES_TEXT
+
+        return Status("blocked", MIP_PRICES_TEXT)
     prices = getattr(n.buses_t, "marginal_price", None)
     if prices is not None and not prices.empty:
         return OK
