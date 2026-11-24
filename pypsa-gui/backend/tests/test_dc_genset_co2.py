@@ -185,3 +185,114 @@ def test_the_pinned_digests_move_only_by_the_gas_efficiency(monkeypatch):
         "4ae621820bfa2bbdf0295d5fe6d9557ed89025a5197cd4826898bf550e13a0bd",
         "9766df8fdb39a263d938f2b2ded7d83f52be73968322a43128d6389b0715141b",
     )
+
+
+def _staged_with_override(values_by_period=None):
+    n = T.build_eh_datacenter_staged()
+    _dispatch(n, grid_supply=1.0)
+    ovr = n.generators_t["eh_co2_t_per_mwh"]
+    for period, v in (values_by_period or {}).items():
+        ovr.loc[ovr.index.get_level_values(0) == period, "grid_supply"] = v
+    return n, ovr
+
+
+def _expected_t(n, ovr, periods=None):
+    w = _build_snapshot_weights(n, "generators")
+    col = ovr["grid_supply"].fillna(0.35)
+    if periods is not None:
+        keep = ovr.index.get_level_values(0).isin(periods)
+        return float((w[keep] * col[keep]).sum())
+    return float((w * col).sum())
+
+
+def test_the_single_year_template_has_no_override_and_both_views_agree():
+    n = T.build_eh_datacenter()
+    assert "eh_co2_t_per_mwh" not in n.generators_t
+    _dispatch(n, grid_supply=1.0, genset_1=2.0)
+    cmp_, res = _both_flat(n)
+    w = float(_build_snapshot_weights(n, "generators").iloc[0])
+    n_snaps = len(n.snapshots)
+    expect = n_snaps * w * (1.0 * 0.35 + 2.0 * GAS_T_PER_MWH_FUEL / PACK_EFFICIENCY)
+    assert res["total_tCO2"] == pytest.approx(expect)
+    assert cmp_.total_kt.total * 1000.0 == pytest.approx(expect)
+
+
+def _both_flat(n):
+    from services.results.emissions import compute_emissions
+
+    cmp_ = _compute_emissions_summary(n, [], False, True)
+    res = compute_emissions(
+        n,
+        "lopf",
+        result_df=lambda n_, comp, attr, src: getattr(getattr(n_, comp), attr),
+    )
+    return cmp_, res
+
+
+def test_an_overridden_generator_on_a_zero_intensity_carrier_is_still_counted():
+    n, ovr = _staged_with_override()
+    n.carriers.loc["grid", "co2_emissions"] = 0.0
+    n.carriers.loc["solar", "co2_emissions"] = 0.0
+    cmp_, res = _both(n)
+    expect = _expected_t(n, ovr)
+    assert cmp_.by_carrier_kt["grid"].total * 1000.0 == pytest.approx(expect)
+    by_carrier = {r["carrier"]: r["tCO2"] for r in res["by_carrier"]}
+    assert by_carrier["grid"] == pytest.approx(expect)
+    assert "solar" not in by_carrier  # zero intensity and no override: not listed
+
+
+def test_an_all_zero_override_lists_no_carrier():
+    n, _ = _staged_with_override({2027: 0.0, 2030: 0.0, 2035: 0.0})
+    cmp_, res = _both(n)
+    assert "grid" not in cmp_.by_carrier_kt
+    assert res["total_tCO2"] == 0.0
+
+
+def test_the_override_is_weighted_by_snapshot_weight_in_both_views():
+    n, ovr = _staged_with_override()
+    first = n.snapshots.get_level_values(0)[0]
+    idx = ovr.index[ovr.index.get_level_values(0) == first]
+    ovr.loc[idx[: len(idx) // 2], "grid_supply"] = 0.10  # not constant
+    for col in ("generators", "objective"):  # not uniform either
+        n.snapshot_weightings.loc[idx[: len(idx) // 3], col] *= 3.0
+    cmp_, res = _both(n)
+    expect = _expected_t(n, ovr)
+    assert cmp_.total_kt.total * 1000.0 == pytest.approx(expect, rel=1e-9)
+    assert res["total_tCO2"] == pytest.approx(expect, rel=1e-9)
+
+
+def test_a_period_of_zero_weight_adds_nothing_and_stays_finite():
+    n, ovr = _staged_with_override()
+    first = n.snapshots.get_level_values(0)[0]
+    zero = n.snapshots.get_level_values(0) == first
+    for col in ("generators", "objective"):
+        n.snapshot_weightings.loc[zero, col] = 0.0
+    cmp_, res = _both(n)
+    expect = _expected_t(
+        n, ovr, periods=[p for p in set(n.snapshots.get_level_values(0)) if p != first]
+    )
+    assert res["total_tCO2"] == pytest.approx(expect, rel=1e-9)
+    assert cmp_.total_kt.total * 1000.0 == pytest.approx(expect, rel=1e-9)
+
+
+def test_the_per_period_rows_carry_energy_times_the_periods_intensity():
+    n, ovr = _staged_with_override()
+    _, res = _both(n)
+    for row in res["by_period"]:
+        assert row["total_tCO2"] == pytest.approx(
+            _expected_t(n, ovr, periods=[row["period"]]), rel=1e-9
+        )
+    assert len(res["by_period"]) == 3
+
+
+def test_a_pack_row_with_no_value_falls_to_the_default(monkeypatch):
+    from services.adequacy.dc_backup import EFFICIENCY_KEY
+    from services.library.defaults_pack import loader
+
+    blank = SimpleNamespace(key=EFFICIENCY_KEY, value=None)
+    monkeypatch.setattr(
+        loader,
+        "load_defaults_pack",
+        lambda *a, **k: SimpleNamespace(cost_values=[blank]),
+    )
+    assert T._genset_efficiency(None) == pytest.approx(1 / 2.8)
