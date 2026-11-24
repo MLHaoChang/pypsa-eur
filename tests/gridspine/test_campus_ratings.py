@@ -156,7 +156,9 @@ def test_peak_governs():
 
 
 def test_peak_boundary_at_60_hz_and_50_hz():
-    a = SwitchgearAssumptions(tk_s=3.0, tkr_s=3.0)  # gear rated for 3 s: Ith 24.37 kA stays under 25
+    a = SwitchgearAssumptions(
+        tk_s=3.0, tkr_s=3.0
+    )  # gear rated for 3 s: Ith 24.37 kA stays under 25
     assert (
         _one(
             [("B1", 33.0, 24.0, 65.0, math.nan, 1)], f_hz=60, margin=0.0, a=a
@@ -212,7 +214,10 @@ def test_beyond_ladder_names_the_peak_when_the_peak_fails():
     # Ik'' 37, ip 101: Ith 39.47 kA fits 40, the peak 101 > 2.5 x 40 does not
     r = _one([("B1", 33.0, 37.0, 101.0, math.nan, 1)], margin=0.0)
     assert r.flag == "beyond_ladder"
-    assert r.governing == "ip 101.00 kA with the 0% margin, above the largest rated peak 100 kA at 33 kV"
+    assert (
+        r.governing
+        == "ip 101.00 kA with the 0% margin, above the largest rated peak 100 kA at 33 kV"
+    )
 
 
 def test_beyond_ladder_never_prints_a_need_equal_to_the_limit():
@@ -490,7 +495,9 @@ def test_rate_campus_names_the_n_minus_1_case_and_writes_its_tables(tmp_path):
     )
     assert cb.design_i_ka == pytest.approx(0.31)
     assert cb.design_case == "N-1:TR1, period 2030 hour 7"
-    assert cb.ith_ka == pytest.approx(21.363422451751465)  # Ith over 1 s at the larger end, worst period
+    assert cb.ith_ka == pytest.approx(
+        21.363422451751465
+    )  # Ith over 1 s at the larger end, worst period
     assert cb.chosen_id.startswith("CB_20_")
     assert cb.chosen_i_ka * 0.8 >= 0.31 * 1.2
     assert cb.section_mm2 >= 21.363422451751465e3 / 94
@@ -557,10 +564,19 @@ def test_rate_campus_the_larger_end_governs_when_it_is_the_to_bus(tmp_path):
     run = _run(tmp_path)
     cb = rate_campus(run)["cables"].iloc[0]
     assert (cb.from_bus, cb.to_bus) == ("MV1", "MV2")
-    _rewrite_sc(run, ("MV1", 20.0, 9.0, 20.0, math.nan, 2030), ("MV2", 20.0, 21.0, 52.0, math.nan, 2040),
-                ("MV2", 20.0, 18.0, 45.0, math.nan, 2030), ("PCC", 110.0, 15.0, 37.0, math.nan, 2030))
+    _rewrite_sc(
+        run,
+        ("MV1", 20.0, 9.0, 20.0, math.nan, 2030),
+        ("MV2", 20.0, 21.0, 52.0, math.nan, 2040),
+        ("MV2", 20.0, 18.0, 45.0, math.nan, 2030),
+        ("PCC", 110.0, 15.0, 37.0, math.nan, 2030),
+    )
     cb = rate_campus(run)["cables"].iloc[0]
-    assert cb.ith_ka == pytest.approx(thermal_current(21.0, 52.0, 50, 1.0)) == pytest.approx(21.363422451751465)
+    assert (
+        cb.ith_ka
+        == pytest.approx(thermal_current(21.0, 52.0, 50, 1.0))
+        == pytest.approx(21.363422451751465)
+    )
     assert cb.withstand_evaluated
 
 
@@ -569,14 +585,19 @@ def test_rate_campus_an_unknown_end_leaves_the_withstand_not_evaluated(tmp_path,
     from gridspine.drivers.campus_study import rate_campus
 
     run = _run(tmp_path)
-    rows = [("MV1", 20.0, 21.0, 52.0, math.nan, 2040), ("PCC", 110.0, 15.0, 37.0, math.nan, 2030)]
+    rows = [
+        ("MV1", 20.0, 21.0, 52.0, math.nan, 2040),
+        ("PCC", 110.0, 15.0, 37.0, math.nan, 2030),
+    ]
     if mv2 is not None:
         rows.append(("MV2", 20.0, *mv2, math.nan, 2040))
     _rewrite_sc(run, *rows)
     cb = rate_campus(run)["cables"].iloc[0]
     assert math.isnan(cb.ith_ka) and math.isnan(cb.s_min_mm2)
     assert not cb.withstand_evaluated and cb.flag == "withstand_not_evaluated"
-    assert cb.chosen_id is not None  # chosen on ampacity and voltage drop, the withstand shown as unknown
+    assert (
+        cb.chosen_id is not None
+    )  # chosen on ampacity and voltage drop, the withstand shown as unknown
 
 
 def test_rate_campus_a_declared_cable_equal_to_the_chosen_one_is_not_flagged(tmp_path):
@@ -584,7 +605,9 @@ def test_rate_campus_a_declared_cable_equal_to_the_chosen_one_is_not_flagged(tmp
 
     first = rate_campus(_run(tmp_path / "a"))["cables"].iloc[0]
     assert first.declared_runs == 1
-    cb = rate_campus(_run(tmp_path / "b", declared_i_ka=float(first.chosen_i_ka)))["cables"].iloc[0]
+    cb = rate_campus(_run(tmp_path / "b", declared_i_ka=float(first.chosen_i_ka)))[
+        "cables"
+    ].iloc[0]
     assert cb.declared_i_ka == cb.chosen_i_ka and pd.isna(cb.flag)
 
 
@@ -668,22 +691,41 @@ def test_the_ith_margin_boundary_is_exact():
     r = _one([("B1", 33.0, 10.0, 10.0 * NO_DC, math.nan, 1)], margin=0.25, a=a)
     assert r.chosen_ka == 25.0 and r.ith_tkr_ka == 20.0
     assert r.governing == "Ith over 4 s referred to 1 s 20.00 kA, period 1"
-    assert _one([("B1", 33.0, 10.0001, 10.0001 * NO_DC, math.nan, 1)], margin=0.25, a=a).chosen_ka == 31.5
+    assert (
+        _one(
+            [("B1", 33.0, 10.0001, 10.0001 * NO_DC, math.nan, 1)], margin=0.25, a=a
+        ).chosen_ka
+        == 31.5
+    )
 
 
 def test_a_fault_longer_than_the_rated_duration_needs_more():
     # IEC 62271-1: Ith sqrt(Tk) <= Ithr sqrt(Tkr). Ik'' 15 with no DC over 3 s on 1 s gear: 15 sqrt(3) = 25.98 kA
-    longer = _one([("B1", 33.0, 15.0, 15.0 * NO_DC, math.nan, 1)], margin=0.0, a=SwitchgearAssumptions(tk_s=3.0))
-    assert longer.ith_ka == 15.0 and longer.ith_tkr_ka == pytest.approx(25.980762113533157)
+    longer = _one(
+        [("B1", 33.0, 15.0, 15.0 * NO_DC, math.nan, 1)],
+        margin=0.0,
+        a=SwitchgearAssumptions(tk_s=3.0),
+    )
+    assert longer.ith_ka == 15.0 and longer.ith_tkr_ka == pytest.approx(
+        25.980762113533157
+    )
     assert longer.chosen_ka == 31.5
-    rated = _one([("B1", 33.0, 15.0, 15.0 * NO_DC, math.nan, 1)], margin=0.0,
-                 a=SwitchgearAssumptions(tk_s=3.0, tkr_s=3.0))
+    rated = _one(
+        [("B1", 33.0, 15.0, 15.0 * NO_DC, math.nan, 1)],
+        margin=0.0,
+        a=SwitchgearAssumptions(tk_s=3.0, tkr_s=3.0),
+    )
     assert rated.chosen_ka == 25.0
 
 
 def test_a_three_second_fault_on_one_second_gear_is_beyond_the_ladder():
     # the probe: Ith(3 s) 24.37 kA, I2t 1782 kA2s; referred to 1 s that is 42.21 kA > 40
-    r = _one([("B1", 33.0, 24.0, 65.0, math.nan, 1)], f_hz=60, margin=0.0, a=SwitchgearAssumptions(tk_s=3.0))
+    r = _one(
+        [("B1", 33.0, 24.0, 65.0, math.nan, 1)],
+        f_hz=60,
+        margin=0.0,
+        a=SwitchgearAssumptions(tk_s=3.0),
+    )
     assert r.chosen_id is None and r.flag == "beyond_ladder"
     assert r.governing == (
         "Ith over 3 s referred to 1 s 42.21 kA with the 0% margin, above the largest rated short-time current 40 kA at 33 kV"
@@ -691,31 +733,53 @@ def test_a_three_second_fault_on_one_second_gear_is_beyond_the_ladder():
 
 
 def test_a_shorter_fault_is_not_credited_below_the_rated_current():
-    r = _one([("B1", 33.0, 24.0, 24.0 * NO_DC, math.nan, 1)], margin=0.0,
-             a=SwitchgearAssumptions(tk_s=0.2))
+    r = _one(
+        [("B1", 33.0, 24.0, 24.0 * NO_DC, math.nan, 1)],
+        margin=0.0,
+        a=SwitchgearAssumptions(tk_s=0.2),
+    )
     assert r.ith_tkr_ka == r.ith_ka == 24.0 and r.chosen_ka == 25.0
 
 
-NAN_FIRST = [("B1", 33.0, math.nan, 10.0, math.nan, 1), ("B1", 33.0, 35.0, 49.0, math.nan, 2)]
+NAN_FIRST = [
+    ("B1", 33.0, math.nan, 10.0, math.nan, 1),
+    ("B1", 33.0, 35.0, 49.0, math.nan, 2),
+]
 
 
 @pytest.mark.parametrize("rows", [NAN_FIRST, NAN_FIRST[::-1]])
 def test_a_nan_period_is_skipped_in_either_row_order(rows):
     r = _one(rows, margin=0.1)  # 35 x 1.1 = 38.5 -> 40
-    assert r.chosen_ka == 40.0 and r.ikss_ka == 35.0 and r.governing == "Ik'' 35.00 kA, period 2"
+    assert (
+        r.chosen_ka == 40.0
+        and r.ikss_ka == 35.0
+        and r.governing == "Ik'' 35.00 kA, period 2"
+    )
     assert pd.isna(r.flag)
 
 
 def test_a_bus_with_no_finite_fault_level_is_not_evaluated():
-    r = _one([("B1", 33.0, math.nan, 10.0, 25.0, 1), ("B1", 33.0, 12.0, math.nan, 25.0, 2)])
+    r = _one(
+        [("B1", 33.0, math.nan, 10.0, 25.0, 1), ("B1", 33.0, 12.0, math.nan, 25.0, 2)]
+    )
     assert r.chosen_id is None and math.isnan(r.chosen_ka) and math.isnan(r.utilisation)
-    assert r.flag == "not_evaluated" and r.governing == "no fault level was computed at this bus"
+    assert (
+        r.flag == "not_evaluated"
+        and r.governing == "no fault level was computed at this bus"
+    )
 
 
 @pytest.mark.parametrize(
     "kw",
-    [dict(mu=math.nan), dict(n=math.nan), dict(tk_s=0.0), dict(tk_s=-1.0), dict(tk_s=math.inf),
-     dict(tkr_s=0.0), dict(tkr_s=math.nan)],
+    [
+        dict(mu=math.nan),
+        dict(n=math.nan),
+        dict(tk_s=0.0),
+        dict(tk_s=-1.0),
+        dict(tk_s=math.inf),
+        dict(tkr_s=0.0),
+        dict(tkr_s=math.nan),
+    ],
 )
 def test_switchgear_assumptions_are_validated(kw):
     with pytest.raises(ValueError, match=next(iter(kw))):
@@ -724,8 +788,16 @@ def test_switchgear_assumptions_are_validated(kw):
 
 @pytest.mark.parametrize(
     "kw",
-    [dict(derating=0.0), dict(derating=math.nan), dict(vd_limit_pct=0.0), dict(pf=1.5), dict(pf=math.nan),
-     dict(t_clear_s=-0.1), dict(t_clear_s=math.inf), dict(conductor="Fe")],
+    [
+        dict(derating=0.0),
+        dict(derating=math.nan),
+        dict(vd_limit_pct=0.0),
+        dict(pf=1.5),
+        dict(pf=math.nan),
+        dict(t_clear_s=-0.1),
+        dict(t_clear_s=math.inf),
+        dict(conductor="Fe"),
+    ],
 )
 def test_cable_assumptions_are_validated(kw):
     with pytest.raises(ValueError, match=next(iter(kw))):
@@ -737,11 +809,16 @@ def test_a_bad_margin_is_refused(margin):
     with pytest.raises(ValueError, match="margin"):
         choose_switchgear(_sc(("B1", 33.0, 20.0, 28.0, math.nan, 1)), LIB, 50, margin)
     with pytest.raises(ValueError, match="margin"):
-        choose_cable(LIB, vn_kv=33.0, length_km=1.0, i_ka=0.1, ith_ka=1.0, margin=margin)
+        choose_cable(
+            LIB, vn_kv=33.0, length_km=1.0, i_ka=0.1, ith_ka=1.0, margin=margin
+        )
 
 
 def test_a_zero_margin_is_allowed():
-    assert _one([("B1", 33.0, 25.0, 25.0 * NO_DC, math.nan, 1)], margin=0.0).chosen_ka == 25.0
+    assert (
+        _one([("B1", 33.0, 25.0, 25.0 * NO_DC, math.nan, 1)], margin=0.0).chosen_ka
+        == 25.0
+    )
 
 
 def test_the_row_carries_the_voltage_and_duration():
