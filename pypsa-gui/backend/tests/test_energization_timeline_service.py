@@ -127,3 +127,23 @@ def test_grid_mw_is_the_period_minimum_not_its_maximum(monkeypatch):
     (p,) = T.timeline(_net(), {})["periods"]
     assert p["grid_mw"] == 5.0
     assert p["shortfall_mw"] == 25.0  # peak 30 against 5 grid, no on-site
+
+
+def test_a_nan_capacity_on_a_variable_generator_never_reaches_the_answer():
+    import json
+
+    import pandas as pd
+
+    from services import dc_energization_timeline as T
+
+    n = _net()
+    n.add("Generator", "pv", bus="b", carrier="solar", p_nom=5.0)
+    n.add("Generator", "__voll_l", bus="b", carrier="load_shedding", p_nom=99.0)
+    n.generators["p_nom_opt"] = n.generators["p_nom"]
+    n.generators.loc["pv", "p_nom_opt"] = float("nan")
+    n.generators_t.p = pd.DataFrame(
+        {"pv": [1.0] * 4, "__voll_l": [0.0] * 4}, index=n.snapshots
+    )
+    out = T.timeline(n, {})
+    json.dumps(out, allow_nan=False)
+    assert out["periods"][0]["run"]["curtailed_mwh"] == 0.0
