@@ -29,7 +29,7 @@
 import GridComplianceSection from '../components/GridComplianceSection'
 import { assetLabel } from './results/investment/financeModel'
 import { SiteTypeSelect } from '../components/reliabilityGoal/SiteTypeSelect'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, RefreshCw, Save, Square, Wand2, Workflow } from 'lucide-react'
 import {
@@ -289,7 +289,7 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
         <GridComplianceSection name={name} />
       </>)}
       {part === 'results' && (state.data.results
-        ? <ResultsSection state={state.data} pending={pending} />
+        ? <ResultsSection state={state.data} pending={pending} name={name} />
         : (
           <PageSection title="Results">
             <p className="text-[12px] text-muted" data-testid="campus-no-results">
@@ -644,6 +644,67 @@ function TrafoVerdict({ t, bought }: { t: TransformerSizing; bought: InvestmentR
   )
 }
 
+/** The PSS/E hand-off of the latest run (grid-compliance 23): one case per island critical hour, each a zip
+ *  of the .raw, the .dyr, the GFM parameters and the README. A case from a run older than the last edit says so. */
+export function CampusPsseSection({ name }: { name: string }) {
+  const psse = useQuery({ queryKey: ['campus-psse', name], queryFn: () => campusApi.psse(name), retry: false })
+  const [busy, setBusy] = useState<string | null>(null)
+  const [failure, setFailure] = useState<string | null>(null)
+  const d = psse.data
+  async function download(bundle: string) {
+    setBusy(bundle)
+    setFailure(null)
+    try {
+      const { blob } = await campusApi.psseZip(name, bundle)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${bundle}.zip`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setFailure(errorText(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+  let body: ReactNode
+  if (psse.isError) body = <p data-testid="psse-error" className="text-[12px] text-warn">{errorText(psse.error)}</p>
+  else if (!d) body = <p className="text-[12px] text-muted">Loading…</p>
+  else if (!d.has_run) body = <p data-testid="psse-none" className="text-[12px] text-muted">No grid study has run yet. Run the study in Grid study ›; it writes one PSS/E case per island critical hour.</p>
+  else if (d.error) body = <p data-testid="psse-write-error" className="text-[12px] text-warn">The PSS/E cases could not be written: {d.error}. Fix that and run the study again.</p>
+  else if (d.bundles.length === 0) body = <p data-testid="psse-skipped" className="text-[12px] text-muted">No PSS/E case: {d.skipped ?? 'this run wrote none'}. Add island data to the campus and run the study again.</p>
+  else body = (
+    <>
+      {d.stale && (
+        <p data-testid="psse-stale" className="text-[12px] text-warn border border-warn/40 rounded px-3 py-2 mb-2">
+          These cases are from a run older than the last edit to the campus or the project. Run the study again before sending them.
+        </p>
+      )}
+      <ul className="space-y-1">
+        {d.bundles.map(b => (
+          <li key={b.name} data-testid={`psse-bundle-${b.name}`} className="flex items-center gap-3 text-[12px]">
+            <span className="whitespace-nowrap">{b.period != null && b.hour != null ? `Period ${b.period}, hour ${b.hour}` : b.name}</span>
+            <span className="text-muted tabular-nums">{b.files.length} files, {Math.max(1, Math.round(b.size / 1024))} kB</span>
+            <Btn onClick={() => download(b.name)} disabled={busy === b.name} title="The .raw, .dyr, GFM parameters, README and manifest of this case, as a zip">
+              Download PSS/E case
+            </Btn>
+          </li>
+        ))}
+      </ul>
+      {d.run_at && <p className="text-[11px] text-muted mt-1">From the run of {new Date(d.run_at).toLocaleString()}.</p>}
+      {failure && <p data-testid="psse-download-error" className="text-[12px] text-warn mt-1">{failure}</p>}
+    </>
+  )
+  return (
+    <PageSection title="PSS/E case" hint="the island critical hours, grid-connected before the trip, for the TSO's PSS/E">
+      {body}
+    </PageSection>
+  )
+}
+
 function StatusTag({ s, detail }: { s: CheckStatus; detail?: string | null }) {
   // unknown is "no limit" only when the profile sets none; a missing input is "not checked", its detail says which
   const text = s === 'unknown' && detail === NO_LIMIT_DETAIL ? 'no limit' : STATUS_TEXT[s]
@@ -655,7 +716,7 @@ function StatusTag({ s, detail }: { s: CheckStatus; detail?: string | null }) {
  *  compensation, short circuit, critical hours); the Grid study results panel shows both. */
 export type CampusResultsPart = 'all' | 'grid_code' | 'electrical_design'
 
-function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; pending: boolean; show?: CampusResultsPart }) {
+function ResultsSection({ state, pending, name, show = 'all' }: { state: CampusState; pending: boolean; name: string; show?: CampusResultsPart }) {
   const grid = show !== 'electrical_design'
   const design = show !== 'grid_code'
   const r = state.results!
@@ -757,6 +818,8 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
       {grid && <CampusHarmonicScanSection scan={r.harmonic_scan} />}
 
       {grid && <CampusDipsRestartSection dips={r.dips_restart} />}
+
+      {grid && <CampusPsseSection name={name} />}
 
       {design && <>
       <PageSection panelSection="electrical_design" title="Transformers" hint="worst selected hour, intact and N-1, with the design margin">
@@ -876,7 +939,7 @@ export function CampusResultsTab({ name, part }: { name: string; part: Exclude<C
   return (
     <div className="space-y-3">
       <p className="text-[11px] text-muted" data-testid="campus-tab-from">From the Grid study (latest run).</p>
-      <ResultsSection state={state.data} pending={pending} show={part} />
+      <ResultsSection state={state.data} pending={pending} name={name} show={part} />
     </div>
   )
 }
