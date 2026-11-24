@@ -56,3 +56,21 @@ def test_a_value_edit_marks_the_last_run_stale(client, site, route, name, field,
     assert _kinds(_flow(client, project))["optimisation"] == "stale"
     # The last run's figures stay readable.
     assert client.get("/api/results/generators").status_code == 200
+
+
+def test_the_expert_table_bulk_edit_marks_the_last_run_stale(client, site):  # noqa: F811
+    """The Expert table saves through `PATCH /_bulk`, not the per-row PUT."""
+    project = site(_all_components_network(), name="pg13_bulk")
+    assert client.post("/api/simulation/run").status_code == 200
+    assert _wait_idle(client)["status"] == "completed"
+    r = client.patch(
+        "/api/network/_bulk",
+        json={
+            "component_class": "StorageUnit",
+            "names": ["su"],
+            "updates": {"p_nom_max": 20.0},
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert _kinds(_flow(client, project))["optimisation"] == "stale"
+    assert client.get("/api/results/generators").status_code == 200

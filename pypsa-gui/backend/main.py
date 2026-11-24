@@ -426,6 +426,7 @@ _DISPATCH_INVALIDATE_PREFIXES = ("/api/network/",)
 # A value edit of one of these through `PUT /api/network/<route>/<name>` keeps the last run's dispatch when its
 # shape still matches the network: the run reads stale by its input fingerprint instead of vanishing (pg 13).
 _VALUE_EDIT_ROUTES = frozenset({"generators", "loads", "lines", "links", "storage_units", "stores"})
+_VALUE_EDIT_CLASSES = frozenset({"Generator", "Load", "Line", "Link", "StorageUnit", "Store"})  # the Expert table's `PATCH /_bulk`
 _DISPATCH_INVALIDATE_EXCLUDE = {"/api/network/undo", "/api/network/undo/info"}
 _AUTH_PUBLIC_PATHS = {
     "/api/auth/forgot-password",
@@ -1229,6 +1230,12 @@ async def undo_snapshot_middleware(request: Request, call_next):
     # already unsolved (no `_t` data to clear) or when the mutation is the
     # very FIRST after a clear (no dispatch state to lose).
     pre_dispatch = None
+    bulk_class = None
+    if request.method == "PATCH" and path == "/api/network/_bulk":
+        try:
+            bulk_class = (await request.json()).get("component_class")
+        except Exception:
+            bulk_class = None
     will_check_dispatch = (
         is_write
         and path not in _DISPATCH_INVALIDATE_EXCLUDE
@@ -1311,7 +1318,8 @@ async def undo_snapshot_middleware(request: Request, call_next):
             with PyPSAService.get_lock():
                 parts = path.strip("/").split("/")
                 kept = (
-                    request.method == "PUT" and len(parts) == 4 and parts[2] in _VALUE_EDIT_ROUTES
+                    (request.method == "PUT" and len(parts) == 4 and parts[2] in _VALUE_EDIT_ROUTES
+                     or bulk_class in _VALUE_EDIT_CLASSES)
                     and pre_dispatch == "fresh"
                     and dispatch_status(PyPSAService.get_network()) == "fresh"
                 )
