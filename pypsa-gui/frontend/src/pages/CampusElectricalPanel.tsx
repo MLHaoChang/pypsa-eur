@@ -734,7 +734,7 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
                       ? (limitMin < 0
                         ? `${bandEdge(limitMin)} to ${bandEdge(limitMax)} ${c.unit ?? ''}`
                         : `${num(limitMin, 3)}–${num(limitMax, 3)} ${c.unit ?? ''}`).trim()
-                      : `${num(limit, 3)} ${c.unit ?? ''}`.trim()}
+                      : limit == null ? 'no limit set' : `${num(limit, 3)} ${c.unit ?? ''}`.trim()}
                   </td>
                     <td className="align-top min-w-[16rem]">
                       <div>{detail}</div>
