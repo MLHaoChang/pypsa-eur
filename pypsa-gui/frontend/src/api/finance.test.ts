@@ -47,6 +47,15 @@ describe('financeApi', () => {
     await expect(financeApi.putFinance(null, 'd')).rejects.toBe(e422)
   })
 
+  it('a 409 keeps the needs the start lists (template-e2e issue 40)', async () => {
+    post.mockRejectedValueOnce(axiosError(409, { code: 'not_solved', message: 'solve first',
+                                                 needs: ['not_solved', 'finance_inputs_missing'] }))
+    await expect(financeApi.startInvestmentCase()).rejects.toMatchObject(
+      { code: 'not_solved', needs: ['not_solved', 'finance_inputs_missing'] })
+    post.mockRejectedValueOnce(axiosError(409, { code: 'study_in_flight', message: 'busy' }))
+    await expect(financeApi.startInvestmentCase()).rejects.toMatchObject({ needs: undefined })
+  })
+
   it('runs, polls, aborts; 204 is null; the xlsx is a link', async () => {
     post.mockResolvedValue({ status: 200, data: { status: 'running' } })
     await financeApi.startInvestmentCase()

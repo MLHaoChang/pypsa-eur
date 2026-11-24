@@ -160,12 +160,12 @@ export function Row({ label, value, unit, tip, badge, note, action }: {
   const display = typeof value === 'boolean' ? '✓' : typeof value === 'number' ? (value as number).toLocaleString(undefined, { maximumFractionDigits: 4 }) : String(value)
   return (
     <div className="group flex flex-wrap justify-between items-baseline py-0.5 border-b border-border/50 last:border-0">
-      <span className="text-xs text-muted shrink-0 mr-2">
+      <span className="text-xs text-muted min-w-0 flex-1 basis-0 mr-2" data-testid="row-label">
         <InfoTip text={tip}>{label}</InfoTip>
         {badge}
         {action}
       </span>
-      <span className="text-xs font-mono text-text text-right">{display}{unit ? <span className="text-muted ml-0.5">{unit}</span> : null}</span>
+      <span className="text-xs font-mono text-text text-right shrink-0">{display}{unit ? <span className="text-muted ml-0.5">{unit}</span> : null}</span>
       {note && <p className="basis-full text-[9px] leading-snug text-muted" data-testid="row-note">{note}</p>}
     </div>
   )

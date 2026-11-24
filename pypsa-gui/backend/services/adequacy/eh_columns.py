@@ -12,6 +12,7 @@ They are NOT PyPSA attributes, so three boundaries need help:
 from __future__ import annotations
 
 import math
+from decimal import Decimal
 
 import numpy as np
 import pandas as pd
@@ -133,6 +134,41 @@ def coerce_eh_value(component_class: str, col: str, value):
     if kind == "text":
         return "" if value is None else str(value).strip()
     raise ValueError(f"{col}: unknown kind {kind!r}")  # pragma: no cover
+
+
+def sk_number(value) -> float | None:
+    """The number in a short-circuit cell, or None when blank, NaN or not a number. An infinity is kept:
+    the write paths refuse it, but an import can store it, and an infinite minimum is above any finite maximum."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(v) else v
+
+
+def sk_shown(value: float) -> str:
+    """A short-circuit power at full precision, so two nearby values never read the same (1234567.89, not 1.23457e+06)."""
+    return format(Decimal(repr(float(value))).normalize(), "f")
+
+
+def check_grid_strength_pair(component_class: str, row, submitted=None) -> None:
+    """A slack Generator's minimum short-circuit power never exceeds its maximum (catalogue 06, GK B X8).
+
+    `row` is the whole row after the edit (a one-sided edit is checked against the stored other value).
+    With `submitted`, the check runs only when that edit names `sk_min_mva` or `sk_max_mva`, so an
+    unrelated edit of an imported, reversed pair still goes through. A blank (NaN) on either side skips it.
+    Raises ValueError with the user-facing rule; the write path makes it a 422.
+    """
+    if component_class != "Generator":
+        return
+    if submitted is not None and not ({"sk_min_mva", "sk_max_mva"} & set(submitted)):
+        return
+    lo, hi = sk_number(row.get("sk_min_mva")), sk_number(row.get("sk_max_mva"))
+    if lo is not None and hi is not None and lo > hi:
+        # The stated limit is the stored maximum at full precision, so entering it as the minimum passes.
+        raise ValueError(f"Minimum short-circuit power: it is above the maximum short-circuit power ({sk_shown(hi)} MVA).")
 
 
 def dc_ac_ratio(value, label: str | None = "DC/AC ratio") -> float:
