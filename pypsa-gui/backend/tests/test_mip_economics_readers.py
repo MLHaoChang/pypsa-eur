@@ -315,8 +315,8 @@ def test_the_study_case_withholds_market_revenue_on_a_mip_record():
     every case (no bill and no saving counted), so its 0.0 is a judged value."""
     from tests.test_engine_adapter_case_golden import OPTIONS, _bundle
 
-    for option in OPTIONS:
-        _assert_case_withholds_market_revenue(_bundle, option)
+    lp_values = [_assert_case_withholds_market_revenue(_bundle, o) for o in OPTIONS]
+    assert any(v for v in lp_values)  # at least one case earns a market revenue
 
 
 def _assert_case_withholds_market_revenue(_bundle, option):
@@ -343,6 +343,10 @@ def _assert_case_withholds_market_revenue(_bundle, option):
     assert lp_view.market_revenue_at_duals.annual_value is not None
     assert all(y.market_revenue_at_duals is not None for y in lp_view.years)
     assert all("market_revenue_at_duals" not in y.unavailable for y in lp_view.years)
+    # An LP's operating years carry the case's own market revenue, not a stand-in 0.0.
+    lp_value = lp_view.market_revenue_at_duals.annual_value
+    assert all(y.market_revenue_at_duals == lp_value for y in lp_view.years[1:])
+    return lp_value
 
 
 def test_the_study_case_s_live_frames_are_judged_by_the_network(mip, lp):
@@ -419,3 +423,21 @@ def test_the_chat_results_tool_carries_the_reason_on_a_mip(mip, monkeypatch):
     kp = chat_tools.get_results("carrier_kpis")
     assert kp["price_limit"] == DUALS_NOT_MARGINAL
     assert all(row["revenue_eur"] is None for row in kp["rows"])
+
+
+def test_a_mip_withholds_the_priced_keys_of_every_period_too():
+    """`_withhold_priced` nulls the priced keys in each `by_period` entry, not only
+    the row's totals; price-independent keys stay."""
+    from services.results.asset_economics import PRICED_KEYS, _withhold_priced
+
+    key = PRICED_KEYS["generators"][0]
+    row = {
+        "name": "g",
+        key: 5.0,
+        "energy_mwh": 3.0,
+        "by_period": [{key: 2.0, "energy_mwh": 1.0}, {key: 3.0, "energy_mwh": 2.0}],
+    }
+    _withhold_priced([row], [], [], [])
+    assert row[key] is None and row["energy_mwh"] == 3.0
+    assert [e[key] for e in row["by_period"]] == [None, None]
+    assert [e["energy_mwh"] for e in row["by_period"]] == [1.0, 2.0]
