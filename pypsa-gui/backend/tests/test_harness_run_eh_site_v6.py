@@ -479,14 +479,24 @@ def test_c3_bytes_changed_between_the_card_and_the_grant_are_refused(project):
     assert record["refused"]["kind"] == run_urdb.CHANGED and "hash" not in record
 
 
-@pytest.mark.parametrize("commercial", [{"import_tariff_ref": {"kind": "library", "id": "t", "version": 1}},
-                                        {"import_tariff": {"id": "inline"}}])
+@pytest.mark.parametrize(
+    "commercial",
+    [
+        {"import_tariff_ref": {"kind": "library", "id": "t", "version": 1}},
+        {"import_tariff": {"id": "inline"}},
+    ],
+)
 def test_c3_a_project_that_prices_imports_already_writes_nothing(project, commercial):
     envelope, row = _granted(project, _ctx())
     ctx = _ctx()
     ctx.solver_state["solver_config"]["commercial"] = commercial
     before = _count()
-    assert run_envelope._match_prepare(envelope, "import_urdb_tariff", row["args"], ctx, {}) == "not_a_gap"
+    assert (
+        run_envelope._match_prepare(
+            envelope, "import_urdb_tariff", row["args"], ctx, {}
+        )
+        == "not_a_gap"
+    )
     assert _count() == before
 
 
@@ -745,10 +755,14 @@ def test_c6_a_bound_context_with_a_str_storage_dir_reads_the_upload(project):
     ctx = SimpleNamespace(**{**vars(_ctx()), "storage_dir": str(project)})
     envelope, row = _granted(project, ctx)
     record = _record(envelope)
-    assert "refused" not in record and record["upload_sha256"] == row["source"]["sha256"]
+    assert (
+        "refused" not in record and record["upload_sha256"] == row["source"]["sha256"]
+    )
     note = {}
     assert (
-        run_envelope._match_prepare(envelope, "import_urdb_tariff", row["args"], ctx, note)
+        run_envelope._match_prepare(
+            envelope, "import_urdb_tariff", row["args"], ctx, note
+        )
         is None
     )
     assert note == {"source": record["hash"]}
@@ -794,14 +808,16 @@ def test_plan_an_upload_that_is_no_rate_object_is_unreadable():
 @pytest.mark.parametrize(
     "label,description", [("x" * 600, "x" * 500), ("", None), (None, None)]
 )
-def test_plan_describes_the_item_by_its_label_truncated(monkeypatch, label, description):
+def test_plan_describes_the_item_by_its_label_truncated(
+    monkeypatch, label, description
+):
     from services.library import items as I
 
     seen, real = [], I.prepare_item
-    monkeypatch.setattr(
-        I, "prepare_item", lambda *a: seen.append(a[3]) or real(*a)
+    monkeypatch.setattr(I, "prepare_item", lambda *a: seen.append(a[3]) or real(*a))
+    run_urdb.plan(
+        json.dumps(_rate(label=label)).encode(), run_urdb.pinned_args("f", "a" * 64)
     )
-    run_urdb.plan(json.dumps(_rate(label=label)).encode(), run_urdb.pinned_args("f", "a" * 64))
     assert seen[0]["description"] == description
     assert seen[0]["source"] == "urdb" and seen[0]["provider"] == "OpenEI URDB"
 
@@ -825,9 +841,7 @@ def test_plan_a_rate_without_a_startdate_is_urdb_invalid():
 # ── run_urdb: the project's finance and commercial config ────────────────────
 
 
-@pytest.mark.parametrize(
-    "ctx", [SimpleNamespace(solver_state=None), SimpleNamespace()]
-)
+@pytest.mark.parametrize("ctx", [SimpleNamespace(solver_state=None), SimpleNamespace()])
 def test_no_solver_state_states_no_currency_and_holds_no_tariff(ctx):
     assert run_urdb._finance(ctx) is None
     assert run_urdb.tariff_held(ctx) is False
@@ -852,21 +866,26 @@ def test_tariff_held_reads_a_typed_commercial_config():
 
 
 def test_modelled_years_of_no_snapshots_is_no_span():
-    """pypsa refuses empty snapshots, but the guard is what keeps NaT out of
+    """Pypsa refuses empty snapshots, but the guard is what keeps NaT out of
     `stamp`'s date comparisons (which raise TypeError on NaT): not equivalent."""
     empty = SimpleNamespace(snapshots=pd.DatetimeIndex([]))
     assert run_urdb.modelled_years(empty) == ([], None)
     tariff = run_urdb.plan(FIXTURE.read_bytes(), run_urdb.pinned_args("f", "a" * 64))[
         "tariff"
     ]
-    assert run_urdb.stamp(SimpleNamespace(**{**vars(_ctx()), "network": empty}), tariff) is None
+    assert (
+        run_urdb.stamp(SimpleNamespace(**{**vars(_ctx()), "network": empty}), tariff)
+        is None
+    )
 
 
 def test_c7_a_span_exactly_on_the_validity_bounds_is_admitted():
     tariff = run_urdb.plan(FIXTURE.read_bytes(), run_urdb.pinned_args("f", "a" * 64))[
         "tariff"
     ]
-    assert str(tariff.valid_from) == "2025-01-01" and str(tariff.valid_to) == "2027-12-31"
+    assert (
+        str(tariff.valid_from) == "2025-01-01" and str(tariff.valid_to) == "2027-12-31"
+    )
     on_bounds = pd.DatetimeIndex(["2025-01-01 00:00", "2027-12-31 23:00"])
     assert _stamp(snapshots=on_bounds) is None
     assert _stamp(snapshots=on_bounds, periods=[2025, 2027]) is None
@@ -903,7 +922,12 @@ def test_library_hash_reads_only_a_missing_item_as_none(monkeypatch, status, rai
 
 @pytest.mark.parametrize(
     "source",
-    ["urdb_upload", ["urdb_upload"], {"kind": "weather_choices"}, {"kind": "urdb_upload", "x": 1}],
+    [
+        "urdb_upload",
+        ["urdb_upload"],
+        {"kind": "weather_choices"},
+        {"kind": "urdb_upload", "x": 1},
+    ],
 )
 def test_an_attach_tariff_gap_names_a_urdb_source_by_its_kind_only(source):
     assert run_envelope._check_source("attach_tariff", {"kind": "urdb_upload"}) == {
@@ -933,7 +957,9 @@ def test_c5_the_grant_refuses_only_a_urdb_gap_and_row_on_an_unwritable_library(
     monkeypatch, gaps, write, writable
 ):
     monkeypatch.setattr(run_urdb, "may_write_library", lambda: writable)
-    run_envelope._urdb_grant_check({"gaps": gaps}, [{"write": write, "status": "confirmed"}])
+    run_envelope._urdb_grant_check(
+        {"gaps": gaps}, [{"write": write, "status": "confirmed"}]
+    )
 
 
 def test_urdb_refused_keeps_a_grant_refusal_and_a_record_without_a_hash():

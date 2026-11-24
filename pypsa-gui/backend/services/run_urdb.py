@@ -153,12 +153,19 @@ def tariff_held(ctx) -> bool:
     tariff): the gap is filled, so the import would only leave an unused
     Library item (the attach is refused `not_a_gap` anyway)."""
     cfg = (getattr(ctx, "solver_state", None) or {}).get("solver_config")
-    commercial = cfg.get("commercial") if isinstance(cfg, Mapping) else getattr(cfg, "commercial", None)
+    commercial = (
+        cfg.get("commercial")
+        if isinstance(cfg, Mapping)
+        else getattr(cfg, "commercial", None)
+    )
     if hasattr(commercial, "model_dump"):
         commercial = commercial.model_dump()
     if not isinstance(commercial, Mapping):
         return False
-    return commercial.get("import_tariff_ref") not in (None, "", {}) or commercial.get("import_tariff") is not None
+    return (
+        commercial.get("import_tariff_ref") not in (None, "", {})
+        or commercial.get("import_tariff") is not None
+    )
 
 
 def modelled_years(network) -> tuple[list[int], tuple | None]:
@@ -209,9 +216,13 @@ def upload_bytes(ctx, file_id: str) -> bytes:
     not this project's is `upload_not_found`, C6."""
     from services import upload_service
 
-    storage = getattr(ctx, "storage_dir", None)  # a str on a bound context (pypsa_service)
+    storage = getattr(
+        ctx, "storage_dir", None
+    )  # a str on a bound context (pypsa_service)
     return upload_service.get_upload_bytes(
-        ctx.loaded_project, file_id, project_dir=pathlib.Path(storage) if storage else None
+        ctx.loaded_project,
+        file_id,
+        project_dir=pathlib.Path(storage) if storage else None,
     )
 
 
