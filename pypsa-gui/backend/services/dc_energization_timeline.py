@@ -25,11 +25,11 @@ from services import dc_time_to_power as T
 _NOT_FIRM = {"solar", "wind", "onwind", "offwind", "ror", "grid", "AC"}
 
 BASIS_INPUTS = (
-    "Drawn from the inputs, no run: the largest hourly facility load in each "
-    "period, the energization schedule and the committed on-site units."
+    "the largest hourly facility load in each period, the energization "
+    "schedule and the committed on-site units."
 )
 BASIS_RUN = (
-    "Inputs as above, with the last run's energy served, shed and curtailed "
+    "the same inputs, with the last run's energy served, shed and curtailed "
     "in each period."
 )
 

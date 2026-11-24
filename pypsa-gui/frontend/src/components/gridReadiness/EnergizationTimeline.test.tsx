@@ -43,7 +43,7 @@ describe('EnergizationTimeline', () => {
       ...p, run: { served_mwh: 1000, shed_mwh: 12, curtailed_mwh: 3 } })) }
     render(<EnergizationTimelineView data={run} />)
     expect(screen.getByTestId('energization-timeline-basis').textContent).toContain('Last run')
-    expect(screen.getByTestId('energization-timeline-run').textContent).toContain('shed 12 MWh')
+    expect(screen.getByTestId('energization-timeline-run').textContent).toContain('shed 12\u00A0MWh')
   })
 
   it('says when the run is out of date and keys power apart from energy', () => {

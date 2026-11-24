@@ -11,6 +11,7 @@ import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 
 const mw = (v: number) => `${Number(v.toPrecision(4))} MW`
+const mwh = (v: number) => `${Math.round(v).toLocaleString('en-GB')}\u00A0MWh`
 const periodWords = (p: string) => (p === 'all' ? 'All periods' : p)
 
 /** The shortfall of each period, one sentence each (never colour alone). */
@@ -44,19 +45,19 @@ export function EnergizationTimelineView({ data, busy = false }: { data: Timelin
         Key: bars are firm power in MW (grid import, then on-site gensets and batteries); the hatched bar is the shortfall;
         the line is the peak facility demand, an assumed profile (not a measurement).
       </div>
-      <div className="h-[180px]" data-testid="energization-timeline-chart">
+      <div className="h-[230px]" data-testid="energization-timeline-chart">
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+          <ComposedChart data={rows} margin={{ top: 4, right: 8, bottom: 16, left: 0 }}>
             <defs>
               <pattern id="et-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
                 <rect width="6" height="6" fill="#fee2e2" /><line x1="0" y1="0" x2="0" y2="6" stroke="#dc2626" strokeWidth="2" />
               </pattern>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" />
+            <CartesianGrid strokeDasharray="3 3" stroke="currentColor" strokeOpacity={0.2} />
             <XAxis dataKey="period" tick={{ fontSize: 10 }} label={{ value: 'Model period', position: 'insideBottom', offset: -2, fontSize: 10 }} height={32} />
             <YAxis tick={{ fontSize: 10 }} width={56} label={{ value: 'Power (MW)', angle: -90, position: 'insideLeft', fontSize: 10 }} />
             <Tooltip formatter={(v: number) => mw(v)} />
-            <Legend wrapperStyle={{ fontSize: 10 }} />
+            <Legend wrapperStyle={{ fontSize: 10, paddingTop: 12 }} />
             <Bar stackId="s" dataKey="grid" name="Energized grid import" fill="#2563eb" isAnimationActive={false} />
             {kinds.map(k => (
               <Bar key={k} stackId="s" dataKey={k} name={k === 'genset' ? 'On-site gensets' : 'On-site batteries'}
@@ -64,7 +65,7 @@ export function EnergizationTimelineView({ data, busy = false }: { data: Timelin
             ))}
             <Bar stackId="s" dataKey="shortfall" name="Shortfall (no firm supply)" fill="url(#et-hatch)"
               stroke="#dc2626" isAnimationActive={false} />
-            <Line type="monotone" dataKey="demand" name="Peak facility demand (assumed profile)" stroke="#111827" strokeWidth={2} isAnimationActive={false} />
+            <Line type="linear" dataKey="demand" name="Peak facility demand (assumed profile)" stroke="currentColor" strokeWidth={2} isAnimationActive={false} />
           </ComposedChart>
         </ResponsiveContainer>
       </div>
@@ -78,7 +79,7 @@ export function EnergizationTimelineView({ data, busy = false }: { data: Timelin
       </div>
       {ran.length > 0 && (
         <div data-testid="energization-timeline-run" className="text-text-muted">
-          Energy of the last run, in MWh (not power): {ran.map(p => `${periodWords(p.period)}: served ${Math.round(p.run!.served_mwh)} MWh · shed ${Math.round(p.run!.shed_mwh)} MWh · curtailed ${Math.round(p.run!.curtailed_mwh)} MWh`).join(' · ')}
+          Energy of the last run, in MWh (not power): {ran.map(p => `${periodWords(p.period)}: served ${mwh(p.run!.served_mwh)} · shed ${mwh(p.run!.shed_mwh)} · curtailed ${mwh(p.run!.curtailed_mwh)}`).join(' · ')}
         </div>
       )}
     </div>
