@@ -336,7 +336,7 @@ def test_no_open_network_is_a_typed_refusal(monkeypatch):
             {"unit": "EUR/L"},
             "research_unit_mismatch",
             "A researched genset fuel price takes EUR/MWh (genset fuel cost per MWh electrical output, "
-            "excl. VAT); 'EUR/L' is refused, not converted.",
+            "excl. VAT); EUR/L is refused, not converted.",
         ),
         ({"value": 0.0}, "invalid_source_row", "A genset fuel price is above 0."),
     ],

@@ -839,7 +839,7 @@ def _fuel_steps(
         raise ResearchError(
             "research_unit_mismatch",
             f"A researched genset fuel price takes {gap['unit']} ({gap['basis']}); "
-            f"{row.get('unit')!r} is refused, not converted.",
+            f"{row.get('unit')} is refused, not converted.",
         )
     if not row["value"] > 0:
         raise ResearchError("invalid_source_row", "A genset fuel price is above 0.")
