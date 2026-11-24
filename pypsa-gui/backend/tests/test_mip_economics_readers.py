@@ -270,6 +270,11 @@ def test_the_live_routes_gate_by_the_solve_s_record(mip, lp, monkeypatch):
     monkeypatch.setattr(results, "_dispatch_ready", lambda n: True)
     for n, record, expect in (
         (mip, {"price_limit": DUALS_NOT_MARGINAL}, DUALS_NOT_MARGINAL),
+        # The record wins over today's judgement of the network: an LP network
+        # under a MIP solve's record is withheld (re-judging it would read None).
+        (lp, {"price_limit": DUALS_NOT_MARGINAL}, DUALS_NOT_MARGINAL),
+        # No record: the network is judged with the current config.
+        (mip, {}, DUALS_NOT_MARGINAL),
         (lp, {}, None),
     ):
         monkeypatch.setattr(
@@ -310,7 +315,11 @@ def test_the_study_case_withholds_market_revenue_on_a_mip_record():
     every case (no bill and no saving counted), so its 0.0 is a judged value."""
     from tests.test_engine_adapter_case_golden import OPTIONS, _bundle
 
-    option = OPTIONS[0]
+    for option in OPTIONS:
+        _assert_case_withholds_market_revenue(_bundle, option)
+
+
+def _assert_case_withholds_market_revenue(_bundle, option):
     record = {
         "generators": [],
         "storage_units": [],
@@ -334,3 +343,55 @@ def test_the_study_case_withholds_market_revenue_on_a_mip_record():
     assert lp_view.market_revenue_at_duals.annual_value is not None
     assert all(y.market_revenue_at_duals is not None for y in lp_view.years)
     assert all("market_revenue_at_duals" not in y.unavailable for y in lp_view.years)
+
+
+def test_the_study_case_s_live_frames_are_judged_by_the_network(mip, lp):
+    """Without a run record, `option_case` reads the live frames under the network's
+    own limit (`engine_adapter._econ_rows`): a MIP's rows carry the reason."""
+    from services.study import engine_adapter
+
+    econ, source = engine_adapter._econ_rows(mip, CFG, None)
+    assert source == "live_frames" and econ["price_limit"] == DUALS_NOT_MARGINAL
+    econ, source = engine_adapter._econ_rows(lp, CFG, None)
+    assert source == "live_frames" and econ.get("price_limit") is None
+
+
+@pytest.mark.parametrize("limit", [DUALS_NOT_MARGINAL, None])
+def test_the_study_runner_records_the_option_s_price_limit(limit, monkeypatch):
+    """`runner._read_option` judges the fork's solve, passes the limit to asset
+    economics and copies it into the run record; an LP's record has no key."""
+    import harness.solve_validity as sv
+    from services.results import asset_economics as AE
+    from services.study import packs
+    from services.study import questions as Q
+    from services.study import runner as R
+    from tests.golden import site_fixture as sf
+    from tests.u2_targets import bound_option
+
+    seen = {}
+
+    def fake(n, cfg, *, result_df=None, price_limit=None):
+        seen["price_limit"] = price_limit
+        out = {cls: [] for cls in R._ECON_CLASSES}
+        out["capital_costs_available"] = True
+        if price_limit:
+            out["price_limit"] = price_limit
+        return out
+
+    monkeypatch.setattr(sv, "mip_price_limit", lambda n, cfg: limit)
+    monkeypatch.setattr(AE, "compute_asset_economics", fake)
+    ledger = sf.site_ledger()
+    m, compiled = bound_option(sf.site_intake(), ledger, "none", sf.site_library())
+    d = R._read_option(
+        m,
+        packs.option_solver_config(ledger, compiled),
+        Q.option(Q.BESS_AT_SITE, "none"),
+        "full_study",
+        2020,
+        compiled=compiled,
+    )
+    assert seen == {"price_limit": limit}
+    assert d.get("price_limit") == limit
+    assert d["asset_economics"].get("price_limit") == limit
+    if limit is None:
+        assert "price_limit" not in d and "price_limit" not in d["asset_economics"]

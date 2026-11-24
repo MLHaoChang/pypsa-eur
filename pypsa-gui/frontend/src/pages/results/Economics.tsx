@@ -589,6 +589,9 @@ export default function Economics() {
   }, [projectedRows])
 
   const nothingDispatched = kpis.energy <= 1e-6
+  // A KPI withheld for the solve's price limit: the Kpi's own unavailable state,
+  // with the one sectionWords wording as its reason (as Dispatch and Capacity).
+  const withheld = { state: 'unavailable' as const, reason: withheldCell(priceLimit) }
 
   const groupTotals = useMemo(() => {
     return {
@@ -756,8 +759,9 @@ export default function Economics() {
         </div>
         <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
           <KPI accent label="Total revenue"
-               value={kpis.revenue != null ? fmtCurrency(kpis.revenue) : withheldCell(priceLimit)}
+               value={kpis.revenue != null ? fmtCurrency(kpis.revenue) : '—'}
                sub="Σ dispatch × bus marginal price"
+               {...(kpis.revenue == null ? withheld : {})}
                hint="Annualised market revenue across every generator, storage unit and store. Storage uses discharge revenue only (charge cost is booked separately)." />
           <KPI label="Fixed cost"
                value={kpis.fixed != null ? fmtCurrency(kpis.fixed) : COST_UNAVAILABLE}
@@ -775,10 +779,10 @@ export default function Economics() {
                  : 'Σ dispatch × marginal_cost'}
                hint="Σ |p| × marginal_cost. For storage assets this also includes the cost of charging energy (charge_mwh × bus price) — the market price paid to fill the reservoir." />
           <KPI label="Net profit"
-               value={kpis.net != null ? fmtCurrency(kpis.net)
-                 : priceLimit ? withheldCell(priceLimit) : COST_UNAVAILABLE}
-               sub={kpis.net == null
-                 ? (priceLimit ? 'needs revenue, which is withheld' : 'needs fixed cost, which could not be computed')
+               value={kpis.net != null ? fmtCurrency(kpis.net) : COST_UNAVAILABLE}
+               {...(kpis.net == null && priceLimit ? withheld : {})}
+               sub={kpis.net == null && !priceLimit
+                 ? 'needs fixed cost, which could not be computed'
                  : kpis.profitMarginPct != null
                  ? `margin ${kpis.profitMarginPct >= 0 ? '' : '−'}${Math.abs(kpis.profitMarginPct).toFixed(1)}% · = revenue − ${(kpis.charge_cost ?? 0) > 0 ? 'charge − ' : ''}vom − fixed`
                  : `= revenue − ${(kpis.charge_cost ?? 0) > 0 ? 'charge − ' : ''}vom − fixed`}
@@ -791,25 +795,26 @@ export default function Economics() {
                sub="MWh sold into the market (Σ p+ × weight)"
                hint="Σ dispatch × weight. For storage, this is the discharged energy (positive p only) — charge MWh isn't double-counted." />
           <KPI label="Charge cost (storage)"
-               value={kpis.charge_cost != null ? fmtCurrency(kpis.charge_cost) : withheldCell(priceLimit)}
+               value={kpis.charge_cost != null ? fmtCurrency(kpis.charge_cost) : '—'}
                sub="market price paid to fill"
                {...(!hasStorage
                  ? { state: 'not_applicable' as const, reason: 'This network has no storage.' }
-                 : kpis.charge_cost == null || Math.abs(kpis.charge_cost) > 1e-3 ? {} : { state: 'zero' as const })}
+                 : kpis.charge_cost == null ? withheld
+                 : Math.abs(kpis.charge_cost) > 1e-3 ? {} : { state: 'zero' as const })}
                hint="Σ charge_mwh × bus price across every storage asset. Zero on networks without storage. Subtracts directly from storage revenue in the net-profit roll-up." />
           <KPI label="System LCOE / LCOS"
                value={kpis.sysLcoe != null
                  ? `${kpis.sysLcoe.toFixed(2)} €/MWh`
-                 : kpis.charge_cost == null ? withheldCell(priceLimit)
                  : costsAvailable ? '—' : COST_UNAVAILABLE}
                sub="(Σ fixed + vom + charge) / Σ energy"
-               {...(nothingDispatched ? NOTHING_DISPATCHED : {})}
+               {...(nothingDispatched ? NOTHING_DISPATCHED
+                 : kpis.sysLcoe == null && kpis.charge_cost == null ? withheld : {})}
                hint="Portfolio-wide €/MWh — what every MWh delivered into the market costs the system to produce, on average. Useful as a yardstick: the avg capture price needs to exceed this for the portfolio to recover costs." />
           <KPI label="Avg capture price"
-               value={kpis.avgCapture != null ? `${kpis.avgCapture.toFixed(2)} €/MWh`
-                 : kpis.revenue == null ? withheldCell(priceLimit) : '—'}
+               value={kpis.avgCapture != null ? `${kpis.avgCapture.toFixed(2)} €/MWh` : '—'}
                sub="Σ revenue / Σ energy delivered"
-               {...(nothingDispatched ? NOTHING_DISPATCHED : {})}
+               {...(nothingDispatched ? NOTHING_DISPATCHED
+                 : kpis.avgCapture == null && kpis.revenue == null ? withheld : {})}
                hint="Volume-weighted average price the portfolio earned on delivered MWh (discharge for storage). Compare to System LCOE / LCOS: capture above LCOE means market prices cover production cost on average." />
         </div>
         {/* The backend's own framing of a near-zero net profit: an extendable

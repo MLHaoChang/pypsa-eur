@@ -68,7 +68,9 @@ it('shows withheld price-based KPIs as "Not available (integer solve)", never 0 
   for (const label of ['Total revenue', 'Net profit', 'Charge cost (storage)', 'Avg capture price']) {
     const tile = kpi(label)
     expect(tile.textContent, label).toContain(WITHHELD)
-    expect(tile.querySelector('[data-kpi-value]')?.getAttribute('data-kpi-value'), label).not.toMatch(/^€?0(\.0+)?/)
+    // The Kpi's own unavailable state (as Dispatch): the reason, and no figure at all.
+    expect(tile.getAttribute('data-state'), label).toBe('unavailable')
+    expect(tile.querySelector('[data-kpi-value]'), label).toBeNull()
   }
   expect(document.body.textContent).not.toContain('NaN')
   // Not "0 profitable · 0 loss-making": profitability is not known.
