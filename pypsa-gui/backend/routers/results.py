@@ -3060,8 +3060,15 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
     from services.workflow_tools import solve_freshness
 
     n = PyPSAService.get_network()
+    from services import study_solve
+
+    study = None
     if not _dispatch_ready(n):
-        return Response(status_code=204)
+        # A Guided study solved a private copy: its solve is the run to export (template-e2e 30).
+        study = study_solve.fallback()
+        if study is None:
+            return Response(status_code=204)
+        n = study["network"]
     if _solver_in_flight():  # the network carries the LP's transient transforms
         raise HTTPException(409, {
             "error_kind": "results_workbook_stale",
@@ -3069,7 +3076,8 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
     latest = _workbook_run(user)
     if run_id is not None:
         _refuse_other_run(run_id, latest, user)
-    freshness = solve_freshness()
+    freshness = (solve_freshness() if study is None
+                 else {"inputs_changed_since_solve": False, "results_current": True})
     if not freshness.get("results_current") and not stored:
         why = ("The inputs changed since the solve, so the results describe an earlier model."
                if freshness.get("inputs_changed_since_solve") else

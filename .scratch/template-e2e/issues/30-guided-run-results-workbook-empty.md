@@ -34,9 +34,9 @@ What should the workbook export after a Guided study run?
 
 ## Acceptance criteria (option 1)
 
-- [ ] A failing test first: after a Guided study run on `eh_site`, the workbook route returns a workbook whose dispatch and capacity sheets are filled, and the flow/Expert run state reads the study run.
-- [ ] Download File gives a file, or a plain error with its reason. A request that would yield an empty workbook says so before any download starts.
-- [ ] The `template-journeys.mjs` xfail keyed to 30 is removed and the step passes.
+- [x] A failing test first: after a Guided study run on `eh_site`, the workbook route returns a workbook whose dispatch and capacity sheets are filled, and the flow/Expert run state reads the study run.
+- [x] Download File gives a file, or a plain error with its reason. A request that would yield an empty workbook says so before any download starts.
+- [x] The `template-journeys.mjs` xfail keyed to 30 is removed and the step passes.
 - [ ] End to end in the real app: `eh_site` › Guided › run the study › Expert › Export › Results workbook › Download. The .xlsx opens, its headline equals the Guided verdict, and the Expert header names the run.
 
 ## Likely files
