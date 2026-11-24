@@ -3,7 +3,7 @@
 
 # 03 DC template gensets count CO2 per MWh of fuel as per MWh of electricity
 
-Status: needs-triage
+Status: done
 Blocked by: none
 Source: DC template review 2026-11-24 (`../README.md`). Stage 3.
 Severity: major (a wrong number on the axis the owner wants to constrain)
@@ -15,9 +15,9 @@ Model: sonnet. Review: GK A.
 
 ## Acceptance criteria
 
-- [ ] Genset `efficiency` = 1 / heat rate (from the load spec's genset entry, else the library default, marked assumed); a test checks t/MWh_el = carrier intensity × heat rate.
-- [ ] The grid intensity is a per-period input with its source shown as assumed; the Emissions view names it.
-- [ ] The marginal cost and the CO2 count read the same efficiency (no double count with `co2_price`).
+- [x] Genset `efficiency` = 1 / heat rate (from the load spec's genset entry, else the library default, marked assumed); a test checks t/MWh_el = carrier intensity × heat rate.
+- [x] The grid intensity is a per-period input with its source shown as assumed; the Emissions view names it.
+- [x] The marginal cost and the CO2 count read the same efficiency (no double count with `co2_price`).
 
 ## Likely files
 
