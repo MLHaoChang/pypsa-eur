@@ -212,7 +212,7 @@ def _switchgear(run: Path, spec: dict) -> list:
                 rating=_num(r.chosen_ka),
                 unit="kA",
                 quantity=n,
-                governing=f"{r.governing}, {r.tk_s:g} s"
+                governing=f"{r.governing}; fault {r.tk_s:g} s, rated {r.tkr_s:g} s"
                 if _num(r.chosen_ka) is not None
                 else r.governing,
                 source="computed",
@@ -238,7 +238,7 @@ def _cables(run: Path) -> list:
             if r.governing == "voltage drop":
                 gov += f" ({float(r.vd_pct):.2f} %)"
             elif r.governing == "short-circuit withstand":
-                gov += f" (Ik'' {float(r.ik_ka):.1f} kA needs {float(r.s_min_mm2):.0f} mm2)"
+                gov += f" (Ith {float(r.ith_ka):.1f} kA needs {float(r.s_min_mm2):.0f} mm2)"
         else:
             gov = r.governing
         runs = int(r.runs) if chosen else int(r.declared_runs)

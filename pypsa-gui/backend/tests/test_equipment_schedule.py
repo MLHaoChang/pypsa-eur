@@ -235,7 +235,7 @@ def test_every_kind_with_rating_source_and_criterion(tmp_path):
         20.0,
         "declared_below_chosen",
     )
-    assert mv1["governing"] == "Ith 21.36 kA, period 2040, 1 s"
+    assert mv1["governing"] == "Ith 21.36 kA, period 2040; fault 1 s, rated 1 s"
     # MV1: TR1, TR2 lv ends, two cable runs, BESS1 = 5 bays (one per connection)
     assert mv1["quantity"] == 5
     assert mv1["library_id"] == "SG_20_31p5"
@@ -487,7 +487,7 @@ def test_one_rating_table_alone_is_still_missing(tmp_path, keep):
     "governing, extra",
     [
         ("voltage drop", " (2.50 %)"),
-        ("short-circuit withstand", " (Ik'' 12.0 kA needs 128 mm2)"),
+        ("short-circuit withstand", " (Ith 12.0 kA needs 128 mm2)"),
         ("ampacity", ""),
     ],
 )
@@ -504,7 +504,7 @@ def test_the_cable_criterion_text_names_its_number(tmp_path, governing, extra):
                 "declared_i_ka": 0.4,
                 "design_i_ka": 0.3,
                 "design_case": "intact, period 2030 hour 7",
-                "ik_ka": 12.0,
+                "ith_ka": 12.0,
                 "chosen_id": "C",
                 "conductor": "Al",
                 "runs": 1,
