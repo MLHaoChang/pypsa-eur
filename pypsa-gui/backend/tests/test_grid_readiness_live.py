@@ -259,10 +259,32 @@ def test_a_real_solve_leaves_the_rows_current_until_an_edit(client, hub):
     assert client.post("/api/simulation/run").status_code == 200
     assert _wait_idle(client)["status"] == "completed"
     assert STALE not in _rows(client, hub)["scr"]["note"]
-    _edit_fault(client, hub, 0.9)
+    # One edit of a unit's size after the solve (the issue's case), not a fault-level edit.
+    storage = client.get("/api/network/storage_units").json()
+    storage = storage.get("items", storage) if isinstance(storage, dict) else storage
+    unit = next(u for u in storage if float(u.get("p_nom") or 0) > 0)
+    r = client.put(f"/api/network/storage_units/{unit['name']}",
+                   json={**unit, "p_nom": float(unit["p_nom"]) * 2})
+    assert r.status_code == 200, r.text
     assert STALE in _rows(client, hub)["scr"]["note"]
 
 
 def test_a_network_with_no_solve_stamp_makes_no_stale_claim(client, hub):
     _edit_fault(client, hub, 0.9)
     assert STALE not in _scr(client, hub)["note"]
+
+
+def test_a_bool_is_not_a_solve_stamp():
+    """True is an int in Python (== 1): it must read as no stamp, not as revision 1."""
+    from types import SimpleNamespace
+
+    from services import dirty_state
+    from services.adequacy.grid_readiness import _edited_since_solve
+
+    ctx = SimpleNamespace(network=SimpleNamespace(_solved_network_revision=True), network_revision=7)
+    assert _edited_since_solve(ctx) is False
+    ctx.network._solved_network_revision = 1
+    assert _edited_since_solve(ctx) is True
+    ctx.network._solved_network_revision = 7
+    assert _edited_since_solve(ctx) is False
+    assert dirty_state.revision(ctx) == 7
