@@ -8,7 +8,7 @@ Engine gatekeeper B (70; harness, app backend, investment/finance and outsourced
 
 Engine gatekeeper B2 (5; finance and business case, ui-modern, other app fixes, GC-09 and app-backend packages opened from 2026-11-17 04:00Z; owner decision GKB2-1): `session_01G7qCunMhwXEgi1uSaq95qh`
 
-Engine gatekeeper A2 (7; grid-compliance packages GC-01..GC-08 and the PowerFactory DGS import; owner decisions GC-PACE-1, IMPORTS-1): `session_01G7qCumxGnkQmGQ7vt3ZX1D`
+Engine gatekeeper A2 (8; grid-compliance packages GC-01..GC-08 and the PowerFactory DGS import; owner decisions GC-PACE-1, IMPORTS-1): `session_01G7qCukmdZJ8fY27LqoZyXi`
 
 Engine gatekeeper B3 (6; new template-e2e, ux-next, project-io app side, project-viewer-role and site-scene reviews from 2026-11-17 13:00Z; owner decision SCALE-1): `session_01G7qCum6HUJsEnApmq7PQMr`
 
