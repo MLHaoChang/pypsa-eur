@@ -25,6 +25,7 @@ import { openFlowTarget, openOffGridConstraints, openOperatingReserve } from '..
 import { useTopologyFindings } from './useTopologyFindings'
 import { TOPOLOGY_FINDING_TITLES, type TopologyFinding } from '../utils/topologyCheck'
 import { GridReadinessScorecard, useGridReadiness } from '../components/gridReadiness/GridReadinessScorecard'
+import { EnergizationTimeline } from '../components/gridReadiness/EnergizationTimeline'
 import { NotInScopeGroup } from '../components/flowScope/NotInScopeGroup'
 
 // IssuesPanel — surfaces the backend's preflight validation findings as a
@@ -419,6 +420,7 @@ export default function IssuesPanel() {
             <div data-testid="grid-readiness-group">
               <GridReadinessScorecard data={gridReadiness} mode="expert"
                 onJump={(type, name) => jumpTo(COMPONENT_TYPE_MAP[type] ?? type, name)} />
+              <EnergizationTimeline />
             </div>
           </PageSection>
         )}
