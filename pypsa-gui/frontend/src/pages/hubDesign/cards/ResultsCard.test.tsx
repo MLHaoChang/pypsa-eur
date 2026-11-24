@@ -536,3 +536,12 @@ describe('no reliability verdict for this site type (template-e2e 11)', () => {
     expect(screen.queryByTestId('hub-results-no-verdict')).toBeNull()
   })
 })
+
+describe('no-verdict template: the shortfall tile agrees with the note (template-e2e 11)', () => {
+  it('does not ask for a goal', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue({ id: 'eh_h2_hub', name: 'H2', recommended_archetype: 'strong_grid' } as never)
+    mount()
+    await screen.findByTestId('hub-results-no-verdict')
+    expect(screen.queryByText(/Set an allowed shortfall in Goal/)).toBeNull()
+  })
+})

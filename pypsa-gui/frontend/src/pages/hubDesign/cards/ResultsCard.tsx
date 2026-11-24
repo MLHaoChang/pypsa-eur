@@ -129,6 +129,7 @@ export function ResultsCard() {
     target: summary.target_lole_h ?? null,
     horizonYears: horizonYearsOf(report),
     stale,
+    noVerdict: hasNoVerdict(template?.id),
     verdict: verdict === 'pass' || verdict === 'fail' || verdict === 'inconclusive' ? verdict : null,
     feederBound: summary.feeder_bound != null,
     belowFloor: (report ? certificationPayload(report) : null)?.below_floor === true,

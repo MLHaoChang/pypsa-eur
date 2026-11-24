@@ -48,6 +48,8 @@ export interface ChapterInputs {
                  verdict: 'pass' | 'fail' | 'inconclusive' | null
                  /** The project has its own solve; `false` marks the figure as the study's alone (G5). */
                  solved?: boolean
+                 /** template-e2e 11: this site type has no reliability verdict. */
+                 noVerdict?: boolean
                  /** The review says the study is out of date (N4). */
                  stale?: boolean
                  /** Years the Monte Carlo modelled (`certification.horizon_years`); names the basis line (N10). */
@@ -148,6 +150,10 @@ function gridPlan({ campus, notHub }: ChapterInputs['grid']): Omit<ChapterTile, 
 
 function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 'group'> {
   const label = 'Expected shortfall'
+  if (r.noVerdict) {
+    return { label, value: '', state: 'not_modelled', reason: 'No reliability verdict for this site type.',
+      open: { panel: 'results', tab: 'adequacy' } }
+  }
   if (r.running) {
     return { label, value: '', state: 'running', reason: 'The reliability study is running.',
       open: { panel: 'results', tab: 'adequacy' } }
