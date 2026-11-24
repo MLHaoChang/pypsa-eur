@@ -429,12 +429,15 @@ def optimisation_stale(ctx=None) -> bool:
     must not break on a freshness read."""
     try:
         read = read_runs(ctx)
-        return read.dispatch != "none" and results_verdicts(read)["optimisation"].state == "stale"
+        return (
+            read.dispatch != "none"
+            and results_verdicts(read)["optimisation"].state == "stale"
+        )
     except Exception:  # noqa: BLE001
         return False
 
 
-def read_runs(ctx=None) -> "RunsRead":
+def read_runs(ctx=None) -> RunsRead:
     return read(cached=True) if ctx is None else read(ctx, cached=True)
 
 
