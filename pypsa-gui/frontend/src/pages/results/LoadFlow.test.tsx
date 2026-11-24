@@ -387,3 +387,52 @@ describe('bus voltage chart · report', () => {
     expect(new Set([w.figure, m.figure, t.figure]).size).toBe(3)
   })
 })
+
+// ── Integer (MIP) solve: price-based carrier KPIs are withheld ──────────────
+describe('carrier KPIs on an integer solve', () => {
+  const row = (carrier: string, mv: number | null, rev: number | null) => ({
+    component: 'Generator', carrier, capacity_mw: 100, energy_mwh: 500,
+    capacity_factor_pct: 50, curtailment_mwh: 0, curtailment_pct: 0,
+    market_value_eur_per_mwh: mv, revenue_eur: rev,
+  })
+
+  it('shows "Not available (integer solve)" for market value and revenue, never 0 or NaN', async () => {
+    vi.mocked(resultsApi.getCarrierKpis).mockResolvedValue({
+      rows: [row('gas', null, null)], price_limit: 'mip_duals_not_marginal',
+    })
+    renderPage()
+    const tr = (await screen.findByText('gas')).closest('tr')!
+    const cells = within(tr).getAllByRole('cell')
+    expect(cells[7].textContent).toBe('Not available (integer solve)')
+    expect(cells[8].textContent).toBe('Not available (integer solve)')
+    expect(tr.textContent).not.toContain('NaN')
+  })
+
+  it('writes an empty CSV cell for a withheld figure, not 0', async () => {
+    vi.mocked(resultsApi.getCarrierKpis).mockResolvedValue({
+      rows: [row('gas', null, null)], price_limit: 'mip_duals_not_marginal',
+    })
+    const parts: string[] = []
+    const origBlob = globalThis.Blob
+    vi.stubGlobal('Blob', class extends origBlob {
+      constructor(p: BlobPart[], o?: BlobPropertyBag) { super(p, o); parts.push(String(p[0])) }
+    })
+    URL.createObjectURL = vi.fn(() => 'blob:x')
+    URL.revokeObjectURL = vi.fn()
+    renderPage()
+    const section = (await screen.findByText(/Carrier KPIs \(1\)/)).closest('section')!
+    await userEvent.click(within(section).getByRole('button', { name: /CSV/ }))
+    vi.unstubAllGlobals()
+    const csv = parts.find(p => p.startsWith('component,'))!
+    expect(csv.split('\r\n')[1]).toMatch(/,,\s*$/)
+  })
+
+  it('keeps an LP payload\'s numbers as before', async () => {
+    vi.mocked(resultsApi.getCarrierKpis).mockResolvedValue({ rows: [row('gas', 42.5, 21250)] })
+    renderPage()
+    const tr = (await screen.findByText('gas')).closest('tr')!
+    const cells = within(tr).getAllByRole('cell')
+    expect(cells[7].textContent).toBe('42.50')
+    expect(tr.textContent).not.toContain('Not available')
+  })
+})

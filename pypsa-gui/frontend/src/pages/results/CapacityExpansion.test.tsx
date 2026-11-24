@@ -542,3 +542,22 @@ it('shows the Fuel & run hours section only when the cost breakdown carries a fu
   renderPage()
   expect(await screen.findByTestId('fuel-run-hours')).toBeTruthy()
 })
+
+it('withholds the storage charge cost on an integer solve rather than summing the priced part', async () => {
+  vi.mocked(networkApi.getStorageUnits).mockResolvedValue([extendableBattery])
+  const b = (total: number) => ({ total, by_period: {} })
+  const carrier = (charge: ReturnType<typeof b> | null) => ({
+    revenue_meur: null, opex_meur: b(1), gen_cost_meur: b(1), storage_charge_cost_meur: charge,
+    capex_meur: b(1), dispatch_gwh: b(1), lcoe_eur_per_mwh: b(1),
+  })
+  vi.mocked(resultsApi.getEconomicsByCarrier).mockResolvedValue({
+    available: true, unavailable_reason: 'mip_duals_not_marginal',
+    // One carrier priced, one withheld: the total must not be the priced part.
+    by_carrier: { gas: carrier(b(0.5)), battery: carrier(null) },
+  })
+  renderPage()
+  await screen.findByText('Not available (integer solve)')
+  const tile = kpiCard('Storage charge cost')
+  expect(tile.textContent).toContain('Not available (integer solve)')
+  expect(tile.textContent).not.toMatch(/€\s*0|500|NaN/)
+})

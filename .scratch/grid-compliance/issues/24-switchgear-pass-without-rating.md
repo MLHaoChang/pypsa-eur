@@ -3,7 +3,7 @@
 
 # 24 Switchgear short circuit reads PASS while its Limit column is blank
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), walk W3 (text dump `t-res.txt`).
 Model: sonnet. Review: GK A + UX.
