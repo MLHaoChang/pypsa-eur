@@ -15,6 +15,7 @@ Two toys:
 from __future__ import annotations
 
 import math
+import threading
 
 import pandas as pd
 import pypsa
@@ -290,22 +291,44 @@ def test_the_foreground_network_and_revision_are_untouched(monkeypatch, failure)
         real(cfg, net, lock, lq, sink)
 
     monkeypatch.setattr(sweep, "_solve_once", flaky)
+    res = fr.run_front_study(n, PyPSAService.get_lock(), _cfg(), lever="ens_cap",
+                             levels=[100.0], co2_caps_t=[None, 219_000.0, 300_000.0],
+                             mc_draws=20)
+    # one broken point is kept as failed; the others still solve
+    failed = [p for p in res["points"] if p["status"] != "ok"]
+    assert [p["status"] for p in failed] == (["error"] if failure == "raise" else ["infeasible"])
     if failure == "raise":
-        with pytest.raises(RuntimeError):
-            fr.run_front_study(n, PyPSAService.get_lock(), _cfg(), lever="ens_cap",
-                               levels=[100.0], co2_caps_t=[None, 219_000.0, 300_000.0],
-                               mc_draws=20)
-    else:
-        res = fr.run_front_study(n, PyPSAService.get_lock(), _cfg(), lever="ens_cap",
-                                 levels=[100.0], co2_caps_t=[None, 219_000.0, 300_000.0],
-                                 mc_draws=20)
-        failed = [p for p in res["points"] if p["status"] != "ok"]
-        assert [p["status"] for p in failed] == ["infeasible"]
-        assert failed[0]["point"] is None and failed[0]["mc"] is None
-        assert failed[0]["on_front"] is None and failed[0]["dominated_by"] == []
+        assert failed[0]["error"] == "solver died"
+    assert failed[0]["point"] is None and failed[0]["mc"] is None
+    assert failed[0]["on_front"] is None and failed[0]["dominated_by"] == []
+    assert sum(p["status"] == "ok" for p in res["points"]) == 2
     _assert_same_frames(before, _frames(n))
     assert PyPSAService.get_active_context().network_revision == rev
     assert PyPSAService.get_active_context().network is n
+
+
+def test_an_interrupt_is_not_swallowed_as_a_failed_point(monkeypatch):
+    from services.adequacy import sweep
+
+    def interrupted(cfg, net, lock, lq, sink):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(sweep, "_solve_once", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        _run(_hand(), levels=[100.0], co2_caps_t=[None])
+
+
+def test_a_solved_foreground_with_a_live_solver_model_can_be_studied():
+    # copying a network whose solver model is still attached raises; the
+    # private copy must detach it under the lock first
+    n = _hand()
+    n.optimize(solver_name="highs")
+    assert n.model.solver_model is not None
+    before = n.generators_t.p.copy()
+    base = fr._private_base(n, threading.RLock())
+    assert base is not n
+    pd.testing.assert_frame_equal(base.generators_t.p, before)
+    pd.testing.assert_frame_equal(n.generators_t.p, before)   # solution kept
 
 
 def test_the_result_does_not_depend_on_the_grid_order():
@@ -575,3 +598,179 @@ def test_the_front_writes_no_fingerprint_field():
     res = _run(_hand(), lever="ens_cap", levels=[100.0])
     assert not math.isnan(res["points"][0]["point"]["total_eur_per_yr"])
     assert not {"fingerprint", "digest", "network_fingerprint"} & set(res)
+
+
+# --------------------------------------------------------------------------
+# Weightings, discounting and scale
+# --------------------------------------------------------------------------
+
+def _two_periods_with_clean(objective) -> pypsa.Network:
+    n = _two_periods()
+    n.add("Carrier", "clean", co2_emissions=0.0)
+    n.add("Generator", "c", bus="b", carrier="clean", p_nom_extendable=True,
+          p_nom_max=1000.0, capital_cost=1000.0, marginal_cost=50.0,
+          build_year=2030, lifetime=50)
+    n.investment_period_weightings.loc[:, "objective"] = objective
+    return n
+
+
+def test_a_discounted_multi_period_shadow_reads_in_undiscounted_eur_per_t():
+    # Cap 219 000 t/yr = half the gas energy: gas 50 MW, clean 50 MW in each
+    # period. One more tonne lets gas make 2 MWh more instead of clean:
+    # (50 − 10)·2 = 80 EUR/t, in every period, whatever the discounting.
+    res = _run(_two_periods_with_clean([1.0, 0.5]), lever="ens_cap", levels=[100.0],
+               co2_caps_t=[219_000.0], cfg=_cfg(multi_investment_periods=True))
+    pt = res["points"][0]["point"]
+    assert pt["co2_binding"] is True
+    assert pt["co2_shadow_eur_per_t"] == pytest.approx(80.0, rel=1e-6)
+    assert pt["co2_t_per_yr"] == pytest.approx(219_000.0, rel=1e-6)
+    assert pt["capex_eur_per_yr"] == pytest.approx(100_000.0, rel=1e-6)
+    assert pt["opex_eur_per_yr"] == pytest.approx(50 * 10 * 8760 + 50 * 50 * 8760, rel=1e-6)
+
+
+def test_snapshot_weightings_and_a_user_objective_scale_leave_the_hand_point():
+    n = _hand()
+    n.snapshot_weightings.loc[:, :] = 2.0       # each modelled hour counts twice
+    res = _run(n, lever="ens_cap", levels=[100.0], co2_caps_t=[219_000.0],
+               cfg=_cfg(user_objective_scale=1e-3))
+    pt = res["points"][0]["point"]
+    assert pt["capex_eur_per_yr"] == pytest.approx(17_500_000.0, rel=1e-6)
+    assert pt["opex_eur_per_yr"] == pytest.approx(8_760_000.0, rel=1e-6)
+    assert pt["co2_t_per_yr"] == pytest.approx(219_000.0, rel=1e-6)
+    assert pt["co2_shadow_eur_per_t"] == pytest.approx(17.0776, abs=1e-3)
+
+
+# --------------------------------------------------------------------------
+# Unknown is not "never bound" (missing report numbers)
+# --------------------------------------------------------------------------
+
+def _ok(level, cap, *, rel_b, co2_b):
+    return {"status": "ok", "level": level, "co2_cap_t_per_yr": cap,
+            "point": {"reliability_binding": rel_b, "co2_binding": co2_b,
+                      "capacities": {"g": float(level)}, "total_eur_per_yr": float(level)}}
+
+
+def test_an_unread_binding_is_said_as_unknown_not_never_bound():
+    pts = [_ok(1, 10.0, rel_b=None, co2_b=None), _ok(2, 10.0, rel_b=False, co2_b=False)]
+    d = fr.degenerate_findings(pts, "ens_cap", voll=5000.0, outage_model=False,
+                               reference_co2=None)
+    assert d["axes"]["ens_cap"]["unknown"] is True
+    assert "could not be read at 1 of 2 points" in d["axes"]["ens_cap"]["text"]
+    assert "never bound" not in d["axes"]["ens_cap"]["text"]
+    assert d["axes"]["co2"]["unknown"] is True
+    assert "never bound" not in d["axes"]["co2"]["text"]
+
+
+def test_a_known_binding_beats_an_unread_one():
+    pts = [_ok(1, 10.0, rel_b=None, co2_b=None), _ok(2, 10.0, rel_b=True, co2_b=True)]
+    d = fr.degenerate_findings(pts, "reserve_margin", voll=0.0, outage_model=False,
+                               reference_co2=None)
+    assert d["axes"] == {}
+
+
+def test_missing_report_metrics_leave_lp_ens_unknown(monkeypatch):
+    from services.adequacy import sweep
+    real = sweep._solve_once
+
+    def no_metrics(cfg, net, lock, lq, sink):
+        real(cfg, net, lock, lq, sink)
+        sink["adequacy_report"] = {**sink["adequacy_report"], "metrics": {}}
+
+    monkeypatch.setattr(sweep, "_solve_once", no_metrics)
+    res = _run(_hand(), lever="ens_cap", levels=[100.0], co2_caps_t=[None], mc_draws=10)
+    p = res["points"][0]
+    assert p["point"]["lp_ens_mwh"] is None
+    assert fr._objectives(p, "lp_ens") is None
+
+
+# --------------------------------------------------------------------------
+# Tolerance boundaries
+# --------------------------------------------------------------------------
+
+def test_close_and_same_design_sit_on_their_tolerances():
+    assert fr._close(0.0, 0.9e-6, fr._ABS_TOL_MW)
+    assert not fr._close(0.0, 1.1e-6, fr._ABS_TOL_MW)
+    assert fr._close(1e9, 1e9 * (1 + 0.9e-6), 0.0)
+    assert not fr._close(1e9, 1e9 * (1 + 1.1e-6), 0.0)
+    a = _pt({"g": 0.0}, 0.0)
+    assert fr.same_design(a, _pt({"g": 0.9e-6}, 0.0009))
+    assert not fr.same_design(a, _pt({"g": 1.1e-6}, 0.0))
+    assert not fr.same_design(a, _pt({"g": 0.0}, 0.0011))
+
+
+def test_dominance_ignores_differences_inside_the_tolerance():
+    assert not fr._dominates((0.0, 0.0, 0.0), (0.0009, 0.0, 0.0))
+    assert fr._dominates((0.0, 0.0, 0.0), (0.0011, 0.0, 0.0))
+    assert not fr._dominates((0.0011, 0.0, 0.0), (0.0, 0.0, 0.0))
+    assert not fr._dominates((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
+
+
+# --------------------------------------------------------------------------
+# MC branches: pack boundary and zonal inputs (mocked)
+# --------------------------------------------------------------------------
+
+def _mc_result(lole):
+    return {"lole_hours": lole, "lole_ci": [lole, lole], "eue_mwh": 2 * lole,
+            "eue_ci": None, "n_samples": 7, "resolution_floor_h": 0.5,
+            "time_basis": "modelled"}
+
+
+def test_the_mc_takes_the_pack_boundary_and_the_zonal_engine(monkeypatch):
+    import types
+
+    from services.adequacy import archetypes, eh_stages, mc, mc_zonal
+
+    seen = {}
+
+    def hub_boundary_copy(work, pack):
+        seen["pack"] = pack
+        return None, "BOUNDARY"
+
+    def freeze(work, cfg, lock, overlay=None, boundary=None):
+        seen["freeze"] = (overlay, boundary)
+        return types.SimpleNamespace(mc_inputs="MC", zonal_inputs="Z", mc_error=None)
+
+    def zonal(inputs, **kw):
+        seen["zonal"] = (inputs, kw)
+        return _mc_result(0.25)
+
+    def single(*a, **kw):
+        raise AssertionError("zonal inputs must use the zonal engine")
+
+    monkeypatch.setattr(archetypes, "hub_boundary_copy", hub_boundary_copy)
+    monkeypatch.setattr(eh_stages, "freeze_fixed_plan", freeze)
+    monkeypatch.setattr(mc_zonal, "zonal_mc_adequacy", zonal)
+    monkeypatch.setattr(mc, "mc_adequacy", single)
+    pack = types.SimpleNamespace(import_overlay="OVERLAY")
+    out, err = fr._mc_point("WORK", _cfg(), None, pack, 40, 3)
+    assert err is None
+    assert seen["pack"] is pack and seen["freeze"] == ("OVERLAY", "BOUNDARY")
+    assert seen["zonal"] == ("Z", {"draws": 40, "max_draws": 40, "batch": 40, "seed": 3})
+    assert out["lole_hours"] == 0.25 and out["below_floor"] is True
+    assert out["eue_ci"] is None and out["lole_ci"] == [0.25, 0.25]
+
+
+def test_the_mc_without_a_pack_uses_the_single_area_engine(monkeypatch):
+    import types
+
+    from services.adequacy import eh_stages, mc
+
+    def freeze(work, cfg, lock, **kw):
+        assert kw == {}
+        return types.SimpleNamespace(mc_inputs="MC", zonal_inputs=None, mc_error=None)
+
+    monkeypatch.setattr(eh_stages, "freeze_fixed_plan", freeze)
+    monkeypatch.setattr(mc, "mc_adequacy", lambda inputs, **kw: _mc_result(0.5))
+    out, err = fr._mc_point("WORK", _cfg(), None, None, 40, 3)
+    assert err is None and out["below_floor"] is False
+
+
+def test_an_mc_that_cannot_run_is_an_error_not_a_zero(monkeypatch):
+    import types
+
+    from services.adequacy import eh_stages
+
+    monkeypatch.setattr(eh_stages, "freeze_fixed_plan", lambda *a, **k:
+                        types.SimpleNamespace(mc_inputs=None, zonal_inputs=None,
+                                              mc_error="no outage data"))
+    assert fr._mc_point("WORK", _cfg(), None, None, 40, 3) == (None, "no outage data")

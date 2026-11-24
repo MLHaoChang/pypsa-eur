@@ -242,6 +242,9 @@ def _capacities(n) -> dict[str, float]:
 
 
 _CAPACITY_VARS = ("p_nom", "e_nom", "s_nom")
+# PyPSA subtracts the capital cost of extendables' existing capacity through a
+# fixed variable of this name: a capacity term, so it belongs to capex.
+_CAPEX_CONSTANT_VAR = "objective_constant"
 
 
 def _objective_years(n) -> float:
@@ -276,11 +279,14 @@ def _lp_capex_share(n) -> float | None:
             vf = m.variables[name].flat
             labels = vf["labels"].astype(int).tolist()
             sol.update(zip(labels, vf["solution"].astype(float).tolist()))
-            if name.split("-", 1)[-1] in _CAPACITY_VARS:
+            if (name.split("-", 1)[-1] in _CAPACITY_VARS
+                    or name == _CAPEX_CONSTANT_VAR):
                 cap.update(labels)
         expr = m.objective.expression
         obj = expr.flat
         vals = obj["coeffs"].astype(float) * obj["vars"].map(sol).astype(float)
+        # A bare constant on the expression is not a capacity term (the repo's
+        # wrappers put penalty constants there), so it counts in the whole only.
         whole = float(vals.sum()) + float(getattr(expr, "const", 0.0) or 0.0)
         part = float(vals[obj["vars"].isin(cap)].sum())
     except Exception:                                         # noqa: BLE001
@@ -332,16 +338,33 @@ def _co2(n, names: list[str]) -> tuple[float | None, float | None, bool | None]:
     shadows, binds = [], []
     for name in names:
         mu = float(gc.at[name, "mu"]) if "mu" in gc.columns else float("nan")
-        # A `<=` cap in a minimisation has mu ≤ 0: the cost of one more tonne
-        # of headroom is −mu, in the objective's EUR per t.
-        shadows.append(-mu if math.isfinite(mu) else float("nan"))
+        # A `<=` cap in a minimisation has mu ≤ 0: one more tonne of headroom
+        # is worth −mu in objective EUR. A period's constraint counts each
+        # modelled tonne `years` times while its objective counts the cost
+        # `objective` (discounted) times, so the undiscounted EUR/t is
+        # −mu × years / objective.
+        shadows.append(-mu * _period_shadow_factor(n, gc, name)
+                       if math.isfinite(mu) else float("nan"))
         binds.append(_cap_binding(mu if math.isfinite(mu) else None, None,
                                   float(gc.at[name, "constant"])))
     if any(b is None for b in binds):
         return t_per_yr, None, None
     binding = any(binds)
-    shadow = max(shadows) if binding else None
+    finite = [s for s in shadows if math.isfinite(s)]
+    shadow = max(finite) if binding and finite else None
     return t_per_yr, shadow, binding
+
+
+def _period_shadow_factor(n, gc, name: str) -> float:
+    p = gc.at[name, "investment_period"] if "investment_period" in gc.columns else None
+    if p is None or (isinstance(p, float) and math.isnan(p)):
+        return 1.0
+    ipw = n.investment_period_weightings
+    try:
+        years, obj = float(ipw.at[p, "years"]), float(ipw.at[p, "objective"])
+    except (KeyError, TypeError, ValueError):
+        return 1.0
+    return years / obj if obj > 0 and math.isfinite(years) else 1.0
 
 
 def _reliability_binding(lever: str, rep: dict | None) -> bool | None:
@@ -382,7 +405,8 @@ def _solve_point(base, cfg, lock, log_queue, lever, level, cap):
         "capex_eur_per_yr": capex,
         "opex_eur_per_yr": opex,
         "total_eur_per_yr": total,
-        "lp_ens_mwh": float(metrics.get("ens_mwh", 0.0) or 0.0),
+        "lp_ens_mwh": (float(metrics["ens_mwh"])
+                       if metrics.get("ens_mwh") is not None else None),
         "reliability_binding": _reliability_binding(lever, rep),
         "co2_t_per_yr": co2,
         "co2_shadow_eur_per_t": shadow,
@@ -517,7 +541,17 @@ def degenerate_findings(points: list[dict], lever: str, *, voll: float,
         return {"axes": axes, "all": False,
                 "text": (f"No point solved ({', '.join(words)}), so there is no "
                          "front to read.")}
-    if not any(p["point"].get("reliability_binding") for p in ok):
+    rel_b = [p["point"].get("reliability_binding") for p in ok]
+    lever_words = "ENS target" if lever == "ens_cap" else "reserve margin"
+    if not any(rel_b) and any(b is None for b in rel_b):
+        # Unread is not "never bound": say what we do not know.
+        axes[lever] = {
+            "text": (f"Whether the {lever_words} bound could not be read at "
+                     f"{sum(b is None for b in rel_b)} of {len(ok)} points, and it "
+                     "did not bind at the rest."),
+            "levers": [], "unknown": True,
+        }
+    elif not any(rel_b):
         if lever == "ens_cap":
             why = ("the dispatch model has no outages, so " if not outage_model
                    else "")
@@ -537,9 +571,18 @@ def degenerate_findings(points: list[dict], lever: str, *, voll: float,
                 "levers": ["higher_margin"],
             }
     capped = [p for p in ok if p.get("co2_cap_t_per_yr") is not None]
-    if capped and not any(p["point"].get("co2_binding") for p in capped):
+    co2_b = [p["point"].get("co2_binding") for p in capped]
+    if capped and not any(co2_b) and any(b is None for b in co2_b):
+        axes["co2"] = {
+            "text": (f"Whether the CO2 limit bound could not be read at "
+                     f"{sum(b is None for b in co2_b)} of {len(capped)} capped "
+                     "points, and it did not bind at the rest."),
+            "levers": [], "unknown": True,
+        }
+    elif capped and not any(co2_b):
         lowest = min(p["co2_cap_t_per_yr"] for p in capped)
-        ref = (f"the least-cost design emits {_fmt(reference_co2)} t/yr, "
+        ref = (f"with no limit, at the loosest reliability level swept, the "
+               f"design emits {_fmt(reference_co2)} t/yr, "
                if reference_co2 is not None else "")
         axes["co2"] = {
             "text": (f"The CO2 limit never bound: {ref}within every limit swept "
@@ -576,10 +619,26 @@ def _margin_preflight(network, lock, cfg, margin: float, lever_why: str) -> None
 
 def _private_base(network, lock):
     from services.adequacy.redundancy import _detach_solver_model
+    # Copying a network with a live solver model attached raises; detach it
+    # under the lock first, as the hub-side copy does (the foreground keeps
+    # its solution, only the solver handle is dropped).
     with lock:
+        _detach_solver_model(network)
         base = network.copy()
-    _detach_solver_model(base)
     return base
+
+
+def _guarded_point(base, cfg, lock, log_queue, lever, level, cap):
+    """``_solve_point``, with an ordinary exception kept as a failed point so
+    one broken point does not lose the others. ``BaseException`` (a stop,
+    an interpreter exit) still propagates."""
+    try:
+        return _solve_point(base, cfg, lock, log_queue, lever, level, cap)
+    except Exception as exc:                                  # noqa: BLE001
+        logger.exception("front: point (%s, %s) raised", level, cap)
+        return {"lever": lever, "level": level, "co2_cap_t_per_yr": cap,
+                "status": "error", "error": str(exc) or type(exc).__name__,
+                "point": None}, None
 
 
 def run_front_study(network, lock, cfg, *, levels, co2_caps_t=None,
@@ -595,8 +654,11 @@ def run_front_study(network, lock, cfg, *, levels, co2_caps_t=None,
     points already swept (``aborted``).
     """
     from services.adequacy.frontier import non_convexity_warning
+    from services.project_context import ProjectContext
+    from services.pypsa_service import PyPSAService
 
-    lever_used, lever_why = choose_lever(network, lever)
+    with lock:
+        lever_used, lever_why = choose_lever(network, lever)
     lvls = _clean_levels(lever_used, levels)
     caps = _clean_caps(co2_caps_t)
     if lever_used == "ens_cap" and float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
@@ -609,9 +671,10 @@ def run_front_study(network, lock, cfg, *, levels, co2_caps_t=None,
 
     if lever_used == "reserve_margin":
         _margin_preflight(network, lock, cfg, max(lvls), lever_why)
-    outage_model = lp_has_outage_model(network)
     lq = log_queue if log_queue is not None else queue.SimpleQueue()
     base = _private_base(network, lock)
+    # read off the private copy: no lock, and the same state the points start from
+    outage_model = lp_has_outage_model(base)
     points: list[dict] = []
     result = {
         "lever": lever_used, "lever_reason": lever_why,
@@ -631,14 +694,25 @@ def run_front_study(network, lock, cfg, *, levels, co2_caps_t=None,
                        "capacity terms (annualised capital and fixed O&M), opex "
                        "the rest (dispatch, fuel, import tariff, CO2 price)"),
         "points": points, "reference_co2_t_per_yr": None,
-        "warning": non_convexity_warning(network, cfg),
+        "warning": non_convexity_warning(base, cfg),
         "aborted": False,
     }
+    with PyPSAService.solving_context(ProjectContext(network=base)):
+        _sweep(result, points, base, cfg, lock, lq, lever_used, lvls, caps,
+               mc_draws, seed, pack, stop_event)
+    return _finish(result, points, cfg, lever_used, outage_model)
+
+
+def _sweep(result, points, base, cfg, lock, lq, lever_used, lvls, caps,
+           mc_draws, seed, pack, stop_event) -> None:
+    """Every grid point, then the uncapped reference when no column is
+    uncapped. Runs inside the study's solving context, so the solver's
+    transient marks land on the private base, never the foreground."""
     for idx, (lv, cap) in enumerate(itertools.product(lvls, caps)):
         if stop_event is not None and stop_event.is_set():
             result["aborted"] = True
             break
-        rec, work = _solve_point(base, cfg, lock, lq, lever_used, lv, cap)
+        rec, work = _guarded_point(base, cfg, lock, lq, lever_used, lv, cap)
         result["solves"] += 1
         rec["index"] = idx
         rec["mc"], rec["mc_error"] = (None, "point not solved")
@@ -650,13 +724,19 @@ def run_front_study(network, lock, cfg, *, levels, co2_caps_t=None,
     if None in caps:
         ref = [p["point"]["co2_t_per_yr"] for p in ok if p["co2_cap_t_per_yr"] is None]
         result["reference_co2_t_per_yr"] = min(ref) if ref else None
-    elif not result["aborted"]:
+    elif stop_event is not None and stop_event.is_set():
+        result["aborted"] = True        # the reference solve is skipped too
+    else:
         # the loosest reliability level: the largest ENS cap, the smallest margin
         loosest = max(lvls) if lever_used == "ens_cap" else min(lvls)
-        rec, _work = _solve_point(base, cfg, lock, lq, lever_used, loosest, None)
+        rec, _work = _guarded_point(base, cfg, lock, lq, lever_used, loosest, None)
         result["solves"] += 1
         if rec["status"] == "ok":
             result["reference_co2_t_per_yr"] = rec["point"]["co2_t_per_yr"]
+
+
+def _finish(result, points, cfg, lever_used, outage_model) -> dict:
+    ok = [p for p in points if p["status"] == "ok"]
 
     mc_all = bool(ok) and all(p.get("mc") is not None for p in ok)
     basis = "mc_eue" if mc_all else "lp_ens"
