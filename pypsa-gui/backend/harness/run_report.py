@@ -57,17 +57,21 @@ def _stop(path, step_id, reason, detail=None):
     runner._update(path, change)
 
 
-def harness_source(path, task: dict, profile: dict) -> dict:
+def harness_source(path, task: dict, profile: dict, network=None) -> dict:
     """The `harness_run` evidence source: the run record, its envelope, the
-    chapters the profile asks for and the request coverage so far (HH-09A)."""
-    from harness import run_handoff
+    chapters the profile asks for and the request coverage so far (HH-09A).
+    A profile with a genset fuel-price gap adds the fuel gensets' prices on
+    `network` now (study harness 34)."""
+    from harness import research, run_handoff
     from services import run_envelope
 
+    fuel = research.fuel_prices(network, profile) if network is not None else None
     return {
         "task": task,
         "envelope": run_envelope.read(path),
         "chapters": list(profile.get("chapters") or []),
         "coverage": run_handoff.coverage(task, profile, None),
+        **({"fuel": fuel} if fuel is not None else {}),
     }
 
 
@@ -115,7 +119,10 @@ def start(
         llm = report_jobs._resolve_profile()
         provider = report_jobs._provider_or_400(llm)
         evidence, figures = report_jobs._evidence_for(
-            project, harness_run=harness_source(path, task, profile)
+            project,
+            harness_run=harness_source(
+                path, task, profile, getattr(ctx, "network", None)
+            ),
         )
         report_id = report_jobs._start(
             project,

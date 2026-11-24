@@ -32,6 +32,7 @@ admission refuse it). An unverified row is listed, never offered.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import logging
 import re
@@ -63,7 +64,12 @@ READ_TOOLS = frozenset(
     }
 )
 _GAP_KEYS = {"key", "stage", "tool", "target", "unit", "basis", "question"}
-_TOOLS = {"attach_tariff"}  # proposal-first (#970 item 4): gaps with an edit adapter
+# Study harness 34 (GK B (70)): the genset fuel price, one carded bulk write.
+FUEL_TOOL = "bulk_update_components"
+_TOOLS = {
+    "attach_tariff",
+    FUEL_TOOL,
+}  # proposal-first (#970 item 4): gaps with an edit adapter
 # Issue 29 (SH-06, GK B E11): an explore gap may take a sourced range. It has
 # no edit adapter (`tool: null`); issue 06's case admission reads its rows.
 SHAPES = ("point", "range")
@@ -82,6 +88,7 @@ ERROR_KINDS = (
     {"error_kind": "research_not_available"},
     {"error_kind": "research_cleanup_failed"},
     {"error_kind": "research_range_not_applicable"},
+    {"error_kind": "research_mixed_fuel"},
 )
 
 
@@ -702,7 +709,8 @@ def write_steps(task: dict[str, Any], row: dict[str, Any]) -> list[dict[str, Any
     """The run steps that write a confirmed row, each through its own card:
     every step carries the row's `research_ref`, so envelope admission
     refuses it (R4) and the user approves it. Ids start with the gap's stage,
-    so its gate waits for them. Only `attach_tariff` gaps exist (#970 item 4)."""
+    so its gate waits for them. A tariff gap writes a Library tariff and
+    attaches it (#970 item 4); the genset fuel price one bulk edit (issue 34)."""
     from services import run_profiles
 
     if (
@@ -719,6 +727,8 @@ def write_steps(task: dict[str, Any], row: dict[str, Any]) -> list[dict[str, Any
     )
     name = f"research {key} {row['id']}"
     prefix = f"{gap['stage']}.research.{row['id']}"
+    if gap["tool"] == FUEL_TOOL:
+        return _fuel_steps(row, gap, prefix)
     meta = {
         "source": RESEARCH_SOURCE + row["url"],
         "research_ref": row["id"],
@@ -746,6 +756,164 @@ def write_steps(task: dict[str, Any], row: dict[str, Any]) -> list[dict[str, Any
             "args": {"name": name, "research_ref": row["id"]},
         },
     ]
+
+
+# ── The genset fuel price (study harness 34, GK B (70)) ─────────────────────
+
+
+def _active_network():
+    from services.pypsa_service import PyPSAService
+
+    return PyPSAService.get_active_context().network
+
+
+def fuel_gensets(
+    network, gap: dict[str, Any]
+) -> tuple[str | None, list[str], list[str]]:
+    """(carrier, names, curved) for a fuel-price gap on `network`: the one
+    fuel carrier of the generators the gap's target glob names, every
+    Generator of that carrier (a renamed genset too), and those of them whose
+    fuel curve sets their marginal cost (S2: never written raw). Raises
+    `research_mixed_fuel` when the matched gensets burn two fuels (S1)."""
+    from services import fuel_curve
+
+    gens = network.generators
+    matched = [
+        str(n) for n in gens.index if fnmatch.fnmatchcase(str(n), gap["target"]["name"])
+    ]
+    carriers = sorted({str(gens.at[n, "carrier"]) for n in matched})
+    if len(carriers) > 1:
+        raise ResearchError(
+            "research_mixed_fuel",
+            f"The site's gensets burn {', '.join(carriers)}; one researched price is never "
+            "written to two fuels. Nothing was written.",
+        )
+    if not carriers:
+        return None, [], []
+    names = [str(n) for n in gens.index if str(gens.at[n, "carrier"]) == carriers[0]]
+    curved = [
+        n for n in names if fuel_curve.curve_of(gens.loc[n].to_dict()) is not None
+    ]
+    return carriers[0], [n for n in names if n not in curved], curved
+
+
+def _fuel_steps(
+    row: dict[str, Any], gap: dict[str, Any], prefix: str
+) -> list[dict[str, Any]]:
+    """One carded bulk edit of the fuel gensets' marginal cost, carrying the
+    row (R4). Fails closed on a range or a unit not the gap's (refused, not
+    converted) and on a value not above 0 (Q3)."""
+    if row.get("range") is not None or row.get("value") is None:
+        raise ResearchError(
+            "research_range_not_applicable",
+            "A sourced range is read by a case change, never written as a fuel price.",
+        )
+    if row.get("unit") != gap["unit"] or row.get("basis") != gap["basis"]:
+        raise ResearchError(
+            "research_unit_mismatch",
+            f"A researched genset fuel price takes {gap['unit']} ({gap['basis']}); "
+            f"{row.get('unit')!r} is refused, not converted.",
+        )
+    if not row["value"] > 0:
+        raise ResearchError("invalid_source_row", "A genset fuel price is above 0.")
+    _, names, _ = fuel_gensets(_active_network(), gap)
+    if not names:  # the report's gap line names why nothing was written
+        return []
+    return [
+        {
+            "id": f"{prefix}.fuel",
+            "tool": FUEL_TOOL,
+            "status": "pending",
+            "args": {
+                "component_class": "Generator",
+                "names": names,
+                "updates": {gap["target"]["attr"]: row["value"]},
+                "research_ref": row["id"],
+            },
+        }
+    ]
+
+
+def fuel_prices(network, profile: dict[str, Any]) -> dict[str, Any] | None:
+    """The report's read of the fuel gensets now (`fuel_gap_line`): None when
+    the profile has no fuel-price gap. Never raises."""
+    gap = next(
+        (
+            g
+            for g in (profile.get("research") or {}).get("gaps") or []
+            if g.get("tool") == FUEL_TOOL
+        ),
+        None,
+    )
+    if gap is None:
+        return None
+    try:
+        carrier, names, curved = fuel_gensets(network, gap)
+    except ResearchError as exc:
+        return {"key": gap["key"], "error": exc.kind}
+    gens = network.generators
+    return {
+        "key": gap["key"],
+        "unit": gap["unit"],
+        "carrier": carrier,
+        "prices": {n: float(gens.at[n, gap["target"]["attr"]]) for n in names},
+        "curved": curved,
+    }
+
+
+FUEL_LINE = "Genset fuel price not researched: template value kept"
+
+
+def _fmt(prices: dict[str, float]) -> str:
+    return ", ".join(f"{v:g}" for v in sorted(set(prices.values())))
+
+
+def fuel_gap_line(task: dict[str, Any], fuel: dict[str, Any] | None) -> str | None:
+    """The report's gap row for the genset fuel price (S4): None for a
+    profile without the gap, or when a confirmed row's value is what every
+    written genset holds now and no genset was left out."""
+    if fuel is None:
+        return None
+    if fuel.get("error") == "research_mixed_fuel":
+        return f"{FUEL_LINE}: the gensets burn more than one fuel"
+    kept = (
+        f"{FUEL_LINE} ({_fmt(fuel['prices'])} {fuel['unit']}, {fuel['carrier']})"
+        if fuel["prices"]
+        else FUEL_LINE
+    )
+    block = (task.get("run") or {}).get("research") or {}
+    rows = [
+        r
+        for r in block.get("rows") or []
+        if (r.get("for") or {}).get("gap") == fuel["key"]
+    ]
+    confirmed = next((r for r in rows if r.get("status") == "confirmed"), None)
+    if confirmed is not None:
+        if not fuel["prices"]:
+            return f"{FUEL_LINE}: every genset's cost is set by its fuel curve"
+        if any(v != confirmed["value"] for v in fuel["prices"].values()):
+            return f"{kept}: the researched value was not written"
+        if fuel["curved"]:
+            return (
+                "Genset fuel price researched; left out, as their fuel curve sets their cost: "
+                + ", ".join(fuel["curved"])
+            )
+        return None
+    step = next(
+        (s for s in block.get("steps") or [] if s.get("stage") == "inputs"), None
+    )
+    status = (step or {}).get("status")
+    if status == "not_granted":
+        return f"{kept}: research not granted"
+    if status in ("not_available", "error"):
+        return f"{kept}: research not available"
+    if any(
+        r.get("status") == "rejected"
+        for r in rows
+        if r.get("verification") == "verified"
+    ):
+        return f"{kept}: the researched sources were rejected"
+    return f"{kept}: no verified source"
 
 
 def decide(task_id: str, row_id: str, verdict: str, *, by: str) -> dict[str, Any]:

@@ -958,7 +958,7 @@ def _harness_section(harness_run: dict | None,
         if sec is None or sec.status != "ok":
             missing.append((sid, SECTION_TITLES.get(sid, sid), sec.note if sec is not None else "no source"))
     payload, tables = H.build(harness_run.get("task") or {}, harness_run.get("envelope"), missing,
-                              harness_run.get("coverage"))
+                              harness_run.get("coverage"), fuel=harness_run.get("fuel"))
     sections[H.SECTION_ID] = EvidenceSection(
         section_id=H.SECTION_ID, title=H.TITLE, kind="harness_run", status="ok", source=H.SOURCE,
         engine="study_harness", payload=payload)

@@ -1,0 +1,1 @@
+{"kinds": {"research_mixed_fuel": {"surface": "inline", "why": "Confirming a researched genset fuel price is refused when the site's gensets burn more than one fuel carrier: one price is never written to two fuels. Nothing is written; the template's prices stay and the report names the gap. The assistant tells the user and does not retry."}}}

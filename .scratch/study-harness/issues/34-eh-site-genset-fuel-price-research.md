@@ -3,7 +3,7 @@
 
 # 34 — eh_site: genset fuel price as a research gap
 
-Status: ready-for-agent (Opus; GK B plan first)
+Status: done
 Type: task
 Gated: yes (GK B)
 Model tier: opus
@@ -25,7 +25,7 @@ Checked on master: no research gap for the genset fuel price in `eh_site@2` (`ex
 - Likely files: `pypsa-gui/backend/services/run_profiles.py` (a new `eh_site@3` profile, L8), `harness/run_eh.py`, `services/run_gates.py`, `tests/test_harness_run_eh_site_v2.py` and a sibling for v3. Reviewer: GK B (plan first).
 
 Acceptance:
-- [ ] `eh_site@3` (or the version issue 33 adds, if it merges first) carries a fuel-price research gap: a cited source, the unit checked, the value inside the envelope's research cost cap.
-- [ ] A grant that does not allow research refuses the gap with a typed reason and keeps the template's fuel price, shown in the report.
-- [ ] A price in the wrong unit is refused, with a test.
-- [ ] Earlier profile versions are byte-equal (L8).
+- [x] `eh_site@3` (or the version issue 33 adds, if it merges first) carries a fuel-price research gap: a cited source, the unit checked, the value inside the envelope's research cost cap.
+- [x] A grant that does not allow research refuses the gap with a typed reason and keeps the template's fuel price, shown in the report.
+- [x] A price in the wrong unit is refused, with a test.
+- [x] Earlier profile versions are byte-equal (L8).
