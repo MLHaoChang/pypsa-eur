@@ -85,6 +85,7 @@ def capture(session):
             project = current_project(db, user, project_id)
         except HTTPException as exc:
             if exc.status_code == 409:
+                # current_project's only 409 is the binding check above.
                 # The save route keeps current_project's string detail (issue 21).
                 raise HTTPException(409, {'error_kind': 'project_binding_changed',
                                           'message': 'The open project changed since this chat started. No tool was admitted.'}) from exc
