@@ -27,6 +27,7 @@ from __future__ import annotations
 import io
 import json
 import math
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -89,6 +90,99 @@ def _num(x):
 
 
 NOT_EVALUATED = "not evaluated"
+
+# ── the one word map: the table, the switchgear sub-table and the .xlsx read these ──
+
+#: Each kind in plain words.
+KIND_LABELS = {
+    "transformer": "Transformer",
+    "reactive": "Reactive compensation",
+    "filter": "Harmonic filter",
+    "switchgear": "Switchgear",
+    "cable": "Cable",
+    "genset": "Genset",
+    "bess": "Battery storage",
+    "ups": "UPS",
+    "fuel_cell": "Fuel cell",
+    "pv": "Solar PV",
+    "wind": "Wind",
+}
+#: The engine's quantity and criterion keys in plain words, longest key first.
+CRITERION_LABELS = {
+    "Ith over": "Thermal short-circuit current over",
+    "Ik''": "Initial short-circuit current",
+    "Ith": "Thermal short-circuit current",
+    "Ib": "Breaking current",
+    "ip": "Peak short-circuit current",
+    "ampacity": "Current-carrying capacity",
+    "voltage drop": "Voltage drop",
+    "short-circuit withstand": "Short-circuit withstand",
+}
+#: The assumptions' names in plain words.
+ASSUMPTION_LABELS = {
+    "mu": "Breaking-current factor (Ib / Ik'')",
+    "n": "Thermal heat factor",
+    "tk_s": "Fault duration",
+    "tkr_s": "Rated short-time duration",
+    "derating": "Derating",
+    "vd_limit_pct": "Voltage drop limit",
+    "pf": "Power factor",
+    "t_clear_s": "Clearing time",
+    "conductor": "Conductor",
+    "k": "Conductor heat constant",
+    "design_cases": "Design cases",
+    "margin": "Margin",
+    "bays": "Switchgear bays",
+}
+
+
+def _plain(text: str) -> str:
+    """The engine's leading quantity key in plain words ("Ith 21.36 kA" ->
+    "Thermal short-circuit current 21.36 kA")."""
+    for key, words in CRITERION_LABELS.items():
+        if text == key or text.startswith(key + " "):
+            return words + text[len(key) :]
+    return text
+
+
+def _case(case) -> str:
+    """A load-flow case in plain words: "intact" -> "all in service",
+    "N-1:TR1" -> "TR1 out of service"."""
+    case = _text(case)
+    if case is None:
+        return NOT_EVALUATED
+    head, _, rest = case.partition(",")
+    if head == "intact":
+        head = "all in service"
+    elif head.startswith("N-1:"):
+        head = f"{head[4:]} out of service"
+    return head + ("," + rest if rest else "")
+
+
+_BEYOND = re.compile(
+    r"^(?P<q>.+?) (?P<need>[0-9.]+) kA with the (?P<margin>[0-9]+)% margin, above the largest "
+    r"(?P<what>rated short-time current|rated peak) (?P<limit>[0-9.]+) kA at (?P<kv>.+)$"
+)
+
+
+def _switchgear_text(governing, flag) -> str:
+    text = _text(governing)
+    if text is None:
+        return NOT_EVALUATED
+    m = _BEYOND.match(text) if flag == "beyond_ladder" else None
+    if m is None:
+        return _plain(text)
+    largest = (
+        "largest rating"
+        if m["what"] == "rated short-time current"
+        else "largest rated peak"
+    )
+    return (
+        f"Above the largest standard rating: {_plain(m['q'])[0].lower()}{_plain(m['q'])[1:]} {m['need']} kA "
+        f"with the {m['margin']} % margin, {largest} {m['limit']} kA at {m['kv']}"
+    )
+
+
 #: Kept with the run by the DC Grid study: the library the ratings were chosen
 #: from, so every capex in the schedule is priced on that one basis.
 RATINGS_LIBRARY_FILE = "campus_ratings_library.yaml"
@@ -154,9 +248,9 @@ def _transformers(run: Path, spec: dict, lib: dict) -> list:
             and r.max_s_n1_mva >= r.max_s_intact_mva
         )
         flow = (
-            f"N-1 {_fmt(r.max_s_n1_mva, '.1f', ' MVA')}"
+            f"Loading with one transformer out {_fmt(r.max_s_n1_mva, '.1f', ' MVA')}"
             if n1
-            else f"intact {_fmt(r.max_s_intact_mva, '.1f', ' MVA')}"
+            else f"Loading, all in service {_fmt(r.max_s_intact_mva, '.1f', ' MVA')}"
         )
         governing = (
             f"{flow} + {_fmt(r.margin, '.0%')} margin = {_fmt(r.required_unit_mva, '.1f', ' MVA')} per unit, "
@@ -279,9 +373,10 @@ def _switchgear(run: Path, spec: dict) -> list:
                 rating=rated,
                 unit="kA",
                 quantity=n,
-                governing=f"{r.governing}; fault {_fmt(r.tk_s, 'g', ' s')}, rated {_fmt(r.tkr_s, 'g', ' s')}"
+                governing=f"{_plain(r.governing)}; fault duration {_fmt(r.tk_s, 'g', ' s')}, "
+                f"rated duration {_fmt(r.tkr_s, 'g', ' s')}"
                 if rated is not None
-                else _text(r.governing) or NOT_EVALUATED,
+                else _switchgear_text(r.governing, _text(r.flag)),
                 source="computed",
                 declared_rating=_num(r.declared_ka),
                 declared_unit="kA" if _num(r.declared_ka) is not None else None,
@@ -291,6 +386,11 @@ def _switchgear(run: Path, spec: dict) -> list:
             )
         )
     return rows
+
+
+def _assumptions(run: Path) -> list:
+    path = run / cs.RATING_ASSUMPTIONS_JSON
+    return json.loads(path.read_text()) if path.is_file() else []
 
 
 def _cables(run: Path) -> list:
@@ -320,19 +420,30 @@ def _cables(run: Path) -> list:
             "s_min_mm2",
         ),
     )
+    vd_limit = next(
+        (a.get("value") for a in _assumptions(run) if a.get("name") == "vd_limit_pct"),
+        None,
+    )
     rows = []
     for r in cb.itertuples(index=False):
         chosen = _text(r.chosen_id) is not None and _num(r.section_mm2) is not None
         if chosen:
-            gov = (
-                f"{r.governing} {_fmt(r.utilisation, '.0%')}: design "
-                f"{_fmt(_num(r.design_i_ka) * 1e3 if _num(r.design_i_ka) is not None else None, '.0f', ' A')} in "
-                f"{_text(r.design_case) or NOT_EVALUATED}"
-            )
+            design = _num(r.design_i_ka)
+            then = f"design {_fmt(design * 1e3 if design is not None else None, '.0f', ' A')} with {_case(r.design_case)}"
             if r.governing == "voltage drop":
-                gov += f" ({_fmt(r.vd_pct, '.2f', ' %')})"
+                limit = (
+                    f"of the {_fmt(vd_limit, 'g', ' %')} limit"
+                    if _num(vd_limit) is not None
+                    else f"{_fmt(r.utilisation, '.0%')} of the limit"
+                )
+                gov = f"Voltage drop {_fmt(r.vd_pct, '.2f', ' %')} {limit}; {then}"
             elif r.governing == "short-circuit withstand":
-                gov += f" (Ith {_fmt(r.ith_ka, '.1f', ' kA')} needs {_fmt(r.s_min_mm2, '.0f', ' mm2')})"
+                gov = (
+                    f"Short-circuit withstand: thermal current {_fmt(r.ith_ka, '.1f', ' kA')} needs "
+                    f"{_fmt(r.s_min_mm2, '.0f', ' mm2')}; {then}"
+                )
+            else:
+                gov = f"{_plain(str(r.governing))}, {_fmt(r.utilisation, '.0%')} used; {then}"
         else:
             gov = _text(r.governing) or NOT_EVALUATED
         runs = _num(r.runs) if chosen else _num(r.declared_runs)
@@ -412,10 +523,15 @@ def build(run_dir, library_path=None) -> dict:
         missing.append("switchgear and cable ratings: run the DC Grid study again")
     rows += _units(spec)
     rows.sort(key=lambda r: KINDS.index(r["kind"]))
-    path = run / cs.RATING_ASSUMPTIONS_JSON
-    assumptions = json.loads(path.read_text()) if path.is_file() else []
+    assumptions = _assumptions(run)
     if assumptions:
         assumptions.append(BAYS_ASSUMPTION)
+    assumptions = [
+        {**a, "label": ASSUMPTION_LABELS.get(a.get("name"), a.get("name"))}
+        for a in assumptions
+    ]
+    for r in rows:
+        r["kind_label"] = KIND_LABELS[r["kind"]]
     return {
         "rows": rows,
         "assumptions": assumptions,
@@ -445,12 +561,12 @@ def to_xlsx(schedule: dict) -> bytes:
     """Two sheets: ``Schedule`` (the rows, in order) and ``Assumptions``."""
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as xw:
-        pd.DataFrame(schedule["rows"], columns=COLUMNS).rename(columns=_HEAD).to_excel(
-            xw, sheet_name="Schedule", index=False
-        )
+        pd.DataFrame(schedule["rows"], columns=COLUMNS).assign(
+            kind=[KIND_LABELS.get(r["kind"], r["kind"]) for r in schedule["rows"]]
+        ).rename(columns=_HEAD).to_excel(xw, sheet_name="Schedule", index=False)
         pd.DataFrame(
             schedule["assumptions"],
-            columns=["applies_to", "name", "value", "unit", "source"],
+            columns=["applies_to", "label", "value", "unit", "source"],
         ).to_excel(xw, sheet_name="Assumptions", index=False)
     return buf.getvalue()
 

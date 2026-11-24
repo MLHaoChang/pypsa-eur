@@ -186,7 +186,8 @@ def test_every_kind_with_rating_source_and_criterion(tmp_path):
         "genset",
         "bess",
     }
-    assert all(set(r) == set(es.COLUMNS) for r in rows)
+    assert all(set(r) == {*es.COLUMNS, "kind_label"} for r in rows)
+    assert all(r["kind_label"] == es.KIND_LABELS[r["kind"]] for r in rows)
 
     (tr,) = _by(rows, "transformer")
     assert (tr["asset"], tr["rating"], tr["unit"], tr["quantity"], tr["source"]) == (
@@ -197,7 +198,7 @@ def test_every_kind_with_rating_source_and_criterion(tmp_path):
         "computed",
     )
     assert tr["governing"].startswith(
-        "N-1 52.0 MVA + 20% margin = 62.4 MVA per unit, period 2040 hour 19"
+        "Loading with one transformer out 52.0 MVA + 20% margin = 62.4 MVA per unit, period 2040 hour 19"
     )
     assert (tr["declared_rating"], tr["flag"], tr["location"]) == (
         40.0,
@@ -237,7 +238,10 @@ def test_every_kind_with_rating_source_and_criterion(tmp_path):
         20.0,
         "declared_below_chosen",
     )
-    assert mv1["governing"] == "Ith 21.36 kA, period 2040; fault 1 s, rated 1 s"
+    assert (
+        mv1["governing"]
+        == "Thermal short-circuit current 21.36 kA, period 2040; fault duration 1 s, rated duration 1 s"
+    )
     # MV1: TR1, TR2 lv ends, two cable runs, BESS1 = 5 bays (one per connection)
     assert mv1["quantity"] == 5
     assert mv1["library_id"] == "SG_20_31p5"
@@ -252,7 +256,9 @@ def test_every_kind_with_rating_source_and_criterion(tmp_path):
         and cb["source"] == "computed"
         and cb["library_id"].startswith("CB_20_")
     )
-    assert "design 620 A in N-1:TR1, period 2040 hour 19" in cb["governing"]
+    assert (
+        "design 620 A with TR1 out of service, period 2040 hour 19" in cb["governing"]
+    )
     assert cb["declared_rating"] == pytest.approx(2400.0)  # 2 runs x 1.2 kA, in A
     assert cb["flag"] is None
     assert cb["location"] == "MV1 - MV2, 2 km"
@@ -305,7 +311,10 @@ def test_a_run_from_before_ratings_says_what_is_missing(tmp_path):
 
 def test_the_bay_count_is_listed_as_an_assumption(tmp_path):
     out = es.build(_run(tmp_path))
-    assert es.BAYS_ASSUMPTION in out["assumptions"]
+    assert {**es.BAYS_ASSUMPTION, "label": "Switchgear bays"} in out["assumptions"]
+    assert all(
+        a["label"] == es.ASSUMPTION_LABELS[a["name"]] for a in out["assumptions"]
+    )
     assert {a["source"] for a in out["assumptions"] if a["name"] == "bays"} == {
         "assumed"
     }
@@ -317,7 +326,9 @@ def test_the_workbook_rows_equal_the_json_rows(tmp_path):
     head, *body = list(wb["Schedule"].values)
     assert len(body) == len(out["rows"])
     for got, want in zip(body, out["rows"]):
-        assert list(got) == [want[c] for c in es.COLUMNS]
+        assert list(got) == [
+            es.KIND_LABELS[want["kind"]] if c == "kind" else want[c] for c in es.COLUMNS
+        ]
 
 
 def test_the_workbook_has_the_rows_and_the_assumptions(tmp_path):
@@ -415,11 +426,14 @@ def _sizing(run, **kw):
 @pytest.mark.parametrize(
     "kw, flow",
     [
-        ({}, "N-1 52.0 MVA"),
-        ({"max_s_n1_mva": 46.0}, "N-1 46.0 MVA"),  # equal: the outage case is named
-        ({"max_s_n1_mva": 45.0}, "intact 46.0 MVA"),
-        ({"n_minus_1": False}, "intact 46.0 MVA"),
-        ({"max_s_n1_mva": math.nan}, "intact 46.0 MVA"),
+        ({}, "Loading with one transformer out 52.0 MVA"),
+        (
+            {"max_s_n1_mva": 46.0},
+            "Loading with one transformer out 46.0 MVA",
+        ),  # equal: the outage case is named
+        ({"max_s_n1_mva": 45.0}, "Loading, all in service 46.0 MVA"),
+        ({"n_minus_1": False}, "Loading, all in service 46.0 MVA"),
+        ({"max_s_n1_mva": math.nan}, "Loading, all in service 46.0 MVA"),
     ],
 )
 def test_the_transformer_criterion_names_the_case_that_set_it(tmp_path, kw, flow):
@@ -487,14 +501,17 @@ def test_one_rating_table_alone_is_still_missing(tmp_path, keep):
 
 
 @pytest.mark.parametrize(
-    "governing, extra",
+    "governing, words",
     [
-        ("voltage drop", " (2.50 %)"),
-        ("short-circuit withstand", " (Ith 12.0 kA needs 128 mm2)"),
-        ("ampacity", ""),
+        ("voltage drop", "Voltage drop 2.50 % 90% of the limit"),
+        (
+            "short-circuit withstand",
+            "Short-circuit withstand: thermal current 12.0 kA needs 128 mm2",
+        ),
+        ("ampacity", "Current-carrying capacity, 90% used"),
     ],
 )
-def test_the_cable_criterion_text_names_its_number(tmp_path, governing, extra):
+def test_the_cable_criterion_text_names_its_number(tmp_path, governing, words):
     run = tmp_path
     pd.DataFrame(
         [
@@ -525,7 +542,7 @@ def test_the_cable_criterion_text_names_its_number(tmp_path, governing, extra):
     (cb,) = es._cables(run)
     assert (
         cb["governing"]
-        == f"{governing} 90%: design 300 A in intact, period 2030 hour 7{extra}"
+        == f"{words}; design 300 A with all in service, period 2030 hour 7"
     )
 
 
@@ -587,7 +604,10 @@ def test_a_switchgear_beyond_the_ladder_reads(tmp_path):
         and mv1["rating"] is None
         and mv1["capex_eur"] is None
     )
-    assert "above the largest" in mv1["governing"] and "nan" not in mv1["governing"]
+    assert mv1["governing"] == (
+        "Above the largest standard rating: thermal short-circuit current 108.96 kA with the 20 % margin, "
+        "largest rating 40 kA at 20 kV"
+    )
 
 
 def test_a_bus_with_no_fault_level_reads_not_evaluated(tmp_path):
@@ -633,8 +653,8 @@ def test_nan_figures_read_not_evaluated(tmp_path):
     tr.to_csv(run / cs.SIZING_TRAFO_CSV, index=False)
     out = es.build(run)
     (c,) = _by(out["rows"], "cable")
-    assert c["governing"].startswith(
-        f"{c['governing'].split(' not evaluated')[0]} not evaluated: design not evaluated in"
+    assert (
+        "; design not evaluated with " in c["governing"] and "nan" not in c["governing"]
     )
     for t in _by(out["rows"], "transformer"):
         assert t["rating"] is None and t["capex_eur"] is None and t["flag"] is None
@@ -720,3 +740,59 @@ def test_a_study_run_writes_the_ratings_and_keeps_its_library(user_and_db):  # n
         and out["stale"] is False
         and _by(out["rows"], "switchgear")
     )
+
+
+def test_the_voltage_drop_names_its_limit_and_the_case_its_outage(tmp_path):
+    run = _run(tmp_path)
+    cb = pd.read_csv(run / cs.CABLE_RATING_CSV)
+    cb[["governing", "vd_pct", "design_case"]] = [
+        "voltage drop",
+        2.9,
+        "N-1:TR1, period 2040 hour 19",
+    ]
+    cb.to_csv(run / cs.CABLE_RATING_CSV, index=False)
+    (c,) = _by(es.build(run)["rows"], "cable")
+    assert c["governing"].startswith("Voltage drop 2.90 % of the 3 % limit; design ")
+    assert c["governing"].endswith(" with TR1 out of service, period 2040 hour 19")
+
+
+@pytest.mark.parametrize(
+    "engine, words",
+    [
+        ("Ik'' 21.00 kA, period 3", "Initial short-circuit current 21.00 kA, period 3"),
+        ("Ib 21.00 kA, period 3", "Breaking current 21.00 kA, period 3"),
+        ("Ith 21.36 kA, period 3", "Thermal short-circuit current 21.36 kA, period 3"),
+        (
+            "Ith over 3 s referred to 1 s 25.98 kA, period 3",
+            "Thermal short-circuit current over 3 s referred to 1 s 25.98 kA, period 3",
+        ),
+        ("ip 53.74 kA, period 3", "Peak short-circuit current 53.74 kA, period 3"),
+    ],
+)
+def test_every_engine_quantity_reads_in_words(engine, words):
+    assert es._plain(engine) == words
+
+
+def test_the_peak_beyond_the_largest_rating_reads_in_words():
+    text = (
+        "ip 101.00 kA with the 0% margin, above the largest rated peak 100 kA at 33 kV"
+    )
+    assert es._switchgear_text(text, "beyond_ladder") == (
+        "Above the largest standard rating: peak short-circuit current 101.00 kA with the 0 % margin, "
+        "largest rated peak 100 kA at 33 kV"
+    )
+
+
+def test_every_kind_and_assumption_has_words():
+    assert set(es.KIND_LABELS) == set(es.KINDS)
+    from gridspine.static.campus_ratings import (
+        CableAssumptions,
+        SwitchgearAssumptions,
+        assumptions_table,
+    )
+
+    names = {
+        a["name"]
+        for a in assumptions_table(SwitchgearAssumptions(), CableAssumptions())
+    }
+    assert names | {"design_cases", "margin", "bays"} <= set(es.ASSUMPTION_LABELS)
