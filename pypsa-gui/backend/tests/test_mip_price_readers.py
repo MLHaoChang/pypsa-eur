@@ -427,3 +427,16 @@ def test_compare_s_record_decides_even_when_the_config_cannot_be_read(tmp_path, 
         pickle.dumps({"last_solve_settings": {"price_limit": DUALS_NOT_MARGINAL}})
     )
     assert _price_limit(tmp_path, lp) == DUALS_NOT_MARGINAL
+
+
+def test_an_lp_record_does_not_open_an_unreadable_config(tmp_path):
+    """Mutant kill: a record without `price_limit` (an LP solve's) is no judgement."""
+    import pickle
+
+    from routers.compare import _price_limit
+
+    (tmp_path / "solver_config.json").write_text("{not json")
+    (tmp_path / "results_state.pkl").write_bytes(
+        pickle.dumps({"last_solve_settings": {"voll_eur_per_mwh": 0.0}})
+    )
+    assert _price_limit(tmp_path, _process_unit_net()) == SOLVER_CONFIG_UNREADABLE
