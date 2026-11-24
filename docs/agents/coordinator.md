@@ -16,7 +16,7 @@ UX reviewer (28; UI coherence gate, owner decision 2026-10-20): `session_01G7qCu
 
 UX reviewer 2 (area routed to UX (28) from 2026-11-24 08:50Z, after UX 2 (6) rotated out; template-e2e, ux-next, ui-cohesion, CS-B and guided-results UI reviews; owner decisions SCALE-1, SCALE-4): `session_01G7qCumS1PHmhWWrSDM5zsb`
 
-Engine gatekeeper B4 (area routed to GK B2 (6) from 2026-11-24 17:37Z (GK B2 (5) from 00:41Z, after B4 (4) rotated out); owner decision SCALE-4): `session_01G7qCunsKRggQte5DUeTMBt`
+Engine gatekeeper B4 (area routed to GK B2 (5) from 2026-11-24 00:41Z, GK B2 (6) from 17:37Z, after B4 (4) rotated out; owner decision SCALE-4): `session_01G7qCunsKRggQte5DUeTMBt`
 
 UX reviewer 3 (area routed to UX (28) from 2026-11-24 00:48Z, after UX 3 (3) rotated out; UI reviews from 2026-11-20 11:30Z and template walkthroughs; owner decisions SCALE-4, WALK-CADENCE-1): `session_01G7qCumS1PHmhWWrSDM5zsb`
 

@@ -1,0 +1,22 @@
+{
+ "entries": [
+  {
+   "id": "energization_timeline",
+   "title": "Demand against energization over time",
+   "disposition": "unbuilt",
+   "reason": "Demand against energization per period is not in chat yet; a later slice adds the chat tool. Until then, the Site card in Guided and Grid readiness in Expert Issues show the chart.",
+   "page": "Site card (Guided) and Issues (Expert)",
+   "panel": null,
+   "keywords": [
+    "timeline",
+    "energization"
+   ],
+   "routes": [
+    [
+     "GET",
+     "/api/projects/{name}/flow/energization_timeline"
+    ]
+   ]
+  }
+ ]
+}
