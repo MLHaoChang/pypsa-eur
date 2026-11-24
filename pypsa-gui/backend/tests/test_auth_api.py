@@ -318,3 +318,89 @@ def test_reset_password_consumes_token_and_revokes_existing_sessions(
     assert stored_token.used_at is not None
     assert sessions
     assert all(session.revoked_at is not None for session in sessions)
+
+
+def _login(client, user, password="secret-pass"):
+    response = client.post("/api/auth/login", json={"email": user.email, "password": password})
+    assert response.status_code == 200
+    client.headers["X-CSRF-Token"] = response.json()["csrf_token"]
+    return response
+
+
+def test_account_lists_workspace_with_role(auth_client, auth_session_local) -> None:
+    organization = _create_org(auth_session_local, name="Northwind")
+    user = _create_user(auth_session_local, password="secret-pass")
+    _add_membership(auth_session_local, user_id=user.id, org_id=organization.id, role="member")
+    _login(auth_client, user)
+
+    body = auth_client.get("/api/auth/account").json()
+
+    assert body["email"] == user.email
+    assert body["workspaces"] == [
+        {"org_id": str(organization.id), "name": "Northwind", "role": "member"}
+    ]
+
+
+def test_account_requires_auth(auth_client) -> None:
+    assert auth_client.get("/api/auth/account").status_code == 401
+
+
+def test_change_password_ends_other_sessions_and_swaps_credentials(
+    auth_client, auth_session_local, user_with_password
+) -> None:
+    _login(auth_client, user_with_password)
+    with TestClient(main.app) as other:
+        _login(other, user_with_password)
+        assert other.get("/api/auth/me").status_code == 200
+
+        response = auth_client.post(
+            "/api/auth/change-password",
+            json={"current_password": "secret-pass", "new_password": "brand-new-pass"},
+        )
+
+        assert response.status_code == 200
+        assert other.get("/api/auth/me").status_code == 401
+    assert auth_client.get("/api/auth/me").status_code == 200
+    with TestClient(main.app) as fresh:
+        old = fresh.post(
+            "/api/auth/login",
+            json={"email": user_with_password.email, "password": "secret-pass"},
+        )
+        new = fresh.post(
+            "/api/auth/login",
+            json={"email": user_with_password.email, "password": "brand-new-pass"},
+        )
+    assert old.status_code == 401
+    assert new.status_code == 200
+
+
+def test_change_password_rejects_wrong_current_password(
+    auth_client, auth_session_local, user_with_password
+) -> None:
+    _login(auth_client, user_with_password)
+
+    response = auth_client.post(
+        "/api/auth/change-password",
+        json={"current_password": "not-it", "new_password": "brand-new-pass"},
+    )
+
+    assert response.status_code == 400
+    with auth_session_local() as db:
+        stored = db.get(User, user_with_password.id)
+        assert verify_password("secret-pass", stored.password_hash)
+
+
+def test_change_password_rejects_weak_new_password(
+    auth_client, auth_session_local, user_with_password
+) -> None:
+    _login(auth_client, user_with_password)
+
+    response = auth_client.post(
+        "/api/auth/change-password",
+        json={"current_password": "secret-pass", "new_password": "short"},
+    )
+
+    assert response.status_code == 422
+    with auth_session_local() as db:
+        stored = db.get(User, user_with_password.id)
+        assert verify_password("secret-pass", stored.password_hash)

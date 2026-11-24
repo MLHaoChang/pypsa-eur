@@ -3,6 +3,7 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
 import UserMenu from './UserMenu'
 import { useMemoryStore } from '../store/memoryStore'
 
@@ -19,7 +20,7 @@ vi.mock('../auth/AuthProvider', () => ({
 afterEach(() => { cleanup(); useMemoryStore.setState({ open: false, editId: null }) })
 
 function renderMenu() {
-  return render(<QueryClientProvider client={new QueryClient()}><UserMenu /></QueryClientProvider>)
+  return render(<QueryClientProvider client={new QueryClient()}><MemoryRouter><UserMenu /></MemoryRouter></QueryClientProvider>)
 }
 
 it('Esc on Memory returns focus to the account menu button', async () => {

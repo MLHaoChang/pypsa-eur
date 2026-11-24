@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import { Brain, ChevronDown, LogOut, User as UserIcon } from 'lucide-react'
 import { useAuth } from '../auth/AuthProvider'
@@ -81,6 +82,14 @@ export default function UserMenu() {
           </div>
 
           <div className="my-1 border-t border-border" />
+          <Link
+            to="/account"
+            onClick={() => setOpen(false)}
+            data-testid="user-menu-account"
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[12px] text-text hover:bg-bg-2 transition-colors"
+          >
+            <UserIcon size={13} className="shrink-0" /> Account
+          </Link>
           <button
             onClick={() => { setOpen(false); buttonRef.current?.focus(); useMemoryStore.getState().openMemory() }}
             data-testid="user-menu-memory"
