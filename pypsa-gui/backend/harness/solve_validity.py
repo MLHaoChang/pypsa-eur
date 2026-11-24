@@ -209,6 +209,55 @@ def price_limit(cls) -> str | None:
     return None
 
 
+# What a reader outside checked answers says in place of a MIP's bus prices
+# (assistant-assurance 17).
+MIP_PRICES_TEXT = "Not available on an integer (MIP) solve: it has no marginal prices."
+
+
+def mip_price_limit(n, config) -> str | None:
+    """`DUALS_NOT_MARGINAL` when `buses_t.marginal_price` holds a MIP's zeros, else None.
+
+    The one gate for every reader outside checked answers (assistant-assurance
+    17). It is `classify`'s own MIP test, so a reader and a checked answer never
+    disagree on the solve kind; unlike `classify` it also gates a stochastic run
+    that is a MIP. `config` is the solver config of the solve that wrote the
+    prices (process-UC mode decides whether commitment stayed binary); `None`
+    reads as the defaults.
+    """
+    return DUALS_NOT_MARGINAL if is_mip(n, config) else None
+
+
+# The solve's config could not be read, so whether it was a MIP is not known.
+SOLVER_CONFIG_UNREADABLE = "solver_config_unreadable"
+
+
+def solved_price_limit(state, n) -> str | None:
+    """`mip_price_limit` for a run's solver state: keyed on the solve that wrote the prices.
+
+    `solver_service` records the limit in `last_solve_settings["price_limit"]`,
+    judged with the config that solve used, only when it is set. Without that
+    record (an LP solve, or a solve from before it) `n` is judged with the
+    current config, which errs only toward withholding, except for a MIP solved
+    before the record existed whose config has since been changed to an LP.
+    """
+    settings = state.get("last_solve_settings") or {}
+    if isinstance(settings, dict) and settings.get("price_limit"):
+        return settings["price_limit"]
+    return mip_price_limit(n, state.get("solver_config"))
+
+
+def price_limit_without_config(n) -> str | None:
+    """`mip_price_limit` when the solve's config cannot be read: fails closed.
+
+    Only the process-UC mode in the config can turn a committable network into
+    an LP, so a network with no committable or modular unit is an LP whatever
+    the config, and one that is a MIP under the defaults is reported as a MIP.
+    """
+    if not (_committable(n) or _modular(n)):
+        return None
+    return DUALS_NOT_MARGINAL if is_mip(n, None) else SOLVER_CONFIG_UNREADABLE
+
+
 def _objective(n):
     """The objective as the solver bounded it, in user units: solver_service
     reverses its objective scale on `n.objective` right after the solve."""

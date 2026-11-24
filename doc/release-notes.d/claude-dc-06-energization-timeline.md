@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Data-centre projects show demand against energization per period (energized grid import and committed on-site firm capacity against peak demand, shortfall in words), in Guided and Expert, redrawn from inputs without a run.
