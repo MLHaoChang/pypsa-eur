@@ -6,6 +6,7 @@ Hand check: gas carries 0.20 t per MWh of fuel; a genset at the library heat
 rate (2.8 MWh fuel per MWh el) emits 0.20 * 2.8 = 0.56 t per MWh el, so 10 MW
 for one hour is 5.6 t. With the default efficiency of 1 it was 2.0 t.
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -29,7 +30,9 @@ def _gas_gens(n):
     return [g for g in n.generators.index if n.generators.at[g, "carrier"] == "gas"]
 
 
-@pytest.mark.parametrize("builder", [T.build_eh_datacenter, T.build_eh_datacenter_staged])
+@pytest.mark.parametrize(
+    "builder", [T.build_eh_datacenter, T.build_eh_datacenter_staged]
+)
 def test_gas_gensets_carry_efficiency_one_over_heat_rate(builder):
     n = builder()
     gens = _gas_gens(n)
@@ -43,13 +46,16 @@ def test_genset_co2_is_0_56_t_per_mwh_el():
     n.generators_t.p = pd.DataFrame(0.0, index=n.snapshots, columns=n.generators.index)
     n.generators_t.p.loc[n.snapshots[0], "genset_1"] = 10.0  # 10 MW for one hour
     res = _compute_emissions_summary(n, [], False, True)
-    w = float(_build_snapshot_weights(n, "generators").iloc[0])  # the week stands for a year
+    w = float(
+        _build_snapshot_weights(n, "generators").iloc[0]
+    )  # the week stands for a year
     assert res.by_carrier_kt["gas"].total == pytest.approx(5.6 * w / 1000.0)
     assert res.intensity_kg_per_mwh.total == pytest.approx(560.0)
 
 
 def test_load_spec_heat_rate_is_used():
     from models.flex_archetypes import DataCentreLoadSpec  # noqa: F401
+
     n = T.build_eh_datacenter()
     assert n.generators.at["genset_1", "efficiency"] == pytest.approx(1 / 2.8)
 
@@ -68,11 +74,16 @@ def test_staged_grid_intensity_is_per_period_and_counted():
 
 def test_results_emissions_agrees_with_compare_on_the_staged_grid():
     from services.results.emissions import compute_emissions
+
     n = T.build_eh_datacenter_staged()
     n.generators_t.p = pd.DataFrame(0.0, index=n.snapshots, columns=n.generators.index)
     n.generators_t.p["grid_supply"] = 1.0
     n.generators_t.p["genset_1"] = 2.0
     cmp_ = _compute_emissions_summary(n, [], True, True)
-    res = compute_emissions(n, "lopf", result_df=lambda n_, comp, attr, src: getattr(getattr(n_, comp), attr))
+    res = compute_emissions(
+        n,
+        "lopf",
+        result_df=lambda n_, comp, attr, src: getattr(getattr(n_, comp), attr),
+    )
     total = res["total_tCO2"] if isinstance(res, dict) else res.total_tCO2
     assert total == pytest.approx(cmp_.total_kt.total * 1000.0, rel=1e-6)
