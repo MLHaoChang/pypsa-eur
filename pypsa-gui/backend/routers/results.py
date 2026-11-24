@@ -1020,7 +1020,10 @@ def get_prices(
     if not _dispatch_ready(n):
         return _not_solved()
     try:
-        payload = compute_prices(n, source, from_, to_, result_df=_result_df)
+        from harness.solve_validity import solved_price_limit
+
+        payload = compute_prices(n, source, from_, to_, result_df=_result_df,
+                                 price_limit=solved_price_limit(_state, n))
     except Exception:  # the service logged it; the route keeps its 204
         return _not_solved()
     return _not_solved() if payload is None else payload
@@ -1048,7 +1051,10 @@ def get_price_drivers(threshold: float = 2000.0, limit: int = 200):
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return _not_solved()
-    payload = compute_price_drivers(n, threshold, limit)
+    from harness.solve_validity import solved_price_limit
+
+    payload = compute_price_drivers(n, threshold, limit,
+                                    price_limit=solved_price_limit(_state, n))
     return _not_solved() if payload is None else payload
 
 

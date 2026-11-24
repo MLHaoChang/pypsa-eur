@@ -41,7 +41,13 @@ from services.results.load_frames import _apply_merit_order_correction  # noqa: 
 # its service caller now and the router imports it back.
 
 
-def compute_prices(n, source, from_, to_, *, result_df):
+def withheld(price_limit: str) -> dict:
+    """The price views' answer when the solve's prices are not marginal prices:
+    the same shape as the prices digest's (`prices_digest.digest`)."""
+    return {"status": "unavailable", "reason": price_limit}
+
+
+def compute_prices(n, source, from_, to_, *, result_df, price_limit=None):
     """
     Bus marginal prices as a (windowable) time-series payload.
 
@@ -49,8 +55,14 @@ def compute_prices(n, source, from_, to_, *, result_df):
     lookup, the `_dispatch_ready` gate and the `_state` reads. Returns the
     payload dict, or `None` where there is nothing to show; an internal
     exception is logged and raised (the route answers 204).
+
+    `price_limit` (assistant-assurance 17) is the limit of the solve that wrote
+    the prices: on an integer (MIP) solve they are not marginal prices, so the
+    series and the generator-cost fallback are withheld with the reason.
     """
     import numpy as np
+    if price_limit:
+        return withheld(price_limit)
     try:
         df = result_df(n, "buses_t", "marginal_price", source)
         if df is None or df.empty:
@@ -166,15 +178,18 @@ def compute_prices(n, source, from_, to_, *, result_df):
 
 
 
-def compute_price_drivers(n, threshold, limit):
+def compute_price_drivers(n, threshold, limit, *, price_limit=None):
     """
     Snapshots whose price exceeds `threshold`, with the marginal unit.
 
     Lifted from `routers.results.get_price_drivers`, which keeps the network
     lookup, the `_dispatch_ready` gate and the `_state` reads. Returns the
-    payload dict, or `None` where the handler returns 204.
+    payload dict, or `None` where the handler returns 204. On a solve with a
+    `price_limit` (a MIP) there is no marginal unit to name: withheld.
     """
     import math
+    if price_limit:
+        return withheld(price_limit)
     try:
         prices = n.buses_t.marginal_price
         if prices.empty:
