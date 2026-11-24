@@ -644,6 +644,11 @@ function TrafoVerdict({ t, bought }: { t: TransformerSizing; bought: InvestmentR
   )
 }
 
+/** A check row with no limit never reads pass: it reads "not checked". */
+export function passNeedsLimit(s: CheckStatus, limit: number | null | undefined, lo?: number | null, hi?: number | null): CheckStatus {
+  return s === 'pass' && limit == null && (lo == null || hi == null) ? 'unknown' : s
+}
+
 function StatusTag({ s, detail }: { s: CheckStatus; detail?: string | null }) {
   // unknown is "no limit" only when the profile sets none; a missing input is "not checked", its detail says which
   const text = s === 'unknown' && detail === NO_LIMIT_DETAIL ? 'no limit' : STATUS_TEXT[s]
@@ -707,25 +712,29 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
                 const w = c as InvestedComplianceRow
                 const value = invested ? w.value_with_measures : c.value
                 const detail = invested ? w.detail_with_measures : c.detail
+                // the limit the displayed verdict used: the re-solved one when it was kept
+                const limit = invested ? (w.limit_with_measures ?? c.limit) : c.limit
+                const limitMin = invested ? (w.limit_min_with_measures ?? c.limit_min) : c.limit_min
+                const limitMax = invested ? (w.limit_max_with_measures ?? c.limit_max) : c.limit_max
                 const at = invested
                   ? where(w.worst_period_with_measures, w.worst_hour_with_measures, w.worst_case_with_measures)
                   : where(c.worst_period, c.worst_hour, c.worst_case)
                 return (
                   <tr key={c.check} data-testid={`compliance-${c.check}`} className="border-t border-border">
                     <td className="py-1 pr-3 whitespace-nowrap align-top">{CHECK_LABEL[c.check] ?? c.check}</td>
-                    <td className="pr-3 align-top"><StatusTag s={c.status_as_is} detail={c.detail} /></td>
-                    <td className="pr-3 align-top"><StatusTag s={c.status_with_measures} detail={detail} /></td>
+                    <td className="pr-3 align-top"><StatusTag s={passNeedsLimit(c.status_as_is, c.limit, c.limit_min, c.limit_max)} detail={c.detail} /></td>
+                    <td className="pr-3 align-top"><StatusTag s={passNeedsLimit(c.status_with_measures, limit, limitMin, limitMax)} detail={detail} /></td>
                     <td data-testid={`compliance-worst-${c.check}`} className="pr-3 whitespace-nowrap align-top tabular-nums">
                       {num(value, 3)} {c.unit} <span className="block text-muted">{at}</span>
                     </td>
                     <td data-testid={`compliance-limit-${c.check}`} className="pr-3 whitespace-nowrap align-top tabular-nums text-muted">
                     {/* a unitless row (the power factor) reads back from the CSV with a null unit */}
                     {/* a band with a negative edge reads "−a to b": an en dash beside a minus is hard to read */}
-                    {c.limit_min != null && c.limit_max != null
-                      ? (c.limit_min < 0
-                        ? `${bandEdge(c.limit_min)} to ${bandEdge(c.limit_max)} ${c.unit ?? ''}`
-                        : `${num(c.limit_min, 3)}–${num(c.limit_max, 3)} ${c.unit ?? ''}`).trim()
-                      : `${num(c.limit, 3)} ${c.unit ?? ''}`.trim()}
+                    {limitMin != null && limitMax != null
+                      ? (limitMin < 0
+                        ? `${bandEdge(limitMin)} to ${bandEdge(limitMax)} ${c.unit ?? ''}`
+                        : `${num(limitMin, 3)}–${num(limitMax, 3)} ${c.unit ?? ''}`).trim()
+                      : `${num(limit, 3)} ${c.unit ?? ''}`.trim()}
                   </td>
                     <td className="align-top min-w-[16rem]">
                       <div>{detail}</div>

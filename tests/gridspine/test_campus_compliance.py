@@ -133,6 +133,36 @@ def test_switchgear_with_a_rating_is_judged_and_without_one_is_not_rated():
     assert report(short_circuit=sc.assign(adequate=["True", "False"])).loc["switchgear", "status_as_is"] == "fail"
 
 
+def test_a_row_without_a_limit_never_reads_pass():
+    sc = inputs()["short_circuit"].assign(rated_ka=[31.5, 25.0], adequate=[True, True], rating_source=["library", "library"])
+    row = report(short_circuit=sc).loc["switchgear"]
+    assert row["status_as_is"] == "pass" and row["limit"] == 31.5 and "library" in row["detail"]
+    from gridspine.static.campus_compliance import NO_LIMIT_NOT_CHECKED, no_pass_without_limit
+    frame = report(short_circuit=sc).reset_index().assign(limit=float("nan"))
+    out = no_pass_without_limit(frame.assign(limit_min=float("nan"), limit_max=float("nan")))
+    bad = out[out["status_as_is"] == "pass"]
+    assert bad.empty and (out.loc[out["check"] == "switchgear", "status_as_is"] == "unknown").all()
+    assert NO_LIMIT_NOT_CHECKED in out.set_index("check").at["switchgear", "detail"]
+
+
+@pytest.mark.parametrize("status, limit, lo, hi, want", [
+    ("pass", 31.5, None, None, "pass"),                 # a limit: stays
+    ("pass", None, 0.95, 1.05, "pass"),                 # a whole band: stays
+    ("pass", None, None, None, "unknown"),              # nothing to pass against
+    ("pass", None, 0.95, None, "unknown"),              # half a band is no band
+    ("fail", None, None, None, "fail"),                 # a fail is never hidden
+    ("not_rated", None, None, None, "not_rated"),
+])
+def test_the_no_limit_guard_per_row(status, limit, lo, hi, want):
+    from gridspine.static.campus_compliance import NO_LIMIT_NOT_CHECKED, no_pass_without_limit
+    nan = float("nan")
+    frame = pd.DataFrame([{"check": "x", "status_as_is": status, "detail": "d", "limit": nan if limit is None else limit,
+                           "limit_min": nan if lo is None else lo, "limit_max": nan if hi is None else hi}])
+    row = no_pass_without_limit(frame).iloc[0].to_dict()
+    assert row["status_as_is"] == want
+    assert row["detail"] == (f"{NO_LIMIT_NOT_CHECKED}; d" if want == "unknown" and status == "pass" else "d")
+
+
 def test_the_profiles_a_study_can_choose_from_are_listed_with_titles():
     codes = list_grid_codes()
     assert "eu_rfg_dcc_ce" in codes and codes["eu_rfg_dcc_ce"].startswith("EU RfG")
