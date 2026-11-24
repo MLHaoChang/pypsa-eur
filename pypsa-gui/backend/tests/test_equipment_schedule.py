@@ -3,6 +3,7 @@ its rating, quantity, governing criterion, source and capex; declared
 ratings below the chosen ones flagged, never overwritten."""
 
 import io
+import json
 import math
 
 import openpyxl
@@ -16,6 +17,7 @@ from gridspine.static.campus_flow import SizingCriteria
 from services import campus_electrical_service as ce
 from services import equipment_schedule as es
 from services import project_registry
+from tests.test_campus_electrical_service import hub_network, user_and_db  # noqa: F401 - fixtures
 
 
 def t(v, source="assumed"):
@@ -351,6 +353,7 @@ def test_no_study_yet_is_an_empty_schedule_that_says_so(client, hub):
         "rows": [],
         "assumptions": [],
         "missing": ["no DC Grid study has run: run it in Campus electrical"],
+        "stale": False,
     }
     x = client.get(BASE + ".xlsx")
     assert x.status_code == 200
@@ -523,4 +526,197 @@ def test_the_cable_criterion_text_names_its_number(tmp_path, governing, extra):
     assert (
         cb["governing"]
         == f"{governing} 90%: design 300 A in intact, period 2030 hour 7{extra}"
+    )
+
+
+# --------------------------------------------------------------------------
+# GK A on #1981: every run shape reads, ids stay text, NaN never reads as judged
+# --------------------------------------------------------------------------
+
+
+def _dumps(out):
+    return json.dumps(out, allow_nan=False)  # what the route serialises; NaN would 500
+
+
+def test_a_run_that_rated_no_cable_reads(tmp_path):
+    # writer -> reader: no load flow reached the cable, so rate_campus writes the not_rated shape
+    run = _run(tmp_path, rated=False)
+    pd.DataFrame(columns=["period", "hour", "case", "cable", "i_ka"]).to_csv(
+        run / cs.LF_LINE_CSV, index=False
+    )
+    cs.rate_campus(run, criteria=SizingCriteria(margin=0.2))
+    assert "conductor" not in pd.read_csv(run / cs.CABLE_RATING_CSV).columns
+    out = es.build(run)
+    (cb,) = _by(out["rows"], "cable")
+    assert cb["rating"] is None and cb["capex_eur"] is None and cb["library_id"] is None
+    assert (
+        cb["governing"] == "no load flow reached this cable"
+        and cb["flag"] == "not_rated"
+    )
+    assert cb["quantity"] == 2 and cb["unit"] == "mm2"
+    assert cb["declared_rating"] == pytest.approx(2400.0) and cb["declared_unit"] == "A"
+    _dumps(out)
+
+
+def test_a_cable_no_library_cable_passes_reads(tmp_path):
+    run = _run(tmp_path, rated=False)
+    pd.DataFrame(
+        [(2040, 19, "N-1:TR1", "CB1", 50.0)],
+        columns=["period", "hour", "case", "cable", "i_ka"],
+    ).to_csv(run / cs.LF_LINE_CSV, index=False)
+    cs.rate_campus(run, criteria=SizingCriteria(margin=0.2))
+    (cb,) = _by(es.build(run)["rows"], "cable")
+    assert (
+        cb["flag"] == "no_library_cable"
+        and cb["rating"] is None
+        and cb["capex_eur"] is None
+    )
+    assert cb["governing"].startswith("no library cable at 20 kV passes")
+    assert cb["quantity"] == 2  # the declared runs
+
+
+def test_a_switchgear_beyond_the_ladder_reads(tmp_path):
+    run = _run(tmp_path, rated=False)
+    sc = pd.read_csv(run / cs.SHORT_CIRCUIT_CSV)
+    sc.loc[sc.bus == "MV1", ["ikss_max_ka", "ip_max_ka"]] = [90.0, 200.0]
+    sc.to_csv(run / cs.SHORT_CIRCUIT_CSV, index=False)
+    cs.rate_campus(run, criteria=SizingCriteria(margin=0.2))
+    mv1 = next(r for r in es.build(run)["rows"] if r["asset"] == "MV1 switchgear")
+    assert (
+        mv1["flag"] == "beyond_ladder"
+        and mv1["rating"] is None
+        and mv1["capex_eur"] is None
+    )
+    assert "above the largest" in mv1["governing"] and "nan" not in mv1["governing"]
+
+
+def test_a_bus_with_no_fault_level_reads_not_evaluated(tmp_path):
+    run = _run(tmp_path, rated=False)
+    sc = pd.read_csv(run / cs.SHORT_CIRCUIT_CSV)
+    sc.loc[sc.bus == "MV1", "ikss_max_ka"] = math.nan
+    sc.to_csv(run / cs.SHORT_CIRCUIT_CSV, index=False)
+    cs.rate_campus(run, criteria=SizingCriteria(margin=0.2))
+    out = es.build(run)
+    mv1 = next(r for r in out["rows"] if r["asset"] == "MV1 switchgear")
+    assert (
+        mv1["rating"] is None and mv1["capex_eur"] is None and mv1["library_id"] is None
+    )
+    assert mv1["flag"] == "not_evaluated"
+    assert mv1["governing"] == "no fault level was computed at this bus"
+    (cb,) = _by(out["rows"], "cable")  # MV1 is the cable's from bus
+    assert cb["flag"] == "withstand_not_evaluated"
+    assert "nan" not in _dumps(out).lower()
+
+
+def test_ids_and_names_stay_text(tmp_path):
+    run = _run(tmp_path)
+    sg = pd.read_csv(run / cs.SWITCHGEAR_RATING_CSV, dtype={"bus": str})
+    sg.loc[sg.bus == "MV1", ["bus", "chosen_id"]] = ["010", "1234"]
+    sg.to_csv(run / cs.SWITCHGEAR_RATING_CSV, index=False)
+    cb = pd.read_csv(run / cs.CABLE_RATING_CSV)
+    cb[["cable", "chosen_id"]] = ["010", "1234"]
+    cb.to_csv(run / cs.CABLE_RATING_CSV, index=False)
+    rows = es.build(run)["rows"]
+    sw = next(r for r in rows if r["asset"] == "010 switchgear")
+    assert sw["library_id"] == "1234" and sw["location"].startswith("010 (")
+    (c,) = _by(rows, "cable")
+    assert (c["asset"], c["library_id"]) == ("010", "1234")
+
+
+def test_nan_figures_read_not_evaluated(tmp_path):
+    run = _run(tmp_path)
+    cb = pd.read_csv(run / cs.CABLE_RATING_CSV)
+    cb[["utilisation", "design_i_ka"]] = math.nan
+    cb.to_csv(run / cs.CABLE_RATING_CSV, index=False)
+    tr = pd.read_csv(run / cs.SIZING_TRAFO_CSV)
+    tr["recommended_unit_mva"] = math.nan
+    tr.to_csv(run / cs.SIZING_TRAFO_CSV, index=False)
+    out = es.build(run)
+    (c,) = _by(out["rows"], "cable")
+    assert c["governing"].startswith(
+        f"{c['governing'].split(' not evaluated')[0]} not evaluated: design not evaluated in"
+    )
+    for t in _by(out["rows"], "transformer"):
+        assert t["rating"] is None and t["capex_eur"] is None and t["flag"] is None
+    assert "nan" not in _dumps(out).lower()
+    es.to_xlsx(out)
+
+
+def test_each_declared_rating_names_its_unit(tmp_path):
+    rows = es.build(_run(tmp_path))["rows"]
+    units = {
+        r["kind"]: r["declared_unit"] for r in rows if r["declared_rating"] is not None
+    }
+    assert units == {"transformer": "MVA", "switchgear": "kA", "cable": "A"}
+    assert all(r["declared_unit"] is None for r in rows if r["declared_rating"] is None)
+
+
+def test_the_schedule_prices_from_the_library_the_study_kept(tmp_path):
+    from gridspine.templates.campus_assets import load_asset_library
+
+    run = _run(tmp_path)
+    lib = load_asset_library()
+    for e in lib["transformers"]:
+        e["capex_eur"] = {"value": 7.0, "source": "assumed"}
+    (run / es.RATINGS_LIBRARY_FILE).write_text(yaml.safe_dump(lib))
+    priced = [
+        t["capex_eur"]
+        for t in _by(es.build(run)["rows"], "transformer")
+        if t["capex_eur"]
+    ]
+    assert priced and all(
+        c == pytest.approx(7.0 * t)
+        for c, t in zip(
+            priced,
+            [
+                t["quantity"]
+                for t in _by(es.build(run)["rows"], "transformer")
+                if t["capex_eur"]
+            ],
+        )
+    )
+
+
+def test_a_changed_library_marks_the_schedule_stale(client, hub, monkeypatch, tmp_path):
+    run = _run(tmp_path)
+    monkeypatch.setattr(ce, "campus_dir", lambda project: tmp_path)
+    monkeypatch.setattr(ce, "_stale", lambda project, d: False)
+    (run / es.RATINGS_LIBRARY_FILE).write_bytes(
+        ce.effective_library(tmp_path).read_bytes()
+    )
+    assert client.get(BASE).json()["stale"] is False
+    changed = (
+        ce.effective_library(tmp_path).read_bytes()
+        + b"\n# a price edited since the study ran\n"
+    )
+    (run / es.RATINGS_LIBRARY_FILE).write_bytes(changed)
+    assert client.get(BASE).json()["stale"] is True
+    (run / es.RATINGS_LIBRARY_FILE).unlink()
+    monkeypatch.setattr(ce, "_stale", lambda project, d: True)
+    assert client.get(BASE).json()["stale"] is True
+
+
+def test_a_study_run_writes_the_ratings_and_keeps_its_library(user_and_db):  # noqa: F811 - the fixture
+    db, user = user_and_db
+    row = project_registry.create_root(db, user, "Rated Hub")
+    hub_network(priced=True).export_to_netcdf(
+        str(project_registry.ensure_project_dir(row) / "network.nc")
+    )
+    ce.draft(row)
+    ce.run(row, {"k": 1, "pf": 0.95, "margin": 0.1, "n_minus_1": True})
+    run = ce.campus_dir(row) / "run"
+    for name in (
+        cs.SWITCHGEAR_RATING_CSV,
+        cs.CABLE_RATING_CSV,
+        cs.RATING_ASSUMPTIONS_JSON,
+    ):
+        assert (run / name).is_file(), name
+    assert (run / es.RATINGS_LIBRARY_FILE).read_bytes() == ce.effective_library(
+        ce.campus_dir(row)
+    ).read_bytes()
+    out = es.for_project(row)
+    assert (
+        out["missing"] == []
+        and out["stale"] is False
+        and _by(out["rows"], "switchgear")
     )

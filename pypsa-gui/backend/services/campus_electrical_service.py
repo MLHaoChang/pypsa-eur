@@ -2015,7 +2015,11 @@ def run(project, settings: dict, *, progress=None, should_stop=None) -> dict:
                 stage("size")
                 cs.size_campus(work, criteria, profile=s["profile"], pf=s["pf"], profile_dirs=profile_dirs)
                 # DC review 09: switchgear and cable ratings chosen from this sizing
-                cs.rate_campus(work, _effective_library(d), criteria=criteria)
+                # ... from a copy of the library kept with the run, so the schedule prices on that one basis
+                from services.equipment_schedule import RATINGS_LIBRARY_FILE
+                kept = work / RATINGS_LIBRARY_FILE
+                kept.write_bytes(_effective_library(d).read_bytes())
+                cs.rate_campus(work, kept, criteria=criteria)
                 (work / PROFILE_USED_FILE).write_text(json.dumps(
                     {"profile": s["profile"], "sha256": profile_fingerprint(project, s["profile"])}))
                 stage("harmonic_scan")
