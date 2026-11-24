@@ -3,7 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import AccountPage from './AccountPage'
+import AccountPage, { roleLabel } from './AccountPage'
 import { authApi } from '../api/auth'
 
 vi.mock('../auth/AuthProvider', () => ({ useAuth: () => ({ user: { email: 'a@example.com' } }) }))
@@ -19,6 +19,14 @@ function renderPage() {
   )
 }
 
+describe('roleLabel', () => {
+  it('maps stored roles to plain words and passes unknown ones through', () => {
+    expect(roleLabel('admin')).toBe('Admin')
+    expect(roleLabel('member')).toBe('Member')
+    expect(roleLabel('viewer')).toBe('viewer')
+  })
+})
+
 describe('AccountPage', () => {
   beforeEach(() => {
     vi.mocked(authApi.account).mockResolvedValue({
@@ -31,7 +39,7 @@ describe('AccountPage', () => {
   it('shows the read-only email and the workspace with its role', async () => {
     renderPage()
     expect(await screen.findByText('Northwind')).toBeTruthy()
-    expect(screen.getByText('admin')).toBeTruthy()
+    expect(screen.getByText('Admin')).toBeTruthy()
     expect(screen.getByLabelText('Email').hasAttribute('readonly')).toBe(true)
   })
 
@@ -69,5 +77,23 @@ describe('AccountPage', () => {
     await userEvent.type(screen.getByLabelText('Confirm new password'), 'new-password-1')
     await userEvent.click(screen.getByRole('button', { name: 'Change password' }))
     expect((await screen.findByRole('alert')).textContent).toContain('Current password is incorrect')
+  })
+
+  it('clears the success line when the user types again', async () => {
+    vi.mocked(authApi.changePassword).mockResolvedValue({ ok: true })
+    renderPage()
+    await userEvent.type(screen.getByLabelText('Current password'), 'old-password')
+    await userEvent.type(screen.getByLabelText('New password'), 'new-password-1')
+    await userEvent.type(screen.getByLabelText('Confirm new password'), 'new-password-1')
+    await userEvent.click(screen.getByRole('button', { name: 'Change password' }))
+    await screen.findByRole('status')
+    await userEvent.type(screen.getByLabelText('Current password'), 'x')
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('says so when the user has no workspace', async () => {
+    vi.mocked(authApi.account).mockResolvedValue({ email: 'a@example.com', workspaces: [] })
+    renderPage()
+    expect(await screen.findByText(/not a member of a workspace/)).toBeTruthy()
   })
 })

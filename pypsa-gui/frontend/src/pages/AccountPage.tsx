@@ -7,6 +7,10 @@ import { useAuth } from '../auth/AuthProvider'
 
 const MIN_PASSWORD_LENGTH = 8
 
+// Plain words for the stored role value; an unknown value shows as stored.
+export const ROLE_LABELS: Record<string, string> = { admin: 'Admin', member: 'Member' }
+export const roleLabel = (role: string): string => ROLE_LABELS[role] ?? role
+
 function errorText(error: unknown): string {
   if (axios.isAxiosError(error)) {
     if (error.response?.status === 400 && typeof error.response.data?.detail === 'string') return error.response.data.detail
@@ -59,7 +63,8 @@ export default function AccountPage() {
 
       <section className="space-y-1">
         <label htmlFor="account-email" className="text-[10px] font-mono uppercase tracking-[0.14em] text-muted">Email</label>
-        <input id="account-email" className={inputClass} value={email} readOnly />
+        <input id="account-email" className={inputClass} value={email} readOnly aria-describedby="account-email-note" />
+        <p id="account-email-note" className="text-[10px] text-muted">Your email is your sign-in name. It cannot be changed here; ask a workspace admin.</p>
       </section>
 
       <section className="space-y-1" aria-label="Workspaces">
@@ -73,7 +78,7 @@ export default function AccountPage() {
             {(account.data?.workspaces ?? []).map(w => (
               <li key={w.org_id} className="flex justify-between px-3 py-1.5 text-[12px]">
                 <span>{w.name}</span>
-                <span className="text-muted">{w.role}</span>
+                <span className="text-muted">{roleLabel(w.role)}</span>
               </li>
             ))}
           </ul>
@@ -85,18 +90,18 @@ export default function AccountPage() {
         <div className="space-y-1">
           <label htmlFor="account-current" className="text-[11px]">Current password</label>
           <input id="account-current" type="password" autoComplete="current-password" required className={inputClass}
-            value={current} onChange={e => setCurrent(e.target.value)} />
+            value={current} onChange={e => { setCurrent(e.target.value); setDone(false) }} />
         </div>
         <div className="space-y-1">
           <label htmlFor="account-new" className="text-[11px]">New password</label>
           <input id="account-new" type="password" autoComplete="new-password" required minLength={MIN_PASSWORD_LENGTH} className={inputClass}
-            value={next} onChange={e => setNext(e.target.value)} />
+            value={next} onChange={e => { setNext(e.target.value); setDone(false) }} />
           <p className="text-[10px] text-muted">At least {MIN_PASSWORD_LENGTH} characters. Your other sessions are signed out.</p>
         </div>
         <div className="space-y-1">
           <label htmlFor="account-confirm" className="text-[11px]">Confirm new password</label>
           <input id="account-confirm" type="password" autoComplete="new-password" required className={inputClass}
-            value={confirm} onChange={e => setConfirm(e.target.value)} />
+            value={confirm} onChange={e => { setConfirm(e.target.value); setDone(false) }} />
         </div>
         {error && <p className="text-[12px] text-danger" role="alert">{error}</p>}
         {done && <p className="text-[12px] text-accent" role="status">Password changed. Your other sessions were signed out.</p>}
