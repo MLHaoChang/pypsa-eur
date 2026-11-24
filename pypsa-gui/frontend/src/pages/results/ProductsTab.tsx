@@ -44,7 +44,9 @@ function CostTile({ testId, kg, multiPeriod }: { testId: string; kg: number; mul
       <span className="text-[11px] text-muted">Hydrogen cost</span>
       <span className="text-sm font-semibold text-text whitespace-nowrap">{kg.toFixed(2)} €/kg</span>
       <span className="text-[10px] text-muted">
-        {multiPeriod ? 'across all investment periods' : 'for the modelled year'}; electrolysers only: annualised fixed cost + variable cost + electricity, per kg H₂ made; as in Economics and the report
+        {multiPeriod ? 'Across all investment periods.' : 'For the modelled year.'}
+        {' '}Electrolysers only: annualised fixed cost, variable cost and electricity, per kg H₂ made.
+        {' '}As in Economics and the report.
       </span>
     </div>
   )
