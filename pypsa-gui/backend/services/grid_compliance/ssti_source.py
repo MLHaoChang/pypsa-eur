@@ -6,9 +6,12 @@ The tables come through the scorecard's own validated read
 run files. Each caption is the scorecard row's note, so a row the scorecard
 refused (a damaged table, a contradicting verdict, a profile moved since the
 run) states its reason there, and its Verdict column judges nothing. The
-off-grid rule is the scorecard's ``grid_case`` (S2): islanded, the UIF rows
-read "not evaluated (islanded)" and their UIF "—"; off-grid, the scan from the
-PCC leaves the pack as its rows leave the scorecard.
+off-grid rule is the scorecard's ``grid_case`` (S2), and the rows judged are
+the scorecard's own (``grid_readiness.uif_judged``, GC-08e): a campus the run
+screened islanded prints its island rows judged, and for an islanded project
+those alone; islanded with no island rows, the UIF rows read "not evaluated
+(islanded)" and their UIF "—". Off-grid, the scan from the PCC leaves the pack
+as its rows leave the scorecard.
 
 No run with the screens yet gives None (pending). A failed stage or an
 unreadable record raises ``SstiSourceUnavailable`` (GK A2 (a)), so the pack
@@ -35,6 +38,8 @@ RESONANCE_COLUMNS = [
 #: A row the scorecard did not judge: the table shows what the run wrote, never a verdict.
 NOT_JUDGED = "not judged"
 ISLANDED = "not evaluated (islanded)"
+#: An island row with no UIF (no machine feeds its bus with the grid out), on a judged row.
+NOT_EVALUATED = "not evaluated"
 NON_FINITE = "—"
 UNREADABLE_NOTE = "an unreadable note"
 
@@ -111,57 +116,42 @@ def _cell(r, column: str, kind):
     return kind(r[column]) if column in r else ""
 
 
-#: ``gridspine.static.ssti_uif.ROLE_ISLAND`` for a build without gridspine, so a saved run's island rows
-#: still print; ``test_grid_compliance_ssti_island`` holds it equal to the engine's.
-FALLBACK_ROLE_ISLAND = "island converter bus (not judged)"
-
-
 def _uif_table(row: dict, frame, case: str, path: str) -> Table:
-    try:
-        from gridspine.static.ssti_uif import ROLE_ISLAND
-    except (
-        ImportError
-    ):  # a build without gridspine: the engine's role, pinned by a test
-        ROLE_ISLAND = FALLBACK_ROLE_ISLAND
+    """The UIF rows the scorecard row judges (``grid_readiness.uif_judged``: the grid rows, then the island
+    rows; the island rows alone for an islanded project the run screened islanded), each judged under the
+    row's own limit and rule when the row is judged, else "not judged" (GC-08e)."""
+    from services.adequacy.grid_readiness import uif_island, uif_judged
 
     rows = []
-    role = frame["role"].astype(str) if frame is not None and "role" in frame else None
-    judged = frame[role == "converter bus"] if role is not None else None
-    for _, r in judged.iterrows() if judged is not None else ():
-        uif, threshold = _apart(r.get("uif"), r.get("threshold"))
-        if case == "islanded":
-            # the UIF counts the grid's infeed, which an island lacks: no number to show
-            verdict, uif = ISLANDED, NON_FINITE
-        elif row["verdict"] in ("pass", "warn"):
-            verdict = _judged(r["uif"], row)
-        else:
-            verdict = NOT_JUDGED
-        rows.append(
-            [
-                _cell(r, "bus", _text),
-                _cell(r, "case", _text),
-                _cell(r, "machine", _text),
-                uif,
-                threshold,
-                verdict,
-                _cell(r, "note", _note),
-            ]
-        )
-    # GC-08b: the island cases' rows are printed, not judged, until the scorecard judges them (GC-08e)
-    island = frame[role == ROLE_ISLAND] if role is not None else None
-    for _, r in island.iterrows() if island is not None else ():
-        uif, threshold = _apart(r.get("uif"), r.get("threshold"))
-        rows.append(
-            [
-                _cell(r, "bus", _text),
-                _cell(r, "case", _text),
-                _cell(r, "machine", _text),
-                uif,
-                threshold,
-                NOT_JUDGED,
-                _cell(r, "note", _note),
-            ]
-        )
+    shown = []
+    if frame is not None and "role" in frame:
+        judged, island = uif_judged(frame, case), uif_island(frame)
+        shown = [frame[judged & ~island], frame[judged & island]]
+        # islanded, a run without island rows counted the grid's infeed: no number to show
+        unscreened = case == "islanded" and not island.any()
+    for part in shown:
+        for _, r in part.iterrows():
+            uif, threshold = _apart(r.get("uif"), r.get("threshold"))
+            if unscreened:
+                verdict, uif = ISLANDED, NON_FINITE
+            elif row["verdict"] not in ("pass", "warn"):
+                verdict = NOT_JUDGED
+            elif _missing(r.get("uif")):
+                # an island bus no machine feeds: the scorecard checked it reads "not evaluated"
+                verdict, uif = NOT_EVALUATED, NON_FINITE
+            else:
+                verdict = _judged(r["uif"], row)
+            rows.append(
+                [
+                    _cell(r, "bus", _text),
+                    _cell(r, "case", _text),
+                    _cell(r, "machine", _text),
+                    uif,
+                    threshold,
+                    verdict,
+                    _cell(r, "note", _note),
+                ]
+            )
     return Table(
         table_id="ssti_uif",
         columns=UIF_COLUMNS,

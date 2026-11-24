@@ -502,9 +502,8 @@ def test_converter_only_campus_with_island_data_is_not_evaluated():
 
 def test_island_case_selection_both_ways():
     """
-    A closed tie, with or without island requirements: no island call and the GC-08 rows (GK A2: the
-    declared-requirements case waits for GC-08e). An open tie: the grid-out call with every machine (a lone
-    machine's SC_i is 0).
+    A closed tie without island data: no island call and the GC-08 rows. A closed tie that declares island
+    requirements, and an open tie: the grid-out call with every machine (a lone machine's SC_i is 0), GC-08e.
     """
     seen = []
 
@@ -512,27 +511,59 @@ def test_island_case_selection_both_ways():
         seen.append((set(installed), island))
         return _stub(campus, installed)
 
+    closed = build_campus(campus_spec())
+    assert closed.island["requirements"] is None and not closed.tie_normally_open
+    assert not su.islands(closed)
+    seen.clear()
+    study = su.campus_uif(closed, fault_levels=spy)
+    assert seen == [({"GEN1"}, False), (set(), False)]
+    assert set(study.rows["case"]) == set(su.CASES)
+    assert study.island_verdict == "not evaluated"
+    assert math.isnan(study.island_worst_uif)
     declared = build_campus(campus_spec())
     declared.island["requirements"] = {
         "values": {},
         "sources": {},
-    }  # island operation declared
-    for closed in (build_campus(campus_spec()), declared):
-        assert not su.islands(closed)
-        seen.clear()
-        study = su.campus_uif(closed, fault_levels=spy)
-        assert seen == [({"GEN1"}, False), (set(), False)]
-        assert set(study.rows["case"]) == set(su.CASES)
-        assert study.island_verdict == "not evaluated"
-        assert math.isnan(study.island_worst_uif)
+    }  # island operation declared on a closed tie
     spec = campus_spec()
     spec["campus"]["pcc"].update(tie_normally_open=True, p_connection_mw=t(20.0))
     open_tie = build_campus(spec)
-    assert su.islands(open_tie)
-    seen.clear()
-    study = su.campus_uif(open_tie, fault_levels=spy)
-    assert seen == [({"GEN1"}, False), (set(), False), ({"GEN1"}, True)]
-    assert set(study.rows["case"]) == {*su.CASES, *ISLAND}
+    assert open_tie.island["requirements"] is None
+    for campus in (declared, open_tie):
+        assert su.islands(campus)
+        seen.clear()
+        study = su.campus_uif(campus, fault_levels=spy)
+        assert seen == [({"GEN1"}, False), (set(), False), ({"GEN1"}, True)]
+        assert set(study.rows["case"]) == {*su.CASES, *ISLAND}
+
+
+def test_closed_tie_with_island_requirements_flags_islanded_alone():
+    """
+    GC-08e: a closed tie that declares island requirements, one 10 MVA genset, threshold 1. The grid cases
+    clear (their verdict and worst stay the GC-08 rows'); islanded, UIF = S_plant / S_i = 8.265306... flags.
+    """
+    spec = _island_spec(GEN1=(10.0, 0.15))
+    spec["campus"]["pcc"]["tie_normally_open"] = False
+    campus = build_campus(spec)
+    campus.island["requirements"] = {"values": {}, "sources": {}}
+    study = su.campus_uif(campus, 1.0)
+    grid = study.rows[study.rows["case"].isin(su.CASES)].set_index(["bus", "case", "machine"])
+    assert sorted(grid.index) == sorted(MASTER_ONE)
+    for key, value in MASTER_ONE.items():
+        assert _close(grid.at[key, "uif"], value), key
+    assert study.verdict == "clear"
+    assert _close(study.worst_uif, max(v for (b, _, _), v in MASTER_ONE.items() if b != "PCC"))
+    island = study.rows[study.rows["role"] == su.ROLE_ISLAND].set_index(["bus", "case"])
+    for label in ISLAND:
+        assert _close(island.at[("MV2", label), "uif"], 8.265306122448980)
+        assert island.at[("MV2", label), "verdict"] == "flag"
+    assert study.island_verdict == "flag"
+    assert _close(study.island_worst_uif, 8.265306122448980)
+
+
+def test_island_role_reads_judged():
+    """GC-08e: the island rows' role no longer says "not judged"; the GC-08b string is the readers' legacy."""
+    assert su.ROLE_ISLAND == "island converter bus"
 
 
 @pytest.mark.parametrize("sc", [0.0, math.nan, math.inf])

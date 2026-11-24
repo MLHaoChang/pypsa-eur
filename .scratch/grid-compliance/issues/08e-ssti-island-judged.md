@@ -3,7 +3,7 @@
 
 # GC-08e SSTI UIF: the scorecard and pack judge the island rows
 
-Status: needs-triage
+Status: in-progress
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: GC-08b (`08b-ssti-island-case.md`)
