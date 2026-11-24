@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -361,7 +361,7 @@ def change_password(
     db.get(User, user.id).password_hash = hash_password(payload.new_password)
     raw_token = request.cookies.get(get_settings().session_cookie_name)
     keep = resolve_session_row(db, raw_token) if raw_token else None
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     for session in db.scalars(select(Session).where(Session.user_id == user.id)):
         if session.revoked_at is None and (keep is None or session.id != keep.id):
             session.revoked_at = now
