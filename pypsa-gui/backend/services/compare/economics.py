@@ -32,8 +32,7 @@ from services.results.load_frames import corrected_marginal_prices
 
 
 def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_state: bool = True,
-                               lost_load_cap: dict | None = None, *, cfg=None, result_df=None,
-                               solve_config=None) -> EconomicsComparison:
+                               lost_load_cap: dict | None = None, *, cfg=None, result_df=None) -> EconomicsComparison:
     """
     Per-carrier economic summary for the Economics comparison tab.
 
@@ -860,12 +859,4 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
         # Cheapest LCOH first — surface the most competitive Link on top.
         per_asset_lcoh.sort(key=lambda e: e.lcoh_eur_per_mwh.total)
 
-    # assistant-assurance 17: on an integer (MIP) solve the bus prices are 0.0,
-    # not prices. `solve_config` is the config of the solve that wrote them
-    # (Compare passes the project's own); without it, `cfg`.
-    from harness.solve_validity import mip_price_limit
-    price_limit = mip_price_limit(n, cfg if solve_config is None else solve_config)
-    if price_limit is not None:
-        per_asset_lcoh = []
-    return EconomicsComparison(available=True, by_carrier=out, per_asset_lcoh=per_asset_lcoh,
-                               price_limit=price_limit)
+    return EconomicsComparison(available=True, by_carrier=out, per_asset_lcoh=per_asset_lcoh)

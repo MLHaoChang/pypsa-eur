@@ -22,7 +22,7 @@ from services.results.load_frames import corrected_marginal_prices
 
 
 
-def compute_lcoh(n, cfg, *, result_df):
+def compute_lcoh(n, cfg, *, result_df, price_limit=...):
     """
     Levelised cost of hydrogen per electrolyser Link.
 
@@ -39,10 +39,14 @@ def compute_lcoh(n, cfg, *, result_df):
 
     # assistant-assurance 17: an integer (MIP) solve's bus prices are 0.0, not
     # prices, so the electricity-cost term (and the LCOH) is not established.
+    # `price_limit` is the caller's judgement of the solve that wrote the
+    # prices (the route's `solved_price_limit`); without one, `n` under `cfg`.
     from harness.solve_validity import MIP_PRICES_TEXT, mip_price_limit
-    if (limit := mip_price_limit(n, cfg)) is not None:
+    if price_limit is ...:
+        price_limit = mip_price_limit(n, cfg)
+    if price_limit is not None:
         return {"rows": [], "total": None, "currency": "EUR",
-                "unavailable_reason": limit, "message": MIP_PRICES_TEXT}
+                "unavailable_reason": price_limit, "message": MIP_PRICES_TEXT}
 
     links_df = n.links
     if links_df.empty:

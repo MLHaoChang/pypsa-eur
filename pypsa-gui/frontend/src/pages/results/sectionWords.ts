@@ -18,6 +18,7 @@ export function sectionWords(section: string, tabLabel: (id: string) => string |
 export const NOT_KEPT_WORDS: Record<string, { why: string; short: string }> = {
   multi_period_not_digested: { why: 'multi-period runs keep no dispatch or prices', short: 'multi-period run' },
   no_prices: { why: 'the solve produced no prices', short: 'no prices' },
+  mip_duals_not_marginal: { why: 'an integer (MIP) solve has no marginal prices', short: 'integer solve' },
   over_section_cap: { why: 'too large to keep', short: 'too large' },
 }
 

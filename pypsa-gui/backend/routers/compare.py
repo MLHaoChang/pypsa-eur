@@ -418,14 +418,14 @@ def get_results_summary(
     capacity = _compute_capacity_summary(temp_n, periods, is_multi, has_solve)
     dispatch = _compute_dispatch_summary(temp_n, periods, is_multi, has_solve)
     loading = _compute_loading_summary(temp_n, periods, is_multi, has_solve)
-    # assistant-assurance 17: whether this project's solve was a MIP is read
-    # against its own saved solver config, never the active project's.
-    solve_config = _price_solve_config(src)
-    prices = _compute_prices_summary(temp_n, periods, is_multi, has_solve, solve_config=solve_config)
+    # assistant-assurance 17: whether this project's solve was a MIP, judged by
+    # its own saved solve, never by the active project's config.
+    price_limit = _price_limit(src, temp_n)
+    prices = _compute_prices_summary(temp_n, periods, is_multi, has_solve, price_limit=price_limit)
     emissions = _compute_emissions_summary(temp_n, periods, is_multi, has_solve)
     economics = _compute_economics_summary(
         temp_n, periods, is_multi, has_solve, prices_from_state=False,
-        lost_load_cap=_read_lost_load_capture(src), solve_config=solve_config,
+        lost_load_cap=_read_lost_load_capture(src),
     )
     curtailment = _compute_curtailment_summary(temp_n, periods, is_multi, has_solve)
     lost_load = _compute_lost_load_summary(src, temp_n, periods, is_multi, has_solve)
@@ -528,10 +528,10 @@ def _compute_dispatch_summary(n, periods, is_multi, has_solve):
 
 
 def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_state: bool = True,
-                               lost_load_cap: dict | None = None, solve_config=None):
+                               lost_load_cap: dict | None = None):
     return _svc_economics._compute_economics_summary(
         n, periods, is_multi, has_solve, prices_from_state, lost_load_cap,
-        cfg=_live_solver_config(), result_df=_result_df, solve_config=solve_config,
+        cfg=_live_solver_config(), result_df=_result_df,
     )
 
 
@@ -606,14 +606,21 @@ def _project_solver_config(directory: pathlib.Path):
         raise HTTPException(422, f"The project's saved solver settings cannot be used: {exc}")
 
 
-def _price_solve_config(directory: pathlib.Path):
-    """The project's own solver config for the MIP price gate (assistant-assurance
-    17); None, read as the defaults, when its saved settings cannot be read, so a
-    summary is never refused over the gate."""
+def _price_limit(directory: pathlib.Path, n):
+    """The MIP price gate for a saved project (assistant-assurance 17): the limit
+    its solve recorded (`last_solve_settings`), else `n` under the project's own
+    saved solver config; failing closed when that config cannot be read."""
+    from harness import solve_validity
+
+    state = {"last_solve_settings": _saved_results_state(directory).get("last_solve_settings")}
     try:
-        return _project_solver_config(directory)
+        state["solver_config"] = _project_solver_config(directory)
     except HTTPException:
-        return None
+        settings = state["last_solve_settings"]
+        if isinstance(settings, dict) and settings.get("price_limit"):
+            return settings["price_limit"]
+        return solve_validity.price_limit_without_config(n)
+    return solve_validity.solved_price_limit(state, n)
 
 
 def _load_project_network(directory: pathlib.Path):

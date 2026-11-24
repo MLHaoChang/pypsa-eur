@@ -301,7 +301,8 @@ def _read_option(n, cfg, opt, fidelity: Fidelity, currency_year, *, compiled) ->
     # assistant-assurance 17: an integer (MIP) solve's bus prices are 0.0, not
     # prices; the report reads this to withhold the figures priced at them.
     from harness.solve_validity import mip_price_limit
-    detail["price_limit"] = mip_price_limit(n, cfg)
+    if (price_limit := mip_price_limit(n, cfg)) is not None:
+        detail["price_limit"] = price_limit  # only when set: an LP's detail is unchanged
     bill = engine_adapter.bill(n, compiled, fidelity=fidelity)
     detail["bill"] = bill.model_dump(mode="json")
     try:

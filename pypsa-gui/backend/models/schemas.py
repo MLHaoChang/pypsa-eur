@@ -1515,11 +1515,6 @@ class EconomicsComparison(BaseModel):
     # cost on average?"; this list answers "which individual electrolyser
     # is most/least competitive in scenario A vs B?".
     per_asset_lcoh: list[AssetLCOHEntry] = Field(default_factory=list)
-    # "mip_duals_not_marginal" on an integer (MIP) solve (assistant-assurance
-    # 17): its bus prices are 0.0, not prices, so the figures priced at them
-    # (revenue_meur, storage_charge_cost_meur) are not established and
-    # `per_asset_lcoh` is left empty. None when the prices are the solve's duals.
-    price_limit: str | None = None
 
 
 class CurtailmentComparison(BaseModel):

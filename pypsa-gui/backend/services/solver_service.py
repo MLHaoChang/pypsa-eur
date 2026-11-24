@@ -653,6 +653,13 @@ def build_lp_chain(network, config, log_queue):
     return extra_fn
 
 
+def _mip_price_limit(n, config):
+    """`harness/solve_validity.mip_price_limit`, imported lazily (assistant-assurance 17)."""
+    from harness.solve_validity import mip_price_limit
+
+    return mip_price_limit(n, config)
+
+
 def run_simulation(
     config: SolverConfig,
     network: pypsa.Network,
@@ -1565,6 +1572,11 @@ def run_simulation(
                        if (_rf_target := _rf_target_of(config)) is not None else {}),
                     **({k: getattr(config, k, None) for k in _OR_SHARES}
                        if _or_shares_of(config) is not None else {}),
+                    # assistant-assurance 17: an integer (MIP) solve's bus
+                    # prices are 0.0, not prices. Judged here, with the config
+                    # this solve used; only when on, like the keys above.
+                    **({"price_limit": _price_limit}
+                       if (_price_limit := _mip_price_limit(network, config)) else {}),
                 } if status in ("ok", "optimal") else None))
                 _margin_payload = None
                 if not _margin_targets:

@@ -681,7 +681,9 @@ def get_lcoh():
     if not _dispatch_ready(n):
         return _not_solved()
     # Effective capital_cost via the same fill PyPSA uses for n.statistics().
-    payload = compute_lcoh(n, _state.get('solver_config') or SolverConfig(), result_df=_result_df)
+    from harness.solve_validity import solved_price_limit
+    payload = compute_lcoh(n, _state.get('solver_config') or SolverConfig(), result_df=_result_df,
+                           price_limit=solved_price_limit(_state, n))
     return _not_solved() if payload is None else payload
 
 

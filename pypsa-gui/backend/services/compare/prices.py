@@ -47,7 +47,7 @@ def weighted_stats(values, weights_arr):
     return mean, _quantile(0.5), _quantile(0.9)
 
 
-def _compute_prices_summary(n, periods, is_multi, has_solve, *, solve_config=None) -> PricesComparison:
+def _compute_prices_summary(n, periods, is_multi, has_solve, *, price_limit=...) -> PricesComparison:
     """
     Marginal price view. Builds:
 
@@ -74,9 +74,12 @@ def _compute_prices_summary(n, periods, is_multi, has_solve, *, solve_config=Non
     if not has_solve:
         return PricesComparison()
     # assistant-assurance 17: a MIP's 0.0 bus prices are not prices.
-    # `solve_config` is the config of the solve that wrote them.
-    if (limit := mip_price_limit(n, solve_config)) is not None:
-        return PricesComparison(unavailable_reason=limit)
+    # `price_limit` is the caller's judgement of the solve that wrote them
+    # (Compare: `routers.compare._price_limit`); without one, `n` under defaults.
+    if price_limit is ...:
+        price_limit = mip_price_limit(n, None)
+    if price_limit is not None:
+        return PricesComparison(unavailable_reason=price_limit)
     # Curtailment-cost-corrected duals (same merit-order correction the Results
     # Prices tab applies), so the duration curve / mean / max / min match.
     # from_state=False → read this bundle's own buses_t, not the live snapshot.
