@@ -161,7 +161,7 @@ _UNITS = {
     "pf": "",
     "t_clear_s": "s",
     "conductor": "",
-    "k": "A s^0.5/mm2",
+    "k": "A·√s/mm²",
 }
 
 

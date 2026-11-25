@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-Status: ready-for-agent once PR #812 has merged (it edits `harness/providers/wiring.py`). Written 2026-10-28. Gatekeeper B reviews the plan in the PR body and the PR.
+Status: ready-for-agent; audit 2026-11-25: #812 merged, so the task is unblocked; nothing built yet (no core-read set in `wiring.py`, `validate_network` still `-> list[dict]`). Written 2026-10-28. Gatekeeper B reviews the plan in the PR body and the PR.
 
 # Outsourced task Q: Core read tools always survive OpenAI's 128-tool cut, and three small pins
 
@@ -38,3 +38,7 @@ The app has about 340 tools, and OpenAI accepts 128 per request. `_bounded_tools
 - Green: `tests/test_openai_tool_selection.py`, `tests/test_loadflow_navigation.py`, `tests/test_json_fragments.py`, the tool-error manifest tests, and `python -m smoke.assistant_inventory --check` and `python -m smoke.assistant_route_parity --check` (both from `pypsa-gui/backend`). The repo's CI is green.
 - A release-note fragment under `doc/release-notes.d/` if the release-notes guard asks for one.
 - Stay out of every file not named above. Never edit the base `pypsa-gui/tool-error-kinds.json`.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: checked #812 merged (GitHub); wiring.py has only `_GRIDSPINE_ALWAYS` (l.252); chat_tools.py:4315 still `-> list[dict]`; no pin test found.

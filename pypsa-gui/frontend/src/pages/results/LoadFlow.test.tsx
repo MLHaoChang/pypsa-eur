@@ -436,3 +436,15 @@ describe('carrier KPIs on an integer solve', () => {
     expect(tr.textContent).not.toContain('Not available')
   })
 })
+
+describe('withheld prices on an integer solve (assistant-assurance 17, 2b)', () => {
+  it('reads a MIP\'s withheld prices as none: the tab still renders, with no NaN', async () => {
+    const withheld = { status: 'unavailable', reason: 'mip_duals_not_marginal' }
+    vi.mocked(resultsApi.getPrices).mockResolvedValue(withheld)
+    vi.mocked(resultsApi.getPriceDrivers).mockResolvedValue(withheld as never)
+    const { container } = renderPage()
+    expect(await findKpiValue('424 MW')).toBeTruthy()
+    expect(container.textContent).not.toContain('NaN')
+    expect(container.textContent).not.toContain('mip_duals_not_marginal')
+  })
+})

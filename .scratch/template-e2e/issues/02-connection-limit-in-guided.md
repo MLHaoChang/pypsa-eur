@@ -3,7 +3,7 @@
 
 # 02 — The connection limit cannot be changed in Guided; "Import efficiency" opens an empty Link form
 
-Status: ready-for-agent; audit 2026-11-19: open in #1626
+Status: ready-for-agent; audit 2026-11-25: #1626, #1773, #1778 merged (Guided field, per-period drawer, energization check); left: chat parity for energization_per_period (declared unbuilt in not_via_chat)
 Owner: builder session_01G7qCumsdzuVnJQAD41wFxk
 Size: S
 Gated: UX
@@ -197,3 +197,7 @@ Each condition is quoted verbatim from the gatekeepers' messages (GK B 65 sessio
   - A non-dict request body gets FastAPI's untyped 422 (the `body: dict` parameter), not one of the five kinds — for the PR body.
 
 - 2026-11-23 status sweep: landed in #1626 (a8f35cc7); #1773 (a1176d99); #1778 (954ab859): Guided Connection limit field, staged per-period drawer and energization check. Remains: chat parity for energization_per_period (declared unbuilt in not_via_chat).
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: PR merge state checked against origin/master log; acceptance items grepped on master code.

@@ -32,7 +32,8 @@ from services.results_workbook.overview import (
     CASE_ROWS, RUN_THE_CASE, OverviewFigures, overview_figures,
 )
 
-__all__ = ["TITLE", "Run", "Scenarios", "gather_experiments", "gather_scenarios", "write_scenarios"]
+__all__ = ["TITLE", "Run", "Scenarios", "gather_experiments", "gather_scenarios", "run_price_limit",
+           "run_state", "write_scenarios"]
 
 TITLE = "Scenarios"
 HORIZON = "horizon"
@@ -63,6 +64,30 @@ class Run:
     # views whose route reads a whole context (Load flow). None for the base,
     # whose context is the active one.
     context: Any = None
+    # Solver state of a base solve held apart from the active context (a Guided study's); None: the active one.
+    solver_state: dict | None = None
+
+
+def run_state(run: Run) -> dict:
+    """The run's solver state: a solve held apart (a Guided study's), its saved context's, or the
+    active one (the base)."""
+    if run.solver_state is not None:
+        return run.solver_state
+    if run.context is not None:
+        return run.context.solver_state
+    from services.pypsa_service import PyPSAService
+    return PyPSAService.get_solver_state()
+
+
+def run_price_limit(run: Run) -> str | None:
+    """The price limit of the solve that produced `run`'s results (assistant-assurance 17 S3):
+    judged from the run's own solver state, never another run's. A held study solve's state
+    carries its solve settings but not its config, which is the run's own `cfg`."""
+    from harness.solve_validity import solved_price_limit
+    state = run_state(run)
+    if state.get("solver_config") is None and run.cfg is not None:
+        state = {**state, "solver_config": run.cfg}
+    return solved_price_limit(state, run.network)
 
 
 @dataclass
@@ -138,10 +163,11 @@ def _fill(run: Run, read: dict, *, result_df_for, ic_key, solved_settings_for, d
     ctx = read["ctx"]
     state = ctx.solver_state
     result_df = result_df_for(state)
-    run.figs = overview_figures(ctx.network, state.get("solver_config"),
-                                state.get("last_lost_load"), result_df)
     run.network, run.cfg, run.result_df = ctx.network, state.get("solver_config"), result_df
     run.context = ctx
+    run.figs = overview_figures(ctx.network, state.get("solver_config"),
+                                state.get("last_lost_load"), result_df,
+                                price_limit=run_price_limit(run))
     run.lost_load = state.get("last_lost_load")
     run.solved_settings = (solved_settings_for(state, ctx.network) if solved_settings_for
                            else lambda state=state: state.get("last_solve_settings"))

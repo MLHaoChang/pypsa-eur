@@ -1,0 +1,14 @@
+{
+ "entries": [
+  {
+   "id": "co2_limit_goal_result",
+   "title": "CO2 limit goal result",
+   "disposition": "unbuilt",
+   "reason": "Chat cannot read the CO2 limit goal's result yet. Expert's Emissions tab lists the goal's cap and whether it binds.",
+   "page": "Results",
+   "panel": null,
+   "keywords": ["limit", "cap"],
+   "routes": [["GET", "/api/results/co2_limit"]]
+  }
+ ]
+}

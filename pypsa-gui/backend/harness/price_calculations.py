@@ -55,9 +55,10 @@ def source(ctx, entity):
         "price": [_number(v) for v in prices[entity]] if entity in prices.columns else [None] * len(index),
         "voll": _number(settings.get("voll_eur_per_mwh")),
         "valid_solve": common.lp_outputs_live(ctx),
-        # A MIP's buses_t.marginal_price is not a marginal price (S2, G2d).
-        "solve_limit": solve_validity.price_limit(
-            solve_validity.classify(n, ctx.solver_state.get("solver_config"))),
+        # A MIP's buses_t.marginal_price is not a marginal price (S2, G2d), judged by
+        # the solve that wrote the prices, not today's config (assistant-assurance 17 S7).
+        "solve_limit": (solve_validity.STOCHASTIC if solve_validity.is_stochastic(n)
+                        else solve_validity.solved_price_limit(ctx.solver_state, n)),
     }
 
 

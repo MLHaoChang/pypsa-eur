@@ -3,10 +3,14 @@
 // It edits the project's island sidecar (`island_config.json`) and shows the
 // island report. Thin like the rest of the panel:
 // - the form edits a few requirements in place (scenarios, the ride-through
-//   numbers with their source tags, N+k, linearised UC) and each unit's
-//   control mode; the JSON editor holds the whole sidecar, so nothing the
-//   form leaves out is lost;
-// - Save sends the sidecar, and the backend validates it (422 names the field);
+//   numbers, N+k, linearised UC); each unit's control mode is shown read-only
+//   with a link to its asset form, where the Controls block edits it
+//   (control-strategy 02, design DC-04);
+// - once a sidecar exists, the JSON editor holds its requirements only and
+//   Save sends a PATCH of the values that changed, as plain values: the
+//   server sets each source (GK B3 K4, K19). A project without one pastes the
+//   whole sidecar, which Save sends whole; the backend validates either
+//   (422 names the field);
 // - Run solves the islanding variants on the saved project;
 // - the report's tables are READ from `GET /island/report`, each with the
 //   model behind it, the screening caveat, and its assumed rows tagged.
@@ -15,6 +19,10 @@
 //   results of I4–I6) as the report orders them.
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { networkApi } from '../api/network'
+import { nk } from '../utils/queryKeys'
+import { openAssetControls, unitClass } from './islandControlsNav'
+import { requirementsDiff } from './islandRequirementsDiff'
 import { controlModeLabel, islandScenarioLabel } from '../plainNames'
 import { displayName } from '../utils/displayName'
 import { Play, Save } from 'lucide-react'
@@ -22,6 +30,7 @@ import {
   campusApi, errorText, isIslandConfigChanged, ISLAND_SCENARIOS,
   type IslandConfig, type IslandGroup, type IslandReport, type IslandScenario, type IslandSource, type IslandTable,
 } from '../api/campusElectrical'
+import type { IslandControlsState, UnitControl } from '../api/islandControls'
 import { Btn, PageSection, Tag } from '../components/PageKit'
 import CampusIslandCutsSection, { scenarioWords } from './CampusIslandCutsSection'
 import { openFlowTargetInPlace, showResultsTab, withReturnFrom } from '../layout/flowNavigation'
@@ -33,8 +42,6 @@ export const ISLAND_KEY = (name: string) => ['campusElectrical', 'island', name]
 export const ISLAND_REPORT_KEY = (name: string) => ['campusElectrical', 'islandReport', name] as const
 
 const INPUT = 'px-2 py-1 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20'
-const SOURCES: IslandSource[] = ['measured', 'datasheet', 'assumed']
-const CONTROLS = ['gfl_pq', 'gfl_qu', 'gfl_pf', 'gfl_fw', 'gfm_droop', 'gfm_vsm']
 /** The requirements the form edits, each a tagged number. */
 export const NUMBERS: [string, string][] = Object.entries(ISLAND_REQUIREMENT_LABELS)
 
@@ -199,19 +206,31 @@ export default function CampusIslandSection({ name }: { name: string }) {
   // refused (409) rather than dropping that change; Reload shows the new file.
   const [stale, setStale] = useState(false)
   const saved = island.data?.config ?? null
+  // The raw editor shows what Save can send: the requirements once a sidecar exists, else the whole file.
+  const rawOf = (c: IslandConfig | null) => (c ? JSON.stringify(saved ? c.requirements : c, null, 2) : '')
+  const project = useUIStore(s => s.currentProject)
+  const lists = {
+    StorageUnit: useQuery({ queryKey: nk(project, 'storage_units'), queryFn: networkApi.getStorageUnits }).data,
+    Generator: useQuery({ queryKey: nk(project, 'generators'), queryFn: networkApi.getGenerators }).data,
+    Store: useQuery({ queryKey: nk(project, 'stores'), queryFn: networkApi.getStores }).data,
+    Link: useQuery({ queryKey: nk(project, 'links'), queryFn: networkApi.getLinks }).data,
+  }
 
   useEffect(() => {
     setConfig(saved)
-    setText(saved ? JSON.stringify(saved, null, 2) : '')
+    setText(rawOf(saved))
   }, [JSON.stringify(saved)])   // eslint-disable-line react-hooks/exhaustive-deps
 
-  const edit = (next: IslandConfig) => { setConfig(next); setText(JSON.stringify(next, null, 2)); setTextError(null) }
+  const edit = (next: IslandConfig) => { setConfig(next); setText(rawOf(next)); setTextError(null) }
+  const diff = saved && config ? requirementsDiff(saved.requirements, config.requirements) : null
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ISLAND_KEY(name) })
     qc.invalidateQueries({ queryKey: ISLAND_REPORT_KEY(name) })
   }
   const save = useMutation({
-    mutationFn: () => campusApi.saveIsland(name, config as IslandConfig, island.data?.revision),
+    mutationFn: () => (saved
+      ? campusApi.patchIsland(name, { requirements: diff!.patch }, island.data?.revision)
+      : campusApi.saveIsland(name, config as IslandConfig, island.data?.revision)),
     onMutate: () => { setRefusal(null); setStale(false) },
     onSuccess: d => { qc.setQueryData(ISLAND_KEY(name), d); refresh() },
     onError: e => (isIslandConfigChanged(e) ? setStale(true) : setRefusal(errorText(e))),
@@ -224,7 +243,9 @@ export default function CampusIslandSection({ name }: { name: string }) {
   })
 
   const req = config?.requirements
-  const dirty = config !== null && JSON.stringify(config) !== JSON.stringify(saved)
+  const dirty = saved ? !!diff && Object.keys(diff.patch).length > 0
+    : config !== null && JSON.stringify(config) !== JSON.stringify(saved)
+  const refused = diff?.refusals ?? []
   const setReq = (field: string, value: unknown) =>
     config && edit({ ...config, requirements: { ...config.requirements, [field]: value } })
   const toggleScenario = (sc: IslandScenario) => {
@@ -232,8 +253,6 @@ export default function CampusIslandSection({ name }: { name: string }) {
     const has = req.scenarios.includes(sc)
     setReq('scenarios', has ? req.scenarios.filter(s => s !== sc) : [...req.scenarios, sc])
   }
-  const setUnitControl = (unit: string, control: string) =>
-    config && edit({ ...config, units: { ...config.units, [unit]: { ...config.units[unit], control } } })
 
   return (
     <div data-testid="island-section" data-panel-section="island">
@@ -274,14 +293,8 @@ export default function CampusIslandSection({ name }: { name: string }) {
                     onChange={e => setReq(field, e.target.value === '' ? undefined
                       : { value: Number(e.target.value), source: tagged?.source ?? 'assumed' })}
                   />
-                  <select
-                    aria-label={`${label} source`} className={INPUT} disabled={!tagged}
-                    value={tagged?.source ?? 'assumed'}
-                    onChange={e => tagged && setReq(field, { ...tagged, source: e.target.value as IslandSource })}
-                  >
-                    {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                  {tagged?.source === 'assumed' && <Tag tone="warn">assumed</Tag>}
+                  {tagged?.source === 'assumed' ? <Tag tone="warn">assumed</Tag>
+                    : tagged && <span className="text-muted" data-testid={`island-${field}-source`}>{tagged.source}</span>}
                 </div>
               )
             })}
@@ -290,15 +303,7 @@ export default function CampusIslandSection({ name }: { name: string }) {
                      onChange={e => setReq('linearised_uc', e.target.checked)} />
               Linearised unit commitment for the fixed-size gensets (u may be fractional)
             </label>
-            {Object.entries(config!.units).filter(([, u]) => u.control !== undefined).map(([unit, u]) => (
-              <div key={unit} className="flex gap-2 items-center text-[12px]">
-                <label htmlFor={`island-control-${unit}`} className="w-56">Control mode of {displayName(unit)}</label>
-                <select id={`island-control-${unit}`} className={INPUT} value={u.control}
-                        onChange={e => setUnitControl(unit, e.target.value)}>
-                  {CONTROLS.map(c => <option key={c} value={c}>{controlModeLabel(c)}</option>)}
-                </select>
-              </div>
-            ))}
+            <UnitControlRows units={(island.data as IslandControlsState | undefined)?.unit_controls ?? null} lists={lists} />
           </div>
         )}
 
@@ -309,13 +314,20 @@ export default function CampusIslandSection({ name }: { name: string }) {
           value={text}
           onChange={e => {
             setText(e.target.value)
-            try { setConfig(JSON.parse(e.target.value)); setTextError(null) }
-            catch { setTextError('not valid JSON yet') }
+            try {
+              const parsed = JSON.parse(e.target.value)
+              setConfig(saved && config ? { ...config, requirements: parsed } : parsed); setTextError(null)
+            } catch { setTextError('not valid JSON yet') }
           }}
         />
         {textError && <p className="text-[11px] text-danger">{textError}</p>}
+        {refused.length > 0 && (
+          <ul role="alert" className="text-[11px] text-danger" data-testid="island-raw-refusals">
+            {refused.map(r => <li key={r}>{r}</li>)}
+          </ul>
+        )}
         <div className="flex justify-end gap-2 mt-2">
-          <Btn onClick={() => save.mutate()} disabled={save.isPending || !dirty || !!textError || !config}>
+          <Btn onClick={() => save.mutate()} disabled={save.isPending || !dirty || !!textError || !config || refused.length > 0}>
             <Save size={13} /> Save island config
           </Btn>
           <Btn onClick={() => run.mutate()} disabled={run.isPending || !saved || dirty}>
@@ -332,6 +344,33 @@ export default function CampusIslandSection({ name }: { name: string }) {
         </p>
         {saved && <CampusIslandCutsSection name={name} mode="actions" />}
       </PageSection>
+    </div>
+  )
+}
+
+/** Each converter's and UPS's control mode, read-only: the asset form's Controls block edits it
+ *  (design DC-04). The unit name is the user's own asset name; the mode is in words. */
+function UnitControlRows({ units, lists }: {
+  units: Record<string, UnitControl> | null
+  lists: Parameters<typeof unitClass>[1]
+}) {
+  if (!units) return null
+  return (
+    <div className="grid gap-1" data-testid="island-unit-controls">
+      <p className="text-[12px] font-medium">Unit control modes</p>
+      {Object.entries(units).map(([unit, u]) => {
+        const type = unitClass(unit, lists)
+        const mode = u.kind === 'ups' ? 'UPS ride-through settings' : controlModeLabel(u.control ?? '')
+        return (
+          <p key={unit} className="text-[12px]" data-testid={`island-unit-control-${unit}`}>
+            {displayName(unit)}: {mode}
+            {type
+              ? <> · <button type="button" className="text-link hover:underline" data-testid={`island-unit-edit-${unit}`}
+                  onClick={() => openAssetControls(type, unit)}>Edit in asset ›</button></>
+              : <span className="text-muted"> · no asset of this name in the network, so there is no form to open</span>}
+          </p>
+        )
+      })}
     </div>
   )
 }

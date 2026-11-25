@@ -3,7 +3,7 @@
 
 # Readers outside checked answers still show a MIP's 0.0 bus prices
 
-Status: ready-for-agent
+Status: done
 Type: bug
 Found by: GK B (65) on #1680 (issue 10, S2).
 
@@ -104,3 +104,15 @@ Follow-up: `27-study-report-lp-flags-untested.md`. These are the LP-path flags i
 GK B2 on #1970 (2a), non-blocking edges, recorded:
 - A MIP study run recorded before #1970, with no `price_limit` key in its stored asset economics, still shows its stored 0.0 market rows through `engine_adapter._econ_rows`. It is the same known edge accepted in slice 1 (A4): a stored record is not re-judged.
 - The scenario workbook (`results_workbook/overview.py:136`, `views_network.py:176`) still calls `compute_economics_by_carrier` without the limit. It is deferred to 2b by the coordinator's ruling (after template-e2e 30, #1963) and is a 2b condition (S3).
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: #1957 and #1970 merged (GitHub merge commits on master); services/results/prices.py, results_workbook/views_network.py and overview.py carry no price_limit gate, harness/price_calculations.py still classifies with today's config.
+
+## Slice 2b (prices), done
+
+- Results Prices and price drivers, the generator-cost fallback, asset_results price metrics (REQ_DUALS) and S7 (`price_calculations` judges the solve's record) are gated.
+- The results workbook (S3): the Prices, Economics and Capacity expansion sheets and the Overview's storage-charging and opex lines pass `solved_price_limit` over each run's own state (`scenarios.run_price_limit`: the base's, a held study solve's, each scenario's saved context). On a MIP the Prices sheet holds the reason and no price; priced cells read not_established. An LP workbook is cell-equal to master.
+- Headline KPIs: swept 2026-11-25. `asset_results` headlines that rest on prices need REQ_DUALS (gated); `results/headline_kpis.py`, `sensitivity_comparison._values` and `chat_tools._scenario_headlines` carry no price-derived figure. Nothing left to gate.
+- Study `workbook_view` and the Compare UI flags shipped in 2a (#1970).
+

@@ -9,9 +9,10 @@ import { BACKUP_MODE_FIELD, MODE_LABEL } from '../DcBackupSection'
 export type DcTemplateId = 'eh_datacenter' | 'eh_datacenter_staged'
 export const DC_TEMPLATES: readonly string[] = ['eh_datacenter', 'eh_datacenter_staged']
 
-export type DcField = 'it_load' | 'pue' | 'backup' | 'architecture'
+export type DcField = 'it_load' | 'pue' | 'backup' | 'architecture' | 'workload' | 'compute'
 export const DC_FIELD_LABEL: Record<DcField, string> = {
   it_load: 'IT load', pue: 'PUE at design', backup: BACKUP_MODE_FIELD, architecture: ARCH_FIELD,
+  workload: 'Workload', compute: 'Compute',
 }
 export const DC_ARCH_OPTIONS = Object.entries(ARCH_LABEL) as [DcArchitecture, string][]
 export const DC_BACKUP_OPTIONS = Object.entries(MODE_LABEL) as [DcBackupMode, string][]
@@ -41,8 +42,45 @@ export const DC_DEFAULTS = {
   phases: [{ year: 2027, mw: 12 }, { year: 2030, mw: 24 }, { year: 2035, mw: 36 }],
 }
 
-export interface DcDraft { it_load: string; pue: string; backup: DcBackupMode; architecture: DcArchitecture }
-export const initialDcDraft = (): DcDraft => ({
+/** The Workload select's plain words, keyed by the backend's `utilisation` values
+ *  (a backend test holds the two lists equal). */
+export type DcUtilisation = 'ai_training' | 'inference' | 'mixed' | 'flat'
+export const UTILISATION_OPTIONS: [DcUtilisation, string][] = [
+  ['ai_training', 'AI training'], ['inference', 'Inference'], ['mixed', 'Mixed'], ['flat', 'Flat'],
+]
+/** The assumed shape inputs, as the engine's defaults; shown as assumed, unit beside. */
+export type MixKey = 'trough' | 'peak' | 'peakHour' | 'training' | 'flat'
+export const MIX_FIELDS: Record<DcUtilisation, [MixKey, string, string][]> = {
+  ai_training: [],
+  inference: [['trough', 'Lowest load', 'share of IT MW, 0 to 1'], ['peak', 'Highest load', 'share of IT MW, 0 to 1'], ['peakHour', 'Peak hour', 'hour of day, 0 to 23']],
+  mixed: [['training', 'Training share', 'share of IT MW, 0 to 1'], ['trough', 'Inference lowest load', 'share of IT MW, 0 to 1'], ['peak', 'Inference highest load', 'share of IT MW, 0 to 1'], ['peakHour', 'Inference peak hour', 'hour of day, 0 to 23']],
+  flat: [['flat', 'Constant load', 'share of IT MW, 0 to 1']],
+}
+export const MIX_DEFAULTS: Record<MixKey, string> = { trough: '0.4', peak: '0.85', peakHour: '20', training: '0.5', flat: '0.8' }
+export const MISMATCH_NOTE_ABOVE = 0.1
+
+export interface ComputeDraft { counts: string[]; kw: string; util: string }
+export const emptyCompute = (staged: boolean): ComputeDraft => ({ counts: staged ? ['', '', ''] : [''], kw: '', util: '' })
+const computeUsed = (c: ComputeDraft) => c.kw.trim() !== '' || c.util.trim() !== '' || c.counts.some(x => x.trim() !== '')
+/** IT MW from accelerators × kW each (host included) × utilisation; NaN until the three are numbers. */
+export const derivedMw = (c: ComputeDraft, i: number) => {
+  const n = asNumber(c.counts[i] ?? ''), kw = asNumber(c.kw), u = asNumber(c.util)
+  return n * kw * u / 1000
+}
+/** What the IT load is called beside the derived figure: typed on the single-year form, the build plan's on the staged one. */
+export const itWord = (staged: boolean) => (staged ? { noun: 'planned', wins: 'plan wins' } : { noun: 'typed', wins: 'typed wins' })
+/** The mismatch note (muted, not an error), two plain sentences naming both figures; null within 10 %. */
+export function computeMismatch(derived: number, typed: number, staged = false): string | null {
+  if (!(Number.isFinite(derived) && typed > 0) || Math.abs(derived - typed) / typed <= MISMATCH_NOTE_ABOVE) return null
+  return `Compute gives ${derived.toFixed(1)} MW. The ${itWord(staged).noun} IT load is ${typed.toFixed(1)} MW and is the one used.`
+}
+
+export interface DcDraft {
+  it_load: string; pue: string; backup: DcBackupMode; architecture: DcArchitecture
+  utilisation: DcUtilisation; mix: Record<MixKey, string>; compute: ComputeDraft
+}
+export const initialDcDraft = (staged = false): DcDraft => ({
+  utilisation: 'ai_training', mix: { ...MIX_DEFAULTS }, compute: emptyCompute(staged),
   it_load: String(DC_DEFAULTS.itLoadMw), pue: String(DC_DEFAULTS.pue),
   backup: DC_DEFAULTS.backup, architecture: DC_DEFAULTS.architecture,
 })
@@ -95,6 +133,19 @@ export function validateDc(d: DcDraft, templateId: string): Partial<Record<DcFie
   }
   const pue = asNumber(d.pue)
   if (!(Number.isFinite(pue) && pue >= 1)) e.pue = `${DC_FIELD_LABEL.pue}: enter a number of at least 1`
+  for (const [key] of MIX_FIELDS[d.utilisation]) {
+    const v = asNumber(d.mix[key])
+    const ok = key === 'peakHour' ? Number.isInteger(v) && v >= 0 && v <= 23 : Number.isFinite(v) && v >= 0 && v <= 1
+    if (!ok) { e.workload = `${DC_FIELD_LABEL.workload}: ${key === 'peakHour' ? 'the peak hour is a whole hour from 0 to 23.' : 'shares are numbers from 0 to 1.'}`; break }
+  }
+  if (d.utilisation === 'inference' || d.utilisation === 'mixed') {
+    if (asNumber(d.mix.trough) > asNumber(d.mix.peak)) e.workload = `${DC_FIELD_LABEL.workload}: the lowest load must not exceed the highest.`
+  }
+  if (computeUsed(d.compute)) {
+    const bad = d.compute.counts.some(c => !(asNumber(c) > 0)) || !(asNumber(d.compute.kw) > 0)
+      || !(asNumber(d.compute.util) > 0 && asNumber(d.compute.util) <= 1)
+    if (bad) e.compute = `${DC_FIELD_LABEL.compute}: give every accelerator count and the kW above 0. Give a utilisation above 0, up to 1. Or clear all compute fields.`
+  }
   return e
 }
 
@@ -111,6 +162,18 @@ export function dcLoadBody(
     const raw = site?.ambient[k].trim() ?? ''
     if (raw !== '' && Number.isFinite(Number(raw))) dc[key] = Number(raw)
   }
+  if (d.utilisation !== 'ai_training') {
+    dc.utilisation = d.utilisation
+    const KEY: Record<MixKey, string> = {
+      trough: 'trough_share', peak: 'peak_share', peakHour: 'peak_hour', training: 'training_share', flat: 'flat_share',
+    }
+    // Only the chosen kind's inputs: an inference spec stores no flat share.
+    dc.workload_mix = Object.fromEntries(MIX_FIELDS[d.utilisation].map(([k]) => [KEY[k], Number(d.mix[k])]))
+  }
+  if (computeUsed(d.compute)) {
+    dc.compute = { kw_per_accelerator: Number(d.compute.kw), utilisation: Number(d.compute.util),
+      accelerator_counts: d.compute.counts.map(Number) }
+  }
   if (templateId !== 'eh_datacenter_staged') {
     dc.phases = [{ cod: `${DC_DEFAULTS.singleYear}-01-01`, it_mw: Number(d.it_load) }]
   }
@@ -123,6 +186,8 @@ export function dcFieldOf(key: string): DcField | null {
   if (key === 'dc_load.pue_at_design') return 'pue'
   if (key.startsWith('dc_load.backup')) return 'backup'
   if (key === 'dc_load.architecture') return 'architecture'
+  if (key.startsWith('dc_load.utilisation') || key.startsWith('dc_load.workload_mix')) return 'workload'
+  if (key.startsWith('dc_load.compute')) return 'compute'
   return null
 }
 

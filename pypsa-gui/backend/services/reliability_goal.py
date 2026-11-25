@@ -171,6 +171,9 @@ def goal_sources(goal: dict, overridden: set[str] | frozenset[str] = frozenset()
 # computed before the field existed still matches (homer-parity 01a R1).
 OFF_WHEN_FALSY = frozenset({"min_renewable_fraction", "reserve_share_load",
                             "reserve_share_pv", "reserve_share_wind"})
+# Opt-in LP fields whose 0 is a setting (the CO2 limit's 0 means no
+# emissions): left out only while None, for the same reason.
+OFF_WHEN_NONE = frozenset({"co2_limit_t_per_yr"})
 
 
 def goal_free_config(cfg: Any) -> dict:
@@ -180,7 +183,8 @@ def goal_free_config(cfg: Any) -> dict:
     d = cfg if isinstance(cfg, dict) else asdict(cfg)
     return {k: v for k, v in d.items()
             if k not in GOAL_FIELDS and k not in NOT_LP_FIELDS
-            and not (k in OFF_WHEN_FALSY and _off(v))}
+            and not (k in OFF_WHEN_FALSY and _off(v))
+            and not (k in OFF_WHEN_NONE and v is None)}
 
 
 def _off(v: Any) -> bool:

@@ -296,6 +296,9 @@ RESULT_STATE_KEYS = (
     "eh_dtc_stress",
     "eh_dtc_planning",
     "last_reserve_margin",
+    # DC review 02: the CO2 limit goal's per-period caps, duals and, after an
+    # infeasible solve, its typed refusal (None when the goal is off).
+    "last_co2_cap",
     # Grid-to-process ticket 03: the binary operational check of a plan with
     # committable process units (None without one).
     "last_process_uc_check",
@@ -360,7 +363,7 @@ def cleared_result_state() -> dict[str, None]:
 # module.
 STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop",
              "eh_study", "investment_case", "business_case", "decision_study",
-             "report_job")
+             "report_job", "front")
 
 # The studies that re-solve the USER'S OWN network object in place, between
 # their iterates — so an edit landing mid-study is either overwritten by the
@@ -370,8 +373,11 @@ STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop",
 # (`mc_loop_runner.py`, the `network.copy()` under `lock`), and `eh_study`
 # solves a private `network.copy()` (`eh_study.py`). `decision_study` solves
 # study-owned option forks through the queue, never the base network object
-# (`services/study/runner.py`). A key added to STUDY_KEYS must be classified
-# here on purpose.
+# (`services/study/runner.py`). `front` (DC 01, the cost/reliability/CO2
+# front) is out too: `front._private_base` detaches the solver model and takes
+# one `network.copy()` under the lock, and every point solves a copy of that
+# copy, so the user's network object is only read. A key added to STUDY_KEYS
+# must be classified here on purpose.
 LIVE_NETWORK_STUDIES = frozenset({"fmea_sweep", "frontier", "coupling_loop",
                                   "margin_loop"})
 
@@ -393,6 +399,7 @@ STUDY_LABELS = {
     # Business case 08a: reads the solved network's linked outputs, so it holds the mesh.
     "business_case": "a business-case run",
     "report_job": "report generation",
+    "front": "a cost/reliability/CO2 front study",
 }
 
 # The studies a user can actually STOP.
@@ -409,7 +416,7 @@ STUDY_LABELS = {
 # drift the day someone REMOVES an abort.
 ABORTABLE_STUDIES = ("coupling_loop", "margin_loop", "mc", "frontier",
                      "fmea_sweep", "eh_study", "investment_case",
-                     "business_case", "decision_study", "report_job")
+                     "business_case", "decision_study", "report_job", "front")
 
 
 def may_rewrite_user_ts(ctx: Any) -> bool:
@@ -585,6 +592,8 @@ class ProjectSolverState:
     # serves. Reset with the rest each solve, so a margin can never outlive
     # the plan that met it.
     last_reserve_margin: Any = None
+    # DC review 02: the CO2 limit goal's result (`services/solver/co2_cap.py`).
+    last_co2_cap: Any = None
     # Grid-to-process ticket 03: the binary operational check payload.
     last_process_uc_check: Any = None
     # F1: the sizing label of the last solve ("optimised" or the fixed source).
@@ -648,6 +657,9 @@ class ProjectSolverState:
     # Transient report worker/control record. Never persisted as solve results;
     # retain while alive and clear with finished study/job records on reset.
     report_job: Any = None
+    # DC 01: the cost/reliability/CO2 front's record. Not persisted, like
+    # every study record above.
+    front: Any = None
 
     def as_dict(self) -> dict[str, Any]:
         """A plain dict with the same keys/values — the legacy `_state` shape."""

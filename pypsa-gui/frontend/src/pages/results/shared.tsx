@@ -175,8 +175,8 @@ export function UnavailableCell() {
 // The classes travel with the component for the same reason the word does:
 // `text-[11px] text-muted py-2` repeated at six call sites is six chances for
 // one of them to be edited alone.
-export function UnavailableBlock() {
-  return <p className="text-[11px] text-muted py-2">{COST_UNAVAILABLE}</p>
+export function UnavailableBlock({ text = COST_UNAVAILABLE }: { text?: string } = {}) {
+  return <p className="text-[11px] text-muted py-2">{text}</p>
 }
 
 // Drop-in warning banner for the six windowing tabs — renders nothing unless

@@ -128,12 +128,17 @@ def _energy_served(n, lost_load: dict | None, result_df,
     return float(weighted.sum()), _per_period_groupby(weighted, sns, is_multi)
 
 
-def overview_figures(n, cfg, lost_load: dict | None, result_df) -> OverviewFigures:
-    """The Overview's numbers, each from the service the Results tabs read."""
+def overview_figures(n, cfg, lost_load: dict | None, result_df, *,
+                     price_limit: str | None = None) -> OverviewFigures:
+    """The Overview's numbers, each from the service the Results tabs read. `price_limit` is the
+    limit of the solve that produced `n`'s results (`solved_price_limit` over the run's own state,
+    assistant-assurance 17 S3): on a MIP a figure priced at the duals is not established."""
+    from harness.solve_validity import MIP_PRICES_TEXT
     from services.results.cost_breakdown import compute_cost_breakdown
     from services.results.economics_by_carrier import compute_economics_by_carrier
 
-    econ = compute_economics_by_carrier(n, cfg, lost_load, result_df=result_df)
+    econ = compute_economics_by_carrier(n, cfg, lost_load, result_df=result_df,
+                                        price_limit=price_limit)
     notes: list[str] = []
     try:
         cb = compute_cost_breakdown(n, cfg) or {}
@@ -156,6 +161,8 @@ def overview_figures(n, cfg, lost_load: dict | None, result_df) -> OverviewFigur
             return Line(key, label, "M EUR", None, {p: None for p in periods},
                         "economics_by_carrier", note)
         t, pp = _econ_sum(by_carrier, field_, periods)
+        if t is None and econ.get("unavailable_reason"):
+            note = MIP_PRICES_TEXT if note is None else f"{note}. {MIP_PRICES_TEXT}"
         return Line(key, label, "M EUR", t, pp, f"economics_by_carrier.{field_} (Σ carriers)", note)
 
     cb_pp = {str(r["period"]): r for r in cb.get("by_period") or []}

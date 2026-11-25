@@ -39,19 +39,23 @@ def _cap_binding(mu: float | None, slack: float | None, cap_value: float = 0.0) 
     return abs(mu) > 1e-6
 
 
-def compute_emissions(n, source, *, result_df):
+def compute_emissions(n, source, *, result_df, goal_cap: dict | None = None):
     """
     CO2 emissions by carrier, generator and period.
 
     Lifted from `routers.results.get_emissions`, which keeps the network
     lookup, the `_dispatch_ready` gate and the `_state` reads. Returns the
     payload dict, or `None` where the handler returns 204.
+
+    `goal_cap` is the solve's CO2 limit goal result (`last_co2_cap`, DC review
+    02): its rows exist only during the solve, so they are listed in `caps`
+    from it, flagged ``"goal": True``, in the same shape as a stored cap.
     """
     import math as _math
 
     import pandas as _pd
 
-    from services.co2_override import override_series
+    from services.co2_override import flat_t_per_mwh, override_series
     src = source if source in ("lopf", "ac_pf") else "lopf"
     p = result_df(n, "generators_t", "p", src)
     if p is None or p.empty:
@@ -167,15 +171,8 @@ def compute_emissions(n, source, *, result_df):
     for name in gens.index:
         g_carrier = (str(gens.at[name, "carrier"]) if "carrier" in gens.columns else "").lower()
         intensity = co2_by_carrier.get(g_carrier, 0.0)
-        eff = float(gens.at[name, "efficiency"]) if "efficiency" in gens.columns else 1.0
-        if not _math.isfinite(eff) or eff <= 0:
-            eff = 1.0
         # GK B H1: a curve genset's fuel per MWh is its slope, not 1 / efficiency.
-        slope = _fuel_curve.curve_slope(gens.loc[name])
-        if intensity == 0:
-            out_intensity = 0.0
-        else:
-            out_intensity = intensity * slope if slope is not None else intensity / eff
+        out_intensity = flat_t_per_mwh(gens.loc[name], intensity)
         mwh_horizon = float(gen_energy_horizon.get(name, 0.0))
         if not _math.isfinite(mwh_horizon):
             mwh_horizon = 0.0
@@ -399,6 +396,15 @@ def compute_emissions(n, source, *, result_df):
                     }
     except Exception:
         pass
+    if goal_cap:
+        from services.solver.co2_cap import cap_entries
+
+        for cap_entry in cap_entries(goal_cap, total_t, period_totals):
+            caps.append(cap_entry)
+            if not cap_info.get("active"):
+                cap_info = {k: cap_entry[k] for k in (
+                    "active", "name", "cap_tCO2", "shadow_price_eur_per_tCO2",
+                    "slack_tCO2", "binding")}
 
     return {
         "total_tCO2": total_t,

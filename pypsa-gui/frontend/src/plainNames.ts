@@ -56,6 +56,15 @@ const CONTROL_LABELS: Record<string, string> = {
 }
 export const controlModeLabel = (id: string): string => CONTROL_LABELS[id] ?? sentenceCase(id)
 
+/** The island control presets (gridspine `PRESETS`) in words. */
+const PRESET_LABELS: Record<string, string> = {
+  grid_following: 'Grid following',
+  grid_forming_support: 'Grid forming support',
+  fast_frequency_response: 'Fast frequency response',
+  voltage_support: 'Voltage support',
+}
+export const presetLabel = (id: string): string => PRESET_LABELS[id] ?? sentenceCase(id)
+
 const ISLAND_SCENARIO_LABELS: Record<string, string> = {
   ups_bridged: 'UPS-bridged',
   seamless: 'Seamless',

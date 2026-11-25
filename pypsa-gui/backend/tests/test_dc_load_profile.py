@@ -218,7 +218,7 @@ def test_readiness_runs_on_the_profile():
 
 @pytest.mark.parametrize("raw, field", [
     ({"phases": [{"cod": "2027-01-01", "it_mw": 12.0}]}, "dc_load.phases"),
-    ({"utilisation": "inference"}, "dc_load.utilisation"),
+    ({"utilisation": "bogus"}, "dc_load.utilisation"),
     ({"critical_share": 0.0}, "dc_load.critical_share"),
     ({"pue_at_design": 0.9}, "dc_load.pue_at_design"),
     ({"ai_workload": {"idle_share": 0.99}}, "dc_load.ai_workload"),

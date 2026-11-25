@@ -3,7 +3,7 @@
 
 # 14 — Harness profile: eh_ipp_hybrid
 
-Status: ready-for-agent; audit 2026-11-19: profile and explore cases merged (#1454, #1492, #1508, #1532, #1544, #1575); S-C PPA price KPI open in #1590
+Status: ready-for-agent; audit 2026-11-25: #1454, #1492, #1508, #1532, #1544, #1575, #1590 merged (profile, explore cases, PPA price KPI, run_profiles.py:1209-1216); left: slice S-D unconfirmed, not defined in this file
 Type: task
 Blocked by: 07
 Gated: yes (GK B, investment/finance)
@@ -123,3 +123,7 @@ Plan: a native runner step `ppa_price` (reads only, 0 solves) after the run's ow
 - S8: a new error kind goes in a `tool-error-kinds.d/` fragment; `test_tool_error_kind_manifest` and `test_harness_run_monitor` at the trial merge.
 
 - 2026-11-23 status sweep: landed in #1454 (837cb6a78b); #1492 (a0169f265c); #1508 (787ace4c26); #1532 (6e99aee5cd); #1544 (755cbe3b59); #1575 (91f43242ee); #1590 (c3800b71b2): slices through eh_ipp_hybrid@3 (PPA price read natively). Unconfirmed: slice S-D.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: PR merge state checked against origin/master log; acceptance items grepped on master code.

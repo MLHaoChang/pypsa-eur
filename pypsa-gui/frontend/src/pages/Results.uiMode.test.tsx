@@ -27,6 +27,7 @@ vi.mock('./results/FmeaTab', () => stub('fmea-stub'))
 vi.mock('./results/StorageCycling', () => stub('storage-stub'))
 vi.mock('./results/asset/AssetDetail', () => stub('asset-stub'))
 vi.mock('./results/InvestmentTab', () => stub('investment-stub'))
+vi.mock('./results/EquipmentScheduleTab', () => stub('schedule-stub'))
 // The rail's CompareView reports the tab Results seeded it with.
 vi.mock('./CompareView', () => ({
   default: ({ initialTab }: { initialTab?: string }) => <div data-testid="compare-stub" data-initial-tab={initialTab} />,
@@ -56,7 +57,7 @@ import Results from './Results'
 // order, and Asset detail stands apart on the right of the group row.
 // In the strip's order: Summary, then each card's tabs (W10 R1), then Asset Detail.
 const ALL_IDS = ['summary', 'capex', 'overview', 'dispatch', 'flows', 'loadshape', 'storage', 'emissions', 'lostload',
-  'curtailment', 'prices', 'economics', 'loadflow', 'grid_code', 'electrical_design', 'island', 'grid_forming', 'adequacy', 'fmea', 'investment', 'reports', 'exports', 'specialist_packet', 'asset']
+  'curtailment', 'prices', 'economics', 'loadflow', 'grid_code', 'electrical_design', 'island', 'grid_forming', 'adequacy', 'fmea', 'investment', 'reports', 'exports', 'equipment_schedule', 'specialist_packet', 'asset']
 
 async function renderResults() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -104,13 +105,13 @@ describe('Results in Guided mode', () => {
   it('shows exactly the summary, adequacy, FMEA, energy-flow and load-shape tabs (M3: Summary in Guided too)', async () => {
     await renderResults()
     expect(groupIds()).toEqual(['summary', 'capacity', 'reliability', 'handoff'])
-    expect(tabIds()).toEqual(['summary', 'flows', 'loadshape', 'adequacy', 'fmea', 'reports', 'exports', 'specialist_packet'])
+    expect(tabIds()).toEqual(['summary', 'flows', 'loadshape', 'adequacy', 'fmea', 'reports', 'exports', 'equipment_schedule', 'specialist_packet'])
   })
 
   it('shows exactly those tabs on a multi-period run too', async () => {
     snapState.periods = [2030, 2040]
     await renderResults()
-    expect(tabIds()).toEqual(['summary', 'flows', 'loadshape', 'adequacy', 'fmea', 'reports', 'exports', 'specialist_packet'])
+    expect(tabIds()).toEqual(['summary', 'flows', 'loadshape', 'adequacy', 'fmea', 'reports', 'exports', 'equipment_schedule', 'specialist_packet'])
   })
 
   it('a stored hidden tab renders adequacy and is not rewritten', async () => {

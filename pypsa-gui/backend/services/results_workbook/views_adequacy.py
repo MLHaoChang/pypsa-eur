@@ -30,6 +30,7 @@ import pandas as pd
 
 from services.results_workbook.views import HORIZON, Key, Table, ViewData
 from services.results_workbook.views_grid import NO_PERIODS, _is_number, _records, _scalar
+from services.results_workbook.scenarios import run_state as _state
 from services.results_workbook.views_network import _view
 
 __all__: list[str] = []
@@ -48,12 +49,6 @@ DELTA_EUE = "ΔEUE, MWh"
 OCCURRENCE = "occurrence per year"
 
 
-def _state(run) -> dict:
-    """The run's solver state: its saved context's, or the active one (the base)."""
-    if run.context is not None:
-        return run.context.solver_state
-    from services.pypsa_service import PyPSAService
-    return PyPSAService.get_solver_state()
 
 
 def _num(v) -> float | None:

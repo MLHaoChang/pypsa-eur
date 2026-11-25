@@ -41,6 +41,13 @@ export function withheldCell(reason: string | undefined): string {
   return `Not available (${(reason && NOT_KEPT_WORDS[reason]?.short) || 'no prices'})`
 }
 
+/** A whole view withheld for a price limit, in words only:
+ *  "Marginal prices: not available. An integer (MIP) solve has no marginal prices." */
+export function withheldBlock(what: string, reason: string | undefined): string {
+  const why = (reason && NOT_KEPT_WORDS[reason]?.why) || 'the solve produced no prices'
+  return `${what}: not available. ${why.charAt(0).toUpperCase()}${why.slice(1)}.`
+}
+
 /** The visible label beside a total that leaves out a withheld part:
  *  "Total excludes revenue: an integer (MIP) solve has no marginal prices." */
 export function withheldTotalNote(what: string, reason: string | undefined): string {

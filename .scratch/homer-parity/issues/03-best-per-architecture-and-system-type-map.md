@@ -3,7 +3,7 @@
 
 # 03 — Results: best system per architecture, winning-system-type map, grid-extension break-even
 
-Status: 03c done (#1435), 03d done (#1468); 03a and 03b tracked in their own PRs
+Status: ready-for-agent; audit 2026-11-25: 03c done (#1435), 03d done (#1468); 03a service on master (`services/study/supply_architectures.py`, `test_homer_supply_architectures.py`; no own PR merge commit found); 03b-1 merged (#1617, runner, route, chat tools); left: 03b-2 the winner-map UI (no frontend consumer on master)
 Model: Sonnet for 03b and 03c; Opus for 03a
 Reviewer: GK B; UX for 03b (and 03c if it adds a UI input)
 Blocked by: 03b blocked by 03a; 03c independent
@@ -94,3 +94,7 @@ Split by the coordinator (PR-SIZE-1): 03b-1 = runner, route, chat tools and conf
 - V8: route registry, disposition, ACL, write-surface and golden-coverage tests, assistant inventory, route parity and control matrix pass; the new kinds are in `tool-error-kinds.d/claude-homer-03b-system-type-map.json`.
 - V9 (option 1): `harness/system_map_card.py` carries the confirmation data. Its digest binds the shown arguments (variable ids, every axis value, the tool arguments) plus the saved base's revision and nothing else; the derived architectures and solve count must equal what the card computed at approval. The architecture labels and the solve count enter the digest in 03b-2, with their rendering.
 - V10: until 03b-2 the result surfaces only in the chat read; it shares the one study slot with 03a and the tornado.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: checked merge log for #1435, #1468, #1617; supply_architectures.py:28,77 lists infeasible rows; test_homer_supply_architectures.py:157 omit-not-zero; grep of frontend/src finds no system-type-map component. The 03a PR number was not found in master's history, so the 03a and 03b acceptance boxes were left unticked.

@@ -1076,6 +1076,33 @@ export interface DcArchitectureCompare {
              most_services: DcArchitecture[]; most_services_text: string }
 }
 
+/** One row of the equipment schedule (GET /campus-electrical/{name}/equipment-schedule). */
+export type EquipmentFlag = 'declared_below_chosen' | 'beyond_ladder' | 'not_evaluated' | 'not_rated'
+  | 'no_library_cable' | 'withstand_not_evaluated' | 'partly_evaluated'
+export interface EquipmentScheduleRow {
+  kind: string; kind_label: string; asset: string; location: string | null
+  rating: number | null; unit: string | null; quantity: number | null
+  /** The criterion that set the rating, in plain words with units. */
+  governing: string | null
+  source: 'computed' | 'declared' | 'assumed' | 'not sized'
+  declared_rating: number | null; declared_unit: string | null
+  /** One flag, or several joined by "; ", most severe first (see `flagsOf`). */
+  flag: string | null; library_id: string | null
+  /** Library price of the chosen rating times the quantity; null when unpriced. */
+  capex_eur: number | null
+  /** Switchgear only: the rated peak (ip) of the chosen rating, kA. */
+  rated_peak_ka?: number | null
+}
+export interface EquipmentScheduleAssumption {
+  applies_to: string; name: string; label: string; value: unknown; unit: string; source: string
+}
+export interface EquipmentSchedule {
+  rows: EquipmentScheduleRow[]; assumptions: EquipmentScheduleAssumption[]
+  /** What is missing, and what to run to get it. */
+  missing: string[]
+  stale: boolean
+}
+
 export const CAMPUS_RUN_TIMEOUT_MS = 900_000
 /** Drafting loads the whole saved network, as a bundle download does: its 180 s. */
 export const CAMPUS_DRAFT_TIMEOUT_MS = 180_000
@@ -1299,6 +1326,13 @@ export const campusApi = {
   deletePublishedGridCode: (project: string, profileId: string) =>
     client.delete<{ deleted: string }>(`${codes(project)}/published/${encodeURIComponent(profileId)}`, quiet)
       .then(r => r.data),
+
+  /** The equipment schedule of the last DC Grid study. */
+  equipmentSchedule: (project: string) =>
+    client.get<EquipmentSchedule>(`${base(project)}/equipment-schedule`, quiet).then(r => r.data),
+  /** The same schedule as a workbook (Schedule and Assumptions sheets). */
+  equipmentScheduleXlsx: (project: string) =>
+    client.get(`${base(project)}/equipment-schedule.xlsx`, { ...quiet, responseType: 'blob' }).then(r => r.data as Blob),
 }
 
 /** The backend's refusal as one line: its `detail`, or the request's message. */
