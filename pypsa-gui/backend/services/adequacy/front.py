@@ -633,13 +633,19 @@ def _objectives(p: dict, basis: str) -> tuple | None:
 
 
 def same_design(a: dict, b: dict) -> bool:
-    """Same built capacities (every asset) and the same total cost."""
+    """Same built capacities (every asset) and the same total cost. An
+    unread (None) size or total is never "the same": the pair is not judged
+    equal on a number nobody read."""
+
+    def close(x, y, tol):
+        return x is not None and y is not None and _close(x, y, tol)
+
     ca, cb = a["capacities"], b["capacities"]
     if set(ca) != set(cb):
         return False
-    if not all(_close(ca[k], cb[k], _ABS_TOL_MW) for k in ca):
+    if not all(close(ca[k], cb[k], _ABS_TOL_MW) for k in ca):
         return False
-    return _close(a["total_eur_per_yr"], b["total_eur_per_yr"], _ABS_TOL_EUR)
+    return close(a["total_eur_per_yr"], b["total_eur_per_yr"], _ABS_TOL_EUR)
 
 
 def _fmt(x: float) -> str:

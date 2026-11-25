@@ -389,13 +389,15 @@ def test_a_failure_after_the_first_write_is_undone(
         raise RuntimeError("validator refused late")
 
     monkeypatch.setattr(network_bulk, "apply_bulk_update", second_fails)
-    from services import undo_service
 
-    depth = undo_service.depth()
+    def depth():
+        return len(session_ctx(client).undo.stack)
+
+    before_depth = depth()
     with pytest.raises(RuntimeError):
         client.post(f"{URL}/apply", json={"index": 0, "expected_revision": rev})
     assert calls == ["Generator"]
-    assert undo_service.depth() == depth
+    assert depth() == before_depth
     pd.testing.assert_frame_equal(gens(client), before, check_dtype=False)
     assert rec["status"] == "done"
 
@@ -522,6 +524,24 @@ def test_the_apply_checks_pass_a_good_point(unit_apply):
             422,
             "no finite, non-negative solved size",
         ),
+        (
+            _rec(
+                [
+                    {
+                        "status": "ok",
+                        "point": {
+                            "capacities": {
+                                "generators:gas": True,
+                                "generators:clean": 1.0,
+                            }
+                        },
+                    }
+                ]
+            ),
+            0,
+            422,
+            "no finite, non-negative solved size",
+        ),
     ],
     ids=[
         "no-record",
@@ -535,6 +555,7 @@ def test_the_apply_checks_pass_a_good_point(unit_apply):
         "none-size",
         "nan-size",
         "negative-size",
+        "bool-size",
     ],
 )
 def test_each_apply_refusal(unit_apply, record, index, status, word):
