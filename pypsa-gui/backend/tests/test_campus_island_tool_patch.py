@@ -177,8 +177,9 @@ SWITCH = {"units": {"bess": {"control": "gfm_vsm"}}}
 
 
 def test_a_switch_card_shows_each_dropped_field_as_removed_and_each_filled_one(
-    grid, saved
-):  # noqa: F811
+    grid,  # noqa: F811
+    saved,
+):
     frames, cards, result = _dispatch(
         grid,
         "campus_set_island_config",
