@@ -356,18 +356,34 @@ def capacity_units(n, keys) -> dict[str, str | None]:
     return out
 
 
-def _currency(cfg) -> str:
-    """The case's currency (the finance inputs' ``currency``), the one every
-    cost of the front is in; FinanceInputs' own default when none is set."""
+def _currency(cfg) -> tuple[str, bool]:
+    """The case's currency (the finance inputs' ``currency``) and whether it
+    was assumed. The front's costs are the network's own costs, labelled in
+    this currency; nothing is converted. A missing or invalid code (checked
+    against FinanceInputs' own ``currency`` field) falls back to that field's
+    default and is marked assumed (``True``)."""
+    from typing import Annotated
+
+    from pydantic import TypeAdapter, ValidationError
+
     from models.finance import FinanceInputs
 
+    field = FinanceInputs.model_fields["currency"]
     raw = getattr(cfg, "finance", None)
     cur = (
         raw.get("currency") if isinstance(raw, dict) else getattr(raw, "currency", None)
     )
-    if isinstance(cur, str) and len(cur) == 3:
-        return cur
-    return FinanceInputs.model_fields["currency"].default
+    try:
+        code = TypeAdapter(Annotated[str, *field.metadata]).validate_python(
+            cur, strict=True
+        )
+    except ValidationError:
+        return field.default, True
+    return code, False
+
+
+# The symbols the panel writes too (frontend utils/money.ts SYMBOL).
+_CURRENCY_SYMBOL = {"EUR": "€", "USD": "$", "GBP": "£"}
 
 
 _CAPACITY_VARS = ("p_nom", "e_nom", "s_nom")
@@ -748,8 +764,10 @@ def degenerate_findings(
     voll: float,
     outage_model: bool,
     reference_co2: float | None,
+    currency: str = "EUR",
 ) -> dict:
-    """Which axes never bound, in words, with the lever to pull."""
+    """Which axes never bound, in words, with the lever to pull. ``currency``
+    is the result's ``currency``, the label on the value of lost load."""
     ok = [p for p in points if p.get("status") == "ok" and p.get("point")]
     axes: dict[str, dict] = {}
     if not ok:
@@ -782,7 +800,7 @@ def degenerate_findings(
             axes["ens_cap"] = {
                 "text": (
                     f"The ENS target never limited the design at any of {len(ok)} points: "
-                    f"{why}at a value of lost load of {_fmt(voll)} €/MWh serving every MWh is "
+                    f"{why}at a value of lost load of {_fmt(voll)} {_CURRENCY_SYMBOL.get(currency, currency)}/MWh serving every MWh is "
                     "already the cheapest plan. Use the reserve-margin lever, "
                     "lower the value of lost load, or read the sampled-outage LOLE per point."
                 ),
@@ -1000,6 +1018,7 @@ def run_front_study(
     # read off the private copy: no lock, and the same state the points start from
     outage_model = lp_has_outage_model(base)
     points: list[dict] = []
+    currency, currency_assumed = _currency(cfg)
     result = {
         "lever": lever_used,
         "lever_reason": lever_why,
@@ -1031,7 +1050,8 @@ def run_front_study(
             "the rest (dispatch, fuel, import tariff, CO2 price)"
         ),
         "points": points,
-        "currency": _currency(cfg),
+        "currency": currency,
+        "currency_assumed": currency_assumed,
         "reference_co2_t_per_yr": None,
         "warning": non_convexity_warning(base, cfg),
         "aborted": False,
@@ -1132,6 +1152,7 @@ def _finish(result, points, cfg, lever_used, outage_model) -> dict:
         voll=float(getattr(cfg, "voll", 0.0) or 0.0),
         outage_model=outage_model,
         reference_co2=result["reference_co2_t_per_yr"],
+        currency=result["currency"],
     )
     return result
 

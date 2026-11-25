@@ -65,8 +65,10 @@ export interface FrontResult {
   warning?: string | null
   aborted?: boolean
   reference_co2_t_per_yr?: number | null
-  /** The case's currency (ISO code); every cost of the front is in it. */
+  /** The case's currency (ISO code): the network's own costs, labelled in it, not converted. */
   currency?: string | null
+  /** True when the case set no valid currency and `currency` is the default. */
+  currency_assumed?: boolean
 }
 
 /** GET /results/front and GET /results/eh_front: one shape. */

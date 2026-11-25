@@ -719,6 +719,56 @@ def test_no_solved_point_is_said_plainly():
     )
 
 
+def test_each_point_size_carries_its_own_bus_unit():
+    # GK A (38): a Store on a tonne bus reads t, a Line MVA, a Generator MW,
+    # on the point itself, not only in capacity_units().
+    n = _hand()
+    n.add("Bus", "ore", carrier="ore", unit="t")
+    n.add(
+        "Store",
+        "pile",
+        bus="ore",
+        e_nom_extendable=True,
+        e_nom_max=1000.0,
+        capital_cost=1.0,
+    )
+    n.add("Bus", "b2", carrier="AC")
+    n.add("Load", "l2", bus="b2", p_set=10.0)
+    n.add(
+        "Line",
+        "l1",
+        bus0="b",
+        bus1="b2",
+        x=0.1,
+        r=0.01,
+        s_nom_extendable=True,
+        s_nom_max=1000.0,
+        capital_cost=1.0,
+    )
+    res = _run(n, lever="ens_cap", levels=[100.0])
+    assert res["points"][0]["status"] == "ok"
+    pt = res["points"][0]["point"]
+    units = pt["capacity_units"]
+    assert units["stores:pile"] == "t"
+    assert units["lines:l1"] == "MVA"
+    assert units["generators:gas"] == "MW"
+    assert set(units) == set(pt["capacities"])
+
+
+def test_the_result_carries_the_case_currency_and_says_when_it_is_assumed():
+    res = _run(
+        _hand(), cfg=_cfg(finance={"currency": "GBP"}), lever="ens_cap", levels=[100.0]
+    )
+    assert (res["currency"], res["currency_assumed"]) == ("GBP", False)
+    # the ENS sentence labels the value of lost load in that currency
+    assert "5,000 £/MWh" in res["degenerate"]["axes"]["ens_cap"]["text"]
+    res = _run(
+        _hand(), cfg=_cfg(finance={"currency": "EURO"}), lever="ens_cap", levels=[100.0]
+    )
+    assert (res["currency"], res["currency_assumed"]) == ("EUR", True)
+    assert "5,000 €/MWh" in res["degenerate"]["axes"]["ens_cap"]["text"]
+
+
 # --------------------------------------------------------------------------
 # Degenerate, said plainly (F6)
 # --------------------------------------------------------------------------

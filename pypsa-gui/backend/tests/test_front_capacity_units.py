@@ -57,10 +57,26 @@ def test_the_currency_is_the_finance_inputs():
     class Cfg:
         finance = {"currency": "GBP"}
 
-    assert fr._currency(Cfg()) == "GBP"
-    assert fr._currency(object()) == "EUR"
+    assert fr._currency(Cfg()) == ("GBP", False)
+    # FinanceInputs' own rule: exactly three characters, a string
+    for bad in ("EURO", "EU", "", 978, None):
 
-    class Odd:
-        finance = {"currency": "EURO"}
+        class Odd:
+            finance = {"currency": bad}
 
-    assert fr._currency(Odd()) == "EUR"
+        assert fr._currency(Odd()) == ("EUR", True), bad
+    assert fr._currency(object()) == ("EUR", True)
+
+
+def test_the_ens_sentence_uses_the_given_currency():
+    pts = [{"status": "ok", "level": 1.0, "point": {"reliability_binding": False}}]
+    for cur, label in (("EUR", "€"), ("USD", "$"), ("CHF", "CHF")):
+        d = fr.degenerate_findings(
+            pts,
+            "ens_cap",
+            voll=5000.0,
+            outage_model=True,
+            reference_co2=None,
+            currency=cur,
+        )
+        assert f"5,000 {label}/MWh" in d["axes"]["ens_cap"]["text"]
