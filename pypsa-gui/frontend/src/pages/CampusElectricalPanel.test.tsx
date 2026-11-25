@@ -30,7 +30,7 @@ const api = vi.hoisted(() => ({
   state: vi.fn(), draft: vi.fn(), save: vi.fn(), run: vi.fn(), gridCodes: vi.fn(),
   library: vi.fn(), saveLibrary: vi.fn(), resetLibrary: vi.fn(),
   startMilp: vi.fn(), milpStatus: vi.fn(), cancelMilp: vi.fn(),
-  island: vi.fn(), islandReport: vi.fn(),
+  island: vi.fn(), islandReport: vi.fn(), equipmentSchedule: vi.fn(),
 }))
 const queue = vi.hoisted(() => ({ abort: vi.fn() }))
 vi.mock('../api/solveQueue', async () => {
@@ -114,6 +114,7 @@ beforeEach(() => {
   commercial.getCommercial.mockResolvedValue({ poc_link: 'grid_import' })
   api.gridCodes.mockResolvedValue({ shipped: {}, published: [], drafts: [], documents: [], extraction_available: false })
   api.milpStatus.mockResolvedValue(null)
+  api.equipmentSchedule.mockResolvedValue({ rows: [], assumptions: [], missing: [], stale: false })
   api.library.mockResolvedValue({ yaml: 'discount_rate: {value: 0.07, source: assumed}\n', is_default: true })
 })
 afterEach(() => cleanup())
@@ -465,6 +466,23 @@ describe('CampusElectricalPanel', () => {
     expect(screen.getByTestId('fault-IT_BUS-2030').textContent).toContain('23.41')
     expect(screen.getByText(/max_consumption_mw/)).toBeTruthy()
     expect(screen.getByText(/bess_new: built at 0 MW/)).toBeTruthy()
+  })
+
+  it('Short circuit: a bus with no declared rating reads "Not declared", and the switchgear chosen sits under it', async () => {
+    const st = sized()
+    st.results!.short_circuit = [{ ...st.results!.short_circuit[0], rated_ka: null, adequate: null }]
+    api.state.mockResolvedValue(st)
+    api.equipmentSchedule.mockResolvedValue({ rows: [{
+      kind: 'switchgear', kind_label: 'Switchgear', asset: 'IT_BUS switchgear', location: 'IT_BUS (11 kV)', rating: 31.5,
+      unit: 'kA', quantity: 3, governing: 'Thermal short-circuit current 21.4 kA', source: 'computed', declared_rating: null,
+      declared_unit: null, flag: null, library_id: 'sg', capex_eur: 1 }], assumptions: [], missing: [], stale: false })
+    renderPanel()
+    const row = await screen.findByTestId('fault-IT_BUS-2030')
+    expect(row.textContent).toContain('Not declared')
+    expect(row.textContent).not.toContain('—')
+    // the Verdict says what follows from it, not "not rated" a second time
+    expect(row.querySelector('td:last-child')!.textContent).toBe('nothing to judge against')
+    expect((await screen.findByTestId('switchgear-IT_BUS')).textContent).toContain('31.5 kA')
   })
 
   it('lets the compliance, transformer and short-circuit tables scroll sideways rather than clip', async () => {
