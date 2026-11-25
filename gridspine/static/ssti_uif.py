@@ -29,8 +29,9 @@ converter's current-source infeed would raise SC_tot and understate UIF); the ve
 cases and machines, since a weak grid raises a machine's share.
 
 **Island (GC-08b).** A campus whose PCC tie is normally open
-(``tie_normally_open``) is also screened with the grid out (a closed-tie campus
-that declares island requirements waits for GC-08e), in the cases ``ISLAND_CASES``: SC_i and SC_tot then come from the
+(``tie_normally_open``), or that declares island requirements
+(``campus.island["requirements"]``, GC-08e), is also screened with the grid out (``islands``), in the cases
+``ISLAND_CASES``: SC_i and SC_tot then come from the
 machines alone, so a lone genset has SC_i = 0 and UIF = S_plant / S_i. Counting
 the grid's infeed there would understate the islanded UIF many times over. The
 island rows carry their own case label, IEC 60909's c for that case and the role
@@ -40,8 +41,8 @@ converter bus. A
 bus no machine feeds islanded (SC_tot 0) reads "not evaluated", never clear.
 ``UifStudy.island_verdict`` is the worst over the island rows (any "not
 evaluated" row keeps it from clearing); ``verdict`` and ``worst_uif`` stay the
-grid cases' alone, so the readers of GC-08 judge what they judged before
-(GC-08e moves them onto the island rows).
+grid cases' alone. The scorecard and the pack judge the island rows from both
+(GC-08e).
 
 Screening only: the binding answer is the EMT study.
 """
@@ -68,8 +69,9 @@ CONVERTER_KINDS = ("bess", "pv", "wind", "fuel_cell", "ups", "load")
 MACHINE_KIND = "genset"
 ROLE_CONVERTER = "converter bus"
 ROLE_PCC = "PCC (information)"
-#: An island-case row at a converter bus: computed, not yet judged by the scorecard or pack (GC-08e).
-ROLE_ISLAND = "island converter bus (not judged)"
+#: An island-case row at a converter bus, judged by the scorecard and the pack (GC-08e). GC-08b wrote it as
+#: "island converter bus (not judged)"; the readers accept both (``grid_readiness.UIF_ROLES_ISLAND``).
+ROLE_ISLAND = "island converter bus"
 NO_ISLAND_SOURCE = (
     "no synchronous machine feeds this bus with the grid out: SC_tot is 0, so no UIF"
 )
@@ -107,7 +109,7 @@ class UifStudy:
     worst_uif: float
     notes: list
     #: The island cases' own verdict and worst UIF (GC-08b); "not evaluated" for a campus that does not
-    #: ``islands``. Kept apart from ``verdict`` until the scorecard and pack judge them (GC-08e).
+    #: ``islands``. Kept apart from ``verdict``: the scorecard and the pack judge them from both (GC-08e).
     island_verdict: str = "not evaluated"
     island_worst_uif: float = math.nan
 
@@ -253,10 +255,11 @@ def _s_mva(levels: pd.DataFrame, bus: str, case: str) -> float:
 
 def islands(campus) -> bool:
     """
-    Whether the campus is screened islanded: its PCC tie is normally open. Declared island requirements on
-    a closed tie do not count yet (GK A2 ruling; GC-08e widens it).
+    Whether the campus is screened islanded: its PCC tie is normally open, or it declares island
+    requirements (``campus.island["requirements"]``), so it can run with the grid out (GC-08e).
     """
-    return bool(campus.tie_normally_open)
+    island = getattr(campus, "island", None) or {}
+    return bool(campus.tie_normally_open) or island.get("requirements") is not None
 
 
 def campus_uif(

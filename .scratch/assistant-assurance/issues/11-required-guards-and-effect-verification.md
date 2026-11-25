@@ -3,7 +3,7 @@
 
 # Required effect guards and independent completion verification
 
-Status: ready-for-agent; audit 2026-11-19: read-back for update_component merged (#119); left: general mandatory guards, untasked idempotency, task-resolution evidence, A3.5/A3.6/A7.7
+Status: ready-for-agent; audit 2026-11-25: general mandatory guards (harness/guards.py REQUIRED_GUARDS, issue 04 S4a, test_p3_required_guards.py), write read-back and extra-edit checks (#1204 merged) and job holds (job_holds.py) are on master; left: task-resolution evidence, untasked write idempotency, A7.7, whether the released-operation mapping is complete
 Model: Opus
 Progress: Effect read-back for exact update_component only; general guards, untasked idempotency and task-resolution evidence pending
 Type: task
@@ -51,3 +51,7 @@ See [implementation status](../implementation-status.md), [contracts](../harness
 ### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
 
 Was: `needs-triage`. Files: `pypsa-gui/backend/harness/` guard/receipt code, `services/chat_tools.py` dispatch, task/job idempotency stores. Blockers: 04 (action and job outcomes; ready, a live session touches it, so start after it lands); 01 is done. Reviewer: GK B.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: #1204 read merged via GitHub; guards.py, job_holds.py and test_p3_required_guards.py exist on origin/master 87a634f4; the old '#119' reference was truncated and not verified; left items not found in code or checked, so not marked done.

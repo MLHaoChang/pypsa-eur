@@ -173,12 +173,15 @@ def _ambient_c(clock: _Clock, p: Mapping[str, Any]) -> np.ndarray:
     amb = SimpleNamespace(
         ambient_annual_mean_c=_num(p, "ambient_annual_mean_c", -40.0, 40.0),
         ambient_seasonal_amplitude_k=_num(p, "ambient_seasonal_amplitude_k", 0.0, 40.0),
-        ambient_diurnal_amplitude_k=_num(p, "ambient_diurnal_amplitude_k", 0.0, 30.0))
+        ambient_diurnal_amplitude_k=_num(p, "ambient_diurnal_amplitude_k", 0.0, 30.0),
+        ambient_peak_day=_num(p, "ambient_peak_day", 1.0, 366.0))
     return ambient_c(amb, clock.utc, clock.timezone)
 
 
 _AMBIENT = {"ambient_annual_mean_c": 10.0, "ambient_seasonal_amplitude_k": 9.0,
-            "ambient_diurnal_amplitude_k": 5.0}
+            "ambient_diurnal_amplitude_k": 5.0,
+            # day of year the seasonal cosine peaks: 200 north, 17 south (dc_load_profile)
+            "ambient_peak_day": 200}
 
 
 def _in_hours(hour: np.ndarray, start: int, end: int) -> np.ndarray:

@@ -1,0 +1,17 @@
+{
+ "entries": [
+  {
+   "id": "campus_psse_bundle_download",
+   "title": "Download the campus PSS/E case",
+   "disposition": "manual",
+   "reason": "A PSS/E hand-off case is a zip file the user saves from the app; chat cannot hand over a download. The Grid code & connection results list each bundle with its button.",
+   "page": "Results, Grid code & connection",
+   "panel": null,
+   "keywords": ["psse", "raw", "dyr", "handoff"],
+   "routes": [
+    ["GET", "/api/campus-electrical/{name}/psse"],
+    ["GET", "/api/campus-electrical/{name}/psse/{bundle}/download"]
+   ]
+  }
+ ]
+}

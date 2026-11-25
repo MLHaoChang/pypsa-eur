@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): After a Guided study the results workbook, the dispatch status and the Expert run state read the study's own solve when the network has no dispatch of its own, so the workbook is no longer empty and Download gives a file.

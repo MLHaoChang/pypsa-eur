@@ -1,0 +1,2584 @@
+{
+ "scorecard": {
+  "S1": {
+   "schema": 1,
+   "profile": {
+    "id": "eu_rfg_dcc_ce",
+    "title": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe",
+    "error": null
+   },
+   "template_id": "demo",
+   "envelope": false,
+   "rows": [
+    {
+     "id": "scr",
+     "requirement": "Short-circuit ratio at the PoC",
+     "limit": 3.0,
+     "unit": null,
+     "source": "Screening rule: an SCR of 3.0, the edge between moderate and strong grids; assumed, not a grid-code value",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No short-circuit level and inverter capacity at every point of connection, so the SCR is not known: enter the fault level and, where the network has no inverter-based generator or battery to derive it from (or has several points of connection), the IBR capacity field of each point of connection's bus",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": ">=",
+      "otherwise": "warn",
+      "tolerance": 0.0
+     },
+     "setting": {
+      "item": "fault_level",
+      "user": null,
+      "default": {
+       "value": null,
+       "source": "assumed",
+       "origin": "placeholder"
+      }
+     }
+    },
+    {
+     "id": "energization_peak:all",
+     "requirement": "Load within the energized import (after its efficiency) plus firm gensets and batteries, hour by hour (all)",
+     "limit": 60.0,
+     "unit": "MW",
+     "source": "The connection's capacity and the island requirements' genset N+k and ride-through",
+     "project_value": 0.0,
+     "verdict": "pass",
+     "assumed": true,
+     "note": "all: binding hour now, hourly-mean load 0 MW against the 60 MW energized import = 60 MW (checked hour by hour; the period's peak is 0 MW); no energization schedule: the connection's capacity; import efficiency from the import Link's efficiency, as entered; fixed loads only (a flexible conversion unit is a decision, not counted)",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Link",
+      "entity": "grid_import",
+      "field": "eh_energization_mw"
+     }
+    },
+    {
+     "id": "ramp_rate",
+     "requirement": "Load ramp rate at the PoC within the connection ramp limit",
+     "limit": 6.0,
+     "unit": "MW/min",
+     "source": "assumed (generic placeholder): 10% of the connection capacity per minute",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No AI-training load profile on this project, so its ramp, swing and oscillation are not known (a data-centre project created with the AI-training profile has one)",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Link",
+      "entity": "grid_import",
+      "field": "connection_ramp"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "fail",
+      "tolerance": 1e-09
+     },
+     "setting": {
+      "item": "connection_ramp",
+      "user": null,
+      "default": {
+       "value": 6.0,
+       "source": "assumed",
+       "origin": "placeholder"
+      }
+     }
+    },
+    {
+     "id": "oscillation",
+     "requirement": "Power oscillation at the PoC (0.1-2 Hz band) within the limit",
+     "limit": 1.0,
+     "unit": "% of connection, peak-to-peak",
+     "source": "assumed (generic placeholder): 1 % of the connection",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No AI-training load profile on this project, so its ramp, swing and oscillation are not known (a data-centre project created with the AI-training profile has one)",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Link",
+      "entity": "grid_import",
+      "field": "oscillation"
+     },
+     "setting": {
+      "item": "oscillation",
+      "user": null,
+      "default": {
+       "value": 1.0,
+       "source": "assumed",
+       "origin": "placeholder"
+      }
+     }
+    },
+    {
+     "id": "rapid_voltage_change",
+     "requirement": "Rapid voltage change at the PoC on the AI-training load step",
+     "limit": 3.0,
+     "unit": "% of nominal",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: not set by RfG/DCC; IEC TR 61000-3-7 indicative planning levels for infrequent rapid voltage changes at HV/EHV are about 3-5 % (not verified against the text here); 3 % used",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No AI-training load profile on this project, so its ramp, swing and oscillation are not known (a data-centre project created with the AI-training profile has one)",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "rapid_voltage_change_infrequent",
+     "requirement": "Rapid voltage change at the PoC on an infrequent event (the whole connection switched)",
+     "limit": null,
+     "unit": "% of nominal",
+     "source": "no limit set",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No limit set: the grid code sets no infrequent rapid-voltage-change tier",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "harmonic_distortion",
+     "requirement": "Harmonic voltage distortion at the PoC from the site's drives and heaters",
+     "limit": 3.0,
+     "unit": "% THD",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: THD: not set by RfG/DCC; IEC TR 61000-3-6 Table 2 indicative planning level for total harmonic distortion at HV-EHV (not verified against the text here); 3 % used; Individual orders: not set by RfG/DCC; IEC TR 61000-3-6 Table 2 indicative planning levels for individual harmonic voltages at HV-EHV, % of the fundamental (not verified against the text here)",
+     "project_value": 0.0,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "THD 0 % (limit 3 %); no input for mill: a unit without its inputs blocks a pass; S_k 150 MVA; a screening estimate (IEC 61000-3-6 summation, U_h = I_h \u00b7 h / S_k) that ignores network resonance, background distortion and the operator's allocation of the planning level; above the limit a harmonic study is needed",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": "mill",
+      "field": "rated_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     },
+     "harmonics": {
+      "sk_mva": 150.0,
+      "thd_pct": 0.0,
+      "worst_order": null,
+      "worst_u_h_pct": null,
+      "failing_orders": [],
+      "no_input_units": [
+       "mill"
+      ],
+      "demo_spectrum_units": []
+     }
+    },
+    {
+     "id": "current_distortion",
+     "requirement": "Current distortion (TDD) at the PoC from the site's drives and heaters",
+     "limit": 2.5,
+     "unit": "%\u00a0of\u00a0I_L",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: not set by RfG/DCC; placeholder; IEEE 519-2014 Tables 2-4 current distortion limits by PCC voltage and Isc/IL (not verified against the text here)",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "mill has no Harmonic source or Rated apparent power; a unit without them blocks a pass. IEEE 519-2014 Table 3: short-circuit ratio 2.5, band \u2264 20. S_sc: the fault level entered at the PoC, not IEEE 519's maximum short-circuit current, so the band can differ from the standard's. I_L: the connection's rated import at the PoC, not IEEE 519's average monthly maximum demand. Screening: above the limit, run a harmonic load-flow study.",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": "mill",
+      "field": "rated_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     },
+     "tdd": {
+      "sk_mva": 150.0,
+      "i_l_mva": 60.0,
+      "isc_il": 2.5,
+      "table": "Table 3",
+      "band": "<= 20",
+      "tdd_pct": 0.0,
+      "tdd_limit_pct": 2.5,
+      "worst_order": null,
+      "failing_orders": [],
+      "no_input_units": [
+       "mill"
+      ],
+      "label": "screening; binding answer is a harmonic load-flow study with the grid's impedance"
+     }
+    },
+    {
+     "id": "flicker",
+     "requirement": "Flicker severity at the PoC from the site's stepping loads",
+     "limit": 0.6,
+     "unit": "Plt",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: Pst: not set by RfG/DCC; IEC TR 61000-3-7 indicative planning level for short-term flicker severity Pst at HV-EHV; a planning level, not an emission limit allocated to this installation (margin overstated); not verified against the text here; Plt: not set by RfG/DCC; IEC TR 61000-3-7 indicative planning level for long-term flicker severity Plt at HV-EHV; a planning level, not an emission limit allocated to this installation (margin overstated); not verified against the text here",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "mill: Largest power step and Changes per minute are not set; a unit without its inputs or outside the method blocks a pass; S_k 150 MVA; a screening estimate (IEC 61000-3-7 analytic method, d = step / S_k, rectangular steps, Plt = Pst for a steady pattern) that ignores the grid X/R and the operator's allocation of the planning level; units summed with alpha 3 (assumed; units stepping together are not covered); S_k is the entered S_k'' with the IEC 60909 c factor, so d may be understated by up to 1.1; above the limit a flicker-meter study is needed",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": "mill",
+      "field": "flicker_step_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     },
+     "flicker": {
+      "sk_mva": 150.0,
+      "pst": null,
+      "plt": null,
+      "pst_limit": 0.8,
+      "plt_limit": 0.6,
+      "no_input_units": [
+       "mill"
+      ],
+      "outside_range_units": []
+     }
+    },
+    {
+     "id": "motor_start:mill",
+     "requirement": "Voltage change at the PoC when the unit's motor starts: mill",
+     "limit": 3.0,
+     "unit": "% of nominal",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: not set by RfG/DCC; IEC TR 61000-3-7 indicative planning levels for infrequent rapid voltage changes at HV/EHV are about 3-5 % (not verified against the text here); 3 % used; planning level, not an emission limit allocated to this installation; the project's grid code governs",
+     "project_value": 9.8761,
+     "verdict": "warn",
+     "assumed": true,
+     "note": "direct on line start of 2000 kW at 6 \u00d7 rated, pf 0.3: S_start 14.12 MVA; dU 9.876 % (above 3 %); the PoC has no minimum short-circuit case: the entered S_k'' 150 MVA / c_max 1.1 is used; Q_gfm 0 (conservative): the grid-forming storage's reactive power at the PoC cannot be stated; a screening estimate (dU = (S_start \u00b7 sin \u03c6_start \u2212 Q_gfm) / S_sc, the grid's R ignored, one motor starting at a time); the start current multiples and starting power factors are demo values; above the limit a motor-start load-flow or RMS study is needed",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": "mill",
+      "field": "start_method"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     },
+     "motor_start": {
+      "motor_kw": 2000.0,
+      "start_method": "dol",
+      "start_multiple": 6.0,
+      "start_pf": 0.3,
+      "s_start_mva": 14.117647058823529,
+      "q_gfm_mvar": 0.0,
+      "sk_mva": 150.0,
+      "sk_case": "entered",
+      "c": 1.1,
+      "s_sc_mva": 136.36363636363635,
+      "du_pct": 9.87607643819897
+     }
+    },
+    {
+     "id": "voltage_unbalance",
+     "requirement": "Voltage unbalance at the PoC from the site's single-phase load",
+     "limit": null,
+     "unit": "%\u00a0of\u00a0positive\u00a0sequence",
+     "source": "The grid code sets no unbalance limit",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "The grid code sets no unbalance limit",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": null,
+      "field": "single_phase_share"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "voltage_stability_pv",
+     "requirement": "Voltage stability margin (P\u2013V)",
+     "limit": 5.0,
+     "unit": "% of planned load",
+     "source": "assumed (generic placeholder): P\u2013V margin of at least 5 % of the planned load, planning practice placeholder, not a requirement of this project's grid code",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No grid study with the voltage stability check yet: run the grid study. A screening estimate: an RMS study gives the binding answer.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": ">=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "voltage_stability_qv",
+     "requirement": "Voltage stability margin (Q\u2013V)",
+     "limit": 0.0,
+     "unit": "Mvar",
+     "source": "assumed (generic placeholder): Q\u2013V margin of at least 0 Mvar (the Q\u2013V curve's minimum at or below zero injection at the operating voltage), planning practice placeholder, not a requirement of this project's grid code",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No grid study with the voltage stability check yet: run the grid study. A screening estimate: an RMS study gives the binding answer.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": ">=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "ssti_uif",
+     "requirement": "Sub-synchronous torsional interaction: unit interaction factor (TRGC 19)",
+     "limit": 0.1,
+     "unit": "UIF",
+     "source": "Assumed screening threshold (the grid code sets none)",
+     "project_value": 0.5,
+     "verdict": "warn",
+     "assumed": true,
+     "note": "Worst UIF 0.5 \u00b7 bus LV \u00b7 islanded, max fault level \u00b7 machine GAS. This is above the assumed screening threshold 0.1, so an EMT SSTI study is warranted for the grid-connected and islanded states. Screening; the binding answer is the EMT study.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": null
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 0.0
+     }
+    },
+    {
+     "id": "subsync_series_resonance",
+     "requirement": "Sub-synchronous resonance: series resonance against torsional modes (TRGC 20)",
+     "limit": 1.0,
+     "unit": "Hz",
+     "source": "Assumed screening torsional clearance (the grid code sets none)",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "The scan was not evaluated. Screening; the binding answer is the EMT study.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": null
+     }
+    },
+    {
+     "id": "ssci",
+     "requirement": "Sub-synchronous control interaction (TRGC 20)",
+     "limit": null,
+     "unit": null,
+     "source": "the campus run",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "Not evaluated: converter damping not modelled. Screening; the binding answer is the EMT study.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": null
+     }
+    },
+    {
+     "id": "reactive_range",
+     "requirement": "Reactive power range at the PoC",
+     "limit": null,
+     "unit": "Mvar",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: DCC Art. 15(1)(a): not wider than 48 percent of the larger of the maximum import or export capacity (0,9 power factor); the relevant TSO specifies the actual range",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "The project has no island requirements yet",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "control"
+     },
+     "rule": {
+      "comparator": ">=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "frequency_support",
+     "requirement": "Frequency support offered by the site's converters",
+     "limit": "at least one of grid forming, synthetic inertia, frequency containment, fast frequency response",
+     "unit": null,
+     "source": "Assumed: the scorecard's own expectation for a large connection; the grid code sets no limit",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "The project has no island requirements yet",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "dynamic:frequency_ranges",
+     "requirement": "Stay connected over the frequency ranges and times",
+     "limit": "49.0-51.0 Hz unlimited; 47.5-48.5 Hz and 48.5-49.0 Hz for TSO-specified times (at least 30 min at 47.5-48.5 Hz); 51.0-51.5 Hz 30 min (Continental Europe)",
+     "unit": null,
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: DCC Art. 12(1) and Annex I, Table 1 (demand facilities); RfG Art. 13(1)(a) Table 2 (generating modules)",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Needs an RMS study (dynamic; EMT where the code asks for it); it applies to the site; a steady-state screening never passes it",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "dynamic:rocof",
+     "requirement": "Withstand a rate of change of frequency",
+     "limit": "TSO-specified",
+     "unit": null,
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: RfG Art. 13(1)(b): the rate of change of frequency withstand capability is specified by the TSO",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Needs an RMS study (dynamic; EMT where the code asks for it); it applies to the site's inverter-based units; a steady-state screening never passes it",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "dynamic:frt",
+     "requirement": "Fault ride-through of the on-site power park modules (BESS, PV)",
+     "limit": "the TSO's voltage-against-time profile, within the RfG's ranges by module type",
+     "unit": null,
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: RfG Art. 14(3)(a) (type B) and Art. 16(3)(a) (type D): the TSO specifies the voltage-against-time profile within the RfG's bounds",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Needs an RMS study (dynamic; EMT where the code asks for it); it applies to the site's inverter-based units; a steady-state screening never passes it",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "dynamic:lfsm_o",
+     "requirement": "Limited frequency sensitive mode, over-frequency",
+     "limit": "droop 2-12 %, threshold 50.2-50.5 Hz (TSO-specified within these)",
+     "unit": null,
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: RfG Art. 13(2)",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Needs an RMS study (dynamic; EMT where the code asks for it); it applies to the site's inverter-based units; a steady-state screening never passes it",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "grid_former",
+     "requirement": "A unit that forms the island's voltage",
+     "limit": "a grid-forming battery or a genset",
+     "unit": null,
+     "source": "The island study's rule: a grid-forming battery or a genset forms the voltage",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Not assessed: The project has no island requirements yet",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "island"
+     }
+    },
+    {
+     "id": "lole",
+     "requirement": "Loss of load expectation within the reliability goal",
+     "limit": null,
+     "unit": "h/yr",
+     "source": "No LOLE goal in the template's assumptions",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "The project sets no LOLE goal (an ENS cap only, or none)",
+     "section": "scenarios",
+     "target": {
+      "section": "scenarios",
+      "panel": "simparams",
+      "component": null,
+      "entity": null,
+      "field": "target_lole_h"
+     }
+    }
+   ],
+   "excluded": [],
+   "summary": {
+    "pass": 1,
+    "warn": 2,
+    "fail": 0,
+    "unknown": 21,
+    "assumed": 18,
+    "red_flags": 2,
+    "pass_after_mitigation": 0
+   },
+   "basis": "advisory screening of the saved network and its sidecars; never blocks Run. A fail is a red flag to take to the network operator; unknown means an input is missing, never a pass"
+  },
+  "S2": {
+   "schema": 1,
+   "profile": {
+    "id": "eu_rfg_dcc_ce",
+    "title": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe",
+    "error": null
+   },
+   "template_id": "demo",
+   "envelope": false,
+   "rows": [
+    {
+     "id": "scr",
+     "requirement": "Short-circuit ratio at the PoC",
+     "limit": 3.0,
+     "unit": null,
+     "source": "Screening rule: an SCR of 3.0, the edge between moderate and strong grids; assumed, not a grid-code value",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No short-circuit level and inverter capacity at every point of connection, so the SCR is not known: enter the fault level and, where the network has no inverter-based generator or battery to derive it from (or has several points of connection), the IBR capacity field of each point of connection's bus",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": ">=",
+      "otherwise": "warn",
+      "tolerance": 0.0
+     },
+     "setting": {
+      "item": "fault_level",
+      "user": null,
+      "default": {
+       "value": null,
+       "source": "assumed",
+       "origin": "placeholder"
+      }
+     }
+    },
+    {
+     "id": "energization_peak:all",
+     "requirement": "Load within the energized import (after its efficiency) plus firm gensets and batteries, hour by hour (all)",
+     "limit": 60.0,
+     "unit": "MW",
+     "source": "The connection's capacity and the island requirements' genset N+k and ride-through",
+     "project_value": 0.0,
+     "verdict": "pass",
+     "assumed": true,
+     "note": "all: binding hour now, hourly-mean load 0 MW against the 60 MW energized import = 60 MW (checked hour by hour; the period's peak is 0 MW); no energization schedule: the connection's capacity; import efficiency from the import Link's efficiency, as entered; fixed loads only (a flexible conversion unit is a decision, not counted)",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Link",
+      "entity": "grid_import",
+      "field": "eh_energization_mw"
+     }
+    },
+    {
+     "id": "ramp_rate",
+     "requirement": "Load ramp rate at the PoC within the connection ramp limit",
+     "limit": 6.0,
+     "unit": "MW/min",
+     "source": "assumed (generic placeholder): 10% of the connection capacity per minute",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No AI-training load profile on this project, so its ramp, swing and oscillation are not known (a data-centre project created with the AI-training profile has one)",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Link",
+      "entity": "grid_import",
+      "field": "connection_ramp"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "fail",
+      "tolerance": 1e-09
+     },
+     "setting": {
+      "item": "connection_ramp",
+      "user": null,
+      "default": {
+       "value": 6.0,
+       "source": "assumed",
+       "origin": "placeholder"
+      }
+     }
+    },
+    {
+     "id": "oscillation",
+     "requirement": "Power oscillation at the PoC (0.1-2 Hz band) within the limit",
+     "limit": 1.0,
+     "unit": "% of connection, peak-to-peak",
+     "source": "assumed (generic placeholder): 1 % of the connection",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No AI-training load profile on this project, so its ramp, swing and oscillation are not known (a data-centre project created with the AI-training profile has one)",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Link",
+      "entity": "grid_import",
+      "field": "oscillation"
+     },
+     "setting": {
+      "item": "oscillation",
+      "user": null,
+      "default": {
+       "value": 1.0,
+       "source": "assumed",
+       "origin": "placeholder"
+      }
+     }
+    },
+    {
+     "id": "rapid_voltage_change",
+     "requirement": "Rapid voltage change at the PoC on the AI-training load step",
+     "limit": 3.0,
+     "unit": "% of nominal",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: not set by RfG/DCC; IEC TR 61000-3-7 indicative planning levels for infrequent rapid voltage changes at HV/EHV are about 3-5 % (not verified against the text here); 3 % used",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No AI-training load profile on this project, so its ramp, swing and oscillation are not known (a data-centre project created with the AI-training profile has one)",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "rapid_voltage_change_infrequent",
+     "requirement": "Rapid voltage change at the PoC on an infrequent event (the whole connection switched)",
+     "limit": null,
+     "unit": "% of nominal",
+     "source": "no limit set",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No limit set: the grid code sets no infrequent rapid-voltage-change tier",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "harmonic_distortion",
+     "requirement": "Harmonic voltage distortion at the PoC from the site's drives and heaters",
+     "limit": 3.0,
+     "unit": "% THD",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: THD: not set by RfG/DCC; IEC TR 61000-3-6 Table 2 indicative planning level for total harmonic distortion at HV-EHV (not verified against the text here); 3 % used; Individual orders: not set by RfG/DCC; IEC TR 61000-3-6 Table 2 indicative planning levels for individual harmonic voltages at HV-EHV, % of the fundamental (not verified against the text here)",
+     "project_value": 0.0,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "THD 0 % (limit 3 %); no input for mill: a unit without its inputs blocks a pass; S_k 150 MVA; a screening estimate (IEC 61000-3-6 summation, U_h = I_h \u00b7 h / S_k) that ignores network resonance, background distortion and the operator's allocation of the planning level; above the limit a harmonic study is needed",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": "mill",
+      "field": "rated_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     },
+     "harmonics": {
+      "sk_mva": 150.0,
+      "thd_pct": 0.0,
+      "worst_order": null,
+      "worst_u_h_pct": null,
+      "failing_orders": [],
+      "no_input_units": [
+       "mill"
+      ],
+      "demo_spectrum_units": []
+     }
+    },
+    {
+     "id": "current_distortion",
+     "requirement": "Current distortion (TDD) at the PoC from the site's drives and heaters",
+     "limit": 2.5,
+     "unit": "%\u00a0of\u00a0I_L",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: not set by RfG/DCC; placeholder; IEEE 519-2014 Tables 2-4 current distortion limits by PCC voltage and Isc/IL (not verified against the text here)",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "mill has no Harmonic source or Rated apparent power; a unit without them blocks a pass. IEEE 519-2014 Table 3: short-circuit ratio 2.5, band \u2264 20. S_sc: the fault level entered at the PoC, not IEEE 519's maximum short-circuit current, so the band can differ from the standard's. I_L: the connection's rated import at the PoC, not IEEE 519's average monthly maximum demand. Screening: above the limit, run a harmonic load-flow study.",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": "mill",
+      "field": "rated_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     },
+     "tdd": {
+      "sk_mva": 150.0,
+      "i_l_mva": 60.0,
+      "isc_il": 2.5,
+      "table": "Table 3",
+      "band": "<= 20",
+      "tdd_pct": 0.0,
+      "tdd_limit_pct": 2.5,
+      "worst_order": null,
+      "failing_orders": [],
+      "no_input_units": [
+       "mill"
+      ],
+      "label": "screening; binding answer is a harmonic load-flow study with the grid's impedance"
+     }
+    },
+    {
+     "id": "flicker",
+     "requirement": "Flicker severity at the PoC from the site's stepping loads",
+     "limit": 0.6,
+     "unit": "Plt",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: Pst: not set by RfG/DCC; IEC TR 61000-3-7 indicative planning level for short-term flicker severity Pst at HV-EHV; a planning level, not an emission limit allocated to this installation (margin overstated); not verified against the text here; Plt: not set by RfG/DCC; IEC TR 61000-3-7 indicative planning level for long-term flicker severity Plt at HV-EHV; a planning level, not an emission limit allocated to this installation (margin overstated); not verified against the text here",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "mill: Largest power step and Changes per minute are not set; a unit without its inputs or outside the method blocks a pass; S_k 150 MVA; a screening estimate (IEC 61000-3-7 analytic method, d = step / S_k, rectangular steps, Plt = Pst for a steady pattern) that ignores the grid X/R and the operator's allocation of the planning level; units summed with alpha 3 (assumed; units stepping together are not covered); S_k is the entered S_k'' with the IEC 60909 c factor, so d may be understated by up to 1.1; above the limit a flicker-meter study is needed",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": "mill",
+      "field": "flicker_step_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     },
+     "flicker": {
+      "sk_mva": 150.0,
+      "pst": null,
+      "plt": null,
+      "pst_limit": 0.8,
+      "plt_limit": 0.6,
+      "no_input_units": [
+       "mill"
+      ],
+      "outside_range_units": []
+     }
+    },
+    {
+     "id": "motor_start:mill",
+     "requirement": "Voltage change at the PoC when the unit's motor starts: mill",
+     "limit": 3.0,
+     "unit": "% of nominal",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: not set by RfG/DCC; IEC TR 61000-3-7 indicative planning levels for infrequent rapid voltage changes at HV/EHV are about 3-5 % (not verified against the text here); 3 % used; planning level, not an emission limit allocated to this installation; the project's grid code governs",
+     "project_value": 9.8761,
+     "verdict": "warn",
+     "assumed": true,
+     "note": "direct on line start of 2000 kW at 6 \u00d7 rated, pf 0.3: S_start 14.12 MVA; dU 9.876 % (above 3 %); the PoC has no minimum short-circuit case: the entered S_k'' 150 MVA / c_max 1.1 is used; Q_gfm 0 (conservative): the grid-forming storage's reactive power at the PoC cannot be stated; a screening estimate (dU = (S_start \u00b7 sin \u03c6_start \u2212 Q_gfm) / S_sc, the grid's R ignored, one motor starting at a time); the start current multiples and starting power factors are demo values; above the limit a motor-start load-flow or RMS study is needed",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": "mill",
+      "field": "start_method"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     },
+     "motor_start": {
+      "motor_kw": 2000.0,
+      "start_method": "dol",
+      "start_multiple": 6.0,
+      "start_pf": 0.3,
+      "s_start_mva": 14.117647058823529,
+      "q_gfm_mvar": 0.0,
+      "sk_mva": 150.0,
+      "sk_case": "entered",
+      "c": 1.1,
+      "s_sc_mva": 136.36363636363635,
+      "du_pct": 9.87607643819897
+     }
+    },
+    {
+     "id": "voltage_unbalance",
+     "requirement": "Voltage unbalance at the PoC from the site's single-phase load",
+     "limit": null,
+     "unit": "%\u00a0of\u00a0positive\u00a0sequence",
+     "source": "The grid code sets no unbalance limit",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "The grid code sets no unbalance limit",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": null,
+      "field": "single_phase_share"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "voltage_stability_pv",
+     "requirement": "Voltage stability margin (P\u2013V)",
+     "limit": 5.0,
+     "unit": "% of planned load",
+     "source": "assumed (generic placeholder): P\u2013V margin of at least 5 % of the planned load, planning practice placeholder, not a requirement of this project's grid code",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No grid study with the voltage stability check yet: run the grid study. A screening estimate: an RMS study gives the binding answer.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": ">=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "voltage_stability_qv",
+     "requirement": "Voltage stability margin (Q\u2013V)",
+     "limit": 0.0,
+     "unit": "Mvar",
+     "source": "assumed (generic placeholder): Q\u2013V margin of at least 0 Mvar (the Q\u2013V curve's minimum at or below zero injection at the operating voltage), planning practice placeholder, not a requirement of this project's grid code",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No grid study with the voltage stability check yet: run the grid study. A screening estimate: an RMS study gives the binding answer.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": ">=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "ssti_uif",
+     "requirement": "Sub-synchronous torsional interaction: unit interaction factor (TRGC 19)",
+     "limit": 0.1,
+     "unit": "UIF",
+     "source": "Assumed screening threshold (the grid code sets none)",
+     "project_value": 0.08,
+     "verdict": "pass",
+     "assumed": true,
+     "note": "Worst UIF 0.08 \u00b7 bus MV \u00b7 max fault level \u00b7 machine GAS. This is at or below the assumed screening threshold 0.1, so no EMT SSTI study is indicated for the grid-connected and islanded states. Screening; the binding answer is the EMT study.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": null
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 0.0
+     }
+    },
+    {
+     "id": "subsync_series_resonance",
+     "requirement": "Sub-synchronous resonance: series resonance against torsional modes (TRGC 20)",
+     "limit": 1.0,
+     "unit": "Hz",
+     "source": "Assumed screening torsional clearance (the grid code sets none)",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "The scan was not evaluated. Screening; the binding answer is the EMT study.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": null
+     }
+    },
+    {
+     "id": "ssci",
+     "requirement": "Sub-synchronous control interaction (TRGC 20)",
+     "limit": null,
+     "unit": null,
+     "source": "the campus run",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "Not evaluated: converter damping not modelled. Screening; the binding answer is the EMT study.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": null
+     }
+    },
+    {
+     "id": "reactive_range",
+     "requirement": "Reactive power range at the PoC",
+     "limit": null,
+     "unit": "Mvar",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: DCC Art. 15(1)(a): not wider than 48 percent of the larger of the maximum import or export capacity (0,9 power factor); the relevant TSO specifies the actual range",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "The project has no island requirements yet",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "control"
+     },
+     "rule": {
+      "comparator": ">=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "frequency_support",
+     "requirement": "Frequency support offered by the site's converters",
+     "limit": "at least one of grid forming, synthetic inertia, frequency containment, fast frequency response",
+     "unit": null,
+     "source": "Assumed: the scorecard's own expectation for a large connection; the grid code sets no limit",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "The project has no island requirements yet",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "dynamic:frequency_ranges",
+     "requirement": "Stay connected over the frequency ranges and times",
+     "limit": "49.0-51.0 Hz unlimited; 47.5-48.5 Hz and 48.5-49.0 Hz for TSO-specified times (at least 30 min at 47.5-48.5 Hz); 51.0-51.5 Hz 30 min (Continental Europe)",
+     "unit": null,
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: DCC Art. 12(1) and Annex I, Table 1 (demand facilities); RfG Art. 13(1)(a) Table 2 (generating modules)",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Needs an RMS study (dynamic; EMT where the code asks for it); it applies to the site; a steady-state screening never passes it",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "dynamic:rocof",
+     "requirement": "Withstand a rate of change of frequency",
+     "limit": "TSO-specified",
+     "unit": null,
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: RfG Art. 13(1)(b): the rate of change of frequency withstand capability is specified by the TSO",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Needs an RMS study (dynamic; EMT where the code asks for it); it applies to the site's inverter-based units; a steady-state screening never passes it",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "dynamic:frt",
+     "requirement": "Fault ride-through of the on-site power park modules (BESS, PV)",
+     "limit": "the TSO's voltage-against-time profile, within the RfG's ranges by module type",
+     "unit": null,
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: RfG Art. 14(3)(a) (type B) and Art. 16(3)(a) (type D): the TSO specifies the voltage-against-time profile within the RfG's bounds",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Needs an RMS study (dynamic; EMT where the code asks for it); it applies to the site's inverter-based units; a steady-state screening never passes it",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "dynamic:lfsm_o",
+     "requirement": "Limited frequency sensitive mode, over-frequency",
+     "limit": "droop 2-12 %, threshold 50.2-50.5 Hz (TSO-specified within these)",
+     "unit": null,
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: RfG Art. 13(2)",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Needs an RMS study (dynamic; EMT where the code asks for it); it applies to the site's inverter-based units; a steady-state screening never passes it",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "grid_former",
+     "requirement": "A unit that forms the island's voltage",
+     "limit": "a grid-forming battery or a genset",
+     "unit": null,
+     "source": "The island study's rule: a grid-forming battery or a genset forms the voltage",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Not assessed: The project has no island requirements yet",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "island"
+     }
+    },
+    {
+     "id": "lole",
+     "requirement": "Loss of load expectation within the reliability goal",
+     "limit": null,
+     "unit": "h/yr",
+     "source": "No LOLE goal in the template's assumptions",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "The project sets no LOLE goal (an ENS cap only, or none)",
+     "section": "scenarios",
+     "target": {
+      "section": "scenarios",
+      "panel": "simparams",
+      "component": null,
+      "entity": null,
+      "field": "target_lole_h"
+     }
+    }
+   ],
+   "excluded": [],
+   "summary": {
+    "pass": 2,
+    "warn": 1,
+    "fail": 0,
+    "unknown": 21,
+    "assumed": 18,
+    "red_flags": 1,
+    "pass_after_mitigation": 0
+   },
+   "basis": "advisory screening of the saved network and its sidecars; never blocks Run. A fail is a red flag to take to the network operator; unknown means an input is missing, never a pass"
+  },
+  "S5": {
+   "schema": 1,
+   "profile": {
+    "id": "eu_rfg_dcc_ce",
+    "title": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe",
+    "error": null
+   },
+   "template_id": "demo",
+   "envelope": false,
+   "rows": [
+    {
+     "id": "scr",
+     "requirement": "Short-circuit ratio at the PoC",
+     "limit": 3.0,
+     "unit": null,
+     "source": "Screening rule: an SCR of 3.0, the edge between moderate and strong grids; assumed, not a grid-code value",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No short-circuit level and inverter capacity at every point of connection, so the SCR is not known: enter the fault level and, where the network has no inverter-based generator or battery to derive it from (or has several points of connection), the IBR capacity field of each point of connection's bus",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": ">=",
+      "otherwise": "warn",
+      "tolerance": 0.0
+     },
+     "setting": {
+      "item": "fault_level",
+      "user": null,
+      "default": {
+       "value": null,
+       "source": "assumed",
+       "origin": "placeholder"
+      }
+     }
+    },
+    {
+     "id": "energization_peak:all",
+     "requirement": "Load within the energized import (after its efficiency) plus firm gensets and batteries, hour by hour (all)",
+     "limit": 60.0,
+     "unit": "MW",
+     "source": "The connection's capacity and the island requirements' genset N+k and ride-through",
+     "project_value": 0.0,
+     "verdict": "pass",
+     "assumed": true,
+     "note": "all: binding hour now, hourly-mean load 0 MW against the 60 MW energized import = 60 MW (checked hour by hour; the period's peak is 0 MW); no energization schedule: the connection's capacity; import efficiency from the import Link's efficiency, as entered; fixed loads only (a flexible conversion unit is a decision, not counted)",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Link",
+      "entity": "grid_import",
+      "field": "eh_energization_mw"
+     }
+    },
+    {
+     "id": "ramp_rate",
+     "requirement": "Load ramp rate at the PoC within the connection ramp limit",
+     "limit": 6.0,
+     "unit": "MW/min",
+     "source": "assumed (generic placeholder): 10% of the connection capacity per minute",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No AI-training load profile on this project, so its ramp, swing and oscillation are not known (a data-centre project created with the AI-training profile has one)",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Link",
+      "entity": "grid_import",
+      "field": "connection_ramp"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "fail",
+      "tolerance": 1e-09
+     },
+     "setting": {
+      "item": "connection_ramp",
+      "user": null,
+      "default": {
+       "value": 6.0,
+       "source": "assumed",
+       "origin": "placeholder"
+      }
+     }
+    },
+    {
+     "id": "oscillation",
+     "requirement": "Power oscillation at the PoC (0.1-2 Hz band) within the limit",
+     "limit": 1.0,
+     "unit": "% of connection, peak-to-peak",
+     "source": "assumed (generic placeholder): 1 % of the connection",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No AI-training load profile on this project, so its ramp, swing and oscillation are not known (a data-centre project created with the AI-training profile has one)",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Link",
+      "entity": "grid_import",
+      "field": "oscillation"
+     },
+     "setting": {
+      "item": "oscillation",
+      "user": null,
+      "default": {
+       "value": 1.0,
+       "source": "assumed",
+       "origin": "placeholder"
+      }
+     }
+    },
+    {
+     "id": "rapid_voltage_change",
+     "requirement": "Rapid voltage change at the PoC on the AI-training load step",
+     "limit": 3.0,
+     "unit": "% of nominal",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: not set by RfG/DCC; IEC TR 61000-3-7 indicative planning levels for infrequent rapid voltage changes at HV/EHV are about 3-5 % (not verified against the text here); 3 % used",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No AI-training load profile on this project, so its ramp, swing and oscillation are not known (a data-centre project created with the AI-training profile has one)",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "rapid_voltage_change_infrequent",
+     "requirement": "Rapid voltage change at the PoC on an infrequent event (the whole connection switched)",
+     "limit": null,
+     "unit": "% of nominal",
+     "source": "no limit set",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No limit set: the grid code sets no infrequent rapid-voltage-change tier",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "harmonic_distortion",
+     "requirement": "Harmonic voltage distortion at the PoC from the site's drives and heaters",
+     "limit": 3.0,
+     "unit": "% THD",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: THD: not set by RfG/DCC; IEC TR 61000-3-6 Table 2 indicative planning level for total harmonic distortion at HV-EHV (not verified against the text here); 3 % used; Individual orders: not set by RfG/DCC; IEC TR 61000-3-6 Table 2 indicative planning levels for individual harmonic voltages at HV-EHV, % of the fundamental (not verified against the text here)",
+     "project_value": 0.0,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "THD 0 % (limit 3 %); no input for mill: a unit without its inputs blocks a pass; S_k 150 MVA; a screening estimate (IEC 61000-3-6 summation, U_h = I_h \u00b7 h / S_k) that ignores network resonance, background distortion and the operator's allocation of the planning level; above the limit a harmonic study is needed",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": "mill",
+      "field": "rated_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     },
+     "harmonics": {
+      "sk_mva": 150.0,
+      "thd_pct": 0.0,
+      "worst_order": null,
+      "worst_u_h_pct": null,
+      "failing_orders": [],
+      "no_input_units": [
+       "mill"
+      ],
+      "demo_spectrum_units": []
+     }
+    },
+    {
+     "id": "current_distortion",
+     "requirement": "Current distortion (TDD) at the PoC from the site's drives and heaters",
+     "limit": 2.5,
+     "unit": "%\u00a0of\u00a0I_L",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: not set by RfG/DCC; placeholder; IEEE 519-2014 Tables 2-4 current distortion limits by PCC voltage and Isc/IL (not verified against the text here)",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "mill has no Harmonic source or Rated apparent power; a unit without them blocks a pass. IEEE 519-2014 Table 3: short-circuit ratio 2.5, band \u2264 20. S_sc: the fault level entered at the PoC, not IEEE 519's maximum short-circuit current, so the band can differ from the standard's. I_L: the connection's rated import at the PoC, not IEEE 519's average monthly maximum demand. Screening: above the limit, run a harmonic load-flow study.",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": "mill",
+      "field": "rated_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     },
+     "tdd": {
+      "sk_mva": 150.0,
+      "i_l_mva": 60.0,
+      "isc_il": 2.5,
+      "table": "Table 3",
+      "band": "<= 20",
+      "tdd_pct": 0.0,
+      "tdd_limit_pct": 2.5,
+      "worst_order": null,
+      "failing_orders": [],
+      "no_input_units": [
+       "mill"
+      ],
+      "label": "screening; binding answer is a harmonic load-flow study with the grid's impedance"
+     }
+    },
+    {
+     "id": "flicker",
+     "requirement": "Flicker severity at the PoC from the site's stepping loads",
+     "limit": 0.6,
+     "unit": "Plt",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: Pst: not set by RfG/DCC; IEC TR 61000-3-7 indicative planning level for short-term flicker severity Pst at HV-EHV; a planning level, not an emission limit allocated to this installation (margin overstated); not verified against the text here; Plt: not set by RfG/DCC; IEC TR 61000-3-7 indicative planning level for long-term flicker severity Plt at HV-EHV; a planning level, not an emission limit allocated to this installation (margin overstated); not verified against the text here",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "mill: Largest power step and Changes per minute are not set; a unit without its inputs or outside the method blocks a pass; S_k 150 MVA; a screening estimate (IEC 61000-3-7 analytic method, d = step / S_k, rectangular steps, Plt = Pst for a steady pattern) that ignores the grid X/R and the operator's allocation of the planning level; units summed with alpha 3 (assumed; units stepping together are not covered); S_k is the entered S_k'' with the IEC 60909 c factor, so d may be understated by up to 1.1; above the limit a flicker-meter study is needed",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": "mill",
+      "field": "flicker_step_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     },
+     "flicker": {
+      "sk_mva": 150.0,
+      "pst": null,
+      "plt": null,
+      "pst_limit": 0.8,
+      "plt_limit": 0.6,
+      "no_input_units": [
+       "mill"
+      ],
+      "outside_range_units": []
+     }
+    },
+    {
+     "id": "motor_start:mill",
+     "requirement": "Voltage change at the PoC when the unit's motor starts: mill",
+     "limit": 3.0,
+     "unit": "% of nominal",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: not set by RfG/DCC; IEC TR 61000-3-7 indicative planning levels for infrequent rapid voltage changes at HV/EHV are about 3-5 % (not verified against the text here); 3 % used; planning level, not an emission limit allocated to this installation; the project's grid code governs",
+     "project_value": 9.8761,
+     "verdict": "warn",
+     "assumed": true,
+     "note": "direct on line start of 2000 kW at 6 \u00d7 rated, pf 0.3: S_start 14.12 MVA; dU 9.876 % (above 3 %); the PoC has no minimum short-circuit case: the entered S_k'' 150 MVA / c_max 1.1 is used; Q_gfm 0 (conservative): the grid-forming storage's reactive power at the PoC cannot be stated; a screening estimate (dU = (S_start \u00b7 sin \u03c6_start \u2212 Q_gfm) / S_sc, the grid's R ignored, one motor starting at a time); the start current multiples and starting power factors are demo values; above the limit a motor-start load-flow or RMS study is needed",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": "mill",
+      "field": "start_method"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     },
+     "motor_start": {
+      "motor_kw": 2000.0,
+      "start_method": "dol",
+      "start_multiple": 6.0,
+      "start_pf": 0.3,
+      "s_start_mva": 14.117647058823529,
+      "q_gfm_mvar": 0.0,
+      "sk_mva": 150.0,
+      "sk_case": "entered",
+      "c": 1.1,
+      "s_sc_mva": 136.36363636363635,
+      "du_pct": 9.87607643819897
+     }
+    },
+    {
+     "id": "voltage_unbalance",
+     "requirement": "Voltage unbalance at the PoC from the site's single-phase load",
+     "limit": null,
+     "unit": "%\u00a0of\u00a0positive\u00a0sequence",
+     "source": "The grid code sets no unbalance limit",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "The grid code sets no unbalance limit",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": null,
+      "field": "single_phase_share"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "voltage_stability_pv",
+     "requirement": "Voltage stability margin (P\u2013V)",
+     "limit": 5.0,
+     "unit": "% of planned load",
+     "source": "assumed (generic placeholder): P\u2013V margin of at least 5 % of the planned load, planning practice placeholder, not a requirement of this project's grid code",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No grid study with the voltage stability check yet: run the grid study. A screening estimate: an RMS study gives the binding answer.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": ">=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "voltage_stability_qv",
+     "requirement": "Voltage stability margin (Q\u2013V)",
+     "limit": 0.0,
+     "unit": "Mvar",
+     "source": "assumed (generic placeholder): Q\u2013V margin of at least 0 Mvar (the Q\u2013V curve's minimum at or below zero injection at the operating voltage), planning practice placeholder, not a requirement of this project's grid code",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No grid study with the voltage stability check yet: run the grid study. A screening estimate: an RMS study gives the binding answer.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": ">=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "ssti_uif",
+     "requirement": "Sub-synchronous torsional interaction: unit interaction factor (TRGC 19)",
+     "limit": 0.1,
+     "unit": "UIF",
+     "source": "Assumed screening threshold (the grid code sets none)",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "The islanded UIF is not evaluated at bus LV: no synchronous machine feeds it with the grid out. Screening; the binding answer is the EMT study.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": null
+     }
+    },
+    {
+     "id": "subsync_series_resonance",
+     "requirement": "Sub-synchronous resonance: series resonance against torsional modes (TRGC 20)",
+     "limit": 1.0,
+     "unit": "Hz",
+     "source": "Assumed screening torsional clearance (the grid code sets none)",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "The scan was not evaluated. Screening; the binding answer is the EMT study.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": null
+     }
+    },
+    {
+     "id": "ssci",
+     "requirement": "Sub-synchronous control interaction (TRGC 20)",
+     "limit": null,
+     "unit": null,
+     "source": "the campus run",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "Not evaluated: converter damping not modelled. Screening; the binding answer is the EMT study.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": null
+     }
+    },
+    {
+     "id": "reactive_range",
+     "requirement": "Reactive power range at the PoC",
+     "limit": null,
+     "unit": "Mvar",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: DCC Art. 15(1)(a): not wider than 48 percent of the larger of the maximum import or export capacity (0,9 power factor); the relevant TSO specifies the actual range",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "The project has no island requirements yet",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "control"
+     },
+     "rule": {
+      "comparator": ">=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "frequency_support",
+     "requirement": "Frequency support offered by the site's converters",
+     "limit": "at least one of grid forming, synthetic inertia, frequency containment, fast frequency response",
+     "unit": null,
+     "source": "Assumed: the scorecard's own expectation for a large connection; the grid code sets no limit",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "The project has no island requirements yet",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "dynamic:frequency_ranges",
+     "requirement": "Stay connected over the frequency ranges and times",
+     "limit": "49.0-51.0 Hz unlimited; 47.5-48.5 Hz and 48.5-49.0 Hz for TSO-specified times (at least 30 min at 47.5-48.5 Hz); 51.0-51.5 Hz 30 min (Continental Europe)",
+     "unit": null,
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: DCC Art. 12(1) and Annex I, Table 1 (demand facilities); RfG Art. 13(1)(a) Table 2 (generating modules)",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Needs an RMS study (dynamic; EMT where the code asks for it); it applies to the site; a steady-state screening never passes it",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "dynamic:rocof",
+     "requirement": "Withstand a rate of change of frequency",
+     "limit": "TSO-specified",
+     "unit": null,
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: RfG Art. 13(1)(b): the rate of change of frequency withstand capability is specified by the TSO",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Needs an RMS study (dynamic; EMT where the code asks for it); it applies to the site's inverter-based units; a steady-state screening never passes it",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "dynamic:frt",
+     "requirement": "Fault ride-through of the on-site power park modules (BESS, PV)",
+     "limit": "the TSO's voltage-against-time profile, within the RfG's ranges by module type",
+     "unit": null,
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: RfG Art. 14(3)(a) (type B) and Art. 16(3)(a) (type D): the TSO specifies the voltage-against-time profile within the RfG's bounds",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Needs an RMS study (dynamic; EMT where the code asks for it); it applies to the site's inverter-based units; a steady-state screening never passes it",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "dynamic:lfsm_o",
+     "requirement": "Limited frequency sensitive mode, over-frequency",
+     "limit": "droop 2-12 %, threshold 50.2-50.5 Hz (TSO-specified within these)",
+     "unit": null,
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: RfG Art. 13(2)",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Needs an RMS study (dynamic; EMT where the code asks for it); it applies to the site's inverter-based units; a steady-state screening never passes it",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "grid_former",
+     "requirement": "A unit that forms the island's voltage",
+     "limit": "a grid-forming battery or a genset",
+     "unit": null,
+     "source": "The island study's rule: a grid-forming battery or a genset forms the voltage",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Not assessed: The project has no island requirements yet",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "island"
+     }
+    },
+    {
+     "id": "lole",
+     "requirement": "Loss of load expectation within the reliability goal",
+     "limit": null,
+     "unit": "h/yr",
+     "source": "No LOLE goal in the template's assumptions",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "The project sets no LOLE goal (an ENS cap only, or none)",
+     "section": "scenarios",
+     "target": {
+      "section": "scenarios",
+      "panel": "simparams",
+      "component": null,
+      "entity": null,
+      "field": "target_lole_h"
+     }
+    }
+   ],
+   "excluded": [],
+   "summary": {
+    "pass": 1,
+    "warn": 1,
+    "fail": 0,
+    "unknown": 22,
+    "assumed": 18,
+    "red_flags": 1,
+    "pass_after_mitigation": 0
+   },
+   "basis": "advisory screening of the saved network and its sidecars; never blocks Run. A fail is a red flag to take to the network operator; unknown means an input is missing, never a pass"
+  },
+  "S6": {
+   "schema": 1,
+   "profile": {
+    "id": "eu_rfg_dcc_ce",
+    "title": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe",
+    "error": null
+   },
+   "template_id": "demo",
+   "envelope": false,
+   "rows": [
+    {
+     "id": "scr",
+     "requirement": "Short-circuit ratio at the PoC",
+     "limit": 3.0,
+     "unit": null,
+     "source": "Screening rule: an SCR of 3.0, the edge between moderate and strong grids; assumed, not a grid-code value",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No short-circuit level and inverter capacity at every point of connection, so the SCR is not known: enter the fault level and, where the network has no inverter-based generator or battery to derive it from (or has several points of connection), the IBR capacity field of each point of connection's bus",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": ">=",
+      "otherwise": "warn",
+      "tolerance": 0.0
+     },
+     "setting": {
+      "item": "fault_level",
+      "user": null,
+      "default": {
+       "value": null,
+       "source": "assumed",
+       "origin": "placeholder"
+      }
+     }
+    },
+    {
+     "id": "energization_peak:all",
+     "requirement": "Load within the energized import (after its efficiency) plus firm gensets and batteries, hour by hour (all)",
+     "limit": 60.0,
+     "unit": "MW",
+     "source": "The connection's capacity and the island requirements' genset N+k and ride-through",
+     "project_value": 0.0,
+     "verdict": "pass",
+     "assumed": true,
+     "note": "all: binding hour now, hourly-mean load 0 MW against the 60 MW energized import = 60 MW (checked hour by hour; the period's peak is 0 MW); no energization schedule: the connection's capacity; import efficiency from the import Link's efficiency, as entered; fixed loads only (a flexible conversion unit is a decision, not counted)",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Link",
+      "entity": "grid_import",
+      "field": "eh_energization_mw"
+     }
+    },
+    {
+     "id": "ramp_rate",
+     "requirement": "Load ramp rate at the PoC within the connection ramp limit",
+     "limit": 6.0,
+     "unit": "MW/min",
+     "source": "assumed (generic placeholder): 10% of the connection capacity per minute",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No AI-training load profile on this project, so its ramp, swing and oscillation are not known (a data-centre project created with the AI-training profile has one)",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Link",
+      "entity": "grid_import",
+      "field": "connection_ramp"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "fail",
+      "tolerance": 1e-09
+     },
+     "setting": {
+      "item": "connection_ramp",
+      "user": null,
+      "default": {
+       "value": 6.0,
+       "source": "assumed",
+       "origin": "placeholder"
+      }
+     }
+    },
+    {
+     "id": "oscillation",
+     "requirement": "Power oscillation at the PoC (0.1-2 Hz band) within the limit",
+     "limit": 1.0,
+     "unit": "% of connection, peak-to-peak",
+     "source": "assumed (generic placeholder): 1 % of the connection",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No AI-training load profile on this project, so its ramp, swing and oscillation are not known (a data-centre project created with the AI-training profile has one)",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Link",
+      "entity": "grid_import",
+      "field": "oscillation"
+     },
+     "setting": {
+      "item": "oscillation",
+      "user": null,
+      "default": {
+       "value": 1.0,
+       "source": "assumed",
+       "origin": "placeholder"
+      }
+     }
+    },
+    {
+     "id": "rapid_voltage_change",
+     "requirement": "Rapid voltage change at the PoC on the AI-training load step",
+     "limit": 3.0,
+     "unit": "% of nominal",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: not set by RfG/DCC; IEC TR 61000-3-7 indicative planning levels for infrequent rapid voltage changes at HV/EHV are about 3-5 % (not verified against the text here); 3 % used",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No AI-training load profile on this project, so its ramp, swing and oscillation are not known (a data-centre project created with the AI-training profile has one)",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "rapid_voltage_change_infrequent",
+     "requirement": "Rapid voltage change at the PoC on an infrequent event (the whole connection switched)",
+     "limit": null,
+     "unit": "% of nominal",
+     "source": "no limit set",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No limit set: the grid code sets no infrequent rapid-voltage-change tier",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "harmonic_distortion",
+     "requirement": "Harmonic voltage distortion at the PoC from the site's drives and heaters",
+     "limit": 3.0,
+     "unit": "% THD",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: THD: not set by RfG/DCC; IEC TR 61000-3-6 Table 2 indicative planning level for total harmonic distortion at HV-EHV (not verified against the text here); 3 % used; Individual orders: not set by RfG/DCC; IEC TR 61000-3-6 Table 2 indicative planning levels for individual harmonic voltages at HV-EHV, % of the fundamental (not verified against the text here)",
+     "project_value": 0.0,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "THD 0 % (limit 3 %); no input for mill: a unit without its inputs blocks a pass; S_k 150 MVA; a screening estimate (IEC 61000-3-6 summation, U_h = I_h \u00b7 h / S_k) that ignores network resonance, background distortion and the operator's allocation of the planning level; above the limit a harmonic study is needed",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": "mill",
+      "field": "rated_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     },
+     "harmonics": {
+      "sk_mva": 150.0,
+      "thd_pct": 0.0,
+      "worst_order": null,
+      "worst_u_h_pct": null,
+      "failing_orders": [],
+      "no_input_units": [
+       "mill"
+      ],
+      "demo_spectrum_units": []
+     }
+    },
+    {
+     "id": "current_distortion",
+     "requirement": "Current distortion (TDD) at the PoC from the site's drives and heaters",
+     "limit": 2.5,
+     "unit": "%\u00a0of\u00a0I_L",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: not set by RfG/DCC; placeholder; IEEE 519-2014 Tables 2-4 current distortion limits by PCC voltage and Isc/IL (not verified against the text here)",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "mill has no Harmonic source or Rated apparent power; a unit without them blocks a pass. IEEE 519-2014 Table 3: short-circuit ratio 2.5, band \u2264 20. S_sc: the fault level entered at the PoC, not IEEE 519's maximum short-circuit current, so the band can differ from the standard's. I_L: the connection's rated import at the PoC, not IEEE 519's average monthly maximum demand. Screening: above the limit, run a harmonic load-flow study.",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": "mill",
+      "field": "rated_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     },
+     "tdd": {
+      "sk_mva": 150.0,
+      "i_l_mva": 60.0,
+      "isc_il": 2.5,
+      "table": "Table 3",
+      "band": "<= 20",
+      "tdd_pct": 0.0,
+      "tdd_limit_pct": 2.5,
+      "worst_order": null,
+      "failing_orders": [],
+      "no_input_units": [
+       "mill"
+      ],
+      "label": "screening; binding answer is a harmonic load-flow study with the grid's impedance"
+     }
+    },
+    {
+     "id": "flicker",
+     "requirement": "Flicker severity at the PoC from the site's stepping loads",
+     "limit": 0.6,
+     "unit": "Plt",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: Pst: not set by RfG/DCC; IEC TR 61000-3-7 indicative planning level for short-term flicker severity Pst at HV-EHV; a planning level, not an emission limit allocated to this installation (margin overstated); not verified against the text here; Plt: not set by RfG/DCC; IEC TR 61000-3-7 indicative planning level for long-term flicker severity Plt at HV-EHV; a planning level, not an emission limit allocated to this installation (margin overstated); not verified against the text here",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "mill: Largest power step and Changes per minute are not set; a unit without its inputs or outside the method blocks a pass; S_k 150 MVA; a screening estimate (IEC 61000-3-7 analytic method, d = step / S_k, rectangular steps, Plt = Pst for a steady pattern) that ignores the grid X/R and the operator's allocation of the planning level; units summed with alpha 3 (assumed; units stepping together are not covered); S_k is the entered S_k'' with the IEC 60909 c factor, so d may be understated by up to 1.1; above the limit a flicker-meter study is needed",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": "mill",
+      "field": "flicker_step_mva"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     },
+     "flicker": {
+      "sk_mva": 150.0,
+      "pst": null,
+      "plt": null,
+      "pst_limit": 0.8,
+      "plt_limit": 0.6,
+      "no_input_units": [
+       "mill"
+      ],
+      "outside_range_units": []
+     }
+    },
+    {
+     "id": "motor_start:mill",
+     "requirement": "Voltage change at the PoC when the unit's motor starts: mill",
+     "limit": 3.0,
+     "unit": "% of nominal",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: not set by RfG/DCC; IEC TR 61000-3-7 indicative planning levels for infrequent rapid voltage changes at HV/EHV are about 3-5 % (not verified against the text here); 3 % used; planning level, not an emission limit allocated to this installation; the project's grid code governs",
+     "project_value": 9.8761,
+     "verdict": "warn",
+     "assumed": true,
+     "note": "direct on line start of 2000 kW at 6 \u00d7 rated, pf 0.3: S_start 14.12 MVA; dU 9.876 % (above 3 %); the PoC has no minimum short-circuit case: the entered S_k'' 150 MVA / c_max 1.1 is used; Q_gfm 0 (conservative): the grid-forming storage's reactive power at the PoC cannot be stated; a screening estimate (dU = (S_start \u00b7 sin \u03c6_start \u2212 Q_gfm) / S_sc, the grid's R ignored, one motor starting at a time); the start current multiples and starting power factors are demo values; above the limit a motor-start load-flow or RMS study is needed",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": "mill",
+      "field": "start_method"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     },
+     "motor_start": {
+      "motor_kw": 2000.0,
+      "start_method": "dol",
+      "start_multiple": 6.0,
+      "start_pf": 0.3,
+      "s_start_mva": 14.117647058823529,
+      "q_gfm_mvar": 0.0,
+      "sk_mva": 150.0,
+      "sk_case": "entered",
+      "c": 1.1,
+      "s_sc_mva": 136.36363636363635,
+      "du_pct": 9.87607643819897
+     }
+    },
+    {
+     "id": "voltage_unbalance",
+     "requirement": "Voltage unbalance at the PoC from the site's single-phase load",
+     "limit": null,
+     "unit": "%\u00a0of\u00a0positive\u00a0sequence",
+     "source": "The grid code sets no unbalance limit",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "The grid code sets no unbalance limit",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": "Link",
+      "entity": null,
+      "field": "single_phase_share"
+     },
+     "rule": {
+      "comparator": "<=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "voltage_stability_pv",
+     "requirement": "Voltage stability margin (P\u2013V)",
+     "limit": 5.0,
+     "unit": "% of planned load",
+     "source": "assumed (generic placeholder): P\u2013V margin of at least 5 % of the planned load, planning practice placeholder, not a requirement of this project's grid code",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No grid study with the voltage stability check yet: run the grid study. A screening estimate: an RMS study gives the binding answer.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": ">=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "voltage_stability_qv",
+     "requirement": "Voltage stability margin (Q\u2013V)",
+     "limit": 0.0,
+     "unit": "Mvar",
+     "source": "assumed (generic placeholder): Q\u2013V margin of at least 0 Mvar (the Q\u2013V curve's minimum at or below zero injection at the operating voltage), planning practice placeholder, not a requirement of this project's grid code",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "No grid study with the voltage stability check yet: run the grid study. A screening estimate: an RMS study gives the binding answer.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": "Bus",
+      "entity": null,
+      "field": "eh_sk_mva"
+     },
+     "rule": {
+      "comparator": ">=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "ssti_uif",
+     "requirement": "Sub-synchronous torsional interaction: unit interaction factor (TRGC 19)",
+     "limit": 0.1,
+     "unit": "UIF",
+     "source": "Assumed screening threshold (the grid code sets none)",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "This run was saved before islanded cases were judged. Run the grid study again. Screening; the binding answer is the EMT study.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": null
+     }
+    },
+    {
+     "id": "subsync_series_resonance",
+     "requirement": "Sub-synchronous resonance: series resonance against torsional modes (TRGC 20)",
+     "limit": 1.0,
+     "unit": "Hz",
+     "source": "Assumed screening torsional clearance (the grid code sets none)",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "The scan was not evaluated. Screening; the binding answer is the EMT study.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": null
+     }
+    },
+    {
+     "id": "ssci",
+     "requirement": "Sub-synchronous control interaction (TRGC 20)",
+     "limit": null,
+     "unit": null,
+     "source": "the campus run",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "Not evaluated: converter damping not modelled. Screening; the binding answer is the EMT study.",
+     "section": "connection",
+     "target": {
+      "section": "connection",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": null
+     }
+    },
+    {
+     "id": "reactive_range",
+     "requirement": "Reactive power range at the PoC",
+     "limit": null,
+     "unit": "Mvar",
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: DCC Art. 15(1)(a): not wider than 48 percent of the larger of the maximum import or export capacity (0,9 power factor); the relevant TSO specifies the actual range",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "The project has no island requirements yet",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "control"
+     },
+     "rule": {
+      "comparator": ">=",
+      "otherwise": "warn",
+      "tolerance": 1e-09
+     }
+    },
+    {
+     "id": "frequency_support",
+     "requirement": "Frequency support offered by the site's converters",
+     "limit": "at least one of grid forming, synthetic inertia, frequency containment, fast frequency response",
+     "unit": null,
+     "source": "Assumed: the scorecard's own expectation for a large connection; the grid code sets no limit",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "The project has no island requirements yet",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "dynamic:frequency_ranges",
+     "requirement": "Stay connected over the frequency ranges and times",
+     "limit": "49.0-51.0 Hz unlimited; 47.5-48.5 Hz and 48.5-49.0 Hz for TSO-specified times (at least 30 min at 47.5-48.5 Hz); 51.0-51.5 Hz 30 min (Continental Europe)",
+     "unit": null,
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: DCC Art. 12(1) and Annex I, Table 1 (demand facilities); RfG Art. 13(1)(a) Table 2 (generating modules)",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Needs an RMS study (dynamic; EMT where the code asks for it); it applies to the site; a steady-state screening never passes it",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "dynamic:rocof",
+     "requirement": "Withstand a rate of change of frequency",
+     "limit": "TSO-specified",
+     "unit": null,
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: RfG Art. 13(1)(b): the rate of change of frequency withstand capability is specified by the TSO",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Needs an RMS study (dynamic; EMT where the code asks for it); it applies to the site's inverter-based units; a steady-state screening never passes it",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "dynamic:frt",
+     "requirement": "Fault ride-through of the on-site power park modules (BESS, PV)",
+     "limit": "the TSO's voltage-against-time profile, within the RfG's ranges by module type",
+     "unit": null,
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: RfG Art. 14(3)(a) (type B) and Art. 16(3)(a) (type D): the TSO specifies the voltage-against-time profile within the RfG's bounds",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Needs an RMS study (dynamic; EMT where the code asks for it); it applies to the site's inverter-based units; a steady-state screening never passes it",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "dynamic:lfsm_o",
+     "requirement": "Limited frequency sensitive mode, over-frequency",
+     "limit": "droop 2-12 %, threshold 50.2-50.5 Hz (TSO-specified within these)",
+     "unit": null,
+     "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: RfG Art. 13(2)",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Needs an RMS study (dynamic; EMT where the code asks for it); it applies to the site's inverter-based units; a steady-state screening never passes it",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "preset"
+     }
+    },
+    {
+     "id": "grid_former",
+     "requirement": "A unit that forms the island's voltage",
+     "limit": "a grid-forming battery or a genset",
+     "unit": null,
+     "source": "The island study's rule: a grid-forming battery or a genset forms the voltage",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": false,
+     "note": "Not assessed: The project has no island requirements yet",
+     "section": "assets",
+     "target": {
+      "section": "assets",
+      "panel": null,
+      "component": null,
+      "entity": null,
+      "field": "island"
+     }
+    },
+    {
+     "id": "lole",
+     "requirement": "Loss of load expectation within the reliability goal",
+     "limit": null,
+     "unit": "h/yr",
+     "source": "No LOLE goal in the template's assumptions",
+     "project_value": null,
+     "verdict": "unknown",
+     "assumed": true,
+     "note": "The project sets no LOLE goal (an ENS cap only, or none)",
+     "section": "scenarios",
+     "target": {
+      "section": "scenarios",
+      "panel": "simparams",
+      "component": null,
+      "entity": null,
+      "field": "target_lole_h"
+     }
+    }
+   ],
+   "excluded": [],
+   "summary": {
+    "pass": 1,
+    "warn": 1,
+    "fail": 0,
+    "unknown": 22,
+    "assumed": 18,
+    "red_flags": 1,
+    "pass_after_mitigation": 0
+   },
+   "basis": "advisory screening of the saved network and its sidecars; never blocks Run. A fail is a red flag to take to the network operator; unknown means an input is missing, never a pass"
+  }
+ },
+ "pack": {
+  "P1": {
+   "table_id": "ssti_uif",
+   "columns": [
+    "Bus",
+    "Case",
+    "Machine",
+    "UIF",
+    "Threshold",
+    "Verdict",
+    "Note"
+   ],
+   "rows": [
+    [
+     "MV",
+     "max",
+     "GAS",
+     "0.08",
+     "0.1",
+     "pass",
+     ""
+    ],
+    [
+     "MV",
+     "min",
+     "GAS",
+     "0.04",
+     "0.1",
+     "pass",
+     ""
+    ],
+    [
+     "MV",
+     "islanded max",
+     "GAS",
+     "0.5",
+     "0.1",
+     "warn",
+     ""
+    ],
+    [
+     "MV",
+     "islanded min",
+     "GAS",
+     "0.25",
+     "0.1",
+     "warn",
+     ""
+    ],
+    [
+     "LV",
+     "islanded max",
+     "GAS",
+     "\u2014",
+     "0.1",
+     "not evaluated",
+     "No synchronous machine feeds this bus with the grid out"
+    ],
+    [
+     "LV",
+     "islanded min",
+     "GAS",
+     "\u2014",
+     "0.1",
+     "not evaluated",
+     "No synchronous machine feeds this bus with the grid out"
+    ]
+   ],
+   "caption": "Worst UIF 0.5 \u00b7 bus MV \u00b7 islanded, max fault level \u00b7 machine GAS. This is above the assumed screening threshold 0.1, so an EMT SSTI study is warranted for the grid-connected and islanded states. The islanded UIF is not evaluated at bus LV: no synchronous machine feeds it with the grid out. Screening; the binding answer is the EMT study.",
+   "source_path": "campus_electrical/run/campus_ssti_uif.csv"
+  },
+  "P2": {
+   "table_id": "ssti_uif",
+   "columns": [
+    "Bus",
+    "Case",
+    "Machine",
+    "UIF",
+    "Threshold",
+    "Verdict",
+    "Note"
+   ],
+   "rows": [
+    [
+     "MV",
+     "islanded max",
+     "GAS",
+     "0.06",
+     "0.1",
+     "pass",
+     ""
+    ],
+    [
+     "MV",
+     "islanded min",
+     "GAS",
+     "0.03",
+     "0.1",
+     "pass",
+     ""
+    ]
+   ],
+   "caption": "Worst UIF 0.06 \u00b7 bus MV \u00b7 islanded, max fault level \u00b7 machine GAS. This is at or below the assumed screening threshold 0.1, so no EMT SSTI study is indicated for the islanded state only. Screening; the binding answer is the EMT study. Grid-connected rows are left out: the project has no grid connection.",
+   "source_path": "campus_electrical/run/campus_ssti_uif.csv"
+  }
+ }
+}

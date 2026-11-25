@@ -1057,6 +1057,7 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
         pass
 
     from services import fuel_curve as _fuel_curve
+    from services.co2_override import has_override, override_series
 
     no_load_t = _fuel_curve.no_load_fuel_t(network)
 
@@ -1103,12 +1104,14 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
             for p, e in opex0_per_period.items():
                 period_data[p]["opex_var_mc0"] += e
             # CO2 emitted + per-period surcharge from cfg.co2_price_per_period.
-            if intensity > 0:
+            if intensity > 0 or has_override(network, g):
                 # Same fuel terms as services/results/emissions.py (homer-parity 02e/02j): a curve genset's
                 # slope replaces 1 / efficiency, and its no-load fuel emits per committed hour.
                 slope = _fuel_curve.curve_slope(gens.loc[g])
                 out_intensity = intensity * slope if slope is not None else intensity / eff
-                co2_series = p_series * out_intensity
+                # A per-snapshot intensity (`services.co2_override`) counts each snapshot's own MWh el.
+                ovr = override_series(network, g, out_intensity, p_series.index)
+                co2_series = p_series * (out_intensity if ovr is None else ovr)
                 if g in no_load_t.columns:
                     co2_series = co2_series + no_load_t[g].reindex(sns).fillna(0.0) * intensity
                 tco2_per_period = _per_period_split(co2_series, weights)

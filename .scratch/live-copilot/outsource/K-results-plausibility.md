@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-Status: ready-for-agent after PR #694 (Codex G-a) merges — owner decision Q5 = A; gatekeeper reviews the plan first (a harness change)
+Status: ready-for-agent; audit 2026-11-25: #694 (Codex G-a) merged, so the task is unblocked (owner decision Q5 = A; gatekeeper reviews the plan first, a harness change); nothing built yet (no `services/results/plausibility.py`)
 
 # Outsourced task K: The assistant checks whether solved results make sense (LC-20, first rules)
 
@@ -129,3 +129,7 @@ pixi run gui-tests   # full backend suite before opening the PR
 - [ ] The S2.5 list is untouched and the new tool is not on it.
 - [ ] The full backend suite is green, or the PR lists each failure that also fails on `master`.
 - [ ] The PR names the six rules and Scope items 3 and 5 as left for follow-ups.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: checked #694 merged (GitHub); no plausibility module or tool in services/ or harness/catalogue.py.

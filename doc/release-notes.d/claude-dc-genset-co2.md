@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): the data-centre templates count genset CO2 per MWh of electricity (efficiency = 1 / heat rate, 0.56 t/MWh instead of 0.20) and carry the grid carbon intensity per period, marked assumed.

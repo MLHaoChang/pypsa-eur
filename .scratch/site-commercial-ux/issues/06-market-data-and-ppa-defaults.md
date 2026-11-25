@@ -3,7 +3,7 @@
 
 # 06 No market data: historical prices, PPA defaults per contract form and market bundles are unbuilt (S1, S2, K8)
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-25: S1 (#1850, #1851, #1865), S2a (#1852), S2b (#1880) and K8 (#1923, #1932, #1938) merged; left: the live E2E-DONE-1 for S1, blocked on the owner adding ENTSOE_API_TOKEN
 Owner: SCU06-PLAN-1.
 Blocked by: none for S1/S2; K8 needs its own gated plan (with DC-06, one reserve model)
 Design: `.scratch/project-workflow/integration-sensitivities.md` §1, §2 and §6; commercial-finance.md §7 row K8 (Q8 = A).
@@ -99,3 +99,7 @@ S2a ships the PPA/CfD defaults as five `common` Library contract items (`eu-ppa-
 5. Settlement with exact values: the CfD settled with the reference above and below the strike (opposite signs, exact amounts); baseload at baseload_mw against a profile that under- and over-produces; sleeved, with the fee landing as a cost.
 6. `changes_dispatch` is false or absent on all five, pinned by a test.
 7. Mutation runs (`scripts/coord/mutants.py`) on `common.py` and the placeholder-check module, survivors explained in the PR.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: checked the cited PRs against the master merge log and market_prices.py, DayAheadPrices.tsx and the common PPA items; the live ENTSO-E probe and E2E need the owner token, so they stay open.

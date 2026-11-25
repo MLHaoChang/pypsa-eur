@@ -3,7 +3,7 @@
 
 # Metric semantics, deterministic calculations and raw validity
 
-Status: ready-for-agent; audit 2026-11-19: losses validity (#1644) and solve validity (#1680) merged; S4/S5/S6a/S7 open in #1704, #1705, #1712, #1707; left besides: NPV and other-domain metrics, plausibility adapter
+Status: ready-for-agent; audit 2026-11-25: #1644, #1680, #1704, #1705, #1712 and #1707 all merged (S1-S7); left: NPV and other-domain metrics, plausibility adapter, per-metric domain review
 Model: Opus
 Progress: harness/calculations.py with generator, network and storage profiles shipped; other domains, NPV and validity checks pending
 Type: task
@@ -148,3 +148,7 @@ Branch `claude/aa-10-s4-metric-parity`, plan GK B GO. `tests/assurance_acceptanc
 Filed from the plan review, not found by these tests: ticket 21 (adequacy total system cost reads 0 for a non-finite objective).
 
 - 2026-11-23 status sweep: landed in #1644 (321152e43f); #1680 (6bff977ac9); #1704 (1e4600d600); #1705 (bda99bbbcb); #1712 (76707f136c); #1707 (00856ef95a): all six PRs are merged (the status line still lists four as open). Remains: NPV and other-domain metrics, plausibility adapter, per-metric domain review.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: merge commits for the six PRs found on origin/master; remaining items taken from the 2026-11-23 sweep line, NPV/plausibility not found in code.

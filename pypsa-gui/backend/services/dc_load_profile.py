@@ -94,9 +94,48 @@ def ambient_c(spec: DataCentreLoadSpec, snapshots, timezone: str | None = None) 
     t = _local_index(pd.DatetimeIndex(snapshots), timezone)
     hod = t.hour.to_numpy() + t.minute.to_numpy() / 60.0
     doy = t.dayofyear.to_numpy()
+    peak_day = getattr(spec, "ambient_peak_day", 200)
     return (spec.ambient_annual_mean_c
-            + spec.ambient_seasonal_amplitude_k * np.cos(2 * np.pi * (doy - 200) / 365.0)
+            + spec.ambient_seasonal_amplitude_k * np.cos(2 * np.pi * (doy - peak_day) / 365.0)
             + spec.ambient_diurnal_amplitude_k * np.cos(2 * np.pi * (hod - 15.0) / 24.0))
+
+
+#: Climate-zone presets chosen from |latitude| when no weather data is read
+#: (assumed, order of magnitude of zone-typical air temperature): the upper
+#: latitude bound, then mean °C, seasonal K, diurnal K.
+CLIMATE_ZONES: tuple[tuple[float, str, float, float, float], ...] = (
+    (15.0, "tropical", 27.0, 1.5, 5.0),
+    (25.0, "hot (arid or subtropical)", 27.0, 10.0, 8.0),
+    (35.0, "subtropical", 21.0, 9.0, 6.0),
+    (45.0, "warm temperate", 15.0, 9.0, 5.0),
+    (60.0, "temperate", 10.0, 9.0, 5.0),
+    (90.0, "cold", 3.0, 11.0, 4.0),
+)
+
+
+def climate_preset(latitude: float) -> dict:
+    """The ambient fields of the climate zone of ``latitude`` (the southern
+    hemisphere's seasonal peak is in January, day 17)."""
+    a = abs(float(latitude))
+    zone = next(z for z in CLIMATE_ZONES if a <= z[0] or z is CLIMATE_ZONES[-1])
+    return {"ambient_annual_mean_c": zone[2], "ambient_seasonal_amplitude_k": zone[3],
+            "ambient_diurnal_amplitude_k": zone[4],
+            "ambient_peak_day": 17 if latitude < 0 else 200, "zone": zone[1]}
+
+
+def ambient_basis(spec: DataCentreLoadSpec, snapshots, timezone: str | None = None) -> dict:
+    """What the PUE's ambient rests on, for the card: the source, the annual
+    mean, the design-day peak (the hottest hour of the snapshots), and the
+    resulting peak PUE and peak facility MW of the largest phase."""
+    temp = ambient_c(spec, snapshots, timezone)
+    it_mw = max(p.it_mw for p in spec.phases)
+    facility = hourly_profile(spec, snapshots, it_mw, timezone)
+    return {"source": spec.ambient_source, "entered": list(spec.ambient_entered),
+            "site_latitude": spec.site_latitude,
+            "mean_c": spec.ambient_annual_mean_c,
+            "design_day_peak_c": float(temp.max()),
+            "peak_pue": float(pue(spec, temp).max()),
+            "peak_facility_mw": float(facility.max())}
 
 
 def pue(spec: DataCentreLoadSpec, temp_c: np.ndarray) -> np.ndarray:
@@ -243,6 +282,13 @@ def _architecture_rows(spec: DataCentreLoadSpec) -> list[tuple[str, str, str]]:
     return ledger_rows(spec)
 
 
+def _basis_snapshots(spec: DataCentreLoadSpec) -> pd.DatetimeIndex:
+    """A whole year of hours from the first phase's year: the ambient cosine's
+    design-day peak is found on a full cycle, whatever week the template solves."""
+    year = pd.Timestamp(spec.phases[0].cod).year
+    return pd.date_range(f"{year}-01-01", f"{year}-12-31 23:00", freq="1h")
+
+
 def meta_block(spec: DataCentreLoadSpec, timezone: str | None) -> dict:
     """What a project's ``eh_template.json`` carries under ``META_KEY``. An
     unset architecture is not stored, so it reloads as "ac", assumed (DC 05)."""
@@ -250,6 +296,7 @@ def meta_block(spec: DataCentreLoadSpec, timezone: str | None) -> dict:
     if "architecture" not in spec.model_fields_set:
         dump.pop("architecture", None)
     return {"spec": dump, "time_basis": time_basis(timezone),
+            "ambient": ambient_basis(spec, _basis_snapshots(spec), timezone),
             "envelope": dynamic_envelope(spec), "ledger": ledger(spec, timezone)}
 
 
@@ -266,7 +313,10 @@ def read_ambient(project_dir) -> dict | None:
     spec = block.get("spec") if isinstance(block, dict) else None
     if not isinstance(spec, dict) or not all(k in spec for k in AMBIENT_FIELDS):
         return None
-    return {k: float(spec[k]) for k in AMBIENT_FIELDS}
+    out = {k: float(spec[k]) for k in AMBIENT_FIELDS}
+    if "ambient_peak_day" in spec:
+        out["ambient_peak_day"] = int(spec["ambient_peak_day"])
+    return out
 
 
 def read_envelope(project_dir) -> dict | None:
