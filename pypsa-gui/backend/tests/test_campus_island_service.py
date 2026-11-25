@@ -73,8 +73,10 @@ def _sidecar_path(project):
 def test_a_project_without_a_sidecar_has_no_island_config_and_no_study(project):
     out = ce.get_island(project)
     assert (out["config"], out["study"], out["services"], out["warnings"]) == (None, None, None, [])
-    assert set(out) == {"config", "revision", "study", "study_at", "presets", "services", "warnings"}
+    assert set(out) == {"config", "revision", "study", "study_at", "presets", "services", "warnings",
+                        "controls", "control_fields", "pf_choice", "unit_controls"}
     assert out["study_at"] is None
+    assert out["unit_controls"] is None
 
 
 def test_the_study_says_when_it_was_written(project):
