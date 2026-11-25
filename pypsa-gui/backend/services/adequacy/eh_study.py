@@ -830,7 +830,8 @@ def _front_margin_base(st: _Study) -> dict:
     assumed ``FRONT_MARGIN_BASE``, named as such (GK A, Q1)."""
     from services.adequacy.front import FRONT_MARGIN_BASE
     m = getattr(st.cfg, "reserve_margin", None)
-    if m is not None:
+    # 0 switches the margin off (SolverConfig.reserve_margin), so it sets no base
+    if m is not None and m != 0:
         return {"value": float(m), "assumed": False,
                 "basis": "the session's reserve margin"}
     return {"value": FRONT_MARGIN_BASE, "assumed": True,

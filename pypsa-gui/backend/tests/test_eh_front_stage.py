@@ -286,7 +286,6 @@ def test_the_ens_lever_without_a_pack_target_is_not_established(
 @pytest.mark.parametrize(
     "margin, match",
     [
-        (0.0, "the reserve_margin base 0.0 must be a positive, finite number"),
         (-0.1, "the reserve_margin base -0.1 must be a positive, finite number"),
         (float("nan"), "the reserve_margin base nan must be a positive, finite"),
         # 2 × the ladder's 4 = 8 lies past MAX_MARGIN: check_front_request names it
@@ -603,3 +602,28 @@ def test_readiness_needs_room_for_two_points():
 def test_the_margin_lever_does_not_need_voll():
     row = _readiness(_pack(10.0), voll=0.0)
     assert row["solves"] == 5 and row["reason"] is None
+
+
+def test_a_zero_margin_is_off_so_the_assumed_base_applies(monkeypatch, stub_front):
+    # SolverConfig.reserve_margin: None/0 = off (GK A (38), #2004 ask 2)
+    calls = stub_front(lever="reserve_margin")
+    store: dict = {}
+    _stage_only(
+        monkeypatch,
+        _pack(10.0),
+        store=store,
+        cfg=SolverConfig(voll=VOLL, reserve_margin=0.0),
+    )
+    assert calls[0]["levels"][0] == fr.FRONT_MARGIN_BASE
+    assert store["eh_front"]["margin_base"]["assumed"] is True
+
+
+def test_a_network_swap_clears_eh_front():
+    from services.project_context import RESULT_STATE_KEYS, cleared_result_state
+
+    assert "eh_front" in RESULT_STATE_KEYS
+    assert cleared_result_state()["eh_front"] is None
+    PyPSAService.set_network(certifiable_weak_network())
+    PyPSAService.get_active_context().solver_state["eh_front"] = {"points": []}
+    PyPSAService.reset_network()
+    assert PyPSAService.get_active_context().solver_state.get("eh_front") is None

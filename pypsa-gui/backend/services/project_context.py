@@ -295,6 +295,8 @@ RESULT_STATE_KEYS = (
     "eh_lever_comparison",
     "eh_dtc_stress",
     "eh_dtc_planning",
+    # DC 01: the EH study's opt-in front stage (its sibling table).
+    "eh_front",
     "last_reserve_margin",
     # Grid-to-process ticket 03: the binary operational check of a plan with
     # committable process units (None without one).
@@ -584,6 +586,7 @@ class ProjectSolverState:
     eh_lever_comparison: Any = None  # Phase 3c import/storage lever table
     eh_dtc_stress: Any = None  # Phase 4a DtC stress table
     eh_dtc_planning: Any = None  # Phase 4b DtC planning table
+    eh_front: Any = None  # DC 01 EH study front stage (eh_study._stage_front)
     # The firm-capacity (reserve-margin) result of the last solve that
     # enforced one — the PERSISTED solve-time stash `/results/reserve_margin`
     # serves. Reset with the rest each solve, so a margin can never outlive
