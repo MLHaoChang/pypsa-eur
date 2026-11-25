@@ -74,6 +74,16 @@ def _config_hash(cfg) -> str:
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
+def _valued_to_year(n) -> int | None:
+    """The year a multi-period solve's cost runs to: the first investment period
+    plus the years its period weightings span; None when the network does not say."""
+    try:
+        years = float(n.investment_period_weightings["years"].sum())
+        return int(n.investment_periods[0]) + int(round(years)) if years > 0 else None
+    except Exception:
+        return None
+
+
 def _outage_basis_counts(n) -> dict[str, int]:
     """How many assets entered occurrence data on each basis (asset-level
     rows only — carrier defaults are library values, not user inputs)."""
@@ -591,6 +601,7 @@ def build_adequacy_report(n, cfg, targets: dict, captured: dict,
         cost=CostBlock(
             total_system_cost_eur=total_system_cost,
             period_basis="npv_multi_period" if multi else "single_period",
+            valued_to_year=_valued_to_year(n) if multi else None,
         ),
         inputs=InputsBlock(
             weather_years=["modelled"],

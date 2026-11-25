@@ -494,7 +494,13 @@ def test_a_study_without_front_is_masters():
         certifiable_weak_network(), _pack(10.0), stages=None, budget=6, mc_draws=30
     )
     assert "front" not in [s.stage for s in report.pipeline.stages]
-    assert _digest(report.model_dump_json()) == MASTER_REPORT_DIGEST
+    # master's report had no valued_to_year (template-e2e 28, None on this single-period run): leave it out, so
+    # the digest still pins every field master wrote.
+    assert report.valued_to_year is None
+    assert (
+        _digest(report.model_dump_json(exclude={"valued_to_year"}))
+        == MASTER_REPORT_DIGEST
+    )
 
 
 def test_readiness_without_front_is_masters():

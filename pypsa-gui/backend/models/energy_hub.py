@@ -326,6 +326,8 @@ class ReferenceDesignReport(BaseModel):
     certified: bool | None = None
     cost_at_target_eur: float | None = None
     period_basis: Literal["single_period", "npv_multi_period"] | None = None
+    # The year a multi-period study's cost runs to, recorded at solve time (template-e2e 28).
+    valued_to_year: int | None = None
     excludes_shed_cost: Literal[True] = True
     sections: dict[str, SectionState] = Field(default_factory=dict)
     completeness: dict[str, SectionStatus] = Field(default_factory=dict)

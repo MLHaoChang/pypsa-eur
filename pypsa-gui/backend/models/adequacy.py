@@ -297,6 +297,10 @@ class CostBlock(BaseModel):
     # making the figure an NPV — not the annualised number a reliability
     # standard implies. The axis label depends on knowing which.
     period_basis: Literal["single_period", "npv_multi_period"]
+    # A multi-period run's cost spans the first period to the end of the last
+    # one's weighting years (template-e2e 28); recorded at solve time so the
+    # label "valued to 2045" holds still when the inputs are edited later.
+    valued_to_year: int | None = None
 
 
 class VollBlock(BaseModel):

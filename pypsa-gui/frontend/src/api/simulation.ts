@@ -986,6 +986,8 @@ export interface EhReferenceDesignReport {
   certified?: boolean | null
   cost_at_target_eur?: number | null
   period_basis?: string | null
+  /** The year a multi-period study's cost runs to, recorded when it was solved (issue 28). */
+  valued_to_year?: number | null
   excludes_shed_cost?: boolean
   completeness?: Record<string, EhSectionStatus>
   sections?: Record<string, EhSectionState>

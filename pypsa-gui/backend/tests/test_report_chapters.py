@@ -278,3 +278,12 @@ def test_island_constraints_off_says_the_hub_does_not_read_them():
     ev = _collect(island={"report": _island_report(), "gfm": gfm})
     assert any("does not read them" in d for d in ev.required_disclosures)
     assert not any("Re-solve the hub" in d for d in ev.required_disclosures)
+
+
+def test_the_investment_table_says_how_long_the_valuation_runs():
+    """Issue 28 (owner option A): the horizon is stated, from the finance inputs, never typed in."""
+    base = {"currency": "EUR", "npv_at_wacc_eur": 1.0}
+    rows = lambda p: dict(map(tuple, chapters.investment_table(p, "x").rows))   # noqa: E731
+    assert rows({**base, "cod_year": 2027, "analysis_years": 18})["Valued over"] == "2027–2045 (18 years)"
+    assert "Valued over" not in rows(base)                       # no years stated: the table as it was
+    assert "Valued over" not in rows({**base, "cod_year": 2027, "analysis_years": None})

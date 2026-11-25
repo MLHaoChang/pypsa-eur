@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Guided results show the cost of hydrogen per kg when the design makes any, the cost tile says the finance horizon runs past the plan ("valued to 2045 (18 years)"), and the report's investment table states how long the valuation runs (template-e2e issue 28).
