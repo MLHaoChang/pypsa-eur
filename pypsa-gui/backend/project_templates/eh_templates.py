@@ -751,9 +751,6 @@ def dc_load_spec(template_id: str, raw: dict | None, planning: Planning | None =
         err = exc.errors()[0]
         field = ".".join(["dc_load", *(str(x) for x in err["loc"])])
         raise DcLoadError(f"{field}: {err['msg']}", field) from None
-    if spec.utilisation != "ai_training":
-        raise DcLoadError("dc_load.utilisation: only 'ai_training' is modelled",
-                          "dc_load.utilisation")
     if spec.critical_share <= 0:
         raise DcLoadError("dc_load.critical_share: must be > 0 (it_load is the critical load)",
                           "dc_load.critical_share")

@@ -8,8 +8,8 @@ import { useState } from 'react'
 import { dcLoadRefusal, type TemplateCreate } from '../../../hooks/useCreateFromTemplate'
 import {
   ARCH_HINT, BACKUP_HINT, DC_ARCH_OPTIONS, DC_BACKUP_OPTIONS, DC_DEFAULTS, DC_FIELD_LABEL, STAGED_BESS_LINE,
-  ambientSourceText, validateAmbient, dcFieldOf, dcLoadBody, emptyAmbient, dcRefusalText, initialDcDraft, validateDc,
-  type DcDraft, type DcField,
+  ambientSourceText, validateAmbient, UTILISATION_OPTIONS, MIX_FIELDS, derivedMw, computeMismatch, dcFieldOf, dcLoadBody, emptyAmbient, dcRefusalText, initialDcDraft, validateDc,
+  type DcDraft, type DcField, type DcUtilisation,
 } from '../dcLoadForm'
 import { emptyLocation, locationOf, validateLocation, writeCreatedLocation, type LocationDraft } from '../siteLocation'
 import { SiteLocationFields, showLocationSaveFailure } from './SiteLocationFields'
@@ -28,14 +28,14 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
   disabledReason: string | null
   onCancel: () => void
 }) {
-  const [draft, setDraft] = useState<DcDraft>(initialDcDraft)
+  const staged = templateId === 'eh_datacenter_staged'
+  const [draft, setDraft] = useState<DcDraft>(() => initialDcDraft(staged))
   const [server, setServer] = useState<{ field: DcField | null; text: string } | null>(null)
   const [loc, setLoc] = useState<LocationDraft>(emptyLocation)
   const [amb, setAmb] = useState(emptyAmbient)
   const lat = locationOf(loc)?.lat ?? null
   const ambErrors = validateAmbient(amb)
   const locErrors = validateLocation(loc)
-  const staged = templateId === 'eh_datacenter_staged'
   const local = validateDc(draft, templateId)
   const errors: Partial<Record<DcField, string>> = { ...local }
   if (server?.field && !errors[server.field]) errors[server.field] = server.text
@@ -56,6 +56,13 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
   }
   const err = (f: DcField) => errors[f]
     ? <p role="alert" data-testid={`dc-form-error-${f}`} className="text-[11px] text-danger">{errors[f]}</p> : null
+
+  const note = (f: DcField) => errors[f]
+    ? <p role="status" data-testid={`dc-form-error-${f}`} className="text-[11px] text-danger">{errors[f]}</p> : null
+  const typedMw = (i: number) => staged ? DC_DEFAULTS.phases[i].mw : Number(draft.it_load)
+  const phaseName = (i: number) => staged ? `${DC_DEFAULTS.phases[i].year}` : `${DC_DEFAULTS.singleYear}`
+  const setMix = (k: keyof DcDraft['mix'], v: string) => set('mix', { ...draft.mix, [k]: v })
+  const setCount = (i: number, v: string) => set('compute', { ...draft.compute, counts: draft.compute.counts.map((c, j) => j === i ? v : c) })
 
   return (
     <form data-testid="dc-load-form" aria-label={`${templateName} setup`}
@@ -130,6 +137,59 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
         </ul>
         {err('architecture')}
       </div>
+
+      <div className="flex flex-col gap-1">
+        <label htmlFor="dc-form-workload" className="font-semibold text-text">{DC_FIELD_LABEL.workload}</label>
+        <select id="dc-form-workload" data-testid="dc-form-workload" className={`${INPUT} w-40`}
+          value={draft.utilisation} onChange={e => set('utilisation', e.target.value as DcUtilisation)}>
+          {UTILISATION_OPTIONS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+        </select>
+        {MIX_FIELDS[draft.utilisation].length > 0 && (
+          <div data-testid="dc-form-mix" className="flex flex-wrap gap-3">
+            {MIX_FIELDS[draft.utilisation].map(([k, label, unit]) => (
+              <label key={k} className="flex flex-col gap-1 font-semibold text-text">{label} <span className="font-normal text-muted">(assumed, {unit})</span>
+                <input data-testid={`dc-form-mix-${k}`} type="number" step="any" className={`${INPUT} w-24`}
+                  value={draft.mix[k]} onChange={e => setMix(k, e.target.value)} aria-invalid={!!errors.workload} />
+              </label>
+            ))}
+          </div>
+        )}
+        {note('workload')}
+      </div>
+
+      <details className="text-[11px]" data-testid="dc-form-compute" open={!!errors.compute || undefined}>
+        <summary className="cursor-pointer text-muted">▸ Derive IT from compute (optional)</summary>
+        <div className="mt-1 flex flex-col gap-1">
+          <p className="text-muted">The typed IT load always wins; compute is shown beside it and changes nothing in the model.</p>
+          <div className="flex flex-wrap gap-3">
+            <label className="flex flex-col gap-1 font-semibold text-text">kW per accelerator (host share included)
+              <input data-testid="dc-form-compute-kw" type="number" step="any" className={`${INPUT} w-24`}
+                value={draft.compute.kw} onChange={e => set('compute', { ...draft.compute, kw: e.target.value })} />
+            </label>
+            <label className="flex flex-col gap-1 font-semibold text-text">Utilisation (0 to 1)
+              <input data-testid="dc-form-compute-util" type="number" step="any" className={`${INPUT} w-24`}
+                value={draft.compute.util} onChange={e => set('compute', { ...draft.compute, util: e.target.value })} />
+            </label>
+          </div>
+          {draft.compute.counts.map((c, i) => {
+            const derived = derivedMw(draft.compute, i)
+            const mismatch = computeMismatch(derived, typedMw(i))
+            return (
+              <div key={i} data-testid={`dc-form-compute-phase-${i}`} className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-1.5 font-semibold text-text">Accelerators from {phaseName(i)}
+                  <input data-testid={`dc-form-compute-count-${i}`} type="number" step="any" className={`${INPUT} w-28`}
+                    value={c} onChange={e => setCount(i, e.target.value)} />
+                </label>
+                <span data-testid={`dc-form-compute-derived-${i}`} className="text-muted">
+                  derived {Number.isFinite(derived) ? derived.toFixed(1) : '–'} MW IT · typed {typedMw(i)} MW IT (typed wins)
+                </span>
+                {mismatch && <span data-testid={`dc-form-compute-mismatch-${i}`} className="text-warn">{mismatch}</span>}
+              </div>
+            )
+          })}
+          {note('compute')}
+        </div>
+      </details>
 
       <SiteLocationFields value={loc} errors={locErrors} onChange={setLoc} />
       <p data-testid="dc-form-ambient-source" className="text-[11px] text-muted">{ambientSourceText(lat, amb)}</p>

@@ -29,6 +29,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from services.dc_workload_shapes import shape_utilisation
+
+from models.dc_compute_spec import WorkloadMixSpec
 from models.flex_archetypes import AiWorkloadSpec, DataCentreLoadSpec, DcPhase
 
 #: The key in a project's ``eh_template.json`` that carries the spec, the
@@ -55,6 +58,12 @@ SOURCES: dict[str, str] = {
     "oscillation_period_s": f"assumed; {_STABILISATION}; {_NERC}",
     "tan_phi_swing": ("assumed; reactive swing of the load as tan φ of its real swing, to be replaced "
                       "by vendor data (IEC TR 61000-3-7 treats flicker through ΔP and ΔQ)"),
+    "workload_mix": ("assumed; illustrative diurnal request load of an inference service "
+                     "(trough overnight, peak in the evening), a training share for mixed "
+                     "campuses and a constant share for flat; no measured fleet data"),
+    "compute": ("as entered; IT MW = accelerators × kW per accelerator (host share included) × "
+                "utilisation, reported beside the typed IT MW, never read by a solve"),
+    "ignored_inputs": "ignored; the input is not modelled",
     "idle_hours_per_day": "assumed; illustrative daily restart/maintenance window",
     "pue": "assumed; PUE at or below the design temperature, slope above it",
     "architecture": ("assumed; conversion-loss chain from the defaults pack's power-architecture "
@@ -158,7 +167,9 @@ def utilisation(spec: DataCentreLoadSpec, snapshots, timezone: str | None = None
     w = workload(spec)
     hod = _local_index(pd.DatetimeIndex(snapshots), timezone).hour.to_numpy()
     idle = ((hod - w.idle_start_hour) % 24) < w.idle_hours_per_day
-    return np.where(idle, w.idle_share, training_utilisation(w))
+    training = np.where(idle, w.idle_share, training_utilisation(w))
+    return shape_utilisation(spec.utilisation, hod, training=training,
+                             mix=spec.workload_mix or WorkloadMixSpec())
 
 
 def hourly_profile(spec: DataCentreLoadSpec, snapshots, it_mw: float,
@@ -216,6 +227,10 @@ def dynamic_envelope(spec: DataCentreLoadSpec) -> dict:
                   "peak_to_peak_mw": "MW", "period_s": "s", "frequency_hz": "Hz",
                   "rack_kw": "kW per rack"},
         "source": "assumed",
+        "workload_kind": spec.utilisation,
+        **({"kind_note": ("the swing, checkpoint and oscillation terms are the AI-training "
+                          "step model's, kept as an upper bound; the hourly profile follows "
+                          f"the {spec.utilisation} shape")} if spec.utilisation != "ai_training" else {}),
         "phases": phases,
         "peak_note": ("the template's peak check reads the hourly mean; within the hour the "
                       "load sits at the full step, a few per cent above it"),
@@ -228,6 +243,21 @@ def dynamic_envelope(spec: DataCentreLoadSpec) -> dict:
         },
         "sources": SOURCES,
     }
+
+
+def _mix_text(spec: DataCentreLoadSpec) -> str:
+    m = spec.workload_mix or WorkloadMixSpec()
+    parts = {"inference": f"inference {m.trough_share:g}–{m.peak_share:g} of IT MW, peak at {m.peak_hour:02d}:00",
+             "mixed": f"{m.training_share:g} training, the rest inference "
+                      f"({m.trough_share:g}–{m.peak_share:g}, peak at {m.peak_hour:02d}:00)",
+             "flat": f"flat {m.flat_share:g} of IT MW"}
+    return parts[spec.utilisation]
+
+
+def _compute_text(spec: DataCentreLoadSpec) -> str:
+    c = spec.compute
+    return (f"{c.kw_per_accelerator:g} kW per accelerator at {c.utilisation:g} utilisation; "
+            f"accelerators per phase: {', '.join(f'{n:g}' for n in c.accelerator_counts)}")
 
 
 def ledger(spec: DataCentreLoadSpec, timezone: str | None) -> list[dict]:
@@ -266,6 +296,10 @@ def ledger(spec: DataCentreLoadSpec, timezone: str | None) -> list[dict]:
         ("rack density", ", ".join(
             f"{p.cod.year}: {p.rack_kw:g} kW/rack" if p.rack_kw else f"{p.cod.year}: not set"
             for p in spec.phases), "rack_kw"),
+        *([("workload shape", _mix_text(spec), "workload_mix")] if spec.utilisation != "ai_training" else []),
+        *([("compute block", _compute_text(spec), "compute")] if spec.compute else []),
+        *[(f"ignored: {name.replace('_', ' ')} is not modelled", "not modelled", "ignored_inputs")
+          for name in spec.ignored_inputs],
         *([("project start", spec.project_start.isoformat(), "project_start")]
           if spec.project_start else []),
         *([("grid connection date", spec.connection_date.isoformat(), "connection_date")]

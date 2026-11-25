@@ -15,6 +15,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_serializer, model_validator
 
 from models.commercial import TimeSeriesRef
+from models.dc_compute_spec import ComputeSpec, WorkloadMixSpec
 from models.design_intent import DesignIntentSpec
 
 RedundancyTier = Literal["N", "N+1", "2N"]
@@ -177,7 +178,15 @@ class DataCentreLoadSpec(BaseModel):
     curtailment_price_eur_per_mwh: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     workload_shift_window_h: float | None = Field(default=None, gt=0)
     gensets: list[GensetSpec] = Field(default_factory=list)
-    waste_heat_export: bool = False
+    #: DC 05: shape parameters of the inference, mixed and flat kinds; None = the
+    #: assumed defaults. Omitted from the dump when unset (byte-equal stored specs).
+    workload_mix: WorkloadMixSpec | None = None
+    #: DC 05: the optional compute block; reported next to the typed IT MW, never
+    #: read by the LP (typed IT MW wins).
+    compute: ComputeSpec | None = None
+    #: Inputs a stored spec carried that nothing models (``waste_heat_export``);
+    #: the ledger reports them. Never dumped, so they cannot move a hash.
+    ignored_inputs: list[str] = Field(default_factory=list, exclude=True)
     #: Asset-sizing design intent A-E (AS-01); None = a backup_mode-only project.
     design_intent: DesignIntentSpec | None = None
     #: Backup on loss of grid (DC 03); the default keeps the genset fleet.
@@ -191,13 +200,24 @@ class DataCentreLoadSpec(BaseModel):
     #: Neither date is read by a solve.
     connection_date: date | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_waste_heat_export(cls, data):
+        """``waste_heat_export`` is not modelled (DC 05): an old spec that set it
+        still loads, and the ledger says the input was ignored."""
+        if isinstance(data, dict) and "waste_heat_export" in data:
+            data = dict(data)
+            if data.pop("waste_heat_export"):
+                data["ignored_inputs"] = [*data.get("ignored_inputs", []), "waste_heat_export"]
+        return data
+
     @model_serializer(mode="wrap")
     def _omit_unstated_dates(self, handler):
         """A spec without the DC 27 dates dumps as it did before they existed,
         so stored specs, sidecars and hashes stay byte-equal (GK A G8)."""
         data = handler(self)
         if isinstance(data, dict):
-            for key in ("project_start", "connection_date"):
+            for key in ("project_start", "connection_date", "workload_mix", "compute"):
                 if data.get(key) is None:
                     data.pop(key, None)
         return data
@@ -209,6 +229,9 @@ class DataCentreLoadSpec(BaseModel):
         cods = [p.cod for p in self.phases]
         if cods != sorted(cods):
             raise ValueError("phases must be ordered by cod")
+        if self.compute and len(self.compute.accelerator_counts) != len(self.phases):
+            raise ValueError("compute.accelerator_counts needs one count per phase "
+                             f"({len(self.phases)}), got {len(self.compute.accelerator_counts)}")
         return self
 
 
