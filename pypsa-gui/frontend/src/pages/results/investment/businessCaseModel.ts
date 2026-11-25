@@ -136,6 +136,7 @@ export const COLUMN_LABEL: Record<string, string> = {
   derating: 'De-rating',
   linked_share: 'Sold share',
   linked_share_by_year: 'Sold share by year',
+  volume_class: 'Volume class',
 }
 
 /** Plain words per refusal kind (G9), each opening with the column label. A
@@ -166,7 +167,8 @@ export const REFUSAL_WORDS: Record<string, string> = {
   linked_output_missing: 'Quantity from: this model has no such output',
   double_count: 'Quantity from: the energy model rows already price this output',
   default_unit_mismatch: 'Price: the cost default is in another unit, not filled',
-  volume_factor_typed_line: 'Quantity from: a typed quantity cannot follow the volume factor (lease-up). Take the quantity from the model, or set the volume factor to 100 % in this line’s years',
+  // The backend's own sentence (`VolumeFactorTypedLine.words`), pinned by its parity test.
+  volume_factor_typed_line: 'Volume class: choose Fixed or Follows volume, or set the volume factor to 100 % in every year of this line.',
   volume_factor_unclassified: 'Volume factor (lease-up), %: a row that does not follow served volume (export, PPA, CfD) cannot be scaled. Set the volume factor to 100 % in the years it runs',
 }
 
@@ -288,6 +290,7 @@ export function withKind(line: LineItem, kind: LineKind, opts: BusinessCaseOptio
   if (kind !== 'capex') {
     delete next.depreciation; delete next.life_years; delete next.rate; delete next.refresh_years
   }
+  if (!takesVolumeClass(kind, next.quantity_source)) delete next.volume_class
   const units = unitsFor({ ...next, unit: '' }, opts)
   if (!units.includes(next.unit)) next.unit = units[0] ?? next.unit
   return next
@@ -329,6 +332,18 @@ export const REFUSALS_REASON_WORDS: Record<string, string> = {
  *  (backend `takes_derating`). */
 export const takesDerating = (category: string, quantitySource: string): boolean =>
   category === 'capacity_payment' && quantitySource.startsWith('linked:capacity.')
+
+/** The lines a volume class applies to (BC 18): typed revenue and opex (backend
+ *  `LineItem._typed_operating_only`). Any other line refuses one, so the card clears it. */
+export const takesVolumeClass = (kind: string, quantitySource: string): boolean =>
+  kind !== 'capex' && sourceKind(quantitySource) === 'typed'
+
+/** The volume class select's options, in the workbook's words (BC 18, UX 30). */
+export const VOLUME_CLASS_OPTIONS: ReadonlyArray<readonly ['' | 'fixed' | 'volume', string]> = [
+  ['', 'Not stated'],
+  ['fixed', 'Fixed (never scales)'],
+  ['volume', 'Follows volume (scales with lease-up)'],
+]
 
 /** Indexation is stored as a fraction per year (0.02) and shown in %/yr (2), like the
  *  volume factor beside it. The conversion happens only at the edit boundary: the shown

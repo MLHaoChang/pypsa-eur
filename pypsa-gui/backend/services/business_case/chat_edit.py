@@ -82,6 +82,8 @@ _WORDS = {
     "linked_share_by_year": "Sold share",
     # A capacity payment's paid share of the capacity in service (walk 04).
     "derating": "De-rating",
+    # A typed line's volume class under a lease-up (BC 18).
+    "volume_class": "Volume class",
     "hint": "Hint",
     "kw_per_gpu": "kW per GPU",
     "lhv_kwh_per_kg": "LHV (kWh/kg)",

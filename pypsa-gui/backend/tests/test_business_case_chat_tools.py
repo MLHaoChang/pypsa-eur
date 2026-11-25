@@ -272,6 +272,32 @@ def test_invalid_inputs_name_the_field(bc):
     assert any("no_such_field" in e["loc"] for e in d["errors"])
 
 
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"quantity_source": "linked:served_product.nh3@1", "quantity": None},
+        {
+            "kind": "capex",
+            "category": "facility",
+            "escalation": "capex",
+            "life_years": 20.0,
+        },
+    ],
+    ids=["source", "kind"],
+)
+def test_bc18_a_class_kept_through_a_source_or_kind_change_is_a_422(bc, change):
+    """GK B2 BC 18 Q2: a stated volume class is never dropped silently; the error names
+    `volume_class` and says to clear it."""
+    d = _refused(
+        chat_tools.set_business_case_lines,
+        _digest(),
+        _bc(_line(price=None, volume_class="volume", **change)),
+    )
+    assert d["error_kind"] == "business_case_inputs_invalid" and d["status"] == 422
+    assert any("volume_class" in e["loc"] for e in d["errors"])
+    assert "clear volume_class" in d["message"]
+
+
 # ── the card (D1) ───────────────────────────────────────────────────────────
 
 
@@ -1200,9 +1226,12 @@ def test_bc15_the_summary_carries_the_lease_up_only_when_one_applied(bc, monkeyp
     )
     R._state["business_case_report"] = _report()
     out = chat_tools.get_business_case()
-    assert not {"volume_factor", "volume_factor_note", "volume_factor_ignored"} & set(
-        out
-    )
+    assert not {
+        "volume_factor",
+        "volume_factor_note",
+        "volume_factor_ignored",
+        "volume_class",
+    } & set(out)
     rep = _report()
     rep["pnl"].update(
         volume_factor={"2027": 0.5},
@@ -1214,3 +1243,7 @@ def test_bc15_the_summary_carries_the_lease_up_only_when_one_applied(bc, monkeyp
     assert out["volume_factor"] == {"2027": 0.5}
     assert out["volume_factor_note"] == VOLUME_FACTOR_NOTE
     assert out["volume_factor_ignored"] == [2040]
+    assert "volume_class" not in out
+    rep["pnl"]["volume_class"] = {"service": "fixed"}
+    out = chat_tools.get_business_case()
+    assert out["volume_class"] == {"service": "fixed"}

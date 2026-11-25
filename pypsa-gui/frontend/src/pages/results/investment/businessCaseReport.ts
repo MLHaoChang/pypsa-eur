@@ -518,7 +518,6 @@ export const REFUSAL_ACTION: Record<string, string> = {
   linked_output_missing: 'pick another output; this model has no such output',
   double_count: 'type the quantity; the energy model already prices this output',
   default_unit_mismatch: 'set the price; the cost default is in another unit',
-  volume_factor_typed_line: 'take the quantity from the model, or set the volume factor (lease-up) to 100 % in this line’s years',
 }
 
 /** A refused run in words (walk 05, UX 2): `business_case_refused:<kind>: lines[<i>].<column>`

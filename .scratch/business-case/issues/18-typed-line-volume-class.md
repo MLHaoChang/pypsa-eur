@@ -3,7 +3,7 @@
 
 # 18 — A volume class the user states on a typed line
 
-Status: ready-for-agent; audit 2026-11-25: nothing built on master
+Status: done
 Gated: GK B2
 Type: enhancement
 Parent: business-case 15 (lease-up volume factor), GK B2 plan answer Q1

@@ -28,7 +28,7 @@ import {
   blankLine, edited, hintUnitWords, priceUnitWords, unitWords, linkedSource, OUTPUTS_REASON_WORDS,
   parsePaste, placeRefusals, placeValidation, provenanceDetail, provenanceOf,
   operatingYears, REFUSALS_REASON_WORDS, sourceKind, uniqueName, unitNotAllowed, unitsFor, VOLUME_FIELD,
-  takesDerating, withKind, yearsOf, fractionToPct, pctToFraction, indexationUnusual, INDEXATION_SOFT_PCT,
+  takesDerating, takesVolumeClass, VOLUME_CLASS_OPTIONS, withKind, yearsOf, fractionToPct, pctToFraction, indexationUnusual, INDEXATION_SOFT_PCT,
   type Placed,
 } from './businessCaseModel'
 
@@ -37,6 +37,8 @@ const KIND_WORD: Record<LineKind, string> = { revenue: 'Revenue', opex: 'Operati
 const words = (id: string) => id.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase())
 const CELL = 'border border-border rounded px-1 py-0.5 bg-bg text-[11px]'
 const BAD = ' border-danger'
+/** A placed refusal's line in the row's refusal list, for a field's aria-describedby. */
+const refusalId = (p: Placed) => `bc-refusal-${p.line}-${p.column}`
 
 
 function optionsErrorWords(e: unknown): string {
@@ -188,6 +190,23 @@ function Details({ line, set, placed, years, indexationConfirmed, onConfirmIndex
         {sourceKind(line.quantity_source) === 'linked' && num('linked_share', 'Sold share', '0 to 1; empty reads 1')}
         {takesDerating(line.category, line.quantity_source)
           && num('derating', 'De-rating', '0 to 1: the share of the capacity the market pays for; no default')}
+        {takesVolumeClass(line.kind, line.quantity_source) && (() => {
+          // BC 18: whether this typed amount follows served volume under a lease-up.
+          const bad = placed.find(p => p.column === 'volume_class')
+          return (
+            <label className="flex items-center gap-1">
+              <span>Volume class</span>
+              <select aria-label={`Volume class, ${line.name}`} data-testid="bc-volume-class"
+                      className={CELL + (bad ? BAD : '')}
+                      aria-invalid={bad ? true : undefined}
+                      aria-describedby={bad ? refusalId(bad) : undefined}
+                      value={line.volume_class ?? ''}
+                      onChange={e => set({ volume_class: (e.target.value || null) as LineItem['volume_class'] })}>
+                {VOLUME_CLASS_OPTIONS.map(([v, w]) => <option key={v} value={v}>{w}</option>)}
+              </select>
+            </label>
+          )
+        })()}
         {line.kind === 'capex' && (
           <>
             <label className="flex items-center gap-1">
@@ -583,7 +602,8 @@ export default function BusinessCaseLines() {
                                           setLine(i, { quantity_source: qs,
                                                        unit: units.includes(ln.unit) ? ln.unit : (units[0] ?? ln.unit),
                                                        ...(sourceKind(qs) === 'linked' ? { quantity: null } : {}),
-                                                       ...(takesDerating(ln.category, qs) ? {} : { derating: null }) })
+                                                       ...(takesDerating(ln.category, qs) ? {} : { derating: null }),
+                                                       ...(takesVolumeClass(ln.kind, qs) ? {} : { volume_class: null }) })
                                         }} />
                         </td>
                         <td className="px-1">
@@ -635,10 +655,10 @@ export default function BusinessCaseLines() {
                           <td colSpan={11} className="px-1 pb-1">
                             <ul className="text-danger sticky left-0 max-w-[56rem]">
                               {shown.map((p, k) => (
-                                <li key={k} data-column={p.column}>
+                                <li key={k} data-column={p.column} id={refusalId(p)}>
                                   {p.message}{' '}
                                   {!open.has(i) && ['money_year', 'indexation', 'life_years', 'rate', 'refresh_years',
-                                    'quantity_by_year', 'price_by_year', 'linked_share', 'derating'].includes(p.column) && (
+                                    'quantity_by_year', 'price_by_year', 'linked_share', 'derating', 'volume_class'].includes(p.column) && (
                                     <button type="button" className="underline" onClick={() => toggle(i)}>Show details</button>
                                   )}
                                 </li>

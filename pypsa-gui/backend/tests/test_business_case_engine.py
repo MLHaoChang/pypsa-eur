@@ -1982,14 +1982,14 @@ def test_bc15_q1_a_typed_operating_line_refuses_under_a_factor_below_full():
     typed = _line(name="service", category="service_fee", quantity=1.0)
     with pytest.raises(VolumeFactorTypedLine) as e:
         _run(_lease_case({2032: 0.5}, typed), ic=_no_export_ic(), outputs=_NH3_OUT)
-    assert e.value.field == "lines[1].quantity_source"
+    assert e.value.field == "lines[1].volume_class"
     inputs = _lease_case(
         {2032: 0.5}, typed, _line(name="o2", kind="opex", category="staff")
     )
     found = inputs.refusals(horizon=(2031, 2035), base_year=2031)
     assert [x.field for x in found if x.kind == "volume_factor_typed_line"] == [
-        "lines[1].quantity_source",
-        "lines[2].quantity_source",
+        "lines[1].volume_class",
+        "lines[2].volume_class",
     ]
     # Not when the factor is 1 in its span, nor outside it, nor for capex, nor for a
     # year outside the operating years (ignored, never both ignored and refused: C3).

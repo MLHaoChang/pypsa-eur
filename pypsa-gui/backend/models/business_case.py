@@ -115,6 +115,9 @@ Escalation = Literal["opex", "fuel", "tariff", "ppa", "export", "capex", "contra
 Depreciation = Literal["straight_line", "declining_balance"]
 #: The columns a pack default may fill (`default_keys`, `assumed`).
 DefaultColumn = Literal["price", "quantity", "life_years", "rate"]
+#: A typed operating line's volume class under a lease-up (BC 18): `fixed` never
+#: scales, `volume` scales by the year's volume factor; unset refuses (ruling 6).
+VolumeClass = Literal["fixed", "volume"]
 
 #: (kind, category) -> (ledger stream, stream class), spec §3 (G-C1, GK B (a)). A capex
 #: line is an asset, not a stream. Slice 05 adds the `STREAM_CLASS` rows.
@@ -292,6 +295,9 @@ class LineItem(BaseModel):
         le=1.0,
         description="de-rating: the share of the capacity in service the market pays for",
     )
+    # BC 18: the user states whether a typed revenue or opex quantity follows served
+    # volume. Unset stays unset: a lease-up year below 100 % in its span refuses.
+    volume_class: VolumeClass | None = None
     hint: Hint | None = None
 
     # -- shape faults (GK B Q3): a column the line does not take is a parse error
@@ -383,6 +389,21 @@ class LineItem(BaseModel):
             raise ValueError(f"{info.field_name} applies to linked lines only")
         return v
 
+    @field_validator("volume_class")
+    @classmethod
+    def _typed_operating_only(cls, v: Any, info: ValidationInfo) -> Any:
+        # A stated assumption is never dropped silently (GK B2 BC 18 Q2): a linked or a
+        # share line's volume class is set by its source, and capex has no volume.
+        if v is not None and (
+            info.data.get("quantity_source") != "typed"
+            or info.data.get("kind") not in ("revenue", "opex")
+        ):
+            raise ValueError(
+                "volume_class applies to typed revenue and opex lines only; "
+                "clear volume_class to change the source or the kind"
+            )
+        return v
+
     @model_validator(mode="after")
     def _assumed_matches_and_method(self) -> LineItem:
         for col, d in self.assumed.items():
@@ -466,6 +487,14 @@ class BusinessCaseInputs(BaseModel):
         if len({int(k) for k in v}) != len(v):
             raise ValueError("a year is listed twice")
         return v
+
+    def scaled_years(self, ln: LineItem, horizon: tuple[int, int]) -> list[int]:
+        """The years of `ln`'s span inside `horizon` whose volume factor is below full
+        volume (BC 15, 18): the one predicate the refusal, the engine, the digest and the
+        report read (GK B2 BC 18 V1)."""
+        first = max(ln.start_year or horizon[0], horizon[0])
+        last = min(ln.end_year or horizon[1], horizon[1])
+        return [y for y in range(first, last + 1) if self.volume_factor_at(y) != 1.0]
 
     def volume_factor_at(self, year: int) -> float:
         """`year`'s volume factor: its cell, else 1.0."""
@@ -585,15 +614,12 @@ class BusinessCaseInputs(BaseModel):
         if (
             ln.source == "typed"
             and ln.kind != "capex"
-            and any(
-                self.volume_factor_at(y) != 1.0
-                for y in years
-                if horizon[0] <= y <= horizon[1]
-            )
+            and ln.volume_class is None
+            and self.scaled_years(ln, horizon)
         ):
-            # Ruling 6 (GK B2 BC 15 Q1): a typed line states an amount, not its volume
-            # class, so a lease-up below 100 % in its span refuses rather than guess.
-            out.append(VolumeFactorTypedLine(f"{at}.quantity_source"))
+            # Ruling 6 (GK B2 BC 15 Q1): a typed amount whose volume class the user has
+            # not stated (BC 18) refuses under a lease-up below 100 % in its span.
+            out.append(VolumeFactorTypedLine(f"{at}.volume_class"))
         if not share and ln.price is None and not _covers(ln.price_by_year, years):
             cls = PriceNotEstablished if ln.kind == "revenue" else CostNotEstablished
             out.append(cls(f"{at}.price"))
@@ -800,9 +826,15 @@ class DoubleCount(BusinessCaseRefused):
 
 class VolumeFactorTypedLine(BusinessCaseRefused):
     """A typed revenue or opex line in a year whose volume factor is below 100 %: its
-    volume class is not stated, so ruling 6 refuses (GK B2 BC 15 Q1)."""
+    volume class is not stated, so ruling 6 refuses (GK B2 BC 15 Q1, BC 18). `field` is
+    the line's `volume_class`."""
 
     kind = "volume_factor_typed_line"
+    #: The one sentence the edit card shows (UX 30 BC 18); the frontend's table pins it.
+    words = (
+        "Volume class: choose Fixed or Follows volume, "
+        "or set the volume factor to 100 % in every year of this line."
+    )
 
 
 class VolumeFactorUnclassified(BusinessCaseRefused):

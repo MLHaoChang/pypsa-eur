@@ -208,7 +208,7 @@ def test_bc15_a_lease_up_reaches_the_report_and_the_workbook(
     body = run(_line())
     assert body["status"] == "refused"
     assert body["refusal"]["refusal"] == "volume_factor_typed_line"
-    assert body["refusal"]["field"] == "lines[0].quantity_source"
+    assert body["refusal"]["field"] == "lines[0].volume_class"
     # This IC sells under a PPA: a generation-side row refuses, naming it (ruling 6).
     body = run(gpu)
     assert body["status"] == "refused"
@@ -257,6 +257,11 @@ def test_bc15_a_lease_up_reaches_the_report_and_the_workbook(
     text = {str(c.value) for row in wb[sheet].iter_rows() for c in row}
     assert not {LEASE_UP_ROW, "Volume factor (lease-up)"} & text
     assert not any("not re-solved" in t for t in text)
+    # BC 18: a stated class runs through the route, and the report names it.
+    body = run(gpu, _line(volume_class="volume"))
+    assert body.get("status") == "done", json.dumps(body)[:600]
+    assert body["report"]["pnl"]["volume_class"] == {"product": "volume"}
+    assert "volume_class" not in full["report"]["pnl"]
 
 
 def test_bc15_a_lease_up_outside_zero_to_one_is_a_422(

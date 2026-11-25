@@ -52,6 +52,7 @@ from models.business_case import (
     LineItem,
     LinkedOutputMissing,
     NameDuplicate,
+    VolumeFactorTypedLine,
     VolumeFactorUnclassified,
     takes_derating,
 )
@@ -208,9 +209,14 @@ STREAM_VOLUME_CLASS: dict[str, str] = {
 }
 
 
-def _volume_line(ln: LineItem) -> bool:
-    """A linked operating line on served volume. An undetermined kind, or one in no
-    set, refuses."""
+def _volume_line(ln: LineItem, at: str = "volume_class") -> bool:
+    """An operating line on served volume. A typed line reads the class its user stated
+    (BC 18) and unset refuses (ruling 6); a linked line reads its output kind, where an
+    undetermined kind, or one in no set, refuses."""
+    if ln.source == "typed":
+        if ln.volume_class is None:
+            raise VolumeFactorTypedLine(at)
+        return ln.volume_class == "volume"
     if ln.source != "linked":
         return False
     kind = _output_id(ln).partition(".")[0]
@@ -261,6 +267,15 @@ def volume_factor_display(
     if scaled:
         out["volume_factor"] = {str(y): f for y, f in scaled.items()}
         out["volume_factor_note"] = VOLUME_FACTOR_NOTE
+        horizon = (min(ops), max(ops))
+        # BC 18: each typed line's stated class, where a year it runs is scaled.
+        classes = {
+            ln.name: ln.volume_class
+            for ln in inputs.lines
+            if ln.volume_class is not None and inputs.scaled_years(ln, horizon)
+        }
+        if classes:
+            out["volume_class"] = classes
     ignored = sorted(y for y in inputs.volume_factor_by_year if y not in ops)
     if ignored:
         out["volume_factor_ignored"] = ignored
@@ -593,15 +608,20 @@ def build_business_case(
 
     # Revenue and opex read from typed or linked quantities.
     by_year: dict[int, list[TemplateLine]] = {}
-    for ln in lines:
+    for i, ln in enumerate(lines):
         if ln.kind == "capex" or ln.source == "share_of":
             continue
         first, last = _span(ln, horizon)
+        scaled = inputs.scaled_years(ln, horizon)
         for y in ops:
             if not first <= y <= last:
                 continue
             q, pc = _quantity(ln, y, outputs), ln.cell("price", y)
-            if q is not None and y in lease_up and _volume_line(ln):
+            if (
+                q is not None
+                and y in scaled
+                and _volume_line(ln, f"lines[{i}].volume_class")
+            ):
                 q *= lease_up[y]
             amount = _finite(
                 None if q is None or pc.value is None else _SIGN[ln.kind] * q * pc.value
@@ -755,7 +775,7 @@ def _bound(out) -> dict | None:
     return None
 
 
-def _line_blob(ln: LineItem, horizon: tuple[int, int]) -> dict:
+def _line_blob(ln: LineItem, horizon: tuple[int, int], scaled: list[int]) -> dict:
     """A line as the digest reads it (GK B BC 07 P1): a field enters only when it can
     change an outcome and is set, so a digest from before the field stays byte-equal. The
     hint and a default's range are display only and never enter."""
@@ -770,6 +790,9 @@ def _line_blob(ln: LineItem, horizon: tuple[int, int]) -> dict:
         del d["linked_share_by_year"]
     if d["derating"] is None:
         del d["derating"]
+    # BC 18: a stated class changes an outcome only in a year of its span below 100 %.
+    if d["volume_class"] is None or not scaled:
+        del d["volume_class"]
     if not ln.default_keys:
         del d["default_units"]
     for a in d["assumed"].values():
@@ -798,7 +821,10 @@ def business_case_hash(
         "ic": _fallback_hash(ic_case),
         "preset": inputs.preset,
         "receivable_days": inputs.receivable_days,
-        "lines": [_line_blob(ln, horizon) for ln in inputs.lines],
+        "lines": [
+            _line_blob(ln, horizon, inputs.scaled_years(ln, horizon))
+            for ln in inputs.lines
+        ],
         "bound": {
             ln.name: _bound(outputs.get(ln.name))
             for ln in inputs.lines
