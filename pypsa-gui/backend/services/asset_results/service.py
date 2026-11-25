@@ -308,14 +308,15 @@ def build_headline(n, component_class: str, name: str, *, precond: dict,
 def build_response(
     n, component_class: str, name: str, *, category: str,
     metric_ids: list[str], source: str, from_iso: str | None,
-    to_iso: str | None, period, mode: str,
+    to_iso: str | None, period, mode: str, price_limit: Any = C.LIVE_SOLVE,
 ) -> dict:
+    """`price_limit`: the limit of the solve behind `n`'s prices; by default the live solve's."""
     from services.results.economics_caveats import interior_optimum_notes
     from services.serialization import clean_scalar
 
     from routers.simulation import _state_snapshot
 
-    precond = C.preconditions(n, component_class, name)
+    precond = C.preconditions(n, component_class, name, price_limit=price_limit)
     sns = slice_snapshots(n, from_iso, to_iso, period)
     stamps, periods = _stamps_and_periods(n, sns)
 

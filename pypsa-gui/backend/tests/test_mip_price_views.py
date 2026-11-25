@@ -253,3 +253,43 @@ def test_mip_cause_sentence_matches_the_frontend_words():
     why = m.group(1)
     assert MIP_PRICES_CAUSE == f"{why[0].upper()}{why[1:]}."
     assert MIP_PRICES_TEXT == f"Not available. {MIP_PRICES_CAUSE}"
+
+
+def test_a_study_fork_is_judged_by_its_own_solve_not_the_live_one(mip, lp, monkeypatch):
+    """GK B2 H1 on #1994: the study explanation reads a fork from disk. A MIP fork under an LP
+    live solve withholds its prices; an LP fork under a MIP live solve keeps them."""
+    import routers.results as results
+    from harness.solve_validity import MIP_PRICES_TEXT
+    from services.study import explain as study_explain
+    from services.study import findings as F
+
+    assert (
+        F.option_price_limit({"price_limit": DUALS_NOT_MARGINAL}, lp)
+        == DUALS_NOT_MARGINAL
+    )
+    assert (
+        F.option_price_limit({}, mip) == DUALS_NOT_MARGINAL
+    )  # judged under its solve's config
+    assert F.option_price_limit(None, lp) is None
+
+    def revenue(n, limit):
+        _, kpis = study_explain.network_readers(n, price_limit=limit)
+        return {h["id"]: h for h in kpis("Generator", "cheap")["headline"]}[
+            "revenue_eur"
+        ]
+
+    monkeypatch.setitem(results._state, "solver_config", CFG)
+    # An LP live solve; the MIP fork still withholds.
+    monkeypatch.setitem(results._state, "last_solve_settings", {})
+    row = revenue(mip, F.option_price_limit({}, mip))
+    assert row["status"] == "blocked" and row["reason"] == MIP_PRICES_TEXT
+    assert (
+        study_explain.bus_price_signals(mip, ["el"], price_limit=DUALS_NOT_MARGINAL)
+        == {}
+    )
+    # A MIP live solve; the LP fork keeps its prices.
+    monkeypatch.setitem(
+        results._state, "last_solve_settings", {"price_limit": DUALS_NOT_MARGINAL}
+    )
+    assert revenue(lp, F.option_price_limit({}, lp))["status"] == "ok"
+    assert study_explain.bus_price_signals(lp, ["el"], price_limit=None)

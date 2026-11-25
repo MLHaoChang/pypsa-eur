@@ -28,6 +28,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from services.asset_results.compute import LIVE_SOLVE
 from services.results.economics_caveats import ZERO_PROFIT_BY_CONSTRUCTION
 from services.results.sizing import classify_sizing
 
@@ -59,8 +60,9 @@ class ExplainError(LookupError):
         self.message = message
 
 
-def bus_price_signals(n: Any, buses: list[str]) -> dict:
-    """Mean / min / max / load-weighted marginal price at each of the asset's buses."""
+def bus_price_signals(n: Any, buses: list[str], *, price_limit: Any = LIVE_SOLVE) -> dict:
+    """Mean / min / max / load-weighted marginal price at each of the asset's buses.
+    `price_limit`: the limit of the solve behind `n`'s prices; by default the live solve's."""
     from services.asset_results import service as svc
 
     wanted = ["bus_price_mean", "bus_price_min", "bus_price_max",
@@ -73,7 +75,7 @@ def bus_price_signals(n: Any, buses: list[str]) -> dict:
             resp = svc.build_response(
                 n, "Bus", bus, category="prices", metric_ids=wanted,
                 source="lopf", from_iso=None, to_iso=None, period=None,
-                mode="chronological",
+                mode="chronological", **_limit_kw(price_limit),
             )
         except Exception:  # noqa: BLE001 — a missing signal is not a failure
             continue
@@ -193,7 +195,7 @@ def reading_notes(sizing: dict, co2: list[dict], buses: list[str]) -> list[str]:
 
 
 def explain_asset(n: Any, component_class: str, name: str, *,
-                  results: ResultsFn, asset_kpis: KpisFn) -> dict:
+                  results: ResultsFn, asset_kpis: KpisFn, price_limit: Any = LIVE_SOLVE) -> dict:
     """
     Assemble the evidence behind one sizing decision on ``n``: what the LP
     built, WHICH CONSTRAINT stopped it there, what the asset earned, and the
@@ -201,8 +203,10 @@ def explain_asset(n: Any, component_class: str, name: str, *,
 
     ``results(kind)`` answers the ``emissions`` and ``line_duals`` results of
     ``n``; ``asset_kpis(component_class, name)`` its per-asset summary KPIs
-    (``headline`` and ``unavailable``). Raises :class:`ExplainError` (400 for
-    a class the optimiser does not size, 404 for an unknown asset).
+    (``headline`` and ``unavailable``). ``price_limit`` is the limit of the
+    solve behind ``n``'s prices (assistant-assurance 17); by default the live
+    solve's record. Raises :class:`ExplainError` (400 for a class the
+    optimiser does not size, 404 for an unknown asset).
     """
     from services.asset_results.compute import attr_for, nom_col_for
     from services.dispatch_status import dispatch_status_detail
@@ -248,7 +252,7 @@ def explain_asset(n: Any, component_class: str, name: str, *,
         "asset_kpis": kpis.get("headline", []),
         "unavailable_kpis": kpis.get("unavailable", []),
         "system_signals": {
-            "bus_prices": bus_price_signals(n, buses) if solved else {},
+            "bus_prices": bus_price_signals(n, buses, price_limit=price_limit) if solved else {},
             "co2_caps": co2,
             "congestion": congestion_at(n, buses, results) if solved else {
                 "lines": [], "note": "no fresh dispatch — nothing to assess"},
@@ -257,7 +261,12 @@ def explain_asset(n: Any, component_class: str, name: str, *,
     }
 
 
-def network_readers(n: Any) -> tuple[ResultsFn, KpisFn]:
+def _limit_kw(price_limit: Any) -> dict:
+    """`build_response`'s `price_limit` kwarg: absent (the live solve's record) unless given."""
+    return {} if price_limit is LIVE_SOLVE else {"price_limit": price_limit}
+
+
+def network_readers(n: Any, *, price_limit: Any = LIVE_SOLVE) -> tuple[ResultsFn, KpisFn]:
     """
     ``(results, asset_kpis)`` over an explicit network — a study fork read
     from disk — computed from its live frames (the ``eh_report`` precedent),
@@ -293,7 +302,7 @@ def network_readers(n: Any) -> tuple[ResultsFn, KpisFn]:
         resp = svc.build_response(
             n, component_class, name, category="summary", metric_ids=requested,
             source="lopf", from_iso=None, to_iso=None, period=None,
-            mode="chronological",
+            mode="chronological", **_limit_kw(price_limit),
         )
         headline = [
             {"id": h["id"], "label": h["label"], "unit": h.get("unit", ""),

@@ -89,9 +89,16 @@ def build_ctx(n, component_class: str, name: str, *, source: str, sns) -> Ctx:
 
 # ── Preconditions ───────────────────────────────────────────────────────────
 
-def preconditions(n, component_class: str, name: str) -> dict[str, Status]:
+# `preconditions(price_limit=LIVE_SOLVE)`: judge REQ_DUALS by the live solve's record. A reader of
+# another network (a study fork read from disk) passes that network's own limit instead.
+LIVE_SOLVE = object()
+
+
+def preconditions(n, component_class: str, name: str, *,
+                  price_limit: Any = LIVE_SOLVE) -> dict[str, Status]:
     """
-    Evaluate every precondition once per request.
+    Evaluate every precondition once per request. `price_limit` is the limit of the solve that
+    produced `n`'s prices (assistant-assurance 17); by default the live solve's record.
 
     Returned map is consumed by `applicability.resolve_metric`; anything a
     metric does not list is irrelevant to it.
@@ -143,8 +150,9 @@ def preconditions(n, component_class: str, name: str) -> dict[str, Status]:
     # 3. LP duals for this component class + nodal prices.
     from harness.solve_validity import solved_price_limit
 
-    out[REQ_DUALS] = _duals_status(n, component_class,
-                                   solved_price_limit(_state_snapshot(), n))
+    if price_limit is LIVE_SOLVE:
+        price_limit = solved_price_limit(_state_snapshot(), n)
+    out[REQ_DUALS] = _duals_status(n, component_class, price_limit)
 
     # 4. Unit commitment on THIS asset.
     out[REQ_COMMITTABLE] = _committable_status(n, component_class, name)

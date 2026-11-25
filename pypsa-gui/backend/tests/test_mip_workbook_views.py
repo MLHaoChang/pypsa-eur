@@ -247,3 +247,32 @@ def test_an_lp_total_that_is_not_established_gets_no_integer_solve_reason(
         overview_figures(lp, SolverConfig(), None, _rdf), "opex_storage_charging"
     )
     assert line.total is None and line.note is None
+
+
+def test_the_all_assets_totals_are_not_established_when_one_asset_is_withheld(
+    lp, monkeypatch
+):
+    """GK B2 H2 on #1994: a total over a withheld part is not established (S1), never the sum of
+    the known parts; with every part known it is their sum."""
+    from services.results import asset_economics as ae_mod
+    from services.results_workbook.views_network import _sum_or_none
+
+    assert _sum_or_none([1.0, None, 2.0]) is None
+    assert _sum_or_none([1.0, float("nan")]) is None
+    assert _sum_or_none([1.0, 2.0]) == 3.0
+
+    real = ae_mod.compute_asset_economics
+
+    def one_withheld(*a, **kw):
+        out = real(*a, **kw)
+        row = out["generators"][0]
+        row["revenue_eur"] = row["net_profit_eur"] = None
+        for b in row.get("by_period") or []:
+            b["revenue_eur"] = b["net_profit_eur"] = None
+        return out
+
+    monkeypatch.setattr(ae_mod, "compute_asset_economics", one_withheld)
+    rows = _build(lp, LP_RECORD)["Economics"]
+    keys = {r[0]: r[3] for r in rows if r and r[2] == "horizon"}
+    assert keys["Revenue (all assets)"] == "not_established"
+    assert keys["Net profit (all assets)"] == "not_established"
