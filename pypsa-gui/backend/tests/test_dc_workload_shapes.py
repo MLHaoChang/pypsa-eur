@@ -55,3 +55,8 @@ def test_mix_bounds_refuse(bad):
 
 def test_defaults_are_valid():
     WorkloadMixSpec()
+
+
+def test_an_unknown_kind_raises():
+    with pytest.raises(ValueError, match="unknown utilisation kind"):
+        u("bogus")
