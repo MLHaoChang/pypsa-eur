@@ -83,6 +83,7 @@ def test_the_issue_rows_are_declared():
         'entsoe_day_ahead_prices': ('manual', 'library'),  # SCU06 S1: spends the stored token
         'table_tonne_unit_marks': ('manual', None),  # ui-modern 05f (not_via_chat.d/)
         'market_packs': ('manual', None),  # SCU06 K8a (not_via_chat.d/), SCU06-CHAT-1
+        'campus_psse_bundle_download': ('manual', None),  # grid-compliance 23 (not_via_chat.d/)
     }
     assert 'grid_code_publish' not in entries  # GRIDCODE-CHAT-1: chat tools behind a card
     assert {k: (e['disposition'], e['panel']) for k, e in entries.items()} == expected

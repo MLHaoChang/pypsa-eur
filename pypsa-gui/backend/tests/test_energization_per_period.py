@@ -288,8 +288,8 @@ MASTER_FP_SINGLE = (
     "c5d6c416f41b319c4043f2db0c30def9f22e9273ded7664a958c355bcda81433",
 )
 MASTER_FP_EH_DATACENTER = (
-    "4ae621820bfa2bbdf0295d5fe6d9557ed89025a5197cd4826898bf550e13a0bd",
-    "9766df8fdb39a263d938f2b2ded7d83f52be73968322a43128d6389b0715141b",
+    "839f0ce0e2ca23b9e41b87cb790fa185731f2d17e917c0c7f175190898650c8a",
+    "f705089c9810e3bb4a02b8808cbe2fb3d5f9b37eb617fffb28ccade22692ea8d",
 )
 
 
@@ -488,7 +488,9 @@ def test_d2a_an_unscheduled_network_keeps_its_pre_02b_key_and_reads_fresh():
 def test_d2a_the_fingerprint_of_an_unscheduled_template_is_pre_02b():
     n = build_eh_datacenter()
     assert E.energization_frame(n) is None
-    assert _fps(n) == MASTER_FP_EH_DATACENTER  # master's, byte for byte
+    assert (
+        _fps(n) == MASTER_FP_EH_DATACENTER
+    )  # master's digest with the gas efficiency at the pack's 0.41 (DC review 03)
 
 
 def test_d2a_a_build_shares_no_snapshot_index_with_an_earlier_one():

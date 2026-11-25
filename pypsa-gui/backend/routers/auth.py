@@ -9,13 +9,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DBSession
 
 import security
-from db.models import User
+from db.models import Organization, User
 from db.session import get_db
 from deps import require_user
 from services import email_service
 from services.auth_service import (
     create_session,
     issue_password_token,
+    hash_password,
+    resolve_session_row,
+    revoke_all_sessions_for_user,
     revoke_session,
     set_password_from_token,
     verify_password,
@@ -35,6 +38,11 @@ class LoginRequest(BaseModel):
 class PasswordTokenRequest(BaseModel):
     token: str
     password: str = Field(min_length=8)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8)
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -309,3 +317,55 @@ def reset_password(
     db: DBSession = Depends(get_db),
 ) -> dict[str, bool]:
     return _consume_password_token(db=db, payload=payload, purpose="reset_password")
+
+
+@router.get("/account")
+def account(
+    user: User = Depends(require_user),
+    db: DBSession = Depends(get_db),
+) -> dict[str, object]:
+    """The signed-in user's email and the workspaces they belong to, with their role in each."""
+    membership = get_user_membership(db, user.id)
+    organization = db.get(Organization, membership.org_id) if membership is not None else None
+    workspaces = (
+        [{"org_id": str(organization.id), "name": organization.name, "role": membership.role}]
+        if membership is not None and organization is not None
+        else []
+    )
+    return {"email": user.email, "workspaces": workspaces}
+
+
+@router.post("/change-password")
+def change_password(
+    payload: ChangePasswordRequest,
+    request: Request,
+    user: User = Depends(require_user),
+    db: DBSession = Depends(get_db),
+) -> dict[str, bool]:
+    """Change the signed-in user's password. Needs the current one; ends every other session."""
+    # A wrong current password is a 400, not a 401: the client treats 401 as "session expired".
+    ip = security.client_ip(request)
+    retry_after = security.login_retry_after(ip, user.email)
+    if retry_after is not None:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed attempts. Try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+    if user.password_hash is None or not verify_password(payload.current_password, user.password_hash):
+        security.record_failed_login(ip, user.email)
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+
+    security.clear_login_attempts(ip, user.email)
+    # `user` may belong to another DB session (require_user's); write through ours.
+    stored = db.get(User, user.id)
+    if stored is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    stored.password_hash = hash_password(payload.new_password)
+    raw_token = request.cookies.get(get_settings().session_cookie_name)
+    keep = resolve_session_row(db, raw_token) if raw_token else None
+    revoke_all_sessions_for_user(
+        db, stored.id, keep_session_id=keep.id if keep is not None else None, commit=False
+    )
+    db.commit()
+    return {"ok": True}

@@ -1,8 +1,8 @@
 # Coordinator
 
-Current coordinator session: `session_01G7qCunZCVnfeh3dmSTuVdx`
+Current coordinator session: `session_01G7qCuk3bUTKVftWScQQJgq`
 
-Engine gatekeeper A (36; gridspine, DC, grid-to-process and IC/adequacy engine reviews; owner decision GK-SPLIT-1): `session_01G7qCujM7tzX7MduVNzjAig`
+Engine gatekeeper A (37; gridspine, DC, grid-to-process and IC/adequacy engine reviews; owner decision GK-SPLIT-1): `session_01G7qCukLWTP1wXiCtqPFbsb`
 
 Engine gatekeeper B (71; harness, app backend, investment/finance and outsourced reviews; GK-SPLIT-1): `session_01G7qCumJgMkmKqGED2LgfRU`
 

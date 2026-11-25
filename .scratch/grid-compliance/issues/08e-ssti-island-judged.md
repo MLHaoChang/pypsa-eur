@@ -3,7 +3,7 @@
 
 # GC-08e SSTI UIF: the scorecard and pack judge the island rows
 
-Status: needs-triage
+Status: done
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: GC-08b (`08b-ssti-island-case.md`)
@@ -43,3 +43,11 @@ SSTI risk is computed but shown to no one until this lands.
 - An open-tie campus whose island UIF flags reads warn on the scorecard, naming the island case.
 - A closed-tie campus with island requirements whose worst UIF is islanded says so in the note.
 - The pack prints the island rows judged; existing GC-08 / GC-08b tests pass unchanged.
+
+## Comments
+
+**Built (PR #1984, merged 2026-11-25).** GK A2 (8) GO on C1–C7, then GK OK and UX 29 OK at cbc68135.
+- `uif_judged` / `uif_islanded` in `grid_readiness` pick the rows that the scorecard and the pack both judge.
+- The run's meta carries `island_verdict` / `island_worst_uif`.
+- A GC-08b-era run reads unknown "rerun".
+- UX 29's sentence shape applies to the islanding notes; the rest of the SSTI note set is GC-08g.
