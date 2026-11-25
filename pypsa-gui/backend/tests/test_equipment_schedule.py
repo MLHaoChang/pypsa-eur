@@ -842,6 +842,48 @@ def test_a_bus_voltage_the_study_left_out_comes_from_the_campus_file(tmp_path):
     rows = {r["asset"]: r for r in es.build(run)["rows"] if r["kind"] == "switchgear"}
     assert rows["MV1 switchgear"]["location"] == "MV1 (20 kV)"
     assert rows["AUX switchgear"]["location"] == "AUX"  # the table says "Not stated"
+    assert rows["PCC switchgear"]["location"] == "PCC (110 kV)"  # from pcc.vn_kv
+
+
+def test_an_integer_bus_key_in_the_campus_file_still_gives_the_voltage(tmp_path):
+    run = _run(tmp_path)
+    spec = yaml.safe_load((run / cs.CAMPUS_YAML).read_text())
+    spec["campus"]["buses"][11] = spec["campus"]["buses"].pop(
+        "MV2"
+    )  # YAML reads `11:` as an int
+    (run / cs.CAMPUS_YAML).write_text(yaml.safe_dump(spec))
+    sg = pd.read_csv(run / cs.SWITCHGEAR_RATING_CSV, dtype={"bus": str})
+    sg["vn_kv"] = math.nan
+    sg.loc[sg.bus == "MV2", "bus"] = "11"
+    sg.to_csv(run / cs.SWITCHGEAR_RATING_CSV, index=False)
+    rows = {r["asset"]: r for r in es.build(run)["rows"] if r["kind"] == "switchgear"}
+    assert rows["11 switchgear"]["location"] == "11 (20 kV)"
+
+
+def test_a_pcc_bus_also_listed_with_another_voltage_shows_neither(tmp_path):
+    run = _run(tmp_path)
+    spec = yaml.safe_load((run / cs.CAMPUS_YAML).read_text())
+    spec["campus"]["buses"]["PCC"] = {"vn_kv": 132.0}  # pcc.vn_kv is 110
+    (run / cs.CAMPUS_YAML).write_text(yaml.safe_dump(spec))
+    sg = pd.read_csv(run / cs.SWITCHGEAR_RATING_CSV, dtype={"bus": str})
+    sg["vn_kv"] = math.nan
+    sg.to_csv(run / cs.SWITCHGEAR_RATING_CSV, index=False)
+    rows = {r["asset"]: r for r in es.build(run)["rows"] if r["kind"] == "switchgear"}
+    assert rows["PCC switchgear"]["location"] == "PCC"
+    assert rows["MV1 switchgear"]["location"] == "MV1 (20 kV)"
+
+
+def test_a_pcc_bus_also_listed_with_its_own_voltage_keeps_it(tmp_path):
+    run = _run(tmp_path)
+    spec = yaml.safe_load((run / cs.CAMPUS_YAML).read_text())
+    spec["campus"]["buses"]["PCC"] = {"vn_kv": 110}  # the same as pcc.vn_kv
+    spec["campus"]["buses"]["SPARE"] = None  # an empty bus entry reads as no voltage
+    (run / cs.CAMPUS_YAML).write_text(yaml.safe_dump(spec))
+    sg = pd.read_csv(run / cs.SWITCHGEAR_RATING_CSV, dtype={"bus": str})
+    sg["vn_kv"] = math.nan
+    sg.to_csv(run / cs.SWITCHGEAR_RATING_CSV, index=False)
+    rows = {r["asset"]: r for r in es.build(run)["rows"] if r["kind"] == "switchgear"}
+    assert rows["PCC switchgear"]["location"] == "PCC (110 kV)"
 
 
 def test_an_assumption_the_word_map_does_not_know_never_shows_its_engine_name(tmp_path):
