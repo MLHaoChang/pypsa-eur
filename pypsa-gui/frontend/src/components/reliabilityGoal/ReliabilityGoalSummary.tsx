@@ -29,7 +29,7 @@ export function hasTarget(target: number | null): target is number {
   return target != null && Number.isFinite(target) && target > 0
 }
 
-export function ReliabilityGoalSummary({ items, testId, requireTarget = false, mcBudget = null }: {
+export function ReliabilityGoalSummary({ items, testId, requireTarget = false, mcBudget = null, appliedTarget = null, ranDraws = null }: {
   items: GoalItem[]
   testId: string
   /** `mc_budget` only: the last run's own batching (`result.draws`), read
@@ -39,6 +39,13 @@ export function ReliabilityGoalSummary({ items, testId, requireTarget = false, m
    *  none (or 0), say so and link to where it is set instead of the values.
    *  A goal that could not be read falls through to "could not be read". */
   requireTarget?: boolean
+  /** The goal a verdict was judged against (`certification.target`): when
+   *  nobody set one and the site type gives none, it is shown as assumed,
+   *  never "not set" beside a pass. */
+  appliedTarget?: number | null
+  /** The draws the last run used (`certification.n_samples`): the goal's
+   *  draws are only its first batch, so name both. */
+  ranDraws?: number | null
 }) {
   const { goal, target, isPending, isError } = useReliabilityGoal()
   const link = 'text-link hover:underline'
@@ -55,13 +62,16 @@ export function ReliabilityGoalSummary({ items, testId, requireTarget = false, m
   // The same words the editor shows in both modes (`goalWords`).
   const parts: string[] = []
   // A goal nobody set reads the site type's, marked with the shared chip.
-  const assumed = items.includes('target') && goal?.target_lole_h.value == null ? assumedLole(goal) : null
+  const assumed = items.includes('target') && goal?.target_lole_h.value == null
+    ? assumedLole(goal) ?? (appliedTarget != null && Number.isFinite(appliedTarget) ? appliedTarget : null) : null
   if (goal) {
     for (const it of items) {
       if (it === 'target') parts.push(`allowed shortfall ${assumed != null ? `${assumed} h/yr`
         : goalWords(goal, 'target_lole_h')}`)
       else if (it === 'ens') parts.push(`ENS target ${goalWords(goal, 'ens_cap_permyriad')}`)
-      else if (it === 'draws') parts.push(`MC draws ${goalWords(goal, 'mc_draws')}`)
+      else if (it === 'draws') parts.push(ranDraws != null && ranDraws !== goal.mc_draws.value
+        ? `MC draws ${ranDraws.toLocaleString('en-GB')} in the last run · first batch ${goalWords(goal, 'mc_draws')}`
+        : `MC draws ${goalWords(goal, 'mc_draws')}`)
       // The Expert MC batches adaptively (walkthrough asset-investment 08):
       // the goal's draws are its first batch, not its whole run.
       else if (it === 'mc_budget') parts.push(mcBudget

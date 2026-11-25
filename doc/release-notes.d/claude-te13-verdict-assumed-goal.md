@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The hospital study's goal line now shows the goal a verdict was judged against as assumed (never "not set" beside a pass) and names the last run's draws beside the goal's first batch.
