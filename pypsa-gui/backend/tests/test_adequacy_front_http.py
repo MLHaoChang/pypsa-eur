@@ -253,6 +253,9 @@ def test_apply_fixes_the_point_in_one_undo_step_and_one_bump(
     rec = _run(client)
     i = _capped_index(rec)
     caps = rec["result"]["points"][i]["point"]["capacities"]
+    n = session_ctx(client).network
+    # A dispatch from the old sizes, as a solved network has: apply clears it.
+    n.generators_t.p = pd.DataFrame(1.0, index=n.snapshots, columns=["gas", "clean"])
     before, rev = gens(client), _revision(session_ctx, client)
 
     r = client.post(f"{URL}/apply", json={"index": i, "expected_revision": rev})
@@ -265,6 +268,7 @@ def test_apply_fixes_the_point_in_one_undo_step_and_one_bump(
         assert g.at[name, "p_nom"] == pytest.approx(size)
         assert not bool(g.at[name, "p_nom_extendable"])
     assert g.at["gas", "p_nom"] == pytest.approx(50.0, abs=1e-3)
+    assert session_ctx(client).network.generators_t.p.empty
 
     # Applied is an edit: the record is stale now, so a second apply refuses.
     rev2 = _revision(session_ctx, client)
@@ -526,3 +530,39 @@ def test_no_solver_config_is_refused_before_publishing():
         422,
         "no solver configuration",
     )
+
+
+def test_an_undo_step_that_cannot_be_recorded_refuses_the_apply(
+    gens, client, install_network, session_ctx, monkeypatch
+):
+    from services import network_undo
+
+    _setup(client, install_network)
+    _run(client)
+    before, rev = gens(client), _revision(session_ctx, client)
+    monkeypatch.setattr(network_undo, "push_undo_snapshot", lambda: None)
+    r = client.post(f"{URL}/apply", json={"index": 0, "expected_revision": rev})
+    assert r.status_code == 409 and "undo step" in r.text
+    pd.testing.assert_frame_equal(gens(client), before)
+    assert _revision(session_ctx, client) == rev
+
+
+def test_a_study_running_at_apply_time_refuses_it(
+    gens, client, install_network, session_state, session_ctx
+):
+    _setup(client, install_network)
+    _run(client)
+    before, rev = gens(client), _revision(session_ctx, client)
+    release = threading.Event()
+    t = threading.Thread(target=release.wait, daemon=True)
+    t.start()
+    st = session_state(client)
+    st["mc"] = {"status": "running", "thread": t}
+    try:
+        r = client.post(f"{URL}/apply", json={"index": 0, "expected_revision": rev})
+        assert r.status_code == 409, r.text
+    finally:
+        release.set()
+        t.join(timeout=5)
+        st.pop("mc", None)
+    pd.testing.assert_frame_equal(gens(client), before)

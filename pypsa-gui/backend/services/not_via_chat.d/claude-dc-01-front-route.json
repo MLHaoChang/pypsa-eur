@@ -8,14 +8,25 @@
    "page": "Adequacy (Expert)",
    "panel": null,
    "keywords": [
-    "front",
     "pareto"
    ],
    "routes": [
-    ["GET", "/api/results/front"],
-    ["POST", "/api/results/front"],
-    ["POST", "/api/results/front/abort"],
-    ["POST", "/api/results/front/apply"]
+    [
+     "GET",
+     "/api/results/front"
+    ],
+    [
+     "POST",
+     "/api/results/front"
+    ],
+    [
+     "POST",
+     "/api/results/front/abort"
+    ],
+    [
+     "POST",
+     "/api/results/front/apply"
+    ]
    ]
   }
  ]

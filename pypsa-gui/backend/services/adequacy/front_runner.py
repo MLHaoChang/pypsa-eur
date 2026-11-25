@@ -201,26 +201,78 @@ def _apply_rows(record: dict | None, index: int, expected_revision: int) -> dict
     return rows
 
 
-def apply_front_point(record: dict | None, index: int, expected_revision: int) -> dict:
+def _snapshot_rows(n, rows: dict) -> list:
+    """The current nominal and extendable values of every row the apply
+    writes, to put back if a later class's bulk edit refuses."""
+    from services.network_bulk import _COMPONENT_ATTRS
+
+    saved = []
+    for cls, cls_rows in rows.items():
+        df = getattr(n, _COMPONENT_ATTRS[cls])
+        for r in cls_rows:
+            for col in r["updates"]:
+                saved.append((df, r["name"], col, df.at[r["name"], col]))
+    return saved
+
+
+def _undo_top():
+    from services import undo_service
+
+    top = undo_service.peek_entry()
+    return (undo_service.depth(), top[0] if top else None)
+
+
+def apply_front_point(
+    record: dict | None,
+    index: int,
+    expected_revision: int,
+    *,
+    refuse_busy=None,
+    state_update=None,
+) -> dict:
     """Fix every extendable asset at the point's size (nominal = size,
     extendable off), through the bulk edit and its validators, as ONE undo
-    step and ONE revision bump. All or nothing: a refusal writes nothing, and
-    a failure after the first write is undone."""
+    step and ONE revision bump. All or nothing: every check runs under the
+    mutation lock before the first write (``refuse_busy``, the study mesh,
+    under the solver-state lock as `_publish_study` takes it); an undo step
+    that cannot be recorded refuses; a bulk edit that refuses after an earlier
+    class was written puts that class's values back. Like any edit outside
+    /api/network/ (`routers/flow.py`'s energization edit), it marks the
+    project dirty, bumps the inputs and clears the dispatch the old sizes
+    produced; ``state_update`` then resets the solve status."""
     from services import dirty_state
+    from services.dispatch_status import clear_dispatch
     from services.network_bulk import apply_bulk_update
-    from services.network_undo import apply_undo, push_undo_snapshot
+    from services.network_undo import push_undo_snapshot
 
     lock = PyPSAService.get_lock()
     with lock:
+        if refuse_busy is not None:
+            with PyPSAService.get_solver_state_lock():
+                refuse_busy()
         rows = _apply_rows(record, index, expected_revision)
+        n = PyPSAService.get_network()
+        saved = _snapshot_rows(n, rows)
+        before = _undo_top()
         push_undo_snapshot()
+        if _undo_top() == before:
+            raise HTTPException(
+                409, "the undo step could not be recorded; nothing was applied"
+            )
         try:
             for cls, cls_rows in rows.items():
                 apply_bulk_update({"component_class": cls, "rows": cls_rows})
+            rev = dirty_state.bump_revision()
+            dirty_state.mark_dirty()
+            cleared = clear_dispatch(n)
         except BaseException:
-            apply_undo()
+            for df, name, col, value in saved:
+                df.at[name, col] = value
             raise
-        rev = dirty_state.bump_revision()
+        finally:
+            dirty_state.bump_inputs()
+    if cleared and state_update is not None:
+        state_update(status="idle", condition=None, objective=None, solve_time=None)
     return {
         "applied": index,
         "fixed": sum(len(r) for r in rows.values()),

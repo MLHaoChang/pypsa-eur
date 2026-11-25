@@ -1818,10 +1818,16 @@ def post_front_apply(body: _FrontApplyRequest):
     one undo step, one revision bump. 409 when the network changed since the
     study or ``expected_revision`` is not current; 422 when the point cannot
     be applied. Nothing is written on a refusal."""
+    from routers.simulation import _state_update
     from services.adequacy.front_runner import apply_front_point
 
-    _refuse_if_mesh_busy("front")
-    return apply_front_point(_state.get("front"), body.index, body.expected_revision)
+    return apply_front_point(
+        _state.get("front"),
+        body.index,
+        body.expected_revision,
+        refuse_busy=lambda: _refuse_if_mesh_busy("front"),
+        state_update=_state_update,
+    )
 
 
 # ── Edge Investment Case P4: the single-owner finance run (WP4.6b) ──────────
