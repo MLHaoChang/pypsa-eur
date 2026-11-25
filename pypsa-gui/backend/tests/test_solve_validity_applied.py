@@ -504,3 +504,12 @@ def test_the_real_island_path_seals_its_linearised_commitment(monkeypatch):
     assert sv.price_limit_without_config(n) is None
     del n.meta[sv.APPLIED_KEY]
     assert sv.solved_price_limit({"solver_config": cfg}, n) == sv.DUALS_NOT_MARGINAL
+
+
+def test_a_malformed_record_defers_to_the_persisted_settings():
+    # No committable or modular unit, so only the settings can say MIP; a
+    # malformed record must not be read as a valid LP record.
+    n = _lp()
+    n.meta[sv.APPLIED_KEY] = {**_VALID, "v": 2}
+    state = {"last_solve_settings": {"price_limit": sv.DUALS_NOT_MARGINAL}}
+    assert sv.solved_price_limit(state, n) == sv.DUALS_NOT_MARGINAL
