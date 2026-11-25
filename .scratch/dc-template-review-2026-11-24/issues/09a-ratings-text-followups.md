@@ -5,7 +5,7 @@
 
 Status: ready-for-agent
 Blocked by: none
-Source: UX 29's OK on #1983 (issue 09), two non-blocking follow-ups.
+Source: issue 09: UX 29's OK on #1983 and GK A (37)'s OK on #1981, non-blocking follow-ups.
 Severity: minor
 Model: sonnet. Review: GK A + UX.
 
@@ -15,6 +15,11 @@ The equipment schedule's Assumptions list shows two engine texts from `gridspine
 
 - The cables' "Design cases" value joins two clauses with "; " ("the study's selected hours, intact and every N-1 transformer outage; the study has no cable-outage case"). The rule is short sentences, cause first.
 - The conductor heat constant's unit reads "A s^0.5/mm2" (shown as "A s^0.5/mm²"). Write it "A·√s/mm²".
+
+Two nits from GK A (37)'s OK on #1981, in `pypsa-gui/backend/services/equipment_schedule.py`:
+
+- The bus-voltage fallback reads `buses.get(str(r.bus))`, which misses a YAML integer bus key. Normalise the keys with `str()`, as `gridspine/ingest/campus.py:623` does.
+- A PCC bus's voltage lives in `pcc.vn_kv`, not in `buses`.
 
 ## Fix
 
