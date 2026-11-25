@@ -18,7 +18,7 @@ import { islandControlsApi, type IslandControlsState, type UnitControl } from '.
 import { AssumedChip, AssumedKey } from '../../components/AssumedChip'
 import { Btn } from '../../components/PageKit'
 import { ISLAND_KEY } from '../../pages/CampusIslandSection'
-import { CONTROL_FIELD_WORDS, UPS_CONTROL_FIELDS, UPS_TRANSFER_LABEL } from '../../pages/islandWords'
+import { CONTROL_FIELD_WORDS, LIMIT_WORDS, UPS_CONTROL_FIELDS, UPS_TRANSFER_LABEL } from '../../pages/islandWords'
 import { controlModeLabel, presetLabel } from '../../plainNames'
 import { useUIStore } from '../../store/uiStore'
 import { Section } from './cardKit'
@@ -135,14 +135,12 @@ export function refusalByField(detail: string, fields: string[]): { field: strin
   return { field, words: words ? `${label} must be ${words}.` : `${label} was not accepted. Check the value.` }
 }
 
-/** gridspine's limit wordings (schema/island.py `_CHECKS`), in words: no interval notation (UX 30). */
-const LIMIT_WORDS: Record<string, string> = {
-  'in (0, 1]': 'above 0 and at most 1',
-  'in (0, 100]': 'above 0 and at most 100',
-  positive: 'above 0',
-  'non-negative': '0 or more',
-  'at least 1': '1 or more',
+/** The revision a Save sends: the one the edits were made on, so a draft from an older
+ *  revision meets the server's 409 rather than overwriting what changed (GK B3). */
+export function saveRevision(draft: ControlDraft, current: string | null | undefined): string | null | undefined {
+  return draft.base ?? current
 }
+
 
 export default function ControlsBlock({ name }: { name: string }) {
   const project = useUIStore(s => s.currentProject)
@@ -175,7 +173,7 @@ export default function ControlsBlock({ name }: { name: string }) {
   const save = useMutation({
     mutationFn: () => islandControlsApi.patch(project as string, { units: { [name]: unitPatch(uc!, draft) } },
       // The revision the edits were made on (GK B3): a draft from an older one gets the server's 409.
-      draft.base ?? state?.revision),
+      saveRevision(draft, state?.revision)),
     onMutate: () => { setRefusal(null); setStale(false) },
     onSuccess: data => { qc.setQueryData(ISLAND_KEY(project as string), data); setDraft(EMPTY) },
     onError: (e: unknown) => {

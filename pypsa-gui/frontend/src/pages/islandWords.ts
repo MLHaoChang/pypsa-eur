@@ -57,3 +57,13 @@ export const CONTROL_FIELD_WORDS: Record<string, ControlFieldWords> = {
 /** The UPS settings the Controls block edits (gridspine's UPS block, less `it_load`). */
 export const UPS_CONTROL_FIELDS = ['walk_in_s', 'f_window_hz'] as const
 export const UPS_TRANSFER_LABEL = 'Transfers to its battery on islanding'
+
+/** gridspine's limit wordings (schema/island.py `_SCALAR`), in words: no interval notation (UX 30; parity test
+ *  test_island_control_words_parity.py). */
+export const LIMIT_WORDS: Record<string, string> = {
+  'in (0, 1]': 'above 0 and at most 1',
+  'in (0, 100]': 'above 0 and at most 100',
+  positive: 'above 0',
+  'non-negative': '0 or more',
+  'at least 1': '1 or more',
+}

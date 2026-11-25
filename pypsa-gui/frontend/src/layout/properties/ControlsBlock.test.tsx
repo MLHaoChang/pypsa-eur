@@ -4,11 +4,11 @@ import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/re
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import ControlsBlock, {
-  _resetDrafts, droppedFields, parseValue, presetDefaults, refusalByField, shownFields, STALE_WORDS, unitPatch,
+  _resetDrafts, droppedFields, saveRevision, parseValue, presetDefaults, refusalByField, shownFields, STALE_WORDS, unitPatch,
 } from './ControlsBlock'
 import type { IslandControlsState, UnitControl } from '../../api/islandControls'
 import { useUIStore } from '../../store/uiStore'
-import { CONTROL_FIELD_WORDS } from '../../pages/islandWords'
+import { CONTROL_FIELD_WORDS, LIMIT_WORDS } from '../../pages/islandWords'
 
 const api = vi.hoisted(() => ({ island: vi.fn(), patchIsland: vi.fn() }))
 vi.mock('../../api/campusElectrical', async () => {
@@ -82,6 +82,21 @@ describe('the pure parts', () => {
     expect(parseValue('qu_points', '0.9')).toEqual({ error: 'Enter at least two lines, each with two numbers.' })
     expect(parseValue('droop_pct', 'four')).toEqual({ error: 'Enter a number.' })
   })
+  it('words every gridspine limit wording, with no interval notation', () => {
+    expect(LIMIT_WORDS).toEqual({
+      'in (0, 1]': 'above 0 and at most 1',
+      'in (0, 100]': 'above 0 and at most 100',
+      positive: 'above 0',
+      'non-negative': '0 or more',
+      'at least 1': '1 or more',
+    })
+  })
+
+  it('saves with the revision the draft was made on, not the one now loaded', () => {
+    expect(saveRevision({ values: {}, base: 'r1' }, 'r2')).toBe('r1')
+    expect(saveRevision({ values: {} }, 'r2')).toBe('r2')
+  })
+
   it('puts a 422 on the field it names, in words', () => {
     const f = ['pf_rated', 'H_v_s', 'i_max_pu', 'k_gfm_min']
     expect(refusalByField("island_config.units.bess (control gfm_vsm): missing ['H_v_s']", f))
