@@ -251,6 +251,8 @@ class OptionInput:
     bill: Bill | None
     asset_economics: Mapping | None = None
     caveats: tuple[str, ...] = ()
+    # assistant-assurance 17: the limit of the solve behind the fork's prices (`option_price_limit`).
+    price_limit: str | None = None
 
 
 @dataclass
@@ -1075,7 +1077,17 @@ def verdict(attributions: list[BatteryAttribution], robustness: Robustness | Non
 
 # ── explain (per option asset) ────────────────────────────────────────────
 
-def explain(option_id: str, n) -> list[dict]:
+def option_price_limit(detail: Mapping | None, n) -> str | None:
+    """The limit of the solve behind a fork's prices (assistant-assurance 17): the run record's
+    `price_limit` (`runner._read_option`, set only on a MIP), else the fork judged under its
+    solve's config. A study fork's config (`compile.solver_config`) never sets the process
+    commitment mode, so the defaults judge it as its solve did."""
+    from harness.solve_validity import mip_price_limit
+
+    return (detail or {}).get("price_limit") or mip_price_limit(n, None)
+
+
+def explain(option_id: str, n, price_limit: str | None) -> list[dict]:
     """
     The sizing explanation of an option's own assets (battery, PV) on its
     network, through ``services/study/explain.py`` — the implementation the
@@ -1084,7 +1096,7 @@ def explain(option_id: str, n) -> list[dict]:
     """
     from services.study import explain as study_explain
 
-    results, kpis = study_explain.network_readers(n)
+    results, kpis = study_explain.network_readers(n, price_limit=price_limit)
     out = []
     for cls, component, name in (("StorageUnit", "storage_units", packs.BATTERY_NAME),
                                  ("Generator", "generators", packs.PV_NAME)):
@@ -1092,7 +1104,7 @@ def explain(option_id: str, n) -> list[dict]:
             continue
         try:
             payload = study_explain.explain_asset(n, cls, name, results=results,
-                                                  asset_kpis=kpis)
+                                                  asset_kpis=kpis, price_limit=price_limit)
         except Exception as exc:  # noqa: BLE001 — named, never a silent gap
             payload = {"unavailable": f"explain_failed:{type(exc).__name__}"}
         out.append({"option_id": option_id, "component_class": cls, "name": name,
@@ -1311,7 +1323,8 @@ def context_from_disk(inp: StudyInputs) -> TornadoContext:
         return None if raw is None else Bill.model_validate(raw)
 
     options = {oid: OptionInput(oid, n, bill(oid), (details.get(oid) or {}).get("asset_economics"),
-                                tuple((details.get(oid) or {}).get("caveats") or ()))
+                                tuple((details.get(oid) or {}).get("caveats") or ()),
+                                option_price_limit(details.get(oid), n))
                for oid, n in nets.items() if Q.option(inp.question, oid).free_assets}
     return TornadoContext(
         study_id=inp.study.study_id, question=inp.question, intake=dict(inp.study.intake),
@@ -1428,7 +1441,7 @@ def assemble_findings(study, base_dir, db, base_uuid: str, *,
             [*v.disclosures, *cycling]))})
     explained: list[dict] = []
     for oid, opt in ctx.options.items():
-        explained.extend(explain(oid, opt.network))
+        explained.extend(explain(oid, opt.network, opt.price_limit))
 
     options = [OptionResult.model_validate(o) for o in faux.get("options") or []]
     notes += ["tornado_method_redispatch_fixed_sizes", "perfect_foresight_dispatch"]

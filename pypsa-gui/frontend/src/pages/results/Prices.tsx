@@ -6,7 +6,7 @@ import {
 } from 'recharts'
 import { Download } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { resultsApi } from '../../api/simulation'
+import { resultsApi, isPricesWithheld } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
@@ -14,7 +14,8 @@ import type { Bus } from '../../api/types'
 import { type TSPayload, shortStamp, downloadCSV, KPI, ChartActions,
   ChartFrame, CHART_HEIGHT, SERIES_TOKENS, SERIES_COLOURS, seriesDash, Seg, CHART_GRID, CHART_AXIS, timeAxis, thinRows, ThinNote, thinNoteText, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
   useSeasonalViewMode, SeasonalLineCardGrid, seasonalReportTable, WindowCapBanner,
-  WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, refLine, chartFigure, carrierColour } from './shared'
+  WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, refLine, chartFigure, carrierColour, UnavailableBlock } from './shared'
+import { withheldBlock } from './sectionWords'
 import DurationCurve, { durationRows, type DurationSeries } from './DurationCurve'
 import HourDayHeatmap from './HourDayHeatmap'
 import { heatScale, hourDayGrid, spansPeriods, PICK_ONE_PERIOD } from './hourDay'
@@ -62,7 +63,7 @@ export default function Prices() {
   const hourlyChartRef   = useRef<HTMLDivElement | null>(null)
   // Marginal prices are LP duals — they only exist on the LOPF/SCLOPF solve.
   // PyPSA's `n.pf()` doesn't compute duals, so always pin source='lopf'.
-  const { data: priceTS } = useQuery({
+  const { data: priceRaw } = useQuery({
     queryKey: nk(currentProject, 'results', 'prices', 'lopf', win.from, win.to),
     queryFn: () => resultsApi.getPrices('lopf', fetchRange),
     enabled: winValid,
@@ -76,7 +77,10 @@ export default function Prices() {
   const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses })
 
   const filter = useResultsFilter()
-  const tsP = priceTS as PricesPayload | null
+  // assistant-assurance 17: on an integer (MIP) solve the prices are not marginal
+  // prices; the API withholds them, with the fallback, and says why.
+  const withheldReason = isPricesWithheld(priceRaw) ? priceRaw.reason : null
+  const tsP = (withheldReason ? null : priceRaw) as PricesPayload | null
   const refPeriods = tsP?.periods
   const range = resolveRange(tsP?.index ?? [], filter, refPeriods)
 
@@ -120,11 +124,12 @@ export default function Prices() {
     weeklyAvailable, monthlyAvailable,
   } = useSeasonalViewMode('results:prices-viewmode', tsP?.index ?? [], range)
   const [driverThreshold, setDriverThreshold] = useState<number>(2000)
-  const { data: priceDrivers } = useQuery({
+  const { data: driversRaw } = useQuery({
     queryKey: nk(currentProject, 'results', 'price_drivers', driverThreshold),
     queryFn: () => resultsApi.getPriceDrivers(driverThreshold, 200),
     enabled: !!tsP,
   })
+  const priceDrivers = isPricesWithheld(driversRaw) ? null : driversRaw
 
   // Hourly chart rows — period-scoped.
   const priceChart = useMemo(() => {
@@ -206,6 +211,15 @@ export default function Prices() {
       busStats.map(b => [b.name, b.carrier, b.v_nom, b.meanPrice.toFixed(3), b.peakPrice.toFixed(3), b.troughPrice.toFixed(3)]),
     )
     toast.success(`Exported ${busStats.length} rows`)
+  }
+
+  if (withheldReason) {
+    // Words only: no chart skeleton, no 0 (UX condition, GK ruling b).
+    return (
+      <div className="p-5">
+        <UnavailableBlock text={withheldBlock('Marginal prices', withheldReason)} />
+      </div>
+    )
   }
 
   if (!tsP) {
@@ -474,7 +488,7 @@ export default function Prices() {
       )}
 
       {/* ── Price drivers table ───────────────────────────────── */}
-      {priceTS && (
+      {tsP && (
         <section>
           <div className="flex items-center gap-2 mb-2">
             <h3 className="text-h3 font-semibold text-text">Price drivers</h3>
