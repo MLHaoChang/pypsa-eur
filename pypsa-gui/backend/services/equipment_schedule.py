@@ -366,12 +366,15 @@ def _bus_kv(spec: dict) -> dict:
     """Each bus's voltage from the campus file, keyed by ``str(bus)``.
 
     A YAML integer bus key reads as the same bus as its string; the PCC's
-    voltage is in ``pcc.vn_kv``, not in ``buses``.
+    voltage is in ``pcc.vn_kv``, not in ``buses``. A bus listed twice with
+    two voltages (the campus ingest refuses that file) gets none: neither
+    is shown as the bus's voltage.
     """
     kv = {str(b): (bs or {}).get("vn_kv") for b, bs in (spec.get("buses") or {}).items()}
     pcc = spec.get("pcc") or {}
     if pcc.get("bus") is not None:
-        kv[str(pcc["bus"])] = pcc.get("vn_kv")
+        b, v = str(pcc["bus"]), pcc.get("vn_kv")
+        kv[b] = v if b not in kv or _num(kv[b]) == _num(v) else None
     return kv
 
 
