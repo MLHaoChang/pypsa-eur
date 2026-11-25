@@ -160,7 +160,7 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
 
       <details className="text-[11px]" data-testid="dc-form-compute" open={computeOpen || !!errors.compute || undefined}
         onToggle={e => setComputeOpen(e.currentTarget.open)}>
-        <summary className="cursor-pointer text-muted">{computeOpen || errors.compute ? '▾' : '▸'} Derive IT from compute (optional)</summary>
+        <summary className="cursor-pointer list-none text-muted [&::-webkit-details-marker]:hidden">{computeOpen || errors.compute ? '▾' : '▸'} Derive IT from compute (optional)</summary>
         <div className="mt-1 flex flex-col gap-1">
           <p className="text-muted">The {itWord(staged).noun} IT load always wins. Compute is shown beside it and changes nothing in the model.</p>
           <div className="flex flex-wrap gap-3">
