@@ -60,3 +60,14 @@ def test_defaults_are_valid():
 def test_an_unknown_kind_raises():
     with pytest.raises(ValueError, match="unknown utilisation kind"):
         u("bogus")
+
+
+def test_trough_equal_to_peak_is_a_flat_inference_load():
+    m = WorkloadMixSpec(trough_share=0.6, peak_share=0.6)
+    assert np.allclose(shape_utilisation("inference", HOD, training=TRAIN, mix=m), 0.6)
+
+
+@pytest.mark.parametrize("hour", [20.0, "20"])
+def test_peak_hour_must_be_a_whole_number_not_a_float_or_string(hour):
+    with pytest.raises(ValidationError):
+        WorkloadMixSpec(peak_hour=hour)
