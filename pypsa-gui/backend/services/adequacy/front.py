@@ -808,9 +808,11 @@ def _margin_preflight(network, lock, cfg, margin: float, lever_why: str) -> None
             network, dataclasses.replace(cfg, reserve_margin=margin)
         )
     for iss in issues:
-        if iss.code == "reserve_margin_unpriceable_assets" or iss.code.startswith(
-            "nonfinite_"
-        ):
+        if iss.code in (
+            "reserve_margin_unpriceable_assets",
+            "reserve_margin_import_group_extendable",
+            "reserve_margin_import_link_extendable",
+        ) or iss.code.startswith("nonfinite_"):
             raise FrontConfigError(
                 f"{iss.message} (The reserve-margin lever was used because {lever_why}.)"
             )

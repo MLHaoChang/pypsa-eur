@@ -180,6 +180,15 @@ def reserve_margin_payload(n, targets: dict, *, partial: bool = False) -> dict:
             return default
         return f if math.isfinite(f) else default
 
+    def _firm(row, cap, derate) -> float:
+        """The row's firm credit: its share of the import cap when it sits
+        behind a grid_import Link (``cap``, GK A on #1998 (6)), so the rows
+        sum to the period's ``firm_fixed_mw``; else derate x capacity."""
+        capped = row.get("cap")
+        if isinstance(capped, dict):
+            return _fin(capped.get("member_credit_mw"), 0.0)
+        return derate * cap if cap is not None else 0.0
+
     # ── first pass: built capacity and the gross credit, per row ──────────
     rows_by_period: dict[str, list[tuple[dict, float | None]]] = {}
     firm_built: dict[str, float] = {}
@@ -280,7 +289,13 @@ def reserve_margin_payload(n, targets: dict, *, partial: bool = False) -> dict:
                         derate_net_by_row[id(row)] = dn
                     else:
                         dn = derate            # constant: window-independent
-                    if cap is not None:
+                    if cap is not None and isinstance(row.get("cap"), dict):
+                        # Behind a grid import: its share of the cap, scaled
+                        # to the other window by its own derate's ratio.
+                        firm = _firm(row, cap, derate)
+                        firm_gross += firm
+                        firm_net += firm * dn / derate if derate > 0 else 0.0
+                    elif cap is not None:
                         firm_gross += derate * cap
                         firm_net += dn * cap
                 block.update({
@@ -300,7 +315,7 @@ def reserve_margin_payload(n, targets: dict, *, partial: bool = False) -> dict:
     for P in sorted(rows_by_period):
         for row, cap in rows_by_period[P]:
             derate = float(row.get("derate", 0.0) or 0.0)
-            firm = derate * cap if cap is not None else 0.0
+            firm = _firm(row, cap, derate)
             assets.append({
                 "name": str(row.get("name")),
                 "period": P,

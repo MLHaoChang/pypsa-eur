@@ -98,6 +98,10 @@ def test_the_single_year_template_is_unchanged():
         df.loc[rows, ["overnight_cost", "discount_rate"]] = np.nan
         typed += len(rows)
     assert typed == 7
+    # DC01-OUTAGE-1: the grid supply's two assumed outage cells, back at
+    # master's NaN, give master's digest (test_dc_grid_supply_outage pins them).
+    assert n.generators.loc["grid_supply", ["outage_rate_value", "mttr_hours"]].notna().all()
+    n.generators.loc["grid_supply", ["outage_rate_value", "mttr_hours"]] = np.nan
     assert _digest(n) == "3a20073d9244fb53"
 
 
