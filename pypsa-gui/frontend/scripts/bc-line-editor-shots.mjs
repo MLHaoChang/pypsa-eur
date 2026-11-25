@@ -9,7 +9,7 @@
  * (health only) unless something already answers.
  *
  * States (Expert at 1400 px; b and d also at 1000 px): a-empty, b-template-lines, c-refusal, d-not-established,
- * e-expanded, f-locked-before, f-locked-after. The Investment tab is `expertOnly` in Guided (Results.tsx TABS),
+ * e-expanded, f-locked-before, f-locked-after; BC 18 v-volume-class and w-volume-class-refusal (each also -dark). The Investment tab is `expertOnly` in Guided (Results.tsx TABS),
  * so Guided is skipped unless GUIDED=1 (then the tab is not found and the shot fails). `g-flow` (Expert) applies
  * the preset, types a price, saves, and asserts the PUT body and its If-Match header.
  *
@@ -56,6 +56,10 @@ const OPTIONS = (refusals = null) => ({
   outputs: [{ id: 'served_h2.h2_offtake', label: 'Hydrogen served to h2_offtake', units: ['MWh_H2', 'kg'], derived: false }],
   outputs_reason: null, horizon: [2030, 2034], base_year: 2030, refusals, refusals_reason: null,
 })
+const VC_LINES = (cls) => LINES().map(l => (l.name === 'Staff' && cls ? { ...l, volume_class: cls } : l))
+const VC_REFUSAL = [
+  { code: 'business_case_refused', refusal: 'volume_factor_typed_line', field: 'lines[1].volume_class', message: 'x' },
+]
 const REFUSALS = [
   { code: 'business_case_refused', refusal: 'life_missing', field: 'lines[3].life_years', message: 'x' },
   { code: 'business_case_refused', refusal: 'unit_not_allowed', field: 'lines[1].unit', message: 'x' },
@@ -134,6 +138,11 @@ const STATES = {
   // BC 17: the served reason under each row that is not established (wraps in the Line column).
   'p-row-reasons': { lines: LINES(), narrow: true, run: true, study: { ...RAN, report: { ...RUN_REPORT,
     pnl: { ...RUN_REPORT.pnl, row_reason: ROW_REASON } } }, rowScroll: 'bc-row-ebit' },
+  // BC 18: a typed line's volume class on its edit card, stated and refused, light and dark.
+  'v-volume-class': { lines: VC_LINES('fixed'), expand: 'Staff' },
+  'v-volume-class-dark': { lines: VC_LINES('fixed'), expand: 'Staff', theme: 'dark' },
+  'w-volume-class-refusal': { lines: VC_LINES(null), refusals: VC_REFUSAL, expand: 'Staff' },
+  'w-volume-class-refusal-dark': { lines: VC_LINES(null), refusals: VC_REFUSAL, expand: 'Staff', theme: 'dark' },
 }
 
 async function ensureStub() {
@@ -147,16 +156,17 @@ async function ensureStub() {
 async function newPage(browser, mode, width, st, probe) {
   const ctx = await browser.newContext({ viewport: { width, height: 1000 }, deviceScaleFactor: 1, reducedMotion: 'reduce' })
   await ctx.route(u => ['http:', 'https:'].includes(u.protocol) && u.hostname !== '127.0.0.1', r => r.abort())
-  await ctx.addInitScript(({ mode, project }) => {
+  await ctx.addInitScript(({ mode, project, theme }) => {
     localStorage.setItem('network-diagram:current-project', project)
     localStorage.setItem('network-diagram:assistant-dock', 'closed')
     localStorage.setItem('network-diagram:ui-mode', mode)
     localStorage.setItem('network-diagram:ui-mode-explicit', '1')
-    localStorage.setItem('network-diagram:theme', 'light')
+    localStorage.setItem('network-diagram:theme', theme)
     localStorage.setItem('network-diagram:theme-schema', '2')
-  }, { mode, project: PROJECT })
+  }, { mode, project: PROJECT, theme: st.theme || 'light' })
   const page = await ctx.newPage()
   page.setDefaultTimeout(15000)
+  if (process.env.DEBUG) page.on('console', async m => { if (m.type() !== 'error') return; const st = await Promise.all(m.args().map(a => a.evaluate(e => (e && e.stack) || '').catch(() => ''))); console.log('console:', m.text().slice(0, 200), st.join(' ').slice(0, 900)) })
   page.on('pageerror', e => probe.problems.push(`${mode}/${probe.key}: page error: ${(e.stack || e.message).split('\n').slice(0, 4).join(' / ')}`))
   const unmocked = new Set()
   await page.route(u => u.pathname.startsWith('/api/'), r => {
@@ -186,6 +196,8 @@ async function newPage(browser, mode, width, st, probe) {
     if (sch) return SCHEMAS[sch[1]] ? ok(SCHEMAS[sch[1]]) : r.fulfill({ status: 404, json: { detail: 'none' } })
     if (p === '/api/projects/' || p === '/api/projects') return ok([{ name: PROJECT, bus_count: 2, snapshot_count: 1, has_results: true, created_at: '2026-01-01T00:00:00Z', is_root: true, parent: null }])
     if (p.endsWith('/context')) return r.fulfill({ status: 404, json: { detail: 'none' } })
+    // No reliability goal: it reads not set (a `{}` crashes its hook).
+    if (p.endsWith('/flow/reliability_goal')) return r.fulfill({ status: 404, json: { detail: 'none' } })
     if (m === 'GET' && p.startsWith('/api/results/')) return r.fulfill({ status: 204, body: '' })
     if (m === 'GET' && /\/api\/network\/[a-z_]+$/.test(p)) return ok([])
     unmocked.add(`${m} ${p}`)
