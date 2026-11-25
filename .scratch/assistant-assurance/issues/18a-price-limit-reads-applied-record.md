@@ -3,7 +3,7 @@
 
 # The MIP price gate reads the applied solver record
 
-Status: in progress
+Status: done (#2016)
 Type: task
 Found by: the AA-18 builder's hand-off on #2014 (GK B: out of scope there).
 Parent: 18-record-applied-solver-options.md
@@ -36,3 +36,6 @@ price gate's readers still judge partly from persisted state:
   the record is decided with GK B.
 
 ## Comments
+
+GK B (71), plan GO: non-scalar solver options stay out of the record (option A);
+`dropped` keeps naming them. Done in #2016.
