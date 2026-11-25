@@ -370,7 +370,9 @@ def _bus_kv(spec: dict) -> dict:
     two voltages (the campus ingest refuses that file) gets none: neither
     is shown as the bus's voltage.
     """
-    kv = {str(b): (bs or {}).get("vn_kv") for b, bs in (spec.get("buses") or {}).items()}
+    kv = {
+        str(b): (bs or {}).get("vn_kv") for b, bs in (spec.get("buses") or {}).items()
+    }
     pcc = spec.get("pcc") or {}
     if pcc.get("bus") is not None:
         b, v = str(pcc["bus"]), pcc.get("vn_kv")
