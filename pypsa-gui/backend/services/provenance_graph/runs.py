@@ -436,7 +436,10 @@ def kept_run_stale(ctx=None) -> bool:
         if not edit_kept(n):
             return False
         read = read_runs(ctx)
-        return read.dispatch != "none" and results_verdicts(read)["optimisation"].state == "stale"
+        return (
+            read.dispatch != "none"
+            and results_verdicts(read)["optimisation"].state == "stale"
+        )
     except Exception:  # noqa: BLE001
         return False
 

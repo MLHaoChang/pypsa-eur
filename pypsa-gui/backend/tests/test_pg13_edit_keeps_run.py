@@ -161,7 +161,7 @@ READERS = [
 )
 def test_the_readers_withhold_a_stale_run_and_serve_again_after_a_re_run(
     client,
-    site,
+    site,  # noqa: F811
     route,
     name,
     field,
