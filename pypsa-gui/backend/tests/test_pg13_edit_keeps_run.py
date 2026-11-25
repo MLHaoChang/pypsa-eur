@@ -313,10 +313,9 @@ def test_the_report_is_left_alone_unless_the_run_is_stale(monkeypatch, report, r
 MARKER = "assistant_edit_kept_run"
 
 
-def _network():
-    from services.pypsa_service import PyPSAService
-
-    return PyPSAService.get_network()
+def _ctx(client, session_ctx):
+    """The test client's own project context: `get_network()` unbound returns the empty process foreground."""
+    return session_ctx(client)
 
 
 def test_the_asset_figures_are_withheld_after_a_kept_edit(client, site):  # noqa: F811
@@ -345,28 +344,30 @@ def test_the_asset_figures_are_withheld_after_a_kept_edit(client, site):  # noqa
     assert not body["scalars"] and not body["series"]
 
 
-def test_the_verdict_fails_closed_once_a_run_was_kept(client, site, monkeypatch):  # noqa: F811
+def test_the_verdict_fails_closed_once_a_run_was_kept(client, site, session_ctx, monkeypatch):  # noqa: F811
     """A failed verdict read must withhold, not serve (G2); with no marker nothing was kept (ADR-0001)."""
     from services.provenance_graph import runs
 
     _solved_site(client, site, "pg13_closed")
-    n = _network()
+    ctx = _ctx(client, session_ctx)
+    n = ctx.network
 
     def boom(ctx=None):
         raise RuntimeError("verdict unreadable")
 
     monkeypatch.setattr(runs, "read_runs", boom)
-    assert runs.kept_run_stale() is False
+    assert runs.kept_run_stale(ctx) is False
     n.meta[MARKER] = True
-    assert runs.kept_run_stale() is True
+    assert runs.kept_run_stale(ctx) is True
 
 
-def test_the_marker_is_dropped_by_a_solve_a_clear_and_an_undone_edit(client, site):  # noqa: F811
+def test_the_marker_is_dropped_by_a_solve_a_clear_and_an_undone_edit(client, site, session_ctx):  # noqa: F811
     """A leftover marker would withhold billing on a later commercial edit (G4)."""
     from services.dispatch_status import clear_dispatch
     from services.provenance_graph import runs
 
     project = _solved_site(client, site, "pg13_marker")
+    ctx = _ctx(client, session_ctx)
 
     def edit(mc):
         row = next(
@@ -381,24 +382,24 @@ def test_the_marker_is_dropped_by_a_solve_a_clear_and_an_undone_edit(client, sit
 
     # An edit and its undo: the verdict reads fresh again, so the marker goes the next time anything asks.
     edit(25.0)
-    assert _network().meta[MARKER] is True and runs.kept_run_stale() is True
+    assert ctx.network.meta[MARKER] is True and runs.kept_run_stale(ctx) is True
     edit(20.0)
     assert _kinds(_flow(client, project))["optimisation"] == "fresh"
-    assert runs.kept_run_stale() is False and MARKER not in _network().meta
+    assert runs.kept_run_stale(ctx) is False and MARKER not in ctx.network.meta
     assert client.get("/api/results/generators").status_code == 200
 
     # A solve drops it.
     edit(25.0)
-    assert MARKER in _network().meta
+    assert MARKER in ctx.network.meta
     assert client.post("/api/simulation/run").status_code == 200
     assert _wait_idle(client)["status"] == "completed"
-    assert MARKER not in _network().meta
+    assert MARKER not in ctx.network.meta
 
     # So does clearing the dispatch.
     edit(30.0)
-    assert MARKER in _network().meta
-    clear_dispatch(_network())
-    assert MARKER not in _network().meta
+    assert MARKER in ctx.network.meta
+    clear_dispatch(ctx.network)
+    assert MARKER not in ctx.network.meta
 
 
 @pytest.mark.parametrize("kept", [True, False], ids=["kept-and-stale", "not-kept"])
