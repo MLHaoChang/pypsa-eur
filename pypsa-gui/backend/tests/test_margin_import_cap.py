@@ -465,3 +465,74 @@ def test_a_network_without_a_grid_import_link_is_unchanged():
     assert [(m["name"], d) for m, d in f["terms"]["ALL"]] == _PLAIN_BEFORE["terms"]
     assert f["unpriceable"] == [] and f["import_group_extendable"] == []
     assert math.isfinite(per["firm_fixed_mw"])
+
+
+# ── edges the mutation run found unpinned (E7) ────────────────────────────
+
+
+def test_a_network_without_an_eh_role_column_is_unchanged():
+    n = _plain()
+    n.links = n.links.drop(columns="eh_role")
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f)["firm_fixed_mw"] == _PLAIN_BEFORE["periods"]["ALL"]["firm_fixed_mw"]
+
+
+@pytest.mark.parametrize("end", ["bus0", "bus1"])
+def test_a_grid_import_tag_on_a_non_electrical_link_is_ignored(end):
+    n = _plain()
+    n.add("Carrier", "heat")
+    n.add("Bus", "h", carrier="heat")
+    ends = {"bus0": "b", "bus1": "c"}
+    ends[end] = "h"
+    n.add("Link", "hx", p_nom=5.0, carrier="heat", **ends)
+    n.links.at["hx", "eh_role"] = "grid_import"
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f)["firm_fixed_mw"] == _PLAIN_BEFORE["periods"]["ALL"]["firm_fixed_mw"]
+
+
+def test_a_grid_import_inside_the_upstream_side_caps_nothing():
+    # grid -Line- mid -poc-> site, plus a tagged Link grid -> mid that the
+    # Line bypasses: only `poc` separates anything.
+    n = _net()
+    n.add("Bus", "mid", carrier="AC")
+    n.links.at["poc", "bus0"] = "mid"
+    n.add("Line", "gm", bus0="grid", bus1="mid", x=0.1, r=0.01, s_nom=1000.0)
+    n.add("Link", "shadow", bus0="grid", bus1="mid", p_nom=30.0, carrier="AC")
+    n.links.at["shadow", "eh_role"] = "grid_import"
+    f = reserve_margin_facts(n, _cfg())
+    assert _asset(f, "up")["cap"]["links"] == ["poc"]
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(40 * 0.99 * 0.998)
+
+
+def test_a_grid_import_between_two_site_components_caps_nothing():
+    n = _net()
+    n.add("Bus", "site2", carrier="AC")
+    n.buses.at["site2", "eh_critical"] = True
+    n.add("Link", "inner", bus0="site", bus1="site2", p_nom=10.0, carrier="AC")
+    n.links.at["inner", "eh_role"] = "grid_import"
+    f = reserve_margin_facts(n, _cfg())
+    assert _asset(f, "up")["cap"]["links"] == ["poc"]
+
+
+def test_a_negative_link_rating_counts_as_zero():
+    f = reserve_margin_facts(_net(links=(("poc", -5.0, 0.002),)), _cfg())
+    cap = _asset(f, "up")["cap"]
+    assert cap["link_mw"] == 0.0 and cap["credited_mw"] == 0.0
+
+
+def test_a_period_with_nothing_built_upstream_credits_nothing():
+    n, _ = _two_periods(_net())
+    n.generators.at["up", "build_year"] = 2035
+    n.generators.at["up", "lifetime"] = 100
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f, 2030)["firm_fixed_mw"] == 0.0
+    assert _per(f, 2035)["firm_fixed_mw"] == pytest.approx(40 * 0.99 * 0.998)
+
+
+def test_link_rate_bounds_are_zero_inclusive_and_one_exclusive():
+    f0 = reserve_margin_facts(_net(links=(("poc", 40.0, 0.0),)), _cfg())
+    assert "poc" not in f0["unpriceable"]
+    assert _per(f0)["firm_fixed_mw"] == pytest.approx(40 * 0.99)
+    f1 = reserve_margin_facts(_net(links=(("poc", 40.0, 1.0),)), _cfg())
+    assert "poc" in f1["unpriceable"]
+    assert _per(f1)["firm_fixed_mw"] == 0.0
