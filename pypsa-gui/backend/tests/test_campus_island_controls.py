@@ -295,3 +295,16 @@ def test_the_switch_runs_after_the_base_check_under_the_lock(island, monkeypatch
     monkeypatch.setattr(ce, "_switch_control", lambda *a: (order.append("switch"), real_switch(*a))[1])
     ce.patch_island(island, {"units": {"bess": {"control": "gfl_pq"}}})
     assert order[:3] == ["lock", "base", "switch"] and order[-1] == "unlock"
+
+
+def test_the_fill_never_overwrites_a_kept_value_that_differs_from_the_preset(island):
+    """(c) fills only what the unit lacks: a kept droop of 5 % (the preset says 4) stays, with its source."""
+    ce.patch_island(island, {"units": {"bess": {"droop_pct": 5.0}}})
+    ce.patch_island(island, {"units": {"bess": {"control": "gfm_vsm"}}})
+    assert _stored(island)["units"]["bess"]["droop_pct"] == {"value": 5.0, "source": ce.EDITED_SOURCE}
+
+
+def test_a_patch_value_equal_to_the_preset_s_is_still_the_user_s(island):
+    """K17: a value the patch sends takes EDITED_SOURCE even when it equals the preset default."""
+    ce.patch_island(island, {"units": {"bess": {"control": "gfm_vsm", "H_v_s": 4.0}}})
+    assert _stored(island)["units"]["bess"]["H_v_s"] == {"value": 4.0, "source": ce.EDITED_SOURCE}
