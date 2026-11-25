@@ -389,9 +389,13 @@ def test_a_failure_after_the_first_write_is_undone(
         raise RuntimeError("validator refused late")
 
     monkeypatch.setattr(network_bulk, "apply_bulk_update", second_fails)
+    from services import undo_service
+
+    depth = undo_service.depth()
     with pytest.raises(RuntimeError):
         client.post(f"{URL}/apply", json={"index": 0, "expected_revision": rev})
     assert calls == ["Generator"]
+    assert undo_service.depth() == depth
     pd.testing.assert_frame_equal(gens(client), before, check_dtype=False)
     assert rec["status"] == "done"
 
@@ -480,7 +484,43 @@ def test_the_apply_checks_pass_a_good_point(unit_apply):
             ),
             0,
             422,
-            "no solved size",
+            "no finite, non-negative solved size",
+        ),
+        (
+            _rec(
+                [
+                    {
+                        "status": "ok",
+                        "point": {
+                            "capacities": {
+                                "generators:gas": float("nan"),
+                                "generators:clean": 1.0,
+                            }
+                        },
+                    }
+                ]
+            ),
+            0,
+            422,
+            "no finite, non-negative solved size",
+        ),
+        (
+            _rec(
+                [
+                    {
+                        "status": "ok",
+                        "point": {
+                            "capacities": {
+                                "generators:gas": -1.0,
+                                "generators:clean": 1.0,
+                            }
+                        },
+                    }
+                ]
+            ),
+            0,
+            422,
+            "no finite, non-negative solved size",
         ),
     ],
     ids=[
@@ -493,6 +533,8 @@ def test_the_apply_checks_pass_a_good_point(unit_apply):
         "ok-without-point",
         "no-capacities",
         "none-size",
+        "nan-size",
+        "negative-size",
     ],
 )
 def test_each_apply_refusal(unit_apply, record, index, status, word):
@@ -566,3 +608,26 @@ def test_a_study_running_at_apply_time_refuses_it(
         t.join(timeout=5)
         st.pop("mc", None)
     pd.testing.assert_frame_equal(gens(client), before)
+
+
+def test_a_record_with_no_captured_revision_is_refused(
+    gens, client, install_network, session_state, session_ctx
+):
+    _setup(client, install_network)
+    _run(client)
+    session_state(client)["front"]["network_revision"] = None
+    before, rev = gens(client), _revision(session_ctx, client)
+    r = client.post(f"{URL}/apply", json={"index": 0, "expected_revision": rev})
+    assert r.status_code == 409, r.text
+    pd.testing.assert_frame_equal(gens(client), before)
+    assert _revision(session_ctx, client) == rev
+
+
+def test_a_non_finite_solved_size_reads_none_in_the_point():
+    from services.adequacy import front
+
+    n = _net()
+    n.generators["p_nom_opt"] = [float("nan"), 7.0]
+    caps = front._capacities(n)
+    assert caps == {"generators:gas": None, "generators:clean": 7.0}
+    json.dumps(caps, allow_nan=False)

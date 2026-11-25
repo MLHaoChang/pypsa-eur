@@ -266,7 +266,7 @@ def apply_co2_cap(n, cap_t_per_yr: float | None) -> list[str]:
     return names
 
 
-def _capacities(n) -> dict[str, float]:
+def _capacities(n) -> dict[str, float | None]:
     """Built capacity of every extendable asset, MW (MWh for Stores)."""
     from services.adequacy.sweep import _CAPACITY_ATTRS
 
@@ -280,7 +280,9 @@ def _capacities(n) -> dict[str, float]:
         ext = df.index[df[f"{nom}_extendable"].astype(bool)]
         col = f"{nom}_opt" if f"{nom}_opt" in df.columns else nom
         for k in ext:
-            out[f"{comp}:{k}"] = float(df.at[k, col] or 0.0)
+            # None for a missing or non-finite size, never 0 or NaN (apply
+            # refuses it, and the record stays strict JSON).
+            out[f"{comp}:{k}"] = _finite(df.at[k, col])
     return out
 
 

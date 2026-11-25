@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextvars as _contextvars
 import logging
+import math
 import threading as _threading
 import time
 from typing import Literal
@@ -190,8 +191,15 @@ def _apply_rows(record: dict | None, index: int, expected_revision: int) -> dict
     rows: dict[str, list] = {}
     for key, size in caps.items():
         table, nom = want[key]
-        if size is None:
-            raise HTTPException(422, f"{key} has no solved size")
+        if (
+            isinstance(size, bool)
+            or not isinstance(size, (int, float))
+            or not math.isfinite(size)
+            or size < 0
+        ):
+            raise HTTPException(
+                422, f"{key} has no finite, non-negative solved size ({size})"
+            )
         rows.setdefault(_class_of(table), []).append(
             {
                 "name": key.split(":", 1)[1],
@@ -266,8 +274,13 @@ def apply_front_point(
             dirty_state.mark_dirty()
             cleared = clear_dispatch(n)
         except BaseException:
+            from services import undo_service
+
             for df, name, col, value in saved:
                 df.at[name, col] = value
+            # The step this apply pushed would undo to the state it is back
+            # at already; drop it so the user's next undo is their own edit.
+            undo_service.pop_entry()
             raise
         finally:
             dirty_state.bump_inputs()
