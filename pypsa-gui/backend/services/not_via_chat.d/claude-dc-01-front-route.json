@@ -1,0 +1,22 @@
+{
+ "entries": [
+  {
+   "id": "multi_objective_front",
+   "title": "Cost, reliability and CO2 front",
+   "disposition": "unbuilt",
+   "reason": "The cost, reliability and CO2 front is not in chat yet; a later slice adds the chat tool. Until then the Expert adequacy panel runs it and applies a point.",
+   "page": "Adequacy (Expert)",
+   "panel": null,
+   "keywords": [
+    "front",
+    "pareto"
+   ],
+   "routes": [
+    ["GET", "/api/results/front"],
+    ["POST", "/api/results/front"],
+    ["POST", "/api/results/front/abort"],
+    ["POST", "/api/results/front/apply"]
+   ]
+  }
+ ]
+}

@@ -1774,6 +1774,56 @@ def post_eh_study(body: EhStudyRequest | None = None):
     )
 
 
+# ── the multi-objective front (DC 01): cost vs reliability vs CO2 ───────────
+# Its own block (other branches edit this file). The engine is
+# services/adequacy/front.py; the runner and the apply are front_runner.py.
+from services.adequacy.front_runner import (  # noqa: E402
+    FrontApplyRequest as _FrontApplyRequest,
+    FrontRequest as _FrontRequest,
+)
+
+
+@results_router.get("/front")
+def get_front():
+    """Status and points of the last front study; 204 when none has run."""
+    st = _state.get("front")
+    if not st:
+        return Response(status_code=204)
+    out = run_evidence.wire_record(st)
+    out["edited_since_study"] = _study_state.edited_since(st)
+    return out
+
+
+@results_router.post("/front/abort")
+def post_front_abort():
+    """Stop a running front at its next point boundary; idempotent, 404 only
+    when none has ever run (the shipped loop routes' contract)."""
+    return _abort_study("front", "no front study has been run in this session")
+
+
+@results_router.post("/front")
+def post_front(body: _FrontRequest):
+    """Start the cost / reliability / CO2 front in a worker thread. 422 on a
+    bad request (before anything is published), 409 while another study, a
+    sweep or a foreground solve runs. The budget is always MAX_FRONT_SOLVES."""
+    from services.adequacy.front_runner import start_front
+
+    _refuse_if_mesh_busy("front")
+    return start_front(body, solver_state=_state, publish_study=_publish_study)
+
+
+@results_router.post("/front/apply")
+def post_front_apply(body: _FrontApplyRequest):
+    """Fix the network at one solved point (nominal = size, extendable off):
+    one undo step, one revision bump. 409 when the network changed since the
+    study or ``expected_revision`` is not current; 422 when the point cannot
+    be applied. Nothing is written on a refusal."""
+    from services.adequacy.front_runner import apply_front_point
+
+    _refuse_if_mesh_busy("front")
+    return apply_front_point(_state.get("front"), body.index, body.expected_revision)
+
+
 # ── Edge Investment Case P4: the single-owner finance run (WP4.6b) ──────────
 #
 # The runner (`services/finance/investment_case_runner.py`) never imports the
