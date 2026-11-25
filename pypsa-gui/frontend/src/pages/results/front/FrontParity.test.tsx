@@ -85,12 +85,30 @@ describe('front parity', () => {
       expect(view).toContain('loss-of-load expectation (LOLE)')
       const heads = within(screen.getByTestId(`${id}-table`)).getAllByRole('columnheader').map(h => h.textContent)
       expect(heads).toEqual(expect.arrayContaining([
-        'Reserve margin (%)', 'CO₂ limit (t/yr)', 'Cost (€/yr)', 'EUE (MWh/yr) · CI',
+        'Reserve margin (%)', 'CO₂ limit (t/yr)', 'Cost (million €/yr)', 'EUE (MWh/yr) · CI',
         'LOLE (h/yr) · CI', 'CO₂ (t/yr)',
       ]))
       expect(screen.getByTestId(`${id}-built-0`).textContent)
-        .toBe('Capex 700\u00a0k · opex 300\u00a0k €/yr · built: Generator Gas turbine 10 MW · Storage BESS 4 MW · Store H2 tank 20 MWh')
+        .toBe('Capex 0.70 · opex 0.30 million €/yr · built: Generator Gas turbine 10 MW · Storage BESS 4 MW · Store H2 tank 20 MWh')
       expect(view.toLowerCase()).not.toContain('stale')
+    })
+
+  it.each([['expert', renderExpert, 'front-view'], ['guided', renderGuided, 'hub-front-view']] as const)(
+    '%s: the cost header carries the scale, no cost cell carries a suffix', async (_m, renderIt, id) => {
+      await renderIt()
+      const table = screen.getByTestId(`${id}-table`)
+      const heads = within(table).getAllByRole('columnheader').map(h => h.textContent ?? '')
+      const col = heads.indexOf('Cost (million €/yr)')
+      expect(col).toBeGreaterThan(-1)
+      const cells = within(table).getAllByRole('row').slice(1)
+        .map(r => r.querySelectorAll('td'))
+        .filter(tds => tds.length === heads.length)
+        .map(tds => tds[col].textContent ?? '')
+      expect(cells).toEqual(['1.00', '1.05', '1.20', '1.25'])
+      for (const c of cells) expect(c).toMatch(/^[\d.,]+$/)
+      for (const r of [0, 1, 2, 3]) {
+        expect(screen.getByTestId(`${id}-built-${r}`).textContent).toMatch(/^Capex [\d.]+ · opex [\d.]+ million €\/yr · /)
+      }
     })
 
   it.each([['expert', renderExpert, 'front-view'], ['guided', renderGuided, 'hub-front-view']] as const)(

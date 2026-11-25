@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   applyRefusal, co2Scale, CO2_HIGH, CO2_LOW, frontNotices, frontRows, frontUnits, frontWords,
-  niceTicks, OUT_OF_DATE_TEXT, pickSource, startRefusal,
+  costScale, niceTicks, OUT_OF_DATE_TEXT, pickSource, startRefusal,
 } from './frontModel'
 import { degenerateRecord, DEGENERATE_TEXT, record, result, point } from './testFixtures'
 
@@ -81,5 +81,16 @@ describe('frontModel', () => {
     expect(niceTicks(0.815, 5.31)).toEqual([0, 2, 4, 6])
     expect(niceTicks(1_000_000, 1_200_000)).toEqual([1_000_000, 1_050_000, 1_100_000, 1_150_000, 1_200_000])
     expect(niceTicks(2, 2).length).toBeGreaterThan(1)
+  })
+
+  it('one cost scale per view, from the data: the unit in the header, the numbers bare', () => {
+    const m = costScale(frontRows(record()))
+    expect(m.unit).toBe('million €/yr')
+    expect([m.cell(1_120_000), m.cell(700_000), m.tick(1_050_000)]).toEqual(['1.12', '0.70', '1.05'])
+    const small = frontRows(record({}, result([point(0, { cost: 84_000 })])))
+    const k = costScale(small)
+    expect(k.unit).toBe('thousand €/yr')
+    expect([k.cell(84_000), k.cell(25_200)]).toEqual(['84.0', '25.2'])
+    expect(costScale(frontRows(record({}, result([point(0, { cost: 900 })])))).unit).toBe('€/yr')
   })
 })

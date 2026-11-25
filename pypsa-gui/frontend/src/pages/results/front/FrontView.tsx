@@ -16,7 +16,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import { CHART_AXIS, CHART_GRID } from '../shared'
 import {
-  applyRefusal, ciText, co2Scale, CO2_HIGH, CO2_LOW, fmtCost, fmtNum, frontNotices, frontRows, frontUnits,
+  applyRefusal, ciText, co2Scale, CO2_HIGH, CO2_LOW, costScale, fmtNum, frontNotices, frontRows, frontUnits,
   frontWords, niceTicks, OUT_OF_DATE_TEXT, pickSource, SOURCE_WORDS, type FrontRow, type Refusal,
 } from './frontModel'
 
@@ -111,6 +111,7 @@ function PointShape(props: { cx?: number; cy?: number; payload?: ChartDatum }) {
 
 function FrontChart({ rows, relHeader, relUnit, testId }: { rows: FrontRow[]; relHeader: string; relUnit: string; testId: string }) {
   const scale = co2Scale(rows)
+  const cost = costScale(rows)
   const data: ChartDatum[] = rows
     .filter(r => r.ok && r.rel != null && r.cost != null)
     .map(r => ({
@@ -127,7 +128,7 @@ function FrontChart({ rows, relHeader, relUnit, testId }: { rows: FrontRow[]; re
   const yt = niceTicks(Math.min(...ys), Math.max(...ys))
   return (
     <figure data-testid={`${testId}-chart`} className="m-0">
-      <figcaption className="text-[10px] font-semibold text-text">Cost (€/yr) against reliability</figcaption>
+      <figcaption className="text-[10px] font-semibold text-text">Cost ({cost.unit}) against reliability</figcaption>
       <div className="h-56">
         <ResponsiveContainer width="100%" height="100%">
           <ScatterChart margin={{ top: 10, right: 16, bottom: 26, left: 8 }}>
@@ -136,15 +137,15 @@ function FrontChart({ rows, relHeader, relUnit, testId }: { rows: FrontRow[]; re
               tickFormatter={(v: number) => fmtNum(v)}
               label={{ value: `${relHeader}, lower is more reliable`, position: 'insideBottom', offset: -16, style: { fontSize: 10, fill: 'var(--color-muted)' } }} />
             <YAxis {...CHART_AXIS} dataKey="y" type="number" name="Cost" domain={[yt[0], yt[yt.length - 1]]} ticks={yt} width={80}
-              tickFormatter={(v: number) => fmtCost(v)}
-              label={{ value: 'Cost (€/yr)', angle: -90, position: 'insideLeft', offset: 0, style: { fontSize: 10, fill: 'var(--color-muted)' } }} />
+              tickFormatter={cost.tick}
+              label={{ value: `Cost (${cost.unit})`, angle: -90, position: 'insideLeft', offset: 0, style: { fontSize: 10, fill: 'var(--color-muted)' } }} />
             <RTooltip cursor={false} contentStyle={{ fontSize: 10 }}
               content={({ payload }) => {
                 const d = payload?.[0]?.payload as ChartDatum | undefined
                 if (!d) return null
                 return (
                   <div className="rounded border border-border bg-bg px-2 py-1 text-[10px] text-text">
-                    {d.row.label} · {fmtCost(d.row.cost)} €/yr · {fmtNum(d.row.rel)} {relUnit} · {fmtNum(d.row.co2)} t/yr CO₂
+                    {d.row.label} · {cost.cell(d.row.cost)} {cost.unit} · {fmtNum(d.row.rel)} {relUnit} · {fmtNum(d.row.co2)} t/yr CO₂
                   </div>
                 )
               }} />
@@ -168,7 +169,11 @@ function FrontTable({ record, rows, onUse, useDisabled, pendingIndex, testId }: 
 }) {
   const u = frontUnits(record)
   const scale = co2Scale(rows)
+  const cost = costScale(rows)
   const th = 'text-left font-medium py-1 pr-2 align-bottom'
+  // Numeric columns: a left gutter (cells too), so neighbouring figures
+  // never touch at the Guided card's width.
+  const thNum = `${th} pl-3 text-right`
   // Columns after Point, level and CO2 limit, for a failed point's one cell.
   const rest = 4 + (u.basis === 'mc' ? 1 : 0) + (record.applicable ? 1 : 0)
   return (
@@ -179,10 +184,10 @@ function FrontTable({ record, rows, onUse, useDisabled, pendingIndex, testId }: 
             <th className={th}>Point</th>
             <th className={th}>{u.levelHeader}</th>
             <th className={th}>CO₂ limit (t/yr)</th>
-            <th className={`${th} text-right`}>Cost (€/yr)</th>
-            <th className={`${th} text-right`}>{u.relHeader} · CI</th>
-            {u.basis === 'mc' && <th className={`${th} text-right`}>LOLE ({u.loleUnit}) · CI</th>}
-            <th className={`${th} text-right`}>CO₂ (t/yr)</th>
+            <th className={thNum}>Cost ({cost.unit})</th>
+            <th className={thNum}>{u.relHeader} · CI</th>
+            {u.basis === 'mc' && <th className={thNum}>LOLE ({u.loleUnit}) · CI</th>}
+            <th className={thNum}>CO₂ (t/yr)</th>
             <th className={th}>Front</th>
             {record.applicable && <th className={th}><span className="sr-only">Use</span></th>}
           </tr>
@@ -207,18 +212,18 @@ function FrontTable({ record, rows, onUse, useDisabled, pendingIndex, testId }: 
               <td className="pr-2 font-mono">{r.co2Cap}</td>
               {r.ok ? (
                 <>
-                  <td className="pr-2 text-right font-mono whitespace-nowrap">
-                    {fmtCost(r.cost)}
+                  <td className="pl-3 pr-2 text-right font-mono whitespace-nowrap">
+                    {cost.cell(r.cost)}
                   </td>
-                  <td className="pr-2 text-right font-mono whitespace-nowrap">
+                  <td className="pl-3 pr-2 text-right font-mono whitespace-nowrap">
                     {fmtNum(r.rel)}{r.relCi && <span className="text-muted"> · {ciText(r.relCi)}</span>}
                   </td>
                   {u.basis === 'mc' && (
-                    <td className="pr-2 text-right font-mono whitespace-nowrap">
+                    <td className="pl-3 pr-2 text-right font-mono whitespace-nowrap">
                       {fmtNum(r.lole)}{r.loleCi && <span className="text-muted"> · {ciText(r.loleCi)}</span>}
                     </td>
                   )}
-                  <td className="pr-2 text-right font-mono">{fmtNum(r.co2)}</td>
+                  <td className="pl-3 pr-2 text-right font-mono whitespace-nowrap">{fmtNum(r.co2)}</td>
                   <td className="pr-2 whitespace-nowrap">{frontWords(r)}</td>
                   {record.applicable && (
                     <td className="whitespace-nowrap">
@@ -240,7 +245,7 @@ function FrontTable({ record, rows, onUse, useDisabled, pendingIndex, testId }: 
               <tr data-testid={`${testId}-built-${r.index}`} className={r.chosen ? 'bg-accent/5' : undefined}>
                 <td />
                 <td colSpan={2 + rest} className="pb-1 pr-2 text-muted">
-                  Capex {fmtCost(r.capex)} · opex {fmtCost(r.opex)} €/yr · built: {r.built.map((b, k) => (
+                  Capex {cost.cell(r.capex)} · opex {cost.cell(r.opex)} {cost.unit} · built: {r.built.map((b, k) => (
                     <span key={b.key} className="whitespace-nowrap">
                       {k > 0 && ' · '}{b.kind} <AssetName id={b.name} /> {b.size}
                     </span>

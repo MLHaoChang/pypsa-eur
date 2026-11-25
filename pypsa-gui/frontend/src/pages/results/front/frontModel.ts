@@ -2,7 +2,6 @@
 // model for the Expert panel and the Guided section-10 tile, so the two read
 // the same rows (Guided/Expert parity). Pure: no React, no fetching.
 import type { FrontPoint, FrontRecord, FrontSource } from '../../../api/front'
-import { money } from '../../../utils/money'
 import { componentLabel } from '../../../utils/componentLabels'
 
 /** Owner ruling (ag), verbatim: the figures after "Use this design" are the old network's. */
@@ -37,16 +36,34 @@ const sig = (v: number, digits = 3): string =>
 export const fmtNum = (v: number | null | undefined): string =>
   v == null || !Number.isFinite(v) ? 'not read' : sig(v)
 
-const NBSP = '\u00a0'
+export interface CostScale {
+  /** "million", "thousand" or "" (plain euros). */
+  word: string
+  /** The one unit every cost in the view carries: "million €/yr". */
+  unit: string
+  /** A cost in the scale, bare ("1.12", "0.70"): the header carries the unit. */
+  cell: (v: number | null | undefined) => string
+  /** An axis tick in the scale, bare ("1", "1.05"). */
+  tick: (v: number) => string
+}
 
-/** Money in money()'s notation ("1.2 m", "350 k"), without the symbol (the
- *  header carries "€/yr"), to three figures: the spread on a front is a few
- *  per cent of the cost, which two figures would round away. */
-export function fmtCost(v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(v)) return 'not read'
-  const a = Math.abs(v)
-  const body = a >= 1e6 ? `${sig(a / 1e6)}${NBSP}m` : a >= 1e3 ? `${sig(a / 1e3)}${NBSP}k` : money(a)
-  return `${v < 0 ? '-' : ''}${body}`
+/** One cost scale per view, picked from the largest cost, so the chart's axis,
+ *  the table's column and the capex/opex line always agree (UX 28: one unit
+ *  per header, the numbers bare). */
+export function costScale(rows: FrontRow[]): CostScale {
+  const vals = rows.flatMap(r => [r.cost, r.capex, r.opex]).filter((v): v is number => v != null && Number.isFinite(v))
+  const top = vals.length ? Math.max(...vals.map(Math.abs)) : 0
+  const [div, word] = top >= 1e6 ? [1e6, 'million'] : top >= 1e3 ? [1e3, 'thousand'] : [1, '']
+  const unit = `${word ? `${word} ` : ''}€/yr`
+  const cell = (v: number | null | undefined) => {
+    if (v == null || !Number.isFinite(v)) return 'not read'
+    const x = v / div
+    const a = Math.abs(x)
+    const digits = a < 10 ? 2 : a < 100 ? 1 : 0
+    return x.toLocaleString('en-GB', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+  }
+  const tick = (v: number) => (v / div).toLocaleString('en-GB', { maximumFractionDigits: 3 })
+  return { word, unit, cell, tick }
 }
 
 const fmtCi = (ci: [number, number] | null | undefined): string | null =>
