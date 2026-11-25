@@ -71,8 +71,8 @@ describe('Hand-off › Equipment schedule', () => {
     expect(table.textContent).not.toMatch(/—/)
     expect(screen.getByTestId('schedule-total').textContent).toContain('Capex total of the 2 priced rows: €')
     const assumed = screen.getByTestId('schedule-assumptions').textContent!
-    expect(assumed).toContain('Breaking-current factor 1')
-    expect(assumed).toContain('Fault duration 1 s')
+    expect(assumed).toContain('Breaking-current factor: 1')
+    expect(assumed).toContain('Fault duration: 1 s')
     expect(assumed).not.toMatch(/\bmu\b/)
     expect(screen.queryByTestId('schedule-stale')).toBeNull()
   })
