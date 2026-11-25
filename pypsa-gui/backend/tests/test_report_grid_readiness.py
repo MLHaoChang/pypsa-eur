@@ -75,6 +75,9 @@ def test_the_envelope_disclosure_names_the_load_the_scorecard_names():
     ev = _collect(grid_readiness={**_scorecard(), "load_words": "inference load"})
     text = " ".join(ev.required_disclosures)
     assert "read the inference load envelope" in text and "AI-training" not in text
+    site = " ".join(_collect(grid_readiness={**_scorecard(), "load_words": "site load"}).required_disclosures)
+    assert "read the site load envelope" in site and "before BESS smoothing" in site
+    assert "UPS" not in site.split("the ramp, oscillation")[1].split("mitigation")[0]
     plain = " ".join(_collect(grid_readiness=_scorecard()).required_disclosures)
     assert "read the AI-training load envelope" in plain      # no key: the report as it was
 

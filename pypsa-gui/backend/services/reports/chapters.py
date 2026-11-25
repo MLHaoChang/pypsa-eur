@@ -340,8 +340,10 @@ def grid_readiness_disclosures(payload: dict) -> list[str]:
                    "the counts: " + "; ".join(f"{e['requirement'] or e['id']} ({e['reason']})"
                                                 for e in payload["excluded"]) + ".")
     if payload.get("envelope"):
-        out.append(f"{head} — the ramp, oscillation and voltage-change rows read the "
-                   f"{payload.get('load_words') or 'AI-training load'} envelope IT-side at the point of connection, before UPS/BESS smoothing: before "
+        words = payload.get("load_words") or "AI-training load"
+        backup = "BESS" if words == "site load" else "UPS/BESS"   # no UPS on a non-data-centre site
+        out.append(f"{head} — the ramp, oscillation and voltage-change rows read the {words} "
+                   f"envelope IT-side at the point of connection, before {backup} smoothing: before "
                    "mitigation, not final.")
     if any("after_battery" in r for r in payload["rows"]):
         out.append(f"{head} — {s.get('pass_after_mitigation', 0)} of {s.get('red_flags', 0)} red flag(s) "
