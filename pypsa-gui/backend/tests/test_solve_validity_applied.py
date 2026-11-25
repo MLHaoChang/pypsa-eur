@@ -60,6 +60,7 @@ def test_a_recorded_gap_that_is_not_a_finite_non_negative_number_is_none(value):
         "v": 1,
         "solver": "highs",
         "options": {"mip_rel_gap": value},
+        "dropped": [],
         "linearized_unit_commitment": False,
         "process_uc_mode": None,
     }
@@ -108,27 +109,35 @@ def test_the_recorded_mode_wins_over_the_config_process_uc(monkeypatch):
 # ── a malformed record fails closed; no record keeps the mirror ──────────────
 
 
+_VALID = {
+    "v": 1,
+    "solver": "highs",
+    "options": {"mip_rel_gap": 0.0},
+    "dropped": [],
+    "linearized_unit_commitment": False,
+    "process_uc_mode": None,
+}
+
+
+def test_the_valid_base_record_reads():
+    n = _committable()
+    n.meta[sv.APPLIED_KEY] = dict(_VALID)
+    assert sv.applied_record_of(n) == _VALID
+    assert sv.applied_gap(n, _cfg()) == 0.0
+
+
 @pytest.mark.parametrize(
     "record",
     [
         "x",
-        {"v": 1},
-        {"v": 1, "solver": 3, "options": {}, "linearized_unit_commitment": False},
-        {"v": 1, "solver": "highs", "options": [], "linearized_unit_commitment": False},
-        {"v": 1, "solver": "highs", "options": {}, "linearized_unit_commitment": "no"},
-        {
-            "v": 1,
-            "solver": "highs",
-            "options": {},
-            "linearized_unit_commitment": False,
-            "process_uc_mode": 7,
-        },
-        {
-            "v": 2,
-            "solver": "highs",
-            "options": {"mip_rel_gap": 0.0},
-            "linearized_unit_commitment": False,
-        },
+        {**_VALID, "v": 2},
+        {k: v for k, v in _VALID.items() if k != "v"},
+        {**_VALID, "solver": 3},
+        {**_VALID, "options": []},
+        {**_VALID, "dropped": None},
+        {k: v for k, v in _VALID.items() if k != "dropped"},
+        {**_VALID, "linearized_unit_commitment": "no"},
+        {**_VALID, "process_uc_mode": 7},
     ],
 )
 def test_a_malformed_record_reads_as_an_unrecorded_mip(record):
@@ -175,9 +184,71 @@ def test_the_record_keeps_scalar_options_only():
         "v": 1,
         "solver": "HiGHS",
         "options": {"mip_rel_gap": 0.1, "presolve": "on", "threads": 4, "log": True},
+        "dropped": ["bad", "obj", "5"],
         "linearized_unit_commitment": True,
         "process_uc_mode": "linearised",
     }
+
+
+def test_a_credential_like_option_keeps_its_name_but_not_its_value():
+    rec = sv.applied_record(
+        "gurobi",
+        {
+            "WLSSECRET": "s3cr3t",
+            "CloudSecretKey": "abc",
+            "WLSACCESSID": "id-1",
+            "LicenseID": 1234,
+            "api_token": "t",
+            "Password": "p",
+            "MIPGap": 0.05,
+            "Threads": 2,
+        },
+        {},
+        None,
+    )
+    assert rec["options"] == {
+        "WLSSECRET": sv.REDACTED,
+        "CloudSecretKey": sv.REDACTED,
+        "WLSACCESSID": sv.REDACTED,
+        "LicenseID": sv.REDACTED,
+        "api_token": sv.REDACTED,
+        "Password": sv.REDACTED,
+        "MIPGap": 0.05,
+        "Threads": 2,
+    }
+    n = _committable()
+    n.meta[sv.APPLIED_KEY] = rec
+    assert sv.applied_gap(n, _cfg(solver_name="gurobi")) == 0.05
+
+
+@pytest.mark.parametrize(
+    "solver",
+    sorted(
+        __import__(
+            "services.solver.assumptions", fromlist=["_MIP_KEYS_BY_SOLVER"]
+        )._MIP_KEYS_BY_SOLVER
+    ),
+)
+def test_no_solver_gap_key_reads_as_a_credential(solver):
+    from services.solver.assumptions import _MIP_KEYS_BY_SOLVER
+
+    gap_key = _MIP_KEYS_BY_SOLVER[solver][0]
+    assert sv.applied_record(solver, {gap_key: 0.01}, {}, None)["options"] == {
+        gap_key: 0.01
+    }
+
+
+def test_a_dropped_gap_is_named_and_reads_as_not_recorded():
+    rec = sv.applied_record(
+        "highs", {"mip_rel_gap": [0.1], "callback": object()}, {}, None
+    )
+    assert rec["dropped"] == ["mip_rel_gap", "callback"]
+    assert rec["options"] == {}
+    n = _committable()
+    n.meta[sv.APPLIED_KEY] = rec
+    cls = sv.classify(n, _cfg())  # the mirror would say 0.02
+    assert (cls["kind"], cls["gap"], cls["optimal"]) == ("mip", None, False)
+    assert sv.delta_limit(1.0, cls, 100.0, cls, 100.0) == sv.GAP_NOT_RECORDED
 
 
 def test_the_record_reads_back_after_a_netcdf_round_trip(tmp_path):
@@ -244,4 +315,68 @@ def test_a_solve_whose_provenance_fails_drops_the_record(reset_backend, monkeypa
     monkeypatch.setattr(wt, "_record_solve_inputs", boom)
     stale = _sealed(_committable(), options={"mip_rel_gap": 0.9})  # a previous solve's
     live, _cfg_, _kw = _solve(stale, {"solver_name": "highs"}, monkeypatch)
+    assert sv.APPLIED_KEY not in live.meta
+
+
+def _digests(live, cfg):
+    from services.dispatch_status import dispatch_digest
+    from services.pypsa_service import PyPSAService
+    from services.workflow_tools import _network_input_fingerprint
+
+    ctx = PyPSAService.build_context()
+    ctx.network = live
+    ctx.solver_state["solver_config"] = cfg
+    return (
+        _network_input_fingerprint(ctx),
+        _network_input_fingerprint(ctx, exact=True),
+        dispatch_digest(live),
+    )
+
+
+@pytest.mark.live_solve
+def test_the_record_leaves_the_fingerprints_and_dispatch_digest_unchanged(
+    reset_backend, monkeypatch
+):
+    live, cfg, _kw = _solve(_committable(), {"solver_name": "highs"}, monkeypatch)
+    assert sv.APPLIED_KEY in live.meta
+    with_record = _digests(live, cfg)
+    # The solved network does not read as stale with its record on it.
+    assert with_record[:2] == (
+        live.meta["assistant_solve_input_fingerprint"],
+        live.meta["assistant_solve_exact_input_fingerprint"],
+    )
+    live.meta.pop(sv.APPLIED_KEY)
+    assert _digests(live, cfg) == with_record
+
+
+@pytest.mark.live_solve
+def test_a_failed_solve_drops_the_previous_record(reset_backend, monkeypatch):
+    import queue
+    import threading
+
+    from routers import simulation as sim_router
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig, run_simulation
+    from tests.conftest import install_network_into_backend
+
+    def infeasible(self, *a, **k):
+        return "warning", "infeasible"
+
+    monkeypatch.setattr(
+        __import__("pypsa").optimization.OptimizationAccessor, "__call__", infeasible
+    )
+    install_network_into_backend(_sealed(_committable(), options={"mip_rel_gap": 0.9}))
+    live = PyPSAService.get_network()
+    assert sv.APPLIED_KEY in live.meta
+    cfg = SolverConfig(solver_name="highs")
+    sim_router._state["solver_config"] = cfg
+    status, _cond = run_simulation(
+        cfg,
+        live,
+        PyPSAService.get_lock(),
+        threading.Event(),
+        queue.SimpleQueue(),
+        state_update=lambda **k: None,
+    )
+    assert status not in ("ok", "optimal")
     assert sv.APPLIED_KEY not in live.meta

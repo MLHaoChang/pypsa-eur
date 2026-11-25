@@ -942,8 +942,10 @@ def run_simulation(
 
             # assistant-assurance 18: the options and commitment the solve call
             # applied, sealed next to the input fingerprints below. Stays None
-            # on a path that runs no optimisation (power flow).
+            # on a path that runs no optimisation (power flow). A previous
+            # solve's record goes now, so a failed or aborted solve keeps none.
             _applied = None
+            _seal_applied(network, None)
             if config.mode == "lopf":
                 # SCLOPF dispatches to PyPSA's
                 # `n.optimize.optimize_security_constrained()`, which adds

@@ -23,6 +23,7 @@ since the solver returns no duals, so a MIP price is never a marginal price.
 from __future__ import annotations
 
 import math
+import re
 from types import SimpleNamespace
 from numbers import Real
 
@@ -96,20 +97,37 @@ def _option(value):
     return None
 
 
+# The meta leaves with every NetCDF export and bundle, and `solver_options` is
+# free-form user input: a credential-like key keeps its name, never its value.
+_SECRET_KEY = re.compile(
+    r"secret|password|passwd|token|key|licen[cs]e|access_?id|credential", re.I
+)
+REDACTED = "<redacted>"
+
+
 def applied_record(solver_name, solver_options, uc_kwargs, process_uc_mode) -> dict:
     """The record `solver_service` seals for one solve: the solver, the options
-    dict it passed (scalar values only, so it survives the NetCDF meta), whether
-    `linearized_unit_commitment` was passed (process units, or the island's
-    linearised UC on the full path), and the process-UC mode the plan used."""
-    options = {}
+    dict it passed, whether `linearized_unit_commitment` was passed (process
+    units, or the island's linearised UC on the full path; PyPSA applies it
+    network-wide, so it is one flag), and the process-UC mode the plan used.
+
+    Options keep JSON-safe scalars only, so the record survives the NetCDF
+    meta; any other value is named under `"dropped"`, never left out silently.
+    A credential-like key's value is stored as `REDACTED`."""
+    options, dropped = {}, []
     for key, value in (solver_options or {}).items():
         kept = _option(value)
-        if isinstance(key, str) and kept is not None:
+        if not isinstance(key, str) or kept is None:
+            dropped.append(str(key))
+        elif _SECRET_KEY.search(key):
+            options[key] = REDACTED
+        else:
             options[key] = kept
     return {
         "v": _RECORD_VERSION,
         "solver": solver_name,
         "options": options,
+        "dropped": dropped,
         "linearized_unit_commitment": bool(
             (uc_kwargs or {}).get("linearized_unit_commitment")
         ),
@@ -128,6 +146,7 @@ def applied_record_of(n):
         or rec.get("v") != _RECORD_VERSION
         or not isinstance(rec.get("solver"), str)
         or not isinstance(rec.get("options"), dict)
+        or not isinstance(rec.get("dropped"), list)
         or not isinstance(rec.get("linearized_unit_commitment"), bool)
         or rec.get("process_uc_mode") not in _UC_MODES
     ):
