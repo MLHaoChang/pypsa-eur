@@ -1,9 +1,9 @@
-// The two links between an island unit's Controls block (section 5, the
-// asset form) and the island panel (Expert › Grid study › Island), each
-// through the mode-aware openers so Back returns where the link was
-// (control-strategy 02, UX 29 conditions 3 and 5).
+// The link from the island panel (Expert › Grid study › Island) to an island
+// unit's asset form, where its Controls block edits it, through the
+// mode-aware openers so Back returns to the panel (control-strategy 02, UX 29
+// condition 5).
 import type { FlowTarget } from '../api/flow'
-import { openFlowTarget, openFlowTargetInPlace, withReturnFrom } from '../layout/flowNavigation'
+import { openFlowTarget, openFlowTargetInPlace } from '../layout/flowNavigation'
 import { useUIStore } from '../store/uiStore'
 
 /** The PyPSA classes an island unit can be, in the order a name is looked up. */
@@ -21,15 +21,4 @@ export function openAssetControls(type: UnitClass, name: string): void {
   const target: FlowTarget = { section: 'assets', panel: null, component: type, entity: name, field: null }
   if (useUIStore.getState().uiMode === 'guided') openFlowTargetInPlace(target)
   else openFlowTarget(target)
-}
-
-/** Open the island panel (where the project's control preset shows), scrolled to its Island section. */
-export function openIslandPanel(from?: string): void {
-  const ui = useUIStore.getState()
-  if (ui.uiMode === 'guided') {
-    openFlowTargetInPlace({ section: 'connection', panel: 'campusElectrical', component: null, entity: null, field: null })
-  } else {
-    withReturnFrom(() => ui.setSlidePanel('campusElectrical'), from)
-  }
-  useUIStore.getState().requestPanelSection('campusElectrical', 'island')
 }

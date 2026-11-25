@@ -183,14 +183,26 @@ describe('the block', () => {
     await waitFor(() => expect(api.patchIsland.mock.calls[0][1]).toEqual({ units: { ups: { transfers_on_islanding: true } } }))
   })
 
-  it('names the project preset and links to the island panel with Back', async () => {
+  it('names the project preset in plain words, with no link (no field edits it yet)', async () => {
     api.island.mockResolvedValue({ ...STATE, unit_controls: { bess: { ...BESS, control: 'gfm_vsm',
       preset: 'grid_forming_support', preset_scope: 'project' } } })
     renderBlock()
-    const link = await screen.findByTestId('controls-preset-link')
-    expect(screen.getByTestId('controls-preset').textContent).toBe('From the project preset: Grid forming support ›')
-    await userEvent.click(link)
-    expect(useUIStore.getState().activeSlidePanel).toBe('campusElectrical')
-    expect(useUIStore.getState().panelSectionRequest).toEqual({ panel: 'campusElectrical', section: 'island' })
+    const line = await screen.findByTestId('controls-preset')
+    expect(line.textContent).toBe('From the project preset: Grid forming support.')
+    expect(line.querySelector('button, a')).toBeNull()
+  })
+
+  it('a draft restored after the settings changed elsewhere shows the 409 notice and cannot be saved', async () => {
+    renderBlock()
+    fireEvent.change(await screen.findByLabelText('Frequency droop (%)'), { target: { value: '5' } })
+    cleanup()
+    api.island.mockResolvedValue({ ...STATE, revision: 'r2' })
+    renderBlock()
+    expect((await screen.findByTestId('controls-stale')).textContent).toContain(STALE_WORDS)
+    expect(screen.getByTestId('controls-unsaved').getAttribute('role')).toBe('status')
+    expect((screen.getByRole('button', { name: /Save controls/ }) as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.click(screen.getByRole('button', { name: 'Discard' }))
+    expect(screen.queryByTestId('controls-stale')).toBeNull()
+    expect(api.patchIsland).not.toHaveBeenCalled()
   })
 })

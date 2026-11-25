@@ -21,14 +21,17 @@ import { ISLAND_KEY } from '../../pages/CampusIslandSection'
 import { CONTROL_FIELD_WORDS, UPS_CONTROL_FIELDS, UPS_TRANSFER_LABEL } from '../../pages/islandWords'
 import { controlModeLabel, presetLabel } from '../../plainNames'
 import { useUIStore } from '../../store/uiStore'
-import { openIslandPanel } from '../../pages/islandControlsNav'
 import { Section } from './cardKit'
 
 const INPUT = 'px-2 py-1 text-[12px] border border-border rounded bg-bg focus:outline-none focus:border-accent'
 export const STALE_WORDS = 'The island settings were changed elsewhere. Reload to see them before saving.'
 
 /** A draft: the mode the user picked (if they changed it) and the settings they typed, as typed. */
-export interface ControlDraft { control?: string; values: Record<string, string>; transfers?: boolean }
+export interface ControlDraft {
+  control?: string; values: Record<string, string>; transfers?: boolean
+  /** The island revision the draft was made on: a draft restored after the settings changed is never saved. */
+  base?: string | null
+}
 const EMPTY: ControlDraft = { values: {} }
 
 // Unsaved edits outlive the drawer for the session (UX 29 Q1, option 1): closing and reopening
@@ -142,9 +145,11 @@ export default function ControlsBlock({ name }: { name: string }) {
   const key = `${project}/${name}`
   const [draft, setDraftState] = useState<ControlDraft>(() => drafts.get(key) ?? EMPTY)
   const setDraft = (d: ControlDraft) => {
-    setDraftState(d)
-    if (d.control === undefined && d.transfers === undefined && !Object.keys(d.values).length) drafts.delete(key)
-    else drafts.set(key, d)
+    const empty = d.control === undefined && d.transfers === undefined && !Object.keys(d.values).length
+    const next = empty ? EMPTY : { ...d, base: d.base ?? island.data?.revision ?? null }
+    setDraftState(next)
+    if (empty) drafts.delete(key)
+    else drafts.set(key, next)
   }
   const [refusal, setRefusal] = useState<{ field: string | null; words: string } | null>(null)
   const [stale, setStale] = useState(false)
@@ -153,6 +158,8 @@ export default function ControlsBlock({ name }: { name: string }) {
 
   const state = island.data
   const uc = state?.unit_controls?.[name]
+  // A draft made on an older revision (restored after the settings changed elsewhere): Reload or Discard first.
+  const draftStale = draft.base != null && state?.revision != null && draft.base !== state.revision
   const mode = draft.control ?? uc?.control ?? ''
   const shown = useMemo(() => (state && uc ? shownFields(state, uc, mode, draft) : []), [state, uc, mode, draft])
   const save = useMutation({
@@ -174,7 +181,8 @@ export default function ControlsBlock({ name }: { name: string }) {
   const empty = shown.filter(s => s.origin === 'empty').map(s => s.field)
   const dropped = droppedFields(state, uc, mode)
   const edited = Object.keys(unitPatch(uc, draft)).length > 0
-  const blocked = empty.length ? `Enter ${empty.map(f => CONTROL_FIELD_WORDS[f]?.label ?? f).join(', ')} to save.`
+  const blocked = draftStale ? 'Reload or discard first: the island settings changed since these edits.'
+    : empty.length ? `Enter ${empty.map(f => CONTROL_FIELD_WORDS[f]?.label ?? f).join(', ')} to save.`
     : Object.keys(errors).length ? 'Fix the settings marked below to save.' : null
   const mustOpen = empty.length > 0 || Object.keys(errors).length > 0 || refusal?.field != null
   const open = !guided || mustOpen || (foldOpen ?? false)
@@ -228,16 +236,15 @@ export default function ControlsBlock({ name }: { name: string }) {
   return (
     <div data-testid="controls-block">
       <Section title="Controls">
+        {/* Plain words: no field in the app edits the project preset yet (UX 29, rule #1252). */}
         {uc.preset && uc.preset_scope === 'project' && (
           <p className="text-[12px] text-muted mb-1" data-testid="controls-preset">
-            From the project preset:{' '}
-            <button type="button" className="text-link hover:underline" data-testid="controls-preset-link"
-              onClick={() => openIslandPanel(name)}>{presetLabel(uc.preset)} ›</button>
+            From the project preset: {presetLabel(uc.preset)}.
           </p>
         )}
         {uc.preset && uc.preset_scope === 'unit' && (
           <p className="text-[12px] text-muted mb-1" data-testid="controls-preset">
-            From this unit's preset: {presetLabel(uc.preset)}
+            From this unit's preset: {presetLabel(uc.preset)}.
           </p>
         )}
         {uc.kind !== 'ups' && (
@@ -265,7 +272,7 @@ export default function ControlsBlock({ name }: { name: string }) {
             </details>
           )
           : settings}
-        {stale && (
+        {(stale || draftStale) && (
           <div role="status" className="text-[12px] text-danger mt-2 flex flex-wrap gap-2 items-center"
             data-testid="controls-stale">
             {STALE_WORDS}
@@ -285,15 +292,15 @@ export default function ControlsBlock({ name }: { name: string }) {
         )}
         <div className="flex flex-wrap gap-2 items-center justify-end mt-2">
           {edited && (
-            <span className="text-[11px] text-muted mr-auto" data-testid="controls-unsaved">
+            <span role="status" className="text-[11px] text-muted mr-auto" data-testid="controls-unsaved">
               Unsaved control edits ·{' '}
-              <button type="button" className="text-link hover:underline" onClick={() => { setDraft(EMPTY); setRefusal(null) }}>
+              <button type="button" className="text-link underline" onClick={() => { setDraft(EMPTY); setRefusal(null); setStale(false) }}>
                 Discard
               </button>
             </span>
           )}
           {edited && blocked && <span className="text-[11px] text-danger" data-testid="controls-blocked">{blocked}</span>}
-          <Btn onClick={() => save.mutate()} disabled={!edited || !!blocked || save.isPending}>
+          <Btn onClick={() => save.mutate()} disabled={!edited || !!blocked || stale || save.isPending}>
             <Save size={13} /> Save controls
           </Btn>
         </div>
