@@ -148,6 +148,8 @@ ALLOWED = (
     # current_tdd.py: IEEE 519's Isc/IL band bounds, not a frequency
     re.compile(r"^ISC_IL_BOUNDS = \(20\.0, 50\.0, 100\.0, 1000\.0\)$"),
     re.compile(r"^ISC_IL_BOUNDS_T4 = \(25\.0, 50\.0\)$"),
+    # campus_ratings.py: IEC 62271-1's R10 rated short-time currents in kA, not a frequency
+    re.compile(r"^SWITCHGEAR_LADDER_KA = \(16\.0, 20\.0, 25\.0, 31\.5, 40\.0, 50\.0, 63\.0, 80\.0\)$"),
 )
 #: A default argument in a signature: ``name=50.0`` or ``name: float = 50.0``.
 DEFAULT = re.compile(r"\w+\s*(:\s*\w+\s*)?=\s*50(\.0*)?\s*[,)]")
