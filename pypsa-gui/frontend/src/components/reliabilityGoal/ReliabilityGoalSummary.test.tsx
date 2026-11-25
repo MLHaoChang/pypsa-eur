@@ -41,3 +41,18 @@ describe('ReliabilityGoalSummary: an assumed goal (walkthrough asset-investment 
     expect(screen.queryByTestId('g-assumed')).toBeNull()
   })
 })
+
+describe('ReliabilityGoalSummary: the verdict\'s own goal and draws', () => {
+  it('shows the applied goal as assumed when nothing else names one', () => {
+    state.goal = goal({ target_lole_h: [null, 'default'] })
+    render(<ReliabilityGoalSummary items={['target']} testId="g" appliedTarget={3} />)
+    expect(screen.getByTestId('g-values').textContent).toBe('allowed shortfall 3 h/yr')
+    expect(screen.getByTestId('g-assumed').dataset.state).toBe('assumed')
+  })
+
+  it('names the last run\'s draws beside the goal\'s first batch', () => {
+    state.goal = goal()
+    render(<ReliabilityGoalSummary items={['draws']} testId="g" ranDraws={2000} />)
+    expect(screen.getByTestId('g-values').textContent).toBe('MC draws 2,000 in the last run (first batch 500 (default))')
+  })
+})

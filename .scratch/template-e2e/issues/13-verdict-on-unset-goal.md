@@ -3,7 +3,7 @@
 
 # 13 — "Certified" is shown against an allowed shortfall the card calls "not set"
 
-Status: ready-for-agent
+Status: done
 Impact: high
 Templates: eh_datacenter, hospital site, microgrid (Expert and Guided; extends 06 and 08)
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
