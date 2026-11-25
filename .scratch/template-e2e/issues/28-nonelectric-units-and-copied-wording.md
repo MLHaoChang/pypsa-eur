@@ -3,7 +3,7 @@
 
 # 28 — Non-electric results use MW, and the H2 report carries data-centre wording
 
-Status: ready-for-agent (LCOH tile and horizon label in PR; remains: an ammonia product cost per kg is not computed, so Guided shows hydrogen only)
+Status: done
 Source: decide-report-journeys.md (walk 2026-11-17, master 0ab07339)
 Severity: misleads
 Journey fit: results → report for H2, ammonia, concentrator.
@@ -27,3 +27,4 @@ Checked by code reading only; the app was not re-run. Still true: 'AI-training l
 - Slice 1 (grid_readiness wording template-specific, tested over every shipped template): PR open. Remains: LCOH and product cost in Guided, report wording, report horizon = Guided horizon.
 - Slice 2a (report disclosure reads load_words from the scorecard; the grid_readiness side lands with DC 05's wording PR): PR open.
 - Slice 3 (Guided "Cost of hydrogen" tile from the study report; cost tile and report say the 2045 finance horizon, owner option A): PR open.
+- 2026-11-25 closed: #2003 (grid_readiness wording template-specific), #2010 (report disclosure reads `load_words`; DC 05 emits it), #2017 (Guided hydrogen cost tile, finance-horizon label from the study's recorded `valued_to_year`, report "Valued over" row). The ammonia product cost per kg moved to 28a.
