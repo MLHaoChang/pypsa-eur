@@ -32,6 +32,7 @@ import SourceRunLine from '../../../components/SourceRunLine'
 import { useDispatchRun } from '../../../hooks/useDispatchRun'
 import { money } from '../../../utils/money'
 import GridExtensionCard from '../../results/GridExtensionCard'
+import { FrontTile } from './FrontTile'
 import { hasNoVerdict, NoVerdictNote } from '../noVerdict'
 import { HEADLINED, ResultsHeadline } from './ResultsHeadline'
 import { WhyThisNumber } from './WhyThisNumber'
@@ -157,6 +158,7 @@ export function ResultsCard() {
         )}
         <NoVerdictNote templateId={template?.id} testId="hub-results-no-verdict" />
         <GridExtensionCard />
+        <FrontTile />
         {/* No headline yet, so every tile keeps its figure. */}
         <ChaptersSection reliability={reliability} />
       </CardShell>
@@ -300,6 +302,7 @@ export function ResultsCard() {
         </button>
       </div>
       <GridExtensionCard />
+      <FrontTile />
       <ChaptersSection reliability={reliability} headlined={[...HEADLINED]} />
     </CardShell>
   )

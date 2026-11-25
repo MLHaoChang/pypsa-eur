@@ -1805,6 +1805,30 @@ def get_front():
     return out
 
 
+@results_router.get("/eh_front")
+def get_eh_front():
+    """The Energy Hub study's front (its opt-in ``front`` stage, DC 01), in
+    GET /front's record shape so one reader serves both: ``status``,
+    ``result`` (the engine's points), ``edited_since_study`` read off the
+    EH study's own record. 204 when the last study ran no front stage (or is
+    running: a new study clears the table). Its points were solved on the
+    study's private, pack-applied copy, so ``applicable`` is False: the apply
+    route reads only GET /front's study."""
+    result = _state.get("eh_front")
+    if not result:
+        return Response(status_code=204)
+    study = _state.get("eh_study") or {}
+    return {
+        "source": "eh_study",
+        "status": "aborted" if result.get("aborted") else "done",
+        "result": result,
+        "error": None,
+        "finished_at": study.get("finished_at"),
+        "edited_since_study": _study_state.edited_since(study),
+        "applicable": False,
+    }
+
+
 @results_router.post("/front/abort")
 def post_front_abort():
     """Stop a running front at its next point boundary; idempotent, 404 only

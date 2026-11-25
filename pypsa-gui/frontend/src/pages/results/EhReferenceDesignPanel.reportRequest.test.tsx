@@ -116,7 +116,7 @@ describe('shared study query options (spec §9: cache shared with the cards)', (
 
   it('the invalidation set includes the review the cards read', () => {
     expect(ehStudyQueryKeys('Demo')).toEqual(['eh_study', 'eh_reference_design',
-      'eh_redundancy', 'eh_levers', 'eh_dtc', 'eh_dtc_planning', 'eh_review']
+      'eh_redundancy', 'eh_levers', 'eh_dtc', 'eh_dtc_planning', 'eh_front', 'eh_review']
       .map(leaf => nk('Demo', 'results', leaf)))
   })
 })

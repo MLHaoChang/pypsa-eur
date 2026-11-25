@@ -3,7 +3,7 @@
 
 # 01 A real front of reliability vs capex vs opex vs CO2 for the data-centre templates
 
-Status: in progress
+Status: done
 Blocked by: none (02 adds the CO2 axis cap)
 Source: DC template review 2026-11-24 (`../README.md`). Stage 3.
 Severity: blocker (the owner's core ask)
@@ -60,3 +60,4 @@ A user cannot see which designs are non-dominated across reliability, cost and e
   - On the DC templates `grid_supply` has no outage data, so the reserve-margin lever is refused before any solve (the validator's own sentence).
   - The MC samples each asset row as one unit, and without the pack boundary the grid import never fails, so LOLE reads 0 off-pack. PR2's EH stage passes the pack.
   - `n.statistics` reads 0 capex on the solved templates (finance-pack pricing is LP-side and the tariff is commercial), so costs come from the LP objective.
+- 2026-11-25, PR3 (Expert panel and Guided §10 tile): `FrontPanel` beside `FrontierPanel` and `FrontTile` in the Results card share `pages/results/front/FrontView.tsx`; `GET /results/eh_front` reads the EH stage in GET /front's shape; the apply records the chosen point (`applied`). UX 28's conditions are pinned by `FrontParity.test.tsx`. EH-study points are read-only: they were solved on the pack-applied copy.
