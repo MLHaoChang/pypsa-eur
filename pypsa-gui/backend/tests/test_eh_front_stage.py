@@ -375,14 +375,17 @@ def test_the_front_stage_end_to_end_leaves_the_study_network_alone(monkeypatch):
 
 
 @pytest.mark.live_solve
-def test_the_same_seed_gives_the_same_front():
-    fronts = []
-    for _ in range(2):
+def test_the_same_seed_gives_the_same_front_and_another_seed_does_not():
+    def mc(seed):
         store: dict = {}
         _run(certifiable_weak_network(), _pack(10.0, ladder=(2.0, 1.0)),
-             stages=FRONT, budget=3, store=store, mc_draws=40, mc_seed=3)
-        fronts.append(store["eh_front"]["points"])
-    assert fronts[0] == fronts[1]
+             stages=FRONT, budget=3, store=store, mc_draws=40, mc_seed=seed)
+        assert store["eh_front"]["mc_budget"]["seed"] == seed
+        return store["eh_front"]["points"]
+
+    first = mc(3)
+    assert mc(3) == first
+    assert [p["mc"] for p in mc(4)] != [p["mc"] for p in first]
 
 
 # ── F4: without "front", the study is master's ─────────────────────────────
@@ -427,17 +430,16 @@ def test_readiness_prices_a_requested_front_on_the_margin_lever():
     # the fixture's LP has no outage series, so the margin lever runs; its
     # preflight and the session margin are read at run time: a ceiling
     row = _readiness(_pack(10.0))
-    assert row["solves"] == len(S.frontier_targets(
-        fr.FRONT_MARGIN_BASE, S.frontier_point_count(29, 30),
-        ladder=_pack().frontier_ladder))
+    # 29 solves left of 30 → 12 points allowed; the ladder has 5 factors
+    assert row["solves"] == 5
     assert row["basis"] == "upper_bound" and row["reason"] is None
 
 
 def test_readiness_mirrors_the_stage_on_the_ens_lever(monkeypatch):
     monkeypatch.setattr(fr, "choose_lever", lambda n, req: ("ens_cap", "stub"))
     row = _readiness(_pack(10.0))
-    assert row["solves"] == len(S.frontier_targets(
-        10.0, S.frontier_point_count(29, 30), ladder=_pack().frontier_ladder))
+    assert row["solves"] == 5
+    assert _readiness(_pack(10.0, ladder=(2.0, 1.0, 0.5)))["solves"] == 3
     assert row["basis"] == "exact" and row["reason"] is None
     row = _readiness(_pack(None))
     assert row["solves"] == 0
