@@ -84,7 +84,7 @@ def target_of(cfg: Any) -> float | None:
     if not math.isfinite(v) or v < 0.0:
         raise Co2CapRefusal(
             INVALID,
-            f"{LABEL}: {raw!r} is not a number of t CO₂/yr of 0 or more. "
+            f"{LABEL}: {raw} is not a number of t CO₂/yr of 0 or more. "
             f"Set the limit again in the Goal step.",
         )
     return v
