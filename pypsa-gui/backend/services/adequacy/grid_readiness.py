@@ -85,10 +85,32 @@ _FREQUENCY_SERVICES = ("grid_forming", "synthetic_inertia", "frequency_containme
 #: data-centre templates have an AI-training load, every other template says "site load".
 _LOAD_WORDS = {"eh_datacenter": "AI-training load", "eh_datacenter_staged": "AI-training load"}
 _SITE_LOAD = "site load"
+#: DC 05: a data-centre project names its load by the workload kind stored in
+#: ``dc_load.spec.utilisation``; no spec (or an unreadable one) keeps the template's words.
+_KIND_WORDS = {"ai_training": "AI-training load", "inference": "inference load",
+               "mixed": "mixed load", "flat": "flat load"}
 
 
 def _load_words(inp) -> str:
-    return _LOAD_WORDS.get(inp.meta.get("id"), _SITE_LOAD)
+    words = _LOAD_WORDS.get(inp.meta.get("id"), _SITE_LOAD)
+    if words == _SITE_LOAD:
+        return words
+    raw = getattr(inp, "dc_spec", None)
+    if raw is None:
+        return words
+    from models.flex_archetypes import DataCentreLoadSpec
+    try:                       # the kind as the profile builder reads it (field and default)
+        kind = DataCentreLoadSpec.model_validate(raw).utilisation
+    except ValueError:         # unreadable spec: keep the template's words, claim no kind
+        return words
+    return _KIND_WORDS.get(kind, words)
+
+
+def _load_words_key(inp) -> dict:
+    """``load_words`` for the report, only where it changes the default wording,
+    so an AI-training project's report keeps its evidence hash."""
+    words = _load_words(inp)
+    return {} if words == _LOAD_WORDS["eh_datacenter"] else {"load_words": words}
 
 
 def _before_mitigation(inp) -> str:
@@ -103,6 +125,9 @@ def _no_envelope(inp) -> str:
     if _load_words(inp) == _SITE_LOAD:
         return ("No load-step profile on this project, so the site load's ramp, swing and oscillation "
                 "are not known")
+    if _load_words(inp) != _LOAD_WORDS["eh_datacenter"]:
+        return (f"No {_load_words(inp)} profile on this project, so its ramp, swing and oscillation "
+                "are not known (a data-centre project created with a load profile has one)")
     return ("No AI-training load profile on this project, so its ramp, swing and oscillation "
             "are not known (a data-centre project created with the AI-training profile has one)")
 
@@ -2603,7 +2628,7 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
                 for r in rows)
     return {"schema": SCHEMA, "profile": {"id": profile_id, "title": (profile or {}).get("title"),
                                           "error": error},
-            "template_id": inp.meta.get("id"), "envelope": inp.envelope is not None,
+            "template_id": inp.meta.get("id"), **_load_words_key(inp), "envelope": inp.envelope is not None,
             "rows": rows, "excluded": excluded, "summary": {**counts, "assumed": sum(r["assumed"] for r in rows),
                                       "red_flags": counts["fail"] + counts["warn"],
                                       "pass_after_mitigation": after},
