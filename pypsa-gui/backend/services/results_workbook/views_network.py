@@ -426,7 +426,7 @@ def _prices(run) -> ViewData | None:
     n = run.network
     limit = run_price_limit(run)
     p = compute_prices(n, "lopf", None, None, result_df=run.result_df, price_limit=limit)
-    if limit and p is not None:  # withheld: the reason and an empty cell, never the MIP's 0.0 prices
+    if limit:  # withheld: the reason and an empty cell, never the MIP's 0.0 prices
         return ViewData(keys=[Key("Marginal prices", "EUR/MWh", {HORIZON: None})],
                         notes=_mip_note(run, limit))
     if p is None or not p.get("columns"):

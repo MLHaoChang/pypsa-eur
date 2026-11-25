@@ -133,6 +133,9 @@ def test_a_held_study_solve_is_judged_with_its_own_config():
     assert S.run_price_limit(S.Run(name="b", network=n, cfg=lin, solver_state=held)) is None
     assert S.run_price_limit(
         S.Run(name="b", network=n, cfg=binary, solver_state=held)) == DUALS_NOT_MARGINAL
+    # A state that carries the solve's config is judged by it, not by the run's cfg.
+    assert S.run_price_limit(S.Run(name="b", network=n, cfg=lin,
+                                   solver_state={**held, "solver_config": binary})) == DUALS_NOT_MARGINAL
     # The held solve's own record beats its config.
     assert S.run_price_limit(
         S.Run(name="b", network=n, cfg=lin, solver_state=MIP_RECORD)) == DUALS_NOT_MARGINAL
@@ -150,3 +153,20 @@ def test_a_saved_scenario_s_figures_take_its_own_record(mip, monkeypatch):
     S._fill(run, {"ctx": ctx}, result_df_for=lambda state: _rdf, ic_key=None,
             solved_settings_for=None, dispatch_ready=None)
     assert _line(run.figs, "opex_storage_charging").note == MIP_PRICES_TEXT
+
+
+def test_an_lp_total_that_is_not_established_gets_no_integer_solve_reason(lp, monkeypatch):
+    """Only a total withheld for a MIP names the MIP; an LP's missing total keeps its own note."""
+    from services.results import economics_by_carrier as ebc
+
+    real = ebc.compute_economics_by_carrier
+
+    def one_missing(*a, **kw):
+        out = real(*a, **kw)
+        first = next(iter(out["by_carrier"].values()))
+        first["storage_charge_cost_meur"] = {"total": None, "by_period": {}}
+        return out
+
+    monkeypatch.setattr(ebc, "compute_economics_by_carrier", one_missing)
+    line = _line(overview_figures(lp, SolverConfig(), None, _rdf), "opex_storage_charging")
+    assert line.total is None and line.note is None
