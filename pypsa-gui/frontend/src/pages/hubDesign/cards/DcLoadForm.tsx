@@ -183,7 +183,7 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
                     value={c} onChange={e => setCount(i, e.target.value)} />
                 </label>
                 <span data-testid={`dc-form-compute-derived-${i}`} className="text-muted">
-                  derived {Number.isFinite(derived) ? derived.toFixed(1) : '–'} MW IT · {itWord(staged).noun} {typedMw(i)} MW IT ({itWord(staged).wins})
+                  derived {Number.isFinite(derived) ? derived.toFixed(1) : '–'} MW IT · {itWord(staged).noun} {typedMw(i).toFixed(1)} MW IT ({itWord(staged).wins})
                 </span>
                 {mismatch && <span data-testid={`dc-form-compute-mismatch-${i}`} className="text-warn">{mismatch}</span>}
               </div>
