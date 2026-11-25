@@ -638,8 +638,10 @@ def _import_topology(n, elec_buses: set[str], imports: list[str], snaps,
     ``active(comp)`` is the period's activity mask.
 
     **The site** (G2, GK A (38)) is every bus flagged ``eh_critical``. With
-    no flagged bus, it is the ``bus1`` ends of the ``grid_import`` Links
-    (their documented orientation: ``bus0`` upstream). A Load never makes a
+    no flagged bus, it is the chain ends: each ``grid_import`` Link's
+    ``bus1`` (their documented orientation: ``bus0`` upstream) that is not
+    the ``bus0`` of another ``grid_import`` active in the period, so an
+    unflagged chain is still capped at its tightest Link. A Load never makes a
     site: an upstream bus with its own demand is still upstream. A bus with
     a free path to a site bus is site-side and keeps plain credit.
 
@@ -704,12 +706,15 @@ def _import_topology(n, elec_buses: set[str], imports: list[str], snaps,
             if backward:
                 _edge(other, b0)
 
-    # GK A (38) (1): the flagged buses only; with no flag, the imports'
-    # bus1 side. A Load never makes a site (a 0 MW one upstream included).
+    # GK A (38) (1): the flagged buses only; with no flag, the chain ends:
+    # each import's bus1 that is not the bus0 of another import active in
+    # this period. A Load never makes a site (a 0 MW one upstream included).
     site = {str(b) for b in n.buses.index[flag_column(n.buses, "eh_critical")]
             } & elec_buses
     if not site:
-        site = {str(links.at[lk, "bus1"]) for lk in imports}
+        feeds = {str(links.at[lk, "bus0"]) for lk in imports
+                 if bool(link_act.get(lk, False))}
+        site = {str(links.at[lk, "bus1"]) for lk in imports} - feeds
 
     rev: dict[str, set[str]] = {b: set() for b in fwd}
     for a, outs in fwd.items():

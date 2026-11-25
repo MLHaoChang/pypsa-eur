@@ -1086,3 +1086,25 @@ def test_a_branch_whose_rating_cannot_be_read_is_no_path():
     n.lines.at["b", "s_nom"] = "n/a"
     f = reserve_margin_facts(n, _cfg())
     assert _per(f)["firm_fixed_mw"] == pytest.approx(CAPPED)
+
+
+def test_an_unflagged_chain_is_capped_at_its_last_link():
+    # GK A (38): with no flag, only the chain's end is a site: mid is the
+    # bus0 of l2 (active), so it is not, and up is capped at C2 < C1.
+    n = _series(c1=40.0, c2=30.0)
+    n.buses["eh_critical"] = False
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(30.0 * 0.99 * 0.998 * 0.99)
+    assert _asset(f, "up")["cap"]["links"] == ["l1", "l2"]
+
+
+def test_an_unflagged_chain_end_is_judged_per_period():
+    # l2 is not built in 2030: mid is then the end of the only active chain
+    # hop, so l1 alone caps up; in 2035 the chain runs on to the site.
+    n, _ = _two_periods(_series(c1=40.0, c2=30.0))
+    n.buses["eh_critical"] = False
+    n.links.at["l2", "build_year"] = 2035
+    n.links.at["l2", "lifetime"] = 100
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f, 2030)["firm_fixed_mw"] == pytest.approx(40.0 * 0.99 * 0.998)
+    assert _per(f, 2035)["firm_fixed_mw"] == pytest.approx(30.0 * 0.99 * 0.998 * 0.99)
