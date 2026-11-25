@@ -357,6 +357,10 @@ def _document_rows(name: str, before_doc, after_doc, groups: dict[str, str], lab
         if isinstance(b.get(field), bool) or isinstance(a.get(field), bool):
             row["words"] = {"old": "not set" if b.get(field) is None else "On" if b.get(field) else "Off",
                             "new": "not set" if a.get(field) is None else "On" if a.get(field) else "Off"}
+        elif field in b and field not in a:
+            # A value the edit takes out (an island mode switch drops the old mode's settings,
+            # GK B3 K18) reads as removed, not as "not set".
+            row["words"] = {"old": None, "new": member_words[1]}
         rows.append(_hide(row, b.get(field), a.get(field)))
     return rows
 

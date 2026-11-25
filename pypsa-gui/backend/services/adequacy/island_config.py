@@ -23,6 +23,8 @@ import pathlib
 try:
     from gridspine.schema.contracts import ContractError
     from gridspine.schema.island import (
+        CONTROLS,
+        CONVERTER_KINDS,
         GFM_CONTROLS,
         ISLAND_HOURLY_CSV,
         ISLAND_UNIT_HOURLY_COLUMNS,
@@ -32,11 +34,18 @@ try:
         has_grid_former,
         offered_services,
         preset_applies,
+        preset_block,
         select_preset,
         validate_island_config,
         validate_island_hourly,
         validate_island_unit_hourly,
     )
+    # The parameters each converter control mode needs, as validate_unit_island
+    # reads them: the schema's own objects, re-exported so the Controls block
+    # (GET /island) cannot drift from the validator (GK B3 K7, K14).
+    from gridspine.schema.island import _CONTROL_FIELDS as CONTROL_FIELDS
+    from gridspine.schema.island import _CONVERTER_OPTIONAL as CONVERTER_OPTIONAL
+    from gridspine.schema.island import _PF_CHOICE as PF_CHOICE
 
     GRIDSPINE_AVAILABLE = True
     GRIDSPINE_IMPORT_ERROR = None
@@ -51,11 +60,12 @@ except ImportError as exc:                      # pragma: no cover - build-shape
     GFM_CONTROLS = frozenset()
     # The control presets (ticket 04): none without gridspine.
     PRESETS, SERVICES = {}, ()
+    CONTROLS, CONVERTER_KINDS, CONTROL_FIELDS, CONVERTER_OPTIONAL, PF_CHOICE = (), (), {}, (), ()
 
     def _needs_gridspine(*args, **kwargs):
         raise ContractError(f"the control presets need gridspine ({GRIDSPINE_IMPORT_ERROR})")
 
-    has_grid_former = offered_services = preset_applies = select_preset = _needs_gridspine
+    has_grid_former = offered_services = preset_applies = preset_block = select_preset = _needs_gridspine
     # The I3a hourly tables (plan I3a): without gridspine there are none to write.
     ISLAND_UNIT_HOURLY_CSV = "island_unit_hourly.csv"
     ISLAND_HOURLY_CSV = "island_hourly.csv"

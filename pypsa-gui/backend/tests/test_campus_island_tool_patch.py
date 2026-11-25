@@ -169,3 +169,31 @@ def test_route_and_tool_patch_leave_byte_equal_config(saved):
     assert _rev(saved) == base
     chat_tools.campus_set_island_config(HUB, patch=PATCH, base=base)
     assert _sidecar_path(saved).read_bytes() == via_route
+
+
+# ── CS-B PR 3: a mode switch through the tool (GK B3 K18, K20) ───────────────
+
+SWITCH = {"units": {"bess": {"control": "gfm_vsm"}}}
+
+
+def test_a_switch_card_shows_each_dropped_field_as_removed_and_each_filled_one(grid, saved):  # noqa: F811
+    frames, cards, result = _dispatch(
+        grid, "campus_set_island_config", {"project_id": HUB, "patch": SWITCH, "base": _rev(saved)})
+    assert len(cards) == 1
+    rows = {r["field"]: r for r in cards[0]["edit_card"]["rows"] if r["role"] != "note"}
+    assert (rows["units.bess.control"]["old"], rows["units.bess.control"]["new"]) == ("gfm_droop", "gfm_vsm")
+    dropped = rows["units.bess.tau_f_s.value"]                           # gfm_droop's, dropped
+    assert (dropped["old"], dropped["new"], dropped["words"]["new"]) == (0.1, None, "removed")
+    assert (rows["units.bess.H_v_s.value"]["old"], rows["units.bess.H_v_s.value"]["new"]) == (None, 4.0)
+    assert rows["units.bess.H_v_s.source"]["new"] == "assumed"
+    assert not any(f.startswith(("units.bess.droop_pct", "units.bess.pf_rated")) for f in rows)  # kept
+
+
+def test_route_and_tool_switch_leave_byte_equal_config(saved):
+    base = _rev(saved)
+    ce.patch_island(saved, SWITCH, base)
+    via_route = _sidecar_path(saved).read_bytes()
+    ce.save_island(saved, _config())
+    assert _rev(saved) == base
+    chat_tools.campus_set_island_config(HUB, patch=SWITCH, base=base)
+    assert _sidecar_path(saved).read_bytes() == via_route
