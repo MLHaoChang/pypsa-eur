@@ -300,6 +300,7 @@ def _stage_ens_solve(st: _Study) -> None:
                "metrics": metrics}, None)
     st.cost_at_target = cost.get("total_system_cost_eur")
     st.period_basis = cost.get("period_basis")
+    st.valued_to_year = cost.get("valued_to_year")
     st.sections["cost"] = (
         "ok", {"total_system_cost_eur": st.cost_at_target,
                "period_basis": st.period_basis,
@@ -1469,7 +1470,7 @@ def run_eh_study(
         undo=lambda: None, pack_h=arch.pack_hash(pack),
         ens_cap=pack.availability.ens_cap_permyriad,
         achieved_ens_permyriad=None, achieved_shed_hours=None,
-        cost_at_target=None, period_basis=None, adequacy_report=None,
+        cost_at_target=None, period_basis=None, valued_to_year=None, adequacy_report=None,
         mc_lole_h=None, certified=None, executed=[], ens_met=None,
         fixed_plan=None,
     )
@@ -1597,6 +1598,7 @@ def run_eh_study(
         certified=st.certified,
         cost_at_target_eur=st.cost_at_target,
         period_basis=st.period_basis,
+        valued_to_year=st.valued_to_year,
         tea=tea_obj,
         gates=gates_obj,
         notes=pack_notes,

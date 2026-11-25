@@ -108,16 +108,16 @@ export function evidenceValue(v: unknown): string {
  *  known. The engine reports the basis (`period_basis`); no yearly figure is derived from it. */
 export function costTileLabel(
   periodBasis: string | null | undefined, periods: number[] | null | undefined,
-  analysisYears?: number | null,
+  valuedToYear?: number | null,
 ): string {
   if (periodBasis !== 'npv_multi_period') return 'Yearly cost of this design (before any shortfall costs)'
   const plan = periods && periods.length > 1 ? `, ${Math.min(...periods)}–${Math.max(...periods)}` : ''
-  // Owner decision (issue 28, option A): the finance horizon runs past the plan's last period; say so,
-  // with the years taken from the project's own periods and analysis years, never typed in.
+  // Owner decision (issue 28, option A): the valuation runs past the plan's last period; say so. The end
+  // year is the one the study recorded when it solved, so editing the inputs later never moves the label.
   const first = periods && periods.length > 0 ? Math.min(...periods) : null
   const last = periods && periods.length > 0 ? Math.max(...periods) : null
-  const end = first != null && analysisYears != null && analysisYears > 0 ? first + analysisYears : null
-  const valued = end != null && last != null && end > last ? `, valued to ${end} over ${analysisYears} years` : ''
+  const end = valuedToYear != null && Number.isFinite(valuedToYear) ? valuedToYear : null
+  const valued = end != null && first != null && last != null && end > last ? `, valued to ${end} over ${end - first} years` : ''
   return `Cost over the plan${plan}${valued} (discounted, before any shortfall costs)`
 }
 

@@ -25,7 +25,6 @@ import { SizedDesignTable } from '../../results/SizedDesignTable'
 import { useQuery } from '@tanstack/react-query'
 import { uncheckedKindsSentence, useUncheckedRunKinds } from '../../../hooks/useStaleRunKinds'
 import { networkApi } from '../../../api/network'
-import { financeApi } from '../../../api/finance'
 import { nk } from '../../../utils/queryKeys'
 import { ChaptersSection } from '../ChaptersSection'
 import DownloadReport from '../DownloadReport'
@@ -115,11 +114,6 @@ export function ResultsCard() {
   const periods = useQuery({
     queryKey: nk(project, 'investmentPeriods'), queryFn: networkApi.getInvestmentPeriods,
     enabled: !!project && multiPeriod,
-  })
-  // The finance horizon's length: the cost tile says it runs past the plan (issue 28, owner option A).
-  const financeState = useQuery({
-    queryKey: nk(project, 'simulation', 'finance'), queryFn: () => financeApi.getFinance(),
-    enabled: !!project && multiPeriod, retry: false,
   })
   const setStep = useHubDesignStore(s => s.setStep)
   // Results that came with the project, never checked against its inputs (PG-12): never read as current.
@@ -251,7 +245,7 @@ export function ResultsCard() {
         // shortfall costs — never "the cost of your goal" (P24-FE gate B1).
         // The shared KPI tile (UX S6, G-item 2), the glossary text on hover.
         <Kpi testId="hub-results-cost" headline
-          label={costTileLabel(report?.period_basis, periods.data?.periods, financeState.data?.finance?.analysis_years)}
+          label={costTileLabel(report?.period_basis, periods.data?.periods, report?.valued_to_year)}
           value={fmtCurrency(cost)} fromStudy={solved === false && !stale && !freshnessUnknown}
           hint={solved === false && !stale && !freshnessUnknown ? `${TERM_FALLBACK.cost_at_target} ${FROM_STUDY_HINT}` : TERM_FALLBACK.cost_at_target}
           // The banner above says "Out of date" once for the card; the tile only dims.
