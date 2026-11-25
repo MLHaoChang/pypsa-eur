@@ -416,3 +416,7 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - An emissions override per MWh of electric output wins over a fuel-curve slope on every CO2 surface, the LP price included. The slope or the carrier only fills snapshots with no override, and the no-load fuel stays at the carrier figure (#1965).
 - A switchgear short-time check refers Ith over Tk to the rated Tkr: Ith·√(max(Tk,Tkr)/Tkr) ≤ Ithr. A cable withstand uses Ith over the clearing time, never Ik''·√t (#1980).
 - A solve result is judged on the termination condition, never the status alone, and a study that judges the LP forces the AC PF stage off (#1979).
+
+## Standing rulings (GK A (37), recorded 2026-11-25)
+
+- A firm-capacity (reserve-margin) credit for supply that reaches the site only through a grid_import link is capped by that link, as a series: min(C_upstream, C_link) × a_upstream × a_link. The cap applies to the group behind each link, not to each generator, and uses each period's active link capacity. Which supply is behind a link is derived from topology, never from names. A copper-plate firm sum that credits supply beyond the PoC's rating is a defect (DC 01 PR2b-0).
