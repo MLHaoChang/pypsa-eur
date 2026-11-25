@@ -1314,7 +1314,9 @@ def test_the_ens_text_with_an_outage_model_does_not_blame_missing_outages():
         pts, "ens_cap", voll=5000.0, outage_model=True, reference_co2=None
     )["axes"]["ens_cap"]["text"]
     assert "no outages" not in text
-    assert "never bound at any of 2 points: at a value of lost load of 5,000 €/MWh" in text
+    assert (
+        "never bound at any of 2 points: at a value of lost load of 5,000 €/MWh" in text
+    )
 
 
 def test_with_no_solved_point_the_basis_is_lp_ens(monkeypatch):
