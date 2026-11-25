@@ -17,13 +17,42 @@ import pypsa
 import pytest
 
 from services.solver_service import SolverConfig
+from tests.fixtures.investment_case.edge_15min import build_edge_15min
 
 DIRTY = {"multi_investment_periods": True, "discount_rate": 0.123}
 
 
+TARIFF = {
+    "id": "nl-tou",
+    "name": "NL TOU",
+    "jurisdiction": "NL",
+    "valid_from": "2030-01-01",
+    "items": [
+        {
+            "id": "energy",
+            "kind": "energy",
+            "unit": "per_kwh",
+            "periods": [
+                {"name": "night", "rate": 0.05, "start_hour": 0, "end_hour": 6},
+                {"name": "day", "rate": 0.20},
+            ],
+        }
+    ],
+}
+
+
 def _dirty(client) -> None:
-    r = client.put("/api/simulation/solver_config", json=DIRTY)
+    """The previous project: a non-default tariff, finance and periods."""
+    cfg = DIRTY | {"commercial": {"poc_link": "import", "import_tariff": TARIFF}}
+    r = client.put("/api/simulation/solver_config", json=cfg)
     assert r.status_code == 200, r.text
+    fin = {"financial_close": "2029-01-01", "cod_by_asset": {}, "analysis_years": 30}
+    r = client.put("/api/simulation/finance", json={"finance": fin})
+    assert r.status_code == 200, r.text
+    assert (
+        client.get("/api/simulation/finance").json()["finance"]["analysis_years"] == 30
+    )
+    assert client.get("/api/simulation/solver_config").json()["commercial"]
 
 
 def _saved_config(storage_dir, name: str) -> dict:
@@ -71,12 +100,18 @@ def _import_bundle(client, name, **_):
     ids=["blank", "template", "bundle-import"],
 )
 def test_new_project_saves_default_solver_config(
-    client, api_project, project_storage_dir, tmp_path, monkeypatch, create
+    client, install_network, project_storage_dir, tmp_path, monkeypatch, create
 ):
-    api_project("src_bundle")
+    # The previous project: a network with an `import` Link, saved (its bundle
+    # is the import source), then given a non-default tariff and finance.
+    install_network(build_edge_15min(), name="src_bundle")
+    r = client.post("/api/projects/src_bundle", params={"force": True, "rebind": True})
+    assert r.status_code == 200, r.text
     _dirty(client)
     create(client, "fresh_proj", tmp_path=tmp_path, monkeypatch=monkeypatch)
     saved = _saved_config(project_storage_dir, "fresh_proj")
+    assert not saved.get("commercial")
+    assert not saved.get("finance")
     assert saved.get("multi_investment_periods", False) is False
     assert (
         saved.get("discount_rate", SolverConfig().discount_rate)
@@ -87,10 +122,8 @@ def test_new_project_saves_default_solver_config(
 
 
 def test_netcdf_import_into_the_draft_keeps_the_config(client, install_network):
-    from tests.conftest import build_network
-
     """carry="copy": the same workspace gets a new network, so its config stays."""
-    install_network(build_network())
+    install_network(build_edge_15min())
     _dirty(client)
     nc = client.get("/api/io/export/netcdf")
     assert nc.status_code == 200, nc.text
@@ -101,6 +134,7 @@ def test_netcdf_import_into_the_draft_keeps_the_config(client, install_network):
     assert r.status_code == 200, r.text
     cfg = client.get("/api/simulation/solver_config").json()
     assert cfg["multi_investment_periods"] is True
+    assert cfg["commercial"]["import_tariff"]
 
 
 def test_in_place_replace_keeps_solver_config(client, install_network):
