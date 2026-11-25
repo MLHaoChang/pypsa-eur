@@ -399,18 +399,30 @@ def _co2(co2: dict | None):
     extra = {
         "limit_t_per_yr": co2.get("limit_t_per_yr"),
         "reached": bool(co2.get("binding")),
-        "shadow_price_eur_per_t": co2.get("shadow_price_eur_per_t") if co2.get("binding") else None,
+        "shadow_price_eur_per_t": co2.get("shadow_price_eur_per_t")
+        if co2.get("binding")
+        else None,
         "period": co2.get("period"),
     }
     value = co2.get("t_per_yr")
     if value is None:
-        return _card("co2_annual", None, "tCO2/yr", state="unavailable",
-                     reason=CO2_NOT_COUNTED, **extra)
+        return _card(
+            "co2_annual",
+            None,
+            "tCO2/yr",
+            state="unavailable",
+            reason=CO2_NOT_COUNTED,
+            **extra,
+        )
     return _card("co2_annual", float(value), "tCO2/yr", **extra)
 
 
 def headline_kpis(
-    ctx, *, template: dict | None, cost: dict | None, lost_load: dict | None,
+    ctx,
+    *,
+    template: dict | None,
+    cost: dict | None,
+    lost_load: dict | None,
     co2: dict | None = None,
 ) -> dict:
     """``{"kind", "cards"}`` for the solved open project.
