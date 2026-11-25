@@ -36,6 +36,9 @@ ORDER = {
         "new_build_capital",
         "curtailed_share",
         "unserved_energy",
+        # DC review 02: only while a CO2 limit is set (absent, not a tile,
+        # otherwise), so the strip keeps its cards.
+        "co2_annual",
         # A data-centre project's, last (ui-modern 05, DC27-TTP-1). Absent
         # from the strip, not a tile, where the project has no data-centre
         # load: the strip then keeps its five cards.
@@ -70,6 +73,7 @@ CHECKED = {
 #: identifier appears in a sentence (docs/agents/review-ux.md). The two refusals
 #: with more than one cause are split in `_why`.
 _UNAVAILABLE = ("unavailable", "This run cannot give this figure.")
+CO2_NOT_COUNTED = "This run's CO₂ could not be counted."
 SWITCHED_OFF = (
     "unavailable",
     "Checked figures are off on this installation; an administrator can turn them on.",
@@ -384,13 +388,48 @@ def _unserved(lost_load):
     return _card("unserved_energy", float(lost_load["total_mwh"]), "MWh")
 
 
+def _co2(co2: dict | None):
+    """The CO₂ limit goal's card (DC review 02), None when no limit is set.
+    `co2` is `co2_cap.annual`'s payload; its figure None (no emissions could
+    be counted) reads as not available, never as 0 t. The words under the
+    figure (limit, reached, cost of the limit, period) are the strip's, from
+    the fields carried here."""
+    if not co2:
+        return None
+    extra = {
+        "limit_t_per_yr": co2.get("limit_t_per_yr"),
+        "reached": bool(co2.get("binding")),
+        "shadow_price_eur_per_t": co2.get("shadow_price_eur_per_t")
+        if co2.get("binding")
+        else None,
+        "period": co2.get("period"),
+    }
+    value = co2.get("t_per_yr")
+    if value is None:
+        return _card(
+            "co2_annual",
+            None,
+            "tCO2/yr",
+            state="unavailable",
+            reason=CO2_NOT_COUNTED,
+            **extra,
+        )
+    return _card("co2_annual", float(value), "tCO2/yr", **extra)
+
+
 def headline_kpis(
-    ctx, *, template: dict | None, cost: dict | None, lost_load: dict | None
+    ctx,
+    *,
+    template: dict | None,
+    cost: dict | None,
+    lost_load: dict | None,
+    co2: dict | None = None,
 ) -> dict:
     """``{"kind", "cards"}`` for the solved open project.
 
     `cost` is `compute_cost_breakdown`'s payload and `lost_load` is
     `lost_load_payload`'s, either None when its route would answer 204.
+    `co2` is `co2_cap.annual`'s, None when no CO2 limit was set.
     """
     kind = project_kind(template)
     multi = len(ctx.network.investment_periods) > 0
@@ -410,6 +449,7 @@ def headline_kpis(
             "new_build_capital", cost, "capex_expansion", not multi
         ),
         "unserved_energy": lambda: _unserved(lost_load),
+        "co2_annual": lambda: _co2(co2),
     }
     cards = [build[c]() if c in build else _checked(ctx, c) for c in ORDER[kind]]
     cards = [c for c in cards if c is not None]

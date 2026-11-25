@@ -134,7 +134,7 @@ def test_without_the_ai_profile_the_envelope_rows_are_unknown(tmp_path, tid):
             continue
         assert rows[rid]["verdict"] == "unknown", rid
         if rid != "rapid_voltage_change" or rows[rid]["limit"] is not None:
-            assert "AI-training load profile" in rows[rid]["note"] \
+            assert "load profile" in rows[rid]["note"] or "load-step profile" in rows[rid]["note"] \
                 or "short-circuit level" in rows[rid]["note"]
 
 
@@ -1319,3 +1319,11 @@ def test_without_gridspine_there_are_no_process_units_to_screen(monkeypatch):
     monkeypatch.setitem(sys.modules, "gridspine.drivers.process_chain", None)  # makes the import raise
     links = pd.DataFrame({"eh_process": ["yes", True]}, index=["a", "b"])
     assert G._process_units(links) == []
+
+
+@pytest.mark.parametrize("tid", tuple(T.BUILDERS))
+def test_ai_training_wording_is_only_on_the_data_centre_templates(tmp_path, tid):
+    """Issue 28: the AI-training phrase is a data-centre one; no other shipped template's rows carry it."""
+    d, n = _project(tmp_path, tid)
+    text = json.dumps(G.grid_readiness(d, n, PROFILE))
+    assert ("AI-training" in text) == (tid in DC_IDS), tid

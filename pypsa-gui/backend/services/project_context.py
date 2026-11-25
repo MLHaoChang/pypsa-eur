@@ -298,6 +298,9 @@ RESULT_STATE_KEYS = (
     # DC 01: the EH study's opt-in front stage (its sibling table).
     "eh_front",
     "last_reserve_margin",
+    # DC review 02: the CO2 limit goal's per-period caps, duals and, after an
+    # infeasible solve, its typed refusal (None when the goal is off).
+    "last_co2_cap",
     # Grid-to-process ticket 03: the binary operational check of a plan with
     # committable process units (None without one).
     "last_process_uc_check",
@@ -592,6 +595,8 @@ class ProjectSolverState:
     # serves. Reset with the rest each solve, so a margin can never outlive
     # the plan that met it.
     last_reserve_margin: Any = None
+    # DC review 02: the CO2 limit goal's result (`services/solver/co2_cap.py`).
+    last_co2_cap: Any = None
     # Grid-to-process ticket 03: the binary operational check payload.
     last_process_uc_check: Any = None
     # F1: the sizing label of the last solve ("optimised" or the fixed source).

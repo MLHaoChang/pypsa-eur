@@ -1415,6 +1415,15 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
             except Exception as exc:
                 phase(f"Vintage expansion failed: {exc}. Continuing without per-period bounds.")
 
+        # 8) CO2 limit goal (DC template review 02): one PyPSA CO2 cap row per
+        #    period, written last so its constant reads the final snapshots and
+        #    period weights. Its undo runs first in restore(), so it reads the
+        #    rows' duals before anything else is put back.
+        from services.solver import co2_cap as _co2_cap
+        _co2_undo = _co2_cap.apply(n, cfg, phase, captured)
+        if _co2_undo is not None:
+            undo_actions.append(("call", _co2_undo))
+
     except BaseException:
         # BaseException, not Exception: the abort path raises a
         # `KeyboardInterrupt` into this thread (see `_AbortWatcher`), and an
