@@ -1,6 +1,7 @@
 """DC 01 / DC01-OUTAGE-1: the data-centre templates' grid supply carries
 generic, public, *assumed* outage data, so the reserve margin can price it
 (the front's margin preflight no longer refuses), and the ledger says so."""
+
 from __future__ import annotations
 
 import json
@@ -16,8 +17,10 @@ from project_templates import eh_templates as T
 from services.adequacy import front as fr
 
 DC = ("eh_datacenter", "eh_datacenter_staged")
-_BUILD = {"eh_datacenter": T.build_eh_datacenter,
-          "eh_datacenter_staged": T.build_eh_datacenter_staged}
+_BUILD = {
+    "eh_datacenter": T.build_eh_datacenter,
+    "eh_datacenter_staged": T.build_eh_datacenter_staged,
+}
 _HERE = pathlib.Path(T.__file__).parent
 
 
@@ -29,7 +32,9 @@ def test_the_derivation_is_the_cited_median_year():
     # CEER-ECRB 7th Benchmarking Report (2022), Table 2-18, 2011-2018.
     assert T.GRID_SUPPLY_SAIDI_MIN == pytest.approx(3.945)
     assert T.GRID_SUPPLY_SAIFI == pytest.approx(0.135)
-    assert T.GRID_SUPPLY_FOR == pytest.approx(3.945 / (60 * 8760), rel=1e-4)  # rounded to 1e-9
+    assert T.GRID_SUPPLY_FOR == pytest.approx(
+        3.945 / (60 * 8760), rel=1e-4
+    )  # rounded to 1e-9
     assert T.GRID_SUPPLY_FOR == 7.506e-06
     assert T.GRID_SUPPLY_MTTR_H == 0.487
     assert 0.0 < T.GRID_SUPPLY_FOR < 1.0 and T.GRID_SUPPLY_MTTR_H > 0.0
@@ -45,10 +50,13 @@ def test_the_model_carries_the_outage_data(tid):
 @pytest.mark.parametrize("tid", DC)
 def test_the_ledger_says_assumed_and_equals_the_model(tid):
     g = _BUILD[tid]().generators.loc["grid_supply"]
-    for meta in (T.TEMPLATE_META[tid],
-                 json.loads((_HERE / tid / T.META_FILE).read_text())):
-        rows = {r["field"]: r for r in meta["ledger"]
-                if r.get("entity") == "grid_supply"}
+    for meta in (
+        T.TEMPLATE_META[tid],
+        json.loads((_HERE / tid / T.META_FILE).read_text()),
+    ):
+        rows = {
+            r["field"]: r for r in meta["ledger"] if r.get("entity") == "grid_supply"
+        }
         assert set(rows) == {"outage_rate_value", "mttr_hours"}
         for field, row in rows.items():
             assert row["source"] == "assumed"
