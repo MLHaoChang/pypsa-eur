@@ -296,3 +296,46 @@ def test_the_card_and_the_workbook_name_the_classes_alike():
         "COLUMN_LABEL" in _model_ts()
         and f"volume_class: '{VOLUME_CLASS_LABEL}'" in _model_ts()
     )
+
+
+# ── mutant killers (scripts/coord/mutants.py) ────────────────────────────────
+
+
+def test_an_explicit_null_class_parses_on_any_line():
+    """The card sends `volume_class: null` when a line leaves typed: never a 422."""
+    assert _capex(volume_class=None).volume_class is None
+    linked = _line(
+        name="nh3",
+        quantity=None,
+        volume_class=None,
+        quantity_source="linked:served_product.nh3@1",
+    )
+    assert linked.volume_class is None
+
+
+def test_a_line_that_ends_before_the_lease_up_reads_no_scaled_year():
+    early = _service(end_year=2032)
+    case = _lease_case({2033: _F}, early)
+    assert case.scaled_years(early, (2031, 2035)) == []
+    assert not case.refusals(horizon=(2031, 2035), base_year=2031)
+    assert bcm.volume_factor_display(
+        _lease_case({2033: _F}, _service(end_year=2032, volume_class="fixed")), _OPS
+    ) == {"volume_factor": {"2033": _F}, "volume_factor_note": bcm.VOLUME_FACTOR_NOTE}
+    assert case.scaled_years(_service(end_year=2033), (2031, 2035)) == [2033]
+
+
+def test_the_report_leaves_out_a_class_on_a_line_no_scaled_year_reaches():
+    late = _service(start_year=2033, volume_class="volume")
+    shown = bcm.volume_factor_display(_lease_case(_LEASE, late), _OPS)
+    assert "volume_class" not in shown
+
+
+def test_a_linked_quantity_not_evaluated_under_a_lease_up_stays_not_established():
+    from services.business_case.linked_outputs import NotEvaluated
+
+    _, r = _run(
+        _lease_case(_LEASE),
+        ic=_no_export_ic(),
+        outputs={"nh3": NotEvaluated("served_product.nh3", "stale")},
+    )
+    assert "line_not_established:nh3" in r.op.reasons["operating"]

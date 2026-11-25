@@ -1496,6 +1496,8 @@ def test_the_hash_is_the_domain_the_ic_and_the_inputs_exactly():
                     "linked_share_by_year",
                     "default_units",
                     "derating",
+                    # BC 18: unset, or set where no year of the line is scaled.
+                    "volume_class",
                 },
             )
             for ln in inputs.lines
@@ -2140,7 +2142,10 @@ def test_bc15_v3_every_stream_and_linked_kind_has_exactly_one_volume_class():
 
 
 def test_bc15_a_typed_line_is_not_volume_and_a_linked_export_refuses():
-    assert bcm._volume_line(_line()) is False
+    # BC 18: a typed line reads its stated class; unset refuses (GK B2 BC 18 V4).
+    assert bcm._volume_line(_line(volume_class="fixed")) is False
+    with pytest.raises(VolumeFactorTypedLine):
+        bcm._volume_line(_line())
     assert bcm._volume_line(_line(**_NH3)) is True
     cap = _line(**{**_NH3, "quantity_source": "linked:capacity.pv@1"})
     assert bcm._volume_line(cap) is False
