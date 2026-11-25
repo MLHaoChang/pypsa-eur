@@ -53,6 +53,6 @@ describe('ReliabilityGoalSummary: the verdict\'s own goal and draws', () => {
   it('names the last run\'s draws beside the goal\'s first batch', () => {
     state.goal = goal()
     render(<ReliabilityGoalSummary items={['draws']} testId="g" ranDraws={2000} />)
-    expect(screen.getByTestId('g-values').textContent).toBe('MC draws 2,000 in the last run (first batch 500 (default))')
+    expect(screen.getByTestId('g-values').textContent).toBe('MC draws 2,000 in the last run · first batch 500 (default)')
   })
 })

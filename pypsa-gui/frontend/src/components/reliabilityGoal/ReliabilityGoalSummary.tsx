@@ -70,7 +70,7 @@ export function ReliabilityGoalSummary({ items, testId, requireTarget = false, m
         : goalWords(goal, 'target_lole_h')}`)
       else if (it === 'ens') parts.push(`ENS target ${goalWords(goal, 'ens_cap_permyriad')}`)
       else if (it === 'draws') parts.push(ranDraws != null && ranDraws !== goal.mc_draws.value
-        ? `MC draws ${ranDraws.toLocaleString('en-GB')} in the last run (first batch ${goalWords(goal, 'mc_draws')})`
+        ? `MC draws ${ranDraws.toLocaleString('en-GB')} in the last run · first batch ${goalWords(goal, 'mc_draws')}`
         : `MC draws ${goalWords(goal, 'mc_draws')}`)
       // The Expert MC batches adaptively (walkthrough asset-investment 08):
       // the goal's draws are its first batch, not its whole run.
