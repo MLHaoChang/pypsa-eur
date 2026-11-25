@@ -1076,3 +1076,13 @@ def test_an_extendable_branch_the_solve_may_build_is_a_path(kind, attrs):
         n.add(kind, "b", bus0="grid", bus1="site", x=0.1, **attrs)
     f = reserve_margin_facts(n, _cfg())
     assert _per(f)["firm_fixed_mw"] == pytest.approx(99.0)
+
+
+def test_a_branch_whose_rating_cannot_be_read_is_no_path():
+    # Fail closed: an unreadable rating is not a rating.
+    n = _net()
+    n.add("Line", "b", bus0="grid", bus1="site", x=0.1, s_nom=100.0)
+    n.lines["s_nom"] = n.lines["s_nom"].astype(object)
+    n.lines.at["b", "s_nom"] = "n/a"
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(CAPPED)
