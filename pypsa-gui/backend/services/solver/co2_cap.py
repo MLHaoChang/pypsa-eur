@@ -84,8 +84,8 @@ def target_of(cfg: Any) -> float | None:
     if not math.isfinite(v) or v < 0.0:
         raise Co2CapRefusal(
             INVALID,
-            f"{LABEL}: {raw} is not a number of t CO₂/yr of 0 or more. "
-            f"Set the limit again in the Goal step.",
+            # No "where to set it": the app's link names the place in the user's mode (UX 30).
+            f"{LABEL}: {raw} is not a number of t CO₂/yr of 0 or more.",
         )
     return v
 
@@ -141,8 +141,11 @@ def apply(n, cfg, phase, captured: dict):
     if existing:
         raise Co2CapRefusal(
             DUPLICATE,
-            f"{LABEL}: the network already has a CO₂ cap ({', '.join(map(str, existing))}). "
-            f"Remove that constraint or clear the limit in the Goal step.",
+            # Plain words and no one mode's place (UX 30); the cap's own name stays,
+            # since it is how the user finds the cap to remove.
+            f"{LABEL}: this network already has its own CO₂ cap "
+            f"({', '.join(map(str, existing))}), so this limit was not added. "
+            f"Remove that cap, or clear this limit.",
         )
     # The fuel curve guard (homer-parity 02a) reads the caps as the LP chain is
     # built, before these rows exist: run it here against them.

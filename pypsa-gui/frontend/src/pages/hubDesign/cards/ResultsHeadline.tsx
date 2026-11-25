@@ -134,6 +134,19 @@ function LcoeFigure({ read }: { read: { kind: 'card'; card: HeadlineCard | null 
   )
 }
 
+/** The CO₂ limit goal's figure (DC review 02): the Expert strip's card, with
+ *  its limit line; Emissions holds the limit's rows, opened in the Results
+ *  panel with "Back to Results" (UX GO on DC 02 (4)). */
+export function Co2Figure({ card }: { card: HeadlineCard }) {
+  const words = HEADLINE_WORDS.co2_annual
+  const { value, basis } = headlineFigure(card)
+  return (
+    <Kpi headline testId="hub-results-co2" label={words.label} value={value} basis={basis}
+      state={cardState(card)} reason={card.reason ?? undefined}
+      link={{ label: `${words.tabLabel} ›`, onClick: () => showResultsTab(words.tab, { from: 'Results' }) }} />
+  )
+}
+
 /** The pill when the shortfall is under the goal but a feeder bound holds the verdict back. */
 export const FEEDER_HELD_PILL = 'Under goal · verdict not decided'
 /** template-e2e 21: the goal is under the smallest shortfall the run can show,
@@ -231,6 +244,8 @@ export function ResultsHeadline({ reliability, cost, costEur = null, ci, freshne
   const icRun = useInvestmentCaseRun()
   const headline = useHeadlineKpis()
   const lcoe = headline.data?.cards.find(c => c.id === 'lcoe') ?? null
+  // Only while a CO₂ limit is set: the backend sends the card then (DC review 02).
+  const co2 = headline.data?.cards.find(c => c.id === 'co2_annual') ?? null
   const rel = tiles.find(t => t.id === 'reliability')
   const npv = tiles.find(t => t.id === 'investment')
   const figures: HeadlineFigureState[] = [
@@ -238,6 +253,7 @@ export function ResultsHeadline({ reliability, cost, costEur = null, ci, freshne
       label: t.label, state: t.state, freshnessUnknown: freshnessUnknown && t.id === 'reliability',
     })),
     ...(lcoe ? [{ label: HEADLINE_WORDS.lcoe.label, state: cardState(lcoe) }] : []),
+    ...(co2 ? [{ label: HEADLINE_WORDS.co2_annual.label, state: cardState(co2) }] : []),
   ]
   const note = mixedSourceNote(figures)
   return (
@@ -258,6 +274,7 @@ export function ResultsHeadline({ reliability, cost, costEur = null, ci, freshne
         {headline.isLoading ? <Skeleton className="min-h-[96px]" /> : (
           <LcoeFigure read={headline.isError ? { kind: 'failed' } : headline.data ? { kind: 'card', card: lcoe } : { kind: 'none' }} />
         )}
+        {co2 && <Co2Figure card={co2} />}
       </div>
       {note && <p role="note" data-testid="hub-results-mixed" className="text-[11.5px] text-muted">{note}</p>}
       {reliability.lole != null && (

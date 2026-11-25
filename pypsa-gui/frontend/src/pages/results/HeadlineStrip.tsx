@@ -15,6 +15,7 @@ import { showResultsTab } from '../../layout/flowNavigation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { Sparkline } from '../../components/PageKit'
+import { Co2LimitRefusal } from './Co2LimitRefusal'
 import { HEADLINE_WORDS, comparisonBasis, headlineDelta, headlineFigure, headlineTrend } from './headlineWords'
 
 export const headlineKpisKey = (project: string | null) => nk(project, 'results', 'headline_kpis')
@@ -77,12 +78,21 @@ function Tile({ card, dimmed, tall }: { card: HeadlineCard; dimmed: boolean; tal
         action={card.state === 'not_run' || (card.id === 'lcoe' && card.value == null && card.state !== 'running')
           ? { label: `${words.tabLabel} ›`, onClick: () => showResultsTab(words.tab, { from: 'Summary' }) }
           : undefined}
+        // The CO₂ limit's figure links to Emissions, where the limit's rows are (DC review 02).
+        link={card.id === 'co2_annual'
+          ? { label: `${words.tabLabel} ›`, onClick: () => showResultsTab(words.tab, { from: 'Summary' }) }
+          : undefined}
       />
     </div>
   )
 }
 
+/** The strip, after the CO₂ limit's refusal when the last solve under it found no design (DC review 02). */
 export default function HeadlineStrip() {
+  return <><Co2LimitRefusal mode="expert" /><HeadlineFigures /></>
+}
+
+function HeadlineFigures() {
   const source = useChartSource()
   const project = useUIStore(s => s.currentProject)
   const plain = useHeadlineKpis()

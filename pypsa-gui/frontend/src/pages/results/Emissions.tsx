@@ -26,6 +26,12 @@ import { NOT_RECORDED_KPI, NotRecordedDash, NotRecordedNote } from './NotRecorde
 // shows up in `caps[]`. Horizon-wide caps display a single shadow-price KPI
 // at the top; per-period caps render in a dedicated table beneath.
 
+/** The CO₂ limit goal's rows read "CO₂ limit" (DC review 02); any other cap keeps its constraint name. */
+export const CO2_LIMIT_CAP = 'CO₂ limit'
+/** A goal row whose tonnes the solve did not count says so, not a bare dash (UX 30). */
+export const NOT_REPORTED = 'Not reported'
+const capName = (c: { name: string; goal?: boolean }) => (c.goal ? CO2_LIMIT_CAP : c.name)
+
 export default function Emissions() {
   const currentProject = useUIStore(s => s.currentProject)
   const { data: emissions } = useQuery({
@@ -129,7 +135,7 @@ export default function Emissions() {
                   {' '}<span className="font-mono text-text">
                     {scopeCaps[0].cap_tCO2.toLocaleString(undefined, { maximumFractionDigits: 1 })} tCO₂
                   </span>{' '}
-                  ({scopeCaps[0].name})
+                  ({capName(scopeCaps[0])})
                 </>
               )}
             </span>
@@ -190,7 +196,7 @@ export default function Emissions() {
                 {allCaps.map((c, i) => (
                   <tr key={c.name}
                       className={`${i % 2 === 0 ? 'bg-bg' : 'bg-panel'} ${c.binding ? 'ring-1 ring-warn/30' : ''}`}>
-                    <td className="px-2 py-1 font-mono text-[11px]">{c.name}</td>
+                    <td className={`px-2 py-1 text-[11px] ${c.goal ? '' : 'font-mono'}`}>{capName(c)}</td>
                     <td className="px-2 py-1 text-[11px]">
                       {c.scope === 'horizon'
                         ? <span className="text-muted">horizon</span>
@@ -202,7 +208,9 @@ export default function Emissions() {
                         : '—'}
                     </td>
                     <td className="px-2 py-1 font-mono text-[11px] text-right">
-                      {c.used_tCO2.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                      {c.used_tCO2 != null
+                        ? c.used_tCO2.toLocaleString(undefined, { maximumFractionDigits: 1 })
+                        : <span className="font-sans text-muted">{NOT_REPORTED}</span>}
                     </td>
                     <td className={`px-2 py-1 font-mono text-[11px] text-right
                       ${c.slack_tCO2 != null && c.slack_tCO2 < 0 ? 'text-danger font-semibold' : ''}`}>

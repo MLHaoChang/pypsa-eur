@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { simulationApi } from '../api/simulation'
+import { resultsApi, simulationApi } from '../api/simulation'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
 import { useSimulationStore } from '../store/simulationStore'
@@ -18,7 +18,11 @@ import IssuesPanel from './IssuesPanel'
 
 vi.mock('../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/simulation')>()
-  return { ...actual, simulationApi: { ...actual.simulationApi, preflight: vi.fn() } }
+  return {
+    ...actual,
+    simulationApi: { ...actual.simulationApi, preflight: vi.fn() },
+    resultsApi: { ...actual.resultsApi, getCo2Limit: vi.fn() },
+  }
 })
 
 vi.mock('../api/network', async (importOriginal) => {
@@ -71,6 +75,7 @@ beforeEach(() => {
   vi.mocked(simulationApi.preflight).mockReset()
   vi.mocked(networkApi.getCarriers).mockReset()
   vi.mocked(networkApi.updateCarrier).mockReset()
+  vi.mocked(resultsApi.getCo2Limit).mockReset().mockResolvedValue(null)
   useUIStore.setState({ currentProject: 'Demo' })
 })
 
@@ -276,5 +281,44 @@ describe('IssuesPanel — infeasible card names the constraint (homer-parity 05)
     renderPanel()
     await screen.findByText('No feasible solution')
     expect(screen.queryByTestId('failure-constraint-hint')).toBeNull()
+  })
+})
+
+describe('IssuesPanel — the CO₂ limit refusal in the last-solve failure banner (DC review 02)', () => {
+  const SENTENCE = 'CO₂ limit: no design meets 100 t CO₂/yr. The least reachable is 420 t CO₂/yr. One extra solve without the limit found it.'
+  afterEach(() => {
+    useSimulationStore.getState().setLastFailure(null)
+    useUIStore.setState({ uiMode: 'expert' })
+  })
+  const failed = () => {
+    vi.mocked(simulationApi.preflight).mockResolvedValue({ ok: true, errors: 0, warnings: 0, issues: [] })
+    vi.mocked(networkApi.getCarriers).mockResolvedValue([])
+    useSimulationStore.getState().setLastFailure({
+      category: 'infeasible', title: 'No feasible solution', hint: 'Generic hint.', detail: 'infeasible',
+    })
+  }
+
+  it('Expert: shows the solve\'s sentence and a link to Solver settings when a first solve fails', async () => {
+    vi.mocked(resultsApi.getCo2Limit).mockResolvedValue({
+      limit_t_per_yr: 100,
+      refusal: { code: 'co2_cap_unreachable', message: SENTENCE, least_t_per_yr: { all: 420 },
+        without_limit: 'feasible', extra_solves: 1 },
+    })
+    useUIStore.setState({ uiMode: 'expert' })
+    failed()
+    renderPanel()
+    const refusal = await screen.findByTestId('results-co2-refusal')
+    expect(refusal.textContent).toContain(SENTENCE)
+    await userEvent.click(screen.getByRole('button', { name: 'Raise the limit in Solver settings ›' }))
+    expect(useUIStore.getState().solverBlockRequest).toBe('goal')
+  })
+
+  it('adds nothing to the banner when the solve refused no CO₂ limit', async () => {
+    failed()
+    renderPanel()
+    await screen.findByText('No feasible solution')
+    await waitFor(() => expect(resultsApi.getCo2Limit).toHaveBeenCalled())
+    expect(screen.queryByTestId('results-co2-refusal')).toBeNull()
+    expect(screen.queryByTestId('hub-co2-refusal')).toBeNull()
   })
 })

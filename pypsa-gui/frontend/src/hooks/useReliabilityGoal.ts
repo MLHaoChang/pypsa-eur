@@ -14,11 +14,20 @@ import { nk } from '../utils/queryKeys'
 
 /** The goal fields the editor edits (the site type has its own select). */
 export type GoalNumberField = 'target_lole_h' | 'ens_cap_permyriad' | 'mc_draws'
+/** The CO₂ limit goal (DC review 02): edited with the reliability goal and
+ *  saved with it, but not part of `GET …/reliability_goal`; its stored value
+ *  is the solver config's (`co2_limit_t_per_yr`). */
+export const CO2_LIMIT = 'co2_limit_t_per_yr'
+export type GoalCo2Field = typeof CO2_LIMIT
 /** What the user typed, per field; a field absent here was not edited. */
-export type GoalEdits = Partial<Record<GoalNumberField, string>>
+export type GoalEdits = Partial<Record<GoalNumberField | GoalCo2Field, string>>
 /** The fields a save sends: only the edited ones. */
 export type GoalPatch = Partial<Pick<SolverConfig,
-  'target_lole_h' | 'ens_cap_permyriad' | 'mc_draws' | 'site_archetype'>>
+  'target_lole_h' | 'ens_cap_permyriad' | 'mc_draws' | 'site_archetype' | 'co2_limit_t_per_yr'>>
+
+/** The CO₂ limit's words, the same in both modes (UX GO on DC 02 (1)). */
+export const CO2_LIMIT_UNIT = 't CO₂/yr'
+export const CO2_LIMIT_ERROR = `CO₂ limit must be 0 or more ${CO2_LIMIT_UNIT}.`
 
 /** The engine's draw cap (`services/adequacy/mc.py` MAX_DRAWS). */
 export const MAX_GOAL_DRAWS = 2000
@@ -30,7 +39,7 @@ export const reliabilityGoalKey = (project: string | null) => nk(project, 'relia
  *  an invalid value returns an error naming it instead of a patch. */
 export function goalPatchFromEdits(edits: GoalEdits): { patch: GoalPatch; error: string | null } {
   const patch: GoalPatch = {}
-  const raw = (k: GoalNumberField) => (edits[k] ?? '').trim()
+  const raw = (k: GoalNumberField | GoalCo2Field) => (edits[k] ?? '').trim()
   if ('target_lole_h' in edits) {
     const v = Number(raw('target_lole_h'))
     if (raw('target_lole_h') === '') patch.target_lole_h = null
@@ -50,6 +59,13 @@ export function goalPatchFromEdits(edits: GoalEdits): { patch: GoalPatch; error:
     else if (!Number.isInteger(v) || v < 1 || v > MAX_GOAL_DRAWS) {
       return { patch: {}, error: `MC draws must be a whole number from 1 to ${MAX_GOAL_DRAWS}.` }
     } else patch.mc_draws = v
+  }
+  if (CO2_LIMIT in edits) {
+    // Blank = no limit (null); 0 is a limit: no emissions at all.
+    const v = Number(raw(CO2_LIMIT))
+    if (raw(CO2_LIMIT) === '') patch.co2_limit_t_per_yr = null
+    else if (!Number.isFinite(v) || v < 0) return { patch: {}, error: CO2_LIMIT_ERROR }
+    else patch.co2_limit_t_per_yr = v
   }
   return { patch, error: null }
 }
