@@ -204,11 +204,15 @@ def test_a_front_point_with_the_co2_goal_on_solves_one_cap_row_per_period(monkey
 
     def spy(n, cfg, phase, captured):
         gc = n.global_constraints
-        rows = gc[(gc.type == "primary_energy") & (gc.carrier_attribute == "co2_emissions")]
+        rows = gc[
+            (gc.type == "primary_energy") & (gc.carrier_attribute == "co2_emissions")
+        ]
         seen.append((cfg.co2_limit_t_per_yr, sorted(rows.index)))
         undo = real_apply(n, cfg, phase, captured)
         gc = n.global_constraints
-        after = gc[(gc.type == "primary_energy") & (gc.carrier_attribute == "co2_emissions")]
+        after = gc[
+            (gc.type == "primary_energy") & (gc.carrier_attribute == "co2_emissions")
+        ]
         seen[-1] += (sorted(after.index),)
         return undo
 
@@ -227,7 +231,9 @@ def test_a_front_point_with_the_co2_goal_on_solves_one_cap_row_per_period(monkey
     assert [limit for limit, _, _ in seen] == [None] * len(seen)
     assert all(before == after for _, before, after in seen)
     assert sorted(after for _, _, after in seen) == [[], [fr.CO2_CAP_NAME]]
-    assert res["points"][0]["point"]["co2_t_per_yr"] == pytest.approx(219_000.0, rel=1e-6)
+    assert res["points"][0]["point"]["co2_t_per_yr"] == pytest.approx(
+        219_000.0, rel=1e-6
+    )
 
 
 def test_a_cap_above_the_emissions_has_no_shadow_price():
