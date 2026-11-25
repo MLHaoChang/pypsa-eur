@@ -468,8 +468,11 @@ def _ssti_screens(run: Path, profile: str, profile_dirs) -> None:
     def cited(c):
         return {"source": c[0]["source"] if c else None, "clause": c[0]["clause"] if c else None}
 
-    worst = out.uif.worst_uif
+    worst, island_worst = out.uif.worst_uif, out.uif.island_worst_uif
+    # GC-08e: the island cases' own verdict and worst UIF beside the grid cases', for the scorecard and pack
     meta = {"uif": {"verdict": out.uif.verdict, "worst_uif": None if math.isnan(worst) else worst,
+                    "island_verdict": out.uif.island_verdict,
+                    "island_worst_uif": None if math.isnan(island_worst) else island_worst,
                     "threshold": out.threshold,
                     **cited(out.uif_threshold), "notes": list(out.uif.notes)},
             "subsync": {"verdict": out.subsync_verdict,
