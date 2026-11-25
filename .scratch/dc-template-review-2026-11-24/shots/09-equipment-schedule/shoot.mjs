@@ -48,13 +48,14 @@ try {
   vite = spawn(path.join(FE, 'node_modules/.bin/vite'), ['--port', String(PORT), '--host', '127.0.0.1', '--strictPort'], { cwd: FE, stdio: 'ignore' })
   const b = await chromium.launch()
   for (let i = 0; i < 60; i++) { try { if ((await fetch(`http://127.0.0.1:${PORT}/src/harness09.tmp.html`)).ok) break } catch {} await new Promise(r => setTimeout(r, 1000)) }
-  const shoot = async (view, mode, theme, name, stale) => {
+  const shoot = async (view, mode, theme, name, stale, scrolled) => {
     const ctx = await b.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2 })
     const p = await ctx.newPage()
     await p.route('**/api/campus-electrical/Demo/equipment-schedule', r => r.fulfill({ json: { ...sched, stale } }))
     p.on('console', m => m.type()==='error' && console.log('console', m.text().slice(0,200))); p.on('response', r => r.status()>=400 && console.log('http', r.status(), r.url())); p.on('pageerror', e => console.log('pageerror', e.message.slice(0,300)))
     await p.goto(`http://127.0.0.1:${PORT}/src/harness09.tmp.html?view=${view}&mode=${mode}&theme=${theme}`)
     await p.waitForSelector(view === 'short' ? '[data-testid=switchgear-chosen-scroll]' : '[data-testid=schedule-assumptions]')
+    if (scrolled) await p.locator('[data-testid=switchgear-chosen-scroll]').evaluate(e => { const s = [e, ...e.querySelectorAll('*')].find(x => x.scrollHeight > x.clientHeight + 1) ?? e; s.scrollTop = s.scrollHeight })
     await p.waitForTimeout(600)
     await p.locator('#frame').screenshot({ path: path.join(OUT, `${name}-${mode}-${theme}.png`) })
     await ctx.close()
@@ -63,6 +64,7 @@ try {
     await shoot('table', mode, theme, 'handoff-table', mode === 'guided' && theme === 'light')
     await shoot('short', mode, theme, 'short-circuit-after', false)
   }
+  await shoot('short', 'expert', 'light', 'short-circuit-after-scrolled', false, true)
   await b.close()
 } finally {
   vite?.kill()
