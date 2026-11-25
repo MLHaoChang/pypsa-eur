@@ -33,4 +33,4 @@ def shape_utilisation(
         ) * inference_utilisation(hod, mix)
     if kind == "flat":
         return np.full(len(np.asarray(hod)), mix.flat_share)
-    raise ValueError(f"unknown utilisation kind {kind!r}")
+    raise ValueError(f"unknown utilisation kind {kind}")
