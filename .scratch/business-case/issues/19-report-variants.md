@@ -3,7 +3,7 @@
 
 # 19 Report variants: top N by NPV, greatest IRR, one per participant (K9 / C4)
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-25: nothing built on master
 Owner: BC19-NPV-1.
 Blocked by: `site-commercial-ux/04` (party board, for the per-participant variant)
 Design: `.scratch/project-workflow/commercial-finance.md` §7 row K9; design.md:317.
@@ -30,3 +30,7 @@ Reports come in one form per project. The design promises variants: the top N op
 `pypsa-gui/backend/services/report*` (variant selection), `pypsa-gui/frontend/src/pages/ReportsPanel.tsx`.
 
 ## Comments
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: no 'Top 3 by NPV' or 'Greatest IRR' variant in backend or frontend/src; no PR named.

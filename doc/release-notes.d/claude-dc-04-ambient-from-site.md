@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The data-centre PUE reads an ambient temperature chosen from the site latitude (climate-zone preset) instead of always the Central-European curve; the create form and the load card say which source a run used.

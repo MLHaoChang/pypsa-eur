@@ -3,7 +3,7 @@
 
 # Cohesion slice: one type scale, one header, one card, one empty state, one name
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-25: #1823, #1837, #1856 merged (A, B2, B1 part 1); left: B1 part 2, optional F8 skeleton, done-when shots
 Gated: UX
 Type: implementation (frontend, no colour)
 Owner decisions: UI-COHESION-1 (the non-colour items go into one slice sized for one PR), DENSITY-1 (9–11 px text and Inter stay), THEME-LIGHT-1 (colour is not in this slice).
@@ -61,3 +61,7 @@ Titles 15 px; links and eyebrows ink; selection = ink ring plus accent halo; eye
 ## Comments
 
 - 2026-11-23 status sweep: landed in #1823 (5bf7a297); #1837 (ce472a31); #1856 (a5f2bdca): A, B2 and B1 part 1. Remains: any B1 part 2, optional F8 skeleton, done-when shots and facts check.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: #1823, #1837, #1856 are in the origin/master log; EmptyState.tsx exists; the 2026-11-23 sweep lists what remains, no later cohesion PR found.

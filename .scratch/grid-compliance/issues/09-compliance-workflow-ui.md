@@ -3,7 +3,7 @@
 
 # GC-09 Compliance workflow: deliverable tracker, data list, TSO revision log, report pack
 
-Status: ready-for-agent; audit 2026-11-19: backend open in #1577; UI and item 6 wiring not started
+Status: ready-for-agent; audit 2026-11-25: backend (#1577) and Grid compliance UI section (#1854) merged; left: item 6 (DGS export download and background-harmonics upload wiring)
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: none (tracker, data list and revision log start at once; pack rows light up as 01–08 land)
@@ -89,3 +89,7 @@ Release note: one new file under `doc/release-notes.d/` (see its README).
 - A targeted mutant runs on each guard's test, and the PR body lists them. The PR opens after #1577 merges.
 
 - 2026-11-23 status sweep: landed in #1577 (0578ffac); #1854 (6cf22fbb): backend and Grid compliance UI section. Remains: item 6 (DGS export download and background-harmonics upload wiring).
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: #1577, #1854 in master log; campus_study.powerfactory_campus and import_background_campus have no caller in campus_electrical_service.py or routers.

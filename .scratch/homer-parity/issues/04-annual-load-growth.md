@@ -3,7 +3,7 @@
 
 # 04 — Load growth as a rate per year across the multi-year optimisation and the finance years
 
-Status: ready-for-agent; audit 2026-11-19: 04a open in #1604; 04b not started
+Status: ready-for-agent; audit 2026-11-25: 04a merged (#1604, and #1795 the site fill helper); left: 04b finance per-year multiplier (no growth code in `services/finance/cashflow.py`)
 Model: Sonnet for 04a; Opus for 04b
 Reviewer: GK B (GK A only if adequacy/demand.py changes); UX for 04a
 Blocked by: 04b blocked by 04a
@@ -75,3 +75,7 @@ Extend `test_fca_load_scalers.py`; `test_finance_cashflow.py:157` pattern; `mode
 - **Owner, LOADGROWTH-FORM-1 (2026-11-17):** the generic-site form gets a fill helper, "Grow from the first stage at X % per year", that fills the later stages' peak MW compounded from the first stage year; each stays editable and a typed peak wins; no double counting. Same label, unit and help text wherever it appears. Its own UX placement review; a separate PR after 04a.
 - **GK B (plan amendment and additions, recorded 2026-11-17 by the 04a session):** amendment: derive on the effective periods (the config's `investment_periods` override, else the network's), re-derive on the network time-axis routes, and a pre-flight net that blocks a solve on a stale map. Addition 1: list every writer of the period set and the growth keys in the PR body. Addition 2: undo re-derives (tested). Addition 3: the pre-flight guard has no false positive and a killed mutant. GK B also accepted the C3/(a) reading: a well-formed mark on a removed period is removed.
 - **GK B (64) review of #1604, NOT OK @47ba5eb0:** strict rate field with typed refusals for `true`, `"2"`, −100, NaN; a malformed stored rate map fails closed in every caller; route tests killing the four time-axis hook mutants; the card shows rate, base year and every re-derived factor, the time-axis tool cards included; a network read failure refuses (`load_growth_network_unreadable`). All five addressed in cf3d1953, e8b0cc17, 52efc430; the derivation stays outside the solver-state lock (reason in the PR body).
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: checked #1604 and #1795 merged; grep of cashflow.py finds no geometric interpolation or load growth; `services/solver/load_growth.py` exists (04a).

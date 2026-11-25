@@ -63,6 +63,8 @@ class Run:
     # views whose route reads a whole context (Load flow). None for the base,
     # whose context is the active one.
     context: Any = None
+    # Solver state of a base solve held apart from the active context (a Guided study's); None: the active one.
+    solver_state: dict | None = None
 
 
 @dataclass

@@ -3,7 +3,7 @@
 
 # 18 — A volume class the user states on a typed line
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-25: nothing built on master
 Gated: GK B2
 Type: enhancement
 Parent: business-case 15 (lease-up volume factor), GK B2 plan answer Q1
@@ -19,3 +19,7 @@ A per-line volume class the user states: `fixed` never scales, `volume` scales b
 ## Triage (2026-11-20, master 87cf52a7)
 
 Checked by code reading only. Ask as written: a per-line volume class (`fixed` or `volume`), unset still refuses with `volume_factor_typed_line`, shown on the edit card and the workbook, hashed only where it changes an outcome. Parent business-case 15: check it is merged before starting. Gated: GK B2.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: no per-line volume class in models/business_case.py or the frontend; volume_factor_typed_line still refuses; parent bc 15 is done.

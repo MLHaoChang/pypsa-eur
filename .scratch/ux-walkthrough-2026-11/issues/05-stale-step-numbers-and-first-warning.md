@@ -3,7 +3,7 @@
 
 # Verdict text points to 'step 3 (Goal)'; every template opens with a warning
 
-Status: ready-for-agent; audit 2026-11-19: stale step numbers fixed (#1611, #1695); left: em dashes (SiteTypeSelect.tsx), amber first screen (needs template-e2e 01)
+Status: ready-for-agent; audit 2026-11-25: #1611, #1695 merged (stale step numbers fixed); left: em dashes (SiteTypeSelect.tsx:12,14), amber first screen (needs template-e2e 01)
 Model tier: sonnet
 Size: S
 Blocked by: #1611 merged (it rewrites the Guided verdict text)
@@ -33,3 +33,7 @@ J3 to J6.
 **2026-11-17 triage (SCALE-1).** Narrowed to the stale "step 3 (Goal)" text (name the section with a link) and the em dashes. The amber first screen from "no site location" is template-e2e 01 (ready), so not repeated here. Check #1611 first: it may already rewrite the sentence.
 
 - 2026-11-23 status sweep: landed in #1611 (fdd3bc283c); #1695 (2ed46afa01): stale step numbers fixed. Remains: em dashes in SiteTypeSelect.tsx and the amber first screen (needs template-e2e 01).
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: #1611, #1695 are in the origin/master log; em dashes still at reliabilityGoal/SiteTypeSelect.tsx:12,14; no template-e2e 01 PR found.

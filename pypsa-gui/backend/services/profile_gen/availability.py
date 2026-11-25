@@ -50,7 +50,9 @@ PROVENANCE = "synthetic/assumed"
 KINDS = ("maintenance", "must_run", "derating", "forced_outages")
 _TARGET = {"maintenance": "p_max_pu", "derating": "p_max_pu", "must_run": "p_min_pu"}
 _AMBIENT = {"ambient_annual_mean_c": 10.0, "ambient_seasonal_amplitude_k": 9.0,
-            "ambient_diurnal_amplitude_k": 5.0}
+            "ambient_diurnal_amplitude_k": 5.0,
+            # day of year the seasonal cosine peaks: 200 north, 17 south (dc_load_profile)
+            "ambient_peak_day": 200}
 _SEASON_CENTRE = {"summer": (8, 1), "winter": (1, 15)}
 _DATE = re.compile(r"(?:(\d{4})-)?(\d{2})-(\d{2})")
 
