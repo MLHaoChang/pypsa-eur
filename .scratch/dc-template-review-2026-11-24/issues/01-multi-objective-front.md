@@ -3,7 +3,7 @@
 
 # 01 A real front of reliability vs capex vs opex vs CO2 for the data-centre templates
 
-Status: needs-triage
+Status: in progress
 Blocked by: none (02 adds the CO2 axis cap)
 Source: DC template review 2026-11-24 (`../README.md`). Stage 3.
 Severity: blocker (the owner's core ask)
@@ -42,3 +42,21 @@ A user cannot see which designs are non-dominated across reliability, cost and e
 `services/adequacy/frontier.py`, `frontier_loop_runner.py`, `eh_study.py` (frontier stage), `routers/results.py` (`/results/frontier`), `frontend/src/pages/results/FrontierPanel.tsx`, a Guided results tile under `pages/hubDesign/`.
 
 ## Comments
+
+- 2026-11-24, builder (session_01G7qCuo7FKe7A3MSGkSURqA). Plan in 3 PRs: engine (`services/adequacy/front.py`, GK A); route, EH stage and apply-a-point; Expert panel and Guided §10 tile (UX).
+  - GK A plan GO, conditions F1–F9: no foreground mutation, order independence, a hand-solved CO2 point, one EUE basis, a budget that counts every solve, degenerate text per axis, dominance with ties/NaN, mutants, no fingerprint writes.
+  - Q1: both levers, with reserve_margin the default when the LP has no outage model, detected from the network.
+  - Q2: MC draws pinned per point.
+  - CO2 cap interface agreed with DC 02 through the coordinator: `co2_cap` / `co2_cap_<period>`, `primary_energy` on `co2_emissions`.
+- UX 28 GO for PR3, conditions:
+  - Guided/Expert parity, plus "Run the study in Expert" via withReturn.
+  - A visible key for every encoding (hollow = dominated, CO2 colour with both ends and t/yr, whiskers = CI), and axes with units.
+  - One unit per chart header; table and chart agree.
+  - One "Use this design" per point. After Apply say "Out of date" and offer a re-solve, never "stale". A revision refusal is one plain line with a retry.
+  - Degenerate notice in plain words, colon not em dash, no engine keys.
+  - Built capacities in the panel's asset words; LOLE/EUE/CI expanded on first use.
+  - Shots in Guided and Expert, light and dark: normal, degenerate, chosen point and refusal.
+- Found while building PR1:
+  - On the DC templates `grid_supply` has no outage data, so the reserve-margin lever is refused before any solve (the validator's own sentence).
+  - The MC samples each asset row as one unit, and without the pack boundary the grid import never fails, so LOLE reads 0 off-pack. PR2's EH stage passes the pack.
+  - `n.statistics` reads 0 capex on the solved templates (finance-pack pricing is LP-side and the tariff is commercial), so costs come from the LP objective.
