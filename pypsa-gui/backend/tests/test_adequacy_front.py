@@ -1317,7 +1317,8 @@ def test_the_ens_text_with_an_outage_model_does_not_blame_missing_outages():
     )["axes"]["ens_cap"]["text"]
     assert "no outages" not in text
     assert (
-        "was never reached at any of 2 points: at a value of lost load of 5,000 €/MWh" in text
+        "was never reached at any of 2 points: at a value of lost load of 5,000 €/MWh"
+        in text
     )
 
 
