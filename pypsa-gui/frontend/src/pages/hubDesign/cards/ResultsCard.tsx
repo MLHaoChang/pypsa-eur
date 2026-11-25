@@ -262,7 +262,7 @@ export function ResultsCard() {
           from the study report's TEA block; absent for a design with no electrolyser. */}
       {lcoh?.value != null && (
         <Kpi testId="hub-results-lcoh" label="Cost of hydrogen"
-          value={`€${lcoh.value.toFixed(2)} per kg`}
+          value={`${money(lcoh.value, 'EUR')}/kg`}
           hint="Levelised cost of the hydrogen this design produces, per kilogram, as the study priced it."
           state="ready" dimmed={stale || freshnessUnknown} />
       )}

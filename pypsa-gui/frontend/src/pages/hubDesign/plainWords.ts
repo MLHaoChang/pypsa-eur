@@ -117,7 +117,7 @@ export function costTileLabel(
   const first = periods && periods.length > 0 ? Math.min(...periods) : null
   const last = periods && periods.length > 0 ? Math.max(...periods) : null
   const end = first != null && analysisYears != null && analysisYears > 0 ? first + analysisYears : null
-  const valued = end != null && last != null && end > last ? `, valued to ${end} (${analysisYears} years)` : ''
+  const valued = end != null && last != null && end > last ? `, valued to ${end} over ${analysisYears} years` : ''
   return `Cost over the plan${plan}${valued} (discounted, before any shortfall costs)`
 }
 

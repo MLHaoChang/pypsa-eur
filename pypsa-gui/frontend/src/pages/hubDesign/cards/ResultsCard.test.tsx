@@ -133,7 +133,7 @@ describe('ResultsCard product cost (issue 28)', () => {
     mount()
     const tile = await screen.findByTestId('hub-results-lcoh')
     expect(tile.textContent).toContain('Cost of hydrogen')
-    expect(tile.querySelector('[data-kpi-value]')?.getAttribute('data-kpi-value')).toContain('€2.35 per kg')
+    expect(tile.querySelector('[data-kpi-value]')?.getAttribute('data-kpi-value')).toBe('€\u00a02.35/kg')
   })
   it('shows no hydrogen tile for a design with none', async () => {
     mount()
