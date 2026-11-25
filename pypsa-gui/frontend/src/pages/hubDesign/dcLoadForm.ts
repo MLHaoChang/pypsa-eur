@@ -162,10 +162,11 @@ export function dcLoadBody(
   }
   if (d.utilisation !== 'ai_training') {
     dc.utilisation = d.utilisation
-    dc.workload_mix = {
-      trough_share: Number(d.mix.trough), peak_share: Number(d.mix.peak), peak_hour: Number(d.mix.peakHour),
-      training_share: Number(d.mix.training), flat_share: Number(d.mix.flat),
+    const KEY: Record<MixKey, string> = {
+      trough: 'trough_share', peak: 'peak_share', peakHour: 'peak_hour', training: 'training_share', flat: 'flat_share',
     }
+    // Only the chosen kind's inputs: an inference spec stores no flat share.
+    dc.workload_mix = Object.fromEntries(MIX_FIELDS[d.utilisation].map(([k]) => [KEY[k], Number(d.mix[k])]))
   }
   if (computeUsed(d.compute)) {
     dc.compute = { kw_per_accelerator: Number(d.compute.kw), utilisation: Number(d.compute.util),

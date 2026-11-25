@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_serializer, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_serializer, model_validator
 
 from models.commercial import TimeSeriesRef
 from models.dc_compute_spec import ComputeSpec, WorkloadMixSpec
@@ -184,9 +184,13 @@ class DataCentreLoadSpec(BaseModel):
     #: DC 05: the optional compute block; reported next to the typed IT MW, never
     #: read by the LP (typed IT MW wins).
     compute: ComputeSpec | None = None
-    #: Inputs a stored spec carried that nothing models (``waste_heat_export``);
-    #: the ledger reports them. Never dumped, so they cannot move a hash.
-    ignored_inputs: list[str] = Field(default_factory=list, exclude=True)
+    #: Inputs a stored spec carried that nothing models (``waste_heat_export``),
+    #: set only by the loader below; the ledger reports them. Never dumped.
+    _ignored_inputs: list[str] = PrivateAttr(default_factory=list)
+
+    @property
+    def ignored_inputs(self) -> list[str]:
+        return self._ignored_inputs
     #: Asset-sizing design intent A-E (AS-01); None = a backup_mode-only project.
     design_intent: DesignIntentSpec | None = None
     #: Backup on loss of grid (DC 03); the default keeps the genset fleet.
@@ -200,16 +204,20 @@ class DataCentreLoadSpec(BaseModel):
     #: Neither date is read by a solve.
     connection_date: date | None = None
 
-    @model_validator(mode="before")
+    @model_validator(mode="wrap")
     @classmethod
-    def _drop_waste_heat_export(cls, data):
+    def _drop_waste_heat_export(cls, data, handler):
         """``waste_heat_export`` is not modelled (DC 05): an old spec that set it
-        still loads, and the ledger says the input was ignored."""
+        still loads, and the ledger says a true value was ignored (false is the
+        default and says nothing)."""
+        ignored = False
         if isinstance(data, dict) and "waste_heat_export" in data:
-            data = dict(data)
-            if data.pop("waste_heat_export"):
-                data["ignored_inputs"] = [*data.get("ignored_inputs", []), "waste_heat_export"]
-        return data
+            ignored = bool(data["waste_heat_export"])
+            data = {k: v for k, v in data.items() if k != "waste_heat_export"}
+        spec = handler(data)
+        if ignored:
+            spec._ignored_inputs = ["waste_heat_export"]
+        return spec
 
     @model_serializer(mode="wrap")
     def _omit_unstated_dates(self, handler):

@@ -16,7 +16,7 @@ describe('workload select', () => {
     expect(body().workload_mix).toBeUndefined()
     const d = { ...initialDcDraft(), utilisation: 'inference' as const }
     expect(body(d).utilisation).toBe('inference')
-    expect(body(d).workload_mix).toMatchObject({ trough_share: 0.4, peak_share: 0.85, peak_hour: 20 })
+    expect(body(d).workload_mix).toEqual({ trough_share: 0.4, peak_share: 0.85, peak_hour: 20 })
   })
   it('refuses out-of-range shares and a trough above the peak, opening with the label', () => {
     const d = { ...initialDcDraft(), utilisation: 'inference' as const, mix: { ...MIX_DEFAULTS, peak: '1.2' } }

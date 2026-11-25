@@ -53,3 +53,9 @@ def test_mismatch_boundary_is_literal_ten_percent():
 def test_compute_bounds_refuse(bad):
     with pytest.raises(ValidationError):
         spec(**bad)
+
+
+def test_whole_accelerators_only_and_no_typed_figure_means_none_used():
+    with pytest.raises(ValidationError):
+        spec(accelerator_counts=[12.5])
+    assert compute_report(spec(), [0, 0])[0]["it_mw_used"] is None

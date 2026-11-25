@@ -129,3 +129,18 @@ def test_form_word_map_keys_equal_the_engine_utilisation_values():
     block = ts.split("export const UTILISATION_OPTIONS")[1].split("/** The assumed shape inputs")[0]
     keys = re.findall(r"\['(\w+)', '[^']+'\]", block)
     assert keys == list(get_args(UtilisationKind))
+
+
+def test_mismatch_threshold_is_the_same_in_form_and_engine():
+    import re
+
+    from services.dc_compute import MISMATCH_NOTE_ABOVE
+
+    ts = (pathlib.Path(__file__).resolve().parents[2] / "frontend/src/pages/hubDesign/dcLoadForm.ts").read_text()
+    assert float(re.search(r"MISMATCH_NOTE_ABOVE = ([\d.]+)", ts).group(1)) == MISMATCH_NOTE_ABOVE
+
+
+def test_a_client_cannot_write_ignored_inputs_and_false_says_nothing():
+    assert spec(ignored_inputs=["waste_heat_export"]).ignored_inputs == []
+    assert spec(waste_heat_export=False).ignored_inputs == []
+    assert spec(waste_heat_export=True).ignored_inputs == ["waste_heat_export"]

@@ -27,5 +27,5 @@ def compute_report(c: ComputeSpec | None, typed_it_mw: list[float | None]) -> li
             warning = (f"phase {k + 1}: compute gives {derived:g} MW IT, the typed IT is "
                        f"{typed:g} MW (typed IT is used)")
         rows.append({"typed_it_mw": typed, "compute_it_mw": derived,
-                     "it_mw_used": typed, "warning": warning})
+                     "it_mw_used": typed or None, "warning": warning})
     return rows

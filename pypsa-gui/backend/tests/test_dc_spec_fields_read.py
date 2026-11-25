@@ -1,8 +1,7 @@
 """DC 05: no spec field is accepted and then ignored (issue 05 AC3, GK A W8).
 
 Every field of the data-centre load spec and its sub-specs must be read by code
-outside the model definitions (an attribute read, a key lookup or a quoted name
-in a non-test backend module), or sit in ``READ_ELSEWHERE`` with the reason it
+outside the model definitions (an attribute read in a non-test backend module), or sit in ``READ_ELSEWHERE`` with the reason it
 is fine. A new field nothing reads fails here."""
 from __future__ import annotations
 
@@ -26,7 +25,6 @@ READ_ELSEWHERE: dict[str, str] = {
     "DataCentreLoadSpec.workload_shift_window_h": "KNOWN UNREAD: documented in dc_it_energy as moving no load (DC 06); follow-up to model or remove",
     "GensetSpec.power_mw": "KNOWN UNREAD on GensetSpec: the fleet size comes from the template, the spec value is only a constructor placeholder; follow-up to model or remove",
     "GensetSpec.fuel_price_ref": "KNOWN UNREAD on GensetSpec: the fuel price is the backup block's fuel_price_per_mwh_fuel; follow-up to model or remove",
-    "DataCentreLoadSpec.ignored_inputs": "written by the waste_heat_export drop and read by the ledger via spec.ignored_inputs",
 }
 
 
@@ -49,7 +47,9 @@ def _fields():
 
 
 def _read(name: str, sources: dict[str, str]) -> bool:
-    pat = re.compile(rf"(\.{name}\b|[\"']{name}[\"'])")
+    # An attribute read or a getattr on the spec only: a bare quoted name (a ledger
+    # label, a SOURCES key) is not a read.
+    pat = re.compile(rf"(\.{name}\b|getattr\([^)]*[\"']{name}[\"'])")
     return any(pat.search(text) for text in sources.values())
 
 

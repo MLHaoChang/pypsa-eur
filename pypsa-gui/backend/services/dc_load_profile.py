@@ -29,10 +29,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from services.dc_workload_shapes import shape_utilisation
-
 from models.dc_compute_spec import WorkloadMixSpec
 from models.flex_archetypes import AiWorkloadSpec, DataCentreLoadSpec, DcPhase
+from services.dc_workload_shapes import shape_utilisation
 
 #: The key in a project's ``eh_template.json`` that carries the spec, the
 #: envelope and their ledger.
@@ -60,7 +59,8 @@ SOURCES: dict[str, str] = {
                       "by vendor data (IEC TR 61000-3-7 treats flicker through ΔP and ΔQ)"),
     "workload_mix": ("assumed; illustrative diurnal request load of an inference service "
                      "(trough overnight, peak in the evening), a training share for mixed "
-                     "campuses and a constant share for flat; no measured fleet data"),
+                     "campuses (its training part keeps the training idle window; inference and flat "
+                     "have none) and a constant share for flat; no measured fleet data"),
     "compute": ("as entered; IT MW = accelerators × kW per accelerator (host share included) × "
                 "utilisation, reported beside the typed IT MW, never read by a solve"),
     "ignored_inputs": "ignored; the input is not modelled",

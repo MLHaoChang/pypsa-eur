@@ -6,6 +6,8 @@ per phase. Neither feeds the LP unless the load spec says so: the compute block
 is reported next to the typed IT MW and the typed value always wins."""
 from __future__ import annotations
 
+from typing import Annotated
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from models.schemas import Finite
@@ -39,10 +41,4 @@ class ComputeSpec(BaseModel):
     model_config = _FORBID
     kw_per_accelerator: Finite = Field(gt=0)
     utilisation: Finite = Field(gt=0, le=1)
-    accelerator_counts: list[Finite] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def _counts_positive(self) -> "ComputeSpec":
-        if any(c <= 0 for c in self.accelerator_counts):
-            raise ValueError("accelerator_counts must all be > 0")
-        return self
+    accelerator_counts: list[Annotated[int, Field(gt=0)]] = Field(min_length=1)
