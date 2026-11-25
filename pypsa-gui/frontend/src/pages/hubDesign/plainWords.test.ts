@@ -146,6 +146,16 @@ describe('costTileLabel (UX review N3, decision B)', () => {
       .toBe('Cost over the plan (discounted, before any shortfall costs)')
     expect(costTileLabel('npv_multi_period', [2030])).not.toMatch(/Yearly|–/)
   })
+  it('says the finance horizon runs past the plan, with years derived from the periods (issue 28)', () => {
+    expect(costTileLabel('npv_multi_period', [2027, 2030, 2035], 18))
+      .toBe('Cost over the plan, 2027–2035, valued to 2045 (18 years) (discounted, before any shortfall costs)')
+    expect(costTileLabel('npv_multi_period', [2027, 2031], 9))
+      .toBe('Cost over the plan, 2027–2031, valued to 2036 (9 years) (discounted, before any shortfall costs)')
+    // a horizon that ends with the plan, or none stated, adds nothing
+    expect(costTileLabel('npv_multi_period', [2027, 2035], 8)).not.toMatch(/valued/)
+    expect(costTileLabel('npv_multi_period', [2027, 2035], null)).not.toMatch(/valued/)
+    expect(costTileLabel('single_period', [2027, 2035], 18)).not.toMatch(/valued/)
+  })
 })
 
 describe('plainReason (issue 19, RAW-NAMES-1)', () => {

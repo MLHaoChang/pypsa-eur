@@ -7,7 +7,7 @@ import { FileText } from 'lucide-react'
 import Kpi from '../../../components/Kpi'
 import ResultState from '../../../components/ResultState'
 import { useUIStore } from '../../../store/uiStore'
-import { certificationPayload, fmeaTopRows, LEVERS_SECTION, notEstablishedNotes } from '../../results/EhReferenceDesignPanel'
+import { certificationPayload, fmeaTopRows, lcohChip, LEVERS_SECTION, notEstablishedNotes } from '../../results/EhReferenceDesignPanel'
 import { zeroReasonText } from '../../results/fmea'
 import { fmtCurrency } from '../../results/shared'
 import { studyHasResults } from '../flow'
@@ -25,6 +25,7 @@ import { SizedDesignTable } from '../../results/SizedDesignTable'
 import { useQuery } from '@tanstack/react-query'
 import { uncheckedKindsSentence, useUncheckedRunKinds } from '../../../hooks/useStaleRunKinds'
 import { networkApi } from '../../../api/network'
+import { financeApi } from '../../../api/finance'
 import { nk } from '../../../utils/queryKeys'
 import { ChaptersSection } from '../ChaptersSection'
 import DownloadReport from '../DownloadReport'
@@ -108,11 +109,17 @@ export function ResultsCard() {
   const levers = useHubLevers(!running && leversFinding(review?.findings) != null)
   const cheaper = cheaperDuration(review?.findings, levers, report)
   const cost = report?.cost_at_target_eur
+  const lcoh = report ? lcohChip(report) : null
   const project = useUIStore(s => s.currentProject)
   const multiPeriod = report?.period_basis === 'npv_multi_period'
   const periods = useQuery({
     queryKey: nk(project, 'investmentPeriods'), queryFn: networkApi.getInvestmentPeriods,
     enabled: !!project && multiPeriod,
+  })
+  // The finance horizon's length: the cost tile says it runs past the plan (issue 28, owner option A).
+  const financeState = useQuery({
+    queryKey: nk(project, 'simulation', 'finance'), queryFn: () => financeApi.getFinance(),
+    enabled: !!project && multiPeriod, retry: false,
   })
   const setStep = useHubDesignStore(s => s.setStep)
   // Results that came with the project, never checked against its inputs (PG-12): never read as current.
@@ -244,12 +251,21 @@ export function ResultsCard() {
         // shortfall costs — never "the cost of your goal" (P24-FE gate B1).
         // The shared KPI tile (UX S6, G-item 2), the glossary text on hover.
         <Kpi testId="hub-results-cost" headline
-          label={costTileLabel(report?.period_basis, periods.data?.periods)}
+          label={costTileLabel(report?.period_basis, periods.data?.periods, financeState.data?.finance?.analysis_years)}
           value={fmtCurrency(cost)} fromStudy={solved === false && !stale && !freshnessUnknown}
           hint={solved === false && !stale && !freshnessUnknown ? `${TERM_FALLBACK.cost_at_target} ${FROM_STUDY_HINT}` : TERM_FALLBACK.cost_at_target}
           // The banner above says "Out of date" once for the card; the tile only dims.
           state="ready" dimmed={stale || freshnessUnknown} />
       )} />
+
+      {/* The cost of the product, where the design makes one (issue 28): hydrogen's levelised cost per kg,
+          from the study report's TEA block; absent for a design with no electrolyser. */}
+      {lcoh?.value != null && (
+        <Kpi testId="hub-results-lcoh" label="Cost of hydrogen"
+          value={`€${lcoh.value.toFixed(2)} per kg`}
+          hint="Levelised cost of the hydrogen this design produces, per kilogram, as the study priced it."
+          state="ready" dimmed={stale || freshnessUnknown} />
+      )}
 
       {/* What the study chose to build (walkthrough asset-investment 03). */}
       <SizedDesignTable report={report} mode="guided" testId="hub-results-sized" />

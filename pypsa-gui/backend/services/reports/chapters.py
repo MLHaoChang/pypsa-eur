@@ -120,6 +120,11 @@ def investment_table(payload: dict, source_path: str):
          else F.fmt_text(None)),
         ("Price basis", F.fmt_text(payload.get("basis_statement"))),
     ]
+    cod, years = payload.get("cod_year"), _num(payload.get("analysis_years"))
+    if isinstance(cod, int) and years is not None and years > 0:
+        # Issue 28 (owner option A): the valuation runs from commissioning for the analysis years, which can
+        # be longer than the plan's periods the Guided results show; say so in years taken from the inputs.
+        rows.append(("Valued over", f"{cod}–{cod + int(years)} ({int(years)} years)"))
     if payload.get("island_breakeven_text"):
         rows.append((ISLAND_BREAKEVEN_LABEL, F.fmt_text(payload["island_breakeven_text"])))
     return EvidenceTable(table_id=INVESTMENT, columns=["Item", "Value"], rows=[list(r) for r in rows],

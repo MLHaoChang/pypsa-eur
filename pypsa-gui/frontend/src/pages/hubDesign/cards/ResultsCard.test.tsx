@@ -127,6 +127,21 @@ describe('ResultsCard cost label (gate B1)', () => {
   }
 })
 
+describe('ResultsCard product cost (issue 28)', () => {
+  it('shows the hydrogen cost per kg from the study when it is established', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(study({ ...REPORT, tea: { lcoh_eur_per_kg: 2.345, lcoh_status: 'ok' } }))
+    mount()
+    const tile = await screen.findByTestId('hub-results-lcoh')
+    expect(tile.textContent).toContain('Cost of hydrogen')
+    expect(tile.querySelector('[data-kpi-value]')?.getAttribute('data-kpi-value')).toContain('€2.35 per kg')
+  })
+  it('shows no hydrogen tile for a design with none', async () => {
+    mount()
+    await screen.findByTestId('hub-results-cost')
+    expect(screen.queryByTestId('hub-results-lcoh')).toBeNull()
+  })
+})
+
 describe('ResultsCard body', () => {
   it('cost via fmtCurrency, three risks, the gaps', async () => {
     mount()
