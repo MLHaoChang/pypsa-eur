@@ -1601,3 +1601,98 @@ def test_lole_interval_overlap_is_exact(a, b, overlap):
     ]
     fr._flag_indistinct(pts, "mc_eue")
     assert [p["reliability_indistinct"] for p in pts] == [overlap, overlap]
+
+
+# --------------------------------------------------------------------------
+# Mutation survivors: the guards that read None, never crash
+# --------------------------------------------------------------------------
+
+
+def test_an_optimal_solve_with_no_adequacy_report_reads_none(monkeypatch):
+    from services.adequacy import sweep
+
+    real = sweep._solve_once
+
+    def no_report(cfg, net, lock, lq, sink):
+        real(cfg, net, lock, lq, sink)
+        sink.pop("adequacy_report", None)
+
+    monkeypatch.setattr(sweep, "_solve_once", no_report)
+    p = _run(_hand(), lever="ens_cap", levels=[100.0], co2_caps_t=[None])["points"][0]
+    assert p["status"] == "ok", p
+    pt = p["point"]
+    assert pt["capex_eur_per_yr"] is None and pt["total_eur_per_yr"] is None
+    assert pt["opex_eur_per_yr"] is None and pt["lp_ens_mwh"] is None
+    assert pt["reliability_binding"] is None
+
+
+def test_zero_objective_weightings_read_no_cost_and_still_solve():
+    n = _hand()
+    n.snapshot_weightings["objective"] = 0.0
+    p = _run(n, lever="ens_cap", levels=[100.0], co2_caps_t=[None])["points"][0]
+    assert p["status"] == "ok" and p["condition"].startswith("optimal"), p
+    pt = p["point"]
+    assert pt["total_eur_per_yr"] is None
+    assert pt["capex_eur_per_yr"] is None and pt["opex_eur_per_yr"] is None
+
+
+def test_zero_generator_weightings_read_no_co2_and_still_solve():
+    n = _hand()
+    n.snapshot_weightings["generators"] = 0.0
+    p = _run(n, lever="ens_cap", levels=[100.0], co2_caps_t=[None])["points"][0]
+    assert p["status"] == "ok" and p["condition"].startswith("optimal"), p
+    assert p["point"]["co2_t_per_yr"] is None
+
+
+def test_an_infinite_emissions_total_reads_no_co2(monkeypatch):
+    from services.results import emissions
+
+    real = emissions.compute_emissions
+
+    def infinite(*a, **kw):
+        return {**real(*a, **kw), "total_tCO2": float("inf")}
+
+    monkeypatch.setattr(emissions, "compute_emissions", infinite)
+    p = _run(_hand(), lever="ens_cap", levels=[100.0], co2_caps_t=[None])["points"][0]
+    assert p["status"] == "ok", p
+    assert p["point"]["co2_t_per_yr"] is None
+
+
+def test_an_mc_result_with_nan_lole_and_no_floor_is_unreadable(monkeypatch):
+    from services.adequacy import eh_stages, mc
+
+    monkeypatch.setattr(eh_stages, "freeze_fixed_plan", lambda *a, **k: _frozen())
+    monkeypatch.setattr(
+        mc,
+        "mc_adequacy",
+        lambda i, **kw: {"lole_hours": float("nan"), "eue_mwh": 1.0, "n_samples": 5},
+    )
+    out, err = fr._mc_point("W", _cfg(), None, None, 4, 0)
+    assert out is None and err.startswith("MC result unreadable")
+
+
+def test_a_non_finite_confidence_bound_reads_no_interval():
+    rec = fr._mc_record({**_mc_result(1.0), "lole_ci": [1.0, float("inf")]}, 0.1)
+    assert rec["lole_ci"] is None
+    assert rec["lole_hours"] == 1.0
+
+
+def test_an_ac_power_flow_setting_does_not_fail_the_front():
+    cfg = _cfg(run_ac_pf_after_lopf=True)
+    assert fr._cfg_for(cfg, "ens_cap", 100.0).run_ac_pf_after_lopf is False
+    assert fr._cfg_for(cfg, "reserve_margin", 0.1).run_ac_pf_after_lopf is False
+    res = _run(_hand(), cfg=cfg, lever="ens_cap", levels=[100.0], co2_caps_t=[None])
+    p = res["points"][0]
+    assert p["status"] == "ok" and p["condition"] == "optimal", p
+
+
+def test_the_budget_never_rises_above_the_maximum():
+    levels = [1, 2, 3, 4, 5]
+    with pytest.raises(fr.FrontBudgetError, match="20 solves exceed the 16-solve"):
+        fr.check_budget(levels, [None, 1, 2, 3], 10**6)
+
+
+@pytest.mark.parametrize("v", [10**400, True, False], ids=["huge", "true", "false"])
+def test_an_integer_argument_refuses_overflow_and_bools(v):
+    with pytest.raises(fr.FrontConfigError, match="mc_draws .* is not a number"):
+        fr._int_arg("mc_draws", v, 0, 10)

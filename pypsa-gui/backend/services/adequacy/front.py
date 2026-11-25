@@ -195,6 +195,10 @@ def solves_needed(levels: list, caps: list) -> int:
 
 
 def check_budget(levels: list, caps: list, budget: int) -> int:
+    """The solves the grid needs, or a FrontBudgetError when they exceed
+    ``budget``. The budget never rises above ``MAX_FRONT_SOLVES``, whatever a
+    caller passes."""
+    budget = min(budget, MAX_FRONT_SOLVES)
     need = solves_needed(levels, caps)
     if need > budget:
         extra = "" if None in caps else " + 1 uncapped reference"
@@ -328,8 +332,9 @@ def _lp_capex_share(n) -> float | None:
         expr = m.objective.expression
         obj = expr.flat
         vals = obj["coeffs"].astype(float) * obj["vars"].map(sol).astype(float)
-        # A bare constant on the expression is not a capacity term (the repo's
-        # wrappers put penalty constants there), so it counts in the whole only.
+        # linopy refuses a constant in the objective, so `const` is 0 here; it
+        # is read defensively only, and would count in the whole, never as a
+        # capacity term.
         whole = float(vals.sum()) + float(getattr(expr, "const", 0.0) or 0.0)
         part = float(vals[obj["vars"].isin(cap)].sum())
     except Exception:  # noqa: BLE001
@@ -438,6 +443,10 @@ def _reliability_binding(lever: str, rep: dict | None) -> bool | None:
 
 
 def _cfg_for(cfg, lever: str, level: float):
+    # The front prices LP points only: an AC power flow after the LOPF would
+    # rewrite the condition to `lopf+ac_pf_ok`, which no point reads as
+    # optimal, and it would spend a power flow per point for nothing.
+    cfg = dataclasses.replace(cfg, run_ac_pf_after_lopf=False)
     if lever == "ens_cap":
         return dataclasses.replace(cfg, ens_cap_permyriad=level)
     return dataclasses.replace(cfg, reserve_margin=level)
@@ -791,9 +800,11 @@ def _guarded_point(base, cfg, lock, log_queue, lever, level, cap):
 
 def _int_arg(field: str, v, lo: int, hi: int) -> int:
     """A whole number in ``[lo, hi]``, or a FrontConfigError naming ``field``."""
+    if isinstance(v, bool):
+        raise FrontConfigError(f"{field} {v} is not a number")
     try:
         f = float(v)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         raise FrontConfigError(f"{field} {v} is not a number") from None
     if not math.isfinite(f) or f != int(f) or not lo <= f <= hi:
         raise FrontConfigError(
