@@ -25,3 +25,4 @@ Checked by code reading only; the app was not re-run. Still true: 'AI-training l
 
 - 2026-11-23 status sweep: landed in #1786 (f08b8d44); #1787 (ce38457d): sized-design table and report take their own units. Remains: AI-training load step wording in grid_readiness.py, LCOH and product cost in Guided, template-specific report wording.
 - Slice 1 (grid_readiness wording template-specific, tested over every shipped template): PR open. Remains: LCOH and product cost in Guided, report wording, report horizon = Guided horizon.
+- Slice 2a (report disclosure reads load_words from the scorecard; the grid_readiness side lands with DC 05's wording PR): PR open.

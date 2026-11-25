@@ -3,7 +3,7 @@
 
 # 09a Ratings assumptions in plain text: split the design-cases sentence, write the heat-constant unit
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 Source: issue 09: UX 29's OK on #1983 and GK A (37)'s OK on #1981, non-blocking follow-ups.
 Severity: minor
@@ -26,3 +26,5 @@ Two nits from GK A (37)'s OK on #1981, in `pypsa-gui/backend/services/equipment_
 Change the two texts where the engine writes them (`assumptions_table` in `campus_ratings.py`). Update `tests/gridspine/test_campus_ratings.py` and the ratings content pin in `tests/gridspine/test_campus_run_pin.py`, then retake one Hand-off › Equipment schedule shot with the Assumptions list in frame.
 
 ## Comments
+
+Built on branch `claude/dc-09a-ratings-text`. Shot: `shots/09a-ratings-text/handoff-table-expert-light.png` (Assumptions list in frame).

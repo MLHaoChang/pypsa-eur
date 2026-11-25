@@ -7,7 +7,7 @@ import {
 } from 'recharts'
 import { Download } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { resultsApi, type AcPfConvergenceRow } from '../../api/simulation'
+import { resultsApi, isPricesWithheld, type AcPfConvergenceRow } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import type { Bus } from '../../api/types'
 import { type TSPayload, fmtPower, shortStamp, downloadCSV, KPI, ChartActions, Seg,
@@ -118,11 +118,14 @@ export default function LoadFlow() {
   // zeros. Pin to 'lopf' regardless of the active view toggle so the price
   // chart and table stay meaningful even when the user is inspecting AC PF
   // results elsewhere on the page.
-  const { data: priceTS } = useQuery({
+  const { data: priceRaw } = useQuery({
     queryKey: nk(currentProject, 'results', 'prices', 'lopf', win.from, win.to),
     queryFn: () => resultsApi.getPrices('lopf', fetchRange),
     enabled: winValid,
   })
+  // assistant-assurance 17: a MIP's withheld prices are no prices here; this tab
+  // shows none (they live in the Prices tab, which says why).
+  const priceTS = isPricesWithheld(priceRaw) ? null : priceRaw
   // CO₂ emissions per-carrier + per-generator, plus shadow price of any
   // primary-energy CO₂ cap. Backend reads dispatched energy × carrier
   // intensity / efficiency. Same source as LOPF dispatch (LP stage).
@@ -376,12 +379,13 @@ export default function LoadFlow() {
   // identify the marginal generator + classify the spike. 2000 is a useful
   // default — well above normal merit-order prices, below typical VOLL.
   const [driverThreshold, setDriverThreshold] = useState<number>(2000)
-  const { data: priceDrivers } = useQuery({
+  const { data: driversRaw } = useQuery({
     queryKey: nk(currentProject, 'results', 'price_drivers', driverThreshold),
     queryFn: () => resultsApi.getPriceDrivers(driverThreshold, 200),
     // Only worth firing when prices exist. Re-runs when threshold changes.
     enabled: !!priceTS,
   })
+  const priceDrivers = isPricesWithheld(driversRaw) ? null : driversRaw
 
   // When there are many buses, the legend turns into clutter and the colour
   // palette wraps. Cap the per-bus chart at the top-N by mean |price| —

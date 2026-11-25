@@ -1467,6 +1467,14 @@ export interface OperatingReserveResult {
   reason: string | null
 }
 
+/** `/results/prices` and `/results/price_drivers` on a solve whose bus prices are not
+ *  marginal prices (assistant-assurance 17: an integer solve), in place of the payload. */
+export type PricesWithheld = { status: 'unavailable'; reason: string }
+
+export function isPricesWithheld(x: unknown): x is PricesWithheld {
+  return !!x && typeof x === 'object' && (x as { status?: unknown }).status === 'unavailable'
+}
+
 export const resultsApi = {
   // The strip says so itself when this fails (one message, not a toast as well).
   getHeadlineKpis: () => client.get<HeadlineKpis>('/results/headline_kpis', { skipErrorToast: true }).then(r => r.status === 204 ? null : r.data),
@@ -1649,7 +1657,7 @@ export const resultsApi = {
   // Returns the most-likely marginal generator + a one-word category
   // (load_shedding / thermal_peaker / transmission / unattributed).
   getPriceDrivers: (threshold = 2000, limit = 200) =>
-    client.get<{
+    client.get<PricesWithheld | {
       threshold: number; total_above_threshold: number; truncated: boolean
       rows: Array<{
         snapshot: string; bus: string; price: number

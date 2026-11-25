@@ -362,6 +362,24 @@ def _bays(spec: dict) -> dict:
     return n
 
 
+def _bus_kv(spec: dict) -> dict:
+    """Each bus's voltage from the campus file, keyed by ``str(bus)``.
+
+    A YAML integer bus key reads as the same bus as its string; the PCC's
+    voltage is in ``pcc.vn_kv``, not in ``buses``. A bus listed twice with
+    two voltages (the campus ingest refuses that file) gets none: neither
+    is shown as the bus's voltage.
+    """
+    kv = {
+        str(b): (bs or {}).get("vn_kv") for b, bs in (spec.get("buses") or {}).items()
+    }
+    pcc = spec.get("pcc") or {}
+    if pcc.get("bus") is not None:
+        b, v = str(pcc["bus"]), pcc.get("vn_kv")
+        kv[b] = v if b not in kv or _num(kv[b]) == _num(v) else None
+    return kv
+
+
 def _no_fault_level(periods: str) -> str:
     """A sentence naming the periods with no fault level ("2040" or "2040, 2050")."""
     word = "Periods" if "," in periods else "Period"
@@ -383,7 +401,7 @@ def _switchgear(run: Path, spec: dict) -> list:
         ),
     )
     bays = _bays(spec)
-    buses = spec.get("buses") or {}
+    bus_kv = _bus_kv(spec)
     rows = []
     for r in sg.itertuples(index=False):
         n = max(1, bays.get(str(r.bus), 1))
@@ -392,7 +410,7 @@ def _switchgear(run: Path, spec: dict) -> list:
         skipped = _text(r.skipped_periods) and _text(r.flag) != "not_evaluated"
         kv = _num(r.vn_kv)
         if kv is None:  # a bus voltage is an input: take it from the campus file
-            kv = _num((buses.get(str(r.bus)) or {}).get("vn_kv"))
+            kv = _num(bus_kv.get(str(r.bus)))
         row = _row(
             kind="switchgear",
             asset=f"{r.bus} switchgear",

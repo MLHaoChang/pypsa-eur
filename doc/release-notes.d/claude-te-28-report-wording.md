@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The report's grid-readiness disclosure names the load the scorecard names ("load_words") instead of always "AI-training load"; reports without the key read as before (template-e2e issue 28).
