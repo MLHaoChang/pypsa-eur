@@ -20,10 +20,13 @@ describe('workload select', () => {
   })
   it('refuses out-of-range shares and a trough above the peak, opening with the label', () => {
     const d = { ...initialDcDraft(), utilisation: 'inference' as const, mix: { ...MIX_DEFAULTS, peak: '1.2' } }
-    expect(validateDc(d, 'eh_datacenter').workload).toMatch(/^Workload: /)
+    expect(validateDc(d, 'eh_datacenter').workload).toBe('Workload: shares are numbers from 0 to 1.')
     const e = { ...initialDcDraft(), utilisation: 'inference' as const, mix: { ...MIX_DEFAULTS, trough: '0.9', peak: '0.5' } }
-    expect(validateDc(e, 'eh_datacenter').workload).toMatch(/lowest load must not exceed/)
+    expect(validateDc(e, 'eh_datacenter').workload).toBe('Workload: the lowest load must not exceed the highest.')
     expect(validateDc({ ...initialDcDraft(), utilisation: 'inference' }, 'eh_datacenter').workload).toBeUndefined()
+  })
+  it('writes units without nested brackets', () => {
+    for (const [, , unit] of Object.values(MIX_FIELDS).flat()) expect(unit).not.toMatch(/[()]/)
   })
   it('every non-training kind has its inputs', () => {
     for (const [v] of UTILISATION_OPTIONS) expect(MIX_FIELDS[v].length > 0).toBe(v !== 'ai_training')
@@ -45,7 +48,7 @@ describe('compute block', () => {
   it('a half-filled block is refused, opening with its label', () => {
     const d = initialDcDraft()
     d.compute = { counts: [''], kw: '1.5', util: '' }
-    expect(validateDc(d, 'eh_datacenter').compute).toMatch(/^Compute: /)
+    expect(validateDc(d, 'eh_datacenter').compute).toMatch(/^Compute: .*Or clear all compute fields\.$/)
   })
   it('notes a mismatch only above 10 %, naming both figures', () => {
     expect(computeMismatch(11, 10)).toBeNull()

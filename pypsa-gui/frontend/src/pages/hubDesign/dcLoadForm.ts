@@ -52,9 +52,9 @@ export const UTILISATION_OPTIONS: [DcUtilisation, string][] = [
 export type MixKey = 'trough' | 'peak' | 'peakHour' | 'training' | 'flat'
 export const MIX_FIELDS: Record<DcUtilisation, [MixKey, string, string][]> = {
   ai_training: [],
-  inference: [['trough', 'Lowest load', 'share of IT MW (0 to 1)'], ['peak', 'Highest load', 'share of IT MW (0 to 1)'], ['peakHour', 'Peak hour', 'hour of day, 0 to 23']],
-  mixed: [['training', 'Training share', 'share of IT MW (0 to 1)'], ['trough', 'Inference lowest load', 'share of IT MW (0 to 1)'], ['peak', 'Inference highest load', 'share of IT MW (0 to 1)'], ['peakHour', 'Inference peak hour', 'hour of day, 0 to 23']],
-  flat: [['flat', 'Constant load', 'share of IT MW (0 to 1)']],
+  inference: [['trough', 'Lowest load', 'share of IT MW, 0 to 1'], ['peak', 'Highest load', 'share of IT MW, 0 to 1'], ['peakHour', 'Peak hour', 'hour of day, 0 to 23']],
+  mixed: [['training', 'Training share', 'share of IT MW, 0 to 1'], ['trough', 'Inference lowest load', 'share of IT MW, 0 to 1'], ['peak', 'Inference highest load', 'share of IT MW, 0 to 1'], ['peakHour', 'Inference peak hour', 'hour of day, 0 to 23']],
+  flat: [['flat', 'Constant load', 'share of IT MW, 0 to 1']],
 }
 export const MIX_DEFAULTS: Record<MixKey, string> = { trough: '0.4', peak: '0.85', peakHour: '20', training: '0.5', flat: '0.8' }
 export const MISMATCH_NOTE_ABOVE = 0.1
@@ -136,15 +136,15 @@ export function validateDc(d: DcDraft, templateId: string): Partial<Record<DcFie
   for (const [key] of MIX_FIELDS[d.utilisation]) {
     const v = asNumber(d.mix[key])
     const ok = key === 'peakHour' ? Number.isInteger(v) && v >= 0 && v <= 23 : Number.isFinite(v) && v >= 0 && v <= 1
-    if (!ok) { e.workload = `${DC_FIELD_LABEL.workload}: ${key === 'peakHour' ? 'the peak hour is a whole hour from 0 to 23' : 'shares are numbers from 0 to 1'}`; break }
+    if (!ok) { e.workload = `${DC_FIELD_LABEL.workload}: ${key === 'peakHour' ? 'the peak hour is a whole hour from 0 to 23.' : 'shares are numbers from 0 to 1.'}`; break }
   }
   if (d.utilisation === 'inference' || d.utilisation === 'mixed') {
-    if (asNumber(d.mix.trough) > asNumber(d.mix.peak)) e.workload = `${DC_FIELD_LABEL.workload}: the lowest load must not exceed the highest`
+    if (asNumber(d.mix.trough) > asNumber(d.mix.peak)) e.workload = `${DC_FIELD_LABEL.workload}: the lowest load must not exceed the highest.`
   }
   if (computeUsed(d.compute)) {
     const bad = d.compute.counts.some(c => !(asNumber(c) > 0)) || !(asNumber(d.compute.kw) > 0)
       || !(asNumber(d.compute.util) > 0 && asNumber(d.compute.util) <= 1)
-    if (bad) e.compute = `${DC_FIELD_LABEL.compute}: give every accelerator count and the kW above 0. Give a utilisation above 0, up to 1. Or clear them all`
+    if (bad) e.compute = `${DC_FIELD_LABEL.compute}: give every accelerator count and the kW above 0. Give a utilisation above 0, up to 1. Or clear all compute fields.`
   }
   return e
 }
