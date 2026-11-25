@@ -426,22 +426,38 @@ def kept_run_stale(ctx=None) -> bool:
     """True when a value edit kept the last run's dispatch (`dispatch_status.note_edit_kept`) and the
     optimisation's own verdict now says its inputs changed (provenance-graph 13). One predicate for every
     gate that must not act on such a run. An edit of something the dispatch does not depend on (a commercial
-    term) leaves no marker, so it never counts. A read that fails answers False: the gate it feeds must not
-    break on a freshness read."""
-    try:
-        from services.dispatch_status import edit_kept
-        from services.pypsa_service import PyPSAService
+    term) leaves no marker, so it never counts. Once the marker stands, a verdict that cannot be read fails
+    closed (stale, ADR-0001); a verdict that reads fresh means the edits were undone, so the marker is
+    dropped and a later commercial edit is not mistaken for one."""
+    from services.dispatch_status import EDIT_KEPT_KEY, edit_kept
+    from services.pypsa_service import PyPSAService
 
+    try:
         n = ctx.network if ctx is not None else PyPSAService.get_network()
         if not edit_kept(n):
             return False
-        read = read_runs(ctx)
-        return (
-            read.dispatch != "none"
-            and results_verdicts(read)["optimisation"].state == "stale"
-        )
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 — no network to read a marker from: nothing was kept
         return False
+    try:
+        read = read_runs(ctx)
+        state = results_verdicts(read)["optimisation"].state
+        if read.dispatch == "none":
+            return False
+        if state == "fresh":
+            n.meta.pop(EDIT_KEPT_KEY, None)
+            return False
+        return state == "stale"
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def kept_run_withheld(n) -> bool:
+    """`kept_run_stale` for the network ``n``: only the active network has a run verdict here, so another
+    run's network (a scenario) is withheld on the marker alone."""
+    from services.dispatch_status import edit_kept
+    from services.pypsa_service import PyPSAService
+
+    return kept_run_stale() if n is PyPSAService.get_network() else edit_kept(n)
 
 
 def read_runs(ctx=None) -> RunsRead:

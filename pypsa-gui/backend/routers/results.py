@@ -289,12 +289,10 @@ def _dispatch_ready(n) -> bool:
 
 
 def _kept_run_withheld(n) -> bool:
-    """A value edit kept ``n``'s dispatch and its inputs have since moved on. Only the active network has a
-    run verdict here; another run's network (a scenario) is withheld on the marker alone."""
-    from services.dispatch_status import edit_kept
+    """A value edit kept ``n``'s dispatch and its inputs have since moved on (`runs.kept_run_withheld`)."""
     from services.provenance_graph import runs
 
-    return runs.kept_run_stale() if n is PyPSAService.get_network() else edit_kept(n)
+    return runs.kept_run_withheld(n)
 
 
 def _result_df(n, accessor_name: str, attr: str, source: str = "lopf", *, state=None):
