@@ -17,7 +17,7 @@ const PORTS = { before: 5175, after: 5174 }
 const SURFACES = process.argv.slice(2).length ? process.argv.slice(2) : ['prices', 'asset', 'assetprices']
 const PROJECT = 'aa17-2b'
 const problems = [], written = []
-const REASON = 'Not available on an integer (MIP) solve: it has no marginal prices.'
+const REASON = 'Not available. An integer (MIP) solve has no marginal prices.'  // MIP_PRICES_TEXT
 const json = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
 
 const CATS = [['summary', 'Summary'], ['capacity', 'Capacity'], ['dispatch', 'Dispatch'], ['storage', 'Storage'], ['loadflow', 'Load flow'], ['prices', 'Prices & duals'], ['economics', 'Economics'], ['emissions', 'Emissions']]
@@ -96,6 +96,24 @@ async function login(browser, base) {
     try { await projectsApi.createFromTemplate('eh_datacenter', name); return 'made' } catch (e) { return `failed: ${e.message}` }
   }, PROJECT)
   console.log(base, PROJECT, made)
+  // A solved run state (UX 29 on #1994): the header and pills read solved, not "not run yet".
+  // The price and asset routes are still mocked per variant in `mocks`.
+  const solved = await p.evaluate(async (name) => {
+    const { projectsApi } = await import('/src/api/projects.ts')
+    const { simulationApi } = await import('/src/api/simulation.ts')
+    await projectsApi.activate(name).catch(() => null)  // activated beforehand when the browser call is refused
+    let st = await simulationApi.getStatus()
+    if (st.dispatch !== 'fresh') {
+      await simulationApi.run()
+      for (let i = 0; i < 240; i++) {
+        await new Promise(r => setTimeout(r, 1000))
+        st = await simulationApi.getStatus()
+        if (!st.running && st.dispatch === 'fresh') break
+      }
+    }
+    return `${st.status}/${st.dispatch}`
+  }, PROJECT)
+  console.log(base, PROJECT, 'run state:', solved)
   const st = await ctx.storageState(); await ctx.close(); return st
 }
 async function open(browser, auth, variant, scheme, mode) {

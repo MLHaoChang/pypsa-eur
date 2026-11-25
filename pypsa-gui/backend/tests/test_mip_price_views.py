@@ -230,3 +230,20 @@ def test_asset_results_block_every_price_metric_on_a_mip(
     for mid in ("revenue_eur", "capture_price", "bus_marginal_price"):
         got = resolve_metric(reg.metric_for("Generator", mid), "Generator", pre)
         assert (got.status == "blocked") is withheld, mid
+
+
+def test_mip_cause_sentence_matches_the_frontend_words():
+    """One cause sentence on every surface (UX 29 on #1994): the backend's MIP text and the
+    frontend's `NOT_KEPT_WORDS.mip_duals_not_marginal.why` say the same thing."""
+    import pathlib
+    import re
+
+    from harness.solve_validity import MIP_PRICES_CAUSE, MIP_PRICES_TEXT
+
+    ts = (pathlib.Path(__file__).resolve().parents[2] / "frontend" / "src" / "pages"
+          / "results" / "sectionWords.ts").read_text(encoding="utf-8")
+    m = re.search(r"mip_duals_not_marginal: \{ why: '([^']+)'", ts)
+    assert m, "NOT_KEPT_WORDS.mip_duals_not_marginal not found in sectionWords.ts"
+    why = m.group(1)
+    assert MIP_PRICES_CAUSE == f"{why[0].upper()}{why[1:]}."
+    assert MIP_PRICES_TEXT == f"Not available. {MIP_PRICES_CAUSE}"

@@ -13,7 +13,7 @@ import pytest
 from openpyxl import load_workbook
 
 import services.results_workbook as RW
-from harness.solve_validity import DUALS_NOT_MARGINAL, MIP_PRICES_TEXT
+from harness.solve_validity import DUALS_NOT_MARGINAL, MIP_PRICES_CAUSE, MIP_PRICES_TEXT
 from services.results_workbook import scenarios as S
 from services.results_workbook.overview import overview_figures
 from services.solver_service import SolverConfig
@@ -22,6 +22,10 @@ from tests.test_mip_economics_readers import _rdf, _solved
 MIP_RECORD = {"last_solve_settings": {"price_limit": DUALS_NOT_MARGINAL}}
 LP_RECORD = {"last_solve_settings": {}}
 VIEWS = ["capex", "prices", "economics"]
+
+
+def _note(run: str) -> str:
+    return f"{run}: marginal prices are not available. {MIP_PRICES_CAUSE}"
 
 
 @pytest.fixture(scope="module")
@@ -119,10 +123,11 @@ def test_the_overview_withholds_storage_charging_on_a_mip_with_the_reason(mip, l
 def test_a_mip_base_workbook_writes_no_price_and_names_the_reason(mip):
     wb = _build(mip, MIP_RECORD)
     prices = _text(wb["Prices"])
-    assert MIP_PRICES_TEXT in prices
+    assert _note("Base") in prices
     assert "Mean price" not in prices and "Price duration" not in prices
-    for sheet in ("Capacity expansion", "Economics", "Overview"):
-        assert MIP_PRICES_TEXT in _text(wb[sheet]), sheet
+    for sheet in ("Capacity expansion", "Economics"):
+        assert _note("Base") in _text(wb[sheet]), sheet
+    assert MIP_PRICES_TEXT in _text(wb["Overview"])
     # The asset table's market columns read not_established (the workbook's empty cell), never 0.0.
     rows = wb["Economics"]
     header_at = next(i for i, r in enumerate(rows) if "revenue_eur" in r)
@@ -137,11 +142,12 @@ def test_a_mip_base_workbook_writes_no_price_and_names_the_reason(mip):
 def test_an_lp_base_workbook_keeps_its_prices_and_has_no_reason(lp):
     wb = _build(lp, LP_RECORD)
     assert "Mean price" in _text(wb["Prices"])
-    assert MIP_PRICES_TEXT not in _text([r for rows in wb.values() for r in rows])
+    every = _text([r for rows in wb.values() for r in rows])
+    assert MIP_PRICES_CAUSE not in every
 
 
 def test_each_scenario_is_judged_by_its_own_solve(mip, lp):
-    base_note, scen_note = f"Base: {MIP_PRICES_TEXT}", f"Scenario: {MIP_PRICES_TEXT}"
+    base_note, scen_note = _note("Base"), _note("Scenario")
     # An LP base with a MIP scenario: only the scenario's prices are withheld.
     wb = _build(
         lp,

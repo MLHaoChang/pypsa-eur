@@ -146,8 +146,8 @@ def _frame(run, accessor: str, attr: str) -> pd.DataFrame | None:
 def _mip_note(run, price_limit: str | None) -> list[str]:
     """The one reason a figure priced at a MIP's duals is not established (assistant-assurance 17),
     naming the run: a sheet's notes are shared by the base and every scenario."""
-    from harness.solve_validity import MIP_PRICES_TEXT
-    return [f"{run.name}: {MIP_PRICES_TEXT}"] if price_limit else []
+    from harness.solve_validity import MIP_PRICES_CAUSE
+    return [f"{run.name}: marginal prices are not available. {MIP_PRICES_CAUSE}"] if price_limit else []
 
 
 def _sum_or_none(values) -> float | None:
