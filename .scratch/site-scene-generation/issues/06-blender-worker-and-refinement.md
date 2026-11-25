@@ -3,7 +3,7 @@
 
 # SC-05 — optional integrated Blender generation and reviewed return
 
-Status: ready-for-agent (slice (a) #1561; slice (b), the backend reviewed return, on `claude/site-scene-06b`; slice (c), the review UI, still to build; see the 2026-11-17 comments); audit 2026-11-19: slices a and b merged (#1557, #1561, #1619); left: slice c, the review UI
+Status: ready-for-agent; audit 2026-11-25: slices a and b merged (#1557, #1561, #1619); left: slice c, the review UI (no review UI for the Blender return on master)
 Type: task
 Dependencies: SC-04; SC-00 worker/protocol/resource evidence
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
@@ -135,3 +135,7 @@ The manual job ran on `ubuntu-24.04` (4 vCPU, 16 GiB, 3 GiB swap). Artifact `sc0
 - GK B (62) was archived afterwards. GK B (63) is session_01G7qCundFLhgXpNk7ehKZQT.
 
 - 2026-11-23 status sweep: landed in #1557 (6b559a5e44); #1561 (3fbc9f943f); #1619 (4a00498b19): slice a (worker) and b (backend reviewed return). Remains: slice c, the review UI.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: checked #1557, #1561, #1619 in the master merge log and found no frontend review UI for the Blender return.

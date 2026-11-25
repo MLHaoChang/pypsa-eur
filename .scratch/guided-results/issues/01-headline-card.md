@@ -1,6 +1,6 @@
 # Guided Results headline card
 
-Status: in-progress; audit 2026-11-19: headline card merged (#1611); left: mismatched-revision vitest (G1), chapter-tile one-number rule
+Status: done (merged #1611; name differences filed as issue 04)
 Type: task
 Spec: `.scratch/guided-results/spec.md` §1
 
@@ -48,3 +48,7 @@ UX (23): plan GO with conditions (Q1-Q3 as recommended):
 10. Shots dark and light, dc- and mg-, all states; one Expert shot of the Results headline.
 
 - 2026-11-23 status sweep: landed in #1611 (fdd3bc283c): headline card merged. Remains: mismatched-revision vitest (G1) and the one-number rule on chapter tiles.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: #1611 in master log; ResultsHeadline.test.tsx:81,255 (mixed-revision line, G1) and :119,247 plus ChaptersSection.tsx:110 (one-number rule) are on master; G5 differences are issue 04.

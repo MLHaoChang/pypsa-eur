@@ -3,7 +3,7 @@
 
 # 07 The energy Sankey has no "Process <name>" node, so an NH3 site loses its electricity side (A1b)
 
-Status: ready-for-agent
+Status: done (merged #1917)
 Blocked by: none (grid-to-process/07 is done; design.md §9 lists A1b as "After GTP-07")
 Design: design.md:458 (§9 Follow-ups), option (b) from the #423 review.
 Source: gap review 2026-11-21, design map.
@@ -25,3 +25,7 @@ Model: sonnet. Review: UX.
 `pypsa-gui/frontend/src/pages/results/EnergyFlowsTab.tsx`, the energy-flows read in `pypsa-gui/backend/routers/results.py` (or its service).
 
 ## Comments
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: #1917 (043fec08) merged the Process node in energy_flows.py, energyFlows.ts and EnergyFlowsTab.tsx with backend and vitest tests; CSV export is built from the same rows.

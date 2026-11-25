@@ -3,7 +3,7 @@
 
 # 09 One electrical equipment schedule, with switchgear and cable ratings chosen, not only declared
 
-Status: needs-triage
+Status: done
 Blocked by: none (gc/24 fixes the PASS shown with no switchgear rating; this issue picks the rating)
 Source: DC template review 2026-11-24 (`../README.md`). Stage 5.
 Severity: major
@@ -29,3 +29,5 @@ Transformers are selected from the library by the campus MILP with N-1 and margi
 `services/campus_electrical_service.py`, `gridspine/static/campus_sc.py`, `gridspine/ingest/campus.py`, `services/library/defaults_pack/`, `frontend/src/pages/CampusElectricalPanel.tsx`.
 
 ## Comments
+
+- 2026-11-24 (builder): the schedule is served by `GET /api/campus-electrical/{name}/equipment-schedule` and `GET /api/campus-electrical/{name}/equipment-schedule.xlsx`, shown in Results › Hand-off › Equipment schedule and in the Short-circuit section of Campus electrical. A chat tool for it is not part of this issue (not_via_chat entry `equipment_schedule`, disposition unbuilt).

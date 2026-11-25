@@ -20,6 +20,7 @@ vi.mock('./results/CapacityExpansion', () => stub('capex-stub'))
 vi.mock('./ReportsPanel', () => stub('reports-stub'))
 vi.mock('./results/ExportsTab', () => stub('exports-stub'))
 vi.mock('./results/SpecialistPacketTab', () => stub('packet-stub'))
+vi.mock('./results/EquipmentScheduleTab', () => stub('schedule-stub'))
 vi.mock('./results/Dispatch', () => stub('dispatch-stub'))
 vi.mock('./results/LoadFlow', () => stub('loadflow-stub'))
 vi.mock('./results/Prices', () => stub('prices-stub'))
@@ -133,7 +134,7 @@ describe('the group strip', () => {
       .toEqual(['Island & ride-through', 'Grid-forming'])
     fireEvent.click(screen.getByTestId('results-group-handoff'))
     expect(Array.from(document.querySelectorAll('[data-testid^="results-cardtab-"]')).map(el => el.textContent))
-      .toEqual(['Reports', 'Exports', 'Specialist packet'])
+      .toEqual(['Reports', 'Exports', 'Equipment schedule', 'Specialist packet'])
     fireEvent.click(screen.getByTestId('results-group-capacity'))
     const tabs = Array.from(document.querySelectorAll('[data-testid^="results-cardtab-"]'))
       .map(el => el.textContent)
@@ -144,13 +145,15 @@ describe('the group strip', () => {
 })
 
 describe('Hand-off (R6)', () => {
-  it('opens on Reports, and Exports and the Specialist packet are its other tabs', async () => {
+  it('opens on Reports, and Exports, the Equipment schedule and the Specialist packet are its other tabs', async () => {
     await renderResults()
     fireEvent.click(screen.getByTestId('results-group-handoff'))
     expect(screen.getByTestId('reports-stub')).toBeTruthy()
     expect(screen.queryByTestId('results-gempty')).toBeNull()
     fireEvent.click(screen.getByTestId('results-cardtab-exports'))
     expect(screen.getByTestId('exports-stub')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('results-cardtab-equipment_schedule'))
+    expect(screen.getByTestId('schedule-stub')).toBeTruthy()
     fireEvent.click(screen.getByTestId('results-cardtab-specialist_packet'))
     expect(screen.getByTestId('packet-stub')).toBeTruthy()
     // Hand-off is the end of the road: no "Next" pointing on.

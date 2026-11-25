@@ -3,7 +3,7 @@
 
 # Request scope and complete key-results answers
 
-Status: ready-for-agent; audit 2026-11-19: bounded generator scope merged (#119); left: arbitrary-language scope, retained runs, conversational constraints, other domain profiles
+Status: ready-for-agent; audit 2026-11-25: bounded generator scope and issue 10's slices merged (#1644, #1680, #1704, #1705, #1707, #1712); left: arbitrary-language scope, retained runs, conversational constraints, other domain profiles
 Model: Opus
 Progress: harness.assurance_scope with answered or unavailable slots shipped for bounded grammar; arbitrary-language scope pending
 Type: task
@@ -131,3 +131,7 @@ Conditions:
 - G8: one targeted mutant per guard, with its killing test listed in the PR body.
 - G9: Journey fit line per PR; UX leads S3/S6.
 - S7 ruling: the sealed chart keeps verifying as drawn. The definition hash goes in the evidence record and the cache key; one test shows a fresh answer misses the cache after a definition change, another that the sealed chart reports the old hash.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: #1644 #1680 #1704 #1705 #1707 #1712 are merge commits on origin/master; the old '#119' reference was truncated and not verified; the left items are named in the Progress line and the 2026-11-05 to 2026-11-17 comments and were not found in code.

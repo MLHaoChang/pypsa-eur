@@ -3,7 +3,7 @@
 
 # 07 Results › Hand-off is an empty group: move Reports, Exports and the Specialist packet into it (R6)
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-25: built on master (0cfee78d); left: live end-to-end check on a planning → dynamics project (per-hour bundle)
 Blocked by: template-e2e 30 (the Guided-study results workbook is empty; R0/R1 are on master: `pages/results/groups.ts` `CARD_GROUPS`)
 Design: `.scratch/project-workflow/card-workspaces.md` §3.6 and §8 row R6. Owner decisions: RES-CARDS, CARD-WS, HOLISTIC-1.
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), design map.

@@ -1,6 +1,6 @@
 # Typed cost units in the defaults pack: `capacity_basis`, `includes_grid_connection`, `money_year`, `currency`
 
-Status: resolved (PR #549, merged 2026-10-22 as 78433b13)
+Status: done (merged #549, 2026-10-22; 78433b13 is not in the shallow master log, but the code is on master)
 Type: task
 
 Gated: send the gatekeeper (session_01Fz66v1SpJnjGHky1RbUuqC) the plan first. Own PR. It replaces and includes the
@@ -77,3 +77,7 @@ Built in PR #549 (GS-2b): new EU version `2026-10-22` and regional `2026-10-22+{
 `commercial.grid_connection_double_count`. Follow-ups: `02-ac-dc-pv-rows-price-onto-the-right-rating.md` and
 `03-retune-ammonia-staged-2027-cycling.md`. EU DEA rows are `includes_grid_connection: unknown` until the DEA flags
 are checked against the v0.14 text, so the double-count warning cannot fire for EU rows yet.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: #549 not in the origin/master log (history truncated); capacity_basis, money_year, grid_connection_double_count and pack version 2026-10-22 are present in pypsa-gui/backend/services/library/defaults_pack and commercial/preflight.py.

@@ -264,6 +264,8 @@ def _stage_ens_solve(st: _Study) -> None:
         return
 
     st.mark("ens_solve", "run", solves_charged=1)
+    from services import study_solve
+    study_solve.keep(st.store, st.network, st.cfg, sink)  # the workbook and run state read this solve (template-e2e 30)
     adequacy_report = sink.get("adequacy_report")
     st.adequacy_report = adequacy_report
     if not isinstance(adequacy_report, dict):
@@ -1332,7 +1334,7 @@ def run_eh_study(
     log_queue = log_queue or queue.SimpleQueue()
 
     if store is not None:
-        for key in SIBLING_STORE_KEYS + (report_mod.EH_REPORT_STORE_KEY,):
+        for key in SIBLING_STORE_KEYS + (report_mod.EH_REPORT_STORE_KEY, "eh_study_solve"):
             store.pop(key, None)
 
     # Private network: pack overlay + ENS solve never touch the shared one.

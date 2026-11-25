@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Results › Hand-off has a new Equipment schedule tab listing every electrical asset of the last DC Grid study (rating, quantity, governing criterion, source, declared rating, warnings in words and capex) with an Excel download, and the Short circuit section of Campus electrical now shows the switchgear rating chosen per bus.
