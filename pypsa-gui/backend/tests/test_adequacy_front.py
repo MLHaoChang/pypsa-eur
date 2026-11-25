@@ -729,7 +729,7 @@ def test_an_ens_cap_that_never_binds_says_so_and_names_the_levers():
     d = res["degenerate"]
     assert set(d["axes"]) == {"ens_cap"}
     text = d["axes"]["ens_cap"]["text"]
-    assert "was never reached at any of 2 points" in text
+    assert "never limited the design at any of 2 points" in text
     assert "no outages" in text and "value of lost load of 5,000 €/MWh" in text
     assert d["axes"]["ens_cap"]["levers"] == [
         "reserve_margin",
@@ -995,7 +995,7 @@ def test_an_unread_binding_is_said_as_unknown_not_never_bound():
         pts, "reserve_margin", voll=0.0, outage_model=False, reference_co2=None
     )
     assert "Whether the reserve margin bound" in rm["axes"]["reserve_margin"]["text"]
-    assert "never reached" not in d["axes"]["ens_cap"]["text"]
+    assert "never limited" not in d["axes"]["ens_cap"]["text"]
     assert d["axes"]["co2"]["unknown"] is True
     assert "never reached" not in d["axes"]["co2"]["text"]
 
@@ -1317,7 +1317,7 @@ def test_the_ens_text_with_an_outage_model_does_not_blame_missing_outages():
     )["axes"]["ens_cap"]["text"]
     assert "no outages" not in text
     assert (
-        "was never reached at any of 2 points: at a value of lost load of 5,000 €/MWh"
+        "never limited the design at any of 2 points: at a value of lost load of 5,000 €/MWh"
         in text
     )
 

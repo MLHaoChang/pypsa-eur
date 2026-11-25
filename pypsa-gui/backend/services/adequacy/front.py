@@ -781,7 +781,7 @@ def degenerate_findings(
             why = "the dispatch model has no outages, so " if not outage_model else ""
             axes["ens_cap"] = {
                 "text": (
-                    f"The ENS target was never reached at any of {len(ok)} points: "
+                    f"The ENS target never limited the design at any of {len(ok)} points: "
                     f"{why}at a value of lost load of {_fmt(voll)} €/MWh serving every MWh is "
                     "already the cheapest plan. Use the reserve-margin lever, "
                     "lower the value of lost load, or read the sampled-outage LOLE per point."
@@ -792,7 +792,7 @@ def degenerate_findings(
             tightest = max(p["level"] for p in ok)
             axes["reserve_margin"] = {
                 "text": (
-                    f"The reserve margin was never reached at any of {len(ok)} points: "
+                    f"The reserve margin never limited the design at any of {len(ok)} points: "
                     f"the least-cost fleet already holds more firm capacity than "
                     f"the tightest margin swept ({tightest:.0%}). Sweep higher margins."
                 ),
