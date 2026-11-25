@@ -74,15 +74,18 @@ unsolved network, a description that does not build, and bad settings are
 """
 import contextlib
 import contextvars
+import io
 import hashlib
 import json
 import logging
 import math
 import os
+import re
 import shutil
 import tempfile
 import threading
 import time
+import zipfile
 from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -465,8 +468,11 @@ def _ssti_screens(run: Path, profile: str, profile_dirs) -> None:
     def cited(c):
         return {"source": c[0]["source"] if c else None, "clause": c[0]["clause"] if c else None}
 
-    worst = out.uif.worst_uif
+    worst, island_worst = out.uif.worst_uif, out.uif.island_worst_uif
+    # GC-08e: the island cases' own verdict and worst UIF beside the grid cases', for the scorecard and pack
     meta = {"uif": {"verdict": out.uif.verdict, "worst_uif": None if math.isnan(worst) else worst,
+                    "island_verdict": out.uif.island_verdict,
+                    "island_worst_uif": None if math.isnan(island_worst) else island_worst,
                     "threshold": out.threshold,
                     **cited(out.uif_threshold), "notes": list(out.uif.notes)},
             "subsync": {"verdict": out.subsync_verdict,
@@ -1891,6 +1897,30 @@ def _run_cuts(run_dir: Path, should_stop=None) -> None:
         cs.cuts_campus(run_dir, workers=parallel.workers(), should_stop=should_stop)
 
 
+PSSE_STATUS_FILE = "psse_status.json"
+PSSE_NO_HOURS = "no island critical hours in this run"
+
+
+def _psse_bundles(run_dir: Path) -> None:
+    """The PSS/E hand-off bundles of a ranked run (grid-compliance 23): one per
+    island critical hour, under ``psse/``, written by ``cs.psse_campus`` and
+    never changing what the other stages read. ``PSSE_STATUS_FILE`` records the
+    outcome: ``{"bundles": [names]}``, ``{"skipped": why}`` or ``{"error": why}``.
+    A contract or file error here is recorded and the study goes on; any other
+    error fails the study as before."""
+    path = run_dir / PSSE_STATUS_FILE
+    try:
+        hours = cs.island_hours(run_dir)
+        if not hours:
+            status = {"skipped": PSSE_NO_HOURS}
+        else:
+            status = {"bundles": [b.path.name for b in cs.psse_campus(run_dir, hours)]}
+    except (ContractError, OSError) as exc:
+        logger.warning("campus PSS/E bundles not written: %s", exc)
+        status = {"error": str(exc)}
+    path.write_text(json.dumps(status))
+
+
 @contextlib.contextmanager
 def _aborted_on_stop(stage):
     """gridspine's ``parallel.Stopped`` (an abort inside a stage, its
@@ -2007,6 +2037,7 @@ def run(project, settings: dict, *, progress=None, should_stop=None) -> dict:
                 stage("cuts")
                 if frequency:
                     _run_cuts(work, should_stop)
+                _psse_bundles(work)          # grid-compliance 23, inside the cuts stage
                 stage("size")
                 cs.size_campus(work, criteria, profile=s["profile"], pf=s["pf"], profile_dirs=profile_dirs)
                 (work / PROFILE_USED_FILE).write_text(json.dumps(
@@ -2410,3 +2441,71 @@ def start_milp_job(project, settings: dict) -> dict:
             _MILP_SLOT["active"] = None
         raise
     return _public(record)
+
+
+# ── the PSS/E hand-off bundles of the latest run (grid-compliance 23) ────────
+
+def _psse_root(project) -> Path:
+    return campus_dir(project) / "run" / cs.PSSE_DIR
+
+
+def _bundle_files(bundle: Path, root: Path) -> list:
+    """The regular files of one bundle, as ``(path, relative name)``. A symlink,
+    or anything that resolves outside ``root``, is left out."""
+    out = []
+    for f in sorted(bundle.rglob("*")):
+        if f.is_symlink() or not f.is_file():
+            continue
+        if not f.resolve().is_relative_to(root.resolve()):
+            continue
+        out.append((f, f.relative_to(bundle).as_posix()))
+    return out
+
+
+def _psse_bundle_dirs(root: Path) -> list:
+    """The bundle folders under ``root``: real directories only, never a symlink."""
+    if not root.is_dir() or root.is_symlink():
+        return []
+    return sorted(p for p in root.iterdir() if p.is_dir() and not p.is_symlink())
+
+
+def psse_bundles(project) -> dict:
+    """``{status, stale, run_at, bundles}``: the latest campus run's PSS/E
+    bundles (name, period, hour, files with sizes), whether the run is older
+    than the last edit, and ``skipped``/``error`` when the run wrote none."""
+    require_capacity_expansion(project)
+    d = campus_dir(project)
+    run_dir = d / "run"
+    manifest = run_dir / cs.CAMPUS_MANIFEST
+    if not manifest.is_file():
+        return {"has_run": False, "stale": False, "run_at": None, "bundles": [], "skipped": None, "error": None}
+    status_file = run_dir / PSSE_STATUS_FILE
+    status = json.loads(status_file.read_text()) if status_file.is_file() else {}
+    root = run_dir / cs.PSSE_DIR
+    bundles = []
+    for b in _psse_bundle_dirs(root):
+        files = _bundle_files(b, root)
+        m = re.search(r"p(\d+)_h(\d+)$", b.name)
+        bundles.append({"name": b.name, "period": int(m[1]) if m else None, "hour": int(m[2]) if m else None,
+                        "files": [{"name": n, "size": f.stat().st_size} for f, n in files],
+                        "size": sum(f.stat().st_size for f, _ in files)})
+    run_at = datetime.fromtimestamp(manifest.stat().st_mtime, tz=timezone.utc).isoformat()
+    return {"has_run": True, "stale": _stale(project, d), "run_at": run_at, "bundles": bundles,
+            "skipped": status.get("skipped"), "error": status.get("error")}
+
+
+def psse_bundle_zip(project, name: str) -> tuple:
+    """``(zip bytes, stale)`` of one bundle of the latest run. The folder is
+    picked from the listing of ``psse/`` by its name, never built from ``name``:
+    a path, ``..`` or a symlink out of ``psse/`` matches nothing and is 404."""
+    listing = psse_bundles(project)
+    root = _psse_root(project)
+    listed = {b["name"] for b in listing["bundles"]}       # no run (no manifest) lists nothing, so serves nothing
+    bundle = next((b for b in _psse_bundle_dirs(root) if b.name == name and name in listed), None)
+    if bundle is None:
+        raise HTTPException(status_code=404, detail="no such PSS/E bundle in the latest campus run")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f, rel in _bundle_files(bundle, root):
+            zf.write(f, arcname=f"{bundle.name}/{rel}")
+    return buf.getvalue(), listing["stale"]
