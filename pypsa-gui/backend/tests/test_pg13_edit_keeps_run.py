@@ -306,3 +306,125 @@ def test_the_report_is_left_alone_unless_the_run_is_stale(monkeypatch, report, r
 
     _stale_run(monkeypatch, **run)
     assert _ic_report_after_stale_run(report) == report
+
+
+# ── GK B2 G1-G4 ──────────────────────────────────────────────────────────────
+
+MARKER = "assistant_edit_kept_run"
+
+
+def _network():
+    from services.pypsa_service import PyPSAService
+
+    return PyPSAService.get_network()
+
+
+def test_the_asset_figures_are_withheld_after_a_kept_edit(client, site):  # noqa: F811
+    """`/results/asset/...` gated on shape only and served vom 7700 / net -4900 after a marginal-cost edit (G1)."""
+    _solved_site(client, site, "pg13_asset")
+    url = "/api/results/asset/Generator/g?category=economics"
+
+    def economics():
+        body = client.get(url).json()
+        status = next(c for c in body["categories"] if c["id"] == "economics")
+        return body, status
+
+    body, status = economics()
+    assert status["status"] == "ok" and body["scalars"], status
+    row = next(
+        r for r in client.get("/api/network/generators").json() if r["name"] == "g"
+    )
+    assert (
+        client.put(
+            "/api/network/generators/g", json={**row, "marginal_cost": 25.0}
+        ).status_code
+        == 200
+    )
+    body, status = economics()
+    assert status["status"] == "blocked" and "out of date" in status["reason"], status
+    assert not body["scalars"] and not body["series"]
+
+
+def test_the_verdict_fails_closed_once_a_run_was_kept(client, site, monkeypatch):  # noqa: F811
+    """A failed verdict read must withhold, not serve (G2); with no marker nothing was kept (ADR-0001)."""
+    from services.provenance_graph import runs
+
+    _solved_site(client, site, "pg13_closed")
+    n = _network()
+
+    def boom(ctx=None):
+        raise RuntimeError("verdict unreadable")
+
+    monkeypatch.setattr(runs, "read_runs", boom)
+    assert runs.kept_run_stale() is False
+    n.meta[MARKER] = True
+    assert runs.kept_run_stale() is True
+
+
+def test_the_marker_is_dropped_by_a_solve_a_clear_and_an_undone_edit(client, site):  # noqa: F811
+    """A leftover marker would withhold billing on a later commercial edit (G4)."""
+    from services.dispatch_status import clear_dispatch
+    from services.provenance_graph import runs
+
+    project = _solved_site(client, site, "pg13_marker")
+
+    def edit(mc):
+        row = next(
+            r for r in client.get("/api/network/generators").json() if r["name"] == "g"
+        )
+        assert (
+            client.put(
+                "/api/network/generators/g", json={**row, "marginal_cost": mc}
+            ).status_code
+            == 200
+        )
+
+    # An edit and its undo: the verdict reads fresh again, so the marker goes the next time anything asks.
+    edit(25.0)
+    assert _network().meta[MARKER] is True and runs.kept_run_stale() is True
+    edit(20.0)
+    assert _kinds(_flow(client, project))["optimisation"] == "fresh"
+    assert runs.kept_run_stale() is False and MARKER not in _network().meta
+    assert client.get("/api/results/generators").status_code == 200
+
+    # A solve drops it.
+    edit(25.0)
+    assert MARKER in _network().meta
+    assert client.post("/api/simulation/run").status_code == 200
+    assert _wait_idle(client)["status"] == "completed"
+    assert MARKER not in _network().meta
+
+    # So does clearing the dispatch.
+    edit(30.0)
+    assert MARKER in _network().meta
+    clear_dispatch(_network())
+    assert MARKER not in _network().meta
+
+
+@pytest.mark.parametrize("kept", [True, False], ids=["kept-and-stale", "not-kept"])
+def test_the_business_case_gate_reads_the_merged_verdict(monkeypatch, kept):
+    """The BC reads the investment case through `after_stale_run`, not the raw key (G3)."""
+    from fastapi import HTTPException
+
+    import routers.results as R
+    from services.business_case import runner
+    from services.finance import investment_case_runner as icr
+    from services.provenance_graph import runs
+
+    monkeypatch.setattr(runner, "ic_report_key", lambda stored: ("a", "c"))
+    monkeypatch.setattr(R, "_ic_current_assumptions", lambda: (("k", {}), None))
+    monkeypatch.setattr(
+        icr,
+        "staleness",
+        lambda stored, current, reason=None: {"present": True, "stale": False},
+    )
+    monkeypatch.setattr(runs, "kept_run_stale", lambda ctx=None: kept)
+    if kept:
+        assert R._bc_ic_current() == "investment_case_out_of_date"
+        with pytest.raises(HTTPException) as exc:
+            R._bc_ic_check()
+        assert exc.value.status_code == 409
+        assert exc.value.detail["code"] == "investment_case_missing"
+    else:
+        assert R._bc_ic_current() is None
+        assert R._bc_ic_check() == ("a", "c")
