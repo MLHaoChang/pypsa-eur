@@ -130,8 +130,18 @@ export function refusalByField(detail: string, fields: string[]): { field: strin
   if (!field) return { field: null, words: 'The controls could not be saved. Check the values and try again.' }
   const label = CONTROL_FIELD_WORDS[field]?.label ?? field
   if (/missing/.test(detail)) return { field, words: `${label} is needed for this mode.` }
-  const must = new RegExp(`${field}[^:]*?(must.*?)(?:, got\\b|;|$)`).exec(detail)?.[1]
-  return { field, words: must ? `${label} ${must}.` : `${label} was not accepted. Check the value.` }
+  const limit = new RegExp(`${field}[^:]*?must be (.*?)(?:, got\\b|;|$)`).exec(detail)?.[1]
+  const words = limit !== undefined ? LIMIT_WORDS[limit] : undefined
+  return { field, words: words ? `${label} must be ${words}.` : `${label} was not accepted. Check the value.` }
+}
+
+/** gridspine's limit wordings (schema/island.py `_CHECKS`), in words: no interval notation (UX 30). */
+const LIMIT_WORDS: Record<string, string> = {
+  'in (0, 1]': 'above 0 and at most 1',
+  'in (0, 100]': 'above 0 and at most 100',
+  positive: 'above 0',
+  'non-negative': '0 or more',
+  'at least 1': '1 or more',
 }
 
 export default function ControlsBlock({ name }: { name: string }) {
@@ -217,7 +227,7 @@ export default function ControlsBlock({ name }: { name: string }) {
             {s.origin === 'typed' && <AssumedChip typed testId={`controls-stated-${s.field}`} />}
             {s.origin !== 'typed' && s.source === 'assumed' && (
               <AssumedChip testId={`controls-assumed-${s.field}`}
-                source={s.origin === 'default' ? 'filled from a control preset' : 'a template or preset default'} />
+                source="a preset or template default" />
             )}
             {error && <p role="alert" className="text-[11px] text-danger" data-testid={`controls-error-${s.field}`}>{error}</p>}
           </div>
@@ -238,19 +248,19 @@ export default function ControlsBlock({ name }: { name: string }) {
     <div data-testid="controls-block">
       <Section title="Controls">
         {/* Plain words: no field in the app edits the project preset yet (UX 29, rule #1252). */}
-        {uc.preset && uc.preset_scope === 'project' && (
+        {uc.preset && uc.kind !== 'ups' && uc.preset_scope === 'project' && (
           <p className="text-[12px] text-muted mb-1" data-testid="controls-preset">
             From the project preset: {presetLabel(uc.preset)}.
           </p>
         )}
-        {uc.preset && uc.preset_scope === 'unit' && (
+        {uc.preset && uc.kind !== 'ups' && uc.preset_scope === 'unit' && (
           <p className="text-[12px] text-muted mb-1" data-testid="controls-preset">
             From this unit's preset: {presetLabel(uc.preset)}.
           </p>
         )}
         {uc.kind !== 'ups' && (
-          <div className="flex gap-2 items-center text-[12px] mb-2">
-            <label htmlFor={`controls-${name}-mode`}>Control mode</label>
+          <div className="grid gap-0.5 text-[12px] mb-2">
+            <label htmlFor={`controls-${name}-mode`} className="text-text">Control mode</label>
             <select id={`controls-${name}-mode`} className={`${INPUT} w-full min-w-0 max-w-full`} value={mode} onChange={e => setMode(e.target.value)}>
               {(state.controls ?? []).map(c => <option key={c} value={c}>{controlModeLabel(c)}</option>)}
             </select>

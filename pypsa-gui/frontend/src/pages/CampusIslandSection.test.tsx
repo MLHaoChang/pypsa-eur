@@ -218,7 +218,7 @@ describe('island section: the form', () => {
     const edited = { ...CONFIG.requirements, sustained_h: { value: 24, source: 'measured' } }
     fireEvent.change(raw, { target: { value: JSON.stringify(edited) } })
     expect((await screen.findByTestId('island-raw-refusals')).textContent)
-      .toContain('sustained_h: sources are set by the server, not here')
+      .toContain('Sustained ride-through: the server sets sources. Enter the value only.')
     expect((screen.getByRole('button', { name: /Save island config/ }) as HTMLButtonElement).disabled).toBe(true)
   })
 

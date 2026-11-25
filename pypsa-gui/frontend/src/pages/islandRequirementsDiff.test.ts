@@ -35,26 +35,26 @@ describe('requirementsDiff', () => {
   it('refuses an edited source, at any depth, in words', () => {
     const e = copy(); e.sustained_h.source = 'measured'; e.frequency_limits.transition.f_max_hz.source = 'datasheet'
     expect(requirementsDiff(SAVED, e).refusals).toEqual([
-      'sustained_h: sources are set by the server, not here',
-      'frequency_limits.transition.f_max_hz: sources are set by the server, not here',
+      'Sustained ride-through: the server sets sources. Enter the value only.',
+      'The server sets sources. Enter the value only. (frequency_limits.transition.f_max_hz)',
     ])
   })
   it('refuses a new field sent with a source, a tag swapped for a mapping, and a removal', () => {
     const e = copy(); e.bridge_s = a(5); e.sustained_h = { v: 1 }; delete e.linearised_uc
     expect(requirementsDiff(SAVED, e).refusals.sort()).toEqual([
-      'bridge_s: sources are set by the server, not here',
-      'linearised_uc: a setting cannot be removed here',
-      'sustained_h: enter the value only',
+      'A setting cannot be removed here. (linearised_uc)',
+      'Sustained ride-through: enter the value only.',
+      'UPS bridge: the server sets sources. Enter the value only.',
     ])
   })
   it('a tag with an extra key is not a tag: it is refused, not sent', () => {
     const e = copy(); e.sustained_h = { value: 5, source: 'assumed', note: 'x' }
-    expect(requirementsDiff(SAVED, e)).toEqual({ patch: {}, refusals: ['sustained_h: enter the value only'] })
+    expect(requirementsDiff(SAVED, e)).toEqual({ patch: {}, refusals: ['Sustained ride-through: enter the value only.'] })
   })
   it('a new plain field is sent, and null is refused', () => {
     const e = copy(); e.bridge_s = 5; e.scenarios = null
     const d = requirementsDiff(SAVED, e)
     expect(d.patch).toEqual({ bridge_s: 5 })
-    expect(d.refusals).toEqual(['scenarios: a setting cannot be removed here'])
+    expect(d.refusals).toEqual(['A setting cannot be removed here. (scenarios)'])
   })
 })

@@ -83,13 +83,19 @@ describe('the pure parts', () => {
     expect(parseValue('droop_pct', 'four')).toEqual({ error: 'Enter a number.' })
   })
   it('puts a 422 on the field it names, in words', () => {
-    const f = ['pf_rated', 'H_v_s', 'i_max_pu']
+    const f = ['pf_rated', 'H_v_s', 'i_max_pu', 'k_gfm_min']
     expect(refusalByField("island_config.units.bess (control gfm_vsm): missing ['H_v_s']", f))
       .toEqual({ field: 'H_v_s', words: 'Virtual inertia is needed for this mode.' })
     expect(refusalByField('island_config.units.bess (control gfm_vsm).i_max_pu must be positive, got -1', f))
-      .toEqual({ field: 'i_max_pu', words: 'Current limit must be positive.' })
+      .toEqual({ field: 'i_max_pu', words: 'Current limit must be above 0.' })
     expect(refusalByField('island_config.units.bess (control gfm_droop).pf_rated must be in (0, 1], got 1.5', f))
-      .toEqual({ field: 'pf_rated', words: `${CONTROL_FIELD_WORDS.pf_rated.label} must be in (0, 1].` })
+      .toEqual({ field: 'pf_rated', words: `${CONTROL_FIELD_WORDS.pf_rated.label} must be above 0 and at most 1.` })
+    expect(refusalByField('island_config.units.bess (control gfm_vsm).k_gfm_min must be non-negative, got -1', f).words)
+      .toBe(`${CONTROL_FIELD_WORDS.k_gfm_min?.label ?? 'k_gfm_min'} must be 0 or more.`)
+    expect(refusalByField('island_config.units.bess (control gfm_vsm).i_max_pu must be at least 1, got 0.5', f).words)
+      .toBe('Current limit must be 1 or more.')
+    expect(refusalByField('island_config.units.bess (control gfm_vsm).i_max_pu must be odd, got 2', f).words)
+      .toBe('Current limit was not accepted. Check the value.')
     expect(refusalByField('something else', f).field).toBeNull()
   })
 })
@@ -203,6 +209,14 @@ describe('the block', () => {
     const line = await screen.findByTestId('controls-preset')
     expect(line.textContent).toBe('From the project preset: Grid forming support.')
     expect(line.querySelector('button, a')).toBeNull()
+  })
+
+  it('a UPS has no preset line: a preset sets nothing on a UPS', async () => {
+    api.island.mockResolvedValue({ ...STATE, unit_controls: { ups: { ...UPS,
+      preset: 'grid_forming_support', preset_scope: 'project' } } })
+    renderBlock('ups')
+    await screen.findByLabelText('Walk-in time (s)')
+    expect(screen.queryByTestId('controls-preset')).toBeNull()
   })
 
   it('a draft restored after the settings changed elsewhere shows the 409 notice and cannot be saved', async () => {
