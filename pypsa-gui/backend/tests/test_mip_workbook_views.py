@@ -106,18 +106,36 @@ def test_an_lp_base_workbook_keeps_its_prices_and_has_no_reason(lp):
 
 
 def test_each_scenario_is_judged_by_its_own_solve(mip, lp):
+    base_note, scen_note = f"Base: {MIP_PRICES_TEXT}", f"Scenario: {MIP_PRICES_TEXT}"
     # An LP base with a MIP scenario: only the scenario's prices are withheld.
-    wb = _build(lp, LP_RECORD, scenarios=S.Scenarios(runs=[_scenario(mip, "UC", MIP_RECORD)]))
+    wb = _build(lp, LP_RECORD, scenarios=S.Scenarios(runs=[_scenario(mip, "Scenario", MIP_RECORD)]))
     prices = _text(wb["Prices"])
-    assert "Mean price" in prices and MIP_PRICES_TEXT in prices
+    assert "Mean price" in prices and scen_note in prices and base_note not in prices
     # A MIP base with an LP scenario: the base is withheld, the scenario keeps its prices.
-    wb = _build(mip, MIP_RECORD, scenarios=S.Scenarios(runs=[_scenario(lp, "LP", LP_RECORD)]))
+    wb = _build(mip, MIP_RECORD, scenarios=S.Scenarios(runs=[_scenario(lp, "Scenario", LP_RECORD)]))
     prices = _text(wb["Prices"])
-    assert "Mean price" in prices and MIP_PRICES_TEXT in prices
-    # The scenario's overview figures come from its own record, not the base's.
-    assert _scenario(lp, "LP", LP_RECORD).figs is not None
-    assert _line(_scenario(lp, "LP", LP_RECORD).figs, "opex_storage_charging").total is not None
-    assert _line(_scenario(mip, "UC", MIP_RECORD).figs, "opex_storage_charging").total is None
+    assert "Mean price" in prices and base_note in prices and scen_note not in prices
+    for sheet in ("Economics", "Capacity expansion"):
+        text = _text(wb[sheet])
+        assert base_note in text and scen_note not in text, sheet
+
+
+def test_a_held_study_solve_is_judged_with_its_own_config():
+    """A Guided study's held solve (`study_solve.keep`) carries its solve settings but no
+    solver_config; the run's own cfg judges it. A linearised process-UC solve with no MIP
+    record is an LP and keeps its prices; the same network under binary UC is a MIP."""
+    from tests.test_mip_price_views import _process_network
+
+    n = _process_network()
+    held = {"last_solve_settings": {}}
+    lin = {"solver_name": "highs", "process_uc": "linearised"}
+    binary = {"solver_name": "highs", "process_uc": "binary"}
+    assert S.run_price_limit(S.Run(name="b", network=n, cfg=lin, solver_state=held)) is None
+    assert S.run_price_limit(
+        S.Run(name="b", network=n, cfg=binary, solver_state=held)) == DUALS_NOT_MARGINAL
+    # The held solve's own record beats its config.
+    assert S.run_price_limit(
+        S.Run(name="b", network=n, cfg=lin, solver_state=MIP_RECORD)) == DUALS_NOT_MARGINAL
 
 
 def test_a_saved_scenario_s_figures_take_its_own_record(mip, monkeypatch):
