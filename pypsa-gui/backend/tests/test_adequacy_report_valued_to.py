@@ -1,4 +1,5 @@
 """Issue 28: a multi-period study records the year its cost runs to, at solve time."""
+
 import pandas as pd
 import pypsa
 
