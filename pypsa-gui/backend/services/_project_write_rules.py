@@ -309,6 +309,9 @@ POST   /api/results/fmea_sweep  write active
 POST   /api/results/fmea_sweep/abort  write active
 POST   /api/results/frontier  write active
 POST   /api/results/frontier/abort  write active
+POST   /api/results/front  write active
+POST   /api/results/front/abort  write active
+POST   /api/results/front/apply  write active
 POST   /api/results/investment_case  write active
 POST   /api/results/investment_case/abort  write active
 POST   /api/results/margin_loop  write active

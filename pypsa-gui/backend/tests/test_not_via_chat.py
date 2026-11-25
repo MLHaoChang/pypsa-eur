@@ -79,6 +79,7 @@ def test_the_issue_rows_are_declared():
         'report_chart_snapshots': ('manual', 'results'),
         'energization_per_period': ('unbuilt', None),  # template-e2e 02b (not_via_chat.d/)
         'energization_timeline': ('unbuilt', None),  # DC review 06 (not_via_chat.d/)
+        'multi_objective_front': ('unbuilt', None),  # DC 01 PR2a (not_via_chat.d/)
         'equipment_schedule': ('unbuilt', None),  # DC review 09 (not_via_chat.d/)
         'eh_study_why': ('unbuilt', None),  # guided-results 02a; a later slice adds the chat tool
         'entsoe_day_ahead_prices': ('manual', 'library'),  # SCU06 S1: spends the stored token

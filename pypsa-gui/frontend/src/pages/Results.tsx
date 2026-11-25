@@ -2,7 +2,7 @@ import { manualNavigation } from '../utils/navigationEpoch'
 import RunBoundView from './results/RunBoundView'
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase, Workflow, CalendarClock, Zap, FileText, FileDown, Package } from 'lucide-react'
+import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase, Workflow, CalendarClock, Zap, FileText, FileDown, Package, Table2 } from 'lucide-react'
 import { simulationApi, resultsApi } from '../api/simulation'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
@@ -67,6 +67,7 @@ import BackToHubResults from '../components/BackToHubResults'
 import ReportsPanel from './ReportsPanel'
 import ExportsTab from './results/ExportsTab'
 import SpecialistPacketTab from './results/SpecialistPacketTab'
+import EquipmentScheduleTab from './results/EquipmentScheduleTab'
 
 // What an empty card group points to (one line each to re-point).
 // Mode-aware, through the shared navigation.
@@ -82,7 +83,7 @@ const VALID_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>([
   'summary', 'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'emissions',
   'economics', 'curtailment', 'lostload', 'adequacy', 'storage', 'asset',
   'fmea', 'investment', 'flows', 'loadshape', 'grid_code', 'electrical_design',
-  'island', 'grid_forming', 'grid_risk', 'products', 'reports', 'exports', 'specialist_packet',
+  'island', 'grid_forming', 'grid_risk', 'products', 'reports', 'exports', 'equipment_schedule', 'specialist_packet',
 ])
 
 function loadInitialTab(): ResultsTab {
@@ -140,6 +141,7 @@ export const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingU
 const HANDOFF_TABS: typeof TABS = [
   { id: 'reports',    label: 'Reports',            Icon: FileText,         tip: 'Study reports written from the Energy Hub reference design and the adequacy study; read them here and export to Word' },
   { id: 'exports',    label: 'Exports',            Icon: FileDown,         tip: 'Export the project: bundle, NetCDF, CSV, Excel, MATPOWER or the results workbook' },
+  { id: 'equipment_schedule', label: 'Equipment schedule', Icon: Table2, tip: 'Every electrical asset of the last DC Grid study: rating, quantity, governing criterion, source and capex, with an Excel download' },
   { id: 'specialist_packet', label: 'Specialist packet', Icon: Package,   tip: 'What a dynamics specialist receives: the dispatch source, ranked snapshots, assumptions ledger and per-hour bundles' },
 ]
 // Every tab the panel can show: the result views, then Hand-off.
@@ -184,6 +186,7 @@ const RESULTS_TO_COMPARE_TAB: Record<ResultsTab, CompareTab> = {
   // Hand-off tabs are not result frames the rail can compare.
   reports: 'overview',
   exports: 'overview',
+  equipment_schedule: 'overview',
   specialist_packet: 'overview',
   // The grid studies are not result frames the rail can compare.
   grid_code: 'overview',
@@ -808,6 +811,7 @@ export default function Results() {
       {t === 'products'    && <ProductsTab />}
       {t === 'reports'     && <ReportsPanel />}
       {t === 'exports'     && <ExportsTab />}
+      {t === 'equipment_schedule' && <EquipmentScheduleTab />}
       {t === 'specialist_packet' && <SpecialistPacketTab />}
     </>
   )

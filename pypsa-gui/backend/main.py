@@ -285,6 +285,7 @@ _FOREIGN_LOCK_GATE_EXEMPT_EXACT = frozenset({
     "/api/results/eh_study/abort",
     "/api/results/investment_case/abort",  # same `_abort_study` stop event (LV08 B2a)
     "/api/results/business_case/abort",  # same `_abort_study` stop event (BC 08b)
+    "/api/results/front/abort",  # same `_abort_study` stop event (DC 01)
 })
 #
 # The job-scoped patterns are anchored to the canonical dashed-UUID shape, not
