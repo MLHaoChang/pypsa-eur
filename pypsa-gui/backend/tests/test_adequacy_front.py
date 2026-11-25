@@ -167,6 +167,30 @@ def test_a_binding_co2_point_matches_the_hand_solution():
     assert res["reference_co2_t_per_yr"] == pytest.approx(438_000.0, rel=1e-6)
 
 
+def test_a_co2_limit_goal_in_the_config_leaves_the_fronts_cap_the_only_one():
+    # DC review 02 / GK A C6: a goal limit far below both points' emissions
+    # would refuse each point as a duplicate cap, or bind it, if it reached
+    # the front's solves. Every point solves, and each emits what its own cap
+    # (or none) allows, as in the hand solution.
+    n = _hand()
+    res = _run(
+        n,
+        cfg=_cfg(co2_limit_t_per_yr=1.0),
+        lever="ens_cap",
+        levels=[100.0],
+        co2_caps_t=[None, 219_000.0],
+    )
+    by = _by_key(res)
+    assert all(p["status"] == "ok" for p in res["points"]), res["points"]
+    assert by[(100.0, 219_000.0)]["point"]["co2_t_per_yr"] == pytest.approx(
+        219_000.0, rel=1e-6
+    )
+    assert by[(100.0, None)]["point"]["co2_t_per_yr"] == pytest.approx(
+        438_000.0, rel=1e-6
+    )
+    assert n.global_constraints.empty
+
+
 def test_a_cap_above_the_emissions_has_no_shadow_price():
     res = _run(_hand(), lever="ens_cap", levels=[100.0], co2_caps_t=[500_000.0])
     pt = res["points"][0]["point"]
