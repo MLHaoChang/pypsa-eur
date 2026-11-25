@@ -3,7 +3,7 @@
 
 # 03 A signed-in user cannot change their password or see their account
 
-Status: ready-for-agent
+Status: done (merged #1972; skipped: editable display name needs a users.name migration, owner call)
 Owner: AO03-PAGE-1.
 Blocked by: none
 Source: gap review 2026-11-21, walk W4.
