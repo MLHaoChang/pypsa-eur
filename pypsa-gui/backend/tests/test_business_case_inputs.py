@@ -141,6 +141,7 @@ def _full() -> B.BusinessCaseInputs:
             start_year=2027,
             end_year=2046,
             note="term sheet",
+            volume_class="volume",
             hint={
                 "low": 2.0,
                 "high": 6.0,

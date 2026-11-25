@@ -775,7 +775,9 @@ def _bound(out) -> dict | None:
     return None
 
 
-def _line_blob(ln: LineItem, horizon: tuple[int, int], scaled: list[int]) -> dict:
+def _line_blob(
+    ln: LineItem, horizon: tuple[int, int], scaled: list[int] | tuple[()] = ()
+) -> dict:
     """A line as the digest reads it (GK B BC 07 P1): a field enters only when it can
     change an outcome and is set, so a digest from before the field stays byte-equal. The
     hint and a default's range are display only and never enter."""
