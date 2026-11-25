@@ -710,6 +710,9 @@ def test_an_unread_size_or_total_is_never_the_same_design():
     assert not fr.same_design(a, _pt({"g": None}, 1000.0))
     assert not fr.same_design(_pt({"g": None}, 1000.0), _pt({"g": None}, 1000.0))
     assert not fr.same_design(a, _pt({"g": 100.0}, None))
+    # Mirrored: the unread value on the `a` side (each operand of `close`).
+    assert not fr.same_design(_pt({"g": None}, 1000.0), a)
+    assert not fr.same_design(_pt({"g": 100.0}, None), a)
 
 
 def test_a_front_with_an_unread_capacity_still_finishes(monkeypatch):
