@@ -89,9 +89,11 @@ def test_goal_free_config_drops_only_the_inert_fields():
     assert G.NOT_LP_FIELDS == {"business_case", "finance_assumed",
                                "load_growth_pct_per_year", "load_growth_base_year",
                                "load_scalers_derived"}
+    # ...and the CO2 limit while None: its 0 is a limit (DC review 02).
+    assert G.OFF_WHEN_NONE == {"co2_limit_t_per_yr"}
     assert free == {k: v for k, v in asdict(cfg).items()
                     if k not in G.GOAL_FIELDS and k not in G.OFF_WHEN_FALSY
-                    and k not in G.NOT_LP_FIELDS}
+                    and k not in G.NOT_LP_FIELDS and k not in G.OFF_WHEN_NONE}
     assert free["ens_cap_permyriad"] == 5.0
     assert G.goal_free_config(asdict(cfg)) == free
 

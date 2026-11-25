@@ -728,6 +728,10 @@ class SolverConfigSchema(BaseModel):
     # (`services/solver/renewable_fraction.py`). `allow_inf_nan=False`: a NaN
     # would read as "off" downstream, the same silent coercion as a negative.
     min_renewable_fraction: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
+    # CO2 limit goal (DC template review 02): t CO2 per year, None = off, 0 =
+    # no emissions (`services/solver/co2_cap.py`). Finite: pydantic's ge=0
+    # alone accepts inf, which would read as a limit that is never there.
+    co2_limit_t_per_yr: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     # Operating reserve (homer-parity 01b): dispatchable headroom held every
     # snapshot of at least these FRACTIONS of the load, the PV output and the
     # wind output; all None/0 = off (`services/solver/operating_reserve.py`).

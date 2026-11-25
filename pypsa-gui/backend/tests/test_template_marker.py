@@ -274,7 +274,9 @@ def test_the_strip_of_an_energy_hub_case_shows_its_base_cards(
 ):
     solve(windy)
     kind, by_id, order = strip_of(windy, client, eh_case)
-    assert (kind, tuple(order)) == ("energy_hub", hk.ORDER["energy_hub"])
+    # The CO2 card shows only when the solve had a CO2 limit (DC review 02).
+    expected = tuple(c for c in hk.ORDER["energy_hub"] if c != "co2_annual")
+    assert (kind, tuple(order)) == ("energy_hub", expected)
     assert {"lcoe", "unserved_energy"} <= set(by_id)
     assert "peak_line_loading" not in by_id
 

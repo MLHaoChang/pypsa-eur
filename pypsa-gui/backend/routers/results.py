@@ -875,7 +875,8 @@ def get_emissions(source: str = "lopf"):
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return _not_solved()
-    payload = compute_emissions(n, source, result_df=_result_df)
+    payload = compute_emissions(n, source, result_df=_result_df,
+                                goal_cap=_state.get("last_co2_cap") if source == "lopf" else None)
     return _not_solved() if payload is None else payload
 
 
@@ -3468,7 +3469,31 @@ def _headline_cards() -> dict:
         cost = None
     lost_load = lost_load_payload(n, _state.get("last_lost_load"), _solved_settings)
     return headline_kpis(PyPSAService.get_active_context(), template=_workbook_template(),
-                         cost=cost, lost_load=lost_load)
+                         cost=cost, lost_load=lost_load, co2=_co2_goal_headline(n))
+
+
+def _co2_goal_headline(n) -> dict | None:
+    """The CO2 limit goal's headline figures (DC review 02), None without one."""
+    from services.solver.co2_cap import annual
+
+    goal = _state.get("last_co2_cap")
+    if not goal or goal.get("refusal"):
+        return None
+    e = compute_emissions(n, "lopf", result_df=_result_df)
+    if e is None:  # nothing counted: the card reads not available, never 0 t
+        return annual(goal, None, {})
+    totals = {r["period"]: r["total_tCO2"] for r in e.get("by_period") or []}
+    return annual(goal, e["total_tCO2"], totals)
+
+
+@results_router.get("/co2_limit")
+def get_co2_limit():
+    """The CO₂ limit goal of the last solve (DC review 02): the limit, each
+    period's cap and dual, and after an infeasible solve its typed refusal
+    (``refusal.code`` ``co2_cap_unreachable``, with the least emissions
+    reachable). 204 when the last solve had no CO₂ limit."""
+    goal = _state.get("last_co2_cap")
+    return goal if goal else Response(status_code=204)
 
 
 def _headline_comparison(cards: list[dict], actor_id) -> dict | None:

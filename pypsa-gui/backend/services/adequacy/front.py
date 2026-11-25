@@ -447,6 +447,10 @@ def _cfg_for(cfg, lever: str, level: float):
     # rewrite the condition to `lopf+ac_pf_ok`, which no point reads as
     # optimal, and it would spend a power flow per point for nothing.
     cfg = dataclasses.replace(cfg, run_ac_pf_after_lopf=False)
+    # The front sweeps its own CO2 caps (`apply_co2_cap`) on its copy, so the
+    # CO2 limit goal (DC review 02) must not add a second cap: with both, the
+    # goal would refuse every point as `co2_cap_duplicate` (GK A C6).
+    cfg = dataclasses.replace(cfg, co2_limit_t_per_yr=None)
     if lever == "ens_cap":
         return dataclasses.replace(cfg, ens_cap_permyriad=level)
     return dataclasses.replace(cfg, reserve_margin=level)
