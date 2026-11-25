@@ -69,6 +69,32 @@
       "value": 3.0
     },
     {
+      "component": "Generator",
+      "entity": "grid_supply",
+      "field": "outage_rate_value",
+      "item": "grid_supply_outage_rate",
+      "label": "Grid supply forced-outage rate",
+      "note": "assumed: generic public data, not this site's: SAIDI 3.945 min/yr / (60 x 8760); CEER-ECRB 7th Benchmarking Report on the Quality of Electricity and Gas Supply (2022), Table 2-18: TSO SAIDI and SAIFI excluding exceptional events, 2011-2018, median year. The PoC Link's own outage data is separate and not in these figures",
+      "panel": null,
+      "section": "connection",
+      "source": "assumed",
+      "unit": "p.u. (FOR)",
+      "value": 7.506e-06
+    },
+    {
+      "component": "Generator",
+      "entity": "grid_supply",
+      "field": "mttr_hours",
+      "item": "grid_supply_mttr",
+      "label": "Grid supply mean time to repair",
+      "note": "assumed: generic public data, not this site's: SAIDI 3.945 min/yr / (60 x SAIFI 0.135 per yr); CEER-ECRB 7th Benchmarking Report on the Quality of Electricity and Gas Supply (2022), Table 2-18: TSO SAIDI and SAIFI excluding exceptional events, 2011-2018, median year. The PoC Link's own outage data is separate and not in these figures",
+      "panel": null,
+      "section": "connection",
+      "source": "assumed",
+      "unit": "h",
+      "value": 0.487
+    },
+    {
       "item": "finance inputs",
       "note": "every asset in service on 2030-01-01; the week weighs a year and stands for each operating year, so nothing is annualised",
       "source": "assumed",
