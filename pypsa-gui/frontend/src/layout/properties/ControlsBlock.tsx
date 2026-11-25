@@ -174,7 +174,8 @@ export default function ControlsBlock({ name }: { name: string }) {
   const shown = useMemo(() => (state && uc ? shownFields(state, uc, mode, draft) : []), [state, uc, mode, draft])
   const save = useMutation({
     mutationFn: () => islandControlsApi.patch(project as string, { units: { [name]: unitPatch(uc!, draft) } },
-      state?.revision),
+      // The revision the edits were made on (GK B3): a draft from an older one gets the server's 409.
+      draft.base ?? state?.revision),
     onMutate: () => { setRefusal(null); setStale(false) },
     onSuccess: data => { qc.setQueryData(ISLAND_KEY(project as string), data); setDraft(EMPTY) },
     onError: (e: unknown) => {
