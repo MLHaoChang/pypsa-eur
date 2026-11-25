@@ -240,8 +240,14 @@ def test_mip_cause_sentence_matches_the_frontend_words():
 
     from harness.solve_validity import MIP_PRICES_CAUSE, MIP_PRICES_TEXT
 
-    ts = (pathlib.Path(__file__).resolve().parents[2] / "frontend" / "src" / "pages"
-          / "results" / "sectionWords.ts").read_text(encoding="utf-8")
+    ts = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "frontend"
+        / "src"
+        / "pages"
+        / "results"
+        / "sectionWords.ts"
+    ).read_text(encoding="utf-8")
     m = re.search(r"mip_duals_not_marginal: \{ why: '([^']+)'", ts)
     assert m, "NOT_KEPT_WORDS.mip_duals_not_marginal not found in sectionWords.ts"
     why = m.group(1)
