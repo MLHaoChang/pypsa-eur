@@ -508,6 +508,7 @@ def test_a_grid_import_inside_the_upstream_side_caps_nothing():
     n.links.at["shadow", "eh_role"] = "grid_import"
     f = reserve_margin_facts(n, _cfg())
     assert _asset(f, "up")["cap"]["links"] == ["poc"]
+    assert _asset(f, "up")["cap"]["reason"] == "capped at grid_import poc 40 MW × 0.998"
     assert _per(f)["firm_fixed_mw"] == pytest.approx(40 * 0.99 * 0.998)
 
 
@@ -900,3 +901,90 @@ def test_without_any_load_or_flag_the_link_bus1_side_is_the_site():
     n.remove("Load", "site_load")
     f = reserve_margin_facts(n, _cfg())
     assert _per(f)["firm_fixed_mw"] == pytest.approx(CAPPED)
+
+
+# ── edges the second mutation run found unpinned ──────────────────────────
+
+
+def test_a_bus_fed_one_way_from_upstream_is_an_island():
+    # grid -> zfar can only send away from the site: zfar's generator never
+    # reaches it, so it keeps its plain credit and joins no group.
+    n = _net()
+    n.add("Bus", "zfar", carrier="AC")
+    n.add("Link", "out", bus0="grid", bus1="zfar", p_nom=50.0, carrier="AC")
+    n.add("Generator", "far_g", bus="zfar", carrier="gas", p_nom=10.0)
+    _outage(n, "generators", "far_g", 0.05)
+    f = reserve_margin_facts(n, _cfg())
+    assert "cap" not in _asset(f, "far_g")
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(CAPPED + 9.5)
+
+
+def test_a_one_way_feeder_into_the_upstream_side_joins_its_group():
+    n = _net(up=(), links=(("poc", 400.0, 0.002),))
+    n.add("Bus", "far", carrier="AC")
+    n.add("Link", "feed", bus0="far", bus1="grid", p_nom=50.0, carrier="AC")
+    n.add("Generator", "far_g", bus="far", carrier="gas", p_nom=20.0)
+    _outage(n, "generators", "far_g", 0.05)
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(20 * 0.95 * 0.998)
+    assert _asset(f, "far_g")["cap"]["links"] == ["poc"]
+
+
+def test_buses_joined_by_a_line_are_one_group_through_both_imports():
+    n = _net()
+    n.add("Bus", "mid", carrier="AC")
+    n.add("Line", "gm", bus0="grid", bus1="mid", x=0.1, r=0.01, s_nom=1000.0)
+    n.add("Link", "poc_m", bus0="mid", bus1="site", p_nom=30.0, carrier="AC")
+    _outage(n, "links", "poc_m", 0.01)
+    n.links.at["poc_m", "eh_role"] = "grid_import"
+    f = reserve_margin_facts(n, _cfg())
+    a_l = (0.998 * 40 + 0.99 * 30) / 70.0
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(70.0 * 0.99 * a_l)
+    assert _asset(f, "up")["cap"]["links"] == ["poc", "poc_m"]
+
+
+def test_a_stage_leading_two_ways_is_credited_through_its_direct_import():
+    # grid -poc-> site and grid -l1-> mid -l2-> site: only poc is counted.
+    n = _net()
+    n.add("Bus", "mid", carrier="AC")
+    n.add("Link", "l1", bus0="grid", bus1="mid", p_nom=30.0, carrier="AC")
+    n.add("Link", "l2", bus0="mid", bus1="site", p_nom=20.0, carrier="AC")
+    n.links.loc[["l1", "l2"], "eh_role"] = "grid_import"
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(CAPPED)
+    cap = _asset(f, "up")["cap"]
+    assert cap["links"] == ["poc"]
+    assert "leads elsewhere through other paths, which are not counted" in cap["reason"]
+
+
+def test_a_stage_leading_two_ways_and_none_into_the_site_credits_nothing():
+    n = _net(links=())
+    for m in ("m1", "m2"):
+        n.add("Bus", m, carrier="AC")
+        n.add("Link", f"in_{m}", bus0="grid", bus1=m, p_nom=30.0, carrier="AC")
+        n.add("Link", f"out_{m}", bus0=m, bus1="site", p_nom=30.0, carrier="AC")
+    n.links["eh_role"] = "grid_import"
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f)["firm_fixed_mw"] == 0.0
+    cap = _asset(f, "up")["cap"]
+    assert cap["credited_mw"] == 0.0 and cap["link_mw"] == 0.0
+    assert "no single path to the site" in cap["reason"]
+
+
+def test_a_grid_import_into_a_non_electrical_bus_is_ignored_upstream():
+    n = _net()
+    n.add("Carrier", "heat")
+    n.add("Bus", "h", carrier="heat")
+    n.add("Link", "hx", bus0="grid", bus1="h", p_nom=5.0, carrier="heat")
+    n.links.at["hx", "eh_role"] = "grid_import"
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(CAPPED)
+    assert _asset(f, "up")["cap"]["links"] == ["poc"]
+
+
+def test_a_group_of_only_extendables_credits_nothing():
+    n = _extendable_upstream()
+    n.remove("Generator", "up")
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f)["firm_fixed_mw"] == 0.0
+    assert _asset(f, "up_new")["cap"]["member_credit_mw"] == 0.0
