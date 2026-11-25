@@ -89,7 +89,7 @@ function Assumptions({ data }: { data: EquipmentSchedule }) {
             <SourceChip source="assumed" />
             <span>
               <span className="text-muted">{kinds.get(a.applies_to) ?? cap(a.applies_to)}: </span>
-              {a.label} {String(a.value)}{a.unit ? ` ${a.unit}` : ''}
+              {a.label}: {String(a.value)}{a.unit ? ` ${a.unit}` : ''}
             </span>
           </li>
         ))}
