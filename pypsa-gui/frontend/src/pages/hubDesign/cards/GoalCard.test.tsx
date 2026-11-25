@@ -362,6 +362,12 @@ describe('GoalCard CO₂ limit (DC review 02)', () => {
     await waitFor(() => expect(input('hub-goal-co2').disabled).toBe(false))
     await user.type(input('hub-goal-co2'), '-5')
     expect(screen.getByTestId('hub-goal-co2-error').textContent).toBe(CO2_LIMIT_ERROR)
+    // Screen readers hear the error and tie it to the field (UX 30, blocker 2).
+    const err = screen.getByTestId('hub-goal-co2-error')
+    expect(err.getAttribute('role')).toBe('status')
+    expect(screen.getByTestId('hub-goal-co2').getAttribute('aria-invalid')).toBe('true')
+    expect(screen.getByTestId('hub-goal-co2').getAttribute('aria-describedby')).toBe(err.id)
+    expect(err.id).not.toBe('')
     expect(screen.queryByTestId('hub-goal-error')).toBeNull()
     expect((screen.getByTestId('hub-goal-save') as HTMLButtonElement).disabled).toBe(true)
   })

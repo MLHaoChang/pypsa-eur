@@ -5,7 +5,7 @@ import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import type { Carrier } from '../../api/types'
-import Emissions, { CO2_LIMIT_CAP } from './Emissions'
+import Emissions, { CO2_LIMIT_CAP, NOT_REPORTED } from './Emissions'
 import { findKpiValue } from '../../test/kpi'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
@@ -235,13 +235,13 @@ it('names the CO₂ limit goal\'s cap "CO₂ limit" and keeps a stored cap\'s ow
   expect(table.textContent).not.toContain('dc_co2_limit_2030')
 })
 
-it('a goal row whose tonnes were not counted shows — for used, never crashes', async () => {
+it('a goal row whose tonnes were not counted says "Not reported" for used, never crashes', async () => {
   mockCaps([{ ...cap('dc_co2_limit', null), goal: true, used_tCO2: null, slack_tCO2: null } as never,
     cap('Other', 0)])
   renderPage()
   const table = (await screen.findByText('μ (€/tCO₂)')).closest('table') as HTMLElement
   const row = [...table.querySelectorAll('tbody tr')].find(r => r.firstElementChild?.textContent === CO2_LIMIT_CAP)!
-  expect(row.children[3].textContent).toBe('—')
+  expect(row.children[3].textContent).toBe(NOT_REPORTED)
 })
 
 it('the single active cap\'s header names the goal "CO₂ limit"', async () => {

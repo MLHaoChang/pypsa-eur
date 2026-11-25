@@ -84,6 +84,12 @@ describe('Solver settings — the CO₂ limit', () => {
     fireEvent.change(screen.getByTestId('solver-goal-co2'), { target: { value: '-1' } })
     expect(patch).not.toHaveBeenCalled()
     expect(screen.getByTestId('solver-goal-co2-error').textContent).toBe(CO2_LIMIT_ERROR)
+    // Screen readers hear the error and tie it to the field (UX 30, blocker 2).
+    const err = screen.getByTestId('solver-goal-co2-error')
+    expect(err.getAttribute('role')).toBe('status')
+    expect(screen.getByTestId('solver-goal-co2').getAttribute('aria-invalid')).toBe('true')
+    expect(screen.getByTestId('solver-goal-co2').getAttribute('aria-describedby')).toBe(err.id)
+    expect(err.id).not.toBe('')
     expect(screen.queryByTestId('solver-goal-error')).toBeNull()
   })
 })

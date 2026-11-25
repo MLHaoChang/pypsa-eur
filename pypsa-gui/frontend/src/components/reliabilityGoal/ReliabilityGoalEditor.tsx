@@ -6,7 +6,7 @@
 // template value from the goal, so both modes show the same goal.
 // The CO₂ limit (DC review 02) sits below the reliability fields: it is saved
 // with them, but shows even where the reliability fields are out of scope.
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import type { ReliabilityGoal } from '../../api/flow'
 import {
   assumedLole, CO2_LIMIT, CO2_LIMIT_UNIT, goalPatchFromEdits, goalText, goalWords, GOAL_UNSET, MAX_GOAL_DRAWS,
@@ -203,6 +203,7 @@ export function Co2LimitField({ mode, co2Limit, edits, onChange, disabled = fals
 }) {
   const guided = mode === 'guided'
   const testId = guided ? 'hub-goal-co2' : 'solver-goal-co2'
+  const errorId = useId()
   const value = edits[CO2_LIMIT] ?? (co2Limit == null ? '' : String(co2Limit))
   const v = value.trim()
   const error = goalPatchFromEdits({ [CO2_LIMIT]: value }).error
@@ -213,13 +214,14 @@ export function Co2LimitField({ mode, co2Limit, edits, onChange, disabled = fals
         {CO2_LIMIT_LABEL} ({CO2_LIMIT_UNIT})
       </span>
       <input type="number" data-testid={testId} step="any" min={0}
+        aria-invalid={error ? true : undefined} aria-describedby={error ? errorId : undefined}
         value={value} disabled={disabled} placeholder="no limit"
         onChange={e => onChange({ ...edits, [CO2_LIMIT]: e.target.value })}
         className={guided
           ? 'w-32 rounded border border-border bg-bg px-2 py-1 font-mono text-[12px] text-text'
           : 'px-2 py-1 border border-border rounded text-xs font-mono bg-bg focus:outline-none focus:border-accent'} />
       {error && (
-        <span data-testid={`${testId}-error`} className={guided ? 'text-[12px] text-warn' : 'text-[10px] text-warn'}>
+        <span id={errorId} role="status" data-testid={`${testId}-error`} className={guided ? 'text-[12px] text-warn' : 'text-[10px] text-warn'}>
           {error}
         </span>
       )}

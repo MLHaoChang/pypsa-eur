@@ -28,6 +28,8 @@ import { NOT_RECORDED_KPI, NotRecordedDash, NotRecordedNote } from './NotRecorde
 
 /** The CO₂ limit goal's rows read "CO₂ limit" (DC review 02); any other cap keeps its constraint name. */
 export const CO2_LIMIT_CAP = 'CO₂ limit'
+/** A goal row whose tonnes the solve did not count says so, not a bare dash (UX 30). */
+export const NOT_REPORTED = 'Not reported'
 const capName = (c: { name: string; goal?: boolean }) => (c.goal ? CO2_LIMIT_CAP : c.name)
 
 export default function Emissions() {
@@ -208,7 +210,7 @@ export default function Emissions() {
                     <td className="px-2 py-1 font-mono text-[11px] text-right">
                       {c.used_tCO2 != null
                         ? c.used_tCO2.toLocaleString(undefined, { maximumFractionDigits: 1 })
-                        : '—'}
+                        : <span className="font-sans text-muted">{NOT_REPORTED}</span>}
                     </td>
                     <td className={`px-2 py-1 font-mono text-[11px] text-right
                       ${c.slack_tCO2 != null && c.slack_tCO2 < 0 ? 'text-danger font-semibold' : ''}`}>
