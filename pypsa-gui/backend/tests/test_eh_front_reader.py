@@ -118,7 +118,10 @@ def test_no_study_record_is_unavailable_not_current(client, session_state):
 
 def test_an_aborted_stage_reads_aborted(client, session_state, session_ctx):
     st = session_state(client)
-    st["eh_study"] = {"status": "aborted", "network_revision": _revision(session_ctx, client)}
+    st["eh_study"] = {
+        "status": "aborted",
+        "network_revision": _revision(session_ctx, client),
+    }
     st["eh_front"] = _result(aborted=True)
     assert client.get(URL).json()["status"] == "aborted"
 

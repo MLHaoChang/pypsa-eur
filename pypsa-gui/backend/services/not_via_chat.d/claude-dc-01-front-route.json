@@ -4,7 +4,7 @@
    "id": "multi_objective_front",
    "title": "Cost, reliability and CO2 front",
    "disposition": "unbuilt",
-   "reason": "The cost, reliability and CO2 front is not in chat yet; a later slice adds the chat tool. Until then the Expert adequacy panel runs it and applies a point.",
+   "reason": "The cost, reliability and CO2 front is not in chat yet; a later slice adds the chat tool. Until then the Expert adequacy panel runs it and applies a point, and the Guided Results card shows it.",
    "page": "Adequacy (Expert)",
    "panel": null,
    "keywords": [
@@ -26,6 +26,10 @@
     [
      "POST",
      "/api/results/front/apply"
+    ],
+    [
+     "GET",
+     "/api/results/eh_front"
     ]
    ]
   }

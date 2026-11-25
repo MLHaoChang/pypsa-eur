@@ -75,7 +75,7 @@ function FrontKey({ rows, unitsRel, showCi, testId }: { rows: FrontRow[]; unitsR
       </span>
       <span className="inline-flex items-center gap-1" data-testid={`${testId}-key-hollow`}>
         <svg width="10" height="10" aria-hidden><circle cx="5" cy="5" r="3.5" fill="none" stroke="var(--color-muted)" strokeWidth="1.5" /></svg>
-        hollow: dominated, another point is no worse on cost, reliability and CO₂
+        hollow: dominated, another point is no worse on cost, reliability and CO₂, and better on one
         {anyDominated ? '' : ' (none here)'}
       </span>
       {showCi && (
