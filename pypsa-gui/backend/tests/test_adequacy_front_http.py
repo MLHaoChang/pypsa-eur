@@ -219,6 +219,9 @@ def test_a_worker_that_raises_fails_the_record_and_frees_the_lock(
         with lock:
             raise RuntimeError("solver exploded")
 
+    def silent(network, lock, *a, **kw):
+        raise RuntimeError()
+
     monkeypatch.setattr(front, "run_front_study", boom)
     assert client.post(URL, json=_BODY).status_code == 200
     rec = _poll(client)
@@ -226,6 +229,9 @@ def test_a_worker_that_raises_fails_the_record_and_frees_the_lock(
     lock = PyPSAService.get_lock()
     assert lock.acquire(blocking=False)
     lock.release()
+    monkeypatch.setattr(front, "run_front_study", silent)
+    assert client.post(URL, json=_BODY).status_code == 200
+    assert _poll(client)["error"] == "RuntimeError"
     monkeypatch.setattr(front, "run_front_study", real)
     assert _run(client)["status"] == "done"
 
@@ -384,3 +390,139 @@ def test_a_failure_after_the_first_write_is_undone(
     assert calls == ["Generator"]
     pd.testing.assert_frame_equal(gens(client), before, check_dtype=False)
     assert rec["status"] == "done"
+
+
+# --------------------------------------------------------------------------
+# The apply checks and the request, unit-level (mutation survivors)
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def unit_apply(monkeypatch):
+    """`_apply_rows` against a fixed network and revision 5, never stale."""
+    from services import dirty_state, study_state
+    from services.adequacy import front_runner as frr
+    from services.pypsa_service import PyPSAService
+
+    n = _net()
+    monkeypatch.setattr(study_state, "edited_since", lambda rec: False)
+    monkeypatch.setattr(dirty_state, "revision", lambda *a: 5)
+    monkeypatch.setattr(PyPSAService, "get_network", staticmethod(lambda: n))
+
+    def rows(record, index=0, rev=5):
+        return frr._apply_rows(record, index, rev)
+
+    return rows
+
+
+def _rec(points, status="done"):
+    return {"status": status, "result": {"points": points}}
+
+
+_OK = {
+    "status": "ok",
+    "point": {"capacities": {"generators:gas": 50.0, "generators:clean": 50.0}},
+}
+
+
+def _refused(fn, status, word):
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as e:
+        fn()
+    assert e.value.status_code == status, e.value.detail
+    assert word in str(e.value.detail)
+
+
+def test_the_apply_checks_pass_a_good_point(unit_apply):
+    rows = unit_apply(_rec([_OK]))
+    assert rows == {
+        "Generator": [
+            {"name": "gas", "updates": {"p_nom": 50.0, "p_nom_extendable": False}},
+            {"name": "clean", "updates": {"p_nom": 50.0, "p_nom_extendable": False}},
+        ]
+    }
+
+
+@pytest.mark.parametrize(
+    "record, index, status, word",
+    [
+        (None, 0, 404, "no front study"),
+        (_rec([_OK], status="running"), 0, 409, "running"),
+        ({"status": "done", "result": None}, 0, 409, "done"),
+        ({"status": "done", "result": {"aborted": False}}, 0, 422, "no front point 0"),
+        (_rec([_OK]), 1, 422, "no front point 1"),
+        (_rec([{**_OK, "status": "failed"}]), 0, 422, "did not solve"),
+        (_rec([{"status": "ok", "point": None}]), 0, 422, "did not solve"),
+        (
+            _rec([{"status": "ok", "point": {"total_eur_per_yr": 1.0}}]),
+            0,
+            422,
+            "not in the point",
+        ),
+        (
+            _rec(
+                [
+                    {
+                        "status": "ok",
+                        "point": {
+                            "capacities": {
+                                "generators:gas": None,
+                                "generators:clean": 1.0,
+                            }
+                        },
+                    }
+                ]
+            ),
+            0,
+            422,
+            "no solved size",
+        ),
+    ],
+    ids=[
+        "no-record",
+        "running",
+        "no-result",
+        "no-points",
+        "index-at-len",
+        "failed-with-point",
+        "ok-without-point",
+        "no-capacities",
+        "none-size",
+    ],
+)
+def test_each_apply_refusal(unit_apply, record, index, status, word):
+    _refused(lambda: unit_apply(record, index), status, word)
+
+
+def test_a_table_the_bulk_edit_cannot_write_is_refused():
+    from services.adequacy import front_runner as frr
+
+    assert frr._class_of("generators") == "Generator"
+    _refused(lambda: frr._class_of("sub_networks"), 422, "sub_networks")
+
+
+def test_the_request_defaults_and_pins_the_budget():
+    from services.adequacy import front_runner as frr
+    from services.adequacy.front import DEFAULT_MC_DRAWS, MAX_FRONT_SOLVES
+
+    kw = frr._engine_kwargs(frr.FrontRequest(levels=[1.0]))
+    assert kw["mc_draws"] == DEFAULT_MC_DRAWS and kw["co2_caps_t"] == [None]
+    assert kw["budget_solves"] == MAX_FRONT_SOLVES
+    assert (
+        frr._engine_kwargs(frr.FrontRequest(levels=[1.0], mc_draws=7))["mc_draws"] == 7
+    )
+
+
+def test_no_solver_config_is_refused_before_publishing():
+    from services.adequacy import front_runner as frr
+
+    _refused(
+        lambda: frr.start_front(
+            frr.FrontRequest(levels=[1.0]),
+            solver_state={},
+            publish_study=lambda *a: pytest.fail("published"),
+        ),
+        422,
+        "no solver configuration",
+    )
