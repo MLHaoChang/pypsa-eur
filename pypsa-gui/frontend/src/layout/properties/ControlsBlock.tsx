@@ -130,7 +130,7 @@ export function refusalByField(detail: string, fields: string[]): { field: strin
   if (!field) return { field: null, words: 'The controls could not be saved. Check the values and try again.' }
   const label = CONTROL_FIELD_WORDS[field]?.label ?? field
   if (/missing/.test(detail)) return { field, words: `${label} is needed for this mode.` }
-  const must = new RegExp(`${field}[^:]*?(must[^,]*)`).exec(detail)?.[1]
+  const must = new RegExp(`${field}[^:]*?(must.*?)(?:, got\\b|;|$)`).exec(detail)?.[1]
   return { field, words: must ? `${label} ${must}.` : `${label} was not accepted. Check the value.` }
 }
 
@@ -214,6 +214,7 @@ export default function ControlsBlock({ name }: { name: string }) {
                   aria-invalid={!!error} onChange={e => setValue(s.field, e.target.value)} />
               : <input id={id} type="text" inputMode="decimal" className={`${INPUT} w-32`} value={s.text}
                   aria-invalid={!!error} onChange={e => setValue(s.field, e.target.value)} />}
+            {s.origin === 'typed' && <AssumedChip typed testId={`controls-stated-${s.field}`} />}
             {s.origin !== 'typed' && s.source === 'assumed' && (
               <AssumedChip testId={`controls-assumed-${s.field}`}
                 source={s.origin === 'default' ? 'filled from a control preset' : 'a template or preset default'} />
@@ -250,7 +251,7 @@ export default function ControlsBlock({ name }: { name: string }) {
         {uc.kind !== 'ups' && (
           <div className="flex gap-2 items-center text-[12px] mb-2">
             <label htmlFor={`controls-${name}-mode`}>Control mode</label>
-            <select id={`controls-${name}-mode`} className={INPUT} value={mode} onChange={e => setMode(e.target.value)}>
+            <select id={`controls-${name}-mode`} className={`${INPUT} w-full min-w-0 max-w-full`} value={mode} onChange={e => setMode(e.target.value)}>
               {(state.controls ?? []).map(c => <option key={c} value={c}>{controlModeLabel(c)}</option>)}
             </select>
           </div>

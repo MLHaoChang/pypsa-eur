@@ -16,9 +16,16 @@ export function unitClass(unit: string, lists: Partial<Record<UnitClass, { name:
   return UNIT_CLASSES.find(c => (lists[c] ?? []).some(r => r.name === unit)) ?? null
 }
 
+/** The Back pill's words after the jump: the island panel is reached from Results in Guided and
+ *  from Grid study in Expert, so the section's own name would not say where Back goes. */
+export const ISLAND_RETURN_LABEL = 'Island'
+
 /** Open the unit's asset form, at its Controls block: in place in Guided, the Properties panel in Expert. */
 export function openAssetControls(type: UnitClass, name: string): void {
   const target: FlowTarget = { section: 'assets', panel: null, component: type, entity: name, field: null }
+  const before = useUIStore.getState().flowReturn
   if (useUIStore.getState().uiMode === 'guided') openFlowTargetInPlace(target)
   else openFlowTarget(target)
+  const back = useUIStore.getState().flowReturn
+  if (back && back !== before) useUIStore.setState({ flowReturn: { ...back, label: ISLAND_RETURN_LABEL } })
 }

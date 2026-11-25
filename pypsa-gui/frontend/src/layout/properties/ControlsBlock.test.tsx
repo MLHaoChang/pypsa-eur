@@ -8,6 +8,7 @@ import ControlsBlock, {
 } from './ControlsBlock'
 import type { IslandControlsState, UnitControl } from '../../api/islandControls'
 import { useUIStore } from '../../store/uiStore'
+import { CONTROL_FIELD_WORDS } from '../../pages/islandWords'
 
 const api = vi.hoisted(() => ({ island: vi.fn(), patchIsland: vi.fn() }))
 vi.mock('../../api/campusElectrical', async () => {
@@ -87,6 +88,8 @@ describe('the pure parts', () => {
       .toEqual({ field: 'H_v_s', words: 'Virtual inertia is needed for this mode.' })
     expect(refusalByField('island_config.units.bess (control gfm_vsm).i_max_pu must be positive, got -1', f))
       .toEqual({ field: 'i_max_pu', words: 'Current limit must be positive.' })
+    expect(refusalByField('island_config.units.bess (control gfm_droop).pf_rated must be in (0, 1], got 1.5', f))
+      .toEqual({ field: 'pf_rated', words: `${CONTROL_FIELD_WORDS.pf_rated.label} must be in (0, 1].` })
     expect(refusalByField('something else', f).field).toBeNull()
   })
 })
@@ -108,6 +111,16 @@ describe('the block', () => {
     await screen.findByTestId('controls-assumed-pf_rated')
     expect(screen.queryByTestId('controls-assumed-droop_pct')).toBeNull()   // datasheet: stated
     expect(screen.getAllByTestId('controls-assumed-key')).toHaveLength(1)
+  })
+
+  it('a value typed over an assumed one reads Stated, as the key says', async () => {
+    renderBlock()
+    const user = userEvent.setup()
+    const pf = await screen.findByLabelText(new RegExp(CONTROL_FIELD_WORDS.pf_rated.label))
+    await user.clear(pf)
+    await user.type(pf, '0.9')
+    expect(screen.getByTestId('controls-stated-pf_rated').textContent).toContain('Stated')
+    expect(screen.queryByTestId('controls-assumed-pf_rated')).toBeNull()
   })
 
   it('a switch previews what it drops and fills, then saves one unit patch with the revision it read', async () => {
