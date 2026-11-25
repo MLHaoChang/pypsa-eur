@@ -14,6 +14,8 @@ import { VOLL_TEXT } from '../delegate'
 import { DC_TEMPLATE, readiness } from '../testFixtures'
 import { goal } from '../../../test/fixtures/reliabilityGoal'
 import { GoalCard } from './GoalCard'
+import { CO2_LIMIT_HINT, CO2_LIMIT_ZERO } from '../../../components/reliabilityGoal/ReliabilityGoalEditor'
+import { CO2_LIMIT_ERROR } from '../../../hooks/useReliabilityGoal'
 import { GOAL_KEY_KEPT, GOAL_KEY_SITE_TYPE, GOAL_KEY_TEMPLATE, GOAL_KEY_TYPED } from './goalCardWords'
 import { nk } from '../../../utils/queryKeys'
 
@@ -327,5 +329,59 @@ describe('GoalCard scope (W4a)', () => {
     expect(screen.queryByTestId('hub-goal-lole')).toBeNull()
     expect(await screen.findByTestId('hub-goal-voll')).toBeTruthy()
     expect(screen.queryByTestId('hub-goal-run')).toBeNull()
+  })
+})
+
+describe('GoalCard CO₂ limit (DC review 02)', () => {
+  it('empty reads "no limit" with its hint; 0 is a limit, said on its own line, and saves as 0', async () => {
+    const user = mount()
+    await waitFor(() => expect(input('hub-goal-co2').value).toBe(''))
+    expect(screen.getByTestId('hub-goal-co2-note').textContent).toBe(CO2_LIMIT_HINT)
+    expect(screen.getByText('CO₂ limit (t CO₂/yr)')).toBeTruthy()
+    await user.type(input('hub-goal-co2'), '0')
+    expect(screen.getByTestId('hub-goal-co2-note').textContent).toBe(CO2_LIMIT_ZERO)
+    await user.click(screen.getByTestId('hub-goal-save'))
+    await waitFor(() => expect(simulationApi.updateSolverConfig).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(simulationApi.updateSolverConfig).mock.calls[0][0]).toEqual({ co2_limit_t_per_yr: 0 })
+  })
+
+  it('a stored limit fills the field; clearing it saves no limit (null)', async () => {
+    vi.mocked(simulationApi.getSolverConfig).mockResolvedValue({ voll: 5000, co2_limit_t_per_yr: 1200 } as never)
+    const user = mount()
+    await waitFor(() => expect(input('hub-goal-co2').value).toBe('1200'))
+    expect(screen.queryByTestId('hub-goal-co2-note')).toBeNull()
+    await user.clear(input('hub-goal-co2'))
+    await user.click(screen.getByTestId('hub-goal-save'))
+    await waitFor(() => expect(simulationApi.updateSolverConfig).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(simulationApi.updateSolverConfig).mock.calls[0][0]).toEqual({ co2_limit_t_per_yr: null })
+  })
+
+  it('a negative limit is named under the field and cannot be saved', async () => {
+    const user = mount()
+    await waitFor(() => expect(input('hub-goal-co2').disabled).toBe(false))
+    await user.type(input('hub-goal-co2'), '-5')
+    expect(screen.getByTestId('hub-goal-co2-error').textContent).toBe(CO2_LIMIT_ERROR)
+    expect(screen.queryByTestId('hub-goal-error')).toBeNull()
+    expect((screen.getByTestId('hub-goal-save') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('with Reliability off the limit and "Save goal" stay', async () => {
+    getFlowScope.mockResolvedValue({
+      scope: { version: 1, groups: ['capacity'], source: 'project', preset_id: 'eh_datacenter',
+        options: { capacity: ['sizing'], grid: [], control: [], reliability: [], commercial: [], handoff: [] } },
+      cards: [{ id: 'reliability', label: 'Reliability', locked_reason: null, intended: ['goal_study'],
+        sections: ['assets', 'scenarios'], chip: 'Reliability',
+        options: [{ id: 'goal_study', label: 'Reliability goal & study', status: 'available', reason: null }] }],
+      preset_id: 'eh_datacenter', preset_label: 'Data Center Energy Hub',
+      preset: { version: 1, groups: [], options: {} },
+    })
+    const user = mount()
+    await screen.findByTestId('hub-goal-out-of-scope-add')
+    expect(screen.queryByTestId('hub-goal-lole')).toBeNull()
+    expect(screen.queryByTestId('hub-goal-advanced')).toBeNull()
+    await user.type(input('hub-goal-co2'), '500')
+    await user.click(screen.getByTestId('hub-goal-save'))
+    await waitFor(() => expect(simulationApi.updateSolverConfig).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(simulationApi.updateSolverConfig).mock.calls[0][0]).toEqual({ co2_limit_t_per_yr: 500 })
   })
 })

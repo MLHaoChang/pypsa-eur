@@ -34,6 +34,7 @@ import { money } from '../../../utils/money'
 import GridExtensionCard from '../../results/GridExtensionCard'
 import { hasNoVerdict, NoVerdictNote } from '../noVerdict'
 import { HEADLINED, ResultsHeadline } from './ResultsHeadline'
+import { Co2LimitRefusal } from '../../results/Co2LimitRefusal'
 import { WhyThisNumber } from './WhyThisNumber'
 
 
@@ -139,6 +140,8 @@ export function ResultsCard() {
     // Never an empty or greyed card (UX S6, G2): say why, and how to get there.
     return (
       <CardShell step="results" next="improve" testId="hub-card-results" title="Results">
+        {/* A solve under the CO₂ limit that found no design says so first (DC review 02). */}
+        <Co2LimitRefusal mode="guided" />
         {running ? (
           <ResultState state="running" reason="The study is running; its verdict, cost and risks appear here when it finishes." />
         ) : run?.solved && run.objective != null ? (
@@ -165,6 +168,7 @@ export function ResultsCard() {
 
   return (
     <CardShell step="results" next="improve" testId="hub-card-results" title="Results">
+      <Co2LimitRefusal mode="guided" />
       {/* One amber line (D-3): the edited fact subsumes solved-since. */}
       {study?.edited_since_study === true && (
         <p data-testid="hub-results-edited"

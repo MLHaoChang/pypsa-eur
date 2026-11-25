@@ -8,6 +8,8 @@ import type { ReactElement } from 'react'
 import type { SolverConfig } from '../api/types'
 import { goal } from '../test/fixtures/reliabilityGoal'
 import { ReliabilityAssumptions, solverSettingsSaveBody } from './SolverSettings'
+import { CO2_LIMIT_HINT, CO2_LIMIT_ZERO } from '../components/reliabilityGoal/ReliabilityGoalEditor'
+import { CO2_LIMIT_ERROR } from '../hooks/useReliabilityGoal'
 
 // The goal editor's labels read the hover-help catalogue (a query).
 const render = (ui: ReactElement) => rtlRender(
@@ -57,5 +59,31 @@ describe('Solver settings — the reliability goal', () => {
   it('keeps the ENS warning for a generous target', () => {
     render(<ReliabilityAssumptions draft={{ ...DRAFT, ens_cap_permyriad: 500 }} patch={vi.fn()} />)
     expect(screen.getByText(/500‱ = 5% of demand deliberately unserved/)).toBeTruthy()
+  })
+})
+
+// DC review 02: the CO₂ limit, below the reliability goal, the same field as Guided's Goal card.
+describe('Solver settings — the CO₂ limit', () => {
+  it('reads the draft\'s limit; empty is "no limit" with the hint, 0 is a limit', () => {
+    const patch = vi.fn()
+    render(<ReliabilityAssumptions draft={DRAFT} patch={patch} />)
+    const input = screen.getByTestId('solver-goal-co2') as HTMLInputElement
+    expect(input.value).toBe('')
+    expect(screen.getByTestId('solver-goal-co2-note').textContent).toBe(CO2_LIMIT_HINT)
+    fireEvent.change(input, { target: { value: '0' } })
+    expect(patch).toHaveBeenLastCalledWith({ co2_limit_t_per_yr: 0 })
+    expect(screen.getByTestId('solver-goal-co2-note').textContent).toBe(CO2_LIMIT_ZERO)
+    const next = { ...DRAFT, ...patch.mock.calls.at(-1)![0] } as SolverConfig
+    expect(solverSettingsSaveBody(next, DRAFT)).toEqual({ co2_limit_t_per_yr: 0 })
+  })
+
+  it('a stored limit shows; a negative one never reaches the draft and is named under the field', () => {
+    const patch = vi.fn()
+    render(<ReliabilityAssumptions draft={{ ...DRAFT, co2_limit_t_per_yr: 1200 }} patch={patch} />)
+    expect((screen.getByTestId('solver-goal-co2') as HTMLInputElement).value).toBe('1200')
+    fireEvent.change(screen.getByTestId('solver-goal-co2'), { target: { value: '-1' } })
+    expect(patch).not.toHaveBeenCalled()
+    expect(screen.getByTestId('solver-goal-co2-error').textContent).toBe(CO2_LIMIT_ERROR)
+    expect(screen.queryByTestId('solver-goal-error')).toBeNull()
   })
 })

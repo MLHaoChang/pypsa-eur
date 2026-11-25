@@ -1672,7 +1672,8 @@ export function ReliabilityAssumptions({
               {unsaved?.goal && <NotSavedYet testId="solver-goal-unsaved" />}
             </span>
             <ReliabilityGoalEditor mode="expert"
-              goal={goal ?? goalFromDraft(draft)} edits={edits} onChange={onEdits} />
+              goal={goal ?? goalFromDraft(draft)} edits={edits} onChange={onEdits}
+              co2Limit={draft.co2_limit_t_per_yr ?? null} />
           </div>
           {ensTargetWarning(ensShown) && (
             <p className="text-[10px] text-danger mt-1">

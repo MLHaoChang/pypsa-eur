@@ -5,7 +5,7 @@ import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import type { Carrier } from '../../api/types'
-import Emissions from './Emissions'
+import Emissions, { CO2_LIMIT_CAP } from './Emissions'
 import { findKpiValue } from '../../test/kpi'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
@@ -223,4 +223,29 @@ it('shows no — note when every shadow price is recorded', async () => {
   renderPage()
   expect(await findKpiValue('12.0 €/tCO₂')).toBeTruthy()
   expect(screen.queryByTestId('not-recorded-note')).toBeNull()
+})
+
+// DC review 02, UX GO (4): the goal's own rows read "CO₂ limit", never their constraint name.
+it('names the CO₂ limit goal\'s cap "CO₂ limit" and keeps a stored cap\'s own name', async () => {
+  mockCaps([{ ...cap('dc_co2_limit_2030', 12.5), goal: true } as never, cap('CO2Limit', 0)])
+  renderPage()
+  const table = (await screen.findByText('μ (€/tCO₂)')).closest('table') as HTMLElement
+  const names = [...table.querySelectorAll('tbody tr')].map(r => r.firstElementChild?.textContent)
+  expect(names).toEqual([CO2_LIMIT_CAP, 'CO2Limit'])
+  expect(table.textContent).not.toContain('dc_co2_limit_2030')
+})
+
+it('a goal row whose tonnes were not counted shows — for used, never crashes', async () => {
+  mockCaps([{ ...cap('dc_co2_limit', null), goal: true, used_tCO2: null, slack_tCO2: null } as never,
+    cap('Other', 0)])
+  renderPage()
+  const table = (await screen.findByText('μ (€/tCO₂)')).closest('table') as HTMLElement
+  const row = [...table.querySelectorAll('tbody tr')].find(r => r.firstElementChild?.textContent === CO2_LIMIT_CAP)!
+  expect(row.children[3].textContent).toBe('—')
+})
+
+it('the single active cap\'s header names the goal "CO₂ limit"', async () => {
+  mockCaps([{ ...cap('dc_co2_limit', 3), goal: true } as never])
+  renderPage()
+  expect(await screen.findByText(`(${CO2_LIMIT_CAP})`, { exact: false })).toBeTruthy()
 })
