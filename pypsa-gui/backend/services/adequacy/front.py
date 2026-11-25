@@ -266,23 +266,23 @@ def apply_co2_cap(n, cap_t_per_yr: float | None) -> list[str]:
     return names
 
 
-def _capacities(n) -> dict[str, float]:
+def _capacities(n) -> dict[str, float | None]:
     """Built capacity of every extendable asset, MW (MWh for Stores)."""
+    from services.adequacy.sweep import _CAPACITY_ATTRS
+
     out: dict[str, float] = {}
-    for comp, nom in (
-        ("generators", "p_nom"),
-        ("storage_units", "p_nom"),
-        ("links", "p_nom"),
-        ("stores", "e_nom"),
-        ("lines", "s_nom"),
-    ):
+    # The one capacity table (transformers included), so a point names every
+    # asset that apply_point fixes.
+    for comp, nom in _CAPACITY_ATTRS:
         df = getattr(n, comp, None)
         if df is None or df.empty or f"{nom}_extendable" not in df.columns:
             continue
         ext = df.index[df[f"{nom}_extendable"].astype(bool)]
         col = f"{nom}_opt" if f"{nom}_opt" in df.columns else nom
         for k in ext:
-            out[f"{comp}:{k}"] = float(df.at[k, col] or 0.0)
+            # None for a missing or non-finite size, never 0 or NaN (apply
+            # refuses it, and the record stays strict JSON).
+            out[f"{comp}:{k}"] = _finite(df.at[k, col])
     return out
 
 
@@ -633,13 +633,19 @@ def _objectives(p: dict, basis: str) -> tuple | None:
 
 
 def same_design(a: dict, b: dict) -> bool:
-    """Same built capacities (every asset) and the same total cost."""
+    """Same built capacities (every asset) and the same total cost. An
+    unread (None) size or total is never "the same": the pair is not judged
+    equal on a number nobody read."""
+
+    def close(x, y, tol):
+        return x is not None and y is not None and _close(x, y, tol)
+
     ca, cb = a["capacities"], b["capacities"]
     if set(ca) != set(cb):
         return False
-    if not all(_close(ca[k], cb[k], _ABS_TOL_MW) for k in ca):
+    if not all(close(ca[k], cb[k], _ABS_TOL_MW) for k in ca):
         return False
-    return _close(a["total_eur_per_yr"], b["total_eur_per_yr"], _ABS_TOL_EUR)
+    return close(a["total_eur_per_yr"], b["total_eur_per_yr"], _ABS_TOL_EUR)
 
 
 def _fmt(x: float) -> str:
@@ -813,6 +819,47 @@ def _int_arg(field: str, v, lo: int, hi: int) -> int:
     return int(f)
 
 
+def check_front_request(
+    network,
+    lock,
+    cfg,
+    *,
+    levels,
+    co2_caps_t=None,
+    lever: str | None = None,
+    budget_solves: int = MAX_FRONT_SOLVES,
+    mc_draws: int = DEFAULT_MC_DRAWS,
+) -> dict:
+    """Every refusal ``run_front_study`` makes before its first solve, with no
+    solve: the lever, the cleaned levels and caps, the solves needed and the
+    draws, or a FrontConfigError / FrontBudgetError. A route calls it to
+    refuse a request synchronously; ``run_front_study`` calls it first."""
+    from services.adequacy.mc import MAX_DRAWS
+
+    with lock:
+        lever_used, lever_why = choose_lever(network, lever)
+    lvls = _clean_levels(lever_used, levels)
+    caps = _clean_caps(co2_caps_t)
+    if lever_used == "ens_cap" and float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
+        raise FrontConfigError(
+            "the ENS lever requires VOLL > 0: with no slack generators the cap "
+            "constrains nothing"
+        )
+    budget = _int_arg("budget_solves", budget_solves, 1, MAX_FRONT_SOLVES)
+    draws = _int_arg("mc_draws", mc_draws, 1, MAX_DRAWS)
+    need = check_budget(lvls, caps, budget)
+    if lever_used == "reserve_margin":
+        _margin_preflight(network, lock, cfg, max(lvls), lever_why)
+    return {
+        "lever": lever_used,
+        "lever_reason": lever_why,
+        "levels": lvls,
+        "co2_caps_t_per_yr": caps,
+        "solves_planned": need,
+        "mc_draws": draws,
+    }
+
+
 def run_front_study(
     network,
     lock,
@@ -841,25 +888,22 @@ def run_front_study(
     sweep and skips the reference solve.
     """
     from services.adequacy.frontier import non_convexity_warning
-    from services.adequacy.mc import MAX_DRAWS
     from services.project_context import ProjectContext
     from services.pypsa_service import PyPSAService
 
-    with lock:
-        lever_used, lever_why = choose_lever(network, lever)
-    lvls = _clean_levels(lever_used, levels)
-    caps = _clean_caps(co2_caps_t)
-    if lever_used == "ens_cap" and float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
-        raise FrontConfigError(
-            "the ENS lever requires VOLL > 0: with no slack generators the cap "
-            "constrains nothing"
-        )
-    budget = _int_arg("budget_solves", budget_solves, 1, MAX_FRONT_SOLVES)
-    draws = _int_arg("mc_draws", mc_draws, 1, MAX_DRAWS)
-    need = check_budget(lvls, caps, budget)
-
-    if lever_used == "reserve_margin":
-        _margin_preflight(network, lock, cfg, max(lvls), lever_why)
+    plan = check_front_request(
+        network,
+        lock,
+        cfg,
+        levels=levels,
+        co2_caps_t=co2_caps_t,
+        lever=lever,
+        budget_solves=budget_solves,
+        mc_draws=mc_draws,
+    )
+    lever_used, lever_why = plan["lever"], plan["lever_reason"]
+    lvls, caps = plan["levels"], plan["co2_caps_t_per_yr"]
+    need, draws = plan["solves_planned"], plan["mc_draws"]
     lq = log_queue if log_queue is not None else queue.SimpleQueue()
     base = _private_base(network, lock)
     # read off the private copy: no lock, and the same state the points start from

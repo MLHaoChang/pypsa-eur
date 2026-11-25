@@ -705,6 +705,31 @@ def test_same_design_compares_every_capacity_and_the_cost():
     assert fr.same_design(a, _pt({"g": 100.0 + 1e-9, "s": 5.0}, 1000.0 + 1e-6))
 
 
+def test_an_unread_size_or_total_is_never_the_same_design():
+    a = _pt({"g": 100.0}, 1000.0)
+    assert not fr.same_design(a, _pt({"g": None}, 1000.0))
+    assert not fr.same_design(_pt({"g": None}, 1000.0), _pt({"g": None}, 1000.0))
+    assert not fr.same_design(a, _pt({"g": 100.0}, None))
+    # Mirrored: the unread value on the `a` side (each operand of `close`).
+    assert not fr.same_design(_pt({"g": None}, 1000.0), a)
+    assert not fr.same_design(_pt({"g": 100.0}, None), a)
+
+
+def test_a_front_with_an_unread_capacity_still_finishes(monkeypatch):
+    real = fr._capacities
+
+    def one_unread(n):
+        out = real(n)
+        return {**out, "generators:gas": None}
+
+    monkeypatch.setattr(fr, "_capacities", one_unread)
+    res = _run(
+        _hand(), lever="ens_cap", levels=[100.0, 200.0], co2_caps_t=[None], mc_draws=10
+    )
+    assert [p["status"] for p in res["points"]] == ["ok", "ok"]
+    assert not res.get("aborted")
+
+
 # --------------------------------------------------------------------------
 # Dominance (F7)
 # --------------------------------------------------------------------------
