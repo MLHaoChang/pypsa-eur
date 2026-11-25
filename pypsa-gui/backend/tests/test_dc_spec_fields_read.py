@@ -28,10 +28,10 @@ DEFINITIONS = {"models/flex_archetypes.py", "models/dc_compute_spec.py"}
 #: field -> why it is accepted without a backend reader.
 READ_ELSEWHERE: dict[str, str] = {
     # Found by this guard on its first run; accepted-but-unread today, outside DC 05's
-    # scope, so listed here and reported in the PR as a follow-up (remove or model each).
-    "DataCentreLoadSpec.workload_shift_window_h": "KNOWN UNREAD: documented in dc_it_energy as moving no load (DC 06); follow-up to model or remove",
-    "GensetSpec.power_mw": "KNOWN UNREAD on GensetSpec: the fleet size comes from the template, the spec value is only a constructor placeholder; follow-up to model or remove",
-    "GensetSpec.fuel_price_ref": "KNOWN UNREAD on GensetSpec: the fuel price is the backup block's fuel_price_per_mwh_fuel; follow-up to model or remove",
+    # scope, so listed here and reported in the PR as a follow-up issue .scratch/dc-template-review-2026-11-24/issues/05a-unread-dc-spec-fields.md (remove or model each).
+    "DataCentreLoadSpec.workload_shift_window_h": "KNOWN UNREAD: documented in dc_it_energy as moving no load (DC 06); follow-up: issue 05a",
+    "GensetSpec.power_mw": "KNOWN UNREAD on GensetSpec: the fleet size comes from the template, the spec value is only a constructor placeholder; follow-up: issue 05a",
+    "GensetSpec.fuel_price_ref": "KNOWN UNREAD on GensetSpec: the fuel price is the backup block's fuel_price_per_mwh_fuel; follow-up: issue 05a",
 }
 
 
