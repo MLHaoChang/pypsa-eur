@@ -126,6 +126,7 @@ ISSUE_TITLES: dict[str, str] = {
     "reserve_margin_unsupported_strategy": "Reserve margin not supported by this solve strategy",
     "reserve_margin_myopic_report_is_partial": "Reserve margin report covers only part of a myopic run",
     "reserve_margin_unpriceable_assets": "Reserve margin cannot price some assets",
+    "reserve_margin_import_group_extendable": "Reserve margin cannot credit candidates behind the grid import",
     "reserve_margin_unreachable": "Reserve margin cannot be reached",
     "reserve_margin_carrier_default_derating": "Reserve margin uses default derating for some assets",
 

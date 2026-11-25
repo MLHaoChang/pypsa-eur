@@ -2415,6 +2415,17 @@ def _check_reserve_margin(n, solver_config) -> list[Issue]:
             "availability profile, or unset the margin.",
         ))
 
+    # Option (y): extendable capacity behind a grid_import Link. The margin
+    # cannot credit it, so the run is refused by name rather than enforced
+    # against a fleet that silently left the candidate out.
+    behind = list(facts.get("import_group_extendable") or [])
+    if behind:
+        from services.solver.adequacy import import_group_extendable_message
+        issues.append(_err(
+            "reserve_margin_import_group_extendable", "", "",
+            import_group_extendable_message(behind),
+        ))
+
     for P, per in (facts["stash"].get("periods") or {}).items():
         required = float(per.get("required_mw", 0.0))
         reachable = float(per.get("max_achievable_mw", 0.0))
