@@ -161,7 +161,6 @@ def apply(n, cfg, phase, captured: dict):
         built[name] = {
             "period": p,
             "scale": scale,
-            "years": 1.0 if p is None else _years(n, p),
             "constant": limit * scale,
         }
     setattr(n, _BUILT, {"limit": limit, "rows": built})

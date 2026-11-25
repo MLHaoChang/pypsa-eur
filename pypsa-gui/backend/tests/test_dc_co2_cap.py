@@ -641,39 +641,79 @@ def test_a_binding_multi_period_cap_prices_each_periods_switch_alike():
         assert r["shadow_price_eur_per_t"] == pytest.approx(180.0, rel=1e-6)
 
 
-def test_capture_reads_no_dual_from_a_missing_or_nan_mu():
+def _captured_mu(edit):
     n = _hand()
     co2_cap.apply(n, SolverConfig(co2_limit_t_per_yr=1.0), print, {})
     built = getattr(n, co2_cap._BUILT)["rows"]
     gc = n.c.global_constraints
-    gc.static.loc["co2_cap", "mu"] = -3.0
-    assert co2_cap.capture(n, 1.0, built)["rows"][0]["mu"] == -3.0
-    gc.static.loc["co2_cap", "mu"] = np.nan
-    assert co2_cap.capture(n, 1.0, built)["rows"][0]["mu"] is None
-    gc.static = gc.static.drop(columns="mu")
+    gc.static = edit(gc.static.copy())
     (row,) = co2_cap.capture(n, 1.0, built)["rows"]
-    assert row["mu"] is None and row["shadow_price_eur_per_t"] is None
-    gc.static = gc.static.drop(index="co2_cap")
-    assert co2_cap.capture(n, 1.0, built)["rows"][0]["mu"] is None
+    return row
 
 
-def test_the_extra_lp_counts_only_an_optimal_solve(monkeypatch):
-    # The model holds a solution from a first solve; a second that stops at a
-    # time limit must not report it as the least reachable.
+def _with_mu(v):
+    def edit(df):
+        df["mu"] = pd.Series([v], index=df.index, dtype=object)
+        return df
+
+    return edit
+
+
+def test_capture_reads_no_dual_from_a_missing_or_nan_mu():
+    assert _captured_mu(_with_mu(-3.0))["mu"] == -3.0
+    for v in (None, np.nan):
+        row = _captured_mu(_with_mu(v))
+        assert row["mu"] is None and row["shadow_price_eur_per_t"] is None
+    assert _captured_mu(lambda df: df.drop(columns="mu"))["mu"] is None
+    assert _captured_mu(lambda df: df.drop(index="co2_cap"))["mu"] is None
+
+
+def _solved_hand_with_lhs():
     n = _hand()
     co2_cap.apply(n, SolverConfig(co2_limit_t_per_yr=1.0), print, {})
     n.optimize.create_model()
     lhs = co2_cap.rebuild_rows(n, n.snapshots)
     n.model.solve(solver_name="highs")
-    monkeypatch.setattr(
-        type(n.model), "solve", lambda *_a, **_kw: ("warning", "time_limit")
-    )
-    goal = {
-        "limit_t_per_yr": 1.0,
-        "rows": [dict(_GOAL["rows"][1], name="co2_cap", period=None, row_scale=TO_ROW)],
-    }
-    ref = co2_cap.unreachable(n, goal, lhs, "highs")
+    return n, lhs
+
+
+def _one_row_goal(**row):
+    base = dict(_GOAL["rows"][1], name="co2_cap", period=None, row_scale=TO_ROW)
+    return {"limit_t_per_yr": 1.0, "rows": [dict(base, **row)]}
+
+
+@pytest.mark.parametrize(
+    "result", [("warning", "time_limit"), ("ok", "time_limit"), ("warning", "optimal")]
+)
+def test_the_extra_lp_counts_only_an_ok_and_optimal_solve(monkeypatch, result):
+    # The model holds a solution from a first solve; a second that does not
+    # end ok and optimal must not report it as the least reachable.
+    n, lhs = _solved_hand_with_lhs()
+    monkeypatch.setattr(type(n.model), "solve", lambda *_a, **_kw: result)
+    ref = co2_cap.unreachable(n, _one_row_goal(), lhs, "highs")
     assert ref["without_limit"] == "not_found" and ref["least_t_per_yr"] is None
+
+
+@pytest.mark.parametrize("opts", [None, {"threads": 1}])
+def test_the_extra_lp_passes_the_solvers_options(monkeypatch, opts):
+    n, lhs = _solved_hand_with_lhs()
+    seen = []
+    monkeypatch.setattr(
+        type(n.model), "solve", lambda _m, **kw: seen.append(kw) or ("ok", "optimal")
+    )
+    ref = co2_cap.unreachable(n, _one_row_goal(), lhs, "highs", opts)
+    assert seen == [{"solver_name": "highs", **(opts or {})}]
+    assert ref["without_limit"] == "feasible"
+    # The stored solution is the capped first solve: its row sits at 1 t/yr.
+    assert ref["least_t_per_yr"] == {"all": pytest.approx(1.0, rel=1e-6)}
+
+
+def test_an_optimal_extra_lp_with_no_readable_row_finds_nothing(monkeypatch):
+    n, lhs = _solved_hand_with_lhs()
+    monkeypatch.setattr(type(n.model), "solve", lambda *_a, **_kw: ("ok", "optimal"))
+    ref = co2_cap.unreachable(n, _one_row_goal(row_scale=0.0), lhs, "highs")
+    assert ref["without_limit"] == "not_found" and ref["least_t_per_yr"] is None
+    assert ref["message"].endswith("reachable could not be found.")
 
 
 def test_the_rebuild_leaves_a_period_outside_the_window_alone():
@@ -699,3 +739,66 @@ def test_the_headline_price_is_a_binding_rows_and_a_zero_scale_row_is_unread():
     zero = dict(_GOAL["rows"][1], row_scale=0.0)
     a = co2_cap.annual({"rows": [zero]}, None, {2035: 10.0})
     assert a["t_per_yr"] is None and a["by_period"] == {}
+
+
+def test_the_limit_reads_any_config_as_a_finite_non_negative_number():
+    from types import SimpleNamespace as NS
+
+    assert co2_cap.target_of(NS(co2_limit_t_per_yr="1000")) == 1000.0
+    for bad in (-1.0, float("nan"), float("inf"), "abc", None):
+        assert co2_cap.target_of(NS(co2_limit_t_per_yr=bad)) is None
+    assert co2_cap.target_of(NS()) is None
+
+
+def test_finite_is_none_for_none_nan_and_inf():
+    assert co2_cap._finite(2) == 2.0
+    for v in (None, float("nan"), float("inf")):
+        assert co2_cap._finite(v) is None
+
+
+def test_a_period_outside_the_snapshots_has_none():
+    staged = _hand_staged().snapshots
+    assert co2_cap._period_snapshots(staged, 2050) is None
+    assert co2_cap._period_snapshots(_hand().snapshots, 2030) is None
+    assert len(co2_cap._period_snapshots(staged, 2040)) == 2
+
+
+def test_the_lp_hook_is_untouched_and_the_rebuild_empty_without_the_goal():
+    def fn(_n, _s):
+        return None
+
+    assert co2_cap.wrap_lp(_hand(), fn, SolverConfig()) is fn
+    n = _hand()
+    n.optimize.create_model()
+    assert co2_cap.rebuild_rows(n, n.snapshots) == {}
+    assert co2_cap.take_lhs(n) == {}
+
+
+def test_the_rebuild_skips_a_row_the_lp_does_not_hold():
+    n = _hand(grid_ovr=[0.1, 0.1])
+    co2_cap.apply(n, SolverConfig(co2_limit_t_per_yr=1.0), print, {})
+    n.optimize.create_model()
+    n.model.remove_constraints("GlobalConstraint-co2_cap")
+    assert co2_cap.rebuild_rows(n, n.snapshots) == {}
+
+
+def test_the_rows_read_none_as_no_rows():
+    assert co2_cap.cap_entries({"rows": None}, 1.0, {}) == []
+    for goal in ({"rows": None}, {"rows": []}):
+        a = co2_cap.annual(goal, 1.0, {})
+        assert a["t_per_yr"] is None and a["binding"] is False
+
+
+def test_an_entrys_scope_is_its_period_or_the_horizon():
+    rows = [_GOAL["rows"][1], dict(_GOAL["rows"][1], period=None)]
+    got = co2_cap.cap_entries({"rows": rows}, 10.0, {2035: 10.0})
+    assert [c["scope"] for c in got] == ["period", "horizon"]
+
+
+def test_a_figure_too_large_to_count_is_unread_and_a_priceless_binding_row_skipped():
+    huge = dict(_GOAL["rows"][1], row_scale=1e-300)
+    a = co2_cap.annual({"rows": [huge]}, None, {2035: 1e300})
+    assert a["t_per_yr"] is None and a["by_period"] == {}
+    priceless = dict(_GOAL["rows"][0], shadow_price_eur_per_t=None)
+    a = co2_cap.annual({"rows": [priceless, _GOAL["rows"][0]]}, None, {2030: 500.0})
+    assert a["binding"] is True and a["shadow_price_eur_per_t"] == 180.0
