@@ -650,6 +650,12 @@ class PyPSAService:
                 # results_state.pkl; a template project has none).
                 for key in RESULT_STATE_KEYS:
                     state[key] = None
+                # ★ A different project or blank draft starts from the DEFAULT
+                # solver config (template-e2e issue 32). Carrying the outgoing
+                # one leaked its tariff, finance and periods into the new
+                # project's first save. Loads re-hydrate their own from disk.
+                from services.solver_service import SolverConfig  # noqa: PLC0415
+                state["solver_config"] = SolverConfig()
             if carry == "same":
                 undo_state = prev.undo
             elif carry == "copy":
