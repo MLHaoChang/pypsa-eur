@@ -878,7 +878,7 @@ function ResultsSection({ state, pending, name, show = 'all' }: { state: CampusS
         </TableScroll>
       </PageSection>
 
-      <PageSection panelSection="short_circuit" title="Short circuit" hint="IEC 60909, every installed unit energised, per period">
+      <PageSection title="Short circuit" hint="IEC 60909, every installed unit energised, per period">
         <TableScroll>
           <table className="w-full text-[12px]">
             <thead>
