@@ -630,12 +630,17 @@ def test_a_network_swap_clears_eh_front():
 
 
 @pytest.mark.live_solve
-def test_the_stage_with_the_co2_goal_on_solves_every_point(monkeypatch):
+def test_the_stage_with_the_co2_goal_on_adds_no_goal_cap_row(monkeypatch):
     # DC review 02 C6 at the stage (DC 01 landed second): the session's CO2
     # limit goal reaches the stage's config, yet no front point carries a goal
     # cap row, so none is refused as a duplicate of the front's own cap.
-    # Margins 10 % and 5 %: under the import cap (#1998) the weak network
-    # cannot reach 20 %, which the engine refuses as a validation failure.
+    # Under the import cap (#1998) the weak network's whole fleet tops out at
+    # 140.5 MW firm, short of the 144.0 MW a 20 % margin on its 120 MW peak
+    # needs: that point is refused by the margin preflight, by name, and the
+    # 10 % point solves. Neither is the goal's doing.
+    import dataclasses
+
+    from services import validation_service as V
     from services.solver import co2_cap
 
     limits = []
@@ -645,11 +650,27 @@ def test_the_stage_with_the_co2_goal_on_solves_every_point(monkeypatch):
         limits.append(cfg.co2_limit_t_per_yr)
         return real_apply(n, cfg, phase, captured)
 
-    seen_cfg = {}
+    seen = {}
     real_front = fr.run_front_study
 
     def front_spy(n, lock, cfg, **kw):
-        seen_cfg["limit"] = cfg.co2_limit_t_per_yr
+        seen["limit"] = cfg.co2_limit_t_per_yr
+        seen["codes"] = {
+            m: [
+                i.code
+                for i in V._check_reserve_margin(
+                    n,
+                    dataclasses.replace(cfg, reserve_margin=m, co2_limit_t_per_yr=None),
+                )
+            ]
+            for m in (0.1, 0.2)
+        }
+        seen["unreachable"] = [
+            i.message
+            for i in V._check_reserve_margin(
+                n, dataclasses.replace(cfg, reserve_margin=0.2, co2_limit_t_per_yr=None)
+            )
+        ]
         limits.clear()
         return real_front(n, lock, cfg, **kw)
 
@@ -658,7 +679,7 @@ def test_the_stage_with_the_co2_goal_on_solves_every_point(monkeypatch):
     store: dict = {}
     report = _run(
         certifiable_weak_network(),
-        _pack(10.0, ladder=(1.0, 0.5)),
+        _pack(10.0, ladder=(2.0, 1.0)),
         stages=FRONT,
         budget=3,
         store=store,
@@ -667,6 +688,13 @@ def test_the_stage_with_the_co2_goal_on_solves_every_point(monkeypatch):
     )
     rec = _record(report)
     assert rec.status == "run", rec.note
-    assert seen_cfg["limit"] == 1e9
+    assert seen["limit"] == 1e9
     assert limits and limits == [None] * len(limits)
-    assert [p["status"] for p in store["eh_front"]["points"]] == ["ok", "ok"]
+    by_level = {p["level"]: p["status"] for p in store["eh_front"]["points"]}
+    assert {round(k, 9): v for k, v in by_level.items()} == {
+        0.1: "ok",
+        0.2: "validation_failed",
+    }
+    assert seen["codes"][0.1] == []
+    assert seen["codes"][0.2] == ["reserve_margin_unreachable"]
+    assert "144.0 MW" in seen["unreachable"][0] and "140.5 MW" in seen["unreachable"][0]
