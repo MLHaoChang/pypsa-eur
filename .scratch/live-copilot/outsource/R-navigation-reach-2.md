@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-Status: ready-for-agent once PR #812 (LC-18, `claude/lc18-sensitivity-compare`) has merged — written 2026-10-28; GK B reviews the plan and the harness half, UX the frontend navigation
+Status: done (merged #1308 item 4 `guided_step`, #1328 item 5 `panel_section`; delivered by other branches, not by this outsourced task; #812 also merged)
 
 # Outsourced task R: chat reaches a Guided card and a section of the grid-study and GridSpine panels
 
@@ -246,3 +246,7 @@ cd pypsa-gui/frontend && npm test   # full vitest suite before opening the PR
 - [ ] The three `--check` commands, the named backend and frontend files, `npx tsc -b`, the full `gui-tests` and `npm test` are green, or the PR lists each failure that also fails on `master`.
 - [ ] The diff touches only the files under "Files it may touch", and none of task Q's lines.
 - [ ] One PR on `outsource/navigation-reach-2`, with a body starting `Outsourced task R`.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: checked #1308 and #1328 merged (GitHub); catalogue.py:2486-2487 `guided_step`/`panel_section`, uiNavigate.ts:266, tests/test_navigation_reach.py:133. No outsource/navigation-reach-2 PR was opened.

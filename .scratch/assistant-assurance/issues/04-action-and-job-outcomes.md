@@ -3,7 +3,7 @@
 
 # P3: verified action outcomes and real progress
 
-Status: ready-for-agent; audit 2026-11-19: S1 merged (#1150); left: S1b, S2-S5, A3.5-A3.6 reconciliation
+Status: ready-for-agent; audit 2026-11-25: S1 (#1150) and S4b (#1204) merged, S1b-S3 and S5 code is on master (toolOutcome.ts, test_p3_write_outcomes/snapshot_outcomes, job_holds.py); left: the `_pending` rows (Excel/MATPOWER adapters X6, export edge cases P4-P8, enqueue_unique P10), nonblocking-job cases (live-voice 11c), mismatched artifacts (issue 05)
 Progress: S1 (blocking foreground-job outcomes, harness/outcomes.py) merged ee141c66; S1b (chat tool-line marks) in review; S2–S5 planned; update_component static inputs done (effects.py)
 Type: task
 Blocked by: none (01 and 02 done; live-voice 11a and 11b merged, #1548; only the nonblocking-job cases of the test matrix wait for live-voice 11c, the versioned job events)
@@ -440,3 +440,7 @@ Mutants (N9), each run against `tests/assurance_acceptance/test_p3_job_holds.py`
 | loop: card binding | the approved card not passed to the check | test_after_the_pending_deny_a_repeat_card_names_the_hold_and_runs_once |
 | loop: raise opens | no hold on an uncertain solve raise | test_a_solve_raise_through_the_loop_holds_the_next_call |
 | confirm: forced card | the repeat follows the tier's policy | test_the_repeat_card_is_forced_even_when_the_tier_auto_approves |
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: PR #1150 and #1204 read merged via GitHub; S1b/S2/S3/S5 judged by code and test files on origin/master 87a634f4; their PR numbers were not looked up.

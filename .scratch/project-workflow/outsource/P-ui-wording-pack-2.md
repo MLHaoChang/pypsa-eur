@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-Status: ready-for-agent once PRs #827 and #838 have merged (both touch files below). Written 2026-10-28. No gatekeeper review (wording only, no engine change); the UX reviewer gives the OK.
+Status: ready-for-agent; audit 2026-11-25: #827 and #838 merged, so the task is unblocked; none of the five items done yet (eh_templates.py:404 still says "got", grid_readiness.py:689 still prints the exception, TimeSeriesManager.tsx:1474 still has the em dash). Written 2026-10-28. No gatekeeper review (wording only, no engine change); the UX reviewer gives the OK.
 
 # Outsourced task P: Five wording fixes users meet in refusals, notes, toasts and confirmation cards
 
@@ -91,3 +91,7 @@ Load profile uploaded: 8760 rows for 3 loads (1 unmatched ignored) — model hor
 - `pixi run gui-tests` (or the frontend vitest and backend pytest for the touched files) green. The repo's CI is green.
 - A release-note fragment under `doc/release-notes.d/`.
 - Stay out of every file not named above. If an item turns out to need another file, say so in the PR body instead of widening the change.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: checked #827 and #838 merged (GitHub); items 1, 2, 4 grepped as unchanged; ConfirmationCard.tsx has no "Confirm: run this" header.

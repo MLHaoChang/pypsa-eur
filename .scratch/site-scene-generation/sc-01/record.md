@@ -3,7 +3,7 @@
 
 # SC-01 implementation record
 
-Status: SC-01a (backend) merged (#807); SC-01b (UI) in review. Copied from [implementation-record-template.md](../implementation-record-template.md).
+Status: SC-01a (backend) merged (#807); SC-01b (UI) merged (#821). Copied from [implementation-record-template.md](../implementation-record-template.md).
 
 ## Assignment contract
 
@@ -151,3 +151,7 @@ UX NOT OK @8afaf9b7 (five fixes):
 - Rule 2 is partly met: the Satellite "New site" tool still creates legacy Sites (UX: it keeps its 2D wording and stays).
 - Proposals are per process (from 01a).
 - The boundary is fixed once a Site is adopted.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: #807 and #821 read as merged on GitHub.

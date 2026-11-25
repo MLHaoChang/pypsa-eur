@@ -3,7 +3,7 @@
 
 # Continuation handoff
 
-Status: SC-00 N merged (#794, [sc-00-n/record.md](sc-00-n/record.md)); SC-01a backend in review ([sc-01/record.md](sc-01/record.md)); SC-01b UI, SC-02 onward, B and P not started
+Status: SC-00 N merged (#794, [sc-00-n/record.md](sc-00-n/record.md)); SC-01a backend merged (#807) and SC-01b UI merged (#821) ([sc-01/record.md](sc-01/record.md)); D06 merged (#817); audit 2026-11-25: later units landed (SC-06 a and b #1557, #1561, #1619; SC-07 S6 #1674, #1701, #1702), see each issues/*.md for what is left
 Date: 2026-10-24
 Branch/worktree: `claude/site-scene-generation-spec`, `/workspace/site-scene-spec`
 Baseline: `9988f9899a3bf8e80f51272529f18ea70599b90c`
@@ -54,3 +54,7 @@ Portable Claude implementation-PR handoff (separate package): https://github.com
 ## Interactive configuration clarification
 
 Owner explicitly requires conversational initial configuration and iterative adjustment of geometry, existing load/facility/asset/process associations, supported native connections/parameters and result channels. Read ai-guided-project-flow.md's example intent table and V91–V98, assigned to existing SC-00/01/02/03/07. Preserve separate scene/model/display effect paths and ordinary approvals; unsupported actions disclose a native editor fallback. Both advisory axes confirmed this98-case technical delta at533616f015b09383d625f2f956d5da14667c4851, zero unresolved findings; scoped GO is for publication/Native prototype. No runtime configuration capability has been implemented by this docs update.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: #794, #807, #817, #821 read as merged on GitHub (squash merges absent from the master merge log); later PRs checked in the master merge log.

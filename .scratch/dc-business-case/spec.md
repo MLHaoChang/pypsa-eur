@@ -3,7 +3,7 @@
 
 # Data-centre business case: a standalone project P&L beside the investment case
 
-Status: ready-for-agent once #1316 merges (GK B plan GO with BC1–BC10, GK A with BC3-1..8, owner DCBC-SCOPE-1, all 2026-11-10)
+Status: done (merged #1316 design, #1319 IT energy series; slices 02, 04-07 superseded by .scratch/business-case, owner BC-ALL-1)
 Owner request: 2026-11-10 (coordinator brief, session `session_01G7qCujw1M4yEuv53K2qCpG`)
 Research: [research.md](research.md)
 Reviewers: GK B (finance engine, lead), GK A (DC load and engine parts), UX (the view, slice 06)
@@ -219,3 +219,7 @@ recommended answer on all four.
 | 05 | [Route, chat tool and workbook sheet](issues/05-route-tool-workbook.md) | GK B | 04 |
 | 06 | [Business-case view](issues/06-business-case-view.md) | UX, GK B | 05 |
 | 07 | [Guided question](issues/07-guided-question.md) | GK B | 05, study-harness 10 |
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: #1316 merged; issue statuses 01, 03 done and 02, 04-07 wontfix (superseded); dc_it_energy.py and finance/business_case.py on master.
