@@ -7,7 +7,7 @@
 //   IslandReportView) shows its model and the screening caveat, and its assumed rows
 //   are tagged; what is missing is said; the section itself points there (W10 R3).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, cleanup, waitFor, within } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { IslandConfig, IslandReport } from '../api/campusElectrical'
@@ -15,11 +15,18 @@ import CampusIslandSection, { IslandReportView } from './CampusIslandSection'
 import { useUIStore } from '../store/uiStore'
 
 const api = vi.hoisted(() => ({
-  island: vi.fn(), saveIsland: vi.fn(), runIslandStudy: vi.fn(), islandReport: vi.fn(),
+  island: vi.fn(), saveIsland: vi.fn(), patchIsland: vi.fn(), runIslandStudy: vi.fn(), islandReport: vi.fn(),
 }))
 vi.mock('../api/campusElectrical', async () => {
   const real = await vi.importActual<typeof import('../api/campusElectrical')>('../api/campusElectrical')
   return { ...real, campusApi: api }
+})
+const net = vi.hoisted(() => ({
+  getStorageUnits: vi.fn(), getGenerators: vi.fn(), getStores: vi.fn(), getLinks: vi.fn(),
+}))
+vi.mock('../api/network', async () => {
+  const real = await vi.importActual<typeof import('../api/network')>('../api/network')
+  return { ...real, networkApi: { ...real.networkApi, ...net } }
 })
 
 const a = (value: number) => ({ value, source: 'assumed' as const })
@@ -64,6 +71,11 @@ beforeEach(() => {
   api.island.mockResolvedValue({ config: CONFIG, study: null })
   api.islandReport.mockResolvedValue(REPORT)
   api.saveIsland.mockImplementation((_p: string, config: IslandConfig) => Promise.resolve({ config, study: null }))
+  api.patchIsland.mockResolvedValue({ config: CONFIG, study: null })
+  net.getStorageUnits.mockResolvedValue([{ name: 'bess' }])
+  net.getGenerators.mockResolvedValue([{ name: 'g' }])
+  net.getStores.mockResolvedValue([])
+  net.getLinks.mockResolvedValue([])
   api.runIslandStudy.mockResolvedValue({})
 })
 afterEach(() => cleanup())
@@ -174,7 +186,8 @@ describe('island section: the report', () => {
 })
 
 describe('island section: the form', () => {
-  it('edits the requirements and control modes, then saves the whole sidecar', async () => {
+  it('saves a PATCH of the requirements that changed, as plain values, and never the units', async () => {
+    // GK B3 K4, K19: the server sets each source; a stored {value, source} is never sent back.
     renderSection()
     const user = userEvent.setup()
     await screen.findByTestId('island-form')
@@ -182,24 +195,35 @@ describe('island section: the form', () => {
     const sustained = screen.getByLabelText('Sustained ride-through (h)')
     await user.clear(sustained)
     await user.type(sustained, '12')
-    await user.selectOptions(screen.getByLabelText('Sustained ride-through (h) source'), 'datasheet')
     await user.click(screen.getByLabelText(/Linearised unit commitment/))
-    await user.selectOptions(screen.getByLabelText('Control mode of BESS'), 'gfm_vsm')
     await user.click(screen.getByRole('button', { name: /Save island config/ }))
-    await waitFor(() => expect(api.saveIsland).toHaveBeenCalledTimes(1))
-    const [project, sent] = api.saveIsland.mock.calls[0] as [string, IslandConfig]
+    await waitFor(() => expect(api.patchIsland).toHaveBeenCalledTimes(1))
+    const [project, patch] = api.patchIsland.mock.calls[0] as [string, Record<string, unknown>]
     expect(project).toBe('Hub A')
-    expect(sent.requirements.scenarios).toEqual(['ups_bridged', 'seamless'])
-    expect(sent.requirements.sustained_h).toEqual({ value: 12, source: 'datasheet' })
-    expect(sent.requirements.linearised_uc).toBe(true)
-    expect(sent.units.bess.control).toBe('gfm_vsm')
-    // What the form leaves out travels untouched.
-    expect(sent.requirements.pickup_blocks).toEqual(a(5))
-    expect(sent.units.g).toEqual(CONFIG.units.g)
+    expect(patch).toEqual({ requirements: { scenarios: ['ups_bridged', 'seamless'], sustained_h: 12, linearised_uc: true } })
+    expect(api.saveIsland).not.toHaveBeenCalled()
+  })
+
+  it('has nothing to save while nothing changed, so no request can be refused', async () => {
+    renderSection()
+    await screen.findByTestId('island-form')
+    expect((screen.getByRole('button', { name: /Save island config/ }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('shows the requirements only in the raw editor, and refuses a source typed there in words', async () => {
+    renderSection()
+    await screen.findByTestId('island-form')
+    const raw = screen.getByLabelText('Island config') as HTMLTextAreaElement
+    expect(JSON.parse(raw.value)).toEqual(CONFIG.requirements)
+    const edited = { ...CONFIG.requirements, sustained_h: { value: 24, source: 'measured' } }
+    fireEvent.change(raw, { target: { value: JSON.stringify(edited) } })
+    expect((await screen.findByTestId('island-raw-refusals')).textContent)
+      .toContain('Sustained ride-through: the server sets sources. Enter the value only.')
+    expect((screen.getByRole('button', { name: /Save island config/ }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('shows a 422 inline', async () => {
-    api.saveIsland.mockRejectedValue({ response: { status: 422, data: { detail: 'requirements: ups_bridged needs pickup_blocks' } } })
+    api.patchIsland.mockRejectedValue({ response: { status: 422, data: { detail: 'requirements: ups_bridged needs pickup_blocks' } } })
     renderSection()
     const user = userEvent.setup()
     await screen.findByTestId('island-form')
@@ -209,17 +233,16 @@ describe('island section: the form', () => {
   })
 
   it('sends the revision it read, and a 409 offers a reload instead of overwriting', async () => {
-    // GK B3 (6) ask 4: a whole-config save cannot drop a chat unit patch.
     api.island.mockResolvedValue({ config: CONFIG, study: null, revision: 'r1' })
-    api.saveIsland.mockRejectedValue({ response: { status: 409, data: { detail: {
+    api.patchIsland.mockRejectedValue({ response: { status: 409, data: { detail: {
       error_kind: 'island_config_changed', message: 'changed' } } } })
     renderSection()
     const user = userEvent.setup()
     await screen.findByTestId('island-form')
     await user.click(screen.getByLabelText('Seamless'))
     await user.click(screen.getByRole('button', { name: /Save island config/ }))
-    await waitFor(() => expect(api.saveIsland).toHaveBeenCalledTimes(1))
-    expect(api.saveIsland.mock.calls[0][2]).toBe('r1')
+    await waitFor(() => expect(api.patchIsland).toHaveBeenCalledTimes(1))
+    expect(api.patchIsland.mock.calls[0][2]).toBe('r1')
     const stale = await screen.findByTestId('island-stale')
     expect(stale.textContent).toContain('changed since you opened them')
     expect(screen.queryByTestId('island-refusal')).toBeNull()
@@ -230,8 +253,7 @@ describe('island section: the form', () => {
   })
 
   it('shows another 409 (a locked project) as its own refusal, not as a reload', async () => {
-    // GK B3 (6) ask 6: only island_config_changed means the file moved.
-    api.saveIsland.mockRejectedValue({ response: { status: 409, data: { detail: {
+    api.patchIsland.mockRejectedValue({ response: { status: 409, data: { detail: {
       error_kind: 'project_locked', message: 'The project is locked by another user.' } } } })
     renderSection()
     const user = userEvent.setup()
@@ -240,6 +262,25 @@ describe('island section: the form', () => {
     await user.click(screen.getByRole('button', { name: /Save island config/ }))
     expect((await screen.findByTestId('island-refusal')).textContent).toContain('locked by another user')
     expect(screen.queryByTestId('island-stale')).toBeNull()
+  })
+
+  it('shows each unit control mode read-only, in words, with a link to its asset form', async () => {
+    api.island.mockResolvedValue({ config: CONFIG, study: null, unit_controls: {
+      bess: { kind: 'bess', control: 'gfm_droop', values: {}, sources: {}, preset_scope: null },
+      gone: { kind: 'pv', control: 'gfl_qu', values: {}, sources: {}, preset_scope: null },
+    } })
+    useUIStore.setState({ uiMode: 'expert', selectedComponent: null })
+    renderSection()
+    const row = await screen.findByTestId('island-unit-control-bess')
+    expect(row.textContent).toContain('BESS: Grid-forming, droop')
+    expect(row.textContent).not.toContain('gfm_droop')
+    expect(screen.queryByLabelText(/Control mode of/)).toBeNull()      // no editor here (design DC-04)
+    const gone = await screen.findByTestId('island-unit-control-gone')
+    await waitFor(() => expect(gone.textContent).toContain('no asset of this name in the network'))
+    expect(screen.queryByTestId('island-unit-edit-gone')).toBeNull()
+    await userEvent.click(await screen.findByTestId('island-unit-edit-bess'))
+    expect(useUIStore.getState().selectedComponent).toEqual({ type: 'StorageUnit', name: 'bess' })
+    expect(useUIStore.getState().flowReturn).not.toBeNull()            // Back returns to the Island section
   })
 
   it('runs the study on a saved, unchanged config and reads the island data again', async () => {
