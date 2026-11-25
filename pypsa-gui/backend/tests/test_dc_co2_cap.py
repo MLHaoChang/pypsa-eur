@@ -171,6 +171,7 @@ def test_the_staged_rows_are_per_period_and_scaled_by_years_and_weights():
     for p in n.investment_periods:
         name = f"co2_cap_{p}"
         share = w[w.index.get_level_values(0) == p].sum() / 8760.0
+        assert share == pytest.approx(1.0, rel=1e-12)  # each period stands for a year
         assert gc.at[name, "investment_period"] == p
         assert gc.at[name, "constant"] == pytest.approx(
             1000.0 * yrs[p] * share, rel=1e-12
@@ -348,7 +349,8 @@ def test_an_unreachable_cap_names_the_least_emissions_reachable():
     assert ref["least_t_per_yr"] == {"all": pytest.approx(26_280.0, rel=1e-9)}
     assert ref["message"] == (
         "CO₂ limit: no design meets 10,000 t CO₂/yr. "
-        "The least reachable is 26,280 t CO₂/yr."
+        "The least reachable is 26,280 t CO₂/yr. "
+        "One extra solve without the limit found it."
     )
 
 
@@ -357,7 +359,10 @@ def test_a_network_infeasible_without_the_cap_says_so():
     status, condition, sink, _ = _solve(n, co2_limit_t_per_yr=10_000.0)
     ref = sink["last_co2_cap"]["refusal"]
     assert ref["least_t_per_yr"] is None and ref["without_limit"] == "infeasible"
-    assert "the limit is not the cause" in ref["message"]
+    assert ref["message"] == (
+        "CO₂ limit: no design meets 10,000 t CO₂/yr. One extra solve without "
+        "the limit found no design either, so the limit is not the cause."
+    )
 
 
 # ── the DC templates ──────────────────────────────────────────────────────
@@ -390,6 +395,9 @@ def test_on_the_single_year_dc_template_a_cap_binds_and_cuts_genset_energy():
     n = T.build_eh_datacenter()
     status, _, sink, _ = _solve(n, voll=5000.0, co2_limit_t_per_yr=limit)
     assert status == "ok"
+    # A July week weighted to a whole year: share 1, so the row is the limit.
+    assert co2_cap.year_fraction(n) == pytest.approx(1.0, rel=1e-12)
+    assert sink["last_co2_cap"]["rows"][0]["cap_t"] == pytest.approx(limit, rel=1e-12)
     assert _annual_t(n) == pytest.approx(limit, rel=1e-6)
     assert _gas_mwh(n) < free_gas
     a = co2_cap.annual(
@@ -627,11 +635,12 @@ def test_rows_are_per_period_only_with_the_flag_and_period_snapshots():
 
 def test_a_periods_price_undoes_the_objective_discount():
     n = _hand_staged()
-    assert co2_cap.shadow_price(n, 2040, -72.0) == pytest.approx(180.0)  # × 10 / 4
-    assert co2_cap.shadow_price(n, None, -72.0) == 72.0
-    assert co2_cap.shadow_price(n, 2040, float("nan")) is None
-    n.investment_period_weightings.loc[2040, "objective"] = 0.0
-    assert co2_cap.shadow_price(n, 2040, -72.0) is None
+    co2_cap.apply(n, SolverConfig(co2_limit_t_per_yr=1.0, **_MULTI), print, {})
+    gc = n.global_constraints
+    assert co2_cap.shadow_price(n, gc, "co2_cap_2040", -72.0) == pytest.approx(180.0)
+    assert co2_cap.shadow_price(n, gc, "co2_cap_2030", -72.0) == pytest.approx(72.0)
+    assert co2_cap.shadow_price(n, gc, "co2_cap_2040", float("nan")) is None
+    assert co2_cap.shadow_price(n, gc, "co2_cap_2040", None) is None
 
 
 def test_a_binding_multi_period_cap_prices_each_periods_switch_alike():
@@ -719,7 +728,7 @@ def test_an_optimal_extra_lp_with_no_readable_row_finds_nothing(monkeypatch):
     monkeypatch.setattr(type(n.model), "solve", lambda *_a, **_kw: ("ok", "optimal"))
     ref = co2_cap.unreachable(n, _one_row_goal(row_scale=0.0), lhs, "highs")
     assert ref["without_limit"] == "not_found" and ref["least_t_per_yr"] is None
-    assert ref["message"].endswith("reachable could not be found.")
+    assert ref["message"].endswith("reachable could not be found by one extra solve.")
 
 
 def test_the_rebuild_leaves_a_period_outside_the_window_alone():
@@ -833,3 +842,62 @@ def test_a_refused_goal_reaches_the_result_with_its_code_and_leaves_nothing_stal
     assert sink["last_co2_cap"]["rows"] == []
     assert sink["last_co2_cap"]["refusal"]["code"] == co2_cap.DUPLICATE
     assert not hasattr(n, co2_cap._LHS) and not hasattr(n, co2_cap._BUILT)
+
+
+def test_the_goal_leaves_every_other_rows_dual_as_the_solve_wrote_it():
+    # The grid may give 12 of the 20 MWh: clean covers the rest at +90 EUR/MWh.
+    n = _hand()
+    n.add(
+        "GlobalConstraint",
+        "grid_mwh",
+        type="operational_limit",
+        carrier_attribute="grid",
+        sense="<=",
+        constant=12.0,
+    )
+    status, _, _, _ = _solve(n, co2_limit_t_per_yr=1e9)
+    assert status == "ok"
+    assert n.global_constraints.at["grid_mwh", "mu"] == pytest.approx(-90.0, rel=1e-6)
+    assert list(n.global_constraints.index) == ["grid_mwh"]
+
+
+@pytest.mark.parametrize(
+    "end, runs",
+    [
+        (("warning", "infeasible"), True),
+        (("warning", "infeasible_or_unbounded"), False),
+        (("warning", "time_limit"), False),
+        (("warning", "optimal"), False),
+        (("error", "optimal"), False),
+    ],
+)
+def test_only_a_confirmed_infeasible_solve_runs_the_extra_lp(monkeypatch, end, runs):
+    import services.solver_service as ss
+
+    calls = []
+    monkeypatch.setattr(ss, "_no_solution_is_a_failure", lambda *_a: end)
+    monkeypatch.setattr(
+        co2_cap, "unreachable", lambda *a, **_k: calls.append(a) or {"message": "x"}
+    )
+    _solve(_hand(), co2_limit_t_per_yr=1e9)
+    assert bool(calls) is runs
+
+
+def test_the_cap_row_and_the_emissions_view_count_a_nan_snapshot_alike():
+    # A fuel-curve-free genset at eff 0.5: carrier 0.5 → 1 t/MWh el at the NaN
+    # snapshot, 0.1 at the other.
+    from services.results.emissions import compute_emissions
+
+    n = _hand(grid_ovr=[0.1, np.nan])
+    n.generators.loc["grid", "efficiency"] = 0.5
+    status, _, _, _ = _solve(n, co2_limit_t_per_yr=1e9)
+    assert status == "ok"
+    total = compute_emissions(n, "lopf", result_df=_live)["total_tCO2"]
+    co2_cap.apply(n, SolverConfig(co2_limit_t_per_yr=1e9), print, {})
+    n.optimize.create_model()
+    lhs = co2_cap.rebuild_rows(n, n.snapshots)["co2_cap"]
+    labels = n.model["Generator-p"].sel(name="grid").labels.values
+    coef = co2_cap._row_coefficients(lhs, labels)
+    row_t = float((coef * n.generators_t.p["grid"].to_numpy()).sum())
+    assert row_t == pytest.approx(10 * 0.1 + 10 * 1.0, rel=1e-9)
+    assert total == pytest.approx(row_t, rel=1e-9)

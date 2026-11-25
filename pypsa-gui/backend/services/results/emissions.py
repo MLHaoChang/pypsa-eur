@@ -55,7 +55,7 @@ def compute_emissions(n, source, *, result_df, goal_cap: dict | None = None):
 
     import pandas as _pd
 
-    from services.co2_override import override_series
+    from services.co2_override import flat_t_per_mwh, override_series
     src = source if source in ("lopf", "ac_pf") else "lopf"
     p = result_df(n, "generators_t", "p", src)
     if p is None or p.empty:
@@ -171,15 +171,8 @@ def compute_emissions(n, source, *, result_df, goal_cap: dict | None = None):
     for name in gens.index:
         g_carrier = (str(gens.at[name, "carrier"]) if "carrier" in gens.columns else "").lower()
         intensity = co2_by_carrier.get(g_carrier, 0.0)
-        eff = float(gens.at[name, "efficiency"]) if "efficiency" in gens.columns else 1.0
-        if not _math.isfinite(eff) or eff <= 0:
-            eff = 1.0
         # GK B H1: a curve genset's fuel per MWh is its slope, not 1 / efficiency.
-        slope = _fuel_curve.curve_slope(gens.loc[name])
-        if intensity == 0:
-            out_intensity = 0.0
-        else:
-            out_intensity = intensity * slope if slope is not None else intensity / eff
+        out_intensity = flat_t_per_mwh(gens.loc[name], intensity)
         mwh_horizon = float(gen_energy_horizon.get(name, 0.0))
         if not _math.isfinite(mwh_horizon):
             mwh_horizon = 0.0

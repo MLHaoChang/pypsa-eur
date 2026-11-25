@@ -39,7 +39,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from services.co2_override import has_override, override_series
+from services.co2_override import flat_t_per_mwh, has_override, override_series
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +179,15 @@ def apply(n, cfg, phase, captured: dict):
 
     def undo() -> None:
         captured["co2_cap"] = capture(n, limit, built)
-        gc.static = saved
+        # Only the goal's rows go: every other row keeps the mu the solve wrote.
+        rest = gc.static
+        new = saved.copy()
+        keep = new.index.intersection(rest.index)
+        cols = new.columns.intersection(rest.columns)
+        if len(keep) and len(cols):
+            new.loc[keep, cols] = rest.loc[keep, cols]
+            new.columns.names = saved.columns.names
+        gc.static = new
         try:
             delattr(n, _BUILT)
         except AttributeError:
@@ -188,25 +196,16 @@ def apply(n, cfg, phase, captured: dict):
     return undo
 
 
-def _objective_weight(n, period) -> float:
-    try:
-        return float(n.investment_period_weightings.objective.loc[period])
-    except (KeyError, AttributeError):
-        return 1.0
-
-
-def shadow_price(n, period, mu) -> float | None:
+def shadow_price(n, gc, name, mu) -> float | None:
     """EUR per t CO2, undiscounted, positive when tightening the cap costs money:
     the row's dual is in objective EUR per t of the row, and the objective
-    discounts a period's operating cost by objective(p) / years(p)."""
+    discounts a period's operating cost by objective(p) / years(p). The factor
+    is the adequacy front's (`front._period_shadow_factor`, DC review 01)."""
+    from services.adequacy.front import _period_shadow_factor
+
     if mu is None or not math.isfinite(mu):
         return None
-    if period is None:
-        return -mu
-    obj = _objective_weight(n, period)
-    if obj <= 0:
-        return None
-    return -mu * _years(n, period) / obj
+    return -mu * _period_shadow_factor(n, gc, name)
 
 
 def capture(n, limit: float, built: dict) -> dict:
@@ -219,7 +218,7 @@ def capture(n, limit: float, built: dict) -> dict:
         mu = None
         if name in gc.index and "mu" in gc.columns:
             mu = _finite(gc.at[name, "mu"])
-        price = shadow_price(n, b["period"], mu)
+        price = shadow_price(n, gc, name, mu)
         rows.append(
             {
                 "name": name,
@@ -244,15 +243,12 @@ def _period_snapshots(sns, period):
     return sns[sns.get_level_values(0) == period]
 
 
-def _flat_t_per_mwh(n, g, sns_p) -> pd.Series:
-    """What PyPSA counts for ``g`` per MWh el without an override: its
-    carrier's co2_emissions / efficiency(t)."""
-    co2 = float(
-        n.c.carriers.static[CARRIER_ATTRIBUTE].get(n.generators.at[g, "carrier"], 0.0)
-        or 0.0
-    )
-    eff = n.get_switchable_as_dense("Generator", "efficiency", inds=[g]).loc[sns_p, g]
-    return (co2 / eff).astype(float)
+def _flat_t_per_mwh(n, g) -> float:
+    """``g``'s t CO2 per MWh el without an override figure, by the fallback the
+    Emissions views count (`co2_override.flat_t_per_mwh`)."""
+    co2 = n.c.carriers.static[CARRIER_ATTRIBUTE].get(n.generators.at[g, "carrier"])
+    co2 = float(co2) if co2 is not None and math.isfinite(float(co2)) else 0.0
+    return flat_t_per_mwh(n.generators.loc[g], co2)
 
 
 def target_coefficients(n, g, period, sns_p) -> pd.Series:
@@ -262,9 +258,7 @@ def target_coefficients(n, g, period, sns_p) -> pd.Series:
     w = n.snapshot_weightings.generators.loc[sns_p].astype(float)
     if period is not None:
         w = w * _years(n, period)
-    ovr = override_series(n, g, np.nan, index=sns_p)
-    ovr = ovr.fillna(_flat_t_per_mwh(n, g, sns_p))
-    return w * ovr
+    return w * override_series(n, g, _flat_t_per_mwh(n, g), index=sns_p)
 
 
 def _row_coefficients(lhs, labels: np.ndarray) -> np.ndarray:
@@ -394,20 +388,21 @@ def unreachable(
         ]
         message = (
             f"{LABEL}: no design meets {_fmt(limit)}. The least reachable is "
-            f"{' and '.join(parts)}."
+            f"{' and '.join(parts)}. One extra solve without the limit found it."
         )
         without = "feasible"
     elif without == "infeasible":
         least = None
         message = (
-            f"{LABEL}: no design meets {_fmt(limit)}. No design works without "
-            f"the limit either, so the limit is not the cause."
+            f"{LABEL}: no design meets {_fmt(limit)}. One extra solve without "
+            f"the limit found no design either, so the limit is not the cause."
         )
     else:
         least = None
         message = (
             f"{LABEL}: no design meets {_fmt(limit)}. The least emissions "
-            f"reachable could not be found."
+            f"reachable could not be found"
+            + (" by one extra solve." if solves else ".")
         )
     return {
         "code": UNREACHABLE,

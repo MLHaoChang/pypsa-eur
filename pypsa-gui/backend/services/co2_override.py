@@ -19,6 +19,25 @@ def has_override(n, name) -> bool:
     return t is not None and name in t.columns
 
 
+def flat_t_per_mwh(gen: pd.Series, t_per_mwh_fuel: float) -> float:
+    """Tonnes CO2 per MWh el of a generator at a snapshot with no override
+    figure: its carrier's t per MWh of fuel over its efficiency, a fuel-curve
+    genset's times its slope (GK B H1). A missing, non-finite or non-positive
+    efficiency reads 1. The one fallback the Emissions views and the CO2 limit
+    goal's cap row share."""
+    import math
+
+    from services import fuel_curve
+
+    if t_per_mwh_fuel == 0:
+        return 0.0
+    eff = float(gen.get("efficiency", 1.0))
+    if not math.isfinite(eff) or eff <= 0:
+        eff = 1.0
+    slope = fuel_curve.curve_slope(gen)
+    return t_per_mwh_fuel * slope if slope is not None else t_per_mwh_fuel / eff
+
+
 def override_series(n, name, default: float, index=None) -> pd.Series | None:
     """Tonnes CO2 per MWh el of generator ``name`` at each snapshot of ``index`` (the
     network's snapshots by default); a snapshot with no figure reads ``default``,
