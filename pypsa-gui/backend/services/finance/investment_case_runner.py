@@ -152,6 +152,22 @@ def assumptions_digest(*, finance: dict | None, commercial: dict | None, dispatc
     return json_digest(parts), parts
 
 
+def after_stale_run(report: dict, ctx=None) -> dict:
+    """The case valued the run the inputs have since left (provenance-graph 13): an edit that keeps the
+    dispatch's shape leaves the dispatch digest alone, so the key reads fresh while the optimisation's own
+    verdict is stale. The report is then out of date on `dispatch`, as it was when an edit cleared the run.
+    Every reader of `staleness` (the report route, the business case, the scenarios) passes it through."""
+    from services.provenance_graph import runs
+
+    if not report.get("present") or report.get("stale") is not False:
+        return report
+    if not runs.kept_run_stale(ctx):
+        return report
+    # The client reads the verdict first (`studyStale`), so it says stale too.
+    verdict = {**(report.get("verdict") or {}), "state": "stale"}
+    return {**report, "stale": True, "changed": ["dispatch"], "reason": "inputs_changed", "verdict": verdict}
+
+
 def staleness(stored: dict | None, current: tuple[str, dict] | None,
               *, reason: str | None = None) -> dict[str, Any]:
     """The staleness block of `GET /results/investment_case`. A report whose

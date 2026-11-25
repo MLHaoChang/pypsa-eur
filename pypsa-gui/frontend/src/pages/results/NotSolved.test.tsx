@@ -1,7 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import NotSolved from './NotSolved'
 import { useUIStore } from '../../store/uiStore'
+
+// The out-of-date state has its own test (resultsOutOfDate.test.tsx); here the run has not gone out of date.
+vi.mock('../../hooks/useResultsOutOfDate', () => ({ useResultsOutOfDate: () => false }))
 
 afterEach(cleanup)
 
