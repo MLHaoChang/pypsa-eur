@@ -901,3 +901,26 @@ def test_the_cap_row_and_the_emissions_view_count_a_nan_snapshot_alike():
     row_t = float((coef * n.generators_t.p["grid"].to_numpy()).sum())
     assert row_t == pytest.approx(10 * 0.1 + 10 * 1.0, rel=1e-9)
     assert total == pytest.approx(row_t, rel=1e-9)
+
+
+def test_the_shared_fallback_is_fuel_over_efficiency_or_times_the_curve_slope(
+    monkeypatch,
+):
+    from services.co2_override import flat_t_per_mwh
+
+    assert flat_t_per_mwh(pd.Series({"efficiency": 0.5}), 0.2) == pytest.approx(0.4)
+    for eff in (0.0, -1.0, float("nan"), float("inf")):
+        assert flat_t_per_mwh(pd.Series({"efficiency": eff}), 0.2) == 0.2
+    assert flat_t_per_mwh(pd.Series(dtype=object), 0.2) == 0.2
+    monkeypatch.setattr(fuel_curve, "curve_slope", lambda _row: 2.5)
+    assert flat_t_per_mwh(pd.Series({"efficiency": 0.5}), 0.2) == pytest.approx(0.5)
+    assert flat_t_per_mwh(pd.Series({"efficiency": 0.5}), 0.0) == 0.0
+
+
+@pytest.mark.parametrize("co2", [float("nan"), None])
+def test_a_carrier_with_no_readable_co2_counts_none_in_the_row(co2):
+    n = _hand()
+    n.carriers.loc["grid", "co2_emissions"] = co2
+    assert co2_cap._flat_t_per_mwh(n, "grid") == 0.0
+    n.generators.loc["grid", "carrier"] = "unlisted"
+    assert co2_cap._flat_t_per_mwh(n, "grid") == 0.0
