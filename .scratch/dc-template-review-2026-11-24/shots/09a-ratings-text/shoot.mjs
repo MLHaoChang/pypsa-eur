@@ -1,8 +1,8 @@
 // DC 09a shot: handoff-table-expert-light, the Assumptions list in frame (copy of 09-equipment-schedule/shoot.mjs).
 // schedule.json here is 09's with the two engine texts taken from the code (campus_study.CABLE_DESIGN_BASIS, campus_ratings k unit).
 // Component harness: a temporary harness page (src/ paths pass the dev auth gate) under pypsa-gui/frontend is created, served by
-// vite, and removed in `finally`. The schedule JSON is the real backend's services.equipment_schedule.build
-// (generic bus names), default schedule.json beside this script (or argv[2]). Run: node shoot.mjs
+// vite, and removed in `finally`. 09's schedule.json was the real backend's services.equipment_schedule.build
+// (generic bus names); only the two texts above differ from it. Default schedule.json beside this script (or argv[2]). Run: node shoot.mjs
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
