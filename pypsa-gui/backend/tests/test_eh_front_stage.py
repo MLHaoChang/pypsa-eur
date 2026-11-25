@@ -497,7 +497,10 @@ def test_a_study_without_front_is_masters():
     # master's report had no valued_to_year (template-e2e 28, None on this single-period run): leave it out, so
     # the digest still pins every field master wrote.
     assert report.valued_to_year is None
-    assert _digest(report.model_dump_json(exclude={"valued_to_year"})) == MASTER_REPORT_DIGEST
+    assert (
+        _digest(report.model_dump_json(exclude={"valued_to_year"}))
+        == MASTER_REPORT_DIGEST
+    )
 
 
 def test_readiness_without_front_is_masters():
