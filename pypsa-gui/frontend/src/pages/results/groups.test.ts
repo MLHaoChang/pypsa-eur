@@ -7,7 +7,7 @@ const ALL_TABS: ResultsTab[] = [
   'summary', 'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'emissions',
   'economics', 'curtailment', 'lostload', 'adequacy', 'storage', 'asset', 'fmea', 'investment', 'flows', 'loadshape',
   'grid_code', 'electrical_design', 'island', 'grid_forming', 'grid_risk', 'products',
-  'reports', 'exports', 'specialist_packet',
+  'reports', 'exports', 'equipment_schedule', 'specialist_packet',
 ]
 
 describe('Results groups (UX overhaul S3, owner decisions D1a / D2a)', () => {
@@ -22,7 +22,7 @@ describe('Results groups (UX overhaul S3, owner decisions D1a / D2a)', () => {
     // The Control tabs (W10 R3) are filed under the Control card only: the five Guided chapters
     // have no Control tile until R7, and a tab filed under none of them opens no chapter.
     const control = ['island', 'grid_forming']
-    const handoff = ['reports', 'exports', 'specialist_packet']
+    const handoff = ['reports', 'exports', 'equipment_schedule', 'specialist_packet']
     expect(new Set(grouped)).toEqual(new Set(ALL_TABS.filter(t => t !== 'asset' && !control.includes(t) && !handoff.includes(t))))
     expect(groupOf('asset')).toBeNull()
     for (const t of control) expect(groupOf(t as ResultsTab)).toBeNull()
@@ -76,18 +76,21 @@ describe('Results card groups (W10 R1)', () => {
 describe('Results › Hand-off (R6)', () => {
   it('holds Reports, Exports and the Specialist packet, in that order', () => {
     const g = CARD_GROUPS.find(x => x.id === 'handoff')!
-    expect(g.tabs.map(t => t.id)).toEqual(['reports', 'exports', 'specialist_packet'])
-    expect(g.tabs.map(t => t.views)).toEqual([['reports'], ['exports'], ['specialist_packet']])
+    expect(g.tabs.map(t => t.id)).toEqual(['reports', 'exports', 'equipment_schedule', 'specialist_packet'])
+    expect(g.tabs.map(t => t.views)).toEqual([['reports'], ['exports'], ['equipment_schedule'], ['specialist_packet']])
   })
 
-  it.each(['reports', 'exports', 'specialist_packet'] as const)('cardPlaceOf finds %s under Hand-off', (tab) => {
+  it.each(['reports', 'exports', 'equipment_schedule', 'specialist_packet'] as const)('cardPlaceOf finds %s under Hand-off', (tab) => {
     expect(cardPlaceOf(tab)).toEqual({ group: 'handoff', cardTab: tab })
   })
 
   it('matches the handoff card tabs of services/flow_scope.py', () => {
     const src = readFileSync(resolve(__dirname, '../../../../backend/services/flow_scope.py'), 'utf8')
     const ids = [...src.matchAll(/\("handoff", "(\w+)"\)/g)].map(m => m[1])
-    expect(ids).toEqual(CARD_GROUPS.find(x => x.id === 'handoff')!.tabs.map(t => t.id))
+    // The equipment schedule is a read of the DC Grid study, not a scope sub-option (a card has
+    // at most three): it shows whenever Hand-off does.
+    expect(ids).toEqual(CARD_GROUPS.find(x => x.id === 'handoff')!.tabs.map(t => t.id)
+      .filter(id => id !== 'equipment_schedule'))
   })
 
   it('files no view in two groups', () => {

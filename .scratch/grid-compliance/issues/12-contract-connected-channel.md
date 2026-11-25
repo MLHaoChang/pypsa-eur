@@ -5,7 +5,7 @@
 
 Model tier: opus
 Size: L (three PRs)
-Status: ready-for-agent; audit 2026-11-19: PR-A merged (#1647); PR-C open in #1650, PR-D in #1708; left: PR-B PSS/E CSV `connected` export
+Status: ready-for-agent; audit 2026-11-25: PR-A (#1647), PR-C (#1650) and PR-D (#1708) merged; left: PR-B, the PSS/E CSV `connected` export (psspy_scripts.py still writes `t_s` and a `status` column)
 Type: task
 Parent: `.scratch/grid-compliance/spec.md` (follow-up of GC-07, GK A2 condition K3)
 Gated: yes (GK A, gridspine)
@@ -70,3 +70,7 @@ Merge order: PR-A any time; PR-B after #1608 and #1609; PR-C after PR-A. Item 4 
 - PR-D: a literal -1 (the not-read marker) in a `connected` status column is refused per case, tested in both the CSV and PSCAD readers.
 
 - 2026-11-23 status sweep: landed in #1647 (edd9e7bb); #1708 (4643ab46): v2 contract, EMT pack connected channel, read-back v2. Remains: PR-B, the PSS/E per-case CSV connected export.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: #1647, #1650, #1708 in master log or merged on GitHub; gridspine/handoff/psspy_scripts.py:463,537 still use the old header.

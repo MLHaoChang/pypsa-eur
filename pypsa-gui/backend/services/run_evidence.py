@@ -977,6 +977,7 @@ _STUDY_KIND = {
     'margin_loop': 'margin_loop',
     'eh_study': 'eh_study',
     'investment_case': 'investment_case',
+    'front': 'front',
 }
 
 _WORKER_COMPLETED = frozenset({'completed', 'done', 'met'})
@@ -1179,6 +1180,7 @@ _STUDY_ROUTE = {
     'fmea_sweep': 'get_fmea_sweep', 'frontier': 'get_frontier', 'mc': 'get_mc',
     'coupling_loop': 'get_coupling_loop', 'margin_loop': 'get_margin_loop',
     'eh_study': 'get_eh_study', 'investment_case': 'get_investment_case',
+    'front': 'get_front',
 }
 
 

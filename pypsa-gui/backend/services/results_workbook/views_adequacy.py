@@ -50,6 +50,8 @@ OCCURRENCE = "occurrence per year"
 
 def _state(run) -> dict:
     """The run's solver state: its saved context's, or the active one (the base)."""
+    if run.solver_state is not None:
+        return run.solver_state
     if run.context is not None:
         return run.context.solver_state
     from services.pypsa_service import PyPSAService

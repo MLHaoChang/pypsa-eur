@@ -57,8 +57,10 @@ def _rows_of(table):
 def test_the_meta_records_the_island_verdict_and_worst(tmp_path):
     run, _ = _grid_run_with_open_tie(tmp_path, 2000.0)
     meta = _meta(run)
-    assert meta["verdict"] == "flag" and meta["worst_uif"] == GRID_WORST
-    assert meta["island_verdict"] == "flag" and meta["island_worst_uif"] == ISLAND_WORST
+    assert meta["verdict"] == "flag" and meta["worst_uif"] == pytest.approx(GRID_WORST)
+    assert meta["island_verdict"] == "flag" and meta[
+        "island_worst_uif"
+    ] == pytest.approx(ISLAND_WORST)
 
 
 def test_a_campus_that_does_not_island_records_no_island_verdict(tmp_path):
@@ -74,7 +76,9 @@ def test_a_campus_that_does_not_island_records_no_island_verdict(tmp_path):
 def test_an_open_tie_grid_project_warns_on_its_island_uif(tmp_path):
     _, n = _grid_run_with_open_tie(tmp_path, 2000.0)
     row = _card(tmp_path, n=n)[0]["ssti_uif"]
-    assert row["verdict"] == "warn" and row["project_value"] == ISLAND_WORST
+    assert row["verdict"] == "warn" and row["project_value"] == pytest.approx(
+        ISLAND_WORST
+    )
     assert row["note"] == (
         "Worst UIF 1.97 · bus MV · islanded, max fault level · machine GAS_B. This is above the assumed screening "
         "threshold 0.1, so an EMT SSTI study is warranted for the grid-connected and islanded states. "
@@ -145,7 +149,9 @@ def test_the_old_island_role_still_reads_as_island_rows(tmp_path):
         text.replace(f",{su.ROLE_ISLAND},", ",island converter bus (not judged),")
     )
     row = _card(tmp_path, n=n)[0]["ssti_uif"]
-    assert row["verdict"] == "warn" and row["project_value"] == ISLAND_WORST
+    assert row["verdict"] == "warn" and row["project_value"] == pytest.approx(
+        ISLAND_WORST
+    )
 
 
 def test_the_island_roles_are_the_engines():

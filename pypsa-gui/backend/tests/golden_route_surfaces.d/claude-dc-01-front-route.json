@@ -1,0 +1,4 @@
+{"routes": {"routers/results.py::get_front": [],
+            "routers/results.py::post_front": [],
+            "routers/results.py::post_front_abort": [],
+            "routers/results.py::post_front_apply": []}}

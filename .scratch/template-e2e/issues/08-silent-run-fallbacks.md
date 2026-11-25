@@ -3,7 +3,7 @@
 
 # 08 — Run inputs that fall back to a default without saying so
 
-Status: ready-for-agent; audit 2026-11-19: open in #1645
+Status: ready-for-agent; audit 2026-11-25: #1645 merged (assumed values shown, VOLL fallback refuses); left: the Assumptions behind this result group (issue 26; no such string on master)
 Owner: builder session_01G7qCuo15kNsNqjAaBLjvmL
 Size: M
 Gated: GK B; UX
@@ -33,3 +33,7 @@ None of them shows as "assumed" in its section, in Results or in the report.
 ## Comments
 
 - 2026-11-23 status sweep: landed in #1645 (41318c60): assumed values shown before the run, in the run record and in the report chapter; VOLL fallback refuses. Remains: the "Assumptions behind this result" group (issue 26).
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: PR merge state checked against origin/master log; acceptance items grepped on master code.

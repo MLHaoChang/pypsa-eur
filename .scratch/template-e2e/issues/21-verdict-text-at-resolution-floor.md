@@ -3,7 +3,7 @@
 
 # 21 — Guided verdict says 'straddles the goal' when the run cannot resolve it
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-25: #1927 merged (verdict states the resolution floor and minimum runs; runs below the floor refused at start); left: goal parity on the concentrator rail (issue 41)
 Source: decide-report-journeys.md (walk 2026-11-17, master 0ab07339)
 Severity: misleads
 Journey fit: results. The verdict drives the go/no-go decision.
@@ -21,3 +21,7 @@ With 'Simulation runs per check' = 1 (allowed, minimum) the verdict reads 'Not d
 ## Triage (2026-11-20, master 8a039460)
 
 Checked by code reading only; the app was not re-run. Still true: the 'straddles the' text is still in `eh_study.py` and `headline.ts`. Goal display was partly fixed by #1734 (assumed-goal note). Acceptance as written above; re-check the goal-parity item after #1734. Gated: GK A. Blocked by: none.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: #1927 in master log; floor and min-runs text in eh_study.py:376-490 and headline.ts:55-70; rail parity open as issue 41.

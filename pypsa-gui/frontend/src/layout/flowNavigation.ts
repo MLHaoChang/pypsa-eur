@@ -28,6 +28,8 @@ export interface FlowReturn {
   part: SitePart | null
   /** A stable id (building id or target key), never a display name. */
   partSelection: SitePartSelection | null
+  /** A jump from inside Results: the tab (and block) Back shows again. */
+  resultsBack?: { tab: string; section?: string }
 }
 
 /** The return label for a jump that leaves Site 3D (SC-00 N, SITE3D-NAME-1). */
@@ -135,6 +137,7 @@ export function returnToOrigin(): void {
     if (o.part) ui.setSitePart(o.part)
     ui.setSitePartSelection(o.partSelection)
   }
+  if (o.panel === 'results' && o.resultsBack) ui.requestResultsTab(o.resultsBack.tab, o.resultsBack.section)
   useUIStore.setState({ flowReturn: null })
   restoreScroll(o.scroll)
 }
@@ -306,13 +309,17 @@ export function openN1BranchSelector(): void {
 /** Show one Results tab from where the user is (the Control tabs' links): the Results panel on
  *  that tab, Back returning to the view it left. Never flips the mode. `section` asks the tab
  *  to scroll to one of its blocks once it is on screen (request-then-scroll); `from` names
- *  the origin on the Back pill when the section label would name another place. */
-export function showResultsTab(tab: string, opts: { section?: string; from?: string } = {}): void {
+ *  the origin on the Back pill when the section label would name another place; `back` names
+ *  the Results tab (and block) the link sits in, when it sits in one. */
+export function showResultsTab(tab: string, opts: { section?: string; from?: string; back?: { tab: string; section?: string } } = {}): void {
   withReturn(null, () => {
     const ui = useUIStore.getState()
     ui.setSlidePanel('results')
     ui.requestResultsTab(tab, opts.section)
   }, false, opts.from)
+  // `back`: the jump starts in another Results tab, which Back shows again.
+  const o = useUIStore.getState().flowReturn
+  if (opts.back && o) useUIStore.setState({ flowReturn: { ...o, resultsBack: opts.back } })
 }
 
 /** Show the Grid readiness scorecard ("Readiness › Grid readiness ›"): Issues

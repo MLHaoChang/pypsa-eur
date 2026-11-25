@@ -409,3 +409,14 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 ## Standing rulings (GK A (35), recorded 2026-11-24)
 
 - A pre-run gate that predicts Monte Carlo resolution judges at the draws the MC can actually reach (mc_adequacy runs adaptively to MAX_DRAWS unless max_draws is pinned), never the requested count. A comparison across points pins max_draws=draws (GK A (35), #1927, DRAW-FLOOR-1).
+
+## Standing rulings (GK A (36), recorded 2026-11-25)
+
+- A reader that filters a ratings/duty table on NaN must flag the bus or row as partly evaluated, naming what was skipped. Flags are joined, never one hiding another (#1980).
+- An emissions override per MWh of electric output wins over a fuel-curve slope on every CO2 surface, the LP price included. The slope or the carrier only fills snapshots with no override, and the no-load fuel stays at the carrier figure (#1965).
+- A switchgear short-time check refers Ith over Tk to the rated Tkr: Ith·√(max(Tk,Tkr)/Tkr) ≤ Ithr. A cable withstand uses Ith over the clearing time, never Ik''·√t (#1980).
+- A solve result is judged on the termination condition, never the status alone, and a study that judges the LP forces the AC PF stage off (#1979).
+
+## Standing rulings (GK A (37), recorded 2026-11-25)
+
+- A firm-capacity (reserve-margin) credit for supply that reaches the site only through a grid_import link is capped by that link, as a series: min(C_upstream, C_link) × a_upstream × a_link. The cap applies to the group behind each link, not to each generator, and uses each period's active link capacity. Which supply is behind a link is derived from topology, never from names. A copper-plate firm sum that credits supply beyond the PoC's rating is a defect (DC 01 PR2b-0).

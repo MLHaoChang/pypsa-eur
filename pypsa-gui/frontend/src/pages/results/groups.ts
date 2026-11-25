@@ -9,7 +9,7 @@ export type ResultsTab =
   | 'economics' | 'curtailment' | 'lostload' | 'adequacy' | 'storage'
   | 'asset' | 'fmea' | 'investment' | 'flows' | 'loadshape' | 'grid_code' | 'electrical_design'
   | 'island' | 'grid_forming' | 'grid_risk' | 'products'
-  | 'reports' | 'exports' | 'specialist_packet'
+  | 'reports' | 'exports' | 'equipment_schedule' | 'specialist_packet'
 
 export type ResultsGroup = 'summary' | 'investment' | 'grid_plan' | 'reliability' | 'operation'
 
@@ -94,11 +94,13 @@ export const CARD_GROUPS: readonly CardGroup[] = [
   { id: 'commercial', label: 'Commercial & finance', question: 'What it costs and earns',
     tabs: [{ id: 'investment_case', label: 'Investment case', views: ['investment'] }] },
   // R6: what leaves the tool. Card tab ids match `flow_scope.py` (handoff: reports, exports,
-  // specialist_packet); none is a solve output, so the header shows no Run freshness.
+  // specialist_packet); the equipment schedule is no scope sub-option and shows with Hand-off.
+  // None is a solve output, so the header shows no Run freshness.
   { id: 'handoff', label: 'Hand-off', question: 'What leaves the tool', fromStudy: true,
     tabs: [
       { id: 'reports', label: 'Reports', views: ['reports'] },
       { id: 'exports', label: 'Exports', views: ['exports'] },
+      { id: 'equipment_schedule', label: 'Equipment schedule', views: ['equipment_schedule'] },
       { id: 'specialist_packet', label: 'Specialist packet', views: ['specialist_packet'] },
     ] },
 ]

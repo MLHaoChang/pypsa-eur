@@ -153,6 +153,18 @@ class DataCentreLoadSpec(BaseModel):
     ambient_annual_mean_c: float = 10.0
     ambient_seasonal_amplitude_k: float = Field(default=9.0, ge=0)
     ambient_diurnal_amplitude_k: float = Field(default=5.0, ge=0)
+    #: Day of year the seasonal cosine peaks: 200 north of the equator, 17 south.
+    ambient_peak_day: int = Field(default=200, ge=1, le=366)
+    #: The site latitude the ambient preset was chosen from (None: no location).
+    site_latitude: float | None = Field(default=None, ge=-90, le=90, allow_inf_nan=False)
+    #: Where the ambient fields not entered came from: the assumed temperate
+    #: curve, or a climate-zone preset chosen from ``site_latitude``; "entered"
+    #: when all three were. ``ambient_entered`` names the ones the body stated.
+    #: Fixed at create: a later change of the site location does not re-derive
+    #: them (issue 04b-ambient-not-rederived-on-location-change).
+    ambient_source: Literal["default", "site_location", "entered"] = "default"
+    ambient_entered: list[Literal["ambient_annual_mean_c", "ambient_seasonal_amplitude_k",
+                                  "ambient_diurnal_amplitude_k"]] = Field(default_factory=list)
     #: The AI-training workload model; None keeps the spec's load as given.
     ai_workload: AiWorkloadSpec | None = None
     ups_distribution_loss_share: float = Field(default=0.03, ge=0, le=0.2)

@@ -3,7 +3,7 @@
 
 # Waiting on a run: header says Idle, no ETA, long runs unbounded
 
-Status: ready-for-agent; audit 2026-11-19: pill, ETA and wait open in #1614, #1627, #1630, #1716; left: 409 Conflict cause, Guided-vs-Expert run wording
+Status: ready-for-agent; audit 2026-11-25: #1614, #1627, #1630, #1716 merged (pill, ETA, wait); left: 409 Conflict cause, Guided-vs-Expert run wording
 Model tier: sonnet
 Size: S
 Blocked by: #1627, #1630 merged
@@ -34,3 +34,7 @@ J4 to J5 to J6: the wait ends where Guided results begins.
 **2026-11-17 triage (SCALE-1).** Narrowed. The "Idle" header pill, elapsed/ETA and the end of the wait landing on the headline belong to run progress (#1614, #1627, #1630; session_01G7qCunh1ZQ2fxfbTPMJRin). What stays here: (1) the 409 Conflict responses logged during three runs with no error shown; find the cause and either remove it or say it in words; (2) the wait text does not say whether Guided "Run study" or Expert "Run LOPF" is running (check after #1630). A bound on a 25-minute-plus run is template-e2e 09, not this issue.
 
 - 2026-11-23 status sweep: landed in #1614 (0bca65ec48); #1627 (44387a6952); #1630 (233c38fd14); #1716 (1676808a11): pill, ETA and wait. Remains: the 409 Conflict cause and Guided-vs-Expert run wording.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: #1614, #1627, #1630, #1716 are in the origin/master log; the 409 cause and the Guided-vs-Expert wording have no PR, so still open.

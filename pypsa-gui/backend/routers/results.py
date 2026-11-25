@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import dataclasses
 from contextlib import contextmanager
+import functools
 import logging
 import re
 from typing import TYPE_CHECKING, Any, Literal
@@ -1755,6 +1756,15 @@ def post_eh_study_abort():
 
 
 @results_router.post("/eh_study")
+def post_eh_study_http(body: EhStudyRequest | None = None, user: User = Depends(require_user)):
+    """`POST /results/eh_study`. The study's run record is bound to the starting user
+    (`run_evidence.start_study_run` reads the acting user); without it the record was silently
+    skipped and no run existed (template-e2e 30). The chat tool calls `post_eh_study` itself,
+    with its own acting user already set."""
+    with _result_actor(user):
+        return post_eh_study(body)
+
+
 def post_eh_study(body: EhStudyRequest | None = None):
     """
     Start the Energy Hub reference-design study in a worker thread.
@@ -1772,6 +1782,62 @@ def post_eh_study(body: EhStudyRequest | None = None):
         solver_state=_state,
         state_update=_state_update,
         publish_study=_publish_study,
+    )
+
+
+# ── the multi-objective front (DC 01): cost vs reliability vs CO2 ───────────
+# Its own block (other branches edit this file). The engine is
+# services/adequacy/front.py; the runner and the apply are front_runner.py.
+from services.adequacy.front_runner import (  # noqa: E402
+    FrontApplyRequest as _FrontApplyRequest,
+    FrontRequest as _FrontRequest,
+)
+
+
+@results_router.get("/front")
+def get_front():
+    """Status and points of the last front study; 204 when none has run."""
+    st = _state.get("front")
+    if not st:
+        return Response(status_code=204)
+    out = run_evidence.wire_record(st)
+    out["edited_since_study"] = _study_state.edited_since(st)
+    return out
+
+
+@results_router.post("/front/abort")
+def post_front_abort():
+    """Stop a running front at its next point boundary; idempotent, 404 only
+    when none has ever run (the shipped loop routes' contract)."""
+    return _abort_study("front", "no front study has been run in this session")
+
+
+@results_router.post("/front")
+def post_front(body: _FrontRequest):
+    """Start the cost / reliability / CO2 front in a worker thread. 422 on a
+    bad request (before anything is published), 409 while another study, a
+    sweep or a foreground solve runs. The budget is always MAX_FRONT_SOLVES."""
+    from services.adequacy.front_runner import start_front
+
+    _refuse_if_mesh_busy("front")
+    return start_front(body, solver_state=_state, publish_study=_publish_study)
+
+
+@results_router.post("/front/apply")
+def post_front_apply(body: _FrontApplyRequest):
+    """Fix the network at one solved point (nominal = size, extendable off):
+    one undo step, one revision bump. 409 when the network changed since the
+    study or ``expected_revision`` is not current; 422 when the point cannot
+    be applied. Nothing is written on a refusal."""
+    from routers.simulation import _state_update
+    from services.adequacy.front_runner import apply_front_point
+
+    return apply_front_point(
+        _state.get("front"),
+        body.index,
+        body.expected_revision,
+        refuse_busy=lambda: _refuse_if_mesh_busy("front"),
+        state_update=_state_update,
     )
 
 
@@ -2987,12 +3053,18 @@ def get_results_workbook_views(user: User = Depends(require_user)):
     n = PyPSAService.get_network()
     default = set(resolve_views(_workbook_scope(n, _workbook_template())))
     solved = _dispatch_ready(n)  # before a solve every tab is empty, whatever its probe reads
+    # After a Guided study only the study's solve exists (template-e2e 30): the probes read the live
+    # network, so which tabs the workbook would fill is read off a build from the study's solve.
+    from services import study_solve
+
+    from_study = None if solved or study_solve.fallback() is None else _study_workbook_views(user)
     previous = chat_tools.acting_user_id()
     chat_tools.set_acting_user(str(user.id))  # the probes read through the chat tools
     try:
         rows = []
         for v in workbook_views():
-            status = _probe(v)[0] if solved else "no_data"
+            status = (_probe(v)[0] if solved else "no_data" if from_study is None
+                      else "available" if v.label in from_study else "no_data")
             rows.append({"view_id": v.view_id, "label": v.label, "card": v.card,
                          "card_label": CARD_BY_ID[v.card].label, "selected": v.view_id in default,
                          "available": status == "available",
@@ -3005,6 +3077,25 @@ def get_results_workbook_views(user: User = Depends(require_user)):
     # chooser says which run it exports, beside a past run on Results.
     return {"views": rows, "run": None if run is None else {
         "run_id": run.get("run_id"), "started_at": run.get("started_at")}}
+
+
+def _study_workbook_views(user: User) -> set[str]:
+    """The labels of the views a workbook built from the study's solve fills (About's "In this
+    workbook" column reads "sheets: ..." for them); empty when that build is refused or fails."""
+    import io
+
+    from openpyxl import load_workbook
+
+    try:
+        resp = get_results_workbook(views="", all_views=True, stored=False, run_id=None, user=user)
+        if resp.status_code != 200:
+            return set()
+        about = load_workbook(io.BytesIO(resp.body))["About"]
+    except Exception:  # noqa: BLE001 — no readable workbook: every tab reads empty
+        logger.info("results workbook: the study's tabs could not be probed", exc_info=True)
+        return set()
+    return {str(r[0]) for r in about.iter_rows(values_only=True)
+            if r[0] and isinstance(r[2], str) and r[2].startswith("sheets:")}
 
 
 def _workbook_run(user: User) -> dict | None:
@@ -3065,8 +3156,15 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
     from services.workflow_tools import solve_freshness
 
     n = PyPSAService.get_network()
+    from services import study_solve
+
+    study = None
     if not _dispatch_ready(n):
-        return Response(status_code=204)
+        # A Guided study solved a private copy: its solve is the run to export (template-e2e 30).
+        study = study_solve.fallback()
+        if study is None:
+            return Response(status_code=204)
+        n = study["network"]
     if _solver_in_flight():  # the network carries the LP's transient transforms
         raise HTTPException(409, {
             "error_kind": "results_workbook_stale",
@@ -3074,7 +3172,8 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
     latest = _workbook_run(user)
     if run_id is not None:
         _refuse_other_run(run_id, latest, user)
-    freshness = solve_freshness()
+    freshness = (solve_freshness() if study is None
+                 else {"inputs_changed_since_solve": False, "results_current": True})
     if not freshness.get("results_current") and not stored:
         why = ("The inputs changed since the solve, so the results describe an earlier model."
                if freshness.get("inputs_changed_since_solve") else
@@ -3084,7 +3183,10 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
             "error_kind": "results_workbook_stale",
             "message": f"{why} Run the model again, or export the stored run instead."})
     template = _workbook_template()
-    cfg = _state.get("solver_config")
+    # A study's solve is judged by its own state (config, lost-load capture, adequacy report, settings,
+    # result snapshots): never the live `_state`, which belongs to another solve (template-e2e 30).
+    held = {} if study is None else study["state"]
+    cfg = _state.get("solver_config") if study is None else study["cfg"]
     scope = _workbook_scope(n, template)
     try:
         included = resolve_views(scope, views.split(","), all_views)
@@ -3111,14 +3213,18 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
     previous = chat_tools.acting_user_id()
     chat_tools.set_acting_user(str(user.id))
     try:
-        scenarios = _workbook_scenarios(cfg, n, freshness)
+        scenarios = _workbook_scenarios(cfg, n, freshness) if study is None else None
         blob = RW.build_results_workbook(RW.WorkbookInputs(
-            network=n, cfg=cfg, lost_load=_state.get("last_lost_load"),
-            result_df=_result_df, views=included, ic_report=report, case_state=case_state,
+            network=n, cfg=cfg,
+            lost_load=_state.get("last_lost_load") if study is None else held.get("last_lost_load"),
+            result_df=_result_df if study is None else functools.partial(_result_df, state=held),
+            views=included, ic_report=report, case_state=case_state,
             bc_report=bc_report, bc_state=bc_state,
             project=project, scope=scope, template=template, freshness=freshness,
             stored=stored, run=runs[0] if runs else None, scenarios=scenarios,
-            solved_settings=_solved_settings,
+            solved_settings=(_solved_settings if study is None
+                             else functools.partial(_solved_settings, held, n=n)),
+            solver_state=None if study is None else held,
             project_id=getattr(PyPSAService.get_active_context(), "project_uuid", None),
             project_for=_workbook_project))
     except RW.WorkbookTooLarge as exc:

@@ -3,7 +3,7 @@
 
 # In-process runners re-read the caller's role mid-run
 
-Status: ready-for-agent
+Status: done (merged #1806 runners, #1848 reports and campus)
 Type: task
 Source: GK B (63) on #1622 (F2), a known limit of 01 (VIEWER-ROLE-1, R3)
 
