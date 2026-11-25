@@ -600,9 +600,10 @@ class PyPSAService:
         # the simulation `_state` proxy and undo_service are byte-identical to the
         # pre-split module globals, which survived every network swap. load_project
         # re-hydrates state explicitly right after (solver_config from disk-or-
-        # default, results from the pkl) and calls undo_service.clear(); "New"/reset
-        # intentionally keeps the prior lifecycle + undo, as before. B2's registry
-        # replaces this carry-forward with per-project selection.
+        # default, results from the pkl) and calls undo_service.clear(). A "fresh"
+        # swap (New/reset included) starts from the DEFAULT solver_config; only
+        # "same"/"copy" keep the outgoing one. B2's registry replaces this
+        # carry-forward with per-project selection.
         if prev is not None:
             # ★ A finished STUDY must not outlive the network it measured.
             #
@@ -650,6 +651,12 @@ class PyPSAService:
                 # results_state.pkl; a template project has none).
                 for key in RESULT_STATE_KEYS:
                     state[key] = None
+                # ★ A different project or blank draft starts from the DEFAULT
+                # solver config (template-e2e issue 32). Carrying the outgoing
+                # one leaked its tariff, finance and periods into the new
+                # project's first save. Loads re-hydrate their own from disk.
+                from services.solver_service import SolverConfig  # noqa: PLC0415
+                state["solver_config"] = SolverConfig()
             if carry == "same":
                 undo_state = prev.undo
             elif carry == "copy":
@@ -673,9 +680,9 @@ class PyPSAService:
                 # dict's IDENTITY surviving a swap: `simulation._state` is
                 # `_ActiveStateProxy`, which resolves through
                 # `PyPSAService.get_solver_state()` on every access. The
-                # carry-forward's actual purpose — the user's solver_config
-                # and lifecycle surviving "New" — is preserved by the copy's
-                # VALUES. The lock stays shared: it guards both dicts, which
+                # carry-forward's actual purpose — the lifecycle, and for
+                # carry="same"/"copy" the solver_config, surviving the swap — is
+                # preserved by the copy's VALUES. The lock stays shared: it guards both dicts, which
                 # is coarser than necessary and never wrong.
                 solver_state=state,
                 solver_state_lock=prev.solver_state_lock,
