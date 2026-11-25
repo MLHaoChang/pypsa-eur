@@ -163,17 +163,25 @@ def test_a_site_member_keeps_its_plain_credit():
     assert "cap" not in _asset(f, "genset")
 
 
-# ── G2: the site from its loads; no eh_critical marker ───────────────────
+# ── G2: the site is the eh_critical buses, else the imports' bus1 side ──
 
 
-def test_a_component_with_its_own_load_is_a_site_and_keeps_plain_credit():
-    # G2: the site is where the margin's demand is. A Load on the grid bus is
-    # demand the margin covers, and the grid's generator serves it directly.
+def test_an_upstream_component_with_its_own_load_is_still_capped():
     n = _net()
     n.add("Load", "grid_demand", bus="grid", p_set=50.0)
     f = reserve_margin_facts(n, _cfg())
-    assert _per(f)["firm_fixed_mw"] == pytest.approx(99.0)
-    assert "cap" not in _asset(f, "up")
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(40 * 0.99 * 0.998)
+
+
+@pytest.mark.parametrize("critical", [True, False])
+def test_a_zero_mw_load_upstream_never_makes_a_site(critical):
+    # GK A (38) (1): with a flag the site is the flagged buses only; without
+    # one it is the imports' bus1 side. A Load never makes a site.
+    n = _net(critical=critical)
+    n.add("Load", "grid_aux", bus="grid", p_set=0.0)
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(40 * 0.99 * 0.998)
+    assert _asset(f, "up")["cap"]["links"] == ["poc"]
 
 
 @pytest.mark.parametrize("drop_column", [False, True])
@@ -859,12 +867,13 @@ def test_a_link_with_an_unusable_rate_is_refused_for_that_reason():
     assert "(no outage data, no availability profile)" not in issues[0].message
 
 
-# ── GK A on #1998 (7): the site from its loads ────────────────────────────
+# ── GK A on #1998 (7) / GK A (38) (1): which buses are the site ──────────
 
 
 def test_two_sites_behind_their_own_imports_are_both_sites():
     n = _net()
     n.add("Bus", "site_b", carrier="AC")
+    n.buses.at["site_b", "eh_critical"] = True
     n.add("Load", "load_b", bus="site_b", p_set=10.0)
     n.add("Link", "poc_b", bus0="grid", bus1="site_b", p_nom=30.0, carrier="AC")
     _outage(n, "links", "poc_b", 0.01)
@@ -875,8 +884,8 @@ def test_two_sites_behind_their_own_imports_are_both_sites():
     assert _asset(f, "up")["cap"]["links"] == ["poc", "poc_b"]
 
 
-def test_an_unflagged_site_is_a_site_by_its_load():
-    # Neither site is flagged eh_critical; each is a site by its own Load.
+def test_without_a_flag_each_import_bus1_side_is_a_site():
+    # Neither site is flagged eh_critical; each is a site as an import's bus1.
     n = _net(critical=False)
     n.add("Bus", "site_b", carrier="AC")
     n.add("Load", "load_b", bus="site_b", p_set=10.0)
@@ -988,3 +997,82 @@ def test_a_group_of_only_extendables_credits_nothing():
     f = reserve_margin_facts(n, _cfg())
     assert _per(f)["firm_fixed_mw"] == 0.0
     assert _asset(f, "up_new")["cap"]["member_credit_mw"] == 0.0
+
+
+def test_a_flagged_site_ignores_an_unflagged_load_bus_behind_its_own_import():
+    # With a flag, an unflagged Load bus is not a site: the import into it is
+    # an internal hop of the upstream side, and its own generator is capped.
+    n = _net()
+    n.add("Bus", "other", carrier="AC")
+    n.add("Load", "other_load", bus="other", p_set=10.0)
+    n.add("Link", "poc_o", bus0="grid", bus1="other", p_nom=30.0, carrier="AC")
+    n.links.at["poc_o", "eh_role"] = "grid_import"
+    f = reserve_margin_facts(n, _cfg())
+    assert _asset(f, "up")["cap"]["links"] == ["poc"]
+
+
+# ── GK A (38) (2): a branch with no rating is no path ─────────────────────
+
+
+@pytest.mark.parametrize(
+    "kind, attrs, ts",
+    [
+        ("Link", {"bus0": "grid", "bus1": "site", "p_nom": 0.0}, None),
+        ("Line", {"s_nom": 0.0}, None),
+        ("Line", {"s_nom": 100.0, "s_max_pu": 0.0}, None),
+        ("Line", {"s_nom": 100.0}, ("lines_t", "s_max_pu", [1.0, 0.0, 1.0, 1.0])),
+        ("Transformer", {"s_nom": 0.0}, None),
+        ("Transformer", {"s_nom": 100.0, "s_max_pu": 0.0}, None),
+        ("Line", {"s_nom": 0.0, "s_nom_extendable": True, "s_nom_max": 0.0}, None),
+        (
+            "Link",
+            {
+                "bus0": "grid",
+                "bus1": "site",
+                "p_nom": 0.0,
+                "p_nom_extendable": True,
+                "p_nom_max": 0.0,
+            },
+            None,
+        ),
+    ],
+)
+def test_a_branch_rated_zero_is_no_path(kind, attrs, ts):
+    n = _net()
+    if kind == "Link":
+        n.add("Link", "b", carrier="AC", **attrs)
+    else:
+        n.add(kind, "b", bus0="grid", bus1="site", x=0.1, **attrs)
+    if ts is not None:
+        getattr(n, ts[0])[ts[1]]["b"] = ts[2]
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(CAPPED)
+
+
+@pytest.mark.parametrize(
+    "kind, attrs",
+    [
+        ("Line", {"s_nom": 0.0, "s_nom_extendable": True, "s_nom_max": 50.0}),
+        ("Transformer", {"s_nom": 0.0, "s_nom_extendable": True, "s_nom_max": 50.0}),
+        (
+            "Link",
+            {
+                "bus0": "grid",
+                "bus1": "site",
+                "p_nom": 0.0,
+                "p_nom_extendable": True,
+                "p_nom_max": 50.0,
+            },
+        ),
+    ],
+)
+def test_an_extendable_branch_the_solve_may_build_is_a_path(kind, attrs):
+    # GK A (38) (2): an extendable branch counts at its *_nom_max, which the
+    # solve may build, so what is behind it keeps plain credit.
+    n = _net()
+    if kind == "Link":
+        n.add("Link", "b", carrier="AC", **attrs)
+    else:
+        n.add(kind, "b", bus0="grid", bus1="site", x=0.1, **attrs)
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(99.0)

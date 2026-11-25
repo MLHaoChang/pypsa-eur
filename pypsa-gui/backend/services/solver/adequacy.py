@@ -534,21 +534,41 @@ def _grid_imports(n, elec_buses: set[str]) -> list[str] | None:
     return imports or None
 
 
-def _link_value(n, lk: str, attr: str, snaps, worst, default: float) -> tuple[float, bool]:
-    """A Link's ``attr`` (p_max_pu, p_min_pu, efficiency) over ``snaps``:
-    the time series' ``worst`` (min or max) over those snapshots when it has
-    one, else the static column. Returns ``(value, from_series)``. A value
-    that is not a finite number reads ``default``."""
-    ts = getattr(getattr(n, "links_t", None), attr, None)
+def _link_value(n, lk: str, attr: str, snaps, worst, default: float,
+                comp: str = "links") -> tuple[float, bool]:
+    """A Link's (or another ``comp`` branch's) ``attr`` (p_max_pu, p_min_pu,
+    efficiency, s_max_pu) over ``snaps``: the time series' ``worst`` (min or
+    max) over those snapshots when it has one, else the static column.
+    Returns ``(value, from_series)``. A value that is not a finite number
+    reads ``default``."""
+    ts = getattr(getattr(n, f"{comp}_t", None), attr, None)
     if ts is not None and lk in getattr(ts, "columns", []):
         vals = pd.to_numeric(ts[lk].reindex(snaps), errors="coerce").dropna()
         if len(vals):
             return float(worst(vals)), True
     try:
-        v = float(n.links.at[lk, attr])
+        v = float(getattr(n, comp).at[lk, attr])
     except (KeyError, TypeError, ValueError):
         return default, False
     return (v if math.isfinite(v) else default), False
+
+
+def _branch_rated(n, comp: str, name, nom: str) -> bool:
+    """Whether a plain branch has a rating to carry power at all (GK A (38)
+    (2)): its ``nom`` (s_nom, p_nom) above 0. An EXTENDABLE branch counts at
+    its ``*_nom_max`` instead, the most the solve may build: one with
+    ``*_nom_max > 0`` is a path, as the LP can size it to carry the flow;
+    one capped at 0 is not. (A path only removes the cap, it is never
+    credited itself, so this does not touch the extendable refusals.)"""
+    df = getattr(n, comp)
+    col = nom
+    if f"{nom}_extendable" in df.columns and bool(df.at[name, f"{nom}_extendable"]):
+        col = f"{nom}_max"
+    try:
+        v = float(df.at[name, col])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return not math.isnan(v) and v > 0
 
 
 def _reach(start: set[str], adj: dict[str, set[str]]) -> set[str]:
@@ -607,19 +627,21 @@ def _import_topology(n, elec_buses: set[str], imports: list[str], snaps,
     """Which buses reach the site only through ``grid_import`` Links in ONE
     period, and by which hops (E3, G2; GK A on #1998 (1)-(3), (7)).
 
-    **Paths are directed and per period.** A Line or Transformer active in
-    the period carries power both ways. A plain Link active in the period
-    carries it from bus0 toward its other ports when its p_max_pu (the
-    lowest in the period, for a time series) is above 0, and back when its
-    p_min_pu (the highest in the period) is below 0; a Link that cannot carry
-    power toward the site is no path. ``active(comp)`` is the period's
-    activity mask.
+    **Paths are directed, rated and per period.** A Line or Transformer
+    active in the period carries power both ways when its s_nom and its
+    lowest s_max_pu in the period are both above 0. A plain Link active in
+    the period, with p_nom above 0, carries it from bus0 toward its other
+    ports when its p_max_pu (the lowest in the period, for a time series) is
+    above 0, and back when its p_min_pu (the highest in the period) is below
+    0; a branch that cannot carry power toward the site is no path. An
+    extendable branch is rated at its ``*_nom_max`` (``_branch_rated``).
+    ``active(comp)`` is the period's activity mask.
 
-    **The site** is every bus holding an electrical Load (G2: the margin's
-    demand is there), plus every bus flagged ``eh_critical``. With neither,
-    it falls back to the ``bus1`` ends of the ``grid_import`` Links (their
-    documented orientation: ``bus0`` upstream). A bus with a free path to a
-    site bus is site-side and keeps plain credit.
+    **The site** (G2, GK A (38)) is every bus flagged ``eh_critical``. With
+    no flagged bus, it is the ``bus1`` ends of the ``grid_import`` Links
+    (their documented orientation: ``bus0`` upstream). A Load never makes a
+    site: an upstream bus with its own demand is still upstream. A bus with
+    a free path to a site bus is site-side and keeps plain credit.
 
     **The rest** is split into stages (strongly connected over the free
     paths). A stage's hop is where its power goes next: a free path to
@@ -652,6 +674,12 @@ def _import_topology(n, elec_buses: set[str], imports: list[str], snaps,
         for name in df.index:
             if not bool(act.get(name, False)):
                 continue
+            # A path only when rated: s_nom (or s_nom_max, extendable) and
+            # the lowest s_max_pu in the period both above 0.
+            if not (_branch_rated(n, comp, name, "s_nom")
+                    and _link_value(n, str(name), "s_max_pu", snaps, min, 0.0,
+                                    comp=comp)[0] > 0):
+                continue
             b0, b1 = str(df.at[name, "bus0"]), str(df.at[name, "bus1"])
             _edge(b0, b1)
             _edge(b1, b0)
@@ -661,7 +689,8 @@ def _import_topology(n, elec_buses: set[str], imports: list[str], snaps,
     link_act = active("links")
     for name in links.index:
         lk = str(name)
-        if lk in imp or not bool(link_act.get(name, False)):
+        if lk in imp or not bool(link_act.get(name, False)) \
+                or not _branch_rated(n, "links", name, "p_nom"):
             continue
         forward = _link_value(n, lk, "p_max_pu", snaps, min, 0.0)[0] > 0
         backward = _link_value(n, lk, "p_min_pu", snaps, max, 0.0)[0] < 0
@@ -675,12 +704,10 @@ def _import_topology(n, elec_buses: set[str], imports: list[str], snaps,
             if backward:
                 _edge(other, b0)
 
-    site: set[str] = set()
-    loads = getattr(n, "loads", None)
-    if loads is not None and not loads.empty and "bus" in loads.columns:
-        site |= {str(b) for b in loads["bus"]} & elec_buses
-    site |= {str(b) for b in n.buses.index[flag_column(n.buses, "eh_critical")]
-             } & elec_buses
+    # GK A (38) (1): the flagged buses only; with no flag, the imports'
+    # bus1 side. A Load never makes a site (a 0 MW one upstream included).
+    site = {str(b) for b in n.buses.index[flag_column(n.buses, "eh_critical")]
+            } & elec_buses
     if not site:
         site = {str(links.at[lk, "bus1"]) for lk in imports}
 
