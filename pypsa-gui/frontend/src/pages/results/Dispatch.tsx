@@ -37,6 +37,7 @@ import StorageHeatmap from './StorageHeatmap'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
 import { storageCarrierKey, storageCarrierLabel } from './carrierAliases'
 import NotSolved from './NotSolved'
+import { withheldCell } from './sectionWords'
 
 // The load duration curve's two series: total load, then load minus renewables.
 const LOAD_SERIES: DurationSeries = { key: 'load', name: 'Load', colour: carrierColour('load'), csv: 'load_MW' }
@@ -1666,6 +1667,7 @@ export default function Dispatch() {
                       range={range}
                       lostLoadByCarrier={lostLoadByCarrier}
                       econByCarrier={econByCarrier?.by_carrier ?? null}
+                      econWithheld={econByCarrier?.unavailable_reason}
                       lostLoadNotModelled={lostLoadNotModelled}
                       scaled={scaled}
                       avgScale={avgScale}
@@ -1754,6 +1756,7 @@ export default function Dispatch() {
                   range={range}
                   lostLoadByCarrier={lostLoadByCarrier}
                   econByCarrier={econByCarrier?.by_carrier ?? null}
+                  econWithheld={econByCarrier?.unavailable_reason}
                   lostLoadNotModelled={lostLoadNotModelled}
                   scaled={scaled}
                   avgScale={avgScale}
@@ -2264,7 +2267,7 @@ export function CarrierKpiPanel({
   gensTS, loadTS, storPowerTS, storeTS, curtailTS, linkTS,
   generators, loads, storageUnits, stores, links,
   weightCtx, range,
-  lostLoadByCarrier, econByCarrier,
+  lostLoadByCarrier, econByCarrier, econWithheld,
   scaled, avgScale, isElectrical,
   selectedPeriod, lostLoadNotModelled = false,
 }: {
@@ -2288,17 +2291,20 @@ export function CarrierKpiPanel({
   // load carrier (electrical / hydrogen / heat / …). Single source of truth
   // avoids the panel re-computing with different (unweighted) semantics.
   lostLoadByCarrier: Array<{ carrier: string; mwh: number; cost: number | null }> | null
+  // revenue / storage charge cost (and opex + LCOE of a carrier holding one)
+  // are null on an integer (MIP) solve; econWithheld says why.
   econByCarrier: Record<string, {
-    revenue_meur: { total: number; by_period: Record<string, number> }
-    opex_meur:    { total: number; by_period: Record<string, number> }
+    revenue_meur: { total: number; by_period: Record<string, number> } | null
+    opex_meur:    { total: number; by_period: Record<string, number> } | null
     gen_cost_meur?: { total: number; by_period: Record<string, number> }
-    storage_charge_cost_meur?: { total: number; by_period: Record<string, number> }
+    storage_charge_cost_meur?: { total: number; by_period: Record<string, number> } | null
     curtailment_cost_meur?:    { total: number; by_period: Record<string, number> }
     lost_load_cost_meur?:      { total: number; by_period: Record<string, number> }
     capex_meur:   { total: number; by_period: Record<string, number> }
     dispatch_gwh: { total: number; by_period: Record<string, number> }
-    lcoe_eur_per_mwh: { total: number; by_period: Record<string, number> }
+    lcoe_eur_per_mwh: { total: number; by_period: Record<string, number> } | null
   }> | null
+  econWithheld?: string
   scaled: boolean
   avgScale: number
   isElectrical: boolean
@@ -2524,23 +2530,28 @@ export function CarrierKpiPanel({
       }
       return bucket.total ?? 0
     }
-    let revenue = 0, opex = 0, gen_cost = 0, charge = 0, curt = 0, lost = 0, capex = 0, dispatch = 0
+    // revenue / opex / charge are null when any part is withheld (an integer
+    // solve) — no silent partial sum of a price-based figure.
+    let revenue: number | null = 0, opex: number | null = 0, charge: number | null = 0
+    let gen_cost = 0, curt = 0, lost = 0, capex = 0, dispatch = 0
+    const addNullable = (acc: number | null, bucket: { total: number; by_period: Record<string, number> } | null | undefined) =>
+      acc === null || bucket === null ? null : acc + pickValue(bucket)
     let hit = false
     for (const cc of componentCarriers) {
       const e = econByCarrier[cc]
       if (!e) continue
       hit = true
-      revenue  += pickValue(e.revenue_meur)
-      opex     += pickValue(e.opex_meur)
+      revenue  = addNullable(revenue, e.revenue_meur)
+      opex     = addNullable(opex, e.opex_meur)
       gen_cost += pickValue(e.gen_cost_meur)
-      charge   += pickValue(e.storage_charge_cost_meur)
+      charge   = addNullable(charge, e.storage_charge_cost_meur)
       curt     += pickValue(e.curtailment_cost_meur)
       lost     += pickValue(e.lost_load_cost_meur)
       capex    += pickValue(e.capex_meur)
       dispatch += pickValue(e.dispatch_gwh)
     }
     if (!hit) return null
-    const lcoe = dispatch > 1e-9 ? ((capex + opex) / dispatch) * 1000 : 0
+    const lcoe = opex === null ? null : dispatch > 1e-9 ? ((capex + opex) / dispatch) * 1000 : 0
     return { revenue, opex, gen_cost, charge, curt, lost, capex, dispatch, lcoe }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [econByCarrier, generators, storageUnits, links, group, selectedPeriod])
@@ -2640,17 +2651,20 @@ export function CarrierKpiPanel({
               energy KPIs shown above. */}
           {(() => {
             const genCostEur = econ.gen_cost * 1e6
-            const opexEur = econ.opex * 1e6
+            const opexEur = econ.opex === null ? null : econ.opex * 1e6
             const dispatchTotal = dispatch.totalGen + (dispatch.storageDischarge ?? 0)
-            const lcoe = dispatchTotal > 1e-6 ? (opexEur + econ.capex * 1e6) / dispatchTotal : 0
+            const lcoe = opexEur === null ? null : dispatchTotal > 1e-6 ? (opexEur + econ.capex * 1e6) / dispatchTotal : 0
+            // A figure priced at bus prices that are not prices (integer solve).
+            const withheld = { state: 'unavailable' as const, reason: withheldCell(econWithheld) }
             return (
               <>
-                <KPI accent label="OPEX (total)" value={fmtCurrency(opexEur)}
+                <KPI accent label="OPEX (total)" value={opexEur === null ? '' : fmtCurrency(opexEur)}
+                     {...(opexEur === null ? withheld : {})}
                      hint="Broader than Capacity expansion's OPEX (horizon): Σ gen/link marginal cost + storage charge at bus price + curtailment + lost-load (economics_by_carrier). For this run, gen cost alone matches Capacity expansion; the extra is mainly Storage charge cost." />
                 <KPI label="Gen cost" value={fmtCurrency(genCostEur)}
                      hint={`Σ marginal_cost × |dispatch| × weights over gens / links producing on this carrier. This is what Capacity expansion labels OPEX (horizon). Link costs (e.g. electrolyzer / P2H marginal_cost × |p0|) are already included by the backend.${scaleHint}`} />
-                <KPI label="Storage charge cost" value={fmtCurrency(econ.charge * 1e6)}
-                     {...(hasStorage ? zeroOr(econ.charge) : noStorage)}
+                <KPI label="Storage charge cost" value={econ.charge === null ? '' : fmtCurrency(econ.charge * 1e6)}
+                     {...(!hasStorage ? noStorage : econ.charge === null ? withheld : zeroOr(econ.charge))}
                      hint="What storage paid (or earned, if negative) to charge: bus_price × |charge| × weights. Included in OPEX (total) here, but NOT in Capacity expansion OPEX (horizon)." />
                 <KPI label="Curtailment cost" value={fmtCurrency(econ.curt * 1e6)}
                      {...(!dispatch.hasRenewables ? noRenewables
@@ -2667,8 +2681,9 @@ export function CarrierKpiPanel({
                      hint="VOLL × unserved demand on this carrier's buses" />
                 <KPI label="CAPEX (annuitised)" value={fmtCurrency(econ.capex * 1e6)}
                      hint="Σ ((overnight × annuity, or capital_cost) + fom_cost) × p_nom_opt × years_in_horizon — annuitised CAPEX plus fixed O&M, the fixed cost the LP objective paid; same gens/storage basis as Economics Fixed cost (excludes line CAPEX)." />
-                <KPI label="LCOE" value={`${lcoe.toFixed(1)} €/MWh`}
-                     {...(dispatchTotal > 1e-6 ? {} : notApplicable(`Nothing was dispatched on ${where} buses.`))}
+                <KPI label="LCOE" value={lcoe === null ? '' : `${lcoe.toFixed(1)} €/MWh`}
+                     {...(dispatchTotal <= 1e-6 ? notApplicable(`Nothing was dispatched on ${where} buses.`)
+                       : lcoe === null ? withheld : {})}
                      hint="(CAPEX + OPEX) ÷ (gen + link gen + storage discharge) — aggregated across this carrier's component-carriers" />
               </>
             )

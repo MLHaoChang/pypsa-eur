@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): the campus Grid study no longer reads PASS for a check row that carries no limit; the switchgear row shows the bought switchgear's kA and its source beside the "with the assets" verdict.

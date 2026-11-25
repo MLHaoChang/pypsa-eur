@@ -194,7 +194,7 @@ from gridspine.ingest.campus import build_campus
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.network import MAX_NAME_LEN
 from gridspine.schema.transformer import check_tap, check_vector_group, ratio as tap_ratio
-from gridspine.static.campus_compliance import ADDED, CHECKS, Q_TOL, campus_compliance
+from gridspine.static.campus_compliance import ADDED, CHECKS, Q_TOL, campus_compliance, no_pass_without_limit
 from gridspine.static.campus_flow import (
     SizingCriteria,
     held_transformers,
@@ -1341,7 +1341,11 @@ def with_measures(as_is, compliance) -> pd.DataFrame:
     final = final[[c for c in final.columns if c not in ADDED] + [c for c in ADDED if c in final.columns]]
     for col in ("worst_period", "worst_hour", "worst_case"):
         final[f"{col}_with_measures"] = final["check"].map(after[col])
-    return final
+    # the limit the "with measures" verdict used (the bought switchgear's kA), not the as-is one
+    for col in ("limit", "limit_min", "limit_max"):
+        final[f"{col}_with_measures"] = final["check"].map(after[col])
+    return no_pass_without_limit(final, "limit_with_measures", "limit_min_with_measures", "limit_max_with_measures",
+                                 "status_with_measures", "detail_with_measures")
 
 
 def _pcc_table(study):

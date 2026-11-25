@@ -1,0 +1,3 @@
+{
+ "routes": {"POST /api/auth/change-password": {"category": "not-project-data", "reason": "identity/session, not project data: changes the signed-in user's own password; no project is resolved at all"}}
+}

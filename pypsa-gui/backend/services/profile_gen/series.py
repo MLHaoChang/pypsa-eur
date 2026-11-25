@@ -59,7 +59,7 @@ _DEFAULTS: dict[str, dict[str, Any]] = {
             "currency_year": None, "component_type": "generators"},
     "inflow": {"annual_mwh": None, "shape": None, "monthly": None},
     "cop": {"source": "air", "sink_c": 45.0, "source_c": 10.0, "eta": 0.45,
-            "cop_max": 7.0, **dict.fromkeys(_AMBIENT),
+            "cop_max": 7.0, **dict.fromkeys(_AMBIENT), "ambient_peak_day": None,
             # id -> sink °C of the band each heat pump serves (grid-to-process issue 16);
             # an id absent from it, or no map, uses `sink_c`.
             "sink_c_by_id": None},
@@ -246,6 +246,8 @@ def _cop(idx: pd.DatetimeIndex, p: Mapping[str, Any], timezone,
                 f"state all of {', '.join(_AMBIENT)} for an air source, not only "
                 f"{', '.join(stated)}")
         amb = {k: _num(p, k) for k in _AMBIENT}
+        if p["ambient_peak_day"] is not None:  # a southern site's seasonal phase
+            amb["ambient_peak_day"] = _num(p, "ambient_peak_day", 1.0, 366.0)
         t_src = ambient_c(SimpleNamespace(**amb), idx, timezone) + 273.15
         extra["ambient"] = amb
         extra["ambient_from"] = "params"

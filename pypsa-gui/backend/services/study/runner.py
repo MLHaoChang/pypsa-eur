@@ -326,7 +326,7 @@ def _read_option(n, cfg, opt, fidelity: Fidelity, currency_year, *, compiled) ->
     try:
         from services.results.asset_economics import compute_asset_economics
 
-        econ = compute_asset_economics(n, cfg, result_df=_live_result_df)
+        econ = compute_asset_economics(n, cfg, result_df=_live_result_df, price_limit=price_limit)
         if econ is None:
             raise LookupError("asset economics answered no data for this network")
         # The per-class keys `compute_asset_economics` returns (gate S4 BC-S4-5),
@@ -337,6 +337,8 @@ def _read_option(n, cfg, opt, fidelity: Fidelity, currency_year, *, compiled) ->
             for cls in _ECON_CLASSES}
         detail["asset_economics"]["capital_costs_available"] = econ.get(
             "capital_costs_available")
+        if econ.get("price_limit"):  # only when set: an LP's record is unchanged
+            detail["asset_economics"]["price_limit"] = econ["price_limit"]
         present = [a for a, df in ((packs.BATTERY_NAME, n.storage_units),
                                    (packs.PV_NAME, n.generators)) if a in df.index]
         found = {row.get("name") for cls in _ECON_CLASSES

@@ -153,6 +153,7 @@ def test_sizing_a_ranked_run_solves_every_selected_hour_and_sizes_each_transform
     assert len(sizing) == 1 and sizing.iloc[0]["group"] == "GRID_IMPORT"
     assert sizing.iloc[0]["recommended_unit_mva"] >= sizing.iloc[0]["required_unit_mva"]
     assert (run / "campus_sizing_trafo.csv").is_file() and (run / "campus_lf_bus.csv").is_file()
+    assert list(pd.read_csv(run / "campus_lf_line.csv").columns) == ["period", "hour", "case", "cable", "i_ka"]
 
 
 def test_sizing_corrects_each_selected_hour_into_the_pcc_band_and_records_the_rule(tmp_path, project):

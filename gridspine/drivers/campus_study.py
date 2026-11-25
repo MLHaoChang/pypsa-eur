@@ -187,6 +187,15 @@ from gridspine.static.campus_reactive import ibr_q_capability, ibr_q_curve, reac
 from gridspine.static.campus_compliance import OPEN_TIE_CLAUSE, campus_compliance
 from gridspine.static.campus_invest import ParallelRules, period_spans, select_assets
 from gridspine.static.campus_milp import select_assets_milp
+from gridspine.static.campus_ratings import (
+    CableAssumptions,
+    SwitchgearAssumptions,
+    assumptions_table,
+    choose_cable,
+    choose_switchgear,
+    join_flags,
+    thermal_current,
+)
 from gridspine.static.campus_sc import campus_fault_levels
 from gridspine.static.campus_taps import PCC_TAP_CONTROL  # noqa: F401  (re-exported: the backend's seam)
 from gridspine.templates.campus_assets import DEFAULT_PATH as ASSET_LIBRARY_PATH  # noqa: F401  (the backend's seam)
@@ -211,6 +220,13 @@ DEFAULT_K = 3
 LF_TRAFO_CSV = "campus_lf_trafo.csv"
 LF_BUS_CSV = "campus_lf_bus.csv"
 LF_PCC_CSV = "campus_lf_pcc.csv"
+LF_LINE_CSV = "campus_lf_line.csv"
+SWITCHGEAR_RATING_CSV = "campus_switchgear_rating.csv"
+CABLE_RATING_CSV = "campus_cable_rating.csv"
+RATING_ASSUMPTIONS_JSON = "campus_rating_assumptions.json"
+#: The cases a cable's design current is the maximum over (``rate_campus``).
+CABLE_DESIGN_BASIS = ("the study's selected hours, intact and every N-1 transformer outage; "
+                      "the study has no cable-outage case")
 SIZING_TRAFO_CSV = "campus_sizing_trafo.csv"
 REACTIVE_CSV = "campus_reactive.csv"
 SIZING_COMP_CSV = "campus_sizing_compensation.csv"
@@ -804,7 +820,7 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
     selection = selected_hours(run_dir)
     campus = load_run_campus(run_dir)
     req, p_ref, p_ref_from = _requirement(code, campus, pcc, pf)
-    flows, reactive, trafo_rows, bus_rows, pcc_rows, q_rows = {}, {}, [], [], [], []
+    flows, reactive, trafo_rows, bus_rows, pcc_rows, q_rows, line_rows = {}, {}, [], [], [], [], []
     for period, hour in selection[["period", "hour"]].itertuples(index=False):
         period, hour = int(period), int(hour)
         rows = hourly[(hourly["period"] == period) & (hourly["hour"] == hour)]
@@ -816,6 +832,7 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
                              "losses_mw": f.losses_mw})
             trafo_rows += [{**key, **r} for r in f.trafo.to_dict("records")]
             bus_rows += [{**key, **r} for r in f.bus.to_dict("records")]
+            line_rows += [{**key, "cable": r["cable"], "i_ka": r["i_ka"]} for r in f.line.to_dict("records")]
         r = reactive_need(campus, rows, req)
         reactive[(period, hour)] = r
         q_rows.append({"period": period, "hour": hour, "converged": r.converged, "q0_mvar": r.q0_mvar,
@@ -835,6 +852,8 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
     _write_text_atomic(run_dir / LF_TRAFO_CSV, pd.DataFrame(trafo_rows).to_csv(index=False))
     _write_text_atomic(run_dir / LF_BUS_CSV, pd.DataFrame(bus_rows).to_csv(index=False))
     _write_text_atomic(run_dir / LF_PCC_CSV, pd.DataFrame(pcc_rows).to_csv(index=False))
+    _write_text_atomic(run_dir / LF_LINE_CSV,
+                       pd.DataFrame(line_rows, columns=["period", "hour", "case", "cable", "i_ka"]).to_csv(index=False))
     _write_text_atomic(run_dir / SIZING_TRAFO_CSV, sizing.to_csv(index=False))
     _write_text_atomic(run_dir / REACTIVE_CSV, pd.DataFrame(q_rows).to_csv(index=False))
     _write_text_atomic(run_dir / SIZING_COMP_CSV, comp.to_csv(index=False))
@@ -866,6 +885,66 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
     return {"transformers": sizing, "compensation": comp, "requirement": requirement,
             "short_circuit": short_circuit, "compliance": compliance, "ibr_capability": ibr,
             "ibr_q_curve": curve, "reported_requirements": reported}
+
+
+def rate_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriteria(),
+                switchgear: SwitchgearAssumptions = SwitchgearAssumptions(),
+                cables: CableAssumptions = CableAssumptions()) -> dict:
+    """Choose a switchgear rating per bus and a cable per run from a sized
+    run (DC review 09, ``static/campus_ratings``): reads the short-circuit
+    table and the per-case cable currents ``size_campus`` wrote, writes
+    ``campus_switchgear_rating.csv``, ``campus_cable_rating.csv`` and the
+    assumptions, and returns ``{"switchgear", "cables", "assumptions"}``.
+    The campus file is not changed: a declared rating stays, flagged when
+    below the chosen one. ``library`` is a path, or None for the shipped
+    library; ``criteria.margin`` is the same margin the transformers get."""
+    run_dir = Path(run_dir)
+    lib = load_asset_library(library)
+    campus = load_run_campus(run_dir)
+    net = campus.net
+    f_hz = int(round(float(net.f_hz)))
+    short_circuit = pd.read_csv(_require(run_dir, SHORT_CIRCUIT_CSV))
+    sg = choose_switchgear(short_circuit, lib, f_hz, criteria.margin, switchgear)
+    lines = pd.read_csv(_require(run_dir, LF_LINE_CSV))
+    ith: dict[str, float] = {}   # per bus, the largest Ith over the clearing time; a bus with none is absent
+    for r in short_circuit.itertuples(index=False):
+        ikss, ip = pd.to_numeric(pd.Series([r.ikss_max_ka, r.ip_max_ka]), errors="coerce")
+        if not (math.isfinite(ikss) and math.isfinite(ip)):
+            continue                                # not evaluated there: never 0, never nan-poisoned
+        x = thermal_current(float(ikss), float(ip), f_hz, cables.t_clear_s, switchgear.n)
+        ith[str(r.bus)] = max(x, ith.get(str(r.bus), x))
+    names = net.bus["name"].astype(str)
+    rows = []
+    for i, ln in net.line.iterrows():
+        name = str(ln["name"])
+        fb, tb = names.at[int(ln.from_bus)], names.at[int(ln.to_bus)]
+        mine = lines[lines["cable"].astype(str) == name]
+        row = {"cable": name, "from_bus": fb, "to_bus": tb, "vn_kv": float(net.bus.at[int(ln.from_bus), "vn_kv"]),
+               "length_km": float(ln.length_km), "declared_runs": int(ln.parallel),
+               "declared_i_ka": float(ln.max_i_ka) * int(ln.parallel), "design_basis": CABLE_DESIGN_BASIS}
+        if mine.empty or mine["i_ka"].isna().all():
+            rows.append({**row, "design_i_ka": math.nan, "design_case": None, "ith_ka": math.nan, "chosen_id": None,
+                         "governing": "no load flow reached this cable", "flag": "not_rated"})
+            continue
+        top = mine.loc[mine["i_ka"].idxmax()]
+        # the larger end governs; either end unknown leaves the withstand not evaluated
+        ith_ka = max(ith[fb], ith[tb]) if fb in ith and tb in ith else math.nan
+        c = choose_cable(lib, vn_kv=row["vn_kv"], length_km=row["length_km"], i_ka=float(top.i_ka), ith_ka=ith_ka,
+                         margin=criteria.margin, a=cables)
+        flag = ("no_library_cable" if c["chosen_id"] is None
+                else join_flags("declared_below_chosen" if row["declared_i_ka"] < c["chosen_i_ka"] - 1e-12 else None,
+                                None if c["withstand_evaluated"] else "withstand_not_evaluated"))
+        rows.append({**row, "design_i_ka": float(top.i_ka),
+                     "design_case": f"{top.case}, period {int(top.period)} hour {int(top.hour)}",
+                     "ith_ka": ith_ka, **c, "flag": flag})
+    cb = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["cable", "from_bus", "to_bus", "vn_kv", "chosen_id"])
+    assumptions = assumptions_table(switchgear, cables) + [
+        {"applies_to": "cables", "name": "design_cases", "value": CABLE_DESIGN_BASIS, "unit": "", "source": "computed"},
+        {"applies_to": "both", "name": "margin", "value": criteria.margin, "unit": "", "source": "declared"}]
+    _write_text_atomic(run_dir / SWITCHGEAR_RATING_CSV, sg.to_csv(index=False))
+    _write_text_atomic(run_dir / CABLE_RATING_CSV, cb.to_csv(index=False))
+    _write_text_atomic(run_dir / RATING_ASSUMPTIONS_JSON, json.dumps(assumptions, indent=2))
+    return {"switchgear": sg, "cables": cb, "assumptions": assumptions}
 
 
 def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriteria(), profile: str = DEFAULT_PROFILE,

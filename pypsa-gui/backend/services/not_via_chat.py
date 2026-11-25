@@ -70,8 +70,8 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'id': 'sign_in_and_password',
         'title': 'Sign-in and password changes',
         'disposition': 'out of chat',
-        'reason': 'Sign-in and password changes handle authentication secrets and must be completed on the Sign-in page, outside chat.',
-        'page': 'Sign-in page',
+        'reason': 'Sign-in and password changes handle authentication secrets and must be completed on the Sign-in page, or on the Account page, outside chat.',
+        'page': 'Sign-in page; Account page (/account)',
         'panel': None,
         'keywords': frozenset({
             'login',
@@ -82,7 +82,9 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
             'signin',
         }),
         'routes': frozenset({
+            ('GET', '/api/auth/account'),
             ('GET', '/api/auth/me'),
+            ('POST', '/api/auth/change-password'),
             ('POST', '/api/auth/forgot-password'),
             ('POST', '/api/auth/login'),
             ('POST', '/api/auth/logout'),

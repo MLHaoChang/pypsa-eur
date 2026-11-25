@@ -167,6 +167,29 @@ export interface InvestedComplianceRow extends ComplianceRow {
   worst_period_with_measures?: number | null
   worst_hour_with_measures?: number | null
   worst_case_with_measures?: string | null
+  /** The limit the "with the assets" verdict used (the bought switchgear's kA);
+   *  absent in a run from before it was kept. */
+  limit_with_measures?: number | null
+  limit_min_with_measures?: number | null
+  limit_max_with_measures?: number | null
+}
+
+export interface PsseBundle {
+  name: string
+  period: number | null
+  hour: number | null
+  files: { name: string; size: number }[]
+  size: number
+}
+
+/** `GET /psse`: the latest campus run's PSS/E bundles. `skipped` and `error` say why a run wrote none. */
+export interface PsseBundles {
+  has_run: boolean
+  stale: boolean
+  run_at: string | null
+  bundles: PsseBundle[]
+  skipped: string | null
+  error: string | null
 }
 
 export interface HistoryRow { iteration: number; need: string; from: string; to: string; check: string; detail: string }
@@ -1131,6 +1154,15 @@ export const campusApi = {
     client.post<DcArchitectureCompare>(`${base(project)}/dc-architecture/compare`,
       energyPricePerMwh == null ? {} : { energy_price_per_mwh: energyPricePerMwh },
       { ...quiet, timeout: DC_BACKUP_ASSESS_TIMEOUT_MS }).then(r => r.data),
+
+  /** The latest run's PSS/E hand-off bundles (grid-compliance 23). */
+  psse: (project: string) =>
+    client.get<PsseBundles>(`${base(project)}/psse`, quiet).then(r => r.data),
+
+  /** One bundle as a zip blob. */
+  psseZip: (project: string, bundle: string) =>
+    client.get<Blob>(`${base(project)}/psse/${encodeURIComponent(bundle)}/download`, { responseType: 'blob', ...quiet })
+      .then(r => ({ blob: r.data, stale: r.headers['x-run-stale'] === 'true' })),
 
   /** The island sidecar as written and the last island study (null each when absent). */
   island: (project: string) =>

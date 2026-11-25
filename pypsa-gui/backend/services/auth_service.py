@@ -110,15 +110,22 @@ def revoke_session(db: DBSession, raw_token: str) -> None:
     db.commit()
 
 
-def revoke_all_sessions_for_user(db: DBSession, user_id: uuid.UUID) -> None:
+def revoke_all_sessions_for_user(
+    db: DBSession,
+    user_id: uuid.UUID,
+    *,
+    keep_session_id: uuid.UUID | None = None,
+    commit: bool = True,
+) -> None:
+    """Revoke the user's live sessions, except `keep_session_id`. `commit=False` leaves the commit to the caller."""
     sessions = db.scalars(select(Session).where(Session.user_id == user_id)).all()
     revoked_at = _now_utc()
     changed = False
     for session in sessions:
-        if session.revoked_at is None:
+        if session.revoked_at is None and session.id != keep_session_id:
             session.revoked_at = revoked_at
             changed = True
-    if changed:
+    if changed and commit:
         db.commit()
 
 

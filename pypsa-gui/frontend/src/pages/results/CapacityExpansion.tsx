@@ -23,6 +23,7 @@ import { canonicaliseCarrier, type ComponentClass } from './carrierAliases'
 import NotSolved from './NotSolved'
 import { retiredSize } from './retired'
 import { totalCostWords } from './headlineWords'
+import { withheldCell } from './sectionWords'
 
 // ── Capacity Expansion tab ────────────────────────────────────────────────────
 // Cost summary (KPIs + CAPEX-by-class chart) sits at the top. Below it, one
@@ -920,13 +921,16 @@ export default function CapacityExpansion() {
   const noCurtailmentCost = generatorsLoaded && cost.curtailment_cost === 0
     && !generators.some(g => (attr<number>(g, 'curtailment_cost') ?? 0) > 0)
 
-  const storageChargeCostEur = (() => {
+  // null when any carrier's charge cost is withheld (an integer solve has no
+  // marginal prices) — never a partial sum read as the whole.
+  const storageChargeCostEur = ((): number | null => {
     const carriers = econByCarrier?.by_carrier
     if (!carriers) return 0
     const periodKey = filter.selectedPeriod != null ? String(filter.selectedPeriod) : null
     let sumMeur = 0
     for (const e of Object.values(carriers)) {
       const bucket = e.storage_charge_cost_meur
+      if (bucket === null) return null
       if (!bucket) continue
       if (periodKey && bucket.by_period && periodKey in bucket.by_period) {
         sumMeur += bucket.by_period[periodKey] ?? 0
@@ -1031,8 +1035,12 @@ export default function CapacityExpansion() {
               investment slices that are NOT folded into LP OPEX above. */}
           <KPI
             label="Storage charge cost"
-            value={Math.abs(storageChargeCostEur) > 1e-3 ? fmtCurrency(storageChargeCostEur) : fmtCurrency(0)}
-            {...(noStorage ? NO_STORAGE : Math.abs(storageChargeCostEur) > 1e-3 ? {} : { state: 'zero' as const })}
+            value={storageChargeCostEur === null ? ''
+              : Math.abs(storageChargeCostEur) > 1e-3 ? fmtCurrency(storageChargeCostEur) : fmtCurrency(0)}
+            {...(noStorage ? NO_STORAGE
+              : storageChargeCostEur === null
+                ? { state: 'unavailable' as const, reason: withheldCell(econByCarrier?.unavailable_reason) }
+              : Math.abs(storageChargeCostEur) > 1e-3 ? {} : { state: 'zero' as const })}
             hint="Market accounting: bus_price × |storage charge| × weights (same as Dispatch Storage charge cost). Not part of LP variable OPEX — adding it to OPEX (horizon) recovers Dispatch OPEX (total) when gen cost is the only other term." />
           <KPI
             label="Curtailment cost"

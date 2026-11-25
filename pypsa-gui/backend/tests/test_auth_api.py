@@ -318,3 +318,179 @@ def test_reset_password_consumes_token_and_revokes_existing_sessions(
     assert stored_token.used_at is not None
     assert sessions
     assert all(session.revoked_at is not None for session in sessions)
+
+
+def _login(client, user, password="secret-pass"):
+    response = client.post("/api/auth/login", json={"email": user.email, "password": password})
+    assert response.status_code == 200
+    client.headers["X-CSRF-Token"] = response.json()["csrf_token"]
+    return response
+
+
+def test_account_lists_workspace_with_role(auth_client, auth_session_local) -> None:
+    organization = _create_org(auth_session_local, name="Northwind")
+    user = _create_user(auth_session_local, password="secret-pass")
+    _add_membership(auth_session_local, user_id=user.id, org_id=organization.id, role="member")
+    _login(auth_client, user)
+
+    body = auth_client.get("/api/auth/account").json()
+
+    assert body["email"] == user.email
+    assert body["workspaces"] == [
+        {"org_id": str(organization.id), "name": "Northwind", "role": "member"}
+    ]
+
+
+def test_account_requires_auth(auth_client) -> None:
+    assert auth_client.get("/api/auth/account").status_code == 401
+
+
+def test_change_password_ends_other_sessions_and_swaps_credentials(
+    auth_client, auth_session_local, user_with_password
+) -> None:
+    _login(auth_client, user_with_password)
+    with TestClient(main.app) as other:
+        _login(other, user_with_password)
+        assert other.get("/api/auth/me").status_code == 200
+
+        response = auth_client.post(
+            "/api/auth/change-password",
+            json={"current_password": "secret-pass", "new_password": "brand-new-pass"},
+        )
+
+        assert response.status_code == 200
+        assert other.get("/api/auth/me").status_code == 401
+    assert auth_client.get("/api/auth/me").status_code == 200
+    with TestClient(main.app) as fresh:
+        old = fresh.post(
+            "/api/auth/login",
+            json={"email": user_with_password.email, "password": "secret-pass"},
+        )
+        new = fresh.post(
+            "/api/auth/login",
+            json={"email": user_with_password.email, "password": "brand-new-pass"},
+        )
+    assert old.status_code == 401
+    assert new.status_code == 200
+
+
+def test_change_password_rejects_wrong_current_password(
+    auth_client, auth_session_local, user_with_password
+) -> None:
+    _login(auth_client, user_with_password)
+
+    response = auth_client.post(
+        "/api/auth/change-password",
+        json={"current_password": "not-it", "new_password": "brand-new-pass"},
+    )
+
+    assert response.status_code == 400
+    with auth_session_local() as db:
+        stored = db.get(User, user_with_password.id)
+        assert verify_password("secret-pass", stored.password_hash)
+
+
+def test_change_password_rejects_weak_new_password(
+    auth_client, auth_session_local, user_with_password
+) -> None:
+    _login(auth_client, user_with_password)
+
+    response = auth_client.post(
+        "/api/auth/change-password",
+        json={"current_password": "secret-pass", "new_password": "short"},
+    )
+
+    assert response.status_code == 422
+    with auth_session_local() as db:
+        stored = db.get(User, user_with_password.id)
+        assert verify_password("secret-pass", stored.password_hash)
+
+
+def test_account_leaves_out_orgs_the_user_is_not_in(auth_client, auth_session_local) -> None:
+    mine = _create_org(auth_session_local, name="Mine")
+    _create_org(auth_session_local, name="Someone else's")
+    user = _create_user(auth_session_local, password="secret-pass")
+    _add_membership(auth_session_local, user_id=user.id, org_id=mine.id, role="admin")
+    _login(auth_client, user)
+
+    names = [w["name"] for w in auth_client.get("/api/auth/account").json()["workspaces"]]
+
+    assert names == ["Mine"]
+
+
+def test_account_has_no_workspaces_without_membership(auth_client, user_with_password) -> None:
+    _login(auth_client, user_with_password)
+
+    assert auth_client.get("/api/auth/account").json()["workspaces"] == []
+
+
+def _wrong_change(client):
+    return client.post(
+        "/api/auth/change-password",
+        json={"current_password": "not-it", "new_password": "brand-new-pass"},
+    )
+
+
+def test_change_password_is_throttled_after_repeated_wrong_current_passwords(
+    auth_client, auth_session_local, user_with_password
+) -> None:
+    _login(auth_client, user_with_password)
+    limit = get_settings().login_max_attempts
+    for _ in range(limit):
+        assert _wrong_change(auth_client).status_code == 400
+
+    blocked = _wrong_change(auth_client)
+    assert blocked.status_code == 429
+    assert int(blocked.headers["Retry-After"]) > 0
+    # Once blocked, even the right current password is refused and nothing changes.
+    right = auth_client.post(
+        "/api/auth/change-password",
+        json={"current_password": "secret-pass", "new_password": "brand-new-pass"},
+    )
+    assert right.status_code == 429
+    with auth_session_local() as db:
+        assert verify_password("secret-pass", db.get(User, user_with_password.id).password_hash)
+
+
+def test_change_password_success_clears_the_failure_counter(
+    auth_client, user_with_password
+) -> None:
+    _login(auth_client, user_with_password)
+    limit = get_settings().login_max_attempts
+    for _ in range(limit - 1):
+        assert _wrong_change(auth_client).status_code == 400
+    ok = auth_client.post(
+        "/api/auth/change-password",
+        json={"current_password": "secret-pass", "new_password": "brand-new-pass"},
+    )
+    assert ok.status_code == 200
+
+    # The counter was cleared: a full allowance of wrong tries is available again.
+    for _ in range(limit - 1):
+        assert auth_client.post(
+            "/api/auth/change-password",
+            json={"current_password": "not-it", "new_password": "brand-new-pass"},
+        ).status_code == 400
+
+
+def test_change_password_refuses_with_401_when_the_user_vanishes_mid_request(
+    auth_client, auth_session_local, user_with_password, monkeypatch
+) -> None:
+    import routers.auth as auth_router
+
+    _login(auth_client, user_with_password)
+
+    def verify_then_delete_user(_password, _hash):
+        with auth_session_local() as other:
+            other.delete(other.get(User, user_with_password.id))
+            other.commit()
+        return True
+
+    monkeypatch.setattr(auth_router, "verify_password", verify_then_delete_user)
+
+    response = auth_client.post(
+        "/api/auth/change-password",
+        json={"current_password": "secret-pass", "new_password": "brand-new-pass"},
+    )
+
+    assert response.status_code == 401
