@@ -152,6 +152,8 @@ def test_a_binding_co2_point_matches_the_hand_solution():
     pt = p["point"]
     assert pt["capacities"]["generators:gas"] == pytest.approx(50.0, abs=1e-3)
     assert pt["capacities"]["generators:clean"] == pytest.approx(50.0, abs=1e-3)
+    # every size carries its unit, read off its bus (UX 30, DC 01 PR3)
+    assert pt["capacity_units"] == {k: "MW" for k in pt["capacities"]}
     assert pt["capex_eur_per_yr"] == pytest.approx(17_500_000.0, rel=1e-6)
     assert pt["opex_eur_per_yr"] == pytest.approx(8_760_000.0, rel=1e-6)
     assert pt["total_eur_per_yr"] == pytest.approx(26_260_000.0, rel=1e-6)
@@ -717,6 +719,56 @@ def test_no_solved_point_is_said_plainly():
     )
 
 
+def test_each_point_size_carries_its_own_bus_unit():
+    # GK A (38): a Store on a tonne bus reads t, a Line MVA, a Generator MW,
+    # on the point itself, not only in capacity_units().
+    n = _hand()
+    n.add("Bus", "ore", carrier="ore", unit="t")
+    n.add(
+        "Store",
+        "pile",
+        bus="ore",
+        e_nom_extendable=True,
+        e_nom_max=1000.0,
+        capital_cost=1.0,
+    )
+    n.add("Bus", "b2", carrier="AC")
+    n.add("Load", "l2", bus="b2", p_set=10.0)
+    n.add(
+        "Line",
+        "l1",
+        bus0="b",
+        bus1="b2",
+        x=0.1,
+        r=0.01,
+        s_nom_extendable=True,
+        s_nom_max=1000.0,
+        capital_cost=1.0,
+    )
+    res = _run(n, lever="ens_cap", levels=[100.0])
+    assert res["points"][0]["status"] == "ok"
+    pt = res["points"][0]["point"]
+    units = pt["capacity_units"]
+    assert units["stores:pile"] == "t"
+    assert units["lines:l1"] == "MVA"
+    assert units["generators:gas"] == "MW"
+    assert set(units) == set(pt["capacities"])
+
+
+def test_the_result_carries_the_case_currency_and_says_when_it_is_assumed():
+    res = _run(
+        _hand(), cfg=_cfg(finance={"currency": "GBP"}), lever="ens_cap", levels=[100.0]
+    )
+    assert (res["currency"], res["currency_assumed"]) == ("GBP", False)
+    # the ENS sentence labels the value of lost load in that currency
+    assert "5,000 £/MWh" in res["degenerate"]["axes"]["ens_cap"]["text"]
+    res = _run(
+        _hand(), cfg=_cfg(finance={"currency": "EURO"}), lever="ens_cap", levels=[100.0]
+    )
+    assert (res["currency"], res["currency_assumed"]) == ("EUR", True)
+    assert "5,000 €/MWh" in res["degenerate"]["axes"]["ens_cap"]["text"]
+
+
 # --------------------------------------------------------------------------
 # Degenerate, said plainly (F6)
 # --------------------------------------------------------------------------
@@ -727,8 +779,8 @@ def test_an_ens_cap_that_never_binds_says_so_and_names_the_levers():
     d = res["degenerate"]
     assert set(d["axes"]) == {"ens_cap"}
     text = d["axes"]["ens_cap"]["text"]
-    assert "never bound at any of 2 points" in text
-    assert "no outages" in text and "VOLL 5,000 EUR/MWh" in text
+    assert "never limited the design at any of 2 points" in text
+    assert "no outages" in text and "value of lost load of 5,000 €/MWh" in text
     assert d["axes"]["ens_cap"]["levers"] == [
         "reserve_margin",
         "lower_voll",
@@ -993,9 +1045,9 @@ def test_an_unread_binding_is_said_as_unknown_not_never_bound():
         pts, "reserve_margin", voll=0.0, outage_model=False, reference_co2=None
     )
     assert "Whether the reserve margin bound" in rm["axes"]["reserve_margin"]["text"]
-    assert "never bound" not in d["axes"]["ens_cap"]["text"]
+    assert "never limited" not in d["axes"]["ens_cap"]["text"]
     assert d["axes"]["co2"]["unknown"] is True
-    assert "never bound" not in d["axes"]["co2"]["text"]
+    assert "never reached" not in d["axes"]["co2"]["text"]
 
 
 def test_a_known_binding_beats_an_unread_one():
@@ -1314,7 +1366,10 @@ def test_the_ens_text_with_an_outage_model_does_not_blame_missing_outages():
         pts, "ens_cap", voll=5000.0, outage_model=True, reference_co2=None
     )["axes"]["ens_cap"]["text"]
     assert "no outages" not in text
-    assert "never bound at any of 2 points: at VOLL 5,000 EUR/MWh" in text
+    assert (
+        "never limited the design at any of 2 points: at a value of lost load of 5,000 €/MWh"
+        in text
+    )
 
 
 def test_with_no_solved_point_the_basis_is_lp_ens(monkeypatch):

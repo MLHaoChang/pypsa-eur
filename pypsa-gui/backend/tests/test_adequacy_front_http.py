@@ -269,6 +269,9 @@ def test_apply_fixes_the_point_in_one_undo_step_and_one_bump(
         assert not bool(g.at[name, "p_nom_extendable"])
     assert g.at["gas", "p_nom"] == pytest.approx(50.0, abs=1e-3)
     assert session_ctx(client).network.generators_t.p.empty
+    # The chosen point, as both results surfaces read it (PR3).
+    applied = client.get(URL).json()["applied"]
+    assert applied["index"] == i and applied["network_revision"] == rev + 1
 
     # Applied is an edit: the record is stale now, so a second apply refuses.
     rev2 = _revision(session_ctx, client)
