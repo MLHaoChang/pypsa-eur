@@ -68,6 +68,7 @@ def test_mismatch_boundary_is_literal_ten_percent():
         dict(utilisation=0),
         dict(utilisation=1.01),
         dict(utilisation=float("inf")),
+        dict(utilisation=float("nan")),
         dict(accelerator_counts=[0]),
         dict(accelerator_counts=[-5]),
         dict(accelerator_counts=[float("inf")]),
@@ -90,3 +91,17 @@ def test_a_phase_beyond_the_given_counts_has_no_derived_figure():
     rows = compute_report(spec(), [12.0, 24.0, 40.0])
     assert rows[2]["compute_it_mw"] is None and rows[2]["warning"] is None
     assert rows[2]["it_mw_used"] == 40.0
+
+
+def test_typed_wins_when_the_derived_figure_is_higher():
+    rows = compute_report(spec(), [10.0, 20.0])  # derived 12.0 and 24.0
+    assert [r["it_mw_used"] for r in rows] == [10.0, 20.0]
+    assert (
+        rows[0]["compute_it_mw"] == pytest.approx(12.0)
+        and rows[0]["warning"] is not None
+    )
+
+
+def test_just_below_ten_percent_has_no_note():
+    s = ComputeSpec(kw_per_accelerator=1.0, utilisation=1.0, accelerator_counts=[10999])
+    assert compute_report(s, [10.0])[0]["warning"] is None  # 9.99 % over typed

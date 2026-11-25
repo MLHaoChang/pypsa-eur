@@ -2,4 +2,4 @@
 
 * Feat(pypsa-gui): An optional compute block (accelerators, kW per accelerator, utilisation) shows the IT MW it implies beside the typed IT MW. The typed value always wins and the block changes nothing in the model.
 
-* Fix(pypsa-gui): The never-read `waste_heat_export` input is removed. An old spec that sets it still loads and its ledger says it was ignored; a spec's dump no longer carries that key.
+* Fix(pypsa-gui): The `waste_heat_export` input is not modelled and nothing reads it. It stays accepted and stored, so a spec dumps as before, and the ledger says it is ignored when it is set.

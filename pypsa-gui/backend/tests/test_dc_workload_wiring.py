@@ -70,15 +70,12 @@ def test_ai_training_hourly_series_is_masters_literal_values(it):
     assert got == pytest.approx(MASTER_FACILITY[it], abs=1e-8)
 
 
-def test_master_era_spec_dump_is_master_minus_the_dead_key():
+def test_master_era_spec_dumps_and_hashes_to_masters_literal():
     d = spec().model_dump(mode="json")
+    assert d["waste_heat_export"] is False  # kept, as master dumped it
+    assert "workload_mix" not in d and "compute" not in d
     assert (
-        "waste_heat_export" not in d and "workload_mix" not in d and "compute" not in d
-    )
-    assert "ignored_inputs" not in d
-    with_key = {**d, "waste_heat_export": False}
-    assert (
-        hashlib.sha256(json.dumps(with_key, sort_keys=True).encode()).hexdigest()
+        hashlib.sha256(json.dumps(d, sort_keys=True).encode()).hexdigest()
         == MASTER_DUMP_SHA
     )
 
@@ -95,16 +92,26 @@ def test_kinds_change_the_series_ai_training_does_not():
         assert not np.allclose(P.utilisation(spec(utilisation=kind), IDX), base)
 
 
-def test_waste_heat_export_true_is_dropped_and_reported():
+def test_waste_heat_export_true_is_stored_and_ledgered_as_not_modelled():
     s = spec(waste_heat_export=True)
-    assert s.model_dump(mode="json") == spec().model_dump(
-        mode="json"
-    )  # hash cannot move
+    assert (
+        s.model_dump(mode="json")["waste_heat_export"] is True
+    )  # stored, as master did
     rows = P.ledger(s, None)
     assert any("waste heat export is not modelled" in r["item"] for r in rows)
+
+
+def test_waste_heat_export_false_says_nothing():
     assert not any(
         "waste heat" in r["item"] for r in P.ledger(spec(waste_heat_export=False), None)
     )
+    assert not any("waste heat" in r["item"] for r in P.ledger(spec(), None))
+
+
+@pytest.mark.parametrize("junk", ["maybe", [1], {"a": 1}, 2])
+def test_waste_heat_export_junk_is_refused_by_name(junk):
+    with pytest.raises(Exception, match="waste_heat_export"):
+        spec(waste_heat_export=junk)
 
 
 def test_compute_block_counts_must_match_phases():
@@ -212,7 +219,37 @@ def test_mismatch_threshold_is_the_same_in_form_and_engine():
     )
 
 
-def test_a_client_cannot_write_ignored_inputs_and_false_says_nothing():
-    assert spec(ignored_inputs=["waste_heat_export"]).ignored_inputs == []
-    assert spec(waste_heat_export=False).ignored_inputs == []
-    assert spec(waste_heat_export=True).ignored_inputs == ["waste_heat_export"]
+def test_more_counts_than_phases_is_refused():
+    comp = {
+        "kw_per_accelerator": 1.5,
+        "utilisation": 0.8,
+        "accelerator_counts": [1000, 2000, 3000],
+    }
+    with pytest.raises(Exception, match="one count per phase"):
+        spec(compute=comp)
+
+
+@pytest.mark.parametrize("tid", ["eh_datacenter", "eh_datacenter_staged"])
+def test_compute_block_leaves_the_investment_case_digest_unchanged(tmp_path, tid):
+    from services.finance.investment_case_runner import assumptions_digest
+
+    n_ph = len(T.dc_load_spec(tid, {}).phases)
+    comp = {
+        "kw_per_accelerator": 1.5,
+        "utilisation": 0.8,
+        "accelerator_counts": [10000.0] * n_ph,
+    }
+
+    def digest(raw, where):
+        T.write_sidecars(tmp_path / where, tid, load_spec=T.dc_load_spec(tid, raw))
+        cfg = json.loads((tmp_path / where / T.SOLVER_FILE).read_text())
+        rest = {k: v for k, v in cfg.items() if k not in ("finance", "commercial")}
+        return assumptions_digest(
+            finance=cfg.get("finance"),
+            commercial=cfg.get("commercial"),
+            dispatch=None,
+            packs={},
+            solver=rest,
+        )[0]
+
+    assert digest({"compute": comp}, "a") == digest({}, "b")

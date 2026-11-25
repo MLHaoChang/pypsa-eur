@@ -75,8 +75,8 @@ def test_a_field_nothing_reads_is_caught():
     assert not _read("zz_no_such_field_zz", sources)
 
 
-def test_waste_heat_export_is_not_a_field():
-    assert "waste_heat_export" not in F.DataCentreLoadSpec.model_fields
+def test_waste_heat_export_is_read_by_the_ledger():
+    assert _read("waste_heat_export", _sources())
 
 
 def test_allowlist_entries_name_real_fields_and_carry_a_reason():

@@ -63,7 +63,7 @@ SOURCES: dict[str, str] = {
                      "have none) and a constant share for flat; no measured fleet data"),
     "compute": ("as entered; IT MW = accelerators × kW per accelerator (host share included) × "
                 "utilisation, reported beside the typed IT MW, never read by a solve"),
-    "ignored_inputs": "ignored; the input is not modelled",
+    "waste_heat_export": "as entered; accepted and stored, read by no solve (waste heat export is not modelled)",
     "idle_hours_per_day": "assumed; illustrative daily restart/maintenance window",
     "pue": "assumed; PUE at or below the design temperature, slope above it",
     "architecture": ("assumed; conversion-loss chain from the defaults pack's power-architecture "
@@ -298,8 +298,8 @@ def ledger(spec: DataCentreLoadSpec, timezone: str | None) -> list[dict]:
             for p in spec.phases), "rack_kw"),
         *([("workload shape", _mix_text(spec), "workload_mix")] if spec.utilisation != "ai_training" else []),
         *([("compute block", _compute_text(spec), "compute")] if spec.compute else []),
-        *[(f"ignored: {name.replace('_', ' ')} is not modelled", "not modelled", "ignored_inputs")
-          for name in spec.ignored_inputs],
+        *([("ignored: waste heat export is not modelled", "not modelled", "waste_heat_export")]
+          if spec.waste_heat_export else []),
         *([("project start", spec.project_start.isoformat(), "project_start")]
           if spec.project_start else []),
         *([("grid connection date", spec.connection_date.isoformat(), "connection_date")]
