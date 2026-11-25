@@ -191,6 +191,45 @@ def test_a_co2_limit_goal_in_the_config_leaves_the_fronts_cap_the_only_one():
     assert n.global_constraints.empty
 
 
+def test_a_front_point_with_the_co2_goal_on_solves_one_cap_row_per_period(monkeypatch):
+    # DC review 02 C6, the PR that lands second adds it (#1989 is on master):
+    # a DC 01 front per-point solve with the CO2 limit goal set carries exactly
+    # one CO2 cap row per period, and it is the front's own `co2_cap`. The goal
+    # is dropped from each point's config (`front._cfg_for`), so the goal adds
+    # no `co2_cap_<p>` row; the front's swept cap wins.
+    from services.solver import co2_cap
+
+    seen = []
+    real_apply = co2_cap.apply
+
+    def spy(n, cfg, phase, captured):
+        gc = n.global_constraints
+        rows = gc[(gc.type == "primary_energy") & (gc.carrier_attribute == "co2_emissions")]
+        seen.append((cfg.co2_limit_t_per_yr, sorted(rows.index)))
+        undo = real_apply(n, cfg, phase, captured)
+        gc = n.global_constraints
+        after = gc[(gc.type == "primary_energy") & (gc.carrier_attribute == "co2_emissions")]
+        seen[-1] += (sorted(after.index),)
+        return undo
+
+    monkeypatch.setattr(co2_cap, "apply", spy)
+    res = _run(
+        _hand(),
+        cfg=_cfg(co2_limit_t_per_yr=1.0),
+        lever="ens_cap",
+        levels=[100.0],
+        co2_caps_t=[219_000.0],
+    )
+    assert res["points"][0]["status"] == "ok", res["points"]
+    assert seen, "the goal's apply never ran on a front point"
+    # Two solves: the capped point, and the front's uncapped reference solve.
+    # In neither does the goal add a row; the capped one carries the front's.
+    assert [limit for limit, _, _ in seen] == [None] * len(seen)
+    assert all(before == after for _, before, after in seen)
+    assert sorted(after for _, _, after in seen) == [[], [fr.CO2_CAP_NAME]]
+    assert res["points"][0]["point"]["co2_t_per_yr"] == pytest.approx(219_000.0, rel=1e-6)
+
+
 def test_a_cap_above_the_emissions_has_no_shadow_price():
     res = _run(_hand(), lever="ens_cap", levels=[100.0], co2_caps_t=[500_000.0])
     pt = res["points"][0]["point"]
