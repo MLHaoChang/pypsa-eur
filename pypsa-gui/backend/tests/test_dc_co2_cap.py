@@ -225,14 +225,19 @@ def test_the_dual_is_the_rebuilt_rows_not_the_flat_one():
     assert cap["binding"] is False and cap["cost_eur_per_t"] is None
 
 
-@pytest.mark.parametrize("scale", [1.0, 1e-3])
+@pytest.mark.parametrize(
+    "scale",
+    [
+        {"user_objective_scale": 1.0},
+        {"user_objective_scale": 1e-3},
+        {"auto_objective_scale": True},
+    ],
+)
 def test_a_binding_cap_prices_the_marginal_switch_at_any_objective_scale(scale):
     # Cap 6 t of the grid's 10: 8 MWh must move to clean at +90 EUR/MWh and
     # each MWh saves 0.5 t, so a tonne costs 180 EUR.
     n = _hand()
-    status, _, sink, _ = _solve(
-        n, co2_limit_t_per_yr=6.0 / TO_ROW, user_objective_scale=scale
-    )
+    status, _, sink, _ = _solve(n, co2_limit_t_per_yr=6.0 / TO_ROW, **scale)
     assert status == "ok"
     assert n.generators_t.p["clean"].sum() == pytest.approx(8.0, rel=1e-6)
     (cap,) = co2_cap.cap_entries(sink["last_co2_cap"], 6.0, {})
@@ -578,6 +583,7 @@ def test_an_extra_lp_that_cannot_run_does_not_blame_the_network():
     }
     ref = co2_cap.unreachable(n, goal, {}, "highs")
     assert ref["without_limit"] == "not_found" and ref["least_t_per_yr"] is None
+    assert ref["extra_solves"] == 0
     assert ref["message"] == (
         "CO₂ limit: no design meets 1 t CO₂/yr. The least "
         "emissions reachable could not be found."
@@ -745,9 +751,15 @@ def test_the_limit_reads_any_config_as_a_finite_non_negative_number():
     from types import SimpleNamespace as NS
 
     assert co2_cap.target_of(NS(co2_limit_t_per_yr="1000")) == 1000.0
-    for bad in (-1.0, float("nan"), float("inf"), "abc", None):
-        assert co2_cap.target_of(NS(co2_limit_t_per_yr=bad)) is None
+    assert co2_cap.target_of(NS(co2_limit_t_per_yr=0)) == 0.0
+    assert co2_cap.target_of(NS(co2_limit_t_per_yr=None)) is None
     assert co2_cap.target_of(NS()) is None
+    # A value that cannot be read never reads as "no limit".
+    for bad in (-1.0, float("nan"), float("inf"), "abc", object()):
+        with pytest.raises(co2_cap.Co2CapRefusal) as err:
+            co2_cap.target_of(NS(co2_limit_t_per_yr=bad))
+        assert err.value.code == co2_cap.INVALID
+        assert str(err.value).startswith("CO₂ limit: ")
 
 
 def test_finite_is_none_for_none_nan_and_inf():
@@ -802,3 +814,22 @@ def test_a_figure_too_large_to_count_is_unread_and_a_priceless_binding_row_skipp
     priceless = dict(_GOAL["rows"][0], shadow_price_eur_per_t=None)
     a = co2_cap.annual({"rows": [priceless, _GOAL["rows"][0]]}, None, {2030: 500.0})
     assert a["binding"] is True and a["shadow_price_eur_per_t"] == 180.0
+
+
+def test_a_refused_goal_reaches_the_result_with_its_code_and_leaves_nothing_stale():
+    n = _hand()
+    _, _, sink, _ = _solve(n, co2_limit_t_per_yr=6.0 / TO_ROW)
+    assert sink["last_co2_cap"]["rows"]
+    n.add(
+        "GlobalConstraint",
+        "my_cap",
+        type="primary_energy",
+        carrier_attribute="co2_emissions",
+        sense="<=",
+        constant=1e9,
+    )
+    status, _, sink, _ = _solve(n, co2_limit_t_per_yr=6.0 / TO_ROW)
+    assert status == "error"
+    assert sink["last_co2_cap"]["rows"] == []
+    assert sink["last_co2_cap"]["refusal"]["code"] == co2_cap.DUPLICATE
+    assert not hasattr(n, co2_cap._LHS) and not hasattr(n, co2_cap._BUILT)

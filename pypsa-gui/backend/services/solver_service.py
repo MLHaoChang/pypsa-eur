@@ -1941,6 +1941,13 @@ def run_simulation(
         for line in tb_str.rstrip().split("\n"):
             log_queue.put(f"TRACEBACK: {line}")
         status, condition = "error", str(exc)
+        # CO2 limit goal (DC review 02): a failed solve carries no stale goal
+        # result; a refusal of the goal itself carries its code.
+        _co2_cap.take_lhs(network)
+        _emit_state(last_co2_cap=(
+            {"limit_t_per_yr": None, "rows": [],
+             "refusal": {"code": exc.code, "message": str(exc)}}
+            if isinstance(exc, _co2_cap.Co2CapRefusal) else None))
     finally:
         # Tear down the abort watcher FIRST so no stray KeyboardInterrupt can be
         # injected during cleanup (disarm already stopped injection at the solve

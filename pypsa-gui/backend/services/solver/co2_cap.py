@@ -32,6 +32,7 @@ weighted emissions and names the least emissions reachable per period.
 
 from __future__ import annotations
 
+import logging
 import math
 from typing import Any
 
@@ -40,12 +41,15 @@ import pandas as pd
 
 from services.co2_override import has_override, override_series
 
+logger = logging.getLogger(__name__)
+
 ROW = "co2_cap"
 CARRIER_ATTRIBUTE = "co2_emissions"
 HOURS_PER_YEAR = 8760.0
 LABEL = "CO₂ limit"
 UNREACHABLE = "co2_cap_unreachable"
 DUPLICATE = "co2_cap_duplicate"
+INVALID = "co2_cap_invalid"
 # The facts the rows were built from, kept on the network while they exist.
 _BUILT = "_co2_cap_rows"
 # The rows' LHS the last LP built, for `unreachable`'s extra LP.
@@ -67,15 +71,22 @@ def row_name(period: Any) -> str:
 
 def target_of(cfg: Any) -> float | None:
     """The configured limit in t CO2 per year, or None when off. 0 is a limit
-    (no emissions at all); a negative, NaN or infinite value is off (the
-    schema refuses them, so only a hand-made config can carry one)."""
+    (no emissions at all). A set value that is not a finite non-negative
+    number raises ``Co2CapRefusal(INVALID)``: the schema refuses it, so only a
+    hand-made config can carry one, and it never reads as "no limit"."""
+    raw = getattr(cfg, "co2_limit_t_per_yr", None)
+    if raw is None:
+        return None
     try:
-        v = getattr(cfg, "co2_limit_t_per_yr", None)
-        v = None if v is None else float(v)
+        v = float(raw)
     except (TypeError, ValueError):
-        return None
-    if v is None or not math.isfinite(v) or v < 0.0:
-        return None
+        v = math.nan
+    if not math.isfinite(v) or v < 0.0:
+        raise Co2CapRefusal(
+            INVALID,
+            f"{LABEL}: {raw!r} is not a number of t CO₂/yr of 0 or more. "
+            f"Set the limit again in the Goal step.",
+        )
     return v
 
 
@@ -207,8 +218,7 @@ def capture(n, limit: float, built: dict) -> dict:
     for name, b in built.items():
         mu = None
         if name in gc.index and "mu" in gc.columns:
-            v = gc.at[name, "mu"]
-            mu = float(v) if v is not None and math.isfinite(float(v)) else None
+            mu = _finite(gc.at[name, "mu"])
         price = shadow_price(n, b["period"], mu)
         rows.append(
             {
@@ -347,6 +357,7 @@ def unreachable(
     rows = result["rows"]
     least: dict | None = None
     without = "not_found"
+    solves = 0
     m = getattr(n, "model", None)
     try:
         if m is not None and lhs and all(r["name"] in lhs for r in rows):
@@ -358,6 +369,7 @@ def unreachable(
                 if cname in m.constraints:
                     m.remove_constraints(cname)
             m.add_objective(obj, overwrite=True)
+            solves = 1
             status, condition = m.solve(
                 solver_name=solver_name, **(solver_options or {})
             )
@@ -372,6 +384,7 @@ def unreachable(
                         _finite(val / r["row_scale"]) if r["row_scale"] > 0 else None
                     )
     except Exception:  # noqa: BLE001 - the refusal still names the limit
+        logger.warning("%s: the least-emissions LP failed", LABEL, exc_info=True)
         least = None
     if least is not None and any(v is not None for v in least.values()):
         parts = [
@@ -402,7 +415,7 @@ def unreachable(
         "limit_t_per_yr": limit,
         "least_t_per_yr": least,
         "without_limit": without,
-        "extra_solves": 1,
+        "extra_solves": solves,
     }
 
 
