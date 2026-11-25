@@ -3,7 +3,7 @@
 
 # 12 — Mining concentrator run never finishes in a usable time and blocks the app
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-25: slice (c) stage and elapsed time landed (#1627, #1630); left: (a) shorter default horizon, (b) reliable Abort and responsive backend (no merged PR found)
 Impact: high
 Templates: eh_concentrator_staged (26,280 snapshots)
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
@@ -27,3 +27,7 @@ Checked by code reading only; the app was not re-run. Three parts, slice them (P
 ## Comments
 
 - Seen again 2026-11-21 (template walk, master 6b421b06): Concentrator, Guided › Run study on a 4-core, 15 GB machine: still "Studying… (up to 30 calculation steps) · 28:40 elapsed" after the first LP (interior point 24.5 min, then crossover with 124,120 infeasibilities) and a second LP had started. I clicked Abort at 30:16: no toast, no label change, and the solver was still iterating 3 minutes later; I restarted the API to stop it. Expert header said "Idle" while it ran, and the Solve Queue did not list the Guided run. Shorter horizon works: Expert › Model Horizon › Snapshot window › "Same year per period", 6-hourly (4,380 snapshots) solved in 280 s (upper bound), 254 s after a load/bound edit. That build replaced the template's per-period years with one repeated year, and afterwards Capacity Bounds said "No investment periods configured" on a Multi-period project (possibly caused by the rebuild).
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: #1627 and #1630 in master log (RunStrip.tsx); no merged PR found for horizon or Abort; code not re-run.

@@ -3,7 +3,7 @@
 
 # 01 — Parameter catalogue core (01a): entries, asset types, guide files, `GET /api/catalogue`, range validation
 
-Status: ready-for-agent; audit 2026-11-19: 01a-1 open in #1634
+Status: ready-for-agent; audit 2026-11-25: 01a-1 merged (#1634; core, route, guide, model names); left: 01a-2 (settings.py entries, coverage rule, display names) and 01a-3 (range validation on every write path, sk_min <= sk_max check)
 Type: task
 Gated: yes (GK B; UX (23) OKs the rename diff table and guide drafts)
 Spec: [spec.md](../spec.md) §3, §6.2, §7.2, §10.1
@@ -77,3 +77,7 @@ The catalogue is mode-free: `depth: essentials` is the Guided set, everything el
   - X8: the deferred sk_min ≤ sk_max cross-check is ticketed now (01a-3) and linked in the PR body.
 
 - 2026-11-23 status sweep: landed in #1634 (347f55dd8c); #1804 (3cfc9173be); #1807 (3af79cda45); #1812 (a65c921c3c): catalogue core, routers and generated names are on master. Likely complete; PR-body rename table and range validators on every write path not checked.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: #1634 in master log; asset_schema has catalogue.py, routers/catalogue.py, guide/, catalogue.ids.txt, modelNames.generated.json, but no settings.py and catalogue range is always None (catalogue.py:205).
