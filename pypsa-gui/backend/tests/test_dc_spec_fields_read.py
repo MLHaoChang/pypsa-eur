@@ -3,19 +3,26 @@
 Every field of the data-centre load spec and its sub-specs must be read by code
 outside the model definitions (an attribute read in a non-test backend module), or sit in ``READ_ELSEWHERE`` with the reason it
 is fine. A new field nothing reads fails here."""
+
 from __future__ import annotations
 
 import pathlib
 import re
 
-import pytest
 
 from models import dc_compute_spec as C
 from models import flex_archetypes as F
 
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
-SPECS = [F.DataCentreLoadSpec, F.DcPhase, F.GensetSpec, F.AiWorkloadSpec, F.BackupSpec,
-         C.WorkloadMixSpec, C.ComputeSpec]
+SPECS = [
+    F.DataCentreLoadSpec,
+    F.DcPhase,
+    F.GensetSpec,
+    F.AiWorkloadSpec,
+    F.BackupSpec,
+    C.WorkloadMixSpec,
+    C.ComputeSpec,
+]
 #: Files that define or only validate the specs do not count as readers.
 DEFINITIONS = {"models/flex_archetypes.py", "models/dc_compute_spec.py"}
 #: field -> why it is accepted without a backend reader.
@@ -55,7 +62,11 @@ def _read(name: str, sources: dict[str, str]) -> bool:
 
 def test_every_spec_field_is_read_by_some_code():
     sources = _sources()
-    unread = [f"{m}.{n}" for m, n in _fields() if f"{m}.{n}" not in READ_ELSEWHERE and not _read(n, sources)]
+    unread = [
+        f"{m}.{n}"
+        for m, n in _fields()
+        if f"{m}.{n}" not in READ_ELSEWHERE and not _read(n, sources)
+    ]
     assert not unread, f"accepted but read by no code: {unread}"
 
 

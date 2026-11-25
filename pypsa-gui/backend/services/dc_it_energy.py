@@ -206,7 +206,9 @@ def it_energy(
             }
         )
     # DC 05: the compute block, if given, beside the typed IT MW (reported only).
-    for row, comp in zip(phases, compute_report(spec.compute, [p.it_mw for p in spec.phases])):
+    for row, comp in zip(
+        phases, compute_report(spec.compute, [p.it_mw for p in spec.phases])
+    ):
         row.update(compute_it_mw=comp["compute_it_mw"], compute_note=comp["warning"])
     return ItEnergy(
         periods=periods, phases=phases, hourly=hourly.drop(columns="it_kw_h")

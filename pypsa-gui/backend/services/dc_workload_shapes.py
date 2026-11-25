@@ -5,6 +5,7 @@ returned untouched. ``inference`` is a diurnal request load, a cosine between a
 trough and a peak share peaking at ``peak_hour`` on the site clock. ``mixed`` is
 the ``training_share`` blend of the two; ``flat`` is a constant. Every
 parameter is assumed."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -18,15 +19,18 @@ def inference_utilisation(hod: np.ndarray, mix: WorkloadMixSpec) -> np.ndarray:
     return mix.trough_share + swing * 0.5 * (1.0 + np.cos(phase))
 
 
-def shape_utilisation(kind: str, hod: np.ndarray, *, training: np.ndarray,
-                      mix: WorkloadMixSpec) -> np.ndarray:
+def shape_utilisation(
+    kind: str, hod: np.ndarray, *, training: np.ndarray, mix: WorkloadMixSpec
+) -> np.ndarray:
     """u(t) for ``kind``; ``training`` is the ai_training series on the same snapshots."""
     if kind == "ai_training":
         return training
     if kind == "inference":
         return inference_utilisation(hod, mix)
     if kind == "mixed":
-        return mix.training_share * training + (1.0 - mix.training_share) * inference_utilisation(hod, mix)
+        return mix.training_share * training + (
+            1.0 - mix.training_share
+        ) * inference_utilisation(hod, mix)
     if kind == "flat":
         return np.full(len(np.asarray(hod)), mix.flat_share)
     raise ValueError(f"unknown utilisation kind {kind!r}")
