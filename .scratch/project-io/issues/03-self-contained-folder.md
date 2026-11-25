@@ -1,6 +1,6 @@
 # 03 Self-contained project folder
 
-Status: ready-for-agent (library part #1689; weather part: owner Q4 answered)
+Status: done (merged #1689 library copies, newer_in_library, migration; #1709 weather cutout provenance)
 Blocked by: 01, 02
 
 A project folder (and so its bundle) holds everything it needs to open and solve on another machine, without the org Library or the shared weather cache.
@@ -38,3 +38,7 @@ GK B3, 2026-11-18, plan GO with changes (weather part):
 - W7. Run mutants on the bbox source, the sha validation, the per-target overwrite, the OSError path and the batch's single write, and list the kills in the PR body.
 
 - 2026-11-23 status sweep: landed in #1689 (f5611d5853); #1709 (18e84edaaf): library copies, newer_in_library, migration, and weather cutout provenance. Not checked item by item against the acceptance list.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: checked services/library/project_copies.py:140,182 (fill, prune), bundle_pins.py:160,357 (write_copies, `newer_in_library`), routers/projects.py:3665 (migration on load), services/profile_gen/weather_prefs.py:116 `recorded_cutouts`.

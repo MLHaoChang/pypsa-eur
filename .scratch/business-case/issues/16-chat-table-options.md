@@ -3,7 +3,7 @@
 
 # 16 — Chat reads of the line table's options and the preset
 
-Status: ready-for-agent
+Status: done (merged #1651)
 Blocked by: none (business-case 09 merged)
 Model tier: sonnet
 Size: S
@@ -36,3 +36,7 @@ the route-parity binding, and the held declarations removed.
 ## Comments
 
 **2026-11-17 triage (SCALE-1).** Still needed on master: the options route has no chat tool and `business_case_table_options` is still declared unbuilt. A tool-list change, so the ChatPanel tool-list tests apply.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: #1651 merged (GitHub); get_business_case(detail='options') in services/chat_tools.py:_bc_options and catalogue.py:6080, the apply_business_case_preset binding at catalogue.py:6082, and no business_case_table_options row or bc-09 declaration fragment left on master.

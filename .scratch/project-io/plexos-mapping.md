@@ -1,6 +1,6 @@
 # PLEXOS import: mapping plan
 
-Status: ready-for-agent (slice 1 merged as #1603; slice 2 plan GO from GK A (29), split 2a/2b; scope settled by PLEXOS-SCOPE-1)
+Status: done (slices merged: 1 #1603, 2a #1665, 2b #1713, 3a #1728, 3b #1745; slice 4 dropped by PLEXOS-SCOPE-1)
 Owner decisions: IMPORTS-1, IMPORT-FLOW-1, HOLISTIC-1, RAW-NAMES-1, PR-SIZE-1, PLEXOS-SCOPE-1
 
 ## What a PLEXOS model file is
@@ -160,3 +160,7 @@ Generator: capacity, unit count, minimum stable level, rating profile, heat rate
   - D3: equal values on a shared snapshot are fine, different values fail closed (dated × dated and dated × timesliced). D4: band ≠ 1 is refused before grouping. D5: all dated rows outside the horizon → the undated row plus a warning; with no undated row → a gap, unmapped. Static "constant" is exact `==`.
   - C1: `Month,Day,Period` step = a day over its periods per day, equal to the snapshot step (finer and coarser refused); ragged days refused; 29 Feb rows used in leap years only. C2: non-finite cells in `NAME,M1..M12` and `Pattern` → that name unmapped.
   - L1: the World fixture's 0 dated / timesliced rows and 0 Timeslice objects is a test; the report and ledger of all 11 World Models are byte-identical to 3a's (compared with 3a's code in a worktree).
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: checked merge log for the five PRs; gridspine/ingest has plexos_xml.py, plexos_import.py, plexos_csv.py, plexos_pattern.py.

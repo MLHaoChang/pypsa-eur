@@ -47,6 +47,42 @@ export const initialDcDraft = (): DcDraft => ({
   backup: DC_DEFAULTS.backup, architecture: DC_DEFAULTS.architecture,
 })
 
+/** The three ambient fields, blank = from the site's climate zone, else the default curve. */
+export type AmbientDraft = { mean: string; seasonal: string; diurnal: string }
+export const emptyAmbient = (): AmbientDraft => ({ mean: '', seasonal: '', diurnal: '' })
+const AMBIENT_KEYS = [
+  ['mean', 'ambient_annual_mean_c'], ['seasonal', 'ambient_seasonal_amplitude_k'],
+  ['diurnal', 'ambient_diurnal_amplitude_k'],
+] as const
+
+/** Which temperature the run will use, in words, from the draft. */
+export function ambientSourceText(lat: number | null, a: AmbientDraft): string {
+  const rest = lat != null ? 'the site location' : 'the default curve'
+  if (Object.values(a).every(v => v.trim() === '')) {
+    return lat != null
+      ? 'Ambient temperature: from the site location. A climate zone is chosen from its latitude. It is not weather data.'
+      : 'Ambient temperature: the default temperate (Central European) curve. No site location is set. A hot site’s cooling is understated.'
+  }
+  return Object.values(a).every(v => v.trim() !== '')
+    ? 'Ambient temperature: as you entered it.'
+    : `Ambient temperature: your entries, the rest from ${rest}.`
+}
+
+/** Checks on the three ambient fields; a blank one is fine (it comes from the site or default). */
+export function validateAmbient(a: AmbientDraft): Partial<Record<keyof AmbientDraft, string>> {
+  const e: Partial<Record<keyof AmbientDraft, string>> = {}
+  const check = (k: keyof AmbientDraft, label: string, lo: number, hi: number, unit: string) => {
+    const raw = a[k].trim()
+    if (raw === '') return
+    const v = Number(raw)
+    if (!Number.isFinite(v) || v < lo || v > hi) e[k] = `${label}: enter a number from ${lo} to ${hi} ${unit}, or clear it`
+  }
+  check('mean', 'Annual mean', -60, 60, '°C')
+  check('seasonal', 'Seasonal swing', 0, 40, '°C')
+  check('diurnal', 'Daily swing', 0, 30, '°C')
+  return e
+}
+
 const asNumber = (s: string) => (s.trim() === '' ? NaN : Number(s))
 
 /** Checks beside each field, in the field label's words; the staged plan's
@@ -63,9 +99,17 @@ export function validateDc(d: DcDraft, templateId: string): Partial<Record<DcFie
 }
 
 /** The create body's `dc_load`. The staged plan keeps its own phases. */
-export function dcLoadBody(d: DcDraft, templateId: string): Record<string, unknown> {
+export function dcLoadBody(
+  d: DcDraft, templateId: string, site?: { lat: number | null; ambient: AmbientDraft },
+): Record<string, unknown> {
   const dc: Record<string, unknown> = {
     pue_at_design: Number(d.pue), architecture: d.architecture, backup: { mode: d.backup },
+  }
+  // The site latitude picks the ambient climate zone; a stated ambient field wins.
+  if (site?.lat != null) dc.site_latitude = site.lat
+  for (const [k, key] of AMBIENT_KEYS) {
+    const raw = site?.ambient[k].trim() ?? ''
+    if (raw !== '' && Number.isFinite(Number(raw))) dc[key] = Number(raw)
   }
   if (templateId !== 'eh_datacenter_staged') {
     dc.phases = [{ cod: `${DC_DEFAULTS.singleYear}-01-01`, it_mw: Number(d.it_load) }]

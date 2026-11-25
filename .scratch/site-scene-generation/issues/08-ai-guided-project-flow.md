@@ -3,7 +3,7 @@
 
 # SC-07 — integrated AI guidance and project-flow continuity
 
-Status: ready-for-agent; audit 2026-11-19: S6c merged (#1702); S6a open in #1674, S6b in #1701
+Status: ready-for-agent; audit 2026-11-25: S6a (#1674), S6b (#1701), S6c (#1702) merged; left: S7 journey evidence (S1-S5 not confirmed on master)
 Model: Opus
 Type: task
 Dependencies: accepted SC-00 N contracts; develop native adapters with SC-01–SC-03, optional adapters only when their respective engine gates pass
@@ -186,3 +186,7 @@ GK B (37), `session_01G7qCuiY6AnM2CjmQw3AqmV`, relaxes V5's "assistant_tasks.py 
 Found while building: a denied card never reaches the task step (the confirmation gate refuses before `begin_step`), so the apply stays pending and R3 claims no "Not done" for it; and a refused apply is stored `uncertain`, so R3 reads "Not done" only for a typed refusal that proves nothing landed (expired, cancelled, revision conflict, unknown target).
 
 - 2026-11-23 status sweep: landed in #1674 (d42349a0d5); #1701 (d0c2629630); #1702 (3be79e9e3e): S6a, S6b, S6c. Remains: S7 journey evidence (S1-S5 not confirmed).
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: checked #1674, #1701, #1702 in the master merge log; S7 evidence still open per the 2026-11-23 sweep note.

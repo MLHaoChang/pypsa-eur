@@ -3,7 +3,7 @@
 
 # 06 — Reliability goal shows "3 h/yr (assumed)" and "No goal yet" at once; backup inputs grouped under Scenarios in Expert only
 
-Status: ready-for-agent; audit 2026-11-19: backend open in #1645, UI in #1735
+Status: ready-for-agent; audit 2026-11-25: #1645 merged (backend refuses a run with no VOLL), #1735 merged (goal editor Assumed chip); left: backup and control inputs with section 5 as their single home
 Owner: builder session_01G7qCuo15kNsNqjAaBLjvmL (backend first; reliability_goal.py after #1604)
 Size: S
 Gated: UX; GK B (goal value source)
@@ -33,3 +33,7 @@ Journey fit: set up the question (section 8) → run → results header ("the re
 - Seen again 2026-11-21 (template walk, master 6b421b06): Ammonia: verdict "No reliability goal is set for this site, so the study did not certify it", with a Set a goal button; Guided cost shown. Concentrator and IPP: Reliability not offered or not reached.
 
 - 2026-11-23 status sweep: landed in #1645 (41318c60); #1735 (ae6ea750): goal editor shows the assumed value with the Assumed chip; the backend refuses a run with no VOLL. Remains: backup inputs having section 5 as their single home.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: PR merge state checked against origin/master log; acceptance items grepped on master code.

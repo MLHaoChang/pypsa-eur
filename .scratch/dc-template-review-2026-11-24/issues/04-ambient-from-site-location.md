@@ -3,7 +3,7 @@
 
 # 04 The PUE's ambient temperature ignores the site's location
 
-Status: needs-triage
+Status: done
 Blocked by: none (te/01, site location in Guided, gives the anchor this reads)
 Source: DC template review 2026-11-24 (`../README.md`). Stage 1.
 Severity: major (cooling energy, peak facility load and so the PoC size are understated at a hot site)
@@ -17,9 +17,9 @@ Nothing sets these from the project's location or a weather year, and no Guided 
 
 ## Acceptance criteria
 
-- [ ] With a site location set, the ambient series comes from the same weather source the renewable profiles use (or, offline, a climate-zone preset chosen from the latitude), marked with its source; without one it stays the assumed temperate default and says so.
-- [ ] The DC load card shows the ambient basis (mean, design-day peak) and the resulting peak PUE and peak facility MW; Expert shows and edits the three ambient fields.
-- [ ] Test: the same spec at a hot-climate preset gives a higher peak facility load and annual energy than at the default, by the slope × excess temperature.
+- [x] With a site location set, the ambient series comes from the same weather source the renewable profiles use (or, offline, a climate-zone preset chosen from the latitude), marked with its source; without one it stays the assumed temperate default and says so.
+- [x] The DC load card shows the ambient basis (mean, design-day peak) and the resulting peak PUE and peak facility MW; Expert shows and edits the three ambient fields.
+- [x] Test: the same spec at a hot-climate preset gives a higher peak facility load and annual energy than at the default, by the slope × excess temperature.
 
 ## Likely files
 
