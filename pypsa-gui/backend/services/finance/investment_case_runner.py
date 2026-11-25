@@ -161,7 +161,7 @@ def after_stale_run(report: dict, ctx=None) -> dict:
 
     if not report.get("present") or report.get("stale") is not False:
         return report
-    if not runs.optimisation_stale(ctx):
+    if not runs.kept_run_stale(ctx):
         return report
     # The client reads the verdict first (`studyStale`), so it says stale too.
     verdict = {**(report.get("verdict") or {}), "state": "stale"}

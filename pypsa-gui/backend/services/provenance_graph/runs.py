@@ -422,17 +422,21 @@ def reserves_verdict(inputs: pins.Pin | None, weights: pins.Pin) -> Verdict:
     return staleness(b.build(), res)
 
 
-def optimisation_stale(ctx=None) -> bool:
-    """True when a dispatch is kept and the optimisation's own verdict says its inputs changed
-    (provenance-graph 13: a value edit keeps the last run, which then reads stale). One predicate for
-    every gate that must not act on such a run. A read that fails answers False: the gate it feeds
-    must not break on a freshness read."""
+def kept_run_stale(ctx=None) -> bool:
+    """True when a value edit kept the last run's dispatch (`dispatch_status.note_edit_kept`) and the
+    optimisation's own verdict now says its inputs changed (provenance-graph 13). One predicate for every
+    gate that must not act on such a run. An edit of something the dispatch does not depend on (a commercial
+    term) leaves no marker, so it never counts. A read that fails answers False: the gate it feeds must not
+    break on a freshness read."""
     try:
+        from services.dispatch_status import edit_kept
+        from services.pypsa_service import PyPSAService
+
+        n = ctx.network if ctx is not None else PyPSAService.get_network()
+        if not edit_kept(n):
+            return False
         read = read_runs(ctx)
-        return (
-            read.dispatch != "none"
-            and results_verdicts(read)["optimisation"].state == "stale"
-        )
+        return read.dispatch != "none" and results_verdicts(read)["optimisation"].state == "stale"
     except Exception:  # noqa: BLE001
         return False
 

@@ -222,7 +222,7 @@ def _not_solved():
     their own reads."""
     from services.provenance_graph import runs
 
-    if runs.optimisation_stale():
+    if runs.kept_run_stale():
         return Response(status_code=204, headers={"X-Results-State": "out_of_date"})
     return Response(status_code=204)
 
@@ -284,9 +284,16 @@ def _dispatch_ready(n) -> bool:
     # A value edit keeps the last run's dispatch (provenance-graph 13), so its shape reads fresh while the
     # static inputs have moved on; serving it would recombine the two into figures no run produced. Only the
     # active network has a run verdict here; another run's network (a scenario) is gated by its own read.
+    return not _kept_run_withheld(n)
+
+
+def _kept_run_withheld(n) -> bool:
+    """A value edit kept ``n``'s dispatch and its inputs have since moved on. Only the active network has a
+    run verdict here; another run's network (a scenario) is withheld on the marker alone."""
+    from services.dispatch_status import edit_kept
     from services.provenance_graph import runs
 
-    return not (n is PyPSAService.get_network() and runs.optimisation_stale())
+    return runs.kept_run_stale() if n is PyPSAService.get_network() else edit_kept(n)
 
 
 def _result_df(n, accessor_name: str, attr: str, source: str = "lopf", *, state=None):
@@ -2411,17 +2418,14 @@ def post_investment_case(body: InvestmentCaseRequest | None = None,
     # `detail.needs`, the first blocker's own code first; the refusal keeps
     # that code and status.
     known = _ic_needs(lambda: [c for c in (connection_need(cfg),) if c])
-    from services.provenance_graph import runs
-
-    if runs.optimisation_stale():
-        raise HTTPException(409, {"code": "not_solved",
-                                  "message": "the inputs changed since the last solve: re-run it, "
-                                             "the investment case values the solved dispatch",
-                                  "needs": ["not_solved", *known]})
     if not _dispatch_ready(n):
-        raise HTTPException(409, {"code": "not_solved",
-                                  "message": "solve the network first: the investment case "
-                                             "values the solved dispatch",
+        from services.provenance_graph import runs
+
+        # A value edit kept the last run's dispatch (provenance-graph 13): say so, not "unsolved".
+        why = ("the inputs changed since the last solve: re-run it, the investment case values the "
+               "solved dispatch" if runs.kept_run_stale() else
+               "solve the network first: the investment case values the solved dispatch")
+        raise HTTPException(409, {"code": "not_solved", "message": why,
                                   "needs": ["not_solved", *known, *_ic_needs(
                                       lambda: finance_needs(getattr(cfg, "finance", None)))]})
     owner = body.owner if body is not None else None

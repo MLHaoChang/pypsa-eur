@@ -260,8 +260,10 @@ def test_a_rename_clears_the_run(client, site, route, name, new):  # noqa: F811
 def _stale_run(monkeypatch, *, dispatch="fresh", state="stale"):
     from types import SimpleNamespace
 
+    from services import dispatch_status
     from services.provenance_graph import runs
 
+    monkeypatch.setattr(dispatch_status, "edit_kept", lambda n: True)
     monkeypatch.setattr(
         runs, "read", lambda cached=True: SimpleNamespace(dispatch=dispatch)
     )

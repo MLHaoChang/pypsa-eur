@@ -1835,7 +1835,7 @@ def ac_pf_refusal(n, config) -> tuple[str, str] | None:
             return issue.code, issue.message
     from services.provenance_graph import runs
 
-    if runs.optimisation_stale():
+    if runs.kept_run_stale():
         # A value edit keeps the last run's dispatch (provenance-graph 13); fixing it would pin a
         # dispatch the inputs have left.
         return ("ac_pf_stale_dispatch",

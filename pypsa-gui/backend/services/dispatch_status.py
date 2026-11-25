@@ -258,6 +258,23 @@ def affects_dispatch(component_class: str) -> bool:
     return component_class in _CLEARABLE_T_ATTRS
 
 
+EDIT_KEPT_KEY = "assistant_edit_kept_run"
+
+
+def note_edit_kept(n) -> None:
+    """A value edit left the solve's `_t` dispatch in place (provenance-graph 13). The dispatch then still
+    has its shape while the static inputs have moved on, so a reader must not combine them: the results
+    readers withhold their figures while this marker stands and the run's verdict is stale. It lives in
+    `n.meta`, so a save keeps it; a solve (`_record_solve_inputs`) and `clear_dispatch` drop it."""
+    if getattr(n, "is_solved", False) and getattr(n, "meta", None) is not None:
+        n.meta[EDIT_KEPT_KEY] = True
+
+
+def edit_kept(n) -> bool:
+    """Whether `note_edit_kept` marked ``n`` since its last solve."""
+    return bool((getattr(n, "meta", None) or {}).get(EDIT_KEPT_KEY))
+
+
 def clear_dispatch(n: pypsa.Network) -> bool:
     """
     Empty every solver-output `_t` DataFrame on ``n``. Returns True iff
@@ -285,6 +302,8 @@ def clear_dispatch(n: pypsa.Network) -> bool:
     """
     if n is None:  # defensive — `getattr(None, ...)` would crash
         return False
+    if getattr(n, "meta", None) is not None:
+        n.meta.pop(EDIT_KEPT_KEY, None)
     cleared = False
     # Iterate every dispatch-bearing component and zero its `_t` frames.
     # The DataFrames are shape (snapshots, components); we replace with the

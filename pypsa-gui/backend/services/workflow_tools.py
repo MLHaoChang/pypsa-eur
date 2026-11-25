@@ -267,11 +267,12 @@ def project_readiness(project_id: str | None = None) -> dict:
         if ctx.user_ts_unreadable:
             blockers.append("The saved user time-series store cannot be read.")
         dirty = dirty_state.is_dirty(ctx)
-        results_current = solve_freshness(ctx)["results_current"]
-        # A value edit keeps the last run's columns (pg13), so the dispatch's shape stays
-        # "fresh"; the load flow seeds from it only while the run itself is still current.
-        engines = _network_engines(not blockers, freshness.get("state") == "fresh" and results_current,
-                                   results_current, lf_current)
+        from services.provenance_graph import runs
+
+        # A value edit keeps the last run's columns (pg13), so the dispatch's shape stays "fresh"; the
+        # load flow seeds from it only while no such edit has left it behind the inputs.
+        engines = _network_engines(not blockers, freshness.get("state") == "fresh" and not runs.kept_run_stale(),
+                                   solve_freshness(ctx)["results_current"], lf_current)
         return {**identity, "saved": saved, "dirty": dirty, "ready": not blockers, **_engine_choice(engines),
                 "blockers": blockers, "validation": {**validation, "issues": validation.get("issues", [])[:12]},
                 "validation_issue_count": len(validation.get("issues", [])), "solvers": solvers,
@@ -1087,5 +1088,6 @@ def _record_solve_inputs(network, config):
     with one_input_walk():  # issue 225: the two reads, and nothing between them
         plain_digest = _network_input_fingerprint(ctx)
         exact_digest = _network_input_fingerprint(ctx, exact=True)
+    network.meta.pop("assistant_edit_kept_run", None)  # this solve's dispatch matches its inputs again
     network.meta["assistant_solve_input_fingerprint"] = plain_digest
     network.meta["assistant_solve_exact_input_fingerprint"] = exact_digest

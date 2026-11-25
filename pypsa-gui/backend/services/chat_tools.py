@@ -3281,7 +3281,7 @@ def solve_ppa_price(target_irr: float, target_year: int,
     n = PyPSAService.get_network()
     from services.provenance_graph import runs
 
-    if runs.optimisation_stale():
+    if runs.kept_run_stale():
         _ic_raise(409, "investment_case_not_solved",
                   "the inputs changed since the last solve: re-run it, the PPA price is solved on its dispatch")
     if not _dispatch_ready(n):

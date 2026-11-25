@@ -150,11 +150,7 @@ def _asset(name="campus:TR_132_33_40#1", *, currency="EUR", price_year=2025, met
 
 @pytest.mark.live_solve
 def test_the_campus_study_assets_are_the_reports_extra_assets_and_its_capex(
-        client, install_network, session_ctx, _auth_db, reset_backend, monkeypatch):
-    # This setup solves outside the app and puts the solver config back after the save, so the run's recorded
-    # inputs never match and its verdict reads out of date (provenance-graph 13). The run's verdict is not what
-    # this test is about: the report's key parts are.
-    monkeypatch.setattr("services.provenance_graph.runs.optimisation_stale", lambda ctx=None: False)
+        client, install_network, session_ctx, _auth_db, reset_backend):
     from services import campus_electrical_service as ce
     from tests.test_finance_case_storage_and_meters import _commercial, _fin, _single_owner, _site
     from tests.test_value_flow_reconciliation import _solve

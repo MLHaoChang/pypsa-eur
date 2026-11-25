@@ -837,6 +837,10 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict,
         _apply_investment_parts(n, component_class, name, parts)
         _apply_fuel_curve(n, component_class, name, stamp=True)
         _reattach_component_series(n, attr, name, saved_series)
+        if new_name == name:
+            from services.dispatch_status import note_edit_kept
+
+            note_edit_kept(n)
         # Re-key any saved per-period bounds so the modal data follows the
         # rename instead of stranding under the old key.
         if new_name != name:
