@@ -4,7 +4,7 @@
    "method": "GET",
    "path": "/api/campus-electrical/{name}/equipment-schedule",
    "reason": "held-by-spec",
-   "issue": ".scratch/dc-template-review-2026-11-24/issues/09-equipment-schedule-switchgear-cables.md"
+   "issue": ".scratch/dc-template-review-2026-11-24/issues/09b-equipment-schedule-in-chat.md"
   },
   {
    "method": "GET",
