@@ -120,6 +120,11 @@ def investment_table(payload: dict, source_path: str):
          else F.fmt_text(None)),
         ("Price basis", F.fmt_text(payload.get("basis_statement"))),
     ]
+    cod, years = payload.get("cod_year"), _num(payload.get("analysis_years"))
+    if isinstance(cod, int) and years is not None and years > 0:
+        # Issue 28 (owner option A): the valuation runs from commissioning for the analysis years, which can
+        # be longer than the plan's periods the Guided results show; say so in years taken from the inputs.
+        rows.append(("Valued over", f"{cod}–{cod + int(years)} ({int(years)} years)"))
     if payload.get("island_breakeven_text"):
         rows.append((ISLAND_BREAKEVEN_LABEL, F.fmt_text(payload["island_breakeven_text"])))
     return EvidenceTable(table_id=INVESTMENT, columns=["Item", "Value"], rows=[list(r) for r in rows],
@@ -275,6 +280,10 @@ def grid_readiness_payload(source: dict | None) -> dict | None:
         rows.append(row)
     payload = {"profile": dict(source.get("profile") or {}), "rows": rows,
                "summary": dict(source.get("summary") or {}), "envelope": bool(source.get("envelope"))}
+    # What the scorecard calls the load whose step it reads ("AI-training load", "site load", ...).
+    # Only when it names one, so a report without it keeps its evidence hash.
+    if isinstance(source.get("load_words"), str) and source["load_words"].strip():
+        payload["load_words"] = source["load_words"].strip()
     # Only when there are some, so a report without excluded rows keeps its evidence hash.
     excluded = [{"id": e.get("id"), "requirement": e.get("requirement"), "reason": e.get("reason")}
                 for e in source.get("excluded") or [] if isinstance(e, dict)]
@@ -336,8 +345,10 @@ def grid_readiness_disclosures(payload: dict) -> list[str]:
                    "the counts: " + "; ".join(f"{e['requirement'] or e['id']} ({e['reason']})"
                                                 for e in payload["excluded"]) + ".")
     if payload.get("envelope"):
-        out.append(f"{head} — the ramp, oscillation and voltage-change rows read the AI-training load "
-                   "envelope IT-side at the point of connection, before UPS/BESS smoothing: before "
+        words = payload.get("load_words") or "AI-training load"
+        backup = "BESS" if words == "site load" else "UPS/BESS"   # no UPS on a non-data-centre site
+        out.append(f"{head} — the ramp, oscillation and voltage-change rows read the {words} "
+                   f"envelope IT-side at the point of connection, before {backup} smoothing: before "
                    "mitigation, not final.")
     if any("after_battery" in r for r in payload["rows"]):
         out.append(f"{head} — {s.get('pass_after_mitigation', 0)} of {s.get('red_flags', 0)} red flag(s) "

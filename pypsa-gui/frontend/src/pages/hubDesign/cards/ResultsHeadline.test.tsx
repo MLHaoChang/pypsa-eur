@@ -334,3 +334,29 @@ describe('ReliabilityBullet', () => {
     expect(screen.getByTestId('hub-results-reliability-chart').textContent).toContain('Out of date')
   })
 })
+
+// DC review 02, UX GO (3)/(4): Guided shows the CO₂ limit's figure only while a limit is set,
+// with the strip's words, and opens Emissions in the Results panel ("Back to Results").
+describe('Results headline: the CO₂ limit', () => {
+  const CO2: HeadlineCard = {
+    id: 'co2_annual', value: 950, unit: 'tCO2/yr', state: 'ready', reason: null, formula_id: null, detail: null,
+    delta: null, trend: null, limit_t_per_yr: 1000, reached: true, shadow_price_eur_per_t: 85, period: null,
+  }
+  it('is absent without a limit', async () => {
+    mount()
+    await screen.findByTestId('hub-results-lcoe')
+    expect(screen.queryByTestId('hub-results-co2')).toBeNull()
+  })
+  it('shows the figure and its limit line, and links to Emissions', async () => {
+    const withCo2 = withLcoe(LCOE_READY)
+    vi.mocked(resultsApi.getHeadlineKpis).mockResolvedValue({ ...withCo2, cards: [...withCo2.cards, CO2] })
+    const user = mount()
+    const tile = await screen.findByTestId('hub-results-co2')
+    expect(tile.textContent).toContain(HEADLINE_WORDS.co2_annual.label)
+    expect(tile.textContent).toContain(headlineFigure(CO2).basis!)
+    await user.click(within(tile).getByRole('button', { name: 'Emissions ›' }))
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
+    expect(useUIStore.getState().resultsTabRequest).toBe('emissions')
+    expect(useUIStore.getState().flowReturn?.label).toBe('Results')
+  })
+})

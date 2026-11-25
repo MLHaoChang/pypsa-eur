@@ -27,6 +27,7 @@ import { TOPOLOGY_FINDING_TITLES, type TopologyFinding } from '../utils/topology
 import { GridReadinessScorecard, useGridReadiness } from '../components/gridReadiness/GridReadinessScorecard'
 import { EnergizationTimeline } from '../components/gridReadiness/EnergizationTimeline'
 import { NotInScopeGroup } from '../components/flowScope/NotInScopeGroup'
+import { Co2LimitRefusal } from './results/Co2LimitRefusal'
 
 // IssuesPanel — surfaces the backend's preflight validation findings as a
 // browsable list. Reuses /api/simulation/preflight, which is the same gate
@@ -51,6 +52,7 @@ export default function IssuesPanel() {
   // (infeasible / unbounded / numerical / build error).
   const lastFailure = useSimulationStore(s => s.lastFailure)
   const setLastFailure = useSimulationStore(s => s.setLastFailure)
+  const uiMode = useUIStore(s => s.uiMode)
 
   // Refetch on mount + every 15 s. The model may change between solves
   // (user edits buses, costs, etc.), so polling keeps the panel honest
@@ -223,6 +225,11 @@ export default function IssuesPanel() {
                     )}
                   </div>
                 ))}
+                {/* The CO₂ limit's refusal (DC review 02): a first solve that fails has no
+                    results for the strip or the card to show it in (UX 30, blocker 1). */}
+                <div className="mt-2 empty:hidden">
+                  <Co2LimitRefusal mode={uiMode === 'guided' ? 'guided' : 'expert'} />
+                </div>
                 {lastFailure.detail && (
                   <div className="mt-2 text-[10px] font-mono text-muted break-all">
                     solver: {lastFailure.detail}

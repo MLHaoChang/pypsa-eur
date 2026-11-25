@@ -14,8 +14,11 @@ import { VOLL_TEXT } from '../delegate'
 import { DC_TEMPLATE, readiness } from '../testFixtures'
 import { goal } from '../../../test/fixtures/reliabilityGoal'
 import { GoalCard } from './GoalCard'
+import { CO2_LIMIT_HINT, CO2_LIMIT_ZERO } from '../../../components/reliabilityGoal/ReliabilityGoalEditor'
+import { CO2_LIMIT_ERROR } from '../../../hooks/useReliabilityGoal'
 import { GOAL_KEY_KEPT, GOAL_KEY_SITE_TYPE, GOAL_KEY_TEMPLATE, GOAL_KEY_TYPED } from './goalCardWords'
 import { nk } from '../../../utils/queryKeys'
+import { flowScopeKey } from '../../../components/flowScope/useFlowScope'
 
 vi.mock('../../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/simulation')>()
@@ -328,4 +331,107 @@ describe('GoalCard scope (W4a)', () => {
     expect(await screen.findByTestId('hub-goal-voll')).toBeTruthy()
     expect(screen.queryByTestId('hub-goal-run')).toBeNull()
   })
+})
+
+describe('GoalCard CO₂ limit (DC review 02)', () => {
+  it('empty reads "no limit" with its hint; 0 is a limit, said on its own line, and saves as 0', async () => {
+    const user = mount()
+    await waitFor(() => expect(input('hub-goal-co2').value).toBe(''))
+    expect(screen.getByTestId('hub-goal-co2-note').textContent).toBe(CO2_LIMIT_HINT)
+    expect(screen.getByText('CO₂ limit (t CO₂/yr)')).toBeTruthy()
+    await user.type(input('hub-goal-co2'), '0')
+    expect(screen.getByTestId('hub-goal-co2-note').textContent).toBe(CO2_LIMIT_ZERO)
+    await user.click(screen.getByTestId('hub-goal-save'))
+    await waitFor(() => expect(simulationApi.updateSolverConfig).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(simulationApi.updateSolverConfig).mock.calls[0][0]).toEqual({ co2_limit_t_per_yr: 0 })
+  })
+
+  it('a stored limit fills the field; clearing it saves no limit (null)', async () => {
+    vi.mocked(simulationApi.getSolverConfig).mockResolvedValue({ voll: 5000, co2_limit_t_per_yr: 1200 } as never)
+    const user = mount()
+    await waitFor(() => expect(input('hub-goal-co2').value).toBe('1200'))
+    expect(screen.queryByTestId('hub-goal-co2-note')).toBeNull()
+    await user.clear(input('hub-goal-co2'))
+    await user.click(screen.getByTestId('hub-goal-save'))
+    await waitFor(() => expect(simulationApi.updateSolverConfig).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(simulationApi.updateSolverConfig).mock.calls[0][0]).toEqual({ co2_limit_t_per_yr: null })
+  })
+
+  it('a negative limit is named under the field and cannot be saved', async () => {
+    const user = mount()
+    await waitFor(() => expect(input('hub-goal-co2').disabled).toBe(false))
+    await user.type(input('hub-goal-co2'), '-5')
+    expect(screen.getByTestId('hub-goal-co2-error').textContent).toBe(CO2_LIMIT_ERROR)
+    // Screen readers hear the error and tie it to the field (UX 30, blocker 2).
+    const err = screen.getByTestId('hub-goal-co2-error')
+    expect(err.getAttribute('role')).toBe('status')
+    expect(screen.getByTestId('hub-goal-co2').getAttribute('aria-invalid')).toBe('true')
+    expect(screen.getByTestId('hub-goal-co2').getAttribute('aria-describedby')).toBe(err.id)
+    expect(err.id).not.toBe('')
+    expect(screen.queryByTestId('hub-goal-error')).toBeNull()
+    expect((screen.getByTestId('hub-goal-save') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('with Reliability off the limit and "Save goal" stay', async () => {
+    getFlowScope.mockResolvedValue({
+      scope: { version: 1, groups: ['capacity'], source: 'project', preset_id: 'eh_datacenter',
+        options: { capacity: ['sizing'], grid: [], control: [], reliability: [], commercial: [], handoff: [] } },
+      cards: [{ id: 'reliability', label: 'Reliability', locked_reason: null, intended: ['goal_study'],
+        sections: ['assets', 'scenarios'], chip: 'Reliability',
+        options: [{ id: 'goal_study', label: 'Reliability goal & study', status: 'available', reason: null }] }],
+      preset_id: 'eh_datacenter', preset_label: 'Data Center Energy Hub',
+      preset: { version: 1, groups: [], options: {} },
+    })
+    const user = mount()
+    await screen.findByTestId('hub-goal-out-of-scope-add')
+    expect(screen.queryByTestId('hub-goal-lole')).toBeNull()
+    expect(screen.queryByTestId('hub-goal-advanced')).toBeNull()
+    await user.type(input('hub-goal-co2'), '500')
+    await user.click(screen.getByTestId('hub-goal-save'))
+    await waitFor(() => expect(simulationApi.updateSolverConfig).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(simulationApi.updateSolverConfig).mock.calls[0][0]).toEqual({ co2_limit_t_per_yr: 500 })
+  })
+})
+
+describe('GoalCard CO₂ limit with Reliability out of scope (UX 29)', () => {
+  const scope = (reliability: string[]) => ({
+    scope: { version: 1, groups: reliability.length ? ['capacity', 'reliability'] : ['capacity'], source: 'project',
+      preset_id: 'eh_datacenter',
+      options: { capacity: ['sizing'], grid: [], control: [], reliability, commercial: [], handoff: [] } },
+    cards: [{ id: 'reliability', label: 'Reliability', locked_reason: null, intended: ['goal_study'],
+      sections: ['assets', 'scenarios'], chip: 'Reliability',
+      options: [{ id: 'goal_study', label: 'Reliability goal & study', status: 'available', reason: null }] }],
+    preset_id: 'eh_datacenter', preset_label: 'Data Center Energy Hub',
+    preset: { version: 1, groups: [], options: {} },
+  })
+  it('saves the CO₂ limit only: a hidden field\'s edit is never sent and its error never blocks', async () => {
+    getFlowScope.mockResolvedValue(scope(['goal_study']))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><GoalCard /></QueryClientProvider>)
+    const user = userEvent.setup()
+    await waitFor(() => expect(input('hub-goal-lole').disabled).toBe(false))
+    await user.clear(input('hub-goal-lole'))
+    await user.type(input('hub-goal-lole'), '-1')
+    expect(screen.getByTestId('hub-goal-error')).toBeTruthy()
+    // The user takes Reliability out of scope: its block hides with the bad edit in it.
+    getFlowScope.mockResolvedValue(scope([]))
+    await act(async () => { await client.invalidateQueries({ queryKey: flowScopeKey('Demo') }) })
+    await screen.findByTestId('hub-goal-out-of-scope-add')
+    expect(screen.queryByTestId('hub-goal-lole')).toBeNull()
+    expect(screen.queryByTestId('hub-goal-error')).toBeNull()
+    await user.type(input('hub-goal-co2'), '50000')
+    const save = screen.getByTestId('hub-goal-save') as HTMLButtonElement
+    expect(save.disabled).toBe(false)
+    await user.click(save)
+    await waitFor(() => expect(simulationApi.updateSolverConfig).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(simulationApi.updateSolverConfig).mock.calls[0][0]).toEqual({ co2_limit_t_per_yr: 50000 })
+  })
+})
+
+it('an invalid CO₂ limit says why Save goal is off, never "No changes to save"', async () => {
+  const user = mount()
+  await waitFor(() => expect(input('hub-goal-co2').disabled).toBe(false))
+  await user.type(input('hub-goal-co2'), '-5')
+  expect(screen.getByTestId('hub-goal-co2-error')).toBeTruthy()
+  expect(screen.queryByTestId('hub-goal-no-changes')).toBeNull()
 })

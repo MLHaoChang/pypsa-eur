@@ -1,0 +1,34 @@
+{
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/results/front",
+   "reason": "held-by-spec",
+   "issue": ".scratch/dc-template-review-2026-11-24/issues/01a-front-in-chat.md"
+  },
+  {
+   "method": "POST",
+   "path": "/api/results/front",
+   "reason": "held-by-spec",
+   "issue": ".scratch/dc-template-review-2026-11-24/issues/01a-front-in-chat.md"
+  },
+  {
+   "method": "POST",
+   "path": "/api/results/front/abort",
+   "reason": "held-by-spec",
+   "issue": ".scratch/dc-template-review-2026-11-24/issues/01a-front-in-chat.md"
+  },
+  {
+   "method": "POST",
+   "path": "/api/results/front/apply",
+   "reason": "held-by-spec",
+   "issue": ".scratch/dc-template-review-2026-11-24/issues/01a-front-in-chat.md"
+  },
+  {
+   "method": "GET",
+   "path": "/api/results/eh_front",
+   "reason": "held-by-spec",
+   "issue": ".scratch/dc-template-review-2026-11-24/issues/01a-front-in-chat.md"
+  }
+ ]
+}

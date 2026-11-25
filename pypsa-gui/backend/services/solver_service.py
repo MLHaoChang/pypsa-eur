@@ -669,6 +669,24 @@ def _mip_price_limit(n, config):
     return mip_price_limit(n, config)
 
 
+def _applied_record(solver_name, solver_options, uc_kwargs, process_uc_mode):
+    """`harness/solve_validity.applied_record`, imported lazily (assistant-assurance 18)."""
+    from harness.solve_validity import applied_record
+
+    return applied_record(solver_name, solver_options, uc_kwargs, process_uc_mode)
+
+
+def _seal_applied(network, record) -> None:
+    """Seal `record` in `network.meta` next to the input fingerprints, or drop
+    a previous solve's record when this one has none (assistant-assurance 18)."""
+    from harness.solve_validity import APPLIED_KEY
+
+    if record is None:
+        network.meta.pop(APPLIED_KEY, None)
+    else:
+        network.meta[APPLIED_KEY] = record
+
+
 def run_simulation(
     config: SolverConfig,
     network: pypsa.Network,
@@ -922,6 +940,12 @@ def run_simulation(
             # them, never the transient transforms below.
             release_inputs.refresh()
 
+            # assistant-assurance 18: the options and commitment the solve call
+            # applied, sealed next to the input fingerprints below. Stays None
+            # on a path that runs no optimisation (power flow). A previous
+            # solve's record goes now, so a failed or aborted solve keeps none.
+            _applied = None
+            _seal_applied(network, None)
             if config.mode == "lopf":
                 # SCLOPF dispatches to PyPSA's
                 # `n.optimize.optimize_security_constrained()`, which adds
@@ -1130,7 +1154,8 @@ def run_simulation(
                 # branch adds the island's); the binary check runs after a
                 # linearised plan, or a plain one on the year base.
                 plan_uc_kwargs = dict(proc_uc_kwargs)
-                _plain = _process_uc.planning_uc_mode(network, config) == "plain"
+                _uc_mode = _process_uc.planning_uc_mode(network, config)
+                _plain = _uc_mode == "plain"
                 # Solve-strategy dispatch. Three modes share the same lifecycle
                 # (apply_modelling → optimise → restore) but branch differently
                 # at the solve step:
@@ -1498,6 +1523,11 @@ def run_simulation(
                             phase(f"Myopic restore: skipped one entry ({exc})")
                     restore_modelling()
                     release_inputs()  # restored: the live inputs are the solve's inputs again
+                # Every LOPF path (full incl. the island's linearised UC,
+                # SCLOPF, rolling, myopic) passed `merged_solver_options` and
+                # `plan_uc_kwargs`; `harness/solve_validity` reads this record.
+                _applied = _applied_record(
+                    config.solver_name, merged_solver_options, plan_uc_kwargs, _uc_mode)
                 # Persist the commercial price frame only for a solve that
                 # produced a dispatch (re-review #5: no rows mixing one run's
                 # prices with another run's dispatch).
@@ -1828,9 +1858,11 @@ def run_simulation(
                 try:
                     from services.workflow_tools import _record_solve_inputs
                     _record_solve_inputs(network, config)
+                    _seal_applied(network, _applied)
                 except Exception as exc:
                     network.meta.pop("assistant_solve_input_fingerprint", None)
                     network.meta.pop("assistant_solve_exact_input_fingerprint", None)
+                    _seal_applied(network, None)
                     phase(f"Result input provenance unavailable: {type(exc).__name__}")
     except KeyboardInterrupt:
         # The abort watcher injected this to cancel the native HiGHS solve mid-

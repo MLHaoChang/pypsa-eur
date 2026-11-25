@@ -9,6 +9,7 @@ import {
   AdequacyChips, CoptChips,
   type AdequacyReportPayload, type CoptPayload,
 } from './adequacy'
+import { FrontPanel } from './FrontPanel'
 import { FrontierPanel } from './FrontierPanel'
 import { ReserveMarginPanel } from './ReserveMarginPanel'
 import { McPanel } from './McPanel'
@@ -121,6 +122,8 @@ export default function AdequacyTab() {
 
       <ReserveMarginPanel />
       <FrontierPanel goalMwh={report?.target?.system.cap_mwh ?? null} />
+      {/* The two-axis front beside the one-axis frontier (DC review 01). */}
+      <FrontPanel />
       <McPanel />
       <LoopPanel />
       {/* The SAME coupled search on the other lever (Phase 9). It sits after

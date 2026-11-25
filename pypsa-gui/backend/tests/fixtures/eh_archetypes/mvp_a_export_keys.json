@@ -10,6 +10,7 @@
     "certified",
     "cost_at_target_eur",
     "period_basis",
+    "valued_to_year",
     "excludes_shed_cost",
     "completeness",
     "sections",

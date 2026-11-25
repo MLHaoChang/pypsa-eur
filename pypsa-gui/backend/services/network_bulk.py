@@ -647,6 +647,11 @@ def apply_bulk_update(body: dict) -> dict:
                 for t in _targets:
                     rederive_scaled_parts(n, component_class, t)
 
+    from services.dispatch_status import note_edit_kept
+
+    with PyPSAService.get_lock():
+        note_edit_kept(PyPSAService.get_network())  # the in-place write kept the dispatch (pg13)
+
     # One audit entry per bulk op (not per component). The row form cannot
     # print every value, so it prints the shape instead.
     if row_form:

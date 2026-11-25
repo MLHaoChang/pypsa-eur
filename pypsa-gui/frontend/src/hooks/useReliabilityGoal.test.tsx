@@ -7,7 +7,8 @@ import type { ReactNode } from 'react'
 import { simulationApi } from '../api/simulation'
 import { useUIStore } from '../store/uiStore'
 import { goal } from '../test/fixtures/reliabilityGoal'
-import { assumedLole, goalPatchFromEdits, goalText, goalWords, useReliabilityGoal } from './useReliabilityGoal'
+import { CO2_UNIT } from '../pages/results/headlineWords'
+import { CO2_LIMIT_UNIT, assumedLole, goalPatchFromEdits, goalText, goalWords, useReliabilityGoal } from './useReliabilityGoal'
 import type { ReliabilityGoal } from '../api/flow'
 
 const getReliabilityGoal = vi.fn()
@@ -145,4 +146,9 @@ describe('assumedLole (template-e2e 06, GK B 65)', () => {
   it('is none without a goal', () => {
     expect(assumedLole(null)).toBeNull()
   })
+})
+
+// The field and the results figure name one unit (UX 30): the two constants never drift.
+it('the CO₂ limit field and the CO₂ figure use the same unit', () => {
+  expect(CO2_LIMIT_UNIT).toBe(CO2_UNIT)
 })

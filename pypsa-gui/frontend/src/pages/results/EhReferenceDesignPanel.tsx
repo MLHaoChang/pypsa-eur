@@ -961,6 +961,8 @@ export function ehStudyQueryKeys(project: string | null) {
     nk(project, 'results', 'eh_levers'),
     nk(project, 'results', 'eh_dtc'),
     nk(project, 'results', 'eh_dtc_planning'),
+    // DC 01: the study's opt-in front stage (GET /results/eh_front).
+    nk(project, 'results', 'eh_front'),
     // P24: the hub-design cards' review (GET /results/eh_review) goes stale
     // with the study.
     nk(project, 'results', 'eh_review'),
@@ -1317,7 +1319,8 @@ export function EhReferenceDesignPanel() {
           </p>
 
           <div className="flex flex-col gap-1 text-[10px] text-muted">
-            <ReliabilityGoalSummary testId="eh-goal" items={['site', 'target', 'ens', 'draws']} />
+            <ReliabilityGoalSummary testId="eh-goal" items={['site', 'target', 'ens', 'draws']}
+              appliedTarget={cert?.target ?? null} ranDraws={certification?.n_samples ?? null} />
             <span data-testid="eh-archetype">
               <InfoTip text={fieldTip('archetype')}>{selected.label}</InfoTip>: {selected.blurb}
             </span>

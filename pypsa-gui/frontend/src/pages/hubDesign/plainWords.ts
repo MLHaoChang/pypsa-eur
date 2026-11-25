@@ -106,10 +106,19 @@ export function evidenceValue(v: unknown): string {
 /** The cost tile's label. A multi-period study's cost is the discounted total over every investment
  *  period, not a year's cost (UX review N3, owner decision B): say so, with the plan's years when
  *  known. The engine reports the basis (`period_basis`); no yearly figure is derived from it. */
-export function costTileLabel(periodBasis: string | null | undefined, periods: number[] | null | undefined): string {
+export function costTileLabel(
+  periodBasis: string | null | undefined, periods: number[] | null | undefined,
+  valuedToYear?: number | null,
+): string {
   if (periodBasis !== 'npv_multi_period') return 'Yearly cost of this design (before any shortfall costs)'
-  const years = periods && periods.length > 1 ? `, ${Math.min(...periods)}–${Math.max(...periods)}` : ''
-  return `Cost over the plan${years} (discounted, before any shortfall costs)`
+  const plan = periods && periods.length > 1 ? `, ${Math.min(...periods)}–${Math.max(...periods)}` : ''
+  // Owner decision (issue 28, option A): the valuation runs past the plan's last period; say so. The end
+  // year is the one the study recorded when it solved, so editing the inputs later never moves the label.
+  const first = periods && periods.length > 0 ? Math.min(...periods) : null
+  const last = periods && periods.length > 0 ? Math.max(...periods) : null
+  const end = valuedToYear != null && Number.isFinite(valuedToYear) ? valuedToYear : null
+  const valued = end != null && first != null && last != null && end > last ? `, valued to ${end} over ${end - first} years` : ''
+  return `Cost over the plan${plan}${valued} (discounted, before any shortfall costs)`
 }
 
 /** A not-run reason or study note in plain words (issue 19, RAW-NAMES-1): the study's run limit, the import

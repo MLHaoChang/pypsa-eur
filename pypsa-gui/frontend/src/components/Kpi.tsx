@@ -33,7 +33,7 @@ const TONE: Record<KpiTone, string> = {
 
 export default function Kpi({
   label, value, unit, basis, hint, delta, deltaTone, headline, testId,
-  state = 'ready', reason, action, fromStudy, valueLabel, dimmed, trend,
+  state = 'ready', reason, action, link, fromStudy, valueLabel, dimmed, trend,
 }: {
   label: string
   value: string
@@ -50,6 +50,8 @@ export default function Kpi({
   /** One plain sentence saying why, for any state but ready / zero. */
   reason?: string
   action?: ResultAction
+  /** The view the figure comes from ("Emissions ›"), shown with the figure; `action` is for a missing one. */
+  link?: ResultAction
   /** The figure is the study's; the project itself is not solved (G5). Keeps the figure, adds the pill. */
   fromStudy?: boolean
   /** Hover text and accessible name for the figure itself, e.g. what a "—" means. */
@@ -104,6 +106,7 @@ export default function Kpi({
       {action && state !== 'ready' && state !== 'zero' && (
         <div className="mt-auto"><StateAction action={action} /></div>
       )}
+      {link && showsFigure && <div><StateAction action={link} /></div>}
     </div>
   )
 }

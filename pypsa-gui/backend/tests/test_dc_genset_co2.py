@@ -418,6 +418,8 @@ def test_master_digests_return_with_the_gas_efficiency_at_one(monkeypatch, tmp_p
         df = getattr(n, frame)
         rows = [a for a in T.DC_EXISTING if a in df.index]
         df.loc[rows, ["overnight_cost", "discount_rate"]] = np.nan
+    # DC01-OUTAGE-1's two grid-supply cells, back at master's NaN.
+    n.generators.loc["grid_supply", ["outage_rate_value", "mttr_hours"]] = np.nan
     assert _digest(n) == "32b282c3eb61543e"
 
 

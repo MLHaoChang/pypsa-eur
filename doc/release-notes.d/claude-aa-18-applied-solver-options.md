@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A solve now records the solver options and the unit-commitment relaxation it actually applied (including the island's linearised commitment), and checked answers read the MIP gap and LP/MIP kind from that record instead of reconstructing them from the saved settings. Runs solved before this change are read as before.

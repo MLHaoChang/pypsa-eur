@@ -33,11 +33,13 @@ from models.energy_hub import (
     DEFAULT_EH_FMEA_TOP_N,
     DEFAULT_EH_FRONTIER_LADDER,
     DEFAULT_EH_MC_DRAWS,
+    EH_OPT_IN_STAGES,
     EH_PIPELINE_STAGES,
     MAX_EH_BUDGET_SOLVES,
     ArchetypePack,
     PipelineStageRecord,
     ReferenceDesignReport,
+    stage_has_row,
 )
 from services.adequacy import archetypes as arch
 from services.adequacy import eh_report as report_mod
@@ -82,6 +84,7 @@ SIBLING_STORE_KEYS: tuple[str, ...] = (
     "eh_lever_comparison",
     "eh_dtc_stress",
     "eh_dtc_planning",
+    "eh_front",
 )
 
 # Pipeline stage → report section it fills (for unreached-stage notes).
@@ -169,6 +172,8 @@ def certification_wanted(pack: ArchetypePack) -> bool:
 def default_stages_for(pack: ArchetypePack) -> tuple[str, ...]:
     """The pack's default pipeline (``stages=None``)."""
     def _keep(s: str) -> bool:
+        if s in EH_OPT_IN_STAGES:
+            return False
         if s == "redundancy":
             return bool(pack.levers.redundancy)
         if s == "levers":
@@ -295,6 +300,7 @@ def _stage_ens_solve(st: _Study) -> None:
                "metrics": metrics}, None)
     st.cost_at_target = cost.get("total_system_cost_eur")
     st.period_basis = cost.get("period_basis")
+    st.valued_to_year = cost.get("valued_to_year")
     st.sections["cost"] = (
         "ok", {"total_system_cost_eur": st.cost_at_target,
                "period_basis": st.period_basis,
@@ -819,6 +825,80 @@ def _stage_frontier(st: _Study) -> None:
     st.sections["frontier"] = (status, payload, note)
 
 
+def _front_margin_base(st: _Study) -> dict:
+    """The margin the front's margin ladder is built around, and its basis:
+    the session's reserve margin when one is set (it wins), else the engine's
+    assumed ``FRONT_MARGIN_BASE``, named as such (GK A, Q1)."""
+    from services.adequacy.front import FRONT_MARGIN_BASE
+    m = getattr(st.cfg, "reserve_margin", None)
+    # 0 switches the margin off (SolverConfig.reserve_margin), so it sets no base
+    if m is not None and m != 0:
+        return {"value": float(m), "assumed": False,
+                "basis": "the session's reserve margin"}
+    return {"value": FRONT_MARGIN_BASE, "assumed": True,
+            "basis": "assumed: front default, not a project setting"}
+
+
+def _stage_front(st: _Study) -> None:
+    """The multi-objective front (DC 01) on the pack-applied study copy:
+    opt-in, never in a pack default. ``run_front_study`` copies the network
+    once under the lock and never writes it, so later stages read the
+    ens_solve plan. The result goes to the ``eh_front`` sibling table; the
+    report's sections are unchanged."""
+    from services.adequacy import front as fr
+
+    def _skip(reason: str) -> None:
+        # no report section to fill: the record carries the reason
+        st.mark("front", "skipped", note=reason)
+
+    n_points = frontier_point_count(st.remaining(), st.budget_solves)
+    if n_points < 2:
+        return _skip(
+            f"not run: budget_solves leaves {st.remaining()} solve(s); a "
+            "front needs at least two points")
+    try:
+        with st.lock:
+            lever, lever_why = fr.choose_lever(st.network, None)
+        margin = _front_margin_base(st)
+        levels = fr.front_levels(
+            lever, n_points=n_points, ladder=st.pack.frontier_ladder,
+            ens_cap=st.ens_cap, margin_base=margin["value"])
+        result = fr.run_front_study(
+            st.network, st.lock, st.cfg, levels=levels, co2_caps_t=[None],
+            lever=lever, budget_solves=min(n_points, fr.MAX_FRONT_SOLVES),
+            mc_draws=st.mc_draws, seed=st.mc_seed, pack=st.pack,
+            log_queue=st.log_queue, stop_event=st.stop_event)
+    except (fr.FrontConfigError, fr.FrontBudgetError) as exc:
+        return _skip(f"front not established: {exc}")
+    except Exception as exc:  # noqa: BLE001 — degrade like every other stage
+        logger.exception("front failed")
+        partial = getattr(exc, "front_result", None) or {}
+        charged = int(partial.get("solves") or 0)
+        st.solves += charged
+        st.mark("front", "failed", note=f"front failed: {exc}",
+                solves_charged=charged)
+        return
+    charged = int(result["solves"])
+    st.solves += charged
+    result["levels_basis"] = (
+        "the pack's ENS target" if lever == "ens_cap" else margin["basis"])
+    result["margin_base"] = margin if lever == "reserve_margin" else None
+    result["ladder"] = [float(f) for f in st.pack.frontier_ladder]
+    result["solves_charged"] = charged
+    result["pack_hash"] = st.pack_h
+    if st.store is not None:
+        st.store["eh_front"] = result
+    n_ok = len([p for p in result["points"] if p["status"] == "ok"])
+    if result.get("aborted"):
+        st.aborted = True
+        st.mark("front", "aborted", solves_charged=charged,
+                note="front aborted mid-sweep")
+    else:
+        st.mark("front", "run", solves_charged=charged,
+                note=f"{n_ok} of {len(result['points'])} points solved "
+                     f"({lever}: {lever_why})")
+
+
 def _closed_import_links(network, pack) -> list[str]:
     """Import Links the pack closed (p_*_pu → 0, e.g. off_grid)."""
     out = []
@@ -1254,6 +1334,7 @@ _STAGE_HANDLERS = {
     "apply_pack": _stage_apply_pack,
     "ens_solve": _stage_ens_solve,
     "frontier": _stage_frontier,
+    "front": _stage_front,
     "mc_certify": _stage_mc_certify,
     "fmea_top": _stage_fmea_top,
     "redundancy": _stage_redundancy,
@@ -1359,6 +1440,8 @@ def run_eh_study(
 
     records: list[PipelineStageRecord] = []
     for name in DEFAULT_STAGES:
+        if not stage_has_row(name, requested):
+            continue  # no row: a study without it reads as before (F4)
         if name not in requested:
             note = None
             if name == "mc_certify" and certification_wanted(pack):
@@ -1387,7 +1470,7 @@ def run_eh_study(
         undo=lambda: None, pack_h=arch.pack_hash(pack),
         ens_cap=pack.availability.ens_cap_permyriad,
         achieved_ens_permyriad=None, achieved_shed_hours=None,
-        cost_at_target=None, period_basis=None, adequacy_report=None,
+        cost_at_target=None, period_basis=None, valued_to_year=None, adequacy_report=None,
         mc_lole_h=None, certified=None, executed=[], ens_met=None,
         fixed_plan=None,
     )
@@ -1515,6 +1598,7 @@ def run_eh_study(
         certified=st.certified,
         cost_at_target_eur=st.cost_at_target,
         period_basis=st.period_basis,
+        valued_to_year=st.valued_to_year,
         tea=tea_obj,
         gates=gates_obj,
         notes=pack_notes,

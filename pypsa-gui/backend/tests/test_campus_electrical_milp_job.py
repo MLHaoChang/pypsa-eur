@@ -223,6 +223,31 @@ def test_the_least_cost_run_is_made_first_when_there_is_none(hub, monkeypatch):
     finish(hub, engine)
 
 
+def test_the_summary_is_written_whole_never_truncated_in_place(hub, monkeypatch):
+    # The summary marks a finished job (_milp_results reads it while the job may
+    # be writing it): a truncate-then-write lets a status poll read "" mid-write.
+    from pathlib import Path
+
+    from services import atomic_io
+
+    atomic, real_atomic = [], atomic_io.atomic_write_text
+    monkeypatch.setattr(atomic_io, "atomic_write_text", lambda path, text, *a, **k: (
+        atomic.append(Path(path).name), real_atomic(path, text, *a, **k))[1])
+    real_write = Path.write_text
+
+    def write_text(self, *a, **k):
+        assert self.name != ce.MILP_SUMMARY_FILE, "the summary must not be truncated in place"
+        return real_write(self, *a, **k)
+
+    monkeypatch.setattr(Path, "write_text", write_text)
+    engine = FakeEngine(iterations=1)
+    monkeypatch.setattr(ce, "_milp_engine", engine)
+    ce.start_milp_job(hub, SETTINGS)
+    finish(hub, engine)
+    assert record_of(hub)["state"] == "done"
+    assert ce.MILP_SUMMARY_FILE in atomic
+
+
 def test_a_fresh_least_cost_run_with_the_same_settings_is_reused_and_otherwise_rerun(hub, monkeypatch):
     ce.run(hub, SETTINGS)
     runs = []

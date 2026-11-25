@@ -36,6 +36,7 @@ EXPORT_KEYS: tuple[str, ...] = (
     "certified",
     "cost_at_target_eur",
     "period_basis",
+    "valued_to_year",
     "excludes_shed_cost",
     "completeness",
     "sections",
@@ -487,6 +488,7 @@ def assemble_reference_design_report(
     certified: bool | None = None,
     cost_at_target_eur: float | None = None,
     period_basis: str | None = None,
+    valued_to_year: int | None = None,
     tea: TeaBlock | None = None,
     gates: GatesBlock | None = None,
     notes: list[str] | None = None,
@@ -513,6 +515,7 @@ def assemble_reference_design_report(
         certified=certified,
         cost_at_target_eur=cost_at_target_eur,
         period_basis=period_basis,  # type: ignore[arg-type]
+        valued_to_year=valued_to_year,
         sections=sections,
         completeness=completeness,
         pipeline=pipeline,

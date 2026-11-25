@@ -3,7 +3,7 @@
 
 # 13 A component edit discards the last run (not_run) instead of marking it stale
 
-Status: ready-for-agent
+Status: done
 Blocked by: none. Likely a regression of 04 (done; D1(a): "a value edit … reads stale").
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), walk W2 (shots `s29-stale-expert`, `s29-inv-after-edit`).
 Model: sonnet (diagnose first: `diagnosing-bugs` skill). Review: GK B.
@@ -18,13 +18,15 @@ After any edit the user loses sight of the last results until they re-run, and t
 
 ## Acceptance criteria
 
-- [ ] A failing test first: run, edit one component value through the route, then the flow's results freshness reads `stale` with the edited part named. The last run's figures stay readable and marked out of date.
-- [ ] Every component PUT route (generators, loads, lines, links, storage units, stores) behaves the same; the test is parametrised over them.
-- [ ] Expert Results shows the stale figures with an "Out of date" band and Run LOPF "(1 out of date)", matching the investment case.
-- [ ] End to end in the real app: IPP template › run › Expert › edit the battery's max power in the table › Results still shows the run, marked out of date, and so does the Investment case. Re-run → both fresh.
+- [x] A failing test first: run, edit one component value through the route, then the flow's results freshness reads `stale` with the edited part named. The run's verdict stays readable; its figures are withheld with a typed "out of date, re-run" until re-run (owner decision PG13-STALE-1: no reader recombines the old dispatch with edited inputs; serving the solve-time figures is issue 14).
+- [x] Every component PUT route (generators, loads, lines, links, storage units, stores) behaves the same; the test is parametrised over them.
+- [x] Expert Results shows the "Out of date" band and Run LOPF "(1 out of date)", matching the investment case, which keeps its own figures; the other result tables answer "out of date, re-run" (`X-Results-State: out_of_date`) instead of figures.
+- [x] End to end in the real app: IPP template › run › Expert › edit the battery's max power in the table › Results says the run is out of date, and so does the Investment case (which keeps its figures). Re-run → both fresh.
 
 ## Likely files
 
 `pypsa-gui/backend/routers/network.py` (component PUT routes), `pypsa-gui/backend/services/provenance_graph/`, `pypsa-gui/backend/services/flow_service.py` (results freshness), `pypsa-gui/frontend/src/hooks/useStaleRunKinds*`, the Results Summary empty state.
 
 ## Comments
+
+Done in PR #1960. Cause: the route middleware cleared the dispatch after every accepted `/api/network/*` write and `_update_component` dropped the edited row's result columns. A value edit through the six component PUT routes and the Expert table's `PATCH /_bulk` now keeps the run, so it reads `stale`; the investment-case report reads out of date on `dispatch` (route and verdict); the table's bulk save and a finished solve refetch the flow. Checked in the real app on the IPP template: run, investment case, edit `bess` in the Storage table, then the header "(1 out of date)", the Summary "Out of date" pill and the Investment case warning; re-run reads fresh (the investment case needs its own re-run). Transformer, bus and carrier edits are untouched.

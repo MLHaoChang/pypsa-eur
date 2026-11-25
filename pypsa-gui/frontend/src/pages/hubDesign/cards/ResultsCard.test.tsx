@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { kpiFigure, splitValueUnit } from '../../../utils/format'
 import { TERM_FALLBACK } from '../shared/Term'
+import { networkApi } from '../../../api/network'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -125,6 +126,21 @@ describe('ResultsCard cost label (gate B1)', () => {
       expect(cost.getAttribute('title')).not.toMatch(/goal/i)
     })
   }
+})
+
+describe('ResultsCard product cost (issue 28)', () => {
+  it('shows the hydrogen cost per kg from the study when it is established', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(study({ ...REPORT, tea: { lcoh_eur_per_kg: 2.345, lcoh_status: 'ok' } }))
+    mount()
+    const tile = await screen.findByTestId('hub-results-lcoh')
+    expect(tile.textContent).toContain('Cost of hydrogen')
+    expect(tile.querySelector('[data-kpi-value]')?.getAttribute('data-kpi-value')).toBe('€\u00a02.35/kg')
+  })
+  it('shows no hydrogen tile for a design with none', async () => {
+    mount()
+    await screen.findByTestId('hub-results-cost')
+    expect(screen.queryByTestId('hub-results-lcoh')).toBeNull()
+  })
 })
 
 describe('ResultsCard body', () => {
@@ -548,5 +564,15 @@ describe('no-verdict template: the shortfall tile agrees with the note (template
     expect(screen.getAllByText(/No reliability verdict for this site type/)).toHaveLength(1)
     // Only the cost tile keeps its "Why this number"; the shortfall tile has no figure.
     expect(screen.getAllByText('Why this number')).toHaveLength(1)
+  })
+})
+
+describe('ResultsCard horizon label (issue 28)', () => {
+  it('says the cost runs to the year the study recorded, and holds still when the inputs change', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(study({ ...REPORT, period_basis: 'npv_multi_period', valued_to_year: 2045 }))
+    vi.spyOn(networkApi, 'getInvestmentPeriods').mockResolvedValue({ periods: [2027, 2030, 2035], weightings: [] } as never)
+    mount()
+    const tile = await screen.findByTestId('hub-results-cost')
+    await waitFor(() => expect(tile.textContent).toContain('valued to 2045 over 18 years'))
   })
 })

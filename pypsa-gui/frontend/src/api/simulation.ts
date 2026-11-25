@@ -986,6 +986,8 @@ export interface EhReferenceDesignReport {
   certified?: boolean | null
   cost_at_target_eur?: number | null
   period_basis?: string | null
+  /** The year a multi-period study's cost runs to, recorded when it was solved (issue 28). */
+  valued_to_year?: number | null
   excludes_shed_cost?: boolean
   completeness?: Record<string, EhSectionStatus>
   sections?: Record<string, EhSectionState>
@@ -1436,6 +1438,29 @@ export interface HeadlineCard {
   delta: { value: number | null; pct: number | null; note: string | null } | null
   /** The figure per investment period, for a run with two or more; `basis` says what a point is. */
   trend: { basis: string; points: { period: number | string; value: number }[] } | null
+  /** `co2_annual` only (DC review 02): the CO₂ limit goal's limit (t CO₂/yr),
+   *  whether it was reached (bound), its cost (€/t, only when reached) and,
+   *  on a multi-period run, the period the figure is (the highest). */
+  limit_t_per_yr?: number | null
+  reached?: boolean
+  shadow_price_eur_per_t?: number | null
+  period?: number | string | null
+}
+/** `GET /results/co2_limit` (DC review 02, `services/solver/co2_cap.py`). */
+export interface Co2LimitResult {
+  /** null on a refusal of a limit that could not be read. */
+  limit_t_per_yr: number | null
+  /** Set when the solve under the limit was infeasible or the limit was refused. */
+  refusal?: {
+    /** `co2_cap_unreachable`, `co2_cap_invalid`, or another refusal's code. */
+    code: string
+    /** One plain sentence, the solve log's own. */
+    message: string
+    /** The least emissions reachable per period ("all" on a single-period run); null when not found. */
+    least_t_per_yr?: Record<string, number | null> | null
+    without_limit?: 'feasible' | 'infeasible' | 'not_found'
+    extra_solves?: number
+  } | null
 }
 /** The open project against its base case: the base itself, or a sensitivity case of it. */
 export interface HeadlineComparison {
@@ -1477,6 +1502,9 @@ export function isPricesWithheld(x: unknown): x is PricesWithheld {
 
 export const resultsApi = {
   // The strip says so itself when this fails (one message, not a toast as well).
+  // The CO₂ limit goal of the last solve (DC review 02); null when it had none. After an
+  // infeasible solve under the limit, `refusal` says so and names the least emissions reachable.
+  getCo2Limit: () => client.get<Co2LimitResult>('/results/co2_limit', { skipErrorToast: true }).then(r => r.status === 204 ? null : r.data),
   getHeadlineKpis: () => client.get<HeadlineKpis>('/results/headline_kpis', { skipErrorToast: true }).then(r => r.status === 204 ? null : r.data),
   // The same cards with the base case read as well; slower, so the strip asks after it has painted.
   getHeadlineComparison: () => client.get<HeadlineKpis>('/results/headline_kpis', { params: { compare: 1 }, skipErrorToast: true }).then(r => r.status === 204 ? null : r.data),
@@ -1623,11 +1651,14 @@ export const resultsApi = {
         investment_period: number | null
         scope: 'period' | 'horizon'
         cap_tCO2: number | null
-        used_tCO2: number
+        // null on a CO₂ limit goal row whose period's tonnes were not counted.
+        used_tCO2: number | null
         // null when the cap's dual is missing or non-finite (unknown).
         shadow_price_eur_per_tCO2: number | null
         slack_tCO2: number | null
-        binding: boolean
+        binding: boolean | null
+        // The CO₂ limit goal's own rows (DC review 02), named "CO₂ limit".
+        goal?: boolean
       }>
       is_multi_period: boolean
       // Per-investment-period breakdown. Empty on flat (single-period)

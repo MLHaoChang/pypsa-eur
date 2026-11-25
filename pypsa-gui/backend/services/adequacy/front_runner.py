@@ -284,6 +284,9 @@ def apply_front_point(
             raise
         finally:
             dirty_state.bump_inputs()
+        # The chosen point, read by both results surfaces (Guided §10 and
+        # Expert): which design was put on the network, at which revision.
+        record["applied"] = {"index": index, "network_revision": rev, "at": time.time()}
     if cleared and state_update is not None:
         state_update(status="idle", condition=None, objective=None, solve_time=None)
     return {

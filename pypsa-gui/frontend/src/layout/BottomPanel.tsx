@@ -767,6 +767,8 @@ function AssetTable({
       qc.invalidateQueries({ queryKey: nk(projectId, 'undoInfo') })
       qc.invalidateQueries({ queryKey: ['changelog'] })
       qc.invalidateQueries({ queryKey: nk(projectId, 'results') })
+      // The header's "(n out of date)" and the Results states read the flow's freshness (pg 13).
+      qc.invalidateQueries({ queryKey: nk(projectId, 'flow') })
       toast.success(`Updated ${r.updated} ${componentClass.toLowerCase()}(s)`)
     },
   })

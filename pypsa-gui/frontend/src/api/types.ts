@@ -228,6 +228,9 @@ export interface SolverConfig {
   // snapshot uses the period's price; periods missing from the dict fall
   // back to the scalar `co2_price`. Ignored on flat (single-period) networks.
   co2_price_per_period?: Record<string, number>
+  // The CO₂ limit goal (DC review 02, `services/solver/co2_cap.py`): t CO₂ per
+  // year, one cap row per investment period. null = off; 0 = no emissions.
+  co2_limit_t_per_yr?: number | null
   voll: number                       // €/MWh — when > 0, slack gens per bus
   // Reliability target (adequacy spec §5.1): unserved electrical energy cap
   // in parts per ten thousand (‱) of period demand; null = off.

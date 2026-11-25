@@ -70,6 +70,18 @@ def test_without_an_envelope_the_smoothing_disclosure_is_not_made():
     assert not any("smoothing" in d for d in ev.required_disclosures)
 
 
+def test_the_envelope_disclosure_names_the_load_the_scorecard_names():
+    """Issue 28: the report says what the scorecard calls the load, not always AI training."""
+    ev = _collect(grid_readiness={**_scorecard(), "load_words": "inference load"})
+    text = " ".join(ev.required_disclosures)
+    assert "read the inference load envelope" in text and "AI-training" not in text
+    site = " ".join(_collect(grid_readiness={**_scorecard(), "load_words": "site load"}).required_disclosures)
+    assert "read the site load envelope" in site and "before BESS smoothing" in site
+    assert "UPS" not in site.split("the ramp, oscillation")[1].split("mitigation")[0]
+    plain = " ".join(_collect(grid_readiness=_scorecard()).required_disclosures)
+    assert "read the AI-training load envelope" in plain      # no key: the report as it was
+
+
 def test_an_unreadable_scorecard_is_a_not_established_chapter():
     ev = _collect(grid_readiness={})
     assert ev.sections[chapters.GRID_READINESS].status == "not_established"

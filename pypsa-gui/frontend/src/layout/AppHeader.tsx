@@ -734,6 +734,8 @@ export default function AppHeader() {
           const proj = useUIStore.getState().currentProject
           qcRef.invalidateQueries({ queryKey: nk(proj, 'results') })
           qcRef.invalidateQueries({ queryKey: nk(proj, 'simulationStatus') })
+          // The header's "(n out of date)" reads the flow's freshness; a solve makes it fresh (pg 13).
+          qcRef.invalidateQueries({ queryKey: nk(proj, 'flow') })
           // Say it finished and where the answer is (UX assessment Q6). Open
           // Results only when nothing else is showing — the same rule the
           // failure branch uses, so a deliberately opened panel stays put.
