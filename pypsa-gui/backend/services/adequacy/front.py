@@ -57,6 +57,9 @@ MAX_ENS_PERMYRIAD = 10_000.0
 
 CO2_CAP_NAME = "co2_cap"
 LEVERS = ("ens_cap", "reserve_margin")
+# The margin the EH study's front ladder is built around when the session sets
+# none: an assumed planning margin, named in the result (``levels_basis``).
+FRONT_MARGIN_BASE = 0.10
 
 # Equality tolerances for "the same design" (capacities, cost) and for the
 # dominance comparison.
@@ -207,6 +210,41 @@ def check_budget(levels: list, caps: list, budget: int) -> int:
             f"the {budget}-solve budget; drop levels or caps"
         )
     return need
+
+
+def front_levels(
+    lever: str,
+    *,
+    n_points: int,
+    ladder,
+    ens_cap: float | None,
+    margin_base: float | None,
+) -> list[float]:
+    """The reliability levels for a lever: ``n_points`` of the ladder's
+    factors on the lever's own base, the base itself always one of them
+    (``eh_study.frontier_targets``, the frontier's rule). The ENS lever's base
+    is the ENS cap (‱), the margin lever's a margin fraction. A missing base
+    is a FrontConfigError naming it. The levels are not validated here:
+    ``check_front_request`` does that for the route and the stage alike."""
+    from services.adequacy.eh_study import frontier_targets
+
+    if lever not in LEVERS:
+        raise FrontConfigError(
+            f"unknown reliability lever {lever}; use one of {', '.join(LEVERS)}"
+        )
+    base = ens_cap if lever == "ens_cap" else margin_base
+    if base is None:
+        raise FrontConfigError(
+            "the ENS lever needs an ENS target (‱ of demand)"
+            if lever == "ens_cap"
+            else "the reserve-margin lever needs a base margin"
+        )
+    f = float(base)
+    if not math.isfinite(f) or f <= 0:
+        raise FrontConfigError(
+            f"the {lever} base {base} must be a positive, finite number"
+        )
+    return frontier_targets(f, int(n_points), ladder=tuple(ladder))
 
 
 # --------------------------------------------------------------------------
@@ -950,23 +988,29 @@ def run_front_study(
         "warning": non_convexity_warning(base, cfg),
         "aborted": False,
     }
-    with PyPSAService.solving_context(ProjectContext(network=base)):
-        _sweep(
-            result,
-            points,
-            base,
-            cfg,
-            lock,
-            lq,
-            lever_used,
-            lvls,
-            caps,
-            draws,
-            seed,
-            pack,
-            stop_event,
-        )
-    return _finish(result, points, cfg, lever_used, outage_model)
+    try:
+        with PyPSAService.solving_context(ProjectContext(network=base)):
+            _sweep(
+                result,
+                points,
+                base,
+                cfg,
+                lock,
+                lq,
+                lever_used,
+                lvls,
+                caps,
+                draws,
+                seed,
+                pack,
+                stop_event,
+            )
+        return _finish(result, points, cfg, lever_used, outage_model)
+    except Exception as exc:
+        # A caller that charges solves (the EH study) reads what was spent
+        # before the failure, as it does for the frontier.
+        exc.front_result = result  # type: ignore[attr-defined]
+        raise
 
 
 def _sweep(

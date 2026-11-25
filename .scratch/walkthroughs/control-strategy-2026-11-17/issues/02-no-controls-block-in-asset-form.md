@@ -3,7 +3,7 @@
 
 # 02: Converter control modes have no home in section 5; Guided cannot see or set them
 
-Status: ready-for-agent
+Status: done
 Impact: high
 Templates: Island Microgrid, Data Center Energy Hub, every template with a battery, PV, wind or UPS
 Found by: control-strategy walkthrough, 2026-11-17 (master 9491878d)

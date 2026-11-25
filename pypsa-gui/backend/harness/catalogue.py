@@ -187,7 +187,7 @@ EH_ARCHETYPE_ENUM = ["strong_grid", "weak_flexible", "off_grid"]
 # EH pipeline stages — mirrors models.energy_hub.EH_PIPELINE_STAGES (order
 # included). An explicit list must keep apply_pack + ens_solve.
 EH_STAGE_ENUM = [
-    "apply_pack", "ens_solve", "frontier", "mc_certify", "fmea_top",
+    "apply_pack", "ens_solve", "frontier", "front", "mc_certify", "fmea_top",
     "redundancy", "levers", "dtc_stress", "dtc_planning", "assemble",
 ]
 

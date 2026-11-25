@@ -275,6 +275,10 @@ def grid_readiness_payload(source: dict | None) -> dict | None:
         rows.append(row)
     payload = {"profile": dict(source.get("profile") or {}), "rows": rows,
                "summary": dict(source.get("summary") or {}), "envelope": bool(source.get("envelope"))}
+    # What the scorecard calls the load whose step it reads ("AI-training load", "site load", ...).
+    # Only when it names one, so a report without it keeps its evidence hash.
+    if isinstance(source.get("load_words"), str) and source["load_words"].strip():
+        payload["load_words"] = source["load_words"].strip()
     # Only when there are some, so a report without excluded rows keeps its evidence hash.
     excluded = [{"id": e.get("id"), "requirement": e.get("requirement"), "reason": e.get("reason")}
                 for e in source.get("excluded") or [] if isinstance(e, dict)]
@@ -336,8 +340,10 @@ def grid_readiness_disclosures(payload: dict) -> list[str]:
                    "the counts: " + "; ".join(f"{e['requirement'] or e['id']} ({e['reason']})"
                                                 for e in payload["excluded"]) + ".")
     if payload.get("envelope"):
-        out.append(f"{head} — the ramp, oscillation and voltage-change rows read the AI-training load "
-                   "envelope IT-side at the point of connection, before UPS/BESS smoothing: before "
+        words = payload.get("load_words") or "AI-training load"
+        backup = "BESS" if words == "site load" else "UPS/BESS"   # no UPS on a non-data-centre site
+        out.append(f"{head} — the ramp, oscillation and voltage-change rows read the {words} "
+                   f"envelope IT-side at the point of connection, before {backup} smoothing: before "
                    "mitigation, not final.")
     if any("after_battery" in r for r in payload["rows"]):
         out.append(f"{head} — {s.get('pass_after_mitigation', 0)} of {s.get('red_flags', 0)} red flag(s) "
