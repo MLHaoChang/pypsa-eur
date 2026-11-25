@@ -49,6 +49,12 @@ export function fmtCurrency(eur: number | null | undefined, digits = 2): string 
   return signFirstEuro(eur, `${body}${unit}`)
 }
 
+/** Tonnes of CO₂ as the CO₂ limit and its figures read them (DC review 02): never
+ *  scaled, grouped, whole tonnes (one decimal under 10): "50,000", "7.5". */
+export function fmtCo2Tonnes(t: number): string {
+  return t.toLocaleString('en', { maximumFractionDigits: Math.abs(t) < 10 ? 1 : 0 })
+}
+
 /** Tonnes of product, scaled like fmtEnergy: t, kt, Mt. */
 export function fmtTonnage(t: number | null | undefined, digits = 2): string {
   if (t == null || !Number.isFinite(t)) return '—'

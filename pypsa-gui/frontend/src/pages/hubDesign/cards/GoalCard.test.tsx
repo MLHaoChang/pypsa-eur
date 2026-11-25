@@ -18,6 +18,7 @@ import { CO2_LIMIT_HINT, CO2_LIMIT_ZERO } from '../../../components/reliabilityG
 import { CO2_LIMIT_ERROR } from '../../../hooks/useReliabilityGoal'
 import { GOAL_KEY_KEPT, GOAL_KEY_SITE_TYPE, GOAL_KEY_TEMPLATE, GOAL_KEY_TYPED } from './goalCardWords'
 import { nk } from '../../../utils/queryKeys'
+import { flowScopeKey } from '../../../components/flowScope/useFlowScope'
 
 vi.mock('../../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/simulation')>()
@@ -384,4 +385,47 @@ describe('GoalCard CO₂ limit (DC review 02)', () => {
     await waitFor(() => expect(simulationApi.updateSolverConfig).toHaveBeenCalledTimes(1))
     expect(vi.mocked(simulationApi.updateSolverConfig).mock.calls[0][0]).toEqual({ co2_limit_t_per_yr: 500 })
   })
+})
+
+describe('GoalCard CO₂ limit with Reliability out of scope (UX 29)', () => {
+  const scope = (reliability: string[]) => ({
+    scope: { version: 1, groups: reliability.length ? ['capacity', 'reliability'] : ['capacity'], source: 'project',
+      preset_id: 'eh_datacenter',
+      options: { capacity: ['sizing'], grid: [], control: [], reliability, commercial: [], handoff: [] } },
+    cards: [{ id: 'reliability', label: 'Reliability', locked_reason: null, intended: ['goal_study'],
+      sections: ['assets', 'scenarios'], chip: 'Reliability',
+      options: [{ id: 'goal_study', label: 'Reliability goal & study', status: 'available', reason: null }] }],
+    preset_id: 'eh_datacenter', preset_label: 'Data Center Energy Hub',
+    preset: { version: 1, groups: [], options: {} },
+  })
+  it('saves the CO₂ limit only: a hidden field\'s edit is never sent and its error never blocks', async () => {
+    getFlowScope.mockResolvedValue(scope(['goal_study']))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><GoalCard /></QueryClientProvider>)
+    const user = userEvent.setup()
+    await waitFor(() => expect(input('hub-goal-lole').disabled).toBe(false))
+    await user.clear(input('hub-goal-lole'))
+    await user.type(input('hub-goal-lole'), '-1')
+    expect(screen.getByTestId('hub-goal-error')).toBeTruthy()
+    // The user takes Reliability out of scope: its block hides with the bad edit in it.
+    getFlowScope.mockResolvedValue(scope([]))
+    await act(async () => { await client.invalidateQueries({ queryKey: flowScopeKey('Demo') }) })
+    await screen.findByTestId('hub-goal-out-of-scope-add')
+    expect(screen.queryByTestId('hub-goal-lole')).toBeNull()
+    expect(screen.queryByTestId('hub-goal-error')).toBeNull()
+    await user.type(input('hub-goal-co2'), '50000')
+    const save = screen.getByTestId('hub-goal-save') as HTMLButtonElement
+    expect(save.disabled).toBe(false)
+    await user.click(save)
+    await waitFor(() => expect(simulationApi.updateSolverConfig).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(simulationApi.updateSolverConfig).mock.calls[0][0]).toEqual({ co2_limit_t_per_yr: 50000 })
+  })
+})
+
+it('an invalid CO₂ limit says why Save goal is off, never "No changes to save"', async () => {
+  const user = mount()
+  await waitFor(() => expect(input('hub-goal-co2').disabled).toBe(false))
+  await user.type(input('hub-goal-co2'), '-5')
+  expect(screen.getByTestId('hub-goal-co2-error')).toBeTruthy()
+  expect(screen.queryByTestId('hub-goal-no-changes')).toBeNull()
 })

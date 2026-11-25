@@ -195,7 +195,7 @@ describe('headline words', () => {
     expect(headlineFigure(co2({ reached: false, shadow_price_eur_per_t: null })).basis)
       .toBe('Limit 1,000 t CO₂/yr · not reached')
     expect(headlineFigure(co2({ value: 12000, limit_t_per_yr: 12000, reached: true, shadow_price_eur_per_t: 1500, period: 2040 })))
-      .toEqual({ value: '12,000 t CO₂/yr', basis: 'Limit 12,000 t CO₂/yr · reached · cost of the limit €\u00a01.5\u00a0k/t · highest period, 2040' })
+      .toEqual({ value: '12,000 t CO₂/yr', basis: 'Limit 12,000 t CO₂/yr · reached · cost of the limit €\u00a01.5\u00a0k/t · per year, highest period 2040' })
     // A limit of 0 reads as one, never as no limit.
     expect(headlineFigure(co2({ value: 0, limit_t_per_yr: 0, reached: true, shadow_price_eur_per_t: null })).basis)
       .toBe('Limit 0 t CO₂/yr · reached')

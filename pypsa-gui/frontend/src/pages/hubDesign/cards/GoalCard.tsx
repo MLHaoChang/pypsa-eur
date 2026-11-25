@@ -12,7 +12,7 @@ import { nk } from '../../../utils/queryKeys'
 import StressScenarioEditor from '../../results/StressScenarioEditor'
 import { useHubDesignStore } from '../hubDesignStore'
 import { useUIStore } from '../../../store/uiStore'
-import { assumedLole, goalPatchFromEdits, useReliabilityGoal, type GoalEdits } from '../../../hooks/useReliabilityGoal'
+import { assumedLole, CO2_LIMIT, goalPatchFromEdits, useReliabilityGoal, type GoalEdits } from '../../../hooks/useReliabilityGoal'
 import { Co2LimitField, ReliabilityGoalEditor } from '../../../components/reliabilityGoal/ReliabilityGoalEditor'
 import { VOLL_TEXT } from '../delegate'
 import { GOAL_VOLL_LABEL } from './goalCardWords'
@@ -29,7 +29,12 @@ export function GoalCard() {
   const liveStudy = useLiveStudyRunning()
   const { goal, save } = useReliabilityGoal()
   const [edits, setEdits] = useState<GoalEdits>({})
-  const { patch, error: editError } = goalPatchFromEdits(edits)
+  // Section 8's scope (W4a): with Reliability › goal & study off, the goal
+  // hides and the study is not run. "Save goal" then saves the CO₂ limit only:
+  // a hidden field is never sent, and its error never blocks the save (UX 29).
+  const reliabilityOn = useInScope('reliability', 'goal_study')
+  const saved: GoalEdits = reliabilityOn ? edits : (CO2_LIMIT in edits ? { [CO2_LIMIT]: edits[CO2_LIMIT] } : {})
+  const { patch, error: editError } = goalPatchFromEdits(saved)
   const edited = Object.keys(patch).length > 0
   const saveGoal = () => save.mutate(patch, { onSuccess: () => setEdits({}) })
   const [advanced, setAdvanced] = useState(false)
@@ -46,10 +51,7 @@ export function GoalCard() {
     setAdvanced(true)
     useHubDesignStore.getState().setGoalAdvancedRequested(false)
   }, [advancedRequested])
-  // Section 8's scope (W4a): with Reliability › goal & study off, the goal
-  // hides and the study is not run. VOLL stays: the optimisation prices lost
-  // load with it (modular-cards §2).
-  const reliabilityOn = useInScope('reliability', 'goal_study')
+  // VOLL stays out of scope too: the optimisation prices lost load with it (modular-cards §2).
   // The CO₂ limit (DC review 02) is saved with the goal but is not a
   // reliability setting: it stays when the reliability goal is out of scope.
   const { data: cfg } = useQuery({
@@ -95,7 +97,7 @@ export function GoalCard() {
           className="rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
           {save.isPending ? 'Saving…' : 'Save goal'}
         </button>
-        {!edited && !save.isSuccess && (
+        {!edited && !editError && !save.isSuccess && (
           <span data-testid="hub-goal-no-changes" className="text-[12px] text-muted">
             No changes to save.
           </span>

@@ -33,12 +33,13 @@ export function Co2LimitRefusal({ mode }: { mode: 'guided' | 'expert' }) {
   const testId = mode === 'guided' ? 'hub-co2-refusal' : 'results-co2-refusal'
   return (
     <div role="status" data-testid={testId}
-      className="flex flex-col gap-1 rounded border border-warn/40 bg-warn/10 px-3 py-2 text-[12px] text-text">
-      <span>{refusal.message}</span>
-      {link && (
+      className="rounded border border-warn/40 bg-warn/10 px-3 py-2 text-[12px] text-text">
+      {/* The fix on the same line as the sentence (UX 29 (5)). */}
+      {refusal.message}
+      {link && <>{' '}
         <button type="button" data-testid={`${testId}-link`} onClick={() => openReliabilityGoal()}
-          className="self-start text-[12px] text-accent hover:underline">{link}</button>
-      )}
+          className="text-[12px] text-accent hover:underline">{link}</button>
+      </>}
     </div>
   )
 }

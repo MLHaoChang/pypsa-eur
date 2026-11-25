@@ -4,7 +4,7 @@
 // A label is the word its own tab already uses (parity: headlineWords.test.ts).
 import type { HeadlineCard, HeadlineComparison } from '../../api/simulation'
 import { chartFigure } from '../../components/charts/chartTheme'
-import { fmtCurrency, fmtEnergy } from '../../utils/format'
+import { fmtCo2Tonnes, fmtCurrency, fmtEnergy } from '../../utils/format'
 import { money } from '../../utils/money'
 import { HEADLINES } from './investment/financeModel'
 
@@ -81,10 +81,7 @@ export function headlineFigure(card: HeadlineCard): { value: string; basis?: str
   }
 }
 
-/** Tonnes of CO₂ as the limit field reads them: whole tonnes, grouped. */
-export function co2Number(t: number): string {
-  return t.toLocaleString('en', { maximumFractionDigits: t < 10 ? 1 : 0 })
-}
+const co2Number = fmtCo2Tonnes
 
 /** The line under the CO₂ figure: "Limit 1,000 t CO₂/yr · reached · cost of the
  *  limit € 85 /t", or "· not reached"; a multi-period run says which period the
@@ -97,7 +94,7 @@ export function co2LimitWords(card: HeadlineCard): string | undefined {
     parts.push('reached')
     if (card.shadow_price_eur_per_t != null) parts.push(`cost of the limit ${money(card.shadow_price_eur_per_t, 'EUR')}/t`)
   } else parts.push('not reached')
-  if (card.period != null) parts.push(`highest period, ${card.period}`)
+  if (card.period != null) parts.push(`per year, highest period ${card.period}`)
   return parts.join(' · ')
 }
 

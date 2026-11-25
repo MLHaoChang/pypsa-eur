@@ -21,6 +21,7 @@ import { AssumedChip } from '../AssumedChip'
 import { Term } from '../../pages/hubDesign/shared/Term'
 import { useGuide } from '../GuidedTour'
 import { InfoTip } from '../../layout/properties/cardKit'
+import { fmtCo2Tonnes } from '../../utils/format'
 
 /** The ENS target's hint, as Solver settings has always worded it. */
 export const ENS_HINT = "Caps unserved ELECTRICAL energy per investment period at this share (parts per ten thousand) of the period's demand. 0 = off. Adequate systems run ~0.1–1‱; GB's standard is 3 loss-of-load hours/yr. Requires a VOLL > 0."
@@ -30,8 +31,8 @@ const ALL_FIELDS: GoalNumberField[] = ['target_lole_h', 'ens_cap_permyriad', 'mc
 
 /** The CO₂ limit's label and its hint for an empty field (UX GO on DC 02). */
 export const CO2_LIMIT_LABEL = 'CO₂ limit'
-export const CO2_LIMIT_HINT = 'No limit. Type the most CO₂ the design may emit per year to make the optimiser meet it.'
-export const CO2_LIMIT_ZERO = 'A limit of 0: the design may emit no CO₂ at all.'
+export const CO2_LIMIT_HINT = `No CO₂ limit. Type the most CO₂ per year the site may emit, for example ${fmtCo2Tonnes(50_000)}.`
+export const CO2_LIMIT_ZERO = '0: the site may emit no CO₂ at all.'
 
 export function ReliabilityGoalEditor({
   mode, goal, edits, onChange, fields = ALL_FIELDS, disabled = false, co2Limit,
