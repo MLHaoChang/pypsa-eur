@@ -28,6 +28,8 @@ export interface FrontPointValues {
   co2_binding?: boolean | null
   /** "table:name" → built size, MW (MWh for a Store); null when unread. */
   capacities: Record<string, number | null>
+  /** Each capacity key's size unit, read off its bus (MW, MWh, t/h, t, MVA); null when not known. */
+  capacity_units?: Record<string, string | null>
 }
 
 export interface FrontPoint {
@@ -63,6 +65,8 @@ export interface FrontResult {
   warning?: string | null
   aborted?: boolean
   reference_co2_t_per_yr?: number | null
+  /** The case's currency (ISO code); every cost of the front is in it. */
+  currency?: string | null
 }
 
 /** GET /results/front and GET /results/eh_front: one shape. */

@@ -2,7 +2,7 @@
 // model for the Expert panel and the Guided section-10 tile, so the two read
 // the same rows (Guided/Expert parity). Pure: no React, no fetching.
 import type { FrontPoint, FrontRecord, FrontSource } from '../../../api/front'
-import { componentLabel } from '../../../utils/componentLabels'
+import { SYMBOL } from '../../../utils/money'
 
 /** Owner ruling (ag), verbatim: the figures after "Use this design" are the old network's. */
 export const OUT_OF_DATE_TEXT = 'Out of date: the inputs changed after the last run. Run again to see the figures.'
@@ -10,12 +10,6 @@ export const OUT_OF_DATE_TEXT = 'Out of date: the inputs changed after the last 
 export const SOURCE_WORDS: Record<FrontSource, string> = {
   front: 'Front study',
   eh_study: 'Energy Hub study',
-}
-
-/** The capacity table a point names ("generators:gas") → the component class. */
-const TABLE_CLASS: Record<string, string> = {
-  generators: 'Generator', storage_units: 'StorageUnit', stores: 'Store',
-  links: 'Link', lines: 'Line', transformers: 'Transformer',
 }
 
 /** Which record a surface shows: the one the user picked, else the Expert
@@ -37,9 +31,9 @@ export const fmtNum = (v: number | null | undefined): string =>
   v == null || !Number.isFinite(v) ? 'not read' : sig(v)
 
 export interface CostScale {
-  /** "million", "thousand" or "" (plain euros). */
+  /** "million", "thousand" or "" (plain units). */
   word: string
-  /** The one unit every cost in the view carries: "million €/yr". */
+  /** The one unit every cost in the view carries: "million €/yr", in the case's currency. */
   unit: string
   /** A cost in the scale, bare ("1.12", "0.70"): the header carries the unit. */
   cell: (v: number | null | undefined) => string
@@ -50,11 +44,13 @@ export interface CostScale {
 /** One cost scale per view, picked from the largest cost, so the chart's axis,
  *  the table's column and the capex/opex line always agree (UX 28: one unit
  *  per header, the numbers bare). */
-export function costScale(rows: FrontRow[]): CostScale {
+export function costScale(rows: FrontRow[], currency?: string | null): CostScale {
   const vals = rows.flatMap(r => [r.cost, r.capex, r.opex]).filter((v): v is number => v != null && Number.isFinite(v))
   const top = vals.length ? Math.max(...vals.map(Math.abs)) : 0
   const [div, word] = top >= 1e6 ? [1e6, 'million'] : top >= 1e3 ? [1e3, 'thousand'] : [1, '']
-  const unit = `${word ? `${word} ` : ''}€/yr`
+  // The case's currency (the result's `currency`), in money()'s symbols.
+  const cur = currency ? (SYMBOL[currency] ?? currency) : SYMBOL.EUR
+  const unit = `${word ? `${word} ` : ''}${cur}/yr`
   const cell = (v: number | null | undefined) => {
     if (v == null || !Number.isFinite(v)) return 'not read'
     const x = v / div
@@ -91,11 +87,11 @@ export function frontUnits(record: FrontRecord): FrontUnits {
     relUnit,
     relHeader: mc ? `EUE (${relUnit})` : `ENS in the dispatch model (${relUnit})`,
     loleUnit: `h${per}`,
-    levelHeader: res?.lever === 'ens_cap' ? 'ENS target (‱ of demand)' : 'Reserve margin (%)',
+    levelHeader: res?.lever === 'ens_cap' ? 'ENS target (per 10,000 of demand)' : 'Reserve margin (%)',
   }
 }
 
-export interface BuiltAsset { key: string; kind: string; name: string; size: string }
+export interface BuiltAsset { key: string; name: string; size: string }
 
 export interface FrontRow {
   /** Position in the record's points: what the apply route takes. */
@@ -130,14 +126,16 @@ function failureWords(p: FrontPoint): string {
   return 'This point did not solve'
 }
 
-function builtAssets(caps: Record<string, number | null> | undefined): BuiltAsset[] {
+/** Each built asset by name, with its size in the unit the backend read off
+ *  its bus (`capacity_units`: MW, t/h on a tonne bus…). No unit when none was
+ *  sent: never a guess. */
+function builtAssets(caps: Record<string, number | null> | undefined,
+  units: Record<string, string | null> | undefined): BuiltAsset[] {
   return Object.entries(caps ?? {}).map(([key, v]) => {
-    const [table, ...rest] = key.split(':')
-    const cls = TABLE_CLASS[table] ?? table
-    const unit = cls === 'Store' ? 'MWh' : 'MW'
+    const unit = units?.[key]
     return {
-      key, kind: componentLabel(cls), name: rest.join(':'),
-      size: v == null || !Number.isFinite(v) ? 'not read' : `${sig(v)} ${unit}`,
+      key, name: key.split(':').slice(1).join(':'),
+      size: v == null || !Number.isFinite(v) ? 'not read' : unit ? `${sig(v)} ${unit}` : sig(v),
     }
   })
 }
@@ -169,7 +167,7 @@ export function frontRows(record: FrontRecord): FrontRow[] {
       onFront: ok ? (p.on_front ?? null) : null,
       dominatedBy: (p.dominated_by ?? []).map(label),
       chosen: chosen === i,
-      built: ok ? builtAssets(v?.capacities) : [],
+      built: ok ? builtAssets(v?.capacities, v?.capacity_units) : [],
     }
   })
 }
@@ -202,13 +200,12 @@ export function frontWords(r: FrontRow): string {
   return `dominated by ${r.dominatedBy.join(', ')}`
 }
 
-// The CO2 colour scale: low emissions teal, high emissions orange. Literal
-// hex (an SVG fill in a Recharts shape), readable on the light and dark
-// surfaces alike; hue and lightness both change, so it does not rest on hue.
-export const CO2_LOW = '#0f766e'
-export const CO2_HIGH = '#ea580c'
-
-const hex = (c: string) => [1, 3, 5].map(k => parseInt(c.slice(k, k + 2), 16))
+// The CO2 colour scale: the --color-co2-low / --color-co2-high tokens
+// (index.css, both themes). A point mixes them by its share of the range;
+// hue and lightness both change, so the scale does not rest on hue. SVG takes
+// these through `style`, not presentation attributes (var() resolves there).
+export const CO2_LOW = 'var(--color-co2-low)'
+export const CO2_HIGH = 'var(--color-co2-high)'
 
 export interface Co2Scale { min: number | null; max: number | null; colour: (v: number | null) => string }
 
@@ -216,12 +213,12 @@ export function co2Scale(rows: FrontRow[]): Co2Scale {
   const vals = rows.filter(r => r.ok && r.co2 != null && Number.isFinite(r.co2)).map(r => r.co2 as number)
   const min = vals.length ? Math.min(...vals) : null
   const max = vals.length ? Math.max(...vals) : null
-  const [a, b] = [hex(CO2_LOW), hex(CO2_HIGH)]
   const colour = (v: number | null) => {
     if (v == null || min == null || max == null) return 'var(--color-muted)'
     const t = max > min ? (v - min) / (max - min) : 0
-    const c = a.map((x, k) => Math.round(x + (b[k] - x) * t).toString(16).padStart(2, '0'))
-    return `#${c.join('')}`
+    if (t <= 0) return CO2_LOW
+    if (t >= 1) return CO2_HIGH
+    return `color-mix(in srgb, ${CO2_HIGH} ${Math.round(t * 100)}%, ${CO2_LOW})`
   }
   return { min, max, colour }
 }

@@ -324,6 +324,55 @@ def _capacities(n) -> dict[str, float | None]:
     return out
 
 
+# The bus a size is measured on, per capacity table (lines and transformers
+# are rated in MVA, whatever their buses carry).
+_SIZE_BUS_COL = {
+    "generators": "bus",
+    "storage_units": "bus",
+    "stores": "bus",
+    "links": "bus0",
+}
+
+
+def capacity_units(n, keys) -> dict[str, str | None]:
+    """The unit of each capacity key's size, read off its bus the way the
+    Guided holds read it (``flow_service._size_unit``): MW / MWh on an energy
+    bus, t/h / t on a tonne bus, MVA for a line or transformer. None where the
+    bus's unit is not known: the panel then shows no unit, never a guess."""
+    from services.flow_service import _size_unit
+
+    out: dict[str, str | None] = {}
+    for key in keys:
+        table, _, name = key.partition(":")
+        if table in ("lines", "transformers"):
+            out[key] = "MVA"
+            continue
+        col = _SIZE_BUS_COL.get(table)
+        df = getattr(n, table, None)
+        if col is None or df is None or name not in df.index or col not in df.columns:
+            out[key] = None
+            continue
+        try:
+            out[key] = _size_unit(n, df.at[name, col], stock=table == "stores")
+        except Exception:  # noqa: BLE001 — an unreadable size bus has no known unit
+            out[key] = None
+    return out
+
+
+def _currency(cfg) -> str:
+    """The case's currency (the finance inputs' ``currency``), the one every
+    cost of the front is in; FinanceInputs' own default when none is set."""
+    from models.finance import FinanceInputs
+
+    raw = getattr(cfg, "finance", None)
+    cur = (
+        raw.get("currency") if isinstance(raw, dict) else getattr(raw, "currency", None)
+    )
+    if isinstance(cur, str) and len(cur) == 3:
+        return cur
+    return FinanceInputs.model_fields["currency"].default
+
+
 _CAPACITY_VARS = ("p_nom", "e_nom", "s_nom")
 # PyPSA subtracts the capital cost of extendables' existing capacity through a
 # fixed variable of this name: a capacity term, so it belongs to capex.
@@ -527,7 +576,8 @@ def _solve_point(base, cfg, lock, log_queue, lever, level, cap):
             "co2_t_per_yr": co2,
             "co2_shadow_eur_per_t": shadow,
             "co2_binding": co2_bind,
-            "capacities": _capacities(work),
+            "capacities": (caps := _capacities(work)),
+            "capacity_units": capacity_units(work, caps),
             "excludes_shed_cost": True,
         },
     )
@@ -735,9 +785,9 @@ def degenerate_findings(
             axes["ens_cap"] = {
                 "text": (
                     f"The ENS target never bound at any of {len(ok)} points: "
-                    f"{why}at VOLL {_fmt(voll)} EUR/MWh serving every MWh is "
+                    f"{why}at a value of lost load of {_fmt(voll)} €/MWh serving every MWh is "
                     "already the cheapest plan. Use the reserve-margin lever, "
-                    "lower VOLL, or read the sampled-outage LOLE per point."
+                    "lower the value of lost load, or read the sampled-outage LOLE per point."
                 ),
                 "levers": ["reserve_margin", "lower_voll", "outage_sampling"],
             }
@@ -756,7 +806,7 @@ def degenerate_findings(
     if capped and not any(co2_b) and any(b is None for b in co2_b):
         axes["co2"] = {
             "text": (
-                f"Whether the CO2 limit bound could not be read at "
+                f"Whether the CO₂ limit bound could not be read at "
                 f"{sum(b is None for b in co2_b)} of {len(capped)} capped "
                 "points, and it did not bind at the rest."
             ),
@@ -773,7 +823,7 @@ def degenerate_findings(
         )
         axes["co2"] = {
             "text": (
-                f"The CO2 limit never bound: {ref}within every limit swept "
+                f"The CO₂ limit never bound: {ref}within every limit swept "
                 f"(lowest {_fmt(lowest)} t/yr). Sweep limits below the "
                 "unconstrained emissions."
             ),
@@ -982,6 +1032,7 @@ def run_front_study(
             "the rest (dispatch, fuel, import tariff, CO2 price)"
         ),
         "points": points,
+        "currency": _currency(cfg),
         "reference_co2_t_per_yr": None,
         "warning": non_convexity_warning(base, cfg),
         "aborted": False,

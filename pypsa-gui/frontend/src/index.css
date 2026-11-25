@@ -135,6 +135,10 @@
   --color-series-6: #4f46e5;
   --color-series-7: #e11d48;
   --color-series-8: #047857;
+  /* The CO2 colour scale (the multi-objective front, DC 01): low emissions to
+     high; hue and lightness both change. */
+  --color-co2-low: #0f766e;
+  --color-co2-high: #c2410c;
 
   /* Asset-category coding */
   --color-cat-thermal: #dc2626;
@@ -330,6 +334,8 @@
   --color-series-4: #eab308;
   --color-series-6: #818cf8;
   --color-series-8: #64748b;
+  --color-co2-low: #2dd4bf;
+  --color-co2-high: #fb923c;
 }
 
 /* ── Compact density overrides ─────────────────────────────────────────────

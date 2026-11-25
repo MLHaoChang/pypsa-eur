@@ -19,11 +19,15 @@ describe('frontModel', () => {
     expect(frontWords(rows[0])).toBe('on the front')
   })
 
-  it('names built capacities in the component words, MWh for a Store', () => {
+  it('sizes built capacities in the unit the backend sent, and none when it sent none', () => {
     const b = frontRows(record())[0].built
-    expect(b.map(x => `${x.kind} ${x.name} ${x.size}`)).toEqual([
-      'Generator gas_turbine 10 MW', 'Storage bess 4 MW', 'Store h2_tank 20 MWh',
-    ])
+    expect(b.map(x => `${x.name} ${x.size}`)).toEqual(['gas_turbine 10 MW', 'bess 4 MW', 'h2_tank 20 MWh'])
+    const pts = [point(0)]
+    pts[0].point!.capacities = { 'links:crusher': 12, 'stores:pile': 300, 'generators:odd': 5 }
+    pts[0].point!.capacity_units = { 'links:crusher': 't/h', 'stores:pile': 't', 'generators:odd': null }
+    expect(frontRows(record({}, result(pts)))[0].built.map(x => x.size)).toEqual(['12 t/h', '300 t', '5'])
+    delete pts[0].point!.capacity_units
+    expect(frontRows(record({}, result(pts)))[0].built.map(x => x.size)).toEqual(['12', '300', '5'])
   })
 
   it('gives one unit per header, per year only when the horizon is a year', () => {
@@ -33,14 +37,16 @@ describe('frontModel', () => {
     pts[1].mc!.time_basis = 'hours_per_horizon'
     expect(frontUnits(record({}, result(pts))).relHeader).toBe('EUE (MWh per modelled horizon)')
     const lp = frontUnits(record({}, result([point(0)], { reliability_basis: 'lp_ens', lever: 'ens_cap' })))
-    expect(lp).toMatchObject({ basis: 'lp', relHeader: 'ENS in the dispatch model (MWh)', levelHeader: 'ENS target (‱ of demand)' })
+    expect(lp).toMatchObject({ basis: 'lp', relHeader: 'ENS in the dispatch model (MWh)', levelHeader: 'ENS target (per 10,000 of demand)' })
   })
 
-  it('scales CO2 from the lowest to the highest emissions, both ends known', () => {
+  it('scales CO2 from the lowest to the highest emissions, both ends the theme tokens', () => {
     const s = co2Scale(frontRows(record()))
     expect([s.min, s.max]).toEqual([1500, 2000])
+    expect([CO2_LOW, CO2_HIGH]).toEqual(['var(--color-co2-low)', 'var(--color-co2-high)'])
     expect(s.colour(1500)).toBe(CO2_LOW)
     expect(s.colour(2000)).toBe(CO2_HIGH)
+    expect(s.colour(1750)).toBe('color-mix(in srgb, var(--color-co2-high) 50%, var(--color-co2-low))')
   })
 
   it('the Expert study wins unless the user picked the Energy Hub one', () => {
@@ -92,5 +98,8 @@ describe('frontModel', () => {
     expect(k.unit).toBe('thousand €/yr')
     expect([k.cell(84_000), k.cell(25_200)]).toEqual(['84.0', '25.2'])
     expect(costScale(frontRows(record({}, result([point(0, { cost: 900 })])))).unit).toBe('€/yr')
+    // The case's currency, in money()'s symbols.
+    expect(costScale(frontRows(record()), 'GBP').unit).toBe('million £/yr')
+    expect(costScale(frontRows(record()), 'CHF').unit).toBe('million CHF/yr')
   })
 })

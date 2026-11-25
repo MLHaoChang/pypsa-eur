@@ -17,7 +17,7 @@ export const FRONT_SECTION = 'front'
 
 const LEVER_LABEL: Record<FrontLever, string> = {
   reserve_margin: 'Reserve margin (%)',
-  ens_cap: 'ENS target (‱ of demand)',
+  ens_cap: 'ENS target (per 10,000 of demand)',
 }
 
 /** "10, 15, 20" → numbers; null when a part is not a number. */

@@ -19,6 +19,7 @@ export function point(i: number, o: Partial<{
       lp_ens_mwh: 0, reliability_binding: true,
       co2_t_per_yr: o.co2 ?? 2000 - i * 100, co2_binding: o.cap != null,
       capacities: { 'generators:gas_turbine': 10 + i, 'storage_units:bess': 4 + i, 'stores:h2_tank': 20 },
+      capacity_units: { 'generators:gas_turbine': 'MW', 'storage_units:bess': 'MW', 'stores:h2_tank': 'MWh' },
     },
     mc: status !== 'ok' ? null : {
       lole_hours: lole, lole_ci: [lole * 0.8, lole * 1.2], eue_mwh: eue, eue_ci: [eue * 0.75, eue * 1.25],
@@ -32,7 +33,7 @@ export function point(i: number, o: Partial<{
 export function result(points: FrontPoint[], o: Partial<FrontResult> = {}): FrontResult {
   return {
     lever: 'reserve_margin', levels: [0.1, 0.15, 0.2], co2_caps_t_per_yr: [null, 1500],
-    points, reliability_basis: 'mc_eue', reliability_basis_note: null,
+    points, currency: 'EUR', reliability_basis: 'mc_eue', reliability_basis_note: null,
     degenerate: { axes: {}, all: false, text: null }, warning: null, aborted: false, ...o,
   }
 }

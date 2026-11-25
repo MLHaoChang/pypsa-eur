@@ -10,7 +10,7 @@ import {
 } from 'recharts'
 import { frontApi, type FrontRecord, type FrontSource } from '../../../api/front'
 import { networkApi } from '../../../api/network'
-import ResultState, { StateAction } from '../../../components/ResultState'
+import ResultState, { StateAction, StatePill } from '../../../components/ResultState'
 import AssetName from '../../../components/AssetName'
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
@@ -70,24 +70,24 @@ function FrontKey({ rows, unitsRel, showCi, testId }: { rows: FrontRow[]; unitsR
         )}
       </span>
       <span className="inline-flex items-center gap-1">
-        <svg width="10" height="10" aria-hidden><circle cx="5" cy="5" r="4" fill={CO2_LOW} /></svg>
-        filled: on the front
+        <svg width="10" height="10" aria-hidden><circle cx="5" cy="5" r="4" style={{ fill: CO2_LOW }} /></svg>
+        filled = on the front
       </span>
       <span className="inline-flex items-center gap-1" data-testid={`${testId}-key-hollow`}>
-        <svg width="10" height="10" aria-hidden><circle cx="5" cy="5" r="3.5" fill="none" stroke="var(--color-muted)" strokeWidth="1.5" /></svg>
-        hollow: dominated, another point is no worse on cost, reliability and CO₂, and better on one
+        <svg width="10" height="10" aria-hidden><circle cx="5" cy="5" r="3.5" fill="none" style={{ stroke: 'var(--color-muted)' }} strokeWidth="1.5" /></svg>
+        hollow = dominated: another point is no worse on cost, reliability and CO₂, and better on one
         {anyDominated ? '' : ' (none here)'}
       </span>
       {showCi && (
         <span className="inline-flex items-center gap-1" data-testid={`${testId}-key-ci`}>
-          <svg width="14" height="10" aria-hidden><path d="M1 2v6M1 5h12M13 2v6" stroke="var(--color-muted)" fill="none" /></svg>
-          whiskers: 95 % confidence interval (CI) of the EUE, {unitsRel}
+          <svg width="14" height="10" aria-hidden><path d="M1 2v6M1 5h12M13 2v6" style={{ stroke: 'var(--color-muted)' }} fill="none" /></svg>
+          whiskers = 95 % confidence interval (CI) of the EUE, {unitsRel}
         </span>
       )}
       {anyChosen && (
         <span className="inline-flex items-center gap-1" data-testid={`${testId}-key-chosen`}>
-          <svg width="12" height="12" aria-hidden><circle cx="6" cy="6" r="5" fill="none" stroke="var(--color-text)" strokeWidth="1.5" /></svg>
-          ringed: the design you chose
+          <svg width="12" height="12" aria-hidden><circle cx="6" cy="6" r="5" fill="none" style={{ stroke: 'var(--color-text)' }} strokeWidth="1.5" /></svg>
+          ringed = the design you chose
         </span>
       )}
     </div>
@@ -102,16 +102,19 @@ function PointShape(props: { cx?: number; cy?: number; payload?: ChartDatum }) {
   const hollow = payload.row.onFront === false
   return (
     <g>
-      {payload.row.chosen && <circle cx={cx} cy={cy} r={8} fill="none" stroke="var(--color-text)" strokeWidth={1.5} />}
+      {payload.row.chosen && <circle cx={cx} cy={cy} r={8} fill="none" style={{ stroke: 'var(--color-text)' }} strokeWidth={1.5} />}
+      {/* Colours through `style`: the CO2 tokens are var() and color-mix(), which presentation attributes do not resolve. */}
       <circle cx={cx} cy={cy} r={4.5}
-        fill={hollow ? 'none' : payload.colour} stroke={payload.colour} strokeWidth={hollow ? 1.75 : 1} />
+        style={{ fill: hollow ? 'none' : payload.colour, stroke: payload.colour }} strokeWidth={hollow ? 1.75 : 1} />
     </g>
   )
 }
 
-function FrontChart({ rows, relHeader, relUnit, testId }: { rows: FrontRow[]; relHeader: string; relUnit: string; testId: string }) {
+function FrontChart({ rows, relHeader, relUnit, currency, testId }: {
+  rows: FrontRow[]; relHeader: string; relUnit: string; currency?: string | null; testId: string
+}) {
   const scale = co2Scale(rows)
-  const cost = costScale(rows)
+  const cost = costScale(rows, currency)
   const data: ChartDatum[] = rows
     .filter(r => r.ok && r.rel != null && r.cost != null)
     .map(r => ({
@@ -159,9 +162,11 @@ function FrontChart({ rows, relHeader, relUnit, testId }: { rows: FrontRow[]; re
   )
 }
 
-function FrontTable({ record, rows, onUse, useDisabled, pendingIndex, testId }: {
+function FrontTable({ record, rows, showUse, onUse, useDisabled, pendingIndex, testId }: {
   record: FrontRecord
   rows: FrontRow[]
+  /** The Use column: the Expert study only, and never on the read-only Guided tile. */
+  showUse: boolean
   onUse: (i: number) => void
   useDisabled: boolean
   pendingIndex: number | null
@@ -169,13 +174,13 @@ function FrontTable({ record, rows, onUse, useDisabled, pendingIndex, testId }: 
 }) {
   const u = frontUnits(record)
   const scale = co2Scale(rows)
-  const cost = costScale(rows)
+  const cost = costScale(rows, record.result?.currency)
   const th = 'text-left font-medium py-1 pr-2 align-bottom'
   // Numeric columns: a left gutter (cells too), so neighbouring figures
   // never touch at the Guided card's width.
   const thNum = `${th} pl-3 text-right`
   // Columns after Point, level and CO2 limit, for a failed point's one cell.
-  const rest = 4 + (u.basis === 'mc' ? 1 : 0) + (record.applicable ? 1 : 0)
+  const rest = 4 + (u.basis === 'mc' ? 1 : 0) + (showUse ? 1 : 0)
   return (
     <div className="overflow-x-auto">
       <table data-testid={`${testId}-table`} className="w-full text-[10px]">
@@ -189,7 +194,7 @@ function FrontTable({ record, rows, onUse, useDisabled, pendingIndex, testId }: 
             {u.basis === 'mc' && <th className={thNum}>LOLE ({u.loleUnit}) · CI</th>}
             <th className={thNum}>CO₂ (t/yr)</th>
             <th className={th}>Front</th>
-            {record.applicable && <th className={th}><span className="sr-only">Use</span></th>}
+            {showUse && <th className={th}><span className="sr-only">Use</span></th>}
           </tr>
         </thead>
         <tbody>
@@ -200,8 +205,8 @@ function FrontTable({ record, rows, onUse, useDisabled, pendingIndex, testId }: 
                 <span className="inline-flex items-center gap-1">
                   {r.ok && (
                     <svg width="10" height="10" aria-hidden>
-                      <circle cx="5" cy="5" r="3.5" fill={r.onFront === false ? 'none' : scale.colour(r.co2)}
-                        stroke={scale.colour(r.co2)} strokeWidth="1.5" />
+                      <circle cx="5" cy="5" r="3.5" strokeWidth="1.5"
+                        style={{ fill: r.onFront === false ? 'none' : scale.colour(r.co2), stroke: scale.colour(r.co2) }} />
                     </svg>
                   )}
                   {r.label}
@@ -225,12 +230,12 @@ function FrontTable({ record, rows, onUse, useDisabled, pendingIndex, testId }: 
                   )}
                   <td className="pl-3 pr-2 text-right font-mono whitespace-nowrap">{fmtNum(r.co2)}</td>
                   <td className="pr-2 whitespace-nowrap">{frontWords(r)}</td>
-                  {record.applicable && (
+                  {showUse && (
                     <td className="whitespace-nowrap">
                       <button type="button" data-testid={`${testId}-use-${r.index}`}
                         disabled={useDisabled || pendingIndex != null}
                         onClick={() => onUse(r.index)}
-                        className="rounded border border-border px-2 py-0.5 text-[10px] font-semibold text-text hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-40">
+                        className="rounded border border-border px-2 py-0.5 text-[10px] font-semibold text-text hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-60">
                         {pendingIndex === r.index ? 'Applying…' : 'Use this design'}
                       </button>
                     </td>
@@ -247,7 +252,7 @@ function FrontTable({ record, rows, onUse, useDisabled, pendingIndex, testId }: 
                 <td colSpan={2 + rest} className="pb-1 pr-2 text-muted">
                   Capex {cost.cell(r.capex)} · opex {cost.cell(r.opex)} {cost.unit} · built: {r.built.map((b, k) => (
                     <span key={b.key} className="whitespace-nowrap">
-                      {k > 0 && ' · '}{b.kind} <AssetName id={b.name} /> {b.size}
+                      {k > 0 && ', '}<AssetName id={b.name} /> · {b.size}
                     </span>
                   ))}
                 </td>
@@ -261,10 +266,12 @@ function FrontTable({ record, rows, onUse, useDisabled, pendingIndex, testId }: 
 }
 
 /** The front of one or two records, with the source switch when both exist. */
-export function FrontView({ front, eh, testId, runStudy }: {
+export function FrontView({ front, eh, testId, runStudy, readOnly = false }: {
   front: FrontRecord | null
   eh: FrontRecord | null
   testId: string
+  /** The Guided tile: no "Use this design"; a design is chosen in Expert. */
+  readOnly?: boolean
   /** What "Run again" means here when the study's own figures are out of date. */
   runStudy?: { label: string; onClick: () => void }
 }) {
@@ -298,6 +305,7 @@ export function FrontView({ front, eh, testId, runStudy }: {
   const res = record.result
   const rows = frontRows(record)
   const u = frontUnits(record)
+  const canUse = record.applicable && !readOnly
   const notices = frontNotices(record)
   const edited = record.edited_since_study === true
   const appliedHere = record.applied != null
@@ -335,9 +343,11 @@ export function FrontView({ front, eh, testId, runStudy }: {
           </p>
 
           {edited && (
+            // The app's out-of-date state (ResultState's pill), then ruling (ag)'s sentence and the re-solve.
             <div role="status" data-testid={`${testId}-out-of-date`}
-              className="flex flex-wrap items-center gap-2 rounded border border-warn/50 bg-warn/10 px-3 py-1.5 text-[11px] text-warn">
-              <span>{OUT_OF_DATE_TEXT}</span>
+              className="flex flex-col gap-1.5 rounded-[8px] border border-border bg-bg-2 px-3 py-2.5">
+              <StatePill state="stale" />
+              <p className="text-[11px] text-text">{OUT_OF_DATE_TEXT}</p>
               {appliedHere
                 ? <StateAction action={{ label: 'Run the solve', onClick: requestRunSolve }} />
                 : runStudy && <StateAction action={runStudy} />}
@@ -356,8 +366,8 @@ export function FrontView({ front, eh, testId, runStudy }: {
           )}
 
           <FrontKey rows={rows} unitsRel={u.relUnit} showCi={rows.some(r => r.relCi)} testId={testId} />
-          <div className={edited ? 'opacity-60' : undefined}>
-            <FrontChart rows={rows} relHeader={u.relHeader} relUnit={u.relUnit} testId={testId} />
+          <div className={edited ? 'opacity-80' : undefined}>
+            <FrontChart rows={rows} relHeader={u.relHeader} relUnit={u.relUnit} currency={res.currency} testId={testId} />
           </div>
 
           {refusal && (
@@ -370,11 +380,11 @@ export function FrontView({ front, eh, testId, runStudy }: {
               )}
             </p>
           )}
-          {record.applicable && edited && !appliedHere && (
+          {canUse && edited && !appliedHere && (
             <p className={muted}>The designs cannot be used until the study runs again on the edited network.</p>
           )}
-          <div className={edited ? 'opacity-60' : undefined}>
-            <FrontTable record={record} rows={rows} testId={testId}
+          <div className={edited ? 'opacity-80' : undefined}>
+            <FrontTable record={record} rows={rows} testId={testId} showUse={canUse}
               onUse={i => apply.mutate({ index: i, fresh: false })}
               useDisabled={edited} pendingIndex={apply.isPending ? (apply.variables?.index ?? null) : null} />
           </div>
