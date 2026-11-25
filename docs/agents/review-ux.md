@@ -117,6 +117,12 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - (ac) A text control with the sentence colour and no underline is not a control: use the shared `Btn` or an ink underlined link (#1913).
 - (ad) Euro amounts put the minus before the euro sign, "-€16.31 M", through the one shared helper `signFirstEuro` in `utils/format.ts` (#1836).
 - (ae) A red link is the existing text-link token (accent red). It is not blocking; log it for UI-COHESION-1 (UX (ae)).
+- (af) A ">" or link never targets a place that cannot change the value. Use plain text and file a follow-up issue instead (CS-B Q3).
+- (ag) A results surface whose figures are withheld after an edit says "Out of date: the inputs changed after the last run. Run again to see the figures.", never "Not run yet". The state is per project and needs the flow's stale flag (#1960).
+- (ah) One cause sentence per reason across UI, chat and workbook, pinned by a parity test (#1994).
+- (ai) Shots must not contradict the state they claim, e.g. "not run yet" pills behind a solved-run message (#1994).
+- (aj) Backend-built table text (criteria, notes) follows the sentence rules: no "; " chains, no nested brackets, mm² (#1983).
+- (ak) Data in one cell is separated with "·" (rating · peak; figure · unit counts).
 
 ## Master merges
 
