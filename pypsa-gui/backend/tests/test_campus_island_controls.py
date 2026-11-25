@@ -332,6 +332,37 @@ def test_a_switch_under_the_project_preset_opts_out_this_unit_only(project):  # 
     assert uc["bess"].get("preset") is None and uc["pv"]["preset"] == "voltage_support"
 
 
+def test_an_opted_out_unit_switched_to_the_project_preset_s_mode_is_written(project):  # noqa: F811
+    """The unit's own ``"preset": null`` wins over the project preset: its
+    effective mode is its own gfm_droop, so gfm_vsm is a switch (GK B3, P2)."""
+    cfg = _cfg(preset="grid_forming_support")
+    cfg["units"]["bess"] = {
+        **_cfg()["units"]["bess"],
+        "preset": None,
+    }
+    ce.save_island(project, cfg)
+    ce.patch_island(project, {"units": {"bess": {"control": "gfm_vsm"}}})
+    bess = _stored(project)["units"]["bess"]
+    assert bess["preset"] is None and bess["control"] == "gfm_vsm"
+    assert bess["H_v_s"] == {"value": 4.0, "source": "assumed"}
+    assert "tau_f_s" not in bess
+
+
+def test_a_unit_s_own_preset_is_the_one_a_switch_materialises(project):  # noqa: F811
+    """The bess runs its own voltage_support (gfl_qu), not the project's
+    grid_forming_support (gfm_vsm): a switch to gfm_vsm materialises the
+    unit's preset, so its pf_rated 0.9 is kept, not the project's 0.95."""
+    cfg = _cfg(preset="grid_forming_support")
+    cfg["units"]["bess"]["preset"] = "voltage_support"
+    ce.save_island(project, cfg)
+    ce.patch_island(project, {"units": {"bess": {"control": "gfm_vsm"}}})
+    bess = _stored(project)["units"]["bess"]
+    assert bess["preset"] is None and bess["control"] == "gfm_vsm"
+    assert bess["pf_rated"] == {"value": 0.9, "source": "assumed"}
+    assert bess["H_v_s"] == {"value": 4.0, "source": "assumed"}
+    assert "qu_points" not in bess
+
+
 def test_a_client_cannot_opt_out_with_null(preset_island):
     text = _sidecar_path(preset_island).read_text()
     with pytest.raises(HTTPException) as exc:
