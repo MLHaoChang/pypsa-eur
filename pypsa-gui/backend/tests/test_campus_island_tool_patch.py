@@ -176,17 +176,37 @@ def test_route_and_tool_patch_leave_byte_equal_config(saved):
 SWITCH = {"units": {"bess": {"control": "gfm_vsm"}}}
 
 
-def test_a_switch_card_shows_each_dropped_field_as_removed_and_each_filled_one(grid, saved):  # noqa: F811
+def test_a_switch_card_shows_each_dropped_field_as_removed_and_each_filled_one(
+    grid,  # noqa: F811
+    saved,
+):
     frames, cards, result = _dispatch(
-        grid, "campus_set_island_config", {"project_id": HUB, "patch": SWITCH, "base": _rev(saved)})
+        grid,
+        "campus_set_island_config",
+        {"project_id": HUB, "patch": SWITCH, "base": _rev(saved)},
+    )
     assert len(cards) == 1
     rows = {r["field"]: r for r in cards[0]["edit_card"]["rows"] if r["role"] != "note"}
-    assert (rows["units.bess.control"]["old"], rows["units.bess.control"]["new"]) == ("gfm_droop", "gfm_vsm")
-    dropped = rows["units.bess.tau_f_s.value"]                           # gfm_droop's, dropped
-    assert (dropped["old"], dropped["new"], dropped["words"]["new"]) == (0.1, None, "removed")
-    assert (rows["units.bess.H_v_s.value"]["old"], rows["units.bess.H_v_s.value"]["new"]) == (None, 4.0)
+    assert (rows["units.bess.control"]["old"], rows["units.bess.control"]["new"]) == (
+        "gfm_droop",
+        "gfm_vsm",
+    )
+    dropped = rows["units.bess.tau_f_s.value"]  # gfm_droop's, dropped
+    assert (dropped["old"], dropped["new"], dropped["words"]["new"]) == (
+        0.1,
+        None,
+        "removed",
+    )
+    assert (
+        rows["units.bess.H_v_s.value"]["old"],
+        rows["units.bess.H_v_s.value"]["new"],
+    ) == (None, 4.0)
     assert rows["units.bess.H_v_s.source"]["new"] == "assumed"
-    assert not any(f.startswith(("units.bess.droop_pct", "units.bess.pf_rated")) for f in rows)  # kept
+    for changed in ("units.bess.control", "units.bess.H_v_s.value"):  # kept or added
+        assert rows[changed].get("words", {}).get("new") != "removed"
+    assert not any(
+        f.startswith(("units.bess.droop_pct", "units.bess.pf_rated")) for f in rows
+    )  # kept
 
 
 def test_route_and_tool_switch_leave_byte_equal_config(saved):

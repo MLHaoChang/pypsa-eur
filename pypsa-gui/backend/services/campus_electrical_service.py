@@ -1810,7 +1810,7 @@ def _switch_control(where: str, unit: dict, change: dict, project_preset: str | 
     if kind not in CONVERTER_KINDS:
         raise _bad_patch(f"{where}.control", f"a {kind} unit has no control mode")
     if new not in CONTROLS:
-        raise _bad_patch(f"{where}.control", f"unknown control mode {new!r}; allowed {list(CONTROLS)}")
+        raise _bad_patch(f"{where}.control", f"unknown control mode '{new}'; allowed {list(CONTROLS)}")
     current, applied = _effective_control(unit, project_preset)
     if new == current:
         return change if "control" in unit else {k: v for k, v in change.items() if k != "control"}
