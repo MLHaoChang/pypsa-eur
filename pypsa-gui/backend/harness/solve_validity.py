@@ -328,9 +328,16 @@ def mip_price_limit(n, config) -> str | None:
     disagree on the solve kind; unlike `classify` it also gates a stochastic run
     that is a MIP. `config` is the solver config of the solve that wrote the
     prices (process-UC mode decides whether commitment stayed binary); `None`
-    reads as the defaults.
+    reads as the defaults. A run sealed with `applied_record_of` is judged by
+    that record, whatever `config` says (`is_mip`).
     """
     return DUALS_NOT_MARGINAL if is_mip(n, config) else None
+
+
+def _recorded(n) -> bool:
+    """`n` carries a well-formed applied record, so no config is needed to judge it."""
+    rec = applied_record_of(n)
+    return rec is not None and rec is not MALFORMED
 
 
 # The solve's config could not be read, so whether it was a MIP is not known.
@@ -345,7 +352,13 @@ def solved_price_limit(state, n) -> str | None:
     record (an LP solve, or a solve from before it) `n` is judged with the
     current config, which errs only toward withholding, except for a MIP solved
     before the record existed whose config has since been changed to an LP.
+
+    A network sealed with `applied_record_of` is judged by that record, which
+    travels with `n` (assistant-assurance 18a); the settings and config serve
+    only a run sealed before it, or one whose record is malformed.
     """
+    if _recorded(n):
+        return mip_price_limit(n, None)
     settings = state.get("last_solve_settings") or {}
     if isinstance(settings, dict) and settings.get("price_limit"):
         return settings["price_limit"]
@@ -358,7 +371,10 @@ def price_limit_without_config(n) -> str | None:
     Only the process-UC mode in the config can turn a committable network into
     an LP, so a network with no committable or modular unit is an LP whatever
     the config, and one that is a MIP under the defaults is reported as a MIP.
+    A network sealed with `applied_record_of` needs no config: its record decides.
     """
+    if _recorded(n):
+        return mip_price_limit(n, None)
     if not (_committable(n) or _modular(n)):
         return None
     return DUALS_NOT_MARGINAL if is_mip(n, None) else SOLVER_CONFIG_UNREADABLE

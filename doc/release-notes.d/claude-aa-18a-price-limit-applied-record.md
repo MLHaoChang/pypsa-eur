@@ -1,0 +1,1 @@
+* Bug(pypsa-gui): The marginal-price gate judges a solved network by the solver options its solve recorded, not by the saved solver settings, so a solve whose saved config was later edited, or cannot be read, no longer hides or shows prices wrongly. Runs solved before the record existed are judged as before.
