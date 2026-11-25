@@ -1385,7 +1385,10 @@ def _run_states(*, solving: bool) -> dict[str, str]:
 
     read = runs.read(cached=True)
     verdicts = runs.results_verdicts(read)
-    no_results = read.dispatch == "none"  # an edit cleared them, or nothing ran
+    from services import study_solve
+
+    study_solve_held = study_solve.fallback() is not None  # the study's own solve is the latest run
+    no_results = read.dispatch == "none" and not study_solve_held  # an edit cleared them, or nothing ran
     if study_state.running_study() is not None:
         study = "running"
     elif not read.study_done:
@@ -1394,7 +1397,7 @@ def _run_states(*, solving: bool) -> dict[str, str]:
         study = _verdict_word(verdicts["study"])
     return {
         "optimisation": "running" if solving else "not_run" if no_results
-        else _verdict_word(verdicts["optimisation"]),
+        else "fresh" if study_solve_held else _verdict_word(verdicts["optimisation"]),
         "study": study,
         "loadflow": "running" if solving else "not_run" if no_results or not read.loadflow_ran
         else _verdict_word(verdicts["loadflow"]),

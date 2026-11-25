@@ -284,11 +284,10 @@ async function journey(t) {
       ])
       assert.match(download.suggestedFilename(), /\.docx$/)
     })
-    // Gap 30: a Guided study leaves Expert's Results empty, so the workbook has nothing to export. The chooser
-    // lives in the Expert sidebar: go there for the export, then back to Guided for the hand-off below.
+    // The chooser lives in the Expert sidebar: go there for the export, then back to Guided for the hand-off below.
     const workbookStarted = Date.now()
     await L.chooseMode(ctx, 'Expert')
-    await L.gap(ctx, '30', 'Export > Results workbook (Excel) after a Guided study delivers an .xlsx with content', async () => {
+    await L.step(ctx, 'Export > Results workbook (Excel) after a Guided study delivers an .xlsx with content', async () => {
       const item = page.getByRole('button', { name: 'Export…', exact: true }).first()
       if (!(await item.isVisible())) await page.getByTestId('sidebar-project-menu').click()
       await item.click()
