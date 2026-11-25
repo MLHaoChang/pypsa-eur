@@ -446,7 +446,7 @@ def kept_run_stale(ctx=None) -> bool:
         if state == "fresh":
             n.meta.pop(EDIT_KEPT_KEY, None)
             return False
-        return state == "stale"
+        return state != "fresh"
     except Exception:  # noqa: BLE001
         return True
 

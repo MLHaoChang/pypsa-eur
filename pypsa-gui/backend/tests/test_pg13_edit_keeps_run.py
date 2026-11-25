@@ -366,6 +366,30 @@ def test_the_verdict_fails_closed_once_a_run_was_kept(
     assert runs.kept_run_stale(ctx) is True
 
 
+def test_an_uncompared_verdict_withholds_while_the_marker_stands(
+    client,
+    site,  # noqa: F811
+    session_ctx,
+    monkeypatch,
+):
+    """A pre-fingerprint project reads `uncompared`: only `fresh` may serve a kept run (G5)."""
+    from types import SimpleNamespace
+
+    from services.provenance_graph import runs
+
+    _solved_site(client, site, "pg13_uncompared")
+    ctx = _ctx(client, session_ctx)
+    monkeypatch.setattr(
+        runs,
+        "results_verdicts",
+        lambda read: {"optimisation": SimpleNamespace(state="uncompared")},
+    )
+    assert runs.kept_run_stale(ctx) is False  # no marker: nothing was kept
+    ctx.network.meta[MARKER] = True
+    assert runs.kept_run_stale(ctx) is True
+    assert MARKER in ctx.network.meta
+
+
 def test_the_marker_is_dropped_by_a_solve_a_clear_and_an_undone_edit(
     client,
     site,  # noqa: F811
