@@ -244,7 +244,7 @@ def test_the_stage_runs_the_margin_lever_on_the_session_margin(monkeypatch, stub
 
 
 def test_the_stage_uses_the_named_assumed_margin_when_none_is_set(
-    monkeypatch, stub_front
+    monkeypatch, stub_front, real_record
 ):
     calls = stub_front(lever="reserve_margin")
     store: dict = {}
@@ -261,6 +261,11 @@ def test_the_stage_uses_the_named_assumed_margin_when_none_is_set(
     rec = _record(report)
     assert rec.status == "run"
     assert "reserve_margin: stub picks reserve_margin" in rec.note
+    # the note counts the solved points of the real record
+    pts = real_record["points"]
+    n_ok = sum(p["status"] == "ok" for p in pts)
+    assert n_ok >= 1
+    assert rec.note.startswith(f"{n_ok} of {len(pts)} points solved")
 
 
 def test_the_ens_lever_without_a_pack_target_is_not_established(
