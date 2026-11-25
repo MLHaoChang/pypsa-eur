@@ -18,10 +18,10 @@ After any edit the user loses sight of the last results until they re-run, and t
 
 ## Acceptance criteria
 
-- [x] A failing test first: run, edit one component value through the route, then the flow's results freshness reads `stale` with the edited part named. The last run's figures stay readable and marked out of date.
+- [x] A failing test first: run, edit one component value through the route, then the flow's results freshness reads `stale` with the edited part named. The run's verdict stays readable; its figures are withheld with a typed "out of date, re-run" until re-run (owner decision PG13-STALE-1: no reader recombines the old dispatch with edited inputs; serving the solve-time figures is issue 14).
 - [x] Every component PUT route (generators, loads, lines, links, storage units, stores) behaves the same; the test is parametrised over them.
-- [x] Expert Results shows the stale figures with an "Out of date" band and Run LOPF "(1 out of date)", matching the investment case.
-- [x] End to end in the real app: IPP template › run › Expert › edit the battery's max power in the table › Results still shows the run, marked out of date, and so does the Investment case. Re-run → both fresh.
+- [x] Expert Results shows the "Out of date" band and Run LOPF "(1 out of date)", matching the investment case, which keeps its own figures; the other result tables answer "out of date, re-run" (`X-Results-State: out_of_date`) instead of figures.
+- [x] End to end in the real app: IPP template › run › Expert › edit the battery's max power in the table › Results says the run is out of date, and so does the Investment case (which keeps its figures). Re-run → both fresh.
 
 ## Likely files
 

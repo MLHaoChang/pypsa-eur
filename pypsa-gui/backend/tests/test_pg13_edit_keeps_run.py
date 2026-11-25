@@ -54,8 +54,8 @@ def test_a_value_edit_marks_the_last_run_stale(client, site, route, name, field,
     assert r.status_code == 200, r.text
 
     assert _kinds(_flow(client, project))["optimisation"] == "stale"
-    # The last run's figures stay readable.
-    assert client.get("/api/results/generators").status_code == 200
+    # The figures are withheld, never recombined with the edited inputs (owner decision PG13-STALE-1).
+    assert client.get("/api/results/generators").status_code == 204
 
 
 def test_the_expert_table_bulk_edit_marks_the_last_run_stale(client, site):  # noqa: F811
@@ -73,7 +73,7 @@ def test_the_expert_table_bulk_edit_marks_the_last_run_stale(client, site):  # n
     )
     assert r.status_code == 200, r.text
     assert _kinds(_flow(client, project))["optimisation"] == "stale"
-    assert client.get("/api/results/generators").status_code == 200
+    assert client.get("/api/results/generators").status_code == 204
 
 
 def test_a_value_edit_marks_the_investment_case_out_of_date(
@@ -139,6 +139,62 @@ def _solved_site(client, site, name):  # noqa: F811
     assert _wait_idle(client)["status"] == "completed"
     assert _kinds(_flow(client, project))["optimisation"] == "fresh"
     return project
+
+
+READERS = [
+    "generators",
+    "lines",
+    "headline_kpis",
+    "asset_economics",
+    "energy_flows",
+    "carrier_kpis",
+]
+
+
+@pytest.mark.parametrize(
+    "route,name,field,value",
+    [
+        ("generators", "g", "marginal_cost", 25.0),
+        ("loads", "l", "bus", "a"),
+    ],
+    ids=["value-edit", "topology-edit"],
+)
+def test_the_readers_withhold_a_stale_run_and_serve_again_after_a_re_run(
+    client,
+    site,
+    route,
+    name,
+    field,
+    value,  # noqa: F811
+):
+    """Old dispatch must never be recombined with edited inputs (GK B2 F1, owner decision PG13-STALE-1)."""
+    project = _solved_site(client, site, f"pg13_readers_{field}")
+    before = {r: client.get(f"/api/results/{r}").status_code for r in READERS}
+    assert before["generators"] == 200 and before["lines"] == 200, before
+
+    row = next(
+        r for r in client.get(f"/api/network/{route}").json() if r["name"] == name
+    )
+    assert (
+        client.put(
+            f"/api/network/{route}/{name}", json={**row, field: value}
+        ).status_code
+        == 200
+    )
+    assert _kinds(_flow(client, project))["optimisation"] == "stale"
+    for reader, status in before.items():
+        if status != 200:
+            continue
+        r = client.get(f"/api/results/{reader}")
+        assert r.status_code == 204, (reader, r.status_code)
+        assert r.headers.get("x-results-state") == "out_of_date", reader
+
+    assert client.post("/api/simulation/run").status_code == 200
+    assert _wait_idle(client)["status"] == "completed"
+    assert _kinds(_flow(client, project))["optimisation"] == "fresh"
+    for reader, status in before.items():
+        if status == 200:
+            assert client.get(f"/api/results/{reader}").status_code == 200, reader
 
 
 def test_a_bus_edit_still_clears_the_run(client, site):  # noqa: F811

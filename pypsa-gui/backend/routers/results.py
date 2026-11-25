@@ -216,6 +216,14 @@ def get_run_evidence_file(
 # ── Results endpoints ─────────────────────────────────────────────────────────
 
 def _not_solved():
+    """The answer of a results reader that has no figures to serve. When a kept run's inputs have since
+    changed (provenance-graph 13, owner decision PG13-STALE-1) it says why in `X-Results-State`, so a client
+    can tell "out of date, re-run" from "never solved"; the freshness word and the investment case keep
+    their own reads."""
+    from services.provenance_graph import runs
+
+    if runs.optimisation_stale():
+        return Response(status_code=204, headers={"X-Results-State": "out_of_date"})
     return Response(status_code=204)
 
 
@@ -271,7 +279,14 @@ def _dispatch_ready(n) -> bool:
     """
     if not getattr(n, "is_solved", False):
         return False
-    return _dispatch_status(n) == "fresh"
+    if _dispatch_status(n) != "fresh":
+        return False
+    # A value edit keeps the last run's dispatch (provenance-graph 13), so its shape reads fresh while the
+    # static inputs have moved on; serving it would recombine the two into figures no run produced. Only the
+    # active network has a run verdict here; another run's network (a scenario) is gated by its own read.
+    from services.provenance_graph import runs
+
+    return not (n is PyPSAService.get_network() and runs.optimisation_stale())
 
 
 def _result_df(n, accessor_name: str, attr: str, source: str = "lopf", *, state=None):
@@ -2396,12 +2411,6 @@ def post_investment_case(body: InvestmentCaseRequest | None = None,
     # `detail.needs`, the first blocker's own code first; the refusal keeps
     # that code and status.
     known = _ic_needs(lambda: [c for c in (connection_need(cfg),) if c])
-    if not _dispatch_ready(n):
-        raise HTTPException(409, {"code": "not_solved",
-                                  "message": "solve the network first: the investment case "
-                                             "values the solved dispatch",
-                                  "needs": ["not_solved", *known, *_ic_needs(
-                                      lambda: finance_needs(getattr(cfg, "finance", None)))]})
     from services.provenance_graph import runs
 
     if runs.optimisation_stale():
@@ -2409,6 +2418,12 @@ def post_investment_case(body: InvestmentCaseRequest | None = None,
                                   "message": "the inputs changed since the last solve: re-run it, "
                                              "the investment case values the solved dispatch",
                                   "needs": ["not_solved", *known]})
+    if not _dispatch_ready(n):
+        raise HTTPException(409, {"code": "not_solved",
+                                  "message": "solve the network first: the investment case "
+                                             "values the solved dispatch",
+                                  "needs": ["not_solved", *known, *_ic_needs(
+                                      lambda: finance_needs(getattr(cfg, "finance", None)))]})
     owner = body.owner if body is not None else None
     # IC G3 R-2: the campus study read once, outside the network lock; the case
     # and the staleness key take the same source.
@@ -3078,7 +3093,7 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
 
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
-        return Response(status_code=204)
+        return _not_solved()
     if _solver_in_flight():  # the network carries the LP's transient transforms
         raise HTTPException(409, {
             "error_kind": "results_workbook_stale",
@@ -3569,9 +3584,9 @@ def get_billing():
         raise HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
                                   "message": "a solve is running; read the bill after it ends"})
     if not _dispatch_ready(n):
-        return Response(status_code=204)
+        return _not_solved()
     payload = compute_billing(n, _state["solver_config"], state=_state, result_df=_result_df)
-    return Response(status_code=204) if payload is None else payload
+    return _not_solved() if payload is None else payload
 
 
 _PREVIEW_LOCK_WAIT_S = 2.0
@@ -3617,7 +3632,7 @@ def preview_billing(body: BillingPreviewIn):
                                       "message": "set the commercial config (poc_link) first"})
         n = PyPSAService.get_network()
         if not _dispatch_ready(n):
-            return Response(status_code=204)
+            return _not_solved()
         try:
             payload = compute_billing_preview(n, cfg, body.tariff)
         except _VE as exc:
@@ -3647,9 +3662,9 @@ def get_cfe_score():
         raise HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
                                   "message": "a solve is running; read the score after it ends"})
     if not _dispatch_ready(n):
-        return Response(status_code=204)
+        return _not_solved()
     payload = compute_cfe_score(n, _state["solver_config"], result_df=_result_df)
-    return Response(status_code=204) if payload is None else payload
+    return _not_solved() if payload is None else payload
 
 
 @results_router.get("/value_flows")
@@ -3667,10 +3682,10 @@ def get_value_flows():
                                   "message": "a solve is running; read the value flows after it "
                                              "ends"})
     if not _dispatch_ready(n):
-        return Response(status_code=204)
+        return _not_solved()
     payload = compute_value_flows(n, _state["solver_config"], result_df=_result_df,
                                   lost_load=_state.get("last_lost_load"))
-    return Response(status_code=204) if payload is None else payload
+    return _not_solved() if payload is None else payload
 
 
 def _energy_flows_payload(period: int | None, from_: int | None, to_: int | None):
@@ -3683,7 +3698,7 @@ def _energy_flows_payload(period: int | None, from_: int | None, to_: int | None
                                   "message": "a solve is running; read the energy flows after it "
                                              "ends"})
     if not _dispatch_ready(n):
-        return Response(status_code=204)
+        return _not_solved()
     window = None if from_ is None and to_ is None else (from_ or 0, to_ if to_ is not None else 10 ** 9)
     return energy_flows(n, period, window, result_df=_result_df,
                         lost_load=_state.get("last_lost_load"))
@@ -3731,7 +3746,7 @@ def _load_shape_payload(period: int | None, from_: int | None, to_: int | None, 
         raise HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
                                   "message": "a solve is running; read the load shape after it ends"})
     if not _dispatch_ready(n):
-        return Response(status_code=204)
+        return _not_solved()
     window = None if from_ is None and to_ is None else (from_ or 0, to_ if to_ is not None else 10 ** 9)
     return load_shape(n, period, window, week, result_df=_result_df,
                       lost_load=_state.get("last_lost_load"))
