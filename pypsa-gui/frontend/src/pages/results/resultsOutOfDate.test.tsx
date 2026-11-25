@@ -4,12 +4,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import NotSolved from './NotSolved'
 import { OUT_OF_DATE_TEXT } from '../../components/ResultsOutOfDate'
-import { noteResultsResponse, useResultsOutOfDate } from '../../store/resultsOutOfDate'
+import { noteResultsResponse, useResultsOutOfDateFlag } from '../../store/resultsOutOfDate'
 import { useUIStore } from '../../store/uiStore'
+
+const kinds = vi.hoisted(() => ({ stale: ['Optimisation'] as string[] }))
+vi.mock('../../hooks/useStaleRunKinds', () => ({ useStaleRunKinds: () => kinds.stale }))
 
 const hdr = (v?: string) => ({ get: (k: string) => (k.toLowerCase() === 'x-results-state' ? v : undefined) })
 
-beforeEach(() => { useResultsOutOfDate.setState({ outOfDate: false }); useUIStore.setState({ uiMode: 'expert' } as never) })
+beforeEach(() => {
+  kinds.stale = ['Optimisation']
+  useResultsOutOfDateFlag.setState({ project: null })
+  useUIStore.setState({ uiMode: 'expert', currentProject: 'A' } as never)
+})
 afterEach(cleanup)
 
 describe('results 204 states', () => {
@@ -38,6 +45,18 @@ describe('results 204 states', () => {
     noteResultsResponse('/results/generators', 204, hdr('out_of_date'))
     noteResultsResponse('/results/lines', 200, hdr(undefined))
     noteResultsResponse('/network/foo', 204, hdr(undefined))
-    expect(useResultsOutOfDate.getState().outOfDate).toBe(true)
+    expect(useResultsOutOfDateFlag.getState().project).toBe('A')
+  })
+  it('another project, or a flow that no longer reads out of date, never shows the sentence', () => {
+    noteResultsResponse('/results/generators', 204, hdr('out_of_date'))
+    useUIStore.setState({ currentProject: 'B' } as never)
+    const { unmount } = render(<NotSolved what="Dispatch" />)
+    expect(screen.getByText('Not run yet')).toBeTruthy()
+    expect(screen.queryByTestId('results-out-of-date')).toBeNull()
+    unmount()
+    useUIStore.setState({ currentProject: 'A' } as never)
+    kinds.stale = []
+    render(<NotSolved what="Dispatch" />)
+    expect(screen.getByText('Not run yet')).toBeTruthy()
   })
 })

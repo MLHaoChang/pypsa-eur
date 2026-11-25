@@ -5,7 +5,7 @@
 // shown as zero: a quantity the solve did not model says so, and a standard
 // that was not set is not shown as met.
 import ResultsOutOfDate from '../../components/ResultsOutOfDate'
-import { useResultsOutOfDate } from '../../store/resultsOutOfDate'
+import { useResultsOutOfDate } from '../../hooks/useResultsOutOfDate'
 import { showGridReadiness } from '../../layout/flowNavigation'
 import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -157,7 +157,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
   const { flow } = useProjectFlow()
   const studyKind = flow?.sections.find(sec => sec.section === 'results')?.freshness_by_kind?.study
   const requestRunSolve = useUIStore(st => st.requestRunSolve)
-  const resultsOutOfDate = useResultsOutOfDate(st => st.outOfDate)
+  const resultsOutOfDate = useResultsOutOfDate()
   const caps = capacityRows(stats as Record<string, unknown>[] | null | undefined, selectedPeriod)
   const ll = (lostLoad ?? null) as LostLoadPayload | null
   const rm = reserveMarginVerdict(margin as ReserveMarginSummary | null | undefined)

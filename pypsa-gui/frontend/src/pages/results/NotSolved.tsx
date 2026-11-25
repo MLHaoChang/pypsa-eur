@@ -4,7 +4,7 @@
 // runs the solve from here, through the header's own run path.
 import ResultState from '../../components/ResultState'
 import ResultsOutOfDate from '../../components/ResultsOutOfDate'
-import { useResultsOutOfDate } from '../../store/resultsOutOfDate'
+import { useResultsOutOfDate } from '../../hooks/useResultsOutOfDate'
 import { useUIStore } from '../../store/uiStore'
 
 /** Solving changes the network the study ran on, so its results go out of date (UX review N4). */
@@ -19,7 +19,7 @@ export default function NotSolved({ what, why }: {
 }) {
   const requestRunSolve = useUIStore(s => s.requestRunSolve)
   const guided = useUIStore(s => s.uiMode === 'guided')
-  const outOfDate = useResultsOutOfDate(s => s.outOfDate)
+  const outOfDate = useResultsOutOfDate()
   if (outOfDate) return <div className="p-6"><ResultsOutOfDate /></div>
   const verb = /s$/.test(what) && !/ss$/.test(what) ? 'come' : 'comes'
   return (
