@@ -4,10 +4,13 @@
 // how it is written — Guided's Goal card with its "Save goal", Expert's Solver
 // settings through its draft and Save. An unedited field shows the stored or
 // template value from the goal, so both modes show the same goal.
-import type { ReactNode } from 'react'
+// The CO₂ limit (DC review 02) sits below the reliability fields: it is saved
+// with them, but shows even where the reliability fields are out of scope.
+import { useId, type ReactNode } from 'react'
 import type { ReliabilityGoal } from '../../api/flow'
 import {
-  assumedLole, goalPatchFromEdits, goalText, goalWords, GOAL_UNSET, MAX_GOAL_DRAWS, type GoalEdits, type GoalNumberField,
+  assumedLole, CO2_LIMIT, CO2_LIMIT_UNIT, goalPatchFromEdits, goalText, goalWords, GOAL_UNSET, MAX_GOAL_DRAWS,
+  type GoalEdits, type GoalNumberField,
 } from '../../hooks/useReliabilityGoal'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
 import { isAssumedItem } from '../../pages/hubDesign/AssumptionsCard'
@@ -18,6 +21,7 @@ import { AssumedChip } from '../AssumedChip'
 import { Term } from '../../pages/hubDesign/shared/Term'
 import { useGuide } from '../GuidedTour'
 import { InfoTip } from '../../layout/properties/cardKit'
+import { fmtCo2Tonnes } from '../../utils/format'
 
 /** The ENS target's hint, as Solver settings has always worded it. */
 export const ENS_HINT = "Caps unserved ELECTRICAL energy per investment period at this share (parts per ten thousand) of the period's demand. 0 = off. Adequate systems run ~0.1–1‱; GB's standard is 3 loss-of-load hours/yr. Requires a VOLL > 0."
@@ -25,8 +29,13 @@ export const ENS_UNIT = '‱ of demand'
 
 const ALL_FIELDS: GoalNumberField[] = ['target_lole_h', 'ens_cap_permyriad', 'mc_draws']
 
+/** The CO₂ limit's label and its hint for an empty field (UX GO on DC 02). */
+export const CO2_LIMIT_LABEL = 'CO₂ limit'
+export const CO2_LIMIT_HINT = `No CO₂ limit. Type the most CO₂ per year the site may emit, for example ${fmtCo2Tonnes(50_000)}.`
+export const CO2_LIMIT_ZERO = '0: the site may emit no CO₂ at all.'
+
 export function ReliabilityGoalEditor({
-  mode, goal, edits, onChange, fields = ALL_FIELDS, disabled = false,
+  mode, goal, edits, onChange, fields = ALL_FIELDS, disabled = false, co2Limit,
 }: {
   /** Its two homes: Guided's Goal card (`hub-goal-*` test ids) and Expert's
    *  Solver settings (`solver-goal-*`). */
@@ -37,9 +46,14 @@ export function ReliabilityGoalEditor({
   /** The fields shown (Guided keeps ENS and draws under "More settings"). */
   fields?: GoalNumberField[]
   disabled?: boolean
+  /** The stored CO₂ limit (t CO₂/yr, null = none); the field shows only
+   *  when this is given (undefined while the config loads). */
+  co2Limit?: number | null
 }) {
   const guided = mode === 'guided'
-  const error = goalPatchFromEdits(edits).error
+  // The CO₂ limit says its own error under its field.
+  const { [CO2_LIMIT]: _co2, ...reliabilityEdits } = edits
+  const error = goalPatchFromEdits(reliabilityEdits).error
   // The catalogue's hover help (P21), as the EH panel's pack fields had it.
   // Guided's labels are glossary terms with their own hover; draws has none.
   const { data: guide } = useGuide()
@@ -88,6 +102,9 @@ export function ReliabilityGoalEditor({
       {error && (guided
         ? <p data-testid="hub-goal-error" className="text-[12px] text-warn">{error}</p>
         : <p data-testid="solver-goal-error" className="text-[10px] text-warn">{error}</p>)}
+      {co2Limit !== undefined && (
+        <Co2LimitField mode={mode} co2Limit={co2Limit} edits={edits} onChange={onChange} disabled={disabled} />
+      )}
     </div>
   )
 }
@@ -167,6 +184,52 @@ function GoalInput({ k, mode, testId, label, placeholder, value, disabled, fromT
         </span>
       )}
       {standing && <LoleChip testId={testId} standing={standing} />}
+    </label>
+  )
+}
+
+/** The CO₂ limit (DC review 02), part of the goal and saved with it: empty =
+ *  no limit, with a hint; 0 is a limit (no emissions at all), said on a muted
+ *  line; an invalid value says so under the field. The editor mounts it below
+ *  the reliability fields; Guided's Goal card places it itself, below "More
+ *  settings", so it stays when the reliability goal is out of scope. */
+export function Co2LimitField({ mode, co2Limit, edits, onChange, disabled = false }: {
+  mode: 'guided' | 'expert'
+  /** The stored limit, null = none. */
+  co2Limit: number | null
+  edits: GoalEdits
+  onChange: (edits: GoalEdits) => void
+  disabled?: boolean
+}) {
+  const guided = mode === 'guided'
+  const testId = guided ? 'hub-goal-co2' : 'solver-goal-co2'
+  const errorId = useId()
+  const value = edits[CO2_LIMIT] ?? (co2Limit == null ? '' : String(co2Limit))
+  const v = value.trim()
+  const error = goalPatchFromEdits({ [CO2_LIMIT]: value }).error
+  const note = error ? null : v === '' ? CO2_LIMIT_HINT : Number(v) === 0 ? CO2_LIMIT_ZERO : null
+  return (
+    <label className={guided ? 'flex flex-col gap-1 text-[12px]' : 'flex flex-col gap-1'}>
+      <span className={guided ? 'font-semibold text-text' : 'text-[10px] text-muted'}>
+        {CO2_LIMIT_LABEL} ({CO2_LIMIT_UNIT})
+      </span>
+      <input type="number" data-testid={testId} step="any" min={0}
+        aria-invalid={error ? true : undefined} aria-describedby={error ? errorId : undefined}
+        value={value} disabled={disabled} placeholder="no limit"
+        onChange={e => onChange({ ...edits, [CO2_LIMIT]: e.target.value })}
+        className={guided
+          ? 'w-32 rounded border border-border bg-bg px-2 py-1 font-mono text-[12px] text-text'
+          : 'px-2 py-1 border border-border rounded text-xs font-mono bg-bg focus:outline-none focus:border-accent'} />
+      {error && (
+        <span id={errorId} role="status" data-testid={`${testId}-error`} className={guided ? 'text-[12px] text-warn' : 'text-[10px] text-warn'}>
+          {error}
+        </span>
+      )}
+      {note && (
+        <span data-testid={`${testId}-note`} className={guided ? 'text-[12px] text-muted' : 'text-[10px] text-muted'}>
+          {note}
+        </span>
+      )}
     </label>
   )
 }

@@ -6,11 +6,14 @@
 // goal (W3b-R): the editor is Expert's Solver settings one, and "Save goal"
 // writes only the fields typed here.
 import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { simulationApi } from '../../../api/simulation'
+import { nk } from '../../../utils/queryKeys'
 import StressScenarioEditor from '../../results/StressScenarioEditor'
 import { useHubDesignStore } from '../hubDesignStore'
 import { useUIStore } from '../../../store/uiStore'
-import { assumedLole, goalPatchFromEdits, useReliabilityGoal, type GoalEdits } from '../../../hooks/useReliabilityGoal'
-import { ReliabilityGoalEditor } from '../../../components/reliabilityGoal/ReliabilityGoalEditor'
+import { assumedLole, CO2_LIMIT, goalPatchFromEdits, useReliabilityGoal, type GoalEdits } from '../../../hooks/useReliabilityGoal'
+import { Co2LimitField, ReliabilityGoalEditor } from '../../../components/reliabilityGoal/ReliabilityGoalEditor'
 import { VOLL_TEXT } from '../delegate'
 import { GOAL_VOLL_LABEL } from './goalCardWords'
 import { CardShell, DelegateButton } from '../shared/CardShell'
@@ -26,7 +29,12 @@ export function GoalCard() {
   const liveStudy = useLiveStudyRunning()
   const { goal, save } = useReliabilityGoal()
   const [edits, setEdits] = useState<GoalEdits>({})
-  const { patch, error: editError } = goalPatchFromEdits(edits)
+  // Section 8's scope (W4a): with Reliability › goal & study off, the goal
+  // hides and the study is not run. "Save goal" then saves the CO₂ limit only:
+  // a hidden field is never sent, and its error never blocks the save (UX 29).
+  const reliabilityOn = useInScope('reliability', 'goal_study')
+  const saved: GoalEdits = reliabilityOn ? edits : (CO2_LIMIT in edits ? { [CO2_LIMIT]: edits[CO2_LIMIT] } : {})
+  const { patch, error: editError } = goalPatchFromEdits(saved)
   const edited = Object.keys(patch).length > 0
   const saveGoal = () => save.mutate(patch, { onSuccess: () => setEdits({}) })
   const [advanced, setAdvanced] = useState(false)
@@ -43,10 +51,13 @@ export function GoalCard() {
     setAdvanced(true)
     useHubDesignStore.getState().setGoalAdvancedRequested(false)
   }, [advancedRequested])
-  // Section 8's scope (W4a): with Reliability › goal & study off, the goal
-  // hides and the study is not run. VOLL stays: the optimisation prices lost
-  // load with it (modular-cards §2).
-  const reliabilityOn = useInScope('reliability', 'goal_study')
+  // VOLL stays out of scope too: the optimisation prices lost load with it (modular-cards §2).
+  // The CO₂ limit (DC review 02) is saved with the goal but is not a
+  // reliability setting: it stays when the reliability goal is out of scope.
+  const { data: cfg } = useQuery({
+    queryKey: nk(project, 'solverConfig'), queryFn: simulationApi.getSolverConfig, enabled: !!project,
+  })
+  const co2Limit = cfg ? (cfg.co2_limit_t_per_yr ?? null) : undefined
   // "No goal yet" only when there is none at all: no typed, saved or template
   // value and no site-type assumed goal (template-e2e 06).
   const loleText = edits.target_lole_h ?? (goal?.target_lole_h.source !== 'default'
@@ -58,33 +69,35 @@ export function GoalCard() {
       {!reliabilityOn && (
         <ScopeGate card="reliability" option="goal_study" testId="hub-goal-out-of-scope">{null}</ScopeGate>
       )}
-      {reliabilityOn && <>
-      <ReliabilityGoalEditor mode="guided" goal={goal} edits={edits}
+      {reliabilityOn && <ReliabilityGoalEditor mode="guided" goal={goal} edits={edits}
         onChange={setEdits} disabled={running || !goal}
-        fields={advanced ? ['target_lole_h', 'ens_cap_permyriad', 'mc_draws'] : ['target_lole_h']} />
+        fields={advanced ? ['target_lole_h', 'ens_cap_permyriad', 'mc_draws'] : ['target_lole_h']} />}
       {/* With no goal and no assumed one the field reads "not set", as Expert
           does; a typical value is only suggested here, never shown as a default. */}
-      {loleText.trim() === '' && (
+      {reliabilityOn && loleText.trim() === '' && (
         <span className="text-[12px] text-muted" data-testid="hub-goal-empty-hint">
           No goal yet. Type how many hours per year without power you can accept (for example 3)
           to get a pass or fail answer.
         </span>
       )}
 
-      <div className="flex flex-col gap-2">
+      {reliabilityOn && <div className="flex flex-col gap-2">
         <button type="button" data-testid="hub-goal-advanced" aria-expanded={advanced}
           onClick={() => setAdvanced(a => !a)}
           className="self-start text-[11px] text-muted hover:text-accent">
           {advanced ? '▾' : '▸'} More settings
         </button>
-      </div>
+      </div>}
+      {co2Limit !== undefined && (
+        <Co2LimitField mode="guided" co2Limit={co2Limit} edits={edits} onChange={setEdits} disabled={running} />
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" data-testid="hub-goal-save" onClick={saveGoal}
           disabled={!edited || editError !== null || save.isPending || running}
           className="rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
           {save.isPending ? 'Saving…' : 'Save goal'}
         </button>
-        {!edited && !save.isSuccess && (
+        {!edited && !editError && !save.isSuccess && (
           <span data-testid="hub-goal-no-changes" className="text-[12px] text-muted">
             No changes to save.
           </span>
@@ -100,7 +113,6 @@ export function GoalCard() {
           </span>
         )}
       </div>
-      </>}
 
       {/* The same editor Solver settings mounts: one editor for the stress conditions. */}
       {advanced && (

@@ -126,7 +126,18 @@ def preconditions(n, component_class: str, name: str, *,
     #    results endpoint does.
     ds = _dispatch_status(n) if getattr(n, "is_solved", False) else "none"
     if ds == "fresh":
-        out[REQ_DISPATCH] = OK
+        from services.provenance_graph import runs
+
+        if runs.kept_run_withheld(n):
+            # A value edit kept the dispatch (provenance-graph 13): its figures would be recombined with the
+            # edited inputs, so they are withheld like every other results reader's.
+            out[REQ_DISPATCH] = Status(
+                "blocked",
+                "results are out of date — the inputs changed after the last solve",
+                Remedy("run_simulation", "Re-run simulation"),
+            )
+        else:
+            out[REQ_DISPATCH] = OK
     elif ds == "stale":
         out[REQ_DISPATCH] = Status(
             "blocked",

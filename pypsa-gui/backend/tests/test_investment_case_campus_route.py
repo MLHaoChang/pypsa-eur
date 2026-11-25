@@ -177,7 +177,7 @@ def test_the_campus_study_assets_are_the_reports_extra_assets_and_its_capex(
     assert {b["source_hash"] for b in block} == {want_hash}
     capex = -sum(ln["amount"] for ln in full["cashflow_lines"]
                  if ln["provenance"]["source"] == "capex")
-    assert body["report"]["stale"] is False
+    assert body["report"]["stale"] is False                          # the key is current
 
     # The study removed: the report names `extra_assets`; the re-run drops exactly its capex.
     shutil.rmtree(campus_dir / "run")

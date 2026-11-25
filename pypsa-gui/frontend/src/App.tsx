@@ -485,6 +485,7 @@ export default function App() {
             const proj = useUIStore.getState().currentProject
             qc.invalidateQueries({ queryKey: nk(proj, 'results') })
             qc.invalidateQueries({ queryKey: nk(proj, 'simulationStatus') })
+            qc.invalidateQueries({ queryKey: nk(proj, 'flow') })
           },
           (reason) => {
             useSimulationStore.getState().setStatus('failed')

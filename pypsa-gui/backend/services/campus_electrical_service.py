@@ -2479,7 +2479,10 @@ def _run_milp_job(record: dict, milp_dir: Path, kw: dict) -> None:
     try:
         out = _milp_engine(milp_dir, milp_dir / USED_LIBRARY_FILE, progress=progress, should_stop=stop.is_set, **kw)
         summary = {k: (v.item() if hasattr(v, "item") else v) for k, v in out["summary"].items()}
-        (milp_dir / MILP_SUMMARY_FILE).write_text(json.dumps({"summary": summary, "fallback": out["fallback"]}))
+        from services.atomic_io import atomic_write_text
+
+        # whole or absent: _milp_results reads it while the job may be writing it
+        atomic_write_text(milp_dir / MILP_SUMMARY_FILE, json.dumps({"summary": summary, "fallback": out["fallback"]}))
         cancelled = summary["stop"] == "cancelled"
         with _MILP_LOCK:
             record.update(state="cancelled" if cancelled else "done", finished_at=time.time(), stop=summary["stop"],

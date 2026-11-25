@@ -110,6 +110,53 @@ def _outage(n, component: str, name: str, rate: float, mttr_h: float) -> None:
     df.at[name, "mttr_hours"] = mttr_h
 
 
+# ── The upstream grid's outage data, assumed (DC 01, DC01-OUTAGE-1) ─────────
+#
+# Generic public data for the transmission grid behind the data-centre PoC, so
+# the reserve margin and the MC can judge the grid supply instead of refusing
+# it as unpriceable. Source: CEER-ECRB 7th Benchmarking Report on the Quality
+# of Electricity and Gas Supply (2022), Table 2-18, the one TSO-level SAIDI and
+# SAIFI pair in the report (Slovenia, HV and EHV, excluding exceptional events,
+# 2011-2018). They count interruptions on the TSO's network up to its delivery
+# points, so the site's own PoC Link (``grid_import``, with its own outage
+# data) is not in them and nothing is counted twice. The median year is used:
+# one ice-storm year (2014, 3,678.61 min) puts the mean over a hundred times
+# above the typical year.
+_CEER_TSO_SAIDI_MIN = (2.11, 3.07, 6.35, 3678.61, 4.82, 1.67, 73.40, 0.99)
+_CEER_TSO_SAIFI = (0.06, 0.19, 0.11, 0.25, 0.16, 0.05, 0.22, 0.04)
+#: Median minutes per year without supply, and interruptions per year.
+GRID_SUPPLY_SAIDI_MIN = float(np.median(_CEER_TSO_SAIDI_MIN))
+GRID_SUPPLY_SAIFI = float(np.median(_CEER_TSO_SAIFI))
+#: FOR = SAIDI / (60 * 8760); MTTR = SAIDI / (60 * SAIFI), in hours.
+GRID_SUPPLY_FOR = round(GRID_SUPPLY_SAIDI_MIN / (60.0 * 8760.0), 9)
+GRID_SUPPLY_MTTR_H = round(GRID_SUPPLY_SAIDI_MIN / (60.0 * GRID_SUPPLY_SAIFI), 4)
+_GRID_SUPPLY_SOURCE = (
+    "CEER-ECRB 7th Benchmarking Report on the Quality of Electricity and Gas "
+    "Supply (2022), Table 2-18: TSO SAIDI and SAIFI excluding exceptional "
+    "events, 2011-2018, median year")
+
+
+def grid_supply_outage_ledger() -> list[dict]:
+    """The two `assumed` rows for the grid supply's outage data."""
+    def row(item, label, value, unit, field, how):
+        return {"item": item, "label": label, "value": value, "unit": unit,
+                "source": "assumed",
+                "note": f"assumed: generic public data, not this site's: {how}; "
+                        f"{_GRID_SUPPLY_SOURCE}. The PoC Link's own outage data "
+                        "is separate and not in these figures",
+                "section": "connection", "panel": None, "component": "Generator",
+                "entity": "grid_supply", "field": field}
+    return [
+        row("grid_supply_outage_rate", "Grid supply forced-outage rate",
+            GRID_SUPPLY_FOR, "p.u. (FOR)", "outage_rate_value",
+            f"SAIDI {GRID_SUPPLY_SAIDI_MIN:g} min/yr / (60 x 8760)"),
+        row("grid_supply_mttr", "Grid supply mean time to repair",
+            GRID_SUPPLY_MTTR_H, "h", "mttr_hours",
+            f"SAIDI {GRID_SUPPLY_SAIDI_MIN:g} min/yr / (60 x SAIFI "
+            f"{GRID_SUPPLY_SAIFI:g} per yr)"),
+    ]
+
+
 def _tag_columns(n) -> None:
     """Typed EH tag columns (P14) with their defaults on every row."""
     n.buses["eh_poc"] = False
@@ -195,6 +242,8 @@ def build_eh_datacenter(phases=None, load_spec=None, planning=None) -> pypsa.Net
           p_nom=500.0, marginal_cost=0.0)
     n.generators_t.marginal_cost = pd.DataFrame(
         {"grid_supply": price}, index=snaps)
+    # The upstream grid can fail too (DC01-OUTAGE-1): generic, assumed data.
+    _outage(n, "generators", "grid_supply", GRID_SUPPLY_FOR, GRID_SUPPLY_MTTR_H)
 
     # The weak connection: 40 MW is the physical rating, so the FMEA
     # worksheet (saved network) and the EH study (pack cap) see one system.
@@ -2207,6 +2256,11 @@ def grid_readiness_ledger(template_id: str) -> list[dict]:
 for _tid in _GRID_READINESS_SITE.keys() & TEMPLATE_META.keys():   # staged hubs: when registered
     TEMPLATE_META[_tid]["ledger"] = [*(TEMPLATE_META[_tid].get("ledger") or []),
                                      *grid_readiness_ledger(_tid)]
+
+for _tid in ("eh_datacenter", "eh_datacenter_staged"):
+    if _tid in TEMPLATE_META:
+        TEMPLATE_META[_tid]["ledger"] = [*TEMPLATE_META[_tid]["ledger"],
+                                         *grid_supply_outage_ledger()]
 
 # Sidecar file names copied by POST /api/projects/from_template/<id>.
 META_FILE = "eh_template.json"

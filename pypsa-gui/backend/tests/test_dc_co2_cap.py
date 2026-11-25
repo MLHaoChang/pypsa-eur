@@ -315,6 +315,8 @@ def test_a_hand_made_cap_is_left_alone_and_the_goal_refused():
     with pytest.raises(co2_cap.Co2CapRefusal) as exc:
         co2_cap.apply(n, SolverConfig(co2_limit_t_per_yr=1.0), lambda _m: None, {})
     assert exc.value.code == co2_cap.DUPLICATE
+    # No one mode's place: the app's link names it (UX 30).
+    assert "Goal step" not in str(exc.value)
     before = _frozen(n)
     status, _, _, logs = _solve(n, co2_limit_t_per_yr=1.0)
     assert status != "ok"
@@ -769,6 +771,8 @@ def test_the_limit_reads_any_config_as_a_finite_non_negative_number():
             co2_cap.target_of(NS(co2_limit_t_per_yr=bad))
         assert err.value.code == co2_cap.INVALID
         assert str(err.value).startswith("CO₂ limit: ")
+        # The app's link names where to set it, in the user's mode (UX 30).
+        assert "Goal step" not in str(err.value)
 
 
 def test_finite_is_none_for_none_nan_and_inf():

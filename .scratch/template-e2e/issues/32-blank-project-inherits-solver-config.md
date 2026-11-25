@@ -3,7 +3,7 @@
 
 # 32 A new blank project inherits the previous project's solver config (tariff, finance, value flows, periods)
 
-Status: ready-for-agent
+Status: done
 Blocked by: none. 15 ("study result and active project carry over", wontfix: not reproduced) is the same family; this is a reproduction with the evidence on disk.
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), walk W1 (shot `b9-ready`).
 Severity: high (wrong inputs, silently)

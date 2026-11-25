@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The campus MILP job writes its summary atomically, so a status read during the write no longer fails on an empty file; the equipment schedule's Assumptions list puts a colon after each label.

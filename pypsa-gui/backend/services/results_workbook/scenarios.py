@@ -153,7 +153,7 @@ def _fill(run: Run, read: dict, *, result_df_for, ic_key, solved_settings_for, d
     """A comparable run's figures from its own saved context (`read`, as
     `sensitivity_comparison._read` gives it); a run whose dispatch the routes
     would not serve gets `case_unsolved` and no figures."""
-    from services.finance.investment_case_runner import staleness
+    from services.finance.investment_case_runner import after_stale_run, staleness
     from services.finance.report import load_ic_report
     from harness import sensitivity_comparison as sc
     if not run.reasons and dispatch_ready is not None and not dispatch_ready(read["ctx"].network):
@@ -175,7 +175,8 @@ def _fill(run: Run, read: dict, *, result_df_for, ic_key, solved_settings_for, d
     run.ic_report = load_ic_report(state)
     if run.ic_report is not None:
         current, why = ic_key(ctx, result_df)
-        run.case_state = staleness(run.ic_report.model_dump(mode="json"), current, reason=why)
+        run.case_state = after_stale_run(
+            staleness(run.ic_report.model_dump(mode="json"), current, reason=why), ctx)
 
 
 def gather_scenarios(base_project_id: str, base_basis: dict, *,

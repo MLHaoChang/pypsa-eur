@@ -19,7 +19,7 @@ vi.mock('../../layout/flowNavigation', async (orig) => ({
 }))
 
 import HeadlineStrip, { headlineKpisKey } from './HeadlineStrip'
-import { COST_WORDS, CURTAILMENT_RATE, HEADLINE_WORDS, comparisonBasis, headlineDelta, headlineFigure, headlineTrend } from './headlineWords'
+import { CO2_EMISSIONS, COST_WORDS, CURTAILMENT_RATE, HEADLINE_WORDS, comparisonBasis, headlineDelta, headlineFigure, headlineTrend } from './headlineWords'
 import { HEADLINES } from './investment/financeModel'
 
 const card = (id: string, over: Partial<HeadlineCard> = {}): HeadlineCard => ({
@@ -167,13 +167,16 @@ describe('HeadlineStrip', () => {
 
 describe('headline words', () => {
   // The ids `services/results/headline_kpis.py` ORDER can send.
-  const IDS = ['lcoe', 'system_cost', 'new_build_capital', 'curtailed_share', 'unserved_energy', 'peak_line_loading', 'time_to_power']
+  const IDS = ['lcoe', 'system_cost', 'new_build_capital', 'curtailed_share', 'unserved_energy', 'peak_line_loading', 'time_to_power', 'co2_annual']
 
   it('names every card the backend can send, in its tab’s own words', () => {
     expect(Object.keys(HEADLINE_WORDS).sort()).toEqual([...IDS].sort())
     expect(HEADLINE_WORDS.lcoe.label).toBe(HEADLINES.find(h => h.id === 'lcoe_real')!.label)
     expect(HEADLINE_WORDS.curtailed_share.label).toBe(CURTAILMENT_RATE)
     expect(HEADLINE_WORDS.system_cost.label).toBe(COST_WORDS.total)
+    // The Emissions tab's own heading.
+    expect(HEADLINE_WORDS.co2_annual.label).toBe(CO2_EMISSIONS)
+    expect(CO2_EMISSIONS).toBe('CO₂ emissions')
     for (const w of Object.values(HEADLINE_WORDS)) expect(w.label).not.toMatch(/CAPEX|annualised|_/)
   })
 
@@ -182,6 +185,27 @@ describe('headline words', () => {
     expect(headlineFigure(card('time_to_power', { value: 12, unit: 'months' }))).toEqual({ value: '12 months', basis: 'from project start' })
     expect(headlineFigure(card('time_to_power', { value: 1, unit: 'months', detail: 'First power may be as early as 2027-01-01.' }))).toEqual({ value: '1 month', basis: 'First power may be as early as 2027-01-01.' })
     expect(headlineFigure(card('lcoe', { value: 55.5, unit: 'USD/MWh' })).value).toBe('55.50 USD/MWh')
+  })
+
+  // DC review 02, UX GO (1) and (3): t CO₂/yr, the limit, reached or not, the cost of the limit in money() style.
+  it('words the CO₂ limit card: reached with its cost, not reached, and the period of a multi-period run', () => {
+    const co2 = (extra: Partial<HeadlineCard>) => card('co2_annual', { value: 950, unit: 'tCO2/yr', limit_t_per_yr: 1000, ...extra })
+    expect(headlineFigure(co2({ reached: true, shadow_price_eur_per_t: 85.4 })))
+      .toEqual({ value: '950 t CO₂/yr', basis: 'Limit 1,000 t CO₂/yr · reached · cost of the limit €\u00a085.4/t' })
+    expect(headlineFigure(co2({ reached: false, shadow_price_eur_per_t: null })).basis)
+      .toBe('Limit 1,000 t CO₂/yr · not reached')
+    expect(headlineFigure(co2({ value: 12000, limit_t_per_yr: 12000, reached: true, shadow_price_eur_per_t: 1500, period: 2040 })))
+      .toEqual({ value: '12,000 t CO₂/yr', basis: 'Limit 12,000 t CO₂/yr · reached · cost of the limit €\u00a01.5\u00a0k/t · per year, highest period 2040' })
+    // A limit of 0 reads as one, never as no limit.
+    expect(headlineFigure(co2({ value: 0, limit_t_per_yr: 0, reached: true, shadow_price_eur_per_t: null })).basis)
+      .toBe('Limit 0 t CO₂/yr · reached')
+  })
+
+  it('the CO₂ card links to Emissions, named "Summary" on the Back pill', async () => {
+    api.getHeadlineKpis.mockResolvedValue({ kind: 'dc', cards: [card('co2_annual', { value: 950, unit: 'tCO2/yr', limit_t_per_yr: 1000, reached: false })] })
+    renderStrip()
+    fireEvent.click(await screen.findByRole('button', { name: 'Emissions ›' }))
+    expect(nav.showResultsTab).toHaveBeenCalledWith('emissions', { from: 'Summary' })
   })
 })
 
