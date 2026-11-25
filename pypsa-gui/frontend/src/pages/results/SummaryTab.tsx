@@ -4,6 +4,8 @@
 // query keys so the cache is shared, and a link into its tab. Absent is never
 // shown as zero: a quantity the solve did not model says so, and a standard
 // that was not set is not shown as met.
+import ResultsOutOfDate from '../../components/ResultsOutOfDate'
+import { useResultsOutOfDate } from '../../store/resultsOutOfDate'
 import { showGridReadiness } from '../../layout/flowNavigation'
 import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -155,6 +157,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
   const { flow } = useProjectFlow()
   const studyKind = flow?.sections.find(sec => sec.section === 'results')?.freshness_by_kind?.study
   const requestRunSolve = useUIStore(st => st.requestRunSolve)
+  const resultsOutOfDate = useResultsOutOfDate(st => st.outOfDate)
   const caps = capacityRows(stats as Record<string, unknown>[] | null | undefined, selectedPeriod)
   const ll = (lostLoad ?? null) as LostLoadPayload | null
   const rm = reserveMarginVerdict(margin as ReserveMarginSummary | null | undefined)
@@ -173,6 +176,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
         </div>
       )
     }
+    if (resultsOutOfDate) return <div className="p-6" data-testid="summary-empty"><ResultsOutOfDate /></div>
     return (
       <div className="p-6 text-[12px] text-muted" data-testid="summary-empty">
         No results yet: run the model, and its cost, emissions, reliability and capacities are summarised here.

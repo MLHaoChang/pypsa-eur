@@ -1,3 +1,4 @@
+import { noteResultsResponse } from '../store/resultsOutOfDate'
 import axios, { AxiosError, AxiosHeaders, type InternalAxiosRequestConfig } from 'axios'
 import toast from 'react-hot-toast'
 import { appLog } from '../store/simulationStore'
@@ -171,6 +172,7 @@ client.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 
 client.interceptors.response.use(
   (res) => {
+    noteResultsResponse(res.config.url, res.status, res.headers)
     const method = (res.config.method ?? '').toUpperCase()
     if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)) {
       const url = res.config.url ?? ''
