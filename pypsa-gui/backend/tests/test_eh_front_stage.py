@@ -510,10 +510,10 @@ def test_readiness_without_front_is_masters():
     )
 
 
-def _readiness(pack, *, voll=VOLL):
+def _readiness(pack, *, voll=VOLL, budget=30):
     n = certifiable_weak_network()
     PyPSAService.set_network(n)
-    out = R.eh_readiness(n, pack, budget_solves=30, voll=voll, stages=FRONT)
+    out = R.eh_readiness(n, pack, budget_solves=budget, voll=voll, stages=FRONT)
     return next(r for r in out["stages"] if r["stage"] == "front")
 
 
@@ -589,3 +589,17 @@ def test_apply_refuses_when_only_the_study_front_exists(
     )
     assert r.status_code == 404
     assert "no front study has been run" in r.text
+
+
+def test_readiness_needs_room_for_two_points():
+    # budget 2: ens_solve leaves 1 → no front; budget 3 leaves 2 → two points
+    row = _readiness(_pack(10.0), budget=2)
+    assert row["solves"] == 0
+    assert row["reason"] == "budget leaves room for fewer than two points"
+    row = _readiness(_pack(10.0), budget=3)
+    assert row["solves"] == 2 and row["reason"] is None
+
+
+def test_the_margin_lever_does_not_need_voll():
+    row = _readiness(_pack(10.0), voll=0.0)
+    assert row["solves"] == 5 and row["reason"] is None
