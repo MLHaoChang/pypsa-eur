@@ -66,6 +66,9 @@ export interface LineItem {
   /** A capacity payment linked to capacity in service: the share the market pays for (0 to 1). */
   derating?: number | null
   linked_share_by_year?: Record<string, number>
+  /** A typed revenue or opex line under a lease-up (BC 18): `fixed` never scales, `volume`
+   *  scales by the year's volume factor; unset refuses in a year below 100 %. */
+  volume_class?: 'fixed' | 'volume' | null
   hint?: PriceHint | null
 }
 

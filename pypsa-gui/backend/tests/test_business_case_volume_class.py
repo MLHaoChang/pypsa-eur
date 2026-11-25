@@ -1,0 +1,341 @@
+# SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
+#
+# SPDX-License-Identifier: MIT
+"""Business-case 18: a volume class the user states on a typed revenue or opex line.
+
+`fixed` never scales, `volume` scales by the year's lease-up factor, unset refuses
+`volume_factor_typed_line` (ruling 6). The digest reads the class only where it changes an
+outcome, so a master-era case keeps its digest."""
+
+from __future__ import annotations
+
+from typing import get_args
+
+import pytest
+from pydantic import ValidationError
+
+import services.finance.business_case as bcm
+from models.business_case import LineItem, VolumeClass, VolumeFactorTypedLine
+from services.results_workbook.business_case import write_business_case_sheet
+from tests.test_business_case_engine import (
+    _NH3_OUT,
+    _OPS,
+    _amount,
+    _at,
+    _capex,
+    _inputs,
+    _lease_case,
+    _line,
+    _no_export_ic,
+    _run,
+)
+
+_F = 0.6
+_LEASE = {2032: _F}
+
+
+def _service(**kw) -> LineItem:
+    # 10 × 50 = 500 a year.
+    return _line(name="service", category="service_fee", **kw)
+
+
+def _staff(**kw) -> LineItem:
+    return _line(
+        name="staff", kind="opex", category="staff", quantity=2.0, price=30.0, **kw
+    )
+
+
+def _go(*lines, factor=_LEASE):
+    return _run(_lease_case(factor, *lines), ic=_no_export_ic(), outputs=_NH3_OUT)[0]
+
+
+# ── the outcome under a 60 % year ────────────────────────────────────────────
+
+
+def test_volume_scales_by_the_years_factor_and_fixed_never_does():
+    bc = _go(_service(volume_class="volume"), _staff(volume_class="fixed"))
+    assert _amount(bc, "service", 2032) == 10.0 * _F * 50.0
+    assert _amount(bc, "service", 2031) == 500.0
+    assert _amount(bc, "staff", 2032) == -60.0
+    bc = _go(_service(volume_class="fixed"), _staff(volume_class="volume"))
+    assert _amount(bc, "service", 2032) == 500.0
+    assert _amount(bc, "staff", 2032) == -2.0 * _F * 30.0
+    assert _amount(bc, "staff", 2033) == -60.0
+
+
+def test_volume_scales_a_per_year_quantity_by_each_years_own_factor():
+    ln = _service(
+        quantity=None,
+        quantity_by_year={y: float(y - 2030) for y in _OPS},
+        volume_class="volume",
+    )
+    bc = _go(ln, factor={2031: 0.5, 2033: 0.25})
+    assert _amount(bc, "service", 2031) == 1.0 * 0.5 * 50.0
+    assert _amount(bc, "service", 2032) == 2.0 * 50.0
+    assert _amount(bc, "service", 2033) == 3.0 * 0.25 * 50.0
+
+
+def test_unset_still_refuses_naming_the_class():
+    with pytest.raises(VolumeFactorTypedLine) as e:
+        _go(_service(volume_class="volume"), _staff())
+    assert e.value.field == "lines[2].volume_class"
+    found = _lease_case(_LEASE, _service(), _staff(volume_class="fixed")).refusals(
+        horizon=(2031, 2035), base_year=2031
+    )
+    assert [(x.kind, x.field) for x in found] == [
+        ("volume_factor_typed_line", "lines[1].volume_class")
+    ]
+
+
+def test_a_stated_class_clears_the_refusal_for_either_class():
+    for cls in ("fixed", "volume"):
+        found = _lease_case(_LEASE, _service(volume_class=cls)).refusals(
+            horizon=(2031, 2035), base_year=2031
+        )
+        assert not found, cls
+
+
+def test_the_engine_refuses_an_unset_typed_line_it_is_asked_to_scale():
+    """Defence behind `require_runnable`: the engine never reads unset as either class."""
+    with pytest.raises(VolumeFactorTypedLine):
+        bcm._volume_line(_service())
+    assert bcm._volume_line(_service(volume_class="volume")) is True
+    assert bcm._volume_line(_service(volume_class="fixed")) is False
+
+
+def test_a_mixed_year_scales_each_line_by_its_class_and_a_share_once():
+    """GK B2 BC 18 V3: one 60 % year, distinct literals: a fixed line, a volume line and
+    a share_of line on the volume line's base."""
+    volume = _line(
+        name="service",
+        category="service_fee",
+        quantity=10.0,
+        price=70.0,
+        volume_class="volume",
+    )
+    fixed = _line(
+        name="staff",
+        kind="opex",
+        category="staff",
+        quantity=3.0,
+        price=20.0,
+        volume_class="fixed",
+    )
+    share = _line(
+        name="royalty",
+        kind="opex",
+        category="other",
+        unit="share",
+        quantity=0.15,
+        price=None,
+        quantity_source="share_of:revenue/service_fee",
+    )
+    bc, r = _run(
+        _lease_case(_LEASE, volume, fixed, share), ic=_no_export_ic(), outputs=_NH3_OUT
+    )
+    assert _amount(bc, "service", 2032) == 420.0
+    assert _amount(bc, "staff", 2032) == -60.0
+    assert _amount(bc, "nh3", 2032) == 100.0 * _F * 400.0
+    i, esc = _at(r, 2032), 1.02  # one year of the IC's 2 % opex escalation
+    got = {k: float(r.op.lines[k][i]) for k in ("service", "staff", "royalty")}
+    assert got == pytest.approx(
+        {"service": 420.0 * esc, "staff": -60.0 * esc, "royalty": -0.15 * 420.0 * esc},
+        rel=1e-12,
+    )
+    assert sum(got.values()) == pytest.approx((420.0 - 60.0 - 63.0) * esc, rel=1e-12)
+
+
+# ── where the class may be stated ────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda: _capex(volume_class="fixed"),
+        lambda: _line(
+            name="nh3",
+            quantity=None,
+            volume_class="volume",
+            quantity_source="linked:served_product.nh3@1",
+        ),
+        lambda: _line(
+            name="r",
+            kind="opex",
+            category="other",
+            quantity=None,
+            quantity_source="share_of:revenue",
+            volume_class="fixed",
+        ),
+    ],
+    ids=["capex", "linked", "share_of"],
+)
+def test_the_class_on_a_line_it_cannot_apply_to_is_a_parse_error(make):
+    with pytest.raises(ValidationError, match="volume_class"):
+        make()
+
+
+def test_an_unknown_class_is_a_parse_error():
+    with pytest.raises(ValidationError):
+        _service(volume_class="sometimes")
+
+
+def test_a_typed_opex_line_takes_the_class():
+    assert _staff(volume_class="volume").volume_class == "volume"
+    assert _service().volume_class is None
+
+
+# ── the digest ───────────────────────────────────────────────────────────────
+
+#: Master 24ea3f90's digests, before the field existed.
+_MASTER_TYPED = "6da40d455842570f8f42d84e63d8222e"
+_MASTER_LEASE = "f897c1522ac5f4714ef6a4bed7227e99"
+
+
+def test_a_master_era_case_keeps_its_digest():
+    ic = _no_export_ic()
+    typed = _inputs(_service())
+    assert _run(typed, ic=ic, outputs=_NH3_OUT)[0].hash == _MASTER_TYPED
+    assert _go(factor=_LEASE).hash == _MASTER_LEASE
+
+
+@pytest.mark.parametrize("cls", ["fixed", "volume"])
+def test_a_class_that_changes_no_outcome_never_enters_the_digest(cls):
+    ic = _no_export_ic()
+    # At 100 % in every year.
+    at_full = _inputs(_service(volume_class=cls))
+    assert _run(at_full, ic=ic, outputs=_NH3_OUT)[0].hash == _MASTER_TYPED
+    # Below 100 % only in a year outside the line's span.
+    late = dict(start_year=2033)
+    assert _go(_service(volume_class=cls, **late)).hash == _go(_service(**late)).hash
+
+
+def test_the_class_enters_the_digest_where_it_scales_a_year():
+    fixed = _go(_service(volume_class="fixed")).hash
+    volume = _go(_service(volume_class="volume")).hash
+    assert fixed != volume
+    assert _MASTER_LEASE not in (fixed, volume)
+    # The span bounds count: a line ending in the scaled year still reads it.
+    a = _go(_service(volume_class="fixed", end_year=2032)).hash
+    b = _go(_service(volume_class="volume", end_year=2032)).hash
+    assert a != b
+
+
+# ── report and workbook ──────────────────────────────────────────────────────
+
+
+def test_the_report_names_each_stated_class_only_under_a_lease_up():
+    case = _lease_case(
+        _LEASE, _service(volume_class="volume"), _staff(volume_class="fixed")
+    )
+    shown = bcm.volume_factor_display(case, _OPS)
+    assert shown["volume_class"] == {"service": "volume", "staff": "fixed"}
+    full = _lease_case(None, _service(volume_class="volume"))
+    assert bcm.volume_factor_display(full, _OPS) == {}
+
+
+def _sheet(pnl):
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    report = {
+        "basis": {"label": "b"},
+        "pnl": pnl,
+        "kpis": {},
+    }
+    ws = wb[write_business_case_sheet(wb, report, {"stale": False})]
+    return [(r[0], r[1]) for r in ws.iter_rows(min_col=1, max_col=2, values_only=True)]
+
+
+def test_the_workbook_shows_each_stated_class_under_a_lease_up():
+    rows = _sheet(
+        {
+            "volume_factor": {"2032": _F},
+            "volume_factor_note": bcm.VOLUME_FACTOR_NOTE,
+            "volume_class": {"service": "volume", "staff": "fixed"},
+        }
+    )
+    assert ("Volume class: service", "Follows volume (scales with lease-up)") in rows
+    assert ("Volume class: staff", "Fixed (never scales)") in rows
+    assert not [r for r in _sheet({}) if str(r[0]).startswith("Volume class")]
+
+
+# ── one set of words, backend and card (UX 30, GK B2 V5) ─────────────────────
+
+
+def _model_ts() -> str:
+    from pathlib import Path
+
+    return (
+        Path(__file__).resolve().parents[2]
+        / "frontend/src/pages/results/investment/businessCaseModel.ts"
+    ).read_text()
+
+
+def test_the_card_shows_the_backends_refusal_sentence():
+    import re
+
+    m = re.search(r"^\s+volume_factor_typed_line: '([^']*)',$", _model_ts(), re.M)
+    assert m and m.group(1) == VolumeFactorTypedLine.words
+
+
+def test_the_card_and_the_workbook_name_the_classes_alike():
+    import re
+
+    from services.results_workbook.business_case import (
+        VOLUME_CLASS_LABEL,
+        VOLUME_CLASS_WORDS,
+    )
+
+    block = (
+        _model_ts().split("export const VOLUME_CLASS_OPTIONS", 1)[1].split("]\n", 1)[0]
+    )
+    pairs = dict(re.findall(r"\['(\w*)', '([^']*)'\]", block))
+    assert pairs == {"": "Not stated", **VOLUME_CLASS_WORDS}
+    assert set(VOLUME_CLASS_WORDS) == set(get_args(VolumeClass))
+    assert (
+        "COLUMN_LABEL" in _model_ts()
+        and f"volume_class: '{VOLUME_CLASS_LABEL}'" in _model_ts()
+    )
+
+
+# ── mutant killers (scripts/coord/mutants.py) ────────────────────────────────
+
+
+def test_an_explicit_null_class_parses_on_any_line():
+    """The card sends `volume_class: null` when a line leaves typed: never a 422."""
+    assert _capex(volume_class=None).volume_class is None
+    linked = _line(
+        name="nh3",
+        quantity=None,
+        volume_class=None,
+        quantity_source="linked:served_product.nh3@1",
+    )
+    assert linked.volume_class is None
+
+
+def test_a_line_that_ends_before_the_lease_up_reads_no_scaled_year():
+    early = _service(end_year=2032)
+    case = _lease_case({2033: _F}, early)
+    assert case.scaled_years(early, (2031, 2035)) == []
+    assert not case.refusals(horizon=(2031, 2035), base_year=2031)
+    assert bcm.volume_factor_display(
+        _lease_case({2033: _F}, _service(end_year=2032, volume_class="fixed")), _OPS
+    ) == {"volume_factor": {"2033": _F}, "volume_factor_note": bcm.VOLUME_FACTOR_NOTE}
+    assert case.scaled_years(_service(end_year=2033), (2031, 2035)) == [2033]
+
+
+def test_the_report_leaves_out_a_class_on_a_line_no_scaled_year_reaches():
+    late = _service(start_year=2033, volume_class="volume")
+    shown = bcm.volume_factor_display(_lease_case(_LEASE, late), _OPS)
+    assert "volume_class" not in shown
+
+
+def test_a_linked_quantity_not_evaluated_under_a_lease_up_stays_not_established():
+    from services.business_case.linked_outputs import NotEvaluated
+
+    _, r = _run(
+        _lease_case(_LEASE),
+        ic=_no_export_ic(),
+        outputs={"nh3": NotEvaluated("served_product.nh3", "stale")},
+    )
+    assert "line_not_established:nh3" in r.op.reasons["operating"]

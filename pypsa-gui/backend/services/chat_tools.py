@@ -3808,9 +3808,11 @@ def get_business_case(detail: str = "summary") -> dict:
                                   if isinstance(report.get("assumed"), list) else _NE),
                    verdict=_bc_verdict(report, bc_verdict))
         # BC 15: the lease-up the run applied and its basis, so an answer about the
-        # result never reads it as full volume. Absent at 100 %.
+        # result never reads it as full volume, and each typed line's stated volume
+        # class (BC 18). Absent at 100 %.
         out.update({k: v for k, v in (report.get("pnl") or {}).items()
-                    if k in ("volume_factor", "volume_factor_note", "volume_factor_ignored")})
+                    if k in ("volume_factor", "volume_factor_note", "volume_factor_ignored",
+                             "volume_class")})
         cut = []
         for section in _BC_CUT_ORDER:
             if _json_len(out) <= _BC_SUMMARY_CHARS:

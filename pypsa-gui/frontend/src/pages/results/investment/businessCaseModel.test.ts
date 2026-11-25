@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { BusinessCaseOptions, LineItem } from '../../../api/businessCase'
 import {
   edited, hintUnitWords, parsePaste, priceUnitWords, placeRefusals, placeValidation, provenanceOf, refusalWords,
-  sourceKind, unitNotAllowed, unitsFor, VOLUME_SCOPE, withKind, yearsOf,
+  sourceKind, takesVolumeClass, unitNotAllowed, unitsFor, VOLUME_SCOPE, withKind, yearsOf,
 } from './businessCaseModel'
 
 export const OPTS: BusinessCaseOptions = {
@@ -120,9 +120,20 @@ describe('line edits', () => {
 })
 
 describe('the volume factor in words (BC 15)', () => {
+  it('the volume class applies to typed revenue and opex only, and a kind change clears it (BC 18)', () => {
+    expect(takesVolumeClass('revenue', 'typed')).toBe(true)
+    expect(takesVolumeClass('opex', 'typed')).toBe(true)
+    expect(takesVolumeClass('capex', 'typed')).toBe(false)
+    expect(takesVolumeClass('revenue', 'linked:served_h2.h2_load@1')).toBe(false)
+    expect(takesVolumeClass('opex', 'share_of:revenue')).toBe(false)
+    const ln = { name: 'S', kind: 'opex', category: 'staff', unit: 'unit', quantity_source: 'typed',
+      escalation: 'opex', volume_class: 'fixed' } as const
+    expect(withKind({ ...ln }, 'revenue', null).volume_class).toBe('fixed')
+    expect(withKind({ ...ln }, 'capex', null)).not.toHaveProperty('volume_class')
+  })
   it('a typed line refused under a lease-up names its column and the fix, never the kind', () => {
-    const t = refusalWords('volume_factor_typed_line', 'lines[0].quantity_source')
-    expect(t).toMatch(/^Quantity from: /)
+    const t = refusalWords('volume_factor_typed_line', 'lines[0].volume_class')
+    expect(t).toMatch(/^Volume class: choose Fixed or Follows volume, /)
     expect(t).toMatch(/100 %/)
     expect(t).not.toMatch(/volume_factor|lease-up:/i)
   })
@@ -134,6 +145,6 @@ describe('the volume factor in words (BC 15)', () => {
     expect(refusalWords('volume_factor_unclassified')).toMatch(/^Volume factor \(lease-up\), %: .*100 %/)
   })
   it('the scope sentence names what scales, what is kept and what refuses', () => {
-    expect(VOLUME_SCOPE).toMatch(/^Scales: lines priced on the model's served output, energy, network and fuel costs, .* and per-kWh taxes and certificates\. Kept: capacity lines, capital cost lines and fixed charges\. Refused while a year is below 100 %: a typed revenue or cost line, /)
+    expect(VOLUME_SCOPE).toMatch(/^Scales: lines priced on the model's served output, energy, network and fuel costs, .* per-kWh taxes and certificates and typed lines whose volume class is Follows volume\. Kept: capacity lines, capital cost lines, fixed charges and typed lines whose volume class is Fixed\. Refused while a year is below 100 %: a typed revenue or cost line with no volume class stated, /)
   })
 })

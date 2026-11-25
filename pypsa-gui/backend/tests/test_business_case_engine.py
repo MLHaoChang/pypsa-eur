@@ -1496,6 +1496,8 @@ def test_the_hash_is_the_domain_the_ic_and_the_inputs_exactly():
                     "linked_share_by_year",
                     "default_units",
                     "derating",
+                    # BC 18: unset, or set where no year of the line is scaled.
+                    "volume_class",
                 },
             )
             for ln in inputs.lines
@@ -1982,14 +1984,14 @@ def test_bc15_q1_a_typed_operating_line_refuses_under_a_factor_below_full():
     typed = _line(name="service", category="service_fee", quantity=1.0)
     with pytest.raises(VolumeFactorTypedLine) as e:
         _run(_lease_case({2032: 0.5}, typed), ic=_no_export_ic(), outputs=_NH3_OUT)
-    assert e.value.field == "lines[1].quantity_source"
+    assert e.value.field == "lines[1].volume_class"
     inputs = _lease_case(
         {2032: 0.5}, typed, _line(name="o2", kind="opex", category="staff")
     )
     found = inputs.refusals(horizon=(2031, 2035), base_year=2031)
     assert [x.field for x in found if x.kind == "volume_factor_typed_line"] == [
-        "lines[1].quantity_source",
-        "lines[2].quantity_source",
+        "lines[1].volume_class",
+        "lines[2].volume_class",
     ]
     # Not when the factor is 1 in its span, nor outside it, nor for capex, nor for a
     # year outside the operating years (ignored, never both ignored and refused: C3).
@@ -2140,7 +2142,10 @@ def test_bc15_v3_every_stream_and_linked_kind_has_exactly_one_volume_class():
 
 
 def test_bc15_a_typed_line_is_not_volume_and_a_linked_export_refuses():
-    assert bcm._volume_line(_line()) is False
+    # BC 18: a typed line reads its stated class; unset refuses (GK B2 BC 18 V4).
+    assert bcm._volume_line(_line(volume_class="fixed")) is False
+    with pytest.raises(VolumeFactorTypedLine):
+        bcm._volume_line(_line())
     assert bcm._volume_line(_line(**_NH3)) is True
     cap = _line(**{**_NH3, "quantity_source": "linked:capacity.pv@1"})
     assert bcm._volume_line(cap) is False

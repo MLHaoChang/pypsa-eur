@@ -92,8 +92,8 @@ describe('a refused run names the line and what to do (walk 05)', () => {
       .toBe('Capacity payment (BESS, firm capacity): Price: refused')
     expect(refusedRunText('the run could not start', names)).toBe('the run could not start')
     // BC 15: a typed line under a lease-up names the line and the fix; the stream refusal names the row.
-    expect(refusedRunText('business_case_refused:volume_factor_typed_line: lines[2].quantity_source', names))
-      .toBe('Insurance: take the quantity from the model, or set the volume factor (lease-up) to 100 % in this line’s years')
+    expect(refusedRunText('business_case_refused:volume_factor_typed_line: lines[2].volume_class', names))
+      .toBe('Insurance: Volume class: choose Fixed or Follows volume, or set the volume factor to 100 % in every year of this line.')
     expect(refusedRunText('business_case_refused:volume_factor_unclassified: energy_export', names))
       .toMatch(/^Volume factor \(lease-up\), %: The energy-model row “energy export” does not follow served volume/)
   })

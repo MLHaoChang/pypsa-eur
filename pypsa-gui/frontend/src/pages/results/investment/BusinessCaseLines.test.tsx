@@ -574,3 +574,63 @@ describe('Indexation: % per year, stored as a fraction (bc-23)', () => {
     expect((await screen.findByTestId('bc-row-refusals')).textContent).toMatch(/^Indexation: between −20 and \+30 %\/yr/)
   })
 })
+
+describe('the volume class (BC 18)', () => {
+  const SERVICE: LineItem = {
+    name: 'Service', kind: 'revenue', category: 'product_sale', unit: 't', quantity_source: 'typed',
+    quantity: 10, price: 50, escalation: 'opex',
+  }
+  const open = async (name: string) => {
+    const row = (await screen.findByLabelText(`Name, line 1`)).closest('tr')!
+    fireEvent.click(within(row).getAllByRole('button')[0])
+    return screen.queryByLabelText(`Volume class, ${name}`) as HTMLSelectElement | null
+  }
+  beforeEach(() => {
+    api.putInputs.mockImplementation(async (cfg) => ({ business_case: cfg, digest: 'd2', status: 'ok' }))
+  })
+
+  it('a typed revenue line offers the three classes, unset reading Not stated', async () => {
+    mount(config(SERVICE))
+    const sel = (await open('Service'))!
+    expect(sel.value).toBe('')
+    expect(within(sel).getAllByRole('option').map(o => o.textContent)).toEqual(
+      ['Not stated', 'Fixed (never scales)', 'Follows volume (scales with lease-up)'])
+    fireEvent.change(sel, { target: { value: 'volume' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save the lines' }))
+    await waitFor(() => expect(api.putInputs).toHaveBeenCalledTimes(1))
+    expect(api.putInputs.mock.calls[0][0]!.inputs.lines[0].volume_class).toBe('volume')
+  })
+  it('a linked line and a capex line offer none', async () => {
+    mount(config(H2))
+    expect(await open('H2 sales')).toBeNull()
+    cleanup()
+    mount(config(CAPEX))
+    expect(await open('Plant')).toBeNull()
+  })
+  it('leaving typed or becoming capex clears a stated class', async () => {
+    mount(config({ ...SERVICE, volume_class: 'fixed' }))
+    expect((await open('Service'))!.value).toBe('fixed')
+    fireEvent.change(screen.getByLabelText('Kind, Service'), { target: { value: 'capex' } })
+    expect(screen.queryByLabelText('Volume class, Service')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Kind, Service'), { target: { value: 'revenue' } })
+    expect((screen.getByLabelText('Volume class, Service') as HTMLSelectElement).value).toBe('')
+    fireEvent.change(screen.getByLabelText('Price, Service'), { target: { value: '51' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save the lines' }))
+    await waitFor(() => expect(api.putInputs).toHaveBeenCalledTimes(1))
+    expect(api.putInputs.mock.calls[0][0]!.inputs.lines[0]).not.toHaveProperty('volume_class')
+  })
+  it('the refusal sits on the select, in the backend’s one sentence', async () => {
+    mount(config(SERVICE), { refusals: [
+      { code: 'business_case_refused', refusal: 'volume_factor_typed_line', field: 'lines[0].volume_class', message: 'x' },
+    ] })
+    const row = await screen.findByTestId('bc-row-refusals')
+    const li = within(row).getByText(/^Volume class:/, { selector: 'li' })
+    expect(li.textContent).toMatch(
+      /^Volume class: choose Fixed or Follows volume, or set the volume factor to 100 % in every year of this line\./)
+    fireEvent.click(within(row).getByRole('button', { name: 'Show details' }))
+    const sel = screen.getByLabelText('Volume class, Service')
+    expect(sel.getAttribute('aria-invalid')).toBe('true')
+    expect(sel.getAttribute('aria-describedby')).toBe(li.id)
+    expect(li.id).toBeTruthy()
+  })
+})

@@ -24,6 +24,12 @@ RUN_THE_BUSINESS_CASE = "run the business case (Results, Investment tab)"
 
 #: The lease-up row of "P&L by year" (BC 15); written only when a year is below 100 %.
 LEASE_UP_ROW = "Volume factor (lease-up), %"
+#: The edit card's label and option words for a typed line's volume class (BC 18).
+VOLUME_CLASS_LABEL = "Volume class"
+VOLUME_CLASS_WORDS = {
+    "fixed": "Fixed (never scales)",
+    "volume": "Follows volume (scales with lease-up)",
+}
 
 #: An empty figure on this sheet, as the app writes it (walk 06); never 0.
 NOT_ESTABLISHED_WORDS = "not established"
@@ -170,6 +176,9 @@ def write_business_case_sheet(wb, report: dict | None, state: dict | None) -> st
                 + ", ".join(str(y) for y in pnl["volume_factor_ignored"]),
             )
         )
+    for name, cls in (pnl.get("volume_class") or {}).items():
+        # BC 18: each typed line's stated class, in the edit card's words (UX 30).
+        rows.append((f"{VOLUME_CLASS_LABEL}: {name}", VOLUME_CLASS_WORDS.get(cls, cls)))
     r = 3
     for k, v in rows:
         _put(ws, r, 1, k)
