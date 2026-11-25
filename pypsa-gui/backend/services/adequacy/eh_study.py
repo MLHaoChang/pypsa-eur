@@ -823,17 +823,17 @@ def _stage_frontier(st: _Study) -> None:
     st.sections["frontier"] = (status, payload, note)
 
 
-def _front_margin_base(st: _Study) -> tuple[float | None, str]:
-    """The margin the front's margin ladder is built around, and where it came
-    from: the session's reserve margin when one is set, else the engine's
-    named assumed base."""
+def _front_margin_base(st: _Study) -> dict:
+    """The margin the front's margin ladder is built around, and its basis:
+    the session's reserve margin when one is set (it wins), else the engine's
+    assumed ``FRONT_MARGIN_BASE``, named as such (GK A, Q1)."""
     from services.adequacy.front import FRONT_MARGIN_BASE
     m = getattr(st.cfg, "reserve_margin", None)
     if m is not None:
-        return float(m), "the session's reserve margin"
-    return FRONT_MARGIN_BASE, (
-        f"an assumed base margin of {FRONT_MARGIN_BASE:g} (no reserve margin "
-        "is set)")
+        return {"value": float(m), "assumed": False,
+                "basis": "the session's reserve margin"}
+    return {"value": FRONT_MARGIN_BASE, "assumed": True,
+            "basis": "assumed: front default, not a project setting"}
 
 
 def _stage_front(st: _Study) -> None:
@@ -855,10 +855,10 @@ def _stage_front(st: _Study) -> None:
     try:
         with st.lock:
             lever, lever_why = fr.choose_lever(st.network, None)
-        margin_base, margin_from = _front_margin_base(st)
+        margin = _front_margin_base(st)
         levels = fr.front_levels(
             lever, n_points=n_points, ladder=st.pack.frontier_ladder,
-            ens_cap=st.ens_cap, margin_base=margin_base)
+            ens_cap=st.ens_cap, margin_base=margin["value"])
         result = fr.run_front_study(
             st.network, st.lock, st.cfg, levels=levels, co2_caps_t=[None],
             lever=lever, budget_solves=min(n_points, fr.MAX_FRONT_SOLVES),
@@ -877,7 +877,8 @@ def _stage_front(st: _Study) -> None:
     charged = int(result["solves"])
     st.solves += charged
     result["levels_basis"] = (
-        "the pack's ENS target" if lever == "ens_cap" else margin_from)
+        "the pack's ENS target" if lever == "ens_cap" else margin["basis"])
+    result["margin_base"] = margin if lever == "reserve_margin" else None
     result["ladder"] = [float(f) for f in st.pack.frontier_ladder]
     result["solves_charged"] = charged
     result["pack_hash"] = st.pack_h

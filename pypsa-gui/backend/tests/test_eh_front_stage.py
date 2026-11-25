@@ -161,6 +161,7 @@ def test_the_stage_runs_the_ens_lever_on_the_pack_target(monkeypatch):
     assert call["co2_caps_t"] == [None]
     assert call["pack"] is not None
     assert store["eh_front"]["levels_basis"] == "the pack's ENS target"
+    assert store["eh_front"]["margin_base"] is None
 
 
 def test_the_stage_runs_the_margin_lever_on_the_session_margin(monkeypatch):
@@ -174,6 +175,9 @@ def test_the_stage_runs_the_margin_lever_on_the_session_margin(monkeypatch):
     assert call["levels"] == S.frontier_targets(
         0.2, S.frontier_point_count(29, 30), ladder=_pack().frontier_ladder)
     assert store["eh_front"]["levels_basis"] == "the session's reserve margin"
+    # a set margin wins, and the payload says so
+    assert store["eh_front"]["margin_base"] == {
+        "value": 0.2, "assumed": False, "basis": "the session's reserve margin"}
 
 
 def test_the_stage_uses_the_named_assumed_margin_when_none_is_set(monkeypatch):
@@ -181,7 +185,11 @@ def test_the_stage_uses_the_named_assumed_margin_when_none_is_set(monkeypatch):
     store: dict = {}
     report = _stage_only(monkeypatch, _pack(None), store=store)
     assert calls[0]["levels"][0] == fr.FRONT_MARGIN_BASE == 0.10
-    assert "assumed base margin of 0.1" in store["eh_front"]["levels_basis"]
+    assert store["eh_front"]["margin_base"] == {
+        "value": 0.10, "assumed": True,
+        "basis": "assumed: front default, not a project setting"}
+    assert store["eh_front"]["levels_basis"] == (
+        "assumed: front default, not a project setting")
     rec = _record(report)
     assert rec.status == "run"
     assert "reserve_margin: stub picks reserve_margin" in rec.note
@@ -197,6 +205,28 @@ def test_the_ens_lever_without_a_pack_target_is_not_established(monkeypatch):
     assert rec.note == ("front not established: the ENS lever needs an ENS "
                         "target (‱ of demand)")
     assert "eh_front" not in store
+
+
+@pytest.mark.parametrize("margin, match", [
+    (0.0, "the reserve_margin base 0.0 must be a positive, finite number"),
+    (-0.1, "the reserve_margin base -0.1 must be a positive, finite number"),
+    (float("nan"), "the reserve_margin base nan must be a positive, finite"),
+    # 2 × the ladder's 4 = 8 lies past MAX_MARGIN: check_front_request names it
+    (2.0, "reliability level 8.0 must be a positive number"),
+])
+def test_a_margin_ladder_out_of_range_is_refused_by_name(monkeypatch, margin,
+                                                         match):
+    monkeypatch.setattr(fr, "choose_lever",
+                        lambda n, req: ("reserve_margin", "stub"))
+    store: dict = {}
+    report = _stage_only(monkeypatch, _pack(10.0), store=store,
+                         cfg=SolverConfig(voll=VOLL, reserve_margin=margin))
+    rec = _record(report)
+    assert rec.status == "skipped" and rec.solves_charged == 0
+    assert rec.note.startswith("front not established: ")
+    assert match in rec.note
+    assert "eh_front" not in store
+    assert report.pipeline.solves_consumed == 1
 
 
 def test_a_budget_short_of_two_points_is_not_run(monkeypatch):
@@ -379,3 +409,44 @@ def test_readiness_prices_a_requested_front():
     assert row["solves"] == len(S.frontier_targets(
         1.0, S.frontier_point_count(29, 30), ladder=_pack().frontier_ladder))
     assert row["basis"] == "exact" and row["reason"] is None
+
+
+# ── a requested front shows in every stage list; no apply from eh_front ───
+
+
+def test_a_requested_front_has_its_row_everywhere(monkeypatch):
+    from harness import catalogue
+
+    _stub_front(monkeypatch)
+    report = _stage_only(monkeypatch, _pack(10.0))
+    assert _record(report).status == "run"
+    n = certifiable_weak_network()
+    PyPSAService.set_network(n)
+    out = R.eh_readiness(n, _pack(10.0), budget_solves=30, voll=VOLL,
+                         stages=FRONT)
+    assert [r["stage"] for r in out["stages"]].count("front") == 1
+    assert "front" in catalogue.EH_STAGE_ENUM
+    assert catalogue.EH_STAGE_ENUM == list(EH_PIPELINE_STAGES)
+
+
+def test_study_start_clears_an_old_eh_front(monkeypatch):
+    _stub_front(monkeypatch)
+    store = {"eh_front": {"stale": True}}
+    _stage_only(monkeypatch, _pack(10.0), store=store)
+    assert "stale" not in store["eh_front"]
+    store = {"eh_front": {"stale": True}}
+    _run(certifiable_weak_network(), _pack(10.0),
+         stages=("apply_pack", "ens_solve", "assemble"), budget=2, store=store)
+    assert "eh_front" not in store
+
+
+def test_apply_refuses_when_only_the_study_front_exists(
+        client, install_network, session_state):
+    install_network(certifiable_weak_network())
+    state = session_state(client)
+    state.pop("front", None)
+    state["eh_front"] = {"points": [{"status": "ok"}], "solves": 1}
+    r = client.post("/api/results/front/apply",
+                    json={"index": 0, "expected_revision": 0})
+    assert r.status_code == 404
+    assert "no front study has been run" in r.text
