@@ -39,6 +39,7 @@ from models.energy_hub import (
     ArchetypePack,
     PipelineStageRecord,
     ReferenceDesignReport,
+    stage_has_row,
 )
 from services.adequacy import archetypes as arch
 from services.adequacy import eh_report as report_mod
@@ -844,12 +845,13 @@ def _stage_front(st: _Study) -> None:
     report's sections are unchanged."""
     from services.adequacy import front as fr
 
-    def _not_established(reason: str, status: str = "skipped") -> None:
-        st.mark("front", status, note=reason)
+    def _skip(reason: str) -> None:
+        # no report section to fill: the record carries the reason
+        st.mark("front", "skipped", note=reason)
 
     n_points = frontier_point_count(st.remaining(), st.budget_solves)
     if n_points < 2:
-        return _not_established(
+        return _skip(
             f"not run: budget_solves leaves {st.remaining()} solve(s); a "
             "front needs at least two points")
     try:
@@ -865,7 +867,7 @@ def _stage_front(st: _Study) -> None:
             mc_draws=st.mc_draws, seed=st.mc_seed, pack=st.pack,
             log_queue=st.log_queue, stop_event=st.stop_event)
     except (fr.FrontConfigError, fr.FrontBudgetError) as exc:
-        return _not_established(f"front not established: {exc}")
+        return _skip(f"front not established: {exc}")
     except Exception as exc:  # noqa: BLE001 — degrade like every other stage
         logger.exception("front failed")
         partial = getattr(exc, "front_result", None) or {}
@@ -1436,7 +1438,7 @@ def run_eh_study(
 
     records: list[PipelineStageRecord] = []
     for name in DEFAULT_STAGES:
-        if name not in requested and name in EH_OPT_IN_STAGES:
+        if not stage_has_row(name, requested):
             continue  # no row: a study without it reads as before (F4)
         if name not in requested:
             note = None

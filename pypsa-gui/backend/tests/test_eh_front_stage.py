@@ -57,7 +57,7 @@ def _record(report, stage="front"):
 # ── opt-in (F4) ────────────────────────────────────────────────────────────
 
 
-def test_front_follows_frontier_and_is_opt_in():
+def test_front_follows_frontier_and_is_opt_in(stub_front):
     order = list(EH_PIPELINE_STAGES)
     assert order.index("front") == order.index("frontier") + 1
     assert EH_OPT_IN_STAGES == ("front",)
@@ -70,27 +70,43 @@ def test_front_follows_frontier_and_is_opt_in():
     assert "eh_front" in S.SIBLING_STORE_KEYS
 
 
-def _stub_front(monkeypatch, *, lever="reserve_margin", solves=None,
-                raise_after=None):
-    """run_front_study replaced by a recorder: no solve."""
-    calls = []
+@pytest.fixture(scope="module")
+def real_record():
+    """A record the real writer saved (review-gk #1427): run_front_study on
+    the fixture network, two margin levels, a few draws."""
+    return fr.run_front_study(certifiable_weak_network(), threading.Lock(),
+                              SolverConfig(voll=VOLL), levels=[0.05, 0.1],
+                              lever="reserve_margin", mc_draws=5)
 
-    def fake(network, lock, cfg, **kw):
-        calls.append({"network": network, "cfg": cfg, **kw})
-        n_solves = len(kw["levels"]) if solves is None else solves
-        res = {"lever": kw["lever"], "levels": list(kw["levels"]),
-               "solves": n_solves, "aborted": False,
-               "points": [{"status": "ok"} for _ in kw["levels"]]}
-        if raise_after is not None:
-            exc = RuntimeError("boom")
-            exc.front_result = {**res, "solves": raise_after}
-            raise exc
-        return res
 
-    monkeypatch.setattr(fr, "run_front_study", fake)
-    monkeypatch.setattr(fr, "choose_lever",
-                        lambda n, req: (lever, f"stub picks {lever}"))
-    return calls
+@pytest.fixture
+def stub_front(monkeypatch, real_record):
+    """run_front_study replaced by a recorder that returns a copy of the real
+    record (its lever, levels and, when given, solve count set to the call's):
+    no solve in the stage tests."""
+    import copy
+
+    def install(*, lever="reserve_margin", solves=None, raise_after=None):
+        calls = []
+
+        def fake(network, lock, cfg, **kw):
+            calls.append({"network": network, "cfg": cfg, **kw})
+            res = copy.deepcopy(real_record)
+            res.update(lever=kw["lever"], levels=list(kw["levels"]))
+            if solves is not None:
+                res["solves"] = solves
+            if raise_after is not None:
+                exc = RuntimeError("boom")
+                exc.front_result = {**res, "solves": raise_after}
+                raise exc
+            return res
+
+        monkeypatch.setattr(fr, "run_front_study", fake)
+        monkeypatch.setattr(fr, "choose_lever",
+                            lambda n, req: (lever, f"stub picks {lever}"))
+        return calls
+
+    return install
 
 
 def _stage_only(monkeypatch, pack, *, budget=30, cfg=None, store=None,
@@ -149,8 +165,8 @@ def test_front_levels_refuses_a_missing_or_bad_base_by_name(lever, kw, match):
         fr.front_levels(lever, n_points=3, ladder=(2.0, 1.0, 0.5), **kw)
 
 
-def test_the_stage_runs_the_ens_lever_on_the_pack_target(monkeypatch):
-    calls = _stub_front(monkeypatch, lever="ens_cap")
+def test_the_stage_runs_the_ens_lever_on_the_pack_target(monkeypatch, stub_front):
+    calls = stub_front(lever="ens_cap")
     store: dict = {}
     _stage_only(monkeypatch, _pack(10.0), store=store)
     (call,) = calls
@@ -164,8 +180,8 @@ def test_the_stage_runs_the_ens_lever_on_the_pack_target(monkeypatch):
     assert store["eh_front"]["margin_base"] is None
 
 
-def test_the_stage_runs_the_margin_lever_on_the_session_margin(monkeypatch):
-    calls = _stub_front(monkeypatch, lever="reserve_margin")
+def test_the_stage_runs_the_margin_lever_on_the_session_margin(monkeypatch, stub_front):
+    calls = stub_front(lever="reserve_margin")
     store: dict = {}
     _stage_only(monkeypatch, _pack(10.0), store=store,
                 cfg=SolverConfig(voll=VOLL, reserve_margin=0.2))
@@ -180,8 +196,8 @@ def test_the_stage_runs_the_margin_lever_on_the_session_margin(monkeypatch):
         "value": 0.2, "assumed": False, "basis": "the session's reserve margin"}
 
 
-def test_the_stage_uses_the_named_assumed_margin_when_none_is_set(monkeypatch):
-    calls = _stub_front(monkeypatch, lever="reserve_margin")
+def test_the_stage_uses_the_named_assumed_margin_when_none_is_set(monkeypatch, stub_front):
+    calls = stub_front(lever="reserve_margin")
     store: dict = {}
     report = _stage_only(monkeypatch, _pack(None), store=store)
     assert calls[0]["levels"][0] == fr.FRONT_MARGIN_BASE == 0.10
@@ -195,8 +211,8 @@ def test_the_stage_uses_the_named_assumed_margin_when_none_is_set(monkeypatch):
     assert "reserve_margin: stub picks reserve_margin" in rec.note
 
 
-def test_the_ens_lever_without_a_pack_target_is_not_established(monkeypatch):
-    calls = _stub_front(monkeypatch, lever="ens_cap")
+def test_the_ens_lever_without_a_pack_target_is_not_established(monkeypatch, stub_front):
+    calls = stub_front(lever="ens_cap")
     store: dict = {}
     report = _stage_only(monkeypatch, _pack(None), store=store)
     assert calls == []
@@ -229,8 +245,8 @@ def test_a_margin_ladder_out_of_range_is_refused_by_name(monkeypatch, margin,
     assert report.pipeline.solves_consumed == 1
 
 
-def test_a_budget_short_of_two_points_is_not_run(monkeypatch):
-    calls = _stub_front(monkeypatch)
+def test_a_budget_short_of_two_points_is_not_run(monkeypatch, stub_front):
+    calls = stub_front()
     report = _stage_only(monkeypatch, _pack(10.0), budget=2)
     assert calls == []
     rec = _record(report)
@@ -241,8 +257,8 @@ def test_a_budget_short_of_two_points_is_not_run(monkeypatch):
 # ── F2: the study's seed and draws ─────────────────────────────────────────
 
 
-def test_the_stage_passes_the_study_seed_and_draws(monkeypatch):
-    calls = _stub_front(monkeypatch)
+def test_the_stage_passes_the_study_seed_and_draws(monkeypatch, stub_front):
+    calls = stub_front()
     _stage_only(monkeypatch, _pack(10.0), mc_seed=7, mc_draws=123)
     assert calls[0]["seed"] == 7 and calls[0]["mc_draws"] == 123
     calls.clear()
@@ -255,17 +271,17 @@ def test_the_stage_passes_the_study_seed_and_draws(monkeypatch):
 
 
 @pytest.mark.parametrize("solves", [3, 4])
-def test_the_charge_is_the_engine_count(monkeypatch, solves):
+def test_the_charge_is_the_engine_count(monkeypatch, solves, stub_front):
     # 4 = three points plus a reference solve the stage did not plan
-    _stub_front(monkeypatch, solves=solves)
+    stub_front(solves=solves)
     report = _stage_only(monkeypatch, _pack(10.0, ladder=(2.0, 1.0, 0.5)))
     rec = _record(report)
     assert rec.solves_charged == solves
     assert report.pipeline.solves_consumed == 1 + solves
 
 
-def test_a_failed_front_charges_what_it_spent(monkeypatch):
-    _stub_front(monkeypatch, raise_after=2)
+def test_a_failed_front_charges_what_it_spent(monkeypatch, stub_front):
+    stub_front(raise_after=2)
     store: dict = {}
     report = _stage_only(monkeypatch, _pack(10.0), store=store)
     rec = _record(report)
@@ -275,11 +291,11 @@ def test_a_failed_front_charges_what_it_spent(monkeypatch):
     assert "eh_front" not in store
 
 
-def test_a_failure_with_no_partial_charges_nothing(monkeypatch):
+def test_a_failure_with_no_partial_charges_nothing(monkeypatch, stub_front):
     def boom(*a, **k):
         raise RuntimeError("early")
 
-    _stub_front(monkeypatch)
+    stub_front()
     monkeypatch.setattr(fr, "run_front_study", boom)
     report = _stage_only(monkeypatch, _pack(10.0))
     rec = _record(report)
@@ -400,24 +416,46 @@ def test_readiness_without_front_is_masters():
         == MASTER_READINESS_DIGEST
 
 
-def test_readiness_prices_a_requested_front():
+def _readiness(pack, *, voll=VOLL):
     n = certifiable_weak_network()
     PyPSAService.set_network(n)
-    out = R.eh_readiness(n, _pack(10.0), budget_solves=30, voll=VOLL,
-                         stages=FRONT)
-    row = next(r for r in out["stages"] if r["stage"] == "front")
+    out = R.eh_readiness(n, pack, budget_solves=30, voll=voll, stages=FRONT)
+    return next(r for r in out["stages"] if r["stage"] == "front")
+
+
+def test_readiness_prices_a_requested_front_on_the_margin_lever():
+    # the fixture's LP has no outage series, so the margin lever runs; its
+    # preflight and the session margin are read at run time: a ceiling
+    row = _readiness(_pack(10.0))
     assert row["solves"] == len(S.frontier_targets(
-        1.0, S.frontier_point_count(29, 30), ladder=_pack().frontier_ladder))
+        fr.FRONT_MARGIN_BASE, S.frontier_point_count(29, 30),
+        ladder=_pack().frontier_ladder))
+    assert row["basis"] == "upper_bound" and row["reason"] is None
+
+
+def test_readiness_mirrors_the_stage_on_the_ens_lever(monkeypatch):
+    monkeypatch.setattr(fr, "choose_lever", lambda n, req: ("ens_cap", "stub"))
+    row = _readiness(_pack(10.0))
+    assert row["solves"] == len(S.frontier_targets(
+        10.0, S.frontier_point_count(29, 30), ladder=_pack().frontier_ladder))
     assert row["basis"] == "exact" and row["reason"] is None
+    row = _readiness(_pack(None))
+    assert row["solves"] == 0
+    assert row["reason"] == ("front not established: the ENS lever needs an "
+                             "ENS target (‱ of demand)")
+    row = _readiness(_pack(10.0), voll=0.0)
+    assert row["solves"] == 0
+    assert row["reason"] == ("the front's ENS lever needs VOLL > 0 (the "
+                             "session VOLL is 0)")
 
 
 # ── a requested front shows in every stage list; no apply from eh_front ───
 
 
-def test_a_requested_front_has_its_row_everywhere(monkeypatch):
+def test_a_requested_front_has_its_row_everywhere(monkeypatch, stub_front):
     from harness import catalogue
 
-    _stub_front(monkeypatch)
+    stub_front()
     report = _stage_only(monkeypatch, _pack(10.0))
     assert _record(report).status == "run"
     n = certifiable_weak_network()
@@ -429,8 +467,8 @@ def test_a_requested_front_has_its_row_everywhere(monkeypatch):
     assert catalogue.EH_STAGE_ENUM == list(EH_PIPELINE_STAGES)
 
 
-def test_study_start_clears_an_old_eh_front(monkeypatch):
-    _stub_front(monkeypatch)
+def test_study_start_clears_an_old_eh_front(monkeypatch, stub_front):
+    stub_front()
     store = {"eh_front": {"stale": True}}
     _stage_only(monkeypatch, _pack(10.0), store=store)
     assert "stale" not in store["eh_front"]

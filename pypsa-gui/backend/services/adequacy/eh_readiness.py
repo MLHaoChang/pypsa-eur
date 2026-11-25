@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from models.energy_hub import EH_OPT_IN_STAGES, EH_PIPELINE_STAGES, ArchetypePack
+from models.energy_hub import EH_PIPELINE_STAGES, ArchetypePack, stage_has_row
 from services.adequacy import archetypes as arch
 from services.adequacy import eh_study as S
 
@@ -50,14 +50,30 @@ def _stage_estimate(stage: str, net, pack: ArchetypePack, ctx: dict) -> tuple[
                                        ladder=tuple(pack.frontier_ladder))),
                 "exact", None)
     if stage == "front":
-        # The stage's own point count (frontier_point_count), uncapped CO2
-        # column only, so no reference solve; the lever is chosen at run time.
+        # The stage's own rule: the lever read off the pack-applied copy, its
+        # base, then frontier_point_count points of the pack ladder, uncapped
+        # CO2 column only (no reference solve).
+        from services.adequacy import front as fr
         n = S.frontier_point_count(ctx["remaining"], ctx["budget"])
         if n < 2:
             return 0, "exact", "budget leaves room for fewer than two points"
-        # the count does not depend on the lever's base, only on the ladder
-        return (len(S.frontier_targets(1.0, n, ladder=tuple(pack.frontier_ladder))),
-                "exact", None)
+        lever, _why = fr.choose_lever(net, None)
+        if lever == "ens_cap" and not ctx["voll_ok"]:
+            return 0, "exact", (f"the front's ENS lever needs VOLL > 0 (the "
+                                f"session VOLL is {ctx['voll']:g})")
+        try:
+            # readiness has no session margin: the assumed base stands in, and
+            # the point count of a positive base does not depend on its value
+            levels = fr.front_levels(
+                lever, n_points=n, ladder=pack.frontier_ladder,
+                ens_cap=pack.availability.ens_cap_permyriad,
+                margin_base=fr.FRONT_MARGIN_BASE)
+        except fr.FrontConfigError as exc:
+            return 0, "exact", f"front not established: {exc}"
+        # the margin lever's preflight and the session margin are read at run
+        # time, so its count is a ceiling
+        return (len(levels), "exact" if lever == "ens_cap" else "upper_bound",
+                None)
     if stage == "fmea_top":
         k = ctx["class_b"]["k"]
         if ctx["class_b"].get("error"):
@@ -290,7 +306,7 @@ def eh_readiness(network, pack: ArchetypePack, *, budget_solves: int,
     total = 0
     after_upper = False
     for stage in EH_PIPELINE_STAGES:
-        if stage not in requested and stage in EH_OPT_IN_STAGES:
+        if not stage_has_row(stage, requested):
             continue  # no row unless asked for, as in the study's pipeline
         if stage not in requested:
             rows.append({"stage": stage, "prediction": "not_requested",

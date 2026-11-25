@@ -60,6 +60,12 @@ EH_PIPELINE_STAGES: tuple[str, ...] = (
 # readiness rows unless requested, so a study without them is unchanged.
 EH_OPT_IN_STAGES: tuple[str, ...] = ("front",)
 
+
+def stage_has_row(stage: str, requested) -> bool:
+    """Whether a stage gets a row in a pipeline or readiness list: every
+    default stage does; an opt-in stage only when ``requested`` names it."""
+    return stage not in EH_OPT_IN_STAGES or stage in requested
+
 EHPipelineStage = Literal[
     "apply_pack",
     "ens_solve",
@@ -273,7 +279,7 @@ class EHStudyPipeline(BaseModel):
     stages: list[PipelineStageRecord] = Field(
         default_factory=lambda: [
             PipelineStageRecord(stage=s) for s in EH_PIPELINE_STAGES
-            if s not in EH_OPT_IN_STAGES
+            if stage_has_row(s, ())
         ])
     budget_solves: int = Field(
         default=DEFAULT_EH_BUDGET_SOLVES, ge=1, le=MAX_EH_BUDGET_SOLVES)
