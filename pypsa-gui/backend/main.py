@@ -84,6 +84,7 @@ from routers import (
     durable_conversation,
     clustering,
     adequacy_worksheet,
+    eh_front,
     flow,
     site_scene,
     compare,
@@ -1417,6 +1418,8 @@ app.include_router(results.results_router, prefix="/api/results", tags=["results
 app.include_router(reserves.router, prefix="/api/results", tags=["results"])
 # The plan-vs-operation gap (DC grid readiness 07 S3): read-only.
 app.include_router(operational_gap.router, prefix="/api/results", tags=["results"])
+# The Energy Hub study's front stage (DC 01): read-only.
+app.include_router(eh_front.router, prefix="/api/results", tags=["results"])
 # Per-asset "Asset Detail" results (Phase 1). Mounted AFTER results_router so
 # the more specific /api/results/asset/... prefix registers without being
 # shadowed; the two routers don't share any literal path segments in practice

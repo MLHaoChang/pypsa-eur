@@ -1022,7 +1022,10 @@ def get_prices(
     if not _dispatch_ready(n):
         return _not_solved()
     try:
-        payload = compute_prices(n, source, from_, to_, result_df=_result_df)
+        from harness.solve_validity import solved_price_limit
+
+        payload = compute_prices(n, source, from_, to_, result_df=_result_df,
+                                 price_limit=solved_price_limit(_state, n))
     except Exception:  # the service logged it; the route keeps its 204
         return _not_solved()
     return _not_solved() if payload is None else payload
@@ -1050,7 +1053,10 @@ def get_price_drivers(threshold: float = 2000.0, limit: int = 200):
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return _not_solved()
-    payload = compute_price_drivers(n, threshold, limit)
+    from harness.solve_validity import solved_price_limit
+
+    payload = compute_price_drivers(n, threshold, limit,
+                                    price_limit=solved_price_limit(_state, n))
     return _not_solved() if payload is None else payload
 
 
@@ -1803,30 +1809,6 @@ def get_front():
     out = run_evidence.wire_record(st)
     out["edited_since_study"] = _study_state.edited_since(st)
     return out
-
-
-@results_router.get("/eh_front")
-def get_eh_front():
-    """The Energy Hub study's front (its opt-in ``front`` stage, DC 01), in
-    GET /front's record shape so one reader serves both: ``status``,
-    ``result`` (the engine's points), ``edited_since_study`` read off the
-    EH study's own record. 204 when the last study ran no front stage (or is
-    running: a new study clears the table). Its points were solved on the
-    study's private, pack-applied copy, so ``applicable`` is False: the apply
-    route reads only GET /front's study."""
-    result = _state.get("eh_front")
-    if not result:
-        return Response(status_code=204)
-    study = _state.get("eh_study") or {}
-    return {
-        "source": "eh_study",
-        "status": "aborted" if result.get("aborted") else "done",
-        "result": result,
-        "error": None,
-        "finished_at": study.get("finished_at"),
-        "edited_since_study": _study_state.edited_since(study),
-        "applicable": False,
-    }
 
 
 @results_router.post("/front/abort")

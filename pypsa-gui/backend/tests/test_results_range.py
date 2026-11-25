@@ -416,7 +416,6 @@ def test_the_endpoint_list_covers_every_series_endpoint():
     # run-evidence.json serves that same section as a file (LC-03 past-run parity).
     aggregates.update({"/loadflow-view", "/run-view", "/run-evidence.json"})
     aggregates.add("/front")  # DC 01: the front study record, not a series
-    aggregates.add("/eh_front")  # DC 01: the EH study's front record, not a series
     # Business case (business-case 08a): the inputs state, the preset variants
     # and the stored case are structured documents, not index/columns/data.
     aggregates.update({"/business_case", "/business_case/inputs", "/business_case/preset",
