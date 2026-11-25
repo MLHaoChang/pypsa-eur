@@ -163,3 +163,24 @@ def test_without_an_after_battery_value_the_table_and_hash_are_unchanged():
     plain = _collect(grid_readiness=_scorecard())
     assert "After battery/UPS" not in plain.tables[chapters.GRID_READINESS].columns
     assert not any("after the site's battery" in d for d in plain.required_disclosures)
+
+
+def test_a_site_load_scorecard_reads_load_side_in_the_report_end_to_end(tmp_path):
+    """GK L4: a non-data-centre template's own scorecard, carried with a load
+    envelope, gives the report's "site load ... load-side ... BESS" sentence."""
+    import json
+    from services.adequacy import grid_readiness as G
+
+    tid = "eh_h2_hub"
+    n = T.BUILDERS[tid]()
+    T.write_sidecars(tmp_path, tid)
+    dc_meta = T.dc_load_meta("eh_datacenter", T.dc_load_spec("eh_datacenter", {}))
+    meta = json.loads((tmp_path / "eh_template.json").read_text())
+    meta["dc_load"] = {"envelope": dc_meta["envelope"]}
+    (tmp_path / "eh_template.json").write_text(json.dumps(meta))
+    card = G.grid_readiness(tmp_path, n, "eu_rfg_dcc_ce")
+    assert card["load_words"] == "site load" and card["envelope"]
+    text = " ".join(_collect(grid_readiness=card).required_disclosures)
+    assert ("the ramp, oscillation and voltage-change rows read the site load envelope load-side "
+            "at the point of connection, before BESS smoothing") in text
+    assert "IT-side" not in text and "AI-training" not in text
