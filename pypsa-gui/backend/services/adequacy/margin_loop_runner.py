@@ -282,7 +282,8 @@ def start_margin_loop(
         # have slipped past this guard and the loop would have spent its
         # budget refusing — the K6 outcome this guard exists to prevent.
         if iss.code in ("reserve_margin_unpriceable_assets",
-                        "reserve_margin_import_group_extendable") \
+                        "reserve_margin_import_group_extendable",
+                        "reserve_margin_import_link_extendable") \
                 or iss.code.startswith("nonfinite_"):
             raise _unsupported_scope(iss.message)
 

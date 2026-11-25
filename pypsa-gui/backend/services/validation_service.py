@@ -2408,7 +2408,8 @@ def _check_reserve_margin(n, solver_config) -> list[Issue]:
         issues.append(_err(
             "reserve_margin_unpriceable_assets", "", "",
             f"The reserve margin cannot price {len(unpriceable)} asset(s) "
-            f"(no outage data, no availability profile): {names}{more}. They "
+            f"(no outage data, or an outage rate outside [0, 1), and no "
+            f"availability profile): {names}{more}. They "
             "are excluded from the firm-capacity total — never credited at "
             "1.0 — so the margin would be enforced against a fleet smaller "
             "than the one you built. Enter an outage rate and basis, or an "
@@ -2424,6 +2425,16 @@ def _check_reserve_margin(n, solver_config) -> list[Issue]:
         issues.append(_err(
             "reserve_margin_import_group_extendable", "", "",
             import_group_extendable_message(behind),
+        ))
+
+    # GK A on #1998 (4): an extendable grid_import Link with supply behind it.
+    # Its static p_nom is not what the solve builds, so it is refused by name.
+    ext_links = list(facts.get("import_link_extendable") or [])
+    if ext_links:
+        from services.solver.adequacy import import_link_extendable_message
+        issues.append(_err(
+            "reserve_margin_import_link_extendable", "", "",
+            import_link_extendable_message(ext_links),
         ))
 
     for P, per in (facts["stash"].get("periods") or {}).items():

@@ -152,6 +152,11 @@ def _wrap_with_reserve_margin(network: "pypsa.Network", user_fn, cfg, log_queue=
             msg = import_group_extendable_message(facts["import_group_extendable"])
             _emit(msg)
             raise ValueError(msg)
+        # GK A on #1998 (4): an extendable grid import, refused the same way.
+        if facts.get("import_link_extendable"):
+            msg = import_link_extendable_message(facts["import_link_extendable"])
+            _emit(msg)
+            raise ValueError(msg)
         stash = facts["stash"]
         margin = stash["margin"]
         # Solve-time truth for §4's report and §3's diagnoser: restore reverts
@@ -514,26 +519,9 @@ def _wrap_with_import_energy_cap(network: "pypsa.Network", user_fn, cfg,
     return wrapper
 
 
-def _import_groups(n, elec_buses: set[str]) -> dict | None:
-    """The point-of-connection groups, by topology (E3, G2), or None when the
-    network has no ``grid_import`` Link (the margin is then untouched).
-
-    The electrical buses are split into connected components over every
-    Line, Transformer and Link (undirected: direction never matters) EXCEPT
-    the ``eh_role == "grid_import"`` Links; the components are
-    ``archetypes._components`` over ``archetypes._branch_edges``, the split
-    the MC's hub boundary uses. The SITE side is every component holding a
-    bus flagged ``eh_critical``. When no bus in the network is flagged, the
-    site side falls back to the components holding ``bus1`` of a
-    ``grid_import`` Link (its documented orientation: ``bus0`` upstream).
-    Loads do not decide sides: an upstream component with its own demand is
-    still upstream.
-
-    Returns ``{"comp_of": {bus: component id}, "links": {upstream component
-    id: [grid_import Links joining it to a site component]}}``. A Link whose
-    two ends stay connected another way (a parallel Line or Link) joins no
-    group: what is behind it has a path to the site and keeps plain credit.
-    """
+def _grid_imports(n, elec_buses: set[str]) -> list[str] | None:
+    """The ``eh_role == "grid_import"`` Links with both ends electrical, or
+    None when there is none (the margin is then untouched)."""
     links = getattr(n, "links", None)
     if links is None or links.empty or "eh_role" not in links.columns:
         return None
@@ -543,79 +531,397 @@ def _import_groups(n, elec_buses: set[str]) -> dict | None:
         and str(links.at[lk, "bus0"]) in elec_buses
         and str(links.at[lk, "bus1"]) in elec_buses
     ]
-    if not imports:
-        return None
-    from services.adequacy.archetypes import _branch_edges, _components
+    return imports or None
+
+
+def _link_value(n, lk: str, attr: str, snaps, worst, default: float) -> tuple[float, bool]:
+    """A Link's ``attr`` (p_max_pu, p_min_pu, efficiency) over ``snaps``:
+    the time series' ``worst`` (min or max) over those snapshots when it has
+    one, else the static column. Returns ``(value, from_series)``. A value
+    that is not a finite number reads ``default``."""
+    ts = getattr(getattr(n, "links_t", None), attr, None)
+    if ts is not None and lk in getattr(ts, "columns", []):
+        vals = pd.to_numeric(ts[lk].reindex(snaps), errors="coerce").dropna()
+        if len(vals):
+            return float(worst(vals)), True
+    try:
+        v = float(n.links.at[lk, attr])
+    except (KeyError, TypeError, ValueError):
+        return default, False
+    return (v if math.isfinite(v) else default), False
+
+
+def _reach(start: set[str], adj: dict[str, set[str]]) -> set[str]:
+    seen = set(start)
+    stack = list(start)
+    while stack:
+        for w in adj.get(stack.pop(), ()):
+            if w not in seen:
+                seen.add(w)
+                stack.append(w)
+    return seen
+
+
+def _sccs(nodes: set[str], fwd: dict[str, set[str]]) -> dict[str, int]:
+    """Strongly connected components of ``fwd`` restricted to ``nodes``
+    (Kosaraju, iterative): ``{bus: component id}``."""
+    order: list[str] = []
+    seen: set[str] = set()
+    for s in sorted(nodes):
+        if s in seen:
+            continue
+        seen.add(s)
+        stack = [(s, iter(sorted(fwd[s] & nodes)))]
+        while stack:
+            v, it = stack[-1]
+            for w in it:
+                if w not in seen:
+                    seen.add(w)
+                    stack.append((w, iter(sorted(fwd[w] & nodes))))
+                    break
+            else:
+                stack.pop()
+                order.append(v)
+    rev: dict[str, set[str]] = {b: set() for b in nodes}
+    for a in nodes:
+        for b in fwd[a] & nodes:
+            rev[b].add(a)
+    comp: dict[str, int] = {}
+    cid = -1
+    for s in reversed(order):
+        if s in comp:
+            continue
+        cid += 1
+        comp[s] = cid
+        stack2 = [s]
+        while stack2:
+            for w in rev[stack2.pop()]:
+                if w not in comp:
+                    comp[w] = cid
+                    stack2.append(w)
+    return comp
+
+
+def _import_topology(n, elec_buses: set[str], imports: list[str], snaps,
+                     active) -> dict:
+    """Which buses reach the site only through ``grid_import`` Links in ONE
+    period, and by which hops (E3, G2; GK A on #1998 (1)-(3), (7)).
+
+    **Paths are directed and per period.** A Line or Transformer active in
+    the period carries power both ways. A plain Link active in the period
+    carries it from bus0 toward its other ports when its p_max_pu (the
+    lowest in the period, for a time series) is above 0, and back when its
+    p_min_pu (the highest in the period) is below 0; a Link that cannot carry
+    power toward the site is no path. ``active(comp)`` is the period's
+    activity mask.
+
+    **The site** is every bus holding an electrical Load (G2: the margin's
+    demand is there), plus every bus flagged ``eh_critical``. With neither,
+    it falls back to the ``bus1`` ends of the ``grid_import`` Links (their
+    documented orientation: ``bus0`` upstream). A bus with a free path to a
+    site bus is site-side and keeps plain credit.
+
+    **The rest** is split into stages (strongly connected over the free
+    paths). A stage's hop is where its power goes next: a free path to
+    another stage, or its ``grid_import`` Links (bus0 -> bus1) to one stage
+    or to the site. A stage that reaches the site only through hops is
+    "behind" the import; one that cannot reach it at all is an island and
+    keeps plain credit. A stage with hops to several places is credited only
+    through its imports straight into the site (none: nothing), and says so.
+    The imports are structural: one not active in the period is a hop rated
+    0 MW, not a missing hop.
+
+    Returns ``{"stage_of": {bus: stage}, "next": {stage: (target, links,
+    fanout)}}`` for the behind stages, where ``target`` is a stage,
+    ``"SITE"`` or None, and ``links`` is empty for a free hop."""
     from services.solver.process_uc import flag_column
 
-    buses = [str(b) for b in n.buses.index if str(b) in elec_buses]
-    comps = _components(buses, _branch_edges(n, exclude_links=set(imports)))
-    comp_of = {b: i for i, comp in enumerate(comps) for b in comp}
-    critical = {str(b) for b in n.buses.index[flag_column(n.buses, "eh_critical")]}
-    site = {comp_of[b] for b in critical if b in comp_of}
-    if not critical:
-        site = {comp_of[str(links.at[lk, "bus1"])] for lk in imports}
-    groups: dict[int, list[str]] = {}
-    for lk in imports:
-        ends = {comp_of[str(links.at[lk, "bus0"])], comp_of[str(links.at[lk, "bus1"])]}
-        upstream = ends - site
-        if len(ends) == 2 and len(upstream) == 1:
-            groups.setdefault(upstream.pop(), []).append(lk)
-    return {"comp_of": comp_of, "links": {c: sorted(ls) for c, ls in groups.items()}}
+    links = n.links
+    imp = set(imports)
+    fwd: dict[str, set[str]] = {b: set() for b in elec_buses}
 
+    def _edge(a: str, b: str) -> None:
+        if a in fwd and b in fwd and a != b:
+            fwd[a].add(b)
 
-def _import_group_credit(n, P, links: list[str], grp: dict, link_q: dict,
-                         energized: dict, links_active, link_nodata: list[str],
-                         link_bad: list[str]) -> float:
-    """One import group's firm credit in period P (the series rule, E1/E2),
-    written onto each member's ``assets`` row as ``cap`` (E5).
-
-    ``U = Σ C_i`` over the active fixed members, ``A_up = Σ d_i C_i / U``,
-    ``C_L`` the MW of the group's grid_import Links active in P (each at its
-    ``p_nom``, and at most its energization schedule's minimum in P when it
-    has one, ``energization.energized_mw_by_period``), ``A_L = Σ (1 - q_l)
-    C_l / C_L``. Credit ``min(U, C_L) x A_up x A_L``; 0 when ``C_L`` is 0
-    (G3)."""
-    ekey = "all" if P == "ALL" else str(P)
-    c_l = 0.0
-    a_num = 0.0
-    for lk in links:
-        if lk not in link_q or not bool(links_active.get(lk, False)):
+    for comp in ("lines", "transformers"):
+        df = getattr(n, comp, None)
+        if df is None or df.empty:
             continue
-        mw = n.links.at[lk, "p_nom"]
-        try:
-            mw = max(0.0, float(mw)) if math.isfinite(float(mw)) else 0.0
-        except (TypeError, ValueError):
-            mw = 0.0
-        e = (energized.get(lk) or {}).get(ekey)
-        if e is not None and math.isfinite(e):
-            mw = min(mw, max(0.0, e))
-        c_l += mw
-        a_num += (1.0 - link_q[lk]) * mw
-    u = grp["U"]
-    a_l = a_num / c_l if c_l > 0 else None
-    credit = min(u, c_l) * (grp["dU"] / u) * a_l if (c_l > 0 and u > 0) else 0.0
-    names = ", ".join(links)
-    if c_l > 0:
-        reason = f"capped at grid_import {names} {c_l:g} MW × {a_l:g}"
-    else:
-        reason = (f"no import capacity in period {P}: grid_import {names} is "
-                  "not active or is rated 0 MW, so nothing behind it is credited")
-    nodata = [lk for lk in links if lk in link_nodata]
-    if nodata:
-        reason += ("; link availability taken as 1: no outage data "
-                   f"({', '.join(nodata)})")
-    bad = [lk for lk in links if lk in link_bad]
-    if bad:
-        reason += f"; {', '.join(bad)} not counted: outage rate outside [0, 1)"
-    for row, extendable in grp["rows"]:
-        cap = {"links": list(links), "link_mw": c_l, "link_availability": a_l,
-               "group_mw": u, "credited_mw": credit, "reason": reason}
-        if extendable:
-            cap["reason"] = (reason + "; extendable behind the import: refused "
-                             "(reserve_margin_import_group_extendable), not credited")
-        row["cap"] = cap
-    return credit
+        act = active(comp)
+        for name in df.index:
+            if not bool(act.get(name, False)):
+                continue
+            b0, b1 = str(df.at[name, "bus0"]), str(df.at[name, "bus1"])
+            _edge(b0, b1)
+            _edge(b1, b0)
+    ports = sorted((c for c in links.columns
+                    if c.startswith("bus") and c[3:].isdigit() and c != "bus0"),
+                   key=lambda c: int(c[3:]))
+    link_act = active("links")
+    for name in links.index:
+        lk = str(name)
+        if lk in imp or not bool(link_act.get(name, False)):
+            continue
+        forward = _link_value(n, lk, "p_max_pu", snaps, min, 0.0)[0] > 0
+        backward = _link_value(n, lk, "p_min_pu", snaps, max, 0.0)[0] < 0
+        b0 = str(links.at[name, "bus0"])
+        for c in ports:
+            other = str(links.at[name, c])
+            if other.strip() in ("", "nan", "None"):
+                continue
+            if forward:
+                _edge(b0, other)
+            if backward:
+                _edge(other, b0)
+
+    site: set[str] = set()
+    loads = getattr(n, "loads", None)
+    if loads is not None and not loads.empty and "bus" in loads.columns:
+        site |= {str(b) for b in loads["bus"]} & elec_buses
+    site |= {str(b) for b in n.buses.index[flag_column(n.buses, "eh_critical")]
+             } & elec_buses
+    if not site:
+        site = {str(links.at[lk, "bus1"]) for lk in imports}
+
+    rev: dict[str, set[str]] = {b: set() for b in fwd}
+    for a, outs in fwd.items():
+        for b in outs:
+            rev[b].add(a)
+    free = _reach(site & set(fwd), rev)
+    rest = set(fwd) - free
+    scc = _sccs(rest, fwd)
+
+    # targets[stage][target] = {"free": bool, "links": set}
+    targets: dict[int, dict] = {s: {} for s in set(scc.values())}
+    for a in rest:
+        for b in fwd[a]:
+            if scc[b] != scc[a]:
+                targets[scc[a]].setdefault(
+                    scc[b], {"free": False, "links": set()})["free"] = True
+    for lk in imports:
+        t, h = str(links.at[lk, "bus0"]), str(links.at[lk, "bus1"])
+        if t in free:
+            continue
+        hs = "SITE" if h in free else scc[h]
+        if hs == scc[t]:
+            continue
+        targets[scc[t]].setdefault(hs, {"free": False, "links": set()})["links"].add(lk)
+
+    behind = {s for s, tg in targets.items() if "SITE" in tg}
+    grew = True
+    while grew:
+        grew = False
+        for s, tg in targets.items():
+            if s not in behind and any(t in behind for t in tg):
+                behind.add(s)
+                grew = True
+
+    nxt: dict[int, tuple] = {}
+    for s in behind:
+        tg = {t: v for t, v in targets[s].items() if t == "SITE" or t in behind}
+        if len(tg) == 1:
+            (t, v), = tg.items()
+            nxt[s] = (t, () if v["free"] else tuple(sorted(v["links"])), False)
+        elif "SITE" in tg:
+            nxt[s] = ("SITE", tuple(sorted(tg["SITE"]["links"])), True)
+        else:
+            nxt[s] = (None, (), True)
+    return {"stage_of": {b: scc[b] for b in rest if scc[b] in behind},
+            "next": nxt}
+
+
+def _import_paths(topo: dict) -> dict[int, list[tuple]]:
+    """Each behind stage's hops to the site (or to a dead end), in order."""
+    paths: dict[int, list[tuple]] = {}
+    for s in topo["next"]:
+        path, cur, seen = [], s, set()
+        while cur in topo["next"] and cur not in seen:
+            seen.add(cur)
+            path.append(topo["next"][cur])
+            cur = topo["next"][cur][0]
+        paths[s] = path
+    return paths
+
+
+def _import_trees(topo: dict) -> tuple[dict[int, int], dict[int, set[str]]]:
+    """Each behind stage's root (the last stage before the site or a dead
+    end) and each root's ``grid_import`` Links: one tree is one group."""
+    nxt = topo["next"]
+    root_of: dict[int, int] = {}
+    for s, path in _import_paths(topo).items():
+        cur = s
+        for t, _l, _f in path:
+            if t in nxt:
+                cur = t
+        root_of[s] = cur
+    tree_links: dict[int, set[str]] = {}
+    for s in nxt:
+        tree_links.setdefault(root_of[s], set()).update(nxt[s][1])
+    return root_of, tree_links
+
+
+def _import_link_caps(n, P, topo: dict, snaps, links_active, link_q: dict,
+                      energized: dict, notes: dict) -> dict[str, tuple]:
+    """``{link: (C_l, a_l)}`` for every hop Link of the period: ``C_l`` the
+    MW it DELIVERS (GK A on #1998 (3), (5)) = ``p_nom`` x its p_max_pu (the
+    lowest in the period for a time series), at most its energization
+    schedule's minimum in P (``energization.energized_mw_by_period``, a
+    sending-side MW), x its efficiency (the lowest in the period); 0 when it
+    is not active in P or its outage rate is unusable. ``a_l = 1 - q_l``.
+    Records the Links read off a time series in ``notes``."""
+    ekey = "all" if P == "ALL" else str(P)
+    notes["pu_varies"], notes["eff_varies"] = [], []
+    caps: dict[str, tuple] = {}
+    for hop in topo["next"].values():
+        for lk in hop[1]:
+            if lk in caps:
+                continue
+            if lk not in link_q or not bool(links_active.get(lk, False)):
+                caps[lk] = (0.0, 0.0)
+                continue
+            try:
+                p_nom = float(n.links.at[lk, "p_nom"])
+            except (TypeError, ValueError):
+                p_nom = 0.0
+            pu, pu_ts = _link_value(n, lk, "p_max_pu", snaps, min, 0.0)
+            eff, eff_ts = _link_value(n, lk, "efficiency", snaps, min, 0.0)
+            mw = max(0.0, p_nom) * max(0.0, pu) if math.isfinite(p_nom) else 0.0
+            e = (energized.get(lk) or {}).get(ekey)
+            if e is not None and math.isfinite(e):
+                mw = min(mw, max(0.0, e))
+            caps[lk] = (mw * max(0.0, eff), 1.0 - link_q[lk])
+            if pu_ts:
+                notes["pu_varies"].append(lk)
+            if eff_ts:
+                notes["eff_varies"].append(lk)
+    return caps
+
+
+def _import_group_credit(P, topo: dict, groups: dict, link_cap: dict,
+                         notes: dict) -> float:
+    """The period's firm credit through its ``grid_import`` Links (the series
+    rule, E1/E2 and GK A (37)), written onto each member's ``assets`` row as
+    ``cap`` (E5).
+
+    Per hop of ``grid_import`` Links: ``C = Σ C_l`` with ``C_l`` the MW a
+    Link DELIVERS in P (``link_cap``: p_nom × its lowest p_max_pu in P, at
+    most its energization schedule, × efficiency) and ``A = Σ a_l C_l / C``.
+    A stage passes on ``min(U, C)`` at availability ``(dU / U) × A``, where
+    ``U`` and ``dU`` are its own fixed members (``Σ C_i``, ``Σ d_i C_i``)
+    plus what its upstream stages pass to it; a free hop passes all of it.
+    The hop into the site credits ``min(U, C) × (dU / U) × A``, so a chain
+    is capped at its tightest Link: ``min(U, C_1, C_2) × A_up × A_1 × A_2``.
+    A hop rated 0 MW passes nothing (G3).
+
+    ``groups`` is ``{stage: {"U", "dU", "rows"}}`` from the member loop;
+    ``notes`` holds the link lists ``nodata``, ``bad``, ``pu_varies`` and
+    ``eff_varies`` (``_import_link_caps``)."""
+    nxt = topo["next"]
+
+    def _hop(links: tuple) -> tuple[float, float | None]:
+        c = sum(link_cap[lk][0] for lk in links)
+        if c <= 0:
+            return 0.0, None
+        return c, sum(link_cap[lk][1] * link_cap[lk][0] for lk in links) / c
+
+    arrive: dict[int, tuple[float, float]] = {}
+
+    def _arrive(s) -> tuple[float, float]:
+        if s not in arrive:
+            g = groups.get(s) or {"U": 0.0, "dU": 0.0}
+            u, du = g["U"], g["dU"]
+            for y, (t, _l, _f) in nxt.items():
+                if t == s:
+                    pu, pdu = _pass(y)
+                    u, du = u + pu, du + pdu
+            arrive[s] = (u, du)
+        return arrive[s]
+
+    def _pass(s) -> tuple[float, float]:
+        t, links, _f = nxt[s]
+        u, du = _arrive(s)
+        if t is None or u <= 0:
+            return 0.0, 0.0
+        if not links:
+            return u, du
+        c, a = _hop(links)
+        if c <= 0:
+            return 0.0, 0.0
+        out = min(u, c)
+        return out, out * (du / u) * a
+
+    paths = _import_paths(topo)
+    root_of, _tree_links = _import_trees(topo)
+    credit_of: dict[int, float] = {}
+    for s in nxt:
+        if root_of[s] == s:
+            credit_of[s] = _pass(s)[1] if nxt[s][0] == "SITE" else 0.0
+    total = sum(credit_of.values())
+
+    tree_u: dict[int, float] = {}
+    tree_du: dict[int, float] = {}
+    for s in nxt:
+        r = root_of[s]
+        g = groups.get(s) or {"U": 0.0, "dU": 0.0}
+        tree_u[r] = tree_u.get(r, 0.0) + g["U"]
+        tree_du[r] = tree_du.get(r, 0.0) + g["dU"]
+
+    for s, g in groups.items():
+        if s not in nxt:
+            continue
+        r = root_of[s]
+        hops = [h for h in paths[s] if h[1]]
+        links = sorted({lk for h in hops for lk in h[1]})
+        caps = [_hop(h[1]) for h in hops]
+        c_l = min((c for c, _a in caps), default=0.0)
+        a_l = None
+        if c_l > 0:
+            a_l = 1.0
+            for _c, a in caps:
+                a_l *= a
+        dead_end = paths[s][-1][0] is None
+        if dead_end:
+            c_l, a_l = 0.0, None
+        credit = credit_of.get(r, 0.0)
+        names = ", ".join(links)
+        if dead_end:
+            reason = (f"no single path to the site in period {P}: the supply "
+                      "behind it reaches the site only through grid_import "
+                      "Links that lead several ways, none of them straight "
+                      "into the site, so nothing behind it is credited")
+        elif c_l > 0:
+            reason = f"capped at grid_import {names} {c_l:g} MW × {a_l:g}"
+        else:
+            reason = (f"no import capacity in period {P}: grid_import {names} "
+                      "is not active, open (p_max_pu 0) or rated 0 MW, so "
+                      "nothing behind it is credited")
+        if any(h[2] for h in paths[s]):
+            reason += ("; it also leads elsewhere through other paths, which "
+                       "are not counted")
+        for key, what in (("pu_varies", "p_max_pu"), ("eff_varies", "efficiency")):
+            varies = [lk for lk in links if lk in notes[key]]
+            if varies:
+                reason += (f"; the lowest {what} in the period is taken for "
+                           f"{', '.join(varies)}")
+        nodata = [lk for lk in links if lk in notes["nodata"]]
+        if nodata:
+            reason += ("; link availability taken as 1: no outage data "
+                       f"({', '.join(nodata)})")
+        bad = [lk for lk in links if lk in notes["bad"]]
+        if bad:
+            reason += f"; {', '.join(bad)} not counted: outage rate outside [0, 1)"
+        share = credit / tree_du[r] if tree_du.get(r, 0.0) > 0 else 0.0
+        for row, extendable, d_cap in g["rows"]:
+            cap = {"links": links, "link_mw": c_l, "link_availability": a_l,
+                   "group_mw": tree_u.get(r, 0.0), "credited_mw": credit,
+                   "member_credit_mw": 0.0 if extendable else share * d_cap,
+                   "reason": reason}
+            if extendable:
+                cap["reason"] = (reason + "; extendable behind the import: refused "
+                                 "(reserve_margin_import_group_extendable), not credited")
+            row["cap"] = cap
+    return total
 
 
 def import_group_extendable_message(groups: list[dict]) -> str:
@@ -633,6 +939,18 @@ def import_group_extendable_message(groups: list[dict]) -> str:
     )
 
 
+def import_link_extendable_message(links: list[str]) -> str:
+    """The ONE sentence for an extendable ``grid_import`` Link (GK A on
+    #1998 (4)), shared by the preflight and the LP wrapper."""
+    return (
+        "The reserve margin cannot credit supply behind an extendable grid "
+        f"import: {', '.join(links)}. The margin would read the Link's static "
+        "p_nom, which the solve ignores for an extendable Link and may build "
+        "smaller. Make the grid import fixed (set its p_nom) or unset the "
+        "margin."
+    )
+
+
 def reserve_margin_facts(n, cfg, snapshots=None, emit=None, *,
                          demand_scaled_in_place: bool = False) -> dict | None:
     """
@@ -644,18 +962,22 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None, *,
          "terms":   {period: [(member, derate), …]},   # active extendables
          "unpriceable":     [names excluded for lack of evidence],
          "carrier_default": [names credited off a carrier class average],
-         "import_group_extendable": [{"members": [...], "links": [...]}]}
+         "import_group_extendable": [{"members": [...], "links": [...]}],
+         "import_link_extendable":  [grid_import Links that are extendable]}
 
     **The point-of-connection cap.** Generation and storage that reach the
     site only through ``grid_import`` Links (``eh_role``) are credited as a
-    GROUP, never above what the Links deliver (``_import_groups``,
-    ``_import_group_credit``): ``min(U, C_L) x A_up x A_L`` per period,
-    replacing the members' own terms in ``firm_fixed_mw`` and
-    ``max_achievable_mw``. Each capped member's ``assets`` row carries a
-    ``cap`` dict saying so; ``capacity_mw`` is unchanged. An extendable member
-    behind such a Link is not credited and is listed in
-    ``import_group_extendable``, which the preflight and the LP wrapper both
-    refuse. A network with no ``grid_import`` Link is untouched.
+    GROUP, never above what the Links deliver (``_import_topology``, per
+    period; ``_import_group_credit``): ``min(U, C_L) x A_up x A_L`` per
+    period, a chain of imports at its tightest Link, replacing the members'
+    own terms in ``firm_fixed_mw`` and ``max_achievable_mw``. Each capped
+    member's ``assets`` row carries a ``cap`` dict saying so (with its own
+    share, ``member_credit_mw``); ``capacity_mw`` is unchanged. An extendable
+    member behind such a Link is not credited and is listed in
+    ``import_group_extendable``; an extendable ``grid_import`` Link with
+    something behind it is listed in ``import_link_extendable``. The
+    preflight and the LP wrapper refuse both. A network with no
+    ``grid_import`` Link is untouched.
 
     This is deliberately ONE function rather than two, because §3's preflight
     must answer "can any plan built from this candidate set reach the margin?"
@@ -876,48 +1198,79 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None, *,
                 "energy_limited": energy_limited,
             })
 
-    # ── the point-of-connection cap (E1-E7): members reaching the site only
-    #    through `grid_import` Links are credited as a group, at most what
-    #    the Links deliver. No such Link: nothing below runs.
-    cap_links: dict[int, list[str]] = {}
-    group_of: dict[int, int] = {}            # id(member) -> its component
+    def _active(comp: str, P) -> pd.Series:
+        """Activity mask for one component frame in period P. Masks BOTH
+        sides: a fixed asset not yet built is not a constant either.
+        Phase 12d: the mask itself is ``services.adequacy.activity.
+        active_mask`` — the SAME call the engines make — so the margin and
+        the engines agree by construction; the all-True guard stays here
+        (E12 pins the delegation; the import is deliberately lazy)."""
+        df = getattr(n, comp, None)
+        try:
+            from services.adequacy import activity as _activity
+            return _activity.active_mask(n, comp, P)
+        except Exception:
+            idx = df.index if df is not None else pd.Index([])
+            return pd.Series(True, index=idx, dtype=bool)
+
+    # ── the point-of-connection cap (E1-E7; GK A on #1998): members reaching
+    #    the site only through `grid_import` Links are credited as a group,
+    #    at most what the Links deliver. The topology is built per period
+    #    from that period's active branches. No such Link: nothing below runs.
+    topos: dict = {}                         # period -> _import_topology
     link_q: dict[str, float] = {}
     link_nodata: list[str] = []
     link_bad: list[str] = []
     energized: dict[str, dict | None] = {}
     import_group_extendable: list[dict] = []
-    topo = _import_groups(n, elec_buses)
-    if topo is not None:
-        cap_links = topo["links"]
-        for mem in members:
-            c = topo["comp_of"].get(mem["bus"])
-            if c in cap_links:
-                group_of[id(mem)] = c
+    import_link_extendable: list[str] = []
+    imports = _grid_imports(n, elec_buses)
+    if imports is not None:
+        used: set[str] = set()
+        ext_groups: dict[tuple, set[str]] = {}
+        ext_links: set[str] = set()
+        for P in periods:
+            snaps_p = snapshots[(period_of == P).to_numpy()]
+            topo = _import_topology(n, elec_buses, imports, snaps_p,
+                                    lambda comp, P=P: _active(comp, P))
+            topos[P] = topo
+            root_of, tree_links = _import_trees(topo)
+            for s_links in tree_links.values():
+                used |= s_links
+            held: dict[int, list[dict]] = {}
+            for mem in members:
+                st = topo["stage_of"].get(mem["bus"])
+                if st is not None:
+                    held.setdefault(root_of[st], []).append(mem)
+            for r, mems in held.items():
+                ls = tuple(sorted(tree_links[r]))
+                ext_links |= {lk for lk in ls if bool(n.links.at[lk, "p_nom_extendable"])}
+                ext = {m["name"] for m in mems if m["extendable"]}
+                if ext:
+                    ext_groups.setdefault(ls, set()).update(ext)
+        import_group_extendable = [
+            {"members": sorted(ms), "links": list(ls)}
+            for ls, ms in sorted(ext_groups.items())]
+        import_link_extendable = sorted(ext_links)
         from services.adequacy.energization import energized_mw_by_period
         lparams = resolve_outage_params(n, "links")
-        for ls in cap_links.values():
-            for lk in ls:
-                row = lparams.loc[lk]
-                if str(row["source"]) == "missing":
-                    # G1: no evidence on the Link itself; its availability is
-                    # taken as 1 and the facts say so.
-                    link_q[lk] = 0.0
-                    link_nodata.append(lk)
-                else:
-                    q = _finite(row["rate"])
-                    if math.isnan(q) or not (0.0 <= q < 1.0):
-                        # Unusable rate: as unpriceable as a generator's, and
-                        # the Link carries nothing until it is fixed.
-                        unpriceable.append(lk)
-                        link_bad.append(lk)
-                        continue
-                    link_q[lk] = q
-                energized[lk] = energized_mw_by_period(n, lk)
-        for c, ls in sorted(cap_links.items()):
-            ext = sorted(m["name"] for m in members
-                         if group_of.get(id(m)) == c and m["extendable"])
-            if ext:
-                import_group_extendable.append({"members": ext, "links": ls})
+        for lk in sorted(used):
+            row = lparams.loc[lk]
+            if str(row["source"]) == "missing":
+                # G1: no evidence on the Link itself; its availability is
+                # taken as 1 and the facts say so.
+                link_q[lk] = 0.0
+                link_nodata.append(lk)
+            else:
+                q = _finite(row["rate"])
+                if math.isnan(q) or not (0.0 <= q < 1.0):
+                    # Unusable rate: as unpriceable as a generator's, and
+                    # the Link carries nothing until it is fixed.
+                    unpriceable.append(lk)
+                    link_bad.append(lk)
+                    continue
+                link_q[lk] = q
+            energized[lk] = energized_mw_by_period(n, lk)
 
     if unpriceable and emit is not None:
         emit(
@@ -938,21 +1291,6 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None, *,
     terms: dict[str, list] = {}
     carrier_default: list[str] = []
 
-    def _active(comp: str, P) -> pd.Series:
-        """Activity mask for one component frame in period P. Masks BOTH
-        sides: a fixed asset not yet built is not a constant either.
-        Phase 12d: the mask itself is ``services.adequacy.activity.
-        active_mask`` — the SAME call the engines make — so the margin and
-        the engines agree by construction; the all-True guard stays here
-        (E12 pins the delegation; the import is deliberately lazy)."""
-        df = getattr(n, comp, None)
-        try:
-            from services.adequacy import activity as _activity
-            return _activity.active_mask(n, comp, P)
-        except Exception:
-            idx = df.index if df is not None else pd.Index([])
-            return pd.Series(True, index=idx, dtype=bool)
-
     ext_sets: list[frozenset] = []
 
     for P in periods:
@@ -969,10 +1307,10 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None, *,
         peak_idx = peak_window(demand_p, n_override=peak_hours_override)
 
         active = {c: _active(c, P) for c in ("generators", "storage_units")}
-        # Per-group accumulators for the point-of-connection cap (E4: the
-        # group's members and Links are each masked for THIS period).
-        groups_p = {c: {"U": 0.0, "dU": 0.0, "rows": []} for c in cap_links}
-        links_active = _active("links", P) if cap_links else None
+        # Per-stage accumulators for the point-of-connection cap (E4: the
+        # members, the Links and the paths are each masked for THIS period).
+        topo_p = topos.get(P)
+        groups_p: dict[int, dict] = {}
         # Phase 12b: the profile frame restricted to this period, ONCE, so the
         # per-member classification below is a column take rather than a
         # per-member reindex of the full column (the shipped-code review
@@ -997,7 +1335,9 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None, *,
             d = max(0.0, min(1.0, d if math.isfinite(d) else 0.0))
 
             capacity_mw: float | None
-            grp = groups_p.get(group_of.get(id(mem), -1))
+            stage = topo_p["stage_of"].get(mem["bus"]) if topo_p else None
+            grp = (groups_p.setdefault(stage, {"U": 0.0, "dU": 0.0, "rows": []})
+                   if stage is not None else None)
             if grp is not None:
                 # Behind a grid_import Link: the group's credit replaces the
                 # member's (added after this loop). An extendable here is
@@ -1065,12 +1405,15 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None, *,
             }
             stash["assets"].append(asset_row)
             if grp is not None:
-                grp["rows"].append((asset_row, bool(mem["extendable"])))
+                grp["rows"].append((asset_row, bool(mem["extendable"]),
+                                    0.0 if mem["extendable"] else d * mem["p_nom"]))
 
-        for c, grp in groups_p.items():
-            credit = _import_group_credit(
-                n, P, cap_links[c], grp, link_q, energized, links_active,
-                link_nodata, link_bad)
+        if topo_p is not None and topo_p["next"]:
+            notes = {"nodata": link_nodata, "bad": link_bad}
+            link_cap = _import_link_caps(
+                n, P, topo_p, snapshots[in_p.to_numpy()], _active("links", P),
+                link_q, energized, notes)
+            credit = _import_group_credit(P, topo_p, groups_p, link_cap, notes)
             firm_fixed += credit
             max_achievable += credit
 
@@ -1101,4 +1444,5 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None, *,
         "unpriceable": unpriceable,
         "carrier_default": carrier_default,
         "import_group_extendable": import_group_extendable,
+        "import_link_extendable": import_link_extendable,
     }

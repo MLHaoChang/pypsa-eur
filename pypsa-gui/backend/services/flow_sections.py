@@ -157,6 +157,7 @@ CODE_SECTION: Final[dict[str, str]] = {
     "reserve_margin_myopic_report_is_partial": "scenarios",
     "reserve_margin_unpriceable_assets": "scenarios",
     "reserve_margin_import_group_extendable": "scenarios",
+    "reserve_margin_import_link_extendable": "scenarios",
     "reserve_margin_unreachable": "scenarios",
     "reserve_margin_unsupported_strategy": "scenarios",
     "rolling_horizon_exceeds_snapshots": "scenarios",

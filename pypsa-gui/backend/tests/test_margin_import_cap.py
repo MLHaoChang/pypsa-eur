@@ -137,8 +137,9 @@ def test_a_generator_with_a_line_path_to_the_site_stays_uncapped():
 
 
 def test_a_generator_with_a_plain_link_path_stays_uncapped():
+    # The bypass carries power toward the site (bus0 grid -> bus1 site).
     n = _net()
-    n.add("Link", "bypass", bus0="site", bus1="grid", p_nom=5.0, carrier="AC")
+    n.add("Link", "bypass", bus0="grid", bus1="site", p_nom=5.0, carrier="AC")
     f = reserve_margin_facts(n, _cfg())
     assert _per(f)["firm_fixed_mw"] == pytest.approx(99.0)
 
@@ -162,14 +163,17 @@ def test_a_site_member_keeps_its_plain_credit():
     assert "cap" not in _asset(f, "genset")
 
 
-# ── G2: loads upstream; no eh_critical marker ─────────────────────────────
+# ── G2: the site from its loads; no eh_critical marker ───────────────────
 
 
-def test_an_upstream_component_with_its_own_load_is_still_capped():
+def test_a_component_with_its_own_load_is_a_site_and_keeps_plain_credit():
+    # G2: the site is where the margin's demand is. A Load on the grid bus is
+    # demand the margin covers, and the grid's generator serves it directly.
     n = _net()
     n.add("Load", "grid_demand", bus="grid", p_set=50.0)
     f = reserve_margin_facts(n, _cfg())
-    assert _per(f)["firm_fixed_mw"] == pytest.approx(40 * 0.99 * 0.998)
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(99.0)
+    assert "cap" not in _asset(f, "up")
 
 
 @pytest.mark.parametrize("drop_column", [False, True])
@@ -279,8 +283,11 @@ def test_the_single_year_campus_no_longer_credits_the_grid_beyond_the_poc():
 
     f = reserve_margin_facts(T.build_eh_datacenter(), _cfg())
     cap = _asset(f, "grid_supply")["cap"]
-    assert cap["link_mw"] == 40.0
-    assert cap["credited_mw"] == pytest.approx(40.0 * (1 - T.GRID_SUPPLY_FOR) * 0.998)
+    # 40 MW at the PoC's 0.995 efficiency: what reaches dc_mv.
+    assert cap["link_mw"] == pytest.approx(40.0 * 0.995)
+    assert cap["credited_mw"] == pytest.approx(
+        40.0 * 0.995 * (1 - T.GRID_SUPPLY_FOR) * 0.998
+    )
 
 
 # ── option (y): an extendable behind the import is refused by name ────────
@@ -536,3 +543,360 @@ def test_link_rate_bounds_are_zero_inclusive_and_one_exclusive():
     f1 = reserve_margin_facts(_net(links=(("poc", 40.0, 1.0),)), _cfg())
     assert "poc" in f1["unpriceable"]
     assert _per(f1)["firm_fixed_mw"] == 0.0
+
+
+# ── GK A on #1998 (1): the topology per period ────────────────────────────
+
+CAPPED = 40 * 0.99 * 0.998  # 39.52 MW
+
+
+def test_a_line_built_later_is_no_path_before_it_exists():
+    n, _ = _two_periods(_net())
+    n.add("Line", "tie", bus0="grid", bus1="site", x=0.1, r=0.01, s_nom=1000.0)
+    n.lines.at["tie", "build_year"] = 2035
+    n.lines.at["tie", "lifetime"] = 100
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f, 2030)["firm_fixed_mw"] == pytest.approx(CAPPED)
+    assert _asset(f, "up", 2030)["cap"]["links"] == ["poc"]
+    assert _per(f, 2035)["firm_fixed_mw"] == pytest.approx(99.0)
+    assert "cap" not in _asset(f, "up", 2035)
+
+
+def test_a_line_retired_early_is_no_path_after_it_goes():
+    n, _ = _two_periods(_net())
+    n.add("Line", "tie", bus0="grid", bus1="site", x=0.1, r=0.01, s_nom=1000.0)
+    n.lines.at["tie", "build_year"] = 2025
+    n.lines.at["tie", "lifetime"] = 7  # gone in 2032
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f, 2030)["firm_fixed_mw"] == pytest.approx(99.0)
+    assert _per(f, 2035)["firm_fixed_mw"] == pytest.approx(CAPPED)
+
+
+def test_a_transformer_built_later_is_no_path_before_it_exists():
+    n, _ = _two_periods(_net())
+    n.add("Transformer", "tx", bus0="grid", bus1="site", x=0.1, s_nom=1000.0)
+    n.transformers.at["tx", "build_year"] = 2035
+    n.transformers.at["tx", "lifetime"] = 100
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f, 2030)["firm_fixed_mw"] == pytest.approx(CAPPED)
+    assert _per(f, 2035)["firm_fixed_mw"] == pytest.approx(99.0)
+
+
+def test_a_plain_link_built_later_is_no_path_before_it_exists():
+    n, _ = _two_periods(_net())
+    n.add("Link", "bypass", bus0="grid", bus1="site", p_nom=5.0, carrier="AC")
+    n.links.at["bypass", "build_year"] = 2035
+    n.links.at["bypass", "lifetime"] = 100
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f, 2030)["firm_fixed_mw"] == pytest.approx(CAPPED)
+    assert _per(f, 2035)["firm_fixed_mw"] == pytest.approx(99.0)
+
+
+# ── GK A on #1998 (2): imports in series ──────────────────────────────────
+
+
+def _series(c1=40.0, q1=0.002, c2=30.0, q2=0.01):
+    """Grid -l1-> mid -l2-> site, both tagged grid_import."""
+    n = _net(links=())
+    n.add("Bus", "mid", carrier="AC")
+    n.add("Link", "l1", bus0="grid", bus1="mid", p_nom=c1, carrier="AC")
+    n.add("Link", "l2", bus0="mid", bus1="site", p_nom=c2, carrier="AC")
+    _outage(n, "links", "l1", q1)
+    _outage(n, "links", "l2", q2)
+    n.links["eh_role"] = "grid_import"
+    return n
+
+
+def test_a_chain_of_imports_is_capped_at_its_tightest_link():
+    f = reserve_margin_facts(_series(), _cfg())
+    credit = min(100.0, 40.0, 30.0) * 0.99 * 0.998 * 0.99
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(credit)
+    cap = _asset(f, "up")["cap"]
+    assert cap["links"] == ["l1", "l2"]
+    assert cap["link_mw"] == pytest.approx(30.0)
+    assert cap["link_availability"] == pytest.approx(0.998 * 0.99)
+    assert cap["credited_mw"] == pytest.approx(credit)
+
+
+def test_the_tightest_link_of_a_chain_may_be_the_first():
+    f = reserve_margin_facts(_series(c1=20.0, c2=60.0), _cfg())
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(20.0 * 0.99 * 0.998 * 0.99)
+    assert _asset(f, "up")["cap"]["link_mw"] == pytest.approx(20.0)
+
+
+def test_a_member_between_two_imports_shares_the_last_link():
+    n = _series()
+    n.add("Generator", "mid_g", bus="mid", carrier="gas", p_nom=20.0)
+    _outage(n, "generators", "mid_g", 0.05)
+    f = reserve_margin_facts(n, _cfg())
+    # up arrives at mid as min(100, 40) at 0.99 x 0.998; mid_g adds 20 at 0.95.
+    u = 40.0 + 20.0
+    du = 40.0 * 0.99 * 0.998 + 20.0 * 0.95
+    credit = min(u, 30.0) * (du / u) * 0.99
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(credit)
+    mid = _asset(f, "mid_g")["cap"]
+    assert mid["links"] == ["l2"] and mid["link_mw"] == pytest.approx(30.0)
+    assert mid["credited_mw"] == pytest.approx(credit)
+    assert _asset(f, "up")["cap"]["credited_mw"] == pytest.approx(credit)
+
+
+def test_a_chain_whose_first_link_is_not_built_credits_nothing_upstream():
+    n, _ = _two_periods(_series())
+    n.links.at["l1", "build_year"] = 2035
+    n.links.at["l1", "lifetime"] = 100
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f, 2030)["firm_fixed_mw"] == 0.0
+    assert "no import capacity in period 2030" in _asset(f, "up", 2030)["cap"]["reason"]
+    assert _per(f, 2035)["firm_fixed_mw"] == pytest.approx(30 * 0.99 * 0.998 * 0.99)
+
+
+# ── GK A on #1998 (3): the direction and availability of a path ───────────
+
+
+@pytest.mark.parametrize(
+    "attrs, uncapped",
+    [
+        ({"bus0": "site", "bus1": "grid"}, False),  # export only
+        ({"bus0": "site", "bus1": "grid", "p_min_pu": -1.0}, True),
+        ({"bus0": "grid", "bus1": "site", "p_max_pu": 0.0}, False),
+        ({"bus0": "grid", "bus1": "site", "p_max_pu": 0.0, "p_min_pu": -1.0}, False),
+    ],
+)
+def test_a_plain_link_is_a_path_only_toward_the_site(attrs, uncapped):
+    n = _net()
+    n.add("Link", "bypass", p_nom=5.0, carrier="AC", **attrs)
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(99.0 if uncapped else CAPPED)
+
+
+def test_a_plain_link_that_is_shut_for_an_hour_is_no_path():
+    n = _net()
+    n.add("Link", "bypass", bus0="grid", bus1="site", p_nom=5.0, carrier="AC")
+    n.links_t.p_max_pu["bypass"] = [1.0, 0.0, 1.0, 1.0]
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(CAPPED)
+
+
+def test_a_normally_open_import_credits_nothing_and_says_why():
+    n = _net()
+    n.links.at["poc", "p_max_pu"] = 0.0
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f)["firm_fixed_mw"] == 0.0
+    cap = _asset(f, "up")["cap"]
+    assert cap["link_mw"] == 0.0 and cap["credited_mw"] == 0.0
+    assert "no import capacity" in cap["reason"]
+
+
+def test_an_import_is_credited_at_its_p_max_pu():
+    n = _net()
+    n.links.at["poc", "p_max_pu"] = 0.5
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(20 * 0.99 * 0.998)
+    assert _asset(f, "up")["cap"]["link_mw"] == pytest.approx(20.0)
+
+
+def test_a_time_varying_import_rating_is_taken_at_its_period_minimum():
+    n, _ = _two_periods(_net())
+    n.links_t.p_max_pu["poc"] = [1.0, 0.5, 0.75, 1.0, 1.0, 0.25, 1.0, 1.0]
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f, 2030)["firm_fixed_mw"] == pytest.approx(20 * 0.99 * 0.998)
+    assert _per(f, 2035)["firm_fixed_mw"] == pytest.approx(10 * 0.99 * 0.998)
+    reason = _asset(f, "up", 2035)["cap"]["reason"]
+    assert "lowest p_max_pu in the period" in reason
+
+
+def test_a_static_import_rating_does_not_mention_a_minimum():
+    f = reserve_margin_facts(_net(), _cfg())
+    assert "lowest p_max_pu" not in _asset(f, "up")["cap"]["reason"]
+
+
+# ── GK A on #1998 (4): an extendable import is refused by name ────────────
+
+
+def _extendable_import():
+    n = _net()
+    n.links.at["poc", "p_nom_extendable"] = True
+    n.links.at["poc", "p_nom_min"] = 0.0
+    n.links.at["poc", "p_nom_max"] = 100.0
+    n.links.at["poc", "capital_cost"] = 1000.0
+    return n
+
+
+IMPORT_EXT = "reserve_margin_import_link_extendable"
+
+
+def test_an_extendable_import_is_refused_by_name():
+    f = reserve_margin_facts(_extendable_import(), _cfg())
+    assert f["import_link_extendable"] == ["poc"]
+    issues = [
+        i
+        for i in _check_reserve_margin(_extendable_import(), _cfg())
+        if i.code == IMPORT_EXT
+    ]
+    assert len(issues) == 1 and issues[0].severity == "error"
+    assert "poc" in issues[0].message and "extendable" in issues[0].message
+
+
+def test_a_fixed_import_is_not_refused():
+    f = reserve_margin_facts(_net(), _cfg())
+    assert f["import_link_extendable"] == []
+    assert not [
+        i for i in _check_reserve_margin(_net(), _cfg()) if i.code == IMPORT_EXT
+    ]
+
+
+def test_an_extendable_import_with_nothing_behind_it_is_not_refused():
+    n = _extendable_import()
+    n.remove("Generator", "up")
+    assert reserve_margin_facts(n, _cfg())["import_link_extendable"] == []
+
+
+def test_the_lp_wrapper_refuses_an_extendable_import():
+    n = _extendable_import()
+    n.optimize.create_model()
+    fn = _wrap_with_reserve_margin(n, None, _cfg(), log_queue=queue.SimpleQueue())
+    with pytest.raises(ValueError, match="poc"):
+        fn(n, n.snapshots)
+
+
+def test_the_front_preflight_refuses_an_extendable_import():
+    import threading
+
+    from services.adequacy import front as fr
+
+    with pytest.raises(fr.FrontConfigError, match="poc") as exc:
+        fr._margin_preflight(
+            _extendable_import(), threading.Lock(), _cfg(None), 0.1, "why"
+        )
+    assert "extendable" in str(exc.value)
+
+
+def test_the_margin_loop_refuses_an_extendable_import(client, install_network):
+    _loop_setup(client, install_network, _extendable_import())
+    r = client.post("/api/results/margin_loop", json={"target_lole_h": 1.0})
+    assert r.status_code == 422, r.text
+    issues = [
+        i
+        for i in _check_reserve_margin(_extendable_import(), _cfg(0.15))
+        if i.code == IMPORT_EXT
+    ]
+    assert r.json()["detail"] == {
+        "error_kind": "unsupported_scope",
+        "message": issues[0].message,
+    }
+
+
+def test_the_templates_carry_no_extendable_import():
+    from project_templates import eh_templates as T
+
+    for build in T.BUILDERS.values():
+        f = reserve_margin_facts(build(), _cfg())
+        assert not f["import_link_extendable"]
+
+
+# ── GK A on #1998 (5): the import's efficiency ────────────────────────────
+
+
+def test_an_import_is_credited_at_its_delivered_side():
+    n = _net()
+    n.links.at["poc", "efficiency"] = 0.5
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(20 * 0.99 * 0.998)
+    assert _asset(f, "up")["cap"]["link_mw"] == pytest.approx(20.0)
+
+
+def test_an_energized_import_is_capped_before_its_efficiency():
+    n = _net()
+    n.links.at["poc", "efficiency"] = 0.5
+    n.links.at["poc", "p_max_pu"] = 0.75  # 30 MW sent, 15 MW delivered
+    f = reserve_margin_facts(n, _cfg())
+    assert _asset(f, "up")["cap"]["link_mw"] == pytest.approx(15.0)
+
+
+# ── GK A on #1998 (6): the surfaces agree ─────────────────────────────────
+
+
+def test_a_capped_asset_row_reports_its_share_of_the_cap():
+    from services.adequacy.report import reserve_margin_payload
+
+    n = _net(up=(("a", 30.0, 0.01), ("b", 30.0, 0.05)))
+    f = reserve_margin_facts(n, _cfg())
+    payload = reserve_margin_payload(n, f["stash"])
+    rows = {r["name"]: r for r in payload["assets"]}
+    credit = _per(f)["firm_fixed_mw"]
+    du = 0.99 * 30 + 0.95 * 30
+    assert rows["a"]["firm_mw"] == pytest.approx(credit * 0.99 * 30 / du)
+    assert rows["b"]["firm_mw"] == pytest.approx(credit * 0.95 * 30 / du)
+    assert payload["by_period"][0]["firm_mw"] == pytest.approx(credit)
+
+
+def test_the_campus_rows_sum_to_its_period_firm():
+    from project_templates import eh_templates as T
+    from services.adequacy.report import reserve_margin_payload
+
+    for build in (T.build_eh_datacenter, T.build_eh_datacenter_staged):
+        n = build()
+        f = reserve_margin_facts(n, _cfg())
+        payload = reserve_margin_payload(n, f["stash"])
+        for per in payload["by_period"]:
+            rows = [r for r in payload["assets"] if r["period"] == per["period"]]
+            assert sum(r["firm_mw"] for r in rows) == pytest.approx(per["firm_mw"])
+            gs = [r for r in rows if r["name"] == "grid_supply"][0]
+            assert gs["firm_mw"] < 60.0
+
+
+def test_a_link_with_an_unusable_rate_is_refused_for_that_reason():
+    n = _net()
+    n.links.at["poc", "outage_rate_value"] = 1.5
+    issues = [
+        i
+        for i in _check_reserve_margin(n, _cfg())
+        if i.code == "reserve_margin_unpriceable_assets"
+    ]
+    assert len(issues) == 1
+    assert "outage rate outside [0, 1)" in issues[0].message
+    assert "(no outage data, no availability profile)" not in issues[0].message
+
+
+# ── GK A on #1998 (7): the site from its loads ────────────────────────────
+
+
+def test_two_sites_behind_their_own_imports_are_both_sites():
+    n = _net()
+    n.add("Bus", "site_b", carrier="AC")
+    n.add("Load", "load_b", bus="site_b", p_set=10.0)
+    n.add("Link", "poc_b", bus0="grid", bus1="site_b", p_nom=30.0, carrier="AC")
+    _outage(n, "links", "poc_b", 0.01)
+    n.links.at["poc_b", "eh_role"] = "grid_import"
+    f = reserve_margin_facts(n, _cfg())
+    a_l = (0.998 * 40 + 0.99 * 30) / 70.0
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(70.0 * 0.99 * a_l)
+    assert _asset(f, "up")["cap"]["links"] == ["poc", "poc_b"]
+
+
+def test_an_unflagged_site_is_a_site_by_its_load():
+    # Neither site is flagged eh_critical; each is a site by its own Load.
+    n = _net(critical=False)
+    n.add("Bus", "site_b", carrier="AC")
+    n.add("Load", "load_b", bus="site_b", p_set=10.0)
+    n.add("Link", "poc_b", bus0="grid", bus1="site_b", p_nom=30.0, carrier="AC")
+    n.links.at["poc_b", "eh_role"] = "grid_import"
+    f = reserve_margin_facts(n, _cfg())
+    assert _asset(f, "up")["cap"]["links"] == ["poc", "poc_b"]
+
+
+def test_an_eh_critical_bus_without_a_load_is_still_a_site():
+    n = _net()
+    n.add("Bus", "site_b", carrier="AC", eh_critical=True)
+    n.buses.at["site_b", "eh_critical"] = True
+    n.add("Link", "poc_b", bus0="grid", bus1="site_b", p_nom=30.0, carrier="AC")
+    n.links.at["poc_b", "eh_role"] = "grid_import"
+    f = reserve_margin_facts(n, _cfg())
+    assert _asset(f, "up")["cap"]["links"] == ["poc", "poc_b"]
+
+
+def test_without_any_load_or_flag_the_link_bus1_side_is_the_site():
+    n = _net(critical=False)
+    n.remove("Load", "site_load")
+    f = reserve_margin_facts(n, _cfg())
+    assert _per(f)["firm_fixed_mw"] == pytest.approx(CAPPED)
