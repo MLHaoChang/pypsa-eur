@@ -33,3 +33,5 @@ CO2 is reported (Expert `pages/results/Emissions.tsx`, `services/compare/emissio
 `project_templates/eh_templates.py`, `services/reliability_goal.py` (goal fields), `routers/simulation.py` (`solver_config`), `pages/hubDesign/cards/GoalCard.tsx`, `services/results/headline_kpis.py`.
 
 ## Comments
+
+- 2026-11-25 (PR 2): chat does not read the goal's result yet. `GET /api/results/co2_limit` (the limit, each period's cap and dual, and the typed refusal) is held by this spec in route parity, as `not_via_chat` lists it "unbuilt"; a read tool would be its own issue.
