@@ -3,7 +3,7 @@
 
 # 09 One electrical equipment schedule, with switchgear and cable ratings chosen, not only declared
 
-Status: needs-triage
+Status: done
 Blocked by: none (gc/24 fixes the PASS shown with no switchgear rating; this issue picks the rating)
 Source: DC template review 2026-11-24 (`../README.md`). Stage 5.
 Severity: major
