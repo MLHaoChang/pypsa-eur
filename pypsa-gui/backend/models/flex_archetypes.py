@@ -15,6 +15,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_serializer, model_validator
 
 from models.commercial import TimeSeriesRef
+from models.dc_compute_spec import ComputeSpec, WorkloadMixSpec
 from models.design_intent import DesignIntentSpec
 
 RedundancyTier = Literal["N", "N+1", "2N"]
@@ -24,6 +25,7 @@ UtilisationKind = Literal["ai_training", "inference", "mixed", "flat"]
 class DcPhase(BaseModel):
     """One COD phase. ``it_mw`` is the IT load in service from ``cod`` on
     (cumulative, not the increment), as the staged template counts it."""
+
     cod: date
     it_mw: float = Field(gt=0)
     #: Rack power density of this phase (kW per rack), so a later phase can
@@ -45,6 +47,7 @@ class AiWorkloadSpec(BaseModel):
     hour: the hourly profile takes the mean (checkpoint duty, idle hours), the
     sub-hourly terms go to the dynamic envelope only. Every default is
     assumed; `services.dc_load_profile.SOURCES` says where each comes from."""
+
     full_share: float = Field(default=0.95, gt=0, le=1)
     idle_share: float = Field(default=0.30, ge=0, le=1)
     #: Idle-to-full (and full-to-idle) ramp time of a job-synchronised step.
@@ -63,7 +66,7 @@ class AiWorkloadSpec(BaseModel):
     idle_start_hour: int = Field(default=3, ge=0, le=23)
 
     @model_validator(mode="after")
-    def _steps(self) -> "AiWorkloadSpec":
+    def _steps(self) -> AiWorkloadSpec:
         if self.idle_share > self.full_share:
             raise ValueError("idle_share must be ≤ full_share")
         if self.checkpoint_duration_s > self.checkpoint_interval_s:
@@ -80,7 +83,7 @@ BackupMode = Literal["genset", "bess", "hybrid"]
 DcArchitecture = Literal["ac", "mv_ups", "dc_800v", "sst"]
 
 
-def _assumed_backup_bess() -> "BessSpec":
+def _assumed_backup_bess() -> BessSpec:
     """The backup BESS's assumed defaults (DC 03): Li-ion RTE and DoD, 2 %/yr
     calendar fade, 0.005 %/full cycle, restored to nameplate every year."""
     return BessSpec(power_mw=1.0, energy_mwh=1.0, round_trip_efficiency=0.88,
@@ -100,6 +103,7 @@ class BackupSpec(BaseModel):
     ``bess`` spec's ``power_mw``/``energy_mwh`` are placeholders: sizing
     sets them; its efficiency, DoD, fade and augmentation are read. Every
     default is assumed (``services.adequacy.dc_backup.SOURCES``)."""
+
     mode: BackupMode = "genset"
     autonomy_h: float = Field(default=4.0, gt=0, le=72)
     ride_through_s: float = Field(default=600.0, ge=0)
@@ -126,7 +130,7 @@ class BackupSpec(BaseModel):
         return data
 
     @model_validator(mode="after")
-    def _fade_given(self) -> "BackupSpec":
+    def _fade_given(self) -> BackupSpec:
         """A ``bess`` the spec gives must give both fades: BessSpec's own
         default (0) would read as no fade (GK B K5). Without a ``bess`` the
         labelled assumed defaults apply."""
@@ -177,7 +181,15 @@ class DataCentreLoadSpec(BaseModel):
     curtailment_price_eur_per_mwh: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     workload_shift_window_h: float | None = Field(default=None, gt=0)
     gensets: list[GensetSpec] = Field(default_factory=list)
+    #: Accepted and stored, read by no solve (nothing models waste heat export):
+    #: the ledger says so when it is true. Kept so a stored spec dumps and hashes as before.
     waste_heat_export: bool = False
+    #: DC 05: shape parameters of the inference, mixed and flat kinds; None = the
+    #: assumed defaults. Omitted from the dump when unset (byte-equal stored specs).
+    workload_mix: WorkloadMixSpec | None = None
+    #: DC 05: the optional compute block; reported next to the typed IT MW, never
+    #: read by the LP (typed IT MW wins).
+    compute: ComputeSpec | None = None
     #: Asset-sizing design intent A-E (AS-01); None = a backup_mode-only project.
     design_intent: DesignIntentSpec | None = None
     #: Backup on loss of grid (DC 03); the default keeps the genset fleet.
@@ -197,18 +209,21 @@ class DataCentreLoadSpec(BaseModel):
         so stored specs, sidecars and hashes stay byte-equal (GK A G8)."""
         data = handler(self)
         if isinstance(data, dict):
-            for key in ("project_start", "connection_date"):
+            for key in ("project_start", "connection_date", "workload_mix", "compute"):
                 if data.get(key) is None:
                     data.pop(key, None)
         return data
 
     @model_validator(mode="after")
-    def _shares(self) -> "DataCentreLoadSpec":
+    def _shares(self) -> DataCentreLoadSpec:
         if self.critical_share + self.curtailable_share > 1.0 + 1e-9:
             raise ValueError("critical_share + curtailable_share must be ≤ 1")
         cods = [p.cod for p in self.phases]
         if cods != sorted(cods):
             raise ValueError("phases must be ordered by cod")
+        if self.compute and len(self.compute.accelerator_counts) != len(self.phases):
+            raise ValueError("compute.accelerator_counts needs one count per phase "
+                             f"({len(self.phases)}), got {len(self.compute.accelerator_counts)}")
         return self
 
 
@@ -238,7 +253,7 @@ class EvFleetSpec(BaseModel):
     public_utilisation_ref: TimeSeriesRef | None = None
 
     @model_validator(mode="after")
-    def _window_not_empty(self) -> "EvFleetSpec":
+    def _window_not_empty(self) -> EvFleetSpec:
         if self.arrival_hour == self.departure_hour:
             raise ValueError("arrival_hour and departure_hour must differ")
         return self
