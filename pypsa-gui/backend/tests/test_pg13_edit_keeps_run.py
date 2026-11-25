@@ -345,8 +345,8 @@ def test_the_asset_figures_are_withheld_after_a_kept_edit(client, site):  # noqa
 
 
 def test_the_verdict_fails_closed_once_a_run_was_kept(
-    client, site, session_ctx, monkeypatch
-):  # noqa: F811
+    client, site, session_ctx, monkeypatch  # noqa: F811
+):
     """A failed verdict read must withhold, not serve (G2); with no marker nothing was kept (ADR-0001)."""
     from services.provenance_graph import runs
 
@@ -364,8 +364,8 @@ def test_the_verdict_fails_closed_once_a_run_was_kept(
 
 
 def test_the_marker_is_dropped_by_a_solve_a_clear_and_an_undone_edit(
-    client, site, session_ctx
-):  # noqa: F811
+    client, site, session_ctx  # noqa: F811
+):
     """A leftover marker would withhold billing on a later commercial edit (G4)."""
     from services.dispatch_status import clear_dispatch
     from services.provenance_graph import runs
