@@ -634,6 +634,8 @@ def test_the_stage_with_the_co2_goal_on_solves_every_point(monkeypatch):
     # DC review 02 C6 at the stage (DC 01 landed second): the session's CO2
     # limit goal reaches the stage's config, yet no front point carries a goal
     # cap row, so none is refused as a duplicate of the front's own cap.
+    # Margins 10 % and 5 %: under the import cap (#1998) the weak network
+    # cannot reach 20 %, which the engine refuses as a validation failure.
     from services.solver import co2_cap
 
     limits = []
@@ -656,7 +658,7 @@ def test_the_stage_with_the_co2_goal_on_solves_every_point(monkeypatch):
     store: dict = {}
     report = _run(
         certifiable_weak_network(),
-        _pack(10.0, ladder=(2.0, 1.0)),
+        _pack(10.0, ladder=(1.0, 0.5)),
         stages=FRONT,
         budget=3,
         store=store,
