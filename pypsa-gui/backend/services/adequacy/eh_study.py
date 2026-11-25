@@ -33,6 +33,7 @@ from models.energy_hub import (
     DEFAULT_EH_FMEA_TOP_N,
     DEFAULT_EH_FRONTIER_LADDER,
     DEFAULT_EH_MC_DRAWS,
+    EH_OPT_IN_STAGES,
     EH_PIPELINE_STAGES,
     MAX_EH_BUDGET_SOLVES,
     ArchetypePack,
@@ -82,6 +83,7 @@ SIBLING_STORE_KEYS: tuple[str, ...] = (
     "eh_lever_comparison",
     "eh_dtc_stress",
     "eh_dtc_planning",
+    "eh_front",
 )
 
 # Pipeline stage → report section it fills (for unreached-stage notes).
@@ -169,6 +171,8 @@ def certification_wanted(pack: ArchetypePack) -> bool:
 def default_stages_for(pack: ArchetypePack) -> tuple[str, ...]:
     """The pack's default pipeline (``stages=None``)."""
     def _keep(s: str) -> bool:
+        if s in EH_OPT_IN_STAGES:
+            return False
         if s == "redundancy":
             return bool(pack.levers.redundancy)
         if s == "levers":
@@ -819,6 +823,77 @@ def _stage_frontier(st: _Study) -> None:
     st.sections["frontier"] = (status, payload, note)
 
 
+def _front_margin_base(st: _Study) -> tuple[float | None, str]:
+    """The margin the front's margin ladder is built around, and where it came
+    from: the session's reserve margin when one is set, else the engine's
+    named assumed base."""
+    from services.adequacy.front import FRONT_MARGIN_BASE
+    m = getattr(st.cfg, "reserve_margin", None)
+    if m is not None:
+        return float(m), "the session's reserve margin"
+    return FRONT_MARGIN_BASE, (
+        f"an assumed base margin of {FRONT_MARGIN_BASE:g} (no reserve margin "
+        "is set)")
+
+
+def _stage_front(st: _Study) -> None:
+    """The multi-objective front (DC 01) on the pack-applied study copy:
+    opt-in, never in a pack default. ``run_front_study`` copies the network
+    once under the lock and never writes it, so later stages read the
+    ens_solve plan. The result goes to the ``eh_front`` sibling table; the
+    report's sections are unchanged."""
+    from services.adequacy import front as fr
+
+    def _not_established(reason: str, status: str = "skipped") -> None:
+        st.mark("front", status, note=reason)
+
+    n_points = frontier_point_count(st.remaining(), st.budget_solves)
+    if n_points < 2:
+        return _not_established(
+            f"not run: budget_solves leaves {st.remaining()} solve(s); a "
+            "front needs at least two points")
+    try:
+        with st.lock:
+            lever, lever_why = fr.choose_lever(st.network, None)
+        margin_base, margin_from = _front_margin_base(st)
+        levels = fr.front_levels(
+            lever, n_points=n_points, ladder=st.pack.frontier_ladder,
+            ens_cap=st.ens_cap, margin_base=margin_base)
+        result = fr.run_front_study(
+            st.network, st.lock, st.cfg, levels=levels, co2_caps_t=[None],
+            lever=lever, budget_solves=min(n_points, fr.MAX_FRONT_SOLVES),
+            mc_draws=st.mc_draws, seed=st.mc_seed, pack=st.pack,
+            log_queue=st.log_queue, stop_event=st.stop_event)
+    except (fr.FrontConfigError, fr.FrontBudgetError) as exc:
+        return _not_established(f"front not established: {exc}")
+    except Exception as exc:  # noqa: BLE001 — degrade like every other stage
+        logger.exception("front failed")
+        partial = getattr(exc, "front_result", None) or {}
+        charged = int(partial.get("solves") or 0)
+        st.solves += charged
+        st.mark("front", "failed", note=f"front failed: {exc}",
+                solves_charged=charged)
+        return
+    charged = int(result["solves"])
+    st.solves += charged
+    result["levels_basis"] = (
+        "the pack's ENS target" if lever == "ens_cap" else margin_from)
+    result["ladder"] = [float(f) for f in st.pack.frontier_ladder]
+    result["solves_charged"] = charged
+    result["pack_hash"] = st.pack_h
+    if st.store is not None:
+        st.store["eh_front"] = result
+    n_ok = len([p for p in result["points"] if p["status"] == "ok"])
+    if result.get("aborted"):
+        st.aborted = True
+        st.mark("front", "aborted", solves_charged=charged,
+                note="front aborted mid-sweep")
+    else:
+        st.mark("front", "run", solves_charged=charged,
+                note=f"{n_ok} of {len(result['points'])} points solved "
+                     f"({lever}: {lever_why})")
+
+
 def _closed_import_links(network, pack) -> list[str]:
     """Import Links the pack closed (p_*_pu → 0, e.g. off_grid)."""
     out = []
@@ -1254,6 +1329,7 @@ _STAGE_HANDLERS = {
     "apply_pack": _stage_apply_pack,
     "ens_solve": _stage_ens_solve,
     "frontier": _stage_frontier,
+    "front": _stage_front,
     "mc_certify": _stage_mc_certify,
     "fmea_top": _stage_fmea_top,
     "redundancy": _stage_redundancy,
@@ -1359,6 +1435,8 @@ def run_eh_study(
 
     records: list[PipelineStageRecord] = []
     for name in DEFAULT_STAGES:
+        if name not in requested and name in EH_OPT_IN_STAGES:
+            continue  # no row: a study without it reads as before (F4)
         if name not in requested:
             note = None
             if name == "mc_certify" and certification_wanted(pack):

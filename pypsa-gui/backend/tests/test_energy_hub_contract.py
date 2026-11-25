@@ -24,6 +24,7 @@ def test_pipeline_constants_match_spec():
         "apply_pack",
         "ens_solve",
         "frontier",
+        "front",
         "mc_certify",
         "fmea_top",
         "redundancy",
@@ -37,7 +38,10 @@ def test_pipeline_constants_match_spec():
 def test_default_pipeline_budget_clamped():
     p = EH.EHStudyPipeline()
     assert p.budget_solves == 30
-    assert [s.stage for s in p.stages] == list(EH.EH_PIPELINE_STAGES)
+    # an opt-in stage has no row unless a study asks for it (DC 01 F4)
+    assert EH.EH_OPT_IN_STAGES == ("front",)
+    assert [s.stage for s in p.stages] == [
+        s for s in EH.EH_PIPELINE_STAGES if s not in EH.EH_OPT_IN_STAGES]
     with pytest.raises(pydantic.ValidationError):
         EH.EHStudyPipeline(budget_solves=0)
     with pytest.raises(pydantic.ValidationError):
@@ -124,7 +128,7 @@ def test_mvp_a_report_fixture_round_trips():
     r = EH.ReferenceDesignReport.model_validate_json(path.read_text())
     assert r.archetype == "strong_grid"
     assert r.pipeline.budget_solves == EH.DEFAULT_EH_BUDGET_SOLVES
-    assert len(r.pipeline.stages) == len(EH.EH_PIPELINE_STAGES)
+    assert len(r.pipeline.stages) == len(EH.EHStudyPipeline().stages)
     assert set(r.completeness) == set(EH.REPORT_SECTIONS)
     assert all(s == "not_established" for s in r.completeness.values())
     r2 = EH.ReferenceDesignReport.model_validate_json(r.model_dump_json())

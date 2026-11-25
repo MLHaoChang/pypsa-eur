@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from models.energy_hub import EH_PIPELINE_STAGES, ArchetypePack
+from models.energy_hub import EH_OPT_IN_STAGES, EH_PIPELINE_STAGES, ArchetypePack
 from services.adequacy import archetypes as arch
 from services.adequacy import eh_study as S
 
@@ -48,6 +48,15 @@ def _stage_estimate(stage: str, net, pack: ArchetypePack, ctx: dict) -> tuple[
             return 0, "exact", "budget leaves room for fewer than two points"
         return (len(S.frontier_targets(pack.availability.ens_cap_permyriad, n,
                                        ladder=tuple(pack.frontier_ladder))),
+                "exact", None)
+    if stage == "front":
+        # The stage's own point count (frontier_point_count), uncapped CO2
+        # column only, so no reference solve; the lever is chosen at run time.
+        n = S.frontier_point_count(ctx["remaining"], ctx["budget"])
+        if n < 2:
+            return 0, "exact", "budget leaves room for fewer than two points"
+        # the count does not depend on the lever's base, only on the ladder
+        return (len(S.frontier_targets(1.0, n, ladder=tuple(pack.frontier_ladder))),
                 "exact", None)
     if stage == "fmea_top":
         k = ctx["class_b"]["k"]
@@ -281,6 +290,8 @@ def eh_readiness(network, pack: ArchetypePack, *, budget_solves: int,
     total = 0
     after_upper = False
     for stage in EH_PIPELINE_STAGES:
+        if stage not in requested and stage in EH_OPT_IN_STAGES:
+            continue  # no row unless asked for, as in the study's pipeline
         if stage not in requested:
             rows.append({"stage": stage, "prediction": "not_requested",
                          "solves": 0, "basis": "exact", "reason": None})

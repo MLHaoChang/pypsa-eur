@@ -45,6 +45,7 @@ EH_PIPELINE_STAGES: tuple[str, ...] = (
     "apply_pack",
     "ens_solve",
     "frontier",
+    "front",
     "mc_certify",
     "fmea_top",
     "redundancy",
@@ -54,10 +55,16 @@ EH_PIPELINE_STAGES: tuple[str, ...] = (
     "assemble",
 )
 
+# Stages that run only when a caller names them (DC 01 PR2b): never in a
+# pack's default pipeline, and absent from a report's pipeline rows and the
+# readiness rows unless requested, so a study without them is unchanged.
+EH_OPT_IN_STAGES: tuple[str, ...] = ("front",)
+
 EHPipelineStage = Literal[
     "apply_pack",
     "ens_solve",
     "frontier",
+    "front",
     "mc_certify",
     "fmea_top",
     "redundancy",
@@ -266,6 +273,7 @@ class EHStudyPipeline(BaseModel):
     stages: list[PipelineStageRecord] = Field(
         default_factory=lambda: [
             PipelineStageRecord(stage=s) for s in EH_PIPELINE_STAGES
+            if s not in EH_OPT_IN_STAGES
         ])
     budget_solves: int = Field(
         default=DEFAULT_EH_BUDGET_SOLVES, ge=1, le=MAX_EH_BUDGET_SOLVES)
