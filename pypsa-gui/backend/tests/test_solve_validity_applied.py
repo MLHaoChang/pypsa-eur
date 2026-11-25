@@ -42,7 +42,9 @@ def test_a_recorded_solve_without_a_gap_reports_none_though_the_config_has_one()
 
 
 def test_the_recorded_solver_picks_the_gap_key():
-    n = _sealed(_committable(), solver="gurobi", options={"MIPGap": 0.03, "mip_rel_gap": 0.5})
+    n = _sealed(
+        _committable(), solver="gurobi", options={"MIPGap": 0.03, "mip_rel_gap": 0.5}
+    )
     assert sv.applied_gap(n, _cfg(solver_name="highs")) == 0.03
 
 
@@ -85,7 +87,9 @@ def test_a_recorded_solve_without_committable_units_is_an_lp():
     assert sv.is_mip(_sealed(_lp()), _cfg()) is False
 
 
-def test_the_recorded_plain_mode_leaves_only_other_committable_units_binary(monkeypatch):
+def test_the_recorded_plain_mode_leaves_only_other_committable_units_binary(
+    monkeypatch,
+):
     n = _sealed(_committable(), mode="plain")
     monkeypatch.setattr(sv, "other_committable", lambda _n: (0, 0))
     assert sv.is_mip(n, _cfg()) is False
@@ -112,10 +116,19 @@ def test_the_recorded_mode_wins_over_the_config_process_uc(monkeypatch):
         {"v": 1, "solver": 3, "options": {}, "linearized_unit_commitment": False},
         {"v": 1, "solver": "highs", "options": [], "linearized_unit_commitment": False},
         {"v": 1, "solver": "highs", "options": {}, "linearized_unit_commitment": "no"},
-        {"v": 1, "solver": "highs", "options": {}, "linearized_unit_commitment": False,
-         "process_uc_mode": 7},
-        {"v": 2, "solver": "highs", "options": {"mip_rel_gap": 0.0},
-         "linearized_unit_commitment": False},
+        {
+            "v": 1,
+            "solver": "highs",
+            "options": {},
+            "linearized_unit_commitment": False,
+            "process_uc_mode": 7,
+        },
+        {
+            "v": 2,
+            "solver": "highs",
+            "options": {"mip_rel_gap": 0.0},
+            "linearized_unit_commitment": False,
+        },
     ],
 )
 def test_a_malformed_record_reads_as_an_unrecorded_mip(record):
@@ -146,8 +159,15 @@ def test_an_object_without_a_meta_dict_has_no_record():
 def test_the_record_keeps_scalar_options_only():
     rec = sv.applied_record(
         "HiGHS",
-        {"mip_rel_gap": 0.1, "presolve": "on", "threads": 4, "log": True,
-         "bad": float("nan"), "obj": object(), 5: 1.0},
+        {
+            "mip_rel_gap": 0.1,
+            "presolve": "on",
+            "threads": 4,
+            "log": True,
+            "bad": float("nan"),
+            "obj": object(),
+            5: 1.0,
+        },
         {"linearized_unit_commitment": True},
         "linearised",
     )
@@ -163,7 +183,12 @@ def test_the_record_keeps_scalar_options_only():
 def test_the_record_reads_back_after_a_netcdf_round_trip(tmp_path):
     import pypsa
 
-    n = _sealed(_committable(), options={"mip_rel_gap": 0.05}, linearised=True, mode="linearised")
+    n = _sealed(
+        _committable(),
+        options={"mip_rel_gap": 0.05},
+        linearised=True,
+        mode="linearised",
+    )
     path = tmp_path / "n.nc"
     n.export_to_netcdf(path)
     back = pypsa.Network(path)
@@ -177,7 +202,11 @@ def test_the_record_reads_back_after_a_netcdf_round_trip(tmp_path):
 def test_the_solve_records_the_options_it_passed(reset_backend, monkeypatch):
     live, cfg, kwargs = _solve(
         _committable(),
-        {"solver_name": "highs", "mip_gap": 0.01, "solver_options": {"mip_rel_gap": 0.1}},
+        {
+            "solver_name": "highs",
+            "mip_gap": 0.01,
+            "solver_options": {"mip_rel_gap": 0.1},
+        },
         monkeypatch,
     )
     rec = live.meta[sv.APPLIED_KEY]

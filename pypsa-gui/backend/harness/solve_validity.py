@@ -110,7 +110,9 @@ def applied_record(solver_name, solver_options, uc_kwargs, process_uc_mode) -> d
         "v": _RECORD_VERSION,
         "solver": solver_name,
         "options": options,
-        "linearized_unit_commitment": bool((uc_kwargs or {}).get("linearized_unit_commitment")),
+        "linearized_unit_commitment": bool(
+            (uc_kwargs or {}).get("linearized_unit_commitment")
+        ),
         "process_uc_mode": process_uc_mode,
     }
 
