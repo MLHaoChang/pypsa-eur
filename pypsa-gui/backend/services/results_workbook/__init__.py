@@ -201,13 +201,14 @@ def build_results_workbook(inp: WorkbookInputs) -> bytes:
     wb = Workbook()
     about = wb.active
     overview = wb.create_sheet()
-    figs = overview_figures(inp.network, inp.cfg, inp.lost_load, inp.result_df)
-    write_overview(overview, figs, inp.ic_report, inp.case_state)
-    base = scenarios.Run(name=inp.project or "Base", figs=figs, ic_report=inp.ic_report,
+    base = scenarios.Run(name=inp.project or "Base", ic_report=inp.ic_report,
                          case_state=inp.case_state, network=inp.network, cfg=inp.cfg,
                          lost_load=inp.lost_load, result_df=inp.result_df,
                          solved_settings=inp.solved_settings, project_id=inp.project_id,
                          solver_state=inp.solver_state)
+    figs = base.figs = overview_figures(inp.network, inp.cfg, inp.lost_load, inp.result_df,
+                                        price_limit=scenarios.run_price_limit(base))
+    write_overview(overview, figs, inp.ic_report, inp.case_state)
     if inp.scenarios is not None:
         scenarios.write_scenarios(wb.create_sheet(index=1), base, inp.scenarios)
     ctx = WorkbookContext(inp, runs=[base, *(inp.scenarios.runs if inp.scenarios else [])])

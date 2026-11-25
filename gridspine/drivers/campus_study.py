@@ -225,8 +225,8 @@ SWITCHGEAR_RATING_CSV = "campus_switchgear_rating.csv"
 CABLE_RATING_CSV = "campus_cable_rating.csv"
 RATING_ASSUMPTIONS_JSON = "campus_rating_assumptions.json"
 #: The cases a cable's design current is the maximum over (``rate_campus``).
-CABLE_DESIGN_BASIS = ("the study's selected hours, intact and every N-1 transformer outage; "
-                      "the study has no cable-outage case")
+CABLE_DESIGN_BASIS = ("The study's selected hours, intact and every N-1 transformer outage. "
+                      "The study has no cable-outage case.")
 SIZING_TRAFO_CSV = "campus_sizing_trafo.csv"
 REACTIVE_CSV = "campus_reactive.csv"
 SIZING_COMP_CSV = "campus_sizing_compensation.csv"

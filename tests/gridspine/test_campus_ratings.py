@@ -424,6 +424,18 @@ def test_assumptions_table_all_assumed():
         "k",
     }
     assert next(r for r in rows if r["name"] == "derating")["value"] == 0.8
+    assert next(r for r in rows if r["name"] == "k")["unit"] == "A·√s/mm²"
+
+
+def test_the_design_basis_is_short_sentences():
+    from gridspine.drivers.campus_study import CABLE_DESIGN_BASIS
+
+    # one clause per sentence, capitalised and closed: no "; " join
+    assert "; " not in CABLE_DESIGN_BASIS
+    assert CABLE_DESIGN_BASIS == (
+        "The study's selected hours, intact and every N-1 transformer outage. "
+        "The study has no cable-outage case."
+    )
 
 
 # --------------------------------------------------------------------------

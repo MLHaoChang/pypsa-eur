@@ -1552,8 +1552,17 @@ def get_island(project) -> dict:
     when none has run since the sidecar was saved), the control presets a
     project can select, the grid services its converters offer
     (``offered_services``; None without a valid sidecar) and its typed
-    warnings (``island_warnings``)."""
+    warnings (``island_warnings``).
+
+    The section-5 Controls block reads ``controls`` and ``control_fields``
+    (gridspine's own objects, the ones the validator uses: GK B3 K7) and
+    ``unit_controls``: each converter and UPS unit's checked block, its
+    preset expanded, from the same bytes as ``config`` and ``revision``
+    (None when the sidecar does not validate)."""
     from services.adequacy.island_config import (
+        CONTROL_FIELDS,
+        CONTROLS,
+        PF_CHOICE,
         PRESETS,
         island_warnings,
         offered_services,
@@ -1565,7 +1574,7 @@ def get_island(project) -> dict:
     # One read: the revision is the hash of the very bytes parsed (GK B3 (6)).
     raw = sidecar.read_bytes() if sidecar.is_file() else None
     config = json.loads(raw) if raw is not None else None
-    services, warnings = None, []
+    services, warnings, unit_controls = None, [], None
     if config is not None:
         try:
             valid = validate(config)
@@ -1573,6 +1582,7 @@ def get_island(project) -> dict:
             valid = None                          # the editor shows the 422 on save
         if valid is not None:
             services, warnings = offered_services(valid), island_warnings(valid)
+            unit_controls = _unit_controls(config, valid)
     return {"config": config,
             # The sidecar's content hash: a PATCH passes it back as ``base`` and
             # is refused (409) when the file changed since (GK B3 K1).
@@ -1583,7 +1593,26 @@ def get_island(project) -> dict:
                          if study.is_file() else None),
             "presets": {name: {"kinds": list(p["kinds"]), "converter": p["converter"], "ups": p["ups"]}
                         for name, p in PRESETS.items()},
-            "services": services, "warnings": warnings}
+            "services": services, "warnings": warnings,
+            "controls": CONTROLS, "control_fields": CONTROL_FIELDS, "pf_choice": PF_CHOICE,
+            "unit_controls": unit_controls}
+
+
+def _unit_controls(raw: dict, valid: dict) -> dict:
+    """``{unit: checked block}`` of each converter and UPS unit (gridspine's
+    ``validate_unit_island`` output: kind, control, values, sources, the
+    preset that applied), plus ``preset_scope``: ``"unit"`` when the unit
+    names its own preset, ``"project"`` when the project's applied."""
+    from services.adequacy.island_config import CONVERTER_KINDS
+
+    out = {}
+    for name, block in valid["units"].items():
+        if block["kind"] not in (*CONVERTER_KINDS, "ups"):
+            continue
+        own = isinstance(raw["units"].get(name), dict) and "preset" in raw["units"][name]
+        scope = None if block.get("preset") is None else "unit" if own else "project"
+        out[name] = {**block, "preset_scope": scope}
+    return out
 
 
 def _fixed_ratings(project) -> dict:
@@ -1740,6 +1769,68 @@ def _is_number(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+def _effective_control(unit: dict, project_preset: str | None) -> tuple[str | None, str | None]:
+    """``(control, preset)`` a raw unit runs: the preset's control when one
+    applies (the unit's own ``preset`` wins over the project's, and
+    ``"preset": null`` opts out), else the unit's own ``control``. A preset
+    never names a mode the unit does not run (gridspine refuses that)."""
+    from services.adequacy.island_config import PRESETS, preset_block
+
+    name = unit["preset"] if "preset" in unit else project_preset
+    block = preset_block(name, unit.get("kind")) if name in PRESETS else None
+    if block is None or "control" not in block:
+        return unit.get("control"), None
+    return block["control"], name
+
+
+def _switch_control(where: str, unit: dict, change: dict, project_preset: str | None) -> dict:
+    """A unit patch that names ``control`` (section 5's Controls block; GK B3
+    K8, K15-K17). Returns the change to merge.
+
+    The same mode as the unit runs now changes nothing here; an omitted
+    ``control`` stays omitted, so a unit under a preset is left as it was.
+    A new mode: (a) the preset's fields become the unit's own, still tagged
+    ``assumed``, and ``"preset": null`` takes this unit (only) out of the
+    preset; (b) the fields the new mode does not take are dropped; (c) the
+    new mode's missing fields come from a preset that runs that mode on this
+    kind (``preset_block``), tagged ``assumed``. A field still missing (the
+    rating-scaled FFR fields; a mode no preset runs on this kind) is the save
+    path's 422 naming it, unless the patch gives it."""
+    from services.adequacy.island_config import (
+        CONTROL_FIELDS,
+        CONTROLS,
+        CONVERTER_KINDS,
+        CONVERTER_OPTIONAL,
+        PF_CHOICE,
+        PRESETS,
+        preset_block,
+    )
+
+    new, kind = change["control"], unit.get("kind")
+    if kind not in CONVERTER_KINDS:
+        raise _bad_patch(f"{where}.control", f"a {kind} unit has no control mode")
+    if new not in CONTROLS:
+        raise _bad_patch(f"{where}.control", f"unknown control mode '{new}'; allowed {list(CONTROLS)}")
+    current, applied = _effective_control(unit, project_preset)
+    if new == current:
+        return change if "control" in unit else {k: v for k, v in change.items() if k != "control"}
+    if applied is not None:                                                   # (a)
+        block = preset_block(applied, kind)
+        own = {k: v for k, v in unit.items() if k != "preset"}
+        unit.clear()
+        unit.update({**block, **own, "preset": None})
+    keep = {"kind", "preset", "control", "pf_rated", *CONTROL_FIELDS[new], *CONVERTER_OPTIONAL,
+            *(PF_CHOICE if new == "gfl_pf" else ())}
+    for f in [f for f in unit if f not in keep]:                              # (b)
+        del unit[f]
+    for name in PRESETS:                                                      # (c)
+        block = preset_block(name, kind)
+        if block is not None and block.get("control") == new:
+            unit.update({f: v for f, v in block.items() if f not in unit and f not in change})
+            break
+    return change
+
+
 def merge_island_patch(config: dict, patch: dict) -> None:
     """Apply a partial island change to ``config`` in place, with
     ``patch_island``'s merge rules and refusals (the edit card previews the
@@ -1758,6 +1849,8 @@ def merge_island_patch(config: dict, patch: dict) -> None:
                 if not isinstance(value, dict):
                     raise _bad_patch(where, "send the unit's fields to change, by name")
                 unit = current[name]
+                if "control" in value:
+                    value = _switch_control(where, unit, value, config.get("preset"))
                 for f, v in value.items():
                     unit[f] = _merge_value(f"{where}.{f}", unit.get(f), v)
             else:

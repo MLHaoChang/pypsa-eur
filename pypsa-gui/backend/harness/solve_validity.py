@@ -210,8 +210,11 @@ def price_limit(cls) -> str | None:
 
 
 # What a reader outside checked answers says in place of a MIP's bus prices
-# (assistant-assurance 17).
-MIP_PRICES_TEXT = "Not available on an integer (MIP) solve: it has no marginal prices."
+# (assistant-assurance 17): one cause sentence on every surface, the frontend's
+# `NOT_KEPT_WORDS.mip_duals_not_marginal.why` (sectionWords.ts; parity test
+# `test_mip_cause_sentence_matches_the_frontend_words`).
+MIP_PRICES_CAUSE = "An integer (MIP) solve has no marginal prices."
+MIP_PRICES_TEXT = f"Not available. {MIP_PRICES_CAUSE}"
 
 
 def mip_price_limit(n, config) -> str | None:

@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The equipment schedule's Assumptions list writes the cables' design cases as two sentences and the conductor heat constant's unit as "A·√s/mm²"; a switchgear row whose voltage the study left out now takes it from an integer bus key or from `pcc.vn_kv`.

@@ -29,6 +29,7 @@ import FieldsPending from './properties/FieldsPending'
 import { ingestRescale } from '../utils/rescaleActions'
 import type { RescalePreview } from '../utils/rescale'
 import { networkApi } from '../api/network'
+import ControlsBlock from './properties/ControlsBlock'
 import { simulationApi } from '../api/simulation'
 import type { Bus, Carrier, Generator, Line, Link, LinkProfileMeta, Load, StorageUnit, Store, Transformer, LoadProfileMeta, GeneratorProfileMeta } from '../api/types'
 import { safeMax } from '../utils/numeric'
@@ -1959,6 +1960,8 @@ export function LinkPanel({ name }: { name: string }) {
     <div className="p-3">
       {/* From and To bus lead LinkCard's own read-out: not repeated here. */}
       <LinkCard key={link.name} link={link} mode="detail" onRename={n => setSelectedComponent({ type: 'Link', name: n })} />
+      {/* Sizing, then Controls: the unit's island control settings (control-strategy 02). */}
+      <ControlsBlock key={`controls:${link.name}`} name={link.name} />
       {currentProject && (
         <Section title="Availability">
           <AvailabilityEditor key={link.name} project={currentProject} component={link.name} componentType="links" mode={uiMode} />
@@ -2000,6 +2003,8 @@ function GeneratorPanel({ name }: { name: string }) {
         <Row label="Bus" value={gen.bus} tip={fieldHelp(schema, 'bus')} />
       </Section>
       <GeneratorCard key={gen.name} gen={gen} mode="detail" onRename={n => setSelectedComponent({ type: 'Generator', name: n })} />
+      {/* Sizing, then Controls: the unit's island control settings (control-strategy 02). */}
+      <ControlsBlock key={`controls:${gen.name}`} name={gen.name} />
       {currentProject && editors && !editors.availability && (
         <Section title="Profile">
           <SeriesStateLink project={currentProject} componentType="generators" attribute="p_max_pu" component={gen.name} />
@@ -2041,6 +2046,8 @@ function StorageUnitPanel({ name }: { name: string }) {
         <Row label="Bus" value={su.bus} tip={fieldHelp(schema, 'bus')} />
       </Section>
       <StorageUnitCard key={su.name} su={su} mode="detail" onRename={n => setSelectedComponent({ type: 'StorageUnit', name: n })} />
+      {/* Sizing, then Controls: the unit's island control settings (control-strategy 02). */}
+      <ControlsBlock key={`controls:${su.name}`} name={su.name} />
       {currentProject && inflow?.applicable && (
         <Section title="Inflow">
           <SeriesEditor key={su.name} project={currentProject} component={su.name} kind="inflow" mode={uiMode} />
@@ -2067,6 +2074,8 @@ function StorePanel({ name }: { name: string }) {
         <Row label="Bus" value={store.bus} tip={fieldHelp(schema, 'bus')} />
       </Section>
       <StoreCard key={store.name} store={store} mode="detail" onRename={n => setSelectedComponent({ type: 'Store', name: n })} />
+      {/* Sizing, then Controls: the unit's island control settings (control-strategy 02). */}
+      <ControlsBlock key={`controls:${store.name}`} name={store.name} />
     </div>
   )
 }
