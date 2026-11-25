@@ -59,3 +59,9 @@ def test_whole_accelerators_only_and_no_typed_figure_means_none_used():
     with pytest.raises(ValidationError):
         spec(accelerator_counts=[12.5])
     assert compute_report(spec(), [0, 0])[0]["it_mw_used"] is None
+
+
+def test_a_phase_beyond_the_given_counts_has_no_derived_figure():
+    rows = compute_report(spec(), [12.0, 24.0, 40.0])
+    assert rows[2]["compute_it_mw"] is None and rows[2]["warning"] is None
+    assert rows[2]["it_mw_used"] == 40.0
