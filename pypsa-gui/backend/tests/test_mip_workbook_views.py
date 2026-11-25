@@ -1,0 +1,134 @@
+# SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
+# SPDX-License-Identifier: MIT
+"""Assistant-assurance 17, slice 2b: the results workbook never writes a MIP's 0.0 bus
+prices, or a figure priced at them, as a market result. Each run (the base, a held study
+solve, every scenario) is judged by the limit of the solve that produced its own results (S3),
+and an LP's workbook keeps its figures (S4)."""
+
+from __future__ import annotations
+
+import io
+
+import pytest
+from openpyxl import load_workbook
+
+import services.results_workbook as RW
+from harness.solve_validity import DUALS_NOT_MARGINAL, MIP_PRICES_TEXT
+from services.results_workbook import scenarios as S
+from services.results_workbook.overview import overview_figures
+from services.solver_service import SolverConfig
+from tests.test_mip_economics_readers import _rdf, _solved
+
+MIP_RECORD = {"last_solve_settings": {"price_limit": DUALS_NOT_MARGINAL}}
+LP_RECORD = {"last_solve_settings": {}}
+VIEWS = ["capex", "prices", "economics"]
+
+
+@pytest.fixture(scope="module")
+def mip():
+    return _solved(committable=True)
+
+
+@pytest.fixture(scope="module")
+def lp():
+    return _solved(committable=False)
+
+
+def _build(n, state, *, scenarios=None) -> dict:
+    blob = RW.build_results_workbook(RW.WorkbookInputs(
+        network=n, cfg=SolverConfig(), lost_load=None, result_df=_rdf, views=VIEWS,
+        project="Base", scenarios=scenarios, solved_settings=lambda: None,
+        solver_state=state))
+    wb = load_workbook(io.BytesIO(blob))
+    return {ws.title: [[c for c in row] for row in ws.iter_rows(values_only=True)]
+            for ws in wb.worksheets}
+
+
+def _text(rows) -> str:
+    return "\n".join(str(c) for row in rows for c in row if c is not None)
+
+
+def _line(figs, key):
+    return next(line for line in figs.lines if line.key == key)
+
+
+def _scenario(n, name, state):
+    """A comparable scenario whose own saved state says how it was solved."""
+    return S.Run(name=name, figs=overview_figures(
+        n, SolverConfig(), None, _rdf,
+        price_limit=S.run_price_limit(S.Run(name=name, network=n, solver_state=state))),
+        network=n, cfg=SolverConfig(), result_df=_rdf, solved_settings=lambda: None,
+        solver_state=state)
+
+
+def test_run_price_limit_reads_the_run_s_own_solve(mip, lp):
+    assert S.run_price_limit(S.Run(name="m", network=mip, solver_state=MIP_RECORD)) == DUALS_NOT_MARGINAL
+    # The record wins over today's judgement of the network: an LP network under a MIP record.
+    assert S.run_price_limit(S.Run(name="l", network=lp, solver_state=MIP_RECORD)) == DUALS_NOT_MARGINAL
+    assert S.run_price_limit(S.Run(name="l", network=lp, solver_state=LP_RECORD)) is None
+
+
+def test_the_overview_withholds_storage_charging_on_a_mip_with_the_reason(mip, lp):
+    m = overview_figures(mip, SolverConfig(), None, _rdf, price_limit=DUALS_NOT_MARGINAL)
+    line = _line(m, "opex_storage_charging")
+    assert line.total is None and set(line.by_period.values()) <= {None}
+    assert line.note == MIP_PRICES_TEXT
+    assert _line(m, "opex").total is None  # a total over a withheld part (S1)
+    # A price-independent line keeps its value and gets no reason.
+    capex = _line(m, "capex_annualised")
+    assert capex.total is not None and capex.note is None
+    # The same network as an LP: the figures and their notes are as before.
+    lp_figs = overview_figures(lp, SolverConfig(), None, _rdf)
+    assert _line(lp_figs, "opex_storage_charging").total is not None
+    assert _line(lp_figs, "opex_storage_charging").note is None
+
+
+def test_a_mip_base_workbook_writes_no_price_and_names_the_reason(mip):
+    wb = _build(mip, MIP_RECORD)
+    prices = _text(wb["Prices"])
+    assert MIP_PRICES_TEXT in prices
+    assert "Mean price" not in prices and "Price duration" not in prices
+    for sheet in ("Capacity expansion", "Economics", "Overview"):
+        assert MIP_PRICES_TEXT in _text(wb[sheet]), sheet
+    # The asset table's market columns read not_established (the workbook's empty cell), never 0.0.
+    rows = wb["Economics"]
+    header_at = next(i for i, r in enumerate(rows) if "revenue_eur" in r)
+    header = rows[header_at]
+    body = [r for r in rows[header_at + 1:] if r and r[0] is not None][:4]
+    for col in ("revenue_eur", "net_profit_eur", "avg_price_eur_per_mwh"):
+        assert body and all(r[header.index(col)] == "not_established" for r in body), col
+
+
+def test_an_lp_base_workbook_keeps_its_prices_and_has_no_reason(lp):
+    wb = _build(lp, LP_RECORD)
+    assert "Mean price" in _text(wb["Prices"])
+    assert MIP_PRICES_TEXT not in _text([r for rows in wb.values() for r in rows])
+
+
+def test_each_scenario_is_judged_by_its_own_solve(mip, lp):
+    # An LP base with a MIP scenario: only the scenario's prices are withheld.
+    wb = _build(lp, LP_RECORD, scenarios=S.Scenarios(runs=[_scenario(mip, "UC", MIP_RECORD)]))
+    prices = _text(wb["Prices"])
+    assert "Mean price" in prices and MIP_PRICES_TEXT in prices
+    # A MIP base with an LP scenario: the base is withheld, the scenario keeps its prices.
+    wb = _build(mip, MIP_RECORD, scenarios=S.Scenarios(runs=[_scenario(lp, "LP", LP_RECORD)]))
+    prices = _text(wb["Prices"])
+    assert "Mean price" in prices and MIP_PRICES_TEXT in prices
+    # The scenario's overview figures come from its own record, not the base's.
+    assert _scenario(lp, "LP", LP_RECORD).figs is not None
+    assert _line(_scenario(lp, "LP", LP_RECORD).figs, "opex_storage_charging").total is not None
+    assert _line(_scenario(mip, "UC", MIP_RECORD).figs, "opex_storage_charging").total is None
+
+
+def test_a_saved_scenario_s_figures_take_its_own_record(mip, monkeypatch):
+    """`_fill`: the overview figures of a scenario read from its saved context pass that
+    context's own limit (S3), not the base's."""
+    from types import SimpleNamespace
+
+    ctx = SimpleNamespace(network=mip, solver_state={**MIP_RECORD, "solver_config": SolverConfig()})
+    run = S.Run(name="UC")
+    monkeypatch.setattr("harness.sensitivity_comparison._values", lambda read: {})
+    monkeypatch.setattr("services.finance.report.load_ic_report", lambda state: None)
+    S._fill(run, {"ctx": ctx}, result_df_for=lambda state: _rdf, ic_key=None,
+            solved_settings_for=None, dispatch_ready=None)
+    assert _line(run.figs, "opex_storage_charging").note == MIP_PRICES_TEXT

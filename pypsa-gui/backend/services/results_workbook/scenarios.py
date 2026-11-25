@@ -67,6 +67,15 @@ class Run:
     solver_state: dict | None = None
 
 
+def run_price_limit(run: Run) -> str | None:
+    """The price limit of the solve that produced `run`'s results (assistant-assurance 17 S3):
+    judged from the run's own solver state (its saved context's, a held study solve's, or the
+    active one for the base), never another run's."""
+    from harness.solve_validity import solved_price_limit
+    from services.results_workbook.views_adequacy import _state
+    return solved_price_limit(_state(run), run.network)
+
+
 @dataclass
 class Scenarios:
     runs: list[Run]                # the sensitivity runs, base excluded
@@ -140,8 +149,10 @@ def _fill(run: Run, read: dict, *, result_df_for, ic_key, solved_settings_for, d
     ctx = read["ctx"]
     state = ctx.solver_state
     result_df = result_df_for(state)
+    from harness.solve_validity import solved_price_limit
     run.figs = overview_figures(ctx.network, state.get("solver_config"),
-                                state.get("last_lost_load"), result_df)
+                                state.get("last_lost_load"), result_df,
+                                price_limit=solved_price_limit(state, ctx.network))
     run.network, run.cfg, run.result_df = ctx.network, state.get("solver_config"), result_df
     run.context = ctx
     run.lost_load = state.get("last_lost_load")

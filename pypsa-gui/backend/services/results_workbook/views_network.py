@@ -19,6 +19,7 @@ from collections.abc import Callable
 import pandas as pd
 
 from services.results_workbook.registry import register
+from services.results_workbook.scenarios import run_price_limit
 from services.results_workbook.views import HORIZON, Key, Table, ViewData, write_view
 
 __all__: list[str] = []
@@ -142,6 +143,13 @@ def _frame(run, accessor: str, attr: str) -> pd.DataFrame | None:
 
 # ── Capacity Expansion ───────────────────────────────────────────────────
 
+def _mip_note(run, price_limit: str | None) -> list[str]:
+    """The one reason a figure priced at a MIP's duals is not established (assistant-assurance 17),
+    naming the run: a sheet's notes are shared by the base and every scenario."""
+    from harness.solve_validity import MIP_PRICES_TEXT
+    return [f"{run.name}: {MIP_PRICES_TEXT}"] if price_limit else []
+
+
 def _sum_or_none(values) -> float | None:
     """A total only when every part is known (ADR-0001: no partial sums)."""
     values = list(values)
@@ -173,12 +181,13 @@ def _capex(run) -> ViewData | None:
     from services.results.economics_by_carrier import compute_economics_by_carrier
     n = run.network
     cb = compute_cost_breakdown(n, run.cfg)
-    ebc = compute_economics_by_carrier(n, run.cfg, run.lost_load, result_df=run.result_df)
+    ebc = compute_economics_by_carrier(n, run.cfg, run.lost_load, result_df=run.result_df,
+                                       price_limit=run_price_limit(run))
     if cb is None and not ebc.get("available"):
         return None
     d = ViewData(notes=["Costs as the Capacity expansion tab reads them (cost breakdown and "
                         "economics by carrier); capacity is each asset's optimal size, counted in "
-                        "the periods it is active."])
+                        "the periods it is active.", *_mip_note(run, ebc.get("unavailable_reason"))])
     if cb is not None:
         by_period = cb.get("by_period") or []
         for key, label in (("capex", "Capex (annualised)"), ("opex", "Opex"),
@@ -415,7 +424,11 @@ def _lostload(run) -> ViewData | None:
 def _prices(run) -> ViewData | None:
     from services.results.prices import compute_price_drivers, compute_prices
     n = run.network
-    p = compute_prices(n, "lopf", None, None, result_df=run.result_df)
+    limit = run_price_limit(run)
+    p = compute_prices(n, "lopf", None, None, result_df=run.result_df, price_limit=limit)
+    if limit and p is not None:  # withheld: the reason and an empty cell, never the MIP's 0.0 prices
+        return ViewData(keys=[Key("Marginal prices", "EUR/MWh", {HORIZON: None})],
+                        notes=_mip_note(run, limit))
     if p is None or not p.get("columns"):
         return None
     d = ViewData(notes=["Marginal prices per bus and snapshot as the Prices tab "
@@ -447,7 +460,7 @@ def _prices(run) -> ViewData | None:
     dur.insert(0, "Rank", range(1, len(dur) + 1))
     d.tables.append(Table("Price duration", "EUR/MWh", dur))
     d.tables.append(_ts_table(run, "Prices", "EUR/MWh", p, "price"))
-    drivers = compute_price_drivers(n, 2000.0, 200)  # the route's defaults
+    drivers = compute_price_drivers(n, 2000.0, 200, price_limit=limit)  # the route's defaults
     if drivers and drivers.get("rows"):
         d.tables.append(_rows(f"Price drivers (price ≥ {drivers['threshold']:g})", "EUR/MWh",
                               drivers["rows"], ["snapshot", "bus", "marginal_gen", "carrier"]))
@@ -464,13 +477,15 @@ _ASSET_VALUES = ("p_nom_opt_mw", "energy_mwh", "capacity_factor", "revenue_eur",
 def _economics(run) -> ViewData | None:
     from services.results.asset_economics import compute_asset_economics
     n = run.network
-    ae = compute_asset_economics(n, run.cfg, result_df=run.result_df)
+    ae = compute_asset_economics(n, run.cfg, result_df=run.result_df,
+                                 price_limit=run_price_limit(run))
     assets = [dict(r, component=comp) for comp in ("generators", "storage_units", "stores", "links")
               for r in ae.get(comp) or []]
     if not assets:
         return None
     d = ViewData(notes=["Per-asset economics as the Economics tab "
-                        "reads them.", *(ae.get("reading_notes") or [])])
+                        "reads them.", *(ae.get("reading_notes") or []),
+                        *_mip_note(run, ae.get("price_limit"))])
     by_period = [{"period": b.get("period"), "name": a["name"], **b}
                  for a in assets for b in a.get("by_period") or []]
     for metric, label in (("revenue_eur", "Revenue"), ("net_profit_eur", "Net profit")):
