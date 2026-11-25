@@ -380,3 +380,15 @@ def test_a_failed_solve_drops_the_previous_record(reset_backend, monkeypatch):
     )
     assert status not in ("ok", "optimal")
     assert sv.APPLIED_KEY not in live.meta
+
+
+def test_an_integer_option_stays_an_integer():
+    rec = sv.applied_record("highs", {"threads": 4, "mip_rel_gap": 0.01}, {}, None)
+    assert type(rec["options"]["threads"]) is int
+    assert type(rec["options"]["mip_rel_gap"]) is float
+
+
+def test_no_options_and_no_uc_keywords_make_an_empty_record():
+    rec = sv.applied_record("highs", None, None, None)
+    assert rec["options"] == {} and rec["dropped"] == []
+    assert rec["linearized_unit_commitment"] is False
