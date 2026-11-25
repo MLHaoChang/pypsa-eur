@@ -4,7 +4,7 @@
    "method": "GET",
    "path": "/api/results/co2_limit",
    "reason": "held-by-spec",
-   "issue": ".scratch/dc-template-review-2026-11-24/issues/02-co2-cap-goal.md"
+   "issue": ".scratch/dc-template-review-2026-11-24/issues/02b-chat-reads-co2-limit-result.md"
   }
  ]
 }

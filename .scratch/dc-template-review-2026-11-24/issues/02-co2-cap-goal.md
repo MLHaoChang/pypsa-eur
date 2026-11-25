@@ -34,7 +34,7 @@ CO2 is reported (Expert `pages/results/Emissions.tsx`, `services/compare/emissio
 
 ## Comments
 
-- 2026-11-25 (PR 2): chat does not read the goal's result yet. `GET /api/results/co2_limit` (the limit, each period's cap and dual, and the typed refusal) is held by this spec in route parity, as `not_via_chat` lists it "unbuilt"; a read tool would be its own issue.
+- 2026-11-25 (PR 2): chat does not read the goal's result yet. `GET /api/results/co2_limit` (the limit, each period's cap and dual, and the typed refusal) is held by this spec in route parity, as `not_via_chat` lists it "unbuilt"; a read tool is issue 02b (`02b-chat-reads-co2-limit-result.md`), which holds the route now that 02 is done.
 - 2026-11-25: done with #1987 (engine) and #2007 (UI). UX 30's follow-ups, pre-existing and left out of #2007:
   - `ScopeCards.tsx` shows a stray "·" in "The Run computes: · Change" when no card is in scope.
   - Emissions shows "BIND" and "currently BINDING" with an em dash on the goal row.
