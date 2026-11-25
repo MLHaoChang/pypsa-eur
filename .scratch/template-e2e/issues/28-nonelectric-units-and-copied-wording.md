@@ -3,7 +3,7 @@
 
 # 28 — Non-electric results use MW, and the H2 report carries data-centre wording
 
-Status: ready-for-agent
+Status: ready-for-agent (slice 1 in PR; LCOH, report wording, horizon remain)
 Source: decide-report-journeys.md (walk 2026-11-17, master 0ab07339)
 Severity: misleads
 Journey fit: results → report for H2, ammonia, concentrator.
@@ -24,3 +24,4 @@ Checked by code reading only; the app was not re-run. Still true: 'AI-training l
 ## Comments
 
 - 2026-11-23 status sweep: landed in #1786 (f08b8d44); #1787 (ce38457d): sized-design table and report take their own units. Remains: AI-training load step wording in grid_readiness.py, LCOH and product cost in Guided, template-specific report wording.
+- Slice 1 (grid_readiness wording template-specific, tested over every shipped template): PR open. Remains: LCOH and product cost in Guided, report wording, report horizon = Guided horizon.

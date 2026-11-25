@@ -32,6 +32,8 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
+from services.dc_compute import compute_report
+
 from models.flex_archetypes import DataCentreLoadSpec, DcPhase
 
 #: The data-centre templates' bus and load names the unserved rule reads.
@@ -203,6 +205,11 @@ def it_energy(
                 "rack_count": p.it_mw / p.rack_kw * 1000.0 if p.rack_kw else NOT_SET,
             }
         )
+    # DC 05: the compute block, if given, beside the typed IT MW (reported only).
+    for row, comp in zip(
+        phases, compute_report(spec.compute, [p.it_mw for p in spec.phases])
+    ):
+        row.update(compute_it_mw=comp["compute_it_mw"], compute_note=comp["warning"])
     return ItEnergy(
         periods=periods, phases=phases, hourly=hourly.drop(columns="it_kw_h")
     )

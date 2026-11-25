@@ -420,6 +420,8 @@ def test_the_endpoint_list_covers_every_series_endpoint():
     # and the stored case are structured documents, not index/columns/data.
     aggregates.update({"/business_case", "/business_case/inputs", "/business_case/preset",
                        "/business_case/options"})
+    # CO2 limit goal (DC review 02): the goal's limit, per-period caps and refusal.
+    aggregates.add("/co2_limit")
     unclassified = declared - ranged - aggregates
     assert not unclassified, (
         f"unclassified /results endpoints: {sorted(unclassified)} — add each to "
