@@ -582,3 +582,120 @@ def test_an_extra_lp_that_cannot_run_does_not_blame_the_network():
         "CO₂ limit: no design meets 1 t CO₂/yr. The least "
         "emissions reachable could not be found."
     )
+
+
+# ── a hand-made multi-period network ──────────────────────────────────────
+
+
+def _hand_staged():
+    """`_hand` over two periods: 2 snapshots × 438 h = 0.1 yr per period,
+    years 5 and 10, objective weights 5 and 4 (2040 discounted)."""
+    n = _hand(weight=438.0)
+    n.set_investment_periods([2030, 2040])
+    n.investment_period_weightings.loc[:, "years"] = [5.0, 10.0]
+    n.investment_period_weightings.loc[:, "objective"] = [5.0, 4.0]
+    return n
+
+
+_MULTI = {"multi_investment_periods": True}
+
+
+def test_a_periods_constant_is_the_limit_times_its_years_times_its_year_share():
+    n = _hand_staged()
+    co2_cap.apply(n, SolverConfig(co2_limit_t_per_yr=1000.0, **_MULTI), print, {})
+    gc = n.global_constraints
+    assert gc["constant"].to_dict() == {
+        "co2_cap_2030": pytest.approx(500.0, rel=1e-12),  # 1000 × 5 × 0.1
+        "co2_cap_2040": pytest.approx(1000.0, rel=1e-12),  # 1000 × 10 × 0.1
+    }
+    assert co2_cap.row_scale(n, 2040) == pytest.approx(1.0, rel=1e-12)
+    assert co2_cap.row_scale(n, None) == pytest.approx(0.2, rel=1e-12)
+
+
+def test_rows_are_per_period_only_with_the_flag_and_period_snapshots():
+    on, off = SolverConfig(**_MULTI), SolverConfig()
+    assert co2_cap.periods(_hand_staged(), on) == [2030, 2040]
+    assert co2_cap.periods(_hand_staged(), off) == [None]
+    assert co2_cap.periods(_hand(), on) == [None]
+
+
+def test_a_periods_price_undoes_the_objective_discount():
+    n = _hand_staged()
+    assert co2_cap.shadow_price(n, 2040, -72.0) == pytest.approx(180.0)  # × 10 / 4
+    assert co2_cap.shadow_price(n, None, -72.0) == 72.0
+    assert co2_cap.shadow_price(n, 2040, float("nan")) is None
+    n.investment_period_weightings.loc[2040, "objective"] = 0.0
+    assert co2_cap.shadow_price(n, 2040, -72.0) is None
+
+
+def test_a_binding_multi_period_cap_prices_each_periods_switch_alike():
+    # Cap 60 % of the grid's 0.5 t × 10 MW all year: 40 % moves to clean at
+    # +90 EUR/MWh, 0.5 t a MWh, 180 EUR/t in each period whatever its discount.
+    n = _hand_staged()
+    status, _, sink, _ = _solve(n, co2_limit_t_per_yr=0.6 * 43_800.0, **_MULTI)
+    assert status == "ok"
+    rows = {r["name"]: r for r in sink["last_co2_cap"]["rows"]}
+    assert rows["co2_cap_2030"]["mu"] == pytest.approx(-180.0, rel=1e-6)
+    assert rows["co2_cap_2040"]["mu"] == pytest.approx(-72.0, rel=1e-6)
+    for r in rows.values():
+        assert r["shadow_price_eur_per_t"] == pytest.approx(180.0, rel=1e-6)
+
+
+def test_capture_reads_no_dual_from_a_missing_or_nan_mu():
+    n = _hand()
+    co2_cap.apply(n, SolverConfig(co2_limit_t_per_yr=1.0), print, {})
+    built = getattr(n, co2_cap._BUILT)["rows"]
+    gc = n.c.global_constraints
+    gc.static.loc["co2_cap", "mu"] = -3.0
+    assert co2_cap.capture(n, 1.0, built)["rows"][0]["mu"] == -3.0
+    gc.static.loc["co2_cap", "mu"] = np.nan
+    assert co2_cap.capture(n, 1.0, built)["rows"][0]["mu"] is None
+    gc.static = gc.static.drop(columns="mu")
+    (row,) = co2_cap.capture(n, 1.0, built)["rows"]
+    assert row["mu"] is None and row["shadow_price_eur_per_t"] is None
+    gc.static = gc.static.drop(index="co2_cap")
+    assert co2_cap.capture(n, 1.0, built)["rows"][0]["mu"] is None
+
+
+def test_the_extra_lp_counts_only_an_optimal_solve(monkeypatch):
+    # The model holds a solution from a first solve; a second that stops at a
+    # time limit must not report it as the least reachable.
+    n = _hand()
+    co2_cap.apply(n, SolverConfig(co2_limit_t_per_yr=1.0), print, {})
+    n.optimize.create_model()
+    lhs = co2_cap.rebuild_rows(n, n.snapshots)
+    n.model.solve(solver_name="highs")
+    monkeypatch.setattr(
+        type(n.model), "solve", lambda *_a, **_kw: ("warning", "time_limit")
+    )
+    goal = {
+        "limit_t_per_yr": 1.0,
+        "rows": [dict(_GOAL["rows"][1], name="co2_cap", period=None, row_scale=TO_ROW)],
+    }
+    ref = co2_cap.unreachable(n, goal, lhs, "highs")
+    assert ref["without_limit"] == "not_found" and ref["least_t_per_yr"] is None
+
+
+def test_the_rebuild_leaves_a_period_outside_the_window_alone():
+    n = _hand_staged()
+    n.generators_t[OVERRIDE_ATTR] = pd.DataFrame({"grid": 0.1}, index=n.snapshots)
+    co2_cap.apply(n, SolverConfig(co2_limit_t_per_yr=1e9, **_MULTI), print, {})
+    n.optimize.create_model(multi_investment_periods=True)
+    first = n.snapshots[n.snapshots.get_level_values(0) == 2030]
+    lhs = co2_cap.rebuild_rows(n, first)
+    p = n.model["Generator-p"].sel(name="grid")
+    for period, want in ((2030, 438.0 * 5 * 0.1), (2040, 438.0 * 10 * 0.5)):
+        sns = n.snapshots[n.snapshots.get_level_values(0) == period]
+        got = co2_cap._row_coefficients(
+            lhs[f"co2_cap_{period}"], p.sel(snapshot=sns).labels.values
+        )
+        assert got.tolist() == pytest.approx([want, want])
+
+
+def test_the_headline_price_is_a_binding_rows_and_a_zero_scale_row_is_unread():
+    slack = dict(_GOAL["rows"][1], shadow_price_eur_per_t=99.0)
+    a = co2_cap.annual({"rows": [slack]}, None, {2035: 10.0})
+    assert a["binding"] is False and a["shadow_price_eur_per_t"] is None
+    zero = dict(_GOAL["rows"][1], row_scale=0.0)
+    a = co2_cap.annual({"rows": [zero]}, None, {2035: 10.0})
+    assert a["t_per_yr"] is None and a["by_period"] == {}
