@@ -429,7 +429,9 @@ def test_mip_price_limit_reads_the_record_over_the_config():
 
 def test_price_limit_without_config_reads_the_record():
     # No config is needed once the solve recorded what it applied.
-    assert sv.price_limit_without_config(_sealed(_committable(), linearised=True)) is None
+    assert (
+        sv.price_limit_without_config(_sealed(_committable(), linearised=True)) is None
+    )
     assert sv.price_limit_without_config(_sealed(_committable(), mode="binary")) == (
         sv.DUALS_NOT_MARGINAL
     )
@@ -466,8 +468,10 @@ def test_a_run_without_a_valid_record_keeps_the_settings_and_config_path(record)
     n = _process_unit_net()  # an LP under the default config, a MIP under binary
     if record:
         n.meta[sv.APPLIED_KEY] = {**_VALID, "v": 2}
-    recorded = {"last_solve_settings": {"price_limit": sv.DUALS_NOT_MARGINAL},
-                "solver_config": _cfg()}
+    recorded = {
+        "last_solve_settings": {"price_limit": sv.DUALS_NOT_MARGINAL},
+        "solver_config": _cfg(),
+    }
     assert sv.solved_price_limit(recorded, n) == sv.DUALS_NOT_MARGINAL
     unrecorded = {"last_solve_settings": {}, "solver_config": _cfg()}
     # No record: the config decides (an LP). Malformed: fails closed.
