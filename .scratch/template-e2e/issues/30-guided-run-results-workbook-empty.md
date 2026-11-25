@@ -3,7 +3,7 @@
 
 # 30 After a Guided study run, the results workbook is empty and Expert reads "Not run yet"
 
-Status: ready-for-agent
+Status: done (PR #1963); two halves open, filed as 45 and 46
 Blocked by: none. Related: `provenance-graph/13` (an edit drops the last run to not_run), which may share the cause: the run kinds a Guided study writes vs the LOPF results Expert and the workbook read.
 Source: TE2E-29 builder (session_01G7qCuk2dRcskiyXzKdfgdo), relayed by the coordinator 2026-11-21; filed in the gap review (`.scratch/gap-review-2026-11-21/README.md`). The `template-journeys.mjs` workbook step is xfail-keyed (`L.gap`) to this issue.
 Severity: blocks a journey (a Guided user cannot export results)
@@ -36,9 +36,9 @@ What should the workbook export after a Guided study run?
 ## Acceptance criteria (option 1)
 
 - [x] A failing test first: after a Guided study run on `eh_site`, the workbook route returns a workbook whose dispatch and capacity sheets are filled, and the flow/Expert run state reads the study run.
-- [x] Download File gives a file, or a plain error with its reason. A request that would yield an empty workbook says so before any download starts.
+- [x] Download File gives a file (from the study's held solve). **Open half, issue 45:** a request that would yield an empty workbook says so before any download starts (the route still answers 204).
 - [x] The `template-journeys.mjs` xfail keyed to 30 is removed and the step passes.
-- [ ] End to end in the real app: `eh_site` › Guided › run the study › Expert › Export › Results workbook › Download. The .xlsx opens, its headline equals the Guided verdict, and the Expert header names the run.
+- [ ] **Open, issue 46** (needs the Expert header files, held by other PRs). End to end in the real app: `eh_site` › Guided › run the study › Expert › Export › Results workbook › Download. The .xlsx opens, its headline equals the Guided verdict, and the Expert header names the run.
 
 ## Likely files
 
@@ -46,3 +46,4 @@ What should the workbook export after a Guided study run?
 
 ## Comments
 - 2026-11-24 coordinator: owner chose option 1 (TE2E-30-1); Status → ready-for-agent. Found blocking guided-results 07's export check (#1944). Opens after template-e2e 11 (#1948) merges: both edit `template-journeys.mjs`.
+- 2026-11-25 PR #1963: fixed by `services/study_solve.py` (held study solve, LOPF first). Boxes 1 and 3 done; box 2 half done (45 open); box 4 open (46). Carried non-blocking from GK B2: the held solve is not persisted (204 / none after a restart); `/simulation/status` shows live status beside the study dispatch; the chooser builds the full workbook to list tabs; AA-17 2b `solved_price_limit` must judge the passed network and the held solve's stamp once it lands.
