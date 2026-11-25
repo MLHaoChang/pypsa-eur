@@ -1,7 +1,7 @@
 // DC 02 PR 2 shots: the CO₂ limit field, its Results figure and its refusal (Guided/Expert x light/dark).
 // Component harness: a temporary page under pypsa-gui/frontend/src, served by vite and removed in `finally`;
 // the API answers are route mocks in the shapes `GET /results/headline_kpis` and `GET /results/co2_limit` send.
-// Run: node shoot.mjs
+// Run: node shoot.mjs, then downscale: SHOTS_MAX=1200 scripts/coord/shots.sh and keep the .small files.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
