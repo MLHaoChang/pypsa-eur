@@ -3,7 +3,7 @@
 
 # Required warning slots (A2.8)
 
-Status: ready-for-agent
+Status: done (merged #1831)
 Type: task
 Blocked by: none (the missing warning disposition in the result-slot contract is this issue's own work)
 
@@ -47,3 +47,7 @@ That test does **not** count as coverage for this ticket.
 - The listed blocker is the work itself: add a warning disposition to the slot contract, then the profiles; L: the builder proposes a split.
 
 - 2026-11-23 status sweep: landed in #1831 (503155ec11): A2.8 warning-slot tests and a warning disposition from the AC branch-loading profile landed; not checked against every scope bullet, so the status stays until confirmed.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: each scope bullet checked against #1831 (merged, GitHub) and master: receipt policy 5 and warning slot in assurance_shapes.py and assurance_contracts.v1.json, emitted by ac_branch_calculations.py, A2.8 tests in test_p2_request_slots.py, dropped-warning mutants killed per the PR body.

@@ -3,7 +3,7 @@
 
 # 03 — Carriers & processes: every Edit in Guided jumps to Expert
 
-Status: ready-for-agent; audit 2026-11-19: recipe drawer merged (#1684); left (unverified): Expert label parity for recipes, browser test
+Status: ready-for-agent; audit 2026-11-25: #1684 merged (recipe drawer); left (unverified): Expert label parity for recipes, browser test
 Owner: builder session_01G7qCumsdzuVnJQAD41wFxk
 Decided: GAP03-ADD-1 (Q5 a), Guided edits recipe values in a drawer; adding carriers and process units stays an Expert action behind a return link
 Size: M
@@ -26,3 +26,7 @@ For the electrolyser (H2 hub) and Haber-Bosch (ammonia) templates, the recipe is
 ## Comments
 
 - 2026-11-23 status sweep: landed in #1684 (35c1cb93): recipe drawer in Guided section 2 and the Expert recipe card. Adding a carrier or process unit stays Expert by design (GAP03-ADD-1 Q5 a). Remains: browser test and Expert label parity.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: PR merge state checked against origin/master log; acceptance items grepped on master code.
