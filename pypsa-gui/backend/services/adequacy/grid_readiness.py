@@ -86,9 +86,12 @@ _FREQUENCY_SERVICES = ("grid_forming", "synthetic_inertia", "frequency_containme
 _LOAD_WORDS = {"eh_datacenter": "AI-training load", "eh_datacenter_staged": "AI-training load"}
 _SITE_LOAD = "site load"
 #: DC 05: a data-centre project names its load by the workload kind stored in
-#: ``dc_load.spec.utilisation``; no spec (or an unreadable one) keeps the template's words.
+#: ``dc_load.spec.utilisation``, in the Workload select's words (frontend
+#: ``UTILISATION_OPTIONS``, a test holds them equal) lowercased; no spec (or an
+#: unreadable one) keeps the template's words. A flat load has no step of its
+#: own, so it is just "load".
 _KIND_WORDS = {"ai_training": "AI-training load", "inference": "inference load",
-               "mixed": "mixed load", "flat": "flat load"}
+               "mixed": "mixed load", "flat": "load"}
 
 
 def _load_words(inp) -> str:

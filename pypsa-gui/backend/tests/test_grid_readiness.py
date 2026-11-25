@@ -1371,3 +1371,20 @@ def test_an_unreadable_spec_keeps_the_template_words(tmp_path):
 def test_a_non_dc_template_reports_site_load(tmp_path):
     d, n = _project(tmp_path, next(t for t in TIDS if t not in DC_IDS))
     assert G.grid_readiness(d, n, PROFILE)["load_words"] == "site load"
+
+
+def test_each_kind_reads_as_the_workload_select_words():
+    """The scorecard's kind words are the form's Workload labels, lowercased;
+    AI training keeps its hyphenated "AI-training load" (byte-identical) and
+    flat drops the kind, since a flat load has no step of its own."""
+    from typing import get_args
+    import re
+    from models.flex_archetypes import UtilisationKind
+    ts = (pathlib.Path(__file__).resolve().parents[2]
+          / "frontend/src/pages/hubDesign/dcLoadForm.ts").read_text()
+    block = ts.split("export const UTILISATION_OPTIONS")[1].split("]\n")[0]
+    labels = dict(re.findall(r"\['(\w+)', '([^']+)'\]", block))
+    assert sorted(labels) == sorted(get_args(UtilisationKind)) == sorted(G._KIND_WORDS)
+    expected = {k: f"{v.lower()} load" for k, v in labels.items()}
+    expected.update(ai_training="AI-training load", flat="load")
+    assert G._KIND_WORDS == expected
