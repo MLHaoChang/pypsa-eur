@@ -10,18 +10,30 @@ import re
 
 from gridspine.schema import island as schema
 
-WORDS = pathlib.Path(__file__).resolve().parents[2] / "frontend" / "src" / "pages" / "islandWords.ts"
+WORDS = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / "frontend"
+    / "src"
+    / "pages"
+    / "islandWords.ts"
+)
 
 
 def _keys(block: str) -> set[str]:
-    body = re.search(r"CONTROL_FIELD_WORDS[^=]*=\s*\{(.*?)\n\}", WORDS.read_text(), re.S)
+    body = re.search(
+        r"CONTROL_FIELD_WORDS[^=]*=\s*\{(.*?)\n\}", WORDS.read_text(), re.S
+    )
     assert body, f"no {block} in {WORDS}"
     return set(re.findall(r"^\s{2}(\w+):", body.group(1), re.M))
 
 
 def test_every_schema_control_setting_has_words():
-    fields = {"pf_rated", *schema._PF_CHOICE, *schema._UPS_REQUIRED,
-              *(f for fs in schema._CONTROL_FIELDS.values() for f in fs)}
+    fields = {
+        "pf_rated",
+        *schema._PF_CHOICE,
+        *schema._UPS_REQUIRED,
+        *(f for fs in schema._CONTROL_FIELDS.values() for f in fs),
+    }
     words = _keys("CONTROL_FIELD_WORDS")
     assert fields <= words, sorted(fields - words)
 
