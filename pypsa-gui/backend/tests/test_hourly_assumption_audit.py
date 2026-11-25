@@ -37,6 +37,9 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "solver/adequacy.py": (3, "EH import-energy cap: E MWh/yr × Σ w / 8760 per period "
                               "(formula, code, message) — a unit"),
     "solver_service.py": (1, "comment restating the solver/adequacy.py cap formula"),
+    "solver/co2_cap.py": (3, "DC review 02 CO2 limit goal: the cap's constant is "
+                             "limit t/yr × years × Σ w / 8760 per period (docstring, "
+                             "HOURS_PER_YEAR, year_fraction) — 8760 h/yr, a unit"),
     "solver/envelope_floors.py": (4, "AS-03 genset run-hour cap: H h/yr × Σ w / 8760 per period "
                                      "(docstring, code) and the cap's [0, 8760] h/yr range — a unit"),
     "asset_results/compute.py": (2, "prose explaining why Σweights/8760 is avoided"),
@@ -182,6 +185,7 @@ def test_the_inventory_is_pinned():
     # AS-06: adequacy/sizing_loop_runner.py (1) reads a RangeIndex as hourly for tsam.
     # G2P-15: process_heat.py (1), the two-level heat demo's own hourly snapshots.
     # SCU06 S1a: market_prices.py (3), the ENTSO-E series' own UTC-year axis.
-    assert sum(c for c, _ in ALLOWED.values()) == 97
-    assert len(ALLOWED) == 51
+    # DC review 02: solver/co2_cap.py (3) annualises the CO2 limit's constant.
+    assert sum(c for c, _ in ALLOWED.values()) == 100
+    assert len(ALLOWED) == 52
     assert all(reason for _, reason in ALLOWED.values())
