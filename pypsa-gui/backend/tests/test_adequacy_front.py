@@ -167,6 +167,30 @@ def test_a_binding_co2_point_matches_the_hand_solution():
     assert res["reference_co2_t_per_yr"] == pytest.approx(438_000.0, rel=1e-6)
 
 
+def test_a_co2_limit_goal_in_the_config_leaves_the_fronts_cap_the_only_one():
+    # DC review 02 / GK A C6: a goal limit far below both points' emissions
+    # would refuse each point as a duplicate cap, or bind it, if it reached
+    # the front's solves. Every point solves, and each emits what its own cap
+    # (or none) allows, as in the hand solution.
+    n = _hand()
+    res = _run(
+        n,
+        cfg=_cfg(co2_limit_t_per_yr=1.0),
+        lever="ens_cap",
+        levels=[100.0],
+        co2_caps_t=[None, 219_000.0],
+    )
+    by = _by_key(res)
+    assert all(p["status"] == "ok" for p in res["points"]), res["points"]
+    assert by[(100.0, 219_000.0)]["point"]["co2_t_per_yr"] == pytest.approx(
+        219_000.0, rel=1e-6
+    )
+    assert by[(100.0, None)]["point"]["co2_t_per_yr"] == pytest.approx(
+        438_000.0, rel=1e-6
+    )
+    assert n.global_constraints.empty
+
+
 def test_a_cap_above_the_emissions_has_no_shadow_price():
     res = _run(_hand(), lever="ens_cap", levels=[100.0], co2_caps_t=[500_000.0])
     pt = res["points"][0]["point"]
@@ -703,6 +727,31 @@ def test_same_design_compares_every_capacity_and_the_cost():
     assert not fr.same_design(a, _pt({"g": 100.0}, 1000.0))  # asset set
     assert not fr.same_design(a, _pt({"g": 100.0, "s": 5.0}, 1001.0))  # cost
     assert fr.same_design(a, _pt({"g": 100.0 + 1e-9, "s": 5.0}, 1000.0 + 1e-6))
+
+
+def test_an_unread_size_or_total_is_never_the_same_design():
+    a = _pt({"g": 100.0}, 1000.0)
+    assert not fr.same_design(a, _pt({"g": None}, 1000.0))
+    assert not fr.same_design(_pt({"g": None}, 1000.0), _pt({"g": None}, 1000.0))
+    assert not fr.same_design(a, _pt({"g": 100.0}, None))
+    # Mirrored: the unread value on the `a` side (each operand of `close`).
+    assert not fr.same_design(_pt({"g": None}, 1000.0), a)
+    assert not fr.same_design(_pt({"g": 100.0}, None), a)
+
+
+def test_a_front_with_an_unread_capacity_still_finishes(monkeypatch):
+    real = fr._capacities
+
+    def one_unread(n):
+        out = real(n)
+        return {**out, "generators:gas": None}
+
+    monkeypatch.setattr(fr, "_capacities", one_unread)
+    res = _run(
+        _hand(), lever="ens_cap", levels=[100.0, 200.0], co2_caps_t=[None], mc_draws=10
+    )
+    assert [p["status"] for p in res["points"]] == ["ok", "ok"]
+    assert not res.get("aborted")
 
 
 # --------------------------------------------------------------------------
