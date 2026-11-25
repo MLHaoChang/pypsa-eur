@@ -81,14 +81,30 @@ def _services_text(services) -> str:
 
 _FREQUENCY_SERVICES = ("grid_forming", "synthetic_inertia", "frequency_containment",
                        "fast_frequency_response")
-_BEFORE_MITIGATION = ("the AI-training load is read at the point of connection before any UPS or "
-                      "battery smoothing, so the verdict is before mitigation, not final")
+#: What a template calls the load whose step the connection rows read; only the
+#: data-centre templates have an AI-training load, every other template says "site load".
+_LOAD_WORDS = {"eh_datacenter": "AI-training load", "eh_datacenter_staged": "AI-training load"}
+_SITE_LOAD = "site load"
+
+
+def _load_words(inp) -> str:
+    return _LOAD_WORDS.get(inp.meta.get("id"), _SITE_LOAD)
+
+
+def _before_mitigation(inp) -> str:
+    cushion = "UPS or battery" if _load_words(inp) != _SITE_LOAD else "battery"
+    return (f"the {_load_words(inp)} is read at the point of connection before any {cushion} "
+            "smoothing, so the verdict is before mitigation, not final")
 #: The island study's scenarios in words.
 SCENARIO_WORDS = {"ups_bridged": "UPS-bridged", "seamless": "seamless", "planned": "planned"}
 #: Who a dynamic requirement applies to, in words.
 _APPLIES_WORDS = {"ibr": "the site's inverter-based units", "facility": "the site", "load": "the load"}
-_NO_ENVELOPE = ("No AI-training load profile on this project, so its ramp, swing and oscillation "
-                "are not known (a data-centre project created with the AI-training profile has one)")
+def _no_envelope(inp) -> str:
+    if _load_words(inp) == _SITE_LOAD:
+        return ("No load-step profile on this project, so the site load's ramp, swing and oscillation "
+                "are not known")
+    return ("No AI-training load profile on this project, so its ramp, swing and oscillation "
+            "are not known (a data-centre project created with the AI-training profile has one)")
 
 
 def _target(section, component=None, entity=None, field=None, panel=None) -> dict:
@@ -500,7 +516,7 @@ def _ramp_row(inp: _Inputs) -> dict:
     if inp.envelope is None or limit is None:
         return _row("ramp_rate", req, rule=RULE_RAMP, limit=limit, unit="MW/min", source=source,
                     project_value=None, verdict="unknown", assumed=assumed,
-                    note=_NO_ENVELOPE if inp.envelope is None else "No grid connection to scale the limit by",
+                    note=_no_envelope(inp) if inp.envelope is None else "No grid connection to scale the limit by",
                     section="connection", target=target)
     per_s = float(inp.envelope["max"]["max_dp_dt_mw_per_s"])
     per_min = mw_per_s_to_mw_per_min(per_s)
@@ -508,7 +524,7 @@ def _ramp_row(inp: _Inputs) -> dict:
                 project_value=round(per_min, 4), verdict=_judge(per_min, limit, RULE_RAMP),
                 assumed=assumed or _envelope_assumed(inp),
                 note=(f"Steepest load change {per_s:.4g} MW/s = {per_min:.4g} MW/min (the steeper of the "
-                      f"training step and the oscillation); {_BEFORE_MITIGATION}"),
+                      f"load step and the oscillation); {_before_mitigation(inp)}"),
                 section="connection", target=target)
 
 
@@ -526,7 +542,7 @@ def _oscillation_row(inp: _Inputs) -> dict:
     if inp.envelope is None or not inp.connection_mw:
         return _row("oscillation", req, limit=limit, unit="% of connection, peak-to-peak",
                     source=source, project_value=None, verdict="unknown", assumed=assumed,
-                    note=_NO_ENVELOPE if inp.envelope is None else "No grid connection to compare against",
+                    note=_no_envelope(inp) if inp.envelope is None else "No grid connection to compare against",
                     section="connection", target=target)
     amp = float(inp.envelope["max"]["oscillation_amplitude_mw"])
     period = float(inp.envelope["max"]["oscillation_period_s"])
@@ -540,7 +556,7 @@ def _oscillation_row(inp: _Inputs) -> dict:
                 source=source, project_value=round(pct, 4), verdict=verdict,
                 assumed=assumed or _envelope_assumed(inp),
                 note=(f"{2 * amp:.4g} MW peak-to-peak over the {inp.connection_mw:g} MW connection, "
-                      f"{band}; {_BEFORE_MITIGATION}"),
+                      f"{band}; {_before_mitigation(inp)}"),
                 section="connection", target=target)
 
 
@@ -629,7 +645,7 @@ def _rvc_tan_phi(inp: _Inputs) -> tuple[float, str]:
 def _rvc_row(inp: _Inputs) -> dict:
     target = _target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"),
                      "eh_sk_mva")
-    req = "Rapid voltage change at the PoC on the AI-training load step"
+    req = f"Rapid voltage change at the PoC on the {_load_words(inp)} step"
     lim = (inp.profile or {}).get("rvc_limit_pct")
     if not isinstance(lim, dict):
         return _row("rapid_voltage_change", req, rule=RULE_RVC, limit=None, unit="% of nominal",
@@ -643,7 +659,7 @@ def _rvc_row(inp: _Inputs) -> dict:
     if inp.envelope is None or sk is None:
         return _row("rapid_voltage_change", req, rule=RULE_RVC, limit=limit, unit="% of nominal", source=source,
                     project_value=None, verdict="unknown", assumed=lim_assumed or fault_assumed,
-                    note=_NO_ENVELOPE if inp.envelope is None
+                    note=_no_envelope(inp) if inp.envelope is None
                     else "No short-circuit level at the point of connection",
                     section="connection", target=target)
     swing = float(inp.envelope["max"]["swing_mw"])
@@ -659,7 +675,7 @@ def _rvc_row(inp: _Inputs) -> dict:
                      + (f"; {f['words']}" if f["words"] else "")
                      + f"; for reference the P-only ΔS/S_k = {swing:.4g} MW / {sk:g} MVA = {swing / sk * 100.0:.4g} %; "
                      "S_k is the entered S_k'' with the IEC 60909 c factor, so d may be understated by up to 1.1; "
-                     f"above the limit a power-flow or EMT study is needed; {_BEFORE_MITIGATION}"),
+                     f"above the limit a power-flow or EMT study is needed; {_before_mitigation(inp)}"),
                section="connection", target=target)
     if xr_assumed:
         row["xr_assumed"] = True                       # AS-18: the scorecard links to the PoC X/R field
