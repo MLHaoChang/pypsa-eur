@@ -522,7 +522,7 @@ def _units(spec: dict) -> list:
         s, p = _tagged(u.get("s_mva")), _tagged(u.get("p_mw"))
         e = _tagged(u.get("e_mwh"))
         rating, unit = (s, "MVA") if s is not None else (p, "MW")
-        gov = "declared in the campus file" + (f"; {e:g} MWh" if e is not None else "")
+        gov = "declared in the campus file" + (f" · {e:g} MWh" if e is not None else "")
         rows.append(
             _row(
                 kind=kind,
@@ -572,7 +572,15 @@ def build(run_dir, library_path=None) -> dict:
     if assumptions:
         assumptions.append(BAYS_ASSUMPTION)
     assumptions = [
-        {**a, "label": ASSUMPTION_LABELS.get(a.get("name"), OTHER_ASSUMPTION)}
+        {
+            **a,
+            "label": ASSUMPTION_LABELS.get(a.get("name"), OTHER_ASSUMPTION),
+            **(
+                {"unit": a["unit"].replace("mm2", "mm²")}
+                if isinstance(a.get("unit"), str)
+                else {}
+            ),
+        }
         for a in assumptions
     ]
     for r in rows:

@@ -270,7 +270,7 @@ def test_every_kind_with_rating_source_and_criterion(tmp_path):
 
     gen, bess = _by(rows, "genset")[0], _by(rows, "bess")[0]
     assert (gen["rating"], gen["unit"], gen["source"]) == (12.5, "MVA", "declared")
-    assert bess["governing"] == "declared in the campus file; 40 MWh"
+    assert bess["governing"] == "declared in the campus file · 40 MWh"
     assert not _by(rows, "load")
     assert out["missing"] == []
     assert {a["name"] for a in out["assumptions"]} >= {
@@ -439,6 +439,7 @@ def _sizing(run, **kw):
         ({"max_s_n1_mva": 45.0}, "Loading, all in service 46.0 MVA"),
         ({"n_minus_1": False}, "Loading, all in service 46.0 MVA"),
         ({"max_s_n1_mva": math.nan}, "Loading, all in service 46.0 MVA"),
+        ({"n_minus_1": math.nan}, "Loading, all in service 46.0 MVA"),
     ],
 )
 def test_the_transformer_criterion_names_the_case_that_set_it(tmp_path, kw, flow):
@@ -867,3 +868,78 @@ def test_no_criterion_chains_clauses_or_writes_mm2(tmp_path):
             if r["kind"] in ("switchgear", "cable"):
                 assert "; " not in r["governing"], r["governing"]
             assert "mm2" not in (r["governing"] or "") + (r["unit"] or "")
+
+
+def test_blank_and_nan_text_read_not_evaluated():
+    assert es._text("") is None and es._text("x") == "x"
+    assert es._case(None) == es._case(math.nan) == es.NOT_EVALUATED
+    assert es._switchgear_text(None, None) == es.NOT_EVALUATED
+
+
+def test_a_campus_file_with_empty_sections_still_reads_the_ratings(tmp_path):
+    run = _run(tmp_path)
+    _sizing(run)
+    (tr,) = es._transformers(run, {"transformers": None}, {"transformers": []})
+    assert tr["location"] is None
+    sg = pd.read_csv(run / cs.SWITCHGEAR_RATING_CSV, dtype={"bus": str})
+    sg["vn_kv"] = math.nan
+    sg.to_csv(run / cs.SWITCHGEAR_RATING_CSV, index=False)
+    assert all(
+        r["location"] == r["asset"].removesuffix(" switchgear")
+        for r in es._switchgear(run, {"buses": None})
+    )
+
+
+def test_the_transformer_count_is_a_whole_number(tmp_path):
+    tr = _sizing(_run(tmp_path, rated=False), units=2.0)
+    assert type(tr["quantity"]) is int and tr["quantity"] == 2
+
+
+def test_a_transformer_with_no_voltage_or_count_is_not_priced(tmp_path):
+    run = _run(tmp_path, rated=False)
+    lib = {
+        "transformers": [
+            {
+                "id": "OK",
+                "hv_kv": t(110.0),
+                "lv_kv": t(20.0),
+                "s_mva": t(63.0),
+                "capex_eur": t(1000.0),
+            }
+        ]
+    }
+    spec = _spec()["campus"]
+    for key in ("vn_hv_kv", "vn_lv_kv"):
+        trafos = {
+            n: {k: v for k, v in tr.items() if k != key}
+            for n, tr in spec["transformers"].items()
+        }
+        _sizing(run)
+        (tr,) = es._transformers(run, {**spec, "transformers": trafos}, lib)
+        assert tr["library_id"] is None and tr["capex_eur"] is None
+    _sizing(run, units=math.nan)
+    (tr,) = es._transformers(run, spec, lib)
+    assert tr["library_id"] == "OK" and tr["capex_eur"] is None
+
+
+@pytest.mark.parametrize(
+    "chosen_id, section",
+    [("", 240.0), ("CU240", math.nan)],
+)
+def test_a_cable_is_chosen_only_with_both_an_id_and_a_section(
+    tmp_path, chosen_id, section
+):
+    # The engine blanks both together (campus_ratings); the reader still needs both.
+    run = _run(tmp_path)
+    cb = pd.read_csv(run / cs.CABLE_RATING_CSV, dtype={"chosen_id": str})
+    cb["chosen_id"], cb["section_mm2"], cb["governing"] = chosen_id, section, math.nan
+    cb.to_csv(run / cs.CABLE_RATING_CSV, index=False)
+    (c,) = es._cables(run)
+    assert c["rating"] is None and c["library_id"] is None and c["capex_eur"] is None
+    assert c["governing"] == es.NOT_EVALUATED
+
+
+def test_an_assumption_unit_writes_mm_squared(tmp_path):
+    out = es.build(_run(tmp_path))
+    units = [a["unit"] for a in out["assumptions"] if isinstance(a.get("unit"), str)]
+    assert any("mm²" in u for u in units) and not any("mm2" in u for u in units)
