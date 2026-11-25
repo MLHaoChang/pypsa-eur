@@ -347,14 +347,11 @@ def capacity_units(n, keys) -> dict[str, str | None]:
         if table in ("lines", "transformers"):
             out[key] = "MVA"
             continue
-        col = _SIZE_BUS_COL.get(table)
-        df = getattr(n, table, None)
-        if col is None or df is None or name not in df.index or col not in df.columns:
-            out[key] = None
-            continue
         try:
-            out[key] = _size_unit(n, df.at[name, col], stock=table == "stores")
-        except Exception:  # noqa: BLE001 — an unreadable size bus has no known unit
+            bus = getattr(n, table).at[name, _SIZE_BUS_COL[table]]
+            out[key] = _size_unit(n, bus, stock=table == "stores")
+        except Exception:  # noqa: BLE001 — an unknown table, a gone asset or
+            # an unreadable size bus has no known unit
             out[key] = None
     return out
 
@@ -784,7 +781,7 @@ def degenerate_findings(
             why = "the dispatch model has no outages, so " if not outage_model else ""
             axes["ens_cap"] = {
                 "text": (
-                    f"The ENS target never bound at any of {len(ok)} points: "
+                    f"The ENS target was never reached at any of {len(ok)} points: "
                     f"{why}at a value of lost load of {_fmt(voll)} €/MWh serving every MWh is "
                     "already the cheapest plan. Use the reserve-margin lever, "
                     "lower the value of lost load, or read the sampled-outage LOLE per point."
@@ -795,7 +792,7 @@ def degenerate_findings(
             tightest = max(p["level"] for p in ok)
             axes["reserve_margin"] = {
                 "text": (
-                    f"The reserve margin never bound at any of {len(ok)} points: "
+                    f"The reserve margin was never reached at any of {len(ok)} points: "
                     f"the least-cost fleet already holds more firm capacity than "
                     f"the tightest margin swept ({tightest:.0%}). Sweep higher margins."
                 ),
@@ -823,7 +820,7 @@ def degenerate_findings(
         )
         axes["co2"] = {
             "text": (
-                f"The CO₂ limit never bound: {ref}within every limit swept "
+                f"The CO₂ limit was never reached: {ref}within every limit swept "
                 f"(lowest {_fmt(lowest)} t/yr). Sweep limits below the "
                 "unconstrained emissions."
             ),

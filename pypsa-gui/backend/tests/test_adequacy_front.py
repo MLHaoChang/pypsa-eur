@@ -152,6 +152,8 @@ def test_a_binding_co2_point_matches_the_hand_solution():
     pt = p["point"]
     assert pt["capacities"]["generators:gas"] == pytest.approx(50.0, abs=1e-3)
     assert pt["capacities"]["generators:clean"] == pytest.approx(50.0, abs=1e-3)
+    # every size carries its unit, read off its bus (UX 30, DC 01 PR3)
+    assert pt["capacity_units"] == {k: "MW" for k in pt["capacities"]}
     assert pt["capex_eur_per_yr"] == pytest.approx(17_500_000.0, rel=1e-6)
     assert pt["opex_eur_per_yr"] == pytest.approx(8_760_000.0, rel=1e-6)
     assert pt["total_eur_per_yr"] == pytest.approx(26_260_000.0, rel=1e-6)
@@ -727,7 +729,7 @@ def test_an_ens_cap_that_never_binds_says_so_and_names_the_levers():
     d = res["degenerate"]
     assert set(d["axes"]) == {"ens_cap"}
     text = d["axes"]["ens_cap"]["text"]
-    assert "never bound at any of 2 points" in text
+    assert "was never reached at any of 2 points" in text
     assert "no outages" in text and "value of lost load of 5,000 €/MWh" in text
     assert d["axes"]["ens_cap"]["levers"] == [
         "reserve_margin",
@@ -993,9 +995,9 @@ def test_an_unread_binding_is_said_as_unknown_not_never_bound():
         pts, "reserve_margin", voll=0.0, outage_model=False, reference_co2=None
     )
     assert "Whether the reserve margin bound" in rm["axes"]["reserve_margin"]["text"]
-    assert "never bound" not in d["axes"]["ens_cap"]["text"]
+    assert "never reached" not in d["axes"]["ens_cap"]["text"]
     assert d["axes"]["co2"]["unknown"] is True
-    assert "never bound" not in d["axes"]["co2"]["text"]
+    assert "never reached" not in d["axes"]["co2"]["text"]
 
 
 def test_a_known_binding_beats_an_unread_one():
@@ -1315,7 +1317,7 @@ def test_the_ens_text_with_an_outage_model_does_not_blame_missing_outages():
     )["axes"]["ens_cap"]["text"]
     assert "no outages" not in text
     assert (
-        "never bound at any of 2 points: at a value of lost load of 5,000 €/MWh" in text
+        "was never reached at any of 2 points: at a value of lost load of 5,000 €/MWh" in text
     )
 
 

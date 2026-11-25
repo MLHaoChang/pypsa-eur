@@ -36,6 +36,8 @@ def test_units_follow_the_bus():
         "generators:mystery",
         "lines:l1",
         "generators:gone",
+        "nonsense:gt",
+        "carriers:AC",
     ]
     assert fr.capacity_units(_net(), keys) == {
         "generators:gt": "MW",
@@ -46,6 +48,8 @@ def test_units_follow_the_bus():
         "generators:mystery": None,
         "lines:l1": "MVA",
         "generators:gone": None,
+        "nonsense:gt": None,
+        "carriers:AC": None,
     }
 
 
@@ -55,3 +59,8 @@ def test_the_currency_is_the_finance_inputs():
 
     assert fr._currency(Cfg()) == "GBP"
     assert fr._currency(object()) == "EUR"
+
+    class Odd:
+        finance = {"currency": "EURO"}
+
+    assert fr._currency(Odd()) == "EUR"
