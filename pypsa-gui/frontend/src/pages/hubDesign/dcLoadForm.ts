@@ -67,10 +67,12 @@ export const derivedMw = (c: ComputeDraft, i: number) => {
   const n = asNumber(c.counts[i] ?? ''), kw = asNumber(c.kw), u = asNumber(c.util)
   return n * kw * u / 1000
 }
-/** The mismatch note (muted, not an error), naming both figures; null within 10 %. */
-export function computeMismatch(derived: number, typed: number): string | null {
+/** What the IT load is called beside the derived figure: typed on the single-year form, the build plan's on the staged one. */
+export const itWord = (staged: boolean) => (staged ? { noun: 'planned', wins: 'plan wins' } : { noun: 'typed', wins: 'typed wins' })
+/** The mismatch note (muted, not an error), two plain sentences naming both figures; null within 10 %. */
+export function computeMismatch(derived: number, typed: number, staged = false): string | null {
   if (!(Number.isFinite(derived) && typed > 0) || Math.abs(derived - typed) / typed <= MISMATCH_NOTE_ABOVE) return null
-  return `Compute gives ${derived.toFixed(1)} MW; the typed IT load is ${typed.toFixed(1)} MW and is the one used.`
+  return `Compute gives ${derived.toFixed(1)} MW. The ${itWord(staged).noun} IT load is ${typed.toFixed(1)} MW and is the one used.`
 }
 
 export interface DcDraft {
@@ -142,7 +144,7 @@ export function validateDc(d: DcDraft, templateId: string): Partial<Record<DcFie
   if (computeUsed(d.compute)) {
     const bad = d.compute.counts.some(c => !(asNumber(c) > 0)) || !(asNumber(d.compute.kw) > 0)
       || !(asNumber(d.compute.util) > 0 && asNumber(d.compute.util) <= 1)
-    if (bad) e.compute = `${DC_FIELD_LABEL.compute}: give every accelerator count and the kW above 0, and a utilisation above 0 up to 1, or clear them all`
+    if (bad) e.compute = `${DC_FIELD_LABEL.compute}: give every accelerator count and the kW above 0. Give a utilisation above 0, up to 1. Or clear them all`
   }
   return e
 }

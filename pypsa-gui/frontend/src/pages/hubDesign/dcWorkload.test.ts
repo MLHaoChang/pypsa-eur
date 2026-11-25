@@ -49,7 +49,8 @@ describe('compute block', () => {
   })
   it('notes a mismatch only above 10 %, naming both figures', () => {
     expect(computeMismatch(11, 10)).toBeNull()
-    expect(computeMismatch(11.01, 10)).toMatch(/11\.0 MW.*10\.0 MW/)
+    expect(computeMismatch(11.01, 10)).toBe('Compute gives 11.0 MW. The typed IT load is 10.0 MW and is the one used.')
+    expect(computeMismatch(11.01, 10, true)).toMatch(/The planned IT load is 10\.0 MW/)
     expect(computeMismatch(NaN, 10)).toBeNull()
   })
 })

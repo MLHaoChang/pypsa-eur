@@ -8,7 +8,7 @@ import { useState } from 'react'
 import { dcLoadRefusal, type TemplateCreate } from '../../../hooks/useCreateFromTemplate'
 import {
   ARCH_HINT, BACKUP_HINT, DC_ARCH_OPTIONS, DC_BACKUP_OPTIONS, DC_DEFAULTS, DC_FIELD_LABEL, STAGED_BESS_LINE,
-  ambientSourceText, validateAmbient, UTILISATION_OPTIONS, MIX_FIELDS, derivedMw, computeMismatch, dcFieldOf, dcLoadBody, emptyAmbient, dcRefusalText, initialDcDraft, validateDc,
+  ambientSourceText, validateAmbient, UTILISATION_OPTIONS, MIX_FIELDS, derivedMw, computeMismatch, itWord, dcFieldOf, dcLoadBody, emptyAmbient, dcRefusalText, initialDcDraft, validateDc,
   type DcDraft, type DcField, type DcUtilisation,
 } from '../dcLoadForm'
 import { emptyLocation, locationOf, validateLocation, writeCreatedLocation, type LocationDraft } from '../siteLocation'
@@ -31,6 +31,7 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
   const staged = templateId === 'eh_datacenter_staged'
   const [draft, setDraft] = useState<DcDraft>(() => initialDcDraft(staged))
   const [server, setServer] = useState<{ field: DcField | null; text: string } | null>(null)
+  const [computeOpen, setComputeOpen] = useState(false)
   const [loc, setLoc] = useState<LocationDraft>(emptyLocation)
   const [amb, setAmb] = useState(emptyAmbient)
   const lat = locationOf(loc)?.lat ?? null
@@ -157,10 +158,11 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
         {note('workload')}
       </div>
 
-      <details className="text-[11px]" data-testid="dc-form-compute" open={!!errors.compute || undefined}>
-        <summary className="cursor-pointer text-muted">▸ Derive IT from compute (optional)</summary>
+      <details className="text-[11px]" data-testid="dc-form-compute" open={computeOpen || !!errors.compute || undefined}
+        onToggle={e => setComputeOpen(e.currentTarget.open)}>
+        <summary className="cursor-pointer text-muted">{computeOpen || errors.compute ? '▾' : '▸'} Derive IT from compute (optional)</summary>
         <div className="mt-1 flex flex-col gap-1">
-          <p className="text-muted">The typed IT load always wins; compute is shown beside it and changes nothing in the model.</p>
+          <p className="text-muted">The {itWord(staged).noun} IT load always wins. Compute is shown beside it and changes nothing in the model.</p>
           <div className="flex flex-wrap gap-3">
             <label className="flex flex-col gap-1 font-semibold text-text">kW per accelerator (host share included)
               <input data-testid="dc-form-compute-kw" type="number" step="any" className={`${INPUT} w-24`}
@@ -173,7 +175,7 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
           </div>
           {draft.compute.counts.map((c, i) => {
             const derived = derivedMw(draft.compute, i)
-            const mismatch = computeMismatch(derived, typedMw(i))
+            const mismatch = computeMismatch(derived, typedMw(i), staged)
             return (
               <div key={i} data-testid={`dc-form-compute-phase-${i}`} className="flex flex-wrap items-center gap-2">
                 <label className="flex items-center gap-1.5 font-semibold text-text">Accelerators from {phaseName(i)}
@@ -181,7 +183,7 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
                     value={c} onChange={e => setCount(i, e.target.value)} />
                 </label>
                 <span data-testid={`dc-form-compute-derived-${i}`} className="text-muted">
-                  derived {Number.isFinite(derived) ? derived.toFixed(1) : '–'} MW IT · typed {typedMw(i)} MW IT (typed wins)
+                  derived {Number.isFinite(derived) ? derived.toFixed(1) : '–'} MW IT · {itWord(staged).noun} {typedMw(i)} MW IT ({itWord(staged).wins})
                 </span>
                 {mismatch && <span data-testid={`dc-form-compute-mismatch-${i}`} className="text-warn">{mismatch}</span>}
               </div>
