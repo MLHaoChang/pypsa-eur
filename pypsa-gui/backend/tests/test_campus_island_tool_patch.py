@@ -201,6 +201,8 @@ def test_a_switch_card_shows_each_dropped_field_as_removed_and_each_filled_one(
         rows["units.bess.H_v_s.value"]["new"],
     ) == (None, 4.0)
     assert rows["units.bess.H_v_s.source"]["new"] == "assumed"
+    for changed in ("units.bess.control", "units.bess.H_v_s.value"):  # kept or added
+        assert rows[changed].get("words", {}).get("new") != "removed"
     assert not any(
         f.startswith(("units.bess.droop_pct", "units.bess.pf_rated")) for f in rows
     )  # kept
