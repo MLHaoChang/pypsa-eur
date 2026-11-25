@@ -1327,3 +1327,64 @@ def test_ai_training_wording_is_only_on_the_data_centre_templates(tmp_path, tid)
     d, n = _project(tmp_path, tid)
     text = json.dumps(G.grid_readiness(d, n, PROFILE))
     assert ("AI-training" in text) == (tid in DC_IDS), tid
+
+
+# ── DC 05: the load is named by the stored workload kind ────────────────────
+
+
+def test_an_inference_project_reads_inference_load_not_ai_training(tmp_path):
+    """The words follow ``dc_load.spec.utilisation``, on the rows and as the
+    scorecard's ``load_words`` (what the report reads)."""
+    d, n = _project(tmp_path, "eh_datacenter", dc_load={"utilisation": "inference"})
+    meta = json.loads((d / "eh_template.json").read_text())
+    meta["dc_load"].pop("envelope", None)
+    (d / "eh_template.json").write_text(json.dumps(meta))
+    out = G.grid_readiness(d, n, PROFILE)
+    rows = _rows(out)
+    assert out["load_words"] == "inference load"
+    assert rows["rapid_voltage_change"]["requirement"] == "Rapid voltage change at the PoC on the inference load step"
+    assert rows["ramp_rate"]["note"].startswith("No inference load profile on this project")
+    # The in-hour peak note keeps its training-share uplift (05a/05b), so it is not reworded here.
+    assert not [k for k, r in rows.items() if "AI-training" in json.dumps(r) and not k.startswith("energization_peak:")]
+
+
+def test_an_ai_training_project_keeps_its_words_and_report_key(tmp_path):
+    """Byte-identical to master (504b9b3f): the full RVC row, and no
+    ``load_words`` key, so the report's evidence hash does not move."""
+    d, n = _project(tmp_path, "eh_datacenter", dc_load={"utilisation": "ai_training"})
+    out = G.grid_readiness(d, n, PROFILE)
+    assert "load_words" not in out
+    golden = json.loads((pathlib.Path(__file__).parent / "golden" / "dc05_ai_training_rvc_row.json").read_text())
+    assert json.loads(json.dumps(_rows(out)["rapid_voltage_change"])) == golden
+
+
+def test_an_unreadable_spec_keeps_the_template_words(tmp_path):
+    d, n = _project(tmp_path, "eh_datacenter", dc_load={"utilisation": "inference"})
+    meta = json.loads((d / "eh_template.json").read_text())
+    meta["dc_load"]["spec"]["pue_at_design"] = "not a number"
+    (d / "eh_template.json").write_text(json.dumps(meta))
+    out = G.grid_readiness(d, n, PROFILE)
+    assert "load_words" not in out
+    assert _rows(out)["rapid_voltage_change"]["requirement"].endswith("on the AI-training load step")
+
+
+def test_a_non_dc_template_reports_site_load(tmp_path):
+    d, n = _project(tmp_path, next(t for t in TIDS if t not in DC_IDS))
+    assert G.grid_readiness(d, n, PROFILE)["load_words"] == "site load"
+
+
+def test_each_kind_reads_as_the_workload_select_words():
+    """The scorecard's kind words are the form's Workload labels, lowercased;
+    AI training keeps its hyphenated "AI-training load" (byte-identical) and
+    flat drops the kind, since a flat load has no step of its own."""
+    from typing import get_args
+    import re
+    from models.flex_archetypes import UtilisationKind
+    ts = (pathlib.Path(__file__).resolve().parents[2]
+          / "frontend/src/pages/hubDesign/dcLoadForm.ts").read_text()
+    block = ts.split("export const UTILISATION_OPTIONS")[1].split("]\n")[0]
+    labels = dict(re.findall(r"\['(\w+)', '([^']+)'\]", block))
+    assert sorted(labels) == sorted(get_args(UtilisationKind)) == sorted(G._KIND_WORDS)
+    expected = {k: f"{v.lower()} load" for k, v in labels.items()}
+    expected.update(ai_training="AI-training load", flat="load")
+    assert G._KIND_WORDS == expected

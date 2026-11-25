@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The grid-readiness scorecard names a data-centre project's load by its stored workload kind (for example "inference load"), not always "AI-training load", and carries the wording as `load_words` for the report.

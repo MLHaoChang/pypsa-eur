@@ -702,7 +702,7 @@ def _dc_action(tool):
 # input; every emitted row is here or in `DC_NOT_GATED` (a test pins both, on
 # the shipped template and on a project with sidecars). No wildcard.
 _CAMPUS_RUN = "the campus study, held to the run's grid-code profile"
-_DC_LOAD = "the AI-training load profile stored at project creation (no run)"
+_DC_LOAD = "the data-centre load profile stored at project creation (no run)"
 _ISLAND = "the island study (island_config.json, island_study.json; no run here)"
 DC_SCORECARD = (
     ("scr", "block", "The short-circuit ratio at the PoC meets the profile's minimum.",

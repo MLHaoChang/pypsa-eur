@@ -1,0 +1,56 @@
+{
+ "id": "rapid_voltage_change",
+ "requirement": "Rapid voltage change at the PoC on the AI-training load step",
+ "limit": 3.0,
+ "unit": "% of nominal",
+ "source": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe: not set by RfG/DCC; IEC TR 61000-3-7 indicative planning levels for infrequent rapid voltage changes at HV/EHV are about 3-5 % (not verified against the text here); 3 % used",
+ "project_value": 3.1782,
+ "verdict": "warn",
+ "assumed": true,
+ "note": "Voltage change on the voltage form (cos ψ·ΔP + sin ψ·ΔQ)/S_k, ψ = atan(X/R), IEC TR 61000-3-7: ΔP 23.4 MW, ΔQ 2.34 Mvar (tan φ_swing 0.1 from the envelope), X/R 4 (assumed; typical grid X/R, replace with the network operator's value) gives 3.178 %; the X/R-free bound √(ΔP² + ΔQ²)/S_k is 9.407 %; for reference the P-only ΔS/S_k = 23.4 MW / 250 MVA = 9.36 %; S_k is the entered S_k'' with the IEC 60909 c factor, so d may be understated by up to 1.1; above the limit a power-flow or EMT study is needed; the AI-training load is read at the point of connection before any UPS or battery smoothing, so the verdict is before mitigation, not final",
+ "section": "connection",
+ "target": {
+  "section": "connection",
+  "panel": null,
+  "component": "Bus",
+  "entity": "grid",
+  "field": "eh_sk_mva"
+ },
+ "rule": {
+  "comparator": "<=",
+  "otherwise": "warn",
+  "tolerance": 1e-09
+ },
+ "xr_assumed": true,
+ "voltage_form_pct": 3.1782,
+ "xr_free_bound_pct": 9.4067,
+ "after_battery": {
+  "value": 0.9081,
+  "verdict": "pass",
+  "rule": {
+   "comparator": "<=",
+   "otherwise": "warn",
+   "tolerance": 1e-09
+  },
+  "units": [
+   "ups_battery"
+  ],
+  "unit_detail": [
+   {
+    "unit": "ups_battery",
+    "kind": "ups",
+    "latency_s": null,
+    "walk_in_s": 15.0,
+    "basis": "UPS, walks in over 15 s",
+    "target": {
+     "section": "assets",
+     "panel": null,
+     "component": "StorageUnit",
+     "entity": "ups_battery",
+     "field": null
+    }
+   }
+  ],
+  "note": "2030: of the 23.4 MW step, batteries hold 0 MW to the 4 MW/min limit; the UPS walks 23.4 MW in over 15 s (93.6 MW/min); the uncovered part (0 MW) is counted at the envelope's rate, conservatively, and a 0 MW oscillation remains; short by the smoothing screen: a 23.4 MW step through the 4 MW/min limit takes 5.85 min and 1.14 MWh each way; oscillation 3.4 MW above the limit, 0.0006 MWh of swing; need 26.8 MW / 2.28 MWh against 40 MW / 3.75 MWh left after backup; UPS ups_battery: 5.75 MWh kept to bridge 34.5 MW for 600 s; 'ups_battery' walks in over 15 s (UPS, assumed); closed form on the envelope's phases, blind to in-hour ramps beyond them; energies as delivered, charging losses not added; the UPS carries 23.4 MW of the step and walks it onto the grid over 15 s, 93.6 MW/min, above the 4 MW/min limit; bess_new sized by the run, not counted"
+ }
+}

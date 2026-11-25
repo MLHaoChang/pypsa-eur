@@ -347,8 +347,9 @@ def grid_readiness_disclosures(payload: dict) -> list[str]:
     if payload.get("envelope"):
         words = payload.get("load_words") or "AI-training load"
         backup = "BESS" if words == "site load" else "UPS/BESS"   # no UPS on a non-data-centre site
+        side = "load-side" if words == "site load" else "IT-side"  # IT is data-centre wording
         out.append(f"{head} — the ramp, oscillation and voltage-change rows read the {words} "
-                   f"envelope IT-side at the point of connection, before {backup} smoothing: before "
+                   f"envelope {side} at the point of connection, before {backup} smoothing: before "
                    "mitigation, not final.")
     if any("after_battery" in r for r in payload["rows"]):
         out.append(f"{head} — {s.get('pass_after_mitigation', 0)} of {s.get('red_flags', 0)} red flag(s) "
