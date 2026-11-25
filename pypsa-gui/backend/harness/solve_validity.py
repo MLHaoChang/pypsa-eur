@@ -74,18 +74,86 @@ def is_stochastic(n) -> bool:
     return bool(getattr(n, "has_scenarios", False))
 
 
+# assistant-assurance 18: what the solve call actually applied, sealed in
+# `network.meta` next to the input fingerprints by `solver_service`. A run
+# sealed before this record keeps the reconstruction mirror below.
+APPLIED_KEY = "assistant_solve_applied"
+_RECORD_VERSION = 1
+_UC_MODES = (None, "linearised", "binary", "plain")
+# A record that is present but unreadable: the reads fail closed (an integer
+# solve with no recorded gap), never back onto the mirror.
+MALFORMED = object()
+
+
+def _option(value):
+    """`value` as a JSON-safe scalar for the record, or `None` to leave it out."""
+    if isinstance(value, (bool, str)):
+        return value
+    if isinstance(value, int):
+        return int(value)
+    if isinstance(value, Real) and math.isfinite(float(value)):
+        return float(value)
+    return None
+
+
+def applied_record(solver_name, solver_options, uc_kwargs, process_uc_mode) -> dict:
+    """The record `solver_service` seals for one solve: the solver, the options
+    dict it passed (scalar values only, so it survives the NetCDF meta), whether
+    `linearized_unit_commitment` was passed (process units, or the island's
+    linearised UC on the full path), and the process-UC mode the plan used."""
+    options = {}
+    for key, value in (solver_options or {}).items():
+        kept = _option(value)
+        if isinstance(key, str) and kept is not None:
+            options[key] = kept
+    return {
+        "v": _RECORD_VERSION,
+        "solver": solver_name,
+        "options": options,
+        "linearized_unit_commitment": bool((uc_kwargs or {}).get("linearized_unit_commitment")),
+        "process_uc_mode": process_uc_mode,
+    }
+
+
+def applied_record_of(n):
+    """The sealed record, `None` for a run sealed before it, or `MALFORMED`."""
+    meta = getattr(n, "meta", None)
+    if not isinstance(meta, dict) or APPLIED_KEY not in meta:
+        return None
+    rec = meta[APPLIED_KEY]
+    if (
+        not isinstance(rec, dict)
+        or rec.get("v") != _RECORD_VERSION
+        or not isinstance(rec.get("solver"), str)
+        or not isinstance(rec.get("options"), dict)
+        or not isinstance(rec.get("linearized_unit_commitment"), bool)
+        or rec.get("process_uc_mode") not in _UC_MODES
+    ):
+        return MALFORMED
+    return rec
+
+
 def _integer_commitment(n, config) -> bool:
     """Committable units the solve kept binary, under the effective process-UC
-    mode (`process_uc.planning_uc_mode`, the one solver_service applies):
+    mode: the one the solve recorded (`applied_record_of`), else the mirror of
+    `process_uc.planning_uc_mode` for a run sealed before the record.
     "linearised" relaxes commitment network-wide, so the solve is an LP; "plain"
     solves the process units as plain Links, leaving only the other committable
-    units binary."""
+    units binary. A malformed record keeps every committable unit binary."""
     if not _committable(n):
         return False
-    setting = SimpleNamespace(process_uc=_field(config, "process_uc", "auto"))
-    mode = planning_uc_mode(n, setting)
-    if mode == "linearised":
-        return False
+    rec = applied_record_of(n)
+    if rec is MALFORMED:
+        return True
+    if rec is not None:
+        if rec["linearized_unit_commitment"]:
+            return False
+        mode = rec["process_uc_mode"]
+    else:
+        setting = SimpleNamespace(process_uc=_field(config, "process_uc", "auto"))
+        mode = planning_uc_mode(n, setting)
+        if mode == "linearised":
+            return False
     if mode == "plain":
         return bool(sum(other_committable(n)))
     return True
@@ -108,11 +176,18 @@ def applied_gap(n, config) -> float | None:
     configured `mip_gap` is added under the solver's key only when a Generator
     or Link is committable (a user-set key wins). `None` means no gap reached
     the solver, so its own default applied and nothing records it.
+
+    A run sealed with `applied_record_of` is read from that record (the options
+    the solve call passed); the mirror above serves only runs sealed before it.
     """
+    rec = applied_record_of(n)
+    if rec is MALFORMED:
+        return None
+    if rec is not None:
+        return _gap_in(rec["solver"], rec["options"])
     solver = _field(config, "solver_name")
     if not isinstance(solver, str) or solver.lower() not in _MIP_KEYS_BY_SOLVER:
         return None
-    gap_key = _MIP_KEYS_BY_SOLVER[solver.lower()][0]
     options = _field(config, "solver_options") or {}
     if not isinstance(options, dict):
         return None
@@ -121,7 +196,14 @@ def applied_gap(n, config) -> float | None:
         if mip_gap is None:
             return None
         options = _resolve_mip_kwargs(solver, mip_gap, 0, options)
-    value = options.get(gap_key)
+    return _gap_in(solver, options)
+
+
+def _gap_in(solver, options) -> float | None:
+    """The relative gap under `solver`'s own key in `options`, or `None`."""
+    if solver.lower() not in _MIP_KEYS_BY_SOLVER:
+        return None
+    value = options.get(_MIP_KEYS_BY_SOLVER[solver.lower()][0])
     if isinstance(value, bool) or not isinstance(value, Real):
         return None
     value = float(value)

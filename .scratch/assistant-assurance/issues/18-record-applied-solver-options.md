@@ -3,7 +3,7 @@
 
 # Record the solver options actually applied at the solve call
 
-Status: ready-for-agent
+Status: done
 Type: task
 Found by: GK B (65) on #1680 (issue 10, S2), point (c).
 
