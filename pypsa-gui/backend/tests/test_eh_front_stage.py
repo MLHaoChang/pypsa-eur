@@ -627,3 +627,44 @@ def test_a_network_swap_clears_eh_front():
     PyPSAService.get_active_context().solver_state["eh_front"] = {"points": []}
     PyPSAService.reset_network()
     assert PyPSAService.get_active_context().solver_state.get("eh_front") is None
+
+
+@pytest.mark.live_solve
+def test_the_stage_with_the_co2_goal_on_solves_every_point(monkeypatch):
+    # DC review 02 C6 at the stage (DC 01 landed second): the session's CO2
+    # limit goal reaches the stage's config, yet no front point carries a goal
+    # cap row, so none is refused as a duplicate of the front's own cap.
+    from services.solver import co2_cap
+
+    limits = []
+    real_apply = co2_cap.apply
+
+    def spy(n, cfg, phase, captured):
+        limits.append(cfg.co2_limit_t_per_yr)
+        return real_apply(n, cfg, phase, captured)
+
+    seen_cfg = {}
+    real_front = fr.run_front_study
+
+    def front_spy(n, lock, cfg, **kw):
+        seen_cfg["limit"] = cfg.co2_limit_t_per_yr
+        limits.clear()
+        return real_front(n, lock, cfg, **kw)
+
+    monkeypatch.setattr(co2_cap, "apply", spy)
+    monkeypatch.setattr(fr, "run_front_study", front_spy)
+    store: dict = {}
+    report = _run(
+        certifiable_weak_network(),
+        _pack(10.0, ladder=(2.0, 1.0)),
+        stages=FRONT,
+        budget=3,
+        store=store,
+        cfg=SolverConfig(voll=VOLL, co2_limit_t_per_yr=1e9),
+        mc_draws=5,
+    )
+    rec = _record(report)
+    assert rec.status == "run", rec.note
+    assert seen_cfg["limit"] == 1e9
+    assert limits and limits == [None] * len(limits)
+    assert [p["status"] for p in store["eh_front"]["points"]] == ["ok", "ok"]
