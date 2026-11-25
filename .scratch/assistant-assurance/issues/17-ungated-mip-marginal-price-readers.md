@@ -3,7 +3,7 @@
 
 # Readers outside checked answers still show a MIP's 0.0 bus prices
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-25: slice 1 (#1957) and slice 2a economics (#1970) merged; left: slice 2b (Results prices and price_drivers, asset_results price_at_bus, results_workbook views, study workbook_view, Compare UI flags, headline KPIs, S7 solved_price_limit in price_calculations)
 Type: bug
 Found by: GK B (65) on #1680 (issue 10, S2).
 
@@ -104,3 +104,7 @@ Follow-up: `27-study-report-lp-flags-untested.md`. These are the LP-path flags i
 GK B2 on #1970 (2a), non-blocking edges, recorded:
 - A MIP study run recorded before #1970, with no `price_limit` key in its stored asset economics, still shows its stored 0.0 market rows through `engine_adapter._econ_rows`. It is the same known edge accepted in slice 1 (A4): a stored record is not re-judged.
 - The scenario workbook (`results_workbook/overview.py:136`, `views_network.py:176`) still calls `compute_economics_by_carrier` without the limit. It is deferred to 2b by the coordinator's ruling (after template-e2e 30, #1963) and is a 2b condition (S3).
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: #1957 and #1970 merged (GitHub merge commits on master); services/results/prices.py, results_workbook/views_network.py and overview.py carry no price_limit gate, harness/price_calculations.py still classifies with today's config.

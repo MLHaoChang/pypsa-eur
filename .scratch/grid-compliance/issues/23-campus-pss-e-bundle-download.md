@@ -3,7 +3,7 @@
 
 # 23 The campus study writes a PSS/E hand-off bundle, but the app offers no download
 
-Status: ready-for-agent
+Status: done
 Blocked by: none (sibling: 09 item 6 owns the DGS download, and 04c owns the bundle's contents)
 Source: gap review 2026-11-21 (`.scratch/gap-review-2026-11-21/README.md`), walk W3.
 Model: sonnet. Review: GK A (bundle seam) + UX.
@@ -28,3 +28,5 @@ The grid-compliance journey ends with "hand the case to the TSO's PSS/E": the ap
 `pypsa-gui/backend/services/campus_electrical_service.py`, `pypsa-gui/backend/routers/campus_electrical.py`, `pypsa-gui/frontend/src/pages/CampusElectricalPanel.tsx`, `gridspine/handoff/campus_bundle.py` (read only), a `golden_route_surfaces.d` / `route_chat_disposition.d` fragment.
 
 ## Comments
+
+Premise changed (2026-11-24, builder; coordinator decision, option A): no code called `cs.psse_campus` in the app's study, so no bundles were written. The scope became "write and serve": a `psse` step inside the cuts stage of the campus Run (`campus_electrical_service._psse_bundles`, outcome in `psse_status.json`; `ContractError`/`OSError` recorded, any other error fails the study as before), `GET /api/campus-electrical/{name}/psse` and `GET .../psse/{bundle}.zip` (a stale run's zip carries `X-Run-Stale: true`), and the "PSS/E case" section.

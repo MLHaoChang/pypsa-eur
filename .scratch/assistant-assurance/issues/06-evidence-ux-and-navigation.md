@@ -3,7 +3,7 @@
 
 # P5: evidence navigation and honest process UI
 
-Status: ready-for-agent; audit 2026-11-19: evidence card merged (#119); left: browser, device and accessibility journeys, A5.1-A5.5 ACK/stale rules
+Status: needs-triage; audit 2026-11-25: the cited '#119' is truncated and could not be matched to a PR; evidence card and /ui-ack exist in code (services ui-ack, harness/navigation.py) but A5.1-A5.5 were not checked case by case
 Progress: Evidence card and navigation ACKs shipped; complete browser, device and accessibility journeys pending
 Type: task
 Blocked by: 03, 04, 05; live-voice issues 03/06 for exact historical UI
@@ -76,3 +76,7 @@ Global deployment remains disabled and this whole phase issue stays open.
 ### 2026-11-04 — displayed-data revision proof moved here from 02
 
 Owner decision AA02-SCOPE-1 moves the "displayed-data revision proof" from [02](02-evidence-identity-and-access.md) to this issue (A5.2), with live-copilot LC-03 building the per-family adapters. Today the v2 `/ui-ack` `source_binding` re-reads the load-flow view and records `verification: browser_displayed_data`. Every other result family ACKs as `browser_mounted_view`, which is not numerical proof of what was shown.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: checked master for ui-ack and navigation code only; no PR number resolvable, so no done or partial claim.

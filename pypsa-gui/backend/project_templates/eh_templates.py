@@ -136,6 +136,36 @@ def _price(n, component: str, name: str, technology: str) -> None:
 # ── Data Center Energy Hub (weak_flexible) ─────────────────────────────────
 
 
+#: Grid carbon intensity of the supply (t CO2 per MWh el) by period. Assumed, not
+#: sourced: a flat 0.35 t/MWh as the template always carried, declining across the
+#: staged plan's periods; a period not listed reads ``DC_GRID_CO2_DEFAULT``.
+DC_GRID_CO2_DEFAULT = 0.35
+DC_GRID_CO2_T_PER_MWH = {2027: 0.35, 2030: 0.30, 2035: 0.22}
+_GRID_CO2_ATTR = "eh_co2_t_per_mwh"
+
+
+def _genset_efficiency(load_spec) -> float:
+    """Electric efficiency of a gas genset = 1 / heat rate (MWh fuel per MWh el).
+    The heat rate is the load spec's first genset entry, else the defaults pack's
+    ``gas-genset.investment.efficiency`` (the row the candidates are priced from
+    and the backup costing reads, ``services.adequacy.dc_backup``), else the
+    ``GensetSpec`` default (assumed). The carrier's ``co2_emissions`` is per MWh
+    of fuel, so t/MWh_el = intensity x heat rate; the marginal cost stays per MWh
+    el (PyPSA prices the output)."""
+    from models.flex_archetypes import GensetSpec
+    from services.adequacy.dc_backup import EFFICIENCY_KEY
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    gensets = getattr(load_spec, "gensets", None)
+    if gensets:
+        return 1.0 / gensets[0].heat_rate_mwh_fuel_per_mwh_el
+    row = next((r for r in load_defaults_pack(TEMPLATE_PACK_VERSION).cost_values
+                if r.key == EFFICIENCY_KEY), None)
+    if row is not None and row.value:
+        return float(row.value)
+    return 1.0 / GensetSpec.model_fields["heat_rate_mwh_fuel_per_mwh_el"].default
+
+
 def build_eh_datacenter(phases=None, load_spec=None, planning=None) -> pypsa.Network:
     """A 50 MW hyperscale campus behind a weak, capped grid connection.
 
@@ -187,7 +217,7 @@ def build_eh_datacenter(phases=None, load_spec=None, planning=None) -> pypsa.Net
     for i in range(1, 5):
         g = f"genset_{i}"
         n.add("Generator", g, bus="dc_mv", carrier="gas", p_nom=10.0,
-              marginal_cost=165.0)
+              marginal_cost=165.0, efficiency=_genset_efficiency(load_spec))
         _outage(n, "generators", g, 0.03, 24.0)
     n.add("Generator", "rooftop_pv", bus="dc_mv", carrier="solar", p_nom=4.0,
           marginal_cost=0.0)
@@ -202,7 +232,8 @@ def build_eh_datacenter(phases=None, load_spec=None, planning=None) -> pypsa.Net
 
     # Candidates the ENS-capped expansion may build, priced from the pack.
     n.add("Generator", "genset_new", bus="dc_mv", carrier="gas", p_nom=0.0,
-          p_nom_extendable=True, p_nom_max=40.0, marginal_cost=165.0)
+          p_nom_extendable=True, p_nom_max=40.0, marginal_cost=165.0,
+          efficiency=_genset_efficiency(load_spec))
     _price(n, "generators", "genset_new", "gas-genset")
     _outage(n, "generators", "genset_new", 0.03, 24.0)
     n.add("StorageUnit", "bess_new", bus="it_bus", carrier="battery",
@@ -581,6 +612,10 @@ def _staged_datacenter(n: pypsa.Network, plan: _DcPlan, load_spec=None) -> pypsa
     n.links_t["eh_energization_mw"] = pd.DataFrame(
         {"grid_import": np.repeat([plan.energization[y] for y in years], len(SNAPSHOTS))},
         index=snaps)
+    n.generators_t[_GRID_CO2_ATTR] = pd.DataFrame(
+        {"grid_supply": np.repeat(
+            [DC_GRID_CO2_T_PER_MWH.get(y, DC_GRID_CO2_DEFAULT) for y in years], len(SNAPSHOTS))},
+        index=snaps)
     n.remove("Generator", "genset_new")
     n.remove("StorageUnit", "bess_new")
     n.links.at["grid_import", "p_nom"] = _DC_POC_MW
@@ -602,7 +637,8 @@ def _staged_datacenter(n: pypsa.Network, plan: _DcPlan, load_spec=None) -> pypsa
     for y in years:
         g, b = f"genset_new_{y}", f"bess_new_{y}"
         n.add("Generator", g, bus="dc_mv", carrier="gas", p_nom=0.0, p_nom_extendable=True,
-              p_nom_max=40.0, marginal_cost=165.0, build_year=y)
+              p_nom_max=40.0, marginal_cost=165.0, build_year=y,
+              efficiency=_genset_efficiency(load_spec))
         _price(n, "generators", g, "gas-genset")
         _outage(n, "generators", g, 0.03, 24.0)
         n.add("StorageUnit", b, bus="it_bus", carrier="battery", p_nom=0.0, p_nom_extendable=True,
@@ -671,6 +707,28 @@ def _apply_dc_profile(n, spec, snapshots, it_mw: float, *, timezone, period=None
     p_set.loc[rows, "cooling"] = (1.0 - spec.critical_share) * facility
 
 
+def _apply_ambient_source(merged: dict, raw: dict) -> None:
+    """Fill the ambient fields the body does not state from the site latitude's
+    climate zone, and record which it stated and where the rest came from.
+    The latitude is checked here (a string or a boolean is refused, not coerced)."""
+    from services.dc_load_profile import AMBIENT_FIELDS, DcLoadError, climate_preset
+
+    lat = raw.get("site_latitude")
+    if lat is not None:
+        if (isinstance(lat, bool) or not isinstance(lat, (int, float))
+                or not math.isfinite(lat) or not -90 <= lat <= 90):
+            raise DcLoadError("dc_load.site_latitude: must be a number from -90 to 90",
+                              "dc_load.site_latitude")
+        merged["site_latitude"] = float(lat)
+        for k, v in climate_preset(lat).items():
+            if k != "zone" and k not in raw:
+                merged[k] = v
+    entered = [k for k in AMBIENT_FIELDS if k in raw]
+    merged["ambient_entered"] = entered
+    merged["ambient_source"] = ("entered" if len(entered) == len(AMBIENT_FIELDS)
+                                else "site_location" if lat is not None else "default")
+
+
 def dc_load_spec(template_id: str, raw: dict | None, planning: Planning | None = None):
     """The checked opt-in spec from a create body's ``dc_load`` (merged over
     ``dc_load_preset``), or ``DcLoadError`` naming the field. The staged
@@ -683,6 +741,7 @@ def dc_load_spec(template_id: str, raw: dict | None, planning: Planning | None =
     if not isinstance(raw, dict):
         raise DcLoadError("dc_load: must be an object", "dc_load")
     merged = {**dc_load_preset(template_id, planning), **raw}
+    _apply_ambient_source(merged, raw)
     merged.setdefault("ai_workload", None)
     if merged["ai_workload"] is None:
         merged["ai_workload"] = {}
@@ -1326,6 +1385,13 @@ def _dc_staged_meta(plan: _DcPlan, load_spec=None) -> dict:
                      "models one July week, so a monthly item would be billed for one month); "
                      "replace with the site's tariff; synthetic, illustrative; no money year of "
                      "its own; read in the case's money (2025)"},
+            {"item": "grid carbon intensity",
+             "value": ", ".join(f"{y}: {DC_GRID_CO2_T_PER_MWH.get(y, DC_GRID_CO2_DEFAULT):g}"
+                                for y, _it, _pue in plan.phases) + " t CO2/MWh el",
+             "source": "assumed",
+             "note": "one figure per period, not a measured grid mix; the Emissions view "
+                     "counts grid imports at it. Gas gensets emit at the carrier's 0.20 t/MWh "
+                     "of fuel times the heat rate (the load spec's, else the pack's gas-genset efficiency)"},
             {"item": "tariff clock", "value": "UTC",
              "source": "assumed",
              "note": "the representative week's hours are the site clock; stating them as UTC "

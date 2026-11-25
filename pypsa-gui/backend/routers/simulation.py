@@ -1997,11 +1997,19 @@ def get_status():
     if dispatch != "none":
         stamp = (getattr(network, "meta", None) or {}).get("assistant_solve_at")
         solved_at = stamp if isinstance(stamp, str) else None
+    objective = s["objective"]
+    if dispatch == "none":
+        # A finished Guided study's own solve is the latest run (template-e2e 30).
+        from services import study_solve
+
+        held = study_solve.fallback()
+        if held is not None:
+            dispatch, objective = "fresh", held["objective"]
     return {
         "running": s["status"] == "running",
         "status": s["status"],
         "condition": s["condition"],
-        "objective": s["objective"],
+        "objective": objective,
         "solve_time": s["solve_time"],
         # Actionable failure card for the last finished solve (None on
         # success/abort or before any run). Lets a late poll / reload surface

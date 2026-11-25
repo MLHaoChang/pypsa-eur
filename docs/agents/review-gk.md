@@ -405,3 +405,14 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A config that cannot be read never falls back to defaults where the defaults would show an unjudged value. It fails closed with its own reason (GK B2 (5), AA-17 A2; #1079 and #1009 applied).
 - A total over parts where any part is withheld reads not available, or is labelled as excluding that part. Test it with a mixed case, and mutate each sum helper (GK B2 (5), AA-17 S1; #1970 F1).
 - When the backend already words a flag into rendered notes, the frontend skips that flag and does not word it a second time. Pin it with a writer→reader contract test (GK B2 (5), #1935 F1).
+
+## Standing rulings (GK A (35), recorded 2026-11-24)
+
+- A pre-run gate that predicts Monte Carlo resolution judges at the draws the MC can actually reach (mc_adequacy runs adaptively to MAX_DRAWS unless max_draws is pinned), never the requested count. A comparison across points pins max_draws=draws (GK A (35), #1927, DRAW-FLOOR-1).
+
+## Standing rulings (GK A (36), recorded 2026-11-25)
+
+- A reader that filters a ratings/duty table on NaN must flag the bus or row as partly evaluated, naming what was skipped. Flags are joined, never one hiding another (#1980).
+- An emissions override per MWh of electric output wins over a fuel-curve slope on every CO2 surface, the LP price included. The slope or the carrier only fills snapshots with no override, and the no-load fuel stays at the carrier figure (#1965).
+- A switchgear short-time check refers Ith over Tk to the rated Tkr: Ith·√(max(Tk,Tkr)/Tkr) ≤ Ithr. A cable withstand uses Ith over the clearing time, never Ik''·√t (#1980).
+- A solve result is judged on the termination condition, never the status alone, and a study that judges the LP forces the AC PF stage off (#1979).

@@ -1,0 +1,21 @@
+{
+ "entries": [
+  {
+   "id": "equipment_schedule",
+   "title": "Electrical equipment schedule",
+   "disposition": "unbuilt",
+   "reason": "The equipment schedule (ratings of transformers, switchgear and cables) is not in chat yet; Campus electrical runs the Grid study that fills it, and Results Hand-off will show it.",
+   "page": "Campus electrical (Grid study) and Results Hand-off",
+   "panel": null,
+   "keywords": [
+    "schedule",
+    "switchgear",
+    "cable"
+   ],
+   "routes": [
+    ["GET", "/api/campus-electrical/{name}/equipment-schedule"],
+    ["GET", "/api/campus-electrical/{name}/equipment-schedule.xlsx"]
+   ]
+  }
+ ]
+}

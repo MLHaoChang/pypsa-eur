@@ -1,0 +1,1 @@
+* Chore(coord): `scripts/coord/premerge.sh` now waits until every workflow run on the PR head has completed (and the main Test workflow has started), and blocks when a GK or UX OK is missing or stale for a PR whose files need that review; `PREMERGE_WAIVE` records a deliberate waiver.

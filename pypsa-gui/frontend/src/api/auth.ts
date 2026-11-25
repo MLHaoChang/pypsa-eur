@@ -18,6 +18,22 @@ export interface OrgMember {
   role: 'admin' | 'member' | null
 }
 
+export interface AccountWorkspace {
+  org_id: string
+  name: string
+  role: 'admin' | 'member'
+}
+
+export interface AccountInfo {
+  email: string
+  workspaces: AccountWorkspace[]
+}
+
+export interface ChangePasswordPayload {
+  current_password: string
+  new_password: string
+}
+
 export interface LoginPayload {
   email: string
   password: string
@@ -60,6 +76,10 @@ export const authApi = {
     client.get<AuthUser>('/auth/me', quietAuthRequest).then(r => r.data),
   orgMembers: () =>
     client.get<OrgMember[]>('/auth/org-members').then(r => r.data),
+  account: () =>
+    client.get<AccountInfo>('/auth/account', quietAuthRequest).then(r => r.data),
+  changePassword: (payload: ChangePasswordPayload) =>
+    client.post<OkResponse>('/auth/change-password', payload, quietAuthRequest).then(r => r.data),
   forgotPassword,
   forgot: forgotPassword,
   setPassword: (payload: PasswordTokenPayload) =>

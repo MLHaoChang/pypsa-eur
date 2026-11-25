@@ -3,7 +3,7 @@
 
 # 05 — Raw parameter, option and internal names shown to the user (RAW-NAMES-1)
 
-Status: ready-for-agent; audit 2026-11-19: Set-in-Expert lines in plain words merged (#1631); left: raw ids in eh_concentrator.py, campusElectrical.ts, CampusIslandCutsSection.tsx, ipp_da
+Status: ready-for-agent; audit 2026-11-25: #1631, #1738 merged (plain names for load-profile fields, control modes, Set-in-Expert lines); left: raw ids still allow-listed in uiCopyGuard.allow.json, template-wide snake_case scan test
 Owner: expert-catalogue slices 01/02 (lead session_01G7qCuo4TtQpLUWDE5GKpny)
 Size: M
 Gated: UX
@@ -51,3 +51,7 @@ Waiting on other PRs / later slices:
 - 2026-11-21, expert-catalogue 02c: the raw-name guard (`uiCopyGuard.test.ts`) now scans every `.ts`/`.tsx` under `src/` for catalogue model names, template component ids and Library ids. One allow row names this issue: `layout/properties/cardKit.tsx` `grid_import` (the Energy Hub role tip; the role dropdown still lists raw role ids, `EH_LINK_ROLES`). Ids built at run time (asset names from the network) are not seen by a source scan.
 
 - 2026-11-23 status sweep: landed in #1738 (6c32315c); #1631 (f713f49a): plain names for load-profile fields, island control modes, price-series picker, "Set in Expert" lines. Remains: raw ids still allow-listed in uiCopyGuard.test.ts and the template-wide snake_case scan test.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: PR merge state checked against origin/master log; acceptance items grepped on master code.

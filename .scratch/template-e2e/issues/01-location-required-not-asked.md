@@ -3,7 +3,7 @@
 
 # 01 — Location is a required input, but no template asks for it and Run does not wait for it
 
-Status: ready-for-agent
+Status: ready-for-agent; audit 2026-11-25: #1802 merged (create forms ask for location); left: run gate and Section 1 incomplete state (site_location_missing is still a warning, flow_service.py:1237), Q1 and anchor-clears-item items
 Owner: builder session_01G7qCumsdzuVnJQAD41wFxk (after #1586/#1594)
 Size: S
 Gated: UX; GK B (run gate)
@@ -38,3 +38,7 @@ Design §2.3 marks location **R** for every template. In the app (verified 2026-
   - [ ] End to end in the real app: DC staged › section 1 › Open here › confirm coordinates → the item disappears, section 1 turns complete, and Run's note list no longer names the location.
 
 - 2026-11-23 status sweep: landed in #1802 (b257639a): create forms now ask for location. Remains: the run gate (site_location_missing is still only a warning) and the Section 1 incomplete state.
+
+## Audit (2026-11-25)
+
+- 2026-11-25 audit: PR merge state checked against origin/master log; acceptance items grepped on master code.

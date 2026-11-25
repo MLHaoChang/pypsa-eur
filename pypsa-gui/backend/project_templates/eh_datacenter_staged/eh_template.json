@@ -57,6 +57,12 @@
       "value": "dc_network_tariff_synthetic: network energy charge 35 EUR/MWh 08-20 h, 20 EUR/MWh otherwise"
     },
     {
+      "item": "grid carbon intensity",
+      "note": "one figure per period, not a measured grid mix; the Emissions view counts grid imports at it. Gas gensets emit at the carrier's 0.20 t/MWh of fuel times the heat rate (the load spec's, else the pack's gas-genset efficiency)",
+      "source": "assumed",
+      "value": "2027: 0.35, 2030: 0.3, 2035: 0.22 t CO2/MWh el"
+    },
+    {
       "item": "tariff clock",
       "note": "the representative week's hours are the site clock; stating them as UTC reads each tariff window on the snapshot hour as is",
       "source": "assumed",
