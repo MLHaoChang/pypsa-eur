@@ -78,8 +78,10 @@ def test_the_envelope_disclosure_names_the_load_the_scorecard_names():
     site = " ".join(_collect(grid_readiness={**_scorecard(), "load_words": "site load"}).required_disclosures)
     assert "read the site load envelope" in site and "before BESS smoothing" in site
     assert "UPS" not in site.split("the ramp, oscillation")[1].split("mitigation")[0]
+    assert "envelope load-side at the point" in site and "IT-side" not in site
     plain = " ".join(_collect(grid_readiness=_scorecard()).required_disclosures)
     assert "read the AI-training load envelope" in plain      # no key: the report as it was
+    assert "envelope IT-side at the point" in plain and "envelope IT-side at the point" in text
 
 
 def test_an_unreadable_scorecard_is_a_not_established_chapter():

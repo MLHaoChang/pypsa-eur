@@ -20,3 +20,5 @@ The scorecard renders a row's note as separate sentences, each ending in a
 full stop, for every template and workload kind at once (not per kind, so the
 AI-training wording does not drift from the rest). Check the report chapter
 and the copilot, which read the same notes, and any evidence hash that moves.
+
+Also (UX nit, pre-existing): the after-mitigation label reads `After UPS "UPS battery"`; it should read "After the UPS battery".
