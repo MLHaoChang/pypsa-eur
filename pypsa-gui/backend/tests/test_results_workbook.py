@@ -349,7 +349,7 @@ def test_round_trip_and_libreoffice_recalculates(solved, tmp_path):
 
 # ── the route ─────────────────────────────────────────────────────────────
 
-def test_route_says_no_run_yet_before_a_solve(client, install_network):
+def test_route_says_not_run_yet_before_a_solve(client, install_network):
     n = pypsa.Network()
     n.add("Bus", "A")
     install_network(n)
@@ -357,7 +357,7 @@ def test_route_says_no_run_yet_before_a_solve(client, install_network):
     assert r.status_code == 409
     d = r.json()["detail"]
     assert d["error_kind"] == "results_workbook_no_run"
-    assert d["message"] == "No run yet: run the study or Run LOPF."
+    assert d["message"] == "Not run yet: nothing has been solved."
 
 
 def test_route_refuses_a_stale_run_and_exports_the_stored_one_on_request(client, install_network):
@@ -500,3 +500,35 @@ def test_about_carries_the_study_verdict_line(client, install_network, monkeypat
     monkeypatch.setattr(eh_review, "review_latest", lambda *a, **k: {"status": "no_data"})
     about = {row[0].value: row[1].value for row in _wb(client.get(URL).content)["About"].iter_rows()}
     assert "Verdict" not in about
+
+def test_route_calls_a_kept_run_after_an_edit_out_of_date_not_unrun(client, install_network, monkeypatch):
+    import services.provenance_graph.runs as runs
+
+    n = pypsa.Network()
+    n.add("Bus", "A")
+    install_network(n)
+    monkeypatch.setattr(runs, "kept_run_stale", lambda ctx=None: True)
+    r = client.get(URL)
+    assert r.status_code == 409 and r.json()["detail"]["error_kind"] == "results_workbook_stale"
+
+
+def test_route_calls_a_shape_stale_dispatch_out_of_date_not_unrun(client, install_network):
+    n = _network()
+    n.add("Generator", "added_after_the_solve", bus=n.buses.index[0], p_nom=1.0)
+    install_network(n)
+    r = client.get(URL)
+    assert r.status_code == 409 and r.json()["detail"]["error_kind"] == "results_workbook_stale"
+
+
+def test_chat_tool_keeps_the_stale_kind_for_a_kept_run(install_network, monkeypatch):
+    from fastapi import HTTPException
+    import services.chat_tools as T
+    import services.provenance_graph.runs as runs
+
+    n = pypsa.Network()
+    n.add("Bus", "A")
+    install_network(n)
+    monkeypatch.setattr(runs, "kept_run_stale", lambda ctx=None: True)
+    with pytest.raises(HTTPException) as exc:
+        T.export_results_workbook()
+    assert exc.value.detail["error_kind"] == "results_workbook_stale"

@@ -3046,6 +3046,7 @@ def _workbook_project(run):
             return None
 
 
+<<<<<<< HEAD
 def _workbook_verdict(store: dict, record) -> str | None:
     """The study's verdict line for About, or None when no study review exists
     (the same review the Guided Results card reads, template-e2e 46)."""
@@ -3058,6 +3059,11 @@ def _workbook_verdict(store: dict, record) -> str | None:
         logger.info("results workbook: no verdict line", exc_info=True)
         return None
     return verdict_line(review.get("summary")) if review.get("status") == "ok" else None
+=======
+# The cause only; the Export tab words what to do per mode ("Not run yet: ..."). Pinned to
+# ResultsWorkbookPicker.tsx's WORKBOOK_NO_RUN by tests/test_workbook_no_run_words_parity.py.
+WORKBOOK_NO_RUN_MESSAGE = "Not run yet: nothing has been solved."
+>>>>>>> origin/claude/workbook-no-run-45
 
 
 def _workbook_template():
@@ -3214,9 +3220,18 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
         # A Guided study solved a private copy: its solve is the run to export (template-e2e 30).
         study = study_solve.fallback()
         if study is None:
+            from services.provenance_graph import runs
+
+            # "Not run yet" only when nothing was ever solved; a run kept after an edit, or whose dispatch
+            # no longer fits the network, is out of date (the same 409 as a changed-inputs export).
+            if getattr(n, "is_solved", False) or runs.kept_run_stale():
+                raise HTTPException(409, {
+                    "error_kind": "results_workbook_stale",
+                    "message": "The inputs changed since the solve, so the results describe an earlier "
+                               "model. Run the model again."})
             raise HTTPException(409, {
                 "error_kind": "results_workbook_no_run",
-                "message": "No run yet: run the study or Run LOPF."})
+                "message": WORKBOOK_NO_RUN_MESSAGE})
         n = study["network"]
     if _solver_in_flight():  # the network carries the LP's transient transforms
         raise HTTPException(409, {
