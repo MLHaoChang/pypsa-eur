@@ -39,7 +39,12 @@ TRAFOS = {"T1": [0.4, 0.0, 1.0]}
 # Demand D at p_set 10, 20, 40: 1*10 + 0.5*20 + 2*40 = 100 MWh.
 DEMAND = [10.0, 20.0, 40.0]
 # Network: 3 + 0 + 2.4 = 5.4 MWh; peak max(2, 0, 1) = 2 MW; 5.4 / 100 = 5.4 %.
-NETWORK = {"loss_energy": 5.4, "peak_loss": 2.0, "demand_energy": 100.0, "loss_pct_of_demand": 5.4}
+NETWORK = {
+    "loss_energy": 5.4,
+    "peak_loss": 2.0,
+    "demand_energy": 100.0,
+    "loss_pct_of_demand": 5.4,
+}
 
 
 @pytest.fixture(autouse=True)
@@ -94,13 +99,22 @@ def losses_case(baseline):
 
 
 def _checked(ctx, entity, window=None):
-    scope = {"version": 1, "profile": losses.PROFILE, "project_id": ctx.project_uuid,
-             "entity_id": entity, "retain": False}
+    scope = {
+        "version": 1,
+        "profile": losses.PROFILE,
+        "project_id": ctx.project_uuid,
+        "entity_id": entity,
+        "retain": False,
+    }
     if window:
         scope.update(start=window[0], end=window[1])
     record = records.capture_scoped(records.actor_id(), scope)
     values = {f["metric"]: f["value"] for f in record["facts"]}
-    reasons = {s["metric"]: s["reason"] for s in record["slots"] if s["disposition"] == "unavailable"}
+    reasons = {
+        s["metric"]: s["reason"]
+        for s in record["slots"]
+        if s["disposition"] == "unavailable"
+    }
     return values, reasons
 
 
@@ -123,7 +137,9 @@ def test_one_branch_is_its_own_arithmetic(losses_case):
 
 def test_an_exact_window_reads_only_its_snapshots(losses_case):
     # Snapshots 1..2 of L1: 0.5*2 + 2*0.5 = 2 MWh, peak 2 MW.
-    values, _ = _checked(losses_case(), "L1", (STAMPS[1].isoformat(), STAMPS[2].isoformat()))
+    values, _ = _checked(
+        losses_case(), "L1", (STAMPS[1].isoformat(), STAMPS[2].isoformat())
+    )
     assert values == pytest.approx({"loss_energy": 2.0, "peak_loss": 2.0}, rel=1e-12)
 
 
@@ -136,15 +152,20 @@ def test_a_missing_or_infinite_value_never_yields_a_loss(losses_case, bad):
     network, why = _checked(ctx, "network")
     # The network total needs every branch complete; demand stands on its own.
     assert network == {"demand_energy": 100.0}
-    assert why == {"loss_energy": "incomplete", "peak_loss": "incomplete",
-                   "loss_pct_of_demand": "incomplete"}
+    assert why == {
+        "loss_energy": "incomplete",
+        "peak_loss": "incomplete",
+        "loss_pct_of_demand": "incomplete",
+    }
     # The other branches still answer.
     assert _checked(ctx, "L2")[0] == {"loss_energy": 0.0, "peak_loss": 0.0}
 
 
 def test_a_bad_value_outside_the_window_still_withholds_the_branch(losses_case):
     ctx = losses_case(lines={"L1": [np.nan, 2.0, 0.5], "L2": [0.0, 0.0, 0.0]})
-    values, reasons = _checked(ctx, "L1", (STAMPS[1].isoformat(), STAMPS[2].isoformat()))
+    values, reasons = _checked(
+        ctx, "L1", (STAMPS[1].isoformat(), STAMPS[2].isoformat())
+    )
     assert values == {} and reasons["loss_energy"] == "incomplete"
 
 
@@ -163,23 +184,37 @@ def test_a_repeated_index_is_misaligned(losses_case):
 
 
 def test_misaligned_outranks_absent_and_incomplete(losses_case):
-    ctx = losses_case(lines={"L1": [np.nan, 2.0, 0.5]}, index=pd.DatetimeIndex([STAMPS[0], STAMPS[0], STAMPS[2]]))
-    ctx.network.lines_t.loss = pd.DataFrame({"L1": [np.nan, 2.0, 0.5]}, index=STAMPS)  # L2 absent, L1 NaN
-    assert _checked(ctx, "network")[1]["loss_energy"] == "misaligned"  # T1's frame is misaligned
+    ctx = losses_case(
+        lines={"L1": [np.nan, 2.0, 0.5]},
+        index=pd.DatetimeIndex([STAMPS[0], STAMPS[0], STAMPS[2]]),
+    )
+    ctx.network.lines_t.loss = pd.DataFrame(
+        {"L1": [np.nan, 2.0, 0.5]}, index=STAMPS
+    )  # L2 absent, L1 NaN
+    assert (
+        _checked(ctx, "network")[1]["loss_energy"] == "misaligned"
+    )  # T1's frame is misaligned
 
 
 def test_a_short_frame_never_certifies(losses_case):
-    ctx = losses_case(lines={k: v[:2] for k, v in LINES.items()},
-               trafos={k: v[:2] for k, v in TRAFOS.items()}, index=STAMPS[:2])
+    ctx = losses_case(
+        lines={k: v[:2] for k, v in LINES.items()},
+        trafos={k: v[:2] for k, v in TRAFOS.items()},
+        index=STAMPS[:2],
+    )
     values, reasons = _checked(ctx, "network")
     assert reasons["loss_energy"] == "incomplete" and "loss_energy" not in values
 
 
 def test_a_zero_row_frame_is_losses_not_recorded(losses_case):
-    ctx = losses_case(lines={k: [] for k in LINES}, trafos={k: [] for k in TRAFOS}, index=STAMPS[:0])
+    ctx = losses_case(
+        lines={k: [] for k in LINES}, trafos={k: [] for k in TRAFOS}, index=STAMPS[:0]
+    )
     values, reasons = _checked(ctx, "network")
     assert values == {"demand_energy": 100.0}
-    assert reasons == dict.fromkeys(("loss_energy", "peak_loss", "loss_pct_of_demand"), "losses_not_recorded")
+    assert reasons == dict.fromkeys(
+        ("loss_energy", "peak_loss", "loss_pct_of_demand"), "losses_not_recorded"
+    )
     assert _checked(ctx, "L2")[1]["loss_energy"] == "losses_not_recorded"
 
 
@@ -188,7 +223,10 @@ def test_the_share_of_demand_needs_every_load_complete(losses_case):
     ctx.network.loads_t.p.loc[STAMPS[1], "D"] = np.nan
     values, reasons = _checked(ctx, "network")
     assert values == pytest.approx({"loss_energy": 5.4, "peak_loss": 2.0}, rel=1e-12)
-    assert reasons == {"demand_energy": "incomplete", "loss_pct_of_demand": "incomplete"}
+    assert reasons == {
+        "demand_energy": "incomplete",
+        "loss_pct_of_demand": "incomplete",
+    }
 
 
 def test_a_zero_demand_is_a_near_zero_denominator(losses_case):
@@ -213,12 +251,15 @@ def test_an_unverified_solve_answers_nothing(losses_case):
     assert values == {} and reasons == dict.fromkeys(losses.METRICS, "unverified_solve")
 
 
-@pytest.mark.parametrize(("entity", "change", "kind"), [
-    ("nowhere", None, "unknown_branch"),
-    ("L1", "pf", "ac_pf_present"),
-    ("network", "multi", "unsupported_snapshot_scope"),
-    ("L1", "twin", "ambiguous_branch"),
-])
+@pytest.mark.parametrize(
+    ("entity", "change", "kind"),
+    [
+        ("nowhere", None, "unknown_branch"),
+        ("L1", "pf", "ac_pf_present"),
+        ("network", "multi", "unsupported_snapshot_scope"),
+        ("L1", "twin", "ambiguous_branch"),
+    ],
+)
 def test_refusals_are_named(losses_case, entity, change, kind):
     ctx = losses_case()
     if change == "pf":
@@ -228,7 +269,9 @@ def test_refusals_are_named(losses_case, entity, change, kind):
     elif change == "twin":
         ctx.network.add("Transformer", "L1", bus0="B", bus1="C", x=0.1, s_nom=5)
     with pytest.raises(ValueError) as error:
-        calculations.scoped_source(ctx, {"profile": losses.PROFILE, "entity_id": entity})
+        calculations.scoped_source(
+            ctx, {"profile": losses.PROFILE, "entity_id": entity}
+        )
     assert error.value.args[0] == kind
     assert kind in losses.REFUSALS
 
@@ -240,8 +283,20 @@ def test_every_slot_reason_is_declared_and_reached(losses_case):
     for kwargs, entity, edit in [
         ({"lines": {"L1": [1.0, np.nan, 0.5], "L2": [0.0] * 3}}, "network", None),
         ({"trafos": {"other": [0.0] * 3}}, "network", None),
-        ({"index": pd.DatetimeIndex([STAMPS[0], STAMPS[0], STAMPS[2]])}, "network", None),
-        ({"lines": {k: [] for k in LINES}, "trafos": {k: [] for k in TRAFOS}, "index": STAMPS[:0]}, "network", None),
+        (
+            {"index": pd.DatetimeIndex([STAMPS[0], STAMPS[0], STAMPS[2]])},
+            "network",
+            None,
+        ),
+        (
+            {
+                "lines": {k: [] for k in LINES},
+                "trafos": {k: [] for k in TRAFOS},
+                "index": STAMPS[:0],
+            },
+            "network",
+            None,
+        ),
         ({"demand": [0.0, 0.0, 0.0]}, "network", None),
         ({}, "L1", None),
         ({}, "network", "unverify"),
@@ -251,9 +306,13 @@ def test_every_slot_reason_is_declared_and_reached(losses_case):
         if edit == "unverify":
             ctx.network.add("Load", "late", bus="B", p_set=1)
         elif edit == "noloads":
-            raw = calculations.scoped_source(ctx, {"profile": losses.PROFILE, "entity_id": "network"})
+            raw = calculations.scoped_source(
+                ctx, {"profile": losses.PROFILE, "entity_id": "network"}
+            )
             raw["loads"] = {}
-            _, slots = losses.calculate(raw, {"profile": losses.PROFILE, "entity_id": "network"})
+            _, slots = losses.calculate(
+                raw, {"profile": losses.PROFILE, "entity_id": "network"}
+            )
             seen |= {s["reason"] for s in slots if s["disposition"] == "unavailable"}
             continue
         seen |= set(_checked(ctx, entity)[1].values())
@@ -265,8 +324,12 @@ def test_the_route_shows_the_same_hand_figures(losses_case, client):
     losses_case()
     route = client.get("/api/results/losses", params={"source": "lopf"}).json()
     assert route["validity"]["complete"] is True
-    assert (route["total_mwh"], route["peak_mw"], route["total_demand_mwh"], route["loss_pct_of_demand"]) == (
-        5.4, 2.0, 100.0, 5.4)
+    assert (
+        route["total_mwh"],
+        route["peak_mw"],
+        route["total_demand_mwh"],
+        route["loss_pct_of_demand"],
+    ) == (5.4, 2.0, 100.0, 5.4)
 
 
 # ── a real LP with losses, and parity with /results/losses ─────────────────
@@ -285,7 +348,9 @@ def lossy(baseline, client):
     n.add("Generator", "G", bus="A", p_nom=200, marginal_cost=10)
     n.add("Load", "L", bus="B", p_set=DEMAND)
     ctx.network = n
-    assert n.optimize(solver_name="highs", transmission_losses=True, include_objective_constant=False) == ("ok", "optimal")
+    assert n.optimize(
+        solver_name="highs", transmission_losses=True, include_objective_constant=False
+    ) == ("ok", "optimal")
     ctx.solver_state.update(status="completed", condition="optimal")
     workflow_tools._record_solve_inputs(n, ctx.solver_state["solver_config"])
     return ctx
@@ -302,7 +367,9 @@ def test_lp_losses_close_the_energy_balance_and_match_the_route(lossy, client):
     assert values["loss_energy"] == pytest.approx(loss_energy, rel=1e-6)
     assert values["peak_loss"] == pytest.approx(max(per_snapshot), rel=1e-6)
     assert values["demand_energy"] == 100.0
-    assert values["loss_pct_of_demand"] == pytest.approx(loss_energy, rel=1e-6)  # of 100 MWh
+    assert values["loss_pct_of_demand"] == pytest.approx(
+        loss_energy, rel=1e-6
+    )  # of 100 MWh
 
     response = client.get("/api/results/losses", params={"source": "lopf"})
     assert response.status_code == 200, response.text
@@ -325,7 +392,9 @@ def test_where_the_route_fills_zero_the_checked_answer_withholds(lossy, client):
 def test_grammar():
     scope = assurance_scope.from_message("Show the losses for network.", "p1", {})
     assert scope["profile"] == losses.PROFILE and scope["entity_id"] == "network"
-    branch = assurance_scope.from_message("show losses for branch L1; from 2026-01-01T00:00 to 2026-01-01T01:00", "p1", {})
+    branch = assurance_scope.from_message(
+        "show losses for branch L1; from 2026-01-01T00:00 to 2026-01-01T01:00", "p1", {}
+    )
     assert branch["profile"] == losses.PROFILE and branch["entity_id"] == "L1"
 
 
@@ -333,7 +402,9 @@ def test_a_population_above_the_cap_is_refused(losses_case, monkeypatch):
     ctx = losses_case()
     monkeypatch.setattr(losses, "MAX_BRANCHES", 2)  # three branches here
     with pytest.raises(ValueError, match="unsupported_branch_population"):
-        calculations.scoped_source(ctx, {"profile": losses.PROFILE, "entity_id": "network"})
+        calculations.scoped_source(
+            ctx, {"profile": losses.PROFILE, "entity_id": "network"}
+        )
     monkeypatch.setattr(losses, "MAX_BRANCHES", 3)
     calculations.scoped_source(ctx, {"profile": losses.PROFILE, "entity_id": "network"})
 
@@ -345,24 +416,37 @@ def test_weights_on_another_index_are_misaligned(losses_case, monkeypatch):
     shifted = pd.Series(WEIGHTS, index=STAMPS + pd.Timedelta(minutes=1))
     monkeypatch.setattr(period_utils, "snapshot_weights", lambda n, column: shifted)
     with pytest.raises(ValueError, match="misaligned_source"):
-        calculations.scoped_source(ctx, {"profile": losses.PROFILE, "entity_id": "network"})
+        calculations.scoped_source(
+            ctx, {"profile": losses.PROFILE, "entity_id": "network"}
+        )
 
 
 def test_a_negative_weight_answers_nothing(losses_case):
-    raw = calculations.scoped_source(losses_case(), {"profile": losses.PROFILE, "entity_id": "network"})
+    raw = calculations.scoped_source(
+        losses_case(), {"profile": losses.PROFILE, "entity_id": "network"}
+    )
     raw["energy_weight"][1] = -0.5
-    facts, slots = losses.calculate(raw, {"profile": losses.PROFILE, "entity_id": "network"})
+    facts, slots = losses.calculate(
+        raw, {"profile": losses.PROFILE, "entity_id": "network"}
+    )
     assert facts == [] and {s["reason"] for s in slots} == {"unverified_solve"}
 
 
 def test_a_record_of_another_entity_is_rejected(losses_case):
-    raw = calculations.scoped_source(losses_case(), {"profile": losses.PROFILE, "entity_id": "L1"})
+    raw = calculations.scoped_source(
+        losses_case(), {"profile": losses.PROFILE, "entity_id": "L1"}
+    )
     with pytest.raises(ValueError, match="branch_losses_source_identity"):
         losses.calculate(raw, {"profile": losses.PROFILE, "entity_id": "L2"})
 
 
 def test_the_record_holds_no_number_for_a_member_that_is_not_complete(losses_case):
     ctx = losses_case(lines={"L1": [1.0, np.nan, 0.5], "L2": [0.0, 0.0, 0.0]})
-    raw = calculations.scoped_source(ctx, {"profile": losses.PROFILE, "entity_id": "network"})
+    raw = calculations.scoped_source(
+        ctx, {"profile": losses.PROFILE, "entity_id": "network"}
+    )
     assert raw["branches"]["Line:L1"] == {"state": "incomplete", "values": None}
-    assert raw["branches"]["Line:L2"] == {"state": "complete", "values": [0.0, 0.0, 0.0]}
+    assert raw["branches"]["Line:L2"] == {
+        "state": "complete",
+        "values": [0.0, 0.0, 0.0],
+    }

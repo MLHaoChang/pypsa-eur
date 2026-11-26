@@ -129,10 +129,15 @@ def curtailed_energy(n, generator, start=None, end=None, column="generators"):
 # losses_calculations.py
 def loss_energy(n, start=None, end=None, column="generators"):
     """Sum over every Line and Transformer of loss(t) w(t)."""
-    frames = [n.lines_t.loss.to_numpy(dtype=float), n.transformers_t.loss.to_numpy(dtype=float)]
+    frames = [
+        n.lines_t.loss.to_numpy(dtype=float),
+        n.transformers_t.loss.to_numpy(dtype=float),
+    ]
     window = rows(n.snapshots, start, end)
     weights = _weights(n, column)[window]
-    return _total(np.concatenate([(f[window] * weights[:, None]).ravel() for f in frames]))
+    return _total(
+        np.concatenate([(f[window] * weights[:, None]).ravel() for f in frames])
+    )
 
 
 # capacity_calculations.py

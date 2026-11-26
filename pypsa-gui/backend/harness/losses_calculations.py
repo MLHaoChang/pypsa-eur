@@ -22,15 +22,29 @@ PROFILE = "branch-losses/1"
 MAX_BRANCHES = 64
 MAX_LOADS = 64
 BRANCH_CLASSES = ("Line", "Transformer")
-REFUSALS = frozenset({
-    "unsupported_snapshot_scope", "ac_pf_present", "unsupported_branch_population",
-    "ambiguous_branch", "unknown_branch", "misaligned_source",
-})
+REFUSALS = frozenset(
+    {
+        "unsupported_snapshot_scope",
+        "ac_pf_present",
+        "unsupported_branch_population",
+        "ambiguous_branch",
+        "unknown_branch",
+        "misaligned_source",
+    }
+)
 # Every reason a slot can carry; pinned by exact set equality in the tests.
-REASONS = frozenset({
-    "unverified_solve", "losses_not_recorded", "incomplete", "absent", "misaligned",
-    "no_loads", "network_scope_required", "near_zero_denominator",
-})
+REASONS = frozenset(
+    {
+        "unverified_solve",
+        "losses_not_recorded",
+        "incomplete",
+        "absent",
+        "misaligned",
+        "no_loads",
+        "network_scope_required",
+        "near_zero_denominator",
+    }
+)
 # Worst first: the reason a population carries is its worst member's state.
 _STATE_ORDER = ("misaligned", "absent", "incomplete")
 METRICS = {
@@ -76,11 +90,19 @@ def source(ctx, entity):
     if state.get("ac_pf_results") is not None or state.get("lopf_results") is not None:
         raise ValueError("ac_pf_present")
     if entity == "network":
-        names = [(c, str(name)) for c in BRANCH_CLASSES for name in n.components[c].static.index]
+        names = [
+            (c, str(name))
+            for c in BRANCH_CLASSES
+            for name in n.components[c].static.index
+        ]
         if len(names) > MAX_BRANCHES or len(n.loads) > MAX_LOADS:
             raise ValueError("unsupported_branch_population")
     else:
-        names = [(c, entity) for c in BRANCH_CLASSES if entity in n.components[c].static.index]
+        names = [
+            (c, entity)
+            for c in BRANCH_CLASSES
+            if entity in n.components[c].static.index
+        ]
         if len(names) > 1:
             raise ValueError("ambiguous_branch")
     if not names:
@@ -98,7 +120,10 @@ def source(ctx, entity):
                 values = [_number(v) for v in aligned[row["name"]]]
             else:
                 values = None
-            out[f"{component}:{row['name']}"] = {"state": row["state"], "values": values}
+            out[f"{component}:{row['name']}"] = {
+                "state": row["state"],
+                "values": values,
+            }
         return out
 
     branches, recorded = {}, False
@@ -111,7 +136,11 @@ def source(ctx, entity):
         branches.update(rows(frame, members, component))
     loads = {}
     if entity == "network":
-        loads = rows(n.loads_t.p if hasattr(n.loads_t, "p") else None, [str(x) for x in n.loads.index], "Load")
+        loads = rows(
+            n.loads_t.p if hasattr(n.loads_t, "p") else None,
+            [str(x) for x in n.loads.index],
+            "Load",
+        )
     return {
         "version": 1,
         "profile": PROFILE,
@@ -132,7 +161,11 @@ def _worst(members):
 
 def calculate(raw, scope):
     """Unavailable, with the state as the reason, unless every member the metric reads is complete."""
-    if raw.get("version") != 1 or raw.get("profile") != PROFILE or raw["entity_id"] != scope["entity_id"]:
+    if (
+        raw.get("version") != 1
+        or raw.get("profile") != PROFILE
+        or raw["entity_id"] != scope["entity_id"]
+    ):
         raise ValueError("branch_losses_source_identity")
     a, b = profile_common.window(raw["index"], scope)
     rows = range(a, b + 1)
@@ -142,12 +175,18 @@ def calculate(raw, scope):
         reasons = dict.fromkeys(METRICS, "unverified_solve")
     else:
         network = raw["entity_id"] == "network"
-        loss_reason = "losses_not_recorded" if not raw["losses_recorded"] else _worst(raw["branches"])
+        loss_reason = (
+            "losses_not_recorded"
+            if not raw["losses_recorded"]
+            else _worst(raw["branches"])
+        )
         if loss_reason:
             reasons["loss_energy"] = reasons["peak_loss"] = loss_reason
         else:
             series = [m["values"] for m in raw["branches"].values()]
-            available["loss_energy"] = math.fsum(weights[k] * v[i] for v in series for k, i in enumerate(rows))
+            available["loss_energy"] = math.fsum(
+                weights[k] * v[i] for v in series for k, i in enumerate(rows)
+            )
             available["peak_loss"] = max(abs(v[i]) for v in series for i in rows)
         if not network:
             reasons.update(dict.fromkeys(NETWORK_ONLY, "network_scope_required"))
@@ -157,25 +196,37 @@ def calculate(raw, scope):
                 reasons["demand_energy"] = reasons["loss_pct_of_demand"] = demand_reason
             else:
                 available["demand_energy"] = math.fsum(
-                    weights[k] * m["values"][i] for m in raw["loads"].values() for k, i in enumerate(rows))
+                    weights[k] * m["values"][i]
+                    for m in raw["loads"].values()
+                    for k, i in enumerate(rows)
+                )
                 if loss_reason:
                     reasons["loss_pct_of_demand"] = loss_reason
                 elif abs(available["demand_energy"]) <= NEAR_ZERO:
                     reasons["loss_pct_of_demand"] = "near_zero_denominator"
                 else:
-                    available["loss_pct_of_demand"] = 100.0 * available["loss_energy"] / available["demand_energy"]
+                    available["loss_pct_of_demand"] = (
+                        100.0 * available["loss_energy"] / available["demand_energy"]
+                    )
     return profile_common.facts_and_slots(scope, METRICS, available, reasons, b - a + 1)
 
 
 def notes(raw, scope, label):
     """Always-shown scope lines: how many members the figures stand on, and which are not complete."""
     del scope, label
-    lines = [f"{len(raw['branches'])} branches"
-             + (f" and {len(raw['loads'])} Loads" if raw["entity_id"] == "network" else "")
-             + " classified on their raw values over the whole solved horizon."]
-    bad = sorted(f"{key} ({m['state']})" for key, m in {**raw["branches"], **raw["loads"]}.items()
-                 if m["state"] != "complete")
+    lines = [
+        f"{len(raw['branches'])} branches"
+        + (f" and {len(raw['loads'])} Loads" if raw["entity_id"] == "network" else "")
+        + " classified on their raw values over the whole solved horizon."
+    ]
+    bad = sorted(
+        f"{key} ({m['state']})"
+        for key, m in {**raw["branches"], **raw["loads"]}.items()
+        if m["state"] != "complete"
+    )
     if bad and raw["losses_recorded"]:
-        shown = ", ".join(bad[:5]) + (f" and {len(bad) - 5} more" if len(bad) > 5 else "")
+        shown = ", ".join(bad[:5]) + (
+            f" and {len(bad) - 5} more" if len(bad) > 5 else ""
+        )
         lines.append("Not complete: " + shown + ".")
     return lines
