@@ -519,6 +519,9 @@ def _rerecorded(ctx):
         ("Link:start_up_cost", "unmodelled_cost_terms"),
         ("Generator:shut_down_cost", "unmodelled_cost_terms"),
         ("Generator:curtailment_cost", "unmodelled_cost_terms"),
+        # Time-varying tables only, the static column left at 0 (the `*_t` branch of `_nonzero`).
+        ("Generator_t:marginal_cost_quadratic", "unmodelled_cost_terms"),
+        ("StorageUnit_t:spill_cost", "unmodelled_cost_terms"),
     ],
 )
 def test_each_sub_guard_withholds_every_figure(cost_case, monkeypatch, change, reason):
@@ -551,6 +554,14 @@ def test_each_sub_guard_withholds_every_figure(cost_case, monkeypatch, change, r
         monkeypatch.setattr(
             "services.asset_schema.derive.has_parts", lambda c, row: c == "StorageUnit"
         )
+    elif change.split(":")[0].endswith("_t"):
+        component, attr = change.split(":")
+        component = n.components[component.removesuffix("_t")]
+        name = component.static.index[-1]
+        if attr in component.static:
+            component.static[attr] = 0.0
+        component.dynamic[attr] = pd.DataFrame({name: [0.0, 1.0]}, index=n.snapshots)
+        _rerecorded(ctx)
     else:
         component, attr = change.split(":")
         static = n.components[component].static
@@ -586,3 +597,94 @@ def test_a_residual_of_a_hundred_millionth_is_refused(cost_case):
     ctx = cost_case()
     ctx.network._objective = OBJECTIVE * (1 + 1e-8)
     assert set(_checked(ctx, "network")[1].values()) == {"objective_mismatch"}
+
+
+def _uneven_network():
+    """Four snapshots, objective weights 0.7, 1.3, 2.9, 0.45, non-round prices on five classes."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2026-03-01", periods=4, freq="h"))
+    n.snapshot_weightings["objective"] = [0.7, 1.3, 2.9, 0.45]
+    n.snapshot_weightings["generators"] = [0.7, 1.3, 2.9, 0.45]
+    n.snapshot_weightings["stores"] = [1.0, 1.0, 1.0, 1.0]
+    n.add("Carrier", ["gas", "solar", "AC", "heat", "battery", "h2"])
+    n.add("Bus", ["A", "B"], v_nom=110, carrier="AC")
+    n.add("Bus", "H", carrier="heat")
+    n.add("Generator", "gas", bus="A", carrier="gas", p_nom=40, marginal_cost=23.17)
+    n.add(
+        "Generator",
+        "solar",
+        bus="A",
+        carrier="solar",
+        p_nom_extendable=True,
+        p_nom_max=9.3,
+        p_max_pu=[0.0, 0.41, 0.93, 0.17],
+        capital_cost=3131.7,
+        marginal_cost=0.013,
+    )
+    n.add(
+        "Line",
+        "L",
+        bus0="A",
+        bus1="B",
+        x=0.1,
+        s_nom_extendable=True,
+        capital_cost=1713.3,
+        carrier="AC",
+    )
+    n.add("Load", "dB", bus="B", p_set=[7.3, 11.9, 13.1, 5.7])
+    n.add(
+        "Link",
+        "K",
+        bus0="A",
+        bus1="H",
+        p_nom_extendable=True,
+        efficiency=0.93,
+        capital_cost=4411.9,
+        marginal_cost=0.71,
+        carrier="heat",
+    )
+    n.add("Load", "dH", bus="H", p_set=[1.1, 2.3, 0.7, 1.9])
+    n.add(
+        "Store",
+        "S",
+        bus="H",
+        e_nom=1.3,
+        e_initial=1.3,
+        marginal_cost=0.37,
+        carrier="h2",
+    )
+    n.add(
+        "StorageUnit",
+        "SU",
+        bus="B",
+        p_nom=2.2,
+        max_hours=1.7,
+        state_of_charge_initial=3.74,
+        marginal_cost=0.29,
+        carrier="battery",
+    )
+    return n
+
+
+def test_a_real_uneven_solve_reproduces_the_objective_within_the_tolerance(baseline):
+    """RESIDUAL_TOLERANCE's headroom has a solve behind it: non-round prices, uneven weights."""
+    ctx = baseline[0]
+    ctx.network = _uneven_network()
+    solve_costed(ctx)
+    values, reasons = _checked(ctx, "network")
+    assert reasons == {}
+    objective = ctx.network.objective
+    assert abs(values["objective_residual"]) <= system_cost.RESIDUAL_TOLERANCE * max(
+        1.0, abs(objective)
+    )
+    # The docstring's claim: summation order only, far inside the tolerance.
+    assert abs(
+        values["objective_residual"]
+    ) <= 1e-3 * system_cost.RESIDUAL_TOLERANCE * max(1.0, abs(objective))
+    assert {a["class"] for a in _raw(ctx)["assets"]} == {
+        "Generator",
+        "Line",
+        "Link",
+        "Store",
+        "StorageUnit",
+    }
