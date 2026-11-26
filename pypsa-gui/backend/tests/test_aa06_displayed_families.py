@@ -330,7 +330,8 @@ def test_a_held_network_lock_answers_409(client, solved, tab):
     assert response.json()["detail"]["error_kind"] == "assurance_context_changed"
 
 
-def test_a_reader_without_access_to_the_open_project_gets_404(_auth_db, solved):
+@pytest.mark.parametrize("tab", ["emissions", "grid_risk"])
+def test_a_reader_without_access_to_the_open_project_gets_404(_auth_db, solved, tab):
     from fastapi.testclient import TestClient
 
     import main
@@ -340,7 +341,7 @@ def test_a_reader_without_access_to_the_open_project_gets_404(_auth_db, solved):
     uid, session_local = _other_org_user(_auth_db)
     with TestClient(main.app) as c:
         outsider = attach_session(c, session_local, uid)
-        response = outsider.get("/api/results/displayed/grid_risk")
+        response = outsider.get(f"/api/results/displayed/{tab}")
     assert response.status_code == 404
     assert response.json()["detail"]["error_kind"] == "not_authorized"
 
@@ -412,3 +413,21 @@ def test_the_grid_risk_read_of_the_shown_payload_is_its_hash(client, baseline):
         {k: v for k, v in read.items() if k != "project_id"},
     ):
         assert ADAPTERS["grid_risk"].read_ref(partial) is None
+
+
+def test_the_served_data_keeps_the_routes_key_order_and_only_the_hash_sorts(
+    client, solved, monkeypatch
+):
+    """A tab may draw a dict's keys in order (carrier stacks): the view serves the
+    route's order; the canonical sorted form is only what is hashed."""
+    from routers import results
+
+    payload = {"z_first": {"solar": 1.0, "grid": 2.0}, "a_last": [1]}
+    monkeypatch.setattr(results, "get_emissions", lambda *_a, **_k: payload)
+    response = client.get("/api/results/displayed/emissions")
+    data = response.json()["data"]
+    assert list(data) == ["z_first", "a_last"]
+    assert list(data["z_first"]) == ["solar", "grid"]
+    assert response.json()["binding"]["data_sha256"] == hashlib.sha256(
+        canonical(payload).encode()
+    ).hexdigest()

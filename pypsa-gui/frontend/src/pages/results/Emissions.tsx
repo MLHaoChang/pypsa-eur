@@ -35,7 +35,7 @@ const capName = (c: { name: string; goal?: boolean }) => (c.goal ? CO2_LIMIT_CAP
 export default function Emissions() {
   const currentProject = useUIStore(s => s.currentProject)
   // A5.2: the bound view, so a chat navigation can prove the figures shown.
-  const { data: displayed } = useQuery({
+  const { data: displayed, isError } = useQuery({
     queryKey: nk(currentProject, 'results', 'displayed', 'emissions'),
     queryFn: displayedResultsApi.emissions,
   })
@@ -91,6 +91,14 @@ export default function Emissions() {
     )
   }, [emissions, view])
 
+  // A failed read is not "not run yet" (rulings ai, aa): the error toast says why.
+  if (isError) {
+    return (
+      <p className="p-5 text-[12px] text-muted" role="status" data-testid="emissions-error">
+        The emissions could not be read. Try again in a moment.
+      </p>
+    )
+  }
   if (!emissions) {
     return (
       <NotSolved what="Emissions" why="CO₂ is each carrier’s intensity times its dispatched energy." />

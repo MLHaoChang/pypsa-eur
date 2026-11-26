@@ -262,3 +262,11 @@ it('the single active cap\'s header names the goal "CO₂ limit"', async () => {
   renderPage()
   expect(await screen.findByText(`(${CO2_LIMIT_CAP})`, { exact: false })).toBeTruthy()
 })
+
+// UX 31 on #2029 (rulings ai, aa): a failed read is an error, never "has not run yet".
+it('a server error shows that the emissions could not be read, not that nothing has run', async () => {
+  vi.mocked(resultsApi.getEmissions).mockRejectedValue(Object.assign(new Error('boom'), { response: { status: 500 } }))
+  renderPage()
+  expect(await screen.findByTestId('emissions-error')).toBeTruthy()
+  expect(screen.queryByText(/has not run yet/)).toBeNull()
+})

@@ -54,7 +54,9 @@ def _bound(tab: str, payload) -> dict:
 
     ctx = PyPSAService.get_active_context()
     encoded = canonical(payload)
-    data = json.loads(encoded)
+    # Served in the route's own key order (a tab may draw dict keys in order);
+    # only the hash uses the sorted canonical form.
+    data = _finite(jsonable_encoder(payload))
     return {
         "status": "ok",
         "data": data,
@@ -105,9 +107,14 @@ VIEWS = {"emissions": emissions_view, "grid_risk": grid_risk_view}
 
 
 def _serve(view, actor: User):
-    from routers.results import _result_actor
+    from routers.results import _open_project_read, _result_actor
+    from services.pypsa_service import PyPSAService
 
     with _result_actor(actor):
+        # The open project's data only for a reader the project ACL admits
+        # (404 `not_authorized`), as the load-flow and grid-risk views do.
+        if PyPSAService.get_active_context().project_uuid:
+            _open_project_read(None, "Open the project and ask again.")
         out = view()
     if out["status"] != "ok":
         headers = (
