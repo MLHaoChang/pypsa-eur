@@ -401,7 +401,9 @@ def spent_solves(path, step_id, record, begun) -> int:
         try:
             settled = run_envelope.settle_case_solves(path, step_id, solves)
         except Exception:  # noqa: BLE001 -- unreadable envelope: keep the reservation
-            logger.warning("run_ic: the case's solves could not be settled", exc_info=True)
+            logger.warning(
+                "run_ic: the case's solves could not be settled", exc_info=True
+            )
             settled = None
         if settled is not None:
             return settled

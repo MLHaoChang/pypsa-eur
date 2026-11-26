@@ -173,12 +173,26 @@ def _own_planned_stage_only(ctx):
     n = ctx.network
     last = max(int(p) for p in n.investment_periods)
     n.remove("Link", n.links.index[n.links.build_year > last])
-    present = {(c, name) for c, df in (("Generator", n.generators), ("StorageUnit", n.storage_units),
-                                       ("Store", n.stores), ("Link", n.links)) for name in df.index}
+    present = {
+        (c, name)
+        for c, df in (
+            ("Generator", n.generators),
+            ("StorageUnit", n.storage_units),
+            ("Store", n.stores),
+            ("Link", n.links),
+        )
+        for name in df.index
+    }
     cfg = ctx.solver_state["solver_config"]
-    commercial = cfg.commercial if isinstance(cfg.commercial, dict) else cfg.commercial.model_dump()
+    commercial = (
+        cfg.commercial
+        if isinstance(cfg.commercial, dict)
+        else cfg.commercial.model_dump()
+    )
     flows = commercial["value_flows"]
-    flows["asset_owners"] = [a for a in flows["asset_owners"] if (a["component"], a["asset_id"]) in present]
+    flows["asset_owners"] = [
+        a for a in flows["asset_owners"] if (a["component"], a["asset_id"]) in present
+    ]
     cfg.commercial = commercial
     years = {str(int(p)) for p in n.investment_periods}
     cods = cfg.finance["cod_by_asset"]
@@ -186,7 +200,9 @@ def _own_planned_stage_only(ctx):
 
 
 @pytest.mark.live_solve
-def test_a_v2_run_solves_its_case_against_the_site_today(granted, rated, baseline, site, monkeypatch):
+def test_a_v2_run_solves_its_case_against_the_site_today(
+    granted, rated, baseline, site, monkeypatch
+):
     """Study-harness issue 52: @2's solve stage runs the case after the queued
     solve; the case re-solves its baseline (the site as today) on the run's
     counted reservation, both case rules block and pass, and the run's solves
@@ -204,19 +220,28 @@ def test_a_v2_run_solves_its_case_against_the_site_today(granted, rated, baselin
     run = record["run"]
     rules = {
         r["rule"]: r
-        for r in (run["stages"].get("result_gate", {}).get("gate") or {}).get("rules", [])
+        for r in (run["stages"].get("result_gate", {}).get("gate") or {}).get(
+            "rules", []
+        )
     }
     steps = [(s["id"], s["tool"], s["status"], s.get("error")) for s in record["steps"]]
     assert run["status"] == "completed" and run["stage"] == "handoff", (
-        run["status"], run["stage"], steps,
+        run["status"],
+        run["stage"],
+        steps,
         {k: (r["verdict"], r.get("reason")) for k, r in rules.items()},
     )
     assert script.requests == []
     assert [(t, st) for i, t, st, _ in steps if i.startswith("solve.")] == [
-        ("solve_queue_enqueue", "completed"), ("run_investment_case", "completed")]
+        ("solve_queue_enqueue", "completed"),
+        ("run_investment_case", "completed"),
+    ]
     for rid in ("conc.ic.counterfactual", "conc.ic.basis"):
         assert (rules[rid]["verdict"], rules[rid]["severity"]) == ("pass", "block"), (
-            rid, rules[rid].get("reason"), rules[rid].get("facts"))
+            rid,
+            rules[rid].get("reason"),
+            rules[rid].get("facts"),
+        )
     assert rules["conc.ic.basis"]["facts"][0]["value"] == "site_today"
     assert rules["conc.kpi.npv"]["severity"] == "warn"
     case = next(s for s in record["steps"] if s["tool"] == "run_investment_case")
