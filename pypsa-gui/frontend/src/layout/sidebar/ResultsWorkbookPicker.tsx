@@ -88,10 +88,17 @@ export function WorkbookRunNote({ run }: { run: ResultsWorkbookRun | null | unde
 const tabLabel = (v: ResultsWorkbookView) => TABS.find(t => t.id === v.view_id)?.label ?? v.label
 const cardLabel = (v: ResultsWorkbookView) => CARD_GROUPS.find(g => g.id === v.card)?.label ?? v.card_label
 
-/** Why Download is off, in words, or null when the workbook holds at least one tab. */
-export function workbookBlock(views: ResultsWorkbookView[] | undefined, choice: WorkbookChoice): string | null {
+/** The cause the workbook route gives too (routers/results.py WORKBOOK_NO_RUN_MESSAGE; parity-pinned). */
+export const WORKBOOK_NO_RUN = 'Not run yet'
+
+/** Why Download is off, in words, or null when the workbook holds at least one tab. Guided has no Run LOPF
+ *  button, so with no run it says to run the study; Expert names the button. */
+export function workbookBlock(views: ResultsWorkbookView[] | undefined, choice: WorkbookChoice,
+                              guided = false): string | null {
   if (!views) return null  // still loading, or the list failed: the route decides at download
-  if (!views.some(v => v.available)) return 'No run yet: run the study or Run LOPF.'
+  if (!views.some(v => v.available)) {
+    return guided ? `${WORKBOOK_NO_RUN}: run the study, then export.` : `${WORKBOOK_NO_RUN}: click Run LOPF, then export.`
+  }
   const included = views.some(v => v.available && (v.selected || choice.all || choice.extra.includes(v.view_id)))
   return included ? null : 'Tick at least one result tab.'
 }
@@ -105,6 +112,7 @@ export function ResultsWorkbookPicker({ value, onChange }: {
 }) {
   const { data, isLoading, isError } = useWorkbookViews()
   const { data: run } = useWorkbookRun()
+  const guided = useUIStore(s => s.uiMode) === 'guided'
   if (isLoading) return <p className="mt-2 ml-7 text-[10px] text-muted">Loading result tabs…</p>
   if (isError || !data) return (
     <div className="mt-2 ml-7 text-[10px]">
@@ -121,7 +129,7 @@ export function ResultsWorkbookPicker({ value, onChange }: {
   const toggle = (id: string) => onChange({
     ...value, extra: value.extra.includes(id) ? value.extra.filter(x => x !== id) : [...value.extra, id],
   })
-  const block = workbookBlock(data, value)
+  const block = workbookBlock(data, value, guided)
 
   return (
     <fieldset className="mt-2 ml-7 text-[10px]" data-testid="workbook-picker">

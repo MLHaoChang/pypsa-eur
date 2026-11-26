@@ -3046,6 +3046,11 @@ def _workbook_project(run):
             return None
 
 
+# The cause only; the Export tab words what to do per mode ("Not run yet: ..."). Pinned to
+# ResultsWorkbookPicker.tsx's WORKBOOK_NO_RUN by tests/test_workbook_no_run_words_parity.py.
+WORKBOOK_NO_RUN_MESSAGE = "Not run yet: nothing has been solved."
+
+
 def _workbook_template():
     from services import flow_service, network_lengths
 
@@ -3202,7 +3207,7 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
         if study is None:
             raise HTTPException(409, {
                 "error_kind": "results_workbook_no_run",
-                "message": "No run yet: run the study or Run LOPF."})
+                "message": WORKBOOK_NO_RUN_MESSAGE})
         n = study["network"]
     if _solver_in_flight():  # the network carries the LP's transient transforms
         raise HTTPException(409, {

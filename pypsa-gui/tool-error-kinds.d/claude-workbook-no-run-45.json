@@ -2,7 +2,7 @@
   "kinds": {
     "results_workbook_no_run": {
       "surface": "inline",
-      "why": "GET /api/results/workbook.xlsx refuses with 409 when no run exists (the live network was never solved and no Guided study solve is held) instead of a silent 204; the message says to run the study or Run LOPF, and the Export tab shows it in place of an enabled Download."
+      "why": "GET /api/results/workbook.xlsx refuses with 409 when no run exists (the live network was never solved and no Guided study solve is held) instead of a silent 204; the message gives the cause (\"Not run yet: nothing has been solved.\"), and the Export tab words what to do per mode in place of an enabled Download."
     }
   }
 }
