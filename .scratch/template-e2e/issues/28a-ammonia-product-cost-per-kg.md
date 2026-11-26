@@ -3,7 +3,7 @@
 
 # 28a — Guided shows no product cost per kg for the ammonia template
 
-Status: ready-for-agent
+Status: done
 Source: issue 28 (closed 2026-11-25; its remaining item, owner ruling)
 Severity: misleads
 Journey fit: results for the ammonia template.
