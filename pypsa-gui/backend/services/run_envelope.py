@@ -1632,25 +1632,29 @@ def case_budget_refusal(envelope, note):
     return None
 
 
-def settle_case_solves(task_path, solves):
-    """Study-harness issue 52: the run's latest admitted case that reserved
-    its baseline (its `used` row's `reserved`) spent `solves` baseline LPs
-    (its record's `baseline_solves`: 0 on a cache hit), clamped to the
+def settle_case_solves(task_path, step_id, solves):
+    """Study-harness issue 52: the case step `step_id`'s admission (its own
+    `used` row, told by the runner's call id, `runner.step_call_prefix`; a
+    retried step's latest) reserved its baseline and spent `solves` baseline
+    LPs (its record's `baseline_solves`: 0 on a cache hit), clamped to the
     reservation; `run.budget.used.solves` follows. The settled solves, or
-    None when no such row is there (nothing reserved, nothing to settle)."""
+    None when the step has no reserving row (nothing to settle)."""
+    from harness.runner import step_call_prefix
     from services import assistant_tasks
+    prefix = step_call_prefix(step_id)
     with assistant_tasks._LOCK:
         envelope = _load(task_path)
         row = next((a for a in reversed((envelope or {}).get("audit", []))
-                    if a.get("event") == "used" and a.get("tool") in CASE_TOOLS), None)
+                    if a.get("event") == "used" and a.get("tool") in CASE_TOOLS
+                    and str(a.get("call_id", "")).startswith(prefix)), None)
         if row is None or type(row.get("reserved")) is not int:
             return None
-        spent = max(0, min(int(solves), row["reserved"]))
-        if row.get("solves") != spent:
-            row["solves"] = spent
+        settled = max(0, min(solves, row["reserved"]))
+        if row.get("solves") != settled:
+            row["solves"] = settled
             _save(task_path, envelope)
             _count_solves(task_path, envelope)
-        return spent
+        return settled
 
 
 def case_baseline_reserved(task_id) -> bool:

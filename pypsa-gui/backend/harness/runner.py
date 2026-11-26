@@ -349,6 +349,12 @@ def _email(path, task, status, data_items=None, gaps=None):
 # ── The runner ───────────────────────────────────────────────────────────────
 
 
+def step_call_prefix(step_id) -> str:
+    """The start of each call id the runner dispatches for step `step_id`
+    (`Runner.dispatch`): an audit row is told to a step by it."""
+    return f"run-{step_id}-"
+
+
 def step_capture(tool_use_id, args, ctx):
     """Issue 07 B3b (GK B (33) A, C1-C2): the `write_guard` of a run's own
     solve step dispatched after its user card. Only the call that is this
@@ -1138,7 +1144,7 @@ class Runner:
         (its contextvars copied from the bound tick)."""
         from harness import eventlog, loop
         task_id = session.task_id
-        tool_use_id = f"run-{step['id']}-{uuid.uuid4().hex[:8]}"
+        tool_use_id = f"{step_call_prefix(step['id'])}{uuid.uuid4().hex[:8]}"
         locks = contextlib.ExitStack()
         refused = []
         before = []  # the project's fingerprint under this step's locks, before it runs

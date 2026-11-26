@@ -20,9 +20,9 @@ from services.results import baseline as B
 
 REF = "eh_concentrator_staged@2"
 PLAN_ROW = {"event": "used", "tool": "solve_queue_enqueue", "call_id": "s"}
-CASE_ROW = {"event": "used", "tool": run_ic.TOOL, "call_id": "c",
-            "reserved": run_envelope.CASE_BASELINE_SOLVES, "solves": run_envelope.CASE_BASELINE_SOLVES}
 TICKET = ("t1", "solve.2", "a1")
+CASE_ROW = {"event": "used", "tool": run_ic.TOOL, "call_id": "run-solve.2-0a1b2c3d",
+            "reserved": run_envelope.CASE_BASELINE_SOLVES, "solves": run_envelope.CASE_BASELINE_SOLVES}
 
 
 # ── the baseline reports the LPs it ran ─────────────────────────────────────
@@ -188,15 +188,27 @@ def test_a_record_that_does_not_say_keeps_the_whole_reservation(envelope, settle
 
 
 def test_the_settle_is_clamped_to_the_reservation_and_idempotent(envelope):
-    assert run_envelope.settle_case_solves("task.json", 7) == run_envelope.CASE_BASELINE_SOLVES
-    assert run_envelope.settle_case_solves("task.json", -1) == 0
-    assert run_envelope.settle_case_solves("task.json", 0) == 0
+    assert run_envelope.settle_case_solves("task.json", "solve.2", 7) == run_envelope.CASE_BASELINE_SOLVES
+    assert run_envelope.settle_case_solves("task.json", "solve.2", -1) == 0
+    assert run_envelope.settle_case_solves("task.json", "solve.2", 0) == 0
     assert envelope["counted"] == [1]  # recounted on a change only
 
 
+def test_only_the_steps_own_row_is_settled(envelope, settled):
+    """A later round's case (another step) or another step's row is never
+    settled from this step's record."""
+    later = {**CASE_ROW, "call_id": "run-solve.4-ffffffff"}
+    envelope["audit"].append(later)
+    run_ic.settle("task.json", TICKET, "ad:1", _record(baseline_solves=0), 1.0)
+    assert (envelope["audit"][1]["solves"], later["solves"]) == (0, run_envelope.CASE_BASELINE_SOLVES)
+    assert run_envelope.settle_case_solves("task.json", "solve.9", 0) is None
+    from harness.runner import step_call_prefix
+    assert CASE_ROW["call_id"].startswith(step_call_prefix("solve.2"))
+
+
 def test_a_case_with_nothing_reserved_settles_nothing(envelope, settled):
-    envelope["audit"][1] = {"event": "used", "tool": run_ic.TOOL, "call_id": "c"}
-    assert run_envelope.settle_case_solves("task.json", 1) is None
+    envelope["audit"][1] = {"event": "used", "tool": run_ic.TOOL, "call_id": CASE_ROW["call_id"]}
+    assert run_envelope.settle_case_solves("task.json", "solve.2", 1) is None
     run_ic.settle("task.json", TICKET, "ad:1", _record(baseline_solves=0), 1.0)
     assert settled[0][2]["solves"] == run_ic.SOLVES == 0
     assert run_envelope.solves_used(envelope) == 1

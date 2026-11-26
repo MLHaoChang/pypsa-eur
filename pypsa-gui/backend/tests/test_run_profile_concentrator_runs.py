@@ -164,7 +164,6 @@ def test_a_run_on_the_demo_data_reaches_the_hand_off(granted, rated, site, monke
     assert run["budget"]["used"]["solves"] == 1
 
 
-@pytest.mark.live_solve
 def _own_planned_stage_only(ctx):
     """The template's single owner owns every stage's builds; the test plans
     the first stage only, so the later stages' assets leave its value flows
@@ -186,6 +185,7 @@ def _own_planned_stage_only(ctx):
     cfg.finance["cod_by_asset"] = {a: d for a, d in cods.items() if str(d)[:4] in years}
 
 
+@pytest.mark.live_solve
 def test_a_v2_run_solves_its_case_against_the_site_today(granted, rated, baseline, site, monkeypatch):
     """Study-harness issue 52: @2's solve stage runs the case after the queued
     solve; the case re-solves its baseline (the site as today) on the run's

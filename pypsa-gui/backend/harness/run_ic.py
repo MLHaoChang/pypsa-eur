@@ -389,17 +389,17 @@ def reserved(path) -> int:
     return solves if type(solves) is int else SOLVES
 
 
-def spent(path, record, begun) -> int:
-    """The solves the case spent (issue 52): its own record's
-    `baseline_solves` (0 on a cache hit, the LPs run on a miss) settle the
-    run's reservation; a record that does not say, or is not the step's own,
+def spent_solves(path, step_id, record, begun) -> int:
+    """The solves the case step `step_id` spent (issue 52): its own record's
+    `baseline_solves` (0 on a cache hit, the LPs run on a miss) settle its
+    reservation; a record that does not say, or is not the step's own,
     keeps the whole reservation (`reserved`)."""
     from services import run_envelope
 
     solves = record.get("baseline_solves") if _own(record, begun) else None
     if type(solves) is int:
         try:
-            settled = run_envelope.settle_case_solves(path, solves)
+            settled = run_envelope.settle_case_solves(path, step_id, solves)
         except Exception:  # noqa: BLE001 -- unreadable envelope: keep the reservation
             logger.warning("run_ic: the case's solves could not be settled", exc_info=True)
             settled = None
@@ -413,7 +413,7 @@ def settle(path, ticket, job_id, record, begun):
     from services import assistant_tasks
 
     native, status, error = outcome(record, begun)
-    solves = spent(path, record, begun)
+    solves = spent_solves(path, ticket[1], record, begun)
     result = (
         {"study": STUDY, "started_at": begun, "solves": solves}
         if status == "completed"
