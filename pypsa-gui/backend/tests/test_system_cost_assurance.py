@@ -259,12 +259,12 @@ def test_dropping_a_class_from_the_basis_breaks_the_identity(cost_case, componen
 
 
 def test_the_residual_is_the_objective_minus_the_hand_basis(cost_case):
-    """An objective 0.0005 EUR above the hand basis (inside 1e-6 x 943) leaves 0.0005 EUR."""
+    """An objective 5e-7 EUR above the hand basis (inside 1e-9 x 943) leaves 5e-7 EUR."""
     ctx = cost_case()
-    ctx.network._objective = OBJECTIVE + 0.0005
+    ctx.network._objective = OBJECTIVE + 5e-7
     values, reasons = _checked(ctx, "network")
     assert reasons == {}
-    assert values["objective_residual"] == pytest.approx(0.0005, abs=1e-9)
+    assert values["objective_residual"] == pytest.approx(5e-7, abs=1e-11)
 
 
 @pytest.mark.parametrize(("factor", "answered"), [(1.0, True), (2.0, False)])
@@ -283,14 +283,15 @@ def test_the_residual_tolerance_boundary(cost_case, factor, answered):
 
 
 def test_the_tolerance_scales_with_one_below_a_unit_objective(cost_case):
-    """max(1, |objective|): a tiny objective is judged against an absolute 1e-6 EUR."""
+    """max(1, |objective|): below 1 EUR the bound is RESIDUAL_TOLERANCE EUR, and a residual
+    exactly on it passes (the hand basis is exactly 0, so the residual is exact: pins `<=`)."""
     raw = _raw(cost_case())
     for asset in raw["assets"]:
         asset["capital_cost"] = asset["fom_cost"] = 0.0
         asset["overnight_cost"] = None
         if asset["marginal"] is not None:
             asset["marginal"] = [0.0] * len(asset["marginal"])
-    raw["objective"] = 0.9 * system_cost.RESIDUAL_TOLERANCE
+    raw["objective"] = system_cost.RESIDUAL_TOLERANCE
     assert set(_reasons(raw).values()) == {None}
     raw["objective"] = 2 * system_cost.RESIDUAL_TOLERANCE
     assert set(_reasons(raw).values()) == {"objective_mismatch"}
@@ -312,10 +313,11 @@ def _reach(cost_case, monkeypatch, name):
     n = ctx.network
     if name == "unverified_solve":
         n.add("Load", "late", bus="B", p_set=1)
+    elif name == "objective_scaled":
+        monkeypatch.setattr(ctx.solver_state["solver_config"], "user_objective_scale", 2.0)
+        _rerecorded(ctx)  # the solve ran with this config
     elif name == "objective_not_recorded":
         n._objective = math.nan
-    elif name == "objective_scaled":
-        n._pypsa_gui_objective_scale = 2.0
     elif name == "objective_constant":
         n._objective_constant = 5.0
     elif name == "extra_objective_terms":
@@ -389,3 +391,81 @@ def test_grammar():
     assert scope["profile"] == system_cost.PROFILE and scope["entity_id"] == "network"
     carrier = assurance_scope.from_message("show system cost for carrier gas", "p1", {})
     assert carrier["profile"] == system_cost.PROFILE and carrier["entity_id"] == "gas"
+
+
+def _rerecorded(ctx):
+    workflow_tools._record_solve_inputs(ctx.network, ctx.solver_state["solver_config"])
+    return ctx
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        ("live_scale", "objective_scaled"),
+        ("auto_scale", "objective_scaled"),
+        ("pcs", "extra_objective_terms"),
+        ("commercial", "extra_objective_terms"),
+        ("modular", "mip_solve"),
+        ("inactive", "unmodelled_cost_terms"),
+        ("composite", "unmodelled_cost_terms"),
+        ("Generator:marginal_cost_quadratic", "unmodelled_cost_terms"),
+        ("Store:marginal_cost_storage", "unmodelled_cost_terms"),
+        ("StorageUnit:spill_cost", "unmodelled_cost_terms"),
+        ("Generator:stand_by_cost", "unmodelled_cost_terms"),
+        ("Link:start_up_cost", "unmodelled_cost_terms"),
+        ("Generator:shut_down_cost", "unmodelled_cost_terms"),
+        ("Generator:curtailment_cost", "unmodelled_cost_terms"),
+    ],
+)
+def test_each_sub_guard_withholds_every_figure(cost_case, monkeypatch, change, reason):
+    """One fixture per branch of a guard, so dropping any one of them fails a test."""
+    ctx = cost_case()
+    n = ctx.network
+    if change == "live_scale":
+        n._pypsa_gui_objective_scale = 2.0
+    elif change == "auto_scale":
+        monkeypatch.setattr(ctx.solver_state["solver_config"], "auto_objective_scale", True)
+        _rerecorded(ctx)
+    elif change == "pcs":
+        monkeypatch.setattr("services.solver.pcs_statcom.cost_terms", lambda n: {"PCS oversize": 1.0})
+    elif change == "commercial":
+        monkeypatch.setattr("services.commercial.cost_rows.commercial_cost_terms",
+                            lambda n, c, **k: {"items": [{"eur": 1.0}]})
+    elif change == "modular":
+        n.lines.loc["L", "s_nom_mod"] = 5.0
+        _rerecorded(ctx)
+    elif change == "inactive":
+        n.stores.loc["S", "active"] = False
+        _rerecorded(ctx)
+    elif change == "composite":
+        monkeypatch.setattr("services.asset_schema.derive.has_parts",
+                            lambda c, row: c == "StorageUnit")
+    else:
+        component, attr = change.split(":")
+        static = n.components[component].static
+        static[attr] = 0.0 if attr not in static else static[attr]
+        static.loc[static.index[-1], attr] = 1.0
+        _rerecorded(ctx)
+    assert set(_checked(ctx, "network")[1].values()) == {reason}
+
+
+def test_a_negative_weight_answers_nothing(cost_case):
+    raw = _raw(cost_case())
+    raw["objective_weight"][0] = -1.0
+    assert set(_reasons(raw).values()) == {"unverified_solve"}
+
+
+def test_a_priced_asset_without_dispatch_answers_nothing(cost_case):
+    raw = _raw(cost_case())
+    (link,) = [a for a in raw["assets"] if a["name"] == "K"]
+    link["dispatch"] = None
+    assert set(_reasons(raw).values()) == {"invalid_or_missing_raw_data"}
+
+
+def test_a_scenario_network_is_refused(cost_case, monkeypatch):
+    ctx = cost_case()
+    monkeypatch.setattr(pypsa.Network, "has_scenarios", property(lambda self: True))
+    with pytest.raises(ValueError) as error:
+        _raw(ctx)
+    assert error.value.args[0] == "unsupported_snapshot_scope"
+

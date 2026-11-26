@@ -26,12 +26,13 @@ import math
 from harness import profile_common
 
 PROFILE = "system-cost-breakdown/1"
-# Relative to max(1, |objective|). HiGHS's default primal and dual feasibility
-# tolerances are 1e-7, and the objective scale this basis admits is exactly 1,
-# so an exact LP optimum differs from the hand basis by about 1e-7 of the
-# objective; 1e-6 gives one order of headroom and still refuses a missing term
-# (the smallest per-class term in the hand LP is about 1e-3 of its objective).
-RESIDUAL_TOLERANCE = 1e-6
+# Relative to max(1, |objective|). The hand basis is evaluated on the solver's own
+# primal values (capacities and dispatch), so with the objective scale held at 1
+# it differs from the reported objective only by floating-point summation order,
+# about 1e-13 of the objective over the bounded population (MAX_ASSETS x
+# MAX_SNAPSHOTS terms). 1e-9 leaves that several orders of headroom and refuses
+# any missing term above a billionth of the objective.
+RESIDUAL_TOLERANCE = 1e-9
 HOURS_PER_YEAR = 8760.0
 MAX_ASSETS = 128
 # The component class, its capacity attribute and the dispatch its marginal cost multiplies.
@@ -51,6 +52,8 @@ UNMODELLED = (
     "stand_by_cost",
     "start_up_cost",
     "shut_down_cost",
+    # The app's curtailment penalty (services/solver/objective.py), a Generator column.
+    "curtailment_cost",
 )
 REFUSALS = frozenset(
     {
@@ -104,7 +107,9 @@ DISCLOSURE = (
     "System cost is capex (cost coefficient per modelled horizon times optimal capacity) plus "
     "objective-weighted opex, summed per carrier over Generators, Links, StorageUnits, Stores, Lines and "
     "Transformers. It is published only when the extendable capex plus all opex reproduces the LP "
-    "objective; non-extendable capex is reported but is not in the objective. Whole horizon only."
+    "objective; non-extendable capex is reported but is not in the objective. Whole horizon only. "
+    "An extendable asset with existing capacity, an overnight cost without its own discount rate and "
+    "finite lifetime, a composite asset, a curtailment penalty or a scaled objective withholds every figure."
 )
 
 
@@ -140,9 +145,13 @@ def _carriers(n):
 def source(ctx, entity):
     """Called under the network lock; every asset is captured, the entity filter comes later."""
     from harness.calculations import _number
+    from services.asset_schema.derive import has_parts
 
     n = ctx.network
     index = profile_common.single_period_index(n)
+    if getattr(n, "has_scenarios", False):
+        # Stochastic objectives weight each scenario by its probability; not modelled here.
+        raise ValueError("unsupported_snapshot_scope")
     if entity != "network":
         carriers = _carriers(n)
         variants = sorted(c for c in carriers if c != entity and c.casefold() == entity.casefold())
@@ -160,6 +169,9 @@ def source(ctx, entity):
             continue
         unmodelled = unmodelled or any(_nonzero(component, a, names) for a in UNMODELLED)
         if "active" in static and not static["active"].all():
+            unmodelled = True
+        if any(has_parts(component_class, static.loc[name]) for name in names):
+            # Composite rows are re-derived from their parts at solve time; this basis reads the columns.
             unmodelled = True
         if "committable" in static and static["committable"].any():
             mip = True
@@ -207,13 +219,30 @@ def source(ctx, entity):
         "objective_weight": [_number(v) for v in weights.reindex(index)],
         "objective": None if objective is None else _number(objective),
         "objective_constant": _number(getattr(n, "objective_constant", 0.0) or 0.0),
-        "objective_scale": _number(getattr(n, "_pypsa_gui_objective_scale", 1.0)),
+        "objective_scale": _objective_scale(ctx),
         "extra_objective_terms": _extra_terms(ctx),
         "mip": mip,
         "unmodelled_cost_terms": unmodelled,
         "assets": assets,
         "valid_solve": profile_common.lp_outputs_live(ctx),
     }
+
+
+def _objective_scale(ctx):
+    """The scale the solve applied: the live sentinel before it is reverted, else the recorded config.
+
+    The solver deletes `_pypsa_gui_objective_scale` after rescaling, so the config the solve
+    ran with is what persists; an automatic scale counts as unknown (None).
+    """
+    from harness.calculations import _number
+
+    live = getattr(ctx.network, "_pypsa_gui_objective_scale", None)
+    if live is not None:
+        return _number(live)
+    cfg = (ctx.solver_state or {}).get("solver_config")
+    if getattr(cfg, "auto_objective_scale", False):
+        return None
+    return _number(getattr(cfg, "user_objective_scale", 1.0))
 
 
 def _extra_terms(ctx):
@@ -251,7 +280,7 @@ def _guard(raw, weights):
     """The first reason the hand basis cannot stand for the objective, or None."""
     if not raw["valid_solve"] or not profile_common.finite(weights) or min(weights) < 0:
         return "unverified_solve"
-    if raw["objective"] is None or not math.isfinite(raw["objective"]):
+    if raw["objective"] is None:  # `_number` captures a NaN or infinite objective as None
         return "objective_not_recorded"
     if raw["objective_scale"] != 1.0:
         return "objective_scaled"

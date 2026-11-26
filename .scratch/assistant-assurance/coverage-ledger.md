@@ -945,5 +945,5 @@ Four verified rows in `pypsa-gui/backend/tests/assurance_acceptance/metric_ledge
 (capex, opex, system cost, objective residual), answer and route surfaces. GK B's plan GO
 (option a) names two S3 items that R3 does not build; they stay pending here:
 - pending: the objective-vs-cost clarification card (S3, G3: clarification choices pinned by exact list equality). Not built.
-- pending: objective-scale reversal under auto and user scale ≠ 1 (S3, G3). R3 refuses a scaled objective (`objective_scaled`) instead of reversing it.
+- pending: objective-scale reversal under auto and user scale ≠ 1 (S3, G3). R3 refuses a scaled objective (`objective_scaled`, read from the recorded solver config, since the solver deletes its live sentinel) instead of reversing it.
 
