@@ -424,3 +424,10 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 ## Standing rulings (GK A2 (8), recorded 2026-11-26)
 
 - A strength row (SCR, ESCR, WSCR) judges the finite worst over the outages that do not island the PoC. It names each islanding outage as not evaluated and caps its verdict at unknown while any exists; when every outage islands the PoC it reads unknown with no value. The loss-of-supply fail stays on the planning-criteria row. An islanding outage never prints as SCR 0 (GK A2 (8), #2038 B2; reconciles GC-03 H4 with GK B4).
+
+## Standing rulings (GK B (71), recorded 2026-11-26)
+
+- A PR that writes a new key into `network.meta` (exported to netCDF and bundles) redacts secret-like solver and user option values and lists the non-scalars it drops. It shows that `_network_input_fingerprint`, plain and exact, is unchanged by the key (GK B (71), #2014).
+- A bound or displayed-data view proves it calls the existing route function, with a byte-equal canonical-JSON parity test. Its binding's `input_sha256` is asserted equal to the plain fingerprint, and each auth or lock dependency gets a test that kills its removal (GK B (71), #2029).
+- A route that adds a POST, even an auth or account one, needs rows in both `write_surface_lock_policy` and `services/_project_write_rules.py` (`test_viewer_role_gate`). Run both at the trial merge (GK B (71), #1972 missed both, in turn).
+- A harness grant that leads to a Library write pins the Library ref by hash and version at admission, and the attach args carry that version. A test puts a foreign version under the granted name (GK B (71), #1967).
