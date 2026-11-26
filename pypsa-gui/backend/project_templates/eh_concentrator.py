@@ -504,6 +504,19 @@ def register(T) -> None:
     T.TEMPLATE_META[TID] = _meta(T)
 
 
+def _lole_goal_row() -> dict:
+    """The assumed reliability goal the Goal card and the study use for a
+    ``weak_flexible`` site (template-e2e 41); the same row the grid-readiness
+    sites carry (``eh_templates.grid_readiness_ledger``)."""
+    lole = 3.0
+    return {"item": "lole_goal", "label": "Reliability goal (LOLE)", "value": lole, "unit": "h/yr",
+            "source": "assumed",
+            "note": f"assumed: the recommended pack's target_lole_h ({lole:g} h/yr); the "
+                    "reliability study certifies the site against it",
+            "section": "scenarios", "panel": "simparams", "component": None, "entity": None,
+            "field": "target_lole_h"}
+
+
 def _meta(T) -> dict:
     """The concentrator's ``eh_template.json``."""
     S_py = {y: e - y for y, e in zip(YEARS, (*YEARS[1:], HORIZON_END))}
@@ -531,7 +544,7 @@ def _meta(T) -> dict:
                          for y in YEARS],
         "period_years": {str(y): S_py[y] for y in YEARS},
         "time_base": "year",
-        "ledger": _ledger(),
+        "ledger": [*_ledger(), _lole_goal_row()],
         "study_notes": [
             "Each period is one chronological year of hours, so the concentrate shed fills over 21 "
             "days and empties at each vessel.",
