@@ -420,3 +420,7 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 ## Standing rulings (GK A (37), recorded 2026-11-25)
 
 - A firm-capacity (reserve-margin) credit for supply that reaches the site only through a grid_import link is capped by that link, as a series: min(C_upstream, C_link) × a_upstream × a_link. The cap applies to the group behind each link, not to each generator, and uses each period's active link capacity. Which supply is behind a link is derived from topology, never from names. A copper-plate firm sum that credits supply beyond the PoC's rating is a defect (DC 01 PR2b-0).
+
+## Standing rulings (GK A2 (8), recorded 2026-11-26)
+
+- A strength row (SCR, ESCR, WSCR) judges the finite worst over the outages that do not island the PoC. It names each islanding outage as not evaluated and caps its verdict at unknown while any exists; when every outage islands the PoC it reads unknown with no value. The loss-of-supply fail stays on the planning-criteria row. An islanding outage never prints as SCR 0 (GK A2 (8), #2038 B2; reconciles GC-03 H4 with GK B4).
