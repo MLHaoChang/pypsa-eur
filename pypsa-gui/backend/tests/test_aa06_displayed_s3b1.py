@@ -675,7 +675,9 @@ def test_a_capex_read_claims_the_part_it_names_and_says_showing(client, solved, 
     assert ref == {key: ack["source_binding"][key]}
     turn.note_read("get_results", read, {"result_kind": kind})
     _ack_ok(client, ack)
-    assert navigation.display(turn, ack, wait=0)["say"] == "showing"
+    # S3b-2: the words name the part read, never the whole tab.
+    out = navigation.display(turn, ack, wait=0)
+    assert (out["say"], out["parts"]) == (f"showing {kind}", [kind])
 
 
 def test_a_capex_read_of_one_part_does_not_claim_the_other(client, solved):

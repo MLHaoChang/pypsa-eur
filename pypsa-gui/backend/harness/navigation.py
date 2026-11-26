@@ -407,7 +407,13 @@ def display(turn, acknowledgement, wait=ACK_WAIT_SECONDS):
             # A read names the parts it read (Capacity expansion: one of two).
             keys = tuple(k for k in keys if k in read)
         shown = {k: binding.get(k) for k in keys}
-        if read == shown:
+        if read == shown and len(keys) < len(adapter.ref_keys):
+            # A read of some parts of a multi-part view (Dispatch, Capacity
+            # expansion): the words name those parts, never the whole tab.
+            parts = [k.removesuffix("_sha256") for k in keys]
+            out["say"] = "showing " + ", ".join(parts)
+            out["parts"] = parts
+        elif read == shown:
             out["say"] = "showing"
         else:
             # The tab shows its own default view; the words describe the read.

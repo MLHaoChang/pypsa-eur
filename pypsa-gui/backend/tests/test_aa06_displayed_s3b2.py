@@ -764,7 +764,12 @@ def test_a_dispatch_read_claims_the_part_it_names(client, solved, kind):
     # The hash of the part named, and no claim on any other part.
     assert turn.reads["dispatch"] == {key: ack["source_binding"][key]}
     _ack_ok(client, ack)
-    assert navigation.display(turn, ack, wait=0)["say"] == "showing"
+    # The words name the one part read, never the whole tab.
+    assert navigation.display(turn, ack, wait=0) == {
+        "verification": "browser_displayed_data",
+        "say": f"showing {kind}",
+        "parts": [kind],
+    }
 
 
 def test_a_generators_and_a_storage_dispatch_read_say_showing(client, solved):
@@ -775,7 +780,34 @@ def test_a_generators_and_a_storage_dispatch_read_say_showing(client, solved):
     _read(turn, "storage_dispatch")
     assert set(turn.reads["dispatch"]) == {"storage_dispatch_sha256"}
     _ack_ok(client, ack)
-    assert navigation.display(turn, ack, wait=0)["say"] == "showing"
+    out = navigation.display(turn, ack, wait=0)
+    assert (out["say"], out["parts"]) == (
+        "showing storage_dispatch",
+        ["storage_dispatch"],
+    )
+
+
+def test_a_read_of_several_parts_names_each_and_all_parts_say_plain_showing(
+    client, solved
+):
+    """Two parts matched: both named. Every part matched: the whole view is
+    what was read, so the words say "showing" without a part list."""
+    turn, ack = _issue(solved, "dispatch")
+    binding = ack["source_binding"]
+    _ack_ok(client, ack)
+    two = ("generators_sha256", "loads_sha256")
+    turn.reads["dispatch"] = {k: binding[k] for k in two}
+    out = navigation.display(turn, ack, wait=0)
+    assert (out["say"], out["parts"]) == (
+        "showing generators, loads",
+        ["generators", "loads"],
+    )
+    refs = displayed_adapters.ADAPTERS["dispatch"].ref_keys
+    turn.reads["dispatch"] = {k: binding[k] for k in refs}
+    assert navigation.display(turn, ack, wait=0) == {
+        "verification": "browser_displayed_data",
+        "say": "showing",
+    }
 
 
 def test_a_dispatch_read_of_one_part_does_not_claim_another(client, solved):
