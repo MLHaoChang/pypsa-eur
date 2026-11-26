@@ -7,6 +7,7 @@ server hands to the ui_event frame: it either never ACKs (closed tab, or a
 newer navigation made the view stale so the frontend's `isCurrent()` is false)
 or ACKs late, after a newer navigation superseded it.
 """
+
 # ruff: noqa: F811 -- imported pytest fixtures
 import copy
 import threading
@@ -19,7 +20,13 @@ from harness.navigation import OrdinaryTurn
 from harness.session import ChatSession
 from services import assurance_records, chat_service, result_views
 from services.loadflow_summary import get_loadflow_view
-from tests.assurance_acceptance.support import OMIT, Harness, parse_sse, text_turn, tool_turn
+from tests.assurance_acceptance.support import (
+    OMIT,
+    Harness,
+    parse_sse,
+    text_turn,
+    tool_turn,
+)
 from tests.test_results_source_navigation import result_project  # noqa: F401
 from tests.test_workflow_tools import baseline, helpers_state  # noqa: F401
 
@@ -29,30 +36,42 @@ SUMMARY = {"panel_id": "results", "results_tab": "summary"}
 
 # ── Registry guard: displayed_data <=> an adapter exists ────────────────────
 
+
 def test_registry_matches_the_adapter_table():
     displayed_adapters.check_registry(result_views.RESULT_VIEWS)
-    assert {v.tab for v in result_views.RESULT_VIEWS
-            if v.verification == "displayed_data"} == set(displayed_adapters.ADAPTERS)
+    assert {
+        v.tab for v in result_views.RESULT_VIEWS if v.verification == "displayed_data"
+    } == set(displayed_adapters.ADAPTERS)
 
 
 def test_a_view_claiming_displayed_data_without_an_adapter_fails():
     import dataclasses
 
-    views = [dataclasses.replace(v, verification="displayed_data") if v.tab == "summary" else v
-             for v in result_views.RESULT_VIEWS]
+    views = [
+        dataclasses.replace(v, verification="displayed_data")
+        if v.tab == "summary"
+        else v
+        for v in result_views.RESULT_VIEWS
+    ]
     with pytest.raises(AssertionError, match="summary"):
         displayed_adapters.check_registry(views)
 
 
 def test_an_adapter_without_a_displayed_data_view_fails():
-    adapters = {**displayed_adapters.ADAPTERS, "emissions": displayed_adapters.ADAPTERS["loadflow"]}
+    adapters = {
+        **displayed_adapters.ADAPTERS,
+        "emissions": displayed_adapters.ADAPTERS["loadflow"],
+    }
     with pytest.raises(AssertionError, match="emissions"):
         displayed_adapters.check_registry(result_views.RESULT_VIEWS, adapters)
 
 
 # ── Load flow through the table equals the pre-table behaviour ──────────────
 
-def test_loadflow_issue_ack_and_read_are_unchanged_through_the_table(client, result_project):
+
+def test_loadflow_issue_ack_and_read_are_unchanged_through_the_table(
+    client, result_project
+):
     ctx = result_project[0]
     owner = assurance_records.actor_id()
     turn = OrdinaryTurn(ChatSession(owner_user_id=owner), ctx, 3)
@@ -60,38 +79,82 @@ def test_loadflow_issue_ack_and_read_are_unchanged_through_the_table(client, res
     action = navigation.issue(turn, {"kind": "navigate", **LOADFLOW})
     view = get_loadflow_view()
     # Issue: v2, the tab's default view's binding verbatim, the same fields.
-    assert set(action) == {"version", "action_id", "turn_id", "binding_generation", "target",
-                           "project_id", "project_name", "input_sha256", "source_binding"}
+    assert set(action) == {
+        "version",
+        "action_id",
+        "turn_id",
+        "binding_generation",
+        "target",
+        "project_id",
+        "project_name",
+        "input_sha256",
+        "source_binding",
+    }
     assert action["version"] == 2 and action["target"] == LOADFLOW
     assert action["source_binding"] == view["binding"]
     # ACK: the same re-read decides.
-    body = {k: action[k] for k in ("version", "action_id", "turn_id", "binding_generation",
-                                   "target", "source_binding")}
+    body = {
+        k: action[k]
+        for k in (
+            "version",
+            "action_id",
+            "turn_id",
+            "binding_generation",
+            "target",
+            "source_binding",
+        )
+    }
     response = client.post("/api/chat/ui-ack", json=body)
-    assert response.json() == {"version": 2, "action_id": action["action_id"],
-                               "outcome": "completed", "verification": "browser_displayed_data"}
+    assert response.json() == {
+        "version": 2,
+        "action_id": action["action_id"],
+        "outcome": "completed",
+        "verification": "browser_displayed_data",
+    }
     # note_read: the summary's ui_reference names source and window.
-    turn.note_read("get_loadflow_summary", {"status": "ok", "ui_reference": {
-        "results_tab": "loadflow", "source": "lopf", "window_from": 0, "window_to": 1}})
+    turn.note_read(
+        "get_loadflow_summary",
+        {
+            "status": "ok",
+            "ui_reference": {
+                "results_tab": "loadflow",
+                "source": "lopf",
+                "window_from": 0,
+                "window_to": 1,
+            },
+        },
+    )
     turn.note_read("get_loadflow_summary", {"status": "unavailable"})
     turn.note_read("get_results", {"status": "ok"})
-    assert turn.reads == {"loadflow": {"source": "lopf", "window_from": 0, "window_to": 1}}
+    assert turn.reads == {
+        "loadflow": {"source": "lopf", "window_from": 0, "window_to": 1}
+    }
     shown = {k: view["binding"][k] for k in ("source", "window_from", "window_to")}
     turn.reads["loadflow"] = dict(shown)
     assert navigation.display(turn, action, wait=0) == {
-        "verification": "browser_displayed_data", "say": "showing"}
+        "verification": "browser_displayed_data",
+        "say": "showing",
+    }
 
 
-def test_a_source_binding_for_a_tab_without_an_adapter_is_invalid(client, result_project):
-    body = {"version": 2, "action_id": "a", "turn_id": "t", "binding_generation": 1,
-            "target": SUMMARY,
-            "source_binding": copy.deepcopy(get_loadflow_view()["binding"])}
+def test_a_source_binding_for_a_tab_without_an_adapter_is_invalid(
+    client, result_project
+):
+    body = {
+        "version": 2,
+        "action_id": "a",
+        "turn_id": "t",
+        "binding_generation": 1,
+        "target": SUMMARY,
+        "source_binding": copy.deepcopy(get_loadflow_view()["binding"]),
+    }
     response = client.post("/api/chat/ui-ack", json=body)
     assert response.status_code == 422
     assert response.json()["detail"]["error_kind"] == "invalid_assurance_request"
 
 
 # ── Stream cases ────────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def stream(client, monkeypatch):
@@ -113,9 +176,17 @@ def stream(client, monkeypatch):
     def run(steps, browser=None):
         recording_issue.browser = browser
         response = harness.request(
-            [*[tool_turn("ui_open_panel", s, call_id=f"nav-{i}") for i, s in enumerate(steps)],
-             text_turn("Done.")],
-            assurance=OMIT, ui_ack=True, message="Open the load flow results.")
+            [
+                *[
+                    tool_turn("ui_open_panel", s, call_id=f"nav-{i}")
+                    for i, s in enumerate(steps)
+                ],
+                text_turn("Done."),
+            ],
+            assurance=OMIT,
+            ui_ack=True,
+            message="Open the load flow results.",
+        )
         assert response.status_code == 200, response.text[:400]
         return parse_sse(response.text), issued
 
@@ -125,34 +196,52 @@ def stream(client, monkeypatch):
 
 
 def _body(ack):
-    body = {k: ack[k] for k in ("version", "action_id", "turn_id", "binding_generation", "target")}
+    body = {
+        k: ack[k]
+        for k in ("version", "action_id", "turn_id", "binding_generation", "target")
+    }
     if ack["version"] == 2:
         body["source_binding"] = ack["source_binding"]
     return body
 
 
 def _results(frames):
-    return [d for e, d in frames if e == "tool_result" and d.get("tool_name") == "ui_open_panel"]
+    return [
+        d
+        for e, d in frames
+        if e == "tool_result" and d.get("tool_name") == "ui_open_panel"
+    ]
 
 
 def _display(result):
-    return (result.get("result") or {}).get("display") if isinstance(result.get("result"), dict) \
+    return (
+        (result.get("result") or {}).get("display")
+        if isinstance(result.get("result"), dict)
         else None
+    )
 
 
 def test_closed_tab_never_acks_so_the_tool_says_opened_and_the_record_stays_submitted(
-        client, result_project, stream, monkeypatch):
+    client, result_project, stream, monkeypatch
+):
     monkeypatch.setattr(navigation, "ACK_WAIT_SECONDS", 0.3)
     frames, issued = stream([LOADFLOW])
     events = [d for e, d in frames if e == "ui_event"]
-    assert len(events) == 1 and events[0]["acknowledgement"]["action_id"] == issued[0]["action_id"]
+    assert (
+        len(events) == 1
+        and events[0]["acknowledgement"]["action_id"] == issued[0]["action_id"]
+    )
     displays = [r for r in (_display(r) for r in _results(frames)) if r]
-    assert displays == [{"verification": "submitted", "say": "opened"}], _results(frames)
+    assert displays == [{"verification": "submitted", "say": "opened"}], _results(
+        frames
+    )
     record = client.get(f"/api/chat/navigation/{issued[0]['action_id']}").json()
     assert record["outcome"] == "submitted"
     # The tab is reopened after the record expired: its late ACK cannot complete.
     path = assurance_records._path(assurance_records.actor_id(), issued[0]["action_id"])
-    saved = assurance_records.load(assurance_records.actor_id(), issued[0]["action_id"], "ui_action")
+    saved = assurance_records.load(
+        assurance_records.actor_id(), issued[0]["action_id"], "ui_action"
+    )
     assurance_records.save({**saved, "expires_at": 0}, issued[0]["action_id"])
     assert path.parent.exists()
     late = client.post("/api/chat/ui-ack", json=_body(issued[0]))
@@ -161,7 +250,8 @@ def test_closed_tab_never_acks_so_the_tool_says_opened_and_the_record_stays_subm
 
 
 def test_newer_navigation_supersedes_so_a_late_ack_is_refused_and_stays_submitted(
-        client, result_project, stream, monkeypatch):
+    client, result_project, stream, monkeypatch
+):
     """The browser holds the first view's ACK (the user moved on, so the
     frontend's isCurrent() is false) and posts it only after the newer
     navigation is issued: 409, the first stays submitted and the tool says
@@ -178,6 +268,7 @@ def test_newer_navigation_supersedes_so_a_late_ack_is_refused_and_stays_submitte
             def post():
                 late.append(client.post("/api/chat/ui-ack", json=_body(ack)))
                 done.set()
+
             threading.Thread(target=post).start()
             done.wait(5)
 
