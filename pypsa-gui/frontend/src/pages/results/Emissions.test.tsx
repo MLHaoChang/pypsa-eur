@@ -13,6 +13,19 @@ vi.mock('../../api/simulation', async (importOriginal) => {
   return { ...actual, resultsApi: { ...actual.resultsApi, getEmissions: vi.fn() } }
 })
 
+// A5.2: the tab reads the bound view; the payload stays the mocked route's.
+const BINDING = vi.hoisted(() => ({
+  version: 1 as const, project_id: 'p-1', project_name: 'Demo', scope: 'current' as const,
+  view: 'emissions', input_sha256: 'a'.repeat(64), data_sha256: 'b'.repeat(64),
+}))
+vi.mock('../../api/displayedResults', async () => {
+  const { resultsApi: api } = await import('../../api/simulation')
+  return { displayedResultsApi: { emissions: async () => {
+    const data = await api.getEmissions()
+    return data ? { status: 'ok', data, binding: BINDING } : null
+  } } }
+})
+
 vi.mock('../../api/network', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/network')>()
   return { ...actual, networkApi: { ...actual.networkApi, getCarriers: vi.fn() } }

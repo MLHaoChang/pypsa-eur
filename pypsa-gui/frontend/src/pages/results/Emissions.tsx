@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { resultsApi } from '../../api/simulation'
+import { displayedResultsApi } from '../../api/displayedResults'
 import { networkApi } from '../../api/network'
 import type { Carrier } from '../../api/types'
 import { useUIStore } from '../../store/uiStore'
@@ -34,10 +34,12 @@ const capName = (c: { name: string; goal?: boolean }) => (c.goal ? CO2_LIMIT_CAP
 
 export default function Emissions() {
   const currentProject = useUIStore(s => s.currentProject)
-  const { data: emissions } = useQuery({
-    queryKey: nk(currentProject, 'results', 'emissions'),
-    queryFn: resultsApi.getEmissions,
+  // A5.2: the bound view, so a chat navigation can prove the figures shown.
+  const { data: displayed } = useQuery({
+    queryKey: nk(currentProject, 'results', 'displayed', 'emissions'),
+    queryFn: displayedResultsApi.emissions,
   })
+  const emissions = displayed?.data
   // Carrier intensities — used only to distinguish "genuinely clean" from
   // "nobody told the model what this fuel emits" when the total is 0.
   const { data: carriers = [] } = useQuery({
@@ -113,7 +115,8 @@ export default function Emissions() {
   const zeroUnexplained = view.total_tCO2 === 0 && !anyIntensity
 
   return (
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0">
+    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0"
+      data-result-tab="emissions" data-result-binding={JSON.stringify(displayed?.binding)}>
 
       {/* ── KPI strip ──────────────────────────────────────────── */}
       <section>
