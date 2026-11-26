@@ -436,3 +436,9 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 
 - A gate that withholds an unjudged run checks "not fresh", never "is stale": an uncompared or unknown verdict withholds (GK B2 (6), #1960 G5).
 - A line a report attributes to a run (a verdict, a horizon) prints only when it was recorded with that run (GK B2 (6), #2017 T1, #2026 V1).
+
+## Standing rulings (GK A (38), recorded 2026-11-26)
+
+- In the grid_import firm-capacity cap, a branch counts as a path only if its rating in the period is > 0: s_nom × min s_max_pu for Lines and Transformers, p_nom × p_max_pu plus the direction for Links. An extendable branch counts as a path when its *_nom_max > 0 (#1998).
+- The site is the eh_critical buses when any bus is flagged. Otherwise it is the chain ends: a grid_import's bus1 that is not the bus0 of another grid_import active in the period. A Load never makes a site (#1998, #2013).
+- A wording key on a scorecard or report is emitted only where it changes the text, so unchanged reports keep their evidence hash (#2013 L1).

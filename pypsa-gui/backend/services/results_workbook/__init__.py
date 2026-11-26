@@ -73,6 +73,8 @@ class WorkbookInputs:
     # (`business_case.runner.staleness`); the export never runs it (C7).
     bc_report: dict | None = None
     bc_state: dict | None = None
+    # The study's verdict line (`adequacy.verdict_line`): About says what Guided said.
+    verdict: str | None = None
     # The latest completed run's summary (`run_evidence.list_project_runs`), if any.
     run: dict | None = None
     # The base's sensitivity runs (`scenarios.gather_scenarios`), if it has any.
@@ -151,6 +153,7 @@ def _about(ws, inp: WorkbookInputs, statuses: list[tuple[str, str, str]], figs) 
         ("Generated at", datetime.now(UTC).isoformat(timespec="seconds")),
         ("Run", run.get("run_id") or "not recorded"),
         ("Run finished at", run.get("finished_at") or "not recorded"),
+        *([("Verdict", inp.verdict)] if inp.verdict else []),
         ("Results", _freshness_text(inp)),
         ("Input fingerprint", meta.get("assistant_solve_input_fingerprint")),
         ("Workflow", flow_scope.preset_label(inp.template)),

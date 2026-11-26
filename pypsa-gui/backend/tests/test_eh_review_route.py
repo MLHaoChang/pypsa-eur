@@ -261,3 +261,34 @@ def test_a_study_clears_an_earlier_stored_report_so_a_raised_study_is_204(
     assert rec["status"] == "failed" and "after the clear" in (rec["error"] or "")
     r = client.get(REVIEW_URL)
     assert r.status_code == 204, r.text
+
+
+@pytest.mark.live_solve
+def test_the_workbook_about_carries_the_real_study_verdict(
+        client, install_network, session_ctx):
+    """template-e2e 46: the real review over a held study built by the runner (not a stub): About's
+    Verdict row is the lead of what the Guided card reads; a cleared report (stale) gives none."""
+    import io
+
+    from openpyxl import load_workbook
+
+    from services.adequacy.verdict_line import verdict_line
+
+    _setup(client, install_network)
+    r = client.post(STUDY_URL, json={
+        "archetype": "weak_flexible",
+        "stages": ["apply_pack", "ens_solve", "assemble"]})
+    assert r.status_code == 200, r.text
+    assert _poll(client)["status"] == "done"
+    expected = verdict_line(client.get(REVIEW_URL).json()["summary"])
+    assert expected
+
+    def about():
+        w = client.get("/api/results/workbook.xlsx")
+        assert w.status_code == 200, w.text
+        sheet = load_workbook(io.BytesIO(w.content))["About"]
+        return {row[0].value: row[1].value for row in sheet.iter_rows() if row[0].value}
+
+    assert about()["Verdict"] == expected
+    session_ctx(client).solver_state.pop(EH_REPORT_STORE_KEY, None)  # a later solve cleared the report
+    assert "Verdict" not in about()

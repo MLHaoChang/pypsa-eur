@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vitest'
 import type { EhReferenceDesignReport, EhReview } from '../../api/simulation'
 import { headline, riskName } from './headline'
+import verdictLines from '../../../../backend/tests/data/verdict_line_cases.json'
 
 type OkReview = Extract<EhReview, { status: 'ok' }>
 
@@ -193,4 +194,12 @@ describe('headline and Expert share one set of verdict words (EXPERT-GUIDED-1)',
       expect(headline(review({ verdict, mc_lole_h_per_year: 4, target_lole_h: 3 }), r)
         .startsWith(words)).toBe(true)
     })
+})
+
+// The workbook's About "Verdict" row is the lead of this sentence (backend verdict_line.py); both
+// tests read the same cases, so the two cannot drift (template-e2e 46).
+describe('headline opens with the workbook verdict line', () => {
+  it.each(verdictLines)('$lead', ({ summary, lead }) => {
+    expect(headline(review(summary as OkReview['summary']), report()).startsWith(lead)).toBe(true)
+  })
 })

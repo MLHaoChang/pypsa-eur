@@ -109,7 +109,7 @@ COPT = {"screening_lole": (2.5, "h"), "screening_eue": (122.5, "MWh"), "screenin
 # and the SSTI UIF, series-resonance and SSCI screens before any campus run), not scalar (the peak, oscillation, LOLE, harmonic distortion, flicker,
 # current distortion) or categorical (frequency support, four dynamic rows, grid former, ride-through).
 GRID = {"checked_pass": (1, "rows"), "checked_warn": (1, "rows"), "checked_fail": (0, "rows"),
-        "not_checked": (23, "rows")}
+        "not_checked": (27, "rows")}
 # Computed on demand from the current network or saved files: nothing to go stale.
 ON_DEMAND = {"copt-screening/1", "grid-readiness/1"}
 PROFILE_METRICS = {

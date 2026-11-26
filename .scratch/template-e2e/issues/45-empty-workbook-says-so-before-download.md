@@ -3,7 +3,7 @@
 
 # 45 An empty results workbook says so before any download starts
 
-Status: ready-for-agent
+Status: done
 Source: template-e2e 30 (#1963), acceptance box 2, second half.
 
 ## What
