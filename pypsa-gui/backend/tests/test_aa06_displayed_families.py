@@ -428,6 +428,7 @@ def test_the_served_data_keeps_the_routes_key_order_and_only_the_hash_sorts(
     data = response.json()["data"]
     assert list(data) == ["z_first", "a_last"]
     assert list(data["z_first"]) == ["solar", "grid"]
-    assert response.json()["binding"]["data_sha256"] == hashlib.sha256(
-        canonical(payload).encode()
-    ).hexdigest()
+    assert (
+        response.json()["binding"]["data_sha256"]
+        == hashlib.sha256(canonical(payload).encode()).hexdigest()
+    )
