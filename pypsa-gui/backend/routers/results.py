@@ -3046,14 +3046,16 @@ def _workbook_project(run):
             return None
 
 
-def _workbook_verdict(held: dict) -> str | None:
-    """The held study's verdict line for About, or None when its review is missing or not of this solve
-    (the same review the Guided Results card reads, template-e2e 46)."""
+def _workbook_verdict(store: dict, record) -> str | None:
+    """The finished study's verdict line for About, or None when its review is missing or stale. Called
+    only when `study_solve.fallback()` returned the study's solve: a done, unedited study with no live
+    dispatch, whose report sits in the context's store (`held["state"]` has only the ENS solve's side
+    results, the report is written to the store later). The same review the Guided Results card reads."""
     from services.adequacy.eh_review import review_latest
     from services.adequacy.verdict_line import verdict_line
 
     try:
-        review = review_latest(held, None)
+        review = review_latest(store, record if isinstance(record, dict) else None)
     except Exception:  # noqa: BLE001 - the workbook never fails for want of a verdict
         logger.info("results workbook: no verdict line", exc_info=True)
         return None
@@ -3264,7 +3266,7 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
     runs = [latest] if latest is not None else []
     # Only a held study's own solve has a verdict to show: a live LOPF workbook is not the study's run
     # (the study solves a private copy), whatever order the two ran in (GK B2 V1).
-    verdict = _workbook_verdict(held) if study is not None else None
+    verdict = _workbook_verdict(_state, get_eh_study()) if study is not None else None
     project = PyPSAService.get_loaded_project()
     report = load_ic_report(_state)
     case_state = None
