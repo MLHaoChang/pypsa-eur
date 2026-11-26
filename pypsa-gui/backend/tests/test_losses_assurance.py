@@ -450,3 +450,41 @@ def test_the_record_holds_no_number_for_a_member_that_is_not_complete(losses_cas
         "state": "complete",
         "values": [0.0, 0.0, 0.0],
     }
+
+
+def test_a_window_without_the_peak_snapshot_has_its_own_peak(losses_case):
+    # L1 = 1, 2, 0.5 peaks at snapshot 1. The last snapshot alone: 2 x 0.5 = 1 MWh, peak 0.5 MW.
+    values, _ = _checked(
+        losses_case(), "L1", (STAMPS[2].isoformat(), STAMPS[2].isoformat())
+    )
+    assert values == {"loss_energy": 1.0, "peak_loss": 0.5}
+
+
+@pytest.mark.parametrize("bad", [None, math.nan, math.inf])
+def test_a_missing_or_non_finite_weight_answers_nothing(losses_case, bad):
+    raw = calculations.scoped_source(
+        losses_case(), {"profile": losses.PROFILE, "entity_id": "network"}
+    )
+    raw["energy_weight"][1] = bad
+    facts, slots = losses.calculate(
+        raw, {"profile": losses.PROFILE, "entity_id": "network"}
+    )
+    assert facts == [] and {s["reason"] for s in slots} == {"unverified_solve"}
+
+
+def test_a_load_population_above_the_cap_is_refused(losses_case, monkeypatch):
+    ctx = losses_case()
+    monkeypatch.setattr(losses, "MAX_LOADS", 0)  # one Load here
+    with pytest.raises(ValueError, match="unsupported_branch_population"):
+        calculations.scoped_source(
+            ctx, {"profile": losses.PROFILE, "entity_id": "network"}
+        )
+    monkeypatch.setattr(losses, "MAX_LOADS", 1)
+    calculations.scoped_source(ctx, {"profile": losses.PROFILE, "entity_id": "network"})
+
+
+def test_an_lp_record_kept_beside_a_flow_is_refused(losses_case):
+    ctx = losses_case()
+    ctx.solver_state["lopf_results"] = {}  # the LP snapshot a power flow keeps, alone
+    with pytest.raises(ValueError, match="ac_pf_present"):
+        calculations.scoped_source(ctx, {"profile": losses.PROFILE, "entity_id": "L1"})
