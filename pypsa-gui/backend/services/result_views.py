@@ -12,8 +12,9 @@ component) names it in `needs`; the model resolves that before reading.
 
 `verification` is the strongest proof the browser can give today:
 `displayed_data` means a source-bound (v2) ACK of the exact data shown;
-`mounted_view` means the tab mounted, not which data it rendered. Only load
-flow has a displayed-data adapter; the words say "showing" only with that.
+`mounted_view` means the tab mounted, not which data it rendered. A view is
+`displayed_data` exactly when `harness/displayed_adapters.py` has an adapter
+for its tab (`check_registry` is the guard); the words say "showing" only then.
 
 `historical_section` names the run-evidence section that keeps this view for
 past runs. None means past runs refuse it; current results never stand in.
