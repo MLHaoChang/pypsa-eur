@@ -541,7 +541,6 @@ REVIEWED = {
             ("grid-readiness/1", "checked_pass"),
             ("grid-readiness/1", "checked_warn"),
             ("grid-readiness/1", "checked_fail"),
-            ("investment-case/1", "project_irr"),
             ("network-linear-cost/1", "dispatch_energy"),
             ("network-linear-cost/1", "marginal_expenditure"),
             ("network-linear-cost/1", "peak_dispatch"),
@@ -620,28 +619,36 @@ def test_independent_domain_approval_stays_false():
 
 # Profiles whose oracle tests compare at the constant their rows name. The other
 # profiles' oracle tests use literal tolerances; pinning them is not done here.
-TOLERANCE_PINNED = (
-    "energy-balance/1",
-    "branch-losses/1",
-    "system-cost-breakdown/1",
-    "renewable-share/1",
-)
-
-
-def test_a_named_tolerance_is_the_one_its_oracle_test_uses(ledger):
-    """The constant a row names appears in the module of its oracle test."""
-    rows, _ = ledger
+def unpinned_reviews(rows) -> list[str]:
+    """Reviewed rows whose named tolerance constant does not appear in their oracle test's module."""
     off = []
     for (profile, metric), (row, _) in sorted(rows.items()):
-        match = NAMED_TOLERANCE.fullmatch(row["tolerance"])
-        if profile not in TOLERANCE_PINNED or row["oracle"] is None:
+        if row.get("domain_review", "pending") == "pending" or row["oracle"] is None:
             continue
+        match = NAMED_TOLERANCE.fullmatch(row["tolerance"])
         if match is None:
             continue  # "exact" or ulp:<n>: no constant to name
         test_file = REPO / row["oracle"].split("::")[0]
         if match[2] not in test_file.read_text():
             off.append(f"{profile}/{metric}: {match[2]} not in {test_file.name}")
+    return off
+
+
+def test_a_reviewed_row_names_the_tolerance_its_oracle_test_uses(ledger):
+    """A row holds a gk-b sha only when the constant it names appears in its oracle test's module."""
+    off = unpinned_reviews(ledger[0])
     assert off == [], "\n".join(off)
+
+
+def test_a_review_on_an_unpinned_row_is_refused(ledger):
+    rows, _ = ledger
+    pair = ("investment-case/1", "project_irr")  # IRR_TOLERANCE, unnamed in its test (issue 29)
+    row, path = rows[pair]
+    assert row["domain_review"] == "pending"
+    reviewed = {**rows, pair: ({**row, "domain_review": R2_OK}, path)}
+    assert unpinned_reviews(reviewed) == [
+        "investment-case/1/project_irr: IRR_TOLERANCE not in test_investment_assurance.py"
+    ]
 
 
 # ── pending metrics with no checked profile (issue 10 R5) ────────────────
