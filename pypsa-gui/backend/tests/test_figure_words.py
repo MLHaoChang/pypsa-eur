@@ -53,7 +53,9 @@ def test_units_and_bases_take_the_report_currency_and_never_a_silent_euro():
         FW.basis("lcoe_real", "USD", "2024 USD")
         == "investment case · real basis, 2024 USD"
     )
-    assert "None" not in FW.basis("lcoe_real", "USD")  # no money words: nothing, never "None"
+    assert "None" not in FW.basis(
+        "lcoe_real", "USD"
+    )  # no money words: nothing, never "None"
     # only the study's TEA figure is in euro by construction (`cost_at_target_eur`)
     euro = {
         fid for fid, f in FW.FIGURES.items() if "€" in json.dumps(f, ensure_ascii=False)
@@ -298,3 +300,31 @@ def test_each_contract_label_is_the_ruled_name_or_a_recorded_divergence():
             assert label != ruled and (repo / ticket).is_file(), key
         else:
             assert definition["label"] == ruled, key
+
+
+# ── the money year (finance/report.py helpers, GK B (72) ruling A) ──────────
+
+
+def test_the_money_year_is_the_base_year_unless_none_is_stated():
+    from services.finance.report import money_year
+
+    assert money_year(2020, 2027) == 2027
+    assert money_year(2024, 2024) == 2024
+    assert money_year(2024, None) == 2024
+    assert money_year(None, 2027) is None
+
+
+def test_the_money_words_follow_the_engine_basis():
+    from types import SimpleNamespace
+
+    from services.finance.report import basis_statement, money_words
+
+    assert money_words("USD", 2020, 2027) == "costs in real 2027 USD (2020 price data)"
+    assert money_words("USD", 2024, 2024) == "2024 USD"
+    assert money_words("USD", 2024) == "2024 USD"
+    assert money_words("USD", None, 2027) == "USD (currency year not stated)"
+    fin = SimpleNamespace(currency="USD", currency_year=2020, price_basis="nominal")
+    assert (
+        basis_statement(fin, 2027)
+        == "nominal basis, costs in real 2027 USD (2020 price data)"
+    )
