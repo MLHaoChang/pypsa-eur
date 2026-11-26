@@ -2560,10 +2560,10 @@ def _gc03_failed(what: str, error: dict) -> str:
             else f"The {what} screen could not run, and the run gave no reason")
 
 
-def _gc03_missing(run: pathlib.Path, what: str) -> str:
-    from gridspine.drivers.campus_study import CAMPUS_YAML
-
-    if (run / CAMPUS_YAML).is_file():
+def _gc03_missing(run: pathlib.Path, what: str, campus_yaml: str) -> str:
+    """Why a GC-03 screen has no record: ``campus_yaml`` (``campus_study.CAMPUS_YAML``, imported by the
+    caller under its ImportError guard) marks a run from before the screen."""
+    if (run / campus_yaml).is_file():
         return f"This campus run is from before the {what}: rerun the campus study"
     return f"No campus run with the {what} yet: run the campus study"
 
@@ -2626,7 +2626,7 @@ def _planning_judged(inp: _Inputs) -> list[dict]:
                   or f"{_profile_title(inp)}: thermal, voltage and angle limits after each contingency")
     try:
         ce, run = _gc03_run(inp)
-        from gridspine.drivers.campus_study import PLANNING_CSV
+        from gridspine.drivers.campus_study import CAMPUS_YAML, PLANNING_CSV
     except ImportError as exc:  # pragma: no cover - build-shape branch
         return [_row(PLANNING_ID, _PLANNING_REQ, project_value=None, verdict="unknown", assumed=True,
                      note=f"The planning screen needs gridspine ({exc})", **common)]
@@ -2638,7 +2638,7 @@ def _planning_judged(inp: _Inputs) -> list[dict]:
                      **common)]
     if not isinstance(meta, dict):
         return [_row(PLANNING_ID, _PLANNING_REQ, project_value=None, verdict="unknown", assumed=True,
-                     note=_gc03_missing(run, "planning screen"), **common)]
+                     note=_gc03_missing(run, "planning screen", CAMPUS_YAML), **common)]
     try:
         frame = pd.read_csv(run / PLANNING_CSV)
     except (OSError, ValueError):
@@ -2718,7 +2718,7 @@ def _strength_rows(inp: _Inputs) -> list[dict]:
     target = _target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"), "eh_sk_mva")
     try:
         ce, run = _gc03_run(inp)
-        from gridspine.drivers.campus_study import STRENGTH_CSV, STRENGTH_GROUPS_CSV
+        from gridspine.drivers.campus_study import CAMPUS_YAML, STRENGTH_CSV, STRENGTH_GROUPS_CSV
     except ImportError as exc:  # pragma: no cover - build-shape branch
         ce = run = None
         reason = f"The strength screen needs gridspine ({exc})"
@@ -2730,7 +2730,7 @@ def _strength_rows(inp: _Inputs) -> list[dict]:
         if isinstance(error, dict):
             reason = _gc03_failed("strength", error)
         elif not isinstance(meta, dict):
-            reason = _gc03_missing(run, "strength screen")
+            reason = _gc03_missing(run, "strength screen", CAMPUS_YAML)
         elif meta.get("verdict") == ce.STRENGTH_NOT_EVALUATED:
             reason = f"{meta.get('note') or 'There is no grid infeed'}. Strength is not evaluated."
         else:
