@@ -48,12 +48,12 @@
     "formula": "the unique r with sum over k of project_post_tax[k] / (1 + r)^k = 0",
     "validity": "a current investment-case report (else investment_case_not_current); finite cash (else cash_not_established); the figure must reproduce the report's headline (headline_not_established, headline_mismatch). Refusals: network_scope_required, unsupported_snapshot_scope; a unique bracketed root, else irr_not_unique / irr_not_bracketed",
     "tolerance": "harness.investment_calculations:IRR_TOLERANCE",
-    "oracle": null,
-    "status": "pending",
+    "oracle": "pypsa-gui/backend/tests/test_investment_assurance.py::test_project_irr_of_one_sign_change_is_the_hand_root",
+    "status": "verified",
     "surfaces": {
      "answer": {
-      "status": "pending",
-      "test": null
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_investment_assurance.py::test_project_irr_of_one_sign_change_is_the_hand_root"
      }
     }
    }

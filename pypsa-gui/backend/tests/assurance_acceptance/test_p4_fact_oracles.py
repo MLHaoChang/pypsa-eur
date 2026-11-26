@@ -54,6 +54,11 @@ WEIGHTS = {
         "objective": [0.5, 2.0, 1.5],
         "stores": [4.0, 0.25, 1.0],
     },
+    "hand_losses": {
+        "generators": [2.0, 1.0, 3.0],
+        "objective": [0.5, 2.0, 1.5],
+        "stores": [4.0, 0.25, 1.0],
+    },
     "grid": {
         "generators": [2.0, 1.0, 3.0],
         "objective": [1.5, 0.5, 2.0],
@@ -232,6 +237,12 @@ CASES = [
         True,
     ),
     (
+        "branch-losses/1",
+        "loss_energy",
+        lambda ctx, **k: oracle.loss_energy(ctx.network, **k),
+        True,
+    ),
+    (
         "capacity/1",
         "optimal_capacity",
         lambda ctx, **k: oracle.optimal_capacity(ctx.network, "G2"),
@@ -292,8 +303,8 @@ def test_one_oracle_per_profile_module():
         for line in pathlib.Path(oracle.__file__).read_text().splitlines()
         if line.startswith("# ") and line.endswith(".py")
     }
-    assert len(modules) == len(CASES) == 16
-    assert len({profile for profile, *_ in CASES}) == 16
+    assert len(modules) == len(CASES) == 17
+    assert len({profile for profile, *_ in CASES}) == 17
 
 
 @pytest.mark.parametrize(

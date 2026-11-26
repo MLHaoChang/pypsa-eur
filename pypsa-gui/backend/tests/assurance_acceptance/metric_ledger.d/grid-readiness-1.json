@@ -6,12 +6,12 @@
     "formula": "count of rows checked with verdict pass",
     "validity": "counts every scorecard row once; a row is checked only when its stored figure re-judges to the stored verdict under the code's own rule (else boundary_disagreement, rule_mismatch, unknown, not_scalar, categorical: not_checked). Refusals: limits_changed_during_read, network_scope_required, no_saved_project, unknown_grid_code_profile, unsupported_snapshot_scope",
     "tolerance": "exact",
-    "oracle": null,
-    "status": "pending",
+    "oracle": "pypsa-gui/backend/tests/test_grid_readiness_assurance.py::test_hand_rows_give_hand_counts_with_boundaries_on_the_documented_side",
+    "status": "verified",
     "surfaces": {
      "answer": {
-      "status": "pending",
-      "test": null
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_grid_readiness_assurance.py::test_hand_rows_give_hand_counts_with_boundaries_on_the_documented_side"
      }
     }
    },
@@ -20,12 +20,12 @@
     "formula": "count of rows checked with verdict warn",
     "validity": "counts every scorecard row once; a row is checked only when its stored figure re-judges to the stored verdict under the code's own rule (else boundary_disagreement, rule_mismatch, unknown, not_scalar, categorical: not_checked). Refusals: limits_changed_during_read, network_scope_required, no_saved_project, unknown_grid_code_profile, unsupported_snapshot_scope",
     "tolerance": "exact",
-    "oracle": null,
-    "status": "pending",
+    "oracle": "pypsa-gui/backend/tests/test_grid_readiness_assurance.py::test_hand_rows_give_hand_counts_with_boundaries_on_the_documented_side",
+    "status": "verified",
     "surfaces": {
      "answer": {
-      "status": "pending",
-      "test": null
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_grid_readiness_assurance.py::test_hand_rows_give_hand_counts_with_boundaries_on_the_documented_side"
      }
     }
    },
@@ -34,12 +34,12 @@
     "formula": "count of rows checked with verdict fail",
     "validity": "counts every scorecard row once; a row is checked only when its stored figure re-judges to the stored verdict under the code's own rule (else boundary_disagreement, rule_mismatch, unknown, not_scalar, categorical: not_checked). Refusals: limits_changed_during_read, network_scope_required, no_saved_project, unknown_grid_code_profile, unsupported_snapshot_scope",
     "tolerance": "exact",
-    "oracle": null,
-    "status": "pending",
+    "oracle": "pypsa-gui/backend/tests/test_grid_readiness_assurance.py::test_hand_rows_give_hand_counts_with_boundaries_on_the_documented_side",
+    "status": "verified",
     "surfaces": {
      "answer": {
-      "status": "pending",
-      "test": null
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_grid_readiness_assurance.py::test_hand_rows_give_hand_counts_with_boundaries_on_the_documented_side"
      }
     }
    },
