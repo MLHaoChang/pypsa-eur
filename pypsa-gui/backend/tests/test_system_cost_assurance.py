@@ -579,3 +579,10 @@ def test_a_scenario_network_is_refused(cost_case, monkeypatch):
     with pytest.raises(ValueError) as error:
         _raw(ctx)
     assert error.value.args[0] == "unsupported_snapshot_scope"
+
+
+def test_a_residual_of_a_hundred_millionth_is_refused(cost_case):
+    """1e-8 x the objective is inside a 1e-6 bound but outside RESIDUAL_TOLERANCE (1e-9)."""
+    ctx = cost_case()
+    ctx.network._objective = OBJECTIVE * (1 + 1e-8)
+    assert set(_checked(ctx, "network")[1].values()) == {"objective_mismatch"}
