@@ -61,6 +61,8 @@ REASONS = frozenset(
         "unsupported_supply_path",
         "unserved_energy_not_modelled",
         "unsupported_population",
+        "carrier_missing",
+        "no_generation",
         "no_electricity_served",
         "nonrenewable_exceeds_served",
     }
@@ -129,6 +131,7 @@ def source(ctx, entity):
     classes = classify(n)
     weights = n.snapshot_weightings["generators"].reindex(index)
     nonren = [str(g) for g in classes["nonren_generators"]]
+    renewable = [str(g) for g in classes["renewable_generators"]]
     loads = [str(l) for l in classes["loads"]]
     return {
         "version": 1,
@@ -145,7 +148,17 @@ def source(ctx, entity):
         "loads": {l: _column(n.loads_t.p, l, index) for l in loads}
         if len(loads) <= MAX_MEMBERS
         else None,
-        "renewable_generators": len(classes["renewable_generators"]),
+        "renewable_generators": {
+            g: _column(n.generators_t.p, g, index) for g in renewable
+        }
+        if len(renewable) <= MAX_MEMBERS
+        else None,
+        # A blank or NaN carrier would be classified non-renewable by default; it is not guessed.
+        "carrier_missing": sorted(
+            str(g)
+            for g, c in n.generators["carrier"].items()
+            if not isinstance(c, str) or not c.strip() or c.strip().casefold() == "nan"
+        ),
         "valid_solve": profile_common.lp_outputs_live(ctx),
     }
 
@@ -154,8 +167,15 @@ def _guard(raw, weights):
     """The first reason the plain basis cannot stand for the population, or None."""
     if not raw["valid_solve"] or not profile_common.finite(weights) or min(weights) < 0:
         return "unverified_solve"
-    if raw["unread"] or raw["generators"] is None or raw["loads"] is None:
+    if (
+        raw["unread"]
+        or raw["generators"] is None
+        or raw["loads"] is None
+        or raw["renewable_generators"] is None
+    ):
         return "unsupported_population"
+    if raw["carrier_missing"]:
+        return "carrier_missing"
     if raw["withholding"]:
         return "unsupported_supply_path"
     if raw["slacks_removed"]:
@@ -190,8 +210,27 @@ def calculate(raw, scope):
             w * p[a + i] for p in raw["loads"].values() for i, w in enumerate(weights)
         )
         available = {"nonrenewable_energy": nonren, "electricity_used": served}
+        # Renewable output only decides whether anything was generated; a value the
+        # route ignores (NaN on a renewable column) cannot prove output was zero.
+        renewable = [
+            None if p is None else p[a + i]
+            for p in raw["renewable_generators"].values()
+            for i in range(len(weights))
+        ]
+        generated = nonren + math.fsum(
+            w * max(p[a + i], 0.0)
+            for p in raw["renewable_generators"].values()
+            for i, w in enumerate(weights)
+            if p is not None and p[a + i] is not None
+        )
         if served <= NEAR_ZERO:
             reasons["renewable_share"] = "no_electricity_served"
+        elif generated <= NEAR_ZERO:
+            # Use met from storage alone: the share of a zero generation is undefined.
+            unknown = any(v is None for v in renewable)
+            reasons["renewable_share"] = (
+                "invalid_or_missing_raw_data" if unknown else "no_generation"
+            )
         elif nonren > served:
             # All non-renewable output counts as used on site; above the use it is undefined.
             reasons["renewable_share"] = "nonrenewable_exceeds_served"
@@ -206,6 +245,6 @@ def notes(raw, scope, label):
     count = lambda members: "too many" if members is None else len(members)  # noqa: E731
     return [
         f"{count(raw['generators'])} non-renewable Generators and {count(raw['loads'])} Loads counted; "
-        f"{raw['renewable_generators']} renewable Generators supply the rest.",
+        f"{count(raw['renewable_generators'])} renewable Generators supply the rest.",
         "The share is in percent; the difference between two shares is in percentage points.",
     ]

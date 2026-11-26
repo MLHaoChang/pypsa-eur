@@ -954,6 +954,8 @@ Three verified rows in `pypsa-gui/backend/tests/assurance_acceptance/metric_ledg
 The classification is `services/solver/renewable_fraction.py:classify` (renewable test
 `services/results/carrier_kpis.py:_is_renewable_carrier`), named and pinned by exact sets; the
 hand oracle uses generator weights 1, 0.5, 2. Percent versus percentage points is tested both ways.
+A blank or NaN Generator carrier withholds every figure (`carrier_missing`); load met with no
+generation (storage alone) withholds the share (`no_generation`).
 - pending: the populations R4 withholds (`unsupported_supply_path`: source and conversion Links,
   net clusters, injecting or unattributed sources, slack Generators) and runs with a removed slack
   (`unserved_energy_not_modelled`). The route answers these; the checked profile does not.

@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import ResultState from '../../components/ResultState'
 import { useQuery } from '@tanstack/react-query'
 import { displayedResultsApi } from '../../api/displayedResults'
 import { networkApi } from '../../api/network'
@@ -94,9 +95,9 @@ export default function Emissions() {
   // A failed read is not "not run yet" (rulings ai, aa): the error toast says why.
   if (isError) {
     return (
-      <p className="p-5 text-[12px] text-muted" role="status" data-testid="emissions-error">
-        The emissions could not be read. Try again in a moment.
-      </p>
+      <div className="p-6" data-testid="emissions-error">
+        <ResultState state="unavailable" reason="The emissions could not be read. Try again in a moment." />
+      </div>
     )
   }
   if (!emissions) {

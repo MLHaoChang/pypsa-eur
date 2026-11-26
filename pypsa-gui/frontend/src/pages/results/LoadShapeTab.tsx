@@ -99,12 +99,22 @@ export default function LoadShapeTab() {
   const [annualPeriod, setAnnualPeriod] = useState<number | null | undefined>(undefined)
   const { drag, range, setDrag, clear, whole } = useWindowRange()
 
-  const { data, isFetched } = useQuery({
-    queryKey: nk(currentProject, 'results', 'load_shape', period, range?.[0], range?.[1], week),
-    queryFn: () => loadShapeApi.get({ period, from: range?.[0], to: range?.[1], week }),
+  // A5.2: the bound view, so a chat navigation can prove the load shape shown.
+  const { data: displayed, isFetched, isError } = useQuery({
+    queryKey: nk(currentProject, 'results', 'displayed', 'loadshape', period, range?.[0], range?.[1], week),
+    queryFn: () => loadShapeApi.displayed({ period, from: range?.[0], to: range?.[1], week }),
     placeholderData: keepPreviousData,
   })
+  const data = displayed?.data
 
+  // A failed read is not "not run yet" (rulings ai, aa): the error toast says why.
+  if (isError && !data) {
+    return (
+      <div className="p-6" data-testid="ls-error">
+        <ResultState state="unavailable" reason="The load shape could not be read. Try again in a moment." />
+      </div>
+    )
+  }
   if (!data) {
     if (!isFetched) return null
     return (
@@ -116,7 +126,8 @@ export default function LoadShapeTab() {
   }
   if (data.status !== 'ok') {
     return (
-      <div className="p-6" data-testid="ls-unavailable">
+      <div className="p-6" data-testid="ls-unavailable"
+        data-result-tab="loadshape" data-result-binding={displayed ? JSON.stringify(displayed.binding) : undefined}>
         <ResultState state="unavailable" reason={data.reason ?? 'The load shape could not be established for this run.'} />
       </div>
     )
@@ -131,7 +142,8 @@ export default function LoadShapeTab() {
   const annualRow = annual.find(r => r.period === (annualPeriod === undefined ? data.period : annualPeriod)) ?? annual[0]
 
   return (
-    <div className="space-y-4 p-3" data-testid="ls-view">
+    <div className="space-y-4 p-3" data-testid="ls-view"
+       data-result-tab="loadshape" data-result-binding={displayed ? JSON.stringify(displayed.binding) : undefined}>
       <div className="flex flex-wrap items-center gap-3 text-[11px]">
         {periods.length > 1 && shellPeriod == null && (
           <label>

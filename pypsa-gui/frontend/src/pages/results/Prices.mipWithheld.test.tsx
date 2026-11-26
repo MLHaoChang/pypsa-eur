@@ -21,6 +21,20 @@ vi.mock('../../api/simulation', async (importOriginal) => {
   }
 })
 
+// The tab reads the prices and their drivers as one bound view (A5.2 S3b); it
+// carries what the two mocked routes return.
+vi.mock('../../api/displayedResults', async () => {
+  const { resultsApi } = await import('../../api/simulation')
+  return {
+    displayedResultsApi: {
+      prices: (threshold: number, limit: number, range?: { from: number; to: number }) => Promise.all([
+        resultsApi.getPrices('lopf', range), resultsApi.getPriceDrivers(threshold, limit),
+      ]).then(([prices, drivers]) => prices && {
+        status: 'ok', data: { prices, price_drivers: drivers ?? null }, binding: { version: 1, project_id: 'p', scope: 'current', view: 'prices', data_sha256: 'a'.repeat(64) },
+      }),
+    },
+  }
+})
 vi.mock('../../api/network', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/network')>()
   return {
@@ -64,8 +78,7 @@ it('says in words that a MIP has no marginal prices, with no chart and no number
   expect(screen.queryByText(/Approximated prices/)).toBeNull()  // the fallback banner
   expect(screen.queryByText('Price drivers')).toBeNull()
   expect(container.textContent).not.toMatch(/NaN|—|€\s?0\b|\b0\.00\b/)
-  // The drivers are never asked for: there are no prices to explain.
-  expect(resultsApi.getPriceDrivers).not.toHaveBeenCalled()
+  // The bound view reads the drivers with the prices, and they come back withheld too.
 })
 
 it('still draws an LP\'s prices', async () => {
@@ -75,4 +88,14 @@ it('still draws an LP\'s prices', async () => {
   renderPage()
   expect(await screen.findAllByText(/424\.24/)).not.toHaveLength(0)
   expect(screen.queryByText(/not available/)).toBeNull()
+})
+
+it('keeps the withheld words and state from the bound view, never "not run" or "unavailable" (UX 31)', async () => {
+  const { container } = renderPage()
+  expect(await screen.findByText(withheldBlock('Marginal prices', 'mip_duals_not_marginal'))).toBeTruthy()
+  expect(container.textContent).not.toMatch(/not run|has not run|could not be read|unavailable/i)
+  expect(screen.queryByTestId('prices-error')).toBeNull()
+  // The withheld answer is what the view bound: the root carries that binding.
+  const root = container.querySelector('[data-result-tab="prices"]')!
+  expect(JSON.parse(root.getAttribute('data-result-binding')!).view).toBe('prices')
 })

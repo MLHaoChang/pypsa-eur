@@ -186,14 +186,24 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
   // The slider edits `drag`; the request follows it after a pause.
   const { drag, range, setDrag, clear, whole } = useWindowRange()
 
-  const { data, isFetched } = useQuery({
-    queryKey: nk(currentProject, 'results', 'energy_flows', period, range?.[0], range?.[1]),
-    queryFn: () => energyFlowsApi.get({ period, from: range?.[0], to: range?.[1] }),
+  // A5.2: the bound view, so a chat navigation can prove the flows shown.
+  const { data: displayed, isFetched, isError } = useQuery({
+    queryKey: nk(currentProject, 'results', 'displayed', 'flows', period, range?.[0], range?.[1]),
+    queryFn: () => energyFlowsApi.displayed({ period, from: range?.[0], to: range?.[1] }),
     placeholderData: keepPreviousData,
   })
+  const data = displayed?.data
   const chartRef = useRef<HTMLDivElement>(null)
   const source = useChartSource()
 
+  // A failed read is not "not run yet" (rulings ai, aa): the error toast says why.
+  if (isError && !data) {
+    return (
+      <div className="p-6" data-testid="ef-error">
+        <ResultState state="unavailable" reason="The energy flows could not be read. Try again in a moment." />
+      </div>
+    )
+  }
   if (!data) {
     if (!isFetched) return null
     return (
@@ -205,7 +215,8 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
   }
   if (data.status !== 'ok') {
     return (
-      <div className="p-6 space-y-2" data-testid="ef-unavailable">
+      <div className="p-6 space-y-2" data-testid="ef-unavailable"
+        data-result-tab="flows" data-result-binding={displayed ? JSON.stringify(displayed.binding) : undefined}>
         <ResultState state="unavailable"
           reason={data.reason ?? 'The flows could not be shown to conserve energy for this run.'}>
           {data.flags.length > 0 && (
@@ -233,7 +244,8 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
   const exportName = `energy_flows_${data.period ?? 'year'}`
 
   return (
-    <div className="space-y-3 p-3" data-testid="ef-view">
+    <div className="space-y-3 p-3" data-testid="ef-view"
+       data-result-tab="flows" data-result-binding={displayed ? JSON.stringify(displayed.binding) : undefined}>
       <div className="flex flex-wrap items-center gap-3 text-[11px]">
         {data.conservation && <ConservationChip c={data.conservation} />}
         {periods.length > 1 && shellPeriod == null && (

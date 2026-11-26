@@ -1,0 +1,11 @@
+{"binding_overrides": [
+ {"file": "api/energyFlows.ts", "method": "GET", "url": "/api/results/displayed/flows",
+  "routes": [["GET", "/api/results/energy_flows"]],
+  "reason": "the Energy flow tab's source-bound view (A5.2 S3a): the /results/energy_flows payload for one period and window, read through that route's function, plus a binding"},
+ {"file": "api/loadShape.ts", "method": "GET", "url": "/api/results/displayed/loadshape",
+  "routes": [["GET", "/api/results/load_shape"]],
+  "reason": "the Load shape tab's source-bound view (A5.2 S3a): the /results/load_shape payload for one period, window and week, read through that route's function, plus a binding"},
+ {"file": "api/displayedResults.ts", "method": "GET", "url": "/api/results/displayed/curtailment",
+  "routes": [["GET", "/api/results/curtailment"], ["GET", "/api/results/generators"]],
+  "reason": "the Curtailment tab's source-bound view (A5.2 S3a): the /results/curtailment and /results/generators payloads over one window, read under one guard through those routes' functions, plus one binding"}
+]}

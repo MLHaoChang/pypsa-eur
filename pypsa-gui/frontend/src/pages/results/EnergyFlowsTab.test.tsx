@@ -14,7 +14,11 @@ import * as shared from './shared'
 
 vi.mock('../../api/energyFlows', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/energyFlows')>()
-  return { ...actual, energyFlowsApi: { get: vi.fn(), csv: vi.fn() } }
+  const get = vi.fn()
+  // The tab reads the bound view (A5.2); it carries the same payload `get` returns.
+  const displayed = (q?: unknown) => Promise.resolve(get(q))
+    .then((d: unknown) => d && { status: 'ok', data: d, binding: { version: 1, project_id: 'p', scope: 'current', view: 'flows', data_sha256: 'a'.repeat(64) } })
+  return { ...actual, energyFlowsApi: { get, csv: vi.fn(), displayed } }
 })
 
 vi.mock('react-hot-toast', () => ({ default: { success: vi.fn(), error: vi.fn() } }))
@@ -62,6 +66,13 @@ describe('EnergyFlowsTab', () => {
     expectAllButtonsNamed(container)
   })
 
+  it('marks its root with the bound view, for the navigation ACK (A5.2)', async () => {
+    mount()
+    const root = await screen.findByTestId('ef-view')
+    expect(root.getAttribute('data-result-tab')).toBe('flows')
+    expect(JSON.parse(root.getAttribute('data-result-binding')!).view).toBe('flows')
+  })
+
   it('labels the process swatch in words, not by colour alone', async () => {
     vi.mocked(energyFlowsApi.get).mockResolvedValue(
       { ...OK, rows: [...ROWS, { source: 'solar', via: 'Direct', destination: 'Process nh3', mwh: 10 }] })
@@ -96,6 +107,13 @@ describe('EnergyFlowsTab', () => {
     vi.mocked(energyFlowsApi.get).mockResolvedValue(null)
     mount()
     expect(await screen.findByText(/Run a solve/)).toBeTruthy()
+  })
+
+  it('a failed read says the flows could not be read, never "run a solve" (UX 31)', async () => {
+    vi.mocked(energyFlowsApi.get).mockRejectedValue(new Error('500'))
+    mount()
+    expect(await screen.findByTestId('ef-error')).toBeTruthy()
+    expect(screen.queryByText(/Run a solve/)).toBeNull()
   })
 
   it('asks for the narrowed window after the slider settles', async () => {

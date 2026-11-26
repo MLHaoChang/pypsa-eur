@@ -232,8 +232,10 @@ def test_a_read_before_a_resolve_is_opened_not_showing(client, solved):
     turn = _turn(solved)
     turn.note_read("get_results", chat_tools.get_results(result_kind="emissions"))
     # Another results read is not an emissions read and leaves it in place.
+    # (A generators series has curtailment's shape, so it is noted as a
+    # curtailment read whose hash never matches the curtailment shown: S3a.)
     turn.note_read("get_results", chat_tools.get_results(result_kind="generators"))
-    assert set(turn.reads) == {"emissions"}
+    assert set(turn.reads) == {"emissions", "curtailment"}
     _resolve(solved)
     ack = navigation.issue(
         turn, {"kind": "navigate", "panel_id": "results", "results_tab": "emissions"}

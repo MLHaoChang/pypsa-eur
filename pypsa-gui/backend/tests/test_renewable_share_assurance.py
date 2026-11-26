@@ -361,6 +361,27 @@ def _curtailment_export(n):
     )
 
 
+def _blank_carrier(n):
+    """A Generator with no carrier: classify would call it non-renewable by default."""
+    n.add("Generator", "unnamed", bus="AC", carrier="", p_nom=1, marginal_cost=90.0)
+
+
+def _storage_only(n):
+    """Every Generator at p_nom 0; a battery that starts full serves the load."""
+    n.generators["p_nom"] = 0.0
+    n.add("Carrier", "battery")
+    n.add(
+        "StorageUnit",
+        "battery",
+        bus="AC",
+        carrier="battery",
+        p_nom=5,
+        max_hours=10,
+        cyclic_state_of_charge=False,
+        state_of_charge_initial=50,
+    )
+
+
 def _reach(share_case, monkeypatch, name):
     ctx = (
         share_case(load=(0.0, 0.0, 0.0))
@@ -385,7 +406,25 @@ def _reach(share_case, monkeypatch, name):
         ctx = share_case(_many_loads)
     elif name == "nonrenewable_exceeds_served":
         ctx = share_case(_gas_export)
+    elif name == "carrier_missing":
+        ctx = share_case(_blank_carrier)
+    elif name == "no_generation":
+        ctx = share_case(_storage_only, load=(1.0, 2.0, 1.0))
     return set(_checked(ctx, window)[1].values())
+
+
+def test_the_reasons_are_the_named_set():
+    assert share.REASONS == {
+        "unverified_solve",
+        "invalid_or_missing_raw_data",
+        "unsupported_supply_path",
+        "unserved_energy_not_modelled",
+        "unsupported_population",
+        "carrier_missing",
+        "no_generation",
+        "no_electricity_served",
+        "nonrenewable_exceeds_served",
+    }
 
 
 @pytest.mark.parametrize("name", sorted(share.REASONS))
@@ -402,6 +441,33 @@ def test_the_share_alone_is_withheld_when_its_denominator_fails(share_case):
     }
 
 
+def test_storage_alone_withholds_the_share_but_not_the_energies(share_case):
+    """Load met from a full battery and no generation: the share of zero output is undefined."""
+    values, reasons = _checked(share_case(_storage_only, load=(1.0, 2.0, 1.0)))
+    assert reasons == {"renewable_share": "no_generation"}
+    assert values["nonrenewable_energy"][0] == pytest.approx(0.0, abs=1e-9)
+    assert values["electricity_used"][0] == pytest.approx(1 * 1 + 2 * 0.5 + 1 * 2)
+
+
+def test_an_unread_renewable_column_cannot_prove_no_generation(share_case):
+    ctx = share_case(_storage_only, load=(1.0, 2.0, 1.0))
+    n = ctx.network
+    n.generators_t.p = n.generators_t.p.drop(columns="wind")
+    assert _checked(ctx)[1] == {"renewable_share": "invalid_or_missing_raw_data"}
+
+
+@pytest.mark.parametrize("carrier", ["", "  ", float("nan"), "nan"])
+def test_a_blank_or_nan_carrier_withholds_every_figure(share_case, carrier):
+    def tweak(n):
+        _blank_carrier(n)
+        n.generators.loc["unnamed", "carrier"] = carrier
+
+    values, reasons = _checked(share_case(tweak))
+    assert values == {}
+    assert set(reasons) == set(share.METRICS)
+    assert set(reasons.values()) == {"carrier_missing"}
+
+
 @pytest.mark.parametrize(
     ("served", "answered"), [(2 * derived.NEAR_ZERO, True), (derived.NEAR_ZERO, False)]
 )
@@ -411,6 +477,67 @@ def test_the_denominator_boundary(share_case, served, answered):
     raw["loads"] = {"L": [served, 0.0, 0.0]}
     reasons = _reasons(raw)
     assert (reasons["renewable_share"] is None) is answered
+
+
+def _supply(share_case, renewable, nonren, load):
+    """The hand record with its dispatch replaced: one weight-1 slot carries the numbers."""
+    raw = _raw(share_case())
+    raw["generators"] = {g: [0.0, 0.0, 0.0] for g in raw["generators"]}
+    raw["generators"]["gas"] = list(nonren)
+    raw["renewable_generators"] = {
+        g: [0.0, 0.0, 0.0] for g in raw["renewable_generators"]
+    }
+    raw["renewable_generators"].update(renewable)
+    raw["loads"] = {"L": list(load)}
+    return _reasons(raw)["renewable_share"]
+
+
+@pytest.mark.parametrize(
+    ("output", "reason"),
+    [(2 * derived.NEAR_ZERO, None), (derived.NEAR_ZERO, "no_generation")],
+)
+def test_the_generation_boundary(share_case, output, reason):
+    assert (
+        _supply(share_case, {"wind": [output, 0.0, 0.0]}, [0.0] * 3, [1.0, 0.0, 0.0])
+        == reason
+    )
+
+
+def test_non_renewable_output_alone_is_generation(share_case):
+    assert _supply(share_case, {}, [1.0, 0.0, 0.0], [1.0, 0.0, 0.0]) is None
+
+
+def test_negative_renewable_output_does_not_cancel_generation(share_case):
+    renewable = {"wind": [-5.0, 0.0, 0.0], "bio": [0.0, 1.0, 0.0]}
+    assert _supply(share_case, renewable, [0.0] * 3, [0.0, 1.0, 0.0]) is None
+
+
+def test_an_unread_renewable_value_in_the_last_slot_is_not_zero(share_case):
+    renewable = {"wind": [0.0, 0.0, None]}
+    assert (
+        _supply(share_case, renewable, [0.0] * 3, [1.0, 0.0, 0.0])
+        == "invalid_or_missing_raw_data"
+    )
+
+
+def _renewables(count):
+    """Small wind Generators until `count` renewable Generators stand on the network."""
+
+    def tweak(n):
+        for i in range(count - 2):  # wind and bio are already there
+            n.add("Generator", f"wind {i}", bus="AC", carrier="onwind", p_nom=0.01)
+
+    return tweak
+
+
+@pytest.mark.parametrize(
+    ("count", "reasons"),
+    [(share.MAX_MEMBERS, set()), (share.MAX_MEMBERS + 1, {"unsupported_population"})],
+)
+def test_the_renewable_population_cap(share_case, count, reasons):
+    ctx = share_case(_renewables(count))
+    assert len(classify(ctx.network)["renewable_generators"]) == count
+    assert set(_checked(ctx)[1].values()) == reasons
 
 
 def test_nonrenewable_equal_to_use_is_zero_percent(share_case):
@@ -455,7 +582,12 @@ def test_a_slack_generator_withholds_every_figure(baseline):
     ctx = baseline[0]
     ctx.network = _network()
     ctx.network.add(
-        "Generator", VOLL_SLACK_PREFIX + "AC", bus="AC", p_nom=100, marginal_cost=1e4
+        "Generator",
+        VOLL_SLACK_PREFIX + "AC",
+        bus="AC",
+        carrier="load_shedding",
+        p_nom=100,
+        marginal_cost=1e4,
     )
     _solve(ctx)
     assert set(_checked(ctx)[1].values()) == {"unsupported_supply_path"}

@@ -16,6 +16,8 @@ export const STAGE_LABEL: Record<CampusRunStage, string> = {
   voltage_stability: 'the P–V/Q–V voltage-stability margin at the PCC',
   dips_restart: 'the dips, trips and restarts of the process units',
   ssti_screens: 'the SSTI and sub-synchronous screens from the PCC and behind each series capacitor',
+  planning: 'the planning criteria after each N-1 contingency on the campus',
+  strength: 'the short-circuit ratios (SCR, ESCR, WSCR) at each point of connection',
   invest: 'buying the assets from the library, re-checked by AC load flow',
   gfm_settings: 'recommending grid-forming settings from the island hours',
   done: 'finishing',
@@ -29,6 +31,8 @@ const STAGE_NAME: Record<CampusRunStage, string> = {
   voltage_stability: 'the P–V/Q–V screen',
   dips_restart: 'the dip and restart screens',
   ssti_screens: 'the SSTI and sub-synchronous screens',
+  planning: 'the planning-criteria screen',
+  strength: 'the strength screen',
   invest: 'the investment step', gfm_settings: 'the grid-forming settings', done: 'finishing',
 }
 
