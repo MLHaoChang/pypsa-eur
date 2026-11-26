@@ -642,7 +642,10 @@ def test_a_reviewed_row_names_the_tolerance_its_oracle_test_uses(ledger):
 
 def test_a_review_on_an_unpinned_row_is_refused(ledger):
     rows, _ = ledger
-    pair = ("investment-case/1", "project_irr")  # IRR_TOLERANCE, unnamed in its test (issue 29)
+    pair = (
+        "investment-case/1",
+        "project_irr",
+    )  # IRR_TOLERANCE, unnamed in its test (issue 29)
     row, path = rows[pair]
     assert row["domain_review"] == "pending"
     reviewed = {**rows, pair: ({**row, "domain_review": R2_OK}, path)}
