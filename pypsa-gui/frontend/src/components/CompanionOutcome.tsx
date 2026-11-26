@@ -6,19 +6,20 @@ import { CheckedEvidenceCard } from './CheckedEvidenceCard'
 import { CheckedChart } from './CheckedChart'
 import ChatMarkdown from './ChatMarkdown'
 import { hasWarning, WARNED_LABEL } from '../utils/answerAssurance'
+import { approvedChatHref } from '../utils/chatLinks'
 
 /** The one word for an answer the gate did not check; the chat panel's turn mark uses it too. */
 export const ANSWER_NOT_CHECKED = 'Answer not checked'
 
-const UPLOAD_BLOB = /^\/api\/projects\/[^/?#]+\/uploads\/[0-9a-f]{16}\/blob$/
 
 export function downloadHref(result: unknown): { href: string; filename: string | null } | null {
   if (!result || typeof result !== 'object' || Array.isArray(result) || !('download_url' in result)
     || '_assurance' in result) return null
   const record = result as { download_url?: unknown; filename?: unknown }
   const href = record.download_url
-  if (typeof href !== 'string' || href.length > 512 || !UPLOAD_BLOB.test(href)) return null
-  return { href, filename: typeof record.filename === 'string' && record.filename.length <= 180 ? record.filename : null }
+  const approved = approvedChatHref(href, ['upload'])
+  if (!approved) return null
+  return { href: approved, filename: typeof record.filename === 'string' && record.filename.length <= 180 ? record.filename : null }
 }
 
 function afterLastUser(messages: readonly ChatMessage[]): readonly ChatMessage[] {
@@ -67,6 +68,7 @@ function OutcomeCard({ message, checked, failed, download, docked }: {
     return () => window.removeEventListener('focus', refresh)
   }, [checked])
   const answer = !failed && verified?.message === message ? verified.answer : null
+  const answerHref = answer ? approvedChatHref(`/api/chat/answers/${encodeURIComponent(answer.answer_id)}`, ['answer']) : null
   const missing = checked && (failed || unavailable || !message?.answer_id || !message.receipt)
   const ordinaryText = message?.content ?? ''
   const tooLarge = new TextEncoder().encode(ordinaryText).byteLength > 64 * 1024
@@ -126,7 +128,7 @@ function OutcomeCard({ message, checked, failed, download, docked }: {
       {checked && <button type="button" className="underline" onClick={() => {
         setVerified(null); setRevision(r => r + 1)
       }}>Refresh evidence</button>}
-      {answer && <a className="underline" href={`/api/chat/answers/${encodeURIComponent(answer.answer_id)}`}
+      {answerHref && <a className="underline" href={answerHref}
         target="_blank" rel="noopener noreferrer">View answer record</a>}
       {!checked && download && <a data-testid="companion-download" className="underline"
         href={download.href} download={download.filename ?? undefined}>Download</a>}

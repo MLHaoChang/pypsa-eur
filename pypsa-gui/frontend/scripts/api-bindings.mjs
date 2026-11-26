@@ -158,6 +158,13 @@ export function scan(srcRoot) {
       const viaCalls = fromParameter(decl, depth)
       if (viaCalls) return viaCalls
     }
+    // The chat link seam (utils/chatLinks.ts) returns its argument's path or
+    // null: the URL it can hand to a link is the URL it was given.
+    if (ts.isCallExpression(expr) && ts.isIdentifier(expr.expression)
+      && expr.expression.text === 'approvedChatHref' && expr.arguments.length > 0) {
+      visited.add(expr)
+      return urls(expr.arguments[0], depth + 1)
+    }
     if (ts.isCallExpression(expr)) {
       const fn = callee(expr)
       const body = fn && returned(fn)
