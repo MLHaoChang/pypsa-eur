@@ -565,3 +565,52 @@ def test_a_hit_and_a_fresh_baseline_give_the_same_case_hash(reset_backend):
     finally:
         B.clear_cache()
     assert hashes[0] is not None and hashes[0] == hashes[1]
+
+
+def test_a_settle_that_raises_keeps_the_whole_reservation(
+    envelope, settled, monkeypatch
+):
+    """GK B (72) 1: an envelope that cannot be settled never fails the step
+    and never refunds: the whole reservation stays charged."""
+
+    def unreadable(*a, **k):
+        raise OSError("the envelope could not be read")
+
+    monkeypatch.setattr(run_envelope, "settle_case_solves", unreadable)
+    run_ic.settle("task.json", TICKET, "ad:1", _record(baseline_solves=0), 1.0)
+    assert settled[0][2]["solves"] == run_envelope.CASE_BASELINE_SOLVES
+    assert envelope["audit"][1]["solves"] == run_envelope.CASE_BASELINE_SOLVES
+
+
+def test_the_runner_keeps_a_refusals_count_and_the_step_settles_it(envelope, settled):
+    """GK B (72) 2: a build refused after k baseline LPs leaves k on the
+    runner's own record, and the case step settles k."""
+    from services.finance import investment_case_runner as R
+    from services.finance.case import FinanceRefused
+    from tests.test_investment_case_runner import _run
+
+    def build():
+        R.BUILD_STATS.get()["baseline_solves"] = 1
+        raise FinanceRefused(
+            "baseline_not_established:infeasible", "the site does not solve"
+        )
+
+    record, _ = _run(build)
+    assert record["status"] == "refused" and record["baseline_solves"] == 1
+    begun = record["started_at"]
+    run_ic.settle("task.json", TICKET, "ad:1", record, begun)
+    assert settled[0][:2] == ("refused", "failed")
+    assert envelope["audit"][1]["solves"] == 1
+    assert run_envelope.solves_used(envelope) == 2
+
+
+def test_a_retried_step_settles_its_later_admission(envelope, settled):
+    """GK B (72) 3: a step admitted twice (a retry) settles its later
+    `used` row; the earlier one keeps its reservation."""
+    retry = {**CASE_ROW, "call_id": "run-solve.2-11111111"}
+    envelope["audit"].append(retry)
+    run_ic.settle("task.json", TICKET, "ad:1", _record(baseline_solves=0), 1.0)
+    assert (envelope["audit"][1]["solves"], retry["solves"]) == (
+        run_envelope.CASE_BASELINE_SOLVES,
+        0,
+    )
