@@ -112,6 +112,11 @@ WEIGHT_BASIS: dict[str, str] = {
     "not_checked": "none",
     # time_to_power_calculations.py: months from the stated dates and stages
     "time_to_power_months": "none",
+    # losses_calculations.py: peak is a per-snapshot maximum
+    "loss_energy": "generators",
+    "peak_loss": "none",
+    "demand_energy": "generators",
+    "loss_pct_of_demand": "generators",
     # system_cost_calculations.py: capex is per horizon (nyears = Σ objective weights / 8760)
     "system_capex": "objective",
     "system_opex": "objective",

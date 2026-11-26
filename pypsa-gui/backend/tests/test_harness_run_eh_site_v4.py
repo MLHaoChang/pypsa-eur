@@ -1794,8 +1794,9 @@ def test_pilot_on_v4_runs_the_case_and_hands_off_its_figures(
     result gate and its loop, its baseline's solves reserved on the run; its
     chapter is established (no gap row) and the hand-off reads its figures.
     M3: the budget leaves exactly the case's 2 solves at its admission, and
-    it runs. F1: its whole reservation stays charged, never less than the
-    LPs its baseline ran. M1, M2: it ran once, on the final solve."""
+    it runs. Study-harness issue 52: its reservation settles to the LPs its
+    baseline ran (its record's `baseline_solves`), never fewer. M1, M2: it
+    ran once, on the final solve."""
     from harness import run_report
     from routers import results
     from services import run_gates
@@ -1816,16 +1817,14 @@ def test_pilot_on_v4_runs_the_case_and_hands_off_its_figures(
     used = [
         a for a in audit if a.get("event") == "used" and a.get("tool") == run_ic.TOOL
     ]
-    assert (
-        len(used) == 1
-        and used[0]["reserved"] == used[0]["solves"] == case["result"]["solves"] == 2
-    )
-    assert 1 <= len(spy["lps"]) <= used[0]["solves"]  # F1: no refund below what ran
+    assert len(used) == 1 and used[0]["reserved"] == 2
+    # issue 52: settled to the LPs the baseline ran (a miss here), no fewer
+    assert 1 <= len(spy["lps"]) == used[0]["solves"] == case["result"]["solves"] <= 2
     envelope = json.loads(run_envelope.path_for(path).read_text())
     assert (
         run["budget"]["used"]["solves"]
         == run_envelope.solves_used(envelope)
-        == envelope["budget"]["solves"]
+        == envelope["budget"]["solves"] - (2 - len(spy["lps"]))
     )
     # M1: the stored case's inputs are the final solved network's (after the
     # coupling loop's last re-solve): its key is the current one.

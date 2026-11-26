@@ -291,3 +291,42 @@ def test_a_live_tool_answer_with_unsaved_edits_is_no_checker_mismatch(hub, check
     frames = ask(checked, ctx, {f["metric"]: f["value"] for f in facts})
     assert approval(frames)["verdict"] != "limited"
     assert "couldn't verify" not in public_text(frames)
+
+
+# ── AA-10 R2: hand rows straddling each rule's boundary (GK B (72) R2 conditions) ──
+
+
+def _row(rid, value, limit, rule, verdict):
+    return {"id": rid, "requirement": rid, "limit": limit, "unit": "", "project_value": value,
+            "verdict": verdict, "assumed": False, "rule": rule}
+
+
+def test_hand_rows_give_hand_counts_with_boundaries_on_the_documented_side():
+    """Each row states its stored verdict, which _judge must reproduce. Thresholds
+    are the registered rule constants, never restated here."""
+    ramp_tol = G.RULE_RAMP["tolerance"]
+    rows = [
+        # SCR, ">=" with zero tolerance: at the limit is met, so pass (the "=" side).
+        _row("scr", 3.0, 3.0, G.RULE_SCR, "pass"),
+        # SCR below the limit: otherwise = warn.
+        _row("scr", 2.5, 3.0, G.RULE_SCR, "warn"),
+        # Ramp, "<=" plus its tolerance: limit + tolerance is still met, so pass.
+        _row("ramp_rate", 10.0 + ramp_tol, 10.0, G.RULE_RAMP, "pass"),
+        # Ramp just past the tolerance band: otherwise = fail.
+        _row("ramp_rate", 10.0 + 4 * ramp_tol, 10.0, G.RULE_RAMP, "fail"),
+        # Voltage unbalance, "<=": well over, otherwise = warn.
+        _row("voltage_unbalance", 3.0, 2.0, G.RULE_UNBALANCE, "warn"),
+        # Stored "pass" that the rule re-judges as fail: withheld, counted not_checked.
+        _row("ramp_rate", 12.0, 10.0, G.RULE_RAMP, "pass"),
+        # No value: not checked.
+        _row("reactive_range", None, 0.95, G.RULE_REACTIVE, "unknown"),
+    ]
+    # pass: rows 1, 3; warn: rows 2, 5; fail: row 4; not checked: rows 6, 7.
+    assert counts(rows) == {"checked_pass": 2, "checked_warn": 2, "checked_fail": 1, "not_checked": 2}
+
+
+def test_a_verdict_flipped_at_the_boundary_moves_one_count():
+    at = [_row("scr", 3.0, 3.0, G.RULE_SCR, "pass")]
+    below = [_row("scr", 3.0 - 1e-12, 3.0, G.RULE_SCR, "warn")]  # zero tolerance: any shortfall warns
+    assert counts(at) == {"checked_pass": 1, "checked_warn": 0, "checked_fail": 0, "not_checked": 0}
+    assert counts(below) == {"checked_pass": 0, "checked_warn": 1, "checked_fail": 0, "not_checked": 0}

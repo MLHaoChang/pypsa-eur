@@ -43,6 +43,7 @@ from tests.test_energy_balance_assurance import exporting  # noqa: F401
 from tests.test_grid_readiness_assurance import hub  # noqa: F401
 from tests.test_harness_reliability import scope as cost_scope
 from tests.test_investment_assurance import hand, lcoe_hand, project, store  # noqa: F401
+from tests.test_losses_assurance import hand_losses, write_losses  # noqa: F401
 from tests.test_lost_load_assurance import short  # noqa: F401
 from tests.test_lost_load_assurance import solve as solve_through_api
 from tests.test_result_profiles_assurance import gas, priced, windy  # noqa: F401
@@ -174,6 +175,9 @@ DRIVERS = {
         "gas", solve, _scope("network-emissions/1", "network")
     ),
     "curtailment/1": Driver("windy", solve, _scope("curtailment/1", "G1")),
+    "branch-losses/1": Driver(
+        "hand_losses", write_losses, _scope("branch-losses/1", "network")
+    ),
     "system-cost-breakdown/1": Driver(
         "hand_cost", solve_costed, _scope("system-cost-breakdown/1", "network")
     ),
@@ -219,6 +223,7 @@ FIXTURES = [
     priced,
     gas,
     windy,
+    hand_losses,
     hand_cost,
     built,
     tank,

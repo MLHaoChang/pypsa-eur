@@ -1,0 +1,1 @@
+* Test(pypsa-gui): Hand-worked oracles now cover the last 11 unverified checked-answer metrics: the network-linear-cost dispatch and fixed-cost figures, energy-balance storage change and the export/losses remainder, the grid-readiness pass/warn/fail counts, and the project IRR. With these, every metric in the per-metric ledger has a verified oracle.

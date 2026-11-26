@@ -36,7 +36,7 @@ import json
 import math
 import queue
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from services.finance.baseline_text import flag_text  # noqa: F401  (the flags' wording)
 from services.reliability_goal import goal_free_config
@@ -238,10 +238,11 @@ def baseline_network(n, plan: BaselinePlan, supplies=()):
 
 
 class BaselineRefused(Exception):
-    def __init__(self, code: str, detail: str = "") -> None:
+    def __init__(self, code: str, detail: str = "", *, solves: int = 0) -> None:
         super().__init__(f"{code}: {detail}" if detail else code)
         self.code = code
         self.detail = detail
+        self.solves = solves  # the LPs this call ran before it refused (study-harness issue 52)
 
 
 @dataclass(frozen=True)
@@ -250,6 +251,10 @@ class Baseline:
     lost_load: dict | None
     plan: BaselinePlan
     digest: str
+    # Study-harness issue 52: the LPs the call that returned this ran: 0 on a
+    # cache hit, else 1 or 2 (the retry without the island rows). A run's
+    # case settles its reserved baseline solves from it.
+    solves: int = 0
 
 
 _CACHE: dict[str, Baseline] = {}
@@ -306,7 +311,9 @@ def solve_baseline(n, cfg, plan: BaselinePlan, *, solve=None) -> Baseline:
     state sink, inside a private solving context that shares only the project's
     storage folder (its island sidecar). Cached by its inputs: reading a case
     again does not re-solve. Refused `baseline_not_established:<condition>`
-    when the baseline does not solve. `solve` replaces `run_simulation` in tests."""
+    when the baseline does not solve. The result's `solves` (and a refusal's)
+    is the LPs this call ran: 0 on a cache hit. `solve` replaces
+    `run_simulation` in tests."""
     from services.pypsa_service import PyPSAService
 
     live = PyPSAService.solve_target_context()
@@ -333,6 +340,7 @@ def solve_baseline(n, cfg, plan: BaselinePlan, *, solve=None) -> Baseline:
         return base, sink, status, condition
 
     base, sink, status, condition = attempt(copy.copy(cfg))
+    solves = 1
     relaxed: tuple[str, ...] = ()
     if status not in ("ok", "optimal") and getattr(cfg, "island_constraints", False):
         # The island rows are a requirement the plan's new builds meet (they
@@ -341,10 +349,11 @@ def solve_baseline(n, cfg, plan: BaselinePlan, *, solve=None) -> Baseline:
         conf = copy.copy(cfg)
         conf.island_constraints = False
         base, sink, status, condition = attempt(conf)
+        solves = 2
         relaxed = ("baseline_island_rows_relaxed",)
     if status not in ("ok", "optimal"):
         raise BaselineRefused(f"baseline_not_established:{condition or status}",
-                              "the site without the plan's new builds does not solve")
+                              "the site without the plan's new builds does not solve", solves=solves)
     if relaxed:
         plan = BaselinePlan(removed=plan.removed, kept=plan.kept,
                             flags=plan.flags + relaxed, fixed=plan.fixed)
@@ -352,8 +361,8 @@ def solve_baseline(n, cfg, plan: BaselinePlan, *, solve=None) -> Baseline:
     with _CACHE_LOCK:
         if len(_CACHE) >= _CACHE_MAX:
             _CACHE.pop(next(iter(_CACHE)))
-        _CACHE[key] = got
-    return got
+        _CACHE[key] = got  # a later hit reads it with solves 0
+    return replace(got, solves=solves)
 
 
 def clear_cache() -> None:

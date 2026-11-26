@@ -74,6 +74,7 @@ from services import shutdown as shutdown_service
 from routers import (
     admin,
     asset_results,
+    results_displayed,
     assistant_activity,
     auth,
     catalogue,
@@ -1452,6 +1453,8 @@ app.include_router(eh_front.router, prefix="/api/results", tags=["results"])
 # shadowed; the two routers don't share any literal path segments in practice
 # but this keeps the ordering convention consistent with the rest of the file.
 app.include_router(asset_results.router, prefix="/api/results/asset", tags=["asset-results"])
+# Assistant-assurance 06 (A5.2): results tabs' payloads with their displayed-data binding.
+app.include_router(results_displayed.router, prefix="/api/results/displayed", tags=["results"])
 # Sequential multi-project solve queue (Phase A / C1). Sits under /api/simulation
 # so it's adjacent to the foreground solve lifecycle it shares (_state, log_stream).
 app.include_router(solve_queue.router, prefix="/api/simulation/queue", tags=["solve-queue"])

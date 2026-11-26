@@ -25,7 +25,7 @@ harness/
   job_hold_store.py  issue 16: the one DB seam of the job-hold records (write, set_job, delete, exists, get, active; S2: renew, delete_if, foreign, and the strict solve_jobs reads solve_job_status, live_solve_jobs); every function raises, the caller decides
   outcomes.py     issue 04: each tool result's `_outcome` (completed/partial/failed/uncertain/denied) from an independent read, never the handler's word: jobs (S1), row writes, imports and exports against the whole-state map with extra_edits (S2, S4b), undo_last (S3), the raise and timeout paths (S4b)
   navigation.py   issued view actions and owner/project/turn/generation-bound browser ACKs
-  displayed_adapters.py  per-results-tab displayed-data adapters: a tab ACKs `browser_displayed_data` only through one (A5.2); `check_registry` keeps result_views in step
+  displayed_adapters.py  per-results-tab displayed-data adapters: a tab ACKs `browser_displayed_data` only through one (A5.2); `check_registry` keeps result_views in step. Load flow, Emissions and Grid risk today; the last two render `routers/results_displayed.py` views, which call their tab's route function
   reviewer.py     optional single bounded read-only review of qualitative interpretations
   publication.py  JSON/ZIP from the same validated answer, facts and evidence
   rollout.py      capabilities, profile/effect rollback and bounded shadow observation
@@ -615,6 +615,13 @@ time-weighted price, generator CO2 over the time-varying efficiency with the cap
 dual as −mu, and curtailment of generators with a time-varying availability. An AC
 power flow leaves the LP outputs in place (owner decision PF-SAVE-1: the flow's
 values live only in `ac_pf_results`), so every profile still reads the LP after one.
+`branch-losses/1` (opt-in, `losses_calculations.py`, assistant-assurance 10 S1b) is the
+exception: like the loading profiles it refuses once a power-flow record exists
+(`ac_pf_present`). It reads the LP's Line and Transformer `loss` frames and `loads_t.p`
+through `services/results/losses.py:_validity_rows`, before the route's zero-fill. A member
+that is incomplete, absent or misaligned anywhere in the horizon gives no figure, and its
+state is the slot's reason. The network totals and the share of demand need every member
+complete, and the share uses `derived.NEAR_ZERO` as its denominator guard.
 `capacity/1` (opt-in) reports one named-class component's `*_nom_opt` and its
 change, and says when it was built to its bound; `storage-cycles/1` divides window
 discharge (store weights) by energy capacity, sharing the StorageUnit profile's
@@ -1845,9 +1852,27 @@ this network.
   each up to twice the template's. The process units, the mine, the
   shipments, the services load, the grid import, the shed and the slack are
   never levers.
-- **Solves.** The plan is the envelope's solve (`CONC_SOLVES = 1`). The case
-  in the run, with its baseline re-solve counted, is study-harness issue 52;
-  `missing_tools` names it (`CONC_CASE_OUTSIDE`).
+- **Solves.** The plan is the envelope's solve (`CONC_SOLVES = 1`). On @1 the
+  case stays out of the run; `missing_tools` names it (`CONC_CASE_OUTSIDE`).
+- **The case in the run (`eh_concentrator_staged@2`, study-harness issue 52).**
+  @2 is @1 with `run_investment_case` after the queued solve in the solve
+  stage. Its `runs` entry names `baseline_solves` (`CASE_BASELINE_SOLVES`,
+  the bound: `solve_baseline` tries at most twice), so the envelope admits
+  the case and reserves the baseline on its `used` row; `_ic_build_case`
+  then solves the baseline in the run. `solve_baseline` reports the LPs it
+  ran (`Baseline.solves`, `BaselineRefused.solves`: 0 on a cache hit); the
+  build writes them into the runner's per-call `BUILD_STATS` and the case's
+  record keeps them (`baseline_solves`). `run_ic.settle` settles the step's
+  own `used` row (its call id, `runner.step_call_prefix`) from that record
+  (`run_envelope.settle_case_solves`, clamped to the reservation). A record
+  that does not say (a raise mid-solve, an abort, a fake), says no count, or
+  is not the step's own keeps the whole reservation. `solves_used` is then the real LP count: plan
+  plus baseline on a miss, plan only on a hit. An L2 round runs the solve
+  stage again, the case with it, so the budget is the plan and its baseline
+  plus, per round, the re-solve and its baseline, each at its bound:
+  1 + 2 + 2 × (1 + 2) = 9. `ic.counterfactual` and
+  `ic.counterfactual.basis` block again and, with `ic.returns`, read the
+  run's own case. The issue-52 line leaves `missing_tools`.
 
 ### The IPP hybrid profile (study harness 14)
 

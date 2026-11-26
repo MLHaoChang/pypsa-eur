@@ -12,6 +12,8 @@ Incremental = actual − baseline, line by line; a case with no new builds is 0.
 """
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import pandas as pd
 import pypsa
@@ -238,7 +240,10 @@ def test_the_baseline_is_cached_by_its_inputs(reset_backend):
     plan = baseline_plan(n, cfg)
     first = B.solve_baseline(n, cfg, plan, solve=counted)
     again = B.solve_baseline(n, cfg, plan, solve=counted)
-    assert again is first and len(calls) == 1
+    # the cached baseline (its network the same object); issue 52: each call
+    # reports the LPs it ran, 1 on the miss and 0 on the hit
+    assert again.network is first.network and len(calls) == 1
+    assert again == dataclasses.replace(first, solves=0) and (first.solves, again.solves) == (1, 0)
 
 
 def test_a_baseline_that_does_not_solve_is_refused():

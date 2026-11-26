@@ -89,6 +89,90 @@ ADAPTERS: Mapping[str, DisplayedAdapter] = MappingProxyType(
 )
 
 
+# ── Single-payload tabs (A5.2 S2): routers/results_displayed.py ─────────────
+
+_VIEW_BINDING = frozenset(
+    {
+        "version",
+        "project_id",
+        "project_name",
+        "scope",
+        "view",
+        "input_sha256",
+        "data_sha256",
+    }
+)
+
+
+def _view(tab):
+    def read(_binding=None):
+        from routers import results_displayed
+
+        return results_displayed.VIEWS[tab]()
+
+    return read
+
+
+# What services.chat_tools._with_freshness adds to a results read.
+_FRESHNESS_KEYS = frozenset(
+    {"inputs_changed_since_solve", "results_current", "freshness_note"}
+)
+
+
+def _payload_ref(is_payload):
+    """A chat read of the same payload: its hash in the view's encoding, so the
+    words say "showing" only when the tab shows exactly what the turn read."""
+
+    def ref(result):
+        if not is_payload(result):
+            return None
+        import hashlib
+
+        from routers.results_displayed import canonical
+
+        # get_results adds the LC-12 freshness words to the route's payload.
+        payload = {k: v for k, v in result.items() if k not in _FRESHNESS_KEYS}
+        return {"data_sha256": hashlib.sha256(canonical(payload).encode()).hexdigest()}
+
+    return ref
+
+
+def _is_emissions(result):
+    return isinstance(result, dict) and {"total_tCO2", "by_carrier"} <= set(result)
+
+
+def _is_grid_risk(result):
+    return (
+        isinstance(result, dict)
+        and result.get("available") is True
+        and "omitted" in result
+        and "project_id" in result
+    )
+
+
+ADAPTERS = MappingProxyType(
+    {
+        **ADAPTERS,
+        "emissions": DisplayedAdapter(
+            current=_view("emissions"),
+            reread=_view("emissions"),
+            binding_keys=_VIEW_BINDING,
+            read_tool="get_results",
+            ref_keys=("data_sha256",),
+            read_ref=_payload_ref(_is_emissions),
+        ),
+        "grid_risk": DisplayedAdapter(
+            current=_view("grid_risk"),
+            reread=_view("grid_risk"),
+            binding_keys=_VIEW_BINDING,
+            read_tool="get_grid_risk_production",
+            ref_keys=("data_sha256",),
+            read_ref=_payload_ref(_is_grid_risk),
+        ),
+    }
+)
+
+
 def for_target(target) -> DisplayedAdapter | None:
     """The adapter for exactly a results-tab target, else None."""
     if (

@@ -39,6 +39,7 @@ class RequestScope(BaseModel):
         "generator-emissions/1", "network-emissions/1", "curtailment/1", "capacity/1", "system-cost-breakdown/1",
         "storage-cycles/1", "energy-balance/1", "site-import/1", "investment-case/1", "investment-lcoe/1",
         "copt-screening/1", "grid-readiness/1", "time-to-power/1", "ac-branch-loading/1",
+        "branch-losses/1",
     ]
     project_id: str = Field(min_length=1, max_length=128)
     entity_id: str = Field(min_length=1, max_length=128)
@@ -89,7 +90,7 @@ def validate(value):
     if scope["profile"] == "ac-branch-loading/1" and scope["entity_id"] in ("network", EVERY):
         raise ValueError("unsupported_population_scope")
     if scope["profile"] in ("bus-price/1", "generator-emissions/1", "network-emissions/1",
-                            "curtailment/1", "system-cost-breakdown/1") and (
+                            "curtailment/1", "branch-losses/1", "system-cost-breakdown/1") and (
         scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("unsupported_result_cost_scope")
@@ -295,8 +296,8 @@ def _from_message(message, project_id, ui_context):
             value.update(start=sized[4], end=sized[5])
         return validate(value)
     result = re.fullmatch(
-        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?(price|emissions|curtailment)\s+for\s+"
-        r"(network|(bus|generator)\s+([^;]{1,128}?))"
+        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?(price|emissions|curtailment|losses)\s+for\s+"
+        r"(network|(bus|generator|branch)\s+([^;]{1,128}?))"
         r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
         message.strip(), re.I,
     )
@@ -308,6 +309,8 @@ def _from_message(message, project_id, ui_context):
             ("emissions", ""): "network-emissions/1",
             ("curtailment", "generator"): "curtailment/1",
             ("curtailment", ""): "curtailment/1",
+            ("losses", "branch"): "branch-losses/1",
+            ("losses", ""): "branch-losses/1",
         }.get((kind, word))
         if profile is None:
             return None  # e.g. "price for network" or "emissions for bus X": no such profile

@@ -1,0 +1,6 @@
+{
+ "served_by_tool": {
+  "GET /api/results/displayed/emissions": "get_results",
+  "GET /api/results/displayed/grid_risk": "get_grid_risk_production"
+ }
+}
