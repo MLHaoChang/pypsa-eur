@@ -3,8 +3,8 @@ import { useQuery } from '@tanstack/react-query'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
 } from 'recharts'
-import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
+import { displayedResultsApi } from '../../api/displayedResults'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import type { StorageUnit } from '../../api/types'
@@ -95,11 +95,13 @@ export default function StorageCycling() {
   // SNAPSHOT INDEX (not a results payload) — same hook Dispatch uses so the
   // storage-dispatch query below can be windowed before any payload exists.
   const { win, winValid, fetchRange } = useResultsWindow(currentProject)
-  const { data: storPowerTS, isFetched: dispatchFetched } = useQuery({
-    queryKey: nk(currentProject, 'results', 'storage_dispatch', win.from, win.to),
-    queryFn: () => resultsApi.getStorageDispatchResults(undefined, fetchRange),
+  // A5.2: the dispatch as a bound view, so a chat navigation can prove the figures shown.
+  const { data: displayed, isFetched: dispatchFetched, isError } = useQuery({
+    queryKey: nk(currentProject, 'results', 'displayed', 'storage', win.from, win.to),
+    queryFn: () => displayedResultsApi.storage(fetchRange),
     enabled: winValid,
   })
+  const storPowerTS = displayed?.data
   const { data: storageUnits = [], isSuccess: unitsLoaded } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
   const { data: vintageResults } = useQuery({ queryKey: nk(currentProject, 'vintage_results'), queryFn: networkApi.listVintageResults })
 
@@ -294,6 +296,14 @@ export default function StorageCycling() {
       </div>
     )
   }
+  // A failed read is not "not run yet" (rulings ai, aa): the error toast says why.
+  if (isError && !storPowerTS) {
+    return (
+      <div className="p-6" data-testid="storage-error">
+        <ResultState state="unavailable" reason="The storage dispatch could not be read. Try again in a moment." />
+      </div>
+    )
+  }
   if (!storPowerTS || units.length === 0) {
     if (!unitsLoaded) return null
     return (
@@ -313,7 +323,8 @@ export default function StorageCycling() {
   return (
     // [&>*]:shrink-0: the cards keep their height and the column scrolls (DC 06
     // adds a tall reserve card; a shrinking card would clip its content).
-    <div className="flex flex-col h-full overflow-auto p-4 gap-4 results-scroll-clear [&>*]:shrink-0">
+    <div className="flex flex-col h-full overflow-auto p-4 gap-4 results-scroll-clear [&>*]:shrink-0"
+      data-result-tab="storage" data-result-binding={displayed ? JSON.stringify(displayed.binding) : undefined}>
       {/* Truncated-window banner — see FIX 1 secondary in the
           results-tabs-window final review: a narrow-but-wide window can
           still hit the server's MAX_RESPONSE_VALUES cap. */}

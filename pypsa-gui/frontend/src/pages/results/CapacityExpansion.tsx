@@ -6,8 +6,9 @@ import {
 } from 'recharts'
 import { Download } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { resultsApi, simulationApi } from '../../api/simulation'
+import { simulationApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
+import { displayedResultsApi } from '../../api/displayedResults'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import FuelRunHours from './FuelRunHours'
@@ -21,6 +22,7 @@ import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableT
 import { CarrierFilter, useCarrierFilter, bindCarrierFilter } from './CarrierFilter'
 import { canonicaliseCarrier, type ComponentClass } from './carrierAliases'
 import NotSolved from './NotSolved'
+import ResultState from '../../components/ResultState'
 import { retiredSize } from './retired'
 import { totalCostWords } from './headlineWords'
 import { withheldCell } from './sectionWords'
@@ -119,17 +121,17 @@ export default function CapacityExpansion() {
   const waterfallChartRef = useRef<HTMLDivElement | null>(null)
   const perPeriodCapRef = useRef<HTMLDivElement | null>(null)
   const perPeriodClassRef = useRef<HTMLDivElement | null>(null)
-  const { data: cost, isLoading } = useQuery({
-    queryKey: nk(currentProject, 'results', 'cost_breakdown'),
-    queryFn: resultsApi.getCostBreakdown,
+  // A5.2: the cost breakdown and the economics by carrier as one bound view
+  // (one solve, one binding), so a chat navigation can prove the figures shown.
+  // The economics carry the market-accounting storage charge cost (bus_price ×
+  // |charge|) — not in PyPSA statistics OPEX. Same source as Dispatch's
+  // "Storage charge cost" so the two tabs can be reconciled without merging definitions.
+  const { data: displayed, isLoading, isError } = useQuery({
+    queryKey: nk(currentProject, 'results', 'displayed', 'capex'),
+    queryFn: displayedResultsApi.capex,
   })
-  // Market-accounting storage charge cost (bus_price × |charge|) — not in
-  // PyPSA statistics OPEX. Same source as Dispatch's "Storage charge cost"
-  // so the two tabs can be reconciled without merging definitions.
-  const { data: econByCarrier } = useQuery({
-    queryKey: nk(currentProject, 'results', 'economics_by_carrier'),
-    queryFn: resultsApi.getEconomicsByCarrier,
-  })
+  const cost = displayed?.data.cost_breakdown
+  const econByCarrier = displayed?.data.economics_by_carrier
 
   const { data: generators = [], isSuccess: generatorsLoaded } = useQuery({ queryKey: nk(currentProject, 'generators'), queryFn: networkApi.getGenerators })
   const { data: storageUnits = [], isSuccess: storageUnitsLoaded } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
@@ -849,6 +851,12 @@ export default function CapacityExpansion() {
   }
 
   if (isLoading) return <div className="p-6 text-muted text-xs">Loading…</div>
+  // A failed read is not "not run yet" (rulings ai, aa): the error toast says why.
+  if (isError && !cost) return (
+    <div className="p-6" data-testid="capex-error">
+      <ResultState state="unavailable" reason="The capacity expansion could not be read. Try again in a moment." />
+    </div>
+  )
   if (!cost) return (
     <NotSolved what="Capacity expansion" />
   )
@@ -942,7 +950,8 @@ export default function CapacityExpansion() {
   })()
 
   return (
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full results-scroll-clear [&>*]:shrink-0">
+    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full results-scroll-clear [&>*]:shrink-0"
+      data-result-tab="capex" data-result-binding={displayed ? JSON.stringify(displayed.binding) : undefined}>
 
       {/* ── Upfront (PV) CAPEX unavailable ─────────────────────── */}
       {/* Gated on lifetime mode on purpose: in Annualised mode not one figure

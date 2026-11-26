@@ -8,6 +8,8 @@ import { Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { resultsApi, isPricesWithheld } from '../../api/simulation'
 import { networkApi } from '../../api/network'
+import { displayedResultsApi } from '../../api/displayedResults'
+import ResultState from '../../components/ResultState'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import type { Bus } from '../../api/types'
@@ -63,11 +65,20 @@ export default function Prices() {
   const hourlyChartRef   = useRef<HTMLDivElement | null>(null)
   // Marginal prices are LP duals — they only exist on the LOPF/SCLOPF solve.
   // PyPSA's `n.pf()` doesn't compute duals, so always pin source='lopf'.
-  const { data: priceRaw } = useQuery({
-    queryKey: nk(currentProject, 'results', 'prices', 'lopf', win.from, win.to),
-    queryFn: () => resultsApi.getPrices('lopf', fetchRange),
+  const [driverThreshold, setDriverThreshold] = useState<number>(2000)
+  // A5.2: the prices and their drivers as one bound view (one solve, one
+  // binding), so a chat navigation can prove the figures shown. On a MIP both
+  // parts come back withheld, with the reason, as the two routes answered.
+  const pricesKey = nk(currentProject, 'results', 'displayed', 'prices', 'lopf', win.from, win.to, driverThreshold)
+  const { data: displayed, isError } = useQuery({
+    queryKey: pricesKey,
+    queryFn: () => displayedResultsApi.prices(driverThreshold, 200, fetchRange),
     enabled: winValid,
+    // A new drivers threshold keeps the prices on screen while the view reloads.
+    placeholderData: (prev, prevQuery) => (
+      prevQuery?.queryKey.slice(0, -1).every((k, i) => k === pricesKey[i]) ? prev : undefined),
   })
+  const priceRaw = displayed?.data.prices
   // CO₂ emissions for the cap shadow price KPI. Other CO₂ data lives in the
   // Emissions tab.
   const { data: emissions } = useQuery({
@@ -123,12 +134,7 @@ export default function Prices() {
     setViewMode: setViewModePersist, effectiveMode,
     weeklyAvailable, monthlyAvailable,
   } = useSeasonalViewMode('results:prices-viewmode', tsP?.index ?? [], range)
-  const [driverThreshold, setDriverThreshold] = useState<number>(2000)
-  const { data: driversRaw } = useQuery({
-    queryKey: nk(currentProject, 'results', 'price_drivers', driverThreshold),
-    queryFn: () => resultsApi.getPriceDrivers(driverThreshold, 200),
-    enabled: !!tsP,
-  })
+  const driversRaw = displayed?.data.price_drivers ?? null
   const priceDrivers = isPricesWithheld(driversRaw) ? null : driversRaw
 
   // Hourly chart rows — period-scoped.
@@ -213,10 +219,23 @@ export default function Prices() {
     toast.success(`Exported ${busStats.length} rows`)
   }
 
-  if (withheldReason) {
-    // Words only: no chart skeleton, no 0 (UX condition, GK ruling b).
+  const bindingMark = {
+    'data-result-tab': 'prices',
+    'data-result-binding': displayed ? JSON.stringify(displayed.binding) : undefined,
+  }
+  // A failed read is not "not run yet" (rulings ai, aa): the error toast says why.
+  if (isError && !priceRaw) {
     return (
-      <div className="p-5">
+      <div className="p-6" data-testid="prices-error">
+        <ResultState state="unavailable" reason="The prices could not be read. Try again in a moment." />
+      </div>
+    )
+  }
+  if (withheldReason) {
+    // Words only: no chart skeleton, no 0 (UX condition, GK ruling b). The
+    // withheld answer is what the view bound, so this root carries its binding.
+    return (
+      <div className="p-5" {...bindingMark}>
         <UnavailableBlock text={withheldBlock('Marginal prices', withheldReason)} />
       </div>
     )
@@ -229,7 +248,8 @@ export default function Prices() {
   }
 
   return (
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0">
+    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0"
+      {...bindingMark}>
 
       {/* ── Truncated-window banner (FIX 1 secondary, results-tabs-window
           final review) — a narrow-but-wide window can still hit the

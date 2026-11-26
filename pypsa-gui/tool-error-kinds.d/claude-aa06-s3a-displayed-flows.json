@@ -2,11 +2,11 @@
   "kinds": {
     "invalid_window": {
       "surface": "inline",
-      "why": "GET /api/results/displayed/{flows,loadshape,curtailment} refuses with 422 a window whose start is after its end, instead of serving some default view under a binding the browser did not ask for (assistant assurance 06, A5.2 S3a); the tab never sends one, so a caller sees it only for a malformed request."
+      "why": "GET /api/results/displayed/{flows,loadshape,curtailment,prices,storage} refuses with 422 a window whose start is after its end, instead of serving some default view under a binding the browser did not ask for (assistant assurance 06, A5.2 S3a); the tab never sends one, so a caller sees it only for a malformed request."
     },
     "source_not_offered": {
       "surface": "inline",
-      "why": "GET /api/results/displayed/{flows,loadshape,curtailment} refuses with 422 a `?source=` instead of ignoring it, since these views serve the solved network and their binding has no source key (assistant assurance 06, A5.2 S3a, GK S3 condition 2); the tab never sends one, so a caller sees it only for a malformed request."
+      "why": "GET /api/results/displayed/{flows,loadshape,curtailment,prices,capex,storage} refuses with 422 a `?source=` instead of ignoring it, since these views serve the solved network and their binding has no source key (assistant assurance 06, A5.2 S3a, GK S3 condition 2); the tab never sends one, so a caller sees it only for a malformed request."
     }
   }
 }

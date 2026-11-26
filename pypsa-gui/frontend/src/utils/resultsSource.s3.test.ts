@@ -31,4 +31,15 @@ describe('displayedResultsSource keeps the S3 binding keys', () => {
     mark('curtailment', binding)
     expect(displayedResultsSource('curtailment')).toEqual(binding)
   })
+
+  it('echoes the S3b prices and capex keys', () => {
+    const prices = { ...base, view: 'prices', source: 'lopf', window_from: null, window_to: 4,
+      threshold: 2000, limit: 200, price_limit: 'mip_duals_not_marginal', read_sha256: 'c'.repeat(64) }
+    mark('prices', prices)
+    expect(displayedResultsSource('prices')).toEqual(prices)
+    const capex = { ...base, view: 'capex', cost_breakdown_sha256: 'c'.repeat(64),
+      economics_by_carrier_sha256: 'd'.repeat(64) }
+    mark('capex', capex)
+    expect(displayedResultsSource('capex')).toEqual(capex)
+  })
 })

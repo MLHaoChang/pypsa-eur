@@ -1,0 +1,7 @@
+{
+ "served_by_tool": {
+  "GET /api/results/displayed/prices": "get_results",
+  "GET /api/results/displayed/capex": "get_results",
+  "GET /api/results/displayed/storage": "get_results"
+ }
+}

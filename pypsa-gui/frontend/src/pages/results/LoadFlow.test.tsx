@@ -9,6 +9,8 @@ import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import LoadFlow from './LoadFlow'
+import { displayedResultsApi } from '../../api/displayedResults'
+import { nk } from '../../utils/queryKeys'
 import { findKpiValue } from '../../test/kpi'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
@@ -28,6 +30,16 @@ vi.mock('../../api/simulation', async (importOriginal) => {
 
 vi.mock('../../api/resultsEvidence', () => ({ resultsEvidenceApi: { loadflow: vi.fn() } }))
 
+// The CO₂ section reads the Emissions tab's bound view (A5.2 S3b); it carries
+// what the mocked route returns.
+vi.mock('../../api/displayedResults', async () => {
+  const { resultsApi } = await import('../../api/simulation')
+  return {
+    displayedResultsApi: {
+      emissions: vi.fn(() => resultsApi.getEmissions().then(data => data && { status: 'ok', data, binding: { version: 1, project_id: 'p', scope: 'current', view: 'emissions', data_sha256: 'a'.repeat(64) } })),
+    },
+  }
+})
 vi.mock('../../api/network', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/network')>()
   return {
@@ -446,5 +458,28 @@ describe('withheld prices on an integer solve (assistant-assurance 17, 2b)', () 
     expect(await findKpiValue('424 MW')).toBeTruthy()
     expect(container.textContent).not.toContain('NaN')
     expect(container.textContent).not.toContain('mip_duals_not_marginal')
+  })
+})
+
+describe('the CO₂ line reads the Emissions tab\'s bound view (A5.2 S3b, UX 31)', () => {
+  function renderWith() {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(<QueryClientProvider client={client}><LoadFlow /></QueryClientProvider>)
+    return { client, ...view }
+  }
+
+  it('uses exactly the Emissions tab\'s query key, so the two share one fetch', async () => {
+    const { client } = renderWith()
+    await waitFor(() => expect(client.getQueryData(nk('Demo', 'results', 'displayed', 'emissions'))).toBeTruthy())
+    expect(displayedResultsApi.emissions).toHaveBeenCalled()
+    expect(client.getQueryData(nk('Demo', 'results', 'emissions'))).toBeUndefined()
+  })
+
+  it('a failed read hides the line and never shows a no-cap or €0/t reading', async () => {
+    vi.mocked(resultsApi.getEmissions).mockRejectedValue(new Error('500'))
+    const { client, container } = renderWith()
+    await waitFor(() => expect(client.getQueryState(nk('Demo', 'results', 'displayed', 'emissions'))?.status).toBe('error'))
+    expect(screen.queryByText('CO₂ emissions')).toBeNull()
+    expect(container.textContent).not.toMatch(/no cap|€\s?0(\.0+)?\s?\/\s?t|0\.00 €\/tCO₂/i)
   })
 })

@@ -18,6 +18,19 @@ vi.mock('../../api/simulation', async (importOriginal) => {
   }
 })
 
+// The tab reads the cost breakdown and economics as one bound view (A5.2 S3b);
+// it carries what the two mocked routes return.
+vi.mock('../../api/displayedResults', async () => {
+  const { resultsApi } = await import('../../api/simulation')
+  return {
+    displayedResultsApi: {
+      capex: () => Promise.all([resultsApi.getCostBreakdown(), resultsApi.getEconomicsByCarrier()])
+        .then(([cost, economics]) => cost && {
+          status: 'ok', data: { cost_breakdown: cost, economics_by_carrier: economics }, binding: { version: 1, project_id: 'p', scope: 'current', view: 'capex', data_sha256: 'a'.repeat(64) },
+        }),
+    },
+  }
+})
 vi.mock('../../api/network', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/network')>()
   return {
@@ -560,4 +573,36 @@ it('withholds the storage charge cost on an integer solve rather than summing th
   const tile = kpiCard('Storage charge cost')
   expect(tile.textContent).toContain('Not available (integer solve)')
   expect(tile.textContent).not.toMatch(/€\s*0|500|NaN/)
+})
+
+it('reads the cost breakdown and economics as one bound view and marks its root with it (A5.2)', async () => {
+  const { container } = renderPage()
+  await waitFor(() => expect(container.querySelector('[data-result-tab="capex"]')).toBeTruthy())
+  const root = container.querySelector('[data-result-tab="capex"]')!
+  expect(JSON.parse(root.getAttribute('data-result-binding')!).view).toBe('capex')
+})
+
+it('a failed read says the capacity expansion could not be read, never "has not run yet" (UX 31)', async () => {
+  vi.mocked(resultsApi.getCostBreakdown).mockRejectedValue(new Error('500'))
+  renderPage()
+  expect(await screen.findByTestId('capex-error')).toBeTruthy()
+  expect(screen.getByText(/The capacity expansion could not be read/)).toBeTruthy()
+  expect(screen.queryByText(/has not run yet/)).toBeNull()
+})
+
+it('keeps the loading and not-solved branches; "unavailable" is only for a failed read (UX 31)', async () => {
+  let resolve: (v: null) => void = () => {}
+  vi.mocked(resultsApi.getCostBreakdown).mockReturnValue(new Promise(r => { resolve = r }) as never)
+  renderPage()
+  expect(await screen.findByText('Loading…')).toBeTruthy()
+  resolve(null)
+  expect(await screen.findByText(/has not run yet/)).toBeTruthy()
+  expect(screen.queryByTestId('capex-error')).toBeNull()
+})
+
+it('a solve with no expansion keeps its zero state, not "could not be read" (UX 31)', async () => {
+  const { container } = renderPage()  // the default mock: capex_expansion 0
+  await waitFor(() => expect(container.querySelector('[data-result-tab="capex"]')).toBeTruthy())
+  expect(screen.queryByTestId('capex-error')).toBeNull()
+  expect(container.textContent).not.toMatch(/could not be read/)
 })
