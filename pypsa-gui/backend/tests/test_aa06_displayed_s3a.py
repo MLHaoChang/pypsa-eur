@@ -316,6 +316,26 @@ def test_a_malformed_or_foreign_binding_is_refused_422(client, solved, tab, chan
     assert _outcome(client, ack["action_id"]) == "submitted"
 
 
+@pytest.mark.parametrize("tab", TABS)
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"window_from": 0},  # index 0 is a bound, not a missing one
+        {"window_from": 0, "window_to": 0},  # a one-snapshot window
+        {"window_from": 2, "window_to": 2},
+        {"window_to": 0},
+    ],
+)
+def test_an_index_of_0_or_a_window_with_from_equal_to_is_a_valid_binding(
+    client, solved, tab, change
+):
+    binding = client.get(f"/api/results/displayed/{tab}").json()["binding"]
+    adapter = displayed_adapters.ADAPTERS[tab]
+    assert displayed_adapters.valid_binding(adapter, {**binding, **change})
+    if "period" in binding:
+        assert displayed_adapters.valid_binding(adapter, {**binding, "period": 0})
+
+
 def test_a_missing_index_key_is_refused_422(client, solved):
     _, ack = _issue(solved, "loadshape")
     body = copy.deepcopy(_ack_body(ack))
@@ -331,12 +351,31 @@ def test_the_view_refuses_a_malformed_window_or_a_source_it_lacks(
     client, solved, tab, params
 ):
     response = client.get(f"/api/results/displayed/{tab}", params=params)
+    assert response.status_code == 422
     if "source" in params:
-        # FastAPI ignores an unknown query parameter; the binding says what was served.
-        assert response.status_code == 200
-        assert "source" not in response.json()["binding"]
-    else:
-        assert response.status_code == 422
+        # Refused, never ignored (GK S3 condition 2).
+        assert response.json()["detail"]["error_kind"] == "source_not_offered"
+
+
+@pytest.mark.parametrize("tab", TABS)
+@pytest.mark.parametrize(
+    "params,recorded",
+    [
+        ({"from": 1}, {"window_from": 1, "window_to": None}),
+        ({"to": 1}, {"window_from": None, "window_to": 1}),
+        ({"from": 1, "to": 1}, {"window_from": 1, "window_to": 1}),
+        ({"from": 0, "to": 0}, {"window_from": 0, "window_to": 0}),
+    ],
+)
+def test_a_half_or_one_snapshot_window_is_served_and_bound(
+    client, solved, tab, params, recorded
+):
+    """Only `?from=`, only `?to=`, or from == to is a window, not a 422 or a 500."""
+    response = client.get(f"/api/results/displayed/{tab}", params=params)
+    assert response.status_code == 200, response.text
+    binding = response.json()["binding"]
+    assert {k: binding[k] for k in recorded} == recorded
+    assert displayed_adapters.valid_binding(displayed_adapters.ADAPTERS[tab], binding)
 
 
 # ── One guard per bound read (GK B 72, condition 1) ─────────────────────────
@@ -561,6 +600,17 @@ def test_a_bounded_summary_read_never_makes_the_words_say_showing(
 )
 def test_a_non_curtailment_read_has_no_ref(result):
     assert displayed_adapters.ADAPTERS["curtailment"].read_ref(result) is None
+
+
+def test_a_payload_with_exactly_the_series_keys_has_a_ref():
+    """{index, columns, data} and nothing else is the curtailment read's shape."""
+    import hashlib
+
+    series = {"index": ["t0"], "columns": ["pv"], "data": [[4.0]]}
+    expected = hashlib.sha256(canonical(series).encode()).hexdigest()
+    assert displayed_adapters.ADAPTERS["curtailment"].read_ref(series) == {
+        "read_sha256": expected
+    }
 
 
 def test_the_curtailment_read_ref_is_the_hash_of_the_part_shown(client, solved):

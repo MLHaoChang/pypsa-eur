@@ -232,6 +232,20 @@ def get_displayed_grid_risk(actor: User = Depends(require_user)):
 
 
 _INDEX = {"ge": 0}
+_SOURCE = Query(None, description="Refused: these views serve the solved network only.")
+
+
+def _no_source(source) -> None:
+    """A `?source=` is refused, never ignored: the binding has no source key, so
+    serving the solved view under it would bind data the caller did not ask for."""
+    if source is not None:
+        raise HTTPException(
+            422,
+            {
+                "error_kind": "source_not_offered",
+                "message": "this view has no source choice; it serves the solved network",
+            },
+        )
 
 
 @router.get("/flows")
@@ -241,9 +255,11 @@ def get_displayed_flows(
     ),
     from_: int | None = Query(None, alias="from", **_INDEX),
     to_: int | None = Query(None, alias="to", **_INDEX),
+    source: str | None = _SOURCE,
     actor: User = Depends(require_user),
 ):
     """The Energy flow tab's payload and its source binding."""
+    _no_source(source)
     return _serve(flows_view, actor, period=period, window_from=from_, window_to=to_)
 
 
@@ -255,9 +271,11 @@ def get_displayed_loadshape(
     from_: int | None = Query(None, alias="from", **_INDEX),
     to_: int | None = Query(None, alias="to", **_INDEX),
     week: int | None = Query(None, **_INDEX),
+    source: str | None = _SOURCE,
     actor: User = Depends(require_user),
 ):
     """The Load shape tab's payload and its source binding."""
+    _no_source(source)
     return _serve(
         loadshape_view,
         actor,
@@ -272,7 +290,9 @@ def get_displayed_loadshape(
 def get_displayed_curtailment(
     from_: int | None = Query(None, alias="from", **_INDEX),
     to_: int | None = Query(None, alias="to", **_INDEX),
+    source: str | None = _SOURCE,
     actor: User = Depends(require_user),
 ):
     """The Curtailment tab's payloads (curtailment and generators) and their one binding."""
+    _no_source(source)
     return _serve(curtailment_view, actor, window_from=from_, window_to=to_)
