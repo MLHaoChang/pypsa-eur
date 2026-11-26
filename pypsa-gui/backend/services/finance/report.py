@@ -483,7 +483,7 @@ def basis_statement(fin, base_year: int | None = None) -> str:
     (held flat to the base year, escalated from it at the case's rates), so when
     the currency year is not the base year the statement says that: "nominal
     basis, costs in real 2027 EUR (2020 price data)". Nothing is converted."""
-    return f"{fin.price_basis} basis, {money_words(fin, base_year)}"
+    return f"{fin.price_basis} basis, {money_words(fin.currency, fin.currency_year, base_year)}"
 
 
 def money_year(currency_year: int | None, base_year: int | None = None) -> int | None:
@@ -496,22 +496,25 @@ def money_year(currency_year: int | None, base_year: int | None = None) -> int |
     return int(base_year) if base_year is not None else int(currency_year)
 
 
-def money_words(fin, base_year: int | None = None) -> str:
+def money_words(currency: str, currency_year: int | None, base_year: int | None = None) -> str:
     """The money half of `basis_statement`: "2020 EUR", "costs in real 2027 EUR
     (2020 price data)" or "EUR (currency year not stated)"."""
-    if fin.currency_year is None:
-        return f"{fin.currency} (currency year not stated)"
-    if base_year is not None and int(base_year) != int(fin.currency_year):
-        return costs_money_words(fin, base_year)
-    return f"{fin.currency_year} {fin.currency}"
+    if currency_year is None:
+        return f"{currency} (currency year not stated)"
+    if base_year is not None and int(base_year) != int(currency_year):
+        return _costs_words(currency, currency_year, base_year)
+    return f"{currency_year} {currency}"
 
 
 def costs_money_words(fin, base_year: int) -> str:
     """"costs in real 2027 EUR (2020 price data)": how the typed upfront and
     operating costs are read — as real money of the base year, whatever year their
     price data states (the money-year convention; no price index is applied)."""
-    return (f"costs in real {int(base_year)} {fin.currency} "
-            f"({fin.currency_year} price data)")
+    return _costs_words(fin.currency, fin.currency_year, base_year)
+
+
+def _costs_words(currency: str, currency_year, base_year: int) -> str:
+    return f"costs in real {int(base_year)} {currency} ({currency_year} price data)"
 
 
 def _lcos_block(result) -> dict[str, Any]:

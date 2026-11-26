@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "_comment": "One name, unit and basis per result figure (guided-results 04). Read by services/figure_words.py and the frontend's utils/figureWords.ts; the parity tests on both sides pin every surface to these words. '{currency}' and '{money}' are filled from the investment report.",
+  "_comment": "One name, unit and basis per result figure (guided-results 04). Read by services/figure_words.py (and, from guided-results 04 slice 2, the frontend); tests/test_figure_words.py pins every backend surface to these words. '{currency}' and '{money}' are filled from the investment report.",
   "figures": {
     "expected_shortfall": {
       "name": "Expected shortfall",
@@ -28,6 +28,11 @@
       "name": "LCOE (finance-consistent, nominal)",
       "unit": "{currency}/MWh",
       "basis": "investment case · nominal basis"
+    },
+    "study_cost_per_mwh": {
+      "name": "Cost per MWh served (study)",
+      "unit": "€/MWh",
+      "basis": "The study's cost at the target divided by the energy it served. Energy shed is not counted."
     }
   }
 }

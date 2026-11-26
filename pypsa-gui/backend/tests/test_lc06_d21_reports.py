@@ -30,7 +30,7 @@ SECTIONS = ["executive_summary", "fmea_top"]
 HEADLINE = [
     ["Archetype", "strong_grid"], ["ENS cap (‱ of demand)", "10.00"],
     ["Achieved ENS (‱ of demand)", "not established"], ["Achieved shed hours (h/yr)", "not established"],
-    ["Expected shortfall (h/yr)", "3.21 h/yr"], ["Cost at target", "not established"], ["LCOE", "not established"],
+    ["Expected shortfall (h/yr)", "3.21 h/yr"], ["Cost at target", "not established"], ["Cost per MWh served (study)", "not established"],
     ["LCOH", "not established"], ["Pack hash", "p"], ["Assumptions hash", "a"]]
 
 

@@ -436,6 +436,7 @@ def test_only_the_figure_name_moved_the_golden(monkeypatch):
     import hashlib
 
     monkeypatch.setitem(FW.FIGURES["expected_shortfall"], "name", "MC LOLE")
+    monkeypatch.setitem(FW.FIGURES["study_cost_per_mwh"], "name", "LCOE")
     ev = collect_evidence(study_report=None, eh_report=_populated(), worksheet=_worksheet())
     doc = evidence_only_document(ev, title="Client report", report_id="0123456789abcdef", figure_pngs={})
     text = doc.model_copy(update={"created_at": ""}).model_dump_json()
@@ -449,7 +450,7 @@ def test_no_saved_charts_leaves_the_document_byte_equal_to_masters():
 
     from services.reports.chart_snapshots import ReportFigures
 
-    golden = "4357e6ce2dd84021f0e0a6f7885fd34c7f1bf25927981760513a57f95c8f6904"
+    golden = "44db0fbe0a78edcd0b8443e4e0d9d5ca289f341fcd827ed3b2978c1b3524b60e"
     ev = collect_evidence(study_report=None, eh_report=_populated(), worksheet=_worksheet())
     for pngs in ({}, ReportFigures({}, [])):
         doc = evidence_only_document(ev, title="Client report", report_id="0123456789abcdef", figure_pngs=pngs)

@@ -275,14 +275,12 @@ def _ttp_detail(raw):
     return None
 
 
-def _lcoe_money(ctx, raw):
+def _lcoe_money(ctx, raw, unit):
     """The LCOE card's money year and basis line (guided-results 04), from the raw the
     checked fact was read from and the finance report's own money-year helpers, so the
     card cannot drift from the engine's basis. The base year comes from the stored
     report that raw was read from (same assumptions hash); without it, or without a
     currency year, no year is guessed."""
-    from types import SimpleNamespace
-
     from services import figure_words as FW
     from services.finance.report import money_words, money_year
 
@@ -293,11 +291,15 @@ def _lcoe_money(ctx, raw):
     if isinstance(stored, dict) and stored.get("assumptions_hash") == raw.get("assumptions_hash"):
         payload = ((stored.get("sections") or {}).get("project") or {}).get("payload") or {}
         base_year = payload.get("base_year")
-    currency, currency_year = raw.get("currency") or None, raw.get("currency_year")
-    fin = SimpleNamespace(currency=currency or "report currency", currency_year=currency_year)
+    # the currency the checked fact's unit names ("<ISO code>/MWh", or "currency/MWh"
+    # when the report's code is not one), so the basis line and the unit agree
+    code = str(unit or "").removesuffix("/MWh")
+    currency = code if code and code != "currency" else None
+    currency_year = raw.get("currency_year")
     return {
         "money_year": money_year(currency_year, base_year),
-        "basis": FW.basis("lcoe_real", currency, money_words(fin, base_year)),
+        "basis": FW.basis("lcoe_real", currency,
+                          money_words(currency or "report currency", currency_year, base_year)),
     }
 
 
@@ -342,7 +344,7 @@ def _checked(ctx, card_id):
             )
         if card_id == "lcoe":
             return _card(card_id, fact["value"], fact["unit"], formula_id=fact["formula_id"],
-                         **_lcoe_money(ctx, raw))
+                         **_lcoe_money(ctx, raw, fact["unit"]))
         detail = (
             _peak_branch(raw, scope, fact["value"])
             if card_id == "peak_line_loading"

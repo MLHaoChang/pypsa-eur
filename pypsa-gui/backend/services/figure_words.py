@@ -1,9 +1,10 @@
 """One name, unit and basis per result figure (guided-results 04).
 
-`figure_words.json` beside this module is the single source: the reports, the
-harness and the `/results/headline_kpis` cards read it here, and the frontend
-reads the same file (`frontend/src/utils/figureWords.ts`). The parity tests on
-both sides pin every surface to it, so no surface keeps its own copy of a name.
+`figure_words.json` beside this module is the single source: the reports and the
+`/results/headline_kpis` cards read it here, and `tests/test_figure_words.py` pins
+every backend surface to it (the checked metrics' contract labels as recorded
+divergences until their v2 profiles land). The frontend reads the same file in
+guided-results 04 slice 2.
 
 The file is validated at import against a closed schema and a bad file stops
 the app loudly: a figure never falls back to a default label.

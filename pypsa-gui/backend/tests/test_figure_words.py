@@ -46,7 +46,9 @@ def test_units_and_bases_take_the_report_currency_and_never_a_silent_euro():
     assert FW.unit("project_npv", "USD") == "USD"
     assert FW.unit("lcoe_real") == "report currency/MWh"
     assert FW.basis("lcoe_real", "USD", "2024 USD") == "investment case · real basis, 2024 USD"
-    assert "€" not in json.dumps(FW.FIGURES, ensure_ascii=False)
+    # only the study's TEA figure is in euro by construction (`cost_at_target_eur`)
+    euro = {fid for fid, f in FW.FIGURES.items() if "€" in json.dumps(f, ensure_ascii=False)}
+    assert euro == {"study_cost_per_mwh"}
 
 
 def _write(tmp_path, doc):
@@ -93,6 +95,14 @@ def test_the_report_prints_the_expected_shortfall_under_its_one_name():
     assert not any(str(k).startswith("MC LOLE") for k in rows)
 
 
+def test_the_studys_cost_per_mwh_is_not_called_lcoe():
+    eh = {"archetype": "strong_grid", "tea": {"lcoe_eur_per_mwh": 42.0}}
+    rows = dict(map(tuple, E.collect_evidence(study_report=None, eh_report=eh, worksheet=None)
+                    .tables["headline"].rows))
+    assert rows[FW.name("study_cost_per_mwh")] == F.fmt_number(42.0, unit="€/MWh", digits=1)
+    assert not any("LCOE" in str(k) for k in rows if k != "LCOH")
+
+
 def _investment(currency="EUR", nominal=91.25, real=77.5):
     rep = _ic_report()
     p = rep["sections"]["project"]["payload"]
@@ -123,7 +133,7 @@ def test_a_usd_case_prints_no_euro_and_a_missing_currency_says_report_currency()
 # ── no second copy of a name (GK B (72) cond. 6) ────────────────────────────
 
 # A retired name may not reappear in backend code; the one source prints the figure.
-RETIRED = ["MC LOLE (h/yr)", "NPV at the WACC, after tax\"", "Unlevered NPV at WACC"]
+RETIRED = ["MC LOLE (h/yr)", "NPV at the WACC, after tax\"", "Unlevered NPV at WACC", '("LCOE",', '("MC LOLE",']
 # Kept on purpose, each with its reason:
 KEPT = {
     # The checked-metric labels are contract text (AA-V1-CHANGE-1): a rename is a new
@@ -148,7 +158,7 @@ def test_the_reports_read_the_names_from_the_one_source():
     for mod in ("services/reports/evidence.py", "services/reports/chapters.py"):
         text = (BACKEND / mod).read_text(encoding="utf-8")
         assert "figure_words as FW" in text
-        for fid in ("project_npv", "expected_shortfall", "lcoe_real", "lcoe_nominal"):
+        for fid in ("project_npv", "expected_shortfall", "lcoe_real", "lcoe_nominal", "study_cost_per_mwh"):
             assert not re.search(re.escape(json.dumps(FW.name(fid))), text), (mod, fid)
 
 
@@ -227,6 +237,9 @@ def test_the_investment_digest_and_the_network_fingerprint_do_not_read_a_name(pr
 
 
 def test_the_report_lcoe_is_the_checked_nominal_fact(project, monkeypatch):
+    """The chapter row reads `lcoe_finance_consistent_eur_per_mwh`, which finance/report.py
+    fills from the engine's `lcoe_nominal_per_mwh` (set here as it does); the row then equals
+    the checked nominal fact and not the real one, so reading the real key instead fails."""
     from tests.test_investment_assurance import LCOE, lcoe_hand, published, store
 
     payload = store(project, lcoe_hand)
