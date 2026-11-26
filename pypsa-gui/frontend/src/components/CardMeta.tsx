@@ -11,12 +11,18 @@ function stated(value: MetaEntry[1]): value is string | number {
   return typeof value === 'number' ? Number.isFinite(value) : typeof value === 'string' && value.trim() !== ''
 }
 
-export function metaLine(entries: readonly MetaEntry[]): string {
+function metaParts(entries: readonly MetaEntry[]): string[] {
   const shown = entries.filter(([, value]) => stated(value)).map(([, value]) => String(value))
   const missing = entries.filter(([, value]) => !stated(value)).map(([name]) => name)
-  return [...shown, ...(missing.length ? [`Not stated: ${missing.join(', ')}`] : [])].join(' · ')
+  return [...shown, ...(missing.length ? [`Not stated: ${missing.join(', ')}`] : [])]
 }
 
+export function metaLine(entries: readonly MetaEntry[]): string {
+  return metaParts(entries).join(' · ')
+}
+
+/** The line wraps only between entries, so a time window or a unit is never split. */
 export function CardMeta({ entries, className = '' }: { entries: readonly MetaEntry[]; className?: string }) {
-  return <p className={className} data-testid="card-meta">{metaLine(entries)}</p>
+  return <p className={className} data-testid="card-meta">{metaParts(entries).map((part, i) =>
+    <span key={i}>{i > 0 && ' · '}<span className="whitespace-nowrap">{part}</span></span>)}</p>
 }
