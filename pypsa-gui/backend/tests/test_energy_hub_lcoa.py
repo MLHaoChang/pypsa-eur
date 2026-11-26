@@ -435,3 +435,28 @@ def test_a_two_bus_h2_to_nh3_link_is_synthesis_and_priced_on_its_h2():
         "Link", "nh3_import", bus0="port", bus1="nh3", carrier="NH3 import", p_nom=50.0
     )
     assert ammonia_synthesis_links(n) == ["h2_to_nh3"]
+
+
+def test_an_unbuilt_link_on_an_unpriced_bus_is_skipped_not_valued():
+    # GK B2 (7) N1: an unbuilt link is never valued, so its bus having no price does not
+    # withhold the figure, and the note counts only the built link.
+    n = _hb_network()
+    n.add("Bus", "spare", carrier="AC")
+    n.add(
+        "Link",
+        "hb_unbuilt",
+        bus0="spare",
+        bus1="nh3",
+        bus2="h2",
+        carrier="Haber-Bosch",
+        p_nom=0.0,
+        efficiency=4.0,
+        efficiency2=-5.0,
+    )
+    n.links.at["hb_unbuilt", "p_nom_opt"] = 0.0
+    n.links.at["hb_unbuilt", "fom_cost"] = 0.0
+    n.links_t.p0["hb_unbuilt"] = [0.0, 0.0]
+    tea = _tea(n)
+    assert tea.lcoa_status == "ok"
+    assert tea.lcoa_eur_per_t == pytest.approx(609.9497716894978, rel=1e-12)
+    assert "over 1 ammonia-synthesis Link(s)" in tea.lcoa_note

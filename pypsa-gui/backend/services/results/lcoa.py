@@ -203,7 +203,7 @@ def _lcoa(n, cfg, names, result_df) -> dict:
     except Exception:
         prices = raw
 
-    def _price(bus, name):
+    def _bus_price(bus, name):
         for frame in (raw, prices):
             if (
                 frame is None
@@ -251,12 +251,12 @@ def _lcoa(n, cfg, names, result_df) -> dict:
         fixed = (cc + fom) * p_nom * years
         vom = float((disp.abs() * mc * weights).sum())
         electricity = float(
-            (consume * _price(links.at[name, "bus0"], name) * weights).sum()
+            (consume * _bus_price(links.at[name, "bus0"], name) * weights).sum()
         )
         # bus0's input (electricity; H2 on a two-bus H2 -> NH3 Link) is `electricity_eur`.
         # Further inputs (efficiency_k < 0): the Haber-Bosch loop's H2 draw, at its bus's price.
         inputs = sum(
-            float((consume * share * _price(bus, name) * weights).sum())
+            float((consume * share * _bus_price(bus, name) * weights).sum())
             for bus, share in _input_buses(links, name)
         )
         cost = fixed + vom + electricity + inputs
