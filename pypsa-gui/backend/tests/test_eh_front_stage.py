@@ -499,14 +499,24 @@ def test_a_study_without_front_is_masters():
     assert report.valued_to_year is None
     # Nor the TEA block's cost-of-ammonia fields and currency (template-e2e 28a): pinned here by value.
     new = {"lcoa_eur_per_t", "lcoa_status", "lcoa_note", "currency"}
-    skipped = {"lcoa_eur_per_t": None, "lcoa_status": "skipped",
-               "lcoa_note": "Cost of ammonia skipped: the network has no ammonia-synthesis Links",
-               "currency": None}
+    skipped = {
+        "lcoa_eur_per_t": None,
+        "lcoa_status": "skipped",
+        "lcoa_note": "Cost of ammonia skipped: the network has no ammonia-synthesis Links",
+        "currency": None,
+    }
     assert {k: getattr(report.tea, k) for k in new} == skipped
     assert {k: report.sections["tea"].payload[k] for k in new} == skipped
     assert (
-        _digest(report.model_dump_json(exclude={
-            "valued_to_year": True, "tea": new, "sections": {"tea": {"payload": new}}}))
+        _digest(
+            report.model_dump_json(
+                exclude={
+                    "valued_to_year": True,
+                    "tea": new,
+                    "sections": {"tea": {"payload": new}},
+                }
+            )
+        )
         == MASTER_REPORT_DIGEST
     )
 

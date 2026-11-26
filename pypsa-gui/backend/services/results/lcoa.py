@@ -15,9 +15,15 @@ Unlike LCOH it never sums part of the numerator (GK B2 A4): a part it cannot
 value (a needed bus price, a weighting, the solved capacity, a cost, the
 output's unit) answers `not_established` naming that part, never a lower figure.
 """
+
 from __future__ import annotations
 
-from services.period_utils import is_multi_period, period_years_map, snapshot_weights, years_for_period
+from services.period_utils import (
+    is_multi_period,
+    period_years_map,
+    snapshot_weights,
+    years_for_period,
+)
 from services.results.load_frames import corrected_marginal_prices
 
 #: PyPSA-Eur's ``MWh_NH3_per_tNH3`` (config.default.yaml), used for an MWh bus with no ``mwh_per_t``.
@@ -51,7 +57,11 @@ def _input_buses(links, name):
     k = 2
     while f"bus{k}" in links.columns:
         bus = links.at[name, f"bus{k}"]
-        eff = _num(links.at[name, f"efficiency{k}"]) if f"efficiency{k}" in links.columns else None
+        eff = (
+            _num(links.at[name, f"efficiency{k}"])
+            if f"efficiency{k}" in links.columns
+            else None
+        )
         if isinstance(bus, str) and bus and eff is not None and eff < 0:
             out.append((bus, -eff))
         k += 1
@@ -77,14 +87,21 @@ def ammonia_synthesis_links(n) -> list[str]:
         bus1 = links.at[name, "bus1"] if "bus1" in links.columns else None
         if _carrier(n.buses, bus1).upper() != "NH3":
             continue
-        if any(_carrier(n.buses, bus).upper() == "H2" for bus, _ in _input_buses(links, name)):
+        if any(
+            _carrier(n.buses, bus).upper() == "H2"
+            for bus, _ in _input_buses(links, name)
+        ):
             out.append(name)
     return out
 
 
 def _mwh_per_t(n, bus) -> tuple[float, str]:
     """The output bus's unit per t NH3, and how it was read (GK B2 A2: fail closed)."""
-    unit = str(n.buses.at[bus, "unit"]).strip() if "unit" in n.buses.columns and bus in n.buses.index else ""
+    unit = (
+        str(n.buses.at[bus, "unit"]).strip()
+        if "unit" in n.buses.columns and bus in n.buses.index
+        else ""
+    )
     if unit == "t":
         return 1.0, "NH3 bus in t"
     if unit == "MWh":
@@ -92,8 +109,11 @@ def _mwh_per_t(n, bus) -> tuple[float, str]:
             v = _num(n.buses.at[bus, "mwh_per_t"])
             if v is not None and v > 0:
                 return v, f"{v:g} MWh/t from the NH3 bus"
-        return DEFAULT_MWH_PER_T, f"{DEFAULT_MWH_PER_T:g} MWh/t, PyPSA-Eur's MWh_NH3_per_tNH3"
-    raise _NotValued(f"the NH3 bus {bus!r} has unit {unit or 'none'!r}, neither t nor MWh")
+        return (
+            DEFAULT_MWH_PER_T,
+            f"{DEFAULT_MWH_PER_T:g} MWh/t, PyPSA-Eur's MWh_NH3_per_tNH3",
+        )
+    raise _NotValued(f"the NH3 bus {bus} has unit {unit or 'none'}, neither t nor MWh")
 
 
 def compute_lcoa(n, cfg, *, result_df, price_limit=...):
@@ -111,6 +131,7 @@ def compute_lcoa(n, cfg, *, result_df, price_limit=...):
         return empty
 
     from harness.solve_validity import MIP_PRICES_TEXT, mip_price_limit
+
     if price_limit is ...:
         price_limit = mip_price_limit(n, cfg)
     if price_limit is not None:
@@ -135,7 +156,10 @@ def _lcoa(n, cfg, names, result_df) -> dict:
     sns = n.snapshots
     weights = snapshot_weights(n, "objective").reindex(sns)
     energy_weights = snapshot_weights(n, "generators").reindex(sns)
-    if not (_np.isfinite(weights.to_numpy(float)).all() and _np.isfinite(energy_weights.to_numpy(float)).all()):
+    if not (
+        _np.isfinite(weights.to_numpy(float)).all()
+        and _np.isfinite(energy_weights.to_numpy(float)).all()
+    ):
         raise _NotValued("a snapshot weighting is missing")
     # Horizon-total years for the annuitised fixed cost, as LCOH: the OPEX and
     # input sums already span every period's years through `weights`.
@@ -143,7 +167,12 @@ def _lcoa(n, cfg, names, result_df) -> dict:
     if is_multi_period(n):
         try:
             ymap = period_years_map(n)
-            years = float(sum(years_for_period(ymap, p) for p in sorted({int(p) for p in sns.get_level_values(0)})))
+            years = float(
+                sum(
+                    years_for_period(ymap, p)
+                    for p in sorted({int(p) for p in sns.get_level_values(0)})
+                )
+            )
         except Exception as exc:
             raise _NotValued("the investment periods' years are missing") from exc
 
@@ -154,9 +183,14 @@ def _lcoa(n, cfg, names, result_df) -> dict:
                 cap_costs = _pd.Series(cap_costs, index=links.index)
             cap_costs = cap_costs.copy()
     except Exception:
-        cap_costs = fom_per_horizon(n, links.get("capital_cost", _pd.Series(0.0, index=links.index)))
-    fom_costs = (fom_per_horizon(n, links["fom_cost"]) if "fom_cost" in links.columns
-                 else _pd.Series(0.0, index=links.index))
+        cap_costs = fom_per_horizon(
+            n, links.get("capital_cost", _pd.Series(0.0, index=links.index))
+        )
+    fom_costs = (
+        fom_per_horizon(n, links["fom_cost"])
+        if "fom_cost" in links.columns
+        else _pd.Series(0.0, index=links.index)
+    )
 
     # The solved duals as read, before the merit-order correction: the correction
     # answers zeros for a missing frame, so presence is judged on the raw read (A4).
@@ -171,15 +205,20 @@ def _lcoa(n, cfg, names, result_df) -> dict:
 
     def _price(bus, name):
         for frame in (raw, prices):
-            if frame is None or bus not in getattr(frame, "columns", ()) \
-                    or frame[bus].reindex(sns).astype(float).isna().any():
-                raise _NotValued(f"the price of bus {bus!r} that {name!r} draws from is missing")
+            if (
+                frame is None
+                or bus not in getattr(frame, "columns", ())
+                or frame[bus].reindex(sns).astype(float).isna().any()
+            ):
+                raise _NotValued(
+                    f"the price of bus {bus} that {name} draws from is missing"
+                )
         return prices[bus].reindex(sns).astype(float)
 
     def _part(value, what, name):
         v = _num(value)
         if v is None:
-            raise _NotValued(f"the {what} of {name!r} is missing")
+            raise _NotValued(f"the {what} of {name} is missing")
         return v
 
     rows: list[dict] = []
@@ -187,19 +226,21 @@ def _lcoa(n, cfg, names, result_df) -> dict:
     fleet_t = 0.0
     for name in names:
         if name not in p0.columns:
-            raise _NotValued(f"the dispatch of {name!r} is missing")
+            raise _NotValued(f"the dispatch of {name} is missing")
         disp = p0[name].reindex(sns).astype(float)
         if disp.isna().any():
-            raise _NotValued(f"the dispatch of {name!r} is missing")
+            raise _NotValued(f"the dispatch of {name} is missing")
         if "p_nom_opt" not in links.columns:
-            raise _NotValued(f"the solved capacity of {name!r} is missing")
+            raise _NotValued(f"the solved capacity of {name} is missing")
         p_nom = _part(links.at[name, "p_nom_opt"], "solved capacity", name)
         eff = _part(links.at[name, "efficiency"], "efficiency", name)
         consume = disp.clip(lower=0)
         mwh_per_t, basis = _mwh_per_t(n, links.at[name, "bus1"])
         nh3_t = float((consume * energy_weights).sum()) * eff / mwh_per_t
         if nh3_t <= 0:
-            rows.append({"name": name, "nh3_t": 0.0, "cost_eur": None, "lcoa_eur_per_t": None})
+            rows.append(
+                {"name": name, "nh3_t": 0.0, "cost_eur": None, "lcoa_eur_per_t": None}
+            )
             continue
         # The typed costs as entered: the per-horizon helpers fill a gap with 0.
         _part(links.at[name, "capital_cost"], "capital cost", name)
@@ -210,17 +251,38 @@ def _lcoa(n, cfg, names, result_df) -> dict:
         mc = _part(links.at[name, "marginal_cost"], "marginal cost", name)
         fixed = (cc + fom) * p_nom * years
         vom = float((disp.abs() * mc * weights).sum())
-        electricity = float((consume * _price(links.at[name, "bus0"], name) * weights).sum())
+        electricity = float(
+            (consume * _price(links.at[name, "bus0"], name) * weights).sum()
+        )
         # Further inputs (efficiency_k < 0): the Haber-Bosch loop's H2 draw, at its bus's price.
-        inputs = sum(float((consume * share * _price(bus, name) * weights).sum())
-                     for bus, share in _input_buses(links, name))
+        inputs = sum(
+            float((consume * share * _price(bus, name) * weights).sum())
+            for bus, share in _input_buses(links, name)
+        )
         cost = fixed + vom + electricity + inputs
-        rows.append({"name": name, "nh3_t": nh3_t, "cost_eur": cost, "lcoa_eur_per_t": cost / nh3_t,
-                     "fixed_eur": fixed, "vom_eur": vom, "electricity_eur": electricity,
-                     "inputs_eur": inputs, "t_basis": basis})
+        rows.append(
+            {
+                "name": name,
+                "nh3_t": nh3_t,
+                "cost_eur": cost,
+                "lcoa_eur_per_t": cost / nh3_t,
+                "fixed_eur": fixed,
+                "vom_eur": vom,
+                "electricity_eur": electricity,
+                "inputs_eur": inputs,
+                "t_basis": basis,
+            }
+        )
         fleet_cost += cost
         fleet_t += nh3_t
-    total = ({"lcoa_eur_per_t": fleet_cost / fleet_t, "nh3_t": fleet_t, "cost_eur": fleet_cost,
-              "t_basis": sorted({r["t_basis"] for r in rows if r.get("t_basis")})}
-             if fleet_t > 0 else None)
+    total = (
+        {
+            "lcoa_eur_per_t": fleet_cost / fleet_t,
+            "nh3_t": fleet_t,
+            "cost_eur": fleet_cost,
+            "t_basis": sorted({r["t_basis"] for r in rows if r.get("t_basis")}),
+        }
+        if fleet_t > 0
+        else None
+    )
     return {"rows": rows, "total": total, "currency": "EUR"}
