@@ -148,7 +148,9 @@ def source(ctx, entity):
         "loads": {l: _column(n.loads_t.p, l, index) for l in loads}
         if len(loads) <= MAX_MEMBERS
         else None,
-        "renewable_generators": {g: _column(n.generators_t.p, g, index) for g in renewable}
+        "renewable_generators": {
+            g: _column(n.generators_t.p, g, index) for g in renewable
+        }
         if len(renewable) <= MAX_MEMBERS
         else None,
         # A blank or NaN carrier would be classified non-renewable by default; it is not guessed.
@@ -226,7 +228,9 @@ def calculate(raw, scope):
         elif generated <= NEAR_ZERO:
             # Use met from storage alone: the share of a zero generation is undefined.
             unknown = any(v is None for v in renewable)
-            reasons["renewable_share"] = "invalid_or_missing_raw_data" if unknown else "no_generation"
+            reasons["renewable_share"] = (
+                "invalid_or_missing_raw_data" if unknown else "no_generation"
+            )
         elif nonren > served:
             # All non-renewable output counts as used on site; above the use it is undefined.
             reasons["renewable_share"] = "nonrenewable_exceeds_served"

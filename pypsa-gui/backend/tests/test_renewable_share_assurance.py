@@ -484,7 +484,9 @@ def _supply(share_case, renewable, nonren, load):
     raw = _raw(share_case())
     raw["generators"] = {g: [0.0, 0.0, 0.0] for g in raw["generators"]}
     raw["generators"]["gas"] = list(nonren)
-    raw["renewable_generators"] = {g: [0.0, 0.0, 0.0] for g in raw["renewable_generators"]}
+    raw["renewable_generators"] = {
+        g: [0.0, 0.0, 0.0] for g in raw["renewable_generators"]
+    }
     raw["renewable_generators"].update(renewable)
     raw["loads"] = {"L": list(load)}
     return _reasons(raw)["renewable_share"]
@@ -495,7 +497,10 @@ def _supply(share_case, renewable, nonren, load):
     [(2 * derived.NEAR_ZERO, None), (derived.NEAR_ZERO, "no_generation")],
 )
 def test_the_generation_boundary(share_case, output, reason):
-    assert _supply(share_case, {"wind": [output, 0.0, 0.0]}, [0.0] * 3, [1.0, 0.0, 0.0]) == reason
+    assert (
+        _supply(share_case, {"wind": [output, 0.0, 0.0]}, [0.0] * 3, [1.0, 0.0, 0.0])
+        == reason
+    )
 
 
 def test_non_renewable_output_alone_is_generation(share_case):
