@@ -200,7 +200,10 @@ def test_the_year_build_passes_the_validator(n0):
 
 def test_every_ledger_row_is_demo_or_sourced():
     ledger = T.TEMPLATE_META[TID]["ledger"]
-    assert {r["source"] for r in ledger} <= {"demo", "sourced"}
+    # The one assumed row is the reliability goal the Goal card and the study use
+    # (template-e2e 41); every other row is demo or sourced.
+    assert {r["source"] for r in ledger if r["item"] != "lole_goal"} <= {"demo", "sourced"}
+    assert [r["source"] for r in ledger if r["item"] == "lole_goal"] == ["assumed"]
     items = {r["item"] for r in ledger}
     for item in ("ore feed (mine)", "grinding specific energy (Bond)", "crushing", "flotation", "site services",
                  "mill lines", "crusher capacity", "coarse-ore stockpile", "mill p_min_pu, min up / min down",
