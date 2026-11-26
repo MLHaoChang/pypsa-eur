@@ -208,3 +208,10 @@ it('issue 07: focus survives the turn starting (disabled flips true while the bu
   fireEvent.click(button)
   expect(onRequest).not.toHaveBeenCalled()
 })
+
+it('issue 07: the button looks dimmed while the turn runs (aria-disabled styling)', () => {
+  render(<AssistantResultCard result={{ [SCENE_UNKNOWN_KEY]: true }} disabled onRequest={vi.fn()} />)
+  const button = screen.getByTestId('scene-unknown-check-button')
+  expect(button.getAttribute('aria-disabled')).toBe('true')
+  expect(button.className).toContain('aria-disabled:opacity-40')
+})
