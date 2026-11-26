@@ -483,13 +483,27 @@ def basis_statement(fin, base_year: int | None = None) -> str:
     (held flat to the base year, escalated from it at the case's rates), so when
     the currency year is not the base year the statement says that: "nominal
     basis, costs in real 2027 EUR (2020 price data)". Nothing is converted."""
+    return f"{fin.price_basis} basis, {money_words(fin, base_year)}"
+
+
+def money_year(currency_year: int | None, base_year: int | None = None) -> int | None:
+    """The year whose money the case's real figures are in: the base year when the
+    price data states another year (the money-year convention, `costs_money_words`),
+    the currency year otherwise, and None when no currency year is stated — never a
+    guessed year."""
+    if currency_year is None:
+        return None
+    return int(base_year) if base_year is not None else int(currency_year)
+
+
+def money_words(fin, base_year: int | None = None) -> str:
+    """The money half of `basis_statement`: "2020 EUR", "costs in real 2027 EUR
+    (2020 price data)" or "EUR (currency year not stated)"."""
     if fin.currency_year is None:
-        money = f"{fin.currency} (currency year not stated)"
-    elif base_year is not None and int(base_year) != int(fin.currency_year):
-        return (f"{fin.price_basis} basis, {costs_money_words(fin, base_year)}")
-    else:
-        money = f"{fin.currency_year} {fin.currency}"
-    return f"{fin.price_basis} basis, {money}"
+        return f"{fin.currency} (currency year not stated)"
+    if base_year is not None and int(base_year) != int(fin.currency_year):
+        return costs_money_words(fin, base_year)
+    return f"{fin.currency_year} {fin.currency}"
 
 
 def costs_money_words(fin, base_year: int) -> str:

@@ -1255,3 +1255,49 @@ def test_a_switched_off_profile_leaves_no_time_to_power_tile(monkeypatch):
     _ttp_card(monkeypatch, SPEC, [])
     monkeypatch.setenv(GATE, "curtailment/1")
     assert hk._checked(SimpleNamespace(project_uuid="p"), "time_to_power") is None
+
+
+# ── guided-results 04: the LCOE card carries its money year ─────────────────
+
+
+def _lcoe_card(project, client, monkeypatch, currency_year, base_year):
+    def money(payload):
+        lcoe_hand(payload)
+        payload["currency_year"], payload["base_year"] = currency_year, base_year
+
+    store(project, money)
+    as_template(monkeypatch, "eh_datacenter")
+    _, by_id, _ = cards(client)
+    return by_id["lcoe"]
+
+
+def _engine_words(currency_year, base_year):
+    from types import SimpleNamespace
+
+    from services.finance.report import basis_statement
+
+    # the engine's own basis line, read as real: the card names the money it is in
+    return basis_statement(SimpleNamespace(currency="USD", currency_year=currency_year, price_basis="real"),
+                           base_year)
+
+
+def test_the_lcoe_card_is_in_base_year_money_when_the_price_data_states_another_year(
+        project, client, monkeypatch):
+    lcoe = _lcoe_card(project, client, monkeypatch, 2020, 2027)
+    assert lcoe["state"] == "ready" and lcoe["money_year"] == 2027
+    assert lcoe["basis"] == "investment case · " + _engine_words(2020, 2027)
+    assert lcoe["basis"] == "investment case · real basis, costs in real 2027 USD (2020 price data)"
+
+
+def test_the_lcoe_card_names_the_currency_year_when_it_is_the_base_year(project, client, monkeypatch):
+    lcoe = _lcoe_card(project, client, monkeypatch, 2024, 2024)
+    assert lcoe["money_year"] == 2024
+    assert lcoe["basis"] == "investment case · " + _engine_words(2024, 2024)
+    assert lcoe["basis"] == "investment case · real basis, 2024 USD"
+
+
+def test_the_lcoe_card_guesses_no_year_when_none_is_stated(project, client, monkeypatch):
+    lcoe = _lcoe_card(project, client, monkeypatch, None, 2027)
+    assert lcoe["money_year"] is None
+    assert lcoe["basis"] == "investment case · real basis, USD (currency year not stated)"
+    assert lcoe["basis"] == "investment case · " + _engine_words(None, 2027)

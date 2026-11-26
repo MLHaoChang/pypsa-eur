@@ -17,6 +17,8 @@ from services import figure_words as FW
 from services.reports import chapters, evidence as E
 from services.reports import formatting as F
 from tests.test_chat_tools_investment_case import _report as _ic_report
+from tests.test_investment_assurance import private_store, project  # noqa: F401
+from tests.test_workflow_tools import baseline  # noqa: F401
 
 BACKEND = Path(__file__).resolve().parent.parent
 
@@ -148,3 +150,92 @@ def test_the_reports_read_the_names_from_the_one_source():
         assert "figure_words as FW" in text
         for fid in ("project_npv", "expected_shortfall", "lcoe_real", "lcoe_nominal"):
             assert not re.search(re.escape(json.dumps(FW.name(fid))), text), (mod, fid)
+
+
+# ── the chat's checked metrics (GK B (72): contract labels move only with a profile v2) ──
+
+# Every checked metric that prints one of the figures, as an exact set: (profile, metric) → figure.
+HARNESS_FIGURES = {
+    ("investment-case/1", "project_npv"): "project_npv",
+    ("investment-lcoe/1", "lcoe_real"): "lcoe_real",
+    ("investment-lcoe/1", "lcoe_nominal"): "lcoe_nominal",
+    ("copt-screening/1", "screening_lole"): "screening_shortfall",
+}
+TICKET = ".scratch/assistant-assurance/issues/28-figure-names-in-contract-labels.md"
+# Known divergences, not skips: the contract label the chat prints today, until the ticket lands.
+PENDING_CONTRACT_LABELS = {
+    ("investment-case/1", "project_npv"): ("Project NPV (post tax, at the WACC)", TICKET),
+    ("investment-lcoe/1", "lcoe_real"): ("LCOE, real (engine definition)", TICKET),
+    ("investment-lcoe/1", "lcoe_nominal"): ("LCOE, nominal (engine definition)", TICKET),
+    ("copt-screening/1", "screening_lole"): ("Screening LOLE over the modelled horizon (COPT)", TICKET),
+}
+
+
+def _contract_metrics():
+    from harness import copt_calculations as copt, investment_calculations as inv
+
+    return {
+        (inv.PROFILE, "project_npv"): inv.METRICS["project_npv"],
+        (inv.LCOE_PROFILE, "lcoe_real"): inv.LCOE_METRICS["lcoe_real"],
+        (inv.LCOE_PROFILE, "lcoe_nominal"): inv.LCOE_METRICS["lcoe_nominal"],
+        (copt.PROFILE, "screening_lole"): copt.METRICS["screening_lole"],
+    }
+
+
+def test_every_checked_metric_of_a_figure_is_mapped_to_it():
+    from harness import copt_calculations as copt, investment_calculations as inv
+
+    words = re.compile(r"\b(NPV|LOLE|LCOE)\b")
+    printed = {(inv.PROFILE, m) for m, d in inv.METRICS.items() if words.search(d["label"])}
+    printed |= {(inv.LCOE_PROFILE, m) for m, d in inv.LCOE_METRICS.items() if words.search(d["label"])}
+    printed |= {(copt.PROFILE, m) for m, d in copt.METRICS.items() if words.search(d["label"])}
+    # Equity NPV is another figure (at the cost of equity); it carries none of the four names.
+    assert printed - {(inv.PROFILE, "equity_npv")} == set(HARNESS_FIGURES)
+    assert set(_contract_metrics()) == set(HARNESS_FIGURES)
+
+
+def test_each_contract_label_is_the_ruled_name_or_a_recorded_divergence():
+    repo = BACKEND.parent.parent
+    for key, definition in _contract_metrics().items():
+        ruled = FW.name(HARNESS_FIGURES[key])
+        if key in PENDING_CONTRACT_LABELS:
+            label, ticket = PENDING_CONTRACT_LABELS[key]
+            # a changed contract label must update or remove its row
+            assert definition["label"] == label, key
+            assert label != ruled and (repo / ticket).is_file(), key
+        else:
+            assert definition["label"] == ruled, key
+
+
+# ── labels are not identity (GK B (72) cond. 2) ─────────────────────────────
+
+
+def _renamed(monkeypatch):
+    for fid in ("project_npv", "expected_shortfall", "lcoe_real", "lcoe_nominal"):
+        monkeypatch.setitem(FW.FIGURES[fid], "name", f"renamed {fid}")
+
+
+def test_the_investment_digest_and_the_network_fingerprint_do_not_read_a_name(project, monkeypatch):
+    from routers.results import _ic_current_assumptions
+    from services.finance.investment_case_runner import assumptions_digest
+    from services.workflow_tools import _network_input_fingerprint
+
+    args = dict(finance={"wacc_nominal": 0.07}, commercial=None, dispatch="d", packs={"tax": "t"})
+    before = (assumptions_digest(**args), _ic_current_assumptions(), _network_input_fingerprint(project))
+    _renamed(monkeypatch)
+    assert (assumptions_digest(**args), _ic_current_assumptions(), _network_input_fingerprint(project)) == before
+
+
+def test_the_report_lcoe_is_the_checked_nominal_fact(project, monkeypatch):
+    from tests.test_investment_assurance import LCOE, lcoe_hand, published, store
+
+    payload = store(project, lcoe_hand)
+    nominal, real = payload["lcoe_nominal_per_mwh"], payload["lcoe_real_per_mwh"]
+    assert real is not None and abs(real - nominal) > 0.1  # a swap shows at 1 dp
+    facts = published(project, {"lcoe_nominal": nominal, "lcoe_real": real}, LCOE)
+    rep = project.solver_state["investment_case_report"]
+    # finance/report.py: the report's finance-consistent LCOE is the engine's nominal metric
+    rep["lcoe_finance_consistent_eur_per_mwh"] = payload["lcoe_nominal_per_mwh"]
+    rows = dict(map(tuple, chapters.investment_table(chapters.investment_payload(rep, stale=False), "x").rows))
+    assert rows[FW.name("lcoe_nominal")] == F.fmt_number(facts["lcoe_nominal"], unit="USD/MWh", digits=1)
+    assert rows[FW.name("lcoe_nominal")] != F.fmt_number(facts["lcoe_real"], unit="USD/MWh", digits=1)
