@@ -8,6 +8,7 @@
     "tolerance": "harness.derived:NEAR_ZERO",
     "oracle": "pypsa-gui/backend/tests/test_renewable_share_assurance.py::test_network_figures_equal_the_hand_arithmetic",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -26,6 +27,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_renewable_share_assurance.py::test_network_figures_equal_the_hand_arithmetic",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -44,6 +46,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_renewable_share_assurance.py::test_network_figures_equal_the_hand_arithmetic",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",

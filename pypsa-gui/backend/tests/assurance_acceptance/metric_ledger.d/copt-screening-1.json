@@ -8,6 +8,7 @@
     "tolerance": "harness.copt_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "pending",
@@ -26,6 +27,7 @@
     "tolerance": "harness.copt_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "pending",
@@ -44,6 +46,7 @@
     "tolerance": "harness.copt_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "pending",

@@ -8,6 +8,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_site_import_assurance.py::test_export_is_what_the_meter_delivers_into_the_grid_bus",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -22,6 +23,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_site_import_assurance.py::test_export_is_what_the_meter_delivers_into_the_grid_bus",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -36,6 +38,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_site_import_assurance.py::test_export_is_what_the_meter_delivers_into_the_grid_bus",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -50,6 +53,7 @@
     "tolerance": "harness.site_import_calculations:AT_LIMIT",
     "oracle": "pypsa-gui/backend/tests/test_site_import_assurance.py::test_export_is_what_the_meter_delivers_into_the_grid_bus",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",

@@ -8,6 +8,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_time_to_power_assurance.py::test_the_staged_example_reads_12_months_to_the_2027_stage",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "pending",

@@ -8,6 +8,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_network_without_a_cap_has_no_shadow_price",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -32,6 +33,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_a_binding_cap_reports_the_dual_as_a_positive_price",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",

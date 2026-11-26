@@ -8,6 +8,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_branch_loading_assurance.py::test_line_loading_matches_the_hand_values_and_the_load_flow_tab",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -22,6 +23,7 @@
     "tolerance": "harness.branch_calculations:OVER_LIMIT_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_branch_loading_assurance.py::test_an_observed_overload_counts_weighted_hours_like_the_tab",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -36,6 +38,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_branch_loading_assurance.py::test_line_loading_matches_the_hand_values_and_the_load_flow_tab",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -50,6 +53,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_branch_loading_assurance.py::test_line_loading_matches_the_hand_values_and_the_load_flow_tab",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",

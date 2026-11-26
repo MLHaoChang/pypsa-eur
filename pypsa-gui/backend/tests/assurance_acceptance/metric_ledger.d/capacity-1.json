@@ -8,6 +8,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_an_extendable_generator_built_to_its_bound",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -22,6 +23,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_an_extendable_generator_built_to_its_bound",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",

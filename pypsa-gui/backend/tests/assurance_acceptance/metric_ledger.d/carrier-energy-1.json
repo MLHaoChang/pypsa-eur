@@ -8,6 +8,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_carrier_assurance.py::test_wind_carrier_energy_matches_the_hand_sum",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -22,6 +23,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_carrier_assurance.py::test_wind_carrier_energy_matches_the_hand_sum",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -36,6 +38,7 @@
     "tolerance": "harness.storage_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_carrier_assurance.py::test_battery_carrier_reads_split_storage_power_and_an_empty_generator_set",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -50,6 +53,7 @@
     "tolerance": "harness.storage_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_carrier_assurance.py::test_battery_carrier_reads_split_storage_power_and_an_empty_generator_set",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",

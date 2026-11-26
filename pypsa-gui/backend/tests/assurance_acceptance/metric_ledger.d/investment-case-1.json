@@ -8,6 +8,7 @@
     "tolerance": "harness.investment_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_investment_assurance.py::test_hand_cash_with_a_nonzero_first_year",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "pending",
@@ -22,6 +23,7 @@
     "tolerance": "harness.investment_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_investment_assurance.py::test_hand_cash_with_a_nonzero_first_year",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "pending",
@@ -36,6 +38,7 @@
     "tolerance": "harness.investment_calculations:IRR_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_investment_assurance.py::test_hand_cash_with_a_nonzero_first_year",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "pending",
@@ -50,6 +53,7 @@
     "tolerance": "harness.investment_calculations:IRR_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_investment_assurance.py::test_project_irr_of_one_sign_change_is_the_hand_root",
     "status": "verified",
+    "domain_review": "gk-b:e0be8aa78175a29b88c93d1c46b51c0f6189307c",
     "surfaces": {
      "answer": {
       "status": "verified",

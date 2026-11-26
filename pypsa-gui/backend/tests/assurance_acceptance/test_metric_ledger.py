@@ -31,8 +31,21 @@ SECTION = "profiles"
 SURFACES = ("answer", "route", "workbook", "pdf", "download_meta")
 STATUSES = ("verified", "pending")
 ROW_KEYS = frozenset(
-    {"metric", "formula", "validity", "tolerance", "oracle", "status", "surfaces"}
+    {
+        "metric",
+        "formula",
+        "validity",
+        "tolerance",
+        "oracle",
+        "status",
+        "domain_review",
+        "surfaces",
+    }
 )
+# GK B's per-metric domain review (issue 10 R5): "pending", or the full head SHA of
+# the PR that carries the GK B OK. A pending row may carry GK B's one-line reason.
+DOMAIN_REVIEW = re.compile(r"gk-b:[0-9a-f]{40}")
+ROW_OPTIONAL = frozenset({"domain_review_note"})
 SURFACE_KEYS = frozenset({"status", "test"})
 OPTIONAL = frozenset({"ticket"})
 NAMED_TOLERANCE = re.compile(
@@ -284,6 +297,14 @@ def _status_problems(entry: dict, test_key: str) -> list[str]:
     return []
 
 
+def domain_review_problem(value) -> str | None:
+    if value == "pending" or (
+        isinstance(value, str) and DOMAIN_REVIEW.fullmatch(value)
+    ):
+        return None
+    return f"domain_review {value!r} is not 'pending' or gk-b:<full sha>"
+
+
 def row_problems(profile: str, row, path: Path) -> list[str]:
     """Every closed-schema breach of one row, each naming the file and the row."""
     name = row.get("metric") if isinstance(row, dict) else repr(row)
@@ -292,10 +313,12 @@ def row_problems(profile: str, row, path: Path) -> list[str]:
         return [f"{where}: a row is an object"]
     found = []
     keys = set(row)
-    if ROW_KEYS - keys or keys - ROW_KEYS - OPTIONAL:
+    if ROW_KEYS - keys or keys - ROW_KEYS - OPTIONAL - ROW_OPTIONAL:
         found.append(
-            f"keys missing {sorted(ROW_KEYS - keys)}, unknown {sorted(keys - ROW_KEYS - OPTIONAL)}"
+            f"keys missing {sorted(ROW_KEYS - keys)}, "
+            f"unknown {sorted(keys - ROW_KEYS - OPTIONAL - ROW_OPTIONAL)}"
         )
+    found += filter(None, [domain_review_problem(row.get("domain_review"))])
     for key in ("formula", "validity"):
         if not (isinstance(row.get(key), str) and row[key].strip()):
             found.append(f"{key} must be non-empty text")
@@ -413,6 +436,7 @@ ROW = {
     "tolerance": "exact",
     "oracle": None,
     "status": "pending",
+    "domain_review": "pending",
     "surfaces": {"answer": {"status": "pending", "test": None}},
 }
 
@@ -491,4 +515,181 @@ def test_node_ids_resolve_statically_including_a_param_id():
     assert "not resolvable statically" in node_problem(
         "pypsa-gui/backend/tests/test_assurance_metrics.py::"
         "test_missing_or_out_of_bounds_dispatch_never_becomes_full_horizon[bad0]"
+    )
+
+
+# ── per-metric domain review (issue 10 R5, GK B plan GO) ─────────────────
+
+R1_OK = "gk-b:bf0eed8e63449828d3c91967f75a8c35e2775a2a"  # #2036
+R2_OK = "gk-b:e0be8aa78175a29b88c93d1c46b51c0f6189307c"  # #2037
+# Exact set: a row whose domain_review is not "pending" is listed here with its value.
+REVIEWED = {
+    **{
+        ("branch-losses/1", m): R1_OK
+        for m in ("loss_energy", "peak_loss", "demand_energy", "loss_pct_of_demand")
+    },
+    **{
+        pair: R2_OK
+        for pair in (
+            ("energy-balance/1", "storage_change"),
+            ("energy-balance/1", "export_losses_and_conversion"),
+            ("grid-readiness/1", "checked_pass"),
+            ("grid-readiness/1", "checked_warn"),
+            ("grid-readiness/1", "checked_fail"),
+            ("investment-case/1", "project_irr"),
+            ("network-linear-cost/1", "dispatch_energy"),
+            ("network-linear-cost/1", "marginal_expenditure"),
+            ("network-linear-cost/1", "peak_dispatch"),
+            ("network-linear-cost/1", "annual_fixed_cost"),
+            ("network-linear-cost/1", "allocated_fixed_cost"),
+        )
+    },
+}
+
+
+def test_the_reviewed_rows_are_exactly_the_listed_set(ledger):
+    rows, _ = ledger
+    reviewed = {
+        pair: row["domain_review"]
+        for pair, (row, _) in rows.items()
+        if row.get("domain_review") != "pending"
+    }
+    assert reviewed == REVIEWED, summary(rows)
+
+
+def test_only_a_verified_row_can_carry_a_domain_review(ledger):
+    rows, _ = ledger
+    assert all(rows[pair][0]["status"] == "verified" for pair in REVIEWED)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "gk-b:bf0eed8",
+        "gk-a:bf0eed8e63449828d3c91967f75a8c35e2775a2a",
+        "gk-b:BF0EED8E63449828D3C91967F75A8C35E2775A2A",
+        "gk-b:bf0eed8e63449828d3c91967f75a8c35e2775a2a ",
+        "ok",
+        None,
+    ],
+)
+def test_a_malformed_domain_review_is_refused(value):
+    problems = row_problems("bus-price/1", {**ROW, "domain_review": value}, Path("x"))
+    assert any("domain_review" in p for p in problems)
+    assert not row_problems("bus-price/1", {**ROW, "domain_review": R1_OK}, Path("x"))
+
+
+def test_a_row_without_domain_review_is_refused():
+    row = {k: v for k, v in ROW.items() if k != "domain_review"}
+    assert any(
+        "keys missing ['domain_review']" in p
+        for p in row_problems("bus-price/1", row, Path("x"))
+    )
+
+
+def test_domain_review_feeds_no_tally_and_no_gate(ledger):
+    """Changing every row's domain_review leaves the verified tally equal, and no
+    application module opens the ledger, so rollout and pilot gating cannot see it."""
+    rows, _ = ledger
+    flipped = {
+        pair: ({**row, "domain_review": R1_OK}, path)
+        for pair, (row, path) in rows.items()
+    }
+    assert summary(flipped) == summary(rows)
+    backend = HERE.parents[1]
+    readers = [
+        str(path.relative_to(backend))
+        for path in backend.rglob("*.py")
+        if "tests" not in path.relative_to(backend).parts
+        and re.search(r"\bmetric_ledger\b", path.read_text(errors="ignore"))
+    ]
+    assert readers == []
+
+
+def test_independent_domain_approval_stays_false():
+    from harness import assurance_contracts, rollout
+
+    assert rollout.capabilities()["independent_domain_approval"] is False
+    assert "independent_domain_approval" in assurance_contracts.PENDING
+
+
+# Profiles whose oracle tests compare at the constant their rows name. The other
+# profiles' oracle tests use literal tolerances; pinning them is not done here.
+TOLERANCE_PINNED = (
+    "energy-balance/1",
+    "branch-losses/1",
+    "system-cost-breakdown/1",
+    "renewable-share/1",
+)
+
+
+def test_a_named_tolerance_is_the_one_its_oracle_test_uses(ledger):
+    """The constant a row names appears in the module of its oracle test."""
+    rows, _ = ledger
+    off = []
+    for (profile, metric), (row, _) in sorted(rows.items()):
+        match = NAMED_TOLERANCE.fullmatch(row["tolerance"])
+        if profile not in TOLERANCE_PINNED or row["oracle"] is None:
+            continue
+        if match is None:
+            continue  # "exact" or ulp:<n>: no constant to name
+        test_file = REPO / row["oracle"].split("::")[0]
+        if match[2] not in test_file.read_text():
+            off.append(f"{profile}/{metric}: {match[2]} not in {test_file.name}")
+    assert off == [], "\n".join(off)
+
+
+# ── pending metrics with no checked profile (issue 10 R5) ────────────────
+
+PENDING = HERE / "metric_ledger_pending.json"
+PENDING_NAMES = {
+    "fmea",
+    "monte_carlo_adequacy",
+    "adequacy_loops",
+    "billing",
+    "cfe_score",
+    "lcoh",
+    "unit_commitment",
+    "bus_voltages",
+    "business_case_npv",
+    "objective_decomposition",
+}
+
+
+def _pending_rows():
+    return json.loads(PENDING.read_text())["pending"]
+
+
+def test_the_pending_metrics_are_exactly_the_named_set():
+    rows = _pending_rows()
+    names = [r["name"] for r in rows]
+    assert len(names) == len(set(names)) and set(names) == PENDING_NAMES
+    for row in rows:
+        assert set(row) == {
+            "name",
+            "implementation",
+            "what",
+            "status",
+            "oracle",
+            "reason",
+        }, row
+        assert row["status"] == "pending" and row["oracle"] is None, row
+
+
+@pytest.mark.parametrize("row", _pending_rows(), ids=lambda r: r["name"])
+def test_each_pending_implementation_resolves(row):
+    """A rename of the function breaks this, so the row cannot point at nothing."""
+    import importlib
+
+    module, function = row["implementation"].split(":")
+    assert callable(getattr(importlib.import_module(module), function))
+
+
+def test_no_pending_metric_is_counted_as_verified(ledger):
+    rows, _ = ledger
+    profiles = {profile for profile, _ in rows}
+    names = {metric for _, metric in rows}
+    assert not PENDING_NAMES & (profiles | names)
+    assert "0 verified" in summary(
+        {(r["name"], r["name"]): (r, PENDING) for r in _pending_rows()}
     )

@@ -8,6 +8,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/assurance_acceptance/test_p2_request_slots.py::test_a_non_converged_interval_keeps_its_warning_slot_whatever_is_asked",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -22,6 +23,7 @@
     "tolerance": "harness.branch_calculations:OVER_LIMIT_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/assurance_acceptance/test_p2_request_slots.py::test_a_non_converged_interval_keeps_its_warning_slot_whatever_is_asked",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -36,6 +38,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/assurance_acceptance/test_p2_request_slots.py::test_a_non_converged_interval_keeps_its_warning_slot_whatever_is_asked",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -50,6 +53,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/assurance_acceptance/test_p2_request_slots.py::test_a_non_converged_interval_keeps_its_warning_slot_whatever_is_asked",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",

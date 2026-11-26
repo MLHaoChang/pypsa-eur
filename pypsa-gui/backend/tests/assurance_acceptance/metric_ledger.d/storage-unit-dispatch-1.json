@@ -8,6 +8,7 @@
     "tolerance": "harness.storage_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -22,6 +23,7 @@
     "tolerance": "harness.storage_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -36,6 +38,7 @@
     "tolerance": "harness.storage_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -50,6 +53,7 @@
     "tolerance": "harness.storage_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -64,6 +68,7 @@
     "tolerance": "harness.storage_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -78,6 +83,7 @@
     "tolerance": "harness.storage_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",

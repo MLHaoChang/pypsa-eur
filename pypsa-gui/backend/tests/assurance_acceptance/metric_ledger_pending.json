@@ -1,0 +1,85 @@
+{
+ "$comment": "Metrics with no checked profile (issue 10 R5). Each implementation resolves to a module:function; a pending row has oracle null and is never counted as verified. Pending items of a checked profile stay in coverage-ledger.md.",
+ "pending": [
+  {
+   "name": "fmea",
+   "implementation": "services.adequacy.copt_endpoint:build_fmea_modes_payload",
+   "what": "FMEA failure-mode rows and their LOLE/EUE impact",
+   "status": "pending",
+   "oracle": null,
+   "reason": "no checked profile yet; not in harness.calculations.PROFILES (issue 10 R5, owner Q4)"
+  },
+  {
+   "name": "monte_carlo_adequacy",
+   "implementation": "services.adequacy.mc:simulate",
+   "what": "Monte Carlo adequacy indices (LOLE, EUE) from sampled outages",
+   "status": "pending",
+   "oracle": null,
+   "reason": "no checked profile yet; not in harness.calculations.PROFILES (issue 10 R5, owner Q4)"
+  },
+  {
+   "name": "adequacy_loops",
+   "implementation": "services.adequacy.margin_loop_runner:start_margin_loop",
+   "what": "margin and coupling loops that size capacity to a LOLE target",
+   "status": "pending",
+   "oracle": null,
+   "reason": "no checked profile yet; not in harness.calculations.PROFILES (issue 10 R5, owner Q4)"
+  },
+  {
+   "name": "billing",
+   "implementation": "services.results.billing:compute_billing",
+   "what": "tariff bill lines and totals",
+   "status": "pending",
+   "oracle": null,
+   "reason": "no checked profile yet; not in harness.calculations.PROFILES (issue 10 R5, owner Q4)"
+  },
+  {
+   "name": "cfe_score",
+   "implementation": "services.results.cfe_score:compute_cfe_score",
+   "what": "hourly carbon-free energy score",
+   "status": "pending",
+   "oracle": null,
+   "reason": "no checked profile yet; not in harness.calculations.PROFILES (issue 10 R5, owner Q4)"
+  },
+  {
+   "name": "lcoh",
+   "implementation": "services.results.lcoh:compute_lcoh",
+   "what": "levelised cost of hydrogen",
+   "status": "pending",
+   "oracle": null,
+   "reason": "no checked profile yet; not in harness.calculations.PROFILES (issue 10 R5, owner Q4)"
+  },
+  {
+   "name": "unit_commitment",
+   "implementation": "services.results.unit_commitment:compute_unit_commitment",
+   "what": "committed status, start-ups and shut-downs",
+   "status": "pending",
+   "oracle": null,
+   "reason": "no checked profile yet; not in harness.calculations.PROFILES (issue 10 R5, owner Q4)"
+  },
+  {
+   "name": "bus_voltages",
+   "implementation": "routers.results:get_voltages",
+   "what": "AC power-flow bus voltage magnitudes",
+   "status": "pending",
+   "oracle": null,
+   "reason": "no checked profile yet; not in harness.calculations.PROFILES (issue 10 R5, owner Q4)"
+  },
+  {
+   "name": "business_case_npv",
+   "implementation": "services.finance.business_case:_npv_at",
+   "what": "the business case's own NPV, a second NPV implementation beside investment-case/1's equity_npv and project_npv",
+   "status": "pending",
+   "oracle": null,
+   "reason": "no checked profile yet; not in harness.calculations.PROFILES (issue 10 R5, owner Q4)"
+  },
+  {
+   "name": "objective_decomposition",
+   "implementation": "services.results.objective_decomposition:_bridge",
+   "what": "the objective-to-cost bridge; system-cost-breakdown/1 checks against it but does not verify it",
+   "status": "pending",
+   "oracle": null,
+   "reason": "no checked profile yet; not in harness.calculations.PROFILES (issue 10 R5, owner Q4)"
+  }
+ ]
+}

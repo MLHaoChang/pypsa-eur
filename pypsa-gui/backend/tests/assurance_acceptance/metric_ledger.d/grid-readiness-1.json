@@ -8,6 +8,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_grid_readiness_assurance.py::test_hand_rows_give_hand_counts_with_boundaries_on_the_documented_side",
     "status": "verified",
+    "domain_review": "gk-b:e0be8aa78175a29b88c93d1c46b51c0f6189307c",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -22,6 +23,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_grid_readiness_assurance.py::test_hand_rows_give_hand_counts_with_boundaries_on_the_documented_side",
     "status": "verified",
+    "domain_review": "gk-b:e0be8aa78175a29b88c93d1c46b51c0f6189307c",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -36,6 +38,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_grid_readiness_assurance.py::test_hand_rows_give_hand_counts_with_boundaries_on_the_documented_side",
     "status": "verified",
+    "domain_review": "gk-b:e0be8aa78175a29b88c93d1c46b51c0f6189307c",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -50,6 +53,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_grid_readiness_assurance.py::test_a_rounded_boundary_is_withheld_not_re_verdicted",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "pending",

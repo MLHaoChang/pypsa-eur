@@ -8,6 +8,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_lost_load_assurance.py::test_lost_load_matches_the_hand_values_from_a_real_solve",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -22,6 +23,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_lost_load_assurance.py::test_lost_load_matches_the_hand_values_from_a_real_solve",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -36,6 +38,7 @@
     "tolerance": "harness.lost_load_calculations:SHED_THRESHOLD_MW",
     "oracle": "pypsa-gui/backend/tests/test_lost_load_assurance.py::test_lost_load_matches_the_hand_values_from_a_real_solve",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -50,6 +53,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_lost_load_assurance.py::test_lost_load_matches_the_hand_values_from_a_real_solve",
     "status": "verified",
+    "domain_review": "pending",
     "surfaces": {
      "answer": {
       "status": "verified",
