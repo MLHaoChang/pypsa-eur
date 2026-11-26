@@ -1220,7 +1220,8 @@ export default function AppHeader() {
           <div className="flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-border bg-bg-2">
             <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
             <span className="text-[10px] text-muted font-mono">{label}</span>
-            {finishedRun && !queued && !studying && status !== 'running' && (
+            {/* The study is the run being read only while the user's own LOPF solve has left no status (TE2E-30-2). */}
+            {finishedRun && !queued && !studying && status === 'idle' && (
               <span className="text-[10px] text-muted font-mono" data-testid="header-run">· {finishedRun}</span>
             )}
           </div>

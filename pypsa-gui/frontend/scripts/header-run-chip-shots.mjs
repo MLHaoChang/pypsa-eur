@@ -31,7 +31,7 @@ try {
     page.setDefaultTimeout(30000)
     const finished = Date.UTC(2026, 10, 26, 13, 2) / 1000
     await page.route('**/api/results/eh_study', route => route.fulfill({ json: {
-      status: 'ok', study: 'eh_site', started_at: finished - 240, finished_at: finished, budget_solves: 4 } }))
+      status: 'done', study: 'eh_site', started_at: finished - 240, finished_at: finished, budget_solves: 4 } }))
     await page.goto(`${base}/app`)
     await page.getByRole('button', { name: 'Skip tour' }).click({ timeout: 4000 }).catch(() => {})
     await page.evaluate(t => document.documentElement.setAttribute('data-theme', t), theme)

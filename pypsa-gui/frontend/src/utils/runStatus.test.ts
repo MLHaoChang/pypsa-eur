@@ -92,11 +92,13 @@ describe('formatting', () => {
 describe('finishedStudyLabel', () => {
   it('names an ended study by its finish time', () => {
     const at = Date.UTC(2026, 10, 26, 13, 2) / 1000
-    expect(finishedStudyLabel({ status: 'ok', finished_at: at })).toMatch(/^Run of 26 Nov, \d\d:\d\d$/)
+    expect(finishedStudyLabel({ status: 'done', finished_at: at })).toMatch(/^Run of 26 Nov, \d\d:\d\d$/)
   })
   it('names nothing while it runs or without a time', () => {
     expect(finishedStudyLabel({ status: 'running', started_at: 1 })).toBeNull()
-    expect(finishedStudyLabel({ status: 'ok' })).toBeNull()
+    expect(finishedStudyLabel({ status: 'done' })).toBeNull()
+    for (const status of ['failed', 'aborted', 'interrupted'])
+      expect(finishedStudyLabel({ status, finished_at: 1 })).toBeNull()
     expect(finishedStudyLabel(null)).toBeNull()
   })
 })

@@ -68,10 +68,11 @@ export function runFromStudy(study: EhStudyPayload | null | undefined): RunView 
   }
 }
 
-/** The Guided goal study once it has ended, as the header names it: "Run of 26 Nov, 13:02"
- *  (its finish, else its start). Null while it runs or when no time was recorded. */
+/** The Guided goal study once it has finished successfully, as the header names it: "Run of 26 Nov, 13:02"
+ *  (its finish, else its start). Null while it runs, after a failed, aborted or interrupted study, or when no
+ *  time was recorded. */
 export function finishedStudyLabel(study: EhStudyPayload | null | undefined): string | null {
-  if (!study || study.status === 'running') return null
+  if (!study || study.status !== 'done') return null
   const at = study.finished_at ?? study.started_at
   if (at == null) return null
   const when = runWhen(new Date(at * 1000).toISOString())
