@@ -740,3 +740,18 @@ def test_a_blank_or_unreadable_reason_reads_as_none_given(error):
         G._gc03_failed("strength", {"error": "demo"})
         == "The strength screen could not run: demo"
     )
+
+
+def test_the_four_rows_are_gated_as_screening_warnings_on_the_campus_run():
+    """Every emitted row is gated or listed as not gated (D8); GC-03's are static screens, so they warn."""
+    from services import run_profiles
+
+    gated = {
+        row: (severity, source)
+        for row, severity, _, source in run_profiles.DC_SCORECARD
+    }
+    ids = (G.PLANNING_ID, *STRENGTH_IDS)
+    assert {i: gated.get(i) for i in ids} == dict.fromkeys(
+        ids, ("warn", run_profiles._CAMPUS_RUN)
+    )
+    assert not set(ids) & set(run_profiles.DC_NOT_GATED)
