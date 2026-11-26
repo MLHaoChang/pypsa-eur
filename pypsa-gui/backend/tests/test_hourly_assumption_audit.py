@@ -66,6 +66,9 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "chat_tools.py": (2, "prose / output-budget guidance"),
     "harness/catalogue.py": (3, "tool descriptions (row counts, default hours)"),
     "harness/sensitivity_comparison.py": (1, "HOURS_PER_YEAR = 8760 h/yr annualises; not a snapshot step"),
+    "harness/system_cost_calculations.py": (2, "nyears = Σ objective weights / 8760 (docstring, "
+                                              "HOURS_PER_YEAR) scales annual costs; a unit, not a step"),
+    "harness/fact_identity.py": (1, "comment: capex per horizon, nyears = Σ objective weights / 8760"),
     "legacy_import.py": (1, "prose describing a legacy fixture"),
     "profile_gen/load_archetypes.py": (1, "an archetype is drawn on the source year's "
                                           "HOURS by design (load shapes are hourly only); "
@@ -186,6 +189,7 @@ def test_the_inventory_is_pinned():
     # G2P-15: process_heat.py (1), the two-level heat demo's own hourly snapshots.
     # SCU06 S1a: market_prices.py (3), the ENTSO-E series' own UTC-year axis.
     # DC review 02: solver/co2_cap.py (3) annualises the CO2 limit's constant.
-    assert sum(c for c, _ in ALLOWED.values()) == 100
-    assert len(ALLOWED) == 52
+    # AA-10 R3: harness/system_cost_calculations.py (2) and harness/fact_identity.py (1), nyears.
+    assert sum(c for c, _ in ALLOWED.values()) == 103
+    assert len(ALLOWED) == 54
     assert all(reason for _, reason in ALLOWED.values())
