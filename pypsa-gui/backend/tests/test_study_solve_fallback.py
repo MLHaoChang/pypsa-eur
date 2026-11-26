@@ -246,3 +246,67 @@ def test_the_held_objective_is_finite_or_none(objective, expected):
 
     assert study_solve._objective(SimpleNamespace(objective=objective)) == expected
     assert study_solve._objective(SimpleNamespace()) is None
+
+
+def _about(content):
+    return {
+        r[0].value: r[1].value
+        for r in load_workbook(io.BytesIO(content))["About"].iter_rows()
+        if r[0].value
+    }
+
+
+def _review(monkeypatch, review):
+    import services.adequacy.eh_review as eh_review
+
+    monkeypatch.setattr(eh_review, "review_latest", lambda *a, **k: review)
+
+
+PASS = {
+    "status": "ok",
+    "stale": False,
+    "summary": {"verdict": "pass", "mc_lole_h_per_year": 0.4, "target_lole_h": 2},
+}
+
+
+def test_about_carries_the_held_studys_verdict(client, after_study, monkeypatch):
+    """Study only: the workbook is the study's solve, so its verdict is the study's."""
+    _review(monkeypatch, PASS)
+    r = client.get(URL)
+    assert r.status_code == 200
+    assert _about(r.content)["Verdict"] == (
+        "Certified: about 0.4 h/yr of shortfall, under the 2 h/yr goal."
+    )
+
+
+def test_a_stale_study_review_gives_no_verdict(client, after_study, monkeypatch):
+    _review(monkeypatch, {**PASS, "stale": True})
+    assert "Verdict" not in _about(client.get(URL).content)
+
+
+def test_a_live_solve_workbook_never_carries_the_studys_verdict(
+    client, install_network, after_study, monkeypatch
+):
+    """Study then LOPF, and LOPF then study: the live network has its own dispatch, so the workbook is
+    the LOPF's and the study's report (a private copy's solve) says nothing about it (GK B2 V1)."""
+    _review(monkeypatch, PASS)
+    install_network(_network(), name="P")
+    from services.pypsa_service import PyPSAService
+    import services.workflow_tools as wt
+
+    monkeypatch.setattr(
+        wt,
+        "solve_freshness",
+        lambda ctx=None: {"inputs_changed_since_solve": False, "results_current": True},
+    )
+    ctx = PyPSAService.get_active_context()
+    study_solve.keep(
+        ctx.solver_state, _network(), None, {}
+    )  # a study ran after the LOPF
+    ctx.solver_state["eh_study"] = {
+        "status": "done",
+        "network_revision": dirty_state.revision(),
+    }
+    r = client.get(URL)
+    assert r.status_code == 200
+    assert "Verdict" not in _about(r.content)

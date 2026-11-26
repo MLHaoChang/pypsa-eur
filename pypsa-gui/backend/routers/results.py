@@ -3046,18 +3046,20 @@ def _workbook_project(run):
             return None
 
 
-def _workbook_verdict(store: dict, record) -> str | None:
-    """The study's verdict line for About, or None when no study review exists
+def _workbook_verdict(held: dict) -> str | None:
+    """The held study's verdict line for About, or None when its review is missing or not of this solve
     (the same review the Guided Results card reads, template-e2e 46)."""
     from services.adequacy.eh_review import review_latest
     from services.adequacy.verdict_line import verdict_line
 
     try:
-        review = review_latest(store, record if isinstance(record, dict) else None)
+        review = review_latest(held, None)
     except Exception:  # noqa: BLE001 - the workbook never fails for want of a verdict
         logger.info("results workbook: no verdict line", exc_info=True)
         return None
-    return verdict_line(review.get("summary")) if review.get("status") == "ok" else None
+    if review.get("status") != "ok" or review.get("stale"):
+        return None
+    return verdict_line(review.get("summary"))
 
 
 # The cause only; the Export tab words what to do per mode ("Not run yet: ..."). Pinned to
@@ -3260,8 +3262,9 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
     except UnknownView as exc:
         raise HTTPException(422, {"error_kind": "unknown_result_view", "message": str(exc)})
     runs = [latest] if latest is not None else []
-    verdict = _workbook_verdict(held if study is not None else _state,
-                                None if study is not None else get_eh_study())
+    # Only a held study's own solve has a verdict to show: a live LOPF workbook is not the study's run
+    # (the study solves a private copy), whatever order the two ran in (GK B2 V1).
+    verdict = _workbook_verdict(held) if study is not None else None
     project = PyPSAService.get_loaded_project()
     report = load_ic_report(_state)
     case_state = None
