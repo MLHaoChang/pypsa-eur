@@ -236,10 +236,12 @@ def test_off_grid_excludes_both_rows_with_the_reason(tmp_path, setup):
     vs = [e for e in out["excluded"] if e["id"] in IDS]
     assert [e["id"] for e in vs] == list(IDS)
     assert all(e["reason"] == G.VS_OFF_GRID for e in vs)
+    # GC-03: the campus strength rows leave with the same reason.
+    assert [e["reason"] for e in out["excluded"] if e["id"] in G._STRENGTH] == [G.VS_OFF_GRID] * len(G._STRENGTH)
     # Study harness 12: the other off-grid exclusions are the fault-level rows, with their own reason.
     # GC-08: the sub-synchronous rows are scanned from the PCC and leave with theirs.
     assert all(e["reason"] == (G.SUBSYNC_OFF_GRID if e["id"] in G.SUBSYNC_PCC_ROWS else G.SK_OFF_GRID)
-               for e in out["excluded"] if e["id"] not in IDS)
+               for e in out["excluded"] if e["id"] not in (*IDS, *G._STRENGTH))
     assert set(G.SUBSYNC_PCC_ROWS) <= {e["id"] for e in out["excluded"]}
     assert sum(out["summary"][v] for v in G.VERDICTS) == len(out["rows"])
 

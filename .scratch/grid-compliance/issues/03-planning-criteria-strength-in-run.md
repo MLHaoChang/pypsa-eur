@@ -3,7 +3,7 @@
 
 # GC-03 Planning criteria and SCR/ESCR/WSCR in the campus run; TSO contingency-list import
 
-Status: ready-for-agent; audit 2026-11-19: campus steps merged (#1574, #1589); left: scorecard rows in grid_readiness.py and the campus service section
+Status: done; campus steps (#1574, #1589), service stages, scorecard rows and the scr_min/escr_min/wscr_min profile keys (PR3). The TSO-list upload route is `26-tso-contingency-list-upload.md`.
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: none
@@ -94,3 +94,4 @@ Release note: one new file under `doc/release-notes.d/` (see its README).
 **2026-11-17, GK A2 ruling on T2: (A).** pandapower's IEC 60909 minimum case adds no sgen current, and the campus carries a genset as an sgen, so S_k''min is grid-only (the conservative minimum-generation case). Conditions: `GENSET_SK_NOTE` appears only when a genset exists (tested both ways); the "gensets in" wording is gone everywhere; S_k is pinned unchanged with a genset on a PoC bus and off one. Option B (genset as a synchronous `gen` with K_G) is filed as `13-genset-in-strength-fault-level.md` (renumbered from 10 by the coordinator) (needs-triage).
 
 - 2026-11-23 status sweep: landed in #1574 (5d937574); #1589 (8f8d141d): contingency-list import and planning_campus/strength_campus in campus_study. Remains: PR3 (scorecard rows, campus service section and RUN_STAGES entries).
+- 2026-11-26: PR3 built: `planning` and `strength` run stages in the campus service, the `planning_criteria` and `campus_scr`/`campus_escr`/`campus_wscr` scorecard rows, and optional `scr_min`, `escr_min`, `wscr_min` profile keys (GK A2 PR3 plan GO, option A). Follow-up: `26-tso-contingency-list-upload.md`.

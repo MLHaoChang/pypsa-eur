@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
@@ -21,6 +21,20 @@ vi.mock('../../api/simulation', async (importOriginal) => {
   }
 })
 
+// The tab reads curtailment and generators as one bound view (A5.2); it carries
+// what the two mocked routes return.
+vi.mock('../../api/displayedResults', async () => {
+  const { resultsApi } = await import('../../api/simulation')
+  return {
+    displayedResultsApi: {
+      curtailment: (range?: { from: number; to: number }) => Promise.all([
+        resultsApi.getCurtailment(range), resultsApi.getGeneratorResults(undefined, range),
+      ]).then(([curtailment, generators]) => curtailment && {
+        status: 'ok', data: { curtailment, generators: generators ?? null }, binding: { version: 1, project_id: 'p', scope: 'current', view: 'curtailment', data_sha256: 'a'.repeat(64) },
+      }),
+    },
+  }
+})
 vi.mock('../../api/network', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/network')>()
   return {
@@ -95,6 +109,21 @@ function renderPage() {
     </QueryClientProvider>,
   )
 }
+
+it('reads curtailment and generators as one bound view and marks its root with it (A5.2)', async () => {
+  const { container } = renderPage()
+  await waitFor(() => expect(container.querySelector('[data-result-tab="curtailment"]')).toBeTruthy())
+  const root = container.querySelector('[data-result-tab="curtailment"]')!
+  expect(JSON.parse(root.getAttribute('data-result-binding')!).view).toBe('curtailment')
+  expect(resultsApi.getGeneratorResults).toHaveBeenCalledWith(undefined, undefined)
+})
+
+it('a failed read says curtailment could not be read, never "has not run yet" (UX 31)', async () => {
+  vi.mocked(resultsApi.getCurtailment).mockRejectedValue(new Error('500'))
+  renderPage()
+  expect(await screen.findByTestId('curtailment-error')).toBeTruthy()
+  expect(screen.queryByText(/has not run yet/)).toBeNull()
+})
 
 it('renders a distinctive curtailed-energy KPI sourced from a single mocked snapshot', async () => {
   renderPage()

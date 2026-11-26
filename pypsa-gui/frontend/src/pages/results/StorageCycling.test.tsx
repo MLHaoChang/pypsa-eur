@@ -12,6 +12,17 @@ vi.mock('../../api/simulation', async (importOriginal) => {
   return { ...actual, resultsApi: { ...actual.resultsApi, getStorageDispatchResults: vi.fn() } }
 })
 
+// The tab reads the storage dispatch as a bound view (A5.2 S3b); it carries
+// what the mocked route returns.
+vi.mock('../../api/displayedResults', async () => {
+  const { resultsApi } = await import('../../api/simulation')
+  return {
+    displayedResultsApi: {
+      storage: (range?: { from: number; to: number }) => resultsApi.getStorageDispatchResults(undefined, range)
+        .then(data => data && { status: 'ok', data, binding: { version: 1, project_id: 'p', scope: 'current', view: 'storage', data_sha256: 'a'.repeat(64) } }),
+    },
+  }
+})
 vi.mock('../../api/network', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/network')>()
   return {
@@ -411,4 +422,20 @@ describe('StorageCycling: reserve products (DC 06)', () => {
     // A symmetric product carries no directional note.
     expect(screen.queryByTestId('reserve-not-modelled')).toBeNull()
   })
+})
+
+it('reads the storage dispatch as a bound view and marks its root with it (A5.2)', async () => {
+  const { container } = renderPage()
+  await waitFor(() => expect(container.querySelector('[data-result-tab="storage"]')).toBeTruthy())
+  const root = container.querySelector('[data-result-tab="storage"]')!
+  expect(JSON.parse(root.getAttribute('data-result-binding')!).view).toBe('storage')
+  expect(resultsApi.getStorageDispatchResults).toHaveBeenCalledWith(undefined, undefined)
+})
+
+it('a failed read says the storage dispatch could not be read, never "run a solve" (UX 31)', async () => {
+  vi.mocked(resultsApi.getStorageDispatchResults).mockRejectedValue(new Error('500'))
+  renderPage()
+  expect(await screen.findByTestId('storage-error')).toBeTruthy()
+  expect(screen.getByText(/The storage dispatch could not be read/)).toBeTruthy()
+  expect(screen.queryByText(/Run a solve to count them/)).toBeNull()
 })

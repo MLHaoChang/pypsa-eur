@@ -1,6 +1,7 @@
 // GET /results/energy_flows (site commercial UX A1): where the site's energy
 // came from, what it passed through and where it went, in MWh.
 import client from './client'
+import type { Displayed } from './displayedResults'
 
 export interface EnergyFlowRow {
   source: string
@@ -64,6 +65,10 @@ export const energyFlowsApi = {
   /** `null` before a solve (204). */
   get: (q: EnergyFlowsQuery = {}) =>
     client.get<EnergyFlowsPayload>('/results/energy_flows', { params: params(q) })
+      .then(r => (r.status === 204 ? null : r.data)),
+  /** The same payload with its displayed-data binding (A5.2): `null` before a solve. */
+  displayed: (q: EnergyFlowsQuery = {}) =>
+    client.get<Displayed<EnergyFlowsPayload>>('/results/displayed/flows', { params: params(q) })
       .then(r => (r.status === 204 ? null : r.data)),
   /** The same rows as the chart, as CSV text (the file the server writes). */
   csv: (q: EnergyFlowsQuery = {}) =>

@@ -32,6 +32,20 @@ vi.mock('../../api/simulation', async (importOriginal) => {
   }
 })
 
+// The tab reads the prices and their drivers as one bound view (A5.2 S3b); it
+// carries what the two mocked routes return.
+vi.mock('../../api/displayedResults', async () => {
+  const { resultsApi } = await import('../../api/simulation')
+  return {
+    displayedResultsApi: {
+      prices: (threshold: number, limit: number, range?: { from: number; to: number }) => Promise.all([
+        resultsApi.getPrices('lopf', range), resultsApi.getPriceDrivers(threshold, limit),
+      ]).then(([prices, drivers]) => prices && {
+        status: 'ok', data: { prices, price_drivers: drivers ?? null }, binding: { version: 1, project_id: 'p', scope: 'current', view: 'prices', data_sha256: 'a'.repeat(64) },
+      }),
+    },
+  }
+})
 vi.mock('../../api/network', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/network')>()
   return {
@@ -205,4 +219,21 @@ describe('hourly price chart · report', () => {
     ])
     expect(ids.size).toBe(4)
   })
+})
+
+it('reads prices and drivers as one bound view and marks its root with it (A5.2)', async () => {
+  const { container } = renderPage()
+  await waitFor(() => expect(container.querySelector('[data-result-tab="prices"]')).toBeTruthy())
+  const root = container.querySelector('[data-result-tab="prices"]')!
+  expect(JSON.parse(root.getAttribute('data-result-binding')!).view).toBe('prices')
+  expect(resultsApi.getPrices).toHaveBeenCalledWith('lopf', undefined)
+  expect(resultsApi.getPriceDrivers).toHaveBeenCalledWith(2000, 200)
+})
+
+it('a failed read says the prices could not be read, never "has not run yet" (UX 31)', async () => {
+  vi.mocked(resultsApi.getPrices).mockRejectedValue(new Error('500'))
+  renderPage()
+  expect(await screen.findByTestId('prices-error')).toBeTruthy()
+  expect(screen.getByText(/The prices could not be read/)).toBeTruthy()
+  expect(screen.queryByText(/has not run yet/)).toBeNull()
 })

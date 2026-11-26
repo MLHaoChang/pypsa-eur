@@ -137,6 +137,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                historical_section="results_capacity",
                units="MW, MWh, EUR/a",
                checked_profiles=("generator-cost/1", "storage-unit-cost/1", "capacity/1"),
+               verification="displayed_data",
                card="capacity", sub_option="sizing", card_tab="build"),
     ResultView("dispatch", _RESULTS, "dispatch", "Dispatch",
                "hourly generation and storage operation", "results",
@@ -158,6 +159,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                             "energy is unavailable, not zero.",
                checked_profiles=("energy-balance/1",),
                units="MWh",
+               verification="displayed_data",
                card="capacity", sub_option="dispatch", card_tab="operation"),
     # Gated like flows: the copilot read lands with the catalogue work.
     ResultView("loadshape", _RESULTS, "loadshape", "Load shape",
@@ -169,6 +171,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                claim_limits="Energy carriers only; a group the network does not model, or the run "
                             "cannot establish, is named, not shown as zero.",
                units="MW, MWh",
+               verification="displayed_data",
                card="capacity", sub_option="dispatch", card_tab="operation"),
     ResultView("loadflow", _RESULTS, "loadflow", "Load Flow",
                "line and transformer loading against their ratings", "results",
@@ -230,6 +233,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                 _r("get_results", result_kind="price_drivers")),
                historical_section="results_prices",
                units="EUR/MWh", checked_profiles=("bus-price/1",),
+               verification="displayed_data",
                card="capacity", sub_option="dispatch", card_tab="costs_prices"),
     ResultView("economics", _RESULTS, "economics", "Economics",
                "per-asset revenue, cost and LCOE", "results",
@@ -248,6 +252,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                "renewable energy available but not used", "results",
                (_r("get_results", result_kind="curtailment"),),
                units="MWh, %", checked_profiles=("curtailment/1",),
+               verification="displayed_data",
                card="capacity", sub_option="dispatch", card_tab="curtailment"),
     ResultView("lostload", _RESULTS, "lostload", "Lost load",
                "demand that could not be served", "results",
@@ -266,6 +271,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                (_r("get_results", result_kind="storage"),),
                units="cycles, MWh",
                checked_profiles=("storage-unit-dispatch/1", "storage-cycles/1"),
+               verification="displayed_data",
                card="capacity", sub_option="dispatch", card_tab="operation"),
     ResultView("fmea", _RESULTS, "fmea", "FMEA",
                "failure modes ranked by their effect on supply", "adequacy",
@@ -481,8 +487,9 @@ def list_result_views(exclude_shown: bool = False, card: str | None = None) -> d
             row["read"] = [r.call() for r in v.reads]
             if data == "available" and v.tab not in shown:
                 row["shows"] = v.shows
-        if v.verification == "displayed_data":
-            row["verification"] = v.verification
+            # With the reads: what an opened tab can prove it showed (A5.2).
+            if v.verification == "displayed_data":
+                row["verification"] = v.verification
         if reason:
             row["reason"] = reason
         out.append(row)
