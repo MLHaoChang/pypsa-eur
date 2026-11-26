@@ -2715,7 +2715,10 @@ def _strength_rows(inp: _Inputs) -> list[dict]:
             reason = f"{meta.get('note') or 'There is no grid infeed'}. Strength is not evaluated"
         else:
             try:
-                tables = {"pocs": pd.read_csv(run / STRENGTH_CSV), "groups": pd.read_csv(run / STRENGTH_GROUPS_CSV)}
+                # outage names stay text: a numeric name reads as written, never as a float
+                names = {"worst_outage": str, "islanding_outages": str}
+                tables = {"pocs": pd.read_csv(run / STRENGTH_CSV, dtype=names),
+                          "groups": pd.read_csv(run / STRENGTH_GROUPS_CSV, dtype=names)}
             except (OSError, ValueError):
                 reason = "The run's strength tables are missing or unreadable: rerun the campus study"
     rows = []

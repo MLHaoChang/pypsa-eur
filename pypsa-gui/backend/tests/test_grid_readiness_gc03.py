@@ -290,3 +290,101 @@ def test_the_scr_row_is_unchanged(tmp_path):
     digest = hashlib.sha256(json.dumps(row, sort_keys=True).encode()).hexdigest()
     assert digest == "0715ecd9ff23a1fd9fc1848703ea3adc4c71220e206ebee1159b8f817f6e3925"
     assert not math.isnan(row["project_value"])
+
+
+# ── edge cases the mutants found ────────────────────────────────────────────
+
+def test_failures_with_no_case_and_a_missing_table_disagree(tmp_path):
+    _planning(tmp_path, verdict="fail", cases=0, failures=1)
+    assert _card(tmp_path)[G.PLANNING_ID]["note"].startswith("The run's planning record disagrees")
+    _planning(tmp_path)
+    (tmp_path / "campus_electrical" / "run" / "campus_planning.csv").unlink()
+    row = _card(tmp_path)[G.PLANNING_ID]
+    assert row["verdict"] == "unknown" and row["note"].startswith("The run's planning record disagrees")
+
+
+def test_three_names_are_listed_whole_and_a_fourth_is_elided(tmp_path):
+    _planning(tmp_path, verdict="fail", not_converged=["a", "b", "c"])
+    assert "(a, b, c)." in _card(tmp_path)[G.PLANNING_ID]["note"]
+    _planning(tmp_path, verdict="incomplete", excluded=["a", "b", "c"])
+    assert _card(tmp_path)[G.PLANNING_ID]["note"].endswith("(a, b, c).")
+    _planning(tmp_path, verdict="incomplete", excluded=["a", "b", "c", "d"])
+    assert _card(tmp_path)[G.PLANNING_ID]["note"].endswith("(a, b, c, …).")
+
+
+def test_an_error_with_no_reason_says_so(tmp_path):
+    run = _run_dir(tmp_path)
+    (run / ce.PLANNING_ERROR).write_text("{}")
+    (run / ce.STRENGTH_ERROR).write_text("{}")
+    card = _card(tmp_path)
+    assert card[G.PLANNING_ID]["note"] == "The planning screen could not run: no reason given"
+    assert card["campus_scr"]["note"] == f"The strength screen could not run: no reason given. {BASIS}"
+
+
+def test_a_profile_error_is_the_source_of_every_new_row(tmp_path):
+    _planning(tmp_path)
+    _strength(tmp_path)
+    card = _card(tmp_path, "no_such_code")
+    for rid in (G.PLANNING_ID, *STRENGTH_IDS):
+        assert "unknown grid-code profile" in card[rid]["source"]
+    assert card["campus_scr"]["verdict"] == "unknown" and card["campus_scr"]["project_value"] == 4.0
+
+
+def test_an_open_tie_with_no_note_still_says_why(tmp_path):
+    run = _run_dir(tmp_path)
+    (run / ce.STRENGTH_META).write_text(json.dumps({"verdict": ce.STRENGTH_NOT_EVALUATED}))
+    assert _card(tmp_path)["campus_scr"]["note"] == f"There is no grid infeed. Strength is not evaluated. {BASIS}"
+
+
+def test_the_least_ratio_is_found_when_it_comes_last(tmp_path):
+    _strength(tmp_path, pocs=[_poc("2030", "MV", scr=4.0), _poc("2031", "MV", scr=2.0, outage="L5")])
+    row = _card(tmp_path)["campus_scr"]
+    assert row["project_value"] == 2.0 and "stage 2031 (worst outage L5" in row["note"]
+
+
+def test_a_row_with_no_converter_size_is_a_gap(tmp_path):
+    _strength(tmp_path, pocs=[_poc(scr=4.0), _poc("2031", "LV1", p=float("nan"), scr=5.0, outage="L7")])
+    row = _card(tmp_path)["campus_scr"]
+    assert row["verdict"] == "unknown" and row["note"].startswith("No SCR at PoC LV1, stage 2031 (worst outage L7)")
+
+
+def test_no_outage_named_reads_so_in_a_value_and_in_a_gap(tmp_path):
+    _strength(tmp_path, pocs=[_poc(scr=4.0, outage=float("nan"))])
+    assert "(no outage lowers it · intact 6)" in _card(tmp_path)["campus_scr"]["note"]
+    _strength(tmp_path, pocs=[_poc(scr=float("nan"), outage=float("nan"))])
+    assert _card(tmp_path)["campus_scr"]["note"].startswith(
+        "No SCR at PoC MV, stage 2030: the fault level under its worst outage")
+
+
+def test_a_numeric_outage_name_reads_as_written(tmp_path):
+    _strength(tmp_path, pocs=[_poc(scr=4.0, outage="7"), _poc("2031", scr=5.0, outage=float("nan"))])
+    assert "(worst outage 7 · intact 6)" in _card(tmp_path)["campus_scr"]["note"]
+
+
+def test_a_lone_gap_with_a_minimum_and_a_gap_beside_a_value_with_none_read_unknown(tmp_path):
+    _strength(tmp_path, pocs=[_poc(scr=float("nan"), outage="L7")])
+    profile, dirs = _profile_with(tmp_path, scr_min=3.0)
+    row = _card(tmp_path, profile, dirs)["campus_scr"]
+    assert row["verdict"] == "unknown" and row["limit"] == 3.0
+    _strength(tmp_path, pocs=[_poc("2030", "LV1", scr=float("nan"), outage="L7"), _poc("2031", scr=2.0)])
+    row = _card(tmp_path)["campus_scr"]
+    assert row["verdict"] == "unknown" and row["project_value"] is None
+    assert row["note"] == ("No SCR at PoC LV1, stage 2030 (worst outage L7): the fault level under its worst outage "
+                           f"was not found. {BASIS}")
+
+
+@pytest.mark.parametrize("cell, expect", [
+    (["T1"], ["T1"]), ("['T2', 'T1']", ["T2", "T1"]), ("('T1',)", ["T1"]), ("'T1'", ["T1"]), ("T1 (", ["T1 ("]),
+    ("", []), ("  ", []), (float("nan"), []), (None, []),
+])
+def test_an_islanding_cell_is_read_as_a_list(cell, expect):
+    assert G._islanding(cell) == expect
+
+
+def test_the_strength_rows_point_at_the_fault_level_bus_like_the_scr_row(tmp_path):
+    d, n = _project(tmp_path, "eh_datacenter")
+    _strength(d)
+    rows = _rows(G.grid_readiness(d, n, PROFILE))
+    assert rows["scr"]["target"] is not None
+    for rid in STRENGTH_IDS:
+        assert rows[rid]["target"] == rows["scr"]["target"]
