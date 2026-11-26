@@ -257,21 +257,27 @@ export function ResultsCard() {
           state="ready" dimmed={stale || freshnessUnknown} />
       )} />
 
-      {/* The cost of the product, where the design makes one (issue 28): hydrogen's levelised cost per kg,
-          from the study report's TEA block; absent for a design with no electrolyser. */}
-      {lcoh?.value != null && (
-        <Kpi testId="hub-results-lcoh" label="Cost of hydrogen"
-          value={`${unitPrice(lcoh.value, teaCurrency)}/kg`}
-          hint="Levelised cost of the hydrogen this design produces, per kilogram, as the study priced it."
-          state="ready" dimmed={stale || freshnessUnknown} />
-      )}
-      {/* Ammonia's cost per tonne (issue 28a), the unit of the template's Haber-Bosch flows (t/d);
-          absent for a design with no ammonia synthesis. */}
-      {lcoa != null && (
-        <Kpi testId="hub-results-lcoa" label="Cost of ammonia"
-          value={`${unitPrice(lcoa, teaCurrency)}/t`}
-          hint="Levelised cost of the ammonia this design produces, per tonne, as the study priced it."
-          state="ready" dimmed={stale || freshnessUnknown} />
+      {/* The product costs share the headline's two-column grid (UX 31): hydrogen left, ammonia right,
+          a lone tile in the left column. */}
+      {(lcoh?.value != null || lcoa != null) && (
+        <div data-testid="hub-results-products" className="grid grid-cols-2 gap-2">
+          {/* The cost of the product, where the design makes one (issue 28): hydrogen's levelised cost per kg,
+              from the study report's TEA block; absent for a design with no electrolyser. */}
+          {lcoh?.value != null && (
+            <Kpi testId="hub-results-lcoh" label="Cost of hydrogen"
+              value={`${unitPrice(lcoh.value, teaCurrency)}/kg`}
+              hint="Levelised cost of the hydrogen this design produces, per kilogram, as the study priced it."
+              state="ready" dimmed={stale || freshnessUnknown} />
+          )}
+          {/* Ammonia's cost per tonne (issue 28a), the unit of the template's Haber-Bosch flows (t/d);
+              absent for a design with no ammonia synthesis. */}
+          {lcoa != null && (
+            <Kpi testId="hub-results-lcoa" label="Cost of ammonia"
+              value={`${unitPrice(lcoa, teaCurrency)}/t`}
+              hint="Levelised cost of the ammonia this design produces, per tonne, as the study priced it."
+              state="ready" dimmed={stale || freshnessUnknown} />
+          )}
+        </div>
       )}
 
       {/* What the study chose to build (walkthrough asset-investment 03). */}

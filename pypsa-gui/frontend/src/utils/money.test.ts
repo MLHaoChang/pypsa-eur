@@ -34,5 +34,9 @@ describe('money', () => {
     expect(unitPrice(1150.4, 'EUR')).toBe('€\u00a01,150')
     expect(unitPrice(1_234_567, 'USD')).toBe('$\u00a01,234,567')
     expect(unitPrice(12.5, null)).toBe('12.5')
+    // Signed, the minus before the symbol (ruling (ad)).
+    expect(unitPrice(-1150.4, 'EUR')).toBe('-€\u00a01,150')
+    expect(unitPrice(-1.725, 'EUR')).toBe('-€\u00a01.73')
+    expect(unitPrice(-1000.2, 'EUR')).toBe('-€\u00a01,000')
   })
 })

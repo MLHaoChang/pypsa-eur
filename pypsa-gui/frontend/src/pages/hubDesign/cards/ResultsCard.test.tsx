@@ -150,6 +150,11 @@ describe('ResultsCard product cost (issue 28)', () => {
     expect(tile.querySelector('[data-kpi-value]')?.getAttribute('data-kpi-value')).toBe('€\u00a0612/t')
     expect(screen.getByTestId('hub-results-lcoh').querySelector('[data-kpi-value]')
       ?.getAttribute('data-kpi-value')).toBe('€\u00a02.35/kg')
+
+    // One two-column row, hydrogen left, ammonia right (UX 31).
+    const row = screen.getByTestId('hub-results-products')
+    expect(row.className).toContain('grid-cols-2')
+    expect([...row.children].map(e => e.getAttribute('data-testid'))).toEqual(['hub-results-lcoh', 'hub-results-lcoa'])
   })
   it('writes a cost per tonne from 1,000 in full, never as k (UX 30)', async () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue(study({ ...REPORT, tea: {
