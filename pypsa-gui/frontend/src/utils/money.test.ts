@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
 // SPDX-License-Identifier: MIT
 import { describe, expect, it } from 'vitest'
-import { money } from './money'
+import { money, unitPrice } from './money'
 import cases from './money.cases.json'
 import { money as dcMoney } from '../pages/DcBackupSection'
 import { moneyForGridRisk } from '../pages/results/GridRiskTab'
@@ -26,5 +26,17 @@ describe('money', () => {
       expect(moneyForGridRisk(v)).toBe(money(v, 'EUR'))
       expect(dcMoney(v, 'EUR')).toBe(money(v, 'EUR'))
     }
+  })
+
+  it('writes a per-unit price without k or m (UX 30, issue 28a)', () => {
+    expect(unitPrice(1.725, 'EUR')).toBe('€\u00a01.73')
+    expect(unitPrice(439.09, 'EUR')).toBe('€\u00a0439')
+    expect(unitPrice(1150.4, 'EUR')).toBe('€\u00a01,150')
+    expect(unitPrice(1_234_567, 'USD')).toBe('$\u00a01,234,567')
+    expect(unitPrice(12.5, null)).toBe('12.5')
+    // Signed, the minus before the symbol (ruling (ad)).
+    expect(unitPrice(-1150.4, 'EUR')).toBe('-€\u00a01,150')
+    expect(unitPrice(-1.725, 'EUR')).toBe('-€\u00a01.73')
+    expect(unitPrice(-1000.2, 'EUR')).toBe('-€\u00a01,000')
   })
 })

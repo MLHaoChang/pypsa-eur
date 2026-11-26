@@ -97,6 +97,9 @@ import {
   type CurrentToolOutcome, type ToolOutcomeMark, currentToolOutcome, outcomeClock, refusalDetail, toolOutcomeLine, toolOutcomeOf, toolOutcomeWords,
 } from './toolOutcome'
 import MemorySettledLine, { isMemoryRow, memorySettledAt } from './memory/MemorySettledLine'
+import { approvedChatHref } from '../utils/chatLinks'
+import { ChatAnnouncer } from './ChatAnnouncer'
+import { useChatAnnouncer } from '../store/chatAnnouncer'
 export { guidedCardSummary } from './ConfirmationCard'
 
 // Phase D — extensions accepted by the file picker / drag-drop overlay.
@@ -548,6 +551,20 @@ export function ChoiceCard({ companion = false, target = null, inputOpen = false
   const [picked, setPicked] = useState<string[]>([])
   // A new card starts with nothing picked.
   useEffect(() => { setPicked([]) }, [choice])
+  // A new card takes focus only from the chat itself (or from nowhere): never from a field
+  // elsewhere in the app, nor from a chat field with text in it. A status line names it.
+  const cardRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!choice) return
+    const a = document.activeElement
+    const nowhere = !a || a === document.body
+    const inChat = a instanceof Element && !!a.closest('[data-testid="chat-panel"], [data-testid="companion-anchor"]')
+    const typing = (a instanceof HTMLTextAreaElement || a instanceof HTMLInputElement) && a.value !== ''
+    if ((nowhere || inChat) && !typing) cardRef.current?.focus()
+  }, [choice])
+  // The question is named once through the chat's shared polite status region.
+  const announce = useChatAnnouncer(s => s.announce)
+  useEffect(() => { if (choice) announce(`Question: ${choice.title}`) }, [choice, announce])
   if (!choice) return null
   const multi = choice.multi_select === true
   const planReview = choice.intent === 'plan_review'
@@ -572,7 +589,9 @@ export function ChoiceCard({ companion = false, target = null, inputOpen = false
     send(choice.options.map((o) => o.label).filter((l) => picked.includes(l)).join('; '))
   const card = (
     <div
-      className={`border border-accent/50 bg-accent/5 rounded p-3 mx-3 my-2 ${inputOpen ? 'max-xl:hidden' : ''}`}
+      ref={cardRef}
+      tabIndex={-1}
+      className={`border border-accent/50 bg-accent/5 rounded p-3 mx-3 my-2 focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-accent ${inputOpen ? 'max-xl:hidden' : ''}`}
       data-testid="chat-choice-card"
       data-intent={planReview ? 'plan_review' : 'choice'}
       role="group"
@@ -595,6 +614,9 @@ export function ChoiceCard({ companion = false, target = null, inputOpen = false
             planReview ? 'max-h-80' : 'max-h-48'
           }`}
           data-testid="chat-choice-detail"
+          tabIndex={0}
+          role="region"
+          aria-label={`${choice.title}: details`}
         >
           <ChatMarkdown>{choice.detail}</ChatMarkdown>
         </div>
@@ -1132,7 +1154,7 @@ function UploadChipStrip({
               )}
               {isExport && (
                 <a
-                  href={getUploadBlobUrl(currentProject, u.file_id)}
+                  href={approvedChatHref(getUploadBlobUrl(currentProject, u.file_id), ['upload']) ?? undefined}
                   download={u.filename}
                   className="text-accent hover:underline px-0.5"
                   title={`Download ${u.filename}`}
@@ -3483,6 +3505,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
+      <ChatAnnouncer />
       {dragActive && (
         <div
           className="absolute inset-0 z-50 bg-accent/15 border-[3px] border-dashed border-accent rounded-md flex items-center justify-center pointer-events-none"

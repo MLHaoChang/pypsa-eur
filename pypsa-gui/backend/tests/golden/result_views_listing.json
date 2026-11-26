@@ -118,7 +118,8 @@
     "label": "Emissions",
     "data": "available",
     "shown": false,
-    "card": "capacity"
+    "card": "capacity",
+    "verification": "displayed_data"
    },
    {
     "id": "curtailment",
@@ -160,7 +161,8 @@
     "label": "Grid risk to production",
     "data": "available",
     "shown": false,
-    "card": "reliability"
+    "card": "reliability",
+    "verification": "displayed_data"
    },
    {
     "id": "products",
@@ -303,7 +305,8 @@
     "label": "Emissions",
     "data": "available",
     "shown": false,
-    "card": "capacity"
+    "card": "capacity",
+    "verification": "displayed_data"
    },
    {
     "id": "curtailment",
@@ -345,7 +348,8 @@
     "label": "Grid risk to production",
     "data": "available",
     "shown": false,
-    "card": "reliability"
+    "card": "reliability",
+    "verification": "displayed_data"
    },
    {
     "id": "products",
@@ -439,7 +443,8 @@
     "label": "Grid risk to production",
     "data": "available",
     "shown": false,
-    "card": "reliability"
+    "card": "reliability",
+    "verification": "displayed_data"
    },
    {
     "id": "products",
@@ -524,7 +529,8 @@
     "label": "Emissions (advanced)",
     "data": "available",
     "shown": false,
-    "card": "capacity"
+    "card": "capacity",
+    "verification": "displayed_data"
    },
    {
     "id": "curtailment",
@@ -632,7 +638,8 @@
     "label": "Grid risk to production",
     "data": "available",
     "shown": false,
-    "card": "reliability"
+    "card": "reliability",
+    "verification": "displayed_data"
    },
    {
     "id": "products",
@@ -709,7 +716,8 @@
     "label": "Emissions (advanced)",
     "data": "available",
     "shown": false,
-    "card": "capacity"
+    "card": "capacity",
+    "verification": "displayed_data"
    },
    {
     "id": "curtailment",

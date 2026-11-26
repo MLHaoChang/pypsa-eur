@@ -12,8 +12,9 @@ component) names it in `needs`; the model resolves that before reading.
 
 `verification` is the strongest proof the browser can give today:
 `displayed_data` means a source-bound (v2) ACK of the exact data shown;
-`mounted_view` means the tab mounted, not which data it rendered. Only load
-flow has a displayed-data adapter; the words say "showing" only with that.
+`mounted_view` means the tab mounted, not which data it rendered. A view is
+`displayed_data` exactly when `harness/displayed_adapters.py` has an adapter
+for its tab (`check_registry` is the guard); the words say "showing" only then.
 
 `historical_section` names the run-evidence section that keeps this view for
 past runs. None means past runs refuse it; current results never stand in.
@@ -239,6 +240,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                "CO2 totals and any cap's shadow price", "results",
                (_r("get_results", result_kind="emissions"),),
                historical_section="results_emissions",
+               verification="displayed_data",
                units="t CO2, EUR/t",
                checked_profiles=("generator-emissions/1", "network-emissions/1"),
                card="capacity", sub_option="dispatch", card_tab="operation"),
@@ -277,6 +279,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                "then EUR, per year, with the result file each comes from", "results",
                (_rp("get_grid_risk_production", "lines"),),
                guided_label="Grid risk to production",
+               verification="displayed_data",
                claim_limits="Expected values per year, not a forecast. The total is an upper bound: the "
                             "lines may overlap. A missing input is unknown, never zero; EUR is Unavailable "
                             "without a lost-production value. Campus lines are from the last campus run "

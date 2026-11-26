@@ -2290,7 +2290,10 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
     no solve for it, and a kept asset added after its admission is refused here,
     under the lock that plans it (`baseline_solve`), unless the run's grant
     reserved the baseline's solves at the case's admission (study harness 36,
-    GK B (60) A2: `run_envelope.case_baseline_reserved`)."""
+    GK B (60) A2: `run_envelope.case_baseline_reserved`). Each call writes
+    the baseline LPs it ran (0 on a cache hit or with no baseline; absent
+    while unknown) into the runner's per-call `BUILD_STATS`, which the runner
+    keeps on the case's record (study-harness issue 52)."""
     from services import assistant_tasks
 
     in_run = assistant_tasks.RUN_CONTEXT.get() is not None
@@ -2299,6 +2302,10 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
         in_run = not run_envelope.case_baseline_reserved(harness_locks.in_run())
 
     def build():
+        from services.finance.investment_case_runner import BUILD_STATS
+        stats = BUILD_STATS.get()
+        stats = stats if stats is not None else {}  # outside the runner: nobody reads it
+        stats["baseline_solves"] = 0  # no LP yet
         from models.finance import FinanceInputs
         from services.finance.case import FinanceRefused
         from services.results.finance_case import build_finance_case
@@ -2324,10 +2331,13 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
             snap = _network_copy(n) if plan is not None and plan.needed else None
         base = None
         if snap is not None:
+            del stats["baseline_solves"]  # unknown until the solve returns or refuses
             try:
                 base = _B.solve_baseline(snap, cfg, plan)
             except _B.BaselineRefused as exc:
+                stats["baseline_solves"] = exc.solves
                 raise FinanceRefused(exc.code, exc.detail) from exc
+            stats["baseline_solves"] = base.solves
         with PyPSAService.get_lock():
             case = build_finance_case(n, cfg, fin, result_df=_result_df, lost_load=lost_load,
                                       owner=owner,
@@ -3046,6 +3056,11 @@ def _workbook_project(run):
             return None
 
 
+# The cause only; the Export tab words what to do per mode ("Not run yet: ..."). Pinned to
+# ResultsWorkbookPicker.tsx's WORKBOOK_NO_RUN by tests/test_workbook_no_run_words_parity.py.
+WORKBOOK_NO_RUN_MESSAGE = "Not run yet: nothing has been solved."
+
+
 def _workbook_template():
     from services import flow_service, network_lengths
 
@@ -3174,7 +3189,8 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
     """The run's results as one workbook (results-workbook spec; RW-TABS-1):
     About, Overview (investment-grade KPIs with native charts) and a sheet per
     included result view — the project's selected cards, plus `views`
-    (comma-separated view ids) or `all`. 204 before a solve; 409
+    (comma-separated view ids) or `all`. 409 `results_workbook_no_run` before a
+    solve (no silent 204); 409
     `results_workbook_stale` while a solve runs, or when the results do not
     match the current inputs (changed, or no fingerprint recorded) unless
     `stored=true` exports the stored run (About says so); 422
@@ -3199,7 +3215,18 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
         # A Guided study solved a private copy: its solve is the run to export (template-e2e 30).
         study = study_solve.fallback()
         if study is None:
-            return _not_solved()
+            from services.provenance_graph import runs
+
+            # "Not run yet" only when nothing was ever solved; a run kept after an edit, or whose dispatch
+            # no longer fits the network, is out of date (the same 409 as a changed-inputs export).
+            if getattr(n, "is_solved", False) or runs.kept_run_stale():
+                raise HTTPException(409, {
+                    "error_kind": "results_workbook_stale",
+                    "message": "The inputs changed since the solve, so the results describe an earlier "
+                               "model. Run the model again."})
+            raise HTTPException(409, {
+                "error_kind": "results_workbook_no_run",
+                "message": WORKBOOK_NO_RUN_MESSAGE})
         n = study["network"]
     if _solver_in_flight():  # the network carries the LP's transient transforms
         raise HTTPException(409, {

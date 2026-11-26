@@ -141,6 +141,49 @@ describe('ResultsCard product cost (issue 28)', () => {
     await screen.findByTestId('hub-results-cost')
     expect(screen.queryByTestId('hub-results-lcoh')).toBeNull()
   })
+  it('shows the ammonia cost per tonne from the study beside an unchanged hydrogen tile (issue 28a)', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(study({ ...REPORT, tea: {
+      lcoh_eur_per_kg: 2.345, lcoh_status: 'ok', lcoa_eur_per_t: 612.4, lcoa_status: 'ok', currency: 'EUR' } }))
+    mount()
+    const tile = await screen.findByTestId('hub-results-lcoa')
+    expect(tile.textContent).toContain('Cost of ammonia')
+    expect(tile.querySelector('[data-kpi-value]')?.getAttribute('data-kpi-value')).toBe('€\u00a0612/t')
+    expect(screen.getByTestId('hub-results-lcoh').querySelector('[data-kpi-value]')
+      ?.getAttribute('data-kpi-value')).toBe('€\u00a02.35/kg')
+
+    // One two-column row, hydrogen left, ammonia right (UX 31).
+    const row = screen.getByTestId('hub-results-products')
+    expect(row.className).toContain('grid-cols-2')
+    expect([...row.children].map(e => e.getAttribute('data-testid'))).toEqual(['hub-results-lcoh', 'hub-results-lcoa'])
+  })
+  it('writes a cost per tonne from 1,000 in full, never as k (UX 30)', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(study({ ...REPORT, tea: {
+      lcoa_eur_per_t: 1150.4, lcoa_status: 'ok', currency: 'USD' } }))
+    mount()
+    const tile = await screen.findByTestId('hub-results-lcoa')
+    expect(tile.querySelector('[data-kpi-value]')?.getAttribute('data-kpi-value')).toBe('$\u00a01,150/t')
+    expect(tile.getAttribute('title')).toBe('Levelised cost of the ammonia this design produces, per tonne, as the study priced it.')
+  })
+  it('dims both product tiles under the one Out of date banner, as the cost tile', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(study({ ...REPORT, tea: {
+      lcoh_eur_per_kg: 2.345, lcoh_status: 'ok', lcoa_eur_per_t: 612.4, lcoa_status: 'ok' } }))
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ stale: true, source: 'stored report' }))
+    mount()
+    expect((await screen.findByTestId('hub-results-stale')).textContent).toContain('Out of date')
+    for (const id of ['hub-results-lcoh', 'hub-results-lcoa']) {
+      const tile = screen.getByTestId(id)
+      expect(tile.getAttribute('data-state')).toBe('ready')
+      expect(tile.textContent).not.toContain('Out of date')
+      expect(tile.querySelector('.opacity-60')).not.toBeNull()
+    }
+  })
+  it('shows no ammonia tile for a design with no ammonia synthesis', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(study({ ...REPORT, tea: {
+      lcoh_eur_per_kg: 2.345, lcoh_status: 'ok', lcoa_eur_per_t: null, lcoa_status: 'skipped' } }))
+    mount()
+    await screen.findByTestId('hub-results-lcoh')
+    expect(screen.queryByTestId('hub-results-lcoa')).toBeNull()
+  })
 })
 
 describe('ResultsCard body', () => {

@@ -532,6 +532,7 @@ def test_the_record_is_read_as_plain_values_or_not_at_all():
         "finished_at": None,  # SH-36 B1
         "error": "e",
         "error_code": "c",
+        "baseline_solves": None,  # study-harness issue 52
         "thread": worker,
     }
     ctx.solver_state[run_ic.STUDY] = {"status": "done"}
@@ -541,6 +542,7 @@ def test_the_record_is_read_as_plain_values_or_not_at_all():
         "finished_at": None,
         "error": None,
         "error_code": None,
+        "baseline_solves": None,
         "thread": None,
     }
 

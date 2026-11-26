@@ -63,8 +63,11 @@ def test_products_probe_reads_the_process_view_empty_key(monkeypatch):
     assert rv._probe(view) == ('available', None)
 
 
-def test_load_flow_is_the_only_view_that_proves_displayed_data_today():
-    assert {v.view_id for v in rv.RESULT_VIEWS if v.verification == 'displayed_data'} == {'loadflow'}
+def test_displayed_data_views_are_exactly_the_adapter_table():
+    from harness import displayed_adapters
+
+    displayed_adapters.check_registry(rv.RESULT_VIEWS)
+    assert 'loadflow' in {v.view_id for v in rv.RESULT_VIEWS if v.verification == 'displayed_data'}
     lf = rv.view('loadflow')
     assert [r.tool for r in lf.reads] == ['get_loadflow_summary']
     assert 'active-power proxy' in lf.claim_limits.lower()

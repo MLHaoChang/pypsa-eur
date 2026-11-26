@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Keyboard and landmarks: one `<main>`, one h1 per screen and a "Skip to main content" first Tab stop; choice cards take focus and announce, their detail box is focusable, "Check the 3D site" keeps focus, and the greeting's API-key field gets focus (UX walkthrough 07).

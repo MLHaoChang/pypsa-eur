@@ -5,6 +5,7 @@ import uuid
 
 from fastapi import HTTPException
 
+from harness import displayed_adapters
 from harness.durable import network_guard, transaction
 from services import assurance_records as records, workflow_tools
 from services.pypsa_service import PyPSAService
@@ -191,19 +192,18 @@ def issue(turn, payload):
             "outcome": "submitted",
             "expires_at": time.time() + 30,
         }
-        # Only this results adapter can attest displayed data today. Other
+        # Only a displayed-data adapter can attest the data shown. Other
         # version-1 actions retain their explicit mounted-view meaning.
         facts = None
+        adapter = displayed_adapters.for_target(target) if "highlight" not in target else None
         if loadflow:
             view, facts = loadflow_target(loadflow.get("loadflow_source"),
                                           loadflow.get("window_from"),
                                           loadflow.get("window_to"),
                                           loadflow.get("highlight"))
             record.update(version=2, source_binding=view["binding"])
-        elif target == {"panel_id": "results", "results_tab": "loadflow"}:
-            from services.loadflow_summary import get_loadflow_view
-
-            view = get_loadflow_view()
+        elif adapter is not None:
+            view = adapter.current()
             if view.get("status") != "ok":
                 return None
             record.update(version=2, source_binding=view["binding"])
@@ -265,15 +265,8 @@ def acknowledge(owner, body):
     ):
         raise HTTPException(422, {"error_kind": "invalid_assurance_request"})
     if body["version"] == 2:
-        binding = body["source_binding"]
-        keys = {"version", "project_id", "project_name", "scope", "source",
-                "input_sha256", "data_sha256", "window_from", "window_to"}
-        if (not isinstance(binding, dict) or set(binding) != keys
-                or type(binding.get("version")) is not int or binding["version"] != 1
-                or any(type(binding.get(k)) is not int or binding[k] < 0
-                       for k in ("window_from", "window_to"))
-                or any(not isinstance(binding.get(k), str)
-                       for k in keys - {"version", "window_from", "window_to"})):
+        adapter = displayed_adapters.for_target(body["target"])
+        if adapter is None or not displayed_adapters.valid_binding(adapter, body["source_binding"]):
             raise HTTPException(422, {"error_kind": "invalid_assurance_request"})
     try:
         with (
@@ -296,17 +289,16 @@ def acknowledge(owner, body):
             ):
                 raise ValueError("mismatch")
             if record["version"] == 2:
-                from services.loadflow_summary import get_loadflow_view
                 from services import chat_tools
 
                 binding = record["source_binding"]
+                adapter = displayed_adapters.for_target(record["target"])
                 # This request is a browser read-back, often outside a model
                 # turn. Its authenticated actor is authoritative here.
                 previous = chat_tools.acting_user_id()
                 chat_tools.set_acting_user(owner)
                 try:
-                    fresh = get_loadflow_view(binding["source"], binding["window_from"],
-                                              binding["window_to"])
+                    fresh = adapter.reread(binding)
                 finally:
                     chat_tools.set_acting_user(previous)
                 if fresh.get("status") != "ok" or fresh.get("binding") != binding:
@@ -346,15 +338,16 @@ class OrdinaryTurn:
         self.owner = session.owner_user_id or records.actor_id()
         self.project_id = ctx.project_uuid
         self.binding_generation = generation
-        # results tab -> {source, window_from, window_to} of this turn's last read
+        # results tab -> the facts (its adapter's ref_keys) of this turn's last read
         self.reads = {}
 
     def note_read(self, tool_name, result):
         """Remember what this turn read, so "showing" means the data read."""
-        if tool_name == "get_loadflow_summary" and isinstance(result, dict) \
-                and result.get("status") == "ok":
-            ref = result.get("ui_reference") or {}
-            self.reads["loadflow"] = {k: ref.get(k) for k in ("source", "window_from", "window_to")}
+        for tab, adapter in displayed_adapters.ADAPTERS.items():
+            if tool_name == adapter.read_tool:
+                ref = adapter.read_ref(result)
+                if ref is not None:
+                    self.reads[tab] = ref
 
 
 def open_ordinary(session, generation):
@@ -394,8 +387,10 @@ def display(turn, acknowledgement, wait=ACK_WAIT_SECONDS):
     out = {"verification": verification or "submitted", "say": "opened"}
     if verification == "browser_displayed_data":
         binding = acknowledgement.get("source_binding") or {}
-        shown = {k: binding.get(k) for k in ("source", "window_from", "window_to")}
-        read = turn.reads.get((acknowledgement.get("target") or {}).get("results_tab"))
+        tab = (acknowledgement.get("target") or {}).get("results_tab")
+        adapter = displayed_adapters.ADAPTERS.get(tab)
+        shown = {k: binding.get(k) for k in (adapter.ref_keys if adapter else ())}
+        read = turn.reads.get(tab)
         if read == shown:
             out["say"] = "showing"
         else:

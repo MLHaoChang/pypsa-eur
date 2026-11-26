@@ -215,7 +215,10 @@ describe('Stop monitoring', () => {
     await userEvent.keyboard('{Enter}')
     expect(postChatProgressStop).toHaveBeenCalledTimes(1)
     // The state is words in a status region, not a colour.
-    expect(screen.getByRole('status').textContent).toBe(MONITOR_WORDS.stopped)
+    // (The chat's shared announcer is the other status region; A5.5.)
+    const lines = screen.getAllByRole('status').filter(el => el.getAttribute('data-testid') !== 'chat-announcer')
+    expect(lines).toHaveLength(1)
+    expect(lines[0].textContent).toBe(MONITOR_WORDS.stopped)
   })
 })
 

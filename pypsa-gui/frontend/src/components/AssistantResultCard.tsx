@@ -6,6 +6,7 @@ import { openScenariosHighlight } from './uiNavigate'
 import { CARD_GROUPS } from '../pages/results/groups'
 import RunMonitor from './runMonitor/RunMonitor'
 import { PartialMappingLine, partialMapping } from '../site3d/partialMapping'
+import { approvedChatHref } from '../utils/chatLinks'
 
 /** LC-12: where a plan's waiting job stands in this view. */
 export type ContinuationLine =
@@ -122,9 +123,9 @@ export function SceneUnknownCheck({ disabled, onRequest }: { disabled: boolean; 
   const checking = asked
   return <div className="mt-1 font-sans text-xs" data-testid="scene-unknown-check">
     {/* "Checking…" is a state, not a dead control: it keeps full contrast (UX, S5a shots). */}
-    <button type="button" disabled={disabled || checking}
-      className={checking ? 'text-muted' : 'text-accent disabled:opacity-40'}
-      data-testid="scene-unknown-check-button" onClick={() => { setAsked(true); onRequest(SCENE_CHECK_PROMPT, SCENE_CHECK_LABEL) }}>
+    <button type="button" aria-disabled={disabled || checking || undefined}
+      className={checking ? 'text-muted' : 'text-accent aria-disabled:opacity-40'}
+      data-testid="scene-unknown-check-button" onClick={() => { if (disabled || checking) return; setAsked(true); onRequest(SCENE_CHECK_PROMPT, SCENE_CHECK_LABEL) }}>
       {checking ? 'Checking…' : 'Check the 3D site'}
     </button>
     <span role="status" className="sr-only">{checking ? 'Checking the 3D site' : ''}</span>
@@ -154,9 +155,7 @@ export default function AssistantResultCard({ result, disabled, disabledReason, 
   const taskId = typeof task?.task_id === 'string' && /^[0-9a-f-]{36}$/.test(task.task_id) ? task.task_id : null
   const status = typeof task?.status === 'string' ? task.status : ''
   const next = object(task?.next_step)
-  const link = typeof data.download_url === 'string'
-    && /^\/api\/projects\/[^/?#]+\/uploads\/[0-9a-f]{16}\/blob$/.test(data.download_url)
-    ? data.download_url : null
+  const link = approvedChatHref(data.download_url, ['upload'])
   const preview = typeof data.preview_id === 'string' && data.valid === true && Array.isArray(data.diff) ? data : null
   // LC-17: a sweep's cases, opened in Scenarios on the user's click (never automatically).
   const sweepCases = typeof data.baseline_project_id === 'string' && Array.isArray(data.cases)

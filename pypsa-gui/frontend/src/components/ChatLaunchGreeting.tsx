@@ -243,7 +243,7 @@ export default function ChatLaunchGreeting() {
       {needsKey && (
         <div className="mt-3 pt-3 border-t border-border" data-testid="chat-launch-key-offer">
           {showKeyForm ? (
-            <ApiKeySetup />
+            <ApiKeySetup focusInput />
           ) : (
             <button
               className="text-[12px] text-muted hover:text-accent underline underline-offset-2"

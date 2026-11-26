@@ -6,7 +6,7 @@
 // an upper bound: the lines may overlap. The per-unit breakdown stays in the campus results (12b-3).
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { resultsApi } from '../../api/simulation'
+import { displayedResultsApi } from '../../api/displayedResults'
 import type { FlowTarget } from '../../api/flow'
 import type { GridRiskCell, GridRiskLine, GridRiskLineKey, GridRiskProduction, GridRiskTarget } from '../../api/types'
 import { PageSection, Tag } from '../../components/PageKit'
@@ -315,14 +315,17 @@ export function GridRiskBody({ data, mode }: { data: GridRiskProduction; mode: '
 export default function GridRiskTab() {
   const project = useUIStore(s => s.currentProject)
   const mode = useUIStore(s => s.uiMode)
-  const { data, isLoading } = useQuery({
-    queryKey: nk(project, 'results', 'grid_risk_production'), queryFn: resultsApi.getGridRiskProduction, retry: false,
+  // A5.2: the bound view, so a chat navigation can prove the figures shown.
+  const { data: displayed, isLoading } = useQuery({
+    queryKey: nk(project, 'results', 'displayed', 'grid_risk'), queryFn: displayedResultsApi.gridRisk, retry: false,
   })
+  const data = displayed?.data
   return (
     <div className="p-3">
       <PageSection title={GRID_RISK_TITLE}
         hint="Each grid risk as lost tonnes, then EUR, per year. Expected values, not a forecast.">
-        <div className="px-4 py-3" data-testid="grid-risk-section">
+        <div className="px-4 py-3" data-testid="grid-risk-section" data-result-tab="grid_risk"
+          data-result-binding={displayed ? JSON.stringify(displayed.binding) : undefined}>
           {isLoading ? <span className="text-[11px] text-muted">Loading…</span>
             : !data || !data.available || !data.lines
               ? <EmptyState testId="grid-risk-empty"

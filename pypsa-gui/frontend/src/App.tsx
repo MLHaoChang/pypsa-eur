@@ -240,7 +240,7 @@ export function FullPageTab({ panel, onClose }: { panel: SlidePanel; onClose: ()
           {meta.eyebrow}
         </span>
         <span className="text-border-3">/</span>
-        <span className="text-[12px] font-semibold text-text tracking-[-0.005em]">{meta.title}</span>
+        <h1 className="m-0 text-[12px] font-semibold text-text tracking-[-0.005em]">{meta.title}</h1>
         <span className="flex-1" />
         {fromHub && !hasFlowReturn && <BackToHubResults />}
         {next}
@@ -677,6 +677,15 @@ export default function App() {
     <AuthMismatchGate>
       <AppErrorBoundary>
       <div className="flex flex-col h-screen overflow-hidden bg-bg">
+        {/* First Tab stop: jump past the header and sidebar to the work area. */}
+        <a
+          href="#main-content"
+          data-testid="skip-to-main"
+          onClick={e => { e.preventDefault(); document.getElementById('main-content')?.focus() }}
+          className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-[100] focus:rounded focus:bg-panel focus:px-3 focus:py-1.5 focus:text-[11px] focus:text-text focus:outline focus:outline-2 focus:outline-accent"
+        >
+          Skip to main content
+        </a>
         <ProjectMismatchWatcher isStudy={tabIsStudy} />
         {/* ── Crash recovery banner ──────────────────────────────────── */}
         {/* Renders only when a project has an orphaned `.tmp` sibling — a
@@ -720,7 +729,8 @@ export default function App() {
           {/* Zone 2 — Centre: the canvas (+ bottom panel). Most sidebar tabs
               open alongside it as a HALF-WIDTH panel (the canvas stays visible,
               shrunk to the other half); Results takes the whole area. */}
-          <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
+          <main id="main-content" tabIndex={-1} className="flex flex-1 min-w-0 min-h-0 overflow-hidden outline-none">
+            {!activeSlidePanel && <h1 className="sr-only">{canvasView === 'site' ? '3D site' : canvasView === 'blank' ? 'Network canvas' : 'Map'}</h1>}
 
             {/* Canvas column — full width normally, the rest beside a tab panel,
                 hidden while a full-screen tab (Results) occupies the area. Kept
@@ -795,7 +805,7 @@ export default function App() {
                 </ErrorBoundary>
               </div>
             )}
-          </div>
+          </main>
 
           {/* Zone 3 — Right properties panel. Only renders alongside the
               Topology Canvas — hidden while a tab panel occupies the right half. */}
