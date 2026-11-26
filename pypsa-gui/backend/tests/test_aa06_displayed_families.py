@@ -162,11 +162,12 @@ def _input_edit(ctx):
     ctx.network.loads.loc["L1", "p_set"] = 12.0
 
 
-@pytest.mark.parametrize("change", [_resolve, _input_edit])
-def test_emissions_ack_after_a_resolve_or_an_input_edit_is_refused(
-    client, solved, change
-):
-    _, ack = _issue(solved, "emissions")
+@pytest.mark.parametrize(
+    "tab,change",
+    [("emissions", _resolve), ("emissions", _input_edit), ("grid_risk", _input_edit)],
+)
+def test_ack_after_a_resolve_or_an_input_edit_is_refused(client, solved, tab, change):
+    _, ack = _issue(solved, tab)
     change(solved)
     response = client.post("/api/chat/ui-ack", json=_ack_body(ack))
     assert response.status_code == 409
@@ -174,8 +175,9 @@ def test_emissions_ack_after_a_resolve_or_an_input_edit_is_refused(
     assert _outcome(client, ack["action_id"]) == "submitted"
 
 
-def test_emissions_ack_after_a_project_switch_is_refused(client, solved):
-    _, ack = _issue(solved, "emissions")
+@pytest.mark.parametrize("tab", ["emissions", "grid_risk"])
+def test_ack_after_a_project_switch_is_refused(client, solved, tab):
+    _, ack = _issue(solved, tab)
     original = solved.project_uuid
     solved.project_uuid = "00000000-0000-4000-8000-000000000001"
     try:
@@ -264,3 +266,96 @@ def test_grid_risk_view_binds_the_hand_oracle_connection_line(client, baseline):
         client.post("/api/chat/ui-ack", json=_ack_body(ack)).json()["verification"]
         == "browser_displayed_data"
     )
+
+
+# ── GK B NOT OK @3631166f: tests for the surviving mutants ──────────────────
+
+
+@pytest.mark.parametrize("tab", ["emissions", "grid_risk"])
+def test_the_binding_input_hash_is_the_plain_network_fingerprint(client, solved, tab):
+    from services import workflow_tools
+
+    served = client.get(f"/api/results/displayed/{tab}").json()["binding"]
+    assert served["input_sha256"] == workflow_tools._network_input_fingerprint(solved)
+    _input_edit(solved)
+    again = client.get(f"/api/results/displayed/{tab}").json()["binding"]
+    assert again["input_sha256"] == workflow_tools._network_input_fingerprint(solved)
+    assert again["input_sha256"] != served["input_sha256"]
+
+
+def test_a_non_finite_value_is_null_in_the_data_its_hash_and_the_ack(
+    client, solved, monkeypatch
+):
+    from routers import results
+
+    payload = {"total_t": float("nan"), "peak_t": float("inf"), "rows": [1.0]}
+    monkeypatch.setattr(results, "get_emissions", lambda *_a, **_k: payload)
+    body = client.get("/api/results/displayed/emissions").json()
+    assert body["data"] == {"total_t": None, "peak_t": None, "rows": [1.0]}
+    expected = hashlib.sha256(
+        b'{"peak_t":null,"rows":[1.0],"total_t":null}'
+    ).hexdigest()
+    assert canonical(payload) == '{"peak_t":null,"rows":[1.0],"total_t":null}'
+    assert body["binding"]["data_sha256"] == expected
+    _, ack = _issue(solved, "emissions")
+    assert ack["source_binding"] == body["binding"]
+    response = client.post("/api/chat/ui-ack", json=_ack_body(ack))
+    assert response.status_code == 200, response.text
+    assert response.json()["verification"] == "browser_displayed_data"
+
+
+@pytest.mark.parametrize("tab", ["emissions", "grid_risk"])
+def test_a_held_network_lock_answers_409(client, solved, tab):
+    import threading
+
+    from services.pypsa_service import PyPSAService
+
+    lock = PyPSAService.get_lock()
+    held, release = threading.Event(), threading.Event()
+
+    def hold():
+        with lock:
+            held.set()
+            release.wait(10)
+
+    worker = threading.Thread(target=hold)
+    worker.start()
+    assert held.wait(5)
+    try:
+        response = client.get(f"/api/results/displayed/{tab}")
+    finally:
+        release.set()
+        worker.join()
+    assert response.status_code == 409
+    assert response.json()["detail"]["error_kind"] == "assurance_context_changed"
+
+
+def test_a_reader_without_access_to_the_open_project_gets_404(_auth_db, solved):
+    from fastapi.testclient import TestClient
+
+    import main
+    from tests.conftest import attach_session
+    from tests.test_chat_session_ownership import _other_org_user
+
+    uid, session_local = _other_org_user(_auth_db)
+    with TestClient(main.app) as c:
+        outsider = attach_session(c, session_local, uid)
+        response = outsider.get("/api/results/displayed/grid_risk")
+    assert response.status_code == 404
+    assert response.json()["detail"]["error_kind"] == "not_authorized"
+
+
+@pytest.mark.parametrize(
+    "field,value", [("run_id", "run-2"), ("window", {"from": 0, "to": 2})]
+)
+def test_a_binding_naming_a_run_or_window_these_views_lack_is_refused(
+    client, solved, field, value
+):
+    """Emissions and Grid risk have no run or window selector: a binding that
+    names one (another run or window) is not this view's binding shape, so the
+    ACK refuses it as malformed (422) and the action stays submitted."""
+    _, ack = _issue(solved, "emissions")
+    body = copy.deepcopy(_ack_body(ack))
+    body["source_binding"][field] = value
+    assert client.post("/api/chat/ui-ack", json=body).status_code == 422
+    assert _outcome(client, ack["action_id"]) == "submitted"

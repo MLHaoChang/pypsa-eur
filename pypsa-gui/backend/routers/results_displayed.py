@@ -53,7 +53,8 @@ def _bound(tab: str, payload) -> dict:
     from services.pypsa_service import PyPSAService
 
     ctx = PyPSAService.get_active_context()
-    data = json.loads(canonical(payload))
+    encoded = canonical(payload)
+    data = json.loads(encoded)
     return {
         "status": "ok",
         "data": data,
@@ -64,7 +65,7 @@ def _bound(tab: str, payload) -> dict:
             "scope": "current",
             "view": tab,
             "input_sha256": workflow_tools._network_input_fingerprint(ctx),
-            "data_sha256": hashlib.sha256(canonical(payload).encode()).hexdigest(),
+            "data_sha256": hashlib.sha256(encoded.encode()).hexdigest(),
         },
     }
 
