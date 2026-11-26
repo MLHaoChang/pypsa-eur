@@ -2290,10 +2290,10 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
     no solve for it, and a kept asset added after its admission is refused here,
     under the lock that plans it (`baseline_solve`), unless the run's grant
     reserved the baseline's solves at the case's admission (study harness 36,
-    GK B (60) A2: `run_envelope.case_baseline_reserved`). The build's
-    `baseline_solves` is the baseline LPs its last call ran (0 on a cache hit
-    or with no baseline; None while unknown), which the runner keeps on the
-    case's record (study-harness issue 52)."""
+    GK B (60) A2: `run_envelope.case_baseline_reserved`). Each call writes
+    the baseline LPs it ran (0 on a cache hit or with no baseline; absent
+    while unknown) into the runner's per-call `BUILD_STATS`, which the runner
+    keeps on the case's record (study-harness issue 52)."""
     from services import assistant_tasks
 
     in_run = assistant_tasks.RUN_CONTEXT.get() is not None
@@ -2302,7 +2302,10 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
         in_run = not run_envelope.case_baseline_reserved(harness_locks.in_run())
 
     def build():
-        build.baseline_solves = 0  # each call reports its own
+        from services.finance.investment_case_runner import BUILD_STATS
+        stats = BUILD_STATS.get()
+        stats = stats if stats is not None else {}  # outside the runner: nobody reads it
+        stats["baseline_solves"] = 0  # no LP yet
         from models.finance import FinanceInputs
         from services.finance.case import FinanceRefused
         from services.results.finance_case import build_finance_case
@@ -2328,13 +2331,13 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
             snap = _network_copy(n) if plan is not None and plan.needed else None
         base = None
         if snap is not None:
-            build.baseline_solves = None  # unknown until the solve returns or refuses
+            del stats["baseline_solves"]  # unknown until the solve returns or refuses
             try:
                 base = _B.solve_baseline(snap, cfg, plan)
             except _B.BaselineRefused as exc:
-                build.baseline_solves = exc.solves
+                stats["baseline_solves"] = exc.solves
                 raise FinanceRefused(exc.code, exc.detail) from exc
-            build.baseline_solves = base.solves
+            stats["baseline_solves"] = base.solves
         with PyPSAService.get_lock():
             case = build_finance_case(n, cfg, fin, result_df=_result_df, lost_load=lost_load,
                                       owner=owner,
@@ -2344,7 +2347,6 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
             case = dataclasses.replace(case, campus=campus.summary)
         flags = (campus.run_flags if campus is not None else ()) + tuple(growth_flags)
         return dataclasses.replace(case, flags=case.flags + flags) if flags else case
-    build.baseline_solves = 0
     return build
 
 

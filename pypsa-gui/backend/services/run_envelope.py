@@ -1638,9 +1638,12 @@ def settle_case_solves(task_path, step_id, solves):
     retried step's latest) reserved its baseline and spent `solves` baseline
     LPs (its record's `baseline_solves`: 0 on a cache hit), clamped to the
     reservation; `run.budget.used.solves` follows. The settled solves, or
-    None when the step has no reserving row (nothing to settle)."""
+    None when the step has no reserving row or `solves` is no count (not a
+    non-negative int): the whole reservation then stays charged."""
     from harness.runner import step_call_prefix
     from services import assistant_tasks
+    if type(solves) is not int or solves < 0:
+        return None
     prefix = step_call_prefix(step_id)
     with assistant_tasks._LOCK:
         envelope = _load(task_path)
@@ -1649,7 +1652,7 @@ def settle_case_solves(task_path, step_id, solves):
                     and str(a.get("call_id", "")).startswith(prefix)), None)
         if row is None or type(row.get("reserved")) is not int:
             return None
-        settled = max(0, min(solves, row["reserved"]))
+        settled = min(solves, row["reserved"])
         if row.get("solves") != settled:
             row["solves"] = settled
             _save(task_path, envelope)

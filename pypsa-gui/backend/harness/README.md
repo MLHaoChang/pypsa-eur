@@ -1846,11 +1846,13 @@ this network.
   the bound: `solve_baseline` tries at most twice), so the envelope admits
   the case and reserves the baseline on its `used` row; `_ic_build_case`
   then solves the baseline in the run. `solve_baseline` reports the LPs it
-  ran (`Baseline.solves`, `BaselineRefused.solves`: 0 on a cache hit), the
-  case's record keeps them (`baseline_solves`), and `run_ic.settle` settles
-  the row from that record (`run_envelope.settle_case_solves`, clamped to
-  the reservation). A record that does not say, or is not the step's own,
-  keeps the whole reservation. `solves_used` is then the real LP count: plan
+  ran (`Baseline.solves`, `BaselineRefused.solves`: 0 on a cache hit); the
+  build writes them into the runner's per-call `BUILD_STATS` and the case's
+  record keeps them (`baseline_solves`). `run_ic.settle` settles the step's
+  own `used` row (its call id, `runner.step_call_prefix`) from that record
+  (`run_envelope.settle_case_solves`, clamped to the reservation). A record
+  that does not say (a raise mid-solve, an abort, a fake), says no count, or
+  is not the step's own keeps the whole reservation. `solves_used` is then the real LP count: plan
   plus baseline on a miss, plan only on a hit. An L2 round runs the solve
   stage again, the case with it, so the budget is the plan and its baseline
   plus, per round, the re-solve and its baseline, each at its bound:

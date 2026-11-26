@@ -50,6 +50,10 @@ from services.reliability_goal import goal_free_config
 logger = logging.getLogger("pypsa_gui.results")
 
 STUDY_KEY = "investment_case"
+# Study-harness issue 52: the build's own figures for one call (its
+# `baseline_solves`), a dict the worker makes per call and the build writes
+# into; a build that does not write (a seam's fake) leaves it empty.
+BUILD_STATS: _contextvars.ContextVar[dict | None] = _contextvars.ContextVar("ic_build_stats", default=None)
 STAGES: tuple[str, ...] = ("build_case", "load_pack", "run_engine", "assemble", "store")
 
 
@@ -364,10 +368,12 @@ def start_investment_case(
             if aborted():
                 return
             progress("build_case")
+            stats: dict = {}
+            stats_token = BUILD_STATS.set(stats)
             try:
                 case = build_case()
             except FinanceRefused as exc:
-                _keep_baseline_solves(record, build_case, lock)
+                _keep_baseline_solves(record, stats, lock)
                 report = refused_finance_report(exc.code, exc.detail, case_id=case_id,
                                                 assumptions_hash=a_hash, packs=packs,
                                                 owner=body.owner)
@@ -377,7 +383,9 @@ def start_investment_case(
                     return
                 finish("refused", error=str(exc), error_code=exc.code)
                 return
-            _keep_baseline_solves(record, build_case, lock)
+            finally:
+                BUILD_STATS.reset(stats_token)
+            _keep_baseline_solves(record, stats, lock)
             if aborted():
                 return
             progress("load_pack")
@@ -432,13 +440,14 @@ def start_investment_case(
             "tax_pack_id": fin.tax_pack_id, "started_at": record["started_at"]}
 
 
-def _keep_baseline_solves(record: dict, build_case, lock) -> None:
-    """Study-harness issue 52: the baseline LPs the build ran (its
-    `baseline_solves`: 0 on a cache hit or with no baseline) on the record,
-    where a run's case step settles its reserved solves from. Left out when
-    the build does not say (a seam's fake) or does not know."""
-    solves = getattr(build_case, "baseline_solves", None)
-    if type(solves) is int:
+def _keep_baseline_solves(record: dict, stats: dict, lock) -> None:
+    """Study-harness issue 52: the baseline LPs this call of the build ran
+    (`stats["baseline_solves"]`: 0 on a cache hit or with no baseline) on the
+    record, where a run's case step settles its reserved solves from. Left
+    out when the build does not say (a seam's fake) or does not know (it
+    raised mid-solve), so the whole reservation stays charged."""
+    solves = stats.get("baseline_solves")
+    if type(solves) is int and solves >= 0:
         with lock:
             record["baseline_solves"] = solves
 

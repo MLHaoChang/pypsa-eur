@@ -69,6 +69,17 @@ def test_the_island_relaxed_retry_reports_both_lps(fake_solve):
     assert "baseline_island_rows_relaxed" in got.plan.flags
 
 
+def test_a_changed_input_after_a_hit_is_a_miss_again(fake_solve, monkeypatch):
+    """GK A (38) S3: the count is what ran: a new cache key (the inputs
+    changed) solves again and counts its LP, never a hit's 0."""
+    run, statuses, lps = fake_solve
+    keys = iter(["rev-1", "rev-1", "rev-2"])
+    monkeypatch.setattr(B, "_key", lambda *a, **k: next(keys))
+    statuses.extend(["optimal", "optimal"])
+    assert [run().solves, run().solves, run().solves] == [1, 0, 1]
+    assert len(lps) == 2
+
+
 def test_a_refused_baseline_reports_the_lps_it_ran(fake_solve):
     run, statuses, lps = fake_solve
     statuses.extend(["infeasible", "infeasible"])
@@ -80,50 +91,111 @@ def test_a_refused_baseline_reports_the_lps_it_ran(fake_solve):
 # ── the case's build and its record carry them ──────────────────────────────
 
 
-@pytest.mark.parametrize("outcome", ["miss", "hit", "refused", "no_baseline"])
-def test_the_build_reports_the_baseline_solves_of_its_last_call(monkeypatch, outcome):
-    """`_ic_build_case`'s build carries the LPs its baseline ran; the runner
-    keeps them on the record (`_keep_baseline_solves`)."""
+@pytest.fixture
+def build_for(monkeypatch):
+    """`_ic_build_case` on fakes; `outcomes` pops one baseline outcome per
+    call (`miss`, `hit`, `relaxed`, `refused`, `boom`), `kept` False needs none."""
     from routers import results
-    from services.finance.case import FinanceRefused
-    from services.finance.investment_case_runner import _keep_baseline_solves
     from services.pypsa_service import PyPSAService
     from services.results import finance_case
 
-    plan = B.BaselinePlan(removed=(), kept=() if outcome == "no_baseline" else (("G", "g"),), flags=())
+    state = {"kept": True, "outcomes": []}
 
     def solve_baseline(*a, **k):
+        outcome = state["outcomes"].pop(0)
         if outcome == "refused":
-            raise B.BaselineRefused("baseline_not_established:infeasible", "", solves=1)
-        return SimpleNamespace(solves=1 if outcome == "miss" else 0)
+            raise B.BaselineRefused("baseline_not_established:infeasible", "", solves=2)
+        if outcome == "boom":
+            raise RuntimeError("the solver died mid-solve")
+        return SimpleNamespace(solves={"miss": 1, "hit": 0, "relaxed": 2}[outcome])
 
-    monkeypatch.setattr(finance_case, "baseline_plan", lambda n, cfg, owner=None: plan)
+    monkeypatch.setattr(finance_case, "baseline_plan", lambda n, cfg, owner=None: B.BaselinePlan(
+        removed=(), kept=(("G", "g"),) if state["kept"] else (), flags=()))
     monkeypatch.setattr(B, "solve_baseline", solve_baseline)
     monkeypatch.setattr(finance_case, "build_finance_case", lambda *a, **k: SimpleNamespace(flags=()))
     monkeypatch.setattr("services.workflow_tools._network_copy", lambda n: n)
     monkeypatch.setattr("models.finance.FinanceInputs.model_validate", classmethod(lambda cls, raw: raw))
     monkeypatch.setattr(PyPSAService, "get_lock", staticmethod(lambda: threading.Lock()))
     build = results._ic_build_case(object(), SimpleNamespace(finance={}), owner=None, lost_load=None)
-    assert build.baseline_solves == 0
-    if outcome == "refused":
-        with pytest.raises(FinanceRefused):
-            build()
-    else:
+    return build, state
+
+
+def _kept(build):
+    """One call of `build` as the runner makes it: a per-call stats dict,
+    then the record `_keep_baseline_solves` writes from it."""
+    from services.finance.case import FinanceRefused
+    from services.finance.investment_case_runner import BUILD_STATS, _keep_baseline_solves
+
+    stats: dict = {}
+    token = BUILD_STATS.set(stats)
+    try:
         build()
+    except (FinanceRefused, RuntimeError):
+        pass
+    finally:
+        BUILD_STATS.reset(token)
     record: dict = {}
-    _keep_baseline_solves(record, build, threading.Lock())
-    assert record == {"baseline_solves": {"miss": 1, "hit": 0, "refused": 1, "no_baseline": 0}[outcome]}
+    _keep_baseline_solves(record, stats, threading.Lock())
+    return record.get("baseline_solves", "absent")
+
+
+@pytest.mark.parametrize("outcome, kept", [("miss", 1), ("hit", 0), ("relaxed", 2), ("refused", 2), ("boom", "absent")])
+def test_each_call_records_the_baseline_lps_it_ran(build_for, outcome, kept):
+    """A refusal after the relaxed retry counts both LPs; a raise mid-solve
+    leaves the figure out (the whole reservation stays charged)."""
+    build, state = build_for
+    state["outcomes"].append(outcome)
+    assert _kept(build) == kept
+
+
+def test_a_case_with_no_baseline_records_none_run(build_for):
+    build, state = build_for
+    state["kept"] = False
+    assert _kept(build) == 0
+
+
+def test_two_builds_in_sequence_record_their_own_figures(build_for):
+    """GK B (71) 1: a miss then a hit on the same build record 1 then 0,
+    never the first call's figure twice."""
+    build, state = build_for
+    state["outcomes"].extend(["miss", "hit"])
+    assert [_kept(build), _kept(build)] == [1, 0]
 
 
 def test_a_build_that_does_not_say_leaves_the_record_alone():
     from services.finance.investment_case_runner import _keep_baseline_solves
 
+    for stats in ({}, {"baseline_solves": None}, {"baseline_solves": -1}, {"baseline_solves": True},
+                  {"baseline_solves": 1.0}):
+        record: dict = {}
+        _keep_baseline_solves(record, stats, threading.Lock())
+        assert record == {}, stats
+
+
+def test_the_runner_keeps_the_figure_on_the_record_per_call():
+    """The worker gives each build call its own stats dict; a fake that
+    ignores it leaves the record without a figure."""
+    from services.finance import investment_case_runner as R
+
+    seen = []
+
+    def build():
+        stats = R.BUILD_STATS.get()
+        seen.append(stats)
+        stats["baseline_solves"] = 1
+        raise RuntimeError("stop after the build")
+
+    assert R.BUILD_STATS.get() is None
     record: dict = {}
-    _keep_baseline_solves(record, lambda: None, threading.Lock())
-    unknown = lambda: None  # noqa: E731
-    unknown.baseline_solves = None  # a solve that raised something unexpected
-    _keep_baseline_solves(record, unknown, threading.Lock())
-    assert record == {}
+    stats: dict = {}
+    token = R.BUILD_STATS.set(stats)
+    try:
+        with pytest.raises(RuntimeError):
+            build()
+    finally:
+        R.BUILD_STATS.reset(token)
+    R._keep_baseline_solves(record, stats, threading.Lock())
+    assert seen == [stats] and record == {"baseline_solves": 1} and R.BUILD_STATS.get() is None
 
 
 # ── run_ic settles the reservation from the record ──────────────────────────
@@ -170,14 +242,19 @@ def test_solves_used_is_the_real_lp_count_on_a_miss_and_on_a_hit(envelope, settl
     assert run_envelope.solves_used(envelope) == used == envelope["counted"][-1]
 
 
-def test_a_refused_case_counts_the_lps_its_baseline_ran(envelope, settled):
+@pytest.mark.parametrize("lps", [1, 2])
+def test_a_refused_case_counts_the_lps_its_baseline_ran(envelope, settled, lps):
+    """A refusal after the island-relaxed retry settles at 2."""
     run_ic.settle("task.json", TICKET, "ad:1",
-                  _record("refused", baseline_solves=1, error_code="baseline_not_established:x"), 1.0)
+                  _record("refused", baseline_solves=lps, error_code="baseline_not_established:x"), 1.0)
     assert settled[0][1] == "failed"
-    assert run_envelope.solves_used(envelope) == 2
+    assert envelope["audit"][1]["solves"] == lps
+    assert run_envelope.solves_used(envelope) == 1 + lps
 
 
-@pytest.mark.parametrize("record", [_record(), _record(baseline_solves=None),
+@pytest.mark.parametrize("record", [_record(), _record(baseline_solves=None), _record(baseline_solves=-1),
+                                    _record(baseline_solves=True), _record(baseline_solves=0.0),
+                                    _record("aborted"), _record("failed", error_code="internal_error"),
                                     {**_record(baseline_solves=0), "started_at": 9.0}])
 def test_a_record_that_does_not_say_keeps_the_whole_reservation(envelope, settled, record):
     """No `baseline_solves`, or not the step's own record: the reservation
@@ -189,14 +266,19 @@ def test_a_record_that_does_not_say_keeps_the_whole_reservation(envelope, settle
 
 def test_the_settle_is_clamped_to_the_reservation_and_idempotent(envelope):
     assert run_envelope.settle_case_solves("task.json", "solve.2", 7) == run_envelope.CASE_BASELINE_SOLVES
-    assert run_envelope.settle_case_solves("task.json", "solve.2", -1) == 0
+    assert envelope["counted"] == []  # nothing changed
+    for no_count in (-1, True, 1.0, None, "1"):
+        assert run_envelope.settle_case_solves("task.json", "solve.2", no_count) is None, no_count
+    assert envelope["audit"][1]["solves"] == run_envelope.CASE_BASELINE_SOLVES
+    assert run_envelope.settle_case_solves("task.json", "solve.2", 1) == 1
+    assert run_envelope.settle_case_solves("task.json", "solve.2", 1) == 1
     assert run_envelope.settle_case_solves("task.json", "solve.2", 0) == 0
-    assert envelope["counted"] == [1]  # recounted on a change only
+    assert envelope["counted"] == [2, 1]  # recounted on a change only
 
 
 def test_only_the_steps_own_row_is_settled(envelope, settled):
-    """A later round's case (another step) or another step's row is never
-    settled from this step's record."""
+    """GK A (38) S1: with two case rows in one envelope, settling the older
+    step's leaves the newer row (a later round's case) untouched."""
     later = {**CASE_ROW, "call_id": "run-solve.4-ffffffff"}
     envelope["audit"].append(later)
     run_ic.settle("task.json", TICKET, "ad:1", _record(baseline_solves=0), 1.0)
@@ -216,6 +298,19 @@ def test_a_case_with_nothing_reserved_settles_nothing(envelope, settled):
 
 # ── the concentrator's @2 profile ───────────────────────────────────────────
 
+# L8 (GK A (38) S4, GK B (71) 4): @1 as on master f15f7c460, hashed in a fresh
+# worktree there (`json.dumps(PROFILES[ref], sort_keys=True)`), never regenerated.
+PINNED_V1 = "d87844f0d50a991bcc92f55ac3868c648ce78d857b6070b7559110586159d17f"
+
+
+def test_v1_stays_byte_equal_to_master():
+    import hashlib
+    import json
+
+    blob = json.dumps(run_profiles.PROFILES["eh_concentrator_staged@1"], sort_keys=True).encode()
+    assert hashlib.sha256(blob).hexdigest() == PINNED_V1
+
+
 
 def test_v2_runs_the_case_after_the_queued_solve_on_a_counted_reservation():
     v2, v1 = run_profiles.resolve(REF), run_profiles.resolve("eh_concentrator_staged@1")
@@ -229,6 +324,14 @@ def test_v2_runs_the_case_after_the_queued_solve_on_a_counted_reservation():
         run_profiles.CONC_SOLVES + baseline + run_profiles.L2_ROUNDS * (1 + baseline)) == 9
     assert v1["envelope"]["budget"]["solves"] == 3
     assert not any(r["tool"] == run_ic.TOOL for r in v1["envelope"]["runs"])
+
+
+def test_v2_names_the_baseline_at_the_bound_the_validator_requires():
+    """GK A (38) S4: @2's entry passes `_check_run`; one below the bound fails."""
+    entry = next(r for r in run_profiles.resolve(REF)["envelope"]["runs"] if r["tool"] == run_ic.TOOL)
+    run_envelope._check_run(entry)
+    with pytest.raises(run_envelope.EnvelopeError):
+        run_envelope._check_run({**entry, "baseline_solves": 1})
 
 
 def test_v2_case_rules_block_and_read_the_runs_own_case():
@@ -252,3 +355,24 @@ def test_v2_refuses_a_case_whose_baseline_the_solves_left_cannot_cover():
         == run_envelope.IC_BUDGET_KIND
     env["audit"].pop()
     assert run_envelope.case_budget_refusal(env, {"case_solves": run_envelope.CASE_BASELINE_SOLVES}) is None
+
+
+@pytest.mark.live_solve
+def test_a_hit_and_a_fresh_baseline_give_the_same_case_hash(reset_backend):
+    """GK B (71) 3: the LP count is no case input: a case on a fresh
+    baseline and one on its cache hit hash alike."""
+    from routers.results import _ic_case_hash
+    from services.results.finance_case import baseline_plan
+    from tests.test_finance_baseline_purchase import _site_today
+    from tests.test_finance_case_adapter import _case
+    from tests.test_finance_counterfactual_purchase import PURCHASE, _fin_h2
+
+    B.clear_cache()
+    try:
+        n, cfg, ll, fresh = _site_today(reference_purchases=[PURCHASE])
+        hit = B.solve_baseline(n, cfg, baseline_plan(n, cfg))
+        assert fresh.solves >= 1 and hit.solves == 0
+        hashes = [_ic_case_hash(_case(n, cfg, _fin_h2(), baseline=b, lost_load=ll)) for b in (fresh, hit)]
+    finally:
+        B.clear_cache()
+    assert hashes[0] is not None and hashes[0] == hashes[1]
