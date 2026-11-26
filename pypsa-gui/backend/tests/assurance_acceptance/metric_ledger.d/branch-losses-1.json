@@ -1,0 +1,78 @@
+{
+ "profiles": {
+  "branch-losses/1": [
+   {
+    "metric": "loss_energy",
+    "formula": "sum over branches b and t of w_generators[t] x loss_b[t]",
+    "validity": "verified solve with no power-flow record (else unverified_solve); loss frames recorded (else losses_not_recorded); every Line and Transformer read is complete over the whole solved horizon by services.results.losses._validity_rows, else its worst state: misaligned, absent or incomplete (a short frame is incomplete). Refusals: ac_pf_present, ambiguous_branch, misaligned_source, unknown_branch, unsupported_branch_population, unsupported_snapshot_scope",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_losses_assurance.py::test_network_figures_equal_the_hand_arithmetic",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_losses_assurance.py::test_network_figures_equal_the_hand_arithmetic"
+     },
+     "route": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_losses_assurance.py::test_the_route_shows_the_same_hand_figures"
+     }
+    }
+   },
+   {
+    "metric": "peak_loss",
+    "formula": "max over branches b and t of |loss_b[t]|",
+    "validity": "verified solve with no power-flow record (else unverified_solve); loss frames recorded (else losses_not_recorded); every Line and Transformer read is complete over the whole solved horizon by services.results.losses._validity_rows, else its worst state: misaligned, absent or incomplete (a short frame is incomplete). Refusals: ac_pf_present, ambiguous_branch, misaligned_source, unknown_branch, unsupported_branch_population, unsupported_snapshot_scope",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_losses_assurance.py::test_network_figures_equal_the_hand_arithmetic",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_losses_assurance.py::test_network_figures_equal_the_hand_arithmetic"
+     },
+     "route": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_losses_assurance.py::test_the_route_shows_the_same_hand_figures"
+     }
+    }
+   },
+   {
+    "metric": "demand_energy",
+    "formula": "sum over Loads l and t of w_generators[t] x p_l[t]",
+    "validity": "network scope only (else network_scope_required); at least one Load (else no_loads); every Load's loads_t.p complete over the whole solved horizon, else its worst state",
+    "tolerance": "exact",
+    "oracle": "pypsa-gui/backend/tests/test_losses_assurance.py::test_network_figures_equal_the_hand_arithmetic",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_losses_assurance.py::test_network_figures_equal_the_hand_arithmetic"
+     },
+     "route": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_losses_assurance.py::test_the_route_shows_the_same_hand_figures"
+     }
+    }
+   },
+   {
+    "metric": "loss_pct_of_demand",
+    "formula": "100 x loss_energy / demand_energy",
+    "validity": "verified solve with no power-flow record (else unverified_solve); loss frames recorded (else losses_not_recorded); every Line and Transformer read is complete over the whole solved horizon by services.results.losses._validity_rows, else its worst state: misaligned, absent or incomplete (a short frame is incomplete). Refusals: ac_pf_present, ambiguous_branch, misaligned_source, unknown_branch, unsupported_branch_population, unsupported_snapshot_scope; and network scope only (else network_scope_required); at least one Load (else no_loads); every Load's loads_t.p complete over the whole solved horizon, else its worst state; |demand_energy| <= NEAR_ZERO gives near_zero_denominator",
+    "tolerance": "harness.derived:NEAR_ZERO",
+    "oracle": "pypsa-gui/backend/tests/test_losses_assurance.py::test_network_figures_equal_the_hand_arithmetic",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_losses_assurance.py::test_network_figures_equal_the_hand_arithmetic"
+     },
+     "route": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_losses_assurance.py::test_the_route_shows_the_same_hand_figures"
+     }
+    }
+   }
+  ]
+ }
+}

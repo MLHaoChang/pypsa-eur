@@ -5332,7 +5332,8 @@
         "copt-screening/1",
         "grid-readiness/1",
         "time-to-power/1",
-        "ac-branch-loading/1"
+        "ac-branch-loading/1",
+        "branch-losses/1"
        ],
        "type": "string"
       },
@@ -6688,6 +6689,36 @@
     "branch_rating"
    ]
   },
+  "branch-losses/1": {
+   "definitions": {
+    "demand_energy": {
+     "formula_id": "served-demand-energy/1",
+     "label": "Served demand",
+     "unit": "MWh"
+    },
+    "loss_energy": {
+     "formula_id": "branch-loss-energy/1",
+     "label": "Transmission loss energy",
+     "unit": "MWh"
+    },
+    "loss_pct_of_demand": {
+     "formula_id": "loss-share-of-demand/1",
+     "label": "Losses as a share of served demand",
+     "unit": "%"
+    },
+    "peak_loss": {
+     "formula_id": "branch-loss-peak/1",
+     "label": "Largest single-branch loss",
+     "unit": "MW"
+    }
+   },
+   "metrics": [
+    "loss_energy",
+    "peak_loss",
+    "demand_energy",
+    "loss_pct_of_demand"
+   ]
+  },
   "bus-price/1": {
    "definitions": {
     "hours_at_voll": {
@@ -7543,7 +7574,8 @@
      "copt-screening/1",
      "grid-readiness/1",
      "time-to-power/1",
-     "ac-branch-loading/1"
+     "ac-branch-loading/1",
+     "branch-losses/1"
     ],
     "title": "Profile",
     "type": "string"

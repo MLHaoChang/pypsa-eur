@@ -75,6 +75,11 @@ WEIGHT_BASIS: dict[str, str] = {
     "available_energy": "generators",
     "curtailed_energy": "generators",
     "curtailment_share": "generators",
+    # losses_calculations.py
+    "loss_energy": "generators",
+    "peak_loss": "none",
+    "demand_energy": "generators",
+    "loss_pct_of_demand": "generators",
     # capacity_calculations.py
     "optimal_capacity": "none",
     "capacity_change": "none",
