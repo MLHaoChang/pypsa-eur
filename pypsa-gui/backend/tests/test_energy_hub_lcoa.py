@@ -99,6 +99,8 @@ def test_lcoa_is_exact_over_each_part():
     assert out["total"]["nh3_t"] == pytest.approx(NH3_T)
     assert out["total"]["cost_eur"] == pytest.approx(COST)
     assert out["total"]["lcoa_eur_per_t"] == pytest.approx(COST / NH3_T)
+    # The same figure as a literal worked by hand: 2439.7991 EUR / 4 t.
+    assert out["total"]["lcoa_eur_per_t"] == pytest.approx(609.9497716894978, rel=1e-12)
     assert out["currency"] == "EUR"
 
 
@@ -355,3 +357,81 @@ def test_a_synthesis_link_with_no_dispatch_column_is_not_established():
     n.links_t.p0 = pd.DataFrame({"other": [1.0, 1.0]}, index=n.snapshots)
     tea = _tea(n)
     assert tea.lcoa_status == "not_established" and "dispatch of hb" in tea.lcoa_note
+
+
+def test_an_idle_built_link_keeps_its_fixed_cost_in_the_fleet():
+    # GK B2 (7) L1: hb2 is built (4 MW, capital 500 + FOM 3) but made no NH3.
+    n = _hb_network()
+    n.add(
+        "Link",
+        "hb2",
+        bus0="hub",
+        bus1="nh3",
+        bus2="h2",
+        carrier="Haber-Bosch",
+        p_nom=4.0,
+        efficiency=4.0,
+        efficiency2=-5.0,
+        marginal_cost=1.5,
+        capital_cost=500.0,
+    )
+    n.links.at["hb2", "p_nom_opt"] = 4.0
+    n.links.at["hb2", "fom_cost"] = 3.0
+    n.links_t.p0["hb2"] = [0.0, 0.0]
+    total = _lcoa(n)["total"]
+    assert total["nh3_t"] == pytest.approx(NH3_T)
+    # (2439.7991 + 503 x 4 x 2 / 8760) EUR / 4 t
+    assert total["lcoa_eur_per_t"] == pytest.approx(610.0646118721462, rel=1e-12)
+
+
+def test_an_unbuilt_link_adds_nothing():
+    n = _hb_network()
+    n.add(
+        "Link",
+        "hb2",
+        bus0="hub",
+        bus1="nh3",
+        bus2="h2",
+        carrier="Haber-Bosch",
+        p_nom=0.0,
+        efficiency=4.0,
+        efficiency2=-5.0,
+        capital_cost=500.0,
+    )
+    n.links.at["hb2", "p_nom_opt"] = 0.0
+    n.links.at["hb2", "fom_cost"] = 3.0
+    n.links_t.p0["hb2"] = [0.0, 0.0]
+    assert _lcoa(n)["total"]["lcoa_eur_per_t"] == pytest.approx(
+        609.9497716894978, rel=1e-12
+    )
+
+
+def test_a_two_bus_h2_to_nh3_link_is_synthesis_and_priced_on_its_h2():
+    # GK B2 (7) L2: bus0 = H2, bus1 = NH3, no further bus; 1 then 2 MWh_H2 at 80 then 90.
+    n = _hb_network()
+    n.remove("Link", "hb")
+    n.add(
+        "Link",
+        "h2_to_nh3",
+        bus0="h2",
+        bus1="nh3",
+        carrier="custom",
+        p_nom=5.0,
+        efficiency=0.8,
+        marginal_cost=0.0,
+        capital_cost=0.0,
+    )
+    n.links.at["h2_to_nh3", "p_nom_opt"] = 5.0
+    n.links.at["h2_to_nh3", "fom_cost"] = 0.0
+    n.links_t.p0 = pd.DataFrame({"h2_to_nh3": [1.0, 2.0]}, index=n.snapshots)
+    assert ammonia_synthesis_links(n) == ["h2_to_nh3"]
+    total = _lcoa(n)["total"]
+    assert total["nh3_t"] == pytest.approx(0.48)
+    # (1 x 80 + 2 x 90) EUR / (3 x 0.8 / 5) t
+    assert total["lcoa_eur_per_t"] == pytest.approx(541.6666666666667, rel=1e-12)
+    # An import Link from a non-H2 bus is still not synthesis.
+    n.add("Bus", "port", carrier="NH3 import")
+    n.add(
+        "Link", "nh3_import", bus0="port", bus1="nh3", carrier="NH3 import", p_nom=50.0
+    )
+    assert ammonia_synthesis_links(n) == ["h2_to_nh3"]

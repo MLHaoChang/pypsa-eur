@@ -72,8 +72,8 @@ def ammonia_synthesis_links(n) -> list[str]:
     """Names of the ammonia-synthesis Links.
 
     The carrier names Haber(-Bosch) or ammonia synthesis; or the Link makes NH3
-    (bus1 carries NH3) from an H2 input. An NH3 import or purchase Link, which
-    draws no H2, is not synthesis (GK B2 A3).
+    (bus1 carries NH3) from an H2 input, on bus0 or a further input bus. An NH3
+    import or purchase Link, which draws no H2, is not synthesis (GK B2 A3).
     """
     links = getattr(n, "links", None)
     if links is None or links.empty:
@@ -87,10 +87,10 @@ def ammonia_synthesis_links(n) -> list[str]:
         bus1 = links.at[name, "bus1"] if "bus1" in links.columns else None
         if _carrier(n.buses, bus1).upper() != "NH3":
             continue
-        if any(
-            _carrier(n.buses, bus).upper() == "H2"
-            for bus, _ in _input_buses(links, name)
-        ):
+        # The H2 input is bus0 (a two-bus H2 -> NH3 Link) or a further input bus (GK B2 (7) L2).
+        bus0 = links.at[name, "bus0"] if "bus0" in links.columns else None
+        inputs = [bus0] + [bus for bus, _ in _input_buses(links, name)]
+        if any(_carrier(n.buses, bus).upper() == "H2" for bus in inputs):
             out.append(name)
     return out
 
@@ -233,15 +233,14 @@ def _lcoa(n, cfg, names, result_df) -> dict:
         if "p_nom_opt" not in links.columns:
             raise _NotValued(f"the solved capacity of {name} is missing")
         p_nom = _part(links.at[name, "p_nom_opt"], "solved capacity", name)
+        if p_nom <= 0:
+            # Not built: no cost and no NH3, as LCOH skips a Link without capacity.
+            continue
         eff = _part(links.at[name, "efficiency"], "efficiency", name)
         consume = disp.clip(lower=0)
         mwh_per_t, basis = _mwh_per_t(n, links.at[name, "bus1"])
         nh3_t = float((consume * energy_weights).sum()) * eff / mwh_per_t
-        if nh3_t <= 0:
-            rows.append(
-                {"name": name, "nh3_t": 0.0, "cost_eur": None, "lcoa_eur_per_t": None}
-            )
-            continue
+        # A built Link that made no NH3 still carries its fixed cost into the fleet (GK B2 (7) L1).
         # The typed costs as entered: the per-horizon helpers fill a gap with 0.
         _part(links.at[name, "capital_cost"], "capital cost", name)
         if "fom_cost" in links.columns:
@@ -254,6 +253,7 @@ def _lcoa(n, cfg, names, result_df) -> dict:
         electricity = float(
             (consume * _price(links.at[name, "bus0"], name) * weights).sum()
         )
+        # bus0's input (electricity; H2 on a two-bus H2 -> NH3 Link) is `electricity_eur`.
         # Further inputs (efficiency_k < 0): the Haber-Bosch loop's H2 draw, at its bus's price.
         inputs = sum(
             float((consume * share * _price(bus, name) * weights).sum())
@@ -265,7 +265,7 @@ def _lcoa(n, cfg, names, result_df) -> dict:
                 "name": name,
                 "nh3_t": nh3_t,
                 "cost_eur": cost,
-                "lcoa_eur_per_t": cost / nh3_t,
+                "lcoa_eur_per_t": cost / nh3_t if nh3_t > 0 else None,
                 "fixed_eur": fixed,
                 "vom_eur": vom,
                 "electricity_eur": electricity,
