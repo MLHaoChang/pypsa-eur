@@ -9,6 +9,7 @@ failure, not a silent difference.
 import pandas as pd
 import pytest
 
+from harness.energy_balance_calculations import SERVED_TOL
 from services import workflow_tools
 from services.results.energy_flows import energy_flows
 from tests.assurance_acceptance.support import approval, public_text
@@ -206,3 +207,37 @@ def test_no_carrier_split_beside_withheld_totals(shortfall):
     raw["w_store"] = [0.0] * len(raw["w_store"])  # a gate calculate applies, past the bus balance
     assert balance.calculate(raw, scope)[0] == []
     assert not any("different carriers" in line for line in balance.notes(raw, scope, str))
+
+
+# ── AA-10 R2: storage change and the remainder against hand-worked LPs (GK B (72) R2) ──
+# The LP is compared at the profile's own SERVED_TOL; no new epsilon.
+
+
+def test_storage_change_and_remainder_equal_the_hand_lp(battery):
+    """Hour 2 needs 4 MW from the battery: its state falls by 4 / 0.9 = 40/9 MWh over a
+    1 h store weight. Hour 1 stores it at store weight 2: p_store = (40/9) / (2 x 0.9) = 200/81 MW.
+    Generator weights are 1, 1. Storage change, the state delta x w_gen / w_store as the tab
+    converts it: (40/9) x 1/2 - (40/9) x 1/1 = -20/9 MWh. Generation 200/81, served 0 + 4 = 4,
+    so the remainder is 200/81 - 4 + 20/9 = (200 - 324 + 180) / 81 = 56/81 MWh: the round-trip loss."""
+    values = profile_facts(solve(battery))
+    assert values["storage_change"] == pytest.approx(-20 / 9, abs=SERVED_TOL)
+    assert values["generation_energy"] == pytest.approx(200 / 81, abs=SERVED_TOL)
+    assert values["served_energy"] == pytest.approx(4.0, abs=SERVED_TOL)
+    assert values["export_losses_and_conversion"] == pytest.approx(56 / 81, abs=SERVED_TOL)
+    # The balance closes with a zero residual.
+    residual = (values["generation_energy"] - values["served_energy"] - values["storage_change"]
+                - values["export_losses_and_conversion"])
+    assert residual == 0
+
+
+def test_the_remainder_is_the_export_and_tie_loss_of_the_hand_lp(exporting):
+    """Load 5 MW in both hours. Hour 1: PV (20 MW) serves the load and sells the tie's full
+    6 MW at the grid price; the tie is a Link with bus1 = B1, so a reverse flow p = -6 draws
+    |p| x 0.98 = 5.88 MW from B1, and PV runs 5 + 5.88 = 10.88 MW. Hour 2: no PV, so the grid
+    supplies 5 / 0.98 MW at bus0 for 5 MW at B1. Generation 10.88 + 5/0.98, served 10,
+    storage change 0, remainder 0.88 + 5/0.98."""
+    values = profile_facts(solve(exporting))
+    assert values["storage_change"] == 0
+    assert values["generation_energy"] == pytest.approx(10.88 + 5 / 0.98, abs=SERVED_TOL)
+    assert values["served_energy"] == pytest.approx(10.0, abs=SERVED_TOL)
+    assert values["export_losses_and_conversion"] == pytest.approx(0.88 + 5 / 0.98, abs=SERVED_TOL)

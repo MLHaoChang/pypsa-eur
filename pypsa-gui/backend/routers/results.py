@@ -2290,7 +2290,10 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
     no solve for it, and a kept asset added after its admission is refused here,
     under the lock that plans it (`baseline_solve`), unless the run's grant
     reserved the baseline's solves at the case's admission (study harness 36,
-    GK B (60) A2: `run_envelope.case_baseline_reserved`)."""
+    GK B (60) A2: `run_envelope.case_baseline_reserved`). Each call writes
+    the baseline LPs it ran (0 on a cache hit or with no baseline; absent
+    while unknown) into the runner's per-call `BUILD_STATS`, which the runner
+    keeps on the case's record (study-harness issue 52)."""
     from services import assistant_tasks
 
     in_run = assistant_tasks.RUN_CONTEXT.get() is not None
@@ -2299,6 +2302,10 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
         in_run = not run_envelope.case_baseline_reserved(harness_locks.in_run())
 
     def build():
+        from services.finance.investment_case_runner import BUILD_STATS
+        stats = BUILD_STATS.get()
+        stats = stats if stats is not None else {}  # outside the runner: nobody reads it
+        stats["baseline_solves"] = 0  # no LP yet
         from models.finance import FinanceInputs
         from services.finance.case import FinanceRefused
         from services.results.finance_case import build_finance_case
@@ -2324,10 +2331,13 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
             snap = _network_copy(n) if plan is not None and plan.needed else None
         base = None
         if snap is not None:
+            del stats["baseline_solves"]  # unknown until the solve returns or refuses
             try:
                 base = _B.solve_baseline(snap, cfg, plan)
             except _B.BaselineRefused as exc:
+                stats["baseline_solves"] = exc.solves
                 raise FinanceRefused(exc.code, exc.detail) from exc
+            stats["baseline_solves"] = base.solves
         with PyPSAService.get_lock():
             case = build_finance_case(n, cfg, fin, result_df=_result_df, lost_load=lost_load,
                                       owner=owner,
@@ -3046,6 +3056,24 @@ def _workbook_project(run):
             return None
 
 
+def _workbook_verdict(store: dict, record) -> str | None:
+    """The finished study's verdict line for About, or None when its review is missing or stale. Called
+    only when `study_solve.fallback()` returned the study's solve: a done, unedited study with no live
+    dispatch, whose report sits in the context's store (`held["state"]` has only the ENS solve's side
+    results, the report is written to the store later). The same review the Guided Results card reads."""
+    from services.adequacy.eh_review import review_latest
+    from services.adequacy.verdict_line import verdict_line
+
+    try:
+        review = review_latest(store, record if isinstance(record, dict) else None)
+    except Exception:  # noqa: BLE001 - the workbook never fails for want of a verdict
+        logger.info("results workbook: no verdict line", exc_info=True)
+        return None
+    if review.get("status") != "ok" or review.get("stale"):
+        return None
+    return verdict_line(review.get("summary"))
+
+
 # The cause only; the Export tab words what to do per mode ("Not run yet: ..."). Pinned to
 # ResultsWorkbookPicker.tsx's WORKBOOK_NO_RUN by tests/test_workbook_no_run_words_parity.py.
 WORKBOOK_NO_RUN_MESSAGE = "Not run yet: nothing has been solved."
@@ -3246,6 +3274,9 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
     except UnknownView as exc:
         raise HTTPException(422, {"error_kind": "unknown_result_view", "message": str(exc)})
     runs = [latest] if latest is not None else []
+    # Only a held study's own solve has a verdict to show: a live LOPF workbook is not the study's run
+    # (the study solves a private copy), whatever order the two ran in (GK B2 V1).
+    verdict = _workbook_verdict(_state, get_eh_study()) if study is not None else None
     project = PyPSAService.get_loaded_project()
     report = load_ic_report(_state)
     case_state = None
@@ -3272,7 +3303,7 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
             lost_load=_state.get("last_lost_load") if study is None else held.get("last_lost_load"),
             result_df=_result_df if study is None else functools.partial(_result_df, state=held),
             views=included, ic_report=report, case_state=case_state,
-            bc_report=bc_report, bc_state=bc_state,
+            bc_report=bc_report, bc_state=bc_state, verdict=verdict,
             project=project, scope=scope, template=template, freshness=freshness,
             stored=stored, run=runs[0] if runs else None, scenarios=scenarios,
             solved_settings=(_solved_settings if study is None

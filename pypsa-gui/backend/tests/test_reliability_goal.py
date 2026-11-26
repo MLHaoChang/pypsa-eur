@@ -15,6 +15,7 @@ import pandas as pd
 import pypsa
 import pytest
 
+from project_templates.eh_templates import TEMPLATE_META
 from services import reliability_goal as G
 from services.adequacy.eh_study_runner import EhStudyRequest
 
@@ -587,3 +588,23 @@ def test_a_non_number_assumed_goal_reads_as_none(bad, monkeypatch):
     monkeypatch.setattr(G, "active_goal", lambda state: goal)
     assert G.no_target_hint({}) == ""
     assert G.assumed_lole({"target_lole_h": {"value": None, "source": "default"}}) is None
+
+
+@pytest.mark.parametrize("template_id", sorted(TEMPLATE_META))
+def test_template_assumed_lole_agrees_across_rail_card_and_study(template_id):
+    """Issue 41: the ledger's assumed LOLE row (the rail), the Goal card's
+    `effective_goal` and the study's pack target are one number, or all absent."""
+    from project_templates import eh_templates as T
+
+    meta = T.template_meta(template_id)
+    rows = [r for r in meta["ledger"]
+            if r.get("source") == "assumed" and r.get("field") == "target_lole_h"]
+    assert len(rows) <= 1
+    rail = float(rows[0]["value"]) if rows else None
+    goal = G.effective_goal({}, meta)
+    card = G.assumed_lole(goal)
+    study = G.pack_target_lole_h(goal["site_archetype"]["value"])
+    if goal["target_lole_h"]["value"] is not None:      # a template-set goal: no assumed row
+        assert rail is None and card is None
+        return
+    assert rail == card == study

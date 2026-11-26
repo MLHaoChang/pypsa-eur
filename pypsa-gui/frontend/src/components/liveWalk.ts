@@ -89,7 +89,7 @@ export function startKeyResultsWalk(opts?: {
     try {
       const evidence = run
         ? await resultsEvidenceApi.run(run.runId, shown.section ?? undefined, run.baselineRunId)
-        : await resultsEvidenceApi.loadflow(initial.resultSource, shown.window_from, shown.window_to)
+        : await resultsEvidenceApi.loadflow(initial.resultSource, shown.window_from ?? undefined, shown.window_to ?? undefined)
       const now = displayedResultsSource(tab.id)
       if (!current() || !now || !evidence.binding || !sameResultsSource(now, shown)
         || !sameResultsSource(shown, evidence.binding)) return

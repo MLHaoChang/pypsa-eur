@@ -3,7 +3,7 @@
 
 # 52 — A run's investment case cannot re-solve its baseline
 
-Status: ready-for-agent; audit 2026-11-25: #1624 merged (baseline_solves reservation, run_envelope.py; used by the eh_site v4 profile, run_profiles.py:635); left: eh_concentrator_staged still reads a stored case and warns (run_profiles.py:1015-1029), run_ic.py:26 SOLVES = 0, issue-52 line still in README
+Status: done
 Gated: GK A (solve count), GK B co-review (harness and finance)
 Type: task
 Parent: SH 16 (eh_concentrator_staged@1), GK A (28) Q7, Q8
@@ -54,3 +54,12 @@ but its shipped template keeps no existing asset, so it needs no baseline.
 ## Audit (2026-11-25)
 
 - 2026-11-25 audit: PR merge state checked against origin/master log; acceptance items grepped on master code.
+
+## Resolution (2026-11-26)
+
+- `eh_concentrator_staged@2` runs the case after the queued solve on a counted reservation; @1 stays
+  byte-equal. `solve_baseline` reports its LPs (`Baseline.solves`, 0 on a hit), the record keeps
+  `baseline_solves`, and `run_ic.settle` settles the case's row from it (`run_envelope.settle_case_solves`).
+- Deviation: the reservation is #1624's bound `CASE_BASELINE_SOLVES = 2` (the island-relaxed retry),
+  not 1, and an L2 round re-runs the case with the solve stage, so @2's budget is 1 + 2 + 2 × (1 + 2) = 9.
+- Tests: `tests/test_ic_baseline_in_run.py`; `tests/test_run_profile_concentrator_runs.py` (@2 demo run).

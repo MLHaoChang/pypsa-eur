@@ -1114,6 +1114,54 @@ def _eh_concentrator_staged() -> dict:
 
 EH_CONCENTRATOR_STAGED = _eh_concentrator_staged()
 
+# Study-harness issue 52 (GK A (28) Q7, Q8): eh_concentrator_staged@2. The
+# solve stage runs the investment case after the queued solve, and the case
+# re-solves its baseline (the site as it stands today) inside the run as a
+# counted reservation (`run_investment_case` with `baseline_solves`, settled
+# from the case's record: 0 on a cache hit). The counterfactual rules block
+# again and every case rule reads the run's own case. An L2 round runs the
+# solve stage again, the case with it, so the budget is the plan and its
+# baseline, and per round the re-solve and its baseline, each baseline at its
+# bound. eh_concentrator_staged@1 stays byte-equal for the runs started on it.
+CONC_V2_SOLVES_PER_ROUND = 1  # the round's re-solve, before its case's baseline
+
+
+def _eh_concentrator_staged_v2() -> dict:
+    from services import run_envelope
+
+    profile = copy.deepcopy(EH_CONCENTRATOR_STAGED)
+    profile["version"] = 2
+    baseline = run_envelope.CASE_BASELINE_SOLVES
+    profile["stages"]["solve"] = {"actions": [*GENERIC["solve"]["actions"], _call("run_investment_case")],
+                                  "rules": copy.deepcopy(GENERIC["solve"]["rules"])}
+    rules = profile["stages"]["result_gate"]["rules"]
+    in_run = {
+        "conc.ic.counterfactual": _rule(
+            "conc.ic.counterfactual", "ic.counterfactual", "eq", "established",
+            basis="The investment case the run solved compares against an established counterfactual; "
+                  "until then it is not evaluated and goes to the user."),
+        "conc.ic.basis": _rule(
+            "conc.ic.basis", "ic.counterfactual.basis", "eq", "site_today",
+            basis="The counterfactual is the site as it stands today (existing connection, no PV or BESS, "
+                  "the same process), its baseline re-solved by the run's own case."),
+        "conc.kpi.npv": _rule(
+            "conc.kpi.npv", "ic.returns", "nonempty", severity="warn",
+            basis="KPI: the project NPV at the WACC and IRR against the site as today, from the run's "
+                  "own case; no number otherwise. NPV by stage is not established (missing tools)."),
+    }
+    profile["stages"]["result_gate"]["rules"] = [in_run.get(r["id"], r) for r in rules]
+    envelope = profile["envelope"]
+    envelope["runs"] = [{"tool": "solve_queue_enqueue"},
+                        {"tool": "run_investment_case", "baseline_solves": baseline},
+                        {"tool": "generate_report"}]
+    envelope["budget"]["solves"] = (CONC_SOLVES + baseline
+                                    + L2_ROUNDS * (CONC_V2_SOLVES_PER_ROUND + baseline))
+    profile["missing_tools"] = [t for t in profile["missing_tools"] if t != CONC_CASE_OUTSIDE]
+    return profile
+
+
+EH_CONCENTRATOR_STAGED_V2 = _eh_concentrator_staged_v2()
+
 # Study harness 14 (design §9.3 "eh_ipp_hybrid"; GK B (52) GO, I1-I10):
 # eh_ipp_hybrid@1. Commercial-led: the solve, then the single-owner investment
 # case. The result gate blocks when the peak export passes the export link's
@@ -1456,6 +1504,7 @@ PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2, "eh_
                               "eh_h2_hub@1": EH_H2_HUB, "eh_h2_hub_staged@1": EH_H2_HUB_STAGED,
                               "eh_ammonia_staged@1": EH_AMMONIA_STAGED,
                               "eh_concentrator_staged@1": EH_CONCENTRATOR_STAGED,
+                              "eh_concentrator_staged@2": EH_CONCENTRATOR_STAGED_V2,
                               "eh_ipp_hybrid@1": EH_IPP_HYBRID, "eh_ipp_hybrid@2": EH_IPP_HYBRID_V2,
                               "eh_ipp_hybrid@3": EH_IPP_HYBRID_V3,
                               "eh_microgrid@1": EH_MICROGRID, "eh_microgrid_staged@1": EH_MICROGRID_STAGED,

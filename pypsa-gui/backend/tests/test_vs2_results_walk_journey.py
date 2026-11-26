@@ -56,7 +56,9 @@ def test_list_result_views_reports_data_and_no_values(oj_grid):
     assert 'read' not in by_id['loadflow'] and by_id['loadflow']['card'] == 'grid'
     card_listing = chat_tools.DISPATCHERS['list_result_views'](card='grid')
     assert next(v for v in card_listing['views'] if v['id'] == 'loadflow')['read'] == [{'tool': 'get_loadflow_summary', 'args': {}}]
-    assert by_id['loadflow']['verification'] == 'displayed_data'
+    # What a tab can prove it showed comes with its reads (list_result_views(card=…)).
+    assert 'verification' not in by_id['loadflow']
+    assert next(v for v in card_listing['views'] if v['id'] == 'loadflow')['verification'] == 'displayed_data'
     assert by_id['overview']['data'] == 'not_applicable'   # single period
     assert by_id['asset']['data'] == 'needs_entity'
     assert all(not v['shown'] for v in listing['views'])

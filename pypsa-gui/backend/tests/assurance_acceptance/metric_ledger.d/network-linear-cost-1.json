@@ -6,12 +6,12 @@
     "formula": "sum over t of p[t] x w_generators[t], summed over the network's generators",
     "validity": "each snapshot needs a verified LP solve (else unverified_solve), capacity >= 0, p within capacity x [p_min_pu, p_max_pu] +/- 1e-8 and its inputs present with weight > 0; one excluded snapshot makes it unavailable (invalid_or_missing_raw_data, partial value labelled). Refusals: unsupported_snapshot_scope, unknown_generator, misaligned_source, missing_dispatch, unsupported_generator_sign",
     "tolerance": "exact",
-    "oracle": null,
-    "status": "pending",
+    "oracle": "pypsa-gui/backend/tests/test_network_cost_oracle.py::test_the_network_population_equals_the_hand_lp",
+    "status": "verified",
     "surfaces": {
      "answer": {
-      "status": "pending",
-      "test": null
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_network_cost_oracle.py::test_the_network_population_equals_the_hand_lp"
      }
     }
    },
@@ -20,12 +20,12 @@
     "formula": "sum over t of p[t] x marginal_cost[t] x w_objective[t], summed over the network's generators",
     "validity": "each snapshot needs a verified LP solve (else unverified_solve), capacity >= 0, p within capacity x [p_min_pu, p_max_pu] +/- 1e-8 and its inputs present with weight > 0; one excluded snapshot makes it unavailable (invalid_or_missing_raw_data, partial value labelled). Refusals: unsupported_snapshot_scope, unknown_generator, misaligned_source, missing_dispatch, unsupported_generator_sign; in a cost profile also withheld with the cost reason when the cost population is not linear",
     "tolerance": "exact",
-    "oracle": null,
-    "status": "pending",
+    "oracle": "pypsa-gui/backend/tests/test_network_cost_oracle.py::test_the_network_population_equals_the_hand_lp",
+    "status": "verified",
     "surfaces": {
      "answer": {
-      "status": "pending",
-      "test": null
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_network_cost_oracle.py::test_the_network_population_equals_the_hand_lp"
      }
     }
    },
@@ -34,12 +34,12 @@
     "formula": "max over t of sum over generators of p[t]",
     "validity": "each snapshot needs a verified LP solve (else unverified_solve), capacity >= 0, p within capacity x [p_min_pu, p_max_pu] +/- 1e-8 and its inputs present with weight > 0; one excluded snapshot makes it unavailable (invalid_or_missing_raw_data, partial value labelled). Refusals: unsupported_snapshot_scope, unknown_generator, misaligned_source, missing_dispatch, unsupported_generator_sign",
     "tolerance": "exact",
-    "oracle": null,
-    "status": "pending",
+    "oracle": "pypsa-gui/backend/tests/test_network_cost_oracle.py::test_the_network_population_equals_the_hand_lp",
+    "status": "verified",
     "surfaces": {
      "answer": {
-      "status": "pending",
-      "test": null
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_network_cost_oracle.py::test_the_network_population_equals_the_hand_lp"
      }
     }
    },
@@ -48,12 +48,12 @@
     "formula": "sum of capacity x capital_cost over the generators and passive branches (capacity = p_nom_opt if extendable else p_nom)",
     "validity": "needs an explicit cost basis (else explicit_cost_basis_required), a linear non-committable cost model with no unsupported cost components, a verified solve, and every capacity and capital_cost finite and >= 0 (else unsupported_or_invalid_cost_population)",
     "tolerance": "exact",
-    "oracle": null,
-    "status": "pending",
+    "oracle": "pypsa-gui/backend/tests/test_network_cost_oracle.py::test_the_network_population_equals_the_hand_lp",
+    "status": "verified",
     "surfaces": {
      "answer": {
-      "status": "pending",
-      "test": null
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_network_cost_oracle.py::test_the_network_population_equals_the_hand_lp"
      }
     }
    },
@@ -62,12 +62,12 @@
     "formula": "annual_fixed_cost x cost_basis.annual_fixed_cost_fraction",
     "validity": "needs an explicit cost basis (else explicit_cost_basis_required), a linear non-committable cost model with no unsupported cost components, a verified solve, and every capacity and capital_cost finite and >= 0 (else unsupported_or_invalid_cost_population)",
     "tolerance": "exact",
-    "oracle": null,
-    "status": "pending",
+    "oracle": "pypsa-gui/backend/tests/test_network_cost_oracle.py::test_the_network_population_equals_the_hand_lp",
+    "status": "verified",
     "surfaces": {
      "answer": {
-      "status": "pending",
-      "test": null
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_network_cost_oracle.py::test_the_network_population_equals_the_hand_lp"
      }
     }
    },

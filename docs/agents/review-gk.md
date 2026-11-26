@@ -401,7 +401,7 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 
 ## Standing rulings (GK B2 (5), recorded 2026-11-24)
 
-- A reader of a solve's results judges the solve that produced them: a record stamped at solve time, never today's draft config (GK B2 (5), AA-17 A1).
+- A reader of a solve's results judges the solve that produced them: a record stamped at solve time, never today's draft config. A reader of a held or stored solve takes every input (state, cfg, stamp) from that solve's own record, never from the live `_state` (GK B2 (5), AA-17 A1; widened by GK B2 (6), #1963 F1, #1994 H1).
 - A config that cannot be read never falls back to defaults where the defaults would show an unjudged value. It fails closed with its own reason (GK B2 (5), AA-17 A2; #1079 and #1009 applied).
 - A total over parts where any part is withheld reads not available, or is labelled as excluding that part. Test it with a mixed case, and mutate each sum helper (GK B2 (5), AA-17 S1; #1970 F1).
 - When the backend already words a flag into rendered notes, the frontend skips that flag and does not word it a second time. Pin it with a writer→reader contract test (GK B2 (5), #1935 F1).
@@ -420,6 +420,22 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 ## Standing rulings (GK A (37), recorded 2026-11-25)
 
 - A firm-capacity (reserve-margin) credit for supply that reaches the site only through a grid_import link is capped by that link, as a series: min(C_upstream, C_link) × a_upstream × a_link. The cap applies to the group behind each link, not to each generator, and uses each period's active link capacity. Which supply is behind a link is derived from topology, never from names. A copper-plate firm sum that credits supply beyond the PoC's rating is a defect (DC 01 PR2b-0).
+
+## Standing rulings (GK A2 (8), recorded 2026-11-26)
+
+- A strength row (SCR, ESCR, WSCR) judges the finite worst over the outages that do not island the PoC. It names each islanding outage as not evaluated and caps its verdict at unknown while any exists; when every outage islands the PoC it reads unknown with no value. The loss-of-supply fail stays on the planning-criteria row. An islanding outage never prints as SCR 0 (GK A2 (8), #2038 B2; reconciles GC-03 H4 with GK B4).
+
+## Standing rulings (GK B (71), recorded 2026-11-26)
+
+- A PR that writes a new key into `network.meta` (exported to netCDF and bundles) redacts secret-like solver and user option values and lists the non-scalars it drops. It shows that `_network_input_fingerprint`, plain and exact, is unchanged by the key (GK B (71), #2014).
+- A bound or displayed-data view proves it calls the existing route function, with a byte-equal canonical-JSON parity test. Its binding's `input_sha256` is asserted equal to the plain fingerprint, and each auth or lock dependency gets a test that kills its removal (GK B (71), #2029).
+- A route that adds a POST, even an auth or account one, needs rows in both `write_surface_lock_policy` and `services/_project_write_rules.py` (`test_viewer_role_gate`). Run both at the trial merge (GK B (71), #1972 missed both, in turn).
+- A harness grant that leads to a Library write pins the Library ref by hash and version at admission, and the attach args carry that version. A test puts a foreign version under the granted name (GK B (71), #1967).
+
+## Standing rulings (GK B2 (6), recorded 2026-11-26)
+
+- A gate that withholds an unjudged run checks "not fresh", never "is stale": an uncompared or unknown verdict withholds (GK B2 (6), #1960 G5).
+- A line a report attributes to a run (a verdict, a horizon) prints only when it was recorded with that run (GK B2 (6), #2017 T1, #2026 V1).
 
 ## Standing rulings (GK A (38), recorded 2026-11-26)
 

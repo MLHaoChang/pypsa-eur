@@ -68,8 +68,7 @@
     "label": "Load Flow",
     "data": "available",
     "shown": true,
-    "card": "grid",
-    "verification": "displayed_data"
+    "card": "grid"
    },
    {
     "id": "grid_code",
@@ -474,8 +473,7 @@
     "label": "Load Flow (advanced)",
     "data": "available",
     "shown": true,
-    "card": "grid",
-    "verification": "displayed_data"
+    "card": "grid"
    },
    {
     "id": "grid_code",

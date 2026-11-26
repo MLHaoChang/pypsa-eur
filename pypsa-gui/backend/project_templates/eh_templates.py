@@ -2221,6 +2221,14 @@ def _gr_row(item, label, value, unit, note, section, component=None, entity=None
             "field": field or item}
 
 
+def lole_goal_row(lole: float) -> dict:
+    """The assumed reliability-goal row: the recommended pack's target_lole_h."""
+    return _gr_row("lole_goal", "Reliability goal (LOLE)", lole, "h/yr",
+                   f"assumed: the recommended pack's target_lole_h ({lole:g} h/yr); the "
+                   "reliability study certifies the site against it", "scenarios",
+                   None, None, "target_lole_h", panel="simparams")
+
+
 def grid_readiness_ledger(template_id: str) -> list[dict]:
     """The template's grid-readiness ledger rows."""
     link, mw, eff, bus, sk, lole = _GRID_READINESS_SITE[template_id]
@@ -2246,16 +2254,23 @@ def grid_readiness_ledger(template_id: str) -> list[dict]:
                             "rapid-voltage-change screenings read it", "connection", "Bus", bus,
                             "eh_sk_mva"))
     if lole is not None:
-        rows.append(_gr_row("lole_goal", "Reliability goal (LOLE)", lole, "h/yr",
-                            f"assumed: the recommended pack's target_lole_h ({lole:g} h/yr); the "
-                            "reliability study certifies the site against it", "scenarios",
-                            None, None, "target_lole_h", panel="simparams"))
+        rows.append(lole_goal_row(lole))
     return rows
 
 
 for _tid in _GRID_READINESS_SITE.keys() & TEMPLATE_META.keys():   # staged hubs: when registered
     TEMPLATE_META[_tid]["ledger"] = [*(TEMPLATE_META[_tid].get("ledger") or []),
                                      *grid_readiness_ledger(_tid)]
+
+if "eh_concentrator_staged" in TEMPLATE_META:
+    # Registered outside _GRID_READINESS_SITE, but its Goal card and study use the pack's
+    # target too (template-e2e 41): read it from the pack, not a copy.
+    from services.reliability_goal import pack_target_lole_h as _pack_lole
+
+    _meta = TEMPLATE_META["eh_concentrator_staged"]
+    _lole = _pack_lole(_meta["recommended_archetype"])
+    if _lole is not None:
+        _meta["ledger"] = [*_meta["ledger"], lole_goal_row(_lole)]
 
 for _tid in ("eh_datacenter", "eh_datacenter_staged"):
     if _tid in TEMPLATE_META:

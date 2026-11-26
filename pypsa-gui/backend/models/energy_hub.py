@@ -302,6 +302,13 @@ class TeaBlock(BaseModel):
     # Links exist but produced no H₂ / the engine could not price them.
     lcoh_status: SectionStatus | None = None
     lcoh_note: str | None = None
+    # Levelised cost of ammonia (EUR per t NH3) over the ammonia-synthesis
+    # Links (template-e2e 28a), on the same rule: null + a flag, never 0.
+    lcoa_eur_per_t: float | None = None
+    lcoa_status: SectionStatus | None = None
+    lcoa_note: str | None = None
+    #: The currency of the cost figures above, as the engine reports it.
+    currency: str | None = None
 
 
 class GatesBlock(BaseModel):

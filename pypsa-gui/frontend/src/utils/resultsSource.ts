@@ -6,11 +6,19 @@ export interface ResultsSourceBinding {
   data_sha256: string
   input_sha256?: string
   source?: 'lopf' | 'ac_pf'
-  window_from?: number
-  window_to?: number
+  /** null: the route's default window (A5.2 S3 views record the call they made). */
+  window_from?: number | null
+  window_to?: number | null
+  /** A5.2 S3: the period and week a bound view was read for (null: the route's default). */
+  period?: number | null
+  week?: number | null
+  /** A5.2 S3: a multi-payload view's hash of the part the chat read names. */
+  read_sha256?: string
   run_id?: string
   section?: string | null
   baseline_run_id?: string | null
+  /** A results tab's bound view (A5.2): which tab's payload `data_sha256` hashes. */
+  view?: string
 }
 
 export function sameResultsSource(a: ResultsSourceBinding, b: ResultsSourceBinding): boolean {
@@ -33,7 +41,8 @@ export function displayedResultsSource(tab: string, root: Document | HTMLElement
       if (value.version === 1 && typeof value.project_id === 'string'
         && /^(?:current|historical)$/.test(value.scope) && /^[a-f0-9]{64}$/.test(value.data_sha256)) {
         const keys = ['version', 'project_id', 'project_name', 'scope', 'data_sha256', 'input_sha256',
-          'source', 'window_from', 'window_to', 'run_id', 'section', 'baseline_run_id']
+          'source', 'window_from', 'window_to', 'run_id', 'section', 'baseline_run_id', 'view',
+          'period', 'week', 'read_sha256']
         return Object.fromEntries(keys.filter(k => Object.prototype.hasOwnProperty.call(value, k)
           && (value[k as keyof ResultsSourceBinding] === null || typeof value[k as keyof ResultsSourceBinding] === 'string'
             || typeof value[k as keyof ResultsSourceBinding] === 'number' && Number.isFinite(value[k as keyof ResultsSourceBinding])))

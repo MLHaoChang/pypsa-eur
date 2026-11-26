@@ -756,6 +756,13 @@ export interface EhTeaBlock {
   notes?: string | null
   lcoh_status?: EhSectionStatus | null
   lcoh_note?: string | null
+  /** Levelised cost of ammonia, per t NH3 (template-e2e 28a); null + `lcoa_status`
+   *  (`skipped`: no ammonia synthesis) when not established, never 0. */
+  lcoa_eur_per_t?: number | null
+  lcoa_status?: EhSectionStatus | null
+  lcoa_note?: string | null
+  /** Currency of the cost figures, as the engine reports it (absent in older reports). */
+  currency?: string | null
 }
 
 /** MC LOLE certification verdict (spec decision 2, §4 P11 Q1): `pass` iff
