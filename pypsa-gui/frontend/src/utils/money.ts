@@ -17,3 +17,14 @@ export function money(v: number, currency?: string | null): string {
   const body = a >= 1e6 ? `${sig(a / 1e6, 2)}${NBSP}m` : a >= 1e3 ? `${sig(a / 1e3, 3)}${NBSP}k` : sig(a, 3)
   return cur ? `${cur}${NBSP}${body}` : body
 }
+
+/** A price per unit ("€ 1.73", "€ 439", "€ 1,150"), unsigned: never abbreviated to k/m, since
+ *  "€ 1.2 k/t" misreads (UX 30, issue 28a). Below 1,000 it is `money`'s three figures; from
+ *  1,000 a whole number with thousands separators. The caller appends the unit ("/kg", "/t"). */
+export function unitPrice(v: number, currency?: string | null): string {
+  const a = Math.abs(v)
+  if (a < 1e3 || !Number.isFinite(a)) return money(v, currency)
+  const cur = currency ? (SYMBOL[currency] ?? currency) : ''
+  const body = Math.round(a).toLocaleString('en')
+  return cur ? `${cur}${NBSP}${body}` : body
+}

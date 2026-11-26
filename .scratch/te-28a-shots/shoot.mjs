@@ -37,7 +37,7 @@ const flow = {
 }
 const businessCaseInputs = { business_case: null, digest: 'd', status: 'not_set' }
 
-async function shoot(file, report, theme) {
+async function shoot(file, report, theme, rev = review) {
   const p = await (await b.newContext({ viewport: { width: 1250, height: 1700 }, deviceScaleFactor: 2 })).newPage()
   p.on('pageerror', e => console.log('PAGEERR', e.message.slice(0, 200)))
   const R = {
@@ -46,7 +46,7 @@ async function shoot(file, report, theme) {
     '/api/network/meta': { name: 'Demo', bus_count: 0, snapshot_count: 4 },
     '/api/network/investment_periods': { periods: [2027, 2030, 2035], weightings: [] },
     '/api/results/eh_study': { status: 'done', archetype: 'weak_flexible', report, edited_since_study: false },
-    '/api/results/eh_review': review,
+    '/api/results/eh_review': rev,
     '/api/results/eh_reference_design': report,
     '/api/projects/Demo/flow': flow,
     '/api/results/business_case/inputs': businessCaseInputs,
@@ -81,4 +81,6 @@ async function shoot(file, report, theme) {
 await shoot('shot-guided-ammonia-light.png', ammoniaReport, 'light')
 await shoot('shot-guided-ammonia-dark.png', ammoniaReport, 'dark')
 await shoot('shot-guided-h2-no-ammonia-light.png', h2Report, 'light')
+// Out of date: the study's review says the network was solved since; the card's one banner, the tiles dimmed.
+await shoot('shot-guided-ammonia-stale-light.png', ammoniaReport, 'light', { ...review, stale: true })
 await b.close()

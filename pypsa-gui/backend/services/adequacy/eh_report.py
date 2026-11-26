@@ -426,7 +426,14 @@ def _fill_lcoa(block: TeaBlock, network, cfg) -> None:
     try:
         from services.solver_service import SolverConfig
 
-        payload = compute_lcoa(network, cfg or SolverConfig(), result_df=_live_result_df)
+        from harness.solve_validity import mip_price_limit, price_limit_without_config
+
+        # GK B2 A1: judged on the solve that produced `network`: the study's own config
+        # (`st.cfg`) or the network's sealed record, never the live config; without a
+        # config it fails closed.
+        limit = mip_price_limit(network, cfg) if cfg is not None else price_limit_without_config(network)
+        payload = compute_lcoa(network, cfg or SolverConfig(), result_df=_live_result_df,
+                               price_limit=limit)
     except Exception as exc:  # noqa: BLE001 — flagged, never zeroed
         block.lcoa_status = "not_established"
         block.lcoa_note = f"Cost of ammonia not established: the engine failed ({exc})"
@@ -434,6 +441,10 @@ def _fill_lcoa(block: TeaBlock, network, cfg) -> None:
     if payload.get("unavailable_reason"):
         block.lcoa_status = "not_established"
         block.lcoa_note = "Cost of ammonia not established: an integer (MIP) solve has no electricity price"
+        return
+    if payload.get("not_established"):
+        block.lcoa_status = "not_established"
+        block.lcoa_note = f"Cost of ammonia not established: {payload['not_established']}"
         return
     total = payload.get("total") or {}
     value = total.get("lcoa_eur_per_t")
@@ -448,7 +459,8 @@ def _fill_lcoa(block: TeaBlock, network, cfg) -> None:
     block.lcoa_status = "ok"
     block.lcoa_note = (
         f"Cost of ammonia = (fixed + VOM + electricity + H2 at their bus prices) / NH3 made, over "
-        f"{len(payload.get('rows') or [])} ammonia-synthesis Link(s), {total.get('nh3_t', 0.0):,.0f} t")
+        f"{len(payload.get('rows') or [])} ammonia-synthesis Link(s), {total.get('nh3_t', 0.0):,.0f} t "
+        f"({'; '.join(total.get('t_basis') or [])})")
     block.notes = f"{block.notes}; {block.lcoa_note}"
 
 
@@ -464,7 +476,8 @@ def compute_tea(*, cost_eur: float | None,
     and has any. ADR-0001: an LCOH that cannot be established is ``None`` +
     ``lcoh_status``/``lcoh_note`` — ``skipped`` when there is no electrolyser
     Link, ``not_established`` when there is one but it produced no H₂ (or the
-    engine could not price it). Never 0.
+    engine could not price it). Never 0. The cost of ammonia (EUR/t NH3) is
+    flagged the same way over the ammonia-synthesis Links (``_fill_lcoa``).
     """
     if cost_eur is None or served_energy_mwh is None or served_energy_mwh <= 0:
         block = TeaBlock(
@@ -476,11 +489,22 @@ def compute_tea(*, cost_eur: float | None,
         )
     if network is None:
         return block
-    _fill_lcoa(block, network, cfg)
+    _fill_lcoh(block, network, cfg)
+    # Ammonia after hydrogen, so the hydrogen path and its notes read as before (28a).
+    try:
+        _fill_lcoa(block, network, cfg)
+    except Exception as exc:  # noqa: BLE001 — flagged, never zeroed
+        block.lcoa_status = "not_established"
+        block.lcoa_note = f"Cost of ammonia not established: the engine failed ({exc})"
+    return block
+
+
+def _fill_lcoh(block: TeaBlock, network, cfg) -> None:
+    """The fleet LCOH onto ``block`` (the body ``compute_tea`` had before 28a)."""
     if not has_electrolyser_links(network):
         block.lcoh_status = "skipped"
         block.lcoh_note = "LCOH skipped: the network has no electrolyser Links"
-        return block
+        return
     try:
         from services.results.lcoh import compute_lcoh
         from services.solver_service import SolverConfig
@@ -490,12 +514,12 @@ def compute_tea(*, cost_eur: float | None,
     except Exception as exc:  # noqa: BLE001 — flagged, never zeroed
         block.lcoh_status = "not_established"
         block.lcoh_note = f"LCOH not established: LCOH engine failed ({exc})"
-        return block
+        return
     if (payload or {}).get("unavailable_reason"):
         # assistant-assurance 17: an integer (MIP) solve has no electricity price.
         block.lcoh_status = "not_established"
         block.lcoh_note = "LCOH not established: an integer (MIP) solve has no electricity price"
-        return block
+        return
     total = (payload or {}).get("total") or {}
     value = total.get("lcoh_eur_per_kg_h2")
     if value is None or not math.isfinite(float(value)):
@@ -504,7 +528,7 @@ def compute_tea(*, cost_eur: float | None,
         block.lcoh_note = (
             f"LCOH not established: {n_rows} electrolyser Link(s) but no H₂ "
             "produced in the solved dispatch (Links never consumed)")
-        return block
+        return
     block.lcoh_eur_per_kg = float(value)
     block.currency = payload.get("currency") or block.currency
     block.lcoh_status = "ok"
@@ -512,7 +536,6 @@ def compute_tea(*, cost_eur: float | None,
         f"LCOH = fleet (CAPEX + VOM + electricity) / H₂ produced over "
         f"{len(payload.get('rows') or [])} electrolyser Link(s), LHV basis")
     block.notes = f"{block.notes}; {block.lcoh_note}"
-    return block
 
 
 def assemble_reference_design_report(

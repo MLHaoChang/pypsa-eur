@@ -30,7 +30,7 @@ import { ChaptersSection } from '../ChaptersSection'
 import DownloadReport from '../DownloadReport'
 import SourceRunLine from '../../../components/SourceRunLine'
 import { useDispatchRun } from '../../../hooks/useDispatchRun'
-import { money } from '../../../utils/money'
+import { money, unitPrice } from '../../../utils/money'
 import GridExtensionCard from '../../results/GridExtensionCard'
 import { FrontTile } from './FrontTile'
 import { hasNoVerdict, NoVerdictNote } from '../noVerdict'
@@ -261,7 +261,7 @@ export function ResultsCard() {
           from the study report's TEA block; absent for a design with no electrolyser. */}
       {lcoh?.value != null && (
         <Kpi testId="hub-results-lcoh" label="Cost of hydrogen"
-          value={`${money(lcoh.value, teaCurrency)}/kg`}
+          value={`${unitPrice(lcoh.value, teaCurrency)}/kg`}
           hint="Levelised cost of the hydrogen this design produces, per kilogram, as the study priced it."
           state="ready" dimmed={stale || freshnessUnknown} />
       )}
@@ -269,8 +269,8 @@ export function ResultsCard() {
           absent for a design with no ammonia synthesis. */}
       {lcoa != null && (
         <Kpi testId="hub-results-lcoa" label="Cost of ammonia"
-          value={`${money(lcoa, teaCurrency)}/t`}
-          hint="Levelised cost of the ammonia this design makes, per tonne, as the study priced it: the synthesis unit, its electricity and its hydrogen."
+          value={`${unitPrice(lcoa, teaCurrency)}/t`}
+          hint="Levelised cost of the ammonia this design produces, per tonne, as the study priced it."
           state="ready" dimmed={stale || freshnessUnknown} />
       )}
 
