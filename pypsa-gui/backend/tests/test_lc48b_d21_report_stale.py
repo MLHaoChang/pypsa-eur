@@ -207,4 +207,6 @@ def test_a_report_drafted_under_the_old_figure_name_reads_stale_and_keeps_its_wo
 
     _reason(lambda: T.export_report_docx(old))  # 409 report_stale with the redraft hint
     assert old in [r["report_id"] for r in T.list_reports()]
-    assert ["MC LOLE (h/yr)", "3.21 h/yr"] in T.get_report_table(old, "headline")["items"]
+    assert ["MC LOLE (h/yr)", "3.21 h/yr"] in T.get_report_table(old, "headline")[
+        "items"
+    ]

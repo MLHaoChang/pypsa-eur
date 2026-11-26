@@ -288,8 +288,12 @@ def _lcoe_money(ctx, raw, unit):
     if stored is not None and hasattr(stored, "model_dump"):
         stored = stored.model_dump(mode="json")
     base_year = None
-    if isinstance(stored, dict) and stored.get("assumptions_hash") == raw.get("assumptions_hash"):
-        payload = ((stored.get("sections") or {}).get("project") or {}).get("payload") or {}
+    if isinstance(stored, dict) and stored.get("assumptions_hash") == raw.get(
+        "assumptions_hash"
+    ):
+        payload = ((stored.get("sections") or {}).get("project") or {}).get(
+            "payload"
+        ) or {}
         base_year = payload.get("base_year")
     # the currency the checked fact's unit names ("<ISO code>/MWh", or "currency/MWh"
     # when the report's code is not one), so the basis line and the unit agree
@@ -298,8 +302,11 @@ def _lcoe_money(ctx, raw, unit):
     currency_year = raw.get("currency_year")
     return {
         "money_year": money_year(currency_year, base_year),
-        "basis": FW.basis("lcoe_real", currency,
-                          money_words(currency or "report currency", currency_year, base_year)),
+        "basis": FW.basis(
+            "lcoe_real",
+            currency,
+            money_words(currency or "report currency", currency_year, base_year),
+        ),
     }
 
 
@@ -343,8 +350,13 @@ def _checked(ctx, card_id):
                 next((s.get("reason") for s in slots if s["metric"] == metric), None),
             )
         if card_id == "lcoe":
-            return _card(card_id, fact["value"], fact["unit"], formula_id=fact["formula_id"],
-                         **_lcoe_money(ctx, raw, fact["unit"]))
+            return _card(
+                card_id,
+                fact["value"],
+                fact["unit"],
+                formula_id=fact["formula_id"],
+                **_lcoe_money(ctx, raw, fact["unit"]),
+            )
         detail = (
             _peak_branch(raw, scope, fact["value"])
             if card_id == "peak_line_loading"

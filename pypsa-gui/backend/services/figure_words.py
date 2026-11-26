@@ -24,7 +24,9 @@ PLACEHOLDERS = {"currency", "money"}
 
 def _validate(doc) -> dict[str, dict[str, str]]:
     if not isinstance(doc, dict) or set(doc) - {"version", "_comment", "figures"}:
-        raise ValueError("figure_words.json: top level must hold only version, _comment, figures")
+        raise ValueError(
+            "figure_words.json: top level must hold only version, _comment, figures"
+        )
     if doc.get("version") != 1:
         raise ValueError("figure_words.json: version must be 1")
     figures = doc.get("figures")
@@ -35,15 +37,23 @@ def _validate(doc) -> dict[str, dict[str, str]]:
             raise ValueError(f"figure_words.json: {fid} must be an object")
         unknown, missing = set(entry) - FIELDS, REQUIRED - set(entry)
         if unknown:
-            raise ValueError(f"figure_words.json: {fid} has unknown keys {sorted(unknown)}")
+            raise ValueError(
+                f"figure_words.json: {fid} has unknown keys {sorted(unknown)}"
+            )
         if missing:
             raise ValueError(f"figure_words.json: {fid} lacks {sorted(missing)}")
         for key, value in entry.items():
             if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"figure_words.json: {fid}.{key} must be a non-empty string")
-            fields = {f for _t, f, _s, _c in string.Formatter().parse(value) if f is not None}
+                raise ValueError(
+                    f"figure_words.json: {fid}.{key} must be a non-empty string"
+                )
+            fields = {
+                f for _t, f, _s, _c in string.Formatter().parse(value) if f is not None
+            }
             if fields - PLACEHOLDERS:
-                raise ValueError(f"figure_words.json: {fid}.{key} has unknown placeholders {sorted(fields - PLACEHOLDERS)}")
+                raise ValueError(
+                    f"figure_words.json: {fid}.{key} has unknown placeholders {sorted(fields - PLACEHOLDERS)}"
+                )
     return figures
 
 
@@ -71,11 +81,13 @@ def unit(fid: str, currency: str | None = None) -> str:
     return _fill(FIGURES[fid]["unit"], currency, None)
 
 
-def basis(fid: str, currency: str | None = None, money: str | None = None) -> str | None:
+def basis(
+    fid: str, currency: str | None = None, money: str | None = None
+) -> str | None:
     text = FIGURES[fid].get("basis")
     return None if text is None else _fill(text, currency, money)
 
 
 def label(fid: str) -> str:
-    """"Expected shortfall (h/yr)": the name with a fixed unit, for table rows."""
+    """ "Expected shortfall (h/yr)": the name with a fixed unit, for table rows."""
     return f"{name(fid)} ({unit(fid)})"
