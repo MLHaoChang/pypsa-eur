@@ -175,7 +175,7 @@ def section_2_evidence_only_report(rep: dict) -> tuple[str, dict] | None:
           and all(s.get("source") == "code" for s in doc.get("sections") or []))
     headline = (doc.get("tables") or {}).get("headline") or {}
     lole = next((row for row in headline.get("rows") or []
-                 if row and str(row[0]).startswith("MC LOLE")), None)
+                 if row and str(row[0]) == "Expected shortfall (h/yr)"), None)
     _step("the headline MC LOLE reads 'not established' (mc_certify was skipped)",
           rep.get("mc_lole_h") is None and lole is not None
           and lole[1] == "not established", f"mc_lole_h={rep.get('mc_lole_h')} row={lole}")
@@ -226,7 +226,7 @@ def section_3_export(rep: dict, rid: str, doc: dict) -> None:
           f"name={top[0].get('name') if top else None}")
     _step("the Link-primary disclosure is present", "Link-primary" in text)
     _step("the headline MC LOLE row reads 'not established'",
-          "MC LOLE (h/yr)\nnot established" in text)
+          "Expected shortfall (h/yr)\nnot established" in text)
     _step("the skipped stages are stated, not omitted",
           text.count("Not established:") >= 3,
           f"statements={text.count('Not established:')}")

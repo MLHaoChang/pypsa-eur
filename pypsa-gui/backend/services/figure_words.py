@@ -89,5 +89,5 @@ def basis(
 
 
 def label(fid: str) -> str:
-    """ "Expected shortfall (h/yr)": the name with a fixed unit, for table rows."""
+    """The name with a fixed unit for table rows, e.g. "Expected shortfall (h/yr)"."""
     return f"{name(fid)} ({unit(fid)})"
