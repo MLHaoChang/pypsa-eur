@@ -122,9 +122,9 @@ export function SceneUnknownCheck({ disabled, onRequest }: { disabled: boolean; 
   const checking = asked
   return <div className="mt-1 font-sans text-xs" data-testid="scene-unknown-check">
     {/* "Checking…" is a state, not a dead control: it keeps full contrast (UX, S5a shots). */}
-    <button type="button" disabled={disabled} aria-disabled={checking || undefined}
+    <button type="button" aria-disabled={disabled || checking || undefined}
       className={checking ? 'text-muted' : 'text-accent disabled:opacity-40'}
-      data-testid="scene-unknown-check-button" onClick={() => { if (checking) return; setAsked(true); onRequest(SCENE_CHECK_PROMPT, SCENE_CHECK_LABEL) }}>
+      data-testid="scene-unknown-check-button" onClick={() => { if (disabled || checking) return; setAsked(true); onRequest(SCENE_CHECK_PROMPT, SCENE_CHECK_LABEL) }}>
       {checking ? 'Checking…' : 'Check the 3D site'}
     </button>
     <span role="status" className="sr-only">{checking ? 'Checking the 3D site' : ''}</span>

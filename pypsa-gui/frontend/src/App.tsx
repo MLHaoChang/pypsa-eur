@@ -730,7 +730,7 @@ export default function App() {
               open alongside it as a HALF-WIDTH panel (the canvas stays visible,
               shrunk to the other half); Results takes the whole area. */}
           <main id="main-content" tabIndex={-1} className="flex flex-1 min-w-0 min-h-0 overflow-hidden outline-none">
-            {!activeSlidePanel && <h1 className="sr-only">Network canvas</h1>}
+            {!activeSlidePanel && <h1 className="sr-only">{canvasView === 'site' ? '3D site' : canvasView === 'blank' ? 'Network canvas' : 'Map'}</h1>}
 
             {/* Canvas column — full width normally, the rest beside a tab panel,
                 hidden while a full-screen tab (Results) occupies the area. Kept

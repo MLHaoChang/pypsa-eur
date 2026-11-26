@@ -195,3 +195,16 @@ it('issue 07: "Check the 3D site" keeps keyboard focus after the click', () => {
   fireEvent.click(button)
   expect(document.activeElement).toBe(button)
 })
+
+it('issue 07: focus survives the turn starting (disabled flips true while the button is focused)', () => {
+  const onRequest = vi.fn()
+  const result = { [SCENE_UNKNOWN_KEY]: true }
+  const { rerender } = render(<AssistantResultCard result={result} disabled={false} onRequest={onRequest} />)
+  const button = screen.getByTestId('scene-unknown-check-button')
+  button.focus()
+  rerender(<AssistantResultCard result={result} disabled onRequest={onRequest} />)
+  expect(document.activeElement).toBe(button)
+  expect(button.getAttribute('aria-disabled')).toBe('true')
+  fireEvent.click(button)
+  expect(onRequest).not.toHaveBeenCalled()
+})
