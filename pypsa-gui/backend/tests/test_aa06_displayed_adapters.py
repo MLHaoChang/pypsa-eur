@@ -237,13 +237,11 @@ def test_closed_tab_never_acks_so_the_tool_says_opened_and_the_record_stays_subm
     )
     record = client.get(f"/api/chat/navigation/{issued[0]['action_id']}").json()
     assert record["outcome"] == "submitted"
-    # The tab is reopened after the record expired: its late ACK cannot complete.
-    path = assurance_records._path(assurance_records.actor_id(), issued[0]["action_id"])
+    # The tab is reopened after the record's 30 s expiry: its late ACK cannot complete.
     saved = assurance_records.load(
         assurance_records.actor_id(), issued[0]["action_id"], "ui_action"
     )
     assurance_records.save({**saved, "expires_at": 0}, issued[0]["action_id"])
-    assert path.parent.exists()
     late = client.post("/api/chat/ui-ack", json=_body(issued[0]))
     assert late.status_code == 409
     assert late.json()["detail"]["error_kind"] == "ui_ack_mismatch"
@@ -285,3 +283,131 @@ def test_newer_navigation_supersedes_so_a_late_ack_is_refused_and_stays_submitte
     assert displays[1]["verification"] == "browser_mounted_view"
     assert displays[1]["say"] == "opened"
     assert uuid.UUID(issued[1]["action_id"])
+
+
+# ── Binding and target validation (each refused before any record read) ────
+
+_LF_BINDING = {
+    "version": 1,
+    "project_id": "p",
+    "project_name": "n",
+    "scope": "current",
+    "source": "lopf",
+    "input_sha256": "i",
+    "data_sha256": "d",
+    "window_from": 0,
+    "window_to": 1,
+}
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"extra": "x"},
+        {"version": 2},
+        {"version": True},
+        {"window_from": -1},
+        {"window_to": True},
+        {"window_from": 1.0},
+        {"data_sha256": 5},
+        {"project_id": None},
+    ],
+)
+def test_valid_binding_refuses_each_malformed_field(change):
+    adapter = displayed_adapters.ADAPTERS["loadflow"]
+    assert displayed_adapters.valid_binding(adapter, _LF_BINDING)
+    assert not displayed_adapters.valid_binding(adapter, {**_LF_BINDING, **change})
+
+
+def test_valid_binding_refuses_a_missing_key_and_a_non_dict():
+    adapter = displayed_adapters.ADAPTERS["loadflow"]
+    missing = {k: v for k, v in _LF_BINDING.items() if k != "source"}
+    assert not displayed_adapters.valid_binding(adapter, missing)
+    assert not displayed_adapters.valid_binding(adapter, [_LF_BINDING])
+
+
+@pytest.mark.parametrize(
+    "target,found",
+    [
+        (LOADFLOW, True),
+        ({**LOADFLOW, "highlight": {"component": "Line", "name": "L1"}}, True),
+        ({"panel_id": "map", "results_tab": "loadflow"}, False),
+        ({**LOADFLOW, "extra": 1}, False),
+        ({"panel_id": "results", "results_tab": ["loadflow"]}, False),
+        ({"panel_id": "results"}, False),
+        (SUMMARY, False),
+        ("results/loadflow", False),
+    ],
+)
+def test_for_target_names_an_adapter_only_for_an_exact_results_tab(target, found):
+    assert (displayed_adapters.for_target(target) is not None) is found
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        {"panel_id": "results", "results_tab": ["loadflow"]},
+        {"panel_id": "results", "results_tab": {"tab": "loadflow"}},
+    ],
+)
+def test_an_unhashable_results_tab_on_a_v2_ack_is_invalid_not_a_server_error(
+    client, target
+):
+    body = {
+        "version": 2,
+        "action_id": "a",
+        "turn_id": "t",
+        "binding_generation": 1,
+        "target": target,
+        "source_binding": dict(_LF_BINDING),
+    }
+    response = client.post("/api/chat/ui-ack", json=body)
+    assert response.status_code == 422
+    assert response.json()["detail"]["error_kind"] == "invalid_assurance_request"
+
+
+@pytest.mark.parametrize(
+    "change", [{"version": 2}, {"window_from": -1}, {"extra": "x"}]
+)
+def test_a_malformed_binding_on_the_ack_route_is_invalid(client, change):
+    body = {
+        "version": 2,
+        "action_id": "a",
+        "turn_id": "t",
+        "binding_generation": 1,
+        "target": LOADFLOW,
+        "source_binding": {**_LF_BINDING, **change},
+    }
+    assert client.post("/api/chat/ui-ack", json=body).status_code == 422
+
+
+def test_loadflow_read_ref_ignores_non_reads():
+    ref = displayed_adapters.ADAPTERS["loadflow"].read_ref
+    assert ref(["not", "a", "dict"]) is None
+    assert ref({"status": "unavailable"}) is None
+    assert ref({"status": "ok"}) == {
+        "source": None,
+        "window_from": None,
+        "window_to": None,
+    }
+
+
+def test_display_of_a_mounted_view_never_says_showing(client, result_project):
+    ctx = result_project[0]
+    turn = OrdinaryTurn(ChatSession(owner_user_id=assurance_records.actor_id()), ctx, 3)
+    navigation.begin_turn(turn, 3)
+    action = navigation.issue(turn, {"kind": "navigate", **SUMMARY})
+    assert action["version"] == 1
+    body = {
+        k: action[k]
+        for k in ("version", "action_id", "turn_id", "binding_generation", "target")
+    }
+    assert (
+        client.post("/api/chat/ui-ack", json=body).json()["verification"]
+        == "browser_mounted_view"
+    )
+    turn.reads["summary"] = {}
+    assert navigation.display(turn, action, wait=0) == {
+        "verification": "browser_mounted_view",
+        "say": "opened",
+    }

@@ -95,8 +95,9 @@ def for_target(target) -> DisplayedAdapter | None:
         isinstance(target, dict)
         and target.get("panel_id") == "results"
         and set(target) <= {"panel_id", "results_tab", "highlight"}
+        and isinstance(target.get("results_tab"), str)
     ):
-        return ADAPTERS.get(target.get("results_tab"))
+        return ADAPTERS.get(target["results_tab"])
     return None
 
 

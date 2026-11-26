@@ -195,8 +195,7 @@ def issue(turn, payload):
         # Only a displayed-data adapter can attest the data shown. Other
         # version-1 actions retain their explicit mounted-view meaning.
         facts = None
-        adapter = displayed_adapters.ADAPTERS.get(target.get("results_tab")) \
-            if set(target) == {"panel_id", "results_tab"} else None
+        adapter = displayed_adapters.for_target(target) if "highlight" not in target else None
         if loadflow:
             view, facts = loadflow_target(loadflow.get("loadflow_source"),
                                           loadflow.get("window_from"),
