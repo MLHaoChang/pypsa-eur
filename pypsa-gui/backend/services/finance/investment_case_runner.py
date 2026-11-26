@@ -367,6 +367,7 @@ def start_investment_case(
             try:
                 case = build_case()
             except FinanceRefused as exc:
+                _keep_baseline_solves(record, build_case, lock)
                 report = refused_finance_report(exc.code, exc.detail, case_id=case_id,
                                                 assumptions_hash=a_hash, packs=packs,
                                                 owner=body.owner)
@@ -376,6 +377,7 @@ def start_investment_case(
                     return
                 finish("refused", error=str(exc), error_code=exc.code)
                 return
+            _keep_baseline_solves(record, build_case, lock)
             if aborted():
                 return
             progress("load_pack")
@@ -428,6 +430,17 @@ def start_investment_case(
     publish_study(STUDY_KEY, record, t)
     return {"status": "running", "study": STUDY_KEY, "case_id": case_id, "owner": body.owner,
             "tax_pack_id": fin.tax_pack_id, "started_at": record["started_at"]}
+
+
+def _keep_baseline_solves(record: dict, build_case, lock) -> None:
+    """Study-harness issue 52: the baseline LPs the build ran (its
+    `baseline_solves`: 0 on a cache hit or with no baseline) on the record,
+    where a run's case step settles its reserved solves from. Left out when
+    the build does not say (a seam's fake) or does not know."""
+    solves = getattr(build_case, "baseline_solves", None)
+    if type(solves) is int:
+        with lock:
+            record["baseline_solves"] = solves
 
 
 def public_record(record: dict | None) -> dict | None:

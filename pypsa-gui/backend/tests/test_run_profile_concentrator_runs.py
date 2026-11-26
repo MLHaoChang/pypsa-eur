@@ -7,8 +7,9 @@ data, as the run's own project, to the hand-off (acceptance 2; GK A (28)).
 The template is created through the route as a user does (its finance,
 commercial and solver settings), then planned on its first stage only (2027,
 one chronological year: `eh_concentrator.build_eh_concentrator_staged(years=)`,
-as the template's own tests plan it) so the real solve fits the CI budget. The
-investment case stays out of the run (GK A (28) Q8, study-harness issue 52). The readers are
+as the template's own tests plan it) so the real solve fits the CI budget. On
+@1 the investment case stays out of the run (GK A (28) Q8); on @2 the run
+solves the case and its baseline, counted (study-harness issue 52). The readers are
 pinned in `test_run_profile_concentrator.py`."""
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ import eh_concentrator as C  # noqa: E402
 import eh_templates as T  # noqa: E402
 
 REF = "eh_concentrator_staged@1"
+REF_V2 = "eh_concentrator_staged@2"
 TEMPLATE = "eh_concentrator_staged"
 FIXTURES = (granted, rated)
 
@@ -160,3 +162,68 @@ def test_a_run_on_the_demo_data_reaches_the_hand_off(granted, rated, site, monke
     assert not [a for a in envelope["audit"] if a["event"] == "refused"]
     assert run_envelope.solves_used(envelope) == 1
     assert run["budget"]["used"]["solves"] == 1
+
+
+@pytest.mark.live_solve
+def _own_planned_stage_only(ctx):
+    """The template's single owner owns every stage's builds; the test plans
+    the first stage only, so the later stages' assets leave its value flows
+    (else the case refuses `owner_asset_missing`) and their later CODs leave
+    its finance, as do its links built after the planned period (else
+    `staged_cod_not_active_period`)."""
+    n = ctx.network
+    last = max(int(p) for p in n.investment_periods)
+    n.remove("Link", n.links.index[n.links.build_year > last])
+    present = {(c, name) for c, df in (("Generator", n.generators), ("StorageUnit", n.storage_units),
+                                       ("Store", n.stores), ("Link", n.links)) for name in df.index}
+    cfg = ctx.solver_state["solver_config"]
+    commercial = cfg.commercial if isinstance(cfg.commercial, dict) else cfg.commercial.model_dump()
+    flows = commercial["value_flows"]
+    flows["asset_owners"] = [a for a in flows["asset_owners"] if (a["component"], a["asset_id"]) in present]
+    cfg.commercial = commercial
+    years = {str(int(p)) for p in n.investment_periods}
+    cods = cfg.finance["cod_by_asset"]
+    cfg.finance["cod_by_asset"] = {a: d for a, d in cods.items() if str(d)[:4] in years}
+
+
+def test_a_v2_run_solves_its_case_against_the_site_today(granted, rated, baseline, site, monkeypatch):
+    """Study-harness issue 52: @2's solve stage runs the case after the queued
+    solve; the case re-solves its baseline (the site as today) on the run's
+    counted reservation, both case rules block and pass, and the run's solves
+    are the real LPs: the plan and the baseline (a cache miss here)."""
+    from harness import budget as harness_budget
+    from services import run_envelope
+    from services.results import baseline as B
+
+    monkeypatch.setattr(harness_budget, "PER_TOOL_TIMEOUT_SECONDS", 120.0)  # as on @1
+    _own_planned_stage_only(baseline[0])
+    B.clear_cache()
+    task, path, _ = granted(run={**RUN, "profile": REF_V2})
+    script = Script()  # never consulted: no L2 round on a passing gate
+    record = go(harness_runner.Runner("a", agent_provider=script), path, task)
+    run = record["run"]
+    rules = {
+        r["rule"]: r
+        for r in (run["stages"].get("result_gate", {}).get("gate") or {}).get("rules", [])
+    }
+    steps = [(s["id"], s["tool"], s["status"], s.get("error")) for s in record["steps"]]
+    assert run["status"] == "completed" and run["stage"] == "handoff", (
+        run["status"], run["stage"], steps,
+        {k: (r["verdict"], r.get("reason")) for k, r in rules.items()},
+    )
+    assert script.requests == []
+    assert [(t, st) for i, t, st, _ in steps if i.startswith("solve.")] == [
+        ("solve_queue_enqueue", "completed"), ("run_investment_case", "completed")]
+    for rid in ("conc.ic.counterfactual", "conc.ic.basis"):
+        assert (rules[rid]["verdict"], rules[rid]["severity"]) == ("pass", "block"), (
+            rid, rules[rid].get("reason"), rules[rid].get("facts"))
+    assert rules["conc.ic.basis"]["facts"][0]["value"] == "site_today"
+    assert rules["conc.kpi.npv"]["severity"] == "warn"
+    case = next(s for s in record["steps"] if s["tool"] == "run_investment_case")
+    envelope = envelope_of(path)
+    assert not [a for a in envelope["audit"] if a["event"] == "refused"]
+    row = next(a for a in envelope["audit"] if a.get("tool") == "run_investment_case")
+    assert (row["reserved"], row["solves"]) == (run_envelope.CASE_BASELINE_SOLVES, 1)
+    assert case["result"]["solves"] == 1
+    assert run_envelope.solves_used(envelope) == 2  # the plan and the baseline
+    assert run["budget"]["used"]["solves"] == 2

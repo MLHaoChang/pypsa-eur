@@ -8,7 +8,10 @@
 follower settles it from the case's own record, the one whose `started_at`
 the start receipt names, never one read after the call returned (the shape of
 `run_eh`). Nothing polls: the model is released while the step waits (LC-45).
-The case solves no LP, so the step reserves and spends no solve."""
+The case itself solves no LP; a grant that reserved its baseline's solves at
+admission (study harness 36) settles that reservation from the record's
+`baseline_solves` (study-harness issue 52: 0 on a cache hit, the LPs run on a
+miss)."""
 
 from __future__ import annotations
 
@@ -23,7 +26,7 @@ TOOL = "run_investment_case"
 STUDY = "investment_case"
 POLL_SECONDS = 0.5
 MAX_FOLLOW_SECONDS = 6 * 3600
-SOLVES = 0  # the case values the solved dispatch; it solves no LP
+SOLVES = 0  # the case values the solved dispatch; only a reserved baseline solves an LP
 _WAKE = threading.Event()  # never set in production; a poll interval (tests set it)
 _FOLLOW_LOCK = threading.Lock()
 _FOLLOWERS: dict[tuple, threading.Thread] = {}
@@ -101,6 +104,7 @@ def _record(ctx):
                 "finished_at",
                 "error",
                 "error_code",
+                "baseline_solves",
                 "thread",
             )
         }
@@ -385,13 +389,33 @@ def reserved(path) -> int:
     return solves if type(solves) is int else SOLVES
 
 
+def spent(path, record, begun) -> int:
+    """The solves the case spent (issue 52): its own record's
+    `baseline_solves` (0 on a cache hit, the LPs run on a miss) settle the
+    run's reservation; a record that does not say, or is not the step's own,
+    keeps the whole reservation (`reserved`)."""
+    from services import run_envelope
+
+    solves = record.get("baseline_solves") if _own(record, begun) else None
+    if type(solves) is int:
+        try:
+            settled = run_envelope.settle_case_solves(path, solves)
+        except Exception:  # noqa: BLE001 -- unreadable envelope: keep the reservation
+            logger.warning("run_ic: the case's solves could not be settled", exc_info=True)
+            settled = None
+        if settled is not None:
+            return settled
+    return reserved(path)
+
+
 def settle(path, ticket, job_id, record, begun):
     """Settle the step from `record`; the case is never started again."""
     from services import assistant_tasks
 
     native, status, error = outcome(record, begun)
+    solves = spent(path, record, begun)
     result = (
-        {"study": STUDY, "started_at": begun, "solves": reserved(path)}
+        {"study": STUDY, "started_at": begun, "solves": solves}
         if status == "completed"
         else None
     )

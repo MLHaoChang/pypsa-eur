@@ -1632,6 +1632,27 @@ def case_budget_refusal(envelope, note):
     return None
 
 
+def settle_case_solves(task_path, solves):
+    """Study-harness issue 52: the run's latest admitted case that reserved
+    its baseline (its `used` row's `reserved`) spent `solves` baseline LPs
+    (its record's `baseline_solves`: 0 on a cache hit), clamped to the
+    reservation; `run.budget.used.solves` follows. The settled solves, or
+    None when no such row is there (nothing reserved, nothing to settle)."""
+    from services import assistant_tasks
+    with assistant_tasks._LOCK:
+        envelope = _load(task_path)
+        row = next((a for a in reversed((envelope or {}).get("audit", []))
+                    if a.get("event") == "used" and a.get("tool") in CASE_TOOLS), None)
+        if row is None or type(row.get("reserved")) is not int:
+            return None
+        spent = max(0, min(int(solves), row["reserved"]))
+        if row.get("solves") != spent:
+            row["solves"] = spent
+            _save(task_path, envelope)
+            _count_solves(task_path, envelope)
+        return spent
+
+
 def case_baseline_reserved(task_id) -> bool:
     """A2: the run's latest admitted case reserved its baseline's solves (its
     `used` row carries `reserved`), so the case may solve the baseline. False

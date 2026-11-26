@@ -1838,9 +1838,25 @@ this network.
   each up to twice the template's. The process units, the mine, the
   shipments, the services load, the grid import, the shed and the slack are
   never levers.
-- **Solves.** The plan is the envelope's solve (`CONC_SOLVES = 1`). The case
-  in the run, with its baseline re-solve counted, is study-harness issue 52;
-  `missing_tools` names it (`CONC_CASE_OUTSIDE`).
+- **Solves.** The plan is the envelope's solve (`CONC_SOLVES = 1`). On @1 the
+  case stays out of the run; `missing_tools` names it (`CONC_CASE_OUTSIDE`).
+- **The case in the run (`eh_concentrator_staged@2`, study-harness issue 52).**
+  @2 is @1 with `run_investment_case` after the queued solve in the solve
+  stage. Its `runs` entry names `baseline_solves` (`CASE_BASELINE_SOLVES`,
+  the bound: `solve_baseline` tries at most twice), so the envelope admits
+  the case and reserves the baseline on its `used` row; `_ic_build_case`
+  then solves the baseline in the run. `solve_baseline` reports the LPs it
+  ran (`Baseline.solves`, `BaselineRefused.solves`: 0 on a cache hit), the
+  case's record keeps them (`baseline_solves`), and `run_ic.settle` settles
+  the row from that record (`run_envelope.settle_case_solves`, clamped to
+  the reservation). A record that does not say, or is not the step's own,
+  keeps the whole reservation. `solves_used` is then the real LP count: plan
+  plus baseline on a miss, plan only on a hit. An L2 round runs the solve
+  stage again, the case with it, so the budget is the plan and its baseline
+  plus, per round, the re-solve and its baseline, each at its bound:
+  1 + 2 + 2 × (1 + 2) = 9. `ic.counterfactual` and
+  `ic.counterfactual.basis` block again and, with `ic.returns`, read the
+  run's own case. The issue-52 line leaves `missing_tools`.
 
 ### The IPP hybrid profile (study harness 14)
 
