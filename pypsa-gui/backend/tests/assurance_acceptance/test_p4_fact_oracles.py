@@ -261,7 +261,9 @@ CASES = [
     (
         "renewable-share/1",
         "nonrenewable_energy",
-        lambda ctx, **k: oracle.nonrenewable_energy(ctx.network, ["gas", "h2 turbine"], **k),
+        lambda ctx, **k: oracle.nonrenewable_energy(
+            ctx.network, ["gas", "h2 turbine"], **k
+        ),
         True,
     ),
     (

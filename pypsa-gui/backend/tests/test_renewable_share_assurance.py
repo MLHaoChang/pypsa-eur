@@ -57,12 +57,25 @@ def _network(load=(10.0, 20.0, 8.0)):
     n.add("Carrier", ["AC", "onwind", "biomass", "gas", "hydrogen"])
     n.add("Bus", "AC", v_nom=110, carrier="AC")
     n.add("Load", "L", bus="AC", p_set=list(load))
-    n.add("Generator", "wind", bus="AC", carrier="onwind", p_nom=12,
-          p_max_pu=[1.0, 0.25, 0.5], marginal_cost=0.0)
+    n.add(
+        "Generator",
+        "wind",
+        bus="AC",
+        carrier="onwind",
+        p_nom=12,
+        p_max_pu=[1.0, 0.25, 0.5],
+        marginal_cost=0.0,
+    )
     n.add("Generator", "bio", bus="AC", carrier="biomass", p_nom=3, marginal_cost=10.0)
     n.add("Generator", "gas", bus="AC", carrier="gas", p_nom=100, marginal_cost=50.0)
-    n.add("Generator", "h2 turbine", bus="AC", carrier="hydrogen", p_nom=5,
-          marginal_cost=80.0)
+    n.add(
+        "Generator",
+        "h2 turbine",
+        bus="AC",
+        carrier="hydrogen",
+        p_nom=5,
+        marginal_cost=80.0,
+    )
     return n
 
 
@@ -123,7 +136,9 @@ def _checked(ctx, window=None):
 
 
 def _raw(ctx):
-    return calculations.scoped_source(ctx, {"profile": share.PROFILE, "entity_id": "network"})
+    return calculations.scoped_source(
+        ctx, {"profile": share.PROFILE, "entity_id": "network"}
+    )
 
 
 def _reasons(raw, window=None):
@@ -139,8 +154,17 @@ def _reasons(raw, window=None):
 
 def test_the_renewable_keywords_are_the_named_set():
     assert set(carrier_kpis._RENEWABLE_KW) == {
-        "wind", "solar", "ror", "hydro", "geothermal", "wave", "tidal",
-        "pv", "biomass", "biogas", "run-of-river",
+        "wind",
+        "solar",
+        "ror",
+        "hydro",
+        "geothermal",
+        "wave",
+        "tidal",
+        "pv",
+        "biomass",
+        "biogas",
+        "run-of-river",
     }
 
 
@@ -165,7 +189,9 @@ def test_an_unnamed_class_withholds_every_figure(share_case, monkeypatch):
     from services.solver import renewable_fraction
 
     real = renewable_fraction.classify
-    monkeypatch.setattr(renewable_fraction, "classify", lambda n: {**real(n), "new_class": ["x"]})
+    monkeypatch.setattr(
+        renewable_fraction, "classify", lambda n: {**real(n), "new_class": ["x"]}
+    )
     assert set(_checked(ctx)[1].values()) == {"unsupported_population"}
 
 
@@ -198,12 +224,18 @@ def test_the_route_shows_the_same_figures(share_case, client):
     route = client.get("/api/results/renewable_fraction").json()
     assert route["reason"] is None
     assert route["fraction"] == pytest.approx(1 - 7 / 36, rel=1e-9)
-    assert route["fraction"] * 100 == pytest.approx(values["renewable_share"][0], rel=1e-9)
-    assert route["nonrenewable_mwh"] == pytest.approx(values["nonrenewable_energy"][0], rel=1e-9)
+    assert route["fraction"] * 100 == pytest.approx(
+        values["renewable_share"][0], rel=1e-9
+    )
+    assert route["nonrenewable_mwh"] == pytest.approx(
+        values["nonrenewable_energy"][0], rel=1e-9
+    )
     assert route["served_mwh"] == pytest.approx(values["electricity_used"][0], rel=1e-9)
 
 
-def test_an_injected_wrong_route_value_does_not_move_the_checked_answer(share_case, monkeypatch, client):
+def test_an_injected_wrong_route_value_does_not_move_the_checked_answer(
+    share_case, monkeypatch, client
+):
     """A4.6/G4: a wrong service aggregate is caught by the parity check, not copied."""
     ctx = share_case()
     from services.solver import renewable_fraction as service
@@ -218,7 +250,9 @@ def test_an_injected_wrong_route_value_does_not_move_the_checked_answer(share_ca
     route = client.get("/api/results/renewable_fraction").json()
     values, _ = _checked(ctx)
     assert values["renewable_share"][0] == pytest.approx(SHARE, rel=1e-12)
-    assert route["fraction"] * 100 != pytest.approx(values["renewable_share"][0], rel=1e-9)
+    assert route["fraction"] * 100 != pytest.approx(
+        values["renewable_share"][0], rel=1e-9
+    )
 
 
 # ── percent and percentage points, both ways ──────────────────────────────
@@ -226,15 +260,26 @@ def test_an_injected_wrong_route_value_does_not_move_the_checked_answer(share_ca
 
 def _derived(formula, operands, value, unit, **extra):
     return Derived.model_validate(
-        {"id": "d1", "kind": "derived", "formula_id": formula, "operands": operands,
-         "value": value, "unit": unit, **extra}
+        {
+            "id": "d1",
+            "kind": "derived",
+            "formula_id": formula,
+            "operands": operands,
+            "value": value,
+            "unit": unit,
+            **extra,
+        }
     )
 
 
 def _two_shares(share_case):
     whole = _checked(share_case())[0]["renewable_share"]
-    window = _checked(share_case(), (STAMPS[1].isoformat(), STAMPS[2].isoformat()))[0]["renewable_share"]
-    key = derived.scope_key({"project_id": "P", "scope": {"kind": "run_section", "entity_id": "R"}})
+    window = _checked(share_case(), (STAMPS[1].isoformat(), STAMPS[2].isoformat()))[0][
+        "renewable_share"
+    ]
+    key = derived.scope_key(
+        {"project_id": "P", "scope": {"kind": "run_section", "entity_id": "R"}}
+    )
     return {"a": (*whole, key), "b": (*window, key)}
 
 
@@ -244,7 +289,9 @@ def test_two_shares_differ_in_percentage_points(share_case):
     [entry] = derived.check(
         [_derived("percentage_point_delta/1", ["a", "b"], expected, "pp")], published
     )
-    assert entry["value"] == pytest.approx(expected, rel=1e-12) and entry["unit"] == "pp"
+    assert (
+        entry["value"] == pytest.approx(expected, rel=1e-12) and entry["unit"] == "pp"
+    )
 
 
 @pytest.mark.parametrize(
@@ -263,7 +310,11 @@ def test_two_shares_never_give_a_percent_change(share_case, formula, extra):
 
 
 def _reach(share_case, monkeypatch, name):
-    ctx = share_case(load=(0.0, 0.0, 0.0)) if name == "no_electricity_served" else share_case()
+    ctx = (
+        share_case(load=(0.0, 0.0, 0.0))
+        if name == "no_electricity_served"
+        else share_case()
+    )
     n, window = ctx.network, None
     if name == "unverified_solve":
         n.add("Load", "late", bus="AC", p_set=1)
@@ -275,7 +326,9 @@ def _reach(share_case, monkeypatch, name):
         n.add("Link", "genset", bus0="fuel", bus1="AC", p_nom=10, efficiency=0.4)
         workflow_tools._record_solve_inputs(n, ctx.solver_state["solver_config"])
     elif name == "unserved_energy_not_modelled":
-        ctx.solver_state["last_lost_load"] = {"lost_load_t": pd.DataFrame({"L": [0.0, 1.0, 0.0]}, index=STAMPS)}
+        ctx.solver_state["last_lost_load"] = {
+            "lost_load_t": pd.DataFrame({"L": [0.0, 1.0, 0.0]}, index=STAMPS)
+        }
     elif name == "unsupported_population":
         monkeypatch.setattr(share, "MAX_MEMBERS", 1)
     elif name == "nonrenewable_exceeds_served":
@@ -293,10 +346,15 @@ def test_each_reason_has_its_own_fixture(share_case, monkeypatch, name):
 def test_the_share_alone_is_withheld_when_its_denominator_fails(share_case):
     values, reasons = _checked(share_case(load=(0.0, 0.0, 0.0)))
     assert reasons == {"renewable_share": "no_electricity_served"}
-    assert values == {"nonrenewable_energy": (0.0, "MWh"), "electricity_used": (0.0, "MWh")}
+    assert values == {
+        "nonrenewable_energy": (0.0, "MWh"),
+        "electricity_used": (0.0, "MWh"),
+    }
 
 
-@pytest.mark.parametrize(("served", "answered"), [(2 * derived.NEAR_ZERO, True), (derived.NEAR_ZERO, False)])
+@pytest.mark.parametrize(
+    ("served", "answered"), [(2 * derived.NEAR_ZERO, True), (derived.NEAR_ZERO, False)]
+)
 def test_the_denominator_boundary(share_case, served, answered):
     raw = _raw(share_case())
     raw["generators"] = {g: [0.0, 0.0, 0.0] for g in raw["generators"]}
@@ -316,7 +374,9 @@ def test_negative_generator_output_is_not_counted(share_case):
     raw = _raw(share_case())
     raw["generators"]["gas"] = [-5.0, 14.0, 0.0]
     facts, _ = share.calculate(raw, {"profile": share.PROFILE, "entity_id": "network"})
-    assert {f["metric"]: f["value"] for f in facts}["nonrenewable_energy"] == pytest.approx(NONREN)
+    assert {f["metric"]: f["value"] for f in facts}[
+        "nonrenewable_energy"
+    ] == pytest.approx(NONREN)
 
 
 def test_a_negative_weight_answers_nothing(share_case):
@@ -331,7 +391,9 @@ def test_a_negative_weight_answers_nothing(share_case):
 )
 def test_each_removed_slack_withholds_every_figure(share_case, slack):
     ctx = share_case()
-    ctx.solver_state["last_lost_load"] = {slack: pd.DataFrame({"x": [0.0, 0.0, 0.0]}, index=STAMPS)}
+    ctx.solver_state["last_lost_load"] = {
+        slack: pd.DataFrame({"x": [0.0, 0.0, 0.0]}, index=STAMPS)
+    }
     assert set(_checked(ctx)[1].values()) == {"unserved_energy_not_modelled"}
 
 
@@ -341,7 +403,9 @@ def test_a_slack_generator_withholds_every_figure(baseline):
 
     ctx = baseline[0]
     ctx.network = _network()
-    ctx.network.add("Generator", VOLL_SLACK_PREFIX + "AC", bus="AC", p_nom=100, marginal_cost=1e4)
+    ctx.network.add(
+        "Generator", VOLL_SLACK_PREFIX + "AC", bus="AC", p_nom=100, marginal_cost=1e4
+    )
     _solve(ctx)
     assert set(_checked(ctx)[1].values()) == {"unsupported_supply_path"}
 
@@ -360,10 +424,22 @@ def test_a_record_of_another_entity_is_rejected(share_case):
 
 
 def test_grammar():
-    scope = assurance_scope.from_message("Show the renewable share for network.", "p1", {})
+    scope = assurance_scope.from_message(
+        "Show the renewable share for network.", "p1", {}
+    )
     assert scope["profile"] == share.PROFILE and scope["entity_id"] == "network"
     windowed = assurance_scope.from_message(
-        "show renewable share for network; from 2026-01-01T01:00 to 2026-01-01T02:00", "p1", {}
+        "show renewable share for network; from 2026-01-01T01:00 to 2026-01-01T02:00",
+        "p1",
+        {},
     )
-    assert (windowed["start"], windowed["end"]) == ("2026-01-01T01:00", "2026-01-01T02:00")
-    assert assurance_scope.from_message("show the renewable share for generator gas", "p1", {}) is None
+    assert (windowed["start"], windowed["end"]) == (
+        "2026-01-01T01:00",
+        "2026-01-01T02:00",
+    )
+    assert (
+        assurance_scope.from_message(
+            "show the renewable share for generator gas", "p1", {}
+        )
+        is None
+    )
