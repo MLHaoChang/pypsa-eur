@@ -73,6 +73,7 @@ def test_a_consistent_pass_passes(tmp_path):
     _planning(tmp_path)
     row = _card(tmp_path)[G.PLANNING_ID]
     assert row["verdict"] == "pass" and row["project_value"] == 0
+    assert row["source"].endswith(": thermal, voltage and angle limits after each contingency")
     assert row["note"] == ("Contingencies from campus N-1 (branches and units). 4 cases screened at each period's "
                            "maximum-import and maximum-export hour. 0 fail.")
 
@@ -388,3 +389,11 @@ def test_the_strength_rows_point_at_the_fault_level_bus_like_the_scr_row(tmp_pat
     assert rows["scr"]["target"] is not None
     for rid in STRENGTH_IDS:
         assert rows[rid]["target"] == rows["scr"]["target"]
+
+
+def test_a_table_with_more_rows_than_cases_disagrees(tmp_path):
+    _planning(tmp_path)
+    path = tmp_path / "campus_electrical" / "run" / "campus_planning.csv"
+    frame = pd.read_csv(path)
+    pd.concat([frame, frame.tail(1)]).to_csv(path, index=False)
+    assert _card(tmp_path)[G.PLANNING_ID]["note"].startswith("The run's planning record disagrees")
