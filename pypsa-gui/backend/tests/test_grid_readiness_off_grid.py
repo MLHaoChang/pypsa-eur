@@ -81,8 +81,9 @@ def test_the_fault_level_builders_are_read_from_the_code():
     plus the SCR row (which reads it through the SCR gate)."""
     derived = {b for b in G._BUILDERS if _reads_the_poc_fault_level(b)} | {G._scr_rows}
     # The voltage-stability rows name the governing PoC; they leave an off-grid scorecard by their own rule.
-    assert G._vs_rows in derived
-    derived -= {G._vs_rows}
+    # So do the campus strength rows (grid-compliance GC-03).
+    assert G._vs_rows in derived and G._strength_rows in derived
+    derived -= {G._vs_rows, G._strength_rows}
     assert derived == set(G.SK_BUILDERS)
     named = {b.__name__ for b in G.SK_BUILDERS}
     assert named == {
@@ -127,7 +128,7 @@ def test_off_grid_excludes_scr_and_every_fault_level_row_with_the_reason(tmp_pat
     out = G.grid_readiness(tmp_path, _site(), PROFILE)
     excluded = {e["id"]: e for e in out["excluded"]}
     # The sub-synchronous rows are scanned from the PCC and leave by their own rule (GC-08).
-    assert set(excluded) == sk | set(VS_IDS) | set(G.SUBSYNC_PCC_ROWS)
+    assert set(excluded) == sk | set(VS_IDS) | set(G.SUBSYNC_PCC_ROWS) | set(G._STRENGTH)
     assert all(
         excluded[i]["reason"] == G.SK_OFF_GRID and excluded[i]["requirement"]
         for i in sk
@@ -140,6 +141,9 @@ def test_off_grid_excludes_scr_and_every_fault_level_row_with_the_reason(tmp_pat
     # The voltage-stability rows also read the PoC's fault level and leave by their own rule.
     assert not set(VS_IDS) & {r["id"] for r in out["rows"]}
     assert all(excluded[i]["reason"] == G.VS_OFF_GRID for i in VS_IDS) and VS_IDS
+    # So do the campus strength rows (GC-03); the planning row stays: the campus N-1 applies off-grid too.
+    assert all(excluded[i]["reason"] == G.VS_OFF_GRID for i in G._STRENGTH)
+    assert G.PLANNING_ID in {r["id"] for r in out["rows"]}
     # An excluded row is never counted, as a pass or as anything else.
     assert sum(out["summary"][v] for v in G.VERDICTS) == len(out["rows"])
     for i in sk:

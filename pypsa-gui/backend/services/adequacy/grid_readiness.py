@@ -2876,7 +2876,7 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
         rows += out
     excluded = []
     if (case := grid_case(inp)) != "grid":
-        why = {**dict.fromkeys(sk_built, SK_OFF_GRID), **dict.fromkeys(_VS, VS_OFF_GRID),
+        why = {**dict.fromkeys(sk_built, SK_OFF_GRID), **dict.fromkeys(_VS, VS_OFF_GRID), **dict.fromkeys(_STRENGTH, VS_OFF_GRID),
                **dict.fromkeys(SUBSYNC_PCC_ROWS, SUBSYNC_OFF_GRID)}
         if case == "islanded":
             why.update(dict.fromkeys(conn_built, CONN_OFF_GRID))
