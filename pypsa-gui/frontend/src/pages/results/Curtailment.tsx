@@ -6,7 +6,7 @@ import ResultState from '../../components/ResultState'
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
 } from 'recharts'
-import { resultsApi } from '../../api/simulation'
+import { displayedResultsApi } from '../../api/displayedResults'
 import { networkApi } from '../../api/network'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
@@ -39,11 +39,15 @@ export default function Curtailment() {
   // SNAPSHOT INDEX (not a results payload) — same hook Dispatch uses so the
   // per-snapshot queries below can be windowed before any payload exists.
   const { win, winValid, fetchRange } = useResultsWindow(currentProject)
-  const { data: curtailTS } = useQuery({
-    queryKey: nk(currentProject, 'results', 'curtailment', win.from, win.to),
-    queryFn: () => resultsApi.getCurtailment(fetchRange),
+  // A5.2: curtailment and its plants' dispatch as one bound view (one solve, one
+  // binding), so a chat navigation can prove the figures shown.
+  const { data: displayed } = useQuery({
+    queryKey: nk(currentProject, 'results', 'displayed', 'curtailment', win.from, win.to),
+    queryFn: () => displayedResultsApi.curtailment(fetchRange),
     enabled: winValid,
   })
+  const curtailTS = displayed?.data.curtailment
+  const gensTS = displayed?.data.generators
   const { data: generators = [], isSuccess: generatorsLoaded } = useQuery({ queryKey: nk(currentProject, 'generators'), queryFn: networkApi.getGenerators })
   // WeightCtx + timeline assembled by the shared hook (fetches /snapshots +
   // /investmentPeriods) — same recipe as the Dispatch tab so the per-period ×
@@ -120,11 +124,6 @@ export default function Curtailment() {
   // Totals: curtailment energy + percent vs (curtailed + delivered) using
   // the renewable generators' supply for the denominator. Comes from the
   // Dispatch tab's same formula so the two views stay reconciled.
-  const { data: gensTS } = useQuery({
-    queryKey: nk(currentProject, 'results', 'generators', win.from, win.to),
-    queryFn: () => resultsApi.getGeneratorResults(undefined, fetchRange),
-    enabled: winValid,
-  })
   const totals = useMemo(() => {
     const curt = weightedSum(curtailTS as TSPayload | null, renewableNames, weightCtx, range, 'generators') ?? 0
     const delivered = weightedSum(gensTS as TSPayload | null, renewableNames, weightCtx, range, 'generators') ?? 0
@@ -152,7 +151,8 @@ export default function Curtailment() {
     : {}
 
   return (
-    <div className="flex flex-col h-full overflow-auto p-4 gap-4 results-scroll-clear [&>*]:shrink-0">
+    <div className="flex flex-col h-full overflow-auto p-4 gap-4 results-scroll-clear [&>*]:shrink-0"
+      data-result-tab="curtailment" data-result-binding={displayed ? JSON.stringify(displayed.binding) : undefined}>
       {/* Truncated-window banner — see FIX 1 secondary in the
           results-tabs-window final review: a narrow-but-wide window can
           still hit the server's MAX_RESPONSE_VALUES cap. */}

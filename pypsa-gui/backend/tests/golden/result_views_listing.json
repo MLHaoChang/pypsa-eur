@@ -68,8 +68,7 @@
     "label": "Load Flow",
     "data": "available",
     "shown": true,
-    "card": "grid",
-    "verification": "displayed_data"
+    "card": "grid"
    },
    {
     "id": "grid_code",
@@ -118,8 +117,7 @@
     "label": "Emissions",
     "data": "available",
     "shown": false,
-    "card": "capacity",
-    "verification": "displayed_data"
+    "card": "capacity"
    },
    {
     "id": "curtailment",
@@ -161,8 +159,7 @@
     "label": "Grid risk to production",
     "data": "available",
     "shown": false,
-    "card": "reliability",
-    "verification": "displayed_data"
+    "card": "reliability"
    },
    {
     "id": "products",
@@ -305,8 +302,7 @@
     "label": "Emissions",
     "data": "available",
     "shown": false,
-    "card": "capacity",
-    "verification": "displayed_data"
+    "card": "capacity"
    },
    {
     "id": "curtailment",
@@ -348,8 +344,7 @@
     "label": "Grid risk to production",
     "data": "available",
     "shown": false,
-    "card": "reliability",
-    "verification": "displayed_data"
+    "card": "reliability"
    },
    {
     "id": "products",
@@ -443,8 +438,7 @@
     "label": "Grid risk to production",
     "data": "available",
     "shown": false,
-    "card": "reliability",
-    "verification": "displayed_data"
+    "card": "reliability"
    },
    {
     "id": "products",
@@ -479,8 +473,7 @@
     "label": "Load Flow (advanced)",
     "data": "available",
     "shown": true,
-    "card": "grid",
-    "verification": "displayed_data"
+    "card": "grid"
    },
    {
     "id": "grid_code",
@@ -529,8 +522,7 @@
     "label": "Emissions (advanced)",
     "data": "available",
     "shown": false,
-    "card": "capacity",
-    "verification": "displayed_data"
+    "card": "capacity"
    },
    {
     "id": "curtailment",
@@ -638,8 +630,7 @@
     "label": "Grid risk to production",
     "data": "available",
     "shown": false,
-    "card": "reliability",
-    "verification": "displayed_data"
+    "card": "reliability"
    },
    {
     "id": "products",
@@ -716,8 +707,7 @@
     "label": "Emissions (advanced)",
     "data": "available",
     "shown": false,
-    "card": "capacity",
-    "verification": "displayed_data"
+    "card": "capacity"
    },
    {
     "id": "curtailment",

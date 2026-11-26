@@ -1,0 +1,7 @@
+{
+ "served_by_tool": {
+  "GET /api/results/displayed/flows": "get_energy_flows",
+  "GET /api/results/displayed/loadshape": "get_load_shape",
+  "GET /api/results/displayed/curtailment": "get_results"
+ }
+}

@@ -9,7 +9,11 @@ import { expectAllButtonsNamed } from '../../test-utils/accessibleName'
 
 vi.mock('../../api/loadShape', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/loadShape')>()
-  return { ...actual, loadShapeApi: { get: vi.fn() } }
+  const get = vi.fn()
+  // The tab reads the bound view (A5.2); it carries the same payload `get` returns.
+  const displayed = (q?: unknown) => Promise.resolve(get(q))
+    .then((d: unknown) => d && { status: 'ok', data: d, binding: { version: 1, project_id: 'p', scope: 'current', view: 'loadshape', data_sha256: 'a'.repeat(64) } })
+  return { ...actual, loadShapeApi: { get, displayed } }
 })
 
 const heat = (peak: number) => ({
@@ -46,6 +50,13 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('LoadShapeTab', () => {
+  it('marks its root with the bound view, for the navigation ACK (A5.2)', async () => {
+    mount()
+    const root = await screen.findByTestId('ls-view')
+    expect(root.getAttribute('data-result-tab')).toBe('loadshape')
+    expect(JSON.parse(root.getAttribute('data-result-binding')!).view).toBe('loadshape')
+  })
+
   it('draws the import heatmap, shows a gap as blank and an unmodelled export as not modelled', async () => {
     const { container } = mount()
     const imp = await screen.findByTestId('ls-heat-import')
