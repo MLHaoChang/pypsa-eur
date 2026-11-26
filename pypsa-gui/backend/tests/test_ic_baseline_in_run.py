@@ -154,6 +154,16 @@ def test_a_case_with_no_baseline_records_none_run(build_for):
     assert _kept(build) == 0
 
 
+def test_a_build_outside_the_runner_needs_no_stats(build_for):
+    """A build no runner worker calls (no `BUILD_STATS`) still builds."""
+    from services.finance.investment_case_runner import BUILD_STATS
+
+    build, state = build_for
+    state["outcomes"].append("miss")
+    assert BUILD_STATS.get() is None
+    assert build().flags == ()
+
+
 def test_two_builds_in_sequence_record_their_own_figures(build_for):
     """GK B (71) 1: a miss then a hit on the same build record 1 then 0,
     never the first call's figure twice."""
@@ -283,9 +293,24 @@ def test_only_the_steps_own_row_is_settled(envelope, settled):
     envelope["audit"].append(later)
     run_ic.settle("task.json", TICKET, "ad:1", _record(baseline_solves=0), 1.0)
     assert (envelope["audit"][1]["solves"], later["solves"]) == (0, run_envelope.CASE_BASELINE_SOLVES)
+    assert settled[0][2]["solves"] == 0  # the step's own figure, not the newer row's
     assert run_envelope.settle_case_solves("task.json", "solve.9", 0) is None
     from harness.runner import step_call_prefix
     assert CASE_ROW["call_id"].startswith(step_call_prefix("solve.2"))
+
+
+def test_a_later_refused_admission_of_the_step_leaves_its_used_row_settled(envelope):
+    """A retried admission of the same step that was refused carries no
+    reservation; the step's admitted row is the one settled."""
+    envelope["audit"].append({"event": "refused", "tool": run_ic.TOOL, "call_id": "run-solve.2-99999999",
+                              "reason": "ic_budget"})
+    assert run_envelope.settle_case_solves("task.json", "solve.2", 1) == 1
+    assert envelope["audit"][1]["solves"] == 1
+
+
+def test_no_envelope_settles_nothing(monkeypatch):
+    monkeypatch.setattr(run_envelope, "_load", lambda path: None)
+    assert run_envelope.settle_case_solves("task.json", "solve.2", 1) is None
 
 
 def test_a_case_with_nothing_reserved_settles_nothing(envelope, settled):
