@@ -548,6 +548,14 @@ export function ChoiceCard({ companion = false, target = null, inputOpen = false
   const [picked, setPicked] = useState<string[]>([])
   // A new card starts with nothing picked.
   useEffect(() => { setPicked([]) }, [choice])
+  // A new card takes focus (its title is read out), unless the user is mid-sentence in a field.
+  const cardRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!choice) return
+    const a = document.activeElement
+    const typing = (a instanceof HTMLTextAreaElement || a instanceof HTMLInputElement) && a.value !== ''
+    if (!typing) cardRef.current?.focus()
+  }, [choice])
   if (!choice) return null
   const multi = choice.multi_select === true
   const planReview = choice.intent === 'plan_review'
@@ -572,7 +580,10 @@ export function ChoiceCard({ companion = false, target = null, inputOpen = false
     send(choice.options.map((o) => o.label).filter((l) => picked.includes(l)).join('; '))
   const card = (
     <div
-      className={`border border-accent/50 bg-accent/5 rounded p-3 mx-3 my-2 ${inputOpen ? 'max-xl:hidden' : ''}`}
+      ref={cardRef}
+      tabIndex={-1}
+      aria-live="polite"
+      className={`border border-accent/50 bg-accent/5 rounded p-3 mx-3 my-2 outline-none focus-visible:ring-1 focus-visible:ring-accent ${inputOpen ? 'max-xl:hidden' : ''}`}
       data-testid="chat-choice-card"
       data-intent={planReview ? 'plan_review' : 'choice'}
       role="group"
@@ -595,6 +606,9 @@ export function ChoiceCard({ companion = false, target = null, inputOpen = false
             planReview ? 'max-h-80' : 'max-h-48'
           }`}
           data-testid="chat-choice-detail"
+          tabIndex={0}
+          role="region"
+          aria-label={`${choice.title}: details`}
         >
           <ChatMarkdown>{choice.detail}</ChatMarkdown>
         </div>

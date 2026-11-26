@@ -204,3 +204,15 @@ describe('Escape handling with the composer always on screen', () => {
     expect(useUIStore.getState().activeSlidePanel).toBeNull()
   })
 })
+
+describe('shell landmarks (UX walkthrough issue 07)', () => {
+  it('one main landmark, one h1, and a skip link that is the first Tab stop', () => {
+    const { container } = renderApp()
+    expect(screen.getAllByRole('main')).toHaveLength(1)
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1)
+    const skip = screen.getByTestId('skip-to-main')
+    expect(container.querySelector('a, button, input, [tabindex="0"]')).toBe(skip)
+    fireEvent.click(skip)
+    expect(document.activeElement).toBe(screen.getByRole('main'))
+  })
+})

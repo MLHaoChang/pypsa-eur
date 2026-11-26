@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
@@ -174,6 +174,13 @@ describe('the launch orientation, with no project open', () => {
 })
 
 describe('the launch orientation with no API key', () => {
+  it('issue 07: opening the key form puts focus in the key field', async () => {
+    vi.mocked(getApiKeySettings).mockResolvedValue(KEY_MISSING)
+    renderGreeting()
+    fireEvent.click(await screen.findByTestId('chat-launch-key-offer-open'))
+    const field = await screen.findByLabelText('Anthropic API key')
+    expect(document.activeElement).toBe(field)
+  })
   it('makes a quiet offer instead of an error', async () => {
     vi.mocked(getApiKeySettings).mockResolvedValue(KEY_MISSING)
     renderGreeting()

@@ -144,7 +144,10 @@ it('SC-07 S5a (R4): Checking… from the click until the turn ends, never a succ
   expect(onRequest.mock.calls[0][0]).toMatch(/Do not apply it again/)
   expect(onRequest.mock.calls[0][1]).toBe('Check the 3D site')  // the bubble's words; the prompt stays in Details
   expect(button().textContent).toBe('Checking…')
-  expect(button().disabled).toBe(true)
+  // aria-disabled, not disabled: a disabled button would drop keyboard focus (issue 07).
+  expect(button().getAttribute('aria-disabled')).toBe('true')
+  fireEvent.click(button())
+  expect(onRequest).toHaveBeenCalledTimes(1)
   rerender(<AssistantResultCard result={result} disabled onRequest={onRequest} />)  // the turn runs
   expect(button().textContent).toBe('Checking…')
   rerender(<AssistantResultCard result={result} disabled={false} onRequest={onRequest} />)  // it ended
@@ -183,4 +186,12 @@ it('live-voice 16: a step whose job was stopped reads stopped, not failed, and t
   expect(screen.getByText('Next: run_simulation (stopped)')).toBeTruthy()
   expect(screen.queryByText(/cancelled/)).toBeNull()
   expect(screen.getAllByTestId('assistant-task-step')[1].textContent).toBe('run_simulation · stopped')
+})
+
+it('issue 07: "Check the 3D site" keeps keyboard focus after the click', () => {
+  render(<AssistantResultCard result={{ [SCENE_UNKNOWN_KEY]: true }} disabled={false} onRequest={vi.fn()} />)
+  const button = screen.getByTestId('scene-unknown-check-button')
+  button.focus()
+  fireEvent.click(button)
+  expect(document.activeElement).toBe(button)
 })

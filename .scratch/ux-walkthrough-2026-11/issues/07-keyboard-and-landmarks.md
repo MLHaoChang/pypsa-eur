@@ -3,7 +3,7 @@
 
 # Keyboard and landmarks: no main, no h1, focus order, chat-card focus
 
-Status: ready-for-agent
+Status: done
 Model tier: sonnet
 Size: M
 Gated: UX

@@ -143,3 +143,28 @@ describe('ChoiceCard', () => {
   })
 })
 
+
+describe('ChoiceCard focus (UX walkthrough issue 07)', () => {
+  it('a new card takes focus and announces politely', () => {
+    useChatStore.setState({ choice: CHOICE })
+    render(<ChoiceCard />)
+    const card = screen.getByTestId('chat-choice-card')
+    expect(document.activeElement).toBe(card)
+    expect(card.getAttribute('aria-live')).toBe('polite')
+  })
+  it('does not steal focus from a field with text in it', () => {
+    const input = document.createElement('textarea')
+    document.body.appendChild(input)
+    input.value = 'half a sentence'
+    input.focus()
+    useChatStore.setState({ choice: CHOICE })
+    render(<ChoiceCard />)
+    expect(document.activeElement).toBe(input)
+    input.remove()
+  })
+  it('the scrollable detail box is keyboard-reachable', () => {
+    useChatStore.setState({ choice: { ...CHOICE, detail: 'Long **plan**' } })
+    render(<ChoiceCard />)
+    expect(screen.getByTestId('chat-choice-detail').getAttribute('tabindex')).toBe('0')
+  })
+})
