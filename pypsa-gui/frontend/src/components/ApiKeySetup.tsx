@@ -85,8 +85,11 @@ function isForbidden(error: unknown): boolean {
  */
 export default function ApiKeySetup({
   sessionProfile = null,
+  focusInput = false,
 }: {
   sessionProfile?: { id: string; label: string } | null
+  /** Take focus on the key field (the greeting opens the form on a click). */
+  focusInput?: boolean
 } = {}) {
   const qc = useQueryClient()
   const setError = useChatStore((s) => s.setError)
@@ -227,6 +230,7 @@ export default function ApiKeySetup({
 
       <form className="mt-2 flex items-center gap-2" onSubmit={onSubmit}>
         <input
+          autoFocus={focusInput}
           // `type="password"` so a key pasted during a screen-share or a demo
           // is not left legible on the display afterwards.
           type="password"

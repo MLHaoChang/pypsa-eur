@@ -143,3 +143,49 @@ describe('ChoiceCard', () => {
   })
 })
 
+
+describe('ChoiceCard focus (UX walkthrough issue 07)', () => {
+  it('a new card takes focus from nowhere and names itself in one status line', () => {
+    useChatStore.setState({ choice: CHOICE })
+    render(<ChoiceCard />)
+    const card = screen.getByTestId('chat-choice-card')
+    expect(document.activeElement).toBe(card)
+    expect(card.getAttribute('aria-live')).toBeNull()
+    expect(screen.getByTestId('chat-choice-status').textContent).toBe(`Question: ${CHOICE.title}`)
+  })
+  it('does not take focus from a control outside the chat', () => {
+    const outside = document.createElement('button')
+    document.body.appendChild(outside)
+    outside.focus()
+    useChatStore.setState({ choice: CHOICE })
+    render(<ChoiceCard />)
+    expect(document.activeElement).toBe(outside)
+    outside.remove()
+  })
+  it('takes focus from the chat composer when it is empty', () => {
+    const panel = document.createElement('div')
+    panel.setAttribute('data-testid', 'chat-panel')
+    const ta = document.createElement('textarea')
+    panel.appendChild(ta); document.body.appendChild(panel)
+    ta.focus()
+    useChatStore.setState({ choice: CHOICE })
+    render(<ChoiceCard />)
+    expect(document.activeElement).toBe(screen.getByTestId('chat-choice-card'))
+    panel.remove()
+  })
+  it('does not steal focus from a field with text in it', () => {
+    const input = document.createElement('textarea')
+    document.body.appendChild(input)
+    input.value = 'half a sentence'
+    input.focus()
+    useChatStore.setState({ choice: CHOICE })
+    render(<ChoiceCard />)
+    expect(document.activeElement).toBe(input)
+    input.remove()
+  })
+  it('the scrollable detail box is keyboard-reachable', () => {
+    useChatStore.setState({ choice: { ...CHOICE, detail: 'Long **plan**' } })
+    render(<ChoiceCard />)
+    expect(screen.getByTestId('chat-choice-detail').getAttribute('tabindex')).toBe('0')
+  })
+})
