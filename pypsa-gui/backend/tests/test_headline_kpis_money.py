@@ -63,3 +63,63 @@ def test_the_lcoe_card_guesses_no_year_when_none_is_stated(
         lcoe["basis"] == "investment case · real basis, USD (currency year not stated)"
     )
     assert lcoe["basis"] == "investment case · " + _engine_words(None, 2027)
+
+
+# ── `_lcoe_money` on its own: where the base year and the currency come from ──
+
+
+def _ctx(stored):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(solver_state={"investment_case_report": stored})
+
+
+def _stored(base_year=2027, assumptions_hash="h"):
+    return {
+        "assumptions_hash": assumptions_hash,
+        "sections": {"project": {"payload": {"base_year": base_year}}},
+    }
+
+
+RAW = {"assumptions_hash": "h", "currency_year": 2020}
+
+
+def test_the_base_year_is_read_from_the_stored_report_raw_was_read_from():
+    from services.results.headline_kpis import _lcoe_money
+
+    assert _lcoe_money(_ctx(_stored()), RAW, "USD/MWh")["money_year"] == 2027
+
+    class Model:  # a stored pydantic report
+        def model_dump(self, mode):
+            assert mode == "json"
+            return _stored()
+
+    assert _lcoe_money(_ctx(Model()), RAW, "USD/MWh")["money_year"] == 2027
+
+
+def test_another_reports_base_year_is_never_borrowed():
+    from services.results.headline_kpis import _lcoe_money
+
+    # a report of other assumptions, no report, or one without a project payload: no base year
+    for stored in (
+        _stored(assumptions_hash="other"),
+        None,
+        {"assumptions_hash": "h"},
+        {"assumptions_hash": "h", "sections": {"project": {}}},
+        {"assumptions_hash": "h", "sections": {"project": None}},
+        {"assumptions_hash": "h", "sections": None},
+    ):
+        out = _lcoe_money(_ctx(stored), RAW, "USD/MWh")
+        assert out["money_year"] == 2020, stored
+        assert out["basis"] == "investment case · real basis, 2020 USD", stored
+
+
+def test_the_basis_names_the_currency_of_the_facts_unit():
+    from services.results.headline_kpis import _lcoe_money
+
+    for unit in ("currency/MWh", None, ""):
+        out = _lcoe_money(_ctx(None), RAW, unit)
+        assert out["basis"] == "investment case · real basis, 2020 report currency", (
+            unit
+        )
+    assert _lcoe_money(_ctx(None), RAW, "GBP/MWh")["basis"].endswith("2020 GBP")

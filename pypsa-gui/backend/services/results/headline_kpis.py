@@ -285,7 +285,7 @@ def _lcoe_money(ctx, raw, unit):
     from services.finance.report import money_words, money_year
 
     stored = ctx.solver_state.get("investment_case_report")
-    if stored is not None and hasattr(stored, "model_dump"):
+    if hasattr(stored, "model_dump"):
         stored = stored.model_dump(mode="json")
     base_year = None
     if isinstance(stored, dict) and stored.get("assumptions_hash") == raw.get(
@@ -298,7 +298,7 @@ def _lcoe_money(ctx, raw, unit):
     # the currency the checked fact's unit names ("<ISO code>/MWh", or "currency/MWh"
     # when the report's code is not one), so the basis line and the unit agree
     code = str(unit or "").removesuffix("/MWh")
-    currency = code if code and code != "currency" else None
+    currency = None if code in ("", "currency") else code
     currency_year = raw.get("currency_year")
     return {
         "money_year": money_year(currency_year, base_year),
