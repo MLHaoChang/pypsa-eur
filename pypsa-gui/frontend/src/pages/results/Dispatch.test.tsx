@@ -57,6 +57,13 @@ vi.mock('../../api/displayedResults', async () => {
   return { displayedResultsApi: { dispatch } }
 })
 
+// The error toast is spied: the source_not_available tests below send the
+// read through the real client and its interceptor.
+vi.mock('react-hot-toast', () => ({
+  default: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn(), dismiss: vi.fn(), loading: vi.fn() }),
+  toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn(), dismiss: vi.fn(), loading: vi.fn() }),
+}))
+
 vi.mock('../../api/network', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/network')>()
   return {
@@ -388,4 +395,58 @@ it('keeps the not-solved branch: no series is "not run", not "could not be read"
   renderPage()
   expect(await screen.findByText(/has not run yet/)).toBeTruthy()
   expect(screen.queryByTestId('dispatch-error')).toBeNull()
+})
+
+// The bound view read through the real client, its interceptor and an adapter
+// that answers with `status` and `detail`, so the toast is the interceptor's own.
+async function failRealRead(status: number, detail: unknown) {
+  const { displayedResultsApi } = await import('../../api/displayedResults')
+  const actual = await vi.importActual<typeof import('../../api/displayedResults')>('../../api/displayedResults')
+  const { client } = await import('../../api/client')
+  const adapter: import('axios').AxiosAdapter = async (config) => Promise.reject(Object.assign(
+    new Error(`Request failed with status code ${status}`),
+    { config, response: { status, data: { detail }, headers: {}, config } }))
+  vi.mocked(displayedResultsApi.dispatch).mockImplementation((source, range) => {
+    const was = client.defaults.adapter
+    client.defaults.adapter = adapter
+    try { return actual.displayedResultsApi.dispatch(source, range) } finally { client.defaults.adapter = was }
+  })
+}
+
+const AC_PF_NOT_RUN = 'The AC power flow has not run yet. Run it, or show the LP dispatch.'
+
+it('no AC power flow on record is "not run yet" with the LP switch, never a toast or "could not be read" (UX 31)', async () => {
+  const toast = (await import('react-hot-toast')).default
+  vi.mocked(toast.error).mockClear()
+  await failRealRead(422, { error_kind: 'source_not_available', message: AC_PF_NOT_RUN })
+  useUIStore.setState({ resultSource: 'ac_pf' })
+  try {
+    renderPage()
+    expect(await screen.findByText(AC_PF_NOT_RUN)).toBeTruthy()
+    expect(screen.getByText('Not run yet')).toBeTruthy()
+    expect(screen.queryByText(/could not be read/)).toBeNull()
+    expect(screen.queryByTestId('dispatch-error')).toBeNull()
+    expect(vi.mocked(toast.error)).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Show the LP dispatch' }))
+    expect(useUIStore.getState().resultSource).toBe('lopf')
+  } finally {
+    useUIStore.setState({ resultSource: 'lopf' })
+    vi.mocked((await import('../../api/displayedResults')).displayedResultsApi.dispatch).mockReset()
+  }
+})
+
+it('a 500 still toasts and shows the unavailable state (UX 31)', async () => {
+  const toast = (await import('react-hot-toast')).default
+  vi.mocked(toast.error).mockClear()
+  await failRealRead(500, 'Internal Server Error')
+  try {
+    renderPage()
+    expect(await screen.findByTestId('dispatch-error')).toBeTruthy()
+    expect(screen.getByText(/The dispatch could not be read/)).toBeTruthy()
+    expect(screen.getByText('Not available for this run')).toBeTruthy()
+    expect(vi.mocked(toast.error)).toHaveBeenCalledWith('Internal Server Error', expect.anything())
+    expect(screen.queryByText(AC_PF_NOT_RUN)).toBeNull()
+  } finally {
+    vi.mocked((await import('../../api/displayedResults')).displayedResultsApi.dispatch).mockReset()
+  }
 })

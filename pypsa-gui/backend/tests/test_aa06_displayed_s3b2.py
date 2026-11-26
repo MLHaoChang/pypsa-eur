@@ -540,6 +540,9 @@ def test_ac_pf_without_a_flow_on_record_is_refused_and_binds_nothing(client, sol
     response = _get(client, "dispatch", source="ac_pf")
     assert response.status_code == 422
     assert response.json()["detail"]["error_kind"] == "source_not_available"
+    assert response.json()["detail"]["message"] == (
+        "The AC power flow has not run yet. Run it, or show the LP dispatch."
+    )
     assert "binding" not in response.json()
 
 

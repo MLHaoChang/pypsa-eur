@@ -7,6 +7,7 @@ import {
 import { Download, Flame, Wind, BatteryCharging, Zap, ChevronDown, ChevronRight, Plug, Database, Scissors } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { displayedResultsApi } from '../../api/displayedResults'
+import { errorKind } from '../../api/profiles'
 import { networkApi } from '../../api/network'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
@@ -285,7 +286,7 @@ export default function Dispatch() {
   //  - economics by carrier (live network): the per-carrier KPI strip above
   //    each DispatchStack, mirroring the Compare View's by_carrier split
   //    (gen/charge/curtailment/lost-load). Not windowed.
-  const { data: displayed, isSuccess: lostLoadRead, isError } = useQuery({
+  const { data: displayed, isSuccess: lostLoadRead, isError, error: readError } = useQuery({
     queryKey: nk(currentProject, 'results', 'displayed', 'dispatch', resultSource, win.from, win.to),
     queryFn: () => displayedResultsApi.dispatch(resultSource, fetchRange),
     enabled: winValid,
@@ -1230,6 +1231,18 @@ export default function Dispatch() {
   // because React Query holds the underlying data anyway.
   const [view, setView] = useState<'dispatch' | 'flh'>('dispatch')
 
+  // No AC power flow on record for `?source=ac_pf` is a missing precondition,
+  // not a failed read: no toast (the client keeps it quiet), "not run yet",
+  // and the way back to the LP dispatch.
+  if (isError && !displayed && errorKind(readError) === 'source_not_available') {
+    return (
+      <div className="p-6" data-testid="dispatch-ac-pf-not-run">
+        <ResultState state="not_run"
+          reason="The AC power flow has not run yet. Run it, or show the LP dispatch."
+          action={{ label: 'Show the LP dispatch', onClick: () => useUIStore.getState().setResultSource('lopf') }} />
+      </div>
+    )
+  }
   // A failed read is not "not run yet" (rulings ai, aa): the error toast says why.
   if (isError && !displayed) {
     return (

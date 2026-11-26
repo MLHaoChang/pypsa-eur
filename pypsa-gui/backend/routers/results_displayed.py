@@ -332,7 +332,7 @@ def dispatch_view(source="lopf", window_from=None, window_to=None) -> dict:
                 422,
                 {
                     "error_kind": "source_not_available",
-                    "message": "no AC power flow has run for this network",
+                    "message": "The AC power flow has not run yet. Run it, or show the LP dispatch.",
                 },
             )
         reads = {
