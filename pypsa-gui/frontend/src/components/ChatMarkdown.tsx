@@ -67,6 +67,21 @@ function CodeBlockPre({ children, ...rest }: { children?: ReactNode } & Record<s
   )
 }
 
+// Assistant-assurance 06 (A5.3): a link in assistant prose is followed only when it
+// stays in the app: a guide link (a button below) or a same-origin path. Any other
+// destination (another site, mail, a script or data URL, a protocol-relative URL) is
+// shown as plain, selectable text in the sentence colour, with the address beside
+// any differing link text, so injected link text cannot hide where it points (UX 31).
+export function inAppHref(href: unknown): href is string {
+  return typeof href === 'string' && /^\/(?![/\\])/.test(href) && !href.includes('\\')
+}
+
+function urlAsText(href: unknown, children: ReactNode) {
+  const text = extractCopyText(children)
+  const shown = typeof href === 'string' && href !== '' && href !== text ? ` (${href})` : ''
+  return <span className="text-text select-text" data-testid="chat-link-as-text">{children}{shown}</span>
+}
+
 const components: Components = {
   h1: ({ node, ...p }) => <h1 className="text-[15px] font-semibold text-text mt-3 mb-1.5 first:mt-0" {...p} />,
   h2: ({ node, ...p }) => <h2 className="text-[14px] font-semibold text-text mt-3 mb-1.5 first:mt-0" {...p} />,
@@ -82,7 +97,11 @@ const components: Components = {
     // In-app: a button, not a link; the click re-checks the id with the same pattern.
     ? <button type="button" className="text-accent underline hover:no-underline"
         onClick={e => { const id = guideLinkId(p.href); if (id) openGuide(id, e.currentTarget) }}>{p.children}</button>
-    : <a className="text-accent underline hover:no-underline" target="_blank" rel="noreferrer" {...p} />),
+    : inAppHref(p.href)
+      ? <a className="text-accent underline hover:no-underline" target="_blank" rel="noreferrer" {...p} />
+      : urlAsText(p.href, p.children)),
+  // An image is never fetched from assistant text: its alt text stands in.
+  img: ({ node, alt }) => <span className="text-muted" data-testid="chat-image-as-text">{alt ? `[image: ${alt}]` : '[image]'}</span>,
   hr: ({ node, ...p }) => <hr className="my-2 border-border" {...p} />,
   blockquote: ({ node, ...p }) => <blockquote className="my-1.5 border-l-2 border-border pl-2 text-muted" {...p} />,
   // v10 dropped the `inline` prop — inline code has no `language-*` class, fenced
@@ -103,15 +122,26 @@ const components: Components = {
   td: ({ node, ...p }) => <td className="border border-border px-2 py-1 align-top" {...p} />,
 }
 
+// The report viewer keeps its earlier link and image rendering (its prose is a
+// report the user exports, not a chat reply).
+const { img: _chatImg, ...shared } = components
+const reportComponents: Components = {
+  ...shared,
+  a: ({ node, ...p }) => (guideLinkId(p.href)
+    ? <button type="button" className="text-accent underline hover:no-underline"
+        onClick={e => { const id = guideLinkId(p.href); if (id) openGuide(id, e.currentTarget) }}>{p.children}</button>
+    : <a className="text-accent underline hover:no-underline" target="_blank" rel="noreferrer" {...p} />),
+}
+
 // `rehypePlugins` is optional and off by default: the report viewer passes
 // `rehypeMarkUnverified` so audited numbers get their `<mark>` inside the
 // rendered prose (pages/reports/highlightUnverified.ts); chat passes nothing.
 export default function ChatMarkdown({
-  children, rehypePlugins,
-}: { children: string; rehypePlugins?: Options['rehypePlugins'] }) {
+  children, rehypePlugins, externalLinks = 'text',
+}: { children: string; rehypePlugins?: Options['rehypePlugins']; externalLinks?: 'text' | 'link' }) {
   return (
     <div className="chat-markdown break-words">
-      <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins ?? undefined} components={components} urlTransform={artifactUrlTransform}>
+      <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins ?? undefined} components={externalLinks === 'link' ? reportComponents : components} urlTransform={artifactUrlTransform}>
         {children}
       </Markdown>
     </div>

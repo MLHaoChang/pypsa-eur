@@ -21,12 +21,10 @@ describe('assistant artifact links', () => {
     expect(screen.getByRole('link', { name: 'network.nc' }).getAttribute('href')).toBe(download)
   })
 
-  it.each([download, 'https://docs.pypsa.org/', 'mailto:support@example.com'])(
-    'preserves a normal destination: %s', (url) => {
-      render(<ChatMarkdown>{`[resource](${url})`}</ChatMarkdown>)
-      expect(screen.getByRole('link', { name: 'resource' }).getAttribute('href')).toBe(url)
-    },
-  )
+  it('preserves a same-origin destination', () => {
+    render(<ChatMarkdown>{`[resource](${download})`}</ChatMarkdown>)
+    expect(screen.getByRole('link', { name: 'resource' }).getAttribute('href')).toBe(download)
+  })
 
   it.each([
     'javascript:alert%281%29',
@@ -38,7 +36,9 @@ describe('assistant artifact links', () => {
     'authenticated download link: /api/projects/../../private',
   ])('does not convert an unsafe or unrelated labeled destination: %s', (url) => {
     const { container } = render(<ChatMarkdown>{`[resource](<${url}>)`}</ChatMarkdown>)
-    expect(container.querySelector('a')?.getAttribute('href')).toBe('')
+    // A5.3: refused, so shown as text, never as a link with an emptied address.
+    expect(container.querySelector('a')).toBeNull()
+    expect(screen.getByTestId('chat-link-as-text').textContent).toContain('resource')
   })
 })
 
@@ -69,4 +69,60 @@ describe('Parameter guide links (expert-catalogue §6.1)', () => {
       expect(screen.queryByRole('button', { name: 'resource' })).toBeNull()
       expect(container.querySelector('a')?.getAttribute('href')).toBe('')
     })
+})
+
+// Assistant-assurance 06 (A5.3): no arbitrary external URL, script, image or raw
+// HTML from assistant prose; injected link text cannot hide the address.
+describe('assistant prose link policy (A5.3)', () => {
+  it.each([
+    ['https://docs.pypsa.org/', 'https://docs.pypsa.org/'],
+    ['http://evil.example/x', 'http://evil.example/x'],
+    ['mailto:support@example.com', 'mailto:support@example.com'],
+    ['//evil.example/x', '//evil.example/x'],
+    ['/\\evil.example/x', '/\\evil.example/x'],
+  ])('an external destination is plain text with its address: %s', (url, shown) => {
+    const { container } = render(<ChatMarkdown>{`See [the docs](<${url}>).`}</ChatMarkdown>)
+    expect(container.querySelector('a')).toBeNull()
+    const text = screen.getByTestId('chat-link-as-text')
+    expect(text.textContent).toBe(`the docs (${shown})`)
+    expect(text.className).not.toMatch(/underline|accent/)
+  })
+
+  it.each(['javascript:alert(1)', 'JaVaScRiPt:alert(1)', 'vbscript:msgbox(1)',
+    'data:text/html,<script>alert(1)</script>'])('a script or data URL is inert text: %s', (url) => {
+    const { container } = render(<ChatMarkdown>{`[click me](<${url}>)`}</ChatMarkdown>)
+    expect(container.querySelector('a')).toBeNull()
+    expect(container.innerHTML).not.toMatch(/javascript:|vbscript:|data:text/i)
+    expect(screen.getByTestId('chat-link-as-text').textContent).toBe('click me')
+  })
+
+  it('injected link text naming a safe site still shows the real address', () => {
+    render(<ChatMarkdown>{'[https://app.local/results](https://evil.example/steal)'}</ChatMarkdown>)
+    expect(screen.getByTestId('chat-link-as-text').textContent)
+      .toBe('https://app.local/results (https://evil.example/steal)')
+  })
+
+  it('a bare URL autolinked by GFM is text, not a link', () => {
+    const { container } = render(<ChatMarkdown>{'Read https://evil.example/x now.'}</ChatMarkdown>)
+    expect(container.querySelector('a')).toBeNull()
+    expect(container.textContent).toContain('https://evil.example/x')
+  })
+
+  it('an image is never fetched: its alt text stands in', () => {
+    const { container } = render(<ChatMarkdown>{'![chart](https://evil.example/track.png)'}</ChatMarkdown>)
+    expect(container.querySelector('img')).toBeNull()
+    expect(screen.getByTestId('chat-image-as-text').textContent).toBe('[image: chart]')
+  })
+
+  it('raw HTML is never rendered as elements', () => {
+    const { container } = render(<ChatMarkdown>{
+      'Hi <img src=x onerror="alert(1)"> <script>alert(2)</script> <a href="https://evil.example">x</a> <iframe src="https://evil.example"></iframe>'}</ChatMarkdown>)
+    expect(container.querySelector('img, script, iframe, a')).toBeNull()
+    expect(container.innerHTML).not.toMatch(/onerror=|<script/i)
+  })
+
+  it('the report viewer keeps its external links', () => {
+    render(<ChatMarkdown externalLinks="link">{'[docs](https://docs.pypsa.org/)'}</ChatMarkdown>)
+    expect(screen.getByRole('link', { name: 'docs' }).getAttribute('href')).toBe('https://docs.pypsa.org/')
+  })
 })
