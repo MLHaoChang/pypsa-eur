@@ -54,12 +54,15 @@ def fake_solve(monkeypatch):
         return status, status
 
     plan = B.BaselinePlan(removed=(), kept=(("Generator", "genset_1"),), flags=())
-    run = lambda: B.solve_baseline(
-        SimpleNamespace(),
-        SimpleNamespace(island_constraints=True),
-        plan,  # noqa: E731
-        solve=solve,
-    )
+
+    def run():
+        return B.solve_baseline(
+            SimpleNamespace(),
+            SimpleNamespace(island_constraints=True),
+            plan,
+            solve=solve,
+        )
+
     return run, statuses, lps
 
 
