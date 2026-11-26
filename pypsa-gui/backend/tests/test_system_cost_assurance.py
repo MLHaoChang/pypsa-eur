@@ -77,22 +77,82 @@ def _network(**gas):
     n.add("Bus", ["A", "B"], v_nom=110, carrier="AC")
     n.add("Bus", "C", v_nom=20, carrier="AC")
     n.add("Bus", "D", carrier="heat")
-    n.add("Generator", "gas", bus="A", carrier="gas", p_nom=50, marginal_cost=20,
-          capital_cost=14600, **gas)
-    n.add("Generator", "wind", bus="A", carrier="wind", p_nom_extendable=True, p_nom_max=4,
-          p_max_pu=[1.0, 0.5], overnight_cost=8760, discount_rate=0.05, lifetime=20)
-    n.add("Line", "L", bus0="A", bus1="B", x=0.1, s_nom_extendable=True, capital_cost=1460,
-          carrier="AC")
-    n.add("Transformer", "T", bus0="B", bus1="C", x=0.1, s_nom_extendable=True,
-          capital_cost=2920, carrier="AC")
+    n.add(
+        "Generator",
+        "gas",
+        bus="A",
+        carrier="gas",
+        p_nom=50,
+        marginal_cost=20,
+        capital_cost=14600,
+        **gas,
+    )
+    n.add(
+        "Generator",
+        "wind",
+        bus="A",
+        carrier="wind",
+        p_nom_extendable=True,
+        p_nom_max=4,
+        p_max_pu=[1.0, 0.5],
+        overnight_cost=8760,
+        discount_rate=0.05,
+        lifetime=20,
+    )
+    n.add(
+        "Line",
+        "L",
+        bus0="A",
+        bus1="B",
+        x=0.1,
+        s_nom_extendable=True,
+        capital_cost=1460,
+        carrier="AC",
+    )
+    n.add(
+        "Transformer",
+        "T",
+        bus0="B",
+        bus1="C",
+        x=0.1,
+        s_nom_extendable=True,
+        capital_cost=2920,
+        carrier="AC",
+    )
     n.add("Load", "dC", bus="C", p_set=[10.0, 20.0])
-    n.add("Link", "K", bus0="A", bus1="D", p_nom_extendable=True, capital_cost=5840,
-          fom_cost=2920, marginal_cost=1, carrier="heat")
+    n.add(
+        "Link",
+        "K",
+        bus0="A",
+        bus1="D",
+        p_nom_extendable=True,
+        capital_cost=5840,
+        fom_cost=2920,
+        marginal_cost=1,
+        carrier="heat",
+    )
     n.add("Load", "dD", bus="D", p_set=[0.0, 3.0])
-    n.add("Store", "S", bus="D", e_nom=1, e_initial=1, capital_cost=876, marginal_cost=0.1,
-          carrier="h2")
-    n.add("StorageUnit", "SU", bus="C", p_nom=2, max_hours=1, state_of_charge_initial=2,
-          capital_cost=8760, marginal_cost=0.5, carrier="battery")
+    n.add(
+        "Store",
+        "S",
+        bus="D",
+        e_nom=1,
+        e_initial=1,
+        capital_cost=876,
+        marginal_cost=0.1,
+        carrier="h2",
+    )
+    n.add(
+        "StorageUnit",
+        "SU",
+        bus="C",
+        p_nom=2,
+        max_hours=1,
+        state_of_charge_initial=2,
+        capital_cost=8760,
+        marginal_cost=0.5,
+        carrier="battery",
+    )
     return n
 
 
@@ -101,7 +161,10 @@ def solve_costed(ctx):
     n = ctx.network
     cfg = ctx.solver_state["solver_config"]
     with with_periodized_cost_defaults(n, cfg):
-        assert n.optimize(solver_name="highs", include_objective_constant=False)[1] == "optimal"
+        assert (
+            n.optimize(solver_name="highs", include_objective_constant=False)[1]
+            == "optimal"
+        )
     ctx.solver_state.update(status="completed", condition="optimal")
     workflow_tools._record_solve_inputs(n, cfg)
     return ctx
@@ -128,8 +191,13 @@ def cost_case(baseline):
 
 
 def _scope(ctx, entity, window=None):
-    scope = {"version": 1, "profile": system_cost.PROFILE, "project_id": ctx.project_uuid,
-             "entity_id": entity, "retain": False}
+    scope = {
+        "version": 1,
+        "profile": system_cost.PROFILE,
+        "project_id": ctx.project_uuid,
+        "entity_id": entity,
+        "retain": False,
+    }
     if window:
         scope.update(start=window[0], end=window[1])
     return scope
@@ -138,16 +206,24 @@ def _scope(ctx, entity, window=None):
 def _checked(ctx, entity, window=None):
     record = records.capture_scoped(records.actor_id(), _scope(ctx, entity, window))
     values = {f["metric"]: f["value"] for f in record["facts"]}
-    reasons = {s["metric"]: s["reason"] for s in record["slots"] if s["disposition"] == "unavailable"}
+    reasons = {
+        s["metric"]: s["reason"]
+        for s in record["slots"]
+        if s["disposition"] == "unavailable"
+    }
     return values, reasons
 
 
 def _raw(ctx, entity="network"):
-    return calculations.scoped_source(ctx, {"profile": system_cost.PROFILE, "entity_id": entity})
+    return calculations.scoped_source(
+        ctx, {"profile": system_cost.PROFILE, "entity_id": entity}
+    )
 
 
 def _reasons(raw, entity="network"):
-    _, slots = system_cost.calculate(raw, {"profile": system_cost.PROFILE, "entity_id": entity})
+    _, slots = system_cost.calculate(
+        raw, {"profile": system_cost.PROFILE, "entity_id": entity}
+    )
     return {s["metric"]: s.get("reason") for s in slots}
 
 
@@ -157,7 +233,9 @@ def test_network_figures_equal_the_hand_arithmetic(cost_case):
     assert values["system_capex"] == pytest.approx(CAPEX, rel=1e-12)
     assert values["system_opex"] == pytest.approx(OPEX, rel=1e-9)
     assert values["system_cost"] == pytest.approx(CAPEX + OPEX, rel=1e-9)
-    assert abs(values["objective_residual"]) <= system_cost.RESIDUAL_TOLERANCE * OBJECTIVE
+    assert (
+        abs(values["objective_residual"]) <= system_cost.RESIDUAL_TOLERANCE * OBJECTIVE
+    )
 
 
 def test_the_carriers_sum_to_the_network_and_each_is_its_own_arithmetic(cost_case):
@@ -169,7 +247,9 @@ def test_the_carriers_sum_to_the_network_and_each_is_its_own_arithmetic(cost_cas
         assert values["system_capex"] == pytest.approx(capex, rel=1e-12, abs=1e-12)
         assert values["system_opex"] == pytest.approx(opex, rel=1e-9, abs=1e-9)
         total.append(values["system_cost"])
-    assert math.fsum(total) == pytest.approx(_checked(ctx, "network")[0]["system_cost"], rel=1e-12)
+    assert math.fsum(total) == pytest.approx(
+        _checked(ctx, "network")[0]["system_cost"], rel=1e-12
+    )
 
 
 def test_the_objective_is_the_hand_lp_basis(cost_case):
@@ -183,7 +263,9 @@ def test_the_annuity_is_the_hand_number_on_both_routes(cost_case, client):
     assert _annuity(0.05, 20) == pytest.approx(CRF, rel=1e-15)
     assert system_cost.annuity(0.0, 20) == 1 / 20
     ctx = cost_case()
-    assert _checked(ctx, "wind")[0]["system_capex"] == pytest.approx(WIND_CAPEX, rel=1e-12)
+    assert _checked(ctx, "wind")[0]["system_capex"] == pytest.approx(
+        WIND_CAPEX, rel=1e-12
+    )
     route = client.get("/api/results/cost_breakdown").json()
     (wind,) = [r for r in route["by_carrier"] if r["carrier"] == "wind"]
     assert wind["capex"] == round(WIND_CAPEX, 5)
@@ -204,8 +286,11 @@ def _disagreements(route, ctx):
     for carrier in CARRIERS:
         values = _checked(ctx, carrier)[0]
         capex, opex = routed.get(carrier.casefold(), (None, None))
-        for metric, theirs in (("system_capex", capex), ("system_opex", opex),
-                               ("system_cost", None if capex is None else capex + opex)):
+        for metric, theirs in (
+            ("system_capex", capex),
+            ("system_opex", opex),
+            ("system_cost", None if capex is None else capex + opex),
+        ):
             if theirs is None or round(theirs, 5) != round(values[metric], 5):
                 out.add((carrier, metric))
     return out
@@ -215,12 +300,16 @@ def test_the_route_shows_the_same_figures(cost_case, client):
     """A4.6: Σ by_carrier is the route's total, and every carrier is the checked figure."""
     ctx = cost_case()
     route = client.get("/api/results/cost_breakdown").json()
-    assert math.fsum(r["total"] for r in route["by_carrier"]) == pytest.approx(route["total"], rel=1e-9)
+    assert math.fsum(r["total"] for r in route["by_carrier"]) == pytest.approx(
+        route["total"], rel=1e-9
+    )
     assert route["total"] == round(CAPEX + OPEX, 5)
     assert _disagreements(route, ctx) == set()
 
 
-def test_an_injected_plus_one_breaks_exactly_the_pairs_it_feeds(cost_case, client, monkeypatch):
+def test_an_injected_plus_one_breaks_exactly_the_pairs_it_feeds(
+    cost_case, client, monkeypatch
+):
     """+1 EUR on one carrier's route opex: exactly its opex and total disagree; the
     checked answer does not read the service, so it does not move."""
     from routers import results
@@ -238,7 +327,10 @@ def test_an_injected_plus_one_breaks_exactly_the_pairs_it_feeds(cost_case, clien
 
     monkeypatch.setattr(results, "compute_cost_breakdown", wrong)
     route = client.get("/api/results/cost_breakdown").json()
-    assert _disagreements(route, ctx) == {("heat", "system_opex"), ("heat", "system_cost")}
+    assert _disagreements(route, ctx) == {
+        ("heat", "system_opex"),
+        ("heat", "system_cost"),
+    }
     assert _checked(ctx, "heat")[0]["system_opex"] == pytest.approx(5.0, rel=1e-9)
 
 
@@ -271,8 +363,12 @@ def test_the_residual_is_the_objective_minus_the_hand_basis(cost_case):
 def test_the_residual_tolerance_boundary(cost_case, factor, answered):
     """At RESIDUAL_TOLERANCE x max(1, |objective|) it answers; at twice that it refuses."""
     raw = _raw(cost_case())
-    values = {f["metric"]: f["value"] for f in system_cost.calculate(
-        raw, {"profile": system_cost.PROFILE, "entity_id": "network"})[0]}
+    values = {
+        f["metric"]: f["value"]
+        for f in system_cost.calculate(
+            raw, {"profile": system_cost.PROFILE, "entity_id": "network"}
+        )[0]
+    }
     basis = raw["objective"] - values["objective_residual"]
     tol = system_cost.RESIDUAL_TOLERANCE
     # Solve objective = basis (1 + f tol) so the residual is exactly f tol |objective|,
@@ -307,21 +403,27 @@ def _reach(cost_case, monkeypatch, name):
     elif name == "annuity_inputs_missing":
         ctx = cost_case()
         ctx.network.generators.loc["wind", "discount_rate"] = math.nan
-        workflow_tools._record_solve_inputs(ctx.network, ctx.solver_state["solver_config"])
+        workflow_tools._record_solve_inputs(
+            ctx.network, ctx.solver_state["solver_config"]
+        )
     else:
         ctx = cost_case()
     n = ctx.network
     if name == "unverified_solve":
         n.add("Load", "late", bus="B", p_set=1)
     elif name == "objective_scaled":
-        monkeypatch.setattr(ctx.solver_state["solver_config"], "user_objective_scale", 2.0)
+        monkeypatch.setattr(
+            ctx.solver_state["solver_config"], "user_objective_scale", 2.0
+        )
         _rerecorded(ctx)  # the solve ran with this config
     elif name == "objective_not_recorded":
         n._objective = math.nan
     elif name == "objective_constant":
         n._objective_constant = 5.0
     elif name == "extra_objective_terms":
-        monkeypatch.setattr("services.solver.reserve_products.objective_revenue", lambda n: 3.0)
+        monkeypatch.setattr(
+            "services.solver.reserve_products.objective_revenue", lambda n: 3.0
+        )
     elif name == "invalid_or_missing_raw_data":
         n.generators_t.p.iloc[0, 0] = math.nan
     elif name == "objective_mismatch":
@@ -383,7 +485,9 @@ def test_refusals_are_named(cost_case, monkeypatch, entity, change, kind):
 def test_a_record_of_another_entity_is_rejected(cost_case):
     raw = _raw(cost_case(), "gas")
     with pytest.raises(ValueError, match="system_cost_source_identity"):
-        system_cost.calculate(raw, {"profile": system_cost.PROFILE, "entity_id": "wind"})
+        system_cost.calculate(
+            raw, {"profile": system_cost.PROFILE, "entity_id": "wind"}
+        )
 
 
 def test_grammar():
@@ -424,13 +528,19 @@ def test_each_sub_guard_withholds_every_figure(cost_case, monkeypatch, change, r
     if change == "live_scale":
         n._pypsa_gui_objective_scale = 2.0
     elif change == "auto_scale":
-        monkeypatch.setattr(ctx.solver_state["solver_config"], "auto_objective_scale", True)
+        monkeypatch.setattr(
+            ctx.solver_state["solver_config"], "auto_objective_scale", True
+        )
         _rerecorded(ctx)
     elif change == "pcs":
-        monkeypatch.setattr("services.solver.pcs_statcom.cost_terms", lambda n: {"PCS oversize": 1.0})
+        monkeypatch.setattr(
+            "services.solver.pcs_statcom.cost_terms", lambda n: {"PCS oversize": 1.0}
+        )
     elif change == "commercial":
-        monkeypatch.setattr("services.commercial.cost_rows.commercial_cost_terms",
-                            lambda n, c, **k: {"items": [{"eur": 1.0}]})
+        monkeypatch.setattr(
+            "services.commercial.cost_rows.commercial_cost_terms",
+            lambda n, c, **k: {"items": [{"eur": 1.0}]},
+        )
     elif change == "modular":
         n.lines.loc["L", "s_nom_mod"] = 5.0
         _rerecorded(ctx)
@@ -438,8 +548,9 @@ def test_each_sub_guard_withholds_every_figure(cost_case, monkeypatch, change, r
         n.stores.loc["S", "active"] = False
         _rerecorded(ctx)
     elif change == "composite":
-        monkeypatch.setattr("services.asset_schema.derive.has_parts",
-                            lambda c, row: c == "StorageUnit")
+        monkeypatch.setattr(
+            "services.asset_schema.derive.has_parts", lambda c, row: c == "StorageUnit"
+        )
     else:
         component, attr = change.split(":")
         static = n.components[component].static
@@ -468,4 +579,3 @@ def test_a_scenario_network_is_refused(cost_case, monkeypatch):
     with pytest.raises(ValueError) as error:
         _raw(ctx)
     assert error.value.args[0] == "unsupported_snapshot_scope"
-

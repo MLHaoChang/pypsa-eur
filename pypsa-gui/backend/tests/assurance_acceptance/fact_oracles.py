@@ -276,12 +276,19 @@ def system_opex(n, start=None, end=None, column="objective"):
     window = rows(n.snapshots, start, end)
     weights = _weights(n, column)[window]
     terms = []
-    for component, dispatch in (("Generator", "p"), ("Link", "p0"),
-                                ("StorageUnit", "p_dispatch"), ("Store", "p")):
+    for component, dispatch in (
+        ("Generator", "p"),
+        ("Link", "p0"),
+        ("StorageUnit", "p_dispatch"),
+        ("Store", "p"),
+    ):
         flow = n.components[component].dynamic[dispatch]
         price = n.get_switchable_as_dense(component, "marginal_cost")[flow.columns]
         terms.append(
-            (price.to_numpy(dtype=float)[window] * flow.to_numpy(dtype=float)[window]
-             * weights[:, None]).ravel()
+            (
+                price.to_numpy(dtype=float)[window]
+                * flow.to_numpy(dtype=float)[window]
+                * weights[:, None]
+            ).ravel()
         )
     return _total(np.concatenate(terms))

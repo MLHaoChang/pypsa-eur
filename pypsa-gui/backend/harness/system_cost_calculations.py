@@ -154,7 +154,9 @@ def source(ctx, entity):
         raise ValueError("unsupported_snapshot_scope")
     if entity != "network":
         carriers = _carriers(n)
-        variants = sorted(c for c in carriers if c != entity and c.casefold() == entity.casefold())
+        variants = sorted(
+            c for c in carriers if c != entity and c.casefold() == entity.casefold()
+        )
         if variants and entity in carriers:
             raise ValueError("ambiguous_carrier")
         if entity not in carriers:
@@ -167,7 +169,9 @@ def source(ctx, entity):
         names = list(static.index)
         if not names:
             continue
-        unmodelled = unmodelled or any(_nonzero(component, a, names) for a in UNMODELLED)
+        unmodelled = unmodelled or any(
+            _nonzero(component, a, names) for a in UNMODELLED
+        )
         if "active" in static and not static["active"].all():
             unmodelled = True
         if any(has_parts(component_class, static.loc[name]) for name in names):
@@ -194,7 +198,9 @@ def source(ctx, entity):
                 "nom_opt": _number(row[f"{nom}_opt"]),
                 "capital_cost": _number(row.get("capital_cost", 0.0)),
                 "fom_cost": _number(row.get("fom_cost", 0.0)),
-                "overnight_cost": None if overnight is None or overnight != overnight else _number(overnight),
+                "overnight_cost": None
+                if overnight is None or overnight != overnight
+                else _number(overnight),
                 "discount_rate": _number(row.get("discount_rate")),
                 "lifetime": _number(row.get("lifetime")),
                 "marginal": None,
@@ -280,7 +286,9 @@ def _guard(raw, weights):
     """The first reason the hand basis cannot stand for the objective, or None."""
     if not raw["valid_solve"] or not profile_common.finite(weights) or min(weights) < 0:
         return "unverified_solve"
-    if raw["objective"] is None:  # `_number` captures a NaN or infinite objective as None
+    if (
+        raw["objective"] is None
+    ):  # `_number` captures a NaN or infinite objective as None
         return "objective_not_recorded"
     if raw["objective_scale"] != 1.0:
         return "objective_scaled"
@@ -328,7 +336,8 @@ def calculate(raw, scope):
             opex = 0.0
             if asset["marginal"] is not None:
                 opex = math.fsum(
-                    w * m * d for w, m, d in zip(weights, asset["marginal"], asset["dispatch"])
+                    w * m * d
+                    for w, m, d in zip(weights, asset["marginal"], asset["dispatch"])
                 )
             rows.append((asset, coefficient, coefficient * asset["nom_opt"], opex))
     if reason is None and any(
