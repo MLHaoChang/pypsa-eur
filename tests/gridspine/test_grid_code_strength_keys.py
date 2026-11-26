@@ -1,8 +1,10 @@
 # SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
 #
 # SPDX-License-Identifier: MIT
-"""The optional grid-strength minima of a grid-code profile (plan GC-03): ``scr_min``,
-``escr_min`` and ``wscr_min``, each {value, clause, source}. No shipped profile carries one."""
+"""
+The optional grid-strength minima of a grid-code profile (plan GC-03): ``scr_min``,
+``escr_min`` and ``wscr_min``, each {value, clause, source}. No shipped profile carries one.
+"""
 
 import pytest
 

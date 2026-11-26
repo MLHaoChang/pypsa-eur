@@ -128,7 +128,9 @@ def test_off_grid_excludes_scr_and_every_fault_level_row_with_the_reason(tmp_pat
     out = G.grid_readiness(tmp_path, _site(), PROFILE)
     excluded = {e["id"]: e for e in out["excluded"]}
     # The sub-synchronous rows are scanned from the PCC and leave by their own rule (GC-08).
-    assert set(excluded) == sk | set(VS_IDS) | set(G.SUBSYNC_PCC_ROWS) | set(G._STRENGTH)
+    assert set(excluded) == sk | set(VS_IDS) | set(G.SUBSYNC_PCC_ROWS) | set(
+        G._STRENGTH
+    )
     assert all(
         excluded[i]["reason"] == G.SK_OFF_GRID and excluded[i]["requirement"]
         for i in sk
