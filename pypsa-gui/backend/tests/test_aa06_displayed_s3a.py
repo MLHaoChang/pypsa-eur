@@ -336,6 +336,16 @@ def test_an_index_of_0_or_a_window_with_from_equal_to_is_a_valid_binding(
         assert displayed_adapters.valid_binding(adapter, {**binding, "period": 0})
 
 
+def test_a_window_that_starts_after_it_ends_is_refused_for_every_adapter():
+    """Load flow too, whose window bounds are not nullable indexes."""
+    from tests.test_aa06_displayed_adapters import _LF_BINDING
+
+    adapter = displayed_adapters.ADAPTERS["loadflow"]
+    assert displayed_adapters.valid_binding(adapter, _LF_BINDING)
+    flipped = {**_LF_BINDING, "window_from": 2, "window_to": 1}
+    assert not displayed_adapters.valid_binding(adapter, flipped)
+
+
 def test_a_missing_index_key_is_refused_422(client, solved):
     _, ack = _issue(solved, "loadshape")
     body = copy.deepcopy(_ack_body(ack))
@@ -611,6 +621,12 @@ def test_a_payload_with_exactly_the_series_keys_has_a_ref():
     assert displayed_adapters.ADAPTERS["curtailment"].read_ref(series) == {
         "read_sha256": expected
     }
+
+
+def test_an_emissions_read_with_exactly_its_two_keys_has_a_ref():
+    """S2's shape check is a subset test, so the bare payload is a read too."""
+    payload = {"total_tCO2": 1.0, "by_carrier": {"gas": 1.0}}
+    assert displayed_adapters.ADAPTERS["emissions"].read_ref(payload) is not None
 
 
 def test_the_curtailment_read_ref_is_the_hash_of_the_part_shown(client, solved):

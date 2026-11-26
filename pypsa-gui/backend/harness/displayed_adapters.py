@@ -272,7 +272,7 @@ def valid_binding(adapter: DisplayedAdapter, binding) -> bool:
         elif not isinstance(value, str):
             return False
     start, end = binding.get("window_from"), binding.get("window_to")
-    if adapter.index_keys and start is not None and end is not None and start > end:
+    if start is not None and end is not None and start > end:
         return False
     return True
 
