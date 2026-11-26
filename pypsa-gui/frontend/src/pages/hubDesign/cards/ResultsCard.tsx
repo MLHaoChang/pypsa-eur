@@ -110,6 +110,9 @@ export function ResultsCard() {
   const cheaper = cheaperDuration(review?.findings, levers, report)
   const cost = report?.cost_at_target_eur
   const lcoh = report ? lcohChip(report) : null
+  // The cost of ammonia per t, where the design synthesises it (issue 28a); the study's figure only.
+  const lcoa = report?.tea?.lcoa_eur_per_t ?? null
+  const teaCurrency = report?.tea?.currency || 'EUR'
   const project = useUIStore(s => s.currentProject)
   const multiPeriod = report?.period_basis === 'npv_multi_period'
   const periods = useQuery({
@@ -258,8 +261,16 @@ export function ResultsCard() {
           from the study report's TEA block; absent for a design with no electrolyser. */}
       {lcoh?.value != null && (
         <Kpi testId="hub-results-lcoh" label="Cost of hydrogen"
-          value={`${money(lcoh.value, 'EUR')}/kg`}
+          value={`${money(lcoh.value, teaCurrency)}/kg`}
           hint="Levelised cost of the hydrogen this design produces, per kilogram, as the study priced it."
+          state="ready" dimmed={stale || freshnessUnknown} />
+      )}
+      {/* Ammonia's cost per tonne (issue 28a), the unit of the template's Haber-Bosch flows (t/d);
+          absent for a design with no ammonia synthesis. */}
+      {lcoa != null && (
+        <Kpi testId="hub-results-lcoa" label="Cost of ammonia"
+          value={`${money(lcoa, teaCurrency)}/t`}
+          hint="Levelised cost of the ammonia this design makes, per tonne, as the study priced it: the synthesis unit, its electricity and its hydrogen."
           state="ready" dimmed={stale || freshnessUnknown} />
       )}
 

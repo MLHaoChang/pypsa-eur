@@ -141,6 +141,23 @@ describe('ResultsCard product cost (issue 28)', () => {
     await screen.findByTestId('hub-results-cost')
     expect(screen.queryByTestId('hub-results-lcoh')).toBeNull()
   })
+  it('shows the ammonia cost per tonne from the study beside an unchanged hydrogen tile (issue 28a)', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(study({ ...REPORT, tea: {
+      lcoh_eur_per_kg: 2.345, lcoh_status: 'ok', lcoa_eur_per_t: 612.4, lcoa_status: 'ok', currency: 'EUR' } }))
+    mount()
+    const tile = await screen.findByTestId('hub-results-lcoa')
+    expect(tile.textContent).toContain('Cost of ammonia')
+    expect(tile.querySelector('[data-kpi-value]')?.getAttribute('data-kpi-value')).toBe('€\u00a0612/t')
+    expect(screen.getByTestId('hub-results-lcoh').querySelector('[data-kpi-value]')
+      ?.getAttribute('data-kpi-value')).toBe('€\u00a02.35/kg')
+  })
+  it('shows no ammonia tile for a design with no ammonia synthesis', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(study({ ...REPORT, tea: {
+      lcoh_eur_per_kg: 2.345, lcoh_status: 'ok', lcoa_eur_per_t: null, lcoa_status: 'skipped' } }))
+    mount()
+    await screen.findByTestId('hub-results-lcoh')
+    expect(screen.queryByTestId('hub-results-lcoa')).toBeNull()
+  })
 })
 
 describe('ResultsCard body', () => {
