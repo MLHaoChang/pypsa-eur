@@ -49,6 +49,7 @@ from tests.test_lost_load_assurance import solve as solve_through_api
 from tests.test_result_profiles_assurance import gas, priced, windy  # noqa: F401
 from tests.test_result_profiles_assurance import solve
 from tests.test_site_import_assurance import importing  # noqa: F401
+from tests.test_system_cost_assurance import hand_cost, solve_costed  # noqa: F401
 from tests.test_storage_assurance import storage  # noqa: F401
 from tests.test_storage_cost_assurance import BASIS, record_solve
 from tests.test_time_to_power_assurance import staged_dc  # noqa: F401
@@ -177,6 +178,9 @@ DRIVERS = {
     "branch-losses/1": Driver(
         "hand_losses", write_losses, _scope("branch-losses/1", "network")
     ),
+    "system-cost-breakdown/1": Driver(
+        "hand_cost", solve_costed, _scope("system-cost-breakdown/1", "network")
+    ),
     "capacity/1": Driver(
         "built", solve, _scope("capacity/1", "G2", component_class="Generator")
     ),
@@ -220,6 +224,7 @@ FIXTURES = [
     gas,
     windy,
     hand_losses,
+    hand_cost,
     built,
     tank,
     exporting,
