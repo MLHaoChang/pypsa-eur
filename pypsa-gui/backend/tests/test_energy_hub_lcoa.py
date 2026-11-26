@@ -257,3 +257,42 @@ def test_a_failing_ammonia_engine_is_flagged_and_leaves_hydrogen_alone(monkeypat
     tea = R.compute_tea(cost_eur=100.0, served_energy_mwh=10.0, network=certifiable_weak_network())
     assert tea.lcoh_status == "skipped"
     assert tea.lcoa_status == "not_established" and "bad buses" in tea.lcoa_note
+
+
+def test_an_unsolved_network_is_not_established():
+    n = _hb_network()
+    n.links_t.p0 = pd.DataFrame(index=n.snapshots)
+    tea = _tea(n)
+    assert tea.lcoa_eur_per_t is None
+    assert tea.lcoa_status == "not_established" and "solved dispatch" in tea.lcoa_note
+
+
+def test_an_output_bus_is_not_charged():
+    n = _hb_network()
+    n.add("Bus", "heat", carrier="heat")
+    n.links["bus3"] = ""
+    n.links["efficiency3"] = 0.0
+    n.links.at["hb", "bus3"] = "heat"
+    n.links.at["hb", "efficiency3"] = 0.3
+    n.buses_t.marginal_price["heat"] = [40.0, 45.0]
+    assert _lcoa(n)["total"]["cost_eur"] == pytest.approx(COST)
+
+
+def test_the_ammonia_synthesis_carrier_counts_without_an_h2_bus():
+    n = _hb_network(carrier="Ammonia synthesis")
+    n.buses.at["h2", "carrier"] = "AC"
+    assert ammonia_synthesis_links(n) == ["hb"]
+
+
+def test_a_missing_generators_weighting_is_not_established():
+    n = _hb_network()
+    n.snapshot_weightings.loc[1, "generators"] = float("nan")
+    tea = _tea(n)
+    assert tea.lcoa_status == "not_established" and "weighting" in tea.lcoa_note
+
+
+def test_a_synthesis_link_with_no_dispatch_column_is_not_established():
+    n = _hb_network()
+    n.links_t.p0 = pd.DataFrame({"other": [1.0, 1.0]}, index=n.snapshots)
+    tea = _tea(n)
+    assert tea.lcoa_status == "not_established" and "dispatch of 'hb'" in tea.lcoa_note
