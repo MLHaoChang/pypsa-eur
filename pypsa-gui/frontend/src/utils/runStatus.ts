@@ -9,6 +9,7 @@
 import type { SolveJob, SolveJobKind } from '../api/solveQueue'
 import type { EhStudyPayload } from '../api/simulation'
 import type { RunEstimate } from '../api/runEstimate'
+import { runWhen } from '../pages/results/runWhen'
 
 /** Plain names for each run type (RAW-NAMES-1: never the kind string). */
 export const RUN_NAME: Record<SolveJobKind, string> = {
@@ -65,6 +66,17 @@ export function runFromStudy(study: EhStudyPayload | null | undefined): RunView 
     jobId: null,
     queued: false,
   }
+}
+
+/** The Guided goal study once it has finished successfully, as the header names it: "Run of 26 Nov, 13:02"
+ *  (its finish, else its start). Null while it runs, after a failed, aborted or interrupted study, or when no
+ *  time was recorded. */
+export function finishedStudyLabel(study: EhStudyPayload | null | undefined): string | null {
+  if (!study || study.status !== 'done') return null
+  const at = study.finished_at ?? study.started_at
+  if (at == null) return null
+  const when = runWhen(new Date(at * 1000).toISOString())
+  return when ? `Run of ${when}` : null
 }
 
 /** 41 → "0:41", 188 → "3:08". */

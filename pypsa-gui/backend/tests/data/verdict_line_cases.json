@@ -1,0 +1,9 @@
+[
+  {"summary": {"verdict": "fail", "mc_lole_h_per_year": 12.38, "target_lole_h": 3}, "lead": "Not certified: about 12.4 h/yr of shortfall vs a 3 h/yr goal"},
+  {"summary": {"verdict": "fail", "mc_lole_h_per_year": 7.6, "target_lole_h": 2.5}, "lead": "Not certified: about 7.6 h/yr of shortfall vs a 2.5 h/yr goal"},
+  {"summary": {"verdict": "pass", "mc_lole_h_per_year": 0.4, "target_lole_h": 2}, "lead": "Certified: about 0.4 h/yr of shortfall, under the 2 h/yr goal."},
+  {"summary": {"verdict": "pass", "mc_lole_h_per_year": 0, "target_lole_h": 2}, "lead": "Certified: no shortfall expected, under the 2 h/yr goal."},
+  {"summary": {"verdict": "inconclusive", "mc_lole_h_per_year": 1.9, "target_lole_h": 2, "feeder_bound": {"pockets": [{"buses": ["bus_a"], "feeders": ["feeder_1"], "bound_h_per_year": 3.2}]}}, "lead": "Not decided"},
+  {"summary": {"verdict": "pass", "mc_lole_h_per_year": 1.2, "target_lole_h": null}, "lead": "No reliability goal was set: the study reports 1.2 h/yr of shortfall. Set a goal to certify."},
+  {"summary": {"verdict": null, "mc_lole_h_per_year": null, "target_lole_h": null}, "lead": "No reliability goal is set for this site, so the study did not certify it"}
+]
