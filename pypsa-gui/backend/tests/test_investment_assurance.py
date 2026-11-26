@@ -297,3 +297,38 @@ def test_an_unknown_retained_year_is_named_as_such(project, checked):
         payload["lcoe_inputs"]["energy_mwh"][1] = None
     store(project, gap)
     assert set(reasons(ask(checked, project, {}, LCOE)).values()) == {"lcoe_inputs_not_established"}
+
+
+# ── AA-10 R2: project_irr against hand-worked roots (GK B (72) R2 conditions) ──
+
+
+def _project_irr_slot(ctx):
+    from harness import calculations, investment_calculations
+
+    scope = {"version": 1, "profile": PROFILE, "entity_id": "network"}
+    raw = investment_calculations.source(ctx, "network", investment_calculations.current(ctx), PROFILE)
+    facts, slots = calculations.scoped_calculate(raw, scope)
+    values = {f["metric"]: f["value"] for f in facts}
+    return values.get("project_irr"), {s["metric"]: s.get("reason") for s in slots}["project_irr"]
+
+
+def test_project_irr_of_one_sign_change_is_the_hand_root(project):
+    # -100 + 110 / (1 + r) = 0  =>  r = 110 / 100 - 1 = 0.10 exactly.
+    store(project, lambda p: hand(p, project=[-100.0, 110.0]))
+    value, reason = _project_irr_slot(project)
+    assert reason is None
+    assert value == pytest.approx(0.10, abs=1e-9)
+
+
+def test_project_irr_with_two_roots_is_refused(project):
+    # -100 + 230 / (1 + r) - 132 / (1 + r)^2 = 0  =>  100x^2 - 230x + 132 = 0 with x = 1 + r:
+    # x = (230 ± sqrt(52900 - 52800)) / 200 = (230 ± 10) / 200 = 1.1 or 1.2, so r = 10 % and 20 %.
+    # A profile returning the first root it finds would answer one of them.
+    store(project, lambda p: hand(p, project=[-100.0, 230.0, -132.0]))
+    assert _project_irr_slot(project) == (None, "irr_not_unique")
+
+
+def test_project_irr_without_a_sign_change_is_refused(project):
+    # 100 + 50 / (1 + r) > 0 for every r > -1: no root.
+    store(project, lambda p: hand(p, project=[100.0, 50.0]))
+    assert _project_irr_slot(project) == (None, "irr_no_sign_change")

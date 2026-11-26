@@ -615,6 +615,13 @@ time-weighted price, generator CO2 over the time-varying efficiency with the cap
 dual as −mu, and curtailment of generators with a time-varying availability. An AC
 power flow leaves the LP outputs in place (owner decision PF-SAVE-1: the flow's
 values live only in `ac_pf_results`), so every profile still reads the LP after one.
+`branch-losses/1` (opt-in, `losses_calculations.py`, assistant-assurance 10 S1b) is the
+exception: like the loading profiles it refuses once a power-flow record exists
+(`ac_pf_present`). It reads the LP's Line and Transformer `loss` frames and `loads_t.p`
+through `services/results/losses.py:_validity_rows`, before the route's zero-fill. A member
+that is incomplete, absent or misaligned anywhere in the horizon gives no figure, and its
+state is the slot's reason. The network totals and the share of demand need every member
+complete, and the share uses `derived.NEAR_ZERO` as its denominator guard.
 `capacity/1` (opt-in) reports one named-class component's `*_nom_opt` and its
 change, and says when it was built to its bound; `storage-cycles/1` divides window
 discharge (store weights) by energy capacity, sharing the StorageUnit profile's
