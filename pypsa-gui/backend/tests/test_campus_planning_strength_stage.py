@@ -92,11 +92,8 @@ def test_a_scr_minimum_in_the_profile_judges_the_campus_scr_row_only(ran):
         and row["source"].endswith("demo clause 1.2")
         and row["assumed"] is False
     )
-    assert (
-        row["verdict"]
-        == G._judge(row["project_value"], 3.0, G.RULE_STRENGTH)
-        != "unknown"
-    )
+    # the fixture's one transformer islands the PoC, so there is no ratio to judge: never a pass, never 0
+    assert row["verdict"] == "unknown" and row["project_value"] is None
     # ESCR and WSCR are never judged on the SCR minimum
     assert card["campus_escr"]["verdict"] == card["campus_wscr"]["verdict"] == "unknown"
     assert card["campus_escr"]["limit"] is None
@@ -219,21 +216,25 @@ def test_a_run_from_before_the_stages_reads_unknown_and_asks_for_a_rerun(ran):
 
 
 def test_the_campus_scr_row_matches_the_run_table(ran):
-    """The row shows the least worst-outage SCR the run wrote over the PoCs and stages with a converter; an
-    outage that islands a PoC (the fixture's one transformer) counts as 0 and is named."""
+    """The shared fixture has one PCC transformer, so its outage (GRID-MV-1) islands the PoC: the engine leaves
+    it out of the worst, the strength rows read unknown with no value (never 0) and name it, and the planning
+    row fails for that same outage (GK A2 ruling on H4)."""
     hub, _ = ran  # noqa: F811 - the hub fixture's value
-    table = pd.read_csv(ce.campus_dir(hub) / "run" / ce.cs.STRENGTH_CSV)
+    run = ce.campus_dir(hub) / "run"
+    table = pd.read_csv(run / ce.cs.STRENGTH_CSV)
     live = table[table["p_mw"] > 0]
-    islands = live[live["islanding_outages"].astype(str) != "[]"]
-    row = _card(hub)["campus_scr"]
-    if len(islands):
-        first = sorted(G._islanding(islands["islanding_outages"].iloc[0]))[0]
-        assert (
-            row["project_value"] == 0.0
-            and f"outage {first} islands it from the grid" in row["note"]
-        )
-    else:
-        assert row["project_value"] == pytest.approx(float(live["scr_worst"].min()))
+    assert len(live) and live["scr_worst"].isna().all()
+    assert set(live["islanding_outages"]) == {"['GRID-MV-1']"}
+    card = _card(hub)
+    for rid in ("campus_scr", "campus_escr", "campus_wscr"):
+        row = card[rid]
+        assert row["verdict"] == "unknown" and row["project_value"] is None
+        assert "GRID-MV-1 at " in row["note"] and "is not evaluated" in row["note"]
+    planning = pd.read_csv(run / ce.cs.PLANNING_CSV)
+    assert set(planning.loc[planning["verdict"] == "fail", "contingency_id"]) == {
+        "GRID-MV-1"
+    }
+    assert card[G.PLANNING_ID]["verdict"] == "fail"
 
 
 # ── the wrappers on their own (no run) ──────────────────────────────────────

@@ -145,7 +145,10 @@ def test_off_grid_excludes_scr_and_every_fault_level_row_with_the_reason(tmp_pat
     assert all(excluded[i]["reason"] == G.VS_OFF_GRID for i in VS_IDS) and VS_IDS
     # So do the campus strength rows (GC-03); the planning row stays: the campus N-1 applies off-grid too.
     assert all(excluded[i]["reason"] == G.VS_OFF_GRID for i in G._STRENGTH)
-    assert G.PLANNING_ID in {r["id"] for r in out["rows"]}
+    planning = next(r for r in out["rows"] if r["id"] == G.PLANNING_ID)
+    assert planning["note"].endswith(
+        ". Off-grid, this screens the campus's own N-1, and the TSO's grid code does not apply."
+    )
     # An excluded row is never counted, as a pass or as anything else.
     assert sum(out["summary"][v] for v in G.VERDICTS) == len(out["rows"])
     for i in sk:

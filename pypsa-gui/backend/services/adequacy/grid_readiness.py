@@ -2523,6 +2523,8 @@ PLANNING_ID = "planning_criteria"
 _PLANNING_REQ = "Planning criteria under contingency (TRGC 15)"
 #: The planning summary's verdict on the scorecard: anything but "pass" or "fail" (incomplete, not
 #: evaluated, error, blank, a value from another version) is unknown, never a pass.
+#: The planning row's line on an off-grid scorecard: the campus N-1 still applies, the TSO's code does not.
+PLANNING_OFF_GRID = "Off-grid, this screens the campus's own N-1, and the TSO's grid code does not apply."
 PLANNING_VERDICTS = {"pass": "pass", "fail": "fail"}
 #: Each strength row: its profile key, its ratio, the run table and column it reads.
 _STRENGTH = {
@@ -2549,6 +2551,13 @@ def _gc03_run(inp: _Inputs):
     from services import campus_electrical_service as ce
 
     return ce, inp.dir / ce.SUBDIR / "run"
+
+
+def _gc03_failed(what: str, error: dict) -> str:
+    """The note of a GC-03 screen that could not run, with the run's reason when it gave one."""
+    why = error.get("error")
+    return (f"The {what} screen could not run: {why}" if isinstance(why, str) and why.strip()
+            else f"The {what} screen could not run, and the run gave no reason")
 
 
 def _gc03_missing(run: pathlib.Path, what: str) -> str:
@@ -2597,6 +2606,16 @@ def _planning_counts(meta: dict, frame) -> tuple[str | None, str]:
 
 
 def _planning_rows(inp: _Inputs) -> list[dict]:
+    """The planning-criteria row (``_planning_judged``); off-grid its note says the campus's own N-1 is
+    screened and the TSO's code does not apply."""
+    rows = _planning_judged(inp)
+    if grid_case(inp) != "grid":
+        for r in rows:
+            r["note"] = f"{r['note'].rstrip('.')}. {PLANNING_OFF_GRID}"
+    return rows
+
+
+def _planning_judged(inp: _Inputs) -> list[dict]:
     """The planning-criteria screen of the campus run (``campus_study.planning_campus``): thermal, voltage
     and angle limits after each contingency of the campus N-1, at each period's maximum-import and
     maximum-export hour. A pass needs every case screened and passing (fail closed)."""
@@ -2615,7 +2634,7 @@ def _planning_rows(inp: _Inputs) -> list[dict]:
     meta = _read_json(run / ce.PLANNING_META)
     if isinstance(error, dict):
         return [_row(PLANNING_ID, _PLANNING_REQ, project_value=None, verdict="unknown", assumed=True,
-                     note=f"The planning screen could not run: {error.get('error') or 'no reason given'}",
+                     note=_gc03_failed("planning", error),
                      **common)]
     if not isinstance(meta, dict):
         return [_row(PLANNING_ID, _PLANNING_REQ, project_value=None, verdict="unknown", assumed=True,
@@ -2650,38 +2669,39 @@ def _islanding(v) -> list:
     return list(out) if isinstance(out, (list, tuple)) else [out]
 
 
-def _strength_worst(frame, spec: dict):
-    """The worst row of a strength table for ``spec``: ``("value", value, row, outage, islands)`` with the least
-    ratio (an outage that islands the PoC counts as 0; ties to the first stage and PoC), or
-    ``("gap", the worst found or None, row, its outage, False)`` for the first connected row with no finite
-    ratio. Rows with no converter connected in the stage (P = 0) have no ratio and are left out. None when no
-    row is connected."""
-    worst, gap = None, None
+def _outage_name(v) -> str | None:
+    """An outage cell as text, None when empty (NaN)."""
+    return None if v is None or (isinstance(v, float) and math.isnan(v)) else str(v)
+
+
+def _strength_worst(frame, spec: dict) -> dict | None:
+    """What a strength table says for ``spec`` over its connected rows (P = 0 rows have no converter and are
+    left out), in (stage, PoC or group) order:
+
+    - ``worst``: ``(value, row, outage)`` of the least finite ratio (ties go to the first row), or None;
+    - ``gap``: ``(row, outage)`` of the first row with no ratio and no islanding outage to explain it, or None;
+    - ``islands``: ``[(outage, row)]``, each outage that islands a PoC (or the group). The engine leaves those
+      out of the worst (``static/strength.py``): a ratio under them is not evaluated, never 0.
+
+    None when no row is connected."""
+    worst, gap, islands, connected = None, None, [], False
     for _, r in frame.sort_values(["stage", spec["where"]], kind="mergesort").iterrows():
         p = _num(r.get("p_mw"))
         if p is not None and p == 0:
             continue
-        islands = _islanding(r.get("islanding_outages"))
-        if islands:
-            cand = (0.0, r, str(sorted(map(str, islands))[0]), True)
-        else:
-            v = _num(r.get(spec["value"]))
-            if v is None or p is None:
-                if gap is None:
-                    gap = r
-                continue
-            outage = r.get("worst_outage")
-            cand = (v, r, None if outage is None or (isinstance(outage, float) and math.isnan(outage))
-                    else str(outage), False)
-        if worst is None or cand[0] < worst[0]:
-            worst = cand
-    if gap is not None:
-        outage = gap.get("worst_outage")
-        outage = None if outage is None or (isinstance(outage, float) and math.isnan(outage)) else str(outage)
-        return "gap", worst, gap, outage, False
-    if worst is None:
+        connected = True
+        isl = sorted(map(str, _islanding(r.get("islanding_outages"))))
+        islands += [(o, r) for o in isl]
+        v = _num(r.get(spec["value"]))
+        if v is None or p is None:
+            if gap is None and not (isl and p is not None):
+                gap = (r, _outage_name(r.get("worst_outage")))
+            continue
+        if worst is None or v < worst[0]:
+            worst = (v, r, _outage_name(r.get("worst_outage")))
+    if not connected:
         return None
-    return ("value", *worst)
+    return {"worst": worst, "gap": gap, "islands": islands}
 
 
 def _strength_at(spec: dict, r) -> str:
@@ -2708,15 +2728,15 @@ def _strength_rows(inp: _Inputs) -> list[dict]:
         meta = _read_json(run / ce.STRENGTH_META)
         tables = {}
         if isinstance(error, dict):
-            reason = f"The strength screen could not run: {error.get('error') or 'no reason given'}"
+            reason = _gc03_failed("strength", error)
         elif not isinstance(meta, dict):
             reason = _gc03_missing(run, "strength screen")
         elif meta.get("verdict") == ce.STRENGTH_NOT_EVALUATED:
-            reason = f"{meta.get('note') or 'There is no grid infeed'}. Strength is not evaluated"
+            reason = f"{meta.get('note') or 'There is no grid infeed'}. Strength is not evaluated."
         else:
             try:
-                # outage names stay text: a numeric name reads as written, never as a float
-                names = {"worst_outage": str, "islanding_outages": str}
+                # ids and outage names stay text: "001" or "7" reads as written, never as a number
+                names = dict.fromkeys(("poc", "group", "worst_outage", "islanding_outages"), str)
                 tables = {"pocs": pd.read_csv(run / STRENGTH_CSV, dtype=names),
                           "groups": pd.read_csv(run / STRENGTH_GROUPS_CSV, dtype=names)}
             except (OSError, ValueError):
@@ -2751,21 +2771,25 @@ def _strength_rows(inp: _Inputs) -> list[dict]:
         if hit is None:
             rows.append(unknown(f"No converter is connected at any stage, so there is no {spec['what']} to judge"))
             continue
-        kind, value, r, outage, islands = hit
-        gap_words = None
-        if kind == "gap":
+        kind = "PoC" if spec["where"] == "poc" else "group"
+        extra = []
+        if hit["gap"] is not None:
+            r, outage = hit["gap"]
             gap_at = _strength_at(spec, r) + (f" (worst outage {outage})" if outage is not None else "")
-            gap_words = f"No {spec['what']} at {gap_at}: the fault level under its worst outage was not found"
-            # a ratio found elsewhere below the minimum still warns: the missing one can only be lower
-            if value is None or limit is None or _judge(value[0], limit, RULE_STRENGTH) == "pass":
-                rows.append(unknown(gap_words))
-                continue
-            value, r, outage, islands = value
-        at = _strength_at(spec, r)
-        if islands:
-            how = f"outage {outage} islands it from the grid, so the {spec['what']} is 0"
-        else:
-            how = f"worst outage {outage}" if outage is not None else "no outage lowers it"
+            extra.append(f"No {spec['what']} at {gap_at}: the fault level under its worst outage was not found.")
+        if hit["islands"]:
+            k = len(hit["islands"])
+            named = ", ".join(f"{o} at {_strength_at(spec, r)}" for o, r in hit["islands"][:3])
+            extra.append(f"{k} outage{'s' if k != 1 else ''} island{'' if k != 1 else 's'} the {kind} from the "
+                         f"grid, so the {spec['what']} under {'them' if k != 1 else 'it'} is not evaluated "
+                         f"({named}{', …' if k > 3 else ''}). The planning-criteria row judges that loss of "
+                         "supply.")
+        if hit["worst"] is None:
+            # every connected row islands under its outages or has no ratio: nothing to show
+            rows.append(unknown(" ".join(extra)))
+            continue
+        value, r, outage = hit["worst"]
+        how = f"worst outage {outage}" if outage is not None else "no outage lowers it"
         intact = _num(r.get(spec["intact"]))
         if limit is None:
             shown = f"{value:.4g}"
@@ -2776,9 +2800,12 @@ def _strength_rows(inp: _Inputs) -> list[dict]:
             verdict = _judge(value, limit, RULE_STRENGTH)
             words = (f"at or above the minimum {lim_shown}" if verdict == "pass"
                      else f"below the minimum {lim_shown}")
-        note = (f"Lowest {spec['what']} {shown} at {at} ({how}"
+        if extra and verdict == "pass":
+            # a ratio not evaluated somewhere can only be lower: never a pass (a warn found elsewhere stays)
+            verdict = "unknown"
+        note = (f"Lowest {spec['what']} {shown} at {_strength_at(spec, r)} ({how}"
                 + (f" · intact {intact:.4g}" if intact is not None else "") + f"): {words}."
-                + (f" {gap_words}." if gap_words else "") + f" {STRENGTH_BASIS}")
+                + "".join(f" {e}" for e in extra) + f" {STRENGTH_BASIS}")
         rows.append(_row(rid, spec["req"], project_value=value, verdict=verdict, assumed=assumed,
                          note=note, **common))
     return rows

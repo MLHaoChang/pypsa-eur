@@ -386,8 +386,10 @@ def test_a_connected_poc_with_no_ratio_is_unknown_and_named_never_dropped(tmp_pa
     )
     profile, dirs = _profile_with(tmp_path, scr_min=3.0)
     row = _card(tmp_path, profile, dirs)["campus_scr"]
-    assert row["verdict"] == "unknown" and row["project_value"] is None
+    # the value found is shown, but the gap caps a pass at unknown
+    assert row["verdict"] == "unknown" and row["project_value"] == 4.0
     assert row["note"] == (
+        "Lowest SCR 4 at PoC MV, stage 2030 (worst outage L1 · intact 6): at or above the minimum 3. "
         "No SCR at PoC LV1, stage 2031 (worst outage L7): the fault level under its worst outage "
         "was not found. " + BASIS
     )
@@ -411,7 +413,9 @@ def test_a_gap_never_hides_a_ratio_found_below_the_minimum(tmp_path):
     )
 
 
-def test_an_islanding_outage_reads_zero_and_is_named(tmp_path):
+def test_when_every_outage_islands_the_poc_nothing_is_shown_and_never_zero(tmp_path):
+    """The engine leaves an islanding outage out of the worst: with only those, there is no ratio to show.
+    The loss of supply is the planning row's fail (GK A2 ruling on H4)."""
     _strength(
         tmp_path,
         pocs=[
@@ -422,17 +426,71 @@ def test_an_islanding_outage_reads_zero_and_is_named(tmp_path):
                 islands="['T2', 'T1']",
             )
         ],
-        groups=[_group(islands="['T1']")],
+        groups=[_group(wscr=float("nan"), outage=float("nan"), islands="['T1']")],
     )
     profile, dirs = _profile_with(tmp_path, scr_min=3.0)
     card = _card(tmp_path, profile, dirs)
     scr = card["campus_scr"]
-    assert scr["verdict"] == "warn" and scr["project_value"] == 0.0
-    assert (
-        "(outage T1 islands it from the grid, so the SCR is 0 · intact 6)"
-        in scr["note"]
+    assert scr["verdict"] == "unknown" and scr["project_value"] is None
+    assert scr["note"] == (
+        "2 outages island the PoC from the grid, so the SCR under them is not evaluated (T1 at PoC MV, "
+        "stage 2030, T2 at PoC MV, stage 2030). The planning-criteria row judges that loss of supply. "
+        + BASIS
     )
-    assert card["campus_wscr"]["project_value"] == 0.0
+    wscr = card["campus_wscr"]
+    assert wscr["verdict"] == "unknown" and wscr["project_value"] is None
+    assert wscr["note"].startswith(
+        "1 outage islands the group from the grid, so the WSCR under it is not "
+        "evaluated (T1 at group campus, stage 2030)."
+    )
+
+
+def test_two_transformers_judge_the_finite_worst_and_an_islanding_outage_caps_a_pass(
+    tmp_path,
+):
+    """Two PCC transformers: losing one leaves a finite SCR, which is judged; a second PoC fed radially islands
+    under its outage, which is named and keeps the row from passing."""
+    pocs = [
+        _poc("2030", "MV", scr=4.0, outage="T1"),
+        _poc("2030", "LV1", scr=float("nan"), outage=float("nan"), islands="['L3']"),
+    ]
+    _strength(tmp_path, pocs=pocs)
+    profile, dirs = _profile_with(tmp_path, scr_min=3.0)
+    row = _card(tmp_path, profile, dirs)["campus_scr"]
+    assert row["verdict"] == "unknown" and row["project_value"] == 4.0
+    assert row["note"] == (
+        "Lowest SCR 4 at PoC MV, stage 2030 (worst outage T1 · intact 6): at or above the minimum 3. "
+        "1 outage islands the PoC from the grid, so the SCR under it is not evaluated (L3 at PoC LV1, stage "
+        "2030). The planning-criteria row judges that loss of supply. " + BASIS
+    )
+    # with no islanding outage the same finite worst passes
+    _strength(tmp_path, pocs=pocs[:1])
+    assert _card(tmp_path, profile, dirs)["campus_scr"]["verdict"] == "pass"
+    # an islanding outage beside a finite worst of the same PoC: the finite worst is judged, never 0
+    _strength(
+        tmp_path, pocs=[_poc("2030", "MV", scr=2.0, outage="T1", islands="['T9']")]
+    )
+    row = _card(tmp_path, profile, dirs)["campus_scr"]
+    assert row["verdict"] == "warn" and row["project_value"] == 2.0
+    assert "(T9 at PoC MV, stage 2030)" in row["note"]
+
+
+def test_more_than_three_islanding_outages_are_counted_and_elided(tmp_path):
+    _strength(tmp_path, pocs=[_poc(scr=4.0, islands="['A', 'B', 'C', 'D']")])
+    note = _card(tmp_path)["campus_scr"]["note"]
+    assert (
+        "4 outages island the PoC from the grid, so the SCR under them is not evaluated (A at PoC MV, stage "
+        "2030, B at PoC MV, stage 2030, C at PoC MV, stage 2030, …)."
+    ) in note
+
+
+def test_ids_read_as_text(tmp_path):
+    _strength(
+        tmp_path, pocs=[_poc(poc="001", scr=4.0)], groups=[{**_group(), "group": "007"}]
+    )
+    card = _card(tmp_path)
+    assert "at PoC 001, stage 2030" in card["campus_scr"]["note"]
+    assert "at group 007, stage 2030" in card["campus_wscr"]["note"]
 
 
 def test_no_converter_at_any_stage_is_unknown(tmp_path):
@@ -516,11 +574,11 @@ def test_an_error_with_no_reason_says_so(tmp_path):
     card = _card(tmp_path)
     assert (
         card[G.PLANNING_ID]["note"]
-        == "The planning screen could not run: no reason given"
+        == "The planning screen could not run, and the run gave no reason"
     )
     assert (
         card["campus_scr"]["note"]
-        == f"The strength screen could not run: no reason given. {BASIS}"
+        == f"The strength screen could not run, and the run gave no reason. {BASIS}"
     )
 
 
@@ -562,8 +620,8 @@ def test_a_row_with_no_converter_size_is_a_gap(tmp_path):
         pocs=[_poc(scr=4.0), _poc("2031", "LV1", p=float("nan"), scr=5.0, outage="L7")],
     )
     row = _card(tmp_path)["campus_scr"]
-    assert row["verdict"] == "unknown" and row["note"].startswith(
-        "No SCR at PoC LV1, stage 2031 (worst outage L7)"
+    assert row["verdict"] == "unknown" and (
+        " No SCR at PoC LV1, stage 2031 (worst outage L7): " in row["note"]
     )
 
 
@@ -599,10 +657,12 @@ def test_a_lone_gap_with_a_minimum_and_a_gap_beside_a_value_with_none_read_unkno
         ],
     )
     row = _card(tmp_path)["campus_scr"]
-    assert row["verdict"] == "unknown" and row["project_value"] is None
+    # no minimum: the value found is still shown (option A), and the gap is named
+    assert row["verdict"] == "unknown" and row["project_value"] == 2.0
     assert row["note"] == (
-        "No SCR at PoC LV1, stage 2030 (worst outage L7): the fault level under its worst outage "
-        f"was not found. {BASIS}"
+        "Lowest SCR 2 at PoC MV, stage 2031 (worst outage L1 · intact 6): the profile states no SCR minimum, "
+        "so it is shown, not judged. No SCR at PoC LV1, stage 2030 (worst outage L7): the fault level under its "
+        f"worst outage was not found. {BASIS}"
     )
 
 
@@ -640,4 +700,43 @@ def test_a_table_with_more_rows_than_cases_disagrees(tmp_path):
     pd.concat([frame, frame.tail(1)]).to_csv(path, index=False)
     assert _card(tmp_path)[G.PLANNING_ID]["note"].startswith(
         "The run's planning record disagrees"
+    )
+
+
+def test_the_harness_checks_a_judged_strength_row_and_names_the_planning_row(tmp_path):
+    """The assistant's checked scorecard: a judged strength row is checked by its declared rule and carries the
+    static-screen caveat; the planning row's count is not a number against a limit (GK A2 B1)."""
+    from harness import gate_words
+    from harness import grid_readiness_calculations as calc
+
+    _planning(tmp_path)
+    _strength(tmp_path)
+    profile, dirs = _profile_with(tmp_path, scr_min=3.0, escr_min=3.6, wscr_min=3.0)
+    card = _card(tmp_path, profile, dirs)
+    assert {rid: calc.disposition(card[rid]) for rid in STRENGTH_IDS} == {
+        "campus_scr": ("checked", "pass"),
+        "campus_escr": ("checked", "warn"),
+        "campus_wscr": ("checked", "pass"),
+    }
+    assert calc.disposition(card[G.PLANNING_ID]) == ("not_scalar", None)
+    for rid in STRENGTH_IDS:
+        assert calc._registered()[rid] == G.RULE_STRENGTH
+        assert (
+            calc.CAVEATS[rid]
+            == "a static screen; the binding answer is the RMS or EMT study"
+        )
+    assert all(gate_words.RULE_WORDS[f"dc.{i}"] for i in (G.PLANNING_ID, *STRENGTH_IDS))
+
+
+@pytest.mark.parametrize(
+    "error", [{}, {"error": ""}, {"error": "  "}, {"error": None}, {"error": 3}]
+)
+def test_a_blank_or_unreadable_reason_reads_as_none_given(error):
+    assert (
+        G._gc03_failed("planning", error)
+        == "The planning screen could not run, and the run gave no reason"
+    )
+    assert (
+        G._gc03_failed("strength", {"error": "demo"})
+        == "The strength screen could not run: demo"
     )
