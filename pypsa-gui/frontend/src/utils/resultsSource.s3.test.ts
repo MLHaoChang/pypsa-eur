@@ -42,4 +42,13 @@ describe('displayedResultsSource keeps the S3 binding keys', () => {
     mark('capex', capex)
     expect(displayedResultsSource('capex')).toEqual(capex)
   })
+
+  it('echoes the S3b-2 dispatch source and every part hash', () => {
+    const parts = ['cost_breakdown', 'generators', 'curtailment', 'storage', 'storage_dispatch', 'store_dispatch',
+      'store_energy', 'loads', 'links', 'lost_load', 'economics_by_carrier']
+    const dispatch = { ...base, view: 'dispatch', source: 'ac_pf', window_from: 0, window_to: null,
+      ...Object.fromEntries(parts.map(p => [`${p}_sha256`, 'e'.repeat(64)])) }
+    mark('dispatch', dispatch)
+    expect(displayedResultsSource('dispatch')).toEqual(dispatch)
+  })
 })

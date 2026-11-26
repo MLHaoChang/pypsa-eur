@@ -349,7 +349,10 @@ class OrdinaryTurn:
             if args is not None and adapter.read_kinds and kind not in adapter.read_kinds:
                 continue
             if tool_name == adapter.read_tool:
-                ref = adapter.read_ref(result)
+                if adapter.kind_read_ref is not None:
+                    ref = adapter.kind_read_ref(result, kind)
+                else:
+                    ref = adapter.read_ref(result)
                 if ref is not None:
                     self.reads[tab] = ref
 
