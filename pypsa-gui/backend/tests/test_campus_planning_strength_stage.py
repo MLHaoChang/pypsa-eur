@@ -125,7 +125,7 @@ def test_an_open_tie_reads_not_evaluated_and_an_exception_still_writes_the_error
     for rid in STRENGTH_IDS:
         row = _card(hub)[rid]
         assert row["verdict"] == "unknown"
-        assert row["note"].startswith(ce.STRENGTH_OPEN_TIE + ", so the strength is not evaluated")
+        assert row["note"].startswith(ce.STRENGTH_OPEN_TIE + ". Strength is not evaluated.")
 
     def boom(*a, **kw):
         raise RuntimeError("demo failure")

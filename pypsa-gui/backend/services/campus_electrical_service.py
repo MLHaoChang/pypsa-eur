@@ -506,7 +506,7 @@ STRENGTH_META = "campus_strength.json"
 STRENGTH_ERROR = "strength_error.json"
 #: The strength meta of a campus whose tie to the grid is normally open: no grid infeed to judge against.
 STRENGTH_NOT_EVALUATED = "not evaluated"
-STRENGTH_OPEN_TIE = "The tie to the grid is normally open, so there is no grid infeed to judge the strength against"
+STRENGTH_OPEN_TIE = "The tie to the grid is normally open, so there is no grid infeed to judge strength against"
 
 
 def _gc03_screen(run: Path, files, name: str, call, error_file: str, meta_file: str) -> None:
@@ -519,14 +519,14 @@ def _gc03_screen(run: Path, files, name: str, call, error_file: str, meta_file: 
 
     clear()
     try:
-        summary = call()
+        text = json.dumps(call())
     except Exception as exc:  # noqa: BLE001 - a screen failure is shown with the results, never a failed run
         if not isinstance(exc, ContractError):
             logger.exception("campus run: the %s screen failed in %s", name, run)
         clear()
         (run / error_file).write_text(json.dumps({"error": str(exc) or type(exc).__name__}))
         return
-    (run / meta_file).write_text(json.dumps(summary))
+    (run / meta_file).write_text(text)
 
 
 def _planning(run: Path, profile: str, profile_dirs) -> None:
@@ -549,7 +549,7 @@ def _strength(run: Path, profile: str, profile_dirs) -> None:
     def call():
         if _tie_open(run):
             return {"verdict": STRENGTH_NOT_EVALUATED, "note": STRENGTH_OPEN_TIE,
-                    "basis": "static screen; binding answer is the RMS/EMT study"}
+                    "basis": "Static screen: the RMS or EMT study gives the final answer."}
         return cs.strength_campus(run, profile, profile_dirs)
 
     _gc03_screen(run, (cs.STRENGTH_CSV, cs.STRENGTH_GROUPS_CSV, STRENGTH_META, STRENGTH_ERROR), "strength",

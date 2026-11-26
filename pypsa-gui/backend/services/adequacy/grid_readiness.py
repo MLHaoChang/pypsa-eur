@@ -2516,9 +2516,9 @@ def _grid_strength_rows(inp: _Inputs) -> list[dict]:
 # ── planning criteria and grid strength in the campus run (grid-compliance GC-03, TRGC 15) ──
 
 #: The strength rows' basis, once in each row's note.
-STRENGTH_BASIS = "Static screen; binding answer is the RMS/EMT study."
+STRENGTH_BASIS = "Static screen: the RMS or EMT study gives the final answer."
 #: A strength ratio below the code's stated minimum warns: the static screen is not the binding study.
-RULE_STRENGTH = {"comparator": ">=", "otherwise": "warn", "tolerance": 0.0}
+RULE_STRENGTH = RULE_SCR
 PLANNING_ID = "planning_criteria"
 _PLANNING_REQ = "Planning criteria under contingency (TRGC 15)"
 #: The planning summary's verdict on the scorecard: anything but "pass" or "fail" (incomplete, not
@@ -2576,23 +2576,24 @@ def _planning_counts(meta: dict, frame) -> tuple[str | None, str]:
         expect = "incomplete"
     else:
         expect = "pass"
-    table_ok = (frame is not None and len(frame) == cases
+    table_ok = (frame is not None and "verdict" in frame.columns and len(frame) == cases
                 and int((frame["verdict"].astype(str) == "fail").sum()) == failures) if cases else True
     if meta.get("verdict") != expect or failures > cases or not table_ok:
         return None, "The run's planning record disagrees with its own counts"
-    words = [f"{cases} contingency case{'s' if cases != 1 else ''} screened at each period's maximum-import "
-             f"and maximum-export hour, {failures} failing"]
-    if nc:
-        words.append(f"{nc} case{'s' if nc != 1 else ''} did not converge, which counts as a violation "
-                     f"({', '.join(map(str, lists['not_converged'][:3]))}{', …' if nc > 3 else ''})")
-    if un:
-        words.append(f"{un} hour{'s' if un != 1 else ''} had no contingency to screen")
-    if ex:
-        words.append(f"{ex} contingenc{'ies' if ex != 1 else 'y'} of the list left out, so the screen "
-                     f"cannot pass ({', '.join(map(str, lists['excluded'][:3]))}{', …' if ex > 3 else ''})")
+    words = [f"{cases} case{'s' if cases != 1 else ''} screened at each period's maximum-import and "
+             f"maximum-export hour.", f"{failures} fail{'s' if failures == 1 else ''}."]
     if expect == "not_evaluated":
-        words = ["No contingency was screened, so the screen cannot pass"]
-    return planning_verdict(expect), "; ".join(words)
+        words = ["No contingency was screened, so the screen cannot pass."]
+    if nc:
+        words.append(f"{nc} load flow{'s' if nc != 1 else ''} did not solve, and each counts as a violation "
+                     f"({', '.join(map(str, lists['not_converged'][:3]))}{', …' if nc > 3 else ''}).")
+    if un:
+        words.append(f"{un} hour{'s' if un != 1 else ''} had no contingency to screen.")
+    if ex:
+        words.append(f"{ex} contingenc{'ies' if ex != 1 else 'y'} of the list {'were' if ex != 1 else 'was'} "
+                     f"left out, so the screen cannot pass "
+                     f"({', '.join(map(str, lists['excluded'][:3]))}{', …' if ex > 3 else ''}).")
+    return planning_verdict(expect), " ".join(words)
 
 
 def _planning_rows(inp: _Inputs) -> list[dict]:
@@ -2601,8 +2602,9 @@ def _planning_rows(inp: _Inputs) -> list[dict]:
     maximum-export hour. A pass needs every case screened and passing (fail closed)."""
     import pandas as pd
 
-    common = dict(limit=None, unit=None, section="connection", target=_target("connection"),
-                  source=f"{_profile_title(inp)}: thermal, voltage and angle limits after each contingency")
+    common = dict(limit=None, unit="violations", section="connection", target=_target("connection"),
+                  source=inp.profile_error
+                  or f"{_profile_title(inp)}: thermal, voltage and angle limits after each contingency")
     try:
         ce, run = _gc03_run(inp)
         from gridspine.drivers.campus_study import PLANNING_CSV
@@ -2627,8 +2629,10 @@ def _planning_rows(inp: _Inputs) -> list[dict]:
         return [_row(PLANNING_ID, _PLANNING_REQ, project_value=None, verdict="unknown", assumed=True,
                      note=f"{note}: rerun the campus study", **common)]
     source = meta.get("source") if isinstance(meta.get("source"), str) else "the campus N-1"
-    return [_row(PLANNING_ID, _PLANNING_REQ, project_value=meta["failures"], verdict=verdict, assumed=True,
-                 note=f"Contingencies from {source}: {note}.", **common)]
+    # the violations: failing cases and load flows that did not solve
+    violations = meta["failures"] + len(meta["not_converged"])
+    return [_row(PLANNING_ID, _PLANNING_REQ, project_value=violations, verdict=verdict, assumed=True,
+                 note=f"Contingencies from {source}. {note}", **common)]
 
 
 def _islanding(v) -> list:
@@ -2649,8 +2653,9 @@ def _islanding(v) -> list:
 def _strength_worst(frame, spec: dict):
     """The worst row of a strength table for ``spec``: ``("value", value, row, outage, islands)`` with the least
     ratio (an outage that islands the PoC counts as 0; ties to the first stage and PoC), or
-    ``("gap", None, row, None, False)`` for the first connected row with no finite ratio. Rows with no converter
-    connected in the stage (P = 0) have no ratio and are left out. None when no row is connected."""
+    ``("gap", the worst found or None, row, its outage, False)`` for the first connected row with no finite
+    ratio. Rows with no converter connected in the stage (P = 0) have no ratio and are left out. None when no
+    row is connected."""
     worst, gap = None, None
     for _, r in frame.sort_values(["stage", spec["where"]], kind="mergesort").iterrows():
         p = _num(r.get("p_mw"))
@@ -2662,7 +2667,8 @@ def _strength_worst(frame, spec: dict):
         else:
             v = _num(r.get(spec["value"]))
             if v is None or p is None:
-                gap = gap or r
+                if gap is None:
+                    gap = r
                 continue
             outage = r.get("worst_outage")
             cand = (v, r, None if outage is None or (isinstance(outage, float) and math.isnan(outage))
@@ -2670,10 +2676,16 @@ def _strength_worst(frame, spec: dict):
         if worst is None or cand[0] < worst[0]:
             worst = cand
     if gap is not None:
-        return "gap", None, gap, None, False
+        outage = gap.get("worst_outage")
+        outage = None if outage is None or (isinstance(outage, float) and math.isnan(outage)) else str(outage)
+        return "gap", worst, gap, outage, False
     if worst is None:
         return None
     return ("value", *worst)
+
+
+def _strength_at(spec: dict, r) -> str:
+    return f"{'PoC' if spec['where'] == 'poc' else 'group'} {r[spec['where']]!s}, stage {r['stage']!s}"
 
 
 def _strength_rows(inp: _Inputs) -> list[dict]:
@@ -2700,7 +2712,7 @@ def _strength_rows(inp: _Inputs) -> list[dict]:
         elif not isinstance(meta, dict):
             reason = _gc03_missing(run, "strength screen")
         elif meta.get("verdict") == ce.STRENGTH_NOT_EVALUATED:
-            reason = f"{meta.get('note') or 'There is no grid infeed'}, so the strength is not evaluated"
+            reason = f"{meta.get('note') or 'There is no grid infeed'}. Strength is not evaluated"
         else:
             try:
                 tables = {"pocs": pd.read_csv(run / STRENGTH_CSV), "groups": pd.read_csv(run / STRENGTH_GROUPS_CSV)}
@@ -2714,13 +2726,13 @@ def _strength_rows(inp: _Inputs) -> list[dict]:
             source = f"{_profile_title(inp)}: {lim.get('clause') or spec['key']}"
             assumed = lim.get("source") != "code"
         else:
-            source, assumed = f"{_profile_title(inp)} states no {spec['what']} minimum", True
+            source, assumed = inp.profile_error or f"{_profile_title(inp)} states no {spec['what']} minimum", True
         common = dict(rule=RULE_STRENGTH, limit=limit, unit=None, source=source, section="connection",
                       target=target)
 
         def unknown(why, value=None):
             return _row(rid, spec["req"], project_value=value, verdict="unknown", assumed=True,
-                        note=f"{why}. {STRENGTH_BASIS}", **common)
+                        note=f"{why.rstrip('.')}. {STRENGTH_BASIS}", **common)
 
         if reason is not None:
             rows.append(unknown(reason))
@@ -2737,11 +2749,16 @@ def _strength_rows(inp: _Inputs) -> list[dict]:
             rows.append(unknown(f"No converter is connected at any stage, so there is no {spec['what']} to judge"))
             continue
         kind, value, r, outage, islands = hit
-        at = f"{'PoC' if spec['where'] == 'poc' else 'group'} {r[spec['where']]!s}, stage {r['stage']!s}"
+        gap_words = None
         if kind == "gap":
-            rows.append(unknown(f"No {spec['what']} at {at}: the fault level under its worst outage was not "
-                                "found"))
-            continue
+            gap_at = _strength_at(spec, r) + (f" (worst outage {outage})" if outage is not None else "")
+            gap_words = f"No {spec['what']} at {gap_at}: the fault level under its worst outage was not found"
+            # a ratio found elsewhere below the minimum still warns: the missing one can only be lower
+            if value is None or limit is None or _judge(value[0], limit, RULE_STRENGTH) == "pass":
+                rows.append(unknown(gap_words))
+                continue
+            value, r, outage, islands = value
+        at = _strength_at(spec, r)
         if islands:
             how = f"outage {outage} islands it from the grid, so the {spec['what']} is 0"
         else:
@@ -2756,8 +2773,9 @@ def _strength_rows(inp: _Inputs) -> list[dict]:
             verdict = _judge(value, limit, RULE_STRENGTH)
             words = (f"at or above the minimum {lim_shown}" if verdict == "pass"
                      else f"below the minimum {lim_shown}")
-        note = (f"Least {spec['what']} {shown} at {at} ({how}"
-                + (f"; intact {intact:.4g}" if intact is not None else "") + f"): {words}. {STRENGTH_BASIS}")
+        note = (f"Lowest {spec['what']} {shown} at {at} ({how}"
+                + (f" · intact {intact:.4g}" if intact is not None else "") + f"): {words}."
+                + (f" {gap_words}." if gap_words else "") + f" {STRENGTH_BASIS}")
         rows.append(_row(rid, spec["req"], project_value=value, verdict=verdict, assumed=assumed,
                          note=note, **common))
     return rows

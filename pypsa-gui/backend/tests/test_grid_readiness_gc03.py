@@ -20,7 +20,7 @@ from tests.test_grid_readiness import PROFILE, _project, _rows
 from tests.test_grid_readiness_motor_start import _site
 
 STRENGTH_IDS = ("campus_scr", "campus_escr", "campus_wscr")
-BASIS = "Static screen; binding answer is the RMS/EMT study."
+BASIS = "Static screen: the RMS or EMT study gives the final answer."
 
 
 def _run_dir(d):
@@ -73,8 +73,8 @@ def test_a_consistent_pass_passes(tmp_path):
     _planning(tmp_path)
     row = _card(tmp_path)[G.PLANNING_ID]
     assert row["verdict"] == "pass" and row["project_value"] == 0
-    assert row["note"] == ("Contingencies from campus N-1 (branches and units): 4 contingency cases screened at "
-                           "each period's maximum-import and maximum-export hour, 0 failing.")
+    assert row["note"] == ("Contingencies from campus N-1 (branches and units). 4 cases screened at each period's "
+                           "maximum-import and maximum-export hour. 0 fail.")
 
 
 def test_a_failing_case_fails(tmp_path):
@@ -86,7 +86,8 @@ def test_a_failing_case_fails(tmp_path):
 def test_a_non_converged_case_is_a_violation(tmp_path):
     _planning(tmp_path, verdict="fail", not_converged=["period 2030 hour 3 (max_import)"])
     row = _card(tmp_path)[G.PLANNING_ID]
-    assert row["verdict"] == "fail" and "1 case did not converge, which counts as a violation" in row["note"]
+    assert row["verdict"] == "fail" and row["project_value"] == 1
+    assert "1 load flow did not solve, and each counts as a violation (period 2030 hour 3 (max_import))." in row["note"]
 
 
 def test_a_pass_with_a_non_converged_case_disagrees_with_itself_and_is_unknown(tmp_path):
@@ -109,13 +110,16 @@ def test_an_incomplete_list_never_passes_and_shows_the_count(tmp_path):
     _planning(tmp_path, verdict="incomplete", excluded=["TSO_7", "line 12"])
     row = _card(tmp_path)[G.PLANNING_ID]
     assert row["verdict"] == "unknown"
-    assert "2 contingencies of the list left out, so the screen cannot pass (TSO_7, line 12)" in row["note"]
+    assert row["note"].endswith("2 contingencies of the list were left out, so the screen cannot pass "
+                                "(TSO_7, line 12).")
 
 
 def test_nothing_screened_never_passes(tmp_path):
     _planning(tmp_path, verdict="not_evaluated", cases=0, unscreened=["period 2030 hour 3"])
     row = _card(tmp_path)[G.PLANNING_ID]
-    assert row["verdict"] == "unknown" and "No contingency was screened" in row["note"]
+    assert row["verdict"] == "unknown"
+    assert row["note"] == ("Contingencies from campus N-1 (branches and units). No contingency was screened, so the "
+                           "screen cannot pass. 1 hour had no contingency to screen.")
 
 
 @pytest.mark.parametrize("bad", [{"cases": True}, {"cases": -1}, {"failures": "0"}, {"excluded": "TSO_7"}])
@@ -126,6 +130,13 @@ def test_an_unreadable_record_is_unknown(tmp_path, bad):
     (run / ce.PLANNING_META).write_text(json.dumps(meta))
     row = _card(tmp_path)[G.PLANNING_ID]
     assert row["verdict"] == "unknown" and row["note"].startswith("The run's planning record is unreadable")
+
+
+def test_a_planning_table_without_a_verdict_column_is_unknown_never_a_crash(tmp_path):
+    _planning(tmp_path)
+    run = tmp_path / "campus_electrical" / "run"
+    pd.read_csv(run / "campus_planning.csv").drop(columns="verdict").to_csv(run / "campus_planning.csv", index=False)
+    assert _card(tmp_path)[G.PLANNING_ID]["verdict"] == "unknown"
 
 
 def test_a_planning_error_and_no_run_read_unknown(tmp_path):
@@ -169,7 +180,7 @@ def test_with_no_minimum_each_ratio_is_shown_and_unknown(tmp_path):
         assert row["verdict"] == "unknown" and row["project_value"] == value and row["limit"] is None
         assert row["source"].endswith(f"states no {rid.split('_')[1].upper()} minimum")
         assert row["note"].count(BASIS) == 1 and row["note"].endswith(BASIS)
-    assert card["campus_scr"]["note"] == ("Least SCR 4 at PoC MV, stage 2030 (worst outage L1; intact 6): the "
+    assert card["campus_scr"]["note"] == ("Lowest SCR 4 at PoC MV, stage 2030 (worst outage L1 · intact 6): the "
                                           "profile states no SCR minimum, so it is shown, not judged. " + BASIS)
 
 
@@ -193,7 +204,7 @@ def test_a_value_just_below_the_minimum_never_prints_equal_to_it(tmp_path):
     profile, dirs = _profile_with(tmp_path, scr_min=3.0)
     row = _card(tmp_path, profile, dirs)["campus_scr"]
     assert row["verdict"] == "warn" and row["project_value"] == 2.99996
-    assert "Least SCR 2.99996 at PoC MV" in row["note"] and "below the minimum 3." in row["note"]
+    assert "Lowest SCR 2.99996 at PoC MV" in row["note"] and "below the minimum 3." in row["note"]
 
 
 def test_the_least_ratio_over_pocs_and_stages_is_shown_and_ties_go_to_the_first(tmp_path):
@@ -201,7 +212,7 @@ def test_the_least_ratio_over_pocs_and_stages_is_shown_and_ties_go_to_the_first(
             _poc("2030", "LV1", scr=2.5, outage="L4"), _poc("2030", "LV3", p=0.0, scr=float("nan"))]
     _strength(tmp_path, pocs=pocs)
     row = _card(tmp_path)["campus_scr"]
-    assert row["project_value"] == 2.5 and "at PoC LV1, stage 2030 (worst outage L4;" in row["note"]
+    assert row["project_value"] == 2.5 and "at PoC LV1, stage 2030 (worst outage L4 · intact 6)" in row["note"]
 
 
 def test_a_stage_with_no_converter_connected_is_left_out(tmp_path):
@@ -211,11 +222,22 @@ def test_a_stage_with_no_converter_connected_is_left_out(tmp_path):
 
 
 def test_a_connected_poc_with_no_ratio_is_unknown_and_named_never_dropped(tmp_path):
-    _strength(tmp_path, pocs=[_poc(scr=1.0), _poc("2031", "LV1", scr=float("nan"), outage=float("nan"))])
+    _strength(tmp_path, pocs=[_poc(scr=4.0), _poc("2031", "LV1", scr=float("nan"), outage="L7"),
+                              _poc("2032", "LV2", scr=float("nan"), outage=float("nan"))])
     profile, dirs = _profile_with(tmp_path, scr_min=3.0)
     row = _card(tmp_path, profile, dirs)["campus_scr"]
     assert row["verdict"] == "unknown" and row["project_value"] is None
-    assert row["note"] == ("No SCR at PoC LV1, stage 2031: the fault level under its worst outage was not found. "
+    assert row["note"] == ("No SCR at PoC LV1, stage 2031 (worst outage L7): the fault level under its worst outage "
+                           "was not found. " + BASIS)
+
+
+def test_a_gap_never_hides_a_ratio_found_below_the_minimum(tmp_path):
+    _strength(tmp_path, pocs=[_poc("2030", "LV1", scr=float("nan"), outage=float("nan")), _poc("2031", scr=2.0)])
+    profile, dirs = _profile_with(tmp_path, scr_min=3.0)
+    row = _card(tmp_path, profile, dirs)["campus_scr"]
+    assert row["verdict"] == "warn" and row["project_value"] == 2.0
+    assert row["note"] == ("Lowest SCR 2 at PoC MV, stage 2031 (worst outage L1 · intact 6): below the minimum 3. "
+                           "No SCR at PoC LV1, stage 2030: the fault level under its worst outage was not found. "
                            + BASIS)
 
 
@@ -227,7 +249,7 @@ def test_an_islanding_outage_reads_zero_and_is_named(tmp_path):
     card = _card(tmp_path, profile, dirs)
     scr = card["campus_scr"]
     assert scr["verdict"] == "warn" and scr["project_value"] == 0.0
-    assert "(outage T1 islands it from the grid, so the SCR is 0; intact 6)" in scr["note"]
+    assert "(outage T1 islands it from the grid, so the SCR is 0 · intact 6)" in scr["note"]
     assert card["campus_wscr"]["project_value"] == 0.0
 
 
@@ -244,7 +266,8 @@ def test_an_open_tie_reads_not_evaluated(tmp_path):
     for rid in STRENGTH_IDS:
         row = _card(tmp_path)[rid]
         assert row["verdict"] == "unknown"
-        assert row["note"] == f"{ce.STRENGTH_OPEN_TIE}, so the strength is not evaluated. {BASIS}"
+        assert row["note"] == ("The tie to the grid is normally open, so there is no grid infeed to judge strength "
+                               f"against. Strength is not evaluated. {BASIS}")
 
 
 def test_a_strength_error_an_older_run_and_a_missing_column_read_unknown(tmp_path):
