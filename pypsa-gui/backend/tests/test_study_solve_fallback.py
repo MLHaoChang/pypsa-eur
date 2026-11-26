@@ -304,9 +304,7 @@ def test_a_live_solve_workbook_never_carries_the_studys_verdict(
     assert r.status_code == 200
     assert "Verdict" not in _about(r.content)
     ctx = PyPSAService.get_active_context()
-    study_solve.keep(
-        ctx.solver_state, _network(), None, {}
-    )  # then LOPF then study
+    study_solve.keep(ctx.solver_state, _network(), None, {})  # then LOPF then study
     ctx.solver_state["eh_study"] = {
         "status": "done",
         "network_revision": dirty_state.revision(),
