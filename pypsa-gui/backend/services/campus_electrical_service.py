@@ -498,6 +498,76 @@ def _ssti_screens_results(run: Path) -> dict | None:
     return meta
 
 
+# --- GC-03: the planning-criteria and grid-strength screens (TRGC 15) ---
+
+PLANNING_META = "campus_planning.json"
+PLANNING_ERROR = "planning_error.json"
+STRENGTH_META = "campus_strength.json"
+STRENGTH_ERROR = "strength_error.json"
+#: The strength meta of a campus whose tie to the grid is normally open: no grid infeed to judge against.
+STRENGTH_NOT_EVALUATED = "not evaluated"
+STRENGTH_OPEN_TIE = "The tie to the grid is normally open, so there is no grid infeed to judge the strength against"
+
+
+def _gc03_screen(run: Path, files, name: str, call, error_file: str, meta_file: str) -> None:
+    """Run one GC-03 screen beside the sizing: clear ``files``, write the summary ``call()`` returns to
+    ``meta_file``, or on any failure the reason to ``error_file`` with none of ``files`` left. A failure
+    never fails the run."""
+    def clear():
+        for f in files:
+            (run / f).unlink(missing_ok=True)
+
+    clear()
+    try:
+        summary = call()
+    except Exception as exc:  # noqa: BLE001 - a screen failure is shown with the results, never a failed run
+        if not isinstance(exc, ContractError):
+            logger.exception("campus run: the %s screen failed in %s", name, run)
+        clear()
+        (run / error_file).write_text(json.dumps({"error": str(exc) or type(exc).__name__}))
+        return
+    (run / meta_file).write_text(json.dumps(summary))
+
+
+def _planning(run: Path, profile: str, profile_dirs) -> None:
+    """The planning-criteria screen of the sized run over the campus N-1 (``campus_study.planning_campus``):
+    ``campus_planning.csv`` and its summary in ``PLANNING_META``, or the reason in ``PLANNING_ERROR``."""
+    _gc03_screen(run, (cs.PLANNING_CSV, PLANNING_META, PLANNING_ERROR), "planning-criteria",
+                 lambda: cs.planning_campus(run, profile, profile_dirs), PLANNING_ERROR, PLANNING_META)
+
+
+def _tie_open(run: Path) -> bool:
+    spec = cs._run_campus_spec(run)
+    pcc = ((spec or {}).get("campus") or {}).get("pcc") or {}
+    return pcc.get("tie_normally_open") is True
+
+
+def _strength(run: Path, profile: str, profile_dirs) -> None:
+    """SCR, ESCR and WSCR per PoC and stage, intact and worst outage (``campus_study.strength_campus``):
+    the CSVs and the summary in ``STRENGTH_META``, or the reason in ``STRENGTH_ERROR``. A normally open
+    tie has no grid infeed: the meta reads "not evaluated" with the reason, and no CSV is written."""
+    def call():
+        if _tie_open(run):
+            return {"verdict": STRENGTH_NOT_EVALUATED, "note": STRENGTH_OPEN_TIE,
+                    "basis": "static screen; binding answer is the RMS/EMT study"}
+        return cs.strength_campus(run, profile, profile_dirs)
+
+    _gc03_screen(run, (cs.STRENGTH_CSV, cs.STRENGTH_GROUPS_CSV, STRENGTH_META, STRENGTH_ERROR), "strength",
+                 call, STRENGTH_ERROR, STRENGTH_META)
+
+
+def _gc03_results(run: Path, meta_file: str, error_file: str, tables: dict) -> dict | None:
+    """A GC-03 screen for ``get_state``: ``{error, verdict: "error"}`` when it could not run, else its meta
+    with each of ``tables`` (key -> CSV) read; None for a run from before it was a stage."""
+    error = run / error_file
+    if error.is_file():
+        return {**json.loads(error.read_text()), "verdict": "error"}
+    meta = run / meta_file
+    if not meta.is_file():
+        return None
+    return {**json.loads(meta.read_text()), **{k: _read_csv(run / f) or [] for k, f in tables.items()}}
+
+
 _DIPS_INPUTS_CACHE: dict = {}
 
 
@@ -674,6 +744,10 @@ def _results(run: Path):
         "dips_restart": _dips_restart_results(run),
         # GC-08: the SSTI UIF screen and the sub-synchronous scan (``_ssti_screens_results``).
         "ssti_screens": _ssti_screens_results(run),
+        # GC-03: the planning-criteria screen (TRGC 15) and SCR/ESCR/WSCR per PoC and stage.
+        "planning": _gc03_results(run, PLANNING_META, PLANNING_ERROR, {"rows": cs.PLANNING_CSV}),
+        "strength": _gc03_results(run, STRENGTH_META, STRENGTH_ERROR,
+                                  {"rows": cs.STRENGTH_CSV, "groups": cs.STRENGTH_GROUPS_CSV}),
     }
 
 
@@ -2032,7 +2106,7 @@ def _aborted_on_stop(stage):
 #: The run's stages, in order, as its progress names them (the queue log's
 #: ``campus <stage> <done>/<total>`` lines and ``get_state``'s ``run_job``).
 RUN_STAGES = ("prepare", "rank", "island_checks", "cuts", "size", "harmonic_scan", "voltage_stability",
-              "dips_restart", "ssti_screens", "invest")
+              "dips_restart", "ssti_screens", "planning", "strength", "invest")
 
 
 class CampusRunAborted(Exception):
@@ -2155,6 +2229,10 @@ def run(project, settings: dict, *, progress=None, should_stop=None) -> dict:
                 _dips_restart(work, s["profile"], profile_dirs, nc)
                 stage("ssti_screens")
                 _ssti_screens(work, s["profile"], profile_dirs)
+                stage("planning")
+                _planning(work, s["profile"], profile_dirs)
+                stage("strength")
+                _strength(work, s["profile"], profile_dirs)
             except ContractError as exc:
                 raise _unprocessable(exc)
             _publish_run(work, published)

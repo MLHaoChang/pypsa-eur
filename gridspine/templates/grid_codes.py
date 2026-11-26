@@ -120,6 +120,11 @@ A profile may carry these optional keys:
     The least Q–V reactive margin at the connection point, Mvar (study harness
     issue 18), a number >= 0. The grid-readiness Q–V row judges on it as the
     P–V row does.
+``scr_min``, ``escr_min``, ``wscr_min``
+    The least short-circuit ratio, effective SCR and weighted SCR the code
+    states at a point of connection (plan GC-03), each a positive number.
+    Each grid-readiness strength row judges its own ratio on its own key
+    only; without it the row reads unknown. No shipped profile carries one.
 ``load_ramp_mw_per_min``, ``load_variation_limit``, ``lcl_ride_through_band``, ``stage1_ds_over_ssc_pct``, ``ride_through_transfer_counts``
     The limits on a large load's variation (asset-sizing loop AS-08).
     ``load_ramp_mw_per_min`` is the ramp limit, a positive number.
@@ -213,6 +218,11 @@ _SINGLE_LIMITS = ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_
                   "pv_margin_min_pct", "qv_margin_min_mvar",
                   "load_ramp_mw_per_min", "load_variation_limit", "lcl_ride_through_band", "stage1_ds_over_ssc_pct",
                   "ride_through_transfer_counts",)
+#: The grid-strength minima (plan GC-03, ``static/strength.py``): the least SCR, ESCR and WSCR the code
+#: states at a PoC. Optional, and no shipped profile carries one unless the public code states it by
+#: clause; absent, the strength row reads "unknown", never pass.
+STRENGTH_KEYS = ("scr_min", "escr_min", "wscr_min")
+_SINGLE_LIMITS += STRENGTH_KEYS
 #: Every key a profile may carry; any other is loaded with a warning.
 PROFILE_KEYS = frozenset({"title", "voltage_bands", "q_range_demand", "rvc_limit_pct", "campus_voltage",
                           "q_range_ibr", "rvc_limit_infrequent_pct", "q_capability_pq", "pf_min_lagging",
@@ -228,6 +238,7 @@ PROFILE_KEYS = frozenset({"title", "voltage_bands", "q_range_demand", "rvc_limit
                           "pv_margin_min_pct", "qv_margin_min_mvar",
                           "load_ramp_mw_per_min", "load_variation_limit", "lcl_ride_through_band", "stage1_ds_over_ssc_pct",
                   "ride_through_transfer_counts",})
+PROFILE_KEYS = PROFILE_KEYS | frozenset(STRENGTH_KEYS)
 #: The voltage-control keys (plan GC-02, ``static/voltage_control.py``): ``q_v_slope_pct`` (the Q(V)
 #: droop's slope, % voltage for the full Q_max), ``voltage_control_modes`` (the modes the code asks the
 #: plant to offer) and ``q_band_v_range_pu`` (``min``/``max``: the PoC voltages over which the code states
@@ -365,7 +376,7 @@ def _check_profile(name, p):
                 "ssti_uif_threshold", "subsync_torsional_clearance_hz",
                 "voltage_deadband_pct",
                 "angle_limit_deg",
-                "pv_margin_min_pct"):
+                "pv_margin_min_pct", *STRENGTH_KEYS):
         if key not in p:
             continue                                   # q_range_demand and rvc_limit_pct are required
         _check_limit(key, p[key], where)

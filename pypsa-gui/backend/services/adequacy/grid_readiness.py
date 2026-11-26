@@ -2513,9 +2513,260 @@ def _grid_strength_rows(inp: _Inputs) -> list[dict]:
     return rows
 
 
+# ── planning criteria and grid strength in the campus run (grid-compliance GC-03, TRGC 15) ──
+
+#: The strength rows' basis, once in each row's note.
+STRENGTH_BASIS = "Static screen; binding answer is the RMS/EMT study."
+#: A strength ratio below the code's stated minimum warns: the static screen is not the binding study.
+RULE_STRENGTH = {"comparator": ">=", "otherwise": "warn", "tolerance": 0.0}
+PLANNING_ID = "planning_criteria"
+_PLANNING_REQ = "Planning criteria under contingency (TRGC 15)"
+#: The planning summary's verdict on the scorecard: anything but "pass" or "fail" (incomplete, not
+#: evaluated, error, blank, a value from another version) is unknown, never a pass.
+PLANNING_VERDICTS = {"pass": "pass", "fail": "fail"}
+#: Each strength row: its profile key, its ratio, the run table and column it reads.
+_STRENGTH = {
+    "campus_scr": {"req": "Short-circuit ratio at each PoC, worst outage", "key": "scr_min", "what": "SCR",
+                   "table": "pocs", "value": "scr_worst", "intact": "scr_intact", "where": "poc"},
+    "campus_escr": {"req": "Effective short-circuit ratio at each PoC, worst outage", "key": "escr_min",
+                    "what": "ESCR", "table": "pocs", "value": "escr_worst", "intact": "escr_intact", "where": "poc"},
+    "campus_wscr": {"req": "Weighted short-circuit ratio of the PoCs, worst outage", "key": "wscr_min",
+                    "what": "WSCR", "table": "groups", "value": "wscr_worst", "intact": "wscr_intact",
+                    "where": "group"},
+}
+
+
+def planning_verdict(value) -> str:
+    """The scorecard verdict of a planning summary's verdict string (``PLANNING_VERDICTS``, else unknown)."""
+    return PLANNING_VERDICTS.get(value, "unknown") if isinstance(value, str) else "unknown"
+
+
+def _count(v) -> int | None:
+    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
+
+
+def _gc03_run(inp: _Inputs):
+    from services import campus_electrical_service as ce
+
+    return ce, inp.dir / ce.SUBDIR / "run"
+
+
+def _gc03_missing(run: pathlib.Path, what: str) -> str:
+    from gridspine.drivers.campus_study import CAMPUS_YAML
+
+    if (run / CAMPUS_YAML).is_file():
+        return f"This campus run is from before the {what}: rerun the campus study"
+    return f"No campus run with the {what} yet: run the campus study"
+
+
+def _planning_counts(meta: dict, frame) -> tuple[str | None, str]:
+    """(verdict, note) of a planning summary, judged on its own counts: a pass needs the summary's "pass"
+    and no failing, non-converged, unscreened or excluded case; a summary whose verdict or counts disagree
+    with themselves or with its table is unreadable (verdict None)."""
+    cases, failures = _count(meta.get("cases")), _count(meta.get("failures"))
+    lists = {k: meta.get(k) for k in ("not_converged", "unscreened", "excluded")}
+    if cases is None or failures is None or not all(isinstance(v, list) for v in lists.values()):
+        return None, "The run's planning record is unreadable"
+    nc, un, ex = (len(lists[k]) for k in ("not_converged", "unscreened", "excluded"))
+    if nc or failures:
+        expect = "fail"
+    elif cases == 0:
+        expect = "not_evaluated"
+    elif un or ex:
+        expect = "incomplete"
+    else:
+        expect = "pass"
+    table_ok = (frame is not None and len(frame) == cases
+                and int((frame["verdict"].astype(str) == "fail").sum()) == failures) if cases else True
+    if meta.get("verdict") != expect or failures > cases or not table_ok:
+        return None, "The run's planning record disagrees with its own counts"
+    words = [f"{cases} contingency case{'s' if cases != 1 else ''} screened at each period's maximum-import "
+             f"and maximum-export hour, {failures} failing"]
+    if nc:
+        words.append(f"{nc} case{'s' if nc != 1 else ''} did not converge, which counts as a violation "
+                     f"({', '.join(map(str, lists['not_converged'][:3]))}{', …' if nc > 3 else ''})")
+    if un:
+        words.append(f"{un} hour{'s' if un != 1 else ''} had no contingency to screen")
+    if ex:
+        words.append(f"{ex} contingenc{'ies' if ex != 1 else 'y'} of the list left out, so the screen "
+                     f"cannot pass ({', '.join(map(str, lists['excluded'][:3]))}{', …' if ex > 3 else ''})")
+    if expect == "not_evaluated":
+        words = ["No contingency was screened, so the screen cannot pass"]
+    return planning_verdict(expect), "; ".join(words)
+
+
+def _planning_rows(inp: _Inputs) -> list[dict]:
+    """The planning-criteria screen of the campus run (``campus_study.planning_campus``): thermal, voltage
+    and angle limits after each contingency of the campus N-1, at each period's maximum-import and
+    maximum-export hour. A pass needs every case screened and passing (fail closed)."""
+    import pandas as pd
+
+    common = dict(limit=None, unit=None, section="connection", target=_target("connection"),
+                  source=f"{_profile_title(inp)}: thermal, voltage and angle limits after each contingency")
+    try:
+        ce, run = _gc03_run(inp)
+        from gridspine.drivers.campus_study import PLANNING_CSV
+    except ImportError as exc:  # pragma: no cover - build-shape branch
+        return [_row(PLANNING_ID, _PLANNING_REQ, project_value=None, verdict="unknown", assumed=True,
+                     note=f"The planning screen needs gridspine ({exc})", **common)]
+    error = _read_json(run / ce.PLANNING_ERROR)
+    meta = _read_json(run / ce.PLANNING_META)
+    if isinstance(error, dict):
+        return [_row(PLANNING_ID, _PLANNING_REQ, project_value=None, verdict="unknown", assumed=True,
+                     note=f"The planning screen could not run: {error.get('error') or 'no reason given'}",
+                     **common)]
+    if not isinstance(meta, dict):
+        return [_row(PLANNING_ID, _PLANNING_REQ, project_value=None, verdict="unknown", assumed=True,
+                     note=_gc03_missing(run, "planning screen"), **common)]
+    try:
+        frame = pd.read_csv(run / PLANNING_CSV)
+    except (OSError, ValueError):
+        frame = None
+    verdict, note = _planning_counts(meta, frame)
+    if verdict is None:
+        return [_row(PLANNING_ID, _PLANNING_REQ, project_value=None, verdict="unknown", assumed=True,
+                     note=f"{note}: rerun the campus study", **common)]
+    source = meta.get("source") if isinstance(meta.get("source"), str) else "the campus N-1"
+    return [_row(PLANNING_ID, _PLANNING_REQ, project_value=meta["failures"], verdict=verdict, assumed=True,
+                 note=f"Contingencies from {source}: {note}.", **common)]
+
+
+def _islanding(v) -> list:
+    """The islanding outages a strength table cell lists (written as a Python list), else []."""
+    import ast
+
+    if isinstance(v, list):
+        return v
+    if not isinstance(v, str) or not v.strip():
+        return []
+    try:
+        out = ast.literal_eval(v)
+    except (ValueError, SyntaxError):
+        return [v]
+    return list(out) if isinstance(out, (list, tuple)) else [out]
+
+
+def _strength_worst(frame, spec: dict):
+    """The worst row of a strength table for ``spec``: ``("value", value, row, outage, islands)`` with the least
+    ratio (an outage that islands the PoC counts as 0; ties to the first stage and PoC), or
+    ``("gap", None, row, None, False)`` for the first connected row with no finite ratio. Rows with no converter
+    connected in the stage (P = 0) have no ratio and are left out. None when no row is connected."""
+    worst, gap = None, None
+    for _, r in frame.sort_values(["stage", spec["where"]], kind="mergesort").iterrows():
+        p = _num(r.get("p_mw"))
+        if p is not None and p == 0:
+            continue
+        islands = _islanding(r.get("islanding_outages"))
+        if islands:
+            cand = (0.0, r, str(sorted(map(str, islands))[0]), True)
+        else:
+            v = _num(r.get(spec["value"]))
+            if v is None or p is None:
+                gap = gap or r
+                continue
+            outage = r.get("worst_outage")
+            cand = (v, r, None if outage is None or (isinstance(outage, float) and math.isnan(outage))
+                    else str(outage), False)
+        if worst is None or cand[0] < worst[0]:
+            worst = cand
+    if gap is not None:
+        return "gap", None, gap, None, False
+    if worst is None:
+        return None
+    return ("value", *worst)
+
+
+def _strength_rows(inp: _Inputs) -> list[dict]:
+    """SCR, ESCR and WSCR at the PoCs of the campus run (``campus_study.strength_campus``): the least
+    ratio over the PoCs and stages under the worst campus outage, each judged on the profile's own
+    minimum for that ratio only (``scr_min``, ``escr_min``, ``wscr_min``). No minimum stated reads
+    unknown with the value shown, never a pass."""
+    import pandas as pd
+
+    target = _target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"), "eh_sk_mva")
+    try:
+        ce, run = _gc03_run(inp)
+        from gridspine.drivers.campus_study import STRENGTH_CSV, STRENGTH_GROUPS_CSV
+    except ImportError as exc:  # pragma: no cover - build-shape branch
+        ce = run = None
+        reason = f"The strength screen needs gridspine ({exc})"
+    else:
+        reason = None
+        error = _read_json(run / ce.STRENGTH_ERROR)
+        meta = _read_json(run / ce.STRENGTH_META)
+        tables = {}
+        if isinstance(error, dict):
+            reason = f"The strength screen could not run: {error.get('error') or 'no reason given'}"
+        elif not isinstance(meta, dict):
+            reason = _gc03_missing(run, "strength screen")
+        elif meta.get("verdict") == ce.STRENGTH_NOT_EVALUATED:
+            reason = f"{meta.get('note') or 'There is no grid infeed'}, so the strength is not evaluated"
+        else:
+            try:
+                tables = {"pocs": pd.read_csv(run / STRENGTH_CSV), "groups": pd.read_csv(run / STRENGTH_GROUPS_CSV)}
+            except (OSError, ValueError):
+                reason = "The run's strength tables are missing or unreadable: rerun the campus study"
+    rows = []
+    for rid, spec in _STRENGTH.items():
+        lim = (inp.profile or {}).get(spec["key"])
+        limit = _num(lim.get("value")) if isinstance(lim, dict) else None
+        if limit is not None:
+            source = f"{_profile_title(inp)}: {lim.get('clause') or spec['key']}"
+            assumed = lim.get("source") != "code"
+        else:
+            source, assumed = f"{_profile_title(inp)} states no {spec['what']} minimum", True
+        common = dict(rule=RULE_STRENGTH, limit=limit, unit=None, source=source, section="connection",
+                      target=target)
+
+        def unknown(why, value=None):
+            return _row(rid, spec["req"], project_value=value, verdict="unknown", assumed=True,
+                        note=f"{why}. {STRENGTH_BASIS}", **common)
+
+        if reason is not None:
+            rows.append(unknown(reason))
+            continue
+        frame = tables[spec["table"]]
+        missing = [c for c in ("stage", spec["where"], "p_mw", spec["value"], "worst_outage", "islanding_outages")
+                   if c not in frame.columns]
+        if missing:
+            rows.append(unknown(f"The run's strength table has no {', '.join(missing)} column: "
+                                "rerun the campus study"))
+            continue
+        hit = _strength_worst(frame, spec)
+        if hit is None:
+            rows.append(unknown(f"No converter is connected at any stage, so there is no {spec['what']} to judge"))
+            continue
+        kind, value, r, outage, islands = hit
+        at = f"{'PoC' if spec['where'] == 'poc' else 'group'} {r[spec['where']]!s}, stage {r['stage']!s}"
+        if kind == "gap":
+            rows.append(unknown(f"No {spec['what']} at {at}: the fault level under its worst outage was not "
+                                "found"))
+            continue
+        if islands:
+            how = f"outage {outage} islands it from the grid, so the {spec['what']} is 0"
+        else:
+            how = f"worst outage {outage}" if outage is not None else "no outage lowers it"
+        intact = _num(r.get(spec["intact"]))
+        if limit is None:
+            shown = f"{value:.4g}"
+            words = f"the profile states no {spec['what']} minimum, so it is shown, not judged"
+            verdict = "unknown"
+        else:
+            shown, lim_shown = ssti_apart(value, limit)
+            verdict = _judge(value, limit, RULE_STRENGTH)
+            words = (f"at or above the minimum {lim_shown}" if verdict == "pass"
+                     else f"below the minimum {lim_shown}")
+        note = (f"Least {spec['what']} {shown} at {at} ({how}"
+                + (f"; intact {intact:.4g}" if intact is not None else "") + f"): {words}. {STRENGTH_BASIS}")
+        rows.append(_row(rid, spec["req"], project_value=value, verdict=verdict, assumed=assumed,
+                         note=note, **common))
+    return rows
+
+
 _BUILDERS = (_grid_strength_rows, _scr_rows, _peak_rows, _ramp_row, _oscillation_row, _rvc_row, _rvc_infrequent_row,
              _harmonic_row, _tdd_row, _flicker_row, _motor_start_rows, _unbalance_row, _vs_rows,
-             _ssti_rows, _reactive_row, _support_rows, _island_rows, _lole_row)
+             _ssti_rows, _reactive_row, _support_rows, _island_rows, _lole_row,
+             _planning_rows, _strength_rows)
 #: The builders whose rows are judged against the PoC's fault level: the SCR
 #: row and each builder that reads ``_poc_sk_mva`` (pinned by a test that
 #: reads the builders' source, so a new S_k''-built row cannot stay on an
