@@ -11,6 +11,8 @@ export interface ResultsSourceBinding {
   run_id?: string
   section?: string | null
   baseline_run_id?: string | null
+  /** A results tab's bound view (A5.2): which tab's payload `data_sha256` hashes. */
+  view?: string
 }
 
 export function sameResultsSource(a: ResultsSourceBinding, b: ResultsSourceBinding): boolean {
@@ -33,7 +35,7 @@ export function displayedResultsSource(tab: string, root: Document | HTMLElement
       if (value.version === 1 && typeof value.project_id === 'string'
         && /^(?:current|historical)$/.test(value.scope) && /^[a-f0-9]{64}$/.test(value.data_sha256)) {
         const keys = ['version', 'project_id', 'project_name', 'scope', 'data_sha256', 'input_sha256',
-          'source', 'window_from', 'window_to', 'run_id', 'section', 'baseline_run_id']
+          'source', 'window_from', 'window_to', 'run_id', 'section', 'baseline_run_id', 'view']
         return Object.fromEntries(keys.filter(k => Object.prototype.hasOwnProperty.call(value, k)
           && (value[k as keyof ResultsSourceBinding] === null || typeof value[k as keyof ResultsSourceBinding] === 'string'
             || typeof value[k as keyof ResultsSourceBinding] === 'number' && Number.isFinite(value[k as keyof ResultsSourceBinding])))

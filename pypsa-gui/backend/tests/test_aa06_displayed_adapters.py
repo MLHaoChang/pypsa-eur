@@ -60,9 +60,9 @@ def test_a_view_claiming_displayed_data_without_an_adapter_fails():
 def test_an_adapter_without_a_displayed_data_view_fails():
     adapters = {
         **displayed_adapters.ADAPTERS,
-        "emissions": displayed_adapters.ADAPTERS["loadflow"],
+        "prices": displayed_adapters.ADAPTERS["loadflow"],
     }
-    with pytest.raises(AssertionError, match="emissions"):
+    with pytest.raises(AssertionError, match="prices"):
         displayed_adapters.check_registry(result_views.RESULT_VIEWS, adapters)
 
 

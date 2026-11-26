@@ -18,6 +18,15 @@ vi.mock('../../api/simulation', async () => {
   const real = await vi.importActual<typeof import('../../api/simulation')>('../../api/simulation')
   return { ...real, resultsApi: { ...real.resultsApi, getGridRiskProduction: api.risk } }
 })
+// Grid risk renders its bound view (A5.2), which carries what the route returns.
+vi.mock('../../api/displayedResults', () => ({
+  displayedResultsApi: {
+    gridRisk: async () => {
+      const data = await api.risk()
+      return data ? { status: 'ok', data, binding: { version: 1, project_id: 'p', scope: 'current', view: 'grid_risk', data_sha256: 'a'.repeat(64) } } : null
+    },
+  },
+}))
 vi.mock('../../components/flowScope/useFlowScope', () => ({
   useFlowScope: () => ({ scope: { version: 1, groups: ['grid'], options: {}, source: 'project', preset_id: 'p' }, isSuccess: true }),
 }))

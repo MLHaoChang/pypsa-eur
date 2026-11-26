@@ -240,6 +240,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                "CO2 totals and any cap's shadow price", "results",
                (_r("get_results", result_kind="emissions"),),
                historical_section="results_emissions",
+               verification="displayed_data",
                units="t CO2, EUR/t",
                checked_profiles=("generator-emissions/1", "network-emissions/1"),
                card="capacity", sub_option="dispatch", card_tab="operation"),
@@ -278,6 +279,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                "then EUR, per year, with the result file each comes from", "results",
                (_rp("get_grid_risk_production", "lines"),),
                guided_label="Grid risk to production",
+               verification="displayed_data",
                claim_limits="Expected values per year, not a forecast. The total is an upper bound: the "
                             "lines may overlap. A missing input is unknown, never zero; EUR is Unavailable "
                             "without a lost-production value. Campus lines are from the last campus run "
