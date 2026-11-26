@@ -314,7 +314,10 @@ async function journey(t) {
       assert.deepEqual(sheets.slice(0, 2), ['About', 'Overview'], `first sheets are ${sheets.slice(0, 2)}`)
       // template-e2e 46: About's Verdict row is the lead of the Guided verdict, and the Expert header names the run.
       if (ctx.guidedVerdict) {
-        const strings = [...(await zip.file('xl/sharedStrings.xml').async('string')).matchAll(/<t[^>]*>([^<]*)<\/t>/g)]
+        // About is the first sheet; its text sits in sharedStrings or, in a streamed workbook, inline in the sheet.
+        const xml = (await Promise.all(['xl/sharedStrings.xml', 'xl/worksheets/sheet1.xml']
+          .map(name => zip.file(name)?.async('string') ?? ''))).join('')
+        const strings = [...xml.matchAll(/<t[^>]*>([^<]*)<\/t>/g)]
           .map(m => m[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&'))
         assert.ok(strings.includes('Verdict'), 'About has no Verdict row')
         const lead = strings.find(t => t.length > 8 && ctx.guidedVerdict.startsWith(t))
