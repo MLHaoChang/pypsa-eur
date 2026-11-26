@@ -392,3 +392,124 @@ def test_no_options_and_no_uc_keywords_make_an_empty_record():
     rec = sv.applied_record("highs", None, None, None)
     assert rec["options"] == {} and rec["dropped"] == []
     assert rec["linearized_unit_commitment"] is False
+
+
+# ── 18a: the price readers judge by the record too ───────────────────────────
+
+
+def test_solved_price_limit_reads_the_record_over_the_persisted_settings():
+    # The settings and config say a binary MIP; the solve that wrote `n`
+    # ran linearised, so its prices are an LP's.
+    n = _sealed(_committable(), linearised=True)
+    state = {
+        "last_solve_settings": {"price_limit": sv.DUALS_NOT_MARGINAL},
+        "solver_config": _cfg(process_uc="binary"),
+    }
+    assert sv.solved_price_limit(state, n) is None
+
+
+def test_solved_price_limit_reads_a_recorded_mip_over_an_lp_config():
+    n = _sealed(_committable(), mode="binary")
+    state = {
+        "last_solve_settings": {"voll_eur_per_mwh": 0.0},
+        "solver_config": _cfg(process_uc="linearised"),
+    }
+    assert sv.solved_price_limit(state, n) == sv.DUALS_NOT_MARGINAL
+    assert sv.solved_price_limit({}, n) == sv.DUALS_NOT_MARGINAL
+
+
+def test_mip_price_limit_reads_the_record_over_the_config():
+    lp_run = _sealed(_committable(), linearised=True)
+    assert sv.mip_price_limit(lp_run, _cfg(process_uc="binary")) is None
+    mip_run = _sealed(_committable(), mode="binary")
+    assert sv.mip_price_limit(mip_run, _cfg(process_uc="linearised")) == (
+        sv.DUALS_NOT_MARGINAL
+    )
+
+
+def test_price_limit_without_config_reads_the_record():
+    # No config is needed once the solve recorded what it applied.
+    assert (
+        sv.price_limit_without_config(_sealed(_committable(), linearised=True)) is None
+    )
+    assert sv.price_limit_without_config(_sealed(_committable(), mode="binary")) == (
+        sv.DUALS_NOT_MARGINAL
+    )
+    assert sv.price_limit_without_config(_sealed(_modular(), linearised=True)) == (
+        sv.DUALS_NOT_MARGINAL
+    )
+    assert sv.price_limit_without_config(_sealed(_lp())) is None
+
+
+@pytest.mark.parametrize(
+    "net, kw, other, expected",
+    [
+        (_committable, {"linearised": True}, (0, 0), None),
+        (_committable, {"mode": "binary"}, (0, 0), sv.DUALS_NOT_MARGINAL),
+        (_committable, {"mode": "plain"}, (0, 0), None),
+        (_committable, {"mode": "plain"}, (1, 0), sv.DUALS_NOT_MARGINAL),
+        (_modular, {"linearised": True}, (0, 0), sv.DUALS_NOT_MARGINAL),
+        (_lp, {}, (0, 0), None),
+    ],
+)
+def test_a_valid_record_never_reads_as_an_unreadable_config(
+    monkeypatch, net, kw, other, expected
+):
+    monkeypatch.setattr(sv, "other_committable", lambda _n: other)
+    n = _sealed(net(), **kw)
+    assert sv.price_limit_without_config(n) == expected
+    assert sv.price_limit_without_config(n) != sv.SOLVER_CONFIG_UNREADABLE
+
+
+@pytest.mark.parametrize("record", [None, "malformed"])
+def test_a_run_without_a_valid_record_keeps_the_settings_and_config_path(record):
+    from tests.test_mip_price_readers import _process_unit_net
+
+    n = _process_unit_net()  # an LP under the default config, a MIP under binary
+    if record:
+        n.meta[sv.APPLIED_KEY] = {**_VALID, "v": 2}
+    recorded = {
+        "last_solve_settings": {"price_limit": sv.DUALS_NOT_MARGINAL},
+        "solver_config": _cfg(),
+    }
+    assert sv.solved_price_limit(recorded, n) == sv.DUALS_NOT_MARGINAL
+    unrecorded = {"last_solve_settings": {}, "solver_config": _cfg()}
+    # No record: the config decides (an LP). Malformed: fails closed.
+    assert sv.solved_price_limit(unrecorded, n) == (
+        sv.DUALS_NOT_MARGINAL if record else None
+    )
+    assert sv.price_limit_without_config(n) == (
+        sv.DUALS_NOT_MARGINAL if record else sv.SOLVER_CONFIG_UNREADABLE
+    )
+
+
+@pytest.mark.live_solve
+def test_the_real_island_path_seals_its_linearised_commitment(monkeypatch):
+    """The island sidecar's linearised UC, through `run_simulation` and the real
+    `island.solve_uc` (only the sidecar load is stubbed): the record says
+    linearised, so the committable genset's prices read as an LP's."""
+    from services.solver_service import SolverConfig
+    from tests.test_island_rows import _hub, _run, _units
+    from tests.test_island_study import _committed_genset, _uc
+
+    n = _hub(load=10.0, gensets=[("g", 6.0)])
+    n.storage_units.at["bess", "p_nom_max"] = 7.0
+    n.generators.at["g", "committable"] = True  # the mirror alone would say MIP
+    island = _uc(_units(gensets={"g": _committed_genset()}))
+    cfg = SolverConfig(island_constraints=True)
+    status, condition, _ = _run(n, cfg, monkeypatch, island)
+    assert status in ("ok", "optimal"), condition
+    assert sv.applied_record_of(n)["linearized_unit_commitment"] is True
+    assert sv.solved_price_limit({"solver_config": cfg}, n) is None
+    assert sv.price_limit_without_config(n) is None
+    del n.meta[sv.APPLIED_KEY]
+    assert sv.solved_price_limit({"solver_config": cfg}, n) == sv.DUALS_NOT_MARGINAL
+
+
+def test_a_malformed_record_defers_to_the_persisted_settings():
+    # No committable or modular unit, so only the settings can say MIP; a
+    # malformed record must not be read as a valid LP record.
+    n = _lp()
+    n.meta[sv.APPLIED_KEY] = {**_VALID, "v": 2}
+    state = {"last_solve_settings": {"price_limit": sv.DUALS_NOT_MARGINAL}}
+    assert sv.solved_price_limit(state, n) == sv.DUALS_NOT_MARGINAL

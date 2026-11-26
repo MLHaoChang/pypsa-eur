@@ -351,7 +351,8 @@ def test_the_live_readers_judge_by_the_solve_s_record(
     client, install_network, session_state, monkeypatch
 ):
     """A1 at the route and the retained digest: an LP network whose solve recorded a MIP
-    (its config since edited) is withheld; without the record its prices are read."""
+    (its config since edited) is withheld; without the record its prices are read.
+    The network's own applied record (18a) outranks both."""
     from services import retained_results
     from services.pypsa_service import PyPSAService
 
@@ -373,6 +374,13 @@ def test_the_live_readers_judge_by_the_solve_s_record(
         **state["last_solve_settings"],
         "price_limit": DUALS_NOT_MARGINAL,
     }
+    # assistant-assurance 18a: the network's applied record (an LP) outranks the
+    # persisted settings; only a run sealed before the record reads them.
+    assert client.get("/api/results/lcoh").json()["rows"]
+    assert retained_results._prices_digest().get("reason") != DUALS_NOT_MARGINAL
+    from harness.solve_validity import APPLIED_KEY
+
+    del n.meta[APPLIED_KEY]
     lcoh = client.get("/api/results/lcoh").json()
     assert lcoh["rows"] == [] and lcoh["unavailable_reason"] == DUALS_NOT_MARGINAL
     assert retained_results._prices_digest() == {
