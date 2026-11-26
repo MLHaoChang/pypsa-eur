@@ -3,7 +3,7 @@
 
 # 46 End-to-end: Guided run, workbook headline equals the verdict, Expert header names the run
 
-Status: ready-for-agent
+Status: done
 Source: template-e2e 30 (#1963), acceptance box 4.
 
 ## What
