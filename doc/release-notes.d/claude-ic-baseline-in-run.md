@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The concentrator study run (`eh_concentrator_staged@2`) now solves its investment case inside the run, re-solving the site-today baseline as a counted reservation (0 solves on a cache hit), so its counterfactual rules block again.
