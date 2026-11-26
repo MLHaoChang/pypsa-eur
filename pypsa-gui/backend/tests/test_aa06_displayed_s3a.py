@@ -67,7 +67,7 @@ def _site(load=6.0):
 
 
 @pytest.fixture
-def solved(baseline):
+def solved(baseline):  # noqa: F811
     ctx, _project_id, _root = baseline
     ctx.network = _site()
     ctx.solver_state.update(status="completed", condition="optimal")
@@ -184,7 +184,7 @@ def test_a_generators_204_leaves_that_part_null(client, solved, monkeypatch):
 
 
 @pytest.mark.parametrize("tab", TABS)
-def test_an_unsolved_project_answers_204_like_the_old_route(client, baseline, tab):
+def test_an_unsolved_project_answers_204_like_the_old_route(client, baseline, tab):  # noqa: F811
     assert client.get(f"/api/results/displayed/{tab}").status_code == 204
 
 

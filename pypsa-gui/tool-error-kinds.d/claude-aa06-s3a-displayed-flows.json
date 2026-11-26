@@ -1,0 +1,8 @@
+{
+  "kinds": {
+    "invalid_window": {
+      "surface": "inline",
+      "why": "GET /api/results/displayed/{flows,loadshape,curtailment} refuses with 422 a window whose start is after its end, instead of serving some default view under a binding the browser did not ask for (assistant assurance 06, A5.2 S3a); the tab never sends one, so a caller sees it only for a malformed request."
+    }
+  }
+}
