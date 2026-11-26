@@ -425,3 +425,28 @@ def test_the_control_views_sit_under_scope_options_the_run_does_not_own_yet():
     assert flow_scope.AVAILABILITY[('control', 'island_checks')][0] == flow_scope.NOT_YET
     assert rv.for_results_tab('island').sub_option == 'island_checks'
     assert rv.for_results_tab('grid_forming').sub_option == 'presets'
+
+
+# ── `verification` lives with the reads, in the card listing (A5.2 S3a, GK B 72) ──
+
+
+@pytest.mark.parametrize('mode', ['expert', 'guided'])
+def test_the_plain_listing_carries_no_verification_claim(monkeypatch, mode):
+    """A reader of the plain listing cannot take a partial claim for a full one."""
+    listing = _forced_listing(monkeypatch, mode)
+    assert all('verification' not in row for row in listing['views'])
+    assert 'displayed_data' not in json.dumps(listing)
+
+@pytest.mark.parametrize('mode', ['expert', 'guided'])
+def test_every_card_listing_names_each_bound_tab_and_no_other(monkeypatch, mode):
+    seen = set()
+    for card in sorted({v.card for v in rv.RESULT_VIEWS if v.panel == 'results' and v.card}):
+        for row in _forced_listing(monkeypatch, mode, card=card)['views']:
+            if row.get('card') != card:
+                continue
+            seen.add(row['id'])
+            bound = rv.view(row['id']).verification == 'displayed_data'
+            assert row.get('verification') == ('displayed_data' if bound else None), row['id']
+    bound_tabs = {v.view_id for v in rv.RESULT_VIEWS if v.verification == 'displayed_data' and v.card}
+    assert bound_tabs <= seen
+    assert {'loadflow', 'emissions', 'grid_risk', 'flows', 'loadshape', 'curtailment'} <= bound_tabs

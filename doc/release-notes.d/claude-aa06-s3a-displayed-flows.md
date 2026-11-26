@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Energy flow, Load shape and Curtailment tabs render a source-bound view for the period, window and week shown, so a chat navigation to them is confirmed on the exact figures shown (assistant assurance 06, A5.2 S3a).

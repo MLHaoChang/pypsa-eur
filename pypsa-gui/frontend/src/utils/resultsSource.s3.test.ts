@@ -1,0 +1,34 @@
+// Assistant-assurance 06, A5.2 (S3): a bound view records the period, window and
+// week its route was called with (null: the route's default) and, for a
+// multi-payload tab, the hash of the part the chat read names. The ACK reader
+// must echo those keys exactly, or the server's whole-binding compare fails.
+import { afterEach, describe, expect, it } from 'vitest'
+import { displayedResultsSource } from './resultsSource'
+
+const base = {
+  version: 1, project_id: 'p-1', project_name: 'Demo', scope: 'current', view: 'loadshape',
+  input_sha256: 'a'.repeat(64), data_sha256: 'b'.repeat(64),
+}
+
+function mark(tab: string, binding: object) {
+  const el = document.createElement('div')
+  el.dataset.resultTab = tab
+  el.dataset.resultBinding = JSON.stringify(binding)
+  document.body.appendChild(el)
+}
+
+afterEach(() => { document.body.innerHTML = '' })
+
+describe('displayedResultsSource keeps the S3 binding keys', () => {
+  it('echoes null and numeric period, window and week', () => {
+    const binding = { ...base, period: null, window_from: 3, window_to: null, week: 2 }
+    mark('loadshape', binding)
+    expect(displayedResultsSource('loadshape')).toEqual(binding)
+  })
+
+  it('echoes a multi-payload view\'s read_sha256', () => {
+    const binding = { ...base, view: 'curtailment', read_sha256: 'c'.repeat(64), window_from: null, window_to: null }
+    mark('curtailment', binding)
+    expect(displayedResultsSource('curtailment')).toEqual(binding)
+  })
+})

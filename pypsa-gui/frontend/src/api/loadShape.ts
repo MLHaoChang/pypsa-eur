@@ -3,6 +3,7 @@
 // `not_modelled`; one the server cannot establish is `unavailable`. Neither is
 // ever drawn as zero (ADR-0001).
 import client from './client'
+import type { Displayed } from './displayedResults'
 
 export type SeriesState =
   | { status: 'ok'; mw: number[] }
@@ -72,15 +73,20 @@ export interface LoadShapeQuery {
   week?: number
 }
 
+const params = (q: LoadShapeQuery) => ({
+  ...(q.period != null ? { period: q.period } : {}),
+  ...(q.from != null ? { from: q.from } : {}),
+  ...(q.to != null ? { to: q.to } : {}),
+  ...(q.week != null ? { week: q.week } : {}),
+})
+
 export const loadShapeApi = {
   /** `null` before a solve (204). */
   get: (q: LoadShapeQuery = {}) =>
-    client.get<LoadShapePayload>('/results/load_shape', {
-      params: {
-        ...(q.period != null ? { period: q.period } : {}),
-        ...(q.from != null ? { from: q.from } : {}),
-        ...(q.to != null ? { to: q.to } : {}),
-        ...(q.week != null ? { week: q.week } : {}),
-      },
-    }).then(r => (r.status === 204 ? null : r.data)),
+    client.get<LoadShapePayload>('/results/load_shape', { params: params(q) })
+      .then(r => (r.status === 204 ? null : r.data)),
+  /** The same payload with its displayed-data binding (A5.2): `null` before a solve. */
+  displayed: (q: LoadShapeQuery = {}) =>
+    client.get<Displayed<LoadShapePayload>>('/results/displayed/loadshape', { params: params(q) })
+      .then(r => (r.status === 204 ? null : r.data)),
 }
