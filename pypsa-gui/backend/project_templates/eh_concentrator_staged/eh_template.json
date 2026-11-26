@@ -183,6 +183,19 @@
       "value": "HiGHS interior point (solver_options solver=ipm)"
     },
     {
+      "component": null,
+      "entity": null,
+      "field": "target_lole_h",
+      "item": "lole_goal",
+      "label": "Reliability goal (LOLE)",
+      "note": "assumed: the recommended pack's target_lole_h (3 h/yr); the reliability study certifies the site against it",
+      "panel": "simparams",
+      "section": "scenarios",
+      "source": "assumed",
+      "unit": "h/yr",
+      "value": 3.0
+    },
+    {
       "item": "tax",
       "note": "a stand-in: the template is priced in EUR on German data; pick your country's tax rule. Depreciation straight line by the BMF AfA-Tabelle AV (2000): 3.1.2 Stromerzeugung 19 years, 3.1.3 Akkumulatoren 10, 3.1.5 Windkraftanlagen 16, 3.1.6 Photovoltaikanlagen 20; assets it does not list assumed, network lifetime, else 20 years. Hebesatz: Destatis 2023 average 407 %, rounded to 400 %",
       "source": "assumed",
