@@ -1,0 +1,11 @@
+{"binding_overrides": [
+ {"file": "api/displayedResults.ts", "method": "GET", "url": "/api/results/displayed/prices",
+  "routes": [["GET", "/api/results/prices"], ["GET", "/api/results/price_drivers"]],
+  "reason": "the Prices tab's source-bound view (A5.2 S3b-1): the /results/prices payload (LP source) for one window and the /results/price_drivers payload at one threshold and row cap, read under one guard through those routes' functions, plus one binding; on a MIP both parts are the routes' withheld answer"},
+ {"file": "api/displayedResults.ts", "method": "GET", "url": "/api/results/displayed/capex",
+  "routes": [["GET", "/api/results/cost_breakdown"], ["GET", "/api/results/economics_by_carrier"]],
+  "reason": "the Capacity expansion tab's source-bound view (A5.2 S3b-1): the /results/cost_breakdown and /results/economics_by_carrier payloads, read under one guard through those routes' functions, plus one binding"},
+ {"file": "api/displayedResults.ts", "method": "GET", "url": "/api/results/displayed/storage",
+  "routes": [["GET", "/api/results/storage_dispatch"]],
+  "reason": "the Storage cycling tab's source-bound view (A5.2 S3b-1): the /results/storage_dispatch payload (LP source) for one window, read through that route's function, plus a binding"}
+]}

@@ -341,9 +341,13 @@ class OrdinaryTurn:
         # results tab -> the facts (its adapter's ref_keys) of this turn's last read
         self.reads = {}
 
-    def note_read(self, tool_name, result):
-        """Remember what this turn read, so "showing" means the data read."""
+    def note_read(self, tool_name, result, args=None):
+        """Remember what this turn read, so "showing" means the data read. With
+        the call's `args`, a get_results read of another kind is not this tab's."""
+        kind = args.get("result_kind") if isinstance(args, dict) else None
         for tab, adapter in displayed_adapters.ADAPTERS.items():
+            if args is not None and adapter.read_kinds and kind not in adapter.read_kinds:
+                continue
             if tool_name == adapter.read_tool:
                 ref = adapter.read_ref(result)
                 if ref is not None:
@@ -389,8 +393,17 @@ def display(turn, acknowledgement, wait=ACK_WAIT_SECONDS):
         binding = acknowledgement.get("source_binding") or {}
         tab = (acknowledgement.get("target") or {}).get("results_tab")
         adapter = displayed_adapters.ADAPTERS.get(tab)
-        shown = {k: binding.get(k) for k in (adapter.ref_keys if adapter else ())}
+        reason = binding.get(adapter.withheld_key) if adapter and adapter.withheld_key else None
+        if reason:
+            # The tab shows that its figures are withheld, and why (a MIP's prices).
+            out["say"] = f"unavailable: {reason}"
+            return out
         read = turn.reads.get(tab)
+        keys = adapter.ref_keys if adapter else ()
+        if read:
+            # A read names the parts it read (Capacity expansion: one of two).
+            keys = tuple(k for k in keys if k in read)
+        shown = {k: binding.get(k) for k in keys}
         if read == shown:
             out["say"] = "showing"
         else:

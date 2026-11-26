@@ -14,7 +14,8 @@ guard.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any
 from collections.abc import Callable, Mapping
@@ -37,6 +38,18 @@ class DisplayedAdapter:
     # Binding keys holding the int index the view was called with, or null for
     # the route's default (S3). A window must not start after it ends.
     index_keys: frozenset[str] = frozenset()
+    # S3b: binding keys holding a finite number (a price threshold), or a
+    # string or null (the reason a solve's prices are withheld).
+    number_keys: frozenset[str] = frozenset()
+    nullable_keys: frozenset[str] = frozenset()
+    # The sources the tab offers; a binding with any other is refused.
+    sources: frozenset[str] | None = None
+    # The get_results kinds whose read can name this tab's facts; a read of
+    # another kind never replaces this tab's ref (when the call is known).
+    read_kinds: frozenset[str] = frozenset()
+    # The binding key naming why the shown figures are withheld: when set, the
+    # words say "unavailable: <reason>", never "showing".
+    withheld_key: str | None = None
 
 
 # ── Load flow (live-voice 07, LC-03) ────────────────────────────────────────
@@ -140,6 +153,11 @@ def _payload_ref(is_payload, key="data_sha256"):
     return ref
 
 
+def _keys(result):
+    """A read's own keys, without the freshness words get_results adds."""
+    return set(result) - _FRESHNESS_KEYS
+
+
 def _is_emissions(result):
     return isinstance(result, dict) and {"total_tCO2", "by_carrier"} <= set(result)
 
@@ -163,6 +181,7 @@ ADAPTERS = MappingProxyType(
             read_tool="get_results",
             ref_keys=("data_sha256",),
             read_ref=_payload_ref(_is_emissions),
+            read_kinds=frozenset({"emissions"}),
         ),
         "grid_risk": DisplayedAdapter(
             current=_view("grid_risk"),
@@ -198,10 +217,18 @@ def _no_read_ref(_result):
     return None
 
 
+_SERIES = frozenset({"index", "periods", "columns", "data", "range"})
+
+
 def _is_curtailment(result):
-    """A per-snapshot results payload (curtailment's shape). Another series of
-    the same shape hashes differently, so it can only make the words "opened"."""
-    return isinstance(result, dict) and {"index", "columns", "data"} <= set(result)
+    """A plain per-snapshot series (curtailment's key set, nothing more: a
+    prices payload carries more keys). Another plain series is told apart by
+    its get_results kind (`read_kinds`); without the kind it hashes
+    differently, so it can only make the words "opened"."""
+    return (
+        isinstance(result, dict)
+        and {"index", "columns", "data"} <= _keys(result) <= _SERIES
+    )
 
 
 _WINDOW = ("window_from", "window_to")
@@ -240,6 +267,105 @@ ADAPTERS = MappingProxyType(
         },
     }
 )
+ADAPTERS = MappingProxyType(
+    {
+        **ADAPTERS,
+        "curtailment": replace(
+            ADAPTERS["curtailment"], read_kinds=frozenset({"curtailment"})
+        ),
+    }
+)
+
+
+# ── Prices, Capacity expansion and Storage cycling (A5.2 S3b-1) ─────────────
+
+
+def _is_prices(result):
+    """The prices payload, or its withheld answer on a MIP (`prices.withheld`)."""
+    if not isinstance(result, dict):
+        return False
+    if _keys(result) == {"status", "reason"}:
+        return result["status"] == "unavailable"
+    return {"index", "columns", "data", "data_adjusted", "source"} <= _keys(result)
+
+
+def _is_cost_breakdown(result):
+    return isinstance(result, dict) and {"capex", "opex", "total"} <= _keys(result)
+
+
+def _is_economics(result):
+    return isinstance(result, dict) and {"available", "by_carrier"} <= _keys(
+        result
+    ) <= {"available", "by_carrier", "unavailable_reason"}
+
+
+_CAPEX_PARTS = (
+    (
+        "cost_breakdown_sha256",
+        _payload_ref(_is_cost_breakdown, "cost_breakdown_sha256"),
+    ),
+    (
+        "economics_by_carrier_sha256",
+        _payload_ref(_is_economics, "economics_by_carrier_sha256"),
+    ),
+)
+
+
+def _capex_read_ref(result):
+    """The hash of the one part a read names: it claims that part, not the other."""
+    for _key, ref in _CAPEX_PARTS:
+        out = ref(result)
+        if out is not None:
+            return out
+    return None
+
+
+_PRICE_KEYS = ("source", *_WINDOW, "threshold", "limit")
+_STORAGE_KEYS = ("source", *_WINDOW)
+
+ADAPTERS = MappingProxyType(
+    {
+        **ADAPTERS,
+        "prices": DisplayedAdapter(
+            current=_params_view("prices", _PRICE_KEYS),
+            reread=_params_view("prices", _PRICE_KEYS),
+            binding_keys=_VIEW_BINDING
+            | frozenset(_PRICE_KEYS)
+            | {"read_sha256", "price_limit"},
+            read_tool="get_results",
+            ref_keys=("read_sha256",),
+            read_ref=_payload_ref(_is_prices, "read_sha256"),
+            index_keys=frozenset({*_WINDOW, "limit"}),
+            number_keys=frozenset({"threshold"}),
+            nullable_keys=frozenset({"price_limit"}),
+            sources=frozenset({"lopf"}),
+            read_kinds=frozenset({"prices"}),
+            withheld_key="price_limit",
+        ),
+        "capex": DisplayedAdapter(
+            current=_params_view("capex", ()),
+            reread=_params_view("capex", ()),
+            binding_keys=_VIEW_BINDING | {key for key, _ in _CAPEX_PARTS},
+            read_tool="get_results",
+            ref_keys=tuple(key for key, _ in _CAPEX_PARTS),
+            read_ref=_capex_read_ref,
+            read_kinds=frozenset({"cost_breakdown", "economics_by_carrier"}),
+        ),
+        # The chat's storage read is the state of charge, not this dispatch
+        # series, so nothing it reads is the payload shown: the words say
+        # "opened" (adding storage_dispatch to the view's reads is a follow-up).
+        "storage": DisplayedAdapter(
+            current=_params_view("storage", _STORAGE_KEYS),
+            reread=_params_view("storage", _STORAGE_KEYS),
+            binding_keys=_VIEW_BINDING | frozenset(_STORAGE_KEYS),
+            read_tool="get_results",
+            ref_keys=("data_sha256",),
+            read_ref=_no_read_ref,
+            index_keys=frozenset(_WINDOW),
+            sources=frozenset({"lopf"}),
+        ),
+    }
+)
 
 
 def for_target(target) -> DisplayedAdapter | None:
@@ -266,11 +392,19 @@ def valid_binding(adapter: DisplayedAdapter, binding) -> bool:
         if key in adapter.index_keys:
             if value is not None and (type(value) is not int or value < 0):
                 return False
+        elif key in adapter.number_keys:
+            if type(value) not in (int, float) or not math.isfinite(value):
+                return False
+        elif key in adapter.nullable_keys:
+            if value is not None and not isinstance(value, str):
+                return False
         elif key.startswith("window_"):
             if type(value) is not int or value < 0:
                 return False
         elif not isinstance(value, str):
             return False
+    if adapter.sources is not None and binding.get("source") not in adapter.sources:
+        return False
     start, end = binding.get("window_from"), binding.get("window_to")
     if start is not None and end is not None and start > end:
         return False
