@@ -1,0 +1,8 @@
+{"binding_overrides": [
+ {"file": "api/displayedResults.ts", "method": "GET", "url": "/api/results/displayed/emissions",
+  "routes": [["GET", "/api/results/emissions"]],
+  "reason": "the Emissions tab's source-bound view (A5.2): the /results/emissions payload, read through that route's function, plus a binding"},
+ {"file": "api/displayedResults.ts", "method": "GET", "url": "/api/results/displayed/grid_risk",
+  "routes": [["GET", "/api/results/grid_risk_production"]],
+  "reason": "the Grid risk tab's source-bound view (A5.2): the /results/grid_risk_production payload, read through that route's function, plus a binding"}
+]}

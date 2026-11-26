@@ -14,11 +14,11 @@ export interface Displayed<T> {
 
 export type EmissionsPayload = NonNullable<Awaited<ReturnType<typeof resultsApi.getEmissions>>>
 
-const read = <T>(tab: string) => client
-  .get<Displayed<T>>(`/results/displayed/${tab}`, { skipErrorToast: true })
-  .then(r => (r.status === 204 || !r.data ? null : r.data))
+const bound = <T>(r: { status: number; data: Displayed<T> }) => (r.status === 204 || !r.data ? null : r.data)
 
 export const displayedResultsApi = {
-  emissions: () => read<EmissionsPayload>('emissions'),
-  gridRisk: () => read<GridRiskProduction>('grid_risk'),
+  emissions: () => client.get<Displayed<EmissionsPayload>>('/results/displayed/emissions',
+    { skipErrorToast: true }).then(bound),
+  gridRisk: () => client.get<Displayed<GridRiskProduction>>('/results/displayed/grid_risk',
+    { skipErrorToast: true }).then(bound),
 }
