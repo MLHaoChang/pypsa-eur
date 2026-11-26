@@ -83,6 +83,7 @@ import type { ContinuationLine } from './AssistantResultCard'
 import { WorkbookDownloadCard } from './workbook/WorkbookChatCard'
 import * as speechOut from '../utils/speechOut'
 import { useUIStore, type UiMode } from '../store/uiStore'
+import type { resultsEvidenceApi } from '../api/resultsEvidence'
 import { networkApi } from '../api/network'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
 import { useSpeechToText } from '../hooks/useSpeechToText'
@@ -2689,7 +2690,13 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
         }>(frame)
         try {
           if (!applyUiNavigate(d, streamNavigationEpoch.current, { fromModelTurn: true })) break
-          const shownLine = navigationAnnouncement(d)
+          // The run view's read, when already cached, names a past run by its start time.
+          const runView = d.kind === 'open_run_result' && d.run_id
+            ? qc.getQueryData<Awaited<ReturnType<typeof resultsEvidenceApi.run>>>(
+              nk(useUIStore.getState().currentProject, 'run-view', d.run_id, undefined, undefined))
+            : undefined
+          const shownLine = navigationAnnouncement(d,
+            runView?.binding.run_id === d.run_id ? runView?.data.started_at ?? null : null)
           if (shownLine) useChatAnnouncer.getState().announce(shownLine)
           // SC-07 S5b R6: Site 3D says "Opened" only on its ACK; with none issued
           // (no network open, GK B V3) it cannot be confirmed.

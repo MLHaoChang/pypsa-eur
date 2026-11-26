@@ -715,7 +715,7 @@ export default function Results() {
             : `${tip}. Advanced tab: shown because it was asked for; it leaves the strip when you pick another tab.`}
         data-testid={`results-tab-${id}`}
         data-advanced={advanced ? 'true' : undefined}
-        aria-pressed={active}
+        aria-current={active ? 'true' : undefined}
         className={`h-8 px-3 shrink-0 flex items-center gap-1.5 text-[12px] font-medium border-b-2 -mb-px transition-colors
           ${active
             ? 'border-accent text-accent'
@@ -868,7 +868,7 @@ export default function Results() {
               title={off ? `${g.question}. Outside scope: add ${g.label} to the scope to run it.` : g.question}
               data-testid={`results-group-${g.id}`}
               data-outside-scope={off ? 'true' : undefined}
-              aria-pressed={active}
+              aria-current={active ? 'true' : undefined}
               className={`h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
                 ${active ? 'border-accent text-text' : 'border-transparent text-muted hover:text-text'}
                 ${off ? 'opacity-50' : ''}`}
@@ -904,7 +904,7 @@ export default function Results() {
             const tabActive = activeCardTab === ct.id
             return (
               <button key={ct.id} onClick={() => pickCardTab(ct.id)} data-testid={`results-cardtab-${ct.id}`}
-                aria-pressed={tabActive}
+                aria-current={tabActive ? 'true' : undefined}
                 data-views={ct.views.filter(v => visibleTabIds.has(v)).join(',')}
                 className={`h-8 px-3 shrink-0 flex items-center text-[12px] font-medium border-b-2 -mb-px transition-colors
                   ${tabActive ? 'border-accent text-accent' : 'border-transparent text-muted hover:text-text'}`}>

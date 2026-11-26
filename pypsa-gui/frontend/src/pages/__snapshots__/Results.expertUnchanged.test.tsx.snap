@@ -1,45 +1,45 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`Results tab strip — Expert unchanged > renders the base strip with a stored non-guided tab active 1`] = `
-"<div><div class="flex items-center shrink-0 border-b border-border bg-panel px-2 gap-0 overflow-x-auto"><button title="The solve at a glance" aria-pressed="false" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
+"<div><div class="flex items-center shrink-0 border-b border-border bg-panel px-2 gap-0 overflow-x-auto"><button title="The solve at a glance" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
                 border-transparent text-muted hover:text-text
-                ">Summary</button><button title="What to build, and how it runs" aria-pressed="true" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
+                ">Summary</button><button title="What to build, and how it runs" aria-current="true" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
                 border-accent text-text
-                ">Capacity expansion</button><button title="Whether the network and the connection carry it" aria-pressed="false" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
+                ">Capacity expansion</button><button title="Whether the network and the connection carry it" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
                 border-transparent text-muted hover:text-text
-                ">AC power flow &amp; grid</button><button title="How the plant is controlled" aria-pressed="false" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
+                ">AC power flow &amp; grid</button><button title="How the plant is controlled" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
                 border-transparent text-muted hover:text-text
-                ">Control</button><button title="Whether the critical load stays on" aria-pressed="false" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
+                ">Control</button><button title="Whether the critical load stays on" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
                 border-transparent text-muted hover:text-text
-                ">Reliability</button><button title="What it costs and earns" aria-pressed="false" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
+                ">Reliability</button><button title="What it costs and earns" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
                 border-transparent text-muted hover:text-text
-                ">Commercial &amp; finance</button><button title="What leaves the tool" aria-pressed="false" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
+                ">Commercial &amp; finance</button><button title="What leaves the tool" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
                 border-transparent text-muted hover:text-text
-                ">Hand-off</button><div class="flex-1"></div><button title="One asset in full — every applicable result, as numbers or charts, exportable" aria-pressed="false" class="h-8 px-3 shrink-0 flex items-center gap-1.5 text-[12px] font-medium border-b-2 -mb-px transition-colors
+                ">Hand-off</button><div class="flex-1"></div><button title="One asset in full — every applicable result, as numbers or charts, exportable" class="h-8 px-3 shrink-0 flex items-center gap-1.5 text-[12px] font-medium border-b-2 -mb-px transition-colors
           border-transparent text-muted hover:text-text"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-crosshair" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="22" x2="18" y1="12" y2="12"></line><line x1="6" x2="2" y1="12" y2="12"></line><line x1="12" x2="12" y1="6" y2="2"></line><line x1="12" x2="12" y1="22" y2="18"></line></svg>Asset Detail</button><button title="Compare with another saved project, side-by-side" class="h-7 px-2.5 ml-1 mr-1 flex items-center gap-1.5 text-[11px] font-medium rounded transition-colors
-            text-muted hover:text-text border border-border"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-panel-right-open" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M15 3v18"></path><path d="m10 15-3-3 3-3"></path></svg>Compare</button></div><div class="flex items-center shrink-0 border-b border-border bg-bg px-2 gap-0 overflow-x-auto" data-testid="results-subtabs"><button aria-pressed="false" data-views="capex" class="h-8 px-3 shrink-0 flex items-center text-[12px] font-medium border-b-2 -mb-px transition-colors
-                  border-transparent text-muted hover:text-text">Build</button><button aria-pressed="false" data-views="dispatch,flows,loadshape,storage,emissions,lostload" class="h-8 px-3 shrink-0 flex items-center text-[12px] font-medium border-b-2 -mb-px transition-colors
-                  border-transparent text-muted hover:text-text">Operation</button><button aria-pressed="false" data-views="curtailment" class="h-8 px-3 shrink-0 flex items-center text-[12px] font-medium border-b-2 -mb-px transition-colors
-                  border-transparent text-muted hover:text-text">Curtailment</button><button aria-pressed="true" data-views="prices,economics" class="h-8 px-3 shrink-0 flex items-center text-[12px] font-medium border-b-2 -mb-px transition-colors
+            text-muted hover:text-text border border-border"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-panel-right-open" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M15 3v18"></path><path d="m10 15-3-3 3-3"></path></svg>Compare</button></div><div class="flex items-center shrink-0 border-b border-border bg-bg px-2 gap-0 overflow-x-auto" data-testid="results-subtabs"><button data-views="capex" class="h-8 px-3 shrink-0 flex items-center text-[12px] font-medium border-b-2 -mb-px transition-colors
+                  border-transparent text-muted hover:text-text">Build</button><button data-views="dispatch,flows,loadshape,storage,emissions,lostload" class="h-8 px-3 shrink-0 flex items-center text-[12px] font-medium border-b-2 -mb-px transition-colors
+                  border-transparent text-muted hover:text-text">Operation</button><button data-views="curtailment" class="h-8 px-3 shrink-0 flex items-center text-[12px] font-medium border-b-2 -mb-px transition-colors
+                  border-transparent text-muted hover:text-text">Curtailment</button><button aria-current="true" data-views="prices,economics" class="h-8 px-3 shrink-0 flex items-center text-[12px] font-medium border-b-2 -mb-px transition-colors
                   border-accent text-accent">Costs &amp; prices</button></div></div>"
 `;
 
 exports[`Results tab strip — Expert unchanged > renders the base strip with the default tab 1`] = `
-"<div><div class="flex items-center shrink-0 border-b border-border bg-panel px-2 gap-0 overflow-x-auto"><button title="The solve at a glance" aria-pressed="true" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
+"<div><div class="flex items-center shrink-0 border-b border-border bg-panel px-2 gap-0 overflow-x-auto"><button title="The solve at a glance" aria-current="true" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
                 border-accent text-text
-                ">Summary</button><button title="What to build, and how it runs" aria-pressed="false" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
+                ">Summary</button><button title="What to build, and how it runs" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
                 border-transparent text-muted hover:text-text
-                ">Capacity expansion</button><button title="Whether the network and the connection carry it" aria-pressed="false" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
+                ">Capacity expansion</button><button title="Whether the network and the connection carry it" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
                 border-transparent text-muted hover:text-text
-                ">AC power flow &amp; grid</button><button title="How the plant is controlled" aria-pressed="false" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
+                ">AC power flow &amp; grid</button><button title="How the plant is controlled" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
                 border-transparent text-muted hover:text-text
-                ">Control</button><button title="Whether the critical load stays on" aria-pressed="false" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
+                ">Control</button><button title="Whether the critical load stays on" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
                 border-transparent text-muted hover:text-text
-                ">Reliability</button><button title="What it costs and earns" aria-pressed="false" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
+                ">Reliability</button><button title="What it costs and earns" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
                 border-transparent text-muted hover:text-text
-                ">Commercial &amp; finance</button><button title="What leaves the tool" aria-pressed="false" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
+                ">Commercial &amp; finance</button><button title="What leaves the tool" class="h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
                 border-transparent text-muted hover:text-text
-                ">Hand-off</button><div class="flex-1"></div><button title="One asset in full — every applicable result, as numbers or charts, exportable" aria-pressed="false" class="h-8 px-3 shrink-0 flex items-center gap-1.5 text-[12px] font-medium border-b-2 -mb-px transition-colors
+                ">Hand-off</button><div class="flex-1"></div><button title="One asset in full — every applicable result, as numbers or charts, exportable" class="h-8 px-3 shrink-0 flex items-center gap-1.5 text-[12px] font-medium border-b-2 -mb-px transition-colors
           border-transparent text-muted hover:text-text"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-crosshair" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="22" x2="18" y1="12" y2="12"></line><line x1="6" x2="2" y1="12" y2="12"></line><line x1="12" x2="12" y1="6" y2="2"></line><line x1="12" x2="12" y1="22" y2="18"></line></svg>Asset Detail</button><button title="Compare with another saved project, side-by-side" class="h-7 px-2.5 ml-1 mr-1 flex items-center gap-1.5 text-[11px] font-medium rounded transition-colors
             text-muted hover:text-text border border-border"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-panel-right-open" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M15 3v18"></path><path d="m10 15-3-3 3-3"></path></svg>Compare</button></div></div>"
 `;

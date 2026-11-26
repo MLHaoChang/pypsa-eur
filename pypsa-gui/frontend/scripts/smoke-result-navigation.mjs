@@ -177,13 +177,13 @@ async function journey(mode, kind) {
   /** The control that shows `id` as selected: its own button, else its card tab, else its group. */
   async function selectedControl(id) {
     const own = page.getByTestId(`results-tab-${id}`)
-    if (await own.count()) { assert.equal(await own.getAttribute('aria-pressed'), 'true', `${id}: its tab button is not pressed`); return own }
+    if (await own.count()) { assert.equal(await own.getAttribute('aria-current'), 'true', `${id}: its tab button is not current`); return own }
     const place = cardPlaceOf(id)
     assert(place, `${id}: no card group holds it`)
     const group = page.getByTestId(`results-group-${place.group}`)
-    assert.equal(await group.getAttribute('aria-pressed'), 'true', `${id}: group ${place.group} is not pressed`)
+    assert.equal(await group.getAttribute('aria-current'), 'true', `${id}: group ${place.group} is not current`)
     const card = page.getByTestId(`results-cardtab-${place.cardTab}`)
-    if (await card.count()) { assert.equal(await card.getAttribute('aria-pressed'), 'true', `${id}: card tab ${place.cardTab} is not pressed`); return card }
+    if (await card.count()) { assert.equal(await card.getAttribute('aria-current'), 'true', `${id}: card tab ${place.cardTab} is not current`); return card }
     return group
   }
   /** Keyboard only: Tab from the chat input until the selected control has focus, then Enter keeps it. */
@@ -233,7 +233,7 @@ async function journey(mode, kind) {
     const binding = JSON.parse(await loading.getAttribute('data-result-binding'))
     assert.deepEqual([binding.window_from, binding.window_to], [2, 5], 'Load flow does not show the window asked for')
     await loading.getByText(/^Window 2–5 · 4 snapshots/).waitFor()
-    assert.deepEqual((await announced()).slice(before), ['Showing Load Flow, snapshots 2 to 5'])
+    assert.deepEqual((await announced()).slice(before), ['Showing Load Flow'], 'the window is not announced as raw snapshot positions')
     assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-testid')), 'chat-input')
   }
 
@@ -246,7 +246,10 @@ async function journey(mode, kind) {
   const retained = page.locator('section[data-result-tab="summary"][data-result-binding]')
   await retained.getByText(`Retained run ${RUN_ID} · completed`).waitFor()
   assert.equal(JSON.parse(await retained.getAttribute('data-result-binding')).run_id, RUN_ID, 'another run is on screen')
-  assert.deepEqual((await announced()).slice(beforeRun), [`Showing run ${RUN_ID}, Summary`])
+  // The run is named by its start time once its read is cached, else "an earlier run"; never its id.
+  const runLine = (await announced()).slice(beforeRun)
+  assert.equal(runLine.length, 1, `run: announced ${runLine.length} times`)
+  assert.match(runLine[0], /^Showing (an earlier run|the run of \d{1,2} [A-Z][a-z]{2}, \d{2}:\d{2}), Summary$/)
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-testid')), 'chat-input')
 
   assert.deepEqual(errors, [], `${mode}/${kind}: page or console errors`)

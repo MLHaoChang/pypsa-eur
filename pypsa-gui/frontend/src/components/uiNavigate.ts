@@ -5,6 +5,7 @@ import toast from 'react-hot-toast'
 import { openParameter, pickAssetFor, resolveEntry } from '../catalogue/openParameter'
 import { HUB_STEPS, useHubDesignStore, type HubStep } from '../pages/hubDesign/hubDesignStore'
 import { ALL_TABS } from '../pages/results/resultTabs'
+import { runWhen } from '../pages/results/runWhen'
 
 /**
  * Map chat tool panel_id → SlidePanel / special navigation targets.
@@ -134,14 +135,18 @@ export function openScenariosHighlight(ids: string[]): void {
 }
 
 /** A5.5: the polite status line for an assistant's Results navigation, or null
- * for any other navigation. The chat announcer drops a repeat of its last line. */
-export function navigationAnnouncement(d: NavigationRequest): string | null {
+ * for any other navigation. The chat announcer drops a repeat of its last line.
+ * A past run is named by when it started (`startedAt`, from the run view's cached
+ * read), never by its id; a Load flow window is left out, since the frame carries
+ * snapshot positions, not times (RAW-NAMES-1). */
+export function navigationAnnouncement(d: NavigationRequest, startedAt?: string | null): string | null {
   const label = d.results_tab ? ALL_TABS.find(t => t.id === d.results_tab)?.label ?? null : null
-  if (d.kind === 'open_run_result' && d.run_id) return `Showing run ${d.run_id}${label ? `, ${label}` : ''}`
+  if (d.kind === 'open_run_result' && d.run_id) {
+    const when = runWhen(startedAt)
+    return `Showing ${when ? `the run of ${when}` : 'an earlier run'}${label ? `, ${label}` : ''}`
+  }
   if ((d.kind ?? 'navigate') !== 'navigate' && d.kind !== 'open_panel') return null
-  if (!label) return null
-  const windowed = d.results_tab === 'loadflow' && typeof d.window_from === 'number' && typeof d.window_to === 'number'
-  return `Showing ${label}${windowed ? `, snapshots ${d.window_from} to ${d.window_to}` : ''}`
+  return label ? `Showing ${label}` : null
 }
 
 export function applyUiNavigate(d: NavigationRequest, expectedEpoch?: number,
