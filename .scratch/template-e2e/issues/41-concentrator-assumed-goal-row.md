@@ -3,7 +3,7 @@
 
 # 41 — The concentrator template's rail does not show its assumed goal
 
-Status: ready-for-agent
+Status: done
 Source: issue 21, goal-parity re-check (#1927); GK A (35) chose a follow-up
 Severity: misleads
 Journey fit: inputs → results. The goal the study certifies against is not named where the other templates name it.
