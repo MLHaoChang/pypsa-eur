@@ -479,6 +479,62 @@ def test_the_denominator_boundary(share_case, served, answered):
     assert (reasons["renewable_share"] is None) is answered
 
 
+def _supply(share_case, renewable, nonren, load):
+    """The hand record with its dispatch replaced: one weight-1 slot carries the numbers."""
+    raw = _raw(share_case())
+    raw["generators"] = {g: [0.0, 0.0, 0.0] for g in raw["generators"]}
+    raw["generators"]["gas"] = list(nonren)
+    raw["renewable_generators"] = {g: [0.0, 0.0, 0.0] for g in raw["renewable_generators"]}
+    raw["renewable_generators"].update(renewable)
+    raw["loads"] = {"L": list(load)}
+    return _reasons(raw)["renewable_share"]
+
+
+@pytest.mark.parametrize(
+    ("output", "reason"),
+    [(2 * derived.NEAR_ZERO, None), (derived.NEAR_ZERO, "no_generation")],
+)
+def test_the_generation_boundary(share_case, output, reason):
+    assert _supply(share_case, {"wind": [output, 0.0, 0.0]}, [0.0] * 3, [1.0, 0.0, 0.0]) == reason
+
+
+def test_non_renewable_output_alone_is_generation(share_case):
+    assert _supply(share_case, {}, [1.0, 0.0, 0.0], [1.0, 0.0, 0.0]) is None
+
+
+def test_negative_renewable_output_does_not_cancel_generation(share_case):
+    renewable = {"wind": [-5.0, 0.0, 0.0], "bio": [0.0, 1.0, 0.0]}
+    assert _supply(share_case, renewable, [0.0] * 3, [0.0, 1.0, 0.0]) is None
+
+
+def test_an_unread_renewable_value_in_the_last_slot_is_not_zero(share_case):
+    renewable = {"wind": [0.0, 0.0, None]}
+    assert (
+        _supply(share_case, renewable, [0.0] * 3, [1.0, 0.0, 0.0])
+        == "invalid_or_missing_raw_data"
+    )
+
+
+def _renewables(count):
+    """Small wind Generators until `count` renewable Generators stand on the network."""
+
+    def tweak(n):
+        for i in range(count - 2):  # wind and bio are already there
+            n.add("Generator", f"wind {i}", bus="AC", carrier="onwind", p_nom=0.01)
+
+    return tweak
+
+
+@pytest.mark.parametrize(
+    ("count", "reasons"),
+    [(share.MAX_MEMBERS, set()), (share.MAX_MEMBERS + 1, {"unsupported_population"})],
+)
+def test_the_renewable_population_cap(share_case, count, reasons):
+    ctx = share_case(_renewables(count))
+    assert len(classify(ctx.network)["renewable_generators"]) == count
+    assert set(_checked(ctx)[1].values()) == reasons
+
+
 def test_nonrenewable_equal_to_use_is_zero_percent(share_case):
     raw = _raw(share_case())
     raw["generators"] = {"gas": [10.0, 20.0, 8.0], "h2 turbine": [0.0, 0.0, 0.0]}
