@@ -91,7 +91,7 @@ const cardLabel = (v: ResultsWorkbookView) => CARD_GROUPS.find(g => g.id === v.c
 /** Why Download is off, in words, or null when the workbook holds at least one tab. */
 export function workbookBlock(views: ResultsWorkbookView[] | undefined, choice: WorkbookChoice): string | null {
   if (!views) return null  // still loading, or the list failed: the route decides at download
-  if (!views.some(v => v.available)) return 'No results yet: run the model, then export.'
+  if (!views.some(v => v.available)) return 'No run yet: run the study or Run LOPF.'
   const included = views.some(v => v.available && (v.selected || choice.all || choice.extra.includes(v.view_id)))
   return included ? null : 'Tick at least one result tab.'
 }

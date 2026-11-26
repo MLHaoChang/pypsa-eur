@@ -78,7 +78,7 @@ describe('ResultsWorkbookPicker', () => {
 describe('workbookBlock', () => {
   it('says why Download is off', () => {
     expect(workbookBlock(undefined, WORKBOOK_DEFAULT)).toBeNull()
-    expect(workbookBlock([row('capex', 'x', 'capacity', 'x', true, false, 'r')], WORKBOOK_DEFAULT)).toMatch(/run the model/i)
+    expect(workbookBlock([row('capex', 'x', 'capacity', 'x', true, false, 'r')], WORKBOOK_DEFAULT)).toBe('No run yet: run the study or Run LOPF.')
     expect(workbookBlock([row('capex', 'x', 'capacity', 'x', false)], WORKBOOK_DEFAULT)).toMatch(/at least one/i)
     expect(workbookBlock([row('capex', 'x', 'capacity', 'x', false)], { extra: ['capex'], all: false })).toBeNull()
     expect(workbookBlock([row('capex', 'x', 'capacity', 'x', true)], WORKBOOK_DEFAULT)).toBeNull()

@@ -349,11 +349,15 @@ def test_round_trip_and_libreoffice_recalculates(solved, tmp_path):
 
 # ── the route ─────────────────────────────────────────────────────────────
 
-def test_route_204_before_a_solve(client, install_network):
+def test_route_says_no_run_yet_before_a_solve(client, install_network):
     n = pypsa.Network()
     n.add("Bus", "A")
     install_network(n)
-    assert client.get(URL).status_code == 204
+    r = client.get(URL)
+    assert r.status_code == 409
+    d = r.json()["detail"]
+    assert d["error_kind"] == "results_workbook_no_run"
+    assert d["message"] == "No run yet: run the study or Run LOPF."
 
 
 def test_route_refuses_a_stale_run_and_exports_the_stored_one_on_request(client, install_network):
