@@ -414,7 +414,7 @@ class Turn:
                     ac_branch_calculations, answer_sections, branch_calculations, carrier_calculations, curtailment_calculations,
                     capacity_calculations, emissions_calculations, energy_balance_calculations,
                     lost_load_calculations, site_import_calculations, investment_calculations, copt_calculations,
-                    grid_readiness_calculations, time_to_power_calculations,
+                    grid_readiness_calculations, time_to_power_calculations, system_cost_calculations,
                     price_calculations, storage_cycles_calculations,
                 )
 
@@ -425,6 +425,7 @@ class Turn:
                             | energy_balance_calculations.REFUSALS | site_import_calculations.REFUSALS
                             | investment_calculations.REFUSALS | copt_calculations.REFUSALS
                             | grid_readiness_calculations.REFUSALS | time_to_power_calculations.REFUSALS
+                            | system_cost_calculations.REFUSALS
                             | answer_sections.REFUSALS | ac_branch_calculations.REFUSALS
                             | {"too_many_metrics_for_warnings"})
                 named = isinstance(exc, ValueError) and exc.args and exc.args[0] in refusals
@@ -643,6 +644,8 @@ class Turn:
             assurance_metrics.copt_screen.PROFILE: "Network",
             assurance_metrics.readiness.PROFILE: "Network",
             assurance_metrics.time_to_power.PROFILE: "Network",
+            assurance_metrics.system_cost.PROFILE:
+                "Network" if self.request_scope["entity_id"] == "network" else "Carrier",
             assurance_metrics.curtailment.PROFILE:
                 "Network" if self.request_scope["entity_id"] == "network" else "Generator",
         }.get(profile)
@@ -672,6 +675,8 @@ class Turn:
             lines.extend(assurance_metrics.lost_load.notes(record["raw"], self.request_scope, _label))
         if profile in assurance_metrics.emissions.PROFILES:
             lines.extend(assurance_metrics.emissions.notes(record["raw"], _label))
+        if profile == assurance_metrics.system_cost.PROFILE:
+            lines.extend(assurance_metrics.system_cost.notes(record["raw"], self.request_scope, _label))
         if profile == assurance_metrics.curtailment.PROFILE:
             lines.extend(assurance_metrics.curtailment.notes(record["raw"], self.request_scope, _label))
         if profile == assurance_metrics.capacity.PROFILE:

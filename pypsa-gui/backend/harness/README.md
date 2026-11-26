@@ -620,6 +620,12 @@ change, and says when it was built to its bound; `storage-cycles/1` divides wind
 discharge (store weights) by energy capacity, sharing the StorageUnit profile's
 per-snapshot bounds helper; cyclic units are checked against their bounds only.
 `tests/test_profile_registry.py` keeps every metric name to one module.
+`system-cost-breakdown/1` (opt-in, `system_cost_calculations.py`, assistant-assurance 10 R3)
+gives capex, opex and their sum for the network or one carrier, as `/results/cost_breakdown`
+books them, from the component tables alone. Every figure needs the hand basis (extendable
+capex plus all opex) to reproduce `n.objective` within `RESIDUAL_TOLERANCE` × max(1, |objective|).
+A scaled objective, an objective constant, PCS/STATCOM, reserve or commercial terms, a MIP or
+an unmodelled cost attribute withholds every figure with its own reason. Whole horizon only.
 `energy-balance/1` (opt-in) gives the Energy flow tab's totals (generation, served,
 unserved, storage change and the unsplit remainder of export, losses and conversion),
 gated by a per-bus balance; the tab's Source -> Via -> Destination rows are its own

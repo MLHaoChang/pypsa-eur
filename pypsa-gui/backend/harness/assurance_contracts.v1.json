@@ -5324,6 +5324,7 @@
         "network-emissions/1",
         "curtailment/1",
         "capacity/1",
+        "system-cost-breakdown/1",
         "storage-cycles/1",
         "energy-balance/1",
         "site-import/1",
@@ -7352,6 +7353,36 @@
     "final_state_of_charge"
    ]
   },
+  "system-cost-breakdown/1": {
+   "definitions": {
+    "objective_residual": {
+     "formula_id": "objective-minus-hand-lp-basis/1",
+     "label": "LP objective minus the hand cost basis",
+     "unit": "EUR"
+    },
+    "system_capex": {
+     "formula_id": "system-capex-by-carrier/1",
+     "label": "Capital cost (per modelled horizon)",
+     "unit": "EUR"
+    },
+    "system_cost": {
+     "formula_id": "system-cost-by-carrier/1",
+     "label": "System cost (capital plus operating)",
+     "unit": "EUR"
+    },
+    "system_opex": {
+     "formula_id": "system-opex-by-carrier/1",
+     "label": "Operating cost",
+     "unit": "EUR"
+    }
+   },
+   "metrics": [
+    "system_capex",
+    "system_opex",
+    "system_cost",
+    "objective_residual"
+   ]
+  },
   "time-to-power/1": {
    "definitions": {
     "time_to_power_months": {
@@ -7535,6 +7566,7 @@
      "network-emissions/1",
      "curtailment/1",
      "capacity/1",
+     "system-cost-breakdown/1",
      "storage-cycles/1",
      "energy-balance/1",
      "site-import/1",

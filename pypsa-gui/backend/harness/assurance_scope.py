@@ -36,7 +36,7 @@ class RequestScope(BaseModel):
         "generator-dispatch/1", "generator-cost/1", "network-linear-cost/1",
         "storage-unit-dispatch/1", "storage-unit-cost/1", "carrier-energy/1",
         "branch-loading/1", "network-loading/1", "lost-load/1", "bus-price/1",
-        "generator-emissions/1", "network-emissions/1", "curtailment/1", "capacity/1",
+        "generator-emissions/1", "network-emissions/1", "curtailment/1", "capacity/1", "system-cost-breakdown/1",
         "storage-cycles/1", "energy-balance/1", "site-import/1", "investment-case/1", "investment-lcoe/1",
         "copt-screening/1", "grid-readiness/1", "time-to-power/1", "ac-branch-loading/1",
     ]
@@ -89,7 +89,7 @@ def validate(value):
     if scope["profile"] == "ac-branch-loading/1" and scope["entity_id"] in ("network", EVERY):
         raise ValueError("unsupported_population_scope")
     if scope["profile"] in ("bus-price/1", "generator-emissions/1", "network-emissions/1",
-                            "curtailment/1") and (
+                            "curtailment/1", "system-cost-breakdown/1") and (
         scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("unsupported_result_cost_scope")
@@ -318,6 +318,17 @@ def _from_message(message, project_id, ui_context):
         if result[5]:
             value.update(start=result[5], end=result[6])
         return validate(value)
+    cost = re.fullmatch(
+        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?system cost\s+for\s+"
+        r"(network|carrier\s+([^;]{1,128}?))[.!?]?",
+        message.strip(), re.I,
+    )
+    if cost:
+        # Whole horizon only: the figures are tied to the LP objective, so no window words.
+        return validate({
+            "version": 1, "profile": "system-cost-breakdown/1", "project_id": project_id,
+            "entity_id": cost[2] or "network", "retain": False,
+        })
     lost = re.fullmatch(
         r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?lost load\s+for\s+"
         r"(network|load\s+([^;]{1,128}?))"

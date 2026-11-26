@@ -268,3 +268,20 @@ def checked_pass(rows_):
         for row in rows_
         if row.get("verdict") == "pass" and readiness_verdict(row) == "pass"
     )
+
+
+# system_cost_calculations.py
+def system_opex(n, start=None, end=None, column="objective"):
+    """Sum over every priced dispatch of marginal_cost(t) x dispatch(t) x w(t)."""
+    window = rows(n.snapshots, start, end)
+    weights = _weights(n, column)[window]
+    terms = []
+    for component, dispatch in (("Generator", "p"), ("Link", "p0"),
+                                ("StorageUnit", "p_dispatch"), ("Store", "p")):
+        flow = n.components[component].dynamic[dispatch]
+        price = n.get_switchable_as_dense(component, "marginal_cost")[flow.columns]
+        terms.append(
+            (price.to_numpy(dtype=float)[window] * flow.to_numpy(dtype=float)[window]
+             * weights[:, None]).ravel()
+        )
+    return _total(np.concatenate(terms))
