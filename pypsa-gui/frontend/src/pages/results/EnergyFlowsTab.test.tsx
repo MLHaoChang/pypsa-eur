@@ -109,6 +109,13 @@ describe('EnergyFlowsTab', () => {
     expect(await screen.findByText(/Run a solve/)).toBeTruthy()
   })
 
+  it('a failed read says the flows could not be read, never "run a solve" (UX 31)', async () => {
+    vi.mocked(energyFlowsApi.get).mockRejectedValue(new Error('500'))
+    mount()
+    expect(await screen.findByTestId('ef-error')).toBeTruthy()
+    expect(screen.queryByText(/Run a solve/)).toBeNull()
+  })
+
   it('asks for the narrowed window after the slider settles', async () => {
     mount()
     const end = await screen.findByLabelText('Window end')

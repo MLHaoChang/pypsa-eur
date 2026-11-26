@@ -210,11 +210,29 @@ describe('implemented assurance publication boundary', () => {
 
   it('P4/P5: unapproved artifact links are not downloadable from a tool card', async () => {
     await start()
+    // The tool row must exist first, or the card is never mounted and the
+    // assertion below passes vacuously (assurance 06 S4, G5).
+    emit('tool_request', { tool_use_id: 'chart-call', tool_name: 'create_chart', args: {}, safety_tier: 'write' })
     emit('tool_result', { tool_use_id: 'chart-call', tool_name: 'create_chart', result: {
       filename: 'chart.png', download_url: '/api/projects/project-id/uploads/0123456789abcdef/blob',
       _assurance: { version: 1, outcome: 'submitted', evidence_ids: [] },
     } })
+    expect((await screen.findAllByText(/create_chart/)).length).toBeGreaterThan(0)
     expect(screen.queryByTestId('assistant-file-download')).toBeNull()
+    expect(document.querySelector('a[href*="/uploads/"]')).toBeNull()
+  })
+
+  it('P4/P5: a strict session drops a tool card\'s result even without assurance metadata', async () => {
+    // Kills the mutant that keeps tool_result in a strict session: without
+    // _assurance the card itself would offer this blob link.
+    await start()
+    emit('tool_request', { tool_use_id: 'chart-bare', tool_name: 'create_chart', args: {}, safety_tier: 'write' })
+    emit('tool_result', { tool_use_id: 'chart-bare', tool_name: 'create_chart', result: {
+      filename: 'chart.png', download_url: '/api/projects/project-id/uploads/0123456789abcdef/blob',
+    } })
+    expect((await screen.findAllByText(/create_chart/)).length).toBeGreaterThan(0)
+    expect(screen.queryByTestId('assistant-file-download')).toBeNull()
+    expect(document.querySelector('a[href*="/uploads/"]')).toBeNull()
   })
 
   it('P5: checking progress is visible without exposing planner reasoning', async () => {

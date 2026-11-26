@@ -63,7 +63,9 @@ def _bound(tab: str, payload, **params) -> dict:
 
     ctx = PyPSAService.get_active_context()
     encoded = canonical(payload)
-    data = json.loads(encoded)
+    # Served in the route's own key order (a tab may draw dict keys in order);
+    # only the hash uses the sorted canonical form.
+    data = _finite(jsonable_encoder(payload))
     return {
         "status": "ok",
         "data": data,
@@ -115,7 +117,11 @@ def _window(window_from, window_to) -> None:
     """A window whose start is after its end is refused, never served as some default."""
     if window_from is not None and window_to is not None and window_from > window_to:
         raise HTTPException(
-            422, {"error_kind": "invalid_window", "message": "the window starts after it ends"}
+            422,
+            {
+                "error_kind": "invalid_window",
+                "message": "the window starts after it ends",
+            },
         )
 
 
@@ -130,8 +136,11 @@ def flows_view(period=None, window_from=None, window_to=None) -> dict:
         if isinstance(payload, Response):
             return _unavailable(payload)
         return _bound(
-            "flows", payload,
-            period=period, window_from=window_from, window_to=window_to,
+            "flows",
+            payload,
+            period=period,
+            window_from=window_from,
+            window_to=window_to,
         )
 
 
@@ -146,8 +155,12 @@ def loadshape_view(period=None, window_from=None, window_to=None, week=None) -> 
         if isinstance(payload, Response):
             return _unavailable(payload)
         return _bound(
-            "loadshape", payload,
-            period=period, window_from=window_from, window_to=window_to, week=week,
+            "loadshape",
+            payload,
+            period=period,
+            window_from=window_from,
+            window_to=window_to,
+            week=week,
         )
 
 
@@ -170,10 +183,12 @@ def curtailment_view(window_from=None, window_to=None) -> dict:
             "generators": None if isinstance(generators, Response) else generators,
         }
         return _bound(
-            "curtailment", parts,
+            "curtailment",
+            parts,
             # The part the chat read (get_results curtailment) names, in the same encoding.
             read_sha256=_sha256(curtailment),
-            window_from=window_from, window_to=window_to,
+            window_from=window_from,
+            window_to=window_to,
         )
 
 
@@ -221,7 +236,9 @@ _INDEX = {"ge": 0}
 
 @router.get("/flows")
 def get_displayed_flows(
-    period: int | None = Query(None, description="Investment period (default: the first)."),
+    period: int | None = Query(
+        None, ge=0, description="Investment period (default: the first)."
+    ),
     from_: int | None = Query(None, alias="from", **_INDEX),
     to_: int | None = Query(None, alias="to", **_INDEX),
     actor: User = Depends(require_user),
@@ -232,7 +249,9 @@ def get_displayed_flows(
 
 @router.get("/loadshape")
 def get_displayed_loadshape(
-    period: int | None = Query(None, description="Investment period (default: the first)."),
+    period: int | None = Query(
+        None, ge=0, description="Investment period (default: the first)."
+    ),
     from_: int | None = Query(None, alias="from", **_INDEX),
     to_: int | None = Query(None, alias="to", **_INDEX),
     week: int | None = Query(None, **_INDEX),
@@ -240,7 +259,12 @@ def get_displayed_loadshape(
 ):
     """The Load shape tab's payload and its source binding."""
     return _serve(
-        loadshape_view, actor, period=period, window_from=from_, window_to=to_, week=week
+        loadshape_view,
+        actor,
+        period=period,
+        window_from=from_,
+        window_to=to_,
+        week=week,
     )
 
 

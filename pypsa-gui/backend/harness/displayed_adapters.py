@@ -207,7 +207,12 @@ def _is_curtailment(result):
 _WINDOW = ("window_from", "window_to")
 _S3A = {
     "flows": (("period", *_WINDOW), "get_energy_flows", ("data_sha256",), _no_read_ref),
-    "loadshape": (("period", *_WINDOW, "week"), "get_load_shape", ("data_sha256",), _no_read_ref),
+    "loadshape": (
+        ("period", *_WINDOW, "week"),
+        "get_load_shape",
+        ("data_sha256",),
+        _no_read_ref,
+    ),
     "curtailment": (
         _WINDOW,
         "get_results",

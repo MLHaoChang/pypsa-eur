@@ -91,13 +91,13 @@ function BlockView({
     case 'paragraph':
       return (
         <div className="text-[12.5px] text-text" data-testid="block-paragraph">
-          <ChatMarkdown rehypePlugins={plugins}>{block.md}</ChatMarkdown>
+          <ChatMarkdown rehypePlugins={plugins} externalLinks="link">{block.md}</ChatMarkdown>
         </div>
       )
     case 'bullets':
       return (
         <div className="text-[12.5px] text-text" data-testid="block-bullets">
-          <ChatMarkdown rehypePlugins={plugins}>{bulletsMarkdown(block.items)}</ChatMarkdown>
+          <ChatMarkdown rehypePlugins={plugins} externalLinks="link">{bulletsMarkdown(block.items)}</ChatMarkdown>
         </div>
       )
     case 'table_ref': {

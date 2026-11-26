@@ -118,6 +118,13 @@ it('reads curtailment and generators as one bound view and marks its root with i
   expect(resultsApi.getGeneratorResults).toHaveBeenCalledWith(undefined, undefined)
 })
 
+it('a failed read says curtailment could not be read, never "has not run yet" (UX 31)', async () => {
+  vi.mocked(resultsApi.getCurtailment).mockRejectedValue(new Error('500'))
+  renderPage()
+  expect(await screen.findByTestId('curtailment-error')).toBeTruthy()
+  expect(screen.queryByText(/has not run yet/)).toBeNull()
+})
+
 it('renders a distinctive curtailed-energy KPI sourced from a single mocked snapshot', async () => {
   renderPage()
   // Curtailment.tsx's own local fmtEnergy (lines 199-205) rounds the MWh

@@ -23,8 +23,8 @@ export interface CurtailmentParts {
 const bound = <T>(r: { status: number; data: Displayed<T> }) => (r.status === 204 || !r.data ? null : r.data)
 
 export const displayedResultsApi = {
-  emissions: () => client.get<Displayed<EmissionsPayload>>('/results/displayed/emissions',
-    { skipErrorToast: true }).then(bound),
+  // As /results/emissions did: a server error toasts.
+  emissions: () => client.get<Displayed<EmissionsPayload>>('/results/displayed/emissions').then(bound),
   gridRisk: () => client.get<Displayed<GridRiskProduction>>('/results/displayed/grid_risk',
     { skipErrorToast: true }).then(bound),
   /** Curtailment and its plants' LP dispatch over one window, read together (A5.2 S3). */

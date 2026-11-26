@@ -29,6 +29,12 @@ it('a proven partial mapping (R3) drops the "may already exist" warning it would
   expect(screen.getByTestId('task-partial-mapping')).toBeTruthy()
   expect(screen.queryByText(/effects may already exist/)).toBeNull()
 })
+it('a result carrying assurance metadata is never a card, so its link is not offered', () => {
+  const url = '/api/projects/project-id/uploads/0123456789abcdef/blob'
+  const { container } = render(<AssistantResultCard result={{ download_url: url, filename: 'chart.png',
+    _assurance: { version: 1, outcome: 'submitted', evidence_ids: [] } }} disabled={false} onRequest={vi.fn()} />)
+  expect(container.innerHTML).toBe('')
+})
 it('offers only authenticated project blob links', () => {
   const url = '/api/projects/project-id/uploads/0123456789abcdef/blob'
   const { rerender } = render(<AssistantResultCard result={{ download_url: url, filename: 'chart.png' }} disabled={false} onRequest={vi.fn()} />)

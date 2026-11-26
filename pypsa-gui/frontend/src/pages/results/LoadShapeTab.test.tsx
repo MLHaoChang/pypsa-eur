@@ -50,6 +50,13 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('LoadShapeTab', () => {
+  it('a failed read says the load shape could not be read, never "run a solve" (UX 31)', async () => {
+    vi.mocked(loadShapeApi.get).mockRejectedValue(new Error('500'))
+    mount()
+    expect(await screen.findByTestId('ls-error')).toBeTruthy()
+    expect(screen.queryByText(/Run a solve/)).toBeNull()
+  })
+
   it('marks its root with the bound view, for the navigation ACK (A5.2)', async () => {
     mount()
     const root = await screen.findByTestId('ls-view')

@@ -41,7 +41,7 @@ export default function Curtailment() {
   const { win, winValid, fetchRange } = useResultsWindow(currentProject)
   // A5.2: curtailment and its plants' dispatch as one bound view (one solve, one
   // binding), so a chat navigation can prove the figures shown.
-  const { data: displayed } = useQuery({
+  const { data: displayed, isError } = useQuery({
     queryKey: nk(currentProject, 'results', 'displayed', 'curtailment', win.from, win.to),
     queryFn: () => displayedResultsApi.curtailment(fetchRange),
     enabled: winValid,
@@ -132,6 +132,14 @@ export default function Curtailment() {
     return { curt, delivered, pct }
   }, [curtailTS, gensTS, renewableNames, weightCtx, range])
 
+  // A failed read is not "not run yet" (rulings ai, aa): the error toast says why.
+  if (isError && !curtailTS) {
+    return (
+      <p className="p-6 text-[12px] text-muted" role="status" data-testid="curtailment-error">
+        The curtailment could not be read. Try again in a moment.
+      </p>
+    )
+  }
   if (!curtailTS) {
     return (
       <NotSolved what="Curtailment" />

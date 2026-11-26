@@ -39,9 +39,23 @@ def _site(load=6.0):
     n.add("Bus", "site")
     n.add("Bus", "grid")
     n.add("Carrier", ["solar", "grid"])
-    n.add("Generator", "pv", bus="site", carrier="solar", p_nom=10,
-          p_max_pu=[1.0, 0.5, 0.0], marginal_cost=0)
-    n.add("Generator", "grid_supply", bus="grid", carrier="grid", p_nom=100, marginal_cost=50)
+    n.add(
+        "Generator",
+        "pv",
+        bus="site",
+        carrier="solar",
+        p_nom=10,
+        p_max_pu=[1.0, 0.5, 0.0],
+        marginal_cost=0,
+    )
+    n.add(
+        "Generator",
+        "grid_supply",
+        bus="grid",
+        carrier="grid",
+        p_nom=100,
+        marginal_cost=50,
+    )
     n.add("Link", "tie", bus0="grid", bus1="site", p_nom=100, efficiency=1.0)
     n.add("Load", "demand", bus="site", p_set=load)
     logging.disable(logging.CRITICAL)
@@ -75,7 +89,14 @@ def _issue(ctx, tab, generation=3):
 
 
 def _ack_body(ack):
-    keys = ("version", "action_id", "turn_id", "binding_generation", "target", "source_binding")
+    keys = (
+        "version",
+        "action_id",
+        "turn_id",
+        "binding_generation",
+        "target",
+        "source_binding",
+    )
     return {k: ack[k] for k in keys}
 
 
@@ -94,20 +115,38 @@ def test_flows_view_is_the_old_route_byte_equal_and_the_hand_oracle(client, solv
     body = client.get("/api/results/displayed/flows").json()
     old = client.get("/api/results/energy_flows").json()
     assert canonical(body["data"]) == canonical(old)
-    assert _rows(body["data"]) == {("solar", "demand"): 11.0, ("Grid import", "demand"): 7.0}
-    windowed = client.get("/api/results/displayed/flows", params={"from": 1, "to": 2}).json()
+    assert _rows(body["data"]) == {
+        ("solar", "demand"): 11.0,
+        ("Grid import", "demand"): 7.0,
+    }
+    windowed = client.get(
+        "/api/results/displayed/flows", params={"from": 1, "to": 2}
+    ).json()
     assert canonical(windowed["data"]) == canonical(
         client.get("/api/results/energy_flows", params={"from": 1, "to": 2}).json()
     )
-    assert _rows(windowed["data"]) == {("solar", "demand"): 5.0, ("Grid import", "demand"): 7.0}
+    assert _rows(windowed["data"]) == {
+        ("solar", "demand"): 5.0,
+        ("Grid import", "demand"): 7.0,
+    }
 
 
 def test_loadshape_view_is_the_old_route_byte_equal_and_the_hand_oracle(client, solved):
     body = client.get("/api/results/displayed/loadshape").json()
-    assert canonical(body["data"]) == canonical(client.get("/api/results/load_shape").json())
+    assert canonical(body["data"]) == canonical(
+        client.get("/api/results/load_shape").json()
+    )
     annual = body["data"]["annual"][0]
-    assert (annual["load_served"], annual["solar"], annual["grid"], annual["excess"]) == (
-        18.0, 11.0, 7.0, 4.0,
+    assert (
+        annual["load_served"],
+        annual["solar"],
+        annual["grid"],
+        annual["excess"],
+    ) == (
+        18.0,
+        11.0,
+        7.0,
+        4.0,
     )
     params = {"from": 1, "to": 2, "week": 0}
     assert canonical(
@@ -116,7 +155,9 @@ def test_loadshape_view_is_the_old_route_byte_equal_and_the_hand_oracle(client, 
 
 
 @pytest.mark.parametrize("window", [None, {"from": 1, "to": 2}])
-def test_curtailment_view_is_both_old_routes_byte_equal_per_part(client, solved, window):
+def test_curtailment_view_is_both_old_routes_byte_equal_per_part(
+    client, solved, window
+):
     body = client.get("/api/results/displayed/curtailment", params=window).json()
     assert set(body["data"]) == {"curtailment", "generators"}
     assert canonical(body["data"]["curtailment"]) == canonical(
@@ -134,7 +175,9 @@ def test_a_generators_204_leaves_that_part_null(client, solved, monkeypatch):
 
     from routers import results
 
-    monkeypatch.setattr(results, "get_generator_results", lambda *_a: Response(status_code=204))
+    monkeypatch.setattr(
+        results, "get_generator_results", lambda *_a: Response(status_code=204)
+    )
     body = client.get("/api/results/displayed/curtailment").json()
     assert body["data"]["generators"] is None
     assert body["data"]["curtailment"]["columns"] == ["pv"]
@@ -152,16 +195,25 @@ def test_an_unsolved_project_answers_204_like_the_old_route(client, baseline, ta
     "tab,params,recorded",
     [
         ("flows", {}, {"period": None, "window_from": None, "window_to": None}),
-        ("flows", {"from": 1, "to": 2}, {"period": None, "window_from": 1, "window_to": 2}),
-        ("loadshape", {"week": 0},
-         {"period": None, "window_from": None, "window_to": None, "week": 0}),
+        (
+            "flows",
+            {"from": 1, "to": 2},
+            {"period": None, "window_from": 1, "window_to": 2},
+        ),
+        (
+            "loadshape",
+            {"week": 0},
+            {"period": None, "window_from": None, "window_to": None, "week": 0},
+        ),
         ("curtailment", {"from": 0, "to": 1}, {"window_from": 0, "window_to": 1}),
     ],
 )
 def test_the_binding_records_the_arguments_the_route_was_called_with(
     client, solved, tab, params, recorded
 ):
-    binding = client.get(f"/api/results/displayed/{tab}", params=params).json()["binding"]
+    binding = client.get(f"/api/results/displayed/{tab}", params=params).json()[
+        "binding"
+    ]
     assert {k: binding[k] for k in recorded} == recorded
     assert set(binding) == displayed_adapters.ADAPTERS[tab].binding_keys
     # The ACK's re-read of this binding is this same view, not the default one.
@@ -171,7 +223,10 @@ def test_the_binding_records_the_arguments_the_route_was_called_with(
 @pytest.mark.parametrize("tab", TABS)
 def test_ack_of_the_rendered_default_binding_is_displayed_data(client, solved, tab):
     _, ack = _issue(solved, tab)
-    assert ack["source_binding"] == client.get(f"/api/results/displayed/{tab}").json()["binding"]
+    assert (
+        ack["source_binding"]
+        == client.get(f"/api/results/displayed/{tab}").json()["binding"]
+    )
     response = client.post("/api/chat/ui-ack", json=_ack_body(ack))
     assert response.status_code == 200, response.text
     assert response.json()["verification"] == "browser_displayed_data"
@@ -195,7 +250,10 @@ def test_ack_after_a_resolve_or_an_input_edit_is_refused(client, solved, tab, ch
     before = ack["source_binding"]["data_sha256"]
     change(solved)
     if change is _resolve:  # the fixture change moves this tab's payload
-        assert client.get(f"/api/results/displayed/{tab}").json()["binding"]["data_sha256"] != before
+        assert (
+            client.get(f"/api/results/displayed/{tab}").json()["binding"]["data_sha256"]
+            != before
+        )
     response = client.post("/api/chat/ui-ack", json=_ack_body(ack))
     assert response.status_code == 409
     assert response.json()["detail"]["error_kind"] == "ui_ack_mismatch"
@@ -225,7 +283,9 @@ def test_ack_after_a_project_switch_is_refused(client, solved, tab):
         ("curtailment", "read_sha256", "0" * 64),
     ],
 )
-def test_ack_of_another_window_period_or_week_is_refused(client, solved, tab, field, value):
+def test_ack_of_another_window_period_or_week_is_refused(
+    client, solved, tab, field, value
+):
     """The browser showed another window than the one the turn opened: 409."""
     _, ack = _issue(solved, tab)
     body = copy.deepcopy(_ack_body(ack))
@@ -237,15 +297,15 @@ def test_ack_of_another_window_period_or_week_is_refused(client, solved, tab, fi
 @pytest.mark.parametrize(
     "tab,change",
     [
-        ("loadshape", {"source": "ac_pf"}),       # a source the tab does not offer
+        ("loadshape", {"source": "ac_pf"}),  # a source the tab does not offer
         ("flows", {"source": "lopf"}),
         ("curtailment", {"source": "lopf"}),
         ("flows", {"window_from": 2, "window_to": 1}),  # starts after it ends
-        ("flows", {"window_from": "0"}),           # not an index
+        ("flows", {"window_from": "0"}),  # not an index
         ("flows", {"window_from": -1}),
         ("loadshape", {"week": 1.5}),
         ("curtailment", {"window_from": True}),
-        ("curtailment", {"run_id": "run-2"}),       # an extra key, as in S2
+        ("curtailment", {"run_id": "run-2"}),  # an extra key, as in S2
     ],
 )
 def test_a_malformed_or_foreign_binding_is_refused_422(client, solved, tab, change):
@@ -267,7 +327,9 @@ def test_a_missing_index_key_is_refused_422(client, solved):
 @pytest.mark.parametrize(
     "params", [{"from": 2, "to": 1}, {"from": -1}, {"to": "x"}, {"source": "ac_pf"}]
 )
-def test_the_view_refuses_a_malformed_window_or_a_source_it_lacks(client, solved, tab, params):
+def test_the_view_refuses_a_malformed_window_or_a_source_it_lacks(
+    client, solved, tab, params
+):
     response = client.get(f"/api/results/displayed/{tab}", params=params)
     if "source" in params:
         # FastAPI ignores an unknown query parameter; the binding says what was served.
@@ -288,7 +350,9 @@ def test_the_view_refuses_a_malformed_window_or_a_source_it_lacks(client, solved
         ("curtailment", ["get_curtailment", "get_generator_results"]),
     ],
 )
-def test_every_part_is_read_inside_one_network_guard(client, solved, monkeypatch, tab, routes):
+def test_every_part_is_read_inside_one_network_guard(
+    client, solved, monkeypatch, tab, routes
+):
     import contextlib
 
     import harness.durable as durable
@@ -358,8 +422,12 @@ def test_the_binding_input_hash_is_the_plain_network_fingerprint(client, solved,
 
 
 @pytest.mark.parametrize(
-    "tab,route", [("flows", "get_energy_flows"), ("loadshape", "get_load_shape"),
-                  ("curtailment", "get_curtailment")],
+    "tab,route",
+    [
+        ("flows", "get_energy_flows"),
+        ("loadshape", "get_load_shape"),
+        ("curtailment", "get_curtailment"),
+    ],
 )
 def test_a_non_finite_value_is_null_in_the_data_its_hash_and_the_ack(
     client, solved, monkeypatch, tab, route
@@ -368,14 +436,21 @@ def test_a_non_finite_value_is_null_in_the_data_its_hash_and_the_ack(
 
     from routers import results
 
-    payload = {"status": "ok", "plants": {}, "total": float("nan"), "peak": float("-inf")}
+    payload = {
+        "status": "ok",
+        "plants": {},
+        "total": float("nan"),
+        "peak": float("-inf"),
+    }
     monkeypatch.setattr(results, route, lambda *_a: payload)
     body = client.get(f"/api/results/displayed/{tab}").json()
     data = body["data"][tab] if tab == "curtailment" else body["data"]
     assert data["total"] is None and data["peak"] is None
     encoded = canonical(body["data"])
     assert "NaN" not in encoded and "Infinity" not in encoded
-    assert body["binding"]["data_sha256"] == hashlib.sha256(encoded.encode()).hexdigest()
+    assert (
+        body["binding"]["data_sha256"] == hashlib.sha256(encoded.encode()).hexdigest()
+    )
     _, ack = _issue(solved, tab)
     assert ack["source_binding"] == body["binding"]
     response = client.post("/api/chat/ui-ack", json=_ack_body(ack))
@@ -464,8 +539,12 @@ def _resolve_curtailment(ctx):
     ctx.network.generators_t.p.loc[:, "grid_supply"] += 1.0
 
 
-@pytest.mark.parametrize("tab,tool", [("flows", "get_energy_flows"), ("loadshape", "get_load_shape")])
-def test_a_bounded_summary_read_never_makes_the_words_say_showing(client, solved, tab, tool):
+@pytest.mark.parametrize(
+    "tab,tool", [("flows", "get_energy_flows"), ("loadshape", "get_load_shape")]
+)
+def test_a_bounded_summary_read_never_makes_the_words_say_showing(
+    client, solved, tab, tool
+):
     """The flows and load-shape reads are bounded summaries, not the payload the
     tab hashed, so the ACK proves the data shown but the words stay "opened"."""
     turn, ack = _issue(solved, tab)
@@ -477,7 +556,8 @@ def test_a_bounded_summary_read_never_makes_the_words_say_showing(client, solved
 
 
 @pytest.mark.parametrize(
-    "result", [None, "text", 3, [], {"index": [], "columns": []}, {"status": "ok", "plants": {}}]
+    "result",
+    [None, "text", 3, [], {"index": [], "columns": []}, {"status": "ok", "plants": {}}],
 )
 def test_a_non_curtailment_read_has_no_ref(result):
     assert displayed_adapters.ADAPTERS["curtailment"].read_ref(result) is None
@@ -490,8 +570,14 @@ def test_the_curtailment_read_ref_is_the_hash_of_the_part_shown(client, solved):
     ref = displayed_adapters.ADAPTERS["curtailment"].read_ref(
         chat_tools.get_results(result_kind="curtailment")
     )
-    expected = hashlib.sha256(canonical(body["data"]["curtailment"]).encode()).hexdigest()
-    assert ref == {"read_sha256": expected} == {"read_sha256": body["binding"]["read_sha256"]}
+    expected = hashlib.sha256(
+        canonical(body["data"]["curtailment"]).encode()
+    ).hexdigest()
+    assert (
+        ref
+        == {"read_sha256": expected}
+        == {"read_sha256": body["binding"]["read_sha256"]}
+    )
     # The whole view's hash covers both parts, so it is not the read's.
     assert body["binding"]["data_sha256"] != expected
 
@@ -499,7 +585,8 @@ def test_the_curtailment_read_ref_is_the_hash_of_the_part_shown(client, solved):
 def test_the_s3a_views_are_listed_as_displayed_data():
     from services import result_views
 
-    claimed = {v.tab for v in result_views.RESULT_VIEWS if v.verification == "displayed_data"}
+    claimed = {
+        v.tab for v in result_views.RESULT_VIEWS if v.verification == "displayed_data"
+    }
     assert set(TABS) <= claimed
     displayed_adapters.check_registry(result_views.RESULT_VIEWS)
-

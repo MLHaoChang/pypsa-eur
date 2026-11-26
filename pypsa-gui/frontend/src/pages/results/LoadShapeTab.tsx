@@ -100,13 +100,21 @@ export default function LoadShapeTab() {
   const { drag, range, setDrag, clear, whole } = useWindowRange()
 
   // A5.2: the bound view, so a chat navigation can prove the load shape shown.
-  const { data: displayed, isFetched } = useQuery({
+  const { data: displayed, isFetched, isError } = useQuery({
     queryKey: nk(currentProject, 'results', 'displayed', 'loadshape', period, range?.[0], range?.[1], week),
     queryFn: () => loadShapeApi.displayed({ period, from: range?.[0], to: range?.[1], week }),
     placeholderData: keepPreviousData,
   })
   const data = displayed?.data
 
+  // A failed read is not "not run yet" (rulings ai, aa): the error toast says why.
+  if (isError && !data) {
+    return (
+      <p className="p-6 text-[12px] text-muted" role="status" data-testid="ls-error">
+        The load shape could not be read. Try again in a moment.
+      </p>
+    )
+  }
   if (!data) {
     if (!isFetched) return null
     return (

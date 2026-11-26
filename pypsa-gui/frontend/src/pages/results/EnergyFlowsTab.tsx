@@ -187,7 +187,7 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
   const { drag, range, setDrag, clear, whole } = useWindowRange()
 
   // A5.2: the bound view, so a chat navigation can prove the flows shown.
-  const { data: displayed, isFetched } = useQuery({
+  const { data: displayed, isFetched, isError } = useQuery({
     queryKey: nk(currentProject, 'results', 'displayed', 'flows', period, range?.[0], range?.[1]),
     queryFn: () => energyFlowsApi.displayed({ period, from: range?.[0], to: range?.[1] }),
     placeholderData: keepPreviousData,
@@ -196,6 +196,14 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
   const chartRef = useRef<HTMLDivElement>(null)
   const source = useChartSource()
 
+  // A failed read is not "not run yet" (rulings ai, aa): the error toast says why.
+  if (isError && !data) {
+    return (
+      <p className="p-6 text-[12px] text-muted" role="status" data-testid="ef-error">
+        The energy flows could not be read. Try again in a moment.
+      </p>
+    )
+  }
   if (!data) {
     if (!isFetched) return null
     return (
