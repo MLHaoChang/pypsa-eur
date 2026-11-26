@@ -18,6 +18,7 @@ import pypsa
 
 from models.energy_hub import REPORT_SECTIONS
 from models.report import Callout, FigureRef, Field, ReportDocument, TableRef
+from services import figure_words as FW
 from services.adequacy.study_report import build_study_report
 from services.reports import formatting as F
 from services.reports.assemble import evidence_only_document
@@ -284,7 +285,7 @@ def test_a_none_payload_value_never_yields_a_zero_cell():
     delta_col = fmea.columns.index("ΔEUE (MWh)")
     assert fmea.rows[0][delta_col] == F.NOT_ESTABLISHED
     headline = doc.tables["headline"]
-    lole = next(r for r in headline.rows if r[0].startswith("MC LOLE"))
+    lole = next(r for r in headline.rows if r[0] == FW.label("expected_shortfall"))
     assert lole[1] == F.NOT_ESTABLISHED
     # The pipeline's "solves charged: 0" is a legitimate zero; every other
     # table came from a payload where None must not have become one.
@@ -426,6 +427,21 @@ def test_a_list_of_like_records_is_a_table_not_json():
 # ── saved Results charts (ui-modern 02 slice 7a) ─────────────────────────
 
 
+MASTER_GOLDEN = "515d84d2559604f226a68826688c2166c185385b5329c9bd31e100ad3e8abe97"
+
+
+def test_only_the_figure_name_moved_the_golden(monkeypatch):
+    """guided-results 04 (GK B (72) cond. 7): with master's row name put back in the one
+    source, the document (and the evidence hash it prints) is master's byte for byte."""
+    import hashlib
+
+    monkeypatch.setitem(FW.FIGURES["expected_shortfall"], "name", "MC LOLE")
+    ev = collect_evidence(study_report=None, eh_report=_populated(), worksheet=_worksheet())
+    doc = evidence_only_document(ev, title="Client report", report_id="0123456789abcdef", figure_pngs={})
+    text = doc.model_copy(update={"created_at": ""}).model_dump_json()
+    assert hashlib.sha256(text.encode()).hexdigest() == MASTER_GOLDEN
+
+
 def test_no_saved_charts_leaves_the_document_byte_equal_to_masters():
     """sha256 of the document JSON (created_at blanked) as master's assemble.py built it for this
     evidence (ui-modern 02 slice 7a, V12); an empty `ReportFigures` must not change one byte."""
@@ -433,7 +449,7 @@ def test_no_saved_charts_leaves_the_document_byte_equal_to_masters():
 
     from services.reports.chart_snapshots import ReportFigures
 
-    golden = "515d84d2559604f226a68826688c2166c185385b5329c9bd31e100ad3e8abe97"
+    golden = "4357e6ce2dd84021f0e0a6f7885fd34c7f1bf25927981760513a57f95c8f6904"
     ev = collect_evidence(study_report=None, eh_report=_populated(), worksheet=_worksheet())
     for pngs in ({}, ReportFigures({}, [])):
         doc = evidence_only_document(ev, title="Client report", report_id="0123456789abcdef", figure_pngs=pngs)

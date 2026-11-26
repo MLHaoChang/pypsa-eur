@@ -39,6 +39,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from models.energy_hub import REPORT_SECTIONS
+from services import figure_words as FW
 from services.adequacy.study_report import (
     _SECTION_CAVEATS,
     _SECTION_QUESTION,
@@ -430,7 +431,8 @@ def _t_headline(headline: dict[str, Any]) -> EvidenceTable:
         ("ENS cap (‱ of demand)", F.fmt_number(headline.get("ens_cap_permyriad"), digits=2)),
         ("Achieved ENS (‱ of demand)", F.fmt_number(headline.get("achieved_ens_permyriad"), digits=2)),
         ("Achieved shed hours (h/yr)", F.fmt_number(headline.get("achieved_shed_hours"), digits=1)),
-        ("MC LOLE (h/yr)", F.fmt_number(headline.get("mc_lole_h"), unit="h/yr", digits=2)),
+        (FW.label("expected_shortfall"),
+         F.fmt_number(headline.get("mc_lole_h"), unit=FW.unit("expected_shortfall"), digits=2)),
         ("Cost at target", cost),
         ("LCOE", F.fmt_number(tea.get("lcoe_eur_per_mwh"), unit="€/MWh", digits=1)),
         ("LCOH", lcoh),

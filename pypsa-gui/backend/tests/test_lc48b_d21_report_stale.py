@@ -119,7 +119,7 @@ def test_a_report_generated_after_the_change_exports_the_new_figure(
 
     assert T.export_report_docx(new)["kind"] == "agent_export"
     headline = T.get_report_table(new, "headline")["items"]
-    assert ["MC LOLE (h/yr)", "4.50 h/yr"] in headline, headline
+    assert ["Expected shortfall (h/yr)", "4.50 h/yr"] in headline, headline
     refused(lambda: T.export_report_docx(old), 409, "report_stale")
 
 

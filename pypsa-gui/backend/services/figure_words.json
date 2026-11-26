@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "_comment": "One name, unit and basis per result figure (guided-results 04). Read by services/figure_words.py and the frontend's utils/figureWords.ts; the parity tests on both sides pin every surface to these words. '{currency}' and '{money}' are filled from the investment report.",
+  "figures": {
+    "expected_shortfall": {
+      "name": "Expected shortfall",
+      "unit": "h/yr",
+      "tag": "LOLE",
+      "basis": "Expected hours a year with load not fully served (loss-of-load expectation, LOLE)"
+    },
+    "screening_shortfall": {
+      "name": "Screening expected shortfall over the modelled horizon (COPT)",
+      "unit": "h",
+      "tag": "LOLE",
+      "basis": "Capacity outage probability table over the modelled hours, not per year (LOLE)"
+    },
+    "project_npv": {
+      "name": "Project NPV at the WACC, after tax (unlevered)",
+      "unit": "{currency}",
+      "basis": "Net present value of the project's after-tax cash before financing, discounted at the WACC"
+    },
+    "lcoe_real": {
+      "name": "LCOE (real)",
+      "unit": "{currency}/MWh",
+      "basis": "investment case · real basis, {money}"
+    },
+    "lcoe_nominal": {
+      "name": "LCOE (finance-consistent, nominal)",
+      "unit": "{currency}/MWh",
+      "basis": "investment case · nominal basis"
+    }
+  }
+}
