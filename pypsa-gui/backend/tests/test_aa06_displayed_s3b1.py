@@ -815,3 +815,30 @@ def test_the_s3b1_views_are_listed_as_displayed_data():
     assert [r.call() for r in storage.reads] == [
         {"tool": "get_results", "args": {"result_kind": "storage"}}
     ] or all("storage_dispatch" not in str(r.call()) for r in storage.reads)
+
+
+# ── The real loop path passes the call's args to note_read (GK B 72) ────────
+
+
+def _loop_read(turn, args):
+    import uuid
+
+    from harness.session import ChatSession
+    from services import chat_service
+
+    session = ChatSession(session_id=uuid.uuid4().hex)
+    session.navigation_turn = turn
+    tool_use = {"id": uuid.uuid4().hex, "name": "get_results", "input": args}
+    list(chat_service._dispatch_real_tool_call(session, tool_use, []))
+
+
+def test_the_loop_passes_the_result_kind_so_a_generators_read_is_not_curtailment(
+    client, solved
+):
+    """A generators series has curtailment's key set; only the call's
+    result_kind, which the loop must pass, tells the two apart."""
+    turn, _ = _issue(solved, "curtailment")
+    _loop_read(turn, {"result_kind": "generators"})
+    assert "curtailment" not in turn.reads
+    _loop_read(turn, {"result_kind": "curtailment"})
+    assert set(turn.reads["curtailment"]) == {"read_sha256"}
