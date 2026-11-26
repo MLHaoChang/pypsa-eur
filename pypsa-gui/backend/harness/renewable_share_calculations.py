@@ -123,9 +123,9 @@ def source(ctx, entity):
     from services.solver.renewable_fraction import classify
 
     n = ctx.network
-    index = profile_common.single_period_index(n)
     if entity != "network":
         raise ValueError("network_scope_required")
+    index = profile_common.single_period_index(n)
     classes = classify(n)
     weights = n.snapshot_weightings["generators"].reindex(index)
     nonren = [str(g) for g in classes["nonren_generators"]]

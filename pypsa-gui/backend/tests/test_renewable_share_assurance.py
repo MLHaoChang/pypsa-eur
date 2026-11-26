@@ -104,8 +104,10 @@ def solve_share(ctx):
 def share_case(baseline):
     ctx = baseline[0]
 
-    def make(**kw):
+    def make(tweak=None, **kw):
         ctx.network = _network(**kw)
+        if tweak is not None:
+            tweak(ctx.network)
         return _solve(ctx)
 
     return make
@@ -309,6 +311,56 @@ def test_two_shares_never_give_a_percent_change(share_case, formula, extra):
 # ── validity: every reason has its own fixture ────────────────────────────
 
 
+def _many_loads(n):
+    """MAX_MEMBERS + 1 counted Loads: a real population over the cap."""
+    for i in range(share.MAX_MEMBERS):
+        n.add("Load", f"small {i}", bus="AC", p_set=0.01)
+
+
+def _gas_export(n):
+    """An export paying more than gas costs: gas runs to export, past the load."""
+    n.add(
+        "Generator",
+        "export",
+        bus="AC",
+        carrier="grid",
+        p_nom=50,
+        sign=-1,
+        marginal_cost=-60.0,
+    )
+
+
+def _inactive_load(n):
+    n.add("Load", "off", bus="AC", p_set=5.0, active=False)
+
+
+def _heat_load(n):
+    n.add("Carrier", "heat")
+    n.add("Bus", "H", carrier="heat")
+    n.add("Load", "heat demand", bus="H", p_set=4.0)
+    n.add(
+        "Generator",
+        "boiler",
+        bus="H",
+        carrier="gas boiler",
+        p_nom=10,
+        marginal_cost=30.0,
+    )
+
+
+def _curtailment_export(n):
+    """A withdrawing Generator takes curtailed wind at t0 only (2 MW at -1 EUR/MWh)."""
+    n.add(
+        "Generator",
+        "export",
+        bus="AC",
+        carrier="grid",
+        p_nom=2,
+        sign=-1,
+        marginal_cost=-1.0,
+    )
+
+
 def _reach(share_case, monkeypatch, name):
     ctx = (
         share_case(load=(0.0, 0.0, 0.0))
@@ -330,11 +382,9 @@ def _reach(share_case, monkeypatch, name):
             "lost_load_t": pd.DataFrame({"L": [0.0, 1.0, 0.0]}, index=STAMPS)
         }
     elif name == "unsupported_population":
-        monkeypatch.setattr(share, "MAX_MEMBERS", 1)
+        ctx = share_case(_many_loads)
     elif name == "nonrenewable_exceeds_served":
-        n.generators_t.p.loc[STAMPS[1], "gas"] = 100.0
-        n.loads_t.p.loc[STAMPS[1], "L"] = 1.0
-        monkeypatch.setattr(share.profile_common, "lp_outputs_live", lambda ctx: True)
+        ctx = share_case(_gas_export)
     return set(_checked(ctx, window)[1].values())
 
 
@@ -379,9 +429,10 @@ def test_negative_generator_output_is_not_counted(share_case):
     ] == pytest.approx(NONREN)
 
 
-def test_a_negative_weight_answers_nothing(share_case):
+@pytest.mark.parametrize("weight", [-0.5, None], ids=["negative", "non_finite"])
+def test_a_negative_or_non_finite_weight_answers_nothing(share_case, weight):
     raw = _raw(share_case())
-    raw["energy_weight"] = [1.0, -0.5, 2.0]
+    raw["energy_weight"] = [1.0, weight, 2.0]  # `_number` captures NaN or inf as None
     assert set(_reasons(raw).values()) == {"unverified_solve"}
 
 
@@ -443,3 +494,83 @@ def test_grammar():
         )
         is None
     )
+
+
+# ── answered populations the KPI also answers: inactive, non-electrical, withdrawing ──
+
+
+@pytest.mark.parametrize(
+    "tweak", [_inactive_load, _heat_load, _curtailment_export], ids=lambda f: f.__name__
+)
+def test_an_answered_variant_equals_the_route(share_case, client, tweak):
+    values, reasons = _checked(share_case(tweak))
+    assert reasons == {}
+    route = client.get("/api/results/renewable_fraction").json()
+    assert route["reason"] is None
+    assert values["renewable_share"][0] == pytest.approx(SHARE, rel=1e-12)
+    assert route["fraction"] * 100 == pytest.approx(
+        values["renewable_share"][0], rel=1e-9
+    )
+    assert route["served_mwh"] == pytest.approx(values["electricity_used"][0], rel=1e-9)
+
+
+def test_a_withdrawing_generator_is_neither_supply_nor_use(share_case):
+    ctx = share_case(_curtailment_export)
+    assert ctx.network.generators_t.p.loc[STAMPS[0], "export"] == pytest.approx(2.0)
+    cls = classify(ctx.network)
+    assert "export" not in cls["nonren_generators"] + cls["injecting_generators"]
+
+
+def test_a_nan_on_an_uncounted_column_does_not_withhold(share_case, client):
+    ctx = share_case()
+    ctx.network.generators_t.p.loc[STAMPS[1], "bio"] = float("nan")
+    values, reasons = _checked(ctx)
+    assert reasons == {}
+    assert values["renewable_share"][0] == pytest.approx(SHARE, rel=1e-12)
+    route = client.get("/api/results/renewable_fraction").json()
+    assert route["fraction"] * 100 == pytest.approx(SHARE, rel=1e-9)
+
+
+def test_the_exports_excess_is_withheld_on_both_surfaces(share_case, client):
+    _reach_ctx = share_case(_gas_export)
+    assert _checked(_reach_ctx)[1]["renewable_share"] == "nonrenewable_exceeds_served"
+    route = client.get("/api/results/renewable_fraction").json()
+    assert route["fraction"] is None and route["reason"]
+
+
+def test_the_dsr_record_fallback_withholds_every_figure(share_case, monkeypatch):
+    ctx = share_case()
+    monkeypatch.setattr(
+        "services.commercial.settlement_inputs.dsr_activation",
+        lambda n: (pd.DataFrame({"AC": [0.0, 1.0, 0.0]}, index=STAMPS), []),
+    )
+    assert set(_checked(ctx)[1].values()) == {"unserved_energy_not_modelled"}
+
+
+def test_a_committed_dc_curtailment_withholds_every_figure(share_case):
+    from services.solver import dc_curtailment
+
+    ctx = share_case()
+    ctx.network.meta = {
+        **(ctx.network.meta or {}),
+        dc_curtailment.META_KEY: {"p_t": [0.0]},
+    }
+    assert set(_checked(ctx)[1].values()) == {"unserved_energy_not_modelled"}
+
+
+def test_a_multi_period_network_is_refused(share_case):
+    ctx = share_case()
+    n = ctx.network
+    n.set_snapshots(pd.MultiIndex.from_product([[2030], STAMPS]))
+    n.set_investment_periods([2030])
+    with pytest.raises(ValueError, match="unsupported_snapshot_scope"):
+        calculations.scoped_source(
+            ctx, {"profile": share.PROFILE, "entity_id": "network"}
+        )
+
+
+def test_another_entity_is_refused_before_the_snapshot_scope(share_case):
+    ctx = share_case()
+    ctx.network.set_snapshots(pd.MultiIndex.from_product([[2030], STAMPS]))
+    with pytest.raises(ValueError, match="network_scope_required"):
+        calculations.scoped_source(ctx, {"profile": share.PROFILE, "entity_id": "gas"})
