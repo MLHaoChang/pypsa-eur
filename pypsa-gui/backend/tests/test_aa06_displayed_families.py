@@ -359,3 +359,56 @@ def test_a_binding_naming_a_run_or_window_these_views_lack_is_refused(
     body["source_binding"][field] = value
     assert client.post("/api/chat/ui-ack", json=body).status_code == 422
     assert _outcome(client, ack["action_id"]) == "submitted"
+
+
+# ── mutants.py survivors (S2 run at 3631166f) ───────────────────────────────
+
+
+@pytest.mark.parametrize("tab", ["emissions", "grid_risk"])
+def test_the_binding_names_the_open_project(client, solved, tab):
+    binding = client.get(f"/api/results/displayed/{tab}").json()["binding"]
+    assert binding["project_id"] == str(solved.project_uuid)
+    assert binding["project_name"] == str(solved.loaded_project)
+    assert binding["project_name"] != ""
+
+
+def test_a_binding_without_an_open_project_names_none_as_empty(solved, monkeypatch):
+    from routers import results, results_displayed
+
+    monkeypatch.setattr(solved, "project_uuid", None)
+    monkeypatch.setattr(solved, "loaded_project", None)
+    binding = results_displayed._bound("emissions", results.get_emissions("lopf"))[
+        "binding"
+    ]
+    assert binding["project_id"] == "" and binding["project_name"] == ""
+
+
+@pytest.mark.parametrize("tab", ["emissions", "grid_risk"])
+@pytest.mark.parametrize("result", [None, "text", 3, []])
+def test_a_non_payload_read_has_no_ref(tab, result):
+    from harness.displayed_adapters import ADAPTERS
+
+    assert ADAPTERS[tab].read_ref(result) is None
+
+
+def test_the_grid_risk_read_of_the_shown_payload_is_its_hash(client, baseline):
+    """The grid-risk chat read is "showing" only for the available payload the
+    tab renders: its ref is the binding's hash; an unavailable or partial
+    payload has no ref."""
+    from harness.displayed_adapters import ADAPTERS
+    from tests.test_grid_risk_production import _network
+
+    ctx = baseline[0]
+    ctx.network = _network()
+    ctx.solver_state.update(status="completed", condition="optimal")
+    shown = client.get("/api/results/displayed/grid_risk").json()["binding"]
+    read = client.get("/api/results/grid_risk_production").json()
+    assert read["available"] is True
+    assert ADAPTERS["grid_risk"].read_ref(read) == {"data_sha256": shown["data_sha256"]}
+    for partial in (
+        {**read, "available": False},
+        {**read, "available": "yes"},
+        {k: v for k, v in read.items() if k != "omitted"},
+        {k: v for k, v in read.items() if k != "project_id"},
+    ):
+        assert ADAPTERS["grid_risk"].read_ref(partial) is None
