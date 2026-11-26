@@ -110,9 +110,9 @@ export default function LoadShapeTab() {
   // A failed read is not "not run yet" (rulings ai, aa): the error toast says why.
   if (isError && !data) {
     return (
-      <p className="p-6 text-[12px] text-muted" role="status" data-testid="ls-error">
-        The load shape could not be read. Try again in a moment.
-      </p>
+      <div className="p-6" data-testid="ls-error">
+        <ResultState state="unavailable" reason="The load shape could not be read. Try again in a moment." />
+      </div>
     )
   }
   if (!data) {

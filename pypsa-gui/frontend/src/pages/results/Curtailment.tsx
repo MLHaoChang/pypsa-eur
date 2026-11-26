@@ -135,9 +135,9 @@ export default function Curtailment() {
   // A failed read is not "not run yet" (rulings ai, aa): the error toast says why.
   if (isError && !curtailTS) {
     return (
-      <p className="p-6 text-[12px] text-muted" role="status" data-testid="curtailment-error">
-        The curtailment could not be read. Try again in a moment.
-      </p>
+      <div className="p-6" data-testid="curtailment-error">
+        <ResultState state="unavailable" reason="The curtailment could not be read. Try again in a moment." />
+      </div>
     )
   }
   if (!curtailTS) {
