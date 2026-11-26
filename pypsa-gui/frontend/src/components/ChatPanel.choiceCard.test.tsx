@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { ChoiceCard } from './ChatPanel'
 import { useChatStore } from '../store/chatStore'
+import { useChatAnnouncer } from '../store/chatAnnouncer'
 
 const CHOICE = {
   tool_use_id: 'tu_1',
@@ -151,7 +152,7 @@ describe('ChoiceCard focus (UX walkthrough issue 07)', () => {
     const card = screen.getByTestId('chat-choice-card')
     expect(document.activeElement).toBe(card)
     expect(card.getAttribute('aria-live')).toBeNull()
-    expect(screen.getByTestId('chat-choice-status').textContent).toBe(`Question: ${CHOICE.title}`)
+    expect(useChatAnnouncer.getState().text).toBe(`Question: ${CHOICE.title}`)
   })
   it('does not take focus from a control outside the chat', () => {
     const outside = document.createElement('button')

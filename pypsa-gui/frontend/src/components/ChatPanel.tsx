@@ -98,6 +98,8 @@ import {
 } from './toolOutcome'
 import MemorySettledLine, { isMemoryRow, memorySettledAt } from './memory/MemorySettledLine'
 import { approvedChatHref } from '../utils/chatLinks'
+import { ChatAnnouncer } from './ChatAnnouncer'
+import { useChatAnnouncer } from '../store/chatAnnouncer'
 export { guidedCardSummary } from './ConfirmationCard'
 
 // Phase D — extensions accepted by the file picker / drag-drop overlay.
@@ -560,6 +562,9 @@ export function ChoiceCard({ companion = false, target = null, inputOpen = false
     const typing = (a instanceof HTMLTextAreaElement || a instanceof HTMLInputElement) && a.value !== ''
     if ((nowhere || inChat) && !typing) cardRef.current?.focus()
   }, [choice])
+  // The question is named once through the chat's shared polite status region.
+  const announce = useChatAnnouncer(s => s.announce)
+  useEffect(() => { if (choice) announce(`Question: ${choice.title}`) }, [choice, announce])
   if (!choice) return null
   const multi = choice.multi_select === true
   const planReview = choice.intent === 'plan_review'
@@ -592,7 +597,6 @@ export function ChoiceCard({ companion = false, target = null, inputOpen = false
       role="group"
       aria-labelledby="chat-choice-title"
     >
-      <span role="status" className="sr-only" data-testid="chat-choice-status">{`Question: ${choice.title}`}</span>
       {planReview && (
         <div className="text-[10px] uppercase tracking-wide text-accent mb-1"
           data-testid="chat-choice-intent">Plan review</div>
@@ -3501,6 +3505,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
+      <ChatAnnouncer />
       {dragActive && (
         <div
           className="absolute inset-0 z-50 bg-accent/15 border-[3px] border-dashed border-accent rounded-md flex items-center justify-center pointer-events-none"
