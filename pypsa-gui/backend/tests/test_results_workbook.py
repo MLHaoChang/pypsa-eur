@@ -349,11 +349,15 @@ def test_round_trip_and_libreoffice_recalculates(solved, tmp_path):
 
 # ── the route ─────────────────────────────────────────────────────────────
 
-def test_route_204_before_a_solve(client, install_network):
+def test_route_says_not_run_yet_before_a_solve(client, install_network):
     n = pypsa.Network()
     n.add("Bus", "A")
     install_network(n)
-    assert client.get(URL).status_code == 204
+    r = client.get(URL)
+    assert r.status_code == 409
+    d = r.json()["detail"]
+    assert d["error_kind"] == "results_workbook_no_run"
+    assert d["message"] == "Not run yet: nothing has been solved."
 
 
 def test_route_refuses_a_stale_run_and_exports_the_stored_one_on_request(client, install_network):
@@ -477,3 +481,36 @@ def test_an_unknown_lost_load_makes_energy_and_lcoe_not_established(solved, lost
     assert "not_established" in served[5].value
     assert not any(isinstance(lcoe[j].value, str) and lcoe[j].value.startswith("=")
                    for j in (1, 2, 3))
+
+
+def test_route_calls_a_kept_run_after_an_edit_out_of_date_not_unrun(client, install_network, monkeypatch):
+    import services.provenance_graph.runs as runs
+
+    n = pypsa.Network()
+    n.add("Bus", "A")
+    install_network(n)
+    monkeypatch.setattr(runs, "kept_run_stale", lambda ctx=None: True)
+    r = client.get(URL)
+    assert r.status_code == 409 and r.json()["detail"]["error_kind"] == "results_workbook_stale"
+
+
+def test_route_calls_a_shape_stale_dispatch_out_of_date_not_unrun(client, install_network):
+    n = _network()
+    n.add("Generator", "added_after_the_solve", bus=n.buses.index[0], p_nom=1.0)
+    install_network(n)
+    r = client.get(URL)
+    assert r.status_code == 409 and r.json()["detail"]["error_kind"] == "results_workbook_stale"
+
+
+def test_chat_tool_keeps_the_stale_kind_for_a_kept_run(install_network, monkeypatch):
+    from fastapi import HTTPException
+    import services.chat_tools as T
+    import services.provenance_graph.runs as runs
+
+    n = pypsa.Network()
+    n.add("Bus", "A")
+    install_network(n)
+    monkeypatch.setattr(runs, "kept_run_stale", lambda ctx=None: True)
+    with pytest.raises(HTTPException) as exc:
+        T.export_results_workbook()
+    assert exc.value.detail["error_kind"] == "results_workbook_stale"

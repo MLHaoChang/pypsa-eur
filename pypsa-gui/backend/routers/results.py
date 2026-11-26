@@ -3046,6 +3046,11 @@ def _workbook_project(run):
             return None
 
 
+# The cause only; the Export tab words what to do per mode ("Not run yet: ..."). Pinned to
+# ResultsWorkbookPicker.tsx's WORKBOOK_NO_RUN by tests/test_workbook_no_run_words_parity.py.
+WORKBOOK_NO_RUN_MESSAGE = "Not run yet: nothing has been solved."
+
+
 def _workbook_template():
     from services import flow_service, network_lengths
 
@@ -3174,7 +3179,8 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
     """The run's results as one workbook (results-workbook spec; RW-TABS-1):
     About, Overview (investment-grade KPIs with native charts) and a sheet per
     included result view — the project's selected cards, plus `views`
-    (comma-separated view ids) or `all`. 204 before a solve; 409
+    (comma-separated view ids) or `all`. 409 `results_workbook_no_run` before a
+    solve (no silent 204); 409
     `results_workbook_stale` while a solve runs, or when the results do not
     match the current inputs (changed, or no fingerprint recorded) unless
     `stored=true` exports the stored run (About says so); 422
@@ -3199,7 +3205,18 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
         # A Guided study solved a private copy: its solve is the run to export (template-e2e 30).
         study = study_solve.fallback()
         if study is None:
-            return _not_solved()
+            from services.provenance_graph import runs
+
+            # "Not run yet" only when nothing was ever solved; a run kept after an edit, or whose dispatch
+            # no longer fits the network, is out of date (the same 409 as a changed-inputs export).
+            if getattr(n, "is_solved", False) or runs.kept_run_stale():
+                raise HTTPException(409, {
+                    "error_kind": "results_workbook_stale",
+                    "message": "The inputs changed since the solve, so the results describe an earlier "
+                               "model. Run the model again."})
+            raise HTTPException(409, {
+                "error_kind": "results_workbook_no_run",
+                "message": WORKBOOK_NO_RUN_MESSAGE})
         n = study["network"]
     if _solver_in_flight():  # the network carries the LP's transient transforms
         raise HTTPException(409, {

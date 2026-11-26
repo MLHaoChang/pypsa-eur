@@ -8423,10 +8423,15 @@ def export_results_workbook(views: list | None = None, all: bool = False,  # noq
     (export that run with `export_run_evidence`)."""
     from routers import results as R
 
-    resp = _route(R.get_results_workbook, views=",".join(str(v) for v in (views or [])),
-                  all_views=bool(all), stored=bool(stored),
-                  run_id=None if run_id is None else str(run_id))
-    if resp.status_code == 204:
+    try:
+        resp = _route(R.get_results_workbook, views=",".join(str(v) for v in (views or [])),
+                      all_views=bool(all), stored=bool(stored),
+                      run_id=None if run_id is None else str(run_id))
+    except HTTPException as exc:  # the route's "no run yet" keeps this tool's own kind
+        if (exc.detail or {}).get("error_kind") != "results_workbook_no_run":
+            raise
+        resp = None
+    if resp is None or resp.status_code == 204:
         raise HTTPException(
             status_code=409,
             detail={"error_kind": "results_workbook_no_results",
