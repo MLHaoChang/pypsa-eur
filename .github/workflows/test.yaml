@@ -389,6 +389,10 @@ jobs:
         npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/pw" "playwright@$PLAYWRIGHT_VERSION"
         "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
 
+    # AA06 S5 (G7a): the navigation tools' input schemas, from this checkout, never committed.
+    - name: Dump the assistant's navigation tool schemas
+      run: .pixi/envs/test/bin/python pypsa-gui/backend/scripts/dump_ui_tool_schemas.py "$RUNNER_TEMP/ui-tool-schemas.json"
+
     - name: Run the owner journeys (OJ-01, OJ-05, OJ-21, LC-03 past runs)
       working-directory: pypsa-gui/frontend
       env:
@@ -406,6 +410,8 @@ jobs:
         node scripts/smoke-template-journey-connection.mjs || status=1
         # Investment walkthrough 02: the data centre's investment case, Guided = Expert, no raw codes.
         node scripts/smoke-template-journey-investment.mjs || status=1
+        # AA06 S5: the assistant opens every result tab, Expert and Guided, frames built from the schemas.
+        node scripts/smoke-result-navigation.mjs "$RUNNER_TEMP/ui-tool-schemas.json" || status=1
         exit $status
 
     - name: Upload journey screenshots
