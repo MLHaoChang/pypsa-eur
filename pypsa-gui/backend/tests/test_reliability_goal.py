@@ -15,6 +15,7 @@ import pandas as pd
 import pypsa
 import pytest
 
+from project_templates.eh_templates import TEMPLATE_META
 from services import reliability_goal as G
 from services.adequacy.eh_study_runner import EhStudyRequest
 
@@ -589,7 +590,7 @@ def test_a_non_number_assumed_goal_reads_as_none(bad, monkeypatch):
     assert G.assumed_lole({"target_lole_h": {"value": None, "source": "default"}}) is None
 
 
-@pytest.mark.parametrize("template_id", sorted(__import__("project_templates.eh_templates", fromlist=["x"]).TEMPLATE_META))
+@pytest.mark.parametrize("template_id", sorted(TEMPLATE_META))
 def test_template_assumed_lole_agrees_across_rail_card_and_study(template_id):
     """Issue 41: the ledger's assumed LOLE row (the rail), the Goal card's
     `effective_goal` and the study's pack target are one number, or all absent."""
