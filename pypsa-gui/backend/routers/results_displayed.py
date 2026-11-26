@@ -323,6 +323,18 @@ def dispatch_view(source="lopf", window_from=None, window_to=None) -> dict:
     _window(window_from, window_to)
     win = (window_from, window_to)
     with network_guard():
+        if source == "ac_pf" and not isinstance(
+            results._state.get("ac_pf_results"), dict
+        ):
+            # No AC power flow on record: the old routes fall back to the live
+            # LP network, which must never be bound under an ac_pf label.
+            raise HTTPException(
+                422,
+                {
+                    "error_kind": "source_not_available",
+                    "message": "no AC power flow has run for this network",
+                },
+            )
         reads = {
             "cost_breakdown": results.get_cost_breakdown(),
             "generators": results.get_generator_results(source, *win),

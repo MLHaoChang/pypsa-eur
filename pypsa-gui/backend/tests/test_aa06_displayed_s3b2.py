@@ -529,10 +529,28 @@ def test_the_dispatch_view_called_directly_refuses_a_source_it_lacks(solved):
     with pytest.raises(HTTPException) as err:
         results_displayed.dispatch_view(window_from=2, window_to=1)
     assert err.value.detail["error_kind"] == "invalid_window"
-    assert results_displayed.dispatch_view(source="ac_pf")["status"] in (
-        "ok",
-        "unavailable",
-    )
+    # No AC power flow on record: refused, never the LP data under an ac_pf label.
+    with pytest.raises(HTTPException) as err:
+        results_displayed.dispatch_view(source="ac_pf")
+    assert err.value.status_code == 422
+    assert err.value.detail["error_kind"] == "source_not_available"
+
+
+def test_ac_pf_without_a_flow_on_record_is_refused_and_binds_nothing(client, solved):
+    response = _get(client, "dispatch", source="ac_pf")
+    assert response.status_code == 422
+    assert response.json()["detail"]["error_kind"] == "source_not_available"
+    assert "binding" not in response.json()
+
+
+def test_an_ack_of_ac_pf_without_a_flow_on_record_is_refused(client, solved):
+    _, ack = _issue(solved, "dispatch")
+    body = copy.deepcopy(_ack_body(ack))
+    body["source_binding"]["source"] = "ac_pf"
+    response = client.post("/api/chat/ui-ack", json=body)
+    assert response.status_code == 409
+    assert response.json()["detail"]["error_kind"] == "ui_ack_mismatch"
+    assert _outcome(client, ack["action_id"]) == "submitted"
 
 
 @pytest.mark.parametrize(
