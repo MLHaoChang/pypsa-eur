@@ -327,3 +327,42 @@ def test_grammar():
     assert scope["profile"] == losses.PROFILE and scope["entity_id"] == "network"
     branch = assurance_scope.from_message("show losses for branch L1; from 2026-01-01T00:00 to 2026-01-01T01:00", "p1", {})
     assert branch["profile"] == losses.PROFILE and branch["entity_id"] == "L1"
+
+
+def test_a_population_above_the_cap_is_refused(losses_case, monkeypatch):
+    ctx = losses_case()
+    monkeypatch.setattr(losses, "MAX_BRANCHES", 2)  # three branches here
+    with pytest.raises(ValueError, match="unsupported_branch_population"):
+        calculations.scoped_source(ctx, {"profile": losses.PROFILE, "entity_id": "network"})
+    monkeypatch.setattr(losses, "MAX_BRANCHES", 3)
+    calculations.scoped_source(ctx, {"profile": losses.PROFILE, "entity_id": "network"})
+
+
+def test_weights_on_another_index_are_misaligned(losses_case, monkeypatch):
+    from services import period_utils
+
+    ctx = losses_case()
+    shifted = pd.Series(WEIGHTS, index=STAMPS + pd.Timedelta(minutes=1))
+    monkeypatch.setattr(period_utils, "snapshot_weights", lambda n, column: shifted)
+    with pytest.raises(ValueError, match="misaligned_source"):
+        calculations.scoped_source(ctx, {"profile": losses.PROFILE, "entity_id": "network"})
+
+
+def test_a_negative_weight_answers_nothing(losses_case):
+    raw = calculations.scoped_source(losses_case(), {"profile": losses.PROFILE, "entity_id": "network"})
+    raw["energy_weight"][1] = -0.5
+    facts, slots = losses.calculate(raw, {"profile": losses.PROFILE, "entity_id": "network"})
+    assert facts == [] and {s["reason"] for s in slots} == {"unverified_solve"}
+
+
+def test_a_record_of_another_entity_is_rejected(losses_case):
+    raw = calculations.scoped_source(losses_case(), {"profile": losses.PROFILE, "entity_id": "L1"})
+    with pytest.raises(ValueError, match="branch_losses_source_identity"):
+        losses.calculate(raw, {"profile": losses.PROFILE, "entity_id": "L2"})
+
+
+def test_the_record_holds_no_number_for_a_member_that_is_not_complete(losses_case):
+    ctx = losses_case(lines={"L1": [1.0, np.nan, 0.5], "L2": [0.0, 0.0, 0.0]})
+    raw = calculations.scoped_source(ctx, {"profile": losses.PROFILE, "entity_id": "network"})
+    assert raw["branches"]["Line:L1"] == {"state": "incomplete", "values": None}
+    assert raw["branches"]["Line:L2"] == {"state": "complete", "values": [0.0, 0.0, 0.0]}
