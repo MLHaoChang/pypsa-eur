@@ -3046,6 +3046,20 @@ def _workbook_project(run):
             return None
 
 
+def _workbook_verdict(store: dict, record) -> str | None:
+    """The study's verdict line for About, or None when no study review exists
+    (the same review the Guided Results card reads, template-e2e 46)."""
+    from services.adequacy.eh_review import review_latest
+    from services.adequacy.verdict_line import verdict_line
+
+    try:
+        review = review_latest(store, record if isinstance(record, dict) else None)
+    except Exception:  # noqa: BLE001 - the workbook never fails for want of a verdict
+        logger.info("results workbook: no verdict line", exc_info=True)
+        return None
+    return verdict_line(review.get("summary")) if review.get("status") == "ok" else None
+
+
 def _workbook_template():
     from services import flow_service, network_lengths
 
@@ -3232,6 +3246,8 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
     except UnknownView as exc:
         raise HTTPException(422, {"error_kind": "unknown_result_view", "message": str(exc)})
     runs = [latest] if latest is not None else []
+    verdict = _workbook_verdict(held if study is not None else _state,
+                                None if study is not None else get_eh_study())
     project = PyPSAService.get_loaded_project()
     report = load_ic_report(_state)
     case_state = None
@@ -3258,7 +3274,7 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
             lost_load=_state.get("last_lost_load") if study is None else held.get("last_lost_load"),
             result_df=_result_df if study is None else functools.partial(_result_df, state=held),
             views=included, ic_report=report, case_state=case_state,
-            bc_report=bc_report, bc_state=bc_state,
+            bc_report=bc_report, bc_state=bc_state, verdict=verdict,
             project=project, scope=scope, template=template, freshness=freshness,
             stored=stored, run=runs[0] if runs else None, scenarios=scenarios,
             solved_settings=(_solved_settings if study is None

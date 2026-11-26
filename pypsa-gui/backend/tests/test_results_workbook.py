@@ -481,3 +481,22 @@ def test_an_unknown_lost_load_makes_energy_and_lcoe_not_established(solved, lost
     assert "not_established" in served[5].value
     assert not any(isinstance(lcoe[j].value, str) and lcoe[j].value.startswith("=")
                    for j in (1, 2, 3))
+
+
+def test_about_carries_the_study_verdict_line(client, install_network, monkeypatch):
+    import services.adequacy.eh_review as eh_review
+    import services.workflow_tools as wt
+
+    install_network(_network())
+    monkeypatch.setattr(wt, "solve_freshness",
+                        lambda ctx=None: {"inputs_changed_since_solve": False, "results_current": True})
+    summary = {"verdict": "pass", "mc_lole_h_per_year": 0.4, "target_lole_h": 2}
+    monkeypatch.setattr(eh_review, "review_latest",
+                        lambda *a, **k: {"status": "ok", "summary": summary})
+    r = client.get(URL)
+    assert r.status_code == 200
+    about = {row[0].value: row[1].value for row in _wb(r.content)["About"].iter_rows()}
+    assert about["Verdict"] == "Certified: about 0.4 h/yr of shortfall, under the 2 h/yr goal."
+    monkeypatch.setattr(eh_review, "review_latest", lambda *a, **k: {"status": "no_data"})
+    about = {row[0].value: row[1].value for row in _wb(client.get(URL).content)["About"].iter_rows()}
+    assert "Verdict" not in about
