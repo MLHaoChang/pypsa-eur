@@ -163,3 +163,37 @@ def test_the_campus_scr_row_matches_the_run_table(ran):
         assert row["project_value"] == 0.0 and f"outage {first} islands it from the grid" in row["note"]
     else:
         assert row["project_value"] == pytest.approx(float(live["scr_worst"].min()))
+
+
+# ── the wrappers on their own (no run) ──────────────────────────────────────
+
+@pytest.mark.parametrize("spec", [None, {}, {"campus": None}, {"campus": {"pcc": None}}, {"campus": {"pcc": {}}}])
+def test_a_spec_with_no_pcc_has_no_open_tie(monkeypatch, tmp_path, spec):
+    monkeypatch.setattr(ce.cs, "_run_campus_spec", lambda run: spec)
+    assert ce._tie_open(tmp_path) is False
+
+
+def test_a_screen_with_no_table_reads_an_empty_list(tmp_path):
+    (tmp_path / ce.PLANNING_META).write_text(json.dumps({"verdict": "pass"}))
+    assert ce._gc03_results(tmp_path, ce.PLANNING_META, ce.PLANNING_ERROR, {"rows": "absent.csv"}) == {
+        "verdict": "pass", "rows": []}
+
+
+def test_a_screen_failure_is_written_named_and_logged_unless_it_is_a_contract_refusal(tmp_path, caplog):
+    from gridspine.schema.contracts import ContractError
+
+    def boom(exc):
+        def call():
+            raise exc
+        return call
+
+    files = ("out.csv", "meta.json", "err.json")
+    with caplog.at_level("ERROR"):
+        ce._gc03_screen(tmp_path, files, "demo", boom(RuntimeError()), "err.json", "meta.json")
+    assert json.loads((tmp_path / "err.json").read_text()) == {"error": "RuntimeError"}
+    assert "the demo screen failed" in caplog.text
+    caplog.clear()
+    with caplog.at_level("ERROR"):
+        ce._gc03_screen(tmp_path, files, "demo", boom(ContractError("demo refusal")), "err.json", "meta.json")
+    assert json.loads((tmp_path / "err.json").read_text()) == {"error": "demo refusal"}
+    assert "the demo screen failed" not in caplog.text and not (tmp_path / "meta.json").exists()
