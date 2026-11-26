@@ -522,8 +522,13 @@ def test_node_ids_resolve_statically_including_a_param_id():
 
 R1_OK = "gk-b:bf0eed8e63449828d3c91967f75a8c35e2775a2a"  # #2036
 R2_OK = "gk-b:e0be8aa78175a29b88c93d1c46b51c0f6189307c"  # #2037
+R3_OK = "gk-b:0746af566b2e1c98d02ece109dc5ead76ccefc6b"  # #2044
 # Exact set: a row whose domain_review is not "pending" is listed here with its value.
 REVIEWED = {
+    **{
+        ("system-cost-breakdown/1", m): R3_OK
+        for m in ("system_capex", "system_opex", "system_cost", "objective_residual")
+    },
     **{
         ("branch-losses/1", m): R1_OK
         for m in ("loss_energy", "peak_loss", "demand_energy", "loss_pct_of_demand")
