@@ -97,6 +97,7 @@ import {
   type CurrentToolOutcome, type ToolOutcomeMark, currentToolOutcome, outcomeClock, refusalDetail, toolOutcomeLine, toolOutcomeOf, toolOutcomeWords,
 } from './toolOutcome'
 import MemorySettledLine, { isMemoryRow, memorySettledAt } from './memory/MemorySettledLine'
+import { approvedChatHref } from '../utils/chatLinks'
 export { guidedCardSummary } from './ConfirmationCard'
 
 // Phase D — extensions accepted by the file picker / drag-drop overlay.
@@ -1149,7 +1150,7 @@ function UploadChipStrip({
               )}
               {isExport && (
                 <a
-                  href={getUploadBlobUrl(currentProject, u.file_id)}
+                  href={approvedChatHref(getUploadBlobUrl(currentProject, u.file_id), ['upload']) ?? undefined}
                   download={u.filename}
                   className="text-accent hover:underline px-0.5"
                   title={`Download ${u.filename}`}

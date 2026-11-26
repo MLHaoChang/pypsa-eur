@@ -15,6 +15,7 @@ import remarkGfm from 'remark-gfm'
 import type { Components, Options } from 'react-markdown'
 import { extractCopyText } from '../utils/chatUi'
 import { guideLinkId } from '../catalogue/guideLink'
+import { approvedChatHref } from '../utils/chatLinks'
 import { openGuide } from '../catalogue/guideStore'
 
 // Models occasionally include this label inside a Markdown destination rather
@@ -68,14 +69,12 @@ function CodeBlockPre({ children, ...rest }: { children?: ReactNode } & Record<s
 }
 
 // Assistant-assurance 06 (A5.3): a link in assistant prose is followed only when it
-// stays in the app: a guide link (a button below) or a same-origin path. Any other
-// destination (another site, mail, a script or data URL, a protocol-relative URL) is
+// stays in the app: a guide link (a button below) or one of the app's own download
+// and evidence routes (`approvedChatHref`, the one link seam). Any other
+// destination (another site, mail, a script or data URL, a protocol-relative URL,
+// another in-app path) is
 // shown as plain, selectable text in the sentence colour, with the address beside
 // any differing link text, so injected link text cannot hide where it points (UX 31).
-export function inAppHref(href: unknown): href is string {
-  return typeof href === 'string' && /^\/(?![/\\])/.test(href) && !href.includes('\\')
-}
-
 function urlAsText(href: unknown, children: ReactNode) {
   const text = extractCopyText(children)
   const shown = typeof href === 'string' && href !== '' && href !== text ? ` (${href})` : ''
@@ -97,9 +96,12 @@ const components: Components = {
     // In-app: a button, not a link; the click re-checks the id with the same pattern.
     ? <button type="button" className="text-accent underline hover:no-underline"
         onClick={e => { const id = guideLinkId(p.href); if (id) openGuide(id, e.currentTarget) }}>{p.children}</button>
-    : inAppHref(p.href)
-      ? <a className="text-accent underline hover:no-underline" target="_blank" rel="noreferrer" {...p} />
-      : urlAsText(p.href, p.children)),
+    : (() => {
+      const href = approvedChatHref(p.href)
+      return href
+        ? <a className="text-accent underline hover:no-underline" target="_blank" rel="noreferrer" href={href}>{p.children}</a>
+        : urlAsText(p.href, p.children)
+    })()),
   // An image is never fetched from assistant text: its alt text stands in.
   img: ({ node, alt }) => <span className="text-muted" data-testid="chat-image-as-text">{alt ? `[image: ${alt}]` : '[image]'}</span>,
   hr: ({ node, ...p }) => <hr className="my-2 border-border" {...p} />,

@@ -119,6 +119,29 @@ describe('assistant prose link policy (A5.3)', () => {
     expect(container.querySelector('img, script, iframe, a, [onerror]')).toBeNull()
   })
 
+  it.each([
+    'java&#x73;cript:alert(1)', 'javascript&#58;alert(1)', 'javascript%3Aalert(1)', 'java\tscript:alert(1)',
+    `https://${window.location.host}@evil.example/x`, '/results/prices', '/api/projects/p/settings',
+  ])('G1: only an app download or evidence route is a link, not %s', (url) => {
+    const { container } = render(<ChatMarkdown>{`[go](<${url}>)`}</ChatMarkdown>)
+    expect(container.querySelector('a')).toBeNull()
+    expect(container.innerHTML).not.toMatch(/href=|javascript:/i)
+  })
+
+  it('G1: an app download route in prose is a link to that route', () => {
+    render(<ChatMarkdown>{'[values](/api/chat/answers/a-1/export?format=zip)'}</ChatMarkdown>)
+    expect(screen.getByRole('link', { name: 'values' }).getAttribute('href')).toBe('/api/chat/answers/a-1/export?format=zip')
+  })
+
+  it.each([
+    '<img src=x onerror="alert(1)">', '&lt;img src=x onerror=alert(1)&gt;',
+    '<a href="javascript:alert(1)">x</a>', '&lt;a href=javascript:alert(1)&gt;x&lt;/a&gt;',
+    '<script>alert(1)</script>', '&lt;script&gt;alert(1)&lt;/script&gt;',
+  ])('G3: raw or entity-encoded HTML adds no element or attribute: %s', (html) => {
+    const { container } = render(<ChatMarkdown>{`Hi ${html} there`}</ChatMarkdown>)
+    expect(container.querySelector('img, script, a, [onerror], [href], [src]')).toBeNull()
+  })
+
   it('the report viewer keeps its external links', () => {
     render(<ChatMarkdown externalLinks="link">{'[docs](https://docs.pypsa.org/)'}</ChatMarkdown>)
     expect(screen.getByRole('link', { name: 'docs' }).getAttribute('href')).toBe('https://docs.pypsa.org/')

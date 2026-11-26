@@ -1,6 +1,7 @@
 import { hasWarning, WARNED_LABEL, warningText, type AnswerReceipt } from '../utils/answerAssurance'
 import { readableProfile, readableWindow } from '../utils/readableTime'
 import type { NavigationEntry } from '../utils/answerAssurance'
+import { approvedChatHref } from '../utils/chatLinks'
 
 // What the Load flow tab shows instead of the checked solve and window (S3b).
 const VIEW_REASON: Record<NonNullable<NavigationEntry['reason']>, string> = {
@@ -35,6 +36,7 @@ export function CheckedEvidenceCard({ answerId, receipt, sourceLabel }: { answer
   // the warning row already words it, so that raw line is not shown (UX 3, #1831).
   const warningPrefixes = (receipt.result_slots ?? []).filter(s => s.disposition === 'warning').map(s => `${s.metric}: `)
   const limitations = receipt.limitations.filter(text => !warningPrefixes.some(prefix => text.startsWith(prefix)))
+  const exportHref = approvedChatHref(`/api/chat/answers/${encodeURIComponent(answerId)}/export?format=zip`, ['export'])
   return <details className="mt-2 text-[11px] border border-border rounded p-2" data-testid="checked-evidence-card">
     <summary className="cursor-pointer">{clarifying ? 'Clarification needed' : warned ? WARNED_LABEL : receipt.request_complete === true ? 'Requested results checked' : 'Checked evidence and limitations'}</summary>
     <div className="mt-2 space-y-1">
@@ -56,8 +58,11 @@ export function CheckedEvidenceCard({ answerId, receipt, sourceLabel }: { answer
         : <p>{receipt.checked_block_ids.length} facts checked against evidence. This does not certify the engineering model.</p>}
       {receipt.reviewer_status !== 'not_required' && <p>Interpretation review: {receipt.reviewer_status.replace(/_/g, ' ')}</p>}
       <div className="flex flex-wrap gap-2">
-        {!clarifying && <a className="underline" href={`/api/chat/answers/${encodeURIComponent(answerId)}/export?format=zip`} download>Download checked values and evidence</a>}
-        {receipt.evidence_ids.map((id, i) => <a key={id} className="underline" href={`/api/chat/evidence/${encodeURIComponent(id)}`} target="_blank" rel="noopener noreferrer">Evidence {i + 1}</a>)}
+        {!clarifying && exportHref && <a className="underline" href={exportHref} download>Download checked values and evidence</a>}
+        {receipt.evidence_ids.map((id, i) => {
+          const href = approvedChatHref(`/api/chat/evidence/${encodeURIComponent(id)}`, ['evidence'])
+          return href && <a key={id} className="underline" href={href} target="_blank" rel="noopener noreferrer">Evidence {i + 1}</a>
+        })}
       </div>
     </div>
   </details>

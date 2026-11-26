@@ -2,6 +2,7 @@ import type { CheckedChart as Chart } from '../utils/answerAssurance'
 import { useUIStore } from '../store/uiStore'
 import { openPanel } from '../pages/results/openPanel'
 import { readableWindow } from '../utils/readableTime'
+import { approvedChatHref } from '../utils/chatLinks'
 
 // The Results tab that draws the same data natively, per checked profile.
 const NATIVE: Record<string, { tab: string; label: string }> = {
@@ -33,18 +34,19 @@ const SLOT_WORDS: Record<string, string> = {
 export function CheckedChart({ chart, profile, entity, compact = false }: {
   chart: Chart; profile?: string; entity?: string; compact?: boolean
 }) {
+  const href = approvedChatHref(chart.download_url, ['upload'])
   const drawn = chart.series.filter(s => s.disposition === 'drawn')
   const notDrawn = chart.series.filter(s => s.disposition !== 'drawn')
   const native = profile ? NATIVE[profile] : undefined
   if (compact) {
-    return chart.status === 'drawn' && chart.download_url
-      ? <a data-testid="checked-chart-download" className="underline" href={chart.download_url}
+    return chart.status === 'drawn' && href
+      ? <a data-testid="checked-chart-download" className="underline" href={href}
         download={chart.filename ?? undefined}>Download chart</a>
       : null
   }
   return <div className="mt-2 text-[11px] border border-border rounded p-2" data-testid="checked-chart">
-    {chart.status === 'drawn' && chart.download_url
-      ? <a data-testid="checked-chart-download" className="underline font-medium" href={chart.download_url}
+    {chart.status === 'drawn' && href
+      ? <a data-testid="checked-chart-download" className="underline font-medium" href={href}
         download={chart.filename ?? undefined}>Download chart{chart.filename ? ` (${chart.filename})` : ''}</a>
       : <p className="font-medium">Chart not drawn{chart.title ? ` — ${chart.title}` : ''}</p>}
     {chart.status === 'drawn' && chart.window && <p className="mt-1" data-testid="checked-chart-footer">
