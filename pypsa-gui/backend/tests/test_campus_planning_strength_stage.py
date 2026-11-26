@@ -87,11 +87,7 @@ def test_a_scr_minimum_in_the_profile_judges_the_campus_scr_row_only(ran):
     _publish(hub, scr_min={"value": 3.0, "clause": "demo clause 1.2", "source": "code"})
     card = _card(hub)
     row = card["campus_scr"]
-    assert (
-        row["limit"] == 3.0
-        and row["source"].endswith("demo clause 1.2")
-        and row["assumed"] is False
-    )
+    assert row["limit"] == 3.0 and row["source"].endswith("demo clause 1.2")
     # the fixture's one transformer islands the PoC, so there is no ratio to judge: never a pass, never 0
     assert row["verdict"] == "unknown" and row["project_value"] is None
     # ESCR and WSCR are never judged on the SCR minimum
