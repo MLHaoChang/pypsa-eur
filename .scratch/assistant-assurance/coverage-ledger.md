@@ -947,3 +947,14 @@ Four verified rows in `pypsa-gui/backend/tests/assurance_acceptance/metric_ledge
 - pending: the objective-vs-cost clarification card (S3, G3: clarification choices pinned by exact list equality). Not built.
 - pending: objective-scale reversal under auto and user scale ≠ 1 (S3, G3). R3 refuses a scaled objective (`objective_scaled`, read from the recorded solver config, since the solver deletes its live sentinel) instead of reversing it.
 
+### 2026-11-26 — AA-10 R4: renewable-share/1
+
+Three verified rows in `pypsa-gui/backend/tests/assurance_acceptance/metric_ledger.d/renewable-share-1.json`
+(renewable share in percent, non-renewable energy, electricity used), answer and route surfaces.
+The classification is `services/solver/renewable_fraction.py:classify` (renewable test
+`services/results/carrier_kpis.py:_is_renewable_carrier`), named and pinned by exact sets; the
+hand oracle uses generator weights 1, 0.5, 2. Percent versus percentage points is tested both ways.
+- pending: the populations R4 withholds (`unsupported_supply_path`: source and conversion Links,
+  net clusters, injecting or unattributed sources, slack Generators) and runs with a removed slack
+  (`unserved_energy_not_modelled`). The route answers these; the checked profile does not.
+- pending: multi-period networks (`unsupported_snapshot_scope`).

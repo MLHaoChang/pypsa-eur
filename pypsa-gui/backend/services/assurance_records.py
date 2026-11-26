@@ -1889,6 +1889,7 @@ def capture_scoped(owner, scope):
                 calculations.curtailment.PROFILE,
                 calculations.losses.PROFILE,
                 calculations.system_cost.PROFILE,
+                calculations.renewable_share.PROFILE,
                 calculations.capacity.PROFILE,
                 calculations.cycles.PROFILE,
                 calculations.balance.PROFILE,
