@@ -84,7 +84,7 @@ def test_an_edit_after_the_study_drops_it(client, after_study):
     r = client.get(URL)
     assert (
         r.status_code == 409
-        and r.json()["detail"]["error_kind"] == "results_workbook_no_run"
+        and r.json()["detail"]["error_kind"] == "results_workbook_stale"
     )
     assert client.get("/api/simulation/status").json()["dispatch"] == "none"
 

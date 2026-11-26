@@ -481,3 +481,36 @@ def test_an_unknown_lost_load_makes_energy_and_lcoe_not_established(solved, lost
     assert "not_established" in served[5].value
     assert not any(isinstance(lcoe[j].value, str) and lcoe[j].value.startswith("=")
                    for j in (1, 2, 3))
+
+
+def test_route_calls_a_kept_run_after_an_edit_out_of_date_not_unrun(client, install_network, monkeypatch):
+    import services.provenance_graph.runs as runs
+
+    n = pypsa.Network()
+    n.add("Bus", "A")
+    install_network(n)
+    monkeypatch.setattr(runs, "kept_run_stale", lambda ctx=None: True)
+    r = client.get(URL)
+    assert r.status_code == 409 and r.json()["detail"]["error_kind"] == "results_workbook_stale"
+
+
+def test_route_calls_a_shape_stale_dispatch_out_of_date_not_unrun(client, install_network):
+    n = _network()
+    n.add("Generator", "added_after_the_solve", bus=n.buses.index[0], p_nom=1.0)
+    install_network(n)
+    r = client.get(URL)
+    assert r.status_code == 409 and r.json()["detail"]["error_kind"] == "results_workbook_stale"
+
+
+def test_chat_tool_keeps_the_stale_kind_for_a_kept_run(install_network, monkeypatch):
+    from fastapi import HTTPException
+    import services.chat_tools as T
+    import services.provenance_graph.runs as runs
+
+    n = pypsa.Network()
+    n.add("Bus", "A")
+    install_network(n)
+    monkeypatch.setattr(runs, "kept_run_stale", lambda ctx=None: True)
+    with pytest.raises(HTTPException) as exc:
+        T.export_results_workbook()
+    assert exc.value.detail["error_kind"] == "results_workbook_stale"

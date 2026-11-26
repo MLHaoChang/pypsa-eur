@@ -3205,6 +3205,15 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
         # A Guided study solved a private copy: its solve is the run to export (template-e2e 30).
         study = study_solve.fallback()
         if study is None:
+            from services.provenance_graph import runs
+
+            # "Not run yet" only when nothing was ever solved; a run kept after an edit, or whose dispatch
+            # no longer fits the network, is out of date (the same 409 as a changed-inputs export).
+            if getattr(n, "is_solved", False) or runs.kept_run_stale():
+                raise HTTPException(409, {
+                    "error_kind": "results_workbook_stale",
+                    "message": "The inputs changed since the solve, so the results describe an earlier "
+                               "model. Run the model again."})
             raise HTTPException(409, {
                 "error_kind": "results_workbook_no_run",
                 "message": WORKBOOK_NO_RUN_MESSAGE})
