@@ -273,6 +273,8 @@ async function journey(t) {
       const verdict = await verdictOf(page).innerText()
       await L.goSection(ctx, 'Results & reports')
       assert.equal(await verdictOf(page).innerText(), verdict)
+      // template-e2e 46: kept for the workbook's About "Verdict" row, checked after the export below.
+      ctx.guidedVerdict = await page.getByTestId('hub-results-verdict').count() ? verdict.trim() : null
     })
     await L.gap(ctx, '08', 'Results show "Assumptions behind this result" listing each defaulted input as Assumed', async () => {
       assert.match(await panelText(ctx), /Assumptions behind this result[\s\S]*Assumed/)
@@ -310,6 +312,15 @@ async function journey(t) {
       assert.ok(zip.file('xl/workbook.xml'), 'workbook has no xl/workbook.xml')
       const sheets = [...(await zip.file('xl/workbook.xml').async('string')).matchAll(/<sheet [^>]*name="([^"]+)"/g)].map(m => m[1])
       assert.deepEqual(sheets.slice(0, 2), ['About', 'Overview'], `first sheets are ${sheets.slice(0, 2)}`)
+      // template-e2e 46: About's Verdict row is the lead of the Guided verdict, and the Expert header names the run.
+      if (ctx.guidedVerdict) {
+        const strings = [...(await zip.file('xl/sharedStrings.xml').async('string')).matchAll(/<t[^>]*>([^<]*)<\/t>/g)]
+          .map(m => m[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&amp;/g, '&'))
+        assert.ok(strings.includes('Verdict'), 'About has no Verdict row')
+        const lead = strings.find(t => t.length > 8 && ctx.guidedVerdict.startsWith(t))
+        assert.ok(lead, `no About string opens the Guided verdict ${JSON.stringify(ctx.guidedVerdict.slice(0, 80))}`)
+        assert.match(await page.getByTestId('header-run').innerText(), /Run of \d{1,2} \w{3}, \d\d:\d\d/, 'the Expert header does not name the run')
+      }
     })
     // Excel input workbook (S3): the same chooser gives the project as last saved, with its About sheet.
     const inputStarted = Date.now()

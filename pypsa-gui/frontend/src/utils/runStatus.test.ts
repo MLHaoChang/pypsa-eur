@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SolveJob } from '../api/solveQueue'
 import type { EhStudyPayload } from '../api/simulation'
-import { aboutMinutes, clock, etaText, runFromJob, runFromStudy, runStatusText } from './runStatus'
+import { aboutMinutes, clock, etaText, finishedStudyLabel, runFromJob, runFromStudy, runStatusText } from './runStatus'
 
 const job = (over: Partial<SolveJob> = {}): SolveJob => ({
   id: 'j1', project_id: 'P', project_key: 'o:p', kind: 'solve', status: 'running', position: null,
@@ -86,5 +86,17 @@ describe('formatting', () => {
     const r = runFromJob(job({ kind: 'campus' }))
     expect(runStatusText(r, 134, etaText(est(400), 134))).toBe('Campus study · Running · 2:14 · about 4 min left')
     expect(runStatusText(r, null, null)).toBe('Campus study · Running')
+  })
+})
+
+describe('finishedStudyLabel', () => {
+  it('names an ended study by its finish time', () => {
+    const at = Date.UTC(2026, 10, 26, 13, 2) / 1000
+    expect(finishedStudyLabel({ status: 'ok', finished_at: at })).toMatch(/^Run of 26 Nov, \d\d:\d\d$/)
+  })
+  it('names nothing while it runs or without a time', () => {
+    expect(finishedStudyLabel({ status: 'running', started_at: 1 })).toBeNull()
+    expect(finishedStudyLabel({ status: 'ok' })).toBeNull()
+    expect(finishedStudyLabel(null)).toBeNull()
   })
 })

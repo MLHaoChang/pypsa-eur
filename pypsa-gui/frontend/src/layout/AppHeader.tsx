@@ -9,6 +9,8 @@ import { projectsApi } from '../api/projects'
 import { downloadProjectBundle, saveProjectQuietly, type BundleSaveResult } from '../utils/projectActions'
 import { useSolveQueue, useEnqueueSolve, useAbortJob, activeJobForProject } from '../hooks/useSolveQueue'
 import { useProjectRun } from '../hooks/useProjectRun'
+import { useHubStudy } from '../pages/hubDesign/useHubData'
+import { finishedStudyLabel } from '../utils/runStatus'
 import { RunsIndicator } from '../components/runStatus/RunsIndicator'
 import { nk } from '../utils/queryKeys'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
@@ -834,6 +836,8 @@ export default function AppHeader() {
   // "Running…" for a study too, which read "Idle" before (walkthrough J4/J5).
   // The run strip under the header carries the details.
   const projectRun = useProjectRun()
+  // The finished Guided study, named once it ends (template-e2e 46).
+  const finishedRun = finishedStudyLabel(useHubStudy().study)
 
   // R11 — the project on screen is READ-ONLY while its queue job solves it.
   // The backend already refuses the writes (main.py's solver-in-flight gate
@@ -1216,6 +1220,9 @@ export default function AppHeader() {
           <div className="flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-border bg-bg-2">
             <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot}`} />
             <span className="text-[10px] text-muted font-mono">{label}</span>
+            {finishedRun && !queued && !studying && status !== 'running' && (
+              <span className="text-[10px] text-muted font-mono" data-testid="header-run">· {finishedRun}</span>
+            )}
           </div>
         )
       })()}

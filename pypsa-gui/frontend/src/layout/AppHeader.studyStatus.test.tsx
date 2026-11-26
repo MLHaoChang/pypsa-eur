@@ -11,6 +11,7 @@ import { useUIStore } from '../store/uiStore'
 import { useSimulationStore } from '../store/simulationStore'
 import { WRITABLE } from '../utils/lockState'
 import type { RunView } from '../utils/runStatus'
+import type { EhStudyPayload } from '../api/simulation'
 
 vi.mock('../hooks/useSolveQueue', () => ({
   useSolveQueue: () => ({ data: { jobs: [], running: [], paused: false } }),
@@ -20,6 +21,8 @@ vi.mock('../hooks/useSolveQueue', () => ({
 }))
 
 let projectRun: RunView | null = null
+let hubStudy: EhStudyPayload | null = null
+vi.mock('../pages/hubDesign/useHubData', () => ({ useHubStudy: () => ({ study: hubStudy }) }))
 vi.mock('../hooks/useProjectRun', () => ({ useProjectRun: () => projectRun }))
 
 vi.mock('../auth/AuthModeProvider', () => ({
@@ -42,6 +45,7 @@ const study: RunView = {
 
 beforeEach(() => {
   projectRun = null
+  hubStudy = null
   useUIStore.setState({ currentProject: 'Demo', projectName: 'Demo', uiMode: 'guided', activeSlidePanel: null })
   useUIStore.getState().setLockState(WRITABLE)
   useSimulationStore.setState({ status: 'idle' })
@@ -65,5 +69,20 @@ describe('AppHeader status pill with a Guided study', () => {
     useSimulationStore.setState({ status: 'completed' })
     renderHeader()
     expect(screen.getByText('Optimal')).toBeTruthy()
+  })
+})
+
+describe('AppHeader names the finished Guided study (template-e2e 46)', () => {
+  it('shows "Run of <when>" beside the pill once the study has ended', () => {
+    hubStudy = { status: 'ok', finished_at: Date.UTC(2026, 10, 26, 13, 2) / 1000 }
+    renderHeader()
+    expect(screen.getByTestId('header-run').textContent).toMatch(/Run of 26 Nov, \d\d:\d\d/)
+  })
+
+  it('names no run while it runs or when none has run', () => {
+    projectRun = study
+    hubStudy = { status: 'running', started_at: 100 }
+    renderHeader()
+    expect(screen.queryByTestId('header-run')).toBeNull()
   })
 })
