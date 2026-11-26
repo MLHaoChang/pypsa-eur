@@ -942,7 +942,7 @@ export default function CapacityExpansion() {
   })()
 
   return (
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full results-scroll-clear [&>*]:shrink-0">
+    <div data-testid="results-view-capex" className="flex flex-col gap-5 p-5 overflow-y-auto h-full results-scroll-clear [&>*]:shrink-0">
 
       {/* ── Upfront (PV) CAPEX unavailable ─────────────────────── */}
       {/* Gated on lifetime mode on purpose: in Annualised mode not one figure

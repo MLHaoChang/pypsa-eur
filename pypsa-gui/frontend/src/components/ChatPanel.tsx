@@ -58,7 +58,7 @@ import {
   type InterruptedTurn,
 } from '../api/chat'
 import { useChatProfiles, useChatReadiness, CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
-import { applyUiNavigate } from './uiNavigate'
+import { applyUiNavigate, navigationAnnouncement } from './uiNavigate'
 import { nk } from '../utils/queryKeys'
 import { mismatchSentence } from '../utils/projectMismatch'
 import { invalidateNetworkQueries, moveProjectLock } from '../utils/projectActions'
@@ -2689,6 +2689,8 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
         }>(frame)
         try {
           if (!applyUiNavigate(d, streamNavigationEpoch.current, { fromModelTurn: true })) break
+          const shownLine = navigationAnnouncement(d)
+          if (shownLine) useChatAnnouncer.getState().announce(shownLine)
           // SC-07 S5b R6: Site 3D says "Opened" only on its ACK; with none issued
           // (no network open, GK B V3) it cannot be confirmed.
           const siteNav = isSite3dNavigate(d) && d.tool_use_id ? d.tool_use_id : null
@@ -3044,8 +3046,19 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
       setPendingSendAttachIds(attachIds)
       return
     }
+    refocusAfterTurn.current = document.activeElement === textareaRef.current
     dispatchSend(text, attachIds)
   }, [input, streaming, notReady, mismatchLine, dispatchSend])
+  // A5.5: the composer is disabled while its turn streams, which drops its focus
+  // to the page. When the turn ends, focus goes back to it unless something else
+  // took it meanwhile (a navigation never does).
+  const refocusAfterTurn = useRef(false)
+  useEffect(() => {
+    if (streaming || !refocusAfterTurn.current) return
+    refocusAfterTurn.current = false
+    const a = document.activeElement
+    if (!a || a === document.body) textareaRef.current?.focus()
+  }, [streaming])
 
   const confirmSendWithAttachments = useCallback(() => {
     if (pendingSendText == null) return
