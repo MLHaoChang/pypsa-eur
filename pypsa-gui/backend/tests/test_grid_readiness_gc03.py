@@ -755,3 +755,33 @@ def test_the_four_rows_are_gated_as_screening_warnings_on_the_campus_run():
         ids, ("warn", run_profiles._CAMPUS_RUN)
     )
     assert not set(ids) & set(run_profiles.DC_NOT_GATED)
+
+
+@pytest.mark.parametrize(
+    "cell, name", [(None, None), (float("nan"), None), (7.0, "7.0"), ("L1", "L1")]
+)
+def test_an_outage_cell_reads_as_text_or_none(cell, name):
+    assert G._outage_name(cell) == name
+
+
+def test_a_row_with_an_islanding_outage_but_no_converter_size_is_still_a_gap(tmp_path):
+    _strength(
+        tmp_path,
+        pocs=[
+            _poc(
+                p=float("nan"), scr=float("nan"), outage=float("nan"), islands="['T1']"
+            )
+        ],
+    )
+    assert (
+        " No SCR at PoC MV, stage 2030: the fault level under its worst outage was not found."
+        in (" " + _card(tmp_path)["campus_scr"]["note"])
+    )
+
+
+def test_three_islanding_outages_are_listed_whole(tmp_path):
+    _strength(tmp_path, pocs=[_poc(scr=4.0, islands="['A', 'B', 'C']")])
+    assert (
+        "C at PoC MV, stage 2030). The planning-criteria row"
+        in _card(tmp_path)["campus_scr"]["note"]
+    )
