@@ -351,8 +351,18 @@ def _email(path, task, status, data_items=None, gaps=None):
 
 def step_call_prefix(step_id) -> str:
     """The start of each call id the runner dispatches for step `step_id`
-    (`Runner.dispatch`): an audit row is told to a step by it."""
+    (`Runner.dispatch`): the prefix, then `STEP_CALL_HEX` hex digits."""
     return f"run-{step_id}-"
+
+
+STEP_CALL_HEX = 8
+
+
+def is_step_call(call_id, step_id) -> bool:
+    """`call_id` is one the runner dispatched for exactly step `step_id`
+    (never a step whose id only starts with it: `case` is not `case-2`)."""
+    return isinstance(call_id, str) and re.fullmatch(
+        re.escape(step_call_prefix(step_id)) + f"[0-9a-f]{{{STEP_CALL_HEX}}}", call_id) is not None
 
 
 def step_capture(tool_use_id, args, ctx):
@@ -1144,7 +1154,7 @@ class Runner:
         (its contextvars copied from the bound tick)."""
         from harness import eventlog, loop
         task_id = session.task_id
-        tool_use_id = f"{step_call_prefix(step['id'])}{uuid.uuid4().hex[:8]}"
+        tool_use_id = f"{step_call_prefix(step['id'])}{uuid.uuid4().hex[:STEP_CALL_HEX]}"
         locks = contextlib.ExitStack()
         refused = []
         before = []  # the project's fingerprint under this step's locks, before it runs

@@ -389,6 +389,11 @@ def reserved(path) -> int:
     return solves if type(solves) is int else SOLVES
 
 
+SETTLED = frozenset(
+    {"done", "refused"}
+)  # the outcomes whose count settles the reservation
+
+
 def spent_solves(path, step_id, record, begun) -> int:
     """The solves the case step `step_id` spent (issue 52): its own record's
     `baseline_solves` (0 on a cache hit, the LPs run on a miss) settle its
@@ -415,7 +420,14 @@ def settle(path, ticket, job_id, record, begun):
     from services import assistant_tasks
 
     native, status, error = outcome(record, begun)
-    solves = spent_solves(path, ticket[1], record, begun)
+    # GK A (39) F1: only a case that ran to its end (done, or refused for its
+    # inputs) settles from its count; an aborted or failed one, whose later
+    # stages may have raised after the count was kept, keeps its reservation.
+    solves = (
+        spent_solves(path, ticket[1], record, begun)
+        if native in SETTLED
+        else reserved(path)
+    )
     result = (
         {"study": STUDY, "started_at": begun, "solves": solves}
         if status == "completed"

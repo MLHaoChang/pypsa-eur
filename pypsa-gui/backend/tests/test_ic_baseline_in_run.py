@@ -341,6 +341,9 @@ def test_a_refused_case_counts_the_lps_its_baseline_ran(envelope, settled, lps):
         _record(baseline_solves=0.0),
         _record("aborted"),
         _record("failed", error_code="internal_error"),
+        # GK A (39) F1: a count kept before the case aborted or failed later
+        _record("aborted", baseline_solves=1),
+        _record("failed", baseline_solves=0, error_code="internal_error"),
         {**_record(baseline_solves=0), "started_at": 9.0},
     ],
 )
@@ -386,6 +389,34 @@ def test_only_the_steps_own_row_is_settled(envelope, settled):
     from harness.runner import step_call_prefix
 
     assert CASE_ROW["call_id"].startswith(step_call_prefix("solve.2"))
+
+
+def test_a_step_whose_id_extends_another_is_never_its_row(envelope, settled):
+    """GK A (39) F2: step `case` never settles step `case-2`'s row, even as
+    the latest case row; only the exact call-id shape matches."""
+    from harness.runner import is_step_call
+
+    envelope["audit"][1]["call_id"] = "run-case-0a1b2c3d"
+    other = {**CASE_ROW, "call_id": "run-case-2-0a1b2c3d"}
+    envelope["audit"].append(other)
+    run_ic.settle(
+        "task.json", ("t1", "case", "a1"), "ad:1", _record(baseline_solves=0), 1.0
+    )
+    assert (envelope["audit"][1]["solves"], other["solves"]) == (
+        0,
+        run_envelope.CASE_BASELINE_SOLVES,
+    )
+    assert is_step_call("run-case-0a1b2c3d", "case")
+    for not_mine in (
+        "run-case-2-0a1b2c3d",
+        "run-case-0a1b2c3",
+        "run-case-0a1b2c3dd",
+        "run-case-0A1B2C3D",
+        "xrun-case-0a1b2c3d",
+        None,
+        7,
+    ):
+        assert not is_step_call(not_mine, "case"), not_mine
 
 
 def test_a_later_refused_admission_of_the_step_leaves_its_used_row_settled(envelope):

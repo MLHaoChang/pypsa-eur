@@ -1634,22 +1634,21 @@ def case_budget_refusal(envelope, note):
 
 def settle_case_solves(task_path, step_id, solves):
     """Study-harness issue 52: the case step `step_id`'s admission (its own
-    `used` row, told by the runner's call id, `runner.step_call_prefix`; a
+    `used` row, told by the runner's call id, `runner.is_step_call`; a
     retried step's latest) reserved its baseline and spent `solves` baseline
     LPs (its record's `baseline_solves`: 0 on a cache hit), clamped to the
     reservation; `run.budget.used.solves` follows. The settled solves, or
     None when the step has no reserving row or `solves` is no count (not a
     non-negative int): the whole reservation then stays charged."""
-    from harness.runner import step_call_prefix
+    from harness.runner import is_step_call
     from services import assistant_tasks
     if type(solves) is not int or solves < 0:
         return None
-    prefix = step_call_prefix(step_id)
     with assistant_tasks._LOCK:
         envelope = _load(task_path)
         row = next((a for a in reversed((envelope or {}).get("audit", []))
                     if a.get("event") == "used" and a.get("tool") in CASE_TOOLS
-                    and str(a.get("call_id", "")).startswith(prefix)), None)
+                    and is_step_call(a.get("call_id"), step_id)), None)
         if row is None or type(row.get("reserved")) is not int:
             return None
         settled = min(solves, row["reserved"])
