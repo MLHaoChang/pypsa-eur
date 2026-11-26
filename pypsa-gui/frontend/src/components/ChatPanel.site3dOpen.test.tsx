@@ -146,3 +146,47 @@ it('with no ACK issued (no network open) it is never Opened', async () => {
   await waitFor(() => expect(words()).toBe('Could not confirm the 3D site opened'))
   expect(acknowledgeMountedView).not.toHaveBeenCalled()
 })
+
+// Assistant-assurance 06 (A5.5, GK G6): stream frames, a navigation and its ACK
+// never move focus. The composer is disabled while a turn streams, so the user's
+// focus is held in a field elsewhere in the app (a draft in progress), and after
+// the turn ends it is still there. Focus is read after a tick and a microtask.
+it('stream frames, a navigation and its ACK never move focus', async () => {
+  vi.mocked(acknowledgeMountedView).mockClear()
+  let send: ((frame: ChatFrame) => void) | null = null
+  vi.mocked(createChatStream).mockImplementation((_req, onFrame) => { send = onFrame; return () => {} })
+  renderPanel()
+  const user = userEvent.setup()
+  await user.type(screen.getByTestId('chat-input'), 'open the 3D site')
+  await user.click(screen.getByTestId('chat-send'))
+  await waitFor(() => expect(send).not.toBeNull())
+  const field = document.createElement('input')
+  document.body.appendChild(field)
+  await user.click(field)
+  await user.type(field, 'draft')
+  const settle = async () => { await new Promise(r => setTimeout(r, 0)); await Promise.resolve() }
+  const frames = [
+    { event: 'session_init', data: { session_id: 'sess-focus' } },
+    { event: 'token', data: { text: 'Opening the site view.' } },
+    { event: 'tool_request', data: { tool_use_id: 'tu-1', tool_name: 'ui_open_panel', args: { panel_id: 'map' }, safety_tier: 'read' } },
+    { event: 'tool_result', data: { tool_use_id: 'tu-1', tool_name: 'ui_open_panel',
+      result: { ok: true, ui_navigated: true, kind: 'navigate', panel_id: 'map', canvas_view: 'site' } } },
+    { event: 'ui_event', data: { kind: 'navigate', panel_id: 'map', canvas_view: 'site', tool_use_id: 'tu-1', acknowledgement } },
+  ] as ChatFrame[]
+  for (const frame of frames) {
+    act(() => send!(frame))
+    await settle()
+    expect(document.activeElement, frame.event).toBe(field)
+  }
+  expect(useUIStore.getState().canvasView).toBe('site')
+  await waitFor(() => expect(acknowledgeMountedView).toHaveBeenCalledTimes(1))
+  const [, , onVerified] = vi.mocked(acknowledgeMountedView).mock.calls[0]
+  act(() => onVerified!())
+  await settle()
+  expect(document.activeElement, 'ack').toBe(field)
+  act(() => send!({ event: 'turn_done', data: { usage_acc: { input_tokens: 1, output_tokens: 1 } } } as ChatFrame))
+  await settle()
+  expect(document.activeElement, 'turn_done').toBe(field)
+  expect(field.value).toBe('draft')
+  field.remove()
+})
