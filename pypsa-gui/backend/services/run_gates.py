@@ -194,7 +194,7 @@ def _ic_counterfactual(env):
 
 
 def _ic_returns(env):
-    """SH-10b: the investment case's project post-tax NPV at the WACC and IRR,
+    """SH-10b: the investment case's Project NPV at the WACC, after tax (unlevered), and IRR,
     from the stored case when it is current and its counterfactual
     established; else no evidence with the state and reasons."""
     from services import ic_counterfactual as ic
