@@ -1,5 +1,5 @@
 Status: ready-for-agent
-Progress: S1 merged (#2065), S2 merged (#2084). Plan GO (GK B 74, option a): S3 split into S3a LV08 B-campus (24 tools, stem lv08_bcampus, this PR) and S3b campus-electrical core (18 tools, stem campus_electrical); then S4 Adequacy/FMEA, S5 Asset results + UI control + Explanation, then stop.
+Progress: S1 merged (#2065), S2 merged (#2084). Plan GO (GK B 74, option a): S3 split into S3a LV08 B-campus (24 tools, stem lv08_bcampus, #2086) and S3b campus-electrical core (18 tools, stem campus_electrical, PR open); then S4 Adequacy/FMEA, S5 Asset results + UI control + Explanation, then stop.
 
 # Per-tool registry for the chat catalogue
 
