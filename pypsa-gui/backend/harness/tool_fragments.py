@@ -145,7 +145,10 @@ class SchemaFragments:
                     f"tool {name!r} is defined by both {seen[name]} and {where}"  # repr-ok: import-time error for the developer
                 )
             seen[name] = where
-        for mod in self.modules.values():
+        # Spliced families first (checked in place), then the rest in ORDER, as
+        # in TOOLS, so TOOL_ROUTES appends in the same order.
+        spliced = [m for s, m in self.modules.items() if s in self.spliced]
+        for mod in spliced + self.appended():
             names = {t["name"] for t in mod.TOOLS}
             route_keys = set(getattr(mod, "ROUTES", {}))
             if route_keys != names:
@@ -235,7 +238,13 @@ def merge_dispatchers(
     tools its lock gate covers (network writes are ``NETWORK_WRITES`` instead).
     """
     lock_gated: set[str] = set()
-    for stem in sorted(set(modules) | set(schema_modules)):
+
+    def order(stem: str) -> tuple:
+        # As TOOLS: the rest in ORDER. A spliced family declares no ORDER, so it
+        # sorts first; it is only checked here, so its place adds nothing.
+        return (getattr(schema_modules.get(stem), "ORDER", 0), stem)
+
+    for stem in sorted(set(modules) | set(schema_modules), key=order):
         mod, schema = modules.get(stem), schema_modules.get(stem)
         if mod is None or schema is None:
             have = (mod or schema).__name__
