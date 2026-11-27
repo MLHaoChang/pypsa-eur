@@ -38,7 +38,14 @@ QUESTIONS = {
     "current_run_required": "This selection refers to a retained historical run. Specify the candidate and baseline explicitly to compare historical runs.",
     "capacity_meaning_required": "Which capacity do you mean: Configured capacity (the input before the solve), Optimized capacity (after the solve) or Available capacity?",
     "capacity_component_required": "Please name the component class and its name: generator, link, line, transformer, StorageUnit or store, for example: What is the capacity of generator G1?",
+    # AA-09 S1: a summary outside the bounded grammar is never summarized unscoped.
+    "key_results_scope_required": "Which checked result do you want? Name one result and its component, for example: Give me the key results for storage unit <name>; Give me the energy balance for network; Give me the system cost for network. This summary request is outside the checked request forms, so no part of it has been answered.",
 }
+# AA-09 S1: summary-shaped words; a match only asks, it never selects a profile.
+SUMMARY = re.compile(
+    r"\b(?:key\s+results?|(?:main|headline)\s+results?|summar(?:y|ise|ize)|overview)\b",
+    re.I,
+)
 PENDING = {"cost_quantity_required", "explicit_cost_basis_required", "capacity_meaning_required"}
 
 
@@ -339,6 +346,8 @@ def resolve(turn, message, ui, explicit):
         re.I,
     ):
         return _needs(turn, state["scope"] if state else None, "unsupported_followup")
+    if SUMMARY.search(message):
+        return _needs(turn, None, "key_results_scope_required")
     return None
 
 
