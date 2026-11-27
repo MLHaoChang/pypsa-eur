@@ -5326,6 +5326,7 @@
         "capacity/1",
         "system-cost-breakdown/1",
         "renewable-share/1",
+        "link-flow/1",
         "storage-cycles/1",
         "energy-balance/1",
         "site-import/1",
@@ -7146,6 +7147,42 @@
     "lcoe_real"
    ]
   },
+  "link-flow/1": {
+   "definitions": {
+    "link_conversion_loss": {
+     "formula_id": "link-conversion-loss/1",
+     "label": "Conversion loss in the link",
+     "unit": "MWh"
+    },
+    "link_input_energy": {
+     "formula_id": "link-bus0-net-withdrawal/1",
+     "label": "Energy into the link (bus0, net)",
+     "unit": "MWh"
+    },
+    "link_output_energy": {
+     "formula_id": "link-bus1-net-delivery/1",
+     "label": "Energy out of the link (bus1, net)",
+     "unit": "MWh"
+    },
+    "peak_link_flow": {
+     "formula_id": "link-peak-bus0-flow/1",
+     "label": "Peak flow at bus0",
+     "unit": "MW"
+    },
+    "peak_link_loading": {
+     "formula_id": "link-peak-loading-of-optimised-capacity/1",
+     "label": "Peak loading of the optimised capacity",
+     "unit": "%"
+    }
+   },
+   "metrics": [
+    "link_input_energy",
+    "link_output_energy",
+    "link_conversion_loss",
+    "peak_link_flow",
+    "peak_link_loading"
+   ]
+  },
   "lost-load/1": {
    "definitions": {
     "lost_load_cost": {
@@ -7699,6 +7736,7 @@
      "capacity/1",
      "system-cost-breakdown/1",
      "renewable-share/1",
+     "link-flow/1",
      "storage-cycles/1",
      "energy-balance/1",
      "site-import/1",
