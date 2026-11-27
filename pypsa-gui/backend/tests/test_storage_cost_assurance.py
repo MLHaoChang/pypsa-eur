@@ -81,7 +81,8 @@ def test_direct_storage_cost_uses_independent_51_eur_oracle(priced, checked):
     assert result["receipt"]["request_complete"]
     assert {b["metric"]: b["value"] for b in result["blocks"]} == VALUES
     assert {b["metric"]: b["value"] for b in result["blocks"]} == pytest.approx(
-        VALUES, rel=REL_TOLERANCE)
+        VALUES, rel=REL_TOLERANCE
+    )
     text = public_text(frames)
     assert "StorageUnit Battery" in text and "51 EUR" in text
     assert "charging electricity" in text and "price year 2026" in text
