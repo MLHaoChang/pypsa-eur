@@ -9,6 +9,7 @@ committed.
 
     python pypsa-gui/backend/scripts/dump_ui_tool_schemas.py <out.json>
 """
+
 from __future__ import annotations
 
 import json
@@ -32,7 +33,9 @@ def main(argv: list[str]) -> int:
         print(f"tools not in catalogue.TOOLS: {', '.join(missing)}", file=sys.stderr)
         return 1
     out = {name: {"input_schema": by_name[name]["input_schema"]} for name in NAMES}
-    Path(argv[1]).write_text(json.dumps(out, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    Path(argv[1]).write_text(
+        json.dumps(out, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     return 0
 
 
