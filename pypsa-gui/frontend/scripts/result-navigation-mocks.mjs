@@ -33,6 +33,12 @@ const rec = (kind, path) => {
   if (!hit || hit[0] !== 200) throw new Error(`result-navigation-fixture.json has no 200 answer for ${kind} ${path}`)
   return hit[1]
 }
+/** A part of a multi-part bound view: null where its route had nothing (204), as the backend reads it. */
+const part = (kind, path) => {
+  const hit = RECORDED[kind]?.[path] ?? RECORDED.single[path]
+  return hit?.[0] === 204 ? null : rec(kind, path)
+}
+const parts = (kind, names) => Object.fromEntries(names.map(n => [n, part(kind, `/api/results/${n}`)]))
 const bound = (kind, view, data) => [200, { status: 'ok', data,
   binding: { version: 1, project_id: 'p', project_name: PROJECT, scope: 'current', view, input_sha256: 'a'.repeat(64), data_sha256: 'b'.repeat(64) } }]
 
@@ -75,6 +81,12 @@ const HAND = {
     cost_breakdown: rec(kind, '/api/results/cost_breakdown'), economics_by_carrier: rec(kind, '/api/results/economics_by_carrier') }),
   '/api/results/displayed/prices': kind => bound(kind, 'prices', {
     prices: rec(kind, '/api/results/prices'), price_drivers: rec(kind, '/api/results/price_drivers') }),
+  // A5.2 S3b-2's bound views: Dispatch's eleven parts and the multi-period Overview's six.
+  '/api/results/displayed/dispatch': kind => bound(kind, 'dispatch', {
+    ...parts(kind, ['cost_breakdown', 'generators', 'curtailment', 'storage', 'storage_dispatch', 'loads', 'links', 'lost_load', 'economics_by_carrier']),
+    store_dispatch: part(kind, '/api/results/store_dispatch'), store_energy: part(kind, '/api/results/store_energy') }),
+  '/api/results/displayed/overview': kind => bound(kind, 'overview',
+    parts(kind, ['generators', 'storage_dispatch', 'loads', 'curtailment', 'lost_load', 'cost_breakdown'])),
   '/api/results/displayed/storage': kind => bound(kind, 'storage', rec(kind, '/api/results/storage_dispatch')),
   '/api/results/displayed/grid_risk': () => [200, { status: 'ok', data: GRID_RISK,
     binding: { version: 1, project_id: 'p', project_name: PROJECT, scope: 'current', view: 'grid_risk', input_sha256: 'a'.repeat(64), data_sha256: 'b'.repeat(64) } }],
@@ -85,11 +97,9 @@ const HAND = {
 export const TAB_ROUTES = {
   summary: ['/api/results/statistics', '/api/results/cost_breakdown', '/api/results/emissions', '/api/results/lost_load',
     '/api/results/adequacy', '/api/results/reserve_margin', '/api/results/process_view', '/api/results/headline_kpis'],
-  overview: ['/api/results/cost_breakdown', '/api/results/curtailment', '/api/results/generators', '/api/results/loads',
-    '/api/results/lost_load', '/api/results/storage_dispatch'],
+  overview: ['/api/results/displayed/overview'],
   capex: ['/api/results/displayed/capex', '/api/simulation/asset_costs', '/api/network/vintage_results'],
-  dispatch: ['/api/results/generators', '/api/results/loads', '/api/results/storage_dispatch', '/api/results/links',
-    '/api/results/curtailment', '/api/results/lost_load', '/api/results/economics_by_carrier'],
+  dispatch: ['/api/results/displayed/dispatch'],
   loadflow: ['/api/results/loadflow-view', '/api/results/lines', '/api/results/transformers', '/api/results/prices',
     '/api/results/line_duals', '/api/results/losses', '/api/results/unit_commitment', '/api/results/carrier_kpis'],
   grid_code: [`/api/gridspine/${encodeURIComponent(PROJECT)}/status`, CE],
