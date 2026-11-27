@@ -913,7 +913,7 @@ def test_pack_ratings_round_trip_and_refusals():
     for bad in ("", "  ", None, 3):
         with pytest.raises(ContractError, match="rating_source must be stated"):
             PackRatings(**{**good, "rating_source": bad})
-    for bad in ("A" * 64, "a" * 63, "g" * 64, None, 7):
+    for bad in ("A" * 64, "a" * 63, "a" * 65, "a" * 64 + "z", "g" * 64, None, 7):
         with pytest.raises(ContractError, match="64 hex digits"):
             PackRatings(**{**good, "campus_data_hash": bad})
     with pytest.raises(ContractError, match="must be a PackRatings"):

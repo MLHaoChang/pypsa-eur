@@ -868,9 +868,18 @@ def test_a_rated_pack_is_judged_on_its_ratings_without_caller_input(tmp_path):
     assert Q_BASE not in q["stays_connected"]["detail"]
 
 
+#: master's (pre-GC-13) judgment of ``_full_pack`` with ``RATINGS``: SHA-256 of its sorted JSON.
+MASTER_UNRATED_JUDGMENT = (
+    "2da644799400dbef06200976cf131ad8f758cc6d776d9254b8fa361f875ee599"
+)
+
+
 def test_an_unrated_pack_keeps_its_report(tmp_path):
     # GK A R6: no ratings source text on Q rows and no new header keys for a pack without ratings
     j = judge_pack(_full_pack(tmp_path), PROFILE, RATINGS)
+    # GK A N2: every row and the header byte-equal to master's
+    text = json.dumps(j, sort_keys=True).encode()
+    assert hashlib.sha256(text).hexdigest() == MASTER_UNRATED_JUDGMENT
     assert "rating_source" not in j["header"] and "campus_data_hash" not in j["header"]
     assert j["header"]["rated_p_base"] == "rated P = test plant"
     assert j["header"]["rated_mva_base"] == "rated MVA = test plant"
@@ -941,6 +950,8 @@ def test_a_pack_rating_that_is_not_finite_and_positive_is_refused(tmp_path, bad)
             "64 hex digits",
         ),  # lowercase only, as model_hash gives
         ({"campus_data_hash": "a" * 63}, "64 hex digits"),
+        ({"campus_data_hash": "a" * 65}, "64 hex digits"),
+        ({"campus_data_hash": "a" * 64 + "\n"}, "64 hex digits"),
     ],
 )
 def test_a_blank_source_or_a_malformed_hash_is_refused(tmp_path, over, match):
