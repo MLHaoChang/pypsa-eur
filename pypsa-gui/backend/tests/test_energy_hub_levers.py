@@ -310,6 +310,7 @@ def test_storage_duration_on_split_storage_skips_fixed_stores():
                       energy_capital_cost=1.0)
     n.stores.at["ride", "e_nom_extendable"] = False
     n.stores.at["ride", "e_nom"] = 5.0
+    n.stores.at["ride", "c_rate_max"] = 4.0          # E/P <= 0.25 h: refused at 4 h if it were a candidate
     n.add("Carrier", "energy_bess")
     add_split_storage(n, "bess", "b", "energy_bess", p_nom=10.0, energy_capital_cost=1.0)
     before = n.stores.copy(deep=True)
@@ -387,3 +388,25 @@ def test_a_failed_base_leaves_base_cost_none(monkeypatch):
                   cost_at_target=None, pack_h="h", sections={}, records=[])
     S._stage_levers(st)
     assert st.store["eh_lever_comparison"]["base_cost_eur"] is None
+
+
+def test_storage_duration_mixed_layouts_keep_the_fixed_split_store():
+    """GK A C1-C3: a StorageUnit candidate beside a fixed split store — only the
+    StorageUnit changes, the split store is kept, and the flag says the extra
+    hours are not costed (StorageUnit energy is priced per MW)."""
+    from services.solver.split_storage import add_split_storage
+    n = _ups_and_candidate_network()
+    n.remove("StorageUnit", "ups")
+    n.add("Carrier", "high_c_bess")
+    add_split_storage(n, "ride", "b", "high_c_bess", p_nom=10.0, e_nom_max=10.0,
+                      energy_capital_cost=1.0)
+    n.stores.at["ride", "e_nom_extendable"] = False
+    n.stores.at["ride", "c_rate_max"] = 4.0
+    su, stores = n.storage_units.copy(deep=True), n.stores.copy(deep=True)
+    undo, mut = L.apply_lever_scenario(n, "storage_duration", value=24.0)
+    assert mut["applied_storage"] == ["bess"]
+    assert mut["kept_storage"] == ["ride"]
+    assert mut["energy_costed"] is False
+    assert n.stores.equals(stores)
+    undo()
+    assert n.storage_units.equals(su) and n.stores.equals(stores)
