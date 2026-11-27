@@ -12,6 +12,7 @@ only), run on the records the writer actually wrote, parsed back from the
 (GK A C4). Each wrong scaling (``MUTANTS``) misses it by more than 1e-2 in
 its named case (GK A C3).
 """
+
 import functools
 
 import pandapower as pp
@@ -37,25 +38,52 @@ from tests.gridspine import repca1_reduced as rr
 from tests.gridspine.test_dyr_wecc import PLANT, POC, _net, _records, _write
 from tests.gridspine.test_dyr_writer import _IBR, TOY_UNITS, _p, _toy_templates
 
-TOL = 1e-6           # pu on sum(MBASE), the GC-04b "matches the aggregate" tolerance
-MISS = 1e-2          # a wrong scaling misses the aggregate by more than this
+TOL = 1e-6  # pu on sum(MBASE), the GC-04b "matches the aggregate" tolerance
+MISS = 1e-2  # a wrong scaling misses the aggregate by more than this
 MBASE = {"W_BUS_02": 50.0, "W2": 100.0, "W3": 150.0}
-P0 = 0.5             # every machine's initial pu P
+P0 = 0.5  # every machine's initial pu P
 
 #: Aggregate controller of each case (pu on sum(MBASE)): flags and gains
 #: chosen so the case's path is live and the limits it names bind.
 _BASE = {
-    "repc_vcflag": 1, "repc_refflag": 1, "repc_fflag": 1,
-    "repc_tfltr": 0.02, "repc_kp": 1.0, "repc_ki": 10.0, "repc_tft": 0.02,
-    "repc_tfv": 0.05, "repc_vfrz": 0.0, "repc_rc": 0.05, "repc_xc": 0.05,
-    "repc_kc": 0.05, "repc_emax": 0.1, "repc_emin": -0.1, "repc_dbd1": 0.0,
-    "repc_dbd2": 0.0, "repc_qmax": 0.44, "repc_qmin": -0.44, "repc_kpg": 0.25,
-    "repc_kig": 1.0, "repc_tp": 0.05, "repc_fdbd1": -0.0006, "repc_fdbd2": 0.0006,
-    "repc_femax": 0.1, "repc_femin": -0.1, "repc_pmax": 1.0, "repc_pmin": 0.0,
-    "repc_tg": 0.05, "repc_ddn": 20.0, "repc_dup": 20.0,
+    "repc_vcflag": 1,
+    "repc_refflag": 1,
+    "repc_fflag": 1,
+    "repc_tfltr": 0.02,
+    "repc_kp": 1.0,
+    "repc_ki": 10.0,
+    "repc_tft": 0.02,
+    "repc_tfv": 0.05,
+    "repc_vfrz": 0.0,
+    "repc_rc": 0.05,
+    "repc_xc": 0.05,
+    "repc_kc": 0.05,
+    "repc_emax": 0.1,
+    "repc_emin": -0.1,
+    "repc_dbd1": 0.0,
+    "repc_dbd2": 0.0,
+    "repc_qmax": 0.44,
+    "repc_qmin": -0.44,
+    "repc_kpg": 0.25,
+    "repc_kig": 1.0,
+    "repc_tp": 0.05,
+    "repc_fdbd1": -0.0006,
+    "repc_fdbd2": 0.0006,
+    "repc_femax": 0.1,
+    "repc_femin": -0.1,
+    "repc_pmax": 1.0,
+    "repc_pmin": 0.0,
+    "repc_tg": 0.05,
+    "repc_ddn": 20.0,
+    "repc_dup": 20.0,
 }
-_Q_MODE = {"repc_refflag": 0, "repc_kp": 0.5, "repc_ki": 2.0, "repc_dbd1": -0.05,
-           "repc_dbd2": 0.05}
+_Q_MODE = {
+    "repc_refflag": 0,
+    "repc_kp": 0.5,
+    "repc_ki": 2.0,
+    "repc_dbd1": -0.05,
+    "repc_dbd2": 0.05,
+}
 #: case -> (aggregate controller, step); femax/femin bind in p_up/p_down,
 #: emax/emin and the deadband in q_up/q_down (GK A C2).
 CASES = {
@@ -118,9 +146,14 @@ def _templates(tmp_path, repca1):
     units = dict(TOY_UNITS)
     for u, m in MBASE.items():
         units[u] = {
-            "model": "inverter", "mbase_mva": m, "include_in_inertia": False,
-            "params": {"k_sc": _p(1.2, "assumed"), "rx_sc": _p(0.1, "assumed"),
-                       **{k: _p(v, "assumed") for k, v in (_IBR | repca1).items()}},
+            "model": "inverter",
+            "mbase_mva": m,
+            "include_in_inertia": False,
+            "params": {
+                "k_sc": _p(1.2, "assumed"),
+                "rx_sc": _p(0.1, "assumed"),
+                **{k: _p(v, "assumed") for k, v in (_IBR | repca1).items()},
+            },
         }
     f = tmp_path / "plant.yaml"
     f.write_text(yaml.safe_dump({"units": units}, sort_keys=False))
@@ -128,12 +161,16 @@ def _templates(tmp_path, repca1):
 
 
 def _plant_net():
-    """The toy with a three-machine plant (50/100/150 MVA, all at P0 pu) on
-    BUS_02 behind the PoC line (line 1, grid end BUS_01)."""
+    """
+    The toy with a three-machine plant (50/100/150 MVA, all at P0 pu) on
+    BUS_02 behind the PoC line (line 1, grid end BUS_01).
+    """
     net = _net()
     net.sgen.at[0, "p_mw"] = P0 * MBASE["W_BUS_02"]
     for u in ("W2", "W3"):
-        pp.create_sgen(net, bus=1, p_mw=P0 * MBASE[u], q_mvar=0.0, sn_mva=MBASE[u], name=u)
+        pp.create_sgen(
+            net, bus=1, p_mw=P0 * MBASE[u], q_mvar=0.0, sn_mva=MBASE[u], name=u
+        )
     return net
 
 
@@ -144,8 +181,14 @@ PLANT_POC = {u: PocBranch("line", 1, 0) for u in MBASE}
 def _written(tmp_path, repca1, net=None, plants=PLANTS, poc=PLANT_POC):
     params, templates = _templates(tmp_path, repca1)
     path = tmp_path / "plant.dyr"
-    write_dyr(_plant_net() if net is None else net, params, path,
-              ibr=wecc_params(templates), poc=poc, plants=plants)
+    write_dyr(
+        _plant_net() if net is None else net,
+        params,
+        path,
+        ibr=wecc_params(templates),
+        poc=poc,
+        plants=plants,
+    )
     return path.read_text()
 
 
@@ -157,8 +200,10 @@ def _repca1_fields(text):
             continue
         icons, cons = toks[4:7], toks[7:]
         assert len(cons) == len(REPCA1_CONS)
-        out.append({n: int(v) for n, v in zip(REPCA1_ICONS, icons)}
-                   | {n: float(v) for n, v in zip(REPCA1_CONS, cons)})
+        out.append(
+            {n: int(v) for n, v in zip(REPCA1_ICONS, icons)}
+            | {n: float(v) for n, v in zip(REPCA1_CONS, cons)}
+        )
     return out
 
 
@@ -185,11 +230,15 @@ def test_each_wrong_scaling_misses_the_aggregate_in_its_case(mutant):
 
 
 def test_the_limits_the_scaling_rescales_bind_in_their_cases():
-    """femax/femin bind in p_up/p_down and emax/emin in q_up/q_down: else a
-    mutant scaling that limit the wrong way would survive (GK A C2)."""
+    """
+    femax/femin bind in p_up/p_down and emax/emin in q_up/q_down: else a
+    mutant scaling that limit the wrong way would survive (GK A C2).
+    """
     assert 0.2 > _BASE["repc_femax"] and -0.2 < _BASE["repc_femin"]
     q = _BASE | _Q_MODE
-    assert 0.3 - q["repc_dbd2"] > q["repc_emax"] and -0.3 - q["repc_dbd1"] < q["repc_emin"]
+    assert (
+        0.3 - q["repc_dbd2"] > q["repc_emax"] and -0.3 - q["repc_dbd1"] < q["repc_emin"]
+    )
 
 
 def test_the_tolerance_boundary_is_the_literal_1e_6():
@@ -232,8 +281,14 @@ def test_a_one_machine_plant_writes_todays_aggregate_record_byte_for_byte(tmp_pa
     _, today = _write(tmp_path, PLANT, POC)
     params, templates = _toy_templates(tmp_path, ibr=PLANT)
     path = tmp_path / "one.dyr"
-    write_dyr(_net(), params, path, ibr=wecc_params(templates), poc=POC,
-              plants={"P1": ("W_BUS_02",)})
+    write_dyr(
+        _net(),
+        params,
+        path,
+        ibr=wecc_params(templates),
+        poc=POC,
+        plants={"P1": ("W_BUS_02",)},
+    )
     assert path.read_text() == today
 
 

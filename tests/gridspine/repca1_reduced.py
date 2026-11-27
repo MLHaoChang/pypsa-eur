@@ -21,6 +21,7 @@ V = V0 + xg * Q_poc / sum(MBASE); the frequency is an input. Vfrz and the
 REEC current limits are not modelled (the steps stay away from them).
 Forward Euler, fixed step.
 """
+
 import numpy as np
 
 
@@ -33,8 +34,23 @@ def _col(controllers, name):
     return np.array([float(c[name]) for c in controllers])
 
 
-def simulate(controllers, mbase, *, p0, q0=None, t_step=1.0, dpref=0.0, dvref=0.0,
-             dqref=0.0, df=0.0, t_end=20.0, dt=1e-3, tm=0.05, xg=0.1, v0=1.0):
+def simulate(
+    controllers,
+    mbase,
+    *,
+    p0,
+    q0=None,
+    t_step=1.0,
+    dpref=0.0,
+    dvref=0.0,
+    dqref=0.0,
+    df=0.0,
+    t_end=20.0,
+    dt=1e-3,
+    tm=0.05,
+    xg=0.1,
+    v0=1.0,
+):
     """
     PoC P and Q, in pu on sum(MBASE), sampled every step: ``(t, p, q)``.
 
@@ -49,14 +65,18 @@ def simulate(controllers, mbase, *, p0, q0=None, t_step=1.0, dpref=0.0, dvref=0.
     mtot = m.sum()
     n = len(m)
     p0 = np.broadcast_to(np.asarray(p0, dtype=float), (n,)).copy()
-    q0 = np.zeros(n) if q0 is None else np.broadcast_to(np.asarray(q0, dtype=float), (n,)).copy()
+    q0 = (
+        np.zeros(n)
+        if q0 is None
+        else np.broadcast_to(np.asarray(q0, dtype=float), (n,)).copy()
+    )
     c = {k: _col(controllers, k) for k in controllers[0]}
     vcflag, refflag, fflag = c["repc_vcflag"], c["repc_refflag"], c["repc_fflag"]
 
     def measure(xp, xq):
         p_poc, q_poc = (m * xp).sum(), (m * xq).sum()
         v = v0 + xg * q_poc / mtot
-        pb, qb = p_poc / m, q_poc / m              # Pbranch, Qbranch in pu_i
+        pb, qb = p_poc / m, q_poc / m  # Pbranch, Qbranch in pu_i
         # VcFlag = 1: line drop compensation |V - (Rc + jXc) I|, I = conj(S)/V
         i = (pb - 1j * qb) / v
         v_ldc = np.abs(v - (c["repc_rc"] + 1j * c["repc_xc"]) * i)
@@ -70,8 +90,8 @@ def simulate(controllers, mbase, *, p0, q0=None, t_step=1.0, dpref=0.0, dvref=0.
     # initial equilibrium: every error zero, every state at its output
     xp, xq = p0.copy(), q0.copy()
     _, _, pb0, qin0 = measure(xp, xq)
-    pref_plant = pb0.copy()                        # Plant_pref, pu_i
-    ref_q = qin0.copy()                            # Vref (RefFlag 1) or Qref (0), pu_i
+    pref_plant = pb0.copy()  # Plant_pref, pu_i
+    ref_q = qin0.copy()  # Vref (RefFlag 1) or Qref (0), pu_i
     s_pf, s_pi, s_lag = pb0.copy(), xp.copy(), xp.copy()
     s_qf, s_qi, s_ll = qin0.copy(), xq.copy(), xq.copy()
     f = 0.0
@@ -108,7 +128,9 @@ def simulate(controllers, mbase, *, p0, q0=None, t_step=1.0, dpref=0.0, dvref=0.
         ds_pf = (pb - s_pf) / c["repc_tp"]
         # frequency error Freq_ref - Freq, deadband fdbd1/fdbd2, droop Ddn (< 0) / Dup (> 0)
         ferr = _deadband(np.full(n, -f), c["repc_fdbd1"], c["repc_fdbd2"])
-        droop = c["repc_ddn"] * np.minimum(ferr, 0.0) + c["repc_dup"] * np.maximum(ferr, 0.0)
+        droop = c["repc_ddn"] * np.minimum(ferr, 0.0) + c["repc_dup"] * np.maximum(
+            ferr, 0.0
+        )
         # Plant_pref - Pbranch + droop, limit femin/femax
         ep = np.clip(pref_plant - s_pf + droop, c["repc_femin"], c["repc_femax"])
         # PI Kpg + Kig/s, output limit Pmin/Pmax (non-windup), lag 1/(1 + s Tlag) -> Pref
