@@ -513,3 +513,19 @@ def test_light_importers_do_not_pull_in_the_dispatchers(module, no_services):
         if m.startswith(("services.chat_tools", "services.chat_dispatchers"))
     ]
     assert leaked == [], f"{module} imports the dispatchers: {leaked}"
+
+
+def test_an_order_that_is_a_bool_is_refused():
+    with pytest.raises(FragmentError, match=r"pkg\.a is not spliced.*ORDER"):
+        _schema(a=_mod("pkg.a", ["t1"], ORDER=True)).extend([])
+
+
+def test_validators_and_lock_gated_may_cover_every_tool_of_the_fragment():
+    schema = {"a": _mod("pkg.cat.a", ["t1"])}
+    disp = types.ModuleType("pkg.disp.a")
+    disp.DISPATCHERS = {"t1": print}
+    disp.PRE_DISPATCH_VALIDATORS = {"t1": print}
+    disp.LOCK_GATED = {"t1"}
+    validators: dict = {}
+    assert F.merge_dispatchers({}, validators, {"a": disp}, schema) == {"t1"}
+    assert validators == {"t1": print}
