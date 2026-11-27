@@ -38,7 +38,11 @@ def critical_share(template: dict | None) -> float | None:
     """The generic EH site's must-stay-on share, None when the template has none."""
     params = (template or {}).get("params")
     share = params.get("critical_share") if isinstance(params, dict) else None
-    if (template or {}).get("site_type") and isinstance(share, (int, float)) and share > 0:
+    if (
+        (template or {}).get("site_type")
+        and isinstance(share, (int, float))
+        and share > 0
+    ):
         return float(share)
     return None
 
@@ -66,7 +70,9 @@ def lcoe_caveat(value, unit, *, template: dict | None, n) -> str | None:
         return None
     if not value > LCOE_CAVEAT_BOUND_EUR_PER_MWH:
         return None
-    site = _SITE_WORD.get(str((template or {}).get("site_type") or ""), "a site like this")
+    site = _SITE_WORD.get(
+        str((template or {}).get("site_type") or ""), "a site like this"
+    )
     if critical_share(template) is not None and backup_mw(n) > 0:
         return (
             f"{_bound_words()}, high for {site}: the backup kept for the "

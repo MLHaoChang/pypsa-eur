@@ -113,4 +113,3 @@ def test_the_headline_card_has_no_caveat_below_the_bound(project, client, monkey
     lcoe = _lcoe_card(project, client, monkeypatch, "EUR", 1)
     assert lcoe["state"] == "ready" and lcoe["value"] < 300
     assert lcoe["caveat"] is None
-
