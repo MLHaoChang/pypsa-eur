@@ -104,7 +104,7 @@ Re-audit done case by case; results are in "Done (evidence)" and "Remaining scop
 - **Guided set gap.** The backend views with a Guided label are summary, flows, loadshape, adequacy, fmea, grid_risk and products. The frontend's `tabsFor('guided', …)` gives summary, flows, loadshape, adequacy and fmea, and adds grid_risk and products only when there are process units or products. Nothing checks that the backend applies the same gate.
 - **Multi-period window bug.** Positions 2–5 come back as 2–29 ([29](29-multi-period-loadflow-window.md)). The journey checks the window on single-period networks only (GK B2 ruling).
 - **Focus with the dock unpinned (Q5a).** Focus drops to the page. This is untested and unfixed ([28](28-unpinned-dock-focus-drop.md), with UX 31's ruling on where focus goes).
-- **Intermittent CI error.** One CI run of the journey (#2050 at c410aa0c, expert/multi) logged SVG `NaN` attribute errors on `<circle>` and `<pattern>`. The next head passed, and so did every local run, including one at 6× CPU throttle. Each error line now names its tab, so a recurrence says which view drew it.
+- **SVG `NaN` on multi-period data (likely a chart bug).** One CI run of the journey (#2050 at c410aa0c, expert/multi) logged SVG `NaN` attribute errors on `<circle>` (cx, cy, r) and `<pattern>` (x, y). The next head and every local run passed, including one at 6× CPU throttle. GK B2 rules it a finding, not a flake: some chart likely draws multi-period data with a non-finite coordinate on a timing path. Each error line now names its tab, and a recurrence fails CI by design (G10).
 - **Hand-listed routes (GK B2 N1).** `TAB_ROUTES` in `result-navigation-mocks.mjs` is a hand list. A new tab route missing from it is printed, not failed.
 
 **Follow-ups**
