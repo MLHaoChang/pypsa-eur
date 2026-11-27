@@ -508,15 +508,19 @@ def test_a_study_without_front_is_masters():
     assert {k: getattr(report.tea, k) for k in new} == skipped
     assert {k: report.sections["tea"].payload[k] for k in new} == skipped
     # The lever table's base cost (template-e2e 22 S3): pinned here by value.
-    assert report.sections["levers"].payload["base_cost_eur"] == report.cost_at_target_eur
+    assert (
+        report.sections["levers"].payload["base_cost_eur"] == report.cost_at_target_eur
+    )
     assert (
         _digest(
             report.model_dump_json(
                 exclude={
                     "valued_to_year": True,
                     "tea": new,
-                    "sections": {"tea": {"payload": new},
-                                 "levers": {"payload": {"base_cost_eur"}}},
+                    "sections": {
+                        "tea": {"payload": new},
+                        "levers": {"payload": {"base_cost_eur"}},
+                    },
                 }
             )
         )
