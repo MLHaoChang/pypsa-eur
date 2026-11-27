@@ -3,7 +3,7 @@
 
 # 14 — Harness profile: eh_ipp_hybrid
 
-Status: ready-for-agent; audit 2026-11-25: #1454, #1492, #1508, #1532, #1544, #1575, #1590 merged (profile, explore cases, PPA price KPI, run_profiles.py:1209-1216); left: slice S-D unconfirmed, not defined in this file
+Status: done; 2026-11-27: #1454, #1492, #1508, #1532, #1544, #1575, #1590 merged and all three acceptance criteria are met on master (see Audit); slice S-D was never defined (C1 only says it rides with the last slice), so there is nothing to build
 Type: task
 Blocked by: 07
 Gated: yes (GK B, investment/finance)
@@ -127,3 +127,8 @@ Plan: a native runner step `ppa_price` (reads only, 0 solves) after the run's ow
 ## Audit (2026-11-25)
 
 - 2026-11-25 audit: PR merge state checked against origin/master log; acceptance items grepped on master code.
+- 2026-11-27 verification on master fa6d3c62 (acceptance criteria against code and tests):
+  - Criterion 1: `eh_ipp_hybrid@1` solves, then runs `run_investment_case` (`services/run_profiles.py:1191-1240`, chapters `sizing`, `investment_case`); `@2` runs the shipped cases as explore cases capped by the budget (`:1243-1264`; `tests/test_run_profile_ipp_v2.py`, `test_harness_run_shipped*.py`, `test_harness_shipped_cards.py`); the run steps are tested in `tests/test_run_profile_ipp_runs.py`.
+  - Criterion 2: `@3` adds the native `ppa_price` step and the `ppa_price` record KPI read back at hand-off (`:1266-1287`; `tests/test_run_ppa_price.py`).
+  - Criterion 3: skipped grid, control and reliability stages carry the preset's reasons (`tests/test_run_profile_ipp.py`, the I9 test).
+  - Slice S-D: no file, PR or commit defines it; GK B (56) C1 says "S-D rides with the last", and the last slice (S-C, #1590) merged with S1-S8 covered. Nothing is open.
