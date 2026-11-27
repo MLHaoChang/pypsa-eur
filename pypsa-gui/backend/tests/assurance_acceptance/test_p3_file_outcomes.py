@@ -685,6 +685,10 @@ def test_a_matpower_export_of_a_hub_names_its_links_and_storage(
         ("Generator", "marginal_cost", 0.5),
         ("Line", "x", 1e-4),
         ("Line", "s_nom", 1.0),
+        # GK B (74): each carried field has its own killing case.
+        ("Line", "b", 1e-4),
+        ("Load", "q_set", 0.001),
+        ("Generator", "p_min_pu", 0.1),
     ],
 )
 def test_a_matpower_export_unlike_the_network_reads_uncertain(
@@ -737,6 +741,84 @@ def test_a_matpower_export_with_an_extra_row_reads_uncertain(
         return "".join(lines[:end] + [row] + lines[end:])
 
     monkeypatch.setattr(io_router, "_export_matpower_text", extra)
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+def test_a_matpower_export_of_values_finer_than_4_decimals_is_completed(
+    ieee14_in_project, harness
+):
+    # The file rounds to 4 decimals: a live value with more is still held.
+    live = ieee14_in_project.network
+    live.loads.loc[live.loads.index[0], "p_set"] = 12.345678
+    live.loads.loc[live.loads.index[0], "q_set"] = -3.14159265
+    live.generators.loc[live.generators.index[0], "marginal_cost"] = 2.718281828
+    live.generators.loc[live.generators.index[0], "p_min_pu"] = 0.123456789
+    live.lines.loc[live.lines.index[0], "s_nom"] = 99.999987
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("completed", None), out
+
+
+def test_a_matpower_export_with_another_load_q_reads_uncertain(
+    ieee14_in_project, harness, monkeypatch
+):
+    # A bus with both P and Q demand, and only Q differs in the file.
+    import routers.io as io_router
+
+    live = ieee14_in_project.network
+    load = live.loads.index[0]
+    live.loads.loc[load, ["p_set", "q_set"]] = [5.0, 1.0]
+    changed = live.copy()
+    changed.loads.loc[load, "q_set"] = 1.5
+    real = io_router._export_matpower_text
+
+    def other():
+        ieee14_in_project.network = changed
+        try:
+            return real()
+        finally:
+            ieee14_in_project.network = live
+
+    monkeypatch.setattr(io_router, "_export_matpower_text", other)
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+@pytest.mark.parametrize("end", ["bus0", "bus1"])
+def test_a_matpower_export_with_a_line_on_other_buses_reads_uncertain(
+    ieee14_in_project, harness, monkeypatch, end
+):
+    import routers.io as io_router
+
+    live = ieee14_in_project.network
+    changed = live.copy()
+    line = changed.lines.index[0]
+    a, b = changed.lines.at[line, "bus0"], changed.lines.at[line, "bus1"]
+    v_nom = changed.buses.v_nom
+    other = next(
+        x for x in changed.buses.index if x not in (a, b) and v_nom[x] == v_nom[a]
+    )
+    changed.lines.loc[line, end] = other
+    real = io_router._export_matpower_text
+
+    def moved():
+        ieee14_in_project.network = changed
+        try:
+            return real()
+        finally:
+            ieee14_in_project.network = live
+
+    monkeypatch.setattr(io_router, "_export_matpower_text", moved)
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+def test_a_matpower_export_of_a_generator_on_an_unknown_bus_reads_uncertain(
+    ieee14_in_project, harness
+):
+    # The exporter writes such a generator on bus 1; the check has no fallback.
+    live = ieee14_in_project.network
+    live.generators.loc[live.generators.index[0], "bus"] = "nowhere"
     out = _stream(harness, "export_matpower", {})["_outcome"]
     assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
 
@@ -795,8 +877,9 @@ def test_a_matpower_export_of_loads_with_only_p_or_only_q_is_completed(
 ):
     # A bus with demand in one of P or Q still carries its load row.
     loads = ieee14_in_project.network.loads
-    loads.loc[loads.index[0], "p_set"] = 0.0
-    loads.loc[loads.index[1], "q_set"] = 0.0
+    assert loads.bus.iloc[0] != loads.bus.iloc[1]
+    loads.loc[loads.index[0], ["p_set", "q_set"]] = [0.0, 2.5]
+    loads.loc[loads.index[1], ["p_set", "q_set"]] = [3.5, 0.0]
     out = _stream(harness, "export_matpower", {})["_outcome"]
     assert (out["outcome"], out["reason"]) == ("completed", None), out
 
@@ -902,6 +985,26 @@ def test_an_unrelated_upload_during_the_export_does_not_change_its_file(
         for m in upload_service.list_uploads(project.name, project_dir=directory)
     }
     assert "n.txt" in names
+
+
+def test_the_excel_export_read_uses_the_input_reader_not_prepare(
+    template_in_project, harness, monkeypatch
+):
+    # GK B (74) (not blocking): the export path's reader, by spy.
+    from services import excel_workbook
+
+    real_gs, calls = excel_workbook._gs, []
+
+    def spy():
+        calls.append(1)
+        return real_gs()
+
+    monkeypatch.setattr(excel_workbook, "_gs", spy)
+    monkeypatch.setattr(
+        excel_workbook, "prepare", lambda *a, **k: pytest.fail("prepare on export")
+    )
+    out = _stream(harness, "export_excel", {})["_outcome"]
+    assert out["outcome"] == "completed" and calls
 
 
 def test_an_excel_export_with_a_stale_priced_cost_reads_uncertain(

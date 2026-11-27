@@ -196,7 +196,7 @@ W4/W5. Shots: `.scratch/assistant-assurance/shots/aa04-s2-tool-outcome-{guided,e
 
 #1161 (S2) has GK OK and UX OK @fc9732f83a129ee2710840b7ad76d577fdb14f66.
 
-Named open rows (GK B (26) R1):
+Named open rows (GK B (26) R1). Superseded 2026-11-27: the AA04-P1..P7 `_pending` rows below are now passing cases, and P10 is closed; see "S6 build" at the end.
 
 | Case | Owner | Note |
 |------|-------|------|
