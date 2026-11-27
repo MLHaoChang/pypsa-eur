@@ -192,15 +192,14 @@ describe('island section: the form', () => {
     const user = userEvent.setup()
     await screen.findByTestId('island-form')
     await user.click(screen.getByLabelText('Seamless'))
-    const sustained = screen.getByLabelText('Sustained ride-through (h)')
-    await user.clear(sustained)
-    await user.type(sustained, '12')
+    // The backup numbers are read-only here; section 5 edits them.
+    expect(screen.getByTestId('island-sustained_h-value').textContent).toBe('24')
     await user.click(screen.getByLabelText(/Linearised unit commitment/))
     await user.click(screen.getByRole('button', { name: /Save island config/ }))
     await waitFor(() => expect(api.patchIsland).toHaveBeenCalledTimes(1))
     const [project, patch] = api.patchIsland.mock.calls[0] as [string, Record<string, unknown>]
     expect(project).toBe('Hub A')
-    expect(patch).toEqual({ requirements: { scenarios: ['ups_bridged', 'seamless'], sustained_h: 12, linearised_uc: true } })
+    expect(patch).toEqual({ requirements: { scenarios: ['ups_bridged', 'seamless'], linearised_uc: true } })
     expect(api.saveIsland).not.toHaveBeenCalled()
   })
 

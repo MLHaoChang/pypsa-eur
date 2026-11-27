@@ -293,6 +293,18 @@ export function openIslandLimits(): void {
   withReturn(null, () => openSectionInExpert('scenarios'))
 }
 
+/** Show the backup inputs, their one editing home: section 5, Assets & sizing, in either mode, scrolled
+ *  to the block. Back returns to where it was clicked. */
+export function openBackupInputs(): void {
+  withReturn(null, () => {
+    const ui = useUIStore.getState()
+    const guided = ui.uiMode === 'guided'
+    ui.requestPanelSection(guided ? 'hubDesign' : 'capacityBounds', 'island-backup')
+    if (guided) ui.setActiveSection('assets')
+    else openSectionInExpert('assets')
+  })
+}
+
 /** Show the N-1 security branch selector (Solver settings › Network): the
  *  section's panel in Expert, in place in Guided (never flips the mode). */
 export function openN1BranchSelector(): void {

@@ -11,6 +11,7 @@ import { useUIStore } from '../../store/uiStore'
 import { AssumptionsCard, isAssumedItem } from './AssumptionsCard'
 import { CommercialCard } from './cards/CommercialCard'
 import { SectionHoldings } from './SectionHoldings'
+import { BackupInputs } from './cards/BackupInputs'
 import { useSizedAssets } from './useHubData'
 import { ExpertOnlyLines } from './ExpertOnlyLines'
 import { GoalStudyRun } from './shared/GoalStudyRun'
@@ -177,6 +178,7 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
     <div data-testid={`hub-card-${id}`} className="flex flex-col gap-3 rounded border border-border bg-panel p-4">
       <SectionHoldings id={id} holds={s?.holds} total={s?.holds_total} pending={isPending} failed={isError}
         deferred={flow?.deferred === true} sized={sized} />
+      {id === 'assets' && <BackupInputs />}
       <div>
         <button type="button" data-testid={`section-open-expert-${id}`} onClick={() => openSectionInExpert(id)}
           className="inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-[11px] text-muted hover:border-accent hover:text-accent">

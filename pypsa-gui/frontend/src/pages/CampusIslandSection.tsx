@@ -33,7 +33,7 @@ import {
 import type { IslandControlsState, UnitControl } from '../api/islandControls'
 import { Btn, PageSection, Tag } from '../components/PageKit'
 import CampusIslandCutsSection, { scenarioWords } from './CampusIslandCutsSection'
-import { openFlowTargetInPlace, showResultsTab, withReturnFrom } from '../layout/flowNavigation'
+import { openBackupInputs, openFlowTargetInPlace, showResultsTab, withReturnFrom } from '../layout/flowNavigation'
 import { useUIStore } from '../store/uiStore'
 import { money } from '../utils/money'
 import { ISLAND_REQUIREMENT_LABELS } from './islandWords'
@@ -286,18 +286,20 @@ export default function CampusIslandSection({ name }: { name: string }) {
               const tagged = req[field] as Tagged | undefined
               return (
                 <div key={field} className="flex gap-2 items-center text-[12px]">
-                  <label htmlFor={`island-${field}`} className="w-56">{label}</label>
-                  <input
-                    id={`island-${field}`} type="number" className={`${INPUT} w-28`}
-                    value={tagged?.value ?? ''}
-                    onChange={e => setReq(field, e.target.value === '' ? undefined
-                      : { value: Number(e.target.value), source: tagged?.source ?? 'assumed' })}
-                  />
+                  <span className="w-56">{label}</span>
+                  <span id={`island-${field}`} data-testid={`island-${field}-value`} className="w-28 font-mono">
+                    {tagged?.value ?? 'not set'}
+                  </span>
                   {tagged?.source === 'assumed' ? <Tag tone="warn">assumed</Tag>
                     : tagged && <span className="text-muted" data-testid={`island-${field}-source`}>{tagged.source}</span>}
                 </div>
               )
             })}
+            <p className="text-[11px] text-muted" data-testid="island-backup-home">
+              The backup numbers are edited in Assets &amp; sizing.{' '}
+              <button type="button" className="text-link hover:underline" data-testid="island-backup-open"
+                onClick={openBackupInputs}>Edit them there ›</button>
+            </p>
             <label className="flex gap-2 items-center text-[12px]">
               <input type="checkbox" checked={!!req.linearised_uc}
                      onChange={e => setReq('linearised_uc', e.target.checked)} />

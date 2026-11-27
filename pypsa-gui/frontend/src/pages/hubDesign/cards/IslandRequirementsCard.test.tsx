@@ -117,27 +117,15 @@ describe('IslandRequirementsCard', () => {
       'Demo', { requirements: { scenarios: ['ups_bridged', 'seamless'] } }, 'rev1'))
   })
 
-  it('sends a backup edit as plain numbers with the revision', async () => {
+  it('shows the backup read-only with a link to section 5, the one editing home', async () => {
     const user = userEvent.setup()
     mount()
-    await user.click(await screen.findByTestId('island-backup-edit'))
-    const ups = screen.getByLabelText('UPS bridge (s)')
-    await user.clear(ups)
-    await user.type(ups, '60')
-    await user.click(screen.getByTestId('island-backup-save'))
-    await waitFor(() => expect(campusApi.patchIsland).toHaveBeenCalledWith(
-      'Demo', { requirements: { bridge_s: 60 } }, 'rev1'))
-  })
-
-  it('refuses a negative backup number with a sentence opening with its name', async () => {
-    const user = userEvent.setup()
-    mount()
-    await user.click(await screen.findByTestId('island-backup-edit'))
-    const fuel = screen.getByLabelText('Fuel autonomy (h)')
-    await user.clear(fuel)
-    await user.type(fuel, '-2')
-    expect(screen.getByRole('alert').textContent).toBe('Fuel autonomy: -2 is below 0.')
-    expect((screen.getByTestId('island-backup-save') as HTMLButtonElement).disabled).toBe(true)
+    expect((await screen.findByTestId('island-backup')).textContent).toContain('UPS 30 s')
+    expect(screen.queryByTestId('island-backup-save')).toBeNull()
+    useUIStore.setState({ uiMode: 'guided', activeSection: 'scenarios', panelSectionRequest: null })
+    await user.click(screen.getByTestId('island-backup-edit'))
+    expect(useUIStore.getState().activeSection).toBe('assets')
+    expect(useUIStore.getState().panelSectionRequest).toEqual({ panel: 'hubDesign', section: 'island-backup' })
   })
 
   it('offers a reload when the island settings changed since they were read', async () => {

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The backup inputs (ride-through, UPS bridge, fuel autonomy, generator N+k) are edited in one place, Assets & sizing, in Guided and Expert; section 8 and Grid study show them read-only with a link there.

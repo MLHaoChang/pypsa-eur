@@ -10,13 +10,13 @@
 // (`pages/islandWords.ts`) and one write each (the solver config PUT, the
 // island PATCH). Shown for an off-grid site or a project with an island
 // config; absent otherwise.
-import { useState, type ReactNode } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { simulationApi } from '../../../api/simulation'
 import type { SolverConfig } from '../../../api/types'
 import {
   campusApi, errorText, isIslandConfigChanged, ISLAND_SCENARIOS,
-  type IslandConfig, type IslandScenario, type IslandSource,
+  type IslandConfig, type IslandScenario,
 } from '../../../api/campusElectrical'
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
@@ -27,15 +27,16 @@ import {
 import { ISLAND_KEY } from '../../CampusIslandSection'
 import { islandScenarioLabel } from '../../../plainNames'
 import {
-  ISLAND_OTHER_REQUIREMENT_LABELS, ISLAND_REQUIREMENT_LABELS,
-  type IslandRequirementNumber,
+  ISLAND_OTHER_REQUIREMENT_LABELS,
 } from '../../islandWords'
-import { withReturnFrom } from '../../../layout/flowNavigation'
-import { Btn } from '../../../components/PageKit'
+import { openBackupInputs, withReturnFrom } from '../../../layout/flowNavigation'
+import {
+  backupWords, BTN, Decision, SAVE, SaveError, useIslandPatch, type Tagged,
+} from './BackupInputs'
+export { backupFromText } from './BackupInputs'
 import type { FlowTarget } from '../../../api/flow'
 
 type ShareKey = 'min_renewable_fraction' | keyof typeof RESERVE_LABELS
-type Tagged = { value: number; source: IslandSource }
 
 const unit = (label: string) => label.replace(/ \(%\)$/, '')
 const pct = (v: number) => `${Math.round(v * 100 * 1e4) / 1e4} %`
@@ -43,8 +44,6 @@ const RESERVE_PARTS: [keyof typeof RESERVE_LABELS, string][] = [
   ['reserve_share_load', 'load'], ['reserve_share_pv', 'solar'], ['reserve_share_wind', 'wind'],
 ]
 const RENEWABLE_NAME = unit(MIN_RENEWABLE_FRACTION_LABEL)
-const BTN = 'text-[12px] text-accent hover:underline'
-const SAVE = 'px-2 py-1 rounded border border-border text-[12px] disabled:opacity-50'
 
 /** "Operating reserve: off (assumed)", or the shares that are set. */
 export function reserveWords(cfg: Partial<SolverConfig> | undefined): string {
@@ -109,57 +108,6 @@ export function DispatchLimitsEditor({ onDone }: { onDone?: () => void }) {
   )
 }
 
-function Decision({ id, title, children }: { id: string; title: string; children: ReactNode }) {
-  return (
-    <div data-decision={id} className="flex flex-col gap-1">
-      <span className="text-[12px] font-semibold text-text">{title}</span>
-      {children}
-    </div>
-  )
-}
-
-function DispatchLimits() {
-  const project = useUIStore(s => s.currentProject)
-  const cfg = useQuery({
-    queryKey: nk(project, 'solverConfig'), queryFn: simulationApi.getSolverConfig, enabled: !!project,
-  })
-  const [open, setOpen] = useState(false)
-  return (
-    <Decision id="dispatch-limits" title="Dispatch limits">
-      <p data-testid="island-reserve" className="text-[12px] text-text">{reserveWords(cfg.data)}</p>
-      <p data-testid="island-renewable" className="text-[12px] text-text">{renewableWords(cfg.data)}</p>
-      {open ? <DispatchLimitsEditor onDone={() => setOpen(false)} />
-        : <button type="button" data-testid="island-dispatch-edit" className={`${BTN} self-start`}
-            onClick={() => setOpen(true)}>Edit the reserve and renewable fraction ›</button>}
-    </Decision>
-  )
-}
-
-const STALE = 'The island settings changed since you opened them. Reload and try again.'
-
-/** The island PATCH with the stored revision; a 409 keeps the edit and offers a reload. */
-function useIslandPatch(name: string, revision: string | null | undefined, onSaved?: () => void) {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (requirements: Record<string, unknown>) =>
-      campusApi.patchIsland(name, { requirements }, revision),
-    onSuccess: data => { qc.setQueryData(ISLAND_KEY(name), data); onSaved?.() },
-  })
-}
-
-function SaveError({ error, onReload }: { error: unknown; onReload: () => void }) {
-  if (!error) return null
-  if (isIslandConfigChanged(error)) {
-    return (
-      <p role="alert" data-testid="island-stale" className="text-[12px] text-danger flex gap-2 items-center">
-        {STALE}
-        <Btn onClick={onReload}>Reload</Btn>
-      </p>
-    )
-  }
-  return <p role="alert" data-testid="island-save-error" className="text-[12px] text-danger">{errorText(error)}</p>
-}
-
 function Scenarios({ name, config, revision, reload }: {
   name: string; config: IslandConfig; revision: string | null | undefined; reload: () => void
 }) {
@@ -183,73 +131,31 @@ function Scenarios({ name, config, revision, reload }: {
   )
 }
 
-const BACKUP_WORDS: [IslandRequirementNumber, (v: number) => string][] = [
-  ['sustained_h', v => `ride-through ${v} h`],
-  ['bridge_s', v => `UPS ${v} s`],
-  ['fuel_autonomy_h', v => `fuel ${v} h`],
-  ['genset_redundancy_n', v => `generators N+${v}`],
-]
-const NUMBER_FIELDS = Object.entries(ISLAND_REQUIREMENT_LABELS) as [IslandRequirementNumber, string][]
-
-/** A typed backup number → its value, or a refusal opening with the field's name. */
-export function backupFromText(label: string, text: string): { value: number } | { error: string } {
-  const name = label.replace(/ \([^)]*\)$/, '')
-  const t = text.trim()
-  const v = Number(t)
-  if (t === '' || !Number.isFinite(v)) return { error: `${name}: enter a number.` }
-  if (v < 0) return { error: `${name}: ${t} is below 0.` }
-  return { value: v }
+function DispatchLimits() {
+  const project = useUIStore(s => s.currentProject)
+  const cfg = useQuery({
+    queryKey: nk(project, 'solverConfig'), queryFn: simulationApi.getSolverConfig, enabled: !!project,
+  })
+  const [open, setOpen] = useState(false)
+  return (
+    <Decision id="dispatch-limits" title="Dispatch limits">
+      <p data-testid="island-reserve" className="text-[12px] text-text">{reserveWords(cfg.data)}</p>
+      <p data-testid="island-renewable" className="text-[12px] text-text">{renewableWords(cfg.data)}</p>
+      {open ? <DispatchLimitsEditor onDone={() => setOpen(false)} />
+        : <button type="button" data-testid="island-dispatch-edit" className={`${BTN} self-start`}
+            onClick={() => setOpen(true)}>Edit the reserve and renewable fraction ›</button>}
+    </Decision>
+  )
 }
 
-function Backup({ name, config, revision, reload }: {
-  name: string; config: IslandConfig; revision: string | null | undefined; reload: () => void
-}) {
-  const req = config.requirements
-  const tagged = (f: IslandRequirementNumber) => req[f] as Tagged | undefined
-  const [open, setOpen] = useState(false)
-  const [text, setText] = useState<Partial<Record<IslandRequirementNumber, string>>>({})
-  const save = useIslandPatch(name, revision, () => { setOpen(false); setText({}) })
-  const set = BACKUP_WORDS.filter(([f]) => tagged(f) != null)
-  const assumed = set.some(([f]) => tagged(f)?.source === 'assumed')
-  const parsed = Object.entries(text).map(([f, t]) =>
-    [f, backupFromText(ISLAND_REQUIREMENT_LABELS[f as IslandRequirementNumber], t ?? '')] as const)
-  const errors = parsed.flatMap(([, r]) => ('error' in r ? [r.error] : []))
-  const changes = Object.fromEntries(parsed.flatMap(([f, r]) =>
-    'value' in r && r.value !== tagged(f as IslandRequirementNumber)?.value ? [[f, r.value]] : []))
+
+/** The backup numbers, read-only: section 5 is where they are edited. */
+function BackupSummary({ config }: { config: IslandConfig }) {
   return (
     <Decision id="backup" title="Backup requirements">
-      <p data-testid="island-backup" className="text-[12px] text-text">
-        {set.length
-          ? `Backup: ${set.map(([f, w]) => w(tagged(f)!.value)).join(' · ')}${assumed ? ' (assumed)' : ''}`
-          : 'Backup: not set'}
-      </p>
-      {open ? (
-        <div data-testid="island-backup-editor" className="flex flex-col gap-2">
-          <div className="flex flex-wrap gap-3">
-            {NUMBER_FIELDS.map(([f, label]) => (
-              <label key={f} className="flex flex-col gap-1">
-                <span className="text-[10px] text-muted">{label}</span>
-                <input type="text" inputMode="decimal"
-                  value={text[f] ?? (tagged(f)?.value != null ? String(tagged(f)!.value) : '')}
-                  onChange={e => setText(prev => ({ ...prev, [f]: e.target.value }))}
-                  className="w-28 px-2 py-1 border border-border rounded text-xs font-mono bg-bg focus:outline-none focus:border-accent" />
-              </label>
-            ))}
-          </div>
-          {errors.map(e => <p key={e} role="alert" className="text-[10px] text-danger">{e}</p>)}
-          <div className="flex items-center gap-2">
-            <button type="button" data-testid="island-backup-save" className={SAVE}
-              disabled={errors.length > 0 || Object.keys(changes).length === 0 || save.isPending}
-              onClick={() => save.mutate(changes)}>Save</button>
-            <button type="button" className={BTN}
-              onClick={() => { setOpen(false); setText({}); save.reset() }}>Cancel</button>
-          </div>
-          <SaveError error={save.error} onReload={() => { save.reset(); reload() }} />
-        </div>
-      ) : (
-        <button type="button" data-testid="island-backup-edit" className={`${BTN} self-start`}
-          onClick={() => setOpen(true)}>Edit the backup requirements ›</button>
-      )}
+      <p data-testid="island-backup" className="text-[12px] text-text">{backupWords(config)}</p>
+      <button type="button" data-testid="island-backup-edit" className={`${BTN} self-start`}
+        onClick={openBackupInputs}>Edit in Assets &amp; sizing ›</button>
     </Decision>
   )
 }
@@ -305,7 +211,7 @@ export function IslandRequirementsCard() {
       </header>
       {offGrid && <DispatchLimits />}
       {config && <Scenarios name={project} config={config} revision={revision} reload={reload} />}
-      {config && <Backup name={project} config={config} revision={revision} reload={reload} />}
+      {config && <BackupSummary config={config} />}
       {config && <Remainder config={config} />}
     </section>
   )
