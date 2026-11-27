@@ -202,6 +202,52 @@ def test_every_script_passes_check_script_against_the_manifest(tmp_path):
         check_script((out / scripts[0]).read_text(), allowed - {f"{m['case']}.dyr"})
 
 
+def test_the_pack_declares_v2_only_with_the_scripts_that_write_connected(tmp_path):
+    # GC-12 PR-B, GK A2 T1: each script's CSV header is exactly its case's v2 channels
+    import ast
+
+    from gridspine.handoff.test_battery import CHANNELS, contract_channels
+
+    _hc, m, out = _write(tmp_path, plant=PLANT)
+    assert m["contract_version"] == PP.PSSE_CONTRACT_VERSION == "2"
+    for cid, files in m["outputs"].items():
+        assert files == [f"{cid}.out", f"{cid}.csv", f"{cid}.status.txt"]
+        text = (out / f"run_{cid}.py").read_text()
+        line = next(ln for ln in text.splitlines() if ln.startswith("HEADER = "))
+        header = ast.literal_eval(line.split("=", 1)[1])
+        names = [h.split(" [")[0] for h in header]
+        assert header[0] == "time [s]" and names[-1] == "connected"
+        assert set(names[1:]) <= set(contract_channels("2"))
+        assert header[1:] == [f"{n} [{CHANNELS[n].unit}]" for n in names[1:]]
+    # GK A P1: the manifest's version is the battery's
+    from gridspine.handoff.test_battery import validate_battery
+
+    cases, _notes = PP._battery_cases(_hc.net)
+    assert validate_battery(cases, m["contract_version"]) == tuple(cases)
+    # GK A P3: polled machines are the RAW's machine records of the plant: exactly one
+    records = [r for r in PP.machine_records(_hc.net) if r[0] == PLANT.unit_id]
+    assert len(records) == 1
+    for cid in m["outputs"]:
+        text = (out / f"run_{cid}.py").read_text()
+        line = next(
+            ln for ln in text.splitlines() if ln.startswith("STATUS_MACHINES = ")
+        )
+        assert ast.literal_eval(line.split("=", 1)[1]) == [
+            (records[0][1], records[0][2])
+        ]
+    # without a plant there are no scripts, so no version is declared
+    _hc, bare, _out = _write(tmp_path / "bare")
+    assert "contract_version" not in bare
+
+
+def test_caller_cases_at_v1_are_refused(tmp_path):
+    from gridspine.handoff.test_battery import build_battery
+
+    v1 = build_battery(300.0, 1000.0, 3.0, 10.0, z0_over_z1=1.0, x0_over_r0=10.0)
+    with pytest.raises(ContractError, match="connected"):
+        _write(tmp_path, plant=PLANT, cases=v1)
+
+
 def test_the_battery_built_from_the_grid_lists_its_assumptions(tmp_path):
     _hc, m, _out = _write(tmp_path, plant=PLANT)
     assert m["battery_assumed"] == list(PP.BATTERY_ASSUMED)
@@ -511,3 +557,17 @@ def test_an_all_compound_set_declares_no_map(tmp_path):
     assert m["contingencies"]["label_map"] is None
     assert f"{case}.conmap.csv" not in m["files"]
     assert sorted(p.name for p in (tmp_path / "pack").iterdir()) == sorted(m["files"])
+
+
+def test_a_plant_with_two_raw_machine_records_is_refused(tmp_path, monkeypatch):
+    # GK A P3: connected polls the machines the RAW models; the aggregation gives one
+    real = PP.machine_records
+
+    def doubled(net):
+        recs = list(real(net))
+        plant = next(r for r in recs if r[0] == PLANT.unit_id)
+        return [*recs, (plant[0], plant[1], "9", *plant[3:])]
+
+    monkeypatch.setattr(PP, "machine_records", doubled)
+    with pytest.raises(ContractError, match="has 2 RAW machine records"):
+        _write(tmp_path, plant=PLANT)

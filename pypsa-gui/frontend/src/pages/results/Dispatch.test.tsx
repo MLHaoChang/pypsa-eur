@@ -31,6 +31,39 @@ vi.mock('../../api/simulation', async (importOriginal) => {
   }
 })
 
+// The tab reads its eleven parts as one bound view (A5.2 S3b-2); it carries
+// what the mocked routes return for the same source and window, and answers
+// null when none of the series the tab counts as solved has data, as the view does.
+vi.mock('../../api/displayedResults', async () => {
+  const { resultsApi } = await import('../../api/simulation')
+  const dispatch = vi.fn(async (source?: 'lopf' | 'ac_pf', range?: { from: number; to: number }) => {
+    const [cost_breakdown, generators, curtailment, storage, storage_dispatch, store_dispatch,
+      store_energy, loads, links, lost_load, economics_by_carrier] = await Promise.all([
+      resultsApi.getCostBreakdown(), resultsApi.getGeneratorResults(source, range),
+      resultsApi.getCurtailment(range), resultsApi.getStorageResults(source, range),
+      resultsApi.getStorageDispatchResults(source, range), resultsApi.getStoreDispatchResults(source, range),
+      resultsApi.getStoreEnergyResults(source, range), resultsApi.getLoadResults(source, range),
+      resultsApi.getLinkResults(source, range), resultsApi.getLostLoad(range), resultsApi.getEconomicsByCarrier(),
+    ])
+    if ([generators, storage, storage_dispatch, store_dispatch, store_energy, loads].every(p => p == null)) return null
+    return {
+      status: 'ok',
+      data: { cost_breakdown, generators, curtailment, storage, storage_dispatch, store_dispatch,
+        store_energy, loads, links, lost_load, economics_by_carrier },
+      binding: { version: 1, project_id: 'p', scope: 'current', view: 'dispatch', source: source ?? 'lopf',
+        window_from: range?.from ?? null, window_to: range?.to ?? null, data_sha256: 'a'.repeat(64) },
+    }
+  })
+  return { displayedResultsApi: { dispatch } }
+})
+
+// The error toast is spied: the source_not_available tests below send the
+// read through the real client and its interceptor.
+vi.mock('react-hot-toast', () => ({
+  default: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn(), dismiss: vi.fn(), loading: vi.fn() }),
+  toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn(), dismiss: vi.fn(), loading: vi.fn() }),
+}))
+
 vi.mock('../../api/network', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/network')>()
   return {
@@ -329,4 +362,91 @@ it('does not redraw the group charts when the page re-renders with the same data
   rerender(page())
   rerender(page())
   expect(chartDraws.count).toBe(drawn)
+})
+
+it('reads every part as one bound view at the chosen source and marks its root with it (A5.2)', async () => {
+  const { displayedResultsApi } = await import('../../api/displayedResults')
+  useUIStore.setState({ resultSource: 'ac_pf' })
+  try {
+    const { container } = renderPage()
+    await waitFor(() => expect(container.querySelector('[data-result-tab="dispatch"]')).toBeTruthy())
+    const root = container.querySelector('[data-result-tab="dispatch"]')!
+    const binding = JSON.parse(root.getAttribute('data-result-binding')!)
+    expect(binding.view).toBe('dispatch')
+    expect(binding.source).toBe('ac_pf')
+    expect(vi.mocked(displayedResultsApi.dispatch).mock.calls.at(-1)?.[0]).toBe('ac_pf')
+    // The bound generators part still renders: the same 424.24 the old route gave.
+    expect(vi.mocked(resultsApi.getGeneratorResults)).toHaveBeenCalledWith('ac_pf', undefined)
+  } finally {
+    useUIStore.setState({ resultSource: 'lopf' })
+  }
+})
+
+it('a failed read says the dispatch could not be read, never "has not run yet" (UX 31)', async () => {
+  vi.mocked(resultsApi.getGeneratorResults).mockRejectedValue(new Error('500'))
+  renderPage()
+  expect(await screen.findByTestId('dispatch-error')).toBeTruthy()
+  expect(screen.getByText(/The dispatch could not be read/)).toBeTruthy()
+  expect(screen.queryByText(/has not run yet/)).toBeNull()
+})
+
+it('keeps the not-solved branch: no series is "not run", not "could not be read" (UX 31)', async () => {
+  vi.mocked(resultsApi.getGeneratorResults).mockResolvedValue(null)
+  renderPage()
+  expect(await screen.findByText(/has not run yet/)).toBeTruthy()
+  expect(screen.queryByTestId('dispatch-error')).toBeNull()
+})
+
+// The bound view read through the real client, its interceptor and an adapter
+// that answers with `status` and `detail`, so the toast is the interceptor's own.
+async function failRealRead(status: number, detail: unknown) {
+  const { displayedResultsApi } = await import('../../api/displayedResults')
+  const actual = await vi.importActual<typeof import('../../api/displayedResults')>('../../api/displayedResults')
+  const { client } = await import('../../api/client')
+  const adapter: import('axios').AxiosAdapter = async (config) => Promise.reject(Object.assign(
+    new Error(`Request failed with status code ${status}`),
+    { config, response: { status, data: { detail }, headers: {}, config } }))
+  vi.mocked(displayedResultsApi.dispatch).mockImplementation((source, range) => {
+    const was = client.defaults.adapter
+    client.defaults.adapter = adapter
+    try { return actual.displayedResultsApi.dispatch(source, range) } finally { client.defaults.adapter = was }
+  })
+}
+
+const AC_PF_NOT_RUN = 'The AC power flow has not run yet. Run it, or show the LP dispatch.'
+
+it('no AC power flow on record is "not run yet" with the LP switch, never a toast or "could not be read" (UX 31)', async () => {
+  const toast = (await import('react-hot-toast')).default
+  vi.mocked(toast.error).mockClear()
+  await failRealRead(422, { error_kind: 'source_not_available', message: AC_PF_NOT_RUN })
+  useUIStore.setState({ resultSource: 'ac_pf' })
+  try {
+    renderPage()
+    expect(await screen.findByText(AC_PF_NOT_RUN)).toBeTruthy()
+    expect(screen.getByText('Not run yet')).toBeTruthy()
+    expect(screen.queryByText(/could not be read/)).toBeNull()
+    expect(screen.queryByTestId('dispatch-error')).toBeNull()
+    expect(vi.mocked(toast.error)).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Show the LP dispatch' }))
+    expect(useUIStore.getState().resultSource).toBe('lopf')
+  } finally {
+    useUIStore.setState({ resultSource: 'lopf' })
+    vi.mocked((await import('../../api/displayedResults')).displayedResultsApi.dispatch).mockReset()
+  }
+})
+
+it('a 500 still toasts and shows the unavailable state (UX 31)', async () => {
+  const toast = (await import('react-hot-toast')).default
+  vi.mocked(toast.error).mockClear()
+  await failRealRead(500, 'Internal Server Error')
+  try {
+    renderPage()
+    expect(await screen.findByTestId('dispatch-error')).toBeTruthy()
+    expect(screen.getByText(/The dispatch could not be read/)).toBeTruthy()
+    expect(screen.getByText('Not available for this run')).toBeTruthy()
+    expect(vi.mocked(toast.error)).toHaveBeenCalledWith('Internal Server Error', expect.anything())
+    expect(screen.queryByText(AC_PF_NOT_RUN)).toBeNull()
+  } finally {
+    vi.mocked((await import('../../api/displayedResults')).displayedResultsApi.dispatch).mockReset()
+  }
 })

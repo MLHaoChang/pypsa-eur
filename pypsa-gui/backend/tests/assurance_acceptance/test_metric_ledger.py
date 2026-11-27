@@ -31,8 +31,21 @@ SECTION = "profiles"
 SURFACES = ("answer", "route", "workbook", "pdf", "download_meta")
 STATUSES = ("verified", "pending")
 ROW_KEYS = frozenset(
-    {"metric", "formula", "validity", "tolerance", "oracle", "status", "surfaces"}
+    {
+        "metric",
+        "formula",
+        "validity",
+        "tolerance",
+        "oracle",
+        "status",
+        "domain_review",
+        "surfaces",
+    }
 )
+# GK B's per-metric domain review (issue 10 R5): "pending", or the full head SHA of
+# the PR that carries the GK B OK. A pending row may carry GK B's one-line reason.
+DOMAIN_REVIEW = re.compile(r"gk-b:[0-9a-f]{40}")
+ROW_OPTIONAL = frozenset({"domain_review_note"})
 SURFACE_KEYS = frozenset({"status", "test"})
 OPTIONAL = frozenset({"ticket"})
 NAMED_TOLERANCE = re.compile(
@@ -284,6 +297,14 @@ def _status_problems(entry: dict, test_key: str) -> list[str]:
     return []
 
 
+def domain_review_problem(value) -> str | None:
+    if value == "pending" or (
+        isinstance(value, str) and DOMAIN_REVIEW.fullmatch(value)
+    ):
+        return None
+    return f"domain_review {value!r} is not 'pending' or gk-b:<full sha>"
+
+
 def row_problems(profile: str, row, path: Path) -> list[str]:
     """Every closed-schema breach of one row, each naming the file and the row."""
     name = row.get("metric") if isinstance(row, dict) else repr(row)
@@ -292,10 +313,12 @@ def row_problems(profile: str, row, path: Path) -> list[str]:
         return [f"{where}: a row is an object"]
     found = []
     keys = set(row)
-    if ROW_KEYS - keys or keys - ROW_KEYS - OPTIONAL:
+    if ROW_KEYS - keys or keys - ROW_KEYS - OPTIONAL - ROW_OPTIONAL:
         found.append(
-            f"keys missing {sorted(ROW_KEYS - keys)}, unknown {sorted(keys - ROW_KEYS - OPTIONAL)}"
+            f"keys missing {sorted(ROW_KEYS - keys)}, "
+            f"unknown {sorted(keys - ROW_KEYS - OPTIONAL - ROW_OPTIONAL)}"
         )
+    found += filter(None, [domain_review_problem(row.get("domain_review"))])
     for key in ("formula", "validity"):
         if not (isinstance(row.get(key), str) and row[key].strip()):
             found.append(f"{key} must be non-empty text")
@@ -413,6 +436,7 @@ ROW = {
     "tolerance": "exact",
     "oracle": None,
     "status": "pending",
+    "domain_review": "pending",
     "surfaces": {"answer": {"status": "pending", "test": None}},
 }
 
@@ -491,4 +515,263 @@ def test_node_ids_resolve_statically_including_a_param_id():
     assert "not resolvable statically" in node_problem(
         "pypsa-gui/backend/tests/test_assurance_metrics.py::"
         "test_missing_or_out_of_bounds_dispatch_never_becomes_full_horizon[bad0]"
+    )
+
+
+# ── per-metric domain review (issue 10 R5, GK B plan GO) ─────────────────
+
+R1_OK = "gk-b:bf0eed8e63449828d3c91967f75a8c35e2775a2a"  # #2036
+R2_OK = "gk-b:e0be8aa78175a29b88c93d1c46b51c0f6189307c"  # #2037
+R3_OK = "gk-b:ccad4aaf72c1a6a8b5599b61703e945575171f9b"  # #2044
+R4_OK = "gk-b:1f98625c8302e01590af4612b987d01752076a11"  # #2049
+# GK B (73) on #2057: the 41 rows its R5 table passed, and the two energy-balance
+# rows re-confirmed at SERVED_TOL (they leave R2's sha, which saw BUS_TOL_MW).
+R5_OK = "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8"  # #2057
+# Exact set: a row whose domain_review is not "pending" is listed here with its value.
+REVIEWED = {
+    **{
+        pair: R5_OK
+        for pair in (
+            ("ac-branch-loading/1", "ac_branch_rating"),
+            ("ac-branch-loading/1", "ac_peak_apparent_flow"),
+            ("ac-branch-loading/1", "ac_peak_branch_utilisation"),
+            ("branch-loading/1", "branch_rating"),
+            ("branch-loading/1", "peak_branch_flow"),
+            ("branch-loading/1", "peak_branch_utilisation"),
+            ("bus-price/1", "max_price"),
+            ("bus-price/1", "mean_price"),
+            ("bus-price/1", "min_price"),
+            ("capacity/1", "capacity_change"),
+            ("capacity/1", "optimal_capacity"),
+            ("carrier-energy/1", "carrier_generator_energy"),
+            ("carrier-energy/1", "carrier_peak_generator_output"),
+            ("energy-balance/1", "export_losses_and_conversion"),
+            ("energy-balance/1", "storage_change"),
+            ("generator-cost/1", "allocated_fixed_cost"),
+            ("generator-cost/1", "annual_fixed_cost"),
+            ("generator-cost/1", "dispatch_energy"),
+            ("generator-cost/1", "marginal_expenditure"),
+            ("generator-cost/1", "peak_dispatch"),
+            ("generator-cost/1", "total_cost"),
+            ("generator-dispatch/1", "dispatch_energy"),
+            ("generator-dispatch/1", "marginal_expenditure"),
+            ("generator-dispatch/1", "peak_dispatch"),
+            ("generator-emissions/1", "generator_emissions"),
+            ("grid-readiness/1", "not_checked"),
+            ("lost-load/1", "lost_load_cost"),
+            ("lost-load/1", "lost_load_energy"),
+            ("lost-load/1", "peak_shed"),
+            ("network-emissions/1", "co2_cap_shadow_price"),
+            ("network-emissions/1", "total_emissions"),
+            ("network-linear-cost/1", "total_cost"),
+            ("network-loading/1", "max_branch_utilisation"),
+            ("site-import/1", "export_energy"),
+            ("site-import/1", "grid_import_energy"),
+            ("site-import/1", "peak_grid_import"),
+            ("storage-unit-cost/1", "allocated_fixed_cost"),
+            ("storage-unit-cost/1", "annual_fixed_cost"),
+            ("storage-unit-cost/1", "storage_discharge_expenditure"),
+            ("storage-unit-cost/1", "storage_holding_expenditure"),
+            ("storage-unit-cost/1", "storage_operating_expenditure"),
+            ("storage-unit-cost/1", "total_cost"),
+            ("time-to-power/1", "time_to_power_months"),
+        )
+    },
+    **{
+        ("renewable-share/1", m): R4_OK
+        for m in ("renewable_share", "nonrenewable_energy", "electricity_used")
+    },
+    **{
+        ("system-cost-breakdown/1", m): R3_OK
+        for m in ("system_capex", "system_opex", "system_cost", "objective_residual")
+    },
+    **{
+        ("branch-losses/1", m): R1_OK
+        for m in ("loss_energy", "peak_loss", "demand_energy", "loss_pct_of_demand")
+    },
+    **{
+        pair: R2_OK
+        for pair in (
+            ("grid-readiness/1", "checked_pass"),
+            ("grid-readiness/1", "checked_warn"),
+            ("grid-readiness/1", "checked_fail"),
+            ("network-linear-cost/1", "dispatch_energy"),
+            ("network-linear-cost/1", "marginal_expenditure"),
+            ("network-linear-cost/1", "peak_dispatch"),
+            ("network-linear-cost/1", "annual_fixed_cost"),
+            ("network-linear-cost/1", "allocated_fixed_cost"),
+        )
+    },
+}
+
+
+def test_the_reviewed_rows_are_exactly_the_listed_set(ledger):
+    rows, _ = ledger
+    reviewed = {
+        pair: row["domain_review"]
+        for pair, (row, _) in rows.items()
+        if row.get("domain_review") != "pending"
+    }
+    assert reviewed == REVIEWED, summary(rows)
+
+
+def test_only_a_verified_row_can_carry_a_domain_review(ledger):
+    rows, _ = ledger
+    assert all(rows[pair][0]["status"] == "verified" for pair in REVIEWED)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "gk-b:bf0eed8",
+        "gk-a:bf0eed8e63449828d3c91967f75a8c35e2775a2a",
+        "gk-b:BF0EED8E63449828D3C91967F75A8C35E2775A2A",
+        "gk-b:bf0eed8e63449828d3c91967f75a8c35e2775a2a ",
+        "ok",
+        None,
+    ],
+)
+def test_a_malformed_domain_review_is_refused(value):
+    problems = row_problems("bus-price/1", {**ROW, "domain_review": value}, Path("x"))
+    assert any("domain_review" in p for p in problems)
+    assert not row_problems("bus-price/1", {**ROW, "domain_review": R1_OK}, Path("x"))
+
+
+def test_a_row_without_domain_review_is_refused():
+    row = {k: v for k, v in ROW.items() if k != "domain_review"}
+    assert any(
+        "keys missing ['domain_review']" in p
+        for p in row_problems("bus-price/1", row, Path("x"))
+    )
+
+
+def test_domain_review_feeds_no_tally_and_no_gate(ledger):
+    """Changing every row's domain_review leaves the verified tally equal, and no
+    application module opens the ledger, so rollout and pilot gating cannot see it."""
+    rows, _ = ledger
+    flipped = {
+        pair: ({**row, "domain_review": R1_OK}, path)
+        for pair, (row, path) in rows.items()
+    }
+    assert summary(flipped) == summary(rows)
+    backend = HERE.parents[1]
+    readers = [
+        str(path.relative_to(backend))
+        for path in backend.rglob("*.py")
+        if "tests" not in path.relative_to(backend).parts
+        and re.search(r"\bmetric_ledger\b", path.read_text(errors="ignore"))
+    ]
+    assert readers == []
+
+
+def test_independent_domain_approval_stays_false():
+    from harness import assurance_contracts, rollout
+
+    assert rollout.capabilities()["independent_domain_approval"] is False
+    assert "independent_domain_approval" in assurance_contracts.PENDING
+
+
+# GK B (73) R5 ruling C: a reviewed row's tolerance constant must appear in its
+# oracle test's module. This is a name-in-file check only (issue 29 tightens it).
+def unpinned_reviews(rows) -> list[str]:
+    """Reviewed rows whose named tolerance constant does not appear in their oracle test's module."""
+    off = []
+    for (profile, metric), (row, _) in sorted(rows.items()):
+        if row.get("domain_review", "pending") == "pending" or row["oracle"] is None:
+            continue
+        match = NAMED_TOLERANCE.fullmatch(row["tolerance"])
+        if match is None:
+            continue  # "exact" or ulp:<n>: no constant to name
+        test_file = REPO / row["oracle"].split("::")[0]
+        if match[2] not in test_file.read_text():
+            off.append(f"{profile}/{metric}: {match[2]} not in {test_file.name}")
+    return off
+
+
+def test_a_reviewed_row_names_the_tolerance_its_oracle_test_uses(ledger):
+    """A row holds a gk-b sha only when the constant it names appears in its oracle test's module."""
+    off = unpinned_reviews(ledger[0])
+    assert off == [], "\n".join(off)
+
+
+def test_a_pending_row_says_why_and_a_reviewed_row_does_not(ledger):
+    rows, _ = ledger
+    off = []
+    for (profile, metric), (row, _) in sorted(rows.items()):
+        note = row.get("domain_review_note")
+        if row["domain_review"] == "pending" and row["status"] == "verified":
+            if not (isinstance(note, str) and note.strip()):
+                off.append(f"{profile}/{metric}: pending with no domain_review_note")
+        elif row["domain_review"] != "pending" and note is not None:
+            off.append(f"{profile}/{metric}: reviewed but carries a domain_review_note")
+    assert off == [], "\n".join(off)
+
+
+def test_a_review_on_an_unpinned_row_is_refused(ledger):
+    rows, _ = ledger
+    pair = (
+        "investment-case/1",
+        "project_irr",
+    )  # IRR_TOLERANCE, unnamed in its test (issue 29)
+    row, path = rows[pair]
+    assert row["domain_review"] == "pending"
+    reviewed = {**rows, pair: ({**row, "domain_review": R2_OK}, path)}
+    assert unpinned_reviews(reviewed) == [
+        "investment-case/1/project_irr: IRR_TOLERANCE not in test_investment_assurance.py"
+    ]
+
+
+# ── pending metrics with no checked profile (issue 10 R5) ────────────────
+
+PENDING = HERE / "metric_ledger_pending.json"
+PENDING_NAMES = {
+    "fmea",
+    "monte_carlo_adequacy",
+    "adequacy_loops",
+    "billing",
+    "cfe_score",
+    "lcoh",
+    "unit_commitment",
+    "bus_voltages",
+    "business_case_npv",
+    "objective_decomposition",
+}
+
+
+def _pending_rows():
+    return json.loads(PENDING.read_text())["pending"]
+
+
+def test_the_pending_metrics_are_exactly_the_named_set():
+    rows = _pending_rows()
+    names = [r["name"] for r in rows]
+    assert len(names) == len(set(names)) and set(names) == PENDING_NAMES
+    for row in rows:
+        assert set(row) == {
+            "name",
+            "implementation",
+            "what",
+            "status",
+            "oracle",
+            "reason",
+        }, row
+        assert row["status"] == "pending" and row["oracle"] is None, row
+
+
+@pytest.mark.parametrize("row", _pending_rows(), ids=lambda r: r["name"])
+def test_each_pending_implementation_resolves(row):
+    """A rename of the function breaks this, so the row cannot point at nothing."""
+    import importlib
+
+    module, function = row["implementation"].split(":")
+    assert callable(getattr(importlib.import_module(module), function))
+
+
+def test_no_pending_metric_is_counted_as_verified(ledger):
+    rows, _ = ledger
+    profiles = {profile for profile, _ in rows}
+    names = {metric for _, metric in rows}
+    assert not PENDING_NAMES & (profiles | names)
+    assert "0 verified" in summary(
+        {(r["name"], r["name"]): (r, PENDING) for r in _pending_rows()}
     )

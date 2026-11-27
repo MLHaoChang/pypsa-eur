@@ -8,6 +8,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_bus_price_is_time_weighted_and_observed",
     "status": "verified",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -27,6 +28,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_bus_price_is_time_weighted_and_observed",
     "status": "verified",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -41,6 +43,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_bus_price_is_time_weighted_and_observed",
     "status": "verified",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -55,6 +58,8 @@
     "tolerance": "harness.price_calculations:VOLL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_hours_at_voll_use_the_solves_voll_and_need_one",
     "status": "verified",
+    "domain_review": "pending",
+    "domain_review_note": "unpinned: test_result_profiles_assurance.py does not name VOLL_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "verified",

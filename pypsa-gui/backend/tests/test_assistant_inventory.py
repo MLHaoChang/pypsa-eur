@@ -82,7 +82,7 @@ def isolated_reader(tmp_path, results, panels, edits=()):
         assert old in text, f'{old!r} not in {relative}'
         target.write_text(text.replace(old, new, 1))
     for relative, source in (
-        ('pypsa-gui/frontend/src/pages/Results.tsx', results),
+        ('pypsa-gui/frontend/src/pages/results/resultTabs.ts', results),
         ('pypsa-gui/frontend/src/store/uiStore.ts', panels),
     ):
         target = tmp_path / relative

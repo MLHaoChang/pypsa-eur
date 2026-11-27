@@ -2,8 +2,10 @@ import { manualNavigation } from '../utils/navigationEpoch'
 import RunBoundView from './results/RunBoundView'
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase, Workflow, CalendarClock, Zap, FileText, FileDown, Package, Table2 } from 'lucide-react'
+import { Filter, ChevronDown, ChevronRight, Layers, PanelRightOpen, PanelRightClose } from 'lucide-react'
+import { TABS, ALL_TABS, GUIDED_TABS, tabShown } from './results/resultTabs'
 import { simulationApi, resultsApi } from '../api/simulation'
+import { displayedResultsApi } from '../api/displayedResults'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
@@ -105,52 +107,7 @@ function solveSignature(s: SimulationStatus | undefined): string | null {
   return `${s.condition ?? ''}|${s.objective}|${s.solve_time ?? ''}`
 }
 
-// `multiOnly` tabs appear only for multi-period results — the Overview
-// consolidates per-period economics / generation mix, which is meaningless
-// on a flat single-period run. `expertOnly` tabs are hidden in Guided mode
-// (guided-mode spec §3.5): Guided keeps adequacy and FMEA, the two the
-// hub-design flow reads.
-export const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip: string; multiOnly?: boolean; expertOnly?: boolean; processOnly?: boolean; productsOnly?: boolean }> = [
-  { id: 'summary',    label: 'Summary',            Icon: Gauge,            tip: 'The solve at a glance: cost, emissions, adequacy and the key capacities, each linking to its tab' },
-  { id: 'overview',   label: 'Overview',           Icon: Layers,           tip: 'Per-period economics, generation mix & storage — the whole horizon at a glance', multiOnly: true, expertOnly: true },
-  { id: 'capex',      label: 'Capacity expansion', Icon: TrendingUp,       tip: 'CAPEX, OPEX, sized assets', expertOnly: true },
-  { id: 'dispatch',   label: 'Dispatch',           Icon: Activity,         tip: 'Per-snapshot generation, storage, loads', expertOnly: true },
-  { id: 'loadflow',   label: 'Load Flow',          Icon: NetworkIcon,      tip: 'Line flows, voltages, losses', expertOnly: true },
-  { id: 'grid_code',  label: 'Grid code & connection', Icon: ShieldCheck, tip: 'The grid study: campus PCC compliance against the grid code, and a planning → dynamics study\'s connection capacity and connection-point assessment', expertOnly: true },
-  { id: 'electrical_design', label: 'Electrical design', Icon: Zap, tip: 'The campus study: transformer sizing, reactive compensation, short circuit, critical hours and the investment that meets them', expertOnly: true },
-  { id: 'island',     label: 'Island & ride-through', Icon: ShieldAlert, tip: 'The island study: ride-through hours, the instant of islanding, the cost of island capability, the pickup sequence and the frequency cuts', expertOnly: true },
-  { id: 'grid_forming', label: 'Grid-forming',   Icon: Zap,              tip: 'The recommended grid-forming settings per unit, the cases before and after, and the capacity needed when no setting passes', expertOnly: true },
-  { id: 'flows',      label: 'Energy flow',        Icon: Workflow,         tip: 'Where the site\'s energy came from, what it passed through and where it went — Source → Via → Destination in MWh, with a CSV export' },
-  { id: 'loadshape',  label: 'Load shape',         Icon: CalendarClock,    tip: 'How the site\'s load and grid exchange are shaped in time — import and export heatmaps, a one-week profile, monthly and annual site energy' },
-  { id: 'prices',     label: 'Prices',             Icon: DollarSign,       tip: 'Marginal prices, duration curve, drivers', expertOnly: true },
-  { id: 'economics',  label: 'Asset economics',    Icon: Wallet,           tip: 'Per-asset revenue, profit, LCOE/LCOS — by group or by individual asset', expertOnly: true },
-  { id: 'emissions',  label: 'Emissions',          Icon: Cloud,            tip: 'CO₂ totals, cap shadow price, per-carrier breakdown', expertOnly: true },
-  { id: 'curtailment',label: 'Curtailment',        Icon: Scissors,         tip: 'Renewable energy rejected by the LP — total + per-carrier + time series', expertOnly: true },
-  { id: 'lostload',   label: 'Lost load',          Icon: AlertTriangle,    tip: 'VOLL slack dispatch (unserved demand) — per-carrier and per-bus breakdown', expertOnly: true },
-  { id: 'adequacy',   label: 'Adequacy',           Icon: ShieldCheck,      tip: 'Reliability targets, COPT screening, the cost-vs-availability frontier, sequential Monte Carlo and the reliability-targeted planning loop' },
-  { id: 'storage',    label: 'Storage cycling',    Icon: BatteryCharging,  tip: 'Equivalent full-cycle count per storage unit + carrier rollup', expertOnly: true },
-  { id: 'grid_risk',  label: 'Grid risk to production', Icon: ShieldAlert, tip: 'Each grid risk (ride-through, island, N-1, connection curtailment) as lost tonnes, then EUR, per year', processOnly: true },
-  { id: 'products',   label: 'Products',           Icon: Package,          tip: 'What the site makes (hydrogen, ammonia, …): output in its own unit, running time and, for hydrogen, the cost per kg', productsOnly: true },
-  { id: 'fmea',       label: 'FMEA',               Icon: ShieldAlert,      tip: 'Failure modes ranked by criticality (€ per year): computed rows + expert class-D rows, mitigability, CSV export' },
-  { id: 'investment', label: 'Investment case',    Icon: Briefcase,        tip: 'The investment case: the site bill, participants and value flows, the Library, tariffs and contracts', expertOnly: true },
-  { id: 'asset',      label: 'Asset Detail',       Icon: Crosshair,        tip: 'One asset in full — every applicable result, as numbers or charts, exportable', expertOnly: true },
-]
-
-// Hand-off tabs (R6): what leaves the tool, not a solve output. Kept apart from TABS, which is
-// the list of result views (the workbook picker and the assistant inventory read it as such).
-const HANDOFF_TABS: typeof TABS = [
-  { id: 'reports',    label: 'Reports',            Icon: FileText,         tip: 'Study reports written from the Energy Hub reference design and the adequacy study; read them here and export to Word' },
-  { id: 'exports',    label: 'Exports',            Icon: FileDown,         tip: 'Export the project: bundle, NetCDF, CSV, Excel, MATPOWER or the results workbook' },
-  { id: 'equipment_schedule', label: 'Equipment schedule', Icon: Table2, tip: 'Every electrical asset of the last DC Grid study: rating, quantity, governing criterion, source and capex, with an Excel download' },
-  { id: 'specialist_packet', label: 'Specialist packet', Icon: Package,   tip: 'What a dynamics specialist receives: the dispatch source, ranked snapshots, assumptions ledger and per-hour bundles' },
-]
-// Every tab the panel can show: the result views, then Hand-off.
-const ALL_TABS: typeof TABS = [...TABS, ...HANDOFF_TABS]
-
-// The tabs Guided mode shows (every other row is `expertOnly`).
-const GUIDED_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>(
-  ALL_TABS.filter(t => !t.expertOnly).map(t => t.id),
-)
+export { TABS }
 
 // Maps the Results tab the user is viewing → the equivalent CompareView tab,
 // so opening the docked comparison rail starts on the same metric. Most IDs
@@ -706,9 +663,10 @@ export default function Results() {
   }
 
   // ── UX overhaul S3: groups ───────────────────────────────────────────
+  // An advanced tab (asked for in Guided) is shown as Expert shows it.
   const tabVisible = (t: (typeof ALL_TABS)[number]) =>
-    (!t.multiOnly || uniquePeriods.length > 0) && (!t.expertOnly || uiMode === 'expert' || t.id === advancedTab)
-    && (!t.processOnly || hasProcessUnits) && (!t.productsOnly || hasProducts)
+    tabShown(t, t.id === advancedTab ? 'expert' : uiMode, uniquePeriods.length > 0 ? 'multi' : 'single',
+      { processUnits: hasProcessUnits, products: hasProducts })
   const visibleTabIds = new Set<ResultsTab>(ALL_TABS.filter(tabVisible).map(t => t.id))
   // The drawer sits over the last non-asset tab; a first load on 'asset' falls back to Summary.
   const bodyTab: ResultsTab = effectiveTab === 'asset' ? lastBodyTab.current : effectiveTab
@@ -758,6 +716,7 @@ export default function Results() {
             : `${tip}. Advanced tab: shown because it was asked for; it leaves the strip when you pick another tab.`}
         data-testid={`results-tab-${id}`}
         data-advanced={advanced ? 'true' : undefined}
+        aria-current={active ? 'true' : undefined}
         className={`h-8 px-3 shrink-0 flex items-center gap-1.5 text-[12px] font-medium border-b-2 -mb-px transition-colors
           ${active
             ? 'border-accent text-accent'
@@ -910,7 +869,7 @@ export default function Results() {
               title={off ? `${g.question}. Outside scope: add ${g.label} to the scope to run it.` : g.question}
               data-testid={`results-group-${g.id}`}
               data-outside-scope={off ? 'true' : undefined}
-              aria-pressed={active}
+              aria-current={active ? 'true' : undefined}
               className={`h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
                 ${active ? 'border-accent text-text' : 'border-transparent text-muted hover:text-text'}
                 ${off ? 'opacity-50' : ''}`}
@@ -946,6 +905,7 @@ export default function Results() {
             const tabActive = activeCardTab === ct.id
             return (
               <button key={ct.id} onClick={() => pickCardTab(ct.id)} data-testid={`results-cardtab-${ct.id}`}
+                aria-current={tabActive ? 'true' : undefined}
                 data-views={ct.views.filter(v => visibleTabIds.has(v)).join(',')}
                 className={`h-8 px-3 shrink-0 flex items-center text-[12px] font-medium border-b-2 -mb-px transition-colors
                   ${tabActive ? 'border-accent text-accent' : 'border-transparent text-muted hover:text-text'}`}>
@@ -1202,8 +1162,10 @@ function AggregatedResultsBody() {
   const { data: inv }  = useQuery({ queryKey: nk(currentProject, 'investmentPeriods'),   queryFn: networkApi.getInvestmentPeriods })
   // Use generators TS as the reference for the `periods` parallel array —
   // matches what Dispatch.tsx does. Falls back to /snapshots.periods if
-  // generators TS hasn't loaded yet.
-  const { data: gensTS } = useQuery({ queryKey: nk(currentProject, 'results', 'generators'), queryFn: () => resultsApi.getGeneratorResults() })
+  // generators TS hasn't loaded yet. It is the Overview's bound generators
+  // part (A5.2), the same query AggregatedOverview reads, so one fetch.
+  const { data: overview } = useQuery({ queryKey: nk(currentProject, 'results', 'displayed', 'overview'), queryFn: displayedResultsApi.overview })
+  const gensTS = overview?.data.generators
   const weightCtx: WeightCtx = useMemo(() => {
     const refTs = gensTS as TSPayload | null
     return {

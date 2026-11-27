@@ -633,6 +633,12 @@ books them, from the component tables alone. Every figure needs the hand basis (
 capex plus all opex) to reproduce `n.objective` within `RESIDUAL_TOLERANCE` × max(1, |objective|).
 A scaled objective, an objective constant, PCS/STATCOM, reserve or commercial terms, a MIP or
 an unmodelled cost attribute withholds every figure with its own reason. Whole horizon only.
+`renewable-share/1` (opt-in, `renewable_share_calculations.py`, assistant-assurance 10 R4)
+gives `/results/renewable_fraction`'s share in percent, with its non-renewable energy and the
+electricity used, for the network and an exact window. Membership is `renewable_fraction.classify`
+by name; the arithmetic is the profile's own. A class it does not read (source or conversion
+Links, clusters, unattributed or injecting sources, slacks) or a slack the solve removed withholds
+every figure. Two shares compare in percentage points (`percentage_point_delta/1`) only.
 `energy-balance/1` (opt-in) gives the Energy flow tab's totals (generation, served,
 unserved, storage change and the unsplit remainder of export, losses and conversion),
 gated by a per-bus balance; the tab's Source -> Via -> Destination rows are its own

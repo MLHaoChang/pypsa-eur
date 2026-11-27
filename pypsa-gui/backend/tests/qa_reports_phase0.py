@@ -185,7 +185,7 @@ def section_2_real_study_to_docx() -> None:
     # (A legitimate zero — a stage that charged no solves — is fine.)
     _step("a null headline figure reads 'not established', not 0",
           rep.get("mc_lole_h") is None
-          and "MC LOLE (h/yr)\nnot established" in text,
+          and "Expected shortfall (h/yr)\nnot established" in text,
           f"mc_lole_h={rep.get('mc_lole_h')}")
 
     r = c.get(f"/api/projects/{PROJECT}/uploads")

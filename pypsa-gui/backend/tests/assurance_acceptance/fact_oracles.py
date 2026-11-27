@@ -306,3 +306,11 @@ def system_opex(n, start=None, end=None, column="objective"):
             ).ravel()
         )
     return _total(np.concatenate(terms))
+
+
+# renewable_share_calculations.py
+def nonrenewable_energy(n, generators, start=None, end=None, column="generators"):
+    """Sum of max(p(t), 0) w(t) over the named non-renewable Generators."""
+    p = n.generators_t.p[list(generators)].to_numpy(dtype=float)
+    weighted = np.maximum(p, 0.0).sum(axis=1) * _weights(n, column)
+    return _total(weighted[rows(n.snapshots, start, end)])

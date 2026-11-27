@@ -189,12 +189,44 @@ def _param(campus, uid, name):
     return float(row["value"].iloc[0])
 
 
+def genset_machine(campus, net, i):
+    """Swap the genset sgen ``i`` of ``net`` for a synchronous machine behind
+    its x''d, R/X and rated cos_phi, so IEC 60909 applies K_G (or K_S / K_SO
+    behind its own unit transformer). The sgen goes out of service. Returns
+    the new gen's index. Mutates ``net``."""
+    import pandapower as pp
+
+    uid = str(net.sgen.at[i, "name"])
+    u = campus.units.loc[uid]
+    block = campus.island["units"].get(uid)
+    vn = float(net.bus.at[int(net.sgen.at[i, "bus"]), "vn_kv"])
+    xd = _param(campus, uid, "xd_pp")
+    sn = float(u["s_mva"])
+    cos_phi = block["values"]["cos_phi_r"] if block else GENSET_COS_PHI
+    net.sgen.at[i, "in_service"] = False
+    g = pp.create_gen(net, int(net.sgen.at[i, "bus"]), p_mw=0.0, vm_pu=1.0, sn_mva=sn, vn_kv=vn,
+                      xdss_pu=xd, rdss_ohm=_param(campus, uid, "rx_sc") * xd * vn ** 2 / sn,
+                      cos_phi=cos_phi, name=uid)
+    if block and block.get("unit_transformer"):
+        bus = int(net.sgen.at[i, "bus"])
+        trafos = net.trafo.index[(net.trafo["lv_bus"] == bus) & net.trafo["in_service"].astype(bool)]
+        if len(trafos) != 1:
+            raise ValueError(f"genset {uid} has unit_transformer set, but its bus has {len(trafos)} "
+                             "step-up transformers; it needs exactly one")
+        # IEC 60909 power station unit: K_S with an on-load tap changer,
+        # K_SO without (the usual genset step-up); the transformer then
+        # takes no network K_T of its own
+        net.gen.at[g, "power_station_trafo"] = int(trafos[0])
+        net.trafo.at[trafos[0], "power_station_unit"] = True
+        net.trafo.at[trafos[0], "oltc"] = bool(block.get("unit_transformer_oltc"))
+    return g
+
+
 def machine_net(campus, installed, island=False, case="max", gfm_override=None):
     """A copy of the campus net for IEC 60909: every installed genset a
     synchronous machine behind x''d (K_G, or K_S behind its own unit
     transformer), every installed converter a current source at its mode's
     k, the rest out of service. ``island`` takes the grid out."""
-    import pandapower as pp
 
     # IEC 60909-0: a bypassed series capacitor is neglected
     net = SC.bypass_for_faults(__import__("copy").deepcopy(campus.net))
@@ -211,27 +243,7 @@ def machine_net(campus, installed, island=False, case="max", gfm_override=None):
         if not on:
             continue
         if u["kind"] == "genset":
-            block = campus.island["units"].get(uid)
-            vn = float(net.bus.at[int(net.sgen.at[i, "bus"]), "vn_kv"])
-            xd = _param(campus, uid, "xd_pp")
-            sn = float(u["s_mva"])
-            cos_phi = block["values"]["cos_phi_r"] if block else GENSET_COS_PHI
-            net.sgen.at[i, "in_service"] = False
-            g = pp.create_gen(net, int(net.sgen.at[i, "bus"]), p_mw=0.0, vm_pu=1.0, sn_mva=sn, vn_kv=vn,
-                              xdss_pu=xd, rdss_ohm=_param(campus, uid, "rx_sc") * xd * vn ** 2 / sn,
-                              cos_phi=cos_phi, name=uid)
-            if block and block.get("unit_transformer"):
-                bus = int(net.sgen.at[i, "bus"])
-                trafos = net.trafo.index[(net.trafo["lv_bus"] == bus) & net.trafo["in_service"].astype(bool)]
-                if len(trafos) != 1:
-                    raise ValueError(f"genset {uid} has unit_transformer set, but its bus has {len(trafos)} "
-                                     "step-up transformers; it needs exactly one")
-                # IEC 60909 power station unit: K_S with an on-load tap changer,
-                # K_SO without (the usual genset step-up); the transformer then
-                # takes no network K_T of its own
-                net.gen.at[g, "power_station_trafo"] = int(trafos[0])
-                net.trafo.at[trafos[0], "power_station_unit"] = True
-                net.trafo.at[trafos[0], "oltc"] = bool(block.get("unit_transformer_oltc"))
+            genset_machine(campus, net, i)
         else:
             net.sgen.at[i, "k"] = converter_k(campus, uid, case, gfm_override)
     return net
