@@ -220,6 +220,7 @@ def _snapshot(project):
     return restore
 
 
+@pytest.mark.unlocated
 @pytest.mark.parametrize("kind,model,base_url,auth", WIRES, ids=[p[0] for p in WIRES])
 def test_the_chat_binds_the_site_through_its_card_and_reads_it_back_verified(
     client, scene, project_storage_dir, kind, model, base_url, auth
