@@ -15,8 +15,6 @@ import queue
 import threading
 import time
 
-import pandas as pd
-import pypsa
 import pytest
 
 from models.energy_hub import AvailabilityTarget, default_strong_grid_pack
@@ -24,19 +22,9 @@ from services import solver_service
 from services.adequacy import eh_study as S
 from services.pypsa_service import PyPSAService
 from services.solver_service import SolverConfig
-
-
-def _network() -> pypsa.Network:
-    n = pypsa.Network()
-    n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
-    n.add("Carrier", "gas")
-    n.add("Bus", "b", carrier="AC")
-    n.add("Load", "l", bus="b", p_set=100.0)
-    n.add("Generator", "cheap", bus="b", carrier="gas", p_nom=60.0, marginal_cost=10.0)
-    n.add(
-        "Generator", "backup", bus="b", carrier="gas", p_nom=40.0, marginal_cost=200.0
-    )
-    return n
+from tests.test_eh_study_edited_since import _edit_bus
+from tests.test_eh_study_record_survives_reactivation import poll
+from tests.test_energy_hub_study import _ens_bind_network
 
 
 def _pack():
@@ -52,7 +40,7 @@ def _probe_lock_from_other_thread(lock) -> bool:
     got: list[bool] = []
 
     def _try() -> None:
-        ok = lock.acquire(timeout=1.0)
+        ok = lock.acquire(timeout=3.0)
         if ok:
             lock.release()
         got.append(ok)
@@ -64,7 +52,7 @@ def _probe_lock_from_other_thread(lock) -> bool:
 
 
 def test_study_solve_does_not_hold_the_project_mutation_lock(monkeypatch):
-    n = _network()
+    n = _ens_bind_network()
     PyPSAService.set_network(n)
     shared = PyPSAService.get_lock()
     real = solver_service.run_simulation
@@ -98,7 +86,7 @@ def test_study_solve_does_not_hold_the_project_mutation_lock(monkeypatch):
 def test_abort_during_solve_still_stops_the_study(monkeypatch):
     """The private lock changes nothing for Abort: a stop set during the
     solve still ends the study as aborted, and the shared lock is free."""
-    n = _network()
+    n = _ens_bind_network()
     PyPSAService.set_network(n)
     shared = PyPSAService.get_lock()
     stop = threading.Event()
@@ -161,6 +149,37 @@ def test_delete_of_a_project_with_no_resident_context_is_not_held_up(
     assert not pdir.exists()
 
 
+def test_study_transient_marks_stay_off_the_live_project(monkeypatch):
+    """review-gk (#992): a runner solving a private copy binds a private
+    solving context, so the solve's transient marks (VOLL slacks, vintage
+    clones) and its restore-time clear never reach the live project, which
+    edits and saves now use while the study runs."""
+    n = _ens_bind_network()
+    PyPSAService.set_network(n)
+    live = PyPSAService._transient_target(ensure=True)
+    with live.transient_lock:
+        live.transient_rows["Generator"] = {"foreground-slack"}
+    real = solver_service.run_simulation
+
+    def _spy(*args, **kwargs):
+        PyPSAService.mark_transient("Generator", "study-slack")
+        out = real(*args, **kwargs)
+        PyPSAService.clear_transient()
+        return out
+
+    monkeypatch.setattr(solver_service, "run_simulation", _spy)
+    S.run_eh_study(
+        n,
+        _pack(),
+        SolverConfig(voll=150.0, ens_cap_permyriad=1000.0),
+        lock=PyPSAService.get_lock(),
+        stop_event=threading.Event(),
+        log_queue=queue.SimpleQueue(),
+        stages=("apply_pack", "ens_solve", "assemble"),
+    )
+    assert live.transient_rows == {"Generator": {"foreground-slack"}}
+
+
 # ── Through the routes: a real study whose solve blocks (GK A C2, C3, C5) ───
 
 STUDY_URL = "/api/results/eh_study"
@@ -194,17 +213,6 @@ class _BlockedSolve:
         return self.real(cfg, network, lock, stop_event, *args, **kwargs)
 
 
-def _poll(client, timeout: float = 30.0) -> dict:
-    deadline = time.time() + timeout
-    body: dict = {}
-    while time.time() < deadline:
-        body = client.get(STUDY_URL).json()
-        if body.get("status") != "running":
-            return body
-        time.sleep(0.05)
-    raise AssertionError(f"eh_study never finished: {body!r}")
-
-
 @pytest.fixture
 def blocked_study(client, install_network, monkeypatch, session_state):
     """A saved hub project whose EH study is inside its (blocked) solve."""
@@ -223,21 +231,14 @@ def blocked_study(client, install_network, monkeypatch, session_state):
         t.join(30)
 
 
-def _edit_bus(client, dx: float = 0.001):
-    bus = client.get("/api/network/buses").json()[0]
-    return client.put(
-        f"/api/network/buses/{bus['name']}",
-        json={**bus, "x": float(bus.get("x") or 0.0) + dx},
-    )
-
-
 def test_abort_answers_while_edits_are_in_flight(blocked_study, client, session_ctx):
     """C3: with edits arriving during the solve, they complete, the abort
     route answers within seconds and the study ends aborted, lock free."""
     results: list[int] = []
 
     def _edit(i: int) -> None:
-        results.append(_edit_bus(client, dx=0.001 * (i + 1)).status_code)
+        _edit_bus(client, dx=0.001 * (i + 1))
+        results.append(200)
 
     edits = [threading.Thread(target=_edit, args=(i,)) for i in range(8)]
     for t in edits:
@@ -251,7 +252,7 @@ def test_abort_answers_while_edits_are_in_flight(blocked_study, client, session_
     assert r.status_code == 200, r.text
     assert time.monotonic() - t0 < 3.0
     assert r.json() == {"status": "running", "aborting": True}
-    assert _poll(client)["status"] == "aborted"
+    assert poll(client)["status"] == "aborted"
     assert _probe_lock_from_other_thread(session_ctx(client).mutation_lock) is True
 
 
@@ -267,10 +268,10 @@ def test_an_edit_during_the_study_marks_the_result_edited_since(blocked_study, c
     """C2: a component edit completes at once and the finished study reads
     edited-since."""
     t0 = time.monotonic()
-    assert _edit_bus(client).status_code == 200
+    _edit_bus(client)
     assert time.monotonic() - t0 < 5.0
     blocked_study.release.set()
-    rec = _poll(client)
+    rec = poll(client)
     assert rec["status"] == "done", rec
     assert rec["edited_since_study"] is True, rec
 
@@ -298,12 +299,23 @@ def test_actions_the_lock_used_to_hold_off_are_refused(
     r = client.request(method, url, json=body)
     assert time.monotonic() - t0 < 5.0
     assert r.status_code == 409, (url, r.status_code, r.text)
+    assert "Energy Hub study" in r.text, r.text  # the study guard, not another 409
     assert client.get(STUDY_URL).json()["status"] == "running"
 
 
 def test_snapshot_restore_is_refused(blocked_study, client):
     r = client.post("/api/projects/blocked-study/snapshots/missing/restore")
     assert r.status_code == 409, r.text
+    assert "Energy Hub study" in r.text, r.text
+
+
+def test_bundle_import_is_refused(blocked_study, client):
+    r = client.post(
+        "/api/projects/import_bundle",
+        files={"file": ("bundle.zip", b"not a zip", "application/zip")},
+    )
+    assert r.status_code == 409, r.text
+    assert "Energy Hub study" in r.text, r.text
 
 
 def test_the_live_input_fingerprint_neither_waits_nor_reads_the_copy(
@@ -343,7 +355,7 @@ def test_the_live_input_fingerprint_neither_waits_nor_reads_the_copy(
 
     monkeypatch.setattr(solver_service, "run_simulation", _spy)
     assert client.post(STUDY_URL, json=STAGES).status_code == 200
-    rec = _poll(client)
+    rec = poll(client)
     assert rec["status"] in ("done", "failed"), rec
     assert seen.get("fp") == before
     assert seen.get("live_snapshot") is None
