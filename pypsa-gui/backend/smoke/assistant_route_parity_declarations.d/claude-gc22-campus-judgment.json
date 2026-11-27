@@ -1,9 +1,0 @@
-{
- "limitations": [
-  {
-   "method": "POST",
-   "path": "/api/campus-electrical/{name}/psse/{bundle}/emt/results",
-   "reason": "binary-transfer"
-  }
- ]
-}

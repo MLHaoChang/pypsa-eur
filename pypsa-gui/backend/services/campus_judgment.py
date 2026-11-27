@@ -34,7 +34,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -56,7 +56,9 @@ RESULTS_DIR = "results"
 
 
 def _refuse(status: int, kind: str, message: str) -> HTTPException:
-    return HTTPException(status_code=status, detail={"error_kind": kind, "message": message})
+    return HTTPException(
+        status_code=status, detail={"error_kind": kind, "message": message}
+    )
 
 
 def _run_dir(project) -> Path:
@@ -68,9 +70,20 @@ def _pack_dir(project, bundle) -> Path:
     from the bundle listing by its name, never built from ``bundle``."""
     listed = {b["name"] for b in ce.psse_bundles(project)["bundles"]}
     root = _run_dir(project) / ce.cs.PSSE_DIR
-    found = next((b for b in ce._psse_bundle_dirs(root) if b.name == bundle and bundle in listed), None)
+    found = next(
+        (
+            b
+            for b in ce._psse_bundle_dirs(root)
+            if b.name == bundle and bundle in listed
+        ),
+        None,
+    )
     if found is None:
-        raise _refuse(404, "campus_bundle_not_found", "no such PSS/E bundle in the latest campus run")
+        raise _refuse(
+            404,
+            "campus_bundle_not_found",
+            "no such PSS/E bundle in the latest campus run",
+        )
     pack = found / "emt"
     if pack.is_symlink() or not pack.is_dir() or not (pack / "manifest.json").is_file():
         raise _refuse(404, "campus_pack_not_found", f"bundle {bundle} has no EMT pack")
@@ -81,16 +94,27 @@ def _profile(project, run: Path) -> dict:
     """The grid-code profile the run was held to, as long as it still reads the same."""
     used = ce._profile_used(run)
     if used is None:
-        raise _refuse(409, "campus_judgment_no_profile",
-                      "this campus run does not record the grid-code profile it was held to; run the study again")
+        raise _refuse(
+            409,
+            "campus_judgment_no_profile",
+            "this campus run does not record the grid-code profile it was held to; run the study again",
+        )
     try:
-        profile = ce.cs.load_grid_code(used["profile"], extra_dirs=(ce.grid_codes_dir(project),))
+        profile = ce.cs.load_grid_code(
+            used["profile"], extra_dirs=(ce.grid_codes_dir(project),)
+        )
     except Exception as exc:  # noqa: BLE001 — any load failure means the run's profile is gone
-        raise _refuse(409, "campus_judgment_profile_changed",
-                      f"grid-code profile {used['profile']} no longer loads; run the study again") from exc
+        raise _refuse(
+            409,
+            "campus_judgment_profile_changed",
+            f"grid-code profile {used['profile']} no longer loads; run the study again",
+        ) from exc
     if ce._fingerprint(profile) != used["sha256"]:
-        raise _refuse(409, "campus_judgment_profile_changed",
-                      f"grid-code profile {used['profile']} has changed since the campus run; run the study again")
+        raise _refuse(
+            409,
+            "campus_judgment_profile_changed",
+            f"grid-code profile {used['profile']} has changed since the campus run; run the study again",
+        )
     return profile
 
 
@@ -111,29 +135,53 @@ def _check_files(pack: Path, files: list[tuple[str, bytes]]) -> None:
     if not files:
         raise _refuse(422, "campus_results_empty", "no result files were uploaded")
     if len(files) > MAX_RESULT_FILES:
-        raise _refuse(413, "campus_results_too_many", f"at most {MAX_RESULT_FILES} result files per upload")
+        raise _refuse(
+            413,
+            "campus_results_too_many",
+            f"at most {MAX_RESULT_FILES} result files per upload",
+        )
     if sum(len(data) for _, data in files) > MAX_RESULT_BYTES:
-        raise _refuse(413, "campus_results_too_large",
-                      f"the result files exceed {MAX_RESULT_BYTES // (1024 * 1024)} MB together")
+        raise _refuse(
+            413,
+            "campus_results_too_large",
+            f"the result files exceed {MAX_RESULT_BYTES // (1024 * 1024)} MB together",
+        )
     battery = pack / BATTERY_JSON
     if battery.is_symlink() or not battery.is_file():
-        raise _refuse(409, "campus_pack_no_battery",
-                      "this pack has no test battery: the campus file needs the PCC's zero sequence "
-                      "(x0x_max, r0x0_max); add it and run the study again")
+        raise _refuse(
+            409,
+            "campus_pack_no_battery",
+            "this pack has no test battery: the campus file needs the PCC's zero sequence "
+            "(x0x_max, r0x0_max); add it and run the study again",
+        )
     ids = [c.case_id for c in cases_from_json(battery.read_text(encoding="utf-8"))]
     seen = set()
     for name, data in files:
-        if (not name or name != os.path.basename(name) or "\\" in name or ".." in name
-                or name.startswith(".") or name != name.strip()):
-            raise _refuse(422, "campus_result_name", f"{name!r} is not a plain file name")
+        if (
+            not name
+            or name != os.path.basename(name)
+            or "\\" in name
+            or ".." in name
+            or name.startswith(".")
+            or name != name.strip()
+        ):
+            raise _refuse(
+                422, "campus_result_name", f'"{name}" is not a plain file name'
+            )
         if not any(_claims(name, i) for i in ids):
-            raise _refuse(422, "campus_result_name",
-                          f"{name} is not a result of any case of this pack (<case id>.csv, .inf, .out or _NN.out)")
+            raise _refuse(
+                422,
+                "campus_result_name",
+                f"{name} is not a result of any case of this pack (<case id>.csv, .inf, .out or _NN.out)",
+            )
         if name in seen:
             raise _refuse(422, "campus_result_name", f"{name} is uploaded twice")
         if len(data) > MAX_RESULT_FILE_BYTES:
-            raise _refuse(413, "campus_result_too_large",
-                          f"{name} exceeds {MAX_RESULT_FILE_BYTES // (1024 * 1024)} MB")
+            raise _refuse(
+                413,
+                "campus_result_too_large",
+                f"{name} exceeds {MAX_RESULT_FILE_BYTES // (1024 * 1024)} MB",
+            )
         seen.add(name)
 
 
@@ -174,7 +222,11 @@ def _swap_back(pack: Path, aside: Path | None) -> None:
 def _judgment_files(run: Path) -> list[Path]:
     from gridspine.drivers.readback import COMPLIANCE_DIR, JUDGMENT_CSV, JUDGMENT_JSON
 
-    return [run / COMPLIANCE_DIR / JUDGMENT_JSON, run / COMPLIANCE_DIR / JUDGMENT_CSV, run / JUDGMENT_SOURCE_FILE]
+    return [
+        run / COMPLIANCE_DIR / JUDGMENT_JSON,
+        run / COMPLIANCE_DIR / JUDGMENT_CSV,
+        run / JUDGMENT_SOURCE_FILE,
+    ]
 
 
 def _snapshot(run: Path) -> dict:
@@ -198,12 +250,19 @@ def _read_back(project, bundle, files: list[tuple[str, bytes]] | None) -> dict:
     run = _run_dir(project)
     lock = ce._lock(run)
     if not lock.acquire(blocking=False):
-        raise _refuse(409, "campus_run_in_progress",
-                      "a campus study is running; judge the pack once it has finished")
+        raise _refuse(
+            409,
+            "campus_run_in_progress",
+            "a campus study is running; judge the pack once it has finished",
+        )
     try:
         pack = _pack_dir(project, bundle)
         if (pack / RESULTS_DIR).is_symlink():
-            raise _refuse(409, "campus_pack_results_link", "the pack's results folder is a link; it is not read")
+            raise _refuse(
+                409,
+                "campus_pack_results_link",
+                "the pack's results folder is a link; it is not read",
+            )
         if files is not None:
             _check_files(pack, files)
         profile = _profile(project, run)
@@ -214,8 +273,10 @@ def _read_back(project, bundle, files: list[tuple[str, bytes]] | None) -> dict:
             # A pack written with its own ratings is judged on those; else on the run's campus file.
             ratings = None if (pack / RATINGS_JSON).exists() else run_ratings(run)
             judge_pack_results(run, pack, profile, ratings)
-            source = {"bundle": bundle, "judged_at": datetime.now(timezone.utc).isoformat()}
-            _write_atomic(run / JUDGMENT_SOURCE_FILE, json.dumps(source, sort_keys=True).encode())
+            source = {"bundle": bundle, "judged_at": datetime.now(UTC).isoformat()}
+            _write_atomic(
+                run / JUDGMENT_SOURCE_FILE, json.dumps(source, sort_keys=True).encode()
+            )
         except BaseException as exc:
             if files is not None:
                 _swap_back(pack, aside)
@@ -256,9 +317,13 @@ def _is_stale(project, run: Path, judgment: dict, bundle) -> bool:
     try:
         manifest = read_manifest(_pack_dir(project, bundle))
         if (manifest["data_hash"], manifest["contract_version"]) != (
-                header.get("data_hash"), header.get("contract_version")):
+            header.get("data_hash"),
+            header.get("contract_version"),
+        ):
             return True
-        if "campus_data_hash" in header and header["campus_data_hash"] != run_data_hash(run):
+        if "campus_data_hash" in header and header["campus_data_hash"] != run_data_hash(
+            run
+        ):
             return True
     except (HTTPException, ContractError, OSError, ValueError, KeyError, TypeError):
         return True
@@ -266,11 +331,21 @@ def _is_stale(project, run: Path, judgment: dict, bundle) -> bool:
 
 
 def counts(cases: list) -> dict:
-    """gridspine's ``status_counts`` over ``cases``; a status it does not know counts as unknown."""
+    """Gridspine's ``status_counts`` over ``cases``; a status it does not know counts as unknown."""
     from gridspine.readback.pack import status_counts
 
-    return status_counts({"cases": [{"status": c.get("status") if c.get("status") in STATUSES else "unknown"}
-                                    for c in cases]})
+    return status_counts(
+        {
+            "cases": [
+                {
+                    "status": c.get("status")
+                    if c.get("status") in STATUSES
+                    else "unknown"
+                }
+                for c in cases
+            ]
+        }
+    )
 
 
 def stored(project) -> dict | None:
@@ -281,16 +356,22 @@ def stored(project) -> dict | None:
     if not (run / ce.cs.CAMPUS_MANIFEST).is_file() or not path.is_file():
         return None
     judgment = json.loads(path.read_text(encoding="utf-8"))
-    if (not isinstance(judgment, dict) or not isinstance(judgment.get("cases"), list)
-            or not all(isinstance(c, dict) for c in judgment["cases"])):
+    if (
+        not isinstance(judgment, dict)
+        or not isinstance(judgment.get("cases"), list)
+        or not all(isinstance(c, dict) for c in judgment["cases"])
+    ):
         raise ValueError("judgment.json is not a judgment")
     try:
         source = json.loads((run / JUDGMENT_SOURCE_FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         source = {}
     source = source if isinstance(source, dict) else {}
-    return {"judgment": judgment, "source": source,
-            "stale": _is_stale(project, run, judgment, source.get("bundle"))}
+    return {
+        "judgment": judgment,
+        "source": source,
+        "stale": _is_stale(project, run, judgment, source.get("bundle")),
+    }
 
 
 def get_judgment(project) -> dict:
@@ -302,7 +383,11 @@ def get_judgment(project) -> dict:
     try:
         got = stored(project)
     except (OSError, ValueError) as exc:
-        raise _refuse(409, "campus_judgment_unreadable", f"the stored judgment cannot be read: {exc}") from exc
+        raise _refuse(
+            409,
+            "campus_judgment_unreadable",
+            f"the stored judgment cannot be read: {exc}",
+        ) from exc
     if got is None:
         return {"has_judgment": False}
     judgment, source = got["judgment"], got["source"]
