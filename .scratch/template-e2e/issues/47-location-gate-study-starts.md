@@ -3,7 +3,7 @@
 
 # 47 — The location run gate does not cover the study-family starts
 
-Status: needs-triage (owner decision: do studies count as "Run" for TEMPLATE-GAPS-1 Q1 a?)
+Status: ready-for-agent (owner decision STUDY-GATE-1, 2026-11-27: block studies too; build after #2082 merges)
 Owner: unassigned
 Size: S
 Follows: 01 (PR #2082)
@@ -19,7 +19,6 @@ Follows: 01 (PR #2082)
 
 ## Acceptance
 
-- If studies count as Run: each start refuses with the 422 typed `site_location_missing` (same predicate, on the study's base project) and has a test; the flow's verdict for them follows.
-- If not: record the decision and the exception in `services/site_location.py`.
+- Decided (STUDY-GATE-1, extending TEMPLATE-GAPS-1 Q1 a): a study solves the same unlocated network, so studies count as Run. One gated start per study runner; each start refuses with the 422 typed `site_location_missing` (same predicate, on the study's base project) and has a test; the flow's verdict for them follows.
 
 Noted with it: while the location is missing the study start refuses on location first, so the flow hides the study's other refusals until the location is set.
