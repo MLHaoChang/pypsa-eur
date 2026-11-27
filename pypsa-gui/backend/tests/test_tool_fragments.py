@@ -521,8 +521,10 @@ def _dispatcher_stems():
     return sorted(p.stem for p in folder.glob("[!_]*.py"))
 
 
-def test_the_dispatcher_fragments_are_found_on_disk():
-    assert "report_templates" in _dispatcher_stems()
+def test_the_circular_import_cases_are_exactly_the_discovered_fragments():
+    stems = _dispatcher_stems()
+    assert "report_templates" in stems
+    assert stems == sorted(F.discover(F.DISPATCH_PACKAGE))
 
 
 @pytest.mark.parametrize("stem", _dispatcher_stems())
@@ -600,6 +602,25 @@ def test_the_bundle_check_reads_the_spec_fragment_packages():
     assert f"FRAGMENT_PACKAGES = {packages!r}".replace("'", '"') in SPEC.read_text(
         encoding="utf-8"
     )
+
+
+def test_the_bundle_check_main_refuses_a_bundle_missing_a_fragment(tmp_path):
+    """End to end through ``main``: an otherwise clean bundle passes, and the
+    same bundle less one fragment module is refused."""
+    import plistlib
+
+    cb = _check_bundle()
+
+    def bundle(root, skip=None):
+        _fake_bundle(root, skip=skip)
+        (root / "Contents").mkdir()
+        with (root / "Contents" / "Info.plist").open("wb") as fh:
+            plistlib.dump({k: "Used for chat." for k in cb.REQUIRED_PLIST_KEYS}, fh)
+        return str(root)
+
+    assert cb.main(["check_bundle.py", bundle(tmp_path / "whole")]) == 0
+    skip = "services/chat_dispatchers/report_templates.py"
+    assert cb.main(["check_bundle.py", bundle(tmp_path / "less", skip=skip)]) == 1
 
 
 def test_the_bundle_check_refuses_when_the_source_tree_has_no_fragments(
