@@ -406,14 +406,29 @@ def issued_view(ctx):
     owner = assurance_records.actor_id()
     turn = assurance.Turn(ChatSession(owner_user_id=owner), ctx)
     navigation.begin_turn(turn, 7)
+    # Summary is still a mounted view (no displayed-data adapter), so its ACK
+    # is the version-1 one these tests pin.
     issued = navigation.issue(
-        turn, {"kind": "navigate", "panel_id": "results", "results_tab": "dispatch"}
+        turn, {"kind": "navigate", "panel_id": "results", "results_tab": "summary"}
     )
     body = {
         k: issued[k]
         for k in ("version", "action_id", "turn_id", "binding_generation", "target")
     }
     return turn, body
+
+
+def test_displayed_data_tab_with_no_view_issues_no_ack(baseline):
+    """Dispatch attests the data shown (A5.2 S3b-2): with no solved view on the
+    unsolved baseline there is nothing to attest, so no ACK is issued, as for
+    every displayed-data tab, and never a mounted-view one in its place."""
+    from harness import assurance, navigation
+    from harness.session import ChatSession
+
+    turn = assurance.Turn(ChatSession(owner_user_id=assurance_records.actor_id()), baseline[0])
+    navigation.begin_turn(turn, 7)
+    payload = {"kind": "navigate", "panel_id": "results", "results_tab": "dispatch"}
+    assert navigation.issue(turn, payload) is None
 
 
 def test_issued_navigation_ack_is_authenticated_expiring_and_idempotent(
@@ -711,7 +726,7 @@ def test_navigation_stream_issues_ack_and_never_claims_unconfirmed_completion(
     frames = checked.run(
         [
             tool_turn(
-                "ui_open_panel", {"panel_id": "results", "results_tab": "dispatch"}
+                "ui_open_panel", {"panel_id": "results", "results_tab": "summary"}
             ),
             text_turn('{"schema_version":1,"blocks":[]}'),
         ],

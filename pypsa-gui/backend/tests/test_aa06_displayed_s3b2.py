@@ -546,6 +546,16 @@ def test_ac_pf_without_a_flow_on_record_is_refused_and_binds_nothing(client, sol
     assert "binding" not in response.json()
 
 
+def test_ac_pf_not_run_sentence_matches_the_dispatch_tab(client, solved):
+    """Parity (UX 31): Dispatch shows the not-run state with its own literal,
+    not the route's message, so the two sentences must stay the same."""
+    from pathlib import Path
+
+    message = _get(client, "dispatch", source="ac_pf").json()["detail"]["message"]
+    tab = Path(__file__).resolve().parents[2] / "frontend/src/pages/results/Dispatch.tsx"
+    assert f'reason="{message}"' in tab.read_text(encoding="utf-8")
+
+
 def test_an_ack_of_ac_pf_without_a_flow_on_record_is_refused(client, solved):
     _, ack = _issue(solved, "dispatch")
     body = copy.deepcopy(_ack_body(ack))
