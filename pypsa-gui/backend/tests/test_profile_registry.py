@@ -9,6 +9,7 @@ from harness import (
     curtailment_calculations, emissions_calculations, lost_load_calculations,
     investment_calculations, price_calculations, site_import_calculations, storage_calculations, storage_costs, storage_cycles_calculations,
     time_to_power_calculations, losses_calculations, system_cost_calculations,
+    renewable_share_calculations,
 )
 
 TABLES = (
@@ -23,6 +24,7 @@ TABLES = (
     grid_readiness_calculations.METRICS, time_to_power_calculations.METRICS,
     losses_calculations.METRICS,
     system_cost_calculations.METRICS,
+    renewable_share_calculations.METRICS,
 )
 
 
