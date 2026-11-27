@@ -61,6 +61,8 @@ import pathlib
 
 import pytest
 
+from harness import tool_fragments
+
 CHAT_TOOLS = pathlib.Path(__file__).resolve().parents[1] / "services" / "chat_tools.py"
 
 # Delegations whose call site is genuinely not bindable by arity alone. Each
@@ -90,7 +92,8 @@ def _delegated_calls() -> list[tuple[int, str, str, int, tuple[str, ...]]]:
     LOCAL `from routers.x import handler as _h` inside each wrapper — the same
     alias `_h` means a different handler in every one of them.
     """
-    tree = ast.parse(CHAT_TOOLS.read_text(encoding="utf-8"))
+    # chat_tools.py plus the dispatcher fragments (RETRO-FRAG-1).
+    tree = tool_fragments.dispatcher_source_tree()
     out: list[tuple[int, str, str, int, tuple[str, ...]]] = []
     for fn in [x for x in ast.walk(tree) if isinstance(x, ast.FunctionDef)]:
         aliases: dict[str, tuple[str, str]] = {}

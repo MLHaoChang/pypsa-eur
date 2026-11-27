@@ -77,7 +77,7 @@ done <"$script_dir/waivers.conf"
 # routes (project routes and routers/mcp among them), chat tools, the project
 # ACL services, the harness MCP server, and every module the frozen assurance
 # contracts (harness/assurance_contracts.v1.json) are built from.
-semantic_re='^pypsa-gui/backend/routers/|(^|/)harness/(calculations|[^/]*_calculations|assurance_scope|assurance|assurance_contracts|effects)\.py$|(^|/)harness/assurance_contracts\.v1\.json$|(^|/)harness/catalogue|(^|/)harness/toolsets|(^|/)harness/mcp_server|(^|/)services/chat_tools|(^|/)chat_tools|(^|/)services/project_(acl|registry)\.py$'
+semantic_re='^pypsa-gui/backend/routers/|(^|/)harness/(calculations|[^/]*_calculations|assurance_scope|assurance|assurance_contracts|effects)\.py$|(^|/)harness/assurance_contracts\.v1\.json$|(^|/)harness/catalogue|(^|/)harness/toolsets|(^|/)harness/mcp_server|(^|/)services/chat_tools|(^|/)chat_tools|(^|/)services/chat_dispatchers/|(^|/)harness/tool_fragments\.py$|(^|/)services/project_(acl|registry)\.py$'
 # The one list of semantic tests; .claude/skills/steward/SKILL.md points here.
 semantic_tests=(
   tests/test_write_surface_lock_policy.py
@@ -97,7 +97,7 @@ decl_re='^pypsa-gui/backend/smoke/assistant_route_parity_declarations(\.json$|\.
 decl_tests=(tests/test_assistant_route_parity.py tests/test_route_chat_disposition.py tests/test_json_fragments.py)
 # Frontend tests that read the tool list or the kind manifest (#766 turned
 # master red through ChatPanel.sendRequest); run when either changes.
-tool_list_re='(^|/)harness/(catalogue|toolsets)|(^|/)services/chat_tools|(^|/)chat_tools'
+tool_list_re='(^|/)harness/(catalogue|toolsets|tool_fragments)|(^|/)services/chat_tools|(^|/)chat_tools|(^|/)services/chat_dispatchers/'
 tool_list_vitests=(
   src/components/ChatPanel.test.tsx
   src/components/ChatPanel.sendRequest.test.tsx
