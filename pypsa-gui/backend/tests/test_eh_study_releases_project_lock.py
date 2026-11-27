@@ -8,6 +8,7 @@ for the whole build, solve and restore: on the mining concentrator that was
 30 minutes in which every edit, autosave and project delete waited, the
 request threadpool filled with them, and the Abort request queued behind.
 """
+
 from __future__ import annotations
 
 import queue
@@ -30,14 +31,18 @@ def _network() -> pypsa.Network:
     n.add("Bus", "b", carrier="AC")
     n.add("Load", "l", bus="b", p_set=100.0)
     n.add("Generator", "cheap", bus="b", carrier="gas", p_nom=60.0, marginal_cost=10.0)
-    n.add("Generator", "backup", bus="b", carrier="gas", p_nom=40.0, marginal_cost=200.0)
+    n.add(
+        "Generator", "backup", bus="b", carrier="gas", p_nom=40.0, marginal_cost=200.0
+    )
     return n
 
 
 def _pack():
-    return default_strong_grid_pack().model_copy(update={
-        "availability": AvailabilityTarget(ens_cap_permyriad=1000.0),
-    })
+    return default_strong_grid_pack().model_copy(
+        update={
+            "availability": AvailabilityTarget(ens_cap_permyriad=1000.0),
+        }
+    )
 
 
 def _probe_lock_from_other_thread(lock) -> bool:
@@ -68,14 +73,19 @@ def test_study_solve_does_not_hold_the_project_mutation_lock(monkeypatch):
             seen["shared_free_during_solve"] = _probe_lock_from_other_thread(shared)
             seen["solved_shared_network"] = network is n
             return real(cfg, network, lock, *args, **kwargs)
+
         # Hold whichever lock the study hands the solve, as run_simulation does.
         with lock:
             return _inside()
 
     monkeypatch.setattr(solver_service, "run_simulation", _spy)
     report = S.run_eh_study(
-        n, _pack(), SolverConfig(voll=150.0, ens_cap_permyriad=1000.0),
-        lock=shared, stop_event=threading.Event(), log_queue=queue.SimpleQueue(),
+        n,
+        _pack(),
+        SolverConfig(voll=150.0, ens_cap_permyriad=1000.0),
+        lock=shared,
+        stop_event=threading.Event(),
+        log_queue=queue.SimpleQueue(),
         stages=("apply_pack", "ens_solve", "assemble"),
     )
     assert report is not None
@@ -98,17 +108,21 @@ def test_abort_during_solve_still_stops_the_study(monkeypatch):
 
     monkeypatch.setattr(solver_service, "run_simulation", _spy)
     report = S.run_eh_study(
-        n, _pack(), SolverConfig(voll=150.0, ens_cap_permyriad=1000.0),
-        lock=shared, stop_event=stop, log_queue=queue.SimpleQueue(),
+        n,
+        _pack(),
+        SolverConfig(voll=150.0, ens_cap_permyriad=1000.0),
+        lock=shared,
+        stop_event=stop,
+        log_queue=queue.SimpleQueue(),
         stages=("apply_pack", "ens_solve", "assemble"),
     )
     assert report.pipeline.aborted is True
     assert _probe_lock_from_other_thread(shared) is True
 
 
-def test_delete_refuses_while_the_project_runs_a_study(client, api_project,
-                                                        project_storage_dir,
-                                                        session_state):
+def test_delete_refuses_while_the_project_runs_a_study(
+    client, api_project, project_storage_dir, session_state
+):
     """With the lock free during a study, delete no longer waits on it: it
     answers at once, and refuses rather than deleting the project the study
     will publish into."""
