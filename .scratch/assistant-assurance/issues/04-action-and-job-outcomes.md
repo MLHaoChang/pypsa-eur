@@ -462,8 +462,9 @@ handles, today `adapter_pending`), its own PR.
 | AA04-P7 csv export: EH cells coerced on read | passed | test_a_csv_export_cell_the_reader_would_coerce_reads_uncertain, test_a_csv_export_missing_an_eh_column_reads_uncertain, test_the_csv_import_read_back_still_normalises: the export read-back skips `normalise_eh_columns` (it no longer creates columns; it coerced an unreadable cell to its default) |
 | AA04-P8 csv float text precision | named limit, kept | test_a_csv_export_sees_no_change_below_its_float_tolerance. pypsa 1.1.2's CSV importer parses with pandas' default float parser; an exact read needs the private `_ImporterCSV` |
 | AA04-P10 enqueue_unique drops a different config | closed (issue 15, #1261) | `tests/test_solve_queue_config_conflict.py`: the route and chat tool refuse a differing config with 409 `solve_config_conflict` |
+| AA04-P11 MATPOWER not_carried on the chat tool line | pending: UI follow-up (toolOutcome.ts + UX review) | GK B (74): model-visible is enough for S6 (`_outcome.notice` names each class and its rows, test_a_matpower_export_is_completed_and_names_what_it_cannot_carry); the tool line does not render it yet |
 | Nonblocking job cases (wait_for_job on study/report/queue jobs) | pending: S7 | test_p3_job_outcomes.py::test_wait_on_a_study_or_queue_job_is_pending_not_completed pins today's adapter_pending |
 
-GK B (73) plan: GO with the conditions above. Red before the change: 25 of the first new cases failed on master's `harness/outcomes.py`.
+GK B (73) plan: GO with the conditions above; GK B (74) holds the review. S7 plan: GK B (74) GO with conditions (map over job_adapters' neutral outcomes with an exhaustive OUTCOMES test, identity from `_snapshot_bound_job`, mutants per branch, queue handles named, abort confirmed by a re-read). Red before the change: 25 of the first new cases failed on master's `harness/outcomes.py`.
 The frontend's "this file format cannot be checked yet" word stays: no file tool emits
 adapter_pending now, but the word map is UI (and in open PRs' files); a later UI slice can drop it.

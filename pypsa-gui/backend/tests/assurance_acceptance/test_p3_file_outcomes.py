@@ -5,9 +5,10 @@ Issue 04, slice S3 (GK B (26) X4–X8). Before an import runs,
 Network with the import route's reader steps; after it, `read_import` reads
 the live network's rows and values against that scratch copy. An export
 watches the uploads this call adds (`upload_service.watch_uploads`, a dedup
-hit included); exactly one must be an agent_export in the project, and
-`read_export` reads it back and compares it with the live network. Excel and
-MATPOWER use their routes' readers (X6). The handler's returned JSON is never read.
+hit included); exactly one must be in the project's store (any kind, row
+AA04-P6) and named by the call's result, and `read_export` reads it back and
+compares it with the live network. Excel and MATPOWER use their routes'
+readers (X6). The handler's returned JSON is never read, but for that file_id.
 """
 
 import base64
@@ -637,8 +638,20 @@ def test_a_matpower_export_is_completed_and_names_what_it_cannot_carry(
     out = _stream(harness, "export_matpower", {})["_outcome"]
     assert (out["outcome"], out["reason"]) == ("completed", None), out
     assert out["counts"]["not_carried"] == ["Carrier", "Link", "Store", "series"]
-    for missing in ("Link", "Store", "series"):
-        assert missing in out["notice"]
+    assert out["counts"]["not_carried_rows"] == {
+        "Carrier": len(live.carriers),
+        "Link": 1,
+        "Store": 1,
+        "series": 1,
+    }
+    # GK B (74) Q1 (a): the notice names each class and its row count.
+    for named in (
+        "Link (1)",
+        "Store (1)",
+        "series (1)",
+        f"Carrier ({len(live.carriers)})",
+    ):
+        assert named in out["notice"], out["notice"]
 
 
 def test_the_matpower_tolerance_is_half_a_4th_decimal():

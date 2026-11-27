@@ -1261,22 +1261,24 @@ def _matpower_holds(live, parsed) -> bool | _Uncomparable:
     return True
 
 
-def _matpower_not_carried(live) -> list[str]:
-    """The classes with rows MATPOWER cannot carry, and "series" for time series."""
-    out = sorted(
-        cls
-        for cls in set(live.all_components)
-        - DERIVED_CLASSES
-        - MATPOWER_CLASSES
-        - _STANDARD_TYPES
+def _matpower_not_carried(live) -> dict[str, int]:
+    """{class: rows} MATPOWER cannot carry, and "series": the non-empty time series."""
+    out = {
+        cls: len(live.static(cls))
+        for cls in sorted(
+            set(live.all_components)
+            - DERIVED_CLASSES
+            - MATPOWER_CLASSES
+            - _STANDARD_TYPES
+        )
         if not live.static(cls).empty
-    )
-    series = any(
+    }
+    series = sum(
         not frame.empty
         for cls in live.all_components
         for frame in live.dynamic(cls).values()
     )
-    return out + (["series"] if series else [])
+    return {**out, **({"series": series} if series else {})}
 
 
 def _rows(n) -> dict[str, set[str]]:
@@ -1652,7 +1654,9 @@ def read_export(note: dict | None, result=None) -> dict:
     """The one new export file read back, and the live network it should hold.
 
     The file is the one upload this call added (any kind: row AA04-P6), and
-    the call's own result must name it (GK B (73) Q2)."""
+    the call's own result must name it (GK B (73) Q2). The result's file_id is
+    the one field read from the handler: it can only narrow the read to that
+    file, never decide the outcome (a wrong or missing id reads uncertain)."""
     if not note or note.get("error"):
         return {"error": "no_note"}
     import hashlib
@@ -1749,13 +1753,14 @@ def classify_export(note: dict | None, read: dict | None) -> dict:
         # MATPOWER: the carried fields match; name what the format cannot hold.
         # GK B (73) Q1: the missing classes reach the text the model reads.
         missing = read["not_carried"]
+        named = ", ".join(f"{cls} ({n})" for cls, n in missing.items())
         return {
             **out("completed"),
-            "counts": {"not_carried": missing},
+            "counts": {"not_carried": list(missing), "not_carried_rows": missing},
             **(
                 {
                     "notice": "MATPOWER holds only buses, loads, generators and "
-                    "lines; not in the file: " + ", ".join(missing) + "."
+                    "lines; not in the file (rows): " + named + "."
                 }
                 if missing
                 else {}
