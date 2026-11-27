@@ -563,3 +563,132 @@ def test_the_tables_print_ids_whole_keep_a_value_apart_from_its_limit_and_hide_u
     measured, limit = near[4], near[5]
     assert near[0] == "110012" and measured != limit and float(measured) == 0.10004
     assert refused[3] == "unknown" and refused[4] == "" and refused[6] == ""
+
+
+def _judgment_bytes(run):
+    files = [
+        run / COMPLIANCE_DIR / JUDGMENT_JSON,
+        run / COMPLIANCE_DIR / "judgment.csv",
+        run / cj.JUDGMENT_SOURCE_FILE,
+    ]
+    return {p: p.read_bytes() for p in files if p.is_file()}
+
+
+def test_a_corrupt_battery_is_a_plain_422_and_writes_nothing(island_run):
+    project, run, bundle = island_run
+    (_pack(run, bundle) / "battery.json").write_text("{not json")
+    with pytest.raises(HTTPException) as exc:
+        cj.add_results(project, bundle, [("x.csv", b"")])
+    assert (exc.value.status_code, exc.value.detail["error_kind"]) == (
+        422,
+        "campus_pack_battery_unreadable",
+    )
+    assert (
+        not (run / COMPLIANCE_DIR).exists()
+        and not (_pack(run, bundle) / "results").exists()
+    )
+
+
+def test_a_campus_file_that_no_longer_reads_is_a_plain_422_and_restores_everything(
+    island_run,
+):
+    project, run, bundle = island_run
+    case = _fault_case(run, bundle)
+    cj.add_results(project, bundle, [(f"{case.case_id}.csv", _ride_through_csv())])
+    before = _judgment_bytes(run)
+    results = {
+        p.name: p.read_bytes() for p in (_pack(run, bundle) / "results").iterdir()
+    }
+    (run / "campus.yaml").write_text("campus: [unclosed\n")
+    with pytest.raises(HTTPException) as exc:
+        cj.add_results(project, bundle, [(f"{case.case_id}.inf", b"x")])
+    assert (exc.value.status_code, exc.value.detail["error_kind"]) == (
+        422,
+        "campus_run_unreadable",
+    )
+    assert _judgment_bytes(run) == before
+    assert {
+        p.name: p.read_bytes() for p in (_pack(run, bundle) / "results").iterdir()
+    } == results
+
+
+def test_two_ascii_digits_and_the_status_log_are_results_but_other_digits_are_not(
+    island_run,
+):
+    project, run, bundle = island_run
+    cid = _fault_case(run, bundle).case_id
+    got = cj.add_results(
+        project,
+        bundle,
+        [(f"{cid}_01.out", b"1"), (f"{cid}.inf", b"2"), (f"{cid}.status.txt", b"")],
+    )
+    assert got["has_judgment"] is True
+    for name in (f"{cid}_٠١.out", f"{cid}_０１.out", f"{cid}_1.out"):
+        with pytest.raises(HTTPException) as exc:
+            cj.add_results(project, bundle, [(name, b"1")])
+        assert exc.value.detail["error_kind"] == "campus_result_name", name
+
+
+def test_a_sidecar_write_that_fails_restores_the_previous_read_back(
+    island_run, monkeypatch
+):
+    project, run, bundle = island_run
+    case = _fault_case(run, bundle)
+    cj.add_results(project, bundle, [(f"{case.case_id}.csv", _ride_through_csv())])
+    before = _judgment_bytes(run)
+    real = cj.atomic_write_bytes
+
+    def fail_on_sidecar(path, data):
+        if path.name == cj.JUDGMENT_SOURCE_FILE:
+            raise OSError("read-only file system")
+        real(path, data)
+
+    monkeypatch.setattr(cj, "atomic_write_bytes", fail_on_sidecar)
+    with pytest.raises(OSError):
+        cj.add_results(project, bundle, [(f"{case.case_id}.csv", b"time [s]\n0.0\n")])
+    monkeypatch.setattr(cj, "atomic_write_bytes", real)
+    assert _judgment_bytes(run) == before
+    assert (
+        _pack(run, bundle) / "results" / f"{case.case_id}.csv"
+    ).read_bytes() == _ride_through_csv()
+
+
+def test_the_judgment_is_restored_even_when_putting_the_results_back_fails(
+    island_run, monkeypatch
+):
+    from gridspine.drivers import readback
+
+    project, run, bundle = island_run
+    case = _fault_case(run, bundle)
+    cj.add_results(project, bundle, [(f"{case.case_id}.csv", _ride_through_csv())])
+    before = _judgment_bytes(run)
+    real = readback.judge_pack_results
+
+    def judge_then_fail(*a, **k):
+        real(*a, **k)
+        raise RuntimeError("judge died")
+
+    monkeypatch.setattr(readback, "judge_pack_results", judge_then_fail)
+    monkeypatch.setattr(
+        cj,
+        "_swap_back",
+        lambda pack, aside: (_ for _ in ()).throw(OSError("rename failed")),
+    )
+    with pytest.raises(OSError):
+        cj.add_results(project, bundle, [(f"{case.case_id}.csv", b"time [s]\n0.0\n")])
+    assert _judgment_bytes(run) == before
+
+
+def test_staged_and_old_results_never_reach_the_bundle_download(island_run):
+    import io
+    import zipfile
+
+    project, run, bundle = island_run
+    ids = [c.case_id for c in _cases(run, bundle)]
+    cj.add_results(project, bundle, [(f"{ids[0]}.csv", _ride_through_csv())])
+    cj.add_results(project, bundle, [(f"{ids[1]}.csv", b"time [s]\n0.0\n")])
+    data, _ = ce.psse_bundle_zip(project, bundle)
+    names = zipfile.ZipFile(io.BytesIO(data)).namelist()
+    assert f"{bundle}/emt/results/{ids[1]}.csv" in names
+    assert not [n for n in names if "stage" in n or "aside" in n or n.startswith(".")]
+    assert not any((run / cj.STAGING_DIR).iterdir())

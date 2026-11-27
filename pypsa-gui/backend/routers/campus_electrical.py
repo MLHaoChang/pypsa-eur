@@ -464,7 +464,7 @@ async def upload_pack_results(
     user: User | None = Depends(optional_user),
 ):
     """The engineer's EMT results for one bundle's pack (``<case id>.csv``,
-    ``.inf``, ``.out`` or ``_NN.out``): saved into the pack, then the pack is
+    ``.inf``, ``.out`` or ``_NN.out``, and a case's ``.status.txt`` poll log): saved into the pack, then the pack is
     judged against the run (GC-07 read-back). All files share one size cap."""
     _check_lock(proj, db, user)
     if len(files) > campus_judgment.MAX_RESULT_FILES:

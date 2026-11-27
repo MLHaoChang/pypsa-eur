@@ -38,9 +38,19 @@ import uuid
 from datetime import datetime, UTC
 from pathlib import Path
 
+import yaml
 from fastapi import HTTPException
 
 from services import campus_electrical_service as ce
+
+try:  # gridspine is optional in a packaged app; without it there is no pack to judge
+    from gridspine.drivers import readback as _rb
+    from gridspine.handoff import test_battery as _tb
+    from gridspine.readback import pack as _gp
+except ImportError:  # pragma: no cover - the packaging tests cover the guard
+    _rb = _tb = _gp = None
+
+ContractError = ce.ContractError
 from services.atomic_io import atomic_write_bytes
 
 log = logging.getLogger(__name__)
@@ -57,6 +67,8 @@ MAX_RESULT_BYTES = 256 * 1024 * 1024
 STATUSES = ("pass", "fail", "unknown")
 
 RESULTS_DIR = "results"
+#: In the run, beside ``psse/``: per-call stage and aside folders of an upload.
+STAGING_DIR = ".emt_results"
 
 
 def _refuse(status: int, kind: str, message: str) -> HTTPException:
@@ -124,9 +136,6 @@ def _profile(project, run: Path) -> dict:
 
 def _check_files(pack: Path, files: list[tuple[str, bytes]]) -> None:
     """Every file is a plain name one battery case claims, once each, within the caps."""
-    from gridspine.handoff.test_battery import cases_from_json
-    from gridspine.readback.pack import BATTERY_JSON, _claims
-
     if not files:
         raise _refuse(422, "campus_results_empty", "no result files were uploaded")
     if len(files) > MAX_RESULT_FILES:
@@ -141,7 +150,7 @@ def _check_files(pack: Path, files: list[tuple[str, bytes]]) -> None:
             "campus_results_too_large",
             f"the result files exceed {MAX_RESULT_BYTES // (1024 * 1024)} MB together",
         )
-    battery = pack / BATTERY_JSON
+    battery = pack / _gp.BATTERY_JSON
     if battery.is_symlink() or not battery.is_file():
         raise _refuse(
             409,
@@ -149,7 +158,16 @@ def _check_files(pack: Path, files: list[tuple[str, bytes]]) -> None:
             "this pack has no test battery: the campus file needs the PCC's zero sequence "
             "(x0x_max, r0x0_max); add it and run the study again",
         )
-    ids = [c.case_id for c in cases_from_json(battery.read_text(encoding="utf-8"))]
+    try:
+        ids = [
+            c.case_id for c in _tb.cases_from_json(battery.read_text(encoding="utf-8"))
+        ]
+    except (ContractError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise _refuse(
+            422,
+            "campus_pack_battery_unreadable",
+            "this pack's test battery cannot be read; run the study again to write it afresh",
+        ) from exc
     seen = set()
     for name, data in files:
         if (
@@ -158,16 +176,17 @@ def _check_files(pack: Path, files: list[tuple[str, bytes]]) -> None:
             or "\\" in name
             or ".." in name
             or name.startswith(".")
+            or not name.isascii()
             or name != name.strip()
         ):
             raise _refuse(
                 422, "campus_result_name", f'"{name}" is not a plain file name'
             )
-        if not any(_claims(name, i) for i in ids):
+        if not any(_gp._claims(name, i) for i in ids):
             raise _refuse(
                 422,
                 "campus_result_name",
-                f"{name} is not a result of any case of this pack (<case id>.csv, .inf, .out or _NN.out)",
+                f"{name} is not a result of any case of this pack (<case id>.csv, .inf, .out, _NN.out with two digits, or .status.txt)",
             )
         if name in seen:
             raise _refuse(422, "campus_result_name", f"{name} is uploaded twice")
@@ -185,7 +204,9 @@ def _swap_in(pack: Path, files: list[tuple[str, bytes]]) -> Path | None:
     own, then the old folder renamed aside and the stage renamed in. Returns the
     aside folder (None when there was no earlier results folder)."""
     token = uuid.uuid4().hex
-    stage = pack / f".results.stage.{token}"
+    staging = _staging(pack)
+    staging.mkdir(exist_ok=True)
+    stage = staging / f"stage.{token}"
     stage.mkdir()
     try:
         for name, data in files:
@@ -196,7 +217,7 @@ def _swap_in(pack: Path, files: list[tuple[str, bytes]]) -> Path | None:
     results = pack / RESULTS_DIR
     aside = None
     if results.exists() or results.is_symlink():
-        aside = pack / f".results.aside.{token}"
+        aside = staging / f"aside.{token}"
         results.rename(aside)
     try:
         stage.rename(results)
@@ -208,6 +229,25 @@ def _swap_in(pack: Path, files: list[tuple[str, bytes]]) -> Path | None:
     return aside
 
 
+def _staging(pack: Path) -> Path:
+    """Where an upload is staged and the old results wait: in the run
+    (``run/psse/<bundle>/emt`` → ``run/.emt_results``), so on the same disk
+    for the renames, and never inside a bundle the download zips."""
+    return pack.parents[2] / STAGING_DIR
+
+
+def _ratings(run: Path):
+    """The run's ratings from its campus file; a campus file that no longer reads is a plain 422."""
+    try:
+        return _rb.run_ratings(run)
+    except yaml.YAMLError as exc:
+        raise _refuse(
+            422,
+            "campus_run_unreadable",
+            "this run's campus file cannot be read; run the study again",
+        ) from exc
+
+
 def _swap_back(pack: Path, aside: Path | None) -> None:
     ce._remove_tree(pack / RESULTS_DIR)
     if aside is not None:
@@ -215,11 +255,9 @@ def _swap_back(pack: Path, aside: Path | None) -> None:
 
 
 def _judgment_files(run: Path) -> list[Path]:
-    from gridspine.drivers.readback import COMPLIANCE_DIR, JUDGMENT_CSV, JUDGMENT_JSON
-
     return [
-        run / COMPLIANCE_DIR / JUDGMENT_JSON,
-        run / COMPLIANCE_DIR / JUDGMENT_CSV,
+        run / _rb.COMPLIANCE_DIR / _rb.JUDGMENT_JSON,
+        run / _rb.COMPLIANCE_DIR / _rb.JUDGMENT_CSV,
         run / JUDGMENT_SOURCE_FILE,
     ]
 
@@ -237,11 +275,13 @@ def _restore(snapshot: dict) -> None:
 
 
 def _read_back(project, bundle, files: list[tuple[str, bytes]] | None) -> dict:
-    from gridspine.drivers.readback import judge_pack_results, run_ratings
-    from gridspine.readback.pack import RATINGS_JSON
-    from gridspine.schema.contracts import ContractError
-
     ce.require_capacity_expansion(project)
+    if _rb is None:
+        raise _refuse(
+            503,
+            "campus_judgment_unavailable",
+            "the pack read-back is not installed in this app",
+        )
     run = _run_dir(project)
     lock = ce._lock(run)
     if not lock.acquire(blocking=False):
@@ -269,16 +309,18 @@ def _read_back(project, bundle, files: list[tuple[str, bytes]] | None) -> dict:
                 aside = _swap_in(pack, files)
                 swapped = True
             # A pack written with its own ratings is judged on those; else on the run's campus file.
-            ratings = None if (pack / RATINGS_JSON).exists() else run_ratings(run)
-            judge_pack_results(run, pack, profile, ratings)
+            ratings = None if (pack / _gp.RATINGS_JSON).exists() else _ratings(run)
+            _rb.judge_pack_results(run, pack, profile, ratings)
             source = {"bundle": bundle, "judged_at": datetime.now(UTC).isoformat()}
             atomic_write_bytes(
                 run / JUDGMENT_SOURCE_FILE, json.dumps(source, sort_keys=True).encode()
             )
         except BaseException as exc:
-            if swapped:
-                _swap_back(pack, aside)
-            _restore(before)
+            try:
+                if swapped:
+                    _swap_back(pack, aside)
+            finally:
+                _restore(before)
             if isinstance(exc, ContractError):
                 raise ce._unprocessable(exc) from exc
             raise
@@ -313,23 +355,19 @@ def _is_stale(project, run: Path, judgment: dict, bundle) -> bool:
     """True when the judgment no longer matches the pack it names: the bundle is
     gone, or its manifest's ``data_hash`` or contract version (or, for a rated
     pack, the run's campus data hash) differ from the judgment's."""
-    from gridspine.drivers.readback import run_data_hash
-    from gridspine.readback.pack import read_manifest
-    from gridspine.schema.contracts import ContractError
-
     header = judgment.get("header")
     if not isinstance(bundle, str) or not isinstance(header, dict):
         return True
     try:
-        manifest = read_manifest(_pack_dir(project, bundle))
+        manifest = _gp.read_manifest(_pack_dir(project, bundle))
         if (manifest["data_hash"], manifest["contract_version"]) != (
             header.get("data_hash"),
             header.get("contract_version"),
         ):
             return True
-        if "campus_data_hash" in header and header["campus_data_hash"] != run_data_hash(
-            run
-        ):
+        if "campus_data_hash" in header and header[
+            "campus_data_hash"
+        ] != _rb.run_data_hash(run):
             return True
     except (HTTPException, ContractError, OSError, ValueError, KeyError, TypeError):
         return True
@@ -338,9 +376,7 @@ def _is_stale(project, run: Path, judgment: dict, bundle) -> bool:
 
 def counts(cases: list) -> dict:
     """Gridspine's ``status_counts`` over ``cases``; a status it does not know counts as unknown."""
-    from gridspine.readback.pack import status_counts
-
-    return status_counts(
+    return _gp.status_counts(
         {
             "cases": [
                 {
@@ -357,6 +393,8 @@ def counts(cases: list) -> dict:
 def stored(project) -> dict | None:
     """``{judgment, source, stale}`` as stored for the latest run; None when it
     has none. Raises ``ValueError`` when the stored judgment cannot be read."""
+    if _rb is None:
+        return None
     run = _run_dir(project)
     path = _judgment_files(run)[0]
     if not (run / ce.cs.CAMPUS_MANIFEST).is_file() or not path.is_file():
