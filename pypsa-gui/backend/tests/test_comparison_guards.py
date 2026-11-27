@@ -385,3 +385,50 @@ def test_a_profile_outside_the_allow_set_gets_the_comparison_kind(monkeypatch):
     }
     with pytest.raises(ValueError, match="^unsupported_comparison_scope$"):
         assurance_scope.validate(scope)
+
+
+def test_a_storage_cost_baseline_is_comparable():
+    scope = _scope(profile="storage-unit-cost/1", entity_id="S1")
+    raw = {"storage_unit": {"index": INDEX, "costs": {"objective_weight": WEIGHTS}}}
+    base = {**_baseline(scope), "raw": raw}
+    assert calculations.comparison_mismatch(raw, scope, base) is None
+
+
+@pytest.mark.parametrize(
+    "bounds",
+    [{"start": INDEX[1], "end": INDEX[0]}, {"start": INDEX[2], "end": INDEX[0]}],
+    ids=["adjacent", "reversed"],
+)
+def test_a_window_ending_before_it_starts_raises(bounds):
+    with pytest.raises(ValueError, match="^unknown_period_shape$"):
+        calculations._period(_raw(), _scope(**bounds))
+
+
+def test_weights_of_another_length_raise():
+    with pytest.raises(ValueError, match="^unknown_period_shape$"):
+        calculations._period(_raw(weights=[1.0, 1.0]), _scope())
+
+
+def test_the_full_horizon_period_is_the_whole_index():
+    scope = {k: v for k, v in _scope().items() if k not in ("start", "end")}
+    assert calculations._period(_raw(), scope) == (INDEX, WEIGHTS)
+
+
+def test_a_baseline_without_scope_or_facts_reads_as_another_scope_never_an_error():
+    base = {**_baseline(), "request_scope": None}
+    assert calculations.comparison_mismatch(_raw(), _scope(), base) == "profile"
+    base = {**_baseline(), "facts": None}
+    assert calculations.comparison_mismatch(_raw(), _scope(), base) is None
+
+
+@pytest.mark.parametrize("key", ["start", "end", "snapshots"])
+def test_a_window_record_that_differs_is_refused_even_with_equal_raws(key):
+    base = _baseline()
+    base["window"][key] = {"start": INDEX[1], "end": INDEX[1], "snapshots": 2}[key]
+    assert calculations.comparison_mismatch(_raw(), _scope(), base) == "period"
+
+
+def test_a_baseline_window_without_the_total_basis_is_comparable():
+    base = _baseline()
+    del base["window"]["weight_basis"]["total_cost"]
+    assert calculations.comparison_mismatch(_raw(), _scope(), base) is None
