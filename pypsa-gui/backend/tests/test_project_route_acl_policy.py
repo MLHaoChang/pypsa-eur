@@ -56,6 +56,7 @@ from tests.test_write_surface_lock_policy import (
     _OUR_MODULES,
     _function_ast,
     _local_imports,
+    _proxied,
     _resolve,
 )
 
@@ -116,24 +117,6 @@ TOOL_NAME_IS_NOT_A_PROJECT: dict[str, str] = {
 
 
 # ── reach ───────────────────────────────────────────────────────────────────
-
-def _proxied(fn):
-    """
-    The chat_tools helper a dispatcher fragment's call-time proxy stands for
-    (`def _x(*a, **k): return _ct()._x(*a, **k)`, RETRO-FRAG-1), or None.
-    """
-    code = getattr(fn, "__code__", None)
-    if (
-        code is None
-        or not getattr(fn, "__module__", "").startswith("services.chat_dispatchers.")
-        or code.co_names != ("_ct", fn.__name__)
-    ):
-        return None
-    from services import chat_tools
-
-    target = getattr(chat_tools, fn.__name__, None)
-    return target if inspect.isfunction(target) else None
-
 
 def _reaches_acl(fn, depth: int = 0, seen: set | None = None) -> list[str] | None:
     """
