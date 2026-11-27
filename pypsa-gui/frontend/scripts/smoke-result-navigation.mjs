@@ -103,8 +103,10 @@ async function journey(mode, kind) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 })
   const page = await context.newPage()
   page.setDefaultTimeout(15000)
+  // The tab on screen, so each page or console error names where it happened.
+  let tab = 'boot', reply = null
   const errors = []
-  page.on('pageerror', e => errors.push(`pageerror: ${e.message}`))
+  page.on('pageerror', e => errors.push(`${tab}: pageerror: ${e.message}`))
   // Chromium logs every non-2xx answer as a console error. Only the backend's own
   // refusals the fixture recorded (a hub project's 409 from the grid-study status)
   // are expected, and only at the URL that answered them; any other error fails (G10).
@@ -112,7 +114,7 @@ async function journey(mode, kind) {
   page.on('console', m => {
     if (m.type() !== 'error') return
     if (m.text().startsWith('Failed to load resource') && refused.has(m.location().url)) { expectedRefusals.add(new URL(m.location().url).pathname); return }
-    errors.push(`console: ${m.text().slice(0, 300)}`)
+    errors.push(`${tab}: console: ${m.text().slice(0, 300)}`)
   })
   await context.route(u => ['http:', 'https:'].includes(u.protocol) && u.hostname !== '127.0.0.1', r => r.abort())
   await page.addInitScript(([project, uiMode]) => {
@@ -131,7 +133,6 @@ async function journey(mode, kind) {
     }).observe(document, { subtree: true, childList: true, characterData: true })
   }, [PROJECT, mode])
 
-  let tab = 'boot', reply = null
   await page.route(u => u.pathname.startsWith('/api/'), async route => {
     const request = route.request(), url = new URL(request.url()), p = url.pathname
     requested.add(p)
