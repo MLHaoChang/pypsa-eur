@@ -135,11 +135,30 @@ def test_a_bundle_with_values_not_carried_says_how_many(island_run):
         0,
         [],
     )
-    manifest.write_text("{not json")
+    manifest.write_text(
+        json.dumps(
+            {
+                **m,
+                "not_written": [
+                    {"pp_name": None, "dgs_name": "shunt_3", "attribute": "p_mw"},
+                    {"attribute": "q_mvar"},
+                ],
+            }
+        )
+    )
     b = next(
         b for b in ce.powerfactory_bundles(project)["bundles"] if b["name"] == name
     )
-    assert (b["not_written"], b["pending_verification"]) == (None, None)
+    assert [i["element"] for i in b["not_written_items"]] == ["shunt_3", ""]
+    for text in (
+        "{not json",
+        json.dumps([m]),
+    ):  # unreadable, or JSON that is not an object
+        manifest.write_text(text)
+        b = next(
+            b for b in ce.powerfactory_bundles(project)["bundles"] if b["name"] == name
+        )
+        assert (b["not_written"], b["pending_verification"]) == (None, None), text
     assert (b["not_written_items"], b["pending_items"]) == ([], [])
 
 
@@ -186,6 +205,15 @@ def test_a_run_from_before_the_step_has_no_powerfactory_and_no_error(island_run)
         and listing["bundles"] == []
     )
     assert listing["error"] is None
+
+
+def test_the_psse_listing_still_raises_on_an_unreadable_step_record(island_run):
+    """Only the PowerFactory listing turns an unreadable record into an error
+    line; the PSS/E listing keeps its behaviour (D1)."""
+    project, run = island_run
+    (run / ce.PSSE_STATUS_FILE).write_text("{not json")
+    with pytest.raises(ValueError):
+        ce.psse_bundles(project)
 
 
 @pytest.mark.parametrize("text", ["{not json", "[1, 2]"])
