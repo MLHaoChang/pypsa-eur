@@ -239,7 +239,11 @@ def _native(ctx, family, status="running", worker=None, owner=OWNER_ACTING):
     project = str(ctx.project_uuid)
     with ctx.solver_state_lock:
         if family == "ad":
-            ctx.solver_state["fmea_sweep"] = {**record, "stage": "sweep", "iterations": []}
+            ctx.solver_state["fmea_sweep"] = {
+                **record,
+                "stage": "sweep",
+                "iterations": [],
+            }
         else:
             ctx.solver_state["report_job"] = {
                 **record,
@@ -370,7 +374,10 @@ def test_a_study_whose_worker_still_runs_after_aborted_is_cancel_requested(basel
         job_id = _native(ctx, "ad", worker=worker)
         _set(ctx, "ad", "aborted")
         out = _wait(job_id)
-        assert (out["outcome"], out["reason"]) == ("cancel_requested", "stop_unconfirmed")
+        assert (out["outcome"], out["reason"]) == (
+            "cancel_requested",
+            "stop_unconfirmed",
+        )
     finally:
         release.set()
         worker.join(1)
@@ -502,17 +509,46 @@ def test_a_failing_read_is_uncertain(baseline, monkeypatch):
     [
         (None, ("uncertain", "read_failed")),
         ({"error": "x"}, ("uncertain", "read_failed")),
-        ({"id": "ad:other", "same_project": True, "outcome": "succeeded"}, ("uncertain", "other_job")),
-        ({"id": "ad:j", "outcome": "succeeded"}, ("uncertain", "other_project")),
-        ({"id": "ad:j", "same_project": False, "outcome": "succeeded"}, ("uncertain", "other_project")),
-        ({"id": "ad:j", "same_project": True, "outcome": None, "status": "running"}, ("running", None)),
-        ({"id": "ad:j", "same_project": True, "outcome": None, "status": "queued"}, ("submitted", None)),
-        ({"id": "ad:j", "same_project": True, "outcome": "succeeded"}, ("completed", None)),
-        ({"id": "ad:j", "same_project": True, "outcome": None, "status": "paused"}, ("uncertain", "status_unknown")),
-        ({"id": "ad:j", "same_project": True, "outcome": "later_name"}, ("uncertain", "status_unknown")),
-        ({"id": "ad:j", "same_project": True, "outcome": "cancelled"}, ("cancel_requested", "stop_unconfirmed")),
         (
-            {"id": "ad:j", "same_project": True, "outcome": "cancelled", "worker_exited": True},
+            {"id": "ad:other", "same_project": True, "outcome": "succeeded"},
+            ("uncertain", "other_job"),
+        ),
+        ({"id": "ad:j", "outcome": "succeeded"}, ("uncertain", "other_project")),
+        (
+            {"id": "ad:j", "same_project": False, "outcome": "succeeded"},
+            ("uncertain", "other_project"),
+        ),
+        (
+            {"id": "ad:j", "same_project": True, "outcome": None, "status": "running"},
+            ("running", None),
+        ),
+        (
+            {"id": "ad:j", "same_project": True, "outcome": None, "status": "queued"},
+            ("submitted", None),
+        ),
+        (
+            {"id": "ad:j", "same_project": True, "outcome": "succeeded"},
+            ("completed", None),
+        ),
+        (
+            {"id": "ad:j", "same_project": True, "outcome": None, "status": "paused"},
+            ("uncertain", "status_unknown"),
+        ),
+        (
+            {"id": "ad:j", "same_project": True, "outcome": "later_name"},
+            ("uncertain", "status_unknown"),
+        ),
+        (
+            {"id": "ad:j", "same_project": True, "outcome": "cancelled"},
+            ("cancel_requested", "stop_unconfirmed"),
+        ),
+        (
+            {
+                "id": "ad:j",
+                "same_project": True,
+                "outcome": "cancelled",
+                "worker_exited": True,
+            },
             ("cancelled", None),
         ),
     ],
@@ -522,7 +558,9 @@ def test_classify_job_is_pure_and_fails_closed(read, expected):
     assert (out["outcome"], out["reason"]) == expected
 
 
-def test_a_wait_reads_running_whatever_the_handler_returns(baseline, harness, monkeypatch):
+def test_a_wait_reads_running_whatever_the_handler_returns(
+    baseline, harness, monkeypatch
+):
     # Condition 2: the handler's own fields never reach the outcome.
     from services import chat_tools as ct
 
@@ -530,7 +568,10 @@ def test_a_wait_reads_running_whatever_the_handler_returns(baseline, harness, mo
     monkeypatch.setitem(
         ct.DISPATCHERS,
         "wait_for_job",
-        lambda **_: {"job": {"status": "done", "outcome": "succeeded"}, "completed": True},
+        lambda **_: {
+            "job": {"status": "done", "outcome": "succeeded"},
+            "completed": True,
+        },
     )
     result = _stream_wait(harness, job_id)
     assert result["completed"] is True  # the handler's word stays as it said

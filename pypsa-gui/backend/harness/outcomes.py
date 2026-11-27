@@ -281,7 +281,10 @@ def classify_job(job_id: Any, read: dict | None) -> dict:
         return out("uncertain", "read_failed")
     if "error" in read:
         error = read["error"]
-        return out("uncertain", error if error in ("other_project", "job_not_found") else "read_failed")
+        return out(
+            "uncertain",
+            error if error in ("other_project", "job_not_found") else "read_failed",
+        )
     if read.get("id") != job_id:
         return out("uncertain", "other_job")
     if read.get("same_project") is not True:
