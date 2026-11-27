@@ -8,8 +8,7 @@
     "tolerance": "harness.storage_cycles_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_a_non_cyclic_unit_matches_the_storage_profile",
     "status": "verified",
-    "domain_review": "pending",
-    "domain_review_note": "unpinned: test_capacity_cycles_assurance.py does not name REL_TOLERANCE (issue 29)",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -24,8 +23,7 @@
     "tolerance": "harness.storage_cycles_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_a_non_cyclic_unit_matches_the_storage_profile",
     "status": "verified",
-    "domain_review": "pending",
-    "domain_review_note": "unpinned: test_capacity_cycles_assurance.py does not name REL_TOLERANCE (issue 29)",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -40,8 +38,7 @@
     "tolerance": "harness.storage_cycles_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_a_non_cyclic_unit_matches_the_storage_profile",
     "status": "verified",
-    "domain_review": "pending",
-    "domain_review_note": "unpinned: test_capacity_cycles_assurance.py does not name REL_TOLERANCE (issue 29)",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",

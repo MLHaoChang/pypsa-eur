@@ -8,7 +8,7 @@
     "tolerance": "harness.system_cost_calculations:RESIDUAL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_system_cost_assurance.py::test_the_carriers_sum_to_the_network_and_each_is_its_own_arithmetic",
     "status": "verified",
-    "domain_review": "gk-b:ccad4aaf72c1a6a8b5599b61703e945575171f9b",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -65,7 +65,7 @@
     "tolerance": "harness.system_cost_calculations:RESIDUAL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_system_cost_assurance.py::test_the_residual_is_the_objective_minus_the_hand_basis",
     "status": "verified",
-    "domain_review": "gk-b:ccad4aaf72c1a6a8b5599b61703e945575171f9b",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",

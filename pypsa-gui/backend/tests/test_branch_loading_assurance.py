@@ -118,6 +118,7 @@ def test_an_observed_overload_counts_weighted_hours_like_the_tab(grid, checked):
     expected = overload(ctx)
     _, answer = run(checked, ctx, "L12", expected)
     assert values(answer) == pytest.approx(expected)
+    assert values(answer)["hours_above_rating"] == expected["hours_above_rating"]
     row = next(r for r in get_loadflow_summary(source="lopf")["top"] if r["name"] == "L12")
     assert row["util_pct"] == pytest.approx(125)
     assert row["h_over_limit"] == pytest.approx(2)

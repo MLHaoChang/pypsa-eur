@@ -46,13 +46,15 @@ def simulate(
     dqref=0.0,
     df=0.0,
     t_end=20.0,
-    dt=1e-3,
+    dt=2e-3,
     tm=0.05,
     xg=0.1,
     v0=1.0,
 ):
     """
-    PoC P and Q, in pu on sum(MBASE), sampled every step: ``(t, p, q)``.
+    PoC P and Q, in pu on sum(MBASE), sampled every step, and the limits
+    that bound at some step: ``(t, p, q, bound)``, ``bound`` a set of CON
+    names (``repc_femax`` and so on).
 
     ``controllers`` are REPCA1 field dicts (``unit_params.REPCA1_*`` names),
     one per machine, ``mbase`` their MBASEs, ``p0``/``q0`` the machines'
@@ -99,6 +101,16 @@ def simulate(
     steps = int(round(t_end / dt))
     t_out, p_out, q_out = np.empty(steps + 1), np.empty(steps + 1), np.empty(steps + 1)
     stepped = False
+    bound = set()
+
+    def clip(u, name_lo, name_hi):
+        lo, hi = c[name_lo], c[name_hi]
+        if np.any(u < lo):
+            bound.add(name_lo)
+        if np.any(u > hi):
+            bound.add(name_hi)
+        return np.clip(u, lo, hi)
+
     for k in range(steps + 1):
         t = k * dt
         if not stepped and t >= t_step:
@@ -114,9 +126,9 @@ def simulate(
         ds_qf = (qin - s_qf) / c["repc_tfltr"]
         # error Vref - V or Qref - Q, deadband dbd1/dbd2, limit emin/emax
         e = _deadband(ref_q - s_qf, c["repc_dbd1"], c["repc_dbd2"])
-        e = np.clip(e, c["repc_emin"], c["repc_emax"])
+        e = clip(e, "repc_emin", "repc_emax")
         # PI Kp + Ki/s, output limit Qmin/Qmax (non-windup)
-        qpi = np.clip(c["repc_kp"] * e + s_qi, c["repc_qmin"], c["repc_qmax"])
+        qpi = clip(c["repc_kp"] * e + s_qi, "repc_qmin", "repc_qmax")
         ds_qi = c["repc_ki"] * e
         # lead-lag (1 + s Tft)/(1 + s Tfv) -> Qext
         ratio = c["repc_tft"] / c["repc_tfv"]
@@ -132,9 +144,9 @@ def simulate(
             ferr, 0.0
         )
         # Plant_pref - Pbranch + droop, limit femin/femax
-        ep = np.clip(pref_plant - s_pf + droop, c["repc_femin"], c["repc_femax"])
+        ep = clip(pref_plant - s_pf + droop, "repc_femin", "repc_femax")
         # PI Kpg + Kig/s, output limit Pmin/Pmax (non-windup), lag 1/(1 + s Tlag) -> Pref
-        ppi = np.clip(c["repc_kpg"] * ep + s_pi, c["repc_pmin"], c["repc_pmax"])
+        ppi = clip(c["repc_kpg"] * ep + s_pi, "repc_pmin", "repc_pmax")
         ds_pi = c["repc_kig"] * ep
         pref = np.where(fflag == 1, s_lag, xp)
         ds_lag = (ppi - s_lag) / c["repc_tg"]
@@ -151,7 +163,7 @@ def simulate(
         s_lag = s_lag + dt * ds_lag
         xp = xp + dt * dxp
         xq = xq + dt * dxq
-    return t_out, p_out, q_out
+    return t_out, p_out, q_out, bound
 
 
 def deviation(a, b):

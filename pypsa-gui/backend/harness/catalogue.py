@@ -39,6 +39,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from harness import tool_fragments as _tool_fragments
 from services.asset_schema.attrs_doc import ATTRS_DOC
 
 
@@ -210,31 +211,22 @@ ASSET_HEALTH_METHOD_ENUM = [
 ]
 ASSET_HEALTH_CONFIDENCE_ENUM = ["low", "medium", "high"]
 
-
-def _t(name: str, description: str, properties: dict[str, Any],
-       required: list[str] | None = None) -> dict[str, Any]:
-    """Factory: one tool entry in Anthropic format."""
-    return {
-        "name": name,
-        "description": description,
-        "input_schema": {
-            "type": "object",
-            "properties": properties,
-            "required": required or [],
-        },
-    }
-
-
-def _empty(name: str, description: str) -> dict[str, Any]:
-    return _t(name, description, {}, [])
-
-
-# LC-19: the re-run rule the solve tools and the load flow share (harness/run_lifecycle.py).
-_RERUN_NOTE = (
-    "When the current project's results already match its inputs, the call is refused with "
-    "results_current before any card: tell the user and ask; only on their yes call it again "
-    "with rerun_current: true. "
+# RETRO-FRAG-1: the builders and route sentinels fragments share.
+from harness.catalogue_base import (  # noqa: E402,F401  (re-exported)
+    _CHAT_JSONL,
+    _DERIVED,
+    _RERUN_NOTE,
+    _SERVICE_CALL,
+    _UI_EVENT,
+    _empty,
+    _t,
 )
+
+
+# RETRO-FRAG-1: per-tool fragments (harness/tool_fragments.py). A family moved
+# out of this file is spliced back at its place; a new tool is a new fragment.
+_FRAGMENTS = _tool_fragments.SchemaFragments(
+    _tool_fragments.discover(_tool_fragments.SCHEMA_PACKAGE))
 
 
 TOOLS: list[dict[str, Any]] = [
@@ -3196,86 +3188,9 @@ TOOLS: list[dict[str, Any]] = [
         ["report_id"],
     ),
 
-    # ── Report templates (5) — WP11: the user's own Word template ───────────
-    # A template is an upload of kind `report_template` (the user drops a
-    # .docx on the report viewer, or uploads with ?kind=report_template). It
-    # is DATA: its outline goes to the model inside the untrusted-data fence
-    # and nothing found in it is ever followed.
-    _t(
-        "list_report_templates",
-        "The active project's uploaded report templates (uploads of kind "
-        "report_template): [{file_id, filename, mime, kind, size_kb, "
-        "uploaded_at}], newest first. A template is a Word .docx the user "
-        "uploaded; it is either TAGGED ({{ fields.x.text }} / row loops the "
-        "export fills) or UNTAGGED (a corporate document whose body is "
-        "rebuilt from a mapping plan). Safety: read.",
-        {},
-    ),
-    _t(
-        "set_report_template",
-        "Bind an uploaded template to a report (`file_id` from "
-        "list_report_templates; any .docx upload also works) or unbind it "
-        "(`file_id` null → the default layout). Returns {template_file_id, "
-        "mode: tagged|untagged|null, language (detected from the template), "
-        "outline: headings/tags/placeholders/tables, message}. Binding "
-        "writes the next version of the report; changing the template "
-        "clears a stored mapping plan. 404 upload_not_found; 400 "
-        "template_not_a_template (not a .docx), template_unreadable. "
-        "Safety: write.",
-        {
-            "report_id": {"type": "string"},
-            "file_id": {"type": "string"},
-        },
-        ["report_id"],
-    ),
-    _t(
-        "get_report_template",
-        "The report's bound template (the newest report when `report_id` is "
-        "omitted): {template_file_id, mode, language, outline, plan} — all "
-        "null when none is bound; `plan` is the stored mapping plan of an "
-        "untagged template (null until propose_report_mapping or "
-        "set_report_mapping stored one). Safety: read.",
-        {"report_id": {"type": "string"}},
-        [],
-    ),
-    _t(
-        "propose_report_mapping",
-        "Ask the active LLM profile how the bound UNTAGGED template's "
-        "headings map onto the report's sections (keep / rename / drop per "
-        "heading, sections to insert, placeholder values): ONE generation "
-        "call, same job slot as generate_report (409 report_job_in_flight; "
-        "poll get_report_status, mode 'mapping'). The sanitised plan is "
-        "stored on the report — read it with get_report_template, edit it "
-        "with set_report_mapping; export_report_docx uses it. When the "
-        "model's answer is not a plan the code-only default mapping is "
-        "stored and prose_failures names section 'mapping'. `language` "
-        "defaults to the template's. 400 no_template, 400 "
-        "template_not_untagged (a tagged template needs no plan). "
-        "Safety: execution.",
-        {
-            "report_id": {"type": "string"},
-            "language": {"type": "string"},
-        },
-        ["report_id"],
-    ),
-    _t(
-        "set_report_mapping",
-        "Store an edited mapping plan for the report's untagged template: "
-        "`plan` is the object get_report_template returns as `plan` "
-        "({entries: [{heading_index, action: keep|rename|drop, new_text, "
-        "section_ids}], inserted: [{after_heading_index, section_id, "
-        "heading}], placeholders: {text: value}, unmapped_sections, notes}). "
-        "An entry the template cannot place is dropped with a note in the "
-        "returned plan; with `strict` true such a plan is refused (400 "
-        "invalid_mapping_plan with the notes). 400 no_template. "
-        "Safety: write.",
-        {
-            "report_id": {"type": "string"},
-            "plan": {"type": "object"},
-            "strict": {"type": "boolean"},
-        },
-        ["report_id", "plan"],
-    ),
+    # ── Report templates (5): harness/catalogue_tools/report_templates.py ──
+    *_FRAGMENTS.splice("report_templates"),
+
 
     # ── Report round trip (4) — WP13: an edited Word copy merged back ───────
     # The user exports the report, edits it in Word (text, tracked changes,
@@ -5552,6 +5467,9 @@ TOOLS.extend([
        ["project", "study_id", "architecture_id", "eur_per_km", "grid_supply_npc", "grid_basis"]),
 ])
 
+# RETRO-FRAG-1: every fragment not spliced above, in ORDER (new tools land here).
+_FRAGMENTS.extend(TOOLS)
+
 TOOL_COUNT: int = len(TOOLS)
 
 
@@ -5575,10 +5493,7 @@ TOOL_COUNT: int = len(TOOLS)
 # HTTP entry matches a row in route_inventory_phase0.txt.
 # ─────────────────────────────────────────────────────────────────────────
 
-_SERVICE_CALL = ["_service_call_"]
-_DERIVED = ["_derived_"]
-_UI_EVENT = ["_ui_event_"]
-_CHAT_JSONL = ["_chat_jsonl_"]
+# The four non-HTTP sentinels live in harness/catalogue_base.py (fragments use them).
 
 # Component-class endpoint sets — reused by list_components / create_component
 # / update_component / delete_component multi-route tools.
@@ -5948,15 +5863,8 @@ TOOL_ROUTES: dict[str, list] = {
     ],
     "export_report_docx": [("POST", "/api/projects/{name}/reports/{report_id}/export")],
     "delete_report": [("DELETE", "/api/projects/{name}/reports/{report_id}")],
-    # report templates (5) — WP11: the template routes, called in-process;
-    # `list_report_templates` is the uploads list filtered to one kind.
-    "list_report_templates": [("GET", "/api/projects/{name}/uploads")],
-    "set_report_template": [("POST", "/api/projects/{name}/reports/{report_id}/template")],
-    "get_report_template": [("GET", "/api/projects/{name}/reports/{report_id}/template")],
-    "propose_report_mapping": [
-        ("POST", "/api/projects/{name}/reports/{report_id}/template/plan"),
-    ],
-    "set_report_mapping": [("PUT", "/api/projects/{name}/reports/{report_id}/template/plan")],
+    # report templates (5): harness/catalogue_tools/report_templates.py
+    **_FRAGMENTS.splice_routes("report_templates"),
     # report round trip (4) — WP13: the round-trip routes, called in-process;
     # `list_report_roundtrips` is the uploads list filtered to one kind and
     # `export_report_pdf` is the export route with `format: pdf`.
@@ -6257,6 +6165,13 @@ _SERVICE_CALL_NON_NETWORK_WRITES = frozenset({
     # study-harness 23: a confirmed requirement goes on the durable thread.
     "set_requirement",
 })
+
+# RETRO-FRAG-1: the fragments' routes and service-call write sets.
+_SERVICE_CALL_NETWORK_WRITES, _SERVICE_CALL_NON_NETWORK_WRITES = _FRAGMENTS.merge(
+    TOOLS, TOOL_ROUTES, _SERVICE_CALL_NETWORK_WRITES, _SERVICE_CALL_NON_NETWORK_WRITES)
+FRAGMENT_NETWORK_WRITES = _FRAGMENTS.network_writes
+# The schema side, for chat_tools' dispatcher merge (which families are spliced).
+SCHEMA_FRAGMENTS = _FRAGMENTS
 
 
 def tool_edits_network(tool_name: str) -> bool:

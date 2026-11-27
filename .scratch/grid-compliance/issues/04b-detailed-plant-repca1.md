@@ -3,7 +3,7 @@
 
 # GC-04b: plant controller (REPCA1) on a detailed plant
 
-Status: in-progress
+Status: done
 Model tier: opus
 Blocked by: 12 (package); #1607–#1609
 Type: task
@@ -52,4 +52,17 @@ Conditions:
 - `write_dyr`/`converter_records` take `plants` (name -> unit ids).
 - A gain-shared REPCA1 writes its CONs with 8 decimals (`SHARED_DECIMALS`), because 5 decimals would round a share-scaled gain off the aggregate response by more than 1e-6. N=1 records keep 5 decimals and stay byte-equal.
 - `unequal_dispatch` returns the C5 assumption lines; S2 puts them in the pack.
-- S2 also has to step each machine's Plant_pref and Qref by the same MW, so each controller's step is the aggregate step / w in its own pu (`repca1_reduced.simulate` does this).
+- S2 also has to step each machine's Plant_pref and Qref by the same reference MW, so each controller's step is the aggregate step / w in its own pu (`repca1_reduced.simulate` does this).
+
+**S1 (#2067, GK A OK @6b91527).** GK A's nits were that the binding test was static and that no case bound the output limits. Both are carried into S2: `repca1_reduced.simulate` now returns the limits that bound during the run, and the new p_limit and q_limit cases bind Pmax and Qmax.
+
+**S2 builder notes (2026-11-27).**
+- `Plant(unit_id, branch, members=(...))` declares a detailed plant. `unit_id` is then the plant's name.
+- The writer refuses a plant whose members carry different REPCA1 values (for example PV beside a BESS's `repc_bess`), since there is no single aggregate to share.
+- Every machine's REPCA1 is stepped. A V step uses the same pu volts on every machine; a Q or P step moves each machine by `step * PLANT_MBASE / M_BASE[k]`: the same reference MW on each, and each output moves by the step in its own pu.
+- The case's MBASEs are read and their sum is checked against the plant rating.
+- id/iq/i_poc are the MBASE-weighted sums of the machines' channels. The in-phase assumption is listed in UNVERIFIED.
+- The status poll covers every member. N=3 is tested with one machine tripping.
+- Unequal pu dispatch adds `plant_assumed` to the manifest and the README.
+- A one-member plant writes the aggregate's pack byte for byte.
+- Done when: met. The PoC step response of a detailed plant with N machines matches the aggregate within 1e-6 pu on the reduced model, with the S1 tests.

@@ -13,7 +13,8 @@ Written next to the campus bundle, in its own folder:
 * ``<case>.con``, ``.sub`` and ``.mon``: the contingency set given, or else
   the generated branch, unit and bus-section set;
 * ``run_<case_id>.py``: one psspy script per test-battery case, written only
-  for the aggregated plant (GC-01), which carries the PoC branch. Each writes
+  for the aggregated plant (GC-01), or a detailed plant (GC-04b), which
+  carries the PoC branch. Each writes
   ``<case_id>.out``, ``<case_id>.csv`` (battery contract
   :data:`PSSE_CONTRACT_VERSION`, ``connected`` included) and
   ``<case_id>.status.txt`` (failed status polls, text only);
@@ -43,6 +44,7 @@ from gridspine.handoff.dyr_writer import (
     PocBranch,
     converter_records,
     machine_records,
+    unequal_dispatch,
 )
 from gridspine.handoff.psspy_scripts import PENDING as PSSPY_NOTE
 from gridspine.handoff.psspy_scripts import STATUS_SIDECAR, check_script, write_scripts
@@ -123,10 +125,21 @@ class Plant:
     """
     The aggregated plant (GC-01): its converter's unit id and PoC branch.
     It takes the REPCA1 record, and the psspy scripts drive it.
+
+    A detailed plant (GC-04b) names its converters in ``members``; ``unit_id``
+    is then the plant's name. Every member gets a gain-shared REPCA1 on
+    ``branch`` (``dyr_writer.share_repca1``), the scripts step all of them,
+    and the status poll covers all of them.
     """
 
     unit_id: str
     branch: PocBranch
+    members: tuple = ()
+
+    @property
+    def machine_ids(self) -> tuple:
+        """The plant's converters: the members, or the aggregated machine."""
+        return tuple(self.members) or (self.unit_id,)
 
 
 def grid_following(campus, unit_id) -> bool:
@@ -259,7 +272,7 @@ def write_psse_pack(
         if uid in sync or not grid_following(campus, uid):
             continue
         battery = campus.units.at[uid, "kind"] == "bess"
-        is_plant = plant is not None and uid == plant.unit_id
+        is_plant = plant is not None and uid in plant.machine_ids
         rows[uid] = {"mbase_mva": machines[uid][2]} | converter_set(
             generic, battery, is_plant
         )
@@ -273,13 +286,20 @@ def write_psse_pack(
                 "from": GENERIC_PATH.name,
             }
         )
-    if plant is not None and plant.unit_id not in rows:
-        raise ContractError(
-            f"psse pack: plant unit {plant.unit_id!r} is not a grid-following converter of this campus"
-        )
+    for uid in plant.machine_ids if plant is not None else ():
+        if uid not in rows:
+            raise ContractError(
+                f"psse pack: plant unit {uid!r} is not a grid-following converter of this campus"
+            )
     ibr = pd.DataFrame.from_dict(rows, orient="index").reindex(columns=_COLUMNS)
-    poc = {plant.unit_id: plant.branch} if plant is not None else None
-    conv_lines, _, repc = converter_records(net, ibr, version=VERSION, poc=poc)
+    poc = {u: plant.branch for u in plant.machine_ids} if plant is not None else None
+    plants = (
+        {plant.unit_id: plant.members} if plant is not None and plant.members else None
+    )
+    conv_lines, _, repc = converter_records(
+        net, ibr, version=VERSION, poc=poc, plants=plants
+    )
+    plant_assumed = unequal_dispatch(net, plants)
     with open(out / names["dyr"], "w", newline="\n") as f:
         f.write("".join(f"{ln}\n" for ln in [*sync_lines, *conv_lines]))
     no_record = _no_record(campus, [*sync_lines, *conv_lines])
@@ -300,16 +320,19 @@ def write_psse_pack(
     if plant is not None:
         if cases is None:
             cases, battery_notes = _battery_cases(net)
-        _busr, bus1, bus2, ckt = repc[plant.unit_id]
-        num, mid, mbase = machines[plant.unit_id]
+        ids = plant.machine_ids
+        _busr, bus1, bus2, ckt = repc[ids[0]]
+        num, mid, _mbase = machines[ids[0]]
+        mbase = sum(machines[u][2] for u in ids)  # the plant rating
         # the machines the RAW models for the plant, polled for connected (GK A P3);
-        # the aggregated plant is one RAW machine record
-        plant_machines = [(n, i) for u, n, i, _m, _s in records if u == plant.unit_id]
-        if len(plant_machines) != 1:
+        # each plant converter is one RAW machine record
+        plant_machines = [(n, i) for u, n, i, _m, _s in records if u in ids]
+        if len(plant_machines) != len(ids):
             raise ContractError(
                 f"psse pack: plant {plant.unit_id!r} has {len(plant_machines)} RAW machine "
-                "records; the aggregated plant must be exactly one"
+                f"records for {len(ids)} converters; each must be exactly one"
             )
+        plant_machines = [machines[u][:2] for u in ids]  # plant_machine first
         grid_mbase = next(
             (
                 m
@@ -338,6 +361,7 @@ def write_psse_pack(
             plant_mbase_mva=mbase,
             contract_version=PSSE_CONTRACT_VERSION,
             status_machines=plant_machines,
+            plant_machines=plant_machines if plant.members else None,
         )
         outputs = {
             cid: [f"{cid}.out", f"{cid}.csv", STATUS_SIDECAR.format(case_id=cid)]
@@ -370,6 +394,7 @@ def write_psse_pack(
         if plant is not None
         else _REPCA1_NEEDS_PLANT,
         "battery_assumed": battery_notes,
+        **({"plant_assumed": plant_assumed} if plant_assumed else {}),
         "mon_assumed": MON_ASSUMED,
         "pending_verification": [PIN_NOTE, BUSR_NOTE, PSSPY_NOTE],
     }
@@ -416,6 +441,7 @@ def _readme(m) -> str:
     ] or ["- none"]
     lines += [f"- .seq: {n.removeprefix('seq: ')}" for n in m["seq"]["assumed"]]
     lines += [f"- {n}" for n in m["battery_assumed"]]
+    lines += [f"- {n}" for n in m.get("plant_assumed", [])]
     lines.append(f"- {m['mon_assumed']}")
     lines += ["", "## Not written", ""]
     not_written = [f".seq: {n.removeprefix('seq: ')}" for n in m["seq"]["not_written"]]

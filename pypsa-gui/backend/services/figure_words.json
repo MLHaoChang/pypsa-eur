@@ -49,6 +49,12 @@
       "name": "Cost per MWh served (study)",
       "unit": "€/MWh",
       "basis": "The study's cost at the target divided by the energy it served. Energy shed is not counted."
+    },
+    "system_cost_per_mwh": {
+      "name": "System cost per MWh delivered (before financing and tax)",
+      "unit": "{currency}/MWh",
+      "tag": "LCOE / LCOS",
+      "basis": "Annualised capital and fixed O&M, plus fuel, variable O&M and storage charging energy at the bus price, over all energy the portfolio delivered. No financing or tax."
     }
   }
 }

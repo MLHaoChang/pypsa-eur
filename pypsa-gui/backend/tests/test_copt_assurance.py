@@ -8,6 +8,7 @@ Hand fleet {60 MW q 0.1, 40 MW q 0.2}: available 100 MW with 0.72, 60 with 0.18,
 import pandas as pd
 import pytest
 
+from harness.copt_calculations import REL_TOLERANCE
 from tests.assurance_acceptance.support import approval, public_text
 from tests.test_answer_assurance import checked  # noqa: F401
 from tests.test_assurance_metrics import NumericalProvider
@@ -91,6 +92,8 @@ def test_the_classical_fleet_by_hand_and_as_the_tab_has_it(classical, checked):
     assert (tab["lole_hours"], tab["eue_mwh"], tab["lolp_max"]) == pytest.approx((1.68, 58.8, 0.28))
     frames = ask(checked, classical, values)
     assert answered(checked, frames) == values
+    assert answered(checked, frames) == pytest.approx(
+        {"screening_lole": 1.68, "screening_eue": 58.8, "screening_lolp_max": 0.28}, rel=REL_TOLERANCE)
     text = public_text(frames)
     assert "not a statutory standard" in text and "equals the residual load is not a loss" in text
 

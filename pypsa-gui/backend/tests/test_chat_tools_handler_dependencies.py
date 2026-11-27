@@ -31,6 +31,8 @@ import uuid as _uuid
 from datetime import datetime, timezone
 
 import pytest
+
+from harness import tool_fragments
 from fastapi import HTTPException
 from fastapi import params as fastapi_params
 
@@ -74,7 +76,8 @@ def _unsupplied(handler, call: ast.Call) -> list[str]:
 
 
 def direct_calls_missing_dependencies() -> list[str]:
-    tree = ast.parse((BACKEND / "services" / "chat_tools.py").read_text())
+    # chat_tools.py plus the dispatcher fragments (RETRO-FRAG-1).
+    tree = tool_fragments.dispatcher_source_tree()
     out = []
     for fn in (n for n in tree.body if isinstance(n, ast.FunctionDef)):
         names, modules = _router_aliases(fn)

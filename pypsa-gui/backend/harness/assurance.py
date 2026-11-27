@@ -451,6 +451,14 @@ class Turn:
             re.I,
         )
         if not match:
+            from harness import assurance_conversation
+
+            # AA-09 S1: a summary outside every checked form is clarified, never
+            # drafted unscoped where a required slot could silently go missing.
+            if assurance_conversation.is_summary_request(message):
+                self.request_scope = assurance_conversation.clarify_summary(
+                    self, ui_context, getattr(ctx, "network", None)
+                )
             return
         from services import assurance_metrics
 
@@ -1727,6 +1735,7 @@ class Turn:
         card = {
             "cost_quantity_required": ("Cost quantity", lambda: cost_choices(self.pending_scope)),
             "capacity_meaning_required": ("Capacity meaning", lambda: tuple(CAPACITY_CHOICES)),
+            "key_results_scope_required": ("Checked result", lambda: self.clarification["options"]),
         }.get((self.clarification or {}).get("reason"))
         if card is None:
             return None
