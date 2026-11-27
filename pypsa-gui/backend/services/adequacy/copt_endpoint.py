@@ -287,16 +287,27 @@ def _study_fmea_modes(
             "edited_since_study": edited_since}
 
 
+#: The finished statuses whose record can hold the report it stored.
+_STUDY_REPORT_STATUSES = ("done", "aborted", "failed")
+
+
 def study_fmea_args(state: dict) -> dict:
     """``build_fmea_modes_payload``'s study arguments from a solver state: the
     last EH study's ``fmea_top`` payload, finish time and whether the network
     was edited since (``study_state.edited_since``). Empty while a study
-    runs or when no stored report has the section (template-e2e 24)."""
+    runs, when the record did not write the stored report, or when that
+    report has no such section (template-e2e 24)."""
     from services.adequacy.eh_report import load_eh_report
     from services.study_state import edited_since
 
+    # GK M1 (#2092): the stored report is the record's only when that study
+    # wrote it. ``run_eh_study`` clears the store when it starts and stores
+    # its report when it returns (done, aborted, or failed with a partial
+    # report), so the record then carries the report too. A study refused
+    # before it ran (failed, ``report=None``) leaves the PREVIOUS study's
+    # report in the store: its rows must not be dated with this record.
     record = state.get("eh_study") or {}
-    if record.get("status") == "running":
+    if record.get("status") not in _STUDY_REPORT_STATUSES or record.get("report") is None:
         return {}
     report = load_eh_report(state)
     section = report.sections.get("fmea_top") if report is not None else None

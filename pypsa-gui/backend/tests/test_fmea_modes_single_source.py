@@ -110,11 +110,21 @@ def _store(monkeypatch, payload, status="ok"):
         monkeypatch.setitem(R._state, key, value)
 
 
+def _record(status, finished_at=None, report=True):
+    """A study record as the runner writes it: a study that ran carries the
+    report it stored; one refused before it ran carries ``report=None``."""
+    return {
+        "status": status,
+        "finished_at": finished_at,
+        "report": {"sections": {"fmea_top": {"payload": PAYLOAD}}} if report else None,
+    }
+
+
 @pytest.fixture
 def study(monkeypatch):
     PyPSAService.set_network(_empty_network())
     _store(monkeypatch, PAYLOAD)
-    monkeypatch.setitem(R._state, "eh_study", {"status": "done", "finished_at": 1000.0})
+    monkeypatch.setitem(R._state, "eh_study", _record("done", 1000.0))
     monkeypatch.setitem(R._state, "fmea_sweep", None)
 
 
@@ -363,27 +373,44 @@ def test_a_sweep_without_a_finish_time_does_not_take_over(study, monkeypatch):
 
 def test_a_finished_sweep_wins_over_a_study_without_a_finish_time(study, monkeypatch):
     """A study record that never recorded when it finished is not newer."""
-    monkeypatch.setitem(R._state, "eh_study", {"status": "done"})
+    monkeypatch.setitem(R._state, "eh_study", _record("done"))
     monkeypatch.setitem(R._state, "fmea_sweep", _done_sweep(500.0))
     assert R.get_fmea_modes()["source"] == "live"
 
 
-def test_study_args_without_a_study_record(monkeypatch):
-    """A stored report with no study record (a reopened project) still serves."""
+def test_study_args_without_a_study_record():
+    """With no record, nothing says the stored report is a finished study's."""
     from services.adequacy.copt_endpoint import study_fmea_args
 
     state: dict = {}
     _store_into(state, PAYLOAD)
-    args = study_fmea_args(state)
-    assert args["study_fmea_top"] == PAYLOAD
-    assert args["study_finished_at"] is None
+    assert study_fmea_args(state) == {}
     assert study_fmea_args({}) == {}
+
+
+@pytest.mark.parametrize("status", ["done", "aborted", "failed"])
+def test_a_study_that_wrote_the_report_serves_its_rows(study, monkeypatch, status):
+    """GK M1: done, aborted and stage-failed studies store their own (partial)
+    report, and their record carries it."""
+    monkeypatch.setitem(R._state, "eh_study", _record(status, 1000.0))
+    out = R.get_fmea_modes()
+    assert out["source"] == "eh_study"
+    assert out["study_finished_at"] == 1000.0
+
+
+def test_a_study_refused_before_it_ran_does_not_date_the_old_report(study, monkeypatch):
+    """GK M1: the runner's stale-input refusal fails the record with no report
+    and leaves the previous study's report in the store; its rows must not be
+    served under the failed attempt's finish time."""
+    monkeypatch.setitem(R._state, "eh_study", _record("failed", 2000.0, report=False))
+    out = R.get_fmea_modes()
+    assert getattr(out, "status_code", 200) == 204  # live path, empty network
 
 
 def test_study_args_need_an_fmea_top_payload():
     from services.adequacy.copt_endpoint import study_fmea_args
 
-    no_section: dict = {}
+    no_section: dict = {"eh_study": _record("done", 1000.0)}
     store_eh_report(
         no_section,
         ReferenceDesignReport(
@@ -391,9 +418,12 @@ def test_study_args_need_an_fmea_top_payload():
         ),
     )
     assert study_fmea_args(no_section) == {}
-    no_payload: dict = {}
+    no_payload: dict = {"eh_study": _record("done", 1000.0)}
     _store_into(no_payload, None, status="skipped")
     assert study_fmea_args(no_payload) == {}
+    with_payload: dict = {"eh_study": _record("done", 1000.0)}
+    _store_into(with_payload, PAYLOAD)
+    assert study_fmea_args(with_payload)["study_fmea_top"] == PAYLOAD
 
 
 def test_the_sweeps_restore_and_error_travel_with_the_study_rows(study, monkeypatch):
