@@ -638,19 +638,45 @@ def test_a_sidecar_write_that_fails_restores_the_previous_read_back(
     before = _judgment_bytes(run)
     real = cj.atomic_write_bytes
 
+    failed = []
+
     def fail_on_sidecar(path, data):
-        if path.name == cj.JUDGMENT_SOURCE_FILE:
-            raise OSError("read-only file system")
+        # The read-back's own sidecar write fails; the restore's write goes through.
+        if path.name == cj.JUDGMENT_SOURCE_FILE and not failed:
+            failed.append(path)
+            raise OSError("disk full")
         real(path, data)
 
     monkeypatch.setattr(cj, "atomic_write_bytes", fail_on_sidecar)
     with pytest.raises(OSError):
         cj.add_results(project, bundle, [(f"{case.case_id}.csv", b"time [s]\n0.0\n")])
     monkeypatch.setattr(cj, "atomic_write_bytes", real)
+    assert failed
     assert _judgment_bytes(run) == before
     assert (
         _pack(run, bundle) / "results" / f"{case.case_id}.csv"
     ).read_bytes() == _ride_through_csv()
+
+
+def test_a_sidecar_that_cannot_be_put_back_still_restores_the_judgment(
+    island_run, monkeypatch
+):
+    project, run, bundle = island_run
+    case = _fault_case(run, bundle)
+    cj.add_results(project, bundle, [(f"{case.case_id}.csv", _ride_through_csv())])
+    before = _judgment_bytes(run)
+    real = cj.atomic_write_bytes
+
+    def never_the_sidecar(path, data):
+        if path.name == cj.JUDGMENT_SOURCE_FILE:
+            raise OSError("read-only file system")
+        real(path, data)
+
+    monkeypatch.setattr(cj, "atomic_write_bytes", never_the_sidecar)
+    with pytest.raises(OSError, match="read-only file system"):
+        cj.add_results(project, bundle, [(f"{case.case_id}.csv", b"time [s]\n0.0\n")])
+    after = _judgment_bytes(run)
+    assert {p: b for p, b in before.items() if p.name != cj.JUDGMENT_SOURCE_FILE} == after
 
 
 def test_the_judgment_is_restored_even_when_putting_the_results_back_fails(
@@ -690,5 +716,11 @@ def test_staged_and_old_results_never_reach_the_bundle_download(island_run):
     data, _ = ce.psse_bundle_zip(project, bundle)
     names = zipfile.ZipFile(io.BytesIO(data)).namelist()
     assert f"{bundle}/emt/results/{ids[1]}.csv" in names
-    assert not [n for n in names if "stage" in n or "aside" in n or n.startswith(".")]
+    # emt/thevenin_stages.csv is a real bundle file, so match the staging dir by name.
+    leaked = [
+        n
+        for n in names
+        if cj.STAGING_DIR in n or "/aside." in n or any(p.startswith(".") for p in n.split("/"))
+    ]
+    assert not leaked
     assert not any((run / cj.STAGING_DIR).iterdir())

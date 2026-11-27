@@ -267,11 +267,16 @@ def _snapshot(run: Path) -> dict:
 
 
 def _restore(snapshot: dict) -> None:
+    # Try every file: one that cannot be put back must not leave the others
+    # unrestored, nor hide the error that made the read-back fail.
     for path, data in snapshot.items():
-        if data is None:
-            path.unlink(missing_ok=True)
-        else:
-            atomic_write_bytes(path, data)
+        try:
+            if data is None:
+                path.unlink(missing_ok=True)
+            else:
+                atomic_write_bytes(path, data)
+        except OSError:
+            log.error("could not restore %s after a failed read-back", path, exc_info=True)
 
 
 def _read_back(project, bundle, files: list[tuple[str, bytes]] | None) -> dict:
