@@ -6,7 +6,7 @@ import { useChatStore, type PendingConfirmationCard } from '../store/chatStore'
 import { createChatStream, getChatHealth, postChatAbort, postChatConfirm } from '../api/chat'
 import { listUploads } from '../api/uploads'
 import ChatPanel, { guidedCardSummary, guidedToolPhrase } from './ChatPanel'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import chatStoreSource from '../store/chatStore.ts?raw'
 
@@ -843,8 +843,12 @@ describe('P29: Guided tool lines', () => {
 // phrase beginning "start …" (or saying what it asked for) — none falls back
 // to "use <tool words>", and none reads as a finished study.
 describe('P29 gate B1-1: start-only tools never say they finished', () => {
-  // The backend schema's own word: descriptions that begin "Start …".
-  const schema = readFileSync(resolve(process.cwd(), '..', 'backend', 'harness', 'catalogue.py'), 'utf8')
+  // The backend schema's own word: descriptions that begin "Start …". The
+  // schemas are catalogue.py plus its per-family fragments (RETRO-FRAG-1).
+  const harness = resolve(process.cwd(), '..', 'backend', 'harness')
+  const fragments = readdirSync(resolve(harness, 'catalogue_tools')).filter(f => f.endsWith('.py'))
+  const schema = [resolve(harness, 'catalogue.py'), ...fragments.map(f => resolve(harness, 'catalogue_tools', f))]
+    .map(f => readFileSync(f, 'utf8')).join('\n')
   const fromSchema = [...schema.matchAll(/"([a-z_]+)",\s*\n\s*"Start /g)].map(m => m[1])
   const START_ONLY = [...new Set([...fromSchema,
     'run_simulation', 'run_ac_pf_stage', 'run_fmea_sweep', 'run_frontier_study', 'run_mc_study',
@@ -868,7 +872,16 @@ describe('P29 gate B1-1: start-only tools never say they finished', () => {
     expect(guidedToolPhrase('mcp__tariffs__set_value')).toBe('use set value')
   })
 
-  it.each(START_ONLY)('%s has an explicit "start …" phrase', (tool) => {
+  // Moved into fragments by S3 (#2086, #2096) while the scan still read
+  // catalogue.py alone, so it never checked them; they still lack a phrase.
+  // Follow-up: .scratch/retro-frag-1/issues/03-tool-fragments-follow-up.md. Named,
+  // so every other start-only tool, in any fragment, is still checked.
+  const PHRASE_GAPS = ['campus_new_grid_code_draft', 'campus_start_milp']
+  it('the phrase gaps are still start-only schema tools', () => {
+    expect(fromSchema).toEqual(expect.arrayContaining(PHRASE_GAPS))
+  })
+
+  it.each(START_ONLY.filter(t => !PHRASE_GAPS.includes(t)))('%s has an explicit "start …" phrase', (tool) => {
     const phrase = guidedToolPhrase(tool)
     expect(phrase).not.toMatch(/^use /)
     expect(phrase).toMatch(/^start /)
