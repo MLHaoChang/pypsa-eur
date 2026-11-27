@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-# 49 — "Run the solve" does not show the solve queue's location refusal
+# 50 — "Run the solve" does not show the solve queue's location refusal
 
 Status: ready-for-agent
 Owner: unassigned
