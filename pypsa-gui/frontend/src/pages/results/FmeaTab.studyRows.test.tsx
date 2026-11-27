@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import FmeaTab from './FmeaTab'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
+import { EXPERT_STUDY_SOURCE, GUIDED_STUDY_SOURCE } from './fmeaSourceWords'
+import { OUT_OF_DATE_REASON } from '../../components/ResultsOutOfDate'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -59,14 +61,30 @@ describe('FMEA worksheet with the study as its source', () => {
       voll_eur_per_mwh: null })
     expect(names()).toEqual(['critical_feeder', 'genset_1', 'genset_new'])
     const line = screen.getByTestId('fmea-source-line').textContent ?? ''
-    expect(line).toMatch(/Energy Hub study's ranking of .+\(as in the reference design and the report\)/)
-    expect(line).toMatch(/Edits made since then are not reflected/)
+    expect(line.startsWith(EXPERT_STUDY_SOURCE)).toBe(true)
+    expect(line).toMatch(/The study ran on .+\.$/)
+    expect(screen.queryByTestId('fmea-study-stale')).toBeNull()
+  })
+
+  it('marks the study rows out of date once the network was edited since', async () => {
+    await renderTab({ per_mode: STUDY, source: 'eh_study', edited_since_study: true,
+      voll_eur_per_mwh: null })
+    const stale = screen.getByTestId('fmea-study-stale')
+    expect(stale.querySelector('[data-state="stale"]')).toBeTruthy()
+    expect(stale.textContent).toContain(OUT_OF_DATE_REASON)
+  })
+
+  it('shows the Guided sentence in Guided', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    await renderTab({ per_mode: STUDY, source: 'eh_study', voll_eur_per_mwh: null })
+    expect(screen.getByTestId('fmea-source-line').textContent).toBe(GUIDED_STUDY_SOURCE)
   })
 
   it('ranks live rows by criticality, with no source line', async () => {
     await renderTab({ per_mode: STUDY, source: 'live', voll_eur_per_mwh: 5000 })
     expect(names()).toEqual(['genset_new', 'critical_feeder', 'genset_1'])
     expect(screen.queryByTestId('fmea-source-line')).toBeNull()
+    expect(screen.queryByTestId('fmea-study-stale')).toBeNull()
   })
 
   it('says unpriced study rows need the study run again', async () => {

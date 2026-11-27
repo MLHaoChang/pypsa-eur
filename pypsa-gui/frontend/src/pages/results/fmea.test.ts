@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { buildManualRow, mergeWorksheet, unpricedRankingWarning, WORKSHEET_CSV_HEADER, worksheetCsvRows, ZERO_REASON_TEXT, CRITICALITY_PER_YEAR_LABEL, unpricedModeCount, setVollText, SOLVER_VOLL_LABEL, modesSourceText, studyRepriceText } from './fmea'
+import { buildManualRow, mergeWorksheet, unpricedRankingWarning, WORKSHEET_CSV_HEADER, worksheetCsvRows, ZERO_REASON_TEXT, CRITICALITY_PER_YEAR_LABEL, unpricedModeCount, setVollText, SOLVER_VOLL_LABEL } from './fmea'
 import { GOAL_CARD_TITLE, GOAL_VOLL_LABEL } from '../hubDesign/cards/goalCardWords'
 import type { CoptPayload } from './adequacy'
 
@@ -242,28 +242,6 @@ describe('setVollText names the VOLL input as its landing place does', () => {
   })
 })
 
-// template-e2e 24: the worksheet says when its rows are the study's own.
-describe('modesSourceText', () => {
-  it('names and dates the study, and says later edits are not in its rows', () => {
-    const modes = { per_mode: [], source: 'eh_study' as const, study_finished_at: 1_790_000_000 }
-    const g = modesSourceText(modes, true)!
-    const e = modesSourceText(modes, false)!
-    expect(g).toMatch(/energy hub study of .+: the same risks its results and the report list/)
-    expect(g).toMatch(/Edits made since then are not in them/)
-    expect(e).toMatch(/Energy Hub study's ranking of .+\(as in the reference design and the report\)/)
-    expect(e).toMatch(/Edits made since then are not reflected/)
-  })
-  it('leaves the date out when the study has none', () => {
-    expect(modesSourceText({ per_mode: [], source: 'eh_study' }, true))
-      .toMatch(/^These rows come from the energy hub study: /)
-  })
-  it('says nothing for live rows or no payload', () => {
-    expect(modesSourceText({ per_mode: [], source: 'live' }, true)).toBeNull()
-    expect(modesSourceText({ per_mode: [] }, false)).toBeNull()
-    expect(modesSourceText(null, true)).toBeNull()
-  })
-})
-
 describe('mergeWorksheet — study rows (template-e2e 24)', () => {
   const mode = (mode_id: string, failure_class: string, crit: number | null) => ({
     mode_id, name: mode_id, failure_class, component_class: 'Link',
@@ -284,12 +262,5 @@ describe('mergeWorksheet — study rows (template-e2e 24)', () => {
       { version: 1, manual_rows: [manual], overlays: {} })
     expect(rows.map(r => r.mode_id).slice(0, 3)).toEqual(['b1', 'b2', 'a1'])
     expect(rows).toHaveLength(4)
-  })
-})
-
-describe('studyRepriceText', () => {
-  it('says a re-run is needed only for study rows', () => {
-    expect(studyRepriceText({ per_mode: [], source: 'eh_study' })).toMatch(/run the study again/)
-    expect(studyRepriceText({ per_mode: [], source: 'live' })).toBeNull()
   })
 })

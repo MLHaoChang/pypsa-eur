@@ -25,31 +25,8 @@ export interface ModesPayload {
   source?: 'eh_study' | 'live' | null
   /** When the study that wrote those rows finished (epoch seconds). */
   study_finished_at?: number | null
-}
-
-/** The line naming where the computed rows come from, or null for live rows.
- *  The stored study carries no network fingerprint, so the line dates the
- *  rows and says edits made since are not in them (GK C1). */
-export function modesSourceText(
-  modes: ModesPayload | null | undefined, guided: boolean,
-): string | null {
-  if (modes?.source !== 'eh_study') return null
-  const at = modes.study_finished_at
-  const when = typeof at === 'number' && Number.isFinite(at)
-    ? ` of ${new Date(at * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`
-    : ''
-  return guided
-    ? `These rows come from the energy hub study${when}: the same risks its results and the report list. `
-      + 'Edits made since then are not in them until the study runs again.'
-    : `Computed rows are the Energy Hub study's ranking${when} (as in the reference design and the report). `
-      + 'Edits made since then are not reflected; a contingency sweep run after it reads the current network.'
-}
-
-/** With study rows a new VoLL prices nothing until the study runs again (GK C4). */
-export function studyRepriceText(modes: ModesPayload | null | undefined): string | null {
-  return modes?.source === 'eh_study'
-    ? 'These are the study\'s rows: after setting a price, run the study again to price them.'
-    : null
+  /** Whether the network was edited after that study (null: cannot tell). */
+  edited_since_study?: boolean | null
 }
 
 /**

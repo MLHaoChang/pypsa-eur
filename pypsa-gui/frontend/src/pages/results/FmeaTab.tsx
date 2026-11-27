@@ -33,9 +33,10 @@ import {
   type WorksheetRow,
   type WorksheetSidecar,
   CRITICALITY_PER_YEAR_LABEL,
-  modesSourceText,
-  studyRepriceText,
 } from './fmea'
+import { modesSourceText, studyRepriceText, studyRowsOutOfDate } from './fmeaSourceWords'
+import ResultState from '../../components/ResultState'
+import { OUT_OF_DATE_REASON } from '../../components/ResultsOutOfDate'
 import { openVollField } from '../../layout/flowNavigation'
 
 const FIDELITY_TIP: Record<string, string> = {
@@ -243,6 +244,12 @@ function FmeaWorksheet({ studyRows }: { studyRows: boolean }) {
           </p>
         )}
       </header>
+
+      {studyRowsOutOfDate(modes as ModesPayload | null | undefined) && (
+        <div data-testid="fmea-study-stale">
+          <ResultState state="stale" reason={OUT_OF_DATE_REASON} />
+        </div>
+      )}
 
       {unpricedCount > 0 ? (
         <p data-testid="fmea-unpriced-line" className="text-[11px] text-muted">
