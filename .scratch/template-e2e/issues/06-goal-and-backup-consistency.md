@@ -3,7 +3,7 @@
 
 # 06 — Reliability goal shows "3 h/yr (assumed)" and "No goal yet" at once; backup inputs grouped under Scenarios in Expert only
 
-Status: ready-for-agent; audit 2026-11-25: #1645 merged (backend refuses a run with no VOLL), #1735 merged (goal editor Assumed chip); left: backup and control inputs with section 5 as their single home
+Status: done; #1645 (backend refuses a run with no VOLL), #1735 (goal editor Assumed chip) and #2101 (backup inputs: section 5 is their single editing home in both modes; section 8 and Grid study read-only with a Back link) merged 2026-11-27. Converter control modes stay per asset in Properties.
 Owner: builder session_01G7qCuo15kNsNqjAaBLjvmL (backend first; reliability_goal.py after #1604)
 Size: S
 Gated: UX; GK B (goal value source)
