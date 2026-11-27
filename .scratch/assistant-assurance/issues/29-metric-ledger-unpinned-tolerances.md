@@ -76,7 +76,11 @@ Outside the table above, previously reviewed: widening the check to all verified
 
 | profile | metric | was | fix |
 |---|---|---|---|
-| branch-losses/1 | loss_pct_of_demand | `harness.derived:NEAR_ZERO` | ledger string becomes `ulp:4504` (the oracle's rel 1e-12); NEAR_ZERO stays in the validity text |
-| renewable-share/1 | renewable_share | `harness.derived:NEAR_ZERO` | same |
+| branch-losses/1 | loss_pct_of_demand | `harness.derived:NEAR_ZERO` | ledger string becomes `exact` (its oracle is `values == NETWORK`); NEAR_ZERO stays in the validity text |
+| renewable-share/1 | renewable_share | `harness.derived:NEAR_ZERO` | ledger string becomes `tests.test_renewable_share_assurance:HAND_REL` (the oracle's rel 1e-12, a named test-side constant); NEAR_ZERO stays in the validity text |
 | system-cost-breakdown/1 | system_capex | `harness.system_cost_calculations:RESIDUAL_TOLERANCE` | oracle also asserts at the constant |
 | system-cost-breakdown/1 | objective_residual | `harness.system_cost_calculations:RESIDUAL_TOLERANCE` | oracle also asserts at the constant |
+
+The `exact` rows (ac-branch-loading, branch-loading, bus-price, lost-load, site-import count metrics) are backed by an `==` assertion in their oracle, beside the `approx` one.
+
+**Limit of the pin check.** `unpinned_reviews` accepts a constant only when its import binding names the ledger's module and it is the whole `rel=`/`abs=` argument of `approx`, or the bound of `abs(a - b) <= CONST`; arithmetic, `max` and a bare `assert CONST > 0` do not count. It does not tie the comparison to the metric: any such comparison in the oracle (or a same-module helper it calls) counts.

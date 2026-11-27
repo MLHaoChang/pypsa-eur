@@ -38,6 +38,7 @@ WEIGHTS = [1.0, 0.5, 2.0]
 STAMPS = pd.date_range("2026-01-01", periods=3, freq="h")
 NONREN = 7.0
 USED = 36.0
+HAND_REL = 1e-12  # relative tolerance of the hand-number comparisons below
 SHARE = 100 * (1 - 7 / 36)
 WINDOW_SHARE = 100 * (1 - 7 / 26)
 EQUAL_WEIGHT_SHARE = 100 * (1 - 14 / 38)
@@ -206,7 +207,7 @@ def test_network_figures_equal_the_hand_arithmetic(share_case):
     values, reasons = _checked(share_case())
     assert reasons == {}
     assert values == {
-        "renewable_share": (pytest.approx(SHARE, rel=1e-12), "%"),
+        "renewable_share": (pytest.approx(SHARE, rel=HAND_REL), "%"),
         "nonrenewable_energy": (pytest.approx(NONREN, rel=1e-12), "MWh"),
         "electricity_used": (pytest.approx(USED, rel=1e-12), "MWh"),
     }

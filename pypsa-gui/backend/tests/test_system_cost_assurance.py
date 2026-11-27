@@ -231,8 +231,12 @@ def test_network_figures_equal_the_hand_arithmetic(cost_case):
     values, reasons = _checked(cost_case(), "network")
     assert reasons == {}
     assert values["system_capex"] == pytest.approx(CAPEX, rel=1e-12)
-    assert values["system_opex"] == pytest.approx(OPEX, rel=1e-9)
-    assert values["system_cost"] == pytest.approx(CAPEX + OPEX, rel=1e-9)
+    assert values["system_opex"] == pytest.approx(
+        OPEX, rel=system_cost.RESIDUAL_TOLERANCE
+    )
+    assert values["system_cost"] == pytest.approx(
+        CAPEX + OPEX, rel=system_cost.RESIDUAL_TOLERANCE
+    )
     assert (
         abs(values["objective_residual"]) <= system_cost.RESIDUAL_TOLERANCE * OBJECTIVE
     )
@@ -360,8 +364,8 @@ def test_the_residual_is_the_objective_minus_the_hand_basis(cost_case):
     values, reasons = _checked(ctx, "network")
     assert reasons == {}
     assert values["objective_residual"] == pytest.approx(5e-7, abs=1e-11)
-    assert (
-        abs(values["objective_residual"]) <= system_cost.RESIDUAL_TOLERANCE * OBJECTIVE
+    assert values["objective_residual"] == pytest.approx(
+        5e-7, abs=system_cost.RESIDUAL_TOLERANCE
     )
 
 

@@ -81,8 +81,9 @@ def test_bus_price_is_time_weighted_and_observed(priced, checked):
 
 def test_hours_at_voll_use_the_solves_voll_and_need_one(priced, checked):
     ctx = solve(priced, voll=30)
-    assert answered(checked, ask(checked, ctx, "bus-price/1", "B1", {**PRICE, "hours_at_voll": 3})) == (
-        pytest.approx({**PRICE, "hours_at_voll": 3}))
+    got = answered(checked, ask(checked, ctx, "bus-price/1", "B1", {**PRICE, "hours_at_voll": 3}))
+    assert got == pytest.approx({**PRICE, "hours_at_voll": 3})
+    assert got["hours_at_voll"] == 3
     ctx.solver_state["last_solve_settings"] = None
     frames = ask(checked, ctx, "bus-price/1", "B1", {k: v for k, v in PRICE.items() if k != "hours_at_voll"})
     assert slots(frames)["hours_at_voll"]["reason"] == "voll_missing_or_zero"
