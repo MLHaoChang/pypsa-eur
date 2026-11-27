@@ -41,25 +41,33 @@ QUESTIONS = {
     # AA-09 S1: a summary outside the bounded grammar is never summarized unscoped.
     "key_results_scope_required": "Which checked result do you want? Name one result and its component, for example: Give me the key results for storage unit <name>; Give me the energy balance for network; Give me the system cost for network. This summary request is outside the checked request forms, so no part of it has been answered.",
 }
-# AA-09 S1: a request for a summary of the results; a match only asks, it never
-# selects a profile. A summary word counts only beside "results"/"run", and a
-# message that also asks for an action (export, navigation, an attachment...)
-# stays with the model, which owns those tools.
+# AA-09 S1: the whole message is a request for the results summary: optional polite
+# filler, the summary phrase, then optionally "for <entity>" or "of the run". The
+# phrase is never searched for inside a longer question; any further clause, and
+# the words in WITH_MODEL, stay with the model.
 RESULTS_SUMMARY = re.compile(
-    r"\b(?:key|main|headline)\s+results?\b"
-    r"|\b(?:summar(?:y|ise|ize)|overview)\s+(?:of\s+)?(?:the\s+|my\s+|this\s+)?(?:\w+\s+)?(?:results?|run)\b"
-    r"|\bresults?\s+(?:summary|overview)\b",
+    r"(?:(?:please|can you|could you|would you|i'?d like|i would like)\s+)*"
+    r"(?:(?:give me|show me|show|tell me|what are|what were)\s+)?"
+    r"(?:"
+    r"(?:the\s+|my\s+)?(?:key|main|headline)\s+results"
+    r"|(?:a\s+|an\s+|the\s+)?(?:summary|overview)\s+of\s+(?:the|my|this)\s+(?:\w+\s+)?results"
+    r"|summar(?:ise|ize)\s+(?:the|my|this)\s+(?:\w+\s+){0,2}results"
+    r"|(?:the\s+|a\s+)?results\s+(?:summary|overview)"
+    r")"
+    r"(?:\s+(?:for|of)\s+(?:the\s+)?(?:generator|storage\s*unit|line|transformer|link|store|bus|load"
+    r"|carrier)\s+[\w.:/()+-]{1,64}|\s+(?:for|of)\s+(?:the\s+)?network|\s+of\s+(?:the|this)\s+run)?"
+    r"(?:,?\s+please)?\s*[.!?]?",
     re.I,
 )
-ACTION = re.compile(
-    r"\b(?:export|download|save|open|navigate|go\s+to|create|add|remove|delete|edit"
-    r"|change|apply|attach(?:ed)?|upload|pdf|file|report|document|parameters?)\b",
+WITH_MODEL = re.compile(
+    r"\b(?:why|is|wrong|robust|compare|paper|literature|logs?|errors?|solver|and|then|but)\b|[,;]\s*(?!please\b)",
     re.I,
 )
 
 
 def is_summary_request(message):
-    return bool(RESULTS_SUMMARY.search(message)) and not ACTION.search(message)
+    text = message.strip()
+    return bool(RESULTS_SUMMARY.fullmatch(text)) and not WITH_MODEL.search(text)
 
 
 UNCHECKED_CHOICE = "Answer without a check"

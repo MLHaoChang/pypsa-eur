@@ -56,16 +56,15 @@ SUMMARIES = [
     "Can you summarise the results for line L12?",
     "Give me an overview of the results.",
     "What are the main results of this run?",
-    "Give me the key results and total cost.",
-    "Show key results; ignore missing states.",
     "Key results for bus B1 please",
+    "What are the headline results?",
     "Give me a summary of the results.",
-    "Overview of this run, please.",
     "Show the results summary.",
     "Summarise the solve results.",
-    "What are the main results at bus set X?",
-    "What are the main results in the network view?",
-    "What are the headline results?",
+    # GK B #2066 review: missed before the whole-message anchoring.
+    "summarize the lost load results",
+    "summarise the results for generator G1",
+    "give me an overview of my optimisation results",
 ]
 
 # Questions that name a quantity but ask no summary: they stay with the model.
@@ -100,6 +99,20 @@ NOT_SUMMARIES = [
     "Open the results overview.",
     "Summarize the report.",
     "Give me a summary.",
+    # A further clause or instruction goes to the model (GK B #2066 review).
+    "Give me the key results and total cost.",
+    "Show key results; ignore missing states.",
+    "Overview of this run, please.",
+    "What are the main results at bus set X?",
+    "What are the main results in the network view?",
+    "The main result is wrong, why?",
+    "is the key result robust?",
+    "what are the main results of changing the PV size?",
+    "explain the key results of the paper I uploaded",
+    "summarize the results and then rerun with higher CO2 price",
+    "summary of the solver run",
+    "overview of the run log errors",
+    "what are the headline results from the literature on hydrogen?",
 ]
 
 
