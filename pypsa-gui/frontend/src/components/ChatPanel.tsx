@@ -58,7 +58,7 @@ import {
   type InterruptedTurn,
 } from '../api/chat'
 import { useChatProfiles, useChatReadiness, CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
-import { applyUiNavigate } from './uiNavigate'
+import { applyUiNavigate, navigationAnnouncement } from './uiNavigate'
 import { nk } from '../utils/queryKeys'
 import { mismatchSentence } from '../utils/projectMismatch'
 import { invalidateNetworkQueries, moveProjectLock } from '../utils/projectActions'
@@ -83,6 +83,7 @@ import type { ContinuationLine } from './AssistantResultCard'
 import { WorkbookDownloadCard } from './workbook/WorkbookChatCard'
 import * as speechOut from '../utils/speechOut'
 import { useUIStore, type UiMode } from '../store/uiStore'
+import type { resultsEvidenceApi } from '../api/resultsEvidence'
 import { networkApi } from '../api/network'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
 import { useSpeechToText } from '../hooks/useSpeechToText'
@@ -2689,6 +2690,14 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
         }>(frame)
         try {
           if (!applyUiNavigate(d, streamNavigationEpoch.current, { fromModelTurn: true })) break
+          // The run view's read, when already cached, names a past run by its start time.
+          const runView = d.kind === 'open_run_result' && d.run_id
+            ? qc.getQueryData<Awaited<ReturnType<typeof resultsEvidenceApi.run>>>(
+              nk(useUIStore.getState().currentProject, 'run-view', d.run_id, undefined, undefined))
+            : undefined
+          const shownLine = navigationAnnouncement(d,
+            runView?.binding.run_id === d.run_id ? runView?.data.started_at ?? null : null)
+          if (shownLine) useChatAnnouncer.getState().announce(shownLine)
           // SC-07 S5b R6: Site 3D says "Opened" only on its ACK; with none issued
           // (no network open, GK B V3) it cannot be confirmed.
           const siteNav = isSite3dNavigate(d) && d.tool_use_id ? d.tool_use_id : null
@@ -3044,8 +3053,19 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
       setPendingSendAttachIds(attachIds)
       return
     }
+    refocusAfterTurn.current = document.activeElement === textareaRef.current
     dispatchSend(text, attachIds)
   }, [input, streaming, notReady, mismatchLine, dispatchSend])
+  // A5.5: the composer is disabled while its turn streams, which drops its focus
+  // to the page. When the turn ends, focus goes back to it unless something else
+  // took it meanwhile (a navigation never does).
+  const refocusAfterTurn = useRef(false)
+  useEffect(() => {
+    if (streaming || !refocusAfterTurn.current) return
+    refocusAfterTurn.current = false
+    const a = document.activeElement
+    if (!a || a === document.body) textareaRef.current?.focus()
+  }, [streaming])
 
   const confirmSendWithAttachments = useCallback(() => {
     if (pendingSendText == null) return

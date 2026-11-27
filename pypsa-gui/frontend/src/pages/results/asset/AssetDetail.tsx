@@ -232,7 +232,7 @@ export default function AssetDetail() {
   }
 
   return (
-    <div className="flex h-full min-h-0">
+    <div data-testid="results-view-asset" className="flex h-full min-h-0">
       <div className="w-56 shrink-0"><AssetPicker
         assets={assets} selected={asset} onSelect={a => { setAsset(a); }} /></div>
 

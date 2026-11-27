@@ -3,7 +3,7 @@
 
 # GC-13 Pack manifest: plant ratings bound by the data hash
 
-Status: ready-for-agent
+Status: done
 Type: task
 Parent: `.scratch/grid-compliance/spec.md` (follow-up of GC-07, GK A2 condition K2d)
 Gated: yes (GK A, gridspine)
@@ -38,3 +38,47 @@ and reads every MVA-based case "unknown" unless the caller states a rated MVA an
 ## Triage (2026-11-20, master 87cf52a7)
 
 Checked by code reading only. Acceptance is the 'Done when' section above. Still true: the pack manifests record no plant rating. GC-07 read-back (done) already reads these channels in pu. Gated: GK A. Owner: GC-06 for the EMT pack, GC-04 for the PSS/E pack; slice per pack. Blocked by: none.
+
+## Done (2026-11-27, PR on `claude/gc13-pack-manifest-ratings`)
+
+- EMT pack (GC-06): `write_emt_pack(..., ratings=PackRatings(...))` writes `ratings.json`. The
+  file is listed with its SHA-256, so the `data_hash` binds it, and its four keys are repeated in
+  `manifest.json`.
+- Read-back (GC-07): `pack_ratings` refuses four cases: a ratings file whose SHA-256 is not the
+  manifest's entry, a missing file, a manifest copy that differs from the file, and rating keys
+  with no file. A rating that is not finite and > 0 is refused. `judge_pack` uses the pack's
+  ratings when present and refuses caller ratings that differ. P-based rows, Q-based rows
+  (`q_step`) and the header name `rating_source`.
+- `judge_pack_results` refuses a rated pack whose `campus_data_hash` is not the run's
+  (`run_data_hash`, naming both), and writes nothing.
+- `campus_data_hash` is `schema.model_set.model_hash` of the run's campus description. That is
+  the value a frozen model set holds as `model_hashes[variant]`. It is not the set's input
+  `data_hash`, because a run stores no freeze parameters to recompute that from.
+- The ratings are stated by the caller with a required `rating_source` (GK A R5, ruling A).
+  `campus_data_hash` proves which campus run the pack was built from, not that the ratings are
+  that campus's values: the campus does not name its plant. P-based rows, Q-based rows and the
+  header show each value next to its `rating_source`. Follow-up: GC-28
+  (`28-plant-ratings-from-campus.md`).
+- A rated pack's `data_hash` must recompute from its file list, so changing one byte of
+  `ratings.json` is refused even when its SHA-256 entry is updated. Unrated packs keep master's
+  path, report text and bytes.
+- Follow-up: the PSS/E pack's ratings go with GC-27, which makes that pack readable at all.
+
+## Comments
+
+- 2026-11-27, GK A (39): plan GO, one PR, on these conditions:
+  - R1, the hash: `run_data_hash` is cross-checked against a frozen set's `model_hashes[variant]`.
+    A one-value change to campus.yaml is refused, naming both hashes.
+  - R2, old packs: with `ratings=None` the pack is byte-equal to master (pinned), and an unrated
+    pack reads and judges as before.
+  - R3, equality guards: there is a killing case per compared field, in both the file-against-
+    manifest check and the caller-against-pack check. The hash is lowercase hex only, tested.
+  - R4, fail closed: each refusal is typed and tested. The compliance folder is unchanged after a
+    refusal. A missing campus.yaml is refused.
+  - R5, ratings against the campus: ruling A, with conditions (a) to (c). (a) The PR body says the
+    hash proves which campus, not the ratings. (b) Rows and header show `rating_source` next to the
+    value. (c) GC-28 is filed.
+  - R6, the header: `rating_source` text appears only for rated packs. Unrated reports keep their
+    text and hash.
+  - R7, scope: the PSS/E pack and the poll path are untouched. The PSS/E ratings and the #2058
+    end-sample risk go into GC-27. A release-note fragment is added.

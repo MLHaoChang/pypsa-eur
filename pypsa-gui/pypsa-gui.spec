@@ -91,6 +91,9 @@ datas = [
     # `services/` layout under _MEIPASS. Without them the app does not start.
     (str(BACKEND / "services" / "not_via_chat.json"), "services"),
     (str(BACKEND / "services" / "not_via_chat.d"), "services/not_via_chat.d"),
+    # One name per result figure (guided-results 04): `services/figure_words.py`
+    # reads `figure_words.json` beside itself at import; without it the app does not start.
+    (str(BACKEND / "services" / "figure_words.json"), "services"),
     # The Parameter guide (expert-catalogue 01a): `services/asset_schema/catalogue.py`
     # reads `guide/<id>.md` beside itself; without it every guide body is empty.
     (str(BACKEND / "services" / "asset_schema" / "guide"), "services/asset_schema/guide"),

@@ -950,7 +950,7 @@ export default function CapacityExpansion() {
   })()
 
   return (
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full results-scroll-clear [&>*]:shrink-0"
+    <div data-testid="results-view-capex" className="flex flex-col gap-5 p-5 overflow-y-auto h-full results-scroll-clear [&>*]:shrink-0"
       data-result-tab="capex" data-result-binding={displayed ? JSON.stringify(displayed.binding) : undefined}>
 
       {/* ── Upfront (PV) CAPEX unavailable ─────────────────────── */}

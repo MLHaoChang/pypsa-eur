@@ -32,10 +32,12 @@ const TONE: Record<KpiTone, string> = {
 }
 
 export default function Kpi({
-  label, value, unit, basis, hint, delta, deltaTone, headline, testId,
+  label, lead, value, unit, basis, hint, delta, deltaTone, headline, testId,
   state = 'ready', reason, action, link, fromStudy, valueLabel, dimmed, trend,
 }: {
   label: string
+  /** A plain lead line above the label, e.g. Guided's "What the design is worth" over the NPV's name. */
+  lead?: string
   value: string
   unit?: string
   /** What the figure covers: "annualised · whole horizon", "vs 3 h/yr goal". */
@@ -73,6 +75,7 @@ export default function Kpi({
       className={`@container flex h-full min-w-0 flex-col gap-1 rounded-[8px] border px-3 py-2.5
         ${headline ? 'border-border-2 bg-panel-2' : 'border-border bg-bg-2'}`}
     >
+      {lead && <div className="text-[11px] leading-snug text-muted [overflow-wrap:anywhere]">{lead}</div>}
       <div className="text-[12px] leading-snug text-muted [overflow-wrap:anywhere]">{label}</div>
       {showsFigure ? (
         <div

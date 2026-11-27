@@ -167,7 +167,7 @@ describe('Hand-off (R6)', () => {
     fireEvent.click(screen.getByTestId('results-cardtab-costs_prices'))
     fireEvent.click(within(screen.getByTestId('results-next-handoff')).getByRole('button'))
     expect(screen.getByTestId('reports-stub')).toBeTruthy()
-    expect(screen.getByTestId('results-group-handoff').getAttribute('aria-pressed')).toBe('true')
+    expect(screen.getByTestId('results-group-handoff').getAttribute('aria-current')).toBe('true')
   })
 
   it('with a past run on screen, Hand-off still shows its tabs beside the run chrome', async () => {

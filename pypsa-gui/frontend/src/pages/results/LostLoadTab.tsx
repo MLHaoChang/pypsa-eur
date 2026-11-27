@@ -198,7 +198,7 @@ export default function LostLoadTab() {
     const notRecorded = lostLoad != null && lostLoad.total_mwh == null
       && lostLoad.voll_applied !== false
     return (
-      <div className="flex flex-col h-full overflow-auto p-4 gap-4">
+      <div data-testid="results-view-lostload" className="flex flex-col h-full overflow-auto p-4 gap-4">
         <header>
           <h3 className="text-h3 font-semibold text-text">Lost load</h3>
         </header>
@@ -245,7 +245,7 @@ export default function LostLoadTab() {
   const periodLabel = filter.selectedPeriod != null ? `period ${filter.selectedPeriod}` : 'horizon'
 
   return (
-    <div className="flex flex-col h-full overflow-auto p-4 gap-4 results-scroll-clear">
+    <div data-testid="results-view-lostload" className="flex flex-col h-full overflow-auto p-4 gap-4 results-scroll-clear">
       {/* Truncated-window banner — see FIX 1 secondary in the
           results-tabs-window final review: a narrow-but-wide window can
           still hit the server's MAX_RESPONSE_VALUES cap. */}

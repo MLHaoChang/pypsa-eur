@@ -16,6 +16,7 @@ import { EditedSinceStudyBanner } from './EditedSinceStudyBanner'
 import { basisSuffix, type CoptPayload } from './adequacy'
 import { blockerMessage, ciRange, trim } from './McPanel'
 import { signFirstEuro } from '../../utils/format'
+import { figureHint, figureName } from '../../utils/figureWords'
 
 // ── The adequacy-coupled planning loop (Phase 7, plan §3 / spec §4) ──────────
 //
@@ -543,8 +544,8 @@ export function LoopPanel() {
                 </p>
               )}
               {payload.final && (
-                <span className="text-[10px] text-muted font-mono">
-                  final MC-LOLE{' '}
+                <span className="text-[10px] text-muted font-mono" title={figureHint('expected_shortfall')}>
+                  Final {figureName('expected_shortfall').toLowerCase()}{' '}
                   <span data-testid="loop-final-lole">
                     {loleCell(payload.final.mc, unit, floor)}
                   </span>
@@ -573,7 +574,7 @@ export function LoopPanel() {
                     <th className="text-left  font-medium py-1 pr-3">Solve</th>
                     <th className="text-left  font-medium py-1 pr-3">Bound by</th>
                     <th className="text-right font-medium py-1 pr-3">Cost</th>
-                    <th className="text-left  font-medium py-1 pr-3">MC-LOLE (95% CI)</th>
+                    <th className="text-left  font-medium py-1 pr-3" title={figureHint('expected_shortfall')}>{figureName('expected_shortfall')} (95% CI)</th>
                     <th className="text-left  font-medium py-1">Note</th>
                   </tr>
                 </thead>
