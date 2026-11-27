@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant's wait on a study, report or queued job now reports the job's own outcome (running, completed, failed, partly done when a loop missed its target), read independently of the tool's reply, instead of "cannot be checked yet". A stopped job reads cancelled only once its work is known to have stopped; otherwise it reads as stopping.
