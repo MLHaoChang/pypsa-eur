@@ -88,6 +88,10 @@ try {
   assert(imported.ok(), `NetCDF import failed: ${imported.status()}`)
   const saved = await context.request.post(base + '/api/projects/oj-grid', { headers })
   assert(saved.ok(), `Native project creation failed: ${saved.status()}`)
+  // A missing site location blocks Run (template-e2e 01): confirm the fixture's site coordinates.
+  const anchored = await context.request.put(base + '/api/projects/oj-grid/site-anchor', { headers,
+    data: { anchor: { lat: 52.52, lng: 13.4, source: 'manual', confirmed: true }, expected_revision: 0 } })
+  assert(anchored.ok(), `Site anchor failed: ${anchored.status()}`)
   await context.route(url => ['http:', 'https:'].includes(url.protocol) && url.hostname !== '127.0.0.1', route => route.abort())
   await page.addInitScript(() => {
     localStorage.setItem('network-diagram:current-project', 'oj-grid')

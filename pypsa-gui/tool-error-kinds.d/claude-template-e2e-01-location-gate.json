@@ -1,0 +1,1 @@
+{"kinds": {"site_location_missing": {"surface": "inline", "why": "run_simulation, run_ac_pf_stage and the reliability study start refuse before starting: no bus is placed and the site coordinates are not confirmed. The assistant asks for the site's latitude and longitude (the Site coordinates drawer, or the site-anchor tool) and runs again."}}}

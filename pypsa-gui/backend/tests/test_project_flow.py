@@ -170,9 +170,7 @@ def test_project_section(client, site, edit):
         n.snapshot_weightings.loc[:, "objective"] = 8760 / 24
         n.buses[["x", "y"]] = 0.0
     body = _flow(client, name)
-    assert _states(body)["project"] == "warning"               # no site location
-    assert _codes(body, "project") == ["site_location_missing"]
-    assert body["run_ready"] is True                           # W3: warnings never block
+    assert _states(body)["project"] == "complete"              # located by the anchor
 
 
 def _unplaced_wind_site() -> pypsa.Network:
@@ -259,6 +257,7 @@ def test_profile_location_ignores_non_renewables(client, site):
     assert "profile_location_missing" not in _codes(body, "profiles")
 
 
+@pytest.mark.unlocated
 def test_profile_location_defers_to_site_location_missing(client, site, edit):
     name = site(_unplaced_wind_site())
     with edit() as n:
@@ -635,9 +634,8 @@ def test_r4_study_with_voll_zero(client, tmp_projects_dir, monkeypatch):
     assert body["run_blocker"]["section"] == "scenarios"
     assert body["run_blocker"]["target"]["field"] == "voll"
     assert "presence_voll" not in _codes(body, "scenarios")
-    # The template's buses are unplaced: the location is a note; section 8
-    # is the blocker, not a note.
-    assert {x["section"] for x in body["notes"]} == {"project"}
+    # Section 8 is the blocker, not a note.
+    assert body["notes"] == []
 
 
 def test_a_two_way_grid_import_is_refused_by_the_commercial_binding_first(
@@ -711,12 +709,13 @@ def test_r4_in_flight(client, site, monkeypatch):
 # import_efficiency, fault_level and lole_goal), and the site location is a
 # warning by the brief's rule (the validator does not require it).
 TEMPLATE_STATES = {
-    # R location → warning (site_location_missing). R connection limits and
+    # R location → blocking error unless set (site_location_missing); the
+    # tests below create them located. R connection limits and
     # ramp, R LOLE goal: DC 02's assumed ledger rows → connection and
     # scenarios warning ("to check"). Its shipped finance inputs and tax rule
     # (WALK-IMPROVE-1 b) are assumed ledger rows → commercial warning; the
     # existing campus typed sunk (overnight cost 0) is one → assets warning.
-    "eh_datacenter": {"project": "warning", "carriers": "complete",
+    "eh_datacenter": {"project": "complete", "carriers": "complete",
                       "connection": "warning", "loads": "complete",
                       "assets": "warning", "profiles": "complete",
                       "commercial": "warning", "scenarios": "warning"},
@@ -729,7 +728,7 @@ TEMPLATE_STATES = {
     # Ammonia (#418): electricity, H2 and NH3 pre-filled. Its assumed rows
     # (energization; tanks, electrolyser, UC; finance and the NH3 value) read warning,
     # and so do the study's assumed site type and draws (template-e2e 08).
-    "eh_ammonia_staged": {"project": "warning", "carriers": "complete",
+    "eh_ammonia_staged": {"project": "complete", "carriers": "complete",
                           "connection": "warning", "loads": "complete",
                           "assets": "warning", "profiles": "complete",
                           "commercial": "warning", "scenarios": "warning"},
@@ -768,7 +767,7 @@ def test_generic_site_states_at_create(client, tmp_projects_dir):
     # and the energization schedule (connection), the critical share (loads),
     # the existing site (assets), the money year (commercial).
     assert {s: states[s] for s in INPUTS} == {
-        "project": "warning", "carriers": "complete", "connection": "warning",
+        "project": "complete", "carriers": "complete", "connection": "warning",
         "loads": "warning", "assets": "warning", "profiles": "complete",
         # The study's assumed site type and draws (template-e2e 08).
         "commercial": "warning", "scenarios": "warning"}
@@ -857,16 +856,59 @@ def test_the_assistant_tool_returns_the_endpoints_payload(client, site, bound_ct
     assert out == expected
 
 
-def test_a_missing_location_is_a_note_beside_an_enabled_run(client, site, edit):
-    """Design §3.3: "Run is enabled with a note when only display-only gaps
-    remain ('Project & site: no location')"."""
+@pytest.mark.unlocated
+def test_a_missing_location_blocks_run_until_it_is_set(client, site, edit):
+    """TEMPLATE-GAPS-1 Q1 (a): no bus placed and no confirmed site anchor →
+    section 1 incomplete, Run blocked on the location; confirming the site
+    coordinates (the anchor) clears it, as does placing a bus."""
     name = site()
     with edit() as n:
         n.buses[["x", "y"]] = 0.0
     body = _flow(client, name)
-    assert body["run_ready"] is True
-    assert [x["section"] for x in body["notes"]] == ["project"]
-    assert body["notes"][0]["message"].startswith("Project & site: ")
+    assert _states(body)["project"] == "incomplete"
+    assert _codes(body, "project") == ["site_location_missing"]
+    assert body["run_ready"] is False
+    assert body["run_blocker"]["section"] == "project"
+    assert body["run_blocker"]["code"] == "site_location_missing"
+    # Parity (L3): the server's start paths answer the same, typed and field-pointed.
+    def refused():
+        r = client.post("/api/simulation/run")
+        assert r.status_code == 422, r.text
+        d = r.json()["detail"]
+        assert d["code"] == d["error_kind"] == "site_location_missing" and d["field"] == "x"
+        for path, body in (("/api/simulation/run_ac_pf", None), ("/api/results/eh_study", {})):
+            r = client.post(path, json=body) if body is not None else client.post(path)
+            assert r.status_code == 422, (path, r.text)
+            d = r.json()["detail"]
+            assert isinstance(d, dict) and d["code"] == d["error_kind"] == "site_location_missing", (path, d)
+    refused()
+    put = lambda confirmed: client.put(f"/api/projects/{name}/site-anchor", json={
+        "anchor": {"lat": 52.52, "lng": 13.4, "source": "manual", "confirmed": confirmed},
+        "expected_revision": client.get(f"/api/projects/{name}/site-anchor").json()["revision"]})
+    assert put(False).status_code == 200                       # a draft locates nothing
+    assert _flow(client, name)["run_ready"] is False
+    refused()
+    assert put(True).status_code == 200
+    body = _flow(client, name)
+    assert _states(body)["project"] == "complete"
+    assert body["run_ready"] is True and body["notes"] == []
+    assert "site_location_missing" not in _codes(body, "project")
+    assert client.post("/api/simulation/run").status_code == 200   # the server agrees
+    # Located: the study start no longer refuses with the location code.
+    r = client.post("/api/results/eh_study", json={})
+    detail = r.json().get("detail") if r.status_code == 422 else None
+    assert not (isinstance(detail, dict) and detail.get("code") == "site_location_missing")
+
+
+@pytest.mark.unlocated
+@pytest.mark.parametrize("tid", ["eh_datacenter", "eh_h2_hub", "eh_microgrid", "eh_ipp_hybrid",
+                                 "eh_ammonia_staged"])
+def test_each_template_section_one_without_and_with_a_location(client, tmp_projects_dir, tid):
+    name = _create(client, tid, "loc")
+    body = _flow(client, name)
+    assert _states(body)["project"] == "incomplete"
+    assert body["run_ready"] is False
+    assert body["run_blocker"]["code"] == "site_location_missing"
 
 
 def test_a_held_network_lock_defers_the_flow_instead_of_waiting(client, tmp_projects_dir,
