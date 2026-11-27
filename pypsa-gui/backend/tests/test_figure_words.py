@@ -178,6 +178,25 @@ def test_the_investment_table_names_npv_and_lcoe_as_the_one_source_does():
     assert FW.name("lcoe_real") not in rows and "LCOE" not in rows
 
 
+def test_the_pre_tax_npv_row_is_named_by_the_one_source():
+    payload, rows = _investment()
+    assert FW.name("project_npv_pre_tax") in rows
+    assert "NPV before tax" not in rows
+    assert rows[FW.name("project_npv_pre_tax")] == F.fmt_number(
+        payload["project_pre_tax_npv_eur"], unit="EUR"
+    )
+
+
+def test_the_datacenter_returns_rule_names_the_npv_as_the_one_source_does():
+    from services import run_profiles
+
+    rules = {
+        r["id"]: r
+        for r in run_profiles.resolve("eh_datacenter_staged@1")["stages"]["result_gate"]["rules"]
+    }
+    assert FW.name("project_npv") in rules["dc.ic.returns"]["basis"]
+
+
 def test_a_usd_case_prints_no_euro_and_a_missing_currency_says_report_currency():
     _payload, rows = _investment(currency="USD")
     assert "€" not in json.dumps(rows, ensure_ascii=False) and "EUR" not in json.dumps(
