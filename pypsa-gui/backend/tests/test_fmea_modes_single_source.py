@@ -394,3 +394,25 @@ def test_study_args_need_an_fmea_top_payload():
     no_payload: dict = {}
     _store_into(no_payload, None, status="skipped")
     assert study_fmea_args(no_payload) == {}
+
+
+def test_the_sweeps_restore_and_error_travel_with_the_study_rows(study, monkeypatch):
+    """A sweep older than the study whose closing re-solve failed still says so."""
+    monkeypatch.setitem(
+        R._state,
+        "fmea_sweep",
+        {
+            **_done_sweep(500.0, status="aborted"),
+            "base_restored": False,
+            "base_restore_status": "infeasible",
+            "error": "stopped",
+        },
+    )
+    out = R.get_fmea_modes()
+    assert out["source"] == "eh_study"
+    assert (
+        out["sweep_status"],
+        out["sweep_base_restored"],
+        out["sweep_base_restore_status"],
+        out["sweep_error"],
+    ) == ("aborted", False, "infeasible", "stopped")
