@@ -11,7 +11,7 @@ interface Figure { name: string; unit: string; tag?: string; basis?: string }
 const FIGURES: Record<FigureId, Figure> = source.figures
 
 const fill = (text: string, currency?: string | null, money?: string | null) =>
-  text.replace('{currency}', currency || 'report currency').replace('{money}', money || '')
+  text.replace(/\{currency\}/g, currency || 'report currency').replace(/\{money\}/g, money || '')
 
 /** The figure's one name, e.g. "Expected shortfall". */
 export const figureName = (id: FigureId): string => FIGURES[id].name
