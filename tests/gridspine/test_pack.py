@@ -1,6 +1,7 @@
 """GC-07 part 5: pack read-back (``readback/pack.py``, ``drivers/readback.py``)."""
 
 import csv
+import dataclasses
 import hashlib
 import json
 
@@ -10,6 +11,7 @@ import pytest
 from gridspine.drivers.readback import (
     RATED_MW_SOURCE,
     judge_pack_results,
+    run_data_hash,
     run_ratings,
 )
 from gridspine.handoff.test_battery import (
@@ -800,70 +802,168 @@ def test_a_written_emt_pack_is_read_and_judged(tmp_path):
 # --- GC-13: the pack's own ratings, bound to the campus run ---------------------------------------
 
 SOURCE = "plant nameplate (test)"
+RATED = {
+    "rated_mw": 100.0,
+    "rated_mva": 50.0,
+    "rating_source": SOURCE,
+    "campus_data_hash": "a" * 64,
+}
+PACK_RATINGS = Ratings(100.0, SOURCE, 50.0, SOURCE)
+P_BASE = f"rated P 100 MW = {SOURCE}; pack ratings.json"
+Q_BASE = f"rated MVA 50 MVA = {SOURCE}; pack ratings.json"
 
 
-def _rated(tmp_path, campus_hash="a" * 64, doc=None, manifest_doc=None):
-    """``_full_pack`` written with ratings (``ratings.json`` hashed, keys in the manifest)."""
+def _files_hash(files):
+    text = "".join(f"{n}:{h}\n" for n, h in sorted(files.items()))
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def _rated(tmp_path, doc=None, manifest_doc=None, **over):
+    """``_full_pack`` written with ratings: ``ratings.json`` hashed, its keys in the manifest."""
     pack = _full_pack(tmp_path)
-    doc = doc or {
-        "rated_mw": 100.0,
-        "rated_mva": 50.0,
-        "rating_source": SOURCE,
-        "campus_data_hash": campus_hash,
-    }
+    doc = {**RATED, **over} if doc is None else doc
     text = json.dumps(doc)
     (pack / "ratings.json").write_text(text)
     m = json.loads((pack / "manifest.json").read_text())
     m["files"]["ratings.json"] = hashlib.sha256(text.encode()).hexdigest()
-    m.update(manifest_doc or doc)
+    m["data_hash"] = _files_hash(m["files"])
+    m.update(doc if manifest_doc is None else manifest_doc)
     (pack / "manifest.json").write_text(json.dumps(m))
     return pack
+
+
+def _edit_manifest(pack, **changes):
+    m = json.loads((pack / "manifest.json").read_text())
+    m.update(changes)
+    (pack / "manifest.json").write_text(json.dumps(m))
 
 
 def test_a_rated_pack_is_judged_on_its_ratings_without_caller_input(tmp_path):
     pack = _rated(tmp_path)
     j = judge_pack(pack, PROFILE)
-    assert j == judge_pack(pack, PROFILE, Ratings(100.0, SOURCE, 50.0, SOURCE))
+    assert j == judge_pack(pack, PROFILE, PACK_RATINGS)
     h = j["header"]
+    assert h["ratings"] == {
+        "rated_mw": 100.0,
+        "mw_source": SOURCE,
+        "rated_mva": 50.0,
+        "mva_source": SOURCE,
+    }
     assert h["rating_source"] == SOURCE and h["campus_data_hash"] == "a" * 64
-    assert h["rated_p_base"] == f"rated P = {SOURCE}"
-    assert h["rated_mva_base"] == f"rated MVA = {SOURCE}"
+    assert h["rated_p_base"] == P_BASE and h["rated_mva_base"] == Q_BASE
     by = _by_id(j)
     for cid, base in (
-        ("p_step_skmin_xrmin_up", f"rated P = {SOURCE}"),
-        ("q_step_skmin_xrmin_up", f"rated MVA = {SOURCE}"),
-        ("f_step_skmin_xrmin_up", f"rated P = {SOURCE}"),
+        ("p_step_skmin_xrmin_up", P_BASE),
+        ("q_step_skmin_xrmin_up", Q_BASE),
+        ("f_step_skmin_xrmin_up", P_BASE),
+        ("fault_3ph_skmin_xrmin_v030", P_BASE),
     ):
-        judged = [r for r in by[cid]["rows"] if r["check"] != "stays_connected"]
-        assert judged and all(base in r["detail"] for r in judged), cid
-    # an unrated pack keeps the caller's ratings and states no source of its own
-    plain = judge_pack(_full_pack(tmp_path / "plain"), PROFILE, RATINGS)["header"]
-    assert plain["rating_source"] is None and plain["campus_data_hash"] is None
+        rated = [r for r in by[cid]["rows"] if base in r["detail"]]
+        assert rated, cid
+    # the q_step's three checks read Q in pu of the rated MVA and say so
+    q = _rows(by["q_step_skmin_xrmin_up"])
+    assert all(
+        Q_BASE in q[c]["detail"] for c in ("rise_time", "settling_time", "overshoot")
+    )
+    assert Q_BASE not in q["stays_connected"]["detail"]
 
 
-def test_caller_ratings_that_differ_from_the_pack_are_refused(tmp_path):
+def test_an_unrated_pack_keeps_its_report(tmp_path):
+    # GK A R6: no ratings source text on Q rows and no new header keys for a pack without ratings
+    j = judge_pack(_full_pack(tmp_path), PROFILE, RATINGS)
+    assert "rating_source" not in j["header"] and "campus_data_hash" not in j["header"]
+    assert j["header"]["rated_p_base"] == "rated P = test plant"
+    assert j["header"]["rated_mva_base"] == "rated MVA = test plant"
+    by = _by_id(j)
+    assert not any(
+        "rated MVA" in r["detail"] for r in by["q_step_skmin_xrmin_up"]["rows"]
+    )
+    p = _rows(by["p_step_skmin_xrmin_up"])
+    assert "rated P = test plant" in p["rise_time"]["detail"]
+    assert all(
+        "pack ratings.json" not in r["detail"] for c in j["cases"] for r in c["rows"]
+    )
+    # and an unrated pack with a fake data_hash still reads (master's path)
+    assert read_manifest(_full_pack(tmp_path / "b"))["data_hash"] == "d" * 64
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("rated_mw", 90.0),
+        ("mw_source", "other"),
+        ("rated_mva", 40.0),
+        ("mva_source", "other"),
+    ],
+)
+def test_caller_ratings_that_differ_from_the_pack_in_any_field_are_refused(
+    tmp_path, field, value
+):
+    caller = Ratings(**{**dataclasses.asdict(PACK_RATINGS), field: value})
     with pytest.raises(ContractError, match="differ from the pack's"):
-        judge_pack(_rated(tmp_path), PROFILE, Ratings(90.0, "other", 50.0, "other"))
+        judge_pack(_rated(tmp_path), PROFILE, caller)
 
 
-@pytest.mark.parametrize("bad", [0, -1.0, float("nan"), float("inf"), "100", True, None])
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("rated_mw", 120.0),
+        ("rated_mva", 60.0),
+        ("rating_source", "other"),
+        ("campus_data_hash", "b" * 64),
+    ],
+)
+def test_a_manifest_copy_that_differs_from_ratings_json_in_any_field_is_refused(
+    tmp_path, field, value
+):
+    pack = _rated(tmp_path, manifest_doc={**RATED, field: value})
+    with pytest.raises(ContractError, match="ratings differ"):
+        read_manifest(pack)
+
+
+@pytest.mark.parametrize(
+    "bad", [0, -1.0, float("nan"), float("inf"), "100", True, None]
+)
 def test_a_pack_rating_that_is_not_finite_and_positive_is_refused(tmp_path, bad):
-    doc = {"rated_mw": bad, "rated_mva": 50.0, "rating_source": SOURCE, "campus_data_hash": "a" * 64}
-    pack = _rated(tmp_path, doc=doc)
-    with pytest.raises(ContractError, match="rated_mw must be a finite number > 0"):
-        judge_pack(pack, PROFILE)
+    for name in ("rated_mw", "rated_mva"):
+        pack = _rated(tmp_path / name, **{name: bad})
+        with pytest.raises(ContractError, match=f"{name} must be a finite number > 0"):
+            judge_pack(pack, PROFILE)
+
+
+@pytest.mark.parametrize(
+    "over, match",
+    [
+        ({"rating_source": " "}, "rating_source must be stated"),
+        (
+            {"campus_data_hash": "A" * 64},
+            "64 hex digits",
+        ),  # lowercase only, as model_hash gives
+        ({"campus_data_hash": "a" * 63}, "64 hex digits"),
+    ],
+)
+def test_a_blank_source_or_a_malformed_hash_is_refused(tmp_path, over, match):
+    with pytest.raises(ContractError, match=match):
+        judge_pack(_rated(tmp_path, **over), PROFILE)
 
 
 def test_unbound_or_altered_ratings_are_refused(tmp_path):
+    # one byte changed in ratings.json, its files entry left: SHA-256 mismatch
     pack = _rated(tmp_path / "a")
-    (pack / "ratings.json").write_text((pack / "ratings.json").read_text().replace("100.0", "120.0"))
+    text = (pack / "ratings.json").read_text()
+    (pack / "ratings.json").write_text(text.replace("100.0", "100.1"))
     with pytest.raises(ContractError, match="ratings.json's SHA-256"):
         read_manifest(pack)
-    pack = _rated(tmp_path / "b")
+    # ... its files entry updated too, but not the data_hash: the hash no longer binds it
     m = json.loads((pack / "manifest.json").read_text())
-    m["rated_mw"] = 120.0
+    m["files"]["ratings.json"] = hashlib.sha256(
+        (pack / "ratings.json").read_bytes()
+    ).hexdigest()
+    m["rated_mw"] = 100.1
     (pack / "manifest.json").write_text(json.dumps(m))
-    with pytest.raises(ContractError, match="ratings differ"):
+    with pytest.raises(
+        ContractError, match="data_hash is not the hash of its file list"
+    ):
         read_manifest(pack)
     pack = _pack(tmp_path / "c", _battery(), {"rated_mw": 100.0})
     with pytest.raises(ContractError, match="lists no ratings.json"):
@@ -872,35 +972,85 @@ def test_unbound_or_altered_ratings_are_refused(tmp_path):
     (pack / "ratings.json").unlink()
     with pytest.raises(ContractError, match="ratings.json is missing"):
         judge_pack(pack, PROFILE)
+    pack = _rated(tmp_path / "e")
+    (pack / "ratings.json").write_text(json.dumps({**RATED, "extra": 1}))
+    m = json.loads((pack / "manifest.json").read_text())
+    m["files"]["ratings.json"] = hashlib.sha256(
+        (pack / "ratings.json").read_bytes()
+    ).hexdigest()
+    m["data_hash"] = _files_hash(m["files"])
+    (pack / "manifest.json").write_text(json.dumps(m))
+    with pytest.raises(ContractError, match="must hold exactly"):
+        judge_pack(pack, PROFILE)
 
 
-def _run(tmp_path):
+def _run(tmp_path, spec=None):
     import yaml
 
-    from gridspine.schema.model_set import model_hash
+    from tests.gridspine.test_campus import campus_spec
 
     run = tmp_path / "run"
-    run.mkdir()
-    spec = {"name": "test campus", "pcc": {"p_connection_mw": 80.0}}
+    run.mkdir(exist_ok=True)
+    spec = campus_spec() if spec is None else spec
     (run / "campus.yaml").write_text(yaml.safe_dump(spec))
-    return run, model_hash(spec)
+    return run, spec
+
+
+def test_run_data_hash_is_the_frozen_model_sets_model_hash(tmp_path):
+    # GK A R1: a change to run_data_hash or to the freeze's model hash breaks this
+    from gridspine.ingest.aggregate import freeze
+
+    run, spec = _run(tmp_path)
+    ms = freeze(spec, {"study": "gc13"}, aggregated=False)
+    assert run_data_hash(run) == ms.model_hashes["detailed"]
+    assert (
+        run_data_hash(run) != ms.data_hash
+    )  # the set's input hash also covers its params
 
 
 def test_driver_judges_a_rated_pack_for_the_run_it_was_built_from(tmp_path):
-    run, h = _run(tmp_path)
-    j = judge_pack_results(run, _rated(tmp_path, campus_hash=h), PROFILE)
+    run, _ = _run(tmp_path)
+    h = run_data_hash(run)
+    j = judge_pack_results(run, _rated(tmp_path, campus_data_hash=h), PROFILE)
     assert j["header"]["campus_data_hash"] == h
-    assert j["header"]["ratings"]["rated_mw"] == 100.0  # the pack's, not the run's 80 MW connection
+    assert j["header"]["ratings"]["rated_mw"] == 100.0
+
+
+def _snapshot(folder):
+    return (
+        {p.name: p.read_bytes() for p in folder.iterdir()} if folder.exists() else None
+    )
 
 
 def test_driver_refuses_a_pack_built_from_another_run_naming_both_hashes(tmp_path):
-    run, h = _run(tmp_path)
-    other = "b" * 64
+    import yaml
+
+    run, spec = _run(tmp_path)
+    h = run_data_hash(run)
+    judge_pack_results(run, _rated(tmp_path / "ok", campus_data_hash=h), PROFILE)
+    before = _snapshot(run / "compliance")
+    assert sorted(before) == ["judgment.csv", "judgment.json"]
+    # one value changed in the run's campus: the pack is another run's
+    spec["campus"]["name"] = f"{spec['campus'].get('name', '')} edited"
+    (run / "campus.yaml").write_text(yaml.safe_dump(spec))
+    h2 = run_data_hash(run)
+    assert h2 != h
     with pytest.raises(ContractError) as exc:
-        judge_pack_results(run, _rated(tmp_path, campus_hash=other), PROFILE)
-    assert other in str(exc.value) and h in str(exc.value)
-    assert not (run / "compliance").exists()
-    # a run with no campus description cannot be matched, so a rated pack is refused
-    (run / "campus.yaml").unlink()
-    with pytest.raises(ContractError, match="cannot read this run's campus"):
-        judge_pack_results(run, _rated(tmp_path / "x", campus_hash=h), PROFILE)
+        judge_pack_results(run, _rated(tmp_path / "x", campus_data_hash=h), PROFILE)
+    assert h in str(exc.value) and h2 in str(exc.value)
+    assert _snapshot(run / "compliance") == before  # nothing written, no partial file
+    # a run with no campus description, or one that is not a mapping, cannot be matched
+    for i, text in enumerate((None, "", "- a list\n")):
+        if text is None:
+            (run / "campus.yaml").unlink()
+        else:
+            (run / "campus.yaml").write_text(text)
+        with pytest.raises(ContractError, match="cannot read this run's campus"):
+            judge_pack_results(
+                run, _rated(tmp_path / f"y{i}", campus_data_hash=h), PROFILE
+            )
+        assert _snapshot(run / "compliance") == before
+    # an unrated pack needs no campus description (master's path)
+    judge_pack_results(
+        tmp_path / "bare", _full_pack(tmp_path / "plain"), PROFILE, RATINGS
+    )

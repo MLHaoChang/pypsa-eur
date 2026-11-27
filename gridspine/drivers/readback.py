@@ -88,7 +88,10 @@ def run_data_hash(run_dir) -> str:
 
     path = Path(run_dir) / CAMPUS_YAML
     try:
-        return model_hash(yaml.safe_load(path.read_text(encoding="utf-8")))
+        spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(spec, dict):
+            raise ContractError(f"{CAMPUS_YAML} is not a mapping")
+        return model_hash(spec)
     except (ContractError, OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
         raise ContractError(f"{run_dir}: cannot read this run's campus ({exc})") from exc
 

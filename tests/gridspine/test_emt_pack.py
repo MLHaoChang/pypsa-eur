@@ -887,13 +887,43 @@ def test_ratings_are_written_hashed_and_change_the_data_hash(tmp_path):
     assert json.loads((p.path / RATINGS_JSON).read_text()) == r.as_dict()
     assert {k: m[k] for k in r.as_dict()} == r.as_dict()
     assert m["data_hash"] != pack(tmp_path / "none").manifest["data_hash"]
+    assert m["data_hash"] == read_pack_hash(m["files"])
     other = PackRatings(91.0, 99.0, "plant nameplate (test)", "a" * 64)
     assert m["data_hash"] != pack(tmp_path / "b", ratings=other).manifest["data_hash"]
     assert m["data_hash"] == pack(tmp_path / "c", ratings=r).manifest["data_hash"]
     # read-back judges the written pack on its own ratings, with no caller input
     header = judge_pack(p.path, {})["header"]
-    assert header["ratings"]["rated_mw"] == 90.0 and header["ratings"]["rated_mva"] == 99.0
+    assert (
+        header["ratings"]["rated_mw"] == 90.0 and header["ratings"]["rated_mva"] == 99.0
+    )
     assert header["rating_source"] == "plant nameplate (test)"
     assert header["campus_data_hash"] == "a" * 64
     with pytest.raises(ContractError, match="PackRatings"):
         pack(tmp_path / "d", ratings={"rated_mw": 90.0})
+
+
+#: master's EMT pack (before GC-13) for ``pack(tmp_path)``: its data_hash and manifest SHA-256.
+MASTER_DATA_HASH = "1799b3857f44f1c9ff9b9b3704572bfd58a5200b613d5cef6cfa867b6f8809e5"
+MASTER_MANIFEST_SHA = "c830bd4549965f2354c2d8fec2442239536883c961f7db3df52dd2f7ba0b7d9f"
+
+
+def read_pack_hash(files):
+    from gridspine.readback.pack import _files_hash
+
+    return _files_hash(files)
+
+
+def test_a_pack_without_ratings_is_byte_equal_to_master(tmp_path):
+    # GK A R2: ratings=None writes what master wrote; no ratings file, no rating keys
+    from gridspine.handoff.test_battery import RATING_KEYS, RATINGS_JSON
+
+    p = pack(tmp_path)
+    assert p.manifest["data_hash"] == MASTER_DATA_HASH
+    assert (
+        hashlib.sha256((p.path / "manifest.json").read_bytes()).hexdigest()
+        == MASTER_MANIFEST_SHA
+    )
+    assert (
+        RATINGS_JSON not in p.manifest["files"] and not (p.path / RATINGS_JSON).exists()
+    )
+    assert not set(RATING_KEYS) & set(p.manifest)

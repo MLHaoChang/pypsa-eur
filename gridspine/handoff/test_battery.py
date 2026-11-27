@@ -901,11 +901,20 @@ class PackRatings:
     def __post_init__(self):
         for name in ("rated_mw", "rated_mva"):
             v = getattr(self, name)
-            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v <= 0:
-                raise ContractError(f"pack ratings: {name} must be a finite number > 0, got {v!r}")
+            if (
+                isinstance(v, bool)
+                or not isinstance(v, (int, float))
+                or not math.isfinite(v)
+                or v <= 0
+            ):
+                raise ContractError(
+                    f"pack ratings: {name} must be a finite number > 0, got {v!r}"
+                )
         if not isinstance(self.rating_source, str) or not self.rating_source.strip():
             raise ContractError("pack ratings: rating_source must be stated")
-        if not isinstance(self.campus_data_hash, str) or not _HASH.fullmatch(self.campus_data_hash):
+        if not isinstance(self.campus_data_hash, str) or not _HASH.fullmatch(
+            self.campus_data_hash
+        ):
             raise ContractError(
                 f"pack ratings: campus_data_hash must be 64 hex digits, got {self.campus_data_hash!r}"
             )
@@ -917,8 +926,12 @@ class PackRatings:
 def ratings_json(ratings: PackRatings) -> str:
     """Deterministic ``ratings.json`` text: the same ratings give byte-equal text."""
     if not isinstance(ratings, PackRatings):
-        raise ContractError(f"pack ratings must be a PackRatings, got {type(ratings).__name__}")
-    return json.dumps(ratings.as_dict(), indent=1, sort_keys=True, allow_nan=False) + "\n"
+        raise ContractError(
+            f"pack ratings must be a PackRatings, got {type(ratings).__name__}"
+        )
+    return (
+        json.dumps(ratings.as_dict(), indent=1, sort_keys=True, allow_nan=False) + "\n"
+    )
 
 
 def ratings_from_json(text: str) -> PackRatings:
