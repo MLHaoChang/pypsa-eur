@@ -176,6 +176,11 @@ def _before(raw, a):
     return raw["e_initial"], False
 
 
+def _efficiency(t, w, loss, lossy):
+    """eff = (1 - sl)^w, or 1 at the first snapshot when the start is e_initial."""
+    return (1.0 - loss) ** w if lossy or t else 1.0
+
+
 def _guard(raw, a, b, capacity):
     """The first reason no figure can stand, or None."""
     weights = raw["energy_weight"][a : b + 1]
@@ -185,15 +190,15 @@ def _guard(raw, a, b, capacity):
         return "invalid_or_missing_raw_data"
     p, e, sl = (raw[k][a : b + 1] for k in ("p", "e", "standing_loss"))
     bounds = (raw["e_min_pu"][a : b + 1], raw["e_max_pu"][a : b + 1])
-    if not all(map(profile_common.finite, (p, e, sl, [_before(raw, a)[0]]))) or (
+    previous, lossy = _before(raw, a)
+    if not all(map(profile_common.finite, (p, e, sl, [previous]))) or (
         capacity is not None and not all(map(profile_common.finite, bounds))
     ):
         return "invalid_or_missing_raw_data"
     if any(not 0.0 <= x < 1.0 for x in sl):
         return "unsupported_standing_loss"
-    previous, lossy = _before(raw, a)
     for t, (w, x, now, loss) in enumerate(zip(weights, p, e, sl)):
-        eff = (1.0 - loss) ** w if lossy or t else 1.0
+        eff = _efficiency(t, w, loss, lossy)
         if abs(now - (eff * previous - w * x)) > BALANCE_TOLERANCE * max(1.0, abs(now)):
             return "inconsistent_store_balance"
         previous = now
@@ -237,7 +242,7 @@ def calculate(raw, scope):
         start, lossy = _before(raw, a)
         held = [start, *e[:-1]]
         terms = [
-            (1.0 - ((1.0 - loss) ** w if lossy or t else 1.0), before)
+            (1.0 - _efficiency(t, w, loss, lossy), before)
             for t, (w, loss, before) in enumerate(zip(weights, sl, held))
         ]
         if any(share > 0.0 and before < -NEAR_ZERO for share, before in terms):

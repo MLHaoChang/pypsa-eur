@@ -597,10 +597,10 @@ def test_a_zero_weight_snapshot_still_counts_for_the_peak():
 
 
 def test_a_store_that_never_charges_has_zero_charge_exactly():
-    values, _ = _slots(_hand_raw([1.0, 0.0, 2.0], e_initial=20.0))
+    values, _ = _slots(_hand_raw([1.0, 0.5, 2.0], e_initial=20.0))
     assert values["peak_store_charging"] == 0.0
     assert values["store_charged_energy"] == 0.0
-    assert values["store_net_energy"] == 3.0
+    assert values["store_net_energy"] == 3.5
 
 
 # ── refusals, identity and grammar ────────────────────────────────────────

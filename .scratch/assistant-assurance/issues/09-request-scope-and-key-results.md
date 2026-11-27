@@ -142,3 +142,8 @@ S5 adds `store-dispatch/1` (opt-in): one named Store's charged, discharged and n
 loss, peaks, final energy and fill of `e_nom_opt`, on the store weights, under GK B (75)'s plan GO.
 With S1 (#2066), S3 (#2073), S2 (#2098) and S4 (#2108) this closes the package. See the
 [coverage ledger](../coverage-ledger.md). Independent domain approval stays false.
+
+Closed on the AA 09 package scope the coordinator set. The open items named in the earlier comments
+are not done by these packages: arbitrary-language scope beyond the bounded grammar, broader storage
+economics, and calibration and release gates. Each needs its own issue if it is still wanted. The
+"remain incomplete" line under Completion and handoff describes the state before these packages.
