@@ -135,7 +135,7 @@ function LcoeFigure({ read }: { read: { kind: 'card'; card: HeadlineCard | null 
   // (one entry point per destination, UX 23, 5).
   return (
     <Kpi headline testId="hub-results-lcoe" label={words.label} value={value} basis={basis}
-      state={cardState(card)} reason={card.reason ?? undefined} />
+      caveat={card.caveat} state={cardState(card)} reason={card.reason ?? undefined} />
   )
 }
 

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): An LCOE (real) above EUR 300/MWh keeps its value and gains a muted caveat naming the bound, in the Guided Results tile, the Expert headline strip and the Investment tab. It names the backup cause only when the site has a must-stay-on share and gensets in the design.

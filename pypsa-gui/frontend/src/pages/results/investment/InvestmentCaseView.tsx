@@ -30,6 +30,8 @@ import { Tag } from '../../../components/PageKit'
 import { openPanel } from '../openPanel'
 import InvestmentCaseRunPanel from './InvestmentCaseRunPanel'
 import { useInvestmentCaseRun } from './useInvestmentCaseRun'
+import { useHeadlineKpis } from '../HeadlineStrip'
+import type { HeadlineCard } from '../../../api/simulation'
 
 type Obj = Record<string, unknown>
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -153,11 +155,20 @@ export function WaccGateChip({ state, legs }: { state: GateState; legs: Array<[s
   )
 }
 
+/** The headline LCOE card's caveat (te-24, LCOE-CAVEAT-1), shown under "LCOE (real)" only when
+ *  the card holds this same figure, so Expert never says less than Guided (UX rule 46). */
+export function sameFigureCaveat(card: HeadlineCard | undefined, value: number | null | undefined): string | null {
+  if (!card?.caveat || card.state !== 'ready' || card.value == null || value == null) return null
+  return Math.abs(card.value - value) <= 1e-6 * Math.max(1, Math.abs(value)) ? card.caveat : null
+}
+
 function Headlines({ report }: { report: InvestmentCaseReportPayload }) {
   const rows = headlines(report)
   const caveats = baselineCaveats(report)
   const cf = counterfactualBasis(report)
   const breakeven = islandBreakeven(report)
+  const lcoeCaveat = sameFigureCaveat(useHeadlineKpis().data?.cards.find(c => c.id === 'lcoe'),
+    rows.find(h => h.id === 'lcoe_real')?.value)
   return (
     <>
     <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5" data-testid="ic-headlines">
@@ -170,6 +181,9 @@ function Headlines({ report }: { report: InvestmentCaseReportPayload }) {
           </dd>
           {h.asks && <dd className="col-span-2 text-muted pl-3 pb-0.5" data-testid={`ic-headline-asks-${h.id}`}>{h.asks}</dd>}
           {h.aside && <dd className="col-span-2 text-muted pl-3 pb-0.5" data-testid={`ic-headline-aside-${h.id}`}>{h.aside}</dd>}
+          {h.id === 'lcoe_real' && lcoeCaveat && (
+            <dd className="col-span-2 text-muted pl-3 pb-0.5" data-testid="ic-headline-caveat-lcoe_real">{lcoeCaveat}</dd>
+          )}
         </div>
       ))}
     </dl>

@@ -73,7 +73,7 @@ function Tile({ card, dimmed, tall }: { card: HeadlineCard; dimmed: boolean; tal
     <div className={tall ? TILE_MIN_TREND : TILE_MIN}>
       <Kpi
         headline testId={`headline-${card.id}`} label={words.label} value={value} basis={basis}
-        state={state} reason={card.reason ?? undefined} dimmed={dimmed}
+        caveat={card.caveat} state={state} reason={card.reason ?? undefined} dimmed={dimmed}
         delta={headlineDelta(card)} trend={<Trend card={card} />}
         action={card.state === 'not_run' || (card.id === 'lcoe' && card.value == null && card.state !== 'running')
           ? { label: `${words.tabLabel} ›`, onClick: () => showResultsTab(words.tab, { from: 'Summary' }) }

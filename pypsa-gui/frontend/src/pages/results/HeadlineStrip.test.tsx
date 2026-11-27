@@ -410,3 +410,19 @@ describe('HeadlineStrip trend over the investment periods', () => {
     expect(trend.parentElement?.className).toContain('opacity-60')
   })
 })
+
+describe('LCOE caveat (te-24, LCOE-CAVEAT-1)', () => {
+  const CAVEAT = 'Above €\u00a0300/MWh, high for a hospital: the backup kept for the critical load is costed but rarely runs.'
+  it('the Expert strip shows the same caveat as Guided, from the same card', async () => {
+    api.getHeadlineKpis.mockResolvedValue({ kind: 'energy_hub', cards: [
+      card('lcoe', { value: 413, unit: 'EUR/MWh', caveat: CAVEAT })] })
+    renderStrip()
+    expect((await screen.findByTestId('headline-lcoe-caveat')).textContent).toBe(CAVEAT)
+  })
+  it('no caveat line on a card without one', async () => {
+    api.getHeadlineKpis.mockResolvedValue({ kind: 'energy_hub', cards: [card('lcoe', { value: 61, unit: 'EUR/MWh' })] })
+    renderStrip()
+    await screen.findByTestId('headline-lcoe')
+    expect(screen.queryByTestId('headline-lcoe-caveat')).toBeNull()
+  })
+})
