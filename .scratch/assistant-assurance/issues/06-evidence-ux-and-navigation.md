@@ -93,7 +93,7 @@ Re-audit done case by case; results are in "Done (evidence)" and "Remaining scop
 
 ## Close-out (2026-11-27)
 
-**Merged.** S1 #2027 (displayed adapters), S2 #2029 (Emissions, Grid risk), S4 #2032 (cards and announcer), S3a #2035 (Energy flow, Load shape, Curtailment), S3b-1 #2045 (Prices, Capacity expansion, Storage), S3b-2 #2046 (Dispatch, Overview, master SHA_S3B2) and S5 #2050 (Chromium result journeys, master SHA_S5).
+**Merged.** S1 #2027 (displayed adapters), S2 #2029 (Emissions, Grid risk), S4 #2032 (cards and announcer), S3a #2035 (Energy flow, Load shape, Curtailment), S3b-1 #2045 (Prices, Capacity expansion, Storage), S3b-2 #2046 (Dispatch, Overview, master df206ed7) and S5 #2050 (Chromium result journeys, master 96ccce9a).
 
 **Still `browser_mounted_view` (A5.2).** These ACK as mounted, not as displayed data:
 - Results tabs: summary, lostload, fmea, economics, products, exports.
@@ -102,16 +102,16 @@ Re-audit done case by case; results are in "Done (evidence)" and "Remaining scop
 
 **S5 findings**
 - **Guided set gap.** The backend views with a Guided label are summary, flows, loadshape, adequacy, fmea, grid_risk and products. The frontend's `tabsFor('guided', …)` gives summary, flows, loadshape, adequacy and fmea, and adds grid_risk and products only when there are process units or products. Nothing checks that the backend applies the same gate.
-- **Multi-period window bug.** Positions 2–5 come back as 2–29 ([29](29-multi-period-loadflow-window.md)). The journey checks the window on single-period networks only (GK B2 ruling).
-- **Focus with the dock unpinned (Q5a).** Focus drops to the page. This is untested and unfixed ([28](28-unpinned-dock-focus-drop.md), with UX 31's ruling on where focus goes).
-- **SVG `NaN` on multi-period data (likely a chart bug).** One CI run of the journey (#2050 at c410aa0c, expert/multi) logged SVG `NaN` attribute errors on `<circle>` (cx, cy, r) and `<pattern>` (x, y). The next head and every local run passed, including one at 6× CPU throttle. GK B2 rules it a finding, not a flake: some chart likely draws multi-period data with a non-finite coordinate on a timing path. Each error line now names its tab, and a recurrence fails CI by design (G10).
+- **Multi-period window bug.** Positions 2–5 come back as 2–29 ([32](32-multi-period-loadflow-window.md)). The journey checks the window on single-period networks only (GK B2 ruling).
+- **Focus with the dock unpinned (Q5a).** Focus drops to the page. This is untested and unfixed ([31](31-unpinned-dock-focus-drop.md), with UX 31's ruling on where focus goes).
+- **SVG `NaN` from the topology canvas (fixed in #2050).** The journey logged SVG `NaN` attribute errors on `<circle>` (cx, cy, r) and `<pattern>` (x, y), first at c410aa0c (expert/multi), then at eba55aff (expert/single, Summary). Cause: master's TopologyCanvas ran an animated first fit on the hidden (display:none, 0×0) pane after Results opened. #2050 makes the first fit unanimated and skips fits and pans on a 0×0 pane (`topologyFit.ts` and its test). Residual risk (GK B2): a user-clicked animated fit can still race a full-screen tab switch; untested.
 - **Hand-listed routes (GK B2 N1).** `TAB_ROUTES` in `result-navigation-mocks.mjs` is a hand list. A new tab route missing from it is printed, not failed.
 
 **Follow-ups**
-- The ACK binds the default view; bounded summary reads and Storage's SoC read can only say "opened" ([30](30-navigation-ack-default-view.md)).
+- The ACK binds the default view; bounded summary reads and Storage's SoC read can only say "opened" ([33](33-navigation-ack-default-view.md)).
 - Prices drivers and the Dispatch parts fail as one view (UX 31 ruling A). If one part fails alone in practice, the follow-up is a null part.
 - 33 S1-line mutant survivors in `harness/displayed_adapters.py` have not been rechecked against `test_aa06_displayed_adapters.py`.
 - The `source_not_available` toast skip goes by error kind, not by route.
-- UX 31's chat-wording follow-ups from #2032 ([31](31-ux31-chat-wording-followups.md)).
+- UX 31's chat-wording follow-ups from #2032 ([34](34-ux31-chat-wording-followups.md)).
 - A5.4's failure and retry trail is blocked on issue 04.
 - A5.3's external-URL, XSS and injected-markdown cases, and A5.5 on real screen readers and devices, were not re-audited in this close-out.

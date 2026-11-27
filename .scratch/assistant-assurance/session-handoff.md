@@ -1051,7 +1051,7 @@ keep `test_p4_fact_free_reports.py`'s exact-key pin green.
 
 ## 2026-11-27 — AA-06 (evidence UX and navigation): S3b-2 and S5 merged
 
-Merged: #2046 S3b-2 (Dispatch and Overview displayed data, master SHA_S3B2) and #2050 S5 (Chromium result journeys, master SHA_S5). The earlier slices were #2027, #2029, #2032, #2035 and #2045.
+Merged: #2046 S3b-2 (Dispatch and Overview displayed data, master df206ed7) and #2050 S5 (Chromium result journeys, master 96ccce9a). The earlier slices were #2027, #2029, #2032, #2035 and #2045.
 
 Commands, from `pypsa-gui/backend` with `/root/.venv-pypsa-gui`:
 - `pytest tests/test_harness_reliability.py`: 66 passed.
