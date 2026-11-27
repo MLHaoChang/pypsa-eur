@@ -338,7 +338,7 @@ _PAIRS: dict[str, tuple[tuple[str, str], ...]] = {
         ("rx_min", "rx_max"),
     ),
     "Link": (("p_nom_min", "p_nom_max"), ("p_min_pu", "p_max_pu")),
-    "StorageUnit": (("p_nom_min", "p_nom_max"),),
+    "StorageUnit": (("p_nom_min", "p_nom_max"), ("p_min_pu", "p_max_pu")),
     "Line": (("s_nom_min", "s_nom_max"),),
     "Transformer": (("s_nom_min", "s_nom_max"),),
     "Store": (("e_nom_min", "e_nom_max"), ("e_min_pu", "e_max_pu")),

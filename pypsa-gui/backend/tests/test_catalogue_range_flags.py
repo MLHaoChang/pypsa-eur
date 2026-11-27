@@ -160,6 +160,14 @@ def test_a_pair_flags_only_finite_min_above_finite_max(lo, hi):
         ("Link", "links", "p_nom_min", "p_nom_max", {"bus0": "B1", "bus1": "B2"}),
         ("Link", "links", "p_min_pu", "p_max_pu", {"bus0": "B1", "bus1": "B2"}),
         ("StorageUnit", "storage_units", "p_nom_min", "p_nom_max", {"bus": "B1"}),
+        ("StorageUnit", "storage_units", "p_min_pu", "p_max_pu", {"bus": "B1"}),
+        (
+            "Transformer",
+            "transformers",
+            "s_nom_min",
+            "s_nom_max",
+            {"bus0": "B1", "bus1": "B2", "x": 0.1, "s_nom": 1.0},
+        ),
         (
             "Line",
             "lines",
@@ -490,3 +498,38 @@ def test_the_meta_payload_is_unchanged(client, install_network):
         "bus_count",
         "display_names",
     }
+
+
+@pytest.mark.parametrize("lo, hi", [("sk_min_mva", "sk_max_mva"), ("rx_min", "rx_max")])
+def test_the_grid_strength_pairs_flag_on_a_generator(lo, hi):
+    """DGS X8: the deferred sk_min <= sk_max (and rx) cross-check is a flag."""
+    n = pypsa.Network()
+    n.add("Bus", "B1", v_nom=110.0)
+    n.add("Generator", "G", bus="B1")
+    n.generators[lo] = 9.0
+    n.generators[hi] = 3.0
+    rows = [r for r in R.flags(n) if r["kind"] == "min_above_max"]
+    assert [(r["component"], r["id"], r["field"]) for r in rows] == [
+        ("Generator", "G", lo)
+    ]
+
+
+def test_a_failing_sweep_on_the_read_route_is_no_500(
+    client, install_network, monkeypatch
+):
+    """No lock: an edit may remove a row mid-sweep. The read logs it and
+    answers flags None ("read again"), never a 500."""
+    _saved_as(client, install_network, _flagged(), "Flags race")
+
+    def boom(_n):
+        raise KeyError("row removed mid-sweep")
+
+    monkeypatch.setattr(R, "flags", boom)
+    for url in (
+        "/api/network/range_flags",
+        "/api/projects/Flags race/network/range_flags",
+    ):
+        r = client.get(url)
+        assert r.status_code == 200, r.text
+        assert r.json()["flags"] is None
+        assert isinstance(r.json()["revision"], int)

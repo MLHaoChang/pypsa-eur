@@ -78,6 +78,8 @@ The catalogue is mode-free: `depth: essentials` is the Guided set, everything el
 
 - 2026-11-23 status sweep: landed in #1634 (347f55dd8c); #1804 (3cfc9173be); #1807 (3af79cda45); #1812 (a65c921c3c): catalogue core, routers and generated names are on master. Likely complete; PR-body rename table and range validators on every write path not checked.
 
+- 2026-11-27, 01a-3b (C9 scope): every import that loads a network returns `range_flags` and `range_flags_total` (`ranges.import_flags`): netcdf, csv, matpower, legacy Excel, workbook preview and import, model import (PSS/E and the other converters). "Library apply of a stored project" has no route today; the nearest are `library_reference/apply` (a write, funnelled through the update validator) and `from_template`. The legacy folder import copies files and loads no network. A future import route calls `ranges.import_flags` on its candidate. Time-varying `*_t` min/max pairs are not flagged (R6, issue 11).
+
 ## Audit (2026-11-25)
 
 - 2026-11-25 audit: #1634 in master log; asset_schema has catalogue.py, routers/catalogue.py, guide/, catalogue.ids.txt, modelNames.generated.json, but no settings.py and catalogue range is always None (catalogue.py:205).
