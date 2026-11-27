@@ -4733,6 +4733,15 @@ def _delete_project_db(db, user, name: str, cascade: bool) -> dict:
             },
         )
 
+    # template-e2e 12 (b): a study solves a private copy and no longer holds
+    # the network lock, so the lock below does not wait for it any more. A
+    # project whose resident context runs one is refused, not deleted out from
+    # under the study that will publish into it.
+    for t in [project, *child_projects]:
+        t_ctx = PyPSAService.get_context(project_registry.registry_key(t))
+        if t_ctx is not None:
+            PyPSAService.refuse_if_study_running(f"delete '{t.name}'", ctx=t_ctx)
+
     deleted: list[str] = []
     failed: list[str] = []
     dropped: list[tuple[str, Any]] = []

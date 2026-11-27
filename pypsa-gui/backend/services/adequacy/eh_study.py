@@ -1424,7 +1424,12 @@ def run_eh_study(
     with lock:
         _detach_solver_model(network)
         network = network.copy()
-    # The copy is this study's alone now, so it is read outside the shared lock.
+    # The copy is this study's alone now, so it is read outside the shared lock,
+    # and every stage locks it with a lock of its own (template-e2e 12 (b)): a
+    # solve holds the lock it is given for its whole build, solve and restore,
+    # and handing it the project's mutation lock kept every edit, autosave and
+    # delete of the project waiting for the study (30 min on the concentrator).
+    lock = threading.RLock()
     if on_private_copy is not None:
         on_private_copy(network)
     # Private cfg: the pack target wins for every stage, the session config
