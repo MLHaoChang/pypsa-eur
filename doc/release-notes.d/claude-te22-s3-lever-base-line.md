@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The energy-hub Levers table in Expert results now says what the base design costs at the same target and why each row differs from it, and names the rows that cost the same because the study does not use the extra hours or import capacity.
