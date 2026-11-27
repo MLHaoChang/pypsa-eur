@@ -3,7 +3,7 @@
 
 # GC-09 Compliance workflow: deliverable tracker, data list, TSO revision log, report pack
 
-Status: ready-for-agent; audit 2026-11-25: backend (#1577) and Grid compliance UI section (#1854) merged; left: item 6 (DGS export download and background-harmonics upload wiring)
+Status: ready-for-agent; audit 2026-11-25: backend (#1577) and Grid compliance UI section (#1854) merged; left: item 6, the DGS export download, which lands in the PR of branch `claude/gc09-powerfactory-pack`; the background-harmonics upload moved to `29-campus-harmonic-emission-screen.md` (owner decision GC09-HARMONICS-1)
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: none (tracker, data list and revision log start at once; pack rows light up as 01–08 land)
@@ -37,9 +37,11 @@ needs, where its inputs come from, which tool runs it, what came back, and what 
    chips, next step visible; follows `pypsa-gui/frontend/src/index.css`, `docs/agents/review-ux.md`
    and DENSITY-1.
 6. **PowerFactory pack (GC-05 output)**: GC-09 wires the DGS export download
-   (`campus_study.powerfactory_campus`) and the background-harmonics upload
-   (`campus_study.import_background_campus`) into `campus_electrical_service.py`; GC-05 (#1580)
-   left no app entry point.
+   (`campus_study.powerfactory_campus`) into `campus_electrical_service.py`; GC-05 (#1580)
+   left no app entry point. The DGS export lands in the PR of branch
+   `claude/gc09-powerfactory-pack`. The background-harmonics upload
+   (`campus_study.import_background_campus`) moved to `29-campus-harmonic-emission-screen.md`, since nothing in the app
+   runs `harmonics_campus` yet (owner decision GC09-HARMONICS-1, 2026-11-27).
 
 ## Done when
 
@@ -105,7 +107,7 @@ DGS part:
 - D7. A viewer gets 200 on the GETs and 403 on any write route. Not-via-chat entries cover the downloads. Run the route-parity, chat-disposition and project-ACL semantic tests before reporting.
 - D8. The DGS section and its text go to UX (32). User-facing text carries no GK, ruling or issue refs.
 
-Background upload (only if the owner rules it is built here):
+Background upload: moved to `29-campus-harmonic-emission-screen.md` with D4, D5, D6 and the D7 addition below (owner decision GC09-HARMONICS-1, 2026-11-27); not built in the item 6 PR.
 - D4. Bytes are stored under a fixed name; the client filename is metadata only. A named size cap, tested. `measured_on` is an ISO date; `source` is non-empty and length-capped; bad input gets 422. The write goes to a per-call temp file, then a rename. The whole read-modify-write runs inside the sidecar lock, and DELETE takes the same lock.
 - D5. If the stored background no longer parses against the campus at run time (e.g. a renamed PCC bus), the run never silently scans without it: the "with background" row reads unknown with the reason. Tested with a PCC rename after upload. This needs `harmonics_campus` wired into the run.
 - D6. The stale check pins a hash of the whole sidecar record (bytes sha256, source, measured_on, filename). Change and removal are both tested.

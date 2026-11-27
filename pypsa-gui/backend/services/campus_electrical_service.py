@@ -95,7 +95,6 @@ import yaml
 from fastapi import HTTPException
 
 from services import project_registry
-from services.atomic_io import atomic_write_bytes
 from services.provenance_graph import Pin, pin_broken, pin_stale
 from services.gridspine_service import CAPACITY_EXPANSION, kind_of
 
@@ -951,7 +950,6 @@ def _stale(project, d: Path) -> bool:
         Pin("campus", m.get("campus_sha256"), lambda: hashlib.sha256(text.encode()).hexdigest()),
         Pin("network", m.get("network_sha256"), lambda: _file_digest(nc)),
         *_library_pins(project, d),
-        *_background_pins(project, d),
     ])
 
 
@@ -2224,7 +2222,6 @@ def run(project, settings: dict, *, progress=None, should_stop=None) -> dict:
                 (work / PROFILE_USED_FILE).write_text(json.dumps(
                     {"profile": s["profile"], "sha256": profile_fingerprint(project, s["profile"])}))
                 stage("harmonic_scan")
-                _take_background(project, work)  # the field measurement, if any (GC-09 item 6)
                 _harmonic_scan(work, s["profile"], profile_dirs)
                 stage("voltage_stability")
                 _voltage_stability(work, s["profile"], profile_dirs)
@@ -2790,142 +2787,3 @@ def _not_written_item(record) -> dict:
 def powerfactory_bundle_zip(project, name: str) -> tuple:
     """``(zip bytes, stale)`` of one PowerFactory bundle, picked from the listing as ``psse_bundle_zip`` does."""
     return _bundle_zip(powerfactory_bundles(project), _powerfactory_root(project), name, "PowerFactory")
-
-
-# ── the background voltage harmonics at the PCC (grid-compliance 09, item 6; GC-05) ─────────
-
-#: The field measurement the next run takes into its harmonic screen: the CSV as uploaded, and its provenance.
-BACKGROUND_DIR = "background"
-BACKGROUND_DATA = "measurement.csv"
-BACKGROUND_META = "meta.json"
-#: In the run: the sha256 of the measurement it took (null when none), so a change marks the run stale.
-BACKGROUND_USED_FILE = "background_used.json"
-MAX_BACKGROUND_BYTES = 1024 * 1024
-MAX_BACKGROUND_TEXT = 200
-
-
-def _background_dir(project) -> Path:
-    return campus_dir(project) / BACKGROUND_DIR
-
-
-def _background_meta(d: Path) -> dict | None:
-    """The stored measurement's provenance, or None when there is none. A meta
-    whose CSV is missing or whose sha256 no longer matches it reads as none
-    stored would be wrong: it raises ``ValueError``."""
-    meta_file = d / BACKGROUND_META
-    if not meta_file.is_file():
-        return None
-    meta = json.loads(meta_file.read_text())
-    data = (d / BACKGROUND_DATA).read_bytes()
-    if not isinstance(meta, dict) or meta.get("sha256") != hashlib.sha256(data).hexdigest():
-        raise ValueError("the stored background measurement does not match its record")
-    return meta
-
-
-def _poc(project) -> str:
-    campus = campus_dir(project) / CAMPUS_FILE
-    if not campus.is_file():
-        raise HTTPException(status_code=422, detail={
-            "error_kind": "campus_background_no_campus",
-            "message": "there is no campus file yet; the measurement is taken at its PCC"})
-    try:
-        return str(yaml.safe_load(campus.read_text())["campus"]["pcc"]["bus"])
-    except (yaml.YAMLError, KeyError, TypeError) as exc:
-        raise HTTPException(status_code=422, detail={
-            "error_kind": "campus_background_no_campus",
-            "message": "the campus file names no PCC bus"}) from exc
-
-
-def get_background(project) -> dict:
-    """``{has_background, source, measured_on, filename, orders, uploaded_at}``
-    of the stored measurement, and whether the latest run used this one."""
-    require_capacity_expansion(project)
-    d = _background_dir(project)
-    try:
-        meta = _background_meta(d)
-    except (OSError, ValueError) as exc:
-        raise HTTPException(status_code=409, detail={
-            "error_kind": "campus_background_unreadable",
-            "message": f"the stored background measurement cannot be read: {exc}"}) from exc
-    if meta is None:
-        return {"has_background": False}
-    used = _background_used(campus_dir(project) / "run")
-    return {"has_background": True, **{k: meta.get(k) for k in ("source", "measured_on", "filename", "orders",
-                                                                "uploaded_at")},
-            "in_latest_run": used == meta["sha256"]}
-
-
-def put_background(project, data: bytes, source: str, measured_on: str, filename: str | None) -> dict:
-    """Check the measurement now (``parse_background`` at the campus PCC: a bad
-    file is a 422 and nothing is stored), then keep it for the next run."""
-    from gridspine.ingest.background_harmonics import parse_background
-
-    require_capacity_expansion(project)
-    if len(data) > MAX_BACKGROUND_BYTES:
-        raise HTTPException(status_code=413, detail={
-            "error_kind": "campus_background_too_large",
-            "message": f"the measurement exceeds {MAX_BACKGROUND_BYTES // 1024} KB"})
-    for field, text in (("source", source), ("measured_on", measured_on), ("filename", filename or "")):
-        if len(text) > MAX_BACKGROUND_TEXT:
-            raise HTTPException(status_code=422, detail={
-                "error_kind": "campus_background_invalid", "field": field,
-                "message": f"{field} is longer than {MAX_BACKGROUND_TEXT} characters"})
-    try:
-        rec = parse_background(data, poc=_poc(project), source=source, measured_on=measured_on,
-                               filename=filename)
-    except ContractError as exc:
-        raise _unprocessable(exc) from exc
-    d = _background_dir(project)
-    meta = {"source": rec["source"], "measured_on": rec["measured_on"], "filename": filename,
-            "orders": len(rec["orders_pct"]), "sha256": hashlib.sha256(data).hexdigest(),
-            "uploaded_at": datetime.now(timezone.utc).isoformat()}
-    with _lock(d):
-        d.mkdir(parents=True, exist_ok=True)
-        atomic_write_bytes(d / BACKGROUND_DATA, data)
-        atomic_write_bytes(d / BACKGROUND_META, json.dumps(meta, sort_keys=True).encode())
-    return get_background(project)
-
-
-def delete_background(project) -> dict:
-    """Remove the stored measurement; the next run has no background row."""
-    require_capacity_expansion(project)
-    d = _background_dir(project)
-    with _lock(d):
-        (d / BACKGROUND_META).unlink(missing_ok=True)   # the meta first: a CSV alone reads as none stored
-        (d / BACKGROUND_DATA).unlink(missing_ok=True)
-    return {"has_background": False}
-
-
-def _take_background(project, work: Path) -> None:
-    """Into the run being built: the stored measurement through GC-05's
-    ``import_background_campus``, and the sha256 it took (null when none)."""
-    d = _background_dir(project)
-    with _lock(d):
-        meta = _background_meta(d)
-        data = (d / BACKGROUND_DATA).read_bytes() if meta is not None else None
-    if meta is not None:
-        cs.import_background_campus(work, data, meta["source"], meta["measured_on"], meta.get("filename"))
-    (work / BACKGROUND_USED_FILE).write_text(json.dumps({"sha256": meta["sha256"] if meta else None}))
-
-
-def _background_used(run: Path):
-    """The sha256 the run took; ``False`` for a run from before it was kept."""
-    try:
-        return json.loads((run / BACKGROUND_USED_FILE).read_text())["sha256"]
-    except (OSError, ValueError, KeyError, TypeError):
-        return False
-
-
-def _background_pins(project, d: Path) -> list[Pin]:
-    """The measurement the run took against the one stored now; none for a run
-    from before it was kept. An unreadable store breaks the pin: stale."""
-    used = _background_used(d / "run")
-    if used is False:
-        return []
-
-    def now():
-        meta = _background_meta(_background_dir(project))
-        return meta["sha256"] if meta else "none"
-
-    # a recorded None reads "not recorded" (stale), so a run that took no measurement records "none"
-    return [Pin("background", used or "none", now)]
