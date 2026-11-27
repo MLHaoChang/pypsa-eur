@@ -25,3 +25,8 @@ Checked by code reading only; the app was not re-run. Acceptance as above: Guide
 ## Comments
 
 - 2026-11-23 status sweep: landed in #1662 (a3e82685): unpriced FMEA rows no longer show EUR 0. Remains: Guided-versus-Expert row equality, critical share and MW kept on, LCOE caveat.
+- 2026-11-27: slice 1 merged in #2092 (d1799373). The Guided risk table, Expert FMEA, the reference-design panel, the report and the results workbook all read the EH study's fmea_top rows. A failed study with no report no longer serves the old stored report (GK A M1).
+- 2026-11-27: slice 2, part 1 merged in #2097 (84c2274b). The Guided Results card states the load kept on in an outage, in the Site card's words.
+- Remains: the LCOE caveat, held until the owner sets the plausibility bound (UX 32 gate: no placeholder bound; caveat on the investment "LCOE (real)" in both modes; the cause sentence only when the site has a critical share and backup exists).
+- Follow-up (GK C1 on #2092): put a network fingerprint on the stored EH report, so that a stored report from an edited network is not served as current.
+- Known gap (named in #2092): the Guided ResultsCard "Biggest risks" list and the headline read fmeaTopRows, which holds class-B rows only.
