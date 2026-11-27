@@ -1,0 +1,8 @@
+{
+  "kinds": {
+    "source_not_available": {
+      "surface": "inline",
+      "why": "GET /api/results/displayed/dispatch refuses with 422 `?source=ac_pf` when no AC power flow is on record, because the old routes would fall back to the live LP network and the view would bind LP data under an ac_pf label (assistant assurance 06, A5.2 S3b-2); the tab shows its not-run state with no toast (\"The AC power flow has not run yet. Run it, or show the LP dispatch.\") and an action that switches to the LP dispatch, and the assistant runs the AC power flow or answers from lopf."
+    }
+  }
+}

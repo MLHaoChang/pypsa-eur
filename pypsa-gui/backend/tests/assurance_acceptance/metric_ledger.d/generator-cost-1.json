@@ -8,6 +8,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_harness_reliability.py::test_checked_exports_use_identical_values_scope_and_byte_hash",
     "status": "verified",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -22,6 +23,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_harness_reliability.py::test_checked_exports_use_identical_values_scope_and_byte_hash",
     "status": "verified",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -36,6 +38,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_harness_reliability.py::test_checked_exports_use_identical_values_scope_and_byte_hash",
     "status": "verified",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -50,6 +53,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_harness_reliability.py::test_checked_exports_use_identical_values_scope_and_byte_hash",
     "status": "verified",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -64,6 +68,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_harness_reliability.py::test_checked_exports_use_identical_values_scope_and_byte_hash",
     "status": "verified",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -78,6 +83,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_harness_reliability.py::test_checked_exports_use_identical_values_scope_and_byte_hash",
     "status": "verified",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",
