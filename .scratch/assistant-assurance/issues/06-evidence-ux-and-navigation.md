@@ -3,7 +3,7 @@
 
 # P5: evidence navigation and honest process UI
 
-Status: ready-for-agent; re-audited 2026-11-25 (owner: re-audit, then re-scope): A5.2 and A5.3 mostly done, A5.1/A5.4 partial, A5.5 has no real device or screen-reader test; what is left is under "Remaining scope"
+Status: ready-for-agent; slices S1–S5 merged by 2026-11-27 (#2027, #2029, #2032, #2035, #2045, #2046, #2050); the scope still open is named under "Close-out (2026-11-27)" and filed as issues 28–31
 Progress: Evidence card, CSRF-bound /ui-ack and the Load flow join shipped; per-family displayed-data proof, browser journeys for every mapped view, the real stage trail and accessibility journeys remain
 Type: task
 Blocked by: 04 (only for the A5.4 failure/retry trail; 03 and 05 are done); live-voice issues 03/06 for exact historical UI
@@ -90,3 +90,28 @@ Owner decision AA02-SCOPE-1 moves the "displayed-data revision proof" from [02](
 ## Audit (2026-11-25)
 
 Re-audit done case by case; results are in "Done (evidence)" and "Remaining scope" above.
+
+## Close-out (2026-11-27)
+
+**Merged.** S1 #2027 (displayed adapters), S2 #2029 (Emissions, Grid risk), S4 #2032 (cards and announcer), S3a #2035 (Energy flow, Load shape, Curtailment), S3b-1 #2045 (Prices, Capacity expansion, Storage), S3b-2 #2046 (Dispatch, Overview, master SHA_S3B2) and S5 #2050 (Chromium result journeys, master SHA_S5).
+
+**Still `browser_mounted_view` (A5.2).** These ACK as mounted, not as displayed data:
+- Results tabs: summary, lostload, fmea, economics, products, exports.
+- The campus and GridSpine study-run tabs.
+- Investment, asset and reports.
+
+**S5 findings**
+- **Guided set gap.** The backend views with a Guided label are summary, flows, loadshape, adequacy, fmea, grid_risk and products. The frontend's `tabsFor('guided', …)` gives summary, flows, loadshape, adequacy and fmea, and adds grid_risk and products only when there are process units or products. Nothing checks that the backend applies the same gate.
+- **Multi-period window bug.** Positions 2–5 come back as 2–29 ([29](29-multi-period-loadflow-window.md)). The journey checks the window on single-period networks only (GK B2 ruling).
+- **Focus with the dock unpinned (Q5a).** Focus drops to the page. This is untested and unfixed ([28](28-unpinned-dock-focus-drop.md), with UX 31's ruling on where focus goes).
+- **Intermittent CI error.** One CI run of the journey (#2050 at c410aa0c, expert/multi) logged SVG `NaN` attribute errors on `<circle>` and `<pattern>`. The next head passed, and so did every local run, including one at 6× CPU throttle. Each error line now names its tab, so a recurrence says which view drew it.
+- **Hand-listed routes (GK B2 N1).** `TAB_ROUTES` in `result-navigation-mocks.mjs` is a hand list. A new tab route missing from it is printed, not failed.
+
+**Follow-ups**
+- The ACK binds the default view; bounded summary reads and Storage's SoC read can only say "opened" ([30](30-navigation-ack-default-view.md)).
+- Prices drivers and the Dispatch parts fail as one view (UX 31 ruling A). If one part fails alone in practice, the follow-up is a null part.
+- 33 S1-line mutant survivors in `harness/displayed_adapters.py` have not been rechecked against `test_aa06_displayed_adapters.py`.
+- The `source_not_available` toast skip goes by error kind, not by route.
+- UX 31's chat-wording follow-ups from #2032 ([31](31-ux31-chat-wording-followups.md)).
+- A5.4's failure and retry trail is blocked on issue 04.
+- A5.3's external-URL, XSS and injected-markdown cases, and A5.5 on real screen readers and devices, were not re-audited in this close-out.
