@@ -1069,3 +1069,18 @@ handle returns an outcome from an independent job_adapters snapshot read instead
 turns red first); live-voice 11c has landed (#1550, #1556).
 Not done: the frontend's "this file format cannot be checked yet" word stays (no file
 tool emits adapter_pending now; UI slice).
+
+## 2026-11-27 — AA-04 S7 (wait_for_job on study, report and queue jobs)
+
+Branch `claude/aa04-s7-job-outcomes`, stacked on #2070 (S6). Plan GO and delta GO from
+GK B (74) (conditions 1–6, additions a–d). `outcomes.read_job` + pure `classify_job`
+map `job_adapters.job_status`'s neutral outcome through `NEUTRAL_OUTCOMES`; queue
+jobs are bound to the open project's registry key.
+Commands, in `pypsa-gui/backend` with `/root/.venv-pypsa-gui/bin/python -m pytest`:
+`tests/assurance_acceptance/test_p3_job_outcomes.py` 104 passed (the S7 cases red on
+#2070's head); nonblocking + lv11 + p3 job/outcome/guard suites 638 passed, 0 failed.
+21 hand-written mutants (every map and live branch, id/project checks, error kinds,
+the cancel re-read and worker-exit steps, unknown→completed, reading the handler
+result in loop.py): all killed.
+Remaining: AA04-P11 and AA04-P12 (tool-line words for the S7 reasons), one UI slice
+with UX review; mismatched artifacts (issue 05).
