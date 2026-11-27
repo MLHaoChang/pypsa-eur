@@ -563,7 +563,7 @@ def test_a_moved_dispatcher_calls_the_patched_chat_tools_helper(monkeypatch):
     from services.chat_dispatchers import lv08_bcampus
 
     monkeypatch.setattr(chat_tools, "_campus_route", lambda *a, **k: {"job": "patched"})
-    assert lv08_bcampus.campus_milp_status("P") == {"job": "patched"}
+    assert lv08_bcampus.campus_milp_status("P")["job"] == {"job": "patched"}
 
 
 # ── discovery misses fail loudly ────────────────────────────────────────────
