@@ -295,7 +295,9 @@ def test_report_templates_keeps_its_old_place_in_routes_and_dispatchers(table):
 
 def test_splicing_routes_of_a_family_whose_tools_are_not_spliced_is_refused():
     frags = _schema(a=_mod("pkg.cat.a", ["t1"]))
-    with pytest.raises(FragmentError, match=r"ROUTES of harness\.catalogue_tools\.a.*not its TOOLS"):
+    with pytest.raises(
+        FragmentError, match=r"ROUTES of harness\.catalogue_tools\.a.*not its TOOLS"
+    ):
         frags.splice_routes("a")
 
 
@@ -344,7 +346,10 @@ def test_spliced_dispatchers_are_kept_where_they_were_spliced():
     schema = _schema(a=_mod("pkg.cat.a", ["t1"]), b=_mod("pkg.cat.b", ["t2"], ORDER=1))
     schema.splice("a")
     disp = F.DispatchFragments(
-        {"a": _disp("pkg.disp.a", "t1", LOCK_GATED={"t1"}), "b": _disp("pkg.disp.b", "t2")}
+        {
+            "a": _disp("pkg.disp.a", "t1", LOCK_GATED={"t1"}),
+            "b": _disp("pkg.disp.b", "t2"),
+        }
     )
     dispatchers = {"x": print, **disp.splice("a"), "y": print}
     assert disp.merge(dispatchers, {}, schema) == {"t1"}
@@ -371,7 +376,9 @@ def test_a_spliced_dispatcher_replaced_in_dispatchers_is_refused():
 
 def test_splicing_a_missing_or_twice_spliced_dispatcher_family_is_refused():
     disp = F.DispatchFragments({"a": _disp("pkg.disp.a", "t1")})
-    with pytest.raises(FragmentError, match=r"chat_dispatchers\.b, which was not found"):
+    with pytest.raises(
+        FragmentError, match=r"chat_dispatchers\.b, which was not found"
+    ):
         disp.splice("b")
     disp.splice("a")
     with pytest.raises(FragmentError, match="twice"):
@@ -683,7 +690,9 @@ def test_a_new_fragment_pairs_write_tools_get_every_wrapper(tmp_path):
     assert out["last"] == ["zz_probe_edit", "zz_probe_apply", "zz_probe_save"]
     assert out["network_writes"] and out["non_network_writes"] and out["validator"]
     assert out["gate_mismatches"] == [], out["gate_mismatches"]
-    assert {"zz_probe_edit", "zz_probe_apply", "zz_probe_save"} <= set(out["gate_checked"])
+    assert {"zz_probe_edit", "zz_probe_apply", "zz_probe_save"} <= set(
+        out["gate_checked"]
+    )
     save = out["zz_probe_save"]
     assert save["raw"] and save["depth"] == 1 and save["lock"], save
     assert not save["study"] and not save["undo"], save

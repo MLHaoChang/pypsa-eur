@@ -156,8 +156,12 @@ class SchemaFragments:
             stem = mod.__name__.rsplit(".", 1)[1]
             if stem in self.spliced:
                 _check_spliced(
-                    routes, mod.ROUTES, stem in self.routes_spliced,
-                    mod.__name__, "TOOL_ROUTES", "splice_routes",
+                    routes,
+                    mod.ROUTES,
+                    stem in self.routes_spliced,
+                    mod.__name__,
+                    "TOOL_ROUTES",
+                    "splice_routes",
                 )
             else:
                 _merge(routes, mod.ROUTES, LEGACY_SCHEMA, mod.__name__, "route key")
@@ -245,11 +249,20 @@ def merge_dispatchers(
             )
         if stem in spliced:
             _check_spliced(
-                dispatchers, mod.DISPATCHERS, True, mod.__name__, "DISPATCHERS", "splice"
+                dispatchers,
+                mod.DISPATCHERS,
+                True,
+                mod.__name__,
+                "DISPATCHERS",
+                "splice",
             )
         else:
             _merge(
-                dispatchers, mod.DISPATCHERS, LEGACY_DISPATCH, mod.__name__, "dispatcher"
+                dispatchers,
+                mod.DISPATCHERS,
+                LEGACY_DISPATCH,
+                mod.__name__,
+                "dispatcher",
             )
         own = getattr(mod, "PRE_DISPATCH_VALIDATORS", {})
         if not set(own) <= names:
@@ -278,8 +291,12 @@ def _merge(
 
 
 def _check_spliced(
-    into: dict[str, Any], own: dict[str, Any], was_spliced: bool, where: str,
-    table: str, how: str,
+    into: dict[str, Any],
+    own: dict[str, Any],
+    was_spliced: bool,
+    where: str,
+    table: str,
+    how: str,
 ) -> None:
     """A spliced family's entries must be in ``into`` as the fragment has them."""
     if not was_spliced:
