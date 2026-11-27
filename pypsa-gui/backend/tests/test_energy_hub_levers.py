@@ -43,11 +43,12 @@ def _off_grid_network(fixed_battery: bool = False) -> pypsa.Network:
           capital_cost=500.0, marginal_cost=200.0)
     # Fixed power: duration lever changes energy only. template-e2e 22 S3:
     # the lever re-specifies only candidate (extendable) storage, so the
-    # battery is a candidate pinned at 30 MW (same optimum as fixed).
+    # battery is a candidate pinned at 30 MW (same optimum as fixed;
+    # preflight needs an extendable asset's capital_cost > 0, a constant here).
     n.add("StorageUnit", "bat", bus="b", carrier="battery",
           p_nom=30.0, p_nom_extendable=not fixed_battery,
           p_nom_min=30.0, p_nom_max=30.0,
-          max_hours=4.0, capital_cost=0.0,
+          max_hours=4.0, capital_cost=0.0 if fixed_battery else 1.0,
           efficiency_store=0.95, efficiency_dispatch=0.95,
           cyclic_state_of_charge=True)
     return n

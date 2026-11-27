@@ -73,9 +73,12 @@ def _off_grid_mvp_b_network() -> pypsa.Network:
     n.add("Generator", "peaker", bus="b", carrier="gas",
           p_nom=0.0, p_nom_extendable=True, p_nom_max=100.0,
           capital_cost=500.0, marginal_cost=200.0)
+    # template-e2e 22 S3: the duration lever acts on candidate storage only,
+    # so the battery is a candidate pinned at 30 MW (same optimum as fixed;
+    # preflight needs an extendable asset's capital_cost > 0, a constant here).
     n.add("StorageUnit", "bat", bus="b", carrier="battery",
-          p_nom=30.0, p_nom_extendable=False,
-          max_hours=4.0, capital_cost=0.0,
+          p_nom=30.0, p_nom_extendable=True, p_nom_min=30.0, p_nom_max=30.0,
+          max_hours=4.0, capital_cost=1.0,
           efficiency_store=0.95, efficiency_dispatch=0.95,
           cyclic_state_of_charge=True)
     n.add("Bus", "grid", carrier="AC")

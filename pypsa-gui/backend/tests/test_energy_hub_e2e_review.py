@@ -79,6 +79,8 @@ def test_a_validation_refusal_is_not_charged_as_a_solve(monkeypatch):
     monkeypatch.setattr("services.solver_service.run_simulation",
                         lambda *a, **k: ("error", "validation_failed"))
     n = _feeder_hub()
+    # template-e2e 22 S3: the duration lever acts on candidate storage only.
+    n.storage_units.loc["bat", ["p_nom_extendable", "p_nom_min", "p_nom_max"]] = [True, 20.0, 20.0]
     PyPSAService.set_network(n)
     table = L.compare_lever_scenarios(
         n, SolverConfig(voll=3000.0, ens_cap_permyriad=10.0),

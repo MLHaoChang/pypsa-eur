@@ -44,6 +44,9 @@ def _pair(**su) -> tuple[pypsa.Network, pypsa.Network]:
 
 
 SU = dict(p_nom=20.0, max_hours=2.0, efficiency_store=0.95, efficiency_dispatch=0.9, standing_loss=0.001)
+# template-e2e 22 S3: the duration lever re-specifies only candidate storage,
+# so its tests use the same battery as a candidate pinned at 20 MW.
+SU_CAND = dict(SU, p_nom_extendable=True, p_nom_min=20.0, p_nom_max=20.0)
 
 
 def _spec(s: M.StorageSpec) -> tuple:
@@ -336,11 +339,20 @@ def test_a_redundancy_scenario_restores_a_split_storage_store():
 
 def test_storage_duration_sets_a_split_storage_to_the_storage_unit_energy():
     from services.adequacy.levers import apply_lever_scenario
-    legacy, split = _pair(**SU)
+    legacy, split = _pair(**SU_CAND)
     out = []
     for n in (legacy, split):
         undo, meta = apply_lever_scenario(n, "storage_duration", value=4.0)
         assert meta["applied_storage"] == ["bess"]
+        # A candidate is sized by the solve; write what it gives at the pinned
+        # 20 MW (E = 4 h x P), so the readers see the solved sizes.
+        if n is legacy:
+            n.storage_units.at["bess", "p_nom_opt"] = 20.0
+        else:
+            assert float(n.stores.at["bess", "min_hours"]) == float(n.stores.at["bess", "max_hours"]) == 4.0
+            for row in ("bess charger", "bess discharger"):
+                n.links.at[row, "p_nom_opt"] = n.links.at[row, "p_nom"]
+            n.stores.at["bess", "e_nom_opt"] = 80.0
         out.append(M.snapshot_inputs(n))
         undo()
     assert out[0].storage[0].e_nom_mwh == pytest.approx(80.0)
@@ -352,7 +364,7 @@ def test_storage_duration_sets_a_split_storage_to_the_storage_unit_energy():
 
 def test_storage_duration_outside_the_technology_range_is_refused_by_name():
     from services.adequacy.levers import LeverScenarioError, apply_lever_scenario
-    _, split = _pair(**SU)                          # migrated 2 h: the energy BESS range, 2–8 h
+    _, split = _pair(**SU_CAND)                          # migrated 2 h: the energy BESS range, 2–8 h
     before = split.stores.copy()
     with pytest.raises(LeverScenarioError, match="bess"):
         apply_lever_scenario(split, "storage_duration", value=1.0)
@@ -513,7 +525,7 @@ def test_an_absent_asset_raises_lever_not_applicable_with_its_message(kind):
 
 def test_a_config_error_is_not_lever_not_applicable():
     from services.adequacy.levers import LeverNotApplicable, LeverScenarioError, apply_lever_scenario
-    _, split = _pair(**SU)
+    _, split = _pair(**SU_CAND)
     for kind, value in (("storage_duration", 0.0), ("storage_duration", 1.0), ("no_such_kind", 1.0)):
         with pytest.raises(LeverScenarioError) as e:
             apply_lever_scenario(split, kind, value=value)
@@ -522,7 +534,7 @@ def test_a_config_error_is_not_lever_not_applicable():
 
 def test_storage_duration_refuses_a_c_rate_limit_with_the_add_split_storage_rule():
     from services.adequacy.levers import LeverScenarioError, apply_lever_scenario
-    _, split = _pair(**SU)
+    _, split = _pair(**SU_CAND)
     split.stores.at["bess", "c_rate_max"] = 0.25                # E/P >= 4 h
     with pytest.raises(LeverScenarioError, match=r"bess: c_rate_max 0\.25/h needs E/P >= 4 h"):
         apply_lever_scenario(split, "storage_duration", value=3.0)
