@@ -196,7 +196,7 @@ def same_value(new: Any, old: Any) -> bool:
 def refuse(component_class: str, key: str, value: Any, message: str) -> HTTPException:
     v = _as_number(value)
     return HTTPException(422, detail={
-        "error_kind": ERROR_KIND,
+        "error_kind": "value_out_of_range",  # == ERROR_KIND; the kind manifest reads the literal
         "component": component_class,
         "field": key,
         "value": show(v) if v is not None else str(value),

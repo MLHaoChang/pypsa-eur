@@ -314,3 +314,13 @@ def test_undo_back_to_a_stored_out_of_range_value_is_not_checked(client, world):
     n = PyPSAService.get_network()
     assert n.storage_units.at["SU", "efficiency_dispatch"] == 0.0
     assert n.storage_units.at["SU", "max_hours"] == 2.0
+
+
+def test_the_bulk_coercion_copy_refuses_like_the_bulk_loop(client, world):
+    """R9, #1127 M10: `_coerce_bulk_value` (the outcome reader's copy of the
+    bulk coercion) refuses the same value with the same text."""
+    from services.network_bulk import _coerce_bulk_value
+
+    df = PyPSAService.get_network().storage_units
+    assert _message(lambda: _coerce_bulk_value(df, "efficiency_dispatch", 0.0, "StorageUnit")) == TEXT
+    assert _coerce_bulk_value(df, "efficiency_dispatch", 0.5, "StorageUnit") == 0.5
