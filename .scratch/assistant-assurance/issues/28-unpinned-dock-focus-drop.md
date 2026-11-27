@@ -18,5 +18,9 @@ Assistant-assurance 06 S5 (#2050), raised by UX 31.
 
 ## Acceptance
 
-- With the dock unpinned, after the assistant opens a Results tab, focus lands on a named, visible control. Which control (the dock's launcher, or the tab it opened) is for the UX reviewer to rule on.
+- With the dock unpinned, after the assistant opens a Results tab, focus lands on the active Results tab button, or on `#main-content` when that button is not rendered (UX ruling below).
 - A browser test covers the unpinned case alongside the pinned one.
+
+## UX ruling
+
+UX 31 (on #2050): when the dock steps aside, focus goes to the active Results tab button, the one with `aria-current`. If that button isn't rendered, focus falls back to `#main-content`.

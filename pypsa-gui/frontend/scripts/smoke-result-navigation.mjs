@@ -144,7 +144,15 @@ async function journey(mode, kind) {
         + events.map(e => frame('ui_event', e)).join('')
         + frame('token', { delta: 'Opened.' }) + frame('turn_done', {}) })
     }
-    const mocked = request.method() === 'GET' ? mockFor(url, kind) : undefined
+    let mocked
+    try {
+      mocked = request.method() === 'GET' ? mockFor(url, kind) : undefined
+    } catch (e) {
+      // A mock that cannot be built (a part missing from the fixture) is named here,
+      // not left to surface as a tab-root timeout (GK B2 nit).
+      errors.push(`${tab}: mock ${p}: ${e.message}`)
+      return route.fulfill({ status: 500, json: { detail: e.message } })
+    }
     if (mocked?.[0] >= 400) refused.add(url.href)
     if (mocked) return route.fulfill(mocked[0] === 204 ? { status: 204 } : { status: mocked[0], json: mocked[1] })
     // The catch-all: recorded, and a visited tab's own route here fails the run (G9).
