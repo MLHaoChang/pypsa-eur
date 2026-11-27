@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-# 48 A lever row above the pack's cap reads only "meets"
+# 49 A lever row above the pack's cap reads only "meets"
 
 Status: needs-triage
 Source: template-e2e 22 S3 shots (PR #2095), UX 32 asked for it to be filed.
