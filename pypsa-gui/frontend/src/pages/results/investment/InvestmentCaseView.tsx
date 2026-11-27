@@ -162,7 +162,7 @@ export function sameFigureCaveat(card: HeadlineCard | undefined, value: number |
   return Math.abs(card.value - value) <= 1e-6 * Math.max(1, Math.abs(value)) ? card.caveat : null
 }
 
-function Headlines({ report }: { report: InvestmentCaseReportPayload }) {
+export function Headlines({ report }: { report: InvestmentCaseReportPayload }) {
   const rows = headlines(report)
   const caveats = baselineCaveats(report)
   const cf = counterfactualBasis(report)
