@@ -292,9 +292,7 @@ def names_for_network(n, project_dir: str | pathlib.Path | None) -> dict[str, di
     tid = recorded_template_id(project_dir)
     out: dict[str, dict[str, str]] = {}
     for cls, attr in COMPONENT_LISTS.items():
-        frame = getattr(n, attr, None)
-        if frame is None:
-            continue
+        frame = getattr(n, attr)
         named = {str(cid): name for cid in frame.index
                  if (name := name_for(tid, cls, str(cid))) is not None}
         if named:
