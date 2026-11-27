@@ -2900,6 +2900,7 @@ def _background_pins(project, d: Path) -> list[Pin]:
 
     def now():
         meta = _background_meta(_background_dir(project))
-        return meta["sha256"] if meta else None
+        return meta["sha256"] if meta else "none"
 
-    return [Pin("background", used, now)]
+    # a recorded None reads "not recorded" (stale), so a run that took no measurement records "none"
+    return [Pin("background", used or "none", now)]
