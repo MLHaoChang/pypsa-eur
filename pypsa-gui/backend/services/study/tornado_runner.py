@@ -275,6 +275,7 @@ def start_tornado(study_id: str, *, base_row, db, user_id,
         PyPSAService.mark_study_owned(key)
     try:
         ctx = R.base_context(base_row)
+        R.refuse_unlocated(ctx.network, base_dir)
     except BaseException:
         if registered:
             PyPSAService.unmark_study_owned(key)

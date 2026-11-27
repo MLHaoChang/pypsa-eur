@@ -100,6 +100,7 @@ def start(
         R._refuse_busy(resident)
     _refuse_unsaved(resident)
     network, cfg, fingerprint = _saved_base(base_row)
+    R.refuse_unlocated(network, base_dir)
     try:
         archs = SA.select(network, architecture_ids)
     except SA.ArchitectureUnsolved as exc:

@@ -134,15 +134,16 @@ class SolveDeadlineExceeded(RuntimeError):
 class RunRefused(RuntimeError):
     """The run is refused before anything starts. `status` is the HTTP code."""
 
-    def __init__(self, status: int, code: str, message: str):
+    def __init__(self, status: int, code: str, message: str, extra: dict | None = None):
         super().__init__(f"{code}: {message}")
         self.status = status
         self.code = code
         self.message = message
+        self.extra = extra or {}
 
     @property
     def detail(self) -> dict:
-        return {"error_kind": self.code, "message": self.message}
+        return {**self.extra, "error_kind": self.code, "message": self.message}
 
 
 # ── context plumbing ──────────────────────────────────────────────────────
@@ -182,6 +183,19 @@ def _on_ctx(ctx, fn, *args, **kwargs):
         PyPSAService.bind_request_context(ctx)
         return fn(*args, **kwargs)
     return contextvars.copy_context().run(run)
+
+
+def refuse_unlocated(network, base_dir) -> None:
+    """STUDY-GATE-1: a study solves the base project's network, so a base with no
+    site location is refused like a run (422 `site_location_missing`, the one
+    predicate of `services/site_location.py`), on the network the study will
+    solve and before any worker, run record or ownership mark exists."""
+    from services import site_location
+
+    refusal = site_location.refusal(network, base_dir)
+    if refusal:
+        extra = {k: v for k, v in refusal.items() if k not in ("error_kind", "message")}
+        raise RunRefused(422, refusal["error_kind"], refusal["message"], extra)
 
 
 def base_context(base_row):
@@ -484,6 +498,7 @@ def start_study_run(study_id: str, fidelity: Fidelity | str, *, base_row,
         PyPSAService.mark_study_owned(key)
     try:
         ctx = base_context(base_row)
+        refuse_unlocated(ctx.network, base_dir)
     except BaseException:
         if registered:
             PyPSAService.unmark_study_owned(key)
