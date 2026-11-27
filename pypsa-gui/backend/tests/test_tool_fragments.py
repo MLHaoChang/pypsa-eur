@@ -381,23 +381,65 @@ def test_splicing_a_missing_or_twice_spliced_dispatcher_family_is_refused():
 # ── every shipped fragment tool gets exactly the gates its kind earns ───────
 
 
-def test_every_fragment_tool_is_wrapped_once_per_gate_it_is_in():
-    """Wrapper depth over every discovered tool: each DISPATCHERS entry unwraps
-    to the fragment's own callable through one wrapper per gate (lock, study)
-    the tool is in, as a monolith tool would."""
+def _expected_gates(name, schema, disp):
+    """(lock, study) for a fragment tool, derived from its own ROUTES, write
+    sets and safety tier (not from chat_tools' gate-name functions): the
+    lock gate covers a non-read tool with a write route under a gated prefix,
+    a NETWORK_WRITES or a LOCK_GATED member; the study gate the network
+    writes among those."""
+    from harness.catalogue import safety_tier_for
     from services import chat_tools as T
 
-    lock, study = T._lock_gated_tool_names(), T._study_gated_tool_names()
-    checked = 0
-    for mod in F.discover(F.DISPATCH_PACKAGE).values():
-        for name, raw in mod.DISPATCHERS.items():
+    writes = [
+        path
+        for route in schema.ROUTES[name]
+        if isinstance(route, tuple)
+        for method, path in [route]
+        if method.upper() in T._LOCK_GATE_WRITE_METHODS
+    ]
+    network = name in getattr(schema, "NETWORK_WRITES", ())
+    lock = safety_tier_for(name) != "read" and (
+        network
+        or name in getattr(disp, "LOCK_GATED", ())
+        or any(
+            p.startswith(T._LOCK_GATE_PREFIXES) and p not in T._LOCK_GATE_EXEMPT_PATHS
+            for p in writes
+        )
+    )
+    study = (
+        lock
+        and name not in T._STUDY_GATE_SWAP_TOOLS
+        and (network or any(p.startswith(T._STUDY_GATE_PREFIXES) for p in writes))
+    )
+    return lock, study
+
+
+def gate_mismatches():
+    """Every discovered fragment tool whose DISPATCHERS entry does not unwrap to
+    the fragment's own callable through one wrapper per gate it earns; also the
+    tools checked. Run in-process and in the probe interpreter below."""
+    from services import chat_tools as T
+
+    schemas = F.discover(F.SCHEMA_PACKAGE)
+    lock_names, study_names = T._lock_gated_tool_names(), T._study_gated_tool_names()
+    bad, checked = [], []
+    for stem, disp in F.discover(F.DISPATCH_PACKAGE).items():
+        for name, raw in disp.DISPATCHERS.items():
+            lock, study = _expected_gates(name, schemas[stem], disp)
             fn, depth = T.DISPATCHERS[name], 0
-            while fn is not raw:
-                assert hasattr(fn, "__wrapped__"), (name, "does not unwrap to", mod.__name__)
+            while fn is not raw and hasattr(fn, "__wrapped__"):
                 fn, depth = fn.__wrapped__, depth + 1
-            assert depth == (name in lock) + (name in study), (name, depth)
-            checked += 1
-    assert checked >= len(_REPORT_TEMPLATES)
+            got = (fn is raw, depth, name in lock_names, name in study_names)
+            if got != (True, lock + study, lock, study):
+                bad.append((name, {"want": (lock, study), "got": got}))
+            checked.append(name)
+    return bad, checked
+
+
+def test_every_fragment_tool_is_wrapped_once_per_gate_it_earns():
+    bad, checked = gate_mismatches()
+    assert bad == []
+    assert set(_REPORT_TEMPLATES) <= set(checked)
 
 
 # ── discovery misses fail loudly ────────────────────────────────────────────
@@ -600,7 +642,10 @@ def depth(fn):
         fn, n = fn.__wrapped__, n + 1
     return fn, n
 
+from tests.test_tool_fragments import gate_mismatches
+bad, checked = gate_mismatches()
 out = {"last": [t["name"] for t in C.TOOLS[-3:]],
+       "gate_mismatches": bad, "gate_checked": checked,
        "network_writes": "zz_probe_apply" in C._SERVICE_CALL_NETWORK_WRITES,
        "non_network_writes": "zz_probe_save" in C._SERVICE_CALL_NON_NETWORK_WRITES,
        "validator": T.PRE_DISPATCH_VALIDATORS.get("zz_probe_edit") is P._check}
@@ -637,6 +682,8 @@ def test_a_new_fragment_pairs_write_tools_get_every_wrapper(tmp_path):
     out = json.loads(line[len("PROBE") :])
     assert out["last"] == ["zz_probe_edit", "zz_probe_apply", "zz_probe_save"]
     assert out["network_writes"] and out["non_network_writes"] and out["validator"]
+    assert out["gate_mismatches"] == [], out["gate_mismatches"]
+    assert {"zz_probe_edit", "zz_probe_apply", "zz_probe_save"} <= set(out["gate_checked"])
     save = out["zz_probe_save"]
     assert save["raw"] and save["depth"] == 1 and save["lock"], save
     assert not save["study"] and not save["undo"], save
