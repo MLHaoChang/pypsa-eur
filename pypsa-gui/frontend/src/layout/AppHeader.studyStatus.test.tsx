@@ -3,7 +3,7 @@
 // the queue. It now reads the project's run (`useProjectRun`), queue job or
 // study, and says "Running…"; the run strip under the header has the details.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AppHeader from './AppHeader'
@@ -98,5 +98,31 @@ describe('AppHeader names the finished Guided study (template-e2e 46)', () => {
     hubStudy = { status: 'failed', finished_at: Date.UTC(2026, 10, 26, 13, 2) / 1000 }
     renderHeader()
     expect(screen.queryByTestId('header-run')).toBeNull()
+  })
+})
+
+// template-e2e 25: Expert during a Guided study is read-only and can abort it.
+const abortEhStudy = vi.fn(() => Promise.resolve({ status: 'aborting', aborting: true }))
+vi.mock('../api/simulation', async (orig) => {
+  const m = await orig<typeof import('../api/simulation')>()
+  return { ...m, resultsApi: { ...m.resultsApi, abortEhStudy: () => abortEhStudy() } }
+})
+
+describe('AppHeader during a Guided study (template-e2e 25)', () => {
+  it('offers Abort, locks the workbench and calls the study abort', async () => {
+    projectRun = study
+    useUIStore.setState({ uiMode: 'expert' })
+    renderHeader()
+    const btn = await screen.findByRole('button', { name: /Abort/ })
+    expect(useUIStore.getState().solvingReadOnly).toBe(true)
+    fireEvent.click(btn)
+    await waitFor(() => expect(abortEhStudy).toHaveBeenCalledTimes(1))
+  })
+
+  it('shows Run, not Abort, when no study runs', () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    renderHeader()
+    expect(screen.queryByRole('button', { name: /Abort/ })).toBeNull()
+    expect(useUIStore.getState().solvingReadOnly).toBe(false)
   })
 })

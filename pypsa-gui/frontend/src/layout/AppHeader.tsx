@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useSimulationStore, appLog } from '../store/simulationStore'
 import { networkApi } from '../api/network'
-import { simulationApi, createLogStream } from '../api/simulation'
+import { simulationApi, resultsApi, createLogStream } from '../api/simulation'
 import { projectsApi } from '../api/projects'
 import { downloadProjectBundle, saveProjectQuietly, type BundleSaveResult } from '../utils/projectActions'
 import { useSolveQueue, useEnqueueSolve, useAbortJob, activeJobForProject } from '../hooks/useSolveQueue'
@@ -838,6 +838,13 @@ export default function AppHeader() {
   const projectRun = useProjectRun()
   // The finished Guided study, named once it ends (template-e2e 46).
   const finishedRun = finishedStudyLabel(useHubStudy().study)
+  // A Guided goal study is running (not a queue job): Expert shows it as a run
+  // too — read-only, Run disabled, Abort offered (template-e2e 25).
+  const studyRunning = projectRun != null && projectRun.jobId == null && !projectRun.queued
+  const abortStudy = useMutation({
+    mutationFn: () => resultsApi.abortEhStudy(),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: nk(currentProject, 'results', 'eh_study') }),
+  })
 
   // R11 — the project on screen is READ-ONLY while its queue job solves it.
   // The backend already refuses the writes (main.py's solver-in-flight gate
@@ -846,13 +853,17 @@ export default function AppHeader() {
   // instead of letting the user fill in a form whose save will 409.
   const setSolvingReadOnly = useUIStore(s => s.setSolvingReadOnly)
   useEffect(() => {
-    setSolvingReadOnly(jobRunning)
+    setSolvingReadOnly(jobRunning || studyRunning)
     // Clear on unmount so a header that unmounts mid-solve cannot strand the
     // whole workbench read-only.
     return () => setSolvingReadOnly(false)
-  }, [jobRunning, setSolvingReadOnly])
+  }, [jobRunning, studyRunning, setSolvingReadOnly])
 
   const handleRunButton = async () => {
+    if (studyRunning && !jobRunning && !isRunning) {
+      if (!abortStudy.isPending) abortStudy.mutate()
+      return
+    }
     // 1. RUNNING (queue job or legacy /run) → abort.
     if (jobRunning || isRunning) {
       if (myJob) {
@@ -1117,7 +1128,7 @@ export default function AppHeader() {
           Label's run mode tracks solver_config.mode (Solver Settings). */}
       {(() => {
         // amber for both queued + running; brand red only at idle.
-        const amber = jobQueued || jobRunning || isRunning
+        const amber = jobQueued || jobRunning || isRunning || studyRunning
         // Guided (P24-FE gate decision): the hub design has its own Run, so
         // the idle solve button is hidden; a queued / running solve still
         // shows here so it can be cancelled or aborted.
@@ -1153,12 +1164,12 @@ export default function AppHeader() {
           )}
           <button
             onClick={handleRunButton}
-            disabled={abort.isPending || enqueue.isPending || (readOnly && !amber) || gated}
+            disabled={abort.isPending || abortStudy.isPending || enqueue.isPending || (readOnly && !amber) || gated}
             title={readOnly && !amber
               ? 'Read-only: another user is editing this project'
               : gated
               ? `Cannot run yet — ${runGate.reason}`
-              : jobRunning || isRunning
+              : jobRunning || isRunning || studyRunning
               ? 'Abort the running simulation'
               : jobQueued
                 ? 'Cancel this queued solve'
@@ -1180,8 +1191,8 @@ export default function AppHeader() {
                 : '0 1px 0 rgba(120,20,25,0.45), 0 1px 3px rgba(120,20,25,0.3), inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -1px 0 rgba(0,0,0,0.08)',
             }}
           >
-            {jobRunning || isRunning
-              ? <><Loader size={11} className="animate-spin" /> Abort</>
+            {jobRunning || isRunning || studyRunning
+              ? <><Loader size={11} className="animate-spin" /> {abortStudy.isPending ? 'Aborting…' : 'Abort'}</>
               : jobQueued
                 ? <><Loader size={11} className="animate-spin" /> {queuedLabel}</>
                 : <>

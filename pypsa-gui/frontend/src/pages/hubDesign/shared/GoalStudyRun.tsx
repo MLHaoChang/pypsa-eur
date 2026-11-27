@@ -73,9 +73,10 @@ export function GoalStudyRun() {
           <>
             <span data-testid="hub-run-running" className="text-[12px] text-muted">{runningText}</span>
             <button type="button" data-testid="hub-run-abort" onClick={() => abort.mutate()}
+              disabled={abort.isPending}
               title="Stops at the next stage boundary; the network is left as it was."
               className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] text-muted hover:border-danger hover:text-danger">
-              <Square size={10} /> Abort
+              <Square size={10} /> {abort.isPending ? 'Aborting…' : 'Abort'}
             </button>
           </>
         )}
