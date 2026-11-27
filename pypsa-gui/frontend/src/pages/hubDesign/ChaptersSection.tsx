@@ -11,7 +11,7 @@ import { nk } from '../../utils/queryKeys'
 import { CAMPUS_KEY, CAMPUS_RUN_POLL_MS } from '../CampusElectricalPanel'
 import { isRunJob, useTick } from '../campusRunProgress'
 import { GFM_KEY } from '../CampusIslandGfmSection'
-import { chapterTiles, dispatchSolved, FROM_STUDY_HINT, type ChapterId, type ChapterInputs, type ChapterOpen } from './chapters'
+import { chapterTiles, dispatchSolved, tileHint, type ChapterId, type ChapterInputs, type ChapterOpen } from './chapters'
 import { useHubDesignStore } from './hubDesignStore'
 import RunGridChecks from './RunGridChecks'
 import ProductionTiles from '../results/ProductionTiles'
@@ -112,11 +112,11 @@ export function ChaptersSection({ reliability, headlined = [] }: {
                 {t.label}: in the headline above.
               </p>
             ) : (
-              <Kpi label={t.label} value={t.value} unit={t.unit} basis={t.basis}
+              <Kpi lead={t.lead} label={t.label} value={t.value} unit={t.unit} basis={t.basis}
                 state={t.state} fromStudy={t.fromStudy}
                 // The run panel states "not run yet" and a refusal's needs itself.
                 reason={t.id === 'investment' && (t.state === 'not_run' || icRun.blocker) ? undefined : t.reason}
-                hint={t.fromStudy ? FROM_STUDY_HINT : undefined} testId={`hub-chapter-${t.id}-kpi`} />
+                hint={tileHint(t)} testId={`hub-chapter-${t.id}-kpi`} />
             )}
             {t.control && controlInScope && (
               <p className="text-[11.5px] text-muted" data-testid={`hub-chapter-${t.id}-control`}>

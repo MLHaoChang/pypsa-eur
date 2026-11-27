@@ -1084,3 +1084,20 @@ the cancel re-read and worker-exit steps, unknown→completed, reading the handl
 result in loop.py): all killed.
 Remaining: AA04-P11 and AA04-P12 (tool-line words for the S7 reasons), one UI slice
 with UX review; mismatched artifacts (issue 05).
+
+## 2026-11-27 — AA-06 (evidence UX and navigation): S3b-2 and S5 merged
+
+Merged: #2046 S3b-2 (Dispatch and Overview displayed data, master df206ed7) and #2050 S5 (Chromium result journeys, master 96ccce9a). The earlier slices were #2027, #2029, #2032, #2035 and #2045.
+
+Commands, from `pypsa-gui/backend` with `/root/.venv-pypsa-gui`:
+- `pytest tests/test_harness_reliability.py`: 66 passed.
+- The Dispatch-navigating suites passed: `test_discuss_project_run`, `test_loadflow_navigation`, `test_reference_ladder`, `test_lv03_current_view`, `test_chat_compare_navigate`, `test_run_evidence_acceptance`, `test_aa06_displayed_s3b2` and `test_aa06_displayed_adapters`.
+- `pytest tests/test_assistant_inventory.py tests/test_assistant_control_matrix.py`: 41 passed.
+
+From `pypsa-gui/frontend`, `node scripts/smoke-result-navigation.mjs <schemas.json>` passed on Expert and Guided × single and multi, after `dump_ui_tool_schemas.py`. `scripts/coord/prepush.sh` passed on both heads. GK B (73) killed both #2046 delta mutants (the fall-through at `navigation.py:208`, and a Dispatch.tsx sentence edit). Policy version unchanged.
+
+Not run: the full backend and vitest suites locally; CI covers them.
+
+Remaining blockers: A5.4's failure trail waits on issue 04. The rest of the open scope is named in issue 06 under "Close-out (2026-11-27)" and in issues 28–31.
+
+Next runnable tracer: issue 30. Navigate Prices to a non-default window and expect an ACK bound to that window that says "showing"; today it gets 409 and says "opened".

@@ -656,7 +656,8 @@ def delete_global_constraint(name: str):
 @router.get("/meta")
 def get_meta():
     n = PyPSAService.get_network()
-    return _meta_payload(n, PyPSAService.get_loaded_project())
+    return _meta_payload(n, PyPSAService.get_loaded_project(),
+                         PyPSAService.get_active_context().storage_dir)
 
 
 @router.put("/meta")
