@@ -69,9 +69,8 @@ def active_refusal() -> dict | None:
     Covered starts: `POST /run` (and the chat run tools, which call the handler),
     `POST /run_ac_pf` and the reliability study start (`check_eh_study_start`).
     Study starts are gated in their runners on the study's base project
-    (`services/study/runner.py` `refuse_unlocated`, STUDY-GATE-1). NOT gated yet:
-    the live-network runners of `.scratch/template-e2e/issues/`
-    `48-location-gate-live-network-runners.md`."""
+    (`services/study/runner.py` `refuse_unlocated`, STUDY-GATE-1). Also gated (STUDY-GATE-1, issue 48):
+    the live-network runners and the solve queue, at enqueue (`queued_refusal`) and at dequeue."""
     from services.network_lengths import active_project_dir
     from services.pypsa_service import PyPSAService
 
@@ -82,3 +81,29 @@ def active_refusal() -> dict | None:
         finally:
             lock.release()
     return refusal(PyPSAService.get_network(), active_project_dir())
+
+
+def queued_refusal(
+    project_key: str | None, project_dir: pathlib.Path | None
+) -> dict | None:
+    """`refusal` on the network a queued job of this project will solve: the
+    resident context's when the project is resident (the job solves that one in
+    place), else the saved `network.nc` the job hydrates from. A confirmed
+    anchor settles it without loading anything."""
+    if project_dir is None or anchor_confirmed(project_dir):
+        return None
+    from services.pypsa_service import PyPSAService
+
+    resident = PyPSAService.get_context(project_key) if project_key else None
+    if resident is not None:
+        with resident.mutation_lock:
+            return refusal(resident.network, project_dir)
+    nc_path = project_dir / "network.nc"
+    if not nc_path.exists():
+        return None
+    import pypsa
+
+    n = pypsa.Network()
+    with PyPSAService.get_netcdf_io_lock():
+        PyPSAService.import_network_from_netcdf(n, nc_path)
+    return refusal(n, project_dir)

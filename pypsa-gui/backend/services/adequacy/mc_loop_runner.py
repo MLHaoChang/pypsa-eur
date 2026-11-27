@@ -134,6 +134,14 @@ def start_mc(
     margin_payload = None
     from services import dirty_state
     with PyPSAService.get_lock():
+        # STUDY-GATE-1 (issue 48): the gate reads the network this snapshot is
+        # taken from, inside the same hold; the worker only reads the arrays.
+        from services import site_location
+        from services.network_lengths import active_project_dir
+
+        _no_location = site_location.refusal(n, active_project_dir())
+        if _no_location:
+            raise HTTPException(422, _no_location)
         # LC-37: the edit counter of the network this snapshot reads, as the
         # EH study keeps it; `edited_since_study` compares it.
         network_revision = dirty_state.revision()

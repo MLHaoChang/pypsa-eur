@@ -59,6 +59,14 @@ def _engine_kwargs(body: FrontRequest) -> dict:
 def start_front(body: FrontRequest, *, solver_state: dict, publish_study):
     """Refuse a bad request with 422 before anything is published, then start
     the front in a worker thread (one capacity re-optimisation per point)."""
+    # A missing site location blocks every solve-the-network run (STUDY-GATE-1,
+    # issue 48): refuse before any worker, record or publish.
+    from services import site_location
+
+    _no_location = site_location.active_refusal()
+    if _no_location:
+        raise HTTPException(422, _no_location)
+
     from services import dirty_state
     from services.adequacy.front import (
         FrontBudgetError,

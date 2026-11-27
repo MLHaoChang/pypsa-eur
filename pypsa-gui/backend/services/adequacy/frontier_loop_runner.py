@@ -46,6 +46,14 @@ def start_frontier(
     asks what plan you would BUILD for each standard, so expansion has to
     re-optimise at every point.
     """
+    # A missing site location blocks every solve-the-network run (STUDY-GATE-1,
+    # issue 48): refuse before any worker, record or publish.
+    from services import site_location
+
+    _no_location = site_location.active_refusal()
+    if _no_location:
+        raise HTTPException(422, _no_location)
+
     from services.adequacy.frontier import (
         DEFAULT_TARGETS_PERMYRIAD,
         FrontierBudgetError,
