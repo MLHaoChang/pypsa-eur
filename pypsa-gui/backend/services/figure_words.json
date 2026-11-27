@@ -44,11 +44,11 @@
       "unit": "€/MWh",
       "basis": "The study's cost at the target divided by the energy it served. Energy shed is not counted."
     },
-    "system_cash_cost": {
-      "name": "System cash cost per MWh (before financing and tax)",
+    "system_cost_per_mwh": {
+      "name": "System cost per MWh delivered (before financing and tax)",
       "unit": "{currency}/MWh",
       "tag": "LCOE / LCOS",
-      "basis": "Fixed and variable cost plus storage charging energy at the bus price, over all energy the portfolio delivered. No financing or tax."
+      "basis": "Annualised capital and fixed O&M, plus fuel, variable O&M and storage charging energy at the bus price, over all energy the portfolio delivered. No financing or tax."
     }
   }
 }

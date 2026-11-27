@@ -1,1 +1,1 @@
-* Fix(pypsa-gui): Asset economics names its cash-cost figure "System cash cost per MWh (before financing and tax)" instead of sharing the bare word LCOE, and the Expert LCOE card reads "Out of date" after an edit that follows a run.
+* Fix(pypsa-gui): Asset economics names its system cost figure "System cost per MWh delivered (before financing and tax)" instead of sharing the bare word LCOE, and the Expert LCOE card reads "Out of date" after an edit that follows a run.

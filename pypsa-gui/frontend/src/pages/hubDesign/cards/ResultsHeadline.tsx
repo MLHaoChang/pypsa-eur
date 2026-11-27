@@ -23,7 +23,6 @@ import { useChapterTiles } from '../ChaptersSection'
 import { TABS } from '../../Results'
 import { useHubDesignStore } from '../hubDesignStore'
 import { useResultsOutOfDate } from '../../../hooks/useResultsOutOfDate'
-import { OUT_OF_DATE_TEXT } from '../../../components/ResultsOutOfDate'
 import InvestmentCaseRunPanel from '../../results/investment/InvestmentCaseRunPanel'
 import { useInvestmentCaseRun } from '../../results/investment/useInvestmentCaseRun'
 
@@ -115,6 +114,8 @@ export const LCOE_NOT_APPLICABLE = 'Not applicable for this project type.'
 const READINESS = SECTION_META.find(m => m.id === 'readiness')?.label ?? 'Readiness and run'
 /** The step in plain words, no second link (the NPV figure already opens the Investment case; UX 23, 3). */
 export const LCOE_NO_SOLVE = `To get it, solve the project in ${READINESS}, then run its investment case.`
+/** The pill already says "Out of date"; the reason says why and the next step (UX ruling (ag)). */
+export const LCOE_OUT_OF_DATE = 'The inputs changed after the last run. Run again to see the figures.'
 /** The strip's own words when the read fails. */
 export const LCOE_UNREAD = 'The headline figures could not be read.'
 
@@ -125,7 +126,7 @@ function LcoeFigure({ read }: { read: { kind: 'card'; card: HeadlineCard | null 
   const outOfDate = useResultsOutOfDate()
   if (read.kind !== 'card' || !read.card) {
     const [state, reason]: [ResultStateKind, string] = read.kind === 'failed' ? ['unavailable', LCOE_UNREAD]
-      : read.kind === 'none' ? (outOfDate ? ['unavailable', OUT_OF_DATE_TEXT] : ['not_run', LCOE_NO_SOLVE]) : ['not_applicable', LCOE_NOT_APPLICABLE]
+      : read.kind === 'none' ? (outOfDate ? ['stale', LCOE_OUT_OF_DATE] : ['not_run', LCOE_NO_SOLVE]) : ['not_applicable', LCOE_NOT_APPLICABLE]
     return <Kpi headline testId="hub-results-lcoe" label={words.label} value="" state={state} reason={reason} />
   }
   const card = read.card

@@ -22,7 +22,7 @@ describe('the one source', () => {
   it('the frontend reads exactly these figures', () => {
     expect(Object.keys(source.figures).sort()).toEqual([
       'carrier_lcoe', 'expected_shortfall', 'lcoe_nominal', 'lcoe_real', 'project_npv', 'project_npv_pre_tax',
-      'screening_shortfall', 'study_cost_per_mwh', 'system_cash_cost',
+      'screening_shortfall', 'study_cost_per_mwh', 'system_cost_per_mwh',
     ])
   })
 
@@ -65,8 +65,8 @@ describe('Guided and Expert name a figure alike', () => {
   it("Compare's per-carrier cost is not called the investment case's LCOE", () => {
     expect(figureName('carrier_lcoe')).toBe('Carrier LCOE (before financing and tax)')
     expect(figureName('carrier_lcoe')).not.toBe(figureName('lcoe_real'))
-    expect(figureName('system_cash_cost')).toBe('System cash cost per MWh (before financing and tax)')
-    expect(figureName('system_cash_cost')).not.toMatch(/^LCOE/)
+    expect(figureName('system_cost_per_mwh')).toBe('System cost per MWh delivered (before financing and tax)')
+    expect(figureName('system_cost_per_mwh')).not.toMatch(/^LCOE/)
     expect(figureBasis('carrier_lcoe')).toMatch(/per MWh the carrier produced\. Storage also counts/)
   })
 
