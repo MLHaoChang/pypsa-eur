@@ -3,7 +3,7 @@
 
 # 22 — Improve and the investment case have no manual path
 
-Status: ready-for-agent
+Status: done
 Source: decide-report-journeys.md (walk 2026-11-17, master 0ab07339)
 Severity: blocks decision
 Journey fit: results → decide (compare options, investment case).
@@ -50,4 +50,4 @@ GK B3 (3), S3: route to GK A (levers.py, eh_study.py are engine code). Lead: bot
 UX 2 (4): S1 GO (withReturnFrom / Back pill; visible "Not saved yet" for VOLL, never lost or saved silently; the "Filled in from the Improve card" note clears on edit or leave; "Open in Expert" secondary, before the assistant button, always enabled, tooltip and aria name the destination; neutral "This change: …" copy). S2 GO with a change: the counterfactual line in plain words; one ordered plain-word checklist component in Guided and Expert; the pill says what is missing ("Investment case not run yet") and shows only on the tab where that result is absent; wording to UX 2 before building. S3 GO: one plain-word line under the lever table saying why lever costs differ from the base; shot. Shots dark+light per slice, and one of the refusal checklist.
 
 - 2026-11-23 status sweep: landed in #1757 (5e41d7ed); #1761 (1c965dae); #1886 (f1f8e853): S1 Improve cards open Expert with the change filled in; S2 Guided investment-case run with a refusal checklist. Remains: S3, lever costs reconciling with the base (GK A engine).
-- 2026-11-27 S3 (#2093 engine, #2095 UI line): the storage-duration lever re-specifies only candidate storage, so a fixed battery (DC UPS, H2 hub site_battery) keeps its duration; the lever table carries `base_cost_eur` and the DC 4 h row equals the base (EUR 34.7 m). Follow-ups: (1) the H2 hubs' only lever (storage_duration on `bess_new`, never built) now ties at every duration, so their levers section is "not established" — give eh_h2_hub / eh_h2_hub_staged a lever that differentiates (template data, GK A ruling C); (2) cost StorageUnit energy per MWh, or move candidates to split storage, so a longer duration is priced (GK A C1); (3) issue 48, a lever row above the pack cap reads "meets".
+- 2026-11-27 S3 (#2093 engine, merged; #2095 UI line, merged 6a6fc054): the storage-duration lever re-specifies only candidate storage, so a fixed battery (DC UPS, H2 hub site_battery) keeps its duration; the lever table carries `base_cost_eur` and the DC 4 h row equals the base (EUR 34.7 m). Follow-ups: (1) the H2 hubs' only lever (storage_duration on `bess_new`, never built) now ties at every duration, so their levers section is "not established" — give eh_h2_hub / eh_h2_hub_staged a lever that differentiates (template data, GK A ruling C); (2) cost StorageUnit energy per MWh, or move candidates to split storage, so a longer duration is priced (GK A C1); (3) issue 48, a lever row above the pack cap reads "meets".
