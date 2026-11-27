@@ -24,6 +24,7 @@
     "oracle": "pypsa-gui/backend/tests/test_branch_loading_assurance.py::test_an_observed_overload_counts_weighted_hours_like_the_tab",
     "status": "verified",
     "domain_review": "pending",
+    "domain_review_note": "unpinned: test_branch_loading_assurance.py does not name OVER_LIMIT_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "verified",

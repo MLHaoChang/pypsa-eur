@@ -9,6 +9,7 @@
     "oracle": "pypsa-gui/backend/tests/test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it",
     "status": "verified",
     "domain_review": "pending",
+    "domain_review_note": "unpinned: test_copt_assurance.py does not name REL_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "pending",
@@ -28,6 +29,7 @@
     "oracle": "pypsa-gui/backend/tests/test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it",
     "status": "verified",
     "domain_review": "pending",
+    "domain_review_note": "unpinned: test_copt_assurance.py does not name REL_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "pending",
@@ -47,6 +49,7 @@
     "oracle": "pypsa-gui/backend/tests/test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it",
     "status": "verified",
     "domain_review": "pending",
+    "domain_review_note": "unpinned: test_copt_assurance.py does not name REL_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "pending",

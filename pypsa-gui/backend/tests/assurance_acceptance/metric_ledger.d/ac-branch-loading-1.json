@@ -24,6 +24,7 @@
     "oracle": "pypsa-gui/backend/tests/assurance_acceptance/test_p2_request_slots.py::test_a_non_converged_interval_keeps_its_warning_slot_whatever_is_asked",
     "status": "verified",
     "domain_review": "pending",
+    "domain_review_note": "unpinned: test_p2_request_slots.py does not name OVER_LIMIT_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "verified",

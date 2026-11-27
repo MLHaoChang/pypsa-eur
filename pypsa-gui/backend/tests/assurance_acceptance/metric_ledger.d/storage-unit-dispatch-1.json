@@ -9,6 +9,7 @@
     "oracle": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations",
     "status": "verified",
     "domain_review": "pending",
+    "domain_review_note": "unpinned: test_storage_assurance.py does not name REL_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -24,6 +25,7 @@
     "oracle": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations",
     "status": "verified",
     "domain_review": "pending",
+    "domain_review_note": "unpinned: test_storage_assurance.py does not name REL_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -39,6 +41,7 @@
     "oracle": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations",
     "status": "verified",
     "domain_review": "pending",
+    "domain_review_note": "unpinned: test_storage_assurance.py does not name REL_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -54,6 +57,7 @@
     "oracle": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations",
     "status": "verified",
     "domain_review": "pending",
+    "domain_review_note": "unpinned: test_storage_assurance.py does not name REL_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -69,6 +73,7 @@
     "oracle": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations",
     "status": "verified",
     "domain_review": "pending",
+    "domain_review_note": "unpinned: test_storage_assurance.py does not name REL_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -84,6 +89,7 @@
     "oracle": "pypsa-gui/backend/tests/test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations",
     "status": "verified",
     "domain_review": "pending",
+    "domain_review_note": "unpinned: test_storage_assurance.py does not name REL_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "verified",

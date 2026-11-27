@@ -89,3 +89,17 @@
 | 82 | investment-case/1 | project_irr | the unique r with sum over k of project_post_tax[k] / (1 + r)^k = 0 | test_project_irr_of_one_sign_change_is_the_hand_root | (held R2 OK e0be8aa7; returned to pending by the widened pin) | harness.investment_calculations:IRR_TOLERANCE | no | fraction/year |
 
 Pinned: yes 4, no 35, n/a 43 (exact or ulp:<n>; no constant to name). The renewable-share rows (3) take R4's OK sha in place of a table verdict. Unpinned rows stay pending under issue 29.
+
+## GK B (73) verdict, 2026-11-27, on 25e3b2da
+
+- **Pass (41 rows):** 1, 3-5, 7, 8, 10-16, 28-38, 44-46, 48-50, 52, 56, 57, 59, 63, 64, 71-74, 81. In each:
+  - the formula matches the implementation, weighting included;
+  - the unit is right;
+  - the hand numbers equal the test literals;
+  - `exact` holds, because the checked-answer path refuses any claim that is not equal (`harness/assurance.py:615`), or the test asserts with a literal `==`.
+
+  These rows take the sha of GK B's OK on the R5 PR.
+- **Rows 53-55 (renewable-share/1):** take R4's (#2049) OK sha.
+- **Pending (38 rows):** they stay pending with a `domain_review_note` and are tracked in [issue 29](issues/29-metric-ledger-unpinned-tolerances.md).
+  - 35 rows have a tolerance that is not pinned: 2, 6, 9, 17-24, 39-43, 47, 51, 58, 60-62, 65-70, 75-80 and 82.
+  - 3 rows (25-27) name `SERVED_TOL`, but their oracle compares at `abs=1e-6`.

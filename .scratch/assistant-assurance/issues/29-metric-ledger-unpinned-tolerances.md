@@ -9,7 +9,11 @@ Reviewer: GK B
 
 Split out of [issue 10](10-metric-calculation-and-validity.md) R5 on 2026-11-26 (GK B (73) ruling on R5 condition 5, option C).
 
-R5 runs `test_a_reviewed_row_names_the_tolerance_its_oracle_test_uses` (`pypsa-gui/backend/tests/assurance_acceptance/test_metric_ledger.py`) over every row whose `domain_review` is not `pending`. The 35 verified rows below name a tolerance constant that their oracle test's module never mentions, so none of them can take a `gk-b:` sha. They stay `pending` in the domain review, with a one-line note naming the constant. `investment-case/1 project_irr` held GK B (72)'s R2 OK (`e0be8aa7`); R5 returned it to `pending` on this ground.
+R5 runs `test_a_reviewed_row_names_the_tolerance_its_oracle_test_uses` (`pypsa-gui/backend/tests/assurance_acceptance/test_metric_ledger.py`) over every row whose `domain_review` is not `pending`. The 35 verified rows in the first part of the table below name a tolerance constant that their oracle test's module never mentions, so none of them can take a `gk-b:` sha. They stay `pending` in the domain review, with a one-line note naming the constant. `investment-case/1 project_irr` held GK B (72)'s R2 OK (`e0be8aa7`); R5 returned it to `pending` on this ground.
+
+Three more rows are unpinned in fact, though the check passes them. GK B (73) found this in the R5 table review: `energy-balance/1` `generation_energy`, `served_energy` and `unserved_energy` name `harness.energy_balance_calculations:SERVED_TOL`. Their oracle, `test_energy_balance_assurance.py::test_a_shortfall_comes_off_served_as_it_comes_off_generation`, compares at plain `approx` with a literal `abs=1e-6`. `SERVED_TOL` is imported there and used only by other tests. These rows stay `pending` too and are listed below.
+
+**Limit of the check.** `unpinned_reviews` checks that the constant's name appears somewhere in the oracle test's file. It cannot prove that the oracle compares at that constant. Part of this issue is to tighten the check, for example by resolving the oracle function's source with `ast` and finding the constant inside it. When that is done, rows that are already reviewed must still pass it.
 
 ## What to do
 
@@ -64,3 +68,6 @@ Then send the rows to GK B for domain review. A row that passes takes the sha of
 | storage-unit-dispatch/1 | net_storage_energy | `harness.storage_calculations:REL_TOLERANCE` | `test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations` | compare at the named constant |
 | storage-unit-dispatch/1 | peak_charging_power | `harness.storage_calculations:REL_TOLERANCE` | `test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations` | compare at the named constant |
 | storage-unit-dispatch/1 | peak_discharging_power | `harness.storage_calculations:REL_TOLERANCE` | `test_storage_assurance.py::test_storage_key_results_use_raw_split_power_and_storage_durations` | compare at the named constant |
+| energy-balance/1 | generation_energy | `harness.energy_balance_calculations:SERVED_TOL` | `test_energy_balance_assurance.py::test_a_shortfall_comes_off_served_as_it_comes_off_generation` | compare at the named constant (now `abs=1e-6`) |
+| energy-balance/1 | served_energy | `harness.energy_balance_calculations:SERVED_TOL` | `test_energy_balance_assurance.py::test_a_shortfall_comes_off_served_as_it_comes_off_generation` | compare at the named constant (now `abs=1e-6`) |
+| energy-balance/1 | unserved_energy | `harness.energy_balance_calculations:SERVED_TOL` | `test_energy_balance_assurance.py::test_a_shortfall_comes_off_served_as_it_comes_off_generation` | compare at the named constant (now `abs=1e-6`) |

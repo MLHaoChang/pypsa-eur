@@ -59,6 +59,7 @@
     "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_hours_at_voll_use_the_solves_voll_and_need_one",
     "status": "verified",
     "domain_review": "pending",
+    "domain_review_note": "unpinned: test_result_profiles_assurance.py does not name VOLL_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "verified",

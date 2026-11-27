@@ -9,6 +9,7 @@
     "oracle": "pypsa-gui/backend/tests/test_investment_assurance.py::test_hand_cash_with_a_nonzero_first_year",
     "status": "verified",
     "domain_review": "pending",
+    "domain_review_note": "unpinned: test_investment_assurance.py does not name REL_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "pending",
@@ -24,6 +25,7 @@
     "oracle": "pypsa-gui/backend/tests/test_investment_assurance.py::test_hand_cash_with_a_nonzero_first_year",
     "status": "verified",
     "domain_review": "pending",
+    "domain_review_note": "unpinned: test_investment_assurance.py does not name REL_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "pending",
@@ -39,6 +41,7 @@
     "oracle": "pypsa-gui/backend/tests/test_investment_assurance.py::test_hand_cash_with_a_nonzero_first_year",
     "status": "verified",
     "domain_review": "pending",
+    "domain_review_note": "unpinned: test_investment_assurance.py does not name IRR_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "pending",

@@ -39,6 +39,7 @@
     "oracle": "pypsa-gui/backend/tests/test_lost_load_assurance.py::test_lost_load_matches_the_hand_values_from_a_real_solve",
     "status": "verified",
     "domain_review": "pending",
+    "domain_review_note": "unpinned: test_lost_load_assurance.py does not name SHED_THRESHOLD_MW (issue 29)",
     "surfaces": {
      "answer": {
       "status": "verified",
