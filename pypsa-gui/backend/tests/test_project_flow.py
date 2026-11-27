@@ -51,16 +51,6 @@ def _site_network() -> pypsa.Network:
     return n
 
 
-@pytest.fixture(autouse=True)
-def _site_located(request, monkeypatch):
-    """A missing site location blocks Run (TEMPLATE-GAPS-1 Q1 a). The networks
-    these tests build sit at 0,0, so they start with the site coordinates
-    confirmed; a test about the missing location is marked `unlocated`."""
-    if request.node.get_closest_marker("unlocated") is None:
-        from services import site_location
-        monkeypatch.setattr(site_location, "anchor_confirmed", lambda _d: True)
-
-
 @pytest.fixture
 def site(client, install_network, tmp_projects_dir):
     """Factory: install a network as a saved, open project; returns its name."""
