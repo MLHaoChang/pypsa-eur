@@ -196,7 +196,7 @@ export default function FmeaTab() {
     downloadCSV('fmea_worksheet.csv', WORKSHEET_CSV_HEADER, worksheetCsvRows(rows, guided))
 
   return (
-    <div className="flex flex-col h-full overflow-auto p-4 gap-3">
+    <div data-testid="results-view-fmea" className="flex flex-col h-full overflow-auto p-4 gap-3">
       <header>
         <div className="flex items-center gap-2">
           <h3 className="text-h3 font-semibold text-text">

@@ -10,14 +10,16 @@ import { campusApi } from '../../../api/campusElectrical'
 import { resultsApi, simulationApi, type HeadlineCard, type HeadlineKpis } from '../../../api/simulation'
 import { useUIStore } from '../../../store/uiStore'
 import { useProjectFlow } from '../../../hooks/useProjectFlow'
+import { useResultsOutOfDate } from '../../../hooks/useResultsOutOfDate'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { REPORT, review } from '../testFixtures'
 import captured from '../../../test/fixtures/headlineKpis.json'
 import { ResultsCard } from './ResultsCard'
 import { chartFigure } from '../../../components/charts/chartTheme'
 import { HEADLINE_WORDS, headlineFigure } from '../../results/headlineWords'
-import { BELOW_FLOOR_PILL, FEEDER_HELD_PILL, LCOE_NO_SOLVE, LCOE_NOT_APPLICABLE, LCOE_UNREAD, mixedSourceNote, ReliabilityBullet } from './ResultsHeadline'
+import { BELOW_FLOOR_PILL, FEEDER_HELD_PILL, LCOE_NO_SOLVE, LCOE_OUT_OF_DATE, LCOE_NOT_APPLICABLE, LCOE_UNREAD, mixedSourceNote, ReliabilityBullet } from './ResultsHeadline'
 
+vi.mock('../../../hooks/useResultsOutOfDate', () => ({ useResultsOutOfDate: vi.fn(() => false) }))
 vi.mock('../../../hooks/useProjectFlow', () => ({ useProjectFlow: vi.fn() }))
 vi.mock('../../../api/finance', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/finance')>()
@@ -164,6 +166,18 @@ describe('Results headline', () => {
     const lcoe = await screen.findByTestId('hub-results-lcoe')
     expect(lcoe.getAttribute('data-state')).toBe('unavailable')
     expect(lcoe.textContent).toContain(card.reason)
+  })
+
+  it('LCOE after an edit that follows a run reads "Out of date", never "Not run yet" (UX ruling (ag))', async () => {
+    vi.mocked(useResultsOutOfDate).mockReturnValue(true)
+    vi.mocked(resultsApi.getHeadlineKpis).mockResolvedValue(null)
+    mount()
+    const lcoe = await screen.findByTestId('hub-results-lcoe')
+    expect(lcoe.getAttribute('data-state')).toBe('stale')
+    expect(lcoe.textContent).toContain('Out of date')
+    expect(lcoe.textContent).toContain(LCOE_OUT_OF_DATE)
+    expect(lcoe.textContent).not.toContain(LCOE_NO_SOLVE)
+    vi.mocked(useResultsOutOfDate).mockReturnValue(false)
   })
 
   it.each([

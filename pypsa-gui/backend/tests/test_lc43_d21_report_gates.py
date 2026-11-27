@@ -26,7 +26,7 @@ still reads MC LOLE 3.21 h/yr:
   that keeps the sentence and lists "Executive summary: 1.0 h/yr" under "Numbers to
   check" (the section's audit re-run against the facts version 1 verified, LC-43a);
 - table cells are compared one by one (GK B 52): two rows that swap values, a unit
-  changed beside the number ("3.21 min/yr") or in the row label ("MC LOLE (min/yr)")
+  changed beside the number ("3.21 min/yr") or in the row label ("Expected shortfall (min/yr)")
   are withheld and listed the same way, as are a unit added to the "Value" header and
   an added row or column stating "42 MW"; a reformat
   ("3.210 h/yr"), a label renamed in a row with no number and an added row with no
@@ -197,7 +197,7 @@ def test_a_copy_that_changes_an_admitted_number_leaves_the_headline_and_version_
     report_id = _generated(monkeypatch)
     doc = _docx(client, report_id)
     for row in doc.tables[0].rows:
-        if row.cells[0].text == "MC LOLE (h/yr)":
+        if row.cells[0].text == "Expected shortfall (h/yr)":
             row.cells[1].text = "1.00 h/yr"
 
     out = T.import_edited_report(
@@ -214,7 +214,7 @@ def test_a_copy_that_changes_an_admitted_number_leaves_the_headline_and_version_
     _version_one_reads_as_delivered(client, report_id)
 
 
-_LOLE, _CAP = "MC LOLE (h/yr)", "ENS cap (‱ of demand)"
+_LOLE, _CAP = "Expected shortfall (h/yr)", "ENS cap (‱ of demand)"
 
 
 @pytest.mark.parametrize(
@@ -228,8 +228,8 @@ _LOLE, _CAP = "MC LOLE (h/yr)", "ENS cap (‱ of demand)"
         # T2: a unit changed beside the number, and in the row label.
         ({_LOLE: (None, "3.21 min/yr")}, "3.21 min/yr (unverified, withheld)"),
         (
-            {_LOLE: ("MC LOLE (min/yr)", None)},
-            "MC LOLE (min/yr) (unverified, withheld)",
+            {_LOLE: ("Expected shortfall (min/yr)", None)},
+            "Expected shortfall (min/yr) (unverified, withheld)",
         ),
         # T2: a unit added to the header of the column that holds the numbers.
         ({"Item": (None, "Value (min/yr)")}, "Value (min/yr) (unverified, withheld)"),
@@ -459,7 +459,7 @@ def test_an_unaudited_section_keeps_its_prose_and_withholds_its_tables():
     edited = {
         "headline_edited_v3": _table(
             ["Item", "Value"],
-            ["MC LOLE (h/yr)", "not established"],
+            ["Expected shortfall (h/yr)", "not established"],
             ["Cost at target", "2 €"],
         ),
         "executive_summary_table1_v3": _table(["Peak shed", "42 MW"]),

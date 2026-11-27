@@ -388,9 +388,9 @@ def test_post_evidence_only_builds_v1_and_the_figure_files(
     assert by_id["certification"]["status"] == "skipped"
     assert any(b["type"] == "callout" and b["kind"] == "not_established"
                for b in by_id["certification"]["blocks"])
-    # ADR-0001 through the wire: the headline MC LOLE is null → not established.
+    # ADR-0001 through the wire: the headline expected shortfall (MC LOLE) is null → not established.
     headline = doc["tables"]["headline"]
-    lole = next(row for row in headline["rows"] if row[0].startswith("MC LOLE"))
+    lole = next(row for row in headline["rows"] if row[0] == "Expected shortfall (h/yr)")
     assert lole[1] == "not established"
 
     d = project_storage_dir(name)

@@ -75,7 +75,7 @@ def build_inventory() -> dict:
     checked_tools = _literal_constant(ROOT / 'pypsa-gui/backend/harness/assurance.py', 'CHECKED_TOOLS')
     ack_panels = _literal_constant(ROOT / 'pypsa-gui/backend/harness/navigation.py', 'PANELS')
 
-    results = (ROOT / 'pypsa-gui/frontend/src/pages/Results.tsx').read_text()
+    results = (ROOT / 'pypsa-gui/frontend/src/pages/results/resultTabs.ts').read_text()
     tab_block = re.search(r'\bconst TABS:.*?=\s*\[(.*?)\n\]', results, re.S)
     if tab_block is None:
         raise ValueError('Cannot enumerate Results TABS; update the inventory reader.')
@@ -112,7 +112,7 @@ def build_inventory() -> dict:
         'status': 'source inventory and assurance adapter map; behavioral fixtures and GUI parameter mapping pending',
         'sources': [
             'pypsa-gui/backend/harness/catalogue.py', 'pypsa-gui/backend/harness/toolsets.py',
-            'pypsa-gui/frontend/src/pages/Results.tsx', 'pypsa-gui/frontend/src/store/uiStore.ts',
+            'pypsa-gui/frontend/src/pages/results/resultTabs.ts', 'pypsa-gui/frontend/src/store/uiStore.ts',
             'pypsa-gui/backend/models/energy_hub.py', 'pypsa-gui/backend/services/adequacy/mc.py',
             'pypsa-gui/backend/harness/assurance_coverage.py', 'pypsa-gui/backend/harness/assurance.py',
             'pypsa-gui/backend/harness/navigation.py',

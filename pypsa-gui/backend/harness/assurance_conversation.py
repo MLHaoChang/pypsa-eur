@@ -40,6 +40,10 @@ QUESTIONS = {
     "capacity_component_required": "Please name the component class and its name: generator, link, line, transformer, StorageUnit or store, for example: What is the capacity of generator G1?",
     # AA-09 S1: a summary outside the bounded grammar is never summarized unscoped.
     "key_results_scope_required": "Which checked result do you want? Name one result and its component, for example: Give me the key results for storage unit <name>; Give me the energy balance for network; Give me the system cost for network. This summary request is outside the checked request forms, so no part of it has been answered.",
+    # AA-09 S3: an entity switch and an added filter.
+    "carried_entity_unavailable": "That component is not in the active network under the same component class as the previous checked result. Please name a component of that class, or state the full result scope.",
+    "carried_scope_changed": "The network changed (an edit or a new solve) since the checked result this follow-up refers to, so its window and basis are not carried over. Please state the full result scope again.",
+    "unsupported_constraint": "That request adds a filter (such as excluding, only or without) that no checked result supports. Please ask for the result without the filter, or ask without a check; the filter has not been ignored.",
 }
 # AA-09 S1: the whole message is a request for the results summary: optional polite
 # filler, the summary phrase, then optionally "for <entity>" or "of the run". The
@@ -113,6 +117,25 @@ def clarify_summary(turn, ui, network):
     return scope
 
 
+# AA-09 S3: "same for <class> <name>" keeps the checked window, basis and metrics.
+SWITCH = (
+    r"(?:(?:and\s+)?(?:now\s+)?(?:the\s+)?same\s+for|(?:and\s+)?now\s+for|what\s+about)\s+"
+    r"(generator|storage\s*unit|line|transformer|link|store|bus|load|carrier)\s+([^;?]{1,128}?)"
+)
+CLASS_TABLES = {
+    "Generator": "generators", "StorageUnit": "storage_units", "Line": "lines",
+    "Transformer": "transformers", "Link": "links", "Store": "stores", "Bus": "buses",
+    "Load": "loads", "Carrier": "carriers",
+}
+PROFILE_CLASSES = {
+    "carrier-energy/1": "Carrier", "bus-price/1": "Bus", "lost-load/1": "Load",
+}
+# AA-09 S3: explicit filter words; they matter only when the rest is a checked request.
+FILTER = re.compile(
+    r"\b(?:exclud(?:e|es|ing)|except(?:\s+for)?|without|only(?:\s+for)?|ignor(?:e|es|ing)"
+    r"|apart\s+from|other\s+than)\b",
+    re.I,
+)
 PENDING = {"cost_quantity_required", "explicit_cost_basis_required", "capacity_meaning_required"}
 
 
@@ -405,6 +428,11 @@ def resolve(turn, message, ui, explicit):
             )
         )
         return assurance_scope.validate(scope)
+    switch = _match(SWITCH, message)
+    if switch:
+        return _switch(turn, switch, state, state_reason, pending)
+    if _filtered(message, turn.project_id, ui):
+        return _needs(turn, None, "unsupported_constraint")
     if re.match(r"(?:use\s+)?price year\b", message.strip(), re.I):
         return _needs(turn, state["scope"] if state else None, "unsupported_followup")
     if re.match(
@@ -414,6 +442,76 @@ def resolve(turn, message, ui, explicit):
     ):
         return _needs(turn, state["scope"] if state else None, "unsupported_followup")
     return None
+
+
+def _entity_class(scope):
+    """The component class a checked single-entity scope names, or None."""
+    if scope.get("entity_id") in ("network", assurance_scope.EVERY):
+        return None
+    if scope.get("component_class"):
+        return scope["component_class"]
+    if scope["profile"] in calculations.STORAGE_PROFILES:
+        return "StorageUnit"
+    if scope["profile"] in PROFILE_CLASSES:
+        return PROFILE_CLASSES[scope["profile"]]
+    return "Generator" if scope["profile"].startswith("generator-") else None
+
+
+def _switch(turn, switch, state, state_reason, pending):
+    """AA-09 S3: the same checked scope for another component of the same class, only
+    while the previous checked source is unchanged."""
+    if not state:
+        return _needs(turn, None, state_reason)
+    if pending:
+        return _needs(turn, state["scope"], pending)
+    scope = deepcopy(state["scope"])
+    kind = _entity_class(scope)
+    if kind is None:
+        return _needs(turn, scope, "unsupported_followup")
+    if scope.get("evidence_id"):
+        return _needs(turn, scope, "current_run_required")
+    if scope.get("comparison_evidence_id"):
+        return _needs(turn, scope, "previous_compatible_run_required")
+    word = re.sub(r"\s+", "", switch[1].lower())
+    named = {"storageunit": "StorageUnit"}.get(word, word.capitalize())
+    name = switch[2].strip()
+    entries = state.get("entries") or []
+    try:
+        ctx = PyPSAService.get_active_context()
+        if not entries or entries[-1]["scope"].get("entity_id") != scope["entity_id"]:
+            raise ValueError("no_retained_source")
+        with network_guard():
+            current = calculations.scoped_source(ctx, scope, turn.owner)
+            if records.digest(current) != entries[-1]["run_key"]:
+                raise ValueError("changed_source")
+    except (ValueError, KeyError, TypeError, HTTPException):
+        return _needs(turn, scope, "carried_scope_changed")
+    table = getattr(getattr(ctx, "network", None), CLASS_TABLES[named], None)
+    if named != kind or table is None or name not in table.index:
+        return _needs(turn, scope, "carried_entity_unavailable")
+    scope["entity_id"] = name
+    scope.pop("chart", None)
+    return assurance_scope.validate(scope)
+
+
+def _filtered(message, project_id, ui):
+    """True when a checked request carries an added filter: removing the filter clause
+    leaves a whole message the bounded grammar scopes."""
+    found = FILTER.search(message)
+    if not found:
+        return False
+    text = message.strip()
+    head = re.sub(r"(?:[\s,;:-]|\band\b)+$", "", message[: found.start()])
+    bases = [head]
+    if not head.strip() and "," in text:
+        bases.append(text.split(",", 1)[1])
+    for base in bases:
+        try:
+            if base.strip() and assurance_scope.from_message(base.strip(), project_id, ui):
+                return True
+        except ValueError:
+            return True
+    return False
 
 
 def remember(turn):

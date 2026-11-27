@@ -20,6 +20,7 @@ from __future__ import annotations
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from services import figure_words as FW
 from services.finance.breakeven import LABEL as ISLAND_BREAKEVEN_LABEL
 from services.reports import formatting as F
 
@@ -106,14 +107,18 @@ def investment_payload(report: dict | None, *, stale: bool | None = None) -> dic
 def investment_table(payload: dict, source_path: str):
     from services.reports.evidence import EvidenceTable
 
-    cur = payload.get("currency") or "EUR"
+    # A missing currency reads "report currency", never a silent € (GK B (72) cond. 4).
+    cur = FW.unit("project_npv", payload.get("currency"))
     rows = [
-        ("NPV at the WACC, after tax", F.fmt_number(payload.get("npv_at_wacc_eur"), unit=cur)),
-        ("NPV before tax", F.fmt_number(payload.get("project_pre_tax_npv_eur"), unit=cur)),
+        (FW.name("project_npv"), F.fmt_number(payload.get("npv_at_wacc_eur"), unit=cur)),
+        (FW.name("project_npv_pre_tax"), F.fmt_number(payload.get("project_pre_tax_npv_eur"), unit=cur)),
         ("Project IRR before tax", F.fmt_number(payload.get("project_irr_pre_tax_pct"), unit="%", digits=1)),
         ("Project IRR after tax", F.fmt_number(payload.get("project_irr_post_tax_pct"), unit="%", digits=1)),
         ("Payback (years)", F.fmt_number(payload.get("payback_years"), digits=1)),
-        ("LCOE", F.fmt_number(payload.get("lcoe_eur_per_mwh"), unit="€/MWh", digits=1)),
+        # `lcoe_eur_per_mwh` is the finance-consistent NOMINAL figure (`_investment_payload`).
+        (FW.name("lcoe_nominal"),
+         F.fmt_number(payload.get("lcoe_eur_per_mwh"),
+                      unit=FW.unit("lcoe_nominal", payload.get("currency")), digits=1)),
         ("Minimum DSCR", F.fmt_number(payload.get("min_dscr"), digits=2)),
         ("Compared with", F.fmt_text(payload.get("compared_with")) if payload.get("compared_with")
          else "nothing: incremental = total" if payload.get("no_counterfactual")

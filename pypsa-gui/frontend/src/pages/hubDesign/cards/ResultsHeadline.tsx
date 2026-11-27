@@ -18,10 +18,12 @@ import { SECTION_META } from '../../../layout/flowSections'
 import type { HeadlineCard } from '../../../api/simulation'
 import { HEADLINE_WORDS, headlineFigure } from '../../results/headlineWords'
 import { useHeadlineKpis } from '../../results/HeadlineStrip'
-import { FROM_STUDY_HINT, type ChapterInputs, type ChapterOpen, type ChapterTile } from '../chapters'
+import { tileHint, type ChapterInputs, type ChapterOpen, type ChapterTile } from '../chapters'
 import { useChapterTiles } from '../ChaptersSection'
 import { TABS } from '../../Results'
 import { useHubDesignStore } from '../hubDesignStore'
+import { useResultsOutOfDate } from '../../../hooks/useResultsOutOfDate'
+import { OUT_OF_DATE_REASON } from '../../../components/ResultsOutOfDate'
 import InvestmentCaseRunPanel from '../../results/investment/InvestmentCaseRunPanel'
 import { useInvestmentCaseRun } from '../../results/investment/useInvestmentCaseRun'
 
@@ -97,9 +99,9 @@ function TileFigure({ tile, testId, studyBanner = false, dimmed = false }: {
   const tab = 'step' in o ? null : o.panel === 'results' ? tabLabel(o.tab) : null
   return (
     <div className="flex flex-col gap-1">
-      <Kpi headline testId={testId} label={tile.label} value={tile.value} unit={tile.unit} basis={tile.basis}
+      <Kpi headline testId={testId} lead={tile.lead} label={tile.label} value={tile.value} unit={tile.unit} basis={tile.basis}
         state={view.state} dimmed={view.dimmed || dimmed}
-        reason={tile.reason} fromStudy={tile.fromStudy} hint={tile.fromStudy ? FROM_STUDY_HINT : undefined}
+        reason={tile.reason} fromStudy={tile.fromStudy} hint={tileHint(tile)}
         action={'step' in o ? { label: 'Go to Goal', onClick: () => openTile(o, setStep) } : undefined} />
       {tab && <OpenLink label={tab} testId={`${testId}-open`} onClick={() => openTile(o, setStep)} />}
     </div>
@@ -113,15 +115,18 @@ export const LCOE_NOT_APPLICABLE = 'Not applicable for this project type.'
 const READINESS = SECTION_META.find(m => m.id === 'readiness')?.label ?? 'Readiness and run'
 /** The step in plain words, no second link (the NPV figure already opens the Investment case; UX 23, 3). */
 export const LCOE_NO_SOLVE = `To get it, solve the project in ${READINESS}, then run its investment case.`
+export const LCOE_OUT_OF_DATE = OUT_OF_DATE_REASON
 /** The strip's own words when the read fails. */
 export const LCOE_UNREAD = 'The headline figures could not be read.'
 
 /** `read`: what the headline read gave: a response (with or without an LCOE card), none yet (204), or a failure. */
 function LcoeFigure({ read }: { read: { kind: 'card'; card: HeadlineCard | null } | { kind: 'none' } | { kind: 'failed' } }) {
   const words = HEADLINE_WORDS.lcoe
+  // A 204 after an edit that follows a run is "out of date", not "never solved" (UX ruling (ag)).
+  const outOfDate = useResultsOutOfDate()
   if (read.kind !== 'card' || !read.card) {
     const [state, reason]: [ResultStateKind, string] = read.kind === 'failed' ? ['unavailable', LCOE_UNREAD]
-      : read.kind === 'none' ? ['not_run', LCOE_NO_SOLVE] : ['not_applicable', LCOE_NOT_APPLICABLE]
+      : read.kind === 'none' ? (outOfDate ? ['stale', LCOE_OUT_OF_DATE] : ['not_run', LCOE_NO_SOLVE]) : ['not_applicable', LCOE_NOT_APPLICABLE]
     return <Kpi headline testId="hub-results-lcoe" label={words.label} value="" state={state} reason={reason} />
   }
   const card = read.card
@@ -250,7 +255,8 @@ export function ResultsHeadline({ reliability, cost, costEur = null, ci, freshne
   const npv = tiles.find(t => t.id === 'investment')
   const figures: HeadlineFigureState[] = [
     ...[rel, npv].filter((t): t is ChapterTile => !!t).map(t => ({
-      label: t.label, state: t.state, freshnessUnknown: freshnessUnknown && t.id === 'reliability',
+      // The lead ("What the design is worth") reads as a list item; the ruled name holds a comma.
+      label: t.lead ?? t.label, state: t.state, freshnessUnknown: freshnessUnknown && t.id === 'reliability',
     })),
     ...(lcoe ? [{ label: HEADLINE_WORDS.lcoe.label, state: cardState(lcoe) }] : []),
     ...(co2 ? [{ label: HEADLINE_WORDS.co2_annual.label, state: cardState(co2) }] : []),

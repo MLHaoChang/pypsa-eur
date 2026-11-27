@@ -27,9 +27,17 @@ So a PSS/E result can be read channel by channel, but no judgment is made from a
    with SHA-256 in the manifest and carries a `data_hash`, `pack` and `pack_version`, as the EMT
    pack does.
 2. `KNOWN_PACKS` accepts the PSS/E pack; the README says where the results go (`results/`).
-3. A read-back test on a real `write_psse_pack` output with hand-written result CSVs: a
+3. The PSS/E pack takes `ratings=` (GC-13 `PackRatings`) and writes `ratings.json` as the EMT
+   pack does (`emt_pack.write_emt_pack`), so read-back judges it on its own ratings.
+4. A read-back test on a real `write_psse_pack` output with hand-written result CSVs: a
    stays-connected pass, a trip fail, a failed poll unknown with the sidecar reason.
 
 ## Done when
 
 - `judge_pack` on a written PSS/E pack with results gives one judgment per battery case.
+
+## Risks
+
+- From GK A's review of #2058 (GC-12 PR-B), non-blocking: "Each PSS/E poll is logged at the
+  requested stop time, not the time PSS/E actually reached. If PSS/E only stops on whole DELT
+  steps, the end sample can read blank, which makes every case unknown."
