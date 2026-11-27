@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The checked assistant now asks which checked result you mean when a summary request ("key results", "summarize the results", "overview") falls outside its checked request forms, instead of drafting an unscoped summary that could omit a required result.
