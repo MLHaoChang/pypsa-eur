@@ -160,7 +160,7 @@ def campus_island_report(project_id: str, table: str | None = None) -> dict:
             status_code=422,
             detail={
                 "error_kind": "invalid_tool_args",
-                "message": f"table must be one of {list(TABLE_IDS)}, got {_cut(table, 40)!r}",
+                "message": f"table must be one of {list(TABLE_IDS)}, got {_cut(table, 40)!r}",  # repr-ok: moved verbatim from chat_tools (RETRO-FRAG-1)
             },
         )
     one = next((t for t in tables if t["id"] == table), None)
@@ -300,7 +300,7 @@ def campus_save_grid_code_draft(
             _gridspine_project(db, user, project_id), profile_id
         )
     campus_cards.require_base(
-        current and current["yaml"], base_sha256, f"draft {profile_id!r}"
+        current and current["yaml"], base_sha256, f"draft {profile_id!r}"  # repr-ok: moved verbatim from chat_tools (RETRO-FRAG-1)
     )
     return _with_sha(_campus_route(_h, project_id, profile_id, ProfileText(yaml=yaml)))
 
