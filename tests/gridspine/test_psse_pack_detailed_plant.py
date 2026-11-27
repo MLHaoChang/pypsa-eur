@@ -197,8 +197,10 @@ def test_the_scripts_check_the_case_mbase_sum_against_the_plant_rating(pack):
 
 
 def _run_base_read(text, replies):
-    """Run the script's MBASE read and sum check with a fake macdat that
-    returns ``replies[k]`` = (ierr, MBASE) for machine k."""
+    """
+    Run the script's MBASE read and sum check with a fake macdat that
+    returns ``replies[k]`` = (ierr, MBASE) for machine k.
+    """
     body = ast.parse(text).body
     keep = [
         n
