@@ -1120,21 +1120,25 @@ def get_fmea_modes():
     class A from the COPT engine (regenerated on every call — zero solves)
     plus the last contingency sweep's class B/C rows, criticality-sorted.
     The worksheet merges this with the per-project sidecar's expert rows
-    client-side. 204 only when every source is empty.
+    client-side. 204 only when every source is empty. While the last Energy
+    Hub study is the newest FMEA source, its ``fmea_top`` rows are served
+    instead, as the report reads them (template-e2e 24; ``source`` says which).
     """
-    from services.adequacy.copt_endpoint import build_fmea_modes_payload
+    from services.adequacy.copt_endpoint import build_fmea_modes_payload, study_fmea_top
     try:
         out = build_fmea_modes_payload(
             PyPSAService.get_network(),
             _state.get("solver_config"),
             sweep_record=_state.get("fmea_sweep"),
             get_lock=PyPSAService.get_lock,
+            **study_fmea_top(_state),
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     if out is None:
         return Response(status_code=204)
     return out
+
 
 
 

@@ -19,6 +19,21 @@ export interface ModesPayload {
    *  `time_limit` and `suboptimal`. The frontend must not re-derive it. */
   sweep_base_restored?: boolean | null
   sweep_base_restore_status?: string | null
+  /** template-e2e 24: `eh_study` when the rows are the last Energy Hub
+   *  study's `fmea_top` rows (the ones the report lists), `live` for the
+   *  COPT screening of the current network plus the last sweep. */
+  source?: 'eh_study' | 'live' | null
+}
+
+/** The line naming where the computed rows come from, or null for live rows. */
+export function modesSourceText(
+  modes: ModesPayload | null | undefined, guided: boolean,
+): string | null {
+  if (modes?.source !== 'eh_study') return null
+  return guided
+    ? 'These rows come from the last energy hub study: the same risks its results and the report list.'
+    : 'Computed rows are the last Energy Hub study\'s ranking (as in the reference design and the report), '
+      + 'not a fresh screening; a contingency sweep run after it replaces them.'
 }
 
 /**

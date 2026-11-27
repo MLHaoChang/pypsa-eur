@@ -207,7 +207,7 @@ def _highest(modes: list[dict]) -> list[Key]:
 
 
 def _fmea(run) -> ViewData | None:
-    from services.adequacy.copt_endpoint import build_fmea_modes_payload
+    from services.adequacy.copt_endpoint import build_fmea_modes_payload, study_fmea_top
     if run.context is None:
         from services.pypsa_service import PyPSAService
         get_lock = PyPSAService.get_lock
@@ -215,8 +215,9 @@ def _fmea(run) -> ViewData | None:
         get_lock = contextlib.nullcontext
     state = _state(run)
     # ValueError is the route's 422: it reaches About as an error.
+    # template-e2e 24: the study's own rows while it is the newest source, as the app shows them.
     p = build_fmea_modes_payload(run.network, run.cfg, sweep_record=state.get("fmea_sweep"),
-                                 get_lock=get_lock)
+                                 get_lock=get_lock, **study_fmea_top(state))
     if p is None:  # the route's 204: no failure mode from any source
         return None
     modes = p.get("per_mode") or []

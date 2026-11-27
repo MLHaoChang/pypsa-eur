@@ -167,11 +167,24 @@ def build_fmea_modes_payload(
     *,
     sweep_record: dict | None,
     get_lock: Callable[[], Any],
+    study_fmea_top: dict | None = None,
+    study_finished_at: float | None = None,
 ) -> dict | None:
     """Return the ``/fmea_modes`` JSON body, or ``None`` for HTTP 204.
 
+    template-e2e 24 (one source of FMEA rows): ``study_fmea_top`` is the last
+    Energy Hub study's ``fmea_top`` payload. While that study is the newest
+    FMEA source, its rows are served exactly as the report and the Energy Hub
+    panel read them (``evidence.fmea_top_modes``), at the study's prices, so
+    the worksheet, the panel and the report list the same risks. A sweep that
+    finished after the study, or no study rows, keeps the live COPT + sweep
+    path. ``source`` says which (``"eh_study"`` or ``"live"``).
+
     Raises ``ValueError`` from the nested COPT walk (router maps to 422).
     """
+    study = _study_fmea_modes(study_fmea_top, study_finished_at, sweep_record)
+    if study is not None:
+        return study
     per_mode: list = []
     copt = build_copt_payload(n, cfg, get_lock=get_lock)
     if isinstance(copt, dict):
@@ -214,6 +227,7 @@ def build_fmea_modes_payload(
         # an earlier VOLL included — so each reads None, never €0.
         per_mode = [{**r, **{k: None for k in _EUR_FIELDS}} for r in per_mode]
     return {"per_mode": per_mode,
+            "source": "live",
             "voll_eur_per_mwh": _voll,
             "sweep_status": (sweep or {}).get("status"),
             # Phase 12e (shipped-code review, finding 14): the worksheet is
@@ -225,3 +239,48 @@ def build_fmea_modes_payload(
             "sweep_base_restored": (sweep or {}).get("base_restored"),
             "sweep_base_restore_status": (sweep or {}).get("base_restore_status"),
             "sweep_error": (sweep or {}).get("error")}
+
+
+def _study_fmea_modes(
+    payload: dict | None,
+    finished_at: float | None,
+    sweep: dict | None,
+) -> dict | None:
+    """The ``/fmea_modes`` body from the study's ``fmea_top`` rows, or None
+    when the live path answers (no rows, or a sweep finished after it)."""
+    if not isinstance(payload, dict):
+        return None
+    from services.reports.evidence import fmea_top_modes
+
+    modes = fmea_top_modes(payload)
+    if not modes:
+        return None
+    sweep_at = (sweep or {}).get("finished_at")
+    if (sweep or {}).get("status") in ("done", "aborted") and sweep_at is not None \
+            and (finished_at is None or float(sweep_at) > float(finished_at)):
+        return None
+    voll = payload.get("voll_eur_per_mwh")
+    return {"per_mode": modes,
+            "source": "eh_study",
+            "voll_eur_per_mwh": float(voll) if voll is not None else None,
+            "sweep_status": None,
+            "sweep_base_restored": None,
+            "sweep_base_restore_status": None,
+            "sweep_error": None}
+
+
+def study_fmea_top(state: dict) -> dict:
+    """``build_fmea_modes_payload``'s study arguments from a solver state: the
+    last EH study's ``fmea_top`` payload and finish time. Empty while a study
+    runs or when no stored report has the section (template-e2e 24)."""
+    from services.adequacy.eh_report import load_eh_report
+
+    record = state.get("eh_study") or {}
+    if record.get("status") == "running":
+        return {}
+    report = load_eh_report(state)
+    section = report.sections.get("fmea_top") if report is not None else None
+    if section is None or not isinstance(section.payload, dict):
+        return {}
+    return {"study_fmea_top": section.payload,
+            "study_finished_at": record.get("finished_at")}

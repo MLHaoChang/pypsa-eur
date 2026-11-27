@@ -33,6 +33,7 @@ import {
   type WorksheetRow,
   type WorksheetSidecar,
   CRITICALITY_PER_YEAR_LABEL,
+  modesSourceText,
 } from './fmea'
 import { openVollField } from '../../layout/flowNavigation'
 
@@ -218,6 +219,11 @@ export default function FmeaTab() {
           to a statutory reliability standard (hover a badge for each row's
           fidelity).
         </p>
+        )}
+        {modesSourceText(modes as ModesPayload | null | undefined, guided) && (
+          <p data-testid="fmea-source-line" className="text-[11px] text-muted mt-1">
+            {modesSourceText(modes as ModesPayload | null | undefined, guided)}
+          </p>
         )}
       </header>
 

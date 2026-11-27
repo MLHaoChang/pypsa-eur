@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { buildManualRow, mergeWorksheet, unpricedRankingWarning, WORKSHEET_CSV_HEADER, worksheetCsvRows, ZERO_REASON_TEXT, CRITICALITY_PER_YEAR_LABEL, unpricedModeCount, setVollText, SOLVER_VOLL_LABEL } from './fmea'
+import { buildManualRow, mergeWorksheet, unpricedRankingWarning, WORKSHEET_CSV_HEADER, worksheetCsvRows, ZERO_REASON_TEXT, CRITICALITY_PER_YEAR_LABEL, unpricedModeCount, setVollText, SOLVER_VOLL_LABEL, modesSourceText } from './fmea'
 import { GOAL_CARD_TITLE, GOAL_VOLL_LABEL } from '../hubDesign/cards/goalCardWords'
 import type { CoptPayload } from './adequacy'
 
@@ -239,5 +239,19 @@ describe('setVollText names the VOLL input as its landing place does', () => {
     expect(read('../hubDesign/cards/GoalCard.tsx')).toContain('<Term k="voll_plain">{GOAL_VOLL_LABEL}</Term>')
     expect(read('../hubDesign/shared/CardShell.tsx')).toContain(`goal: '${GOAL_CARD_TITLE}'`)
     expect(setVollText(true)).toBe('Set the price of undelivered energy on the Goal card')
+  })
+})
+
+// template-e2e 24: the worksheet says when its rows are the study's own.
+describe('modesSourceText', () => {
+  it('names the study as the source of its rows, in both modes', () => {
+    const modes = { per_mode: [], source: 'eh_study' as const }
+    expect(modesSourceText(modes, true)).toMatch(/last energy hub study.*report/)
+    expect(modesSourceText(modes, false)).toMatch(/Energy Hub study.*report/)
+  })
+  it('says nothing for live rows or no payload', () => {
+    expect(modesSourceText({ per_mode: [], source: 'live' }, true)).toBeNull()
+    expect(modesSourceText({ per_mode: [] }, false)).toBeNull()
+    expect(modesSourceText(null, true)).toBeNull()
   })
 })
