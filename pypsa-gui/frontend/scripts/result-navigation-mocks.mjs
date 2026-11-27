@@ -27,6 +27,15 @@ const GRID_RISK = { available: true, project_id: 'p', omitted: null, periods: ['
     by_period: { _: { t_per_year: 0.4, eur_per_year: 1200, eur_flag: null } } } }
 const amount = (value, extra = {}) => ({ value, unit: 'MWh', t: value == null ? null : value * 0.03, mwh: value, flag: null, ...extra })
 
+/** A recorded GET body; a route missing from the fixture fails the run here. */
+const rec = (kind, path) => {
+  const hit = RECORDED[kind]?.[path] ?? RECORDED.single[path]
+  if (!hit || hit[0] !== 200) throw new Error(`result-navigation-fixture.json has no 200 answer for ${kind} ${path}`)
+  return hit[1]
+}
+const bound = (kind, view, data) => [200, { status: 'ok', data,
+  binding: { version: 1, project_id: 'p', project_name: PROJECT, scope: 'current', view, input_sha256: 'a'.repeat(64), data_sha256: 'b'.repeat(64) } }]
+
 /** Hand-written routes: exact pathname → (kind, url) → [status, body]. */
 const HAND = {
   '/api/health': () => [200, { status: 'ok', auth_enabled: true }],
@@ -61,6 +70,12 @@ const HAND = {
     return [status, { ...body, window: { ...body.window, from, to, snapshots: to - from + 1 },
       binding: { ...body.binding, window_from: from, window_to: to } }]
   },
+  // A5.2 S3b-1's bound views: the parts recorded from their own routes, read together.
+  '/api/results/displayed/capex': kind => bound(kind, 'capex', {
+    cost_breakdown: rec(kind, '/api/results/cost_breakdown'), economics_by_carrier: rec(kind, '/api/results/economics_by_carrier') }),
+  '/api/results/displayed/prices': kind => bound(kind, 'prices', {
+    prices: rec(kind, '/api/results/prices'), price_drivers: rec(kind, '/api/results/price_drivers') }),
+  '/api/results/displayed/storage': kind => bound(kind, 'storage', rec(kind, '/api/results/storage_dispatch')),
   '/api/results/displayed/grid_risk': () => [200, { status: 'ok', data: GRID_RISK,
     binding: { version: 1, project_id: 'p', project_name: PROJECT, scope: 'current', view: 'grid_risk', input_sha256: 'a'.repeat(64), data_sha256: 'b'.repeat(64) } }],
 }
@@ -72,7 +87,7 @@ export const TAB_ROUTES = {
     '/api/results/adequacy', '/api/results/reserve_margin', '/api/results/process_view', '/api/results/headline_kpis'],
   overview: ['/api/results/cost_breakdown', '/api/results/curtailment', '/api/results/generators', '/api/results/loads',
     '/api/results/lost_load', '/api/results/storage_dispatch'],
-  capex: ['/api/results/cost_breakdown', '/api/results/economics_by_carrier', '/api/simulation/asset_costs', '/api/network/vintage_results'],
+  capex: ['/api/results/displayed/capex', '/api/simulation/asset_costs', '/api/network/vintage_results'],
   dispatch: ['/api/results/generators', '/api/results/loads', '/api/results/storage_dispatch', '/api/results/links',
     '/api/results/curtailment', '/api/results/lost_load', '/api/results/economics_by_carrier'],
   loadflow: ['/api/results/loadflow-view', '/api/results/lines', '/api/results/transformers', '/api/results/prices',
@@ -83,13 +98,13 @@ export const TAB_ROUTES = {
   grid_forming: [`${CE}/island/gfm-settings`],
   flows: ['/api/results/displayed/flows'],
   loadshape: ['/api/results/displayed/loadshape'],
-  prices: ['/api/results/prices', '/api/results/price_drivers', '/api/results/emissions'],
+  prices: ['/api/results/displayed/prices', '/api/results/emissions'],
   economics: ['/api/results/asset_economics', '/api/results/lcoh'],
   emissions: ['/api/results/displayed/emissions'],
   curtailment: ['/api/results/displayed/curtailment', '/api/results/curtailment/by_cause'],
   lostload: ['/api/results/lost_load', '/api/results/adequacy'],
   adequacy: ['/api/results/adequacy', '/api/results/copt'],
-  storage: ['/api/results/storage_dispatch', '/api/results/reserves'],
+  storage: ['/api/results/displayed/storage', '/api/results/reserves'],
   grid_risk: ['/api/results/displayed/grid_risk'],
   products: ['/api/results/process_view', '/api/results/lcoh'],
   fmea: ['/api/results/fmea_modes', `${P}/worksheet`, `${P}/stress_scenarios`],
