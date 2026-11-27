@@ -56,7 +56,10 @@ def test_the_report_lcoe_is_the_checked_nominal_fact(project, monkeypatch):
 
     hand_metrics = {"cash": {}, "years": [0, 1, 2]}
     lcoe_hand(hand_metrics, inflation=0.02)
-    nominal, real = hand_metrics["lcoe_nominal_per_mwh"], hand_metrics["lcoe_real_per_mwh"]
+    nominal, real = (
+        hand_metrics["lcoe_nominal_per_mwh"],
+        hand_metrics["lcoe_real_per_mwh"],
+    )
     assert real is not None and abs(real - nominal) > 0.1  # a swap shows at 1 dp
     run = engine.run_case
 
