@@ -1951,7 +1951,8 @@ def _gc03_source(campus, element, param) -> str:
 def _gc03_templates(campus, net):
     """IEC 60909 unit templates that reproduce the campus spec on ``net``:
     the grid as a source of S_k''min (mbase = S_k''min, x''d = 1, R/X =
-    rx_min) and each remaining sgen with its own k and R/X, so
+    rx_min), each running genset (a ``gen``) with its own x''d, R/X and
+    cos_phi, and each remaining sgen with its own k and R/X, so
     ``set_sc_params`` writes back the values the net already has."""
     from gridspine.templates.unit_params import UnitTemplates
 
@@ -1963,6 +1964,14 @@ def _gc03_templates(campus, net):
         bus = str(net.bus.at[eg["bus"], "name"])
         params += [(uid, "xd_pp", 1.0, "assumed"), (uid, "rx_sc", rx, _gc03_source(campus, bus, "rx_min")),
                    (uid, "cos_phi", 1.0, "assumed")]
+    for i in net.gen.index:
+        g = net.gen.loc[i]
+        uid, sn, xd = str(g["name"]), float(g["sn_mva"]), float(g["xdss_pu"])
+        vn = float(net.bus.at[g["bus"], "vn_kv"])
+        units.append({"unit_id": uid, "model": "GENROU", "mbase_mva": sn, "include_in_inertia": False})
+        params += [(uid, "xd_pp", xd, _gc03_source(campus, uid, "xd_pp")),
+                   (uid, "rx_sc", float(g["rdss_ohm"]) / (xd * vn ** 2 / sn), _gc03_source(campus, uid, "rx_sc")),
+                   (uid, "cos_phi", float(g["cos_phi"]), _gc03_source(campus, uid, "cos_phi_r"))]
     for i in net.sgen.index:
         s = net.sgen.loc[i]
         uid = str(s["name"])
@@ -1976,10 +1985,14 @@ def _gc03_templates(campus, net):
     )
 
 
-#: pandapower's IEC 60909 minimum case adds no sgen current; the campus net
-#: carries a genset as an sgen, so a genset adds nothing to S_k''min.
-GENSET_SK_NOTE = ("a genset is carried as a static generator, which the IEC 60909 minimum case here "
-                  "neglects: S_k'' is the grid side alone, so SCR is low if a genset runs (conservative)")
+#: A genset that runs in every hour of the period feeds S_k''min as a
+#: synchronous machine (GC-13); the minimum case is the period's weakest hour.
+GENSET_SK_NOTE = ("period {period}: genset(s) {names} run in every hour, so S_k'' carries each as a synchronous "
+                  "machine behind its x''d and R/X with the IEC 60909-0 correction K_G (K_S or K_SO behind its own "
+                  "unit transformer)")
+#: A genset built in the period but standing still in some hour adds nothing.
+GENSET_IDLE_NOTE = ("period {period}: genset(s) {names} do not run in every hour, so S_k'' leaves them out "
+                    "(the minimum case is the weakest hour)")
 #: The SCR of a PoC below 1 kV: pandapower's minimum case applies c_min there.
 LV_C_NOTE = ("PoC below 1 kV: S_k'' carries the IEC 60909 voltage factor c_min = 0.95 (IEC 60909-0 Table 1), "
              "so SCR and ESCR read 5 % low (conservative)")
@@ -1992,6 +2005,9 @@ def _gc03_strength(campus, hourly):
     groups, outage method, notes)``."""
     import copy
 
+    from gridspine.ingest.pandapower_source import registry_from_net
+    from gridspine.schema.campus import P_TOL_MW
+    from gridspine.static.island_sc import genset_machine
     from gridspine.static.strength import q_c_by_poc, strength_table
     from gridspine.static.strength_outages import outage_fault_levels
 
@@ -2031,11 +2047,24 @@ def _gc03_strength(campus, hourly):
         hour = int(block["hour"].min())
         sl = block[block["hour"] == hour][["unit_id", "p_mw", "status"]].reset_index(drop=True)
         net, dispatch, loads, registry = _gc03_hour_net(copy.deepcopy(campus), sl, hour)
-        # every converter out of the fault level, and a genset not built in the period
-        keep = gensets & built
-        net.sgen.drop(index=[i for i in net.sgen.index if str(net.sgen.at[i, "name"]) not in keep], inplace=True)
-        registry = registry[(registry["kind"] != "res") | registry.index.isin(keep)]
-        dispatch = dispatch[dispatch["unit_id"].isin(registry.index)].reset_index(drop=True)
+        # every converter out of the fault level, and a genset not running in
+        # every hour of the period (a missing, NaN or non-positive hour is
+        # not running: fail closed); a running genset is a synchronous machine
+        g_rows = block[block["unit_id"].astype(str).isin(gensets & built)]
+        producing = g_rows[(g_rows["status"] == 1) & (g_rows["p_mw"] > P_TOL_MW)]
+        hours = set(block["hour"])
+        by_unit = producing.groupby(producing["unit_id"].astype(str))["hour"]
+        running = {str(u) for u, h in by_unit if set(h) == hours}
+        for i in net.sgen.index[net.sgen["name"].astype(str).isin(running)]:
+            genset_machine(campus, net, i)
+        net.sgen.drop(index=net.sgen.index, inplace=True)
+        registry = registry_from_net(net)
+        dispatch = pd.DataFrame([{"unit_id": uid, "hour": hour, "p_mw": 0.0, "q_mvar": 0.0, "status": 1}
+                                 for uid in registry.index], columns=["unit_id", "hour", "p_mw", "q_mvar", "status"])
+        if running:
+            notes.append(GENSET_SK_NOTE.format(period=period, names=", ".join(sorted(running))))
+        if (gensets & built) - running:
+            notes.append(GENSET_IDLE_NOTE.format(period=period, names=", ".join(sorted((gensets & built) - running))))
         ofl = outage_fault_levels(net, dispatch, loads, hour, registry, _gc03_templates(campus, net), poc_buses,
                                   cap=STRENGTH_OUTAGE_CAP)
         study = strength_table(pocs, stages, ofl.intact, ofl.outages, ofl.method, q_c)
@@ -2045,8 +2074,6 @@ def _gc03_strength(campus, hourly):
         per_poc.append(rows)
         groups.append(study.groups.assign(period=period))
         method = ofl.method
-    if gensets:
-        notes.append(GENSET_SK_NOTE)
     notes.append("S_k'' is the IEC 60909 minimum case with every converter off, network "
                  "transformers with the impedance correction K_T (IEC 60909-0 6.3.3); "
                  "P is the rated power of the converters built in the period; the fault state does not depend "
@@ -2062,9 +2089,11 @@ def strength_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) ->
     (WSCR). Returns the summary. A static screen: the binding answer is the
     RMS/EMT study.
 
-    S_k'' is the IEC 60909 minimum case of the grid side alone: every
-    converter (``IBR_KINDS``) is off, a genset adds nothing (``GENSET_SK_NOTE``), and the grid is the
-    campus spec's S_k''min and rx_min. A PoC is each bus carrying a converter;
+    S_k'' is the IEC 60909 minimum case: every converter (``IBR_KINDS``) is
+    off, a genset that runs in every hour of the period feeds it as a
+    synchronous machine with K_G (``GENSET_SK_NOTE``; any other genset adds
+    nothing, ``GENSET_IDLE_NOTE``), and the grid is the campus spec's
+    S_k''min and rx_min. A PoC is each bus carrying a converter;
     a stage is a period, with P the RATED power of the converters built in it.
     Capacitor banks off every PoC are subtracted at every PoC (worst case)."""
     del profile, profile_dirs  # the bands are strength.py's; the limits are the readiness rows'

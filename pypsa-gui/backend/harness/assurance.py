@@ -415,6 +415,7 @@ class Turn:
                     capacity_calculations, emissions_calculations, energy_balance_calculations,
                     lost_load_calculations, site_import_calculations, investment_calculations, copt_calculations,
                     grid_readiness_calculations, time_to_power_calculations, losses_calculations, system_cost_calculations,
+                    renewable_share_calculations,
                     price_calculations, storage_cycles_calculations,
                 )
 
@@ -426,6 +427,7 @@ class Turn:
                             | investment_calculations.REFUSALS | copt_calculations.REFUSALS
                             | grid_readiness_calculations.REFUSALS | time_to_power_calculations.REFUSALS
                             | system_cost_calculations.REFUSALS
+                            | renewable_share_calculations.REFUSALS
                             | answer_sections.REFUSALS | ac_branch_calculations.REFUSALS
                             | losses_calculations.REFUSALS
                             | {"too_many_metrics_for_warnings"})
@@ -645,6 +647,7 @@ class Turn:
             assurance_metrics.copt_screen.PROFILE: "Network",
             assurance_metrics.readiness.PROFILE: "Network",
             assurance_metrics.time_to_power.PROFILE: "Network",
+            assurance_metrics.renewable_share.PROFILE: "Network",
             assurance_metrics.system_cost.PROFILE:
                 "Network" if self.request_scope["entity_id"] == "network" else "Carrier",
             assurance_metrics.curtailment.PROFILE:
@@ -680,6 +683,8 @@ class Turn:
             lines.extend(assurance_metrics.emissions.notes(record["raw"], _label))
         if profile == assurance_metrics.system_cost.PROFILE:
             lines.extend(assurance_metrics.system_cost.notes(record["raw"], self.request_scope, _label))
+        if profile == assurance_metrics.renewable_share.PROFILE:
+            lines.extend(assurance_metrics.renewable_share.notes(record["raw"], self.request_scope, _label))
         if profile == assurance_metrics.curtailment.PROFILE:
             lines.extend(assurance_metrics.curtailment.notes(record["raw"], self.request_scope, _label))
         if profile == assurance_metrics.losses.PROFILE:

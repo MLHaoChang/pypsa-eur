@@ -13,7 +13,10 @@ Written next to the campus bundle, in its own folder:
 * ``<case>.con``, ``.sub`` and ``.mon``: the contingency set given, or else
   the generated branch, unit and bus-section set;
 * ``run_<case_id>.py``: one psspy script per test-battery case, written only
-  for the aggregated plant (GC-01), which carries the PoC branch;
+  for the aggregated plant (GC-01), which carries the PoC branch. Each writes
+  ``<case_id>.out``, ``<case_id>.csv`` (battery contract
+  :data:`PSSE_CONTRACT_VERSION`, ``connected`` included) and
+  ``<case_id>.status.txt`` (failed status polls, text only);
 * ``README.md`` and ``manifest.json``.
 
 A grid-following converter with no supplied dynamic parameters gets the
@@ -42,7 +45,7 @@ from gridspine.handoff.dyr_writer import (
     machine_records,
 )
 from gridspine.handoff.psspy_scripts import PENDING as PSSPY_NOTE
-from gridspine.handoff.psspy_scripts import check_script, write_scripts
+from gridspine.handoff.psspy_scripts import STATUS_SIDECAR, check_script, write_scripts
 from gridspine.handoff.raw_writer import write_raw
 from gridspine.handoff.seq_writer import NOT_WRITTEN, write_seq
 from gridspine.handoff.test_battery import C_BRACKET_NOTE, build_battery
@@ -68,6 +71,9 @@ from gridspine.templates.wecc_generic import (
 )
 
 VERSION = 35
+#: The battery contract version the pack's scripts write (GC-12): version 2,
+#: since each script polls ``connected``; caller-given ``cases`` must be built at it.
+PSSE_CONTRACT_VERSION = "2"
 SUBDIR = "psse_v35"
 BUSR_NOTE = "BUSR = BUS2, BUS1→BUS2 export: pending verification on first PSS/E load"
 #: The .mon voltage band. The campus carries no planning band of its own, so
@@ -181,6 +187,7 @@ def _battery_cases(net):
         xr_max,
         z0_over_z1=1.0,
         x0_over_r0=xr_max,
+        contract_version=PSSE_CONTRACT_VERSION,
     )
     return cases, list(BATTERY_ASSUMED)
 
@@ -295,6 +302,14 @@ def write_psse_pack(
             cases, battery_notes = _battery_cases(net)
         _busr, bus1, bus2, ckt = repc[plant.unit_id]
         num, mid, mbase = machines[plant.unit_id]
+        # the machines the RAW models for the plant, polled for connected (GK A P3);
+        # the aggregated plant is one RAW machine record
+        plant_machines = [(n, i) for u, n, i, _m, _s in records if u == plant.unit_id]
+        if len(plant_machines) != 1:
+            raise ContractError(
+                f"psse pack: plant {plant.unit_id!r} has {len(plant_machines)} RAW machine "
+                "records; the aggregated plant must be exactly one"
+            )
         grid_mbase = next(
             (
                 m
@@ -321,8 +336,13 @@ def write_psse_pack(
             plant_branch=(bus2, bus1, ckt),  # measured at the PoC (GK A2)
             plant_machine=(num, mid),
             plant_mbase_mva=mbase,
+            contract_version=PSSE_CONTRACT_VERSION,
+            status_machines=plant_machines,
         )
-        outputs = {cid: [f"{cid}.out", f"{cid}.csv"] for cid in scripts}
+        outputs = {
+            cid: [f"{cid}.out", f"{cid}.csv", STATUS_SIDECAR.format(case_id=cid)]
+            for cid in scripts
+        }
         files += sorted(scripts.values())
         allowed = set(files) | {f for pair in outputs.values() for f in pair}
         for c in cases:
@@ -353,6 +373,9 @@ def write_psse_pack(
         "mon_assumed": MON_ASSUMED,
         "pending_verification": [PIN_NOTE, BUSR_NOTE, PSSPY_NOTE],
     }
+    if scripts:
+        # a pack declares a contract version only with the scripts that write it (GK A2 T1)
+        manifest["contract_version"] = PSSE_CONTRACT_VERSION
     if model_set is not None:
         manifest["model_set"] = model_set_manifest(model_set, variant)
     (out / "README.md").write_text(_readme(manifest), encoding="utf-8")

@@ -23,6 +23,26 @@ vi.mock('recharts', async (importOriginal) => {
   }
 })
 
+// The tab reads its six whole-horizon parts as one bound view (A5.2 S3b-2);
+// it carries what the mocked routes return, called with no window, and answers
+// null with none of generators, loads and cost breakdown, as the view does.
+vi.mock('../../api/displayedResults', async () => {
+  const { resultsApi } = await import('../../api/simulation')
+  const overview = vi.fn(async () => {
+    const [generators, storage_dispatch, loads, curtailment, lost_load, cost_breakdown] = await Promise.all([
+      resultsApi.getGeneratorResults(), resultsApi.getStorageDispatchResults(), resultsApi.getLoadResults(),
+      resultsApi.getCurtailment(), resultsApi.getLostLoad(), resultsApi.getCostBreakdown(),
+    ])
+    if (generators == null && loads == null && cost_breakdown == null) return null
+    return {
+      status: 'ok',
+      data: { generators, storage_dispatch, loads, curtailment, lost_load, cost_breakdown },
+      binding: { version: 1, project_id: 'p', scope: 'current', view: 'overview', data_sha256: 'a'.repeat(64) },
+    }
+  })
+  return { displayedResultsApi: { overview } }
+})
+
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
   return {
@@ -468,5 +488,33 @@ describe('AggregatedOverview charts · report', () => {
     expect(pct.figure).toBe('generation_pct')
     expect(pct.unit).toBe('%')
     expect(abs.figure).not.toBe(pct.figure)
+  })
+})
+
+describe('AggregatedOverview bound view (A5.2 S3b-2)', () => {
+  it('reads the six parts as one bound view with no window and marks its root with it', async () => {
+    const { container } = renderOverview()
+    await waitFor(() => expect(container.querySelector('[data-result-tab="overview"]')).toBeTruthy())
+    const root = container.querySelector('[data-result-tab="overview"]')!
+    expect(JSON.parse(root.getAttribute('data-result-binding')!).view).toBe('overview')
+    expect(vi.mocked(resultsApi.getGeneratorResults)).toHaveBeenCalledWith()
+    expect(vi.mocked(resultsApi.getCurtailment)).toHaveBeenCalledWith()
+  })
+
+  it('a failed read says the overview could not be read, never "has not run yet" (UX 31)', async () => {
+    vi.mocked(resultsApi.getCostBreakdown).mockRejectedValue(new Error('500'))
+    renderOverview()
+    expect(await screen.findByTestId('overview-error')).toBeTruthy()
+    expect(screen.getByText(/The aggregated overview could not be read/)).toBeTruthy()
+    expect(screen.queryByText(/has not run yet/)).toBeNull()
+  })
+
+  it('keeps the not-solved branch when nothing is solved, not "could not be read"', async () => {
+    vi.mocked(resultsApi.getGeneratorResults).mockResolvedValue(null)
+    vi.mocked(resultsApi.getLoadResults).mockResolvedValue(null)
+    vi.mocked(resultsApi.getCostBreakdown).mockResolvedValue(null)
+    renderOverview()
+    expect(await screen.findByText(/has not run yet/)).toBeTruthy()
+    expect(screen.queryByTestId('overview-error')).toBeNull()
   })
 })

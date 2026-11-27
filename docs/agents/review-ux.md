@@ -123,6 +123,9 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - (ai) Shots must not contradict the state they claim, e.g. "not run yet" pills behind a solved-run message (#1994).
 - (aj) Backend-built table text (criteria, notes) follows the sentence rules: no "; " chains, no nested brackets, mm² (#1983).
 - (ak) Data in one cell is separated with "·" (rating · peak; figure · unit counts).
+- (al) A failed results fetch keeps its existing error toast. The surface shows the shared ResultState `unavailable` state with "The <x> could not be read. Try again in a moment." It never falls through to `not_run` ("Not run yet") (AA-06, #2045, #2046).
+- (am) A missing run step that the user can start, such as no AC power flow, is ResultState `not_run`, with one sentence naming the step and the next action, e.g. "The AC power flow has not run yet. Run it, or show the LP dispatch." It raises no toast and never says "could not be read". A missing input still follows (aa) "Not yet available" (#2046).
+- (an) Screen-reader announcements never read raw ids or indices. A run is named through `runWhen`, a time window through `readableWindow`, or the name is left out (AA-06).
 
 ## Master merges
 

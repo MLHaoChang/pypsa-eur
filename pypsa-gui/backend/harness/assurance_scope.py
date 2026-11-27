@@ -37,6 +37,7 @@ class RequestScope(BaseModel):
         "storage-unit-dispatch/1", "storage-unit-cost/1", "carrier-energy/1",
         "branch-loading/1", "network-loading/1", "lost-load/1", "bus-price/1",
         "generator-emissions/1", "network-emissions/1", "curtailment/1", "capacity/1", "system-cost-breakdown/1",
+        "renewable-share/1",
         "storage-cycles/1", "energy-balance/1", "site-import/1", "investment-case/1", "investment-lcoe/1",
         "copt-screening/1", "grid-readiness/1", "time-to-power/1", "ac-branch-loading/1",
         "branch-losses/1",
@@ -90,7 +91,8 @@ def validate(value):
     if scope["profile"] == "ac-branch-loading/1" and scope["entity_id"] in ("network", EVERY):
         raise ValueError("unsupported_population_scope")
     if scope["profile"] in ("bus-price/1", "generator-emissions/1", "network-emissions/1",
-                            "curtailment/1", "branch-losses/1", "system-cost-breakdown/1") and (
+                            "curtailment/1", "branch-losses/1", "system-cost-breakdown/1",
+                            "renewable-share/1") and (
         scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("unsupported_result_cost_scope")
@@ -332,6 +334,19 @@ def _from_message(message, project_id, ui_context):
             "version": 1, "profile": "system-cost-breakdown/1", "project_id": project_id,
             "entity_id": cost[2] or "network", "retain": False,
         })
+    share = re.fullmatch(
+        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?renewable share\s+for\s+network"
+        r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
+        message.strip(), re.I,
+    )
+    if share:
+        value = {
+            "version": 1, "profile": "renewable-share/1", "project_id": project_id,
+            "entity_id": "network", "retain": False,
+        }
+        if share[1]:
+            value.update(start=share[1], end=share[2])
+        return validate(value)
     lost = re.fullmatch(
         r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?lost load\s+for\s+"
         r"(network|load\s+([^;]{1,128}?))"

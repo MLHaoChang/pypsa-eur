@@ -3,7 +3,7 @@
 
 # Raw tool and engine names on screens (RAW-NAMES-1)
 
-Status: ready-for-agent; audit 2026-11-25: #1827, #1820, #1821, #1897, #1738 merged (several RAW-NAMES-1 surfaces); left: chat-card rows (AssistantResultCard.tsx:153-189 still shows task_id and tool names) and the rest
+Status: done; chat-card rows fixed in this PR (request labels plain, Task ID Expert-only); earlier surfaces in #1827, #1820, #1821, #1897, #1738
 Model tier: sonnet
 Size: M
 Blocked by: #1634 (expert catalogue core) merged

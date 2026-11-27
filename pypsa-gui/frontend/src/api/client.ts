@@ -91,9 +91,14 @@ const QUIET_MUTATION_URLS = ['/simulation/preflight']
 // `cost_basis_mismatch` — an asset save whose costs were typed under the other
 // bus unit (05d). Only the edit cards and the creation form send the claim, and
 // each toasts the backend's sentence itself; a second toast would repeat it.
+//
+// `source_not_available` — the Dispatch bound view's 422 for `?source=ac_pf`
+// when no AC power flow is on record. A missing precondition, not a failed
+// read: the tab shows it as "not run yet" with the switch to the LP dispatch,
+// and retrying never helps, so a toast would only mislead.
 const QUIET_TOAST_CODES = new Set([
   'solver_in_flight', 'project_locked', 'study_in_flight', PROJECT_MISMATCH,
-  'cost_basis_mismatch',
+  'cost_basis_mismatch', 'source_not_available',
 ])
 
 const AUTH_API_PREFIX = '/auth/'

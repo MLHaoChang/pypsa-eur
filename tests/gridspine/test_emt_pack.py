@@ -871,3 +871,85 @@ def test_lv_pcc_takes_c_min_095_on_sk_max_rows(tmp_path):
         r = rows_[label]
         assert r["vn_kv"] == 0.4 and r["c"] == cv, label
         assert math.hypot(r["r_ohm"], r["x_ohm"]) == pytest.approx(z, rel=1e-12), label
+
+
+# --- GC-13: plant ratings bound by the data hash ------------------------------------------------
+
+
+def test_ratings_are_written_hashed_and_change_the_data_hash(tmp_path):
+    from gridspine.handoff.test_battery import RATINGS_JSON, PackRatings
+    from gridspine.readback.pack import judge_pack
+
+    r = PackRatings(90.0, 99.0, "plant nameplate (test)", "a" * 64)
+    p = pack(tmp_path / "a", ratings=r)
+    m = p.manifest
+    assert RATINGS_JSON in m["files"]
+    assert json.loads((p.path / RATINGS_JSON).read_text()) == r.as_dict()
+    assert {k: m[k] for k in r.as_dict()} == r.as_dict()
+    assert m["data_hash"] != pack(tmp_path / "none").manifest["data_hash"]
+    assert m["data_hash"] == read_pack_hash(m["files"])
+    other = PackRatings(91.0, 99.0, "plant nameplate (test)", "a" * 64)
+    assert m["data_hash"] != pack(tmp_path / "b", ratings=other).manifest["data_hash"]
+    assert m["data_hash"] == pack(tmp_path / "c", ratings=r).manifest["data_hash"]
+    # read-back judges the written pack on its own ratings, with no caller input
+    header = judge_pack(p.path, {})["header"]
+    assert (
+        header["ratings"]["rated_mw"] == 90.0 and header["ratings"]["rated_mva"] == 99.0
+    )
+    assert header["rating_source"] == "plant nameplate (test)"
+    assert header["campus_data_hash"] == "a" * 64
+    with pytest.raises(ContractError, match="PackRatings"):
+        pack(tmp_path / "d", ratings={"rated_mw": 90.0})
+
+
+#: master's (pre-GC-13) unrated EMT pack for ``pack(tmp_path)``: its manifest keys and files.
+MASTER_MANIFEST_KEYS = [
+    "assumptions", "case_ids", "channels", "contract_version", "data_hash", "f_hz", "files",
+    "outputs", "pack", "pack_version", "pcc_bus", "to_be_supplied", "trgc", "vn_kv", "z0_assumed",
+]  # fmt: skip
+MASTER_FILES = [
+    "README.md", "RSCAD_NOTES.md", "battery.json", "cables.csv", "case_schedule.csv",
+    "case_schedule.json", "converters.csv", "earthing_transformers.csv", "filters.csv",
+    "gensets.csv", "insulation.csv", "plant_units.csv", "protection_relays.csv",
+    "run_schedule.py", "thevenin_set.csv", "thevenin_set.json", "thevenin_stages.csv",
+    "to_be_supplied.csv", "transformers.csv",
+]  # fmt: skip
+
+
+def read_pack_hash(files):
+    from gridspine.readback.pack import _files_hash
+
+    return _files_hash(files)
+
+
+def test_a_pack_without_ratings_is_the_rated_pack_less_its_ratings(tmp_path):
+    # GK A R2. The pack's bytes depend on the environment (CSV float text), so master's hash
+    # cannot be pinned across CI and local runs. Instead: ratings=None writes every file the
+    # rated pack writes, byte for byte, except ratings.json, and the same manifest without the
+    # four keys, with master's data_hash formula over the remaining files.
+    from gridspine.handoff.test_battery import RATING_KEYS, RATINGS_JSON, PackRatings
+
+    p = pack(tmp_path / "plain")
+    r = pack(tmp_path / "rated", ratings=PackRatings(90.0, 99.0, "nameplate", "a" * 64))
+    assert (
+        RATINGS_JSON not in p.manifest["files"] and not (p.path / RATINGS_JSON).exists()
+    )
+    assert not set(RATING_KEYS) & set(p.manifest)
+    plain = sorted(f.name for f in p.path.iterdir())
+    assert plain == sorted(f.name for f in r.path.iterdir() if f.name != RATINGS_JSON)
+    for name in plain:
+        if name != "manifest.json":
+            assert (p.path / name).read_bytes() == (r.path / name).read_bytes(), name
+    stripped = {k: v for k, v in r.manifest.items() if k not in RATING_KEYS}
+    stripped["files"] = {
+        k: v for k, v in r.manifest["files"].items() if k != RATINGS_JSON
+    }
+    stripped["data_hash"] = read_pack_hash(stripped["files"])
+    assert stripped == p.manifest
+    assert (p.path / "manifest.json").read_text() == emt_pack._dumps(p.manifest)
+    # what master's unrated pack holds, independent of the environment
+    assert sorted(p.manifest) == MASTER_MANIFEST_KEYS
+    assert sorted(p.manifest["files"]) == MASTER_FILES
+    assert p.manifest["data_hash"] == read_pack_hash(p.manifest["files"])
+    for name, sha in p.manifest["files"].items():
+        assert hashlib.sha256((p.path / name).read_bytes()).hexdigest() == sha, name

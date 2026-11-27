@@ -5,7 +5,7 @@
 
 Model tier: opus
 Size: L (three PRs)
-Status: ready-for-agent; audit 2026-11-25: PR-A (#1647), PR-C (#1650) and PR-D (#1708) merged; left: PR-B, the PSS/E CSV `connected` export (psspy_scripts.py still writes `t_s` and a `status` column)
+Status: done (#2058; PR-A #1647, PR-C #1650, PR-D #1708, PR-B the PSS/E CSV export; judging a PSS/E pack is GC-27)
 Type: task
 Parent: `.scratch/grid-compliance/spec.md` (follow-up of GC-07, GK A2 condition K3)
 Gated: yes (GK A, gridspine)
@@ -74,3 +74,13 @@ Merge order: PR-A any time; PR-B after #1608 and #1609; PR-C after PR-A. Item 4 
 ## Audit (2026-11-25)
 
 - 2026-11-25 audit: #1647, #1650, #1708 in master log or merged on GitHub; gridspine/handoff/psspy_scripts.py:463,537 still use the old header.
+
+- 2026-11-27, GK A (39) plan GO for PR-B, on top of GK A2's T1, T3–T5, T8–T12:
+  - P1 (T1): `write_scripts`' default stays "1" (master's CONTRACT_VERSION; psse_pack is the only caller). The manifest's `contract_version` matches the battery's, tested. A v1 `write_scripts` call stays byte-equal to master's golden script; only v2 is new.
+  - P2 (T3): POLL_DT ≤ the output sample dt, asserted in the script or the writer. The ast test uses a fault apply and clear off both the poll and the sample grid and checks that a poll follows each event stop.
+  - P3 (T4): in `_combine`, ierr 0 with a value other than 0/1 is a failed poll (blank), never 1, tested. psse_pack derives `status_machines` from the machines the pack models, never a fixed default; tested with two machines, or the aggregation shown to give one and asserted.
+  - P4 (T5): the sample takes the first poll at or after it (a trip shows at most POLL_DT early, never late). Pinned with a trip between two samples; hand mutant "last poll at or before" with its killing test.
+  - P5 (T9): the sidecar text goes into the case detail as a reason only, capped (2,000 chars, marked truncated), never parsed; a sidecar of another name stays an extra file.
+  - P6 (T10): moot with two pins: the T11 V = 0 row gives a finite ITERM, and `read_csv` refuses a blank `i_poc_pu` cell (it kills T12's "blank I read as 0" mutant). The body says T10's channels.py change is not needed.
+  - P7 (scope): channels.py, campus_study.py and psspy_scripts' non-v2 paths unchanged; the judge_pack follow-up is a filed issue named in the body.
+- 2026-11-27, PR-B: at contract v2 the PSS/E scripts write `time [s]` / `<name> [<unit>]` (no `status` column) and poll `connected` every time step (POLL_DT = DELT; PoC branch AND every RAW machine of the plant, latched, a failed poll blank with its reason in `<case_id>.status.txt`); psse_pack writes v2. v1 scripts are byte-equal to master. T10 needs no channels.py change: since issue 21 `i_poc_pu` is ITERM, defined at V = 0. `judge_pack` still cannot open a PSS/E pack (no battery.json): follow-up GC-27 (`27-psse-pack-readback.md`).
