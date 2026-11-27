@@ -249,6 +249,14 @@ def build_fmea_modes_payload(
             "sweep_error": (sweep or {}).get("error")}
 
 
+def _sweep_fields(sweep: dict | None) -> dict:
+    """The last sweep's status fields as both paths serve them."""
+    return {"sweep_status": (sweep or {}).get("status"),
+            "sweep_base_restored": (sweep or {}).get("base_restored"),
+            "sweep_base_restore_status": (sweep or {}).get("base_restore_status"),
+            "sweep_error": (sweep or {}).get("error")}
+
+
 def _study_fmea_modes(
     payload: dict | None,
     finished_at: float | None,
@@ -256,9 +264,8 @@ def _study_fmea_modes(
     edited_since: bool | None = None,
 ) -> dict | None:
     """The ``/fmea_modes`` body from the study's ``fmea_top`` rows, or None
-    when the live path answers (no rows, or a sweep finished after it)."""
-    if not isinstance(payload, dict):
-        return None
+    when the live path answers (no rows, or a sweep finished after it).
+    ``fmea_top_modes`` reads a missing payload as no rows."""
     from services.reports.evidence import fmea_top_modes
 
     modes = fmea_top_modes(payload)
@@ -272,15 +279,15 @@ def _study_fmea_modes(
     return {"per_mode": modes,
             "source": "eh_study",
             "voll_eur_per_mwh": float(voll) if voll is not None else None,
-            "sweep_status": None,
-            "sweep_base_restored": None,
-            "sweep_base_restore_status": None,
-            "sweep_error": None,
+            # The sweep's state still travels: a sweep running over the study's
+            # rows must keep the worksheet polling, its abort control and the
+            # edit lock (useLiveStudyRunning) that read ``sweep_status``.
+            **_sweep_fields(sweep),
             "study_finished_at": finished_at,
             "edited_since_study": edited_since}
 
 
-def study_fmea_top(state: dict) -> dict:
+def study_fmea_args(state: dict) -> dict:
     """``build_fmea_modes_payload``'s study arguments from a solver state: the
     last EH study's ``fmea_top`` payload, finish time and whether the network
     was edited since (``study_state.edited_since``). Empty while a study

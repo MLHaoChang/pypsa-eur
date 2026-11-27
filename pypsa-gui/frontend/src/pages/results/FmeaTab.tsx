@@ -34,7 +34,7 @@ import {
   type WorksheetSidecar,
   CRITICALITY_PER_YEAR_LABEL,
 } from './fmea'
-import { modesSourceText, studyRepriceText, studyRowsOutOfDate } from './fmeaSourceWords'
+import { isStudySourced, modesSourceText, studyRepriceText, studyRowsOutOfDate } from './fmeaSourceWords'
 import ResultState from '../../components/ResultState'
 import { OUT_OF_DATE_REASON } from '../../components/ResultsOutOfDate'
 import { openVollField } from '../../layout/flowNavigation'
@@ -104,7 +104,7 @@ export default function FmeaTab() {
     queryFn: () => resultsApi.getFmeaModes(),
     enabled: false,
   })
-  const studyRows = (data as ModesPayload | null | undefined)?.source === 'eh_study'
+  const studyRows = isStudySourced(data as ModesPayload | null | undefined)
   return <FmeaWorksheet key={studyRows ? 'study' : 'live'} studyRows={studyRows} />
 }
 
@@ -214,6 +214,11 @@ function FmeaWorksheet({ studyRows }: { studyRows: boolean }) {
   const exportCsv = () =>
     downloadCSV('fmea_worksheet.csv', WORKSHEET_CSV_HEADER, worksheetCsvRows(rows, guided))
 
+  // template-e2e 24: the rows' source, said once for each line below.
+  const modesPayload = modes as ModesPayload | null | undefined
+  const sourceLine = modesSourceText(modesPayload, guided)
+  const repriceNote = studyRepriceText(modesPayload)
+
   return (
     <div data-testid="results-view-fmea" className="flex flex-col h-full overflow-auto p-4 gap-3">
       <header>
@@ -238,14 +243,12 @@ function FmeaWorksheet({ studyRows }: { studyRows: boolean }) {
           fidelity).
         </p>
         )}
-        {modesSourceText(modes as ModesPayload | null | undefined, guided) && (
-          <p data-testid="fmea-source-line" className="text-[11px] text-muted mt-1">
-            {modesSourceText(modes as ModesPayload | null | undefined, guided)}
-          </p>
+        {sourceLine && (
+          <p data-testid="fmea-source-line" className="text-[11px] text-muted mt-1">{sourceLine}</p>
         )}
       </header>
 
-      {studyRowsOutOfDate(modes as ModesPayload | null | undefined) && (
+      {studyRowsOutOfDate(modesPayload) && (
         <div data-testid="fmea-study-stale">
           <ResultState state="stale" reason={OUT_OF_DATE_REASON} />
         </div>
@@ -259,11 +262,7 @@ function FmeaWorksheet({ studyRows }: { studyRows: boolean }) {
             className="text-link hover:underline">
             {setVollText(guided)} ›
           </button>
-          {studyRepriceText(modes as ModesPayload | null | undefined) && (
-            <span data-testid="fmea-study-reprice">
-              {' '}{studyRepriceText(modes as ModesPayload | null | undefined)}
-            </span>
-          )}
+          {repriceNote && <span data-testid="fmea-study-reprice">{' '}{repriceNote}</span>}
         </p>
       ) : unpricedRankingWarning(modes as ModesPayload | null | undefined) && (
         <p className="text-[10px] text-danger border border-danger/40 rounded px-2 py-1">

@@ -207,7 +207,7 @@ def _highest(modes: list[dict]) -> list[Key]:
 
 
 def _fmea(run) -> ViewData | None:
-    from services.adequacy.copt_endpoint import build_fmea_modes_payload, study_fmea_top
+    from services.adequacy.copt_endpoint import build_fmea_modes_payload, study_fmea_args
     if run.context is None:
         from services.pypsa_service import PyPSAService
         get_lock = PyPSAService.get_lock
@@ -217,7 +217,7 @@ def _fmea(run) -> ViewData | None:
     # ValueError is the route's 422: it reaches About as an error.
     # template-e2e 24: the study's own rows while it is the newest source, as the app shows them.
     p = build_fmea_modes_payload(run.network, run.cfg, sweep_record=state.get("fmea_sweep"),
-                                 get_lock=get_lock, **study_fmea_top(state))
+                                 get_lock=get_lock, **study_fmea_args(state))
     if p is None:  # the route's 204: no failure mode from any source
         return None
     modes = p.get("per_mode") or []
@@ -247,6 +247,13 @@ def _fmea(run) -> ViewData | None:
              "frequency per year × the damage of one event. Rows are the route's order; "
              "the worksheet's expert class-D rows are not here (see the tab).",
              _horizon_note(run.network)]
+    if p.get("source") == "eh_study":
+        # template-e2e 24: say what the app's worksheet says about these rows.
+        notes.append("Rows are the last Energy Hub study's fmea_top ranking, as the report "
+                     "lists them (class B, then class A, each ranked within its class)"
+                     + (" — the network was edited since that study, so they are out of date"
+                        if p.get("edited_since_study") else "")
+                     + "; a contingency sweep run after the study replaces them.")
     if p.get("sweep_status"):
         notes.append(f"Contingency sweep: {p['sweep_status']}.")
     if p.get("sweep_error"):

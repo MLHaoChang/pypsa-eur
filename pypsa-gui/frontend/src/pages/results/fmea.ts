@@ -3,6 +3,7 @@
 // The merge only needs a per_mode carrier — /results/copt and the Phase 4
 // aggregator /results/fmea_modes both satisfy it.
 import { GOAL_CARD_TITLE, GOAL_VOLL_LABEL } from '../hubDesign/cards/goalCardWords'
+import { isStudySourced } from './fmeaSourceWords'
 
 export interface ModesPayload {
   per_mode: Array<Record<string, unknown>>
@@ -159,7 +160,7 @@ export function mergeWorksheet(
   // order the report lists them in (class B, then class A, each ranked
   // within its class: two engines' criticalities are never one ranking);
   // only manual rows are ranked, after them (template-e2e 24, GK C2).
-  if (copt?.source === 'eh_study') {
+  if (isStudySourced(copt)) {
     const computed = rows.filter(r => !r.editable)
     const manual = rows.filter(r => r.editable)
     manual.sort(byCriticality)

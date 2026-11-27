@@ -1124,21 +1124,20 @@ def get_fmea_modes():
     Hub study is the newest FMEA source, its ``fmea_top`` rows are served
     instead, as the report reads them (template-e2e 24; ``source`` says which).
     """
-    from services.adequacy.copt_endpoint import build_fmea_modes_payload, study_fmea_top
+    from services.adequacy.copt_endpoint import build_fmea_modes_payload, study_fmea_args
     try:
         out = build_fmea_modes_payload(
             PyPSAService.get_network(),
             _state.get("solver_config"),
             sweep_record=_state.get("fmea_sweep"),
             get_lock=PyPSAService.get_lock,
-            **study_fmea_top(_state),
+            **study_fmea_args(_state),
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     if out is None:
         return Response(status_code=204)
     return out
-
 
 
 

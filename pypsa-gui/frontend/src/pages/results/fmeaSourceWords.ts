@@ -2,6 +2,7 @@
 // Energy Hub study (`/results/fmea_modes` with `source: "eh_study"`), in one
 // module so the tab and its tests read the same sentences (UX 32, items 1, 2, 4).
 import type { ModesPayload } from './fmea'
+import { runStamp } from '../../components/SourceRunLine'
 
 export const GUIDED_STUDY_SOURCE =
   'These rows come from the last Energy Hub study: the same risks its results and the report list.'
@@ -12,11 +13,11 @@ export const EXPERT_STUDY_SOURCE =
 export const STUDY_REPRICE =
   "These are the study's rows: after setting a price, run the study again to price them."
 
-/** "The study ran on <date>." — GK C1: the rows say when they were made. */
+/** "The study ran on 2026-11-27 16:00." — GK C1: the rows say when they were
+ *  made, in the app's ISO date form (runStamp). */
 export function studyRanOn(at: unknown): string | null {
-  if (typeof at !== 'number' || !Number.isFinite(at)) return null
-  const when = new Date(at * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
-  return `The study ran on ${when}.`
+  const when = typeof at === 'number' && Number.isFinite(at) ? runStamp(at) : null
+  return when ? `The study ran on ${when}.` : null
 }
 
 /** True when the worksheet's computed rows are the last study's. */

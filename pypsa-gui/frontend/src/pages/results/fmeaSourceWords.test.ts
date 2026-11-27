@@ -5,14 +5,17 @@ import {
   EXPERT_STUDY_SOURCE, GUIDED_STUDY_SOURCE, STUDY_REPRICE,
   modesSourceText, studyRepriceText, studyRowsOutOfDate,
 } from './fmeaSourceWords'
+import { runStamp } from '../../components/SourceRunLine'
 
 const study = { per_mode: [], source: 'eh_study' as const, study_finished_at: 1_790_000_000 }
 const live = { per_mode: [], source: 'live' as const }
 
 describe('the study-source line', () => {
-  it('shows the Guided and Expert sentences, then the date, only for study rows', () => {
-    expect(modesSourceText(study, true)).toMatch(new RegExp(`^${GUIDED_STUDY_SOURCE} The study ran on .+\\.$`))
-    expect(modesSourceText(study, false)!.startsWith(`${EXPERT_STUDY_SOURCE} The study ran on `)).toBe(true)
+  it('shows the Guided and Expert sentences, then the ISO date, only for study rows', () => {
+    const stamp = runStamp(1_790_000_000)!
+    expect(stamp).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/)
+    expect(modesSourceText(study, true)).toBe(`${GUIDED_STUDY_SOURCE} The study ran on ${stamp}.`)
+    expect(modesSourceText(study, false)).toBe(`${EXPERT_STUDY_SOURCE} The study ran on ${stamp}.`)
     expect(modesSourceText(live, true)).toBeNull()
     expect(modesSourceText(live, false)).toBeNull()
     expect(modesSourceText(null, false)).toBeNull()
@@ -23,8 +26,11 @@ describe('the study-source line', () => {
   // UX rule 53: the line must stay true; /fmea_modes hands over to the live
   // rows when a sweep finishes after the study (backend test_fmea_modes_single_source).
   it('says a sweep run after the study replaces the rows', () => {
-    expect(EXPERT_STUDY_SOURCE).toMatch(/A contingency sweep run after the study replaces them\./)
-    expect(GUIDED_STUDY_SOURCE).toMatch(/last Energy Hub study/)
+    expect(EXPERT_STUDY_SOURCE).toBe(
+      "Computed rows are the last Energy Hub study's ranking, as in the reference design and the report. "
+      + 'They are not a fresh screening. A contingency sweep run after the study replaces them.')
+    expect(GUIDED_STUDY_SOURCE).toBe(
+      'These rows come from the last Energy Hub study: the same risks its results and the report list.')
   })
 })
 

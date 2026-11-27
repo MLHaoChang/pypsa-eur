@@ -89,10 +89,9 @@ def _empty_network():
     return n
 
 
-def _store(monkeypatch, payload, status="ok"):
+def _store_into(store, payload, status="ok"):
     sections = empty_section_map(default="skipped")
     sections["fmea_top"] = SectionState(status=status, payload=payload)
-    store: dict = {}
     store_eh_report(
         store,
         ReferenceDesignReport(
@@ -102,6 +101,11 @@ def _store(monkeypatch, payload, status="ok"):
             sections=sections,
         ),
     )
+
+
+def _store(monkeypatch, payload, status="ok"):
+    store: dict = {}
+    _store_into(store, payload, status)
     for key, value in store.items():
         monkeypatch.setitem(R._state, key, value)
 
@@ -295,3 +299,98 @@ def test_a_study_without_fmea_rows_leaves_the_live_path(study, monkeypatch):
     )
     out = R.get_fmea_modes()
     assert getattr(out, "status_code", 200) == 204
+
+
+def test_a_running_sweep_keeps_its_status_over_the_study_rows(study, monkeypatch):
+    """The worksheet's polling, abort control and edit lock read sweep_status:
+    a sweep running over the study's rows must still say it runs."""
+    monkeypatch.setitem(
+        R._state,
+        "fmea_sweep",
+        {"status": "running", "finished_at": None, "rows": [], "error": None},
+    )
+    out = R.get_fmea_modes()
+    assert out["source"] == "eh_study"
+    assert out["sweep_status"] == "running"
+
+
+def test_the_results_workbook_lists_the_study_rows_and_says_so(study, monkeypatch):
+    """The Excel FMEA sheet reads the same rows and notes where they come from."""
+    from types import SimpleNamespace
+
+    import services.study_state as study_state
+    from services.results_workbook.views_adequacy import _fmea
+
+    monkeypatch.setattr(study_state, "edited_since", lambda record, **_: True)
+    state = dict(R._state)
+    run = SimpleNamespace(
+        name="Base",
+        network=PyPSAService.get_network(),
+        cfg=state.get("solver_config"),
+        context=None,
+        solver_state=state,
+    )
+    view = _fmea(run)
+    frame = view.tables[0].frame
+    assert len(frame) == len(fmea_top_modes(PAYLOAD))
+    note = next(n for n in view.notes if "Energy Hub study" in n)
+    assert "out of date" in note
+    assert "a contingency sweep run after the study replaces them" in note
+
+
+# ── edges the mutant run found untested (GK C6) ──────────────────────────
+
+
+def _done_sweep(finished_at, status="done"):
+    sweep_mode = _mode("link:x:forced_outage", "x", "B", "Link", 7.0)
+    return {
+        "status": status,
+        "finished_at": finished_at,
+        "rows": [{"failure_mode": sweep_mode, "delta_eue_mwh": 0.1}],
+    }
+
+
+def test_a_failed_sweep_after_the_study_does_not_take_over(study, monkeypatch):
+    """Only a done or aborted sweep has rows to serve; a failed one does not."""
+    monkeypatch.setitem(R._state, "fmea_sweep", _done_sweep(2000.0, status="failed"))
+    assert R.get_fmea_modes()["source"] == "eh_study"
+
+
+def test_a_sweep_without_a_finish_time_does_not_take_over(study, monkeypatch):
+    monkeypatch.setitem(R._state, "fmea_sweep", _done_sweep(None))
+    assert R.get_fmea_modes()["source"] == "eh_study"
+
+
+def test_a_finished_sweep_wins_over_a_study_without_a_finish_time(study, monkeypatch):
+    """A study record that never recorded when it finished is not newer."""
+    monkeypatch.setitem(R._state, "eh_study", {"status": "done"})
+    monkeypatch.setitem(R._state, "fmea_sweep", _done_sweep(500.0))
+    assert R.get_fmea_modes()["source"] == "live"
+
+
+def test_study_args_without_a_study_record(monkeypatch):
+    """A stored report with no study record (a reopened project) still serves."""
+    from services.adequacy.copt_endpoint import study_fmea_args
+
+    state: dict = {}
+    _store_into(state, PAYLOAD)
+    args = study_fmea_args(state)
+    assert args["study_fmea_top"] == PAYLOAD
+    assert args["study_finished_at"] is None
+    assert study_fmea_args({}) == {}
+
+
+def test_study_args_need_an_fmea_top_payload():
+    from services.adequacy.copt_endpoint import study_fmea_args
+
+    no_section: dict = {}
+    store_eh_report(
+        no_section,
+        ReferenceDesignReport(
+            archetype="strong_grid", pack_hash="p", assumptions_hash="a"
+        ),
+    )
+    assert study_fmea_args(no_section) == {}
+    no_payload: dict = {}
+    _store_into(no_payload, None, status="skipped")
+    assert study_fmea_args(no_payload) == {}
