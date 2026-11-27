@@ -145,7 +145,10 @@ def test_nothing_but_the_accessor_reads_the_shortfall():
     by name or by its value."""
     allowed = {"services/process_products.py", "services/process_template_rules.py",
                "services/solver/process_uc.py", "services/solver/lost_production.py",
-               "services/adequacy/slack.py"}
+               "services/adequacy/slack.py",
+               # A static id -> plain-name table (expert catalogue T1): it names the shortfall unit for
+               # display and reads no value or role from the network.
+               "services/template_display_names.py"}
     pattern = re.compile(r"""product_role_generators\([^)]*["']shortfall|\bSHORTFALL\b|\blost_production_value\(|"""
                          r"""["']__lost_""")
     hits = []
