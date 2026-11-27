@@ -132,6 +132,15 @@ WEIGHT_BASIS: dict[str, str] = {
     "link_conversion_loss": "derived",
     "peak_link_flow": "none",
     "peak_link_loading": "none",
+    # store_dispatch_calculations.py: charged/discharged/loss on store weights; states and peaks per snapshot
+    "store_charged_energy": "stores",
+    "store_discharged_energy": "stores",
+    "store_net_energy": "derived",
+    "store_standing_loss": "stores",
+    "peak_store_charging": "none",
+    "peak_store_discharging": "none",
+    "final_store_energy": "none",
+    "peak_store_fill": "none",
 }
 
 # Profiles whose captured index is not snapshots: the investment report's

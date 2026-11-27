@@ -660,6 +660,17 @@ inconsistent flow withholds every figure. Reverse flow through a lossy Link, or 
 (a heat pump's COP), withholds the loss alone. A missing or non-positive `p_nom_opt` withholds the
 loading alone.
 
+`store-dispatch/1` (opt-in, `store_dispatch_calculations.py`, assistant-assurance 09 S5) gives one
+named Store's charged, discharged and net energy, standing loss, peak charging and discharging power,
+the energy at the window's end and the peak fill of `e_nom_opt`, on the store weights over an exact
+window. It follows PyPSA 1.1.2's balance e[t] = (1 − sl)^w·e[t−1] − w·p[t] (p > 0 discharges), reads
+`stores_t.standing_loss`, `e_min_pu` and `e_max_pu` where the Store has those columns (a NaN there is
+missing data), and starts the window from e[a−1], from e[last] for a cyclic Store, or from
+`e_initial` with no standing loss for a non-cyclic one. A standing loss outside [0, 1), a broken
+balance or an energy outside its bounds withholds every figure. A negative energy under a standing
+loss withholds the loss alone; a missing or non-positive `e_nom_opt` withholds the fill alone and
+skips the bound check. The fill is not clamped.
+
 `energy-balance/1` (opt-in) gives the Energy flow tab's totals (generation, served,
 unserved, storage change and the unsplit remainder of export, losses and conversion),
 gated by a per-bus balance; the tab's Source -> Via -> Destination rows are its own

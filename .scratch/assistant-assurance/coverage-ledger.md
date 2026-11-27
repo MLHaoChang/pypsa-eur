@@ -981,3 +981,24 @@ time-varying efficiency, `p_nom` ≠ `p_nom_opt`, and a reverse snapshot on a lo
 - route: `peak_link_flow` is verified against `/results/links` (p0).
 - pending: the energy, loss and loading routes. The route serves the raw p0 series, unweighted and without p1, so there is nothing to compare them with.
 - pending: multi-port Links (`unsupported_link_ports`) and multi-period networks (`unsupported_snapshot_scope`).
+
+### 2026-11-27 — AA-09 S5: store-dispatch/1
+
+Eight verified rows, all with `domain_review` "pending", in
+`pypsa-gui/backend/tests/assurance_acceptance/metric_ledger.d/store-dispatch-1.json`: charged,
+discharged and net energy, standing loss, peak charging and discharging power, final energy and peak
+fill of `e_nom_opt`. The answer surface is verified for every row. The hand oracle uses store weights
+2, 0.5 and 1 (generator 1, 3, 0.5; objective 3, 1, 2), a time-varying standing loss and e_max_pu,
+`e_nom` ≠ `e_nom_opt`, one non-cyclic Store (no loss on `e_initial`, as PyPSA 1.1.2 has it) and one
+cyclic Store whose `e_initial` is ignored.
+- route: the two peaks, the final energy and the fill are verified against `/results/store_dispatch` (p) and `/results/store_energy` (e).
+- pending: the energy and loss routes. Both routes serve the raw series, unweighted, so there is nothing to compare them with.
+- pending: multi-period networks (`unsupported_snapshot_scope`).
+
+### 2026-11-27 — issue 09 closed
+
+The AA 09 packages shipped S1 summary clarification (#2066), S3 conversational carryover (#2073), S2
+comparison guards (#2098), S4 `link-flow/1` (#2108) and S5 `store-dispatch/1` (this PR). Each
+released domain profile has a ledger fragment under `metric_ledger.d/`, and every requested slot
+carries a disposition in the receipt. Scope stays the bounded grammar; independent domain review of
+the new rows stays pending (issue 29).

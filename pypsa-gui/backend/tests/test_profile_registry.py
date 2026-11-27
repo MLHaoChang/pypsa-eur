@@ -11,6 +11,7 @@ from harness import (
     time_to_power_calculations, losses_calculations, system_cost_calculations,
     renewable_share_calculations,
     link_flow_calculations,
+    store_dispatch_calculations,
 )
 
 TABLES = (
@@ -27,6 +28,7 @@ TABLES = (
     system_cost_calculations.METRICS,
     renewable_share_calculations.METRICS,
     link_flow_calculations.METRICS,
+    store_dispatch_calculations.METRICS,
 )
 
 
