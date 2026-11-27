@@ -54,4 +54,31 @@ Checked by code reading only. Acceptance is the 'Done when' section above. Still
 - `campus_data_hash` is `schema.model_set.model_hash` of the run's campus description. That is
   the value a frozen model set holds as `model_hashes[variant]`. It is not the set's input
   `data_hash`, because a run stores no freeze parameters to recompute that from.
+- The ratings are stated by the caller with a required `rating_source` (GK A R5, ruling A).
+  `campus_data_hash` proves which campus run the pack was built from, not that the ratings are
+  that campus's values: the campus does not name its plant. P-based rows, Q-based rows and the
+  header show each value next to its `rating_source`. Follow-up: GC-28
+  (`28-plant-ratings-from-campus.md`).
+- A rated pack's `data_hash` must recompute from its file list, so changing one byte of
+  `ratings.json` is refused even when its SHA-256 entry is updated. Unrated packs keep master's
+  path, report text and bytes.
 - Follow-up: the PSS/E pack's ratings go with GC-27, which makes that pack readable at all.
+
+## Comments
+
+- 2026-11-27, GK A (39): plan GO, one PR, on these conditions:
+  - R1, the hash: `run_data_hash` is cross-checked against a frozen set's `model_hashes[variant]`.
+    A one-value change to campus.yaml is refused, naming both hashes.
+  - R2, old packs: with `ratings=None` the pack is byte-equal to master (pinned), and an unrated
+    pack reads and judges as before.
+  - R3, equality guards: there is a killing case per compared field, in both the file-against-
+    manifest check and the caller-against-pack check. The hash is lowercase hex only, tested.
+  - R4, fail closed: each refusal is typed and tested. The compliance folder is unchanged after a
+    refusal. A missing campus.yaml is refused.
+  - R5, ratings against the campus: ruling A, with conditions (a) to (c). (a) The PR body says the
+    hash proves which campus, not the ratings. (b) Rows and header show `rating_source` next to the
+    value. (c) GC-28 is filed.
+  - R6, the header: `rating_source` text appears only for rated packs. Unrated reports keep their
+    text and hash.
+  - R7, scope: the PSS/E pack and the poll path are untouched. The PSS/E ratings and the #2058
+    end-sample risk go into GC-27. A release-note fragment is added.
