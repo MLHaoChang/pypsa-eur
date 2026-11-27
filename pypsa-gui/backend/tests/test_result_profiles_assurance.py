@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from harness import assurance_scope
+from harness.curtailment_calculations import RESIDUAL_TOLERANCE
 from services import workflow_tools
 from tests.assurance_acceptance.support import approval, public_text
 from tests.test_answer_assurance import checked  # noqa: F401
@@ -80,8 +81,9 @@ def test_bus_price_is_time_weighted_and_observed(priced, checked):
 
 def test_hours_at_voll_use_the_solves_voll_and_need_one(priced, checked):
     ctx = solve(priced, voll=30)
-    assert answered(checked, ask(checked, ctx, "bus-price/1", "B1", {**PRICE, "hours_at_voll": 3})) == (
-        pytest.approx({**PRICE, "hours_at_voll": 3}))
+    got = answered(checked, ask(checked, ctx, "bus-price/1", "B1", {**PRICE, "hours_at_voll": 3}))
+    assert got == pytest.approx({**PRICE, "hours_at_voll": 3})
+    assert got["hours_at_voll"] == 3
     ctx.solver_state["last_solve_settings"] = None
     frames = ask(checked, ctx, "bus-price/1", "B1", {k: v for k, v in PRICE.items() if k != "hours_at_voll"})
     assert slots(frames)["hours_at_voll"]["reason"] == "voll_missing_or_zero"
@@ -195,7 +197,7 @@ WIND = {"available_energy": 50, "curtailed_energy": 33, "curtailment_share": 66}
 @pytest.mark.parametrize("entity", ["G1", "network"])
 def test_curtailment_of_a_variable_generator(windy, checked, entity):
     ctx = solve(windy)
-    assert answered(checked, ask(checked, ctx, "curtailment/1", entity, WIND)) == pytest.approx(WIND)
+    assert answered(checked, ask(checked, ctx, "curtailment/1", entity, WIND)) == pytest.approx(WIND, rel=RESIDUAL_TOLERANCE)
 
 
 def test_a_dispatchable_unit_is_not_curtailed(windy, checked):

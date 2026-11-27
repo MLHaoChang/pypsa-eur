@@ -347,6 +347,12 @@ def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
     ``lock_blocking=False`` (the polled flow) a held lock raises
     `EhStudyLockBusy` instead of waiting."""
     body = body or EhStudyRequest()
+    # A missing site location blocks every run kind (TEMPLATE-GAPS-1 Q1 a); the
+    # flow says it once, as its own `site_location_missing` item.
+    from services import site_location
+    _no_location = site_location.active_refusal()
+    if _no_location:
+        raise HTTPException(422, _no_location)
     # W3b-R: each goal field the request omits (site type, LOLE, ENS, draws)
     # is the project's one stored goal.
     from services.reliability_goal import active_goal, eh_request_with_goal

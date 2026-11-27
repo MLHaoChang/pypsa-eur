@@ -897,6 +897,11 @@ class ImportSummary(BaseModel):
     loads: int
     transformers: int
     snapshots: int
+    # 01a-3b: the import's range flags (ranges.import_flags), capped; the values
+    # load unchanged (C9) and the flags are never persisted (R10). A total of
+    # None means the sweep failed.
+    range_flags: list[dict] = []
+    range_flags_total: int | None = 0
 
 
 class ExcelImportSummary(ImportSummary):

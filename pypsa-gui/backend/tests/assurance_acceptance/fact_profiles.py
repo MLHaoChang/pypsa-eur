@@ -204,6 +204,16 @@ DRIVERS = {
     "copt-screening/1": Driver(
         "classical", _same, _scope("copt-screening/1", "network")
     ),
+    # /2 profiles (AA 28): the same drivers under the ruled labels
+    "investment-case/2": Driver(
+        "project", _stored(hand), _scope("investment-case/2", "network")
+    ),
+    "investment-lcoe/2": Driver(
+        "project", _stored(lcoe_hand), _scope("investment-lcoe/2", "network")
+    ),
+    "copt-screening/2": Driver(
+        "classical", _same, _scope("copt-screening/2", "network")
+    ),
     "grid-readiness/1": Driver(
         "hub", lambda value: value[0], _scope("grid-readiness/1", "network")
     ),

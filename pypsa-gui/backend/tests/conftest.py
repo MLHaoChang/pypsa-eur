@@ -1048,3 +1048,25 @@ def _returned_assurance_shapes():
     assert not mismatches, "Returned assurance shape outside its frozen v1 contract:\n" + "\n".join(
         mismatches[:5]
     )
+
+
+@pytest.fixture(autouse=True)
+def _site_located(request):
+    """A missing site location blocks Run (TEMPLATE-GAPS-1 Q1 a). The networks
+    tests build sit at 0,0, so they start with the site coordinates confirmed;
+    a test about the missing location is marked `unlocated`.
+
+    Patches by hand, not through `monkeypatch`: asking for `monkeypatch` here
+    would create it before the solve-queue reset fixture, so its teardown would
+    run after the reset and break `test_conftest_stall_hook`."""
+    if request.node.get_closest_marker("unlocated") is not None:
+        yield
+        return
+    from services import site_location
+
+    original = site_location.anchor_confirmed
+    site_location.anchor_confirmed = lambda _d: True
+    try:
+        yield
+    finally:
+        site_location.anchor_confirmed = original

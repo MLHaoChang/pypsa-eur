@@ -13,6 +13,7 @@ from deps import current_session
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from models.schemas import ExcelImportSummary, ImportSummary
 from services import active_project, change_log_service
+from services.asset_schema import ranges
 from sqlalchemy.orm import Session as DBSession
 from services.pypsa_service import PyPSAService
 from services.upload_guard import read_capped, safe_extract
@@ -25,8 +26,11 @@ router = APIRouter()
 BASE_DIR = pathlib.Path(__file__).parent.parent
 
 
-def _build_summary(n) -> ImportSummary:
+def _build_summary(n, flagged: dict | None = None) -> ImportSummary:
+    """The import's counts, plus ``flagged`` (``ranges.import_flags`` of the
+    candidate, taken before it is installed) when given."""
     return ImportSummary(
+        **(flagged or {}),
         buses=len(n.buses),
         generators=len(n.generators),
         lines=len(n.lines),
@@ -452,11 +456,12 @@ async def import_netcdf(
                 lambda c: PyPSAService.import_network_from_netcdf(c, tmp),
             )
         rederived = _own_costs_from_parts(n)
+        flagged = ranges.import_flags(n)
         with PyPSAService.get_lock():
             _replace_with(n)
     finally:
         tmp.unlink(missing_ok=True)
-    summary = _build_summary(n)
+    summary = _build_summary(n, flagged)
     change_log_service.log(
         "import", "Network", file.filename or "network.nc",
         f"Imported NetCDF '{file.filename}': {summary.buses} buses, {summary.generators} generators, {summary.snapshots} snapshots"
@@ -486,9 +491,10 @@ async def import_csv(
         n = _parse_candidate("CSV bundle (a .zip of PyPSA CSV tables)", parse)
         normalise_eh_columns(n)
         rederived = _own_costs_from_parts(n)
+        flagged = ranges.import_flags(n)
         with PyPSAService.get_lock():
             _replace_with(n)
-    summary = _build_summary(n)
+    summary = _build_summary(n, flagged)
     change_log_service.log(
         "import", "Network", file.filename or "network_csv.zip",
         f"Imported CSV zip '{file.filename}': {summary.buses} buses, {summary.generators} generators, {summary.snapshots} snapshots"
@@ -517,9 +523,10 @@ async def import_excel(
     prep = excel_workbook.prepare(data, file.filename, new_project=False)
     n = prep.network
     n.name = "Untitled Project"
+    flagged = ranges.import_flags(n)
     with PyPSAService.get_lock():
         _replace_with(n)
-    summary = ExcelImportSummary(**_build_summary(n).model_dump(), report=prep.report.to_dict())
+    summary = ExcelImportSummary(**_build_summary(n, flagged).model_dump(), report=prep.report.to_dict())
     change_log_service.log(
         "import", "Network", file.filename or "network.xlsx",
         f"Imported Excel '{file.filename}': {summary.buses} buses, {summary.generators} generators"
@@ -541,9 +548,10 @@ async def import_matpower(
         "MATPOWER case", lambda c: _parse_matpower(c, data.decode("utf-8")),
         check_names=False,
     )
+    flagged = ranges.import_flags(n)
     with PyPSAService.get_lock():
         _replace_with(n)
-    summary = _build_summary(n)
+    summary = _build_summary(n, flagged)
     change_log_service.log(
         "import", "Network", file.filename or "network.m",
         f"Imported MATPOWER '{file.filename}': {summary.buses} buses, {summary.generators} generators",

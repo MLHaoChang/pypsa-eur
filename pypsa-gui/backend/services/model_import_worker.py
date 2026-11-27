@@ -51,6 +51,7 @@ def run(
         )
     except IR.ImportFormatError as exc:
         return {"refused": str(exc)}
+    from services.asset_schema import ranges
     from services.pypsa_service import PyPSAService
 
     out = Path(out_dir)
@@ -66,6 +67,8 @@ def run(
         "bus_count": len(n.buses),
         "snapshot_count": len(n.snapshots),
         "network_name": str(n.name or ""),
+        # 01a-3b: capped, plain JSON (strings and numbers); never written out (R10).
+        **ranges.import_flags(n),
     }
 
 

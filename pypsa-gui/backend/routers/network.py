@@ -660,6 +660,35 @@ def get_meta():
                          PyPSAService.get_active_context().storage_dir)
 
 
+def _range_flags_payload(ctx) -> dict:
+    """``{revision, flags}`` for ``ctx``'s network: every range flag
+    (``ranges.flags``, uncapped). The revision is read BEFORE the sweep, so
+    the flags reflect at least that revision. Reads only, and takes no lock:
+    an edit during the sweep shows as a newer ``dirty_state.revision``.
+
+    With no lock, an edit can also remove a row mid-sweep. A sweep that
+    raises is logged and gives ``flags: None``, meaning "read again"; the
+    read never becomes a 500."""
+    import logging
+
+    from services import dirty_state
+    from services.asset_schema import ranges
+
+    revision = dirty_state.revision(ctx)
+    try:
+        flags = ranges.flags(ctx.network)
+    except Exception:  # noqa: BLE001 - a racing edit or a sweep bug; logged
+        logging.getLogger(__name__).exception("range_flags sweep failed")
+        flags = None
+    return {"revision": revision, "flags": flags}
+
+
+@router.get("/range_flags")
+def get_range_flags():
+    """The open network's range flags (01a-3b); see `_range_flags_payload`."""
+    return _range_flags_payload(PyPSAService.get_active_context())
+
+
 @router.put("/meta")
 def update_meta(meta: NetworkMeta):
     n = PyPSAService.get_network()

@@ -1,0 +1,66 @@
+{
+ "profiles": {
+  "copt-screening/2": [
+   {
+    "metric": "screening_lole",
+    "formula": "sum over t of w[t] x P[available capacity < residual load[t]] (two-state COPT)",
+    "validity": "the residual and weights must reproduce the engine's (residual_mismatch, weights_mismatch) and each figure its headline (headline_mismatch). Refusals: copt_conventions_not_reproduced, copt_inputs_not_finite, copt_table_too_large, network_scope_required, no_copt_fleet, unsupported_snapshot_scope, unusable_outage_rate",
+    "tolerance": "harness.copt_calculations:REL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it",
+    "status": "verified",
+    "domain_review": "pending",
+    "domain_review_note": "unpinned: test_copt_assurance.py does not name REL_TOLERANCE (issue 29)",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     },
+     "route": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it"
+     }
+    }
+   },
+   {
+    "metric": "screening_eue",
+    "formula": "sum over t of w[t] x E[max(residual load[t] - available capacity, 0)]",
+    "validity": "the residual and weights must reproduce the engine's (residual_mismatch, weights_mismatch) and each figure its headline (headline_mismatch). Refusals: copt_conventions_not_reproduced, copt_inputs_not_finite, copt_table_too_large, network_scope_required, no_copt_fleet, unsupported_snapshot_scope, unusable_outage_rate",
+    "tolerance": "harness.copt_calculations:REL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it",
+    "status": "verified",
+    "domain_review": "pending",
+    "domain_review_note": "unpinned: test_copt_assurance.py does not name REL_TOLERANCE (issue 29)",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     },
+     "route": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it"
+     }
+    }
+   },
+   {
+    "metric": "screening_lolp_max",
+    "formula": "max over t of P[available capacity < residual load[t]]",
+    "validity": "the residual and weights must reproduce the engine's (residual_mismatch, weights_mismatch) and each figure its headline (headline_mismatch). Refusals: copt_conventions_not_reproduced, copt_inputs_not_finite, copt_table_too_large, network_scope_required, no_copt_fleet, unsupported_snapshot_scope, unusable_outage_rate",
+    "tolerance": "harness.copt_calculations:REL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it",
+    "status": "verified",
+    "domain_review": "pending",
+    "domain_review_note": "unpinned: test_copt_assurance.py does not name REL_TOLERANCE (issue 29)",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     },
+     "route": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_copt_assurance.py::test_the_classical_fleet_by_hand_and_as_the_tab_has_it"
+     }
+    }
+   }
+  ]
+ }
+}

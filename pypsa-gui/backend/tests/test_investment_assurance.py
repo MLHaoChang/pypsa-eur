@@ -7,6 +7,11 @@ report checks the rebuild against the engine's own headlines.
 # ruff: noqa: F811 -- imported shared fixtures.
 import pytest
 
+from harness.investment_calculations import (
+    IRR_TOLERANCE,
+    LCOE_TOLERANCE,
+    REL_TOLERANCE,
+)
 from services import workflow_tools
 from services.finance import metrics
 from tests.assurance_acceptance.support import approval, public_text
@@ -108,6 +113,11 @@ def test_hand_cash_with_a_nonzero_first_year(project, checked):
                                  "equity_irr": 0.13066238629180748, "project_irr": metrics.irr(PROJECT)[0]})
     frames = ask(checked, project, values)
     assert answered(checked, frames) == pytest.approx(values, rel=1e-12)
+    got = answered(checked, frames)
+    for npv in ("equity_npv", "project_npv"):
+        assert got[npv] == pytest.approx(values[npv], rel=REL_TOLERANCE)
+    for irr in ("equity_irr", "project_irr"):
+        assert got[irr] == pytest.approx(values[irr], abs=IRR_TOLERANCE)
     text = public_text(frames)
     assert "cost of equity 10.0000%" in text and "WACC 7.0000%" in text
     assert "(financial close) is undiscounted" in text
@@ -229,6 +239,9 @@ def test_the_lcoe_from_the_retained_series(project, checked):
                        LCOE)
     frames = ask(checked, project, values, LCOE)
     assert answered(checked, frames) == values
+    got = answered(checked, frames)
+    for metric in ("lcoe_nominal", "lcoe_real"):
+        assert got[metric] == pytest.approx(values[metric], rel=LCOE_TOLERANCE)
     text = public_text(frames)
     assert "USD/MWh" in text and "incremental value" not in text
 
@@ -318,6 +331,7 @@ def test_project_irr_of_one_sign_change_is_the_hand_root(project):
     value, reason = _project_irr_slot(project)
     assert reason is None
     assert value == pytest.approx(0.10, abs=1e-9)
+    assert value == pytest.approx(0.10, abs=IRR_TOLERANCE)
 
 
 def test_project_irr_with_two_roots_is_refused(project):
@@ -332,3 +346,32 @@ def test_project_irr_without_a_sign_change_is_refused(project):
     # 100 + 50 / (1 + r) > 0 for every r > -1: no root.
     store(project, lambda p: hand(p, project=[100.0, 50.0]))
     assert _project_irr_slot(project) == (None, "irr_no_sign_change")
+
+
+def test_a_stored_v1_record_replays_under_its_own_labels_beside_the_v2(project, checked):
+    """AA 28: the /1 profile still answers and its stored record keeps the old label; /2 prints the ruled one."""
+    store(project, hand)
+    values = published(project, {"equity_npv": 4.132231404958677, "project_npv": PROJECT_NPV,
+                                 "equity_irr": 0.13066238629180748, "project_irr": metrics.irr(PROJECT)[0]})
+    old, new = "Project NPV (post tax, at the WACC)", "Project NPV at the WACC, after tax (unlevered)"
+    v1 = ask(checked, project, values, "investment-case/1")
+    assert answered(checked, v1) == pytest.approx(values, rel=1e-12)  # the stored /1 record reads back and verifies
+    assert old in public_text(v1) and new not in public_text(v1)
+    v2 = ask(checked, project, values, "investment-case/2")
+    assert answered(checked, v2) == pytest.approx(values, rel=1e-12)
+    assert new in public_text(v2) and old not in public_text(v2)
+
+
+def test_the_v2_card_prints_the_tab_labels_and_display_units(project, checked):
+    """AA 28, UX (32): /2 prints the Investment tab's labels; no raw unit word reaches the card."""
+    store(project, hand)
+    values = published(project, {"equity_npv": 4.132231404958677, "project_npv": PROJECT_NPV,
+                                 "equity_irr": 0.13066238629180748, "project_irr": metrics.irr(PROJECT)[0]},
+                       "investment-case/2")
+    text = public_text(ask(checked, project, values, "investment-case/2"))
+    for raw in ("fraction/year", "report currency", "probability"):
+        assert raw not in text
+    lines = text.splitlines()
+    for label in ("Equity IRR, post-tax", "Unlevered project IRR, post-tax"):
+        assert any(line.startswith(label + ": ") and line.endswith(" /yr (0.01 = 1 %).") for line in lines), label
+    assert any(line.startswith("Equity NPV, post-tax (at cost of equity): ") and line.endswith(" USD.") for line in lines)

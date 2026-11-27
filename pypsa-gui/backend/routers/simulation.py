@@ -1553,6 +1553,12 @@ def run():
     _blocked = _study_state.blocking_study_detail()
     if _blocked:
         raise HTTPException(409, _blocked)
+    # A missing site location blocks Run (TEMPLATE-GAPS-1 Q1 a); the flow's
+    # `site_location_missing` item reads the same predicate.
+    from services import site_location
+    _no_location = site_location.active_refusal()
+    if _no_location:
+        raise HTTPException(422, _no_location)
     # Reserve products (DC grid readiness 06): a typed refusal before any worker,
     # read under the lock; a lock held elsewhere leaves it to the solve's own check.
     _lock = PyPSAService.get_lock()
@@ -1888,6 +1894,10 @@ def run_ac_pf():
     _blocked = _study_state.blocking_study_detail()
     if _blocked:
         raise HTTPException(409, _blocked)
+    from services import site_location
+    _no_location = site_location.active_refusal()
+    if _no_location:
+        raise HTTPException(422, _no_location)
 
     n = PyPSAService.get_network()
     stop_event = threading.Event()

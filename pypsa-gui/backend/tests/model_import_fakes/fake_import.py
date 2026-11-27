@@ -29,6 +29,9 @@ def read_fake(paths, options):
     n = pypsa.Network(name=str(options.get("model") or "Fake grid"))
     n.add("Bus", ["North", "South"], v_nom=110.0)
     n.add("Line", "North-South", bus0="North", bus1="South", x=0.1, s_nom=100.0)
+    if word == "flagged":  # an out-of-range value and a min above max (01a-3b)
+        n.buses.loc["South", "v_nom"] = 0.0
+        n.add("Generator", "G1", bus="North", p_nom_min=10.0, p_nom_max=5.0)
     report = ImportReport(
         source_format="fake",
         source_files=[p.name for p in paths],

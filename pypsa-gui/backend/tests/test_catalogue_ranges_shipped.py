@@ -53,3 +53,22 @@ def test_the_sweep_finds_a_stored_value_out_of_range():
             "message": "Nominal voltage must be more than 0; got 0.0.",
         }
     ]
+
+
+# 01a-3b: nor any import flag (out of range, or a min above its max).
+
+
+@pytest.mark.parametrize("label", [label for label, _, _ in _BUILDS])
+def test_every_template_build_has_no_import_flag(label):
+    make = {lb: m for lb, _, m in _BUILDS}[label]
+    assert R.flags(make()) == []
+
+
+@pytest.mark.parametrize("build", [classic.build_3bus, classic.build_ieee14])
+def test_the_grid_benchmarks_have_no_import_flag(build):
+    assert R.flags(build()) == []
+
+
+@pytest.mark.parametrize("path", FIXTURES, ids=lambda p: p.parent.name)
+def test_every_fixture_network_has_no_import_flag(path):
+    assert R.flags(pypsa.Network(str(path))) == []

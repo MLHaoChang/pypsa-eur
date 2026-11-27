@@ -34,7 +34,7 @@ def evaluation_project(baseline, request):
         site.storage_units.at["bess_new", "p_nom_opt"] = 10.0
         site.export_to_netcdf(str(baseline[2] / "network.nc"))
         T.write_sidecars(baseline[2], "eh_datacenter")
-    if case.profile == "copt-screening/1":
+    if case.profile == "copt-screening/2":
         n.remove("Generator", "G1")
         n.add("Carrier", ["gas", "wind"])
         n.add("Generator", "thermal1", bus="B1", carrier="gas", p_nom=60, outage_rate_value=0.5,
@@ -211,7 +211,7 @@ def test_pilot_case(case, evaluation_project, pilot_harness, request):
         with chat_tools._acting() as (db, user):
             project = project_registry.resolve_project(db, user, evaluation_project.project_uuid)
         (project_registry.project_dir(project) / "network.nc").unlink()  # no saved project
-    elif case.fault == "missing" and case.profile == "copt-screening/1":
+    elif case.fault == "missing" and case.profile == "copt-screening/2":
         n.generators.at["thermal1", "outage_rate_value"] = 1.5  # no usable outage rate
     elif case.fault == "missing" and invested:
         report = evaluation_project.solver_state["investment_case_report"]

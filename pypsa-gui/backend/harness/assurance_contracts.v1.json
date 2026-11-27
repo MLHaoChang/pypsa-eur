@@ -5331,6 +5331,9 @@
         "site-import/1",
         "investment-case/1",
         "investment-lcoe/1",
+        "investment-case/2",
+        "investment-lcoe/2",
+        "copt-screening/2",
         "copt-screening/1",
         "grid-readiness/1",
         "time-to-power/1",
@@ -6823,6 +6826,30 @@
     "screening_lolp_max"
    ]
   },
+  "copt-screening/2": {
+   "definitions": {
+    "screening_eue": {
+     "formula_id": "copt-screening-eue/1",
+     "label": "Screening expected unserved energy over the modelled horizon (COPT)",
+     "unit": "MWh"
+    },
+    "screening_lole": {
+     "formula_id": "copt-screening-lole/1",
+     "label": "Screening expected shortfall over the modelled horizon (COPT)",
+     "unit": "h"
+    },
+    "screening_lolp_max": {
+     "formula_id": "copt-screening-lolp-max/1",
+     "label": "Highest hourly loss-of-load probability (COPT)",
+     "unit": "(scale 0 to 1)"
+    }
+   },
+   "metrics": [
+    "screening_lole",
+    "screening_eue",
+    "screening_lolp_max"
+   ]
+  },
   "curtailment/1": {
    "definitions": {
     "available_energy": {
@@ -7053,6 +7080,36 @@
     "project_irr"
    ]
   },
+  "investment-case/2": {
+   "definitions": {
+    "equity_irr": {
+     "formula_id": "equity-post-tax-irr/1",
+     "label": "Equity IRR, post-tax",
+     "unit": "/yr (0.01 = 1 %)"
+    },
+    "equity_npv": {
+     "formula_id": "equity-post-tax-npv/1",
+     "label": "Equity NPV, post-tax (at cost of equity)",
+     "unit": "report currency"
+    },
+    "project_irr": {
+     "formula_id": "project-post-tax-irr/1",
+     "label": "Unlevered project IRR, post-tax",
+     "unit": "/yr (0.01 = 1 %)"
+    },
+    "project_npv": {
+     "formula_id": "project-post-tax-npv/1",
+     "label": "Project NPV at the WACC, after tax (unlevered)",
+     "unit": "report currency"
+    }
+   },
+   "metrics": [
+    "equity_npv",
+    "project_npv",
+    "equity_irr",
+    "project_irr"
+   ]
+  },
   "investment-lcoe/1": {
    "definitions": {
     "lcoe_nominal": {
@@ -7063,6 +7120,24 @@
     "lcoe_real": {
      "formula_id": "investment-lcoe-real/1",
      "label": "LCOE, real (engine definition)",
+     "unit": "currency/MWh"
+    }
+   },
+   "metrics": [
+    "lcoe_nominal",
+    "lcoe_real"
+   ]
+  },
+  "investment-lcoe/2": {
+   "definitions": {
+    "lcoe_nominal": {
+     "formula_id": "investment-lcoe-nominal/1",
+     "label": "LCOE (finance-consistent, nominal)",
+     "unit": "currency/MWh"
+    },
+    "lcoe_real": {
+     "formula_id": "investment-lcoe-real/1",
+     "label": "LCOE (real)",
      "unit": "currency/MWh"
     }
    },
@@ -7629,6 +7704,9 @@
      "site-import/1",
      "investment-case/1",
      "investment-lcoe/1",
+     "investment-case/2",
+     "investment-lcoe/2",
+     "copt-screening/2",
      "copt-screening/1",
      "grid-readiness/1",
      "time-to-power/1",

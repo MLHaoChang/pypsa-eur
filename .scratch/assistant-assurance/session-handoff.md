@@ -1049,6 +1049,42 @@ not seen. Next runnable tracer: SH-07c's `revised_from` on sealed exports must
 keep `test_p4_fact_free_reports.py`'s exact-key pin green.
 
 
+## 2026-11-27 — AA-04 S6 (Excel/MATPOWER read-backs, export edge cases)
+
+Branch `claude/aa04-s6-file-formats`, plan GO from GK B (73) with conditions (Q1 MATPOWER
+not_carried in the model's text, MATPOWER_ABS pinned, Q2 the export reads only the file
+its result names, route-reader spies, P7 mutants).
+Commands, in `pypsa-gui/backend` with `/root/.venv-pypsa-gui/bin/python -m pytest`:
+`tests/assurance_acceptance/test_p3_file_outcomes.py`: 25 new cases red on master's
+`harness/outcomes.py`, all green after; `tests/assurance_acceptance -k "p3 or p4_imports"`:
+682 passed, 0 failed (before the last mutant tests, which add 7 more, passing).
+`scripts/coord/mutants.py harness/outcomes.py` against the file test: 72 of 100 mutants
+ran in the 7000 s cap, 54 killed; the survivors are listed in the PR body (index and
+bus-field checks, now covered by new tests, plus equivalent no-note guards and the
+`<=` boundary). Policy version unchanged (`outcomes.VERSION` 1).
+Rows: AA04-P1..P7 passing, P8 a named limit with its test, P10 closed by issue 15 (#1261).
+Remaining blockers: none for S6. Next runnable tracer (S7): wait_for_job on an `ad:`
+handle returns an outcome from an independent job_adapters snapshot read instead of
+`adapter_pending` (`test_p3_job_outcomes.py::test_wait_on_a_study_or_queue_job_is_pending_not_completed`
+turns red first); live-voice 11c has landed (#1550, #1556).
+Not done: the frontend's "this file format cannot be checked yet" word stays (no file
+tool emits adapter_pending now; UI slice).
+
+## 2026-11-27 — AA-04 S7 (wait_for_job on study, report and queue jobs)
+
+Branch `claude/aa04-s7-job-outcomes`, stacked on #2070 (S6). Plan GO and delta GO from
+GK B (74) (conditions 1–6, additions a–d). `outcomes.read_job` + pure `classify_job`
+map `job_adapters.job_status`'s neutral outcome through `NEUTRAL_OUTCOMES`; queue
+jobs are bound to the open project's registry key.
+Commands, in `pypsa-gui/backend` with `/root/.venv-pypsa-gui/bin/python -m pytest`:
+`tests/assurance_acceptance/test_p3_job_outcomes.py` 104 passed (the S7 cases red on
+#2070's head); nonblocking + lv11 + p3 job/outcome/guard suites 638 passed, 0 failed.
+25 hand-written mutants (after GK B (74) NOT OK @af90b669: queue cancel by kind allow-list, the None guard) (every map and live branch, id/project checks, error kinds,
+the cancel re-read and worker-exit steps, unknown→completed, reading the handler
+result in loop.py): all killed.
+Remaining: AA04-P11 and AA04-P12 (tool-line words for the S7 reasons), one UI slice
+with UX review; mismatched artifacts (issue 05).
+
 ## 2026-11-27 — AA-06 (evidence UX and navigation): S3b-2 and S5 merged
 
 Merged: #2046 S3b-2 (Dispatch and Overview displayed data, master df206ed7) and #2050 S5 (Chromium result journeys, master 96ccce9a). The earlier slices were #2027, #2029, #2032, #2035 and #2045.

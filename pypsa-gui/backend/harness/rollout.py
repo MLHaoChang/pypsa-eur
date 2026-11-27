@@ -14,7 +14,9 @@ def profile_enabled(profile):
         return False
     if value is None:
         return profile not in calculations.OPT_IN_PROFILES
-    return profile in value.split(",")
+    listed = value.split(",")
+    # a /2 profile runs when its /1 predecessor is listed: the operator opted into the checked figure (AA 28)
+    return profile in listed or calculations.PREDECESSORS.get(profile) in listed
 
 
 def effects_enabled():

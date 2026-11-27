@@ -65,6 +65,7 @@ gets the ``Depends`` object itself, which is not ``None`` — so a
 lands somewhere else entirely. That is exactly how the ``session`` parameter
 went unnoticed here: this example used to omit it.
 """
+
 from __future__ import annotations
 
 import atexit
@@ -89,6 +90,13 @@ from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import select  # noqa: E402
 
 import main  # noqa: E402
+
+# A missing site location blocks Run (template-e2e 01). The drivers' networks sit
+# at 0,0, so the driver process starts with the site coordinates confirmed, the
+# way `tests/conftest.py`'s autouse fixture does for pytest.
+from services import site_location as _site_location  # noqa: E402
+
+_site_location.anchor_confirmed = lambda _d: True
 
 _EMAIL = "qa-driver@example.com"
 _ORG = "QA Driver Org"
