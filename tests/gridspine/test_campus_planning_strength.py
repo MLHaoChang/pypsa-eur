@@ -668,9 +668,17 @@ def test_a_genset_not_built_or_not_running_adds_nothing(bus):
     c = build_campus(_genset_spec(bus))
     hourly = _hourly(c)
     gen = hourly["unit_id"] == "GEN"
-    unbuilt = _gc03_strength(c, hourly.assign(status=(~gen).astype(int), p_mw=hourly["p_mw"].where(~gen, 0.0)))
+    unbuilt = _gc03_strength(
+        c,
+        hourly.assign(status=(~gen).astype(int), p_mw=hourly["p_mw"].where(~gen, 0.0)),
+    )
     # running in one hour and standing still in the next: the weakest hour counts
-    idle = _gc03_strength(c, pd.concat([hourly, hourly.assign(hour=1, p_mw=hourly["p_mw"].where(~gen, 0.0))]))
+    idle = _gc03_strength(
+        c,
+        pd.concat(
+            [hourly, hourly.assign(hour=1, p_mw=hourly["p_mw"].where(~gen, 0.0))]
+        ),
+    )
     for poc in ("GRID", "MV1", "MV2"):
         for got in (unbuilt, idle):
             assert _at(got[0], poc)["sk_intact_mva"] == pytest.approx(
