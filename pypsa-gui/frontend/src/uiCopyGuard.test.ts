@@ -292,6 +292,10 @@ const PINNED_ALLOW_KEYS = [
   'pages/hubDesign/delegate.ts|grid_import',
   'pages/hubDesign/delegate.ts|outage_rate_value',
   'pages/hubDesign/delegate.ts|mttr_hours',
+  'pages/hubDesign/delegate.ts|eh_role',
+  'pages/hubDesign/delegate.ts|eh_poc',
+  'pages/hubDesign/delegate.ts|eh_critical',
+  'pages/hubDesign/delegate.ts|eh_sk_mva',
   'pages/modelHorizon/StepPeriodEconomics.tsx|discount_rate',
   'pages/modelHorizon/StepPeriodEconomics.tsx|overnight_cost',
   'pages/modelHorizon/StepPeriodEconomics.tsx|p_nom',
@@ -321,6 +325,7 @@ const PINNED_ALLOW_KEYS = [
   'utils/decisionVocabulary.ts|efficiency_dispatch',
   'utils/decisionVocabulary.ts|grid_import',
   'utils/decisionVocabulary.ts|p_set',
+  'utils/decisionVocabulary.ts|eh_role',
 ]
 
 describe('UI copy guard: what it reads', () => {
