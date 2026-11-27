@@ -432,3 +432,33 @@ def test_a_baseline_window_without_the_total_basis_is_comparable():
     base = _baseline()
     del base["window"]["weight_basis"]["total_cost"]
     assert calculations.comparison_mismatch(_raw(), _scope(), base) is None
+
+
+@pytest.mark.parametrize(
+    ("index", "weights"),
+    [
+        (INDEX, [1.0, 1.0 + 1e-9, 1.0]),
+        ([INDEX[0], "2026-01-01T01:00:00.000001", INDEX[2]], WEIGHTS),
+    ],
+    ids=["weight-1e-9", "sub-second-timestamp"],
+)
+def test_a_near_equal_period_is_refused_exactly(monkeypatch, index, weights):
+    # The compare is exact: no tolerance on weights or timestamps (GK B (75)).
+    base = _baseline(index=index, weights=weights)
+    assert base["window"] == _baseline()["window"]
+    assert calculations.comparison_mismatch(_raw(), _scope(), base) == "period"
+    assert _refused(monkeypatch, base) == "incompatible_comparison_basis"
+
+
+def test_a_dispatch_profile_baseline_is_refused_even_with_an_equal_period(monkeypatch):
+    # generator-dispatch/1 has no cost: its comparison is refused by profile,
+    # not by the period (which cannot read its raw shape).
+    from services import assurance_records as records
+
+    scope = _scope(profile="generator-dispatch/1", comparison_evidence_id=EID)
+    base = _baseline(_scope(profile="generator-dispatch/1"))
+    monkeypatch.setattr(calculations, "_period", lambda raw, scope: (INDEX, WEIGHTS))
+    monkeypatch.setattr(records, "evidence", lambda owner, evidence_id: base)
+    assert calculations.comparison_mismatch(_raw(), scope, base) is None
+    with pytest.raises(ValueError, match="^incompatible_comparison_basis$"):
+        calculations._comparison(_raw(), scope, "owner")
