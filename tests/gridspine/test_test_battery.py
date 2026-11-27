@@ -883,3 +883,45 @@ def test_exported_c_note_cites_the_standard_not_a_review():
 
     assert "IEC 60909-0 Table 1" in C_BRACKET_NOTE
     assert "GK" not in C_BRACKET_NOTE and "GC-02" not in C_BRACKET_NOTE
+
+
+# --- GC-13: pack ratings ------------------------------------------------------------------------
+
+
+def test_pack_ratings_round_trip_and_refusals():
+    from gridspine.handoff.test_battery import (
+        PackRatings,
+        ratings_from_json,
+        ratings_json,
+    )
+
+    good = {
+        "rated_mw": 90,
+        "rated_mva": 99.5,
+        "rating_source": "nameplate",
+        "campus_data_hash": "a" * 64,
+    }
+    r = PackRatings(**good)
+    assert ratings_from_json(ratings_json(r)) == r
+    assert ratings_json(r) == ratings_json(PackRatings(**good))  # byte-equal
+    for name in ("rated_mw", "rated_mva"):
+        for bad in (0, -1.0, float("nan"), float("inf"), True, "90", None):
+            with pytest.raises(
+                ContractError, match=f"{name} must be a finite number > 0"
+            ):
+                PackRatings(**{**good, name: bad})
+    for bad in ("", "  ", None, 3):
+        with pytest.raises(ContractError, match="rating_source must be stated"):
+            PackRatings(**{**good, "rating_source": bad})
+    for bad in ("A" * 64, "a" * 63, "g" * 64, None, 7):
+        with pytest.raises(ContractError, match="64 hex digits"):
+            PackRatings(**{**good, "campus_data_hash": bad})
+    with pytest.raises(ContractError, match="must be a PackRatings"):
+        ratings_json(good)
+    for text, match in (
+        ("{", "does not parse"),
+        ("[1]", "must hold exactly"),
+        ('{"rated_mw": 1}', "must hold exactly"),
+    ):
+        with pytest.raises(ContractError, match=match):
+            ratings_from_json(text)

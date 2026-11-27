@@ -878,6 +878,7 @@ def test_an_unrated_pack_keeps_its_report(tmp_path):
     assert not any(
         "rated MVA" in r["detail"] for r in by["q_step_skmin_xrmin_up"]["rows"]
     )
+    assert not any("None" in r["detail"] for c in j["cases"] for r in c["rows"])
     p = _rows(by["p_step_skmin_xrmin_up"])
     assert "rated P = test plant" in p["rise_time"]["detail"]
     assert all(
