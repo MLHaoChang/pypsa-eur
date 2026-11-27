@@ -70,6 +70,7 @@ from deps import optional_user
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services import campus_electrical_service as ce
 from services import campus_grid_code_service as gc
+from services import campus_judgment
 from services import equipment_schedule
 from services.http_filenames import content_disposition
 from services.upload_guard import UploadBudget
@@ -450,6 +451,43 @@ def download_psse_bundle(bundle: str, proj: AuthorizedProject = ProjectAccessDep
     return Response(data, media_type="application/zip",
                     headers={"Content-Disposition": content_disposition(f"{bundle}.zip"),
                              "X-Run-Stale": "true" if stale else "false"})
+
+
+# ── the pack read-back judgment of the latest run (grid-compliance 22) ──────
+
+@router.post("/{name}/psse/{bundle}/emt/results")
+async def upload_pack_results(
+    bundle: str,
+    files: list[UploadFile] = File(...),
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """The engineer's EMT results for one bundle's pack (``<case id>.csv``,
+    ``.inf``, ``.out`` or ``_NN.out``): saved into the pack, then the pack is
+    judged against the run (GC-07 read-back). All files share one size cap."""
+    _check_lock(proj, db, user)
+    budget = UploadBudget(campus_judgment.MAX_RESULT_BYTES)
+    if len(files) > campus_judgment.MAX_RESULT_FILES:
+        raise HTTPException(status_code=413, detail={
+            "error_kind": "campus_results_too_many",
+            "message": f"at most {campus_judgment.MAX_RESULT_FILES} result files per upload"})
+    got = [(f.filename or "", await budget.read(f)) for f in files]
+    return await run_in_threadpool(campus_judgment.add_results, _row(proj, db), bundle, got)
+
+
+@router.post("/{name}/psse/{bundle}/emt/judge")
+async def judge_pack(bundle: str, proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db),
+                     user: User | None = Depends(optional_user)):
+    """Judge one bundle's pack again on the results it holds; replaces the stored judgment."""
+    _check_lock(proj, db, user)
+    return await run_in_threadpool(campus_judgment.judge, _row(proj, db), bundle)
+
+
+@router.get("/{name}/judgment")
+def get_pack_judgment(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """The latest run's stored pack judgment, as the read-back wrote it, with its status counts."""
+    return campus_judgment.get_judgment(_row(proj, db))
 
 
 # ── the island sidecar and study (campus island plan, I9a) ──────────────────

@@ -1,0 +1,29 @@
+{
+ "entries": [
+  {
+   "id": "campus_pack_results_upload",
+   "title": "Upload EMT results for a campus pack",
+   "disposition": "manual",
+   "reason": "EMT case results are files the user uploads from the app; chat cannot take a file. The Grid code & connection results take them per PSS/E bundle.",
+   "page": "Results, Grid code & connection",
+   "panel": null,
+   "keywords": ["emt", "pscad", "outfile"],
+   "routes": [
+    ["POST", "/api/campus-electrical/{name}/psse/{bundle}/emt/results"]
+   ]
+  },
+  {
+   "id": "campus_pack_judgment",
+   "title": "Campus pack read-back judgment",
+   "disposition": "unbuilt",
+   "reason": "Chat has no tool yet to judge a campus EMT pack again or to read its stored judgment; the grid-compliance assistant tools (GC-10) will add one.",
+   "page": "Results, Grid code & connection",
+   "panel": null,
+   "keywords": ["judgment", "readback"],
+   "routes": [
+    ["POST", "/api/campus-electrical/{name}/psse/{bundle}/emt/judge"],
+    ["GET", "/api/campus-electrical/{name}/judgment"]
+   ]
+  }
+ ]
+}
