@@ -10,6 +10,7 @@ from harness import (
     investment_calculations, price_calculations, site_import_calculations, storage_calculations, storage_costs, storage_cycles_calculations,
     time_to_power_calculations, losses_calculations, system_cost_calculations,
     renewable_share_calculations,
+    link_flow_calculations,
 )
 
 TABLES = (
@@ -25,6 +26,7 @@ TABLES = (
     losses_calculations.METRICS,
     system_cost_calculations.METRICS,
     renewable_share_calculations.METRICS,
+    link_flow_calculations.METRICS,
 )
 
 

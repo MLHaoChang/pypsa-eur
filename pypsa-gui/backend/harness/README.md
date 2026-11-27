@@ -650,6 +650,14 @@ electricity used, for the network and an exact window. Membership is `renewable_
 by name; the arithmetic is the profile's own. A class it does not read (source or conversion
 Links, clusters, unattributed or injecting sources, slacks) or a slack the solve removed withholds
 every figure. Two shares compare in percentage points (`percentage_point_delta/1`) only.
+
+`link-flow/1` (opt-in, `link_flow_calculations.py`, assistant-assurance 09 S4) gives one named
+two-port Link's net energy in at bus0 (Σ w·p0) and out at bus1 (−Σ w·p1), the conversion loss
+(in − out), the peak |p0| and its loading of `p_nom_opt`, on the generator weights over an exact
+window. It reads `links_t.efficiency` where the Link has that column (a NaN there is missing data,
+never the static value) and checks p1 = −η·p0 within `FLOW_TOLERANCE`. A bus2+ port or an
+inconsistent flow withholds every figure; reverse flow through a lossy Link withholds the loss
+alone, and a missing or non-positive `p_nom_opt` the loading alone.
 `energy-balance/1` (opt-in) gives the Energy flow tab's totals (generation, served,
 unserved, storage change and the unsplit remainder of export, losses and conversion),
 gated by a per-bus balance; the tab's Source -> Via -> Destination rows are its own

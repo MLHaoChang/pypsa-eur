@@ -126,6 +126,12 @@ WEIGHT_BASIS: dict[str, str] = {
     "renewable_share": "generators",
     "nonrenewable_energy": "generators",
     "electricity_used": "generators",
+    # link_flow_calculations.py: net p0/p1 energies on generator weights; peaks per snapshot
+    "link_input_energy": "generators",
+    "link_output_energy": "generators",
+    "link_conversion_loss": "derived",
+    "peak_link_flow": "none",
+    "peak_link_loading": "none",
 }
 
 # Profiles whose captured index is not snapshots: the investment report's

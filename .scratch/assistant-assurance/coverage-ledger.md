@@ -970,3 +970,14 @@ Every ledger row now carries `domain_review`: either `pending` or `gk-b:<sha of 
 - **Tolerance pin:** a row can hold a `gk-b:` sha only if its oracle test module names the tolerance constant the row cites (`unpinned_reviews`).
 - **Pending:** 38 verified rows, each with a `domain_review_note`, tracked in issue 29. Among them is `investment-case/1 project_irr`, which held R2's OK and whose tolerance is not pinned.
 - **Pending metrics with no checked profile:** 10 rows in `metric_ledger_pending.json`.
+
+### 2026-11-27 — AA-09 S4: link-flow/1
+
+Five verified rows, all with `domain_review` "pending", in
+`pypsa-gui/backend/tests/assurance_acceptance/metric_ledger.d/link-flow-1.json`: energy in at bus0, energy
+out at bus1, conversion loss, peak flow and peak loading of `p_nom_opt`. The answer surface is
+verified for every row. The hand oracle uses generator weights 1, 3 and 0.5 (objective 2, 1, 1), a
+time-varying efficiency, `p_nom` ≠ `p_nom_opt`, and a reverse snapshot on a lossless Link.
+- route: `peak_link_flow` is verified against `/results/links` (p0).
+- pending: the energy, loss and loading routes. The route serves the raw p0 series, unweighted and without p1, so there is nothing to compare them with.
+- pending: multi-port Links (`unsupported_link_ports`) and multi-period networks (`unsupported_snapshot_scope`).

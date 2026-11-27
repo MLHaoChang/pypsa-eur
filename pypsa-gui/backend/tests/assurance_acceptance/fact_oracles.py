@@ -314,3 +314,10 @@ def nonrenewable_energy(n, generators, start=None, end=None, column="generators"
     p = n.generators_t.p[list(generators)].to_numpy(dtype=float)
     weighted = np.maximum(p, 0.0).sum(axis=1) * _weights(n, column)
     return _total(weighted[rows(n.snapshots, start, end)])
+
+
+# link_flow_calculations.py
+def link_input_energy(n, link, start=None, end=None, column="generators"):
+    """Sum of p0(t) w(t) over the window: net withdrawal at bus0."""
+    p0 = n.links_t.p0[link].to_numpy(dtype=float)
+    return _total((p0 * _weights(n, column))[rows(n.snapshots, start, end)])
