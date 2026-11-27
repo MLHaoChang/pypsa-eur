@@ -1,6 +1,6 @@
 ## What it means
 
-The time zone of the site's local clock. Tariff periods, time-of-use prices and report dates follow it. Left unset, the tool uses the time zone of the price data.
+The time zone of the site's local clock. Time-of-use tariff periods and billing months follow it. Left unset, prices and tariff periods follow the model's own clock, with no summer time.
 
 ## Example
 

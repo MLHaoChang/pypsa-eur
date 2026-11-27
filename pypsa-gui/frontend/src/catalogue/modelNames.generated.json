@@ -259,7 +259,7 @@
   },
   "demand_response": {
     "dsr_price_eur_per_mwh": "Demand-response price",
-    "dsr_share_of_load": "DSR volume"
+    "dsr_share_of_load": "Demand-response volume"
   },
   "grid_code": {
     "grid_code_document": "Grid-code document",

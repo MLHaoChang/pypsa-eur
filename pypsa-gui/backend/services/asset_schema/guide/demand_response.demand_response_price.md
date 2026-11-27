@@ -4,4 +4,4 @@ What each unit of load shed on request costs, for example the lost output or the
 
 ## Example
 
-Pausing the cooling costs about 300 per MWh of shed load, so enter 300.
+Pausing the cooling costs about €300 per MWh of shed load, so enter 300.

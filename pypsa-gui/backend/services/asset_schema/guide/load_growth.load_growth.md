@@ -1,6 +1,6 @@
 ## What it means
 
-How fast each energy type's demand grows per year, in percent, from the growth year onward. It must be a finite number above minus 100. A negative value means demand falls.
+How fast each energy type's demand grows per year, in percent, from the Growth from year onward. It must be a finite number above minus 100. A negative value means demand falls.
 
 ## Example
 

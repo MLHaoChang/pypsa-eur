@@ -4,4 +4,4 @@ What this link does in the Energy Hub studies: a grid import, a conversion betwe
 
 ## Example
 
-The link from the utility's busbar to the site is the grid import; an electrolyser link is a conversion.
+The link from the utility's busbar to the site is the grid import. An electrolyser link is a conversion.

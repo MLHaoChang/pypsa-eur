@@ -276,7 +276,7 @@ def test_settings_defaults_are_engine_or_none():
         "value": True,
         "source": "engine",
     }
-    assert _entry("demand_response.dsr_volume").default == {
+    assert _entry("demand_response.demand_response_volume").default == {
         "value": 0.0,
         "source": "engine",
     }

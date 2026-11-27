@@ -4,4 +4,4 @@ Marks the bus where the site meets the public grid. The grid-readiness checks, t
 
 ## Example
 
-The 20 kV busbar fed by the utility's cable is the point of connection; the site's internal 0.4 kV buses are not.
+The 20 kV busbar fed by the utility's cable is the point of connection. The site's internal 0.4 kV buses are not.

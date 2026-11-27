@@ -165,7 +165,7 @@ SETTINGS: tuple[Setting, ...] = (
         _s(
             "eh_critical",
             "Critical bus",
-            "Supply on this bus must not be lost; the reliability studies watch it.",
+            "Supply on this bus must not be lost. The Energy Hub studies read it to find the site side.",
             kind="bool",
         ),
         "reliability",
@@ -178,7 +178,7 @@ SETTINGS: tuple[Setting, ...] = (
         _s(
             "eh_sk_mva",
             "Short-circuit level at the connection",
-            "The grid's fault level at this bus; a weak grid has a low value.",
+            "The grid's fault level at this bus. A weak grid has a low value.",
             unit="MVA",
             aliases=("fault level", "Sk"),
         ),
@@ -219,7 +219,7 @@ SETTINGS: tuple[Setting, ...] = (
         _s(
             "poc_xr",
             "Grid X/R ratio at the connection",
-            "The grid's reactance over resistance at the connection; unset, the scorecard assumes 4.",
+            "The grid's reactance over resistance at the connection. Left unset, the scorecard assumes 4.",
             aliases=("X/R",),
         ),
         "electrical",
@@ -231,7 +231,7 @@ SETTINGS: tuple[Setting, ...] = (
         _s(
             "backup_autonomy_h",
             "Backup autonomy",
-            "How long the backup supply must carry the site alone.",
+            "How long the backup supply must carry the critical load alone.",
             unit="h",
         ),
         "reliability",
@@ -244,7 +244,7 @@ SETTINGS: tuple[Setting, ...] = (
         _s(
             "site_anchor",
             "Site coordinates",
-            "Where the site is on the map; the weather and the map read it.",
+            "Where the site is on the map. The weather and the map views read it.",
             kind="location",
         ),
         "general",
@@ -256,7 +256,7 @@ SETTINGS: tuple[Setting, ...] = (
         _s(
             "timezone",
             "Site time zone",
-            "The site's local time zone; tariffs and reports follow its clock.",
+            "The site's local time zone. Tariff periods and billing months follow its clock.",
             kind="text",
             depth="advanced",
         ),
@@ -286,10 +286,10 @@ SETTINGS: tuple[Setting, ...] = (
         "demand_response",
         _s(
             "dsr_share_of_load",
-            "DSR volume",
+            "Demand-response volume",
             "The share of each bus's peak load that may be shed on request.",
             share=True,
-            aliases=("demand response",),
+            aliases=("DSR", "demand response"),
         ),
         "operation",
         _DISPATCH,
@@ -385,7 +385,7 @@ SETTINGS: tuple[Setting, ...] = (
         _s(
             "load_growth_pct_per_year",
             "Load growth",
-            "How fast each energy type's demand grows per year; above -100 %.",
+            "How fast each energy type's demand grows per year. It must be more than minus 100 %.",
             unit="%/yr",
             aliases=("demand growth",),
         ),
@@ -398,7 +398,7 @@ SETTINGS: tuple[Setting, ...] = (
         _s(
             "load_growth_base_year",
             "Growth from year",
-            "The year growth counts from; required with a growth rate, at most the first period.",
+            "The year growth counts from. Required with a growth rate, and not after the first period.",
             kind="int",
             required=True,
         ),
@@ -411,7 +411,7 @@ SETTINGS: tuple[Setting, ...] = (
         _s(
             "load_scalers",
             "Load multiplier",
-            "Scales every load in a period; 1 leaves it unchanged.",
+            "Scales every load in a period. 1 leaves it unchanged.",
             unit="×",
         ),
         "operation",
@@ -423,7 +423,7 @@ SETTINGS: tuple[Setting, ...] = (
         _s(
             "load_scalers_by_carrier",
             "Load multiplier per energy type",
-            "Scales one energy type's load in a period; 1 leaves it unchanged.",
+            "Scales one energy type's load in a period. 1 leaves it unchanged.",
             unit="×",
             depth="advanced",
         ),
@@ -502,7 +502,7 @@ SETTINGS: tuple[Setting, ...] = (
         _s(
             "shifts",
             "Shifts per day",
-            "How many shifts an industrial site runs: 1, 2, 3 or around the clock.",
+            "How many shifts an industrial site runs: one, two, three or around the clock.",
             kind="enum",
             options=("1", "2", "3", "continuous"),
             options_plain=("One", "Two", "Three", "Around the clock"),

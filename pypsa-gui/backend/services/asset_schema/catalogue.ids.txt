@@ -26,7 +26,7 @@ carrier.unit
 connection.backup_autonomy
 connection.grid_x_r_ratio_at_the_connection
 demand_response.demand_response_price
-demand_response.dsr_volume
+demand_response.demand_response_volume
 generator.ac_control
 generator.availability
 generator.availability_includes_outages
