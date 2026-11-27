@@ -44,7 +44,12 @@ def test_the_sweep_finds_a_stored_value_out_of_range():
     n = classic.build_3bus()
     bus = n.buses.index[0]
     n.buses.at[bus, "v_nom"] = 0.0
-    assert R.problems(n) == [{
-        "component": "Bus", "id": str(bus), "field": "v_nom", "value": "0.0",
-        "message": "Nominal voltage must be more than 0; got 0.0.",
-    }]
+    assert R.problems(n) == [
+        {
+            "component": "Bus",
+            "id": str(bus),
+            "field": "v_nom",
+            "value": "0.0",
+            "message": "Nominal voltage must be more than 0; got 0.0.",
+        }
+    ]

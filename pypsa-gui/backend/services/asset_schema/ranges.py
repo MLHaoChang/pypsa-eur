@@ -50,21 +50,27 @@ _PYPSA = "pypsa 1.1.2"
 #: is undefined outside it (R1).
 HARD: dict[tuple[str, str], Range] = {
     ("Bus", "v_nom"): Range(
-        min=0.0, min_open=True,
+        min=0.0,
+        min_open=True,
         source=f"{_PYPSA} network/power_flow.py:748: x_pu = x / v_nom**2; "
-               "a nominal voltage is a magnitude"),
+        "a nominal voltage is a magnitude",
+    ),
     ("StorageUnit", "efficiency_dispatch"): Range(
-        min=0.0, min_open=True,
+        min=0.0,
+        min_open=True,
         source=f"{_PYPSA} optimization/constraints.py:1541: the state-of-charge "
-               "balance divides the dispatch by efficiency_dispatch"),
+        "balance divides the dispatch by efficiency_dispatch",
+    ),
     ("StorageUnit", "standing_loss"): Range(
         max=1.0,
         source=f"{_PYPSA} optimization/constraints.py:1530: (1 - standing_loss) "
-               "** elapsed_hours is undefined below 0 for fractional hours"),
+        "** elapsed_hours is undefined below 0 for fractional hours",
+    ),
     ("Store", "standing_loss"): Range(
         max=1.0,
         source=f"{_PYPSA} optimization/constraints.py:1726: (1 - standing_loss) "
-               "** elapsed_hours is undefined below 0 for fractional hours"),
+        "** elapsed_hours is undefined below 0 for fractional hours",
+    ),
 }
 
 #: (component class, column) → the infinity its engine default is (C11).
@@ -97,15 +103,22 @@ def nan_is_unset() -> frozenset[tuple[str, str]]:
     from services.asset_schema import catalogue
 
     defaults = catalogue._engine_defaults()
-    return frozenset(k for k in _numeric_entries()
-                     if k not in defaults or _is_extra_port_efficiency(k))
+    return frozenset(
+        k
+        for k in _numeric_entries()
+        if k not in defaults or _is_extra_port_efficiency(k)
+    )
 
 
 def _is_extra_port_efficiency(key: tuple[str, str]) -> bool:
     """A Link's ``efficiency2``…``k``: NaN is an unused port, since PyPSA reads
     ``efficiency{k}`` only where ``bus{k}`` is set (R1: these get no bound)."""
     cls, col = key
-    return cls == "Link" and col.startswith("efficiency") and col[len("efficiency"):].isdigit()
+    return (
+        cls == "Link"
+        and col.startswith("efficiency")
+        and col[len("efficiency") :].isdigit()
+    )
 
 
 @lru_cache(maxsize=1)
@@ -113,8 +126,11 @@ def _numeric_entries() -> dict[tuple[str, str], str]:
     """(class, column) → plain name, for every numeric component entry."""
     from services.asset_schema import catalogue
 
-    return {(e.scope, e.spec.key): e.plain_name for e in catalogue.entries()
-            if e.spec.kind in NUMERIC_KINDS}
+    return {
+        (e.scope, e.spec.key): e.plain_name
+        for e in catalogue.entries()
+        if e.spec.kind in NUMERIC_KINDS
+    }
 
 
 def wire(scope: str, key: str) -> dict[str, Any] | None:
@@ -122,8 +138,14 @@ def wire(scope: str, key: str) -> dict[str, Any] | None:
     r = HARD.get((scope, key))
     if r is None:
         return None
-    return {"min": r.min, "max": r.max, "min_open": r.min_open, "max_open": r.max_open,
-            "soft_min": r.soft_min, "soft_max": r.soft_max}
+    return {
+        "min": r.min,
+        "max": r.max,
+        "min_open": r.min_open,
+        "max_open": r.max_open,
+        "soft_min": r.soft_min,
+        "soft_max": r.soft_max,
+    }
 
 
 def show(value: float) -> str:
@@ -195,17 +217,23 @@ def same_value(new: Any, old: Any) -> bool:
 
 def refuse(component_class: str, key: str, value: Any, message: str) -> HTTPException:
     v = _as_number(value)
-    return HTTPException(422, detail={
-        "error_kind": "value_out_of_range",  # == ERROR_KIND; the kind manifest reads the literal
-        "component": component_class,
-        "field": key,
-        "value": show(v) if v is not None else str(value),
-        "message": message,
-    })
+    return HTTPException(
+        422,
+        detail={
+            "error_kind": "value_out_of_range",  # == ERROR_KIND; the kind manifest reads the literal
+            "component": component_class,
+            "field": key,
+            "value": show(v) if v is not None else str(value),
+            "message": message,
+        },
+    )
 
 
-def check(component_class: str, changes: Mapping[str, Any],
-          stored: Mapping[str, Any] | None = None) -> None:
+def check(
+    component_class: str,
+    changes: Mapping[str, Any],
+    stored: Mapping[str, Any] | None = None,
+) -> None:
     """Refuse (422 ``value_out_of_range``) the first changed value out of range.
 
     ``stored`` is the row before the write. A value equal to its stored value
@@ -219,8 +247,9 @@ def check(component_class: str, changes: Mapping[str, Any],
             raise refuse(component_class, key, value, message)
 
 
-def check_column(component_class: str, key: str, value: Any,
-                 stored_values: Iterable[Any]) -> None:
+def check_column(
+    component_class: str, key: str, value: Any, stored_values: Iterable[Any]
+) -> None:
     """The bulk form: one value written to many rows. It is refused unless
     every target already stores it."""
     message = problem(component_class, key, value)
@@ -232,9 +261,17 @@ def check_column(component_class: str, key: str, value: Any,
 
 
 #: The classes whose rows the sweep reads, by network attribute.
-_LISTS = {"Bus": "buses", "Generator": "generators", "Load": "loads", "Line": "lines",
-          "Link": "links", "Store": "stores", "StorageUnit": "storage_units",
-          "Transformer": "transformers", "ShuntImpedance": "shunt_impedances"}
+_LISTS = {
+    "Bus": "buses",
+    "Generator": "generators",
+    "Load": "loads",
+    "Line": "lines",
+    "Link": "links",
+    "Store": "stores",
+    "StorageUnit": "storage_units",
+    "Transformer": "transformers",
+    "ShuntImpedance": "shunt_impedances",
+}
 
 
 def problems(n) -> list[dict[str, Any]]:
@@ -251,8 +288,13 @@ def problems(n) -> list[dict[str, Any]]:
                 message = problem(cls, key, value)
                 if message is not None:
                     v = _as_number(value)
-                    out.append({"component": cls, "id": str(name), "field": key,
-                                "value": show(v) if v is not None else str(value),
-                                "message": message})
+                    out.append(
+                        {
+                            "component": cls,
+                            "id": str(name),
+                            "field": key,
+                            "value": show(v) if v is not None else str(value),
+                            "message": message,
+                        }
+                    )
     return out
-
