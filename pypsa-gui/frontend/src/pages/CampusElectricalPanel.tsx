@@ -35,7 +35,7 @@ import { Play, RefreshCw, Save, Square, Wand2, Workflow } from 'lucide-react'
 import {
   campusApi, errorText, isActiveRun, isNoAnswer, isOtherKind, NO_LIMIT_DETAIL,
   type CampusRunJob, type CampusSettings, type CampusState, type CheckStatus, type ComplianceRow,
-  type InvestedComplianceRow, type InvestmentRow, type MilpJobRecord, type TransformerSizing,
+  type InvestedComplianceRow, type InvestmentRow, type MilpJobRecord, type PowerFactoryBundle, type TransformerSizing,
 } from '../api/campusElectrical'
 import { solveQueueApi } from '../api/solveQueue'
 import { useUIStore } from '../store/uiStore'
@@ -647,6 +647,18 @@ function TrafoVerdict({ t, bought }: { t: TransformerSizing; bought: InvestmentR
 
 /** The PSS/E hand-off of the latest run (grid-compliance 23): one case per island critical hour, each a zip
  *  of the .raw, the .dyr, the grid-forming converter parameters and the README. A case from a run older than the last edit says so. */
+/** Hands a downloaded zip to the browser as `<bundle>.zip`. */
+function saveZip(blob: Blob, bundle: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${bundle}.zip`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 export function CampusPsseSection({ name }: { name: string }) {
   const psse = useQuery({ queryKey: ['campus-psse', name], queryFn: () => campusApi.psse(name), retry: false })
   const [busy, setBusy] = useState<string | null>(null)
@@ -657,14 +669,7 @@ export function CampusPsseSection({ name }: { name: string }) {
     setFailure(null)
     try {
       const { blob } = await campusApi.psseZip(name, bundle)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${bundle}.zip`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
+      saveZip(blob, bundle)
     } catch {
       setFailure('The PSS/E case could not be downloaded. Try again.')
     } finally {
@@ -702,6 +707,86 @@ export function CampusPsseSection({ name }: { name: string }) {
   )
   return (
     <PageSection title="PSS/E case" hint="the island critical hours, grid-connected before the trip, for the TSO's PSS/E">
+      {body}
+    </PageSection>
+  )
+}
+
+const FOLD_AFTER = 5
+
+/** What a PowerFactory case leaves out, in plain lines; a case with any of them never reads as complete. */
+export function powerFactoryGaps(b: PowerFactoryBundle): string[] {
+  if (b.not_written == null || b.pending_verification == null) {
+    return ["This case's manifest cannot be read, so what it leaves out is unknown. Run the study again before sending it."]
+  }
+  const lines: string[] = []
+  if (b.not_written > 0) {
+    const names = b.not_written_items.slice(0, FOLD_AFTER).map(i => (i.attribute ? `${i.element} (${i.attribute})` : i.element))
+    const more = b.not_written - names.length
+    const list = more > 0 ? `${names.join(', ')} and ${more} more` : names.join(', ')
+    lines.push(`${b.not_written} ${b.not_written === 1 ? 'value' : 'values'} not written: ${list}. See manifest.json in the zip.`)
+  }
+  if (b.pending_verification > 0) {
+    lines.push(`To check on first import in PowerFactory: ${b.pending_items.join('; ')}.`)
+  }
+  return lines
+}
+
+export function CampusPowerFactorySection({ name }: { name: string }) {
+  const pf = useQuery({ queryKey: ['campus-powerfactory', name], queryFn: () => campusApi.powerfactory(name), retry: false })
+  const [busy, setBusy] = useState<string | null>(null)
+  const [failure, setFailure] = useState<string | null>(null)
+  const d = pf.data
+  async function download(bundle: string) {
+    setBusy(bundle)
+    setFailure(null)
+    try {
+      const { blob } = await campusApi.powerfactoryZip(name, bundle)
+      saveZip(blob, bundle)
+    } catch {
+      setFailure('The PowerFactory case could not be downloaded. Try again.')
+    } finally {
+      setBusy(null)
+    }
+  }
+  const when = (b: PowerFactoryBundle) => (b.period != null && b.hour != null ? `Period ${b.period}, hour ${b.hour}` : b.name)
+  let body: ReactNode
+  if (pf.isError) body = <p data-testid="pf-error" className="text-[12px] text-warn">The PowerFactory cases could not be loaded. Reload the page to try again.</p>
+  else if (!d) body = <p className="text-[12px] text-muted">Loading the PowerFactory cases</p>
+  else if (!d.has_run) body = <p data-testid="pf-none" className="text-[12px] text-muted">No grid study has run yet. Run the study in the Grid study panel. It then writes one PowerFactory case for each island critical hour.</p>
+  else if (!d.has_powerfactory) body = <p data-testid="pf-older-run" className="text-[12px] text-muted">This run was made before the PowerFactory export. Run the study again to write the PowerFactory cases.</p>
+  else if (d.error) body = <p data-testid="pf-write-error" className="text-[12px] text-warn">The study could not write the PowerFactory cases. The other results are not affected. Run the study again.</p>
+  else if (d.bundles.length === 0) body = <p data-testid="pf-skipped" className="text-[12px] text-muted">This run has no island critical hours, so there is no PowerFactory case. Add island data to the campus, then run the study again.</p>
+  else body = (
+    <>
+      {d.stale && (
+        <p data-testid="pf-stale" className="text-[12px] text-warn border border-warn/40 rounded px-3 py-2 mb-2">
+          These cases are out of date: the campus or the project changed after this run. Run the study again before sending them.
+        </p>
+      )}
+      <ul className="space-y-2">
+        {d.bundles.map(b => (
+          <li key={b.name} data-testid={`pf-bundle-${b.name}`} className="text-[12px]">
+            <div className="flex items-center gap-3">
+              <span className="whitespace-nowrap">{when(b)}</span>
+              <span className="text-muted tabular-nums">{b.files.length} {b.files.length === 1 ? 'file' : 'files'}, {Math.max(1, Math.round(b.size / 1024))} kB</span>
+              <Btn onClick={() => download(b.name)} disabled={busy === b.name} aria-label={`Download PowerFactory case, ${when(b).toLowerCase()}`}
+                title="The DGS file, the name map, the harmonic sources, the hour's load flow and the manifest of this case, as a zip">
+                Download PowerFactory case
+              </Btn>
+            </div>
+            {powerFactoryGaps(b).map(line => (
+              <p key={line} data-testid={`pf-gap-${b.name}`} className="text-[12px] text-warn mt-0.5">{line}</p>
+            ))}
+          </li>
+        ))}
+      </ul>
+      {d.run_at && <p className="text-[11px] text-muted mt-1">From the run of {d.run_at.slice(0, 16).replace('T', ' ')} UTC.</p>}
+      {failure && <p data-testid="pf-download-error" className="text-[12px] text-warn mt-1">{failure}</p>}
+    </>
+  )
+  return (
+    <PageSection title="PowerFactory case" hint="the island critical hours as DGS files, for the TSO's PowerFactory">
       {body}
     </PageSection>
   )
@@ -831,6 +916,7 @@ function ResultsSection({ state, pending, name, show = 'all' }: { state: CampusS
       {grid && <CampusDipsRestartSection dips={r.dips_restart} />}
 
       {grid && <CampusPsseSection name={name} />}
+      {grid && <CampusPowerFactorySection name={name} />}
 
       {design && <>
       <PageSection panelSection="electrical_design" title="Transformers" hint="worst selected hour, intact and N-1, with the design margin">

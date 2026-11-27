@@ -2665,8 +2665,10 @@ def psse_bundles(project) -> dict:
     return _bundles(project, cs.PSSE_DIR, PSSE_STATUS_FILE)
 
 
-def _bundles(project, subdir: str, status_name: str) -> dict:
-    """The listing of one kind of hand-off bundle of the latest run, under ``run/<subdir>``."""
+def _bundles(project, subdir: str, status_name: str, unreadable: str | None = None) -> dict:
+    """The listing of one kind of hand-off bundle of the latest run, under ``run/<subdir>``.
+    With ``unreadable``, a status file that does not parse lists that as the
+    ``error`` (and no bundle) instead of raising."""
     require_capacity_expansion(project)
     d = campus_dir(project)
     run_dir = d / "run"
@@ -2674,7 +2676,15 @@ def _bundles(project, subdir: str, status_name: str) -> dict:
     if not manifest.is_file():
         return {"has_run": False, "stale": False, "run_at": None, "bundles": [], "skipped": None, "error": None}
     status_file = run_dir / status_name
-    status = json.loads(status_file.read_text()) if status_file.is_file() else {}
+    try:
+        status = json.loads(status_file.read_text()) if status_file.is_file() else {}
+        if not isinstance(status, dict):
+            raise ValueError("not an object")
+    except (OSError, ValueError):
+        if unreadable is None:
+            raise
+        logger.warning("campus %s unreadable", status_name, exc_info=True)
+        status = {"error": unreadable}
     root = run_dir / subdir
     bundles = []
     for b in _psse_bundle_dirs(root):
@@ -2742,7 +2752,8 @@ def powerfactory_bundles(project) -> dict:
     also says how many values the DGS could not carry (``not_written``) and how
     many wait for verification (``pending_verification``), from its manifest
     (None when the manifest cannot be read)."""
-    listing = _bundles(project, cs.POWERFACTORY_DIR, POWERFACTORY_STATUS_FILE)
+    listing = _bundles(project, cs.POWERFACTORY_DIR, POWERFACTORY_STATUS_FILE,
+                       unreadable="the record of the PowerFactory step cannot be read")
     status_file = campus_dir(project) / "run" / POWERFACTORY_STATUS_FILE
     listing["has_powerfactory"] = listing["has_run"] and status_file.is_file()
     if not listing["has_powerfactory"] or listing["error"]:
@@ -2751,15 +2762,29 @@ def powerfactory_bundles(project) -> dict:
     root = _powerfactory_root(project)
     for b in listing["bundles"]:
         b["not_written"] = b["pending_verification"] = None
+        b["not_written_items"], b["pending_items"] = [], []
         try:
             m = json.loads((root / b["name"] / "manifest.json").read_text())
         except (OSError, ValueError):
             continue
-        if isinstance(m, dict):
-            for key in ("not_written", "pending_verification"):
-                if isinstance(m.get(key), list):
-                    b[key] = len(m[key])
+        if not isinstance(m, dict):
+            continue
+        if isinstance(m.get("not_written"), list):
+            b["not_written"] = len(m["not_written"])
+            b["not_written_items"] = [_not_written_item(r) for r in m["not_written"]]
+        if isinstance(m.get("pending_verification"), list):
+            b["pending_verification"] = len(m["pending_verification"])
+            b["pending_items"] = [str(r) for r in m["pending_verification"]]
     return listing
+
+
+def _not_written_item(record) -> dict:
+    """One value the DGS could not carry, as the listing names it: the element,
+    the attribute and why (``NOT_WRITTEN_COLUMNS`` of the manifest)."""
+    r = record if isinstance(record, dict) else {}
+    element = r.get("pp_name") or r.get("dgs_name") or r.get("element") or ""
+    return {"element": str(element), "attribute": str(r.get("attribute") or ""),
+            "reason": str(r.get("reason") or "")}
 
 
 def powerfactory_bundle_zip(project, name: str) -> tuple:

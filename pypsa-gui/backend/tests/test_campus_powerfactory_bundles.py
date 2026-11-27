@@ -79,9 +79,18 @@ def test_a_bundle_with_values_not_carried_says_how_many(island_run):
                                     "pending_verification": [{"element": "d"}]}))
     b = next(b for b in ce.powerfactory_bundles(project)["bundles"] if b["name"] == name)
     assert (b["not_written"], b["pending_verification"]) == (3, 1)
+    assert [i["element"] for i in b["not_written_items"]] == ["a", "b", "c"]
+    assert len(b["pending_items"]) == 1
+    manifest.write_text(json.dumps({**m, "not_written": [
+        {"pp_table": "sgen", "pp_name": "PV 1", "dgs_name": "pv_1", "attribute": "q_mvar",
+         "value": None, "reason": "no verified attribute"}], "pending_verification": []}))
+    b = next(b for b in ce.powerfactory_bundles(project)["bundles"] if b["name"] == name)
+    assert b["not_written_items"] == [{"element": "PV 1", "attribute": "q_mvar", "reason": "no verified attribute"}]
+    assert (b["not_written"], b["pending_verification"], b["pending_items"]) == (1, 0, [])
     manifest.write_text("{not json")
     b = next(b for b in ce.powerfactory_bundles(project)["bundles"] if b["name"] == name)
     assert (b["not_written"], b["pending_verification"]) == (None, None)
+    assert (b["not_written_items"], b["pending_items"]) == ([], [])
 
 
 def test_a_failed_step_lists_nothing_and_leaves_no_bundle(hub, monkeypatch):
@@ -117,6 +126,18 @@ def test_a_run_from_before_the_step_has_no_powerfactory_and_no_error(island_run)
     listing = ce.powerfactory_bundles(project)
     assert listing["has_run"] and listing["has_powerfactory"] is False and listing["bundles"] == []
     assert listing["error"] is None
+
+
+@pytest.mark.parametrize("text", ["{not json", "[1, 2]"])
+def test_an_unreadable_step_record_lists_an_error_and_no_bundle(island_run, text):
+    project, run = island_run
+    (run / ce.POWERFACTORY_STATUS_FILE).write_text(text)
+    listing = ce.powerfactory_bundles(project)
+    assert listing["has_powerfactory"] and listing["bundles"] == []
+    assert listing["error"] == "the record of the PowerFactory step cannot be read"
+    with pytest.raises(HTTPException) as exc:
+        ce.powerfactory_bundle_zip(project, next(p.name for p in (run / ce.cs.POWERFACTORY_DIR).iterdir()))
+    assert exc.value.status_code == 404
 
 
 def test_no_run_lists_nothing(hub):
