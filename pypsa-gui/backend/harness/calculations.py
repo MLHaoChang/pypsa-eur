@@ -417,7 +417,7 @@ def definition(metric, profile=None):
         # AA-09 S2: a delta keeps the compared metric's unit; a change of a
         # percentage is in percentage points.
         unit = definition(COMPARED_METRIC, profile)["unit"]
-        return {**COMPARISON_METRICS[metric], "unit": "pp" if unit == "%" else unit}
+        return {**DEFINITIONS[metric], "unit": "pp" if unit == "%" else unit}
     if profile == storage_costs.PROFILE and metric == "total_cost":
         return storage_costs.TOTAL_DEFINITION
     if profile in PROFILE_DEFINITIONS and metric in PROFILE_DEFINITIONS[profile]:
