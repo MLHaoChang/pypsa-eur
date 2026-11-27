@@ -37,7 +37,7 @@ metrics explicitly in [ledger](../coverage-ledger.md) and [handoff](../session-h
 
 ## Follow-up: checked plausibility findings
 
-Moved to [issue 28](28-checked-plausibility-findings.md), blocked by #851 (owner Q3, 2026-11-26).
+Moved to [issue 30](30-checked-plausibility-findings.md), blocked by #851 (owner Q3, 2026-11-26).
 
 ## Comments
 
