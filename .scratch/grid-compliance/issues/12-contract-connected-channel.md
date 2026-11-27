@@ -5,7 +5,7 @@
 
 Model tier: opus
 Size: L (three PRs)
-Status: ready-for-agent; audit 2026-11-25: PR-A (#1647), PR-C (#1650) and PR-D (#1708) merged; left: PR-B, the PSS/E CSV `connected` export (psspy_scripts.py still writes `t_s` and a `status` column)
+Status: done (#PENDING-PR; PR-A #1647, PR-C #1650, PR-D #1708, PR-B the PSS/E CSV export; judging a PSS/E pack is GC-27)
 Type: task
 Parent: `.scratch/grid-compliance/spec.md` (follow-up of GC-07, GK A2 condition K3)
 Gated: yes (GK A, gridspine)
@@ -74,3 +74,5 @@ Merge order: PR-A any time; PR-B after #1608 and #1609; PR-C after PR-A. Item 4 
 ## Audit (2026-11-25)
 
 - 2026-11-25 audit: #1647, #1650, #1708 in master log or merged on GitHub; gridspine/handoff/psspy_scripts.py:463,537 still use the old header.
+
+- 2026-11-27, PR-B: the PSS/E scripts write `time [s]` / `<name> [<unit>]` (no `status` column) and, at contract v2, poll `connected` (PoC branch AND every plant machine, latched, a failed poll blank with its reason in `<case_id>.status.txt`). T10 needs no channels.py change: since issue 21 `i_poc_pu` is ITERM, defined at V = 0, so no blank current is written. `judge_pack` still cannot open a PSS/E pack (no battery.json): follow-up GC-27 (`27-psse-pack-readback.md`).
