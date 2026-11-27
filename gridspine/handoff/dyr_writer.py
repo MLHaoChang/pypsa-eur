@@ -433,6 +433,25 @@ def _plant_members(poc, plants):
     return member
 
 
+def _check_plant_controllers(ibr, plants):
+    """Every member of a declared plant carries the same REPCA1 values: they
+    are the aggregate's one controller, which the writer then shares. A plant
+    of differing controllers has no aggregate to match."""
+    for name, units in (plants or {}).items():
+        units = [u for u in units if ibr is not None and u in ibr.index]
+        if len(units) < 2:
+            continue
+        fields = list(REPCA1_ICONS + REPCA1_CONS)
+        first = ibr.loc[units[0]].reindex(fields)
+        differ = [u for u in units[1:] if not ibr.loc[u].reindex(fields).equals(first)]
+        if differ:
+            raise ContractError(
+                f"plant {name!r}: units {differ} carry REPCA1 values other than "
+                f"{units[0]}'s; a detailed plant's machines share one aggregate "
+                "controller"
+            )
+
+
 def _shares(net, repc, plants):
     """unit_id -> MBASE_i / sum(MBASE) over its declared plant; 1.0 for a
     controlled machine outside any plant (the aggregated machine)."""
@@ -559,6 +578,7 @@ def write_dyr(
     if version not in DYR_VERSIONS:
         raise ContractError(f".dyr version {version!r} not supported; supported {DYR_VERSIONS}")
     repc = _poc_ids(net, poc, plants)
+    _check_plant_controllers(ibr, plants)
     shares = _shares(net, repc, plants)
     lines, written, controlled = [], {}, set()
     for unit_id, num, mid, mbase, synchronous in _machines(net):
@@ -635,6 +655,7 @@ def converter_records(net, ibr: pd.DataFrame, version=35, poc=None, plants=None)
     if version not in DYR_VERSIONS:
         raise ContractError(f".dyr version {version!r} not supported; supported {DYR_VERSIONS}")
     repc = _poc_ids(net, poc, plants)
+    _check_plant_controllers(ibr, plants)
     shares = _shares(net, repc, plants)
     lines, written, controlled = [], {}, set()
     for unit_id, num, mid, mbase, synchronous in _machines(net):
