@@ -96,8 +96,16 @@ def queued_refusal(
 
     resident = PyPSAService.get_context(project_key) if project_key else None
     if resident is not None:
-        with resident.mutation_lock:
-            return refusal(resident.network, project_dir)
+        # Non-blocking: a running solve holds this lock for its whole run, and a
+        # queue enqueue must not wait it out. Not got: read unlocked (as
+        # `active_refusal` does); the dequeue re-check is the backstop.
+        lock = resident.mutation_lock
+        if lock.acquire(blocking=False):
+            try:
+                return refusal(resident.network, project_dir)
+            finally:
+                lock.release()
+        return refusal(resident.network, project_dir)
     nc_path = project_dir / "network.nc"
     if not nc_path.exists():
         return None

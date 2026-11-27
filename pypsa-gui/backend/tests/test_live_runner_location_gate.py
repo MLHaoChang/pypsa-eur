@@ -13,11 +13,13 @@ queue, an empty job list. The queue is also re-checked when the worker dequeues.
 from __future__ import annotations
 
 import time
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
 from services import site_location
+from services.pypsa_service import PyPSAService
 from services.solve_queue import solve_queue
 from tests.conftest import build_network
 
@@ -240,3 +242,90 @@ def test_the_worker_rechecks_at_dequeue_and_never_solves(
     assert job["status"] == "failed", job
     assert job["condition"] == CODE and job["error"].startswith(CODE), job
     assert solved == []
+
+
+def test_the_enqueue_gate_does_not_wait_for_a_running_solve(
+    client, install_network, tmp_projects_dir, registry_key_for, project_storage_dir
+):
+    """A running solve holds the resident context's network lock for its whole
+    run: the gate reads unlocked rather than waiting on it."""
+    import threading
+
+    from services.pypsa_service import PyPSAService
+
+    name = _save(client, install_network)
+    key = registry_key_for(name)
+    resident = PyPSAService.get_context(key)
+    assert resident is not None
+    held, release = threading.Event(), threading.Event()
+
+    def hold():
+        with resident.mutation_lock:
+            held.set()
+            release.wait(30)
+
+    holder = threading.Thread(target=hold, daemon=True)
+    holder.start()
+    assert held.wait(5)
+    out: list = []
+    asker = threading.Thread(
+        target=lambda: out.append(
+            site_location.queued_refusal(key, project_storage_dir(name))
+        ),
+        daemon=True,
+    )
+    try:
+        asker.start()
+        asker.join(5)
+        assert not asker.is_alive(), "the gate waited for the network lock"
+        assert out and out[0]["code"] == CODE
+    finally:
+        release.set()
+        holder.join(5)
+
+
+def test_the_business_case_rebuild_refuses_an_unlocated_baseline_resolve(
+    client, install_network, tmp_projects_dir, bound_ctx, monkeypatch
+):
+    """The case rebuild (investment case and business case both) re-solves the
+    site-today baseline on a copy of the live network: an unlocated project is
+    refused with the typed code before any LP; a located one reaches the solve."""
+    from routers import results
+    from services.finance.case import FinanceRefused
+    from services.results import baseline as B
+    from services.results import finance_case as fc
+
+    name = _save(client, install_network)
+    solved: list = []
+
+    class Plan:
+        needed = True
+
+    monkeypatch.setattr(fc, "baseline_plan", lambda *a, **k: Plan())
+    monkeypatch.setattr(
+        B,
+        "solve_baseline",
+        lambda *a, **k: solved.append(1) or (_ for _ in ()).throw(RuntimeError("stub")),
+    )
+    monkeypatch.setattr(
+        "models.finance.FinanceInputs.model_validate", lambda *a, **k: object()
+    )
+
+    def build():
+        with bound_ctx(client):
+            n = PyPSAService.get_network()
+            return results._ic_build_case(
+                n, SimpleNamespace(finance=None), owner=None, lost_load=None
+            )()
+
+    for confirmed in (None, False):
+        if confirmed is False:
+            _put_anchor(client, name, confirmed=False)
+        with pytest.raises(FinanceRefused) as exc:
+            build()
+        assert exc.value.code == CODE
+        assert solved == []
+    _put_anchor(client, name, confirmed=True)
+    with pytest.raises(RuntimeError, match="stub"):
+        build()
+    assert solved == [1]
