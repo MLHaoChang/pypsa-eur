@@ -65,7 +65,34 @@ SUMMARIES = [
     "summarize the lost load results",
     "summarise the results for generator G1",
     "give me an overview of my optimisation results",
+    "key results for the network, please.",
 ]
+
+# Messages the grammar's free slots accept, so only WITH_MODEL keeps them with
+# the model: one class per WITH_MODEL word group (GK B #2066 review).
+WITH_MODEL_ONLY = {
+    "why/is/wrong/robust": [
+        "summarize the wrong results",
+        "summarise the robust results",
+        "key results for generator is",
+        "summarise the why results",
+    ],
+    "compare/paper/literature": [
+        "summarize the compared results",
+        "summarise the literature results",
+        "overview of the paper results",
+    ],
+    "log/error/solver": [
+        "overview of the solver results",
+        "summary of the log results",
+        "summarize the error results",
+    ],
+    "and/then/but": [
+        "key results for generator and",
+        "summarise the then results",
+        "key results for bus but",
+    ],
+}
 
 # Questions that name a quantity but ask no summary: they stay with the model.
 NOT_SUMMARIES = [
@@ -144,6 +171,13 @@ def test_the_summary_words_never_include_a_bare_quantity():
     assert [m for m in SUMMARIES if not summary(m)] == []
     assert [m for m in NOT_SUMMARIES if summary(m)] == []
     assert len(NOT_SUMMARIES) >= 20
+
+
+@pytest.mark.parametrize("group", sorted(WITH_MODEL_ONLY))
+def test_each_with_model_word_group_is_what_rejects_a_grammatical_message(group):
+    for message in WITH_MODEL_ONLY[group]:
+        assert assurance_conversation.RESULTS_SUMMARY.fullmatch(message), message
+        assert not assurance_conversation.is_summary_request(message), message
 
 
 @pytest.mark.parametrize("message", SUMMARIES)

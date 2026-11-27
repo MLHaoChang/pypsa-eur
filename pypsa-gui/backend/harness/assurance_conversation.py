@@ -19,7 +19,10 @@ COMPARE = (
 )
 BASIS = r"(?:use\s+)?price year\s+(\d{4});\s*annual fixed cost fraction\s+(0(?:\.\d+)?|1(?:\.0+)?)"
 CHOICES = ("Marginal dispatch expenditure", "Total declared-basis cost")
-STORAGE_CHOICES = ("Direct StorageUnit operating expenditure", "Total declared-basis cost")
+STORAGE_CHOICES = (
+    "Direct StorageUnit operating expenditure",
+    "Total declared-basis cost",
+)
 # AA03-FREEZE-1 item 3: a bare "capacity" has three meanings; each label maps to one slot.
 CAPACITY_CHOICES = {
     "Configured capacity": capacity.CONFIGURED,
@@ -60,7 +63,8 @@ RESULTS_SUMMARY = re.compile(
     re.I,
 )
 WITH_MODEL = re.compile(
-    r"\b(?:why|is|wrong|robust|compare|paper|literature|logs?|errors?|solver|and|then|but)\b|[,;]\s*(?!please\b)",
+    r"\b(?:why|is|wrong|robust|compar\w*|paper|literature|logs?|errors?|solver|and|then|but)\b"
+    r"|[,;](?!\s*please\s*[.!?]?$)",
     re.I,
 )
 
@@ -112,7 +116,11 @@ def clarify_summary(turn, ui, network):
     return scope
 
 
-PENDING = {"cost_quantity_required", "explicit_cost_basis_required", "capacity_meaning_required"}
+PENDING = {
+    "cost_quantity_required",
+    "explicit_cost_basis_required",
+    "capacity_meaning_required",
+}
 
 
 def _match(pattern, message):
@@ -150,9 +158,15 @@ def _state(turn, ui):
         scope["profile"] != "network-linear-cost/1"
         and isinstance(selected, dict)
         and (
-            selected.get("class") != scope.get("component_class", (
-                "StorageUnit" if scope["profile"] in calculations.STORAGE_PROFILES else "Generator"
-            ))
+            selected.get("class")
+            != scope.get(
+                "component_class",
+                (
+                    "StorageUnit"
+                    if scope["profile"] in calculations.STORAGE_PROFILES
+                    else "Generator"
+                ),
+            )
             or selected.get("name") != scope["entity_id"]
         )
     )
@@ -177,13 +191,14 @@ def _state(turn, ui):
 
 def _needs(turn, scope, reason):
     turn.clarification = {"reason": reason, "question": QUESTIONS[reason]}
-    if reason == "cost_quantity_required" and scope["profile"] in calculations.STORAGE_PROFILES:
-        turn.clarification["question"] = "Which quantity do you mean: Direct StorageUnit operating expenditure or Total declared-basis cost?"
-    turn.pending_scope = (
-        deepcopy(scope)
-        if reason in PENDING
-        else None
-    )
+    if (
+        reason == "cost_quantity_required"
+        and scope["profile"] in calculations.STORAGE_PROFILES
+    ):
+        turn.clarification["question"] = (
+            "Which quantity do you mean: Direct StorageUnit operating expenditure or Total declared-basis cost?"
+        )
+    turn.pending_scope = deepcopy(scope) if reason in PENDING else None
     return scope or {
         "version": 1,
         "profile": calculations.PROFILE,
@@ -211,25 +226,36 @@ def _compatible(scope):
 
 
 def cost_choices(scope):
-    return STORAGE_CHOICES if scope["profile"] in calculations.STORAGE_PROFILES else CHOICES
+    return (
+        STORAGE_CHOICES
+        if scope["profile"] in calculations.STORAGE_PROFILES
+        else CHOICES
+    )
 
 
 def _capacity(turn, message, pending, state):
     """The bare capacity form, or an answer to its card; None when the message is neither."""
     text = re.sub(r"\s+", " ", message.strip().rstrip(".!?"))
-    bare = re.fullmatch(r"(?:what is|what's|whats) (?:the )?capacity of (.{1,160}?)", text, re.I)
+    bare = re.fullmatch(
+        r"(?:what is|what's|whats) (?:the )?capacity of (.{1,160}?)", text, re.I
+    )
     if not bare and pending == "capacity_meaning_required":
         reply = text.lower()
         chosen = {k.lower(): v for k, v in CAPACITY_CHOICES.items()}.get(reply)
         if chosen:
-            return assurance_scope.validate({**deepcopy(state["scope"]), "metrics": [chosen]})
+            return assurance_scope.validate(
+                {**deepcopy(state["scope"]), "metrics": [chosen]}
+            )
         try:
             fresh = assurance_scope.from_message(message, turn.project_id, None)
         except ValueError:
             fresh = None
         # A short reply, or any reply about capacity, that is neither one of the three
         # meanings nor a complete new request is refused, never guessed.
-        if fresh is None and (re.fullmatch(r"[\w-]+(?: [\w-]+){0,2}", reply) or re.search(r"\bcapacity\b", reply)):
+        if fresh is None and (
+            re.fullmatch(r"[\w-]+(?: [\w-]+){0,2}", reply)
+            or re.search(r"\bcapacity\b", reply)
+        ):
             return _needs(turn, state["scope"], "capacity_meaning_required")
         return None
     if not bare:
@@ -245,7 +271,9 @@ def _capacity(turn, message, pending, state):
     if not named:
         # No class (or an unknown one): the name could mean several components. Nothing is
         # retained, and no class is guessed, so this clarification scope is never validated.
-        return _needs(turn, {**scope, "entity_id": "unselected"}, "capacity_component_required")
+        return _needs(
+            turn, {**scope, "entity_id": "unselected"}, "capacity_component_required"
+        )
     word = re.sub(r"\s+", "", named[1].lower())
     scope.update(
         entity_id=named[2].strip(),
@@ -289,7 +317,9 @@ def resolve(turn, message, ui, explicit):
         scope["metrics"] = ["marginal_expenditure" if marginal else "total_cost"]
         if storage_cost:
             scope["profile"] = "storage-unit-cost/1"
-            scope["metrics"] = ["storage_operating_expenditure" if marginal else "total_cost"]
+            scope["metrics"] = [
+                "storage_operating_expenditure" if marginal else "total_cost"
+            ]
         if marginal and scope["profile"] == calculations.PROFILE:
             scope.pop("cost_basis", None)
         elif "cost_basis" not in scope:
@@ -325,8 +355,11 @@ def resolve(turn, message, ui, explicit):
             "project_id": turn.project_id,
             "retain": False,
             "profile": (
-                "storage-unit-cost/1" if ambiguous[1] and ambiguous[1].lower() != "generator"
-                else "generator-cost/1" if ambiguous[1] else "network-linear-cost/1"
+                "storage-unit-cost/1"
+                if ambiguous[1] and ambiguous[1].lower() != "generator"
+                else "generator-cost/1"
+                if ambiguous[1]
+                else "network-linear-cost/1"
             ),
             "entity_id": ambiguous[2] or "network",
             "metrics": ["total_cost"],
@@ -339,7 +372,9 @@ def resolve(turn, message, ui, explicit):
     except ValueError:
         return _needs(turn, None, "unsupported_followup")
     if scope:
-        if scope["profile"] in calculations.COST_PROFILES and not scope.get("cost_basis"):
+        if scope["profile"] in calculations.COST_PROFILES and not scope.get(
+            "cost_basis"
+        ):
             return _needs(turn, scope, "explicit_cost_basis_required")
         return scope
     repeat, compare = _match(REPEAT, message), _match(COMPARE, message)
