@@ -164,6 +164,15 @@ def _owning_org(project_key: str | None):
         yield
 
 
+class SiteLocationRefused(Exception):
+    """A queued solve's project has no site location; `detail` is the typed 422
+    dict of `site_location.refusal`."""
+
+    def __init__(self, detail: dict):
+        super().__init__(detail["message"])
+        self.detail = detail
+
+
 @dataclass
 class SolveJob:
     """One queued solve of a single saved project."""
@@ -1565,6 +1574,16 @@ class SolveQueue:
 
             n = ctx.network
             lock = ctx.mutation_lock
+            # STUDY-GATE-1 (issue 48): re-checked on the network this job is
+            # about to solve, so a job queued or persisted before the enqueue
+            # gate (or whose anchor was since withdrawn) fails typed and is
+            # never solved.
+            from services import site_location
+
+            _no_location = site_location.refusal(
+                n, pathlib.Path(job.storage_dir) if job.storage_dir else None)
+            if _no_location:
+                raise SiteLocationRefused(_no_location)
             # THIS job's config, snapshotted at enqueue — not whatever the
             # context holds now. Falling back to the context's config keeps
             # hand-made jobs (and any row written before 0005) working.
@@ -1726,6 +1745,9 @@ class SolveQueue:
             from services import solve_capture as _capture
             if isinstance(exc, _capture.CaptureMismatch):
                 condition = _capture.MISMATCH  # HH-10 (C6a): nothing was solved
+            if isinstance(exc, SiteLocationRefused):
+                condition = exc.detail["error_kind"]  # nothing was solved
+                error = f"{condition}: {exc.detail['message']}"
             logger.exception("solve_queue: job %s (%r) failed", job.id, project_id)
             try:
                 if ctx is not None and ctx.solver_state.get("thread") is me:

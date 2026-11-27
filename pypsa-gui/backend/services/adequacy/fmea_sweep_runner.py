@@ -44,6 +44,14 @@ def start_fmea_sweep(
     network AND the foreground results in base state (it writes through
     the real state sink).
     """
+    # A missing site location blocks every solve-the-network run (STUDY-GATE-1,
+    # issue 48): refuse before any worker, record or publish.
+    from services import site_location
+
+    _no_location = site_location.active_refusal()
+    if _no_location:
+        raise HTTPException(422, _no_location)
+
     from services.adequacy.stress import (
         StressValidationError,
         run_class_c_sweep,

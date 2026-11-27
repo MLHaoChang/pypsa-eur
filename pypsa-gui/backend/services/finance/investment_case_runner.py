@@ -275,6 +275,14 @@ def start_investment_case(
     established and the start does not refuse with (the site connection). A
     finance-input refusal sends its own code first, then these, as
     `detail.needs`, so one answer lists every need the start can tell."""
+    # The case re-solves the site-today baseline on the active network, so a
+    # missing site location blocks it (STUDY-GATE-1, issue 48): refuse before
+    # any worker, record or publish.
+    from services import site_location
+
+    _no_location = site_location.active_refusal()
+    if _no_location:
+        raise HTTPException(422, _no_location)
     from services.finance.engine import run_case
     from services.finance.packs.base import PackNotFound, load_pack
     from services.finance.report import (

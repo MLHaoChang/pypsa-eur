@@ -2299,6 +2299,10 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
     keeps on the case's record (study-harness issue 52)."""
     from services import assistant_tasks
 
+    # The project directory is read here, on the request, not in the worker.
+    from services.network_lengths import active_project_dir
+    project_dir = active_project_dir()
+
     in_run = assistant_tasks.RUN_CONTEXT.get() is not None
     if in_run:
         from services import harness_locks, run_envelope
@@ -2334,6 +2338,12 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
             snap = _network_copy(n) if plan is not None and plan.needed else None
         base = None
         if snap is not None:
+            # STUDY-GATE-1 (issue 48): a baseline re-solve of an unlocated
+            # project is refused, on the copy it would solve, before any LP.
+            from services import site_location
+            _no_location = site_location.refusal(snap, project_dir)
+            if _no_location:
+                raise FinanceRefused(_no_location["code"], _no_location["message"])
             del stats["baseline_solves"]  # unknown until the solve returns or refuses
             try:
                 base = _B.solve_baseline(snap, cfg, plan)

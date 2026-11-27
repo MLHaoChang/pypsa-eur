@@ -104,6 +104,14 @@ def start_margin_loop(
     the standard is defined against — the margin's own validator downgrades it
     to a warning, and refusing it here would deny a supported configuration).
     """
+    # A missing site location blocks every solve-the-network run (STUDY-GATE-1,
+    # issue 48): refuse before any worker, record or publish.
+    from services import site_location
+
+    _no_location = site_location.active_refusal()
+    if _no_location:
+        raise HTTPException(422, _no_location)
+
     import dataclasses
     import queue as _queue
     import time

@@ -141,6 +141,14 @@ def start_coupling_loop(
     loop would burn its budget and report ``unreachable`` — "no plan meets
     this standard" — when the truth is "this strategy cannot enforce a cap".
     """
+    # A missing site location blocks every solve-the-network run (STUDY-GATE-1,
+    # issue 48): refuse before any worker, record or publish.
+    from services import site_location
+
+    _no_location = site_location.active_refusal()
+    if _no_location:
+        raise HTTPException(422, _no_location)
+
     import dataclasses
     import queue as _queue
     import time

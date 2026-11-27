@@ -71,6 +71,11 @@ try {
     `${base}/api/projects/from_template/eh_datacenter?name=${encodeURIComponent(PROJECT)}`,
     { headers: { 'X-CSRF-Token': csrf }, data: { dc_load: {} }, timeout: 240000 })
   assert(made.ok(), `Template creation failed: ${made.status()} ${await made.text()}`)
+  // A missing site location blocks Run and the solve queue (template-e2e 01, 48): confirm the fixture's site coordinates.
+  const anchored = await context.request.put(`${base}/api/projects/${encodeURIComponent(PROJECT)}/site-anchor`, {
+    headers: { 'X-CSRF-Token': csrf },
+    data: { anchor: { lat: 52.52, lng: 13.4, source: 'manual', confirmed: true }, expected_revision: 0 } })
+  assert(anchored.ok(), `Site anchor failed: ${anchored.status()} ${await anchored.text()}`)
   await context.route(url => ['http:', 'https:'].includes(url.protocol) && url.hostname !== '127.0.0.1', route => route.abort())
   await page.addInitScript(project => {
     localStorage.setItem('network-diagram:current-project', project)

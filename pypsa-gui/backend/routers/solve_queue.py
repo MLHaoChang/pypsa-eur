@@ -79,6 +79,15 @@ def _config_snapshot_for(project_key: str, project_dir) -> str | None:
     return None
 
 
+def _refuse_unlocated(project_key, project_dir) -> None:
+    """422 `site_location_missing` for a queued project with no site location."""
+    from services import site_location
+
+    refusal = site_location.queued_refusal(project_key, project_dir)
+    if refusal:
+        raise HTTPException(422, refusal)
+
+
 @router.post("")
 def enqueue_solve(
     req: EnqueueRequest,
@@ -152,6 +161,9 @@ def enqueue_solve(
             f"Project '{project.name}' has no saved network on disk. Save the "
             "project before queuing it to solve.",
         )
+    # STUDY-GATE-1 (issue 48): an unlocated project is refused here, on the
+    # enqueued project's own network and directory (not the foreground's).
+    _refuse_unlocated(project_registry.registry_key(project), project_dir)
     # Idempotent by project: a second enqueue of a project that already has a
     # queued or running job returns THAT job with `already_queued: true` and
     # creates nothing. 200, not 409 — the caller's intent ("this project should
@@ -1068,6 +1080,8 @@ def requeue_job(
             f"Project '{project_name}' has no saved network on disk. Save the "
             "project before queuing it to solve.",
         )
+
+    _refuse_unlocated(old["project_key"], pathlib.Path(storage_dir))
 
     job, created = solve_queue.enqueue_unique(
         project_name,
