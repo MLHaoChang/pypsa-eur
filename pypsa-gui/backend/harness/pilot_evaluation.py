@@ -206,9 +206,19 @@ LABELS = {
 }
 
 
+# The /2 profiles print the ruled figure names (AA 28), written out here as the pilot's own labels.
+V2_LABELS = {
+    "project_npv": "Project NPV at the WACC, after tax (unlevered)",
+    "lcoe_nominal": "LCOE (finance-consistent, nominal)", "lcoe_real": "LCOE (real)",
+    "screening_lole": "Screening expected shortfall over the modelled horizon (COPT)",
+}
+
+
 def public_label(case, metric):
     if metric == "total_cost" and case.profile == "storage-unit-cost/1":
         return "Total direct StorageUnit cost on the declared basis"
+    if case.profile.endswith("/2") and metric in V2_LABELS:
+        return V2_LABELS[metric]
     return LABELS.get(metric, metric)
 
 
