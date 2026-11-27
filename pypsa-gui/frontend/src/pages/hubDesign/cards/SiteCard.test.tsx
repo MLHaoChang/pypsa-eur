@@ -290,7 +290,7 @@ describe('SiteCard for a generic site (G2)', () => {
   it('says the must-stay-on load as entered, not a bus name', async () => {
     mount()
     await screen.findByTestId('hub-site-critical')
-    expect(text('hub-site-critical')).toContain('3 MW in 2035, 50 % of peak')
+    expect(text('hub-site-critical')).toContain('3 MW in 2035 · 50 % of peak')
   })
 
   it('"Start a new project from these values" says so, and seeds the Start form', async () => {
