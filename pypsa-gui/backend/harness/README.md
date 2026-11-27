@@ -9,7 +9,7 @@ assistant behave the same whichever one is active.
 harness/
   protocol.py     the provider seam: LLMProvider, LLMRequest, LLMEvent, ERROR_KINDS
   catalogue.py    the tool declarations, their Safety tiers, TOOL_ROUTES (merges catalogue_tools/)
-  catalogue_base.py  the `_t` / `_empty` builders, shared enums and route sentinels
+  catalogue_base.py  the `_t` / `_empty` builders and route sentinels fragments share
   catalogue_tools/   per-tool schema fragments: TOOLS, ROUTES, ORDER (RETRO-FRAG-1)
   tool_fragments.py  discovers and merges the fragment pairs; refuses clashes
   toolsets.py     ordered provider-neutral catalogue views and always-available controls
