@@ -17,14 +17,22 @@ from routers import projects as projects_router
 from services import template_display_names as tdn
 
 COVERED = {
-    "eh_ammonia_staged", "eh_concentrator_staged", "eh_datacenter", "eh_datacenter_staged",
-    "eh_h2_hub", "eh_h2_hub_staged", "eh_ipp_hybrid", "eh_microgrid", "eh_microgrid_staged",
+    "eh_ammonia_staged",
+    "eh_concentrator_staged",
+    "eh_datacenter",
+    "eh_datacenter_staged",
+    "eh_h2_hub",
+    "eh_h2_hub_staged",
+    "eh_ipp_hybrid",
+    "eh_microgrid",
+    "eh_microgrid_staged",
     "eh_site",
 }
 EXEMPT = {"3bus", "ieee14", "belgium", "ieee39"}
 
 
 # ── D1: every template is covered or exempt ─────────────────────────────────
+
 
 def test_every_template_is_covered_or_exempt():
     templates = set(projects_router._TEMPLATE_DEFAULT_NAMES)
@@ -40,8 +48,11 @@ def test_every_template_is_covered_or_exempt():
 
 # ── The lookup rules ────────────────────────────────────────────────────────
 
+
 def test_a_placeholder_row_gives_its_value_back():
-    assert tdn.name_for("eh_site", "Generator", "genset_new_2030") == "New genset (2030)"
+    assert (
+        tdn.name_for("eh_site", "Generator", "genset_new_2030") == "New genset (2030)"
+    )
     assert tdn.name_for("eh_site", "Generator", "genset_7") == "Genset 7"
     # Outside the planning bounds, or not a number: no name.
     assert tdn.name_for("eh_site", "Generator", "genset_new_2061") is None
@@ -60,7 +71,9 @@ def test_the_same_id_under_another_class_gets_no_name():
     assert tdn.name_for("eh_site", "StorageUnit", "genset_new_2030") is None
 
 
-@pytest.mark.parametrize("tid", [None, "", "ieee14", "no_such_template", 7, ["eh_h2_hub"]])
+@pytest.mark.parametrize(
+    "tid", [None, "", "ieee14", "no_such_template", 7, ["eh_h2_hub"]]
+)
 def test_no_template_falls_back_to_the_id(tid):
     assert tdn.name_for(tid, "Link", "electrolyser") is None
     assert tdn.label_for(tid, "Link", "electrolyser") == "electrolyser"
@@ -72,6 +85,7 @@ def test_a_named_component_reads_its_name_and_an_unnamed_one_its_id():
 
 
 # ── The meta payload, through the real routes ───────────────────────────────
+
 
 def _create(client, tmp_path, monkeypatch, tid: str, name: str) -> str:
     src = tmp_path / "tpl" / tid
@@ -92,7 +106,9 @@ def _names(client, name: str | None = None) -> dict:
 
 
 def _add_generator(client, gid: str, bus: str = "hub") -> None:
-    r = client.post("/api/network/generators", json={"name": gid, "bus": bus, "p_nom": 1.0})
+    r = client.post(
+        "/api/network/generators", json={"name": gid, "bus": bus, "p_nom": 1.0}
+    )
     assert r.status_code in (200, 201), r.text
 
 
@@ -109,11 +125,18 @@ def test_a_template_project_serves_its_names_on_both_routes(
     assert "solar_new_2030" not in n_ids
 
 
-def test_the_meta_payload_gains_one_key(client, tmp_projects_dir, tmp_path, monkeypatch):
+def test_the_meta_payload_gains_one_key(
+    client, tmp_projects_dir, tmp_path, monkeypatch
+):
     """D5: the one change to the payload is the added key."""
     _create(client, tmp_path, monkeypatch, "eh_h2_hub", "Hub")
     assert set(client.get("/api/network/meta").json()) == {
-        "name", "loaded_project", "snapshot_count", "bus_count", "display_names"}
+        "name",
+        "loaded_project",
+        "snapshot_count",
+        "bus_count",
+        "display_names",
+    }
 
 
 def test_an_unbound_network_serves_no_names(client):
@@ -133,12 +156,19 @@ def test_the_path_scoped_route_serves_its_own_projects_names(
     assert _names(client)["Link"]["electrolyser"] == "Electrolyser"
 
 
-@pytest.mark.parametrize("body", [
-    "{not json", "[1, 2]", '"eh_h2_hub"',
-    json.dumps({"template_id": 7}), json.dumps({"template_id": ["eh_h2_hub"]}),
-    json.dumps({"template_id": None}), json.dumps({"template_id": "no_such_template"}),
-    json.dumps({}),
-])
+@pytest.mark.parametrize(
+    "body",
+    [
+        "{not json",
+        "[1, 2]",
+        '"eh_h2_hub"',
+        json.dumps({"template_id": 7}),
+        json.dumps({"template_id": ["eh_h2_hub"]}),
+        json.dumps({"template_id": None}),
+        json.dumps({"template_id": "no_such_template"}),
+        json.dumps({}),
+    ],
+)
 def test_a_bad_or_missing_record_serves_no_names_and_never_fails(
     client, tmp_projects_dir, project_storage_dir, tmp_path, monkeypatch, body
 ):
@@ -170,7 +200,9 @@ def test_a_rename_drops_the_name_and_a_new_component_with_the_old_id_takes_it(
 ):
     """GK B2 (b): the renamed id is the user's own word."""
     _create(client, tmp_path, monkeypatch, "eh_h2_hub", "Hub")
-    r = client.put("/api/network/generators/wind_farm", json={"name": "my_wind", "bus": "hub"})
+    r = client.put(
+        "/api/network/generators/wind_farm", json={"name": "my_wind", "bus": "hub"}
+    )
     assert r.status_code == 200, r.text
     gens = _names(client).get("Generator", {})
     assert "my_wind" not in gens and "wind_farm" not in gens
@@ -200,6 +232,7 @@ def test_the_names_survive_save_as_a_copy_and_a_fork(
 
 # ── D5: the names stay out of every digest ──────────────────────────────────
 
+
 def test_the_names_stay_out_of_the_fingerprint_and_the_saved_bytes(
     client, tmp_projects_dir, project_storage_dir, tmp_path, monkeypatch
 ):
@@ -210,10 +243,15 @@ def test_the_names_stay_out_of_the_fingerprint_and_the_saved_bytes(
     from services.workflow_tools import _network_input_fingerprint
 
     def fps():
-        ctx = types.SimpleNamespace(network=PyPSAService.get_network(),
-                                    solver_state={"solver_config": {}}, user_ts={},
-                                    storage_dir=None)
-        return _network_input_fingerprint(ctx), _network_input_fingerprint(ctx, exact=True)
+        ctx = types.SimpleNamespace(
+            network=PyPSAService.get_network(),
+            solver_state={"solver_config": {}},
+            user_ts={},
+            storage_dir=None,
+        )
+        return _network_input_fingerprint(ctx), _network_input_fingerprint(
+            ctx, exact=True
+        )
 
     name = _create(client, tmp_path, monkeypatch, "eh_h2_hub", "Hub")
     assert _names(client)
@@ -224,7 +262,9 @@ def test_the_names_stay_out_of_the_fingerprint_and_the_saved_bytes(
     for path in project_storage_dir(name).rglob("*"):
         if path.is_file():
             blob = path.read_bytes()
-            assert b"Hydrogen storage" not in blob and b"Hydrogen offtake" not in blob, path
+            assert (
+                b"Hydrogen storage" not in blob and b"Hydrogen offtake" not in blob
+            ), path
     monkeypatch.setattr(tdn, "DISPLAY_NAMES", {})
     assert _names(client) == {}
     assert fps() == with_names

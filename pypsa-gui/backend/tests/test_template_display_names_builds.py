@@ -18,24 +18,34 @@ from tests.test_template_display_names import COVERED
 
 # ── D2 + D7: the table matches every build that changes the component set ───
 
+
 def _ids(n) -> set[tuple[str, str]]:
-    return {(cls, str(cid)) for cls, attr in tdn.COMPONENT_LISTS.items()
-            for cid in getattr(n, attr).index}
+    return {
+        (cls, str(cid))
+        for cls, attr in tdn.COMPONENT_LISTS.items()
+        for cid in getattr(n, attr).index
+    }
 
 
 def _dc_hybrid(tid):
-    return eh.BUILDERS[tid](load_spec=eh.dc_load_spec(tid, {"backup": {"mode": "hybrid"}}))
+    return eh.BUILDERS[tid](
+        load_spec=eh.dc_load_spec(tid, {"backup": {"mode": "hybrid"}})
+    )
 
 
 def _planned(tid):
-    return eh.BUILDERS[tid](planning=eh.planning_spec(tid, {"start_year": 2030,
-                                                             "end_year": 2060}))
+    return eh.BUILDERS[tid](
+        planning=eh.planning_spec(tid, {"start_year": 2030, "end_year": 2060})
+    )
 
 
 _SITE_FULL = {
-    "existing": {"gensets": {"count": eh_site.MAX_GENSETS, "unit_mw": 1.0, "fuel": "diesel"},
-                 "pv_mw": 1.0, "battery": {"mw": 1.0, "mwh": 2.0},
-                 "ups": {"mw": 10.0, "minutes": 15.0}},
+    "existing": {
+        "gensets": {"count": eh_site.MAX_GENSETS, "unit_mw": 1.0, "fuel": "diesel"},
+        "pv_mw": 1.0,
+        "battery": {"mw": 1.0, "mwh": 2.0},
+        "ups": {"mw": 10.0, "minutes": 15.0},
+    },
 }
 
 
@@ -56,10 +66,20 @@ def _builds():
         if tid.startswith("eh_datacenter"):
             yield f"{tid}:hybrid", tid, lambda tid=tid: _dc_hybrid(tid)
     for st in eh_site.SITE_TYPES:
-        yield f"eh_site:{st}", "eh_site", (
-            lambda st=st: eh_site.build_eh_site(eh_site.site_params({"site_type": st})))
-    yield "eh_site:full", "eh_site", (
-        lambda: eh_site.build_eh_site(eh_site.site_params(_SITE_FULL)))
+        yield (
+            f"eh_site:{st}",
+            "eh_site",
+            (
+                lambda st=st: eh_site.build_eh_site(
+                    eh_site.site_params({"site_type": st})
+                )
+            ),
+        )
+    yield (
+        "eh_site:full",
+        "eh_site",
+        (lambda: eh_site.build_eh_site(eh_site.site_params(_SITE_FULL))),
+    )
 
 
 _BUILDS = list(_builds())
@@ -77,7 +97,9 @@ def test_the_builds_cover_every_covered_template(built):
 @pytest.mark.parametrize("label", [label for label, _, _ in _BUILDS])
 def test_every_component_of_every_build_has_a_name(built, label):
     tid, ids = built[label]
-    missing = sorted(f"{cls}:{cid}" for cls, cid in ids if tdn.name_for(tid, cls, cid) is None)
+    missing = sorted(
+        f"{cls}:{cid}" for cls, cid in ids if tdn.name_for(tid, cls, cid) is None
+    )
     assert not missing, f"{label}: components with no display name: {missing}"
 
 
@@ -92,8 +114,11 @@ def _row_matches(cls: str, cid: str, ids: set[tuple[str, str]]) -> bool:
 @pytest.mark.parametrize("tid", sorted(COVERED))
 def test_every_row_names_a_component_some_build_has(built, tid):
     ids = set().union(*(s for t, s in built.values() if t == tid))
-    stale = sorted(f"{cls}:{cid}" for cls, cid in tdn.DISPLAY_NAMES[tid]
-                   if not _row_matches(cls, cid, ids))
+    stale = sorted(
+        f"{cls}:{cid}"
+        for cls, cid in tdn.DISPLAY_NAMES[tid]
+        if not _row_matches(cls, cid, ids)
+    )
     assert not stale, f"{tid}: rows naming no component: {stale}"
 
 

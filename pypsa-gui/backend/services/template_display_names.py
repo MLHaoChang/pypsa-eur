@@ -46,7 +46,11 @@ Rows = dict[tuple[str, str], str]
 
 
 def _rows(**by_class: dict[str, str]) -> Rows:
-    return {(cls, cid): name for cls, names in by_class.items() for cid, name in names.items()}
+    return {
+        (cls, cid): name
+        for cls, names in by_class.items()
+        for cid, name in names.items()
+    }
 
 
 # ── The data center (single year, staged) ───────────────────────────────────
@@ -55,8 +59,10 @@ _DC_COMMON = _rows(
     Bus={"grid": "Grid", "dc_mv": "Site MV switchboard", "it_bus": "IT power bus"},
     Generator={
         "grid_supply": "Grid supply",
-        "genset_1": "Genset 1", "genset_2": "Genset 2",
-        "genset_3": "Genset 3", "genset_4": "Genset 4",
+        "genset_1": "Genset 1",
+        "genset_2": "Genset 2",
+        "genset_3": "Genset 3",
+        "genset_4": "Genset 4",
         "rooftop_pv": "Rooftop solar",
     },
     Link={"grid_import": "Grid connection", "site_transformer": "Site transformer"},
@@ -68,15 +74,21 @@ _DC_COMMON = _rows(
     },
 )
 
-_DC = {**_DC_COMMON, **_rows(
-    Generator={"genset_new": "New genset"},
-    StorageUnit={"bess_new": "New battery"},
-)}
+_DC = {
+    **_DC_COMMON,
+    **_rows(
+        Generator={"genset_new": "New genset"},
+        StorageUnit={"bess_new": "New battery"},
+    ),
+}
 
-_DC_STAGED = {**_DC_COMMON, **_rows(
-    Generator={"genset_new_{y}": "New genset ({y})"},
-    StorageUnit={"bess_new_{y}": "New battery ({y})"},
-)}
+_DC_STAGED = {
+    **_DC_COMMON,
+    **_rows(
+        Generator={"genset_new_{y}": "New genset ({y})"},
+        StorageUnit={"bess_new_{y}": "New battery ({y})"},
+    ),
+}
 
 # ── The hydrogen hub and the ammonia hub built on it ────────────────────────
 
@@ -93,12 +105,15 @@ _H2_COMMON = _rows(
     Store={"h2_storage": "Hydrogen storage"},
 )
 
-_H2 = {**_H2_COMMON, **_rows(
-    Generator={"solar_new": "New solar", "wind_new": "New wind"},
-    Link={"fuel_cell": "Fuel cell"},
-    Load={"h2_offtake": "Hydrogen offtake"},
-    StorageUnit={"bess_new": "New battery"},
-)}
+_H2 = {
+    **_H2_COMMON,
+    **_rows(
+        Generator={"solar_new": "New solar", "wind_new": "New wind"},
+        Link={"fuel_cell": "Fuel cell"},
+        Load={"h2_offtake": "Hydrogen offtake"},
+        StorageUnit={"bess_new": "New battery"},
+    ),
+}
 
 _H2_STAGED_NEW = _rows(
     Generator={"solar_new_{y}": "New solar ({y})", "wind_new_{y}": "New wind ({y})"},
@@ -106,18 +121,26 @@ _H2_STAGED_NEW = _rows(
     StorageUnit={"bess_new_{y}": "New battery ({y})"},
 )
 
-_H2_STAGED = {**_H2_COMMON, **_H2_STAGED_NEW, **_rows(
-    Link={"fuel_cell": "Fuel cell"},
-    Load={"h2_offtake": "Hydrogen offtake"},
-)}
+_H2_STAGED = {
+    **_H2_COMMON,
+    **_H2_STAGED_NEW,
+    **_rows(
+        Link={"fuel_cell": "Fuel cell"},
+        Load={"h2_offtake": "Hydrogen offtake"},
+    ),
+}
 
-_AMMONIA = {**_H2_COMMON, **_H2_STAGED_NEW, **_rows(
-    Bus={"nh3": "Ammonia"},
-    Generator={"__buy_nh3": "Bought-in ammonia", "__lost_nh3": "Ammonia shortfall"},
-    Link={"haber_bosch": "Ammonia synthesis (Haber-Bosch)"},
-    Load={"nh3_delivery": "Ammonia delivery"},
-    Store={"nh3_tank": "Ammonia tank"},
-)}
+_AMMONIA = {
+    **_H2_COMMON,
+    **_H2_STAGED_NEW,
+    **_rows(
+        Bus={"nh3": "Ammonia"},
+        Generator={"__buy_nh3": "Bought-in ammonia", "__lost_nh3": "Ammonia shortfall"},
+        Link={"haber_bosch": "Ammonia synthesis (Haber-Bosch)"},
+        Load={"nh3_delivery": "Ammonia delivery"},
+        Store={"nh3_tank": "Ammonia tank"},
+    ),
+}
 
 # ── The island microgrid (single year, staged) ──────────────────────────────
 
@@ -125,33 +148,48 @@ _MG_COMMON = _rows(
     Bus={"mainland": "Mainland grid", "island": "Island grid", "hospital": "Hospital"},
     Generator={
         "mainland_supply": "Mainland supply",
-        "diesel_1": "Diesel generator 1", "diesel_2": "Diesel generator 2",
+        "diesel_1": "Diesel generator 1",
+        "diesel_2": "Diesel generator 2",
         "diesel_3": "Diesel generator 3",
-        "pv_plant": "Solar plant", "wind_turbines": "Wind turbines",
+        "pv_plant": "Solar plant",
+        "wind_turbines": "Wind turbines",
     },
-    Link={"subsea_tie": "Subsea cable to the mainland", "hospital_feeder": "Hospital feeder"},
+    Link={
+        "subsea_tie": "Subsea cable to the mainland",
+        "hospital_feeder": "Hospital feeder",
+    },
     Load={"residential": "Homes", "hospital_load": "Hospital load"},
     StorageUnit={"island_battery": "Island battery"},
 )
 
-_MG = {**_MG_COMMON, **_rows(
-    Generator={"diesel_new": "New diesel generator"},
-    StorageUnit={"bess_new": "New battery"},
-)}
+_MG = {
+    **_MG_COMMON,
+    **_rows(
+        Generator={"diesel_new": "New diesel generator"},
+        StorageUnit={"bess_new": "New battery"},
+    ),
+}
 
-_MG_STAGED = {**_MG_COMMON, **_rows(
-    Generator={
-        "diesel_new_{y}": "New diesel generator ({y})",
-        "pv_new_{y}": "New solar ({y})",
-        "wind_new_{y}": "New wind ({y})",
-    },
-    StorageUnit={"bess_new_{y}": "New battery ({y})"},
-)}
+_MG_STAGED = {
+    **_MG_COMMON,
+    **_rows(
+        Generator={
+            "diesel_new_{y}": "New diesel generator ({y})",
+            "pv_new_{y}": "New solar ({y})",
+            "wind_new_{y}": "New wind ({y})",
+        },
+        StorageUnit={"bess_new_{y}": "New battery ({y})"},
+    ),
+}
 
 # ── The generic site ────────────────────────────────────────────────────────
 
 _SITE = _rows(
-    Bus={"grid": "Grid", "site_mv": "Site MV switchboard", "critical": "Critical power bus"},
+    Bus={
+        "grid": "Grid",
+        "site_mv": "Site MV switchboard",
+        "critical": "Critical power bus",
+    },
     Generator={
         "grid_supply": "Grid supply",
         "genset_{n}": "Genset {n}",
@@ -172,9 +210,12 @@ _SITE = _rows(
 
 _CONCENTRATOR = _rows(
     Bus={
-        "grid": "Grid", "site": "Site power bus",
-        "ore_rom": "Run-of-mine ore", "ore_fine": "Crushed ore",
-        "slurry": "Ground slurry", "concentrate": "Concentrate",
+        "grid": "Grid",
+        "site": "Site power bus",
+        "ore_rom": "Run-of-mine ore",
+        "ore_fine": "Crushed ore",
+        "slurry": "Ground slurry",
+        "concentrate": "Concentrate",
     },
     Generator={
         "grid_supply": "Grid supply",
@@ -185,7 +226,9 @@ _CONCENTRATOR = _rows(
     Link={
         "grid_import": "Grid connection",
         "crusher": "Crusher",
-        "mill_1": "Mill 1", "mill_2": "Mill 2", "mill_3": "Mill 3",
+        "mill_1": "Mill 1",
+        "mill_2": "Mill 2",
+        "mill_3": "Mill 3",
         "flotation": "Flotation",
         "flotation_{y}": "Flotation ({y})",
     },
@@ -202,7 +245,11 @@ _CONCENTRATOR = _rows(
 
 _IPP = _rows(
     Bus={"grid": "Grid", "poi": "Point of interconnection"},
-    Generator={"grid": "Grid supply", "wind_farm": "Wind farm", "pv_plant": "Solar plant"},
+    Generator={
+        "grid": "Grid supply",
+        "wind_farm": "Wind farm",
+        "pv_plant": "Solar plant",
+    },
     Link={"grid_import": "Grid import", "grid_export": "Grid export"},
     StorageUnit={"bess": "Battery"},
 )
@@ -231,7 +278,9 @@ def _pattern(cid: str) -> tuple[re.Pattern[str], str] | None:
     return None
 
 
-def name_for(template_id: str | None, component_class: str, component_id: str) -> str | None:
+def name_for(
+    template_id: str | None, component_class: str, component_id: str
+) -> str | None:
     """The template's display name for one component, or None when it has none."""
     rows = DISPLAY_NAMES.get(template_id) if isinstance(template_id, str) else None
     if not rows:
@@ -269,7 +318,9 @@ def recorded_template_id(project_dir: str | pathlib.Path | None) -> str | None:
     if not project_dir:
         return None
     try:
-        meta = json.loads((pathlib.Path(project_dir) / "metadata.json").read_text("utf-8"))
+        meta = json.loads(
+            (pathlib.Path(project_dir) / "metadata.json").read_text("utf-8")
+        )
     except (OSError, ValueError, UnicodeDecodeError):
         return None
     tid = meta.get("template_id") if isinstance(meta, dict) else None
@@ -278,13 +329,21 @@ def recorded_template_id(project_dir: str | pathlib.Path | None) -> str | None:
 
 # The classes a template ships components in, by their network attribute.
 COMPONENT_LISTS: dict[str, str] = {
-    "Bus": "buses", "Generator": "generators", "Load": "loads", "Link": "links",
-    "Store": "stores", "StorageUnit": "storage_units", "Line": "lines",
-    "Transformer": "transformers", "ShuntImpedance": "shunt_impedances",
+    "Bus": "buses",
+    "Generator": "generators",
+    "Load": "loads",
+    "Link": "links",
+    "Store": "stores",
+    "StorageUnit": "storage_units",
+    "Line": "lines",
+    "Transformer": "transformers",
+    "ShuntImpedance": "shunt_impedances",
 }
 
 
-def names_for_network(n, project_dir: str | pathlib.Path | None) -> dict[str, dict[str, str]]:
+def names_for_network(
+    n, project_dir: str | pathlib.Path | None
+) -> dict[str, dict[str, str]]:
     """``{class: {id: name}}`` for the network's components that have a name.
 
     Empty for an unbound network, a project with no recorded or no known
@@ -293,8 +352,11 @@ def names_for_network(n, project_dir: str | pathlib.Path | None) -> dict[str, di
     out: dict[str, dict[str, str]] = {}
     for cls, attr in COMPONENT_LISTS.items():
         frame = getattr(n, attr)
-        named = {str(cid): name for cid in frame.index
-                 if (name := name_for(tid, cls, str(cid))) is not None}
+        named = {
+            str(cid): name
+            for cid in frame.index
+            if (name := name_for(tid, cls, str(cid))) is not None
+        }
         if named:
             out[cls] = named
     return out
