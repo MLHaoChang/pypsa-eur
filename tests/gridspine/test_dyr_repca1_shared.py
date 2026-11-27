@@ -95,6 +95,17 @@ CASES = {
     "v_droop": (_BASE | {"repc_vcflag": 0}, {"dvref": 0.02}),
     "q_up": (_BASE | _Q_MODE, {"dqref": 0.3}),
     "q_down": (_BASE | _Q_MODE, {"dqref": -0.3}),
+    "p_limit": (_BASE, {"dpref": 0.6}),
+    "q_limit": (_BASE | _Q_MODE, {"dqref": 0.6}),
+}
+#: case -> the limits that must bind in it, observed in the run (GK A C2)
+BINDS = {
+    "p_up": {"repc_femax"},
+    "p_down": {"repc_femin"},
+    "q_up": {"repc_emax"},
+    "q_down": {"repc_emin"},
+    "p_limit": {"repc_pmax"},
+    "q_limit": {"repc_qmax"},
 }
 
 
@@ -229,16 +240,16 @@ def test_each_wrong_scaling_misses_the_aggregate_in_its_case(mutant):
     assert rr.deviation(_detailed(case, controllers), _aggregate(case)) > 1e-2
 
 
-def test_the_limits_the_scaling_rescales_bind_in_their_cases():
+@pytest.mark.parametrize("case", sorted(BINDS))
+def test_each_case_binds_its_limits_in_the_aggregate_and_the_detailed_plant(case):
     """
-    femax/femin bind in p_up/p_down and emax/emin in q_up/q_down: else a
+    The limits the scaling rescales (femax/femin, Q-mode emax/emin) and the
+    output limits (Pmax, Qmax) bind during the run, observed: otherwise a
     mutant scaling that limit the wrong way would survive (GK A C2).
     """
-    assert 0.2 > _BASE["repc_femax"] and -0.2 < _BASE["repc_femin"]
-    q = _BASE | _Q_MODE
-    assert (
-        0.3 - q["repc_dbd2"] > q["repc_emax"] and -0.3 - q["repc_dbd1"] < q["repc_emin"]
-    )
+    detailed = _detailed(case, [share_repca1(CASES[case][0], w) for w in _SHARES])
+    assert BINDS[case] <= _aggregate(case)[3]
+    assert detailed[3] == _aggregate(case)[3]
 
 
 def test_the_tolerance_boundary_is_the_literal_1e_6():
