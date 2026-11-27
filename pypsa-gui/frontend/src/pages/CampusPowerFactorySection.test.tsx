@@ -67,7 +67,7 @@ describe('what a PowerFactory case leaves out', () => {
   })
 
   it('names the hour by its period and place in the year, never the bundle id', () => {
-    expect(powerFactoryWhen(bundle({ period: 2030, hour: 14 }))).toBe('Period 2030 · hour 14 of the year')
+    expect(powerFactoryWhen(bundle({ period: 2030, hour: 14 }))).toBe('Period 2030 · time step 14')
   })
 })
 
@@ -81,10 +81,10 @@ describe('the PowerFactory case section of the grid-code results', () => {
       expect(this.download).toBe('hub_p2030_h12.zip')
     })
     renderSection()
-    await userEvent.click(await screen.findByRole('button', { name: 'Download PowerFactory case, period 2030, hour 12 of the year' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Download PowerFactory case, period 2030, time step 12' }))
     await waitFor(() => expect(api.powerfactoryZip).toHaveBeenCalledWith('Hub A', 'hub_p2030_h12'))
     expect(click).toHaveBeenCalledOnce()
-    expect(screen.getByTestId('pf-row-hub_p2030_h12').textContent).toBe('Period 2030 · hour 12 of the year · 2 files · 4 kB')
+    expect(screen.getByTestId('pf-row-hub_p2030_h12').textContent).toBe('Period 2030 · time step 12 · 2 files · 4 kB')
     expect(screen.queryByTestId('pf-gap-hub_p2030_h12')).toBeNull()
     expect(screen.queryByTestId('pf-not-written-hub_p2030_h12')).toBeNull()
     click.mockRestore()

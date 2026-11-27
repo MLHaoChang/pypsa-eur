@@ -732,7 +732,7 @@ export function powerFactoryValueName(i: PowerFactoryNotWritten): string {
 /** Which case a bundle is: the run's `hour` is the snapshot's place in the period (0 for the first),
  *  so its date and time are not known here. */
 export function powerFactoryWhen(b: PowerFactoryBundle): string {
-  return b.period != null && b.hour != null ? `Period ${b.period} · hour ${b.hour} of the year` : b.name
+  return b.period != null && b.hour != null ? `Period ${b.period} · time step ${b.hour}` : b.name
 }
 
 /** The checks a PowerFactory case waits on, one line each; an unreadable manifest is one line too.
