@@ -43,6 +43,9 @@ no such channel, so the row is ``unknown`` ("no connected channel (contract
 v1)") and no case passes; a ``connected`` column in a version-1 result is not
 read. A missing column, a unit other than ``status`` or a value other than
 0/1 makes the row or the case ``unknown`` with the reason, never ``pass``.
+A PSS/E script's ``<case_id>.status.txt`` (its failed status polls) is the
+case's own file, not an extra one; its lines go into the ``stays_connected``
+row's detail as a reason and are never read as samples.
 """
 
 from __future__ import annotations
@@ -55,6 +58,7 @@ from pathlib import Path
 
 import numpy as np
 
+from gridspine.handoff.psspy_scripts import STATUS_SIDECAR
 from gridspine.handoff.test_battery import (
     CONNECTED,
     CONTRACT_VERSIONS,
@@ -73,6 +77,8 @@ from gridspine.schema.contracts import ContractError
 MANIFEST = "manifest.json"
 BATTERY_JSON = "battery.json"
 RESULTS_DIR = "results"
+#: How many characters of a status sidecar a detail quotes before it marks the rest truncated.
+POLL_LOG_CHARS = 2000
 #: Pack kinds and versions this reader knows.
 KNOWN_PACKS = {"pscad_emt": ("1",)}
 #: Channel-contract versions this reader knows.
@@ -399,6 +405,8 @@ def judge_pack(pack_dir, profile: dict, ratings: Ratings) -> dict:
             )
         except ContractError as exc:
             cases.append(_unknown_case(case.case_id, case.kind, f"not judged: {exc}"))
+    for c in cases:  # every case, judged or not, carries its status sidecar as a reason
+        _add_poll_log(c, results, c["case_id"])
     stamp = {
         "data_hash": manifest["data_hash"],
         "contract_version": manifest["contract_version"],
@@ -435,7 +443,35 @@ def judge_pack(pack_dir, profile: dict, ratings: Ratings) -> dict:
     return {"header": header, "cases": cases}
 
 
+def _add_poll_log(result: dict, results: Path, case_id: str) -> None:
+    """
+    Add the case's failed-poll sidecar (``<case_id>.status.txt``, written by the
+    PSS/E scripts) to its ``stays_connected`` row, or to the case detail when
+    there is no such row, as a reason: text, never read as a sample.
+    """
+    side = results / STATUS_SIDECAR.format(case_id=case_id)
+    if not side.is_file():
+        return
+    try:
+        lines = [ln.strip() for ln in side.read_text(encoding="utf-8").splitlines()]
+    except (OSError, UnicodeDecodeError) as exc:
+        lines = [f"unreadable ({exc})"]
+    text = "; ".join(ln for ln in lines if ln)
+    if not text:
+        return
+    if len(text) > POLL_LOG_CHARS:
+        text = text[:POLL_LOG_CHARS] + f" ... (truncated, {len(text)} characters)"
+    note = f"{side.name}: {text}"
+    rows = [r for r in result["rows"] if r["check"] == "stays_connected"]
+    for row in rows:
+        row["detail"] = f"{row['detail']}; {note}" if row["detail"] else note
+    if not rows:
+        result["detail"] = f"{result['detail']}; {note}" if result["detail"] else note
+
+
 def _claims(name: str, case_id: str) -> bool:
+    if name == STATUS_SIDECAR.format(case_id=case_id):
+        return True
     stem = name.rsplit(".", 1)[0]
     if name.endswith((".inf", ".csv", ".out")) and stem == case_id:
         return True

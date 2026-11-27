@@ -4,7 +4,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip as RTooltip, Legend,
 } from 'recharts'
-import { resultsApi } from '../../api/simulation'
+import { displayedResultsApi } from '../../api/displayedResults'
 import { networkApi } from '../../api/network'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
@@ -20,6 +20,7 @@ import {
 } from './shared'
 import { storageCarrierKey, loadCarrierKey } from './carrierAliases'
 import NotSolved from './NotSolved'
+import ResultState from '../../components/ResultState'
 import { type LostLoadMeta, vollOf } from './summary'
 import { NOT_RECORDED_KPI, NotRecordedNote } from './NotRecorded'
 
@@ -74,16 +75,21 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
   const curtailmentRef = useRef<HTMLDivElement | null>(null)
   const loadRef        = useRef<HTMLDivElement | null>(null)
 
-  const { data: gensTS }      = useQuery({ queryKey: nk(currentProject, 'results', 'generators'),       queryFn: () => resultsApi.getGeneratorResults() })
-  const { data: storPowerTS } = useQuery({ queryKey: nk(currentProject, 'results', 'storage_dispatch'), queryFn: () => resultsApi.getStorageDispatchResults() })
-  const { data: loadTS }      = useQuery({ queryKey: nk(currentProject, 'results', 'loads'),            queryFn: () => resultsApi.getLoadResults() })
-  // Wrapped (not bare) because `getCurtailment`/`getLostLoad` now take an
-  // optional `range` — calling with no arguments here is still
-  // byte-identical to the old bare-reference request, and this tab must
-  // stay on whole-horizon payloads (never pass a window).
-  const { data: curtailTS }   = useQuery({ queryKey: nk(currentProject, 'results', 'curtailment'),      queryFn: () => resultsApi.getCurtailment() })
-  const { data: lostLoad, isSuccess: lostLoadRead }    = useQuery({ queryKey: nk(currentProject, 'results', 'lost_load'),        queryFn: () => resultsApi.getLostLoad() })
-  const { data: cost }        = useQuery({ queryKey: nk(currentProject, 'results', 'cost_breakdown'),   queryFn: resultsApi.getCostBreakdown })
+  // A5.2: the six whole-horizon parts as one bound view (one solve, one
+  // binding), so a chat navigation can prove the figures shown. The view
+  // reads each route with no window (this tab must stay on whole-horizon
+  // payloads, never pass a window). Results.tsx's aggregated body reads the
+  // same query for its `periods` array, so it is one fetch.
+  const { data: displayed, isSuccess: lostLoadRead, isError } = useQuery({
+    queryKey: nk(currentProject, 'results', 'displayed', 'overview'),
+    queryFn: displayedResultsApi.overview,
+  })
+  const gensTS = displayed?.data.generators
+  const storPowerTS = displayed?.data.storage_dispatch
+  const loadTS = displayed?.data.loads
+  const curtailTS = displayed?.data.curtailment
+  const lostLoad = displayed?.data.lost_load
+  const cost = displayed?.data.cost_breakdown
 
   const { data: generators = [] }   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
   const { data: storageUnits = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
@@ -470,6 +476,14 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
   // Every period's VOLL is unknown together (one VOLL price): drop the series.
   const vollNotRecorded = economicsBars?.some(r => r.VOLL == null) ?? false
 
+  // A failed read is not "not run yet" (rulings ai, aa): the error toast says why.
+  if (isError && !displayed) {
+    return (
+      <div className="p-6" data-testid="overview-error">
+        <ResultState state="unavailable" reason="The aggregated overview could not be read. Try again in a moment." />
+      </div>
+    )
+  }
   if (!gensTS && !loadTS && !cost) {
     return (
       <NotSolved what="The aggregated overview" />
@@ -503,7 +517,8 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
   }
 
   return (
-    <div data-testid="results-view-overview" className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0">
+    <div data-testid="results-view-overview" className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0"
+      data-result-tab="overview" data-result-binding={displayed ? JSON.stringify(displayed.binding) : undefined}>
 
       <div className="text-[11px] text-muted -mt-2">
         Aggregated view spans every investment period. KPIs use snapshot

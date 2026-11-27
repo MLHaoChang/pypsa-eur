@@ -50,6 +50,7 @@ from tests.test_result_profiles_assurance import gas, priced, windy  # noqa: F40
 from tests.test_result_profiles_assurance import solve
 from tests.test_site_import_assurance import importing  # noqa: F401
 from tests.test_system_cost_assurance import hand_cost, solve_costed  # noqa: F401
+from tests.test_renewable_share_assurance import hand_share, solve_share  # noqa: F401
 from tests.test_storage_assurance import storage  # noqa: F401
 from tests.test_storage_cost_assurance import BASIS, record_solve
 from tests.test_time_to_power_assurance import staged_dc  # noqa: F401
@@ -181,6 +182,9 @@ DRIVERS = {
     "system-cost-breakdown/1": Driver(
         "hand_cost", solve_costed, _scope("system-cost-breakdown/1", "network")
     ),
+    "renewable-share/1": Driver(
+        "hand_share", solve_share, _scope("renewable-share/1", "network")
+    ),
     "capacity/1": Driver(
         "built", solve, _scope("capacity/1", "G2", component_class="Generator")
     ),
@@ -225,6 +229,7 @@ FIXTURES = [
     windy,
     hand_losses,
     hand_cost,
+    hand_share,
     built,
     tank,
     exporting,

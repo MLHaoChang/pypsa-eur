@@ -122,6 +122,10 @@ WEIGHT_BASIS: dict[str, str] = {
     "system_opex": "objective",
     "system_cost": "derived",
     "objective_residual": "derived",
+    # renewable_share_calculations.py: energies on generator weights; the share is their ratio
+    "renewable_share": "generators",
+    "nonrenewable_energy": "generators",
+    "electricity_used": "generators",
 }
 
 # Profiles whose captured index is not snapshots: the investment report's

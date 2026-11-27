@@ -5325,6 +5325,7 @@
         "curtailment/1",
         "capacity/1",
         "system-cost-breakdown/1",
+        "renewable-share/1",
         "storage-cycles/1",
         "energy-balance/1",
         "site-import/1",
@@ -7198,6 +7199,30 @@
     "branches_above_rating"
    ]
   },
+  "renewable-share/1": {
+   "definitions": {
+    "electricity_used": {
+     "formula_id": "served-load-energy/1",
+     "label": "Electricity used on site (served load)",
+     "unit": "MWh"
+    },
+    "nonrenewable_energy": {
+     "formula_id": "nonrenewable-generator-energy/1",
+     "label": "Non-renewable electricity supplied",
+     "unit": "MWh"
+    },
+    "renewable_share": {
+     "formula_id": "renewable-share-of-served/1",
+     "label": "Renewable share of the electricity used on site",
+     "unit": "%"
+    }
+   },
+   "metrics": [
+    "renewable_share",
+    "nonrenewable_energy",
+    "electricity_used"
+   ]
+  },
   "site-import/1": {
    "definitions": {
     "export_energy": {
@@ -7598,6 +7623,7 @@
      "curtailment/1",
      "capacity/1",
      "system-cost-breakdown/1",
+     "renewable-share/1",
      "storage-cycles/1",
      "energy-balance/1",
      "site-import/1",

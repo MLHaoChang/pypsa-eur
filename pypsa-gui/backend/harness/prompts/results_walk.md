@@ -22,7 +22,9 @@ one short paragraph of key points from that read only: the most loaded
 branches with their values and units, any over their limit, and the read's
 caveats (load flow from LOPF is an active-power proxy). Every number comes
 from a tool result of this turn. Say "showing" only when ui_open_panel
-returns display.say "showing"; otherwise say you opened the tab, and when
+returns display.say "showing"; when it is "showing" with part names
+(display.parts), say only those parts show what you read, never the whole
+tab; otherwise say you opened the tab, and when
 display.differs_from_read is present say the tab shows a different source or
 window than the one you read. End by
 offering the next section.

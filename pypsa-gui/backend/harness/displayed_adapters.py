@@ -50,6 +50,9 @@ class DisplayedAdapter:
     # The binding key naming why the shown figures are withheld: when set, the
     # words say "unavailable: <reason>", never "showing".
     withheld_key: str | None = None
+    # S3b-2: a read whose ref depends on its get_results kind, called with
+    # (result, kind) in place of `read_ref` (Dispatch: its series look alike).
+    kind_read_ref: Callable[[Any, str | None], dict | None] | None = None
 
 
 # ── Load flow (live-voice 07, LC-03) ────────────────────────────────────────
@@ -363,6 +366,68 @@ ADAPTERS = MappingProxyType(
             read_ref=_no_read_ref,
             index_keys=frozenset(_WINDOW),
             sources=frozenset({"lopf"}),
+        ),
+    }
+)
+
+
+# ── Dispatch and the multi-period Overview (A5.2 S3b-2) ────────────────────
+
+# Dispatch's parts, each the payload of the get_results kind of the same name.
+DISPATCH_PARTS = (
+    "cost_breakdown",
+    "generators",
+    "curtailment",
+    "storage",
+    "storage_dispatch",
+    "store_dispatch",
+    "store_energy",
+    "loads",
+    "links",
+    "lost_load",
+    "economics_by_carrier",
+)
+_DISPATCH_REFS = tuple(f"{part}_sha256" for part in DISPATCH_PARTS)
+_DISPATCH_KEYS = ("source", *_WINDOW)
+
+
+def _dispatch_read_ref(result, kind):
+    """The hash of the one part a get_results read names (by its kind: the
+    series share one shape), so it claims that part and no other. A no-data
+    answer, or a read whose kind is unknown, claims nothing."""
+    if kind not in DISPATCH_PARTS or not isinstance(result, dict):
+        return None
+    if result.get("status") == "no_data":
+        return None
+    return _payload_ref(lambda _r: True, f"{kind}_sha256")(result)
+
+
+ADAPTERS = MappingProxyType(
+    {
+        **ADAPTERS,
+        "dispatch": DisplayedAdapter(
+            current=_params_view("dispatch", _DISPATCH_KEYS),
+            reread=_params_view("dispatch", _DISPATCH_KEYS),
+            binding_keys=_VIEW_BINDING
+            | frozenset(_DISPATCH_KEYS)
+            | set(_DISPATCH_REFS),
+            read_tool="get_results",
+            ref_keys=_DISPATCH_REFS,
+            read_ref=_no_read_ref,
+            kind_read_ref=_dispatch_read_ref,
+            index_keys=frozenset(_WINDOW),
+            sources=frozenset({"lopf", "ac_pf"}),
+            read_kinds=frozenset(DISPATCH_PARTS),
+        ),
+        # The chat's Overview read is get_vintage_results (the build per
+        # vintage), not these payloads: the words say "opened".
+        "overview": DisplayedAdapter(
+            current=_params_view("overview", ()),
+            reread=_params_view("overview", ()),
+            binding_keys=_VIEW_BINDING,
+            read_tool="get_vintage_results",
+            ref_keys=("data_sha256",),
+            read_ref=_no_read_ref,
         ),
     }
 )

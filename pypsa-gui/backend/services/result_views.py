@@ -129,6 +129,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                multi_period_only=True,
                units="MW, MWh, EUR per period",
                checked_gap="unsupported_snapshot_scope",
+               verification="displayed_data",
                card="capacity", sub_option="sizing", card_tab="build"),
     ResultView("capex", _RESULTS, "capex", "Capacity expansion",
                "sized assets and their capital cost", "results",
@@ -147,6 +148,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                units="MW per snapshot, MWh",
                checked_profiles=("generator-dispatch/1", "storage-unit-dispatch/1",
                                  "carrier-energy/1"),
+               verification="displayed_data",
                card="capacity", sub_option="dispatch", card_tab="operation"),
     # Gated: the copilot read for energy flows lands with the catalogue work
     # (site commercial UX A1); the tab itself is navigable now.
