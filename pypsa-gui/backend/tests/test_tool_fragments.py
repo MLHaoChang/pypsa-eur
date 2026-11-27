@@ -65,7 +65,7 @@ def test_report_templates_is_a_fragment_spliced_at_its_old_place():
         "set_report_mapping",
         "list_report_roundtrips",
     ]
-    assert catalogue._FRAGMENTS.spliced == {"report_templates"}
+    assert "report_templates" in catalogue._FRAGMENTS.spliced
 
 
 def test_every_schema_fragment_has_its_dispatcher_pair():
@@ -276,9 +276,15 @@ _REPORT_TEMPLATES = [
 
 # Every family moved out of the monolith, with the keys either side of its old
 # place on the pre-move master, in TOOLS, TOOL_ROUTES and DISPATCHERS (a dict
-# {table: (before, after)} when the three differ). Each move slice adds its row.
+# {table: (before, after)} when the three differ; after None = the table's end).
+# Each move slice adds its row.
 SPLICED_PLACES = {
     "report_templates": ("delete_report", "list_report_roundtrips"),
+    "lv08_bcampus": {
+        "TOOLS": ("create_evidence_report", "export_results_workbook"),
+        "TOOL_ROUTES": ("create_evidence_report", "get_input_workbook"),
+        "DISPATCHERS": ("get_grid_risk_production", None),
+    },
 }
 
 
@@ -306,7 +312,9 @@ def test_a_spliced_family_keeps_its_old_place(stem, table):
         ),
     }[table]
     i = keys.index(own[0])
-    assert keys[i - 1 : i + len(own) + 1] == [before, *own, after]
+    tail = [] if after is None else [after]
+    assert keys[i - 1 : i + len(own) + 1] == [before, *own, *tail]
+    assert after is not None or i + len(own) == len(keys)
 
 
 def test_splicing_routes_of_a_family_whose_tools_are_not_spliced_is_refused():
@@ -339,6 +347,42 @@ def test_spliced_routes_are_kept_where_they_were_spliced():
     routes = {"x": [], **frags.splice_routes("a"), "y": []}
     frags.merge(tools, routes, frozenset(), frozenset())
     assert list(routes) == ["x", "t1", "y", "t2"]
+
+
+def test_two_spliced_and_two_appended_fragments_keep_their_order():
+    """Two families spliced at their places (in the opposite order to their
+    file names) and two new tools appended in ORDER, not file name."""
+    frags = _schema(
+        a=_mod("pkg.cat.a", ["a1", "a2"]),
+        b=_mod("pkg.cat.b", ["b1"]),
+        y=_mod("pkg.cat.y", ["y1"], ORDER=2026112702),
+        z=_mod("pkg.cat.z", ["z1"], ORDER=2026112701),
+    )
+    tools = [_tool("x"), *frags.splice("b"), _tool("m"), *frags.splice("a"), _tool("n")]
+    frags.extend(tools)
+    routes = {
+        "x": [],
+        **frags.splice_routes("b"),
+        "m": [],
+        **frags.splice_routes("a"),
+        "n": [],
+    }
+    frags.merge(tools, routes, frozenset(), frozenset())
+    order = ["x", "b1", "m", "a1", "a2", "n", "z1", "y1"]
+    assert [t["name"] for t in tools] == order
+    assert list(routes) == order
+    disp = F.DispatchFragments(
+        {s: _disp(f"pkg.disp.{s}", *(n for n in order if n[0] == s)) for s in "abyz"}
+    )
+    dispatchers = {
+        "x": print,
+        **disp.splice("b"),
+        "m": print,
+        **disp.splice("a"),
+        "n": print,
+    }
+    disp.merge(dispatchers, {}, frags)
+    assert list(dispatchers) == order
 
 
 def test_a_spliced_route_removed_from_tool_routes_is_refused():
