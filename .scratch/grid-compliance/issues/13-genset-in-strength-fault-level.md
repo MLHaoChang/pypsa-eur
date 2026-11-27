@@ -3,7 +3,7 @@
 
 # GC-13 A running genset in the strength fault level (S_k''min)
 
-Status: ready-for-agent
+Status: done (GC-13 PR: a genset running in every hour of the period feeds S_k''min as a synchronous `gen` with K_G; GK A rules the minimum-case assumption in review)
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: GC-03 PR2 (`claude/gc03-campus-steps`)

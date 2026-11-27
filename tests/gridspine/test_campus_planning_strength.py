@@ -14,6 +14,7 @@ import pytest
 
 from gridspine.drivers import campus_study
 from gridspine.drivers.campus_study import (
+    GENSET_IDLE_NOTE,
     GENSET_SK_NOTE,
     LF_PCC_CSV,
     LV_C_NOTE,
@@ -634,20 +635,54 @@ GENSET = {
 }
 
 
-@pytest.mark.parametrize("bus", ["MV3", "MV2"])  # off every PoC, and on one
-def test_a_genset_adds_nothing_to_the_minimum_fault_level_and_says_so(bus):
+def _genset_spec(bus):
     spec = _spec(extra_bus=True)
-    plain = _strength(spec)
     spec["campus"]["units"]["GEN"] = {**GENSET, "bus": bus}
-    c = build_campus(spec)
+    return spec
+
+
+def _genset_notes(notes):
+    return [n for n in notes if "genset" in n]
+
+
+def test_a_running_genset_adds_its_own_current_to_the_minimum_fault_level():
+    # Hand calculation at MV2 (per-MVA, c_min = 1.0): the grid side
+    # Z_G + Z_T in parallel with the genset K_G (R + jX''d) / S_rG,
+    # K_G = c_max / (1 + x''d sin phi_rG) (IEC 60909-0 6.6.1, U_n = U_rG),
+    # cos phi_rG 0.8 when the spec gives none.
+    c = build_campus(_genset_spec("MV2"))
+    got = _gc03_strength(c, _hourly(c))
+    k_g = 1.1 / (1 + 0.15 * 0.6)
+    z_gen = k_g * complex(0.1 * 0.15, 0.15) / 12.5
+    z_grid = complex(0.0, Z_G + Z_T)
+    hand = abs(1 / (1 / z_grid + 1 / z_gen))
+    sk = _at(got[0], "MV2")["sk_intact_mva"]
+    assert sk == pytest.approx(1 / hand, rel=5e-3)
+    assert sk > 1 / (Z_G + Z_T) + 50  # the genset counts: about 76 MVA more
+    assert _genset_notes(got[3]) == [GENSET_SK_NOTE.format(period=2030, names="GEN")]
+
+
+@pytest.mark.parametrize("bus", ["MV3", "MV2"])  # off every PoC, and on one
+def test_a_genset_not_built_or_not_running_adds_nothing(bus):
+    plain = _strength(_spec(extra_bus=True))
+    c = build_campus(_genset_spec(bus))
     hourly = _hourly(c)
-    built = _gc03_strength(c, hourly)
-    unbuilt = _gc03_strength(
-        c, hourly.assign(status=(hourly["unit_id"] != "GEN").astype(int))
-    )
+    gen = hourly["unit_id"] == "GEN"
+    unbuilt = _gc03_strength(c, hourly.assign(status=(~gen).astype(int), p_mw=hourly["p_mw"].where(~gen, 0.0)))
+    # running in one hour and standing still in the next: the weakest hour counts
+    idle = _gc03_strength(c, pd.concat([hourly, hourly.assign(hour=1, p_mw=hourly["p_mw"].where(~gen, 0.0))]))
     for poc in ("GRID", "MV1", "MV2"):
-        for got in (built, unbuilt):
+        for got in (unbuilt, idle):
             assert _at(got[0], poc)["sk_intact_mva"] == pytest.approx(
                 _at(plain[0], poc)["sk_intact_mva"], rel=1e-9
             )
-    assert built[3].count(GENSET_SK_NOTE) == 1 and GENSET_SK_NOTE not in plain[3]
+    assert _genset_notes(unbuilt[3]) == [] and _genset_notes(plain[3]) == []
+    assert _genset_notes(idle[3]) == [GENSET_IDLE_NOTE.format(period=2030, names="GEN")]
+
+
+def test_a_running_genset_off_every_poc_still_strengthens_them():
+    plain = _strength(_spec(extra_bus=True))
+    c = build_campus(_genset_spec("MV3"))
+    got = _gc03_strength(c, _hourly(c))
+    for poc in ("GRID", "MV1", "MV2"):
+        assert _at(got[0], poc)["sk_intact_mva"] > _at(plain[0], poc)["sk_intact_mva"]
