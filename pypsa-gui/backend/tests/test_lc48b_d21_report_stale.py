@@ -119,7 +119,7 @@ def test_a_report_generated_after_the_change_exports_the_new_figure(
 
     assert T.export_report_docx(new)["kind"] == "agent_export"
     headline = T.get_report_table(new, "headline")["items"]
-    assert ["MC LOLE (h/yr)", "4.50 h/yr"] in headline, headline
+    assert ["Expected shortfall (h/yr)", "4.50 h/yr"] in headline, headline
     refused(lambda: T.export_report_docx(old), 409, "report_stale")
 
 
@@ -190,3 +190,23 @@ def test_a_version_without_an_evidence_hash_is_refused(project, monkeypatch):
     before = state(project)
     assert _reason(lambda: T.export_report_docx(report_id)) == "no_evidence_hash"
     assert state(project) == before
+
+
+def test_a_report_drafted_under_the_old_figure_name_reads_stale_and_keeps_its_words(
+    project, monkeypatch
+):
+    """guided-results 04 (GK B (72)): renaming a printed figure moves the evidence hash, so a
+    report drafted with master's words goes down the existing stale path once: the redraft
+    hint, no error kind of its own, and the stored report and its table are kept."""
+    from services import figure_words as FW
+
+    with monkeypatch.context() as old_words:
+        old_words.setitem(FW.FIGURES["expected_shortfall"], "name", "MC LOLE")
+        old = _generated(monkeypatch)
+        assert T.export_report_docx(old)["kind"] == "agent_export"
+
+    _reason(lambda: T.export_report_docx(old))  # 409 report_stale with the redraft hint
+    assert old in [r["report_id"] for r in T.list_reports()]
+    assert ["MC LOLE (h/yr)", "3.21 h/yr"] in T.get_report_table(old, "headline")[
+        "items"
+    ]
