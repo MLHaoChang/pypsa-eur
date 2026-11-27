@@ -2,6 +2,9 @@
 # Shrink-only: tests/test_catalogue_settings.py fails on a new gap, a stale line and a count over its ceiling.
 # Cover a line with a settings.py entry (its `writes`) or a NOT_OFFERED_SETTINGS reason, then delete it here.
 PATCH /api/campus-electrical/{name}/island base
+PATCH /api/campus-electrical/{name}/island patch
+PATCH /api/projects/{name}/scenario description
+PATCH /api/projects/{name}/scenario scenario_type
 PATCH /api/projects/{name}/settings derive_lengths_from_geometry
 POST /api/campus-electrical/{name}/island/cuts/apply *
 POST /api/campus-electrical/{name}/island/cuts/apply/cancel *
@@ -44,13 +47,33 @@ POST /api/projects/{name}/profiles/loads/generate resolution
 POST /api/projects/{name}/profiles/loads/generate year
 POST /api/results/eh_study archetype
 POST /api/results/eh_study budget_solves
+POST /api/results/eh_study dsr_buses
 POST /api/results/eh_study dtc_attribution
 POST /api/results/eh_study dtc_config
 POST /api/results/eh_study mc
+POST /api/results/eh_study pack_overrides.certification_metric
+POST /api/results/eh_study pack_overrides.dtc_planning_default
+POST /api/results/eh_study pack_overrides.dtc_stress_default
+POST /api/results/eh_study pack_overrides.ens_cap_permyriad
+POST /api/results/eh_study pack_overrides.frontier_default
+POST /api/results/eh_study pack_overrides.import_energy_mwh_per_year
+POST /api/results/eh_study pack_overrides.import_p_nom_mw
+POST /api/results/eh_study pack_overrides.mc_certify_required
 POST /api/results/eh_study stages
 POST /api/results/eh_study/abort *
 PUT /api/campus-electrical/{name}/island base
+PUT /api/campus-electrical/{name}/island config
+PUT /api/gridspine/{name}/config from_dispatch
+PUT /api/gridspine/{name}/config hours
+PUT /api/gridspine/{name}/config k
+PUT /api/gridspine/{name}/config n2_prune_threshold_pct
+PUT /api/gridspine/{name}/config overlap
+PUT /api/gridspine/{name}/config screen
+PUT /api/gridspine/{name}/config set_from_dispatch
+PUT /api/gridspine/{name}/config window
 PUT /api/results/business_case/inputs business_case
+PUT /api/simulation/commercial/value_flows value_flows
+PUT /api/simulation/finance finance
 PUT /api/simulation/solver_config ac_pf_slack_bus
 PUT /api/simulation/solver_config ac_pf_x_tol
 PUT /api/simulation/solver_config auto_discount_periods
@@ -143,6 +166,7 @@ PUT /api/simulation/solver_config commercial.site_party
 PUT /api/simulation/solver_config commercial.value_flows
 PUT /api/simulation/solver_config default_lifetime
 PUT /api/simulation/solver_config discount_rate
+PUT /api/simulation/solver_config dsr_buses
 PUT /api/simulation/solver_config ens_cap_permyriad
 PUT /api/simulation/solver_config ens_zone_cap_multiple
 PUT /api/simulation/solver_config envelope_floors.backup_mwh

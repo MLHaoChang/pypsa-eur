@@ -126,20 +126,26 @@ def _default_of(scope: str, spec: FieldSpec) -> dict[str, Any]:
     return {"value": _json_number(v), "source": "engine"}
 
 
+def _claim_id(seen: dict[str, str], scope: str, spec: FieldSpec) -> str:
+    """The row's entry id, recorded in `seen`; a case-folded collision is refused, never suffixed or
+    truncated (#1127): set `id=` on one of the rows."""
+    eid = E.entry_id_of(scope, spec)
+    folded = eid.lower()
+    if folded in seen:
+        raise CatalogueError(
+            f"entry id '{eid}' ({scope}.{spec.key}) collides with {seen[folded]}"
+        )
+    seen[folded] = f"{scope}.{spec.key}"
+    return eid
+
+
 @lru_cache(maxsize=1)
 def entries() -> tuple[Entry, ...]:
     out: list[Entry] = []
     seen: dict[str, str] = {}
     for scope in known_components():
         for order, spec in enumerate(fields_for(scope)):
-            eid = E.entry_id_of(scope, spec)
-            folded = eid.lower()
-            if folded in seen:
-                # Refused, never suffixed or truncated (#1127): set `id=` on one of the rows.
-                raise CatalogueError(
-                    f"entry id '{eid}' ({scope}.{spec.key}) collides with {seen[folded]}"
-                )
-            seen[folded] = f"{scope}.{spec.key}"
+            eid = _claim_id(seen, scope, spec)
             group = E.group_of(scope, spec)
             out.append(
                 Entry(
@@ -159,13 +165,7 @@ def entries() -> tuple[Entry, ...]:
     orders: dict[str, int] = {}
     for st in SETTINGS:
         spec, scope = st.spec, st.scope
-        eid = E.entry_id_of(scope, spec)
-        folded = eid.lower()
-        if folded in seen:
-            raise CatalogueError(
-                f"entry id '{eid}' ({scope}.{spec.key}) collides with {seen[folded]}"
-            )
-        seen[folded] = f"{scope}.{spec.key}"
+        eid = _claim_id(seen, scope, spec)
         # A tag column on a class follows that class's rows; a settings scope counts from 0.
         base = len(fields_for(scope)) if scope in known_components() else 0
         order = orders[scope] = orders.get(scope, base - 1) + 1

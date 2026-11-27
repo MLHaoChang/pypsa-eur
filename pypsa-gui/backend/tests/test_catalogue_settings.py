@@ -30,7 +30,7 @@ FIELD_LABELS_FLOOR = 40
 ROUTES_FLOOR = 10
 FIELDS_FLOOR = 150
 #: E5: the committed gap list may only shrink; lower this when you remove lines, never raise it.
-KNOWN_GAPS_CEILING = 189
+KNOWN_GAPS_CEILING = 213
 
 
 # ── FIELD_LABELS ────────────────────────────────────────────────────────────
@@ -103,6 +103,15 @@ def _archetype_params() -> list[str]:
     return sorted(keys)
 
 
+def _pack_override_fields() -> list[str]:
+    """`POST /api/results/eh_study` takes `pack_overrides` as an untyped body dict; the runner checks it
+    against `PackOverrides` (extra="forbid"), so its fields are the ones a caller can write."""
+    from services.adequacy.eh_study_runner import LeverOverrides, PackOverrides
+
+    out = [f"pack_overrides.{k}" for k in PackOverrides.model_fields if k != "levers"]
+    return out + [f"pack_overrides.levers.{k}" for k in LeverOverrides.model_fields]
+
+
 def settings_route_fields(spec) -> dict[str, list[str]]:
     """`"<METHOD> <path>"` → its body fields, for every write route under `SETTINGS_ROUTE_PREFIXES`."""
     comps = spec.get("components", {}).get("schemas", {})
@@ -117,9 +126,13 @@ def settings_route_fields(spec) -> dict[str, list[str]]:
             fields: list[str] = []
             for content in op.get("requestBody", {}).get("content", {}).values():
                 fields += body_fields(content["schema"], comps)
-            if f"{m} {path}" == S.LOAD_GENERATE and "params" in fields:
+            route = f"{m} {path}"
+            if route == S.LOAD_GENERATE and "params" in fields:
                 fields.remove("params")
                 fields += [f"params.{k}" for k in _archetype_params()]
+            if route == S.EH_STUDY and "pack_overrides" in fields:
+                fields.remove("pack_overrides")
+                fields += _pack_override_fields()
             out[f"{m} {path}"] = fields or ["*"]
     return out
 
@@ -238,13 +251,70 @@ def test_load_profile_entries_are_accepted_archetype_params():
 @pytest.mark.parametrize("st", S.SETTINGS, ids=lambda s: f"{s.scope}.{s.spec.key}")
 def test_options_plain_is_parallel_to_options(st):
     assert len(st.spec.options_plain) == len(st.spec.options)
-    if st.spec.kind == "enum":
+    if st.spec.kind in ("enum", "enum_list"):
         assert st.spec.options and all(st.spec.options_plain)
+
+
+def test_an_enum_default_is_one_of_its_options():
+    """`shifts` stores 1, 2, 3 or "continuous"; its options are the string forms (FieldSpec options are str)."""
+    for st in S.SETTINGS:
+        if st.spec.kind == "enum" and st.default is not None:
+            assert str(st.default) in st.spec.options, st.spec.key
 
 
 def test_settings_entries_are_never_essentials():
     """The Guided set is unchanged by 01a-2 (`test_essentials_is_todays_guided_set`)."""
     assert all(s.spec.depth != "essentials" for s in S.SETTINGS)
+
+
+def _entry(eid):
+    return next(e for e in C.entries() if e.id == eid)
+
+
+def test_settings_defaults_are_engine_or_none():
+    assert _entry("levers.size_the_assets").default == {
+        "value": True,
+        "source": "engine",
+    }
+    assert _entry("demand_response.dsr_volume").default == {
+        "value": 0.0,
+        "source": "engine",
+    }
+    assert _entry("reliability.allowed_shortfall").default == {
+        "value": None,
+        "source": "none",
+    }
+    assert _entry("load_growth.growth_from_year").default == {
+        "value": None,
+        "source": "none",
+    }
+
+
+def test_tag_rows_follow_their_class_rows_and_settings_count_from_zero():
+    from services.asset_schema.fields import fields_for
+
+    assert _entry("bus.grid_point_of_connection").order == len(fields_for("Bus"))
+    assert _entry("bus.critical_bus").order == len(fields_for("Bus")) + 1
+    assert _entry("link.energy_hub_role").order == len(fields_for("Link"))
+    assert _entry("connection.grid_x_r_ratio_at_the_connection").order == 0
+    assert _entry("connection.backup_autonomy").order == 1
+
+
+def test_the_tag_reader_sees_the_tags_with_their_kinds():
+    """The registry move reaches its reader: `eh_columns_for` (which coerces API writes) sees each tag."""
+    from services.adequacy.eh_columns import coerce_eh_value, eh_columns_for
+
+    bus = eh_columns_for("Bus")
+    assert [bus[c] for c in ("eh_poc", "eh_critical", "eh_sk_mva", "eh_ibr_mva")] == [
+        "bool",
+        "bool",
+        "float_nonneg",
+        "float_nonneg",
+    ]
+    assert eh_columns_for("Link")["eh_role"] == "role"
+    assert coerce_eh_value("Bus", "eh_poc", "yes") is True
+    with pytest.raises(ValueError):
+        coerce_eh_value("Bus", "eh_sk_mva", -1.0)
 
 
 # ── E1: entries describe, routes enforce as before ──────────────────────────

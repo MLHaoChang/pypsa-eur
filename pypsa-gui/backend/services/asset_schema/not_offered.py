@@ -11,8 +11,8 @@ A reason opens with its kind:
 - `engine-internal`: PyPSA's own bookkeeping, never a planner's input;
 - `time series`: set through a profile, not as one value on the asset;
 - `unsupported`: an engine feature no workflow in the tool offers;
-- `pending`: an input an engine reads that the catalogue should offer; a named follow-up
-  (the Expert form adds it in a later slice without changing today's asset form).
+- `pending`: an input an engine reads that the catalogue should offer; tracked as
+  `.scratch/expert-catalogue/issues/10-pending-engine-inputs.md`.
 """
 
 from __future__ import annotations

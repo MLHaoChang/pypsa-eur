@@ -70,3 +70,31 @@ def _fps(n):
 def test_fingerprint_is_masters_with_every_eh_column_set():
     _fps(_network())  # warm-up: the first walk builds the shared caches
     assert _fps(_network()) == MASTER_FP_EH_COLUMNS
+
+
+def _ic_digest():
+    """The investment-case assumptions digest of a solver config that sets the catalogued settings."""
+    from services.finance.investment_case_runner import assumptions_digest
+    from services.solver_service import SolverConfig
+
+    cfg = SolverConfig(
+        multi_investment_periods=True,
+        investment_periods=[2030, 2035],
+        target_lole_h=0.5,
+        dsr_share_of_load=0.1,
+        dsr_price_eur_per_mwh=300.0,
+        load_growth_pct_per_year={"electrical": 2.0},
+        load_growth_base_year=2030,
+        load_scalers={"2035": 1.2},
+    )
+    return assumptions_digest(
+        finance=None, commercial=None, dispatch=None, packs={}, solver=cfg
+    )[0]
+
+
+#: `_ic_digest()` on master d0d98072, before the move (C5).
+MASTER_IC_DIGEST = "1ddbd1322e4bc2001b77cd0214ca810e"
+
+
+def test_investment_case_digest_is_masters():
+    assert _ic_digest() == MASTER_IC_DIGEST

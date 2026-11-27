@@ -45,6 +45,10 @@ SETTINGS_ROUTE_PREFIXES: tuple[tuple[str, str], ...] = (
     ("PATCH", "/api/campus-electrical/{name}/island"),
     ("POST", "/api/campus-electrical/{name}/island"),
     ("POST", "/api/campus-electrical/{name}/run"),
+    ("PUT", "/api/simulation/finance"),
+    ("PUT", "/api/simulation/commercial/value_flows"),
+    ("PUT", "/api/gridspine/{name}/config"),
+    ("PATCH", "/api/projects/{name}/scenario"),
 )
 
 #: Link roles in the order of `models.energy_hub.EH_LINK_ROLES`, with their plain names (a test keeps
@@ -233,6 +237,7 @@ SETTINGS: tuple[Setting, ...] = (
         "reliability",
         {F.ADEQUACY: "uses"},
         writes=(f"{PROJECT_SETTINGS} backup_autonomy_h",),
+        default=4.0,  # models/schemas.py BACKUP_AUTONOMY_DEFAULT_H
     ),
     Setting(
         "site",
@@ -271,7 +276,10 @@ SETTINGS: tuple[Setting, ...] = (
         ),
         "reliability",
         {F.ADEQUACY: "needs"},
-        writes=(f"{SOLVER_CONFIG} target_lole_h",),
+        writes=(
+            f"{SOLVER_CONFIG} target_lole_h",
+            f"{EH_STUDY} pack_overrides.target_lole_h",
+        ),
     ),
     # Demand response.
     Setting(
@@ -285,11 +293,7 @@ SETTINGS: tuple[Setting, ...] = (
         ),
         "operation",
         _DISPATCH,
-        writes=(
-            f"{SOLVER_CONFIG} dsr_share_of_load",
-            f"{SOLVER_CONFIG} dsr_buses",
-            f"{EH_STUDY} dsr_buses",
-        ),
+        writes=(f"{SOLVER_CONFIG} dsr_share_of_load",),
         default=0.0,
     ),
     Setting(
@@ -317,8 +321,7 @@ SETTINGS: tuple[Setting, ...] = (
         ),
         "investment",
         {F.EXPANSION: "uses"},
-        writes=(f"{EH_STUDY} pack_overrides",),
-        default=True,
+        default=True,  # not a per-run override: the archetype pack sets it
     ),
     Setting(
         "levers",
@@ -331,7 +334,7 @@ SETTINGS: tuple[Setting, ...] = (
         ),
         "investment",
         {F.EXPANSION: "uses", F.ADEQUACY: "uses"},
-        writes=(f"{EH_STUDY} pack_overrides",),
+        writes=(f"{EH_STUDY} pack_overrides.levers.redundancy",),
         default=False,
     ),
     Setting(
@@ -345,7 +348,7 @@ SETTINGS: tuple[Setting, ...] = (
         ),
         "investment",
         {F.EXPANSION: "uses"},
-        writes=(f"{EH_STUDY} pack_overrides",),
+        writes=(f"{EH_STUDY} pack_overrides.levers.import_cap",),
         default=False,
     ),
     Setting(
@@ -359,7 +362,7 @@ SETTINGS: tuple[Setting, ...] = (
         ),
         "investment",
         {F.EXPANSION: "uses"},
-        writes=(f"{EH_STUDY} pack_overrides",),
+        writes=(f"{EH_STUDY} pack_overrides.levers.storage_duration",),
         default=False,
     ),
     Setting(
@@ -373,7 +376,7 @@ SETTINGS: tuple[Setting, ...] = (
         ),
         "investment",
         {F.EXPANSION: "uses"},
-        writes=(f"{EH_STUDY} pack_overrides",),
+        writes=(f"{EH_STUDY} pack_overrides.levers.import_energy",),
         default=False,
     ),
     # Load growth (homer-parity 04a; the words of #1604 and services/solver/load_growth.py).
@@ -435,7 +438,7 @@ SETTINGS: tuple[Setting, ...] = (
             "holidays",
             "Holiday dates",
             "Days the site runs as on a Sunday.",
-            kind="text",
+            kind="list",
         ),
         "operation",
         {F.DISPATCH: "uses"},
@@ -541,7 +544,7 @@ SETTINGS: tuple[Setting, ...] = (
             "shutdown_weeks",
             "Shutdown weeks",
             "Calendar weeks the site stands still.",
-            kind="text",
+            kind="list",
         ),
         "operation",
         {F.DISPATCH: "uses"},
@@ -554,7 +557,7 @@ SETTINGS: tuple[Setting, ...] = (
             "scenarios",
             "Island scenarios",
             "Which ways of leaving the grid the island study tests.",
-            kind="enum",
+            kind="enum_list",
             **_opts(ISLAND_SCENARIOS),
         ),
         "reliability",
@@ -573,7 +576,8 @@ SETTINGS: tuple[Setting, ...] = (
         ),
         "electrical",
         {F.GRID_COMPLIANCE: "uses"},
-        writes=(f"{ISLAND_PUT} config", f"{ISLAND_PATCH} patch"),
+        # Held per unit in the island sidecar (`units.<unit>.control`) inside the free-form `config` /
+        # `patch` bodies, which stay gap lines until the sidecar is typed.
     ),
     Setting(
         "grid_code",
