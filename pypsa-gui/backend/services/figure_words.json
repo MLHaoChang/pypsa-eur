@@ -19,6 +19,11 @@
       "unit": "{currency}",
       "basis": "Net present value of the project's after-tax cash before financing, discounted at the WACC"
     },
+    "project_npv_pre_tax": {
+      "name": "Project NPV at the WACC, before tax (unlevered)",
+      "unit": "{currency}",
+      "basis": "Net present value of the project's cash before tax and before financing, discounted at the WACC"
+    },
     "lcoe_real": {
       "name": "LCOE (real)",
       "unit": "{currency}/MWh",
@@ -29,10 +34,21 @@
       "unit": "{currency}/MWh",
       "basis": "investment case · nominal basis"
     },
+    "carrier_lcoe": {
+      "name": "Carrier LCOE (before financing and tax)",
+      "unit": "{currency}/MWh",
+      "basis": "Annualised capital and fixed O&M, plus fuel and variable O&M, per MWh the carrier produced. Storage also counts its charging energy at the bus price. No financing or tax."
+    },
     "study_cost_per_mwh": {
       "name": "Cost per MWh served (study)",
       "unit": "€/MWh",
       "basis": "The study's cost at the target divided by the energy it served. Energy shed is not counted."
+    },
+    "system_cost_per_mwh": {
+      "name": "System cost per MWh delivered (before financing and tax)",
+      "unit": "{currency}/MWh",
+      "tag": "LCOE / LCOS",
+      "basis": "Annualised capital and fixed O&M, plus fuel, variable O&M and storage charging energy at the bus price, over all energy the portfolio delivered. No financing or tax."
     }
   }
 }

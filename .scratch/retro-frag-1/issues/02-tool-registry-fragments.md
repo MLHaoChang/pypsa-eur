@@ -1,4 +1,5 @@
 Status: ready-for-agent
+Progress: S1 merged (#2065). Plan GO (GK B 74, option a): S2 hardening (#2084), then S3 LV08 B-campus, S4 Adequacy/FMEA, S5 Asset results + UI control + Explanation, then stop.
 
 # Per-tool registry for the chat catalogue
 

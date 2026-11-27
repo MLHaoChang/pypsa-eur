@@ -111,7 +111,7 @@ def investment_table(payload: dict, source_path: str):
     cur = FW.unit("project_npv", payload.get("currency"))
     rows = [
         (FW.name("project_npv"), F.fmt_number(payload.get("npv_at_wacc_eur"), unit=cur)),
-        ("NPV before tax", F.fmt_number(payload.get("project_pre_tax_npv_eur"), unit=cur)),
+        (FW.name("project_npv_pre_tax"), F.fmt_number(payload.get("project_pre_tax_npv_eur"), unit=cur)),
         ("Project IRR before tax", F.fmt_number(payload.get("project_irr_pre_tax_pct"), unit="%", digits=1)),
         ("Project IRR after tax", F.fmt_number(payload.get("project_irr_post_tax_pct"), unit="%", digits=1)),
         ("Payback (years)", F.fmt_number(payload.get("payback_years"), digits=1)),

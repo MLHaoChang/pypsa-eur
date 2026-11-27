@@ -6,7 +6,7 @@ import type { HeadlineCard, HeadlineComparison } from '../../api/simulation'
 import { chartFigure } from '../../components/charts/chartTheme'
 import { fmtCo2Tonnes, fmtCurrency, fmtEnergy } from '../../utils/format'
 import { money } from '../../utils/money'
-import { HEADLINES } from './investment/financeModel'
+import { figureName } from '../../utils/figureWords'
 
 /** The Curtailment tab's own tile label. */
 export const CURTAILMENT_RATE = 'Curtailment rate'
@@ -49,7 +49,7 @@ export const HEADLINE_WORDS: Record<string, Words> = {
   unserved_energy: { label: UNSERVED_ENERGY, tab: 'lostload', tabLabel: 'Lost load' },
   co2_annual: { label: CO2_EMISSIONS, tab: 'emissions', tabLabel: 'Emissions' },
   lcoe: {
-    label: HEADLINES.find(h => h.id === 'lcoe_real')?.label ?? 'LCOE (real)',
+    label: figureName('lcoe_real'),
     tab: 'investment', tabLabel: 'Investment case',
   },
   peak_line_loading: { label: 'Peak line loading', tab: 'loadflow', tabLabel: 'Load flow' },
@@ -76,7 +76,7 @@ export function headlineFigure(card: HeadlineCard): { value: string; basis?: str
     case '%': return { value: `${v.toFixed(1)} %`, basis: card.detail ?? undefined }
     default: {
       const unit = card.unit === 'EUR/MWh' ? '€/MWh' : card.unit ?? ''
-      return { value: `${v.toFixed(2)} ${unit}`.trim(), basis: card.id === 'lcoe' ? 'investment case' : undefined }
+      return { value: `${v.toFixed(2)} ${unit}`.trim(), basis: card.id === 'lcoe' ? card.basis ?? 'investment case' : undefined }
     }
   }
 }

@@ -1,0 +1,3 @@
+{"kinds": {
+  "value_out_of_range": {"surface": "inline", "why": "A write set a component value outside the catalogue's hard range (services/asset_schema/ranges.py): a zero or negative nominal voltage or discharging efficiency, a standing loss above 1, NaN where the engine has a number, or infinity where the engine does not default to it. Nothing was written; the message names the field by its plain name and the value as sent, and the assistant asks for a value in range."}
+}}

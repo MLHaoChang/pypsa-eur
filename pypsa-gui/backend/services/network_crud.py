@@ -9,6 +9,7 @@ router. Never imports ``routers.*``.
 from __future__ import annotations
 
 import math
+import pathlib
 import re
 from functools import lru_cache
 from typing import Any
@@ -32,7 +33,8 @@ from services.asset_schema.derive import (
 from services.asset_schema.schema import CLASS_ATTR, COMPOSITE, composite_parts
 from services.asset_schema import fields as asset_fields
 from services.asset_schema import provenance as asset_provenance
-from services import component_identity
+from services.asset_schema import ranges as asset_ranges
+from services import component_identity, template_display_names
 from services.carrier_catalog import ensure_carrier
 from services.component_names import require_valid_name
 from services.pypsa_service import PyPSAService
@@ -141,7 +143,7 @@ def _get_component(component_class: str, attr: str) -> list[dict]:
     return _serialize_component(n, attr, transient)
 
 
-def _meta_payload(n: Any, loaded_project: str | None) -> dict:
+def _meta_payload(n: Any, loaded_project: str | None, project_dir: str | pathlib.Path | None = None) -> dict:
     """
     The /network/meta response shape for a given network + its on-disk
     binding. `name` is the (mutable) display title; `loaded_project` is the
@@ -152,12 +154,17 @@ def _meta_payload(n: Any, loaded_project: str | None) -> dict:
     Shared by the active-network shim (`GET /api/network/meta`) and the B6
     path-scoped `GET /api/projects/{id}/network/meta`, so the two payloads
     can't drift.
+
+    `display_names` is `{class: {id: name}}` from the template the project
+    at `project_dir` was made from (`services.template_display_names`);
+    `{}` when there is none. Each caller passes its own context's directory.
     """
     return {
         "name": n.name,
         "loaded_project": loaded_project,
         "snapshot_count": len(n.snapshots),
         "bus_count": len(n.buses),
+        "display_names": template_display_names.names_for_network(n, project_dir),
     }
 # PyPSA's multi-port Link columns: `bus2`, `bus3`, … and the matching
 # `efficiency2`, `efficiency3`, …. Mirrors `pypsa.constants.RE_PORTS_GE_2`
@@ -548,6 +555,7 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict,
     kwargs = _drop_unknown_extras(component_class, attr, kwargs)
     _check_investment_parts(component_class, parts, row=kwargs)
     _refuse_reversed_grid_strength(component_class, kwargs)
+    asset_ranges.check(component_class, kwargs)
     notice = check_fuel_curve(component_class, kwargs)
     with PyPSAService.get_lock():
         _refuse_cost_basis_mismatch(n, component_class, kwargs, cost_basis)
@@ -787,6 +795,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict,
         _check_investment_parts(component_class, parts, row=merged)
         _refuse_reversed_grid_strength(component_class, merged, submitted=kwargs)
         stored = df.loc[name].to_dict()
+        asset_ranges.check(component_class, kwargs, stored=stored)
         check_parts_own_costs(component_class, parts, before=stored, submitted=kwargs)
         notice = check_fuel_curve(component_class, merged, n=n, name=name, before=stored, submitted=kwargs)
         if component_class == "Generator":
