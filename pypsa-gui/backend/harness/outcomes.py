@@ -368,7 +368,9 @@ def note_write(tool: str, args: dict) -> dict | None:
             for item in items:
                 item["before_present"] = item["name"] in df.index
                 if item["kind"] == "cell":
-                    item["expected"] = _coerce(df, cls, item["attr"], item["requested"], item["name"])
+                    item["expected"] = _coerce(
+                        df, cls, item["attr"], item["requested"], item["name"]
+                    )
             revision = dirty_state.revision(ctx)
             state = _live_state(ctx)  # S4b: the whole state before (G5/G6)
             carriers = sorted(str(c) for c in ctx.network.carriers.index)

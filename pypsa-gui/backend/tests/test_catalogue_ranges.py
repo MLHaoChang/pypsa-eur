@@ -568,8 +568,7 @@ def test_the_bulk_coercion_copy_refuses_like_the_bulk_loop(client, world):
     name = df.index[0]
     df.loc[name, "efficiency_dispatch"] = 0.0
     assert (
-        _coerce_bulk_value(df, "efficiency_dispatch", 0.0, "StorageUnit", [name])
-        == 0.0
+        _coerce_bulk_value(df, "efficiency_dispatch", 0.0, "StorageUnit", [name]) == 0.0
     )
     df.loc[name, "efficiency_dispatch"] = 0.5
     assert (
