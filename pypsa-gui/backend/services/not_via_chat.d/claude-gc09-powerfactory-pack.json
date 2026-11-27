@@ -7,10 +7,47 @@
    "reason": "A PowerFactory hand-off case is a zip file the user saves from the app; chat cannot hand over a download. The Grid code & connection results list each bundle with its button.",
    "page": "Results, Grid code & connection",
    "panel": null,
-   "keywords": ["powerfactory", "dgs", "digsilent"],
+   "keywords": [
+    "powerfactory",
+    "dgs",
+    "digsilent"
+   ],
    "routes": [
-    ["GET", "/api/campus-electrical/{name}/powerfactory"],
-    ["GET", "/api/campus-electrical/{name}/powerfactory/{bundle}/download"]
+    [
+     "GET",
+     "/api/campus-electrical/{name}/powerfactory"
+    ],
+    [
+     "GET",
+     "/api/campus-electrical/{name}/powerfactory/{bundle}/download"
+    ]
+   ]
+  },
+  {
+   "id": "campus_background_harmonics",
+   "title": "Background harmonics measurement at the campus PCC",
+   "disposition": "manual",
+   "reason": "The background harmonics are a measurement file the user uploads in the app; chat cannot take a file.",
+   "page": "Results, Grid code & connection",
+   "panel": null,
+   "keywords": [
+    "background",
+    "harmonics",
+    "measurement"
+   ],
+   "routes": [
+    [
+     "GET",
+     "/api/campus-electrical/{name}/background-harmonics"
+    ],
+    [
+     "PUT",
+     "/api/campus-electrical/{name}/background-harmonics"
+    ],
+    [
+     "DELETE",
+     "/api/campus-electrical/{name}/background-harmonics"
+    ]
    ]
   }
  ]
