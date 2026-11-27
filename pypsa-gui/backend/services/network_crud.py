@@ -9,6 +9,7 @@ router. Never imports ``routers.*``.
 from __future__ import annotations
 
 import math
+import pathlib
 import re
 from functools import lru_cache
 from typing import Any
@@ -141,7 +142,7 @@ def _get_component(component_class: str, attr: str) -> list[dict]:
     return _serialize_component(n, attr, transient)
 
 
-def _meta_payload(n: Any, loaded_project: str | None, project_dir: Any = None) -> dict:
+def _meta_payload(n: Any, loaded_project: str | None, project_dir: str | pathlib.Path | None = None) -> dict:
     """
     The /network/meta response shape for a given network + its on-disk
     binding. `name` is the (mutable) display title; `loaded_project` is the
