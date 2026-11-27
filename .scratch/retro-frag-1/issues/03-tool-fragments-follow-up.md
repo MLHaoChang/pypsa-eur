@@ -20,12 +20,26 @@ so moving them needs a plan for the order first (GK B):
 
 `ChatPanel.sendRequest.test.tsx` (P29 gate B1-1) scans the schemas for
 descriptions that begin "Start …" and requires each tool to have its own
-"start …" phrase. The scan read `harness/catalogue.py` alone, so the tools S3
-moved into fragments (#2086, #2096) went unchecked. S4 widened the scan to every
-fragment. Two tools fail it and are listed in `PHRASE_GAPS` there:
+"start …" phrase. These two had one-line `_t("x", "Start …` schemas in
+`harness/catalogue.py`, which the scan's regex never matched, so they were never
+checked. Formatted into their fragments by S3 (#2086, #2096), the scan finds
+them since S4 widened it to every fragment. They are listed in `PHRASE_GAPS`
+there, which a test holds equal to the start-only tools without a phrase:
 
 - `campus_new_grid_code_draft`
 - `campus_start_milp`
 
 Give each one a phrase in `ChatPanel`'s `guidedToolPhrase`, then empty
 `PHRASE_GAPS`. That is a UI change, so the UX reviewer sees it.
+
+## Lock gating of start_campaign is checked by name, not by wrapping
+
+Found by GK B (75) on #2106; on master too. `start_campaign` is lock-gated by
+the `_lock_gated` wrapper (`services/chat_tools.py`, `_lock_gated` /
+`_check_foreign_lock`). Two mutants survive at master and on #2106 across
+`test_write_surface_lock_policy`, `test_chat_tools_lock_gate_parity`,
+`test_adequacy_campaign` and `test_lc36_d13_scope_campaign`: skipping the wrapper
+for it, and skipping its `_check_foreign_lock`. The policy test checks the
+lock-gated name set, not that each named tool's dispatcher is wrapped and
+calls the check. Add a test that a foreign lock refuses `start_campaign` (and
+the other routeless lock-gated tools) through `DISPATCHERS`.

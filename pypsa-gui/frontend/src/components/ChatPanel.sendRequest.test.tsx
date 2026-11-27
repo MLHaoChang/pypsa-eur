@@ -872,13 +872,17 @@ describe('P29 gate B1-1: start-only tools never say they finished', () => {
     expect(guidedToolPhrase('mcp__tariffs__set_value')).toBe('use set value')
   })
 
-  // Moved into fragments by S3 (#2086, #2096) while the scan still read
-  // catalogue.py alone, so it never checked them; they still lack a phrase.
-  // Follow-up: .scratch/retro-frag-1/issues/03-tool-fragments-follow-up.md. Named,
-  // so every other start-only tool, in any fragment, is still checked.
+  // Two start-only tools with no phrase. Their schemas were one-line `_t(...)`
+  // calls in catalogue.py, which the scan's regex never matched; formatted into
+  // their fragments by S3 (#2086, #2096), the scan finds them now.
+  // Follow-up: .scratch/retro-frag-1/issues/03-tool-fragments-follow-up.md.
   const PHRASE_GAPS = ['campus_new_grid_code_draft', 'campus_start_milp']
-  it('the phrase gaps are still start-only schema tools', () => {
-    expect(fromSchema).toEqual(expect.arrayContaining(PHRASE_GAPS))
+  const hasStartPhrase = (tool: string) => {
+    const phrase = guidedToolPhrase(tool)
+    return !/^use /.test(phrase) && /^start /.test(phrase) && !/_/.test(phrase)
+  }
+  it('the phrase gaps are exactly the start-only tools without a phrase', () => {
+    expect(START_ONLY.filter(t => !hasStartPhrase(t)).sort()).toEqual(PHRASE_GAPS)
   })
 
   it.each(START_ONLY.filter(t => !PHRASE_GAPS.includes(t)))('%s has an explicit "start …" phrase', (tool) => {
