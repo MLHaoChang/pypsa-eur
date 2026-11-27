@@ -22,6 +22,8 @@ import { tileHint, type ChapterInputs, type ChapterOpen, type ChapterTile } from
 import { useChapterTiles } from '../ChaptersSection'
 import { TABS } from '../../Results'
 import { useHubDesignStore } from '../hubDesignStore'
+import { useResultsOutOfDate } from '../../../hooks/useResultsOutOfDate'
+import { OUT_OF_DATE_TEXT } from '../../../components/ResultsOutOfDate'
 import InvestmentCaseRunPanel from '../../results/investment/InvestmentCaseRunPanel'
 import { useInvestmentCaseRun } from '../../results/investment/useInvestmentCaseRun'
 
@@ -119,9 +121,11 @@ export const LCOE_UNREAD = 'The headline figures could not be read.'
 /** `read`: what the headline read gave: a response (with or without an LCOE card), none yet (204), or a failure. */
 function LcoeFigure({ read }: { read: { kind: 'card'; card: HeadlineCard | null } | { kind: 'none' } | { kind: 'failed' } }) {
   const words = HEADLINE_WORDS.lcoe
+  // A 204 after an edit that follows a run is "out of date", not "never solved" (UX ruling (ag)).
+  const outOfDate = useResultsOutOfDate()
   if (read.kind !== 'card' || !read.card) {
     const [state, reason]: [ResultStateKind, string] = read.kind === 'failed' ? ['unavailable', LCOE_UNREAD]
-      : read.kind === 'none' ? ['not_run', LCOE_NO_SOLVE] : ['not_applicable', LCOE_NOT_APPLICABLE]
+      : read.kind === 'none' ? (outOfDate ? ['unavailable', OUT_OF_DATE_TEXT] : ['not_run', LCOE_NO_SOLVE]) : ['not_applicable', LCOE_NOT_APPLICABLE]
     return <Kpi headline testId="hub-results-lcoe" label={words.label} value="" state={state} reason={reason} />
   }
   const card = read.card

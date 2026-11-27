@@ -252,7 +252,7 @@ it('says LCOE and capture price do not apply when nothing was dispatched, rather
   vi.mocked(resultsApi.getAssetEconomics).mockResolvedValue(p as never)
   renderPage()
   await screen.findByText('Thermal')
-  for (const label of ['System LCOE / LCOS', 'Avg capture price']) {
+  for (const label of ['System cash cost per MWh (before financing and tax)', 'Avg capture price']) {
     const tile = kpiCard(label)
     expect(tile.getAttribute('data-state')).toBe('not_applicable')
     expect(within(tile).getByText('Nothing was dispatched in this window.')).toBeTruthy()
