@@ -41,6 +41,8 @@ import { solveQueueApi } from '../api/solveQueue'
 import { useUIStore } from '../store/uiStore'
 import { usePanelSectionScroll } from './usePanelSectionScroll'
 import { openPanel } from './results/openPanel'
+import { ALL_TABS } from './results/resultTabs'
+import { withReturnFrom } from '../layout/flowNavigation'
 import { settingsFromDraft, useCampusDraft, useCampusRunNotice, type LostRun } from '../store/campusSettingsDraft'
 import { isNotSolvedRefusal, NotSolvedRefusal } from './results/NotSolved'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
@@ -775,6 +777,11 @@ function PowerFactoryNotWritten({ b }: { b: PowerFactoryBundle }) {
 /** How long the download-failed notice stays before it clears. */
 const PF_NOTICE_MS = 8000
 
+/** Opens the Grid study panel with a Back pill to the results tab the link sits in. */
+function openGridStudyFrom(tab: Exclude<CampusResultsPart, 'all'>) {
+  withReturnFrom(() => openPanel('scenarios', 'campusStudy'), ALL_TABS.find(t => t.id === tab)?.label)
+}
+
 export function CampusPowerFactorySection({ name }: { name: string }) {
   const pf = useQuery({ queryKey: ['campus-powerfactory', name], queryFn: () => campusApi.powerfactory(name), retry: false })
   const [busy, setBusy] = useState<string | null>(null)
@@ -798,7 +805,7 @@ export function CampusPowerFactorySection({ name }: { name: string }) {
       setBusy(null)
     }
   }
-  const gridStudy = { label: 'Grid study ›', onClick: () => openPanel('scenarios', 'campusStudy') }
+  const gridStudy = { label: 'Grid study ›', onClick: () => openGridStudyFrom('grid_code') }
   let body: ReactNode
   if (pf.isError) body = <div data-testid="pf-error"><ResultState state="unavailable" reason="The PowerFactory cases could not be read. Try again in a moment." /></div>
   else if (!d) body = <p className="text-[12px] text-muted">Loading the PowerFactory cases</p>
@@ -809,7 +816,7 @@ export function CampusPowerFactorySection({ name }: { name: string }) {
     <p data-testid="pf-skipped" className="text-[12px] text-muted">
       This run has no island critical hours, so there is no PowerFactory case. Add island data in the Island
       section of the Grid study panel, then run the study again.{' '}
-      <button type="button" data-testid="pf-grid-study-link" className="text-accent underline" onClick={gridStudy.onClick}>
+      <button type="button" data-testid="pf-grid-study-link" className="underline" onClick={gridStudy.onClick}>
         {gridStudy.label}
       </button>
     </p>
@@ -1091,7 +1098,7 @@ export function CampusResultsTab({ name, part }: { name: string; part: Exclude<C
   if (!state.data.results) {
     return (
       <EmptyState testId="campus-tab-state" title="Not run yet"
-        action={{ label: 'Run the grid checks in Grid study ›', onClick: () => openPanel('scenarios', 'campusStudy') }}>
+        action={{ label: 'Run the grid checks in Grid study ›', onClick: () => openGridStudyFrom(part) }}>
         The grid study has not produced results for this project.
       </EmptyState>
     )

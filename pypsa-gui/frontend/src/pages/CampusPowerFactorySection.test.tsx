@@ -11,7 +11,8 @@ const store = vi.hoisted(() => ({ currentProject: 'Hub A' as string | null }))
 vi.mock('../store/uiStore', () => ({
   useUIStore: Object.assign((sel: (s: { currentProject: string | null }) => unknown) => sel({ currentProject: store.currentProject }), { subscribe: () => () => {} }),
 }))
-const nav = vi.hoisted(() => ({ openPanel: vi.fn() }))
+const nav = vi.hoisted(() => ({ withReturnFrom: vi.fn((jump: () => void) => jump()), openPanel: vi.fn() }))
+vi.mock('../layout/flowNavigation', () => ({ withReturnFrom: nav.withReturnFrom }))
 vi.mock('./results/openPanel', () => ({ openPanel: nav.openPanel }))
 const api = vi.hoisted(() => ({ powerfactory: vi.fn(), powerfactoryZip: vi.fn() }))
 vi.mock('../api/campusElectrical', async () => {
@@ -160,4 +161,14 @@ describe('the PowerFactory case section of the grid-code results', () => {
     expect(notice.closest('[role="status"]')).toBeTruthy()
     await waitFor(() => expect(screen.queryByTestId('pf-download-error')).toBeNull(), { timeout: 9000 })
   }, 12000)
+})
+
+describe('the Grid study link', () => {
+  it('opens the Grid study panel with a Back pill to Grid code & connection', async () => {
+    api.powerfactory.mockResolvedValue(listing({ has_run: false, bundles: [] }))
+    renderSection()
+    await userEvent.click(await screen.findByRole('button', { name: 'Grid study ›' }))
+    expect(nav.withReturnFrom).toHaveBeenCalledWith(expect.any(Function), 'Grid code & connection')
+    expect(nav.openPanel).toHaveBeenCalledWith('scenarios', 'campusStudy')
+  })
 })
