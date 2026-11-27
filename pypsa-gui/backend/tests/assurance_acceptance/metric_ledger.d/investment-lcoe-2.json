@@ -1,0 +1,38 @@
+{
+ "profiles": {
+  "investment-lcoe/2": [
+   {
+    "metric": "lcoe_nominal",
+    "formula": "(PV(value) - PV(equity cash)) / PV(energy_mwh), all at the cost of equity",
+    "validity": "retained LCOE inputs (else lcoe_inputs_not_retained / lcoe_inputs_not_established), a recorded cost of equity (else npv_rate_not_recorded), finite equity cash (else cash_not_established), discounted energy > 0 (else no_discounted_generation), and the report's headline reproduced (headline_not_established, headline_mismatch)",
+    "tolerance": "harness.investment_calculations:LCOE_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_investment_assurance.py::test_the_lcoe_from_the_retained_series",
+    "status": "verified",
+    "domain_review": "pending",
+    "domain_review_note": "unpinned: test_investment_assurance.py does not name LCOE_TOLERANCE (issue 29)",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     }
+    }
+   },
+   {
+    "metric": "lcoe_real",
+    "formula": "(PV(value) - PV(equity cash)) / PV_real(energy_mwh) at (1 + coe) / (1 + inflation) - 1; the nominal figure on a real price basis",
+    "validity": "retained LCOE inputs (else lcoe_inputs_not_retained / lcoe_inputs_not_established), a recorded cost of equity (else npv_rate_not_recorded), finite equity cash (else cash_not_established), discounted energy > 0 (else no_discounted_generation), and the report's headline reproduced (headline_not_established, headline_mismatch); recorded inflation > -1, else inflation_not_recorded",
+    "tolerance": "harness.investment_calculations:LCOE_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_investment_assurance.py::test_the_lcoe_from_the_retained_series",
+    "status": "verified",
+    "domain_review": "pending",
+    "domain_review_note": "unpinned: test_investment_assurance.py does not name LCOE_TOLERANCE (issue 29)",
+    "surfaces": {
+     "answer": {
+      "status": "pending",
+      "test": null
+     }
+    }
+   }
+  ]
+ }
+}

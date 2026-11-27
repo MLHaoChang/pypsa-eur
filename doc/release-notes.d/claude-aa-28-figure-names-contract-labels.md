@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Checked answers for the investment returns, the LCOE and the COPT screening now print the ruled figure names, through new `investment-case/2`, `investment-lcoe/2` and `copt-screening/2` profiles beside the unchanged `/1` ones; stored `/1` answers still replay.

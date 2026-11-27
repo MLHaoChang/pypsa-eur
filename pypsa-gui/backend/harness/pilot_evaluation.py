@@ -111,7 +111,7 @@ COPT = {"screening_lole": (2.5, "h"), "screening_eue": (122.5, "MWh"), "screenin
 GRID = {"checked_pass": (1, "rows"), "checked_warn": (1, "rows"), "checked_fail": (0, "rows"),
         "not_checked": (27, "rows")}
 # Computed on demand from the current network or saved files: nothing to go stale.
-ON_DEMAND = {"copt-screening/1", "grid-readiness/1"}
+ON_DEMAND = {"copt-screening/1", "copt-screening/2", "grid-readiness/1"}
 PROFILE_METRICS = {
     "generator-dispatch/1": tuple(GENERATOR)[:3],
     "generator-cost/1": tuple(GENERATOR),
@@ -147,6 +147,10 @@ ADDED = {
     "investment-case/1": ("network", "Show the investment returns for", INVESTMENT, "equity_npv"),
     "investment-lcoe/1": ("network", "Show the LCOE for", LCOE, "lcoe_nominal"),
     "copt-screening/1": ("network", "Show the COPT screening for", COPT, "screening_lole"),
+    # /2 profiles (AA 28): the same figures under the ruled labels
+    "investment-case/2": ("network", "Show the investment returns for", INVESTMENT, "equity_npv"),
+    "investment-lcoe/2": ("network", "Show the LCOE for", LCOE, "lcoe_nominal"),
+    "copt-screening/2": ("network", "Show the COPT screening for", COPT, "screening_lole"),
     "grid-readiness/1": ("network", "Show the grid readiness for", GRID, "checked_pass"),
 }
 # Profiles whose scope names the component's class.

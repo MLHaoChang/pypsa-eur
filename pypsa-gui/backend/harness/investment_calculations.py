@@ -14,10 +14,15 @@ import math
 import re
 
 from harness import profile_common as common
+from services import figure_words as FW
 
 PROFILE = "investment-case/1"
 LCOE_PROFILE = "investment-lcoe/1"
-PROFILES = (PROFILE, LCOE_PROFILE)
+# /2 profiles carry the ruled figure names (AA 28); /1 stays as it was (AA-V1-CHANGE-1).
+PROFILE_V2 = "investment-case/2"
+LCOE_PROFILE_V2 = "investment-lcoe/2"
+LCOE_PROFILES = (LCOE_PROFILE, LCOE_PROFILE_V2)
+PROFILES = (PROFILE, LCOE_PROFILE, PROFILE_V2, LCOE_PROFILE_V2)
 LCOE_TOLERANCE = 1e-9  # relative, against the report's headline
 REL_TOLERANCE = 1e-6  # of the sum of |cash|
 IRR_TOLERANCE = 1e-8  # absolute, against the report's headline
@@ -65,6 +70,14 @@ LCOE_METRICS = {
         "label": "LCOE, real (engine definition)",
     },
 }
+# metric -> the ruled figure (figure_words.json); the other metrics keep their /1 labels.
+RULED_FIGURES = {"project_npv": "project_npv", "lcoe_nominal": "lcoe_nominal", "lcoe_real": "lcoe_real"}
+METRICS_V2 = {m: ({**d, "label": FW.name(RULED_FIGURES[m])} if m in RULED_FIGURES else d) for m, d in METRICS.items()}
+LCOE_METRICS_V2 = {
+    m: ({**d, "label": FW.name(RULED_FIGURES[m])} if m in RULED_FIGURES else d) for m, d in LCOE_METRICS.items()
+}
+
+
 LCOE_DISCLOSURE = (
     "The investment case's LCOE as its engine defines it (SAM, generalised): the present value of the "
     "investment's value less that of the post-tax equity cash, divided by the present value of its "
@@ -129,7 +142,7 @@ def source(ctx, entity, state, profile=PROFILE):
         "basis_statement": str(payload.get("basis_statement") or ""),
         "price_basis": str(payload.get("price_basis") or ""),
     }
-    if profile == LCOE_PROFILE:
+    if profile in LCOE_PROFILES:
         inputs = payload.get("lcoe_inputs")  # absent from reports stored before S8b
 
         def series(key):
@@ -241,7 +254,8 @@ def _lcoe(raw, scope, currency):
                     reasons[metric] = "headline_mismatch"
                 else:
                     available[metric] = value
-    definitions = {m: {**d, "unit": currency + "/MWh"} for m, d in LCOE_METRICS.items()}
+    lcoe_metrics = LCOE_METRICS_V2 if raw["profile"] == LCOE_PROFILE_V2 else LCOE_METRICS
+    definitions = {m: {**d, "unit": currency + "/MWh"} for m, d in lcoe_metrics.items()}
     return common.facts_and_slots(scope, definitions, available, reasons, n)
 
 
@@ -251,7 +265,7 @@ def calculate(raw, scope):
         raise ValueError("investment_source_identity")
     if "start" in scope:
         raise ValueError("unsupported_snapshot_scope")
-    if raw["profile"] == LCOE_PROFILE:
+    if raw["profile"] in LCOE_PROFILES:
         code = raw["currency"] if re.fullmatch(r"[A-Z]{3}", raw["currency"]) else "currency"
         return _lcoe(raw, scope, code)
     available, reasons = {}, {}
@@ -285,7 +299,8 @@ def calculate(raw, scope):
             available[metric] = value
     # The currency is a user string: only an ISO-style code becomes a unit.
     currency = raw["currency"] if re.fullmatch(r"[A-Z]{3}", raw["currency"]) else "report currency"
-    definitions = {m: ({**d, "unit": currency} if m.endswith("_npv") else d) for m, d in METRICS.items()}
+    metrics = METRICS_V2 if raw["profile"] == PROFILE_V2 else METRICS
+    definitions = {m: ({**d, "unit": currency} if m.endswith("_npv") else d) for m, d in metrics.items()}
     return common.facts_and_slots(scope, definitions, available, reasons, len(raw["index"]))
 
 
@@ -305,6 +320,6 @@ def notes(raw, label):
         "(financial close) is undiscounted.",
     ] + ([
         "The LCOE is on the incremental value against the counterfactual, as the engine computes it."
-    ] if raw["profile"] == LCOE_PROFILE and raw.get("has_counterfactual") else []) + ([] if raw["profile"] == LCOE_PROFILE else [
-        "The LCOE is checked separately (investment-lcoe/1), from the series the report retains.",
+    ] if raw["profile"] in LCOE_PROFILES and raw.get("has_counterfactual") else []) + ([] if raw["profile"] in LCOE_PROFILES else [
+        f"The LCOE is checked separately ({LCOE_PROFILE_V2 if raw['profile'] == PROFILE_V2 else LCOE_PROFILE}), from the series the report retains.",
     ])

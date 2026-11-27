@@ -19,8 +19,12 @@ import math
 import numpy as np
 
 from harness import profile_common as common
+from services import figure_words as FW
 
 PROFILE = "copt-screening/1"
+# /2 carries the ruled figure name for the screening shortfall (AA 28); /1 stays as it was (AA-V1-CHANGE-1).
+PROFILE_V2 = "copt-screening/2"
+PROFILES = (PROFILE, PROFILE_V2)
 DELTA_MW = 1.0
 SNAP = 1e-12  # the engine's grid snap
 REL_TOLERANCE = 1e-9
@@ -48,6 +52,14 @@ METRICS = {
         "label": "Highest hourly loss-of-load probability (COPT)",
     },
 }
+METRICS_V2 = {
+    **METRICS,
+    "screening_lole": {**METRICS["screening_lole"], "label": FW.name("screening_shortfall")},
+}
+
+
+def metrics_for(profile):
+    return METRICS_V2 if profile == PROFILE_V2 else METRICS
 DISCLOSURE = (
     "COPT screening (fidelity analytic_convolution): thermal two-state units only; storage, links, "
     "imports and the network are excluded, and must-take generation is netted at its availability. "
@@ -113,7 +125,7 @@ def _must_take_varies(n):
                for _g, _cap, series, row in _membership_walk(n, electrical))
 
 
-def source(ctx, entity):
+def source(ctx, entity, profile=PROFILE):
     from services.adequacy.copt import fleet_and_residual
     from services.adequacy.copt_endpoint import build_copt_payload
     from services.pypsa_service import PyPSAService
@@ -146,7 +158,7 @@ def source(ctx, entity):
     metrics = payload["metrics"]
     return {
         "version": 1,
-        "profile": PROFILE,
+        "profile": profile,
         "entity_id": entity,
         "index": [str(v) for v in n.snapshots],
         "units": [{"name": u.name, "capacity_mw": int(round(u.capacity_mw)), "q": float(u.q)} for u in units],
@@ -190,7 +202,7 @@ def hourly(p, residual):
 
 
 def calculate(raw, scope):
-    if raw.get("version") != 1 or raw.get("profile") != PROFILE or raw["entity_id"] != scope["entity_id"]:
+    if raw.get("version") != 1 or raw.get("profile") not in PROFILES or raw["profile"] != scope["profile"] or raw["entity_id"] != scope["entity_id"]:
         raise ValueError("copt_source_identity")
     if "start" in scope:
         raise ValueError("unsupported_snapshot_scope")
@@ -199,9 +211,9 @@ def calculate(raw, scope):
     reasons, available = {}, {}
     if (len(residual) != len(engine_residual) or not common.finite(residual + engine_residual + raw["weights"])
             or any(abs(a - b) > REL_TOLERANCE * scale for a, b in zip(residual, engine_residual))):
-        reasons = dict.fromkeys(METRICS, "residual_mismatch")
+        reasons = dict.fromkeys(metrics_for(raw["profile"]), "residual_mismatch")
     elif any(abs(a - b) > REL_TOLERANCE * max(1.0, abs(b)) for a, b in zip(raw["weights"], raw["engine_weights"])):
-        reasons = dict.fromkeys(METRICS, "weights_mismatch")
+        reasons = dict.fromkeys(metrics_for(raw["profile"]), "weights_mismatch")
     else:
         p = distribution(raw["units"])
         hours = hourly(p, residual)
@@ -216,7 +228,7 @@ def calculate(raw, scope):
                 reasons[metric] = "headline_mismatch"
             else:
                 available[metric] = value
-    return common.facts_and_slots(scope, METRICS, available, reasons, len(raw["index"]))
+    return common.facts_and_slots(scope, metrics_for(raw["profile"]), available, reasons, len(raw["index"]))
 
 
 def notes(raw):

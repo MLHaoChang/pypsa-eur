@@ -238,28 +238,13 @@ def test_the_reports_read_the_names_from_the_one_source():
 # ── the chat's checked metrics (GK B (72): contract labels move only with a profile v2) ──
 
 # Every checked metric that prints one of the figures, as an exact set: (profile, metric) → figure.
+# The /2 profiles carry the ruled names (AA issue 28); the frozen /1 labels are pinned in
+# tests/test_aa28_contract_labels.py.
 HARNESS_FIGURES = {
-    ("investment-case/1", "project_npv"): "project_npv",
-    ("investment-lcoe/1", "lcoe_real"): "lcoe_real",
-    ("investment-lcoe/1", "lcoe_nominal"): "lcoe_nominal",
-    ("copt-screening/1", "screening_lole"): "screening_shortfall",
-}
-TICKET = ".scratch/assistant-assurance/issues/28-figure-names-in-contract-labels.md"
-# Known divergences, not skips: the contract label the chat prints today, until the ticket lands.
-PENDING_CONTRACT_LABELS = {
-    ("investment-case/1", "project_npv"): (
-        "Project NPV (post tax, at the WACC)",
-        TICKET,
-    ),
-    ("investment-lcoe/1", "lcoe_real"): ("LCOE, real (engine definition)", TICKET),
-    ("investment-lcoe/1", "lcoe_nominal"): (
-        "LCOE, nominal (engine definition)",
-        TICKET,
-    ),
-    ("copt-screening/1", "screening_lole"): (
-        "Screening LOLE over the modelled horizon (COPT)",
-        TICKET,
-    ),
+    ("investment-case/2", "project_npv"): "project_npv",
+    ("investment-lcoe/2", "lcoe_real"): "lcoe_real",
+    ("investment-lcoe/2", "lcoe_nominal"): "lcoe_nominal",
+    ("copt-screening/2", "screening_lole"): "screening_shortfall",
 }
 
 
@@ -267,10 +252,10 @@ def _contract_metrics():
     from harness import copt_calculations as copt, investment_calculations as inv
 
     return {
-        (inv.PROFILE, "project_npv"): inv.METRICS["project_npv"],
-        (inv.LCOE_PROFILE, "lcoe_real"): inv.LCOE_METRICS["lcoe_real"],
-        (inv.LCOE_PROFILE, "lcoe_nominal"): inv.LCOE_METRICS["lcoe_nominal"],
-        (copt.PROFILE, "screening_lole"): copt.METRICS["screening_lole"],
+        (inv.PROFILE_V2, "project_npv"): inv.METRICS_V2["project_npv"],
+        (inv.LCOE_PROFILE_V2, "lcoe_real"): inv.LCOE_METRICS_V2["lcoe_real"],
+        (inv.LCOE_PROFILE_V2, "lcoe_nominal"): inv.LCOE_METRICS_V2["lcoe_nominal"],
+        (copt.PROFILE_V2, "screening_lole"): copt.METRICS_V2["screening_lole"],
     }
 
 
@@ -279,32 +264,28 @@ def test_every_checked_metric_of_a_figure_is_mapped_to_it():
 
     words = re.compile(r"\b(NPV|LOLE|LCOE)\b")
     printed = {
-        (inv.PROFILE, m) for m, d in inv.METRICS.items() if words.search(d["label"])
-    }
-    printed |= {
-        (inv.LCOE_PROFILE, m)
-        for m, d in inv.LCOE_METRICS.items()
+        (inv.PROFILE_V2, m)
+        for m, d in inv.METRICS_V2.items()
         if words.search(d["label"])
     }
     printed |= {
-        (copt.PROFILE, m) for m, d in copt.METRICS.items() if words.search(d["label"])
+        (inv.LCOE_PROFILE_V2, m)
+        for m, d in inv.LCOE_METRICS_V2.items()
+        if words.search(d["label"])
+    }
+    printed |= {
+        (copt.PROFILE_V2, m)
+        for m, d in copt.METRICS_V2.items()
+        if words.search(d["label"])
     }
     # Equity NPV is another figure (at the cost of equity); it carries none of the four names.
-    assert printed - {(inv.PROFILE, "equity_npv")} == set(HARNESS_FIGURES)
+    assert printed - {(inv.PROFILE_V2, "equity_npv")} == set(HARNESS_FIGURES)
     assert set(_contract_metrics()) == set(HARNESS_FIGURES)
 
 
-def test_each_contract_label_is_the_ruled_name_or_a_recorded_divergence():
-    repo = BACKEND.parent.parent
+def test_each_contract_label_is_the_ruled_name():
     for key, definition in _contract_metrics().items():
-        ruled = FW.name(HARNESS_FIGURES[key])
-        if key in PENDING_CONTRACT_LABELS:
-            label, ticket = PENDING_CONTRACT_LABELS[key]
-            # a changed contract label must update or remove its row
-            assert definition["label"] == label, key
-            assert label != ruled and (repo / ticket).is_file(), key
-        else:
-            assert definition["label"] == ruled, key
+        assert definition["label"] == FW.name(HARNESS_FIGURES[key]), key
 
 
 # ── the money year (finance/report.py helpers, GK B (72) ruling A) ──────────

@@ -2,11 +2,12 @@ import { client } from './client'
 import { parseApproval, verifyApprovedText, type ApprovedAnswerFrame } from '../utils/answerAssurance'
 import type { ChatMessage } from '../store/chatStore'
 
-const PROFILES = new Set(['generator-dispatch/1', 'generator-cost/1', 'network-linear-cost/1',
+export const CHECKED_PROFILES: ReadonlySet<string> = new Set(['generator-dispatch/1', 'generator-cost/1', 'network-linear-cost/1',
   'storage-unit-dispatch/1', 'storage-unit-cost/1', 'carrier-energy/1',
   'branch-loading/1', 'network-loading/1', 'ac-branch-loading/1', 'lost-load/1',
   'bus-price/1', 'generator-emissions/1', 'network-emissions/1', 'curtailment/1',
-  'capacity/1', 'storage-cycles/1', 'energy-balance/1', 'site-import/1', 'investment-case/1', 'investment-lcoe/1', 'copt-screening/1', 'grid-readiness/1'])
+  'capacity/1', 'storage-cycles/1', 'energy-balance/1', 'site-import/1', 'investment-case/1', 'investment-lcoe/1', 'copt-screening/1', 'grid-readiness/1',
+  'investment-case/2', 'investment-lcoe/2', 'copt-screening/2'])
 
 export interface OwnedCheckedAnswer extends ApprovedAnswerFrame {
   text: string
@@ -54,7 +55,7 @@ export async function getOwnedCheckedAnswer(message: ChatMessage, signal: AbortS
     throw new Error('Checked answer binding mismatch')
   }
   const scope = approved.receipt.request_scope
-  if ((scope && !PROFILES.has(scope.profile))
+  if ((scope && !CHECKED_PROFILES.has(scope.profile))
     || (approved.receipt.request_complete === true && (!scope
       || !approved.receipt.result_slots?.length
       || approved.receipt.result_slots.some(s => s.disposition !== 'answered')))
