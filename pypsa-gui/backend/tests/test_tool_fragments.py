@@ -69,6 +69,7 @@ def test_report_templates_is_a_fragment_spliced_at_its_old_place():
         "report_templates",
         "lv08_bcampus",
         "campus_electrical",
+        "adequacy_studies",
     }
 
 
@@ -293,6 +294,11 @@ SPLICED_PLACES = {
         "TOOLS": ("gridspine_compute_capacity", "gridspine_assess_connection"),
         "TOOL_ROUTES": ("gridspine_assess_connection", "list_library_items"),
         "DISPATCHERS": ("gridspine_assess_connection", "list_library_items"),
+    },
+    "adequacy_studies": {
+        "TOOLS": ("get_eh_template", "solve_queue_enqueue"),
+        "TOOL_ROUTES": ("get_eh_template", "solve_queue_enqueue"),
+        "DISPATCHERS": ("get_reliability_goal", "solve_queue_enqueue"),
     },
 }
 
@@ -536,6 +542,38 @@ def test_lv08_island_table_ids_equal_their_source():
     assert lv08_bcampus._ISLAND_TABLE_IDS == TABLE_IDS
 
 
+def test_adequacy_studies_constants_equal_their_source():
+    """The schema fragment imports only catalogue_base, so it copies these."""
+    from harness.catalogue_tools import adequacy_studies as A
+    from models.energy_hub import MAX_EH_BUDGET_SOLVES
+    from services.adequacy.mc import MAX_DRAWS
+
+    for name in (
+        "ADEQUACY_STUDY_ENUM",
+        "ADEQUACY_RESTORE_ENUM",
+        "EH_ARCHETYPE_ENUM",
+        "EH_STAGE_ENUM",
+    ):
+        assert getattr(A, name) == getattr(catalogue, name), name
+    assert A._MAX_EH_BUDGET_SOLVES == MAX_EH_BUDGET_SOLVES
+    assert A._MC_MAX_DRAWS == MAX_DRAWS
+
+
+def test_the_campaign_writes_stay_lock_gated_and_non_network():
+    """Membership only: the registry digest proves both merged sets equal master."""
+    from services import chat_tools
+
+    assert {
+        "start_campaign",
+        "end_campaign",
+    } <= chat_tools._LOCK_GATE_SERVICE_CALL_MUTATORS
+    assert {
+        "start_campaign",
+        "end_campaign",
+    } <= catalogue._SERVICE_CALL_NON_NETWORK_WRITES
+    assert "campaign_status" not in chat_tools._LOCK_GATE_SERVICE_CALL_MUTATORS
+
+
 def _proxies():
     """(fragment, name) for each dispatcher-fragment helper that reaches a
     chat_tools helper of the same name through ``_ct()``."""
@@ -571,6 +609,92 @@ def test_every_proxy_reaches_chat_tools_at_call_time(monkeypatch):
         sentinel = object()
         monkeypatch.setattr(chat_tools, name, lambda *a, _s=sentinel, **k: _s)
         assert getattr(mod, name)(1, x=2) is sentinel, (mod.__name__, name)
+
+
+# Every helper each dispatcher fragment reaches in chat_tools, by stem. A
+# helper outside this list, or a proxy aimed at another helper (which
+# `_proxies` skips), fails here rather than only in the lock and ACL tests.
+PROXIES = {
+    "report_templates": [],
+    "lv08_bcampus": [
+        "_acting",
+        "_b2b_fit",
+        "_campus_route",
+        "_closing_uploads",
+        "_cut",
+        "_gridspine_project",
+        "_gridspine_upload",
+        "_with_sha",
+    ],
+    "campus_electrical": [
+        "_acting",
+        "_campus_check_lock",
+        "_gridspine_project",
+        "_gridspine_project_for_write",
+        "island_tool_args",
+    ],
+    "adequacy_studies": [
+        "_campaign_gated",
+        "_resolve_adequacy_handler",
+        "get_adequacy_results",
+        "get_asset_health",
+    ],
+}
+
+
+def test_every_dispatcher_fragments_proxies_are_pinned():
+    found = {}
+    for mod, name in _proxies():
+        found.setdefault(mod.__name__.rsplit(".", 1)[1], []).append(name)
+    helpers = {
+        stem: sorted(
+            name
+            for name, fn in vars(mod).items()
+            if name != "_ct"
+            and isinstance(fn, types.FunctionType)
+            and fn.__module__ == mod.__name__
+            and name not in mod.DISPATCHERS
+        )
+        for stem, mod in F.discover(F.DISPATCH_PACKAGE).items()
+    }
+    assert helpers == PROXIES
+    assert {stem: sorted(found.get(stem, [])) for stem in PROXIES} == PROXIES
+
+
+def test_the_adequacy_tables_are_read_from_chat_tools_at_call_time(monkeypatch):
+    """review_eh_study and abort_adequacy_study read two chat_tools dicts
+    through a call-time view, so a patched dict is the one they see."""
+    from routers import results as R
+    from services import chat_tools
+    from services.adequacy import eh_review
+    from services.chat_dispatchers import adequacy_studies as A
+
+    views = {
+        name
+        for mod in F.discover(F.DISPATCH_PACKAGE).values()
+        for name, v in vars(mod).items()
+        if type(v).__name__ == "_CtTable"
+    }
+    assert views == {"_ADEQUACY_NO_DATA_HINTS", "_ADEQUACY_ABORT_HANDLER_NAMES"}
+
+    monkeypatch.setattr(
+        chat_tools, "_ADEQUACY_NO_DATA_HINTS", {"eh_reference_design": "patched"}
+    )
+    monkeypatch.setattr(R, "get_eh_study", lambda: None)
+    monkeypatch.setattr(
+        eh_review,
+        "review_latest",
+        lambda state, record, no_data_message: no_data_message,
+    )
+    assert A.review_eh_study() == "patched"
+
+    monkeypatch.setattr(
+        chat_tools, "_ADEQUACY_ABORT_HANDLER_NAMES", {"probe": "_probe_abort"}
+    )
+    monkeypatch.setattr(R, "_probe_abort", lambda: "stopped", raising=False)
+    assert A.abort_adequacy_study("probe") == "stopped"
+    with pytest.raises(Exception, match="Known: probe"):
+        A.abort_adequacy_study("frontier")
 
 
 def test_a_moved_dispatcher_calls_the_patched_chat_tools_helper(monkeypatch):
