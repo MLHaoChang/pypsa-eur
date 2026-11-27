@@ -145,9 +145,7 @@ def test_a_summary_outside_the_grammar_is_clarified_not_summarized(
 
 
 @pytest.mark.parametrize("message", NOT_SUMMARIES)
-def test_a_question_that_is_not_a_summary_still_runs_unscoped(
-    grid, checked, message
-):
+def test_a_question_that_is_not_a_summary_still_runs_unscoped(grid, checked, message):
     solve(grid)
     provider = FakeProvider([text_turn("Plain answer.")])
     frames = send(checked, provider, message)
@@ -159,8 +157,14 @@ def test_a_question_that_is_not_a_summary_still_runs_unscoped(
 @pytest.mark.parametrize(
     "selected, first",
     [
-        ({"class": "StorageUnit", "name": "Battery"}, "Give me the key results for storage unit Battery"),
-        ({"class": "Generator", "name": "G1"}, "Give me the key results for generator G1"),
+        (
+            {"class": "StorageUnit", "name": "Battery"},
+            "Give me the key results for storage unit Battery",
+        ),
+        (
+            {"class": "Generator", "name": "G1"},
+            "Give me the key results for generator G1",
+        ),
         # A class with no key-results profile never gets an option.
         ({"class": "Line", "name": "L12"}, None),
         ({"class": "Store", "name": "Tank"}, None),
@@ -204,7 +208,10 @@ def test_every_checked_option_scopes_on_its_own(grid, checked, option, profile):
 @pytest.mark.parametrize(
     "message, profile",
     [
-        ("Give me the key results for storage unit Battery.", "storage-unit-dispatch/1"),
+        (
+            "Give me the key results for storage unit Battery.",
+            "storage-unit-dispatch/1",
+        ),
         ("Show the energy balance for network.", "energy-balance/1"),
         ("Give me the key results for every generator.", "generator-dispatch/1"),
         ("Show me the key results for generator G1", "generator-dispatch/1"),
@@ -219,9 +226,7 @@ def test_every_canonical_summary_still_scopes(grid, checked, message, profile):
     assert QUESTION not in public_text(frames)
 
 
-def test_going_on_unchecked_reaches_the_model_with_the_original_request(
-    grid, checked
-):
+def test_going_on_unchecked_reaches_the_model_with_the_original_request(grid, checked):
     solve(grid)
     sid = "kr-" + uuid.uuid4().hex
     first = NumericalProvider(AnyValues())
