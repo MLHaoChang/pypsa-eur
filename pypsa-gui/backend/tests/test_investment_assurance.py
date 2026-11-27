@@ -332,3 +332,17 @@ def test_project_irr_without_a_sign_change_is_refused(project):
     # 100 + 50 / (1 + r) > 0 for every r > -1: no root.
     store(project, lambda p: hand(p, project=[100.0, 50.0]))
     assert _project_irr_slot(project) == (None, "irr_no_sign_change")
+
+
+def test_a_stored_v1_record_replays_under_its_own_labels_beside_the_v2(project, checked):
+    """AA 28: the /1 profile still answers and its stored record keeps the old label; /2 prints the ruled one."""
+    store(project, hand)
+    values = published(project, {"equity_npv": 4.132231404958677, "project_npv": PROJECT_NPV,
+                                 "equity_irr": 0.13066238629180748, "project_irr": metrics.irr(PROJECT)[0]})
+    old, new = "Project NPV (post tax, at the WACC)", "Project NPV at the WACC, after tax (unlevered)"
+    v1 = ask(checked, project, values, "investment-case/1")
+    assert answered(checked, v1) == pytest.approx(values, rel=1e-12)  # the stored /1 record reads back and verifies
+    assert old in public_text(v1) and new not in public_text(v1)
+    v2 = ask(checked, project, values, "investment-case/2")
+    assert answered(checked, v2) == pytest.approx(values, rel=1e-12)
+    assert new in public_text(v2) and old not in public_text(v2)

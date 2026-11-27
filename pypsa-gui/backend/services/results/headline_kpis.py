@@ -61,7 +61,7 @@ ORDER = {
 #: Card id -> (checked profile, metric).
 CHECKED = {
     "curtailed_share": (calculations.curtailment.PROFILE, "curtailment_share"),
-    "lcoe": (calculations.investment.LCOE_PROFILE, "lcoe_real"),
+    "lcoe": (calculations.investment.LCOE_PROFILE_V2, "lcoe_real"),
     "peak_line_loading": (
         calculations.branch.NETWORK_PROFILE,
         "max_branch_utilisation",

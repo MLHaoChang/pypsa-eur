@@ -156,3 +156,68 @@ def test_an_unknown_version_is_refused():
             {"version": 1, "profile": "copt-screening/3", "entity_id": "network"},
             {"profile": "copt-screening/3", "entity_id": "network"},
         )
+
+
+# ── GK B (74) conditions on #2077 ───────────────────────────────────────────
+
+
+def test_the_strip_gate_follows_the_version_chat_emits(monkeypatch):
+    from services.results import headline_kpis as hk
+
+    profile = hk.CHECKED["lcoe"][0]
+    assert (
+        profile == "investment-lcoe/2"
+    )  # chat now answers /2, so the card asks for /2 (STRIP-GATE-1)
+    for listed, shown in (
+        (
+            "investment-lcoe/2",
+            True,
+        ),  # "/2 only": chat answers checked, so the strip shows
+        ("investment-lcoe/1", True),  # an operator who listed /1 keeps the card
+        ("investment-case/1", False),
+        ("", False),
+    ):
+        monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", listed)
+        assert rollout.profile_enabled(profile) is shown, listed
+
+
+def test_rollout_with_only_the_v2_listed(monkeypatch):
+    monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", "investment-case/2")
+    assert rollout.profile_enabled("investment-case/2")
+    assert not rollout.profile_enabled(
+        "investment-case/1"
+    )  # a /2 never enables its predecessor
+    assert not rollout.profile_enabled("investment-lcoe/2")
+
+
+def test_rollout_unset_leaves_every_opt_in_profile_off(monkeypatch):
+    monkeypatch.delenv("PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", raising=False)
+    for profile in (*PAIRS, *PAIRS.values()):
+        assert profile in calculations.OPT_IN_PROFILES
+        assert not rollout.profile_enabled(profile), profile
+    assert rollout.profile_enabled(
+        "generator-dispatch/1"
+    )  # a profile that is not opt-in stays on
+
+
+def test_a_record_of_the_other_version_is_refused():
+    inv = {"version": 1, "entity_id": "network"}
+    for raw_profile, scope_profile in (
+        ("investment-case/1", "investment-case/2"),
+        ("investment-case/2", "investment-case/1"),
+        ("investment-lcoe/1", "investment-lcoe/2"),
+    ):
+        with pytest.raises(ValueError, match="investment_source_identity"):
+            investment_calculations.calculate(
+                {**inv, "profile": raw_profile},
+                {"profile": scope_profile, "entity_id": "network"},
+            )
+    for raw_profile, scope_profile in (
+        ("copt-screening/1", "copt-screening/2"),
+        ("copt-screening/2", "copt-screening/1"),
+    ):
+        with pytest.raises(ValueError, match="copt_source_identity"):
+            copt_calculations.calculate(
+                {**inv, "profile": raw_profile},
+                {"profile": scope_profile, "entity_id": "network"},
+            )
