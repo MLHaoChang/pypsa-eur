@@ -97,7 +97,15 @@ def nan_is_unset() -> frozenset[tuple[str, str]]:
     from services.asset_schema import catalogue
 
     defaults = catalogue._engine_defaults()
-    return frozenset(k for k in _numeric_entries() if k not in defaults)
+    return frozenset(k for k in _numeric_entries()
+                     if k not in defaults or _is_extra_port_efficiency(k))
+
+
+def _is_extra_port_efficiency(key: tuple[str, str]) -> bool:
+    """A Link's ``efficiency2``…``k``: NaN is an unused port, since PyPSA reads
+    ``efficiency{k}`` only where ``bus{k}`` is set (R1: these get no bound)."""
+    cls, col = key
+    return cls == "Link" and col.startswith("efficiency") and col[len("efficiency"):].isdigit()
 
 
 @lru_cache(maxsize=1)
@@ -165,10 +173,10 @@ def problem(component_class: str, key: str, value: Any) -> str | None:
         return None
     if r.min is not None and (v <= r.min if r.min_open else v < r.min):
         word = "more than" if r.min_open else "at least"
-        return f"{plain} must be {word} {show(r.min)}; got {show(v)}."
+        return f"{plain} must be {word} {r.min:g}; got {show(v)}."
     if r.max is not None and (v >= r.max if r.max_open else v > r.max):
         word = "less than" if r.max_open else "at most"
-        return f"{plain} must be {word} {show(r.max)}; got {show(v)}."
+        return f"{plain} must be {word} {r.max:g}; got {show(v)}."
     return None
 
 
@@ -221,3 +229,30 @@ def check_column(component_class: str, key: str, value: Any,
     if all(same_value(value, old) for old in stored_values):
         return
     raise refuse(component_class, key, value, message)
+
+
+#: The classes whose rows the sweep reads, by network attribute.
+_LISTS = {"Bus": "buses", "Generator": "generators", "Load": "loads", "Line": "lines",
+          "Link": "links", "Store": "stores", "StorageUnit": "storage_units",
+          "Transformer": "transformers", "ShuntImpedance": "shunt_impedances"}
+
+
+def problems(n) -> list[dict[str, Any]]:
+    """Every stored value of ``n`` that a new write would refuse: what an
+    import flags (01a-3b) and what the shipped-network sweep pins empty (R3).
+    Reads only; it never changes ``n``."""
+    out: list[dict[str, Any]] = []
+    numeric = _numeric_entries()
+    for cls, attr in _LISTS.items():
+        frame = getattr(n, attr)
+        cols = [k for (c, k) in numeric if c == cls and k in frame.columns]
+        for key in sorted(cols):
+            for name, value in frame[key].items():
+                message = problem(cls, key, value)
+                if message is not None:
+                    v = _as_number(value)
+                    out.append({"component": cls, "id": str(name), "field": key,
+                                "value": show(v) if v is not None else str(value),
+                                "message": message})
+    return out
+

@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, Stri
 from services.pypsa_service import PyPSAService
 from services import assistant_tasks as tasks
 from services import workflow_tools as workflow
+from services.asset_schema import ranges as asset_ranges
 
 _CHART_LOCK = threading.Lock()
 _REVIEWED_PREVIEW: ContextVar[str | None] = ContextVar('reviewed_preview', default=None)
@@ -356,6 +357,9 @@ def _candidate(ctx, changes):
                 except HTTPException as exc:
                     workflow._refuse("invalid_edit_value",
                                      f"{class_label(change.component_class)} '{name}': {exc.detail}")
+        # Expert catalogue 01a-3: the single edit's hard range, before the copy changes (C8, R7).
+        asset_ranges.check_column(change.component_class, change.attribute, change.value,
+                                  [component.static.at[name, change.attribute] for name in change.names])
         component.static.loc[change.names, change.attribute] = change.value
         for name in change.names:
             stored = component.static.at[name, change.attribute]
