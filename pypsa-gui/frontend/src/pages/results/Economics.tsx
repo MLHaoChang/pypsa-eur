@@ -24,6 +24,7 @@ import { nk } from '../../utils/queryKeys'
 import { canonicaliseCarrier, type ComponentClass } from './carrierAliases'
 import NotSolved from './NotSolved'
 import { withheldCell, withheldTotalNote } from './sectionWords'
+import { figureBasis, figureName, figureTag } from '../../utils/figureWords'
 
 // ── Economics tab ──────────────────────────────────────────────────────────
 // Per-asset profitability view. Each row is one Generator / StorageUnit /
@@ -802,20 +803,20 @@ export default function Economics() {
                  : kpis.charge_cost == null ? withheld
                  : Math.abs(kpis.charge_cost) > 1e-3 ? {} : { state: 'zero' as const })}
                hint="Σ charge_mwh × bus price across every storage asset. Zero on networks without storage. Subtracts directly from storage revenue in the net-profit roll-up." />
-          <KPI label="System LCOE / LCOS"
+          <KPI label={figureName('system_cost_per_mwh')}
                value={kpis.sysLcoe != null
                  ? `${kpis.sysLcoe.toFixed(2)} €/MWh`
                  : costsAvailable ? '—' : COST_UNAVAILABLE}
                sub="(Σ fixed + vom + charge) / Σ energy"
                {...(nothingDispatched ? NOTHING_DISPATCHED
                  : kpis.sysLcoe == null && kpis.charge_cost == null ? withheld : {})}
-               hint="Portfolio-wide €/MWh — what every MWh delivered into the market costs the system to produce, on average. Useful as a yardstick: the avg capture price needs to exceed this for the portfolio to recover costs." />
+               hint={`${figureTag('system_cost_per_mwh')}: ${figureBasis('system_cost_per_mwh')} The avg capture price needs to exceed it for the portfolio to recover costs.`} />
           <KPI label="Avg capture price"
                value={kpis.avgCapture != null ? `${kpis.avgCapture.toFixed(2)} €/MWh` : '—'}
                sub="Σ revenue / Σ energy delivered"
                {...(nothingDispatched ? NOTHING_DISPATCHED
                  : kpis.avgCapture == null && kpis.revenue == null ? withheld : {})}
-               hint="Volume-weighted average price the portfolio earned on delivered MWh (discharge for storage). Compare to System LCOE / LCOS: capture above LCOE means market prices cover production cost on average." />
+               hint="Volume-weighted average price the portfolio earned on delivered MWh (discharge for storage). Compare to the system cost per MWh delivered: capture above it means market prices cover production cost on average." />
         </div>
         {/* The backend's own framing of a near-zero net profit: an extendable
             asset at an interior optimum earns ≈ zero BY CONSTRUCTION. Said
