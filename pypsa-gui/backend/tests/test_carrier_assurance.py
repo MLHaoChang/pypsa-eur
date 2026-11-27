@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from harness import assurance_scope, rollout
+from harness.storage_calculations import REL_TOLERANCE
 from services import workflow_tools
 from tests.assurance_acceptance.support import approval, public_text
 from tests.test_answer_assurance import checked  # noqa: F401
@@ -118,7 +119,7 @@ def test_whole_message_grammar_selects_the_carrier_profile(wind, checked):
 def test_battery_carrier_reads_split_storage_power_and_an_empty_generator_set(battery, checked):
     frames, answer = run(checked, battery, "battery", BATTERY)
     assert answer["receipt"]["request_complete"], answer["receipt"]["result_slots"]
-    assert {b["metric"]: b["value"] for b in answer["blocks"]} == pytest.approx(BATTERY)
+    assert {b["metric"]: b["value"] for b in answer["blocks"]} == pytest.approx(BATTERY, rel=REL_TOLERANCE)
     text = public_text(frames)
     assert "0 generators and 1 StorageUnits of this carrier" in text
     assert "Storage energy uses store weights; generator energy uses generator weights" in text

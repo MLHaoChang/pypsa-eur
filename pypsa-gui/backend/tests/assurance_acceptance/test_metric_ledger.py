@@ -16,6 +16,7 @@ import ast
 import importlib
 import json
 import re
+import sys
 from numbers import Real
 from pathlib import Path
 
@@ -527,6 +528,8 @@ R4_OK = "gk-b:1f98625c8302e01590af4612b987d01752076a11"  # #2049
 # GK B (73) on #2057: the 41 rows its R5 table passed, and the two energy-balance
 # rows re-confirmed at SERVED_TOL (they leave R2's sha, which saw BUS_TOL_MW).
 R5_OK = "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8"  # #2057
+# GK B (74) on #2080 (issue 29): the 38 rows it pinned plus the 4 rows it re-confirmed.
+R6_OK = "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417"  # #2080
 # Exact set: a row whose domain_review is not "pending" is listed here with its value.
 REVIEWED = {
     **{
@@ -579,15 +582,12 @@ REVIEWED = {
     },
     **{
         ("renewable-share/1", m): R4_OK
-        for m in ("renewable_share", "nonrenewable_energy", "electricity_used")
+        for m in ("nonrenewable_energy", "electricity_used")
     },
-    **{
-        ("system-cost-breakdown/1", m): R3_OK
-        for m in ("system_capex", "system_opex", "system_cost", "objective_residual")
-    },
+    **{("system-cost-breakdown/1", m): R3_OK for m in ("system_opex", "system_cost")},
     **{
         ("branch-losses/1", m): R1_OK
-        for m in ("loss_energy", "peak_loss", "demand_energy", "loss_pct_of_demand")
+        for m in ("loss_energy", "peak_loss", "demand_energy")
     },
     **{
         pair: R2_OK
@@ -600,6 +600,53 @@ REVIEWED = {
             ("network-linear-cost/1", "peak_dispatch"),
             ("network-linear-cost/1", "annual_fixed_cost"),
             ("network-linear-cost/1", "allocated_fixed_cost"),
+        )
+    },
+    **{
+        pair: R6_OK
+        for pair in (
+            ("ac-branch-loading/1", "ac_hours_above_rating"),
+            ("branch-loading/1", "hours_above_rating"),
+            ("branch-losses/1", "loss_pct_of_demand"),
+            ("bus-price/1", "hours_at_voll"),
+            ("carrier-energy/1", "carrier_storage_charged_energy"),
+            ("carrier-energy/1", "carrier_storage_discharged_energy"),
+            ("copt-screening/1", "screening_eue"),
+            ("copt-screening/1", "screening_lole"),
+            ("copt-screening/1", "screening_lolp_max"),
+            ("curtailment/1", "available_energy"),
+            ("curtailment/1", "curtailed_energy"),
+            ("curtailment/1", "curtailment_share"),
+            ("energy-balance/1", "generation_energy"),
+            ("energy-balance/1", "served_energy"),
+            ("energy-balance/1", "unserved_energy"),
+            ("investment-case/1", "equity_irr"),
+            ("investment-case/1", "equity_npv"),
+            ("investment-case/1", "project_irr"),
+            ("investment-case/1", "project_npv"),
+            ("investment-lcoe/1", "lcoe_nominal"),
+            ("investment-lcoe/1", "lcoe_real"),
+            ("lost-load/1", "shed_hours"),
+            ("network-loading/1", "branches_above_rating"),
+            ("renewable-share/1", "renewable_share"),
+            ("site-import/1", "hours_at_import_limit"),
+            ("storage-cycles/1", "energy_capacity"),
+            ("storage-cycles/1", "equivalent_cycles"),
+            ("storage-cycles/1", "window_discharged_energy"),
+            ("storage-unit-cost/1", "charged_energy"),
+            ("storage-unit-cost/1", "discharged_energy"),
+            ("storage-unit-cost/1", "final_state_of_charge"),
+            ("storage-unit-cost/1", "net_storage_energy"),
+            ("storage-unit-cost/1", "peak_charging_power"),
+            ("storage-unit-cost/1", "peak_discharging_power"),
+            ("storage-unit-dispatch/1", "charged_energy"),
+            ("storage-unit-dispatch/1", "discharged_energy"),
+            ("storage-unit-dispatch/1", "final_state_of_charge"),
+            ("storage-unit-dispatch/1", "net_storage_energy"),
+            ("storage-unit-dispatch/1", "peak_charging_power"),
+            ("storage-unit-dispatch/1", "peak_discharging_power"),
+            ("system-cost-breakdown/1", "objective_residual"),
+            ("system-cost-breakdown/1", "system_capex"),
         )
     },
 }
@@ -671,27 +718,190 @@ def test_independent_domain_approval_stays_false():
     assert "independent_domain_approval" in assurance_contracts.PENDING
 
 
-# GK B (73) R5 ruling C: a reviewed row's tolerance constant must appear in its
-# oracle test's module. This is a name-in-file check only (issue 29 tightens it).
+# GK B (73) R5 ruling C, tightened by issue 29: a verified row's named tolerance
+# constant must be the one its oracle compares at, not just a name in the file.
+TOLERANCE_KEYWORDS = frozenset({"rel", "abs"})
+
+
+def _functions(tree: ast.Module) -> dict[str, ast.AST]:
+    return {
+        node.name: node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+
+def _bindings(tree: ast.Module) -> tuple[dict, dict]:
+    """(names, modules): local name -> (module, name) for `from M import X [as A]`;
+    local name -> module path for `import M [as A]` and `from pkg import mod [as A]`."""
+    names, modules = {}, {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            for a in node.names:
+                names[a.asname or a.name] = (node.module, a.name)
+                modules[a.asname or a.name] = f"{node.module}.{a.name}"
+        elif isinstance(node, ast.Import):
+            for a in node.names:
+                modules[a.asname or a.name.split(".")[0]] = (
+                    a.name if a.asname else a.name.split(".")[0]
+                )
+    return names, modules
+
+
+def _refers_to(node, module: str, constant: str, tree, own_module: str) -> bool:
+    """True when `node` is the constant `module:constant`, by its import binding
+    (or, for a constant a test module defines itself, by that module's own path)."""
+    names, modules = _bindings(tree)
+    if isinstance(node, ast.Name):
+        if node.id in names:
+            return names[node.id] == (module, constant)
+        defined = any(
+            isinstance(n, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == constant for t in n.targets)
+            for n in tree.body
+        )
+        return node.id == constant and defined and module == own_module
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == constant
+        and isinstance(node.value, ast.Name)
+        and modules.get(node.value.id) == module
+    )
+
+
+def _is_approx(func: ast.expr) -> bool:
+    return (isinstance(func, ast.Attribute) and func.attr == "approx") or (
+        isinstance(func, ast.Name) and func.id == "approx"
+    )
+
+
+def compares_at(oracle: str, constant_ref: str) -> bool:
+    """True when the oracle function, or a same-module helper it calls, uses the
+    constant `module.path:NAME` as the whole rel=/abs= argument of `approx`, or as
+    the bound of `abs(a - b) <= NAME`. A constant inside arithmetic, `max`, an
+    `assert NAME > 0` or an import that names another module does not count.
+    Limit: any such comparison in the oracle counts, not one per metric."""
+    module, _, constant = constant_ref.partition(":")
+    path, _, name = oracle.partition("::")
+    tree = ast.parse((REPO / path).read_text())
+    own = Path(path).with_suffix("").as_posix().removeprefix("pypsa-gui/backend/")
+    own = own.replace("/", ".")
+    refers = lambda n: _refers_to(n, module, constant, tree, own)  # noqa: E731
+    functions = _functions(tree)
+    todo, seen = [name.split("[")[0]], set()
+    while todo:
+        current = todo.pop()
+        if current in seen or current not in functions:
+            continue
+        seen.add(current)
+        for node in ast.walk(functions[current]):
+            if (
+                isinstance(node, ast.Compare)
+                and len(node.ops) == 1
+                and isinstance(node.ops[0], (ast.Lt, ast.LtE))
+                and isinstance(node.left, ast.Call)
+                and isinstance(node.left.func, ast.Name)
+                and node.left.func.id == "abs"
+                and len(node.left.args) == 1
+                and isinstance(node.left.args[0], ast.BinOp)
+                and isinstance(node.left.args[0].op, ast.Sub)
+                and refers(node.comparators[0])
+            ):
+                return True
+            if isinstance(node, ast.Call):
+                if _is_approx(node.func) and any(
+                    k.arg in TOLERANCE_KEYWORDS and refers(k.value)
+                    for k in node.keywords
+                ):
+                    return True
+                if isinstance(node.func, ast.Name):
+                    todo.append(node.func.id)
+    return False
+
+
 def unpinned_reviews(rows) -> list[str]:
-    """Reviewed rows whose named tolerance constant does not appear in their oracle test's module."""
+    """Verified rows whose named tolerance constant their oracle does not compare at."""
     off = []
     for (profile, metric), (row, _) in sorted(rows.items()):
-        if row.get("domain_review", "pending") == "pending" or row["oracle"] is None:
+        if row["status"] != "verified" or row["oracle"] is None:
             continue
-        match = NAMED_TOLERANCE.fullmatch(row["tolerance"])
-        if match is None:
+        if NAMED_TOLERANCE.fullmatch(row["tolerance"]) is None:
             continue  # "exact" or ulp:<n>: no constant to name
-        test_file = REPO / row["oracle"].split("::")[0]
-        if match[2] not in test_file.read_text():
-            off.append(f"{profile}/{metric}: {match[2]} not in {test_file.name}")
+        if not compares_at(row["oracle"], row["tolerance"]):
+            off.append(
+                f"{profile}/{metric}: {row['tolerance']} is not the whole rel=/abs= "
+                f"argument of approx in {row['oracle'].split('::')[-1]}"
+            )
     return off
 
 
-def test_a_reviewed_row_names_the_tolerance_its_oracle_test_uses(ledger):
-    """A row holds a gk-b sha only when the constant it names appears in its oracle test's module."""
+def test_a_verified_row_names_the_tolerance_its_oracle_compares_at(ledger):
+    """Every verified row, reviewed or pending, names a constant its oracle asserts at."""
     off = unpinned_reviews(ledger[0])
     assert off == [], "\n".join(off)
+
+
+LEDGER_REF = "harness.m:TOL"
+HEAD = "from harness.m import TOL\n"
+
+
+@pytest.mark.parametrize(
+    ("source", "pinned"),
+    [
+        (HEAD + "def test_o():\n    assert 1 == approx(1, rel=TOL)\n", True),
+        (HEAD + "def test_o():\n    assert 1 == pytest.approx(1, abs=TOL)\n", True),
+        (
+            "from harness import m\ndef test_o():\n    assert 1 == approx(1, rel=m.TOL)\n",
+            True,
+        ),
+        (HEAD + "def test_o():\n    assert abs(a - b) <= TOL\n", True),
+        ("def test_o():\n    assert 1 == approx(1, abs=1e-6)\n", False),  # not named
+        # mutant: imported from another module than the ledger names
+        (
+            "from harness.other import TOL\ndef test_o():\n    assert 1 == approx(1, rel=TOL)\n",
+            False,
+        ),
+        # mutant: the constant only guards, the comparison is loose
+        (
+            HEAD
+            + "def test_o():\n    assert TOL > 0\n    assert 1 == approx(1, rel=0.5)\n",
+            False,
+        ),
+        # mutants: inside arithmetic or max
+        (HEAD + "def test_o():\n    assert 1 == approx(1, rel=TOL * 1e6)\n", False),
+        (HEAD + "def test_o():\n    assert 1 == approx(1, rel=max(TOL, 0.1))\n", False),
+        (HEAD + "def test_o():\n    assert abs(a - b) <= TOL * 1e6\n", False),
+        # a constant used only by another test does not pin this one
+        (
+            HEAD + "def test_other():\n    assert 1 == approx(1, rel=TOL)\n"
+            "def test_o():\n    assert 1 == approx(1, abs=1e-6)\n",
+            False,
+        ),
+        # a same-module helper the oracle calls does count
+        (
+            HEAD + "def helper(a):\n    assert a == approx(1, rel=TOL)\n"
+            "def test_o():\n    helper(1)\n",
+            True,
+        ),
+    ],
+)
+def test_the_check_proves_the_comparison_not_the_name(
+    tmp_path, monkeypatch, source, pinned
+):
+    (tmp_path / "test_x.py").write_text(source)
+    monkeypatch.setattr(sys.modules[__name__], "REPO", tmp_path)
+    assert compares_at("test_x.py::test_o", LEDGER_REF) is pinned
+
+
+def test_a_constant_the_test_module_defines_pins_only_its_own_module_path(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "test_x.py").write_text(
+        "TOL = 1e-12\ndef test_o():\n    assert 1 == approx(1, rel=TOL)\n"
+    )
+    monkeypatch.setattr(sys.modules[__name__], "REPO", tmp_path)
+    assert compares_at("test_x.py::test_o", "test_x:TOL")
+    assert not compares_at("test_x.py::test_o", "harness.m:TOL")
 
 
 def test_a_pending_row_says_why_and_a_reviewed_row_does_not(ledger):
@@ -707,18 +917,17 @@ def test_a_pending_row_says_why_and_a_reviewed_row_does_not(ledger):
     assert off == [], "\n".join(off)
 
 
-def test_a_review_on_an_unpinned_row_is_refused(ledger):
+def test_a_row_naming_a_constant_its_oracle_does_not_use_is_refused(ledger):
     rows, _ = ledger
-    pair = (
-        "investment-case/1",
-        "project_irr",
-    )  # IRR_TOLERANCE, unnamed in its test (issue 29)
+    pair = ("investment-case/1", "project_irr")
     row, path = rows[pair]
-    assert row["domain_review"] == "pending"
-    reviewed = {**rows, pair: ({**row, "domain_review": R2_OK}, path)}
-    assert unpinned_reviews(reviewed) == [
-        "investment-case/1/project_irr: IRR_TOLERANCE not in test_investment_assurance.py"
-    ]
+    assert row["tolerance"] == "harness.investment_calculations:IRR_TOLERANCE"
+    wrong = {**row, "tolerance": "harness.investment_calculations:LCOE_TOLERANCE"}
+    assert (
+        "investment-case/1/project_irr: harness.investment_calculations:LCOE_TOLERANCE "
+        "is not the whole rel=/abs= argument of approx in "
+        "test_project_irr_of_one_sign_change_is_the_hand_root"
+    ) in unpinned_reviews({**rows, pair: (wrong, path)})
 
 
 # ── pending metrics with no checked profile (issue 10 R5) ────────────────

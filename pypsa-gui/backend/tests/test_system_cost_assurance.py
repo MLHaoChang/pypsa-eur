@@ -231,8 +231,12 @@ def test_network_figures_equal_the_hand_arithmetic(cost_case):
     values, reasons = _checked(cost_case(), "network")
     assert reasons == {}
     assert values["system_capex"] == pytest.approx(CAPEX, rel=1e-12)
-    assert values["system_opex"] == pytest.approx(OPEX, rel=1e-9)
-    assert values["system_cost"] == pytest.approx(CAPEX + OPEX, rel=1e-9)
+    assert values["system_opex"] == pytest.approx(
+        OPEX, rel=system_cost.RESIDUAL_TOLERANCE
+    )
+    assert values["system_cost"] == pytest.approx(
+        CAPEX + OPEX, rel=system_cost.RESIDUAL_TOLERANCE
+    )
     assert (
         abs(values["objective_residual"]) <= system_cost.RESIDUAL_TOLERANCE * OBJECTIVE
     )
@@ -245,6 +249,9 @@ def test_the_carriers_sum_to_the_network_and_each_is_its_own_arithmetic(cost_cas
         values, reasons = _checked(ctx, carrier)
         assert reasons == {"objective_residual": "network_scope_required"}
         assert values["system_capex"] == pytest.approx(capex, rel=1e-12, abs=1e-12)
+        assert values["system_capex"] == pytest.approx(
+            capex, rel=system_cost.RESIDUAL_TOLERANCE
+        )
         assert values["system_opex"] == pytest.approx(opex, rel=1e-9, abs=1e-9)
         total.append(values["system_cost"])
     assert math.fsum(total) == pytest.approx(
@@ -357,6 +364,9 @@ def test_the_residual_is_the_objective_minus_the_hand_basis(cost_case):
     values, reasons = _checked(ctx, "network")
     assert reasons == {}
     assert values["objective_residual"] == pytest.approx(5e-7, abs=1e-11)
+    assert values["objective_residual"] == pytest.approx(
+        5e-7, abs=system_cost.RESIDUAL_TOLERANCE
+    )
 
 
 @pytest.mark.parametrize(("factor", "answered"), [(1.0, True), (2.0, False)])

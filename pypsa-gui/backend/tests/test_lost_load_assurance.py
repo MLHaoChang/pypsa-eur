@@ -78,6 +78,7 @@ def test_lost_load_matches_the_hand_values_from_a_real_solve(short, checked, cli
     assert list(state["last_lost_load"]["lost_load_t"]["L1"]) == pytest.approx([0, 5])
     frames = ask(checked, short, SHED)
     assert answered(checked, frames) == pytest.approx(SHED)
+    assert answered(checked, frames)["shed_hours"] == SHED["shed_hours"]
     text = public_text(frames)
     assert "Load L1" in text and "demand response is excluded" in text
     assert "not checked against demand" in text

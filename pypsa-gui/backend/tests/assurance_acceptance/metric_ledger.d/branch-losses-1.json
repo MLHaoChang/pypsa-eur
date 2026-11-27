@@ -62,10 +62,10 @@
     "metric": "loss_pct_of_demand",
     "formula": "100 x loss_energy / demand_energy",
     "validity": "verified LP solve and finite, non-negative snapshot weights (else unverified_solve); loss frames recorded (else losses_not_recorded); every Line and Transformer read is complete over the whole solved horizon by services.results.losses._validity_rows, else its worst state: misaligned, absent or incomplete (a short frame is incomplete). Refusals: ac_pf_present, ambiguous_branch, misaligned_source, unknown_branch, unsupported_branch_population, unsupported_snapshot_scope; and network scope only (else network_scope_required); at least one Load (else no_loads); every Load's loads_t.p complete over the whole solved horizon, else its worst state; |demand_energy| <= NEAR_ZERO gives near_zero_denominator",
-    "tolerance": "harness.derived:NEAR_ZERO",
+    "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_losses_assurance.py::test_network_figures_equal_the_hand_arithmetic",
     "status": "verified",
-    "domain_review": "gk-b:bf0eed8e63449828d3c91967f75a8c35e2775a2a",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",

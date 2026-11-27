@@ -8,8 +8,7 @@
     "tolerance": "harness.energy_balance_calculations:SERVED_TOL",
     "oracle": "pypsa-gui/backend/tests/test_energy_balance_assurance.py::test_a_shortfall_comes_off_served_as_it_comes_off_generation",
     "status": "verified",
-    "domain_review": "pending",
-    "domain_review_note": "unpinned: its oracle compares at abs=1e-6, not SERVED_TOL, though test_energy_balance_assurance.py names it (issue 29)",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -24,8 +23,7 @@
     "tolerance": "harness.energy_balance_calculations:SERVED_TOL",
     "oracle": "pypsa-gui/backend/tests/test_energy_balance_assurance.py::test_a_shortfall_comes_off_served_as_it_comes_off_generation",
     "status": "verified",
-    "domain_review": "pending",
-    "domain_review_note": "unpinned: its oracle compares at abs=1e-6, not SERVED_TOL, though test_energy_balance_assurance.py names it (issue 29)",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -40,8 +38,7 @@
     "tolerance": "harness.energy_balance_calculations:SERVED_TOL",
     "oracle": "pypsa-gui/backend/tests/test_energy_balance_assurance.py::test_a_shortfall_comes_off_served_as_it_comes_off_generation",
     "status": "verified",
-    "domain_review": "pending",
-    "domain_review_note": "unpinned: its oracle compares at abs=1e-6, not SERVED_TOL, though test_energy_balance_assurance.py names it (issue 29)",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",

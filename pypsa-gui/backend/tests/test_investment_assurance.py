@@ -7,6 +7,11 @@ report checks the rebuild against the engine's own headlines.
 # ruff: noqa: F811 -- imported shared fixtures.
 import pytest
 
+from harness.investment_calculations import (
+    IRR_TOLERANCE,
+    LCOE_TOLERANCE,
+    REL_TOLERANCE,
+)
 from services import workflow_tools
 from services.finance import metrics
 from tests.assurance_acceptance.support import approval, public_text
@@ -108,6 +113,11 @@ def test_hand_cash_with_a_nonzero_first_year(project, checked):
                                  "equity_irr": 0.13066238629180748, "project_irr": metrics.irr(PROJECT)[0]})
     frames = ask(checked, project, values)
     assert answered(checked, frames) == pytest.approx(values, rel=1e-12)
+    got = answered(checked, frames)
+    for npv in ("equity_npv", "project_npv"):
+        assert got[npv] == pytest.approx(values[npv], rel=REL_TOLERANCE)
+    for irr in ("equity_irr", "project_irr"):
+        assert got[irr] == pytest.approx(values[irr], abs=IRR_TOLERANCE)
     text = public_text(frames)
     assert "cost of equity 10.0000%" in text and "WACC 7.0000%" in text
     assert "(financial close) is undiscounted" in text
@@ -229,6 +239,9 @@ def test_the_lcoe_from_the_retained_series(project, checked):
                        LCOE)
     frames = ask(checked, project, values, LCOE)
     assert answered(checked, frames) == values
+    got = answered(checked, frames)
+    for metric in ("lcoe_nominal", "lcoe_real"):
+        assert got[metric] == pytest.approx(values[metric], rel=LCOE_TOLERANCE)
     text = public_text(frames)
     assert "USD/MWh" in text and "incremental value" not in text
 
@@ -318,6 +331,7 @@ def test_project_irr_of_one_sign_change_is_the_hand_root(project):
     value, reason = _project_irr_slot(project)
     assert reason is None
     assert value == pytest.approx(0.10, abs=1e-9)
+    assert value == pytest.approx(0.10, abs=IRR_TOLERANCE)
 
 
 def test_project_irr_with_two_roots_is_refused(project):

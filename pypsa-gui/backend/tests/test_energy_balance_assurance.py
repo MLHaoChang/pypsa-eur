@@ -103,10 +103,11 @@ def test_a_shortfall_comes_off_served_as_it_comes_off_generation(shortfall, chec
               "storage_change": 0, "export_losses_and_conversion": 0}
     frames = ask(checked, ctx, values)
     assert answered(checked, frames) == pytest.approx(values)
+    assert answered(checked, frames) == pytest.approx(values, abs=SERVED_TOL)
     expected = tab(ctx.network)
     assert expected["unserved_product"] == pytest.approx(4)
     for metric in ("generation_energy", "served_energy", "storage_change", "export_losses_and_conversion"):
-        assert values[metric] == pytest.approx(expected[metric], abs=1e-6)
+        assert values[metric] == pytest.approx(expected[metric], abs=SERVED_TOL)
     text = public_text(frames)
     assert "split by source and route is its own attribution" in text
     assert "derived (generation minus served minus storage change), not separately measured" in text
