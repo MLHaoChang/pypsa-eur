@@ -530,6 +530,24 @@ def _resolve(name, fn, local):
     return getattr(fn, "__globals__", {}).get(name)
 
 
+def _proxied(fn):
+    """
+    The chat_tools helper a dispatcher fragment's call-time proxy stands for
+    (`def _x(*a, **k): return _ct()._x(*a, **k)`, RETRO-FRAG-1), or None.
+    """
+    code = getattr(fn, "__code__", None)
+    if (
+        code is None
+        or not getattr(fn, "__module__", "").startswith("services.chat_dispatchers.")
+        or code.co_names != ("_ct", fn.__name__)
+    ):
+        return None
+    from services import chat_tools
+
+    target = getattr(chat_tools, fn.__name__, None)
+    return target if inspect.isfunction(target) else None
+
+
 def _lock_check_path(fn, depth: int = 0, seen: set | None = None) -> list[str] | None:
     """
     The call chain from `fn` to a lock-check primitive, or None.
@@ -546,6 +564,10 @@ def _lock_check_path(fn, depth: int = 0, seen: set | None = None) -> list[str] |
     if depth > 6 or key in seen:
         return None
     seen.add(key)
+    target = _proxied(fn)
+    if target is not None:
+        chain = _lock_check_path(target, depth + 1, seen)
+        return [fn.__name__, *chain] if chain else None
     try:
         node = _function_ast(fn)
     except (OSError, TypeError, SyntaxError):
@@ -652,6 +674,12 @@ def test_the_verifier_sees_through_helpers():
     assert _lock_check_path(routes[("POST", "/api/projects/{name}/reports/generate")]), "cross-module helper"
     assert _lock_check_path(routes[("DELETE", "/api/projects/{name}")]), "`_delete_project_db`"
     assert _lock_check_path(routes[("PUT", "/api/projects/{name}/asset_health")]), "OPEN-ITEMS item 16"
+    from services import chat_tools
+
+    via_proxy = _lock_check_path(chat_tools.DISPATCHERS["campus_set_library"])
+    assert via_proxy and via_proxy[1] == "_gridspine_project_for_write", (
+        f"a moved dispatcher through its chat_tools proxy (RETRO-FRAG-1): {via_proxy}"
+    )
 
 
 # ── chat tools ──────────────────────────────────────────────────────────────

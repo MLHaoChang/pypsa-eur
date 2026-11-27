@@ -65,7 +65,11 @@ def test_report_templates_is_a_fragment_spliced_at_its_old_place():
         "set_report_mapping",
         "list_report_roundtrips",
     ]
-    assert "report_templates" in catalogue._FRAGMENTS.spliced
+    assert catalogue._FRAGMENTS.spliced == {
+        "report_templates",
+        "lv08_bcampus",
+        "campus_electrical",
+    }
 
 
 def test_every_schema_fragment_has_its_dispatcher_pair():
@@ -284,6 +288,11 @@ SPLICED_PLACES = {
         "TOOLS": ("create_evidence_report", "export_results_workbook"),
         "TOOL_ROUTES": ("create_evidence_report", "get_input_workbook"),
         "DISPATCHERS": ("get_grid_risk_production", None),
+    },
+    "campus_electrical": {
+        "TOOLS": ("gridspine_compute_capacity", "gridspine_assess_connection"),
+        "TOOL_ROUTES": ("gridspine_assess_connection", "list_library_items"),
+        "DISPATCHERS": ("gridspine_assess_connection", "list_library_items"),
     },
 }
 
@@ -536,11 +545,10 @@ def _proxies():
         (mod, name)
         for mod in F.discover(F.DISPATCH_PACKAGE).values()
         for name, fn in vars(mod).items()
-        if name.startswith("_")
-        and name != "_ct"
+        if name != "_ct"
         and isinstance(fn, types.FunctionType)
         and fn.__module__ == mod.__name__
-        and "_ct" in fn.__code__.co_names
+        and fn.__code__.co_names == ("_ct", name)
         and hasattr(chat_tools, name)
     ]
 
@@ -551,7 +559,14 @@ def test_every_proxy_reaches_chat_tools_at_call_time(monkeypatch):
     from services import chat_tools
 
     found = _proxies()
-    assert {n for _, n in found} >= {"_campus_route", "_acting", "_b2b_fit"}
+    assert {n for _, n in found} >= {
+        "_campus_route",
+        "_acting",
+        "_b2b_fit",
+        "_campus_check_lock",
+        "_gridspine_project_for_write",
+        "island_tool_args",
+    }
     for mod, name in found:
         sentinel = object()
         monkeypatch.setattr(chat_tools, name, lambda *a, _s=sentinel, **k: _s)
@@ -564,6 +579,21 @@ def test_a_moved_dispatcher_calls_the_patched_chat_tools_helper(monkeypatch):
 
     monkeypatch.setattr(chat_tools, "_campus_route", lambda *a, **k: {"job": "patched"})
     assert lv08_bcampus.campus_milp_status("P")["job"] == {"job": "patched"}
+
+
+def test_a_campus_electrical_dispatcher_calls_the_patched_public_helper(monkeypatch):
+    from services import chat_tools
+    from services.chat_dispatchers import campus_electrical
+
+    class Patched(Exception):
+        pass
+
+    def refuse(*a, **k):
+        raise Patched
+
+    monkeypatch.setattr(chat_tools, "island_tool_args", refuse)
+    with pytest.raises(Patched):
+        campus_electrical.campus_set_island_config("P", config={})
 
 
 # ── discovery misses fail loudly ────────────────────────────────────────────
