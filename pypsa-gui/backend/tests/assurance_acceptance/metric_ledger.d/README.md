@@ -15,11 +15,16 @@ file. `smoke/json_fragments.py` merges the files with `../metric_ledger.json`
    "tolerance": "exact",
    "oracle": "pypsa-gui/backend/tests/test_x.py::test_y[param]",
    "status": "verified",
+   "domain_review": "pending",
    "surfaces": {"answer": {"status": "verified", "test": "pypsa-gui/backend/tests/test_x.py::test_y"},
                 "workbook": {"status": "pending", "test": null, "ticket": ".scratch/<feature>/issues/NN-x.md"}}}
 ]}}
 ```
 
+- `domain_review` is `pending` or `gk-b:<40-hex sha>`, the head GK B gave its OK
+  on. Only a `verified` row whose named tolerance constant appears in its
+  oracle test's module may hold a sha. The optional `domain_review_note` says
+  why a row stays pending. The field feeds no tally and no gate.
 - One profile per file, one row per metric, no other keys. A `(profile, metric)`
   that two files define fails, naming both.
 - `formula` is plain text over the raw inputs; `validity` names the guards and

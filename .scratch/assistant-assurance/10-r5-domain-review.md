@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-# Issue 10 R5 domain review: verified metric-ledger rows with domain_review pending (81 rows)
+# Issue 10 R5 domain review: verified metric-ledger rows with domain_review pending (82 rows)
 
 | # | profile | metric | formula (≤60 chars, abbreviated) | oracle test (function name only) | hand numbers | tolerance | pinned | unit |
 |---|---|---|---|---|---|---|---|---|
@@ -88,7 +88,7 @@
 | 81 | time-to-power/1 | time_to_power_months | calendar months from the stated project_start to first powe… | test_the_staged_example_reads_12_months_to_the_2027_stage | 12 months (2026-01-01 → 2027-01-01) | exact | n/a | months |
 | 82 | investment-case/1 | project_irr | the unique r with sum over k of project_post_tax[k] / (1 + r)^k = 0 | test_project_irr_of_one_sign_change_is_the_hand_root | (held R2 OK e0be8aa7; returned to pending by the widened pin) | harness.investment_calculations:IRR_TOLERANCE | no | fraction/year |
 
-Pinned: yes 4, no 35, n/a 43 (exact or ulp:<n>; no constant to name). The renewable-share rows (3) take R4's OK sha in place of a table verdict. Unpinned rows stay pending under issue 29.
+Pinned: yes 4 by the name-in-file check, but only row 55 (renewable_share) in fact; rows 25-27 compare at abs=1e-6. No 35, n/a 43 (exact or ulp:<n>; no constant to name). The renewable-share rows (3) take R4's OK sha in place of a table verdict. Unpinned rows stay pending under issue 29.
 
 ## GK B (73) verdict, 2026-11-27, on 25e3b2da
 

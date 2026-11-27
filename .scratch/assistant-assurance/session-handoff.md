@@ -9,6 +9,10 @@ Historical sections below describe earlier
 states and commands. The current [implementation status](implementation-status.md)
 and [API contracts](harness-contracts.md) supersede them. Independent domain/release
 approval remains pending.
+Per-metric domain review (issue 10 R5, 2026-11-27): see the R5 note in
+[coverage-ledger](coverage-ledger.md). The 38 rows still pending are tracked in
+[issue 29](issues/29-metric-ledger-unpinned-tolerances.md), and the 10 metrics with
+no checked profile are in `metric_ledger_pending.json`.
 Baseline: master d43809ae. Dictation PR 106 has merged; existing Claude/tool
 behavior remains the baseline. Do not reuse the old failed environment.
 

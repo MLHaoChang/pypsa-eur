@@ -617,8 +617,8 @@ def test_independent_domain_approval_stays_false():
     assert "independent_domain_approval" in assurance_contracts.PENDING
 
 
-# Profiles whose oracle tests compare at the constant their rows name. The other
-# profiles' oracle tests use literal tolerances; pinning them is not done here.
+# GK B (73) R5 ruling C: a reviewed row's tolerance constant must appear in its
+# oracle test's module. This is a name-in-file check only (issue 29 tightens it).
 def unpinned_reviews(rows) -> list[str]:
     """Reviewed rows whose named tolerance constant does not appear in their oracle test's module."""
     off = []
