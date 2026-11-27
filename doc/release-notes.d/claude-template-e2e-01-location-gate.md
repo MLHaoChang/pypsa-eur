@@ -1,1 +1,1 @@
-* Fix(pypsa-gui): A project with no site location now reads "incomplete" in Project & site and blocks Run until the latitude and longitude are set; confirming the site coordinates in the drawer clears it.
+* Fix(pypsa-gui): A project with no site location now blocks Run (server and Project & site section) until a bus is placed or the site latitude and longitude are confirmed; the run starts answer a typed `site_location_missing` refusal.

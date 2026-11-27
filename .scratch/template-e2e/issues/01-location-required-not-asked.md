@@ -3,7 +3,7 @@
 
 # 01 — Location is a required input, but no template asks for it and Run does not wait for it
 
-Status: ready-for-agent; audit 2026-11-25: #1802 merged (create forms ask for location); left: run gate and Section 1 incomplete state (site_location_missing is still a warning, flow_service.py:1237), Q1 and anchor-clears-item items
+Status: done (2026-11-27, PR for claude/template-e2e-01-location-gate): the missing location blocks Run on the server (`services/site_location.py`) and in the flow; Section 1 reads incomplete until a bus is placed or the site anchor is confirmed. Follow-up: the readiness line linking to the Latitude/Longitude drawer (UX).
 Owner: builder session_01G7qCumsdzuVnJQAD41wFxk (after #1586/#1594)
 Size: S
 Gated: UX; GK B (run gate)
