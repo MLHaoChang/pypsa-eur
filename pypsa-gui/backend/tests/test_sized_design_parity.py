@@ -417,11 +417,14 @@ OLD = {
 
 def test_an_old_stored_report_hashes_and_renders_as_on_master():
     """sha256 of the evidence master ae6ea750a collects for OLD: no sized-assets
-    table, no connection row, the old caption, so a stored report stays fresh."""
+    table, no connection row, the old caption, so a stored report stays fresh.
+    guided-results 04 renamed two of its rows on purpose ("MC LOLE (h/yr)" → "Expected
+    shortfall (h/yr)", "LCOE" → "Cost per MWh served (study)"); the hash moved with them
+    and nothing else did, so such a report asks to be redrafted once."""
     ev = E.collect_evidence(study_report=None, eh_report=OLD, worksheet=None)
     assert (
         E.evidence_hash(ev)
-        == "cb5607f9d1c0bc438a55a3ff66a4d67a4f599e5ea6ab8d85d98ff3e2c5a949bf"
+        == "bd86cc3cd9554d65e48cb5133a2032da18d98ff0dfc2a2abe449c2dbccb8a2d5"
     )
     assert "sized_assets" not in ev.tables
     assert (
