@@ -71,3 +71,12 @@ Then send the rows to GK B for domain review. A row that passes takes the sha of
 | energy-balance/1 | generation_energy | `harness.energy_balance_calculations:SERVED_TOL` | `test_energy_balance_assurance.py::test_a_shortfall_comes_off_served_as_it_comes_off_generation` | compare at the named constant (now `abs=1e-6`) |
 | energy-balance/1 | served_energy | `harness.energy_balance_calculations:SERVED_TOL` | `test_energy_balance_assurance.py::test_a_shortfall_comes_off_served_as_it_comes_off_generation` | compare at the named constant (now `abs=1e-6`) |
 | energy-balance/1 | unserved_energy | `harness.energy_balance_calculations:SERVED_TOL` | `test_energy_balance_assurance.py::test_a_shortfall_comes_off_served_as_it_comes_off_generation` | compare at the named constant (now `abs=1e-6`) |
+
+Outside the table above, previously reviewed: widening the check to all verified rows flags these four. They keep their `gk-b:` sha and GK B re-confirms them in this PR's domain review.
+
+| profile | metric | was | fix |
+|---|---|---|---|
+| branch-losses/1 | loss_pct_of_demand | `harness.derived:NEAR_ZERO` | ledger string becomes `ulp:4504` (the oracle's rel 1e-12); NEAR_ZERO stays in the validity text |
+| renewable-share/1 | renewable_share | `harness.derived:NEAR_ZERO` | same |
+| system-cost-breakdown/1 | system_capex | `harness.system_cost_calculations:RESIDUAL_TOLERANCE` | oracle also asserts at the constant |
+| system-cost-breakdown/1 | objective_residual | `harness.system_cost_calculations:RESIDUAL_TOLERANCE` | oracle also asserts at the constant |

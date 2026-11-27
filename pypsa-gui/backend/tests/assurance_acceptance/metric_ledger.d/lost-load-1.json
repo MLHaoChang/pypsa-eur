@@ -35,11 +35,11 @@
     "metric": "shed_hours",
     "formula": "sum over t of w_generators[t] where electrical-load shed[t] > SHED_THRESHOLD_MW",
     "validity": "verified solve (else unverified_solve); every shed value and weight in the window finite and weights >= 0, else invalid_or_missing_shed_data. Refusals: legacy_lost_load_capture, misaligned_source, no_electrical_loads, no_lost_load_capture, unknown_load, unsupported_load_population, unsupported_snapshot_scope, reversed_window",
-    "tolerance": "harness.lost_load_calculations:SHED_THRESHOLD_MW",
+    "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_lost_load_assurance.py::test_lost_load_matches_the_hand_values_from_a_real_solve",
     "status": "verified",
     "domain_review": "pending",
-    "domain_review_note": "unpinned: test_lost_load_assurance.py does not name SHED_THRESHOLD_MW (issue 29)",
+    "domain_review_note": "pinned in issue 29; awaiting GK B domain review",
     "surfaces": {
      "answer": {
       "status": "verified",

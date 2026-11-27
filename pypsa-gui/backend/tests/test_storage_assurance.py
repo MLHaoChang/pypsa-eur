@@ -9,6 +9,7 @@ import zipfile
 import pandas as pd
 import pytest
 
+from harness.storage_calculations import REL_TOLERANCE
 from services import assurance_records, chat_service, workflow_tools
 from tests.assurance_acceptance.support import approval, public_text
 from tests.test_answer_assurance import checked  # noqa: F401
@@ -94,6 +95,8 @@ def test_storage_key_results_use_raw_split_power_and_storage_durations(
     record = answer(checked, frames)
     assert record["receipt"]["request_complete"]
     assert {b["metric"]: b["value"] for b in record["blocks"]} == VALUES
+    assert {b["metric"]: b["value"] for b in record["blocks"]} == pytest.approx(
+        VALUES, rel=REL_TOLERANCE)
     text = public_text(frames)
     assert "StorageUnit Battery" in text and "Generator Battery" not in text
     assert "10 MWh" in text and "-6 MWh" in text

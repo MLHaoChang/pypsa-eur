@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from harness import assurance_scope
+from harness.curtailment_calculations import RESIDUAL_TOLERANCE
 from services import workflow_tools
 from tests.assurance_acceptance.support import approval, public_text
 from tests.test_answer_assurance import checked  # noqa: F401
@@ -195,7 +196,7 @@ WIND = {"available_energy": 50, "curtailed_energy": 33, "curtailment_share": 66}
 @pytest.mark.parametrize("entity", ["G1", "network"])
 def test_curtailment_of_a_variable_generator(windy, checked, entity):
     ctx = solve(windy)
-    assert answered(checked, ask(checked, ctx, "curtailment/1", entity, WIND)) == pytest.approx(WIND)
+    assert answered(checked, ask(checked, ctx, "curtailment/1", entity, WIND)) == pytest.approx(WIND, rel=RESIDUAL_TOLERANCE)
 
 
 def test_a_dispatchable_unit_is_not_curtailed(windy, checked):

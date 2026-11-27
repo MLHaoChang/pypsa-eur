@@ -4,6 +4,7 @@
 import pandas as pd
 import pytest
 
+from harness.storage_cycles_calculations import REL_TOLERANCE
 from services import workflow_tools
 from tests.assurance_acceptance.support import approval, public_text
 from tests.test_answer_assurance import checked  # noqa: F401
@@ -92,7 +93,7 @@ def test_a_non_cyclic_unit_matches_the_storage_profile(storage, checked):
                                     "retain": False, "metrics": ["discharged_energy"]})
     values = {"window_discharged_energy": 4, "energy_capacity": 20, "equivalent_cycles": 0.2}
     s6 = ask(checked, storage, "storage-cycles/1", "Battery", "StorageUnit", values)
-    assert answered(checked, s6) == pytest.approx(values)
+    assert answered(checked, s6) == pytest.approx(values, rel=REL_TOLERANCE)
     assert answered(checked, s2)["discharged_energy"] == answered(checked, s6)["window_discharged_energy"]
 
 

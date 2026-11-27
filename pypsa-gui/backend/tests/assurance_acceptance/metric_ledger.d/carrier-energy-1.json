@@ -39,7 +39,7 @@
     "oracle": "pypsa-gui/backend/tests/test_carrier_assurance.py::test_battery_carrier_reads_split_storage_power_and_an_empty_generator_set",
     "status": "verified",
     "domain_review": "pending",
-    "domain_review_note": "unpinned: test_carrier_assurance.py does not name REL_TOLERANCE (issue 29)",
+    "domain_review_note": "pinned in issue 29; awaiting GK B domain review",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -55,7 +55,7 @@
     "oracle": "pypsa-gui/backend/tests/test_carrier_assurance.py::test_battery_carrier_reads_split_storage_power_and_an_empty_generator_set",
     "status": "verified",
     "domain_review": "pending",
-    "domain_review_note": "unpinned: test_carrier_assurance.py does not name REL_TOLERANCE (issue 29)",
+    "domain_review_note": "pinned in issue 29; awaiting GK B domain review",
     "surfaces": {
      "answer": {
       "status": "verified",

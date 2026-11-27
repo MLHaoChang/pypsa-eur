@@ -5,7 +5,7 @@
     "metric": "renewable_share",
     "formula": "100 x (1 - nonrenewable_energy / electricity_used), in percent; compared in percentage points (percentage_point_delta/1), never as a percent change",
     "validity": "verified LP solve and finite, non-negative generator weights (else unverified_solve); every class renewable_fraction.classify returns is named in READ, NOT_COUNTED or WITHHOLDING and at most MAX_MEMBERS Generators (counted or renewable) and Loads are read (unsupported_population); every Generator carrier present, not blank or NaN (carrier_missing); no source Link, conversion Link, net or open cluster, injecting or unattributed source, or slack Generator (unsupported_supply_path); no VoLL shed, demand response or data-centre curtailment removed by the solve (unserved_energy_not_modelled); every counted dispatch present and finite (invalid_or_missing_raw_data). Refusals: network_scope_required, unsupported_snapshot_scope (multi-period network); electricity_used above NEAR_ZERO (no_electricity_served); some generation above NEAR_ZERO, read from the counted and renewable dispatch (no_generation; a missing renewable column reads invalid_or_missing_raw_data); nonrenewable_energy not above electricity_used (nonrenewable_exceeds_served)",
-    "tolerance": "harness.derived:NEAR_ZERO",
+    "tolerance": "ulp:4504",
     "oracle": "pypsa-gui/backend/tests/test_renewable_share_assurance.py::test_network_figures_equal_the_hand_arithmetic",
     "status": "verified",
     "domain_review": "gk-b:1f98625c8302e01590af4612b987d01752076a11",

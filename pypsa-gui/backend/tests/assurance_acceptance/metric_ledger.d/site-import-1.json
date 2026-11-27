@@ -50,11 +50,11 @@
     "metric": "hours_at_import_limit",
     "formula": "sum over t of w_generators[t] where import[t] >= AT_LIMIT x limit[t] and limit > 0",
     "validity": "verified solve (else unverified_solve); every generator and port dispatch readable and weights >= 0, else invalid_or_missing_dispatch. Refusals: load_shape_not_established, network_scope_required, unsupported_snapshot_scope; a grid generator and an import connection, else no_grid_connection / no_import_connection",
-    "tolerance": "harness.site_import_calculations:AT_LIMIT",
+    "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_site_import_assurance.py::test_export_is_what_the_meter_delivers_into_the_grid_bus",
     "status": "verified",
     "domain_review": "pending",
-    "domain_review_note": "unpinned: test_site_import_assurance.py does not name AT_LIMIT (issue 29)",
+    "domain_review_note": "pinned in issue 29; awaiting GK B domain review",
     "surfaces": {
      "answer": {
       "status": "verified",

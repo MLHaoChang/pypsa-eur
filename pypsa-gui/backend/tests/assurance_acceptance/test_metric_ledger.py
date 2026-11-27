@@ -16,6 +16,7 @@ import ast
 import importlib
 import json
 import re
+import sys
 from numbers import Real
 from pathlib import Path
 
@@ -671,27 +672,90 @@ def test_independent_domain_approval_stays_false():
     assert "independent_domain_approval" in assurance_contracts.PENDING
 
 
-# GK B (73) R5 ruling C: a reviewed row's tolerance constant must appear in its
-# oracle test's module. This is a name-in-file check only (issue 29 tightens it).
+# GK B (73) R5 ruling C, tightened by issue 29: a verified row's named tolerance
+# constant must be the one its oracle compares at, not just a name in the file.
+TOLERANCE_KEYWORDS = frozenset({"rel", "abs", "rtol", "atol"})
+
+
+def _functions(tree: ast.Module) -> dict[str, ast.AST]:
+    return {
+        node.name: node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+
+def _names(node: ast.AST, constant: str) -> bool:
+    return any(
+        (isinstance(n, ast.Name) and n.id == constant)
+        or (isinstance(n, ast.Attribute) and n.attr == constant)
+        for n in ast.walk(node)
+    )
+
+
+def compares_at(oracle: str, constant: str) -> bool:
+    """True when the oracle function, or a helper it calls in its module, uses
+    `constant` as a rel/abs/rtol/atol keyword or inside a comparison."""
+    path, _, name = oracle.partition("::")
+    tree = ast.parse((REPO / path).read_text())
+    functions = _functions(tree)
+    todo, seen = [name.split("[")[0]], set()
+    while todo:
+        current = todo.pop()
+        if current in seen or current not in functions:
+            continue
+        seen.add(current)
+        for node in ast.walk(functions[current]):
+            if isinstance(node, ast.Compare) and _names(node, constant):
+                return True
+            if isinstance(node, ast.Call):
+                if any(
+                    k.arg in TOLERANCE_KEYWORDS and _names(k.value, constant)
+                    for k in node.keywords
+                ):
+                    return True
+                if isinstance(node.func, ast.Name):
+                    todo.append(node.func.id)
+    return False
+
+
 def unpinned_reviews(rows) -> list[str]:
-    """Reviewed rows whose named tolerance constant does not appear in their oracle test's module."""
+    """Verified rows whose named tolerance constant their oracle does not compare at."""
     off = []
     for (profile, metric), (row, _) in sorted(rows.items()):
-        if row.get("domain_review", "pending") == "pending" or row["oracle"] is None:
+        if row["status"] != "verified" or row["oracle"] is None:
             continue
         match = NAMED_TOLERANCE.fullmatch(row["tolerance"])
         if match is None:
             continue  # "exact" or ulp:<n>: no constant to name
-        test_file = REPO / row["oracle"].split("::")[0]
-        if match[2] not in test_file.read_text():
-            off.append(f"{profile}/{metric}: {match[2]} not in {test_file.name}")
+        if not compares_at(row["oracle"], match[2]):
+            off.append(
+                f"{profile}/{metric}: {match[2]} is not a tolerance keyword "
+                f"in {row['oracle'].split('::')[-1]}"
+            )
     return off
 
 
-def test_a_reviewed_row_names_the_tolerance_its_oracle_test_uses(ledger):
-    """A row holds a gk-b sha only when the constant it names appears in its oracle test's module."""
+def test_a_verified_row_names_the_tolerance_its_oracle_compares_at(ledger):
+    """Every verified row, reviewed or pending, names a constant its oracle asserts at."""
     off = unpinned_reviews(ledger[0])
     assert off == [], "\n".join(off)
+
+
+def test_the_check_proves_the_comparison_not_the_name(tmp_path, monkeypatch):
+    """A constant that is only imported, or used by another test, does not pin the row."""
+    source = tmp_path / "test_x.py"
+    source.write_text(
+        "from m import TOL\n"
+        "def helper(a):\n    assert a == approx(1, rel=TOL)\n"
+        "def test_imports_only():\n    assert 1 == approx(1, abs=1e-6)\n"
+        "def test_other():\n    assert 1 == approx(1, abs=TOL)\n"
+        "def test_helper():\n    helper(1)\n"
+    )
+    monkeypatch.setattr(sys.modules[__name__], "REPO", tmp_path)
+    assert not compares_at("test_x.py::test_imports_only", "TOL")
+    assert compares_at("test_x.py::test_other", "TOL")
+    assert compares_at("test_x.py::test_helper", "TOL")
 
 
 def test_a_pending_row_says_why_and_a_reviewed_row_does_not(ledger):
@@ -707,17 +771,15 @@ def test_a_pending_row_says_why_and_a_reviewed_row_does_not(ledger):
     assert off == [], "\n".join(off)
 
 
-def test_a_review_on_an_unpinned_row_is_refused(ledger):
+def test_a_row_naming_a_constant_its_oracle_does_not_use_is_refused(ledger):
     rows, _ = ledger
-    pair = (
-        "investment-case/1",
-        "project_irr",
-    )  # IRR_TOLERANCE, unnamed in its test (issue 29)
+    pair = ("investment-case/1", "project_irr")
     row, path = rows[pair]
-    assert row["domain_review"] == "pending"
-    reviewed = {**rows, pair: ({**row, "domain_review": R2_OK}, path)}
-    assert unpinned_reviews(reviewed) == [
-        "investment-case/1/project_irr: IRR_TOLERANCE not in test_investment_assurance.py"
+    assert row["tolerance"] == "harness.investment_calculations:IRR_TOLERANCE"
+    wrong = {**row, "tolerance": "harness.investment_calculations:LCOE_TOLERANCE"}
+    assert unpinned_reviews({**rows, pair: (wrong, path)}) == [
+        "investment-case/1/project_irr: LCOE_TOLERANCE is not a tolerance keyword "
+        "in test_project_irr_of_one_sign_change_is_the_hand_root"
     ]
 
 

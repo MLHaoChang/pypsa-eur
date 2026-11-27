@@ -9,7 +9,7 @@
     "oracle": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_a_non_cyclic_unit_matches_the_storage_profile",
     "status": "verified",
     "domain_review": "pending",
-    "domain_review_note": "unpinned: test_capacity_cycles_assurance.py does not name REL_TOLERANCE (issue 29)",
+    "domain_review_note": "pinned in issue 29; awaiting GK B domain review",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -25,7 +25,7 @@
     "oracle": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_a_non_cyclic_unit_matches_the_storage_profile",
     "status": "verified",
     "domain_review": "pending",
-    "domain_review_note": "unpinned: test_capacity_cycles_assurance.py does not name REL_TOLERANCE (issue 29)",
+    "domain_review_note": "pinned in issue 29; awaiting GK B domain review",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -41,7 +41,7 @@
     "oracle": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_a_non_cyclic_unit_matches_the_storage_profile",
     "status": "verified",
     "domain_review": "pending",
-    "domain_review_note": "unpinned: test_capacity_cycles_assurance.py does not name REL_TOLERANCE (issue 29)",
+    "domain_review_note": "pinned in issue 29; awaiting GK B domain review",
     "surfaces": {
      "answer": {
       "status": "verified",

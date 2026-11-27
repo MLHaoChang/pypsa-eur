@@ -53,13 +53,13 @@
    },
    {
     "metric": "hours_at_voll",
-    "formula": "sum over t of w_generators[t] where marginal_price[t] >= VoLL x (1 - tolerance)",
+    "formula": "sum over t of w_generators[t] where marginal_price[t] >= VoLL x (1 - VOLL_TOLERANCE), VOLL_TOLERANCE = 1e-6",
     "validity": "verified solve (else unverified_solve); prices and weights finite, weights >= 0 and sum > 0, else invalid_or_missing_price_data. Refusals: unknown_bus, misaligned_source, unsupported_snapshot_scope; VoLL of the solve > 0, else voll_missing_or_zero",
-    "tolerance": "harness.price_calculations:VOLL_TOLERANCE",
+    "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_hours_at_voll_use_the_solves_voll_and_need_one",
     "status": "verified",
     "domain_review": "pending",
-    "domain_review_note": "unpinned: test_result_profiles_assurance.py does not name VOLL_TOLERANCE (issue 29)",
+    "domain_review_note": "pinned in issue 29; awaiting GK B domain review",
     "surfaces": {
      "answer": {
       "status": "verified",
