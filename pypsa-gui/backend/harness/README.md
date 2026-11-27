@@ -8,7 +8,10 @@ assistant behave the same whichever one is active.
 ```
 harness/
   protocol.py     the provider seam: LLMProvider, LLMRequest, LLMEvent, ERROR_KINDS
-  catalogue.py    the tool declarations, their Safety tiers, TOOL_ROUTES
+  catalogue.py    the tool declarations, their Safety tiers, TOOL_ROUTES (merges catalogue_tools/)
+  catalogue_base.py  the `_t` / `_empty` builders, shared enums and route sentinels
+  catalogue_tools/   per-tool schema fragments: TOOLS, ROUTES, ORDER (RETRO-FRAG-1)
+  tool_fragments.py  discovers and merges the fragment pairs; refuses clashes
   toolsets.py     ordered provider-neutral catalogue views and always-available controls
   events.py       the closed vocabulary of frames the turn loop yields to the UI; (live-voice 11c) `PROGRESS_FRAMES`, the separate vocabulary of the /progress stream (`tool_progress`, `job_snapshot`, `job_terminal`)
   assurance.py    opt-in checked input/result drafts and publication gate
@@ -139,7 +142,14 @@ See `.scratch/chat-companion/issues/06d-companion-access-summary.md`.
    `catalogue.TOOL_ROUTES`. The `Safety: <tier>` text in the description IS
    the tier declaration (`catalogue.safety_tier_for`). The parity tests
    (`test_chat_tools_schema_match.py`, `test_chat_tools_endpoint_map.py`)
-   keep the three in step.
+   keep the three in step. A NEW tool is a fragment pair, not a row in those
+   files (RETRO-FRAG-1): `harness/catalogue_tools/<stem>.py` (TOOLS, ROUTES,
+   optional NETWORK_WRITES / NON_NETWORK_WRITES, `ORDER = YYYYMMDDNN`; imports
+   only `harness.catalogue_base`) and `services/chat_dispatchers/<stem>.py`
+   (DISPATCHERS, optional PRE_DISPATCH_VALIDATORS). `harness/tool_fragments.py`
+   discovers both at import and merges them before the chat_tools gates wrap
+   DISPATCHERS; a duplicate name or key, an ORDER clash or an unpaired module
+   refuses the import with both module names (`tests/test_tool_fragments.py`).
 3. **Frames are closed.** Every `(event, payload)` the loop yields is named
    in `events.FRAMES`; the tripwire test fails on a new name.
 4. **Behaviour is Markdown.** A workflow or a skill is a file; adding one
@@ -881,8 +891,15 @@ in `smoke/family_manifest.d/`, and a results route's golden surfaces in
 defined twice, so a fragment adds rows and never overrides one; every check
 (stale or unknown route, unknown tool, ceilings) runs on the merged table. A declaration or
 `KNOWN_GAPS` row whose route a tool now serves stays in place and passes as stale;
-the coordinator's sweep deletes it (`smoke/prune_stale_declarations.py`). New tool
-blocks go at the end of TOOLS (and of the matching chat_tools section). Existing tools then keep their selection tie-breaks, which `wiring._bounded_tools` resolves toward the earlier index. Two PRs that append at the same anchor conflict as text: resolve it by keeping both blocks, the earlier-merged PR's first, then run `assistant_inventory.py --check` and the tool-selection tests at the merge.
+the coordinator's sweep deletes it (`smoke/prune_stale_declarations.py`). A new
+tool is a new fragment pair (contract item 2), never a block appended to TOOLS or
+to chat_tools: unspliced fragments are appended after the monolith in `ORDER`
+(the day the tool was added, then a counter), so existing tools keep their
+selection tie-breaks, which `wiring._bounded_tools` resolves toward the earlier
+index. Two PRs that pick the same ORDER fail the import on the trial merge; the
+later one takes the next counter. A family moved out of the monolith is spliced
+back at its old place (`*_FRAGMENTS.splice("<stem>")`) and declares no ORDER;
+the move PR shows `smoke/tool_registry_digest.py` equal on master and the branch.
 The assistant can navigate all current Results tabs and panel targets, including
 adequacy/FMEA, workspace/settings/GridSpine/reports/campus electrical. Invalid
 navigation IDs/types are refused by the shared handler before a UI event emits.
