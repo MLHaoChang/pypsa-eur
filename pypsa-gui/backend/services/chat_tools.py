@@ -10686,7 +10686,7 @@ DISPATCHERS.update({
 # like every tool above.
 from harness import tool_fragments as _tool_fragments  # noqa: E402
 
-_tool_fragments.merge_dispatchers(
+_FRAGMENT_LOCK_GATED = _tool_fragments.merge_dispatchers(
     DISPATCHERS, PRE_DISPATCH_VALIDATORS,
     _tool_fragments.discover(_tool_fragments.DISPATCH_PACKAGE),
     _tool_fragments.discover(_tool_fragments.SCHEMA_PACKAGE),
@@ -10817,7 +10817,7 @@ _LOCK_GATE_SERVICE_CALL_MUTATORS = _NETWORK_SERVICE_CALL_MUTATORS | frozenset({
     # context or close the campaign they are running.
     "start_campaign",
     "end_campaign",
-})
+}) | _FRAGMENT_LOCK_GATED  # RETRO-FRAG-1: a fragment's LOCK_GATED tools
 
 
 def _lock_gated_tool_names() -> frozenset[str]:

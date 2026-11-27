@@ -146,7 +146,8 @@ See `.scratch/chat-companion/issues/06d-companion-access-summary.md`.
    files (RETRO-FRAG-1): `harness/catalogue_tools/<stem>.py` (TOOLS, ROUTES,
    optional NETWORK_WRITES / NON_NETWORK_WRITES, `ORDER = YYYYMMDDNN`; imports
    only `harness.catalogue_base`) and `services/chat_dispatchers/<stem>.py`
-   (DISPATCHERS, optional PRE_DISPATCH_VALIDATORS). `harness/tool_fragments.py`
+   (DISPATCHERS, optional PRE_DISPATCH_VALIDATORS and LOCK_GATED, the routeless
+   tools that write the project folder). `harness/tool_fragments.py`
    discovers both at import and merges them before the chat_tools gates wrap
    DISPATCHERS; a duplicate name or key, an ORDER clash or an unpaired module
    refuses the import with both module names (`tests/test_tool_fragments.py`).

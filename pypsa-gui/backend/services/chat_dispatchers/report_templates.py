@@ -8,20 +8,18 @@ Thin wrappers over the template routes (`routers/reports.py`,
 `routers/report_jobs.py`), called in-process for the active project. A
 template is DATA: the mapping job shows its outline to the model inside the
 untrusted-data fence, and nothing found in a template is ever followed.
+
+The chat_tools helpers are imported inside each function: chat_tools imports
+this module at its end, so a top-level import would be circular when this
+module is imported first.
 """
 
 from __future__ import annotations
 
-from services.chat_tools import (
-    _newest_report_id,
-    _report_project,
-    _require_active_project,
-    _route,
-)
-
 
 def list_report_templates() -> list[dict]:
     """The active project's uploads of kind `report_template`, newest first."""
+    from services.chat_tools import _require_active_project
     from services import upload_service
 
     name = _require_active_project()
@@ -40,6 +38,7 @@ def list_report_templates() -> list[dict]:
 
 def set_report_template(report_id: str, file_id: str | None = None) -> dict:
     """Bind an upload as the report's template (null unbinds); the route's outline back."""
+    from services.chat_tools import _report_project, _route
     from routers.reports import BindTemplateBody, bind_template as _h
 
     project = _report_project()
@@ -69,6 +68,7 @@ def set_report_template(report_id: str, file_id: str | None = None) -> dict:
 
 def get_report_template(report_id: str | None = None) -> dict:
     """The bound template's outline and stored plan (the newest report when omitted)."""
+    from services.chat_tools import _newest_report_id, _report_project, _route
     from routers.reports import get_template as _h
 
     project = _report_project()
@@ -78,6 +78,7 @@ def get_report_template(report_id: str | None = None) -> dict:
 
 def propose_report_mapping(report_id: str, language: str | None = None) -> dict:
     """Start the mapping job for the report's untagged template (same slot as generate)."""
+    from services.chat_tools import _report_project, _route
     from routers.report_jobs import ProposeMappingBody, propose_template_plan as _h
 
     project = _report_project()
@@ -95,6 +96,7 @@ def propose_report_mapping(report_id: str, language: str | None = None) -> dict:
 
 def set_report_mapping(report_id: str, plan: dict, strict: bool = False) -> dict:
     """Store a (user- or model-edited) mapping plan; the sanitised plan back."""
+    from services.chat_tools import _report_project, _route
     from routers.reports import put_template_plan as _h
 
     project = _report_project()

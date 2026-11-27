@@ -213,6 +213,56 @@ def test_appended_fragments_follow_order_not_file_name():
     assert [t["name"] for t in tools] == ["legacy", "early", "late"]
 
 
+def test_a_fragment_spliced_twice_is_refused():
+    frags = _schema(a=_mod("pkg.a", ["t1"]))
+    frags.splice("a")
+    with pytest.raises(FragmentError, match=r"splices pkg\.a twice"):
+        frags.splice("a")
+
+
+@pytest.mark.parametrize("attr", ["NETWORK_WRITES", "NON_NETWORK_WRITES"])
+def test_a_fragments_write_sets_are_merged(attr):
+    frags = _schema(a=_mod("pkg.a", ["t1"], ORDER=1, **{attr: {"t1"}}))
+    tools: list = []
+    frags.extend(tools)
+    net, non = frags.merge(tools, {}, frozenset({"x"}), frozenset({"y"}))
+    got = net if attr == "NETWORK_WRITES" else non
+    assert got == {"t1", "x" if attr == "NETWORK_WRITES" else "y"}
+
+
+@pytest.mark.parametrize("attr", ["NETWORK_WRITES", "NON_NETWORK_WRITES"])
+def test_a_write_set_naming_another_tool_is_refused(attr):
+    frags = _schema(a=_mod("pkg.a", ["t1"], ORDER=1, **{attr: {"legacy_tool"}}))
+    tools: list = []
+    frags.extend(tools)
+    with pytest.raises(
+        FragmentError, match=rf"pkg\.a: {attr} names a tool it does not define"
+    ):
+        frags.merge(tools, {}, frozenset(), frozenset())
+
+
+@pytest.mark.parametrize("attr", ["PRE_DISPATCH_VALIDATORS", "LOCK_GATED"])
+def test_a_dispatcher_fragment_cannot_reach_another_tool(attr):
+    schema = {"a": _mod("pkg.cat.a", ["t1"])}
+    disp = types.ModuleType("pkg.disp.a")
+    disp.DISPATCHERS = {"t1": lambda: None}
+    setattr(
+        disp, attr, {"legacy_tool": print} if attr != "LOCK_GATED" else {"legacy_tool"}
+    )
+    with pytest.raises(
+        FragmentError, match=rf"pkg\.disp\.a: {attr} names a tool it does not define"
+    ):
+        F.merge_dispatchers({}, {}, {"a": disp}, schema)
+
+
+def test_merge_dispatchers_returns_the_lock_gated_tools():
+    schema = {"a": _mod("pkg.cat.a", ["t1", "t2"])}
+    disp = types.ModuleType("pkg.disp.a")
+    disp.DISPATCHERS = {"t1": print, "t2": print}
+    disp.LOCK_GATED = {"t2"}
+    assert F.merge_dispatchers({}, {}, {"a": disp}, schema) == {"t2"}
+
+
 # ── discovery misses fail loudly ────────────────────────────────────────────
 
 
@@ -250,6 +300,27 @@ def test_discovery_finding_nothing_in_the_frozen_app_raises(tmp_path, monkeypatc
         F.discover("zz_empty_fragments")
 
 
+def test_discovery_in_the_frozen_app_with_fragments_present_succeeds(monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    assert "report_templates" in F.discover(F.SCHEMA_PACKAGE)
+
+
+def test_a_dispatcher_fragment_imported_first_is_not_circular():
+    code = (
+        "import services.chat_dispatchers.report_templates as R\n"
+        "from services import chat_tools as T\n"
+        "assert all(n in T.DISPATCHERS for n in R.DISPATCHERS)\n"
+    )
+    run = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=BACKEND,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    assert run.returncode == 0, run.stderr[-2000:]
+
+
 def test_the_spec_collects_both_fragment_packages():
     """`pkgutil` discovery cannot be followed by PyInstaller's static analysis, so
     the spec lists every module of both packages as hidden imports, and writes
@@ -284,12 +355,15 @@ ORDER = 2099010101
 TOOLS = [
     _t("zz_probe_edit", "Probe edit. Safety: write.", {"cls": {"type": "string"}}, ["cls"]),
     _t("zz_probe_apply", "Probe apply. Safety: write.", {}, []),
+    _t("zz_probe_save", "Probe save. Safety: write.", {}, []),
 ]
 ROUTES = {
     "zz_probe_edit": [("POST", "/api/network/components/{cls}")],
     "zz_probe_apply": _SERVICE_CALL,
+    "zz_probe_save": _SERVICE_CALL,
 }
 NETWORK_WRITES = {"zz_probe_apply"}
+NON_NETWORK_WRITES = {"zz_probe_save"}
 """
 
 _PROBE_DISPATCH = """
@@ -301,12 +375,21 @@ def zz_probe_apply():
     return {}
 
 
+def zz_probe_save():
+    return {}
+
+
 def _check(args):
     return None
 
 
-DISPATCHERS = {"zz_probe_edit": zz_probe_edit, "zz_probe_apply": zz_probe_apply}
+DISPATCHERS = {
+    "zz_probe_edit": zz_probe_edit,
+    "zz_probe_apply": zz_probe_apply,
+    "zz_probe_save": zz_probe_save,
+}
 PRE_DISPATCH_VALIDATORS = {"zz_probe_edit": _check}
+LOCK_GATED = {"zz_probe_save"}
 """
 
 _PROBE_RUN = """
@@ -324,10 +407,11 @@ def depth(fn):
         fn, n = fn.__wrapped__, n + 1
     return fn, n
 
-out = {"last": [t["name"] for t in C.TOOLS[-2:]],
+out = {"last": [t["name"] for t in C.TOOLS[-3:]],
        "network_writes": "zz_probe_apply" in C._SERVICE_CALL_NETWORK_WRITES,
+       "non_network_writes": "zz_probe_save" in C._SERVICE_CALL_NON_NETWORK_WRITES,
        "validator": T.PRE_DISPATCH_VALIDATORS.get("zz_probe_edit") is P._check}
-for name in ("zz_probe_edit", "zz_probe_apply"):
+for name in ("zz_probe_edit", "zz_probe_apply", "zz_probe_save"):
     raw, n = depth(T.DISPATCHERS[name])
     out[name] = {"raw": raw is getattr(P, name), "depth": n,
                  "lock": name in T._lock_gated_tool_names(),
@@ -339,8 +423,9 @@ print("PROBE" + json.dumps(out))
 
 def test_a_new_fragment_pairs_write_tools_get_every_wrapper(tmp_path):
     """Loads a synthetic pair through the real discovery in a fresh interpreter:
-    it lands last in TOOLS, its validator is merged, and both tools are
-    lock-gated, study-gated and undo-captured. Loading the fragments after the
+    it lands last in TOOLS, its validator and write sets are merged, its routed
+    and NETWORK_WRITES tools are lock-gated, study-gated and undo-captured, and
+    its LOCK_GATED project-folder write is lock-gated only. Loading the fragments after the
     gates wrap DISPATCHERS fails this."""
     schema, disp = tmp_path / "schema", tmp_path / "disp"
     schema.mkdir()
@@ -357,8 +442,11 @@ def test_a_new_fragment_pairs_write_tools_get_every_wrapper(tmp_path):
     assert run.returncode == 0, run.stderr[-2000:]
     line = next(x for x in run.stdout.splitlines() if x.startswith("PROBE"))
     out = json.loads(line[len("PROBE") :])
-    assert out["last"] == ["zz_probe_edit", "zz_probe_apply"]
-    assert out["network_writes"] and out["validator"]
+    assert out["last"] == ["zz_probe_edit", "zz_probe_apply", "zz_probe_save"]
+    assert out["network_writes"] and out["non_network_writes"] and out["validator"]
+    save = out["zz_probe_save"]
+    assert save["raw"] and save["depth"] == 1 and save["lock"], save
+    assert not save["study"] and not save["undo"], save
     for name in ("zz_probe_edit", "zz_probe_apply"):
         got = out[name]
         assert got["raw"] and got["depth"] == 2, (name, got)

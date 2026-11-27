@@ -9,7 +9,8 @@ a tool touch no common file:
   value), optionally ``NETWORK_WRITES`` / ``NON_NETWORK_WRITES`` (service-call
   tools, see ``catalogue.tool_edits_network``) and ``ORDER``.
 - ``services/chat_dispatchers/<stem>.py``: ``DISPATCHERS`` (name -> callable)
-  and optionally ``PRE_DISPATCH_VALIDATORS``.
+  and optionally ``PRE_DISPATCH_VALIDATORS`` and ``LOCK_GATED`` (routeless
+  tools that write the project folder).
 
 Both packages are discovered at import (``pkgutil.iter_modules``). The schema
 fragments are merged by ``harness/catalogue.py``; the dispatcher fragments by
@@ -52,7 +53,7 @@ def discover(package: str) -> dict[str, ModuleType]:
     if not stems and getattr(sys, "frozen", False):
         raise FragmentError(
             f"{package}: no fragment modules found in the frozen app; "
-            "pypsa-gui.spec must collect the package (collect_submodules)"
+            "pypsa-gui.spec must list it in FRAGMENT_PACKAGES (_fragment_modules)"
         )
     return {s: importlib.import_module(f"{package}.{s}") for s in stems}
 
@@ -155,8 +156,14 @@ def merge_dispatchers(
     validators: dict[str, Any],
     modules: dict[str, ModuleType],
     schema_modules: dict[str, ModuleType],
-) -> None:
-    """Merge the dispatcher fragments in place, after checking each pairs its schema."""
+) -> frozenset[str]:
+    """Merge the dispatcher fragments in place, after checking each pairs its schema.
+
+    Returns the fragments' ``LOCK_GATED`` tools: routeless (service-call) tools
+    that write the project folder, which chat_tools adds to the service-call
+    tools its lock gate covers (network writes are ``NETWORK_WRITES`` instead).
+    """
+    lock_gated: set[str] = set()
     for stem in sorted(set(modules) | set(schema_modules)):
         mod, schema = modules.get(stem), schema_modules.get(stem)
         if mod is None or schema is None:
@@ -172,13 +179,19 @@ def merge_dispatchers(
         _merge(
             dispatchers, mod.DISPATCHERS, LEGACY_DISPATCH, mod.__name__, "dispatcher"
         )
-        _merge(
-            validators,
-            getattr(mod, "PRE_DISPATCH_VALIDATORS", {}),
-            LEGACY_DISPATCH,
-            mod.__name__,
-            "pre-dispatch validator",
-        )
+        own = getattr(mod, "PRE_DISPATCH_VALIDATORS", {})
+        if not set(own) <= names:
+            raise FragmentError(
+                f"{mod.__name__}: PRE_DISPATCH_VALIDATORS names a tool it does not define"
+            )
+        _merge(validators, own, LEGACY_DISPATCH, mod.__name__, "pre-dispatch validator")
+        gated = set(getattr(mod, "LOCK_GATED", ()))
+        if not gated <= names:
+            raise FragmentError(
+                f"{mod.__name__}: LOCK_GATED names a tool it does not define"
+            )
+        lock_gated |= gated
+    return frozenset(lock_gated)
 
 
 def _merge(
