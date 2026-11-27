@@ -524,8 +524,59 @@ R1_OK = "gk-b:bf0eed8e63449828d3c91967f75a8c35e2775a2a"  # #2036
 R2_OK = "gk-b:e0be8aa78175a29b88c93d1c46b51c0f6189307c"  # #2037
 R3_OK = "gk-b:ccad4aaf72c1a6a8b5599b61703e945575171f9b"  # #2044
 R4_OK = "gk-b:1f98625c8302e01590af4612b987d01752076a11"  # #2049
+# GK B (73) on #2057: the 41 rows its R5 table passed, and the two energy-balance
+# rows re-confirmed at SERVED_TOL (they leave R2's sha, which saw BUS_TOL_MW).
+R5_OK = "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8"  # #2057
 # Exact set: a row whose domain_review is not "pending" is listed here with its value.
 REVIEWED = {
+    **{
+        pair: R5_OK
+        for pair in (
+            ("ac-branch-loading/1", "ac_branch_rating"),
+            ("ac-branch-loading/1", "ac_peak_apparent_flow"),
+            ("ac-branch-loading/1", "ac_peak_branch_utilisation"),
+            ("branch-loading/1", "branch_rating"),
+            ("branch-loading/1", "peak_branch_flow"),
+            ("branch-loading/1", "peak_branch_utilisation"),
+            ("bus-price/1", "max_price"),
+            ("bus-price/1", "mean_price"),
+            ("bus-price/1", "min_price"),
+            ("capacity/1", "capacity_change"),
+            ("capacity/1", "optimal_capacity"),
+            ("carrier-energy/1", "carrier_generator_energy"),
+            ("carrier-energy/1", "carrier_peak_generator_output"),
+            ("energy-balance/1", "export_losses_and_conversion"),
+            ("energy-balance/1", "storage_change"),
+            ("generator-cost/1", "allocated_fixed_cost"),
+            ("generator-cost/1", "annual_fixed_cost"),
+            ("generator-cost/1", "dispatch_energy"),
+            ("generator-cost/1", "marginal_expenditure"),
+            ("generator-cost/1", "peak_dispatch"),
+            ("generator-cost/1", "total_cost"),
+            ("generator-dispatch/1", "dispatch_energy"),
+            ("generator-dispatch/1", "marginal_expenditure"),
+            ("generator-dispatch/1", "peak_dispatch"),
+            ("generator-emissions/1", "generator_emissions"),
+            ("grid-readiness/1", "not_checked"),
+            ("lost-load/1", "lost_load_cost"),
+            ("lost-load/1", "lost_load_energy"),
+            ("lost-load/1", "peak_shed"),
+            ("network-emissions/1", "co2_cap_shadow_price"),
+            ("network-emissions/1", "total_emissions"),
+            ("network-linear-cost/1", "total_cost"),
+            ("network-loading/1", "max_branch_utilisation"),
+            ("site-import/1", "export_energy"),
+            ("site-import/1", "grid_import_energy"),
+            ("site-import/1", "peak_grid_import"),
+            ("storage-unit-cost/1", "allocated_fixed_cost"),
+            ("storage-unit-cost/1", "annual_fixed_cost"),
+            ("storage-unit-cost/1", "storage_discharge_expenditure"),
+            ("storage-unit-cost/1", "storage_holding_expenditure"),
+            ("storage-unit-cost/1", "storage_operating_expenditure"),
+            ("storage-unit-cost/1", "total_cost"),
+            ("time-to-power/1", "time_to_power_months"),
+        )
+    },
     **{
         ("renewable-share/1", m): R4_OK
         for m in ("renewable_share", "nonrenewable_energy", "electricity_used")
@@ -541,8 +592,6 @@ REVIEWED = {
     **{
         pair: R2_OK
         for pair in (
-            ("energy-balance/1", "storage_change"),
-            ("energy-balance/1", "export_losses_and_conversion"),
             ("grid-readiness/1", "checked_pass"),
             ("grid-readiness/1", "checked_warn"),
             ("grid-readiness/1", "checked_fail"),
@@ -642,6 +691,19 @@ def unpinned_reviews(rows) -> list[str]:
 def test_a_reviewed_row_names_the_tolerance_its_oracle_test_uses(ledger):
     """A row holds a gk-b sha only when the constant it names appears in its oracle test's module."""
     off = unpinned_reviews(ledger[0])
+    assert off == [], "\n".join(off)
+
+
+def test_a_pending_row_says_why_and_a_reviewed_row_does_not(ledger):
+    rows, _ = ledger
+    off = []
+    for (profile, metric), (row, _) in sorted(rows.items()):
+        note = row.get("domain_review_note")
+        if row["domain_review"] == "pending" and row["status"] == "verified":
+            if not (isinstance(note, str) and note.strip()):
+                off.append(f"{profile}/{metric}: pending with no domain_review_note")
+        elif row["domain_review"] != "pending" and note is not None:
+            off.append(f"{profile}/{metric}: reviewed but carries a domain_review_note")
     assert off == [], "\n".join(off)
 
 

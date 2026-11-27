@@ -1,7 +1,9 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-# Issue 10 R5 domain review: verified metric-ledger rows with domain_review pending (82 rows)
+# Issue 10 R5 domain review: 82 verified metric-ledger rows, as sent for review (pending at 25e3b2da)
+
+Outcome, on master after #2057: 41 rows take GK B's #2057 OK (`gk-b:41f32cf0`). Rows 53-55 (renewable-share/1) take R4's OK (`gk-b:1f98625c`, #2049). The other 38 stay pending under issue 29. Two rows outside this table, energy-balance/1 `storage_change` and `export_losses_and_conversion`, also move from R2's OK (`e0be8aa7`, which saw `BUS_TOL_MW`) to `gk-b:41f32cf0`, because GK B re-confirmed them at `SERVED_TOL` (option A).
 
 | # | profile | metric | formula (≤60 chars, abbreviated) | oracle test (function name only) | hand numbers | tolerance | pinned | unit |
 |---|---|---|---|---|---|---|---|---|

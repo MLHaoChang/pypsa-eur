@@ -8,7 +8,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_carrier_assurance.py::test_wind_carrier_energy_matches_the_hand_sum",
     "status": "verified",
-    "domain_review": "pending",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -23,7 +23,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_carrier_assurance.py::test_wind_carrier_energy_matches_the_hand_sum",
     "status": "verified",
-    "domain_review": "pending",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",

@@ -53,7 +53,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_grid_readiness_assurance.py::test_a_rounded_boundary_is_withheld_not_re_verdicted",
     "status": "verified",
-    "domain_review": "pending",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "pending",

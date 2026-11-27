@@ -8,7 +8,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_generator_emissions_use_dispatch_over_efficiency",
     "status": "verified",
-    "domain_review": "pending",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",

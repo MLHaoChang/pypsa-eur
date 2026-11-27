@@ -8,7 +8,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_branch_loading_assurance.py::test_network_counts_branches_above_rating_as_an_integer",
     "status": "verified",
-    "domain_review": "pending",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",

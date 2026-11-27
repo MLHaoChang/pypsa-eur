@@ -8,7 +8,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_lost_load_assurance.py::test_lost_load_matches_the_hand_values_from_a_real_solve",
     "status": "verified",
-    "domain_review": "pending",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -23,7 +23,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_lost_load_assurance.py::test_lost_load_matches_the_hand_values_from_a_real_solve",
     "status": "verified",
-    "domain_review": "pending",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -54,7 +54,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_lost_load_assurance.py::test_lost_load_matches_the_hand_values_from_a_real_solve",
     "status": "verified",
-    "domain_review": "pending",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",
