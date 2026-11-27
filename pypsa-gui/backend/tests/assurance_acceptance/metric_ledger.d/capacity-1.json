@@ -8,6 +8,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_an_extendable_generator_built_to_its_bound",
     "status": "verified",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -22,6 +23,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_capacity_cycles_assurance.py::test_an_extendable_generator_built_to_its_bound",
     "status": "verified",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",

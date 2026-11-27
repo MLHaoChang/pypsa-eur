@@ -36,13 +36,15 @@ EXEMPT = {"3bus", "ieee14", "belgium", "ieee39"}
 
 def test_every_template_is_covered_or_exempt():
     templates = set(projects_router._TEMPLATE_DEFAULT_NAMES)
+    # D1: the builder registry is the source. TEMPLATE_META carries every
+    # covered template but eh_site (built from its own module); a template
+    # added to either registry alone fails here, by name.
+    builder = set(eh.TEMPLATE_META) | {"eh_site"}
+    assert builder == COVERED, sorted(builder ^ COVERED)
     assert set(tdn.DISPLAY_NAMES) == COVERED
     assert set(tdn.EXEMPT) == EXEMPT
     assert not COVERED & EXEMPT
     assert templates == COVERED | EXEMPT, sorted(templates ^ (COVERED | EXEMPT))
-    # The builder registry (TEMPLATE_META carries the same nine; eh_site is
-    # built from its own module) names no template outside the table.
-    assert set(eh.TEMPLATE_META) | {"eh_site"} <= COVERED
     assert all(reason.strip() for reason in tdn.EXEMPT.values())
 
 

@@ -109,7 +109,9 @@ def test_every_workbook_view_has_a_results_tab_label():
 
     from services.results_workbook.registry import workbook_views
 
-    src = (Path(__file__).resolve().parents[2] / "frontend/src/pages/Results.tsx").read_text()
+    src = (
+        Path(__file__).resolve().parents[2] / "frontend/src/pages/results/resultTabs.ts"
+    ).read_text()
     tabs = dict(re.findall(r"\{ id: '(\w+)',\s*label: '([^']+)'", src))
     missing = [v.view_id for v in workbook_views() if v.view_id not in tabs]
     assert not missing, f"workbook views with no Results tab label: {missing}"

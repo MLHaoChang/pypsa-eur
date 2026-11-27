@@ -873,3 +873,73 @@ def cases_from_json(text: str) -> tuple:
         )
     except (KeyError, TypeError, AttributeError) as exc:
         raise ContractError(f"battery JSON case is malformed: {exc!r}") from exc
+
+
+#: The pack file that holds the plant ratings (GC-13), hashed in the manifest.
+RATINGS_JSON = "ratings.json"
+#: The keys a pack's ratings carry, in ``ratings.json`` and in its manifest.
+RATING_KEYS = ("rated_mw", "rated_mva", "rating_source", "campus_data_hash")
+_HASH = re.compile(r"[0-9a-f]{64}")
+
+
+@dataclass(frozen=True)
+class PackRatings:
+    """
+    The plant ratings a pack's P and Q setpoints and channels are in pu of
+    (GC-13): rated active (MW) and apparent (MVA) power, where they come from,
+    and ``campus_data_hash``, the campus run the pack was built from
+    (``schema.model_set.model_hash`` of its campus description, which is a
+    frozen model set's ``model_hashes[variant]``). Refused: a rating that is
+    not a finite number > 0, a blank source, a hash that is not 64 hex digits.
+    """
+
+    rated_mw: float
+    rated_mva: float
+    rating_source: str
+    campus_data_hash: str
+
+    def __post_init__(self):
+        for name in ("rated_mw", "rated_mva"):
+            v = getattr(self, name)
+            if (
+                isinstance(v, bool)
+                or not isinstance(v, (int, float))
+                or not math.isfinite(v)
+                or v <= 0
+            ):
+                raise ContractError(
+                    f"pack ratings: {name} must be a finite number > 0, got {v!r}"
+                )
+        if not isinstance(self.rating_source, str) or not self.rating_source.strip():
+            raise ContractError("pack ratings: rating_source must be stated")
+        if not isinstance(self.campus_data_hash, str) or not _HASH.fullmatch(
+            self.campus_data_hash
+        ):
+            raise ContractError(
+                f"pack ratings: campus_data_hash must be 64 hex digits, got {self.campus_data_hash!r}"
+            )
+
+    def as_dict(self) -> dict:
+        return {k: getattr(self, k) for k in RATING_KEYS}
+
+
+def ratings_json(ratings: PackRatings) -> str:
+    """Deterministic ``ratings.json`` text: the same ratings give byte-equal text."""
+    if not isinstance(ratings, PackRatings):
+        raise ContractError(
+            f"pack ratings must be a PackRatings, got {type(ratings).__name__}"
+        )
+    return (
+        json.dumps(ratings.as_dict(), indent=1, sort_keys=True, allow_nan=False) + "\n"
+    )
+
+
+def ratings_from_json(text: str) -> PackRatings:
+    """Inverse of :func:`ratings_json`; refuses a malformed file or a key other than :data:`RATING_KEYS`."""
+    try:
+        doc = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ContractError(f"{RATINGS_JSON} does not parse: {exc}") from exc
+    if not isinstance(doc, dict) or set(doc) != set(RATING_KEYS):
+        raise ContractError(f"{RATINGS_JSON} must hold exactly {list(RATING_KEYS)}")
+    return PackRatings(**doc)

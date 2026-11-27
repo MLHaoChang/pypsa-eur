@@ -9,6 +9,10 @@ Historical sections below describe earlier
 states and commands. The current [implementation status](implementation-status.md)
 and [API contracts](harness-contracts.md) supersede them. Independent domain/release
 approval remains pending.
+Per-metric domain review (issue 10 R5, 2026-11-27): see the R5 note in
+[coverage-ledger](coverage-ledger.md). The 38 rows still pending are tracked in
+[issue 29](issues/29-metric-ledger-unpinned-tolerances.md), and the 10 metrics with
+no checked profile are in `metric_ledger_pending.json`.
 Baseline: master d43809ae. Dictation PR 106 has merged; existing Claude/tool
 behavior remains the baseline. Do not reuse the old failed environment.
 
@@ -1044,3 +1048,20 @@ approximation; the B4 number scan reads tokens, so a number inside a word is
 not seen. Next runnable tracer: SH-07c's `revised_from` on sealed exports must
 keep `test_p4_fact_free_reports.py`'s exact-key pin green.
 
+
+## 2026-11-27 — AA-06 (evidence UX and navigation): S3b-2 and S5 merged
+
+Merged: #2046 S3b-2 (Dispatch and Overview displayed data, master df206ed7) and #2050 S5 (Chromium result journeys, master 96ccce9a). The earlier slices were #2027, #2029, #2032, #2035 and #2045.
+
+Commands, from `pypsa-gui/backend` with `/root/.venv-pypsa-gui`:
+- `pytest tests/test_harness_reliability.py`: 66 passed.
+- The Dispatch-navigating suites passed: `test_discuss_project_run`, `test_loadflow_navigation`, `test_reference_ladder`, `test_lv03_current_view`, `test_chat_compare_navigate`, `test_run_evidence_acceptance`, `test_aa06_displayed_s3b2` and `test_aa06_displayed_adapters`.
+- `pytest tests/test_assistant_inventory.py tests/test_assistant_control_matrix.py`: 41 passed.
+
+From `pypsa-gui/frontend`, `node scripts/smoke-result-navigation.mjs <schemas.json>` passed on Expert and Guided × single and multi, after `dump_ui_tool_schemas.py`. `scripts/coord/prepush.sh` passed on both heads. GK B (73) killed both #2046 delta mutants (the fall-through at `navigation.py:208`, and a Dispatch.tsx sentence edit). Policy version unchanged.
+
+Not run: the full backend and vitest suites locally; CI covers them.
+
+Remaining blockers: A5.4's failure trail waits on issue 04. The rest of the open scope is named in issue 06 under "Close-out (2026-11-27)" and in issues 28–31.
+
+Next runnable tracer: issue 30. Navigate Prices to a non-default window and expect an ACK bound to that window that says "showing"; today it gets 409 and says "opened".

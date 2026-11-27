@@ -1262,7 +1262,7 @@ export default function Dispatch() {
   // with `overflow-hidden` then clip their charts to a thin sliver.
   return (
     <notRecorded.Provider value={notRecorded.report}>
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0"
+    <div data-testid="results-view-dispatch" className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0"
       data-result-tab="dispatch" data-result-binding={displayed ? JSON.stringify(displayed.binding) : undefined}>
 
       {/* One "—" note for the whole page; the sections below report theirs. */}

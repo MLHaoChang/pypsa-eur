@@ -27,6 +27,7 @@ from services.asset_schema.asset_types import (
     functions_of as type_functions,
 )
 from services.asset_schema.fields import FieldSpec, fields_for, known_components
+from services.asset_schema.settings import SETTINGS
 from services.asset_schema.functions import (
     FUNCTION_HELP,
     FUNCTION_IDS,
@@ -126,20 +127,26 @@ def _default_of(scope: str, spec: FieldSpec) -> dict[str, Any]:
     return {"value": _json_number(v), "source": "engine"}
 
 
+def _claim_id(seen: dict[str, str], scope: str, spec: FieldSpec) -> str:
+    """The row's entry id, recorded in `seen`; a case-folded collision is refused, never suffixed or
+    truncated (#1127): set `id=` on one of the rows."""
+    eid = E.entry_id_of(scope, spec)
+    folded = eid.lower()
+    if folded in seen:
+        raise CatalogueError(
+            f"entry id '{eid}' ({scope}.{spec.key}) collides with {seen[folded]}"
+        )
+    seen[folded] = f"{scope}.{spec.key}"
+    return eid
+
+
 @lru_cache(maxsize=1)
 def entries() -> tuple[Entry, ...]:
     out: list[Entry] = []
     seen: dict[str, str] = {}
     for scope in known_components():
         for order, spec in enumerate(fields_for(scope)):
-            eid = E.entry_id_of(scope, spec)
-            folded = eid.lower()
-            if folded in seen:
-                # Refused, never suffixed or truncated (#1127): set `id=` on one of the rows.
-                raise CatalogueError(
-                    f"entry id '{eid}' ({scope}.{spec.key}) collides with {seen[folded]}"
-                )
-            seen[folded] = f"{scope}.{spec.key}"
+            eid = _claim_id(seen, scope, spec)
             group = E.group_of(scope, spec)
             out.append(
                 Entry(
@@ -156,7 +163,44 @@ def entries() -> tuple[Entry, ...]:
                     default=_default_of(scope, spec),
                 )
             )
+    orders: dict[str, int] = {}
+    for st in SETTINGS:
+        spec, scope = st.spec, st.scope
+        eid = _claim_id(seen, scope, spec)
+        # A tag column on a class follows that class's rows; a settings scope counts from 0.
+        base = len(fields_for(scope)) if scope in known_components() else 0
+        order = orders[scope] = orders.get(scope, base - 1) + 1
+        out.append(
+            Entry(
+                id=eid,
+                scope=scope,
+                spec=spec,
+                plain_name=E.plain_name_of(scope, spec),
+                short_help=E.short_help_of(scope, spec),
+                group=st.group,
+                order=order,
+                depth=spec.depth,
+                functions=_ordered_functions(st.functions),
+                aliases=spec.aliases,
+                default=_setting_default(st.default),
+            )
+        )
     return tuple(out)
+
+
+def _ordered_functions(rows: dict[str, str]) -> dict[str, str]:
+    order = {f: i for i, f in enumerate(Function)}
+    return {
+        Function(f).value: v
+        for f, v in sorted(rows.items(), key=lambda kv: order[Function(kv[0])])
+    }
+
+
+def _setting_default(value: Any) -> dict[str, Any]:
+    """A setting's built-in default (shown, never written); None: the setting has none until set."""
+    if value is None:
+        return {"value": None, "source": "none"}
+    return {"value": _json_number(value), "source": "engine"}
 
 
 def guide_ids() -> tuple[str, ...]:

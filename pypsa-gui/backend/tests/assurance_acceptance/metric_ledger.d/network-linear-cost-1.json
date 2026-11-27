@@ -8,6 +8,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_network_cost_oracle.py::test_the_network_population_equals_the_hand_lp",
     "status": "verified",
+    "domain_review": "gk-b:e0be8aa78175a29b88c93d1c46b51c0f6189307c",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -22,6 +23,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_network_cost_oracle.py::test_the_network_population_equals_the_hand_lp",
     "status": "verified",
+    "domain_review": "gk-b:e0be8aa78175a29b88c93d1c46b51c0f6189307c",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -36,6 +38,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_network_cost_oracle.py::test_the_network_population_equals_the_hand_lp",
     "status": "verified",
+    "domain_review": "gk-b:e0be8aa78175a29b88c93d1c46b51c0f6189307c",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -50,6 +53,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_network_cost_oracle.py::test_the_network_population_equals_the_hand_lp",
     "status": "verified",
+    "domain_review": "gk-b:e0be8aa78175a29b88c93d1c46b51c0f6189307c",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -64,6 +68,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_network_cost_oracle.py::test_the_network_population_equals_the_hand_lp",
     "status": "verified",
+    "domain_review": "gk-b:e0be8aa78175a29b88c93d1c46b51c0f6189307c",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -78,6 +83,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_harness_reliability.py::test_passive_branch_cost_and_physical_limits_have_independent_oracle[None]",
     "status": "verified",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",

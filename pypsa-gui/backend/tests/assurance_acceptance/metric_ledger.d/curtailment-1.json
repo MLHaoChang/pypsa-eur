@@ -8,6 +8,8 @@
     "tolerance": "harness.curtailment_calculations:RESIDUAL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_curtailment_of_a_variable_generator[G1]",
     "status": "verified",
+    "domain_review": "pending",
+    "domain_review_note": "unpinned: test_result_profiles_assurance.py does not name RESIDUAL_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -22,6 +24,8 @@
     "tolerance": "harness.curtailment_calculations:RESIDUAL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_curtailment_of_a_variable_generator[G1]",
     "status": "verified",
+    "domain_review": "pending",
+    "domain_review_note": "unpinned: test_result_profiles_assurance.py does not name RESIDUAL_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -36,6 +40,8 @@
     "tolerance": "harness.curtailment_calculations:RESIDUAL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_curtailment_of_a_variable_generator[G1]",
     "status": "verified",
+    "domain_review": "pending",
+    "domain_review_note": "unpinned: test_result_profiles_assurance.py does not name RESIDUAL_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "verified",

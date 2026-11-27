@@ -3,7 +3,7 @@
 
 # Metric semantics, deterministic calculations and raw validity
 
-Status: ready-for-agent; audit 2026-11-25: #1644, #1680, #1704, #1705, #1712 and #1707 all merged (S1-S7); left: NPV and other-domain metrics, plausibility adapter, per-metric domain review
+Status: done (#2057; NPV checked by investment-case/1; plausibility adapter moved to issue 28; unpinned ledger tolerances in issue 29)
 Model: Opus
 Progress: harness/calculations.py with generator, network and storage profiles shipped; other domains, NPV and validity checks pending
 Type: task
@@ -37,16 +37,7 @@ metrics explicitly in [ledger](../coverage-ledger.md) and [handoff](../session-h
 
 ## Follow-up: checked plausibility findings
 
-Named by GK B's amendment on #851 (2026-10-28): Codex K ships the plausibility rules native and read-only, and checked publication of its findings is deferred here. Owned by the Assurance track, gated by GK B.
-
-**Checked plausibility findings: a bounded plausibility evidence/profile adapter.** Acceptance:
-- only `get_results(result_kind="plausibility")` is admitted; no blanket `get_results` whitelist, and the general guard on ordinary results reads stays closed;
-- a valid finding is published as a positive control;
-- LC-T19 injected extra claims are withheld;
-- the stored record is MAC'd like #850;
-- lookup re-derives the findings from the recorded result.
-
-Study-harness issue 05's LC-T19 line depends on this item.
+Moved to [issue 30](30-checked-plausibility-findings.md), blocked by #851 (owner Q3, 2026-11-26).
 
 ## Comments
 
@@ -152,3 +143,4 @@ Filed from the plan review, not found by these tests: ticket 21 (adequacy total 
 ## Audit (2026-11-25)
 
 - 2026-11-25 audit: merge commits for the six PRs found on origin/master; remaining items taken from the 2026-11-23 sweep line, NPV/plausibility not found in code.
+- 2026-11-26 correction (AA-10 R5): NPV is checked, by `investment-case/1` (`equity_npv`, `harness/investment_calculations.py`); `business_case._npv_at` is a second NPV implementation, recorded as a pending row. #1704 is slice S4 (metric parity), not S3; S3 (the objective bridge) was never built and R3 (#2044) carries its own bridge.

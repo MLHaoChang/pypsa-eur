@@ -159,7 +159,7 @@ export default function Curtailment() {
     : {}
 
   return (
-    <div className="flex flex-col h-full overflow-auto p-4 gap-4 results-scroll-clear [&>*]:shrink-0"
+    <div data-testid="results-view-curtailment" className="flex flex-col h-full overflow-auto p-4 gap-4 results-scroll-clear [&>*]:shrink-0"
       data-result-tab="curtailment" data-result-binding={displayed ? JSON.stringify(displayed.binding) : undefined}>
       {/* Truncated-window banner — see FIX 1 secondary in the
           results-tabs-window final review: a narrow-but-wide window can

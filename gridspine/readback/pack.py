@@ -33,7 +33,10 @@ Battery kind to judge kind:
 
 MW and Mvar channels become pu of the plant's rated active and apparent power
 (``Ratings``); a case that needs a rating the caller has not given is
-``unknown``.
+``unknown``. A pack written with ratings (GC-13: ``ratings.json``, listed with
+its SHA-256 and repeated in the manifest) is judged on them, with no caller
+input; a caller's ``Ratings`` that differ from them are refused, and every P-
+and Q-based row and the header name the ``rating_source``.
 
 Stays connected (GC-12). Every judged case gets a ``stays_connected``
 obligation row. Under contract version 2 it reads the result's ``connected``
@@ -62,8 +65,12 @@ from gridspine.handoff.psspy_scripts import STATUS_SIDECAR
 from gridspine.handoff.test_battery import (
     CONNECTED,
     CONTRACT_VERSIONS,
+    RATING_KEYS,
+    RATINGS_JSON,
+    PackRatings,
     cases_from_json,
     contract_channels,
+    ratings_from_json,
 )
 from gridspine.readback.channels import (
     ChannelFrame,
@@ -169,7 +176,52 @@ def read_manifest(pack_dir) -> dict:
             f"{BATTERY_JSON}'s SHA-256 is not the manifest's entry: the battery "
             "is not the one this pack was written with"
         )
+    pack_ratings(pack_dir, manifest)  # a ratings file that is not bound is refused here
     return manifest
+
+
+def pack_ratings(pack_dir, manifest) -> PackRatings | None:
+    """
+    The ratings a pack was written with (GC-13), or None for a pack with none.
+
+    ``ratings.json`` must match its SHA-256 entry, the ``data_hash`` must be
+    the hash of the file list (so it binds the ratings; checked for a rated
+    pack only, an unrated one reads as before), and the manifest's copy of its keys must equal it; a manifest that
+    carries a rating key without the file is refused.
+    """
+    pack_dir = Path(pack_dir)
+    files = manifest["files"]
+    stated = sorted(k for k in RATING_KEYS if k in manifest)
+    if RATINGS_JSON not in files:
+        if stated:
+            raise ContractError(
+                f"{MANIFEST} states {stated} but lists no {RATINGS_JSON}: the ratings "
+                "are not under the pack's data_hash"
+            )
+        return None
+    path = pack_dir / RATINGS_JSON
+    if not path.is_file():
+        raise ContractError(f"{pack_dir}: {RATINGS_JSON} is missing")
+    if _sha256(path) != files[RATINGS_JSON]:
+        raise ContractError(
+            f"{RATINGS_JSON}'s SHA-256 is not the manifest's entry: the ratings "
+            "are not the ones this pack was written with"
+        )
+    if _files_hash(files) != manifest["data_hash"]:
+        raise ContractError(
+            f"{MANIFEST}'s data_hash is not the hash of its file list: the ratings "
+            "are not bound by it"
+        )
+    ratings = ratings_from_json(path.read_text(encoding="utf-8"))
+    if {k: manifest.get(k) for k in RATING_KEYS} != ratings.as_dict():
+        raise ContractError(f"{MANIFEST}'s ratings differ from {RATINGS_JSON}'s")
+    return ratings
+
+
+def _files_hash(files) -> str:
+    """The ``data_hash`` a pack writer gives its file list (``emt_pack.write_emt_pack``)."""
+    text = "".join(f"{n}:{h}\n" for n, h in sorted(files.items()))
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 def _pscad_result(inf, outs) -> ChannelFrame:
@@ -229,6 +281,30 @@ def _p_base(ratings: Ratings) -> str:
     )
 
 
+def _mva_base(ratings: Ratings) -> str:
+    return (
+        f"rated MVA = {ratings.mva_source}"
+        if ratings.rated_mva is not None
+        else "no rated MVA"
+    )
+
+
+def _bases(ratings: Ratings, own: PackRatings | None) -> tuple:
+    """
+    ``(p_base, q_base)``: the text a P- and a Q-based row carries. A rated
+    pack names each value with its ``rating_source``, so a reader sees it is
+    stated, not derived from the campus; an unrated one keeps the text it had
+    before GC-13 (no Q text).
+    """
+    if own is None:
+        return _p_base(ratings), None
+    where = f"{own.rating_source}; pack {RATINGS_JSON}"
+    return (
+        f"rated P {own.rated_mw:g} MW = {where}",
+        f"rated MVA {own.rated_mva:g} MVA = {where}",
+    )
+
+
 def _unknown_case(case_id, kind, why) -> dict:
     return {
         "case_id": case_id,
@@ -251,15 +327,21 @@ def _connected_why(frame: ChannelFrame, contract_version: str):
 
 
 def _judge_one(
-    case, frame: ChannelFrame, profile: dict, ratings: Ratings, contract_version: str
+    case,
+    frame: ChannelFrame,
+    profile: dict,
+    ratings: Ratings,
+    contract_version: str,
+    bases: tuple,
 ) -> dict:
-    """The judgment of one battery case on its result frame."""
+    """The judgment of one battery case on its result frame; ``bases`` from ``_bases``."""
     channels, units = {}, {}
     p = case.params
     # judge default pre-window; stays_connected is an obligation on every kind (GK A2 D-2)
     jc = {"id": case.case_id, "t_event": case.t_event_s, "connected_required": True}
     note = ""
     p_rows = ()  # the checks that read P in pu of the rated P
+    q_rows = ()  # the checks that read Q in pu of the rated MVA
 
     def take(role, values, unit):
         name = role.upper()
@@ -306,6 +388,8 @@ def _judge_one(
         take("y", y, "pu")
         if case.kind == "p_step":
             p_rows = ("rise_time", "settling_time", "overshoot")
+        elif case.kind == "q_step":
+            q_rows = ("rise_time", "settling_time", "overshoot")
         y0 = _pre_mean(frame, y, case.t_event_s, PRE_WINDOW_S)
         if y0 is None:
             return _unknown_case(
@@ -353,9 +437,9 @@ def _judge_one(
     for row in result["rows"]:
         if note:
             row["detail"] = f"{row['detail']}; {note}" if row["detail"] else note
-        if row["check"] in p_rows:
-            base = _p_base(ratings)
-            row["detail"] = f"{row['detail']}; {base}" if row["detail"] else base
+        for rows, base in ((p_rows, bases[0]), (q_rows, bases[1])):
+            if base is not None and row["check"] in rows:
+                row["detail"] = f"{row['detail']}; {base}" if row["detail"] else base
         if row["check"] == "stays_connected" and why is not None:
             row["detail"] = f"{row['detail']}; {why}" if row["detail"] else why
     result["kind"] = case.kind
@@ -364,16 +448,34 @@ def _judge_one(
     return result
 
 
-def judge_pack(pack_dir, profile: dict, ratings: Ratings) -> dict:
+def judge_pack(pack_dir, profile: dict, ratings: Ratings | None = None) -> dict:
     """
     ``{header, cases}``: the header names the pack, its ``data_hash``, the
-    contract version, the ratings with their sources and the results files
-    no case claimed; ``cases`` has one judgment per battery case id.
+    contract version, the ratings with their sources (and, for a pack written
+    with ratings, its ``rating_source`` and ``campus_data_hash``) and the
+    results files no case claimed; ``cases`` has one judgment per battery
+    case id. A pack's own ratings are used when it has them; ``ratings``
+    is then optional and refused when it differs from them.
     """
-    if not isinstance(ratings, Ratings):
+    if ratings is not None and not isinstance(ratings, Ratings):
         raise ContractError(f"ratings must be a Ratings, got {type(ratings).__name__}")
     pack_dir = Path(pack_dir)
     manifest = read_manifest(pack_dir)
+    own = pack_ratings(pack_dir, manifest)
+    if own is not None:
+        mine = Ratings(
+            own.rated_mw, own.rating_source, own.rated_mva, own.rating_source
+        )
+        if ratings is not None and ratings != mine:
+            raise ContractError(
+                f"the caller's ratings {dataclasses.asdict(ratings)} differ from the "
+                f"pack's {dataclasses.asdict(mine)} ({RATINGS_JSON}); a pack is judged "
+                "on the ratings it was written with"
+            )
+        ratings = mine
+    elif ratings is None:
+        ratings = Ratings()
+    bases = _bases(ratings, own)
     battery = cases_from_json((pack_dir / BATTERY_JSON).read_text(encoding="utf-8"))
     results = pack_dir / RESULTS_DIR
     cases = []
@@ -401,7 +503,9 @@ def judge_pack(pack_dir, profile: dict, ratings: Ratings) -> dict:
             continue
         try:
             cases.append(
-                _judge_one(case, frame, profile, ratings, manifest["contract_version"])
+                _judge_one(
+                    case, frame, profile, ratings, manifest["contract_version"], bases
+                )
             )
         except ContractError as exc:
             cases.append(_unknown_case(case.case_id, case.kind, f"not judged: {exc}"))
@@ -427,12 +531,8 @@ def judge_pack(pack_dir, profile: dict, ratings: Ratings) -> dict:
         "pack_version": manifest["pack_version"],
         **stamp,
         "ratings": dataclasses.asdict(ratings),
-        "rated_p_base": _p_base(ratings),
-        "rated_mva_base": (
-            f"rated MVA = {ratings.mva_source}"
-            if ratings.rated_mva is not None
-            else "no rated MVA"
-        ),
+        "rated_p_base": bases[0],
+        "rated_mva_base": _mva_base(ratings) if own is None else bases[1],
         "connected": (
             CONNECTED_READ
             if CONNECTED in contract_channels(manifest["contract_version"])
@@ -440,6 +540,9 @@ def judge_pack(pack_dir, profile: dict, ratings: Ratings) -> dict:
         ),
         "extra_files": extra,
     }
+    if own is not None:  # an unrated pack's header keeps master's keys (GK A R6)
+        header["rating_source"] = own.rating_source
+        header["campus_data_hash"] = own.campus_data_hash
     return {"header": header, "cases": cases}
 
 

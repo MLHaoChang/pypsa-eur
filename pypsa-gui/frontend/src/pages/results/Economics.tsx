@@ -711,7 +711,7 @@ export default function Economics() {
   const periodLabel = filter.selectedPeriod != null ? ` (period ${filter.selectedPeriod})` : ''
 
   return (
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0">
+    <div data-testid="results-view-economics" className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0">
 
       {/* ── Capital costs unavailable ─────────────────────────────────── */}
       {/* Deliberately a banner and not an early return: the resolver's failure

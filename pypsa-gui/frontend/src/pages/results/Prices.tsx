@@ -248,7 +248,7 @@ export default function Prices() {
   }
 
   return (
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0"
+    <div data-testid="results-view-prices" className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0"
       {...bindingMark}>
 
       {/* ── Truncated-window banner (FIX 1 secondary, results-tabs-window
