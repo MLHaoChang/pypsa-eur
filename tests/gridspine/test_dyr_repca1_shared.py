@@ -14,6 +14,7 @@ its named case (GK A C3).
 """
 
 import functools
+import math
 
 import pandapower as pp
 import pytest
@@ -153,9 +154,10 @@ def _detailed(case, controllers):
 # --- the written records ---------------------------------------------------------
 
 
-def _templates(tmp_path, repca1):
+def _templates(tmp_path, repca1, override=None):
     units = dict(TOY_UNITS)
     for u, m in MBASE.items():
+        own = repca1 | (override or {}).get(u, {})
         units[u] = {
             "model": "inverter",
             "mbase_mva": m,
@@ -163,7 +165,7 @@ def _templates(tmp_path, repca1):
             "params": {
                 "k_sc": _p(1.2, "assumed"),
                 "rx_sc": _p(0.1, "assumed"),
-                **{k: _p(v, "assumed") for k, v in (_IBR | repca1).items()},
+                **{k: _p(v, "assumed") for k, v in (_IBR | own).items()},
             },
         }
     f = tmp_path / "plant.yaml"
@@ -338,6 +340,38 @@ def test_the_written_shares_follow_the_raw_mbase(tmp_path):
 
 
 # --- equal-dispatch assumption (GK A C5) ---------------------------------------------
+
+
+def test_a_plant_whose_machines_carry_different_repca1_values_is_refused(tmp_path):
+    """No one aggregate controller to share (GK A M2)."""
+    params, templates = _templates(
+        tmp_path, _BASE, override={"W3": {"repc_kpg": 2 * _BASE["repc_kpg"]}}
+    )
+    with pytest.raises(ContractError, match=r"plant 'P1': units \['W3'\] carry REPCA1"):
+        write_dyr(
+            _plant_net(),
+            params,
+            tmp_path / "x.dyr",
+            ibr=wecc_params(templates),
+            poc=PLANT_POC,
+            plants=PLANTS,
+        )
+
+
+def _q_spread(q_pu):
+    """The plant with W3 at ``q_pu`` reactive power (pu on its MBASE), the rest at 0."""
+    net = _plant_net()
+    net.sgen.loc[net.sgen["name"] == "W3", "q_mvar"] = q_pu * MBASE["W3"]
+    return unequal_dispatch(net, PLANTS)
+
+
+def test_a_spread_of_exactly_1e_6_states_no_assumption():
+    assert _q_spread(1e-6) == []
+
+
+def test_a_spread_just_above_1e_6_is_listed():
+    (note,) = _q_spread(math.nextafter(1e-6, 1.0))
+    assert "unequal pu Q" in note
 
 
 def test_equal_pu_dispatch_states_no_assumption():

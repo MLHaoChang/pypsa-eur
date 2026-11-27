@@ -6,7 +6,8 @@ GC-04b S2: the PSS/E pack for a detailed plant (GK A C5, C7).
 
 The plant is the bundle fixture's PV1 (16.5 MVA) plus PV2 (33 MVA) and PV3
 (49.5 MVA) on MV1, behind TR1. Every converter gets a gain-shared REPCA1;
-the scripts step every machine's reference by the same MW, record each
+the scripts step every machine's reference by the same reference MW (each
+output by the step in its own pu), record each
 machine's currents and sum them by MBASE, and poll every machine for
 ``connected``.
 """
@@ -70,10 +71,11 @@ def _pack(tmp_path, plant=DETAILED, pv=(10.0, 20.0, 30.0), s=None):
     text = (b.path / f"{b.path.name}.dyr").read_text()
     grid = next(x for x in _records(text) if x[1] == "GENCLS")
     out = tmp_path / "pack"
+    cases = {c.case_id: c for c in PP._battery_cases(hc.net)[0]}  # the pack's default
     m = PP.write_psse_pack(
         out, hc, b.path.name, text.splitlines(), (grid[0], grid[2]), plant=plant
     )
-    return m, out
+    return m, out, cases
 
 
 @pytest.fixture(scope="module")
@@ -81,17 +83,19 @@ def pack(tmp_path_factory):
     return _pack(tmp_path_factory.mktemp("detailed"))
 
 
+def _cid(pack, kind):
+    return next(c for c in pack[0]["outputs"] if c.startswith(kind))
+
+
 def _script(pack, kind):
-    m, out = pack
-    cid = next(c for c in m["outputs"] if c.startswith(kind))
-    return (out / f"run_{cid}.py").read_text()
+    return (pack[1] / f"run_{_cid(pack, kind)}.py").read_text()
 
 
 # --- the .dyr --------------------------------------------------------------------------
 
 
 def test_every_plant_converter_gets_a_repca1_on_the_one_poc_branch(pack):
-    m, out = pack
+    m, out, _ = pack
     recs = [
         r for r in _records((out / f"{m['case']}.dyr").read_text()) if r[1] == "REPCA1"
     ]
@@ -122,7 +126,7 @@ def test_a_one_member_plant_writes_the_aggregate_pack(tmp_path):
         assert (out1 / name).read_bytes() == (out2 / name).read_bytes(), name
 
 
-# --- steps: every machine, the same MW (C7) ------------------------------------------------
+# --- steps: every machine, the same reference MW (C7) ------------------------------------------------
 
 
 class _Calls:
@@ -158,23 +162,29 @@ def _run_step(text, m_base):
 @pytest.mark.parametrize(
     ("kind", "call"), [("p_step", "increment_gref"), ("q_step", "increment_vref")]
 )
-def test_a_p_or_q_step_moves_every_machine_by_the_same_mw(pack, kind, call):
+def test_a_p_or_q_step_moves_every_reference_by_the_same_mw_and_step_pu(
+    pack, kind, call
+):
     text = _script(pack, kind)
     m_base = [MBASE[u] for u in MEMBERS]
     calls = _run_step(text, m_base)
     machines = _assigned(text, "PLANT_MACHINES")
     assert [c[:3] for c in calls] == [(call, b, i) for b, i in machines]
+    step = pack[2][_cid(pack, kind)].params["step_pu"]  # the case's own step
+    # each reference moves by the same MW, the aggregate's step on the plant rating ...
     mw = [c[3] * m for c, m in zip(calls, m_base)]
-    step = float(
-        ast.unparse(ast.parse(text)).split(f"psspy.{call}(bus, mid, ")[1].split(" ")[0]
-    )
     assert mw == pytest.approx([step * sum(m_base)] * len(MEMBERS), rel=1e-12)
+    # ... which is the step / w in each machine's own pu
+    assert [c[3] for c in calls] == pytest.approx(
+        [step * sum(m_base) / m for m in m_base], rel=1e-12
+    )
 
 
 def test_a_v_step_moves_every_machine_by_the_same_pu_volts(pack):
     text = _script(pack, "v_step")
     calls = _run_step(text, [MBASE[u] for u in MEMBERS])
-    assert len(calls) == len(MEMBERS) and len({c[3] for c in calls}) == 1
+    step = pack[2][_cid(pack, "v_step")].params["step_pu"]
+    assert [c[3] for c in calls] == [step] * len(MEMBERS)  # the case's step, unscaled
     assert {c[0] for c in calls} == {"increment_vref"}
 
 
@@ -184,6 +194,53 @@ def test_the_scripts_check_the_case_mbase_sum_against_the_plant_rating(pack):
         sum(MBASE.values())
     )
     assert "if abs(sum(M_BASE) - PLANT_MBASE) > 1e-6:" in text
+
+
+def _run_base_read(text, replies):
+    """Run the script's MBASE read and sum check with a fake macdat that
+    returns ``replies[k]`` = (ierr, MBASE) for machine k."""
+    body = ast.parse(text).body
+    keep = [
+        n
+        for n in body
+        if (isinstance(n, ast.Assign) and ast.unparse(n) == "M_BASE = []")
+        or (isinstance(n, ast.For) and "macdat" in ast.unparse(n))
+        or (isinstance(n, ast.If) and "sum(M_BASE)" in ast.unparse(n))
+    ]
+    assert len(keep) == 3
+    it = iter(replies)
+
+    class _Fake:
+        def macdat(self, bus, mid, what):
+            assert what == "MBASE"
+            return next(it)
+
+    ns = {
+        "psspy": _Fake(),
+        "PLANT_MACHINES": _assigned(text, "PLANT_MACHINES"),
+        "PLANT_MBASE": _assigned(text, "(F0_HZ, PLANT_MBASE)")[1],
+    }
+    exec(compile(ast.Module(keep, []), "mbase", "exec"), ns)
+    return ns["M_BASE"]
+
+
+def test_the_case_mbase_read_passes_when_the_sum_is_the_rating(pack):
+    text = _script(pack, "p_step")
+    good = [(0, MBASE[u]) for u in MEMBERS]
+    assert _run_base_read(text, good) == [MBASE[u] for u in MEMBERS]
+
+
+@pytest.mark.parametrize(
+    ("replies", "reason"),
+    [
+        ([(0, 16.5), (0, 33.0), (0, 50.0)], "MBASE sum differs from the plant rating"),
+        ([(0, 16.5), (1, 33.0), (0, 49.5)], "plant machine MBASE not read"),
+        ([(0, 16.5), (0, 0.0), (0, 49.5)], "plant machine MBASE not read"),
+    ],
+)
+def test_the_run_stops_on_a_wrong_case_mbase(pack, replies, reason):
+    with pytest.raises(SystemExit, match=reason):
+        _run_base_read(_script(pack, "p_step"), replies)
 
 
 # --- connected: every machine (C7) ---------------------------------------------------------
@@ -232,13 +289,13 @@ def test_the_currents_are_the_mbase_weighted_sum_on_the_plant_rating(pack):
 
 
 def test_an_equal_pu_dispatch_states_no_plant_assumption(pack):
-    m, out = pack
+    m, out, _ = pack
     assert "plant_assumed" not in m
     assert "unequal pu" not in (out / "README.md").read_text()
 
 
 def test_an_unequal_pu_dispatch_is_listed_with_its_machines(tmp_path):
-    m, out = _pack(tmp_path, pv=(10.0, 20.0, 40.0))
+    m, out, _ = _pack(tmp_path, pv=(10.0, 20.0, 40.0))
     (note,) = m["plant_assumed"]
     assert "plant 'PV'" in note and "unequal pu P" in note
     assert all(u in note for u in MEMBERS)

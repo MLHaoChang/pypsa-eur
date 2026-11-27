@@ -130,6 +130,11 @@ UNVERIFIED = {
         "machine-MBASE base of REPCA1 and checked against a reduced REPC_A model, "
         "not against PSS/E"
     ),
+    "REPCA1 references": (
+        "increment_gref and increment_vref on a machine with a REPCA1 move that "
+        "REPCA1's Plant_pref and Vref/Qref, in pu of the machine's MBASE; a "
+        "detailed plant steps every machine's (the step scaling relies on it)"
+    ),
     "detailed plant currents": (
         "a detailed plant's id_pu, iq_pu and i_poc_pu are the MBASE-weighted sums of "
         "its machines' channels on the plant rating, which assumes one terminal bus "
@@ -482,8 +487,9 @@ def _member_step_lines(kind, step):
     A detailed plant's step (GC-04b): every machine's REPCA1 reference moves.
     A V step is in pu volts, the same for every machine. A Q or P step is in
     pu of the plant rating; each machine's reference is in pu of its own
-    MBASE, so it moves by ``step * PLANT_MBASE / M_BASE[k]``, the same MW for
-    every machine, which is the aggregate's step under the gain sharing
+    MBASE, so it moves by ``step * PLANT_MBASE / M_BASE[k]``: the same
+    reference MW on every machine, and each machine's output moves by the
+    step in its own pu, which is the aggregate's step under the gain sharing
     (``dyr_writer.share_repca1``).
     """
     call = "increment_gref" if kind == "p_step" else "increment_vref"
@@ -493,7 +499,7 @@ def _member_step_lines(kind, step):
             f"    psspy.{call}(bus, mid, {step!r})",
         ]
     return [
-        "for (bus, mid), m in zip(PLANT_MACHINES, M_BASE):  # the same MW on each",
+        "for (bus, mid), m in zip(PLANT_MACHINES, M_BASE):  # same reference MW on each",
         f"    psspy.{call}(bus, mid, {step!r} * PLANT_MBASE / m)",
     ]
 
@@ -928,7 +934,8 @@ def write_scripts(
     ``plant_machines`` are a detailed plant's ``(bus, id)`` machines (GC-04b),
     each with a gain-shared REPCA1; ``plant_machine`` is the first of them and
     ``plant_mbase_mva`` the sum of their MBASEs. A V step then moves every
-    machine's reference by the step, a Q or P step by the same MW on each
+    machine's reference by the step, a Q or P step by the same reference MW
+    on each, so each output moves by the step in its own pu
     (``_member_step_lines``), and id/iq/i_poc are the MBASE-weighted sums of
     the machines' channels. One machine writes the aggregate's script.
     """
