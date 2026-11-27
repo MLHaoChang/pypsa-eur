@@ -1048,3 +1048,24 @@ approximation; the B4 number scan reads tokens, so a number inside a word is
 not seen. Next runnable tracer: SH-07c's `revised_from` on sealed exports must
 keep `test_p4_fact_free_reports.py`'s exact-key pin green.
 
+
+## 2026-11-27 — AA-04 S6 (Excel/MATPOWER read-backs, export edge cases)
+
+Branch `claude/aa04-s6-file-formats`, plan GO from GK B (73) with conditions (Q1 MATPOWER
+not_carried in the model's text, MATPOWER_ABS pinned, Q2 the export reads only the file
+its result names, route-reader spies, P7 mutants).
+Commands, in `pypsa-gui/backend` with `/root/.venv-pypsa-gui/bin/python -m pytest`:
+`tests/assurance_acceptance/test_p3_file_outcomes.py`: 25 new cases red on master's
+`harness/outcomes.py`, all green after; `tests/assurance_acceptance -k "p3 or p4_imports"`:
+682 passed, 0 failed (before the last mutant tests, which add 7 more, passing).
+`scripts/coord/mutants.py harness/outcomes.py` against the file test: 72 of 100 mutants
+ran in the 7000 s cap, 54 killed; the survivors are listed in the PR body (index and
+bus-field checks, now covered by new tests, plus equivalent no-note guards and the
+`<=` boundary). Policy version unchanged (`outcomes.VERSION` 1).
+Rows: AA04-P1..P7 passing, P8 a named limit with its test, P10 closed by issue 15 (#1261).
+Remaining blockers: none for S6. Next runnable tracer (S7): wait_for_job on an `ad:`
+handle returns an outcome from an independent job_adapters snapshot read instead of
+`adapter_pending` (`test_p3_job_outcomes.py::test_wait_on_a_study_or_queue_job_is_pending_not_completed`
+turns red first); live-voice 11c has landed (#1550, #1556).
+Not done: the frontend's "this file format cannot be checked yet" word stays (no file
+tool emits adapter_pending now; UI slice).
