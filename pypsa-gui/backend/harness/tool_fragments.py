@@ -125,7 +125,7 @@ class SchemaFragments:
             name, where = t["name"], origin.get(id(t), LEGACY_SCHEMA)
             if name in seen:
                 raise FragmentError(
-                    f"tool {name!r} is defined by both {seen[name]} and {where}"
+                    f"tool {name!r} is defined by both {seen[name]} and {where}"  # repr-ok: import-time error for the developer
                 )
             seen[name] = where
         for mod in self.modules.values():
@@ -187,7 +187,7 @@ def _merge(
     for key, value in new.items():
         if key in into:
             raise FragmentError(
-                f"{what} {key!r} is defined by both {legacy} and {where}"
+                f"{what} {key!r} is defined by both {legacy} and {where}"  # repr-ok: import-time error for the developer
             )
         into[key] = value
 
