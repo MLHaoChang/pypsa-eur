@@ -34,6 +34,11 @@
       "unit": "{currency}/MWh",
       "basis": "investment case · nominal basis"
     },
+    "carrier_lcoe": {
+      "name": "Carrier LCOE (cash cost)",
+      "unit": "{currency}/MWh",
+      "basis": "Annualised capital cost plus fixed and variable O&M (and a converter's input energy cost) per MWh the carrier produced in the solve; no financing or tax"
+    },
     "study_cost_per_mwh": {
       "name": "Cost per MWh served (study)",
       "unit": "€/MWh",

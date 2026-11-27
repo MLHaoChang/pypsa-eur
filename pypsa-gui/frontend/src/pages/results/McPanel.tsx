@@ -19,7 +19,7 @@ import {
   ramChipText, ramChipTitle,
   type AdequacyReportPayload, type CoptPayload,
 } from './adequacy'
-import { figureHint, figureName } from '../../utils/figureWords'
+import { figureHint, figureName, figureUnit } from '../../utils/figureWords'
 
 // ── The sequential Monte-Carlo adequacy study (spec §5, Phase 6) ────────────
 //
@@ -470,6 +470,8 @@ export function McPanel() {
   const m = result?.metrics ?? null
   const warning = result?.warning ?? m?.warning ?? null
   const loleCi = m ? ciRange(m.lole_ci, basisSuffix(m)) : null
+  // The shortfall's unit, shown beside its name (UX (32), rule 70: one unit, visible).
+  const shortfallUnit = m ? basisSuffix(m) : figureUnit('expected_shortfall')
   const eueCi = m ? ciRange(m.eue_ci, 'MWh') : null
   const elcc = result?.elcc ?? []
   const portfolioBlock = result?.elcc_portfolio ?? null
@@ -727,7 +729,7 @@ export function McPanel() {
                       <th className="text-left font-medium py-1 pr-3">Kind</th>
                       <th className="text-right font-medium py-1 pr-3">Capacity</th>
                       <th className="text-left font-medium py-1 pr-3">Credit</th>
-                      <th className="text-right font-medium py-1 pr-3" title={figureHint('expected_shortfall')}>Baseline {figureName('expected_shortfall').toLowerCase()}</th>
+                      <th className="text-right font-medium py-1 pr-3" title={figureHint('expected_shortfall')}>Baseline {figureName('expected_shortfall').toLowerCase()} ({shortfallUnit})</th>
                     </tr>
                   </thead>
                   <tbody className="font-mono">
@@ -780,7 +782,7 @@ export function McPanel() {
           )}
 
           {portfolioBlock && (
-            <PortfolioSection block={portfolioBlock} />
+            <PortfolioSection block={portfolioBlock} unit={shortfallUnit} />
           )}
         </div>
       )}
@@ -797,7 +799,11 @@ export function McPanel() {
  * engine's reason — a refusal is data, and an empty block would read as a
  * broken panel.
  */
-export function PortfolioSection({ block }: { block: ElccPortfolioBlock }) {
+export function PortfolioSection({ block, unit = figureUnit('expected_shortfall') }: {
+  block: ElccPortfolioBlock
+  /** The baseline shortfall's unit: the MC run's basis (h/yr, or hours over its horizon). */
+  unit?: string
+}) {
   const heading = PORTFOLIO_STATUS_LABEL[block.status]
   const refused = block.status !== 'ok' && block.status !== 'margin_unavailable'
   const n = block.population.members.length
@@ -845,7 +851,7 @@ export function PortfolioSection({ block }: { block: ElccPortfolioBlock }) {
                 <th className="text-left font-medium py-1 pr-3">Portfolio ELCC</th>
                 <th className="text-right font-medium py-1 pr-3">Margin credit (gross window)</th>
                 <th className="text-right font-medium py-1 pr-3">Margin credit (net-load window)</th>
-                <th className="text-right font-medium py-1 pr-3" title={figureHint('expected_shortfall')}>Baseline {figureName('expected_shortfall').toLowerCase()}</th>
+                <th className="text-right font-medium py-1 pr-3" title={figureHint('expected_shortfall')}>Baseline {figureName('expected_shortfall').toLowerCase()} ({unit})</th>
               </tr>
             </thead>
             <tbody className="font-mono">

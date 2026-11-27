@@ -1,7 +1,7 @@
 // The Guided report entry (UX S6, G4/G6): one tile per category, each a figure
 // or a state in words, never 0 or "—" for what did not run.
 import { describe, expect, it } from 'vitest'
-import { chapterTiles, type ChapterInputs } from './chapters'
+import { chapterTiles, NO_TAX_PACK_BASIS, type ChapterInputs } from './chapters'
 import type { InvestmentCaseReportPayload } from '../../api/types'
 import { figureBasis, figureName } from '../../utils/figureWords'
 import { fmtCurrency } from '../../utils/format'
@@ -85,7 +85,7 @@ describe('chapterTiles', () => {
     // No tax pack: the pre-tax figure under its own name; the after-tax name never carries it.
     t = byId({ ...NONE, investment: { study: done, report: report(null, -11.01e6) } })
     expect(t.investment).toMatchObject({ state: 'ready', label: figureName('project_npv_pre_tax'),
-      value: fmtCurrency(-11.01e6), basis: 'No tax pack, so the after-tax figure is not established.' })
+      value: fmtCurrency(-11.01e6), basis: NO_TAX_PACK_BASIS })
     expect(t.investment.label).not.toBe(figureName('project_npv'))
     expect(t.investment.label).toMatch(/before tax/)
     t = byId({ ...NONE, investment: { study: done, report: report(null, null) } })

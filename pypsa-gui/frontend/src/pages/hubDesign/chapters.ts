@@ -77,6 +77,9 @@ export function dispatchSolved(status: SimulationStatus | null | undefined): boo
   return !!status && status.dispatch != null && status.dispatch !== 'none' && num(status.objective) != null
 }
 
+/** Why the Guided NPV tile shows the pre-tax figure: the one sentence for this cause (UX (32), (ah)). */
+export const NO_TAX_PACK_BASIS = 'No tax pack, so the after-tax figure is not established.'
+
 /** The hover text of a figure marked "From the study" (G5). */
 export const FROM_STUDY_HINT =
   'From the study, which ran on the design. The project itself has not been solved yet.'
@@ -124,7 +127,7 @@ function investment({ study, report }: ChapterInputs['investment']): Omit<Chapte
     lead, label: figureName(post != null ? 'project_npv' : 'project_npv_pre_tax'),
     value: fmtCurrency(figure), state: stale ? 'stale' : 'ready', open,
     basis: post != null ? figureBasis('project_npv')
-      : 'No tax pack, so the after-tax figure is not established.',
+      : NO_TAX_PACK_BASIS,
     reason: stale ? 'The inputs changed since the case ran.' : undefined,
   }
 }

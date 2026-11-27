@@ -100,7 +100,7 @@ describe('Compare economics: LP scenario beside an integer (MIP) one', () => {
     expect(batteryOpex[3]).toBe(WITHHELD)
     // gas holds no charge cost: its OPEX stays a number on both sides.
     expect(gasOpex[2]).toBe('5.00 M€')
-    const [batteryLcoe, gasLcoe] = metricRows('LCOE')
+    const [batteryLcoe, gasLcoe] = metricRows('Carrier LCOE (cash cost)')
     expect(batteryLcoe[2]).toBe(WITHHELD)
     expect(gasLcoe[2]).toMatch(/€\/MWh/)
     const charge = metricRows('Storage charge cost')

@@ -18,6 +18,7 @@ import { useCarrierFilter, CarrierFilter, bindCarrierFilter } from './results/Ca
 import { COST_UNAVAILABLE, UnavailableBlock, UnavailableCell } from './results/shared'
 import { signFirstEuro } from '../utils/format'
 import { withheldCell } from './results/sectionWords'
+import { figureBasis, figureName } from '../utils/figureWords'
 
 // ── Compare view ─────────────────────────────────────────────────────────────
 // Tabbed A/B comparison across two saved projects. Each tab loads its own
@@ -1838,7 +1839,7 @@ function EconomicsTable({
           // non-trivial value for that bucket — keeps the table compact
           // on carriers without storage / curtailment / lost-load.
           // va/vb null = withheld for a price limit (an integer solve).
-          type Row = { label: string; va: number | null; vb: number | null; fmt: (n: number) => string; invert: boolean; sub?: boolean }
+          type Row = { label: string; hint?: string; va: number | null; vb: number | null; fmt: (n: number) => string; invert: boolean; sub?: boolean }
           const splitRows: Row[] = [
             { label: 'Gen cost',           va: readPV(A?.gen_cost_meur, period),            vb: readPV(B?.gen_cost_meur, period),            fmt: fmtMEur, invert: true, sub: true },
             { label: 'Storage charge cost', va: readNullablePV(A?.storage_charge_cost_meur, period), vb: readNullablePV(B?.storage_charge_cost_meur, period), fmt: fmtMEur, invert: true, sub: true },
@@ -1857,14 +1858,15 @@ function EconomicsTable({
             ...visibleSplits,
             { label: 'CAPEX',    va: readPV(A?.capex_meur,   period), vb: readPV(B?.capex_meur,   period), fmt: fmtMEur,    invert: true  },
             { label: 'Dispatch', va: readPV(A?.dispatch_gwh, period), vb: readPV(B?.dispatch_gwh, period), fmt: v => `${v.toFixed(1)} GWh`, invert: false },
-            { label: 'LCOE',     va: readNullablePV(A?.lcoe_eur_per_mwh, period), vb: readNullablePV(B?.lcoe_eur_per_mwh, period), fmt: fmtEurMwh, invert: true  },
+            // Not the investment case's LCOE (guided-results 04, UX (32)): the carrier's cost per MWh.
+            { label: figureName('carrier_lcoe'), hint: figureBasis('carrier_lcoe'), va: readNullablePV(A?.lcoe_eur_per_mwh, period), vb: readNullablePV(B?.lcoe_eur_per_mwh, period), fmt: fmtEurMwh, invert: true  },
           ]
           return rows.map((r, i) => (
             <tr key={`${c}-${r.label}`} className="border-b border-border/40">
               {i === 0 && (
                 <td rowSpan={rows.length} className="py-1 text-text align-top font-medium">{carrierDisplayName(c)}</td>
               )}
-              <td className={`py-1 text-right ${r.sub ? 'text-muted/70 pr-1 pl-3 italic' : 'text-muted'}`}>{r.label}</td>
+              <td className={`py-1 text-right ${r.sub ? 'text-muted/70 pr-1 pl-3 italic' : 'text-muted'}`} title={r.hint}>{r.label}</td>
               <td className={`py-1 text-right font-mono ${r.sub ? 'text-text/80' : 'text-text'}`}>
                 {!availableA ? <UnavailableCell />
                   : r.va === null ? <span className="text-muted">{withheldCell(reasonA)}</span> : r.fmt(r.va)}
