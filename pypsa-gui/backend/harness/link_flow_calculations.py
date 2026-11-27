@@ -22,7 +22,8 @@ The loading denominator is the optimised `p_nom_opt`, never `p_nom` or
 clamped. A Link with a non-empty bus2 or later port (efficiency2+) is not
 modelled, and a p1 that does not equal -eta x p0 within FLOW_TOLERANCE is not
 trusted; both withhold every figure. Reverse flow through a lossy Link would
-book a gain, so it withholds the loss alone, never as a negative number.
+book a gain, and so would an efficiency above 1 (a heat pump's COP): each
+withholds the loss alone, which is never shown as a negative number.
 """
 
 import math
@@ -43,6 +44,7 @@ REASONS = frozenset(
         "invalid_or_missing_raw_data",
         "inconsistent_link_flow",
         "reverse_flow_with_losses",
+        "efficiency_above_one",
         "no_link_capacity",
     }
 )
@@ -79,7 +81,7 @@ DISCLOSURE = (
     "are net over the window, weighted by the generator snapshot weightings; the loss is energy in "
     "minus energy out. Peak flow is the largest |p0|; peak loading divides it by the optimised capacity "
     "p_nom_opt and can exceed 100 % where p_max_pu > 1. A link with a third port, a flow that does not "
-    "match its efficiency, or reverse flow through a lossy link (loss only) withholds the figures."
+    "match its efficiency, or reverse flow through a lossy link or an efficiency above 1 (loss only) withholds the figures."
 )
 
 
@@ -181,7 +183,9 @@ def calculate(raw, scope):
             "link_output_energy": energy_out,
             "peak_link_flow": peak,
         }
-        if any(x < -NEAR_ZERO and e != 1.0 for x, e in zip(p0, eta)):
+        if any(e > 1.0 for e in eta):
+            reasons["link_conversion_loss"] = "efficiency_above_one"
+        elif any(x < -NEAR_ZERO and e != 1.0 for x, e in zip(p0, eta)):
             reasons["link_conversion_loss"] = "reverse_flow_with_losses"
         else:
             available["link_conversion_loss"] = energy_in - energy_out
@@ -204,7 +208,7 @@ def notes(raw, scope, label):
     capacity = raw["p_nom_opt"]
     shown = (
         "not available"
-        if capacity is None or not math.isfinite(capacity)
+        if capacity is None or not math.isfinite(capacity) or capacity <= NEAR_ZERO
         else f"{capacity:g} MW"
     )
     return [

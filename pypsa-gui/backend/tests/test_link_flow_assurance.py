@@ -36,6 +36,9 @@ from harness import link_flow_calculations as link
 from harness.derived import NEAR_ZERO
 from services import assurance_records as records
 from services import workflow_tools
+from tests.assurance_acceptance.support import approval
+from tests.test_answer_assurance import checked  # noqa: F401
+from tests.test_assurance_metrics import NumericalProvider
 from tests.test_workflow_tools import baseline  # noqa: F401
 
 STAMPS = pd.date_range("2026-01-01", periods=3, freq="h")
@@ -383,6 +386,7 @@ def test_the_reasons_and_refusals_are_the_named_sets():
         "invalid_or_missing_raw_data",
         "inconsistent_link_flow",
         "reverse_flow_with_losses",
+        "efficiency_above_one",
         "no_link_capacity",
     }
     assert link.REFUSALS == {"unknown_link", "unsupported_snapshot_scope"}
@@ -410,7 +414,11 @@ def test_each_guard_withholds_every_figure(reason):
 
 
 def test_every_reason_has_a_case():
-    covered = set(GUARD_CASES) | {"reverse_flow_with_losses", "no_link_capacity"}
+    covered = set(GUARD_CASES) | {
+        "reverse_flow_with_losses",
+        "efficiency_above_one",
+        "no_link_capacity",
+    }
     assert covered == link.REASONS
 
 
@@ -575,3 +583,47 @@ def test_notes_name_the_direction_the_efficiency_and_the_capacity(link_case):
     )
     assert lines[1] == "Loading is against the optimised capacity p_nom_opt (30 MW)."
     assert math.isfinite(raw["p_nom_opt"])
+
+
+@pytest.mark.parametrize(
+    "eta,withheld",
+    [(1.0, False), (1.0 + 1e-12, True), (3.5, True)],
+    ids=["one", "just_above", "cop"],
+)
+def test_an_efficiency_above_one_withholds_the_loss_alone(eta, withheld):
+    """A heat pump's COP books more out than in: never a negative loss."""
+    values, reasons = _slots(_hand_raw([2.0, 4.0], [1.0, eta]))
+    assert reasons == (
+        {"link_conversion_loss": "efficiency_above_one"} if withheld else {}
+    )
+    assert values["link_input_energy"] == 6.0
+    assert values["link_output_energy"] == 2.0 + 4.0 * eta
+
+
+def test_an_efficiency_above_one_wins_over_reverse_flow():
+    reasons = _slots(_hand_raw([-2.0, 4.0], [0.5, 3.5]))[1]
+    assert reasons == {"link_conversion_loss": "efficiency_above_one"}
+
+
+@pytest.mark.parametrize("port", [None, "", float("nan")], ids=["none", "blank", "nan"])
+def test_an_empty_port_value_is_not_a_port(port):
+    assert link._filled(port) is False
+    assert link._filled("C") is True
+
+
+def test_an_unknown_link_keeps_its_kind_through_the_turn(link_case, checked):
+    ctx = link_case()
+    frames = checked.run(
+        NumericalProvider({}),
+        message="Check link flow.",
+        checked_scope=_scope(ctx, "nope"),
+    )
+    receipt = approval(frames).get("receipt") or {}
+    assert receipt.get("request_complete") is False
+    assert {s["reason"] for s in receipt["result_slots"]} == {"unknown_link"}
+
+
+def test_unusable_capacity_reads_not_available_in_the_notes():
+    for capacity in (None, 0.0, -1.0):
+        raw = _hand_raw([1.0], [1.0], p_nom_opt=capacity)
+        assert link.notes(raw, {}, str)[1].endswith("(not available).")

@@ -43,8 +43,8 @@
    },
    {
     "metric": "link_conversion_loss",
-    "formula": "link_input_energy - link_output_energy = sum w_generators[t] x (1 - eta[t]) x p0[t] (signed, never |p0|); PyPSA sign: p0 > 0 is withdrawal at bus0, p1 < 0 delivery at bus1, p1 = -eta[t] x p0[t]; eta[t] is links_t.efficiency[link][t] where that column exists, else the static efficiency",
-    "validity": "verified LP solve and finite, non-negative generator weights (else unverified_solve); no non-empty bus2 or later port on the Link, a blank or NaN port being empty (unsupported_link_ports); p0, p1 and eta[t] present and finite at every window snapshot, a NaN in links_t.efficiency never falling back to the static value (invalid_or_missing_raw_data); |p1[t] + eta[t] x p0[t]| <= FLOW_TOLERANCE x max(1, |p0[t]|) at every window snapshot (inconsistent_link_flow). Refusals: unknown_link, unsupported_snapshot_scope (multi-period network); no window snapshot with p0[t] < -NEAR_ZERO and eta[t] != 1, where PyPSA would book a gain (reverse_flow_with_losses, this slot only)",
+    "formula": "link_input_energy - link_output_energy = sum w_generators[t] x (1 - eta[t]) x p0[t] (signed, never |p0|; never shown negative); PyPSA sign: p0 > 0 is withdrawal at bus0, p1 < 0 delivery at bus1, p1 = -eta[t] x p0[t]; eta[t] is links_t.efficiency[link][t] where that column exists, else the static efficiency",
+    "validity": "verified LP solve and finite, non-negative generator weights (else unverified_solve); no non-empty bus2 or later port on the Link, a blank or NaN port being empty (unsupported_link_ports); p0, p1 and eta[t] present and finite at every window snapshot, a NaN in links_t.efficiency never falling back to the static value (invalid_or_missing_raw_data); |p1[t] + eta[t] x p0[t]| <= FLOW_TOLERANCE x max(1, |p0[t]|) at every window snapshot (inconsistent_link_flow). Refusals: unknown_link, unsupported_snapshot_scope (multi-period network); no window snapshot with p0[t] < -NEAR_ZERO and eta[t] != 1, where PyPSA would book a gain (reverse_flow_with_losses, this slot only); every window eta[t] at most 1, since an efficiency above 1 (a heat pump's COP) would book a gain (efficiency_above_one, this slot only)",
     "tolerance": "tests.test_link_flow_assurance:HAND_REL",
     "oracle": "pypsa-gui/backend/tests/test_link_flow_assurance.py::test_link_figures_equal_the_hand_arithmetic",
     "status": "verified",
@@ -83,7 +83,7 @@
    },
    {
     "metric": "peak_link_loading",
-    "formula": "100 x peak_link_flow / p_nom_opt, in percent; the denominator is the optimised p_nom_opt, never p_nom or p_max_pu x p_nom, and the figure exceeds 100 % where p_max_pu > 1 (not clamped)",
+    "formula": "100 x peak_link_flow / p_nom_opt, in percent; the denominator is the optimised p_nom_opt, never p_nom or p_max_pu x p_nom, and the figure exceeds 100 % where p_max_pu > 1 (not clamped); peak_link_flow reads |p0[t]| with PyPSA sign: p0 > 0 is withdrawal at bus0, p1 < 0 delivery at bus1, p1 = -eta[t] x p0[t]; eta[t] is links_t.efficiency[link][t] where that column exists, else the static efficiency",
     "validity": "verified LP solve and finite, non-negative generator weights (else unverified_solve); no non-empty bus2 or later port on the Link, a blank or NaN port being empty (unsupported_link_ports); p0, p1 and eta[t] present and finite at every window snapshot, a NaN in links_t.efficiency never falling back to the static value (invalid_or_missing_raw_data); |p1[t] + eta[t] x p0[t]| <= FLOW_TOLERANCE x max(1, |p0[t]|) at every window snapshot (inconsistent_link_flow). Refusals: unknown_link, unsupported_snapshot_scope (multi-period network); p_nom_opt present, finite and above NEAR_ZERO (no_link_capacity, this slot only)",
     "tolerance": "tests.test_link_flow_assurance:HAND_REL",
     "oracle": "pypsa-gui/backend/tests/test_link_flow_assurance.py::test_link_figures_equal_the_hand_arithmetic",
