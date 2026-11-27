@@ -32,7 +32,7 @@ from services.asset_schema.derive import (
 from services.asset_schema.schema import CLASS_ATTR, COMPOSITE, composite_parts
 from services.asset_schema import fields as asset_fields
 from services.asset_schema import provenance as asset_provenance
-from services import component_identity
+from services import component_identity, template_display_names
 from services.carrier_catalog import ensure_carrier
 from services.component_names import require_valid_name
 from services.pypsa_service import PyPSAService
@@ -141,7 +141,7 @@ def _get_component(component_class: str, attr: str) -> list[dict]:
     return _serialize_component(n, attr, transient)
 
 
-def _meta_payload(n: Any, loaded_project: str | None) -> dict:
+def _meta_payload(n: Any, loaded_project: str | None, project_dir: Any = None) -> dict:
     """
     The /network/meta response shape for a given network + its on-disk
     binding. `name` is the (mutable) display title; `loaded_project` is the
@@ -152,12 +152,17 @@ def _meta_payload(n: Any, loaded_project: str | None) -> dict:
     Shared by the active-network shim (`GET /api/network/meta`) and the B6
     path-scoped `GET /api/projects/{id}/network/meta`, so the two payloads
     can't drift.
+
+    `display_names` is `{class: {id: name}}` from the template the project
+    at `project_dir` was made from (`services.template_display_names`);
+    `{}` when there is none. Each caller passes its own context's directory.
     """
     return {
         "name": n.name,
         "loaded_project": loaded_project,
         "snapshot_count": len(n.snapshots),
         "bus_count": len(n.buses),
+        "display_names": template_display_names.names_for_network(n, project_dir),
     }
 # PyPSA's multi-port Link columns: `bus2`, `bus3`, … and the matching
 # `efficiency2`, `efficiency3`, …. Mirrors `pypsa.constants.RE_PORTS_GE_2`
