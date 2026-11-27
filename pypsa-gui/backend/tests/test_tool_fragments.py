@@ -559,7 +559,8 @@ def test_adequacy_studies_constants_equal_their_source():
     assert A._MC_MAX_DRAWS == MAX_DRAWS
 
 
-def test_adequacy_studies_write_sets_are_masters():
+def test_the_campaign_writes_stay_lock_gated_and_non_network():
+    """Membership only: the registry digest proves both merged sets equal master."""
     from services import chat_tools
 
     assert {
