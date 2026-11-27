@@ -480,7 +480,9 @@ def test_an_excel_import_of_a_template_is_completed(baseline, harness):
 
 def test_a_matpower_import_is_completed(baseline, harness):
     result = _stream(
-        harness, "import_matpower", {"bytes_b64": _b64(_CASE3.encode()), "filename": "c.m"}
+        harness,
+        "import_matpower",
+        {"bytes_b64": _b64(_CASE3.encode()), "filename": "c.m"},
     )
     out = result["_outcome"]
     assert (out["outcome"], out["reason"]) == ("completed", None), out
@@ -497,8 +499,12 @@ def test_an_uploaded_excel_or_matpower_import_is_completed(baseline, harness, fm
     )
     project, directory, _owner = _project()
     meta = upload_service.add_upload(
-        project.name, data, name, "application/octet-stream",
-        kind="user_upload", project_dir=directory,
+        project.name,
+        data,
+        name,
+        "application/octet-stream",
+        kind="user_upload",
+        project_dir=directory,
     )
     out = _stream(
         harness, "import_uploaded_network", {"file_id": meta.file_id, "format": fmt}
@@ -541,8 +547,59 @@ def test_a_matpower_import_that_lands_another_value_reads_uncertain(
 
 
 def test_an_excel_export_of_a_template_is_completed(template_in_project, harness):
+    # The template's asset provenance (n.meta) is not in a workbook: not a failure.
+    from services import excel_workbook
+
+    assert template_in_project.network.meta.get("asset_params")
+    result = _stream(harness, "export_excel", {})
+    assert result["_outcome"] == {"version": 1, "outcome": "completed", "reason": None}
+    from services import upload_service
+    from services.assistant_tools import _project
+
+    project, directory, _owner = _project()
+    data = upload_service.get_upload_bytes(
+        project.name, result["file_id"], project_dir=directory
+    )
+    assert not excel_workbook.prepare(
+        data, "x.xlsx", new_project=False
+    ).network.meta.get("asset_params")
+
+
+def test_an_excel_export_off_by_more_than_its_tolerance_reads_uncertain(
+    template_in_project, harness, monkeypatch
+):
+    # A value moved by 1e-9 relative (beyond CSV_RTOL, within any display rounding).
+    import routers.io as io_router
+
+    assert outcomes.CSV_RTOL == 1e-12
+    changed = template_in_project.network.copy()
+    changed.generators.loc["genset_1", "p_nom"] *= 1 + 1e-9
+    monkeypatch.setattr(io_router, "_export_excel_bytes", lambda: _excel_bytes(changed))
     out = _stream(harness, "export_excel", {})["_outcome"]
-    assert out == {"version": 1, "outcome": "completed", "reason": None}
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+@pytest.mark.parametrize("tool", ["import_excel", "import_matpower"])
+def test_the_import_note_calls_the_routes_own_reader(baseline, monkeypatch, tool):
+    # GK B (73): the route's reader, not a copy of it.
+    import routers.io as io_router
+    from services import excel_workbook
+
+    module, name = (
+        (excel_workbook, "prepare")
+        if tool == "import_excel"
+        else (io_router, "_parse_matpower")
+    )
+    real, calls = getattr(module, name), []
+
+    def spy(*a, **kw):
+        calls.append(a)
+        return real(*a, **kw)
+
+    monkeypatch.setattr(module, name, spy)
+    data = _excel_bytes() if tool == "import_excel" else _CASE3.encode()
+    note = outcomes.note_import(tool, {"bytes_b64": _b64(data)})
+    assert not note.get("error") and len(calls) == 1
 
 
 def test_an_excel_export_unlike_the_network_reads_uncertain(
@@ -570,10 +627,32 @@ def ieee14_in_project(baseline):
 def test_a_matpower_export_is_completed_and_names_what_it_cannot_carry(
     ieee14_in_project, harness
 ):
+    # GK B (73) Q1: completed, and the classes the file lacks are in the text
+    # the model reads, so an answer cannot claim a full export.
+    live = ieee14_in_project.network
+    live.add(
+        "Link", "hvdc", bus0=live.buses.index[0], bus1=live.buses.index[1], p_nom=10
+    )
+    live.add("Store", "tank", bus=live.buses.index[2], e_nom=5)
     out = _stream(harness, "export_matpower", {})["_outcome"]
     assert (out["outcome"], out["reason"]) == ("completed", None), out
-    # MATPOWER has no carriers, standard types or time series.
-    assert out["counts"]["not_carried"] == ["Carrier", "series"]
+    assert out["counts"]["not_carried"] == ["Carrier", "Link", "Store", "series"]
+    for missing in ("Link", "Store", "series"):
+        assert missing in out["notice"]
+
+
+def test_the_matpower_tolerance_is_half_a_4th_decimal():
+    assert outcomes.MATPOWER_ABS == 5e-5 + 1e-12
+
+
+def test_the_matpower_check_is_written_apart_from_the_exporter():
+    # GK B (73): the projection never calls the exporter's code.
+    import inspect
+
+    src = inspect.getsource(outcomes._matpower_holds) + inspect.getsource(
+        outcomes._matpower_not_carried
+    )
+    assert "routers" not in src and "_export_matpower" not in src
 
 
 def test_a_matpower_export_of_a_hub_names_its_links_and_storage(
@@ -652,16 +731,93 @@ def test_an_export_equal_to_a_user_upload_is_completed(
     from services.assistant_tools import _project
 
     monkeypatch.setattr(
-        io_router, "_export_netcdf_bytes", functools.cache(io_router._export_netcdf_bytes)
+        io_router,
+        "_export_netcdf_bytes",
+        functools.cache(io_router._export_netcdf_bytes),
     )
     project, directory, _owner = _project()
     mine = upload_service.add_upload(
-        project.name, io_router._export_netcdf_bytes(), "mine.nc",
-        "application/x-netcdf", kind="user_upload", project_dir=directory,
+        project.name,
+        io_router._export_netcdf_bytes(),
+        "mine.nc",
+        "application/x-netcdf",
+        kind="user_upload",
+        project_dir=directory,
     )
     result = _stream(harness, "export_network_nc", {})
     assert result["file_id"] == mine.file_id and result["kind"] == "user_upload"
     assert result["_outcome"]["outcome"] == "completed", result["_outcome"]
+
+
+def test_an_export_whose_result_names_another_file_reads_uncertain(
+    template_in_project, harness, monkeypatch
+):
+    # GK B (73) Q2: the watched file must be the one the call's result names.
+    real = chat_tools._save_agent_export
+
+    def renamed(data, filename, mime, **kw):
+        return {**real(data, filename, mime, **kw), "file_id": "someone-else"}
+
+    monkeypatch.setattr(chat_tools, "_save_agent_export", renamed)
+    out = _stream(harness, "export_network_nc", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "export_file_count")
+
+
+@pytest.mark.parametrize("bad", [None, {}, {"file_id": None}])
+def test_an_export_read_without_its_result_names_no_file(template_in_project, bad):
+    note = outcomes.note_export("export_network_nc")
+    chat_tools.export_network_nc()
+    out = outcomes.classify_export(note, outcomes.read_export(note, bad))
+    assert (out["outcome"], out["reason"]) == ("uncertain", "export_file_count")
+
+
+def test_a_csv_export_missing_an_eh_column_reads_uncertain(
+    template_in_project, harness, monkeypatch
+):
+    # P7 mutant: the export leaves out the links' eh_role column.
+    import io
+    import zipfile
+
+    import routers.io as io_router
+
+    assert "eh_role" in template_in_project.network.links.columns
+    real = io_router._export_csv_zip_bytes
+
+    def dropped():
+        import pandas as pd
+
+        source = zipfile.ZipFile(io.BytesIO(real()))
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, "w") as target:
+            for item in source.infolist():
+                data = source.read(item)
+                if item.filename.endswith("links.csv"):
+                    frame = pd.read_csv(io.BytesIO(data), index_col=0, dtype=str)
+                    data = frame.drop(columns="eh_role").to_csv().encode()
+                target.writestr(item, data)
+        return out.getvalue()
+
+    monkeypatch.setattr(io_router, "_export_csv_zip_bytes", dropped)
+    out = _stream(harness, "export_csv_bundle", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+def test_the_csv_import_read_back_still_normalises(baseline, monkeypatch):
+    # P7: only the export read-back skips the route's EH step; an import keeps it.
+    from routers.io import _export_csv_zip_bytes
+    from services.adequacy import eh_columns
+
+    chat_tools.import_network_nc(_b64(_template_bytes()), "t.nc")
+    bundle = _export_csv_zip_bytes()
+    real, calls = eh_columns.normalise_eh_columns, []
+    monkeypatch.setattr(
+        eh_columns, "normalise_eh_columns", lambda n: (calls.append(n), real(n))[1]
+    )
+    note = outcomes.note_import("import_csv_bundle", {"bytes_b64": _b64(bundle)})
+    assert not note.get("error") and calls
+    calls.clear()
+    outcomes._read_file("csv_bundle", bundle, export=True)
+    assert calls == []
 
 
 def test_a_csv_export_cell_the_reader_would_coerce_reads_uncertain(
@@ -689,7 +845,9 @@ def test_a_csv_export_cell_the_reader_would_coerce_reads_uncertain(
                     col = head.split(",").index("rated_mva")
                     cells = rows[0].split(",")
                     cells[col] = "garbled"
-                    data = "\n".join([head, ",".join(cells), *rows[1:]]).encode() + b"\n"
+                    data = (
+                        "\n".join([head, ",".join(cells), *rows[1:]]).encode() + b"\n"
+                    )
                 target.writestr(item, data)
         return out.getvalue()
 

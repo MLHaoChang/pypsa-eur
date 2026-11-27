@@ -4811,7 +4811,7 @@ def _dispatch_real_tool_call(
         # Issue 04 (A3.1/A3.3/A3.4): the outcome from an independent read, never
         # the handler's own fields. First, so a truncated preview keeps it.
         result_for_model = {
-            "_outcome": outcomes.project_write(write_note)
+            "_outcome": outcomes.project_write(write_note, result_for_model)
             if tool_name in outcomes.WRITE_TOOLS
             else outcomes.project(tool_name, args or {}, tool_use_id),
             **{k: v for k, v in (result_for_model or {}).items() if k != "_outcome"},

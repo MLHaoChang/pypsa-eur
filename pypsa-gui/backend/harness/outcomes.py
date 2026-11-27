@@ -858,14 +858,16 @@ def project_raised(note: dict | None) -> dict | None:
     return None
 
 
-def project_write(note: dict | None) -> dict:
-    """The `_outcome` block for one write tool result (ordinary turns)."""
+def project_write(note: dict | None, result=None) -> dict:
+    """The `_outcome` block for one write tool result (ordinary turns).
+
+    `result` is the handler's result: an export reads only the file it names."""
     if note and note.get("tool") == "undo_last":
         return {"version": VERSION, **classify_undo(note, read_undo(note))}
     if note and note.get("tool") in IMPORT_TOOLS:
         return {"version": VERSION, **classify_import(note, read_import(note))}
     if note and note.get("tool") in EXPORT_TOOLS:
-        return {"version": VERSION, **classify_export(note, read_export(note))}
+        return {"version": VERSION, **classify_export(note, read_export(note, result))}
     return {"version": VERSION, **classify_write(note, read_write(note))}
 
 
@@ -1188,6 +1190,9 @@ def _read_file(fmt: str, data: bytes, *, filename=None, export: bool = False):
 MATPOWER_CLASSES = frozenset({"Bus", "Load", "Generator", "Line"})
 # Rows in every network, never content a file carries.
 _STANDARD_TYPES = frozenset({"LineType", "TransformerType"})
+# A field the file rounds to 4 decimals is within half a unit of the 4th
+# decimal, plus float error (GK B (73)); the test pins it.
+MATPOWER_ABS = 5e-5 + 1e-12
 
 
 def _matpower_holds(live, parsed) -> bool | _Uncomparable:
@@ -1196,28 +1201,35 @@ def _matpower_holds(live, parsed) -> bool | _Uncomparable:
     def same(a, b) -> bool:
         return math.isclose(float(a), float(b), rel_tol=CSV_RTOL, abs_tol=1e-12)
 
+    def rounded(file_value, live_value) -> bool:
+        return abs(float(file_value) - float(live_value)) <= MATPOWER_ABS
+
     try:
         buses = list(live.buses.index)
         name = {bus: f"bus_{i + 1}" for i, bus in enumerate(buses)}
         if list(parsed.buses.index) != [name[b] for b in buses]:
             return False
         for bus in buses:
-            if not same(parsed.buses.at[name[bus], "v_nom"], live.buses.at[bus, "v_nom"]):
+            if not same(
+                parsed.buses.at[name[bus], "v_nom"], live.buses.at[bus, "v_nom"]
+            ):
                 return False
         # Demand sits on the bus: one load per bus with any, its static sums.
         want = {}
         for i, bus in enumerate(buses):
             rows = live.loads[live.loads.bus == bus]
-            pd_, qd = round(float(rows.p_set.sum()), 4), round(float(rows.q_set.sum()), 4)
-            if pd_ or qd:
+            pd_, qd = float(rows.p_set.sum()), float(rows.q_set.sum())
+            if round(pd_, 4) or round(qd, 4):
                 want[f"load_{i + 1}"] = (name[bus], pd_, qd)
         got = {
             load: (row.bus, float(row.p_set), float(row.q_set))
             for load, row in parsed.loads.iterrows()
         }
         if set(got) != set(want) or any(
-            got[k][0] != want[k][0] or not same(got[k][1], want[k][1])
-            or not same(got[k][2], want[k][2]) for k in want
+            got[k][0] != want[k][0]
+            or not rounded(got[k][1], want[k][1])
+            or not rounded(got[k][2], want[k][2])
+            for k in want
         ):
             return False
         gens = list(live.generators.index)
@@ -1225,12 +1237,11 @@ def _matpower_holds(live, parsed) -> bool | _Uncomparable:
             return False
         for i, gen in enumerate(gens):
             a, b = live.generators.loc[gen], parsed.generators.loc[f"gen_{i + 1}"]
-            p_nom = round(float(a.p_nom), 4)
             if (
                 b.bus != name.get(a.bus, "bus_1")
-                or not same(b.p_nom, p_nom)
-                or not same(b.p_min_pu * b.p_nom, round(float(a.p_min_pu) * float(a.p_nom), 4))
-                or not same(b.marginal_cost, round(float(a.marginal_cost), 4))
+                or not rounded(b.p_nom, a.p_nom)
+                or not rounded(b.p_min_pu * b.p_nom, float(a.p_min_pu) * float(a.p_nom))
+                or not rounded(b.marginal_cost, a.marginal_cost)
             ):
                 return False
         lines = list(live.lines.index)
@@ -1239,9 +1250,10 @@ def _matpower_holds(live, parsed) -> bool | _Uncomparable:
         for i, line in enumerate(lines):
             a, b = live.lines.loc[line], parsed.lines.loc[f"line_{i + 1}"]
             if (
-                b.bus0 != name.get(a.bus0) or b.bus1 != name.get(a.bus1)
+                b.bus0 != name.get(a.bus0)
+                or b.bus1 != name.get(a.bus1)
                 or not all(same(b[k], a[k]) for k in ("r", "x", "b"))
-                or not same(b.s_nom, round(float(a.s_nom), 4))
+                or not rounded(b.s_nom, a.s_nom)
             ):
                 return False
     except (TypeError, ValueError, KeyError):
@@ -1253,7 +1265,10 @@ def _matpower_not_carried(live) -> list[str]:
     """The classes with rows MATPOWER cannot carry, and "series" for time series."""
     out = sorted(
         cls
-        for cls in set(live.all_components) - DERIVED_CLASSES - MATPOWER_CLASSES - _STANDARD_TYPES
+        for cls in set(live.all_components)
+        - DERIVED_CLASSES
+        - MATPOWER_CLASSES
+        - _STANDARD_TYPES
         if not live.static(cls).empty
     )
     series = any(
@@ -1633,8 +1648,11 @@ def note_export(tool: str) -> dict:
     return note
 
 
-def read_export(note: dict | None) -> dict:
-    """The one new export file read back, and the live network it should hold."""
+def read_export(note: dict | None, result=None) -> dict:
+    """The one new export file read back, and the live network it should hold.
+
+    The file is the one upload this call added (any kind: row AA04-P6), and
+    the call's own result must name it (GK B (73) Q2)."""
     if not note or note.get("error"):
         return {"error": "no_note"}
     import hashlib
@@ -1651,6 +1669,8 @@ def read_export(note: dict | None) -> dict:
             return {
                 "new_files": len(new) if len(note["own"]) == 1 else len(note["own"])
             }
+        if not isinstance(result, dict) or result.get("file_id") != new[0]:
+            return {"new_files": 0}  # the result names no file, or another one
         name, directory = note["store"]
         meta = upload_service.get_upload_meta(name, new[0], project_dir=directory)
         data = upload_service.get_upload_bytes(name, new[0], project_dir=directory)
@@ -1727,5 +1747,18 @@ def classify_export(note: dict | None, read: dict | None) -> dict:
         }
     if read.get("not_carried") is not None:
         # MATPOWER: the carried fields match; name what the format cannot hold.
-        return {**out("completed"), "counts": {"not_carried": read["not_carried"]}}
+        # GK B (73) Q1: the missing classes reach the text the model reads.
+        missing = read["not_carried"]
+        return {
+            **out("completed"),
+            "counts": {"not_carried": missing},
+            **(
+                {
+                    "notice": "MATPOWER holds only buses, loads, generators and "
+                    "lines; not in the file: " + ", ".join(missing) + "."
+                }
+                if missing
+                else {}
+            ),
+        }
     return out("completed")
