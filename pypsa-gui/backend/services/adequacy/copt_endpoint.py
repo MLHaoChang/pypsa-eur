@@ -169,6 +169,7 @@ def build_fmea_modes_payload(
     get_lock: Callable[[], Any],
     study_fmea_top: dict | None = None,
     study_finished_at: float | None = None,
+    study_edited_since: bool | None = None,
 ) -> dict | None:
     """Return the ``/fmea_modes`` JSON body, or ``None`` for HTTP 204.
 
@@ -178,11 +179,18 @@ def build_fmea_modes_payload(
     panel read them (``evidence.fmea_top_modes``), at the study's prices, so
     the worksheet, the panel and the report list the same risks. A sweep that
     finished after the study, or no study rows, keeps the live COPT + sweep
-    path. ``source`` says which (``"eh_study"`` or ``"live"``).
+    path. ``source`` says which (``"eh_study"`` or ``"live"``). A sweep that
+    finished at the very second the study did does not take over: it must
+    finish strictly after. In study mode the live COPT is never computed, so
+    its refusals (422) cannot block the study's rows. ``study_edited_since``
+    (``study_state.edited_since``: True, False or None for cannot tell) and
+    the study's finish time travel with the rows so the worksheet can date
+    them and mark them out of date.
 
     Raises ``ValueError`` from the nested COPT walk (router maps to 422).
     """
-    study = _study_fmea_modes(study_fmea_top, study_finished_at, sweep_record)
+    study = _study_fmea_modes(study_fmea_top, study_finished_at, sweep_record,
+                              study_edited_since)
     if study is not None:
         return study
     per_mode: list = []
@@ -245,6 +253,7 @@ def _study_fmea_modes(
     payload: dict | None,
     finished_at: float | None,
     sweep: dict | None,
+    edited_since: bool | None = None,
 ) -> dict | None:
     """The ``/fmea_modes`` body from the study's ``fmea_top`` rows, or None
     when the live path answers (no rows, or a sweep finished after it)."""
@@ -266,14 +275,18 @@ def _study_fmea_modes(
             "sweep_status": None,
             "sweep_base_restored": None,
             "sweep_base_restore_status": None,
-            "sweep_error": None}
+            "sweep_error": None,
+            "study_finished_at": finished_at,
+            "edited_since_study": edited_since}
 
 
 def study_fmea_top(state: dict) -> dict:
     """``build_fmea_modes_payload``'s study arguments from a solver state: the
-    last EH study's ``fmea_top`` payload and finish time. Empty while a study
+    last EH study's ``fmea_top`` payload, finish time and whether the network
+    was edited since (``study_state.edited_since``). Empty while a study
     runs or when no stored report has the section (template-e2e 24)."""
     from services.adequacy.eh_report import load_eh_report
+    from services.study_state import edited_since
 
     record = state.get("eh_study") or {}
     if record.get("status") == "running":
@@ -283,4 +296,5 @@ def study_fmea_top(state: dict) -> dict:
     if section is None or not isinstance(section.payload, dict):
         return {}
     return {"study_fmea_top": section.payload,
-            "study_finished_at": record.get("finished_at")}
+            "study_finished_at": record.get("finished_at"),
+            "study_edited_since": edited_since(record)}

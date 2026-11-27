@@ -40,7 +40,7 @@ PAYLOAD = {
     "top_n": 10,
     "class_a": {"status": "ok", "rows": [
         _mode("gen:genset_new:forced_outage", "genset_new", "A", "Generator",
-              12_529.0, engine="copt", fidelity="analytic_convolution")]},
+              900_000.0, engine="copt", fidelity="analytic_convolution")]},
     "voll_eur_per_mwh": 5000.0,
 }
 
@@ -54,17 +54,21 @@ def _empty_network():
     return n
 
 
+def _store(monkeypatch, payload, status="ok"):
+    sections = empty_section_map(default="skipped")
+    sections["fmea_top"] = SectionState(status=status, payload=payload)
+    store: dict = {}
+    store_eh_report(store, ReferenceDesignReport(
+        archetype="strong_grid", pack_hash="p", assumptions_hash="a",
+        sections=sections))
+    for key, value in store.items():
+        monkeypatch.setitem(R._state, key, value)
+
+
 @pytest.fixture
 def study(monkeypatch):
     PyPSAService.set_network(_empty_network())
-    sections = empty_section_map(default="skipped")
-    sections["fmea_top"] = SectionState(status="ok", payload=PAYLOAD)
-    report = ReferenceDesignReport(archetype="strong_grid", pack_hash="p",
-                                   assumptions_hash="a", sections=sections)
-    store: dict = {}
-    store_eh_report(store, report)
-    for key, value in store.items():
-        monkeypatch.setitem(R._state, key, value)
+    _store(monkeypatch, PAYLOAD)
     monkeypatch.setitem(R._state, "eh_study",
                         {"status": "done", "finished_at": 1000.0})
     monkeypatch.setitem(R._state, "fmea_sweep", None)
@@ -85,12 +89,72 @@ def test_the_worksheet_serves_the_studys_rows_as_the_report_reads_them(study):
     assert out["per_mode"][0]["name"] == "critical_feeder"
 
 
+def test_the_study_order_is_the_readers_not_a_criticality_sort(study):
+    """GK C2: class B then class A, each ranked within its class, even when a
+    class-A row costs more than every class-B row."""
+    out = R.get_fmea_modes()
+    assert [r["mode_id"] for r in out["per_mode"]] == [
+        "link:critical_feeder:forced_outage", "link:genset_1:forced_outage",
+        "gen:genset_new:forced_outage"]
+    assert [r["rank"] for r in out["per_mode"]] == [1, 2, 1]
+
+
+def test_the_rows_carry_the_studys_finish_time_and_edit_state(study, monkeypatch):
+    """GK C1 / UX 3: the worksheet dates the rows and marks them out of date."""
+    import services.study_state as study_state
+
+    monkeypatch.setattr(study_state, "edited_since", lambda record, **_: True)
+    out = R.get_fmea_modes()
+    assert out["study_finished_at"] == 1000.0
+    assert out["edited_since_study"] is True
+    monkeypatch.setattr(study_state, "edited_since", lambda record, **_: None)
+    assert R.get_fmea_modes()["edited_since_study"] is None
+
+
+def test_the_live_copt_is_not_computed_for_study_rows(study, monkeypatch):
+    """GK C5: a COPT refusal cannot 422 a study-sourced read."""
+    import services.adequacy.copt_endpoint as ce
+
+    def boom(*_a, **_k):
+        raise ValueError("COPT refused")
+
+    monkeypatch.setattr(ce, "build_copt_payload", boom)
+    out = R.get_fmea_modes()
+    assert out["source"] == "eh_study"
+
+
+def test_unpriced_study_rows_stay_unpriced_and_say_so(study, monkeypatch):
+    """GK C4 (backend side): rows the study could not price stay None, and
+    ``source`` tells the worksheet a new VoLL needs the study run again."""
+    payload = {**PAYLOAD, "rows": [{**r, "severity_eur": None,
+                                    "criticality_eur_per_year": None}
+                                   for r in PAYLOAD["rows"]]}
+    payload.pop("voll_eur_per_mwh")
+    _store(monkeypatch, payload)
+    out = R.get_fmea_modes()
+    assert out["source"] == "eh_study"
+    assert out["voll_eur_per_mwh"] is None
+    assert out["per_mode"][0]["criticality_eur_per_year"] is None
+
+
+def test_a_legacy_top_payload_keeps_its_legacy_mark(study, monkeypatch):
+    """GK C3: a report stored before the per-class split is read as written,
+    its rows marked per-horizon legacy by the report's reader."""
+    legacy = {"top": [_mode("gen:g:forced_outage", "g", "A", "Generator", 10.0,
+                            rank=1)]}
+    _store(monkeypatch, legacy)
+    out = R.get_fmea_modes()
+    assert out["source"] == "eh_study"
+    assert _key(out["per_mode"]) == _key(fmea_top_modes(legacy))
+    assert out["per_mode"][0]["criticality_basis"] == "per_horizon_legacy"
+
+
 def test_the_studys_rows_keep_their_prices_without_a_live_voll(study, monkeypatch):
     cfg = PyPSAService.get_solver_state()["solver_config"]
     monkeypatch.setattr(cfg, "voll", 0.0)
     out = R.get_fmea_modes()
     assert [r["criticality_eur_per_year"] for r in out["per_mode"]] \
-        == [473_000.0, 0.0, 12_529.0]
+        == [473_000.0, 0.0, 900_000.0]
 
 
 def test_a_sweep_finished_after_the_study_takes_over(study, monkeypatch):
@@ -101,6 +165,32 @@ def test_a_sweep_finished_after_the_study_takes_over(study, monkeypatch):
     out = R.get_fmea_modes()
     assert out["source"] == "live"
     assert [r["mode_id"] for r in out["per_mode"]] == ["link:x:forced_outage"]
+
+
+def test_a_sweep_finished_at_the_same_second_leaves_the_study(study, monkeypatch):
+    """GK C3: the sweep must finish strictly after the study to take over."""
+    sweep_mode = _mode("link:x:forced_outage", "x", "B", "Link", 7.0)
+    monkeypatch.setitem(R._state, "fmea_sweep", {
+        "status": "done", "finished_at": 1000.0,
+        "rows": [{"failure_mode": sweep_mode, "delta_eue_mwh": 0.1}]})
+    assert R.get_fmea_modes()["source"] == "eh_study"
+
+
+def test_an_aborted_sweep_after_the_study_takes_over(study, monkeypatch):
+    """GK C3: aborted counts as finished, as on the live path."""
+    sweep_mode = _mode("link:x:forced_outage", "x", "B", "Link", 7.0)
+    monkeypatch.setitem(R._state, "fmea_sweep", {
+        "status": "aborted", "finished_at": 2000.0,
+        "rows": [{"failure_mode": sweep_mode, "delta_eue_mwh": 0.1}]})
+    out = R.get_fmea_modes()
+    assert out["source"] == "live"
+    assert [r["mode_id"] for r in out["per_mode"]] == ["link:x:forced_outage"]
+
+
+def test_a_running_sweep_leaves_the_study(study, monkeypatch):
+    monkeypatch.setitem(R._state, "fmea_sweep", {
+        "status": "running", "finished_at": None, "rows": []})
+    assert R.get_fmea_modes()["source"] == "eh_study"
 
 
 def test_a_sweep_older_than_the_study_does_not(study, monkeypatch):
@@ -120,14 +210,8 @@ def test_a_running_study_does_not_serve_the_previous_reports_rows(study, monkeyp
 
 
 def test_a_study_without_fmea_rows_leaves_the_live_path(study, monkeypatch):
-    sections = empty_section_map(default="skipped")
-    sections["fmea_top"] = SectionState(status="not_established", payload={
-        "rows": [], "class_a": {"status": "not_established", "rows": []}})
-    store: dict = {}
-    store_eh_report(store, ReferenceDesignReport(
-        archetype="strong_grid", pack_hash="p", assumptions_hash="a",
-        sections=sections))
-    for key, value in store.items():
-        monkeypatch.setitem(R._state, key, value)
+    _store(monkeypatch, {"rows": [], "class_a": {"status": "not_established",
+                                                 "rows": []}},
+           status="not_established")
     out = R.get_fmea_modes()
     assert getattr(out, "status_code", 200) == 204
