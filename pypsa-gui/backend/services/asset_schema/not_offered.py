@@ -24,12 +24,18 @@ _ACTIVE = "unsupported: an engine switch that drops the asset; the tool keeps or
 _TYPE_TAG = "unsupported: a free-text engine tag no study reads; the asset type comes from the catalogue."
 _QUADRATIC = "unsupported: quadratic running cost is not offered; the solve is linear."
 _UC_INIT = "unsupported: the starting state of unit commitment; every solve starts from the engine default."
-_UC_RAMP = "unsupported: start-up and shut-down ramp limits; the ramp limits are offered."
+_UC_RAMP = (
+    "unsupported: start-up and shut-down ramp limits; the ramp limits are offered."
+)
 _P_SET = "time series: the fixed power comes from the asset's profile."
 _Q_SET = "time series: reactive power set points come from a profile; no study writes one value."
-_PERIOD = "unsupported: per-period storage cycling for multi-period expansion is not offered."
+_PERIOD = (
+    "unsupported: per-period storage cycling for multi-period expansion is not offered."
+)
 _V_ANG = "unsupported: voltage angle limits for the linear power flow are not offered."
-_S_MAX_PU = "pending: the usable share of the rating (thermal margin); the rating is offered."
+_S_MAX_PU = (
+    "pending: the usable share of the rating (thermal margin); the rating is offered."
+)
 _NUM_PARALLEL = "pending: parallel circuits; today one branch row is one circuit."
 _TERRAIN = "unsupported: the terrain cost factor is folded into the per-km cost."
 

@@ -257,6 +257,10 @@ UNITLESS = frozenset(
         ("Link", "efficiency4"),
         ("Load", "sign"),
         ("Transformer", "tap_ratio"),
+        # Settings rows (services/asset_schema/settings.py).
+        ("connection", "poc_xr"),
+        ("load_growth", "load_growth_base_year"),
+        ("load_profile", "seed"),
     }
 )
 

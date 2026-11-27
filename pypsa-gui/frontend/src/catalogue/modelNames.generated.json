@@ -3,6 +3,10 @@
     "carrier": "Carrier",
     "control": "Control",
     "country": "Country",
+    "eh_critical": "Critical bus",
+    "eh_ibr_mva": "Inverter-based capacity",
+    "eh_poc": "Grid point of connection",
+    "eh_sk_mva": "Short-circuit level at the connection",
     "lost_production_value": "Lost-production value",
     "mwh_per_t": "Energy per tonne",
     "name": "Name",
@@ -118,6 +122,7 @@
     "efficiency3": "Port 3 efficiency",
     "efficiency4": "Port 4 efficiency",
     "eh_process": "Process unit",
+    "eh_role": "Energy Hub role",
     "flicker_changes_per_min": "Changes per minute",
     "flicker_step_mva": "Largest power step",
     "fom_cost": "Fixed O&M",
@@ -247,5 +252,52 @@
     "v_nom_0": "Declared HV voltage",
     "v_nom_1": "Declared LV voltage",
     "x": "Reactance"
+  },
+  "connection": {
+    "backup_autonomy_h": "Backup autonomy",
+    "poc_xr": "Grid X/R ratio at the connection"
+  },
+  "demand_response": {
+    "dsr_price_eur_per_mwh": "Demand-response price",
+    "dsr_share_of_load": "DSR volume"
+  },
+  "grid_code": {
+    "grid_code_document": "Grid-code document",
+    "grid_code_profile": "Grid code"
+  },
+  "grid_study": {
+    "control": "Control mode",
+    "scenarios": "Island scenarios"
+  },
+  "levers": {
+    "import_cap": "Import capacity",
+    "import_energy": "Import energy",
+    "redundancy": "Redundancy",
+    "sizing": "Size the assets",
+    "storage_duration": "Battery duration"
+  },
+  "load_growth": {
+    "load_growth_base_year": "Growth from year",
+    "load_growth_pct_per_year": "Load growth",
+    "load_scalers": "Load multiplier",
+    "load_scalers_by_carrier": "Load multiplier per energy type"
+  },
+  "load_profile": {
+    "base_share": "Always-on share",
+    "holidays": "Holiday dates",
+    "noise": "Random variation",
+    "saturday_operation": "Runs on Saturdays",
+    "seasonal_amplitude": "Seasonal swing",
+    "seed": "Random seed",
+    "shifts": "Shifts per day",
+    "shutdown_weeks": "Shutdown weeks",
+    "timezone": "Time zone"
+  },
+  "reliability": {
+    "target_lole_h": "Allowed shortfall"
+  },
+  "site": {
+    "site_anchor": "Site coordinates",
+    "timezone": "Site time zone"
   }
 }
