@@ -95,7 +95,11 @@ def test_an_upload_judges_the_pack_and_the_stored_judgment_is_served_as_written(
     assert sum(got["status_counts"].values()) == len(_cases(run, bundle))
     for key in ("data_hash", "contract_version", "ratings"):
         assert key in got["header"], key
-    assert got["header"]["ratings"]["mw_source"], "the rating's source is carried"
+    import dataclasses
+
+    from gridspine.drivers.readback import run_ratings
+
+    assert got["header"]["ratings"] == dataclasses.asdict(run_ratings(run)), "the run's ratings and sources"
     judged = {c["case_id"]: c for c in got["cases"]}
     assert judged[case.case_id]["detail"] != "no result file"
     assert cj.get_judgment(project) == got
