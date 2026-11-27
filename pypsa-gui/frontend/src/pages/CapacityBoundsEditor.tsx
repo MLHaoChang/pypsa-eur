@@ -186,7 +186,7 @@ export default function CapacityBoundsEditor() {
 
   return (
     <fieldset disabled={readOnly} data-testid="bounds-fieldset"
-      className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm min-w-0 border-0 m-0">
+      className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm min-w-0 border-0 m-0 disabled:opacity-60">
       <BackupInputs />
       <div className="text-[11.5px] text-muted -mt-2 leading-relaxed">
         Every extendable asset is listed here. Each can use a <span className="font-medium">single</span>{' '}
