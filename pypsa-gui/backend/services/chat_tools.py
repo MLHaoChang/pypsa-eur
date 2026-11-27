@@ -10057,7 +10057,6 @@ DISPATCHERS: dict[str, Any] = {
     "gridspine_compute_capacity": gridspine_compute_capacity,
     "gridspine_get_connection_assessments": gridspine_get_connection_assessments,
     "gridspine_assess_connection": gridspine_assess_connection,
-    # campus electrical (3)
     # Campus electrical core: services/chat_dispatchers/campus_electrical.py
     **_DISPATCH_FRAGMENTS.splice("campus_electrical"),
     # library (4)

@@ -548,7 +548,7 @@ def _proxies():
         if name != "_ct"
         and isinstance(fn, types.FunctionType)
         and fn.__module__ == mod.__name__
-        and "_ct" in fn.__code__.co_names
+        and fn.__code__.co_names == ("_ct", name)
         and hasattr(chat_tools, name)
     ]
 
