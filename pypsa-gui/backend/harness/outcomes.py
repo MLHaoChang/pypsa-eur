@@ -297,14 +297,18 @@ def _static(n, component_class):
     return getattr(n, attr)
 
 
-def _coerce(df, component_class, attr, value):
-    """`value` as the bulk path would write it into `df[attr]`, or UNCOMPARABLE."""
+def _coerce(df, component_class, attr, value, name=None):
+    """`value` as the bulk path would write it into `df[attr]`, or UNCOMPARABLE.
+
+    `name` is the row a cell write lands on: a value it already stores is
+    not refused (01a-3a, R4), as in the bulk loop."""
     from services.network_bulk import _coerce_bulk_value
 
     if attr not in df.columns:
         return UNCOMPARABLE
     try:
-        return _coerce_bulk_value(df, attr, value, component_class)
+        targets = [name] if name is not None and name in df.index else None
+        return _coerce_bulk_value(df, attr, value, component_class, targets)
     except Exception:  # noqa: BLE001 - a refused value is not comparable
         return UNCOMPARABLE
 
@@ -364,7 +368,7 @@ def note_write(tool: str, args: dict) -> dict | None:
             for item in items:
                 item["before_present"] = item["name"] in df.index
                 if item["kind"] == "cell":
-                    item["expected"] = _coerce(df, cls, item["attr"], item["requested"])
+                    item["expected"] = _coerce(df, cls, item["attr"], item["requested"], item["name"])
             revision = dirty_state.revision(ctx)
             state = _live_state(ctx)  # S4b: the whole state before (G5/G6)
             carriers = sorted(str(c) for c in ctx.network.carriers.index)

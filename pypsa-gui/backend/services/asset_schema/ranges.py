@@ -8,7 +8,8 @@ R1–R9 for 01a-3:
   flag, never a refusal, and that includes min ≤ max pairs (R2).
 - NaN is refused on every numeric entry with a numeric engine default; where
   the engine has none, NaN is the stored "not set" and stays writable
-  (``nan_is_unset``, K1d). ±inf is accepted only where the engine's own
+  (``nan_is_unset``, K1d; the list is pinned in the tests). A Link's
+  ``efficiency{k}`` takes NaN only while its ``bus{k}`` is blank. ±inf is accepted only where the engine's own
   default is that infinity (``INF_OK``, C11).
 - A bound is in the stored model unit, so a field on a tonne bus is checked
   in t or t/h (C10). The hard rows are sign and zero bounds, which hold in
@@ -99,7 +100,8 @@ NUMERIC_KINDS = frozenset({"number", "int"})
 def nan_is_unset() -> frozenset[tuple[str, str]]:
     """The numeric entries whose engine default is NaN or none at all, where a
     NaN is the stored "not set" (K1d: a blank discount rate). NaN is accepted
-    there and refused everywhere else."""
+    there and refused everywhere else. The extra-port efficiencies are in the
+    set, but ``problem`` accepts their NaN only on an unconnected port."""
     from services.asset_schema import catalogue
 
     defaults = catalogue._engine_defaults()
@@ -111,14 +113,21 @@ def nan_is_unset() -> frozenset[tuple[str, str]]:
 
 
 def _is_extra_port_efficiency(key: tuple[str, str]) -> bool:
-    """A Link's ``efficiency2``…``k``: NaN is an unused port, since PyPSA reads
-    ``efficiency{k}`` only where ``bus{k}`` is set (R1: these get no bound)."""
+    """A Link's ``efficiency2``…``k``: NaN marks an unused port, since PyPSA
+    reads ``efficiency{k}`` only where ``bus{k}`` is set (R1: these get no
+    bound)."""
     cls, col = key
     return (
         cls == "Link"
         and col.startswith("efficiency")
         and col[len("efficiency") :].isdigit()
     )
+
+
+def _is_set(bus: Any) -> bool:
+    """A port's bus is connected when it names a bus (PyPSA reads
+    ``efficiency{k}`` only then)."""
+    return isinstance(bus, str) and bus.strip() != ""
 
 
 @lru_cache(maxsize=1)
@@ -173,9 +182,15 @@ def _as_number(value: Any) -> float | None:
         return None
 
 
-def problem(component_class: str, key: str, value: Any) -> str | None:
+def problem(
+    component_class: str, key: str, value: Any, row: Mapping[str, Any] | None = None
+) -> str | None:
     """The refusal text for one value, or None when it is in range or not a
-    numeric catalogue entry."""
+    numeric catalogue entry.
+
+    ``row`` is the component as it stands after the write. A NaN on a Link's
+    ``efficiency{k}`` is an unused port only when ``row`` is known and its
+    ``bus{k}`` is blank; with no row (a bulk write) it is refused."""
     plain = _numeric_entries().get((component_class, key))
     if plain is None:
         return None
@@ -183,6 +198,11 @@ def problem(component_class: str, key: str, value: Any) -> str | None:
     if v is None:
         return None
     if math.isnan(v):
+        if _is_extra_port_efficiency((component_class, key)):
+            port = "bus" + key[len("efficiency") :]
+            if row is not None and not _is_set(row.get(port)):
+                return None
+            return f"{plain} must be a number while {port} is connected; got NaN."
         if (component_class, key) in nan_is_unset():
             return None
         return f"{plain} must be a number; got NaN."
@@ -238,11 +258,12 @@ def check(
 
     ``stored`` is the row before the write. A value equal to its stored value
     is no change and is never refused (C8, R4). A create passes no ``stored``."""
+    row = {**(stored or {}), **changes}
     for key in sorted(changes):
         value = changes[key]
         if stored is not None and key in stored and same_value(value, stored[key]):
             continue
-        message = problem(component_class, key, value)
+        message = problem(component_class, key, value, row)
         if message is not None:
             raise refuse(component_class, key, value, message)
 
@@ -251,11 +272,13 @@ def check_column(
     component_class: str, key: str, value: Any, stored_values: Iterable[Any]
 ) -> None:
     """The bulk form: one value written to many rows. It is refused unless
-    every target already stores it."""
+    every target already stores it. No stored value at all (no target, or
+    the column is absent) is a change, so it is refused."""
     message = problem(component_class, key, value)
     if message is None:
         return
-    if all(same_value(value, old) for old in stored_values):
+    stored = list(stored_values)
+    if stored and all(same_value(value, old) for old in stored):
         return
     raise refuse(component_class, key, value, message)
 
@@ -284,8 +307,9 @@ def problems(n) -> list[dict[str, Any]]:
         frame = getattr(n, attr)
         cols = [k for (c, k) in numeric if c == cls and k in frame.columns]
         for key in sorted(cols):
+            port = _is_extra_port_efficiency((cls, key))
             for name, value in frame[key].items():
-                message = problem(cls, key, value)
+                message = problem(cls, key, value, frame.loc[name] if port else None)
                 if message is not None:
                     v = _as_number(value)
                     out.append(

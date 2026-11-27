@@ -114,7 +114,8 @@ def _bool_input_default(component_class: str, col: str) -> bool:
 
 
 def _coerce_bulk_value(df: pd.DataFrame, col: str, value: Any,
-                       component_class: str) -> Any:
+                       component_class: str,
+                       targets: list[str] | None = None) -> Any:
     """
     Coerce one bulk value to `col`'s existing dtype.
 
@@ -136,6 +137,11 @@ def _coerce_bulk_value(df: pd.DataFrame, col: str, value: Any,
     `component_class` is new to the signature and load-bearing: master's
     rules consult per-class metadata (`_finite_input_meta`,
     `_bool_input_default`) the old three-argument form could not see.
+
+    `targets` (01a-3a, R4) are the rows the value is written to. When given,
+    the range check is the bulk loop's: refused unless every target already
+    stores the value. Without it (a create) every out-of-range value is
+    refused.
     """
     coerced: dict[str, Any] = {}
     for _ in (0,):
@@ -250,7 +256,13 @@ def _coerce_bulk_value(df: pd.DataFrame, col: str, value: Any,
                     "the term or the constraint that reads it. Send null to "
                     "restore the default.")
             # Expert catalogue 01a-3: the catalogue's hard range (C8–C11).
-            asset_ranges.check(component_class, {col: coerced[col]})
+            if targets is None:
+                asset_ranges.check(component_class, {col: coerced[col]})
+            else:
+                asset_ranges.check_column(
+                    component_class, col, coerced[col],
+                    [df.at[t, col] for t in targets
+                     if t in df.index and col in df.columns])
             continue
         # Strings / objects pass through. We still cast to str if the user
         # sent a number into a string column so dtype stays clean.

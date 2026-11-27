@@ -117,7 +117,6 @@ def test_a_value_out_of_range_names_the_field_and_the_value(cls, key, value, tex
             "discount_rate",
             float("nan"),
         ),  # NaN is the stored "not set" (K1d)
-        ("Link", "efficiency2", float("nan")),  # an unused extra port
         ("Link", "efficiency2", -1.0),  # R1: negative means an input
         ("Generator", "marginal_cost", -50.0),  # R1: negative costs are valid
         ("Generator", "p_min_pu", -1.0),  # R1: no *_pu domain
@@ -140,6 +139,113 @@ def test_nan_is_accepted_only_where_the_engine_has_no_number():
     }
 
 
+#: K1d: every numeric entry where NaN is the stored "not set" (no engine
+#: number), the Link extra-port efficiencies aside. A new entry here is a
+#: field that takes a blank; add it on purpose.
+NAN_IS_UNSET = {
+    ("Bus", "lost_production_value"),
+    ("Bus", "mwh_per_t"),
+    ("Bus", "pressure_bar"),
+    ("Bus", "product_value"),
+    ("Bus", "temperature_c"),
+    ("Generator", "curtailment_cost"),
+    ("Generator", "dc_ac_ratio"),
+    ("Generator", "discount_rate"),
+    ("Generator", "fuel_curve_no_load"),
+    ("Generator", "fuel_curve_slope"),
+    ("Generator", "fuel_price"),
+    ("Generator", "lifetime_run_hours"),
+    ("Generator", "mttr_hours"),
+    ("Generator", "om_cost_per_run_hour"),
+    ("Generator", "outage_rate_value"),
+    ("Generator", "overnight_cost"),
+    ("Generator", "ramp_limit_down"),
+    ("Generator", "ramp_limit_up"),
+    ("Generator", "rated_mva"),
+    ("Generator", "rx_max"),
+    ("Generator", "rx_min"),
+    ("Generator", "sk_max_mva"),
+    ("Generator", "sk_min_mva"),
+    ("GlobalConstraint", "investment_period"),
+    ("Line", "discount_rate"),
+    ("Line", "inv_per_km_fom_share"),
+    ("Line", "inv_per_km_overnight"),
+    ("Line", "mttr_hours"),
+    ("Line", "outage_rate_value"),
+    ("Link", "discount_rate"),
+    ("Link", "flicker_changes_per_min"),
+    ("Link", "flicker_step_mva"),
+    ("Link", "i_start_pu"),
+    ("Link", "max_pressure_bar"),
+    ("Link", "max_supply_temp_c"),
+    ("Link", "motor_kw"),
+    ("Link", "mttr_hours"),
+    ("Link", "outage_rate_value"),
+    ("Link", "overnight_cost"),
+    ("Link", "ramp_limit_down"),
+    ("Link", "ramp_limit_up"),
+    ("Link", "rated_mva"),
+    ("Link", "restart_time_h"),
+    ("Link", "single_phase_share"),
+    ("Link", "specific_energy_kwh_per_t"),
+    ("Load", "rated_mva"),
+    ("StorageUnit", "discount_rate"),
+    ("StorageUnit", "inv_energy_fom_share"),
+    ("StorageUnit", "inv_energy_lifetime"),
+    ("StorageUnit", "inv_energy_overnight"),
+    ("StorageUnit", "inv_power_fom_share"),
+    ("StorageUnit", "inv_power_lifetime"),
+    ("StorageUnit", "inv_power_overnight"),
+    ("StorageUnit", "mttr_hours"),
+    ("StorageUnit", "outage_rate_value"),
+    ("Store", "discount_rate"),
+    ("Store", "mttr_hours"),
+    ("Store", "outage_rate_value"),
+    ("Store", "overnight_cost"),
+    ("Transformer", "discount_rate"),
+    ("Transformer", "overnight_cost"),
+    ("Transformer", "v_nom_0"),
+    ("Transformer", "v_nom_1"),
+}
+
+
+def test_the_nan_is_unset_list_is_pinned():
+    unset = {k for k in R.nan_is_unset() if not R._is_extra_port_efficiency(k)}
+    assert unset == NAN_IS_UNSET, sorted(unset ^ NAN_IS_UNSET)
+
+
+def test_nan_on_a_link_port_efficiency_only_while_the_port_is_unused():
+    """PyPSA reads `efficiency{k}` only where `bus{k}` is set."""
+    nan = float("nan")
+    R.check("Link", {"efficiency2": nan}, stored={"bus2": ""})
+    R.check("Link", {"efficiency2": nan, "bus2": ""})
+    assert R.problem("Link", "efficiency2", nan, {"bus2": ""}) is None
+    assert "while bus2 is connected" in _message(
+        lambda: R.check("Link", {"efficiency2": nan}, stored={"bus2": "heat"})
+    )
+    with pytest.raises(HTTPException):
+        R.check("Link", {"efficiency2": nan, "bus2": "heat"}, stored={"bus2": ""})
+    # A bulk write cannot see the rows' ports: NaN is refused unless every
+    # target already stores it.
+    with pytest.raises(HTTPException):
+        R.check_column("Link", "efficiency2", nan, [1.0, nan])
+    R.check_column("Link", "efficiency2", nan, [nan, nan])
+    n = pypsa.Network()
+    n.add("Bus", ["a", "b", "c"])
+    n.add("Link", "used", bus0="a", bus1="b", bus2="c")
+    n.add("Link", "unused", bus0="a", bus1="b")
+    n.links.loc[["used", "unused"], "efficiency2"] = nan
+    flagged = [(p["id"], p["field"]) for p in R.problems(n)]
+    assert ("used", "efficiency2") in flagged
+    assert ("unused", "efficiency2") not in flagged
+
+
+def test_a_bulk_write_with_no_stored_value_is_a_change():
+    """No target, or a column the frame lacks, gives nothing to compare."""
+    with pytest.raises(HTTPException):
+        R.check_column("Bus", "v_nom", 0.0, [])
+
+
 @pytest.mark.parametrize("stored", [0.0, "0", 1e-13])
 def test_the_stored_value_resent_is_no_change(stored):
     """C8, R4: after coercion, float noise or a string is the stored value."""
@@ -154,8 +260,11 @@ def test_the_stored_value_resent_is_no_change(stored):
 #: The code sites that run the validator; the funnel test greps for them.
 FUNNELS = {
     "services/network_crud.py": 2,  # _create_component, _update_component
-    "services/network_bulk.py": 2,  # _coerce_bulk_value, apply_bulk_update's loop
-    "services/assistant_tools.py": 1,  # _candidate: project changes and experiments
+    # _coerce_bulk_value (create and per-target forms), apply_bulk_update's loop
+    "services/network_bulk.py": 3,
+    # _candidate: experiments rely on it; project changes and sensitivity
+    # cases also pass the bulk loop, so for them it is a redundant layer.
+    "services/assistant_tools.py": 1,
 }
 
 TEXT = "Discharging efficiency must be more than 0; got 0.0."
@@ -403,7 +512,9 @@ def test_an_asset_stored_out_of_range_stays_editable(client, world, path):
 
 
 def test_a_bus_on_another_unit_is_checked_in_its_stored_unit(client, world):
-    """C10: the bounds are sign bounds, so a tonne bus reads the same rule."""
+    """C10: the bounds are sign bounds, so a tonne bus reads the same rule.
+    While every HARD row is a sign or zero bound this only shows the check
+    runs on a non-MW bus; a unit-scaled bound would need its own test."""
     r = client.post(
         "/api/network/buses", json={"name": "ore", "v_nom": 1.0, "unit": "t"}
     )
@@ -453,3 +564,19 @@ def test_the_bulk_coercion_copy_refuses_like_the_bulk_loop(client, world):
         == TEXT
     )
     assert _coerce_bulk_value(df, "efficiency_dispatch", 0.5, "StorageUnit") == 0.5
+    # R4: with its targets, a value they already store is no change.
+    name = df.index[0]
+    df.loc[name, "efficiency_dispatch"] = 0.0
+    assert (
+        _coerce_bulk_value(df, "efficiency_dispatch", 0.0, "StorageUnit", [name])
+        == 0.0
+    )
+    df.loc[name, "efficiency_dispatch"] = 0.5
+    assert (
+        _message(
+            lambda: _coerce_bulk_value(
+                df, "efficiency_dispatch", 0.0, "StorageUnit", [name]
+            )
+        )
+        == TEXT
+    )
