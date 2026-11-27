@@ -23,8 +23,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/assurance_acceptance/test_p2_request_slots.py::test_a_non_converged_interval_keeps_its_warning_slot_whatever_is_asked",
     "status": "verified",
-    "domain_review": "pending",
-    "domain_review_note": "pinned in issue 29; awaiting GK B domain review",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",

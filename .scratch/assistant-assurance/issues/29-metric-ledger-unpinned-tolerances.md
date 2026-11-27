@@ -3,7 +3,7 @@
 
 # Metric-ledger tolerances their oracle tests do not use
 
-Status: ready-for-agent
+Status: done
 Type: task
 Reviewer: GK B
 

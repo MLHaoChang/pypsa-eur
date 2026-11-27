@@ -38,8 +38,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_lost_load_assurance.py::test_lost_load_matches_the_hand_values_from_a_real_solve",
     "status": "verified",
-    "domain_review": "pending",
-    "domain_review_note": "pinned in issue 29; awaiting GK B domain review",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",

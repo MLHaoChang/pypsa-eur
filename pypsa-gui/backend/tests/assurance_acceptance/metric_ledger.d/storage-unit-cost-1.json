@@ -8,8 +8,7 @@
     "tolerance": "harness.storage_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_storage_cost_assurance.py::test_direct_storage_cost_uses_independent_51_eur_oracle",
     "status": "verified",
-    "domain_review": "pending",
-    "domain_review_note": "pinned in issue 29; awaiting GK B domain review",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -24,8 +23,7 @@
     "tolerance": "harness.storage_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_storage_cost_assurance.py::test_direct_storage_cost_uses_independent_51_eur_oracle",
     "status": "verified",
-    "domain_review": "pending",
-    "domain_review_note": "pinned in issue 29; awaiting GK B domain review",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -40,8 +38,7 @@
     "tolerance": "harness.storage_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_storage_cost_assurance.py::test_direct_storage_cost_uses_independent_51_eur_oracle",
     "status": "verified",
-    "domain_review": "pending",
-    "domain_review_note": "pinned in issue 29; awaiting GK B domain review",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -56,8 +53,7 @@
     "tolerance": "harness.storage_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_storage_cost_assurance.py::test_direct_storage_cost_uses_independent_51_eur_oracle",
     "status": "verified",
-    "domain_review": "pending",
-    "domain_review_note": "pinned in issue 29; awaiting GK B domain review",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -72,8 +68,7 @@
     "tolerance": "harness.storage_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_storage_cost_assurance.py::test_direct_storage_cost_uses_independent_51_eur_oracle",
     "status": "verified",
-    "domain_review": "pending",
-    "domain_review_note": "pinned in issue 29; awaiting GK B domain review",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -88,8 +83,7 @@
     "tolerance": "harness.storage_calculations:REL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_storage_cost_assurance.py::test_direct_storage_cost_uses_independent_51_eur_oracle",
     "status": "verified",
-    "domain_review": "pending",
-    "domain_review_note": "pinned in issue 29; awaiting GK B domain review",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",

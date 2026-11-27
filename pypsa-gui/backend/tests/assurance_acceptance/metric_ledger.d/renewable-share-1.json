@@ -8,7 +8,7 @@
     "tolerance": "tests.test_renewable_share_assurance:HAND_REL",
     "oracle": "pypsa-gui/backend/tests/test_renewable_share_assurance.py::test_network_figures_equal_the_hand_arithmetic",
     "status": "verified",
-    "domain_review": "gk-b:1f98625c8302e01590af4612b987d01752076a11",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",

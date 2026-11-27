@@ -528,6 +528,8 @@ R4_OK = "gk-b:1f98625c8302e01590af4612b987d01752076a11"  # #2049
 # GK B (73) on #2057: the 41 rows its R5 table passed, and the two energy-balance
 # rows re-confirmed at SERVED_TOL (they leave R2's sha, which saw BUS_TOL_MW).
 R5_OK = "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8"  # #2057
+# GK B (74) on #2080 (issue 29): the 38 rows it pinned plus the 4 rows it re-confirmed.
+R6_OK = "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417"  # #2080
 # Exact set: a row whose domain_review is not "pending" is listed here with its value.
 REVIEWED = {
     **{
@@ -580,15 +582,12 @@ REVIEWED = {
     },
     **{
         ("renewable-share/1", m): R4_OK
-        for m in ("renewable_share", "nonrenewable_energy", "electricity_used")
+        for m in ("nonrenewable_energy", "electricity_used")
     },
-    **{
-        ("system-cost-breakdown/1", m): R3_OK
-        for m in ("system_capex", "system_opex", "system_cost", "objective_residual")
-    },
+    **{("system-cost-breakdown/1", m): R3_OK for m in ("system_opex", "system_cost")},
     **{
         ("branch-losses/1", m): R1_OK
-        for m in ("loss_energy", "peak_loss", "demand_energy", "loss_pct_of_demand")
+        for m in ("loss_energy", "peak_loss", "demand_energy")
     },
     **{
         pair: R2_OK
@@ -601,6 +600,53 @@ REVIEWED = {
             ("network-linear-cost/1", "peak_dispatch"),
             ("network-linear-cost/1", "annual_fixed_cost"),
             ("network-linear-cost/1", "allocated_fixed_cost"),
+        )
+    },
+    **{
+        pair: R6_OK
+        for pair in (
+            ("ac-branch-loading/1", "ac_hours_above_rating"),
+            ("branch-loading/1", "hours_above_rating"),
+            ("branch-losses/1", "loss_pct_of_demand"),
+            ("bus-price/1", "hours_at_voll"),
+            ("carrier-energy/1", "carrier_storage_charged_energy"),
+            ("carrier-energy/1", "carrier_storage_discharged_energy"),
+            ("copt-screening/1", "screening_eue"),
+            ("copt-screening/1", "screening_lole"),
+            ("copt-screening/1", "screening_lolp_max"),
+            ("curtailment/1", "available_energy"),
+            ("curtailment/1", "curtailed_energy"),
+            ("curtailment/1", "curtailment_share"),
+            ("energy-balance/1", "generation_energy"),
+            ("energy-balance/1", "served_energy"),
+            ("energy-balance/1", "unserved_energy"),
+            ("investment-case/1", "equity_irr"),
+            ("investment-case/1", "equity_npv"),
+            ("investment-case/1", "project_irr"),
+            ("investment-case/1", "project_npv"),
+            ("investment-lcoe/1", "lcoe_nominal"),
+            ("investment-lcoe/1", "lcoe_real"),
+            ("lost-load/1", "shed_hours"),
+            ("network-loading/1", "branches_above_rating"),
+            ("renewable-share/1", "renewable_share"),
+            ("site-import/1", "hours_at_import_limit"),
+            ("storage-cycles/1", "energy_capacity"),
+            ("storage-cycles/1", "equivalent_cycles"),
+            ("storage-cycles/1", "window_discharged_energy"),
+            ("storage-unit-cost/1", "charged_energy"),
+            ("storage-unit-cost/1", "discharged_energy"),
+            ("storage-unit-cost/1", "final_state_of_charge"),
+            ("storage-unit-cost/1", "net_storage_energy"),
+            ("storage-unit-cost/1", "peak_charging_power"),
+            ("storage-unit-cost/1", "peak_discharging_power"),
+            ("storage-unit-dispatch/1", "charged_energy"),
+            ("storage-unit-dispatch/1", "discharged_energy"),
+            ("storage-unit-dispatch/1", "final_state_of_charge"),
+            ("storage-unit-dispatch/1", "net_storage_energy"),
+            ("storage-unit-dispatch/1", "peak_charging_power"),
+            ("storage-unit-dispatch/1", "peak_discharging_power"),
+            ("system-cost-breakdown/1", "objective_residual"),
+            ("system-cost-breakdown/1", "system_capex"),
         )
     },
 }

@@ -58,8 +58,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_hours_at_voll_use_the_solves_voll_and_need_one",
     "status": "verified",
-    "domain_review": "pending",
-    "domain_review_note": "pinned in issue 29; awaiting GK B domain review",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",
