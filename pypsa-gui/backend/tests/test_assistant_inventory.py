@@ -64,6 +64,10 @@ def isolated_reader(tmp_path, results, panels, edits=()):
         'pypsa-gui/backend/smoke/assistant_inventory.py',
         'pypsa-gui/backend/harness/__init__.py',
         'pypsa-gui/backend/harness/catalogue.py',
+        # RETRO-FRAG-1: the builders, the merge and the tool fragments it reads.
+        'pypsa-gui/backend/harness/catalogue_base.py',
+        'pypsa-gui/backend/harness/tool_fragments.py',
+        *(str(p.relative_to(ROOT)) for p in (ROOT / 'pypsa-gui/backend/harness/catalogue_tools').glob('*.py')),
         'pypsa-gui/backend/harness/toolsets.py',
         'pypsa-gui/backend/models/energy_hub.py',
         'pypsa-gui/backend/services/adequacy/mc.py',
@@ -82,7 +86,7 @@ def isolated_reader(tmp_path, results, panels, edits=()):
         assert old in text, f'{old!r} not in {relative}'
         target.write_text(text.replace(old, new, 1))
     for relative, source in (
-        ('pypsa-gui/frontend/src/pages/Results.tsx', results),
+        ('pypsa-gui/frontend/src/pages/results/resultTabs.ts', results),
         ('pypsa-gui/frontend/src/store/uiStore.ts', panels),
     ):
         target = tmp_path / relative

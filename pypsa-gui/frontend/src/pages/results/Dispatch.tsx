@@ -6,7 +6,8 @@ import {
 } from 'recharts'
 import { Download, Flame, Wind, BatteryCharging, Zap, ChevronDown, ChevronRight, Plug, Database, Scissors } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { resultsApi } from '../../api/simulation'
+import { displayedResultsApi } from '../../api/displayedResults'
+import { errorKind } from '../../api/profiles'
 import { networkApi } from '../../api/network'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
@@ -37,6 +38,7 @@ import StorageHeatmap from './StorageHeatmap'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
 import { storageCarrierKey, storageCarrierLabel } from './carrierAliases'
 import NotSolved from './NotSolved'
+import ResultState from '../../components/ResultState'
 import { withheldCell } from './sectionWords'
 
 // The load duration curve's two series: total load, then load minus renewables.
@@ -265,78 +267,42 @@ export default function Dispatch() {
   // further down, which resolves against the fetched payload's own index to
   // re-slice client-side — see the comment at that call site.
   const { win, winValid, fetchRange } = useResultsWindow(currentProject)
-  // Cost breakdown: used by the OPEX KPI strip + per-class table below. Same
-  // endpoint Capacity Expansion uses, cached under the shared queryKey so we
-  // don't double-fetch when both tabs are mounted. (LP-only — no source, and
-  // an aggregate with no snapshot axis — not windowed.)
-  const { data: cost } = useQuery({ queryKey: nk(currentProject, 'results', 'cost_breakdown'), queryFn: resultsApi.getCostBreakdown })
-  const { data: gensTS } = useQuery({
-    queryKey: nk(currentProject, 'results', 'generators', resultSource, win.from, win.to),
-    queryFn: () => resultsApi.getGeneratorResults(resultSource, fetchRange),
+  // A5.2: every results part this tab renders, read as one bound view (one
+  // solve, one binding) for the chosen source and window, so a chat navigation
+  // can prove the figures shown. The parts keep their old routes' meaning:
+  //  - cost breakdown: the OPEX KPI strip + per-class table below. Same
+  //    payload Capacity Expansion uses. (LP-only — no source, and an
+  //    aggregate with no snapshot axis — not windowed.)
+  //  - curtailment = max(p_max_pu * p_nom_opt − p, 0), computed server-side:
+  //    the renewables KPI + the toggleable per-section plot below. (LP-only —
+  //    AC PF doesn't produce curtailment.) Windowed like the series.
+  //  - storage gets BOTH SoC (MWh) AND signed power (MW). The power view is
+  //    what the user means by "production / consumption" — positive =
+  //    discharging, negative = charging. SoC is the energy reservoir level.
+  //  - links: per-link p0 (signed MW; positive = bus0→bus1), rendered as one
+  //    section per link carrier (HVDC interconnect vs electrolyser dispatch).
+  //  - lost load: VOLL slack dispatch, non-null only when the last solve ran
+  //    with voll > 0 — the Lost Load KPI + chart below. Windowed.
+  //  - economics by carrier (live network): the per-carrier KPI strip above
+  //    each DispatchStack, mirroring the Compare View's by_carrier split
+  //    (gen/charge/curtailment/lost-load). Not windowed.
+  const { data: displayed, isSuccess: lostLoadRead, isError, error: readError } = useQuery({
+    queryKey: nk(currentProject, 'results', 'displayed', 'dispatch', resultSource, win.from, win.to),
+    queryFn: () => displayedResultsApi.dispatch(resultSource, fetchRange),
     enabled: winValid,
   })
-  // Curtailment = max(p_max_pu * p_nom_opt − p, 0). Computed server-side.
-  // Used for the renewables KPI + the toggleable per-section plot below.
-  // (LP-only — AC PF doesn't produce curtailment.) `getCurtailment` now
-  // carries an optional range (widened alongside Task 4's five tabs) —
-  // windowed the same as its seven siblings above.
-  const { data: curtailTS } = useQuery({
-    queryKey: nk(currentProject, 'results', 'curtailment', win.from, win.to),
-    queryFn: () => resultsApi.getCurtailment(fetchRange),
-    enabled: winValid,
-  })
-  // Storage gets BOTH SoC (MWh) AND signed power (MW). The power view is what
-  // the user means by "production / consumption" — positive = discharging,
-  // negative = charging. SoC is the energy reservoir level.
-  const { data: storTS } = useQuery({
-    queryKey: nk(currentProject, 'results', 'storage', resultSource, win.from, win.to),
-    queryFn: () => resultsApi.getStorageResults(resultSource, fetchRange),
-    enabled: winValid,
-  })
-  const { data: storPowerTS } = useQuery({
-    queryKey: nk(currentProject, 'results', 'storage_dispatch', resultSource, win.from, win.to),
-    queryFn: () => resultsApi.getStorageDispatchResults(resultSource, fetchRange),
-    enabled: winValid,
-  })
-  const { data: storeTS } = useQuery({
-    queryKey: nk(currentProject, 'results', 'store_dispatch', resultSource, win.from, win.to),
-    queryFn: () => resultsApi.getStoreDispatchResults(resultSource, fetchRange),
-    enabled: winValid,
-  })
-  const { data: storeETS } = useQuery({
-    queryKey: nk(currentProject, 'results', 'store_energy', resultSource, win.from, win.to),
-    queryFn: () => resultsApi.getStoreEnergyResults(resultSource, fetchRange),
-    enabled: winValid,
-  })
-  const { data: loadTS } = useQuery({
-    queryKey: nk(currentProject, 'results', 'loads', resultSource, win.from, win.to),
-    queryFn: () => resultsApi.getLoadResults(resultSource, fetchRange),
-    enabled: winValid,
-  })
-  // Per-link p0 (signed MW; positive = bus0→bus1). Rendered as one section
-  // per link carrier so the user can compare e.g. HVDC interconnect vs
-  // electrolyser dispatch separately.
-  const { data: linkTS } = useQuery({
-    queryKey: nk(currentProject, 'results', 'links', resultSource, win.from, win.to),
-    queryFn: () => resultsApi.getLinkResults(resultSource, fetchRange),
-    enabled: winValid,
-  })
-  // VOLL slack dispatch — non-null only when last solve ran with voll > 0
-  // and the LP actually shed load. Drives the Lost Load KPI + chart below.
-  // `getLostLoad` now carries an optional range — windowed like the rest.
-  const { data: lostLoad, isSuccess: lostLoadRead } = useQuery({
-    queryKey: nk(currentProject, 'results', 'lost_load', win.from, win.to),
-    queryFn: () => resultsApi.getLostLoad(fetchRange),
-    enabled: winValid,
-  })
-  // Per-carrier economics (live network) — drives the per-carrier KPI strip
-  // above each DispatchStack. Mirrors the Compare View's by_carrier split
-  // (gen/charge/curtailment/lost-load) so the single-project view shows
-  // the same comprehensive OPEX picture without depending on autosave.
-  const { data: econByCarrier } = useQuery({
-    queryKey: nk(currentProject, 'results', 'economics_by_carrier'),
-    queryFn: resultsApi.getEconomicsByCarrier,
-  })
+  const parts = displayed?.data
+  const cost = parts?.cost_breakdown
+  const gensTS = parts?.generators
+  const curtailTS = parts?.curtailment
+  const storTS = parts?.storage
+  const storPowerTS = parts?.storage_dispatch
+  const storeTS = parts?.store_dispatch
+  const storeETS = parts?.store_energy
+  const loadTS = parts?.loads
+  const linkTS = parts?.links
+  const lostLoad = parts?.lost_load
+  const econByCarrier = parts?.economics_by_carrier
 
   const { data: buses = [] }        = useQuery({ queryKey: nk(currentProject, 'buses'),         queryFn: networkApi.getBuses })
   const { data: generators = [] }   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
@@ -1265,6 +1231,26 @@ export default function Dispatch() {
   // because React Query holds the underlying data anyway.
   const [view, setView] = useState<'dispatch' | 'flh'>('dispatch')
 
+  // No AC power flow on record for `?source=ac_pf` is a missing precondition,
+  // not a failed read: no toast (the client keeps it quiet), "not run yet",
+  // and the way back to the LP dispatch.
+  if (isError && !displayed && errorKind(readError) === 'source_not_available') {
+    return (
+      <div className="p-6" data-testid="dispatch-ac-pf-not-run">
+        <ResultState state="not_run"
+          reason="The AC power flow has not run yet. Run it, or show the LP dispatch."
+          action={{ label: 'Show the LP dispatch', onClick: () => useUIStore.getState().setResultSource('lopf') }} />
+      </div>
+    )
+  }
+  // A failed read is not "not run yet" (rulings ai, aa): the error toast says why.
+  if (isError && !displayed) {
+    return (
+      <div className="p-6" data-testid="dispatch-error">
+        <ResultState state="unavailable" reason="The dispatch could not be read. Try again in a moment." />
+      </div>
+    )
+  }
   if (!hasResults) {
     return (
       <NotSolved what="Dispatch" />
@@ -1276,7 +1262,8 @@ export default function Dispatch() {
   // with `overflow-hidden` then clip their charts to a thin sliver.
   return (
     <notRecorded.Provider value={notRecorded.report}>
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0">
+    <div data-testid="results-view-dispatch" className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0"
+      data-result-tab="dispatch" data-result-binding={displayed ? JSON.stringify(displayed.binding) : undefined}>
 
       {/* One "—" note for the whole page; the sections below report theirs. */}
       <NotRecordedNote show={notRecorded.show} />

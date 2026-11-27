@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The checked assistant now carries the checked window, cost basis and metrics to another component of the same class on "same for generator G2" (only while the earlier checked result's source is unchanged), and asks again instead of dropping the words when a checked request adds a filter such as "excluding" or "only".

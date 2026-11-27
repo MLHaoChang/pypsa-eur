@@ -321,7 +321,7 @@ export default function GridRiskTab() {
   })
   const data = displayed?.data
   return (
-    <div className="p-3">
+    <div data-testid="results-view-grid_risk" className="p-3">
       <PageSection title={GRID_RISK_TITLE}
         hint="Each grid risk as lost tonnes, then EUR, per year. Expected values, not a forecast.">
         <div className="px-4 py-3" data-testid="grid-risk-section" data-result-tab="grid_risk"

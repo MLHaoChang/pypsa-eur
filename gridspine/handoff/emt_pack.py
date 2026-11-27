@@ -59,7 +59,10 @@ fields join ``to_be_supplied.csv``.
 
 **Manifest.** File list with a SHA-256 per file, a ``data_hash`` over them,
 the contract version, case ids, channel names, assumptions and the
-to-be-supplied list; ``model_set_id`` only when one is passed. Keys are
+to-be-supplied list; ``model_set_id`` only when one is passed; the plant
+ratings (``rated_mw``, ``rated_mva``, ``rating_source``,
+``campus_data_hash``) only when given, also in the hashed ``ratings.json``
+(GC-13). Keys are
 sorted, so the same inputs give byte-equal files.
 
 Generic engineering only; TRGC numbers are cited, nothing else.
@@ -81,12 +84,14 @@ from gridspine.handoff.test_battery import (
     CHANNEL_SEP,
     CHANNELS,
     PARAM_NAMES,
+    RATINGS_JSON,
     Thevenin,
     battery_json,
     build_battery,
     contract_channels,
     corner_level,
     fault_impedance_ohm,
+    ratings_json,
     thevenin_impedances_ohm,
     validate_battery,
     voltage_factor,
@@ -590,7 +595,7 @@ def _sha(text: str) -> str:
 
 
 def write_emt_pack(
-    outdir, campus, *, battery=None, stages=None, model_set_id=None
+    outdir, campus, *, battery=None, stages=None, model_set_id=None, ratings=None
 ) -> EmtPack:
     """
     Write the EMT pack into ``outdir``.
@@ -599,7 +604,10 @@ def write_emt_pack(
     holds no max-case zero sequence the battery, schedule and stub are not
     written and the gap is listed in ``to_be_supplied.csv``. ``stages`` maps a
     stage label to its installed unit ids (reference fault levels).
-    ``model_set_id`` is cited in the manifest only when given.
+    ``model_set_id`` is cited in the manifest only when given. ``ratings``
+    (a ``test_battery.PackRatings``, GC-13) is written to ``ratings.json``,
+    hashed with the other files so the ``data_hash`` binds it, and its keys
+    are repeated in the manifest; read-back then judges on them.
     """
     SC.refuse(
         campus.net, "EMT pack"
@@ -678,6 +686,8 @@ def write_emt_pack(
     )
     supply += sheet_gaps.to_dict("records")
     texts[SUPPLY_CSV] = _csv(supply, SUPPLY_COLUMNS)
+    if ratings is not None:
+        texts[RATINGS_JSON] = ratings_json(ratings)
 
     out.mkdir(parents=True, exist_ok=True)
     for name, text in texts.items():
@@ -702,6 +712,8 @@ def write_emt_pack(
     }
     if model_set_id is not None:
         manifest["model_set_id"] = str(model_set_id)
+    if ratings is not None:
+        manifest.update(ratings.as_dict())
     (out / MANIFEST).write_text(_dumps(manifest), newline="\n")
     return EmtPack(
         out, (*files, MANIFEST), pd.DataFrame(supply, columns=SUPPLY_COLUMNS), manifest

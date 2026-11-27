@@ -8,6 +8,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/assurance_acceptance/test_p2_request_slots.py::test_a_non_converged_interval_keeps_its_warning_slot_whatever_is_asked",
     "status": "verified",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -17,11 +18,12 @@
    },
    {
     "metric": "ac_hours_above_rating",
-    "formula": "sum over converged t of w_generators[t] where utilisation[t] > 1 + tolerance",
+    "formula": "sum over converged t of w_generators[t] where utilisation[t] > 1 + OVER_LIMIT_TOLERANCE (1e-6)",
     "validity": "verified solve with condition lopf+ac_pf_ok and current PF revision (else unverified_solve); over converged snapshots of the window only, every one needs p0, p1, q0, q1, s_max_pu and weight >= 0, with rating x s_max_pu > 1e-9, else invalid_or_missing_branch_data (no q0 at any of them: the flow metrics read reactive_flow_unavailable, the rating is answered); any excluded snapshot adds the required warning slot ac_pf_convergence. Refusals: ac_pf_not_available, ac_pf_convergence_unavailable, ac_pf_not_converged, ac_pf_convergence_unknown, ambiguous_branch, unknown_branch, misaligned_source, unsupported_snapshot_scope, too_many_metrics_for_warnings",
-    "tolerance": "harness.branch_calculations:OVER_LIMIT_TOLERANCE",
+    "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/assurance_acceptance/test_p2_request_slots.py::test_a_non_converged_interval_keeps_its_warning_slot_whatever_is_asked",
     "status": "verified",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -36,6 +38,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/assurance_acceptance/test_p2_request_slots.py::test_a_non_converged_interval_keeps_its_warning_slot_whatever_is_asked",
     "status": "verified",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -50,6 +53,7 @@
     "tolerance": "exact",
     "oracle": "pypsa-gui/backend/tests/assurance_acceptance/test_p2_request_slots.py::test_a_non_converged_interval_keeps_its_warning_slot_whatever_is_asked",
     "status": "verified",
+    "domain_review": "gk-b:41f32cf0bbe4de6e9df232044d48858467be85f8",
     "surfaces": {
      "answer": {
       "status": "verified",

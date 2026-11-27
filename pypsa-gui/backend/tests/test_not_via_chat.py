@@ -74,6 +74,7 @@ def test_the_issue_rows_are_declared():
         'power_trace_spectrum': ('unbuilt', None),
         'model_import': ('unbuilt', None),  # project-io 04; chat in issue 05 or later
         'parameter_catalogue': ('unbuilt', None),  # expert-catalogue 01a; chat tools in 01b
+        'import_range_flags': ('unbuilt', None),  # expert-catalogue 01a-3b (not_via_chat.d/)
         'report_comment_revisions': ('unbuilt', None),
         'report_revision_drafts': ('out of chat', None),
         'report_chart_snapshots': ('manual', 'results'),
@@ -260,3 +261,29 @@ def test_saved_report_charts_are_human_only_and_found_by_their_goal(discovery):
 def test_a_real_chart_pin_phrase_is_still_refused(discovery):
     out = chat_tools.find_capabilities('Which charts are pinned to the report?')
     assert out['not_via_chat'][0]['title'] == 'Saving a chart for the report'
+
+
+_RANGE_FLAGS_TITLE = 'Out-of-range values in a network'
+
+
+@pytest.mark.parametrize('goal', [
+    'Set the snapshot range to January.',
+    'What is the range of marginal costs?',
+    'Set p_nom range for the wind farm.',
+    'Change the investment period range.',
+    'Turn on the feature flags.',
+])
+def test_range_or_flags_alone_does_not_refuse(discovery, goal):
+    out = chat_tools.find_capabilities(goal)
+    assert _RANGE_FLAGS_TITLE not in [e['title'] for e in out.get('not_via_chat', [])]
+
+
+@pytest.mark.parametrize('goal', [
+    'Which values in my network are out of range?',
+    'Show the range flags from my import.',
+    'List the implausible values in the network.',
+    'Is any generator outside its range?',
+])
+def test_a_real_out_of_range_ask_is_refused(discovery, goal):
+    out = chat_tools.find_capabilities(goal)
+    assert [e['title'] for e in out.get('not_via_chat', [])][:1] == [_RANGE_FLAGS_TITLE]

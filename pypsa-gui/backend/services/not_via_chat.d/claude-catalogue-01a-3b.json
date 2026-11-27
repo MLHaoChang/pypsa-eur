@@ -1,0 +1,12 @@
+{
+ "entries": [{
+  "id": "import_range_flags",
+  "title": "Out-of-range values in a network",
+  "disposition": "unbuilt",
+  "reason": "Chat cannot list a network's out-of-range or min above max values yet; that arrives with the chat parameter tools. Until then the app reads them from the import response.",
+  "page": "Import summary",
+  "panel": null,
+  "keywords": ["range", "flags", "implausible"],
+  "routes": [["GET", "/api/network/range_flags"], ["GET", "/api/projects/{project_id}/network/range_flags"]]
+ }]
+}

@@ -13,6 +13,7 @@ import type {
 import type { CompletenessRow } from '../../../components/CompletenessChips'
 import type { FlowSectionId } from '../../../api/flow'
 import { fmtAmount } from './valueFlows'
+import { figureName } from '../../../utils/figureWords'
 
 /** The form's draft: a stored object, or a new one the server will judge. */
 export type FinanceDraft = Partial<FinanceInputs> & Record<string, unknown>
@@ -181,7 +182,7 @@ export const HEADLINES: HeadlineSpec[] = [
     top: 'project_irr_pre_tax', section: 'project', keys: ['project_pre_tax_irr'] },
   { id: 'project_irr_post_tax', label: 'Unlevered project IRR, post-tax', kind: 'pct',
     top: 'project_irr_post_tax', section: 'project', keys: ['project_post_tax_irr'] },
-  { id: 'npv_at_wacc', label: 'Unlevered NPV at WACC', kind: 'money',
+  { id: 'npv_at_wacc', label: figureName('project_npv'), kind: 'money',
     top: 'npv_at_wacc', section: 'project', keys: ['project_post_tax_npv'] },
   { id: 'equity_irr_pre_tax', label: 'Equity IRR, pre-tax', kind: 'pct',
     section: 'project', keys: ['equity_pre_tax_irr', 'equity_irr_pre_tax'] },
@@ -197,11 +198,11 @@ export const HEADLINES: HeadlineSpec[] = [
   { id: 'avg_dscr', label: 'Average DSCR', kind: 'ratio', top: 'avg_dscr', section: 'debt', keys: ['avg_dscr'] },
   { id: 'llcr', label: 'LLCR', kind: 'ratio', top: 'llcr', section: 'debt', keys: ['llcr'] },
   { id: 'plcr', label: 'PLCR', kind: 'ratio', top: 'plcr', section: 'debt', keys: ['plcr'] },
-  { id: 'lcoe', label: 'LCOE (finance-consistent, nominal)', kind: 'price',
+  { id: 'lcoe', label: figureName('lcoe_nominal'), kind: 'price',
     top: 'lcoe_finance_consistent_eur_per_mwh', section: 'project', keys: ['lcoe_nominal_per_mwh'],
     // WALK-IMPROVE-1 (a): the two break-even prices answer different questions.
     asks: 'Break-even for all output: one price for every MWh generated that repays every cost at the case’s finance terms, with no other revenue.' },
-  { id: 'lcoe_real', label: 'LCOE (real)', kind: 'price', section: 'project',
+  { id: 'lcoe_real', label: figureName('lcoe_real'), kind: 'price', section: 'project',
     keys: ['lcoe_real_per_mwh'], optional: true },
   { id: 'lcos', label: 'Storage LCOS (charging included, nominal)', kind: 'price', section: 'project',
     keys: ['lcos_nominal_per_mwh'], storage: true },

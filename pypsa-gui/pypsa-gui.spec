@@ -91,6 +91,9 @@ datas = [
     # `services/` layout under _MEIPASS. Without them the app does not start.
     (str(BACKEND / "services" / "not_via_chat.json"), "services"),
     (str(BACKEND / "services" / "not_via_chat.d"), "services/not_via_chat.d"),
+    # One name per result figure (guided-results 04): `services/figure_words.py`
+    # reads `figure_words.json` beside itself at import; without it the app does not start.
+    (str(BACKEND / "services" / "figure_words.json"), "services"),
     # The Parameter guide (expert-catalogue 01a): `services/asset_schema/catalogue.py`
     # reads `guide/<id>.md` beside itself; without it every guide body is empty.
     (str(BACKEND / "services" / "asset_schema" / "guide"), "services/asset_schema/guide"),
@@ -266,6 +269,22 @@ hiddenimports = [
     "gridspine.schema.contracts", "gridspine.templates.unit_params",
 ]
 
+
+# The chat tool fragments (RETRO-FRAG-1): `harness/tool_fragments.py` finds
+# them with `pkgutil.iter_modules` at import, which analysis cannot follow, so
+# every module is listed from the source tree here, and both packages are also
+# written out as real directories (`module_collection_mode` below) so the walk
+# sees plain files as well as the archive. A frozen app that finds no fragment
+# refuses to start rather than run with tools missing.
+def _fragment_modules(package):
+    folder = BACKEND.joinpath(*package.split("."))
+    return [package] + [f"{package}.{p.stem}" for p in sorted(folder.glob("[!_]*.py"))]
+
+
+FRAGMENT_PACKAGES = ("harness.catalogue_tools", "services.chat_dispatchers")
+for _pkg in FRAGMENT_PACKAGES:
+    hiddenimports += _fragment_modules(_pkg)
+
 # Present in the CONDA env and pulled in by xarray's entry-point scan; absent
 # from the pip venv this is built from. Listed here so the next reader knows
 # they were considered and deliberately excluded rather than forgotten.
@@ -328,6 +347,9 @@ a = Analysis(                              # noqa: F821 - injected
         "pandapower": "pyz+py",
         # `docx/parts/*.py` open `parts/../templates/…` (see `datas`).
         "docx": "pyz+py",
+        # The chat tool fragments, walked by pkgutil (see FRAGMENT_PACKAGES).
+        "harness.catalogue_tools": "pyz+py",
+        "services.chat_dispatchers": "pyz+py",
     },
 )
 

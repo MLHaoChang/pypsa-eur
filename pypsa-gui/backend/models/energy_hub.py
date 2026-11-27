@@ -14,6 +14,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from services.asset_schema.settings import eh_custom_columns
+
 EnergyHubArchetype = Literal["strong_grid", "weak_flexible", "off_grid"]
 
 SectionStatus = Literal["ok", "not_established", "skipped"]
@@ -33,12 +35,9 @@ EH_LINK_ROLES: tuple[str, ...] = (
 
 # Custom (non-PyPSA) columns the GUI may write. Each maps to a kind:
 # "bool" (flag, default False), "float_nonneg" (MVA, default NaN) or
-# "role" (one of EH_LINK_ROLES, default "").
-EH_CUSTOM_COLUMNS: dict[str, dict[str, str]] = {
-    "Bus": {"eh_poc": "bool", "eh_critical": "bool",
-            "eh_sk_mva": "float_nonneg", "eh_ibr_mva": "float_nonneg"},
-    "Link": {"eh_role": "role"},
-}
+# "role" (one of EH_LINK_ROLES, default ""). Read from the catalogue's tag
+# rows (services/asset_schema/settings.py `eh_kind`), in their order.
+EH_CUSTOM_COLUMNS: dict[str, dict[str, str]] = eh_custom_columns()
 
 # Spec decision 18 — ordered default pipeline.
 EH_PIPELINE_STAGES: tuple[str, ...] = (

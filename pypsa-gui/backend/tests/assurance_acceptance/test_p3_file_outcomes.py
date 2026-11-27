@@ -5,9 +5,10 @@ Issue 04, slice S3 (GK B (26) X4–X8). Before an import runs,
 Network with the import route's reader steps; after it, `read_import` reads
 the live network's rows and values against that scratch copy. An export
 watches the uploads this call adds (`upload_service.watch_uploads`, a dedup
-hit included); exactly one must be an agent_export in the project, and
-`read_export` reads it back and compares it with the live network. Excel and MATPOWER read adapter_pending (X6). The
-handler's returned JSON is never read.
+hit included); exactly one must be in the project's store (any kind, row
+AA04-P6) and named by the call's result, and `read_export` reads it back and
+compares it with the live network. Excel and MATPOWER use their routes'
+readers (X6). The handler's returned JSON is never read, but for that file_id.
 """
 
 import base64
@@ -422,30 +423,722 @@ def test_an_export_with_no_project_is_a_tool_error_with_no_outcome(baseline, har
     _assert_tool_error_without_outcome(harness, "export_network_nc", {})
 
 
-# ── Excel and MATPOWER: no independent reader yet (X6) ───────────────────
+# ── Excel and MATPOWER (X6, rows AA04-P1..P5) ────────────────────────────
+#
+# An import reads the call's bytes with the route's own reader (the input
+# workbook reader, the MATPOWER parser). An Excel export is read back with
+# that reader and compared on what a workbook carries: no `n.meta`, floats
+# to 15 digits (CSV_RTOL). MATPOWER carries buses, loads, generators and
+# lines only, at 4 decimals: the read-back compares those fields with the
+# live network and names the classes the format cannot carry.
+
+# A three-bus case written by hand, not by the app's exporter.
+_CASE3 = """function mpc = case3
+mpc.version = '2';
+mpc.baseMVA = 100;
+mpc.bus = [
+	1  3  0     0    0  0  1  1.0  0  110  1  1.1  0.9;
+	2  1  60.5  12   0  0  1  1.0  0  110  1  1.1  0.9;
+	3  1  40    8.25 0  0  1  1.0  0  110  1  1.1  0.9;
+];
+mpc.gen = [
+	1  50  0  999  -999  1.0  100  1  150  10;
+	3  20  0  999  -999  1.0  100  1  80   0;
+];
+mpc.branch = [
+	1  2  0.01  0.1   0.02  120  0  0  0  0  1;
+	2  3  0.02  0.15  0.01  90   0  0  0  0  1;
+	1  3  0.015 0.12  0     100  0  0  0  0  1;
+];
+mpc.gencost = [
+	2  0  0  2  12.5  0;
+	2  0  0  2  30    0;
+];
+"""
 
 
-@pytest.mark.parametrize("tool", ["import_excel_pending", "import_matpower_pending"])
-def test_import_formats_without_a_reader_are_pending(tool):
-    tool = tool.removesuffix("_pending")
-    out = outcomes.classify_import(outcomes.note_import(tool, {"bytes_b64": ""}), None)
-    assert (out["outcome"], out["reason"]) == ("uncertain", "adapter_pending")
+def _excel_bytes(n=None) -> bytes:
+    from project_templates.eh_templates import build_eh_datacenter
+    from routers.io import _write_excel
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = pathlib.Path(tmp) / "network.xlsx"
+        _write_excel(build_eh_datacenter() if n is None else n, path)
+        return path.read_bytes()
+
+
+def test_an_excel_import_of_a_template_is_completed(baseline, harness):
+    result = _stream(
+        harness,
+        "import_excel",
+        {"bytes_b64": _b64(_excel_bytes()), "filename": "t.xlsx"},
+    )
+    out = result["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("completed", None), out
+    assert out["counts"]["requested"] == out["counts"]["done"] > 0
+    assert "genset_new" in _live().generators.index
+
+
+def test_a_matpower_import_is_completed(baseline, harness):
+    result = _stream(
+        harness,
+        "import_matpower",
+        {"bytes_b64": _b64(_CASE3.encode()), "filename": "c.m"},
+    )
+    out = result["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("completed", None), out
+    assert _live().loads.at["load_2", "p_set"] == 60.5
 
 
 @pytest.mark.parametrize("fmt", ["excel", "matpower"])
-def test_uploaded_import_formats_without_a_reader_are_pending(fmt):
-    note = outcomes.note_import(
-        "import_uploaded_network", {"file_id": "f", "format": fmt}
+def test_an_uploaded_excel_or_matpower_import_is_completed(baseline, harness, fmt):
+    from services import upload_service
+    from services.assistant_tools import _project
+
+    data, name = (
+        (_excel_bytes(), "t.xlsx") if fmt == "excel" else (_CASE3.encode(), "c.m")
     )
-    out = outcomes.classify_import(note, None)
-    assert (out["outcome"], out["reason"]) == ("uncertain", "adapter_pending")
+    project, directory, _owner = _project()
+    meta = upload_service.add_upload(
+        project.name,
+        data,
+        name,
+        "application/octet-stream",
+        kind="user_upload",
+        project_dir=directory,
+    )
+    out = _stream(
+        harness, "import_uploaded_network", {"file_id": meta.file_id, "format": fmt}
+    )["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("completed", None), out
 
 
-@pytest.mark.parametrize("tool", ["export_excel_pending", "export_matpower_pending"])
-def test_export_formats_without_a_reader_are_pending(tool):
-    tool = tool.removesuffix("_pending")
-    out = outcomes.classify_export(outcomes.note_export(tool), None)
-    assert (out["outcome"], out["reason"]) == ("uncertain", "adapter_pending")
+@pytest.mark.parametrize("tool", ["import_excel", "import_matpower"])
+def test_an_excel_or_matpower_import_that_does_nothing_reads_failed(
+    baseline, harness, monkeypatch, tool
+):
+    import routers.io as io_router
+
+    async def nothing(file, db=None, session=None):
+        return {"buses": 0}
+
+    monkeypatch.setattr(io_router, tool, nothing)
+    data = _excel_bytes() if tool == "import_excel" else _CASE3.encode()
+    out = _stream(harness, tool, {"bytes_b64": _b64(data)})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("failed", None)
+
+
+def test_a_matpower_import_that_lands_another_value_reads_uncertain(
+    baseline, harness, monkeypatch
+):
+    import routers.io as io_router
+
+    real = io_router._parse_matpower
+
+    def off(n, text):
+        real(n, text)
+        n.lines.loc["line_1", "s_nom"] += 1.0
+
+    # The note reads the file; then the route parses it into another value.
+    note = outcomes.note_import("import_matpower", {"bytes_b64": _b64(_CASE3.encode())})
+    monkeypatch.setattr(io_router, "_parse_matpower", off)
+    chat_tools.import_matpower(_b64(_CASE3.encode()))
+    out = outcomes.classify_import(note, outcomes.read_import(note))
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_file")
+
+
+def test_an_excel_export_of_a_template_is_completed(template_in_project, harness):
+    # The template's asset provenance (n.meta) is not in a workbook: not a failure.
+    from services import excel_workbook
+
+    assert template_in_project.network.meta.get("asset_params")
+    result = _stream(harness, "export_excel", {})
+    assert result["_outcome"] == {"version": 1, "outcome": "completed", "reason": None}
+    from services import upload_service
+    from services.assistant_tools import _project
+
+    project, directory, _owner = _project()
+    data = upload_service.get_upload_bytes(
+        project.name, result["file_id"], project_dir=directory
+    )
+    assert not excel_workbook.prepare(
+        data, "x.xlsx", new_project=False
+    ).network.meta.get("asset_params")
+
+
+def test_an_excel_export_off_by_more_than_its_tolerance_reads_uncertain(
+    template_in_project, harness, monkeypatch
+):
+    # A value moved by 1e-9 relative (beyond CSV_RTOL, within any display rounding).
+    import routers.io as io_router
+
+    assert outcomes.CSV_RTOL == 1e-12
+    changed = template_in_project.network.copy()
+    changed.generators.loc["genset_1", "p_nom"] *= 1 + 1e-9
+    monkeypatch.setattr(io_router, "_export_excel_bytes", lambda: _excel_bytes(changed))
+    out = _stream(harness, "export_excel", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+@pytest.mark.parametrize("tool", ["import_excel", "import_matpower"])
+def test_the_import_note_calls_the_routes_own_reader(baseline, monkeypatch, tool):
+    # GK B (73): the route's reader, not a copy of it.
+    import routers.io as io_router
+    from services import excel_workbook
+
+    module, name = (
+        (excel_workbook, "prepare")
+        if tool == "import_excel"
+        else (io_router, "_parse_matpower")
+    )
+    real, calls = getattr(module, name), []
+
+    def spy(*a, **kw):
+        calls.append(a)
+        return real(*a, **kw)
+
+    monkeypatch.setattr(module, name, spy)
+    data = _excel_bytes() if tool == "import_excel" else _CASE3.encode()
+    note = outcomes.note_import(tool, {"bytes_b64": _b64(data)})
+    assert not note.get("error") and len(calls) == 1
+
+
+def test_an_excel_export_unlike_the_network_reads_uncertain(
+    template_in_project, harness, monkeypatch
+):
+    import routers.io as io_router
+
+    changed = template_in_project.network.copy()
+    changed.generators.loc["genset_1", "p_nom"] += 1.0
+    monkeypatch.setattr(io_router, "_export_excel_bytes", lambda: _excel_bytes(changed))
+    out = _stream(harness, "export_excel", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+@pytest.fixture
+def ieee14_in_project(baseline):
+    from project_templates._build import build_ieee14
+
+    ctx = PyPSAService.get_active_context()
+    ctx.network = build_ieee14()
+    assert PyPSAService.get_loaded_project()
+    return ctx
+
+
+def test_a_matpower_export_is_completed_and_names_what_it_cannot_carry(
+    ieee14_in_project, harness
+):
+    # GK B (73) Q1: completed, and the classes the file lacks are in the text
+    # the model reads, so an answer cannot claim a full export.
+    live = ieee14_in_project.network
+    live.add(
+        "Link", "hvdc", bus0=live.buses.index[0], bus1=live.buses.index[1], p_nom=10
+    )
+    live.add("Store", "tank", bus=live.buses.index[2], e_nom=5)
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("completed", None), out
+    assert out["counts"]["not_carried"] == ["Carrier", "Link", "Store", "series"]
+    assert out["counts"]["not_carried_rows"] == {
+        "Carrier": len(live.carriers),
+        "Link": 1,
+        "Store": 1,
+        "series": 1,
+    }
+    # GK B (74) Q1 (a): the notice names each class and its row count.
+    for named in (
+        "Link (1)",
+        "Store (1)",
+        "series (1)",
+        f"Carrier ({len(live.carriers)})",
+    ):
+        assert named in out["notice"], out["notice"]
+
+
+def test_the_matpower_tolerance_is_half_a_4th_decimal():
+    assert outcomes.MATPOWER_ABS == 5e-5 + 1e-12
+
+
+def test_the_matpower_check_is_written_apart_from_the_exporter():
+    # GK B (73): the projection never calls the exporter's code.
+    import inspect
+
+    src = inspect.getsource(outcomes._matpower_holds) + inspect.getsource(
+        outcomes._matpower_not_carried
+    )
+    assert "routers" not in src and "_export_matpower" not in src
+
+
+def test_a_matpower_export_of_a_hub_names_its_links_and_storage(
+    template_in_project, harness
+):
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert out["outcome"] == "completed", out
+    assert {"Link", "StorageUnit"} <= set(out["counts"]["not_carried"])
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        ("Bus", "v_nom", 1.0),
+        ("Load", "p_set", 0.001),
+        ("Generator", "p_nom", 0.001),
+        ("Generator", "marginal_cost", 0.5),
+        ("Line", "x", 1e-4),
+        ("Line", "s_nom", 1.0),
+        # GK B (74): each carried field has its own killing case.
+        ("Line", "b", 1e-4),
+        ("Load", "q_set", 0.001),
+        ("Generator", "p_min_pu", 0.1),
+    ],
+)
+def test_a_matpower_export_unlike_the_network_reads_uncertain(
+    ieee14_in_project, harness, monkeypatch, edit
+):
+    # The file is written from a copy with one carried value moved.
+    import routers.io as io_router
+
+    cls, attr, step = edit
+    live = ieee14_in_project.network
+    changed = live.copy()
+    frame = changed.static(cls)
+    frame.loc[frame.index[0], attr] += step
+    real = io_router._export_matpower_text
+
+    def other():
+        ieee14_in_project.network = changed
+        try:
+            return real()
+        finally:
+            ieee14_in_project.network = live
+
+    monkeypatch.setattr(io_router, "_export_matpower_text", other)
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network"), edit
+
+
+@pytest.mark.parametrize(
+    "section, row",
+    [
+        ("mpc.bus", "\t99  1  0  0  0  0  1  1.0  0  110  1  1.1  0.9;\n"),
+        ("mpc.gen", "\t1  5  0  999  -999  1.0  100  1  10  0;\n"),
+        ("mpc.branch", "\t1  2  0.01  0.1  0  50  0  0  0  0  1;\n"),
+    ],
+)
+def test_a_matpower_export_with_an_extra_row_reads_uncertain(
+    ieee14_in_project, harness, monkeypatch, section, row
+):
+    # Mutants: a row the live network does not have, after all of its own.
+    import routers.io as io_router
+
+    real = io_router._export_matpower_text
+
+    def extra():
+        lines = real().splitlines(keepends=True)
+        first = next(
+            i for i, line in enumerate(lines) if line.startswith(section + " ")
+        )
+        end = next(i for i in range(first, len(lines)) if lines[i].startswith("];"))
+        return "".join(lines[:end] + [row] + lines[end:])
+
+    monkeypatch.setattr(io_router, "_export_matpower_text", extra)
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+def test_a_matpower_export_of_values_finer_than_4_decimals_is_completed(
+    ieee14_in_project, harness
+):
+    # The file rounds to 4 decimals: a live value with more is still held.
+    live = ieee14_in_project.network
+    live.loads.loc[live.loads.index[0], "p_set"] = 12.345678
+    live.loads.loc[live.loads.index[0], "q_set"] = -3.14159265
+    live.generators.loc[live.generators.index[0], "marginal_cost"] = 2.718281828
+    live.generators.loc[live.generators.index[0], "p_min_pu"] = 0.123456789
+    live.lines.loc[live.lines.index[0], "s_nom"] = 99.999987
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("completed", None), out
+
+
+def test_a_matpower_export_with_another_load_q_reads_uncertain(
+    ieee14_in_project, harness, monkeypatch
+):
+    # A bus with both P and Q demand, and only Q differs in the file.
+    import routers.io as io_router
+
+    live = ieee14_in_project.network
+    load = live.loads.index[0]
+    live.loads.loc[load, ["p_set", "q_set"]] = [5.0, 1.0]
+    changed = live.copy()
+    changed.loads.loc[load, "q_set"] = 1.5
+    real = io_router._export_matpower_text
+
+    def other():
+        ieee14_in_project.network = changed
+        try:
+            return real()
+        finally:
+            ieee14_in_project.network = live
+
+    monkeypatch.setattr(io_router, "_export_matpower_text", other)
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+@pytest.mark.parametrize("end", ["bus0", "bus1"])
+def test_a_matpower_export_with_a_line_on_other_buses_reads_uncertain(
+    ieee14_in_project, harness, monkeypatch, end
+):
+    import routers.io as io_router
+
+    live = ieee14_in_project.network
+    changed = live.copy()
+    line = changed.lines.index[0]
+    a, b = changed.lines.at[line, "bus0"], changed.lines.at[line, "bus1"]
+    v_nom = changed.buses.v_nom
+    other = next(
+        x for x in changed.buses.index if x not in (a, b) and v_nom[x] == v_nom[a]
+    )
+    changed.lines.loc[line, end] = other
+    real = io_router._export_matpower_text
+
+    def moved():
+        ieee14_in_project.network = changed
+        try:
+            return real()
+        finally:
+            ieee14_in_project.network = live
+
+    monkeypatch.setattr(io_router, "_export_matpower_text", moved)
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+def test_a_matpower_export_of_a_generator_on_an_unknown_bus_reads_uncertain(
+    ieee14_in_project, harness
+):
+    # The exporter writes such a generator on bus 1; the check has no fallback.
+    live = ieee14_in_project.network
+    live.generators.loc[live.generators.index[0], "bus"] = "nowhere"
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+def test_a_matpower_export_with_another_bus_type_reads_uncertain(
+    ieee14_in_project, harness, monkeypatch
+):
+    # The bus `type` column, which the import parser drops, is read from the text.
+    import routers.io as io_router
+
+    live = ieee14_in_project.network
+    changed = live.copy()
+    changed.buses.loc[changed.buses.index[0], "control"] = "Slack"
+    real = io_router._export_matpower_text
+
+    def other():
+        ieee14_in_project.network = changed
+        try:
+            return real()
+        finally:
+            ieee14_in_project.network = live
+
+    monkeypatch.setattr(io_router, "_export_matpower_text", other)
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+def test_a_matpower_export_with_a_generator_on_another_bus_reads_uncertain(
+    ieee14_in_project, harness, monkeypatch
+):
+    import routers.io as io_router
+
+    live = ieee14_in_project.network
+    changed = live.copy()
+    gen = changed.generators.index[0]
+    other = next(
+        b for b in changed.buses.index if b != changed.generators.at[gen, "bus"]
+    )
+    changed.generators.loc[gen, "bus"] = other
+    real = io_router._export_matpower_text
+
+    def moved():
+        ieee14_in_project.network = changed
+        try:
+            return real()
+        finally:
+            ieee14_in_project.network = live
+
+    monkeypatch.setattr(io_router, "_export_matpower_text", moved)
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+def test_a_matpower_export_of_loads_with_only_p_or_only_q_is_completed(
+    ieee14_in_project, harness
+):
+    # A bus with demand in one of P or Q still carries its load row.
+    loads = ieee14_in_project.network.loads
+    assert loads.bus.iloc[0] != loads.bus.iloc[1]
+    loads.loc[loads.index[0], ["p_set", "q_set"]] = [0.0, 2.5]
+    loads.loc[loads.index[1], ["p_set", "q_set"]] = [3.5, 0.0]
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("completed", None), out
+
+
+def test_an_import_of_an_unknown_format_has_no_note(baseline):
+    from routers.io import _export_csv_zip_bytes
+    from services import upload_service
+    from services.assistant_tools import _project
+
+    project, directory, _owner = _project()
+    meta = upload_service.add_upload(
+        project.name,
+        _export_csv_zip_bytes(),
+        "t.zip",
+        "application/zip",
+        kind="user_upload",
+        project_dir=directory,
+    )
+    note = outcomes.note_import(
+        "import_uploaded_network", {"file_id": meta.file_id, "format": "bogus"}
+    )
+    assert note == {"tool": "import_uploaded_network", "error": True}
+
+
+def test_a_matpower_export_missing_a_line_reads_uncertain(
+    ieee14_in_project, harness, monkeypatch
+):
+    import routers.io as io_router
+
+    real = io_router._export_matpower_text
+
+    def short():
+        lines = real().splitlines(keepends=True)
+        first = next(i for i, line in enumerate(lines) if line.startswith("mpc.branch"))
+        return "".join(lines[: first + 1] + lines[first + 2 :])
+
+    monkeypatch.setattr(io_router, "_export_matpower_text", short)
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+# ── Export edge cases (rows AA04-P6, AA04-P7) ─────────────────────────────
+
+
+def test_an_export_equal_to_a_user_upload_is_completed(
+    template_in_project, harness, monkeypatch
+):
+    # P6: the export's bytes dedup onto the person's own upload, which stays a
+    # user_upload. The watch proves it is this call's file: read it back.
+    import functools
+
+    import routers.io as io_router
+    from services import upload_service
+    from services.assistant_tools import _project
+
+    monkeypatch.setattr(
+        io_router,
+        "_export_netcdf_bytes",
+        functools.cache(io_router._export_netcdf_bytes),
+    )
+    project, directory, _owner = _project()
+    mine = upload_service.add_upload(
+        project.name,
+        io_router._export_netcdf_bytes(),
+        "mine.nc",
+        "application/x-netcdf",
+        kind="user_upload",
+        project_dir=directory,
+    )
+    result = _stream(harness, "export_network_nc", {})
+    assert result["file_id"] == mine.file_id and result["kind"] == "user_upload"
+    assert result["_outcome"]["outcome"] == "completed", result["_outcome"]
+
+
+def test_an_unrelated_upload_during_the_export_does_not_change_its_file(
+    template_in_project, harness, monkeypatch
+):
+    # GK B (73) Q2: another file lands in the same store while this call
+    # exports; the read-back still finds the call's own file.
+    import threading
+
+    from services import upload_service
+    from services.assistant_tools import _project
+
+    project, directory, _owner = _project()
+    real = chat_tools._save_agent_export
+
+    def with_neighbour(data, filename, mime, **kw):
+        t = threading.Thread(
+            target=upload_service.add_upload,
+            args=(project.name, b"unrelated", "n.txt", "text/plain"),
+            kwargs={"kind": "user_upload", "project_dir": directory},
+        )
+        t.start()
+        t.join()
+        return real(data, filename, mime, **kw)
+
+    monkeypatch.setattr(chat_tools, "_save_agent_export", with_neighbour)
+    result = _stream(harness, "export_network_nc", {})
+    assert result["_outcome"]["outcome"] == "completed", result["_outcome"]
+    names = {
+        m.filename
+        for m in upload_service.list_uploads(project.name, project_dir=directory)
+    }
+    assert "n.txt" in names
+
+
+def test_the_excel_export_read_uses_the_input_reader_not_prepare(
+    template_in_project, harness, monkeypatch
+):
+    # GK B (74) (not blocking): the export path's reader, by spy.
+    from services import excel_workbook
+
+    real_gs, calls = excel_workbook._gs, []
+
+    def spy():
+        calls.append(1)
+        return real_gs()
+
+    monkeypatch.setattr(excel_workbook, "_gs", spy)
+    monkeypatch.setattr(
+        excel_workbook, "prepare", lambda *a, **k: pytest.fail("prepare on export")
+    )
+    out = _stream(harness, "export_excel", {})["_outcome"]
+    assert out["outcome"] == "completed" and calls
+
+
+def test_an_excel_export_with_a_stale_priced_cost_reads_uncertain(
+    template_in_project, harness, monkeypatch
+):
+    # The workbook route re-derives a priced row's costs; the export read-back
+    # does not, so a stale cost in the file is seen.
+    import routers.io as io_router
+
+    changed = template_in_project.network.copy()
+    changed.storage_units.loc["bess_new", "capital_cost"] = 1.0
+    monkeypatch.setattr(io_router, "_export_excel_bytes", lambda: _excel_bytes(changed))
+    out = _stream(harness, "export_excel", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+def test_an_excel_export_missing_an_eh_column_reads_uncertain(
+    template_in_project, harness, monkeypatch
+):
+    # P7 for workbooks: no normalise step refills or coerces the column.
+    import routers.io as io_router
+
+    changed = template_in_project.network.copy()
+    changed.links.drop(columns="eh_role", inplace=True)
+    monkeypatch.setattr(io_router, "_export_excel_bytes", lambda: _excel_bytes(changed))
+    out = _stream(harness, "export_excel", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+def test_an_export_whose_result_names_another_file_reads_uncertain(
+    template_in_project, harness, monkeypatch
+):
+    # GK B (73) Q2: the watched file must be the one the call's result names.
+    real = chat_tools._save_agent_export
+
+    def renamed(data, filename, mime, **kw):
+        return {**real(data, filename, mime, **kw), "file_id": "someone-else"}
+
+    monkeypatch.setattr(chat_tools, "_save_agent_export", renamed)
+    out = _stream(harness, "export_network_nc", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "export_file_count")
+
+
+@pytest.mark.parametrize("bad", [None, {}, {"file_id": None}])
+def test_an_export_read_without_its_result_names_no_file(template_in_project, bad):
+    note = outcomes.note_export("export_network_nc")
+    chat_tools.export_network_nc()
+    out = outcomes.classify_export(note, outcomes.read_export(note, bad))
+    assert (out["outcome"], out["reason"]) == ("uncertain", "export_file_count")
+
+
+def test_a_csv_export_missing_an_eh_column_reads_uncertain(
+    template_in_project, harness, monkeypatch
+):
+    # P7 mutant: the export leaves out the links' eh_role column.
+    import io
+    import zipfile
+
+    import routers.io as io_router
+
+    assert "eh_role" in template_in_project.network.links.columns
+    real = io_router._export_csv_zip_bytes
+
+    def dropped():
+        import pandas as pd
+
+        source = zipfile.ZipFile(io.BytesIO(real()))
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, "w") as target:
+            for item in source.infolist():
+                data = source.read(item)
+                if item.filename.endswith("links.csv"):
+                    frame = pd.read_csv(io.BytesIO(data), index_col=0, dtype=str)
+                    data = frame.drop(columns="eh_role").to_csv().encode()
+                target.writestr(item, data)
+        return out.getvalue()
+
+    monkeypatch.setattr(io_router, "_export_csv_zip_bytes", dropped)
+    out = _stream(harness, "export_csv_bundle", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+def test_the_csv_import_read_back_still_normalises(baseline, monkeypatch):
+    # P7: only the export read-back skips the route's EH step; an import keeps it.
+    from routers.io import _export_csv_zip_bytes
+    from services.adequacy import eh_columns
+
+    chat_tools.import_network_nc(_b64(_template_bytes()), "t.nc")
+    bundle = _export_csv_zip_bytes()
+    real, calls = eh_columns.normalise_eh_columns, []
+    monkeypatch.setattr(
+        eh_columns, "normalise_eh_columns", lambda n: (calls.append(n), real(n))[1]
+    )
+    note = outcomes.note_import("import_csv_bundle", {"bytes_b64": _b64(bundle)})
+    assert not note.get("error") and calls
+    calls.clear()
+    outcomes._read_file("csv_bundle", bundle, export=True)
+    assert calls == []
+
+
+def test_a_csv_export_cell_the_reader_would_coerce_reads_uncertain(
+    template_in_project, harness, monkeypatch
+):
+    # P7: the import reader coerces an unreadable EH float cell to NaN. A read-back
+    # with that step would match a live NaN; the export read-back reads raw text.
+    import io
+    import zipfile
+
+    import routers.io as io_router
+
+    live = template_in_project.network
+    live.generators["rated_mva"] = float("nan")
+    real = io_router._export_csv_zip_bytes
+
+    def garbled():
+        source = zipfile.ZipFile(io.BytesIO(real()))
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, "w") as target:
+            for item in source.infolist():
+                data = source.read(item)
+                if item.filename.endswith("generators.csv"):
+                    head, *rows = data.decode().splitlines()
+                    col = head.split(",").index("rated_mva")
+                    cells = rows[0].split(",")
+                    cells[col] = "garbled"
+                    data = (
+                        "\n".join([head, ",".join(cells), *rows[1:]]).encode() + b"\n"
+                    )
+                target.writestr(item, data)
+        return out.getvalue()
+
+    monkeypatch.setattr(io_router, "_export_csv_zip_bytes", garbled)
+    out = _stream(harness, "export_csv_bundle", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
 
 
 def test_the_file_tools_are_write_tools():
@@ -521,12 +1214,6 @@ def _iread(**kw):
             _iread(),
             "uncertain",
             "no_submission",
-        ),
-        (
-            {"tool": "import_excel", "pending": True},
-            None,
-            "uncertain",
-            "adapter_pending",
         ),
         (_inote(), {"error": "readback_failed"}, "uncertain", "readback_failed"),
         (_inote(), {"error": "other_context"}, "uncertain", "other_context"),
@@ -631,12 +1318,6 @@ def _eread(**kw):
             _eread(),
             "uncertain",
             "no_submission",
-        ),
-        (
-            {"tool": "export_excel", "pending": True},
-            None,
-            "uncertain",
-            "adapter_pending",
         ),
         (_enote(), {"error": "readback_failed"}, "uncertain", "readback_failed"),
         (_enote(), {"new_files": 0}, "uncertain", "export_file_count"),
@@ -761,32 +1442,6 @@ def test_the_digest_sees_meta():
     before = outcomes.network_digest(n)
     n.meta = {**n.meta, "asset_params": {"x": 1}}
     assert outcomes.network_digest(n) != before
-
-
-def test_an_export_landing_on_a_user_upload_reads_uncertain(
-    template_in_project, harness, monkeypatch
-):
-    # E5 / M12: the call's one upload is not an agent_export (a dedup onto a
-    # user upload of the same bytes), so there is no export file to read.
-    import functools
-
-    import routers.io as io_router
-    from services import upload_service
-    from services.assistant_tools import _project
-
-    cached = functools.cache(io_router._export_netcdf_bytes)
-    monkeypatch.setattr(io_router, "_export_netcdf_bytes", cached)
-    project, directory, _owner = _project()
-    upload_service.add_upload(
-        project.name,
-        cached(),
-        "mine.nc",
-        "application/x-netcdf",
-        kind="user_upload",
-        project_dir=directory,
-    )
-    out = _stream(harness, "export_network_nc", {})["_outcome"]
-    assert (out["outcome"], out["reason"]) == ("uncertain", "export_file_count")
 
 
 def test_stored_bytes_unlike_their_hash_read_uncertain(

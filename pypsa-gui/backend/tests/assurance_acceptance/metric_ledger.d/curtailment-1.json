@@ -8,6 +8,7 @@
     "tolerance": "harness.curtailment_calculations:RESIDUAL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_curtailment_of_a_variable_generator[G1]",
     "status": "verified",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -22,6 +23,7 @@
     "tolerance": "harness.curtailment_calculations:RESIDUAL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_curtailment_of_a_variable_generator[G1]",
     "status": "verified",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",
@@ -36,6 +38,7 @@
     "tolerance": "harness.curtailment_calculations:RESIDUAL_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_result_profiles_assurance.py::test_curtailment_of_a_variable_generator[G1]",
     "status": "verified",
+    "domain_review": "gk-b:eb6118a10bf2f3b97d47fef6a6d3ed8a259da417",
     "surfaces": {
      "answer": {
       "status": "verified",

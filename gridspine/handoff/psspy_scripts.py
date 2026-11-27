@@ -13,10 +13,13 @@ machine (``grid_machine``) at the PoC side, whose impedance the script sets
 **Channels.** PSS/E records ``raw_<name>`` channels as it measures them; after
 the run the script reads the ``.out`` back with ``dyntools.CHNF.get_data``,
 applies :data:`CONVERSIONS` in a pure ``_convert`` function and writes the CSV
-with the header ``t_s``, the case's channels by their contract names, in
-contract units (``test_battery.CHANNELS``), then ``status``. So the read-back
-never sees a PSS/E unit. ``status`` is always in the header, so the header is
-fixed per case; it is empty on every row. id/iq come from the plant converter's current commands, pu on the plant
+at battery contract version 2 in the read-back's one dialect
+(``readback.channels.read_csv``, GK A2 T8): the header is ``time [s]``, then
+each of the case's channels as
+``<name> [<unit>]`` with name and unit from ``test_battery.CHANNELS``, in the
+case's order. So the read-back never sees a PSS/E unit. Every cell is a number,
+except a ``connected`` sample that was not read, which is blank (version 1:
+see "Connected"). id/iq come from the plant converter's current commands, pu on the plant
 machine's MBASE: the pack sets MBASE = plant rated apparent power, which is
 the contract base. P and Q are measured at the PoC: ``plant_branch`` is
 ``(from = poc_bus, to = plant side bus, ckt)``, so PSS/E reports the flow
@@ -54,7 +57,26 @@ at the plant machine's terminal, not at the PoC end of ``plant_branch``: no
 documented psspy branch-current channel was found (GK A ruling, issue 21). In
 pu the two currents differ by the plant branch's shunt and charging current and
 by any off-nominal ratio on it; a nominal-ratio transformer changes the
-current in A, not in pu. ``status`` stays in the header and is empty.
+current in A, not in pu. The CSV has no text column.
+
+**Connected** (GC-12, battery contract version 2). ``connected`` is 1 while
+the PoC branch and every plant machine (``status_machines``) is in service, 0
+once one is not. PSS/E records no status channel, so the script polls: every
+``psspy.run`` goes through ``_run(t_stop)``, which stops at each multiple of
+``POLL_DT_S`` inside the run and at ``t_stop`` itself (``_tpause``), so each
+event time stays an exact stop, and after each stop reads
+``brnint(..., 'STATUS')`` on the PoC branch and ``macint(..., 'STATUS')`` on
+each machine (``_poll``, first at t = 0). ``_combine`` gives 1 only when every
+reading is 1 with ``ierr`` 0, 0 when any reads 0, else a failed poll (blank,
+never 1), with its reason. ``_latch`` holds every poll after a 0 at 0; a blank
+never sets it. Each ``.out`` sample takes the first poll at or after it
+(``_connected``): a 1 is exact, since a 0 latches; a trip shows at most
+``POLL_DT_S`` early, never late. ``POLL_DT_S`` is the case's time step DELT
+(``dsrval('DELT')``, read after ``strt``): the runs write a sample every step
+(NPLT = 1), so the polls are never coarser than the samples (GK A P2). A
+version-1 script keeps master's ``t_s`` / bare-name / ``status`` CSV byte-equal
+and polls nothing; only version 2 writes the read-back dialect above. The reasons of failed polls go to the
+sidecar ``<case_id>.status.txt`` (text, read back as a reason, never as data).
 
 The psspy calls were written without a PSS/E licence: :data:`PENDING` is
 repeated in every script, :data:`EVENT_CALLS` / :data:`CHANNEL_CALLS`
@@ -68,6 +90,10 @@ import os
 import re
 
 from gridspine.handoff.test_battery import (
+    CHANNELS,
+    CONNECTED,
+    CONTRACT_VERSION,
+    contract_channels,
     fault_impedance_ohm,
     thevenin_impedances_ohm,
     validate_battery,
@@ -98,6 +124,28 @@ UNVERIFIED = {
         "source found"
     ),
     "fnsl": "option order and meaning of FNSL_OPTIONS",
+    "multiple REPCA1 monitoring one branch": (
+        "a detailed plant's machines each carry a REPCA1 on the same PoC branch, "
+        "gains shared by MBASE (dyr_writer.share_repca1); derived from the "
+        "machine-MBASE base of REPCA1 and checked against a reduced REPC_A model, "
+        "not against PSS/E"
+    ),
+    "REPCA1 references": (
+        "increment_gref and increment_vref on a machine with a REPCA1 move that "
+        "REPCA1's Plant_pref and Vref/Qref, in pu of the machine's MBASE; a "
+        "detailed plant steps every machine's (the step scaling relies on it)"
+    ),
+    "detailed plant currents": (
+        "a detailed plant's id_pu, iq_pu and i_poc_pu are the MBASE-weighted sums of "
+        "its machines' channels on the plant rating, which assumes one terminal bus "
+        "and currents in phase (equal pu dispatch)"
+    ),
+    "DELT": "dsrval('DELT') returns (ierr, the dynamic simulation time step in s)",
+    "STATUS polls": (
+        "brnint(..., 'STATUS') and macint(..., 'STATUS') return (ierr, 1 in service "
+        "/ 0 out of service), and a plant protection model's trip sets the "
+        "machine's or the branch's status to 0 during the run"
+    ),
     "solved": "psspy.solved() returns 0 when the last solution converged",
     "ITERM channel": (
         f"machine_array_channel quantity code {ITERM_CODE} is ITERM, the terminal current "
@@ -202,6 +250,10 @@ _FILE_LIKE = re.compile(r"[^\s]+\.[A-Za-z][A-Za-z0-9]{0,4}")
 _ABS = re.compile(r"(/|\\|~|[A-Za-z]:[\\/])")
 _PLANT_KINDS = ("v_step", "q_step", "p_step")
 _STEP_DT_S = 0.005
+#: the time tolerance (s) of the ``connected`` poll helpers; the poll grid is DELT
+EPS_S = 1e-9
+#: the per-case sidecar that carries failed-poll reasons (text, never data)
+STATUS_SIDECAR = "{case_id}.status.txt"
 _TWO_PI = 2.0 * math.pi
 
 
@@ -219,7 +271,10 @@ _HERE_EXPR = "os.path.dirname(os.path.abspath(__file__))"
 
 
 def _open_ok(node, allowed):
-    """True for exactly ``open(os.path.join(HERE, '<allowed>.csv'), 'w')``."""
+    """
+    True for exactly ``open(os.path.join(HERE, '<allowed>'), 'w')`` on a
+    ``.csv`` or ``.status.txt`` pack file.
+    """
     if node.keywords or len(node.args) != 2:
         return False
     path, mode = node.args
@@ -235,7 +290,7 @@ def _open_ok(node, allowed):
         and here.id == "HERE"
         and isinstance(name, ast.Constant)
         and name.value in allowed
-        and str(name.value).endswith(".csv")
+        and str(name.value).endswith((".csv", ".status.txt"))
     )
 
 
@@ -359,7 +414,12 @@ def _pack_local(label, name):
         raise ContractError(f"{label} {name!r}: not pack-local (no directories)")
 
 
-def _event_lines(case, poc_kv):
+def _run_call(polled, t):
+    """One run to ``t``: through ``_run`` (polled, v2) or psspy.run as on v1."""
+    return f"_run({t})" if polled else f"psspy.run(0, {t}, 1000, 1, 0)"
+
+
+def _event_lines(case, poc_kv, polled=False, multi=False):
     p, kind = case.params, case.kind
     if kind == "flat":
         return ["# flat run: no event"]
@@ -373,7 +433,7 @@ def _event_lines(case, poc_kv):
         return [
             f"# three-phase fault, retained voltage {p['v_retained_pu']!r} pu",
             f"psspy.dist_bus_fault(POC_BUS, {vals})",
-            f"psspy.run(0, T_EVENT + {p['duration_s']!r}, 1000, 1, 0)",
+            _run_call(polled, f"T_EVENT + {p['duration_s']!r}"),
             "psspy.dist_clear_fault(1)",
         ]
     if kind == "fault_1ph":
@@ -383,9 +443,11 @@ def _event_lines(case, poc_kv):
             f"ZF_OHM = ({zf.real!r}, {zf.imag!r})",
             "ZF_PU = [z * psspy.sysmva() / POC_KV**2 for z in ZF_OHM]",
             "psspy.dist_scmu_fault_2([1, 1, POC_BUS, 0, 0], ZF_PU + [0.0, 0.0])",
-            f"psspy.run(0, T_EVENT + {p['duration_s']!r}, 1000, 1, 0)",
+            _run_call(polled, f"T_EVENT + {p['duration_s']!r}"),
             "psspy.dist_clear_fault(1)",
         ]
+    if kind in _PLANT_KINDS and multi:
+        return _member_step_lines(kind, p["step_pu"])
     if kind in ("v_step", "q_step"):
         return [f"psspy.increment_vref(PLANT_BUS, PLANT_ID, {p['step_pu']!r})"]
     if kind == "p_step":
@@ -410,16 +472,43 @@ def _event_lines(case, poc_kv):
         "    th = min(tau, HOLD)",
         "    cycles = DF0 * tau + RAMP * (0.5 * th * th + HOLD * (tau - th))",
         f"    psspy.change_state(K_ANGLE, ANGLE0 + {_TWO_PI!r} * cycles)",
-        "    psspy.run(0, T_EVENT + tau, 1000, 1, 0)",
+        "    " + _run_call(polled, "T_EVENT + tau"),
         "    n += 1",
     ]
 
 
 def _recorded(case):
-    return {r for ch in case.channels for r in CONVERSIONS[ch][0]}
+    # ``connected`` is polled (``_poll``), not a recorded channel
+    return {r for ch in case.channels if ch != CONNECTED for r in CONVERSIONS[ch][0]}
 
 
-def _channel_lines(case):
+def _member_step_lines(kind, step):
+    """
+    A detailed plant's step (GC-04b): every machine's REPCA1 reference moves.
+    A V step is in pu volts, the same for every machine. A Q or P step is in
+    pu of the plant rating; each machine's reference is in pu of its own
+    MBASE, so it moves by ``step * PLANT_MBASE / M_BASE[k]``: the same
+    reference MW on every machine, and each machine's output moves by the
+    step in its own pu, which is the aggregate's step under the gain sharing
+    (``dyr_writer.share_repca1``).
+    """
+    call = "increment_gref" if kind == "p_step" else "increment_vref"
+    if kind == "v_step":
+        return [
+            "for bus, mid in PLANT_MACHINES:  # pu volts, the same for every machine",
+            f"    psspy.{call}(bus, mid, {step!r})",
+        ]
+    return [
+        "for (bus, mid), m in zip(PLANT_MACHINES, M_BASE):  # same reference MW on each",
+        f"    psspy.{call}(bus, mid, {step!r} * PLANT_MBASE / m)",
+    ]
+
+
+#: Raw per-machine channels a detailed plant records once per machine.
+_MEMBER_RAW = ("raw_id_pu", "raw_iq_pu", "raw_i_term_pu")
+
+
+def _channel_lines(case, multi=False):
     raw, out = _recorded(case), []
     if "raw_theta_poc_deg" in raw:
         out.append(
@@ -444,48 +533,212 @@ def _channel_lines(case):
         ("raw_iq_pu", 23),
         ("raw_i_term_pu", ITERM_CODE),
     ):
-        if name in raw:
+        if name in raw and multi:
+            out += [
+                "for k, (bus, mid) in enumerate(PLANT_MACHINES):",
+                f"    psspy.machine_array_channel([-1, {code}, bus], mid, {name!r} + '_%d' % k)",
+            ]
+        elif name in raw:
             out.append(
                 f"psspy.machine_array_channel([-1, {code}, PLANT_BUS], PLANT_ID, {name!r})"
             )
     return out
 
 
-def _convert_lines(case):
+def _convert_lines(case, multi=False):
     """
     A pure ``_convert(rec, f0_hz, s_rated, m_base)``: recorded lists -> contract
-    units plus ``status`` (empty); ``m_base`` is the plant machine's MBASE as the
-    case holds it (``None`` without a plant machine); and a pure ``_csv_text(data, header)`` that formats them
-    (a str cell as is, a number by ``repr(float(x))``).
+    units, keyed ``time`` and the contract channel names; ``m_base`` is the plant
+    machine's MBASE as the case holds it (``None`` without a plant machine; a
+    list, one per machine, for a detailed plant, whose id/iq/i_poc are the
+    MBASE-weighted sums of its machines' channels on the plant rating); and
+    a pure ``_csv_text(data, columns, header)`` that formats them (a str cell as
+    is, a number by ``repr(float(x))``). A case that carries ``connected`` also
+    gets the pure status helpers (:func:`_status_lines`), and ``_convert`` reads
+    the polls from ``rec['poll_t']`` / ``rec['poll_v']``.
     """
+    polled = CONNECTED in case.channels
+    t_key = "time" if polled else "t_s"  # v1 keeps master's t_s and status (GK A P1)
     out = [
         "def _convert(rec, f0_hz, s_rated, m_base):",
-        "    out = {'t_s': list(rec['t_s'])}",
+        f"    out = {{{t_key!r}: list(rec['t_s'])}}",
     ]
     for ch in case.channels:
+        if ch == CONNECTED:
+            continue
         inputs, expr, formula = CONVERSIONS[ch]
         if len(inputs) > len("abc"):
             raise ContractError(
                 f"conversion of {ch!r}: {len(inputs)} inputs, at most 3"
             )
+        if multi and inputs[0] in _MEMBER_RAW:
+            out += [
+                f"    # sum over the plant machines of {inputs[0]} * MBASE_k / S_rated "
+                "(one terminal bus, currents in phase)",
+                f"    out[{ch!r}] = [sum(a * m for a, m in zip(row, m_base)) / s_rated "
+                f"for row in zip(*[rec[{inputs[0]!r} + '_%d' % k] "
+                "for k in range(len(m_base))])]",
+            ]
+            continue
         names = "abc"[: len(inputs)]
         cols = ", ".join(f"rec[{r!r}]" for r in inputs)
         out += [
             f"    # {formula}",
             f"    out[{ch!r}] = [{expr} for ({', '.join(names)},) in zip({cols})]",
         ]
+    if polled:
+        out += [
+            "    # the latched status polls, each sample taking the first poll at or after it",
+            f"    out[{CONNECTED!r}] = _connected(rec['t_s'], rec['poll_t'], rec['poll_v'])",
+        ]
+    else:
+        out.append("    out['status'] = ['' for _ in out['t_s']]")
+    sig, cols = (
+        ("data, columns, header", "c in columns")
+        if polled
+        else ("data, header", "h in header")
+    )
     return out + [
-        "    out['status'] = ['' for _ in out['t_s']]",
         "    return out",
         "",
         "",
-        "def _csv_text(data, header):",
+        f"def _csv_text({sig}):",
         "    def cell(x):",
         "        return x if isinstance(x, str) else repr(float(x))",
         "",
-        "    rows = [header, *zip(*[data[h] for h in header])]",
+        f"    rows = [header, *zip(*[data[{cols[0]}] for {cols}])]",
         "    return ''.join(','.join(cell(x) for x in row) + '\\n' for row in rows)",
         "",
+    ]
+
+
+def _status_lines():
+    """
+    The pure helpers behind ``connected`` (module docstring, "Connected"):
+    ``_tpause`` the run stops, ``_combine`` one poll, ``_latch`` the trip latch,
+    ``_connected`` the per-sample cells.
+    """
+    return [
+        "def _tpause(t_now, t_stop, dt):",
+        "    # every k*dt strictly inside (t_now, t_stop), then t_stop itself",
+        "    out, k = [], int(t_now // dt)",
+        "    while (k + 1) * dt < t_stop - EPS_S:",
+        "        k += 1",
+        "        if k * dt > t_now + EPS_S:",
+        "            out.append(k * dt)",
+        "    return out + [t_stop]",
+        "",
+        "",
+        "def _combine(readings):",
+        "    # readings: (label, ierr, status); 1 only if all read 1, a 0 read -> 0,",
+        "    # else a failed poll -> None (blank), with the reason",
+        "    if any(ierr == 0 and st == 0 for _, ierr, st in readings):",
+        "        return 0, ''",
+        "    bad = [",
+        "        f'{label}: ierr={ierr}, status={st!r}'",
+        "        for label, ierr, st in readings",
+        "        if ierr != 0 or st != 1",
+        "    ]",
+        "    return (None, '; '.join(bad)) if bad else (1, '')",
+        "",
+        "",
+        "def _latch(polls):",
+        "    # a 0 holds every later poll at 0; a blank (None) never sets the latch",
+        "    out, tripped = [], False",
+        "    for v in polls:",
+        "        tripped = tripped or v == 0",
+        "        out.append(0 if tripped else v)",
+        "    return out",
+        "",
+        "",
+        "def _connected(times, poll_t, poll_v):",
+        "    # sample t takes the first latched poll at or after t; none after -> blank",
+        "    latched, out, j = _latch(poll_v), [], 0",
+        "    for t in times:",
+        "        while j < len(poll_t) and poll_t[j] < t - EPS_S:",
+        "            j += 1",
+        "        v = latched[j] if j < len(poll_t) else None",
+        "        out.append('' if v is None else v)",
+        "    return out",
+        "",
+    ]
+
+
+def _delt_lines():
+    """
+    Poll every time step (GK A P2): the output writes a sample each step
+    (``psspy.run`` NPLT = 1), so POLL_DT_S = DELT is never coarser than the samples.
+    """
+    return [
+        "ierr, DELT = psspy.dsrval('DELT')",
+        "if ierr or not DELT > 0:",
+        "    raise SystemExit('time step DELT not read: connected cannot be polled')",
+        "POLL_DT_S = DELT  # one poll per time step, so per output sample",
+    ]
+
+
+def _run_lines(status_machines):
+    """
+    ``_run(t_stop)``: how a ``connected`` (v2) script advances the
+    simulation: it stops at every ``_tpause`` point and polls the PoC branch
+    and each plant machine after each stop.
+    """
+    return [
+        f"STATUS_MACHINES = {list(status_machines)!r}",
+        "POLLS = {'t_now': 0.0, 't': [], 'v': [], 'why': []}",
+        "",
+        "",
+        *_status_lines(),
+        "",
+        "def _poll(t):",
+        "    ierr, st = psspy.brnint(BR_FROM, BR_TO, BR_CKT, 'STATUS')",
+        "    readings = [('PoC branch', ierr, st)]",
+        "    for bus, mid in STATUS_MACHINES:",
+        "        ierr, st = psspy.macint(bus, mid, 'STATUS')",
+        "        readings.append((f'machine {bus} {mid}', ierr, st))",
+        "    v, why = _combine(readings)",
+        "    POLLS['t'].append(t)",
+        "    POLLS['v'].append(v)",
+        "    if why:",
+        "        POLLS['why'].append(f't={t!r} s: not read ({why})')",
+        "",
+        "",
+        "def _run(t_stop):",
+        "    for t in _tpause(POLLS['t_now'], t_stop, POLL_DT_S):",
+        "        psspy.run(0, t, 1000, 1, 0)",
+        "        _poll(t)",
+        "    POLLS['t_now'] = t_stop",
+        "",
+    ]
+
+
+def _header(case):
+    """
+    The CSV columns (``_convert`` keys) and header. Version 2: ``time [s]`` and
+    ``name [unit]`` (GK A2 T8). Version 1 keeps master's ``t_s``, bare names and
+    ``status`` byte-equal (GK A P1; no pack writes v1 scripts any more).
+    """
+    if CONNECTED not in case.channels:
+        return None, ["t_s", *case.channels, "status"]
+    columns = ["time", *case.channels]
+    header = ["time [s]", *(f"{ch} [{CHANNELS[ch].unit}]" for ch in case.channels)]
+    return columns, header
+
+
+def _member_base_lines():
+    """
+    Every plant machine's MBASE as the case holds it; their sum must be the
+    plant rating the steps and currents are scaled to.
+    """
+    return [
+        "M_BASE = []",
+        "for bus, mid in PLANT_MACHINES:",
+        "    ierr, m = psspy.macdat(bus, mid, 'MBASE')",
+        "    if ierr or not m > 0:",
+        "        raise SystemExit('plant machine MBASE not read from the case')",
+        "    M_BASE.append(m)",
+        "if abs(sum(M_BASE) - PLANT_MBASE) > 1e-6:",
+        "    raise SystemExit('plant machines MBASE sum differs from the plant rating')",
     ]
 
 
@@ -501,8 +754,14 @@ def _script(
     plant_machine,
     f0_hz,
     plant_mbase,
+    status_machines,
+    sidecar,
+    plant_machines=None,
 ):
     g, cid = case.grid, case.case_id
+    multi = plant_machines is not None and len(plant_machines) > 1
+    polled = CONNECTED in case.channels
+    columns, header = _header(case)
     z1, z0 = thevenin_impedances_ohm(g, poc_kv)
     to_pu = mbase / poc_kv**2
     z1p, z0p = z1 * to_pu, (None if z0 is None else z0 * to_pu)
@@ -534,17 +793,23 @@ def _script(
         f"T_EVENT, T_END = {case.t_event_s!r}, {case.t_end_s!r}",
         f"F0_HZ, PLANT_MBASE = {float(f0_hz)!r}, "
         f"{None if plant_mbase is None else float(plant_mbase)!r}",
-        f"HEADER = {['t_s', *case.channels, 'status']!r}",
+        *([f"COLUMNS = {columns!r}"] if polled else []),
+        f"HEADER = {header!r}",
     ]
+    if polled:
+        lines.append(f"EPS_S = {EPS_S!r}  # time tolerance of the status poll helpers")
     if plant_branch is not None:
         lines.append("BR_FROM, BR_TO, BR_CKT = {!r}, {!r}, {!r}".format(*plant_branch))
     if plant_machine is not None:
         lines.append("PLANT_BUS, PLANT_ID = {!r}, {!r}".format(*plant_machine))
+    if multi:
+        lines.append(f"PLANT_MACHINES = {[tuple(m) for m in plant_machines]!r}")
     lines += [
         "",
         "",
-        *_convert_lines(case),
+        *_convert_lines(case, multi),
         "",
+        *(_run_lines(status_machines) + [""] if polled else []),
         "psspy.psseinit()",
         "psspy.read(0, RAW)",
         "psspy.resq(SEQ)",
@@ -552,7 +817,9 @@ def _script(
         "if ierr or abs(mbase - GRID_MBASE) > 1e-6:",
         "    raise SystemExit('grid machine MBASE differs from the generated base')",
         *(
-            [
+            _member_base_lines()
+            if multi
+            else [
                 "ierr, M_BASE = psspy.macdat(PLANT_BUS, PLANT_ID, 'MBASE')",
                 "if ierr or not M_BASE > 0:",
                 "    raise SystemExit('plant machine MBASE not read from the case')",
@@ -581,19 +848,29 @@ def _script(
         "psspy.fact()",
         "psspy.tysl(0)",
         "psspy.dyre_new([1, 1, 1, 1], DYR, '', '', '')",
-        *_channel_lines(case),
+        *_channel_lines(case, multi),
         "psspy.strt(0, OUT)",
-        "psspy.run(0, T_EVENT, 1000, 1, 0)",
-        *_event_lines(case, poc_kv),
-        "psspy.run(0, T_END, 1000, 1, 0)",
+        *(_delt_lines() if polled else []),
+        *(["_poll(0.0)"] if polled else []),
+        _run_call(polled, "T_EVENT"),
+        *_event_lines(case, poc_kv, polled, multi),
+        _run_call(polled, "T_END"),
         "_title, idents, values = dyntools.CHNF(OUT).get_data()",
         "rec = {idents[k]: values[k] for k in idents if k != 'time'}",
         "rec['t_s'] = values['time']",
+        *(["rec['poll_t'], rec['poll_v'] = POLLS['t'], POLLS['v']"] if polled else []),
         "data = _convert(rec, F0_HZ, PLANT_MBASE, M_BASE)",
         f"with open(os.path.join(HERE, {csv!r}), 'w') as fh:",
-        "    fh.write(_csv_text(data, HEADER))",
-        "",
+        "    fh.write(_csv_text(data, COLUMNS, HEADER))"
+        if polled
+        else "    fh.write(_csv_text(data, HEADER))",
     ]
+    if polled:
+        lines += [
+            f"with open(os.path.join(HERE, {sidecar!r}), 'w') as fh:",
+            "    fh.write(''.join(w + '\\n' for w in POLLS['why']))",
+        ]
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -628,6 +905,9 @@ def write_scripts(
     plant_branch=None,
     plant_machine=None,
     plant_mbase_mva=None,
+    contract_version=CONTRACT_VERSION,
+    status_machines=None,
+    plant_machines=None,
 ) -> dict:
     """
     Write ``run_<case_id>.py`` into ``pack_dir`` for each case; return
@@ -643,11 +923,27 @@ def write_scripts(
     and whose current commands id/iq and terminal current i_poc record; ``f0_hz`` the base frequency that
     turns PSS/E's pu frequency deviation into Hz; ``plant_mbase_mva`` the plant
     rating S_rated (the generated MBASE), needed when a case records ``i_poc_pu``.
+
+    ``contract_version`` is the battery's (``test_battery.CONTRACT_VERSIONS``):
+    every case is checked against it, and under version 2 each script polls
+    ``connected`` (module docstring, "Connected"), which needs ``plant_branch``
+    and ``plant_machine``. ``status_machines`` are the ``(bus, id)`` plant
+    machines polled for it, default ``(plant_machine,)``; ``connected`` reads 1
+    only while the PoC branch and every one of them is in service.
+
+    ``plant_machines`` are a detailed plant's ``(bus, id)`` machines (GC-04b),
+    each with a gain-shared REPCA1; ``plant_machine`` is the first of them and
+    ``plant_mbase_mva`` the sum of their MBASEs. A V step then moves every
+    machine's reference by the step, a Q or P step by the same reference MW
+    on each, so each output moves by the step in its own pu
+    (``_member_step_lines``), and id/iq/i_poc are the MBASE-weighted sums of
+    the machines' channels. One machine writes the aggregate's script.
     """
     cases = tuple(cases)
     if not cases:
         raise ContractError("no battery cases to write scripts for")
-    cases = validate_battery(cases)
+    contract_channels(contract_version)
+    cases = validate_battery(cases, contract_version)
     for label, name in (("raw", raw), ("seq", seq), ("dyr", dyr)):
         _pack_local(label, name)
     if not _is_positive_int(poc_bus):
@@ -682,6 +978,42 @@ def write_scripts(
         ok = isinstance(v, (int, float)) and not isinstance(v, bool)
         if not ok or not math.isfinite(v) or v <= 0:
             raise ContractError(f"{label}={v!r} must be a finite number > 0")
+    polled = CONNECTED in contract_channels(contract_version)
+    if polled and (plant_branch is None or plant_machine is None):
+        raise ContractError(
+            f"contract version {contract_version!r} records {CONNECTED!r}: the status "
+            "polls need plant_branch and plant_machine"
+        )
+    if status_machines is None:
+        status_machines = (plant_machine,) if polled else ()
+    status_machines = tuple(status_machines)
+    if polled and not status_machines:
+        raise ContractError(f"{CONNECTED!r} needs at least one status machine")
+    for m in status_machines:
+        _check_machine("status_machines entry", m)
+    if plant_machines is not None:
+        plant_machines = tuple(tuple(m) for m in plant_machines)
+        if not plant_machines:
+            raise ContractError("plant_machines is empty")
+        for m in plant_machines:
+            _check_machine("plant_machines entry", m)
+        if len(set(plant_machines)) != len(plant_machines):
+            raise ContractError(f"plant_machines {plant_machines!r} repeat a machine")
+        if plant_machine is None or tuple(plant_machine) != plant_machines[0]:
+            raise ContractError(
+                f"plant_machine {plant_machine!r} is not the first of plant_machines "
+                f"{plant_machines!r}"
+            )
+        if len(plant_machines) > 1 and plant_mbase_mva is None:
+            raise ContractError(
+                "a detailed plant's steps and currents need plant_mbase_mva, the sum "
+                "of its machines' MBASE"
+            )
+    if not polled and status_machines:
+        raise ContractError(
+            f"status_machines given, but contract version {contract_version!r} has no "
+            f"{CONNECTED!r} channel"
+        )
     for c in cases:
         if plant_branch is None and set(c.channels) & {"p_poc_mw", "q_poc_mvar"}:
             raise ContractError(f"case {c.case_id}: P/Q channels need plant_branch")
@@ -700,6 +1032,7 @@ def write_scripts(
     for c in cases:
         files = {"RAW": raw, "SEQ": seq, "DYR": dyr, "OUT": f"{c.case_id}.out"}
         csv = f"{c.case_id}.csv"
+        sidecar = STATUS_SIDECAR.format(case_id=c.case_id)
         text = _script(
             c,
             files,
@@ -712,8 +1045,12 @@ def write_scripts(
             plant_machine,
             f0_hz,
             plant_mbase_mva,
+            status_machines,
+            sidecar,
+            plant_machines,
         )
-        check_script(text, {*files.values(), csv}, c.channels)
+        outputs = {csv, sidecar} if polled else {csv}
+        check_script(text, {*files.values(), *outputs}, c.channels)
         name = f"run_{c.case_id}.py"
         with open(
             os.path.join(pack_dir, name), "w", encoding="utf-8", newline="\n"

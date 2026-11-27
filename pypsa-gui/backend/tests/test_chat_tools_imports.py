@@ -33,6 +33,8 @@ import pathlib
 
 import pytest
 
+from harness import tool_fragments
+
 CHAT_TOOLS = pathlib.Path(__file__).resolve().parents[1] / "services" / "chat_tools.py"
 
 # Delegations that are KNOWN to be broken by more than a simple rename — each
@@ -53,7 +55,8 @@ KNOWN_BROKEN: dict[tuple[str, str], str] = {}
 
 def _delegated_imports() -> list[tuple[int, str, str]]:
     """(lineno, module, name) for every routers.*/services.* from-import."""
-    tree = ast.parse(CHAT_TOOLS.read_text(encoding="utf-8"))
+    # chat_tools.py plus the dispatcher fragments (RETRO-FRAG-1).
+    tree = tool_fragments.dispatcher_source_tree()
     out: list[tuple[int, str, str]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module and (

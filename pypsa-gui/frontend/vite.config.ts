@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 // `vitest/config` instead (it re-exports vite's own `defineConfig`
 // overloads, plus the module augmentation) is vitest's documented fix.
 import { defineConfig } from 'vitest/config'
+import { searchForWorkspaceRoot } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { authHtmlGatePlugin } from './vite.auth-gate'
@@ -72,6 +73,14 @@ export default defineConfig({
     // Cloud/agent previews override with `--host 0.0.0.0`.
     host: '127.0.0.1',
     port: 5173,
+    // The figure names are the backend's own file (src/utils/figureWords.ts,
+    // guided-results 04); the dev server may read that one file outside the root.
+    fs: {
+      allow: [
+        searchForWorkspaceRoot(process.cwd()),
+        path.resolve(rootDir, '../backend/services/figure_words.json'),
+      ],
+    },
     proxy: {
       '/api': 'http://127.0.0.1:8000',
     },

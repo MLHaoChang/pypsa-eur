@@ -452,7 +452,7 @@ export default function LoadFlow() {
 
 
   return (
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0">
+    <div data-testid="results-view-loadflow" className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0">
 
       {/* ── Truncated-window banner (FIX 1 secondary, results-tabs-window
           final review) — a narrow-but-wide window can still hit the

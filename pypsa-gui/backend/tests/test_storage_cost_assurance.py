@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from harness import calculations
+from harness.storage_calculations import REL_TOLERANCE
 from services import assurance_records, chat_service, workflow_tools
 from tests.assurance_acceptance.support import approval, public_text
 from tests.test_answer_assurance import checked  # noqa: F401
@@ -79,6 +80,9 @@ def test_direct_storage_cost_uses_independent_51_eur_oracle(priced, checked):
     result = answer(checked, frames)
     assert result["receipt"]["request_complete"]
     assert {b["metric"]: b["value"] for b in result["blocks"]} == VALUES
+    assert {b["metric"]: b["value"] for b in result["blocks"]} == pytest.approx(
+        VALUES, rel=REL_TOLERANCE
+    )
     text = public_text(frames)
     assert "StorageUnit Battery" in text and "51 EUR" in text
     assert "charging electricity" in text and "price year 2026" in text

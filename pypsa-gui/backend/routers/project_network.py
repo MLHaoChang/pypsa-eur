@@ -19,7 +19,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from routers.deps import ProjectDep
-from routers.network import _meta_payload, _serialize_component
+from routers.network import _meta_payload, _range_flags_payload, _serialize_component
 from services.project_context import ProjectContext
 from services.pypsa_service import PyPSAService
 
@@ -49,7 +49,16 @@ _PATH_SCOPED_COMPONENTS: dict[str, str] = {
 @router.get("/{project_id}/network/meta")
 def get_project_meta(ctx: ProjectContext = ProjectDep) -> dict:
     """The /network/meta payload for a SPECIFIC project's network."""
-    return _meta_payload(ctx.network, ctx.loaded_project)
+    return _meta_payload(ctx.network, ctx.loaded_project, ctx.storage_dir)
+
+
+@router.get("/{project_id}/network/range_flags")
+def get_project_range_flags(ctx: ProjectContext = ProjectDep) -> dict:
+    """A SPECIFIC project's range flags, ``{revision, flags}``. The revision is
+    read before the sweep, so the flags reflect at least that revision; no
+    lock is taken (see `routers.network._range_flags_payload`). Declared
+    before the `{component_class}` catch-all."""
+    return _range_flags_payload(ctx)
 
 
 @router.get("/{project_id}/network/{component_class}")

@@ -36,6 +36,38 @@ def _literal_constant(path: Path, name: str):
     raise ValueError(f'Cannot read literal schema constant {name} in {path}; update the reader.')
 
 
+# Repository modules of pure declarations, read with `_metadata` themselves.
+_METADATA_MODULES = {'harness.catalogue_base': 'pypsa-gui/backend/harness/catalogue_base.py'}
+
+
+def _static_tool_fragments():
+    """`harness.tool_fragments` with discovery that reads, not imports, the fragments.
+
+    The merge logic is the real module's (stdlib only, loaded by path); each
+    schema fragment imports only `harness.catalogue_base`, so `_metadata` reads it.
+    """
+    import importlib.util
+    from types import SimpleNamespace
+
+    spec = importlib.util.spec_from_file_location(
+        'assistant_metadata_tool_fragments', ROOT / 'pypsa-gui/backend/harness/tool_fragments.py')
+    real = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(real)
+
+    def discover(package: str) -> dict:
+        folder = ROOT / 'pypsa-gui/backend' / package.replace('.', '/')
+        out = {}
+        for path in sorted(folder.glob('[!_]*.py')):
+            namespace = _metadata(str(path.relative_to(ROOT)))
+            out[path.stem] = SimpleNamespace(
+                __name__=f'{package}.{path.stem}',
+                **{k: v for k, v in namespace.items() if not k.startswith('__')})
+        return out
+
+    return SimpleNamespace(SchemaFragments=real.SchemaFragments, SCHEMA_PACKAGE=real.SCHEMA_PACKAGE,
+                           FragmentError=real.FragmentError, discover=discover)
+
+
 def _metadata(relative: str) -> dict:
     """Evaluate repository-owned declarations, replacing only imported literals.
 
@@ -48,7 +80,15 @@ def _metadata(relative: str) -> dict:
     namespace = {'__name__': 'assistant_metadata', '__file__': str(path)}
     retained = []
     for node in tree.body:
-        if isinstance(node, ast.ImportFrom) and node.module not in ('__future__', 'typing'):
+        if isinstance(node, ast.ImportFrom) and node.module in _METADATA_MODULES:
+            # Declarations split across files (RETRO-FRAG-1): read the same way.
+            source = _metadata(_METADATA_MODULES[node.module])
+            for alias in node.names:
+                namespace[alias.asname or alias.name] = source[alias.name]
+        elif (isinstance(node, ast.ImportFrom) and node.module == 'harness'
+                and [a.name for a in node.names] == ['tool_fragments']):
+            namespace[node.names[0].asname or 'tool_fragments'] = _static_tool_fragments()
+        elif isinstance(node, ast.ImportFrom) and node.module not in ('__future__', 'typing'):
             if node.level or not node.module:
                 raise ValueError('Cannot read relative metadata imports; update the reader.')
             source = ROOT / 'pypsa-gui/backend' / (node.module.replace('.', '/') + '.py')
@@ -75,7 +115,7 @@ def build_inventory() -> dict:
     checked_tools = _literal_constant(ROOT / 'pypsa-gui/backend/harness/assurance.py', 'CHECKED_TOOLS')
     ack_panels = _literal_constant(ROOT / 'pypsa-gui/backend/harness/navigation.py', 'PANELS')
 
-    results = (ROOT / 'pypsa-gui/frontend/src/pages/Results.tsx').read_text()
+    results = (ROOT / 'pypsa-gui/frontend/src/pages/results/resultTabs.ts').read_text()
     tab_block = re.search(r'\bconst TABS:.*?=\s*\[(.*?)\n\]', results, re.S)
     if tab_block is None:
         raise ValueError('Cannot enumerate Results TABS; update the inventory reader.')
@@ -112,7 +152,7 @@ def build_inventory() -> dict:
         'status': 'source inventory and assurance adapter map; behavioral fixtures and GUI parameter mapping pending',
         'sources': [
             'pypsa-gui/backend/harness/catalogue.py', 'pypsa-gui/backend/harness/toolsets.py',
-            'pypsa-gui/frontend/src/pages/Results.tsx', 'pypsa-gui/frontend/src/store/uiStore.ts',
+            'pypsa-gui/frontend/src/pages/results/resultTabs.ts', 'pypsa-gui/frontend/src/store/uiStore.ts',
             'pypsa-gui/backend/models/energy_hub.py', 'pypsa-gui/backend/services/adequacy/mc.py',
             'pypsa-gui/backend/harness/assurance_coverage.py', 'pypsa-gui/backend/harness/assurance.py',
             'pypsa-gui/backend/harness/navigation.py',
