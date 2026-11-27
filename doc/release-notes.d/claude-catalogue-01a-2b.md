@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Projects made from an Energy Hub template now carry a plain display name for each template component (for example "Electrolyser" for `electrolyser`), served on the network meta payload as `display_names`. The ids stay as they were, nothing new is written to the project, and a project with no recorded template, or a grid benchmark, falls back to the ids.

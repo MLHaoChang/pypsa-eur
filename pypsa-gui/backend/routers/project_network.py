@@ -49,7 +49,7 @@ _PATH_SCOPED_COMPONENTS: dict[str, str] = {
 @router.get("/{project_id}/network/meta")
 def get_project_meta(ctx: ProjectContext = ProjectDep) -> dict:
     """The /network/meta payload for a SPECIFIC project's network."""
-    return _meta_payload(ctx.network, ctx.loaded_project)
+    return _meta_payload(ctx.network, ctx.loaded_project, ctx.storage_dir)
 
 
 @router.get("/{project_id}/network/{component_class}")
