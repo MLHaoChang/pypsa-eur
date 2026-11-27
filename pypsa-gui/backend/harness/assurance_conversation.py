@@ -47,19 +47,21 @@ QUESTIONS = {
 # stays with the model, which owns those tools.
 RESULTS_SUMMARY = re.compile(
     r"\b(?:key|main|headline)\s+results?\b"
-    r"|\b(?:summar(?:y|ise|ize)|overview)\s+(?:of\s+)?(?:the\s+|my\s+|this\s+)?(?:results?|run)\b",
+    r"|\b(?:summar(?:y|ise|ize)|overview)\s+(?:of\s+)?(?:the\s+|my\s+|this\s+)?(?:\w+\s+)?(?:results?|run)\b"
+    r"|\bresults?\s+(?:summary|overview)\b",
     re.I,
 )
 ACTION = re.compile(
     r"\b(?:export|download|save|open|navigate|go\s+to|create|add|remove|delete|edit"
-    r"|change|set|run\s+(?:a|the)\s+solve|solve|apply|attach(?:ed)?|upload|pdf|file"
-    r"|report|document|parameters?|view)\b",
+    r"|change|apply|attach(?:ed)?|upload|pdf|file|report|document|parameters?)\b",
     re.I,
 )
 
 
 def is_summary_request(message):
     return bool(RESULTS_SUMMARY.search(message)) and not ACTION.search(message)
+
+
 UNCHECKED_CHOICE = "Answer without a check"
 NETWORK_SUMMARY_CHOICES = (
     "Give me the energy balance for network",
@@ -71,18 +73,37 @@ SELECTED_SUMMARY_CHOICES = {
 }
 
 
-def summary_choices(ui):
+SELECTED_TABLES = {"Generator": "generators", "StorageUnit": "storage_units"}
+
+
+def summary_choices(ui, network):
     """The key-results card: the selected component's checked form first (only for a
-    class with a key-results profile), then network forms, then going on unchecked.
-    Each checked option is a complete request the bounded grammar scopes on its own."""
+    class with a key-results profile, and only when the active network has that
+    component under that class), then network forms, then going on unchecked. Each
+    checked option is a complete request the bounded grammar scopes on its own."""
     selected = (ui or {}).get("selected_component") if isinstance(ui, dict) else None
     options = []
     if isinstance(selected, dict):
-        form = SELECTED_SUMMARY_CHOICES.get(selected.get("class"))
-        name = selected.get("name")
-        if form and isinstance(name, str) and re.fullmatch(r"[\w .:/()+-]{1,128}", name):
-            options.append(form.format(name.strip()))
+        kind, name = selected.get("class"), selected.get("name")
+        table = getattr(network, SELECTED_TABLES.get(kind, ""), None)
+        if (
+            table is not None
+            and isinstance(name, str)
+            and re.fullmatch(r"[\w.:/()+-](?:[\w .:/()+-]{0,126}[\w.:/()+-])?", name)
+            and name in table.index
+        ):
+            options.append(SELECTED_SUMMARY_CHOICES[kind].format(name))
     return [*options, *NETWORK_SUMMARY_CHOICES, UNCHECKED_CHOICE]
+
+
+def clarify_summary(turn, ui, network):
+    """AA-09 S1: a summary outside every checked form gets the key-results card."""
+    scope = _needs(turn, None, "key_results_scope_required")
+    turn.clarification["options"] = summary_choices(ui, network)
+    scope["reason"] = turn.clarification["reason"]
+    return scope
+
+
 PENDING = {"cost_quantity_required", "explicit_cost_basis_required", "capacity_meaning_required"}
 
 

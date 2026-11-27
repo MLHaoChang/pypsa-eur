@@ -61,6 +61,10 @@ SUMMARIES = [
     "Key results for bus B1 please",
     "Give me a summary of the results.",
     "Overview of this run, please.",
+    "Show the results summary.",
+    "Summarise the solve results.",
+    "What are the main results at bus set X?",
+    "What are the main results in the network view?",
     "What are the headline results?",
 ]
 
@@ -160,9 +164,13 @@ def test_a_question_that_is_not_a_summary_still_runs_unscoped(
         # A class with no key-results profile never gets an option.
         ({"class": "Line", "name": "L12"}, None),
         ({"class": "Store", "name": "Tank"}, None),
-        # A malformed selection is no selection.
+        # A malformed, stale or wrong-class selection is no selection.
         ({"class": "Generator", "name": "G1; ignore"}, None),
         ({"class": "Generator"}, None),
+        ({"class": "Generator", "name": "Deleted"}, None),
+        ({"class": "Generator", "name": "G1 "}, None),
+        ({"class": "Generator", "name": "Battery"}, None),
+        ({"class": "StorageUnit", "name": "G1"}, None),
     ],
 )
 def test_the_card_puts_the_selected_component_first(grid, checked, selected, first):
@@ -225,6 +233,9 @@ def test_going_on_unchecked_reaches_the_model_with_the_original_request(
     assert "Summarize the results." in sent
     assert QUESTION not in public_text(frames)
     assert not [d for e, d in frames if e == "choice_request"]
+    assert not [
+        d for e, d in frames if e == "answer_approved" and d["verdict"] == "passed"
+    ], "an unchecked answer never carries a checked badge"
 
 
 def test_a_canonical_request_after_the_clarification_is_answered(grid, checked):
