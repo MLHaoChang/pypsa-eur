@@ -115,7 +115,9 @@ def test_a_v2_profile_differs_from_its_v1_only_in_labels(v2, v1):
         assert {k: v for k, v in old.items() if k not in ("label", "unit")} == {
             k: v for k, v in new.items() if k not in ("label", "unit")
         }
-        assert (old["unit"], new["unit"]) == V2_UNITS.get((v2, metric), (old["unit"], old["unit"]))
+        assert (old["unit"], new["unit"]) == V2_UNITS.get(
+            (v2, metric), (old["unit"], old["unit"])
+        )
         assert len(new["unit"]) <= 16  # answerAssurance.ts refuses a longer unit
         if (v2, metric) in V2_TAB_LABELS:
             assert new["label"] == V2_TAB_LABELS[v2, metric]
