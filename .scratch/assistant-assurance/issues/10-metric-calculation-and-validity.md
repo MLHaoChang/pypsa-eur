@@ -3,7 +3,7 @@
 
 # Metric semantics, deterministic calculations and raw validity
 
-Status: ready-for-agent; audit 2026-11-25: #1644, #1680, #1704, #1705, #1712 and #1707 all merged (S1-S7); left: NPV and other-domain metrics, plausibility adapter, per-metric domain review
+Status: done (#2057; NPV checked by investment-case/1; plausibility adapter moved to issue 28; unpinned ledger tolerances in issue 29)
 Model: Opus
 Progress: harness/calculations.py with generator, network and storage profiles shipped; other domains, NPV and validity checks pending
 Type: task
