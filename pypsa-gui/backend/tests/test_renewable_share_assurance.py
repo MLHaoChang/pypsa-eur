@@ -52,8 +52,10 @@ def private_store(tmp_path, monkeypatch):
 def _network(load=(10.0, 20.0, 8.0)):
     n = pypsa.Network()
     n.set_snapshots(STAMPS)
-    for column in ("objective", "stores", "generators"):
-        n.snapshot_weightings[column] = WEIGHTS
+    # Only the generator weights count; the other columns differ so a wrong column shows.
+    n.snapshot_weightings["generators"] = WEIGHTS
+    n.snapshot_weightings["objective"] = [3.0, 1.0, 0.25]
+    n.snapshot_weightings["stores"] = [0.25, 3.0, 1.0]
     n.add("Carrier", ["AC", "onwind", "biomass", "gas", "hydrogen"])
     n.add("Bus", "AC", v_nom=110, carrier="AC")
     n.add("Load", "L", bus="AC", p_set=list(load))
