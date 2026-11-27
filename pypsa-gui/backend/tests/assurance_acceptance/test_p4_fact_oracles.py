@@ -138,6 +138,7 @@ PREPARE = {
     "storage-unit-dispatch/1": solve_again,
     "branch-loading/1": overloaded,
     "investment-case/1": stored,
+    "investment-case/2": stored,
 }
 
 
@@ -312,6 +313,15 @@ CASES = [
     ),
 ]
 ORACLES = {profile: compute for profile, _m, compute, _e in CASES}
+# A /2 profile (AA 28) is held to its /1 predecessor's oracle: the same figure, only the label differs.
+V2_CASES = [
+    (v2, m, c, e)
+    for v2, v1 in __import__(
+        "harness.calculations", fromlist=["x"]
+    ).PREDECESSORS.items()
+    for p, m, c, e in CASES
+    if p == v1
+]
 
 
 def same(value, expected, exact):
@@ -390,6 +400,16 @@ SPLITS = [
     ("storage-unit-dispatch/1", "discharged_energy", 1),
     ("storage-unit-cost/1", "storage_discharge_expenditure", 1),
 ]
+
+
+@pytest.mark.parametrize(
+    "profile,metric,compute,exact", V2_CASES, ids=[c[0] for c in V2_CASES]
+)
+def test_the_v2_oracle_equals_the_recorded_fact(
+    request, checked, profile, metric, compute, exact
+):
+    ctx, scope = weighted(request, profile)
+    same(fact(checked, scope, metric), compute(ctx), exact)
 
 
 @pytest.mark.parametrize("profile,metric,cut", SPLITS, ids=[s[0] for s in SPLITS])

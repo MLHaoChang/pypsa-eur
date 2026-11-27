@@ -222,3 +222,21 @@ def test_a_table_over_the_work_budget_is_refused_by_name(classical, checked, mon
     # The hand table has 101 points and 2 units: 202 > 200.
     monkeypatch.setattr(copt_calculations, "COPT_WORK_BUDGET", 200)
     assert refused(checked, classical) == {"copt_table_too_large"}
+
+
+def test_the_v2_card_writes_the_figures_and_units_out(classical, checked):
+    """AA 28, UX (32): copt-screening/2 prints the ruled names and no raw unit word."""
+    values = published(classical, {"screening_lole": 1.68, "screening_eue": 58.8, "screening_lolp_max": 0.28})
+    scope = {"version": 1, "profile": "copt-screening/2", "project_id": classical.project_uuid,
+             "entity_id": "network", "retain": False}
+    frames = checked.run(NumericalProvider(values), message="Check the COPT.", checked_scope=scope)
+    assert answered(checked, frames) == values
+    lines = public_text(frames).splitlines()
+
+    def printed(label, unit):
+        return any(line.startswith(label + ": ") and line.endswith(f" {unit}.") for line in lines)
+
+    assert printed("Screening expected shortfall over the modelled horizon (COPT)", "h")
+    assert printed("Screening expected unserved energy over the modelled horizon (COPT)", "MWh")
+    assert printed("Highest hourly loss-of-load probability (COPT)", "(scale 0 to 1)")
+    assert not any(line.startswith("Screening EUE") or line.endswith(" probability.") for line in lines)

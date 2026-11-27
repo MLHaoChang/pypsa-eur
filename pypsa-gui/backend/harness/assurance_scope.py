@@ -39,6 +39,7 @@ class RequestScope(BaseModel):
         "generator-emissions/1", "network-emissions/1", "curtailment/1", "capacity/1", "system-cost-breakdown/1",
         "renewable-share/1",
         "storage-cycles/1", "energy-balance/1", "site-import/1", "investment-case/1", "investment-lcoe/1",
+        "investment-case/2", "investment-lcoe/2", "copt-screening/2",
         "copt-screening/1", "grid-readiness/1", "time-to-power/1", "ac-branch-loading/1",
         "branch-losses/1",
     ]
@@ -116,6 +117,7 @@ def validate(value):
     if scope.get("component_class") and scope["component_class"] not in classed.get(scope["profile"], ()):
         raise ValueError("unsupported_component_class")
     if scope["profile"] in ("energy-balance/1", "site-import/1", "investment-case/1", "investment-lcoe/1",
+                            "investment-case/2", "investment-lcoe/2", "copt-screening/2",
                             "copt-screening/1", "grid-readiness/1", "time-to-power/1") and (
         scope["entity_id"] != "network" or scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
@@ -251,11 +253,11 @@ def _from_message(message, project_id, ui_context):
         message.strip(), re.I,
     )
     if invest:
-        return validate({"version": 1, "profile": "investment-case/1", "project_id": project_id,
+        return validate({"version": 1, "profile": "investment-case/2", "project_id": project_id,
                          "entity_id": "network", "retain": False})
     if re.fullmatch(r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?(?:investment case )?lcoe\s+for\s+network[.!?]?",
                     message.strip(), re.I):
-        return validate({"version": 1, "profile": "investment-lcoe/1", "project_id": project_id,
+        return validate({"version": 1, "profile": "investment-lcoe/2", "project_id": project_id,
                          "entity_id": "network", "retain": False})
     if re.fullmatch(r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?grid[- ]readiness(?:\s+scorecard)?"
                     r"\s+for\s+network[.!?]?", message.strip(), re.I):
@@ -263,7 +265,7 @@ def _from_message(message, project_id, ui_context):
                          "entity_id": "network", "retain": False})
     if re.fullmatch(r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?(?:copt|screening adequacy|copt screening)"
                     r"\s+for\s+network[.!?]?", message.strip(), re.I):
-        return validate({"version": 1, "profile": "copt-screening/1", "project_id": project_id,
+        return validate({"version": 1, "profile": "copt-screening/2", "project_id": project_id,
                          "entity_id": "network", "retain": False})
     if site:
         value = {"version": 1, "profile": "site-import/1", "project_id": project_id,

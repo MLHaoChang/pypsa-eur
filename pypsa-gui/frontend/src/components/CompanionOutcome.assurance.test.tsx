@@ -61,6 +61,32 @@ describe('closed companion publication', () => {
     expect(screen.getByTestId('companion-outcome').getAttribute('data-answer-id')).toBe('answer-1')
   })
 
+  const withProfile = (profile: string) => {
+    const scoped = { ...receipt, request_scope: { ...receipt.request_scope, profile } }
+    vi.mocked(client.get).mockImplementation(async url => ({ data:
+      String(url).endsWith('/reliability/context') ? { version: 1, project_id: 'project-1' } : record({ receipt: scoped }),
+    }))
+    useChatStore.setState({ messages: checkedMessages().map(m => (m.receipt ? { ...m, receipt: scoped } : m)) })
+  }
+
+  // AA 28: the /2 profiles carry the ruled figure names beside /1, and render like any checked answer.
+  it.each(['investment-case/2', 'investment-lcoe/2', 'copt-screening/2', 'investment-case/1'])(
+    'renders a checked answer of %s', async profile => {
+      withProfile(profile)
+      render(<CompanionOutcome />)
+      expect(await screen.findByText(text)).toBeTruthy()
+      expect(screen.getAllByText('Requested results checked').length).toBeGreaterThan(0)
+      expect(screen.getByTestId('companion-outcome').getAttribute('data-answer-id')).toBe('answer-1')
+    })
+
+  it.each(['investment-case/3', 'copt-screening/0'])('does not render an answer of the unknown version %s', async profile => {
+    withProfile(profile)
+    render(<CompanionOutcome />)
+    await waitFor(() => expect(client.get).toHaveBeenCalled())
+    await act(async () => { await Promise.resolve() })
+    expect(screen.queryByText(text)).toBeNull()
+  })
+
   it.each([
     [true, true], [false, false], [undefined, false],
   ])('says the definition changed only when the record reads definition_changed %s', async (flag, shown) => {

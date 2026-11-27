@@ -14,6 +14,12 @@
       "tag": "LOLE",
       "basis": "Capacity outage probability table over the modelled hours, not per year (LOLE)"
     },
+    "screening_eue": {
+      "name": "Screening expected unserved energy over the modelled horizon (COPT)",
+      "unit": "MWh",
+      "tag": "EUE",
+      "basis": "Capacity outage probability table over the modelled hours, not per year (EUE)"
+    },
     "project_npv": {
       "name": "Project NPV at the WACC, after tax (unlevered)",
       "unit": "{currency}",

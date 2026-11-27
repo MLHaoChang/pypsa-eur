@@ -3,7 +3,7 @@
 
 # Checked-metric labels take the ruled figure names (investment-case/2, investment-lcoe/2, copt-screening/2)
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Gated: GK B. Lands after #2044 (it changes `assurance_contracts.v1.json`).
 From: guided-results 04 (`.scratch/guided-results/issues/04-figure-names-parity.md`), GK B (72) ruling 2026-11-26.
