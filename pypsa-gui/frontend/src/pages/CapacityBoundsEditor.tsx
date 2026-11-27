@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { BackupInputs } from './hubDesign/cards/BackupInputs'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Layers, Settings2 } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -171,15 +172,19 @@ export default function CapacityBoundsEditor() {
 
   if (totalCount === 0) {
     return (
-      <div className="p-6 text-center text-xs text-muted" data-testid="capacity-bounds-empty">
-        No asset in this network is sized by the optimiser. Tick “{EXTENDABLE_LABEL}” on an asset to list it
-        here.
+      <div className="flex flex-col gap-4 p-5">
+        <div className="p-6 text-center text-xs text-muted" data-testid="capacity-bounds-empty">
+          No asset in this network is sized by the optimiser. Tick “{EXTENDABLE_LABEL}” on an asset to list it
+          here.
+        </div>
+        <BackupInputs />
       </div>
     )
   }
 
   return (
     <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm">
+      <BackupInputs />
       <div className="text-[11.5px] text-muted -mt-2 leading-relaxed">
         Every extendable asset is listed here. Each can use a <span className="font-medium">single</span>{' '}
         min/max pair across the whole horizon, or <span className="font-medium">per-period</span> bounds

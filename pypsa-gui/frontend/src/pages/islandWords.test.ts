@@ -27,6 +27,6 @@ describe('island word map parity', () => {
     for (const f of ['./CampusIslandSection.tsx', './hubDesign/cards/IslandRequirementsCard.tsx']) {
       expect(read(f)).toContain('islandScenarioLabel(sc)')
     }
-    expect(read('./hubDesign/cards/IslandRequirementsCard.tsx')).toContain('ISLAND_REQUIREMENT_LABELS')
+    expect(read('./hubDesign/cards/BackupInputs.tsx')).toContain('ISLAND_REQUIREMENT_LABELS')
   })
 })
