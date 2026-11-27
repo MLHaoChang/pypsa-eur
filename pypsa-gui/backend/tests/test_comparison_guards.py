@@ -366,3 +366,22 @@ def test_a_profile_without_an_earlier_kind_gets_the_comparison_kind():
     }
     with pytest.raises(ValueError, match="^unsupported_result_cost_scope$"):
         assurance_scope.validate(scope)
+
+
+def test_a_profile_outside_the_allow_set_gets_the_comparison_kind(monkeypatch):
+    # Every released profile outside the set is refused earlier today; this
+    # pins the last guard itself, for the next profile added without a refusal.
+    monkeypatch.setattr(
+        assurance_scope,
+        "COMPARISON_PROFILES",
+        assurance_scope.COMPARISON_PROFILES - {"generator-cost/1"},
+    )
+    scope = {
+        "version": 1,
+        "profile": "generator-cost/1",
+        "project_id": "p1",
+        "entity_id": "G1",
+        "comparison_evidence_id": EID,
+    }
+    with pytest.raises(ValueError, match="^unsupported_comparison_scope$"):
+        assurance_scope.validate(scope)
