@@ -3,7 +3,7 @@
 
 # 21 — Guided verdict says 'straddles the goal' when the run cannot resolve it
 
-Status: ready-for-agent; audit 2026-11-25: #1927 merged (verdict states the resolution floor and minimum runs; runs below the floor refused at start); left: goal parity on the concentrator rail (issue 41)
+Status: done (2026-11-27 sweep: #1927 landed the verdict text; the remainder, issue 41, is done)
 Source: decide-report-journeys.md (walk 2026-11-17, master 0ab07339)
 Severity: misleads
 Journey fit: results. The verdict drives the go/no-go decision.
