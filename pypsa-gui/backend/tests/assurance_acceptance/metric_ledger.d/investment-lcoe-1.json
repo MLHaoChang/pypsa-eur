@@ -8,6 +8,8 @@
     "tolerance": "harness.investment_calculations:LCOE_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_investment_assurance.py::test_the_lcoe_from_the_retained_series",
     "status": "verified",
+    "domain_review": "pending",
+    "domain_review_note": "unpinned: test_investment_assurance.py does not name LCOE_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "pending",
@@ -22,6 +24,8 @@
     "tolerance": "harness.investment_calculations:LCOE_TOLERANCE",
     "oracle": "pypsa-gui/backend/tests/test_investment_assurance.py::test_the_lcoe_from_the_retained_series",
     "status": "verified",
+    "domain_review": "pending",
+    "domain_review_note": "unpinned: test_investment_assurance.py does not name LCOE_TOLERANCE (issue 29)",
     "surfaces": {
      "answer": {
       "status": "pending",

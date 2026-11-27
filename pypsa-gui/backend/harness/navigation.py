@@ -349,7 +349,10 @@ class OrdinaryTurn:
             if args is not None and adapter.read_kinds and kind not in adapter.read_kinds:
                 continue
             if tool_name == adapter.read_tool:
-                ref = adapter.read_ref(result)
+                if adapter.kind_read_ref is not None:
+                    ref = adapter.kind_read_ref(result, kind)
+                else:
+                    ref = adapter.read_ref(result)
                 if ref is not None:
                     self.reads[tab] = ref
 
@@ -404,7 +407,13 @@ def display(turn, acknowledgement, wait=ACK_WAIT_SECONDS):
             # A read names the parts it read (Capacity expansion: one of two).
             keys = tuple(k for k in keys if k in read)
         shown = {k: binding.get(k) for k in keys}
-        if read == shown:
+        if read == shown and len(keys) < len(adapter.ref_keys):
+            # A read of some parts of a multi-part view (Dispatch, Capacity
+            # expansion): the words name those parts, never the whole tab.
+            parts = [k.removesuffix("_sha256") for k in keys]
+            out["say"] = "showing " + ", ".join(parts)
+            out["parts"] = parts
+        elif read == shown:
             out["say"] = "showing"
         else:
             # The tab shows its own default view; the words describe the read.

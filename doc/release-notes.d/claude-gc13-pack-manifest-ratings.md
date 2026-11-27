@@ -1,0 +1,1 @@
+* Feat(gridspine): The PSCAD/EMT pack can carry the plant's rated MW and MVA, their source and the campus run's data hash in a hashed `ratings.json`. Pack read-back judges P- and Q-based cases on those ratings, names their source in every such row, and refuses a pack built from a different campus run (GC-13).

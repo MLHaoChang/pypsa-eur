@@ -1,0 +1,6 @@
+{
+ "served_by_tool": {
+  "GET /api/results/displayed/dispatch": "get_results",
+  "GET /api/results/displayed/overview": "get_results"
+ }
+}

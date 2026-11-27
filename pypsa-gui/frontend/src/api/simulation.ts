@@ -1437,6 +1437,10 @@ export interface HeadlineCard {
   formula_id: string | null
   /** What the figure belongs to, e.g. the line at the peak loading. */
   detail: string | null
+  /** LCOE card only (guided-results 04): the year whose money the real LCOE is in; null when not stated. */
+  money_year?: number | null
+  /** LCOE card only: its basis line, e.g. "investment case · real basis, 2024 EUR". */
+  basis?: string
   /**
    * This case minus its base case, in the card's unit (`?compare=1` only).
    * `pct` is null over a zero base; `value` is null, with `note` saying why,

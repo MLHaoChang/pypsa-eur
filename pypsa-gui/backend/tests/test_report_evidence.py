@@ -20,6 +20,7 @@ from pathlib import Path
 import pypsa
 
 from models.energy_hub import REPORT_SECTIONS
+from services import figure_words as FW
 from services.adequacy.study_report import SECTION_ORDER, build_study_report
 from services.reports import formatting as F
 from services.reports.evidence import (
@@ -433,7 +434,7 @@ def test_none_in_payload_never_renders_as_zero_in_any_cell():
     assert cert["EUE interval"] == F.NOT_ESTABLISHED
     sizing_total = ev.tables["sizing"].rows[-1]
     assert sizing_total[0] == "Total" and sizing_total[1] == F.NOT_ESTABLISHED
-    lole = next(r for r in ev.tables["headline"].rows if r[0].startswith("MC LOLE"))
+    lole = next(r for r in ev.tables["headline"].rows if r[0] == FW.label("expected_shortfall"))
     assert lole[1] == F.NOT_ESTABLISHED
     # A pipeline stage with no note is an empty cell, never a zero; its
     # solves are the ints the runner recorded.

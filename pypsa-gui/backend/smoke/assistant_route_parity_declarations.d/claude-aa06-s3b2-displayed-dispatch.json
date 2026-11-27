@@ -1,0 +1,12 @@
+{"binding_overrides": [
+ {"file": "api/displayedResults.ts", "method": "GET", "url": "/api/results/displayed/dispatch",
+  "routes": [["GET", "/api/results/cost_breakdown"], ["GET", "/api/results/generators"], ["GET", "/api/results/curtailment"],
+             ["GET", "/api/results/storage"], ["GET", "/api/results/storage_dispatch"], ["GET", "/api/results/store_dispatch"],
+             ["GET", "/api/results/store_energy"], ["GET", "/api/results/loads"], ["GET", "/api/results/links"],
+             ["GET", "/api/results/lost_load"], ["GET", "/api/results/economics_by_carrier"]],
+  "reason": "the Dispatch tab's source-bound view (A5.2 S3b-2): the eleven /results/* payloads the tab renders (the series for one source, lopf or ac_pf, and one window; curtailment and lost load for the window; the cost breakdown and economics by carrier), read under one guard through those routes' functions, plus one binding"},
+ {"file": "api/displayedResults.ts", "method": "GET", "url": "/api/results/displayed/overview",
+  "routes": [["GET", "/api/results/generators"], ["GET", "/api/results/storage_dispatch"], ["GET", "/api/results/loads"],
+             ["GET", "/api/results/curtailment"], ["GET", "/api/results/lost_load"], ["GET", "/api/results/cost_breakdown"]],
+  "reason": "the multi-period Overview tab's source-bound view (A5.2 S3b-2): the six whole-horizon /results/* payloads it renders (LP dispatch, no window), read under one guard through those routes' functions, plus one binding"}
+]}

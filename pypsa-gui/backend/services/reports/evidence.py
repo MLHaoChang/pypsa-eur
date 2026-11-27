@@ -39,6 +39,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from models.energy_hub import REPORT_SECTIONS
+from services import figure_words as FW
 from services.adequacy.study_report import (
     _SECTION_CAVEATS,
     _SECTION_QUESTION,
@@ -430,9 +431,12 @@ def _t_headline(headline: dict[str, Any]) -> EvidenceTable:
         ("ENS cap (‱ of demand)", F.fmt_number(headline.get("ens_cap_permyriad"), digits=2)),
         ("Achieved ENS (‱ of demand)", F.fmt_number(headline.get("achieved_ens_permyriad"), digits=2)),
         ("Achieved shed hours (h/yr)", F.fmt_number(headline.get("achieved_shed_hours"), digits=1)),
-        ("MC LOLE (h/yr)", F.fmt_number(headline.get("mc_lole_h"), unit="h/yr", digits=2)),
+        (FW.label("expected_shortfall"),
+         F.fmt_number(headline.get("mc_lole_h"), unit=FW.unit("expected_shortfall"), digits=2)),
         ("Cost at target", cost),
-        ("LCOE", F.fmt_number(tea.get("lcoe_eur_per_mwh"), unit="€/MWh", digits=1)),
+        # eh_report's TEA figure: cost at target / served energy, not the investment-case LCOE
+        (FW.name("study_cost_per_mwh"),
+         F.fmt_number(tea.get("lcoe_eur_per_mwh"), unit=FW.unit("study_cost_per_mwh"), digits=1)),
         ("LCOH", lcoh),
         ("Pack hash", F.fmt_text(headline.get("pack_hash"))),
         ("Assumptions hash", F.fmt_text(headline.get("assumptions_hash"))),
@@ -473,7 +477,8 @@ def _t_certification(payload: dict) -> EvidenceTable:
     rows = [
         ("Metric", F.fmt_text(payload.get("metric"))),
         ("Target LOLE", F.fmt_number(payload.get("target_lole_h"), unit="h/yr", digits=2)),
-        ("MC LOLE", F.fmt_number(payload.get("mc_lole_h"), unit="h/yr", digits=2)),
+        (FW.name("expected_shortfall"),
+         F.fmt_number(payload.get("mc_lole_h"), unit=FW.unit("expected_shortfall"), digits=2)),
         ("LOLE interval", F.fmt_ci(payload.get("lole_ci"), unit="h/yr")),
         ("EUE", F.fmt_number(payload.get("eue_mwh"), unit="MWh", digits=1)),
         ("EUE interval", F.fmt_ci(payload.get("eue_ci"), unit="MWh", digits=1)),
@@ -783,7 +788,9 @@ def _t_expert_rows(payload: dict) -> EvidenceTable:
 
 def _t_tea(tea: dict) -> EvidenceTable:
     rows = [
-        ("LCOE", F.fmt_number(tea.get("lcoe_eur_per_mwh"), unit="€/MWh", digits=1)),
+        # eh_report's TEA figure: cost at target / served energy, not the investment-case LCOE
+        (FW.name("study_cost_per_mwh"),
+         F.fmt_number(tea.get("lcoe_eur_per_mwh"), unit=FW.unit("study_cost_per_mwh"), digits=1)),
         ("LCOH", F.fmt_number(tea.get("lcoh_eur_per_kg"), unit="€/kg", digits=2)),
         ("LCOH status", F.fmt_status(tea.get("lcoh_status"))),
         ("Notes", F.fmt_text(tea.get("notes"))),

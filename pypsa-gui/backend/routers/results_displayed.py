@@ -290,7 +290,108 @@ def storage_view(source="lopf", window_from=None, window_to=None) -> dict:
         )
 
 
+# Dispatch follows the global result source (Load flow's LP / AC power flow
+# toggle), so it offers both; curtailment, lost load and the two aggregates
+# have no source and are read as the tab asks for them.
+DISPATCH_SOURCES = ("lopf", "ac_pf")
+# The per-snapshot parts the tab counts as "solved" (Dispatch.tsx hasResults).
+_DISPATCH_SOLVED = (
+    "generators",
+    "storage",
+    "storage_dispatch",
+    "store_dispatch",
+    "store_energy",
+    "loads",
+)
+
+
+def _parts(reads: dict) -> dict:
+    """A part whose route answered 204 is null, as the tab reads a 204."""
+    return {k: None if isinstance(v, Response) else v for k, v in reads.items()}
+
+
+def dispatch_view(source="lopf", window_from=None, window_to=None) -> dict:
+    """Dispatch renders eleven `/results/*` payloads: the per-snapshot series
+    for one source and window, curtailment and lost load for the window, and
+    the cost breakdown and economics by carrier. All are read under one guard,
+    so they come from one solve. With none of the series the tab counts as
+    solved, the view answers 204, as the tab then shows "not solved"."""
+    from harness.durable import network_guard
+    from routers import results
+
+    _offered(source, DISPATCH_SOURCES)
+    _window(window_from, window_to)
+    win = (window_from, window_to)
+    with network_guard():
+        if source == "ac_pf" and not isinstance(
+            results._state.get("ac_pf_results"), dict
+        ):
+            # No AC power flow on record: the old routes fall back to the live
+            # LP network, which must never be bound under an ac_pf label.
+            raise HTTPException(
+                422,
+                {
+                    "error_kind": "source_not_available",
+                    "message": "The AC power flow has not run yet. Run it, or show the LP dispatch.",
+                },
+            )
+        reads = {
+            "cost_breakdown": results.get_cost_breakdown(),
+            "generators": results.get_generator_results(source, *win),
+            "curtailment": results.get_curtailment(*win),
+            "storage": results.get_storage_results(source, *win),
+            "storage_dispatch": results.get_storage_dispatch_results(source, *win),
+            "store_dispatch": results.get_store_dispatch_results(source, *win),
+            "store_energy": results.get_store_energy_results(source, *win),
+            "loads": results.get_load_results(source, *win),
+            "links": results.get_link_results(source, *win),
+            "lost_load": results.get_lost_load(*win),
+            "economics_by_carrier": results.get_economics_by_carrier(),
+        }
+        parts = _parts(reads)
+        if all(parts[k] is None for k in _DISPATCH_SOLVED):
+            return _unavailable(reads["generators"])
+        return _bound(
+            "dispatch",
+            parts,
+            # Each part a chat read (get_results <kind>) can name, so a read of
+            # one part claims only it.
+            **{f"{k}_sha256": _sha256(v) for k, v in parts.items()},
+            source=source,
+            window_from=window_from,
+            window_to=window_to,
+        )
+
+
+def overview_view() -> dict:
+    """The multi-period Overview renders the whole-horizon `/results/*`
+    payloads its route defaults give (LP dispatch, no window): generators,
+    storage dispatch, loads, curtailment, lost load and the cost breakdown,
+    read under one guard. With none of generators, loads and the cost
+    breakdown the view answers 204, as the tab then shows "not solved"."""
+    from harness.durable import network_guard
+    from routers import results
+
+    with network_guard():
+        reads = {
+            "generators": results.get_generator_results("lopf", None, None),
+            "storage_dispatch": results.get_storage_dispatch_results(
+                "lopf", None, None
+            ),
+            "loads": results.get_load_results("lopf", None, None),
+            "curtailment": results.get_curtailment(None, None),
+            "lost_load": results.get_lost_load(None, None),
+            "cost_breakdown": results.get_cost_breakdown(),
+        }
+        parts = _parts(reads)
+        if all(parts[k] is None for k in ("generators", "loads", "cost_breakdown")):
+            return _unavailable(reads["generators"])
+        return _bound("overview", parts)
+
+
 VIEWS = {
+    "dispatch": dispatch_view,
+    "overview": overview_view,
     "prices": prices_view,
     "capex": capex_view,
     "storage": storage_view,
@@ -450,3 +551,32 @@ def get_displayed_storage(
         window_from=from_,
         window_to=to_,
     )
+
+
+@router.get("/dispatch")
+def get_displayed_dispatch(
+    source: str | None = Query(
+        None, description="The result source, lopf or ac_pf (default: lopf)."
+    ),
+    from_: int | None = Query(None, alias="from", **_INDEX),
+    to_: int | None = Query(None, alias="to", **_INDEX),
+    actor: User = Depends(require_user),
+):
+    """The Dispatch tab's payloads (eleven parts) and their one binding."""
+    return _serve(
+        dispatch_view,
+        actor,
+        source="lopf" if source is None else source,
+        window_from=from_,
+        window_to=to_,
+    )
+
+
+@router.get("/overview")
+def get_displayed_overview(
+    source: str | None = _SOURCE,
+    actor: User = Depends(require_user),
+):
+    """The multi-period Overview tab's payloads (six parts) and their one binding."""
+    _no_source(source)
+    return _serve(overview_view, actor)

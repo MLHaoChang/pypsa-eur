@@ -409,6 +409,16 @@ def test_the_spec_ships_the_generic_defaults_pack_data():
     assert any(VERSIONS_DIR.iterdir())
 
 
+def test_the_spec_ships_the_figure_words_beside_their_loader():
+    """guided-results 04: `services/figure_words.py` reads `figure_words.json` beside
+    itself at import, so the frozen app must carry it at `services/`."""
+    from services.figure_words import SOURCE
+
+    text = SPEC.read_text(encoding="utf-8")
+    assert '(str(BACKEND / "services" / "figure_words.json"), "services")' in text
+    assert SOURCE.parts[-2:] == ("services", "figure_words.json") and SOURCE.is_file()
+
+
 def test_the_build_script_builds_the_project_templates_with_gridspine_reachable():
     """A fresh checkout ships no `network.nc` templates unless the build makes
     them, and the IEEE 39-bus one needs gridspine on the path to be built

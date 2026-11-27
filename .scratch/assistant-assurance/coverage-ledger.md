@@ -960,3 +960,13 @@ generation (storage alone) withholds the share (`no_generation`).
   net clusters, injecting or unattributed sources, slack Generators) and runs with a removed slack
   (`unserved_energy_not_modelled`). The route answers these; the checked profile does not.
 - pending: multi-period networks (`unsupported_snapshot_scope`).
+
+### 2026-11-27 — AA-10 R5: per-metric domain review and close-out
+
+Every ledger row now carries `domain_review`: either `pending` or `gk-b:<sha of the PR GK B OK'd>`. The field feeds no tally and no gate, and `independent_domain_approval` stays False.
+- **Reviewed:**
+  - from their own PRs: R1 branch-losses (4 rows), R2 (10 rows), R3 system-cost-breakdown (4 rows) and R4 renewable-share (3 rows);
+  - from the R5 table, `.scratch/assistant-assurance/10-r5-domain-review.md`: 41 rows.
+- **Tolerance pin:** a row can hold a `gk-b:` sha only if its oracle test module names the tolerance constant the row cites (`unpinned_reviews`).
+- **Pending:** 38 verified rows, each with a `domain_review_note`, tracked in issue 29. Among them is `investment-case/1 project_irr`, which held R2's OK and whose tolerance is not pinned.
+- **Pending metrics with no checked profile:** 10 rows in `metric_ledger_pending.json`.

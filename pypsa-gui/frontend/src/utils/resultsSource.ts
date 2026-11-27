@@ -21,6 +21,16 @@ export interface ResultsSourceBinding {
   /** A5.2 S3b: Capacity expansion's hash of each part a chat read can name. */
   cost_breakdown_sha256?: string
   economics_by_carrier_sha256?: string
+  /** A5.2 S3b-2: Dispatch's hash of each other part a chat read can name. */
+  generators_sha256?: string
+  curtailment_sha256?: string
+  storage_sha256?: string
+  storage_dispatch_sha256?: string
+  store_dispatch_sha256?: string
+  store_energy_sha256?: string
+  loads_sha256?: string
+  links_sha256?: string
+  lost_load_sha256?: string
   run_id?: string
   section?: string | null
   baseline_run_id?: string | null
@@ -32,6 +42,9 @@ export function sameResultsSource(a: ResultsSourceBinding, b: ResultsSourceBindi
   const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].sort()
   return keys.every(k => a[k as keyof ResultsSourceBinding] === b[k as keyof ResultsSourceBinding])
 }
+
+const DISPATCH_PART_HASHES = ['generators', 'curtailment', 'storage', 'storage_dispatch', 'store_dispatch',
+  'store_energy', 'loads', 'links', 'lost_load'].map(part => `${part}_sha256`)
 
 /** Read the adapter's fetched-and-rendered evidence marker, never a tab mount. */
 export function displayedResultsSource(tab: string, root: Document | HTMLElement = document): ResultsSourceBinding | null {
@@ -50,7 +63,7 @@ export function displayedResultsSource(tab: string, root: Document | HTMLElement
         const keys = ['version', 'project_id', 'project_name', 'scope', 'data_sha256', 'input_sha256',
           'source', 'window_from', 'window_to', 'run_id', 'section', 'baseline_run_id', 'view',
           'period', 'week', 'read_sha256', 'threshold', 'limit', 'price_limit',
-          'cost_breakdown_sha256', 'economics_by_carrier_sha256']
+          'cost_breakdown_sha256', 'economics_by_carrier_sha256', ...DISPATCH_PART_HASHES]
         return Object.fromEntries(keys.filter(k => Object.prototype.hasOwnProperty.call(value, k)
           && (value[k as keyof ResultsSourceBinding] === null || typeof value[k as keyof ResultsSourceBinding] === 'string'
             || typeof value[k as keyof ResultsSourceBinding] === 'number' && Number.isFinite(value[k as keyof ResultsSourceBinding])))

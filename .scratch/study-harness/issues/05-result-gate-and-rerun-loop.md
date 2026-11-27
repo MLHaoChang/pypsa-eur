@@ -23,7 +23,7 @@ Design: [design.md](../design.md) §5, §6.2
 
 ## Acceptance criteria
 
-- [ ] LC-20's done-when: `oj-grid` clean returns no warnings; `oj-grid-bad` with one seeded defect per rule returns each finding traced to a fact. LC-T19 extra-claim withholding for plausibility findings depends on the assurance follow-up "Checked plausibility findings" (`.scratch/assistant-assurance/issues/10-metric-calculation-and-validity.md`), not on Codex K (GK B amendment on #851).
+- [ ] LC-20's done-when: `oj-grid` clean returns no warnings; `oj-grid-bad` with one seeded defect per rule returns each finding traced to a fact. LC-T19 extra-claim withholding for plausibility findings depends on the assurance follow-up "Checked plausibility findings" (`.scratch/assistant-assurance/issues/28-checked-plausibility-findings.md`, moved from issue 10), not on Codex K (GK B amendment on #851).
 - [x] An infeasible eh_site fixture: triage reads run, ≤2 changes are applied, one re-solve; ledger rows carry `rule` and `round`.
 - [x] A third round is refused; the run is `needs_user` with the failing rules.
 - [x] A profile with `native:run_margin_loop` never starts an agent turn for that rule.
