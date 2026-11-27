@@ -61,8 +61,24 @@ def refusal(n, project_dir: pathlib.Path | None) -> dict | None:
 
 
 def active_refusal() -> dict | None:
-    """`refusal` on the foreground network and its project."""
+    """`refusal` on the foreground network and its project. The network and the
+    project directory are read inside one non-blocking hold of the network lock
+    when it is free, so a project load cannot pair one project's anchor with
+    another's network; a lock held elsewhere falls back to an unlocked read.
+
+    Covered starts: `POST /run` (and the chat run tools, which call the handler),
+    `POST /run_ac_pf` and the reliability study start (`check_eh_study_start`).
+    NOT gated yet (follow-up `.scratch/template-e2e/issues/`
+    `47-location-gate-study-starts.md`): `routers/studies.py` `start_study_run`
+    and `start_tornado`, the chat `start_supply_architectures`, and
+    `run_evidence.py`'s `start_study_run`."""
     from services.network_lengths import active_project_dir
     from services.pypsa_service import PyPSAService
 
+    lock = PyPSAService.get_lock()
+    if lock.acquire(blocking=False):
+        try:
+            return refusal(PyPSAService.get_network(), active_project_dir())
+        finally:
+            lock.release()
     return refusal(PyPSAService.get_network(), active_project_dir())
