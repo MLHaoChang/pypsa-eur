@@ -13,6 +13,7 @@ import { useHubStudy } from '../pages/hubDesign/useHubData'
 import { finishedStudyLabel } from '../utils/runStatus'
 import { RunsIndicator } from '../components/runStatus/RunsIndicator'
 import { nk } from '../utils/queryKeys'
+import { useStudyAbort, STUDY_ABORT_TITLE } from '../hooks/useStudyAbort'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useUIStore, type UiMode } from '../store/uiStore'
 import { UI_MODE_TITLES, uiModeToast } from '../utils/uiMode'
@@ -841,10 +842,7 @@ export default function AppHeader() {
   // A Guided goal study is running (not a queue job): Expert shows it as a run
   // too — read-only, Run disabled, Abort offered (template-e2e 25).
   const studyRunning = projectRun != null && projectRun.jobId == null && !projectRun.queued
-  const abortStudy = useMutation({
-    mutationFn: () => resultsApi.abortEhStudy(),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: nk(currentProject, 'results', 'eh_study') }),
-  })
+  const { abort: abortStudy, aborting: studyAborting } = useStudyAbort(currentProject, studyRunning)
 
   // R11 — the project on screen is READ-ONLY while its queue job solves it.
   // The backend already refuses the writes (main.py's solver-in-flight gate
@@ -861,7 +859,7 @@ export default function AppHeader() {
 
   const handleRunButton = async () => {
     if (studyRunning && !jobRunning && !isRunning) {
-      if (!abortStudy.isPending) abortStudy.mutate()
+      if (!studyAborting) abortStudy.mutate()
       return
     }
     // 1. RUNNING (queue job or legacy /run) → abort.
@@ -1164,12 +1162,14 @@ export default function AppHeader() {
           )}
           <button
             onClick={handleRunButton}
-            disabled={abort.isPending || abortStudy.isPending || enqueue.isPending || (readOnly && !amber) || gated}
+            disabled={abort.isPending || studyAborting || enqueue.isPending || (readOnly && !amber) || gated}
             title={readOnly && !amber
               ? 'Read-only: another user is editing this project'
               : gated
               ? `Cannot run yet — ${runGate.reason}`
-              : jobRunning || isRunning || studyRunning
+              : studyRunning && !jobRunning && !isRunning
+              ? STUDY_ABORT_TITLE
+              : jobRunning || isRunning
               ? 'Abort the running simulation'
               : jobQueued
                 ? 'Cancel this queued solve'
@@ -1192,7 +1192,7 @@ export default function AppHeader() {
             }}
           >
             {jobRunning || isRunning || studyRunning
-              ? <><Loader size={11} className="animate-spin" /> {abortStudy.isPending ? 'Aborting…' : 'Abort'}</>
+              ? <><Loader size={11} className="animate-spin" /> {studyAborting ? 'Aborting…' : 'Abort'}</>
               : jobQueued
                 ? <><Loader size={11} className="animate-spin" /> {queuedLabel}</>
                 : <>

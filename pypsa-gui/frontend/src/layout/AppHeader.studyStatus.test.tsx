@@ -126,3 +126,31 @@ describe('AppHeader during a Guided study (template-e2e 25)', () => {
     expect(useUIStore.getState().solvingReadOnly).toBe(false)
   })
 })
+
+describe('study abort feedback (UX 33 asks 2-4)', () => {
+  it('names the stage-boundary behaviour in the tooltip, and stays "Aborting…" until the study stops', async () => {
+    projectRun = study
+    useUIStore.setState({ uiMode: 'expert' })
+    const { rerender } = renderHeader()
+    const btn = await screen.findByRole('button', { name: /Abort/ })
+    expect(btn.getAttribute('title')).toBe('Stops at the next stage boundary; the network is left as it was.')
+    fireEvent.click(btn)
+    const aborting = await screen.findByRole('button', { name: /Aborting…/ })
+    expect((aborting as HTMLButtonElement).disabled).toBe(true)
+    // The POST has returned; the study still runs: still disabled.
+    await waitFor(() => expect(abortEhStudy).toHaveBeenCalled())
+    rerender(<QueryClientProvider client={new QueryClient()}><MemoryRouter><AppHeader /></MemoryRouter></QueryClientProvider>)
+    expect((screen.getByRole('button', { name: /Aborting…/ }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('toasts when the abort fails', async () => {
+    const toast = (await import('react-hot-toast')).default
+    const err = vi.spyOn(toast, 'error').mockImplementation(() => '')
+    abortEhStudy.mockRejectedValueOnce(new Error('boom'))
+    projectRun = study
+    useUIStore.setState({ uiMode: 'expert' })
+    renderHeader()
+    fireEvent.click(await screen.findByRole('button', { name: /Abort/ }))
+    await waitFor(() => expect(err).toHaveBeenCalledWith('The study could not be stopped. Try again in a moment.'))
+  })
+})

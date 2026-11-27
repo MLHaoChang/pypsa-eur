@@ -11,6 +11,7 @@
 import { Loader2, Play, Square } from 'lucide-react'
 import { useRunGate } from '../../../hooks/useRunGate'
 import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
+import { STUDY_ABORT_TITLE } from '../../../hooks/useStudyAbort'
 import { ScopeGate } from '../../../components/flowScope/ScopeGate'
 import { useFlowScope, useInScope } from '../../../components/flowScope/useFlowScope'
 import { useGoalStudy } from '../useGoalStudy'
@@ -25,7 +26,7 @@ export function GoalStudyRun() {
   const gate = useRunGate('all')
   const solveGate = useRunGate('optimisation')
   const {
-    project, study, running, templateUnknown, refetchTemplate, vollMissing, built, run, abort, problem,
+    project, study, running, templateUnknown, refetchTemplate, vollMissing, built, run, abort, aborting, problem,
   } = useGoalStudy()
   // The scope (W4a): with Reliability › goal & study off, the study is not run.
   const reliabilityOn = useInScope('reliability', 'goal_study')
@@ -73,10 +74,10 @@ export function GoalStudyRun() {
           <>
             <span data-testid="hub-run-running" className="text-[12px] text-muted">{runningText}</span>
             <button type="button" data-testid="hub-run-abort" onClick={() => abort.mutate()}
-              disabled={abort.isPending}
-              title="Stops at the next stage boundary; the network is left as it was."
+              disabled={aborting}
+              title={STUDY_ABORT_TITLE}
               className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] text-muted hover:border-danger hover:text-danger">
-              <Square size={10} /> {abort.isPending ? 'Aborting…' : 'Abort'}
+              <Square size={10} /> {aborting ? 'Aborting…' : 'Abort'}
             </button>
           </>
         )}
