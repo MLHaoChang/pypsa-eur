@@ -67,6 +67,28 @@ def _network_fingerprint():
             tuple(n.loads.index))
 
 
+# template-e2e 22 S3 (GK A): on the H2 hubs only the default storage_duration
+# lever runs; it re-specifies the candidate bess_new, which no rung builds, so
+# the rows tie. They used to differ only by lengthening the fixed site_battery.
+LEVERS_TIE: dict[str, str] = {
+    "eh_h2_hub": "lever options did not differentiate cost_at_target_eur",
+    "eh_h2_hub_staged": "lever options did not differentiate cost_at_target_eur",
+}
+
+
+def _assert_levers_tie(section: dict, note: str) -> None:
+    """The honest tie, pinned: solved rows, one cost, the fixed battery kept."""
+    assert (section["status"], section["note"]) == ("not_established", note)
+    table = section["payload"] or {}
+    assert int(table.get("comparable_solved") or 0) >= 2, table
+    costs = [o["cost_at_target_eur"] for o in table["options"]]
+    assert costs and all(c == pytest.approx(costs[0], rel=1e-9) for c in costs), costs
+    for o in table["options"]:
+        assert "site_battery" in o["applied"]["kept_storage"], o["applied"]
+        applied = o["applied"]["applied_storage"]
+        assert applied and all(a.startswith("bess_new") for a in applied), applied
+
+
 @pytest.mark.live_solve
 @pytest.mark.parametrize("tid", STUDY_PARAMS)
 def test_every_feature_on_the_template(tid, client, tmp_path, monkeypatch,
@@ -111,6 +133,9 @@ def test_every_feature_on_the_template(tid, client, tmp_path, monkeypatch,
             assert rep["sections"][section]["note"], section
     for must in ("target", "cost", "sizing", "frontier", "fmea_top",
                  "redundancy", "levers", "dtc", "certification"):
+        if must == "levers" and tid in LEVERS_TIE:
+            _assert_levers_tie(rep["sections"]["levers"], LEVERS_TIE[tid])
+            continue
         assert rep["completeness"][must] == "ok", (
             must, rep["sections"][must].get("note"))
     cert = rep["sections"]["certification"]["payload"] or {}
