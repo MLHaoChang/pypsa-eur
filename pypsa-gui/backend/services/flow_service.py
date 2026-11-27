@@ -1224,8 +1224,20 @@ def _money_year_items(facts: _Facts) -> list[dict]:
                   fld=cost_field, value=years)]
 
 
+def _site_anchored(project_dir: pathlib.Path) -> bool:
+    """True when the section-1 drawer has confirmed the site coordinates
+    (`site_anchor.json`); a draft or an unreadable file counts as not set."""
+    from services.site_scene import anchor
+    from services.site_scene.contract import SceneError
+    try:
+        stored = anchor.read_anchor(project_dir).get("anchor")
+    except SceneError:
+        return False
+    return bool(stored) and stored.get("confirmed") is True
+
+
 def _presence(facts: _Facts, *, islanded: bool, study_requested: bool,
-              loads_not_needed: bool = False) -> list[dict]:
+              loads_not_needed: bool = False, anchored: bool = False) -> list[dict]:
     """The presence rules (`PRESENCE_RULES`), all display-only (kind c)."""
     out: list[dict] = []
 
@@ -1233,9 +1245,12 @@ def _presence(facts: _Facts, *, islanded: bool, study_requested: bool,
         out.append(_item(code, severity, message, "flow", PRESENCE_RULES[code][0],
                          title=ISSUE_TITLES.get(code), **kw))
 
-    if facts.buses and facts.buses_placed == 0:
-        add("site_location_missing", "warning",
-            "The site has no location: no bus is placed.", component="Bus", fld="x")
+    if facts.buses and facts.buses_placed == 0 and not anchored:
+        # TEMPLATE-GAPS-1 Q1 (a): a missing location blocks Run until it is set
+        # (the drawer's confirmed site coordinates count, J12).
+        add("site_location_missing", "error",
+            "The site has no location: set its latitude and longitude before running.",
+            component="Bus", fld="x", blocking=True)
     elif facts.renewables_unplaced:
         by_bus: dict[str, list[str]] = {}
         for gen, bus in facts.renewables_unplaced:
@@ -1578,7 +1593,8 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
 
     items: list[dict] = []
     presence = _presence(facts, islanded=islanded, study_requested=study_requested,
-                         loads_not_needed=loads_not_needed)
+                         loads_not_needed=loads_not_needed,
+                         anchored=_site_anchored(project_dir))
     # The study's own VOLL refusal (blocking, same field) says it once.
     voll_refused = any(i["target"]["field"] == "voll" for i in study_items)
     if voll_refused:
@@ -1682,7 +1698,8 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
     def first_blocking(sources: tuple[str, ...]) -> dict | None:
         return next((_pointer(r["label"], it) for r in rows for it in r["items"]
                      if it["blocking"] and it["in_scope"]
-                     and (it["source"] in sources
+                     and (it["code"] == "site_location_missing"
+                          or it["source"] in sources
                           or ("loadflow" in sources
                               and (it["code"], it["target"]["entity"]) in also_loadflow))),
                     None)

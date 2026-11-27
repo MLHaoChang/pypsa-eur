@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A project with no site location now reads "incomplete" in Project & site and blocks Run until the latitude and longitude are set; confirming the site coordinates in the drawer clears it.

@@ -240,11 +240,11 @@ def test_the_chat_binds_the_site_through_its_card_and_reads_it_back_verified(
             "site_scene_apply",
             None,
         ]
-        # The flow has no run blocker yet; the first item the model reads is the
-        # route's own: the Site has no location (a warning, not a blocker).
-        assert flow_before["run_blocker"] is None
+        # The first item the model reads is the route's own: the Site has no
+        # location, and that blocks Run (TEMPLATE-GAPS-1 Q1 a).
         first = flow_before["sections"][0]["items"][0]
-        assert first["code"] == "site_location_missing" and not first["blocking"]
+        assert first["code"] == "site_location_missing" and first["blocking"]
+        assert flow_before["run_blocker"]["code"] == "site_location_missing"
         assert results[1]["value"] == first
         # V63: advance_workflow is a skill-workflow step, never a section tick.
         assert results[3]["error"].startswith("no_active_workflow"), results[3]
