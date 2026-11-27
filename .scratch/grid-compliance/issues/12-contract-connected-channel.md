@@ -5,7 +5,7 @@
 
 Model tier: opus
 Size: L (three PRs)
-Status: done (#PENDING-PR; PR-A #1647, PR-C #1650, PR-D #1708, PR-B the PSS/E CSV export; judging a PSS/E pack is GC-27)
+Status: done (#2058; PR-A #1647, PR-C #1650, PR-D #1708, PR-B the PSS/E CSV export; judging a PSS/E pack is GC-27)
 Type: task
 Parent: `.scratch/grid-compliance/spec.md` (follow-up of GC-07, GK A2 condition K3)
 Gated: yes (GK A, gridspine)
