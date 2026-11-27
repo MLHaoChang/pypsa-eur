@@ -176,12 +176,14 @@ function ConnectionLimitRow({ link, named, staged, liveStudy, schedule }: {
 /** "3.6 MW" at the tile rounding, without padding zeros. */
 const mwText = (x: number) => `${kpiFigure(String(x), 'MW').value.replace(/\.0+$|(\.\d*?)0+$/, '$1')} MW`
 
-/** The generic site's must-stay-on load as entered: "3.6 MW, 30 % of peak". */
+/** The generic site's must-stay-on load as entered: "3.6 MW in 2030 · 30 % of peak"
+ *  (data inside one line split with "·"). Null without a positive share, never "0 %".
+ *  The Results card states the same words (te-24), so the two cannot disagree. */
 export function genericCritical(t: EhTemplateMeta): string | null {
   const p = t.params
-  if (!t.site_type || !p) return null
+  if (!t.site_type || !p || !(p.critical_share > 0) || !p.stages.length) return null
   const last = p.stages[p.stages.length - 1]
-  return `${mwText(p.critical_share * last.peak_mw)} in ${last.year}, `
+  return `${mwText(p.critical_share * last.peak_mw)} in ${last.year} · `
     + `${Math.round(p.critical_share * 100)} % of peak`
 }
 
