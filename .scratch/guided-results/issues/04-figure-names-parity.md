@@ -1,6 +1,7 @@
 # One name and unit for LOLE, NPV and LCOE across Guided, Expert, reports and chat
 
-Status: ready-for-agent
+Status: done
+Note: follow-ups landed: #2074, #2076, #2077.
 Type: task
 Spec: `.scratch/guided-results/spec.md`; GK B (62) condition G5, UX (23) condition 9.
 

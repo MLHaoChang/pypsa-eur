@@ -96,9 +96,9 @@ export async function shot(ctx, name) {
   try { await ctx.page.screenshot({ path: path.join(ctx.out, `${ctx.template}-${name.replace(/[^\w.-]+/g, '_')}.png`) }) } catch { /* best effort */ }
 }
 
-export async function api(ctx, method, url) {
+export async function api(ctx, method, url, data) {
   const csrf = (await ctx.context.cookies()).find(cookie => cookie.name === 'pypsa_gui_csrf')?.value
-  return ctx.context.request.fetch(ctx.base + url, { method, headers: csrf ? { 'X-CSRF-Token': csrf } : {} })
+  return ctx.context.request.fetch(ctx.base + url, { method, headers: csrf ? { 'X-CSRF-Token': csrf } : {}, ...(data === undefined ? {} : { data }) })
 }
 
 /** The Guided hub panel; reopens it when a drawer or a jump to Expert closed it. Never press Escape. */

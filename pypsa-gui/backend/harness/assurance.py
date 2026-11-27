@@ -653,6 +653,9 @@ class Turn:
             assurance_metrics.investment.PROFILE: "Network",
             assurance_metrics.investment.LCOE_PROFILE: "Network",
             assurance_metrics.copt_screen.PROFILE: "Network",
+            assurance_metrics.investment.PROFILE_V2: "Network",
+            assurance_metrics.investment.LCOE_PROFILE_V2: "Network",
+            assurance_metrics.copt_screen.PROFILE_V2: "Network",
             assurance_metrics.readiness.PROFILE: "Network",
             assurance_metrics.time_to_power.PROFILE: "Network",
             assurance_metrics.renewable_share.PROFILE: "Network",
@@ -709,7 +712,7 @@ class Turn:
             lines.extend(assurance_metrics.readiness.notes(record["raw"], _label))
         if profile == assurance_metrics.time_to_power.PROFILE:
             lines.extend(assurance_metrics.time_to_power.notes(record["raw"], _label))
-        if profile == assurance_metrics.copt_screen.PROFILE:
+        if profile in assurance_metrics.copt_screen.PROFILES:
             lines.extend(assurance_metrics.copt_screen.notes(record["raw"]))
         if profile in assurance_metrics.investment.PROFILES:
             lines.extend(assurance_metrics.investment.notes(record["raw"], _label))

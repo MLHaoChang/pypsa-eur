@@ -15,7 +15,7 @@ import { fmtCurrency } from '../../results/shared'
 import { headline } from '../headline'
 import { kpiMoney } from '../plainWords'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
-import { REPORT, review } from '../testFixtures'
+import { DC_TEMPLATE, REPORT, SITE_TEMPLATE, review } from '../testFixtures'
 import { EDITED_TEXT, FRESHNESS_UNKNOWN_TEXT, ResultsCard } from './ResultsCard'
 import { useProjectFlow } from '../../../hooks/useProjectFlow'
 
@@ -617,5 +617,34 @@ describe('ResultsCard horizon label (issue 28)', () => {
     mount()
     const tile = await screen.findByTestId('hub-results-cost')
     await waitFor(() => expect(tile.textContent).toContain('valued to 2045 over 18 years'))
+  })
+})
+
+describe('ResultsCard critical load kept on (te-24)', () => {
+  beforeEach(() => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(study(REPORT))
+  })
+
+  it('states the must-stay-on load once, in the Site card\'s own words', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(SITE_TEMPLATE)
+    mount()
+    const line = await screen.findByTestId('hub-results-critical')
+    expect(line.textContent).toBe('Kept on in an outage: 3 MW in 2035 · 50 % of peak')
+    expect(screen.getAllByTestId('hub-results-critical')).toHaveLength(1)
+  })
+
+  it('shows no line for a template without a must-stay-on share', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(DC_TEMPLATE)
+    mount()
+    await screen.findByTestId('hub-results-verdict')
+    expect(screen.queryByTestId('hub-results-critical')).toBeNull()
+  })
+
+  it('shows no "0 %" line when the share is zero', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue({ ...SITE_TEMPLATE,
+      params: { ...SITE_TEMPLATE.params!, critical_share: 0 } })
+    mount()
+    await screen.findByTestId('hub-results-verdict')
+    expect(screen.queryByTestId('hub-results-critical')).toBeNull()
   })
 })

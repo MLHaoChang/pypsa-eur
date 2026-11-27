@@ -3,7 +3,7 @@
 
 # P3: verified action outcomes and real progress
 
-Status: ready-for-agent; S6 (2026-11-27, `claude/aa04-s6-file-formats`) turns the `_pending` file rows P1-P7 into passing cases, P8 stays a named limit, P10 closed by issue 15; left: S7 nonblocking-job cases (wait_for_job on `ad:`/`rpt:`/queue jobs; live-voice 11c has landed), mismatched artifacts (issue 05)
+Status: ready-for-agent; S6 (2026-11-27, `claude/aa04-s6-file-formats`) turns the `_pending` file rows P1-P7 into passing cases, P8 stays a named limit, P10 closed by issue 15; S7 (2026-11-27, `claude/aa04-s7-job-outcomes`) maps wait_for_job on `ad:`/`rpt:`/queue jobs from job_adapters' neutral view (passing); left: P11 and the S7 reason words (UI), mismatched artifacts (issue 05)
 Progress: S1 (blocking foreground-job outcomes, harness/outcomes.py) merged ee141c66; S1b (chat tool-line marks) in review; S2–S5 planned; update_component static inputs done (effects.py)
 Type: task
 Blocked by: none (01 and 02 done; live-voice 11a and 11b merged, #1548; only the nonblocking-job cases of the test matrix wait for live-voice 11c, the versioned job events)
@@ -463,8 +463,43 @@ handles, today `adapter_pending`), its own PR.
 | AA04-P8 csv float text precision | named limit, kept | test_a_csv_export_sees_no_change_below_its_float_tolerance. pypsa 1.1.2's CSV importer parses with pandas' default float parser; an exact read needs the private `_ImporterCSV` |
 | AA04-P10 enqueue_unique drops a different config | closed (issue 15, #1261) | `tests/test_solve_queue_config_conflict.py`: the route and chat tool refuse a differing config with 409 `solve_config_conflict` |
 | AA04-P11 MATPOWER not_carried on the chat tool line | pending: UI follow-up (toolOutcome.ts + UX review) | GK B (74): model-visible is enough for S6 (`_outcome.notice` names each class and its rows, test_a_matpower_export_is_completed_and_names_what_it_cannot_carry); the tool line does not render it yet |
-| Nonblocking job cases (wait_for_job on study/report/queue jobs) | pending: S7 | test_p3_job_outcomes.py::test_wait_on_a_study_or_queue_job_is_pending_not_completed pins today's adapter_pending |
+| AA04-P12 tool-line words for the S7 reasons (target_not_met, job_refused, stop_unconfirmed, interrupted, status_unknown, job_not_found, other_project, read_failed, other_job) | pending: the AA04-P11 UI slice (activityWords.ts + UX review) | GK B (74) S7 (d): out of scope for S7; today they fall back to the bare state word |
+| AA04-P13 a superseded queue solve reads cancelled | pending candidate (GK B (74), not blocking S7) | an `aborted` solve that a newer enqueue superseded is not the user's cancel; wait_for_job reads it cancelled |
+| Nonblocking job cases (wait_for_job on study/report/queue jobs) | passed (S7, see below) | test_p3_job_outcomes.py::test_wait_on_a_study_or_queue_job_is_pending_not_completed and the S7 cases after it |
 
 GK B (73) plan: GO with the conditions above; GK B (74) holds the review. S7 plan: GK B (74) GO with conditions (map over job_adapters' neutral outcomes with an exhaustive OUTCOMES test, identity from `_snapshot_bound_job`, mutants per branch, queue handles named, abort confirmed by a re-read). Red before the change: 25 of the first new cases failed on master's `harness/outcomes.py`.
 The frontend's "this file format cannot be checked yet" word stays: no file tool emits
 adapter_pending now, but the word map is UI (and in open PRs' files); a later UI slice can drop it.
+
+### 2026-11-27 — S7 build (branch `claude/aa04-s7-job-outcomes`, stacked on #2070): nonblocking jobs
+
+wait_for_job on a study (`ad:`), report (`rpt:`) or queue handle no longer reads
+`adapter_pending`. `outcomes.read_job` takes `job_adapters.job_status` as the
+acting user (`_snapshot_bound_job` for native handles, the queue route's ACL
+read for UUIDs). `outcomes.classify_job` is pure and maps the neutral outcome
+through `NEUTRAL_OUTCOMES`, which is keyed by every `job_adapters.OUTCOMES`
+member. `project()` never sees the handler's result (GK B (74) conditions 1–6).
+
+| Neutral (job_adapters) | Tool `_outcome` | Test (`test_p3_job_outcomes.py`) |
+|------|------|------|
+| live: running / queued | running / submitted | test_wait_on_a_study_or_queue_job_is_pending_not_completed, test_wait_on_a_finished_study_or_report_reads_its_own_outcome, test_wait_on_a_queue_job_reads_the_queue_route |
+| succeeded | completed | same |
+| failed | failed | same |
+| cancelled | cancelled only if a re-read still says so and the worker exited; otherwise cancel_requested `stop_unconfirmed` | test_a_study_whose_worker_still_runs_after_aborted_is_cancel_requested, test_cancelled_is_read_again_before_it_is_believed |
+| not_met (loop missed its target) | partial `target_not_met` | test_wait_on_a_finished_study_or_report_reads_its_own_outcome |
+| refused | failed `job_refused` (not `denied`: only the DENY_MODULES emit it) | same |
+| interrupted (queue) | uncertain `interrupted` | test_wait_on_a_queue_job_reads_the_queue_route |
+| unknown, or a status no family names | uncertain `status_unknown` | same, test_a_study_replaced_by_a_newer_run_is_uncertain |
+| another project, a failed read | uncertain `other_project` / `job_not_found` / `read_failed` / `other_job`, with job_id named | test_a_job_of_another_project_is_uncertain, test_a_queue_job_of_another_project_is_uncertain (bound to the open project's registry key: the queue ACL is the org's), test_an_unknown_handle_is_uncertain_and_still_named, test_a_queue_job_the_actor_may_not_see_is_uncertain, test_a_failing_read_is_uncertain, test_classify_job_is_pure_and_fails_closed |
+
+Exhaustive map: test_every_neutral_outcome_has_one_tool_outcome. Handler
+fields ignored: test_a_wait_reads_running_whatever_the_handler_returns.
+A queue job binds no worker thread, so `_worker_exited` cannot confirm it.
+A queue `aborted` reads cancelled only for the kinds that write it after their
+work returned (solve, gridspine, profile_gen) or a job cancelled while still
+queued. Every other kind reads cancel_requested `stop_unconfirmed`: a Blender
+scene stop before Popen returns is `aborted` while the container may still
+start (GK B (74) NOT OK @af90b669). Test:
+test_a_queue_cancel_is_confirmed_only_by_its_kind.
+Pending (UI): AA04-P12, the new reasons' tool-line words, with P11; that slice
+also drops the now-unused `adapter_pending` words.

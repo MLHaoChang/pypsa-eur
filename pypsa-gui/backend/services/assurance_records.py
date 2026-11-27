@@ -1895,7 +1895,7 @@ def capture_scoped(owner, scope):
                 calculations.balance.PROFILE,
                 calculations.site_import.PROFILE,
                 *calculations.investment.PROFILES,
-                calculations.copt_screen.PROFILE,
+                *calculations.copt_screen.PROFILES,
                 calculations.readiness.PROFILE,
                 calculations.time_to_power.PROFILE,
             )

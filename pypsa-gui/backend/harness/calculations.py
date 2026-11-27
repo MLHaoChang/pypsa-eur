@@ -127,6 +127,9 @@ PROFILES = {
     investment.PROFILE: tuple(investment.METRICS),
     investment.LCOE_PROFILE: tuple(investment.LCOE_METRICS),
     copt_screen.PROFILE: tuple(copt_screen.METRICS),
+    investment.PROFILE_V2: tuple(investment.METRICS_V2),
+    investment.LCOE_PROFILE_V2: tuple(investment.LCOE_METRICS_V2),
+    copt_screen.PROFILE_V2: tuple(copt_screen.METRICS_V2),
     readiness.PROFILE: tuple(readiness.METRICS),
     time_to_power.PROFILE: tuple(time_to_power.METRICS),
     system_cost.PROFILE: tuple(system_cost.METRICS),
@@ -137,7 +140,7 @@ PROFILES = {
 OPT_IN_PROFILES = frozenset({carrier.PROFILE, *branch.PROFILES, *ac_branch.PROFILES, lost_load.PROFILE, price.PROFILE,
                              *emissions.PROFILES, curtailment.PROFILE, capacity.PROFILE,
                              cycles.PROFILE, balance.PROFILE, site_import.PROFILE,
-                             *investment.PROFILES, copt_screen.PROFILE,
+                             *investment.PROFILES, *copt_screen.PROFILES,
                              readiness.PROFILE, time_to_power.PROFILE, losses.PROFILE, system_cost.PROFILE,
                              renewable_share.PROFILE})
 DISCLOSURE = (
@@ -390,9 +393,25 @@ def definition_hash(profile, metrics=None):
     return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+# A /2 profile names the same metrics as its /1 predecessor with the ruled figure labels (AA 28).
+PROFILE_DEFINITIONS = {
+    investment.PROFILE_V2: investment.METRICS_V2,
+    investment.LCOE_PROFILE_V2: investment.LCOE_METRICS_V2,
+    copt_screen.PROFILE_V2: copt_screen.METRICS_V2,
+}
+# successor -> predecessor: listing the /1 id in PYPSA_GUI_ANSWER_ASSURANCE_PROFILES enables its /2.
+PREDECESSORS = {
+    investment.PROFILE_V2: investment.PROFILE,
+    investment.LCOE_PROFILE_V2: investment.LCOE_PROFILE,
+    copt_screen.PROFILE_V2: copt_screen.PROFILE,
+}
+
+
 def definition(metric, profile=None):
     if profile == storage_costs.PROFILE and metric == "total_cost":
         return storage_costs.TOTAL_DEFINITION
+    if profile in PROFILE_DEFINITIONS and metric in PROFILE_DEFINITIONS[profile]:
+        return PROFILE_DEFINITIONS[profile][metric]
     return DEFINITIONS.get(
         metric, {"label": metric, "unit": "", "formula_id": "unsupported"}
     )
@@ -535,8 +554,8 @@ def _scoped_source(ctx, scope, owner=None, investment_state=None):
         return balance.source(ctx, scope["entity_id"])
     if scope["profile"] == site_import.PROFILE:
         return site_import.source(ctx, scope["entity_id"])
-    if scope["profile"] == copt_screen.PROFILE:
-        return copt_screen.source(ctx, scope["entity_id"])
+    if scope["profile"] in copt_screen.PROFILES:
+        return copt_screen.source(ctx, scope["entity_id"], scope["profile"])
     if scope["profile"] == readiness.PROFILE:
         return readiness.source(ctx, scope["entity_id"])
     if scope["profile"] == time_to_power.PROFILE:
@@ -753,7 +772,7 @@ def scoped_calculate(raw, scope):
         return site_import.calculate(raw, scope)
     if scope["profile"] in investment.PROFILES:
         return investment.calculate(raw, scope)
-    if scope["profile"] == copt_screen.PROFILE:
+    if scope["profile"] in copt_screen.PROFILES:
         return copt_screen.calculate(raw, scope)
     if scope["profile"] == readiness.PROFILE:
         return readiness.calculate(raw, scope)
@@ -943,11 +962,11 @@ def disclosure(scope):
         return balance.DISCLOSURE
     if scope["profile"] == site_import.PROFILE:
         return site_import.DISCLOSURE
-    if scope["profile"] == investment.PROFILE:
+    if scope["profile"] in (investment.PROFILE, investment.PROFILE_V2):
         return investment.DISCLOSURE
-    if scope["profile"] == investment.LCOE_PROFILE:
+    if scope["profile"] in investment.LCOE_PROFILES:
         return investment.LCOE_DISCLOSURE
-    if scope["profile"] == copt_screen.PROFILE:
+    if scope["profile"] in copt_screen.PROFILES:
         return copt_screen.DISCLOSURE
     if scope["profile"] == readiness.PROFILE:
         return readiness.DISCLOSURE

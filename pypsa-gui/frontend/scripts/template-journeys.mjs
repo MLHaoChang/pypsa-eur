@@ -157,6 +157,15 @@ async function journey(t) {
       await drawer.getByLabel(/Longitude/i).first().waitFor({ timeout: 1500 })
     })
     await L.resetOverlays(ctx)
+    // A missing site location blocks Run (template-e2e 01): confirm the site coordinates, as the drawer does.
+    await L.step(ctx, 'confirm the site coordinates so Run is no longer blocked', async () => {
+      const put = await L.api(ctx, 'PUT', `/api/projects/${encodeURIComponent(name)}/site-anchor`,
+        { anchor: { lat: 52.52, lng: 13.4, source: 'manual', confirmed: true }, expected_revision: 0 })
+      assert.ok(put.ok(), `site anchor: ${put.status()}`)
+      await page.reload()
+      await L.chooseMode(ctx, 'Guided')
+      await L.ensurePanel(ctx)
+    })
     if (!t.offgrid) await L.gap(ctx, '02', 'Guided section 3 edits "Connection limit (MW)" and Expert shows the new value under the same label', async () => {
       await L.goSection(ctx, 'Connection & grid')
       const field = page.getByLabel(/^Connection limit \(MW\)/).first()

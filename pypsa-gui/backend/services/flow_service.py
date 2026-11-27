@@ -21,10 +21,13 @@ with its state and its items, plus ``run_ready``, ``run_blocker`` and
     reference's inline copy), re-checked read-only;
   * the template's ledger rows marked ``assumed`` (a default the user has not
     confirmed is a warning, design §3.2);
-  * the presence rules (``PRESENCE_RULES``), all display-only (design §3.3 R2
-    kind c): they mark a section ``incomplete`` or ``warning`` and are listed in
-    ``notes``, never in ``run_ready``. Kind (a), an existing server check, is
-    filed as that check (``snapshots_empty``); B1 adds no kind (b) (R3).
+  * the presence rules (``PRESENCE_RULES``), display-only (design §3.3 R2
+    kind c) except ``site_location_missing``: they mark a section ``incomplete``
+    or ``warning`` and are listed in ``notes``, never in ``run_ready``. Kind (a),
+    an existing server check, is filed as that check (``snapshots_empty``); B1
+    adds no kind (b) (R3). ``site_location_missing`` is a run gate (kind a,
+    TEMPLATE-GAPS-1 Q1 a): ``services.site_location`` is the one predicate, the
+    run starts refuse with it, and the item blocks every run kind.
 
 The renewable-profile readiness feed (RP-02) is not on master yet; when it
 lands it is one more source here.
@@ -82,6 +85,7 @@ from typing import Any
 
 from services import flow_scope as S
 from services import flow_sections as F
+from services import site_location
 from services.issue_titles import ISSUE_TITLES
 from services.validation_service import STAGE2_CODES
 from services.adequacy.run_assumptions import run_assumptions
@@ -132,10 +136,12 @@ READINESS_WARNING_PREFIXES: tuple[tuple[str, str, str], ...] = (
 _LOCK_BUSY_REASON = ("The network is busy (a solve or an edit holds its lock): validation "
                      "deferred until it is released. Refresh once it finishes.")
 
-# The presence rules (B1 brief; design §3.3 R2). All kind (c), display only.
+# The presence rules (B1 brief; design §3.3 R2). Kind (c), display only, except
+# `site_location_missing`: a run gate, kind (a) (TEMPLATE-GAPS-1 Q1 a), refused
+# by the run starts through `services.site_location`.
 # `snapshots non-empty` is kind (a): the validator's own `snapshots_empty`.
 PRESENCE_RULES: dict[str, tuple[str, str]] = {
-    "site_location_missing": ("project", "c"),
+    "site_location_missing": ("project", "a"),
     "presence_connection": ("connection", "c"),
     "presence_loads": ("loads", "c"),
     "presence_assets": ("assets", "c"),
@@ -661,8 +667,6 @@ def _holds(n, carriers: list[str], site_assets: list[tuple[str, str]]
 
 def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
     from services import dirty_state
-    from services.network_geometry import _bus_coord
-
     cap, connection = _connection(n, config, template)
     imports = list(cap.links)
     commercial = getattr(config, "commercial", None)
@@ -672,7 +676,7 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
     assets = len(site_assets)
     # The RP-01 rule (NaN, out of range and 0/0 all count as missing), so the
     # flow and the profile refusal agree on what "placed" means.
-    placed = sum(1 for b in n.buses.index if _bus_coord(n, b) is not None)
+    placed = site_location.placed_buses(n)
     from services.profile_gen.readiness import supplied_profiles, unplaced_renewables
     from services.pypsa_service import PyPSAService
 
@@ -793,6 +797,8 @@ def _study_start_items(body: dict, *, requested: bool = True) -> list[dict]:
                              solver_state=PyPSAService.get_solver_state(),
                              lock_blocking=False)
     except HTTPException as exc:
+        if isinstance(exc.detail, dict) and exc.detail.get("code") == site_location.CODE:
+            return []       # said once, by the project section's own run-gate item
         detail = exc.detail if isinstance(exc.detail, str) else (
             exc.detail.get("message") if isinstance(exc.detail, dict)
             and isinstance(exc.detail.get("message"), str) else json.dumps(exc.detail))
@@ -1225,17 +1231,25 @@ def _money_year_items(facts: _Facts) -> list[dict]:
 
 
 def _presence(facts: _Facts, *, islanded: bool, study_requested: bool,
-              loads_not_needed: bool = False) -> list[dict]:
-    """The presence rules (`PRESENCE_RULES`), all display-only (kind c)."""
+              loads_not_needed: bool = False, anchored: bool = False) -> list[dict]:
+    """The presence rules (`PRESENCE_RULES`), display-only (kind c); the missing
+    site location is the exception, a run gate shared with the server."""
     out: list[dict] = []
 
     def add(code: str, severity: str, message: str, **kw) -> None:
         out.append(_item(code, severity, message, "flow", PRESENCE_RULES[code][0],
                          title=ISSUE_TITLES.get(code), **kw))
 
-    if facts.buses and facts.buses_placed == 0:
-        add("site_location_missing", "warning",
-            "The site has no location: no bus is placed.", component="Bus", fld="x")
+    if site_location.is_missing(facts.buses, facts.buses_placed, anchored):
+        # A run gate (TEMPLATE-GAPS-1 Q1 a): the server's start paths refuse it
+        # with the same predicate (`services.site_location`), so the item is a
+        # server verdict (kind a), said once, and blocks every run kind.
+        out.append(_item(site_location.CODE, "error", site_location.MESSAGE,
+                         "validation", PRESENCE_RULES[site_location.CODE][0],
+                         title=ISSUE_TITLES.get(site_location.CODE),
+                         component="Bus", fld="x", blocking=True))
+        out[-1]["_blocks_loadflow"] = True
+        out[-1]["_blocks_study"] = True
     elif facts.renewables_unplaced:
         by_bus: dict[str, list[str]] = {}
         for gen, bus in facts.renewables_unplaced:
@@ -1578,7 +1592,8 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
 
     items: list[dict] = []
     presence = _presence(facts, islanded=islanded, study_requested=study_requested,
-                         loads_not_needed=loads_not_needed)
+                         loads_not_needed=loads_not_needed,
+                         anchored=site_location.anchor_confirmed(project_dir))
     # The study's own VOLL refusal (blocking, same field) says it once.
     voll_refused = any(i["target"]["field"] == "voll" for i in study_items)
     if voll_refused:
@@ -1683,6 +1698,7 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
         return next((_pointer(r["label"], it) for r in rows for it in r["items"]
                      if it["blocking"] and it["in_scope"]
                      and (it["source"] in sources
+                          or ("eh_study" in sources and it.get("_blocks_study"))
                           or ("loadflow" in sources
                               and (it["code"], it["target"]["entity"]) in also_loadflow))),
                     None)

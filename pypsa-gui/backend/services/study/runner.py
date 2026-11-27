@@ -134,15 +134,16 @@ class SolveDeadlineExceeded(RuntimeError):
 class RunRefused(RuntimeError):
     """The run is refused before anything starts. `status` is the HTTP code."""
 
-    def __init__(self, status: int, code: str, message: str):
+    def __init__(self, status: int, code: str, message: str, extra: dict | None = None):
         super().__init__(f"{code}: {message}")
         self.status = status
         self.code = code
         self.message = message
+        self.extra = extra or {}
 
     @property
     def detail(self) -> dict:
-        return {"error_kind": self.code, "message": self.message}
+        return {**self.extra, "error_kind": self.code, "message": self.message}
 
 
 # ── context plumbing ──────────────────────────────────────────────────────
@@ -182,6 +183,45 @@ def _on_ctx(ctx, fn, *args, **kwargs):
         PyPSAService.bind_request_context(ctx)
         return fn(*args, **kwargs)
     return contextvars.copy_context().run(run)
+
+
+def refuse_unlocated(network, base_dir, *, ctx=None) -> None:
+    """STUDY-GATE-1: a study solves the base project's network, so a base with no
+    site location is refused like a run (422 `site_location_missing`, the one
+    predicate of `services/site_location.py`), on the network the study will
+    solve and before any worker or run record exists. With ``ctx`` the network is
+    read under that context's network lock (non-blocking, as `active_refusal`
+    does), since a resident base may be under edit."""
+    from services import site_location
+
+    if ctx is None:
+        refusal = site_location.refusal(network, base_dir)
+    else:
+        def read():
+            lock = PyPSAService.get_lock()
+            if lock.acquire(blocking=False):
+                try:
+                    return site_location.refusal(ctx.network, base_dir)
+                finally:
+                    lock.release()
+            return site_location.refusal(ctx.network, base_dir)
+        refusal = _on_ctx(ctx, read)
+    if refusal:
+        extra = {k: v for k, v in refusal.items() if k not in ("error_kind", "message")}
+        raise RunRefused(422, refusal["error_kind"], refusal["message"], extra)
+
+
+def release_unlocated_base(ctx, base_dir, key: str, registered: bool) -> None:
+    """The gate for a start that already holds the base context (`base_context`
+    succeeded). A refusal on a context this start registered itself drops it and
+    lifts its cap exemption in ONE critical section (`release_study_owned`), never
+    unmark-then-leave-resident (BC-S6-v2-2)."""
+    try:
+        refuse_unlocated(None, base_dir, ctx=ctx)
+    except RunRefused:
+        if registered:
+            PyPSAService.release_study_owned(key, drop=True)
+        raise
 
 
 def base_context(base_row):
@@ -488,6 +528,7 @@ def start_study_run(study_id: str, fidelity: Fidelity | str, *, base_row,
         if registered:
             PyPSAService.unmark_study_owned(key)
         raise
+    release_unlocated_base(ctx, base_dir, key, registered)
     stop_event = threading.Event()
     record: dict[str, Any] = {
         "status": "running", "study": STUDY_KEY, "study_id": study_id,

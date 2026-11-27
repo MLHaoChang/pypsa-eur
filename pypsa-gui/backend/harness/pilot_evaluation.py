@@ -92,15 +92,16 @@ SITE = {"grid_import_energy": (15, "MWh"), "peak_grid_import": (6, "MW"), "expor
         "hours_at_import_limit": (3, "h")}
 # A stored investment-case report with equity cash -100, 150 and project cash -100, 175,
 # both at 25 %: NPVs -100 + 150/1.25 = 20 and -100 + 175/1.25 = 40 USD; IRRs 0.5 and 0.75.
-INVESTMENT = {"equity_npv": (20, "USD"), "project_npv": (40, "USD"), "equity_irr": (0.5, "fraction/year"),
-              "project_irr": (0.75, "fraction/year")}
+# The /2 IRRs carry display words for the unit (AA 28, UX (32)): 0.5 /yr is 50 % a year.
+INVESTMENT = {"equity_npv": (20, "USD"), "project_npv": (40, "USD"), "equity_irr": (0.5, "/yr (0.01 = 1 %)"),
+              "project_irr": (0.75, "/yr (0.01 = 1 %)")}
 # The same report retains value 0, 125 and generation 0, 10 MWh: (125/1.25 - 20) / (10/1.25)
 # = 80 / 8 = 10 USD/MWh nominal; at 25 % inflation the real rate is 0: 80 / 10 = 8 USD/MWh.
 LCOE = {"lcoe_nominal": (10, "USD/MWh"), "lcoe_real": (8, "USD/MWh")}
 # COPT fleet {60 MW q 0.5, 40 MW q 0.25}: available 100/60/40/0 MW with 0.375/0.125/0.375/0.125.
 # Residuals 70 and 100 MW at weight 2: LOLP 0.625 both hours, LOLE 2.5 h; EUE 21.25 + 40 = 61.25
 # per unit weight, 122.5 MWh.
-COPT = {"screening_lole": (2.5, "h"), "screening_eue": (122.5, "MWh"), "screening_lolp_max": (0.625, "probability")}
+COPT = {"screening_lole": (2.5, "h"), "screening_eue": (122.5, "MWh"), "screening_lolp_max": (0.625, "(scale 0 to 1)")}
 # The data-centre template's saved scorecard as the route reads it (25 rows), with the BESS at the
 # size a solve leaves (p_nom_opt 10 MW, set by the pilot fixture). Two rows a declared rule checks:
 # "scr" 250 / (4 + 40 + 10) MVA (PV, UPS battery, BESS; derived) = 4.63 >= 3.0 → pass, and
@@ -111,7 +112,7 @@ COPT = {"screening_lole": (2.5, "h"), "screening_eue": (122.5, "MWh"), "screenin
 GRID = {"checked_pass": (1, "rows"), "checked_warn": (1, "rows"), "checked_fail": (0, "rows"),
         "not_checked": (27, "rows")}
 # Computed on demand from the current network or saved files: nothing to go stale.
-ON_DEMAND = {"copt-screening/1", "grid-readiness/1"}
+ON_DEMAND = {"copt-screening/2", "grid-readiness/1"}
 PROFILE_METRICS = {
     "generator-dispatch/1": tuple(GENERATOR)[:3],
     "generator-cost/1": tuple(GENERATOR),
@@ -144,9 +145,10 @@ ADDED = {
     "storage-cycles/1": ("storage unit Battery", "Show the cycles for", CYCLES, "window_discharged_energy"),
     "energy-balance/1": ("network", "Show the energy balance for", BALANCE, "generation_energy"),
     "site-import/1": ("network", "Show the grid import for", SITE, "grid_import_energy"),
-    "investment-case/1": ("network", "Show the investment returns for", INVESTMENT, "equity_npv"),
-    "investment-lcoe/1": ("network", "Show the LCOE for", LCOE, "lcoe_nominal"),
-    "copt-screening/1": ("network", "Show the COPT screening for", COPT, "screening_lole"),
+    # The chat now emits the /2 profiles (AA 28); /1 is covered by the replay and snapshot tests.
+    "investment-case/2": ("network", "Show the investment returns for", INVESTMENT, "equity_npv"),
+    "investment-lcoe/2": ("network", "Show the LCOE for", LCOE, "lcoe_nominal"),
+    "copt-screening/2": ("network", "Show the COPT screening for", COPT, "screening_lole"),
     "grid-readiness/1": ("network", "Show the grid readiness for", GRID, "checked_pass"),
 }
 # Profiles whose scope names the component's class.
@@ -205,9 +207,22 @@ LABELS = {
 }
 
 
+# The /2 profiles print the ruled figure names (AA 28), written out here as the pilot's own labels.
+V2_LABELS = {
+    "project_npv": "Project NPV at the WACC, after tax (unlevered)",
+    "lcoe_nominal": "LCOE (finance-consistent, nominal)", "lcoe_real": "LCOE (real)",
+    "screening_lole": "Screening expected shortfall over the modelled horizon (COPT)",
+    "screening_eue": "Screening expected unserved energy over the modelled horizon (COPT)",
+    "equity_npv": "Equity NPV, post-tax (at cost of equity)", "equity_irr": "Equity IRR, post-tax",
+    "project_irr": "Unlevered project IRR, post-tax",
+}
+
+
 def public_label(case, metric):
     if metric == "total_cost" and case.profile == "storage-unit-cost/1":
         return "Total direct StorageUnit cost on the declared basis"
+    if case.profile.endswith("/2") and metric in V2_LABELS:
+        return V2_LABELS[metric]
     return LABELS.get(metric, metric)
 
 
