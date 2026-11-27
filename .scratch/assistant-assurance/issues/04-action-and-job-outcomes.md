@@ -464,6 +464,7 @@ handles, today `adapter_pending`), its own PR.
 | AA04-P10 enqueue_unique drops a different config | closed (issue 15, #1261) | `tests/test_solve_queue_config_conflict.py`: the route and chat tool refuse a differing config with 409 `solve_config_conflict` |
 | AA04-P11 MATPOWER not_carried on the chat tool line | pending: UI follow-up (toolOutcome.ts + UX review) | GK B (74): model-visible is enough for S6 (`_outcome.notice` names each class and its rows, test_a_matpower_export_is_completed_and_names_what_it_cannot_carry); the tool line does not render it yet |
 | AA04-P12 tool-line words for the S7 reasons (target_not_met, job_refused, stop_unconfirmed, interrupted, status_unknown, job_not_found, other_project, read_failed, other_job) | pending: the AA04-P11 UI slice (activityWords.ts + UX review) | GK B (74) S7 (d): out of scope for S7; today they fall back to the bare state word |
+| AA04-P13 a superseded queue solve reads cancelled | pending candidate (GK B (74), not blocking S7) | an `aborted` solve that a newer enqueue superseded is not the user's cancel; wait_for_job reads it cancelled |
 | Nonblocking job cases (wait_for_job on study/report/queue jobs) | passed (S7, see below) | test_p3_job_outcomes.py::test_wait_on_a_study_or_queue_job_is_pending_not_completed and the S7 cases after it |
 
 GK B (73) plan: GO with the conditions above; GK B (74) holds the review. S7 plan: GK B (74) GO with conditions (map over job_adapters' neutral outcomes with an exhaustive OUTCOMES test, identity from `_snapshot_bound_job`, mutants per branch, queue handles named, abort confirmed by a re-read). Red before the change: 25 of the first new cases failed on master's `harness/outcomes.py`.
@@ -493,8 +494,12 @@ member. `project()` never sees the handler's result (GK B (74) conditions 1–6)
 
 Exhaustive map: test_every_neutral_outcome_has_one_tool_outcome. Handler
 fields ignored: test_a_wait_reads_running_whatever_the_handler_returns.
-A queue job binds no worker thread, so `_worker_exited` is True for it and a
-queue `aborted` reads cancelled (the queue flips it only once its worker
-returned): test_a_queue_cancel_is_confirmed_without_a_worker_thread.
+A queue job binds no worker thread, so `_worker_exited` cannot confirm it.
+A queue `aborted` reads cancelled only for the kinds that write it after their
+work returned (solve, gridspine, profile_gen) or a job cancelled while still
+queued. Every other kind reads cancel_requested `stop_unconfirmed`: a Blender
+scene stop before Popen returns is `aborted` while the container may still
+start (GK B (74) NOT OK @af90b669). Test:
+test_a_queue_cancel_is_confirmed_only_by_its_kind.
 Pending (UI): AA04-P12, the new reasons' tool-line words, with P11; that slice
 also drops the now-unused `adapter_pending` words.

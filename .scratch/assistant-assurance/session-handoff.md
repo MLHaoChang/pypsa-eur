@@ -1079,7 +1079,7 @@ jobs are bound to the open project's registry key.
 Commands, in `pypsa-gui/backend` with `/root/.venv-pypsa-gui/bin/python -m pytest`:
 `tests/assurance_acceptance/test_p3_job_outcomes.py` 104 passed (the S7 cases red on
 #2070's head); nonblocking + lv11 + p3 job/outcome/guard suites 638 passed, 0 failed.
-21 hand-written mutants (every map and live branch, id/project checks, error kinds,
+25 hand-written mutants (after GK B (74) NOT OK @af90b669: queue cancel by kind allow-list, the None guard) (every map and live branch, id/project checks, error kinds,
 the cancel re-read and worker-exit steps, unknown→completed, reading the handler
 result in loop.py): all killed.
 Remaining: AA04-P11 and AA04-P12 (tool-line words for the S7 reasons), one UI slice

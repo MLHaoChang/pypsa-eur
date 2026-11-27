@@ -223,6 +223,23 @@ NEUTRAL_OUTCOMES: dict[str, tuple[str, str | None]] = {
 _LIVE_STATUS = {"running": "running", "queued": "submitted"}
 
 
+def _queue_stop_confirmed(view: dict) -> bool:
+    """Whether a queue job's `aborted` proves its work stopped.
+
+    A queue job binds no worker thread here, so only the kind's own order can
+    prove it: these kinds write `aborted` after their work returned. A Blender
+    scene job does not: a stop before Popen returns raises CANCELLED while the
+    container may still start (blender_worker `_spawn`). A job cancelled while
+    still queued never started.
+    """
+    from services import solve_queue as sq
+
+    detail = view.get("detail") or {}
+    if detail.get("started_at") is None:
+        return True
+    return detail.get("kind") in (sq.KIND_SOLVE, sq.KIND_GRIDSPINE, sq.KIND_PROFILE_GEN)
+
+
 def read_job(job_id: Any) -> dict:
     """An independent read of one nonblocking job, as the acting user.
 
@@ -243,9 +260,11 @@ def read_job(job_id: Any) -> dict:
     try:
         view = ja.job_status(job_id, actor_id=actor)
         if view.get("outcome") == "cancelled":
-            # A queue job binds no worker thread (True): the queue flips it
-            # to `aborted` only once its worker returned.
-            exited = ja._worker_exited(job_id)
+            exited = (
+                _queue_stop_confirmed(view)
+                if view.get("family") == ja.QUEUE_FAMILY
+                else ja._worker_exited(job_id)
+            )
             view = {**ja.job_status(job_id, actor_id=actor), "worker_exited": exited}
         ctx = PyPSAService.get_active_context()
         # The queue's ACL is the org's, so a visible job may be another

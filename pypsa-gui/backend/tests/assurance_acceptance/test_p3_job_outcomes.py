@@ -459,12 +459,50 @@ def test_a_queue_job_of_another_project_is_uncertain(baseline, monkeypatch):
     )
 
 
-def test_a_queue_cancel_is_confirmed_without_a_worker_thread(baseline):
-    # GK B (74) (b): a queue job binds no worker, so `_worker_exited` is True;
-    # the queue flips `aborted` only once its worker returned.
+@pytest.mark.parametrize(
+    "kind,started,expected",
+    [
+        # These kinds write `aborted` only after their work returned.
+        ("solve", True, ("cancelled", None)),
+        ("gridspine", True, ("cancelled", None)),
+        ("profile_gen", True, ("cancelled", None)),
+        # A Blender scene stop before Popen returns is `aborted` while the
+        # container may still start (GK B (74) NOT OK @af90b669); campus is
+        # not on the list either.
+        ("blender_scene", True, ("cancel_requested", "stop_unconfirmed")),
+        ("campus", True, ("cancel_requested", "stop_unconfirmed")),
+        # Cancelled while still queued: it never started.
+        ("blender_scene", False, ("cancelled", None)),
+    ],
+)
+def test_a_queue_cancel_is_confirmed_only_by_its_kind(
+    baseline, kind, started, expected
+):
+    # A queue job binds no worker thread, so `_worker_exited` cannot confirm it.
     job_id = _queued(baseline, "aborted")
-    assert ja._worker_exited(job_id) is True
-    assert (_wait(job_id)["outcome"], _wait(job_id)["reason"]) == ("cancelled", None)
+    job = solve_queue._jobs[__import__("uuid").UUID(job_id)]
+    job.kind = kind
+    job.started_at = 100.0 if started else None
+    out = _wait(job_id)
+    assert (out["outcome"], out["reason"]) == expected
+
+
+def test_a_job_with_no_project_on_either_side_is_uncertain(baseline, monkeypatch):
+    # The project binding needs both sides named: None == None is not a match.
+    from services.pypsa_service import PyPSAService
+
+    job_id = _native(baseline[0], "ad", status="done")
+    real = ja.job_status
+    monkeypatch.setattr(
+        ja, "job_status", lambda *a, **k: {**real(*a, **k), "project_id": None}
+    )
+    monkeypatch.setattr(
+        PyPSAService,
+        "get_active_context",
+        classmethod(lambda cls: type("Ctx", (), {"project_uuid": None})()),
+    )
+    out = _wait(job_id)
+    assert (out["outcome"], out["reason"]) == ("uncertain", "other_project")
 
 
 def test_a_queue_job_the_actor_may_not_see_is_uncertain(baseline, monkeypatch):
