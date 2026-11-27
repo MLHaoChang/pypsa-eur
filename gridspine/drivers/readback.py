@@ -75,9 +75,31 @@ def run_ratings(run_dir, rated_mva=None, mva_source="", rated_mw=None, mw_source
     return Ratings(rated_mw, mw_source, rated_mva, mva_source)
 
 
-def judge_pack_results(run_dir, pack_dir, profile: dict, ratings) -> dict:
+def run_data_hash(run_dir) -> str:
+    """
+    The campus data hash of a prepared run (GC-13): ``schema.model_set.model_hash``
+    of its stored campus description, the value a pack built from this run
+    carries as ``campus_data_hash``.
+    """
+    import yaml
+
+    from gridspine.drivers.campus_study import CAMPUS_YAML
+    from gridspine.schema.model_set import model_hash
+
+    path = Path(run_dir) / CAMPUS_YAML
+    try:
+        return model_hash(yaml.safe_load(path.read_text(encoding="utf-8")))
+    except (ContractError, OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise ContractError(f"{run_dir}: cannot read this run's campus ({exc})") from exc
+
+
+def judge_pack_results(run_dir, pack_dir, profile: dict, ratings=None) -> dict:
     """
     Judge a pack's results (``readback.pack.judge_pack``) into the run directory.
+
+    A pack written with ratings (GC-13) is judged on them and only for the
+    run it was built from: one whose ``campus_data_hash`` is not this run's
+    (``run_data_hash``) is refused, naming both, and nothing is written.
 
     Writes ``<run_dir>/compliance/judgment.json`` and ``judgment.csv``, each
     atomically; a re-run replaces both. Returns the judgment.
@@ -87,8 +109,17 @@ def judge_pack_results(run_dir, pack_dir, profile: dict, ratings) -> dict:
     import json
 
     from gridspine.drivers.campus_study import _write_text_atomic
-    from gridspine.readback.pack import judge_pack
+    from gridspine.readback.pack import judge_pack, pack_ratings, read_manifest
 
+    own = pack_ratings(pack_dir, read_manifest(pack_dir))
+    if own is not None:
+        run_hash = run_data_hash(run_dir)
+        if own.campus_data_hash != run_hash:
+            raise ContractError(
+                f"pack {pack_dir} was built from campus data {own.campus_data_hash}, "
+                f"not this run's {run_hash} ({run_dir}): a pack is never judged on "
+                "another run's ratings"
+            )
     judgment = judge_pack(pack_dir, profile, ratings)
     out = Path(run_dir) / COMPLIANCE_DIR
     out.mkdir(parents=True, exist_ok=True)

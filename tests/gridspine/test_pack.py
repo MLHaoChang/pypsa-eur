@@ -795,3 +795,112 @@ def test_a_written_emt_pack_is_read_and_judged(tmp_path):
     # the EMT pack writes contract v2 (GC-12 PR-C), so 'connected' = 1 is read
     assert manifest["contract_version"] == "2"
     assert _rows(cases[fault])["stays_connected"]["status"] == "pass"
+
+
+# --- GC-13: the pack's own ratings, bound to the campus run ---------------------------------------
+
+SOURCE = "plant nameplate (test)"
+
+
+def _rated(tmp_path, campus_hash="a" * 64, doc=None, manifest_doc=None):
+    """``_full_pack`` written with ratings (``ratings.json`` hashed, keys in the manifest)."""
+    pack = _full_pack(tmp_path)
+    doc = doc or {
+        "rated_mw": 100.0,
+        "rated_mva": 50.0,
+        "rating_source": SOURCE,
+        "campus_data_hash": campus_hash,
+    }
+    text = json.dumps(doc)
+    (pack / "ratings.json").write_text(text)
+    m = json.loads((pack / "manifest.json").read_text())
+    m["files"]["ratings.json"] = hashlib.sha256(text.encode()).hexdigest()
+    m.update(manifest_doc or doc)
+    (pack / "manifest.json").write_text(json.dumps(m))
+    return pack
+
+
+def test_a_rated_pack_is_judged_on_its_ratings_without_caller_input(tmp_path):
+    pack = _rated(tmp_path)
+    j = judge_pack(pack, PROFILE)
+    assert j == judge_pack(pack, PROFILE, Ratings(100.0, SOURCE, 50.0, SOURCE))
+    h = j["header"]
+    assert h["rating_source"] == SOURCE and h["campus_data_hash"] == "a" * 64
+    assert h["rated_p_base"] == f"rated P = {SOURCE}"
+    assert h["rated_mva_base"] == f"rated MVA = {SOURCE}"
+    by = _by_id(j)
+    for cid, base in (
+        ("p_step_skmin_xrmin_up", f"rated P = {SOURCE}"),
+        ("q_step_skmin_xrmin_up", f"rated MVA = {SOURCE}"),
+        ("f_step_skmin_xrmin_up", f"rated P = {SOURCE}"),
+    ):
+        judged = [r for r in by[cid]["rows"] if r["check"] != "stays_connected"]
+        assert judged and all(base in r["detail"] for r in judged), cid
+    # an unrated pack keeps the caller's ratings and states no source of its own
+    plain = judge_pack(_full_pack(tmp_path / "plain"), PROFILE, RATINGS)["header"]
+    assert plain["rating_source"] is None and plain["campus_data_hash"] is None
+
+
+def test_caller_ratings_that_differ_from_the_pack_are_refused(tmp_path):
+    with pytest.raises(ContractError, match="differ from the pack's"):
+        judge_pack(_rated(tmp_path), PROFILE, Ratings(90.0, "other", 50.0, "other"))
+
+
+@pytest.mark.parametrize("bad", [0, -1.0, float("nan"), float("inf"), "100", True, None])
+def test_a_pack_rating_that_is_not_finite_and_positive_is_refused(tmp_path, bad):
+    doc = {"rated_mw": bad, "rated_mva": 50.0, "rating_source": SOURCE, "campus_data_hash": "a" * 64}
+    pack = _rated(tmp_path, doc=doc)
+    with pytest.raises(ContractError, match="rated_mw must be a finite number > 0"):
+        judge_pack(pack, PROFILE)
+
+
+def test_unbound_or_altered_ratings_are_refused(tmp_path):
+    pack = _rated(tmp_path / "a")
+    (pack / "ratings.json").write_text((pack / "ratings.json").read_text().replace("100.0", "120.0"))
+    with pytest.raises(ContractError, match="ratings.json's SHA-256"):
+        read_manifest(pack)
+    pack = _rated(tmp_path / "b")
+    m = json.loads((pack / "manifest.json").read_text())
+    m["rated_mw"] = 120.0
+    (pack / "manifest.json").write_text(json.dumps(m))
+    with pytest.raises(ContractError, match="ratings differ"):
+        read_manifest(pack)
+    pack = _pack(tmp_path / "c", _battery(), {"rated_mw": 100.0})
+    with pytest.raises(ContractError, match="lists no ratings.json"):
+        read_manifest(pack)
+    pack = _rated(tmp_path / "d")
+    (pack / "ratings.json").unlink()
+    with pytest.raises(ContractError, match="ratings.json is missing"):
+        judge_pack(pack, PROFILE)
+
+
+def _run(tmp_path):
+    import yaml
+
+    from gridspine.schema.model_set import model_hash
+
+    run = tmp_path / "run"
+    run.mkdir()
+    spec = {"name": "test campus", "pcc": {"p_connection_mw": 80.0}}
+    (run / "campus.yaml").write_text(yaml.safe_dump(spec))
+    return run, model_hash(spec)
+
+
+def test_driver_judges_a_rated_pack_for_the_run_it_was_built_from(tmp_path):
+    run, h = _run(tmp_path)
+    j = judge_pack_results(run, _rated(tmp_path, campus_hash=h), PROFILE)
+    assert j["header"]["campus_data_hash"] == h
+    assert j["header"]["ratings"]["rated_mw"] == 100.0  # the pack's, not the run's 80 MW connection
+
+
+def test_driver_refuses_a_pack_built_from_another_run_naming_both_hashes(tmp_path):
+    run, h = _run(tmp_path)
+    other = "b" * 64
+    with pytest.raises(ContractError) as exc:
+        judge_pack_results(run, _rated(tmp_path, campus_hash=other), PROFILE)
+    assert other in str(exc.value) and h in str(exc.value)
+    assert not (run / "compliance").exists()
+    # a run with no campus description cannot be matched, so a rated pack is refused
+    (run / "campus.yaml").unlink()
+    with pytest.raises(ContractError, match="cannot read this run's campus"):
+        judge_pack_results(run, _rated(tmp_path / "x", campus_hash=h), PROFILE)

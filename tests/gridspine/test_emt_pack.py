@@ -871,3 +871,29 @@ def test_lv_pcc_takes_c_min_095_on_sk_max_rows(tmp_path):
         r = rows_[label]
         assert r["vn_kv"] == 0.4 and r["c"] == cv, label
         assert math.hypot(r["r_ohm"], r["x_ohm"]) == pytest.approx(z, rel=1e-12), label
+
+
+# --- GC-13: plant ratings bound by the data hash ------------------------------------------------
+
+
+def test_ratings_are_written_hashed_and_change_the_data_hash(tmp_path):
+    from gridspine.handoff.test_battery import RATINGS_JSON, PackRatings
+    from gridspine.readback.pack import judge_pack
+
+    r = PackRatings(90.0, 99.0, "plant nameplate (test)", "a" * 64)
+    p = pack(tmp_path / "a", ratings=r)
+    m = p.manifest
+    assert RATINGS_JSON in m["files"]
+    assert json.loads((p.path / RATINGS_JSON).read_text()) == r.as_dict()
+    assert {k: m[k] for k in r.as_dict()} == r.as_dict()
+    assert m["data_hash"] != pack(tmp_path / "none").manifest["data_hash"]
+    other = PackRatings(91.0, 99.0, "plant nameplate (test)", "a" * 64)
+    assert m["data_hash"] != pack(tmp_path / "b", ratings=other).manifest["data_hash"]
+    assert m["data_hash"] == pack(tmp_path / "c", ratings=r).manifest["data_hash"]
+    # read-back judges the written pack on its own ratings, with no caller input
+    header = judge_pack(p.path, {})["header"]
+    assert header["ratings"]["rated_mw"] == 90.0 and header["ratings"]["rated_mva"] == 99.0
+    assert header["rating_source"] == "plant nameplate (test)"
+    assert header["campus_data_hash"] == "a" * 64
+    with pytest.raises(ContractError, match="PackRatings"):
+        pack(tmp_path / "d", ratings={"rated_mw": 90.0})
