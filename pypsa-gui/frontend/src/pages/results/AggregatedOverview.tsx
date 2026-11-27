@@ -517,7 +517,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
   }
 
   return (
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0"
+    <div data-testid="results-view-overview" className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0"
       data-result-tab="overview" data-result-binding={displayed ? JSON.stringify(displayed.binding) : undefined}>
 
       <div className="text-[11px] text-muted -mt-2">

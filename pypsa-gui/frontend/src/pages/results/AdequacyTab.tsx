@@ -68,7 +68,7 @@ export default function AdequacyTab() {
   const report = (adequacy ?? null) as AdequacyReportPayload | null
 
   return (
-    <div className="flex flex-col h-full overflow-auto p-4 gap-4">
+    <div data-testid="results-view-adequacy" className="flex flex-col h-full overflow-auto p-4 gap-4">
       <header>
         <div className="flex items-center gap-2">
           <h3 className="text-h3 font-semibold text-text">

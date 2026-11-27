@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useEffect, useLayoutEffect, useRef, useState, useId, createContext, useContext } from 'react'
 import { useElementWidth } from '../hooks/useElementWidth'
+import { fitWhenVisible } from './topologyFit'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ReactFlow, Background, Controls, MiniMap, useNodesState, useEdgesState,
@@ -2013,6 +2014,8 @@ export default function TopologyCanvas() {
   // Q11: the canvas measures itself so the minimap can step aside when narrow,
   // and the legend remembers whether the user folded it away.
   const [canvasEl, setCanvasEl] = useState<HTMLDivElement | null>(null)
+  const canvasElRef = useRef<HTMLDivElement | null>(null)
+  const attachCanvas = useCallback((el: HTMLDivElement | null) => { canvasElRef.current = el; setCanvasEl(el) }, [])
   const canvasWidth = useElementWidth(canvasEl)
   const [legendChoice, setLegendChoice] = useState<boolean | null>(() => readLegendOpen())
   const legendOpen = legendChoice ?? (canvasWidth == null || canvasWidth >= LEGEND_OPEN_MIN_CANVAS_PX)
@@ -2033,6 +2036,8 @@ export default function TopologyCanvas() {
     padding: { top: '40px', right: '40px', bottom: '40px', left: legendOpenRef.current ? '250px' : '70px' },
     duration: prefersReducedMotion() ? 0 : duration, maxZoom: 0.85,
   })
+  // Only while the canvas shows: a fit on the hidden (0×0) pane animates to NaN.
+  const fitCanvas = (duration: number) => fitWhenVisible(rfInstance.current, canvasElRef.current, fitOpts(duration))
   // The canvas opens fitted to the network and stays fitted while the layout
   // settles (saved positions arriving, the sidebar and properties panel
   // changing the canvas width) until the user first pans or zooms.
@@ -2556,7 +2561,7 @@ export default function TopologyCanvas() {
   useEffect(() => {
     if (!hasFitted.current || userMoved.current) return
     const t = setTimeout(() => {
-      if (!userMoved.current) rfInstance.current?.fitView(fitOpts(0))
+      if (!userMoved.current) fitCanvas(0)
     }, 120)
     return () => clearTimeout(t)
   }, [canvasWidth, layoutEpoch])
@@ -2585,10 +2590,12 @@ export default function TopologyCanvas() {
         })) as Node[]
       })
       prevDataSig.current = ''  // force a data refresh on next data-only tick
-      // Fit view once when real nodes first appear (100ms lets RF measure node dimensions)
+      // Fit view once when real nodes first appear (100ms lets RF measure node dimensions).
+      // Not animated: d3 reads the pane size when the animation starts, so Results opening
+      // in that gap (an assistant turn right after load) hid the pane and every frame was NaN.
       if (sig !== '' && !hasFitted.current) {
         hasFitted.current = true
-        setTimeout(() => rfInstance.current?.fitView(fitOpts(400)), 100)
+        setTimeout(() => fitCanvas(0), 100)
       }
     } else {
       // Data-only update: skip when the relevant data hasn't changed. Without
@@ -2729,6 +2736,8 @@ export default function TopologyCanvas() {
     const canvasEl = document.querySelector('.react-flow') as HTMLElement | null
     const w = canvasEl?.clientWidth ?? window.innerWidth
     const h = canvasEl?.clientHeight ?? window.innerHeight
+    // Hidden behind a full-screen tab: an animated pan on a 0×0 pane runs to NaN.
+    if (canvasEl && (w === 0 || h === 0)) return
     const margin = 80
     const isVisible = (
       screenPos.x >= margin && screenPos.x <= w - margin &&
@@ -2827,7 +2836,7 @@ export default function TopologyCanvas() {
     })))
     toast.success('Layout reset — waypoints cleared')
     scheduleSave()
-    setTimeout(() => rfInstance.current?.fitView(fitOpts(400)), 50)
+    setTimeout(() => fitCanvas(400), 50)
   }, [buses, allSatellites, setNodes, setEdges, scheduleSave])
 
   const handleResetDiagram = useCallback(() => {
@@ -2853,7 +2862,7 @@ export default function TopologyCanvas() {
     // layout.json), localStorage for the unsaved network.
     scheduleSave()
     toast.success('Diagram reset — positions and waypoints cleared')
-    setTimeout(() => rfInstance.current?.fitView(fitOpts(400)), 50)
+    setTimeout(() => fitCanvas(400), 50)
   }, [buses, allSatellites, setNodes, setEdges, scheduleSave, layoutEpoch, currentProject])
 
   const onNodeDoubleClick = useCallback((e: React.MouseEvent, node: Node) => {
@@ -3080,7 +3089,7 @@ export default function TopologyCanvas() {
       ${flowAnimationCss()}
     `}</style>
     <div
-      ref={setCanvasEl}
+      ref={attachCanvas}
       className="h-full w-full relative"
       onMouseMove={canvasMode === 'connect' && connectSource ? (e) => setConnectMousePos({ x: e.clientX, y: e.clientY }) : undefined}
       // Drop detection for palette drags lives in AssetPalette itself — it
@@ -3212,7 +3221,7 @@ export default function TopologyCanvas() {
                   <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="3.5" cy="3.5" r="1.6"/><circle cx="12.5" cy="12.5" r="1.6"/><path d="M3.5 5v3a2 2 0 0 0 2 2h5a2 2 0 0 1 2 2v-0.5"/></svg>
                 </button>
                 <button aria-label="Fit view — centre the network in the canvas"
-                  onClick={() => rfInstance.current?.fitView(fitOpts(400))}
+                  onClick={() => fitCanvas(400)}
                   title="Fit view — centre the network in the canvas"
                   className="flex items-center justify-center w-8 h-8 rounded-md text-ink-600 hover:bg-panel hover:text-accent transition-colors"
                 >

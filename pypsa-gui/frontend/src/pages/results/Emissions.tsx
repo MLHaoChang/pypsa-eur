@@ -124,7 +124,7 @@ export default function Emissions() {
   const zeroUnexplained = view.total_tCO2 === 0 && !anyIntensity
 
   return (
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0"
+    <div data-testid="results-view-emissions" className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0"
       data-result-tab="emissions" data-result-binding={JSON.stringify(displayed?.binding)}>
 
       {/* ── KPI strip ──────────────────────────────────────────── */}
