@@ -180,9 +180,6 @@ ADEQUACY_RESTORE_ENUM = ["base", "final"]
 from models.energy_hub import MAX_EH_BUDGET_SOLVES as _MAX_EH_BUDGET_SOLVES  # noqa: E402
 from services.adequacy.mc import MAX_DRAWS as _MC_MAX_DRAWS  # noqa: E402
 
-# The island report's table ids: imported, never restated.
-from services.campus_island_report import TABLE_IDS as _ISLAND_TABLE_IDS  # noqa: E402
-
 # Energy Hub archetype packs — mirrors models.energy_hub.EnergyHubArchetype.
 EH_ARCHETYPE_ENUM = ["strong_grid", "weak_flexible", "off_grid"]
 # EH pipeline stages — mirrors models.energy_hub.EH_PIPELINE_STAGES (order

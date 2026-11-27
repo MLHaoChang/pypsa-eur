@@ -300,7 +300,9 @@ def campus_save_grid_code_draft(
             _gridspine_project(db, user, project_id), profile_id
         )
     campus_cards.require_base(
-        current and current["yaml"], base_sha256, f"draft {profile_id!r}"  # repr-ok: moved verbatim from chat_tools (RETRO-FRAG-1)
+        current and current["yaml"],
+        base_sha256,
+        f"draft {profile_id!r}",  # repr-ok: moved verbatim from chat_tools (RETRO-FRAG-1)
     )
     return _with_sha(_campus_route(_h, project_id, profile_id, ProfileText(yaml=yaml)))
 
