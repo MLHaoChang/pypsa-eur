@@ -276,7 +276,9 @@ def _restore(snapshot: dict) -> None:
             else:
                 atomic_write_bytes(path, data)
         except OSError:
-            log.error("could not restore %s after a failed read-back", path, exc_info=True)
+            log.error(
+                "could not restore %s after a failed read-back", path, exc_info=True
+            )
 
 
 def _read_back(project, bundle, files: list[tuple[str, bytes]] | None) -> dict:

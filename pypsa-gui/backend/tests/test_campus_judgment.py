@@ -676,7 +676,9 @@ def test_a_sidecar_that_cannot_be_put_back_still_restores_the_judgment(
     with pytest.raises(OSError, match="read-only file system"):
         cj.add_results(project, bundle, [(f"{case.case_id}.csv", b"time [s]\n0.0\n")])
     after = _judgment_bytes(run)
-    assert {p: b for p, b in before.items() if p.name != cj.JUDGMENT_SOURCE_FILE} == after
+    assert {
+        p: b for p, b in before.items() if p.name != cj.JUDGMENT_SOURCE_FILE
+    } == after
 
 
 def test_the_judgment_is_restored_even_when_putting_the_results_back_fails(
@@ -720,7 +722,9 @@ def test_staged_and_old_results_never_reach_the_bundle_download(island_run):
     leaked = [
         n
         for n in names
-        if cj.STAGING_DIR in n or "/aside." in n or any(p.startswith(".") for p in n.split("/"))
+        if cj.STAGING_DIR in n
+        or "/aside." in n
+        or any(p.startswith(".") for p in n.split("/"))
     ]
     assert not leaked
     assert not any((run / cj.STAGING_DIR).iterdir())
