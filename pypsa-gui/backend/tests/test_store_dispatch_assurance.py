@@ -514,9 +514,7 @@ def test_the_bound_tolerance_on_both_sides(side, offset, within):
     or 0.5 and 1 for the scaled lower case (slack 5e-6 at e = 5)."""
     level = {"upper": 10.0, "lower": 0.0, "scaled_lower": 5.0}[side]
     low = 0.5 if side == "scaled_lower" else 0.0
-    raw = _hand_raw(
-        [-(level + offset)], e_nom_opt=10.0, e_min_pu=[low], e_max_pu=[1.0]
-    )
+    raw = _hand_raw([-(level + offset)], e_nom_opt=10.0, e_min_pu=[low], e_max_pu=[1.0])
     assert _every(raw) == (set() if within else {"store_bound_violation"})
 
 
@@ -644,7 +642,9 @@ def test_a_cost_or_comparison_scope_is_refused():
 
 
 def test_grammar():
-    scope = assurance_scope.from_message("Show the store dispatch for store s.", "p1", {})
+    scope = assurance_scope.from_message(
+        "Show the store dispatch for store s.", "p1", {}
+    )
     assert (scope["profile"], scope["entity_id"]) == (store.PROFILE, "s")
     windowed = assurance_scope.from_message(
         "show store dispatch for store H2 tank; from 2026-01-01T01:00 to 2026-01-01T02:00",
@@ -667,7 +667,9 @@ def test_the_profile_is_opt_in(monkeypatch):
 
     assert store.PROFILE in calculations.OPT_IN_PROFILES
     assert calculations.PROFILES[store.PROFILE] == tuple(store.METRICS)
-    assert rollout.profile_enabled(store.PROFILE) is True  # listed by the autouse fixture
+    assert (
+        rollout.profile_enabled(store.PROFILE) is True
+    )  # listed by the autouse fixture
     monkeypatch.delenv("PYPSA_GUI_ANSWER_ASSURANCE_PROFILES")
     assert rollout.profile_enabled(store.PROFILE) is False
 
@@ -736,7 +738,7 @@ def test_a_record_of_another_version_or_profile_is_rejected(field, value):
     "p,low,high", [(1e-6, 0.0, 1.0), (-1e-6, -1.0, 0.0)], ids=["lower", "upper"]
 )
 def test_an_energy_exactly_at_a_bound_plus_its_slack_is_within(p, low, high):
-    """e = -1e-6 against 0 x 10 - 1e-6, or e = 1e-6 against 0 x 10 + 1e-6: equal, so inside."""
+    """At e = -1e-6 against 0 x 10 - 1e-6, or e = 1e-6 against 0 x 10 + 1e-6: equal, so inside."""
     raw = _hand_raw([p], e_nom_opt=10.0, e_min_pu=[low], e_max_pu=[high])
     assert abs(raw["e"][0]) == 1e-6
     assert _every(raw) == set()
@@ -747,7 +749,9 @@ def test_an_energy_exactly_at_minus_near_zero_keeps_the_loss():
     assert raw["e"][0] == -NEAR_ZERO
     values, reasons = _slots(raw)
     assert reasons == {"peak_store_fill": "no_store_capacity"}
-    assert values["store_standing_loss"] == pytest.approx(-0.1 * NEAR_ZERO, rel=HAND_REL)
+    assert values["store_standing_loss"] == pytest.approx(
+        -0.1 * NEAR_ZERO, rel=HAND_REL
+    )
 
 
 def test_a_store_with_no_dispatch_column_is_missing_data(store_case, monkeypatch):

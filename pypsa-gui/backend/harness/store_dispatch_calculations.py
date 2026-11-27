@@ -155,7 +155,9 @@ def source(ctx, entity):
         "standing_loss": standing_loss,
         "e_min_pu": _dynamic(n, "e_min_pu", entity, index)[1],
         "e_max_pu": _dynamic(n, "e_max_pu", entity, index)[1],
-        "e_nom_opt": _number(row["e_nom_opt"]) if "e_nom_opt" in stores.columns else None,
+        "e_nom_opt": _number(row["e_nom_opt"])
+        if "e_nom_opt" in stores.columns
+        else None,
         "valid_solve": profile_common.lp_outputs_live(ctx),
     }
 
@@ -177,7 +179,7 @@ def _before(raw, a):
 
 
 def _efficiency(t, w, loss, lossy):
-    """eff = (1 - sl)^w, or 1 at the first snapshot when the start is e_initial."""
+    """The standing efficiency (1 - sl)^w, or 1 at the first snapshot when the start is e_initial."""
     return (1.0 - loss) ** w if lossy or t else 1.0
 
 
