@@ -228,10 +228,7 @@ def _basis(match):
 
 
 def _compatible(scope):
-    return {
-        k: scope.get(k)
-        for k in ("profile", "project_id", "entity_id", "start", "end", "cost_basis")
-    }
+    return {k: scope.get(k) for k in calculations.COMPARISON_KEYS}
 
 
 def cost_choices(scope):
@@ -417,6 +414,9 @@ def resolve(turn, message, ui, explicit):
                 raise ValueError("changed_baseline")
         except (ValueError, KeyError, TypeError, HTTPException):
             return _needs(turn, scope, "baseline_unavailable")
+        # Same scope keys are not enough: the sealed period and unit must match too.
+        if calculations.comparison_mismatch(current, current_scope, baseline):
+            return _needs(turn, scope, "previous_compatible_run_required")
         scope["comparison_evidence_id"] = baseline["evidence_id"]
         scope["metrics"] = list(
             dict.fromkeys(

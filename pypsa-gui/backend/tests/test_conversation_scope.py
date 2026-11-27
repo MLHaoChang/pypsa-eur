@@ -313,6 +313,59 @@ def test_incompatible_basis_does_not_choose_another_baseline(solved, conversatio
     clarified(frames, provider, "previous_compatible_run_required")
 
 
+def _resolved(solved):
+    solved.network.generators.at["G1", "p_nom"] = 30
+    assert solved.network.optimize(solver_name="highs") == ("ok", "optimal")
+    workflow_tools._record_solve_inputs(
+        solved.network, solved.solver_state["solver_config"]
+    )
+
+
+def test_another_window_does_not_compare(solved, conversation):
+    # AA-09 S2 (window): basis is test_incompatible_basis_does_not_choose_another_baseline.
+    first, _ = conversation("Check this run.", VALUES, checked_scope=scope(solved))
+    assert approval(first)["receipt"]["request_complete"]
+    _resolved(solved)
+    # The re-solved run's last hour: 7 MWh at 10 EUR/MWh, 30 MW x 3 EUR/MW fixed.
+    second, _ = conversation(
+        "Show those results from 2026-01-01T01:00:00 to 2026-01-01T01:00:00.",
+        {
+            "dispatch_energy": 7,
+            "marginal_expenditure": 70,
+            "peak_dispatch": 7,
+            "annual_fixed_cost": 90,
+            "allocated_fixed_cost": 90,
+            "total_cost": 160,
+        },
+    )
+    assert approval(second)["receipt"]["request_complete"]
+    frames, provider = conversation("Compare that with the previous run.")
+    clarified(frames, provider, "previous_compatible_run_required")
+
+
+def test_another_period_does_not_compare(solved, conversation):
+    # AA-09 S2 (period): same window and snapshot count, other objective weights.
+    first, _ = conversation("Check this run.", VALUES, checked_scope=scope(solved))
+    assert approval(first)["receipt"]["request_complete"]
+    solved.network.snapshot_weightings["objective"] = 2.0
+    _resolved(solved)
+    frames, provider = conversation("Compare that with the previous run.")
+    clarified(frames, provider, "previous_compatible_run_required")
+
+
+def test_another_unit_does_not_compare(solved, conversation, monkeypatch):
+    # AA-09 S2 (unit): the definition changed after the baseline was sealed. The
+    # baseline record no longer re-verifies, so the turn names it unavailable.
+    from harness import calculations
+
+    first, _ = conversation("Check this run.", VALUES, checked_scope=scope(solved))
+    assert approval(first)["receipt"]["request_complete"]
+    _resolved(solved)
+    monkeypatch.setitem(calculations.DEFINITIONS["total_cost"], "unit", "USD")
+    frames, provider = conversation("Compare that with the previous run.")
+    clarified(frames, provider, "baseline_unavailable")
+
+
 def test_expired_baseline_does_not_fall_back_to_another_run(
     solved, conversation, monkeypatch
 ):

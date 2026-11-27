@@ -61,6 +61,14 @@ class RequestScope(BaseModel):
     chart: list[str] | None = Field(default=None, min_length=1, max_length=8)
 
 
+# AA-09 S2: the only profiles whose scope may carry a comparison_evidence_id.
+# generator-dispatch/1 has no cost, so calculations._comparison refuses its
+# baseline (incompatible_comparison_basis); its scope stays a valid descriptor.
+COMPARISON_PROFILES = frozenset(
+    {"generator-dispatch/1", "generator-cost/1", "network-linear-cost/1", "storage-unit-cost/1"}
+)
+
+
 def validate(value):
     if not isinstance(value, dict) or type(value.get("version")) is not int:
         raise ValueError("invalid_scope_version")
@@ -131,6 +139,9 @@ def validate(value):
         scope["profile"] in ("branch-loading/1", "network-loading/1")
     ) and not scope.get("component_class"):
         raise ValueError("network_scope_required")
+    # Checked after the per-profile refusals above, so their kinds are unchanged.
+    if scope.get("comparison_evidence_id") and scope["profile"] not in COMPARISON_PROFILES:
+        raise ValueError("unsupported_comparison_scope")
     return scope
 
 
