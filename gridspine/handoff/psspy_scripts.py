@@ -720,8 +720,10 @@ def _header(case):
 
 
 def _member_base_lines():
-    """Every plant machine's MBASE as the case holds it; their sum must be the
-    plant rating the steps and currents are scaled to."""
+    """
+    Every plant machine's MBASE as the case holds it; their sum must be the
+    plant rating the steps and currents are scaled to.
+    """
     return [
         "M_BASE = []",
         "for bus, mid in PLANT_MACHINES:",

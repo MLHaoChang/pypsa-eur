@@ -293,7 +293,9 @@ def write_psse_pack(
             )
     ibr = pd.DataFrame.from_dict(rows, orient="index").reindex(columns=_COLUMNS)
     poc = {u: plant.branch for u in plant.machine_ids} if plant is not None else None
-    plants = {plant.unit_id: plant.members} if plant is not None and plant.members else None
+    plants = (
+        {plant.unit_id: plant.members} if plant is not None and plant.members else None
+    )
     conv_lines, _, repc = converter_records(
         net, ibr, version=VERSION, poc=poc, plants=plants
     )
