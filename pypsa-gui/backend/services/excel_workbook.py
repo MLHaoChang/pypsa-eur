@@ -420,14 +420,19 @@ def prepare(data: bytes, filename: str | None, *, new_project: bool) -> Prepared
 
 
 def payload(prep: Prepared) -> dict:
-    """What a preview and an import both return about the file."""
+    """What a preview and an import both return about the file, with the
+    network's range flags (``range_flags``, ``range_flags_total``; 01a-3b)."""
     from routers.io import _build_summary
+    from services.asset_schema import ranges
 
     return {
-        "summary": _build_summary(prep.network).model_dump(),
+        "summary": _build_summary(prep.network).model_dump(
+            exclude={"range_flags", "range_flags_total"}
+        ),
         "report": prep.report.to_dict(),
         "rederived": prep.rederived,
         "not_carried": not_carried(),
+        **ranges.import_flags(prep.network),
     }
 
 

@@ -263,6 +263,216 @@ def test_merge_dispatchers_returns_the_lock_gated_tools():
     assert F.merge_dispatchers({}, {}, {"a": disp}, schema) == {"t2"}
 
 
+# ── a moved family keeps its place in TOOL_ROUTES and DISPATCHERS ───────────
+
+
+_REPORT_TEMPLATES = [
+    "list_report_templates",
+    "set_report_template",
+    "get_report_template",
+    "propose_report_mapping",
+    "set_report_mapping",
+]
+
+# Every family moved out of the monolith, with the keys either side of its old
+# place on the pre-move master, in TOOLS, TOOL_ROUTES and DISPATCHERS (a dict
+# {table: (before, after)} when the three differ). Each move slice adds its row.
+SPLICED_PLACES = {
+    "report_templates": ("delete_report", "list_report_roundtrips"),
+}
+
+
+def test_every_spliced_family_has_its_old_place_pinned():
+    assert set(SPLICED_PLACES) == catalogue._FRAGMENTS.spliced
+
+
+@pytest.mark.parametrize("table", ["TOOLS", "TOOL_ROUTES", "DISPATCHERS"])
+@pytest.mark.parametrize("stem", sorted(SPLICED_PLACES))
+def test_a_spliced_family_keeps_its_old_place(stem, table):
+    from services import chat_tools
+
+    place = SPLICED_PLACES[stem]
+    before, after = place[table] if isinstance(place, dict) else place
+    schema = F.discover(F.SCHEMA_PACKAGE)[stem]
+    own, keys = {
+        "TOOLS": (
+            [t["name"] for t in schema.TOOLS],
+            [t["name"] for t in catalogue.TOOLS],
+        ),
+        "TOOL_ROUTES": (list(schema.ROUTES), list(catalogue.TOOL_ROUTES)),
+        "DISPATCHERS": (
+            list(F.discover(F.DISPATCH_PACKAGE)[stem].DISPATCHERS),
+            list(chat_tools.DISPATCHERS),
+        ),
+    }[table]
+    i = keys.index(own[0])
+    assert keys[i - 1 : i + len(own) + 1] == [before, *own, after]
+
+
+def test_splicing_routes_of_a_family_whose_tools_are_not_spliced_is_refused():
+    frags = _schema(a=_mod("pkg.cat.a", ["t1"]))
+    with pytest.raises(
+        FragmentError, match=r"ROUTES of harness\.catalogue_tools\.a.*not its TOOLS"
+    ):
+        frags.splice_routes("a")
+
+
+def test_splicing_routes_twice_is_refused():
+    frags = _schema(a=_mod("pkg.cat.a", ["t1"]))
+    frags.splice("a")
+    frags.splice_routes("a")
+    with pytest.raises(FragmentError, match="twice"):
+        frags.splice_routes("a")
+
+
+def test_a_spliced_family_whose_routes_are_not_spliced_is_refused():
+    frags = _schema(a=_mod("pkg.cat.a", ["t1"]))
+    tools = frags.splice("a")
+    with pytest.raises(FragmentError, match=r"pkg\.cat\.a.*TOOL_ROUTES.*splice_routes"):
+        frags.merge(tools, {}, frozenset(), frozenset())
+
+
+def test_spliced_routes_are_kept_where_they_were_spliced():
+    frags = _schema(a=_mod("pkg.cat.a", ["t1"]), b=_mod("pkg.cat.b", ["t2"], ORDER=1))
+    tools = [_tool("x"), *frags.splice("a")]
+    frags.extend(tools)
+    routes = {"x": [], **frags.splice_routes("a"), "y": []}
+    frags.merge(tools, routes, frozenset(), frozenset())
+    assert list(routes) == ["x", "t1", "y", "t2"]
+
+
+def test_a_spliced_route_removed_from_tool_routes_is_refused():
+    frags = _schema(a=_mod("pkg.cat.a", ["t1"]))
+    tools = frags.splice("a")
+    frags.splice_routes("a")
+    with pytest.raises(FragmentError, match=r"TOOL_ROUTES entry 't1'.*removed"):
+        frags.merge(tools, {}, frozenset(), frozenset())
+
+
+def test_a_spliced_route_replaced_in_tool_routes_is_refused():
+    frags = _schema(a=_mod("pkg.cat.a", ["t1"]))
+    tools = frags.splice("a")
+    routes = {**frags.splice_routes("a")}
+    routes["t1"] = [("GET", "/api/other")]
+    with pytest.raises(FragmentError, match=r"TOOL_ROUTES entry 't1'.*replaced"):
+        frags.merge(tools, routes, frozenset(), frozenset())
+
+
+def _disp(name, *tools, **attrs):
+    mod = types.ModuleType(name)
+    mod.DISPATCHERS = {t: (lambda: None) for t in tools}
+    for key, value in attrs.items():
+        setattr(mod, key, value)
+    return mod
+
+
+def test_spliced_dispatchers_are_kept_where_they_were_spliced():
+    schema = _schema(a=_mod("pkg.cat.a", ["t1"]), b=_mod("pkg.cat.b", ["t2"], ORDER=1))
+    schema.splice("a")
+    disp = F.DispatchFragments(
+        {
+            "a": _disp("pkg.disp.a", "t1", LOCK_GATED={"t1"}),
+            "b": _disp("pkg.disp.b", "t2"),
+        }
+    )
+    dispatchers = {"x": print, **disp.splice("a"), "y": print}
+    assert disp.merge(dispatchers, {}, schema) == {"t1"}
+    assert list(dispatchers) == ["x", "t1", "y", "t2"]
+
+
+def test_a_dispatcher_family_spliced_on_one_side_only_is_refused():
+    schema = _schema(a=_mod("pkg.cat.a", ["t1"]))
+    disp = F.DispatchFragments({"a": _disp("pkg.disp.a", "t1")})
+    dispatchers = {**disp.splice("a")}
+    with pytest.raises(FragmentError, match=r"\['a'\] spliced by only one"):
+        disp.merge(dispatchers, {}, schema)
+
+
+def test_a_spliced_dispatcher_replaced_in_dispatchers_is_refused():
+    schema = _schema(a=_mod("pkg.cat.a", ["t1"]))
+    schema.splice("a")
+    disp = F.DispatchFragments({"a": _disp("pkg.disp.a", "t1")})
+    dispatchers = {**disp.splice("a")}
+    dispatchers["t1"] = print
+    with pytest.raises(FragmentError, match=r"DISPATCHERS entry 't1'.*replaced"):
+        disp.merge(dispatchers, {}, schema)
+
+
+def test_splicing_a_missing_or_twice_spliced_dispatcher_family_is_refused():
+    disp = F.DispatchFragments({"a": _disp("pkg.disp.a", "t1")})
+    with pytest.raises(
+        FragmentError, match=r"chat_dispatchers\.b, which was not found"
+    ):
+        disp.splice("b")
+    disp.splice("a")
+    with pytest.raises(FragmentError, match="twice"):
+        disp.splice("a")
+
+
+# ── every shipped fragment tool gets exactly the gates its kind earns ───────
+
+
+def _expected_gates(name, schema, disp):
+    """(lock, study) for a fragment tool, derived from its own ROUTES, write
+    sets and safety tier (not from chat_tools' gate-name functions): the
+    lock gate covers a non-read tool with a write route under a gated prefix,
+    a NETWORK_WRITES or a LOCK_GATED member; the study gate the network
+    writes among those."""
+    from harness.catalogue import safety_tier_for
+    from services import chat_tools as T
+
+    writes = [
+        path
+        for route in schema.ROUTES[name]
+        if isinstance(route, tuple)
+        for method, path in [route]
+        if method.upper() in T._LOCK_GATE_WRITE_METHODS
+    ]
+    network = name in getattr(schema, "NETWORK_WRITES", ())
+    lock = safety_tier_for(name) != "read" and (
+        network
+        or name in getattr(disp, "LOCK_GATED", ())
+        or any(
+            p.startswith(T._LOCK_GATE_PREFIXES) and p not in T._LOCK_GATE_EXEMPT_PATHS
+            for p in writes
+        )
+    )
+    study = (
+        lock
+        and name not in T._STUDY_GATE_SWAP_TOOLS
+        and (network or any(p.startswith(T._STUDY_GATE_PREFIXES) for p in writes))
+    )
+    return lock, study
+
+
+def gate_mismatches():
+    """Every discovered fragment tool whose DISPATCHERS entry does not unwrap to
+    the fragment's own callable through one wrapper per gate it earns; also the
+    tools checked. Run in-process and in the probe interpreter below."""
+    from services import chat_tools as T
+
+    schemas = F.discover(F.SCHEMA_PACKAGE)
+    lock_names, study_names = T._lock_gated_tool_names(), T._study_gated_tool_names()
+    bad, checked = [], []
+    for stem, disp in F.discover(F.DISPATCH_PACKAGE).items():
+        for name, raw in disp.DISPATCHERS.items():
+            lock, study = _expected_gates(name, schemas[stem], disp)
+            fn, depth = T.DISPATCHERS[name], 0
+            while fn is not raw and hasattr(fn, "__wrapped__"):
+                fn, depth = fn.__wrapped__, depth + 1
+            got = (fn is raw, depth, name in lock_names, name in study_names)
+            if got != (True, lock + study, lock, study):
+                bad.append((name, {"want": (lock, study), "got": got}))
+            checked.append(name)
+    return bad, checked
+
+
+def test_every_fragment_tool_is_wrapped_once_per_gate_it_earns():
+    bad, checked = gate_mismatches()
+    assert bad == []
+    assert set(_REPORT_TEMPLATES) <= set(checked)
+
+
 # ── discovery misses fail loudly ────────────────────────────────────────────
 
 
@@ -305,9 +515,25 @@ def test_discovery_in_the_frozen_app_with_fragments_present_succeeds(monkeypatch
     assert "report_templates" in F.discover(F.SCHEMA_PACKAGE)
 
 
-def test_a_dispatcher_fragment_imported_first_is_not_circular():
+def _dispatcher_stems():
+    """The dispatcher fragments on disk, listed without importing them."""
+    folder = BACKEND / "services" / "chat_dispatchers"
+    return sorted(p.stem for p in folder.glob("[!_]*.py"))
+
+
+def test_the_circular_import_cases_are_exactly_the_discovered_fragments():
+    stems = _dispatcher_stems()
+    assert "report_templates" in stems
+    assert stems == sorted(F.discover(F.DISPATCH_PACKAGE))
+
+
+@pytest.mark.parametrize("stem", _dispatcher_stems())
+def test_every_dispatcher_fragment_imported_first_is_not_circular(stem):
+    """chat_tools discovers the dispatcher fragments part-way through its own
+    import, so a fragment that imports a chat_tools name at its top would fail
+    whichever module a fresh interpreter imports first."""
     code = (
-        "import services.chat_dispatchers.report_templates as R\n"
+        f"import services.chat_dispatchers.{stem} as R\n"
         "from services import chat_tools as T\n"
         "assert all(n in T.DISPATCHERS for n in R.DISPATCHERS)\n"
     )
@@ -344,6 +570,84 @@ def test_the_spec_collects_both_fragment_packages():
     for pkg in (F.SCHEMA_PACKAGE, F.DISPATCH_PACKAGE):
         listed = set(scope["_fragment_modules"](pkg))
         assert {f"{pkg}.{stem}" for stem in F.discover(pkg)} | {pkg} == listed, pkg
+
+
+def _check_bundle():
+    sys.path.insert(0, str(BACKEND / "smoke"))
+    try:
+        import check_bundle
+    finally:
+        sys.path.pop(0)
+    return check_bundle
+
+
+def _fake_bundle(root, skip=None):
+    """A onedir-shaped tree: alembic.ini at the frozen root, every fragment
+    module written beside it as the spec's "pyz+py" collection does."""
+    frozen = root / "_internal"
+    frozen.mkdir(parents=True)
+    (frozen / "alembic.ini").write_text("")
+    for pkg in (F.SCHEMA_PACKAGE, F.DISPATCH_PACKAGE):
+        rel = Path(*pkg.split("."))
+        (frozen / rel).mkdir(parents=True)
+        for src in (BACKEND / rel).glob("[!_]*.py"):
+            if (rel / src.name).as_posix() != skip:
+                (frozen / rel / src.name).write_text("")
+    return root
+
+
+def test_the_bundle_check_reads_the_spec_fragment_packages():
+    packages = _check_bundle().FRAGMENT_PACKAGES
+    assert packages == (F.SCHEMA_PACKAGE, F.DISPATCH_PACKAGE)
+    assert f"FRAGMENT_PACKAGES = {packages!r}".replace("'", '"') in SPEC.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_the_bundle_check_main_refuses_a_bundle_missing_a_fragment(tmp_path):
+    """End to end through ``main``: an otherwise clean bundle passes, and the
+    same bundle less one fragment module is refused."""
+    import plistlib
+
+    cb = _check_bundle()
+
+    def bundle(root, skip=None):
+        _fake_bundle(root, skip=skip)
+        (root / "Contents").mkdir()
+        with (root / "Contents" / "Info.plist").open("wb") as fh:
+            plistlib.dump({k: "Used for chat." for k in cb.REQUIRED_PLIST_KEYS}, fh)
+        return str(root)
+
+    assert cb.main(["check_bundle.py", bundle(tmp_path / "whole")]) == 0
+    skip = "services/chat_dispatchers/report_templates.py"
+    assert cb.main(["check_bundle.py", bundle(tmp_path / "less", skip=skip)]) == 1
+
+
+def test_the_bundle_check_refuses_when_the_source_tree_has_no_fragments(
+    tmp_path, monkeypatch
+):
+    cb = _check_bundle()
+    monkeypatch.setattr(cb, "_BACKEND", tmp_path / "nowhere")
+    problems = cb.check_fragments(_fake_bundle(tmp_path / "bundle"))
+    assert len(problems) == 2 and "no fragment modules" in problems[0], problems
+
+
+def test_the_bundle_check_passes_a_bundle_with_every_fragment(tmp_path):
+    assert _check_bundle().check_fragments(_fake_bundle(tmp_path)) == []
+
+
+@pytest.mark.parametrize(
+    "skip",
+    [
+        "harness/catalogue_tools/report_templates.py",
+        "services/chat_dispatchers/report_templates.py",
+    ],
+)
+def test_the_bundle_check_refuses_a_bundle_missing_a_fragment(tmp_path, skip):
+    cb = _check_bundle()
+    problems = cb.check_fragments(_fake_bundle(tmp_path, skip=skip))
+    assert len(problems) == 1 and skip in problems[0], problems
+    assert cb.check_fragments(tmp_path / "_internal" / "harness") != []
 
 
 # ── a new fragment pair is gated like every other tool ──────────────────────
@@ -407,7 +711,10 @@ def depth(fn):
         fn, n = fn.__wrapped__, n + 1
     return fn, n
 
+from tests.test_tool_fragments import gate_mismatches
+bad, checked = gate_mismatches()
 out = {"last": [t["name"] for t in C.TOOLS[-3:]],
+       "gate_mismatches": bad, "gate_checked": checked,
        "network_writes": "zz_probe_apply" in C._SERVICE_CALL_NETWORK_WRITES,
        "non_network_writes": "zz_probe_save" in C._SERVICE_CALL_NON_NETWORK_WRITES,
        "validator": T.PRE_DISPATCH_VALIDATORS.get("zz_probe_edit") is P._check}
@@ -444,6 +751,10 @@ def test_a_new_fragment_pairs_write_tools_get_every_wrapper(tmp_path):
     out = json.loads(line[len("PROBE") :])
     assert out["last"] == ["zz_probe_edit", "zz_probe_apply", "zz_probe_save"]
     assert out["network_writes"] and out["non_network_writes"] and out["validator"]
+    assert out["gate_mismatches"] == [], out["gate_mismatches"]
+    assert {"zz_probe_edit", "zz_probe_apply", "zz_probe_save"} <= set(
+        out["gate_checked"]
+    )
     save = out["zz_probe_save"]
     assert save["raw"] and save["depth"] == 1 and save["lock"], save
     assert not save["study"] and not save["undo"], save

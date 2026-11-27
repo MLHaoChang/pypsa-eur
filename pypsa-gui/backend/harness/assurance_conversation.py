@@ -38,11 +38,85 @@ QUESTIONS = {
     "current_run_required": "This selection refers to a retained historical run. Specify the candidate and baseline explicitly to compare historical runs.",
     "capacity_meaning_required": "Which capacity do you mean: Configured capacity (the input before the solve), Optimized capacity (after the solve) or Available capacity?",
     "capacity_component_required": "Please name the component class and its name: generator, link, line, transformer, StorageUnit or store, for example: What is the capacity of generator G1?",
+    # AA-09 S1: a summary outside the bounded grammar is never summarized unscoped.
+    "key_results_scope_required": "Which checked result do you want? Name one result and its component, for example: Give me the key results for storage unit <name>; Give me the energy balance for network; Give me the system cost for network. This summary request is outside the checked request forms, so no part of it has been answered.",
     # AA-09 S3: an entity switch and an added filter.
     "carried_entity_unavailable": "That component is not in the active network under the same component class as the previous checked result. Please name a component of that class, or state the full result scope.",
     "carried_scope_changed": "The network changed (an edit or a new solve) since the checked result this follow-up refers to, so its window and basis are not carried over. Please state the full result scope again.",
     "unsupported_constraint": "That request adds a filter (such as excluding, only or without) that no checked result supports. Please ask for the result without the filter, or ask without a check; the filter has not been ignored.",
 }
+# AA-09 S1: the whole message is a request for the results summary: optional polite
+# filler, the summary phrase, then optionally "for <entity>" or "of the run". The
+# phrase is never searched for inside a longer question; any further clause, and
+# the words in WITH_MODEL, stay with the model.
+RESULTS_SUMMARY = re.compile(
+    r"(?:(?:please|can you|could you|would you|i'?d like|i would like)\s+)*"
+    r"(?:(?:give me|show me|show|tell me|what are|what were)\s+)?"
+    r"(?:"
+    r"(?:the\s+|my\s+)?(?:key|main|headline)\s+results"
+    r"|(?:a\s+|an\s+|the\s+)?(?:summary|overview)\s+of\s+(?:the|my|this)\s+(?:\w+\s+)?results"
+    r"|summar(?:ise|ize)\s+(?:the|my|this)\s+(?:\w+\s+){0,2}results"
+    r"|(?:the\s+|a\s+)?results\s+(?:summary|overview)"
+    r")"
+    r"(?:\s+(?:for|of)\s+(?:the\s+)?(?:generator|storage\s*unit|line|transformer|link|store|bus|load"
+    r"|carrier)\s+[\w.:/()+-]{1,64}|\s+(?:for|of)\s+(?:the\s+)?network|\s+of\s+(?:the|this)\s+run)?"
+    r"(?:,?\s+please)?\s*[.!?]?",
+    re.I,
+)
+WITH_MODEL = re.compile(
+    r"\b(?:why|is|wrong|robust|compar\w*|paper|literature|logs?|errors?|solver|and|then|but)\b"
+    r"|[,;](?!\s*please\s*[.!?]?$)",
+    re.I,
+)
+
+
+def is_summary_request(message):
+    text = message.strip()
+    return bool(RESULTS_SUMMARY.fullmatch(text)) and not WITH_MODEL.search(text)
+
+
+UNCHECKED_CHOICE = "Answer without a check"
+NETWORK_SUMMARY_CHOICES = (
+    "Give me the energy balance for network",
+    "Give me the system cost for network",
+)
+SELECTED_SUMMARY_CHOICES = {
+    "Generator": "Give me the key results for generator {}",
+    "StorageUnit": "Give me the key results for storage unit {}",
+}
+
+
+SELECTED_TABLES = {"Generator": "generators", "StorageUnit": "storage_units"}
+
+
+def summary_choices(ui, network):
+    """The key-results card: the selected component's checked form first (only for a
+    class with a key-results profile, and only when the active network has that
+    component under that class), then network forms, then going on unchecked. Each
+    checked option is a complete request the bounded grammar scopes on its own."""
+    selected = (ui or {}).get("selected_component") if isinstance(ui, dict) else None
+    options = []
+    if isinstance(selected, dict):
+        kind, name = selected.get("class"), selected.get("name")
+        table = getattr(network, SELECTED_TABLES.get(kind, ""), None)
+        if (
+            table is not None
+            and isinstance(name, str)
+            and re.fullmatch(r"[\w.:/()+-](?:[\w .:/()+-]{0,126}[\w.:/()+-])?", name)
+            and name in table.index
+        ):
+            options.append(SELECTED_SUMMARY_CHOICES[kind].format(name))
+    return [*options, *NETWORK_SUMMARY_CHOICES, UNCHECKED_CHOICE]
+
+
+def clarify_summary(turn, ui, network):
+    """AA-09 S1: a summary outside every checked form gets the key-results card."""
+    scope = _needs(turn, None, "key_results_scope_required")
+    turn.clarification["options"] = summary_choices(ui, network)
+    scope["reason"] = turn.clarification["reason"]
+    return scope
+
+
 # AA-09 S3: "same for <class> <name>" keeps the checked window, basis and metrics.
 SWITCH = (
     r"(?:(?:and\s+)?(?:now\s+)?(?:the\s+)?same\s+for|(?:and\s+)?now\s+for|what\s+about)\s+"

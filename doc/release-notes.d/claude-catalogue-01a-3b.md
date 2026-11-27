@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Every network import (netCDF, CSV, MATPOWER, Excel, the input workbook and model files) now lists the imported values the engine cannot use and each minimum set above its maximum, such as a smallest size above the largest size; the values still load unchanged, and the flags are worked out again each time rather than saved.

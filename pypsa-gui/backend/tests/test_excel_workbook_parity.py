@@ -122,6 +122,8 @@ def test_an_older_layout_reads_as_before_the_reroute(client, session_ctx, make, 
     assert r.status_code == 200, r.text
     body = r.json()
     report = body.pop("report")
+    # 01a-3b: the response gains the range flags; these workbooks have none.
+    assert (body.pop("range_flags"), body.pop("range_flags_total")) == ([], 0)
     assert body == BEFORE[case]["summary"]
     # The old parser kept any column; the reader keeps only the app's own (E1) and says so.
     unmapped = [u["source_item"] for u in report["unmapped"]]

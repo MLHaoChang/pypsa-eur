@@ -106,6 +106,7 @@ def test_export_is_what_the_meter_delivers_into_the_grid_bus(exporting, checked)
     assert list(ctx.network.links_t.p0["meter"]) == pytest.approx([6, -6])
     values = {"grid_import_energy": 12, "peak_grid_import": 6, "export_energy": 6, "hours_at_import_limit": 2}
     assert answered(checked, ask(checked, ctx, values)) == pytest.approx(values)
+    assert answered(checked, ask(checked, ctx, values))["hours_at_import_limit"] == 2
     expected = tab(ctx.network)
     for metric in ("grid_import_energy", "peak_grid_import", "export_energy"):
         assert values[metric] == pytest.approx(expected[metric], abs=1e-4)

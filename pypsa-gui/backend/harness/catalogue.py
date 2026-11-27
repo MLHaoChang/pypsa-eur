@@ -2033,8 +2033,10 @@ TOOLS: list[dict[str, Any]] = [
         "load_project",
         "Cold-load a project (GET /api/projects/{name}). Returns "
         "ImportSummary {buses, generators, lines, links, storage_units, "
-        "stores, loads, transformers, snapshots} per schemas.py:455-464 "
-        "(v6-F3). Swaps active context — in-memory unsaved edits are lost. "
+        "stores, loads, transformers, snapshots, range_flags, "
+        "range_flags_total} per schemas.py:455-464 (v6-F3); opening a project "
+        "never checks ranges, so range_flags is [] and range_flags_total 0. "
+        "Swaps active context — in-memory unsaved edits are lost. "
         "Memory rule: chat MUST NOT load while the user has the same project "
         "open in the browser (autosave footgun). Safety: write.",
         {"name": {"type": "string"}},
@@ -2316,7 +2318,8 @@ TOOLS: list[dict[str, Any]] = [
         "import_network_nc",
         "Import a PyPSA netCDF (.nc) file. Returns ImportSummary {buses, "
         "generators, lines, links, storage_units, stores, loads, transformers, "
-        "snapshots} per schemas.py:455-464. reset_network() runs first. "
+        "snapshots, range_flags, range_flags_total} per schemas.py:455-464. "
+        "range_flags is up to 200 values outside the catalogue's range or min-above-max pairs, loaded unchanged; range_flags_total counts them all, null when the check failed. reset_network() runs first. "
         "Safety: destructive.",
         {
             "bytes_b64": {"type": "string"},
@@ -2328,8 +2331,9 @@ TOOLS: list[dict[str, Any]] = [
         "import_csv_bundle",
         "Import a CSV bundle (zip with one CSV per component class). Returns "
         "ImportSummary {buses, generators, lines, links, storage_units, "
-        "stores, loads, transformers, snapshots} per schemas.py:455-464. "
-        "Safety: destructive.",
+        "stores, loads, transformers, snapshots, range_flags, "
+        "range_flags_total} per schemas.py:455-464. "
+        "range_flags is up to 200 values outside the catalogue's range or min-above-max pairs, loaded unchanged; range_flags_total counts them all, null when the check failed. Safety: destructive.",
         {
             "bytes_b64": {"type": "string"},
             "filename": {"type": "string"},
@@ -2341,7 +2345,8 @@ TOOLS: list[dict[str, Any]] = [
         "Import a network from an .xlsx workbook in an older layout (PyPSA's "
         "own export or raw-named sheets). Returns ImportSummary {buses, "
         "generators, lines, links, storage_units, stores, loads, transformers, "
-        "snapshots, report} per schemas.py:455-464; report lists what the file "
+        "snapshots, report, range_flags, range_flags_total} per "
+        "schemas.py:455-464. range_flags is up to 200 values outside the catalogue's range or min-above-max pairs, loaded unchanged; range_flags_total counts them all, null when the check failed. report lists what the file "
         "held that was not read. The PyPSA Studio input workbook is refused "
         "(import_as_new_project): preview_input_workbook then import_input_workbook "
         "import it as a new project. Safety: destructive.",
@@ -2355,7 +2360,8 @@ TOOLS: list[dict[str, Any]] = [
         "import_matpower",
         "Import a MATPOWER case file (.m). Returns ImportSummary {buses, "
         "generators, lines, links, storage_units, stores, loads, transformers, "
-        "snapshots} per schemas.py:455-464. Safety: destructive.",
+        "snapshots, range_flags, range_flags_total} per schemas.py:455-464. "
+        "range_flags is up to 200 values outside the catalogue's range or min-above-max pairs, loaded unchanged; range_flags_total counts them all, null when the check failed. Safety: destructive.",
         {
             "bytes_b64": {"type": "string"},
             "filename": {"type": "string"},
@@ -5863,6 +5869,8 @@ TOOL_ROUTES: dict[str, list] = {
     ],
     "export_report_docx": [("POST", "/api/projects/{name}/reports/{report_id}/export")],
     "delete_report": [("DELETE", "/api/projects/{name}/reports/{report_id}")],
+    # report templates (5): harness/catalogue_tools/report_templates.py
+    **_FRAGMENTS.splice_routes("report_templates"),
     # report round trip (4) — WP13: the round-trip routes, called in-process;
     # `list_report_roundtrips` is the uploads list filtered to one kind and
     # `export_report_pdf` is the export route with `format: pdf`.
@@ -6168,6 +6176,8 @@ _SERVICE_CALL_NON_NETWORK_WRITES = frozenset({
 _SERVICE_CALL_NETWORK_WRITES, _SERVICE_CALL_NON_NETWORK_WRITES = _FRAGMENTS.merge(
     TOOLS, TOOL_ROUTES, _SERVICE_CALL_NETWORK_WRITES, _SERVICE_CALL_NON_NETWORK_WRITES)
 FRAGMENT_NETWORK_WRITES = _FRAGMENTS.network_writes
+# The schema side, for chat_tools' dispatcher merge (which families are spliced).
+SCHEMA_FRAGMENTS = _FRAGMENTS
 
 
 def tool_edits_network(tool_name: str) -> bool:

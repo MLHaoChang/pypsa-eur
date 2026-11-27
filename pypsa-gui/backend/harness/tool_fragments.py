@@ -19,8 +19,9 @@ wrap ``DISPATCHERS``, so a fragment's tool is gated like any other.
 
 Order (``wiring._bounded_tools`` breaks selection ties by TOOLS index, and a
 stable order keeps provider prefix caches warm): a family moved out of the
-monolith is spliced back where it was with ``*_fragment("<stem>")`` and
-declares no ORDER. Every other fragment declares ``ORDER = YYYYMMDDNN`` (the
+monolith is spliced back where it was, its TOOLS with ``splice``, its ROUTES
+with ``splice_routes`` and its DISPATCHERS with ``DispatchFragments.splice``,
+and declares no ORDER. Every other fragment declares ``ORDER = YYYYMMDDNN`` (the
 day the tool was added, then a counter) and is appended after the monolith in
 ORDER. A clash, a duplicate name or key, or an unpaired module refuses the
 import with both module names.
@@ -64,6 +65,7 @@ class SchemaFragments:
     def __init__(self, modules: dict[str, ModuleType]):
         self.modules = modules
         self.spliced: set[str] = set()
+        self.routes_spliced: set[str] = set()
         # The fragments' NETWORK_WRITES, which chat_tools adds to the service-call
         # network mutators its lock and study gates cover (set by ``merge``).
         self.network_writes: frozenset[str] = frozenset()
@@ -84,6 +86,20 @@ class SchemaFragments:
             raise FragmentError(f"{LEGACY_SCHEMA} splices {mod.__name__} twice")
         self.spliced.add(stem)
         return list(mod.TOOLS)
+
+    def splice_routes(self, stem: str) -> dict[str, Any]:
+        """The ROUTES of a spliced family, for its old place in TOOL_ROUTES."""
+        if stem not in self.spliced:
+            raise FragmentError(
+                f"{LEGACY_SCHEMA} splices the ROUTES of {SCHEMA_PACKAGE}.{stem} "
+                "but not its TOOLS; splice both"
+            )
+        if stem in self.routes_spliced:
+            raise FragmentError(
+                f"{LEGACY_SCHEMA} splices the ROUTES of {SCHEMA_PACKAGE}.{stem} twice"
+            )
+        self.routes_spliced.add(stem)
+        return dict(self.modules[stem].ROUTES)
 
     def appended(self) -> list[ModuleType]:
         """The fragments not spliced, in ORDER; a missing or shared ORDER refuses."""
@@ -137,7 +153,18 @@ class SchemaFragments:
                     f"{mod.__name__}: ROUTES keys {sorted(route_keys)} must equal its "
                     f"TOOLS names {sorted(names)}"
                 )
-            _merge(routes, mod.ROUTES, LEGACY_SCHEMA, mod.__name__, "route key")
+            stem = mod.__name__.rsplit(".", 1)[1]
+            if stem in self.spliced:
+                _check_spliced(
+                    routes,
+                    mod.ROUTES,
+                    stem in self.routes_spliced,
+                    mod.__name__,
+                    "TOOL_ROUTES",
+                    "splice_routes",
+                )
+            else:
+                _merge(routes, mod.ROUTES, LEGACY_SCHEMA, mod.__name__, "route key")
         self.network_writes = frozenset(
             n for m in self.modules.values() for n in getattr(m, "NETWORK_WRITES", ())
         )
@@ -151,14 +178,58 @@ class SchemaFragments:
         return {id(t): m.__name__ for m in self.modules.values() for t in m.TOOLS}
 
 
+class DispatchFragments:
+    """The chat_tools side: splice moved families into DISPATCHERS, merge the rest."""
+
+    def __init__(self, modules: dict[str, ModuleType]):
+        self.modules = modules
+        self.spliced: set[str] = set()
+
+    def splice(self, stem: str) -> dict[str, Any]:
+        """The DISPATCHERS of a family moved out of chat_tools, for its old place."""
+        mod = self.modules.get(stem)
+        if mod is None:
+            raise FragmentError(
+                f"{LEGACY_DISPATCH} splices {DISPATCH_PACKAGE}.{stem}, which was not found"
+            )
+        if stem in self.spliced:
+            raise FragmentError(f"{LEGACY_DISPATCH} splices {mod.__name__} twice")
+        self.spliced.add(stem)
+        return dict(mod.DISPATCHERS)
+
+    def merge(
+        self,
+        dispatchers: dict[str, Any],
+        validators: dict[str, Any],
+        schema: SchemaFragments,
+    ) -> frozenset[str]:
+        """``merge_dispatchers``, with the spliced families already in place.
+
+        A family spliced on one side only refuses: a move puts both its TOOLS
+        and its DISPATCHERS back at their old places.
+        """
+        if self.spliced != schema.spliced:
+            odd = sorted(self.spliced ^ schema.spliced)
+            raise FragmentError(
+                f"{odd} spliced by only one of {LEGACY_SCHEMA} and {LEGACY_DISPATCH}; "
+                "a moved family is spliced by both"
+            )
+        return merge_dispatchers(
+            dispatchers, validators, self.modules, schema.modules, self.spliced
+        )
+
+
 def merge_dispatchers(
     dispatchers: dict[str, Any],
     validators: dict[str, Any],
     modules: dict[str, ModuleType],
     schema_modules: dict[str, ModuleType],
+    spliced: set[str] | frozenset[str] = frozenset(),
 ) -> frozenset[str]:
     """Merge the dispatcher fragments in place, after checking each pairs its schema.
 
+    ``spliced`` are the stems whose DISPATCHERS chat_tools already spliced at
+    their old place (``DispatchFragments.splice``); they are checked, not added.
     Returns the fragments' ``LOCK_GATED`` tools: routeless (service-call) tools
     that write the project folder, which chat_tools adds to the service-call
     tools its lock gate covers (network writes are ``NETWORK_WRITES`` instead).
@@ -176,9 +247,23 @@ def merge_dispatchers(
                 f"{mod.__name__} DISPATCHERS {sorted(mod.DISPATCHERS)} must equal "
                 f"{schema.__name__} TOOLS {sorted(names)}"
             )
-        _merge(
-            dispatchers, mod.DISPATCHERS, LEGACY_DISPATCH, mod.__name__, "dispatcher"
-        )
+        if stem in spliced:
+            _check_spliced(
+                dispatchers,
+                mod.DISPATCHERS,
+                True,
+                mod.__name__,
+                "DISPATCHERS",
+                "splice",
+            )
+        else:
+            _merge(
+                dispatchers,
+                mod.DISPATCHERS,
+                LEGACY_DISPATCH,
+                mod.__name__,
+                "dispatcher",
+            )
         own = getattr(mod, "PRE_DISPATCH_VALIDATORS", {})
         if not set(own) <= names:
             raise FragmentError(
@@ -203,6 +288,27 @@ def _merge(
                 f"{what} {key!r} is defined by both {legacy} and {where}"  # repr-ok: import-time error for the developer
             )
         into[key] = value
+
+
+def _check_spliced(
+    into: dict[str, Any],
+    own: dict[str, Any],
+    was_spliced: bool,
+    where: str,
+    table: str,
+    how: str,
+) -> None:
+    """A spliced family's entries must be in ``into`` as the fragment has them."""
+    if not was_spliced:
+        raise FragmentError(
+            f"{where} is spliced into TOOLS but its entries are not spliced into "
+            f"{table}; add **{how}(...) at their old place"
+        )
+    for key, value in own.items():
+        if key not in into or into[key] is not value:
+            raise FragmentError(
+                f"{table} entry {key!r} of the spliced {where} was replaced or removed"  # repr-ok: import-time error for the developer
+            )
 
 
 def _merge_set(

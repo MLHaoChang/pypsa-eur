@@ -594,6 +594,15 @@ def _asks_about_the_strip(words: set[str]) -> bool:
 
 
 
+# The import range-flag entry owns `implausible`; `range` and `flags` alone also
+# mean a snapshot, cost or p_nom range and feature flags (GK B2 (8) N1 on #2083).
+_RANGE_FLAG_PAIRS = frozenset({'out', 'outside', 'beyond', 'flag', 'flags', 'flagged'})
+
+
+def _asks_about_range_flags(words: set[str]) -> bool:
+    return 'implausible' in words or ('range' in words and bool(words & _RANGE_FLAG_PAIRS))
+
+
 def matches(words: set[str], limit: int = 2, goal: str = '') -> list[dict]:
     """Keyword hits, ranked by count then declaration order; return public copies.
 
@@ -610,6 +619,8 @@ def matches(words: set[str], limit: int = 2, goal: str = '') -> list[dict]:
         if entry['id'] == 'memory_parameter_suggestions' and not _asks_for_a_saved_value(words, goal):
             continue
         if entry['id'] == 'results_headline_strip' and not _asks_about_the_strip(words):
+            continue
+        if entry['id'] == 'import_range_flags' and not _asks_about_range_flags(words):
             continue
         hits = len(words & entry['keywords'])
         if hits:

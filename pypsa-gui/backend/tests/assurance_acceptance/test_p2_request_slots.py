@@ -526,6 +526,10 @@ def test_a_non_converged_interval_keeps_its_warning_slot_whatever_is_asked(
         assert slot["excluded_indices"] == [second]
     assert answered(checked, frames) == pytest.approx(FIRST_ONLY)
     assert (
+        answered(checked, frames)["ac_hours_above_rating"]
+        == FIRST_ONLY["ac_hours_above_rating"]
+    )
+    assert (
         "ac_pf_convergence: ac_pf_not_converged (1 of 2 snapshots in the window converged)"
         in (receipt["limitations"])
     )

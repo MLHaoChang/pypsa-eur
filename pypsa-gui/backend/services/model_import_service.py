@@ -512,6 +512,9 @@ def payload(st: Staged) -> dict:
         "warnings": report.get("warnings", []),
         "suggestions": report.get("suggestions", []),
         "stored_files": [n for n in r["sidecars"] if n != METADATA_FILE],
+        # 01a-3b: the child's ranges.import_flags of the read network.
+        "range_flags": r.get("range_flags", []),
+        "range_flags_total": r.get("range_flags_total"),
     }
 
 
