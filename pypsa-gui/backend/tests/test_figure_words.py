@@ -192,7 +192,9 @@ def test_the_datacenter_returns_rule_names_the_npv_as_the_one_source_does():
 
     rules = {
         r["id"]: r
-        for r in run_profiles.resolve("eh_datacenter_staged@1")["stages"]["result_gate"]["rules"]
+        for r in run_profiles.resolve("eh_datacenter_staged@1")["stages"][
+            "result_gate"
+        ]["rules"]
     }
     assert FW.name("project_npv") in rules["dc.ic.returns"]["basis"]
 
