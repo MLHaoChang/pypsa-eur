@@ -13,11 +13,13 @@ machine (``grid_machine``) at the PoC side, whose impedance the script sets
 **Channels.** PSS/E records ``raw_<name>`` channels as it measures them; after
 the run the script reads the ``.out`` back with ``dyntools.CHNF.get_data``,
 applies :data:`CONVERSIONS` in a pure ``_convert`` function and writes the CSV
-in the read-back's one dialect (``readback.channels.read_csv``, GK A2 T8): the
-header is ``time [s]``, then each of the case's channels as
+at battery contract version 2 in the read-back's one dialect
+(``readback.channels.read_csv``, GK A2 T8): the header is ``time [s]``, then
+each of the case's channels as
 ``<name> [<unit>]`` with name and unit from ``test_battery.CHANNELS``, in the
 case's order. So the read-back never sees a PSS/E unit. Every cell is a number,
-except a ``connected`` sample that was not read, which is blank. id/iq come from the plant converter's current commands, pu on the plant
+except a ``connected`` sample that was not read, which is blank (version 1:
+see "Connected"). id/iq come from the plant converter's current commands, pu on the plant
 machine's MBASE: the pack sets MBASE = plant rated apparent power, which is
 the contract base. P and Q are measured at the PoC: ``plant_branch`` is
 ``(from = poc_bus, to = plant side bus, ckt)``, so PSS/E reports the flow
@@ -61,15 +63,19 @@ current in A, not in pu. The CSV has no text column.
 the PoC branch and every plant machine (``status_machines``) is in service, 0
 once one is not. PSS/E records no status channel, so the script polls: every
 ``psspy.run`` goes through ``_run(t_stop)``, which stops at each multiple of
-:data:`POLL_DT_S` inside the run and at ``t_stop`` itself (``_tpause``), so
-each event time stays an exact stop, and after each stop reads
+``POLL_DT_S`` inside the run and at ``t_stop`` itself (``_tpause``), so each
+event time stays an exact stop, and after each stop reads
 ``brnint(..., 'STATUS')`` on the PoC branch and ``macint(..., 'STATUS')`` on
 each machine (``_poll``, first at t = 0). ``_combine`` gives 1 only when every
 reading is 1 with ``ierr`` 0, 0 when any reads 0, else a failed poll (blank,
 never 1), with its reason. ``_latch`` holds every poll after a 0 at 0; a blank
 never sets it. Each ``.out`` sample takes the first poll at or after it
 (``_connected``): a 1 is exact, since a 0 latches; a trip shows at most
-:data:`POLL_DT_S` early, never late. The reasons of failed polls go to the
+``POLL_DT_S`` early, never late. ``POLL_DT_S`` is the case's time step DELT
+(``dsrval('DELT')``, read after ``strt``): the runs write a sample every step
+(NPLT = 1), so the polls are never coarser than the samples (GK A P2). A
+version-1 script keeps master's ``t_s`` / bare-name / ``status`` CSV byte-equal
+and polls nothing; only version 2 writes the read-back dialect above. The reasons of failed polls go to the
 sidecar ``<case_id>.status.txt`` (text, read back as a reason, never as data).
 
 The psspy calls were written without a PSS/E licence: :data:`PENDING` is
@@ -118,6 +124,7 @@ UNVERIFIED = {
         "source found"
     ),
     "fnsl": "option order and meaning of FNSL_OPTIONS",
+    "DELT": "dsrval('DELT') returns (ierr, the dynamic simulation time step in s)",
     "STATUS polls": (
         "brnint(..., 'STATUS') and macint(..., 'STATUS') return (ierr, 1 in service "
         "/ 0 out of service), and a plant protection model's trip sets the "
@@ -227,8 +234,7 @@ _FILE_LIKE = re.compile(r"[^\s]+\.[A-Za-z][A-Za-z0-9]{0,4}")
 _ABS = re.compile(r"(/|\\|~|[A-Za-z]:[\\/])")
 _PLANT_KINDS = ("v_step", "q_step", "p_step")
 _STEP_DT_S = 0.005
-#: the ``connected`` status poll grid (s) and the time tolerance of the poll helpers
-POLL_DT_S = 0.005
+#: the time tolerance (s) of the ``connected`` poll helpers; the poll grid is DELT
 EPS_S = 1e-9
 #: the per-case sidecar that carries failed-poll reasons (text, never data)
 STATUS_SIDECAR = "{case_id}.status.txt"
@@ -392,7 +398,12 @@ def _pack_local(label, name):
         raise ContractError(f"{label} {name!r}: not pack-local (no directories)")
 
 
-def _event_lines(case, poc_kv):
+def _run_call(polled, t):
+    """One run to ``t``: through ``_run`` (polled, v2) or psspy.run as on v1."""
+    return f"_run({t})" if polled else f"psspy.run(0, {t}, 1000, 1, 0)"
+
+
+def _event_lines(case, poc_kv, polled=False):
     p, kind = case.params, case.kind
     if kind == "flat":
         return ["# flat run: no event"]
@@ -406,7 +417,7 @@ def _event_lines(case, poc_kv):
         return [
             f"# three-phase fault, retained voltage {p['v_retained_pu']!r} pu",
             f"psspy.dist_bus_fault(POC_BUS, {vals})",
-            f"_run(T_EVENT + {p['duration_s']!r})",
+            _run_call(polled, f"T_EVENT + {p['duration_s']!r}"),
             "psspy.dist_clear_fault(1)",
         ]
     if kind == "fault_1ph":
@@ -416,7 +427,7 @@ def _event_lines(case, poc_kv):
             f"ZF_OHM = ({zf.real!r}, {zf.imag!r})",
             "ZF_PU = [z * psspy.sysmva() / POC_KV**2 for z in ZF_OHM]",
             "psspy.dist_scmu_fault_2([1, 1, POC_BUS, 0, 0], ZF_PU + [0.0, 0.0])",
-            f"_run(T_EVENT + {p['duration_s']!r})",
+            _run_call(polled, f"T_EVENT + {p['duration_s']!r}"),
             "psspy.dist_clear_fault(1)",
         ]
     if kind in ("v_step", "q_step"):
@@ -443,7 +454,7 @@ def _event_lines(case, poc_kv):
         "    th = min(tau, HOLD)",
         "    cycles = DF0 * tau + RAMP * (0.5 * th * th + HOLD * (tau - th))",
         f"    psspy.change_state(K_ANGLE, ANGLE0 + {_TWO_PI!r} * cycles)",
-        "    _run(T_EVENT + tau)",
+        "    " + _run_call(polled, "T_EVENT + tau"),
         "    n += 1",
     ]
 
@@ -495,9 +506,11 @@ def _convert_lines(case):
     gets the pure status helpers (:func:`_status_lines`), and ``_convert`` reads
     the polls from ``rec['poll_t']`` / ``rec['poll_v']``.
     """
+    polled = CONNECTED in case.channels
+    t_key = "time" if polled else "t_s"  # v1 keeps master's t_s and status (GK A P1)
     out = [
         "def _convert(rec, f0_hz, s_rated, m_base):",
-        "    out = {'time': list(rec['t_s'])}",
+        f"    out = {{{t_key!r}: list(rec['t_s'])}}",
     ]
     for ch in case.channels:
         if ch == CONNECTED:
@@ -513,20 +526,27 @@ def _convert_lines(case):
             f"    # {formula}",
             f"    out[{ch!r}] = [{expr} for ({', '.join(names)},) in zip({cols})]",
         ]
-    if CONNECTED in case.channels:
+    if polled:
         out += [
             "    # the latched status polls, each sample taking the first poll at or after it",
             f"    out[{CONNECTED!r}] = _connected(rec['t_s'], rec['poll_t'], rec['poll_v'])",
         ]
+    else:
+        out.append("    out['status'] = ['' for _ in out['t_s']]")
+    sig, cols = (
+        ("data, columns, header", "c in columns")
+        if polled
+        else ("data, header", "h in header")
+    )
     return out + [
         "    return out",
         "",
         "",
-        "def _csv_text(data, columns, header):",
+        f"def _csv_text({sig}):",
         "    def cell(x):",
         "        return x if isinstance(x, str) else repr(float(x))",
         "",
-        "    rows = [header, *zip(*[data[c] for c in columns])]",
+        f"    rows = [header, *zip(*[data[{cols[0]}] for {cols}])]",
         "    return ''.join(','.join(cell(x) for x in row) + '\\n' for row in rows)",
         "",
     ]
@@ -584,14 +604,25 @@ def _status_lines():
     ]
 
 
-def _run_lines(polled, status_machines):
+def _delt_lines():
     """
-    ``_run(t_stop)``: the one way the script advances the simulation. Polled
-    (a ``connected`` case), it stops at every ``_tpause`` point and polls the
-    PoC branch and each plant machine after each stop.
+    Poll every time step (GK A P2): the output writes a sample each step
+    (``psspy.run`` NPLT = 1), so POLL_DT_S = DELT is never coarser than the samples.
     """
-    if not polled:
-        return ["def _run(t_stop):", "    psspy.run(0, t_stop, 1000, 1, 0)", ""]
+    return [
+        "ierr, DELT = psspy.dsrval('DELT')",
+        "if ierr or not DELT > 0:",
+        "    raise SystemExit('time step DELT not read: connected cannot be polled')",
+        "POLL_DT_S = DELT  # one poll per time step, so per output sample",
+    ]
+
+
+def _run_lines(status_machines):
+    """
+    ``_run(t_stop)``: how a ``connected`` (v2) script advances the
+    simulation: it stops at every ``_tpause`` point and polls the PoC branch
+    and each plant machine after each stop.
+    """
     return [
         f"STATUS_MACHINES = {list(status_machines)!r}",
         "POLLS = {'t_now': 0.0, 't': [], 'v': [], 'why': []}",
@@ -622,7 +653,13 @@ def _run_lines(polled, status_machines):
 
 
 def _header(case):
-    """The CSV columns (``_convert`` keys) and their ``name [unit]`` header (T8)."""
+    """
+    The CSV columns (``_convert`` keys) and header. Version 2: ``time [s]`` and
+    ``name [unit]`` (GK A2 T8). Version 1 keeps master's ``t_s``, bare names and
+    ``status`` byte-equal (GK A P1; no pack writes v1 scripts any more).
+    """
+    if CONNECTED not in case.channels:
+        return None, ["t_s", *case.channels, "status"]
     columns = ["time", *case.channels]
     header = ["time [s]", *(f"{ch} [{CHANNELS[ch].unit}]" for ch in case.channels)]
     return columns, header
@@ -677,13 +714,11 @@ def _script(
         f"T_EVENT, T_END = {case.t_event_s!r}, {case.t_end_s!r}",
         f"F0_HZ, PLANT_MBASE = {float(f0_hz)!r}, "
         f"{None if plant_mbase is None else float(plant_mbase)!r}",
-        f"COLUMNS = {columns!r}",
+        *([f"COLUMNS = {columns!r}"] if polled else []),
         f"HEADER = {header!r}",
     ]
     if polled:
-        lines.append(
-            f"POLL_DT_S, EPS_S = {POLL_DT_S!r}, {EPS_S!r}  # status poll grid, time tolerance"
-        )
+        lines.append(f"EPS_S = {EPS_S!r}  # time tolerance of the status poll helpers")
     if plant_branch is not None:
         lines.append("BR_FROM, BR_TO, BR_CKT = {!r}, {!r}, {!r}".format(*plant_branch))
     if plant_machine is not None:
@@ -693,8 +728,7 @@ def _script(
         "",
         *_convert_lines(case),
         "",
-        *_run_lines(polled, status_machines),
-        "",
+        *(_run_lines(status_machines) + [""] if polled else []),
         "psspy.psseinit()",
         "psspy.read(0, RAW)",
         "psspy.resq(SEQ)",
@@ -733,17 +767,20 @@ def _script(
         "psspy.dyre_new([1, 1, 1, 1], DYR, '', '', '')",
         *_channel_lines(case),
         "psspy.strt(0, OUT)",
+        *(_delt_lines() if polled else []),
         *(["_poll(0.0)"] if polled else []),
-        "_run(T_EVENT)",
-        *_event_lines(case, poc_kv),
-        "_run(T_END)",
+        _run_call(polled, "T_EVENT"),
+        *_event_lines(case, poc_kv, polled),
+        _run_call(polled, "T_END"),
         "_title, idents, values = dyntools.CHNF(OUT).get_data()",
         "rec = {idents[k]: values[k] for k in idents if k != 'time'}",
         "rec['t_s'] = values['time']",
         *(["rec['poll_t'], rec['poll_v'] = POLLS['t'], POLLS['v']"] if polled else []),
         "data = _convert(rec, F0_HZ, PLANT_MBASE, M_BASE)",
         f"with open(os.path.join(HERE, {csv!r}), 'w') as fh:",
-        "    fh.write(_csv_text(data, COLUMNS, HEADER))",
+        "    fh.write(_csv_text(data, COLUMNS, HEADER))"
+        if polled
+        else "    fh.write(_csv_text(data, HEADER))",
     ]
     if polled:
         lines += [

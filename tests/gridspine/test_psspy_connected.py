@@ -11,12 +11,12 @@ oracle is a hand-written literal.
 """
 
 import ast
+import math
 
 import pytest
 
 from gridspine.handoff.psspy_scripts import (
     EPS_S,
-    POLL_DT_S,
     check_script,
     write_scripts,
 )
@@ -40,8 +40,10 @@ from tests.gridspine.test_pack_contract2 import (
 from tests.gridspine.test_psspy_scripts import FILES, KW
 
 FAULT_ID = "fault_3ph_skmin_xrmin_v020"
-# off the 5 ms poll grid on purpose (GK A2 T3)
-T_FAULT, DURATION = 0.5013, 0.1502
+#: the time step the tests' fake case returns for dsrval('DELT'): the poll and sample grid
+DELT = 0.001
+# apply 0.50135, clear 0.65155: both off the 1 ms poll and sample grid (GK A2 T3, GK A P2)
+T_FAULT, DURATION = 0.50135, 0.1502
 
 
 def _battery2(overrides=None):
@@ -78,7 +80,7 @@ def _helpers(text, psspy=None, **env):
     """The script's top-level functions, run with ``env`` and a fake ``psspy``."""
     tree = ast.parse(text)
     fns = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
-    ns = {"POLL_DT_S": POLL_DT_S, "EPS_S": EPS_S, "psspy": psspy, **env}
+    ns = {"POLL_DT_S": DELT, "EPS_S": EPS_S, "psspy": psspy, **env}
     exec(compile(ast.Module(fns, []), "helpers", "exec"), ns)
     return ns
 
@@ -152,12 +154,32 @@ def test_the_checker_refuses_a_sidecar_the_pack_does_not_list(pack2):
 # --- T3: every event time is an exact run stop ------------------------------------------------------------------
 
 
+class _RunLog:
+    """A fake psspy for ``_run``: logs each run stop and each status poll."""
+
+    def __init__(self):
+        self.log = []
+
+    def run(self, opt, t, nprt, nplt, crtplt):
+        assert nplt == 1  # a sample every time step: the polls are never coarser
+        self.log.append(("run", t))
+
+    def brnint(self, *a):
+        self.log.append(("poll", self.log[-1][1]))
+        return 0, 1
+
+    def macint(self, *a):
+        return 0, 1
+
+
 def test_the_run_stops_hold_the_fault_apply_and_clear_times_off_the_grid(pack2):
     cases, texts = pack2
     text = texts[FAULT_ID]
-    ns = _helpers(text)
     env = {"T_EVENT": cases[FAULT_ID].t_event_s, "T_END": cases[FAULT_ID].t_end_s}
     assert env["T_EVENT"] == T_FAULT
+    t_apply, t_clear = T_FAULT, T_FAULT + DURATION
+    for t in (t_apply, t_clear):  # off the poll grid (= the sample grid, DELT)
+        assert abs(t / DELT - round(t / DELT)) > 0.1
     targets = [
         eval(ast.unparse(n.value.args[0]), env)  # noqa: S307 - a literal sum of the script's own names
         for n in ast.parse(text).body
@@ -165,16 +187,30 @@ def test_the_run_stops_hold_the_fault_apply_and_clear_times_off_the_grid(pack2):
         and isinstance(n.value, ast.Call)
         and ast.unparse(n.value.func) == "_run"
     ]
-    assert targets == [T_FAULT, T_FAULT + DURATION, env["T_END"]]
-    stops, t_now = [], 0.0
+    assert targets == [t_apply, t_clear, env["T_END"]]
+    fake = _RunLog()
+    polls = {"t_now": 0.0, "t": [], "v": [], "why": []}
+    ns = _helpers(
+        text,
+        fake,
+        STATUS_MACHINES=[(201, "1")],
+        POLLS=polls,
+        BR_FROM=101,
+        BR_TO=900,
+        BR_CKT="1",
+    )
     for t in targets:
-        stops += ns["_tpause"](t_now, t, POLL_DT_S)
-        t_now = t
-    assert T_FAULT in stops and T_FAULT + DURATION in stops
+        ns["_run"](t)
+    stops = [t for kind, t in fake.log if kind == "run"]
+    assert t_apply in stops and t_clear in stops
     assert stops == sorted(set(stops)) and stops[-1] == env["T_END"]
-    # the grid between: 0.5 before the fault, 0.505 after it
-    assert stops[stops.index(T_FAULT) - 1] == pytest.approx(0.5)
-    assert stops[stops.index(T_FAULT) + 1] == pytest.approx(0.505)
+    # a poll follows every run stop, the event stops included
+    assert fake.log == [e for t in stops for e in (("run", t), ("poll", t))]
+    assert polls["t"] == stops
+    # the grid between: 0.501 after the apply, 0.651 before the clear
+    assert stops[stops.index(t_apply) - 1] == pytest.approx(0.501)
+    assert stops[stops.index(t_apply) + 1] == pytest.approx(0.502)
+    assert stops[stops.index(t_clear) - 1] == pytest.approx(0.651)
     # the fault is applied after the run to T_EVENT and cleared after the run to its end
     lines = text.splitlines()
     assert (
@@ -185,6 +221,21 @@ def test_the_run_stops_hold_the_fault_apply_and_clear_times_off_the_grid(pack2):
         < lines.index(f"_run(T_EVENT + {DURATION!r})")
         < lines.index("psspy.dist_clear_fault(1)")
     )
+
+
+def test_the_poll_step_is_the_case_time_step(pack2):
+    # GK A P2: POLL_DT_S is DELT, read after strt, before the first poll and run
+    lines = pack2[1][FAULT_ID].splitlines()
+    i = lines.index("ierr, DELT = psspy.dsrval('DELT')")
+    assert lines.index("psspy.strt(0, OUT)") < i
+    assert lines[i + 1 : i + 4] == [
+        "if ierr or not DELT > 0:",
+        "    raise SystemExit('time step DELT not read: connected cannot be polled')",
+        "POLL_DT_S = DELT  # one poll per time step, so per output sample",
+    ]
+    assert i < lines.index("_poll(0.0)") < lines.index("_run(T_EVENT)")
+    runs = [ln for ln in lines if "psspy.run(" in ln]
+    assert runs == ["        psspy.run(0, t, 1000, 1, 0)"]  # only inside _run, NPLT = 1
 
 
 def test_tpause_literals(pack2):
@@ -264,6 +315,8 @@ def test_a_failed_poll_is_blank_with_its_reason_never_1(pack2):
         ([("b", 1, 0), ("m1", 0, 1)], None),  # a failed read is not a 0 either
         ([("b", 0, 1), ("m1", 5, 1)], None),  # ierr != 0 is blank, never 1
         ([("b", 0, 0), ("m1", 5, 1)], 0),  # a read 0 is a trip even beside a failure
+        ([("b", 0, 1), ("m1", 0, 2)], None),  # ierr 0 but not 0/1: failed, never 1
+        ([("b", 0, -1), ("m1", 0, 1)], None),
     ],
 )
 def test_combine_literals(pack2, readings, want):
@@ -284,6 +337,16 @@ def test_combine_literals(pack2, readings, want):
 )
 def test_latch_literals(pack2, polls, want):
     assert _helpers(pack2[1][FAULT_ID])["_latch"](polls) == want
+
+
+def test_a_trip_between_two_samples_shows_on_the_earlier_only_within_a_poll_step(pack2):
+    # GK A P4: sample t reads 0 only when a 0 poll falls in (t, t + POLL_DT]
+    conn = _helpers(pack2[1][FAULT_ID])["_connected"]
+    times = [0.0, 0.0005, 0.001]  # a sample between two polls (POLL_DT = 1 ms)
+    # the 0 poll at 0.001 is in (0.0005, 0.0015]: the sample at 0.0005 reads 0
+    assert conn(times, [0.0, 0.001], [1, 0]) == [1, 0, 0]
+    # the first 0 poll at 0.002 is outside (0.0005, 0.0015]: it still reads 1
+    assert conn(times, [0.0, 0.001, 0.002], [1, 1, 0]) == [1, 1, 1]
 
 
 def test_each_sample_takes_the_first_poll_at_or_after_it(pack2):
@@ -332,11 +395,27 @@ def test_the_converter_csv_reads_back_with_literal_values(pack2, tmp_path):
     assert frame.time.tolist() == [0.0, 0.005, 0.5013, 0.505, 0.51]
     assert frame.channel("v_poc_pu").tolist() == [1.0, 1.0, 0.0, 0.0, 0.2]
     assert frame.channel("i_poc_pu").tolist() == [0.5, 0.5, 1.1, 1.1, 0.0]
+    # GK A P6: the V = 0 rows carry a finite current (ITERM), never a blank
+    assert all(math.isfinite(x) for x in frame.channel("i_poc_pu")[2:4])
     assert frame.channel("p_poc_mw").tolist() == [40.0] * n
     assert frame.channel(CONNECTED).tolist() == [1.0, STATUS_NOT_READ, 1.0, 1.0, 0.0]
     assert frame.units[CONNECTED] == "status" and frame.units["i_poc_pu"] == "pu"
     assert csv_text.splitlines()[2].endswith(",")  # the failed poll is a blank cell
     assert set(frame.channels) == set(cases[FAULT_ID].channels)
+
+
+def test_a_blank_current_cell_is_refused_not_read_as_0(tmp_path):
+    # GK A P6 / T12 "blank I read as 0": i_poc_pu is not a blank_status channel
+    path = tmp_path / "blank_i.csv"
+    path.write_text(
+        "time [s],v_poc_pu [pu],i_poc_pu [pu],connected [status]\n"
+        "0.0,1.0,0.5,1.0\n"
+        "0.1,0.0,,1.0\n"
+    )
+    with pytest.raises(
+        ContractError, match="'i_poc_pu' has a missing or non-numeric value at row 1"
+    ):
+        read_csv(path, blank_status=(CONNECTED,))
 
 
 def test_the_old_header_is_refused_and_the_new_one_read(tmp_path):
@@ -387,9 +466,21 @@ def test_a_numeric_sidecar_is_never_read_as_a_sample(tmp_path):
     assert _rows(noisy)["stays_connected"]["status"] == "pass"
     assert plain["status"] == noisy["status"]
     assert _rows(noisy)["stays_connected"]["detail"].endswith(
-        f"{FAULT.case_id}.status.txt: 0; 0; 0; 0; 0; 2 more"
+        f"{FAULT.case_id}.status.txt: 0; 0; 0; 0; 0; 0; 0"
     )
     assert "status.txt" not in (_rows(plain)["stays_connected"]["detail"] or "")
+
+
+def test_a_long_sidecar_is_capped_and_marked_truncated(tmp_path):
+    # GK A P5: 300 lines of 30 characters; the detail quotes 2,000 of them
+    line = "t=0.123 s: not read (ierr=1)"
+    _, c = _sidecar_judge(tmp_path, _status(), "\n".join([line] * 300) + "\n")
+    detail = _rows(c)["stays_connected"]["detail"]
+    quoted = detail.split(f"{FAULT.case_id}.status.txt: ", 1)[1]
+    total = len("; ".join([line] * 300))
+    assert quoted.endswith(f" ... (truncated, {total} characters)")
+    assert len(quoted) == 2000 + len(f" ... (truncated, {total} characters)")
+    assert _rows(c)["stays_connected"]["status"] == "pass"
 
 
 def test_another_case_s_sidecar_is_still_an_extra_file(tmp_path):

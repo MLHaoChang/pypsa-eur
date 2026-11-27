@@ -302,6 +302,14 @@ def write_psse_pack(
             cases, battery_notes = _battery_cases(net)
         _busr, bus1, bus2, ckt = repc[plant.unit_id]
         num, mid, mbase = machines[plant.unit_id]
+        # the machines the RAW models for the plant, polled for connected (GK A P3);
+        # the aggregated plant is one RAW machine record
+        plant_machines = [(n, i) for u, n, i, _m, _s in records if u == plant.unit_id]
+        if len(plant_machines) != 1:
+            raise ContractError(
+                f"psse pack: plant {plant.unit_id!r} has {len(plant_machines)} RAW machine "
+                "records; the aggregated plant must be exactly one"
+            )
         grid_mbase = next(
             (
                 m
@@ -329,6 +337,7 @@ def write_psse_pack(
             plant_machine=(num, mid),
             plant_mbase_mva=mbase,
             contract_version=PSSE_CONTRACT_VERSION,
+            status_machines=plant_machines,
         )
         outputs = {
             cid: [f"{cid}.out", f"{cid}.csv", STATUS_SIDECAR.format(case_id=cid)]

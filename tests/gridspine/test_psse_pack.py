@@ -219,6 +219,22 @@ def test_the_pack_declares_v2_only_with_the_scripts_that_write_connected(tmp_pat
         assert header[0] == "time [s]" and names[-1] == "connected"
         assert set(names[1:]) <= set(contract_channels("2"))
         assert header[1:] == [f"{n} [{CHANNELS[n].unit}]" for n in names[1:]]
+    # GK A P1: the manifest's version is the battery's
+    from gridspine.handoff.test_battery import validate_battery
+
+    cases, _notes = PP._battery_cases(_hc.net)
+    assert validate_battery(cases, m["contract_version"]) == tuple(cases)
+    # GK A P3: polled machines are the RAW's machine records of the plant: exactly one
+    records = [r for r in PP.machine_records(_hc.net) if r[0] == PLANT.unit_id]
+    assert len(records) == 1
+    for cid in m["outputs"]:
+        text = (out / f"run_{cid}.py").read_text()
+        line = next(
+            ln for ln in text.splitlines() if ln.startswith("STATUS_MACHINES = ")
+        )
+        assert ast.literal_eval(line.split("=", 1)[1]) == [
+            (records[0][1], records[0][2])
+        ]
     # without a plant there are no scripts, so no version is declared
     _hc, bare, _out = _write(tmp_path / "bare")
     assert "contract_version" not in bare
@@ -541,3 +557,17 @@ def test_an_all_compound_set_declares_no_map(tmp_path):
     assert m["contingencies"]["label_map"] is None
     assert f"{case}.conmap.csv" not in m["files"]
     assert sorted(p.name for p in (tmp_path / "pack").iterdir()) == sorted(m["files"])
+
+
+def test_a_plant_with_two_raw_machine_records_is_refused(tmp_path, monkeypatch):
+    # GK A P3: connected polls the machines the RAW models; the aggregation gives one
+    real = PP.machine_records
+
+    def doubled(net):
+        recs = list(real(net))
+        plant = next(r for r in recs if r[0] == PLANT.unit_id)
+        return [*recs, (plant[0], plant[1], "9", *plant[3:])]
+
+    monkeypatch.setattr(PP, "machine_records", doubled)
+    with pytest.raises(ContractError, match="has 2 RAW machine records"):
+        _write(tmp_path, plant=PLANT)

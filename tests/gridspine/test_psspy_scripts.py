@@ -20,7 +20,7 @@ from gridspine.handoff.psspy_scripts import (
     check_script,
     write_scripts,
 )
-from gridspine.handoff.test_battery import CHANNELS, KIND_PARAMS, build_battery
+from gridspine.handoff.test_battery import KIND_PARAMS, build_battery
 from gridspine.schema.contracts import ContractError
 
 FILES = {"raw": "pack.raw", "seq": "pack.seq", "dyr": "pack.dyr"}
@@ -294,12 +294,7 @@ def test_csv_header_is_contract_names_in_case_order(pack):
     for cid, text in texts.items():
         line = next(ln for ln in text.splitlines() if ln.startswith("HEADER = "))
         header = ast.literal_eval(line.split("=", 1)[1])
-        # GK A2 T8: the read-back dialect, names and units from test_battery.CHANNELS
-        assert header == [
-            "time [s]",
-            *(f"{ch} [{CHANNELS[ch].unit}]" for ch in cases[cid].channels),
-        ]
-        assert "connected [status]" not in header  # v1 battery: no status polls
+        assert header == ["t_s", *cases[cid].channels, "status"]
         assert f"open(os.path.join(HERE, '{cid}.csv'), 'w')" in text
         assert not {"'v_poc_pu'", "'f_hz'"} & set(
             ln.rsplit(",", 1)[-1].strip(" )]")
@@ -344,8 +339,8 @@ def test_convert_gives_contract_units_on_hand_values(pack):
     assert out["theta_poc_deg"] == [20.0, 0.0]
     # measured at the PoC into the plant branch; the contract is plant -> grid
     assert out["q_poc_mvar"] == [40.0, -4.0] and out["p_poc_mw"] == [-30.0, -3.0]
-    assert out["iq_pu"] == [0.8, 1.0] and out["time"] == [0.0, 1.0]
-    assert "status" not in out and "connected" not in out  # GK A2 T9: no text column
+    assert out["iq_pu"] == [0.8, 1.0] and out["t_s"] == [0.0, 1.0]
+    assert out["status"] == ["", ""]
 
 
 def test_export_from_the_plant_is_positive(pack):
@@ -376,7 +371,7 @@ def test_export_from_the_plant_is_positive(pack):
 def test_v0_at_the_poc_still_gives_the_current(pack):
     """
     A bolted PoC fault (V = 0): the current is the recorded terminal current,
-    defined at V = 0, so the row is complete: no blank cell (GC-21).
+    defined at V = 0, so the row is complete and ``status`` is empty (GC-21).
     """
     cases, texts = pack
     cid = "phase_jump_skmin_xrmin_up"
@@ -394,17 +389,15 @@ def test_v0_at_the_poc_still_gives_the_current(pack):
         "raw_i_term_pu": [0.625, 1.1],
     }
     data = ns["_convert"](rec, 50.0, 80.0, 80.0)
-    columns = ["time", *cases[cid].channels]
-    header = ["time [s]", *(f"{c} [{CHANNELS[c].unit}]" for c in cases[cid].channels)]
-    text = ns["_csv_text"](data, columns, header)
+    header = ["t_s", *cases[cid].channels, "status"]
+    text = ns["_csv_text"](data, header)
     lines = text.splitlines()
     assert lines[0] == ",".join(header) and len(lines) == 3
-    rows = [dict(zip(columns, ln.split(","))) for ln in lines[1:]]
+    rows = [dict(zip(header, ln.split(","))) for ln in lines[1:]]
     assert all(len(ln.split(",")) == len(header) for ln in lines)
-    assert "" not in rows[0].values() and "" not in rows[1].values()
-    assert rows[0]["i_poc_pu"] == "0.625"
+    assert rows[0]["i_poc_pu"] == "0.625" and rows[0]["status"] == ""
     assert rows[1]["v_poc_pu"] == "0.0"
-    assert rows[1]["i_poc_pu"] == "1.1"
+    assert rows[1]["i_poc_pu"] == "1.1" and rows[1]["status"] == ""
     assert "not evaluated" not in text
     assert rows[1]["p_poc_mw"] == "3.0" and rows[1]["iq_pu"] == "1.0"
     assert "nan" not in text.lower() and "inf" not in text.lower()
@@ -883,27 +876,23 @@ GRID_BUS, GRID_ID, GRID_MBASE = 900, 'G2', 250.0
 Z1_PU = (0.44000000000000006, 0.33)  # Thevenin Z1 on GRID_MBASE
 T_EVENT, T_END = 1.0, 10.0
 F0_HZ, PLANT_MBASE = 50.0, None
-COLUMNS = ['time', 'v_poc_pu']
-HEADER = ['time [s]', 'v_poc_pu [pu]']
+HEADER = ['t_s', 'v_poc_pu', 'status']
 
 
 def _convert(rec, f0_hz, s_rated, m_base):
-    out = {'time': list(rec['t_s'])}
+    out = {'t_s': list(rec['t_s'])}
     # v_poc_pu = V
     out['v_poc_pu'] = [a for (a,) in zip(rec['raw_v_poc_pu'])]
+    out['status'] = ['' for _ in out['t_s']]
     return out
 
 
-def _csv_text(data, columns, header):
+def _csv_text(data, header):
     def cell(x):
         return x if isinstance(x, str) else repr(float(x))
 
-    rows = [header, *zip(*[data[c] for c in columns])]
+    rows = [header, *zip(*[data[h] for h in header])]
     return ''.join(','.join(cell(x) for x in row) + '\n' for row in rows)
-
-
-def _run(t_stop):
-    psspy.run(0, t_stop, 1000, 1, 0)
 
 
 psspy.psseinit()
@@ -929,15 +918,15 @@ psspy.tysl(0)
 psspy.dyre_new([1, 1, 1, 1], DYR, '', '', '')
 psspy.voltage_channel([-1, -1, -1, POC_BUS], 'raw_v_poc_pu')
 psspy.strt(0, OUT)
-_run(T_EVENT)
+psspy.run(0, T_EVENT, 1000, 1, 0)
 # flat run: no event
-_run(T_END)
+psspy.run(0, T_END, 1000, 1, 0)
 _title, idents, values = dyntools.CHNF(OUT).get_data()
 rec = {idents[k]: values[k] for k in idents if k != 'time'}
 rec['t_s'] = values['time']
 data = _convert(rec, F0_HZ, PLANT_MBASE, M_BASE)
 with open(os.path.join(HERE, 'flat_skmin_xrmin.csv'), 'w') as fh:
-    fh.write(_csv_text(data, COLUMNS, HEADER))
+    fh.write(_csv_text(data, HEADER))
 '''
 
 

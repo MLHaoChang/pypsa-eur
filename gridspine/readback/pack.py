@@ -77,8 +77,8 @@ from gridspine.schema.contracts import ContractError
 MANIFEST = "manifest.json"
 BATTERY_JSON = "battery.json"
 RESULTS_DIR = "results"
-#: How many sidecar lines a row's detail quotes before it counts the rest.
-POLL_LOG_LINES = 5
+#: How many characters of a status sidecar a detail quotes before it marks the rest truncated.
+POLL_LOG_CHARS = 2000
 #: Pack kinds and versions this reader knows.
 KNOWN_PACKS = {"pscad_emt": ("1",)}
 #: Channel-contract versions this reader knows.
@@ -456,13 +456,12 @@ def _add_poll_log(result: dict, results: Path, case_id: str) -> None:
         lines = [ln.strip() for ln in side.read_text(encoding="utf-8").splitlines()]
     except (OSError, UnicodeDecodeError) as exc:
         lines = [f"unreadable ({exc})"]
-    lines = [ln for ln in lines if ln]
-    if not lines:
+    text = "; ".join(ln for ln in lines if ln)
+    if not text:
         return
-    more = (
-        f"; {len(lines) - POLL_LOG_LINES} more" if len(lines) > POLL_LOG_LINES else ""
-    )
-    note = f"{side.name}: " + "; ".join(lines[:POLL_LOG_LINES]) + more
+    if len(text) > POLL_LOG_CHARS:
+        text = text[:POLL_LOG_CHARS] + f" ... (truncated, {len(text)} characters)"
+    note = f"{side.name}: {text}"
     rows = [r for r in result["rows"] if r["check"] == "stays_connected"]
     for row in rows:
         row["detail"] = f"{row['detail']}; {note}" if row["detail"] else note
