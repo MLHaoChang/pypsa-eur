@@ -256,6 +256,33 @@ def check_rooted(root: Path) -> list[str]:
             if not any((r / rel).is_file() for r in roots)]
 
 
+# The chat tool fragments (RETRO-FRAG-1): `harness/tool_fragments.py` finds them
+# with `pkgutil.iter_modules`, so a module the build left out is a tool missing
+# from the app with nothing failing (a pair left out whole is not even unpaired).
+# The spec lists them from this same source tree (`FRAGMENT_PACKAGES` there) and
+# writes them out as files (`module_collection_mode` "pyz+py").
+FRAGMENT_PACKAGES = ("harness.catalogue_tools", "services.chat_dispatchers")
+_BACKEND = Path(__file__).resolve().parents[1]
+
+
+def check_fragments(root: Path) -> list[str]:
+    """Every fragment module in the source tree is a file in the bundle."""
+    roots = [p.parent for p in root.rglob("alembic.ini") if p.is_file()]
+    problems: list[str] = []
+    for package in FRAGMENT_PACKAGES:
+        rel = Path(*package.split("."))
+        for src in sorted((_BACKEND / rel).glob("[!_]*.py")):
+            if not any(
+                (r / rel / src.name).is_file() or (r / rel / f"{src.stem}.pyc").is_file()
+                for r in roots
+            ):
+                problems.append(
+                    f"MISSING TOOL FRAGMENT      {(rel / src.name).as_posix()} "
+                    "(beside alembic.ini): the app would run without its tools"
+                )
+    return problems
+
+
 def check_info_plist(root: Path) -> list[str]:
     """Assert the TCC usage-description keys are present and non-empty.
 
@@ -298,6 +325,7 @@ def main(argv: list[str]) -> int:
 
     problems, missing = scan(root)
     problems += check_info_plist(root)
+    problems += check_fragments(root)
 
     if missing:
         print(f"WARNING: expected content not found in the bundle: {', '.join(missing)}")

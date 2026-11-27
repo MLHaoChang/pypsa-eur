@@ -10180,6 +10180,14 @@ from services.assistant_tools import (find_capabilities, get_file_delivery, insp
 from services import reference_resolution as _reference_resolution  # noqa: E402
 from services import result_views as _result_views  # noqa: E402
 
+# RETRO-FRAG-1: the per-tool dispatcher fragments (`harness/tool_fragments.py`).
+# A family moved out of this file is spliced back at its place below; the rest
+# are merged after the last `DISPATCHERS.update`, before the gates wrap it.
+from harness import tool_fragments as _tool_fragments  # noqa: E402
+
+_DISPATCH_FRAGMENTS = _tool_fragments.DispatchFragments(
+    _tool_fragments.discover(_tool_fragments.DISPATCH_PACKAGE))
+
 DISPATCHERS: dict[str, Any] = {
     "resolve_project_target": resolve_project_target,
     "resolve_reference": _reference_resolution.resolve_reference,
@@ -10579,6 +10587,8 @@ DISPATCHERS: dict[str, Any] = {
     "regenerate_report_section": regenerate_report_section,
     "export_report_docx": export_report_docx,
     "delete_report": delete_report,
+    # reports (WP11): user templates, services/chat_dispatchers/report_templates.py
+    **_DISPATCH_FRAGMENTS.splice("report_templates"),
     # reports (WP13) — the round trip over the round-trip routes
     "list_report_roundtrips": list_report_roundtrips,
     "import_edited_report": import_edited_report,
@@ -10684,13 +10694,10 @@ DISPATCHERS.update({
 # (see `harness/tool_fragments.py`). Merged HERE, before the gates below wrap
 # DISPATCHERS, so a fragment's tool is lock-gated, study-gated and undo-captured
 # like every tool above.
-from harness import tool_fragments as _tool_fragments  # noqa: E402
+from harness.catalogue import _FRAGMENTS as _SCHEMA_FRAGMENTS  # noqa: E402
 
-_FRAGMENT_LOCK_GATED = _tool_fragments.merge_dispatchers(
-    DISPATCHERS, PRE_DISPATCH_VALIDATORS,
-    _tool_fragments.discover(_tool_fragments.DISPATCH_PACKAGE),
-    _tool_fragments.discover(_tool_fragments.SCHEMA_PACKAGE),
-)
+_FRAGMENT_LOCK_GATED = _DISPATCH_FRAGMENTS.merge(
+    DISPATCHERS, PRE_DISPATCH_VALIDATORS, _SCHEMA_FRAGMENTS)
 
 # Moved families keep their `chat_tools.<name>` attribute for in-process callers.
 from services.chat_dispatchers.report_templates import (  # noqa: E402,F401

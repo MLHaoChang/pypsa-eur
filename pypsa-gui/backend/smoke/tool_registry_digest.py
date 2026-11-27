@@ -10,8 +10,9 @@ sent and what dispatch does exactly as it was. Run this from
 
 One `<sha256>  <what>` line per surface: the Anthropic and OpenAI-compatible
 tool payloads (in order), the OpenAI 128-tool selection for a fixed query, the
-TOOLS name order, TOOL_ROUTES, the DISPATCHERS keys with each callable's name
-and wrapper depth (the lock / study gates), PRE_DISPATCH_VALIDATORS keys, the
+TOOLS name order, TOOL_ROUTES and the DISPATCHERS keys with each callable's
+name and wrapper depth (the lock / study gates), both in insertion order (a
+moved family is spliced back at its place), PRE_DISPATCH_VALIDATORS keys, the
 undo-captured, lock-gated and study-gated sets, and the two service-call write
 sets.
 """
@@ -47,7 +48,7 @@ def digests() -> list[tuple[str, str]]:
     tools = wiring._tools_payload(stage_only=True)
     routes = {
         k: [list(r) if isinstance(r, tuple) else r for r in v]
-        for k, v in sorted(C.TOOL_ROUTES.items())
+        for k, v in C.TOOL_ROUTES.items()
     }
     return [
         ("anthropic tools payload", _sha(tools)),
@@ -68,10 +69,10 @@ def digests() -> list[tuple[str, str]]:
         (
             "DISPATCHERS",
             _sha(
-                sorted(
+                [
                     (k, getattr(v, "__name__", repr(v)), _depth(v))
                     for k, v in T.DISPATCHERS.items()
-                )
+                ]
             ),
         ),
         ("PRE_DISPATCH_VALIDATORS", _sha(sorted(T.PRE_DISPATCH_VALIDATORS))),

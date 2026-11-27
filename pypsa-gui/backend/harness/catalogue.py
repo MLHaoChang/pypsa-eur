@@ -5863,6 +5863,8 @@ TOOL_ROUTES: dict[str, list] = {
     ],
     "export_report_docx": [("POST", "/api/projects/{name}/reports/{report_id}/export")],
     "delete_report": [("DELETE", "/api/projects/{name}/reports/{report_id}")],
+    # report templates (5): harness/catalogue_tools/report_templates.py
+    **_FRAGMENTS.splice_routes("report_templates"),
     # report round trip (4) — WP13: the round-trip routes, called in-process;
     # `list_report_roundtrips` is the uploads list filtered to one kind and
     # `export_report_pdf` is the export route with `format: pdf`.
