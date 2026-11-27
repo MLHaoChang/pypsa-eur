@@ -480,11 +480,14 @@ async def upload_pack_results(
         except HTTPException as exc:
             if exc.status_code != 413:
                 raise
-            kind, message = (("campus_result_too_large", f"{f.filename} exceeds {per_file // (1024 * 1024)} MB")
-                             if per_file <= left else
-                             ("campus_results_too_large", "the result files exceed "
-                              f"{campus_judgment.MAX_RESULT_BYTES // (1024 * 1024)} MB together"))
-            raise HTTPException(status_code=413, detail={"error_kind": kind, "message": message}) from exc
+            if per_file <= left:
+                raise HTTPException(status_code=413, detail={
+                    "error_kind": "campus_result_too_large",
+                    "message": f"{f.filename} exceeds {per_file // (1024 * 1024)} MB"}) from exc
+            raise HTTPException(status_code=413, detail={
+                "error_kind": "campus_results_too_large",
+                "message": f"the result files exceed {campus_judgment.MAX_RESULT_BYTES // (1024 * 1024)} MB together",
+            }) from exc
         used += len(data)
         got.append((f.filename or "", data))
     return await run_in_threadpool(campus_judgment.add_results, _row(proj, db), bundle, got)
