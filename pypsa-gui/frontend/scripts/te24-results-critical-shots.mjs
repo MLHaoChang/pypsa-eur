@@ -3,7 +3,7 @@
 /** te-24 slice 2 shots: the Guided Results card's "Kept on in an outage" line on a site
  * template with a must-stay-on share, and no line on a template without one, light and dark
  * (component harness; the API objects are stubbed, any other /api call answers null).
- * node scripts/te24-results-critical-shots.mjs [out-dir]   (default: .scratch/template-e2e/shots)
+ * node scripts/te24-results-critical-shots.mjs [out-dir]   (default: .scratch/template-e2e/evidence/24)
  */
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -17,7 +17,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const entry = `.te24-${process.pid}.tmp`
 const html = path.join(root, `${entry}.html`)
 const source = path.join(root, 'src', `${entry}.tsx`)
-const out = path.resolve(process.argv[2] || path.join(root, '..', '..', '.scratch', 'template-e2e', 'shots'))
+const out = path.resolve(process.argv[2] || path.join(root, '..', '..', '.scratch', 'template-e2e', 'evidence', '24'))
 let server, browser
 const pageErrors = []
 try {
