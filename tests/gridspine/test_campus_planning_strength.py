@@ -42,6 +42,7 @@ from gridspine.drivers.campus_study import (
 )
 from gridspine.ingest.campus import build_campus
 from gridspine.ingest.contingency_list import read_contingency_list
+from gridspine.schema.campus import P_TOL_MW
 from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_sc import campus_fault_levels
 from tests.gridspine.test_campus_hourly import solved_hub
@@ -695,13 +696,19 @@ def _idle(hourly, how):
     else:
         one = one.assign(
             p_mw=one["p_mw"].where(
-                ~gen, {"zero": 0.0, "nan": math.nan, "negative": -1.0}[how]
+                ~gen,
+                {
+                    "zero": 0.0,
+                    "nan": math.nan,
+                    "negative": -1.0,
+                    "at_tolerance": P_TOL_MW,
+                }[how],
             )
         )
     return pd.concat([hourly, one], ignore_index=True)
 
 
-@pytest.mark.parametrize("how", ["zero", "nan", "negative", "missing"])
+@pytest.mark.parametrize("how", ["zero", "nan", "negative", "at_tolerance", "missing"])
 @pytest.mark.parametrize("bus", ["MV3", "MV2"])  # off every PoC, and on one
 def test_a_genset_not_running_in_every_hour_adds_nothing(bus, how):
     spec = _genset_spec(bus)
@@ -815,3 +822,32 @@ def test_a_campus_without_a_genset_keeps_its_strength_output_byte_equal():
     assert per_poc.to_csv(index=False) == pin["per_poc"]
     assert groups.to_csv(index=False) == pin["groups"]
     assert method == pin["method"] and notes == pin["notes"]
+
+
+def test_a_genset_behind_its_own_unit_transformer_takes_k_so_and_drops_out_with_it(
+    monkeypatch,
+):
+    from tests.gridspine.test_island_schema import genset
+
+    def spec(unit_trafo):
+        s = _genset_spec("MV3")
+        g = genset()
+        g["unit_transformer"], g["unit_transformer_oltc"] = unit_trafo, False
+        s["campus"]["units"]["GEN"]["island"] = g
+        return s
+
+    no_gen = copy.deepcopy(spec(False))
+    del no_gen["campus"]["units"]["GEN"]
+    base = _outage_levels(monkeypatch, no_gen)
+    network = _outage_levels(monkeypatch, spec(False))
+    unit = _outage_levels(monkeypatch, spec(True))
+    # T3 a power station unit: K_SO in place of K_G and T3's own K_T
+    assert unit.at["GRID-MV1-1", "GRID"] > base.at["GRID-MV1-1", "GRID"] * 1.05
+    assert unit.at["GRID-MV1-1", "GRID"] != pytest.approx(
+        network.at["GRID-MV1-1", "GRID"], rel=1e-4
+    )
+    # its step-up out: the genset is cut off
+    for poc in ("GRID", "MV1", "MV2"):
+        assert unit.at["GRID-MV3-1", poc] == pytest.approx(
+            base.at["GRID-MV3-1", poc], rel=1e-9
+        )

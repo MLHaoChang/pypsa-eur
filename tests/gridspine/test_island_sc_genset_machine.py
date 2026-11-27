@@ -40,3 +40,13 @@ def test_machine_net_builds_the_same_tables_as_before_the_lift(case):
 def test_the_pins_hold_a_genset_machine():
     gen = pd.read_json(io.StringIO(PINS["unit_trafo"]["gen"]), orient="split")
     assert list(gen["name"]) == ["G"] and gen["power_station_trafo"].notna().all()
+
+
+def test_a_unit_transformer_genset_needs_exactly_one_step_up():
+    spec = a_genset_island()  # the genset on the PCC bus: no transformer below it
+    spec["campus"]["units"]["G"]["island"]["unit_transformer"] = True
+    c = build_campus(spec)
+    with pytest.raises(
+        ValueError, match="has 0 step-up transformers; it needs exactly one"
+    ):
+        machine_net(c, set(c.units.index), case="max")

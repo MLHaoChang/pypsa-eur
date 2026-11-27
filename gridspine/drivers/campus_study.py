@@ -1988,8 +1988,8 @@ def _gc03_templates(campus, net):
 #: A genset that runs in every hour of the period feeds S_k''min as a
 #: synchronous machine (GC-13); the minimum case is the period's weakest hour.
 GENSET_SK_NOTE = ("period {period}: genset(s) {names} run in every hour, so S_k'' carries each as a synchronous "
-                  "machine behind its x''d and R/X with the IEC 60909-0 correction K_G (K_S behind its own unit "
-                  "transformer)")
+                  "machine behind its x''d and R/X with the IEC 60909-0 correction K_G (K_S or K_SO behind its own "
+                  "unit transformer)")
 #: A genset built in the period but standing still in some hour adds nothing.
 GENSET_IDLE_NOTE = ("period {period}: genset(s) {names} do not run in every hour, so S_k'' leaves them out "
                     "(the minimum case is the weakest hour)")
@@ -2051,9 +2051,10 @@ def _gc03_strength(campus, hourly):
         # every hour of the period (a missing, NaN or non-positive hour is
         # not running: fail closed); a running genset is a synchronous machine
         g_rows = block[block["unit_id"].astype(str).isin(gensets & built)]
-        on = g_rows[(g_rows["status"] == 1) & (g_rows["p_mw"] > P_TOL_MW)]
+        producing = g_rows[(g_rows["status"] == 1) & (g_rows["p_mw"] > P_TOL_MW)]
         hours = set(block["hour"])
-        running = {str(u) for u, h in on.groupby(on["unit_id"].astype(str))["hour"] if set(h) == hours}
+        by_unit = producing.groupby(producing["unit_id"].astype(str))["hour"]
+        running = {str(u) for u, h in by_unit if set(h) == hours}
         for i in net.sgen.index[net.sgen["name"].astype(str).isin(running)]:
             genset_machine(campus, net, i)
         net.sgen.drop(index=net.sgen.index, inplace=True)
