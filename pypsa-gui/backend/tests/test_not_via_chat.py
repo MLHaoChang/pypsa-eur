@@ -74,6 +74,7 @@ def test_the_issue_rows_are_declared():
         'power_trace_spectrum': ('unbuilt', None),
         'model_import': ('unbuilt', None),  # project-io 04; chat in issue 05 or later
         'parameter_catalogue': ('unbuilt', None),  # expert-catalogue 01a; chat tools in 01b
+        'import_range_flags': ('unbuilt', None),  # expert-catalogue 01a-3b (not_via_chat.d/)
         'report_comment_revisions': ('unbuilt', None),
         'report_revision_drafts': ('out of chat', None),
         'report_chart_snapshots': ('manual', 'results'),

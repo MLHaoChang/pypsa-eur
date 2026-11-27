@@ -23,6 +23,7 @@ R1–R9 for 01a-3:
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -30,6 +31,8 @@ from functools import lru_cache
 from typing import Any
 
 from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
 
 ERROR_KIND = "value_out_of_range"
 
@@ -322,3 +325,78 @@ def problems(n) -> list[dict[str, Any]]:
                         }
                     )
     return out
+
+
+#: The min ≤ max pairs the import flags check, by class (gatekeeper R2: they
+#: are flags only and never refused). A pair is checked only when both
+#: columns are in the frame.
+_PAIRS: dict[str, tuple[tuple[str, str], ...]] = {
+    "Generator": (
+        ("p_nom_min", "p_nom_max"),
+        ("p_min_pu", "p_max_pu"),
+        ("sk_min_mva", "sk_max_mva"),
+        ("rx_min", "rx_max"),
+    ),
+    "Link": (("p_nom_min", "p_nom_max"), ("p_min_pu", "p_max_pu")),
+    "StorageUnit": (("p_nom_min", "p_nom_max"),),
+    "Line": (("s_nom_min", "s_nom_max"),),
+    "Transformer": (("s_nom_min", "s_nom_max"),),
+    "Store": (("e_nom_min", "e_nom_max"), ("e_min_pu", "e_max_pu")),
+}
+
+
+def flags(n) -> list[dict[str, Any]]:
+    """What an import tells the user about ``n`` (C9: the values still load
+    unchanged): every :func:`problems` row as ``kind: "out_of_range"``, then
+    every row whose min is above its max as ``kind: "min_above_max"``.
+    A pair flags only finite against finite: NaN, unset or infinity on
+    either side never flags. Static columns only; the ``*_t`` series of
+    ``p_min_pu``/``p_max_pu``/``e_min_pu``/``e_max_pu`` are not read.
+    Reads only; it never changes ``n``. Never persisted (R10)."""
+    out: list[dict[str, Any]] = [{**row, "kind": "out_of_range"} for row in problems(n)]
+    numeric = _numeric_entries()
+    for cls, pairs in _PAIRS.items():
+        frame = getattr(n, _LISTS[cls])
+        for lo, hi in pairs:
+            if lo not in frame.columns or hi not in frame.columns:
+                continue
+            lo_name = numeric.get((cls, lo), lo)
+            hi_name = numeric.get((cls, hi), hi)
+            for name, a, b in zip(frame.index, frame[lo], frame[hi]):
+                x, y = _as_number(a), _as_number(b)
+                if x is None or y is None:
+                    continue
+                if not (math.isfinite(x) and math.isfinite(y)):
+                    continue
+                if x > y:
+                    out.append(
+                        {
+                            "component": cls,
+                            "id": str(name),
+                            "field": lo,
+                            "value": show(x),
+                            "message": (
+                                f"{lo_name} ({show(x)}) is above {hi_name} ({show(y)})."
+                            ),
+                            "kind": "min_above_max",
+                        }
+                    )
+    return out
+
+
+#: The most flag rows one import response carries; the total says how many.
+FLAG_CAP = 200
+
+
+def import_flags(n) -> dict[str, Any]:
+    """The two keys every import response spreads: ``range_flags``, the first
+    :data:`FLAG_CAP` rows of :func:`flags`, and ``range_flags_total``, how many
+    there are in all. ``range_flags_total`` is None when the sweep itself
+    failed (logged): the import then succeeds or fails exactly as it would
+    without flags. Plain JSON (strings and numbers); never persisted (R10)."""
+    try:
+        rows = flags(n)
+    except Exception:
+        logger.exception("range flags sweep failed; the import goes on unflagged")
+        return {"range_flags": [], "range_flags_total": None}
+    return {"range_flags": rows[:FLAG_CAP], "range_flags_total": len(rows)}

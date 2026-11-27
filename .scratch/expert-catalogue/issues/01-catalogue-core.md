@@ -3,7 +3,7 @@
 
 # 01 — Parameter catalogue core (01a): entries, asset types, guide files, `GET /api/catalogue`, range validation
 
-Status: ready-for-agent; audit 2026-11-25: 01a-1 merged (#1634; core, route, guide, model names); left: 01a-2 (settings.py entries, coverage rule, display names) and 01a-3 (range validation on every write path, sk_min <= sk_max check)
+Status: done; 01a-1 #1634, 01a-2 #2061, 01a-2b #2064, 01a-3a #2078, 01a-3b (this PR)
 Type: task
 Gated: yes (GK B; UX (23) OKs the rename diff table and guide drafts)
 Spec: [spec.md](../spec.md) §3, §6.2, §7.2, §10.1
