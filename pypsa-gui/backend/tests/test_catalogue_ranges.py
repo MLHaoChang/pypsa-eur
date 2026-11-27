@@ -143,6 +143,8 @@ def test_nan_is_accepted_only_where_the_engine_has_no_number():
 #: number), the Link extra-port efficiencies aside. A new entry here is a
 #: field that takes a blank; add it on purpose.
 NAN_IS_UNSET = {
+    ("Bus", "eh_ibr_mva"),
+    ("Bus", "eh_sk_mva"),
     ("Bus", "lost_production_value"),
     ("Bus", "mwh_per_t"),
     ("Bus", "pressure_bar"),
@@ -210,7 +212,13 @@ NAN_IS_UNSET = {
 
 
 def test_the_nan_is_unset_list_is_pinned():
-    unset = {k for k in R.nan_is_unset() if not R._is_extra_port_efficiency(k)}
+    # Component classes only: a settings scope (lower-case, e.g. `connection`)
+    # never reaches the component validator.
+    unset = {
+        k
+        for k in R.nan_is_unset()
+        if k[0][:1].isupper() and not R._is_extra_port_efficiency(k)
+    }
     assert unset == NAN_IS_UNSET, sorted(unset ^ NAN_IS_UNSET)
 
 
