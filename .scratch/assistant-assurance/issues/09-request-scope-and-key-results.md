@@ -3,7 +3,7 @@
 
 # Request scope and complete key-results answers
 
-Status: done; closed by AA 09 (5), S5 store-dispatch/1, after S1 #2066, S3 #2073, S2 #2098 and S4 #2108
+Status: done (#2110)
 Model: Opus
 Progress: bounded request scope with answered or unavailable slots for every released domain profile, each with a metric-ledger fragment; scope stays the bounded grammar, and domain review of the new rows is pending in issue 29
 Type: task

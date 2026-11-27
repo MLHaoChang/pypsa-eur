@@ -761,3 +761,22 @@ def test_a_store_with_no_dispatch_column_is_missing_data(store_case, monkeypatch
     raw = _raw(ctx)
     assert raw["p"] is None
     assert _every(raw) == {"invalid_or_missing_raw_data"}
+
+
+def test_a_zero_weight_snapshot_still_counts_for_the_charging_peak():
+    values, reasons = _slots(
+        _hand_raw([-1.0, -7.0, -2.0], weights=[1.0, 0.0, 1.0], e_initial=0.0)
+    )
+    assert reasons == {}
+    assert values["peak_store_charging"] == 7.0
+    assert values["store_charged_energy"] == 3.0
+
+
+def test_a_slightly_negative_energy_with_losses_withholds_the_loss():
+    """e[t-1] = -2e-9, past -NEAR_ZERO but well inside any 1e-6 slack."""
+    raw = _hand_raw([2e-9, 0.0], sl=[0.0, 0.1], e_nom_opt=None)
+    assert raw["e"][0] == -2e-9
+    assert _slots(raw)[1] == {
+        "store_standing_loss": "negative_store_energy_with_losses",
+        "peak_store_fill": "no_store_capacity",
+    }
