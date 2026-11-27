@@ -23,6 +23,7 @@ import uuid
 import pandas as pd
 import pytest
 
+from harness import assurance_conversation
 from harness.assurance_conversation import QUESTIONS
 from harness.providers.fake import FakeProvider
 from services import chat_service, workflow_tools
@@ -292,6 +293,10 @@ def test_a_switch_from_a_comparison_needs_its_own_baseline(pair, chat):
         "Give me the energy balance for network without the battery",
         "Give me the energy balance for network except for bus B2.",
         "Show the energy balance for network; ignoring curtailment.",
+        "Give me the system cost for network apart from taxes.",
+        "Give me the energy balance for network other than bus B2.",
+        # A head the grammar refuses (a repeated chart series) still flags the filter.
+        "Give me the energy balance for network; chart wind, wind excluding taxes",
     ],
 )
 def test_a_checked_request_with_an_added_filter_is_clarified(pair, chat, message):
@@ -314,6 +319,19 @@ def test_filter_words_in_other_questions_stay_with_the_model(pair, chat, message
     frames, provider = chat(message, FakeProvider([text_turn("Plain answer.")]))
     assert provider.requests
     assert QUESTIONS[CONSTRAINT] not in public_text(frames)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Give me the energy balance for network, please.",
+        "Give me the energy balance for network please",
+        "Give me the system cost for network, thanks.",
+        "Give me the system cost for network thanks",
+    ],
+)
+def test_politeness_after_a_checked_request_is_not_a_filter(message):
+    assert not assurance_conversation._filtered(message, "p1", None)
 
 
 def test_the_question_texts_are_pinned():
