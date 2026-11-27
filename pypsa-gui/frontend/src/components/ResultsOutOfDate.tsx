@@ -4,7 +4,9 @@
 import { StateAction } from './ResultState'
 import { useUIStore } from '../store/uiStore'
 
-export const OUT_OF_DATE_TEXT = 'Out of date: the inputs changed after the last run. Run again to see the figures.'
+/** Why and the next step, for a surface whose pill already says "Out of date". */
+export const OUT_OF_DATE_REASON = 'The inputs changed after the last run. Run again to see the figures.'
+export const OUT_OF_DATE_TEXT = `Out of date: ${OUT_OF_DATE_REASON.charAt(0).toLowerCase()}${OUT_OF_DATE_REASON.slice(1)}`
 
 export default function ResultsOutOfDate() {
   const requestRunSolve = useUIStore(s => s.requestRunSolve)
