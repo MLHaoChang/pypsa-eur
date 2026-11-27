@@ -876,6 +876,10 @@ def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
             base_files = [base_dir / name for name in ("network.nc", "solver_config.json", "user_ts.json")]
             base_stamps = [_file_stamp(path) for path in base_files]
             base_ctx = _load_context(base)
+            # STUDY-GATE-1: the sweep solves forks of this baseline, so an unlocated one is refused like a run.
+            from services import site_location
+            if refusal := site_location.refusal(base_ctx.network, base_dir):
+                raise HTTPException(422, refusal)
             base_fingerprint = _network_input_fingerprint(base_ctx)
             prepared = []
             # All changes are validated on disposable copies before creating any project.
