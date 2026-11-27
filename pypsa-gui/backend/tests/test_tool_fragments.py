@@ -517,6 +517,55 @@ def test_every_fragment_tool_is_wrapped_once_per_gate_it_earns():
     assert set(_REPORT_TEMPLATES) <= set(checked)
 
 
+# ── what a moved family copies or reaches in chat_tools ─────────────────────
+
+
+def test_lv08_island_table_ids_equal_their_source():
+    from harness.catalogue_tools import lv08_bcampus
+    from services.campus_island_report import TABLE_IDS
+
+    assert lv08_bcampus._ISLAND_TABLE_IDS == TABLE_IDS
+
+
+def _proxies():
+    """(fragment, name) for each dispatcher-fragment helper that reaches a
+    chat_tools helper of the same name through ``_ct()``."""
+    from services import chat_tools
+
+    return [
+        (mod, name)
+        for mod in F.discover(F.DISPATCH_PACKAGE).values()
+        for name, fn in vars(mod).items()
+        if name.startswith("_")
+        and name != "_ct"
+        and isinstance(fn, types.FunctionType)
+        and fn.__module__ == mod.__name__
+        and "_ct" in fn.__code__.co_names
+        and hasattr(chat_tools, name)
+    ]
+
+
+def test_every_proxy_reaches_chat_tools_at_call_time(monkeypatch):
+    """A proxy bound at import (``_x = _ct()._x``) would miss a later patch of
+    ``chat_tools._x``, which tests rely on (test_lc27_island_report_table_arg)."""
+    from services import chat_tools
+
+    found = _proxies()
+    assert {n for _, n in found} >= {"_campus_route", "_acting", "_b2b_fit"}
+    for mod, name in found:
+        sentinel = object()
+        monkeypatch.setattr(chat_tools, name, lambda *a, _s=sentinel, **k: _s)
+        assert getattr(mod, name)(1, x=2) is sentinel, (mod.__name__, name)
+
+
+def test_a_moved_dispatcher_calls_the_patched_chat_tools_helper(monkeypatch):
+    from services import chat_tools
+    from services.chat_dispatchers import lv08_bcampus
+
+    monkeypatch.setattr(chat_tools, "_campus_route", lambda *a, **k: {"job": "patched"})
+    assert lv08_bcampus.campus_milp_status("P") == {"job": "patched"}
+
+
 # ── discovery misses fail loudly ────────────────────────────────────────────
 
 
