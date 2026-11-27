@@ -154,3 +154,12 @@ describe('study abort feedback (UX 33 asks 2-4)', () => {
     await waitFor(() => expect(err).toHaveBeenCalledWith('The study could not be stopped. Try again in a moment.'))
   })
 })
+
+describe('Guided header with a study alone (UX 33)', () => {
+  it('shows no header Abort: the hub has its own', () => {
+    projectRun = study
+    useUIStore.setState({ uiMode: 'guided' })
+    renderHeader()
+    expect(screen.queryByRole('button', { name: /Abort|Aborting/ })).toBeNull()
+  })
+})

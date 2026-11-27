@@ -1130,7 +1130,8 @@ export default function AppHeader() {
         // Guided (P24-FE gate decision): the hub design has its own Run, so
         // the idle solve button is hidden; a queued / running solve still
         // shows here so it can be cancelled or aborted.
-        if (uiMode === 'guided' && !amber) return null
+        // A Guided study has its own Abort in the hub: no second one here.
+        if (uiMode === 'guided' && !(jobQueued || jobRunning || isRunning)) return null
         // A planning → dynamics study has no network to solve: its run is the
         // study panel's Run study (pio/08).
         if ((isStudy || kindPending) && !amber) return null
