@@ -32,6 +32,7 @@ would no longer be the run's.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
 from datetime import datetime, UTC
@@ -40,6 +41,9 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from services import campus_electrical_service as ce
+from services.atomic_io import atomic_write_bytes
+
+log = logging.getLogger(__name__)
 
 #: Next to gridspine's ``compliance/`` folder in the run: which bundle was judged, and when.
 JUDGMENT_SOURCE_FILE = "judgment_source.json"
@@ -116,15 +120,6 @@ def _profile(project, run: Path) -> dict:
             f"grid-code profile {used['profile']} has changed since the campus run; run the study again",
         )
     return profile
-
-
-def _write_atomic(path: Path, data: bytes) -> None:
-    part = path.with_name(f".{path.name}.{uuid.uuid4().hex}.part")
-    try:
-        part.write_bytes(data)
-        os.replace(part, path)
-    finally:
-        part.unlink(missing_ok=True)
 
 
 def _check_files(pack: Path, files: list[tuple[str, bytes]]) -> None:
@@ -238,7 +233,7 @@ def _restore(snapshot: dict) -> None:
         if data is None:
             path.unlink(missing_ok=True)
         else:
-            _write_atomic(path, data)
+            atomic_write_bytes(path, data)
 
 
 def _read_back(project, bundle, files: list[tuple[str, bytes]] | None) -> dict:
@@ -267,28 +262,39 @@ def _read_back(project, bundle, files: list[tuple[str, bytes]] | None) -> dict:
             _check_files(pack, files)
         profile = _profile(project, run)
         before = _snapshot(run)
-        (run / JUDGMENT_SOURCE_FILE).unlink(missing_ok=True)
-        aside = _swap_in(pack, files) if files is not None else None
+        swapped, aside = False, None
         try:
+            (run / JUDGMENT_SOURCE_FILE).unlink(missing_ok=True)
+            if files is not None:
+                aside = _swap_in(pack, files)
+                swapped = True
             # A pack written with its own ratings is judged on those; else on the run's campus file.
             ratings = None if (pack / RATINGS_JSON).exists() else run_ratings(run)
             judge_pack_results(run, pack, profile, ratings)
             source = {"bundle": bundle, "judged_at": datetime.now(UTC).isoformat()}
-            _write_atomic(
+            atomic_write_bytes(
                 run / JUDGMENT_SOURCE_FILE, json.dumps(source, sort_keys=True).encode()
             )
         except BaseException as exc:
-            if files is not None:
+            if swapped:
                 _swap_back(pack, aside)
             _restore(before)
             if isinstance(exc, ContractError):
                 raise ce._unprocessable(exc) from exc
             raise
         if aside is not None:
-            ce._remove_tree(aside)
+            try:
+                ce._remove_tree(aside)
+            except (
+                OSError
+            ):  # the judgment is stored; a leftover hidden folder is not read
+                log.warning(
+                    "could not remove %s after a read-back", aside, exc_info=True
+                )
+        # read under the lock, so the answer is this read-back's, not a study published since
+        return get_judgment(project)
     finally:
         lock.release()
-    return get_judgment(project)
 
 
 def add_results(project, bundle: str, files: list[tuple[str, bytes]]) -> dict:

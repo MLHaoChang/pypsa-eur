@@ -73,7 +73,7 @@ from services import campus_grid_code_service as gc
 from services import campus_judgment
 from services import equipment_schedule
 from services.http_filenames import content_disposition
-from services.upload_guard import UploadBudget
+from services.upload_guard import UploadBudget, read_capped
 
 router = APIRouter()
 
@@ -467,12 +467,26 @@ async def upload_pack_results(
     ``.inf``, ``.out`` or ``_NN.out``): saved into the pack, then the pack is
     judged against the run (GC-07 read-back). All files share one size cap."""
     _check_lock(proj, db, user)
-    budget = UploadBudget(campus_judgment.MAX_RESULT_BYTES)
     if len(files) > campus_judgment.MAX_RESULT_FILES:
         raise HTTPException(status_code=413, detail={
             "error_kind": "campus_results_too_many",
             "message": f"at most {campus_judgment.MAX_RESULT_FILES} result files per upload"})
-    got = [(f.filename or "", await budget.read(f)) for f in files]
+    got, used = [], 0
+    for f in files:  # each file under its own cap and all of them under the total, refused while reading
+        per_file = campus_judgment.MAX_RESULT_FILE_BYTES
+        left = campus_judgment.MAX_RESULT_BYTES - used
+        try:
+            data = await read_capped(f, min(per_file, left))
+        except HTTPException as exc:
+            if exc.status_code != 413:
+                raise
+            kind, message = (("campus_result_too_large", f"{f.filename} exceeds {per_file // (1024 * 1024)} MB")
+                             if per_file <= left else
+                             ("campus_results_too_large", "the result files exceed "
+                              f"{campus_judgment.MAX_RESULT_BYTES // (1024 * 1024)} MB together"))
+            raise HTTPException(status_code=413, detail={"error_kind": kind, "message": message}) from exc
+        used += len(data)
+        got.append((f.filename or "", data))
     return await run_in_threadpool(campus_judgment.add_results, _row(proj, db), bundle, got)
 
 

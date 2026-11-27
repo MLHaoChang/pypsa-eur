@@ -460,3 +460,106 @@ def test_a_pack_without_a_battery_says_what_the_campus_needs(hub):
         cj.add_results(hub, bundle, [("x.csv", b"")])
     assert exc.value.status_code == 409 and "x0x_max" in exc.value.detail["message"]
     assert not (run / COMPLIANCE_DIR).exists()
+
+
+def test_a_swap_that_fails_leaves_the_judgment_and_sidecar_as_they_were(
+    island_run, monkeypatch
+):
+    project, run, bundle = island_run
+    case = _fault_case(run, bundle)
+    cj.add_results(project, bundle, [(f"{case.case_id}.csv", _ride_through_csv())])
+    files = [
+        run / COMPLIANCE_DIR / JUDGMENT_JSON,
+        run / COMPLIANCE_DIR / "judgment.csv",
+        run / cj.JUDGMENT_SOURCE_FILE,
+    ]
+    before = {p: p.read_bytes() for p in files}
+
+    def disk_full(pack, files):
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(cj, "_swap_in", disk_full)
+    with pytest.raises(OSError):
+        cj.add_results(project, bundle, [(f"{case.case_id}.csv", b"time [s]\n0.0\n")])
+    assert {p: p.read_bytes() for p in files} == before
+    assert cj.get_judgment(project)["stale"] is False
+
+
+def test_an_old_results_folder_that_will_not_go_does_not_fail_a_stored_judgment(
+    island_run, monkeypatch
+):
+    project, run, bundle = island_run
+    ids = [c.case_id for c in _cases(run, bundle)]
+    cj.add_results(project, bundle, [(f"{ids[0]}.csv", _ride_through_csv())])
+    real = ce._remove_tree
+
+    def stuck(path):
+        if ".results.aside." in path.name:
+            raise PermissionError("busy")
+        real(path)
+
+    monkeypatch.setattr(ce, "_remove_tree", stuck)
+    got = cj.add_results(project, bundle, [(f"{ids[1]}.csv", b"time [s]\n0.0\n")])
+    assert got["has_judgment"] is True and got["cases"] == _stored(run)["cases"]
+    assert sorted(p.name for p in (_pack(run, bundle) / "results").iterdir()) == [
+        f"{ids[1]}.csv"
+    ]
+
+
+def test_a_rated_judgment_for_other_campus_data_is_stale(island_run):
+    from gridspine.drivers.readback import run_data_hash
+
+    project, run, bundle = island_run
+    cj.judge(project, bundle)
+    path = run / COMPLIANCE_DIR / JUDGMENT_JSON
+    j = json.loads(path.read_text())
+    for value, stale in ((run_data_hash(run), False), ("0" * 64, True)):
+        path.write_text(
+            json.dumps({**j, "header": {**j["header"], "campus_data_hash": value}})
+        )
+        assert cj.get_judgment(project)["stale"] is stale, value
+        assert (sources.read(project, "GC-07")[0] == "pending") is stale, value
+
+
+def test_the_tables_print_ids_whole_keep_a_value_apart_from_its_limit_and_hide_unjudged_values(
+    island_run,
+):
+    project, run, bundle = island_run
+    cj.judge(project, bundle)
+    path = run / COMPLIANCE_DIR / JUDGMENT_JSON
+    j = json.loads(path.read_text())
+    base = {"role": "", "unit": "pu", "clause": "", "source": "", "detail": ""}
+    j["cases"] = [
+        {
+            **j["cases"][0],
+            "case_id": 110012,
+            "status": "fail",
+            "rows": [
+                {
+                    **base,
+                    "check": "near",
+                    "status": "fail",
+                    "measured": 0.10004,
+                    "limit": 0.1,
+                    "margin": -4e-5,
+                },
+                {
+                    **base,
+                    "check": "refused",
+                    "status": "unknown",
+                    "measured": 5.0,
+                    "limit": 1.0,
+                    "margin": 4.0,
+                },
+            ],
+        }
+    ]
+    path.write_text(json.dumps(j))
+    tables = {t.table_id: t for t in sources.read(project, "GC-07")[1]}
+    assert tables["gc07_cases"].rows == [
+        ["110012", j["cases"][0]["kind"], "fail", j["cases"][0]["detail"] or ""]
+    ]
+    near, refused = tables["gc07_rows"].rows
+    measured, limit = near[4], near[5]
+    assert near[0] == "110012" and measured != limit and float(measured) == 0.10004
+    assert refused[3] == "unknown" and refused[4] == "" and refused[6] == ""

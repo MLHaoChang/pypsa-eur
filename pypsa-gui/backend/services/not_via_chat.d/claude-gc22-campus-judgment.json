@@ -16,7 +16,7 @@
    "id": "campus_pack_judgment",
    "title": "Campus pack read-back judgment",
    "disposition": "unbuilt",
-   "reason": "Chat has no tool yet to judge a campus EMT pack again or to read its stored judgment; the grid-compliance assistant tools (GC-10) will add one.",
+   "reason": "Chat has no tool yet to judge a campus EMT pack again or to read its stored judgment; a grid-compliance assistant tool will add one.",
    "page": "Results, Grid code & connection",
    "panel": null,
    "keywords": ["judgment", "readback"],

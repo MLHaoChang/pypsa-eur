@@ -86,7 +86,11 @@ def test_a_total_over_the_cap_is_413(client, hub, calls, monkeypatch):  # noqa: 
         f"{BASE}/psse/b/emt/results",
         files=[("files", ("a.csv", b"12")), ("files", ("b.csv", b"34"))],
     )
-    assert resp.status_code == 413 and calls == []
+    assert (
+        resp.status_code == 413
+        and resp.json()["detail"]["error_kind"] == "campus_results_too_large"
+    )
+    assert calls == []
 
 
 def test_a_foreign_lock_refuses_both_writes_but_not_the_read(
@@ -134,3 +138,20 @@ def test_a_viewer_reads_the_judgment_and_is_refused_both_writes(world, as_user, 
             resp.status_code == 403 and resp.json()["detail"]["error_kind"] == KIND
         ), resp.text
     assert [c[0] for c in calls] == ["get_judgment"]
+
+
+def test_one_file_over_the_per_file_cap_is_413_while_reading(
+    client,
+    hub,  # noqa: F811
+    calls,
+    monkeypatch,
+):
+    monkeypatch.setattr(cj, "MAX_RESULT_FILE_BYTES", 2)
+    resp = client.post(
+        f"{BASE}/psse/b/emt/results", files=[("files", ("a.csv", b"123"))]
+    )
+    assert (
+        resp.status_code == 413
+        and resp.json()["detail"]["error_kind"] == "campus_result_too_large"
+    )
+    assert calls == []
