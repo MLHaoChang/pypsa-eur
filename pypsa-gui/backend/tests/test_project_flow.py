@@ -57,8 +57,8 @@ def _site_located(request, monkeypatch):
     these tests build sit at 0,0, so they start with the site coordinates
     confirmed; a test about the missing location is marked `unlocated`."""
     if request.node.get_closest_marker("unlocated") is None:
-        from services import flow_service
-        monkeypatch.setattr(flow_service, "_site_anchored", lambda _d: True)
+        from services import site_location
+        monkeypatch.setattr(site_location, "anchor_confirmed", lambda _d: True)
 
 
 @pytest.fixture
@@ -880,16 +880,27 @@ def test_a_missing_location_blocks_run_until_it_is_set(client, site, edit):
     assert body["run_ready"] is False
     assert body["run_blocker"]["section"] == "project"
     assert body["run_blocker"]["code"] == "site_location_missing"
+    # Parity (L3): the server's start paths answer the same, typed and field-pointed.
+    def refused():
+        r = client.post("/api/simulation/run")
+        assert r.status_code == 422, r.text
+        d = r.json()["detail"]
+        assert d["code"] == d["error_kind"] == "site_location_missing" and d["field"] == "x"
+        assert client.post("/api/simulation/run_ac_pf").status_code == 422
+        assert client.post("/api/results/eh_study", json={}).status_code == 422
+    refused()
     put = lambda confirmed: client.put(f"/api/projects/{name}/site-anchor", json={
         "anchor": {"lat": 52.52, "lng": 13.4, "source": "manual", "confirmed": confirmed},
         "expected_revision": client.get(f"/api/projects/{name}/site-anchor").json()["revision"]})
     assert put(False).status_code == 200                       # a draft locates nothing
     assert _flow(client, name)["run_ready"] is False
+    refused()
     assert put(True).status_code == 200
     body = _flow(client, name)
     assert _states(body)["project"] == "complete"
     assert body["run_ready"] is True and body["notes"] == []
     assert "site_location_missing" not in _codes(body, "project")
+    assert client.post("/api/simulation/run").status_code == 200   # the server agrees
 
 
 @pytest.mark.unlocated
