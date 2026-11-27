@@ -4,6 +4,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } fr
 import { useQuery } from '@tanstack/react-query'
 import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase, Workflow, CalendarClock, Zap, FileText, FileDown, Package, Table2 } from 'lucide-react'
 import { simulationApi, resultsApi } from '../api/simulation'
+import { displayedResultsApi } from '../api/displayedResults'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
@@ -1202,8 +1203,10 @@ function AggregatedResultsBody() {
   const { data: inv }  = useQuery({ queryKey: nk(currentProject, 'investmentPeriods'),   queryFn: networkApi.getInvestmentPeriods })
   // Use generators TS as the reference for the `periods` parallel array —
   // matches what Dispatch.tsx does. Falls back to /snapshots.periods if
-  // generators TS hasn't loaded yet.
-  const { data: gensTS } = useQuery({ queryKey: nk(currentProject, 'results', 'generators'), queryFn: () => resultsApi.getGeneratorResults() })
+  // generators TS hasn't loaded yet. It is the Overview's bound generators
+  // part (A5.2), the same query AggregatedOverview reads, so one fetch.
+  const { data: overview } = useQuery({ queryKey: nk(currentProject, 'results', 'displayed', 'overview'), queryFn: displayedResultsApi.overview })
+  const gensTS = overview?.data.generators
   const weightCtx: WeightCtx = useMemo(() => {
     const refTs = gensTS as TSPayload | null
     return {
