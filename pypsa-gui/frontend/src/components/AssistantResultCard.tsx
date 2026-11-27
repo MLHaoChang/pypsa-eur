@@ -181,14 +181,15 @@ export default function AssistantResultCard({ result, disabled, disabledReason, 
           {status !== 'waiting_job' && <button type="button" disabled={disabled} className="text-accent disabled:opacity-40"
             onClick={() => onRequest(status === 'needs_review'
               ? `Use get_task with task_id ${taskId}. Inspect the uncertain step's effects and explain what needs verification before reconciliation.`
-              : `Use resume_task with task_id ${taskId}, then execute the next offered tool call. Preserve all confirmations and stop if a job is still pending.`)}>
+              : `Use resume_task with task_id ${taskId}, then execute the next offered tool call. Preserve all confirmations and stop if a job is still pending.`,
+              status === 'needs_review' ? 'Review the task' : 'Resume the task')}>
             {status === 'needs_review' ? 'Review task' : 'Resume task'}
           </button>}
           <button type="button" disabled={disabled} className="text-muted disabled:opacity-40"
-            onClick={() => onRequest(`Use cancel_task with task_id ${taskId}. Stop future steps; leave running jobs alone.`)}>Cancel task</button>
+            onClick={() => onRequest(`Use cancel_task with task_id ${taskId}. Stop future steps; leave running jobs alone.`, 'Cancel the task')}>Cancel task</button>
         </>}
       </div>
-      <details className="mt-1 text-muted"><summary>Task ID</summary>{taskId}</details>
+      {!guided && <details className="mt-1 text-muted"><summary>Task ID</summary>{taskId}</details>}
     </div>}
     {preview && <div data-testid="assistant-change-preview">
       <div className="font-medium">Project change preview · {Number(preview.changes_total ?? 0)} values</div>
