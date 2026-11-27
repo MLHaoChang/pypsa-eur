@@ -276,7 +276,9 @@ def _queued(baseline, status=None):
     ctx, _project_id, path = baseline
     solve_queue.pause()
     job = solve_queue.enqueue(
-        "Tool Baseline", project_key=ctx.registry_key, storage_dir=str(path)
+        "Tool Baseline",
+        project_key=ctx.registry_key,
+        storage_dir=str(path),
     )
     if status is not None:
         job.status = status
@@ -432,8 +434,41 @@ def test_an_unknown_handle_is_uncertain_and_still_named(baseline, job_id):
     )
 
 
-def test_a_queue_job_the_actor_may_not_see_is_uncertain(baseline):
+def test_a_queue_job_of_another_project_is_uncertain(baseline, monkeypatch):
+    # GK B (74) (a): the queue's ACL is the org's, so a job the actor may see
+    # can be another project's; the open project's registry key binds it.
     job_id = _queued(baseline, "completed")
+    assert ja.job_status(job_id, actor_id=chat_tools.acting_user_id())["outcome"] == (
+        "succeeded"
+    )
+    monkeypatch.setattr(
+        type(baseline[0]), "registry_key", property(lambda self: "org:another-project")
+    )
+    out = _wait(job_id)
+    assert (out["outcome"], out["reason"], out["job_id"]) == (
+        "uncertain",
+        "other_project",
+        job_id,
+    )
+
+
+def test_a_queue_cancel_is_confirmed_without_a_worker_thread(baseline):
+    # GK B (74) (b): a queue job binds no worker, so `_worker_exited` is True;
+    # the queue flips `aborted` only once its worker returned.
+    job_id = _queued(baseline, "aborted")
+    assert ja._worker_exited(job_id) is True
+    assert (_wait(job_id)["outcome"], _wait(job_id)["reason"]) == ("cancelled", None)
+
+
+def test_a_queue_job_the_actor_may_not_see_is_uncertain(baseline, monkeypatch):
+    import routers.solve_queue as route
+
+    job_id = _queued(baseline, "completed")
+
+    def unauthenticated(*a, **k):
+        raise AssertionError("a queue read without an actor must not run")
+
+    monkeypatch.setattr(route, "_visible_job_or_404", unauthenticated)
     token = chat_tools._ACTING_USER_ID.set(None)
     try:
         out = _wait(job_id)
@@ -467,12 +502,17 @@ def test_a_failing_read_is_uncertain(baseline, monkeypatch):
     [
         (None, ("uncertain", "read_failed")),
         ({"error": "x"}, ("uncertain", "read_failed")),
-        ({"id": "ad:other", "outcome": "succeeded"}, ("uncertain", "other_job")),
-        ({"id": "ad:j", "outcome": None, "status": "paused"}, ("uncertain", "status_unknown")),
-        ({"id": "ad:j", "outcome": "later_name"}, ("uncertain", "status_unknown")),
-        ({"id": "ad:j", "outcome": "cancelled"}, ("cancel_requested", "stop_unconfirmed")),
+        ({"id": "ad:other", "same_project": True, "outcome": "succeeded"}, ("uncertain", "other_job")),
+        ({"id": "ad:j", "outcome": "succeeded"}, ("uncertain", "other_project")),
+        ({"id": "ad:j", "same_project": False, "outcome": "succeeded"}, ("uncertain", "other_project")),
+        ({"id": "ad:j", "same_project": True, "outcome": None, "status": "running"}, ("running", None)),
+        ({"id": "ad:j", "same_project": True, "outcome": None, "status": "queued"}, ("submitted", None)),
+        ({"id": "ad:j", "same_project": True, "outcome": "succeeded"}, ("completed", None)),
+        ({"id": "ad:j", "same_project": True, "outcome": None, "status": "paused"}, ("uncertain", "status_unknown")),
+        ({"id": "ad:j", "same_project": True, "outcome": "later_name"}, ("uncertain", "status_unknown")),
+        ({"id": "ad:j", "same_project": True, "outcome": "cancelled"}, ("cancel_requested", "stop_unconfirmed")),
         (
-            {"id": "ad:j", "outcome": "cancelled", "worker_exited": True},
+            {"id": "ad:j", "same_project": True, "outcome": "cancelled", "worker_exited": True},
             ("cancelled", None),
         ),
     ],

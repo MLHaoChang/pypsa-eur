@@ -237,13 +237,28 @@ def read_job(job_id: Any) -> dict:
     from harness import job_adapters as ja
     from services import chat_tools
 
+    from services.pypsa_service import PyPSAService
+
     actor = chat_tools.acting_user_id()
     try:
         view = ja.job_status(job_id, actor_id=actor)
         if view.get("outcome") == "cancelled":
+            # A queue job binds no worker thread (True): the queue flips it
+            # to `aborted` only once its worker returned.
             exited = ja._worker_exited(job_id)
             view = {**ja.job_status(job_id, actor_id=actor), "worker_exited": exited}
-        return view
+        ctx = PyPSAService.get_active_context()
+        # The queue's ACL is the org's, so a visible job may be another
+        # project's: bind it to the open project's registry key. A native
+        # handle's project is checked by job_status (job_project_mismatch);
+        # this requires it to be named at all.
+        if view.get("family") == ja.QUEUE_FAMILY:
+            bound = (view.get("detail") or {}).get("project_key")
+            active = getattr(ctx, "registry_key", None)
+        else:
+            bound, active = view.get("project_id"), getattr(ctx, "project_uuid", None)
+        same = bound is not None and active is not None and str(bound) == str(active)
+        return {**view, "same_project": same}
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, dict) else {}
         kind = detail.get("error_kind")
@@ -269,6 +284,8 @@ def classify_job(job_id: Any, read: dict | None) -> dict:
         return out("uncertain", error if error in ("other_project", "job_not_found") else "read_failed")
     if read.get("id") != job_id:
         return out("uncertain", "other_job")
+    if read.get("same_project") is not True:
+        return out("uncertain", "other_project")
     neutral = read.get("outcome")
     if neutral is None:
         live = _LIVE_STATUS.get(read.get("status"))
