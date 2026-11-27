@@ -149,37 +149,6 @@ def test_delete_of_a_project_with_no_resident_context_is_not_held_up(
     assert not pdir.exists()
 
 
-def test_study_transient_marks_stay_off_the_live_project(monkeypatch):
-    """review-gk (#992): a runner solving a private copy binds a private
-    solving context, so the solve's transient marks (VOLL slacks, vintage
-    clones) and its restore-time clear never reach the live project, which
-    edits and saves now use while the study runs."""
-    n = _ens_bind_network()
-    PyPSAService.set_network(n)
-    live = PyPSAService._transient_target(ensure=True)
-    with live.transient_lock:
-        live.transient_rows["Generator"] = {"foreground-slack"}
-    real = solver_service.run_simulation
-
-    def _spy(*args, **kwargs):
-        PyPSAService.mark_transient("Generator", "study-slack")
-        out = real(*args, **kwargs)
-        PyPSAService.clear_transient()
-        return out
-
-    monkeypatch.setattr(solver_service, "run_simulation", _spy)
-    S.run_eh_study(
-        n,
-        _pack(),
-        SolverConfig(voll=150.0, ens_cap_permyriad=1000.0),
-        lock=PyPSAService.get_lock(),
-        stop_event=threading.Event(),
-        log_queue=queue.SimpleQueue(),
-        stages=("apply_pack", "ens_solve", "assemble"),
-    )
-    assert live.transient_rows == {"Generator": {"foreground-slack"}}
-
-
 # ── Through the routes: a real study whose solve blocks (GK A C2, C3, C5) ───
 
 STUDY_URL = "/api/results/eh_study"

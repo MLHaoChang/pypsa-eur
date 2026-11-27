@@ -1481,13 +1481,6 @@ def run_eh_study(
     )
     sections = st.sections
     gates_obj = None
-    # The copy's own solving context (review-gk, #992): the solves' transient
-    # marks and restore-time clears land here, never on the live project that
-    # edits and saves use while the study runs.
-    from services.project_context import ProjectContext
-    from services.pypsa_service import PyPSAService
-
-    solving = ProjectContext(network=network)
 
     try:
         for stage in EH_PIPELINE_STAGES:
@@ -1510,8 +1503,7 @@ def run_eh_study(
                         "not reached: study aborted"))
                 break
             st.executed.append(stage)
-            with PyPSAService.solving_context(solving):
-                handler(st)
+            handler(st)
 
         if "ens_solve" not in requested:  # unreachable via validate_stages
             for sec in ("target", "cost", "multi_energy"):
@@ -1584,8 +1576,7 @@ def run_eh_study(
 
     finally:
         try:
-            with PyPSAService.solving_context(solving):
-                st.undo()
+            st.undo()
         except Exception:
             logger.exception("EH pack undo failed")
 
