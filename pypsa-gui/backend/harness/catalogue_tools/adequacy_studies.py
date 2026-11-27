@@ -19,7 +19,11 @@ from harness.catalogue_base import _DERIVED, _SERVICE_CALL, _empty, _t
 # routes), each pinned equal to catalogue's, order included.
 # The six kinds that run in a worker thread, i.e. the ones that can be aborted.
 ADEQUACY_STUDY_ENUM = [
-    "fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop",
+    "fmea_sweep",
+    "frontier",
+    "mc",
+    "coupling_loop",
+    "margin_loop",
     "eh_study",
 ]
 # Where a reliability loop leaves the network when it finishes.
@@ -29,8 +33,17 @@ EH_ARCHETYPE_ENUM = ["strong_grid", "weak_flexible", "off_grid"]
 # EH pipeline stages — mirrors models.energy_hub.EH_PIPELINE_STAGES (order
 # included). An explicit list must keep apply_pack + ens_solve.
 EH_STAGE_ENUM = [
-    "apply_pack", "ens_solve", "frontier", "front", "mc_certify", "fmea_top",
-    "redundancy", "levers", "dtc_stress", "dtc_planning", "assemble",
+    "apply_pack",
+    "ens_solve",
+    "frontier",
+    "front",
+    "mc_certify",
+    "fmea_top",
+    "redundancy",
+    "levers",
+    "dtc_stress",
+    "dtc_planning",
+    "assemble",
 ]
 # Engine limits the run_eh_study schema states, pinned to
 # models.energy_hub.MAX_EH_BUDGET_SOLVES and services.adequacy.mc.MAX_DRAWS.
@@ -67,8 +80,12 @@ TOOLS = [
         "update_component / bulk_update_components calls; present them and run "
         "only the ones the user picks (in Guided mode each asks for "
         "confirmation). Applies nothing. `archetype` only words the reasons. Safety: read.",
-        {"archetype": {"type": "string",
-                       "enum": ["strong_grid", "weak_flexible", "off_grid"]}},
+        {
+            "archetype": {
+                "type": "string",
+                "enum": ["strong_grid", "weak_flexible", "off_grid"],
+            }
+        },
         [],
     ),
     _t(
@@ -225,28 +242,36 @@ TOOLS = [
         "Safety: execution.",
         {
             "archetype": {"type": "string", "enum": EH_ARCHETYPE_ENUM},
-            "stages": {"type": "array",
-                       "items": {"type": "string", "enum": EH_STAGE_ENUM}},
-            "budget_solves": {"type": "integer", "minimum": 1,
-                              "maximum": _MAX_EH_BUDGET_SOLVES},
+            "stages": {
+                "type": "array",
+                "items": {"type": "string", "enum": EH_STAGE_ENUM},
+            },
+            "budget_solves": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": _MAX_EH_BUDGET_SOLVES,
+            },
             "pack_overrides": {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    "ens_cap_permyriad": {"type": "number",
-                                          "exclusiveMinimum": 0},
+                    "ens_cap_permyriad": {"type": "number", "exclusiveMinimum": 0},
                     "target_lole_h": {"type": "number", "minimum": 0},
-                    "certification_metric": {"type": "string",
-                                             "enum": ["mc_lole", "none"]},
-                    "import_p_nom_mw": {"type": "number",
-                                        "exclusiveMinimum": 0},
+                    "certification_metric": {
+                        "type": "string",
+                        "enum": ["mc_lole", "none"],
+                    },
+                    "import_p_nom_mw": {"type": "number", "exclusiveMinimum": 0},
                     "import_energy_mwh_per_year": {
-                        "type": "number", "minimum": 0,
+                        "type": "number",
+                        "minimum": 0,
                         "description": (
                             "weak_flexible only: annual energy import budget "
                             "at the hub (MWh/yr), metered as efficiency × p0 "
                             "on the grid→hub import Links, per year of each "
-                            "investment period.")},
+                            "investment period."
+                        ),
+                    },
                     "mc_certify_required": {"type": "boolean"},
                     "frontier_default": {"type": "boolean"},
                     "dtc_stress_default": {"type": "boolean"},
@@ -267,13 +292,13 @@ TOOLS = [
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    "critical_bus_ids": {"type": "array",
-                                         "items": {"type": "string"}},
-                    "critical_load_ids": {"type": "array",
-                                          "items": {"type": "string"}},
-                    "islanding_contingencies": {"type": "array",
-                                                "items": {"type": "string"},
-                                                "minItems": 1},
+                    "critical_bus_ids": {"type": "array", "items": {"type": "string"}},
+                    "critical_load_ids": {"type": "array", "items": {"type": "string"}},
+                    "islanding_contingencies": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                    },
                     "attribution": {
                         "type": "string",
                         "enum": ["bus_aggregate_not_per_load", "per_load"],
@@ -285,7 +310,9 @@ TOOLS = [
                             "stress re-dispatch only. The ranking is exact "
                             "on loss-free paths; the result flags "
                             "priority_exact=false where lossy Links or line "
-                            "losses can invert it.")},
+                            "losses can invert it."
+                        ),
+                    },
                 },
                 "required": ["islanding_contingencies"],
             },
@@ -295,17 +322,25 @@ TOOLS = [
                 "description": (
                     "DtC attribution for the config the study derives from "
                     "eh_critical tags (or merged onto dtc_config; a "
-                    "conflicting dtc_config.attribution is refused).")},
+                    "conflicting dtc_config.attribution is refused)."
+                ),
+            },
             "dsr_buses": {"type": "array", "items": {"type": "string"}},
             "mc": {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    "draws": {"type": "integer", "minimum": 1,
-                              "maximum": _MC_MAX_DRAWS},
+                    "draws": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": _MC_MAX_DRAWS,
+                    },
                     "seed": {"type": "integer", "minimum": 0},
-                    "cov_target": {"type": "number", "exclusiveMinimum": 0,
-                                   "maximum": 1},
+                    "cov_target": {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "maximum": 1,
+                    },
                 },
             },
         },

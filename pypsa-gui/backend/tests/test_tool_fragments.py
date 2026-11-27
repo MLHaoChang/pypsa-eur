@@ -562,8 +562,14 @@ def test_adequacy_studies_constants_equal_their_source():
 def test_adequacy_studies_write_sets_are_masters():
     from services import chat_tools
 
-    assert {"start_campaign", "end_campaign"} <= chat_tools._LOCK_GATE_SERVICE_CALL_MUTATORS
-    assert {"start_campaign", "end_campaign"} <= catalogue._SERVICE_CALL_NON_NETWORK_WRITES
+    assert {
+        "start_campaign",
+        "end_campaign",
+    } <= chat_tools._LOCK_GATE_SERVICE_CALL_MUTATORS
+    assert {
+        "start_campaign",
+        "end_campaign",
+    } <= catalogue._SERVICE_CALL_NON_NETWORK_WRITES
     assert "campaign_status" not in chat_tools._LOCK_GATE_SERVICE_CALL_MUTATORS
 
 
@@ -675,7 +681,9 @@ def test_the_adequacy_tables_are_read_from_chat_tools_at_call_time(monkeypatch):
     )
     monkeypatch.setattr(R, "get_eh_study", lambda: None)
     monkeypatch.setattr(
-        eh_review, "review_latest", lambda state, record, no_data_message: no_data_message
+        eh_review,
+        "review_latest",
+        lambda state, record, no_data_message: no_data_message,
     )
     assert A.review_eh_study() == "patched"
 

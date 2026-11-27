@@ -75,24 +75,31 @@ def get_feature_guide(tour: str | None = None, field: str | None = None) -> dict
     wording, so explanations match the screen. ``tour`` returns one tour's
     steps; ``field`` one field's help; neither returns the index."""
     from services.guides import load_guide
+
     guide = load_guide("eh_fmea")
     if field is not None:
         text = guide["fields"].get(field)
         if text is None:
             raise HTTPException(
-                404, f"no guide entry for field {field!r}; known: "
-                f"{sorted(guide['fields'])}")
+                404,
+                f"no guide entry for field {field!r}; known: {sorted(guide['fields'])}",  # repr-ok: moved verbatim from chat_tools (RETRO-FRAG-1)
+            )
         return {"field": field, "help": text}
     if tour is not None:
         t = guide["tours"].get(tour)
         if t is None:
             raise HTTPException(
-                404, f"no tour {tour!r}; known: {sorted(guide['tours'])}")
+                404,
+                f"no tour {tour!r}; known: {sorted(guide['tours'])}",  # repr-ok: moved verbatim from chat_tools (RETRO-FRAG-1)
+            )
         return {"tour": tour, **t}
-    return {"tours": {k: {"title": v["title"], "intro": v.get("intro"),
-                          "steps": len(v["steps"])}
-                      for k, v in guide["tours"].items()},
-            "fields": sorted(guide["fields"])}
+    return {
+        "tours": {
+            k: {"title": v["title"], "intro": v.get("intro"), "steps": len(v["steps"])}
+            for k, v in guide["tours"].items()
+        },
+        "fields": sorted(guide["fields"]),
+    }
 
 
 def review_eh_study() -> dict:
@@ -105,8 +112,10 @@ def review_eh_study() -> dict:
 
     record = R.get_eh_study()
     return review_latest(
-        R._state, record if isinstance(record, dict) else None,
-        no_data_message=_ADEQUACY_NO_DATA_HINTS["eh_reference_design"])
+        R._state,
+        record if isinstance(record, dict) else None,
+        no_data_message=_ADEQUACY_NO_DATA_HINTS["eh_reference_design"],
+    )
 
 
 def suggest_eh_setup(archetype: str | None = None) -> dict:
@@ -116,24 +125,28 @@ def suggest_eh_setup(archetype: str | None = None) -> dict:
     bulk_update_components action. READ: nothing is applied; the write tools
     confirm whatever the user picks."""
     from services.adequacy.eh_setup import suggest_eh_setup as _suggest
+
     return _suggest(PyPSAService.get_network(), archetype=archetype)
 
 
 def start_campaign(objective: str, budget_solves: int | None = None) -> dict:
     """Open a reliability campaign with one budget across every study."""
     from services.adequacy import campaign
+
     return campaign.start(objective, budget_solves)
 
 
 def campaign_status() -> dict:
     """The running campaign's objective, budget, spend and study log."""
     from services.adequacy import campaign
+
     return campaign.status()
 
 
 def end_campaign(note: str | None = None) -> dict:
     """Close the campaign and return its final record."""
     from services.adequacy import campaign
+
     return campaign.end(note)
 
 
@@ -147,10 +160,11 @@ def run_fmea_sweep(scenarios: list | None = None) -> dict:
     operates on the FOREGROUND network and carries no project name.
     """
     from routers.results import FmeaSweepRequest, post_fmea_sweep as _h
+
     rows = list(scenarios or [])
     return _campaign_gated(
-        "fmea_sweep", lambda: _h(FmeaSweepRequest(scenarios=rows)),
-        scenarios=rows)
+        "fmea_sweep", lambda: _h(FmeaSweepRequest(scenarios=rows)), scenarios=rows
+    )
 
 
 def run_frontier_study(targets_permyriad: list | None = None) -> dict:
@@ -160,10 +174,12 @@ def run_frontier_study(targets_permyriad: list | None = None) -> dict:
     point. Omitting `targets_permyriad` uses the engine's default spread.
     """
     from routers.results import FrontierRequest, post_frontier as _h
+
     return _campaign_gated(
         "frontier",
         lambda: _h(FrontierRequest(targets_permyriad=targets_permyriad)),
-        targets_permyriad=targets_permyriad)
+        targets_permyriad=targets_permyriad,
+    )
 
 
 def run_mc_study(
@@ -183,13 +199,19 @@ def run_mc_study(
     must not be a half-mutated network.
     """
     from routers.results import McRequest, post_mc as _h
-    return _campaign_gated("mc", lambda: _h(McRequest(
-        draws=draws,
-        seed=seed,
-        cov_target=cov_target,
-        elcc_assets=elcc_assets,
-        elcc_portfolio=elcc_portfolio,
-    )))
+
+    return _campaign_gated(
+        "mc",
+        lambda: _h(
+            McRequest(
+                draws=draws,
+                seed=seed,
+                cov_target=cov_target,
+                elcc_assets=elcc_assets,
+                elcc_portfolio=elcc_portfolio,
+            )
+        ),
+    )
 
 
 def run_coupling_loop(
@@ -210,17 +232,21 @@ def run_coupling_loop(
     result's `goal_sources` names where each came from.
     """
     from routers.results import CouplingLoopRequest, post_coupling_loop as _h
+
     return _campaign_gated(
         "coupling_loop",
-        lambda: _h(CouplingLoopRequest(
-            target_lole_h=target_lole_h,
-            draws=draws,
-            seed=seed,
-            eps0=eps0,
-            max_solves=max_solves,
-            restore=restore,
-        )),
-        max_solves=max_solves)
+        lambda: _h(
+            CouplingLoopRequest(
+                target_lole_h=target_lole_h,
+                draws=draws,
+                seed=seed,
+                eps0=eps0,
+                max_solves=max_solves,
+                restore=restore,
+            )
+        ),
+        max_solves=max_solves,
+    )
 
 
 def run_margin_loop(
@@ -242,16 +268,20 @@ def run_margin_loop(
     (W3b-R), named in the result's `goal_sources`.
     """
     from routers.results import MarginLoopRequest, post_margin_loop as _h
+
     return _campaign_gated(
         "margin_loop",
-        lambda: _h(MarginLoopRequest(
-            target_lole_h=target_lole_h,
-            draws=draws,
-            seed=seed,
-            max_solves=max_solves,
-            restore=restore,
-        )),
-        max_solves=max_solves)
+        lambda: _h(
+            MarginLoopRequest(
+                target_lole_h=target_lole_h,
+                draws=draws,
+                seed=seed,
+                max_solves=max_solves,
+                restore=restore,
+            )
+        ),
+        max_solves=max_solves,
+    )
 
 
 def run_eh_study(
@@ -275,19 +305,23 @@ def run_eh_study(
     here wins for this run, and ``goal_sources`` names each one's source.
     """
     from routers.results import EhStudyRequest, post_eh_study as _h
+
     return _campaign_gated(
         "eh_study",
-        lambda: _h(EhStudyRequest(
-            archetype=archetype,
-            stages=stages,
-            budget_solves=budget_solves,
-            pack_overrides=pack_overrides,
-            dtc_config=dtc_config,
-            dtc_attribution=dtc_attribution,
-            dsr_buses=dsr_buses,
-            mc=mc,
-        )),
-        budget_solves=budget_solves)
+        lambda: _h(
+            EhStudyRequest(
+                archetype=archetype,
+                stages=stages,
+                budget_solves=budget_solves,
+                pack_overrides=pack_overrides,
+                dtc_config=dtc_config,
+                dtc_attribution=dtc_attribution,
+                dsr_buses=dsr_buses,
+                mc=mc,
+            )
+        ),
+        budget_solves=budget_solves,
+    )
 
 
 def abort_adequacy_study(study: str) -> dict:
@@ -335,9 +369,12 @@ def build_study_report(project: str | None = None) -> dict:
             health = None
 
     status = _campaign.status()
-    return _build(n, get_adequacy_results,
-                  campaign=status if status.get("active") else None,
-                  health=health)
+    return _build(
+        n,
+        get_adequacy_results,
+        campaign=status if status.get("active") else None,
+        health=health,
+    )
 
 
 DISPATCHERS = {
