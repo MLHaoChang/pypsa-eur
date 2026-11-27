@@ -111,7 +111,7 @@ COPT = {"screening_lole": (2.5, "h"), "screening_eue": (122.5, "MWh"), "screenin
 GRID = {"checked_pass": (1, "rows"), "checked_warn": (1, "rows"), "checked_fail": (0, "rows"),
         "not_checked": (27, "rows")}
 # Computed on demand from the current network or saved files: nothing to go stale.
-ON_DEMAND = {"copt-screening/1", "copt-screening/2", "grid-readiness/1"}
+ON_DEMAND = {"copt-screening/2", "grid-readiness/1"}
 PROFILE_METRICS = {
     "generator-dispatch/1": tuple(GENERATOR)[:3],
     "generator-cost/1": tuple(GENERATOR),
@@ -144,10 +144,7 @@ ADDED = {
     "storage-cycles/1": ("storage unit Battery", "Show the cycles for", CYCLES, "window_discharged_energy"),
     "energy-balance/1": ("network", "Show the energy balance for", BALANCE, "generation_energy"),
     "site-import/1": ("network", "Show the grid import for", SITE, "grid_import_energy"),
-    "investment-case/1": ("network", "Show the investment returns for", INVESTMENT, "equity_npv"),
-    "investment-lcoe/1": ("network", "Show the LCOE for", LCOE, "lcoe_nominal"),
-    "copt-screening/1": ("network", "Show the COPT screening for", COPT, "screening_lole"),
-    # /2 profiles (AA 28): the same figures under the ruled labels
+    # The chat now emits the /2 profiles (AA 28); /1 is covered by the replay and snapshot tests.
     "investment-case/2": ("network", "Show the investment returns for", INVESTMENT, "equity_npv"),
     "investment-lcoe/2": ("network", "Show the LCOE for", LCOE, "lcoe_nominal"),
     "copt-screening/2": ("network", "Show the COPT screening for", COPT, "screening_lole"),

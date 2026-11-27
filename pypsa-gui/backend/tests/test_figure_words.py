@@ -262,7 +262,7 @@ def _contract_metrics():
 def test_every_checked_metric_of_a_figure_is_mapped_to_it():
     from harness import copt_calculations as copt, investment_calculations as inv
 
-    words = re.compile(r"\b(NPV|LOLE|LCOE)\b")
+    words = re.compile(r"\b(NPV|LOLE|LCOE|shortfall)\b")
     printed = {
         (inv.PROFILE_V2, m)
         for m, d in inv.METRICS_V2.items()
