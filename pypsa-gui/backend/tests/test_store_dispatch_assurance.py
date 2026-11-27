@@ -497,14 +497,25 @@ def test_the_balance_tolerance_boundary(energy, offset, consistent):
         ("upper", 2e-5, False),
         ("lower", -0.5e-6, True),
         ("lower", -2e-6, False),
+        ("scaled_lower", -2.5e-6, True),
+        ("scaled_lower", -1e-5, False),
     ],
-    ids=["upper_inside", "upper_past", "lower_inside", "lower_past"],
+    ids=[
+        "upper_inside",
+        "upper_past",
+        "lower_inside",
+        "lower_past",
+        "scaled_lower_inside",
+        "scaled_lower_past",
+    ],
 )
 def test_the_bound_tolerance_on_both_sides(side, offset, within):
-    """Capacity 10, bounds 0 and 1: the slack is BALANCE_TOLERANCE x max(1, |e|)."""
-    level = 10.0 if side == "upper" else 0.0
+    """Capacity 10: the slack is BALANCE_TOLERANCE x max(1, |e|). Bounds 0 and 1,
+    or 0.5 and 1 for the scaled lower case (slack 5e-6 at e = 5)."""
+    level = {"upper": 10.0, "lower": 0.0, "scaled_lower": 5.0}[side]
+    low = 0.5 if side == "scaled_lower" else 0.0
     raw = _hand_raw(
-        [-(level + offset)], e_nom_opt=10.0, e_min_pu=[0.0], e_max_pu=[1.0]
+        [-(level + offset)], e_nom_opt=10.0, e_min_pu=[low], e_max_pu=[1.0]
     )
     assert _every(raw) == (set() if within else {"store_bound_violation"})
 
