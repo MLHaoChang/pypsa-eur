@@ -699,6 +699,92 @@ def test_a_matpower_export_unlike_the_network_reads_uncertain(
     assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network"), edit
 
 
+@pytest.mark.parametrize(
+    "section, row",
+    [
+        ("mpc.bus", "\t99  1  0  0  0  0  1  1.0  0  110  1  1.1  0.9;\n"),
+        ("mpc.gen", "\t1  5  0  999  -999  1.0  100  1  10  0;\n"),
+        ("mpc.branch", "\t1  2  0.01  0.1  0  50  0  0  0  0  1;\n"),
+    ],
+)
+def test_a_matpower_export_with_an_extra_row_reads_uncertain(
+    ieee14_in_project, harness, monkeypatch, section, row
+):
+    # Mutants: a row the live network does not have, after all of its own.
+    import routers.io as io_router
+
+    real = io_router._export_matpower_text
+
+    def extra():
+        lines = real().splitlines(keepends=True)
+        first = next(
+            i for i, line in enumerate(lines) if line.startswith(section + " ")
+        )
+        end = next(i for i in range(first, len(lines)) if lines[i].startswith("];"))
+        return "".join(lines[:end] + [row] + lines[end:])
+
+    monkeypatch.setattr(io_router, "_export_matpower_text", extra)
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+def test_a_matpower_export_with_a_generator_on_another_bus_reads_uncertain(
+    ieee14_in_project, harness, monkeypatch
+):
+    import routers.io as io_router
+
+    live = ieee14_in_project.network
+    changed = live.copy()
+    gen = changed.generators.index[0]
+    other = next(
+        b for b in changed.buses.index if b != changed.generators.at[gen, "bus"]
+    )
+    changed.generators.loc[gen, "bus"] = other
+    real = io_router._export_matpower_text
+
+    def moved():
+        ieee14_in_project.network = changed
+        try:
+            return real()
+        finally:
+            ieee14_in_project.network = live
+
+    monkeypatch.setattr(io_router, "_export_matpower_text", moved)
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+def test_a_matpower_export_of_loads_with_only_p_or_only_q_is_completed(
+    ieee14_in_project, harness
+):
+    # A bus with demand in one of P or Q still carries its load row.
+    loads = ieee14_in_project.network.loads
+    loads.loc[loads.index[0], "p_set"] = 0.0
+    loads.loc[loads.index[1], "q_set"] = 0.0
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("completed", None), out
+
+
+def test_an_import_of_an_unknown_format_has_no_note(baseline):
+    from routers.io import _export_csv_zip_bytes
+    from services import upload_service
+    from services.assistant_tools import _project
+
+    project, directory, _owner = _project()
+    meta = upload_service.add_upload(
+        project.name,
+        _export_csv_zip_bytes(),
+        "t.zip",
+        "application/zip",
+        kind="user_upload",
+        project_dir=directory,
+    )
+    note = outcomes.note_import(
+        "import_uploaded_network", {"file_id": meta.file_id, "format": "bogus"}
+    )
+    assert note == {"tool": "import_uploaded_network", "error": True}
+
+
 def test_a_matpower_export_missing_a_line_reads_uncertain(
     ieee14_in_project, harness, monkeypatch
 ):
