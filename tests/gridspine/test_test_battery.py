@@ -921,6 +921,10 @@ def test_pack_ratings_round_trip_and_refusals():
     for text, match in (
         ("{", "does not parse"),
         ("[1]", "must hold exactly"),
+        (
+            '["rated_mw", "rated_mva", "rating_source", "campus_data_hash"]',
+            "must hold exactly",
+        ),
         ('{"rated_mw": 1}', "must hold exactly"),
     ):
         with pytest.raises(ContractError, match=match):
