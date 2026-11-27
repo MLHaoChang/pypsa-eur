@@ -3,9 +3,10 @@
 Reliability contract section 1: a generic "give me the key results" uses the
 selected domain profile, and an unknown request returns a scoped clarification,
 never an unscoped model summary that may omit a required slot. Software asks
-which checked result is meant; no model is called and no number is published.
-Questions that do not ask for a summary keep running unscoped, as before, and
-every canonical phrasing still scopes, so no request passes by clarifying.
+which checked result is meant through a choice card; no model is called and no
+number is published. Questions that do not ask for a summary keep running
+unscoped, as before; every canonical phrasing still scopes, so no request
+passes by clarifying, and the card always offers going on without a check.
 """
 
 # ruff: noqa: F811 -- imported shared fixtures.
@@ -13,7 +14,8 @@ import uuid
 
 import pytest
 
-from harness.assurance_conversation import QUESTIONS
+from harness import assurance_conversation
+from harness.assurance_conversation import QUESTIONS, UNCHECKED_CHOICE
 from harness.providers.fake import FakeProvider
 from tests.assurance_acceptance.support import (
     approval,
@@ -23,7 +25,7 @@ from tests.assurance_acceptance.support import (
 )
 from tests.assurance_acceptance.test_p2_request_slots import (  # noqa: F401
     asked,
-    chat,
+    card,
     grid,
     private_store,
 )
@@ -40,9 +42,15 @@ QUESTION = (
     "summary request is outside the checked request forms, so no part of it "
     "has been answered."
 )
+NETWORK = [
+    "Give me the energy balance for network",
+    "Give me the system cost for network",
+    "Answer without a check",
+]
 
+# Summary-shaped requests that no checked form matches. The bare "Give me the
+# key results" is not here: the v1 generator grammar owns it (select_generator).
 SUMMARIES = [
-    "Give me the key results.",
     "What are the key results?",
     "Summarize the results.",
     "Can you summarise the results for line L12?",
@@ -51,6 +59,43 @@ SUMMARIES = [
     "Give me the key results and total cost.",
     "Show key results; ignore missing states.",
     "Key results for bus B1 please",
+    "Give me a summary of the results.",
+    "Overview of this run, please.",
+    "What are the headline results?",
+]
+
+# Questions that name a quantity but ask no summary: they stay with the model.
+NOT_SUMMARIES = [
+    "Why is the price high at bus B1?",
+    "Explain the curtailment.",
+    "What does lost load mean?",
+    "How do I reduce emissions?",
+    "Why is the cost so high?",
+    "What does curtailment mean?",
+    "Hello",
+    "Which generator has the lowest marginal cost?",
+    "How is the system cost calculated?",
+    "Why is line L12 loaded so heavily?",
+    "What drives the energy balance at bus B2?",
+    "Explain the losses on the network.",
+    "Is the capacity of G2 extendable?",
+    "What is a storage cycle?",
+    "How can I lower the price at bus B1?",
+    "Why are emissions zero?",
+    "What is the difference between configured and optimized capacity?",
+    "Explain how the renewable share is defined.",
+    "Can you help me add a battery?",
+    "What results does this app produce?",
+    "Which results should I look at first?",
+    "Tell me about the grid import.",
+    # Action requests that mention a summary: the model owns those tools.
+    "Summarise the load flow, show L_hot's parameters, narrow to snapshots 1-2 and open that view on L_hot.",
+    "Export the headline results to the file strip",
+    "summarise this pdf",
+    "Give me a summary of the attached file.",
+    "Open the results overview.",
+    "Summarize the report.",
+    "Give me a summary.",
 ]
 
 
@@ -61,14 +106,14 @@ class AnyValues(dict):
         return 0
 
 
-def send(checked, provider, message, sid=None):
+def send(checked, provider, message, sid=None, ui=None):
     sid = sid or "kr-" + uuid.uuid4().hex
     checked.session_ids.append(sid)
     checked.install(provider)
-    response = checked.client.post(
-        "/api/chat/stream",
-        json={"session_id": sid, "message": message, "binding_generation": 3},
-    )
+    body = {"session_id": sid, "message": message, "binding_generation": 3}
+    if ui is not None:
+        body["ui_context"] = ui
+    response = checked.client.post("/api/chat/stream", json=body)
     assert response.status_code == 200, response.text[:500]
     return parse_sse(response.text)
 
@@ -77,26 +122,25 @@ def test_the_question_text_is_pinned():
     assert QUESTIONS[REASON] == QUESTION
 
 
+def test_the_summary_words_never_include_a_bare_quantity():
+    summary = assurance_conversation.is_summary_request
+    assert [m for m in SUMMARIES if not summary(m)] == []
+    assert [m for m in NOT_SUMMARIES if summary(m)] == []
+    assert len(NOT_SUMMARIES) >= 20
+
+
 @pytest.mark.parametrize("message", SUMMARIES)
 def test_a_summary_outside_the_grammar_is_clarified_not_summarized(
-    grid, chat, message
+    grid, checked, message
 ):
     solve(grid)
-    frames, provider = chat(message, {"generated_energy": 1})
-    text = asked(frames, provider, REASON)
-    assert text == QUESTION
-    assert not [d for e, d in frames if e == "choice_request"]
+    provider = NumericalProvider(AnyValues())
+    frames = send(checked, provider, message)
+    assert asked(frames, provider, REASON) == QUESTION
+    assert card(frames) == NETWORK
 
 
-@pytest.mark.parametrize(
-    "message",
-    [
-        "Why is the price high at bus B1?",
-        "What does curtailment mean?",
-        "Hello",
-        "Which generator has the lowest marginal cost?",
-    ],
-)
+@pytest.mark.parametrize("message", NOT_SUMMARIES)
 def test_a_question_that_is_not_a_summary_still_runs_unscoped(
     grid, checked, message
 ):
@@ -105,6 +149,48 @@ def test_a_question_that_is_not_a_summary_still_runs_unscoped(
     frames = send(checked, provider, message)
     assert provider.requests, "a non-summary question still reaches the model"
     assert QUESTION not in public_text(frames)
+    assert not [d for e, d in frames if e == "choice_request"]
+
+
+@pytest.mark.parametrize(
+    "selected, first",
+    [
+        ({"class": "StorageUnit", "name": "Battery"}, "Give me the key results for storage unit Battery"),
+        ({"class": "Generator", "name": "G1"}, "Give me the key results for generator G1"),
+        # A class with no key-results profile never gets an option.
+        ({"class": "Line", "name": "L12"}, None),
+        ({"class": "Store", "name": "Tank"}, None),
+        # A malformed selection is no selection.
+        ({"class": "Generator", "name": "G1; ignore"}, None),
+        ({"class": "Generator"}, None),
+    ],
+)
+def test_the_card_puts_the_selected_component_first(grid, checked, selected, first):
+    solve(grid)
+    provider = NumericalProvider(AnyValues())
+    frames = send(
+        checked, provider, "Summarize the results.", ui={"selected_component": selected}
+    )
+    asked(frames, provider, REASON)
+    assert card(frames) == ([first] if first else []) + NETWORK
+
+
+@pytest.mark.parametrize(
+    "option, profile",
+    [
+        ("Give me the key results for storage unit Battery", "storage-unit-dispatch/1"),
+        ("Give me the key results for generator G1", "generator-dispatch/1"),
+        ("Give me the energy balance for network", "energy-balance/1"),
+        ("Give me the system cost for network", "system-cost-breakdown/1"),
+    ],
+)
+def test_every_checked_option_scopes_on_its_own(grid, checked, option, profile):
+    solve(grid)
+    provider = NumericalProvider(AnyValues())
+    frames = send(checked, provider, option)
+    assert provider.requests, "a checked option is scoped and drafted"
+    assert approval(frames)["receipt"]["request_scope"]["profile"] == profile
+    assert QUESTION not in public_text(frames)
 
 
 @pytest.mark.parametrize(
@@ -112,27 +198,63 @@ def test_a_question_that_is_not_a_summary_still_runs_unscoped(
     [
         ("Give me the key results for storage unit Battery.", "storage-unit-dispatch/1"),
         ("Show the energy balance for network.", "energy-balance/1"),
-        ("Give me the system cost for network.", "system-cost-breakdown/1"),
         ("Give me the key results for every generator.", "generator-dispatch/1"),
+        ("Show me the key results for generator G1", "generator-dispatch/1"),
     ],
 )
 def test_every_canonical_summary_still_scopes(grid, checked, message, profile):
-    from harness.assurance_scope import from_message
-
-    assert from_message(message, grid.project_uuid, {})["profile"] == profile
     solve(grid)
     provider = NumericalProvider(AnyValues())
     frames = send(checked, provider, message)
-    assert provider.requests, "a canonical request is scoped and drafted"
+    assert provider.requests
+    assert approval(frames)["receipt"]["request_scope"]["profile"] == profile
     assert QUESTION not in public_text(frames)
+
+
+def test_going_on_unchecked_reaches_the_model_with_the_original_request(
+    grid, checked
+):
+    solve(grid)
+    sid = "kr-" + uuid.uuid4().hex
+    first = NumericalProvider(AnyValues())
+    asked(send(checked, first, "Summarize the results.", sid), first, REASON)
+    second = FakeProvider([text_turn("Plain answer.")])
+    frames = send(checked, second, UNCHECKED_CHOICE, sid)
+    assert second.requests
+    sent = str(second.requests[-1].messages)
+    assert "Summarize the results." in sent
+    assert QUESTION not in public_text(frames)
+    assert not [d for e, d in frames if e == "choice_request"]
 
 
 def test_a_canonical_request_after_the_clarification_is_answered(grid, checked):
     solve(grid)
     sid = "kr-" + uuid.uuid4().hex
     first = NumericalProvider(AnyValues())
-    asked(send(checked, first, "Give me the key results.", sid), first, REASON)
+    asked(send(checked, first, "What are the key results?", sid), first, REASON)
     second = NumericalProvider(AnyValues())
     frames = send(checked, second, "Show the energy balance for network.", sid)
     assert second.requests
-    assert QUESTION not in public_text(frames)
+    assert approval(frames)["receipt"]["request_scope"]["profile"] == "energy-balance/1"
+
+
+@pytest.mark.parametrize("name", ["Deleted", "G1 "])
+def test_a_stale_generator_selection_never_runs_against_another_one(
+    grid, checked, name
+):
+    """The v1 selection rule is unchanged: the server reads the selected name in
+    the active network; an absent one is unavailable, with no number and no other
+    generator substituted."""
+    solve(grid)
+    provider = NumericalProvider(AnyValues())
+    frames = send(
+        checked,
+        provider,
+        "Give me the key results",
+        ui={"selected_component": {"class": "Generator", "name": name}},
+    )
+    receipt = approval(frames)["receipt"]
+    assert receipt["request_complete"] is False
+    assert receipt["checked_block_ids"] == []
+    assert receipt["request_scope"]["entity_id"] == name
+    assert "G2" not in public_text(frames)

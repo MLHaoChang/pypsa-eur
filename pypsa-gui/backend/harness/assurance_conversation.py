@@ -41,11 +41,48 @@ QUESTIONS = {
     # AA-09 S1: a summary outside the bounded grammar is never summarized unscoped.
     "key_results_scope_required": "Which checked result do you want? Name one result and its component, for example: Give me the key results for storage unit <name>; Give me the energy balance for network; Give me the system cost for network. This summary request is outside the checked request forms, so no part of it has been answered.",
 }
-# AA-09 S1: summary-shaped words; a match only asks, it never selects a profile.
-SUMMARY = re.compile(
-    r"\b(?:key\s+results?|(?:main|headline)\s+results?|summar(?:y|ise|ize)|overview)\b",
+# AA-09 S1: a request for a summary of the results; a match only asks, it never
+# selects a profile. A summary word counts only beside "results"/"run", and a
+# message that also asks for an action (export, navigation, an attachment...)
+# stays with the model, which owns those tools.
+RESULTS_SUMMARY = re.compile(
+    r"\b(?:key|main|headline)\s+results?\b"
+    r"|\b(?:summar(?:y|ise|ize)|overview)\s+(?:of\s+)?(?:the\s+|my\s+|this\s+)?(?:results?|run)\b",
     re.I,
 )
+ACTION = re.compile(
+    r"\b(?:export|download|save|open|navigate|go\s+to|create|add|remove|delete|edit"
+    r"|change|set|run\s+(?:a|the)\s+solve|solve|apply|attach(?:ed)?|upload|pdf|file"
+    r"|report|document|parameters?|view)\b",
+    re.I,
+)
+
+
+def is_summary_request(message):
+    return bool(RESULTS_SUMMARY.search(message)) and not ACTION.search(message)
+UNCHECKED_CHOICE = "Answer without a check"
+NETWORK_SUMMARY_CHOICES = (
+    "Give me the energy balance for network",
+    "Give me the system cost for network",
+)
+SELECTED_SUMMARY_CHOICES = {
+    "Generator": "Give me the key results for generator {}",
+    "StorageUnit": "Give me the key results for storage unit {}",
+}
+
+
+def summary_choices(ui):
+    """The key-results card: the selected component's checked form first (only for a
+    class with a key-results profile), then network forms, then going on unchecked.
+    Each checked option is a complete request the bounded grammar scopes on its own."""
+    selected = (ui or {}).get("selected_component") if isinstance(ui, dict) else None
+    options = []
+    if isinstance(selected, dict):
+        form = SELECTED_SUMMARY_CHOICES.get(selected.get("class"))
+        name = selected.get("name")
+        if form and isinstance(name, str) and re.fullmatch(r"[\w .:/()+-]{1,128}", name):
+            options.append(form.format(name.strip()))
+    return [*options, *NETWORK_SUMMARY_CHOICES, UNCHECKED_CHOICE]
 PENDING = {"cost_quantity_required", "explicit_cost_basis_required", "capacity_meaning_required"}
 
 
@@ -346,8 +383,6 @@ def resolve(turn, message, ui, explicit):
         re.I,
     ):
         return _needs(turn, state["scope"] if state else None, "unsupported_followup")
-    if SUMMARY.search(message):
-        return _needs(turn, None, "key_results_scope_required")
     return None
 
 
