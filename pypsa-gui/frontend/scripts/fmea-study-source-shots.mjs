@@ -3,7 +3,8 @@
 /**
  * template-e2e 24 screenshot harness: the FMEA worksheet when its rows are the
  * last Energy Hub study's (`source: "eh_study"`): the source line in Guided and
- * Expert, the out-of-date state, and live rows with no line; dark and light, on
+ * Expert, the out-of-date state, unpriced study rows with the re-run note,
+ * and live rows with no line; dark and light, on
  * the real app. Mocked routes only: `GET /api/results/fmea_modes` and the
  * project's worksheet sidecar.
  * Needs the API on :8000 and Vite on :5173 (dev admin, scripts/dev-credentials.mjs).
@@ -39,6 +40,8 @@ const STUDY = { per_mode: ROWS, source: 'eh_study', study_finished_at: 179579520
 const STATES = {
   study: STUDY,
   stale: { ...STUDY, edited_since_study: true },
+  // Unpriced study rows: the "Not priced" line with the re-run note (STUDY_REPRICE).
+  reprice: { ...STUDY, per_mode: ROWS.map(r => ({ ...r, severity_eur: null, criticality_eur_per_year: null })) },
   live: { ...STUDY, source: 'live', voll_eur_per_mwh: 5000, study_finished_at: undefined, edited_since_study: undefined },
 }
 const WORKSHEET = { version: 1, overlays: {}, manual_rows: [] }
@@ -72,7 +75,7 @@ try {
   const auth = await owner.storageState()
   await owner.close()
 
-  const shots = [['guided', 'study'], ['expert', 'study'], ['expert', 'live'], ['guided', 'stale']]
+  const shots = [['guided', 'study'], ['expert', 'study'], ['expert', 'live'], ['guided', 'stale'], ['expert', 'reprice']]
   for (const [mode, state] of shots) {
     for (const theme of ['dark', 'light']) {
       const ctx = await browser.newContext({ storageState: auth, viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 2, reducedMotion: 'reduce' })
@@ -100,6 +103,8 @@ try {
         const hasLine = await page.getByTestId('fmea-source-line').count()
         const hasStale = await page.getByTestId('fmea-study-stale').count()
         if ((state === 'live') === Boolean(hasLine)) problems.push(`${mode}/${state}/${theme}: source line ${hasLine ? 'shown' : 'missing'}`)
+        const hasReprice = await page.getByTestId('fmea-study-reprice').count()
+        if ((state === 'reprice') !== Boolean(hasReprice)) problems.push(`${mode}/${state}/${theme}: re-run note ${hasReprice ? 'shown' : 'missing'}`)
         if ((state === 'stale') !== Boolean(hasStale)) problems.push(`${mode}/${state}/${theme}: stale state ${hasStale ? 'shown' : 'missing'}`)
         // One crop from the header to the table's last row.
         const top = await page.getByTestId('results-view-fmea').locator('header').boundingBox()

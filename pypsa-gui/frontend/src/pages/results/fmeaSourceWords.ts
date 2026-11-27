@@ -4,11 +4,22 @@
 import type { ModesPayload } from './fmea'
 import { runStamp } from '../../components/SourceRunLine'
 
+// The rows keep the study's order (GK C2, the owner's Q2 rule): the two
+// engines' figures are never ranked together, so the lines say what the
+// order is instead of calling it a ranking (UX 32 on #2092, option b).
 export const GUIDED_STUDY_SOURCE =
-  'These rows come from the last Energy Hub study: the same risks its results and the report list.'
+  'These rows come from the last Energy Hub study: the same risks its results and the report list. '
+  + 'They are in the study\'s order: link outages first, then the other equipment, each from the highest yearly risk down.'
 export const EXPERT_STUDY_SOURCE =
-  "Computed rows are the last Energy Hub study's ranking, as in the reference design and the report. "
+  "Computed rows are the last Energy Hub study's, as in the reference design and the report. "
+  + 'They are in the study\'s order: class B link outages first, then class A, each from the highest criticality down. '
   + 'They are not a fresh screening. A contingency sweep run after the study replaces them.'
+/** The Expert intro for study rows: the live intro's "ranked by criticality"
+ *  and "regenerate on every view" are not true of them. */
+export const EXPERT_STUDY_INTRO =
+  'Failure modes with their criticality (€ per year). Expert rows and mitigability notes persist '
+  + 'with the project and survive re-solves. No number here is comparable to a statutory reliability '
+  + 'standard (hover a badge for each row\'s fidelity).'
 /** With study rows a new VoLL prices nothing until the study runs again (GK C4). */
 export const STUDY_REPRICE =
   "These are the study's rows: after setting a price, run the study again to price them."

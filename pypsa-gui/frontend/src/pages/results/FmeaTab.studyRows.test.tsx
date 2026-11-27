@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import FmeaTab from './FmeaTab'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
-import { EXPERT_STUDY_SOURCE, GUIDED_STUDY_SOURCE } from './fmeaSourceWords'
+import { EXPERT_STUDY_INTRO, EXPERT_STUDY_SOURCE, GUIDED_STUDY_SOURCE } from './fmeaSourceWords'
 import { OUT_OF_DATE_REASON } from '../../components/ResultsOutOfDate'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
@@ -64,6 +64,9 @@ describe('FMEA worksheet with the study as its source', () => {
     expect(line.startsWith(EXPERT_STUDY_SOURCE)).toBe(true)
     expect(line).toMatch(/The study ran on .+\.$/)
     expect(screen.queryByTestId('fmea-study-stale')).toBeNull()
+    // The live intro's "ranked by criticality" is not said of study rows.
+    expect(screen.getByText(EXPERT_STUDY_INTRO)).toBeTruthy()
+    expect(screen.queryByText(/ranked by criticality/)).toBeNull()
   })
 
   it('marks the study rows out of date once the network was edited since', async () => {
@@ -85,6 +88,7 @@ describe('FMEA worksheet with the study as its source', () => {
     expect(names()).toEqual(['genset_new', 'critical_feeder', 'genset_1'])
     expect(screen.queryByTestId('fmea-source-line')).toBeNull()
     expect(screen.queryByTestId('fmea-study-stale')).toBeNull()
+    expect(screen.getByText(/ranked by criticality/)).toBeTruthy()
   })
 
   it('says unpriced study rows need the study run again', async () => {

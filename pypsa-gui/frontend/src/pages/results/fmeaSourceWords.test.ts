@@ -27,10 +27,13 @@ describe('the study-source line', () => {
   // rows when a sweep finishes after the study (backend test_fmea_modes_single_source).
   it('says a sweep run after the study replaces the rows', () => {
     expect(EXPERT_STUDY_SOURCE).toBe(
-      "Computed rows are the last Energy Hub study's ranking, as in the reference design and the report. "
+      "Computed rows are the last Energy Hub study's, as in the reference design and the report. "
+      + "They are in the study's order: class B link outages first, then class A, each from the highest criticality down. "
       + 'They are not a fresh screening. A contingency sweep run after the study replaces them.')
     expect(GUIDED_STUDY_SOURCE).toBe(
-      'These rows come from the last Energy Hub study: the same risks its results and the report list.')
+      'These rows come from the last Energy Hub study: the same risks its results and the report list. '
+      + "They are in the study's order: link outages first, then the other equipment, each from the highest yearly risk down.")
+    expect(EXPERT_STUDY_SOURCE).not.toMatch(/ranking/)
   })
 })
 

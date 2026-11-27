@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { buildManualRow, mergeWorksheet, unpricedRankingWarning, WORKSHEET_CSV_HEADER, worksheetCsvRows, ZERO_REASON_TEXT, CRITICALITY_PER_YEAR_LABEL, unpricedModeCount, setVollText, SOLVER_VOLL_LABEL } from './fmea'
+import { buildManualRow, mergeWorksheet, unpricedRankingWarning, WORKSHEET_CSV_HEADER, worksheetCsvRows, ZERO_REASON_TEXT, CRITICALITY_PER_YEAR_LABEL, unpricedModeCount, setVollText, SOLVER_VOLL_LABEL, unpricedNote } from './fmea'
 import { GOAL_CARD_TITLE, GOAL_VOLL_LABEL } from '../hubDesign/cards/goalCardWords'
 import type { CoptPayload } from './adequacy'
+import { STUDY_REPRICE } from './fmeaSourceWords'
 
 const copt: CoptPayload = {
   engine: 'copt', fidelity: 'analytic_convolution',
@@ -262,5 +263,20 @@ describe('mergeWorksheet — study rows (template-e2e 24)', () => {
       { version: 1, manual_rows: [manual], overlays: {} })
     expect(rows.map(r => r.mode_id).slice(0, 3)).toEqual(['b1', 'b2', 'a1'])
     expect(rows).toHaveLength(4)
+  })
+})
+
+describe('unpriced study rows (template-e2e 24)', () => {
+  it('does not say they are listed last, since they keep the study order', () => {
+    expect(unpricedNote(4, true)).toBe('Not priced: 4 modes have no price for undelivered energy.')
+    expect(unpricedNote(1, true)).toBe('Not priced: 1 mode has no price for undelivered energy.')
+    expect(unpricedNote(4)).toMatch(/listed last/)
+  })
+  it('closes the CSV with the re-run note for study rows', () => {
+    const rows = mergeWorksheet({ per_mode: [{ mode_id: 'b1', name: 'b1', failure_class: 'B',
+      criticality_eur_per_year: null, severity_eur: null }], source: 'eh_study' }, null)
+    const last = worksheetCsvRows(rows, false, true).at(-1)![0] as string
+    expect(last).toContain('no price for undelivered energy')
+    expect(last).toContain(STUDY_REPRICE)
   })
 })

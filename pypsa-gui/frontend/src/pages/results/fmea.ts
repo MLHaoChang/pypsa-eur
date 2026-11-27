@@ -3,7 +3,7 @@
 // The merge only needs a per_mode carrier — /results/copt and the Phase 4
 // aggregator /results/fmea_modes both satisfy it.
 import { GOAL_CARD_TITLE, GOAL_VOLL_LABEL } from '../hubDesign/cards/goalCardWords'
-import { isStudySourced } from './fmeaSourceWords'
+import { isStudySourced, STUDY_REPRICE } from './fmeaSourceWords'
 
 export interface ModesPayload {
   per_mode: Array<Record<string, unknown>>
@@ -181,7 +181,11 @@ function byCriticality(a: WorksheetRow, b: WorksheetRow): number {
 
 /** The sentence that says why unpriced modes sit last: one wording for the
  *  tab's visible line and the CSV's note row. */
-export function unpricedNote(count: number): string {
+export function unpricedNote(count: number, studyRows = false): string {
+  // Study rows keep the study's order (template-e2e 24), so they are not moved last.
+  if (studyRows) {
+    return `Not priced: ${count} mode${count === 1 ? ' has' : 's have'} no price for undelivered energy.`
+  }
   return `Not priced: ${count} mode${count === 1 ? ' is' : 's are'} listed last and left out of the ranking.`
 }
 // The VOLL input's name where the link lands, in each mode: Solver settings'
@@ -209,7 +213,7 @@ export const WORKSHEET_CSV_HEADER = [
   'in_metric_scope', 'mitigability', 'engine', 'fidelity',
 ]
 
-export function worksheetCsvRows(rows: WorksheetRow[], guided = false): unknown[][] {
+export function worksheetCsvRows(rows: WorksheetRow[], guided = false, studyRows = false): unknown[][] {
   const out: unknown[][] = rows.map(r => [
     r.mode_id, r.failure_class, r.component_class, r.name,
     r.occurrence_per_year, r.occurrence_basis,
@@ -218,7 +222,10 @@ export function worksheetCsvRows(rows: WorksheetRow[], guided = false): unknown[
   ])
   // The empty € cells say nothing on their own: a closing note row says why.
   const unpriced = unpricedModeCount(rows)
-  if (unpriced > 0) out.push([`${unpricedNote(unpriced)} ${setVollText(guided)}.`])
+  if (unpriced > 0) {
+    out.push([`${unpricedNote(unpriced, studyRows)} ${setVollText(guided)}.`
+      + (studyRows ? ` ${STUDY_REPRICE}` : '')])
+  }
   return out
 }
 

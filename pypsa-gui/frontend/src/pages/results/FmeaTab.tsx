@@ -34,7 +34,7 @@ import {
   type WorksheetSidecar,
   CRITICALITY_PER_YEAR_LABEL,
 } from './fmea'
-import { isStudySourced, modesSourceText, studyRepriceText, studyRowsOutOfDate } from './fmeaSourceWords'
+import { EXPERT_STUDY_INTRO, isStudySourced, modesSourceText, studyRepriceText, studyRowsOutOfDate } from './fmeaSourceWords'
 import ResultState from '../../components/ResultState'
 import { OUT_OF_DATE_REASON } from '../../components/ResultsOutOfDate'
 import { openVollField } from '../../layout/flowNavigation'
@@ -212,7 +212,7 @@ function FmeaWorksheet({ studyRows }: { studyRows: boolean }) {
   }
 
   const exportCsv = () =>
-    downloadCSV('fmea_worksheet.csv', WORKSHEET_CSV_HEADER, worksheetCsvRows(rows, guided))
+    downloadCSV('fmea_worksheet.csv', WORKSHEET_CSV_HEADER, worksheetCsvRows(rows, guided, studyRows))
 
   // template-e2e 24: the rows' source, said once for each line below.
   const modesPayload = modes as ModesPayload | null | undefined
@@ -236,11 +236,13 @@ function FmeaWorksheet({ studyRows }: { studyRows: boolean }) {
           </p>
         ) : (
         <p className="text-[11px] text-muted mt-1">
+          {studyRows ? EXPERT_STUDY_INTRO : (<>
           Failure modes ranked by criticality (€ per year): engine-computed rows
           regenerate on every view; expert rows and mitigability notes persist
           with the project and survive re-solves. No number here is comparable
           to a statutory reliability standard (hover a badge for each row's
           fidelity).
+          </>)}
         </p>
         )}
         {sourceLine && (
@@ -256,7 +258,7 @@ function FmeaWorksheet({ studyRows }: { studyRows: boolean }) {
 
       {unpricedCount > 0 ? (
         <p data-testid="fmea-unpriced-line" className="text-[11px] text-muted">
-          {unpricedNote(unpricedCount)}{' '}
+          {unpricedNote(unpricedCount, studyRows)}{' '}
           <button type="button" data-testid="fmea-unpriced-set-voll"
             onClick={() => openVollField(FMEA_RETURN_LABEL)}
             className="text-link hover:underline">
