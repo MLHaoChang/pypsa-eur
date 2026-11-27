@@ -164,6 +164,9 @@ def _owning_org(project_key: str | None):
         yield
 
 
+from services.failure_taxonomy import classify_failure  # noqa: E402
+
+
 class SiteLocationRefused(Exception):
     """A queued solve's project has no site location; `detail` is the typed 422
     dict of `site_location.refusal`."""
@@ -1756,8 +1759,12 @@ class SolveQueue:
                         # on the success path above: this context stops being
                         # queue-owned the instant we disown the worker.
                         ctx.solver_state.update(
-                            status="failed", condition="queue_error",
+                            status="failed",
+                            condition=(condition if isinstance(exc, SiteLocationRefused)
+                                       else "queue_error"),
                             thread=None, kind=None,
+                            **({"last_failure": classify_failure("failed", condition)}
+                               if isinstance(exc, SiteLocationRefused) else {}),
                         )
             except Exception:
                 pass

@@ -329,3 +329,12 @@ def test_the_business_case_rebuild_refuses_an_unlocated_baseline_resolve(
     with pytest.raises(RuntimeError, match="stub"):
         build()
     assert solved == [1]
+
+
+def test_failure_card_names_the_location_and_the_fix():
+    from services.failure_taxonomy import classify_failure
+
+    card = classify_failure("failed", "site_location_missing")
+    assert card["category"] == "site_location_missing"
+    assert "no location" in card["title"]
+    assert "latitude" in card["hint"].lower() and "longitude" in card["hint"].lower()

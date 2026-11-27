@@ -4,6 +4,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
+import toast from 'react-hot-toast'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AppHeader from './AppHeader'
 import { useUIStore } from '../store/uiStore'
@@ -66,5 +67,20 @@ describe('AppHeader — a run requested from elsewhere', () => {
     renderHeader()
     await act(async () => { await new Promise(r => setTimeout(r, 20)) })
     expect(enqueue).not.toHaveBeenCalled()
+  })
+
+  it('says the queue’s location refusal in words, with the way to fix it', async () => {
+    const spy = vi.spyOn(toast, 'error').mockImplementation(() => '')
+    enqueue.mockRejectedValueOnce({ response: { data: { detail: {
+      code: 'site_location_missing', error_kind: 'site_location_missing',
+      message: 'The site has no location: set its latitude and longitude before running.',
+    } } } })
+    renderHeader()
+    await act(async () => { useUIStore.getState().requestRunSolve() })
+    await vi.waitFor(() => expect(spy).toHaveBeenCalled())
+    const msg = String(spy.mock.calls[0][0])
+    expect(msg).toContain('The site has no location')
+    expect(msg).toContain('Latitude/Longitude')
+    spy.mockRestore()
   })
 })
