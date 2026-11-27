@@ -290,8 +290,6 @@ def names_for_network(n, project_dir: str | pathlib.Path | None) -> dict[str, di
     Empty for an unbound network, a project with no recorded or no known
     template, and a metadata file that cannot be read."""
     tid = recorded_template_id(project_dir)
-    if tid not in DISPLAY_NAMES:
-        return {}
     out: dict[str, dict[str, str]] = {}
     for cls, attr in COMPONENT_LISTS.items():
         frame = getattr(n, attr, None)

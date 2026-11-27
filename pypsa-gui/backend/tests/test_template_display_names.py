@@ -54,6 +54,10 @@ def test_the_same_id_under_another_class_gets_no_name():
     assert tdn.name_for("eh_h2_hub", "Link", "electrolyser") == "Electrolyser"
     assert tdn.name_for("eh_h2_hub", "Bus", "electrolyser") is None
     assert tdn.name_for("eh_h2_hub", "Generator", "electrolyser") is None
+    # A placeholder row stays in its class too.
+    assert tdn.name_for("eh_site", "Generator", "genset_3") == "Genset 3"
+    assert tdn.name_for("eh_site", "Bus", "genset_3") is None
+    assert tdn.name_for("eh_site", "StorageUnit", "genset_new_2030") is None
 
 
 @pytest.mark.parametrize("tid", [None, "", "ieee14", "no_such_template", 7, ["eh_h2_hub"]])
