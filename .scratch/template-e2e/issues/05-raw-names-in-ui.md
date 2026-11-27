@@ -3,7 +3,7 @@
 
 # 05 — Raw parameter, option and internal names shown to the user (RAW-NAMES-1)
 
-Status: ready-for-agent; audit 2026-11-25: #1631, #1738 merged (plain names for load-profile fields, control modes, Set-in-Expert lines); left: raw ids still allow-listed in uiCopyGuard.allow.json, template-wide snake_case scan test
+Status: partly done (PR claude/te-05-raw-names-rest: Energy Hub role names, display-name scan test; Campus YAML form editor and remaining 03-parity allow rows stay open); audit 2026-11-25: #1631, #1738 merged (plain names for load-profile fields, control modes, Set-in-Expert lines); left: raw ids still allow-listed in uiCopyGuard.allow.json, template-wide snake_case scan test
 Owner: expert-catalogue slices 01/02 (lead session_01G7qCuo4TtQpLUWDE5GKpny)
 Size: M
 Gated: UX
