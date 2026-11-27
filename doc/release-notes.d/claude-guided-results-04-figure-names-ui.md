@@ -3,4 +3,5 @@
   "Project NPV at the WACC, after tax (unlevered)", and Guided keeps "What the design is worth" as
   a lead line above it. With no tax pack, the tile shows the pre-tax NPV under its own name,
   "Project NPV at the WACC, before tax (unlevered)". Adequacy and Guided say "Expected shortfall"
-  (h/yr), with LOLE in the tooltip. The LCOE card's basis line gives its money year.
+  (h/yr), with LOLE in the tooltip. The LCOE card's basis line gives its money year. Compare's
+  per-carrier "LCOE" row is now "Carrier LCOE (cash cost)", since it is not the investment case's LCOE.
