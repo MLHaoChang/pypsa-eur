@@ -741,6 +741,29 @@ def test_a_matpower_export_with_an_extra_row_reads_uncertain(
     assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
 
 
+def test_a_matpower_export_with_another_bus_type_reads_uncertain(
+    ieee14_in_project, harness, monkeypatch
+):
+    # The bus `type` column, which the import parser drops, is read from the text.
+    import routers.io as io_router
+
+    live = ieee14_in_project.network
+    changed = live.copy()
+    changed.buses.loc[changed.buses.index[0], "control"] = "Slack"
+    real = io_router._export_matpower_text
+
+    def other():
+        ieee14_in_project.network = changed
+        try:
+            return real()
+        finally:
+            ieee14_in_project.network = live
+
+    monkeypatch.setattr(io_router, "_export_matpower_text", other)
+    out = _stream(harness, "export_matpower", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
 def test_a_matpower_export_with_a_generator_on_another_bus_reads_uncertain(
     ieee14_in_project, harness, monkeypatch
 ):
@@ -846,6 +869,66 @@ def test_an_export_equal_to_a_user_upload_is_completed(
     result = _stream(harness, "export_network_nc", {})
     assert result["file_id"] == mine.file_id and result["kind"] == "user_upload"
     assert result["_outcome"]["outcome"] == "completed", result["_outcome"]
+
+
+def test_an_unrelated_upload_during_the_export_does_not_change_its_file(
+    template_in_project, harness, monkeypatch
+):
+    # GK B (73) Q2: another file lands in the same store while this call
+    # exports; the read-back still finds the call's own file.
+    import threading
+
+    from services import upload_service
+    from services.assistant_tools import _project
+
+    project, directory, _owner = _project()
+    real = chat_tools._save_agent_export
+
+    def with_neighbour(data, filename, mime, **kw):
+        t = threading.Thread(
+            target=upload_service.add_upload,
+            args=(project.name, b"unrelated", "n.txt", "text/plain"),
+            kwargs={"kind": "user_upload", "project_dir": directory},
+        )
+        t.start()
+        t.join()
+        return real(data, filename, mime, **kw)
+
+    monkeypatch.setattr(chat_tools, "_save_agent_export", with_neighbour)
+    result = _stream(harness, "export_network_nc", {})
+    assert result["_outcome"]["outcome"] == "completed", result["_outcome"]
+    names = {
+        m.filename
+        for m in upload_service.list_uploads(project.name, project_dir=directory)
+    }
+    assert "n.txt" in names
+
+
+def test_an_excel_export_with_a_stale_priced_cost_reads_uncertain(
+    template_in_project, harness, monkeypatch
+):
+    # The workbook route re-derives a priced row's costs; the export read-back
+    # does not, so a stale cost in the file is seen.
+    import routers.io as io_router
+
+    changed = template_in_project.network.copy()
+    changed.storage_units.loc["bess_new", "capital_cost"] = 1.0
+    monkeypatch.setattr(io_router, "_export_excel_bytes", lambda: _excel_bytes(changed))
+    out = _stream(harness, "export_excel", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+def test_an_excel_export_missing_an_eh_column_reads_uncertain(
+    template_in_project, harness, monkeypatch
+):
+    # P7 for workbooks: no normalise step refills or coerces the column.
+    import routers.io as io_router
+
+    changed = template_in_project.network.copy()
+    changed.links.drop(columns="eh_role", inplace=True)
+    monkeypatch.setattr(io_router, "_export_excel_bytes", lambda: _excel_bytes(changed))
+    out = _stream(harness, "export_excel", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
 
 
 def test_an_export_whose_result_names_another_file_reads_uncertain(

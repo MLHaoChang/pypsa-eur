@@ -1144,11 +1144,28 @@ CSV_RTOL = 1e-12
 def _read_file(fmt: str, data: bytes, *, filename=None, export: bool = False):
     """A scratch Network from file bytes, with the import route's reader steps.
 
-    An export's read-back (`export`) skips the csv route's `normalise_eh_columns`:
-    it coerces an unreadable cell to its default, which could match the live
-    value the file does not hold (row AA04-P7)."""
+    An export's read-back (`export`) skips the routes' fixing steps:
+    `normalise_eh_columns` coerces an unreadable cell to its default (row
+    AA04-P7), and the workbook route's `rederive_imported_parts` rewrites a
+    priced row's costs from its parts; either could match a live value the
+    file does not hold. The workbook is then read by the input reader alone."""
     if fmt == "netcdf":
         return _load_netcdf(data)
+    if fmt == "excel" and export:
+        import pathlib
+        import tempfile
+
+        from services import excel_workbook
+
+        _, reader, _ = excel_workbook._gs()
+        options = {
+            "custom_columns": excel_workbook.custom_columns(),
+            "columns": excel_workbook.catalogue(),
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "export.xlsx"
+            path.write_bytes(data)
+            return reader.read_excel(path, options).network
     if fmt == "excel":
         from services import excel_workbook
 
@@ -1195,7 +1212,28 @@ _STANDARD_TYPES = frozenset({"LineType", "TransformerType"})
 MATPOWER_ABS = 5e-5 + 1e-12
 
 
-def _matpower_holds(live, parsed) -> bool | _Uncomparable:
+# MATPOWER bus types (its case format): 1 PQ, 2 PV, 3 reference.
+_MATPOWER_BUS_TYPE = {"PQ": 1, "PV": 2, "Slack": 3}
+
+
+def _matpower_bus_types(text: str) -> list[int]:
+    """The `type` column of the file's bus table, which the import parser drops."""
+    import re
+
+    table = re.search(r"mpc\.bus\s*=\s*\[(.*?)\]", text, re.DOTALL)
+    rows = [
+        re.sub(r"%.*", "", line).strip().rstrip(";").split()
+        for line in table[1].splitlines()
+    ]
+    return [int(float(row[1])) for row in rows if row]
+
+
+def _matpower_holds(live, parsed, text: str) -> bool | _Uncomparable:
+    """The live network's MATPOWER fields against the parsed file.
+
+    Not compared: Pg (the exporter's dispatch guess, not network data), and the
+    fields of carried classes that MATPOWER has no column for (carrier,
+    coordinates, line length...)."""
     import math
 
     def same(a, b) -> bool:
@@ -1214,6 +1252,11 @@ def _matpower_holds(live, parsed) -> bool | _Uncomparable:
                 parsed.buses.at[name[bus], "v_nom"], live.buses.at[bus, "v_nom"]
             ):
                 return False
+        types = [
+            _MATPOWER_BUS_TYPE.get(live.buses.at[bus, "control"], 1) for bus in buses
+        ]
+        if _matpower_bus_types(text) != types:
+            return False
         # Demand sits on the bus: one load per bus with any, its static sums.
         want = {}
         for i, bus in enumerate(buses):
@@ -1238,7 +1281,7 @@ def _matpower_holds(live, parsed) -> bool | _Uncomparable:
         for i, gen in enumerate(gens):
             a, b = live.generators.loc[gen], parsed.generators.loc[f"gen_{i + 1}"]
             if (
-                b.bus != name.get(a.bus, "bus_1")
+                b.bus != name.get(a.bus)
                 or not rounded(b.p_nom, a.p_nom)
                 or not rounded(b.p_min_pu * b.p_nom, float(a.p_min_pu) * float(a.p_nom))
                 or not rounded(b.marginal_cost, a.marginal_cost)
@@ -1687,7 +1730,7 @@ def read_export(note: dict | None, result=None) -> dict:
             ctx = PyPSAService.get_active_context()
             start = dirty_state.revision(ctx)
             if fmt == "matpower":
-                match = _matpower_holds(ctx.network, exported)
+                match = _matpower_holds(ctx.network, exported, data.decode("utf-8"))
                 not_carried = _matpower_not_carried(ctx.network)
             else:
                 # A workbook carries no `n.meta` and 15 significant digits.
@@ -1759,8 +1802,8 @@ def classify_export(note: dict | None, read: dict | None) -> dict:
             "counts": {"not_carried": list(missing), "not_carried_rows": missing},
             **(
                 {
-                    "notice": "MATPOWER holds only buses, loads, generators and "
-                    "lines; not in the file (rows): " + named + "."
+                    "notice": "MATPOWER holds only some fields of buses, loads, "
+                    "generators and lines; not in the file (rows): " + named + "."
                 }
                 if missing
                 else {}
