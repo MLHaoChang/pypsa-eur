@@ -656,10 +656,12 @@ def _genset_notes(notes):
 
 
 def _sk_mv2_by_hand(k_g=True, k_t=True, genset=True):
-    """S_k'' at MV2 without pandapower, per MVA (U_n = U_rG = 20 kV, c_min
+    """
+    S_k'' at MV2 without pandapower, per MVA (U_n = U_rG = 20 kV, c_min
     = 1.0 above 1 kV): the grid c_min/S_k''min, T2 K_T·vk/S_n (its vkr of
     0.001 % neglected), in parallel with the genset K_G·(R + jX''d)/S_rG,
-    K_G = c_max / (1 + x''d sin phi_rG), cos phi_rG 0.8 when the spec gives none."""
+    K_G = c_max / (1 + x''d sin phi_rG), cos phi_rG 0.8 when the spec gives none.
+    """
     kt = 0.95 * 1.1 / (1 + 0.6 * VK_T2) if k_t else 1.0
     z_grid = complex(0.0, 1.0 / SK_GRID + kt * VK_T2 / SN)
     if not genset:
@@ -682,8 +684,10 @@ def test_a_running_genset_adds_its_own_current_to_the_minimum_fault_level():
 
 
 def _idle(hourly, how):
-    """``hourly`` over two hours, the genset producing in hour 0 only (or
-    with no row, a NaN or a negative value in hour 1)."""
+    """
+    ``hourly`` over two hours, the genset producing in hour 0 only (or
+    with no row, a NaN or a negative value in hour 1).
+    """
     gen = hourly["unit_id"] == "GEN"
     one = hourly.assign(hour=1)
     if how == "missing":

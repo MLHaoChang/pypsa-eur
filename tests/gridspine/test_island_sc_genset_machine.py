@@ -1,7 +1,9 @@
-"""``island_sc.genset_machine`` lifted out of ``machine_net`` (GC-13, GK A G2):
+"""
+``island_sc.genset_machine`` lifted out of ``machine_net`` (GC-13, GK A G2):
 the gen, trafo and sgen tables ``machine_net`` builds for a genset campus
 equal those pinned from master d0d98072, before the lift
-(``fixtures/gc13_master_pins.json``)."""
+(``fixtures/gc13_master_pins.json``).
+"""
 
 import io
 import json
