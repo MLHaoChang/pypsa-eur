@@ -124,6 +124,12 @@ UNVERIFIED = {
         "source found"
     ),
     "fnsl": "option order and meaning of FNSL_OPTIONS",
+    "multiple REPCA1 monitoring one branch": (
+        "a detailed plant's machines each carry a REPCA1 on the same PoC branch, "
+        "gains shared by MBASE (dyr_writer.share_repca1); derived from the "
+        "machine-MBASE base of REPCA1 and checked against a reduced REPC_A model, "
+        "not against PSS/E"
+    ),
     "DELT": "dsrval('DELT') returns (ierr, the dynamic simulation time step in s)",
     "STATUS polls": (
         "brnint(..., 'STATUS') and macint(..., 'STATUS') return (ierr, 1 in service "

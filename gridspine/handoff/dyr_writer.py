@@ -74,10 +74,12 @@ parameters by name instead (owner decision, I8).
   own branch identity (``raw_writer.branch_ids``) of the plant's PoC branch
   (``PocBranch``): BUS1 the plant end, BUS2 the grid end and also BUSR, so
   BUS1 -> BUS2 flow is export, positive. A missing branch is refused, never
-  written as 0. ONE controlled machine per PoC branch: the plant controller
-  attaches to the aggregated machine (GC-01), because N REPCA1 records each
+  written as 0. ONE controlled machine per PoC branch, unless the machines
+  are a declared detailed plant (``plants``, GC-04b): N REPCA1 records each
   measuring the whole plant's flow on their own MBASE would multiply the
-  loop gain by N; two machines on one PoC branch are refused.
+  loop gain by N, so undeclared sharing is refused, and a declared plant's
+  REPCA1s are rescaled by each machine's MBASE share (``share_repca1``) so
+  their sum acts as the aggregated machine's one controller.
 - Type 3 wind: ``WTDTA1 WTARA1 WTPTA1 WTTQA1`` after the converter pair.
 
 Every converter record goes through ``check_model`` and its ``MODEL_PIN``
@@ -276,12 +278,18 @@ def _values(unit_id, model, names, row):
     return values
 
 
-def _con(c):
+def _con(c, decimals=5):
     """A CON in ten columns, with a leading blank even when the value fills
     all ten (``-998.00000``): PSS/E reads free format, and two values written
-    edge to edge would read as one."""
-    text = f"{c:10.5f}"
+    edge to edge would read as one. A gain-shared REPCA1 takes
+    ``SHARED_DECIMALS`` (its CONs are the aggregate's times or over a share,
+    which five decimals would round off the aggregate's response)."""
+    text = f"{c:{decimals + 5}.{decimals}f}"
     return text if text.startswith(" ") else " " + text
+
+
+#: Decimals of a gain-shared REPCA1's CONs (GC-04b).
+SHARED_DECIMALS = 8
 
 
 def _quoted(ckt):
@@ -289,7 +297,7 @@ def _quoted(ckt):
     return "'" + f"{ckt:<2s}" + "'"
 
 
-def _record(num, mid, model, icons, cons, version):
+def _record(num, mid, model, icons, cons, version, decimals=5):
     """One wrapped record: ICONs on the head line (ints, or a quoted CKT),
     CONs five to a line. The ICON/CON counts are checked against the pin."""
     check_model(model, version)
@@ -302,7 +310,7 @@ def _record(num, mid, model, icons, cons, version):
         f"{i:6d}" if isinstance(i, int) else f"{_quoted(i):>6s}" for i in icons
     )
     body = [
-        "  " + "".join(_con(c) for c in cons[k:k + _CONS_PER_LINE])
+        "  " + "".join(_con(c, decimals) for c in cons[k:k + _CONS_PER_LINE])
         for k in range(0, len(cons), _CONS_PER_LINE)
     ]
     body[-1] += " /"
@@ -313,9 +321,10 @@ def _has(row, names):
     return all(n in row.index and pd.notna(row[n]) for n in names)
 
 
-def _ibr_lines(unit_id, num, mid, row, version=33, repc=None):
+def _ibr_lines(unit_id, num, mid, row, version=33, repc=None, share=1.0):
     """The converter's records. ``repc`` is ``(busr, bus1, bus2, ckt)`` when
-    the unit carries a REPCA1 group."""
+    the unit carries a REPCA1 group; ``share`` its MBASE share of a declared
+    detailed plant (1.0: the aggregated machine, CONs as given)."""
     electrical = ("REECC1", REECC1_ICONS, REECC1_CONS) if _has(row, REECC1_ONLY) else IBR_RECORDS[1]
     lines = []
     for model, icon_names, con_names in (IBR_RECORDS[0], electrical):
@@ -329,8 +338,13 @@ def _ibr_lines(unit_id, num, mid, row, version=33, repc=None):
                 "BUS1/BUS2 would be written as 0 (a controller measuring nothing)"
             )
         values = _values(unit_id, "REPCA1", REPCA1_ICONS + REPCA1_CONS, row)
+        decimals = 5
+        if share != 1.0:
+            values, decimals = share_repca1(values, share), SHARED_DECIMALS
         icons = list(repc) + [int(values[n]) for n in REPCA1_ICONS]
-        lines += _record(num, mid, "REPCA1", icons, [values[n] for n in REPCA1_CONS], version)
+        lines += _record(
+            num, mid, "REPCA1", icons, [values[n] for n in REPCA1_CONS], version, decimals,
+        )
     if _has(row, WECC_GROUPS["wt3"][:1]):
         for model, icon_names, con_names in WT3_RECORDS:
             values = _values(unit_id, model, icon_names + con_names, row)
@@ -341,19 +355,22 @@ def _ibr_lines(unit_id, num, mid, row, version=33, repc=None):
     return lines
 
 
-def _poc_ids(net, poc):
+def _poc_ids(net, poc, plants=None):
     """unit_id -> (BUSR, BUS1, BUS2, CKT) from the RAW's own branch identities.
     BUS1 is the plant end, BUS2 the grid end (the PoC, also BUSR), so branch
     flow from BUS1 to BUS2 is export, positive. One controlled machine per PoC
     branch: N REPCA1s each measuring the whole plant's flow on their own MBASE
-    would multiply the loop gain by N, so a plant is aggregated (GC-01) first."""
+    would multiply the loop gain by N, so a plant is aggregated (GC-01) first,
+    or declared in ``plants`` (name -> unit ids, GC-04b), whose members share
+    one PoC branch and get gain-shared records (``share_repca1``)."""
+    member = _plant_members(poc, plants)
     if not poc:
         return {}
     nums = _bus_numbers(net)
     name_of = net.bus["name"]
     lines, trafos = branch_ids(net)
     tables = {"line": (net.line, lines, "from_bus", "to_bus"), "trafo": (net.trafo, trafos, "hv_bus", "lv_bus")}
-    out, seen = {}, {}
+    out, seen, branch_of = {}, {}, {}
     for unit_id, b in poc.items():
         if b.table not in tables:
             raise ContractError(f"unit {unit_id}: PoC branch table {b.table!r} is not 'line' or 'trafo'")
@@ -372,15 +389,149 @@ def _poc_ids(net, poc):
         bus2 = nums[name_of.at[b.grid_bus]]
         bus1 = i if bus2 == j else j
         key = (b.table, bus1, bus2, ckt)    # line and trafo CKTs count apart, as in the RAW
+        plant = member.get(unit_id)
         if key in seen:
-            raise ContractError(
-                f"units {seen[key]} and {unit_id} share PoC branch {key}: one REPCA1 per "
-                "plant attaches to the aggregated machine: export the GC-01 aggregated model "
-                "(several would multiply the loop gain)"
-            )
-        seen[key] = unit_id
+            other, other_plant = seen[key]
+            if plant is None or plant != other_plant:
+                raise ContractError(
+                    f"units {other} and {unit_id} share PoC branch {key}: one REPCA1 per "
+                    "plant attaches to the aggregated machine: export the GC-01 aggregated "
+                    "model, or declare them one detailed plant (several undeclared "
+                    "controllers would multiply the loop gain)"
+                )
+        else:
+            seen[key] = (unit_id, plant)
+        if plant is not None:
+            first = branch_of.setdefault(plant, (unit_id, key))
+            if first[1] != key:
+                raise ContractError(
+                    f"plant {plant!r}: units {first[0]} and {unit_id} have different PoC "
+                    f"branches {first[1]} and {key}; a detailed plant's controllers measure "
+                    "one branch"
+                )
         out[unit_id] = (bus2, bus1, bus2, ckt)
     return out
+
+
+def _plant_members(poc, plants):
+    """unit_id -> plant name for every declared detailed plant; each member
+    has a PoC branch and belongs to one plant only."""
+    member = {}
+    for name, units in (plants or {}).items():
+        units = list(units)
+        if not units:
+            raise ContractError(f"plant {name!r} has no machines")
+        for u in units:
+            if u in member:
+                raise ContractError(f"unit {u} is in plants {member[u]!r} and {name!r}")
+            if u not in (poc or {}):
+                raise ContractError(
+                    f"plant {name!r}: unit {u} has no PoC branch; every machine of a "
+                    "detailed plant measures the plant's PoC branch"
+                )
+            member[u] = name
+    return member
+
+
+def _shares(net, repc, plants):
+    """unit_id -> MBASE_i / sum(MBASE) over its declared plant; 1.0 for a
+    controlled machine outside any plant (the aggregated machine)."""
+    mbase = {u: m for u, _n, _i, m, _s in _machines(net)}
+    shares = {u: 1.0 for u in repc}
+    for name, units in (plants or {}).items():
+        missing = sorted(u for u in units if u not in mbase)
+        if missing:
+            raise ContractError(f"plant {name!r}: units {missing} are not machines of the RAW")
+        total = sum(mbase[u] for u in units)
+        for u in units:
+            shares[u] = mbase[u] / total
+    return shares
+
+
+#: REPCA1 CONs scaled by the machine's share w (GC-04b), per path; the rest
+#: (time constants, fdbd1/2, Pmax/Pmin, Qmax/Qmin, Vfrz) are unscaled.
+_REPC_BY_W = ("repc_kpg", "repc_kig", "repc_kc", "repc_rc", "repc_xc")
+_REPC_BY_INV_W = ("repc_ddn", "repc_dup", "repc_femax", "repc_femin")
+_REPC_Q_MODE_BY_W = ("repc_kp", "repc_ki")
+_REPC_Q_MODE_BY_INV_W = ("repc_dbd1", "repc_dbd2", "repc_emax", "repc_emin")
+
+
+def share_repca1(values: dict, share: float) -> dict:
+    """
+    One machine's REPCA1 CONs for a detailed plant, so that N controllers,
+    all measuring the plant's PoC branch, act as the aggregated machine's one
+    controller. ``share`` is w = MBASE_i / sum(MBASE); ``values`` are the
+    aggregate's CONs (pu on the aggregate's MBASE), ICONs included.
+
+    Base: PSS/E REPCA1 works on the attached machine's MBASE. OpenIPSL's
+    REPCA1, which follows PSS/E (commit a8c84de9), sets CoB = M_b/S_b
+    (``BaseREPC.mo:73``) and divides pbranch, qbranch and the Rc/Xc drop by it
+    (``REPCA1.mo:154-157``); WECC REMWG, "Clarification on Proper Use of REPC
+    models" (Dec 2021), p.6: "All parameters, including compensation
+    impedance, are on the specified model MVA base", and p.4 for Kc.
+
+    Derivation: machine i reads the branch flow in its own pu, P/M_i = p/w
+    (p in aggregate pu), so its error is e/w, and its output in its own pu must
+    equal the aggregate's output in pu (then sum M_i x = sum(M) x, the
+    aggregate's MW). Hence:
+
+    - P path: Kpg, Kig x w (output = w Kpg e/w = Kpg e); Ddn, Dup, femax,
+      femin x 1/w (the droop and the error limit on the error e/w, so every
+      controller's droop is the same MW and the N integrators agree).
+    - RefFlag = 1 (voltage control): Kp, Ki unscaled (the error is in pu
+      volts, the same for every machine); dbd1/2, emax/emin unscaled.
+    - RefFlag = 0 (Q control): Kp, Ki x w; dbd1/2, emax/emin x 1/w.
+    - Kc, Rc, Xc x w (they multiply Q or I in pu_i, which is q/w).
+
+    Exact when the machines start at equal pu dispatch (``unequal_dispatch``
+    names a plant that does not); then the output limits bind together. No
+    public source covers several REPCA1s monitoring one branch (PSS/E's
+    REPC_B, for that case, has no confirmed public record layout); the
+    derivation is checked against a reduced REPC_A model in
+    ``tests/gridspine/repca1_reduced.py``.
+    """
+    if not 0.0 < share <= 1.0:
+        raise ContractError(f"REPCA1 share {share!r} is not in (0, 1]")
+    out = dict(values)
+    q_mode = int(values["repc_refflag"]) == 0
+    by_w = _REPC_BY_W + (_REPC_Q_MODE_BY_W if q_mode else ())
+    by_inv_w = _REPC_BY_INV_W + (_REPC_Q_MODE_BY_INV_W if q_mode else ())
+    for name in by_w:
+        out[name] = values[name] * share
+    for name in by_inv_w:
+        out[name] = values[name] / share
+    return out
+
+
+#: Initial pu dispatch spread above which a detailed plant's equivalence to
+#: the aggregate is no longer exact (GK A C5).
+DISPATCH_TOL = 1e-6
+
+
+def unequal_dispatch(net, plants) -> list:
+    """
+    One assumption line per declared plant whose machines start at different
+    pu P or Q (on their MBASE): the gain-shared REPCA1s then match the
+    aggregated model only while no output limit binds.
+    """
+    rows = {s["name"]: s for _, s in net.sgen.iterrows()} if hasattr(net, "sgen") else {}
+    notes = []
+    for name, units in (plants or {}).items():
+        units = list(units)
+        missing = sorted(u for u in units if u not in rows)
+        if missing:
+            raise ContractError(f"plant {name!r}: units {missing} are not converters of the network")
+        pu = {u: (rows[u]["p_mw"] / sgen_mbase(rows[u]), rows[u]["q_mvar"] / sgen_mbase(rows[u])) for u in units}
+        for k, label in ((0, "P"), (1, "Q")):
+            vals = [pu[u][k] for u in units]
+            if max(vals) - min(vals) > DISPATCH_TOL:
+                listed = ", ".join(f"{u} {pu[u][k]:.4f}" for u in units)
+                notes.append(
+                    f"plant {name!r}: machines start at unequal pu {label} ({listed}); "
+                    "its gain-shared REPCA1s match the aggregated model only while no "
+                    "output limit binds"
+                )
+    return notes
 
 
 def _check_base(unit_id, template_base, mbase):
@@ -394,6 +545,7 @@ def _check_base(unit_id, template_base, mbase):
 
 def write_dyr(
     net, unit_params: pd.DataFrame, path, ibr: pd.DataFrame = None, version=33, poc=None,
+    plants=None,
 ) -> dict:
     """Write the .dyr; return unit_id -> bus_number for every machine written.
 
@@ -401,16 +553,21 @@ def write_dyr(
     ``wecc_params(templates)`` (also REECC1, REPCA1, type 3 wind): the
     inverters that get converter records. An inverter not in it is omitted
     (see module docstring). ``version`` is 33 or 35; ``poc`` maps a unit with
-    a REPCA1 group to its ``PocBranch``."""
+    a REPCA1 group to its ``PocBranch``; ``plants`` (name -> unit ids)
+    declares detailed plants whose machines share one PoC branch, each with a
+    gain-shared REPCA1 (``share_repca1``)."""
     if version not in DYR_VERSIONS:
         raise ContractError(f".dyr version {version!r} not supported; supported {DYR_VERSIONS}")
-    repc = _poc_ids(net, poc)
+    repc = _poc_ids(net, poc, plants)
+    shares = _shares(net, repc, plants)
     lines, written, controlled = [], {}, set()
     for unit_id, num, mid, mbase, synchronous in _machines(net):
         if not synchronous:
             if ibr is None or unit_id not in ibr.index:
                 continue
-            lines += _converter(unit_id, num, mid, mbase, ibr.loc[unit_id], version, repc, controlled)
+            lines += _converter(
+                unit_id, num, mid, mbase, ibr.loc[unit_id], version, repc, controlled, shares,
+            )
             written[unit_id] = num
             continue
         if unit_id not in unit_params.index:
@@ -449,10 +606,10 @@ def write_dyr(
     return written
 
 
-def _converter(unit_id, num, mid, mbase, row, version, repc, controlled):
+def _converter(unit_id, num, mid, mbase, row, version, repc, controlled, shares):
     """One converter's records; a unit with a REPCA1 group joins ``controlled``."""
     _check_base(unit_id, row["mbase_mva"], mbase)
-    lines = _ibr_lines(unit_id, num, mid, row, version, repc.get(unit_id))
+    lines = _ibr_lines(unit_id, num, mid, row, version, repc.get(unit_id), shares.get(unit_id, 1.0))
     if _has(row, WECC_GROUPS["repca1"][:1]):
         controlled.add(unit_id)
     return lines
@@ -464,7 +621,7 @@ def _check_stray(repc, controlled):
         raise ContractError(f"PoC branch given for {stray}, which write no REPCA1 record")
 
 
-def converter_records(net, ibr: pd.DataFrame, version=35, poc=None) -> tuple:
+def converter_records(net, ibr: pd.DataFrame, version=35, poc=None, plants=None) -> tuple:
     """
     The converter records ``write_dyr`` would write, and nothing else, for a
     caller that writes its own synchronous records (the PSS/E pack appends
@@ -472,17 +629,20 @@ def converter_records(net, ibr: pd.DataFrame, version=35, poc=None) -> tuple:
 
     Returns ``(lines, written, repc)``: the record lines in RAW machine order,
     unit_id -> bus number, and unit_id -> ``(BUSR, BUS1, BUS2, CKT)`` for each
-    REPCA1. Same checks as ``write_dyr``: version, PoC branches, MBASE, every
-    field present.
+    REPCA1. Same checks as ``write_dyr``: version, PoC branches, declared
+    plants, MBASE, every field present.
     """
     if version not in DYR_VERSIONS:
         raise ContractError(f".dyr version {version!r} not supported; supported {DYR_VERSIONS}")
-    repc = _poc_ids(net, poc)
+    repc = _poc_ids(net, poc, plants)
+    shares = _shares(net, repc, plants)
     lines, written, controlled = [], {}, set()
     for unit_id, num, mid, mbase, synchronous in _machines(net):
         if synchronous or unit_id not in ibr.index:
             continue
-        lines += _converter(unit_id, num, mid, mbase, ibr.loc[unit_id], version, repc, controlled)
+        lines += _converter(
+            unit_id, num, mid, mbase, ibr.loc[unit_id], version, repc, controlled, shares,
+        )
         written[unit_id] = num
     _check_stray(repc, controlled)
     return lines, written, repc
