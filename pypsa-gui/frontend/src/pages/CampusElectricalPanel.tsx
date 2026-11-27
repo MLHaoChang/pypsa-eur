@@ -648,8 +648,6 @@ function TrafoVerdict({ t, bought }: { t: TransformerSizing; bought: InvestmentR
   )
 }
 
-/** The PSS/E hand-off of the latest run (grid-compliance 23): one case per island critical hour, each a zip
- *  of the .raw, the .dyr, the grid-forming converter parameters and the README. A case from a run older than the last edit says so. */
 /** Hands a downloaded zip to the browser as `<bundle>.zip`. */
 function saveZip(blob: Blob, bundle: string) {
   const url = URL.createObjectURL(blob)
@@ -662,6 +660,8 @@ function saveZip(blob: Blob, bundle: string) {
   URL.revokeObjectURL(url)
 }
 
+/** The PSS/E hand-off of the latest run (grid-compliance 23): one case per island critical hour, each a zip
+ *  of the .raw, the .dyr, the grid-forming converter parameters and the README. A case from a run older than the last edit says so. */
 export function CampusPsseSection({ name }: { name: string }) {
   const psse = useQuery({ queryKey: ['campus-psse', name], queryFn: () => campusApi.psse(name), retry: false })
   const [busy, setBusy] = useState<string | null>(null)
