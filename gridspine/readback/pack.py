@@ -400,13 +400,13 @@ def judge_pack(pack_dir, profile: dict, ratings: Ratings) -> dict:
             )
             continue
         try:
-            result = _judge_one(
-                case, frame, profile, ratings, manifest["contract_version"]
+            cases.append(
+                _judge_one(case, frame, profile, ratings, manifest["contract_version"])
             )
         except ContractError as exc:
-            result = _unknown_case(case.case_id, case.kind, f"not judged: {exc}")
-        _add_poll_log(result, results, case.case_id)
-        cases.append(result)
+            cases.append(_unknown_case(case.case_id, case.kind, f"not judged: {exc}"))
+    for c in cases:  # every case, judged or not, carries its status sidecar as a reason
+        _add_poll_log(c, results, c["case_id"])
     stamp = {
         "data_hash": manifest["data_hash"],
         "contract_version": manifest["contract_version"],

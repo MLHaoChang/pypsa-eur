@@ -101,6 +101,7 @@ def test_every_v2_script_header_is_its_case_channels_with_units(pack2):
         assert "status" not in _assigned(text, "COLUMNS")  # GK A2 T9: no text column
         # the script polls what it declares, and writes the CSV and its sidecar
         assert "_poll(0.0)" in text.splitlines()
+        assert _assigned(text, "EPS_S") == EPS_S
         assert f"open(os.path.join(HERE, '{cid}.status.txt'), 'w')" in text
 
 
@@ -120,12 +121,20 @@ def test_a_v1_script_never_names_connected(tmp_path):
     ("version", "kw", "reason"),
     [
         ("2", {"plant_branch": None}, "need plant_branch and plant_machine"),
+        ("2", {"plant_machine": None}, "need plant_branch and plant_machine"),
         ("2", {"status_machines": ()}, "needs at least one status machine"),
         ("2", {"status_machines": [(5, "toolong")]}, "1 or 2 characters"),
         ("1", {"status_machines": [(201, "1")]}, "has no 'connected' channel"),
         ("3", {}, "not one of"),
     ],
-    ids=["no_branch", "no_machines", "bad_machine", "v1_machines", "unknown"],
+    ids=[
+        "no_branch",
+        "no_machine",
+        "no_machines",
+        "bad_machine",
+        "v1_machines",
+        "unknown",
+    ],
 )
 def test_refusals(tmp_path, version, kw, reason):
     cases = (
@@ -481,6 +490,32 @@ def test_a_long_sidecar_is_capped_and_marked_truncated(tmp_path):
     assert quoted.endswith(f" ... (truncated, {total} characters)")
     assert len(quoted) == 2000 + len(f" ... (truncated, {total} characters)")
     assert _rows(c)["stays_connected"]["status"] == "pass"
+
+
+def test_a_sidecar_of_exactly_the_cap_is_not_truncated(tmp_path):
+    _, c = _sidecar_judge(tmp_path, _status(), "x" * 2000 + "\n")
+    detail = _rows(c)["stays_connected"]["detail"]
+    assert detail.endswith(f"{FAULT.case_id}.status.txt: " + "x" * 2000)
+
+
+def test_no_sidecar_adds_nothing(tmp_path):
+    pack = _pack2(tmp_path, [FAULT])
+    _write(pack / "results" / f"{FAULT.case_id}.csv", _fault_channels(), _status())
+    c = _by_id(judge_pack(pack, PROFILE, RATINGS))[FAULT.case_id]
+    assert "status.txt" not in str(c)
+
+
+def test_a_sidecar_without_a_stays_connected_row_goes_to_the_case_detail(tmp_path):
+    # an unreadable result has no rows: the sidecar reason lands in the case detail
+    pack = _pack2(tmp_path, [FAULT])
+    (pack / "results" / f"{FAULT.case_id}.csv").write_text(
+        "t_s,v_poc_pu,status\n0.0,1.0,\n"
+    )
+    (pack / "results" / f"{FAULT.case_id}.status.txt").write_text("t=0.0 s: not read\n")
+    c = _by_id(judge_pack(pack, PROFILE, RATINGS))[FAULT.case_id]
+    assert c["rows"] == [] and c["status"] == "unknown"
+    assert c["detail"].startswith(f"{FAULT.case_id}.csv unreadable")
+    assert c["detail"].endswith(f"; {FAULT.case_id}.status.txt: t=0.0 s: not read")
 
 
 def test_another_case_s_sidecar_is_still_an_extra_file(tmp_path):
