@@ -16,6 +16,7 @@ from __future__ import annotations
 import copy
 import json
 
+from services import figure_words as FW
 from services import run_actions, run_gates
 
 STAGES = ("intake", "setup", "inputs", "input_gate", "solve", "result_gate", "explore", "report", "handoff")
@@ -767,7 +768,7 @@ _DC_IC_RULES = [
           basis="The investment case compares against an established counterfactual; until then it is "
                 "not evaluated and never blocks the run."),
     _rule("dc.ic.returns", "ic.returns", "nonempty", severity="warn",
-          basis="The investment case's project post-tax NPV at the WACC and IRR, read from the stored "
+          basis=f"The investment case's {FW.name('project_npv')} and IRR, read from the stored "
                 "case for this network; reported, never compared with a hurdle."),
 ]
 
