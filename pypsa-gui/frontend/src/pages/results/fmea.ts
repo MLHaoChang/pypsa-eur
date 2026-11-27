@@ -23,17 +23,33 @@ export interface ModesPayload {
    *  study's `fmea_top` rows (the ones the report lists), `live` for the
    *  COPT screening of the current network plus the last sweep. */
   source?: 'eh_study' | 'live' | null
+  /** When the study that wrote those rows finished (epoch seconds). */
+  study_finished_at?: number | null
 }
 
-/** The line naming where the computed rows come from, or null for live rows. */
+/** The line naming where the computed rows come from, or null for live rows.
+ *  The stored study carries no network fingerprint, so the line dates the
+ *  rows and says edits made since are not in them (GK C1). */
 export function modesSourceText(
   modes: ModesPayload | null | undefined, guided: boolean,
 ): string | null {
   if (modes?.source !== 'eh_study') return null
+  const at = modes.study_finished_at
+  const when = typeof at === 'number' && Number.isFinite(at)
+    ? ` of ${new Date(at * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}`
+    : ''
   return guided
-    ? 'These rows come from the last energy hub study: the same risks its results and the report list.'
-    : 'Computed rows are the last Energy Hub study\'s ranking (as in the reference design and the report), '
-      + 'not a fresh screening; a contingency sweep run after it replaces them.'
+    ? `These rows come from the energy hub study${when}: the same risks its results and the report list. `
+      + 'Edits made since then are not in them until the study runs again.'
+    : `Computed rows are the Energy Hub study's ranking${when} (as in the reference design and the report). `
+      + 'Edits made since then are not reflected; a contingency sweep run after it reads the current network.'
+}
+
+/** With study rows a new VoLL prices nothing until the study runs again (GK C4). */
+export function studyRepriceText(modes: ModesPayload | null | undefined): string | null {
+  return modes?.source === 'eh_study'
+    ? 'These are the study\'s rows: after setting a price, run the study again to price them.'
+    : null
 }
 
 /**
@@ -162,16 +178,27 @@ export function mergeWorksheet(
     })
   }
   // Priced modes by criticality, then the unpriced ones by name: an unpriced
-  // mode is never ranked as "least critical".
-  rows.sort((a, b) => {
-    const ca = a.criticality_eur_per_year, cb = b.criticality_eur_per_year
-    if (ca === null || cb === null) {
-      if (ca !== cb) return ca === null ? 1 : -1
-      return a.name.localeCompare(b.name)
-    }
-    return cb - ca
-  })
+  // mode is never ranked as "least critical". The study's rows keep the
+  // order the report lists them in (class B, then class A, each ranked
+  // within its class: two engines' criticalities are never one ranking);
+  // only manual rows are ranked, after them (template-e2e 24, GK C2).
+  if (copt?.source === 'eh_study') {
+    const computed = rows.filter(r => !r.editable)
+    const manual = rows.filter(r => r.editable)
+    manual.sort(byCriticality)
+    return [...computed, ...manual]
+  }
+  rows.sort(byCriticality)
   return rows
+}
+
+function byCriticality(a: WorksheetRow, b: WorksheetRow): number {
+  const ca = a.criticality_eur_per_year, cb = b.criticality_eur_per_year
+  if (ca === null || cb === null) {
+    if (ca !== cb) return ca === null ? 1 : -1
+    return a.name.localeCompare(b.name)
+  }
+  return cb - ca
 }
 
 /** The sentence that says why unpriced modes sit last: one wording for the

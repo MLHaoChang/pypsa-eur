@@ -34,6 +34,7 @@ import {
   type WorksheetSidecar,
   CRITICALITY_PER_YEAR_LABEL,
   modesSourceText,
+  studyRepriceText,
 } from './fmea'
 import { openVollField } from '../../layout/flowNavigation'
 
@@ -90,7 +91,23 @@ function NotSetCell({ last = false }: { last?: boolean }) {
   return <td data-testid="fmea-not-set" className={`py-1 ${last ? '' : 'pr-2 '}text-muted`}>Not set</td>
 }
 
+// template-e2e 24 (GK C2): a study's rows open in the report's order (class B,
+// then class A, each ranked within its class), so the table starts unsorted
+// for them; live rows keep the criticality sort. The table's sort state is
+// set once, so the worksheet remounts when the rows' source changes. This
+// observer only reads the cache the worksheet's own query fills.
 export default function FmeaTab() {
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data } = useQuery({
+    queryKey: nk(currentProject, 'results', 'fmea_modes'),
+    queryFn: () => resultsApi.getFmeaModes(),
+    enabled: false,
+  })
+  const studyRows = (data as ModesPayload | null | undefined)?.source === 'eh_study'
+  return <FmeaWorksheet key={studyRows ? 'study' : 'live'} studyRows={studyRows} />
+}
+
+function FmeaWorksheet({ studyRows }: { studyRows: boolean }) {
   const currentProject = useUIStore(s => s.currentProject)
   const guided = useUIStore(s => s.uiMode) === 'guided'
   const engineText = useTerm('fmea_engine')
@@ -146,8 +163,8 @@ export default function FmeaTab() {
   const { rows: filtered, search, setSearch, sortKey, sortDir, onSortClick } =
     useFilterableTable<WorksheetRow, SortK>({
       rows,
-      initialSortKey: 'criticality_eur_per_year',
-      initialSortDir: 'desc',
+      initialSortKey: studyRows ? null : 'criticality_eur_per_year',
+      initialSortDir: studyRows ? null : 'desc',
       getValue: (r, k) => r[k],
       getSearchText: r =>
         `${r.name} ${r.mode_id} ${r.mitigability} ${r.component_class}`.toLowerCase(),
@@ -235,6 +252,11 @@ export default function FmeaTab() {
             className="text-link hover:underline">
             {setVollText(guided)} ›
           </button>
+          {studyRepriceText(modes as ModesPayload | null | undefined) && (
+            <span data-testid="fmea-study-reprice">
+              {' '}{studyRepriceText(modes as ModesPayload | null | undefined)}
+            </span>
+          )}
         </p>
       ) : unpricedRankingWarning(modes as ModesPayload | null | undefined) && (
         <p className="text-[10px] text-danger border border-danger/40 rounded px-2 py-1">
