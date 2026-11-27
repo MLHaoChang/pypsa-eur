@@ -9,8 +9,7 @@ fields (GK B J1). Every unreadable, missing or other-identity input gives
 
 Scope: run_simulation, run_ac_pf_stage, wait_for_job on an `fg:` handle and
 abort_simulation. wait_for_job on study (`ad:`), report (`rpt:`) or queue
-jobs reads "uncertain" with a pending reason; nonblocking jobs wait for
-live-voice issue 11.
+jobs (S7) maps job_adapters' neutral view through `classify_job`.
 """
 
 from __future__ import annotations
@@ -201,16 +200,94 @@ def classify(
     return out("uncertain", "status_unknown")
 
 
+# ── S7: nonblocking jobs (wait_for_job on `ad:`, `rpt:` and queue handles) ───
+#
+# job_adapters' neutral outcome -> this module's outcome. `None` (still live)
+# is read from the native status in `classify_job`. Keyed by every member of
+# `job_adapters.OUTCOMES`, which a test checks, so a neutral outcome added
+# later has no tool outcome until someone names one here.
+NEUTRAL_OUTCOMES: dict[str, tuple[str, str | None]] = {
+    "succeeded": ("completed", None),
+    "failed": ("failed", None),
+    # Only once a re-read still says so and the worker exited (`read_job`).
+    "cancelled": ("cancelled", None),
+    # A loop that finished without meeting its target: ran, not a success.
+    "not_met": ("partial", "target_not_met"),
+    # The study refused to start: no result. Not `denied`, which only the
+    # confirm/guard modules emit for a refusal before the call (S4a).
+    "refused": ("failed", "job_refused"),
+    # A queue worker died mid-job: what it wrote is not known.
+    "interrupted": ("uncertain", "interrupted"),
+    "unknown": ("uncertain", "status_unknown"),
+}
+_LIVE_STATUS = {"running": "running", "queued": "submitted"}
+
+
+def read_job(job_id: Any) -> dict:
+    """An independent read of one nonblocking job, as the acting user.
+
+    `job_adapters.job_status` is the identity-bound `_snapshot_bound_job` read
+    for study and report handles (the handle's own worker and start, its
+    project) and the queue route's own ACL read for queue UUIDs. A `cancelled`
+    read is taken again after checking that the handle's worker exited: an
+    abort route may flip `aborted` before its worker leaves native code.
+    """
+    from fastapi import HTTPException
+
+    from harness import job_adapters as ja
+    from services import chat_tools
+
+    actor = chat_tools.acting_user_id()
+    try:
+        view = ja.job_status(job_id, actor_id=actor)
+        if view.get("outcome") == "cancelled":
+            exited = ja._worker_exited(job_id)
+            view = {**ja.job_status(job_id, actor_id=actor), "worker_exited": exited}
+        return view
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        kind = detail.get("error_kind")
+        if kind == "job_project_mismatch":
+            return {"error": "other_project"}
+        if exc.status_code == 404:
+            return {"error": "job_not_found"}
+        return {"error": "read_failed"}
+    except Exception:  # noqa: BLE001 -- an unreadable job is uncertain (#1079).
+        return {"error": "read_failed"}
+
+
+def classify_job(job_id: Any, read: dict | None) -> dict:
+    """Pure: the outcome of a wait on one nonblocking job from its neutral view."""
+
+    def out(outcome, reason=None):
+        return {"outcome": outcome, "reason": reason}
+
+    if not isinstance(read, dict):
+        return out("uncertain", "read_failed")
+    if "error" in read:
+        error = read["error"]
+        return out("uncertain", error if error in ("other_project", "job_not_found") else "read_failed")
+    if read.get("id") != job_id:
+        return out("uncertain", "other_job")
+    neutral = read.get("outcome")
+    if neutral is None:
+        live = _LIVE_STATUS.get(read.get("status"))
+        return out(live) if live else out("uncertain", "status_unknown")
+    if neutral == "cancelled" and read.get("worker_exited") is not True:
+        return out("cancel_requested", "stop_unconfirmed")
+    return out(*NEUTRAL_OUTCOMES.get(neutral, ("uncertain", "status_unknown")))
+
+
 def project(tool: str, args: dict, tool_use_id: str) -> dict:
     """The `_outcome` block for one job tool result (ordinary turns)."""
     if tool == "wait_for_job":
         job_id = args.get("job_id")
         if not (isinstance(job_id, str) and job_id.startswith("fg:")):
+            # S7: study, report and queue handles (named whichever way it reads).
             return {
                 "version": VERSION,
-                "outcome": "uncertain",
+                **classify_job(job_id, read_job(job_id)),
                 "job_id": job_id if isinstance(job_id, str) else None,
-                "reason": "adapter_pending",
             }
         expected = submission(job_id)
     elif tool == "abort_simulation":

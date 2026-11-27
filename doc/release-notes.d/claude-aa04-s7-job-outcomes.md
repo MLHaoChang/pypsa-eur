@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant's wait on a study, report or queued job now reports the job's own outcome (running, completed, failed, cancelled, partly done when a loop missed its target), read independently of the tool's reply, instead of "cannot be checked yet".

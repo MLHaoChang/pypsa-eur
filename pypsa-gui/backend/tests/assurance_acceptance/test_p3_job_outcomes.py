@@ -14,9 +14,13 @@ import time
 import pytest
 
 from harness import job_adapters as ja, outcomes
-from services import run_evidence
+from services import chat_tools, run_evidence
+from services.solve_queue import solve_queue
 from services.pypsa_service import PyPSAService
 from tests.assurance_acceptance.support import OMIT, tool_turn, text_turn
+
+
+OWNER_ACTING = object()
 
 
 @pytest.fixture(autouse=True)
@@ -215,10 +219,285 @@ def test_a_run_record_of_another_job_is_uncertain(fg_job, monkeypatch):
     assert (out["outcome"], out["reason"]) == ("uncertain", "other_run")
 
 
+# ── S7: wait_for_job on study (`ad:`), report (`rpt:`) and queue jobs ──────
+#
+# The outcome is job_adapters' neutral view (`job_status`: the identity-bound
+# `_snapshot_bound_job` read, or the queue route's own ACL read), never the
+# wait handler's returned fields. GK B (74) S7 conditions 1-6.
+
+
+def _native(ctx, family, status="running", worker=None, owner=OWNER_ACTING):
+    """A registered study or report job bound to the active project's record."""
+    worker = worker or threading.Thread(target=lambda: None)  # never started: exited
+    record = {
+        "status": status,
+        "thread": worker,
+        "stop_event": threading.Event(),
+        "started_at": time.time(),
+    }
+    owner = chat_tools.acting_user_id() if owner is OWNER_ACTING else owner
+    project = str(ctx.project_uuid)
+    with ctx.solver_state_lock:
+        if family == "ad":
+            ctx.solver_state["fmea_sweep"] = {**record, "stage": "sweep", "iterations": []}
+        else:
+            ctx.solver_state["report_job"] = {
+                **record,
+                "report_id": "rep-1",
+                "mode": "generate",
+                "section": "summary",
+                "error": None,
+            }
+    if family == "ad":
+        return ja.register_study_job(
+            study_key="fmea_sweep",
+            tool_name="run_fmea_sweep",
+            tool_use_id="tu-ad",
+            owner_user_id=owner,
+            project_uuid=project,
+        )
+    return ja.register_report_job(
+        tool_name="generate_report",
+        tool_use_id="tu-rpt",
+        report_id="rep-1",
+        owner_user_id=owner,
+        project_uuid=project,
+    )
+
+
+def _set(ctx, family, status):
+    with ctx.solver_state_lock:
+        ctx.solver_state["fmea_sweep" if family == "ad" else "report_job"]["status"] = (
+            status
+        )
+
+
+def _queued(baseline, status=None):
+    ctx, _project_id, path = baseline
+    solve_queue.pause()
+    job = solve_queue.enqueue(
+        "Tool Baseline", project_key=ctx.registry_key, storage_dir=str(path)
+    )
+    if status is not None:
+        job.status = status
+    return str(job.id)
+
+
+def _wait(job_id):
+    return outcomes.project("wait_for_job", {"job_id": job_id}, "tu")
+
+
 def test_wait_on_a_study_or_queue_job_is_pending_not_completed(baseline):
-    for job_id in ("ad:x", "rpt:x", "4b1f0c6e-0000-4000-8000-000000000000"):
-        out = outcomes.project("wait_for_job", {"job_id": job_id}, "tu")
-        assert (out["outcome"], out["reason"]) == ("uncertain", "adapter_pending")
+    ctx = baseline[0]
+    for job_id, expected in (
+        (_native(ctx, "ad"), "running"),
+        (_native(ctx, "rpt"), "running"),
+        (_queued(baseline), "submitted"),
+    ):
+        out = _wait(job_id)
+        assert (out["outcome"], out["reason"], out["job_id"]) == (
+            expected,
+            None,
+            job_id,
+        )
+
+
+@pytest.mark.parametrize(
+    "family,status,expected",
+    [
+        ("ad", "done", ("completed", None)),
+        ("ad", "met", ("completed", None)),
+        ("ad", "failed", ("failed", None)),
+        ("ad", "aborted", ("cancelled", None)),
+        ("ad", "refused", ("failed", "job_refused")),
+        ("ad", "not_confident", ("partial", "target_not_met")),
+        ("ad", "budget_exhausted", ("partial", "target_not_met")),
+        ("ad", "unreachable", ("partial", "target_not_met")),
+        ("ad", "half_done", ("uncertain", "status_unknown")),
+        ("rpt", "done", ("completed", None)),
+        ("rpt", "failed", ("failed", None)),
+        ("rpt", "aborted", ("cancelled", None)),
+        ("rpt", "queued", ("submitted", None)),
+        ("rpt", "half_done", ("uncertain", "status_unknown")),
+    ],
+)
+def test_wait_on_a_finished_study_or_report_reads_its_own_outcome(
+    baseline, family, status, expected
+):
+    ctx = baseline[0]
+    job_id = _native(ctx, family)
+    _set(ctx, family, status)
+    out = _wait(job_id)
+    assert (out["outcome"], out["reason"]) == expected
+    assert out["job_id"] == job_id and out["version"] == outcomes.VERSION
+
+
+@pytest.mark.parametrize(
+    "status,expected",
+    [
+        ("running", ("running", None)),
+        ("completed", ("completed", None)),
+        ("failed", ("failed", None)),
+        ("aborted", ("cancelled", None)),
+        ("interrupted", ("uncertain", "interrupted")),
+        ("half_done", ("uncertain", "status_unknown")),
+    ],
+)
+def test_wait_on_a_queue_job_reads_the_queue_route(baseline, status, expected):
+    job_id = _queued(baseline, status)
+    out = _wait(job_id)
+    assert (out["outcome"], out["reason"], out["job_id"]) == (*expected, job_id)
+
+
+def test_every_neutral_outcome_has_one_tool_outcome():
+    # Condition 1: a neutral outcome added to job_adapters fails here first.
+    assert set(outcomes.NEUTRAL_OUTCOMES) == set(ja.OUTCOMES)
+    for neutral, (outcome, _reason) in outcomes.NEUTRAL_OUTCOMES.items():
+        assert outcome in outcomes.OUTCOMES, neutral
+    assert outcomes.NEUTRAL_OUTCOMES["succeeded"] == ("completed", None)
+    assert outcomes.NEUTRAL_OUTCOMES["unknown"][0] == "uncertain"
+
+
+def test_a_study_whose_worker_still_runs_after_aborted_is_cancel_requested(baseline):
+    # An abort route may flip `aborted` before its worker leaves native code.
+    ctx = baseline[0]
+    release = threading.Event()
+    worker = threading.Thread(target=release.wait, daemon=True)
+    worker.start()
+    try:
+        job_id = _native(ctx, "ad", worker=worker)
+        _set(ctx, "ad", "aborted")
+        out = _wait(job_id)
+        assert (out["outcome"], out["reason"]) == ("cancel_requested", "stop_unconfirmed")
+    finally:
+        release.set()
+        worker.join(1)
+    assert (_wait(job_id)["outcome"], _wait(job_id)["reason"]) == ("cancelled", None)
+
+
+def test_cancelled_is_read_again_before_it_is_believed(baseline, monkeypatch):
+    # Condition 5: the first read says cancelled; the re-read decides.
+    ctx = baseline[0]
+    job_id = _native(ctx, "ad", status="aborted")
+    real, reads = ja.job_status, []
+
+    def first_cancelled_then_done(*a, **k):
+        view = real(*a, **k)
+        reads.append(view["outcome"])
+        if len(reads) > 1:
+            view = {**view, "status": "done", "outcome": "succeeded"}
+        return view
+
+    monkeypatch.setattr(ja, "job_status", first_cancelled_then_done)
+    out = _wait(job_id)
+    assert len(reads) == 2
+    assert (out["outcome"], out["reason"]) == ("completed", None)
+
+
+def test_a_study_replaced_by_a_newer_run_is_uncertain(baseline):
+    ctx = baseline[0]
+    job_id = _native(ctx, "ad")
+    _set(ctx, "ad", "done")
+    _native(ctx, "ad", status="done")  # a newer run owns the record now
+    out = _wait(job_id)
+    assert (out["outcome"], out["reason"], out["job_id"]) == (
+        "uncertain",
+        "status_unknown",
+        job_id,
+    )
+
+
+def test_a_job_of_another_project_is_uncertain(baseline, monkeypatch):
+    ctx = baseline[0]
+    job_id = _native(ctx, "ad", status="done")
+    monkeypatch.setattr(ja._STUDIES[job_id], "project_uuid", "other-project")
+    out = _wait(job_id)
+    assert (out["outcome"], out["reason"], out["job_id"]) == (
+        "uncertain",
+        "other_project",
+        job_id,
+    )
+
+
+@pytest.mark.parametrize(
+    "job_id", ["ad:unknown", "rpt:unknown", "4b1f0c6e-0000-4000-8000-000000000000"]
+)
+def test_an_unknown_handle_is_uncertain_and_still_named(baseline, job_id):
+    # Condition 4: the queue handle (a UUID) is named whichever way the read goes.
+    out = _wait(job_id)
+    assert (out["outcome"], out["reason"], out["job_id"]) == (
+        "uncertain",
+        "job_not_found",
+        job_id,
+    )
+
+
+def test_a_queue_job_the_actor_may_not_see_is_uncertain(baseline):
+    job_id = _queued(baseline, "completed")
+    token = chat_tools._ACTING_USER_ID.set(None)
+    try:
+        out = _wait(job_id)
+    finally:
+        chat_tools._ACTING_USER_ID.reset(token)
+    assert (out["outcome"], out["reason"], out["job_id"]) == (
+        "uncertain",
+        "job_not_found",
+        job_id,
+    )
+
+
+def test_a_failing_read_is_uncertain(baseline, monkeypatch):
+    ctx = baseline[0]
+    job_id = _native(ctx, "rpt", status="done")
+
+    def boom(*a, **k):
+        raise RuntimeError("store down")
+
+    monkeypatch.setattr(ja, "job_status", boom)
+    out = _wait(job_id)
+    assert (out["outcome"], out["reason"], out["job_id"]) == (
+        "uncertain",
+        "read_failed",
+        job_id,
+    )
+
+
+@pytest.mark.parametrize(
+    "read,expected",
+    [
+        (None, ("uncertain", "read_failed")),
+        ({"error": "x"}, ("uncertain", "read_failed")),
+        ({"id": "ad:other", "outcome": "succeeded"}, ("uncertain", "other_job")),
+        ({"id": "ad:j", "outcome": None, "status": "paused"}, ("uncertain", "status_unknown")),
+        ({"id": "ad:j", "outcome": "later_name"}, ("uncertain", "status_unknown")),
+        ({"id": "ad:j", "outcome": "cancelled"}, ("cancel_requested", "stop_unconfirmed")),
+        (
+            {"id": "ad:j", "outcome": "cancelled", "worker_exited": True},
+            ("cancelled", None),
+        ),
+    ],
+)
+def test_classify_job_is_pure_and_fails_closed(read, expected):
+    out = outcomes.classify_job("ad:j", read)
+    assert (out["outcome"], out["reason"]) == expected
+
+
+def test_a_wait_reads_running_whatever_the_handler_returns(baseline, harness, monkeypatch):
+    # Condition 2: the handler's own fields never reach the outcome.
+    from services import chat_tools as ct
+
+    job_id = _native(baseline[0], "ad")
+    monkeypatch.setitem(
+        ct.DISPATCHERS,
+        "wait_for_job",
+        lambda **_: {"job": {"status": "done", "outcome": "succeeded"}, "completed": True},
+    )
+    result = _stream_wait(harness, job_id)
+    assert result["completed"] is True  # the handler's word stays as it said
+    assert (result["_outcome"]["outcome"], result["_outcome"]["job_id"]) == (
+        "running",
+        job_id,
+    )
 
 
 # J4: abort is a request until the solver reads aborted.
