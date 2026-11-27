@@ -33,6 +33,7 @@ from services.asset_schema.derive import (
 from services.asset_schema.schema import CLASS_ATTR, COMPOSITE, composite_parts
 from services.asset_schema import fields as asset_fields
 from services.asset_schema import provenance as asset_provenance
+from services.asset_schema import ranges as asset_ranges
 from services import component_identity, template_display_names
 from services.carrier_catalog import ensure_carrier
 from services.component_names import require_valid_name
@@ -554,6 +555,7 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict,
     kwargs = _drop_unknown_extras(component_class, attr, kwargs)
     _check_investment_parts(component_class, parts, row=kwargs)
     _refuse_reversed_grid_strength(component_class, kwargs)
+    asset_ranges.check(component_class, kwargs)
     notice = check_fuel_curve(component_class, kwargs)
     with PyPSAService.get_lock():
         _refuse_cost_basis_mismatch(n, component_class, kwargs, cost_basis)
@@ -793,6 +795,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict,
         _check_investment_parts(component_class, parts, row=merged)
         _refuse_reversed_grid_strength(component_class, merged, submitted=kwargs)
         stored = df.loc[name].to_dict()
+        asset_ranges.check(component_class, kwargs, stored=stored)
         check_parts_own_costs(component_class, parts, before=stored, submitted=kwargs)
         notice = check_fuel_curve(component_class, merged, n=n, name=name, before=stored, submitted=kwargs)
         if component_class == "Generator":
