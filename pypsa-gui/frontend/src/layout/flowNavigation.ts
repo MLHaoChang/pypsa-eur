@@ -294,15 +294,15 @@ export function openIslandLimits(): void {
 }
 
 /** Show the backup inputs, their one editing home: section 5, Assets & sizing, in either mode, scrolled
- *  to the block. Back returns to where it was clicked. */
-export function openBackupInputs(): void {
+ *  to the block. Back returns to where it was clicked; `origin` names it on the Back pill. */
+export function openBackupInputs(origin: string): void {
   withReturn(null, () => {
     const ui = useUIStore.getState()
     const guided = ui.uiMode === 'guided'
     ui.requestPanelSection(guided ? 'hubDesign' : 'capacityBounds', 'island-backup')
     if (guided) ui.setActiveSection('assets')
     else openSectionInExpert('assets')
-  })
+  }, false, origin)
 }
 
 /** Show the N-1 security branch selector (Solver settings › Network): the

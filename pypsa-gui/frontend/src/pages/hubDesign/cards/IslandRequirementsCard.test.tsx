@@ -125,6 +125,7 @@ describe('IslandRequirementsCard', () => {
     useUIStore.setState({ uiMode: 'guided', activeSection: 'scenarios', panelSectionRequest: null })
     await user.click(screen.getByTestId('island-backup-edit'))
     expect(useUIStore.getState().activeSection).toBe('assets')
+    expect(useUIStore.getState().flowReturn?.label).toBe('Island requirements')
     expect(useUIStore.getState().panelSectionRequest).toEqual({ panel: 'hubDesign', section: 'island-backup' })
   })
 

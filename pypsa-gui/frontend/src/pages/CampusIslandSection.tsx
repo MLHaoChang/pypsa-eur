@@ -298,7 +298,7 @@ export default function CampusIslandSection({ name }: { name: string }) {
             <p className="text-[11px] text-muted" data-testid="island-backup-home">
               The backup numbers are edited in Assets &amp; sizing.{' '}
               <button type="button" className="text-link hover:underline" data-testid="island-backup-open"
-                onClick={openBackupInputs}>Edit them there ›</button>
+                onClick={() => openBackupInputs('Grid study')}>Edit them there ›</button>
             </p>
             <label className="flex gap-2 items-center text-[12px]">
               <input type="checkbox" checked={!!req.linearised_uc}

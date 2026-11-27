@@ -155,7 +155,7 @@ function BackupSummary({ config }: { config: IslandConfig }) {
     <Decision id="backup" title="Backup requirements">
       <p data-testid="island-backup" className="text-[12px] text-text">{backupWords(config)}</p>
       <button type="button" data-testid="island-backup-edit" className={`${BTN} self-start`}
-        onClick={openBackupInputs}>Edit in Assets &amp; sizing ›</button>
+        onClick={() => openBackupInputs('Island requirements')}>Edit in Assets &amp; sizing ›</button>
     </Decision>
   )
 }
