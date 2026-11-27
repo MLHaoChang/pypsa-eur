@@ -230,9 +230,25 @@ def apply_lever_scenario(
 
     if kind == "storage_duration":
         from services.solver.storage_inventory import SPLIT, list_storages
-        split = [e for e in list_storages(n) if e.layout == SPLIT]
+        # template-e2e 22 S3 (GK A ruling A): the duration lever re-specifies
+        # only storage the solve sizes — extendable StorageUnits and split
+        # storages whose Store is e_nom_extendable. Fixed storage (an existing
+        # UPS) keeps its own max_hours: lengthening it adds uncosted energy and
+        # is why the lever rows used not to reconcile with the base design.
         has_su = n.storage_units is not None and not n.storage_units.empty
-        if not has_su and not split:
+        su_all = [str(i) for i in n.storage_units.index] if has_su else []
+        su_cand = [i for i in su_all
+                   if bool(n.storage_units.at[i, "p_nom_extendable"])]
+        split_all = [e for e in list_storages(n) if e.layout == SPLIT]
+        split = [e for e in split_all
+                 if bool(n.stores.at[e.name, "e_nom_extendable"])]
+        kept = ([i for i in su_all if i not in su_cand]
+                + [e.name for e in split_all if e not in split])
+        if not su_cand and not split:
+            if kept:
+                raise LeverNotApplicable(
+                    "no extendable storage to apply storage_duration; fixed "
+                    "storage keeps its own duration: " + ", ".join(kept))
             raise LeverNotApplicable("no StorageUnits or split storages (Store + Links) to apply storage_duration")
         hours = float(value)
         if hours <= 0:
@@ -256,38 +272,37 @@ def apply_lever_scenario(
         if bad:
             raise LeverScenarioError(f"storage_duration {hours:g} h is infeasible for split storage "
                                      + "; ".join(bad))
-        su_snap = n.storage_units.copy(deep=True) if has_su else None
+        su_snap = n.storage_units.copy(deep=True) if su_cand else None
         st_snap = n.stores.copy(deep=True) if split else None
-        if has_su:
-            for name in n.storage_units.index:
-                n.storage_units.at[name, "max_hours"] = hours
+        for name in su_cand:
+            n.storage_units.at[name, "max_hours"] = hours
         # AS-11: a split storage takes the same duration as the equal
-        # StorageUnit: E = hours x P (min_hours = max_hours = hours). The
-        # solve sizes an extendable Store; a fixed one is set to hours x its
-        # AC-side P.
+        # StorageUnit: E = hours x P (min_hours = max_hours = hours); the
+        # solve sizes the extendable Store.
         for e in split:
-            st = n.stores
-            st.at[e.name, "min_hours"] = hours
-            st.at[e.name, "max_hours"] = hours
-            if not bool(st.at[e.name, "e_nom_extendable"]):
-                st.at[e.name, "e_nom"] = hours * e.p_nom_mw
-                if "e_nom_opt" in st.columns:
-                    st.at[e.name, "e_nom_opt"] = hours * e.p_nom_mw
+            n.stores.at[e.name, "min_hours"] = hours
+            n.stores.at[e.name, "max_hours"] = hours
         def undo() -> None:
             if su_snap is not None:
                 n.storage_units = su_snap
             if st_snap is not None:
                 n.stores = st_snap
+        # GK A C1: a StorageUnit's capital_cost is per MW, priced at its
+        # template duration, so its extra hours are not costed; a split
+        # Store is priced per MWh.
+        energy_costed = not su_cand
+        note = f"{hours:g} h nameplate autonomy (not a multi-day ENS claim)"
+        if not energy_costed:
+            note += "; extra hours on a battery modelled as a StorageUnit are not costed"
         return undo, {
             "kind": kind,
             "value": hours,
             "unit": "h",
-            "applied_storage": ([str(i) for i in n.storage_units.index] if has_su else [])
-                               + [e.name for e in split],
+            "applied_storage": su_cand + [e.name for e in split],
+            "kept_storage": kept,
+            "energy_costed": energy_costed,
             "firmness": "planning_limit_only",
-            "autonomy_note": (
-                f"{hours:g} h nameplate autonomy (not a multi-day ENS claim)"
-            ),
+            "autonomy_note": note,
         }
 
     raise LeverScenarioError(f"unknown lever kind {kind!r}")

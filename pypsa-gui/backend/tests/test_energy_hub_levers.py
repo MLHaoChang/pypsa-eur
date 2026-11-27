@@ -19,7 +19,7 @@ from services.adequacy import levers as L
 from services.solver_service import SolverConfig
 
 
-def _off_grid_network() -> pypsa.Network:
+def _off_grid_network(fixed_battery: bool = False) -> pypsa.Network:
     """Peaky island where storage *duration* (energy) binds cost@target.
 
     Mean load ≈ local gen so net energy balances; 6 h peaks need more than
@@ -41,10 +41,14 @@ def _off_grid_network() -> pypsa.Network:
     n.add("Generator", "peaker", bus="b", carrier="gas",
           p_nom=0.0, p_nom_extendable=True, p_nom_max=100.0,
           capital_cost=500.0, marginal_cost=200.0)
-    # Fixed power: duration lever changes energy only.
+    # Fixed power: duration lever changes energy only. template-e2e 22 S3:
+    # the lever re-specifies only candidate (extendable) storage, so the
+    # battery is a candidate pinned at 30 MW (same optimum as fixed;
+    # preflight needs an extendable asset's capital_cost > 0, a constant here).
     n.add("StorageUnit", "bat", bus="b", carrier="battery",
-          p_nom=30.0, p_nom_extendable=False,
-          max_hours=4.0, capital_cost=0.0,
+          p_nom=30.0, p_nom_extendable=not fixed_battery,
+          p_nom_min=30.0, p_nom_max=30.0,
+          max_hours=4.0, capital_cost=0.0 if fixed_battery else 1.0,
           efficiency_store=0.95, efficiency_dispatch=0.95,
           cyclic_state_of_charge=True)
     return n
@@ -251,3 +255,158 @@ def test_off_grid_pack_disables_import_cap_lever():
     pack = default_off_grid_pack()
     assert pack.levers.storage_duration is True
     assert pack.levers.import_cap is False
+
+
+# ── template-e2e 22 S3: the duration lever touches only candidate storage ──
+
+def _ups_and_candidate_network(bess_p_nom: float = 0.0, base=None) -> pypsa.Network:
+    """A DC-like site: a fixed, 0-capex UPS (0.25 h) the base design owns, and
+    an extendable candidate battery priced per MW at its 4 h template duration.
+    Lengthening the UPS would give free energy (the old lever's -475k on DC)."""
+    n = (base or _off_grid_network)()
+    n.remove("StorageUnit", "bat")
+    n.add("StorageUnit", "ups", bus="b", carrier="battery",
+          p_nom=30.0, p_nom_extendable=False, max_hours=0.25, capital_cost=0.0,
+          efficiency_store=0.95, efficiency_dispatch=0.95, cyclic_state_of_charge=True)
+    n.add("StorageUnit", "bess", bus="b", carrier="battery",
+          p_nom=bess_p_nom, p_nom_extendable=True, p_nom_max=60.0, max_hours=4.0,
+          capital_cost=100.0, efficiency_store=0.95, efficiency_dispatch=0.95,
+          cyclic_state_of_charge=True)
+    return n
+
+
+def test_storage_duration_keeps_fixed_storage_and_undo_is_exact():
+    """GK A C2/C3: an extendable unit with p_nom > 0 (brownfield) is a
+    candidate; the fixed UPS keeps its duration; undo restores the frame."""
+    n = _ups_and_candidate_network(bess_p_nom=10.0)
+    before = n.storage_units.copy(deep=True)
+    undo, mut = L.apply_lever_scenario(n, "storage_duration", value=24.0)
+    assert float(n.storage_units.at["bess", "max_hours"]) == 24.0
+    assert float(n.storage_units.at["ups", "max_hours"]) == 0.25
+    assert mut["applied_storage"] == ["bess"]
+    assert mut["kept_storage"] == ["ups"]
+    assert mut["energy_costed"] is False
+    assert "not costed" in mut["autonomy_note"]
+    undo()
+    assert n.storage_units.equals(before)
+
+
+def test_storage_duration_on_fixed_storage_only_is_not_applicable():
+    """GK A ruling A / C6: the old fixed-battery fixture names what it kept."""
+    n = _off_grid_network(fixed_battery=True)
+    with pytest.raises(L.LeverNotApplicable, match="bat"):
+        L.apply_lever_scenario(n, "storage_duration", value=24.0)
+    assert float(n.storage_units.at["bat", "max_hours"]) == 4.0
+
+
+def test_storage_duration_on_split_storage_skips_fixed_stores():
+    """GK A C2/C3: a fixed split store with a c-rate limit no longer blocks the
+    lever; only the extendable Store is re-specified, and its energy is costed."""
+    from services.solver.split_storage import add_split_storage
+    n = _off_grid_network()
+    n.remove("StorageUnit", "bat")
+    n.add("Carrier", "high_c_bess")
+    add_split_storage(n, "ride", "b", "high_c_bess", p_nom=10.0, e_nom_max=10.0,
+                      energy_capital_cost=1.0)
+    n.stores.at["ride", "e_nom_extendable"] = False
+    n.stores.at["ride", "e_nom"] = 5.0
+    n.stores.at["ride", "c_rate_max"] = 4.0          # E/P <= 0.25 h: refused at 4 h if it were a candidate
+    n.add("Carrier", "energy_bess")
+    add_split_storage(n, "bess", "b", "energy_bess", p_nom=10.0, energy_capital_cost=1.0)
+    before = n.stores.copy(deep=True)
+    undo, mut = L.apply_lever_scenario(n, "storage_duration", value=4.0)
+    assert mut["applied_storage"] == ["bess"]
+    assert mut["kept_storage"] == ["ride"]
+    assert mut["energy_costed"] is True
+    assert float(n.stores.at["bess", "max_hours"]) == 4.0
+    assert float(n.stores.at["ride", "e_nom"]) == 5.0
+    assert n.stores.at["ride", "max_hours"] == before.at["ride", "max_hours"]
+    undo()
+    assert n.stores.equals(before)
+
+
+def _lever_table(n, values, cfg=None):
+    from services.pypsa_service import PyPSAService
+    PyPSAService.set_network(n)
+    return L.compare_lever_scenarios(
+        n, cfg or SolverConfig(voll=1000.0, ens_cap_permyriad=1000.0),
+        lock=PyPSAService.get_lock(), stop_event=threading.Event(),
+        log_queue=queue.SimpleQueue(), kind="storage_duration", values=values,
+        availability=AvailabilityTarget(ens_cap_permyriad=1000.0),
+    )
+
+
+@pytest.mark.live_solve
+def test_storage_unit_candidate_extra_hours_are_not_costed():
+    """GK A C1 — pins a known limit: a built candidate StorageUnit is priced per
+    MW, so a longer rung costs no more. Whoever costs StorageUnit energy per MWh
+    flips this test on purpose."""
+    table = _lever_table(_ups_and_candidate_network(), (4.0, 72.0))
+    cost = {o["value"]: o["cost_at_target_eur"] for o in table["options"]}
+    assert all(o["status"] in ("ok", "optimal") for o in table["options"])
+    assert cost[72.0] <= cost[4.0] + 1e-6
+    assert all(o["applied"]["energy_costed"] is False for o in table["options"])
+
+
+@pytest.mark.live_solve
+def test_the_rung_at_the_template_duration_reconciles_with_the_base():
+    """GK A C4: the study's base_cost_eur is st.cost_at_target, and the rung at
+    the candidate's own 4 h equals it — the UPS is no longer lengthened."""
+    from services.adequacy import eh_study as S
+    from services.pypsa_service import PyPSAService
+
+    n = _ups_and_candidate_network(base=_off_grid_network_with_import)
+    pack = default_off_grid_pack().model_copy(update={
+        "availability": AvailabilityTarget(ens_cap_permyriad=1000.0),
+        "mc_certify_required": False,
+    })
+    PyPSAService.set_network(n)
+    store: dict = {}
+    report = S.run_eh_study(
+        n, pack, SolverConfig(voll=1000.0, ens_cap_permyriad=1000.0),
+        lock=PyPSAService.get_lock(), stop_event=threading.Event(),
+        log_queue=queue.SimpleQueue(),
+        stages=("apply_pack", "ens_solve", "levers", "assemble"), store=store,
+    )
+    table = store["eh_lever_comparison"]
+    base = report.sections["cost"].payload["total_system_cost_eur"]
+    assert table["base_cost_eur"] == base
+    four = [o for o in table["options"] if o["value"] == 4.0]
+    assert four and four[0]["cost_at_target_eur"] == pytest.approx(base, rel=1e-6)
+    assert four[0]["applied"]["kept_storage"] == ["ups"]
+
+
+def test_a_failed_base_leaves_base_cost_none(monkeypatch):
+    """GK A C4: no base solve → base_cost_eur is None, never 0."""
+    from services.adequacy import eh_study as S
+    fake = {"kind": "storage_duration", "options": [], "solves_attempted": 0,
+            "comparable_solved": 0, "aborted": False}
+    monkeypatch.setattr(L, "compare_lever_scenarios", lambda *a, **k: dict(fake))
+    st = S._Study(pack=default_off_grid_pack(), network=_ups_and_candidate_network(),
+                  cfg=SolverConfig(), lock=None, stop_event=threading.Event(),
+                  log_queue=queue.SimpleQueue(), store={}, budget_solves=10, solves=1,
+                  cost_at_target=None, pack_h="h", sections={}, records=[])
+    S._stage_levers(st)
+    assert st.store["eh_lever_comparison"]["base_cost_eur"] is None
+
+
+def test_storage_duration_mixed_layouts_keep_the_fixed_split_store():
+    """GK A C1-C3: a StorageUnit candidate beside a fixed split store — only the
+    StorageUnit changes, the split store is kept, and the flag says the extra
+    hours are not costed (StorageUnit energy is priced per MW)."""
+    from services.solver.split_storage import add_split_storage
+    n = _ups_and_candidate_network()
+    n.remove("StorageUnit", "ups")
+    n.add("Carrier", "high_c_bess")
+    add_split_storage(n, "ride", "b", "high_c_bess", p_nom=10.0, e_nom_max=10.0,
+                      energy_capital_cost=1.0)
+    n.stores.at["ride", "e_nom_extendable"] = False
+    n.stores.at["ride", "c_rate_max"] = 4.0
+    su, stores = n.storage_units.copy(deep=True), n.stores.copy(deep=True)
+    undo, mut = L.apply_lever_scenario(n, "storage_duration", value=24.0)
+    assert mut["applied_storage"] == ["bess"]
+    assert mut["kept_storage"] == ["ride"]
+    assert mut["energy_costed"] is False
+    assert n.stores.equals(stores)
+    undo()
+    assert n.storage_units.equals(su) and n.stores.equals(stores)

@@ -1254,7 +1254,11 @@ def _stage_levers(st: _Study) -> None:
             merged = {"kind": "+".join(kinds), "options": [],
                       "solves_attempted": 0, "comparable_solved": 0,
                       "aborted": False}
-        merged = {**merged, "budget_exhausted": budget_exhausted}
+        # template-e2e 22 S3: the base design's cost at the same target, on
+        # the same basis as each option's cost_at_target_eur (objective less
+        # shed cost), so the reader can reconcile the rows with the base.
+        merged = {**merged, "budget_exhausted": budget_exhausted,
+                  "base_cost_eur": st.cost_at_target}
         if skipped_kinds:
             merged = {**merged, "skipped_kinds": list(skipped_kinds)}
         if st.store is not None:

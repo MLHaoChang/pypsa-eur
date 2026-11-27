@@ -260,7 +260,12 @@ def test_default_weak_pipeline_at_budget_30_still_reaches_levers_and_dtc():
 
 @pytest.mark.live_solve
 def test_default_off_grid_pipeline_at_budget_30_still_reaches_levers():
-    report = _run(_feeder_hub(), default_off_grid_pack(), stages=None,
+    n = _feeder_hub()
+    # template-e2e 22 S3: the duration lever acts on candidate storage only, so
+    # the battery is a candidate pinned at its 20 MW (preflight needs capital_cost > 0).
+    n.storage_units.loc["bat", ["p_nom_extendable", "p_nom_min", "p_nom_max", "capital_cost"]] = \
+        [True, 20.0, 20.0, 1.0]
+    report = _run(n, default_off_grid_pack(), stages=None,
                   cfg=SolverConfig(voll=3000.0))
     c = report.completeness
     assert c["fmea_top"] == "ok"
