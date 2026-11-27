@@ -18,7 +18,7 @@ import { SECTION_META } from '../../../layout/flowSections'
 import type { HeadlineCard } from '../../../api/simulation'
 import { HEADLINE_WORDS, headlineFigure } from '../../results/headlineWords'
 import { useHeadlineKpis } from '../../results/HeadlineStrip'
-import { FROM_STUDY_HINT, type ChapterInputs, type ChapterOpen, type ChapterTile } from '../chapters'
+import { tileHint, type ChapterInputs, type ChapterOpen, type ChapterTile } from '../chapters'
 import { useChapterTiles } from '../ChaptersSection'
 import { TABS } from '../../Results'
 import { useHubDesignStore } from '../hubDesignStore'
@@ -97,9 +97,9 @@ function TileFigure({ tile, testId, studyBanner = false, dimmed = false }: {
   const tab = 'step' in o ? null : o.panel === 'results' ? tabLabel(o.tab) : null
   return (
     <div className="flex flex-col gap-1">
-      <Kpi headline testId={testId} label={tile.label} value={tile.value} unit={tile.unit} basis={tile.basis}
+      <Kpi headline testId={testId} lead={tile.lead} label={tile.label} value={tile.value} unit={tile.unit} basis={tile.basis}
         state={view.state} dimmed={view.dimmed || dimmed}
-        reason={tile.reason} fromStudy={tile.fromStudy} hint={tile.fromStudy ? FROM_STUDY_HINT : undefined}
+        reason={tile.reason} fromStudy={tile.fromStudy} hint={tileHint(tile)}
         action={'step' in o ? { label: 'Go to Goal', onClick: () => openTile(o, setStep) } : undefined} />
       {tab && <OpenLink label={tab} testId={`${testId}-open`} onClick={() => openTile(o, setStep)} />}
     </div>

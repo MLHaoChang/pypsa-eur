@@ -3,6 +3,8 @@
 import { describe, expect, it } from 'vitest'
 import { chapterTiles, type ChapterInputs } from './chapters'
 import type { InvestmentCaseReportPayload } from '../../api/types'
+import { figureBasis, figureName } from '../../utils/figureWords'
+import { fmtCurrency } from '../../utils/format'
 
 const NONE: ChapterInputs = {
   investment: { study: null, report: null },
@@ -76,12 +78,16 @@ describe('chapterTiles', () => {
       sections: { project: { status: 'ok', payload: { project_pre_tax_npv: pre } } },
     }) as unknown as InvestmentCaseReportPayload
     const done = { status: 'done' } as never
+    // With a tax pack: the after-tax name and value (GK B (73), cond. 2).
     let t = byId({ ...NONE, investment: { study: done, report: report(-1.2e6, -1e6) } })
-    expect(t.investment).toMatchObject({ state: 'ready', basis: 'Net present value at the WACC, after tax' })
-    expect(t.investment.value).toMatch(/1\.20? M/)
+    expect(t.investment).toMatchObject({ state: 'ready', label: figureName('project_npv'),
+      value: fmtCurrency(-1.2e6), basis: figureBasis('project_npv') })
+    // No tax pack: the pre-tax figure under its own name; the after-tax name never carries it.
     t = byId({ ...NONE, investment: { study: done, report: report(null, -11.01e6) } })
-    expect(t.investment).toMatchObject({ state: 'ready',
-      basis: 'Net present value before tax (no tax pack, so the after-tax figure is not established)' })
+    expect(t.investment).toMatchObject({ state: 'ready', label: figureName('project_npv_pre_tax'),
+      value: fmtCurrency(-11.01e6), basis: 'No tax pack, so the after-tax figure is not established.' })
+    expect(t.investment.label).not.toBe(figureName('project_npv'))
+    expect(t.investment.label).toMatch(/before tax/)
     t = byId({ ...NONE, investment: { study: done, report: report(null, null) } })
     expect(t.investment.state).toBe('unavailable')
   })

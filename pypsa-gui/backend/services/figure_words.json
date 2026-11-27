@@ -19,6 +19,11 @@
       "unit": "{currency}",
       "basis": "Net present value of the project's after-tax cash before financing, discounted at the WACC"
     },
+    "project_npv_pre_tax": {
+      "name": "Project NPV at the WACC, before tax (unlevered)",
+      "unit": "{currency}",
+      "basis": "Net present value of the project's cash before tax and before financing, discounted at the WACC"
+    },
     "lcoe_real": {
       "name": "LCOE (real)",
       "unit": "{currency}/MWh",

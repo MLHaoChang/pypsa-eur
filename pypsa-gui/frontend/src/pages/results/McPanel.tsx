@@ -19,6 +19,7 @@ import {
   ramChipText, ramChipTitle,
   type AdequacyReportPayload, type CoptPayload,
 } from './adequacy'
+import { figureHint, figureName } from '../../utils/figureWords'
 
 // ── The sequential Monte-Carlo adequacy study (spec §5, Phase 6) ────────────
 //
@@ -659,7 +660,7 @@ export function McPanel() {
           {m && (
             <div className="flex flex-wrap gap-4" data-testid="mc-metrics">
               <div className="flex flex-col">
-                <span className="text-[10px] text-muted">LOLE</span>
+                <span className="text-[10px] text-muted" title={figureHint('expected_shortfall')}>{figureName('expected_shortfall')}</span>
                 <span className="text-[12px] font-mono" data-testid="mc-lole">
                   {loleStatement(m)}
                 </span>
@@ -726,7 +727,7 @@ export function McPanel() {
                       <th className="text-left font-medium py-1 pr-3">Kind</th>
                       <th className="text-right font-medium py-1 pr-3">Capacity</th>
                       <th className="text-left font-medium py-1 pr-3">Credit</th>
-                      <th className="text-right font-medium py-1 pr-3">Baseline LOLE</th>
+                      <th className="text-right font-medium py-1 pr-3" title={figureHint('expected_shortfall')}>Baseline {figureName('expected_shortfall').toLowerCase()}</th>
                     </tr>
                   </thead>
                   <tbody className="font-mono">
@@ -844,7 +845,7 @@ export function PortfolioSection({ block }: { block: ElccPortfolioBlock }) {
                 <th className="text-left font-medium py-1 pr-3">Portfolio ELCC</th>
                 <th className="text-right font-medium py-1 pr-3">Margin credit (gross window)</th>
                 <th className="text-right font-medium py-1 pr-3">Margin credit (net-load window)</th>
-                <th className="text-right font-medium py-1 pr-3">Baseline LOLE</th>
+                <th className="text-right font-medium py-1 pr-3" title={figureHint('expected_shortfall')}>Baseline {figureName('expected_shortfall').toLowerCase()}</th>
               </tr>
             </thead>
             <tbody className="font-mono">

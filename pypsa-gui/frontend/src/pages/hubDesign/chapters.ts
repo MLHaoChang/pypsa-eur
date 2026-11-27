@@ -12,6 +12,7 @@ import { fmtCurrency } from '../../utils/format'
 import { failureLine, runningLine } from '../campusRunProgress'
 import { studyStale } from '../results/investment/financeModel'
 import { blockerOf, couldNotFinish, NEED_TEXT, NEEDS_LEAD } from '../results/investment/investmentCaseNeeds'
+import { figureBasis, figureHint, figureName, figureUnit } from '../../utils/figureWords'
 
 export type ChapterId = Exclude<ResultsGroup, 'summary'>
 
@@ -27,6 +28,10 @@ export interface ChapterTile {
   /** The result group's own label (RESULT_GROUPS), so the names match Expert. */
   group: string
   label: string
+  /** A plain lead line above the label (UX (31): "What the design is worth" over the ruled NPV name). */
+  lead?: string
+  /** What the figure is, on hover (owner decision GR04-SHORTFALL-1: the LOLE tag lives here). */
+  hint?: string
   /** The figure is the study's, and the project itself is not solved (G5). */
   fromStudy?: boolean
   /** '' unless the state shows a figure (ready / zero / stale). */
@@ -76,15 +81,20 @@ export function dispatchSolved(status: SimulationStatus | null | undefined): boo
 export const FROM_STUDY_HINT =
   'From the study, which ran on the design. The project itself has not been solved yet.'
 
+/** A tile's hover text: what the figure is, then the from-study caveat when it applies. */
+export const tileHint = (t: Pick<ChapterTile, 'hint' | 'fromStudy'>): string | undefined =>
+  [t.hint, t.fromStudy ? FROM_STUDY_HINT : undefined].filter(Boolean).join(' ') || undefined
+
 const ORDER: ChapterId[] = ['investment', 'grid_plan', 'reliability', 'operation']
 const groupLabel = (id: ChapterId) => RESULT_GROUPS.find(g => g.id === id)?.label ?? id
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 
 function investment({ study, report }: ChapterInputs['investment']): Omit<ChapterTile, 'id' | 'group'> {
   const open: ChapterOpen = { panel: 'results', tab: 'investment' }
-  const label = 'What the design is worth'
+  const lead = 'What the design is worth'
+  const label = figureName('project_npv')
   if (study?.status === 'running') {
-    return { label, value: '', state: 'running', reason: 'The investment case is running.', open }
+    return { lead, label, value: '', state: 'running', reason: 'The investment case is running.', open }
   }
   // A refusal in plain words (issue 22, S2b): the input it needs, or the run's
   // own reason without its code; never a raw code.
@@ -93,10 +103,10 @@ function investment({ study, report }: ChapterInputs['investment']): Omit<Chapte
     const reason = blocker.kind === 'needs'
       ? `${NEEDS_LEAD} ${blocker.needs.map(n => NEED_TEXT[n].item.charAt(0).toLowerCase() + NEED_TEXT[n].item.slice(1)).join('; ')}.`
       : couldNotFinish('guided', blocker.kind === 'unknown' ? blocker.detail : null, blocker.kind === 'unknown' && !!blocker.internal)
-    return { label, value: '', state: 'unavailable', reason, open }
+    return { lead, label, value: '', state: 'unavailable', reason, open }
   }
   if (!report) {
-    return { label, value: '', state: 'not_run', open,
+    return { lead, label, value: '', state: 'not_run', open,
       reason: 'The investment case has not run. It turns the design’s costs and savings into NPV and IRR.' }
   }
   const post = num(report.npv_at_wacc)
@@ -104,14 +114,17 @@ function investment({ study, report }: ChapterInputs['investment']): Omit<Chapte
   const pre = num(payload.project_pre_tax_npv)
   const figure = post ?? pre
   if (figure == null) {
-    return { label, value: '', state: 'unavailable', open,
+    return { lead, label, value: '', state: 'unavailable', open,
       reason: 'The investment case ran, but its NPV is not established; it says why.' }
   }
   const stale = studyStale(study).stale
   return {
-    label, value: fmtCurrency(figure), state: stale ? 'stale' : 'ready', open,
-    basis: post != null ? 'Net present value at the WACC, after tax'
-      : 'Net present value before tax (no tax pack, so the after-tax figure is not established)',
+    // Which figure, by which one is established: the after-tax NPV, else (no tax pack) the
+    // pre-tax one under its own name (GK B (73)); never the after-tax name over a pre-tax number.
+    lead, label: figureName(post != null ? 'project_npv' : 'project_npv_pre_tax'),
+    value: fmtCurrency(figure), state: stale ? 'stale' : 'ready', open,
+    basis: post != null ? figureBasis('project_npv')
+      : 'No tax pack, so the after-tax figure is not established.',
     reason: stale ? 'The inputs changed since the case ran.' : undefined,
   }
 }
@@ -150,7 +163,8 @@ function gridPlan({ campus, notHub }: ChapterInputs['grid']): Omit<ChapterTile, 
 }
 
 function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 'group'> {
-  const label = 'Expected shortfall'
+  const label = figureName('expected_shortfall')
+  const hint = figureHint('expected_shortfall')
   if (r.noVerdict) {
     // The Verdict line above says it; the tile keeps its pill and a way to the report.
     return { label, value: '', state: 'not_modelled', open: { panel: 'results', tab: 'adequacy', report: true } }
@@ -181,7 +195,7 @@ function reliability(r: ChapterInputs['reliability']): Omit<ChapterTile, 'id' | 
   const hours = r.horizonYears != null && isFinite(r.horizonYears) && r.horizonYears > 0
     ? Math.round(r.horizonYears * 8760) : null
   const sampled = `${basis} · Monte Carlo${hours ? `, ${String(hours).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} h` : ''}`
-  return { label, value: String(r.lole), unit: 'h/yr', state: r.stale ? 'stale' : 'ready', basis: sampled, open,
+  return { label, hint, value: String(r.lole), unit: figureUnit('expected_shortfall'), state: r.stale ? 'stale' : 'ready', basis: sampled, open,
     reason: r.stale ? STALE_TILE_REASON : undefined, fromStudy: r.solved === false && !r.stale }
 }
 
