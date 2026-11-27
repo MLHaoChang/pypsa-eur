@@ -37,7 +37,7 @@
     "carrier_lcoe": {
       "name": "Carrier LCOE (cash cost)",
       "unit": "{currency}/MWh",
-      "basis": "Annualised capital cost plus fixed and variable O&M (and a converter's input energy cost) per MWh the carrier produced in the solve; no financing or tax"
+      "basis": "Annualised capital and fixed O&M, plus marginal cost (fuel and variable O&M) and, for storage, charging energy at the bus price. Per MWh the carrier produced. No financing or tax"
     },
     "study_cost_per_mwh": {
       "name": "Cost per MWh served (study)",

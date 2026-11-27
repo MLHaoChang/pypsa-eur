@@ -65,7 +65,7 @@ describe('Guided and Expert name a figure alike', () => {
   it("Compare's per-carrier cost is not called the investment case's LCOE", () => {
     expect(figureName('carrier_lcoe')).toBe('Carrier LCOE (cash cost)')
     expect(figureName('carrier_lcoe')).not.toBe(figureName('lcoe_real'))
-    expect(figureBasis('carrier_lcoe')).toMatch(/per MWh the carrier produced/)
+    expect(figureBasis('carrier_lcoe')).toMatch(/Per MWh the carrier produced/)
   })
 
   it('LCOE: the Investment tab, the Expert strip and Guided headline (one Words entry)', () => {

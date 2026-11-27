@@ -250,7 +250,8 @@ export function ResultsHeadline({ reliability, cost, costEur = null, ci, freshne
   const npv = tiles.find(t => t.id === 'investment')
   const figures: HeadlineFigureState[] = [
     ...[rel, npv].filter((t): t is ChapterTile => !!t).map(t => ({
-      label: t.label, state: t.state, freshnessUnknown: freshnessUnknown && t.id === 'reliability',
+      // The lead ("What the design is worth") reads as a list item; the ruled name holds a comma.
+      label: t.lead ?? t.label, state: t.state, freshnessUnknown: freshnessUnknown && t.id === 'reliability',
     })),
     ...(lcoe ? [{ label: HEADLINE_WORDS.lcoe.label, state: cardState(lcoe) }] : []),
     ...(co2 ? [{ label: HEADLINE_WORDS.co2_annual.label, state: cardState(co2) }] : []),
