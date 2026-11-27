@@ -6,7 +6,10 @@ network transformers with K_T) on a small hand-built campus; the shared hub
 fixture checks the run writes both CSVs and fails closed.
 """
 
+import copy
+import json
 import math
+from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
@@ -626,17 +629,24 @@ def test_the_planning_csv_leads_with_its_key_columns(sized):
     ]
 
 
+# A genset in S_k''min (GC-13, GK A G1-G7). Sized so that the genset, its
+# K_G and the network K_T each move S_k'' at MV2 by far more than 0.5 %.
+XD_GEN, S_GEN, RX_GEN, VK_T2 = 0.05, 12.5, 0.1, 0.20
 GENSET = {
     "kind": "genset",
     "p_mw": _v(10.0),
-    "s_mva": _v(12.5),
-    "xd_pp": _v(0.15),
-    "rx_sc": _v(0.1),
+    "s_mva": _v(S_GEN),
+    "xd_pp": _v(XD_GEN),
+    "rx_sc": _v(RX_GEN),
 }
+PINS = json.loads(
+    (Path(__file__).parent / "fixtures" / "gc13_master_pins.json").read_text()
+)
 
 
-def _genset_spec(bus):
+def _genset_spec(bus, vk_t2=VK_T2):
     spec = _spec(extra_bus=True)
+    spec["campus"]["transformers"]["T2"]["vk_percent"] = _v(vk_t2 * 100)
     spec["campus"]["units"]["GEN"] = {**GENSET, "bus": bus}
     return spec
 
@@ -645,52 +655,159 @@ def _genset_notes(notes):
     return [n for n in notes if "genset" in n]
 
 
+def _sk_mv2_by_hand(k_g=True, k_t=True, genset=True):
+    """S_k'' at MV2 without pandapower, per MVA (U_n = U_rG = 20 kV, c_min
+    = 1.0 above 1 kV): the grid c_min/S_k''min, T2 K_T·vk/S_n (its vkr of
+    0.001 % neglected), in parallel with the genset K_G·(R + jX''d)/S_rG,
+    K_G = c_max / (1 + x''d sin phi_rG), cos phi_rG 0.8 when the spec gives none."""
+    kt = 0.95 * 1.1 / (1 + 0.6 * VK_T2) if k_t else 1.0
+    z_grid = complex(0.0, 1.0 / SK_GRID + kt * VK_T2 / SN)
+    if not genset:
+        return 1 / abs(z_grid)
+    kg = 1.1 / (1 + XD_GEN * 0.6) if k_g else 1.0
+    z_gen = kg * complex(RX_GEN * XD_GEN, XD_GEN) / S_GEN
+    return 1 / abs(1 / (1 / z_grid + 1 / z_gen))
+
+
 def test_a_running_genset_adds_its_own_current_to_the_minimum_fault_level():
-    # Hand calculation at MV2 (per-MVA, c_min = 1.0): the grid side
-    # Z_G + Z_T in parallel with the genset K_G (R + jX''d) / S_rG,
-    # K_G = c_max / (1 + x''d sin phi_rG) (IEC 60909-0 6.6.1, U_n = U_rG),
-    # cos phi_rG 0.8 when the spec gives none.
     c = build_campus(_genset_spec("MV2"))
     got = _gc03_strength(c, _hourly(c))
-    k_g = 1.1 / (1 + 0.15 * 0.6)
-    z_gen = k_g * complex(0.1 * 0.15, 0.15) / 12.5
-    z_grid = complex(0.0, Z_G + Z_T)
-    hand = abs(1 / (1 / z_grid + 1 / z_gen))
-    sk = _at(got[0], "MV2")["sk_intact_mva"]
-    assert sk == pytest.approx(1 / hand, rel=5e-3)
-    assert sk > 1 / (Z_G + Z_T) + 50  # the genset counts: about 76 MVA more
+    hand = _sk_mv2_by_hand()
+    # each part of the oracle moves it by more than the tolerance
+    assert hand / _sk_mv2_by_hand(k_g=False) - 1 < -0.03  # K_G: -3.4 %
+    assert hand / _sk_mv2_by_hand(k_t=False) - 1 > 0.02  # K_T: +2.6 %
+    assert hand / _sk_mv2_by_hand(genset=False) - 1 > 1.0  # the genset: +110 %
+    assert _at(got[0], "MV2")["sk_intact_mva"] == pytest.approx(hand, rel=5e-3)
     assert _genset_notes(got[3]) == [GENSET_SK_NOTE.format(period=2030, names="GEN")]
 
 
+def _idle(hourly, how):
+    """``hourly`` over two hours, the genset producing in hour 0 only (or
+    with no row, a NaN or a negative value in hour 1)."""
+    gen = hourly["unit_id"] == "GEN"
+    one = hourly.assign(hour=1)
+    if how == "missing":
+        one = one[~gen]
+    else:
+        one = one.assign(
+            p_mw=one["p_mw"].where(
+                ~gen, {"zero": 0.0, "nan": math.nan, "negative": -1.0}[how]
+            )
+        )
+    return pd.concat([hourly, one], ignore_index=True)
+
+
+@pytest.mark.parametrize("how", ["zero", "nan", "negative", "missing"])
 @pytest.mark.parametrize("bus", ["MV3", "MV2"])  # off every PoC, and on one
-def test_a_genset_not_built_or_not_running_adds_nothing(bus):
-    plain = _strength(_spec(extra_bus=True))
-    c = build_campus(_genset_spec(bus))
+def test_a_genset_not_running_in_every_hour_adds_nothing(bus, how):
+    spec = _genset_spec(bus)
+    no_gen = copy.deepcopy(spec)
+    del no_gen["campus"]["units"]["GEN"]
+    base = _strength(no_gen)
+    c = build_campus(spec)
+    idle = _gc03_strength(c, _idle(_hourly(c), how))
+    for poc in ("GRID", "MV1", "MV2"):
+        assert _at(idle[0], poc)["sk_intact_mva"] == pytest.approx(
+            _at(base[0], poc)["sk_intact_mva"], rel=1e-9
+        )
+    assert _genset_notes(idle[3]) == [GENSET_IDLE_NOTE.format(period=2030, names="GEN")]
+
+
+def test_a_genset_not_built_adds_nothing_and_says_nothing():
+    spec = _genset_spec("MV2")
+    no_gen = copy.deepcopy(spec)
+    del no_gen["campus"]["units"]["GEN"]
+    base = _strength(no_gen)
+    c = build_campus(spec)
     hourly = _hourly(c)
     gen = hourly["unit_id"] == "GEN"
     unbuilt = _gc03_strength(
         c,
         hourly.assign(status=(~gen).astype(int), p_mw=hourly["p_mw"].where(~gen, 0.0)),
     )
-    # running in one hour and standing still in the next: the weakest hour counts
-    idle = _gc03_strength(
-        c,
-        pd.concat(
-            [hourly, hourly.assign(hour=1, p_mw=hourly["p_mw"].where(~gen, 0.0))]
-        ),
+    for poc in ("GRID", "MV1", "MV2"):
+        assert _at(unbuilt[0], poc)["sk_intact_mva"] == pytest.approx(
+            _at(base[0], poc)["sk_intact_mva"], rel=1e-9
+        )
+    assert _genset_notes(unbuilt[3]) == [] and _genset_notes(base[3]) == []
+
+
+def test_running_is_decided_per_period():
+    c = build_campus(_genset_spec("MV2"))
+    h = _hourly(c)
+    gen = h["unit_id"] == "GEN"
+    two = pd.concat(
+        [h, h.assign(period=2035, p_mw=h["p_mw"].where(~gen, 0.0))], ignore_index=True
     )
-    for poc in ("GRID", "MV1", "MV2"):
-        for got in (unbuilt, idle):
-            assert _at(got[0], poc)["sk_intact_mva"] == pytest.approx(
-                _at(plain[0], poc)["sk_intact_mva"], rel=1e-9
-            )
-    assert _genset_notes(unbuilt[3]) == [] and _genset_notes(plain[3]) == []
-    assert _genset_notes(idle[3]) == [GENSET_IDLE_NOTE.format(period=2030, names="GEN")]
+    got = _gc03_strength(c, two)
+    sk = got[0].set_index(["period", "poc"])["sk_intact_mva"]
+    assert sk[(2030, "MV2")] == pytest.approx(_sk_mv2_by_hand(), rel=5e-3)
+    assert sk[(2035, "MV2")] == pytest.approx(_sk_mv2_by_hand(genset=False), rel=5e-3)
+    assert _genset_notes(got[3]) == [
+        GENSET_SK_NOTE.format(period=2030, names="GEN"),
+        GENSET_IDLE_NOTE.format(period=2035, names="GEN"),
+    ]
 
 
-def test_a_running_genset_off_every_poc_still_strengthens_them():
-    plain = _strength(_spec(extra_bus=True))
-    c = build_campus(_genset_spec("MV3"))
-    got = _gc03_strength(c, _hourly(c))
-    for poc in ("GRID", "MV1", "MV2"):
-        assert _at(got[0], poc)["sk_intact_mva"] > _at(plain[0], poc)["sk_intact_mva"]
+def _outage_levels(monkeypatch, spec):
+    """``_gc03_strength`` on ``spec``, with the N-1 table it judged."""
+    from gridspine.static import strength_outages
+
+    seen, orig = [], strength_outages.outage_fault_levels
+
+    def spy(*a, **k):
+        seen.append(orig(*a, **k))
+        return seen[-1]
+
+    monkeypatch.setattr(strength_outages, "outage_fault_levels", spy)
+    c = build_campus(spec)
+    _gc03_strength(c, _hourly(c))
+    return seen[0].outages
+
+
+def test_an_outage_of_the_genset_feed_takes_its_contribution_away(monkeypatch):
+    # GEN on MV3 hangs on T3 alone: with T3 out it feeds no PoC
+    spec = _genset_spec("MV3")
+    no_gen = copy.deepcopy(spec)
+    del no_gen["campus"]["units"]["GEN"]
+    got, base = _outage_levels(monkeypatch, spec), _outage_levels(monkeypatch, no_gen)
+    feed = [o for o in got.index if str(o) == "GRID-MV3-1"]  # T3
+    other = [o for o in got.index if str(o) == "GRID-MV1-1"]  # T1A
+    assert len(feed) == 1 and len(other) == 1
+    for poc in ("MV1", "MV2"):
+        assert got.at[feed[0], poc] == pytest.approx(base.at[feed[0], poc], rel=1e-9)
+        assert got.at[other[0], poc] > base.at[other[0], poc] * 1.01
+
+
+def test_the_genset_template_round_trips_through_set_sc_params():
+    from gridspine.ingest.pandapower_source import registry_from_net
+    from gridspine.static.island_sc import genset_machine
+    from gridspine.static.shortcircuit import set_sc_params
+
+    c = build_campus(_genset_spec("MV2"))
+    net = copy.deepcopy(c.net)
+    i = net.sgen.index[net.sgen["name"] == "GEN"][0]
+    g = genset_machine(c, net, i)
+    net.sgen.drop(index=net.sgen.index, inplace=True)
+    templates = campus_study._gc03_templates(c, net)
+    row = templates.units.loc["GEN"]
+    assert row["model"] == "GENROU" and row["mbase_mva"] == pytest.approx(S_GEN)
+    net.gen.loc[g, ["sn_mva", "xdss_pu", "rdss_ohm", "cos_phi"]] = (
+        0.0  # set_sc_params must write them back
+    )
+    set_sc_params(net, registry_from_net(net), templates)
+    got = net.gen.loc[g]
+    assert got["sn_mva"] == pytest.approx(S_GEN) and got["xdss_pu"] == pytest.approx(
+        XD_GEN
+    )
+    assert got["rdss_ohm"] == pytest.approx(RX_GEN * XD_GEN * 20.0**2 / S_GEN)
+    assert got["cos_phi"] == pytest.approx(0.8) and got["vn_kv"] == pytest.approx(20.0)
+
+
+def test_a_campus_without_a_genset_keeps_its_strength_output_byte_equal():
+    # pinned from master d0d98072 (before GC-13), tests/gridspine/fixtures/gc13_master_pins.json
+    per_poc, groups, method, notes = _strength(_spec(extra_bus=True))
+    pin = PINS["strength_no_genset"]
+    assert per_poc.to_csv(index=False) == pin["per_poc"]
+    assert groups.to_csv(index=False) == pin["groups"]
+    assert method == pin["method"] and notes == pin["notes"]

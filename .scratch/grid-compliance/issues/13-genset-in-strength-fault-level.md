@@ -3,7 +3,7 @@
 
 # GC-13 A running genset in the strength fault level (S_k''min)
 
-Status: done (GC-13 PR: a genset running in every hour of the period feeds S_k''min as a synchronous `gen` with K_G; GK A rules the minimum-case assumption in review)
+Status: done (branch `claude/gc13-genset-sk`: a genset producing in every hour of the period feeds S_k''min as a synchronous `gen` with K_G; GK A ruled A)
 Type: task
 Parent: `.scratch/grid-compliance/spec.md`
 Blocked by: GC-03 PR2 (`claude/gc03-campus-steps`)
@@ -33,3 +33,24 @@ study says it runs. Decide (with GK A) whether the minimum case assumes the gens
 ## Triage (2026-11-20, master 87cf52a7)
 
 Checked by code reading only. Acceptance is the 'Done when' section above. Still true: `GENSET_SK_NOTE` still states the grid-only SCR. Blocked by GC-03 PR2: merged (#1589), so unblocked. Gated: GK A. Blocked by: none.
+
+## Comments
+
+**GK A (39), plan GO (2026-11-27), conditions G1–G7.** The minimum case assumes a genset runs only
+when it produces in every hour of the period (answer A): S_k''min is the weakest credible state. Counting
+a standby set is a follow-up if a user asks for it.
+
+- G1 (running): a genset counts in a period only when p_mw > 0 in every snapshot of that period; a
+  missing, NaN or ≤ 0 hour means not running (fail closed); no rows for the period, not counted. Decided
+  per period.
+- G2 (refactor): `machine_net` stays behaviour-identical after the lift into `genset_machine`; the
+  island_sc tests pass unchanged, plus a pin of the gen, trafo and sgen tables built from master.
+- G3 (N-1): an outage that cuts the genset's feed carries no genset contribution; an outage elsewhere
+  keeps it.
+- G4 (hand calculation): S_k'' computed without pandapower; the fixture makes K_G, K_T and the genset
+  each move the result by more than 0.5 %. Mutants to kill: K_G dropped, "every hour" to "any hour",
+  the running filter removed, the kind-"gen" row dropped.
+- G5 (templates): the GENROU row round-trips through `set_sc_params` to the spec's values.
+- G6 (notes): a campus with no genset keeps byte-equal strength output, notes included; the note names
+  each counted genset; a built genset not counted gets the not-running reason.
+- G7 (scope): `campus_fault_levels` and `psspy_scripts.py` unchanged; a release-note fragment.

@@ -2048,10 +2048,12 @@ def _gc03_strength(campus, hourly):
         sl = block[block["hour"] == hour][["unit_id", "p_mw", "status"]].reset_index(drop=True)
         net, dispatch, loads, registry = _gc03_hour_net(copy.deepcopy(campus), sl, hour)
         # every converter out of the fault level, and a genset not running in
-        # every hour of the period; a running genset is a synchronous machine
+        # every hour of the period (a missing, NaN or non-positive hour is
+        # not running: fail closed); a running genset is a synchronous machine
         g_rows = block[block["unit_id"].astype(str).isin(gensets & built)]
-        on = (g_rows["status"] == 1) & (g_rows["p_mw"] > P_TOL_MW)
-        running = set(g_rows["unit_id"].astype(str)) - set(g_rows.loc[~on, "unit_id"].astype(str))
+        on = g_rows[(g_rows["status"] == 1) & (g_rows["p_mw"] > P_TOL_MW)]
+        hours = set(block["hour"])
+        running = {str(u) for u, h in on.groupby(on["unit_id"].astype(str))["hour"] if set(h) == hours}
         for i in net.sgen.index[net.sgen["name"].astype(str).isin(running)]:
             genset_machine(campus, net, i)
         net.sgen.drop(index=net.sgen.index, inplace=True)
