@@ -49,6 +49,8 @@ PUT    /api/campus-electrical/{name}/library  write path:name
 POST   /api/campus-electrical/{name}/library/reset  write path:name
 POST   /api/campus-electrical/{name}/milp  write path:name
 POST   /api/campus-electrical/{name}/milp/cancel  write path:name
+POST   /api/campus-electrical/{name}/psse/{bundle}/emt/judge  write path:name
+POST   /api/campus-electrical/{name}/psse/{bundle}/emt/results  write path:name
 POST   /api/campus-electrical/{name}/run  write path:name
 DELETE /api/changelog/  none the org's change log
 POST   /api/chat/import  write active

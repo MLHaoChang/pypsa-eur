@@ -27,8 +27,14 @@ def _gc08(project) -> list[Table] | None:
     return gc08_tables(project)
 
 
+def _gc07(project) -> list[Table] | None:
+    from services.grid_compliance.judgment_source import gc07_tables
+
+    return gc07_tables(project)
+
+
 #: package id → provider, one line per package as it lands.
-SOURCES: dict[str, Provider] = {"GC-08": _gc08}
+SOURCES: dict[str, Provider] = {"GC-07": _gc07, "GC-08": _gc08}
 
 
 def read(project, package: str) -> tuple[str, list[Table] | None]:

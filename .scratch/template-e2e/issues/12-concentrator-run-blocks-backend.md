@@ -3,7 +3,7 @@
 
 # 12 — Mining concentrator run never finishes in a usable time and blocks the app
 
-Status: ready-for-agent; audit 2026-11-25: slice (c) stage and elapsed time landed (#1627, #1630); left: (a) shorter default horizon, (b) reliable Abort and responsive backend (no merged PR found)
+Status: ready-for-agent; (b) reliable Abort and responsive backend done (#2091, efef038b); (c) stage and elapsed time done (#1627, #1630); left: (a) shorter default horizon, carried by issue 09 (b)
 Impact: high
 Templates: eh_concentrator_staged (26,280 snapshots)
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
@@ -31,3 +31,13 @@ Checked by code reading only; the app was not re-run. Three parts, slice them (P
 ## Audit (2026-11-25)
 
 - 2026-11-25 audit: #1627 and #1630 in master log (RunStrip.tsx); no merged PR found for horizon or Abort; code not re-run.
+
+## Part (b) done (2026-11-27, #2091, merged efef038b)
+
+- The EH study solves its private copy under its own lock. The project's mutation lock is held only while the copy is made, so edits, autosave, project delete and the study's Abort answer during a run (`services/adequacy/eh_study.py`).
+- Delete of a project whose resident context runs a study is refused with 409 before any destructive step (`routers/projects.py`).
+- Tests: `pypsa-gui/backend/tests/test_eh_study_releases_project_lock.py`.
+- Follow-ups:
+  - Bind a private solving context that carries the project's `storage_dir`, `solver_state` and the private lock, so the study's transient marks stay off the live project (review-gk #992). A bare context hides the island config, so it was reverted in #2091.
+  - Other study runners still solve under the shared lock.
+  - The Guided Abort has no "Aborting…" state, and project switch or delete during a study gets a 409 rather than aborting the study (UX).

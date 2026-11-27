@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A running energy-hub study no longer holds the project lock while it solves its private copy, so edits, autosave, project delete and Abort stay responsive during a long run (template-e2e 12 (b)). Deleting a project whose study is running is refused with a message to abort the study first.

@@ -45,3 +45,11 @@ mark a deliverable "judged" from it.
 ## Triage (2026-11-20, master 87cf52a7)
 
 Checked by code reading only. Acceptance is the 'Done when' section above. Still true: `gridspine.drivers.readback.judge_pack_results` writes only to the run directory and the backend does not store or serve the judgment. GC-07 is done. Overlaps GC-09 (09-compliance-workflow-ui, backend open in #1577): check that PR first and reuse its route; if it already serves the judgment, set this done. Gated: GK B. Blocked by: none.
+
+## Follow-ups (2026-11-27, PR #2094)
+
+- An "Upload EMT results" UI for each PSS/E bundle, as its own PR after #2094
+  merges (GK ruling). UX 32's rules for it: the counts read
+  "2 pass · 1 fail · 3 not judged", each not-judged row shows its reason as
+  visible text, and each chip has a visible key.
+- Set this issue's Status to done when #2094 merges.
