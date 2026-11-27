@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A checked cost comparison now needs a baseline with the same window, cost basis, period (snapshot count and weight basis) and unit; a missing baseline total reads unavailable, and a percent of a percent is refused.

@@ -313,6 +313,33 @@ def test_incompatible_basis_does_not_choose_another_baseline(solved, conversatio
     clarified(frames, provider, "previous_compatible_run_required")
 
 
+@pytest.mark.parametrize("key", ["period", "unit"])
+def test_another_period_or_unit_does_not_compare(solved, conversation, monkeypatch, key):
+    # AA-09 S2: equal scope keys are not enough; the sealed window and unit
+    # (calculations.comparison_mismatch, unit-tested in test_comparison_guards)
+    # are checked before any model call.
+    from harness import calculations
+
+    first, _ = conversation("Check this run.", VALUES, checked_scope=scope(solved))
+    assert approval(first)["receipt"]["request_complete"]
+    solved.network.generators.at["G1", "p_nom"] = 30
+    assert solved.network.optimize(solver_name="highs") == ("ok", "optimal")
+    workflow_tools._record_solve_inputs(
+        solved.network, solved.solver_state["solver_config"]
+    )
+    seen = []
+    real = calculations.comparison_mismatch
+
+    def mismatch(raw, request_scope, baseline):
+        seen.append(real(raw, request_scope, baseline))
+        return key
+
+    monkeypatch.setattr(calculations, "comparison_mismatch", mismatch)
+    frames, provider = conversation("Compare that with the previous run.")
+    assert seen == [None]
+    clarified(frames, provider, "previous_compatible_run_required")
+
+
 def test_expired_baseline_does_not_fall_back_to_another_run(
     solved, conversation, monkeypatch
 ):

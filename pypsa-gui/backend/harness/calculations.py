@@ -83,7 +83,8 @@ COST_METRICS = {
 COMPARISON_METRICS = {
     "cost_delta": {
         "formula_id": "candidate-minus-baseline-cost/1",
-        "unit": "EUR",
+        # A delta keeps the compared metric's unit (AA-09 S2).
+        "unit": COST_METRICS["total_cost"]["unit"],
         "label": "Cost change (candidate minus baseline)",
         "dependencies": ("total_cost",),
     },
@@ -103,6 +104,11 @@ DEFINITIONS = {**METRICS, **COST_METRICS, **COMPARISON_METRICS, **storage.METRIC
                **readiness.METRICS, **time_to_power.METRICS, **losses.METRICS, **system_cost.METRICS,
                **renewable_share.METRICS}
 COST_PROFILES = frozenset({"generator-cost/1", "network-linear-cost/1", storage_costs.PROFILE})
+# AA-09 S2: a retained baseline is comparable only on these scope keys, the same
+# window identity (fact_identity.window: boundaries, snapshot count, weight basis)
+# and the compared metric's unit. The conversation and the calculation share them.
+COMPARISON_KEYS = ("profile", "project_id", "entity_id", "start", "end", "cost_basis")
+COMPARED_METRIC = "total_cost"
 STORAGE_PROFILES = frozenset({storage.PROFILE, storage_costs.PROFILE})
 PROFILES = {
     PROFILE: tuple(METRICS),
@@ -716,17 +722,7 @@ def _comparison(raw, scope, owner):
         not base_scope.get("retain")
         or base_scope.get("comparison_evidence_id")
         or scope["profile"] == PROFILE
-        or any(
-            base_scope.get(k) != scope.get(k)
-            for k in (
-                "profile",
-                "project_id",
-                "entity_id",
-                "start",
-                "end",
-                "cost_basis",
-            )
-        )
+        or comparison_mismatch(raw, scope, baseline)
     ):
         raise ValueError("incompatible_comparison_basis")
     return {
@@ -738,6 +734,45 @@ def _comparison(raw, scope, owner):
             "scope": base_scope,
         },
     }
+
+
+def _comparison_index(raw, scope):
+    """The candidate's captured snapshot index, as the evidence record reads it."""
+    if scope["profile"] in STORAGE_PROFILES:
+        return raw["storage_unit"]["index"]
+    return next(iter(raw["generators"].values()))["index"]
+
+
+def comparison_mismatch(raw, scope, baseline):
+    """The first of window/basis/period/unit on which a sealed baseline record
+    differs from the candidate (its raw and scope), or None when comparable.
+
+    Period is the record's stored window (AA-05 S5a): a baseline without one, or
+    an index that cannot be read, is a mismatch, never a match."""
+    from harness import fact_identity
+
+    base_scope = baseline.get("request_scope") or {}
+    for key in COMPARISON_KEYS:
+        if base_scope.get(key) != scope.get(key):
+            return key
+    try:
+        base_window = baseline["window"]
+        window = fact_identity.window(_comparison_index(raw, scope), scope)
+        if base_window["snapshots"] is None or any(
+            base_window[k] != window[k] for k in ("start", "end", "snapshots")
+        ):
+            return "period"
+        base_basis = base_window["weight_basis"].get(COMPARED_METRIC)
+        if base_basis is not None and base_basis != window["weight_basis"].get(COMPARED_METRIC):
+            return "period"
+    except (KeyError, TypeError, ValueError, AttributeError, StopIteration, IndexError):
+        return "period"
+    # A baseline without the compared fact stays comparable: its slot reads
+    # unavailable (baseline_total_unavailable), never 0.
+    units = {f.get("unit") for f in baseline.get("facts") or () if f.get("metric") == COMPARED_METRIC}
+    if units - {DEFINITIONS[COMPARED_METRIC]["unit"]}:
+        return "unit"
+    return None
 
 
 def scoped_calculate(raw, scope):
@@ -913,9 +948,15 @@ def _comparison_values(raw, available, reasons):
     if "comparison" in comparison["raw"]:
         raise ValueError("nested_comparison")
     baseline_facts, _ = scoped_calculate(comparison["raw"], comparison["scope"])
-    base = next((f["value"] for f in baseline_facts if f["metric"] == "total_cost"), None)
-    if base is not None and "total_cost" in available:
-        available["cost_delta"] = available["total_cost"] - base
+    if DEFINITIONS[COMPARED_METRIC]["unit"] == "%":
+        # A change of a percentage is in percentage points, and a percent of a
+        # percent is not a figure this profile states: both are refused.
+        reasons.update({m: "derived_unit_mismatch" for m in COMPARISON_METRICS})
+        return
+    # A missing or None baseline total reads unavailable, never 0.
+    base = next((f["value"] for f in baseline_facts if f["metric"] == COMPARED_METRIC), None)
+    if base is not None and COMPARED_METRIC in available:
+        available["cost_delta"] = available[COMPARED_METRIC] - base
         if base != 0:
             available["cost_change_percent"] = available["cost_delta"] / abs(base) * 100
     reasons["cost_delta"] = "baseline_total_unavailable"
