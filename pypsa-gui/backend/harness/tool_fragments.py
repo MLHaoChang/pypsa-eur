@@ -239,12 +239,10 @@ def merge_dispatchers(
     """
     lock_gated: set[str] = set()
 
-    def order(stem: str) -> tuple:  # as TOOLS: spliced first, then ORDER
-        return (
-            stem not in spliced,
-            getattr(schema_modules.get(stem), "ORDER", 0),
-            stem,
-        )
+    def order(stem: str) -> tuple:
+        # As TOOLS: the rest in ORDER. A spliced family declares no ORDER, so it
+        # sorts first; it is only checked here, so its place adds nothing.
+        return (getattr(schema_modules.get(stem), "ORDER", 0), stem)
 
     for stem in sorted(set(modules) | set(schema_modules), key=order):
         mod, schema = modules.get(stem), schema_modules.get(stem)
