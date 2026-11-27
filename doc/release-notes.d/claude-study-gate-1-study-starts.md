@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A study, tornado, supply-architecture comparison, system-type map or sensitivity sweep on a project with no site location is refused with the same `site_location_missing` error as Run, until the location is set.
