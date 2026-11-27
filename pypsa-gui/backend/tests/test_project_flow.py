@@ -876,8 +876,11 @@ def test_a_missing_location_blocks_run_until_it_is_set(client, site, edit):
         assert r.status_code == 422, r.text
         d = r.json()["detail"]
         assert d["code"] == d["error_kind"] == "site_location_missing" and d["field"] == "x"
-        assert client.post("/api/simulation/run_ac_pf").status_code == 422
-        assert client.post("/api/results/eh_study", json={}).status_code == 422
+        for path, body in (("/api/simulation/run_ac_pf", None), ("/api/results/eh_study", {})):
+            r = client.post(path, json=body) if body is not None else client.post(path)
+            assert r.status_code == 422, (path, r.text)
+            d = r.json()["detail"]
+            assert isinstance(d, dict) and d["code"] == d["error_kind"] == "site_location_missing", (path, d)
     refused()
     put = lambda confirmed: client.put(f"/api/projects/{name}/site-anchor", json={
         "anchor": {"lat": 52.52, "lng": 13.4, "source": "manual", "confirmed": confirmed},
@@ -891,6 +894,10 @@ def test_a_missing_location_blocks_run_until_it_is_set(client, site, edit):
     assert body["run_ready"] is True and body["notes"] == []
     assert "site_location_missing" not in _codes(body, "project")
     assert client.post("/api/simulation/run").status_code == 200   # the server agrees
+    # Located: the study start no longer refuses with the location code.
+    r = client.post("/api/results/eh_study", json={})
+    detail = r.json().get("detail") if r.status_code == 422 else None
+    assert not (isinstance(detail, dict) and detail.get("code") == "site_location_missing")
 
 
 @pytest.mark.unlocated
