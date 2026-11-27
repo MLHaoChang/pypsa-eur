@@ -5863,6 +5863,8 @@ TOOL_ROUTES: dict[str, list] = {
     ],
     "export_report_docx": [("POST", "/api/projects/{name}/reports/{report_id}/export")],
     "delete_report": [("DELETE", "/api/projects/{name}/reports/{report_id}")],
+    # report templates (5): harness/catalogue_tools/report_templates.py
+    **_FRAGMENTS.splice_routes("report_templates"),
     # report round trip (4) — WP13: the round-trip routes, called in-process;
     # `list_report_roundtrips` is the uploads list filtered to one kind and
     # `export_report_pdf` is the export route with `format: pdf`.
@@ -6168,6 +6170,8 @@ _SERVICE_CALL_NON_NETWORK_WRITES = frozenset({
 _SERVICE_CALL_NETWORK_WRITES, _SERVICE_CALL_NON_NETWORK_WRITES = _FRAGMENTS.merge(
     TOOLS, TOOL_ROUTES, _SERVICE_CALL_NETWORK_WRITES, _SERVICE_CALL_NON_NETWORK_WRITES)
 FRAGMENT_NETWORK_WRITES = _FRAGMENTS.network_writes
+# The schema side, for chat_tools' dispatcher merge (which families are spliced).
+SCHEMA_FRAGMENTS = _FRAGMENTS
 
 
 def tool_edits_network(tool_name: str) -> bool:

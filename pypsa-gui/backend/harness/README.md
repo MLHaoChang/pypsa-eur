@@ -899,7 +899,9 @@ to chat_tools: unspliced fragments are appended after the monolith in `ORDER`
 selection tie-breaks, which `wiring._bounded_tools` resolves toward the earlier
 index. Two PRs that pick the same ORDER fail the import on the trial merge; the
 later one takes the next counter. A family moved out of the monolith is spliced
-back at its old place (`*_FRAGMENTS.splice("<stem>")`) and declares no ORDER;
+back at its old place in TOOLS (`_FRAGMENTS.splice("<stem>")`), TOOL_ROUTES
+(`**_FRAGMENTS.splice_routes("<stem>")`) and DISPATCHERS
+(`**_DISPATCH_FRAGMENTS.splice("<stem>")`), and declares no ORDER;
 the move PR shows `smoke/tool_registry_digest.py` equal on master and the branch.
 The assistant can navigate all current Results tabs and panel targets, including
 adequacy/FMEA, workspace/settings/GridSpine/reports/campus electrical. Invalid
