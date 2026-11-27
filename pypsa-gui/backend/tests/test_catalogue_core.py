@@ -39,10 +39,9 @@ def _mentions(text: str, names: set[str]) -> list[str]:
 
 
 def test_one_entry_per_field_row():
-    """One entry per asset-form row plus one per settings row (01a-2: shape-preserving update)."""
-    from services.asset_schema.settings import SETTINGS
-
-    assert len(ENTRIES) == sum(len(fields_for(c)) for c in known_components()) + len(SETTINGS)
+    """One entry per asset-form row plus the 34 settings rows (01a-2: shape-preserving update)."""
+    rows = sum(len(fields_for(c)) for c in known_components())
+    assert len(ENTRIES) == rows + 34
 
 
 @pytest.mark.parametrize("e", ENTRIES, ids=lambda e: e.id)
