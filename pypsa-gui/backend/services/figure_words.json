@@ -35,9 +35,9 @@
       "basis": "investment case · nominal basis"
     },
     "carrier_lcoe": {
-      "name": "Carrier LCOE (cash cost)",
+      "name": "Carrier LCOE (before financing and tax)",
       "unit": "{currency}/MWh",
-      "basis": "Annualised capital and fixed O&M, plus marginal cost (fuel and variable O&M) and, for storage, charging energy at the bus price. Per MWh the carrier produced. No financing or tax"
+      "basis": "Annualised capital and fixed O&M, plus fuel and variable O&M, per MWh the carrier produced. Storage also counts its charging energy at the bus price. No financing or tax."
     },
     "study_cost_per_mwh": {
       "name": "Cost per MWh served (study)",
