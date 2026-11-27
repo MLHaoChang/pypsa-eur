@@ -70,9 +70,25 @@ LCOE_METRICS = {
         "label": "LCOE, real (engine definition)",
     },
 }
-# metric -> the ruled figure (figure_words.json); the other metrics keep their /1 labels.
+# metric -> the ruled figure (figure_words.json) (/2 only).
 RULED_FIGURES = {"project_npv": "project_npv", "lcoe_nominal": "lcoe_nominal", "lcoe_real": "lcoe_real"}
-METRICS_V2 = {m: ({**d, "label": FW.name(RULED_FIGURES[m])} if m in RULED_FIGURES else d) for m, d in METRICS.items()}
+# The other /2 labels are the Investment tab's (financeModel.ts HEADLINES, pinned by
+# financeModel.contractLabels.test.ts); the card prints the unit as is, so IRRs carry display
+# words within answerAssurance.ts's 16 characters (UX (32)).
+TAB_LABELS = {
+    "equity_npv": "Equity NPV, post-tax (at cost of equity)",
+    "equity_irr": "Equity IRR, post-tax",
+    "project_irr": "Unlevered project IRR, post-tax",
+}
+IRR_UNIT = "/yr (0.01 = 1 %)"
+METRICS_V2 = {
+    m: {
+        **d,
+        "label": FW.name(RULED_FIGURES[m]) if m in RULED_FIGURES else TAB_LABELS[m],
+        **({"unit": IRR_UNIT} if m.endswith("_irr") else {}),
+    }
+    for m, d in METRICS.items()
+}
 LCOE_METRICS_V2 = {
     m: ({**d, "label": FW.name(RULED_FIGURES[m])} if m in RULED_FIGURES else d) for m, d in LCOE_METRICS.items()
 }

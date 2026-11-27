@@ -92,15 +92,16 @@ SITE = {"grid_import_energy": (15, "MWh"), "peak_grid_import": (6, "MW"), "expor
         "hours_at_import_limit": (3, "h")}
 # A stored investment-case report with equity cash -100, 150 and project cash -100, 175,
 # both at 25 %: NPVs -100 + 150/1.25 = 20 and -100 + 175/1.25 = 40 USD; IRRs 0.5 and 0.75.
-INVESTMENT = {"equity_npv": (20, "USD"), "project_npv": (40, "USD"), "equity_irr": (0.5, "fraction/year"),
-              "project_irr": (0.75, "fraction/year")}
+# The /2 IRRs carry display words for the unit (AA 28, UX (32)): 0.5 /yr is 50 % a year.
+INVESTMENT = {"equity_npv": (20, "USD"), "project_npv": (40, "USD"), "equity_irr": (0.5, "/yr (0.01 = 1 %)"),
+              "project_irr": (0.75, "/yr (0.01 = 1 %)")}
 # The same report retains value 0, 125 and generation 0, 10 MWh: (125/1.25 - 20) / (10/1.25)
 # = 80 / 8 = 10 USD/MWh nominal; at 25 % inflation the real rate is 0: 80 / 10 = 8 USD/MWh.
 LCOE = {"lcoe_nominal": (10, "USD/MWh"), "lcoe_real": (8, "USD/MWh")}
 # COPT fleet {60 MW q 0.5, 40 MW q 0.25}: available 100/60/40/0 MW with 0.375/0.125/0.375/0.125.
 # Residuals 70 and 100 MW at weight 2: LOLP 0.625 both hours, LOLE 2.5 h; EUE 21.25 + 40 = 61.25
 # per unit weight, 122.5 MWh.
-COPT = {"screening_lole": (2.5, "h"), "screening_eue": (122.5, "MWh"), "screening_lolp_max": (0.625, "probability")}
+COPT = {"screening_lole": (2.5, "h"), "screening_eue": (122.5, "MWh"), "screening_lolp_max": (0.625, "(scale 0 to 1)")}
 # The data-centre template's saved scorecard as the route reads it (25 rows), with the BESS at the
 # size a solve leaves (p_nom_opt 10 MW, set by the pilot fixture). Two rows a declared rule checks:
 # "scr" 250 / (4 + 40 + 10) MVA (PV, UPS battery, BESS; derived) = 4.63 >= 3.0 → pass, and
@@ -211,6 +212,9 @@ V2_LABELS = {
     "project_npv": "Project NPV at the WACC, after tax (unlevered)",
     "lcoe_nominal": "LCOE (finance-consistent, nominal)", "lcoe_real": "LCOE (real)",
     "screening_lole": "Screening expected shortfall over the modelled horizon (COPT)",
+    "screening_eue": "Screening expected unserved energy over the modelled horizon (COPT)",
+    "equity_npv": "Equity NPV, post-tax (at cost of equity)", "equity_irr": "Equity IRR, post-tax",
+    "project_irr": "Unlevered project IRR, post-tax",
 }
 
 

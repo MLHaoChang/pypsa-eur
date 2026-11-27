@@ -55,6 +55,9 @@ METRICS = {
 METRICS_V2 = {
     **METRICS,
     "screening_lole": {**METRICS["screening_lole"], "label": FW.name("screening_shortfall")},
+    "screening_eue": {**METRICS["screening_eue"], "label": FW.name("screening_eue")},
+    # The card prints the unit as is: display words, within answerAssurance.ts's 16 characters (UX (32)).
+    "screening_lolp_max": {**METRICS["screening_lolp_max"], "unit": "(scale 0 to 1)"},
 }
 
 

@@ -22,7 +22,7 @@ describe('the one source', () => {
   it('the frontend reads exactly these figures', () => {
     expect(Object.keys(source.figures).sort()).toEqual([
       'carrier_lcoe', 'expected_shortfall', 'lcoe_nominal', 'lcoe_real', 'project_npv', 'project_npv_pre_tax',
-      'screening_shortfall', 'study_cost_per_mwh',
+      'screening_eue', 'screening_shortfall', 'study_cost_per_mwh',
     ])
   })
 

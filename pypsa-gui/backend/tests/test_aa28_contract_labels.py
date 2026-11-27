@@ -38,6 +38,22 @@ V2_FIGURES = {
     ("investment-lcoe/2", "lcoe_real"): "lcoe_real",
     ("investment-lcoe/2", "lcoe_nominal"): "lcoe_nominal",
     ("copt-screening/2", "screening_lole"): "screening_shortfall",
+    ("copt-screening/2", "screening_eue"): "screening_eue",
+}
+# The other /2 investment labels are the Investment tab's words (financeModel.ts HEADLINES; the
+# frontend's financeModel.contractLabels.test.ts pins the parity from the snapshot), UX (32).
+V2_TAB_LABELS = {
+    ("investment-case/2", "equity_npv"): "Equity NPV, post-tax (at cost of equity)",
+    ("investment-case/2", "equity_irr"): "Equity IRR, post-tax",
+    ("investment-case/2", "project_irr"): "Unlevered project IRR, post-tax",
+}
+# The card prints a fact's unit as is, so /2 swaps the raw unit words for display words that fit
+# answerAssurance.ts's 16 characters (UX (32)). The NPVs' "report currency" becomes the report's
+# own currency at run time, in /1 as in /2.
+V2_UNITS = {
+    ("investment-case/2", "equity_irr"): ("fraction/year", "/yr (0.01 = 1 %)"),
+    ("investment-case/2", "project_irr"): ("fraction/year", "/yr (0.01 = 1 %)"),
+    ("copt-screening/2", "screening_lolp_max"): ("probability", "(scale 0 to 1)"),
 }
 # sha256 of each frozen /1 profile entry of the snapshot, taken on master before AA 28.
 V1_PROFILE_SHA256 = {
@@ -96,10 +112,14 @@ def test_a_v2_profile_differs_from_its_v1_only_in_labels(v2, v1):
             calculations.definition(metric, v1),
             calculations.definition(metric, v2),
         )
-        assert {k: v for k, v in old.items() if k != "label"} == {
-            k: v for k, v in new.items() if k != "label"
+        assert {k: v for k, v in old.items() if k not in ("label", "unit")} == {
+            k: v for k, v in new.items() if k not in ("label", "unit")
         }
-        if (v2, metric) not in V2_FIGURES:
+        assert (old["unit"], new["unit"]) == V2_UNITS.get((v2, metric), (old["unit"], old["unit"]))
+        assert len(new["unit"]) <= 16  # answerAssurance.ts refuses a longer unit
+        if (v2, metric) in V2_TAB_LABELS:
+            assert new["label"] == V2_TAB_LABELS[v2, metric]
+        elif (v2, metric) not in V2_FIGURES:
             assert old["label"] == new["label"], (
                 v2,
                 metric,

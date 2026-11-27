@@ -245,6 +245,7 @@ HARNESS_FIGURES = {
     ("investment-lcoe/2", "lcoe_real"): "lcoe_real",
     ("investment-lcoe/2", "lcoe_nominal"): "lcoe_nominal",
     ("copt-screening/2", "screening_lole"): "screening_shortfall",
+    ("copt-screening/2", "screening_eue"): "screening_eue",
 }
 
 
@@ -256,13 +257,14 @@ def _contract_metrics():
         (inv.LCOE_PROFILE_V2, "lcoe_real"): inv.LCOE_METRICS_V2["lcoe_real"],
         (inv.LCOE_PROFILE_V2, "lcoe_nominal"): inv.LCOE_METRICS_V2["lcoe_nominal"],
         (copt.PROFILE_V2, "screening_lole"): copt.METRICS_V2["screening_lole"],
+        (copt.PROFILE_V2, "screening_eue"): copt.METRICS_V2["screening_eue"],
     }
 
 
 def test_every_checked_metric_of_a_figure_is_mapped_to_it():
     from harness import copt_calculations as copt, investment_calculations as inv
 
-    words = re.compile(r"\b(NPV|LOLE|LCOE|shortfall)\b")
+    words = re.compile(r"\b(NPV|LOLE|LCOE|shortfall|unserved energy|EUE)\b")
     printed = {
         (inv.PROFILE_V2, m)
         for m, d in inv.METRICS_V2.items()

@@ -6830,7 +6830,7 @@
    "definitions": {
     "screening_eue": {
      "formula_id": "copt-screening-eue/1",
-     "label": "Screening EUE over the modelled horizon (COPT)",
+     "label": "Screening expected unserved energy over the modelled horizon (COPT)",
      "unit": "MWh"
     },
     "screening_lole": {
@@ -6841,7 +6841,7 @@
     "screening_lolp_max": {
      "formula_id": "copt-screening-lolp-max/1",
      "label": "Highest hourly loss-of-load probability (COPT)",
-     "unit": "probability"
+     "unit": "(scale 0 to 1)"
     }
    },
    "metrics": [
@@ -7084,18 +7084,18 @@
    "definitions": {
     "equity_irr": {
      "formula_id": "equity-post-tax-irr/1",
-     "label": "Equity IRR (post tax)",
-     "unit": "fraction/year"
+     "label": "Equity IRR, post-tax",
+     "unit": "/yr (0.01 = 1 %)"
     },
     "equity_npv": {
      "formula_id": "equity-post-tax-npv/1",
-     "label": "Equity NPV (post tax, at the cost of equity)",
+     "label": "Equity NPV, post-tax (at cost of equity)",
      "unit": "report currency"
     },
     "project_irr": {
      "formula_id": "project-post-tax-irr/1",
-     "label": "Project IRR (post tax)",
-     "unit": "fraction/year"
+     "label": "Unlevered project IRR, post-tax",
+     "unit": "/yr (0.01 = 1 %)"
     },
     "project_npv": {
      "formula_id": "project-post-tax-npv/1",
