@@ -47,18 +47,28 @@ def test_the_investment_digest_and_the_network_fingerprint_do_not_read_a_name(
 
 
 def test_the_report_lcoe_is_the_checked_nominal_fact(project, monkeypatch):
-    """The chapter row reads `lcoe_finance_consistent_eur_per_mwh`, which finance/report.py
-    fills from the engine's `lcoe_nominal_per_mwh` (set here as it does); the row then equals
-    the checked nominal fact and not the real one, so reading the real key instead fails."""
+    """The chapter row reads `lcoe_finance_consistent_eur_per_mwh`, which finance/report.py's
+    own builder (`assemble_finance_sections`) fills. The engine here returns the lcoe_hand
+    metrics (inflation 0.02, so real and nominal differ); the row then equals the checked
+    nominal fact and not the real one, so a builder that read the real metric fails."""
+    from services.finance import engine
     from tests.test_investment_assurance import LCOE, lcoe_hand, published, store
 
-    payload = store(project, lcoe_hand)
-    nominal, real = payload["lcoe_nominal_per_mwh"], payload["lcoe_real_per_mwh"]
+    hand_metrics = {"cash": {}, "years": [0, 1, 2]}
+    lcoe_hand(hand_metrics, inflation=0.02)
+    nominal, real = hand_metrics["lcoe_nominal_per_mwh"], hand_metrics["lcoe_real_per_mwh"]
     assert real is not None and abs(real - nominal) > 0.1  # a swap shows at 1 dp
-    facts = published(project, {"lcoe_nominal": nominal, "lcoe_real": real}, LCOE)
+    run = engine.run_case
+
+    def engine_with_the_hand_lcoe(*args, **kwargs):
+        result = run(*args, **kwargs)
+        result.metrics.update(lcoe_nominal_per_mwh=nominal, lcoe_real_per_mwh=real)
+        return result
+
+    monkeypatch.setattr(engine, "run_case", engine_with_the_hand_lcoe)
+    store(project, lcoe_hand)  # the report is built by finance/report.py, then stored
     rep = project.solver_state["investment_case_report"]
-    # finance/report.py: the report's finance-consistent LCOE is the engine's nominal metric
-    rep["lcoe_finance_consistent_eur_per_mwh"] = payload["lcoe_nominal_per_mwh"]
+    facts = published(project, {"lcoe_nominal": nominal, "lcoe_real": real}, LCOE)
     rows = dict(
         map(
             tuple,

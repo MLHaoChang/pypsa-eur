@@ -109,6 +109,11 @@ def test_the_loader_refuses_a_file_outside_its_schema(tmp_path, bad, why):
         FW.load(_write(tmp_path, bad))
 
 
+def test_the_loader_refuses_a_missing_file(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        FW.load(tmp_path / "figure_words.json")
+
+
 def test_the_loader_reads_a_good_file(tmp_path):
     good = {
         "version": 1,
