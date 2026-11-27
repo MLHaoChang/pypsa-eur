@@ -3,7 +3,7 @@
 
 # P3: verified action outcomes and real progress
 
-Status: ready-for-agent; audit 2026-11-25: S1 (#1150) and S4b (#1204) merged, S1b-S3 and S5 code is on master (toolOutcome.ts, test_p3_write_outcomes/snapshot_outcomes, job_holds.py); left: the `_pending` rows (Excel/MATPOWER adapters X6, export edge cases P4-P8, enqueue_unique P10), nonblocking-job cases (live-voice 11c), mismatched artifacts (issue 05)
+Status: ready-for-agent; S6 (2026-11-27, `claude/aa04-s6-file-formats`) turns the `_pending` file rows P1-P7 into passing cases, P8 stays a named limit, P10 closed by issue 15; left: S7 nonblocking-job cases (wait_for_job on `ad:`/`rpt:`/queue jobs; live-voice 11c has landed), mismatched artifacts (issue 05)
 Progress: S1 (blocking foreground-job outcomes, harness/outcomes.py) merged ee141c66; S1b (chat tool-line marks) in review; S2–S5 planned; update_component static inputs done (effects.py)
 Type: task
 Blocked by: none (01 and 02 done; live-voice 11a and 11b merged, #1548; only the nonblocking-job cases of the test matrix wait for live-voice 11c, the versioned job events)
@@ -444,3 +444,26 @@ Mutants (N9), each run against `tests/assurance_acceptance/test_p3_job_holds.py`
 ## Audit (2026-11-25)
 
 - 2026-11-25 audit: PR #1150 and #1204 read merged via GitHub; S1b/S2/S3/S5 judged by code and test files on origin/master 87a634f4; their PR numbers were not looked up.
+
+### 2026-11-27 — S6 build (branch `claude/aa04-s6-file-formats`): the `_pending` rows
+
+Live-voice 11c landed (#1550 11c-1, #1556 11c-2), so the nonblocking-job rows
+are runnable now; they are slice S7 (wait_for_job on `ad:`/`rpt:`/queue
+handles, today `adapter_pending`), its own PR.
+
+| Row | State | Test (`tests/assurance_acceptance/test_p3_file_outcomes.py` unless named) |
+|-----|-------|------|
+| AA04-P1 import_excel | passed | test_an_excel_import_of_a_template_is_completed, test_an_excel_or_matpower_import_that_does_nothing_reads_failed |
+| AA04-P2 import_matpower | passed | test_a_matpower_import_is_completed, test_a_matpower_import_that_lands_another_value_reads_uncertain |
+| AA04-P3 import_uploaded_network excel/matpower | passed | test_an_uploaded_excel_or_matpower_import_is_completed |
+| AA04-P4 export_excel | passed, named limit | test_an_excel_export_of_a_template_is_completed, test_an_excel_export_unlike_the_network_reads_uncertain. A workbook carries no `n.meta` (asset provenance) and 15 significant digits: meta is not compared and floats use CSV_RTOL, as P8 |
+| AA04-P5 export_matpower | passed | test_a_matpower_export_is_completed_and_names_what_it_cannot_carry, ..._of_a_hub_names_its_links_and_storage, ..._unlike_the_network_reads_uncertain (6 fields), ..._missing_a_line_reads_uncertain. Completed means the carried fields match; `counts.not_carried` names the rest |
+| AA04-P6 export equal to a user upload | passed | test_an_export_equal_to_a_user_upload_is_completed (replaces the fail-safe E5/M12 test): the call's own watched file is read back whatever its kind |
+| AA04-P7 csv export: EH cells coerced on read | passed | test_a_csv_export_cell_the_reader_would_coerce_reads_uncertain: the export read-back skips `normalise_eh_columns` (it no longer creates columns; it coerced an unreadable cell to its default) |
+| AA04-P8 csv float text precision | named limit, kept | test_a_csv_export_sees_no_change_below_its_float_tolerance. pypsa 1.1.2's CSV importer parses with pandas' default float parser; an exact read needs the private `_ImporterCSV` |
+| AA04-P10 enqueue_unique drops a different config | closed (issue 15, #1261) | `tests/test_solve_queue_config_conflict.py`: the route and chat tool refuse a differing config with 409 `solve_config_conflict` |
+| Nonblocking job cases (wait_for_job on study/report/queue jobs) | pending: S7 | test_p3_job_outcomes.py::test_wait_on_a_study_or_queue_job_is_pending_not_completed pins today's adapter_pending |
+
+Red before the change: 25 of the new cases failed on master's `harness/outcomes.py`.
+The frontend's "this file format cannot be checked yet" word stays: no file tool emits
+adapter_pending now, but the word map is UI (and in open PRs' files); a later UI slice can drop it.

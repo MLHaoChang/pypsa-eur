@@ -797,7 +797,6 @@ def read_state(note: dict | None) -> dict:
 # Every uncertain reason the raise and timeout paths emit (classify_raised,
 # timed_out); test_p3_denied_words checks each has its words.
 RAISE_REASONS = (
-    "adapter_pending",
     "no_submission",
     "other_context",
     "readback_failed",
@@ -821,8 +820,6 @@ def classify_raised(note: dict | None, read: dict | None) -> dict:
     def out(outcome, reason=None):
         return {"outcome": outcome, "reason": reason}
 
-    if note and note.get("pending"):
-        return out("uncertain", "adapter_pending")
     if not note or note.get("error"):
         return out("uncertain", "no_submission")
     if note.get("tool") == "undo_last":
@@ -1122,15 +1119,15 @@ def classify_undo(note: dict | None, read: dict | None) -> dict:
 #
 # An import is checked against the file the call named, read into a scratch
 # Network with the route's own reader steps; an export against the one new
-# agent_export upload the call wrote, read back the same way. Excel and
-# MATPOWER have no independent reader yet: they read adapter_pending (X6).
+# upload the call wrote, read back the same way. Excel and MATPOWER use their
+# routes' readers too (X6, rows AA04-P1..P5): a workbook carries no `n.meta`
+# and 15 significant digits; MATPOWER carries only its own fields (below).
 #
 # Saved vs live (X7): both read the LIVE network. An import lands as an unsaved
 # draft bound to no project, so it has no saved copy; an export writes the live
 # network, so its outcome says the file matches the live network, not the
 # project's saved files.
 
-PENDING_FORMATS = frozenset({"excel", "matpower"})
 # X4: the rows an import route adds beyond the file's own, as (class, name).
 # Measured empty: the netcdf and csv routes add columns (normalise_eh_columns)
 # but no rows, on ieee39 and the EH templates. Any other extra reads partial.
@@ -1138,13 +1135,31 @@ IMPORT_EXTRAS: frozenset[tuple[str, str]] = frozenset()
 # X5: a csv bundle stores floats as text, which can move a value by an ulp
 # (95626.80260584055 → …57). The export check compares floats within this
 # relative tolerance; a change smaller than it is not seen (named open row).
+# An xlsx cell keeps 15 significant digits, so the Excel export uses it too.
 CSV_RTOL = 1e-12
 
 
-def _read_file(fmt: str, data: bytes):
-    """A scratch Network from file bytes, with the import route's reader steps."""
+def _read_file(fmt: str, data: bytes, *, filename=None, export: bool = False):
+    """A scratch Network from file bytes, with the import route's reader steps.
+
+    An export's read-back (`export`) skips the csv route's `normalise_eh_columns`:
+    it coerces an unreadable cell to its default, which could match the live
+    value the file does not hold (row AA04-P7)."""
     if fmt == "netcdf":
         return _load_netcdf(data)
+    if fmt == "excel":
+        from services import excel_workbook
+
+        return excel_workbook.prepare(
+            data, filename or "network.xlsx", new_project=False
+        ).network
+    if fmt == "matpower":
+        from routers.io import _parse_candidate, _parse_matpower
+
+        text = data.decode("utf-8")
+        return _parse_candidate(
+            "MATPOWER case", lambda c: _parse_matpower(c, text), check_names=False
+        )
     import io
     import tempfile
     import zipfile
@@ -1161,8 +1176,92 @@ def _read_file(fmt: str, data: bytes):
             safe_extract(archive, folder)
         _map_csv_folder(folder, _unescape_formula)
         n.import_from_csv_folder(folder)
-    normalise_eh_columns(n)
+    if not export:
+        normalise_eh_columns(n)
     return n
+
+
+# MATPOWER (row AA04-P5) carries buses, their summed static loads, generators
+# and lines, rounded to 4 decimals; nothing else. `_matpower_holds` compares
+# those fields of the parsed file with the live network, by position (the
+# file numbers buses 1..N in the live order), written apart from the exporter.
+MATPOWER_CLASSES = frozenset({"Bus", "Load", "Generator", "Line"})
+# Rows in every network, never content a file carries.
+_STANDARD_TYPES = frozenset({"LineType", "TransformerType"})
+
+
+def _matpower_holds(live, parsed) -> bool | _Uncomparable:
+    import math
+
+    def same(a, b) -> bool:
+        return math.isclose(float(a), float(b), rel_tol=CSV_RTOL, abs_tol=1e-12)
+
+    try:
+        buses = list(live.buses.index)
+        name = {bus: f"bus_{i + 1}" for i, bus in enumerate(buses)}
+        if list(parsed.buses.index) != [name[b] for b in buses]:
+            return False
+        for bus in buses:
+            if not same(parsed.buses.at[name[bus], "v_nom"], live.buses.at[bus, "v_nom"]):
+                return False
+        # Demand sits on the bus: one load per bus with any, its static sums.
+        want = {}
+        for i, bus in enumerate(buses):
+            rows = live.loads[live.loads.bus == bus]
+            pd_, qd = round(float(rows.p_set.sum()), 4), round(float(rows.q_set.sum()), 4)
+            if pd_ or qd:
+                want[f"load_{i + 1}"] = (name[bus], pd_, qd)
+        got = {
+            load: (row.bus, float(row.p_set), float(row.q_set))
+            for load, row in parsed.loads.iterrows()
+        }
+        if set(got) != set(want) or any(
+            got[k][0] != want[k][0] or not same(got[k][1], want[k][1])
+            or not same(got[k][2], want[k][2]) for k in want
+        ):
+            return False
+        gens = list(live.generators.index)
+        if list(parsed.generators.index) != [f"gen_{i + 1}" for i in range(len(gens))]:
+            return False
+        for i, gen in enumerate(gens):
+            a, b = live.generators.loc[gen], parsed.generators.loc[f"gen_{i + 1}"]
+            p_nom = round(float(a.p_nom), 4)
+            if (
+                b.bus != name.get(a.bus, "bus_1")
+                or not same(b.p_nom, p_nom)
+                or not same(b.p_min_pu * b.p_nom, round(float(a.p_min_pu) * float(a.p_nom), 4))
+                or not same(b.marginal_cost, round(float(a.marginal_cost), 4))
+            ):
+                return False
+        lines = list(live.lines.index)
+        if list(parsed.lines.index) != [f"line_{i + 1}" for i in range(len(lines))]:
+            return False
+        for i, line in enumerate(lines):
+            a, b = live.lines.loc[line], parsed.lines.loc[f"line_{i + 1}"]
+            if (
+                b.bus0 != name.get(a.bus0) or b.bus1 != name.get(a.bus1)
+                or not all(same(b[k], a[k]) for k in ("r", "x", "b"))
+                or not same(b.s_nom, round(float(a.s_nom), 4))
+            ):
+                return False
+    except (TypeError, ValueError, KeyError):
+        return UNCOMPARABLE
+    return True
+
+
+def _matpower_not_carried(live) -> list[str]:
+    """The classes with rows MATPOWER cannot carry, and "series" for time series."""
+    out = sorted(
+        cls
+        for cls in set(live.all_components) - DERIVED_CLASSES - MATPOWER_CLASSES - _STANDARD_TYPES
+        if not live.static(cls).empty
+    )
+    series = any(
+        not frame.empty
+        for cls in live.all_components
+        for frame in live.dynamic(cls).values()
+    )
+    return out + (["series"] if series else [])
 
 
 def _rows(n) -> dict[str, set[str]]:
@@ -1238,12 +1337,15 @@ def _same_frame(a, b, rtol: float) -> bool:
     return bool(_eq_rows(a, b.sort_index().loc[a.index], rtol).all())
 
 
-def _match(live, expected, *, rtol: float = 0.0, drop=()) -> bool | _Uncomparable:
+def _match(
+    live, expected, *, rtol: float = 0.0, drop=(), meta: bool = True
+) -> bool | _Uncomparable:
     """True when `live` (less the `drop` rows) holds `expected`'s snapshots, rows and series.
 
     Compared on what a file format carries (`_same_frame`): order, dtypes,
     index names and None/NaN are not. Floats agree within `rtol` (0 is
-    exact). A cell that cannot be compared reads UNCOMPARABLE.
+    exact). `meta=False` skips `n.meta`, for a format that cannot carry it.
+    A cell that cannot be compared reads UNCOMPARABLE.
     """
     import pandas as pd
 
@@ -1253,7 +1355,7 @@ def _match(live, expected, *, rtol: float = 0.0, drop=()) -> bool | _Uncomparabl
     try:
         if not pd.Index(live.snapshots).equals(pd.Index(expected.snapshots)):
             return False
-        if _meta_text(live) != _meta_text(expected):
+        if meta and _meta_text(live) != _meta_text(expected):
             return False
         for attr in ("snapshot_weightings", "investment_period_weightings"):
             a, b = getattr(live, attr), getattr(expected, attr)
@@ -1300,23 +1402,21 @@ def _rows_already_equal(live, expected) -> list[tuple[str, str]]:
     return out
 
 
-def _import_bytes(tool: str, args: dict) -> tuple[str, bytes | None]:
-    """(format, the bytes the handler will import); bytes None for a pending format."""
+def _import_bytes(tool: str, args: dict) -> tuple[str, bytes, str | None]:
+    """(format, the bytes the handler will import, the filename it passes)."""
     import base64
     import hashlib
 
     fmt = IMPORT_FORMATS.get(tool) or args.get("format")
-    if fmt in PENDING_FORMATS:
-        return fmt, None
     if tool != "import_uploaded_network":
-        return fmt, base64.b64decode(args["bytes_b64"])
+        return fmt, base64.b64decode(args["bytes_b64"]), args.get("filename")
     from services.assistant_tools import _file
 
     _, _, _, meta, path = _file(args["file_id"])
     data = path.read_bytes()
     if hashlib.sha256(data).hexdigest() != meta.sha256:
         raise ValueError("upload_changed")  # the handler refuses it too
-    return fmt, data
+    return fmt, data, meta.filename
 
 
 def note_import(tool: str, args: dict) -> dict:
@@ -1330,17 +1430,17 @@ def note_import(tool: str, args: dict) -> dict:
     from services.pypsa_service import PyPSAService
 
     try:
-        fmt, data = _import_bytes(tool, args)
-        if data is None:
-            return {"tool": tool, "pending": True}
-        if fmt not in ("netcdf", "csv_bundle"):
+        fmt, data, filename = _import_bytes(tool, args)
+        if fmt not in IMPORT_FORMATS.values():
             raise ValueError(fmt)
-        expected = _read_file(fmt, data)
+        expected = _read_file(fmt, data, filename=filename)
         # The route re-derives a priced row's owned costs from its parts (TCU 10): so does the read-back's copy,
         # else a stale cost in the file reads as not landed. A file the route refuses raises here: uncertain.
+        # The Excel reader re-derives inside `prepare`; MATPOWER carries no prices.
         from services.network_crud import rederive_imported_parts
 
-        rederive_imported_parts(expected)
+        if fmt in ("netcdf", "csv_bundle"):
+            rederive_imported_parts(expected)
         want = _rows(expected)
         # Imports keep the revision counter, so the revision alone cannot tell
         # two projects apart (GK B (27) E3): bind the project, as note_undo does.
@@ -1375,7 +1475,7 @@ def note_import(tool: str, args: dict) -> dict:
 
 def read_import(note: dict | None) -> dict:
     """An independent read of the live network after an import."""
-    if not note or note.get("error") or note.get("pending"):
+    if not note or note.get("error"):
         return {"error": "no_note"}
     from services import dirty_state
     from services.pypsa_service import PyPSAService
@@ -1435,8 +1535,6 @@ def classify_import(note: dict | None, read: dict | None, allowed=None) -> dict:
     def out(outcome, reason=None, **extra):
         return {"outcome": outcome, "reason": reason, **extra}
 
-    if note and note.get("pending"):
-        return out("uncertain", "adapter_pending")
     if not note or note.get("error"):
         return out("uncertain", "no_submission")
     if not isinstance(read, dict) or "error" in read:
@@ -1497,16 +1595,13 @@ def _export_store() -> tuple[str, Any] | None:
     return name, None
 
 
-def _agent_exports(store) -> set[str]:
+def _store_files(store) -> set[str]:
+    """Every upload in the project's store, of any kind (row AA04-P6): an export
+    equal to the person's own upload dedups onto that file, which stays theirs."""
     from services import upload_service
 
     name, directory = store
-    return {
-        m.file_id
-        for m in upload_service.list_uploads(
-            name, project_dir=directory, kind="agent_export"
-        )
-    }
+    return {m.file_id for m in upload_service.list_uploads(name, project_dir=directory)}
 
 
 def note_export(tool: str) -> dict:
@@ -1515,8 +1610,6 @@ def note_export(tool: str) -> dict:
     from services.pypsa_service import PyPSAService
 
     fmt = EXPORT_FORMATS[tool]
-    if fmt in PENDING_FORMATS:
-        return {"tool": tool, "pending": True}
     try:
         store = _export_store()
         if store is None:
@@ -1542,7 +1635,7 @@ def note_export(tool: str) -> dict:
 
 def read_export(note: dict | None) -> dict:
     """The one new export file read back, and the live network it should hold."""
-    if not note or note.get("error") or note.get("pending"):
+    if not note or note.get("error"):
         return {"error": "no_note"}
     import hashlib
 
@@ -1551,9 +1644,9 @@ def read_export(note: dict | None) -> dict:
 
     release_note(note)
     try:
-        # The uploads THIS call added (a dedup hit included), still listed as
-        # agent_export in the project's store: never another session's file.
-        new = sorted(set(note["own"]) & _agent_exports(note["store"]))
+        # The uploads THIS call added (a dedup hit included), still in the
+        # project's store: never another session's file.
+        new = sorted(set(note["own"]) & _store_files(note["store"]))
         if len(note["own"]) != 1 or len(new) != 1:
             return {
                 "new_files": len(new) if len(note["own"]) == 1 else len(note["own"])
@@ -1563,12 +1656,23 @@ def read_export(note: dict | None) -> dict:
         data = upload_service.get_upload_bytes(name, new[0], project_dir=directory)
         if hashlib.sha256(data).hexdigest() != meta.sha256:
             return {"error": "readback_failed"}
-        exported = _read_file(note["format"], data)
-        rtol = CSV_RTOL if note["format"] == "csv_bundle" else 0.0
+        fmt = note["format"]
+        exported = _read_file(fmt, data, filename=meta.filename, export=True)
+        not_carried = None
         with PyPSAService.get_lock():
             ctx = PyPSAService.get_active_context()
             start = dirty_state.revision(ctx)
-            match = _match(ctx.network, exported, rtol=rtol)
+            if fmt == "matpower":
+                match = _matpower_holds(ctx.network, exported)
+                not_carried = _matpower_not_carried(ctx.network)
+            else:
+                # A workbook carries no `n.meta` and 15 significant digits.
+                match = _match(
+                    ctx.network,
+                    exported,
+                    rtol=0.0 if fmt == "netcdf" else CSV_RTOL,
+                    meta=fmt != "excel",
+                )
             state = _live_state(ctx)
             end = dirty_state.revision(ctx)
     except Exception:  # noqa: BLE001 - an unreadable file reads uncertain
@@ -1580,6 +1684,7 @@ def read_export(note: dict | None) -> dict:
         "revision_end": end,
         "match": match,
         "state": state,
+        **({"not_carried": not_carried} if not_carried is not None else {}),
     }
 
 
@@ -1589,8 +1694,6 @@ def classify_export(note: dict | None, read: dict | None) -> dict:
     def out(outcome, reason=None):
         return {"outcome": outcome, "reason": reason}
 
-    if note and note.get("pending"):
-        return out("uncertain", "adapter_pending")
     if not note or note.get("error"):
         return out("uncertain", "no_submission")
     if not isinstance(read, dict) or "error" in read:
@@ -1622,4 +1725,7 @@ def classify_export(note: dict | None, read: dict | None) -> dict:
             "counts": {"requested": 1, "done": 1, "extra": len(diff)},
             "paths_extra": diff[:_MAX_PATHS],
         }
+    if read.get("not_carried") is not None:
+        # MATPOWER: the carried fields match; name what the format cannot hold.
+        return {**out("completed"), "counts": {"not_carried": read["not_carried"]}}
     return out("completed")
