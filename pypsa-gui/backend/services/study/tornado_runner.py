@@ -279,6 +279,7 @@ def start_tornado(study_id: str, *, base_row, db, user_id,
         if registered:
             PyPSAService.unmark_study_owned(key)
         raise
+    R.release_unlocated_base(ctx, base_dir, key, registered)
     stop_event = threading.Event()
     record: dict[str, Any] = {
         "status": "running", "kind": KIND, "study": R.STUDY_KEY, "study_id": study_id,

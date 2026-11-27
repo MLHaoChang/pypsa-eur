@@ -1232,6 +1232,9 @@ export interface EhLeverTable {
   skipped_kinds?: string[]
   honesty_notes?: string[]
   aborted?: boolean
+  /** The base design's cost at the same target, on the same basis as each
+   *  option's `cost_at_target_eur` (template-e2e 22 S3). */
+  base_cost_eur?: number | null
 }
 
 export interface EhDtcContingency {

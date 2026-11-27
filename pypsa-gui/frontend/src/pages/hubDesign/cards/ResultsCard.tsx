@@ -33,6 +33,7 @@ import { useDispatchRun } from '../../../hooks/useDispatchRun'
 import { money, unitPrice } from '../../../utils/money'
 import GridExtensionCard from '../../results/GridExtensionCard'
 import { FrontTile } from './FrontTile'
+import { genericCritical } from './SiteCard'
 import { hasNoVerdict, NoVerdictNote } from '../noVerdict'
 import { HEADLINED, ResultsHeadline } from './ResultsHeadline'
 import { Co2LimitRefusal } from '../../results/Co2LimitRefusal'
@@ -93,6 +94,7 @@ export function ResultsCard() {
   const { review } = useHubReview(studyHasResults(study))
   const report = useHubReport(study, running)
   const { template } = useHubTemplate()
+  const criticalKeptOn = template ? genericCritical(template) : null
   const solved = useDispatchSolved()
   // The dispatch solve, for the source-run line (control-strategy 06, improvement 2).
   const run = useDispatchRun()
@@ -256,6 +258,14 @@ export function ResultsCard() {
           // The banner above says "Out of date" once for the card; the tile only dims.
           state="ready" dimmed={stale || freshnessUnknown} />
       )} />
+
+      {/* The load kept on in an outage, once and muted, in SiteCard's own words (te-24, UX 32 GO);
+          no line when the template has no must-stay-on share. */}
+      {criticalKeptOn && (
+        <p data-testid="hub-results-critical" className="text-[12px] text-muted">
+          Kept on in an outage: {criticalKeptOn}
+        </p>
+      )}
 
       {/* The product costs share the headline's two-column grid (UX 31): hydrogen left, ammonia right,
           a lone tile in the left column. */}

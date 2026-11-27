@@ -863,6 +863,35 @@ describe('EhReferenceDesignPanel — sibling tables', () => {
     expect(screen.getByTestId('eh-dtc-planning')).toBeTruthy()
   })
 
+  it('says what the base design costs and which lever rows tie (template-e2e 22 S3)', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report: REPORT,
+    } as never)
+    vi.mocked(resultsApi.getEhLevers).mockResolvedValue({
+      kind: 'storage_duration',
+      base_cost_eur: 34_700_616,
+      options: [4, 24, 72].map(h => ({ kind: 'storage_duration', value: h, unit: 'h',
+        status: 'ok', cost_at_target_eur: 34_700_616, meets_target: true })),
+    } as never)
+    await openPanel()
+    const base = await screen.findByTestId('eh-levers-base')
+    expect(base.textContent).toBe('Base design: €34.7m at the same target. Each row changes '
+      + 'one lever from the base, so its cost differs by what that change saves or adds.')
+    expect(screen.getByTestId('eh-levers-same-cost').textContent)
+      .toBe('Same cost at every duration: the study does not use the extra hours.')
+  })
+
+  it('shows no base line without a base cost, nor a tie line when costs differ', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report: REPORT,
+    } as never)
+    vi.mocked(resultsApi.getEhLevers).mockResolvedValue(LEV as never)
+    await openPanel()
+    expect(await screen.findByTestId('eh-levers')).toBeTruthy()
+    expect(screen.queryByTestId('eh-levers-base')).toBeNull()
+    expect(screen.queryByTestId('eh-levers-same-cost')).toBeNull()
+  })
+
   it('shows per-Load DtC results with the disclosed VOLL premium (P16)', async () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
       status: 'done', study: 'eh_study', archetype: 'weak_flexible', report: REPORT,

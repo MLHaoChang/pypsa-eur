@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The FMEA risk table (Guided and Expert) now lists the last Energy Hub study's failure modes, the same rows the reference-design panel and the report show, until a contingency sweep run after the study replaces them.

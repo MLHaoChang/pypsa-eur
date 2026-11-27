@@ -117,6 +117,24 @@ TOOL_NAME_IS_NOT_A_PROJECT: dict[str, str] = {
 
 # ── reach ───────────────────────────────────────────────────────────────────
 
+def _proxied(fn):
+    """
+    The chat_tools helper a dispatcher fragment's call-time proxy stands for
+    (`def _x(*a, **k): return _ct()._x(*a, **k)`, RETRO-FRAG-1), or None.
+    """
+    code = getattr(fn, "__code__", None)
+    if (
+        code is None
+        or not getattr(fn, "__module__", "").startswith("services.chat_dispatchers.")
+        or code.co_names != ("_ct", fn.__name__)
+    ):
+        return None
+    from services import chat_tools
+
+    target = getattr(chat_tools, fn.__name__, None)
+    return target if inspect.isfunction(target) else None
+
+
 def _reaches_acl(fn, depth: int = 0, seen: set | None = None) -> list[str] | None:
     """
     The call chain from `fn` to `ensure_project_access`, or None.
@@ -131,6 +149,10 @@ def _reaches_acl(fn, depth: int = 0, seen: set | None = None) -> list[str] | Non
     if depth > 7 or key in seen:
         return None
     seen.add(key)
+    target = _proxied(fn)
+    if target is not None:
+        chain = _reaches_acl(target, depth + 1, seen)
+        return [fn.__name__, *chain] if chain else None
     try:
         node = _function_ast(fn)
     except (OSError, TypeError, SyntaxError):
@@ -296,6 +318,12 @@ def test_the_verifier_sees_each_way_the_acl_is_reached():
     assert via_handler, "in-handler `project_registry.resolve_project` (module call)"
     via_projectdep = _route_acl_chain(*by_key[("GET", "/api/projects/{project_id}/network/meta")])
     assert via_projectdep, "ProjectDep / resolve_project_context"
+    from services import chat_tools
+
+    via_proxy = _reaches_acl(inspect.unwrap(chat_tools.DISPATCHERS["campus_cancel_milp"]))
+    assert via_proxy and via_proxy[1] == "_campus_route", (
+        f"a moved dispatcher through its chat_tools proxy: {via_proxy}"
+    )
 
 
 # ── chat tools ──────────────────────────────────────────────────────────────

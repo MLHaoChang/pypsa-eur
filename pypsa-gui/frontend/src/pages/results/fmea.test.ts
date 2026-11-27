@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { buildManualRow, mergeWorksheet, unpricedRankingWarning, WORKSHEET_CSV_HEADER, worksheetCsvRows, ZERO_REASON_TEXT, CRITICALITY_PER_YEAR_LABEL, unpricedModeCount, setVollText, SOLVER_VOLL_LABEL } from './fmea'
+import { buildManualRow, mergeWorksheet, unpricedRankingWarning, WORKSHEET_CSV_HEADER, worksheetCsvRows, ZERO_REASON_TEXT, CRITICALITY_PER_YEAR_LABEL, unpricedModeCount, setVollText, SOLVER_VOLL_LABEL, unpricedNote } from './fmea'
 import { GOAL_CARD_TITLE, GOAL_VOLL_LABEL } from '../hubDesign/cards/goalCardWords'
 import type { CoptPayload } from './adequacy'
+import { STUDY_REPRICE } from './fmeaSourceWords'
 
 const copt: CoptPayload = {
   engine: 'copt', fidelity: 'analytic_convolution',
@@ -239,5 +240,43 @@ describe('setVollText names the VOLL input as its landing place does', () => {
     expect(read('../hubDesign/cards/GoalCard.tsx')).toContain('<Term k="voll_plain">{GOAL_VOLL_LABEL}</Term>')
     expect(read('../hubDesign/shared/CardShell.tsx')).toContain(`goal: '${GOAL_CARD_TITLE}'`)
     expect(setVollText(true)).toBe('Set the price of undelivered energy on the Goal card')
+  })
+})
+
+describe('mergeWorksheet — study rows (template-e2e 24)', () => {
+  const mode = (mode_id: string, failure_class: string, crit: number | null) => ({
+    mode_id, name: mode_id, failure_class, component_class: 'Link',
+    occurrence_per_year: 1, criticality_eur_per_year: crit, severity_eur: crit,
+  })
+  const per_mode = [mode('b1', 'B', 100), mode('b2', 'B', 0), mode('a1', 'A', 5000)]
+  it('keeps the study order (B then A), never re-ranking across classes', () => {
+    const rows = mergeWorksheet({ per_mode, source: 'eh_study' }, null)
+    expect(rows.map(r => r.mode_id)).toEqual(['b1', 'b2', 'a1'])
+  })
+  it('still ranks live rows by criticality', () => {
+    const rows = mergeWorksheet({ per_mode, source: 'live' }, null)
+    expect(rows.map(r => r.mode_id)).toEqual(['a1', 'b1', 'b2'])
+  })
+  it('puts manual rows after the study rows', () => {
+    const manual = buildManualRow({ name: 'm', occurrencePerYear: 1, severityEur: 1e9 })
+    const rows = mergeWorksheet({ per_mode, source: 'eh_study' },
+      { version: 1, manual_rows: [manual], overlays: {} })
+    expect(rows.map(r => r.mode_id).slice(0, 3)).toEqual(['b1', 'b2', 'a1'])
+    expect(rows).toHaveLength(4)
+  })
+})
+
+describe('unpriced study rows (template-e2e 24)', () => {
+  it('does not say they are listed last, since they keep the study order', () => {
+    expect(unpricedNote(4, true)).toBe('Not priced: 4 modes have no price for undelivered energy.')
+    expect(unpricedNote(1, true)).toBe('Not priced: 1 mode has no price for undelivered energy.')
+    expect(unpricedNote(4)).toMatch(/listed last/)
+  })
+  it('closes the CSV with the re-run note for study rows', () => {
+    const rows = mergeWorksheet({ per_mode: [{ mode_id: 'b1', name: 'b1', failure_class: 'B',
+      criticality_eur_per_year: null, severity_eur: null }], source: 'eh_study' }, null)
+    const last = worksheetCsvRows(rows, false, true).at(-1)![0] as string
+    expect(last).toContain('no price for undelivered energy')
+    expect(last).toContain(STUDY_REPRICE)
   })
 })

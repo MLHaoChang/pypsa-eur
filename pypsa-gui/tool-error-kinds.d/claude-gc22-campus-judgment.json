@@ -1,0 +1,16 @@
+{
+ "kinds": {
+  "campus_results_too_many": {
+   "surface": "inline",
+   "why": "The campus pack results upload refuses more result files than one upload may carry; the user uploads the pack's results in a smaller set."
+  },
+  "campus_result_too_large": {
+   "surface": "inline",
+   "why": "The campus pack results upload refuses a result file over the per-file cap; the user uploads a shorter recording of that case."
+  },
+  "campus_results_too_large": {
+   "surface": "inline",
+   "why": "The campus pack results upload refuses result files over the total cap together; the user uploads the pack's results in a smaller set."
+  }
+ }
+}

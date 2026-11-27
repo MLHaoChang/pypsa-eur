@@ -3,6 +3,7 @@
 // The merge only needs a per_mode carrier — /results/copt and the Phase 4
 // aggregator /results/fmea_modes both satisfy it.
 import { GOAL_CARD_TITLE, GOAL_VOLL_LABEL } from '../hubDesign/cards/goalCardWords'
+import { isStudySourced, STUDY_REPRICE } from './fmeaSourceWords'
 
 export interface ModesPayload {
   per_mode: Array<Record<string, unknown>>
@@ -19,6 +20,14 @@ export interface ModesPayload {
    *  `time_limit` and `suboptimal`. The frontend must not re-derive it. */
   sweep_base_restored?: boolean | null
   sweep_base_restore_status?: string | null
+  /** template-e2e 24: `eh_study` when the rows are the last Energy Hub
+   *  study's `fmea_top` rows (the ones the report lists), `live` for the
+   *  COPT screening of the current network plus the last sweep. */
+  source?: 'eh_study' | 'live' | null
+  /** When the study that wrote those rows finished (epoch seconds). */
+  study_finished_at?: number | null
+  /** Whether the network was edited after that study (null: cannot tell). */
+  edited_since_study?: boolean | null
 }
 
 /**
@@ -147,21 +156,36 @@ export function mergeWorksheet(
     })
   }
   // Priced modes by criticality, then the unpriced ones by name: an unpriced
-  // mode is never ranked as "least critical".
-  rows.sort((a, b) => {
-    const ca = a.criticality_eur_per_year, cb = b.criticality_eur_per_year
-    if (ca === null || cb === null) {
-      if (ca !== cb) return ca === null ? 1 : -1
-      return a.name.localeCompare(b.name)
-    }
-    return cb - ca
-  })
+  // mode is never ranked as "least critical". The study's rows keep the
+  // order the report lists them in (class B, then class A, each ranked
+  // within its class: two engines' criticalities are never one ranking);
+  // only manual rows are ranked, after them (template-e2e 24, GK C2).
+  if (isStudySourced(copt)) {
+    const computed = rows.filter(r => !r.editable)
+    const manual = rows.filter(r => r.editable)
+    manual.sort(byCriticality)
+    return [...computed, ...manual]
+  }
+  rows.sort(byCriticality)
   return rows
+}
+
+function byCriticality(a: WorksheetRow, b: WorksheetRow): number {
+  const ca = a.criticality_eur_per_year, cb = b.criticality_eur_per_year
+  if (ca === null || cb === null) {
+    if (ca !== cb) return ca === null ? 1 : -1
+    return a.name.localeCompare(b.name)
+  }
+  return cb - ca
 }
 
 /** The sentence that says why unpriced modes sit last: one wording for the
  *  tab's visible line and the CSV's note row. */
-export function unpricedNote(count: number): string {
+export function unpricedNote(count: number, studyRows = false): string {
+  // Study rows keep the study's order (template-e2e 24), so they are not moved last.
+  if (studyRows) {
+    return `Not priced: ${count} mode${count === 1 ? ' has' : 's have'} no price for undelivered energy.`
+  }
   return `Not priced: ${count} mode${count === 1 ? ' is' : 's are'} listed last and left out of the ranking.`
 }
 // The VOLL input's name where the link lands, in each mode: Solver settings'
@@ -189,7 +213,7 @@ export const WORKSHEET_CSV_HEADER = [
   'in_metric_scope', 'mitigability', 'engine', 'fidelity',
 ]
 
-export function worksheetCsvRows(rows: WorksheetRow[], guided = false): unknown[][] {
+export function worksheetCsvRows(rows: WorksheetRow[], guided = false, studyRows = false): unknown[][] {
   const out: unknown[][] = rows.map(r => [
     r.mode_id, r.failure_class, r.component_class, r.name,
     r.occurrence_per_year, r.occurrence_basis,
@@ -198,7 +222,10 @@ export function worksheetCsvRows(rows: WorksheetRow[], guided = false): unknown[
   ])
   // The empty € cells say nothing on their own: a closing note row says why.
   const unpriced = unpricedModeCount(rows)
-  if (unpriced > 0) out.push([`${unpricedNote(unpriced)} ${setVollText(guided)}.`])
+  if (unpriced > 0) {
+    out.push([`${unpricedNote(unpriced, studyRows)} ${setVollText(guided)}.`
+      + (studyRows ? ` ${STUDY_REPRICE}` : '')])
+  }
   return out
 }
 

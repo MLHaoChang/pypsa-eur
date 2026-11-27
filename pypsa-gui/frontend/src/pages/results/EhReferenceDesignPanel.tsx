@@ -46,6 +46,7 @@ import { verdictWord } from '../hubDesign/verdictWords'
 import { plainIds } from '../hubDesign/plainWords'
 import { takeImprovePrefill, useImprovePrefillStore } from '../hubDesign/improvePrefill'
 import { leverKindWords } from './leverKindWords'
+import { leverBaseLine, leverSameCostLines } from './leverBaseLine'
 
 const ARCHETYPES: { id: EhArchetype; label: string; blurb: string }[] = [
   {
@@ -2249,6 +2250,16 @@ export function EhReferenceDesignPanel() {
                   </tbody>
                 </table>
               </div>
+              {leverBaseLine(levTable, eur) && (
+                <p className="text-[10px] text-muted" data-testid="eh-levers-base">
+                  {leverBaseLine(levTable, eur)}
+                </p>
+              )}
+              {leverSameCostLines(levTable).map(line => (
+                <p key={line} className="text-[10px] text-muted" data-testid="eh-levers-same-cost">
+                  {line}
+                </p>
+              ))}
             </div>
           )}
 

@@ -34,6 +34,9 @@ import {
   type WorksheetSidecar,
   CRITICALITY_PER_YEAR_LABEL,
 } from './fmea'
+import { EXPERT_STUDY_INTRO, isStudySourced, modesSourceText, studyRepriceText, studyRowsOutOfDate } from './fmeaSourceWords'
+import ResultState from '../../components/ResultState'
+import { OUT_OF_DATE_REASON } from '../../components/ResultsOutOfDate'
 import { openVollField } from '../../layout/flowNavigation'
 
 const FIDELITY_TIP: Record<string, string> = {
@@ -89,7 +92,23 @@ function NotSetCell({ last = false }: { last?: boolean }) {
   return <td data-testid="fmea-not-set" className={`py-1 ${last ? '' : 'pr-2 '}text-muted`}>Not set</td>
 }
 
+// template-e2e 24 (GK C2): a study's rows open in the report's order (class B,
+// then class A, each ranked within its class), so the table starts unsorted
+// for them; live rows keep the criticality sort. The table's sort state is
+// set once, so the worksheet remounts when the rows' source changes. This
+// observer only reads the cache the worksheet's own query fills.
 export default function FmeaTab() {
+  const currentProject = useUIStore(s => s.currentProject)
+  const { data } = useQuery({
+    queryKey: nk(currentProject, 'results', 'fmea_modes'),
+    queryFn: () => resultsApi.getFmeaModes(),
+    enabled: false,
+  })
+  const studyRows = isStudySourced(data as ModesPayload | null | undefined)
+  return <FmeaWorksheet key={studyRows ? 'study' : 'live'} studyRows={studyRows} />
+}
+
+function FmeaWorksheet({ studyRows }: { studyRows: boolean }) {
   const currentProject = useUIStore(s => s.currentProject)
   const guided = useUIStore(s => s.uiMode) === 'guided'
   const engineText = useTerm('fmea_engine')
@@ -145,8 +164,8 @@ export default function FmeaTab() {
   const { rows: filtered, search, setSearch, sortKey, sortDir, onSortClick } =
     useFilterableTable<WorksheetRow, SortK>({
       rows,
-      initialSortKey: 'criticality_eur_per_year',
-      initialSortDir: 'desc',
+      initialSortKey: studyRows ? null : 'criticality_eur_per_year',
+      initialSortDir: studyRows ? null : 'desc',
       getValue: (r, k) => r[k],
       getSearchText: r =>
         `${r.name} ${r.mode_id} ${r.mitigability} ${r.component_class}`.toLowerCase(),
@@ -193,7 +212,12 @@ export default function FmeaTab() {
   }
 
   const exportCsv = () =>
-    downloadCSV('fmea_worksheet.csv', WORKSHEET_CSV_HEADER, worksheetCsvRows(rows, guided))
+    downloadCSV('fmea_worksheet.csv', WORKSHEET_CSV_HEADER, worksheetCsvRows(rows, guided, studyRows))
+
+  // template-e2e 24: the rows' source, said once for each line below.
+  const modesPayload = modes as ModesPayload | null | undefined
+  const sourceLine = modesSourceText(modesPayload, guided)
+  const repriceNote = studyRepriceText(modesPayload)
 
   return (
     <div data-testid="results-view-fmea" className="flex flex-col h-full overflow-auto p-4 gap-3">
@@ -212,23 +236,35 @@ export default function FmeaTab() {
           </p>
         ) : (
         <p className="text-[11px] text-muted mt-1">
+          {studyRows ? EXPERT_STUDY_INTRO : (<>
           Failure modes ranked by criticality (€ per year): engine-computed rows
           regenerate on every view; expert rows and mitigability notes persist
           with the project and survive re-solves. No number here is comparable
           to a statutory reliability standard (hover a badge for each row's
           fidelity).
+          </>)}
         </p>
+        )}
+        {sourceLine && (
+          <p data-testid="fmea-source-line" className="text-[11px] text-muted mt-1">{sourceLine}</p>
         )}
       </header>
 
+      {studyRowsOutOfDate(modesPayload) && (
+        <div data-testid="fmea-study-stale">
+          <ResultState state="stale" reason={OUT_OF_DATE_REASON} />
+        </div>
+      )}
+
       {unpricedCount > 0 ? (
         <p data-testid="fmea-unpriced-line" className="text-[11px] text-muted">
-          {unpricedNote(unpricedCount)}{' '}
+          {unpricedNote(unpricedCount, studyRows)}{' '}
           <button type="button" data-testid="fmea-unpriced-set-voll"
             onClick={() => openVollField(FMEA_RETURN_LABEL)}
             className="text-link hover:underline">
             {setVollText(guided)} ›
           </button>
+          {repriceNote && <span data-testid="fmea-study-reprice">{' '}{repriceNote}</span>}
         </p>
       ) : unpricedRankingWarning(modes as ModesPayload | null | undefined) && (
         <p className="text-[10px] text-danger border border-danger/40 rounded px-2 py-1">

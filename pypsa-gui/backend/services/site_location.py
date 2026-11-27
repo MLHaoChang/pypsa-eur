@@ -68,10 +68,10 @@ def active_refusal() -> dict | None:
 
     Covered starts: `POST /run` (and the chat run tools, which call the handler),
     `POST /run_ac_pf` and the reliability study start (`check_eh_study_start`).
-    NOT gated yet (follow-up `.scratch/template-e2e/issues/`
-    `47-location-gate-study-starts.md`): `routers/studies.py` `start_study_run`
-    and `start_tornado`, the chat `start_supply_architectures`, and
-    `run_evidence.py`'s `start_study_run`."""
+    Study starts are gated in their runners on the study's base project
+    (`services/study/runner.py` `refuse_unlocated`, STUDY-GATE-1). NOT gated yet:
+    the live-network runners of `.scratch/template-e2e/issues/`
+    `48-location-gate-live-network-runners.md`."""
     from services.network_lengths import active_project_dir
     from services.pypsa_service import PyPSAService
 
