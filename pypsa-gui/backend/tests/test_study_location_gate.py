@@ -8,6 +8,7 @@ Covers the four study routes (`POST .../run`, `/findings/tornado`,
 (`workflow_tools.run_sensitivity_sweep`). The solver is the fakes of the
 existing study tests; the gate itself is the real predicate.
 """
+
 # ruff: noqa: F811 -- imported pytest fixtures
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ from services import workflow_tools as wt
 from services.pypsa_service import PyPSAService
 from services.site_scene import anchor as site_anchor
 from services.study import runner as R
-from tests.study_s4_support import INTAKE, create_pack_study, enable_studies, wait_run
+from tests.study_s4_support import create_pack_study, enable_studies, wait_run
 from tests.test_homer_supply_architecture_routes import ArchSolver  # noqa: F401
 from tests.test_homer_supply_architecture_routes import _project as _sa_project
 from tests.test_homer_supply_architecture_routes import _url as _sa_url
@@ -62,16 +63,27 @@ def arch_solver(monkeypatch):
 
 def _put_anchor(client, name, confirmed: bool):
     rev = client.get(f"/api/projects/{name}/site-anchor").json()["revision"]
-    r = client.put(f"/api/projects/{name}/site-anchor", json={
-        "anchor": {"lat": 52.52, "lng": 13.4, "source": "manual", "confirmed": confirmed},
-        "expected_revision": rev})
+    r = client.put(
+        f"/api/projects/{name}/site-anchor",
+        json={
+            "anchor": {
+                "lat": 52.52,
+                "lng": 13.4,
+                "source": "manual",
+                "confirmed": confirmed,
+            },
+            "expected_revision": rev,
+        },
+    )
     assert r.status_code == 200, r.text
 
 
 def _drop_anchor(client, name):
     """The project with no anchor file at all."""
     with chat_tools._acting() as (db, user):
-        path = project_registry.project_dir(project_registry.resolve_project(db, user, name))
+        path = project_registry.project_dir(
+            project_registry.resolve_project(db, user, name)
+        )
     (path / site_anchor.ANCHOR_FILE).unlink(missing_ok=True)
 
 
@@ -122,8 +134,12 @@ def _run_setup(client, api_project, name="gate-run"):
     r = create_pack_study(client, f"{name}-src", name, intake=NO_PV_TOU)
     assert r.status_code == 201, r.text
     sid = r.json()["study_id"]
-    return name, sid, lambda: client.post(f"/api/projects/{name}/studies/{sid}/run", json={}), \
-        f"/api/projects/{name}/studies/{sid}/run"
+    return (
+        name,
+        sid,
+        lambda: client.post(f"/api/projects/{name}/studies/{sid}/run", json={}),
+        f"/api/projects/{name}/studies/{sid}/run",
+    )
 
 
 def _tornado_setup(client, api_project, name="gate-torn"):
@@ -135,23 +151,39 @@ def _tornado_setup(client, api_project, name="gate-torn"):
     original = site_location.anchor_confirmed
     site_location.anchor_confirmed = lambda _d: True  # the run is not under test
     try:
-        assert client.post(f"/api/projects/{base}/studies/{sid}/run", json={}).status_code == 202
+        assert (
+            client.post(f"/api/projects/{base}/studies/{sid}/run", json={}).status_code
+            == 202
+        )
         assert wait_run(client, base, sid)["status"] == "done"
     finally:
         site_location.anchor_confirmed = original
-    return base, sid, \
-        lambda: client.post(f"/api/projects/{base}/studies/{sid}/findings/tornado"), \
-        f"/api/projects/{base}/studies/{sid}/findings/tornado"
+    return (
+        base,
+        sid,
+        lambda: client.post(f"/api/projects/{base}/studies/{sid}/findings/tornado"),
+        f"/api/projects/{base}/studies/{sid}/findings/tornado",
+    )
 
 
 def _sa_setup(client, install_network, name="gate-sa"):
     sid = _sa_project(client, install_network, name)
-    return name, sid, lambda: client.post(_sa_url(name, sid), json={}), _sa_url(name, sid)
+    return (
+        name,
+        sid,
+        lambda: client.post(_sa_url(name, sid), json={}),
+        _sa_url(name, sid),
+    )
 
 
 def _tm_setup(client, install_network, name="gate-tm"):
     sid = _sa_project(client, install_network, name)
-    return name, sid, lambda: client.post(_tm_url(name, sid), json=_tm_body()), _tm_url(name, sid)
+    return (
+        name,
+        sid,
+        lambda: client.post(_tm_url(name, sid), json=_tm_body()),
+        _tm_url(name, sid),
+    )
 
 
 @pytest.fixture(params=["run", "tornado", "supply_architectures", "system_type_map"])
@@ -181,6 +213,30 @@ def test_an_unlocated_base_refuses_the_study_start_and_starts_nothing(client, st
 
 
 @pytest.mark.unlocated
+@pytest.mark.parametrize("kind", ["run", "tornado"])
+def test_a_refusal_on_a_context_the_start_registered_drops_it(
+    client, api_project, studies_on, fake, kind
+):
+    """GK F1 (BC-S6-v2-2): with no resident base, the start hydrates and registers
+    the base itself; an unlocated refusal must leave neither the context nor its
+    cap exemption behind (released in one critical section, `drop=True`)."""
+    setup = _run_setup if kind == "run" else _tornado_setup
+    base, _sid, post, _get = setup(client, api_project, f"gate-drop-{kind}")
+    with chat_tools._acting() as (db, user):
+        key = project_registry.registry_key(
+            project_registry.resolve_project(db, user, base)
+        )
+    PyPSAService.drop(key)
+    PyPSAService._study_owned.discard(key)
+    assert PyPSAService.get_context(key) is None
+    _assert_refused(post())
+    assert PyPSAService.get_context(key) is None, (
+        "a study-owned base context was left resident"
+    )
+    assert key not in PyPSAService._study_owned
+
+
+@pytest.mark.unlocated
 def test_a_draft_anchor_does_not_locate_the_base(client, start):
     base, _sid, post, get_url = start
     _put_anchor(client, base, False)
@@ -190,7 +246,9 @@ def test_a_draft_anchor_does_not_locate_the_base(client, start):
 
 
 @pytest.mark.unlocated
-def test_a_confirmed_anchor_locates_the_base_and_the_start_is_not_refused_for_it(client, start):
+def test_a_confirmed_anchor_locates_the_base_and_the_start_is_not_refused_for_it(
+    client, start
+):
     base, _sid, post, _get = start
     _put_anchor(client, base, True)
     r = post()
@@ -203,7 +261,8 @@ def test_a_confirmed_anchor_locates_the_base_and_the_start_is_not_refused_for_it
 
 @pytest.mark.unlocated
 def test_a_located_active_project_does_not_locate_an_unlocated_base(
-        client, api_project, studies_on, fake):
+    client, api_project, studies_on, fake
+):
     base, sid, post, get_url = _run_setup(client, api_project)
     _put_anchor(client, f"{base}-src", True)  # the active project is located
     before = Started(base)
@@ -213,7 +272,8 @@ def test_a_located_active_project_does_not_locate_an_unlocated_base(
 
 @pytest.mark.unlocated
 def test_an_unlocated_active_project_does_not_refuse_a_located_base(
-        client, api_project, studies_on, fake):
+    client, api_project, studies_on, fake
+):
     base, sid, post, _get = _run_setup(client, api_project)
     _drop_anchor(client, f"{base}-src")  # the active project is unlocated
     _put_anchor(client, base, True)
@@ -227,7 +287,8 @@ def test_an_unlocated_active_project_does_not_refuse_a_located_base(
 
 @pytest.mark.unlocated
 def test_the_chat_comparison_start_maps_the_refusal_to_its_error_kind(
-        client, install_network, studies_on, arch_solver):
+    client, install_network, studies_on, arch_solver
+):
     base, sid, _post, get_url = _sa_setup(client, install_network, "gate-sa-chat")
     before = Started(base)
     with pytest.raises(HTTPException) as exc:
@@ -239,7 +300,8 @@ def test_the_chat_comparison_start_maps_the_refusal_to_its_error_kind(
 
 @pytest.mark.unlocated
 def test_the_sensitivity_sweep_refuses_an_unlocated_baseline_and_creates_nothing(
-        client, baseline):
+    client, baseline
+):
     _ctx, project_id, _path = baseline
     jobs_before, owned = _projects(), _owned()
     with pytest.raises(HTTPException) as exc:
@@ -247,7 +309,9 @@ def test_the_sensitivity_sweep_refuses_an_unlocated_baseline_and_creates_nothing
     assert exc.value.status_code == 422
     assert exc.value.detail["code"] == exc.value.detail["error_kind"] == CODE
     assert exc.value.detail["field"] == "x"
-    assert _projects() == jobs_before and _owned() == owned  # no case project was forked
+    assert (
+        _projects() == jobs_before and _owned() == owned
+    )  # no case project was forked
 
 
 @pytest.mark.unlocated
