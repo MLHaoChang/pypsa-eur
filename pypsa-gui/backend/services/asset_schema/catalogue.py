@@ -21,6 +21,7 @@ from functools import lru_cache
 from typing import Any
 
 from services.asset_schema import entries as E
+from services.asset_schema import ranges
 from services.asset_schema.asset_types import (
     ASSET_TYPES,
     functions_of as type_functions,
@@ -202,7 +203,7 @@ def _entry_dict(e: Entry) -> dict[str, Any]:
         "kind": s.kind,
         "options": list(s.options),
         "options_plain": list(E.options_plain_of(s)),
-        "range": None,
+        "range": ranges.wire(e.scope, s.key),
         "default": e.default,
         "functions": e.functions,
         "aliases": list(e.aliases),

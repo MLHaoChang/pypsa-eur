@@ -20,6 +20,7 @@ import pandas as pd
 from fastapi import HTTPException
 
 from services import change_log_service
+from services.asset_schema import ranges as asset_ranges
 from services.carrier_catalog import ensure_carrier
 from services.pypsa_service import PyPSAService
 from services.study_state import refuse_edit_during_live_study
@@ -248,6 +249,8 @@ def _coerce_bulk_value(df: pd.DataFrame, col: str, value: Any,
                     "PyPSA does not default a non-finite value here, it drops "
                     "the term or the constraint that reads it. Send null to "
                     "restore the default.")
+            # Expert catalogue 01a-3: the catalogue's hard range (C8–C11).
+            asset_ranges.check(component_class, {col: coerced[col]})
             continue
         # Strings / objects pass through. We still cast to str if the user
         # sent a number into a string column so dtype stays clean.
@@ -540,6 +543,11 @@ def apply_bulk_update(body: dict) -> dict:
                             "PyPSA does not default a non-finite value here, it drops "
                             "the term or the constraint that reads it. Send null to "
                             "restore the default.")
+                    # Expert catalogue 01a-3: the catalogue's hard range, unless
+                    # every target already stores this value (C8, R4).
+                    asset_ranges.check_column(
+                        component_class, col, coerced[col],
+                        [df.at[t, col] for t in _targets if col in df.columns])
                     continue
                 # Strings / objects pass through. We still cast to str if the user
                 # sent a number into a string column so dtype stays clean.
