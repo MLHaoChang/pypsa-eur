@@ -1,0 +1,74 @@
+{
+ "profiles": {
+  "system-cost-breakdown/1": [
+   {
+    "metric": "system_capex",
+    "formula": "sum over the carrier's Generators, Links, StorageUnits, Stores, Lines and Transformers of c x nom_opt, c = (overnight_cost x CRF(rate, lifetime) if overnight_cost is set, else capital_cost) x nyears + fom_cost x nyears, nyears = sum of objective weights / 8760",
+    "validity": "verified LP solve and finite, non-negative objective weights (else unverified_solve); whole horizon only (else whole_horizon_required); n.objective recorded and finite (objective_not_recorded); objective scale exactly 1, from the live sentinel or the recorded solver config; an automatic scale counts as unknown (objective_scaled); no objective constant, recorded or from an extendable asset's existing capacity (objective_constant); no PCS/STATCOM, reserve or commercial objective terms (extra_objective_terms); no committable or modular extendable unit (mip_solve); no quadratic, storage, spill, stand-by, start-up, shut-down or curtailment cost, no inactive asset and no composite asset (unmodelled_cost_terms); an overnight_cost has a discount rate and a positive lifetime (annuity_inputs_missing); finite capacities, costs and dispatch (invalid_or_missing_raw_data); extendable capex plus all opex equals n.objective within RESIDUAL_TOLERANCE x max(1, |objective|) (objective_mismatch). Refusals: ambiguous_carrier, unknown_carrier, unsupported_carrier_population, unsupported_snapshot_scope (multi-period or scenario network)",
+    "tolerance": "harness.system_cost_calculations:RESIDUAL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_system_cost_assurance.py::test_the_carriers_sum_to_the_network_and_each_is_its_own_arithmetic",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_system_cost_assurance.py::test_the_carriers_sum_to_the_network_and_each_is_its_own_arithmetic"
+     },
+     "route": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_system_cost_assurance.py::test_the_route_shows_the_same_figures"
+     }
+    }
+   },
+   {
+    "metric": "system_opex",
+    "formula": "sum over the carrier's priced dispatch and t of w_objective[t] x marginal_cost[t] x dispatch[t] (Generator p, Link p0, StorageUnit p_dispatch, Store p)",
+    "validity": "verified LP solve and finite, non-negative objective weights (else unverified_solve); whole horizon only (else whole_horizon_required); n.objective recorded and finite (objective_not_recorded); objective scale exactly 1, from the live sentinel or the recorded solver config; an automatic scale counts as unknown (objective_scaled); no objective constant, recorded or from an extendable asset's existing capacity (objective_constant); no PCS/STATCOM, reserve or commercial objective terms (extra_objective_terms); no committable or modular extendable unit (mip_solve); no quadratic, storage, spill, stand-by, start-up, shut-down or curtailment cost, no inactive asset and no composite asset (unmodelled_cost_terms); an overnight_cost has a discount rate and a positive lifetime (annuity_inputs_missing); finite capacities, costs and dispatch (invalid_or_missing_raw_data); extendable capex plus all opex equals n.objective within RESIDUAL_TOLERANCE x max(1, |objective|) (objective_mismatch). Refusals: ambiguous_carrier, unknown_carrier, unsupported_carrier_population, unsupported_snapshot_scope (multi-period or scenario network)",
+    "tolerance": "harness.system_cost_calculations:RESIDUAL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_system_cost_assurance.py::test_network_figures_equal_the_hand_arithmetic",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_system_cost_assurance.py::test_network_figures_equal_the_hand_arithmetic"
+     },
+     "route": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_system_cost_assurance.py::test_the_route_shows_the_same_figures"
+     }
+    }
+   },
+   {
+    "metric": "system_cost",
+    "formula": "system_capex + system_opex over the same assets",
+    "validity": "verified LP solve and finite, non-negative objective weights (else unverified_solve); whole horizon only (else whole_horizon_required); n.objective recorded and finite (objective_not_recorded); objective scale exactly 1, from the live sentinel or the recorded solver config; an automatic scale counts as unknown (objective_scaled); no objective constant, recorded or from an extendable asset's existing capacity (objective_constant); no PCS/STATCOM, reserve or commercial objective terms (extra_objective_terms); no committable or modular extendable unit (mip_solve); no quadratic, storage, spill, stand-by, start-up, shut-down or curtailment cost, no inactive asset and no composite asset (unmodelled_cost_terms); an overnight_cost has a discount rate and a positive lifetime (annuity_inputs_missing); finite capacities, costs and dispatch (invalid_or_missing_raw_data); extendable capex plus all opex equals n.objective within RESIDUAL_TOLERANCE x max(1, |objective|) (objective_mismatch). Refusals: ambiguous_carrier, unknown_carrier, unsupported_carrier_population, unsupported_snapshot_scope (multi-period or scenario network)",
+    "tolerance": "harness.system_cost_calculations:RESIDUAL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_system_cost_assurance.py::test_network_figures_equal_the_hand_arithmetic",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_system_cost_assurance.py::test_network_figures_equal_the_hand_arithmetic"
+     },
+     "route": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_system_cost_assurance.py::test_the_route_shows_the_same_figures"
+     }
+    }
+   },
+   {
+    "metric": "objective_residual",
+    "formula": "n.objective - (sum over extendable assets of c x nom_opt + network system_opex); network scope only (network_scope_required)",
+    "validity": "verified LP solve and finite, non-negative objective weights (else unverified_solve); whole horizon only (else whole_horizon_required); n.objective recorded and finite (objective_not_recorded); objective scale exactly 1, from the live sentinel or the recorded solver config; an automatic scale counts as unknown (objective_scaled); no objective constant, recorded or from an extendable asset's existing capacity (objective_constant); no PCS/STATCOM, reserve or commercial objective terms (extra_objective_terms); no committable or modular extendable unit (mip_solve); no quadratic, storage, spill, stand-by, start-up, shut-down or curtailment cost, no inactive asset and no composite asset (unmodelled_cost_terms); an overnight_cost has a discount rate and a positive lifetime (annuity_inputs_missing); finite capacities, costs and dispatch (invalid_or_missing_raw_data); extendable capex plus all opex equals n.objective within RESIDUAL_TOLERANCE x max(1, |objective|) (objective_mismatch). Refusals: ambiguous_carrier, unknown_carrier, unsupported_carrier_population, unsupported_snapshot_scope (multi-period or scenario network)",
+    "tolerance": "harness.system_cost_calculations:RESIDUAL_TOLERANCE",
+    "oracle": "pypsa-gui/backend/tests/test_system_cost_assurance.py::test_the_residual_is_the_objective_minus_the_hand_basis",
+    "status": "verified",
+    "surfaces": {
+     "answer": {
+      "status": "verified",
+      "test": "pypsa-gui/backend/tests/test_system_cost_assurance.py::test_the_residual_is_the_objective_minus_the_hand_basis"
+     }
+    }
+   }
+  ]
+ }
+}

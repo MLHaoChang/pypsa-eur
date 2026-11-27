@@ -9,6 +9,7 @@ import { Download } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { resultsApi, isPricesWithheld, type AcPfConvergenceRow } from '../../api/simulation'
 import { networkApi } from '../../api/network'
+import { displayedResultsApi } from '../../api/displayedResults'
 import type { Bus } from '../../api/types'
 import { type TSPayload, fmtPower, shortStamp, downloadCSV, KPI, ChartActions, Seg,
   CHART_GRID, CHART_AXIS, timeAxis, thinRows, ThinNote, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
@@ -129,7 +130,14 @@ export default function LoadFlow() {
   // CO₂ emissions per-carrier + per-generator, plus shadow price of any
   // primary-energy CO₂ cap. Backend reads dispatched energy × carrier
   // intensity / efficiency. Same source as LOPF dispatch (LP stage).
-  const { data: emissions } = useQuery({ queryKey: nk(currentProject, 'results', 'emissions'), queryFn: resultsApi.getEmissions })
+  // The Emissions tab's bound view, under its query key: one fetch, one toast and
+  // one binding for both tabs (A5.2 S3b). A failed read leaves `emissions`
+  // undefined, so the CO₂ section stays hidden rather than reading as no cap.
+  const { data: displayedEmissions } = useQuery({
+    queryKey: nk(currentProject, 'results', 'displayed', 'emissions'),
+    queryFn: displayedResultsApi.emissions,
+  })
+  const emissions = displayedEmissions?.data
   // Per-carrier KPIs (CF / curtailment / market value / revenue). Wraps
   // PyPSA's n.statistics helpers.
   const { data: carrierKpis } = useQuery({ queryKey: nk(currentProject, 'results', 'carrier_kpis'), queryFn: resultsApi.getCarrierKpis })

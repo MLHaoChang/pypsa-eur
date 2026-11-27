@@ -938,3 +938,12 @@ calibration remain pending external judgments and representative observations.
 ### 2026-10-19 — recovered source and reviewer usage gate
 
 Published plans, phased tests and implementations were recovered from master, rather than recreated. Three new public-boundary cases reproduced reviewer approval with missing input/output or cache-only usage. The bounded fix requires explicit input/output counts, charges known usage and withholds interpretations while retaining facts. Fresh local validation: 65 harness tests, 54 phased acceptance cases, 133 expanded evaluation cases, 204 related regressions/four opt-in skips, and 62 frontend cases passed; production build and touched-file Ruff passed. Selections are not added as unique coverage. See `docs/superpowers/qa/2026-10-19-assurance-reviewer-usage.md` and `.scratch/assistant-assurance/reviewer-usage-validation.json` for commands/source hashes/limits. No paid calls or independent domain approval; whole-phase requirements remain open.
+
+### 2026-11-26 — AA-10 R3: system-cost-breakdown/1
+
+Four verified rows in `pypsa-gui/backend/tests/assurance_acceptance/metric_ledger.d/system-cost-breakdown-1.json`
+(capex, opex, system cost, objective residual), answer and route surfaces. GK B's plan GO
+(option a) names two S3 items that R3 does not build; they stay pending here:
+- pending: the objective-vs-cost clarification card (S3, G3: clarification choices pinned by exact list equality). Not built.
+- pending: objective-scale reversal under auto and user scale ≠ 1 (S3, G3). R3 refuses a scaled objective (`objective_scaled`, read from the recorded solver config, since the solver deletes its live sentinel) instead of reversing it.
+

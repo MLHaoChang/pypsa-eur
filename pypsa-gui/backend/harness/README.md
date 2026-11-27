@@ -25,7 +25,7 @@ harness/
   job_hold_store.py  issue 16: the one DB seam of the job-hold records (write, set_job, delete, exists, get, active; S2: renew, delete_if, foreign, and the strict solve_jobs reads solve_job_status, live_solve_jobs); every function raises, the caller decides
   outcomes.py     issue 04: each tool result's `_outcome` (completed/partial/failed/uncertain/denied) from an independent read, never the handler's word: jobs (S1), row writes, imports and exports against the whole-state map with extra_edits (S2, S4b), undo_last (S3), the raise and timeout paths (S4b)
   navigation.py   issued view actions and owner/project/turn/generation-bound browser ACKs
-  displayed_adapters.py  per-results-tab displayed-data adapters: a tab ACKs `browser_displayed_data` only through one (A5.2); `check_registry` keeps result_views in step. Load flow, Emissions, Grid risk, Energy flow, Load shape and Curtailment today; all but Load flow render `routers/results_displayed.py` views, which call their tab's route function (a windowed view binds the period, window and week it was called with; a multi-payload view binds `{part: payload}` read under one guard)
+  displayed_adapters.py  per-results-tab displayed-data adapters: a tab ACKs `browser_displayed_data` only through one (A5.2); `check_registry` keeps result_views in step. Load flow, Emissions, Grid risk, Energy flow, Load shape, Curtailment, Prices, Capacity expansion and Storage cycling today; all but Load flow render `routers/results_displayed.py` views, which call their tab's route function (a windowed view binds the source, period, window and week it was called with; a multi-payload view binds `{part: payload}` read under one guard; a withheld MIP price binds as withheld and the words say `unavailable: <reason>`)
   reviewer.py     optional single bounded read-only review of qualitative interpretations
   publication.py  JSON/ZIP from the same validated answer, facts and evidence
   rollout.py      capabilities, profile/effect rollback and bounded shadow observation
@@ -627,6 +627,12 @@ change, and says when it was built to its bound; `storage-cycles/1` divides wind
 discharge (store weights) by energy capacity, sharing the StorageUnit profile's
 per-snapshot bounds helper; cyclic units are checked against their bounds only.
 `tests/test_profile_registry.py` keeps every metric name to one module.
+`system-cost-breakdown/1` (opt-in, `system_cost_calculations.py`, assistant-assurance 10 R3)
+gives capex, opex and their sum for the network or one carrier, as `/results/cost_breakdown`
+books them, from the component tables alone. Every figure needs the hand basis (extendable
+capex plus all opex) to reproduce `n.objective` within `RESIDUAL_TOLERANCE` × max(1, |objective|).
+A scaled objective, an objective constant, PCS/STATCOM, reserve or commercial terms, a MIP or
+an unmodelled cost attribute withholds every figure with its own reason. Whole horizon only.
 `energy-balance/1` (opt-in) gives the Energy flow tab's totals (generation, served,
 unserved, storage change and the unsplit remainder of export, losses and conversion),
 gated by a per-bus balance; the tab's Source -> Via -> Destination rows are its own

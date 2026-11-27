@@ -117,6 +117,11 @@ WEIGHT_BASIS: dict[str, str] = {
     "peak_loss": "none",
     "demand_energy": "generators",
     "loss_pct_of_demand": "generators",
+    # system_cost_calculations.py: capex is per horizon (nyears = Σ objective weights / 8760)
+    "system_capex": "objective",
+    "system_opex": "objective",
+    "system_cost": "derived",
+    "objective_residual": "derived",
 }
 
 # Profiles whose captured index is not snapshots: the investment report's

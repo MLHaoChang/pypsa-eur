@@ -10,9 +10,10 @@ completes only on an identical binding (`harness/displayed_adapters.py`).
 No new figures: a view never re-implements its route. A tab with nothing to
 show answers as its route does (204, with `X-Results-State` when out of date).
 
-A view that takes a period, window or week (S3) records the values its route
-function was CALLED with in the binding (null: the route's default), so the ACK
-re-reads exactly that view. A tab that renders several payloads reads them all
+A view that takes a source, period, window, week or threshold (S3) records the
+values its route function was CALLED with in the binding (null: the route's
+default), so the ACK re-reads exactly that view; a source the tab does not
+offer is refused. A tab that renders several payloads reads them all
 under one `network_guard()` and binds `{part: payload}` with one hash.
 """
 
@@ -192,7 +193,107 @@ def curtailment_view(window_from=None, window_to=None) -> dict:
         )
 
 
+def _offered(source, offered) -> None:
+    """A source the tab does not offer is refused, never served as some default."""
+    if source not in offered:
+        raise HTTPException(
+            422,
+            {
+                "error_kind": "source_not_offered",
+                "message": f"this view offers the source {' or '.join(offered)} only",
+            },
+        )
+
+
+# The Prices tab pins the LP duals (an AC power flow writes none); Storage
+# cycling asks for the route's default, the LP dispatch.
+PRICE_SOURCES = ("lopf",)
+STORAGE_SOURCES = ("lopf",)
+
+
+def prices_view(
+    source="lopf", window_from=None, window_to=None, threshold=2000.0, limit=200
+) -> dict:
+    """Prices renders `/results/prices` for one source and window and, for its
+    drivers table, `/results/price_drivers` at one threshold and row cap, both
+    read under one guard. On a solve whose prices are not marginal prices (a
+    MIP) both routes answer withheld with the reason; the binding records it as
+    `price_limit`, so the words say the prices are unavailable, never "showing"."""
+    from harness.durable import network_guard
+    from routers import results
+
+    _offered(source, PRICE_SOURCES)
+    _window(window_from, window_to)
+    with network_guard():
+        prices = results.get_prices(source, window_from, window_to)
+        if isinstance(prices, Response):
+            return _unavailable(prices)
+        drivers = results.get_price_drivers(threshold, limit)
+        parts = {
+            "prices": prices,
+            "price_drivers": None if isinstance(drivers, Response) else drivers,
+        }
+        withheld = prices.get("status") == "unavailable"
+        return _bound(
+            "prices",
+            parts,
+            # The part the chat read (get_results prices) names, in the same encoding.
+            read_sha256=_sha256(prices),
+            price_limit=prices.get("reason") if withheld else None,
+            source=source,
+            window_from=window_from,
+            window_to=window_to,
+            threshold=threshold,
+            limit=limit,
+        )
+
+
+def capex_view() -> dict:
+    """Capacity expansion renders `/results/cost_breakdown` and
+    `/results/economics_by_carrier`, read under one guard, as the routes serve
+    them (no annuity or other figure is recomputed here). A cost-breakdown 204
+    is the tab's "not solved", so the view answers 204 too."""
+    from harness.durable import network_guard
+    from routers import results
+
+    with network_guard():
+        cost = results.get_cost_breakdown()
+        if isinstance(cost, Response):
+            return _unavailable(cost)
+        economics = results.get_economics_by_carrier()
+        return _bound(
+            "capex",
+            {"cost_breakdown": cost, "economics_by_carrier": economics},
+            # Each part a chat read can name, so a read of one claims only it.
+            cost_breakdown_sha256=_sha256(cost),
+            economics_by_carrier_sha256=_sha256(economics),
+        )
+
+
+def storage_view(source="lopf", window_from=None, window_to=None) -> dict:
+    """Storage cycling renders `/results/storage_dispatch` for one source and window."""
+    from harness.durable import network_guard
+    from routers import results
+
+    _offered(source, STORAGE_SOURCES)
+    _window(window_from, window_to)
+    with network_guard():
+        payload = results.get_storage_dispatch_results(source, window_from, window_to)
+        if isinstance(payload, Response):
+            return _unavailable(payload)
+        return _bound(
+            "storage",
+            payload,
+            source=source,
+            window_from=window_from,
+            window_to=window_to,
+        )
+
+
 VIEWS = {
+    "prices": prices_view,
+    "capex": capex_view,
+    "storage": storage_view,
     "emissions": emissions_view,
     "grid_risk": grid_risk_view,
     "flows": flows_view,
@@ -296,3 +397,56 @@ def get_displayed_curtailment(
     """The Curtailment tab's payloads (curtailment and generators) and their one binding."""
     _no_source(source)
     return _serve(curtailment_view, actor, window_from=from_, window_to=to_)
+
+
+_OFFERED_SOURCE = Query(
+    None, description="The tab's one source, the LP solve (default: it)."
+)
+
+
+@router.get("/prices")
+def get_displayed_prices(
+    source: str | None = _OFFERED_SOURCE,
+    from_: int | None = Query(None, alias="from", **_INDEX),
+    to_: int | None = Query(None, alias="to", **_INDEX),
+    threshold: float = Query(2000.0, allow_inf_nan=False),
+    limit: int = Query(200, **_INDEX),
+    actor: User = Depends(require_user),
+):
+    """The Prices tab's payloads (prices and price drivers) and their one binding."""
+    return _serve(
+        prices_view,
+        actor,
+        source="lopf" if source is None else source,
+        window_from=from_,
+        window_to=to_,
+        threshold=threshold,
+        limit=limit,
+    )
+
+
+@router.get("/capex")
+def get_displayed_capex(
+    source: str | None = _SOURCE,
+    actor: User = Depends(require_user),
+):
+    """The Capacity expansion tab's payloads (cost breakdown and economics by carrier) and their one binding."""
+    _no_source(source)
+    return _serve(capex_view, actor)
+
+
+@router.get("/storage")
+def get_displayed_storage(
+    source: str | None = _OFFERED_SOURCE,
+    from_: int | None = Query(None, alias="from", **_INDEX),
+    to_: int | None = Query(None, alias="to", **_INDEX),
+    actor: User = Depends(require_user),
+):
+    """The Storage cycling tab's payload and its source binding."""
+    return _serve(
+        storage_view,
+        actor,
+        source="lopf" if source is None else source,
+        window_from=from_,
+        window_to=to_,
+    )

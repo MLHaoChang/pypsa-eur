@@ -4646,7 +4646,7 @@ def _dispatch_real_tool_call(
     ui_event_payload: dict[str, Any] | None = None
     result_for_model = result
     if session.navigation_turn is not None:
-        session.navigation_turn.note_read(tool_name, result)
+        session.navigation_turn.note_read(tool_name, result, args or {})
     if (
         isinstance(result, dict)
         and result.get("_ui_event")
