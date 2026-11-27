@@ -452,6 +452,54 @@ def download_psse_bundle(bundle: str, proj: AuthorizedProject = ProjectAccessDep
                              "X-Run-Stale": "true" if stale else "false"})
 
 
+# ── the PowerFactory (DGS) hand-off and the background harmonics (grid-compliance 09, item 6) ──
+
+@router.get("/{name}/powerfactory")
+def list_powerfactory_bundles(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """The latest campus run's PowerFactory (DGS) bundles, and whether the run is stale."""
+    return ce.powerfactory_bundles(_row(proj, db))
+
+
+@router.get("/{name}/powerfactory/{bundle}/download")
+def download_powerfactory_bundle(bundle: str, proj: AuthorizedProject = ProjectAccessDep,
+                                 db: DBSession = Depends(get_db)):
+    """One PowerFactory bundle as a zip, picked from the listing as the PSS/E download is."""
+    data, stale = ce.powerfactory_bundle_zip(_row(proj, db), bundle)
+    return Response(data, media_type="application/zip",
+                    headers={"Content-Disposition": content_disposition(f"{bundle}.zip"),
+                             "X-Run-Stale": "true" if stale else "false"})
+
+
+@router.get("/{name}/background-harmonics")
+def get_background_harmonics(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    """The stored field measurement of the background harmonics at the PCC, if any."""
+    return ce.get_background(_row(proj, db))
+
+
+@router.put("/{name}/background-harmonics")
+async def put_background_harmonics(
+    file: UploadFile = File(...),
+    source: str = Form(...),
+    measured_on: str = Form(...),
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """A field measurement (CSV of harmonic order and % of the fundamental) with
+    who measured it and when; checked now, used by the next study run."""
+    _check_lock(proj, db, user)
+    data = await UploadBudget(ce.MAX_BACKGROUND_BYTES).read(file)
+    return await run_in_threadpool(ce.put_background, _row(proj, db), data, source, measured_on, file.filename)
+
+
+@router.delete("/{name}/background-harmonics")
+def delete_background_harmonics(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db),
+                                user: User | None = Depends(optional_user)):
+    """Remove the stored measurement; the next study run has no background row."""
+    _check_lock(proj, db, user)
+    return ce.delete_background(_row(proj, db))
+
+
 # ── the island sidecar and study (campus island plan, I9a) ──────────────────
 
 @router.get("/{name}/island")

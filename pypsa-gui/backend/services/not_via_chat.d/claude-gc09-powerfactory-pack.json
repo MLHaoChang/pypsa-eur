@@ -1,0 +1,17 @@
+{
+ "entries": [
+  {
+   "id": "campus_powerfactory_bundle_download",
+   "title": "Download the campus PowerFactory (DGS) case",
+   "disposition": "manual",
+   "reason": "A PowerFactory hand-off case is a zip file the user saves from the app; chat cannot hand over a download. The Grid code & connection results list each bundle with its button.",
+   "page": "Results, Grid code & connection",
+   "panel": null,
+   "keywords": ["powerfactory", "dgs", "digsilent"],
+   "routes": [
+    ["GET", "/api/campus-electrical/{name}/powerfactory"],
+    ["GET", "/api/campus-electrical/{name}/powerfactory/{bundle}/download"]
+   ]
+  }
+ ]
+}
