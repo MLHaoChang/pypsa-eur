@@ -552,7 +552,9 @@ def test_ac_pf_not_run_sentence_matches_the_dispatch_tab(client, solved):
     from pathlib import Path
 
     message = _get(client, "dispatch", source="ac_pf").json()["detail"]["message"]
-    tab = Path(__file__).resolve().parents[2] / "frontend/src/pages/results/Dispatch.tsx"
+    tab = (
+        Path(__file__).resolve().parents[2] / "frontend/src/pages/results/Dispatch.tsx"
+    )
     assert f'reason="{message}"' in tab.read_text(encoding="utf-8")
 
 

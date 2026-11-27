@@ -425,7 +425,9 @@ def test_displayed_data_tab_with_no_view_issues_no_ack(baseline):
     from harness import assurance, navigation
     from harness.session import ChatSession
 
-    turn = assurance.Turn(ChatSession(owner_user_id=assurance_records.actor_id()), baseline[0])
+    turn = assurance.Turn(
+        ChatSession(owner_user_id=assurance_records.actor_id()), baseline[0]
+    )
     navigation.begin_turn(turn, 7)
     payload = {"kind": "navigate", "panel_id": "results", "results_tab": "dispatch"}
     assert navigation.issue(turn, payload) is None
@@ -571,8 +573,15 @@ def test_reviewer_has_no_tools_and_cannot_create_claims(baseline, checked, monke
 @pytest.mark.parametrize(
     "fault",
     [
-        "withhold", "spoof", "unknown_claim", "tool", "no_usage",
-        "missing_input_usage", "missing_output_usage", "cache_only_usage", "bad_source",
+        "withhold",
+        "spoof",
+        "unknown_claim",
+        "tool",
+        "no_usage",
+        "missing_input_usage",
+        "missing_output_usage",
+        "cache_only_usage",
+        "bad_source",
     ],
 )
 def test_reviewer_failures_retain_useful_facts_and_withhold_interpretation(
@@ -713,8 +722,11 @@ def test_ambiguous_cost_request_disposes_requested_slot(solved, checked):
     assert approval(frames)["verdict"] == "limited"
     assert "price year" in public_text(frames)
     slot = approval(frames)["receipt"]["result_slots"][0]
-    assert slot == {"metric": "total_cost", "disposition": "needs_clarification",
-                    "reason": "explicit_cost_basis_required"}
+    assert slot == {
+        "metric": "total_cost",
+        "disposition": "needs_clarification",
+        "reason": "explicit_cost_basis_required",
+    }
     assert not checked.provider.requests
 
 
