@@ -15,6 +15,13 @@ so moving them needs a plan for the order first (GK B):
   `put_stress_scenarios`, `get_eh_template`: contiguous in TOOLS and TOOL_ROUTES,
   but in DISPATCHERS they are interleaved with `get_asset_health`,
   `record_asset_health`, `get_project_flow` and `get_reliability_goal` (S4, #2106).
+- `ui_set_snapshot`: its TOOLS place is after `compare_scenarios`, which sits
+  between it and `ui_open_panel`; in TOOL_ROUTES and DISPATCHERS it follows
+  `ui_open_panel` directly (S5). A one-tool stem would splice, but GK B (75)
+  ruled against one-tool stems.
+- `compare_scenarios`: between `ui_open_panel` and `ui_set_snapshot` in TOOLS,
+  but 17 keys earlier in TOOL_ROUTES and DISPATCHERS, after
+  `get_project_results_summary` (S5).
 
 ## Start-only tools without a "start …" chat phrase
 
