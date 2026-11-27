@@ -727,3 +727,33 @@ def test_a_record_of_another_version_or_profile_is_rejected(field, value):
     raw[field] = value
     with pytest.raises(ValueError, match="store_dispatch_source_identity"):
         store.calculate(raw, {"profile": store.PROFILE, "entity_id": "x"})
+
+
+# ── exact boundaries (mutants.py survivors) ───────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "p,low,high", [(1e-6, 0.0, 1.0), (-1e-6, -1.0, 0.0)], ids=["lower", "upper"]
+)
+def test_an_energy_exactly_at_a_bound_plus_its_slack_is_within(p, low, high):
+    """e = -1e-6 against 0 x 10 - 1e-6, or e = 1e-6 against 0 x 10 + 1e-6: equal, so inside."""
+    raw = _hand_raw([p], e_nom_opt=10.0, e_min_pu=[low], e_max_pu=[high])
+    assert abs(raw["e"][0]) == 1e-6
+    assert _every(raw) == set()
+
+
+def test_an_energy_exactly_at_minus_near_zero_keeps_the_loss():
+    raw = _hand_raw([NEAR_ZERO, 0.0], sl=[0.0, 0.1], e_nom_opt=None)
+    assert raw["e"][0] == -NEAR_ZERO
+    values, reasons = _slots(raw)
+    assert reasons == {"peak_store_fill": "no_store_capacity"}
+    assert values["store_standing_loss"] == pytest.approx(-0.1 * NEAR_ZERO, rel=HAND_REL)
+
+
+def test_a_store_with_no_dispatch_column_is_missing_data(store_case, monkeypatch):
+    ctx = store_case()
+    _live(monkeypatch)
+    ctx.network.stores_t.p.drop(columns="s", inplace=True)
+    raw = _raw(ctx)
+    assert raw["p"] is None
+    assert _every(raw) == {"invalid_or_missing_raw_data"}
