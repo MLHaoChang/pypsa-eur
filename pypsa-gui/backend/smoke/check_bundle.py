@@ -250,8 +250,12 @@ ROOTED = (
 )
 
 
+def _frozen_roots(root: Path) -> list[Path]:
+    return [p.parent for p in root.rglob("alembic.ini") if p.is_file()]
+
+
 def check_rooted(root: Path) -> list[str]:
-    roots = [p.parent for p in root.rglob("alembic.ini") if p.is_file()]
+    roots = _frozen_roots(root)
     return [f"{rel} (beside alembic.ini)" for rel in ROOTED
             if not any((r / rel).is_file() for r in roots)]
 
@@ -267,11 +271,17 @@ _BACKEND = Path(__file__).resolve().parents[1]
 
 def check_fragments(root: Path) -> list[str]:
     """Every fragment module in the source tree is a file in the bundle."""
-    roots = [p.parent for p in root.rglob("alembic.ini") if p.is_file()]
+    roots = _frozen_roots(root)
     problems: list[str] = []
     for package in FRAGMENT_PACKAGES:
         rel = Path(*package.split("."))
-        for src in sorted((_BACKEND / rel).glob("[!_]*.py")):
+        sources = sorted((_BACKEND / rel).glob("[!_]*.py"))
+        if not sources:
+            problems.append(
+                f"NO FRAGMENT SOURCES        {(_BACKEND / rel).as_posix()} has no fragment "
+                "modules to check against; run from the repository checkout"
+            )
+        for src in sources:
             if not any(
                 (r / rel / src.name).is_file() or (r / rel / f"{src.stem}.pyc").is_file()
                 for r in roots

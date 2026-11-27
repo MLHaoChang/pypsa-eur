@@ -10691,10 +10691,12 @@ DISPATCHERS.update({
 # ── Per-tool dispatcher fragments (RETRO-FRAG-1) ──────────────────────────
 #
 # `services/chat_dispatchers/<stem>.py` pairs `harness/catalogue_tools/<stem>.py`
-# (see `harness/tool_fragments.py`). Merged HERE, before the gates below wrap
-# DISPATCHERS, so a fragment's tool is lock-gated, study-gated and undo-captured
-# like every tool above.
-from harness.catalogue import _FRAGMENTS as _SCHEMA_FRAGMENTS  # noqa: E402
+# (see `harness/tool_fragments.py`). Discovered above DISPATCHERS (so a moved
+# family can be spliced at its place), and merged HERE, before the gates below
+# wrap DISPATCHERS, so a fragment's tool is lock-gated, study-gated and
+# undo-captured like every tool above. A fragment imports chat_tools names inside
+# its functions, never at its top: chat_tools is part-loaded when it is imported.
+from harness.catalogue import SCHEMA_FRAGMENTS as _SCHEMA_FRAGMENTS  # noqa: E402
 
 _FRAGMENT_LOCK_GATED = _DISPATCH_FRAGMENTS.merge(
     DISPATCHERS, PRE_DISPATCH_VALIDATORS, _SCHEMA_FRAGMENTS)

@@ -266,12 +266,6 @@ def test_merge_dispatchers_returns_the_lock_gated_tools():
 # ── a moved family keeps its place in TOOL_ROUTES and DISPATCHERS ───────────
 
 
-def _neighbours(keys, first, last):
-    keys = list(keys)
-    i, j = keys.index(first), keys.index(last)
-    return keys[i - 1], keys[i : j + 1], keys[j + 1]
-
-
 _REPORT_TEMPLATES = [
     "list_report_templates",
     "set_report_template",
@@ -280,17 +274,39 @@ _REPORT_TEMPLATES = [
     "set_report_mapping",
 ]
 
+# Every family moved out of the monolith, with the keys either side of its old
+# place on the pre-move master, in TOOLS, TOOL_ROUTES and DISPATCHERS (a dict
+# {table: (before, after)} when the three differ). Each move slice adds its row.
+SPLICED_PLACES = {
+    "report_templates": ("delete_report", "list_report_roundtrips"),
+}
 
-@pytest.mark.parametrize("table", ["TOOL_ROUTES", "DISPATCHERS"])
-def test_report_templates_keeps_its_old_place_in_routes_and_dispatchers(table):
+
+def test_every_spliced_family_has_its_old_place_pinned():
+    assert set(SPLICED_PLACES) == catalogue._FRAGMENTS.spliced
+
+
+@pytest.mark.parametrize("table", ["TOOLS", "TOOL_ROUTES", "DISPATCHERS"])
+@pytest.mark.parametrize("stem", sorted(SPLICED_PLACES))
+def test_a_spliced_family_keeps_its_old_place(stem, table):
     from services import chat_tools
 
-    keys = (catalogue if table == "TOOL_ROUTES" else chat_tools).__dict__[table]
-    assert _neighbours(keys, "list_report_templates", "set_report_mapping") == (
-        "delete_report",
-        _REPORT_TEMPLATES,
-        "list_report_roundtrips",
-    )
+    place = SPLICED_PLACES[stem]
+    before, after = place[table] if isinstance(place, dict) else place
+    schema = F.discover(F.SCHEMA_PACKAGE)[stem]
+    own, keys = {
+        "TOOLS": (
+            [t["name"] for t in schema.TOOLS],
+            [t["name"] for t in catalogue.TOOLS],
+        ),
+        "TOOL_ROUTES": (list(schema.ROUTES), list(catalogue.TOOL_ROUTES)),
+        "DISPATCHERS": (
+            list(F.discover(F.DISPATCH_PACKAGE)[stem].DISPATCHERS),
+            list(chat_tools.DISPATCHERS),
+        ),
+    }[table]
+    i = keys.index(own[0])
+    assert keys[i - 1 : i + len(own) + 1] == [before, *own, after]
 
 
 def test_splicing_routes_of_a_family_whose_tools_are_not_spliced_is_refused():
@@ -323,6 +339,14 @@ def test_spliced_routes_are_kept_where_they_were_spliced():
     routes = {"x": [], **frags.splice_routes("a"), "y": []}
     frags.merge(tools, routes, frozenset(), frozenset())
     assert list(routes) == ["x", "t1", "y", "t2"]
+
+
+def test_a_spliced_route_removed_from_tool_routes_is_refused():
+    frags = _schema(a=_mod("pkg.cat.a", ["t1"]))
+    tools = frags.splice("a")
+    frags.splice_routes("a")
+    with pytest.raises(FragmentError, match=r"TOOL_ROUTES entry 't1'.*removed"):
+        frags.merge(tools, {}, frozenset(), frozenset())
 
 
 def test_a_spliced_route_replaced_in_tool_routes_is_refused():
@@ -497,6 +521,10 @@ def _dispatcher_stems():
     return sorted(p.stem for p in folder.glob("[!_]*.py"))
 
 
+def test_the_dispatcher_fragments_are_found_on_disk():
+    assert "report_templates" in _dispatcher_stems()
+
+
 @pytest.mark.parametrize("stem", _dispatcher_stems())
 def test_every_dispatcher_fragment_imported_first_is_not_circular(stem):
     """chat_tools discovers the dispatcher fragments part-way through its own
@@ -567,7 +595,20 @@ def _fake_bundle(root, skip=None):
 
 
 def test_the_bundle_check_reads_the_spec_fragment_packages():
-    assert _check_bundle().FRAGMENT_PACKAGES == (F.SCHEMA_PACKAGE, F.DISPATCH_PACKAGE)
+    packages = _check_bundle().FRAGMENT_PACKAGES
+    assert packages == (F.SCHEMA_PACKAGE, F.DISPATCH_PACKAGE)
+    assert f"FRAGMENT_PACKAGES = {packages!r}".replace("'", '"') in SPEC.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_the_bundle_check_refuses_when_the_source_tree_has_no_fragments(
+    tmp_path, monkeypatch
+):
+    cb = _check_bundle()
+    monkeypatch.setattr(cb, "_BACKEND", tmp_path / "nowhere")
+    problems = cb.check_fragments(_fake_bundle(tmp_path / "bundle"))
+    assert len(problems) == 2 and "no fragment modules" in problems[0], problems
 
 
 def test_the_bundle_check_passes_a_bundle_with_every_fragment(tmp_path):

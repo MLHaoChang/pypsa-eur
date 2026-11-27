@@ -6170,6 +6170,8 @@ _SERVICE_CALL_NON_NETWORK_WRITES = frozenset({
 _SERVICE_CALL_NETWORK_WRITES, _SERVICE_CALL_NON_NETWORK_WRITES = _FRAGMENTS.merge(
     TOOLS, TOOL_ROUTES, _SERVICE_CALL_NETWORK_WRITES, _SERVICE_CALL_NON_NETWORK_WRITES)
 FRAGMENT_NETWORK_WRITES = _FRAGMENTS.network_writes
+# The schema side, for chat_tools' dispatcher merge (which families are spliced).
+SCHEMA_FRAGMENTS = _FRAGMENTS
 
 
 def tool_edits_network(tool_name: str) -> bool:
