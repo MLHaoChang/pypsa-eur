@@ -1857,6 +1857,9 @@ def run_simulation(
                 # lock. Axis alignment alone cannot detect parameter edits.
                 try:
                     from services.workflow_tools import _record_solve_inputs
+                    from services.solver.assumptions import SOLVE_STRATEGY_META
+                    # What the run's objective is (template-e2e 18), read by /simulation/status.
+                    network.meta[SOLVE_STRATEGY_META] = str(getattr(config, "solve_strategy", "full"))
                     _record_solve_inputs(network, config)
                     _seal_applied(network, _applied)
                 except Exception as exc:

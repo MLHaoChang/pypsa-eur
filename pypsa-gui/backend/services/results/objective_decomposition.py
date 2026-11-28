@@ -117,6 +117,15 @@ def _bridge(n, cost_breakdown, cfg) -> dict:
             by_period[int(e["period"])] = e
         except (TypeError, ValueError, KeyError):
             continue
+    # The weights the LP priced each period with: `auto_discount_periods` sets
+    # PV × years for the solve and restores the network's own afterwards
+    # (template-e2e 18), so the restored `ipw.objective` is not what it charged.
+    # Read from the solve's stamp, never from today's config (the rate or the
+    # toggle may have changed since). No stamp: "unknown", priced as before.
+    from services.solver.assumptions import UNKNOWN, solve_discount
+
+    stamp = solve_discount(n)
+    disc = stamp if isinstance(stamp, dict) else None
     lp_basis = 0.0
     nonext_reported = 0.0
     for p, f in fixed.items():
@@ -125,7 +134,8 @@ def _bridge(n, cost_breakdown, cfg) -> dict:
             opex_raw = float(cost_breakdown.get("opex", 0.0) or 0.0)
         else:
             years = years_for_period(years_map, p)
-            weight = float(n.investment_period_weightings.at[p, "objective"])
+            weight = (disc["factors"][int(p)] if disc is not None
+                      else float(n.investment_period_weightings.at[p, "objective"]))
             entry = by_period.get(int(p))
             # by_period OPEX is already × years; one period's worth is / years.
             opex_raw = (float(entry["opex"]) / years) if entry and years else 0.0
@@ -151,6 +161,8 @@ def _bridge(n, cost_breakdown, cfg) -> dict:
         "period_weighting_adjustment_eur": lp_basis - (cb_total - nonext_reported),
         "lp_basis_total": lp_basis - reserve,
         "is_multi_period": is_mp,
+        "discount": (UNKNOWN if stamp == UNKNOWN else None if disc is None
+                     else {"ref_year": disc["ref_year"], "real_rate": disc["real_rate"]}),
         **({"reserve_revenue_eur": reserve} if reserve else {}),
     }
 
@@ -195,6 +207,7 @@ def compute_objective_decomposition(n, cost_breakdown, cfg=None):
         "lp_basis_total": None,
         "residual_gap_eur": None,
         "residual_gap_pct": None,
+        "discount": None,
     }
     if getattr(cfg, "solve_strategy", "full") == "rolling":
         out["lp_total_scope"] = "last_window"
@@ -251,6 +264,7 @@ def compute_objective_decomposition(n, cost_breakdown, cfg=None):
             out["nonextendable_fixed_cost_eur"] = b["nonextendable_fixed_cost_eur"]
             out["period_weighting_adjustment_eur"] = b["period_weighting_adjustment_eur"]
             out["lp_basis_total"] = b["lp_basis_total"]
+            out["discount"] = b["discount"]
             if "reserve_revenue_eur" in b:
                 out["reserve_revenue_eur"] = b["reserve_revenue_eur"]
             residual = out["lp_total"] - b["lp_basis_total"]
