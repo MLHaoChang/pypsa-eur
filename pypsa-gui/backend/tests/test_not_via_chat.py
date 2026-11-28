@@ -290,3 +290,29 @@ def test_range_or_flags_alone_does_not_refuse(discovery, goal):
 def test_a_real_out_of_range_ask_is_refused(discovery, goal):
     out = chat_tools.find_capabilities(goal)
     assert [e['title'] for e in out.get('not_via_chat', [])][:1] == [_RANGE_FLAGS_TITLE]
+
+
+_GUIDE_PAGES_TITLE = 'Parameter guide pages'
+
+
+@pytest.mark.parametrize('goal', [
+    'Search the parameter catalogue for capacity.',
+    'Find the catalogue entry for marginal cost.',
+    'Which catalogue parameter sets the battery size?',
+    'Guide me through setting the capacity.',
+])
+def test_finding_a_parameter_is_not_refused_as_a_guide_page(discovery, goal):
+    # find_parameter answers these (expert-catalogue 05).
+    out = chat_tools.find_capabilities(goal)
+    assert _GUIDE_PAGES_TITLE not in [e['title'] for e in out.get('not_via_chat', [])]
+
+
+@pytest.mark.parametrize('goal', [
+    'Open the parameter guide for capacity.',
+    'Show me the guide page for asset types.',
+    'Open the catalogue guide on functions.',
+    'Where is the glossary?',
+])
+def test_a_guide_page_ask_is_refused(discovery, goal):
+    out = chat_tools.find_capabilities(goal)
+    assert _GUIDE_PAGES_TITLE in [e['title'] for e in out.get('not_via_chat', [])]
