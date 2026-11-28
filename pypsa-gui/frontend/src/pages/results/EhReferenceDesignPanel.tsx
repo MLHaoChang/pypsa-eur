@@ -1151,10 +1151,12 @@ export function EhReferenceDesignPanel() {
     : study?.report
       ?? ((reportData ?? null) as EhReferenceDesignReport | null)
 
-  // Exports read the STORED report (GET /eh_reference_design), which a later
-  // foreground solve clears while the study record keeps its copy — both
-  // exports then refuse together rather than disagree (P18 gate).
-  const storedReport = running ? null
+  // Exports read the stored report, or the study record's own copy once a
+  // later foreground solve has cleared it (the route serves the same fallback),
+  // so the export survives a later solve (TE2E-16).
+  const storedReport = running ? null : report
+  // The export route's own copy: it says whether this is the record's copy.
+  const exportMeta = running ? null
     : (reportData ?? null) as EhReferenceDesignReport | null
   const hasReport = report != null
   useEffect(() => {
@@ -1666,7 +1668,7 @@ export function EhReferenceDesignPanel() {
                 <button type="button" data-testid="eh-report-json"
                   onClick={() => void exportJson.mutate()}
                   disabled={exportJson.isPending || !storedReport}
-                  title="The stable export shape served by GET /results/eh_reference_design"
+                  title="Saves the study's reference design as a JSON file"
                   className="px-2 py-0.5 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent disabled:opacity-50">
                   Download JSON
                 </button>
@@ -1678,10 +1680,12 @@ export function EhReferenceDesignPanel() {
                     `eh-reference-design-${storedReport.archetype}.csv`,
                     REPORT_SUMMARY_CSV_HEADER, reportSummaryCsvRows(storedReport))}
                 />
-                {!storedReport && (
-                  <span className="text-[10px] text-muted" data-testid="eh-report-not-stored">
-                    Not exportable: the stored report was cleared by a later
-                    solve — re-run the study to export it.
+                {exportMeta?.stale && (
+                  <span data-testid="eh-report-stale"
+                    className={`text-[10px] ${exportMeta.edited_since_study ? 'text-warn' : 'text-muted'}`}>
+                    {exportMeta.edited_since_study
+                      ? 'Out of date: the network changed after the study ran. Run the study again for a current export. The JSON file notes this too.'
+                      : 'From the last study run, before the latest solve. The JSON file notes this too.'}
                   </span>
                 )}
                 {exportError && (

@@ -3,7 +3,7 @@
 
 # 16 — Report and export dead ends after a fresh run
 
-Status: ready-for-agent
+Status: done
 Impact: medium
 Templates: DC, H2, microgrid (export); every template (report)
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)

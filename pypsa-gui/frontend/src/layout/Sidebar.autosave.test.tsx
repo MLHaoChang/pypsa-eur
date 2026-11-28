@@ -101,6 +101,16 @@ describe('autosave while the tab and the backend disagree', () => {
     await waitFor(() => expect(projectsApi.save).toHaveBeenCalledTimes(1))
   })
 
+  it('posts nothing while a queue job or Guided study is solving the project (the 409 source)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    renderSidebar()
+    await waitFor(() => expect(networkApi.getMeta).toHaveBeenCalled())
+    act(() => { useUIStore.getState().setSolvingReadOnly(true) })
+    await tickAutosave()
+    expect(projectsApi.save).not.toHaveBeenCalled()
+    expect(logLines().some(l => /Autosave paused/.test(l))).toBe(true)
+  })
+
   it('an identity 409 ("bound to project") raises the mismatch from the detail\'s names', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     vi.mocked(projectsApi.save).mockRejectedValue(reject409(
