@@ -1169,18 +1169,16 @@ describe('P18 — pipeline table and whole-report export', () => {
       'eh-reference-design-strong_grid-01234567.json', exportBody))
   })
 
-  it('refuses both exports together when the stored report was cleared', async () => {
-    // A later foreground solve clears the stored report while the study
-    // record keeps its copy: the panel still shows it, but neither export
-    // may disagree with GET /eh_reference_design.
+  it('keeps both exports on after a later solve cleared the stored report (TE2E-16)', async () => {
+    // The study record keeps its copy and the route serves it, so the panel
+    // shows the report and both exports stay available.
     done()
-    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(null)
     await openPanel()
-    expect((await screen.findByTestId('eh-report-not-stored')).textContent)
-      .toMatch(/cleared by a later solve/)
-    expect((screen.getByTestId('eh-report-json') as HTMLButtonElement).disabled).toBe(true)
+    expect(await screen.findByTestId('eh-report-json')).toBeTruthy()
+    expect(screen.queryByTestId('eh-report-not-stored')).toBeNull()
+    expect((screen.getByTestId('eh-report-json') as HTMLButtonElement).disabled).toBe(false)
     expect((screen.getByTestId('eh-report-summary-csv') as HTMLButtonElement).disabled)
-      .toBe(true)
+      .toBe(false)
   })
 
   it('says so if the stored report vanished between render and click', async () => {

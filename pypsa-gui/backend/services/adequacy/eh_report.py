@@ -680,9 +680,22 @@ def mark_legacy_report(body: dict) -> dict:
         **fmea, "payload": mark_legacy_fmea_top(fmea["payload"])}}}
 
 
-def eh_reference_design_http_payload(store: dict) -> tuple[dict | None, int]:
-    """Return (body, status) for GET /results/eh_reference_design."""
+def eh_reference_design_http_payload(
+        store: dict, record: dict | None = None) -> tuple[dict | None, int]:
+    """Return (body, status) for GET /results/eh_reference_design.
+
+    TE2E-16: a later foreground solve clears the stored report, but the study
+    record keeps its own copy. With ``record`` given, that copy is served in
+    the same export shape instead of 204, so the export survives the solve.
+    """
     report = load_eh_report(store)
+    if report is None and isinstance(record, dict) \
+            and record.get("status") != "running" \
+            and isinstance(record.get("report"), dict):
+        try:
+            report = ReferenceDesignReport.model_validate(record["report"])
+        except ValueError:
+            report = None
     if report is None:
         return None, 204
     return mark_legacy_report(export_reference_design(report)), 200
