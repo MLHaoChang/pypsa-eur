@@ -3,9 +3,9 @@
 
 # Request scope and complete key-results answers
 
-Status: ready-for-agent; audit 2026-11-25: bounded generator scope and issue 10's slices merged (#1644, #1680, #1704, #1705, #1707, #1712); left: arbitrary-language scope, retained runs, conversational constraints, other domain profiles
+Status: done (#2110)
 Model: Opus
-Progress: harness.assurance_scope with answered or unavailable slots shipped for bounded grammar; arbitrary-language scope pending
+Progress: bounded request scope with answered or unavailable slots for every released domain profile, each with a metric-ledger fragment; scope stays the bounded grammar, and domain review of the new rows is pending in issue 29
 Type: task
 Blocked by: none (reliability contract review done, GK B OK @d36109ae, AA-A04-REVIEW-1; 01 and 02 done)
 
@@ -135,3 +135,15 @@ Conditions:
 ## Audit (2026-11-25)
 
 - 2026-11-25 audit: #1644 #1680 #1704 #1705 #1707 #1712 are merge commits on origin/master; the old '#119' reference was truncated and not verified; the left items are named in the Progress line and the 2026-11-05 to 2026-11-17 comments and were not found in code.
+
+### 2026-11-27: closed by AA 09 (5), S5 store-dispatch/1
+
+S5 adds `store-dispatch/1` (opt-in): one named Store's charged, discharged and net energy, standing
+loss, peaks, final energy and fill of `e_nom_opt`, on the store weights, under GK B (75)'s plan GO.
+With S1 (#2066), S3 (#2073), S2 (#2098) and S4 (#2108) this closes the package. See the
+[coverage ledger](../coverage-ledger.md). Independent domain approval stays false.
+
+Closed on the AA 09 package scope the coordinator set. The open items named in the earlier comments
+are not done by these packages: arbitrary-language scope beyond the bounded grammar, broader storage
+economics, and calibration and release gates. Each needs its own issue if it is still wanted. The
+"remain incomplete" line under Completion and handoff describes the state before these packages.

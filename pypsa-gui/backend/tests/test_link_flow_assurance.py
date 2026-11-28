@@ -627,3 +627,37 @@ def test_unusable_capacity_reads_not_available_in_the_notes():
     for capacity in (None, 0.0, -1.0):
         raw = _hand_raw([1.0], [1.0], p_nom_opt=capacity)
         assert link.notes(raw, {}, str)[1].endswith("(not available).")
+
+
+# ── S4 review nits (folded into S5) ───────────────────────────────────────
+
+
+def test_a_whitespace_only_port_is_not_a_port(link_case, monkeypatch):
+    assert link._filled("  ") is False
+    ctx = link_case()
+    _live(monkeypatch)
+    ctx.network.links.loc["ab", "bus2"] = "  "
+    assert _slots(_raw(ctx))[1] == {}
+
+
+def test_a_heavily_weighted_reverse_flow_at_the_bound_keeps_its_sign():
+    """Lossy (eta 0.5) reverse flow at -NEAR_ZERO, weighted 1e8: the signed loss
+    is 5 - 0.5e8 x NEAR_ZERO, a |p0| loss 5 + 0.5e8 x NEAR_ZERO."""
+    margin = 0.5e8 * NEAR_ZERO
+    assert margin > 1e6 * HAND_REL * 5
+    values, reasons = _slots(
+        _hand_raw([10.0, -NEAR_ZERO], [0.5, 0.5], weights=[1.0, 1e8])
+    )
+    assert reasons == {}
+    assert values["link_conversion_loss"] == pytest.approx(5.0 - margin, rel=HAND_REL)
+
+
+@pytest.mark.parametrize(
+    "field,value", [("version", 2), ("profile", "store-dispatch/1")]
+)
+def test_a_record_of_another_version_or_profile_is_rejected(field, value):
+    raw = _hand_raw([1.0], [1.0])
+    link.calculate(raw, {"profile": link.PROFILE, "entity_id": "x"})
+    raw[field] = value
+    with pytest.raises(ValueError, match="link_flow_source_identity"):
+        link.calculate(raw, {"profile": link.PROFILE, "entity_id": "x"})

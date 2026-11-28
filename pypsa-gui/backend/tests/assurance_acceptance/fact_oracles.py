@@ -321,3 +321,11 @@ def link_input_energy(n, link, start=None, end=None, column="generators"):
     """Sum of p0(t) w(t) over the window: net withdrawal at bus0."""
     p0 = n.links_t.p0[link].to_numpy(dtype=float)
     return _total((p0 * _weights(n, column))[rows(n.snapshots, start, end)])
+
+
+# store_dispatch_calculations.py
+def store_discharged_energy(n, store, start=None, end=None, column="stores"):
+    """Sum of max(p(t), 0) w(t) over the window: p > 0 is discharge to the bus."""
+    p = n.stores_t.p[store].to_numpy(dtype=float)
+    weighted = np.maximum(p, 0.0) * _weights(n, column)
+    return _total(weighted[rows(n.snapshots, start, end)])

@@ -87,6 +87,11 @@ WEIGHTS = {
         "objective": [2.0, 1.0, 0.25],
         "stores": [0.25, 2.0, 3.0],
     },
+    "hand_store": {
+        "generators": [1.0, 3.0, 0.5],
+        "objective": [3.0, 1.0, 2.0],
+        "stores": [2.0, 0.5, 1.0],
+    },
     "built": {"generators": [2.0, 0.5], "objective": [1.5, 3.0], "stores": [4.0, 0.25]},
     "tank": {"generators": [3.0, 1.5], "objective": [0.5, 2.0], "stores": [2.5, 0.5]},
     "exporting": {
@@ -279,6 +284,12 @@ CASES = [
         True,
     ),
     (
+        "store-dispatch/1",
+        "store_discharged_energy",
+        lambda ctx, **k: oracle.store_discharged_energy(ctx.network, "s", **k),
+        True,
+    ),
+    (
         "capacity/1",
         "optimal_capacity",
         lambda ctx, **k: oracle.optimal_capacity(ctx.network, "G2"),
@@ -348,8 +359,8 @@ def test_one_oracle_per_profile_module():
         for line in pathlib.Path(oracle.__file__).read_text().splitlines()
         if line.startswith("# ") and line.endswith(".py")
     }
-    assert len(modules) == len(CASES) == 20
-    assert len({profile for profile, *_ in CASES}) == 20
+    assert len(modules) == len(CASES) == 21
+    assert len({profile for profile, *_ in CASES}) == 21
 
 
 @pytest.mark.parametrize(
