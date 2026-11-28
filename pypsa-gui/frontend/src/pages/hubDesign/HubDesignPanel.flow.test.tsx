@@ -141,6 +141,19 @@ describe('flowState → rail and card (§5.4)', () => {
     expect((await screen.findByTestId('hub-card-results')).textContent).toContain('The study is running')
   })
 
+  it('running with the flow not read: a step says "run in progress", not "not known yet" (te 25)', async () => {
+    const held = flowPayload()
+    held.deferred = true
+    for (const sec of held.sections) { if (sec.state != null) sec.state = 'unknown' as never; sec.items = [] }
+    vi.mocked(flowApi.getProjectFlow).mockResolvedValue(held)
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(RUNNING)
+    mount()
+    await screen.findByTestId('hub-run-running')
+    const site = rail('site')
+    await waitFor(() => expect(site.getAttribute('aria-label')).toContain('run in progress'))
+    expect(site.getAttribute('aria-label')).not.toContain('not known yet')
+  })
+
   it('done: opens on Results; every step enabled', async () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue(DONE)
     vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
