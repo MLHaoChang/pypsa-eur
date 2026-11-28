@@ -100,8 +100,7 @@ def capture(session):
         # is refused at the next write (project-viewer-role 01, GK B R3).
         role = project_acl.project_role(db, user, project)
         return {**read(db, user.id, project.id), 'owner_id': str(user.id), 'project_id': str(project.id),
-                'project_role': role,
-                'owner_email': project_acl.owner_email(db, project)}
+                'project_role': role}
 
 
 def role_admits(snapshot, tier):
@@ -123,7 +122,9 @@ def _require_role(snapshot, tier):
     # A viewer's write is refused whatever personal rule is saved: a saved
     # 'standard' rule never loosens the role (project-viewer-role 01).
     if not role_admits(snapshot, tier):
-        raise project_write_gate.refusal((snapshot or {}).get('owner_email'))
+        # Unnamed on purpose: a tool refusal goes to the model provider, and the
+        # owner's email must not (the HTTP 403 and the GUI banner may name it).
+        raise project_write_gate.refusal()
 
 
 def require_allowed(snapshot, tier):

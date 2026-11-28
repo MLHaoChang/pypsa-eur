@@ -291,3 +291,13 @@ def test_the_view_only_line_comes_after_the_assurance_block(
     head, _, tail = viewer.rpartition("\n")
     assert tail == _VIEW_ONLY
     assert _VIEW_ONLY not in head
+
+
+def test_the_chat_refusal_never_names_the_owner():
+    """The refusal goes to the model provider: a snapshot that carried an owner email still gets the unnamed sentence."""
+    from services.project_write_gate import MESSAGE
+
+    with pytest.raises(HTTPException) as caught:
+        restrictions.require_allowed({**_VIEW, "owner_email": "o@x.com"}, "write")
+    assert caught.value.detail["message"] == MESSAGE
+    assert "@" not in caught.value.detail["message"]
