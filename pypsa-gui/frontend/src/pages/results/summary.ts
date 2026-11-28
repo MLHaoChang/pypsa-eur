@@ -67,6 +67,17 @@ const CAPACITY_UNIT: Record<string, 'MW' | 'MWh'> = { Generator: 'MW', StorageUn
 
 type StatsRow = Record<string, unknown>
 
+/** Template-e2e 18: a `grid` Generator is the wholesale supply beyond the point of connection, not a size
+ *  the site has or built. Its p_nom is a placeholder (500 MW behind the data centre's 40 MW connection,
+ *  100 MW behind the island microgrid's open tie), so it is not a key capacity: what the site can import
+ *  is the connection's rating. */
+const isGridSupply = (component: string, carrier: string) => component === 'Generator' && /^grid$/i.test(carrier.trim())
+
+/** Whether the statistics carry a grid supply `capacityRows` leaves out (the card says so). */
+export function hasGridSupply(stats: StatsRow[] | null | undefined): boolean {
+  return !!stats?.some(r => isGridSupply(String(r.component ?? r.level_0 ?? ''), String(r.carrier ?? r.level_1 ?? '')))
+}
+
 function num(v: unknown): number | null {
   return typeof v === 'number' && Number.isFinite(v) ? v : null
 }
@@ -75,7 +86,7 @@ function num(v: unknown): number | null {
  * The capacity card from `/results/statistics` (PyPSA `n.statistics()`): one row per (component, carrier), largest
  * first. The index columns arrive unnamed (`level_0`, `level_1`) from PyPSA 1.1. A multi-period table has
  * "<metric> | <period>" columns: the selected period's, or the last period's (the fleet at the end of the
- * horizon) when none is selected.
+ * horizon) when none is selected. The grid supply is left out (`isGridSupply`).
  */
 export function capacityRows(stats: StatsRow[] | null | undefined, period: Period): CapacityRow[] {
   if (!stats?.length) return []
@@ -91,6 +102,7 @@ export function capacityRows(stats: StatsRow[] | null | undefined, period: Perio
     const component = String(r.component ?? r.level_0 ?? '')
     const carrier = String(r.carrier ?? r.level_1 ?? '')
     const unit = CAPACITY_UNIT[component]
+    if (isGridSupply(component, carrier)) continue
     const capacity = num(r[col('Optimal Capacity')])
     if (!unit || capacity == null || capacity <= 0) continue
     const installed = num(r[col('Installed Capacity')]) ?? 0

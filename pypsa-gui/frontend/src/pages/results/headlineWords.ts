@@ -7,6 +7,7 @@ import { chartFigure } from '../../components/charts/chartTheme'
 import { fmtCo2Tonnes, fmtCurrency, fmtEnergy } from '../../utils/format'
 import { money } from '../../utils/money'
 import { figureName } from '../../utils/figureWords'
+import { totalCostBasis } from './costBasis'
 
 /** The Curtailment tab's own tile label. */
 export const CURTAILMENT_RATE = 'Curtailment rate'
@@ -67,8 +68,11 @@ export function headlineFigure(card: HeadlineCard): { value: string; basis?: str
     // the periods: what the solve covered, which is a year only by coincidence.
     case 'currency': {
       if (card.id !== 'system_cost') return { value: fmtCurrency(v), basis: 'in this solve' }
+      // Template-e2e 18: a multi-period total (its trend has a point per period) is a sum not
+      // discounted, which the LP objective of the toast and status bar is.
       const words = totalCostWords(v)
-      return { value: words.value, basis: words.note ? `in this solve ${words.note}` : 'in this solve' }
+      const basis = totalCostBasis((card.trend?.points.length ?? 0) >= 2)
+      return { value: words.value, basis: words.note ? `${basis} ${words.note}` : basis }
     }
     case 'MWh': return { value: fmtEnergy(v), basis: 'in this solve' }
     case 'tCO2/yr': return { value: `${co2Number(v)} ${CO2_UNIT}`, basis: co2LimitWords(card) }

@@ -32,7 +32,7 @@ describe('StatusBar objective (control-strategy 07)', () => {
     vi.mocked(simulationApi.getStatus).mockResolvedValue(
       { status: 'completed', objective: 3473806.32, dispatch: 'fresh' } as never)
     renderBar()
-    expect(await screen.findByText('Obj: € 3.5 m')).toBeTruthy()
+    expect(await screen.findByText('LP objective: € 3.5 m')).toBeTruthy()
     expect(screen.queryByText(/B€/)).toBeNull()
   })
 
@@ -40,7 +40,7 @@ describe('StatusBar objective (control-strategy 07)', () => {
     vi.mocked(simulationApi.getStatus).mockResolvedValue(
       { status: 'completed', objective: 115678228, dispatch: 'fresh' } as never)
     renderBar()
-    expect(await screen.findByText('Obj: € 120 m')).toBeTruthy()
+    expect(await screen.findByText('LP objective: € 120 m')).toBeTruthy()
   })
 
   it('reads a dash once the network has moved past the solve, as Results does', async () => {
@@ -49,7 +49,7 @@ describe('StatusBar objective (control-strategy 07)', () => {
     renderBar()
     await vi.waitFor(() => expect(simulationApi.getStatus).toHaveBeenCalled())
     await new Promise(r => setTimeout(r, 0))
-    expect(screen.getByText('Obj: —')).toBeTruthy()
+    expect(screen.getByText('LP objective: —')).toBeTruthy()
   })
 
   it('reads a dash when nothing is solved', async () => {
@@ -57,6 +57,27 @@ describe('StatusBar objective (control-strategy 07)', () => {
       { status: 'idle', objective: null, dispatch: 'none' } as never)
     renderBar()
     await vi.waitFor(() => expect(simulationApi.getStatus).toHaveBeenCalled())
-    expect(screen.getByText('Obj: —')).toBeTruthy()
+    expect(screen.getByText('LP objective: —')).toBeTruthy()
+  })
+
+  // Template-e2e 18: the figure names its basis, as Results › Summary does.
+  it('says a discounted LP objective is discounted, and to which year', async () => {
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({
+      status: 'completed', objective: 120293442, dispatch: 'fresh',
+      objective_basis: 'lp_objective', objective_discounted_to: 2027,
+    } as never)
+    renderBar()
+    const el = await screen.findByText('LP objective: € 120 m (discounted to 2027)')
+    expect(el.getAttribute('title')).toMatch(/^LP objective: discounted to 2027\./)
+  })
+
+  it('names a myopic or rolling run\'s figure the system cost', async () => {
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({
+      status: 'completed', objective: 194866050, dispatch: 'fresh',
+      objective_basis: 'system_cost', objective_discounted_to: null,
+    } as never)
+    renderBar()
+    expect(await screen.findByText('System cost: € 190 m')).toBeTruthy()
+    expect(screen.queryByText(/LP objective/)).toBeNull()
   })
 })

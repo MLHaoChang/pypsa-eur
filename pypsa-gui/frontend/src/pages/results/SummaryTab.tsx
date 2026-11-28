@@ -17,7 +17,7 @@ import { useResultsFilter } from './filterContext'
 import { COST_UNAVAILABLE, FIGURE_NOT_COMPUTED, fmtCurrency, fmtEnergy } from './shared'
 import { kpiFigure, splitValueUnit } from '../../utils/format'
 import {
-  capacityRows, costView, emissionsView, reserveMarginVerdict,
+  capacityRows, costView, hasGridSupply, emissionsView, reserveMarginVerdict,
   type EmissionsPayload, type LostLoadPayload, type ReserveMarginSummary,
 } from './summary'
 import type { AdequacyReportPayload } from './adequacy'
@@ -28,6 +28,11 @@ import OperationalGap from './OperationalGap'
 import { solveWords } from './solveWords'
 import HeadlineStrip, { useHeadlineKpis } from './HeadlineStrip'
 import { COST_WORDS, totalCostWords } from './headlineWords'
+import {
+  gridSupplyLimit, gridSupplyWords, objectiveBasis, objectiveConstant, objectiveGapReasons, objectiveName, totalCostBasis,
+} from './costBasis'
+import { networkApi } from '../../api/network'
+import { getObjectiveDecomposition } from '../../api/results'
 import { NOT_RECORDED, NotRecordedDash, NotRecordedNote } from './NotRecorded'
 import { StatePill } from '../../components/ResultState'
 import { ScopeGate } from '../../components/flowScope/ScopeGate'
@@ -135,6 +140,9 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
     queryKey: nk(project, 'results', 'process_view'), queryFn: resultsApi.getProcessView, retry: false,
   })
   const { data: readiness } = useGridReadiness()
+  // The grid supply's connection, which Key capacities names in place of the supply's placeholder size.
+  const { data: generators } = useQuery({ queryKey: nk(project, 'generators'), queryFn: networkApi.getGenerators })
+  const { data: links } = useQuery({ queryKey: nk(project, 'links'), queryFn: networkApi.getLinks })
   const { data: stats } = useQuery({ queryKey: nk(project, 'results_statistics'), queryFn: resultsApi.getStatistics })
 
   // A figure the headline strip shows is not repeated as a card headline below
@@ -148,6 +156,26 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
     && !!headline?.cards.some(k => k.id === id && k.reason === FIGURE_NOT_COMPUTED)
 
   const c = costView(cost, selectedPeriod)
+  const multiPeriod = (cost?.by_period?.length ?? 0) >= 2
+  // Why the LP objective is not the total (template-e2e 18); only an LP objective has a gap to explain.
+  const { data: decomposition, isError: decompositionFailed } = useQuery({
+    queryKey: nk(project, 'results', 'objective_decomposition'), queryFn: getObjectiveDecomposition,
+    enabled: status?.objective != null && status?.objective_basis !== 'system_cost', retry: false,
+  })
+  const gapReasons = objectiveGapReasons(decomposition, v => fmtCurrency(v))
+  const lpConstant = objectiveConstant(decomposition)
+  // The clauses after the figure, each a plain statement joined by "·" (UX 34): its basis, then why it is
+  // not the total (the first reason says from which figure), or the constant Guided's figure leaves out.
+  const objectiveWords: string[] = decompositionFailed
+    ? [objectiveBasis(status), 'The cost breakdown could not be read. Try again in a moment.']
+    : gapReasons.length > 0
+      ? [`from the total system cost ${fmtCurrency(decomposition?.cost_breakdown_total)}, ${gapReasons[0].words}`,
+        ...gapReasons.slice(1).map(r => r.words)]
+      : [objectiveBasis(status),
+        ...(lpConstant != null ? [`includes existing assets' fixed cost (${fmtCurrency(lpConstant)}), which Guided's yearly cost leaves out`] : [])]
+  // Shown beside the strip only when it says something the strip does not (K1: never the same figure twice).
+  const objectiveExplains = decompositionFailed || gapReasons.length > 0 || lpConstant != null
+    || status?.objective_basis === 'unknown'
   const e = emissionsView(emissions as EmissionsPayload | null | undefined, selectedPeriod)
   const carrierLabels = processCarrierLabels(processView)
   const run = useDispatchRun()
@@ -205,10 +233,14 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[11px] text-muted" data-testid="summary-status">
           <span>Solve: <span className="text-text font-medium">{status.condition ? solveWords(status.condition) : status.status ?? 'not run yet'}</span></span>
           {status.solve_time != null && <span>{Number(status.solve_time).toFixed(1)} s</span>}
-          {/* The strip's Total system cost is the cost figure; the objective would repeat it under another name. */}
-          {status.objective != null && !inStrip('system_cost') && (
-            <span title="The LP objective (n.objective + its constant). The cost card below is the reported system cost from n.statistics(); the two differ by what the objective counts (e.g. existing fixed costs, shed load).">
-              LP objective <span className="font-mono text-text">{fmtCurrency(status.objective)}</span>
+          {/* Template-e2e 18: the run's figure (the solve toast's and the status bar's) with its basis, and
+              why it is not the total system cost above, so the two never read as a contradiction. Where it is
+              the strip's figure under another name (no gap to explain), it is not repeated (K1). */}
+          {status.objective != null && (!inStrip('system_cost') || objectiveExplains) && (
+            <span data-testid="summary-objective"
+              title="The solve's own figure, as in the solve message and the status bar. The total system cost is every asset's annualised fixed cost plus operating cost from n.statistics(), summed over the periods' years and not discounted; shed load is in neither.">
+              {objectiveName(status)} <span className="font-mono text-text">{fmtCurrency(status.objective)}</span>
+              {objectiveWords.map(w => ` · ${w}`).join('')}
             </span>
           )}
           <span>Showing the {scope}</span>
@@ -221,7 +253,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
           // The strip above already carries the total cost and the unserved energy.
           capacity: !c ? null
             : [inStrip('system_cost') ? 'What was built, and the cost by asset'
-              : [totalCostWords(c.total).value, 'in this solve', totalCostWords(c.total).note].filter(Boolean).join(' '),
+              : [totalCostWords(c.total).value, totalCostBasis(multiPeriod && c.period == null), totalCostWords(c.total).note].filter(Boolean).join(' '),
               ll?.total_mwh != null && ll.total_mwh > 0 && !inStrip('unserved_energy') ? `${fmtEnergy(ll.total_mwh)} unserved` : null,
             ].filter(Boolean).join(' · '),
           reliability: target
@@ -242,7 +274,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
           {c ? (
             <>
               {!inStrip('system_cost') && <Headline value={totalCostWords(c.total).value}
-                sub={['total system cost in this solve', totalCostWords(c.total).note].filter(Boolean).join(' ')} />}
+                sub={[`total system cost ${totalCostBasis(multiPeriod && c.period == null)}`, totalCostWords(c.total).note].filter(Boolean).join(' ')} />}
               <Line label={COST_WORDS.capital} value={fmtCurrency(c.capital)} />
               <Line label="Operating cost" value={fmtCurrency(c.operating)} />
               {/* Horizon only (new build is not split per period). A null on
@@ -326,6 +358,11 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
           ) : <Absent>No capacities for this solve.</Absent>}
           {caps.length > MAX_CAPACITY_ROWS && (
             <p className="text-[10px] text-muted">and {caps.length - MAX_CAPACITY_ROWS} more</p>
+          )}
+          {hasGridSupply(stats as Record<string, unknown>[] | null | undefined) && (
+            <p className="text-[10px] text-muted" data-testid="summary-cap-grid-note">
+              {gridSupplyWords(gridSupplyLimit(generators, links), mw => fmtCapacity(mw, 'MW'))}
+            </p>
           )}
         </Card>
       </div>
