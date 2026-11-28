@@ -10,6 +10,7 @@ import { H2Icon } from '../components/AssetIcons'
 import { SkeletonLines } from '../components/Skeleton'
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
 import LoadSeriesEditor from '../components/series/LoadSeriesEditor'
+import { DcLoadFields } from '../pages/hubDesign/cards/DcSetupFields'
 import AvailabilityEditor from '../components/series/AvailabilityEditor'
 import { generatorSeriesEditors, useSeriesFields } from '../components/series/useSeriesFields'
 import SeriesEditor from '../components/series/SeriesEditor'
@@ -2099,6 +2100,11 @@ function LoadPanel({ name }: { name: string }) {
           {/* The load's series editor: the same component the Time Series
               drawer mounts, so a load's p_set has one editor (TS-01). */}
           <LoadSeriesEditor key={load.name} project={currentProject} component={load.name} mode={uiMode} />
+        </Section>
+      )}
+      {currentProject && load.name === 'it_load' && (
+        <Section title="Data-centre set-up">
+          <DcLoadFields />
         </Section>
       )}
     </div>

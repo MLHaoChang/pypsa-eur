@@ -60,6 +60,7 @@ import CampusUnitQCurveSection from './CampusUnitQCurveSection'
 import { GRID_CODE_CHANGED } from '../components/gridReadiness/GridReadinessScorecard'
 import CampusIslandSection, { ISLAND_REPORT_KEY, openCampusFile } from './CampusIslandSection'
 import DcArchitectureSection from './DcArchitectureSection'
+import { DcBackupArchFields } from './hubDesign/cards/DcSetupFields'
 import DcBackupSection from './DcBackupSection'
 import SwitchgearRatingTable from './SwitchgearRatingTable'
 import CampusLibrarySection from './CampusLibrarySection'
@@ -289,6 +290,7 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
         )}
         <CampusIslandSection name={name} />
         <DcBackupSection name={name} />
+        <DcBackupArchFields only="architecture" />
         <DcArchitectureSection name={name} />
         <IntentComparisonSection name={name} gridCode={state.data.settings?.profile ?? null} />
         <GridComplianceSection name={name} />

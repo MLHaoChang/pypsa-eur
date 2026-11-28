@@ -1167,6 +1167,14 @@ export const CAMPUS_DRAFT_TIMEOUT_MS = 180_000
 const base = (project: string) => `/campus-electrical/${encodeURIComponent(project)}`
 const codes = (project: string) => `${base(project)}/grid-codes`
 
+export interface DcLoadPatch {
+  pue_at_design?: number
+  critical_share?: number
+  backup?: { mode: DcBackupMode }
+  architecture?: DcArchitecture
+  overwrite_series?: boolean
+}
+
 export const campusApi = {
   state: (project: string) =>
     client.get<CampusState>(base(project), quiet).then(r => r.data),
@@ -1228,6 +1236,15 @@ export const campusApi = {
    *  the network and the investment case are untouched. */
   setDcBackup: (project: string, backup: DcBackupSetting) =>
     client.put<DcBackupSetting>(`${base(project)}/dc-backup`, backup, quiet).then(r => r.data),
+
+  /** Change a data-centre project's PUE at design, critical share, backup mode or
+   *  power architecture after creation (te 04). 422 `{error_kind: dc_load_invalid, message, field}`;
+   *  409 `{error_kind}` `project_not_open` | `dc_series_edited` (resend with `overwrite_series`) |
+   *  `dc_load_busy` (retry). A PUE or critical-share change rewrites the IT and cooling series
+   *  on the open project as one undo step. */
+  setDcLoad: (project: string, body: DcLoadPatch) =>
+    client.put<{ spec: Record<string, unknown>; series_changed: boolean }>(
+      `${base(project)}/dc-load`, body, quiet).then(r => r.data),
 
   /** Size, prove and price the stored backup mode. Read only. */
   assessDcBackup: (project: string) =>
