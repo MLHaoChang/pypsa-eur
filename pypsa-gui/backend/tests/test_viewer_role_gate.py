@@ -1145,3 +1145,51 @@ def test_a_viewer_reads_and_downloads_the_powerfactory_bundles(
     assert listed.status_code == 200, listed.text
     downloaded = viewer.get(f"{base}/hub_p1_h1/download")
     assert downloaded.status_code == 200 and downloaded.content == b"PK"
+
+
+def test_a_viewer_reads_the_background_harmonics_and_cannot_write_them(
+    world, as_user, monkeypatch
+):
+    """Grid-compliance 29 (GK A2 D7): the stored measurement is a read for a viewer; PUT and DELETE are
+    writes, refused before the service runs."""
+    from services import campus_electrical_service as ce
+
+    calls = []
+    monkeypatch.setattr(ce, "get_background", lambda project: {"has_background": False})
+    monkeypatch.setattr(ce, "put_background", lambda *a: calls.append("put"))
+    monkeypatch.setattr(ce, "delete_background", lambda *a: calls.append("delete"))
+    viewer = as_user(world["viewer"])
+    url = f"/api/campus-electrical/{world['project']}/background-harmonics"
+    got = viewer.get(url)
+    assert got.status_code == 200 and got.json() == {"has_background": False}, got.text
+    put = viewer.put(
+        url,
+        files={"file": ("bg.csv", b"order,u_h_pct_p95\n5,1\n", "text/csv")},
+        data={"source": "s", "measured_on": "2026-10-03"},
+    )
+    assert put.status_code == 403, put.text
+    assert viewer.delete(url).status_code == 403
+    assert calls == []
+
+
+def test_the_background_upload_reads_at_most_the_cap_plus_one_byte(
+    world, as_user, monkeypatch
+):
+    """Grid-compliance 29 (GK A2 G4): the route reads 1 MiB + 1 byte at most, so the service refuses an
+    oversized file without the request buffering it whole."""
+    from services import campus_electrical_service as ce
+
+    seen = []
+    monkeypatch.setattr(
+        ce, "put_background", lambda project, data, *a: seen.append(len(data)) or {}
+    )
+    editor = as_user(world["editor"])
+    url = f"/api/campus-electrical/{world['project']}/background-harmonics"
+    big = b"x" * (3 * 1024 * 1024)
+    got = editor.put(
+        url,
+        files={"file": ("bg.csv", big, "text/csv")},
+        data={"source": "s", "measured_on": "2026-10-03"},
+    )
+    assert got.status_code == 200, got.text
+    assert seen == [1024 * 1024 + 1]

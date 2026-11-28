@@ -1,0 +1,20 @@
+{
+ "kinds": {
+  "campus_background_no_campus": {
+   "surface": "inline",
+   "why": "The background harmonics upload, a measurement file the user uploads in the app, needs a campus with a PCC bus first; the user drafts the campus, then uploads the measurement."
+  },
+  "campus_background_unreadable": {
+   "surface": "inline",
+   "why": "The background harmonics upload, a measurement file the user uploads in the app, has a stored copy that no longer matches its record; the user removes it and uploads the measurement again."
+  },
+  "campus_background_too_large": {
+   "surface": "inline",
+   "why": "The background harmonics upload, a measurement file the user uploads in the app, refuses a file over the size cap; the user uploads a shorter measurement."
+  },
+  "campus_background_invalid": {
+   "surface": "inline",
+   "why": "The background harmonics upload, a measurement file the user uploads in the app, refuses an empty or too long source, a date that is not YYYY-MM-DD, a too long file name or a CSV that does not parse; the user fixes the field the message names."
+  }
+ }
+}

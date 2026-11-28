@@ -143,6 +143,9 @@ TABLE: tuple[Entry, ...] = (
             "run/campus_compliance_invested.csv",
             "run/campus_invest_scope.json",
             "island_study.json",
+            # The background harmonics measurement the user uploaded, and its record (grid-compliance 29).
+            "background/measurement.csv",
+            "background/meta.json",
         )
     ),
     Entry("uploads", DIR, FOLDER, _ALL, "chat uploads"),
@@ -208,6 +211,7 @@ NOT_CARRIED: dict[str, str] = {
     "campus_milp_basis.json": "campus: derived on every run",
     "campus_milp_summary.json": "campus: derived on every run",
     "campus_profile_used.json": "campus: derived on every run",
+    "background_used.json": "campus: derived on every run (the background harmonics the run took)",
     "campus_ratings_library.yaml": "campus: the library a run's ratings were priced from, kept with the run",
     "psse_status.json": "campus: derived on every run (the PSS/E bundle outcome)",
     "powerfactory_status.json": "campus: derived on every run (the PowerFactory bundle outcome)",

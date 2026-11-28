@@ -89,6 +89,7 @@ def test_the_issue_rows_are_declared():
         'campus_pack_results_upload': ('manual', None),  # grid-compliance 22 (not_via_chat.d/)
         'campus_pack_judgment': ('unbuilt', None),  # grid-compliance 22; chat tool in GC-10
         'campus_powerfactory_bundle_download': ('manual', None),  # grid-compliance 09 item 6 (not_via_chat.d/)
+        'campus_background_harmonics': ('manual', None),  # grid-compliance 29 (not_via_chat.d/)
         'co2_limit_goal_result': ('unbuilt', None),  # DC review 02 (not_via_chat.d/)
         'dc_load_after_creation': ('unbuilt', None),  # te 04 (not_via_chat.d/)
     }
