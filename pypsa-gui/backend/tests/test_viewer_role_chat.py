@@ -301,3 +301,47 @@ def test_the_chat_refusal_never_names_the_owner():
         restrictions.require_allowed({**_VIEW, "owner_email": "o@x.com"}, "write")
     assert caught.value.detail["message"] == MESSAGE
     assert "@" not in caught.value.detail["message"]
+
+
+def test_a_routed_chat_result_never_carries_the_owner_email():
+    """B2b: `_route` is the boundary every in-process chat tool call crosses."""
+    from models.schemas import ProjectInfo
+    from services import chat_tools
+
+    out = chat_tools._without_owner_email(
+        {
+            "my_access": "view",
+            "owner_email": "o@x.com",
+            "rows": [{"owner_email": "o@x.com", "a": 1}],
+        }
+    )
+    assert "owner_email" not in str(out)
+    info = ProjectInfo.model_construct(owner_email="o@x.com", name="p")
+    assert chat_tools._without_owner_email([info])[0].owner_email is None
+
+
+def test_a_routed_view_only_refusal_is_unnamed():
+    """B2a: a named refusal from a route reaches the model unnamed."""
+    from services import chat_tools
+    from services.project_write_gate import MESSAGE, refusal
+
+    out = chat_tools._unnamed_view_only(refusal("o@x.com"))
+    assert out.detail["message"] == MESSAGE
+    other = HTTPException(404, {"error_kind": "x", "message": "o@x.com"})
+    assert chat_tools._unnamed_view_only(other) is other
+
+
+def test_route_applies_both_boundary_rules(world):
+    from services import chat_tools
+    from services.project_write_gate import MESSAGE, refusal
+
+    def leaks():
+        return {"owner_email": "o@x.com", "ok": True}
+
+    def refuses():
+        raise refusal("o@x.com")
+
+    assert chat_tools._route(leaks) == {"ok": True}
+    with pytest.raises(HTTPException) as caught:
+        chat_tools._route(refuses)
+    assert caught.value.detail["message"] == MESSAGE

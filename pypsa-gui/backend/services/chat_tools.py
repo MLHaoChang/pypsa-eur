@@ -5452,7 +5452,32 @@ def _route(handler, *args, **kwargs):
                     f"{getattr(handler, '__qualname__', handler)}: it supplies only "
                     f"db/user/actor/session. Resolve it at the call site or extend _route()."
                 )
-        return handler(*args, **{**injected, **kwargs})
+        try:
+            return _without_owner_email(handler(*args, **{**injected, **kwargs}))
+        except HTTPException as exc:
+            raise _unnamed_view_only(exc) from exc
+
+
+def _without_owner_email(value):
+    """Drop `owner_email` from a routed result: a chat tool result goes to the
+    model provider, and the owner's email must not (GK B3, #2151)."""
+    if isinstance(value, dict):
+        return {k: _without_owner_email(v) for k, v in value.items() if k != "owner_email"}
+    if isinstance(value, list):
+        return [_without_owner_email(v) for v in value]
+    if hasattr(value, "model_copy") and getattr(value, "owner_email", None):
+        return value.model_copy(update={"owner_email": None})
+    return value
+
+
+def _unnamed_view_only(exc):
+    """A `project_view_only` refusal reaches the model with the unnamed sentence."""
+    from services import project_write_gate
+
+    detail = exc.detail
+    if isinstance(detail, dict) and detail.get("error_kind") == project_write_gate.KIND:
+        return project_write_gate.refusal()
+    return exc
 
 
 def _authorized_project(name: str):
