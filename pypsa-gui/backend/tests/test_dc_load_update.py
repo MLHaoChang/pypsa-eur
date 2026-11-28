@@ -180,3 +180,29 @@ def test_backup_mode_and_architecture_are_stored_without_touching_the_network(
     spec = _marker(client, name)["spec"]
     assert spec["backup"]["mode"] == "hybrid" and spec["architecture"] == "dc_800v"
     assert _loads(ctx).equals(before)
+
+
+def test_an_empty_update_is_refused(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row, session_ctx
+):
+    name = _make(client, tmp_path, monkeypatch, "eh_datacenter", "dc_empty")
+    r = client.put(f"/api/campus-electrical/{name}/dc-load", json={})
+    assert (
+        r.status_code == 422 and r.json()["detail"]["error_kind"] == "dc_load_invalid"
+    )
+
+
+def test_a_series_change_needs_the_open_network(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row, session_ctx
+):
+    from routers.campus_electrical import _eh_templates
+    from services import project_registry
+    from services.dc_load_update import DcLoadUpdateError, update_dc_load
+
+    name = _make(client, tmp_path, monkeypatch, "eh_datacenter", "dc_closed")
+    marker = _marker(client, name)
+    project_dir = project_registry.project_dir(project_row(name))
+    with pytest.raises(DcLoadUpdateError) as exc:
+        update_dc_load(project_dir, _eh_templates(), {"pue_at_design": 1.5}, None)
+    assert exc.value.kind == "project_not_open"
+    assert _marker(client, name) == marker
