@@ -468,3 +468,104 @@ def test_the_scorer_counts_model_names_and_never_component_ids():
         )
         == []
     )
+
+
+@pytest.mark.parametrize(
+    "stored, default, assumed",
+    [
+        (5, None, False),  # no catalogue default: a set value is the user's
+        (False, "0", False),  # a flag is compared as a flag, not as a number
+        (5, "5", True),  # a default written as text still compares as a number
+    ],
+)
+def test_assumed_edge_cases(stored, default, assumed):
+    from services.parameter_assets import _is_assumed
+
+    assert _is_assumed(stored, default) is assumed
+
+
+def test_stored_values_come_back_as_plain_json_values():
+    import numpy as np
+
+    from services.parameter_assets import _scalar
+
+    assert type(_scalar(np.int64(3))) is int
+    assert _scalar(float("inf")) == "inf" and _scalar(float("-inf")) == "-inf"
+
+
+def test_a_network_without_buses_or_the_class_reads_as_no_assets():
+    from types import SimpleNamespace
+
+    assert PA._bus_carriers(SimpleNamespace()) == {}
+    assert PA._bus_carriers(SimpleNamespace(buses=pd.DataFrame({"v_nom": [1]}))) == {}
+    entry, _ = lookup.resolve("generator.capacity")
+    assert PA.assets(SimpleNamespace(), entry, None) == []
+
+
+def test_plain_names_skip_what_is_not_a_column_name():
+    assert chat_plain_names.plain_names_for("Generator", None) == {}
+    assert chat_plain_names.plain_names_for("Generator", [5, "p_nom"]) == {
+        "p_nom": "Capacity"
+    }
+    assert chat_plain_names._batch_keys({"components": "G1"}) == ()
+    assert chat_plain_names._batch_keys(
+        {"components": [{"name": "G1", "p_nom": 1}, "x"]}
+    ) == ["name", "p_nom"]
+
+
+def test_the_named_column_is_the_refusal_s_own_field_or_none():
+    names = {"p_nom": "Capacity"}
+    named = chat_plain_names._named_column
+    assert named({"field": "carrier", "message": "p_nom is wrong"}, names) is None
+    assert named({"field": ["p_nom"], "message": "x"}, names) is None
+    assert named({"message": None}, names) is None
+    assert named({"message": "p_nom is wrong"}, names) == "p_nom"
+
+
+def test_the_wrapper_leaves_what_it_cannot_name_as_it_is():
+    wrap = lambda f: chat_plain_names.with_plain_names(  # noqa: E731
+        f, columns=chat_plain_names._keys_of("attrs")
+    )
+    assert wrap(lambda component_class, name, attrs: [1])(
+        "Generator", "G1", {"p_nom": 1}
+    ) == [1]
+    assert wrap(lambda component_class, name, attrs: {"ok": 1})(
+        "Generator", "G1", {"not_a_column": 1}
+    ) == {"ok": 1}
+    own = {"ok": 1, "plain_names": {"x": "y"}}
+    assert (
+        wrap(lambda component_class, name, attrs: own)("Generator", "G1", {"p_nom": 1})
+        == own
+    )
+
+    def refuse(detail):
+        def f(component_class, name, attrs):
+            raise HTTPException(422, detail=dict(detail))
+
+        return f
+
+    for detail in (
+        {"error_kind": "x", "message": "the bus is missing"},  # names no column
+        {"error_kind": "x", "field": "p_nom", "message": "m", "plain_name": "Own"},
+    ):
+        with pytest.raises(HTTPException) as exc:
+            wrap(refuse(detail))("Generator", "G1", {"p_nom": 1})
+        assert exc.value.detail == detail
+
+
+def test_a_whole_body_schema_refusal_stays_raw():
+    from pydantic import BaseModel, ValidationError, model_validator
+
+    class Body(BaseModel):
+        p_nom: float = 0
+
+        @model_validator(mode="after")
+        def never(self):
+            raise ValueError("the body is wrong")
+
+    wrapped = chat_plain_names.with_plain_names(
+        lambda component_class, name, attrs: Body(**attrs),
+        columns=chat_plain_names._keys_of("attrs"),
+    )
+    with pytest.raises(ValidationError):
+        wrapped("Generator", "G1", {"p_nom": 1})

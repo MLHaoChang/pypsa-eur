@@ -43,8 +43,9 @@ def _named_column(detail: Any, names: dict[str, str]) -> str | None:
     """The first of the call's columns the refusal names: its `field`, else a whole word of its text."""
     if isinstance(detail, dict):
         field = detail.get("field")
-        if isinstance(field, str) and field in names:
-            return field
+        if isinstance(field, str):
+            # The refusal names its column: that one or none, never a second guess from the text.
+            return field if field in names else None
         text = detail.get("message")
     else:
         text = detail
@@ -85,7 +86,7 @@ def with_plain_names(
                 # it (`harness.results._error_result_content`).
                 exc.detail = {
                     **d,
-                    "field": d.get("field") or key,
+                    "field": key,
                     "plain_name": names[key],
                 }
             raise
