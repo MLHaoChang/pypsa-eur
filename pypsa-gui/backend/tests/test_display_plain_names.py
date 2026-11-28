@@ -42,8 +42,12 @@ def test_the_words_are_the_catalogue_lookup():
 
 
 _PANEL_CLASSES = {
-    "Generator": fields.GENERATOR, "StorageUnit": fields.STORAGE_UNIT, "Store": fields.STORE,
-    "Link": fields.LINK, "Line": fields.LINE, "Transformer": fields.TRANSFORMER,
+    "Generator": fields.GENERATOR,
+    "StorageUnit": fields.STORAGE_UNIT,
+    "Store": fields.STORE,
+    "Link": fields.LINK,
+    "Line": fields.LINE,
+    "Transformer": fields.TRANSFORMER,
 }
 
 
