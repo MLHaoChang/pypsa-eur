@@ -151,7 +151,7 @@ def _rule(variant: str, limit: int, available: int, has_unranked: bool, tied: bo
     if tied:
         text += " Options that tie on a rank are all shown."
     if has_unranked:
-        text += f" Options without a {what} are listed last and not ranked."
+        text += f" Options without an {what} are listed last and not ranked."
     return text
 
 

@@ -461,7 +461,7 @@ def test_variant_report_stores_the_variant_the_section_and_survives_a_regenerate
     assert [s["section_id"] for s in doc["sections"]].count("option_ranking") == 1
     table = doc["tables"]["option_ranking"]
     assert [row[1] for row in table["rows"][:2]] == ["B", "A"] and len(table["rows"]) == 3
-    assert "top 2" in table["caption"] and table["rows"][2][0] == "—"
+    assert "Shows all 2 options" in table["caption"] and table["rows"][2][0] == "—"
 
     _install_provider(monkeypatch, FakeProvider([_draft("fmea_top", "Shorter.")]))
     assert client.post(f"/api/projects/{name}/reports/{rid}/sections/fmea_top/regenerate",
