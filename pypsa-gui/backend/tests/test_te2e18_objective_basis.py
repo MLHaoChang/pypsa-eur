@@ -519,8 +519,23 @@ def _curtailment_network(curtailment_cost: float):
     n.set_snapshots(pd.RangeIndex(3))
     n.add("Bus", "b")
     n.add("Load", "d", bus="b", p_set=4.0)
-    n.add("Generator", "pv", bus="b", p_nom=10.0, p_max_pu=[1.0, 0.5, 0.2], marginal_cost=0.0)
-    n.add("Generator", "gas", bus="b", p_nom=2.0, p_nom_extendable=True, capital_cost=50.0, marginal_cost=30.0)
+    n.add(
+        "Generator",
+        "pv",
+        bus="b",
+        p_nom=10.0,
+        p_max_pu=[1.0, 0.5, 0.2],
+        marginal_cost=0.0,
+    )
+    n.add(
+        "Generator",
+        "gas",
+        bus="b",
+        p_nom=2.0,
+        p_nom_extendable=True,
+        capital_cost=50.0,
+        marginal_cost=30.0,
+    )
     n.generators["curtailment_cost"] = 0.0
     n.generators.loc["pv", "curtailment_cost"] = curtailment_cost
     return n
@@ -540,7 +555,9 @@ def test_with_a_curtailment_cost_only_the_baseline_is_existing_assets_fixed_cost
     _solve_with_wrapper(n)
     dec = compute_objective_decomposition(n, None)
     baseline = n._baseline_objective_constant
-    assert dec["n_objective_constant"] > baseline + 1.0, "the wrapper added its implied capacity term"
+    assert dec["n_objective_constant"] > baseline + 1.0, (
+        "the wrapper added its implied capacity term"
+    )
     assert dec["existing_asset_constant"] == pytest.approx(baseline)
 
 
