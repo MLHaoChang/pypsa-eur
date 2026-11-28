@@ -164,12 +164,16 @@ def test_a_screen_failure_never_fails_the_run_and_leaves_no_rows_g3(
         raise ce.ContractError("harmonics: test failure")
 
     monkeypatch.setattr(ce.cs, "harmonics_campus", broken)
+    _put(
+        drafted
+    )  # taken by the run, but the screen fails: not "used by the latest run"
     results = ce.run(drafted, SETTINGS)["results"]
     assert results["harmonic_emission"] == {"error": "harmonics: test failure"}
     run = ce.campus_dir(drafted) / "run"
     for name in (ce.cs.HARMONICS_CSV, ce.HARMONIC_EMISSION_META):
         assert not (run / name).exists()
     assert results["compliance"]
+    assert ce.get_background(drafted)["in_latest_run"] is False
     monkeypatch.setattr(ce.cs, "harmonics_campus", real)
     again = _run(drafted)  # the next run clears the earlier error
     assert "error" not in again and not (run / ce.HARMONIC_EMISSION_ERROR).exists()
@@ -215,7 +219,9 @@ def test_any_change_to_the_record_marks_the_run_stale_d6(drafted, change):
     _put(drafted)
     _run(drafted)
     assert ce.get_state(drafted)["stale"] is False
+    assert ce.get_background(drafted)["in_latest_run"] is True
     _put(drafted, **change)
+    assert ce.get_background(drafted)["in_latest_run"] is False
     assert ce.get_state(drafted)["stale"] is True
 
 
@@ -401,3 +407,17 @@ def test_a_record_that_is_not_an_object_reads_unreadable(drafted):
         e.value.status_code == 409
         and e.value.detail["error_kind"] == "campus_background_unreadable"
     )
+
+
+def test_a_campus_that_names_no_pcc_bus_is_a_422(drafted):
+    path = ce.campus_dir(drafted) / ce.CAMPUS_FILE
+    spec = yaml.safe_load(path.read_text())
+    del spec["campus"]["pcc"]["bus"]
+    path.write_text(yaml.safe_dump(spec))
+    with pytest.raises(HTTPException) as e:
+        _put(drafted)
+    assert (
+        e.value.status_code == 422
+        and e.value.detail["error_kind"] == "campus_background_no_campus"
+    )
+    assert "PCC bus" in e.value.detail["message"]
