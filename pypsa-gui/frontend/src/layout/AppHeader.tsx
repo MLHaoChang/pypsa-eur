@@ -16,6 +16,7 @@ import { nk } from '../utils/queryKeys'
 import { useStudyAbort, STUDY_ABORT_TITLE } from '../hooks/useStudyAbort'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useUIStore, type UiMode } from '../store/uiStore'
+import ShareButton from './ShareButton'
 import { UI_MODE_TITLES, uiModeToast } from '../utils/uiMode'
 import { formatApiDetail } from '../api/client'
 import { mismatchSentence } from '../utils/projectMismatch'
@@ -1133,6 +1134,9 @@ export default function AppHeader() {
             ? <Check size={12} className="text-success" />
             : <Save size={12} />}
       </button>
+
+      {/* Guided's one entry to sharing; Expert has it in the Workspace panel. */}
+      {uiMode === 'guided' && currentProject && <ShareButton projectId={currentProject} className="shrink-0" />}
 
       <div className="flex-1" />
 

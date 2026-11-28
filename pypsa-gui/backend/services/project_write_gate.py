@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 
 WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 KIND = "project_view_only"
-MESSAGE = "You can view this project but not change it. Ask its owner for edit access."
+MESSAGE = "You can view this project. Ask its owner for edit access."
 REFUSAL = f"{KIND}: {MESSAGE}"  # a run's `error` when its requester lost edit access
 
 

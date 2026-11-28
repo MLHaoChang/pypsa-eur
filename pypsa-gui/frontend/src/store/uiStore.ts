@@ -1,5 +1,6 @@
 import { navigationChanged } from '../utils/navigationEpoch'
 import { create } from 'zustand'
+import type { AccessFields } from '../utils/viewerAccess'
 import { effectiveLockState, type LockState, type ReadOnlyReason } from '../utils/lockState'
 import { readActiveSite } from '../site3d/activeSite'
 import { readActiveSection, writeActiveSection } from './activeSection'
@@ -633,6 +634,11 @@ interface UIStore {
   // solving project editable, and vice versa.
   lockReadOnly: boolean
   solvingReadOnly: boolean
+  // The caller's access to the active project (viewer role): a viewer is
+  // read-only whatever the lock says. `canManageMembers` shows Share.
+  viewerReadOnly: boolean
+  ownerEmail: string | null
+  canManageMembers: boolean
   // Name/id of the project a switch is in flight for (null = none). Drives the
   // "Opening …" progress bar; a cold open can take a minute on a big template.
   openingProject: string | null
@@ -801,6 +807,7 @@ interface UIStore {
   clearWorkbookImportRequest: () => void
   // Apply a derived lock state (from utils/lockState.lockStateFromAcquire).
   setLockState: (s: LockState) => void
+  setProjectAccess: (a: AccessFields) => void
   // A queue job is (or is no longer) solving the project the user is viewing.
   setSolvingReadOnly: (solving: boolean) => void
   setCurrentProject: (name: string | null, preferredId?: string | null) => void
@@ -894,6 +901,9 @@ export const useUIStore = create<UIStore>((set, get) => ({
   readOnlyReason: 'writable',
   lockReadOnly: false,
   solvingReadOnly: false,
+  viewerReadOnly: false,
+  ownerEmail: null,
+  canManageMembers: false,
   openingProject: null,
   setOpeningProject: (target) => set({ openingProject: target }),
   openFailure: null,
@@ -1217,7 +1227,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   clearModelImportRequest: () => set({ modelImportRequest: null }),
   setUnsavedNetwork: (name) => set({ unsavedNetwork: name }),
   setLockState: (s) => set((state) => {
-    const { readOnly, reason } = effectiveLockState(s.readOnly, state.solvingReadOnly)
+    const { readOnly, reason } = effectiveLockState(s.readOnly, state.solvingReadOnly, state.viewerReadOnly)
     return {
       lockReadOnly: s.readOnly,
       lockHolderEmail: s.holderEmail,
@@ -1225,8 +1235,19 @@ export const useUIStore = create<UIStore>((set, get) => ({
       readOnlyReason: reason,
     }
   }),
+  setProjectAccess: (a) => set((state) => {
+    const viewer = a.my_access === 'view'
+    const { readOnly, reason } = effectiveLockState(state.lockReadOnly, state.solvingReadOnly, viewer)
+    return {
+      viewerReadOnly: viewer,
+      ownerEmail: a.owner_email ?? null,
+      canManageMembers: a.can_manage_members === true,
+      readOnly,
+      readOnlyReason: reason,
+    }
+  }),
   setSolvingReadOnly: (solving) => set((state) => {
-    const { readOnly, reason } = effectiveLockState(state.lockReadOnly, solving)
+    const { readOnly, reason } = effectiveLockState(state.lockReadOnly, solving, state.viewerReadOnly)
     return { solvingReadOnly: solving, readOnly, readOnlyReason: reason }
   }),
   setCurrentProject: (name, preferredId) => {

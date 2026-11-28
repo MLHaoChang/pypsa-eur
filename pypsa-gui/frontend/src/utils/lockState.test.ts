@@ -170,3 +170,11 @@ describe('lockFromErrorData', () => {
     expect(lockFromErrorData(undefined)).toBeNull()
   })
 })
+
+describe('viewer reason', () => {
+  it('wins over a lock and a solve: it is the one that waiting never clears', () => {
+    expect(effectiveLockState(true, true, true)).toEqual({ readOnly: true, reason: 'viewer' })
+    expect(effectiveLockState(false, false, true)).toEqual({ readOnly: true, reason: 'viewer' })
+    expect(effectiveLockState(false, false, false)).toEqual({ readOnly: false, reason: 'writable' })
+  })
+})

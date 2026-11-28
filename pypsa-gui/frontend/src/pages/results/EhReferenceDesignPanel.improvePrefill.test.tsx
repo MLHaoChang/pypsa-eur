@@ -71,7 +71,7 @@ it('another project’s prefill never applies', async () => {
 
 // GK B3 E5: a viewer's run of the filled-in study is refused in plain words.
 it('a viewer’s run is refused in the gate’s plain words, never the code', async () => {
-  const MESSAGE = 'You can view this project but not change it. Ask its owner for edit access.'
+  const MESSAGE = 'You can view this project. Ask its owner for edit access.'
   vi.mocked(resultsApi.startEhStudy).mockRejectedValueOnce(
     { response: { status: 403, data: { detail: { error_kind: 'project_view_only', message: MESSAGE } } } })
   useImprovePrefillStore.getState().set({ project: 'Demo', title: 'Price a spare', pack: PACK })

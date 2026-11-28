@@ -97,6 +97,8 @@ def test_activate_resident_swaps_active(
         "evicted": [],
         "lock": {"holder_email": "tester@example.com", "yours": True},
         "my_access": "edit",
+        "can_manage_members": True,
+        "owner_email": "tester@example.com",
         # Edge Investment Case WP1.1c: a resident swap re-checks no Library
         # pins (they were checked when the project was opened).
         "library_issues": [],

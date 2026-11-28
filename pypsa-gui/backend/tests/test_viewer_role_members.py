@@ -318,3 +318,26 @@ def test_the_same_user_twice_in_roles_is_400(world, client):
     response = client.put(f"/api/projects/{world['project']}/members", json=body)
     assert response.status_code == 400, response.text
     assert _stored(world, world["viewer"]) == "viewer"
+
+
+def test_share_facts_follow_the_role(world, as_user):
+    """`can_manage_members` and `owner_email` ride with `my_access` (05)."""
+    viewer = as_user(world["viewer"]).get(f"/api/projects/{world['project']}")
+    assert viewer.status_code == 200, viewer.text
+    body = viewer.json()
+    assert body["can_manage_members"] is False
+    assert body["owner_email"]
+
+
+def test_refusal_cause_sentence_matches_the_frontend_wording():
+    """The viewer line the GUI builds and the refusal share one cause sentence."""
+    import pathlib
+
+    from services.project_write_gate import MESSAGE
+
+    src = (
+        pathlib.Path(__file__).resolve().parents[2]
+        / "frontend/src/utils/viewerAccess.ts"
+    ).read_text()
+    assert MESSAGE.split(". ")[0] + "." in src
+    assert MESSAGE == "You can view this project. Ask its owner for edit access."

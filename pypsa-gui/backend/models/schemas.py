@@ -1002,6 +1002,10 @@ class ProjectInfo(BaseModel):
     # The caller's access: "edit" or "view" (project-viewer-role 01), from
     # `project_acl.project_role`. None where the route does not report it.
     my_access: str | None = None
+    # Whether the caller may change membership, and who owns the project: the
+    # Share button and the viewer's "ask <owner>" line (project-viewer-role 05).
+    can_manage_members: bool | None = None
+    owner_email: str | None = None
     # Name of the parent project (None = root scenario, not a child).
     # A non-null value means this project is a scenario branched off another.
     # The frontend reconstructs the scenario tree by walking these pointers.

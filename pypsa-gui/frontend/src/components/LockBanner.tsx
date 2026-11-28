@@ -19,6 +19,7 @@ export default function LockBanner() {
   const readOnly = useUIStore(s => s.readOnly)
   const reason = useUIStore(s => s.readOnlyReason)
   const holder = useUIStore(s => s.lockHolderEmail)
+  const owner = useUIStore(s => s.ownerEmail)
 
   if (!authEnabled || !readOnly) return null
   // A project being solved says so in the run strip (`runStatus/RunStrip`),
@@ -33,7 +34,7 @@ export default function LockBanner() {
       <Lock size={12} className="shrink-0" />
       <span className="font-semibold">Read-only</span>
       <span className="text-amber-700/80 dark:text-amber-300/80">
-        {readOnlyBannerMessage(reason, holder)}
+        {readOnlyBannerMessage(reason, holder, owner)}
       </span>
     </div>
   )

@@ -1,15 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
-  AlertTriangle, Building2, GitBranch, LayoutGrid, Lock, LockOpen, Plus, Users,
+  Building2, GitBranch, LayoutGrid, Lock, LockOpen, Users,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { projectsApi } from '../api/projects'
 import type { ProjectInfo } from '../api/types'
 import { useAuth } from '../auth/AuthProvider'
 import { useAuthMode } from '../auth/AuthModeProvider'
-import AssignMembersDialog from '../layout/AssignMembersDialog'
+import ShareButton from '../layout/ShareButton'
 import { useUIStore } from '../store/uiStore'
 import { switchToProject } from '../utils/projectActions'
 import { readOnlyBannerMessage } from '../utils/mutationGuard'
@@ -47,7 +47,6 @@ export default function WorkspacePanel() {
   const readOnly = useUIStore(s => s.readOnly)
   const readOnlyReason = useUIStore(s => s.readOnlyReason)
   const lockHolderEmail = useUIStore(s => s.lockHolderEmail)
-  const [membersFor, setMembersFor] = useState<string | null>(null)
 
   const { data: projects = [] } = useQuery({
     queryKey: ['projects'],
@@ -166,31 +165,13 @@ export default function WorkspacePanel() {
                 : 'You hold the edit lock'}
             </span>
           </div>
-
-          {/* Stated plainly rather than implied. The backend keeps ONE resident
-              pypsa.Network per process. */}
-          <p className="flex items-start gap-1.5 text-[10.5px] leading-[1.5] text-ink-400">
-            <AlertTriangle className="mt-0.5 shrink-0" size={11} />
-            <span>
-              The backend holds one active network per process, so people working on
-              different projects against the same server share that slot. Edit locks
-              keep this safe in practice — but it is not full isolation.
-            </span>
-          </p>
         </div>
       </PageSection>
 
       {/* ── Band 3: people ────────────────────────────────────────────── */}
       <PageSection
         title="People"
-        right={authEnabled ? (
-          <Btn
-            onClick={() => setMembersFor(root?.id ?? root?.name ?? currentProject)}
-            title="Add or remove members"
-          >
-            <Plus size={13} /> Members
-          </Btn>
-        ) : undefined}
+        right={authEnabled ? <ShareButton projectId={root?.id ?? root?.name ?? currentProject} /> : undefined}
       >
         <div className="px-4 py-3.5 flex flex-col gap-2">
           <MemberList
@@ -208,14 +189,6 @@ export default function WorkspacePanel() {
           </p>
         </div>
       </PageSection>
-
-      {membersFor && (
-        <AssignMembersDialog
-          onClose={() => setMembersFor(null)}
-          projectId={membersFor}
-          projectLabel={root?.name ?? currentProject}
-        />
-      )}
     </PageBody>
   )
 }
@@ -270,6 +243,7 @@ function MemberList({ projectId, enabled }: { projectId: string; enabled: boolea
             {(member.email ?? '?').slice(0, 1).toUpperCase()}
           </span>
           {member.email ?? member.user_id}
+          {member.role === 'viewer' && <span className="text-muted">Viewer</span>}
         </li>
       ))}
     </ul>
