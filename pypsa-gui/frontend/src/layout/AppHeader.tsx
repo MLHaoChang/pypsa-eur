@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useSimulationStore, appLog } from '../store/simulationStore'
 import { networkApi } from '../api/network'
-import { simulationApi, createLogStream } from '../api/simulation'
+import { simulationApi, resultsApi, createLogStream } from '../api/simulation'
 import { projectsApi } from '../api/projects'
 import { downloadProjectBundle, saveProjectQuietly, type BundleSaveResult } from '../utils/projectActions'
 import { useSolveQueue, useEnqueueSolve, useAbortJob, activeJobForProject } from '../hooks/useSolveQueue'
@@ -13,6 +13,7 @@ import { useHubStudy } from '../pages/hubDesign/useHubData'
 import { finishedStudyLabel } from '../utils/runStatus'
 import { RunsIndicator } from '../components/runStatus/RunsIndicator'
 import { nk } from '../utils/queryKeys'
+import { useStudyAbort, STUDY_ABORT_TITLE } from '../hooks/useStudyAbort'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useUIStore, type UiMode } from '../store/uiStore'
 import { UI_MODE_TITLES, uiModeToast } from '../utils/uiMode'
@@ -838,6 +839,10 @@ export default function AppHeader() {
   const projectRun = useProjectRun()
   // The finished Guided study, named once it ends (template-e2e 46).
   const finishedRun = finishedStudyLabel(useHubStudy().study)
+  // A Guided goal study is running (not a queue job): Expert shows it as a run
+  // too — read-only, Run disabled, Abort offered (template-e2e 25).
+  const studyRunning = projectRun != null && projectRun.jobId == null && !projectRun.queued
+  const { abort: abortStudy, aborting: studyAborting } = useStudyAbort(currentProject, studyRunning)
 
   // R11 — the project on screen is READ-ONLY while its queue job solves it.
   // The backend already refuses the writes (main.py's solver-in-flight gate
@@ -846,13 +851,17 @@ export default function AppHeader() {
   // instead of letting the user fill in a form whose save will 409.
   const setSolvingReadOnly = useUIStore(s => s.setSolvingReadOnly)
   useEffect(() => {
-    setSolvingReadOnly(jobRunning)
+    setSolvingReadOnly(jobRunning || studyRunning)
     // Clear on unmount so a header that unmounts mid-solve cannot strand the
     // whole workbench read-only.
     return () => setSolvingReadOnly(false)
-  }, [jobRunning, setSolvingReadOnly])
+  }, [jobRunning, studyRunning, setSolvingReadOnly])
 
   const handleRunButton = async () => {
+    if (studyRunning && !jobRunning && !isRunning) {
+      if (!studyAborting) abortStudy.mutate()
+      return
+    }
     // 1. RUNNING (queue job or legacy /run) → abort.
     if (jobRunning || isRunning) {
       if (myJob) {
@@ -1117,11 +1126,12 @@ export default function AppHeader() {
           Label's run mode tracks solver_config.mode (Solver Settings). */}
       {(() => {
         // amber for both queued + running; brand red only at idle.
-        const amber = jobQueued || jobRunning || isRunning
+        const amber = jobQueued || jobRunning || isRunning || studyRunning
         // Guided (P24-FE gate decision): the hub design has its own Run, so
         // the idle solve button is hidden; a queued / running solve still
         // shows here so it can be cancelled or aborted.
-        if (uiMode === 'guided' && !amber) return null
+        // A Guided study has its own Abort in the hub: no second one here.
+        if (uiMode === 'guided' && !(jobQueued || jobRunning || isRunning)) return null
         // A planning → dynamics study has no network to solve: its run is the
         // study panel's Run study (pio/08).
         if ((isStudy || kindPending) && !amber) return null
@@ -1153,11 +1163,13 @@ export default function AppHeader() {
           )}
           <button
             onClick={handleRunButton}
-            disabled={abort.isPending || enqueue.isPending || (readOnly && !amber) || gated}
+            disabled={abort.isPending || studyAborting || enqueue.isPending || (readOnly && !amber) || gated}
             title={readOnly && !amber
               ? 'Read-only: another user is editing this project'
               : gated
               ? `Cannot run yet — ${runGate.reason}`
+              : studyRunning && !jobRunning && !isRunning
+              ? STUDY_ABORT_TITLE
               : jobRunning || isRunning
               ? 'Abort the running simulation'
               : jobQueued
@@ -1180,8 +1192,8 @@ export default function AppHeader() {
                 : '0 1px 0 rgba(120,20,25,0.45), 0 1px 3px rgba(120,20,25,0.3), inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -1px 0 rgba(0,0,0,0.08)',
             }}
           >
-            {jobRunning || isRunning
-              ? <><Loader size={11} className="animate-spin" /> Abort</>
+            {jobRunning || isRunning || studyRunning
+              ? <><Loader size={11} className="animate-spin" /> {studyAborting ? 'Aborting…' : 'Abort'}</>
               : jobQueued
                 ? <><Loader size={11} className="animate-spin" /> {queuedLabel}</>
                 : <>

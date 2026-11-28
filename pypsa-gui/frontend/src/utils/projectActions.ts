@@ -2,7 +2,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import { projectsApi } from '../api/projects'
 import type { ProjectInfo } from '../api/types'
 import { networkApi } from '../api/network'
-import { simulationApi } from '../api/simulation'
+import { simulationApi, resultsApi } from '../api/simulation'
 import { appLog, useSimulationStore } from '../store/simulationStore'
 import { useUIStore } from '../store/uiStore'
 import { authEnabled } from '../auth/config'
@@ -97,6 +97,32 @@ export function invalidateNetworkQueries(qc: QueryClient, projectId: string | nu
 }
 
 /**
+ * A Guided goal study runs in its own worker and does not hold the PyPSA lock,
+ * so the lock probe below cannot see it; a project switch or delete during a
+ * study got 409 (template-e2e 25). Abort it and wait until it reports not
+ * running. Returns false when it is still running after the budget.
+ */
+async function abortRunningStudy(): Promise<boolean> {
+  const isRunning = async () =>
+    (await resultsApi.getEhStudy({ quiet: true }))?.status === 'running'
+  try {
+    if (!(await isRunning())) return true
+    appLog('INFO', 'Aborting the running study before switching projects…')
+    await resultsApi.abortEhStudy()
+    const started = Date.now()
+    while (Date.now() - started < 60_000) {
+      if (!(await isRunning())) return true
+      await new Promise(r => setTimeout(r, 500))
+    }
+  } catch {
+    appLog('WARN', 'Study status probe failed — proceeding optimistically')
+    return true
+  }
+  appLog('ERROR', 'The study did not stop within 60 s of abort — wait a moment and retry.')
+  return false
+}
+
+/**
  * Abort any in-flight simulation and wait for the PyPSA lock to ACTUALLY
  * release before returning. Project-switch flows call this before any
  * save / load that needs the lock — otherwise the load blocks at axios'
@@ -129,6 +155,8 @@ export async function abortRunningSim(): Promise<boolean> {
   const SHORT_TIMEOUT_MS = 2_500
   const TOTAL_BUDGET_MS = 60_000
   const POLL_INTERVAL_MS = 500
+
+  if (!(await abortRunningStudy())) return false
 
   // Authoritative pre-check: is the lock free RIGHT NOW? If yes, nothing
   // to abort. (Store-flag check would be wrong: status could still say

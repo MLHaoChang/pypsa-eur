@@ -237,7 +237,8 @@ describe('switchToProject and the hub-design queries (A6)', () => {
     expect(r).toEqual({ status: 'switched' })
 
     await waitFor(() => expect(getFmeaModes).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(getEhStudy).toHaveBeenCalledTimes(1))
+    // B's one fetch, plus abortRunningSim's single "is a study running?" probe of A (template-e2e 25).
+    await waitFor(() => expect(getEhStudy).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(getEhReview).toHaveBeenCalledTimes(1))
     for (const root of ['eh_study', 'eh_review', 'fmea_modes']) {
       const old = client.getQueryCache().find({ queryKey: nk('A', 'results', root), exact: true })
@@ -249,6 +250,6 @@ describe('switchToProject and the hub-design queries (A6)', () => {
     expect(JSON.stringify(client.getQueryData(nk('B', 'results', 'fmea_modes')))).not.toContain('a_gen')
     await new Promise(res => setTimeout(res, 50))
     expect(getFmeaModes).toHaveBeenCalledTimes(1)
-    expect(getEhStudy).toHaveBeenCalledTimes(1)
+    expect(getEhStudy).toHaveBeenCalledTimes(2)
   })
 })

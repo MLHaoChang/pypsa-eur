@@ -9,8 +9,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { blockerMessage } from '../../utils/blockerMessage'
-import { nk } from '../../utils/queryKeys'
 import { buildGoalFreeStudyBody, ehStudyQueryKeys } from '../results/EhReferenceDesignPanel'
+import { useStudyAbort } from '../../hooks/useStudyAbort'
 import { useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import {
   importBlock, useTemplateForm, useHubReadiness, useHubSolverConfig, useHubStudy, useHubTemplate,
@@ -48,17 +48,14 @@ export function useGoalStudy() {
     },
     onError: (e: unknown) => setBlocked(blockerMessage(e)),
   })
-  const abort = useMutation({
-    mutationFn: () => resultsApi.abortEhStudy(),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: nk(project, 'results', 'eh_study') }),
-  })
+  const { abort, aborting } = useStudyAbort(project, running)
 
   return {
     project, study, running, template, templateError, refetchTemplate, readiness,
     // P24-FE re-gate note 2: without the template the study would silently run
     // the default site type's instead of the template's recommended one.
     templateUnknown: templateError && !template,
-    voll, vollMissing, built, run, abort,
+    voll, vollMissing, built, run, abort, aborting,
     problem: built.error ?? blocked,
   }
 }
