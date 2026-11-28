@@ -90,7 +90,7 @@ function RailButton({ id, testId, ...props }: RailProps & { id: FlowSectionId; t
         <span className={bs === 'current' ? '' : 'hidden min-[1600px]:inline'}>{meta.label}</span>
         {bs === 'current' && <span className="hidden min-[1600px]:contents"><ScopeChips section={id} testId="hub-rail-scope-chips" /></span>}
         {!stateless && bs !== 'blocked' && <FlowStateDot state={isError ? null : state} running={running} />}
-        {id === 'scenarios' && props.flow === 'running' && (
+        {id === 'scenarios' && props.flow === 'running' && !running && (
           <Loader2 size={11} className="animate-spin" data-testid="hub-rail-spinner" />
         )}
       </button>

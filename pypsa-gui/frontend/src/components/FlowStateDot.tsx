@@ -1,4 +1,4 @@
-import { Check, Loader2, Minus } from 'lucide-react'
+import { Check, Clock3, Minus } from 'lucide-react'
 import { FLOW_STATE_WORDS, type FlowSectionState } from '../api/flow'
 
 /** One section's state as a mark (design §3.2): a tick, an amber dot, an open
@@ -16,7 +16,7 @@ export function FlowStateDot({ state, testId, running = false }: { state: FlowSe
     : s === 'warning' ? <span className="block h-2 w-2 rounded-full bg-warn" />
       : s === 'incomplete' ? <span className="block h-2 w-2 rounded-full border-2 border-danger" />
         : s === 'not_needed' ? <Minus size={11} className="text-muted" />
-          : busy ? <Loader2 size={11} className="motion-safe:animate-spin text-muted" />
+          : busy ? <Clock3 size={11} className="text-muted" />
           : <span className="text-[10px] font-semibold leading-none text-muted">?</span>
   return (
     <span data-testid={testId} data-state={s} role="img" aria-label={word} title={word}
