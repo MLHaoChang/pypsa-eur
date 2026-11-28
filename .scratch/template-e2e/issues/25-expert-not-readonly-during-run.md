@@ -3,7 +3,7 @@
 
 # 25 — Expert is not read-only during a study run and the run cannot be aborted
 
-Status: partly done (PR #2114: read-only + Abort; progress line and section 5 wait on issue 17)
+Status: done (read-only + Abort #2114; step progress via the run strip #1627/#1630/#2119; 'run in progress' on the Guided rail: claude/te-25-progress-section5)
 Source: decide-report-journeys.md (walk 2026-11-17, master 0ab07339)
 Severity: misleads
 Journey fit: run → results (RUN-READONLY-1, UX-FLOW-NEXT-1).
@@ -24,3 +24,5 @@ Checked by code reading only; the app was not re-run. Acceptance as above (RUN-R
 ## Comments
 
 - Seen again 2026-11-21 (template walk, master 6b421b06): Concentrator: Expert header "Idle" for 30 minutes during a Guided study run (see 12). Separately, a read-only "Another user is editing" banner appeared on the user's own project after a solve: `walkthroughs/templates-2026-11-21` issue 05.
+
+- 2026-11-28: while a run holds the network a step whose state is unknown reads 'run in progress' (spinner) on the Guided rail instead of '? not known yet'. The step name ('step N of up to M') is the run strip's, reused from 17.
