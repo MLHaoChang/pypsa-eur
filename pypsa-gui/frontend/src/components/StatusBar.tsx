@@ -8,8 +8,7 @@ import { solveProgressLabel } from '../utils/solveProgress'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { formatRelativeTime } from '../utils/projectActions'
-import { money } from '../utils/money'
-import { objectiveBasis, objectiveName } from '../pages/results/costBasis'
+import { objectiveBasis, objectiveFigure, objectiveName } from '../pages/results/costBasis'
 
 const STATUS_COLORS: Record<string, string> = {
   idle: 'text-muted', running: 'text-warn', completed: 'text-success',
@@ -130,9 +129,7 @@ export default function StatusBar() {
   const solvedObjective = liveStatus
     ? (liveStatus.dispatch === 'fresh' ? liveStatus.objective ?? null : null)
     : objective
-  const objStr = solvedObjective != null && Number.isFinite(solvedObjective)
-    ? `${solvedObjective < 0 ? '−' : ''}${money(solvedObjective, 'EUR')}`
-    : '—'
+  const objStr = objectiveFigure(solvedObjective) ?? '—'
 
   // Prefer the UI store's project name (set on import/load/save) over PyPSA's
   // internal n.name, which defaults to "Unnamed Network" when not explicitly

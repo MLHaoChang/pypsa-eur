@@ -38,3 +38,15 @@ describe('SourceRunLine (control-strategy 06, improvement 2)', () => {
     expect(runStamp(Date.parse('2026-11-17T15:42:00Z') / 1000)).toBe(runStamp('2026-11-17T15:42:00Z'))
   })
 })
+
+describe('a run action (template-e2e 18)', () => {
+  it('is a button that acts in place: no "›", and disabled while a run is queued or going', () => {
+    const onClick = vi.fn()
+    render(<SourceRunLine source="study" missing={{ run: 'dispatch', action: { label: 'Run the solve', onClick, kind: 'run', disabled: true } }} />)
+    const btn = screen.getByTestId('source-run-action') as HTMLButtonElement
+    expect(btn.textContent).toBe('Run the solve')
+    expect(btn.disabled).toBe(true)
+    fireEvent.click(btn)
+    expect(onClick).not.toHaveBeenCalled()
+  })
+})

@@ -42,6 +42,7 @@ import type { SimulationStatus } from '../../api/types'
 import SourceRunLine from '../../components/SourceRunLine'
 import { useDispatchRun } from '../../hooks/useDispatchRun'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
+import { useProjectRun } from '../../hooks/useProjectRun'
 import { openReliabilityGoal } from '../../layout/flowNavigation'
 import { studyHasResults } from '../hubDesign/flow'
 import { headline as studyHeadline } from '../hubDesign/headline'
@@ -183,6 +184,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
   const report = useHubReport(study, false)
   const studyKind = flow?.sections.find(sec => sec.section === 'results')?.freshness_by_kind?.study
   const requestDispatchSolve = useUIStore(st => st.requestDispatchSolve)
+  const runBusy = useProjectRun() != null
   const resultsOutOfDate = useResultsOutOfDate()
   const caps = capacityRows(stats as Record<string, unknown>[] | null | undefined, selectedPeriod)
   const ll = (lostLoad ?? null) as LostLoadPayload | null
@@ -198,7 +200,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
           <p className="text-[13px] font-semibold text-text" data-testid="summary-study-verdict">{studyHeadline(review, report)}</p>
           <SourceRunLine testId="summary-source" source="study" at={study?.finished_at ?? null}
             outOfDate={review.stale === true || study?.edited_since_study === true}
-            missing={{ run: 'dispatch', action: { label: 'Run the solve', onClick: requestDispatchSolve } }} />
+            missing={{ run: 'dispatch', action: { label: 'Run the solve', onClick: () => requestDispatchSolve(), kind: 'run', disabled: runBusy } }} />
         </div>
       )
     }

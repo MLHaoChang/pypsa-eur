@@ -349,7 +349,7 @@ describe('SummaryTab source run (control-strategy 06)', () => {
     const verdict = await screen.findByTestId('summary-study-verdict')
     expect(verdict.textContent).toMatch(/^Certified/)
     expect(screen.getByTestId('summary-source-from').textContent).toMatch(/^From the reliability study, 2026-11-1[78] \d\d:\d\d$/)
-    expect(screen.getByTestId('summary-source-missing').textContent).toBe('The dispatch solve has not run·Run the solve ›')
+    expect(screen.getByTestId('summary-source-missing').textContent).toBe('The dispatch solve has not run·Run the solve')
     expect(screen.queryByTestId('summary-empty')).toBeNull()
     fireEvent.click(screen.getByTestId('summary-source-action'))
     expect(run).toHaveBeenCalledTimes(1)

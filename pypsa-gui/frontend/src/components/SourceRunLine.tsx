@@ -6,6 +6,7 @@
  * improvement 2, issue 06, #1618-01): which run the figures above come from, when it ran, whether
  * it is out of date, and, when the other mode's run is missing, that in words with one link.
  */
+import { Btn } from './PageKit'
 import { StatePill } from './ResultState'
 
 export type SourceRun = 'dispatch' | 'study'
@@ -30,8 +31,9 @@ export interface SourceRunLineProps {
   source: SourceRun | null
   at?: string | number | null
   outOfDate?: boolean
-  /** The other run, when it has not run: named in words, with one link to it. */
-  missing?: { run: SourceRun; action?: { label: string; onClick: () => void } }
+  /** The other run, when it has not run: named in words, with one link to it ("›"), or, `kind: 'run'`, the
+   *  button that runs it in place (no "›"; `disabled` while a run is queued or going: never a second run). */
+  missing?: { run: SourceRun; action?: { label: string; onClick: () => void; kind?: 'link' | 'run'; disabled?: boolean } }
   testId?: string
 }
 
@@ -49,8 +51,13 @@ export default function SourceRunLine({ source, at, outOfDate = false, missing, 
           {missing.action && (
             <>
               <span aria-hidden="true">·</span>
-              <button type="button" onClick={missing.action.onClick} className="text-link hover:underline"
-                data-testid={`${testId}-action`}>{missing.action.label} ›</button>
+              {missing.action.kind === 'run' ? (
+                <Btn type="button" onClick={missing.action.onClick} disabled={missing.action.disabled}
+                  data-testid={`${testId}-action`}>{missing.action.label}</Btn>
+              ) : (
+                <button type="button" onClick={missing.action.onClick} className="text-link hover:underline"
+                  data-testid={`${testId}-action`}>{missing.action.label} ›</button>
+              )}
             </>
           )}
         </span>

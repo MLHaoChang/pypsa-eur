@@ -12,6 +12,7 @@ import AppHeader, { SolvedObjective } from './AppHeader'
 import { useUIStore } from '../store/uiStore'
 import { WRITABLE } from '../utils/lockState'
 import { simulationApi } from '../api/simulation'
+import { money } from '../utils/money'
 
 const { enqueue, studyRun } = vi.hoisted(() => ({
   enqueue: vi.fn(async () => ({ status: 'running', position: 0 })),
@@ -95,22 +96,42 @@ describe('AppHeader — Expert with a study', () => {
 })
 
 describe('SolvedObjective — the solve toast', () => {
+  it('in Guided shows the bare figure: no Expert basis words', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ objective_basis: 'lp_objective', objective_discounted_to: 2027 } as never)
+    wrap(<SolvedObjective project="demo" objective={120_290_000} />)
+    await act(async () => { await new Promise(r => setTimeout(r, 20)) })
+    expect(document.body.textContent).toBe(`Solved · ${money(120_290_000, 'EUR')}`)
+    expect(screen.queryByText(/LP objective/)).toBeNull()
+  })
+
+  it('never shows an earlier solve\'s cached basis (#1183): only one read after it opened', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    qc.setQueryData(['simulationStatus', 'demo'], { objective_basis: 'system_cost' }, { updatedAt: Date.now() - 60_000 })
+    let resolve: (v: unknown) => void = () => {}
+    vi.mocked(simulationApi.getStatus).mockReturnValueOnce(new Promise(r => { resolve = r }) as never)
+    render(<QueryClientProvider client={qc}><SolvedObjective project="demo" objective={9_000_000} /></QueryClientProvider>)
+    expect(document.body.textContent).toBe(`Solved · ${money(9_000_000, 'EUR')}`)
+    await act(async () => { resolve({ objective_basis: 'lp_objective', objective_discounted_to: null }) })
+    await vi.waitFor(() => expect(document.body.textContent).toBe(`Solved · LP objective: ${money(9_000_000, 'EUR')}`))
+  })
+
   it('names the LP objective and its discount year, as the status bar does', async () => {
     vi.mocked(simulationApi.getStatus).mockResolvedValueOnce(
       { objective_basis: 'lp_objective', objective_discounted_to: 2027 } as never)
-    wrap(<SolvedObjective project="demo" objective="€120.29 M" />)
-    expect(await screen.findByText('Solved · LP objective €120.29 M (discounted to 2027)')).toBeTruthy()
+    wrap(<SolvedObjective project="demo" objective={120_290_000} />)
+    await vi.waitFor(() => expect(document.body.textContent).toBe(`Solved · LP objective: ${money(120_290_000, 'EUR')} (discounted to 2027)`))
   })
 
   it('names the system cost under myopic foresight or a rolling horizon', async () => {
     vi.mocked(simulationApi.getStatus).mockResolvedValueOnce({ objective_basis: 'system_cost' } as never)
-    wrap(<SolvedObjective project="demo" objective="€195 M" />)
-    expect(await screen.findByText('Solved · System cost €195 M')).toBeTruthy()
+    wrap(<SolvedObjective project="demo" objective={195_000_000} />)
+    await vi.waitFor(() => expect(document.body.textContent).toBe(`Solved · System cost: ${money(195_000_000, 'EUR')}`))
   })
 
   it('shows the bare figure until the basis is read, and nothing for a missing figure', () => {
-    wrap(<SolvedObjective project="demo" objective="€9 M" />)
-    expect(screen.getByText('Solved · €9 M')).toBeTruthy()
+    wrap(<SolvedObjective project="demo" objective={9_000_000} />)
+    expect(document.body.textContent).toBe(`Solved · ${money(9_000_000, 'EUR')}`)
     wrap(<SolvedObjective project="demo" objective={null} />)
     expect(screen.getByText('Solved')).toBeTruthy()
   })

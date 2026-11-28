@@ -9,11 +9,14 @@ import { useUIStore } from '../../store/uiStore'
 
 const kinds = vi.hoisted(() => ({ stale: ['Optimisation'] as string[] }))
 vi.mock('../../hooks/useStaleRunKinds', () => ({ useStaleRunKinds: () => kinds.stale }))
+const projectRun = vi.hoisted(() => ({ busy: null as object | null }))
+vi.mock('../../hooks/useProjectRun', () => ({ useProjectRun: () => projectRun.busy }))
 
 const hdr = (v?: string) => ({ get: (k: string) => (k.toLowerCase() === 'x-results-state' ? v : undefined) })
 
 beforeEach(() => {
   kinds.stale = ['Optimisation']
+  projectRun.busy = null
   useResultsOutOfDateFlag.setState({ project: null })
   useUIStore.setState({ uiMode: 'expert', currentProject: 'A' } as never)
 })
@@ -33,6 +36,21 @@ describe('results 204 states', () => {
     expect(buttons).toHaveLength(1)
     fireEvent.click(buttons[0])
     expect(run).toHaveBeenCalledOnce()
+  })
+  it("names each mode's own run (template-e2e 18): Guided never says solve", () => {
+    noteResultsResponse('/results/generators', 204, hdr('out_of_date'))
+    render(<NotSolved what="Dispatch" />)
+    expect(screen.getByRole('button').textContent).toBe('Run the solve')
+    cleanup()
+    useUIStore.setState({ uiMode: 'guided' } as never)
+    render(<NotSolved what="Dispatch" />)
+    expect(screen.getByRole('button').textContent).toBe('Run the optimisation')
+  })
+  it('offers no second run while one is queued or going', () => {
+    projectRun.busy = { name: 'Optimisation', stage: 'Solving', steps: '', startedAt: 0, jobId: 'j', queued: false }
+    noteResultsResponse('/results/generators', 204, hdr('out_of_date'))
+    render(<NotSolved what="Dispatch" />)
+    expect((screen.getByRole('button') as HTMLButtonElement).disabled).toBe(true)
   })
   it('204 without the header: the old Not run yet state', () => {
     noteResultsResponse('/results/generators', 204, hdr('out_of_date'))

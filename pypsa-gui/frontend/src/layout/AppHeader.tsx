@@ -13,7 +13,7 @@ import { useHubStudy } from '../pages/hubDesign/useHubData'
 import { finishedStudyLabel } from '../utils/runStatus'
 import { RunsIndicator } from '../components/runStatus/RunsIndicator'
 import { nk } from '../utils/queryKeys'
-import { objectiveName } from '../pages/results/costBasis'
+import { objectiveFigure, objectiveName } from '../pages/results/costBasis'
 import { useStudyAbort, STUDY_ABORT_TITLE } from '../hooks/useStudyAbort'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useUIStore, type UiMode } from '../store/uiStore'
@@ -57,18 +57,24 @@ export function formatObjective(v: number | null | undefined): string | null {
   return signFirstEuro(v, a.toFixed(0))
 }
 
-/** The solve toast's figure with its name and basis, in the status bar's words (template-e2e 18): read from
- *  the solve's own record, refetched when the solve ends; until it arrives the bare figure. */
-export function SolvedObjective({ project, objective }: { project: string | null; objective: string | null }) {
-  const { data: status } = useQuery({
+/** The solve toast's figure (template-e2e 18): the status bar's figure in its notation, and in Expert its
+ *  name and basis in the status bar's words. The basis is read from the solve's own record once it has been
+ *  fetched after this toast opened, never a cached earlier solve's (#1183); until then the bare figure.
+ *  Guided shows the bare figure: "LP objective" is an Expert word. */
+export function SolvedObjective({ project, objective }: { project: string | null; objective: number | null | undefined }) {
+  const expert = useUIStore(s => s.uiMode) === 'expert'
+  const figure = objectiveFigure(objective)
+  const [openedAt] = useState(() => Date.now())
+  const { data: status, dataUpdatedAt } = useQuery({
     queryKey: nk(project, 'simulationStatus'),
     queryFn: simulationApi.getStatus,
-    enabled: !!project && objective != null,
+    enabled: !!project && figure != null && expert,
   })
-  if (objective == null) return <span>Solved</span>
-  if (status?.objective_basis == null) return <span>Solved · {objective}</span>
-  const discounted = status.objective_discounted_to != null ? ` (discounted to ${status.objective_discounted_to})` : ''
-  return <span>Solved · {objectiveName(status)} {objective}{discounted}</span>
+  if (figure == null) return <span>Solved</span>
+  const read = expert && status?.objective_basis != null && dataUpdatedAt >= openedAt ? status : null
+  if (read == null) return <span>Solved · {figure}</span>
+  const discounted = read.objective_discounted_to != null ? ` (discounted to ${read.objective_discounted_to})` : ''
+  return <span>Solved · {objectiveName(read)}: {figure}{discounted}</span>
 }
 
 /** Open Results after a solve, on its Summary (the answer first; the Summary
@@ -766,10 +772,9 @@ export default function AppHeader() {
           // Say it finished and where the answer is (UX assessment Q6). Open
           // Results only when nothing else is showing — the same rule the
           // failure branch uses, so a deliberately opened panel stays put.
-          const objective = formatObjective(d.objective)
           toast.success((t) => (
             <span className="flex items-center gap-2" data-testid="solve-done-toast">
-              <SolvedObjective project={proj} objective={objective} />
+              <SolvedObjective project={proj} objective={d.objective} />
               <button
                 type="button"
                 className="underline font-medium"
