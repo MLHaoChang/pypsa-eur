@@ -167,14 +167,27 @@ describe('chat tool-line outcome marks', () => {
     expect(screen.getByTestId('chat-tool-no-answer').textContent).toBe(' · no answer (the turn ended first)')
   })
 
-  it('says why a queue job cannot be checked yet, in both modes', async () => {
+  it('says why a job cannot be confirmed, in both modes', async () => {
     await turn('expert')
-    call('w', 'wait_for_job', 'uncertain', 'ad:7', 'adapter_pending')
+    call('w', 'wait_for_job', 'uncertain', 'ad:7', 'status_unknown')
     expect(screen.getByTestId('chat-tool-outcome').textContent)
-      .toBe('–wait_for_job (outcome unknown: this kind of job cannot be checked yet)')
+      .toBe('–wait_for_job (outcome unknown: its state could not be confirmed)')
     act(() => useUIStore.setState({ uiMode: 'guided' }))
     expect(screen.getByTestId('chat-tool-label').textContent)
-      .toBe('Outcome unknown: wait for the job to finish (this kind of job cannot be checked yet)')
+      .toBe('Outcome unknown: wait for the job to finish (its state could not be confirmed)')
+  })
+
+  it('shows what a MATPOWER export leaves out on the tool line, in both modes (AA04-P11)', async () => {
+    await turn('expert')
+    emit('tool_request', { tool_use_id: 'm', tool_name: 'export_matpower', safety_tier: 'write' })
+    emit('tool_result', { tool_use_id: 'm', tool_name: 'export_matpower', result: {
+      _outcome: { version: 1, outcome: 'completed', reason: null,
+        counts: { not_carried: ['Store', 'series'], not_carried_rows: { Store: 2, series: 1 } },
+        notice: 'MATPOWER holds only some fields' } } })
+    expect(screen.getByTestId('chat-tool-outcome').textContent)
+      .toBe('✓export_matpower (done: the MATPOWER format cannot hold 2 stores · 1 time series)')
+    act(() => useUIStore.setState({ uiMode: 'guided' }))
+    expect(screen.getByTestId('chat-tool-label').textContent).toContain('the MATPOWER format cannot hold 2 stores · 1 time series')
   })
 
   it('shows a partly done write with its count in both modes', async () => {

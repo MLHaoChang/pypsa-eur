@@ -4,7 +4,7 @@
  * follows that outcome, never a blanket ✓.
  */
 import {
-  ACTIVITY_STATUS_WORDS, TOOL_OUTCOME_DENIED_DETAIL_WORDS, TOOL_OUTCOME_DENIED_REASON_WORDS, TOOL_OUTCOME_FILE_REASON_WORDS, TOOL_OUTCOME_PARTIAL_REASON_WORDS, TOOL_OUTCOME_REASON_WORDS,
+  ACTIVITY_STATUS_WORDS, TOOL_OUTCOME_DENIED_DETAIL_WORDS, TOOL_OUTCOME_DENIED_REASON_WORDS, TOOL_OUTCOME_FAILED_REASON_WORDS, TOOL_OUTCOME_PARTIAL_REASON_WORDS, TOOL_OUTCOME_STOPPING_REASON_WORDS, TOOL_OUTCOME_REASON_WORDS,
 } from './activityWords'
 
 /** Every outcome the backend's `_outcome.outcome` may carry (harness/outcomes.py). */
@@ -30,6 +30,8 @@ export interface ToolOutcomeBlock {
   outcome: string; job_id: string | null; reason: string | null
   /** A write's read-back counts (issue 04 S2), when the result carries them. */
   counts?: { requested: number; done: number; extra?: number } | null
+  /** An export's rows the file format cannot hold, by class (AA04-P11), when named. */
+  notCarried?: Record<string, number> | null
 }
 
 /** What a write tool's read-back counts (issue 04 S2): "3 of 5 updated". */
@@ -41,18 +43,34 @@ const WRITE_VERBS: Record<string, string> = {
   import_matpower: 'imported', import_uploaded_network: 'imported',
 }
 
-/** The tools whose `_outcome` reads a network file (issue 04 S3, backend IMPORT_TOOLS | EXPORT_TOOLS). */
-const FILE_TOOLS: ReadonlySet<string> = new Set([
-  'import_network_nc', 'import_csv_bundle', 'import_excel', 'import_matpower', 'import_uploaded_network',
-  'export_network_nc', 'export_csv_bundle', 'export_excel', 'export_matpower',
-])
-
 const count = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0
 
 function countsOf(raw: unknown): ToolOutcomeBlock['counts'] {
   const { requested, done, extra } = (raw ?? {}) as Record<string, unknown>
   if (!(count(requested) && count(done) && done <= requested)) return null
   return count(extra) && extra > 0 ? { requested, done, extra } : { requested, done }
+}
+
+function notCarriedOf(raw: unknown): Record<string, number> | null {
+  const rows = (raw as { not_carried_rows?: unknown } | null | undefined)?.not_carried_rows
+  if (!rows || typeof rows !== 'object' || Array.isArray(rows)) return null
+  const out = Object.fromEntries(Object.entries(rows).filter(([, n]) => count(n) && n > 0))
+  return Object.keys(out).length ? out as Record<string, number> : null
+}
+
+/** A component class as plain words, singular or plural: "StorageUnit" → "storage unit(s)". */
+function classNoun(cls: string, n: number): string {
+  if (cls === 'series') return 'time series'
+  const words = cls.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase()
+  if (n === 1) return words
+  return /(s|x|ch|sh)$/.test(words) ? `${words}es` : words.replace(/([^aeiou])y$/, '$1ie') + 's'
+}
+
+/** What an export left out, in words (AA04-P11): "the MATPOWER format cannot hold 2 stores · 1 time series". Null when nothing. */
+export function notCarriedWords(block: ToolOutcomeBlock): string | null {
+  if (toolOutcomeMark(block.outcome).outcome !== 'completed' || !block.notCarried) return null
+  const parts = Object.entries(block.notCarried).map(([cls, n]) => `${n} ${classNoun(cls, n)}`)
+  return `the MATPOWER format cannot hold ${parts.join(' · ')}`
 }
 
 /** The tools whose ordinary-turn result always carries `_outcome` (backend harness/outcomes.py JOB_TOOLS). */
@@ -94,7 +112,8 @@ export function toolOutcomeOf(result: unknown, tool?: string): ToolOutcomeBlock 
     const { version, outcome, job_id: jobId, reason, counts } = raw as Record<string, unknown>
     if (version === 1 && typeof outcome === 'string') {
       return { outcome, job_id: typeof jobId === 'string' && jobId ? jobId : null,
-        reason: typeof reason === 'string' ? reason : null, counts: countsOf(counts) }
+        reason: typeof reason === 'string' ? reason : null, counts: countsOf(counts),
+        ...(notCarriedOf(counts) ? { notCarried: notCarriedOf(counts) } : {}) }
     }
   }
   if (raw != null || (result != null && tool !== undefined && JOB_TOOLS.has(tool))) {
@@ -119,8 +138,9 @@ export function toolOutcomeReasonWord(outcome: string, reason: string | null, to
   const state = toolOutcomeMark(outcome).outcome
   if (state === 'partial') return TOOL_OUTCOME_PARTIAL_REASON_WORDS[reason] ?? null
   if (state === 'denied') return TOOL_OUTCOME_DENIED_REASON_WORDS[reason] ?? null
+  if (state === 'failed') return TOOL_OUTCOME_FAILED_REASON_WORDS[reason] ?? null
+  if (state === 'cancel_requested') return TOOL_OUTCOME_STOPPING_REASON_WORDS[reason] ?? null
   if (state !== 'uncertain') return null
-  if (tool && FILE_TOOLS.has(tool) && reason in TOOL_OUTCOME_FILE_REASON_WORDS) return TOOL_OUTCOME_FILE_REASON_WORDS[reason]
   return TOOL_OUTCOME_REASON_WORDS[reason] ?? null
 }
 
@@ -166,7 +186,7 @@ export function extraEditsWords(tool: string, block: ToolOutcomeBlock): string |
 /** The transcript line: `<glyph> <tool> (<word>[: <reason> | : <n> of <m> <verb>])`. */
 export function toolOutcomeLine(tool: string, block: ToolOutcomeBlock): string {
   const mark = toolOutcomeMark(block.outcome)
-  const why = extraEditsWords(tool, block) ?? toolOutcomeReasonWord(block.outcome, block.reason, tool)
+  const why = extraEditsWords(tool, block) ?? notCarriedWords(block) ?? toolOutcomeReasonWord(block.outcome, block.reason, tool)
   const n = toolOutcomeCount(tool, block)
   const detail = why ?? (n ? `${n} ${WRITE_VERBS[tool]}` : null)
   return `${mark.glyph} ${tool} (${mark.word}${detail ? `: ${detail}` : ''})`
@@ -210,6 +230,7 @@ export function currentToolOutcome(
   }
   const n = own.tool_name ? toolOutcomeCount(own.tool_name, current) : null
   const why = (own.tool_name ? extraEditsWords(own.tool_name, current) : null)
+    ?? notCarriedWords(current)
     ?? toolOutcomeReasonWord(current.outcome, current.reason, own.tool_name)
   return { mark: toolOutcomeMark(current.outcome), ts, why,
     count: n && own.tool_name && current.counts
