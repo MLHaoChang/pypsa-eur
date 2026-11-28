@@ -44,6 +44,7 @@ import SourceRunLine from '../../components/SourceRunLine'
 import { useDispatchRun } from '../../hooks/useDispatchRun'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
 import { useProjectRun } from '../../hooks/useProjectRun'
+import { RUN_NAME } from '../../utils/runStatus'
 import { openReliabilityGoal } from '../../layout/flowNavigation'
 import { studyHasResults } from '../hubDesign/flow'
 import { headline as studyHeadline } from '../hubDesign/headline'
@@ -188,7 +189,10 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
   const report = useHubReport(study, false)
   const studyKind = flow?.sections.find(sec => sec.section === 'results')?.freshness_by_kind?.study
   const requestDispatchSolve = useUIStore(st => st.requestDispatchSolve)
-  const runBusy = useProjectRun() != null
+  const projectRun = useProjectRun()
+  const runBusy = projectRun != null
+  // While a run is queued or going, the missing solve's line says so instead of offering it (UX 34 on #2140).
+  const solveBusy = projectRun == null ? undefined : projectRun.name === RUN_NAME.solve ? 'self' as const : 'other' as const
   const resultsOutOfDate = useResultsOutOfDate()
   const caps = capacityRows(stats as Record<string, unknown>[] | null | undefined, selectedPeriod)
   const ll = (lostLoad ?? null) as LostLoadPayload | null
@@ -204,7 +208,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
           <p className="text-[13px] font-semibold text-text" data-testid="summary-study-verdict">{studyHeadline(review, report)}</p>
           <SourceRunLine testId="summary-source" source="study" at={study?.finished_at ?? null}
             outOfDate={review.stale === true || study?.edited_since_study === true}
-            missing={{ run: 'dispatch', action: { label: 'Run the solve', onClick: () => requestDispatchSolve(), kind: 'run', disabled: runBusy } }} />
+            missing={{ run: 'dispatch', action: { label: 'Run the solve', onClick: () => requestDispatchSolve(), kind: 'run', disabled: runBusy }, busy: solveBusy }} />
         </div>
       )
     }
