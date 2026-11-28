@@ -33,10 +33,13 @@ export const CONNECTION_TOL_MW = 1e-6
 
 export const GRID_ROW = 'Grid connection (import limit, not counted)'
 
-/** `formatting.fmt_number(v, unit, digits=1)`: Python's `f"{v:,.1f}"`,
- *  which rounds an exact tie (32.25, a quarter) to even ("32.2") where
- *  `toLocaleString` rounds it up; a tie at one digit is always a quarter, so
- *  it is found exactly. */
+/** `formatting.fmt_number(v, unit, digits=1)`: Python's `f"{v:,.1f}"`.
+ *  Python rounds the exact binary value, as `toFixed` does (`toLocaleString`
+ *  rounds the shortest decimal, so 0.15 would read "0.2", Python's "0.1"),
+ *  but an exact tie (always a quarter at one digit) goes to even ("32.25" →
+ *  "32.2") where `toFixed` rounds it up. Every payload figure is a float
+ *  (`_p_nom`, `import_capacity`, the peaks), so Python's int branch never
+ *  applies. */
 export function fmt1(v: number | null | undefined, unit?: string | null): string {
   if (v == null || !Number.isFinite(v)) return 'not established'
   let x = v
@@ -44,7 +47,8 @@ export function fmt1(v: number | null | undefined, unit?: string | null): string
     const lo = Math.floor(v * 10)
     x = (Math.abs(lo) % 2 === 0 ? lo : lo + 1) / 10
   }
-  const text = x.toLocaleString('en-GB', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+  const [whole, frac] = x.toFixed(1).split('.')
+  const text = `${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${frac}`
   return unit ? `${text} ${unit}` : text
 }
 
@@ -80,7 +84,7 @@ export function notCountedRows(payload: unknown): [string, string][] | null {
     // A slack that delivered nothing has no row (the report's own rule).
     if (s.energy == null || Math.abs(s.energy) < 1e-9) continue
     rows.push([
-      `${SLACK_WORDS[s.process_role] ?? s.process_role}, ${s.carrier || s.name} (not counted)`,
+      `${Object.prototype.hasOwnProperty.call(SLACK_WORDS, s.process_role) ? SLACK_WORDS[s.process_role] : s.process_role}, ${s.carrier || s.name} (not counted)`,
       `${fmt1(s.p_nom, s.unit)}; ${fmt1(s.energy, s.energy_unit)} over the horizon`,
     ])
   }

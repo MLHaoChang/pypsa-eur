@@ -95,10 +95,18 @@ describe('the not-counted rows match the report on every edge case', () => {
     expect(container.innerHTML).toBe('')
   })
 
+  it('an old payload with assets shows the table and no not-counted block', () => {
+    const assets = (fixture as unknown as Record<string, Case>).eh_datacenter.assets
+    render(<SizedDesignTable testId="t" mode="expert" report={report(assets, { total_p_nom_mw: 3 })} />)
+    expect(screen.getByTestId(`t-row-${assets[0].name}`)).toBeTruthy()
+    expect(screen.queryByTestId('t-not-counted')).toBeNull()
+  })
+
   it("rounds a one-digit tie to even, as Python's format does", () => {
     // f"{v:,.1f}" for each, read from CPython.
-    expect([0.25, 0.75, -0.25, -0.75, 32.25, 1234.56, -0.04, 0.05].map(v => fmt1(v)))
-      .toEqual(['0.2', '0.8', '-0.2', '-0.8', '32.2', '1,234.6', '-0.0', '0.1'])
+    const vs = [0.25, 0.75, -0.25, -0.75, 32.25, 1234.56, -0.04, 0.05, 0.15, 0.35, 1000.05, -1234567.85, 999.95]
+    expect(vs.map(v => fmt1(v)))
+      .toEqual(['0.2', '0.8', '-0.2', '-0.8', '32.2', '1,234.6', '-0.0', '0.1', '0.1', '0.3', '1,000.0', '-1,234,567.9', '1,000.0'])
     expect(fmt1(null, 'MW')).toBe('not established')
     expect(fmt1(Number.NaN, 'MW')).toBe('not established')
   })
