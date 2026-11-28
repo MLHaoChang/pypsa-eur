@@ -15,7 +15,7 @@ vi.mock('../../../api/campusElectrical', async () => {
 })
 const results = vi.hoisted(() => ({ getEhTemplate: vi.fn() }))
 vi.mock('../../../api/simulation', () => ({ resultsApi: results }))
-const ui = vi.hoisted(() => ({ currentProject: 'Site A' as string | null }))
+const ui = vi.hoisted(() => ({ currentProject: 'Site A' as string | null, readOnly: false }))
 vi.mock('../../../store/uiStore', () => ({ useUIStore: (sel: (s: typeof ui) => unknown) => sel(ui) }))
 
 const SPEC = { pue_at_design: 1.3, critical_share: 0.75, architecture: 'ac', backup: { mode: 'genset' } }
@@ -28,6 +28,7 @@ function renderIt(ui_: React.ReactElement) {
 beforeEach(() => {
   vi.clearAllMocks()
   ui.currentProject = 'Site A'
+  ui.readOnly = false
   results.getEhTemplate.mockResolvedValue({ dc_load: { spec: SPEC } })
   campus.setDcLoad.mockResolvedValue({ spec: SPEC, series_changed: true })
 })
@@ -52,7 +53,7 @@ describe('DcLoadFields', () => {
     await userEvent.clear(pue)
     await userEvent.type(pue, '0.9')
     expect(screen.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true)
-    expect(screen.getByTestId('dc-load-invalid').textContent).toContain('PUE is 1 or more')
+    expect(screen.getByTestId('dc-load-invalid').textContent).toContain('PUE at design: enter 1 or more.')
     expect(campus.setDcLoad).not.toHaveBeenCalled()
   })
 
@@ -63,7 +64,7 @@ describe('DcLoadFields', () => {
     await userEvent.clear(share)
     await userEvent.type(share, '90')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
-    expect((await screen.findByTestId('dc-load-refusal')).textContent).toContain('critical_share')
+    expect((await screen.findByTestId('dc-load-refusal')).textContent).toContain('Critical share (%): ')
     expect((share as HTMLInputElement).value).toBe('90')
   })
 
@@ -101,5 +102,34 @@ describe('DcBackupArchFields', () => {
     renderIt(<DcBackupArchFields only="architecture" />)
     await screen.findByLabelText('Power architecture')
     expect(screen.queryByTestId('dc-backup-hint')).toBeNull()
+  })
+})
+
+describe('DC set-up fields: states UX asked for', () => {
+  it('flags an out-of-range critical share, label first', async () => {
+    renderIt(<DcLoadFields />)
+    const share = await screen.findByLabelText('Critical share (%)')
+    await userEvent.clear(share)
+    await userEvent.type(share, '120')
+    expect(share.getAttribute('aria-invalid')).toBe('true')
+    expect(screen.getByTestId('dc-load-invalid').textContent).toBe('Critical share (%): enter a value above 0 and up to 100.')
+  })
+
+  it('says why Save is disabled when nothing changed', async () => {
+    renderIt(<DcLoadFields />)
+    await screen.findByTestId('dc-load-fields')
+    expect(screen.getByTestId('dc-load-save-note').textContent).toContain('Nothing changed yet.')
+  })
+
+  it('is one read-only line with every control disabled for a read-only project', async () => {
+    ui.readOnly = true
+    renderIt(<><DcLoadFields /><DcBackupArchFields /></>)
+    await screen.findByTestId('dc-load-fields')
+    expect(screen.getAllByTestId('dc-read-only')).toHaveLength(2)
+    expect((screen.getByLabelText('PUE at design') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByLabelText('Critical share (%)') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByLabelText('Power architecture') as HTMLSelectElement).disabled).toBe(true)
+    await userEvent.click(screen.getByRole('button', { name: 'Hybrid' }))
+    expect(campus.setDcLoad).not.toHaveBeenCalled()
   })
 })
