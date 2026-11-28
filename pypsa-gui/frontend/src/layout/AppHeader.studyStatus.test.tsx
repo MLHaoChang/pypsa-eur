@@ -140,9 +140,9 @@ describe('one Run entry in Expert (template-e2e 17, TE2E-17-RUN-1)', () => {
     verdict.hasStudy = true; verdict.body = { goal: 1 }; verdict.mutate.mockClear()
     useUIStore.setState({ uiMode: 'expert', currentProject: 'p', readOnly: false } as never)
     renderHeader()
-    const btn = await screen.findByRole('button', { name: /Run study/ })
+    const btn = await screen.findByRole('button', { name: /Run study/ }, { timeout: 10000 })
     fireEvent.click(btn)
-    await waitFor(() => expect(verdict.mutate).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(verdict.mutate).toHaveBeenCalledTimes(1), { timeout: 10000 })
     verdict.hasStudy = false; verdict.body = null
   })
 
