@@ -96,6 +96,24 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
     [catalogue, archetypeName],
   )
 
+  // The editor opens on what the load carries: its shape (when it is one of
+  // the archetypes), its peak and its bus's unit. Generating is an explicit
+  // replace, so the peak is shown as a hint and the field stays empty.
+  const { data: current } = useQuery({
+    queryKey: ['series-current', project, 'loads', 'p_set', component],
+    queryFn: () => seriesApi.current(project, 'loads', 'p_set', component),
+  })
+  const [seeded, setSeeded] = useState(false)
+  const currentKind = current?.exists ? current.kind : null
+  if (!seeded && catalogue && current) {
+    setSeeded(true)
+    const known = [...catalogue.archetypes, ...catalogue.presets].some(a => a.name === currentKind)
+    if (known && currentKind) setChoice(currentKind)
+  }
+  const peakUnit = current?.unit || 'MW'
+  const energyUnit = current?.energy_unit || 'MWh'
+  const peakLabel = `Peak load (${peakUnit})`
+  const energyLabel = `Annual energy (${energyUnit})`
   const replay = useReplay(project, 'loads', 'p_set', component, archetypeName)
   const generate = useMutation({
     mutationFn: (replayRefinements: boolean) => {
@@ -164,11 +182,13 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
               </optgroup>
             </select>
           </label>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="w-20 text-muted">Scale</span>
             <Seg value={scaleKind} onChange={setScaleKind}
-              options={[{ value: 'peak', label: 'Peak MW' }, { value: 'energy', label: 'Annual MWh' }]} />
-            <input aria-label={scaleKind === 'peak' ? 'Peak MW' : 'Annual MWh'} className={`${INPUT} w-24`}
+              options={[{ value: 'peak', label: <span className="whitespace-nowrap">{peakLabel}</span> },
+                { value: 'energy', label: <span className="whitespace-nowrap">{energyLabel}</span> }]} />
+            <input aria-label={scaleKind === 'peak' ? peakLabel : energyLabel} className={`${INPUT} w-24`}
+              placeholder={scaleKind === 'peak' && current?.peak != null ? `now ${Number(current.peak.toFixed(2))}` : ''}
               inputMode="decimal" value={scale} onChange={e => setScale(e.target.value)} />
           </div>
           <button type="button" className="block text-[11px] text-accent" onClick={() => setAdvanced(!advanced)}>
@@ -199,7 +219,7 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
             </Btn>
             <ReplayToggle {...replay} />
             <DisabledReason reason={scale ? null
-              : `Enter ${scaleKind === 'peak' ? 'a peak in MW' : 'the annual energy in MWh'} to preview.`} />
+              : `Enter ${scaleKind === 'peak' ? `a peak in ${peakUnit}` : `the annual energy in ${energyUnit}`} to preview.`} />
           </div>
         </div>
       ) : (

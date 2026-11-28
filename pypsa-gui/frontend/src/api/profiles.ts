@@ -297,6 +297,11 @@ export interface CurrentSeries {
   last?: string | null
   applied_at?: string | null
   refinements?: number
+  /** A load's p_set only: the series' peak and the unit of the load's bus (t/h, MW_NH3…). */
+  peak?: number
+  unit?: string | null
+  /** The unit of the same quantity as energy (t, MWh, MWh_NH3). */
+  energy_unit?: string | null
   /** A storage unit's inflow only: whether one belongs to this unit
    *  (`current.inflow_applies`). */
   applicable?: boolean
