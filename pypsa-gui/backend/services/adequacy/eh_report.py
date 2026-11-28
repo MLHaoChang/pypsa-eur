@@ -196,15 +196,13 @@ def _connection(n, request: dict | None) -> tuple[dict[str, Any], set[str]]:
     }, supply
 
 
-def _horizon_words(n) -> str | None:
+def _horizon_words(n) -> str:
     """"2027–2035" on a staged plan (its first and last period), "2030" with
-    one period; "8,760 h" on a single-period network (its weighted hours);
-    None with no snapshots."""
+    one period; "8,760 h" on a single-period network (its weighted hours; a
+    network always has a snapshot)."""
     periods = [int(p) for p in getattr(n, "investment_periods", ())]
     if periods:
         return f"{periods[0]}–{periods[-1]}" if len(periods) > 1 else str(periods[0])
-    if len(n.snapshots) == 0:
-        return None
     return f"{float(n.snapshot_weightings.generators.sum()):,.0f} h"
 
 

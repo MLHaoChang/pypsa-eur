@@ -864,3 +864,31 @@ def test_a_period_with_no_import_peaks_at_zero():
     flow.loc[2030] = -20.0
     p = _with_import(n, flow)
     assert p["grid_import_peak_by_period"] == {"2027": 10.0, "2030": 0.0, "2035": 10.0}
+
+
+# ── guards the PR A mutants named (GK A 40 P6) ──────────────────────────────
+
+
+def test_a_peak_with_no_verdict_or_a_verdict_with_no_peak_shows_the_limit_alone():
+    assert _cell(grid_import_peak_mw=30.0, connection_check=None) == "40.0 MW"
+    assert _cell(grid_import_peak_mw=None, connection_check="within") == "40.0 MW"
+
+
+def test_a_period_exactly_at_the_tolerance_is_not_named():
+    by = {"2030": 40.0 + TOL, "2035": 41.0}
+    assert _cell(grid_import_peak_mw=41.0, grid_import_peak_by_period=by).endswith(
+        "· in 2035"
+    )
+
+
+def test_a_refusal_with_no_words_still_says_why():
+    assert E._connection_cell({"grid_connection_mw": None}) == (
+        "Not established: the network sets no connection limit."
+    )
+
+
+def test_one_period_and_no_snapshots_name_their_horizon():
+    n = pypsa.Network()
+    n.set_snapshots(pd.MultiIndex.from_product([[2030], range(3)]))
+    n.investment_periods = [2030]
+    assert R._horizon_words(n) == "2030"
