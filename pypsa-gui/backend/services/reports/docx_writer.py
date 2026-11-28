@@ -149,7 +149,8 @@ def _caption(doc, text: str):
 
 
 def _table(doc, header: list[str], rows: list[list[str]],
-           caption: str | None = None, style: str = "Table Grid"):
+           caption: str | None = None, style: str = "Table Grid",
+           right_columns: tuple[int, ...] = ()):
     table = doc.add_table(rows=1, cols=len(header))
     try:
         table.style = doc.styles[style]
@@ -163,6 +164,14 @@ def _table(doc, header: list[str], rows: list[list[str]],
         cells = table.add_row().cells
         for cell, text in zip(cells, row):
             cell.text = text
+    if right_columns:
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+        for i, row in enumerate(table.rows):
+            for c in right_columns:
+                # figures right-aligned with their header; "— (reason)" stays left
+                if c < len(row.cells) and not row.cells[c].text.startswith("—"):
+                    row.cells[c].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
     if caption:
         _caption(doc, caption)
     else:
@@ -331,7 +340,7 @@ def _render_table_ref(doc, block: TableRef, report: ReportDocument,
     label = f"Table {counters.tables}"
     _table(doc, list(table.columns), [list(r) for r in table.rows],
            f"{label} — {caption}" if caption else label,
-           style=counters.table_style)
+           style=counters.table_style, right_columns=tuple(table.right_columns))
 
 
 def _render_figure_ref(doc, block: FigureRef, report: ReportDocument,

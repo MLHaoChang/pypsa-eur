@@ -59,6 +59,7 @@ class Ranking:
     rows: list[Row]
     unranked: list[Row] = field(default_factory=list)
     study_id: str | None = None
+    money: str = "EUR"  # the compare view's money unit, e.g. "EUR 2020"
 
     def meta(self) -> dict:
         return {"variant": self.variant, "n": self.n, "study_id": self.study_id}

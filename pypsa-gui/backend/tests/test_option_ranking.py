@@ -73,6 +73,15 @@ def test_docx_table_has_options_in_npv_order_with_compare_formatting():
     ranked = [row for row in cells if row and row[0] in {"1", "3"} and row[1] in {"B", "C", "D"}]
     assert [row[1] for row in ranked] == ["D", "B", "C"]
     assert ranked[0][2:] == [num(300.0), pct(0.09)]
+    # the NPV header carries the unit; figures are right-aligned, "— (reason)" cells are not
+    from docx.enum.text import WD_ALIGN_PARAGRAPH as A
+
+    table = next(t for t in d.tables if t.rows[0].cells[1].text == "Option")
+    assert table.rows[0].cells[2].text == "NPV (EUR)"
+    assert table.rows[1].cells[2].paragraphs[0].alignment == A.RIGHT
+    assert table.rows[1].cells[1].paragraphs[0].alignment != A.RIGHT
+    last = table.rows[-1]
+    assert last.cells[2].text.startswith("—") and last.cells[2].paragraphs[0].alignment != A.RIGHT
 
 
 def test_generate_refuses_a_bad_variant_before_anything_starts(client, api_project):
@@ -104,7 +113,7 @@ def _stub_record(monkeypatch, stale):
 
     opts = [{"option_id": o, "label": o.upper(), "option_npv": n}
             for o, n in (("a", 10.0), ("b", 30.0), ("c", 20.0))]
-    report = NS(sections={"question": NS(payload={"options": opts})})
+    report = NS(sections={"question": NS(payload={"options": opts})}, facts={}, currency_year=2020)
     cases = {"a": case(0.1), "b": case(0.2), "c": case(None, "no IRR: never positive")}
     monkeypatch.setattr(studies, "_report_record", lambda p, sid: (NS(), report, cases, None, {}))
     monkeypatch.setattr(studies, "_report_stale", lambda *a: ["ledger changed"] if stale else [])
@@ -126,6 +135,11 @@ def test_ranking_for_a_stale_compare_is_409(monkeypatch):
     with pytest.raises(HTTPException) as e:
         studies.ranking_for_study(None, "s1", None, "top_npv", None)
     assert e.value.status_code == 409 and e.value.detail["error_kind"] == "option_compare_stale"
+
+
+def test_the_ranking_carries_the_compare_views_money_unit(monkeypatch):
+    studies = _stub_record(monkeypatch, stale=False)
+    assert studies.ranking_for_study(None, "s1", None, "top_npv", None).money == "EUR 2020"
 
 
 def test_a_reason_code_falls_back_to_the_plain_sentence():

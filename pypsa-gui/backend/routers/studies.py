@@ -286,7 +286,8 @@ def ranking_for_study(project: AuthorizedProject, study_id: str, db: DBSession,
     except OR.VariantError as exc:
         raise _variant_error(exc) from None
     from dataclasses import replace
-    return replace(ranking, study_id=study_id)
+    from services.study import report as study_report
+    return replace(ranking, study_id=study_id, money=study_report.money_unit(report))
 
 
 def report_variants(project: AuthorizedProject = ProjectAccessDep,

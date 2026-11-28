@@ -431,8 +431,8 @@ def _option_ranking_section(r: Any, extra_tables: dict[str, Table]) -> Section:
     from services.study import option_ranking as OR
 
     extra_tables[OR.SECTION_ID] = Table(
-        table_id=OR.SECTION_ID, columns=["Rank", "Option", "NPV", "IRR"],
-        rows=OR.table_rows(r), caption=r.rule)
+        table_id=OR.SECTION_ID, columns=["Rank", "Option", f"NPV ({r.money})", "IRR"],
+        rows=OR.table_rows(r), caption=r.rule, right_columns=[0, 2, 3])
     return Section(section_id=OR.SECTION_ID, heading="Option ranking", source="code",
                    status="ok", blocks=[Paragraph(md=r.rule),
                                         TableRef(table_id=OR.SECTION_ID)])

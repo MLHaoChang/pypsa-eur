@@ -136,6 +136,9 @@ class Table(_Model):
     # JSON pointer into the evidence the rows came from, for the audit and
     # the viewer's citation.
     source_path: str | None = None
+    # Columns of figures a .docx right-aligns (a "— (reason)" cell stays left); left out of
+    # the stored JSON when empty, so an older table is written byte-equal.
+    right_columns: list[int] = PField(default_factory=list, exclude_if=lambda v: not v)
 
 
 class Figure(_Model):
