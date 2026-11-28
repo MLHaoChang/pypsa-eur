@@ -3,7 +3,7 @@
 
 # P3: verified action outcomes and real progress
 
-Status: ready-for-agent; audit 2026-11-28: S1-S7 and the UI slice (P11, P12, `claude/aa04-ui-outcome-words`) are done; left: P13 (a superseded queue solve reads cancelled; backend, GK B) and mismatched artifacts (issue 05); P8 stays a named limit
+Status: done; audit 2026-11-28: S1-S7 and the UI slice (P11, P12, `claude/aa04-ui-outcome-words`) are done; left: P13 (a superseded queue solve reads cancelled; backend, GK B) and mismatched artifacts (issue 05); P8 stays a named limit
 Progress: S1 (blocking foreground-job outcomes, harness/outcomes.py) merged ee141c66; S1b (chat tool-line marks) in review; S2–S5 planned; update_component static inputs done (effects.py)
 Type: task
 Blocked by: none (live-voice 11a, 11b and 11c are merged; the nonblocking-job cases are covered by S7)
@@ -464,7 +464,7 @@ handles, today `adapter_pending`), its own PR.
 | AA04-P10 enqueue_unique drops a different config | closed (issue 15, #1261) | `tests/test_solve_queue_config_conflict.py`: the route and chat tool refuse a differing config with 409 `solve_config_conflict` |
 | AA04-P11 MATPOWER not_carried on the chat tool line | passed (UI slice, 2026-11-28, `claude/aa04-ui-outcome-words`): ChatPanel.toolOutcome.test.tsx "shows what a MATPOWER export leaves out"; toolOutcome.test.ts | GK B (74): model-visible is enough for S6 (`_outcome.notice` names each class and its rows, test_a_matpower_export_is_completed_and_names_what_it_cannot_carry); the tool line does not render it yet |
 | AA04-P12 tool-line words for the S7 reasons (target_not_met, job_refused, stop_unconfirmed, interrupted, status_unknown, job_not_found, other_project, read_failed, other_job) | passed (UI slice, 2026-11-28): toolOutcome.test.ts "words an unknown outcome with reason" and "words the S7 job reasons on their own states"; `adapter_pending` words dropped | GK B (74) S7 (d): out of scope for S7; today they fall back to the bare state word |
-| AA04-P13 a superseded queue solve reads cancelled | pending candidate (GK B (74), not blocking S7) | an `aborted` solve that a newer enqueue superseded is not the user's cancel; wait_for_job reads it cancelled |
+| AA04-P13 a superseded queue solve reads cancelled | passed (claude/aa04-p13-superseded-queue-outcome) | an `aborted` solve that a newer enqueue superseded is not the user's cancel; wait_for_job reads it cancelled |
 | Nonblocking job cases (wait_for_job on study/report/queue jobs) | passed (S7, see below) | test_p3_job_outcomes.py::test_wait_on_a_study_or_queue_job_is_pending_not_completed and the S7 cases after it |
 
 GK B (73) plan: GO with the conditions above; GK B (74) holds the review. S7 plan: GK B (74) GO with conditions (map over job_adapters' neutral outcomes with an exhaustive OUTCOMES test, identity from `_snapshot_bound_job`, mutants per branch, queue handles named, abort confirmed by a re-read). Red before the change: 25 of the first new cases failed on master's `harness/outcomes.py`.
@@ -506,4 +506,4 @@ also drops the now-unused `adapter_pending` words.
 
 ## Audit (2026-11-28)
 
-- 2026-11-28 audit: the matrix marks AA04-P11 and AA04-P12 passed (UI slice, 2026-11-28); the old line 'Pending (UI): AA04-P12' is stale. Only AA04-P13 is a pending candidate (GK B 74, not blocking S7): an `aborted` solve that a newer enqueue superseded must read cancelled in `wait_for_job`. Left: P13 as one small backend slice with a plan to GK B; mismatched artifacts belong to issue 05. Model: sonnet for P13.
+- 2026-11-28 audit: the matrix marks AA04-P11 and AA04-P12 passed (UI slice, 2026-11-28); the old line 'Pending (UI): AA04-P12' is stale. Only AA04-P13 is a pending candidate (GK B 74, not blocking S7): an `aborted` solve that a newer enqueue superseded must not read cancelled in `wait_for_job` (it reads interrupted with `outcome_superseded`). Left: P13 as one small backend slice with a plan to GK B; mismatched artifacts belong to issue 05. Model: sonnet for P13.

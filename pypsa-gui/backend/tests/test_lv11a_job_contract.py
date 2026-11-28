@@ -1130,3 +1130,43 @@ def test_f1_the_stop_lands_inside_the_hold_that_checked_the_origin(
         assert _record(ctx, family)["stop_event"] is new_stop
     finally:
         _stop_all(started)
+
+
+# AA04-P13: a queue solve a newer run disowned is not the user's cancel.
+def _end_as(job, condition, status="aborted"):
+    job.status, job.condition, job.finished_at = status, condition, 123.0
+
+
+def test_a_superseded_queue_solve_reads_interrupted_not_cancelled(baseline):
+    ctx, _project_id, path = baseline
+    job_id, job = _queue(ctx, path)
+    _end_as(job, "superseded")
+    actor = chat_tools.acting_user_id()
+    view = ja.job_status(job_id, actor_id=actor)
+    assert (view["status"], view["outcome"]) == ("aborted", "interrupted")
+    assert view["terminal"] and view["warnings"] == ["outcome_superseded"]
+    waited = chat_tools.wait_for_job(job_id, 0)
+    assert (waited["outcome"], waited["warnings"]) == (view["outcome"], view["warnings"])
+    assert waited["terminal"] and waited["job"]["condition"] == "superseded"
+    out = ja.cancel_job(job_id, actor_id=actor)
+    assert out["cancel"] == "already_finished"
+    assert (out["job"]["outcome"], out["job"]["warnings"]) == ("interrupted", ["outcome_superseded"])
+
+
+@pytest.mark.parametrize("condition", [None, "optimal", "infeasible", "queue_error", "Superseded"])
+def test_any_other_aborted_queue_solve_stays_cancelled(baseline, condition):
+    ctx, _project_id, path = baseline
+    job_id, job = _queue(ctx, path)
+    _end_as(job, condition)
+    view = ja.job_status(job_id, actor_id=chat_tools.acting_user_id())
+    waited = chat_tools.wait_for_job(job_id, 0)
+    assert (view["outcome"], view["warnings"]) == ("cancelled", [])
+    assert (waited["outcome"], waited["warnings"]) == ("cancelled", [])
+
+
+def test_a_superseded_condition_on_a_failed_queue_solve_changes_nothing(baseline):
+    ctx, _project_id, path = baseline
+    job_id, job = _queue(ctx, path)
+    _end_as(job, "superseded", status="failed")
+    view = ja.job_status(job_id, actor_id=chat_tools.acting_user_id())
+    assert (view["outcome"], view["warnings"]) == ("failed", [])

@@ -734,6 +734,20 @@ def _outcome(family: str, status: str | None) -> str | None:
     return _OUTCOMES[family].get(status, 'unknown')
 
 
+# A queue solve a newer run disowned is recorded `aborted` with this condition
+# (`solve_queue._run_solve_job`); it is not the user's cancel (AA04-P13).
+_QUEUE_SUPERSEDED = 'superseded'
+
+
+def queue_outcome(job: dict[str, Any]) -> tuple[str | None, list[str]]:
+    """The neutral outcome and warnings of a queue job row. Keyed on the row's own
+    recorded status and condition, never on live context state."""
+    status = job.get('status') or 'unknown'
+    if status == 'aborted' and job.get('condition') == _QUEUE_SUPERSEDED:
+        return 'interrupted', ['outcome_superseded']
+    return _outcome(QUEUE_FAMILY, status), []
+
+
 def _advance_cursor(job_id: str, status, phase, progress, terminal: bool) -> _Cursor:
     """The job's cursor, moved on when what a monitor sees changed."""
     seen = (status, phase, repr(progress))
@@ -873,7 +887,7 @@ def _queue_job(job_id: str, actor_id: str | None) -> dict[str, Any]:
 def _queue_view(job_id: str, actor_id: str | None) -> dict[str, Any]:
     job = _queue_job(job_id, actor_id)
     status = job.get('status') or 'unknown'
-    outcome = _outcome(QUEUE_FAMILY, status)
+    outcome, warnings = queue_outcome(job)
     return _view(
         job_id=str(job['id']), family=QUEUE_FAMILY, kind=job.get('kind'), tool_use_id=None,
         owner=None,  # the queue's ACL is the project's, not one owner's
@@ -883,7 +897,7 @@ def _queue_view(job_id: str, actor_id: str | None) -> dict[str, Any]:
         finished_at=job.get('finished_at'), input_revision=None,
         input_revision_note=_NO_INPUT_REVISION[QUEUE_FAMILY],
         result_revision=f"queue:{job['id']}@{job.get('finished_at')}",
-        warnings=[],  # the queue records an error, read as `outcome: failed`
+        warnings=warnings,  # the queue records an error, read as `outcome: failed`
         outcome=outcome, detail=job,
     )
 
