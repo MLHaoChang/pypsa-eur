@@ -3,7 +3,7 @@
 
 # 17 — Expert has two Run buttons, no readiness block, and no progress while waiting
 
-Status: ready-for-agent
+Status: done (PR: claude/te-17-one-run-entry; header Run = verdict study in Expert)
 Impact: medium
 Templates: all templates
 Found by: Expert-mode walk, 2026-11-17 (master 0ab07339)
@@ -29,3 +29,5 @@ Decision (owner, 2026-11-20, TE2E-17-RUN-1): the header 'Run' runs the verdict s
 ## Comments
 
 - 2026-11-23 status sweep: landed in #1627 (44387a69); #1630 (233c38fd): run strip gives stage, elapsed time and a running header. Remains: one Run entry that runs the verdict study and Expert readiness matching Guided.
+
+- 2026-11-28: header 'Run' in Expert starts the verdict study (label 'Run study', gate = every requested kind) where the registry offers the goal study; sites without one keep the optimisation Run (GENONLY-RUN-1). Expert Issues already lists the flow's open items (te 09), so readiness matches Guided. Left for ux-walkthrough 03: header Idle/no-ETA pill text.

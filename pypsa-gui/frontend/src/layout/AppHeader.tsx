@@ -30,6 +30,8 @@ import DecisionRunWatcher from '../pages/decision/DecisionRunWatcher'
 import { flushPendingSitesToServer } from '../site3d/sitesStore'
 import { flushPendingMapLayoutToServer } from '../pages/mapLayoutStore'
 import { useRunGate } from '../hooks/useRunGate'
+import { useVerdictStudyEntry } from '../hooks/useVerdictStudyEntry'
+import { useGoalStudy } from '../pages/hubDesign/useGoalStudy'
 import { staleKindsSentence, uncheckedKindsSentence, useStaleRunKinds, useUncheckedRunKinds } from '../hooks/useStaleRunKinds'
 import { openFlowTarget, openSectionInExpert } from './flowNavigation'
 import { componentLabel } from '../utils/componentLabels'
@@ -626,7 +628,13 @@ export default function AppHeader() {
     pf:   'solve a non-linear (AC) Newton-Raphson power flow on the current dispatch',
   }
   const runLabel = `Run ${MODE_LABEL[mode] ?? mode.toUpperCase()}`
-  const runGate = useRunGate('optimisation')
+  // One Run (TE2E-17-RUN-1): where the project has a verdict study, Expert's
+  // header Run starts it (gated by every requested kind, as Guided's) rather
+  // than the bare optimisation.
+  const studyEntry = useVerdictStudyEntry()
+  const goalStudy = useGoalStudy()
+  const verdictRun = uiMode === 'expert' && studyEntry.hasStudy
+  const runGate = useRunGate(verdictRun ? 'all' : 'optimisation')
   const isStudy = useOpenProjectIsStudy()
   // Held until the kind is known, so a study's header never flashes Run LOPF.
   const kindPending = useOpenProjectKindPending()
@@ -888,6 +896,10 @@ export default function AppHeader() {
       toast.error('Read-only: another user is editing this project.')
       return
     }
+    if (verdictRun) {
+      goalStudy.run.mutate()
+      return
+    }
     if (!currentProject) {
       toast.error('Save the project before running it.')
       return
@@ -1137,15 +1149,21 @@ export default function AppHeader() {
         if ((isStudy || kindPending) && !amber) return null
         // Disabled exactly when the server would refuse (design §3.3), saying
         // why by section; display-only gaps ride beside an enabled Run.
-        const gated = runGate.blocked && !amber
+        // A study whose own inputs are not ready is blocked too, with its
+        // reason in the same place (as Guided's section 9 shows it).
+        const studyBlocked = verdictRun && (goalStudy.built.body === null || goalStudy.vollMissing)
+        const studyReason = goalStudy.problem
+          ?? (goalStudy.vollMissing ? 'Set a value of lost load to run the study.' : 'The study inputs are still being read.')
+        const gated = (runGate.blocked || studyBlocked) && !amber
+        const gateReason = runGate.blocked ? runGate.reason : studyReason
         const queuedLabel = `Queued${myJob?.position != null ? ` #${myJob.position}` : ''}`
         return (<>
           {gated && (
             <button type="button" data-testid="run-blocker"
-              onClick={() => runGate.blocker ? openFlowTarget(runGate.blocker.target) : openSectionInExpert('readiness')}
-              title="Show the field to fix"
-              className="max-w-[18rem] truncate text-[11px] text-warn underline-offset-2 hover:underline">
-              {runGate.reason}
+              onClick={() => runGate.blocker && runGate.blocked ? openFlowTarget(runGate.blocker.target) : openSectionInExpert('readiness')}
+              title={`${gateReason ?? ""} Show the field to fix`}
+              className="max-w-[18rem] shrink-0 truncate text-[11px] text-warn underline-offset-2 hover:underline">
+              {gateReason}
             </button>
           )}
           {runGate.checking && !amber && (
@@ -1163,17 +1181,19 @@ export default function AppHeader() {
           )}
           <button
             onClick={handleRunButton}
-            disabled={abort.isPending || studyAborting || enqueue.isPending || (readOnly && !amber) || gated}
+            disabled={abort.isPending || studyAborting || enqueue.isPending || goalStudy.run.isPending || (readOnly && !amber) || gated}
             title={readOnly && !amber
               ? 'Read-only: another user is editing this project'
               : gated
-              ? `Cannot run yet — ${runGate.reason}`
+              ? `Cannot run yet — ${gateReason}`
               : studyRunning && !jobRunning && !isRunning
               ? STUDY_ABORT_TITLE
               : jobRunning || isRunning
               ? 'Abort the running simulation'
               : jobQueued
                 ? 'Cancel this queued solve'
+                : verdictRun
+                ? 'Run study: the reliability study for the goal set on this project'
                 : `${runLabel}: ${MODE_DESC[mode] ?? ''} — queues the solve; runs now if the queue is free${staleText ? ` ${staleText}` : ''}`}
             className="flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3.5 h-8 rounded-lg text-[11px] font-semibold text-white transition-all select-none hover:brightness-110 active:translate-y-px disabled:opacity-60 disabled:cursor-wait"
             style={{
@@ -1197,8 +1217,8 @@ export default function AppHeader() {
               : jobQueued
                 ? <><Loader size={11} className="animate-spin" /> {queuedLabel}</>
                 : <>
-                    {mode === 'lopf' ? <Zap size={11} /> : <Play size={11} />}
-                    {runLabel}
+                    {mode === 'lopf' && !verdictRun ? <Zap size={11} /> : <Play size={11} />}
+                    {verdictRun ? 'Run study' : runLabel}
                     {(staleKinds.length > 0 || uncheckedKinds.length > 0) && (
                       // Below 1400 px the words fold to the counts, so the search field keeps its
                       // width; the full text stays in the title and the accessible name.
