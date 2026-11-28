@@ -95,6 +95,36 @@ def solve_discount(n) -> dict | str | None:
         return UNKNOWN
 
 
+#: `captured` key of the basis a solve is priced on, until `commit_solve_basis` stamps it.
+SOLVE_BASIS_CAPTURED = "solve_basis"
+
+
+def dispatched_strategy(cfg, *, sclopf: bool) -> str:
+    """The strategy `run_simulation` dispatches for ``cfg`` (the one decision it and the stamp share).
+
+    Myopic needs multi-investment periods; rolling needs neither multi-investment periods
+    nor SCLOPF (PyPSA's rolling horizon has no period weightings, and myopic subsumes
+    SCLOPF). Every other combination runs the full horizon.
+    """
+    asked = getattr(cfg, "solve_strategy", "full")
+    multi = bool(getattr(cfg, "multi_investment_periods", False))
+    if asked == "myopic" and multi:
+        return "myopic"
+    if asked == "rolling" and not multi and not sclopf:
+        return "rolling"
+    return "full"
+
+
+def commit_solve_basis(n, captured: dict) -> None:
+    """Stamp the basis held in ``captured`` on ``n``, only after a successful solve: a failed
+    one leaves the previous solve's results, so it leaves their stamp as well."""
+    basis = captured.get(SOLVE_BASIS_CAPTURED)
+    if basis is None:
+        return
+    n.meta[SOLVE_DISCOUNT_META] = basis["discount"]
+    n.meta[SOLVE_STRATEGY_META] = basis["strategy"]
+
+
 def solve_strategy(n) -> str | None:
     """The strategy the last solve ran, from its stamp; None when not stamped."""
     v = (getattr(n, "meta", None) or {}).get(SOLVE_STRATEGY_META)
@@ -680,7 +710,7 @@ def _run_undo_actions(n, undo_actions: list, phase) -> None:
         pass
 
 
-def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
+def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase, *, sclopf: bool | None = None):
     """
     Apply the five transient modelling knobs and return a `(restore, captured)`
     pair. Caller MUST invoke restore() in a finally block, regardless of
@@ -979,9 +1009,13 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
         #     The weights applied are stamped on the network (`SOLVE_DISCOUNT_META`, from the
         #     same dict written into ipw) for readers that reconcile `n.objective` after the
         #     weights are restored (template-e2e 18): null unless they were applied. The
-        #     strategy is stamped beside it, so the pair always describes one solve.
-        n.meta[SOLVE_DISCOUNT_META] = None
-        n.meta[SOLVE_STRATEGY_META] = str(getattr(cfg, "solve_strategy", "full"))
+        #     strategy dispatched is stamped beside it, so the pair always describes one solve.
+        #     Held in `captured` until the solve succeeds (`commit_solve_basis`). ``sclopf`` is
+        #     the caller's resolved SCLOPF flag (None: the config's).
+        if sclopf is None:
+            sclopf = bool(getattr(cfg, "sclopf", False))
+        basis = {"discount": None, "strategy": dispatched_strategy(cfg, sclopf=sclopf)}
+        captured[SOLVE_BASIS_CAPTURED] = basis
         try:
             disc = auto_discount_factors(n, cfg)
             if disc is not None:
@@ -1000,7 +1034,7 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                 undo_actions.append(("call", _restore_ipw_objective))
                 for p in periods_active:
                     ipw.at[p, "objective"] = disc["factors"][p]
-                n.meta[SOLVE_DISCOUNT_META] = {
+                basis["discount"] = {
                     "ref_year": int(disc["ref_year"]), "real_rate": float(r),
                     "factors": {str(p): float(disc["factors"][p]) for p in periods_active},
                 }
