@@ -464,3 +464,46 @@ def test_the_stamp_takes_the_resolved_sclopf_flag(monkeypatch, reset_backend):
     )
     assert out == ("error", "stop after set-up")
     assert seen == {"sclopf": False, "strategy": "rolling"}
+
+
+def test_a_commit_without_a_held_basis_leaves_the_stamp():
+    from services.solver.assumptions import (
+        SOLVE_DISCOUNT_META,
+        SOLVE_STRATEGY_META,
+        commit_solve_basis,
+    )
+
+    n = T.BUILDERS["eh_h2_hub"]()
+    n.meta[SOLVE_STRATEGY_META], n.meta[SOLVE_DISCOUNT_META] = "myopic", None
+    commit_solve_basis(n, {})
+    assert (n.meta[SOLVE_STRATEGY_META], n.meta[SOLVE_DISCOUNT_META]) == (
+        "myopic",
+        None,
+    )
+
+
+def test_set_up_without_a_resolved_flag_reads_the_configs_sclopf():
+    """A caller that resolves no SCLOPF flag (the sizing loop) gets the config's: rolling with
+    SCLOPF on runs the full horizon."""
+    *_n, restore, basis = _assumed("eh_h2_hub", sclopf=True, solve_strategy="rolling")
+    restore()
+    assert basis["strategy"] == "full"
+    *_n, restore, basis = _assumed("eh_h2_hub", sclopf=False, solve_strategy="rolling")
+    restore()
+    assert basis["strategy"] == "rolling"
+
+
+def test_no_basis_when_the_network_cannot_be_read(monkeypatch):
+    from routers import simulation
+    from services import study_solve
+
+    def unreadable():
+        raise RuntimeError("no network")
+
+    monkeypatch.setattr(
+        simulation.PyPSAService, "get_network", staticmethod(unreadable)
+    )
+    monkeypatch.setattr(study_solve, "fallback", lambda *_a, **_k: None)
+    monkeypatch.setitem(simulation._state, "objective", 1.0e6)
+    st = simulation.get_status()
+    assert (st["objective_basis"], st["objective_discounted_to"]) == (None, None)
